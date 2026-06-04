@@ -709,13 +709,31 @@ let risk_rank = function
 
 let max_risk a b = if risk_rank a >= risk_rank b then a else b
 
+let redirect_risk = function
+  | Redirect_scope.File { mode = (Redirect_scope.Write | Redirect_scope.Append); _ } ->
+    R1_Reversible_mutation
+  | Redirect_scope.File { mode = Redirect_scope.Read; _ }
+  | Redirect_scope.Fd_to_fd _ ->
+    R0_Read
+;;
+
+let redirect_floor redirects =
+  List.fold_left
+    (fun acc redirect -> max_risk acc (redirect_risk redirect))
+    R0_Read
+    redirects
+;;
+
 (* Per-[Simple] decision: the stricter of the typed-shape opinion and
    the word-list floor for that single command. Both opinions are scoped
    to one command's own words, so a pipeline can compose them stage by
    stage instead of flattening every stage into one head-anchored list.
    When [literal_words_of_simple] returns [None] (env/redirect/$VAR present)
    the word-list floor cannot be computed and falls back to [R0_Read];
-   the typed opinion still supplies escalation for those cases. *)
+   the typed opinion still supplies escalation for those cases. Redirect
+   writes are command syntax rather than argv tokens, so they get their
+   own floor here; otherwise [echo hi > file] can remain R0 in receipts
+   even though capability policy correctly sees [Write_path]. *)
 let decision_of_simple (s : Shell_ir.simple) : risk_class =
   let typed = risk_of_typed (Shell_ir_typed.of_simple s) in
   let floor =
@@ -723,7 +741,7 @@ let decision_of_simple (s : Shell_ir.simple) : risk_class =
     | Some words -> classify_words words
     | None -> R0_Read
   in
-  max_risk typed floor
+  max_risk (redirect_floor s.redirects) (max_risk typed floor)
 ;;
 
 (* RFC-0208 P0: compose the per-stage decision across a pipeline with

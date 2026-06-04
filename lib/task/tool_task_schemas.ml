@@ -55,7 +55,7 @@ Example: %s({title: 'Fix login bug', priority: 1, description: 'Users cannot log
         ]);
         ("goal_id", `Assoc [
           ("type", `String "string");
-          ("description", `String "Optional structured goal link for rollups. If omitted, scoped keepers may auto-link a single active goal; otherwise the task remains unscoped.");
+          ("description", `String "Optional structured goal link for rollups. If omitted, scoped agents may auto-link a single active goal; otherwise the task remains unscoped.");
         ]);
         ("contract", `Assoc [
           ("type", `String "object");
@@ -113,7 +113,7 @@ Example: masc_batch_add_tasks({tasks: [{title: 'Task A', priority: 2}, {title: '
               ]);
               ("goal_id", `Assoc [
                 ("type", `String "string");
-                ("description", `String "Optional structured goal link for rollups. If omitted, scoped keepers may auto-link a single active goal; otherwise the task remains unscoped.");
+                ("description", `String "Optional structured goal link for rollups. If omitted, scoped agents may auto-link a single active goal; otherwise the task remains unscoped.");
               ]);
               ("contract", `Assoc [
                 ("type", `String "object");
@@ -228,7 +228,7 @@ unavailable to you — this transitions the task directly to awaiting_verificati
 with the required tools can verify and close it. For compatibility, \
 submit_for_verification with evidence on a todo task is treated as submit_pr_evidence. \
 Tasks created through %s complete via action='done' after LLM completion review; \
-they do not route normal completion through the verifier keeper."
+they do not route normal completion through the verifier agent."
       masc_add_task_name
       masc_claim_next_name
       masc_add_task_name;

@@ -85,6 +85,10 @@ DEFAULT_LEAVES: tuple[str, ...] = (
     "masc.keeper_types_profile_sandbox",
     "masc.keeper_pressure",
     "masc.keeper_lifecycle_events",
+    "masc.keeper_usage_trust",
+    "masc.keeper_measurement",
+    "masc.keeper_prompt_names",
+    "masc.keeper_event_bus",
     "masc.keeper_attempt_liveness",
     # PR-S3 (LANE 2): Tool dispatch substrate. The gate enforces that the
     # Tool layer cannot pull keeper/runtime/telemetry back in via the mega-lib.

@@ -100,6 +100,10 @@
   (re_export masc.keeper_types_profile_sandbox)
   (re_export masc.keeper_pressure)
   (re_export masc.keeper_lifecycle_events)
+  (re_export masc.keeper_usage_trust)
+  (re_export masc.keeper_measurement)
+  (re_export masc.keeper_prompt_names)
+  (re_export masc.keeper_event_bus)
   ;; Model inference metrics + runtime provider label leaves.
   (re_export masc.runtime_provider_labels)
   (re_export masc.model_inference_metrics)

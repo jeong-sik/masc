@@ -55,6 +55,13 @@
   masc.attribution
   masc.exec_policy
   masc.keeper_state
+  masc.keeper_id
+  masc.keeper_metrics
+  masc.keeper_types
+  masc.keeper_types_profile_sandbox
+  masc.keeper_pressure
+  masc.keeper_memory_taxonomy
+  masc.keeper_prompt_names
   masc.runtime_provider_labels
   masc.runtime_model
   masc.model_inference_metrics

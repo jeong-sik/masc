@@ -10,7 +10,7 @@
    while that fix is in-flight. *)
 
 module UM = Masc.Keeper_unified_metrics
-module UT = Masc.Keeper_usage_trust
+module UT = Keeper_usage_trust
 module Prom = Masc.Prometheus
 
 let outcome_for ~keeper ~outcome =

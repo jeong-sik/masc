@@ -21,7 +21,7 @@
 open Alcotest
 
 module H = Masc.Keeper_hooks_oas
-module Trust = Masc.Keeper_usage_trust
+module Trust = Keeper_usage_trust
 
 let string_field payload key =
   match payload with

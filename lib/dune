@@ -126,7 +126,6 @@
   keeper_turn_up
   keeper_turn_lifecycle
   keeper_msg_async
-  keeper_event_bus
   keeper_heartbeat_loop_observations
   keeper_supervisor_startup_helpers
   keeper_supervisor_restart_noop
@@ -279,6 +278,10 @@
    masc.keeper_types_profile_sandbox
    masc.keeper_pressure
    masc.keeper_lifecycle_events
+   masc.keeper_usage_trust
+   masc.keeper_measurement
+   masc.keeper_prompt_names
+   masc.keeper_event_bus
    ;; Runtime_provider_labels extracted to lib/runtime_provider_labels/.
    ;; Leaf boundary over agent_sdk.llm_provider canonical provider labels.
    masc.runtime_provider_labels

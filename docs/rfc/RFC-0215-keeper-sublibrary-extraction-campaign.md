@@ -180,6 +180,11 @@ Follow-up credential pre-work narrows persona authoring away from the flat
 normalizer and persona-placeholder modules directly, keeping the same behavior
 while removing a non-domain facade dependency from the first cluster.
 
+The next slice moves keeper/persona handle validation into `Keeper_name`.
+`Keeper_config_text.validate_name` still exposes the legacy config-facing API,
+but persona authoring no longer imports the full `Keeper_config` surface just
+to validate a handle.
+
 ## 5. Extraction sequence
 
 Candidate clusters and their re-measured **flat-ns fan-out** (the G1 metric).

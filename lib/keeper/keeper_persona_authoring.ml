@@ -493,7 +493,7 @@ let normalize_keeper_json ~handle keeper_json =
 ;;
 
 let normalize_profile ~handle profile =
-  if not (Keeper_config.validate_name handle)
+  if not (Keeper_name.validate handle)
   then Error "handle must match [A-Za-z0-9._-]+"
   else if Keeper_types_profile_persona.json_has_operator_todo_placeholder profile
   then

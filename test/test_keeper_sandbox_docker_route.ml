@@ -21,7 +21,6 @@ module Keeper_sandbox_factory = Masc.Keeper_sandbox_factory
 module Keeper_sandbox_runtime = Masc.Keeper_sandbox_runtime
 module Keeper_turn_sandbox_runtime = Masc.Keeper_turn_sandbox_runtime
 module Keeper_tool_execute_command_semantics = Masc.Keeper_tool_execute_command_semantics
-module Keeper_tool_execute_command_words = Masc.Keeper_tool_execute_command_words
 module Keeper_sandbox_docker = Masc.Keeper_sandbox_docker
 module Keeper_types = Masc.Keeper_types
 module Keeper_alerting_path = Masc.Keeper_alerting_path

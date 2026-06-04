@@ -117,14 +117,9 @@ module Masc : sig
     | Plan_update
     | Reset
     | Status
-    | Tool_grant
     | Tool_help
-    | Tool_list
-    | Tool_revoke
     | Web_fetch
     | Web_search
-    | Approval_pending
-    | Approval_get
     | Config
     | Gc
     | Get_metrics

@@ -100,7 +100,7 @@ tools = [
 
 # Essential: tools every keeper needs (orientation + web search).
 [masc.essential]
-tools = ["masc_status", "masc_web_search", "masc_web_fetch", "masc_approval_pending"]
+tools = ["masc_status", "masc_web_search", "masc_web_fetch"]
 
 # Workspace: external agent workspace tools.
 # Only needed by keepers that manage tasks across agents.

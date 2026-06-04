@@ -200,8 +200,6 @@ let classify_masc_tool (tool : Tool_name.Masc.t) =
   | Plan_set_task
   | Plan_update
   | Reset
-  | Tool_grant
-  | Tool_revoke
   | Domain (Task Transition)
   | Domain (Task Update_priority) -> Workspace_write
   | Agent_update
@@ -214,8 +212,6 @@ let classify_masc_tool (tool : Tool_name.Masc.t) =
   | Agent_card
   | Agent_fitness
   | Agents
-  | Approval_get
-  | Approval_pending
   | Domain (Board Board_curation_read)
   | Domain (Board Board_get)
   | Domain (Board Board_hearths)
@@ -244,7 +240,6 @@ let classify_masc_tool (tool : Tool_name.Masc.t) =
   | Domain (Task Tasks)
   | Tool_admin_snapshot
   | Tool_help
-  | Tool_list
   | Tool_stats -> Ungated
 ;;
 

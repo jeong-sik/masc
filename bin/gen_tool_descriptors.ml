@@ -450,43 +450,6 @@ let masc_deliver_spec : tool_spec =
   }
 ;;
 
-(* === PR-2c: inline_infra group (3 of 4 tools — masc_session
-   deferred because enum SSOT is locked to Tool_schemas_inline_infra
-   by test_types.ml :: mcp_session_action_ssot. Codegen needs a
-   shared enum source RFC before that can swap.) === *)
-
-let masc_approval_pending_spec : tool_spec =
-  { name = "masc_approval_pending"
-  ; description =
-      "Keeper-safe read-only view of the pending approval queue. Use this to \
-       detect whether any approvals are waiting before asking an operator or using an \
-       admin-only detail/resolve path."
-  ; parameters = []
-  ; additional_properties = false
-  ; behavior_contract = []
-  }
-;;
-
-let masc_approval_get_spec : tool_spec =
-  { name = "masc_approval_get"
-  ; description =
-      "Operator/admin-only detail view. Fetch one pending HITL approval by id, \
-       including the full input JSON. Use after finding an approval id in the \
-       dashboard or pending approval queue when the preview is insufficient for an \
-       operator decision. Requires the same privileged approval surface as resolving \
-       an approval."
-  ; parameters =
-      [ { p_name = "id"
-        ; p_type = T_string { enum = None; default = None }
-        ; p_description = "Pending approval id, for example appr_abc123def456"
-        ; p_required = true
-        }
-      ]
-  ; additional_properties = false
-  ; behavior_contract = []
-  }
-;;
-
 (* === PR-2d: inline_workspace group (6 tools) === *)
 
 let masc_start_spec : tool_spec =
@@ -588,9 +551,6 @@ let phase6_specs : tool_spec list =
   ; masc_plan_clear_task_spec
   ; masc_note_add_spec
   ; masc_deliver_spec
-    (* PR-2c: inline_infra (masc_session manual; masc_spawn removed by RFC-0182) *)
-  ; masc_approval_pending_spec
-  ; masc_approval_get_spec
     (* PR-2d: inline_workspace group *)
   ; masc_start_spec
   ; masc_broadcast_spec

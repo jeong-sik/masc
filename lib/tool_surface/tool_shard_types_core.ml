@@ -31,13 +31,7 @@ let default_shard_names : string list =
   [ "base"; "board"; "filesystem"; "search_files"; "library"; "taskboard" ]
 ;;
 
-let tool_spec_read_only = [ "masc_tool_list" ]
-let tool_spec_destructive = [ "masc_tool_grant"; "masc_tool_revoke" ]
+let tool_spec_read_only = []
+let tool_spec_destructive = []
 
-let tool_effect_domain name =
-  match Tool_name.of_string name with
-  | Some (Tool_name.Masc Tool_name.Masc.Tool_list) -> Some Tool_catalog.Read_only
-  | Some (Tool_name.Masc (Tool_name.Masc.Tool_grant | Tool_name.Masc.Tool_revoke)) ->
-    Some Tool_catalog.Masc_workspace
-  | Some _ | None -> None
-;;
+let tool_effect_domain _name = None

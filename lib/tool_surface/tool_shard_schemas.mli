@@ -1,7 +1,6 @@
-(** Tool_shard_schemas - MCP tool schema definitions for shard management.
+(** Tool_shard_schemas - removed MCP shard-management surface.
 
-    Extracted from tool_shard.ml to reduce godfile size.
-*)
+    Shard membership remains internal keeper policy state. *)
 
 val schemas : Masc_domain.tool_schema list
-(** MCP tool schemas for masc_tool_grant, masc_tool_revoke, masc_tool_list. *)
+(** Empty: [masc_tool_*] callable tools are not exposed. *)

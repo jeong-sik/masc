@@ -289,8 +289,6 @@ let static_tag_of_tool_name (tool : Tool_name.t) : module_tag option =
     | Agent_update
     | Agents
     | Get_metrics -> Some Mod_agent
-    | Approval_get
-    | Approval_pending
     | Broadcast
     | Mcp_session
     | Messages
@@ -319,7 +317,6 @@ let static_tag_of_tool_name (tool : Tool_name.t) : module_tag option =
     | Plan_set_task
     | Plan_update -> Some Mod_plan
     | Pause | Resume -> Some Mod_control
-    | Tool_grant | Tool_list | Tool_revoke -> Some Mod_shard
 
 let tag_registry : (string, module_tag) Hashtbl.t = Hashtbl.create 512
 let tag_registry_initialized = Atomic.make false

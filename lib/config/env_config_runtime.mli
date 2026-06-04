@@ -285,12 +285,6 @@ module Oas_sse : sig
   val drain_interval_sec : float
 end
 
-(** {1 Memory OAS bridge} *)
-
-module Memory_oas : sig
-  val default_importance : int
-end
-
 (** {1 Smart heartbeat tuning} *)
 
 module SmartHeartbeatTuning : sig

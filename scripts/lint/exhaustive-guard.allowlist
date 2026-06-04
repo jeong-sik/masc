@@ -602,12 +602,6 @@ lib/mcp_transport_protocol/mcp_transport_protocol.ml:31
 lib/mcp_transport_protocol/mcp_transport_protocol.ml:41
 lib/mcp_transport_protocol/mcp_transport_protocol.ml:49
 lib/mcp_transport_protocol/mcp_transport_protocol.ml:203
-lib/memory_oas_bridge.ml:141
-lib/memory_oas_bridge.ml:298
-lib/memory_oas_bridge.ml:323
-lib/memory_oas_bridge.ml:334
-lib/memory_jsonl/memory_jsonl.ml:79
-lib/memory_jsonl/memory_jsonl.ml:94
 lib/meta_cognition_digest.ml:21
 lib/meta_cognition_interpret.ml:14
 lib/meta_cognition_parse.ml:18

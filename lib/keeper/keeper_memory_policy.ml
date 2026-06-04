@@ -132,23 +132,17 @@ type keeper_memory_summary = {
 type compaction_source =
   | Pre_dispatch_hygiene
   | MASC_policy
-  | OAS_proactive
-  | OAS_emergency
   | Memory_bank
 
 let compaction_source_to_string = function
   | Pre_dispatch_hygiene -> "pre_dispatch_hygiene"
   | MASC_policy -> "masc_policy"
-  | OAS_proactive -> "oas_proactive"
-  | OAS_emergency -> "oas_emergency"
   | Memory_bank -> "memory_bank"
 
 let compaction_source_of_string_opt (s : string) : compaction_source option =
   match s with
   | "pre_dispatch_hygiene" -> Some Pre_dispatch_hygiene
   | "masc_policy" -> Some MASC_policy
-  | "oas_proactive" -> Some OAS_proactive
-  | "oas_emergency" -> Some OAS_emergency
   | "memory_bank" -> Some Memory_bank
   | _ -> None
 
@@ -374,8 +368,8 @@ let keeper_state_snapshot_to_summary_text (snapshot : keeper_state_snapshot) : s
 (* Gen7 (2026-04-17): snapshot size cap applied before persistence.
 
    Gen3 (PR #7647) trimmed backward fields at prompt injection and
-   Gen4 (PR #7668) scrubbed [STATE] blocks in OAS compaction, both on
-   the consumption side. Growth of [meta.continuity_summary] itself
+   Gen4 (PR #7668) scrubbed [STATE] blocks during runtime compaction
+   on the consumption side. Growth of [meta.continuity_summary] itself
    was still unbounded: if the LLM produces a longer [STATE] block
    each turn (more decisions, longer goal prose), the parsed snapshot
    and its rendered summary grow monotonically.

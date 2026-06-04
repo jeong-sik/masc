@@ -36,7 +36,6 @@ Necessary condition: different `SPECIFICATION` name. Sufficient confirmation: sp
 | boundary/RuntimeKeeperRecovery | Spec | SpecBuggy | **VALID** |
 | boundary/RuntimeStrategyStateful | Spec | SpecBuggy | **VALID** |
 | boundary/KeeperContractViolated | Spec | SpecBuggy | **VALID** |
-| boundary/KeeperEmptyToolUniverse | Spec | SpecBuggy | **VALID** |
 | boundary/KeeperRecoveryOrchestration | Spec | SpecBuggy | **VALID** |
 | boundary/KeeperStaleKilled | Spec | SpecBuggy | **VALID** |
 | boundary/KeeperTurnScheduler | Spec | SpecBuggy | **VALID** |

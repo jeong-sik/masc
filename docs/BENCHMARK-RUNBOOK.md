@@ -129,7 +129,7 @@ scripts/harness/workload/agent_swarm_live.sh
 - 18명 이상 keeper의 runtime manifest evidence가 있는지 확인한다
 - 각 keeper가 provider-dispatched successful turn을 충분히 남겼는지 확인한다
 - `.masc/keepers/<keeper>/runtime-manifests`, execution receipts,
-  checkpoints, memory injection rows, tool-call log links가 서로 이어지는지
+  checkpoints, memory-bank rows, tool-call log links가 서로 이어지는지
   확인한다
 - 결과를 `logs/keeper_fleet_readiness/<run-id>/summary.json`에 남긴다
 

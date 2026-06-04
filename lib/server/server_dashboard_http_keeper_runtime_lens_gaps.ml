@@ -161,16 +161,6 @@ let runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan =
            }
            gaps
        else gaps)
-  |> (fun gaps ->
-       if scan.memory_injected_count > 0 && scan.memory_flushed_count = 0 then
-         add
-           { code = "memory_flush_missing"
-           ; severity = "warn"
-           ; lane = "memory_context"
-           ; detail = Some "memory was injected but no memory_flushed row was recorded"
-           }
-           gaps
-       else gaps)
   |> List.rev
   |> fun gaps ->
   let gaps =
@@ -441,20 +431,6 @@ let runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan =
               ; severity = "warn"
               ; lane = "memory_context"
               ; detail = Some "context_injected row lacks context_digest"
-              }
-              :: gaps)
-         | None -> gaps)
-    |> (fun gaps ->
-         match scan.latest_memory_injected_row with
-         | Some row ->
-           let decision = row.Keeper_runtime_manifest.decision in
-           (match Json_util.get_string decision "payload_digest" with
-            | Some _ -> gaps
-            | None ->
-              { code = "memory_payload_digest_missing"
-              ; severity = "warn"
-              ; lane = "memory_context"
-              ; detail = Some "memory_injected row lacks payload_digest"
               }
               :: gaps)
          | None -> gaps)

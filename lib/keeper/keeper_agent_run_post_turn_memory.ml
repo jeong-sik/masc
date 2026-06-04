@@ -5,7 +5,6 @@
 let run
   ~config
   ~meta
-  ~memory
   ~turn
   ~oas_turn_count
   ~response_text
@@ -23,7 +22,7 @@ let run
      See RFC #3646 Section 3: Det/NonDet boundary. *)
   (try
      let notes_written, kinds_written =
-       Keeper_memory_bank.append_memory_notes_from_reply
+       Memory.append_from_reply
          config
          meta
          ~snapshot:state_snapshot
@@ -39,7 +38,7 @@ let run
            Keeper_tool_emission_hook.(
              snapshot (accumulator_for_keeper meta.name))
          in
-         Keeper_memory_bank.append_memory_notes_from_tool_results
+         Memory.append_from_tool_results
            config
            meta
            ~turn
@@ -71,21 +70,6 @@ let run
        ~labels:[ "keeper", meta.name ]
        ());
 
-  (* Episodic memory: create an episode from [STATE] after
-     Agent.run returns, then persist and emit activity through the
-     post-run memory adapter. Collaboration learning (Hebbian
-     strengthen/weaken) is owned by the task lifecycle path. *)
-  Keeper_agent_memory_episode.record_success
-    ~config
-    ~keeper_name:meta.name
-    ~memory
-    ~turn
-    ~oas_turn_count
-    ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-    ~state_snapshot_source
-    ~snapshot:state_snapshot
-    ();
-
   (* Memory bank compaction: dedup + consolidate if over threshold. *)
   (try
      let memory_summarizer =
@@ -96,7 +80,7 @@ let run
          ()
      in
      let compaction =
-       Keeper_memory_bank.compact_memory_bank_if_needed
+       Memory.compact_if_needed
          ?summarizer:memory_summarizer
          config
          meta

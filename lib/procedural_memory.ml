@@ -111,51 +111,6 @@ let rewrite_procedures ~agent_name (procs : procedure list) =
   | Ok () -> ()
   | Error msg -> Log.Config.warn "procedural_memory save: %s" msg
 
-(* ================================================================ *)
-(* Procedure Operations                                             *)
-(* ================================================================ *)
-
-(** Record a positive or negative outcome for a pattern.
-    If the pattern already exists, update counts. Otherwise create new. *)
-let record_outcome ~agent_name ~pattern ~evidence_id ~success =
-  let procs = load_procedures ~agent_name in
-  let existing = List.find_opt (fun p -> p.pattern = pattern) procs in
-  match existing with
-  | Some p ->
-    let updated = {
-      p with
-      success_count = p.success_count + (if success then 1 else 0);
-      failure_count = p.failure_count + (if success then 0 else 1);
-      evidence = evidence_id :: p.evidence;
-      last_applied = Time_compat.now ();
-      confidence =
-        let s = Float.of_int (p.success_count + (if success then 1 else 0)) in
-        let f = Float.of_int (p.failure_count + (if success then 0 else 1)) in
-        s /. (s +. f);
-    } in
-    let patched = List.map (fun q ->
-      if q.id = p.id then updated else q
-    ) procs in
-    rewrite_procedures ~agent_name patched;
-    updated
-  | None ->
-    let now = Time_compat.now () in
-    let id = sprintf "proc-%s-%d-%06x"
-      agent_name (int_of_float now) (Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFFFF) in
-    let p = {
-      id;
-      agent_name;
-      pattern;
-      evidence = [evidence_id];
-      success_count = (if success then 1 else 0);
-      failure_count = (if success then 0 else 1);
-      confidence = if success then 1.0 else 0.0;
-      created_at = now;
-      last_applied = now;
-    } in
-    save_procedure ~agent_name p;
-    p
-
 (** Minimum evidence count required for crystallization.
     Configurable via MASC_PROC_MIN_EVIDENCE (default: 3).
     High-confidence patterns (100%) with fewer evidence may still qualify
@@ -189,14 +144,3 @@ let top_procedures ~agent_name ~limit : procedure list =
   |> List.filter is_crystallized
   |> List.sort (fun a b -> Float.compare b.confidence a.confidence)
   |> List.filteri (fun i _ -> i < limit)
-
-(** Format procedures for capsule injection. *)
-let format_for_dna ~agent_name ~limit : string =
-  let procs = top_procedures ~agent_name ~limit in
-  if procs = [] then ""
-  else
-    let lines = List.map (fun p ->
-      sprintf "- %s (confidence: %.0f%%, evidence: %d)"
-        p.pattern (p.confidence *. 100.0) (List.length p.evidence)
-    ) procs in
-    "[PROCEDURES]\n" ^ String.concat "\n" lines ^ "\n[/PROCEDURES]"

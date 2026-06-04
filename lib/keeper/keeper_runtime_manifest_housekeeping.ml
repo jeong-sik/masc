@@ -92,8 +92,6 @@ let mandatory_clock_refs_for_event = function
     [ "edge_id"; "lane"; "compaction_id"; "compaction_source" ]
   | Checkpoint_saved ->
     [ "edge_id"; "lane"; "checkpoint_id" ]
-  | Memory_injected | Memory_flushed ->
-    [ "edge_id"; "lane"; "memory_injection_id" ]
   | Receipt_appended ->
     [ "edge_id"; "lane" ]
   | Turn_finished ->

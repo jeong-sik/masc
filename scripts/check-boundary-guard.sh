@@ -75,17 +75,10 @@ check "V4-marker-definitions" 2 \
   'let goal_prefix\|let memory_summary_prefix\|let state_block_start' \
   "lib/"
 
-# V5: Direct OAS Memory.store calls from MASC bridge code
-# Allowed: memory_oas_bridge.ml (2 actual calls + 5 comments/docs)
-check "V5-memory-store-bypass" 1 \
-  'Memory\.store[^_]' \
-  "lib/memory_oas_bridge.ml"
-
 # V6: OAS lifecycle orchestration from keeper_agent_run
-# Memory_oas_bridge + Oas_worker.run_named calls should be isolated
-# to a thin bridge; currently spread in keeper_agent_run.ml.
+# Oas_worker.run_named calls should be isolated to a thin bridge.
 check "V6-oas-orchestration" 3 \
-  'Memory_oas_bridge\|Oas_worker\.run_named' \
+  'Oas_worker\.run_named' \
   "lib/keeper/keeper_agent_run.ml"
 
 # V7: MASC-specific safety gates in OAS hook layer

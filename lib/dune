@@ -17,8 +17,6 @@
  keeper_checkpoint_failure_operation
  keeper_memory_llm_summary_outcome
  keeper_tool_call_log_route_evidence
- memory_oas_bridge_cache
- memory_oas_bridge_op_outcome
  keeper_user_visible_reply_source
  keeper_continuity_summary_source
  keeper_world_observation_board_signal
@@ -127,7 +125,6 @@
   keeper_agent_run_contract_helpers keeper_agent_run_response_text keeper_agent_run_thinking_trajectory
   keeper_agent_run_tool_observation keeper_agent_run_tool_surface_violation keeper_agent_run_receipt_append keeper_agent_run_receipt keeper_agent_run_sidecar keeper_agent_run_finalize_response
   keeper_agent_result keeper_agent_error
-  keeper_agent_memory_episode
   keeper_run_tools_hooks
   keeper_run_tools_search
   keeper_run_tools_setup
@@ -356,11 +353,6 @@
    ;; semantics.  PR-2 onwards: runtime_event_bridge arms call into
    ;; Sse_event.<event>_constructor instead of inline `Assoc.
    masc.sse_event
-   ;; RFC-0056 Phase 1F — Memory_jsonl leaf module extracted to
-   ;; lib/memory_jsonl/. 219+22 LoC, deps: stdlib + Yojson + Eio +
-   ;; agent_sdk + fs_compat + time_compat + masc_log. OAS Memory
-   ;; long_term_backend over JSONL files.
-   masc.memory_jsonl
    ;; RFC-0056 Phase 1G — Chronicle_event leaf module extracted to
    ;; lib/chronicle_event/. 460+170 LoC, deps: stdlib + Yojson only.
    ;; Chronicle wire format (Actor / Target / Content / Event records

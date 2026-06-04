@@ -21,7 +21,6 @@ type try_provider_ctx =
   ; guardrails : Agent_sdk.Guardrails.t option
   ; hooks : Agent_sdk.Hooks.hooks option
   ; context_reducer : Agent_sdk.Context_reducer.t option
-  ; memory : Agent_sdk.Memory.t option
   ; tool_retry_policy : Agent_sdk.Tool_retry_policy.t option
   ; raw_trace : Agent_sdk.Raw_trace.t option
   ; transport_resolved : Masc_grpc_transport.t

@@ -854,7 +854,7 @@ Aggregate of 254 commits since v0.18.8 (109 feat / 33 fix / 37 docs+spec / 36 ch
 The headline thread for this release is the autonomous **Cycle 24-44 spec ↔ code identity series** (20 PRs, all spec/docs only, behavior-change 0). The series closes the discoverability gap users observed as "lifecycle 30-40% black-box": OCaml subsystems whose specs already cited them but had no reverse anchor. Two patterns:
 
 1. **Anchor addition** (Cycle 24-39, 16 PRs) — adds a `(* Spec navigation (OCaml -> TLA+) ... *)` block plus inline anchors to OCaml modules so code search lands on the authoritative spec module.
-2. **Citation refresh** (Cycle 40-43, 4 PRs) — verifies and corrects stale OCaml line citations in 5 specs (`KeeperTurnCycle`, `KeeperRuntimeLifecycle`, `KeeperDecisionPipeline`, `KeeperHeartbeat`, `KeeperSocialModelMagenticLedger`, `KeeperEmptyToolUniverse`) and adds a forward-stability disclaimer ("function names are stable identifiers; lines drift across edits") that converts future drift into metadata-only refreshes.
+2. **Citation refresh** (Cycle 40-43, 4 PRs) — verifies and corrects stale OCaml line citations in 5 specs and adds a forward-stability disclaimer ("function names are stable identifiers; lines drift across edits") that converts future drift into metadata-only refreshes.
 
 ### Added (spec ↔ code navigation infrastructure — autonomous Cycle 24-44)
 
@@ -876,7 +876,7 @@ The headline thread for this release is the autonomous **Cycle 24-44 spec ↔ co
 - `#11641` `KeeperTurnCycle.tla` — 22 stale line citations across 4 OCaml files refreshed to current main; forward-stability disclaimer added.
 - `#11645` `KeeperRuntimeLifecycle.tla` + `KeeperDecisionPipeline.tla` — sibling refresh of the same `keeper_registry.ml` setter family (`mark_turn_started` 386→493, `mark_turn_finished` 472→614, etc.; 8 setters total).
 - `#11647` `KeeperHeartbeat.tla` — 3 stale `keeper_keepalive.ml` citations refreshed (uniform +13 drift; matches Cycle 27 anchor's inline drift note).
-- `#11649` `KeeperSocialModelMagenticLedger.tla` + `KeeperEmptyToolUniverse.tla` — narrow batch (2 specs, 1 line each + adjacent anchors).
+- `#11649` `KeeperSocialModelMagenticLedger.tla` — narrow citation refresh.
 
 ### Other operational changes (234 commits)
 

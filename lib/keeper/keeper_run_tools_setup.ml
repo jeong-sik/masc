@@ -81,7 +81,6 @@ let prepare_agent_setup
         ; tool_surface_class = Keeper_agent_tool_surface.Surface_none
         ; tool_requirement = No_tools
         ; allowed_tool_count = 0
-        ; tool_gate_enabled = false
         ; tool_surface_fallback_used = false
         ; config_root
         ; runtime_config_path
@@ -481,11 +480,6 @@ let prepare_agent_setup
   let fallback_tool_surface ~turn =
     validate_allow_list ~turn fallback_floor_tool_names
   in
-  let tool_gate_requested_for_turn ~current_tool_choice ~is_last_turn =
-    ignore current_tool_choice;
-    ignore is_last_turn;
-    false
-  in
   let compute_tool_surface
         ~turn
         ~messages
@@ -698,9 +692,6 @@ let prepare_agent_setup
           turn_allowed_tool_names
       else turn_allowed_tool_names
     in
-    let tool_gate_requested =
-      tool_gate_requested_for_turn ~current_tool_choice ~is_last_turn
-    in
     let allowed_tool_count = List.length turn_allowed_tool_names in
     let tool_surface_class : Keeper_agent_tool_surface.tool_surface_class =
       Keeper_agent_tool_surface.tool_surface_class_for_tool_names
@@ -735,7 +726,6 @@ let prepare_agent_setup
     ; is_warning_zone
     ; tool_surface_class
     ; tool_requirement
-    ; tool_gate_requested
     ; claim_context_allowed
     ; tool_surface_fallback_used
     ; lane

@@ -10,7 +10,7 @@
 open Alcotest
 module KG = Masc.Keeper_guards
 module HK = Masc.Keeper_hooks_oas
-module HGA = Masc.Keeper_hooks_oas_gate_attempt
+module HGA = Masc.Keeper_hooks_oas_guard_attempt
 module P = Masc.Prometheus
 
 (* ----------------------------------------------------------------- *)
@@ -143,14 +143,14 @@ let make_gate_event ?(decision = KG.Gate_override) () =
     source_line = Some 123;
   }
 
-let test_render_pre_tool_gate_output_preserves_source () =
-  let blocked = HGA.render_pre_tool_gate_output (make_gate_event ()) in
+let test_render_guard_output_preserves_source () =
+  let blocked = HGA.render_guard_output (make_gate_event ()) in
   check bool "override output carries source path" true
     (contains_substring blocked "source_path=lib/keeper/keeper_guards.ml");
   check bool "override output carries source line" true
     (contains_substring blocked "source_line=123");
   let approval =
-    HGA.render_pre_tool_gate_output
+    HGA.render_guard_output
       (make_gate_event ~decision:KG.Gate_approval_required ())
   in
   check bool "approval output carries source path" true
@@ -569,7 +569,7 @@ let () = run "Keeper_guards" [
     test_case "extract_command_from_input" `Quick test_extract_command_from_input;
     test_case "render_inline_skip_reason" `Quick test_render_inline_skip_reason;
     test_case "pre-tool gate output preserves source" `Quick
-      test_render_pre_tool_gate_output_preserves_source;
+      test_render_guard_output_preserves_source;
     test_case "gate decision vocabulary" `Quick test_gate_decision_vocabulary;
     test_case "gate rejection log severity splits repeats" `Quick
       test_gate_rejection_log_severity_splits_repeats;

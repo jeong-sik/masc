@@ -236,8 +236,8 @@ Institution에서 추출된 행동 패턴. 트리거, 단계, 성공률, 사용 
 **Checkpoint**
 Keeper 세션의 저장점. `working_context`, `generation`, messages, structured working_context를 포함한다. handoff rollover는 새 session에 `next_generation` checkpoint를 저장한 뒤에만 commit된다. `-> lib/keeper/keeper_context_core.ml`, `-> lib/keeper/keeper_rollover.ml`
 
-**OAS Memory Tiers (참고)**
-OAS(OCaml Agent SDK)의 3계층 메모리: Scratchpad (현재 턴), Working (세션 지속), Long-term (세션 간 영속). MASC의 자체 메모리 시스템과 통합 진행 중이다.
+**MASC Memory Facade**
+Keeper memory bank, continuity snapshot, and compaction status를 묶는 MASC-owned public type. `-> lib/memory.mli`
 
 ---
 
@@ -376,7 +376,7 @@ Portal 도메인 에러: `PortalNotOpen`, `PortalAlreadyOpen { agent; target }`,
 ## OAS Integration
 
 **OAS (OCaml Agent SDK)**
-MASC가 에이전트 실행에 사용하는 SDK 라이브러리. 프로젝트: `workspace/yousleepwhen/oas` (agent_sdk). Agent.run, Context_reducer, Memory, Checkpoint, Guardrails, Hooks 등을 제공한다. MASC는 자체 에이전트 생명주기를 재구현하지 않고 OAS Agent.run을 사용한다.
+MASC가 에이전트 실행에 사용하는 SDK 라이브러리. 프로젝트: `workspace/yousleepwhen/oas` (agent_sdk). Agent.run, Context_reducer, Checkpoint, Guardrails, Hooks 등을 제공한다. MASC는 자체 에이전트 생명주기를 재구현하지 않고 OAS Agent.run을 사용한다.
 
 **OAS Worker**
 MASC에서 OAS 기반 모델 호출을 수행하는 통합 진입점. runtime_id 또는 model_label로 모델을 지정하고, OAS Agent.run을 통해 실행한다. 결과로 `run_result`(response, checkpoint, session_id, turns, trace_ref)를 반환한다. 여기서 `turns`는 OAS SDK turn count이며 keeper turn count가 아니다. `-> lib/oas_worker.mli`

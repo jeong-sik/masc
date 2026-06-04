@@ -1,7 +1,7 @@
 (** Runtime-lens clock-group projection and gap detection.
 
     Derives grouped clock edges (turns, batches, attempts, checkpoints,
-    compactions, memory injections, event-bus correlations) from the edge
+    compactions and event-bus correlations) from the edge
     stream produced by {!Server_dashboard_http_keeper_runtime_lens_clock_edges}. *)
 
 open Server_dashboard_http_keeper_api_types
@@ -53,7 +53,6 @@ let clock_group_terminal_event group_type event =
       ("checkpoint_saved" | "state_snapshot_sidecar_saved" | "working_state_sidecar_saved") )
     ->
     true
-  | "memory_injection", "memory_flushed" -> true
   | "compaction", ("context_compacted" | "event_bus_correlated") -> true
   | "event_bus_correlation", "event_bus_correlated" -> true
   | _ -> false
@@ -143,7 +142,6 @@ let runtime_lens_clock_groups_json scan =
     add_if_present edge "provider_attempt" "provider_attempt_id";
     add_if_present edge "checkpoint" "checkpoint_id";
     add_if_present edge "compaction" "compaction_id";
-    add_if_present edge "memory_injection" "memory_injection_id";
     add_if_present edge "event_bus_correlation" "event_bus_correlation_id");
   !ordered_keys
   |> List.filter_map (fun key -> Hashtbl.find_opt groups key)

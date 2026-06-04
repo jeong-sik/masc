@@ -12,8 +12,7 @@
     - The {b lightweight} JSONL tail
       ({!episodes_jsonl_path} / {!record_episode_jsonl} /
       {!load_recent_episodes_jsonl} / {!cap_episodes_jsonl})
-      used by [memory_oas_bridge.ml],
-      [server_dashboard_http.ml], and the keeper heartbeat
+      used by [server_dashboard_http.ml] and the keeper heartbeat
       path that needs to record an episode without an Eio
       switch in scope.
 
@@ -146,8 +145,7 @@ val cap_episodes_jsonl : ?max_lines:int -> unit -> int
 (** Atomically rewrites {!episodes_jsonl_path} to keep the
     most recent [max_lines] entries (default 500).  Returns
     the number of lines dropped (0 when no rewrite was
-    needed).  Triggered by the flush path in
-    [memory_oas_bridge.ml] to bound the JSONL footprint. *)
+    needed). *)
 
 (** {1 Welcome / spawn injection} *)
 

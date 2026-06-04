@@ -1,6 +1,6 @@
-(** Auto-Recall Memory - Agent Being Protocol Memory System
+(** Auto-Recall Context - Agent Being Protocol Context System
 
-    Automatic memory injection for MASC agents.
+    Automatic context recall for MASC agents.
     Fetches relevant context from cache, broadcasts, and file context.
 
     {2 Example Usage}
@@ -13,8 +13,8 @@
 
       (* With Eio runtime context *)
       let result = Auto_recall.fetch_context_eio ~sw ~env workspace_config ~config ~query:"error handling" () in
-      let injection = Auto_recall.format_for_injection result in
-      (* Use injection as system prompt prefix *)
+      let context = Auto_recall.format_for_injection result in
+      (* Use context as system prompt prefix *)
     ]}
 *)
 

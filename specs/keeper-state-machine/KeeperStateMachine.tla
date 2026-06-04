@@ -12,7 +12,7 @@
 \*   - Budget monotonicity (restart_budget_remaining never revives)
 \*   - Overflowed transitions bounded (auto-compact or Paused, never loops)
 \*
-\* Mirrors: lib/keeper/keeper_state_machine.ml
+\* Mirrors: lib/keeper_state/keeper_state_machine.ml
 
 EXTENDS Naturals, FiniteSets
 

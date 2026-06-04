@@ -34,7 +34,7 @@
 \* mechanism has been REMOVED ENTIRELY from both the canonical spec
 \* and the OCaml impl (verified: zero occurrences in
 \* specs/keeper-state-machine/KeeperStateMachine.tla and
-\* lib/keeper/keeper_state_machine.ml as of 2026-04-20).  The audit
+\* lib/keeper_state/keeper_state_machine.ml as of 2026-04-20).  The audit
 \* model is retained as a forensic record of the design lesson:
 \* recovery actions must clear ALL latches that block their target
 \* state, not just the most obvious one.  The named TurnSucceeded /
@@ -55,7 +55,7 @@
 \* Bug model: recovery only dispatches Turn_succeeded (old code).
 \* The liveness property MUST be violated in the buggy variant.
 \*
-\* Mirrors: lib/keeper/keeper_state_machine.ml (update_conditions)
+\* Mirrors: lib/keeper_state/keeper_state_machine.ml (update_conditions)
 \*          lib/keeper/keeper_heartbeat_snapshot.ml:write_heartbeat_snapshot (heartbeat recovery)
 
 EXTENDS Naturals

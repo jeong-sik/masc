@@ -544,11 +544,15 @@ let log_call
         | Some _ -> generation
         | None -> ctx.generation
       in
-      let sandbox_root =
+      let cwd_response =
         match sandbox_root with
-        | Some _ -> sandbox_root
-        | None -> ctx.sandbox_root
+        | Some host_path ->
+          Keeper_cwd_response.docker ~host_cwd:host_path
+            ~container_cwd:ctx.sandbox_root
+        | None ->
+          Keeper_cwd_response.local ~host_cwd:ctx.sandbox_root
       in
+      let sandbox_root = Keeper_cwd_response.keeper_visible cwd_response in
       let allowed_paths =
         match allowed_paths with
         | Some _ -> allowed_paths

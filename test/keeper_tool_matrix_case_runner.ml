@@ -2,6 +2,8 @@ module Types = Masc_domain
 
 module Cases = Test_keeper_tool_matrix_cases
 
+let () = Mirage_crypto_rng_unix.use_default ()
+
 let result_prefix = "__KEEPER_TOOL_MATRIX_RESULT__"
 
 let emit_result ~base_path name = function

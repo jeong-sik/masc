@@ -4,6 +4,21 @@
 open Tool_args
 include Tool_task_handlers
 
+let task_log_info ~task_id fmt =
+  Stdlib.Format.ksprintf
+    (fun message -> Log.Task.info "task_id=%s %s" task_id message)
+    fmt
+
+let task_log_warn ~task_id fmt =
+  Stdlib.Format.ksprintf
+    (fun message -> Log.Task.warn "task_id=%s %s" task_id message)
+    fmt
+
+let task_log_error ~task_id fmt =
+  Stdlib.Format.ksprintf
+    (fun message -> Log.Task.error "task_id=%s %s" task_id message)
+    fmt
+
 let rec handle_done ~tool_name ~start_time ctx args =
   let notes = get_string args "notes" "" in
   handle_transition ~tool_name ~start_time ctx
@@ -62,7 +77,7 @@ and handle_cancel_task ~tool_name ~start_time ctx args =
            ("reason", `String reason);
          ]
    | Error err ->
-       Log.Task.error ~keeper_name:task_id "metrics record failed: %s" (Masc_domain.masc_error_to_string err));
+       task_log_error ~task_id "metrics record failed: %s" (Masc_domain.masc_error_to_string err));
   result_to_response ~tool_name ~start_time result
 
 and handle_transition ~tool_name ~start_time ctx args =
@@ -203,7 +218,7 @@ and handle_transition ~tool_name ~start_time ctx args =
     if force_raw then
       if (Atomic.get Workspace_hooks.is_admin_agent_fn) ~base_path:ctx.config.base_path ~agent_name:ctx.agent_name then true
       else (
-        Log.Task.warn ~keeper_name:task_id "[anti-rationalization] force=true rejected: agent=%s lacks admin privilege"
+        task_log_warn ~task_id "[anti-rationalization] force=true rejected: agent=%s lacks admin privilege"
           ctx.agent_name;
         false
       )
@@ -318,8 +333,8 @@ and handle_transition ~tool_name ~start_time ctx args =
   (* Contracted Done actions are reviewed above by the LLM completion
      reviewer with the persisted completion contract in prompt context.
      Keep AwaitingVerification for explicit submit_for_verification /
-     submit_pr_evidence workflows only; a normal keeper_task_done must
-     not depend on the verifier keeper being alive. *)
+     submit_pr_evidence workflows only; a normal done action must
+     not depend on the verifier agent being alive. *)
   (* RFC-0109 Phase D hard cut: contracted verification submissions
      require substantive evidence. Analysis-only tasks (no contract)
      bypass the gate. *)
@@ -368,8 +383,7 @@ and handle_transition ~tool_name ~start_time ctx args =
     match requested_action, task_opt with
     | ( Masc_domain.Submit_for_verification
       , Some ({ task_status = Masc_domain.Todo; _ } : Masc_domain.task) ) ->
-      Log.Task.info
-        ~keeper_name:task_id
+      task_log_info ~task_id
         "[verification-alias] treating todo submit_for_verification with evidence as submit_pr_evidence task=%s agent=%s"
         task_id
         ctx.agent_name;
@@ -474,7 +488,7 @@ and handle_transition ~tool_name ~start_time ctx args =
                 ?handoff_context ?prepare_verification_request
                 ?prepare_verification_verdict () in
       if is_version_mismatch r && attempt < max_cas_retries then begin
-        Log.Task.info ~keeper_name:task_id "CAS version mismatch on %s (attempt %d/%d), retrying in %.0fms"
+        task_log_info ~task_id "CAS version mismatch on %s (attempt %d/%d), retrying in %.0fms"
           task_id (attempt + 1) max_cas_retries (cas_retry_delay_s *. 1000.0);
         Time_compat.sleep cas_retry_delay_s;
         try_transition (attempt + 1)
@@ -532,8 +546,7 @@ and handle_transition ~tool_name ~start_time ctx args =
              instead of acting on empty strings. *)
           (match verification_id_before with
            | None ->
-             Log.Task.warn
-               ~keeper_name:task_id
+             task_log_warn ~task_id
                "approve_verification action for task %s without verification_id_before (skipping notify)"
                task_id
            | Some verification_id ->
@@ -544,8 +557,7 @@ and handle_transition ~tool_name ~start_time ctx args =
           let reason = if not (String.equal notes "") then notes else reason in
           (match verification_id_before with
            | None ->
-             Log.Task.warn
-               ~keeper_name:task_id
+             task_log_warn ~task_id
                "reject_verification action for task %s without verification_id_before (skipping notify)"
                task_id
            | Some verification_id ->

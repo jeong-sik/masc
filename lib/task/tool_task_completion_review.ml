@@ -61,7 +61,7 @@ let is_placeholder_evidence_ref value =
   value = "" || List.mem value placeholder_evidence_refs
 
 (* [pr_url_has_pull_ref] validates an explicit typed [pr_url] field
-   handed to the task completion adapter (see keeper_tool_task_runtime.ml). The
+   handed to the task completion adapter. The
    substring shape match is a thin guard on a typed input — distinct
    from the retired transition-layer substring gate (RFC-0109 Phase E,
    2026-05-27). *)

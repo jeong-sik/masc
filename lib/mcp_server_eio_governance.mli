@@ -2,7 +2,7 @@
     MCP session helpers.
 
     Extracted from [mcp_server_eio.ml] to reduce file size and
-    enable reuse from {!Tool_inline_dispatch} without
+    enable reuse from {!Mcp_tool_runtime} without
     re-introducing the dependency cycle the split was designed
     to break. {!Mcp_server_eio} re-exports the two record types
     via [type t = Mcp_server_eio_governance.t = { … }] and

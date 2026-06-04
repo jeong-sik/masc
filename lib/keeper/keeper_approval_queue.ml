@@ -906,7 +906,7 @@ let resolve_with_policy
     [Error (Already_resolved _)] if the atomic update found no matching
     entry (concurrent resolve race).
     Called from the dashboard approval HTTP handler
-    ([server_dashboard_http.ml]) and MCP inline dispatch. *)
+    ([server_dashboard_http.ml]) and MCP runtime. *)
 let resolve ~id ~(decision : Agent_sdk.Hooks.approval_decision)
   : (unit, resolve_error) result
   =

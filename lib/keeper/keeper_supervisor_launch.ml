@@ -514,7 +514,7 @@ let launch_supervised_fiber
 (* #10993: persona drift visibility.
 
    [Keeper_identity.normalize_all_names ~check_persona:true] runs on
-   every dispatch via [Tool_inline_dispatch_workspace] (RFC P3-a
+   every dispatch via [Mcp_tool_runtime_workspace] (RFC P3-a
    logging-only mode), but its [Persona_not_found] branch emits a
    Log.Misc.warn that is hard to triage:
 

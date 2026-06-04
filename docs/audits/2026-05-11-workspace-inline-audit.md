@@ -96,7 +96,7 @@ PR-N2가 `Tool_scope.keeper_internal_list`에 추가할 5개 — `Config.surface
 
 ### naming / structure 별도 정리
 - `inline_*` prefix의 의미가 schema 디렉토리 구조에만 존재 (도구 이름엔 `masc_*`). 별도 refactor 필요 없음 — 단 `tool_schemas_inline_*.ml` 파일 분리 자체는 책임 묶음으로 정당화됨.
-- `workspace_*` / `inline_*` 파일 분리는 dispatch 모듈 (`tool_workspace.ml`, `tool_inline_dispatch.ml`)과 1:1 매핑되어 있어 유지.
+- `workspace_*` / `inline_*` 파일 분리는 dispatch 모듈 (`tool_workspace.ml`, `mcp_tool_runtime.ml`)과 1:1 매핑되어 있어 유지.
 
 ## 다음 단계
 

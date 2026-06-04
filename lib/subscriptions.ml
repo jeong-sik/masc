@@ -152,7 +152,7 @@ let session_registry_ref : (Yojson.Safe.t -> int) option ref = ref None
 
 (** One-shot gate for the "registry not wired" message below. Keeps the
     log from flooding when callers on a hot path (Task.Tool,
-    tool_inline_dispatch_comm) invoke push_event_to_sessions before
+    mcp_tool_runtime_comm) invoke push_event_to_sessions before
     bootstrap wires the bridge — or in test harnesses that never wire
     it at all. *)
 let unwired_warned = Atomic.make false

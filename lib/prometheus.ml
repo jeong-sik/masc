@@ -354,8 +354,10 @@ let update_pool_metrics_gauges () =
    retires the scrape path. register_source only enqueues the callback at module
    load (no init dependency); the snapshot is read lazily at each tick. *)
 let otel_samples () : Otel_metrics.sample list =
-  update_pool_metrics_gauges ();
+  update_uptime ();
   update_fd_gauges ();
+  update_fd_accountant_gauges ();
+  update_pool_metrics_gauges ();
   Prometheus_store.snapshot ()
   |> List.map (fun (m : Prometheus_store.metric) ->
          { Otel_metrics.name = m.name
@@ -370,13 +372,10 @@ let otel_samples () : Otel_metrics.sample list =
 
 let () = Otel_metrics.register_source otel_samples
 
-let to_prometheus_text () =
-  update_uptime ();
-  update_fd_gauges ();
-  update_fd_accountant_gauges ();
-  update_pool_metrics_gauges ();
-  Prometheus_store.snapshot () |> Prometheus_render.render_snapshot
-;;
+(* RFC-0217 S4-2 — to_prometheus_text (Prometheus /metrics scrape render) removed.
+   The lazy gauge refreshes it performed are now done by otel_samples before each
+   OTLP export tick (S4-1). Prometheus_render is deleted with it; metrics export
+   via OTLP push only. *)
 
 (** {1 Convenience Functions} *)
 let record_request () = inc_counter metric_mcp_requests ()

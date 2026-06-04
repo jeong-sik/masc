@@ -436,7 +436,6 @@
    ;; with identically-named types in the main library.
    ;; RFC-0163 Phase D1 — Runtime_name leaf extraction (lib/runtime_id/).
    ;; Pure canonical-name validation, stdlib-only.
-
    uri
    tls
    tls-eio

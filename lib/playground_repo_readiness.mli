@@ -89,7 +89,9 @@ val ensure_ready :
     If the worktree is missing, first ensures the parent repo is a valid git
     clone (reclone if needed), then creates the worktree from the fetched
     default origin branch. Parent clone dirtiness is preserved and does not block
-    creating a separate task worktree. Returns [Ok ()] when the worktree is a
+    creating a separate task worktree. Existing and newly-created worktrees have
+    their [.git] gitdir pointer normalized to a relative path so Docker-mounted
+    Git can resolve the worktree metadata. Returns [Ok ()] when the worktree is a
     valid git checkout, or [Error msg] if creation failed. *)
 val ensure_worktree_ready :
   config:Workspace.config ->

@@ -19,4 +19,9 @@ module For_testing : sig
     status:Unix.process_status ->
     (string * Yojson.Safe.t) list
   val compute_command_descriptor : Masc_exec.Shell_ir.t -> Ide_event_types.command_descriptor
+  val typed_execute_response_cwd_json :
+    turn_sandbox_factory:Keeper_sandbox_factory.t option ->
+    cwd:string ->
+    sandbox_extra_fields:(string * Yojson.Safe.t) list ->
+    Yojson.Safe.t
 end

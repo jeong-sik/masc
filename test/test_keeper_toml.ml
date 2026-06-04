@@ -552,6 +552,24 @@ initiative_enabled = true
                 true
               with Not_found -> false))
 
+let test_profile_rejects_removed_ref_keys () =
+  let input = {|
+[keeper]
+goal = "test"
+persona_ref = "base-persona"
+runtime_ref = "tool-runtime"
+|} in
+  match TL.parse_toml input with
+  | Error e -> fail e
+  | Ok doc ->
+      (match KTP.profile_defaults_of_toml doc with
+       | Ok _ -> fail "expected removed TOML ref key error"
+       | Error msg ->
+           check bool "mentions removed persona_ref" true
+             (contains_substring msg "keeper.persona_ref");
+           check bool "mentions removed runtime_ref" true
+             (contains_substring msg "keeper.runtime_ref"))
+
 (* ================================================================ *)
 (* File loading tests                                                *)
 (* ================================================================ *)
@@ -1042,7 +1060,7 @@ tool_denylist = ["OPERATOR_TODO: remove before spawn"]
       check bool "reports resolved payload field" true
         (contains_substring e "$.tool_denylist[0]")
 
-let test_persona_resolver_rejects_non_public_social_model_arg () =
+let test_persona_resolver_ignores_non_public_social_model_arg () =
   with_personas_dir @@ fun personas_dir ->
   let persona_dir = Filename.concat personas_dir "probe" in
   mkdir_p persona_dir;
@@ -1064,10 +1082,12 @@ let test_persona_resolver_rejects_non_public_social_model_arg () =
           ("social_model", `String "magentic_ledger_v1");
         ])
   with
-  | Ok _ -> fail "expected social_model arg rejection"
-  | Error e ->
-      check bool "reports non-public arg" true
-        (contains_substring e "non-public keeper args")
+  | Error e -> fail ("resolver failed: " ^ e)
+  | Ok (_, resolved) ->
+      check bool "social_model arg omitted" true
+        (match Yojson.Safe.Util.member "social_model" resolved with
+         | `Null -> true
+         | _ -> false)
 
 let test_persona_resolver_preserves_autoboot_enabled_arg () =
   with_personas_dir @@ fun personas_dir ->
@@ -1402,7 +1422,6 @@ let test_detect_unknown_keys_empty_when_all_canonical () =
 goal = "canonical"
 mention_targets = ["a", "b"]
 autoboot_enabled = false
-runtime_id = "primary"
 active_goal_ids = ["goal-runtime"]
 |} in
   match TL.parse_toml input with
@@ -1873,6 +1892,8 @@ let () =
             test_profile_rejects_removed_model_keys;
           test_case "rejects removed initiative keys" `Quick
             test_profile_rejects_removed_initiative_keys;
+          test_case "rejects removed ref keys" `Quick
+            test_profile_rejects_removed_ref_keys;
           test_case "rejects keeper.runtime_id key" `Quick
             test_profile_rejects_runtime_id_key;
           test_case "rejects keeper.model key" `Quick
@@ -1954,8 +1975,8 @@ let () =
             test_persona_resolver_reports_placeholder_defaults_source;
           test_case "persona resolver rejects placeholder in resolved payload" `Quick
             test_persona_resolver_rejects_placeholder_in_resolved_payload;
-          test_case "persona resolver rejects non-public social_model arg" `Quick
-            test_persona_resolver_rejects_non_public_social_model_arg;
+          test_case "persona resolver ignores non-public social_model arg" `Quick
+            test_persona_resolver_ignores_non_public_social_model_arg;
           test_case "persona resolver preserves autoboot_enabled arg" `Quick
             test_persona_resolver_preserves_autoboot_enabled_arg;
           test_case "persona resolver preserves canonical tool_access and allowed_paths" `Quick

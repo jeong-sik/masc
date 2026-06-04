@@ -666,65 +666,74 @@ let release_stale_claims config ~ttl_seconds =
       let updated_tasks =
         List.map
           (fun (task : task) ->
-             match task.task_status with
-             | Claimed { assignee; claimed_at } ->
-               let ts =
-                 parse_iso8601 ~default_time:(now_f -. ttl_seconds -. 1.0) claimed_at
-               in
-               if now_f -. ts > ttl_seconds
-               then (
-                 stale_tasks := (task.id, assignee) :: !stale_tasks;
-                 log_event
-                   config
-                   (`Assoc
-                       [ "type", `String "stale_claim_released"
-                       ; "task_id", `String task.id
-                       ; "assignee", `String assignee
-                       ; "age_s", age_seconds_json ts
-                       ; "ts", `String now_str
-                       ]);
-                 clear_assignee_current_task ~assignee ~task_id:task.id;
-                 { task with task_status = Todo })
-               else task
-             | InProgress { assignee; started_at } ->
-               let ts =
-                 parse_iso8601 ~default_time:(now_f -. ttl_seconds -. 1.0) started_at
-               in
-               if now_f -. ts > ttl_seconds
-               then (
-                 stale_tasks := (task.id, assignee) :: !stale_tasks;
-                 log_event
-                   config
-                   (`Assoc
-                       [ "type", `String "stale_inprogress_released"
-                       ; "task_id", `String task.id
-                       ; "assignee", `String assignee
-                       ; "age_s", age_seconds_json ts
-                       ; "ts", `String now_str
-                       ]);
-                 clear_assignee_current_task ~assignee ~task_id:task.id;
-                 { task with task_status = Todo })
-               else task
-             | AwaitingVerification { assignee; submitted_at; _ } ->
-               let ts =
-                 parse_iso8601 ~default_time:(now_f -. ttl_seconds -. 1.0) submitted_at
-               in
-               if now_f -. ts > ttl_seconds
-               then (
-                 stale_tasks := (task.id, assignee) :: !stale_tasks;
-                 log_event
-                   config
-                   (`Assoc
-                       [ "type", `String "stale_verification_released"
-                       ; "task_id", `String task.id
-                       ; "assignee", `String assignee
-                       ; "age_s", age_seconds_json ts
-                       ; "ts", `String now_str
-                       ]);
-                 clear_assignee_current_task ~assignee ~task_id:task.id;
-                 { task with task_status = Todo })
-               else task
-             | Todo | Done _ | Cancelled _ -> task)
+             let effective_ttl =
+               match task.contract with
+               | Some c when c.stale_claim_timeout_sec > 0 ->
+                 Some (float_of_int c.stale_claim_timeout_sec)
+               | _ -> None
+             in
+             match effective_ttl with
+             | None -> task
+             | Some ttl ->
+               (match task.task_status with
+                | Claimed { assignee; claimed_at } ->
+                  let ts =
+                    parse_iso8601 ~default_time:(now_f -. ttl -. 1.0) claimed_at
+                  in
+                  if now_f -. ts > ttl
+                  then (
+                    stale_tasks := (task.id, assignee) :: !stale_tasks;
+                    log_event
+                      config
+                      (`Assoc
+                          [ "type", `String "stale_claim_released"
+                          ; "task_id", `String task.id
+                          ; "assignee", `String assignee
+                          ; "age_s", age_seconds_json ts
+                          ; "ts", `String now_str
+                          ]);
+                    clear_assignee_current_task ~assignee ~task_id:task.id;
+                    { task with task_status = Todo })
+                  else task
+                | InProgress { assignee; started_at } ->
+                  let ts =
+                    parse_iso8601 ~default_time:(now_f -. ttl -. 1.0) started_at
+                  in
+                  if now_f -. ts > ttl
+                  then (
+                    stale_tasks := (task.id, assignee) :: !stale_tasks;
+                    log_event
+                      config
+                      (`Assoc
+                          [ "type", `String "stale_inprogress_released"
+                          ; "task_id", `String task.id
+                          ; "assignee", `String assignee
+                          ; "age_s", age_seconds_json ts
+                          ; "ts", `String now_str
+                          ]);
+                    clear_assignee_current_task ~assignee ~task_id:task.id;
+                    { task with task_status = Todo })
+                  else task
+                | AwaitingVerification { assignee; submitted_at; _ } ->
+                  let ts =
+                    parse_iso8601 ~default_time:(now_f -. ttl -. 1.0) submitted_at
+                  in
+                  if now_f -. ts > ttl
+                  then (
+                    stale_tasks := (task.id, assignee) :: !stale_tasks;
+                    log_event
+                      config
+                      (`Assoc
+                          [ "type", `String "stale_verification_released"
+                          ; "task_id", `String task.id
+                          ; "assignee", `String assignee
+                          ; "age_s", age_seconds_json ts
+                          ; "ts", `String now_str
+                          ]);
+                    clear_assignee_current_task ~assignee ~task_id:task.id;
+                    { task with task_status = Todo })
+                  else task
+                | Todo | Done _ | Cancelled _ -> task))
           backlog.tasks
       in
       if !stale_tasks <> []

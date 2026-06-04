@@ -27,6 +27,32 @@ type extract_mode =
   | Markdown
   | Text
 
+type extraction_source =
+  | Article
+  | Main
+  | Body
+  | Document
+  | Raw_text
+
+let extraction_source_to_string = function
+  | Article -> "article"
+  | Main -> "main"
+  | Body -> "body"
+  | Document -> "document"
+  | Raw_text -> "raw_text"
+
+type content_kind =
+  | Html
+  | Plain_text
+  | Json_text
+  | Xml_text
+
+let content_kind_to_string = function
+  | Html -> "html"
+  | Plain_text -> "text"
+  | Json_text -> "json"
+  | Xml_text -> "xml"
+
 let extract_mode_to_string = function
   | Markdown -> "markdown"
   | Text -> "text"
@@ -264,21 +290,22 @@ let first_group pattern html =
 
 let select_readable_html html =
   let html = strip_noise html in
-  let selected =
+  let selected, source =
     match longest_nonempty (first_group article_re html) with
-    | Some article -> article
+    | Some article -> (article, Article)
     | None -> (
         match longest_nonempty (first_group main_re html) with
-        | Some main -> main
+        | Some main -> (main, Main)
         | None -> (
             match first_group body_re html with
-            | body :: _ -> body
-            | [] -> html))
+            | body :: _ -> (body, Body)
+            | [] -> (html, Document)))
   in
-  List.fold_left
-    (fun acc re -> Re.replace_string re ~by:"" acc)
-    selected
-    remove_boilerplate_res
+  ( List.fold_left
+      (fun acc re -> Re.replace_string re ~by:"" acc)
+      selected
+      remove_boilerplate_res
+  , source )
 
 let clean_inline html =
   Tool_misc_web_search.clean_search_text html
@@ -338,10 +365,50 @@ let render_markdown html =
   |> normalize_markdown
 
 let render_extracted_text ~extract_mode html =
-  let readable = select_readable_html html in
-  match extract_mode with
-  | Markdown -> render_markdown readable
-  | Text -> Tool_misc_web_search.clean_search_text readable
+  let readable, source = select_readable_html html in
+  let text =
+    match extract_mode with
+    | Markdown -> render_markdown readable
+    | Text -> Tool_misc_web_search.clean_search_text readable
+  in
+  text, source
+
+let content_type_base raw =
+  match String.split_on_char ';' raw with
+  | base :: _ -> String.lowercase_ascii (String.trim base)
+  | [] -> String.lowercase_ascii (String.trim raw)
+
+let content_kind_of_content_type = function
+  | None -> Ok Html
+  | Some raw ->
+      let base = content_type_base raw in
+      if String.equal base "" then Ok Html
+      else if String.equal base "text/html"
+              || String.equal base "application/xhtml+xml"
+              || ends_with ~suffix:"+html" base
+      then Ok Html
+      else if String.equal base "text/plain"
+              || String.equal base "text/markdown"
+              || String.equal base "text/csv"
+      then Ok Plain_text
+      else if String.equal base "application/json"
+              || ends_with ~suffix:"+json" base
+      then Ok Json_text
+      else if String.equal base "text/xml"
+              || String.equal base "application/xml"
+              || ends_with ~suffix:"+xml" base
+      then Ok Xml_text
+      else if String.starts_with ~prefix:"text/" base then Ok Plain_text
+      else Error raw
+
+let normalize_raw_text text =
+  text |> Re.replace_string horizontal_space_re ~by:" " |> normalize_markdown
+
+let render_payload ~extract_mode ~content_kind payload =
+  match content_kind with
+  | Html -> render_extracted_text ~extract_mode payload
+  | Plain_text -> (normalize_raw_text payload, Raw_text)
+  | Json_text | Xml_text -> (String.trim payload, Raw_text)
 
 let truncate_text ~max_chars text =
   if String.length text <= max_chars then text, false
@@ -416,51 +483,136 @@ type fetch_failure =
   | Transport_error of string   (* raw transport-layer detail, already redacted *)
   | Http_status of int          (* upstream returned a non-2xx HTTP status *)
   | No_http_status              (* protocol level: status line missing *)
+  | Redirect_blocked of string  (* redirect target failed URL/host policy *)
+  | Redirect_limit_exceeded
+  | Unsupported_content_type of string
 
 let fetch_failure_to_string = function
   | Transport_error detail -> Printf.sprintf "fetch failed: %s" detail
   | Http_status status -> Printf.sprintf "HTTP %d" status
   | No_http_status -> "no HTTP status received"
+  | Redirect_blocked reason -> "redirect blocked: " ^ reason
+  | Redirect_limit_exceeded ->
+      Printf.sprintf "redirect limit exceeded (max %d)" max_redirects
+  | Unsupported_content_type content_type ->
+      Printf.sprintf "unsupported content type: %s" content_type
 
 let fetch_failure_class : fetch_failure -> Tool_result.tool_failure_class =
   function
   | Transport_error _ -> Tool_result.Transient_error
   | Http_status _ -> Tool_result.Runtime_failure
   | No_http_status -> Tool_result.Runtime_failure
+  | Redirect_blocked _ -> Tool_result.Workflow_rejection
+  | Redirect_limit_exceeded -> Tool_result.Runtime_failure
+  | Unsupported_content_type _ -> Tool_result.Runtime_failure
 
-type http_get =
+type fetch_response =
+  { http_status : int option
+  ; final_url : string
+  ; redirect_count : int
+  ; content_type : string option
+  ; downloaded_bytes : int option
+  ; body : string
+  }
+
+type http_fetch =
   timeout_sec:int ->
   headers:(string * string) list ->
   max_response_bytes:int ->
   string ->
-  (int option * string, string) Result.t
+  (fetch_response, fetch_failure) Result.t
 
-let default_http_get ~timeout_sec ~headers ~max_response_bytes url =
-  Tool_local_runtime_http.http_get_text_with_status_with_headers
-    ~timeout_sec
-    ~headers
-    ~follow_redirects:true
-    ~max_redirects
-    ~compressed:true
-    ~max_response_bytes
-    url
+let resolve_redirect_url ~base_url target =
+  Uri.resolve "" (Uri.of_string base_url) (Uri.of_string target) |> Uri.to_string
 
-let http_get_mutex = Mutex.create ()
-let http_get_ref = ref default_http_get
+let redirect_status = function
+  | Some status -> status >= 300 && status < 400
+  | None -> false
 
-let current_http_get () =
-  Mutex.protect http_get_mutex (fun () -> !http_get_ref)
+let fetch_response_of_http_response ~request_url ~redirect_count
+    (response : Tool_local_runtime_http.http_get_response) =
+  { http_status = response.http_status
+  ; final_url =
+      Option.value response.effective_url ~default:request_url
+      |> String.trim
+  ; redirect_count
+  ; content_type = response.content_type
+  ; downloaded_bytes = response.downloaded_bytes
+  ; body = response.body
+  }
 
-let with_http_get_for_test http_get f =
+let validate_redirect_target target =
+  if not (valid_url target) then
+    Error "redirect target must be a valid http or https URL"
+  else
+    match blocked_host_reason target with
+    | Some reason -> Error ("target host is blocked: " ^ reason)
+    | None -> Ok ()
+
+let default_http_fetch ~timeout_sec ~headers ~max_response_bytes url =
+  let rec loop ~redirect_count request_url =
+    match
+      Tool_local_runtime_http.http_get_text_response_with_headers
+        ~timeout_sec
+        ~headers
+        ~follow_redirects:false
+        ~compressed:true
+        ~max_response_bytes
+        request_url
+    with
+    | Error detail ->
+        Error (Transport_error (redact_transport_error_detail detail))
+    | Ok response when redirect_status response.http_status -> (
+        match response.redirect_url with
+        | None | Some "" ->
+            Ok (fetch_response_of_http_response ~request_url ~redirect_count response)
+        | Some redirect_url ->
+            if redirect_count >= max_redirects then Error Redirect_limit_exceeded
+            else
+              let next_url =
+                resolve_redirect_url ~base_url:request_url redirect_url
+              in
+              match validate_redirect_target next_url with
+              | Error reason -> Error (Redirect_blocked reason)
+              | Ok () -> loop ~redirect_count:(redirect_count + 1) next_url)
+    | Ok response ->
+        Ok (fetch_response_of_http_response ~request_url ~redirect_count response)
+  in
+  loop ~redirect_count:0 url
+
+let http_fetch_mutex = Mutex.create ()
+let http_fetch_ref = ref default_http_fetch
+
+let current_http_fetch () =
+  Mutex.protect http_fetch_mutex (fun () -> !http_fetch_ref)
+
+let with_http_fetch_for_test http_fetch f =
   let previous =
-    Mutex.protect http_get_mutex (fun () ->
-        let previous = !http_get_ref in
-        http_get_ref := http_get;
+    Mutex.protect http_fetch_mutex (fun () ->
+        let previous = !http_fetch_ref in
+        http_fetch_ref := http_fetch;
         previous)
   in
   Stdlib.Fun.protect
     ~finally:(fun () ->
-      Mutex.protect http_get_mutex (fun () -> http_get_ref := previous))
+      Mutex.protect http_fetch_mutex (fun () -> http_fetch_ref := previous))
+    f
+
+let with_http_get_for_test http_get f =
+  with_http_fetch_for_test
+    (fun ~timeout_sec ~headers ~max_response_bytes url ->
+      match http_get ~timeout_sec ~headers ~max_response_bytes url with
+      | Ok (http_status, body) ->
+          Ok
+            { http_status
+            ; final_url = url
+            ; redirect_count = 0
+            ; content_type = None
+            ; downloaded_bytes = Some (String.length body)
+            ; body
+            }
+      | Error detail ->
+          Error (Transport_error (redact_transport_error_detail detail)))
     f
 
 (** Main fetch implementation *)
@@ -474,17 +626,39 @@ let fetch_impl ~url ~timeout_sec ~extract_mode ~max_chars =
       ("Accept-Language", "en-US,en;q=0.8,ko;q=0.7");
     ]
   in
-  match (current_http_get ()) ~timeout_sec ~headers ~max_response_bytes url with
-  | Error detail ->
-      Error (Transport_error (redact_transport_error_detail detail))
-  | Ok (Some status, payload) when status >= 200 && status < 300 ->
-      let title = extract_title payload in
-      let description = extract_description payload in
-      let rendered = render_extracted_text ~extract_mode payload in
-      let text, truncated = truncate_text ~max_chars rendered in
-      Ok (status, title, description, text, truncated)
-  | Ok (Some status, _) -> Error (Http_status status)
-  | Ok (None, _) -> Error No_http_status
+  match (current_http_fetch ()) ~timeout_sec ~headers ~max_response_bytes url with
+  | Error failure -> Error failure
+  | Ok response -> (
+      match response.http_status with
+      | Some status when status >= 200 && status < 300 -> (
+          match content_kind_of_content_type response.content_type with
+          | Error content_type -> Error (Unsupported_content_type content_type)
+          | Ok content_kind ->
+              let title =
+                match content_kind with
+                | Html -> extract_title response.body
+                | Plain_text | Json_text | Xml_text -> None
+              in
+              let description =
+                match content_kind with
+                | Html -> extract_description response.body
+                | Plain_text | Json_text | Xml_text -> None
+              in
+              let rendered, extraction_source =
+                render_payload ~extract_mode ~content_kind response.body
+              in
+              let text, truncated = truncate_text ~max_chars rendered in
+              Ok
+                ( response
+                , status
+                , content_kind
+                , extraction_source
+                , title
+                , description
+                , text
+                , truncated ))
+      | Some status -> Error (Http_status status)
+      | None -> Error No_http_status)
 
 (* RFC-0189 PR-1b.8 — typed result.
    Failure-class assignments live with construction:
@@ -563,16 +737,37 @@ let handle ~tool_name ~start_time args : Tool_result.result =
                       message
                 | Ok () -> (
                     match fetch_impl ~url ~timeout_sec:timeout ~extract_mode ~max_chars with
-                    | Ok (http_status, title, description, text, truncated) ->
+                    | Ok
+                        ( response
+                        , http_status
+                        , content_kind
+                        , extraction_source
+                        , title
+                        , description
+                        , text
+                        , truncated ) ->
                         let fields =
                           [
                             ("url", `String url);
+                            ("final_url", `String response.final_url);
                             ("http_status", `Int http_status);
+                            ("redirect_count", `Int response.redirect_count);
                             ("extract_mode", `String extract_mode_label);
+                            ("content_kind", `String (content_kind_to_string content_kind));
+                            ( "extraction_source",
+                              `String (extraction_source_to_string extraction_source) );
                             ("text", `String text);
                             ("content_chars", `Int (String.length text));
                             ("truncated", `Bool truncated);
                           ]
+                          @
+                          (match response.content_type with
+                          | Some value -> [ ("content_type", `String value) ]
+                          | None -> [])
+                          @
+                          (match response.downloaded_bytes with
+                          | Some value -> [ ("downloaded_bytes", `Int value) ]
+                          | None -> [])
                           @
                           (match title with
                           | Some t -> [ ("title", `String t) ]

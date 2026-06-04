@@ -3,6 +3,19 @@ open Alcotest
 let check_float_close label expected actual =
   check bool label true (Float.abs (expected -. actual) < 0.001)
 
+let contains_substring text needle =
+  let len_text = String.length text in
+  let len_needle = String.length needle in
+  if len_needle = 0 then true
+  else if len_needle > len_text then false
+  else
+    let rec loop idx =
+      if idx > len_text - len_needle then false
+      else if String.equal (String.sub text idx len_needle) needle then true
+      else loop (idx + 1)
+    in
+    loop 0
+
 let test_ollama_ps_parser_extracts_loaded_models () =
   let json =
     Yojson.Safe.from_string
@@ -103,9 +116,10 @@ let test_auto_think_policy_prioritizes_response () =
 let test_runtime_probe_reports_effective_think_mode () =
   let open Yojson.Safe.Util in
   let run mode =
+    Eio_main.run @@ fun _env ->
     Masc.Tool_local_runtime_probe.runtime_ollama_probe_json
-      ~server_url:"http://127.0.0.1:1" ~model:"dummy-probe-model"
-      ~think_mode:mode ~timeout_sec:3 ~ps_timeout_sec:1 ()
+      ~server_url:"http://127.0.0.1:1" ~model:"dummy-probe-model" ~think_mode:mode
+      ~timeout_sec:3 ~ps_timeout_sec:1 ()
   in
   let auto = run Masc.Tool_local_runtime_probe.Think_auto in
   check string "auto mode reported" "auto"
@@ -126,9 +140,10 @@ let test_runtime_probe_status_only_skip_is_telemetry () =
       ~labels ()
   in
   let json =
+    Eio_main.run @@ fun _env ->
     Masc.Tool_local_runtime_probe.runtime_ollama_probe_json
-      ~server_url:"http://127.0.0.1:1" ~model:"dummy-probe-model"
-      ~run_generate:false ~timeout_sec:3 ~ps_timeout_sec:1 ()
+      ~server_url:"http://127.0.0.1:1" ~model:"dummy-probe-model" ~run_generate:false
+      ~timeout_sec:3 ~ps_timeout_sec:1 ()
   in
   let after =
     Masc.Prometheus.metric_value_or_zero
@@ -177,6 +192,12 @@ let test_curl_get_argv_keeps_curl_as_executable_with_headers () =
   check bool "compression arg present" true (List.mem "--compressed" argv);
   check bool "body cap arg present" true (List.mem "--max-filesize" argv);
   check bool "body cap does not force range response" false (List.mem "--range" argv);
+  check bool "curl emits structured metadata" true
+    (List.exists
+       (fun arg ->
+         contains_substring arg "%{url_effective}"
+         && contains_substring arg "%{content_type}")
+       argv);
   check bool "curl is not repeated after headers" false (List.mem "curl" (List.tl argv))
 
 let test_ollama_ps_non_200_is_reported_as_error () =

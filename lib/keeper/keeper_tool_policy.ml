@@ -354,7 +354,10 @@ let keeper_universe_masc_tool_schemas (meta : keeper_meta) : Masc_domain.tool_sc
     filter_by_universe ~lookup schema.name)
 
 let keeper_default_model_tools (_meta : keeper_meta) : Masc_domain.tool_schema list =
-  keeper_model_tools @ keeper_voice_tool_schemas
+  (* keeper_voice_tool_schemas removed: voice tools already arrive via
+     Tool_shard.all_keeper_tool_schemas in keeper_base_candidate_tool_names,
+     so adding them here was redundant (dedupe masked the overlap). *)
+  keeper_model_tools
   @ [ keeper_tool_search_schema ]
 
 (** Recovery minimum tools: non-removable shards only.

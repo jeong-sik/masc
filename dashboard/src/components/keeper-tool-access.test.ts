@@ -29,7 +29,7 @@ describe('KeeperToolAccessSummary', () => {
     expect(container.textContent).toContain('auto handoff')
     expect(container.textContent).toContain('proactive idle')
     expect(container.textContent).toContain('mention targets')
-    expect(container.textContent).toContain('allow / deny')
+    expect(container.textContent).toContain('candidate / deny')
   })
 
   it('shows em dash for null runtime name', () => {
@@ -60,10 +60,10 @@ describe('KeeperToolAccessSummary', () => {
     expect(dds[5]!.textContent).toBe('—')
   })
 
-  it('shows allow/deny counts', () => {
+  it('shows candidate/deny counts', () => {
     const container = document.createElement('div')
     render(h(KeeperToolAccessSummary, { config: makeConfig() }), container)
-    expect(container.textContent).toContain('2 allow')
+    expect(container.textContent).toContain('2 candidate')
     expect(container.textContent).toContain('1 deny')
   })
 

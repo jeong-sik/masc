@@ -483,6 +483,7 @@ type task_contract = {
   required_evidence : string list; [@default []]
   inspect_gate_evidence : string list; [@default []]
   verify_gate_evidence : string list; [@default []]
+  stale_claim_timeout_sec : int; [@default 0]
   links : task_execution_links; [@default { operation_id = None; session_id = None }]
 } [@@deriving show, yojson { strict = false }]
 

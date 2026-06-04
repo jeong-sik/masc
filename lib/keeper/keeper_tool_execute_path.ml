@@ -138,10 +138,10 @@ let execution_location_json
   let cwd = normalize_repo_cwd_path cwd in
   let playground_segments = path_segments playground in
   let cwd_segments = path_segments cwd in
-  let scope, relative_segments, repo_name, repo_root, worktree_root =
+  let scope, relative_segments, repo_name, repo_root, worktree_name, worktree_root =
     match strip_segment_prefix ~prefix:playground_segments cwd_segments with
-    | None -> Outside_playground, [], None, None, None
-    | Some [] -> Playground_root, [], None, None, None
+    | None -> Outside_playground, [], None, None, None, None
+    | Some [] -> Playground_root, [], None, None, None, None
     | Some ("repos" :: repo_name :: rest)
       when Playground_repo_readiness.safe_repo_component repo_name ->
       let repo_root =
@@ -149,7 +149,8 @@ let execution_location_json
         |> normalize_repo_cwd_path
       in
       (match rest with
-       | [] -> Repo_root, [ "repos"; repo_name ], Some repo_name, Some repo_root, None
+       | [] ->
+         Repo_root, [ "repos"; repo_name ], Some repo_name, Some repo_root, None, None
        | ".worktrees" :: task_name :: tail
          when Playground_repo_readiness.safe_repo_component task_name ->
          let worktree_root =
@@ -165,14 +166,30 @@ let execution_location_json
          , [ "repos"; repo_name; ".worktrees"; task_name ] @ tail
          , Some repo_name
          , Some repo_root
+         , Some task_name
          , Some worktree_root )
-       | _ -> Repo_subpath, [ "repos"; repo_name ] @ rest, Some repo_name, Some repo_root, None)
-    | Some rest -> Playground_subpath, rest, None, None, None
+       | _ ->
+         Repo_subpath, [ "repos"; repo_name ] @ rest, Some repo_name, Some repo_root, None, None)
+    | Some rest -> Playground_subpath, rest, None, None, None, None
   in
   let relative_cwd =
     match scope with
     | Outside_playground -> `Null
     | _ -> `String (relative_path_of_segments relative_segments)
+  in
+  let selected_worktree =
+    match repo_name, repo_root, worktree_name, worktree_root with
+    | Some repo_name, Some repo_root, Some worktree_name, Some worktree_root ->
+      `Assoc
+        [ "repo_name", `String repo_name
+        ; "repo_root", `String repo_root
+        ; "worktree_name", `String worktree_name
+        ; "worktree_root", `String worktree_root
+        ; "selection_source", `String "execution_cwd"
+        ; "scope", `String (string_of_execution_location_scope scope)
+        ; "relative_cwd", relative_cwd
+        ]
+    | _ -> `Null
   in
   `Assoc
     [ "cwd", `String cwd
@@ -184,7 +201,10 @@ let execution_location_json
     ; "argv_relative_paths_resolve_against_cwd", `Bool true
     ; "repo_name", Json_util.string_opt_to_json repo_name
     ; "repo_root", Json_util.string_opt_to_json repo_root
+    ; "worktree_selected", `Bool (Option.is_some worktree_root)
+    ; "worktree_name", Json_util.string_opt_to_json worktree_name
     ; "worktree_root", Json_util.string_opt_to_json worktree_root
+    ; "selected_worktree", selected_worktree
     ]
 
 let repo_cwd_not_ready_error ~repo_name ~path_root ~git_toplevel =

@@ -30,23 +30,8 @@ type claim_goal_scope = {
   fallback_reason : string option;
 }
 
-let task_is_eligible_for_claim latest_verification_status task =
-  Workspace_task_schedule.task_is_claim_pool_candidate task
-  && not
-       (Workspace_task_schedule.verification_blocks_claim
-          latest_verification_status
-          task)
-
-let active_goal_ids_have_eligible_claim_task config goal_ids =
-  let latest_verification_status =
-    Workspace_task_schedule.latest_verification_status_by_task config
-  in
-  Workspace.get_tasks_safe config
-  |> List.exists (fun task ->
-       task_is_linked_to_keeper_goals goal_ids task
-       && task_is_eligible_for_claim latest_verification_status task)
-
 let resolve_claim_goal_scope ~(config : Workspace.config) ~(meta : keeper_meta) () =
+  ignore config;
   match meta.active_goal_ids with
   | [] ->
       {
@@ -56,26 +41,12 @@ let resolve_claim_goal_scope ~(config : Workspace.config) ~(meta : keeper_meta) 
         fallback_reason = None;
       }
   | goal_ids ->
-      let has_scoped_tasks =
-        active_goal_ids_have_eligible_claim_task config goal_ids
-      in
-      (* Advisory mode: active_goal_ids is a preference, not a hard gate.
-         Tasks outside the goal scope are claimable but the keeper receives
-         a warning in its context so it prefers goal-linked tasks. *)
-      if has_scoped_tasks then
-        {
-          task_filter = (fun (_task : Masc_domain.task) -> true);
-          mode = "active_goal_ids_advisory";
-          effective_goal_ids = goal_ids;
-          fallback_reason = None;
-        }
-      else
-        {
-          task_filter = (fun (_task : Masc_domain.task) -> true);
-          mode = "active_goal_ids_advisory";
-          effective_goal_ids = goal_ids;
-          fallback_reason = None;
-        }
+    {
+      task_filter = task_is_linked_to_keeper_goals goal_ids;
+      mode = "active_goal_ids";
+      effective_goal_ids = goal_ids;
+      fallback_reason = None;
+    }
 
 let resolve_observation_claim_goal_scope ~(config : Workspace.config)
     ~(meta : keeper_meta) () =

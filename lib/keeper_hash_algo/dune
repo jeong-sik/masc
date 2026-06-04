@@ -1,0 +1,9 @@
+(include_subdirs no)
+
+(library
+ (name masc_keeper_hash_algo)
+ (public_name masc.keeper_hash_algo)
+ (wrapped false)
+ (modules keeper_hash_algo)
+ (libraries digestif)
+ (preprocess (pps ppx_deriving.show ppx_deriving.eq)))

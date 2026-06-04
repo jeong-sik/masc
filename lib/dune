@@ -259,6 +259,8 @@
    ;; lib/keeper_state/. Parent still references bare Keeper_state_* modules.
    masc.keeper_state
    ;; Keeper-owned pure/type leaves extracted from lib/keeper/.
+   masc.keeper_hash_algo
+   masc.keeper_container_name
    masc.keeper_tool_name
    masc.keeper_id
    masc.keeper_terminal_reason

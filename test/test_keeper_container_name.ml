@@ -5,7 +5,6 @@
     that the unit-separator collision guard works. *)
 
 open Alcotest
-open Masc
 
 let make ?(algo = Keeper_hash_algo.SHA_256) ~turn_id ~attempt ~suffix () =
   Keeper_container_name.derive ~algo ~turn_id ~attempt ~suffix

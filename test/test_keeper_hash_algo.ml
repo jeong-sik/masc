@@ -5,7 +5,6 @@
     None on unknown input, [all] completeness for property tests. *)
 
 open Alcotest
-open Masc
 
 let h = Keeper_hash_algo.digest_hex
 let hb = Keeper_hash_algo.digest_bytes

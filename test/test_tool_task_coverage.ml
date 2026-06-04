@@ -70,7 +70,6 @@ let ensure_test_runtime =
 
 let install_test_hooks () =
   Atomic.set Workspace_hooks.get_default_runtime_id_fn Runtime.get_default_runtime_id;
-  Atomic.set Workspace_hooks.task_event_lines_read_fn Mcp_server.read_event_lines;
   Atomic.set Task.Handlers.record_verdict_fn
     (fun ~task_id ~req ~result () ->
        Eval_calibration.record_verdict ~task_id ~req ~result ());

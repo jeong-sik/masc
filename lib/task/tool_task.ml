@@ -193,7 +193,6 @@ and handle_transition ~tool_name ~start_time ctx args =
     | items -> Some items
   in
   let evaluator_runtime = get_string_opt args "evaluator_runtime" in
-  let handoff_context_json = Json_util.assoc_member_opt "handoff_context" args in
   let handoff_context =
     parse_handoff_context ~agent_name:ctx.agent_name ~action args
   in

@@ -37,6 +37,11 @@ val parse_string_to_ir :
 
 val dev_allowed_commands : string list
 val readonly_allowed_commands : string list
+(** Read-only executable entrypoints. Includes [git] and [gh] so read-only
+    status/log/view commands can run through the readonly Execute surface.
+    Mutating subcommands are still classified and blocked later by the Shell IR
+    risk gate when write-enabled tool access is absent. *)
+
 val is_dev_allowed : string -> bool
 val is_readonly_allowed : string -> bool
 
@@ -123,4 +128,3 @@ val promote_to_safe :
   allowed_commands:string list ->
   Masc_exec.Shell_ir.t ->
   (safe verified_ir, block_reason) result
-

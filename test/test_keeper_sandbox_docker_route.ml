@@ -1019,6 +1019,27 @@ let test_execute_git_c_bare_worktrees_from_root_uses_single_repo () =
   Alcotest.(check bool) "docker cwd uses the sole repo" true
     (contains_substring log "repos/masc")
 
+let test_execute_git_status_readonly_without_write_tool_access () =
+  setup ~tool_access:[] ~sandbox:Keeper_types_profile_sandbox.Local
+  @@ fun ~config ~meta ~playground ->
+  let repo = Filename.concat (Filename.concat playground "repos") "masc" in
+  ensure_dir repo;
+  git_ok ~cwd:repo [ "init"; "-q" ];
+  let raw =
+    Keeper_tool_command_runtime.handle_tool_execute
+      ~turn_sandbox_factory:None
+      ~exec_cache:None
+      ~config
+      ~meta
+      ~args:(tool_execute_typed_exec_args ~cwd:repo "git" ~argv:[ "status"; "--short" ])
+      ()
+  in
+  Alcotest.(check (option bool)) "git status succeeds without write access"
+    (Some true)
+    (parse_bool_field raw "ok");
+  Alcotest.(check (option bool)) "typed response" (Some true)
+    (parse_bool_field raw "typed")
+
 let test_execute_git_push_requires_write_tool_access_before_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
@@ -1040,11 +1061,8 @@ let test_execute_git_push_requires_write_tool_access_before_docker () =
   (match parse_bool_field raw "ok" with
    | Some true -> Alcotest.failf "push unexpectedly succeeded: %s" raw
    | Some false | None -> ());
-	  Alcotest.(check (option string)) "readonly allowlist before docker"
-	    (Some
-	       "executable \"git\" not in readonly allowlist. The active Execute surface is \
-	        read-only. Use Read/Grep when visible; otherwise ask for a \
-	        write/execute-capable runtime surface before using git/gh.")
+  Alcotest.(check (option string)) "readonly risk gate before docker"
+    (Some "write_operation_gated")
     (parse_string_field raw "error");
   let log = if Sys.file_exists log_path then read_file log_path else "" in
   Alcotest.(check bool) "docker container was not invoked" false
@@ -1949,6 +1967,9 @@ let () =
           Alcotest.test_case
             "docker keeper git -C bare worktree uses sole repo"
             `Quick test_execute_git_c_bare_worktrees_from_root_uses_single_repo;
+          Alcotest.test_case
+            "readonly keeper git status works without write tool_access"
+            `Quick test_execute_git_status_readonly_without_write_tool_access;
           Alcotest.test_case
             "docker keeper git push requires write tool_access"
             `Quick test_execute_git_push_requires_write_tool_access_before_docker;

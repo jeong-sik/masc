@@ -72,6 +72,7 @@ DEFAULT_LEAVES: tuple[str, ...] = (
     "masc.keeper_container_name",
     "masc.keeper_runtime_manifest_types",
     "masc.keeper_registry_types_kill_class",
+    "masc.keeper_registry_types_turn_phase",
     "masc.keeper_registry_types_decision",
     "masc.keeper_registry_types_compaction",
     "masc.keeper_tool_name",

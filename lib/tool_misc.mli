@@ -51,6 +51,7 @@ val with_web_search_simulation_for_test :
 val with_web_fetch_http_get_for_test :
   (timeout_sec:int ->
    headers:(string * string) list ->
+   max_response_bytes:int ->
    string ->
    (int option * string, string) result) ->
   (unit -> 'a) ->
@@ -68,4 +69,3 @@ val register_dashboard_handler :
    Yojson.Safe.t ->
    Tool_result.result) ->
   unit
-

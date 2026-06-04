@@ -17,8 +17,7 @@
     receive the core surface transitively via
     [include Tool_local_runtime_http].
 
-    Internal helpers ([split_http_body_and_status],
-    [append_headers]) stay private. *)
+    Internal helpers stay private. *)
 
 include module type of struct
   include Tool_local_runtime_core
@@ -46,6 +45,10 @@ val string_member : Yojson.Safe.t -> string -> string option
 val http_get_text_with_status_with_headers :
   ?timeout_sec:int ->
   ?headers:(string * string) list ->
+  ?follow_redirects:bool ->
+  ?max_redirects:int ->
+  ?compressed:bool ->
+  ?max_response_bytes:int ->
   string ->
   ((int option * string), string) Result.t
 (** [http_get_text_with_status_with_headers ?timeout_sec ?headers url]
@@ -59,8 +62,24 @@ val http_get_text_with_status_with_headers :
     [timeout_sec] defaults to 10 (floored at 1).
     [headers] defaults to [\[\]]; appended in left-to-right order
     (each pair becomes [-H "name: value"]).
+    [follow_redirects] defaults to [false]; when [true], curl follows
+    redirects up to [max_redirects] (default 3).
+    [compressed] enables curl's transparent compression handling.
+    [max_response_bytes], when set, asks curl to cap/range the response.
 
     Errors include curl exit code, signals, and stop reasons. *)
+
+val curl_get_argv_for_test :
+  ?timeout_sec:int ->
+  ?headers:(string * string) list ->
+  ?follow_redirects:bool ->
+  ?max_redirects:int ->
+  ?compressed:bool ->
+  ?max_response_bytes:int ->
+  string ->
+  string list
+
+(** Pure curl argv builder exposed for focused regression tests. *)
 
 val http_get_text_with_status :
   ?timeout_sec:int ->

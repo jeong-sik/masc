@@ -569,8 +569,9 @@ let test_public_web_fetch_alias_dispatches_to_misc_runtime () =
 </html>|}
       in
       Masc.Tool_misc.with_web_fetch_http_get_for_test
-        (fun ~timeout_sec ~headers url ->
+        (fun ~timeout_sec ~headers ~max_response_bytes url ->
           check int "timeout forwarded" 7 timeout_sec;
+          check int "max response bytes forwarded" 2_000_000 max_response_bytes;
           check string "url forwarded" requested_url url;
           check bool "user agent header present" true
             (List.exists
@@ -589,7 +590,12 @@ let test_public_web_fetch_alias_dispatches_to_misc_runtime () =
               ~name:"WebFetch"
               ~input:
                 (`Assoc
-                  [ ("url", `String requested_url); ("timeout", `Int 7) ])
+                  [
+                    ("url", `String requested_url);
+                    ("timeout", `Int 7);
+                    ("extractMode", `String "markdown");
+                    ("maxChars", `Int 200);
+                  ])
               ()
           in
           check string "web fetch alias outcome" "success"
@@ -603,14 +609,46 @@ let test_public_web_fetch_alias_dispatches_to_misc_runtime () =
             Yojson.Safe.Util.(member "url" json |> to_string);
           check int "http status" 200
             Yojson.Safe.Util.(member "http_status" json |> to_int);
+          check string "extract mode" "markdown"
+            Yojson.Safe.Util.(member "extract_mode" json |> to_string);
+          check bool "not truncated" false
+            Yojson.Safe.Util.(member "truncated" json |> to_bool);
           check string "title" "Alias Title & More"
             Yojson.Safe.Util.(member "title" json |> to_string);
           check string "description" "Alias description & detail"
             Yojson.Safe.Util.(member "description" json |> to_string);
+          check bool "heading rendered as markdown" true
+            (contains_substring
+               Yojson.Safe.Util.(member "text" json |> to_string)
+               "# Alias Fetch");
           check bool "body text cleaned" true
             (contains_substring
                Yojson.Safe.Util.(member "text" json |> to_string)
                "Body content & proof.")))
+
+let test_public_web_fetch_blocks_localhost_before_runtime () =
+  with_exec_fixture "keeper_tool_dispatch_web_fetch_blocks_localhost"
+    (fun ~config ~meta ~ctx_work ->
+      Masc.Tool_misc.with_web_fetch_http_get_for_test
+        (fun ~timeout_sec:_ ~headers:_ ~max_response_bytes:_ _url ->
+          fail "blocked URL should not reach the HTTP runtime")
+        (fun () ->
+          let result =
+            KET.execute_keeper_tool_call_with_outcome
+              ~config
+              ~meta
+              ~ctx_work
+              ~exec_cache:None
+              ~name:"WebFetch"
+              ~input:(`Assoc [ ("url", `String "http://127.0.0.1:8935/health") ])
+              ()
+          in
+          check string "web fetch local outcome" "failure"
+            (outcome_label result.outcome);
+          check string "web fetch local payload shape" "structured_error"
+            (payload_kind result.payload_shape);
+          check bool "blocked host message" true
+            (contains_substring result.raw_output "url host is blocked")))
 
 let workflow_rejection_message =
   "Invalid task state: Self-approval not allowed: verifier must be a different agent"
@@ -840,6 +878,8 @@ let () =
         test_public_web_search_alias_dispatches_to_misc_runtime;
       test_case "public WebFetch alias reaches misc runtime" `Quick
         test_public_web_fetch_alias_dispatches_to_misc_runtime;
+      test_case "public WebFetch blocks localhost before runtime" `Quick
+        test_public_web_fetch_blocks_localhost_before_runtime;
       test_case "task FSM errors require explicit failure_class" `Quick
         test_tool_result_does_not_infer_task_fsm_rejections_from_message;
       test_case "tool_result_or_error preserves failure_class" `Quick

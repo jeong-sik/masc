@@ -33,12 +33,12 @@ type stop_reason = Runtime_agent_context.stop_reason =
       turns_used : int;
       tool_name : string option;
     }
-(** Why the run terminated.  [Completed] is the success
-    path; [TurnBudgetExhausted] fires when the per-call
-    [max_turns] is hit; [MutationBoundaryReached] fires
-    when the keeper hit a mutation tool while in
-    read-only mode (the [tool_name] surfaces which tool
-    triggered the gate). *)
+(** Why this single OAS call yielded control. [Completed] is the
+    model's success path; [TurnBudgetExhausted] means the per-call
+    [max_turns] checkpoint was reached and the keeper should continue
+    from the persisted checkpoint on the next cycle; [MutationBoundaryReached]
+    fires when the keeper hit a mutation tool while in read-only mode
+    (the [tool_name] surfaces which tool triggered the gate). *)
 
 (** {1 Config} *)
 

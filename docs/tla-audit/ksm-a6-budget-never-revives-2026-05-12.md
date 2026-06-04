@@ -85,7 +85,7 @@ when a downstream consumer relies on the BudgetNeverRevives semantics
 
 ## Spec-side adjacent gap — `Restart_budget_exhausted` non-idempotency
 
-`update_conditions` at `lib/keeper/keeper_state_machine.ml:644`:
+`update_conditions` at `lib/keeper_state/keeper_state_machine.ml:644`:
 
 ```ocaml
 | Restart_budget_exhausted -> { c with restart_budget_remaining = false }
@@ -137,4 +137,4 @@ fix lands.
 - `register_restarting`: `lib/keeper/keeper_registry.ml:768-775`
 - Supervisor restart decision: `lib/keeper/keeper_supervisor.ml:1468-1473`
 - Mark-dead path: `lib/keeper/keeper_supervisor.ml:1639-1646`
-- `Restart_budget_exhausted` event handler: `lib/keeper/keeper_state_machine.ml:644`
+- `Restart_budget_exhausted` event handler: `lib/keeper_state/keeper_state_machine.ml:644`

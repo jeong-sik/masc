@@ -3,7 +3,7 @@ status: reference
 last_verified: 2026-04-17
 code_refs:
   - scripts/harness/
-  - lib/keeper/keeper_state_machine.ml
+  - lib/keeper_state/keeper_state_machine.ml
   - lib/keeper/keeper_composite_observer.ml
 ---
 

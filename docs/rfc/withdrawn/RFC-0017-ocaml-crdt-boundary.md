@@ -28,7 +28,7 @@ withdrawn_reason: "Idea never materialized. Awareness channel work (RFC-0069 ref
 
 ## 1. Problem Statement
 
-masc는 OCaml 5 + Eio 백엔드에 12-state Keeper FSM SSOT(`lib/keeper/keeper_state_machine.mli:21-37`)와 25개 TLA+ specs(`specs/keeper-state-machine/`)로 *결정론적 authoritative workspace collaboration*을 운영한다. 외부 분석 보고서(`multiagent-ide-deep-analysis.md`)와 4개 sub-agent 분석은 이 위에 **CRDT(Yjs/Loro)를 추가하라**고 권고한다 — 이때 두 동시성 모델이 한 도메인에서 만나면 다음 위험이 발생한다:
+masc는 OCaml 5 + Eio 백엔드에 12-state Keeper FSM SSOT(`lib/keeper_state/keeper_state_machine.mli:21-37`)와 25개 TLA+ specs(`specs/keeper-state-machine/`)로 *결정론적 authoritative workspace collaboration*을 운영한다. 외부 분석 보고서(`multiagent-ide-deep-analysis.md`)와 4개 sub-agent 분석은 이 위에 **CRDT(Yjs/Loro)를 추가하라**고 권고한다 — 이때 두 동시성 모델이 한 도메인에서 만나면 다음 위험이 발생한다:
 
 1. **Dual-write inconsistency**: OCaml CAS(`masc_transition(expected_version)`)와 Y.Map LWW가 동일 데이터를 양방향 쓰면, OCaml에서는 거부된 transition이 CRDT에서는 수용 → server state ↔ client view drift.
 2. **TLA+ invariant 침식**: `KeeperCompositeLifecycle.tla`이 검증하는 KSM/KTC/KDP/KMC/KCL joint invariant는 OCaml semantics 전제. Yjs Map이 같은 상태를 표현하면 spec 외부 mutation이 invariant 위반 가능.

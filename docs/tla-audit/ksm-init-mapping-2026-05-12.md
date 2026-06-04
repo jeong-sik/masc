@@ -1,7 +1,7 @@
 # KSM Init Mapping Audit (2026-05-12)
 
 **Spec**: `specs/keeper-state-machine/KeeperStateMachine.tla` (lines 19-100, VARIABLES + Init)
-**OCaml**: `lib/keeper/keeper_state_machine.ml` (lines 56-100, conditions/default_conditions) + `lib/keeper/keeper_registry.ml` (lines 750-775, register*)
+**OCaml**: `lib/keeper_state/keeper_state_machine.ml` (lines 56-100, conditions/default_conditions) + `lib/keeper/keeper_registry.ml` (lines 750-775, register*)
 **Iteration**: 1 (Phase A-1, `/loop` plan `.claude/plans/breezy-napping-sketch.md`)
 
 ## TL;DR

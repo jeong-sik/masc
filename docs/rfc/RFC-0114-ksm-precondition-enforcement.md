@@ -15,7 +15,7 @@ implementation_prs: [15939]
 
 ## §1 Problem (caller-context)
 
-`specs/keeper-state-machine/KeeperStateMachine.tla` (KSM) 는 keeper 11-state FSM 의 *각 event* 가 *발화 가능한 precondition* 을 명시함. 5 condition-setter event 중 4개가 OCaml `lib/keeper/keeper_state_machine.ml` (`apply_event` line 752-799, `update_conditions` line 540-674) 에서 **enforce 되지 않음** — `apply_event` 가 *terminal phase reject* 만 통합 enforce, 그 외 precondition 은 silent 통과.
+`specs/keeper-state-machine/KeeperStateMachine.tla` (KSM) 는 keeper 11-state FSM 의 *각 event* 가 *발화 가능한 precondition* 을 명시함. 5 condition-setter event 중 4개가 OCaml `lib/keeper_state/keeper_state_machine.ml` (`apply_event` line 752-799, `update_conditions` line 540-674) 에서 **enforce 되지 않음** — `apply_event` 가 *terminal phase reject* 만 통합 enforce, 그 외 precondition 은 silent 통과.
 
 `docs/tla-audit/ksm-precondition-enforcement-gap-2026-05-12.md` 의 gap matrix:
 

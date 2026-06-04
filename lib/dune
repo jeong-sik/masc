@@ -75,8 +75,7 @@
  keeper_persona_authoring_contract
  keeper_persona_authoring_slug
  keeper_types_profile_sandbox
- keeper_types_profile_persona
- keeper_types_profile_persona_defaults
+ keeper_types_profile_persona keeper_types_profile_persona_defaults
  keeper_types_profile_oas_env
  keeper_types_profile_defaults
  keeper_types_profile

@@ -1,7 +1,7 @@
 # KSM `derive_phase` Priority Chain Audit (2026-05-12)
 
 **Spec**: `specs/keeper-state-machine/KeeperStateMachine.tla` (lines 52-73, `DerivePhase`)
-**OCaml**: `lib/keeper/keeper_state_machine.ml` (lines 403-463, `derive_phase`)
+**OCaml**: `lib/keeper_state/keeper_state_machine.ml` (lines 403-463, `derive_phase`)
 **Iteration**: 3 (Phase A-3, `/loop` plan)
 **Cross-ref**: Iteration 1 #14694 audit (Gap-3 superset condition); Iteration 2 #14698 entry_actions refactor
 

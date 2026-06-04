@@ -176,9 +176,9 @@ MASC_BASE_PATH="$PWD" ./_build/default/bin/main_eio.exe login --json
 
 Keeper 는 장기 실행 자율 에이전트 fiber 입니다. heartbeat / checkpoint / 감독 재시작이 붙어 있고, OAS 의 `Agent.run` 호출을 turn budget 안에서 호출합니다.
 
-### 12-state Lifecycle
+### 13-state Lifecycle
 
-진실의 출처는 `lib/keeper/keeper_state_machine.mli` 의 `type state` 입니다. README 가 어긋나면 `.mli` 를 따르세요.
+진실의 출처는 `lib/keeper_state/keeper_state_machine.mli` 의 `type phase` 입니다. README 가 어긋나면 `.mli` 를 따르세요.
 
 ```
 Offline       등록됨, heartbeat fiber 아직 없음
@@ -193,9 +193,10 @@ Stopped       정상 종료 (terminal)
 Crashed       복구 불가 오류, 재시작 후보
 Restarting    supervisor backoff
 Dead          restart budget 소진 (terminal)
+Zombie        Dead 이후 terminal-terminal tombstone
 ```
 
-대략적인 흐름: `Offline → Running → {Failing | Overflowed | Compacting | HandingOff | Draining} → Paused / Stopped / Crashed → Restarting → Dead`.
+대략적인 흐름: `Offline → Running → {Failing | Overflowed | Compacting | HandingOff | Draining} → Paused / Stopped / Crashed → Restarting → Dead → Zombie`.
 
 ### Autoboot
 

@@ -407,6 +407,7 @@ function cdalHealthChip(cdal: DashboardCdalHealth | null | undefined): Dashboard
 function chipRouteFor(key: string): DashboardHealthChipRoute | undefined {
   switch (key) {
     case 'source-mismatch':
+    case 'server-workspace-split':
     case 'runtime-warning':
       return { tab: 'monitoring', params: { section: 'runtime' } }
     case 'paused-keepers':
@@ -432,12 +433,19 @@ export function dashboardHealthChips(input: DashboardHealthInput): DashboardHeal
   }
 
   const runtime = input.runtimeResolution
-  if (runtime?.source_mismatch || runtime?.server_workspace_mismatch) {
+  if (runtime?.source_mismatch) {
     chips.push({
       key: 'source-mismatch',
       label: 'Source mismatch',
       detail: 'Server, workspace, or resolved base path source differs.',
       tone: 'warn',
+    })
+  } else if (runtime?.server_workspace_mismatch) {
+    chips.push({
+      key: 'server-workspace-split',
+      label: 'Server/base split',
+      detail: 'Server binary repo differs from the dashboard base path; data still resolves from the base path.',
+      tone: 'muted',
     })
   } else if (runtime?.status && runtime.status !== 'ready') {
     chips.push({

@@ -541,12 +541,12 @@ describe('AgentRoster live-only cards', () => {
     const text = container.textContent ?? ''
     expect(text).toContain('albini')
     expect(text).toContain('keeper_tools_list')
-    expect(text).toContain('Source mismatch')
-    expect(text).toContain('agent registry 0')
+    expect(text).not.toContain('Source mismatch')
+    expect(text).not.toContain('agent registry 0')
     expect(text).not.toContain('파생')
   })
 
-  it('surfaces source mismatch on default keeper ops when agent registry is empty', async () => {
+  it('does not report source mismatch on default keeper ops when keeper projection has rows', async () => {
     agents.value = []
     keepers.value = [
       {
@@ -565,8 +565,8 @@ describe('AgentRoster live-only cards', () => {
 
     const text = container.textContent ?? ''
     expect(text).toContain('albini')
-    expect(text).toContain('Source mismatch')
-    expect(text).toContain('keeper projection 1')
+    expect(text).not.toContain('Source mismatch')
+    expect(text).not.toContain('keeper projection 1')
     expect(text).not.toContain('파생')
   })
 

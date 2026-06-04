@@ -566,7 +566,7 @@ export function hydrateDashboardSlice(slice: string, payload: unknown, eventType
 
   switch (slice) {
     case 'shell':
-      hydrateShellSnapshot(payload as DashboardShellResponse, { light: true })
+      hydrateShellSnapshot(payload as DashboardShellResponse, { light: true, preserveAuth: true })
       return
     case 'namespace':
       hydrateServerPushEvent({ type: 'project_snapshot', payload } as SSEEvent)

@@ -640,7 +640,7 @@ let pp_validation_error ppf = function
        e.g. executable=\"cat\" argv=[\"file.txt\"]"
   | Empty_argv { executable } ->
     Format.fprintf ppf "executable %S invoked with empty argv" executable
-  | Executable_repeated_in_argv0 { executable; argv = (_ :: rest as argv) } ->
+  | Executable_repeated_in_argv0 { executable; argv = _ :: rest } ->
     Format.fprintf
       ppf
       "executable %S is repeated as argv[0]; typed Execute argv contains \

@@ -9,13 +9,11 @@
 ;
 ; (include_subdirs no) opts out of parent's (include_subdirs unqualified).
 ; (wrapped false) keeps the bare `Keeper_state_*` module identifiers.
+
 (include_subdirs no)
 
 (library
  (name masc_keeper_state)
  (public_name masc.keeper_state)
  (wrapped false)
- (libraries
-  masc.attribution
-  masc_log
-  yojson))
+ (libraries masc.attribution masc_log yojson))

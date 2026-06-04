@@ -15,6 +15,6 @@
   eio
   masc.masc_log
   agent_sdk
-  agent_sdk.llm_provider
- )
- (preprocess (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq)))
+  agent_sdk.llm_provider)
+ (preprocess
+  (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq)))

@@ -1,25 +1,115 @@
 ;; Eio-native server with HTTP/2 support (OCaml 5.x Effects)
 ;; Uses h2-eio for unlimited SSE streams per connection (no browser 6-conn limit)
+
 (executable
  (name main_eio)
  (modules main_eio)
  (public_name masc)
  (package masc)
- (libraries masc masc.dashboard masc.operator masc.server masc.config masc.embedded_config masc.host_config masc.mcp_session masc.mcp_transport_protocol masc_eio_context cmdliner eio eio_main h2 h2-eio httpun-eio gluten-eio gluten httpun dune-build-info masc_core masc_types fs_compat time_compat masc_log masc_workspace masc_backend masc_process unix fmt yojson str mirage-crypto-rng.unix cohttp cohttp-eio masc.prompt_registry agent_sdk agent_sdk.llm_provider ))
+ (libraries
+  masc
+  masc.dashboard
+  masc.operator
+  masc.server
+  masc.config
+  masc.embedded_config
+  masc.host_config
+  masc.mcp_session
+  masc.mcp_transport_protocol
+  masc_eio_context
+  cmdliner
+  eio
+  eio_main
+  h2
+  h2-eio
+  httpun-eio
+  gluten-eio
+  gluten
+  httpun
+  dune-build-info
+  masc_core
+  masc_types
+  fs_compat
+  time_compat
+  masc_log
+  masc_workspace
+  masc_backend
+  masc_process
+  unix
+  fmt
+  yojson
+  str
+  mirage-crypto-rng.unix
+  cohttp
+  cohttp-eio
+  masc.prompt_registry
+  agent_sdk
+  agent_sdk.llm_provider))
 
 (executable
  (name main_stdio_eio)
  (modules main_stdio_eio)
  (public_name masc-stdio)
  (package masc)
- (libraries masc masc.server masc_core cmdliner eio eio_main mirage-crypto-rng.unix dune-build-info masc_types fs_compat time_compat masc_log masc_workspace masc_backend masc_process masc_eio_context unix fmt yojson str httpun cohttp cohttp-eio masc.prompt_registry masc.mcp_transport_protocol agent_sdk agent_sdk.llm_provider ))
+ (libraries
+  masc
+  masc.server
+  masc_core
+  cmdliner
+  eio
+  eio_main
+  mirage-crypto-rng.unix
+  dune-build-info
+  masc_types
+  fs_compat
+  time_compat
+  masc_log
+  masc_workspace
+  masc_backend
+  masc_process
+  masc_eio_context
+  unix
+  fmt
+  yojson
+  str
+  httpun
+  cohttp
+  cohttp-eio
+  masc.prompt_registry
+  masc.mcp_transport_protocol
+  agent_sdk
+  agent_sdk.llm_provider))
 
 (executable
  (name masc_cost)
  (modules masc_cost)
  (public_name masc-cost)
  (package masc)
- (libraries masc masc_core unix yojson masc_types fs_compat time_compat masc_log masc_workspace masc_backend masc_process masc_eio_context fmt str eio_main eio mirage-crypto-rng.unix httpun cohttp cohttp-eio masc.prompt_registry masc.mcp_transport_protocol agent_sdk agent_sdk.llm_provider ))
+ (libraries
+  masc
+  masc_core
+  unix
+  yojson
+  masc_types
+  fs_compat
+  time_compat
+  masc_log
+  masc_workspace
+  masc_backend
+  masc_process
+  masc_eio_context
+  fmt
+  str
+  eio_main
+  eio
+  mirage-crypto-rng.unix
+  httpun
+  cohttp
+  cohttp-eio
+  masc.prompt_registry
+  masc.mcp_transport_protocol
+  agent_sdk
+  agent_sdk.llm_provider))
 
 (executable
  (name public_tool_manifest)
@@ -32,12 +122,14 @@
 ;; Env knob catalog generator (#10733):
 ;;   regenerates docs/runtime-tunables.md from lib/config/env_config_*.ml.
 ;;   CI gate ensures the catalog stays in sync with the source.
+
 (executable
  (name env_knob_catalog)
  (modules env_knob_catalog)
  (libraries str))
 
 ;; Compaction audit CLI: inspect .masc/data/harness-compact/ JSONL
+
 (executable
  (name masc_compaction_audit)
  (modules masc_compaction_audit)
@@ -47,6 +139,7 @@
 
 ;; Read-only keeper feature proof CLI: renders the same JSON as
 ;; /api/v1/dashboard/keeper-feature-proof without starting a server.
+
 (executable
  (name keeper_feature_proof_report)
  (modules keeper_feature_proof_report)
@@ -55,6 +148,7 @@
  (libraries masc masc.dashboard masc_core fs_compat unix yojson eio eio_main))
 
 ;; TLA+ trace converter: JSONL -> TraceData.tla
+
 (executable
  (name trace_to_tla)
  (modules trace_to_tla)
@@ -64,6 +158,7 @@
 ;; Reads execution-receipts JSONL and prints rows matching the turn_id.
 ;; Foundation for the Step 10 turn-tracing CLI; widens to tool_calls
 ;; and system_log in follow-up stacks.
+
 (executable
  (name masc_trace)
  (modules masc_trace)
@@ -72,25 +167,85 @@
  (libraries yojson))
 
 ;; TUI Dashboard - Terminal interface for multi-agent workspace
+
 (executable
  (name masc_tui)
- (modules masc_tui masc_tui_types masc_tui_ansi masc_tui_render masc_tui_loader)
+ (modules
+  masc_tui
+  masc_tui_types
+  masc_tui_ansi
+  masc_tui_render
+  masc_tui_loader)
  (public_name masc-tui)
  (package masc)
- (libraries masc masc.dashboard masc.server masc.config unix yojson masc_core masc_types fs_compat time_compat masc_log masc_workspace masc_backend masc_process masc_eio_context fmt str eio_main eio mirage-crypto-rng.unix httpun cohttp cohttp-eio masc.prompt_registry masc.mcp_transport_protocol agent_sdk agent_sdk.llm_provider ))
+ (libraries
+  masc
+  masc.dashboard
+  masc.server
+  masc.config
+  unix
+  yojson
+  masc_core
+  masc_types
+  fs_compat
+  time_compat
+  masc_log
+  masc_workspace
+  masc_backend
+  masc_process
+  masc_eio_context
+  fmt
+  str
+  eio_main
+  eio
+  mirage-crypto-rng.unix
+  httpun
+  cohttp
+  cohttp-eio
+  masc.prompt_registry
+  masc.mcp_transport_protocol
+  agent_sdk
+  agent_sdk.llm_provider))
 
 (executable
  (name masc_worker_run)
  (modules masc_worker_run)
  (public_name masc-worker-run)
  (package masc)
- (libraries masc masc.dashboard masc.server yojson unix eio_main eio masc_core masc_types fs_compat time_compat masc_log masc_workspace masc_backend masc_process masc_eio_context fmt str mirage-crypto-rng.unix httpun cohttp cohttp-eio masc.prompt_registry masc.mcp_transport_protocol agent_sdk agent_sdk.llm_provider ))
+ (libraries
+  masc
+  masc.dashboard
+  masc.server
+  yojson
+  unix
+  eio_main
+  eio
+  masc_core
+  masc_types
+  fs_compat
+  time_compat
+  masc_log
+  masc_workspace
+  masc_backend
+  masc_process
+  masc_eio_context
+  fmt
+  str
+  mirage-crypto-rng.unix
+  httpun
+  cohttp
+  cohttp-eio
+  masc.prompt_registry
+  masc.mcp_transport_protocol
+  agent_sdk
+  agent_sdk.llm_provider))
 
 ; RFC-0054 POC — kept as historical regression marker. Same generator
 ; logic as bin/gen_shell_ir_walkers.ml below, but on a synthetic
 ; 3-constructor GADT. test/poc_shell_ir/ proves the codegen approach
 ; works on the same 4-parameter shape that broke under ppxlib in
 ; PR-1 / PR-1b.
+
 (executable
  (name poc_shell_ir_gen)
  (modules poc_shell_ir_gen))
@@ -99,6 +254,7 @@
 ; Hardcoded 9-constructor spec mirrors shell_ir_typed.{ml,mli} order.
 ; Stdlib-only — no ppxlib, no AST manipulation. Output goes through
 ; lib/exec/dune (rule ...) to shell_ir_typed_walkers_gen.ml.
+
 (executable
  (name gen_shell_ir_walkers)
  (modules gen_shell_ir_walkers))
@@ -107,6 +263,7 @@
 ; Depends on tool_schemas_specs (types-only sibling library) to share
 ; spec records with future schema-lint / doc-gen tooling. The cycle is
 ; avoided because tool_schemas_specs does not depend on masc_tool_schemas.
+
 (executable
  (name gen_tool_descriptors)
  (modules gen_tool_descriptors)

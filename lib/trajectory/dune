@@ -12,18 +12,13 @@
 ; for ~50 bare callers across lib/ + bin/ + test/. The 26 wrapped-pattern
 ; callers (Masc.Trajectory.X in tests) drop the prefix per RFC-0056
 ; PoC §4.1 (G5 budget = qualifier-removal only).
+
 (include_subdirs no)
 
 (library
  (name masc_trajectory)
  (public_name masc.trajectory)
  (wrapped false)
- (flags (:standard -w +4))
- (libraries
-  unix
-  eio
-  yojson
-  fs_compat
-  time_compat
-  masc_core
-  masc_log))
+ (flags
+  (:standard -w +4))
+ (libraries unix eio yojson fs_compat time_compat masc_core masc_log))

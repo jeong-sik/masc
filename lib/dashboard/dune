@@ -140,7 +140,8 @@
   masc.resilience
   masc.multimodal
   masc.repo_manager
-  masc.parse_outcome
- )
- (preprocess (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq ppx_let ppx_tla))
- (instrumentation (backend bisect_ppx)))
+  masc.parse_outcome)
+ (preprocess
+  (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq ppx_let ppx_tla))
+ (instrumentation
+  (backend bisect_ppx)))

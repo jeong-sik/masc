@@ -14,5 +14,4 @@
 (library
  (name ast_grep)
  (wrapped false)
- (libraries
-  compiler-libs.common))
+ (libraries compiler-libs.common))

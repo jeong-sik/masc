@@ -6,5 +6,6 @@
  (modules response)
  (wrapped false)
  ; RFC-0071 §3.4 Phase 5 ratchet (warning 4)
- (flags (:standard -w +4))
+ (flags
+  (:standard -w +4))
  (libraries yojson time_compat masc_types))

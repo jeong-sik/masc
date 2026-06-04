@@ -5,6 +5,7 @@
 ; types and the manual envelope wrap.  Callers will replace
 ; runtime_event_bridge.native_event_to_json arms with these
 ; constructors in PR-2 (agent_started/completed/failed migration).
+
 (library
  (name sse_event)
  (public_name masc.sse_event)
@@ -13,9 +14,11 @@
 (rule
  (targets sse_event_t.ml sse_event_t.mli)
  (deps sse_event.atd)
- (action (run atdgen -t %{deps})))
+ (action
+  (run atdgen -t %{deps})))
 
 (rule
  (targets sse_event_j.ml sse_event_j.mli)
  (deps sse_event.atd)
- (action (run atdgen -j -j-std %{deps})))
+ (action
+  (run atdgen -j -j-std %{deps})))

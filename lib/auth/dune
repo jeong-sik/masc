@@ -20,6 +20,6 @@
   masc.fs_compat
   masc.masc_log
   time_compat
-  masc.prometheus
- )
- (preprocess (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq)))
+  masc.prometheus)
+ (preprocess
+  (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq)))

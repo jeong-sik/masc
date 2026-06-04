@@ -162,10 +162,9 @@ only to pre-empt that misattribution.
 
 The first cluster cannot extract as a pure leaf today because no cluster has
 zero flat-ns fan-out (§5 table). The pre-work is: relocate or invert the
-handful of flat-ns refs that are **not** of the cluster's own domain (a
-credential sub-lib must not reach `Masc_oas_bridge`). That inversion — callback
-or interface, per the dependency-direction rule — is a separate PR that ships
-*before* the `dune` stanza.
+handful of remaining flat-ns refs that are **not** ready to live in the
+credential sub-lib. That inversion — callback, relocation, or interface, per
+the dependency-direction rule — ships *before* the `dune` stanza.
 
 First code slice after the residual rename: remove stale persona-authoring
 runtime selection. Keeper TOML already fail-loud rejects `keeper.runtime_id` /
@@ -180,6 +179,11 @@ Follow-up credential pre-work narrows persona authoring away from the flat
 normalizer and persona-placeholder modules directly, keeping the same behavior
 while removing a non-domain facade dependency from the first cluster.
 
+The file-write path also no longer reaches `Keeper_fs`: persona authoring is
+not a hot keeper runtime path, so it can create the persona profile directory
+with `Fs_compat.mkdir_p` and write JSON through `Fs_compat.save_file_atomic`
+without importing the keeper filesystem metrics/cache module.
+
 ## 5. Extraction sequence
 
 Candidate clusters and their re-measured **flat-ns fan-out** (the G1 metric).
@@ -187,7 +191,7 @@ Fan-in is shown for context but does not gate extraction.
 
 | Order | Cluster | Modules | flat-ns fan-out (G1 blockers) | Distinct flat-ns refs |
 |---|---|---|---|---|
-| 1 | credential (`keeper_persona_authoring*`) | 3 | **3** | `Agent_sdk_response`, `Approval_callbacks`, `Masc_oas_bridge` |
+| 1 | credential (`keeper_persona_authoring*`) | 3 | **3** | `Keeper_config`, `Keeper_types_profile_persona`, `Keeper_types_profile_toml_normalizers` |
 | 2 | registry (`keeper_registry_*`) | 19 | 6 | `Admission_queue`, `Governance_registry`, `Prometheus`, `Runtime_params`, `Shutdown`, `Sse` |
 | 3 | error-classify (`*failure*`, `*error_class*`) | 31 | 6 | `Governance_registry`, `Prometheus`, `Runtime_params`, `Shutdown`, `Telemetry_coverage_gap`, `Workspace` |
 | 4 | runtime-binding (`keeper_heartbeat*`/`keeper_runtime*`/`keeper_attempt*`) | 30 | 6 | `Governance_registry`, `Prometheus`, `Runtime_params`, `Sse`, `Telemetry_coverage_gap`, `Workspace` |
@@ -198,14 +202,16 @@ Fan-in is shown for context but does not gate extraction.
 
 **Recommended first extraction: credential (`keeper_persona_authoring*`).**
 It is the smallest *decoupling surface* — 3 modules, 3 flat-ns refs to invert.
-But note the honest caveat: those 3 refs (`Agent_sdk_response`,
-`Approval_callbacks`, `Masc_oas_bridge`) are **not** credential-domain, so they
-cannot move into the credential sub-lib; they must be inverted (callback /
-interface) in a pre-work PR (§4.3) before the `dune` stanza. Clusters 2–4 have
-fan-out dominated by shared infra (`Prometheus`, `Governance_registry`,
-`Runtime_params`, `Sse`), which is harder to invert because it is genuinely
-cross-cutting. Credential's 3 refs are point fixes; the infra refs are systemic.
-That asymmetry — not fan-in — is why credential goes first.
+As of the credential pre-work stack, those direct refs are profile/config
+support (`Keeper_config`, `Keeper_types_profile_persona`,
+`Keeper_types_profile_toml_normalizers`), not the older OAS/approval bridge
+refs. The remaining work is therefore to decide which profile support belongs
+inside the credential extraction unit and which parts should move behind a
+smaller interface before the `dune` stanza. Clusters 2–4 have fan-out dominated
+by shared infra (`Prometheus`, `Governance_registry`, `Runtime_params`, `Sse`),
+which is harder to invert because it is genuinely cross-cutting. Credential's
+refs are point fixes; the infra refs are systemic. That asymmetry — not fan-in
+— is why credential goes first.
 
 If the §4.3 inversion proves larger than a single PR, registry (cluster 2) is
 the fallback first move: its 6 refs are all shared-infra modules that several

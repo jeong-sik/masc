@@ -523,9 +523,9 @@ let normalize_profile ~handle profile =
            (Json_util.kind_name other)))
 ;;
 
-let ensure_personas_root root =
+let ensure_persona_profile_dir profile_path =
   try
-    ignore (Keeper_fs.ensure_dir root);
+    Fs_compat.mkdir_p (Filename.dirname profile_path);
     Ok ()
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -556,8 +556,12 @@ let save_persona ?(overwrite = false) ?(dry_run = false) ~handle profile
         ; warnings = []
         }
     else
-      Result.bind (ensure_personas_root root) (fun () ->
-        match Keeper_fs.save_json_atomic profile_path normalized with
+      Result.bind (ensure_persona_profile_dir profile_path) (fun () ->
+        match
+          Fs_compat.save_file_atomic
+            profile_path
+            (Yojson.Safe.pretty_to_string normalized)
+        with
         | Error msg -> Error msg
         | Ok () ->
           Config_dir_resolver.reset ();

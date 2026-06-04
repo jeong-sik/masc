@@ -143,25 +143,6 @@ let inline_err_workflow ~tool_name ~start_time msg : Tool_result.result =
     msg
 ;;
 
-let approval_error_message (json : Yojson.Safe.t) =
-  match json with
-  | `Assoc fields ->
-      (match List.assoc_opt "error" fields with
-       | Some (`String msg) -> Some msg
-       | Some value -> Some (Yojson.Safe.to_string value)
-       | None -> None)
-  | _ -> None
-;;
-
-let inline_approval_result ~tool_name ~start_time body =
-  match Tool_result.structured_payload_of_message body with
-  | Some json ->
-      (match approval_error_message json with
-       | Some msg -> inline_err_workflow ~tool_name ~start_time msg
-       | None -> inline_ok ~tool_name ~start_time body)
-  | None -> inline_ok ~tool_name ~start_time body
-;;
-
 (** Dispatch a tool call.
     Returns [Some (Tool_result.result)] if the tool name is handled,
     [None] if the tool name is not recognized by this module. *)
@@ -213,15 +194,11 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.result option =
 
   (* ── Approval queue (#5907) ─────────────────────────────────── *)
   | "masc_approval_pending" | "masc_approval_get" | "masc_approval_resolve" ->
-      (match !Approval_dispatch_ref.dispatch ~name ~args:arguments with
-       | Some body ->
-           Some (inline_approval_result ~tool_name:name ~start_time:start body)
-       | None ->
-           Some
-             (inline_err_workflow
-                ~tool_name:name
-                ~start_time:start
-                "approval dispatch is not registered"))
+      Some
+        (Approval_queue_handlers.handle
+           ~tool_name:name
+           ~start_time:start
+           arguments)
 
   (* Verification tools removed: pruned *)
 

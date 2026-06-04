@@ -46,11 +46,11 @@ let dispatch config name =
     ~tag:Tool_dispatch.Mod_control
     ~name ~args:(`Assoc [])
 
-let dispatch_inline config name =
+let dispatch_inline ?(args = `Assoc []) config name =
   Keeper_tag_dispatch.dispatch
     ~config ~agent_name:"test-keeper"
     ~tag:Tool_dispatch.Mod_inline
-    ~name ~args:(`Assoc [])
+    ~name ~args
 
 (* masc_pause_status is read-only — should be allowed. *)
 let test_pause_status_allowed () =
@@ -100,6 +100,66 @@ let test_approval_pending_inline_allowed () =
     | None ->
         fail "masc_approval_pending returned None")
 
+let test_approval_get_missing_id_inline_rejected () =
+  let tr =
+    Approval_queue_handlers.handle
+      ~tool_name:"masc_approval_get"
+      ~start_time:0.0
+      (`Assoc [])
+  in
+  if Tool_result.is_success tr
+  then fail "masc_approval_get should reject missing id"
+  else check string "message" "id is required" (Tool_result.message tr)
+
+let test_approval_get_not_found_inline_rejected () =
+  let args = `Assoc [ "id", `String "appr_missing" ] in
+  let tr =
+    Approval_queue_handlers.handle
+      ~tool_name:"masc_approval_get"
+      ~start_time:0.0
+      args
+  in
+  if Tool_result.is_success tr
+  then fail "masc_approval_get should reject unknown id"
+  else
+    check bool "message mentions not found" true
+      (contains_substring (Tool_result.message tr) "no longer pending")
+
+let test_approval_resolve_inline_allowed () =
+  with_workspace (fun config ->
+    let resolved = ref None in
+    let id =
+      Keeper_approval_queue.submit_pending
+        ~keeper_name:"test-keeper"
+        ~tool_name:"tool_edit_file"
+        ~input:(`Assoc [ "path", `String "demo.txt" ])
+        ~risk_level:Keeper_approval_queue.Critical
+        ~base_path:config.base_path
+        ~on_resolution:(fun decision -> resolved := Some decision)
+        ()
+    in
+    let args =
+      `Assoc [ "id", `String id; "decision", `String "approve" ]
+    in
+    let tr =
+      Approval_queue_handlers.handle
+        ~tool_name:"masc_approval_resolve"
+        ~start_time:0.0
+        args
+    in
+    if Tool_result.is_success tr
+    then
+        (match !resolved with
+         | Some Agent_sdk.Hooks.Approve -> ()
+         | Some (Agent_sdk.Hooks.Reject reason) ->
+             fail (Printf.sprintf "expected approve, got reject: %s" reason)
+         | Some (Agent_sdk.Hooks.Edit _) ->
+             fail "expected approve, got edit"
+         | None -> fail "approval callback was not invoked")
+    else
+      fail (Printf.sprintf "masc_approval_resolve should succeed: %s"
+        (Tool_result.message tr)))
+
 let test_other_inline_blocked () =
   with_workspace (fun config ->
     match dispatch_inline config "masc_agents" with
@@ -122,5 +182,13 @@ let () =
       test_case "masc_approval_pending allowed" `Quick
         test_approval_pending_inline_allowed;
       test_case "other inline tools blocked" `Quick test_other_inline_blocked;
+    ];
+    "Approval handler", [
+      test_case "masc_approval_get missing id rejected" `Quick
+        test_approval_get_missing_id_inline_rejected;
+      test_case "masc_approval_get not found rejected" `Quick
+        test_approval_get_not_found_inline_rejected;
+      test_case "masc_approval_resolve allowed" `Quick
+        test_approval_resolve_inline_allowed;
     ];
   ]

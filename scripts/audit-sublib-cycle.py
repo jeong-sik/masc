@@ -82,6 +82,7 @@ DEFAULT_LEAVES: tuple[str, ...] = (
     "masc.local_runtime_pool",
     "masc.worker_execution_backend",
     "masc.worker_runtime_config",
+    "masc.worker_execution_spec",
     # Keeper-owned pure/type leaves extracted from lib/keeper/.
     "masc.keeper_accountability_claim_types",
     "masc.keeper_runtime_manifest_types",

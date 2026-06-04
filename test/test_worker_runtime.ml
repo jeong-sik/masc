@@ -170,7 +170,7 @@ let test_run_worker_oas_rejects_invalid_explicit_model_label () =
     ~finally:(fun () -> Time_compat.clear_clock ())
     (fun () ->
       Eio.Switch.run @@ fun sw ->
-      let spec : Lib.Worker_execution_spec.t =
+      let spec : Worker_execution_spec.t =
         {
           base_path = root;
           worker_name = "worker-local";
@@ -209,7 +209,7 @@ let test_worker_execution_spec_rejects_removed_fields () =
   "allowed_tools": ["masc_status"]
 }|}
   in
-  match Lib.Worker_execution_spec.of_yojson json with
+  match Worker_execution_spec.of_yojson json with
   | Ok _ -> fail "expected removed worker spec field to be rejected"
   | Error msg ->
       check bool "mentions removed field" true

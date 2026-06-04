@@ -88,7 +88,6 @@
   keeper_run_tools_hooks
   keeper_run_tools_search
   keeper_run_tools_setup
-  voice_bridge_transport
   keeper_turn_driver_provider_attempt
   keeper_turn_driver
   keeper_turn_driver_helpers
@@ -253,6 +252,7 @@
    masc.otel_dispatch_hook
    masc.voice_config
    masc.voice_runtime_overlay
+   masc.voice_bridge_core
    masc.discovery_cache
    masc.local_runtime_pool
    masc.worker_execution_backend

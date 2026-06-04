@@ -1,0 +1,21 @@
+(include_subdirs no)
+
+(library
+ (name voice_bridge_core)
+ (public_name masc.voice_bridge_core)
+ (wrapped false)
+ (modules voice_bridge_core voice_bridge_transport)
+ (libraries
+  eio
+  fs_compat
+  masc.config
+  masc.host_config
+  masc.masc_exec
+  masc.voice_config
+  masc.voice_runtime_overlay
+  masc_core
+  masc_log
+  time_compat
+  unix
+  uri
+  yojson))

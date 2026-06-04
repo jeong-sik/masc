@@ -78,6 +78,7 @@ DEFAULT_LEAVES: tuple[str, ...] = (
     "masc.otel_dispatch_hook",
     "masc.voice_config",
     "masc.voice_runtime_overlay",
+    "masc.voice_bridge_core",
     "masc.discovery_cache",
     "masc.local_runtime_pool",
     "masc.worker_execution_backend",

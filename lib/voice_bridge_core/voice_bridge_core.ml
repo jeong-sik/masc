@@ -329,15 +329,22 @@ let elevenlabs_voice_ids = [
 
 let trim_opt = Env_config_core.trim_opt
 
+let rec find_git_root_from path =
+  let git_path = Filename.concat path ".git" in
+  if Sys.file_exists git_path then Some path
+  else
+    let parent = Filename.dirname path in
+    if String.equal parent path then None else find_git_root_from parent
+
 (** Ensure .masc/audio/ directory exists *)
 let resolved_base_path_opt () =
   match (Host_config.from_env ()).base_path with
   | Some path -> Some path
-  | None -> Workspace_utils_backend_setup.find_git_root (Sys.getcwd ())
+  | None -> find_git_root_from (Sys.getcwd ())
 
 let masc_base_dir () =
   match resolved_base_path_opt () with
-  | Some base_path -> Workspace_utils.masc_dir_from_base_path ~base_path
+  | Some base_path -> Common.masc_dir_from_base_path ~base_path
   | None -> Common.masc_dirname
 
 let ensure_audio_dir () =

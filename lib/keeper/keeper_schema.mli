@@ -3,9 +3,6 @@
     Builds tool-input JSON schemas exposed by [tool_keeper_*] handlers and
     the dashboard authoring surface. *)
 
-module Persona_contract = Keeper_persona_authoring_contract
-(** Authoring contract used to derive the persona axis schemas. *)
-
 val network_mode_enum_strings : string list
 (** Allowed values for explicit sandbox-management tool inputs. *)
 
@@ -15,9 +12,6 @@ val tail_order_enum_strings : string list
 
 val string_array_schema : Yojson.Safe.t
 (** JSON schema fragment for a free-form [string list] field. *)
-
-val persona_axis_schema : Persona_contract.archetype_axis -> Yojson.Safe.t
-(** Schema fragment for one archetype axis (ranged enum + description). *)
 
 val tool_access_schema : string -> Yojson.Safe.t
 (** Schema fragment for [meta.tool_access] (string-array tool allowlist);

@@ -739,6 +739,108 @@ let dashboard_runtime_probe_http_json ?(force = false) () =
     ]
 ;;
 
+let runtime_inventory_source = "runtime.toml"
+
+let runtime_endpoint_url_of_transport = function
+  | Runtime_schema.Http url -> Some url
+  | Runtime_schema.Cli _ -> None
+;;
+
+let runtime_transport_string = function
+  | Runtime_schema.Http _ -> "http"
+  | Runtime_schema.Cli _ -> "cli"
+;;
+
+let runtime_http_transport_is_loopback url =
+  Uri.of_string url |> Uri.host |> Masc_network_defaults.is_loopback_host_opt
+;;
+
+let runtime_kind_of_transport = function
+  | Runtime_schema.Cli _ -> "cli"
+  | Runtime_schema.Http url when runtime_http_transport_is_loopback url -> "local"
+  | Runtime_schema.Http _ -> "http"
+;;
+
+let runtime_dashboard_kind_of_runtime_kind = function
+  | "local" -> "local"
+  | "cli" -> "cli"
+  | _ -> "cloud"
+;;
+
+let runtime_auth_kind_of_credential = function
+  | None -> "none"
+  | Some (Runtime_schema.Env key) -> "env:" ^ key
+  | Some (Runtime_schema.File path) -> "file:" ^ path
+  | Some (Runtime_schema.Inline _) -> "inline"
+;;
+
+let runtime_default_runtime_id () =
+  Runtime.get_default_runtime () |> Option.map (fun (rt : Runtime.t) -> rt.id)
+;;
+
+let runtime_inventory_entry_json ~default_id (rt : Runtime.t) =
+  let runtime_kind = runtime_kind_of_transport rt.provider.transport in
+  let models = [ rt.model.api_name ] in
+  `Assoc
+    [ "provider", `String rt.id
+    ; "runtime_id", `String rt.id
+    ; "provider_id", `String rt.provider.id
+    ; "provider_display_name", `String rt.provider.display_name
+    ; "model_id", `String rt.model.id
+    ; "model_api_name", `String rt.model.api_name
+    ; "protocol", `String rt.provider.protocol
+    ; "transport", `String (runtime_transport_string rt.provider.transport)
+    ; "kind", `String (runtime_dashboard_kind_of_runtime_kind runtime_kind)
+    ; "runtime_kind", `String runtime_kind
+    ; "auth_kind", `String (runtime_auth_kind_of_credential rt.provider.credentials)
+    ; "status", `String "configured"
+    ; "available", `Bool true
+    ; "is_default_runtime", `Bool (Option.equal String.equal default_id (Some rt.id))
+    ; "max_context", `Int rt.model.max_context
+    ; "tools_support", `Bool rt.model.tools_support
+    ; "streaming", `Bool rt.model.streaming
+    ; "model_count", `Int (List.length models)
+    ; "models", Json_util.json_string_list models
+    ; "source", `String runtime_inventory_source
+    ; "endpoint_url", Json_util.string_opt_to_json (runtime_endpoint_url_of_transport rt.provider.transport)
+    ; "note", `Null
+    ]
+;;
+
+let runtime_unique_count values =
+  values |> List.sort_uniq String.compare |> List.length
+;;
+
+let runtime_inventory_json () =
+  let runtimes = Runtime.get_runtimes () in
+  let default_id = runtime_default_runtime_id () in
+  let kind_of_runtime (rt : Runtime.t) =
+    runtime_kind_of_transport rt.provider.transport
+    |> runtime_dashboard_kind_of_runtime_kind
+  in
+  let count_models kind =
+    runtimes
+    |> List.filter (fun rt -> String.equal (kind_of_runtime rt) kind)
+    |> List.length
+  in
+  let provider_ids = List.map (fun (rt : Runtime.t) -> rt.provider.id) runtimes in
+  `Assoc
+    [ "updated_at", `String (Masc_domain.now_iso ())
+    ; "source", `String runtime_inventory_source
+    ; "config_path", Json_util.string_opt_to_json (Runtime.config_path ())
+    ; ( "summary"
+      , `Assoc
+          [ "providers", `Int (runtime_unique_count provider_ids)
+          ; "runtimes", `Int (List.length runtimes)
+          ; "local_models", `Int (count_models "local")
+          ; "cloud_models", `Int (count_models "cloud")
+          ; "cli_models", `Int (count_models "cli")
+          ; "default_runtime_id", Json_util.string_opt_to_json default_id
+          ] )
+    ; "providers", `List (List.map (runtime_inventory_entry_json ~default_id) runtimes)
+    ]
+;;
+
 let runtime_resolution_json (config : Workspace.config) =
   let build = Build_identity.current () in
   let runtime_commit = build.binary_commit in

@@ -1,9 +1,8 @@
 (** Shared persona authoring contract.
 
-    The persona generator schema, persona schema explanation, and
-    generation logic must agree on archetype choices, choice effects,
-    and draft defaults. Keep those values here so adding or renaming
-    a choice is one edit instead of a schema/runtime mirror. *)
+    The persona schema explanation and validation helpers must agree on
+    archetype choices and choice effects. Keep those values here so adding or
+    renaming a choice is one edit instead of a schema/runtime mirror. *)
 
 type archetype_choice_effect =
   { value : string
@@ -18,16 +17,6 @@ type archetype_axis =
   ; effect_text : string
   ; schema_description : string
   }
-
-(** {1 Generation defaults} *)
-
-val default_generation_language : string
-val default_generation_runtime_id : string Lazy.t
-(** Lazy: resolves the default runtime id on first force, after
-    [Runtime.init_default] has run at startup. *)
-val default_temperature : float
-val default_max_tokens : int
-val default_generation_proactive_enabled : bool
 
 (** {1 JSON helpers} *)
 

@@ -8,8 +8,7 @@
 (* #7883 *)
 
 (** Always-approve callback for system-level OAS runs that MASC has
-    already decided to trust (judges, auto_responder,
-    anti_rationalization, OpenAI-compat bridge).
+    already decided to trust (judges and anti_rationalization).
     Unreachable-by-policy tool calls will be accepted here — install only
     where the trust decision is made at the call site. *)
 let auto_approve : Agent_sdk.Hooks.approval_callback =

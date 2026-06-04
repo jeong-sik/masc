@@ -156,7 +156,6 @@ else
     mkdir -p "$RUNTIME_ROOT" "$LOG_DIR"
 
     MASC_ORCHESTRATOR_ENABLED=0 \
-    MASC_AUTO_RESPOND=true \
     MASC_CONFIG_DIR="${MASC_CONFIG_DIR:-$BASE_PATH/.masc/config}" \
         nohup "$RELEASE_EXE" \
             --port="$PROD_PORT" \
@@ -206,7 +205,6 @@ else
                 set -a; source "$HOME/.zshenv" 2>/dev/null || true; set +a
             fi
             MASC_ORCHESTRATOR_ENABLED=0 \
-            MASC_AUTO_RESPOND=true \
             MASC_CONFIG_DIR="${MASC_CONFIG_DIR:-$BASE_PATH/.masc/config}" \
                 nohup "$RELEASE_EXE" \
                     --port="$PROD_PORT" \

@@ -58,7 +58,6 @@
   test_streamable_http_upgrade
   test_mcp_session_id_header
   test_keeper_sdk_error_typed_bridge
-  test_openai_compat_error_map
   test_read_drop_reason
   test_log_ring_encoder
   test_eio_context_fiber_local
@@ -316,7 +315,6 @@
   test_streamable_http_upgrade
   test_mcp_session_id_header
   test_keeper_sdk_error_typed_bridge
-  test_openai_compat_error_map
   test_read_drop_reason
   test_log_ring_encoder
   test_eio_context_fiber_local
@@ -1038,7 +1036,6 @@
   test_http_server_eio_coverage
   test_telemetry_eio_coverage
   test_workspace_git_coverage
-  test_auto_responder_coverage
   test_tool_plan_coverage
   test_tool_agent_coverage
   test_tool_task_coverage
@@ -1085,7 +1082,6 @@
   test_http_server_eio_coverage
   test_telemetry_eio_coverage
   test_workspace_git_coverage
-  test_auto_responder_coverage
   test_tool_plan_coverage
   test_tool_agent_coverage
   test_tool_task_coverage
@@ -1837,13 +1833,6 @@
  (libraries alcotest))
 
 
-
-; RFC-0085 PR-2 — auto_responder log path absorbed into Host_config.log_dir.
-
-(test
- (name test_rfc_0085_pr2_auto_responder_log_dir)
- (modules test_rfc_0085_pr2_auto_responder_log_dir)
- (libraries alcotest ast_grep))
 
 ; RFC-0085 PR-3 — server runtime PID lock absorbed into Host_config.run_dir,
 ; and server bootstrap kept free of provider-specific OAS policy wiring.

@@ -153,7 +153,6 @@ let test_permissions_promoted_to_metadata_ssot () =
       ("masc_runtime_verify", Masc_domain.CanReadState);
       ("masc_persona_list", Masc_domain.CanReadState);
       ("masc_persona_schema", Masc_domain.CanReadState);
-      ("masc_persona_generate", Masc_domain.CanBroadcast);
       ("masc_persona_save", Masc_domain.CanBroadcast);
       ("masc_keeper_reset", Masc_domain.CanBroadcast);
       ("masc_start", Masc_domain.CanBroadcast);

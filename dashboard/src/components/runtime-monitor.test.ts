@@ -27,24 +27,35 @@ describe('RuntimeMonitor', () => {
       updated_at: '2026-05-13T13:00:00Z',
       summary: {
         providers: 1,
+        runtimes: 1,
         local_models: 0,
         cloud_models: 1,
         cli_models: 0,
+        default_runtime_id: 'runpod_mtp.qwen',
       },
       providers: [
         {
-          provider: 'runtime_lane_deadbeef1234',
-          kind: 'runtime',
-          runtime_kind: 'cloud',
-          auth_kind: null,
-          status: 'available',
+          provider: 'runpod_mtp.qwen',
+          runtime_id: 'runpod_mtp.qwen',
+          provider_id: 'runpod_mtp',
+          provider_display_name: 'RunPod MTP',
+          model_id: 'qwen',
+          model_api_name: 'Qwen/Qwen3-32B',
+          protocol: 'provider_d-http',
+          transport: 'http',
+          kind: 'cloud',
+          runtime_kind: 'http',
+          auth_kind: 'env:RUNPOD_API_KEY',
+          status: 'configured',
           available: true,
-          supports_single_agent_run: true,
-          default_model: null,
+          is_default_runtime: true,
+          max_context: 200000,
+          tools_support: true,
+          streaming: true,
           model_count: 1,
-          models: [],
-          source: 'runtime',
-          endpoint_url: null,
+          models: ['Qwen/Qwen3-32B'],
+          source: 'runtime.toml',
+          endpoint_url: 'https://example.invalid/v1',
           note: null,
           discovery: {
             healthy: true,
@@ -73,16 +84,17 @@ describe('RuntimeMonitor', () => {
     container.remove()
   })
 
-  it('shows the stable API runtime lane on provider status cards', async () => {
+  it('shows runtime.toml binding identity on provider status cards', async () => {
     const { RuntimeMonitor } = await import('./runtime-monitor')
 
     render(h(RuntimeMonitor, {}), container)
     await waitFor(
-      () => container.textContent?.includes('runtime_lane_deadbeef1234') ?? false,
-      'runtime lane',
+      () => container.textContent?.includes('runpod_mtp.qwen') ?? false,
+      'runtime binding',
     )
 
-    expect(container.textContent).toContain('runtime_lane_deadbeef1234')
-    expect(container.textContent).not.toContain('runtime 1')
+    expect(container.textContent).toContain('runpod_mtp.qwen')
+    expect(container.textContent).toContain('runpod_mtp')
+    expect(container.textContent).toContain('Qwen/Qwen3-32B')
   })
 })

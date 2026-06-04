@@ -7,7 +7,6 @@ type resolved_tool_timeout =
 
 let tool_timeout_default_env = "MASC_TOOL_TIMEOUT_DEFAULT_SEC"
 let tool_timeout_board_env = "MASC_TOOL_TIMEOUT_BOARD_SEC"
-let tool_timeout_persona_generate_source = "internal:masc_persona_generate_oas_budget"
 
 let default_tool_timeout_sec () = Env_config_runtime.Tools.timeout_default_sec ()
 
@@ -48,11 +47,6 @@ let tool_timeout ~(tool_name : string) ~(_arguments : Yojson.Safe.t) :
        mutation continues in the background, leaving caller-visible status
        out of sync with persisted task state. *)
     None
-  | "masc_persona_generate" ->
-    (* Persona generation runs an OAS worker with its own 120s budget. Keep
-       the outer MCP tools/call timeout above that budget so callers see the
-       generation result or the OAS error instead of a premature MCP timeout. *)
-    Some { timeout_sec = 150.0; source_env = Some tool_timeout_persona_generate_source }
   | name when is_board_write_tool_name name ->
     (* #10569: board writes can queue behind the JSONL persist mutex. Keep
        them bounded, but avoid forcing them through the generic 60s budget

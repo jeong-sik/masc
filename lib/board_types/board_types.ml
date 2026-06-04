@@ -88,9 +88,9 @@ end = struct
   (* Issue #8633: pattern was [^[a-zA-Z0-9._-]+$] which rejected the
      [keeper:foo] colon-namespacing supported by the canonical
      [Validation.Agent_id] (used by session-bound task workspace).
-     Real callers exist (server_routes_http_keeper_stream:413,
-     server_openai_compat:153). Pattern is now a strict superset of
-     both: optional single colon namespace + previously-allowed dots.
+     Real callers exist (server_routes_http_keeper_stream:413).
+     Pattern is now a strict superset of both: optional single colon
+     namespace + previously-allowed dots.
 
      Issue #8625: length cap was 32 — also raised to 64 to match
      [Validation.Agent_id.validate]. Generated worker IDs like

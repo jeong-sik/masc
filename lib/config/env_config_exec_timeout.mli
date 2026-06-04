@@ -44,10 +44,6 @@ type caller =
           [server_startup_takeover] [ps] probe was previously 1s —
           it now uses [Shell_probe] (2s) instead of [Startup] so a
           single env override does not move two unrelated budgets. *)
-  | Auto_responder
-      (** Auto-responder CLI spawn with stdin prompt.  Default 120.0s
-          — preserves the previous inline budget; under-budgeting
-          here would silently cut off legitimate model replies. *)
   | Build_identity
       (** Build identity git probe.  Default 5.0s. *)
   | Voice

@@ -7,12 +7,12 @@
     [Eio.Time.Timeout] into an error result.
     [Eio.Cancel.Cancelled] is always re-raised to preserve structured concurrency.
 
-    [caller] (#10094) is a free-form identifier ("auto_responder",
-    "anti_rationalization", ...) that flows into the timeout label so
-    operators can distinguish fantasy budgets from intentional ones
-    when both fire timeouts in the same session.  Callers must
-    pass [~caller] explicitly or use {!run_with_caller}, which
-    accepts a typed caller and pulls the configured budget from
+    [caller] (#10094) is a free-form identifier
+    ("anti_rationalization", "governance_judge", ...) that flows into
+    the timeout label so operators can distinguish which trusted OAS
+    caller timed out at which configured budget.  Callers must pass
+    [~caller] explicitly or use {!run_with_caller}, which accepts a
+    typed caller and pulls the configured budget from
     [Env_config_oas_bridge]. *)
 let min_timeout_s = 0.0
 let routine_cancel_inner_substring = "Eio__core__Fiber.Not_first"
@@ -60,10 +60,9 @@ let run_safe ~caller ~timeout_s fn =
   with
   | Eio.Time.Timeout ->
     (* #10094: per-caller timeout counter so the operator can see
-       WHICH caller is timing out at WHICH configured budget — log
-       lines alone collapsed all 27 [auto_responder] 60s-timeouts
-       and the 180s tuned timeout callers into the same
-       "after N.Ns" string. *)
+       WHICH caller is timing out at WHICH configured budget instead
+       of collapsing all OAS timeouts into the same "after N.Ns"
+       string. *)
     let wall = elapsed () in
     Prometheus.inc_counter
       Prometheus.metric_oas_bridge_timeout
@@ -139,15 +138,10 @@ let run_safe ~caller ~timeout_s fn =
 
 (** [run_with_caller ~caller fn] — single entry point that resolves
     the per-caller timeout from [Env_config_oas_bridge] and labels
-    the resulting Prometheus counter.  Replaces the seven hardcoded
-    [run_safe ~timeout_s:N.N] literals scattered across the lib
-    tree.  The original tuned values for persona authoring
-    / anti_rationalization are preserved as per-caller defaults;
-    the two fantasy 60s budgets ([auto_responder],
-    [dashboard_provider_runs]) are raised to the global default
-    (300s) since the original 60s did not match observed p50
-    latency.  See [Env_config_oas_bridge] for the full table and
-    env-var override layout. *)
+    the resulting Prometheus counter.  The remaining trusted OAS
+    callers are evaluator/advisory flows with caller-specific defaults
+    owned by [Env_config_oas_bridge]; removed runtime-invocation
+    surfaces must not reappear as hidden timeout configuration. *)
 let run_with_caller ~caller fn =
   let timeout_s = Env_config_oas_bridge.timeout_sec ~caller () in
   run_safe ~caller:(Env_config_oas_bridge.caller_key caller) ~timeout_s fn

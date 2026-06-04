@@ -537,56 +537,12 @@ let test_masc_deliver_schema () =
 let test_masc_persona_authoring_schemas () =
   (match find_registered_tool "masc_persona_schema" with
   | None -> Alcotest.fail "masc_persona_schema not found"
-  | Some _ -> ());
-  (match find_registered_tool "masc_persona_generate" with
-  | None -> Alcotest.fail "masc_persona_generate not found"
   | Some schema -> (
       match get_json_assoc "properties" schema.input_schema with
       | Some props ->
-          Alcotest.(check bool) "generate has concept" true
-            (List.mem_assoc "concept" props);
-          Alcotest.(check bool) "generate has alignment axis" true
-            (List.mem_assoc "alignment" props);
-          Alcotest.(check bool) "generate omits operating_style axis" false
-            (List.mem_assoc "operating_style" props);
-          Alcotest.(check bool) "generate has risk_posture axis" true
-            (List.mem_assoc "risk_posture" props);
-          let enum_strings name =
-            match List.assoc_opt name props with
-            | Some (`Assoc fields) ->
-                (match List.assoc_opt "enum" fields with
-                 | Some (`List values) -> List.map Yojson.Safe.Util.to_string values
-                 | _ -> [])
-            | _ -> []
-          in
-          let default_string name =
-            match List.assoc_opt name props with
-            | Some (`Assoc fields) ->
-                (match List.assoc_opt "default" fields with
-                 | Some (`String value) -> value
-                 | _ -> "")
-            | _ -> ""
-          in
-          let default_bool name =
-            match List.assoc_opt name props with
-            | Some (`Assoc fields) ->
-                (match List.assoc_opt "default" fields with
-                 | Some (`Bool value) -> value
-                 | _ -> false)
-            | _ -> false
-          in
-          let module Contract = Masc.Keeper_persona_authoring_contract in
-          Alcotest.(check (list string)) "alignment enum follows contract"
-            Contract.alignment_choices (enum_strings "alignment");
-          Alcotest.(check (list string)) "risk_posture enum follows contract"
-            Contract.risk_posture_choices (enum_strings "risk_posture");
-          Alcotest.(check string) "language default follows contract"
-            Contract.default_generation_language (default_string "language");
-          (* runtime_id has no static schema default (resolved at request time
-             post-init); only language/proactive carry static defaults. *)
-          Alcotest.(check bool) "proactive default follows contract"
-            Contract.default_generation_proactive_enabled (default_bool "proactive_enabled")
-      | None -> Alcotest.fail "masc_persona_generate missing properties"));
+          Alcotest.(check bool) "schema has include_examples" true
+            (List.mem_assoc "include_examples" props)
+      | None -> Alcotest.fail "masc_persona_schema missing properties"));
   match find_registered_tool "masc_persona_save" with
   | None -> Alcotest.fail "masc_persona_save not found"
   | Some schema -> (

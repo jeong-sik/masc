@@ -18,7 +18,6 @@ type t =
   | `System_worker_container_types
   | `System_worker_runtime_docker
   | `System_spawn
-  | `System_auto_responder
   | `Workspace_identity
   | `Tool_local_runtime
   | `Tool_local_runtime_bench

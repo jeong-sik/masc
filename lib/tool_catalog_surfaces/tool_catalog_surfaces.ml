@@ -72,7 +72,6 @@ let public_mcp_surface_tools =
   ; (* Persona authoring is operator-visible. *)
     "masc_persona_list"
   ; "masc_persona_schema"
-  ; "masc_persona_generate"
   ; "masc_persona_save"
   ; (* Board. [masc_board_reaction] is intentionally public: it is the
        operator/client counterpart to existing board comment/vote actions. *)
@@ -203,8 +202,7 @@ let admin_surface_tools =
   ; "masc_tool_admin_snapshot"
   ; "masc_config"
   ; (* Phase 2: surface SSOT *)
-    "masc_persona_generate"
-  ; "masc_persona_save"
+    "masc_persona_save"
   ; "masc_board_delete"
   ; "masc_pause"
   ; "masc_resume"
@@ -289,4 +287,3 @@ let execution_role_tools : string list =
   ; "masc_tool_help"
   ]
 ;;
-

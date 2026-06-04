@@ -184,17 +184,6 @@ let test_transition_has_no_fixed_timeout () =
        ~_arguments:(`Assoc [])
      = None)
 
-let test_persona_generate_timeout_exceeds_oas_budget () =
-  match
-    Masc.Mcp_server_eio_call_tool.tool_timeout_sec_opt
-      ~tool_name:"masc_persona_generate"
-      ~_arguments:(`Assoc [])
-  with
-  | Some timeout_sec ->
-      check bool "persona generate timeout exceeds internal OAS budget" true
-        (timeout_sec > 120.)
-  | None -> fail "expected persona generation to keep a bounded outer timeout"
-
 let test_regular_tool_uses_default_timeout () =
   match
     Masc.Mcp_server_eio_call_tool.tool_timeout_sec_opt
@@ -532,8 +521,6 @@ let () =
           test_case "contains casefold keeps semantics" `Quick
             test_contains_casefold_keeps_semantics;
           test_case "transition has no fixed timeout" `Quick test_transition_has_no_fixed_timeout;
-          test_case "persona generate timeout exceeds OAS budget" `Quick
-            test_persona_generate_timeout_exceeds_oas_budget;
           test_case "regular tool keeps default timeout" `Quick test_regular_tool_uses_default_timeout;
           test_case "board write tools use board timeout default" `Quick
             test_board_write_tools_use_board_timeout_default;

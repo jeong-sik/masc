@@ -10,6 +10,80 @@ open Keeper_tools_oas_workflow
 open Keeper_tools_oas_deterministic_error
 open Keeper_tools_oas_handler_telemetry
 
+let is_execute_tool_name name =
+  match String.lowercase_ascii name with
+  | "execute" | "tool_execute" | "mcp__masc__execute" -> true
+  | _ -> false
+
+let string_assoc key fields =
+  match List.assoc_opt key fields with
+  | Some (`String value) when String.trim value <> "" -> Some value
+  | _ -> None
+
+let result_cwd raw_result =
+  try
+    match Yojson.Safe.from_string raw_result with
+    | `Assoc fields -> string_assoc "cwd" fields
+    | _ -> None
+  with
+  | Yojson.Json_error _ -> None
+
+let directory_exists path =
+  try Sys.file_exists path && Sys.is_directory path with
+  | Sys_error _ -> false
+
+let take_lines max_lines lines =
+  let rec loop remaining acc = function
+    | [] -> List.rev acc, false
+    | _ :: _ as rest when remaining <= 0 -> List.rev acc, rest <> []
+    | line :: rest -> loop (remaining - 1) (line :: acc) rest
+  in
+  loop max_lines [] lines
+
+let render_git_status_changes output =
+  let lines =
+    output
+    |> String.split_on_char '\n'
+    |> List.map String.trim
+    |> List.filter (fun line -> line <> "")
+  in
+  match lines with
+  | [] -> None
+  | _ ->
+    let lines, truncated = take_lines 40 lines in
+    let suffix =
+      if truncated then [ "... (git status output truncated)" ] else []
+    in
+    Some
+      ("--- Worktree changes (git status --short) ---\n"
+       ^ String.concat "\n" (lines @ suffix))
+
+let post_execute_git_status_change ~(tool_name : string) raw_result =
+  if not (is_execute_tool_name tool_name)
+  then None
+  else (
+    match result_cwd raw_result with
+    | None -> None
+    | Some cwd when not (directory_exists cwd) -> None
+    | Some cwd ->
+      try
+        let status, output =
+          Masc_exec.Exec_gate.run_argv_with_status
+            ~actor:(Masc_exec.Agent_id.of_string "workspace/git")
+            ~raw_source:
+              ("git -C " ^ Filename.quote cwd
+               ^ " --no-optional-locks status --short")
+            ~summary:"post-Execute git status delta"
+            ~timeout_sec:5.0
+            [ "git"; "-C"; cwd; "--no-optional-locks"; "status"; "--short" ]
+        in
+        match status with
+        | Unix.WEXITED 0 -> render_git_status_changes output
+        | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> None
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | _ -> None)
+
 let execute_with_observers
       ~(name : string)
       ~(config : Workspace.config)
@@ -358,10 +432,7 @@ let execute_with_observers
       (match on_tool_called with
        | Some f -> f name
        | None -> ());
-      (* PR#814 Gap 1: Capture git status delta after successful tool execution.
-         If the working tree changed, log it so the keeper is aware of
-         file-system side effects from its tool calls. *)
-      let change_block = None in
+      let change_block = post_execute_git_status_change ~tool_name:name raw_result in
       let normalized = normalize_tool_result ~success:true raw_result in
       let final_result =
         match change_block with

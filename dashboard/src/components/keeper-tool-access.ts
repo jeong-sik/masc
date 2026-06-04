@@ -42,7 +42,7 @@ export function KeeperToolAccessSummary({ config }: { config: KeeperConfig }) {
   const handoff = `${config.handoff.auto ? 'on' : 'off'} · threshold ${config.handoff.threshold}`
   const idle = `${config.proactive.idle_sec}s${config.proactive.enabled ? '' : ' (disabled)'}`
   const mentions = mentionsLabel(config.workspace.mention_targets)
-  const allowlistCount = config.tools.resolved_allowlist.length
+  const candidateCount = config.tools.resolved_allowlist.length
   const denylistCount = config.tools.tool_denylist.length
 
   return html`
@@ -64,8 +64,8 @@ export function KeeperToolAccessSummary({ config }: { config: KeeperConfig }) {
         <${ToolAccessRow} label="proactive idle" value=${idle} />
         <${ToolAccessRow} label="mention targets" value=${mentions} />
         <${ToolAccessRow}
-          label="allow / deny"
-          value=${`${allowlistCount} allow · ${denylistCount} deny`}
+          label="candidate / deny"
+          value=${`${candidateCount} candidate · ${denylistCount} deny`}
         />
       </dl>
     </section>

@@ -868,7 +868,13 @@ let test_tool_execute_runtime_error_reports_default_execution_location () =
   Alcotest.(check bool) "argv paths resolve against cwd" true
     (loc
      |> Json.member "argv_relative_paths_resolve_against_cwd"
-     |> Json.to_bool)
+     |> Json.to_bool);
+  Alcotest.(check bool) "no worktree selected" false
+    (loc |> Json.member "worktree_selected" |> Json.to_bool);
+  Alcotest.(check bool) "selected worktree is absent" true
+    (match loc |> Json.member "selected_worktree" with
+     | `Null -> true
+     | _ -> false)
 
 let test_execution_location_classifies_repo_worktree_subpath () =
   with_eio_fs @@ fun () ->
@@ -896,6 +902,10 @@ let test_execution_location_classifies_repo_worktree_subpath () =
     (loc |> Json.member "cwd_source" |> Json.to_string);
   Alcotest.(check string) "repo name" "masc"
     (loc |> Json.member "repo_name" |> Json.to_string);
+  Alcotest.(check bool) "worktree selected" true
+    (loc |> Json.member "worktree_selected" |> Json.to_bool);
+  Alcotest.(check string) "worktree name" "task-123"
+    (loc |> Json.member "worktree_name" |> Json.to_string);
   Alcotest.(check string)
     "relative cwd"
     "repos/masc/.worktrees/task-123/lib"
@@ -909,7 +919,21 @@ let test_execution_location_classifies_repo_worktree_subpath () =
     "worktree root"
     (normalize_path_for_containment
        (Filename.concat playground "repos/masc/.worktrees/task-123"))
-    (loc |> Json.member "worktree_root" |> Json.to_string)
+    (loc |> Json.member "worktree_root" |> Json.to_string);
+  let selected = loc |> Json.member "selected_worktree" in
+  Alcotest.(check string) "selected repo name" "masc"
+    (selected |> Json.member "repo_name" |> Json.to_string);
+  Alcotest.(check string) "selected worktree name" "task-123"
+    (selected |> Json.member "worktree_name" |> Json.to_string);
+  Alcotest.(check string) "selection source" "execution_cwd"
+    (selected |> Json.member "selection_source" |> Json.to_string);
+  Alcotest.(check string) "selected worktree scope" "repo_worktree_subpath"
+    (selected |> Json.member "scope" |> Json.to_string);
+  Alcotest.(check string)
+    "selected worktree root"
+    (normalize_path_for_containment
+       (Filename.concat playground "repos/masc/.worktrees/task-123"))
+    (selected |> Json.member "worktree_root" |> Json.to_string)
 
 let test_execution_location_outside_playground_has_null_relative_cwd () =
   with_eio_fs @@ fun () ->

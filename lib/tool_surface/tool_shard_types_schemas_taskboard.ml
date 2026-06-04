@@ -185,17 +185,6 @@ let taskboard_tools : Masc_domain.tool_schema list =
                              verbatim. Ignored when the task has no contract."
                         )
                       ] )
-                ; ( "pr_url"
-                  , `Assoc
-                      [ "type", `String "string"
-                      ; ( "description"
-                        , `String
-                            "Draft or open PR URL. Hoisted into \
-                             handoff_context.evidence_refs by the transport \
-                             layer; satisfies the Cdal evidence gate for \
-                             contracted tasks."
-                        )
-                      ] )
                 ] )
           ; "required", `List [ `String "task_id"; `String "result" ]
           ]
@@ -203,7 +192,7 @@ let taskboard_tools : Masc_domain.tool_schema list =
   ; { name = "keeper_task_submit_for_verification"
     ; description =
         "Submit your claimed task to verification instead of marking it done directly. \
-         Use this after opening a PR or when review evidence must be attached before \
+         Use this when review evidence must be attached before \
          final approval."
     ; input_schema =
         `Assoc
@@ -225,17 +214,18 @@ let taskboard_tools : Masc_domain.tool_schema list =
                              review expectations" )
                       ; "minLength", `Int 1
                       ] )
-                ; ( "pr_url"
+                ; ( "evidence_refs"
                   , `Assoc
-                      [ "type", `String "string"
+                      [ "type", `String "array"
+                      ; "items", `Assoc [ "type", `String "string" ]
                       ; ( "description"
                         , `String
-                            "Draft or open PR URL to include in the verification handoff"
-                        )
-                      ; "minLength", `Int 1
+                            "Structured verification evidence refs: PR URL, commit, \
+                             artifact, receipt, test log, task comment, or other \
+                             concrete reviewable reference" )
                       ] )
                 ] )
-          ; "required", `List [ `String "task_id"; `String "notes"; `String "pr_url" ]
+          ; "required", `List [ `String "task_id"; `String "notes" ]
           ]
     }
   ; { name = "keeper_task_create"

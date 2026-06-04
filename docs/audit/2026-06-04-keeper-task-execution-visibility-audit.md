@@ -54,15 +54,14 @@ Code anchors:
 - `lib/keeper/keeper_unified_prompt.ml:652` - continuity filtering
 - `lib/keeper/keeper_unified_prompt.ml:687` - claimable work guidance
 
-Finding: goals are visible, but goal assignment is not a hard claim boundary.
-`Keeper_runtime_contract.resolve_claim_goal_scope` explicitly treats
-`active_goal_ids` as advisory. If active goal IDs exist, tasks outside the goal
-scope are still claimable; the Keeper receives scope context but not a strict
-deny.
+Finding: goals are visible and active goal assignment is now a hard claim
+boundary. `Keeper_runtime_contract.resolve_claim_goal_scope` turns
+`active_goal_ids` into the `Workspace.claim_next_r` `task_filter`; tasks outside
+the active goal set are excluded and counted in `scope_excluded_count`.
 
 Code anchor:
 
-- `lib/keeper/keeper_runtime_contract.ml:62` - advisory active goal mode
+- `lib/keeper/keeper_runtime_contract.ml:49` - active goal task filter
 
 ### 3. Context, checkpoint, and memory
 
@@ -107,6 +106,15 @@ affordances, overlays, fallback floor, and last-turn restrictions.
 
 The actual OAS call receives `AllowList turn_visible_tool_names`.
 
+Terminology is strict here:
+
+- `allowed_tool_names`: policy/candidate surface after keeper profile and denylist
+  resolution. This is not necessarily the exact set exposed to one SDK turn.
+- `turn_visible_tool_names`: internal name for the per-turn resolved tool surface.
+  It is the exact list passed to `Agent_sdk.Guardrails.AllowList`.
+- `oas_allowlist_tool_names`: operator-facing decision-log field for that same
+  list. This avoids introducing a second "visible tool" concept in audit logs.
+
 Code anchors:
 
 - `lib/keeper/keeper_run_tools_setup.ml:489` - compute per-turn tool surface
@@ -126,7 +134,7 @@ Code anchors:
 - `lib/keeper/keeper_tool_policy.ml:397` - Keeper allowed names are candidate minus denied
 
 Follow-up started in this series: decision-log `tool_disclosure` records should
-include the concrete `visible_tool_names`, not only the final count, so an
+include the concrete `oas_allowlist_tool_names`, not only the final count, so an
 operator can reconstruct exactly what the Keeper could call at that SDK turn.
 
 ### 5. Task claim and task assignment
@@ -183,9 +191,11 @@ Code anchors:
 - `lib/keeper/keeper_tool_execute_path.ml:267` - worktree repair path
 - `lib/keeper/keeper_tool_execute_path.ml:418` - write cwd resolution
 
-Finding: moving to a repo/worktree is a `cwd` discipline plus path repair, not a
-separate first-class state. The Keeper must call Execute/Edit/Read with the
-right repo/worktree path.
+Finding: moving to a repo/worktree is still a `cwd` discipline plus path repair,
+not a persistent global Keeper state. PR #20055 makes the selected worktree a
+first-class Execute observation: `execution_location.worktree_selected`,
+`worktree_name`, and `selected_worktree` identify the repo/worktree assignment
+without requiring the Keeper or operator to reparse `cwd`.
 
 ### 7. Tool dispatch and side-effect safety
 
@@ -210,24 +220,29 @@ Code anchors:
 - `lib/keeper/keeper_unified_turn_execution.ml:390` - ambiguous partial commit path
 - `lib/keeper/keeper_unified_turn_execution.ml:803` - timeout after committed tools
 
-Finding: retry safety exists, but post-Execute git status delta is currently not
-injected into the tool result. `keeper_tools_oas_handler_exec.ml` has a comment
-about capturing git status delta, but `change_block` is fixed to `None`.
+Finding: retry safety exists. PR #20055 also wires the stale post-Execute
+change hook: after a successful `Execute` result with a concrete `cwd`, the
+handler reads `git --no-optional-locks status --short` and injects non-empty
+status output into the normalized tool result as `changes`.
 
 Code anchor:
 
-- `lib/keeper/keeper_tools_oas_handler_exec.ml:361` - stale git-delta comment/path
+- `lib/keeper/keeper_tools_oas_handler_exec.ml:13` - post-Execute git status helper
+- `lib/keeper/keeper_tools_oas_handler_exec.ml:435` - change block injected into the result envelope
 
-### 8. Task result and PR evidence
+### 8. Task result and verification evidence
 
-Task completion and PR evidence are explicit task tool transitions.
+Task completion and verification evidence are explicit task tool transitions.
 
 `keeper_task_done` requires `task_id` and `result`, maps the result into
 `handoff_context.summary`, and calls `Task.Tool.handle_transition` with
 `action=done`.
 
-`keeper_task_submit_for_verification` requires `task_id`, `notes`, and a valid
-`pr_url`, then maps the PR URL into `handoff_context.evidence_refs` and calls
+`keeper_task_submit_for_verification` requires `task_id` and `notes`. The notes
+message is the primary evidence handoff: it must say what was done and how it can
+be verified. Optional structured `evidence_refs` can also carry PR URLs, commits,
+artifacts, receipts, test logs, task comments, or other concrete references.
+The wrapper maps these into `handoff_context` and calls
 `action=submit_for_verification`.
 
 Code anchors:
@@ -239,9 +254,11 @@ Code anchors:
 - `lib/task/tool_task.ml:486` - persisted workspace transition
 - `lib/task/tool_task.ml:525` - verification notification path
 
-Finding: PR evidence can be persisted cleanly, but it is not automatic merely
-because the Keeper ran `gh pr create`. The Keeper must call the task transition
-tool or another explicit task/comment tool.
+Finding: verification evidence can be persisted cleanly, but it is not automatic
+merely because the Keeper ran `gh pr create`. The Keeper must call the task
+transition tool or another explicit task/comment tool. Keeper code must not
+treat PR URL or any single reference shape as the verification SSOT; evidence
+semantics live in the task/CDAL domain.
 
 ### 9. Receipt and lineage
 
@@ -265,25 +282,34 @@ fast diagnosis path sees only counts.
 | Surface | Model sees | Runtime enforces | Operator can audit | Status |
 | --- | --- | --- | --- | --- |
 | Allowed Path | Tool schema and path errors; world prompt may not list exact paths | path/cwd resolver and sandbox/allowed-path checks | tool call log context and runtime contract include allowed paths | Partial |
-| Allowed Tool | OAS schemas filtered by `AllowList` | visible names allowlist plus candidate/deny execution gate | receipt/lineage has names; old disclosure only had counts | Partial, first patch adds disclosure names |
-| Assign Task | task counts, claim guidance, current task context | claim/start transitions and current-task reconciliation | backlog, receipt current task, task events | Good after claim; acquisition is advisory |
-| Assign Goal | goal prompt and active-goal world state | advisory scope only | receipt goal IDs and goal progress JSON | Partial |
+| Allowed Tool | OAS schemas filtered by `AllowList` | `turn_visible_tool_names` OAS allowlist plus candidate/deny execution gate | receipt/lineage names plus `tool_disclosure.oas_allowlist_tool_names` | Partial, first patch adds allowlist names |
+| Repo / Worktree Seat | Execute result `execution_location.selected_worktree` after a worktree-scoped call | `cwd` resolver, repo readiness, and worktree repair | Execute result envelope and post-Execute change hook | Good after Execute; not a persistent assignment |
+| Assign Task | task counts, claim guidance, current task context | claim/start transitions and current-task reconciliation | backlog, receipt current task, task events | Good after claim/start |
+| Assign Goal | goal prompt and active-goal world state | `active_goal_ids` hard-gate `keeper_task_claim` | receipt goal IDs and goal progress JSON | Good for claim scope; goal progress remains observational |
 | Past Memory | memory context, checkpoint history, temporal context | memory hooks and checkpoint lifecycle | digests, memory files, post-turn eval | Good model-side; raw audit requires backing files |
-| PR evidence | only if tool output/notes/transition show it | task verification requires real PR URL | handoff evidence refs and task events | Partial; not automatic from `gh pr create` |
+| Verification evidence | only if tool output/notes/transition show it | task verification requires an evidence-bearing handoff, not a PR URL shape | notes, optional evidence refs, and task events | Good for wrapper; not automatic from `gh pr create` |
 
 ## Work Queue
 
-1. **Started**: add concrete `visible_tool_names` to the per-turn
-   `tool_disclosure` decision log. This closes the fastest observability gap
-   without changing policy.
-2. Add a dedicated post-Execute working-tree delta path, or delete the stale
-   comment if the product decision is "receipt/tool logs only".
-3. Split `tool_access` wording from execution semantics in docs/UI/API:
-   candidate surface, discovered visible surface, and denylist are distinct.
-4. Decide whether active goal scope must remain advisory or become a hard task
-   claim gate for specific Keeper profiles.
-5. Decide whether PR creation should become a structured Keeper workflow, or
-   whether explicit `keeper_task_submit_for_verification` remains the SSOT.
-6. Add a first-class "worktree selected" observation if the Keeper should see a
-   stable repo/worktree assignment rather than infer it from `cwd`.
-
+1. **Done in PR #20055**: add concrete `oas_allowlist_tool_names` to the
+   per-turn `tool_disclosure` decision log. This closes the fastest
+   observability gap without changing policy.
+2. **Done in PR #20055**: add a dedicated post-Execute working-tree status
+   path for successful `Execute` calls with a concrete `cwd`.
+3. **Done in PR #20055**: split `tool_access` wording from execution
+   semantics in docs/UI/API. The field now reads as a candidate profile; actual
+   execution still depends on descriptor/registry availability, denylist,
+   per-turn OAS allowlist, and eval gates.
+4. **Done in PR #20055**: make `active_goal_ids` a hard `keeper_task_claim`
+   gate. The resolver now passes a goal-linked task filter into
+   `Workspace.claim_next_r`, and no-scope results report excluded tasks instead
+   of falling back to all work.
+5. **Done in PR #20055**: keep explicit
+   `keeper_task_submit_for_verification` as the task-verification SSOT, but make
+   it evidence-message based rather than PR-URL based. The Keeper submits notes,
+   with optional structured refs for PRs, commits, artifacts, receipts, logs, or
+   task comments; `gh pr create` alone does not mutate task verification state.
+6. **Done in PR #20055**: add a first-class "worktree selected" observation to
+   Execute `execution_location`. This keeps repo/worktree choice tied to the
+   actual `cwd` that runtime enforced, but surfaces the stable assignment as
+   `selected_worktree` instead of requiring string parsing.

@@ -34,7 +34,13 @@ else
 fi
 
 read_sse_external_subscriber_count() {
-  curl -fsS "${MASC_HTTP_BASE_URL}/metrics" 2>/dev/null \
+  local token
+  local -a auth_args=()
+  token="$(transport_auth_token)"
+  if [[ -n "$token" ]]; then
+    auth_args=(-H "Authorization: Bearer ${token}")
+  fi
+  curl -fsS "${auth_args[@]}" "${MASC_HTTP_BASE_URL}/metrics" 2>/dev/null \
     | awk '$1=="masc_sse_external_subscribers_total" { print int($2); found=1; exit } END { if (!found) print -1 }' \
     2>/dev/null || echo "-1"
 }
@@ -42,9 +48,12 @@ read_sse_external_subscriber_count() {
 ws_output="$(mktemp "${TMPDIR:-/tmp}/masc-transport-ws.XXXXXX")"
 ws_handshake="$(mktemp "${TMPDIR:-/tmp}/masc-transport-ws-handshake.XXXXXX")"
 ws_subscribers_before="$(read_sse_external_subscriber_count)"
+ws_auth_token="$(transport_auth_token)"
 MASC_WS_HOST="127.0.0.1" MASC_WS_PORT="$ws_port" WS_OUTPUT="$ws_output" \
-WS_EXPECT="ws-e2e-test-event" WS_HANDSHAKE="$ws_handshake" python3 - <<'PY' &
+WS_EXPECT="ws-e2e-test-event" WS_HANDSHAKE="$ws_handshake" \
+WS_AUTH_TOKEN="$ws_auth_token" python3 - <<'PY' &
 import base64
+import json
 import os
 import socket
 import sys
@@ -54,6 +63,7 @@ port = int(os.environ["MASC_WS_PORT"])
 output_path = os.environ["WS_OUTPUT"]
 expected = os.environ["WS_EXPECT"]
 handshake_path = os.environ["WS_HANDSHAKE"]
+auth_token = os.environ.get("WS_AUTH_TOKEN", "")
 
 sock = socket.create_connection((host, port), timeout=5)
 key = base64.b64encode(os.urandom(16)).decode()
@@ -83,6 +93,19 @@ with open(handshake_path, "w", encoding="utf-8") as fh:
 buffer = buffer.split(b"\r\n\r\n", 1)[1]
 sock.settimeout(6)
 
+def send_text(text: str) -> None:
+    payload = text.encode("utf-8")
+    mask = os.urandom(4)
+    length = len(payload)
+    if length < 126:
+        header = bytes([0x81, 0x80 | length])
+    elif length <= 0xFFFF:
+        header = bytes([0x81, 0x80 | 126]) + length.to_bytes(2, "big")
+    else:
+        header = bytes([0x81, 0x80 | 127]) + length.to_bytes(8, "big")
+    masked = bytes(byte ^ mask[index % 4] for index, byte in enumerate(payload))
+    sock.sendall(header + mask + masked)
+
 def read_exact(n: int) -> bytes:
     global buffer
     data = b""
@@ -97,7 +120,7 @@ def read_exact(n: int) -> bytes:
         data += chunk
     return data
 
-for _ in range(16):
+def read_text_frame() -> tuple[int, str]:
     hdr = read_exact(2)
     opcode = hdr[0] & 0x0F
     masked = (hdr[1] & 0x80) != 0
@@ -111,7 +134,44 @@ for _ in range(16):
     if masked:
       payload = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
     if opcode == 0x1:
-      text = payload.decode("utf-8", errors="replace")
+      return opcode, payload.decode("utf-8", errors="replace")
+    if opcode == 0x8:
+      return opcode, ""
+    return opcode, ""
+
+hello_params = {
+    "protocol": "dashboard-ws.v1",
+    "features": ["snapshot", "delta", "mode_snapshot"],
+}
+if auth_token:
+    hello_params["token"] = auth_token
+send_text(json.dumps({
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "dashboard/hello",
+    "params": hello_params,
+}, separators=(",", ":")))
+
+for _ in range(8):
+    opcode, text = read_text_frame()
+    if opcode == 0x8:
+      raise SystemExit(3)
+    if not text:
+      continue
+    try:
+      payload = json.loads(text)
+    except json.JSONDecodeError:
+      continue
+    if payload.get("id") == 1:
+      if "result" in payload:
+        break
+      raise SystemExit(5)
+else:
+    raise SystemExit(6)
+
+for _ in range(16):
+    opcode, text = read_text_frame()
+    if opcode == 0x1:
       with open(output_path, "a", encoding="utf-8") as fh:
         fh.write(text)
         fh.write("\n")

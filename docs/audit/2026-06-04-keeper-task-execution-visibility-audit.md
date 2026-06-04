@@ -98,20 +98,12 @@ Code anchors:
 ### 4. Tool surface selection
 
 Keeper tools are not a static full MCP surface. `prepare_agent_setup` builds the
-candidate bundle, then each SDK turn recomputes the allowed tool surface from
-the latest message context, deterministic prefilter, discovered tools, tool
-affordances, overlays, fallback floor, and last-turn restrictions.
+candidate bundle, then each SDK turn computes a local OAS schema filter from the
+latest message context, deterministic prefilter, discovered tools, affordances,
+overlays, and last-turn restrictions.
 
-The actual OAS call receives `AllowList turn_allowed_tool_names`.
-
-Terminology is strict here:
-
-- `allowed_tool_names`: policy/candidate surface after keeper profile and denylist
-  resolution. This is not necessarily the exact set exposed to one SDK turn.
-- `turn_allowed_tool_names`: internal name for the per-turn resolved tool surface.
-  It is the exact list passed to `Agent_sdk.Guardrails.AllowList`.
-- `allowed_tool_names`: operator-facing decision-log field for that same
-  list. This avoids introducing a second "allowed tool" concept in audit logs.
+That filter is execution input, not a Keeper-visible contract. Operator evidence
+should come from requested, reported, observed, and materialized tool-use records.
 
 Code anchors:
 
@@ -131,9 +123,9 @@ Code anchors:
 - `lib/keeper/keeper_tool_policy.ml:321` - execution gate uses candidate/deny semantics
 - `lib/keeper/keeper_tool_policy.ml:397` - Keeper allowed names are candidate minus denied
 
-Follow-up started in this series: decision-log `tool_disclosure` records should
-include the concrete `allowed_tool_names`, not only the final count, so an
-operator can reconstruct exactly what the Keeper could call at that SDK turn.
+Follow-up in this series removed the decision-log disclosure record as an
+operator evidence surface. Operators should reconstruct execution from receipt
+lineage and actual tool-call logs, not a per-turn candidate list.
 
 ### 5. Task claim and task assignment
 
@@ -269,16 +261,16 @@ Code anchors:
 - `lib/keeper/keeper_agent_run_receipt.ml:181` - tool surface summary
 - `lib/keeper/keeper_agent_run_receipt.ml:322` - tool lineage manifest
 
-Finding: receipt and `Tool_lineage_recorded` can reconstruct tool visibility, but
-the per-SDK-turn `tool_disclosure` log should carry names too. Without that, the
-fast diagnosis path sees only counts.
+Finding: receipt and `Tool_lineage_recorded` reconstruct requested,
+materialized, emitted, observed, and verified tools. The fast diagnosis path
+should use those concrete evidence streams, not a separate candidate-list log.
 
 ## Visibility Matrix
 
 | Surface | Model sees | Runtime enforces | Operator can audit | Status |
 | --- | --- | --- | --- | --- |
 | Allowed Path | Tool schema and path errors; world prompt may not list exact paths | path/cwd resolver and sandbox/allowed-path checks | tool call log context and runtime contract include allowed paths | Partial |
-| Allowed Tool | OAS schemas filtered by `AllowList` | `turn_allowed_tool_names` OAS allowlist plus candidate/deny execution gate | receipt/lineage names plus `tool_disclosure.allowed_tool_names` | Partial, first patch adds allowlist names |
+| Tool Use | OAS schemas filtered locally by `AllowList` | local schema filter plus safety guards | requested, reported, observed, and materialized tool-use evidence | Execution input only; no Keeper-visible tool contract |
 | Repo / Worktree Seat | Execute result `execution_location.selected_worktree` after a worktree-scoped call | `cwd` resolver, repo readiness, and worktree repair | Execute result envelope and post-Execute change hook | Good after Execute; not a persistent assignment |
 | Assign Task | task counts, claim guidance, current task context | claim/start transitions and current-task reconciliation | backlog, receipt current task, task events | Good after claim/start |
 | Assign Goal | goal prompt and active-goal world state | `active_goal_ids` hard-gate `keeper_task_claim` | receipt goal IDs and goal progress JSON | Good for claim scope; goal progress remains observational |
@@ -287,9 +279,8 @@ fast diagnosis path sees only counts.
 
 ## Work Queue
 
-1. **Done in PR #20055**: add concrete `allowed_tool_names` to the
-   per-turn `tool_disclosure` decision log. This closes the fastest
-   observability gap without changing policy.
+1. The per-turn tool disclosure log was removed; tool visibility evidence now
+   comes from requested, reported, observed, and materialized tool-use records.
 2. **Done in PR #20055**: add a dedicated post-Execute working-tree status
    path for successful `Execute` calls with a concrete `cwd`.
 3. **Done in PR #20055**: split `tool_access` wording from execution

@@ -531,31 +531,6 @@ let test_public_name_projection_uses_descriptor_resolution () =
        [ "tool_execute"; "tool_search_files" ])
 ;;
 
-let test_surface_class_uses_keeper_projection () =
-  Alcotest.(check string)
-    "empty surface"
-    "none"
-    (Surface.tool_surface_class_to_string
-       (Surface.tool_surface_class_for_tool_names []));
-  Alcotest.(check string)
-    "descriptor-backed public MCP surface"
-    "public_only"
-    (Surface.tool_surface_class_to_string
-       (Surface.tool_surface_class_for_tool_names
-          [ "masc_tasks"; "mcp__masc__masc_transition" ]));
-  Alcotest.(check string)
-    "LLM-native keeper aliases are not public MCP"
-    "mixed"
-    (Surface.tool_surface_class_to_string
-       (Surface.tool_surface_class_for_tool_names [ "Execute" ]));
-  Alcotest.(check string)
-    "keeper private surface stays mixed"
-    "mixed"
-    (Surface.tool_surface_class_to_string
-       (Surface.tool_surface_class_for_tool_names
-          [ "keeper_board_post"; "masc_tasks" ]))
-;;
-
 let test_run_tools_setup_has_no_direct_public_mcp_catalog_read () =
   let ic = open_in (source_path "lib/keeper/keeper_run_tools_setup.ml") in
   let source =
@@ -770,10 +745,6 @@ let () =
             "public names project through descriptor resolution"
             `Quick
             test_public_name_projection_uses_descriptor_resolution
-        ; test_case
-            "tool surface class uses keeper projection"
-            `Quick
-            test_surface_class_uses_keeper_projection
         ; test_case
             "keeper_run_tools_setup avoids public MCP catalog classifier"
             `Quick

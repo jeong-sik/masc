@@ -39,10 +39,9 @@ type ctx =
       turn:int -> messages:Agent_sdk.Types.message list ->
       current_tool_choice:Agent_sdk.Types.tool_choice option ->
       decay_discovered:bool -> unit ->
-      computed_tool_surface
+      string list * computed_tool_surface
   ; config : Workspace.config
-  ; keeper_tool_bundle : Keeper_tools_oas.tool_bundle
-  ; keeper_has_owned_active_task : unit -> bool
+  ; keeper_tools_cleanup : unit -> unit
   ; manifest_keeper_turn_id : int option
   ; meta : Keeper_meta_contract.keeper_meta
   ; reported_tool_names_ref : string list ref
@@ -89,7 +88,7 @@ let assemble_hooks
   let agent_name = ctx.agent_name in
   let compute_tool_surface = ctx.compute_tool_surface in
   let config = ctx.config in
-  let keeper_tool_bundle = ctx.keeper_tool_bundle in
+  let keeper_tools_cleanup = ctx.keeper_tools_cleanup in
   let manifest_keeper_turn_id = ctx.manifest_keeper_turn_id in
   let meta = ctx.meta in
   let reported_tool_names_ref = ctx.reported_tool_names_ref in
@@ -105,7 +104,7 @@ let assemble_hooks
   let tool_usage_before = ctx.tool_usage_before in
   let tools = ctx.tools in
   let all_tool_names = ctx.all_tool_names in
-  let initial_tool_surface =
+  let initial_schema_filter, initial_tool_surface =
     compute_tool_surface
       ~turn:(start_turn_count + 1)
       ~messages:history_messages
@@ -115,11 +114,6 @@ let assemble_hooks
   in
   acc.tool_surface
   <- { turn_lane = initial_tool_surface.lane
-     ; tool_surface_class = initial_tool_surface.tool_surface_class
-     ; tool_requirement = initial_tool_surface.tool_requirement
-     ; allowed_tool_count =
-         List.length initial_tool_surface.turn_allowed_tool_names
-     ; tool_surface_fallback_used = initial_tool_surface.tool_surface_fallback_used
      ; config_root
      ; runtime_config_path
      ; gemini_mcp_disabled
@@ -129,7 +123,7 @@ let assemble_hooks
   let initial_tool_surface = initial_tool_surface in
   Keeper_run_tools_hook_accumulator.record_requested_tool_names
       acc
-      initial_tool_surface.turn_allowed_tool_names;
+      initial_schema_filter;
     let meta_ref = ref acc.meta in
     let public_alias_pre_tool_use_guard ~tool_name ~input:_ =
       Keeper_tool_resolution.public_alias_guidance_for_internal_call
@@ -302,10 +296,9 @@ let assemble_hooks
                       let nudge =
                         Printf.sprintf
                           "[CLAIMED TASK] You hold %s. Do NOT call claim_next again. Use \
-                           an execution tool visible in your active runtime schema to \
-                           start working on it now. If no execution tool is visible, \
-                           emit [STATE] with the blocker instead of inventing a tool \
-                           name."
+                           an execution tool from your active runtime schema to start \
+                           working on it now. If no execution tool is available, emit \
+                           [STATE] with the blocker instead of inventing a tool name."
                           (Keeper_id.Task_id.to_string task_id)
                       in
                       match ctx with
@@ -314,7 +307,7 @@ let assemble_hooks
                     else ctx
                   | None -> ctx
                 in
-                let computed_surface =
+                let schema_filter, computed_surface =
                   compute_tool_surface
                     ~turn
                     ~messages
@@ -322,26 +315,7 @@ let assemble_hooks
                     ~decay_discovered:true
                     ()
                 in
-                if Keeper_types_profile.keeper_debug
-                then
-                  Log.Keeper.info
-                    "tool_disclosure keeper=%s core=%d deterministic_prefilter=%d \
-                     discovered=%d llm_selected=%d llm_rerank=%b allowed=%d query_len=%d \
-                     mode=%s"
-                    meta.name
-                    computed_surface.core_count
-                    computed_surface.deterministic_prefilter_count
-                    computed_surface.discovered_count
-                    computed_surface.llm_selected_count
-                    (Keeper_config.keeper_llm_rerank_enabled ())
-                    (List.length computed_surface.turn_allowed_tool_names)
-                    (String.length computed_surface.query_text)
-                    (Keeper_agent_tool_surface.tool_selection_mode_to_string
-                       computed_surface.selection_mode);
-                let turn_allowed_tool_names =
-                  computed_surface.turn_allowed_tool_names
-                in
-                let tool_allowed name = List.mem name turn_allowed_tool_names in
+                let tool_allowed name = List.mem name schema_filter in
                 let last_turn_decision_hint =
                   if tool_allowed "keeper_board_post"
                   then
@@ -435,28 +409,21 @@ let assemble_hooks
                     computed_surface.per_call_max_turns
                     computed_surface.is_last_turn;
                 let tool_filter =
-                  Agent_sdk.Guardrails.AllowList turn_allowed_tool_names
+                  Agent_sdk.Guardrails.AllowList schema_filter
                 in
                 let clear_inherited_strict_tool_choice = function
                   | Some (Agent_sdk.Types.Any | Agent_sdk.Types.Tool _) -> None
                   | other -> other
                 in
                 let tool_choice =
-                  (* Tool gates are advisory. Do not preserve strict inherited
-                     [tool_choice=Any/Tool] in the keeper turn path. *)
                   clear_inherited_strict_tool_choice current_params.tool_choice
                 in
                 let lane = computed_surface.lane in
                 Keeper_run_tools_hook_accumulator.record_requested_tool_names
                   acc
-                  turn_allowed_tool_names;
+                  schema_filter;
                 acc.tool_surface
                 <- { turn_lane = lane
-                   ; tool_surface_class = computed_surface.tool_surface_class
-                   ; tool_requirement = computed_surface.tool_requirement
-                   ; allowed_tool_count = List.length turn_allowed_tool_names
-                   ; tool_surface_fallback_used =
-                       computed_surface.tool_surface_fallback_used
                    ; config_root
                    ; runtime_config_path
                    ; gemini_mcp_disabled
@@ -497,16 +464,9 @@ let assemble_hooks
                   ~allowed_paths:(Keeper_alerting_path.effective_allowed_paths ~meta)
                   ~network_mode:(Keeper_types_profile_sandbox.network_mode_to_string meta.network_mode)
                   ?approval_mode:approval_mode_effective
-                  ~tool_surface_class:
-                    (Keeper_agent_tool_surface.tool_surface_class_to_string
-                       computed_surface.tool_surface_class)
-                  ~allowed_tool_count:(List.length turn_allowed_tool_names)
                   ~runtime_profile:runtime_id_string
                   ();
-                (let now = Time_compat.now () in
-                 let hook_elapsed_ms =
-                   Keeper_timing.round1 ((now -. hook_t0) *. 1000.0)
-                 in
+                (ignore hook_t0;
                  Keeper_registry.set_turn_decision_stage
                    ~base_path:config.base_path
                    meta.name
@@ -533,55 +493,7 @@ let assemble_hooks
                    [validate_runtime_transition]. *)
                  Keeper_registry.mark_turn_provider_attempt_started
                    ~base_path:config.base_path
-                   meta.name;
-                 let disclosure_json =
-                   `Assoc
-                     [ "ts_unix", `Float now
-                     ; "event", `String "tool_disclosure"
-                     ; "keeper_name", `String meta.name
-                     ; "turn", `Int turn
-                     ; ( "checkpoint_start_turn"
-                       , `Int computed_surface.checkpoint_start_turn )
-                     ; "per_call_turn", `Int computed_surface.per_call_turn
-                     ; "per_call_max_turns", `Int computed_surface.per_call_max_turns
-                     ; ( "selection_mode"
-                       , Keeper_agent_tool_surface.tool_selection_mode_to_yojson
-                           computed_surface.selection_mode )
-                     ; "core_count", `Int computed_surface.core_count
-                     ; ( "deterministic_prefilter_count"
-                       , `Int computed_surface.deterministic_prefilter_count )
-                     ; "discovered_count", `Int computed_surface.discovered_count
-                     ; "llm_selected_count", `Int computed_surface.llm_selected_count
-                     ; "final_allowed", `Int (List.length turn_allowed_tool_names)
-                     ; ( "allowed_tool_names"
-                       , Json_util.json_string_list turn_allowed_tool_names )
-                     ; ( "turn_lane"
-                       , Keeper_agent_tool_surface.turn_lane_to_yojson lane )
-                     ; ( "tool_surface_class"
-                       , Keeper_agent_tool_surface.tool_surface_class_to_yojson
-                           computed_surface.tool_surface_class )
-                     ; ( "tool_requirement"
-                       , tool_requirement_to_yojson computed_surface.tool_requirement )
-                     ; ( "tool_surface_fallback_used"
-                       , `Bool computed_surface.tool_surface_fallback_used )
-                     ; "hook_ms", `Float hook_elapsed_ms
-                     ]
-                 in
-                 try
-                   Keeper_types_support.append_jsonl_line
-                     (Keeper_types_support.keeper_decision_log_path config meta.name)
-                     disclosure_json
-                 with
-                 | Eio.Cancel.Cancelled _ as e -> raise e
-                 | exn ->
-                   Prometheus.inc_counter
-                     Keeper_metrics.(to_string DecisionAuditFlushFailures)
-                     ~labels:[ "keeper", meta.name ]
-                     ();
-                   Log.Keeper.warn
-                     "keeper:%s tool_disclosure jsonl append failed: %s"
-                     meta.name
-                     (Printexc.to_string exn));
+                   meta.name);
                 Eio.Fiber.yield ();
                 Agent_sdk.Hooks.AdjustParams
                   { current_params with
@@ -663,7 +575,7 @@ let assemble_hooks
     in
     Ok
       { tools
-      ; cleanup = keeper_tool_bundle.cleanup
+      ; cleanup = keeper_tools_cleanup
       ; hooks
       ; reducer
       ; acc

@@ -19,8 +19,6 @@ type turn_context =
   ; allowed_paths : string list option
   ; network_mode : string option
   ; approval_mode : string option
-  ; tool_surface_class : string option
-  ; allowed_tool_count : int option
   ; runtime_profile : string option
   }
 
@@ -44,8 +42,6 @@ val set_turn_context :
   ?allowed_paths:string list ->
   ?network_mode:string ->
   ?approval_mode:string ->
-  ?tool_surface_class:string ->
-  ?allowed_tool_count:int ->
   ?runtime_profile:string ->
   unit ->
   unit

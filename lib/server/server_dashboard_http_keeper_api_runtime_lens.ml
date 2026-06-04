@@ -147,29 +147,6 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                   ( "turn_lane",
                     Json_util.string_opt_to_json
                       (Json_util.get_string tool_decision "turn_lane") );
-                  ( "tool_surface_class",
-                    Json_util.string_opt_to_json
-                      (Json_util.get_string tool_decision
-                         "tool_surface_class") );
-                  ( "tool_requirement",
-                    Json_util.string_opt_to_json
-                      (first_string_opt
-                         [
-                           Json_util.get_string tool_decision
-                             "tool_requirement";
-                           Json_util.get_string lane_decision
-                             "tool_requirement";
-                         ]) );
-                  ( "allowed_tool_count",
-                    Json_util.int_opt_to_json
-                      (first_int_opt
-                         [
-                           Json_util.get_int tool_decision "allowed_tool_count";
-                           Json_util.get_int lane_decision "effective_tool_count";
-                         ]) );
-                  ( "tool_surface_fallback_used",
-                    Json_util.bool_opt_to_json
-                      (Json_util.get_bool tool_decision "tool_surface_fallback_used") );
                   ("terminal_status", `String tool_runtime_status);
                 ] );
             ( "provider_lane",

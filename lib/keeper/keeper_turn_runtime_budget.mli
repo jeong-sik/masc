@@ -21,7 +21,6 @@ type runtime_execution = {
 val next_fail_open_runtime_for_turn :
   base_runtime:string ->
   effective_runtime:string ->
-  tool_requirement:Keeper_agent_tool_surface.tool_requirement ->
   attempted_runtimes:string list ->
   Agent_sdk.Error.sdk_error ->
   EC.degraded_retry option
@@ -175,7 +174,6 @@ type degraded_retry_budget_decision =
 val next_fail_open_runtime_for_turn_with_budget :
   base_runtime:string ->
   effective_runtime:string ->
-  tool_requirement:Keeper_agent_tool_surface.tool_requirement ->
   attempted_runtimes:string list ->
   estimated_input_tokens:int ->
   max_turns:int ->

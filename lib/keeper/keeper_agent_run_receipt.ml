@@ -160,10 +160,6 @@ let finalize
     ; completion_contract_result
     ; tool_surface =
         { turn_lane = acc.tool_surface.turn_lane
-        ; tool_surface_class = acc.tool_surface.tool_surface_class
-        ; tool_requirement = acc.tool_surface.tool_requirement
-        ; allowed_tool_count = acc.tool_surface.allowed_tool_count
-        ; tool_surface_fallback_used = acc.tool_surface.tool_surface_fallback_used
         ; materialized_tools = !materialized_tool_names_ref
         }
     ; sandbox_kind = Keeper_execution_receipt.sandbox_kind_of_meta meta
@@ -303,8 +299,8 @@ let finalize
     ~status:"recorded"
     ~decision:
       (Keeper_runtime_manifest.tool_lineage
-         ~searched_tool_names:initial_tool_surface.deterministic_prefilter
-         ~allowed_tool_names:initial_tool_surface.turn_allowed_tool_names
+         ~searched_tool_names:[]
+         ~allowed_tool_names:acc.requested_tool_names
          ~materialized_tool_names:!materialized_tool_names_ref
          ~emitted_tool_names:!reported_tool_names_ref
          ~executed_tool_names:!observed_tool_names_ref

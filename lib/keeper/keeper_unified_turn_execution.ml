@@ -77,7 +77,6 @@ let run (ctx : ctx)
       ~(keeper_profile : Keeper_types_profile.keeper_profile_defaults)
       ~(max_turns : int)
       ~(max_idle_turns : int)
-      ~(initial_tool_requirement : Keeper_agent_tool_surface.tool_requirement)
       ~(user_message : string)
       ~(registry_base_path : string)
       ~(degraded_retry_slot_phase_budget_sec : float)
@@ -448,7 +447,6 @@ let run (ctx : ctx)
           next_fail_open_runtime_for_turn_with_budget
             ~base_runtime:(runtime_id_of_meta meta)
             ~effective_runtime:execution_runtime_id
-            ~tool_requirement:initial_tool_requirement
             ~attempted_runtimes
             ~estimated_input_tokens:prompt_timeout_estimate_tokens
             ~max_turns

@@ -1,4 +1,4 @@
-(** Tool-surface gating, selection constants, and backlog task reconciliation. *)
+(** Tool selection constants and backlog task reconciliation. *)
 
 module String_set = Set_util.StringSet
 
@@ -18,32 +18,14 @@ let should_log_unexpected_tool_partial_once ~keeper_name ~unexpected_tool_names 
         Hashtbl.replace unexpected_tool_partial_warned key ();
         true))
 
-type tool_requirement =
-  | Optional
-  | No_tools
-
-let tool_requirement_to_string = function
-  | Optional -> "optional"
-  | No_tools -> "none"
-
-let tool_requirement_of_string = function
-  | "optional" -> Some Optional
-  | "none" -> Some No_tools
-  | _ -> None
-
-let tool_requirement_to_yojson = function
-  | Optional -> `String "optional"
-  | No_tools -> `String "none"
-
 (* Closed sum type for turn_lane.  Two producers emit values:
    - keeper_run_tools.ml emits the per-turn lanes
      (text_only, tool_optional, tool_disabled, retry).
    - keeper_turn_helpers.pre_dispatch_tool_surface emits the
      [Lane_pre_dispatch] placeholder before the per-turn lane logic
      runs.
-   No [@@deriving tla] because the module-level all_symbols binding
-   is reserved for tool_surface_class (a future RFC spec extension
-   can add TurnLaneSet and lift this). *)
+   No [@@deriving tla] because this is a small runtime-local lane
+   label, not a spec catalog. *)
 type turn_lane =
   | Lane_pre_dispatch
   | Lane_text_only
@@ -68,69 +50,8 @@ let turn_lane_of_string = function
 
 let turn_lane_to_yojson lane = `String (turn_lane_to_string lane)
 
-(* Closed sum type for tool-surface selection mode.  See .mli for
-   rationale (avoids name collision with Keeper_skill_routing and
-   Keeper_alerting, each of which owns its own selection_mode). *)
-type tool_selection_mode =
-  | Selection_deterministic_plus_llm_hint
-  | Selection_core_plus_prefilter_plus_discovered
-
-let tool_selection_mode_to_string = function
-  | Selection_deterministic_plus_llm_hint -> "deterministic_plus_llm_hint"
-  | Selection_core_plus_prefilter_plus_discovered ->
-    "core_plus_prefilter_plus_discovered"
-
-let tool_selection_mode_of_string = function
-  | "deterministic_plus_llm_hint" -> Some Selection_deterministic_plus_llm_hint
-  | "core_plus_prefilter_plus_discovered" ->
-    Some Selection_core_plus_prefilter_plus_discovered
-  | _ -> None
-
-let tool_selection_mode_to_yojson m =
-  `String (tool_selection_mode_to_string m)
-
-
-(* Closed sum type for tool_surface_class.  Mirrors RFC-0065 §3.2.2
-   KeeperToolSurface SurfaceClassSet so the correspondence harness can
-   drop the hand-pinned label list.  [@tla.symbol "…"] fixes the wire
-   representation across JSON, Prometheus labels, dashboard surface,
-   and the .tla catalog. *)
-type tool_surface_class =
-  | Surface_none [@tla.symbol "none"]
-  | Surface_public_only [@tla.symbol "public_only"]
-  | Surface_mixed [@tla.symbol "mixed"]
-[@@deriving tla]
-
-(* [@tla.symbol] is the single source of truth for the wire form:
-   - to_tla_symbol (ppx-generated) emits the symbol attached per variant
-   - all_symbols / all_states (ppx-generated) enumerate the type
-   Defining the JSON/Prometheus surface in terms of [to_tla_symbol]
-   guarantees JSON ↔ spec parity cannot drift even if a variant or its
-   symbol changes.  Addresses the SSOT concern in PR #14647 review. *)
-let tool_surface_class_to_string = to_tla_symbol
-
-let tool_surface_class_of_string raw =
-  List.find_opt
-    (fun cls -> String.equal (to_tla_symbol cls) raw)
-    all_states
-
-let tool_surface_class_to_yojson cls =
-  `String (tool_surface_class_to_string cls)
-
-let tool_surface_class_for_tool_names = function
-  | [] -> Surface_none
-  | names
-    when List.for_all
-           Keeper_tool_descriptor_resolution.is_public_mcp_surface_name
-           names -> Surface_public_only
-  | _ -> Surface_mixed
-
 type tool_surface_metrics =
   { turn_lane : turn_lane
-  ; tool_surface_class : tool_surface_class
-  ; tool_requirement : tool_requirement
-  ; allowed_tool_count : int
-  ; tool_surface_fallback_used : bool
   ; config_root : string
   ; runtime_config_path : string option
   ; gemini_mcp_disabled : bool
@@ -139,25 +60,13 @@ type tool_surface_metrics =
   }
 
 type computed_tool_surface =
-  { turn_allowed_tool_names : string list
-  ; absolute_turn : int
+  { absolute_turn : int
   ; checkpoint_start_turn : int
   ; per_call_turn : int
   ; per_call_max_turns : int
-  ; core_count : int
-  ; deterministic_prefilter : string list
-  ; deterministic_prefilter_count : int
-  ; discovered_count : int
-  ; llm_selected_count : int
-  ; selection_mode : tool_selection_mode
   ; is_last_turn : bool
   ; is_warning_zone : bool
-  ; tool_surface_class : tool_surface_class
-  ; tool_requirement : tool_requirement
-  ; claim_context_allowed : bool
-  ; tool_surface_fallback_used : bool
   ; lane : turn_lane
-  ; query_text : string
   }
 
 type turn_affordance =
@@ -266,16 +175,6 @@ let sync_current_task_id_for_agent_name =
 
 let tool_names =
   List.map Keeper_tool_name.to_string
-
-let fallback_floor_tool_names =
-  tool_names
-    Keeper_tool_name.[
-      Context_status;
-      Task_claim;
-      Tasks_list;
-      Board_list;
-      Board_get;
-    ]
 
 let is_claim_tool_name name =
   Keeper_tool_progress.is_claim_tool_name name

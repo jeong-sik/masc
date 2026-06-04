@@ -87,15 +87,8 @@ let redacted_runtime_observation_to_json
 
 let tool_surface_json ~(tool_call_count : int) ~(tools_used : string list)
     (result : Keeper_agent_run.run_result option) =
-  let requirement =
-    match result with
-    | Some r -> Some r.tool_surface.tool_requirement
-    | None -> None
-  in
+  ignore result;
   `Assoc
-    [ ("requirement", match requirement with
-      | Some r -> Keeper_agent_tool_surface.tool_requirement_to_yojson r
-      | None -> `String "unknown")
-    ; ("tool_call_count", `Int tool_call_count)
+    [ ("tool_call_count", `Int tool_call_count)
     ; ("tools_used", `List (List.map (fun value -> `String value) tools_used))
     ]

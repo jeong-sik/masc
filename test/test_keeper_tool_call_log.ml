@@ -252,8 +252,6 @@ let test_turn_context_fields_stored () =
       ~allowed_paths:["/tmp/k-sandbox"; "/tmp/shared"]
       ~network_mode:"inherit"
       ~approval_mode:"manual"
-      ~tool_surface_class:"execution"
-      ~allowed_tool_count:2
       ~runtime_profile:"tool_use_strict"
       ();
     Keeper_tool_call_log.log_call

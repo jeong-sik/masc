@@ -796,7 +796,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
            ("trace_history_count", `Int trace_history_count);
            ("handoff_count_total", `Int trace_history_count);
            ("last_compaction_saved_tokens", `Int last_compaction_saved_tokens);
-           ("allowed_tool_count", `Int (List.length allowed_tools));
            ("sandbox_profile",
              `String (sandbox_profile_to_string m.sandbox_profile));
            ("network_mode",

@@ -150,17 +150,8 @@ type keeper_runtime_mcp_log_context = {
   allowed_paths : string list option;
   network_mode : string option;
   approval_mode : string option;
-  tool_surface_class : string option;
-  allowed_tool_count : int option;
   runtime_profile : string option;
 }
-
-let runtime_mcp_tool_surface_class allowed_tool_names =
-  if allowed_tool_names = [] then "none"
-  else if List.for_all Tool_catalog.is_public_mcp allowed_tool_names then
-    "public_only"
-  else
-    "mixed"
 
 let runtime_mcp_keeper_log_context_of_entry
     ?mcp_session_id
@@ -187,11 +178,6 @@ let runtime_mcp_keeper_log_context_of_entry
     match entry.meta.active_goal_ids with
     | [] -> None
     | ids -> Some ids
-  in
-  let allowed_tool_names =
-    Keeper_tool_policy.keeper_allowed_tool_names
-      ~phase:entry.phase
-      entry.meta
   in
   let config = Workspace.default_config entry.base_path in
   let profile_defaults =
@@ -220,9 +206,6 @@ let runtime_mcp_keeper_log_context_of_entry
     network_mode =
       Some (Keeper_types_profile_sandbox.network_mode_to_string entry.meta.network_mode);
     approval_mode = keeper_oas_context.gemini_approval_mode;
-    tool_surface_class =
-      Some (runtime_mcp_tool_surface_class allowed_tool_names);
-    allowed_tool_count = Some (List.length allowed_tool_names);
     runtime_profile =
       (try Some (Keeper_meta_contract.runtime_id_of_meta entry.meta)
        with Failure _ -> None);
@@ -333,8 +316,6 @@ let record_runtime_mcp_keeper_trajectory
       ?allowed_paths:ctx.allowed_paths
       ?network_mode:ctx.network_mode
       ?approval_mode:ctx.approval_mode
-      ?tool_surface_class:ctx.tool_surface_class
-      ?allowed_tool_count:ctx.allowed_tool_count
       ?runtime_profile:ctx.runtime_profile
       ()
   in
@@ -419,8 +400,6 @@ let record_runtime_mcp_keeper_tool_trace
     ?allowed_paths:ctx.allowed_paths
     ?network_mode:ctx.network_mode
     ?approval_mode:ctx.approval_mode
-    ?tool_surface_class:ctx.tool_surface_class
-    ?allowed_tool_count:ctx.allowed_tool_count
     ?runtime_profile:ctx.runtime_profile
     ~result_bytes:(String.length message)
     ();

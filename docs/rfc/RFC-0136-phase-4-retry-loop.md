@@ -29,7 +29,7 @@ implementation_prs: [16701, 16709, 16751]
 | retry_loop body 종료 | L1700 (추정 ±20) |
 | retry_loop 본체 LOC | ~1100 |
 | retry_loop 명시 args | 7 (`run_meta`, `execution`, `run_generation`, `attempt`, `is_retry`, `allow_degraded_wall_clock_retry_budget`, `attempted_runtimes`) |
-| outer closure deps | 15+ (config, meta, cycle_completed, keeper_turn_id, append_manifest, runtime_manifest_context, effective_runtime_id, profile_defaults, fail_open_rotation_runtimes, initial_tool_requirement, clock, turn_started_at, turn_deadline, do_run, ...) |
+| outer closure deps | 14+ (config, meta, cycle_completed, keeper_turn_id, append_manifest, runtime_manifest_context, effective_runtime_id, profile_defaults, fail_open_rotation_runtimes, clock, turn_started_at, turn_deadline, do_run, ...) |
 | nested helpers | `do_run` (L478), `mark_terminal_error` (L616, **9 call sites**), `attempt_result` (L680), `max_turns` (L670), `execution_runtime_id` (L613), `attempt_timeout_budget` ref (L669) |
 
 ### 1.1 Single-PR 불가 정량 근거
@@ -61,7 +61,7 @@ implementation_prs: [16701, 16709, 16751]
 | 항목 | 값 |
 |------|-----|
 | Source | L436-602 (~167 LOC) |
-| Scope | timeout_sec, turn_started_at, turn_deadline, remaining_turn_budget_s, retry_phase_started_at, elapsed_ms, current_turn_phase_elapsed_ms, keeper_profile, max_idle_turns, max_turns, initial_tool_requirement, do_run, fail_open_rotation_runtimes |
+| Scope | timeout_sec, turn_started_at, turn_deadline, remaining_turn_budget_s, retry_phase_started_at, elapsed_ms, current_turn_phase_elapsed_ms, keeper_profile, max_idle_turns, max_turns, do_run, fail_open_rotation_runtimes |
 | Target module | `keeper_unified_turn_retry_setup.{ml,mli}` |
 | Closure deps | config, meta, channel, observation, clock, generation |
 | 추정 LOC delta | `keeper_unified_turn.ml` 1742 → ~1575 (-167) |
@@ -81,7 +81,6 @@ type retry_setup =
   ; keeper_profile : Keeper_types_profile.keeper_profile_defaults
   ; max_idle_turns : int
   ; max_turns : int
-  ; initial_tool_requirement : Keeper_agent_tool_surface.tool_requirement
   ; do_run : ...  (* TBD — closure spec 후속 측정 *)
   ; fail_open_rotation_runtimes : string list
   }

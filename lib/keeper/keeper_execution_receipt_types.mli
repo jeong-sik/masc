@@ -16,13 +16,8 @@ type receipt_authority_violation = { outcome : string; turn_state : string; }
 val assert_receipt_authoritative :
   outcome:[< `Cancelled | `Error | `Ok | `Skipped ] ->
   turn_state:string -> (unit, receipt_authority_violation) result
-type tool_requirement = Keeper_agent_tool_surface.tool_requirement
 type tool_surface = {
   turn_lane : Keeper_agent_tool_surface.turn_lane;
-  tool_surface_class : Keeper_agent_tool_surface.tool_surface_class;
-  tool_requirement : Keeper_agent_tool_surface.tool_requirement;
-  allowed_tool_count : int;
-  tool_surface_fallback_used : bool;
   materialized_tools : string list;
 }
 type slot_release_phase =

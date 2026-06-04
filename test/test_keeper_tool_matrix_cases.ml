@@ -374,6 +374,8 @@ let keeper_expectation_for_name name =
           "validation error";
           "not claimed";
           "default runtime not initialized";
+          "evidence is insufficient";
+          "Task-completion evidence";
         ]
   | "tool_read_file" ->
       (* Playground resolves paths under .masc/playground/<agent>/ but

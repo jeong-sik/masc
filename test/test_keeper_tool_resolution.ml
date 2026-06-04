@@ -170,7 +170,6 @@ let policy_tool_names =
       "masc_add_task";
       "masc_agent_card";
       "masc_agents";
-      "masc_approval_pending";
       "masc_batch_add_tasks";
       "masc_broadcast";
       "masc_claim_next";

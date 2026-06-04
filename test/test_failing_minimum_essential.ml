@@ -8,8 +8,8 @@
 
     Properties pinned:
     1. Shard floor preserved (5 base read-only tools present).
-    2. Essential MASC subset present (masc_status / web_search / web_fetch /
-       approval_pending) — mirrors [masc.essential] in tool_policy.toml.
+    2. Essential MASC subset present (masc_status / web_search / web_fetch)
+       — mirrors [masc.essential] in tool_policy.toml.
     3. No duplicates (sort_uniq).
     4. Non-empty (TLA+ ToolSetNeverEmpty). *)
 
@@ -33,8 +33,7 @@ let test_includes_essential_masc () =
   in
   assert_includes "masc_status";
   assert_includes "masc_web_search";
-  assert_includes "masc_web_fetch";
-  assert_includes "masc_approval_pending"
+  assert_includes "masc_web_fetch"
 
 let test_no_duplicates () =
   let names = Masc.Keeper_tool_policy.failing_minimum_tool_names () in
@@ -54,7 +53,6 @@ let test_essential_masc_ssot_matches_toml () =
     "masc_status";
     "masc_web_search";
     "masc_web_fetch";
-    "masc_approval_pending";
   ] in
   Alcotest.(check (list string))
     "essential_masc_minimum_names mirrors [masc.essential] toml group"

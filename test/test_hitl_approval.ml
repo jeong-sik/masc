@@ -25,6 +25,16 @@ let temp_dir () =
   dir
 
 let meta_from_json json =
+  let json =
+    match json with
+    | `Assoc fields when not (List.mem_assoc "tool_access" fields) ->
+      let tool_access =
+        Masc.Keeper_meta_contract.default_tool_access_of_meta_json ()
+        |> List.map (fun name -> `String name)
+      in
+      `Assoc (("tool_access", `List tool_access) :: fields)
+    | _ -> json
+  in
   match Keeper_meta_json_parse.meta_of_json json with
   | Ok m -> m
   | Error e -> Alcotest.fail ("meta parse failed: " ^ e)
@@ -132,37 +142,6 @@ let test_approval_queue_failure_metric_labels_site () =
       in
       Alcotest.(check (float 0.0001)) "failure counter delta" 1.0
         (after -. before))
-
-let execute_approval_get args =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  Mcp_eio.set_net (Eio.Stdenv.net env);
-  Mcp_eio.set_clock (Eio.Stdenv.clock env);
-  let clock = Eio.Stdenv.clock env in
-  Eio.Switch.run @@ fun sw ->
-  let base_path = temp_dir () in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base_path)
-    (fun () ->
-      let raw_token =
-        match
-          Masc.Auth.create_token
-            base_path
-            ~agent_name:"approval-admin"
-            ~role:Types.Admin
-        with
-        | Ok (raw, _) -> raw
-        | Error err ->
-          Alcotest.fail
-            ("admin token setup failed: " ^ Masc_domain.masc_error_to_string err)
-      in
-      let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-      let result =
-        Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:"approval-get-test"
-          ~auth_token:raw_token
-          state ~name:"masc_approval_get" ~arguments:args
-      in
-      ((Tool_result.is_success result), (Tool_result.message result)))
 
 let with_test_config f =
   Eio_main.run @@ fun env ->
@@ -804,44 +783,6 @@ let test_approval_queue_keeps_sandbox_backend_out_of_runtime_contract () =
         false
         (has_assoc_key "sandbox_profile" detail_contract))
 
-let test_approval_get_dispatch_success () =
-  let initial_count = AQ.pending_count () in
-  let callback_result = ref None in
-  let input =
-    `Assoc [
-      ("path", `String "/tmp/operator-only");
-      ("payload", `Assoc [("secret", `String "full-input")]);
-    ]
-  in
-  let id =
-    AQ.submit_pending
-      ~keeper_name:"dispatch-detail-keeper"
-      ~tool_name:"tool_edit_file"
-      ~input
-      ~risk_level:AQ.Critical
-      ~on_resolution:(fun decision -> callback_result := Some decision)
-      ()
-  in
-  Fun.protect
-    ~finally:(fun () ->
-      ignore (AQ.resolve ~id ~decision:(Agent_sdk.Hooks.Reject "test cleanup")))
-    (fun () ->
-      let ok, payload =
-        execute_approval_get (`Assoc [("id", `String id)])
-      in
-      if not ok then Alcotest.fail ("dispatch approval_get failed: " ^ payload);
-      let open Yojson.Safe.Util in
-      let json = Yojson.Safe.from_string payload in
-      Alcotest.(check string) "dispatch detail id" id
-        (json |> member "id" |> to_string);
-      Alcotest.(check string) "dispatch includes full input"
-        (Yojson.Safe.to_string input)
-        (json |> member "input" |> Yojson.Safe.to_string));
-  Alcotest.(check int) "dispatch cleanup removes pending"
-    initial_count (AQ.pending_count ());
-  Alcotest.(check bool) "cleanup rejects callback" true
-    (match !callback_result with Some (Agent_sdk.Hooks.Reject _) -> true | _ -> false)
-
 let test_resolve_with_policy_remembers_medium_allow () =
   with_eio_base_path @@ fun base_path ->
       let id =
@@ -1016,34 +957,6 @@ let test_submit_pending_audit_uses_workspace_base_path () =
       Alcotest.(check (list string)) "env fallback has no workspace audit" []
         env_events)
 
-let test_approval_get_dispatch_missing_id () =
-  let ok, msg = execute_approval_get (`Assoc [("id", `String "")]) in
-  Alcotest.(check bool) "missing id fails" false ok;
-  Alcotest.(check bool) "missing id message" true
-    (contains_substring msg "id is required")
-
-let test_approval_get_dispatch_not_found () =
-  let ok, msg =
-    execute_approval_get (`Assoc [("id", `String "appr_missing")])
-  in
-  Alcotest.(check bool) "not found fails" false ok;
-  Alcotest.(check bool) "not found message" true
-    (contains_substring msg "no longer pending");
-  Alcotest.(check bool) "not found next action" true
-    (contains_substring msg "Refresh with masc_approval_pending")
-
-let test_approval_get_rejects_worker_role () =
-  match
-    Masc.Auth.authorize_tool_for_role ~agent_name:"worker"
-      ~role:Masc_domain.Worker ~tool_name:"masc_approval_get"
-  with
-  | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
-  | Error err ->
-      Alcotest.fail
-        (Printf.sprintf "expected forbidden, got %s"
-           (Masc_domain.masc_error_to_string err))
-  | Ok () -> Alcotest.fail "worker should not be allowed to call approval_get"
-
 (* ── 4. Approval callback integration ────────────────────── *)
 
 let test_callback_approves_low_risk () =
@@ -1202,26 +1115,54 @@ let test_sandbox_worktree_write_rule_rejects_unclaimed_or_root_checkout () =
        ~input:root_checkout_input
        ~risk_level:AQ.High)
 
-let test_callback_production_worktree_prepare_auto_approved () =
-  with_test_config @@ fun config ->
-  let pending_before = AQ.pending_count () in
-  let cb =
-    GP.to_oas_approval_callback
-      ~config ~governance_level:"production" ~keeper_name:"test" () in
-  let decision =
-    cb ~tool_name:"tool_execute"
-      ~input:(`Assoc [
-        ("task_id", `String "task-187");
-        ("repo_name", `String "masc");
-      ])
-  in
-  match decision with
-  | Agent_sdk.Hooks.Approve ->
-      Alcotest.(check int) "no pending approval"
-        pending_before (AQ.pending_count ())
-  | Agent_sdk.Hooks.Reject r ->
-      Alcotest.fail ("expected Approve for worktree preparation, got Reject: " ^ r)
-  | _ -> Alcotest.fail "unexpected decision"
+let test_callback_production_worktree_prepare_requires_approval () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Mcp_eio.set_net (Eio.Stdenv.net env);
+  Mcp_eio.set_clock (Eio.Stdenv.clock env);
+  Eio.Switch.run @@ fun sw ->
+  let initial_pending = AQ.pending_count () in
+  let result = ref None in
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+      let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+      let config = state.workspace_config in
+      Eio.Fiber.fork ~sw (fun () ->
+        let cb =
+          GP.to_oas_approval_callback
+            ~config ~governance_level:"production" ~keeper_name:"test" ()
+        in
+        let decision =
+          cb
+            ~tool_name:"tool_execute"
+            ~input:
+              (`Assoc
+                [ ("task_id", `String "task-187"); ("repo_name", `String "masc") ])
+        in
+        result := Some decision);
+      yield_until (fun () -> AQ.pending_count () = initial_pending + 1);
+      Alcotest.(check int)
+        "worktree preparation requires approval"
+        (initial_pending + 1)
+        (AQ.pending_count ());
+      let id =
+        match AQ.list_pending_json () with
+        | `List (`Assoc kvs :: _) ->
+          (match List.assoc_opt "id" kvs with
+           | Some (`String id) -> id
+           | _ -> Alcotest.fail "missing approval id")
+        | _ -> Alcotest.fail "expected pending approval entry"
+      in
+      (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
+       | Ok () -> ()
+       | Error err -> Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
+      yield_until (fun () -> Option.is_some !result);
+      match !result with
+      | Some Agent_sdk.Hooks.Approve -> ()
+      | Some _ -> Alcotest.fail "expected Approve after operator resolution"
+      | None -> Alcotest.fail "worktree preparation callback did not suspend for approval")
 
 let test_callback_paranoid_medium_risk_uses_remembered_policy () =
   with_eio_base_path @@ fun base_path ->
@@ -1500,14 +1441,6 @@ let () =
         test_approval_queue_get_pending_detail;
       Alcotest.test_case "runtime_contract redacts sandbox backend" `Quick
         test_approval_queue_keeps_sandbox_backend_out_of_runtime_contract;
-      Alcotest.test_case "dispatch approval_get success" `Quick
-        test_approval_get_dispatch_success;
-      Alcotest.test_case "dispatch approval_get missing id" `Quick
-        test_approval_get_dispatch_missing_id;
-      Alcotest.test_case "dispatch approval_get not found" `Quick
-        test_approval_get_dispatch_not_found;
-      Alcotest.test_case "approval_get rejects worker role" `Quick
-        test_approval_get_rejects_worker_role;
       Alcotest.test_case "resolve_with_policy remembers medium allow" `Quick
         test_resolve_with_policy_remembers_medium_allow;
       Alcotest.test_case "resolve_with_policy skips high allow memory" `Quick
@@ -1532,8 +1465,8 @@ let () =
         "sandbox worktree write routine rejects unclaimed/root checkout"
         `Quick
         test_sandbox_worktree_write_rule_rejects_unclaimed_or_root_checkout;
-      Alcotest.test_case "production worktree preparation auto-approved" `Quick
-        test_callback_production_worktree_prepare_auto_approved;
+      Alcotest.test_case "production worktree preparation requires approval" `Quick
+        test_callback_production_worktree_prepare_requires_approval;
       Alcotest.test_case "paranoid medium risk uses remembered policy" `Quick
         test_callback_paranoid_medium_risk_uses_remembered_policy;
       Alcotest.test_case "always_approve bypasses threshold" `Quick

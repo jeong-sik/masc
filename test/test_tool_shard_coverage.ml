@@ -284,73 +284,29 @@ let test_execute_unknown_tool () =
   let (ok, _json) = Tool_shard.execute "unknown_tool" (`Assoc []) in
   Alcotest.(check bool) "fails" false ok
 
-let test_execute_tool_list () =
-  let (ok, json) = Tool_shard.execute "masc_tool_list" (`Assoc []) in
-  Alcotest.(check bool) "succeeds" true ok;
-  let shards = Yojson.Safe.Util.(member "shards" json |> to_list) in
-  let all = Tool_shard.list_all_shards () in
-  Alcotest.(check int) "matches list_all_shards" (List.length all) (List.length shards)
-
-let test_execute_tool_list_with_agent () =
-  Tool_shard.remove_agent_shards "test-ex";
-  Tool_shard.set_agent_shards "test-ex" ["base"; "board"];
-  let (ok, json) = Tool_shard.execute "masc_tool_list"
-    (`Assoc [("agent_name", `String "test-ex")]) in
-  Alcotest.(check bool) "succeeds" true ok;
-  let active = Yojson.Safe.Util.(member "active_shards" json |> to_list) in
-  Alcotest.(check int) "2 active" 2 (List.length active);
-  Tool_shard.remove_agent_shards "test-ex"
-
-let test_execute_grant () =
-  Tool_shard.remove_agent_shards "test-grant";
-  Tool_shard.set_agent_shards "test-grant" ["base"];
-  let (ok, json) = Tool_shard.execute "masc_tool_grant"
-    (`Assoc [("agent_name", `String "test-grant"); ("shard_name", `String "board")]) in
-  Alcotest.(check bool) "succeeds" true ok;
-  let status = Yojson.Safe.Util.(member "status" json |> to_string) in
-  Alcotest.(check string) "granted" "granted" status;
-  Tool_shard.remove_agent_shards "test-grant"
-
-let test_execute_grant_missing_params () =
-  let (ok, json) = Tool_shard.execute "masc_tool_grant" (`Assoc []) in
-  Alcotest.(check bool) "fails" false ok;
-  let status = Yojson.Safe.Util.(member "status" json |> to_string) in
-  Alcotest.(check string) "error status" "error" status
-
-let test_execute_revoke () =
-  Tool_shard.remove_agent_shards "test-revoke";
-  Tool_shard.set_agent_shards "test-revoke" ["base"; "board"; "search_files"];
-  let (ok, json) = Tool_shard.execute "masc_tool_revoke"
-    (`Assoc [("agent_name", `String "test-revoke"); ("shard_name", `String "board")]) in
-  Alcotest.(check bool) "succeeds" true ok;
-  let status = Yojson.Safe.Util.(member "status" json |> to_string) in
-  Alcotest.(check string) "revoked" "revoked" status;
-  Tool_shard.remove_agent_shards "test-revoke"
-
-let test_execute_revoke_non_removable () =
-  Tool_shard.remove_agent_shards "test-rev-base";
-  Tool_shard.set_agent_shards "test-rev-base" ["base"; "board"];
-  let (ok, json) = Tool_shard.execute "masc_tool_revoke"
-    (`Assoc [("agent_name", `String "test-rev-base"); ("shard_name", `String "base")]) in
-  Alcotest.(check bool) "fails" false ok;
-  let status = Yojson.Safe.Util.(member "status" json |> to_string) in
-  Alcotest.(check string) "error" "error" status;
-  Tool_shard.remove_agent_shards "test-rev-base"
+let test_execute_retired_tool_names_are_unknown () =
+  List.iter
+    (fun name ->
+      let ok, json = Tool_shard.execute name (`Assoc []) in
+      Alcotest.(check bool) (name ^ " fails") false ok;
+      Alcotest.(check string)
+        (name ^ " unknown message")
+        ("Unknown tool: " ^ name)
+        Yojson.Safe.Util.(to_string json))
+    [ "masc_tool_list"; "masc_tool_grant"; "masc_tool_revoke" ]
 
 (* ============================================================
    schemas tests
    ============================================================ *)
 
 let test_schemas_count () =
-  Alcotest.(check int) "3 schemas" 3 (List.length Tool_shard.schemas)
+  Alcotest.(check int) "no schemas" 0 (List.length Tool_shard.schemas)
 
 let test_schemas_names () =
-  let names = List.map (fun (s : Masc_domain.tool_schema) -> s.name)
-    Tool_shard.schemas in
-  List.iter (fun expected ->
-    Alcotest.(check bool) (expected ^ " present") true
-      (List.mem expected names)
-  ) ["masc_tool_grant"; "masc_tool_revoke"; "masc_tool_list"]
+  Alcotest.(check (list string))
+    "no public masc_tool schemas"
+    []
+    (List.map (fun (s : Masc_domain.tool_schema) -> s.name) Tool_shard.schemas)
 
 (* ============================================================
    base_tools / board_tools content tests
@@ -593,12 +549,8 @@ let () =
     ]);
     ("execute", [
       Alcotest.test_case "unknown tool" `Quick test_execute_unknown_tool;
-      Alcotest.test_case "list" `Quick test_execute_tool_list;
-      Alcotest.test_case "list with agent" `Quick test_execute_tool_list_with_agent;
-      Alcotest.test_case "grant" `Quick test_execute_grant;
-      Alcotest.test_case "grant missing params" `Quick test_execute_grant_missing_params;
-      Alcotest.test_case "revoke" `Quick test_execute_revoke;
-      Alcotest.test_case "revoke non-removable" `Quick test_execute_revoke_non_removable;
+      Alcotest.test_case "retired masc_tool names" `Quick
+        test_execute_retired_tool_names_are_unknown;
     ]);
     ("schemas", [
       Alcotest.test_case "count" `Quick test_schemas_count;

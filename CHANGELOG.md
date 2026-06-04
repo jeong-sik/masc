@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Changed
+- Bumped the OAS agent SDK pin to `v0.203.0` at
+  `6807d1530ee6e1433dad4f8ce6fe5145a0fbc240` and raised the
+  dependency floor to `agent_sdk >= 0.203.0`.
+
 ### Added
 - RFC-0203 Phase 3: in-process Discord gateway
   (`Server_discord_in_process_gateway`) replaces the deleted Python

@@ -32,6 +32,17 @@
   routes (`/api/v1/gate/message` etc.) remain unchanged and continue
   to serve the other external connectors.
 
+## [0.19.37] - 2026-06-05
+
+### Changed
+- Bumped the OAS agent SDK pin to `v0.202.0` at
+  `c1ca73b9e0653350c57b7a74f3de64e2c0d303b0` and raised the masc
+  package metadata to `0.19.37`.
+
+### Removed
+- Dropped stale keeper SDK error handling for OAS error constructors that
+  no longer exist in the `0.202.0` agent SDK surface.
+
 ## [0.19.36] - 2026-06-04
 
 ### Changed

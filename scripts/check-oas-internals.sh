@@ -13,7 +13,7 @@
 #
 #   warn     (--include-internals):
 #     - `Llm_provider.Provider_kind` qualified module access
-#       outside lib/runtime/provider_kind_resolver.{ml,mli} and
+#       outside lib/runtime_model/provider_kind_resolver.{ml,mli} and
 #       lib/runtime/runtime_provider_credentials.{ml,mli} and
 #       lib/runtime/runtime_provider_labels.{ml,mli}
 #       (informational; allowed uses include serialization, type
@@ -101,7 +101,7 @@ scan_warn_provider_kind_external() {
   # Provider_kind qualified access outside runtime provider boundary helpers.
   local matches
   matches="$(rg -n 'Llm_provider\.Provider_kind|\bProvider_kind\.' lib/ "${RG_BASE_FLAGS[@]}" 2>/dev/null \
-    | grep -v 'lib/runtime/provider_kind_resolver\.' \
+    | grep -v 'lib/runtime_model/provider_kind_resolver\.' \
     | grep -v 'lib/runtime/runtime_provider_credentials\.' \
     | grep -v 'lib/runtime/runtime_provider_labels\.' \
     | filter_noise || true)"
@@ -122,8 +122,8 @@ scan_warn_constants_external() {
   local matches
   matches="$(rg -n 'Llm_provider\.Constants' lib/ "${RG_BASE_FLAGS[@]}" 2>/dev/null \
     | grep -v 'lib/oas_compat/' \
-    | grep -v 'lib/runtime/provider_kind_resolver\.' \
-    | grep -v 'lib/runtime/runtime_provider_defaults\.' \
+    | grep -v 'lib/runtime_model/provider_kind_resolver\.' \
+    | grep -v 'lib/runtime_model/runtime_provider_defaults\.' \
     | filter_noise || true)"
   if [[ -n "$matches" ]]; then
     if [[ "$strict_internals" -eq 1 ]]; then

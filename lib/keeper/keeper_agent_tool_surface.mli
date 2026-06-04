@@ -14,7 +14,7 @@ val should_log_unexpected_tool_partial_once :
   keeper_name:string -> unexpected_tool_names:string list -> bool
 
 (** Whether tools are available or absent for this turn.
-    Tool calls are never mandatory; the visible tool surface is advisory. *)
+    Tool calls are never mandatory; the allowed tool surface is advisory. *)
 type tool_requirement =
   | Optional
   | No_tools
@@ -90,7 +90,7 @@ type tool_surface_metrics =
   { turn_lane : turn_lane
   ; tool_surface_class : tool_surface_class
   ; tool_requirement : tool_requirement
-  ; visible_tool_count : int
+  ; allowed_tool_count : int
   ; tool_gate_enabled : bool
   ; tool_surface_fallback_used : bool
   ; config_root : string
@@ -103,7 +103,7 @@ type tool_surface_metrics =
 (** Result of computing the per-turn tool surface (selection +
     classification + lane). *)
 type computed_tool_surface =
-  { turn_visible_tool_names : string list
+  { turn_allowed_tool_names : string list
   ; absolute_turn : int
   ; checkpoint_start_turn : int
   ; per_call_turn : int

@@ -89,7 +89,7 @@ let ingest_turn_event
 let ingest_pr_event
     ~base_path
     ~pr_number
-    ~pr_url
+    ~pull_request_url
     ~pr_title
     ~pr_state
     ~repo
@@ -102,7 +102,7 @@ let ingest_pr_event
   let event =
     Pr_event
       { pr_number
-      ; pr_url
+      ; pull_request_url
       ; pr_title
       ; pr_state
       ; repo
@@ -223,7 +223,7 @@ let ingest_tool_event_from_hook
     ~timestamp_ms:(Int64.of_float (Unix.gettimeofday () *. 1000.0))
     ()
 
-let parse_pr_url_from_output (output : string) : (int * string) option =
+let parse_pull_request_link_from_output (output : string) : (int * string) option =
   let prefix = "https://github.com/" in
   let prefix_len = String.length prefix in
   let output_len = String.length output in
@@ -276,64 +276,64 @@ let ingest_pr_event_from_descriptor
     match extract_descriptor_from_output output_text with
     | Some (Ide_event_types.Gh_pr_create { title; base = _; draft = _ }) ->
       (* PR was created — try to get PR number from output URL *)
-      let pr_number, pr_url = match parse_pr_url_from_output output_text with
+      let pr_number, pull_request_url = match parse_pull_request_link_from_output output_text with
         | Some (n, url) -> (n, url)
         | None -> (0, "")
       in
       ingest_pr_event
-        ~base_path ~pr_number ~pr_url ~pr_title:title
+        ~base_path ~pr_number ~pull_request_url ~pr_title:title
         ~pr_state:"open" ~repo:"" ~keeper_id ~turn_id
         ~comment_count:0 ~review_status:None
         ~timestamp_ms:(Int64.of_float (Unix.gettimeofday () *. 1000.0))
     | Some (Ide_event_types.Gh_pr_merge { pr_number; squash = _ }) ->
       ingest_pr_event
-        ~base_path ~pr_number ~pr_url:"" ~pr_title:""
+        ~base_path ~pr_number ~pull_request_url:"" ~pr_title:""
         ~pr_state:"merged" ~repo:"" ~keeper_id ~turn_id
         ~comment_count:0 ~review_status:None
         ~timestamp_ms:(Int64.of_float (Unix.gettimeofday () *. 1000.0))
     | Some (Ide_event_types.Gh_pr_close { pr_number }) ->
       ingest_pr_event
-        ~base_path ~pr_number ~pr_url:"" ~pr_title:""
+        ~base_path ~pr_number ~pull_request_url:"" ~pr_title:""
         ~pr_state:"closed" ~repo:"" ~keeper_id ~turn_id
         ~comment_count:0 ~review_status:None
         ~timestamp_ms:(Int64.of_float (Unix.gettimeofday () *. 1000.0))
     | Some (Ide_event_types.Gh_pr_comment { pr_number; body = _ }) ->
       ingest_pr_event
-        ~base_path ~pr_number ~pr_url:"" ~pr_title:""
+        ~base_path ~pr_number ~pull_request_url:"" ~pr_title:""
         ~pr_state:"open" ~repo:"" ~keeper_id ~turn_id
         ~comment_count:1 ~review_status:None
         ~timestamp_ms:(Int64.of_float (Unix.gettimeofday () *. 1000.0))
     | Some (Ide_event_types.Gh_pr_edit { pr_number; title = _ }) ->
       ingest_pr_event
-        ~base_path ~pr_number ~pr_url:"" ~pr_title:""
+        ~base_path ~pr_number ~pull_request_url:"" ~pr_title:""
         ~pr_state:"open" ~repo:"" ~keeper_id ~turn_id
         ~comment_count:0 ~review_status:None
         ~timestamp_ms:(Int64.of_float (Unix.gettimeofday () *. 1000.0))
     | Some (Ide_event_types.Gh_pr_review { pr_number }) ->
       ingest_pr_event
-        ~base_path ~pr_number ~pr_url:"" ~pr_title:""
+        ~base_path ~pr_number ~pull_request_url:"" ~pr_title:""
         ~pr_state:"open" ~repo:"" ~keeper_id ~turn_id
         ~comment_count:0 ~review_status:None
         ~timestamp_ms:(Int64.of_float (Unix.gettimeofday () *. 1000.0))
     | Some (Ide_event_types.Gh_api_pr_create { repo; title; base = _ }) ->
-      let pr_number, pr_url = match parse_pr_url_from_output output_text with
+      let pr_number, pull_request_url = match parse_pull_request_link_from_output output_text with
         | Some (n, url) -> (n, url)
         | None -> (0, "")
       in
       ingest_pr_event
-        ~base_path ~pr_number ~pr_url ~pr_title:title
+        ~base_path ~pr_number ~pull_request_url ~pr_title:title
         ~pr_state:"open" ~repo ~keeper_id ~turn_id
         ~comment_count:0 ~review_status:None
         ~timestamp_ms:(Int64.of_float (Unix.gettimeofday () *. 1000.0))
     | Some (Ide_event_types.Gh_api_pr_merge { repo; pr_number }) ->
       ingest_pr_event
-        ~base_path ~pr_number ~pr_url:"" ~pr_title:""
+        ~base_path ~pr_number ~pull_request_url:"" ~pr_title:""
         ~pr_state:"merged" ~repo ~keeper_id ~turn_id
         ~comment_count:0 ~review_status:None
         ~timestamp_ms:(Int64.of_float (Unix.gettimeofday () *. 1000.0))
     | Some (Ide_event_types.Gh_api_pr_comment { repo; pr_number; body = _ }) ->
       ingest_pr_event
-        ~base_path ~pr_number ~pr_url:"" ~pr_title:""
+        ~base_path ~pr_number ~pull_request_url:"" ~pr_title:""
         ~pr_state:"open" ~repo ~keeper_id ~turn_id
         ~comment_count:1 ~review_status:None
         ~timestamp_ms:(Int64.of_float (Unix.gettimeofday () *. 1000.0))
@@ -341,14 +341,14 @@ let ingest_pr_event_from_descriptor
     | None ->
       (* Not a PR operation — fall back to heuristic output parsing *)
       if String.equal (String.lowercase_ascii tool_name) "execute" then
-        match parse_pr_url_from_output output_text with
-        | Some (pr_number, pr_url) ->
+        match parse_pull_request_link_from_output output_text with
+        | Some (pr_number, pull_request_url) ->
           let repo =
             let prefix = "https://github.com/" in
             let prefix_len = String.length prefix in
-            let url_len = String.length pr_url in
+            let url_len = String.length pull_request_url in
             if url_len > prefix_len then
-              let path = String.sub pr_url prefix_len (url_len - prefix_len) in
+              let path = String.sub pull_request_url prefix_len (url_len - prefix_len) in
               let parts = String.split_on_char '/' path in
               match parts with
               | owner :: repo_name :: _ -> owner ^ "/" ^ repo_name
@@ -356,16 +356,16 @@ let ingest_pr_event_from_descriptor
             else "unknown"
           in
           ingest_pr_event
-            ~base_path ~pr_number ~pr_url ~pr_title:""
+            ~base_path ~pr_number ~pull_request_url ~pr_title:""
             ~pr_state:"open" ~repo ~keeper_id ~turn_id
             ~comment_count:0 ~review_status:None
             ~timestamp_ms:(Int64.of_float (Unix.gettimeofday () *. 1000.0))
         | None -> ()
 
 (** Try to detect PR creation from Execute tool output and ingest a PR event.
-    Only fires when [tool_name = "execute"] and output contains a GitHub PR URL.
+    Only fires when [tool_name = "execute"] and output contains a GitHub pull request URL.
 
-    FIXME: This is a heuristic. It parses stdout/stderr for GitHub PR URLs
+    FIXME: This is a heuristic. It parses stdout/stderr for GitHub pull request URLs
     which is fragile — output format changes, non-GitHub hosts, or URL
     in unexpected position will silently miss. A dedicated [Pr_create] tool
     in the keeper vocabulary would make this deterministic. Until then,
@@ -378,14 +378,14 @@ let ingest_pr_event_from_hook
     ~tool_name
   =
   if String.equal (String.lowercase_ascii tool_name) "execute" then
-    match parse_pr_url_from_output output_text with
-    | Some (pr_number, pr_url) ->
+    match parse_pull_request_link_from_output output_text with
+    | Some (pr_number, pull_request_url) ->
       let repo =
         let prefix = "https://github.com/" in
         let prefix_len = String.length prefix in
-        let url_len = String.length pr_url in
+        let url_len = String.length pull_request_url in
         if url_len > prefix_len then
-          let path = String.sub pr_url prefix_len (url_len - prefix_len) in
+          let path = String.sub pull_request_url prefix_len (url_len - prefix_len) in
           let parts = String.split_on_char '/' path in
           match parts with
           | owner :: repo_name :: _ -> owner ^ "/" ^ repo_name
@@ -395,7 +395,7 @@ let ingest_pr_event_from_hook
       ingest_pr_event
         ~base_path
         ~pr_number
-        ~pr_url
+        ~pull_request_url
         ~pr_title:""
         ~pr_state:"open"
         ~repo

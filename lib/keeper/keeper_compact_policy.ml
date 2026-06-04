@@ -340,25 +340,25 @@ let compact_if_needed_typed
     (* RFC-0149 §3.2 PR-2 — the silent [max 0 (pre - post)] floor and
        the companion [metric_keeper_compaction_negative_savings] counter
        (a §1 telemetry-as-fix artefact) are replaced by a phantom-typed
-       [Token_count.saved] match.  The [`Divergent] arm carries the
+       [Keeper_token_count.saved] match.  The [`Divergent] arm carries the
        overrun magnitude as a typed payload that surfaces on the
        post-compact JSONL record below ([tokens_divergence] /
        [messages_divergence]), so operators can detect estimator
        drift without a free-floating Prometheus counter. *)
     let saved_tokens, tokens_divergence =
       match
-        Token_count.saved
-          ~pre:(Token_count.pre_estimate tok_count)
-          ~post:(Token_count.post_recount new_tok_count)
+        Keeper_token_count.saved
+          ~pre:(Keeper_token_count.pre_estimate tok_count)
+          ~post:(Keeper_token_count.post_recount new_tok_count)
       with
       | `Saved n -> n, None
       | `Divergent n -> 0, Some n
     in
     let saved_messages, messages_divergence =
       match
-        Token_count.saved
-          ~pre:(Token_count.pre_estimate msg_count)
-          ~post:(Token_count.post_recount new_msg_count)
+        Keeper_token_count.saved
+          ~pre:(Keeper_token_count.pre_estimate msg_count)
+          ~post:(Keeper_token_count.post_recount new_msg_count)
       with
       | `Saved n -> n, None
       | `Divergent n -> 0, Some n

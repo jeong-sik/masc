@@ -3,6 +3,8 @@ status: reference
 last_verified: 2026-04-17
 code_refs:
   - lib/server/
+  - lib/server/masc_grpc_server.ml
+  - lib/server/masc_grpc_service.ml
   - lib/masc_grpc_transport.ml
   - lib/sse.ml
   - lib/transport.ml
@@ -16,7 +18,7 @@ code_refs:
 |------|-----|
 | Status | Draft |
 | Team | Server |
-| Maps to | `lib/server/`, `lib/masc_grpc_transport.ml`, `lib/sse.ml`, `lib/transport.ml`, `lib/http_server_eio.ml`, `lib/http_server_h2.ml`, `lib/mcp_server_eio*.ml`, `bin/main_eio.ml`, `bin/main_stdio_eio.ml` |
+| Maps to | `lib/server/`, `lib/sse.ml`, `lib/transport.ml`, `lib/http_server_eio.ml`, `lib/http_server_h2.ml`, `lib/mcp_server_eio*.ml`, `bin/main_eio.ml`, `bin/main_stdio_eio.ml` |
 | Dependencies | 02-types-and-invariants |
 | Modules | 61 |
 | LOC | ~17,700 |
@@ -503,7 +505,7 @@ WebSocket 세션은 `ws-{timestamp_ms}-{counter}` 형식 ID를 사용한다. SHA
 
 ## 10. gRPC Service
 
-**소스**: `lib/server/masc_grpc_*.ml` + `lib/masc_grpc_transport.ml`
+**소스**: `lib/server/masc_grpc_server.ml`, `lib/server/masc_grpc_service.ml`, `lib/server/masc_grpc_client.ml`, `lib/server/masc_grpc_types.ml`, `lib/masc_grpc_transport.ml`
 
 ### 10.1 활성화
 
@@ -860,15 +862,15 @@ sequenceDiagram
 | `server_dashboard_http.ml` | 566 | Dashboard API 핸들러 |
 | `server_utils.ml` | 120 | 공용 유틸리티 |
 
-### 18.3 gRPC (`lib/server/masc_grpc_*.ml`)
+### 18.3 gRPC
 
 | Module | LOC | 역할 |
 |--------|-----|------|
-| `masc_grpc_types.ml` | 485 | gRPC 메시지 타입 (JSON wire format) |
-| `masc_grpc_service.ml` | 417 | gRPC 서비스 핸들러 |
-| `masc_grpc_server.ml` | 67 | gRPC 서버 시작 |
-| `masc_grpc_client.ml` | 150 | gRPC 클라이언트 |
-| `masc_grpc_transport.ml` | 24 | 트랜스포트 선택 로직 |
+| `lib/server/masc_grpc_types.ml` | 485 | gRPC 메시지 타입 (JSON wire format) |
+| `lib/server/masc_grpc_service.ml` | 417 | gRPC 서비스 핸들러 |
+| `lib/server/masc_grpc_server.ml` | 67 | gRPC 서버 시작 |
+| `lib/server/masc_grpc_client.ml` | 150 | gRPC 클라이언트 |
+| `lib/masc_grpc_transport.ml` | 24 | 트랜스포트 선택 로직 |
 
 ---
 

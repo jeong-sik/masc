@@ -50,11 +50,6 @@ let all_flags : flag list = [
     default = true; category = "transport";
     lifecycle = Active; since = "2.120.0" };
 
-  { env_name = "MASC_OPENAI_COMPAT";
-    description = "OpenAI-compatible /v1/chat/completions endpoint";
-    default = false; category = "transport";
-    lifecycle = Active; since = "2.80.0" };
-
   { env_name = "MASC_HTTP_AUTH_STRICT";
     description = "Require auth for all HTTP endpoints (not just /mcp)";
     default = false; category = "transport";

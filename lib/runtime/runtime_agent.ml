@@ -805,9 +805,4 @@ let run_with_masc_tools
       in
       let config = { config with tools = oas_tools @ config.tools } in
       run ~sw ~net ~config ?on_event ?on_yield ?on_resume goal
-  | _ ->
-      Error
-        (invalid_runtime_config "tool_support"
-           (Printf.sprintf
-              "%s does not support inline tools or request-scoped runtime MCP tools"
-              (provider_label config.provider_cfg)))
+  | _ -> run ~sw ~net ~config ?on_event ?on_yield ?on_resume goal

@@ -33,11 +33,17 @@ let expand ~loc ~path:_ (expr : expression) =
             | Ok () ->
                 (match validate_ir_capabilities ir with
                  | Ok () ->
-                     let loc = expr.pexp_loc in
-                     [%expr 
-                       Exec_policy.promote_to_safe 
-                         ~allowed_commands:Exec_policy.dev_allowed_commands 
-                         (Obj.magic () : Masc_exec.Shell_ir.t)
+                     let literal = Ast_builder.Default.estring ~loc trimmed in
+                     [%expr
+                       match
+                         Exec_policy.parse_string_to_ir ~mode:Exec_policy.Strict
+                           [%e literal]
+                       with
+                       | Ok ir ->
+                           Exec_policy.promote_to_safe
+                             ~allowed_commands:Exec_policy.dev_allowed_commands
+                             ir
+                       | Error br -> Error br
                      ]
                  | Error msg ->
                      Location.raise_errorf ~loc "Compile-time capability violation: %s" msg)
@@ -56,6 +62,4 @@ let ext =
     Extension.Context.expression
     Ast_pattern.(single_expr_payload __)
     expand
-
 let () = Ppxlib.Driver.register_transformation "safe_sh" ~extensions:[ext]
-

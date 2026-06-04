@@ -81,7 +81,7 @@ check.
   moving to parallel adds fiber setup cost that dominates for small
   fanouts.
 - Changing `Sse.subscribe_external` signature.  That module is
-  shared with gRPC (`lib/server/masc_grpc_service.ml`) and other
+  shared with gRPC (`lib/server/masc_grpc_service.ml:477`) and other
   non-dashboard subscribers.  Changing its contract ripples to code
   not covered by this migration.
 - Deleting the raw-SSE-forward path for unauthenticated sessions.

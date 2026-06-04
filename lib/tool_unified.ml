@@ -79,12 +79,12 @@ let summary_report ?(runtime_metrics = fun () -> `Null) () : Yojson.Safe.t =
   let distinct = Tool_registry.distinct_tools_called () in
   let top_20 = Tool_registry.get_top_n 20 in
   let all_names = Config.all_tool_names () in
-  let visible_names =
+  let allowed_names =
     List.filter (fun name -> Tool_catalog.is_visible name) all_names
   in
-  let never_called = Tool_registry.get_never_called visible_names in
+  let never_called = Tool_registry.get_never_called allowed_names in
   let total_count = List.length all_names in
-  let visible_count = List.length visible_names in
+  let visible_count = List.length allowed_names in
   let hidden_count = total_count - visible_count in
   let public_count = List.length Tool_catalog.public_mcp_tools in
   let tool_dist =

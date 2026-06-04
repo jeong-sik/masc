@@ -88,8 +88,7 @@ val tool_timeout_sec_opt :
     [MASC_TOOL_TIMEOUT_BOARD_SEC] (default 90s, clamped
     5s..300s). This includes keeper/masc board post/comment/vote,
     comment_vote, delete, cleanup, curation_submit, and
-    [masc_board_reaction]. [masc_persona_generate] uses a fixed
-    outer timeout above its internal OAS worker budget. Other bounded tools use
+    [masc_board_reaction]. Other bounded tools use
     [MASC_TOOL_TIMEOUT_DEFAULT_SEC] (default 60s, same
     clamp). [_arguments] is accepted for parity with future
     per-arg overrides but currently unused. *)
@@ -113,7 +112,7 @@ type keeper_runtime_mcp_log_context = {
   network_mode : string option;
   approval_mode : string option;
   tool_surface_class : string option;
-  visible_tool_count : int option;
+  allowed_tool_count : int option;
   runtime_profile : string option;
 }
 (** Snapshot of the keeper-bound runtime-MCP context

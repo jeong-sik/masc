@@ -400,7 +400,6 @@ let record_task_transition
         ~reason
         ~evidence_refs:[ "task:" ^ task_id ]
         ~max_age_sec:task_commitment_expiry_sec
-    | Masc_domain.Submit_pr_evidence
     | Masc_domain.Submit_for_verification
     | Masc_domain.Approve_verification
     | Masc_domain.Reject_verification -> ())

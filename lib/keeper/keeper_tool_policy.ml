@@ -152,6 +152,8 @@ let keeper_supported_keeper_masc_tools =
   ; "masc_keeper_status"
   ; "masc_keeper_msg"
   ; "masc_keeper_msg_result"
+  ; "masc_keeper_msg_cancel"
+  ; "masc_keeper_msg_queue"
   ]
 
 let keeper_supported_masc_schemas (schemas : Masc_domain.tool_schema list) =

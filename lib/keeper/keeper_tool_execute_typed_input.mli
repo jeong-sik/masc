@@ -82,6 +82,10 @@ type validation_error =
     }
   | Empty_executable of { argv : string list }
   | Empty_argv of { executable : string }
+  | Executable_repeated_in_argv0 of {
+      executable : string;
+      argv : string list;
+    }
   | Argv_contains_shell_metachar of {
       executable : string;
       index : int;
@@ -146,10 +150,10 @@ val to_shell_ir :
 (** Validate and lower [input] into {!Masc_exec.Shell_ir.t}.  [Pipeline]
     inputs become an explicit {!Masc_exec.Shell_ir.Pipeline}; literal ["|"]
     argv tokens remain ordinary argument data and never create a pipeline.
-    [Exec] argv is passed through as authored; the lowerer does not strip a
-    duplicated executable token. [sandbox] defaults to host execution; keeper
-    callers may provide Docker runtime targets after sandbox/profile
-    resolution. *)
+    [Exec] argv is passed through as authored after validation; duplicated
+    executable tokens at [argv[0]] are rejected rather than silently stripped.
+    [sandbox] defaults to host execution; keeper callers may provide Docker
+    runtime targets after sandbox/profile resolution. *)
 
 val pp_validation_error : Format.formatter -> validation_error -> unit
 (** Human-readable formatter for {!validation_error}.  Stable across

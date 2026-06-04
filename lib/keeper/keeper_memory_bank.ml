@@ -696,7 +696,12 @@ let append_memory_notes_from_reply
   let (snapshot, source) =
     match snapshot with
     | Some s ->
-      (s, Option.value state_snapshot_source ~default:"message_metadata")
+      let source =
+        match state_snapshot_source with
+        | Some source -> source
+        | None -> "message_metadata"
+      in
+      (s, source)
     | None ->
       (match parse_state_snapshot_from_reply reply with
     | Some s -> (s, "reply_state_block")

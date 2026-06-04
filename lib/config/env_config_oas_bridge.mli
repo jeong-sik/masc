@@ -1,11 +1,8 @@
 (** Env_config_oas_bridge — per-caller OAS bridge timeout SSOT (#10094).
 
-    Replaces seven hardcoded [Masc_oas_bridge.run_safe ~timeout_s:N.N]
-    literals scattered across the lib tree. Each caller is named so
-    its hardcoded default is preserved (compute-heavy budgets at
-    120/180s), raised (old fantasy worker budgets at 300s), or bounded
-    for advisory dashboard judges, while the operator can tune any
-    single caller via env without touching the others.
+    Each remaining caller is named so its hardcoded default is preserved
+    or bounded for advisory dashboard judges, while the operator can tune
+    any single caller via env without touching the others.
 
     Lookup order in {!timeout_sec} (top wins):
     1. Per-caller env [MASC_OAS_BRIDGE_TIMEOUT_<CALLER>_SEC].
@@ -22,11 +19,6 @@
     without a typed default; resolution falls through to the global
     env / hardcoded fallback rather than failing closed. *)
 type caller =
-  | Auto_responder
-  | Dashboard_provider_runs
-  | Keeper_persona_authoring
-  | Server_openai_compat
-  | Tool_deep_review
   | Anti_rationalization
   | Governance_judge
   | Operator_judge
@@ -37,7 +29,7 @@ type caller =
 val caller_key : caller -> string
 
 (** Resolve the OAS bridge timeout (seconds) for [caller] using the
-    five-step lookup order documented above. Invalid env values, including
+    four-step lookup order documented above. Invalid env values, including
     non-positive and non-finite floats, fall back to [global_default_sec]. *)
 val timeout_sec : caller:caller -> unit -> float
 
@@ -53,10 +45,8 @@ val per_caller_env_var : caller:caller -> string
 (** The typed-default caller table exposed for tests. *)
 val known_callers : unit -> caller list
 
-(** Hardcoded final fallback (seconds) — also reused as the typed
-    default for worker-style callers ({!Auto_responder} /
-    {!Dashboard_provider_runs}). Exposed so tests can pin the
-    per-caller table without hardcoding the literal. *)
+(** Hardcoded final fallback (seconds). Exposed so tests can pin the
+    fallback without hardcoding the literal. *)
 val global_default_sec : float
 
 (** Default timeout for advisory dashboard judge callers

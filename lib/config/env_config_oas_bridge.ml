@@ -1,21 +1,14 @@
 (** Env_config_oas_bridge — per-caller OAS bridge timeout SSOT (#10094).
 
-    Replaces seven hardcoded [Masc_oas_bridge.run_safe ~timeout_s:N.N]
-    literals scattered across the lib tree.  Each caller is named so:
+    Each remaining caller is named so:
 
-      1. its default is preserved when the original literal was a
-         deliberately-tuned value (tool_deep_review=180s,
-         anti_rationalization=180s);
-      2. the two old "fantasy" 60s budgets ([auto_responder],
-         [dashboard_provider_runs]) get raised to [default_timeout_sec]
-         (300s) — the original 60s did not match observed p50 latency
-         (50–700s) and produced 27 timeouts/session;
-      3. dashboard judge daemons stay advisory and bounded by default
+      1. anti-rationalization keeps its compute-heavy default (180s);
+      2. dashboard judge daemons stay advisory and bounded by default
          instead of holding an OAS CLI subprocess for multiple dashboard
          refresh intervals;
-      4. the operator can override any single caller's budget via
+      3. the operator can override any single caller's budget via
          [MASC_OAS_BRIDGE_TIMEOUT_<CALLER>_SEC];
-      5. the operator can set a fallback for unknown / future callers
+      4. the operator can set a fallback for unknown / future callers
          via [MASC_OAS_BRIDGE_TIMEOUT_DEFAULT_SEC].
 
     The lookup order is per-caller env > per-caller hardcoded default
@@ -26,23 +19,12 @@
     regardless. *)
 
 type caller =
-  | Auto_responder
-  | Dashboard_provider_runs
-  | Keeper_persona_authoring
-  | Server_openai_compat
-  | Tool_deep_review
   | Anti_rationalization
   | Governance_judge
   | Operator_judge
   | Unknown of string
 
-(** Hardcoded default seconds for each known caller.  When the
-    original literal was 60s on a path with observed p50 above 60s,
-    we raise to [global_default_sec] (300s) — silent fix for the
-    fantasy budgets called out in #10094.  When the original literal
-    was 120/180s on a path that intentionally needed more compute,
-    we preserve the value so the fix does not regress
-    deep_review / anti_rationalization. *)
+(** Hardcoded default seconds for each known caller. *)
 let global_default_sec = 300.0
 
 (** Dashboard judges are background/advisory signal generators.  They run on the
@@ -54,11 +36,6 @@ let global_default_sec = 300.0
 let dashboard_judge_default_sec = 45.0
 
 let caller_key = function
-  | Auto_responder -> "auto_responder"
-  | Dashboard_provider_runs -> "dashboard_provider_runs"
-  | Keeper_persona_authoring -> "keeper_persona_authoring"
-  | Server_openai_compat -> "server_openai_compat"
-  | Tool_deep_review -> "tool_deep_review"
   | Anti_rationalization -> "anti_rationalization"
   | Governance_judge -> "governance_judge"
   | Operator_judge -> "operator_judge"
@@ -67,26 +44,14 @@ let caller_key = function
 
 (** Exported for tests that pin the per-caller default table. *)
 let known_callers () =
-  [ Auto_responder
-  ; Dashboard_provider_runs
-  ; Keeper_persona_authoring
-  ; Server_openai_compat
-  ; Tool_deep_review
-  ; Anti_rationalization
+  [ Anti_rationalization
   ; Governance_judge
   ; Operator_judge
   ]
 ;;
 
 let known_default_sec = function
-  (* #10094: was hardcoded 60s, raised to global_default.  p50 of
-     the underlying LLM call is in the 50–700s range; 60s timed out
-     27 times per session. *)
-  | Auto_responder | Dashboard_provider_runs -> Some global_default_sec
-  (* Preserved at original literal — these were tuned for the
-     specific compute pattern of the caller. *)
-  | Keeper_persona_authoring | Server_openai_compat -> Some 120.0
-  | Tool_deep_review | Anti_rationalization -> Some 180.0
+  | Anti_rationalization -> Some 180.0
   (* #9629 moved both judges into this SSOT after Operator_judge inherited a
      too-short generic inference timeout.  Live dashboard evidence showed the
      opposite failure mode: a 300s advisory judge budget can leave a

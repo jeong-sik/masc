@@ -27,7 +27,6 @@ type transition_action =
   | Submit_for_verification
   | Approve_verification
   | Reject_verification
-  | Submit_pr_evidence
 
 type family =
   | Invalid_transition of
@@ -73,7 +72,6 @@ let transition_action_to_string = function
   | Submit_for_verification -> "submit_for_verification"
   | Approve_verification -> "approve_verification"
   | Reject_verification -> "reject_verification"
-  | Submit_pr_evidence -> "submit_pr_evidence"
 
 let family_to_string = function
   | Invalid_transition { from_status; action } ->
@@ -111,7 +109,6 @@ let all_transition_actions : transition_action list =
   ; Submit_for_verification
   ; Approve_verification
   ; Reject_verification
-  ; Submit_pr_evidence
   ]
 
 let all_families : family list =
@@ -186,7 +183,6 @@ let parse_transition_action_token (s : string) : transition_action option =
   | "submit_for_verification" -> Some Submit_for_verification
   | "approve_verification" | "approve" -> Some Approve_verification
   | "reject_verification" | "reject" -> Some Reject_verification
-  | "submit_pr_evidence" -> Some Submit_pr_evidence
   | _ -> None
 
 (* Find the substring between [prefix] and the first occurrence of
@@ -268,7 +264,6 @@ let classify (msg : string) : family =
   else if contains_ci ~needle:"active_task_limit" msg
   then Active_task_limit_exceeded
   else if contains_ci ~needle:"missing evidence" msg
-     || contains_ci ~needle:"missing pr_url" msg
      || contains_ci ~needle:"submit_for_verification requires" msg
   then Submit_verification_missing_evidence
   else if contains_ci ~needle:"Invalid transition:" msg

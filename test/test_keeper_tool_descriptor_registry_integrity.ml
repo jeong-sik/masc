@@ -24,7 +24,7 @@ module Exec = Masc.Keeper_tool_dispatch_runtime
 module Registry = Masc.Keeper_tool_registry
 module Resolution = Masc.Keeper_tool_descriptor_resolution
 module Surface = Masc.Keeper_agent_tool_surface
-module Board = Tool_shard_types_schemas_board
+module Board = Tool_shard_types
 module Tool_board_registry = Masc.Tool_board_registry
 
 let all_descriptors () : Descriptor.t list = Descriptor.all_descriptors ()
@@ -502,7 +502,6 @@ let test_mcp_context_policy_uses_descriptor_resolution () =
     ; "keeper_broadcast"
     ; "keeper_context_status"
     ; "keeper_task_done"
-    ; "keeper_task_submit_for_verification"
     ; "keeper_tasks_list"
     ; "keeper_time_now"
     ; "keeper_tool_search"
@@ -659,6 +658,8 @@ let cluster_projection_table =
   ; "masc_persona_save", "tool_masc_persona_dispatch"
   ; "masc_keeper_list", "tool_masc_keeper_dispatch"
   ; "masc_keeper_msg_result", "tool_masc_keeper_dispatch"
+  ; "masc_keeper_msg_cancel", "tool_masc_keeper_dispatch"
+  ; "masc_keeper_msg_queue", "tool_masc_keeper_dispatch"
   ; "masc_keeper_compact", "tool_masc_keeper_dispatch"
   ; "masc_keeper_clear", "tool_masc_keeper_dispatch"
   ; "masc_keeper_sandbox_start", "tool_masc_keeper_dispatch"

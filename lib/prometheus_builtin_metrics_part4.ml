@@ -33,7 +33,7 @@ let register
     "Whether the shared keeper FD-pressure breaker is active (1 active, 0 inactive)."
     `Gauge;
   (* RFC-0107 Phase D.4 — piaf connection pool metrics.  Snapshot
-     pushed by [update_pool_metrics_gauges] inside [to_prometheus_text]. *)
+     pushed by [update_pool_metrics_gauges] during OTel export. *)
   add
     metric_pool_idle_total
     "Idle (reusable) connections held by the piaf-backed HTTP pool. \
@@ -354,7 +354,7 @@ let register
     "Phase A F3 (2026-04-28): increments every time the keeper turn enters the \
      [Keeper_tool_surface_empty] blocker branch, incremented from \
      [Keeper_run_tools_hooks] (the pre-turn tool-surface check), i.e. \
-     tool_gate_requested && turn_visible_tool_names = []. Pre-fix the blocker fired silently with \
+     tool_gate_requested && turn_allowed_tool_names = []. Pre-fix the blocker fired silently with \
      no operator-visible counter; this surfaces the volume so Phase B PR-4 can promote \
      it to a typed terminal state with LLM-visible feedback. Labels: keeper_name, \
      turn_lane (text_only | tool_optional | tool_required | retry | tool_disabled), \

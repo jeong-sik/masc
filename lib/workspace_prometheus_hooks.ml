@@ -33,7 +33,6 @@ let task_action_of_transition : Masc_domain.task_action -> Audit_log.action = fu
   | Masc_domain.Cancel -> Audit_log.CancelTask
   | Masc_domain.Release -> Audit_log.ReleaseTask
   | ( Masc_domain.Submit_for_verification
-    | Masc_domain.Submit_pr_evidence
     | Masc_domain.Approve_verification
     | Masc_domain.Reject_verification ) as action ->
     Audit_log.Custom ("task_" ^ Masc_domain.task_action_to_string action)
@@ -136,7 +135,6 @@ let observe_task_transition_event
     | Masc_domain.Done_action
     | Masc_domain.Release
     | Masc_domain.Submit_for_verification
-    | Masc_domain.Submit_pr_evidence
     | Masc_domain.Approve_verification
     | Masc_domain.Reject_verification -> Log.Info
   in
@@ -165,7 +163,6 @@ let observe_task_transition_event
          Prometheus.record_task_failed ()
        | Masc_domain.Release
        | Masc_domain.Submit_for_verification
-       | Masc_domain.Submit_pr_evidence
        | Masc_domain.Reject_verification -> ())
    with
    | Stdlib.Effect.Unhandled _ as exn ->

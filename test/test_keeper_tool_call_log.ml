@@ -253,7 +253,7 @@ let test_turn_context_fields_stored () =
       ~network_mode:"inherit"
       ~approval_mode:"manual"
       ~tool_surface_class:"execution"
-      ~visible_tool_count:2
+      ~allowed_tool_count:2
       ~runtime_profile:"tool_use_strict"
       ();
     Keeper_tool_call_log.log_call

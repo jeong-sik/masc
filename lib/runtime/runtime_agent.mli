@@ -173,7 +173,6 @@ val runtime_mcp_policy_of_tool_names :
   Llm_provider.Llm_transport.runtime_mcp_policy option
 val resolve_tool_lane_for_oas_tools :
   ?agent_name:string ->
-  ?tool_requirement:[ `Required | `Optional ] ->
   provider_cfg:Llm_provider.Provider_config.t ->
   tools:Agent_sdk.Tool.t list ->
   unit ->

@@ -23,7 +23,7 @@ module Float = Stdlib.Float
     - Tool_inline_dispatch_comm: masc_broadcast, masc_messages
     - Tool_inline_dispatch_extra: remaining tools (board, etc.)
 
-    Keeps inline: mcp_session and discover_tools plus MCP-state helpers.
+    Keeps inline: mcp_session plus MCP-state helpers.
 
     RFC-0062 Phase 4c-2: handlers now return [Tool_result.result] directly;
     [wrap_result] adapter removed. *)
@@ -55,67 +55,6 @@ type context = Tool_inline_dispatch_types.context = {
     Workspace.config -> Mcp_server_eio_governance.mcp_session_record list -> unit;
 }
 
-let tool_index_entry_of_schema (schema : Masc_domain.tool_schema)
-  : Agent_sdk.Tool_index.entry =
-  (* The typed [tool_group] display classifier was deleted in the surface-cut
-     refactor; tool-index entries are ungrouped. *)
-  Agent_sdk.Tool_index.
-    { name = schema.name; description = schema.description; group = None; aliases = [] }
-
-let discover_tool_matches ~(query : string) ~(limit : int)
-    (schemas : Masc_domain.tool_schema list) =
-  let query = String.lowercase_ascii (String.trim query) in
-  let limit = max 0 limit in
-  if String.equal query "" || limit = 0 then []
-  else
-    let schema_by_name = Hashtbl.create (List.length schemas) in
-    List.iter
-      (fun (schema : Masc_domain.tool_schema) ->
-         Hashtbl.replace schema_by_name schema.name schema)
-      schemas;
-    let index_config = { Agent_sdk.Tool_index.default_config with top_k = limit } in
-    let index =
-      schemas
-      |> List.map tool_index_entry_of_schema
-      |> Agent_sdk.Tool_index.build ~config:index_config
-    in
-    Agent_sdk.Tool_index.retrieve index query
-    |> List.filter_map (fun (name, score) ->
-      match Hashtbl.find_opt schema_by_name name with
-      | Some schema -> Some (schema, score)
-      | None -> None)
-
-let discover_tools_json ~(query : string) ~(limit : int)
-    (schemas : Masc_domain.tool_schema list) : Yojson.Safe.t =
-  let query = String.lowercase_ascii (String.trim query) in
-  let matches = discover_tool_matches ~query ~limit schemas in
-  let results =
-    List.map
-      (fun ((schema : Masc_domain.tool_schema), score) ->
-         `Assoc
-           [
-             ("name", `String schema.name);
-             ("description", `String schema.description);
-             ("score", `Float score);
-           ])
-      matches
-  in
-  `Assoc
-    [
-      ("query", `String query);
-      ("count", `Int (List.length results));
-      ("tools", `List results);
-      ("scoring", `String "bm25");
-      ( "hint",
-        `String
-          "These tools are callable via tools/call even if not in the default tools/list."
-      );
-    ]
-
-module For_testing = struct
-  let discover_tools_json = discover_tools_json
-end
-
 (* RFC-0189 PR-2: inline helpers return [Tool_result.result] directly.
    Two patterns:
 
@@ -124,8 +63,8 @@ end
      plain strings fall through as [`String body].
    - [inline_err_workflow] commits caller-input rejections to
      [Workflow_rejection]: every error path in this dispatch
-     ("id is required", unknown enum action, "query is required",
-     not-found lookups) is caller-side. *)
+     ("id is required", unknown enum action, not-found lookups) is
+     caller-side. *)
 let inline_ok ~tool_name ~start_time body : Tool_result.result =
   let data =
     match Tool_result.structured_payload_of_message body with
@@ -158,9 +97,6 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.result option =
   (* Argument extraction helpers — delegate to Safe_ops *)
   let arg_get_string key default =
     Safe_ops.json_string ~default key arguments
-  in
-  let arg_get_int key default =
-    Safe_ops.json_int ~default key arguments
   in
   let _arg_get_bool key default =
     Safe_ops.json_bool ~default key arguments
@@ -264,20 +200,6 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.result option =
       (match response with
        | Ok json -> Some (inline_ok ~tool_name:name ~start_time:start (Yojson.Safe.to_string json))
        | Error e -> Some (inline_err_workflow ~tool_name:name ~start_time:start e)))
-
-  (* Infrastructure tools: cancellation, subscription, progress,
-     governance_set, masc_spawn removed — pruned from surfaces *)
-
-  (* ── Tool discovery ─────────────────────────────────────────── *)
-  | "masc_discover_tools" ->
-      let query = arg_get_string "query" "" in
-      let limit = arg_get_int "limit" 20 in
-      if String.equal (String.trim query) "" then
-        Some (inline_err_workflow ~tool_name:name ~start_time:start "query is required")
-      else
-        let all_schemas = Config.visible_tool_schemas ~include_hidden:true () in
-        let payload = discover_tools_json ~query ~limit all_schemas in
-        Some (inline_ok ~tool_name:name ~start_time:start (Yojson.Safe.to_string payload))
 
   (* ── Fallthrough to extra dispatch ──────────────────────────── *)
   | _ ->

@@ -501,12 +501,6 @@ let governance_level () =
 let build_git_commit_opt () =
   raw_value_opt "MASC_BUILD_GIT_COMMIT" |> trim_opt
 
-(** {1 Auto Respond} *)
-
-(** Raw MASC_AUTO_RESPOND value for mode parsing. *)
-let auto_respond_opt () =
-  raw_value_opt "MASC_AUTO_RESPOND" |> trim_opt
-
 (** PubSub max messages per read. Default: 1000. *)
 let pubsub_max_messages () =
   get_int ~default:1000 "MASC_PUBSUB_MAX_MESSAGES"

@@ -15,21 +15,6 @@ let record_fsm_drift_with_agent ~variant ~force ~agent_name =
   (Atomic.get Workspace_hooks.fsm_drift_observer_fn) ~variant ~force ~agent_name
 ;;
 
-let str_contains haystack needle =
-  let haystack_len = String.length haystack in
-  let needle_len = String.length needle in
-  if needle_len = 0 then true
-  else if needle_len > haystack_len then false
-  else (
-    let found = ref false in
-    let i = ref 0 in
-    while !i <= haystack_len - needle_len && not !found do
-      if String.sub haystack !i needle_len = needle then found := true;
-      incr i
-    done;
-    !found)
-;;
-
 let counter_for_per_agent ~variant ~agent_name ~force =
   Masc.Prometheus.metric_value_or_zero
     fsm_drift_per_agent_metric
@@ -50,15 +35,17 @@ let counter_for_variant ~variant ~force =
     ()
 
 let test_metric_name_stable () =
-  let text = Masc.Prometheus.to_prometheus_text () in
+  let metric =
+    Masc.Prometheus.snapshot ()
+    |> List.find_opt (fun (m : Masc.Prometheus.metric) ->
+      String.equal m.name fsm_drift_per_agent_metric && m.labels = [])
+  in
   Alcotest.(check bool)
-    "per-agent HELP registered"
+    "per-agent registered as counter"
     true
-    (str_contains text ("# HELP " ^ fsm_drift_per_agent_metric));
-  Alcotest.(check bool)
-    "per-agent TYPE registered"
-    true
-    (str_contains text ("# TYPE " ^ fsm_drift_per_agent_metric ^ " counter"))
+    (match metric with
+     | Some m -> m.metric_type = Masc.Prometheus.Counter
+     | None -> false)
 
 let test_emits_both_counters () =
   let variant =

@@ -185,17 +185,6 @@ let test_transition_has_no_fixed_timeout () =
        ~_arguments:(`Assoc [])
      = None)
 
-let test_persona_generate_timeout_exceeds_oas_budget () =
-  match
-    Masc.Mcp_server_eio_call_tool.tool_timeout_sec_opt
-      ~tool_name:"masc_persona_generate"
-      ~_arguments:(`Assoc [])
-  with
-  | Some timeout_sec ->
-      check bool "persona generate timeout exceeds internal OAS budget" true
-        (timeout_sec > 120.)
-  | None -> fail "expected persona generation to keep a bounded outer timeout"
-
 let test_regular_tool_uses_default_timeout () =
   match
     Masc.Mcp_server_eio_call_tool.tool_timeout_sec_opt
@@ -303,8 +292,8 @@ let test_runtime_mcp_keeper_log_context_uses_keeper_trace_and_current_turn () =
       check bool "network mode present" true (Option.is_some ctx.network_mode);
       check bool "tool surface class present" true
         (Option.is_some ctx.tool_surface_class);
-      check bool "visible tool count present" true
-        (Option.is_some ctx.visible_tool_count))
+      check bool "allowed tool count present" true
+        (Option.is_some ctx.allowed_tool_count))
 
 let test_runtime_mcp_keeper_log_context_loads_current_task_contract () =
   Eio_main.run @@ fun env ->
@@ -345,7 +334,7 @@ let test_runtime_mcp_keeper_log_context_loads_current_task_contract () =
           ~arguments:(`Assoc [])
       in
       check bool "runtime mcp keeps task contract out of log context" true
-        (Option.is_some ctx.visible_tool_count))
+        (Option.is_some ctx.allowed_tool_count))
 
 let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
   Eio_main.run @@ fun env ->
@@ -431,8 +420,8 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
         (runtime_contract |> U.member "allowed_paths" |> U.to_list
          |> List.length
          > 0);
-      check bool "runtime contract visible tool count present" true
-        (match runtime_contract |> U.member "visible_tool_count" with
+      check bool "runtime contract allowed tool count present" true
+        (match runtime_contract |> U.member "allowed_tool_count" with
          | `Int n -> n > 0
          | _ -> false);
       let omits_field name =
@@ -533,8 +522,6 @@ let () =
           test_case "contains casefold keeps semantics" `Quick
             test_contains_casefold_keeps_semantics;
           test_case "transition has no fixed timeout" `Quick test_transition_has_no_fixed_timeout;
-          test_case "persona generate timeout exceeds OAS budget" `Quick
-            test_persona_generate_timeout_exceeds_oas_budget;
           test_case "regular tool keeps default timeout" `Quick test_regular_tool_uses_default_timeout;
           test_case "board write tools use board timeout default" `Quick
             test_board_write_tools_use_board_timeout_default;

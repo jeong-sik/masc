@@ -184,7 +184,7 @@ let object_schema ?(required = []) properties =
     ]
 ;;
 
-let execute_schema = Tool_shard_types_schemas_execute.tool_execute_schema.input_schema
+let execute_schema = Tool_shard_types.tool_execute_schema.input_schema
 
 let read_file_schema =
   object_schema
@@ -1091,12 +1091,6 @@ let internal_descriptors : t list =
       "Mark the claimed MASC task as done."
       ~last_turn_safe:true
       ~readonly:false
-  ; task_descriptor
-      "submit_for_verification"
-      "keeper_task_submit_for_verification"
-      "Submit task work for verification by another keeper."
-      ~last_turn_safe:true
-      ~readonly:false
     (* ── board cluster (RFC-0179 PR-3, 14 tools) ──────────────── *)
   ; board_descriptor
       "keeper_board_comment"
@@ -1280,9 +1274,7 @@ let internal_descriptors : t list =
       "Read a single pending approval by id." ~readonly:true
   ; masc_approval_descriptor "resolve" "masc_approval_resolve"
       "Resolve a pending approval (approve / reject)." ~readonly:false
-  (* ── RFC-0182 §3.1 — masc_persona_* cluster (3 entries) ──────── *)
-  (* masc_persona_generate is omitted — its handler uses the keeper
-     Eio context and is gated on Phase 5 Eio plumbing scope. *)
+  (* ── RFC-0182 §3.1 — masc_persona_* cluster ──────── *)
   ; masc_persona_descriptor "list" "masc_persona_list"
       "List configured personas plus summary metadata." ~readonly:true
   ; masc_persona_descriptor "schema" "masc_persona_schema"
@@ -1297,6 +1289,10 @@ let internal_descriptors : t list =
       "List configured keepers with optional detailed metadata." ~readonly:true
   ; masc_keeper_descriptor "msg_result" "masc_keeper_msg_result"
       "Poll an async keeper_msg dispatch by request_id." ~readonly:true
+  ; masc_keeper_descriptor "msg_cancel" "masc_keeper_msg_cancel"
+      "Cancel a running async keeper_msg turn by request_id." ~readonly:false
+  ; masc_keeper_descriptor "msg_queue" "masc_keeper_msg_queue"
+      "List all pending/running async keeper_msg requests, optionally filtered by keeper_name." ~readonly:true
   ; masc_keeper_descriptor "compact" "masc_keeper_compact"
       "Run operator-requested context compaction on a keeper." ~readonly:false
   ; masc_keeper_descriptor "clear" "masc_keeper_clear"

@@ -75,7 +75,7 @@ and turn_event =
 
 and pr_event =
   { pr_number : int
-  ; pr_url : string
+  ; pull_request_url : string
   ; pr_title : string
   ; pr_state : string
   ; repo : string

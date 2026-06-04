@@ -1,7 +1,6 @@
 (** Keeper tool schemas — MCP tool definitions for keeper agents. *)
 
 open Masc_domain
-module Persona_contract = Keeper_persona_authoring_contract
 
 (** Network mode strings exposed only by explicit sandbox-management tools.
     Keeper creation/update no longer accepts sandbox posture knobs. *)
@@ -22,13 +21,6 @@ let string_array_schema =
     ("type", `String "array");
     ("items", `Assoc [ ("type", `String "string") ]);
   ]
-
-let persona_axis_schema (axis : Persona_contract.archetype_axis) =
-  `Assoc
-    [ "type", `String "string"
-    ; "enum", Json_util.json_string_list axis.choices
-    ; "description", `String axis.schema_description
-    ]
 
 let tool_access_schema description =
   `Assoc [
@@ -64,48 +56,6 @@ let keeper_schemas : tool_schema list = [
           ("description", `String "If true, include a minimal profile.json example.");
         ]);
       ]);
-    ];
-  };
-  {
-    name = "masc_persona_generate";
-    description = "Draft a persona profile.json from a natural-language concept. This does not write files; use masc_persona_schema for field and archetype choice effects, then masc_persona_save to persist it.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("concept", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Freeform character/operator concept, e.g. 'good evil chaos research keeper'.");
-        ]);
-        ("handle", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional stable persona handle. Must match [A-Za-z0-9._-]+.");
-        ]);
-        ("display_name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional display label for the persona.");
-        ]);
-        ("language", `Assoc [
-          ("type", `String "string");
-          ("default", `String Persona_contract.default_generation_language);
-          ("description", `String "Preferred language for generated text.");
-        ]);
-        ("alignment", persona_axis_schema Persona_contract.alignment_axis);
-        ("risk_posture", persona_axis_schema Persona_contract.risk_posture_axis);
-        ("proactive_enabled", `Assoc [
-          ("type", `String "boolean");
-          ("default", `Bool Persona_contract.default_generation_proactive_enabled);
-          ("description", `String "Default keeper.proactive_enabled for the draft.");
-        ]);
-        ("temperature", `Assoc [
-          ("type", `String "number");
-          ("default", `Float Persona_contract.default_temperature);
-        ]);
-        ("max_tokens", `Assoc [
-          ("type", `String "integer");
-          ("default", `Int Persona_contract.default_max_tokens);
-        ]);
-      ]);
-      ("required", `List [`String "concept"]);
     ];
   };
   {
@@ -448,6 +398,35 @@ let keeper_schemas : tool_schema list = [
         ]);
       ]);
       ("required", `List [`String "request_id"]);
+    ];
+  };
+
+  {
+    name = "masc_keeper_msg_cancel";
+    description = "Cancel a running async keeper_msg request by request_id.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("request_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Request ID returned by masc_keeper_msg");
+        ]);
+      ]);
+      ("required", `List [`String "request_id"]);
+    ];
+  };
+
+  {
+    name = "masc_keeper_msg_queue";
+    description = "List all pending/running async keeper_msg requests, optionally filtered by keeper_name.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("keeper_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional: filter by keeper name");
+        ]);
+      ]);
     ];
   };
 

@@ -94,7 +94,6 @@ type transition_action =
   | Submit_for_verification
   | Approve_verification
   | Reject_verification
-  | Submit_pr_evidence
 
 (** Closed-enum classification of the [InvalidState] error message.
     Derived from the [Tool_task.validate_transition] surface and the
@@ -122,8 +121,8 @@ type family =
   | Active_task_limit_exceeded
       (** Agent already owns more active tasks than the cap allows. *)
   | Submit_verification_missing_evidence
-      (** [Submit_for_verification] called without [pr_url] or
-          explicit evidence reference. *)
+      (** [Submit_for_verification] called without an explicit evidence
+          reference. *)
   | Reclaim_policy_blocked
       (** Re-claim blocked because a typed [Block_reclaim] policy was
           explicitly persisted on the task. Free-text handoff notes and

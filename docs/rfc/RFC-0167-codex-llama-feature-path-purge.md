@@ -79,4 +79,4 @@ Operators must:
 
 - Replace any `runtime.toml` runtime entries of the shape `"llama:<model_id>"` with `"custom:<endpoint_url>"` (the generic discovery-based label).
 - Drop Grafana queries against `masc_runtime_llama_model_not_discovered_total` (series no longer emitted).
-- The structural cli-tool-a WARN/counter is gone; rely on the `tool_support` `Error` path for required-tool omissions on cli-tool-a transports.
+- The structural cli-tool-a WARN/counter is gone; keeper tool exposure now degrades instead of raising a required-tool omission error.

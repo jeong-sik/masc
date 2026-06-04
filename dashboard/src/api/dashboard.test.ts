@@ -1640,20 +1640,26 @@ describe('fetchRuntimeProviders', () => {
         updated_at: '2026-05-13T13:00:00Z',
         summary: {
           providers: 1,
+          runtimes: 1,
           local_models: 0,
           cloud_models: 1,
           cli_models: 0,
+          default_runtime_id: 'runpod_mtp.qwen',
         },
         providers: [
           {
-            provider: 'runtime_lane_deadbeef1234',
-            kind: 'runtime',
-            runtime_kind: 'cloud',
-            status: 'available',
+            provider: 'runpod_mtp.qwen',
+            runtime_id: 'runpod_mtp.qwen',
+            provider_id: 'runpod_mtp',
+            model_id: 'qwen',
+            model_api_name: 'Qwen/Qwen3-32B',
+            kind: 'cloud',
+            runtime_kind: 'http',
+            status: 'configured',
             available: true,
-            supports_single_agent_run: true,
             model_count: 1,
-            source: 'runtime',
+            models: ['Qwen/Qwen3-32B'],
+            source: 'runtime.toml',
             discovery: {
               healthy: true,
               ctx_size: 200000,
@@ -1670,9 +1676,12 @@ describe('fetchRuntimeProviders', () => {
     const result = await fetchRuntimeProviders()
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/providers')
-    expect(result.providers[0]?.provider).toBe('runtime_lane_deadbeef1234')
-    expect(result.providers[0]?.kind).toBe('runtime')
-    expect(result.providers[0]?.runtime_kind).toBe('cloud')
+    expect(result.summary?.default_runtime_id).toBe('runpod_mtp.qwen')
+    expect(result.providers[0]?.provider).toBe('runpod_mtp.qwen')
+    expect(result.providers[0]?.provider_id).toBe('runpod_mtp')
+    expect(result.providers[0]?.model_api_name).toBe('Qwen/Qwen3-32B')
+    expect(result.providers[0]?.kind).toBe('cloud')
+    expect(result.providers[0]?.runtime_kind).toBe('http')
     expect(result.providers[0]?.discovery?.ctx_size).toBe(200000)
   })
 })

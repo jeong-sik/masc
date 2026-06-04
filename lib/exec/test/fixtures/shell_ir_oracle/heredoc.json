@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "parser": "mvdan.cc/sh/v3/syntax@v3.10.0",
+  "command": "cat <<EOF\nhello\nEOF",
+  "parse_status": "ok",
+  "features": {
+    "pipeline": false,
+    "redirect": false,
+    "heredoc": true,
+    "subshell": false,
+    "command_substitution": false,
+    "variable": false,
+    "glob": false,
+    "env_assignment": false,
+    "process_substitution": false
+  },
+  "commands": [
+    { "name": "cat", "argv": ["cat"] }
+  ],
+  "error": null
+}

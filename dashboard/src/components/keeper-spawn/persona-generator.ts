@@ -5,12 +5,12 @@ import { Checkbox } from '../common/checkbox'
 import { TextArea, TextInput } from '../common/input'
 import { showToast } from '../common/toast'
 import {
-  generatePersonaDraft,
   personaAuthoringResult,
   personaDraft,
-  personaGenerating,
+  personaDrafting,
   personaSaveResult,
   personaSaving,
+  preparePersonaDraft,
   savePersonaDraft,
   spawnKeeperFromPersona,
   spawning,
@@ -45,7 +45,7 @@ function applyProfileText(): boolean {
 }
 
 async function generateDraft() {
-  await generatePersonaDraft({
+  await preparePersonaDraft({
     concept: concept.value,
     handle: handle.value,
     displayName: displayName.value,
@@ -123,10 +123,10 @@ export function PersonaGenerator() {
           <${ActionButton}
             variant="primary"
             size="sm"
-            disabled=${personaGenerating.value}
-            ariaBusy=${personaGenerating.value}
+            disabled=${personaDrafting.value}
+            ariaBusy=${personaDrafting.value}
             onClick=${() => void generateDraft()}
-          >${personaGenerating.value ? '생성 중...' : '초안 생성'}<//>
+          >${personaDrafting.value ? '준비 중...' : '초안 준비'}<//>
           <${ActionButton}
             variant="ghost"
             size="sm"
@@ -161,7 +161,7 @@ export function PersonaGenerator() {
             id="persona-profile-json"
             rows=${18}
             value=${profileText.value}
-            placeholder="초안을 생성하면 profile.json이 표시됩니다"
+            placeholder="초안을 준비하면 profile.json이 표시됩니다"
             ariaLabel="persona profile.json"
             onInput=${(e: Event) => { profileText.value = (e.target as HTMLTextAreaElement).value }}
             class="!bg-[var(--color-bg-page)] !px-2 !py-2 !text-3xs font-mono leading-5"

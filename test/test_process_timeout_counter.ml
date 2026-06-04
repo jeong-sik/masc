@@ -43,22 +43,21 @@ let test_metric_name_stable () =
 ;;
 
 let test_metric_registered_at_init () =
-  let text = Masc.Prometheus.to_prometheus_text () in
-  let has literal =
-    try
-      ignore (Str.search_forward (Str.regexp_string literal) text 0);
-      true
-    with
-    | Not_found -> false
+  let metric =
+    Masc.Prometheus.snapshot ()
+    |> List.find_opt (fun (m : Masc.Prometheus.metric) ->
+      String.equal m.name Masc.Prometheus.metric_process_timeout && m.labels = [])
   in
   Alcotest.(check bool)
-    "process timeout HELP registered"
+    "process timeout registered"
     true
-    (has "# HELP masc_process_timeout_total");
+    (Option.is_some metric);
   Alcotest.(check bool)
-    "process timeout TYPE registered"
+    "process timeout registered as counter"
     true
-    (has "# TYPE masc_process_timeout_total counter")
+    (match metric with
+     | Some m -> m.metric_type = Masc.Prometheus.Counter
+     | None -> false)
 ;;
 
 let test_argv_program_basename () =

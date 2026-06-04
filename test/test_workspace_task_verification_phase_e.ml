@@ -1,7 +1,7 @@
 (* RFC-0109 Phase E regression guard.
 
    Before Phase E, task-state verification applied a substring
-   classifier (`pr_url` / `/pull/` / `commit:` / `branch:` / `file:` ...
+   classifier (`/pull/` / `commit:` / `branch:` / `file:` ...
    token matching) inside the transition layer's
    [verification_submission_evidence_refs]. Analysis-only tasks (no
    contract, no handoff_context, plain prose notes) had no way to pass.

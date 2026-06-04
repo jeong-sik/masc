@@ -17,7 +17,7 @@ Follow-up goal/plan: runtime naming cleanup moved into implementation PRs; the s
 | Area | Current truth | Risk / missing consideration | Suggested direction |
 |---|---|---|---|
 | Keeper lifecycle | MASC owns a keeper-cycle FSM above OAS and records pre-dispatch terminal receipts for skips/errors before `Agent.run`. | One "turn" is split across MASC keeper turn, MASC runtime attempts, and OAS agent turns. A reader can easily confuse these clocks. | Add/keep a single turn manifest that records all three counters and every context/runtime/tool decision. |
-| Tools | Tool surface is rebuilt every OAS SDK turn: BM25 index, deterministic prefilter, optional LLM rerank, discovered tools, required tools, policy allowlist, `tool_choice`, completion contract, observed/reported/canonical reconciliation. | Tool selection happens before final provider attempt. Provider lane resolution later can change inline-vs-runtime MCP exposure, so receipt/debug surfaces must show both "requested surface" and "resolved lane". | Record provider-lane result next to `tool_surface`; fail loud when required tool policy and provider lane disagree. |
+| Tools | Tool surface is rebuilt every OAS SDK turn: BM25 index, deterministic prefilter, optional LLM rerank, discovered tools, advisory tool affordances, policy allowlist, `tool_choice`, completion contract, observed/reported/canonical reconciliation. | Tool selection happens before final provider attempt. Provider lane resolution later can change inline-vs-runtime MCP exposure, so receipt/debug surfaces must show both "requested surface" and "resolved lane". | Record provider-lane result next to `tool_surface`; degrade unsupported tool exposure instead of treating tools as mandatory. |
 | Provider/model/runtime | `runtime.toml`/catalog routes are MASC-owned; MASC iterates providers and calls OAS as a single-provider runtime per attempt. OAS has its own `Complete_runtime`, but the keeper hot path does not use it. | Two runtime concepts exist. Future fixes can accidentally use OAS runtime semantics in a MASC-owned policy lane. | Document/enforce "one runtime plane per call path"; keep OAS `Complete_runtime` out of keeper hot path unless deliberately migrated. |
 | Context/memory/compaction | MASC has pre-dispatch checkpoint hygiene, memory hook injection, OAS proactive/emergency compaction, post-run checkpoint patching, and memory-bank writes. | Context state still straddles MASC `working_context`, OAS checkpoint, raw `[STATE]` text, memory hooks, and durable MASC memory. Boundary doc already calls this a partial migration. | Make OAS checkpoint/session the runtime SSOT and move MASC continuity to structured sidecars/receipts instead of raw markers. |
 | External comparison | Agent-LLM-A/Provider-D/ADK put turn loop + context/session near runner. OpenClaw/Hermes expose stronger provider failover and compaction surfaces, closer to MASC. | MASC has stronger operator receipts than most SDKs, but also more boundary complexity than runner-centered systems. | Preserve MASC receipts/governance, but simplify runtime state ownership around OAS primitives. |
@@ -164,9 +164,9 @@ flowchart TD
     C --> D[Build Tool_index over keeper tools]
     D --> E[Install local tool-search function]
     E --> F[Compute initial tool surface]
-    F --> G{missing required tools?}
+    F --> G{allowed tool surface empty?}
     G -- yes --> H[Contract_tool_surface_mismatch -> blocker]
-    G -- no --> I{required gate but no visible tools?}
+    G -- no --> I{tool gate requested but no allowed tools?}
     I -- yes --> J[Contract_no_tool_capable_provider -> blocker]
     I -- no --> K[Compose hooks]
     K --> L[Memory hooks]
@@ -177,10 +177,10 @@ flowchart TD
     P --> Q{LLM rerank enabled?}
     Q -- yes --> R[resolve llm_rerank runtime + Tool_selector.TopK_llm]
     Q -- no --> S[skip rerank]
-    R --> T[merge core/prefilter/LLM/discovered/required/affordance]
+    R --> T[merge core/prefilter/LLM/discovered/affordance]
     S --> T
     T --> U[Tool_op overlay + allowlist validate]
-    U --> V[last-turn / passive-loop / required-tool filters]
+    U --> V[last-turn / passive-loop / allowed-tool filters]
     V --> W[Guardrails.AllowList + tool_choice + completion contract]
     W --> X[OAS provider call]
     X --> Y{StopToolUse?}
@@ -195,11 +195,11 @@ flowchart TD
 
 ### Code-Level Notes
 
-- Tool discovery is not only "search". Search is a tool in the surface: `keeper_tool_search` uses `local_search_fn_ref`, which queries `Agent_sdk.Tool_index.retrieve`, partitions core/visible/discoverable/policy-filtered hits, and adds discovered names to `Keeper_discovered_tools`.
-- The actual visible surface is recomputed every OAS SDK turn in `BeforeTurnParams`.
+- Tool discovery is not only "search". Search is a tool in the surface: `keeper_tool_search` uses `local_search_fn_ref`, which queries `Agent_sdk.Tool_index.retrieve`, partitions core/allowed/discoverable/policy-filtered hits, and adds discovered names to `Keeper_discovered_tools`.
+- The actual allowed surface is recomputed every OAS SDK turn in `BeforeTurnParams`.
 - LLM rerank is a hint layer, not a hard dependency. If rerank runtime resolution, health filtering, or `Tool_selector.select_names` fails, the surface falls back to core + BM25 prefilter + discovered tools.
-- Required tools can come from the active task contract and per-call `required_tool_names`.
-- The hook sets both `Guardrails.AllowList turn_visible_tool_names` and `tool_choice`. This is important: `AllowList` constrains execution, while `tool_choice` nudges or forces provider-side tool use.
+- Task and per-call context can add advisory tool affordances, but tool calls remain optional.
+- The hook sets both `Guardrails.AllowList turn_allowed_tool_names` and `tool_choice`. This is important: `AllowList` constrains execution, while `tool_choice` nudges or forces provider-side tool use.
 - OAS later dispatches only `ToolUse` blocks. Parallelism is handled in OAS `execute_tools` via sequential/exclusive/parallel batches.
 - MASC does not trust only the final assistant blocks. It reconciles reported tool names from response content, registry-observed names, hook-observed names, canonical aliases, and unexpected names before writing the receipt.
 - Tool execution observation has two layers: OAS publishes `ToolCalled` / `ToolCompleted` and raw trace records, while MASC wraps keeper tool handlers and logs keeper-specific route evidence, policy outcomes, and hook observations.
@@ -208,10 +208,10 @@ flowchart TD
 
 | Case | Current behavior |
 |---|---|
-| Search hits only already-visible core tools | Search result says call them directly; no extra discovery needed. |
-| Search hits policy-denied tools | Hidden from visible results and counted as filtered. |
-| Required tool already satisfied in prior tool calls | Required `tool_choice` is cleared for that requirement. |
-| Last OAS turn | Surface intersects last-turn-safe tools unless required tools remain. |
+| Search hits only already-allowed core tools | Search result says call them directly; no extra discovery needed. |
+| Search hits policy-denied tools | Hidden from allowed results and counted as filtered. |
+| Advisory tool already satisfied in prior tool calls | Strict `tool_choice` is cleared for that turn. |
+| Last OAS turn | Surface intersects last-turn-safe tools. |
 | Passive loop + actionable signal | Contract enforcement can narrow the surface to force progress. |
 | No tools after overlay/filter | Fallback floor tools may be injected; otherwise blocker/receipt mismatch. |
 | Provider lacks inline tool support | Provider-lane resolution happens later in `run_try_provider`; this must stay visible in receipt/debugging because tool policy was selected earlier. |
@@ -430,7 +430,7 @@ Extend receipt/tool-call context with:
 
 - provider kind/model chosen for the successful attempt,
 - inline tool lane vs runtime MCP lane,
-- whether required tools were materialized inline, via runtime MCP, or unavailable,
+- whether allowed tools were materialized inline, via runtime MCP, or unavailable,
 - whether `tool_choice` support was native, emulated, or ignored.
 
 This closes the gap where tool policy is selected before final provider attempt.

@@ -4,6 +4,8 @@
 open Tool_args
 include Tool_task_handlers
 
+module Workspace = Workspace_core
+
 let task_log_info ~task_id fmt =
   Stdlib.Format.ksprintf
     (fun message -> Log.Task.info "task_id=%s %s" task_id message)
@@ -88,61 +90,6 @@ and handle_transition ~tool_name ~start_time ctx args =
   let is_internal_marker k =
     String.length k > 0 && Char.equal k.[0] '_'
   in
-  let normalize_args = function
-    | `Assoc kvs ->
-      (* Transport-level alias [pr_url] is hoisted into the typed
-         [handoff_context.evidence_refs] list. Previously this aliased
-         into a "PR: <url>" string blob inside [notes], which the
-         downstream task-handoff schema then had to recover via
-         sibling synthesis or substring scanning. There is no
-         in-repo reader of that [notes] blob — pr_url consumers
-         (tool_call_log, owner_hooks, audit_...)
-         already read pr_url as a typed field elsewhere — so the
-         legacy blob is dead-on-write.
-
-         Merge semantics: if a [handoff_context] object is already
-         present in args, append pr_url to its [evidence_refs]
-         (preserving any existing refs). Otherwise inject a new
-         minimal handoff_context = { evidence_refs = [pr_url] }. *)
-      let kvs =
-        match List.find_opt (fun (k, _) -> String.equal k "pr_url") kvs with
-        | Some (_, `String pr_url) when not (String.equal pr_url "") ->
-            let kvs = List.filter (fun (k, _) -> not (String.equal k "pr_url")) kvs in
-            let merge_pr_url_into_handoff (hc : Yojson.Safe.t) : Yojson.Safe.t =
-              match hc with
-              | `Assoc hc_fields ->
-                let existing_refs =
-                  match List.assoc_opt "evidence_refs" hc_fields with
-                  | Some (`List xs) -> xs
-                  | _ -> []
-                in
-                let new_refs = existing_refs @ [ `String pr_url ] in
-                let hc_fields =
-                  List.filter
-                    (fun (k, _) -> not (String.equal k "evidence_refs"))
-                    hc_fields
-                  @ [ "evidence_refs", `List new_refs ]
-                in
-                `Assoc hc_fields
-              | _ -> `Assoc [ "evidence_refs", `List [ `String pr_url ] ]
-            in
-            (match List.find_opt (fun (k, _) -> String.equal k "handoff_context") kvs with
-             | Some _ ->
-               List.map
-                 (fun (k, v) ->
-                   if String.equal k "handoff_context"
-                   then ("handoff_context", merge_pr_url_into_handoff v)
-                   else (k, v))
-                 kvs
-             | None ->
-               kvs @ [ "handoff_context", merge_pr_url_into_handoff `Null ])
-        | Some _ -> List.filter (fun (k, _) -> not (String.equal k "pr_url")) kvs
-        | None -> kvs
-      in
-      `Assoc kvs
-    | other -> other
-  in
-  let args = normalize_args args in
   let unknown = match args with
     | `Assoc kvs ->
       List.filter
@@ -332,17 +279,15 @@ and handle_transition ~tool_name ~start_time ctx args =
   | None ->
   (* Contracted Done actions are reviewed above by the LLM completion
      reviewer with the persisted completion contract in prompt context.
-     Keep AwaitingVerification for explicit submit_for_verification /
-     submit_pr_evidence workflows only; a normal done action must
-     not depend on the verifier agent being alive. *)
+     Keep AwaitingVerification for explicit submit_for_verification only; a
+     normal done action must not depend on the verifier agent being alive. *)
   (* RFC-0109 Phase D hard cut: contracted verification submissions
      require substantive evidence. Analysis-only tasks (no contract)
      bypass the gate. *)
   let evidence_decision =
     let needs_gate =
       match requested_action with
-      | Masc_domain.Submit_for_verification
-      | Masc_domain.Submit_pr_evidence -> true
+      | Masc_domain.Submit_for_verification -> true
       | Masc_domain.Claim
       | Masc_domain.Start
       | Masc_domain.Done_action
@@ -379,17 +324,6 @@ and handle_transition ~tool_name ~start_time ctx args =
          ~extra_fields
          reason)
   | Workspace_hooks.Pass ->
-  let action =
-    match requested_action, task_opt with
-    | ( Masc_domain.Submit_for_verification
-      , Some ({ task_status = Masc_domain.Todo; _ } : Masc_domain.task) ) ->
-      task_log_info ~task_id
-        "[verification-alias] treating todo submit_for_verification with evidence as submit_pr_evidence task=%s agent=%s"
-        task_id
-        ctx.agent_name;
-      Masc_domain.Submit_pr_evidence
-    | _ -> action
-  in
   let action_s = Masc_domain.task_action_to_string action in
   let default_time = Time_compat.now () -. 60.0 in
   let (started_at_actual, collaborators_from_task) = match task_opt with
@@ -416,7 +350,7 @@ and handle_transition ~tool_name ~start_time ctx args =
   in
   let prepare_verification_request =
     match action with
-    | Masc_domain.Submit_for_verification | Masc_domain.Submit_pr_evidence ->
+    | Masc_domain.Submit_for_verification ->
       Some
         (fun ~task ~assignee ~verification_id ~evidence_refs ->
            (Atomic.get Workspace_hooks.verification_submit_request_fn)
@@ -460,8 +394,7 @@ and handle_transition ~tool_name ~start_time ctx args =
     | Masc_domain.Done_action
     | Masc_domain.Cancel
     | Masc_domain.Release
-    | Masc_domain.Submit_for_verification
-    | Masc_domain.Submit_pr_evidence ->
+    | Masc_domain.Submit_for_verification ->
       None
   in
   let verifier_approve_gate_rejection =
@@ -523,7 +456,7 @@ and handle_transition ~tool_name ~start_time ctx args =
             ("agent_name", `String ctx.agent_name);
           ];
        (match action with
-        | Masc_domain.Submit_for_verification | Masc_domain.Submit_pr_evidence ->
+        | Masc_domain.Submit_for_verification ->
           let tasks = Workspace.get_tasks_raw ctx.config in
           (match List.find_opt (fun (t : Masc_domain.task) -> String.equal t.id task_id) tasks with
            | Some task ->
@@ -604,7 +537,6 @@ and handle_transition ~tool_name ~start_time ctx args =
           ~reason:(Some "task_cancelled");
         ()
    | Ok _, (Masc_domain.Claim | Masc_domain.Start | Masc_domain.Submit_for_verification
-            | Masc_domain.Submit_pr_evidence
             | Masc_domain.Approve_verification | Masc_domain.Reject_verification | Masc_domain.Release)
    | Error _, _ -> ());
   result_to_response ~tool_name ~start_time result

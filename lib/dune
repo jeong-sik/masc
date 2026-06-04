@@ -36,7 +36,6 @@
  prometheus_format
  prometheus_key
  prometheus_store
- prometheus_render
  prometheus_process
  prometheus_builtin_metric_names
  prometheus_builtin_metrics_part1
@@ -56,7 +55,6 @@
   workspace_prometheus_hooks
 
  keeper_persona_authoring_contract
- keeper_persona_authoring_slug
  keeper_types_profile_sandbox
  keeper_types_profile_persona keeper_types_profile_persona_defaults
  keeper_types_profile_oas_env
@@ -215,6 +213,7 @@
   tool_inline_dispatch_types
   tool_inline_dispatch_workspace
   tool_inline_dispatch_comm
+  approval_queue_handlers
   workspace_goals_verification
   tool_misc_admin
   keeper_tool_persona_audit
@@ -437,7 +436,6 @@
    ;; with identically-named types in the main library.
    ;; RFC-0163 Phase D1 — Runtime_name leaf extraction (lib/runtime_id/).
    ;; Pure canonical-name validation, stdlib-only.
-
    uri
    tls
    tls-eio
@@ -518,6 +516,9 @@
    ;; substrate. (libraries) admits no keeper/runtime/domain/server module, so a
    ;; re-coupling is a dune cycle. Pure schema/vocab/policy, zero mega-outbound.
    masc.masc_tool_surface
+   ;; RFC-0217 S2 — OTel metric bridge leaf (Prometheus_store snapshot -> OTLP
+   ;; observable). Prometheus depends on this; the leaf has no masc dep.
+   masc.otel_metrics
    ;; Thompson Sampling agent selection (extracted leaf — Health/Prometheus
    ;; edges inverted to callbacks; Board-callable record_vote without mega-lib cycle)
    masc_thompson

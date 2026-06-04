@@ -87,7 +87,6 @@
 **의심스러운 사용** (검토 필요):
 - `server_dashboard_http_runtime_info.ml`: 7개 mutex lock/unlock, Eio fiber 안에서
 - `worktree_live_context.ml`: Eio 환경에서 git 작업
-- `auto_responder.ml`: 응답 시간 기록
 
 **실행**: `Stdlib.Mutex.lock` -> `Eio.Mutex.use_ro`/`Eio.Mutex.protect` 전환. 단, non-yielding critical section이면 현행 유지 (주석으로 근거 명시).
 

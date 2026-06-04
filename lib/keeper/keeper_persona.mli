@@ -8,9 +8,6 @@ val handle_persona_list :
 val handle_persona_schema :
   _ Keeper_types_profile.context -> Yojson.Safe.t -> tool_result
 
-val handle_persona_generate :
-  _ Keeper_types_profile.context -> Yojson.Safe.t -> tool_result
-
 val handle_persona_save :
   _ Keeper_types_profile.context -> Yojson.Safe.t -> tool_result
 

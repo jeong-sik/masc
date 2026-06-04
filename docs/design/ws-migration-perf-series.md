@@ -215,7 +215,7 @@ Two format helpers (`formatHitRate`, `formatAvgBufferedBytes`) return
 ### 3.8 #10112 — gRPC events_dropped counter (server, observability)
 
 Mirrors #10104's drop signal for the gRPC subscriber path.  The
-gRPC callback in `lib/server/masc_grpc_service.ml` already drops
+gRPC callback in `lib/server/masc_grpc_service.ml:484` already drops
 events when its output stream's buffer is near capacity, but the
 drop was visible only in logs.
 
@@ -387,7 +387,7 @@ No timeline; depends on production confidence in the WS path.
 
 ### gRPC subscriber symmetry (addressed in #10112, #10114, #10117)
 
-The gRPC subscriber in `lib/server/masc_grpc_service.ml` had a
+The gRPC subscriber in `lib/server/masc_grpc_service.ml:477` had a
 similar fan-out shape to WS but no drop signal.  This is now
 covered:
 

@@ -25,21 +25,6 @@ let record_fsm_drift ~variant ~force =
     ~variant ~force ~agent_name:"fsm-drift-counter-test"
 ;;
 
-let str_contains haystack needle =
-  let haystack_len = String.length haystack in
-  let needle_len = String.length needle in
-  if needle_len = 0 then true
-  else if needle_len > haystack_len then false
-  else (
-    let found = ref false in
-    let i = ref 0 in
-    while !i <= haystack_len - needle_len && not !found do
-      if String.sub haystack !i needle_len = needle then found := true;
-      incr i
-    done;
-    !found)
-;;
-
 let counter_for ~variant ~force =
   Masc.Prometheus.metric_value_or_zero
     fsm_drift_metric
@@ -50,15 +35,17 @@ let counter_for ~variant ~force =
     ()
 
 let test_metric_name_stable () =
-  let text = Masc.Prometheus.to_prometheus_text () in
+  let metric =
+    Masc.Prometheus.snapshot ()
+    |> List.find_opt (fun (m : Masc.Prometheus.metric) ->
+      String.equal m.name fsm_drift_metric && m.labels = [])
+  in
   Alcotest.(check bool)
-    "fsm drift HELP registered"
+    "fsm drift registered as counter"
     true
-    (str_contains text ("# HELP " ^ fsm_drift_metric));
-  Alcotest.(check bool)
-    "fsm drift TYPE registered"
-    true
-    (str_contains text ("# TYPE " ^ fsm_drift_metric ^ " counter"))
+    (match metric with
+     | Some m -> m.metric_type = Masc.Prometheus.Counter
+     | None -> false)
 
 (* Exhaustive enum → label mapping.  Adding a new
    [Workspace_task_lifecycle.drift] variant forces the reviewer to

@@ -1,7 +1,7 @@
 # Keeper Tool Boundary Matrix
 
 Status: P0 ratchet source for keeper agent tool boundaries.
-Last updated: 2026-06-03.
+Last updated: 2026-06-04.
 
 This matrix freezes the owner map for keeper modules that participate in the
 agent tool path. A new file in scope must be added here with exactly one owner
@@ -94,6 +94,8 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_sandbox_docker_nested_runtime.mli` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_docker.ml` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_docker.mli` - sandbox-runtime
+- `lib/keeper/keeper_sandbox_error.ml` - sandbox-runtime
+- `lib/keeper/keeper_sandbox_error.mli` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_exec_failure.ml` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_exec_failure.mli` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_factory.ml` - sandbox-runtime

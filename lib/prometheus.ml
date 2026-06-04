@@ -1,12 +1,13 @@
 (** Prometheus-Compatible Metrics for masc
 
-    Provides lightweight metrics collection and Prometheus text format export.
+    Provides lightweight metric accumulation. The in-process store is exported
+    through OTel observable callbacks.
 
     Usage:
     {[
       let () = Prometheus.inc_counter "masc_tasks_total" ~labels:[("status", "completed")]
       let () = Prometheus.set_gauge "masc_active_agents" 5.0
-      let text = Prometheus.to_prometheus_text ()
+      let snapshot = Prometheus.snapshot ()
     ]}
 
     @since 0.4.0
@@ -95,10 +96,9 @@ let metric_workspace_claim_post_provision_failures =
    point lets the operator see WHICH caller is timing out at
    WHICH configured budget without grepping warn-level log
    lines.  Paired with per-caller env-overridable defaults in
-   [Env_config_oas_bridge] so 60s "fantasy" budgets in
-   [auto_responder] / [dashboard_provider_runs] no longer
-   silently masquerade as the same class of event as
-   intentional 120s/180s budgets in persona authoring / deep_review. *)
+   [Env_config_oas_bridge] so remaining evaluator/advisory callers
+   expose their own budgets instead of hiding behind one generic OAS
+   timeout class. *)
 include Prometheus_oas_metric_names
 
 
@@ -302,12 +302,12 @@ let set_tool_schema_stats ~count ~approx_tokens =
 ;;
 
 
-(* Track host labels seen in previous scrapes so we can zero out gauges
+(* Track host labels seen in previous exports so we can zero out gauges
    for hosts that disappeared from the pool. Without this, an evicted
    host's last non-zero idle value would persist in the registry forever
    and the metrics table would grow unboundedly with every unique host
    seen. Set is module-local: only [update_pool_metrics_gauges] reads
-   or writes it, and [to_prometheus_text]'s mutex serialises calls. *)
+   or writes it. *)
 let pool_idle_seen_hosts : (string, unit) Hashtbl.t = Hashtbl.create 16
 
 let update_pool_metrics_gauges () =
@@ -345,13 +345,34 @@ let update_pool_metrics_gauges () =
     set_gauge metric_pool_create_total (float_of_int stats.create_count_total)
 ;;
 
-let to_prometheus_text () =
+(* RFC-0217 S4 — export the in-process metric store to OTel as an observable
+   source. Defined after update_*_gauges so the export tick can refresh the lazy
+   Pool_metrics/Fd gauges into the store first. The store
+   (Prometheus_store) stays the accumulator; the backend polls snapshot
+   each tick (push-model replacement for the old scrape endpoint, S0 spike
+   validated). register_source only enqueues the callback at module load
+   (no init dependency); the snapshot is read lazily at each tick. *)
+let otel_samples () : Otel_metrics.sample list =
   update_uptime ();
   update_fd_gauges ();
   update_fd_accountant_gauges ();
   update_pool_metrics_gauges ();
-  Prometheus_store.snapshot () |> Prometheus_render.render_snapshot
-;;
+  Prometheus_store.snapshot ()
+  |> List.map (fun (m : Prometheus_store.metric) ->
+         { Otel_metrics.name = m.name
+         ; value = m.value
+         ; labels = m.labels
+         ; kind =
+             (match m.metric_type with
+              | Prometheus_store.Counter -> Otel_metrics.Counter
+              | Prometheus_store.Gauge -> Otel_metrics.Gauge
+              | Prometheus_store.Histogram -> Otel_metrics.Histogram)
+         })
+
+let () = Otel_metrics.register_source otel_samples
+
+(* RFC-0217 S4-2 — text scrape rendering removed. Lazy gauge refreshes now
+   happen in [otel_samples] before each OTLP export tick. *)
 
 (** {1 Convenience Functions} *)
 let record_request () = inc_counter metric_mcp_requests ()

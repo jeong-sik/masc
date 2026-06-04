@@ -193,10 +193,9 @@ val telemetry_enabled : unit -> bool
 val parse_warn_enabled : unit -> bool
 val governance_level : unit -> string
 
-(** {1 Build identity / auto respond / pubsub} *)
+(** {1 Build identity / pubsub} *)
 
 val build_git_commit_opt : unit -> string option
-val auto_respond_opt : unit -> string option
 val pubsub_max_messages : unit -> int
 
 (** {1 Keeper defaults} *)

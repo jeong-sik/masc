@@ -100,25 +100,25 @@ Code anchors:
 ### 4. Tool surface selection
 
 Keeper tools are not a static full MCP surface. `prepare_agent_setup` builds the
-candidate bundle, then each SDK turn recomputes the visible tool surface from
+candidate bundle, then each SDK turn recomputes the allowed tool surface from
 the latest message context, deterministic prefilter, discovered tools, tool
 affordances, overlays, fallback floor, and last-turn restrictions.
 
-The actual OAS call receives `AllowList turn_visible_tool_names`.
+The actual OAS call receives `AllowList turn_allowed_tool_names`.
 
 Terminology is strict here:
 
 - `allowed_tool_names`: policy/candidate surface after keeper profile and denylist
   resolution. This is not necessarily the exact set exposed to one SDK turn.
-- `turn_visible_tool_names`: internal name for the per-turn resolved tool surface.
+- `turn_allowed_tool_names`: internal name for the per-turn resolved tool surface.
   It is the exact list passed to `Agent_sdk.Guardrails.AllowList`.
-- `oas_allowlist_tool_names`: operator-facing decision-log field for that same
-  list. This avoids introducing a second "visible tool" concept in audit logs.
+- `allowed_tool_names`: operator-facing decision-log field for that same
+  list. This avoids introducing a second "allowed tool" concept in audit logs.
 
 Code anchors:
 
 - `lib/keeper/keeper_run_tools_setup.ml:489` - compute per-turn tool surface
-- `lib/keeper/keeper_run_tools_setup.ml:659` - final visible tool names
+- `lib/keeper/keeper_run_tools_setup.ml:659` - final allowed tool names
 - `lib/keeper/keeper_run_tools_setup.ml:712` - tool requirement is Optional when tools exist
 - `lib/keeper/keeper_run_tools_hooks.ml:480` - OAS allowlist guardrail
 - `lib/keeper/keeper_run_tools_hooks.ml:515` - tool call log turn context
@@ -134,7 +134,7 @@ Code anchors:
 - `lib/keeper/keeper_tool_policy.ml:397` - Keeper allowed names are candidate minus denied
 
 Follow-up started in this series: decision-log `tool_disclosure` records should
-include the concrete `oas_allowlist_tool_names`, not only the final count, so an
+include the concrete `allowed_tool_names`, not only the final count, so an
 operator can reconstruct exactly what the Keeper could call at that SDK turn.
 
 ### 5. Task claim and task assignment
@@ -232,18 +232,16 @@ Code anchor:
 
 ### 8. Task result and verification evidence
 
-Task completion and verification evidence are explicit task tool transitions.
+Task completion evidence is an explicit task tool transition.
 
 `keeper_task_done` requires `task_id` and `result`, maps the result into
 `handoff_context.summary`, and calls `Task.Tool.handle_transition` with
 `action=done`.
 
-`keeper_task_submit_for_verification` requires `task_id` and `notes`. The notes
-message is the primary evidence handoff: it must say what was done and how it can
-be verified. Optional structured `evidence_refs` can also carry PR URLs, commits,
-artifacts, receipts, test logs, task comments, or other concrete references.
-The wrapper maps these into `handoff_context` and calls
-`action=submit_for_verification`.
+The old task-verification wrapper is retired. PR URLs,
+commits, artifacts, receipts, test logs, task comments, or other concrete
+references belong in `keeper_task_done` result text or typed
+`handoff_context.evidence_refs` on the raw transition surface.
 
 Code anchors:
 
@@ -282,7 +280,7 @@ fast diagnosis path sees only counts.
 | Surface | Model sees | Runtime enforces | Operator can audit | Status |
 | --- | --- | --- | --- | --- |
 | Allowed Path | Tool schema and path errors; world prompt may not list exact paths | path/cwd resolver and sandbox/allowed-path checks | tool call log context and runtime contract include allowed paths | Partial |
-| Allowed Tool | OAS schemas filtered by `AllowList` | `turn_visible_tool_names` OAS allowlist plus candidate/deny execution gate | receipt/lineage names plus `tool_disclosure.oas_allowlist_tool_names` | Partial, first patch adds allowlist names |
+| Allowed Tool | OAS schemas filtered by `AllowList` | `turn_allowed_tool_names` OAS allowlist plus candidate/deny execution gate | receipt/lineage names plus `tool_disclosure.allowed_tool_names` | Partial, first patch adds allowlist names |
 | Repo / Worktree Seat | Execute result `execution_location.selected_worktree` after a worktree-scoped call | `cwd` resolver, repo readiness, and worktree repair | Execute result envelope and post-Execute change hook | Good after Execute; not a persistent assignment |
 | Assign Task | task counts, claim guidance, current task context | claim/start transitions and current-task reconciliation | backlog, receipt current task, task events | Good after claim/start |
 | Assign Goal | goal prompt and active-goal world state | `active_goal_ids` hard-gate `keeper_task_claim` | receipt goal IDs and goal progress JSON | Good for claim scope; goal progress remains observational |
@@ -291,7 +289,7 @@ fast diagnosis path sees only counts.
 
 ## Work Queue
 
-1. **Done in PR #20055**: add concrete `oas_allowlist_tool_names` to the
+1. **Done in PR #20055**: add concrete `allowed_tool_names` to the
    per-turn `tool_disclosure` decision log. This closes the fastest
    observability gap without changing policy.
 2. **Done in PR #20055**: add a dedicated post-Execute working-tree status
@@ -304,11 +302,9 @@ fast diagnosis path sees only counts.
    gate. The resolver now passes a goal-linked task filter into
    `Workspace.claim_next_r`, and no-scope results report excluded tasks instead
    of falling back to all work.
-5. **Done in PR #20055**: keep explicit
-   `keeper_task_submit_for_verification` as the task-verification SSOT, but make
-   it evidence-message based rather than PR-URL based. The Keeper submits notes,
-   with optional structured refs for PRs, commits, artifacts, receipts, logs, or
-   task comments; `gh pr create` alone does not mutate task verification state.
+5. **Superseded after PR #20055**: the explicit task-verification wrapper is retired. Keepers close PR
+   work with `keeper_task_done` and include PR/artifact evidence in `result`;
+   `gh pr create` alone does not mutate task completion state.
 6. **Done in PR #20055**: add a first-class "worktree selected" observation to
    Execute `execution_location`. This keeps repo/worktree choice tied to the
    actual `cwd` that runtime enforced, but surfaces the stable assignment as

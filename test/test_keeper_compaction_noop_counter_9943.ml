@@ -114,30 +114,24 @@ let test_per_keeper_isolation () =
     (noop_for ~keeper:b ~trigger)
 ;;
 
-(* Prometheus text export must include the metric name and the
-   keeper / trigger label keys — PromQL queries depend on this. *)
-let test_prometheus_text_export () =
+(* The in-process registry must preserve the metric name and
+   keeper / trigger label keys; the OTel exporter reads this snapshot. *)
+let test_registry_snapshot_includes_label_shape () =
   let keeper = "test-keeper-compaction-noop-9943-export" in
   let trigger = "context_overflow_imminent" in
+  let metric = Masc.Keeper_metrics.(to_string CompactionNoop) in
   Prom.inc_counter
-    Masc.Keeper_metrics.(to_string CompactionNoop)
+    metric
     ~labels:[ "keeper", keeper; "trigger", trigger ]
     ();
-  let text = Prom.to_prometheus_text () in
-  let contains s sub =
-    let n = String.length s
-    and m = String.length sub in
-    let rec loop i =
-      if i + m > n then false else if String.sub s i m = sub then true else loop (i + 1)
-    in
-    loop 0
+  let has_metric =
+    Prom.snapshot ()
+    |> List.exists (fun (m : Prom.metric) ->
+      String.equal m.name metric
+      && List.mem ("keeper", keeper) m.labels
+      && List.mem ("trigger", trigger) m.labels)
   in
-  Alcotest.(check bool)
-    "metric name in export"
-    true
-    (contains text Masc.Keeper_metrics.(to_string CompactionNoop));
-  Alcotest.(check bool) "keeper label key in export" true (contains text "keeper=");
-  Alcotest.(check bool) "trigger label key in export" true (contains text "trigger=")
+  Alcotest.(check bool) "metric label shape in registry" true has_metric
 ;;
 
 let () =
@@ -156,11 +150,11 @@ let () =
             test_distinct_triggers_separate_rows
         ; Alcotest.test_case "per-keeper isolation" `Quick test_per_keeper_isolation
         ] )
-    ; ( "export"
+    ; ( "registry"
       , [ Alcotest.test_case
-            "metric + labels appear in /metrics"
+            "metric + labels appear in registry"
             `Quick
-            test_prometheus_text_export
+            test_registry_snapshot_includes_label_shape
         ] )
     ]
 ;;

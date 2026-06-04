@@ -83,7 +83,7 @@ and turn_event =
 
 and pr_event =
   { pr_number : int
-  ; pr_url : string
+  ; pull_request_url : string
   ; pr_title : string
   ; pr_state : string
   ; repo : string
@@ -126,7 +126,7 @@ let pr_event_to_json (e : pr_event) : Yojson.Safe.t =
   `Assoc
     [ "type", `String "pr"
     ; "pr_number", `Int e.pr_number
-    ; "pr_url", `String e.pr_url
+    ; "pull_request_url", `String e.pull_request_url
     ; "pr_title", `String e.pr_title
     ; "pr_state", `String e.pr_state
     ; "repo", `String e.repo

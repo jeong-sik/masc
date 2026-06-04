@@ -35,6 +35,10 @@ type validation_error =
     }
   | Empty_executable of { argv : string list }
   | Empty_argv of { executable : string }
+  | Executable_repeated_in_argv0 of {
+      executable : string;
+      argv : string list;
+    }
   | Argv_contains_shell_metachar of {
       executable : string;
       index : int;
@@ -407,6 +411,11 @@ let check_exec ~mode ~executable ~argv ~cwd ~env =
   if String.length trimmed = 0 then Error (Empty_executable { argv })
   else if not (is_allowed ~mode trimmed)
   then Error (Executable_not_allowlisted { name = trimmed; mode })
+  else if
+    match argv with
+    | first :: _ -> String.equal first trimmed
+    | [] -> false
+  then Error (Executable_repeated_in_argv0 { executable = trimmed; argv })
   else
     let* () =
       if argv = [] then Ok () else check_argv ~executable argv
@@ -631,6 +640,19 @@ let pp_validation_error ppf = function
        e.g. executable=\"cat\" argv=[\"file.txt\"]"
   | Empty_argv { executable } ->
     Format.fprintf ppf "executable %S invoked with empty argv" executable
+  | Executable_repeated_in_argv0 { executable; argv = _ :: rest } ->
+    Format.fprintf
+      ppf
+      "executable %S is repeated as argv[0]; typed Execute argv contains \
+       only arguments after the executable. Rewrite as executable=%S argv=%s."
+      executable
+      executable
+      (Yojson.Safe.to_string (`List (List.map (fun arg -> `String arg) rest)))
+  | Executable_repeated_in_argv0 { executable; argv = [] } ->
+    Format.fprintf
+      ppf
+      "executable %S was reported as duplicated in argv[0], but argv is empty"
+      executable
   | Argv_contains_shell_metachar { executable; index; token } ->
     Format.fprintf
       ppf

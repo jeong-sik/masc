@@ -160,7 +160,12 @@ let find_tool fixture name =
 
 let ensure_sample_file fixture =
   let relative = "keeper-tool-matrix.txt" in
-  let absolute = Filename.concat fixture.generic.base_path relative in
+  let absolute =
+    Filename.concat
+      (Masc.Keeper_sandbox.host_root_abs_of_meta ~config:fixture.config fixture.meta)
+      relative
+  in
+  Generic.mkdir_p (Filename.dirname absolute);
   Generic.write_text_file absolute "needle\nsecond line\n";
   relative
 
@@ -202,6 +207,7 @@ let prepare_keeper_name fixture name =
   then
     ensure_keeper_claim fixture;
   if name = "keeper_voice_session_end" then ensure_voice_session fixture;
+  if name = "keeper_ide_annotate" then ignore (ensure_sample_file fixture);
   (* keeper_memory_search: needle "tool matrix memory needle" is already
      in ctx_snapshot from fixture creation (line ~128). No mutation needed. *)
   ignore (name = "keeper_memory_search")
@@ -313,7 +319,7 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
               "Validated the keeper tool matrix case as a follow-up smoke check, confirmed the task fixture was claimed, and recorded the successful completion path." );
         ]
   | "keeper_stay_silent" ->
-      `Assoc [ ("reason", `String "tool matrix silence") ]
+      `Assoc []
   | "keeper_task_create" ->
       `Assoc
         [
@@ -323,6 +329,21 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
         ]
   | "keeper_tool_search" ->
       `Assoc [ ("query", `String "tool matrix") ]
+  | "keeper_ide_annotate" ->
+      `Assoc
+        [
+          ("file_path", `String "keeper-tool-matrix.txt");
+          ("line_start", `Int 1);
+          ("kind", `String "Comment");
+          ("content", `String "tool matrix annotation");
+        ]
+  | "keeper_memory_write" ->
+      `Assoc
+        [
+          ("kind", `String "constraints");
+          ("title", `String "tool matrix constraint");
+          ("content", `String "tool matrix constraint details");
+        ]
   | other -> failwith ("missing keeper arguments contract for " ^ other)
 
 let keeper_expectation_for_name name =
@@ -357,8 +378,10 @@ let extra_guard_fragments_for_name = function
   | "masc_board_migrate" -> [ "requires postgresql backend" ]
   | "masc_get_metrics" -> [ "no metrics found" ]
   | "masc_library_promote" -> [ "no candidate matching" ]
-  | "masc_keeper_list" | "masc_keeper_msg" | "masc_keeper_msg_result"
-  | "masc_keeper_status" ->
+  | "masc_keeper_msg" ->
+      [ "keeper management tool"; "use MCP client"; "requires Eio context" ]
+  | "masc_keeper_list" | "masc_keeper_msg_result"
+  | "masc_keeper_msg_cancel" | "masc_keeper_msg_queue" | "masc_keeper_status" ->
       [ "keeper management tool"; "use MCP client" ]
   | "tool_execute" -> [ "worktree not found" ]
   | _ -> []

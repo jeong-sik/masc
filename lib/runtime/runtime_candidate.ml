@@ -26,9 +26,8 @@ let health_key (t : t) = Runtime_provider_binding.provider_health_key_of_config 
 let model_health_key (t : t) = Runtime_provider_binding.provider_health_key_of_config t
 let health_keys (t : t) = [ Runtime_provider_binding.provider_health_key_of_config t ]
 
-let resolve_tool_lane_for_oas_tools ?agent_name ?tool_requirement ~tools (t : t) =
-  Runtime_agent.resolve_tool_lane_for_oas_tools ?agent_name ?tool_requirement
-    ~provider_cfg:t ~tools ()
+let resolve_tool_lane_for_oas_tools ?agent_name ~tools (t : t) =
+  Runtime_agent.resolve_tool_lane_for_oas_tools ?agent_name ~provider_cfg:t ~tools ()
 
 let runtime_mcp_policy_for_agent ~agent_name (t : t) runtime_mcp_policy =
   Runtime_agent.runtime_mcp_policy_for_provider ~provider_cfg:t ~agent_name

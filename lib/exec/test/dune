@@ -9,7 +9,9 @@
         test_shell_ir_risk_repo_hosting_cli_stress
         test_shell_ir_typed_e2e
         test_shell_ir_differential
+        test_shell_ir_oracle
         test_exec_gate_env_wrapper
         test_shell_ir_risk_action_flags)
  (libraries masc_exec masc_exec_bash_parser masc_exec_command_gate masc_process
-            masc_core masc_config alcotest eio eio_main yojson unix re))
+            masc_core masc_config alcotest eio eio_main yojson unix re)
+ (deps (glob_files fixtures/shell_ir_oracle/*.json)))

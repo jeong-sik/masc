@@ -12,7 +12,7 @@
 | Surface | 결함 | Fleet evidence (2026-05-27 8.4h) |
 |---|---|---|
 | Risk classifier (`lib/governance_pipeline_risk.ml`) | substring matcher 가 primary fallback, `risk_overrides` 8 entry 가 누적 patch | 11 `governance_approval` false-positive |
-| `workflow_rejection_error_json` (`agent_tool_task_runtime.ml:23`) | hint / tool_suggestion 시그니처 부재, 6 call site 모두 dead-end | 5 `keeper_memory_write` + 1 `keeper_task_submit_for_verification` empty-arg = 6 LLM dead-end |
+| `workflow_rejection_error_json` (`agent_tool_task_runtime.ml:23`) | hint / tool_suggestion 시그니처 부재, 6 call site 모두 dead-end | 5 `keeper_memory_write` + 1 retired task-verification wrapper empty-arg = 6 LLM dead-end |
 | Dispatch layer (`config/keepers/base.toml`) | Claude API / MASC structured / Shell executable taxonomy 부재 | 12 confusion (8 Read-via-Execute, 2 keeper_tasks_list-via-Execute) |
 
 각 fix 를 *surgical patch* 로 진행하면 next contributor 가 같은 workaround 패턴을 재구축. PR #19035 가 그 대표 사례 — `risk_overrides` 에 3 entry 추가 (8th-10th) 로 11 false-positive 해소, 단 substring matcher 자체는 그대로.

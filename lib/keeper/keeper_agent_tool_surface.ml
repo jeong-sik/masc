@@ -129,7 +129,7 @@ type tool_surface_metrics =
   { turn_lane : turn_lane
   ; tool_surface_class : tool_surface_class
   ; tool_requirement : tool_requirement
-  ; visible_tool_count : int
+  ; allowed_tool_count : int
   ; tool_gate_enabled : bool
   ; tool_surface_fallback_used : bool
   ; config_root : string
@@ -140,7 +140,7 @@ type tool_surface_metrics =
   }
 
 type computed_tool_surface =
-  { turn_visible_tool_names : string list
+  { turn_allowed_tool_names : string list
   ; absolute_turn : int
   ; checkpoint_start_turn : int
   ; per_call_turn : int
@@ -203,8 +203,7 @@ let tools_for_affordance = function
       "keeper_tasks_list"; "masc_tasks" ]
   | Task_verify ->
     [ "keeper_tasks_list"; "keeper_tasks_audit";
-      "keeper_task_done"; "keeper_task_submit_for_verification";
-      "masc_transition" ]
+      "keeper_task_done"; "masc_transition" ]
 
 let satisfying_tools_for_turn ~(turn_affordances : string list) ~(allowed_tool_names : string list)
   : string list
@@ -241,8 +240,7 @@ let preferred_tool_names_for_turn_affordances turn_affordances =
          [ "keeper_tasks_audit"; "keeper_task_force_release";
            "keeper_task_force_done" ]
        | Task_verify ->
-         [ "keeper_task_submit_for_verification"; "keeper_task_done";
-           "masc_transition" ]
+         [ "keeper_task_done"; "masc_transition" ]
        )
   |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
 
@@ -302,7 +300,7 @@ let keeper_selection_bm25_prefilter_n = 30
    production Tool_index entry builder so tests cannot drift by copying a
    second alias/group table.
 
-   Entries stay keyed by canonical handler names. LLM-visible public aliases
+   Entries stay keyed by canonical handler names. Model-facing public aliases
    such as Execute/Grep project through Keeper_tool_descriptor_resolution
    below, so retrieval shares one public-alias axis instead of carrying duplicate
    Execute/Grep rows. *)
@@ -338,7 +336,6 @@ let tool_search_alias_entries =
   ; "keeper_task_claim", "태스크 가져오기 할당"
   ; "keeper_task_create", "태스크 생성 만들기 일감"
   ; "keeper_task_done", "태스크 완료 마감"
-  ; "keeper_task_submit_for_verification", "태스크 검증제출 리뷰요청 PR검토"
   ; "keeper_task_force_release", "태스크 강제해제 반환"
   ; "keeper_task_force_done", "태스크 강제완료"
   ; "keeper_voice_speak", "음성 말하기 보이스"

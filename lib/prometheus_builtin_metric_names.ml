@@ -70,10 +70,9 @@ let metric_workspace_claim_post_provision_failures =
    point lets the operator see WHICH caller is timing out at
    WHICH configured budget without grepping warn-level log
    lines.  Paired with per-caller env-overridable defaults in
-   [Env_config_oas_bridge] so 60s "fantasy" budgets in
-   [auto_responder] / [dashboard_provider_runs] no longer
-   silently masquerade as the same class of event as
-   intentional 120s/180s budgets in persona authoring / deep_review. *)
+   [Env_config_oas_bridge] so remaining evaluator/advisory callers
+   expose their own budgets instead of hiding behind one generic OAS
+   timeout class. *)
 include Prometheus_oas_metric_names
 
 

@@ -85,7 +85,6 @@ class KeeperAudit:
     product_action: bool
     design_action: bool
     pr_created_evidence: bool
-    pr_url_evidence: bool
     provider_turn_evidence: bool
     checkpoint_evidence: bool
     history_evidence: bool
@@ -113,11 +112,6 @@ class PrCreationEvidence:
     @property
     def created(self) -> bool:
         return bool(self.refs)
-
-    @property
-    def url_present(self) -> bool:
-        return any(ref.startswith("https://github.com/") for ref in self.refs)
-
 
 @dataclass
 class PersistentWorkEvidence:
@@ -367,11 +361,11 @@ def pr_ref_texts_from_structured_output(row: dict[str, Any]) -> list[str]:
     if isinstance(output, str):
         texts.append(output)
     elif isinstance(output, dict):
-        for key in ("output", "pr_url", "pull_request_url", "url", "html_url"):
+        for key in ("output", "url", "html_url"):
             texts.append(text_field(output, key))
         result = output.get("result")
         if isinstance(result, dict):
-            for key in ("pr_url", "pull_request_url", "url", "html_url"):
+            for key in ("url", "html_url"):
                 texts.append(text_field(result, key))
             for key in ("pr_number", "number"):
                 value = result.get(key)
@@ -385,7 +379,7 @@ def pr_ref_texts_from_structured_output(row: dict[str, Any]) -> list[str]:
                 texts.append(f"PR#{value}")
             elif isinstance(value, str) and value.strip().isdigit():
                 texts.append(f"PR#{value.strip()}")
-    for key in ("pr_url", "pull_request_url", "url", "html_url"):
+    for key in ("url", "html_url"):
         texts.append(text_field(row, key))
     for key in ("pr_number", "number"):
         value = row.get(key)
@@ -395,7 +389,7 @@ def pr_ref_texts_from_structured_output(row: dict[str, Any]) -> list[str]:
             texts.append(f"PR#{value.strip()}")
     route_evidence = dict_field(row, "route_evidence")
     if route_evidence is not None:
-        for key in ("pr_url", "pull_request_url", "url", "html_url"):
+        for key in ("url", "html_url"):
             texts.append(text_field(route_evidence, key))
         for key in ("pr_number", "number"):
             value = route_evidence.get(key)
@@ -1047,7 +1041,6 @@ def audit_keeper(
     require_product_evidence: bool,
     require_design_evidence: bool,
     require_pr_created_evidence: bool,
-    require_pr_url_evidence: bool,
     require_provider_turn_evidence: bool,
     require_checkpoint_evidence: bool,
     require_history_evidence: bool,
@@ -1139,7 +1132,6 @@ def audit_keeper(
     product_action = bool(product_evidence)
     design_action = bool(design_evidence)
     pr_created_evidence = pr_creation_evidence.created
-    pr_url_evidence = pr_creation_evidence.url_present
     provider_turn_evidence = persistent_work_evidence.provider_turn
     checkpoint_evidence = persistent_work_evidence.checkpoint
     history_evidence = persistent_work_evidence.history
@@ -1156,10 +1148,6 @@ def audit_keeper(
         failures.append("pr_created_evidence_missing")
     elif not pr_created_evidence:
         warnings.append("pr_created_evidence_missing")
-    if require_pr_url_evidence and not pr_url_evidence:
-        failures.append("pr_url_evidence_missing")
-    elif pr_created_evidence and not pr_url_evidence:
-        warnings.append("pr_url_evidence_missing")
     if require_provider_turn_evidence and not provider_turn_evidence:
         failures.append("provider_turn_evidence_missing")
     if require_checkpoint_evidence and not checkpoint_evidence:
@@ -1184,7 +1172,6 @@ def audit_keeper(
         product_action=product_action,
         design_action=design_action,
         pr_created_evidence=pr_created_evidence,
-        pr_url_evidence=pr_url_evidence,
         provider_turn_evidence=provider_turn_evidence,
         checkpoint_evidence=checkpoint_evidence,
         history_evidence=history_evidence,
@@ -1229,7 +1216,6 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
             require_product_evidence=args.require_product_evidence,
             require_design_evidence=args.require_design_evidence,
             require_pr_created_evidence=args.require_pr_created_evidence,
-            require_pr_url_evidence=args.require_pr_url_evidence,
             require_provider_turn_evidence=(
                 args.require_provider_turn_evidence
                 or args.require_persistent_work_evidence
@@ -1269,7 +1255,6 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
             "require_product_evidence": args.require_product_evidence,
             "require_design_evidence": args.require_design_evidence,
             "require_pr_created_evidence": args.require_pr_created_evidence,
-            "require_pr_url_evidence": args.require_pr_url_evidence,
             "require_provider_turn_evidence": args.require_provider_turn_evidence,
             "require_checkpoint_evidence": args.require_checkpoint_evidence,
             "require_history_evidence": args.require_history_evidence,
@@ -1312,7 +1297,7 @@ def print_text(report: dict[str, Any]) -> None:
             "recent={recent} age={age} board={board} "
             "web_search={web_search} "
             "product={product} design={design} "
-            "pr_created={pr_created} pr_url={pr_url} "
+            "pr_created={pr_created} "
             "provider_turn={provider_turn} checkpoint={checkpoint} "
             "history={history} tool_call_log={tool_call_log}".format(
                 name=keeper["name"],
@@ -1327,7 +1312,6 @@ def print_text(report: dict[str, Any]) -> None:
                 product=str(keeper["product_action"]).lower(),
                 design=str(keeper["design_action"]).lower(),
                 pr_created=str(keeper["pr_created_evidence"]).lower(),
-                pr_url=str(keeper["pr_url_evidence"]).lower(),
                 provider_turn=str(keeper["provider_turn_evidence"]).lower(),
                 checkpoint=str(keeper["checkpoint_evidence"]).lower(),
                 history=str(keeper["history_evidence"]).lower(),
@@ -1400,11 +1384,6 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--require-pr-created-evidence",
         action="store_true",
         help="Fail unless each keeper has structured successful PR creation evidence.",
-    )
-    parser.add_argument(
-        "--require-pr-url-evidence",
-        action="store_true",
-        help="Fail unless each keeper has a structured GitHub pull request URL.",
     )
     parser.add_argument(
         "--require-provider-turn-evidence",

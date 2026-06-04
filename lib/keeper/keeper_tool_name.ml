@@ -40,7 +40,6 @@ type t =
   | Task_claim
   | Task_create
   | Task_done
-  | Task_submit_for_verification
   | Task_force_done
   | Task_force_release
   | Tasks_audit
@@ -88,7 +87,6 @@ let to_string = function
   | Task_claim -> "keeper_task_claim"
   | Task_create -> "keeper_task_create"
   | Task_done -> "keeper_task_done"
-  | Task_submit_for_verification -> "keeper_task_submit_for_verification"
   | Task_force_done -> "keeper_task_force_done"
   | Task_force_release -> "keeper_task_force_release"
   | Tasks_audit -> "keeper_tasks_audit"
@@ -137,7 +135,6 @@ let of_string = function
   | "keeper_task_claim" -> Some Task_claim
   | "keeper_task_create" -> Some Task_create
   | "keeper_task_done" -> Some Task_done
-  | "keeper_task_submit_for_verification" -> Some Task_submit_for_verification
   | "keeper_task_force_done" -> Some Task_force_done
   | "keeper_task_force_release" -> Some Task_force_release
   | "keeper_tasks_audit" -> Some Tasks_audit
@@ -166,7 +163,6 @@ let pending_public_mcp_inline_names =
   ; legacy_masc_broadcast_name
   ; "masc_messages"
   ; "masc_keeper_sandbox_status"
-  ; "masc_persona_generate"
   ; "masc_keeper_create_from_persona"
   ]
 ;;
@@ -204,7 +200,6 @@ let is_keeper_board_tool = function
   | Task_claim
   | Task_create
   | Task_done
-  | Task_submit_for_verification
   | Task_force_done
   | Task_force_release
   | Tasks_audit

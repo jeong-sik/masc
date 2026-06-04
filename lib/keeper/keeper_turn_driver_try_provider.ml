@@ -207,7 +207,6 @@ let run_try_provider
     match
       Runtime_candidate.resolve_tool_lane_for_oas_tools
         ?agent_name:(Runtime_oas_runner.keeper_agent_name_opt ctx.keeper_name)
-        ~tool_requirement:`Optional
         ~tools:ctx.tools
         candidate
     with

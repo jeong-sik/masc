@@ -31,7 +31,6 @@ type caller =
   | Graphql                   (** Graphql_client.{request,query,mutate} HTTP calls (10s) *)
   | Http                      (** http_post_json_text_with_status probes (15s) *)
   | Startup                   (** server bootstrap docker preflight + workspace takeover read (30s) *)
-  | Auto_responder            (** auto_responder cli spawn with stdin prompt (120s) *)
   | Build_identity            (** build identity git probe (5s) *)
   | Voice                     (** voice bridge local playback subprocess (60s) *)
   | Workspace_identity            (** workspace tty identity probe (5s) *)
@@ -62,7 +61,6 @@ let caller_key = function
   | Graphql -> "graphql"
   | Http -> "http"
   | Startup -> "startup"
-  | Auto_responder -> "auto_responder"
   | Build_identity -> "build_identity"
   | Voice -> "voice"
   | Workspace_identity -> "workspace_identity"
@@ -91,7 +89,6 @@ let known_callers () =
     Graphql;
     Http;
     Startup;
-    Auto_responder;
     Build_identity;
     Voice;
     Workspace_identity;
@@ -124,7 +121,6 @@ let known_default_sec = function
   | Graphql -> Some 10.0          (* relation_materializer / dashboard graphql 8-10s *)
   | Http -> Some 15.0             (* tool_local_runtime_verify probe was 15s *)
   | Startup -> Some 30.0          (* server_bootstrap docker preflight 30s *)
-  | Auto_responder -> Some 120.0  (* auto_responder cli spawn was 120s — under-budget regression risk *)
   | Build_identity -> Some 5.0    (* git probe was 5s *)
   | Voice -> Some 60.0            (* local playback was 60s — under-budget regression risk *)
   | Workspace_identity -> Some 5.0    (* tty probe was 5s *)

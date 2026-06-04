@@ -1,5 +1,5 @@
 (** RFC-0142 §Phase 2 — PR-A.  Unit tests for the typed
-    [Provider_error_class] SSOT.
+    [Keeper_provider_error_class] SSOT.
 
     Covers (a) wire-tag stability for every constructor,
     (b) [raw_payload] preserves [Unspecified] verbatim and is [None]
@@ -9,7 +9,7 @@
 
 open Alcotest
 
-module P = Masc.Provider_error_class
+module P = Masc.Keeper_provider_error_class
 
 let tag = testable Fmt.string String.equal
 

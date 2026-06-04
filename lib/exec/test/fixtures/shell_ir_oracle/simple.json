@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "parser": "mvdan.cc/sh/v3/syntax@v3.10.0",
+  "command": "echo hello",
+  "parse_status": "ok",
+  "features": {
+    "pipeline": false,
+    "redirect": false,
+    "heredoc": false,
+    "subshell": false,
+    "command_substitution": false,
+    "variable": false,
+    "glob": false,
+    "env_assignment": false,
+    "process_substitution": false
+  },
+  "commands": [
+    { "name": "echo", "argv": ["echo", "hello"] }
+  ],
+  "error": null
+}

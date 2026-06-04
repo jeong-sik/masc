@@ -258,15 +258,12 @@ let resolve_policy_group ~(fallback : string list) (group_name : string) : strin
 (** Tools allowed on the keeper's last turn.
     Reads [groups.last_turn_safe] from tool_policy.toml. *)
 let last_turn_safe_tool_names () =
-  resolve_policy_group
-    ~fallback:[ "keeper_board_post"; "keeper_board_comment";
-                "keeper_context_status"; "extend_turns";
-                "keeper_time_now"; "keeper_tool_search";
-                "keeper_broadcast"; "keeper_tasks_list"; "keeper_task_done";
-                "keeper_task_submit_for_verification"; "masc_tasks";
-                "masc_transition"; "tool_read_file"; "tool_search_files";
-                "tool_execute"; "masc_web_search"; "masc_web_fetch" ]
-    "last_turn_safe"
+  let fallback =
+    Keeper_tool_descriptor.keeper_last_turn_safe_names ()
+    @ [ "extend_turns" ]
+    |> dedupe_tool_names
+  in
+  resolve_policy_group ~fallback "last_turn_safe"
 
 let tool_policy_of_meta (meta : keeper_meta) =
   let allow = Tool_access_policy.Names meta.tool_access in

@@ -4,6 +4,7 @@ module Types = Masc_domain
 
 open Masc
 open Workspace_types
+module Planning_eio = Masc.Task.Planning_eio
 
 let () = Random.self_init ()
 

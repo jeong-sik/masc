@@ -22,6 +22,8 @@ module Float = Stdlib.Float
               error_add, error_resolve, plan_set_task, plan_get_task, plan_clear_task
 *)
 
+module Planning_eio = Task.Planning_eio
+
 (** Tool handler context *)
 type context = {
   config: Workspace.config;

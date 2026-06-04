@@ -123,6 +123,15 @@ let dedupe_tool_schemas (schemas : Masc_domain.tool_schema list) =
         true))
     schemas
 
+let masc_board_tools_with_keeper_wrappers =
+  [
+    "masc_board_comment";
+    "masc_board_curation_submit";
+    "masc_board_post";
+    "masc_board_vote";
+    "masc_board_delete";
+  ]
+
 (* ── Schema injection filter ──────────────────────────────────── *)
 
 let keeper_safe_inline_tools () =
@@ -186,12 +195,7 @@ let keeper_supported_masc_schemas (schemas : Masc_domain.tool_schema list) =
      author/voter fields. Exposing both leads to the LLM calling the raw
      masc_* variant without the required author, causing "author is required". *)
   let has_keeper_board_wrapper name =
-    let eq v = String.equal name (Tool_name.Board_name.to_string v) in
-    eq Tool_name.Board_name.Board_comment
-    || eq Tool_name.Board_name.Board_curation_submit
-    || eq Tool_name.Board_name.Board_post
-    || eq Tool_name.Board_name.Board_vote
-    || eq Tool_name.Board_name.Board_delete
+    List.mem name masc_board_tools_with_keeper_wrappers
   in
   List.filter (fun (s : Masc_domain.tool_schema) ->
       String.starts_with ~prefix:"masc_" s.name

@@ -1,12 +1,12 @@
-(** Keeper repository readiness.
+(** Playground repository readiness.
 
-    This is a read-only probe for the single keeper sandbox repo clone under
-    the keeper's backend-scoped sandbox repo lane. It gives preflight callers a
-    concrete answer about whether code work can safely start from that clone. *)
+    This module owns repository clone/worktree readiness for playground repo
+    lanes. Keeper callers may ask whether a cwd-backed repo/worktree is usable,
+    but clone/fetch/worktree provisioning policy lives here instead of in
+    keeper execution code. *)
 
 open Keeper_types
 open Keeper_meta_contract
-open Keeper_types_profile
 
 type command_result =
   { ok : bool
@@ -26,7 +26,7 @@ let run_git ~timeout_sec ~clone_path args =
     Masc_exec.Exec_gate.run_argv_with_status
       ~actor:`Workspace_git
       ~raw_source:(String.concat " " argv)
-      ~summary:"keeper repo readiness git probe"
+      ~summary:"playground repo readiness git probe"
       ~timeout_sec argv
   in
   { ok = status = Unix.WEXITED 0; output = String.trim output; status }

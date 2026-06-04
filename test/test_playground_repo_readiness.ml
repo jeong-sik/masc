@@ -1,4 +1,4 @@
-(** Keeper_repo_readiness tests. *)
+(** Playground_repo_readiness tests. *)
 
 open Alcotest
 
@@ -59,7 +59,7 @@ let test_missing_clone () =
   let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
   let json =
-    Masc.Keeper_repo_readiness.inspect ~config
+    Masc.Playground_repo_readiness.inspect ~config
       ~meta ~repo:"jeong-sik/masc" ()
   in
   check bool "not ok" false (json_bool "ok" json);
@@ -72,12 +72,12 @@ let test_non_git_clone () =
   let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
   let clone_path =
-    Masc.Keeper_repo_readiness.clone_path ~config
+    Masc.Playground_repo_readiness.clone_path ~config
       ~meta ~repo_name:"masc"
   in
   mkdir_p clone_path;
   let json =
-    Masc.Keeper_repo_readiness.inspect ~config
+    Masc.Playground_repo_readiness.inspect ~config
       ~meta ~repo:"jeong-sik/masc" ()
   in
   check bool "not ok" false (json_bool "ok" json);
@@ -90,7 +90,7 @@ let test_invalid_repo_name () =
   let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
   let json =
-    Masc.Keeper_repo_readiness.inspect ~config
+    Masc.Playground_repo_readiness.inspect ~config
       ~meta ~repo_name:"../escape" ()
   in
   check bool "not ok" false (json_bool "ok" json);
@@ -139,8 +139,8 @@ let git_ok ~cwd args =
 
 let git_output ~cwd args =
   let result =
-    Masc.Keeper_repo_readiness.run_git
-      ~timeout_sec:Masc.Keeper_repo_readiness.read_only_probe_timeout_sec
+    Masc.Playground_repo_readiness.run_git
+      ~timeout_sec:Masc.Playground_repo_readiness.read_only_probe_timeout_sec
       ~clone_path:cwd
       args
   in
@@ -157,12 +157,12 @@ let test_parent_git_checkout_does_not_count_as_clone () =
   let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
   let clone_path =
-    Masc.Keeper_repo_readiness.clone_path ~config
+    Masc.Playground_repo_readiness.clone_path ~config
       ~meta ~repo_name:"masc"
   in
   mkdir_p clone_path;
   let json =
-    Masc.Keeper_repo_readiness.inspect ~config
+    Masc.Playground_repo_readiness.inspect ~config
       ~meta ~repo:"jeong-sik/masc" ()
   in
   check bool "not ok" false (json_bool "ok" json);
@@ -227,7 +227,7 @@ let test_auto_provisionable_workspace_repo () =
   let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
   let json =
-    Masc.Keeper_repo_readiness.inspect ~config
+    Masc.Playground_repo_readiness.inspect ~config
       ~meta ~repo_name:"masc" ()
   in
   check bool "ok" true (json_bool "ok" json);
@@ -261,7 +261,7 @@ let test_missing_clone_skips_workspace_discovery () =
   let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
   let json =
-    Masc.Keeper_repo_readiness.inspect ~config ~meta
+    Masc.Playground_repo_readiness.inspect ~config ~meta
       ~repo_name:"masc" ()
   in
   check bool "not ok" false (json_bool "ok" json);
@@ -288,7 +288,7 @@ let test_auto_provisionable_workspace_repo_after_file_storm () =
   let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
   let json =
-    Masc.Keeper_repo_readiness.inspect ~config
+    Masc.Playground_repo_readiness.inspect ~config
       ~meta ~repo_name:"masc" ()
   in
   check bool "ok" true (json_bool "ok" json);
@@ -317,7 +317,7 @@ let test_auto_provisionable_workspace_repo_before_hidden_dir_storm () =
   let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
   let json =
-    Masc.Keeper_repo_readiness.inspect ~config
+    Masc.Playground_repo_readiness.inspect ~config
       ~meta ~repo_name:"masc" ()
   in
   check bool "ok" true (json_bool "ok" json);
@@ -346,7 +346,7 @@ let test_auto_provisionable_workspace_repo_before_wide_workspace_storm () =
   let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
   let json =
-    Masc.Keeper_repo_readiness.inspect ~config
+    Masc.Playground_repo_readiness.inspect ~config
       ~meta ~repo_name:"masc" ()
   in
   check bool "ok" true (json_bool "ok" json);
@@ -364,7 +364,7 @@ let test_ensure_worktree_ready_creates_worktree () =
   let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
   let clone_path =
-    Masc.Keeper_repo_readiness.clone_path ~config ~meta ~repo_name:"masc"
+    Masc.Playground_repo_readiness.clone_path ~config ~meta ~repo_name:"masc"
   in
   mkdir_p (Filename.dirname clone_path);
   git_ok ~cwd:base_path [ "clone"; "-q"; remote; clone_path ];
@@ -383,7 +383,7 @@ let test_ensure_worktree_ready_creates_worktree () =
   in
   (* Call ensure_worktree_ready *)
   let result =
-    Masc.Keeper_repo_readiness.ensure_worktree_ready
+    Masc.Playground_repo_readiness.ensure_worktree_ready
       ~config ~meta ~repo_name:"masc" ~task_name:"task-575-test"
       ~worktree_path ()
   in
@@ -394,8 +394,8 @@ let test_ensure_worktree_ready_creates_worktree () =
   check bool "worktree dir exists" true (Sys.file_exists worktree_path);
   check bool "worktree is directory" true (Sys.is_directory worktree_path);
   let probe =
-    Masc.Keeper_repo_readiness.run_git
-      ~timeout_sec:Masc.Keeper_repo_readiness.read_only_probe_timeout_sec
+    Masc.Playground_repo_readiness.run_git
+      ~timeout_sec:Masc.Playground_repo_readiness.read_only_probe_timeout_sec
       ~clone_path:worktree_path
       [ "rev-parse"; "--show-toplevel" ]
   in
@@ -408,7 +408,7 @@ let test_ensure_worktree_ready_idempotent () =
   let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
   let clone_path =
-    Masc.Keeper_repo_readiness.clone_path ~config ~meta ~repo_name:"masc"
+    Masc.Playground_repo_readiness.clone_path ~config ~meta ~repo_name:"masc"
   in
   mkdir_p (Filename.dirname clone_path);
   git_ok ~cwd:base_path [ "clone"; "-q"; remote; clone_path ];
@@ -426,14 +426,14 @@ let test_ensure_worktree_ready_idempotent () =
   in
   (* First call creates the worktree *)
   let r1 =
-    Masc.Keeper_repo_readiness.ensure_worktree_ready
+    Masc.Playground_repo_readiness.ensure_worktree_ready
       ~config ~meta ~repo_name:"masc" ~task_name:"task-idem-test"
       ~worktree_path ()
   in
   (match r1 with Ok () -> () | Error msg -> fail ("first call failed: " ^ msg));
   (* Second call should succeed without error (idempotent) *)
   let r2 =
-    Masc.Keeper_repo_readiness.ensure_worktree_ready
+    Masc.Playground_repo_readiness.ensure_worktree_ready
       ~config ~meta ~repo_name:"masc" ~task_name:"task-idem-test"
       ~worktree_path ()
   in
@@ -448,7 +448,7 @@ let test_ensure_worktree_ready_rejects_nested_plain_directory () =
   let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
   let clone_path =
-    Masc.Keeper_repo_readiness.clone_path ~config ~meta ~repo_name:"masc"
+    Masc.Playground_repo_readiness.clone_path ~config ~meta ~repo_name:"masc"
   in
   mkdir_p (Filename.dirname clone_path);
   git_ok ~cwd:base_path [ "clone"; "-q"; remote; clone_path ];
@@ -466,7 +466,7 @@ let test_ensure_worktree_ready_rejects_nested_plain_directory () =
   in
   mkdir_p worktree_path;
   let result =
-    Masc.Keeper_repo_readiness.ensure_worktree_ready
+    Masc.Playground_repo_readiness.ensure_worktree_ready
       ~config ~meta ~repo_name:"masc" ~task_name:"task-nested-plain-dir"
       ~worktree_path ()
   in
@@ -474,8 +474,8 @@ let test_ensure_worktree_ready_rejects_nested_plain_directory () =
    | Ok () -> fail "plain nested directory was accepted as a worktree"
    | Error _ -> ());
   let probe =
-    Masc.Keeper_repo_readiness.run_git
-      ~timeout_sec:Masc.Keeper_repo_readiness.read_only_probe_timeout_sec
+    Masc.Playground_repo_readiness.run_git
+      ~timeout_sec:Masc.Playground_repo_readiness.read_only_probe_timeout_sec
       ~clone_path:worktree_path
       [ "rev-parse"; "--show-toplevel" ]
   in
@@ -508,7 +508,7 @@ let test_provision_worktrees_creates_worktrees () =
   git_ok ~cwd:repo_dir [ "push"; "-q"; "origin"; "main" ];
   (* Call provision *)
   let task_id = "task-provision-001" in
-  Masc.Keeper_repo_readiness.provision_worktrees_for_task
+  Masc.Playground_repo_readiness.provision_worktrees_for_task
     ~config ~agent_name ~task_id ();
   (* Verify worktree was created *)
   let worktree_path =
@@ -517,8 +517,8 @@ let test_provision_worktrees_creates_worktrees () =
   check bool "worktree dir exists" true (Sys.file_exists worktree_path);
   check bool "worktree is directory" true (Sys.is_directory worktree_path);
   let probe =
-    Masc.Keeper_repo_readiness.run_git
-      ~timeout_sec:Masc.Keeper_repo_readiness.read_only_probe_timeout_sec
+    Masc.Playground_repo_readiness.run_git
+      ~timeout_sec:Masc.Playground_repo_readiness.read_only_probe_timeout_sec
       ~clone_path:worktree_path
       [ "rev-parse"; "--show-toplevel" ]
   in
@@ -556,7 +556,7 @@ let test_provision_worktrees_uses_origin_base_with_dirty_parent () =
   check bool "parent is dirty before" true (String.trim parent_status <> "");
   let origin_main = git_output ~cwd:repo_dir [ "rev-parse"; "origin/main" ] in
   let task_id = "task-635-new-work" in
-  Masc.Keeper_repo_readiness.provision_worktrees_for_task
+  Masc.Playground_repo_readiness.provision_worktrees_for_task
     ~config ~agent_name ~task_id ();
   let worktree_path =
     Filename.concat repo_dir (Printf.sprintf ".worktrees/%s" task_id)
@@ -586,7 +586,7 @@ let test_ensure_worktree_ready_allows_dirty_parent_clone () =
   let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
   let clone_path =
-    Masc.Keeper_repo_readiness.clone_path ~config ~meta ~repo_name:"masc"
+    Masc.Playground_repo_readiness.clone_path ~config ~meta ~repo_name:"masc"
   in
   mkdir_p (Filename.dirname clone_path);
   git_ok ~cwd:base_path [ "clone"; "-q"; remote; clone_path ];
@@ -612,7 +612,7 @@ let test_ensure_worktree_ready_allows_dirty_parent_clone () =
     Filename.concat clone_path ".worktrees/task-635-new-work"
   in
   let result =
-    Masc.Keeper_repo_readiness.ensure_worktree_ready
+    Masc.Playground_repo_readiness.ensure_worktree_ready
       ~config ~meta ~repo_name:"masc" ~task_name:"task-635-new-work"
       ~worktree_path ()
   in
@@ -639,7 +639,7 @@ let test_ensure_worktree_ready_allows_dirty_parent_clone () =
 
 let () =
   Random.self_init ();
-  run "Keeper_repo_readiness"
+  run "Playground_repo_readiness"
     [
       "inspect",
       [

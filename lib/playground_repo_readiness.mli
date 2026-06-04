@@ -1,8 +1,8 @@
-(** Keeper repository readiness.
+(** Playground repository readiness.
 
-    Read-only probe for the single keeper sandbox repo clone under
-    the keeper's backend-scoped sandbox repo lane. Tells preflight
-    callers whether code work can safely start from that clone. *)
+    Owns repository clone/worktree readiness for playground repo lanes. Keeper
+    execution code should treat this as the provisioning boundary rather than
+    carrying repo lifecycle policy itself. *)
 
 (** Stdout/stderr/exit triple for a [run_git] invocation. *)
 type command_result =
@@ -31,8 +31,8 @@ val safe_repo_component : string -> bool
     bare repo name (basename, [.git] stripped). *)
 val repo_name_of_repo_arg : project_root:string -> string -> string
 
-(** Sandbox clone path for [repo_name] under the keeper's
-    backend-scoped repos lane. *)
+(** Sandbox clone path for [repo_name] under a backend-scoped playground repos
+    lane. *)
 val clone_path :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->

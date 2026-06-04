@@ -30,8 +30,8 @@ Three code-level facts (verified 2026-06-02) cause this:
    `get_recent_commits`. There is **no** `merge` / `fast-forward` / `pull`
    / `reset` / `checkout`. So even a fetch cannot move a working tree.
 
-2. **Staleness is masked.** `Keeper_repo_readiness.inspect` measures
-   currency off `@{upstream}` (`keeper_repo_readiness.ml:186-205`). The
+2. **Staleness is masked.** `Playground_repo_readiness.inspect` measures
+   currency off `@{upstream}` (`playground_repo_readiness.ml:186-205`). The
    playground repos were created by `git fetch <local-origin> + git
    checkout -b main FETCH_HEAD`, which sets **no upstream**. With upstream
    unset, `ahead/behind = None`, and the state resolves to `"ready"`
@@ -113,7 +113,7 @@ merge commit or rewrite history.
 ### D4. Quarantine instead of `rm -rf` on corrupt repos
 
 `ensure_ready`'s `not_git_repo` branch currently `rm -rf`s the clone before
-recloning (`keeper_repo_readiness.ml:311-320`) with no stash/commit first —
+recloning (`playground_repo_readiness.ml:311-320`) with no stash/commit first —
 if a dirty clone trips the `not_git_repo` classifier, uncommitted work is
 destroyed. Replace `rm -rf <path>` with `mv <path>
 <path>.corrupt-<turn-id>` (quarantine) so any salvageable work survives a
@@ -166,8 +166,8 @@ first.
 
 ## RFC-gate note
 
-The primary fix site `lib/keeper/keeper_repo_readiness.ml` is **not** in the
+The primary fix site `lib/playground_repo_readiness.ml` is **not** in the
 CLAUDE.md `agent_delegation` literal prefix list, though it is the host-path
 repo lifecycle owner. The fix also touches `lib/repo_manager/repo_git.ml`
 (gated). Recommend widening the `agent_delegation` prefix list to include
-`lib/keeper/keeper_repo_readiness*` and `lib/keeper/keeper_sandbox*`.
+`lib/playground_repo_readiness*` and `lib/keeper/keeper_sandbox*`.

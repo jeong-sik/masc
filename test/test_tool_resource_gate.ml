@@ -67,6 +67,14 @@ let test_classifies_host_local_bottlenecks () =
        ~args:(`Assoc [ "pattern", `String "Tool_resource_gate" ]));
   check
     string
+    "Search public alias"
+    "filesystem_read"
+    (classify
+       "Search"
+       ~is_read_only:true
+       ~args:(`Assoc [ "pattern", `String "Tool_resource_gate" ]));
+  check
+    string
     "Read public alias"
     "filesystem_read"
     (classify
@@ -80,6 +88,18 @@ let test_classifies_host_local_bottlenecks () =
     (classify
        "Write"
        ~args:(`Assoc [ "file_path", `String "x"; "content", `String "y" ]));
+  check
+    string
+    "Edit public alias"
+    "filesystem_write"
+    (classify
+       "Edit"
+       ~args:
+         (`Assoc
+           [ "file_path", `String "x"
+           ; "old_string", `String "a"
+           ; "new_string", `String "b"
+           ]));
   check
     string
     "WebSearch public alias"

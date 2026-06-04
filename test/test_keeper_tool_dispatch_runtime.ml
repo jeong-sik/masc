@@ -72,13 +72,19 @@ let make_meta ?(name = "keeper-exec-tools") ?(policy_voice_enabled = false) ?too
 let make_ctx () =
   Masc.Keeper_context_runtime.create ~system_prompt:"test" ~max_tokens:4000
 
-let with_exec_fixture ?tool_access name fn =
+let with_exec_fixture ?(process = false) ?tool_access name fn =
   let dir = temp_dir name in
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
+      if process
+      then
+        Process_eio.init
+          ~cwd_default:Eio.Path.(Eio.Stdenv.fs env / dir)
+          ~proc_mgr:(Eio.Stdenv.process_mgr env)
+          ~clock:(Eio.Stdenv.clock env);
       let config = Masc.Workspace.default_config dir in
       let meta = make_meta ?tool_access () in
       ignore (Masc.Keeper_registry.register ~base_path:config.base_path meta.name meta);
@@ -102,6 +108,14 @@ let contains_substring text needle =
   in
   needle_len = 0 || loop 0
 
+let parse_json raw =
+  try Yojson.Safe.from_string raw with
+  | Yojson.Json_error err -> fail ("invalid json: " ^ err)
+
+let outcome_label = function
+  | `Success -> "success"
+  | `Failure -> "failure"
+
 let non_empty_lines text =
   String.split_on_char '\n' text
   |> List.map String.trim
@@ -124,6 +138,29 @@ let json_contains_tool name = function
   | `Assoc fields ->
       List.exists (fun (_, value) -> json_list_contains name value) fields
   | _ -> false
+
+let json_bool_field ~default field json =
+  Yojson.Safe.Util.(member field json |> to_bool_option)
+  |> Option.value ~default
+
+let json_string_field ~default field json =
+  Yojson.Safe.Util.(member field json |> to_string_option)
+  |> Option.value ~default
+
+let check_success_result label result =
+  if not (String.equal "success" (outcome_label result.KET.outcome))
+  then
+    fail
+      (Printf.sprintf
+         "%s expected success, got %s: %s"
+         label
+         (outcome_label result.KET.outcome)
+         result.KET.raw_output);
+  check string (label ^ " payload shape") "structured_success"
+    (payload_kind result.KET.payload_shape);
+  let json = Yojson.Safe.from_string result.KET.raw_output in
+  check bool (label ^ " ok") true (json_bool_field ~default:false "ok" json);
+  json
 
 let test_plain_text_is_success_shape () =
   check_kind
@@ -185,9 +222,9 @@ let test_registered_descriptor_bypasses_tool_access_allowlist () =
       check bool "did not stop at tool_access allowlist gate" false
         Yojson.Safe.Util.(member "error" json |> to_string = "tool_not_allowed");
       check bool "reached file runtime" true
-        (contains_substring
-           Yojson.Safe.Util.(member "error" json |> to_string)
-           "File not found"))
+        (match Yojson.Safe.Util.member "path_resolution" json with
+         | `Assoc _ -> true
+         | _ -> false))
 
 let counter_for_tool_not_allowed ~keeper ~tool ~reason =
   Masc.Prometheus.metric_value_or_zero
@@ -370,6 +407,210 @@ let test_execute_with_outcome_bad_query_is_failure () =
         (match result.outcome with `Success -> "success" | `Failure -> "failure");
       check string "bad query payload shape" "structured_error"
         (payload_kind result.payload_shape))
+
+let test_public_local_aliases_dispatch_to_runtime_handlers () =
+  with_exec_fixture ~process:true "keeper_tool_dispatch_runtime_public_aliases"
+    (fun ~config ~meta ~ctx_work ->
+      let playground = KES.keeper_default_write_root ~config ~meta in
+      let visible_file_path = "public-alias.txt" in
+      let file_path = Filename.concat playground "public-alias.txt" in
+      let run name input =
+        KET.execute_keeper_tool_call_with_outcome
+          ~config
+          ~meta
+          ~ctx_work
+          ~exec_cache:None
+          ~name
+          ~input
+          ()
+      in
+      let write_result =
+        run
+          "Write"
+          (`Assoc
+             [ "file_path", `String visible_file_path
+             ; "content", `String "alpha\nbeta\n"
+             ])
+      in
+      ignore (check_success_result "Write" write_result);
+      check string "Write changed disk" "alpha\nbeta\n" (read_file file_path);
+      let read_result =
+        run
+          "Read"
+          (`Assoc
+             [ "file_path", `String visible_file_path; "limit", `Int 4096 ])
+      in
+      let read_json = check_success_result "Read" read_result in
+      check string "Read returns file content" "alpha\nbeta\n"
+        (json_string_field ~default:"" "content" read_json);
+      let edit_result =
+        run
+          "Edit"
+          (`Assoc
+             [ "file_path", `String visible_file_path
+             ; "old_string", `String "alpha"
+             ; "new_string", `String "gamma"
+             ])
+      in
+      ignore (check_success_result "Edit" edit_result);
+      check string "Edit changed disk" "gamma\nbeta\n" (read_file file_path);
+      let grep_result =
+        run
+          "Grep"
+          (`Assoc
+             [ "pattern", `String "gamma"; "path", `String visible_file_path ])
+      in
+      let grep_json = check_success_result "Grep" grep_result in
+      check string "Grep translates to rg op" "rg"
+        (json_string_field ~default:"" "op" grep_json);
+      check bool "Grep returns real match" true
+        (contains_substring grep_result.raw_output "public-alias.txt");
+      check bool "Grep match includes content" true
+        (contains_substring grep_result.raw_output "gamma");
+      let search_result =
+        run
+          "Search"
+          (`Assoc
+             [ "pattern", `String "gamma"; "path", `String visible_file_path ])
+      in
+      let search_json = check_success_result "Search" search_result in
+      check string "Search translates to rg op" "rg"
+        (json_string_field ~default:"" "op" search_json);
+      check bool "Search returns real match" true
+        (contains_substring search_result.raw_output "public-alias.txt");
+      check bool "Search match includes content" true
+        (contains_substring search_result.raw_output "gamma");
+      let execute_result =
+        run
+          "Execute"
+          (`Assoc
+             [ "executable", `String "pwd"
+             ; "cwd", `String playground
+             ; "timeout_sec", `Float 5.0
+             ])
+      in
+      let execute_json = check_success_result "Execute" execute_result in
+      check bool "Execute used typed Shell IR" true
+        (json_bool_field ~default:false "typed" execute_json);
+      check bool "Execute ran in requested cwd" true
+        (contains_substring execute_result.raw_output playground))
+
+let test_public_web_search_alias_dispatches_to_misc_runtime () =
+  with_exec_fixture "keeper_tool_dispatch_web_search_alias"
+    (fun ~config ~meta ~ctx_work ->
+      Masc.Tool_misc.with_web_search_simulation_for_test
+        ~outcomes:
+          [
+            ("brave", `Error "offline");
+            ( "duckduckgo",
+              `Hits
+                [
+                  ( "OCaml Eio runtime",
+                    "https://example.com/eio",
+                    "Fiber <b>runtime</b> evidence" );
+                ] );
+          ]
+        (fun () ->
+          let result =
+            KET.execute_keeper_tool_call_with_outcome
+              ~config
+              ~meta
+              ~ctx_work
+              ~exec_cache:None
+              ~name:"WebSearch"
+              ~input:
+                (`Assoc
+                  [
+                    ("query", `String "ocaml eio runtime alias test");
+                    ("limit", `Int 3);
+                  ])
+              ()
+          in
+          check string "web search alias outcome" "success"
+            (outcome_label result.outcome);
+          check string "web search alias payload shape" "structured_success"
+            (payload_kind result.payload_shape);
+          let json = parse_json result.raw_output in
+          let result_json = Yojson.Safe.Util.member "result" json in
+          check string "status" "ok"
+            Yojson.Safe.Util.(member "status" json |> to_string);
+          check string "query preserved" "ocaml eio runtime alias test"
+            Yojson.Safe.Util.(member "query" result_json |> to_string);
+          check string "fallback provider selected" "duckduckgo"
+            Yojson.Safe.Util.(member "engine" result_json |> to_string);
+          check string "simulated provider url" "test://duckduckgo"
+            Yojson.Safe.Util.(member "search_url" result_json |> to_string);
+          check int "result count" 1
+            Yojson.Safe.Util.(member "result_count" result_json |> to_int);
+          match Yojson.Safe.Util.(member "results" result_json |> to_list) with
+          | [ hit ] ->
+            check string "hit title" "OCaml Eio runtime"
+              Yojson.Safe.Util.(member "title" hit |> to_string);
+            check string "snippet cleaned" "Fiber runtime evidence"
+              Yojson.Safe.Util.(member "snippet" hit |> to_string)
+          | _ -> fail "expected one web search hit"))
+
+let test_public_web_fetch_alias_dispatches_to_misc_runtime () =
+  with_exec_fixture "keeper_tool_dispatch_web_fetch_alias"
+    (fun ~config ~meta ~ctx_work ->
+      let requested_url = "https://example.com/alias-web-fetch" in
+      let html =
+        {|
+<!doctype html>
+<html>
+  <head>
+    <title>Alias Title &amp; More</title>
+    <meta name="description" content="Alias description &amp; detail">
+  </head>
+  <body>
+    <h1>Alias Fetch</h1>
+    <p>Body <b>content</b> &amp; proof.</p>
+  </body>
+</html>|}
+      in
+      Masc.Tool_misc.with_web_fetch_http_get_for_test
+        (fun ~timeout_sec ~headers url ->
+          check int "timeout forwarded" 7 timeout_sec;
+          check string "url forwarded" requested_url url;
+          check bool "user agent header present" true
+            (List.exists
+               (fun (key, value) ->
+                 String.equal key "User-Agent"
+                 && contains_substring value "MASC-FetchWeb")
+               headers);
+          Ok (Some 200, html))
+        (fun () ->
+          let result =
+            KET.execute_keeper_tool_call_with_outcome
+              ~config
+              ~meta
+              ~ctx_work
+              ~exec_cache:None
+              ~name:"WebFetch"
+              ~input:
+                (`Assoc
+                  [ ("url", `String requested_url); ("timeout", `Int 7) ])
+              ()
+          in
+          check string "web fetch alias outcome" "success"
+            (outcome_label result.outcome);
+          check string "web fetch alias payload shape" "structured_success"
+            (payload_kind result.payload_shape);
+          let json = parse_json result.raw_output in
+          check string "status" "ok"
+            Yojson.Safe.Util.(member "status" json |> to_string);
+          check string "url" requested_url
+            Yojson.Safe.Util.(member "url" json |> to_string);
+          check int "http status" 200
+            Yojson.Safe.Util.(member "http_status" json |> to_int);
+          check string "title" "Alias Title & More"
+            Yojson.Safe.Util.(member "title" json |> to_string);
+          check string "description" "Alias description & detail"
+            Yojson.Safe.Util.(member "description" json |> to_string);
+          check bool "body text cleaned" true
+            (contains_substring
+               Yojson.Safe.Util.(member "text" json |> to_string)
+               "Body content & proof.")))
 
 let workflow_rejection_message =
   "Invalid task state: Self-approval not allowed: verifier must be a different agent"
@@ -593,6 +834,12 @@ let () =
         test_execute_with_outcome_missing_file_is_failure;
       test_case "bad query is failure" `Quick
         test_execute_with_outcome_bad_query_is_failure;
+      test_case "public local aliases dispatch to runtime handlers" `Quick
+        test_public_local_aliases_dispatch_to_runtime_handlers;
+      test_case "public WebSearch alias reaches misc runtime" `Quick
+        test_public_web_search_alias_dispatches_to_misc_runtime;
+      test_case "public WebFetch alias reaches misc runtime" `Quick
+        test_public_web_fetch_alias_dispatches_to_misc_runtime;
       test_case "task FSM errors require explicit failure_class" `Quick
         test_tool_result_does_not_infer_task_fsm_rejections_from_message;
       test_case "tool_result_or_error preserves failure_class" `Quick

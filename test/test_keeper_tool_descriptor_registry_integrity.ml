@@ -302,6 +302,10 @@ let test_readonly_policy_is_descriptor_input_aware () =
     (Some true)
     (Resolution.readonly_for_tool_call ~tool_name:"Grep" ~input:public_input);
   Alcotest.(check (option bool))
+    "secondary Search alias follows the same readonly policy"
+    (Some true)
+    (Resolution.readonly_for_tool_call ~tool_name:"Search" ~input:public_input);
+  Alcotest.(check (option bool))
     "MCP-prefixed public input follows the same descriptor policy"
     (Some true)
     (Resolution.readonly_for_tool_call
@@ -320,6 +324,10 @@ let test_readonly_policy_projects_to_input_aware_registry () =
     "Grep public alias is input-aware read-only"
     true
     (Registry.is_read_only_with_input ~tool_name:"Grep" ~input:search_input);
+  Alcotest.(check bool)
+    "Search public alias is input-aware read-only"
+    true
+    (Registry.is_read_only_with_input ~tool_name:"Search" ~input:search_input);
   Alcotest.(check bool)
     "MCP-prefixed Grep is input-aware read-only"
     true
@@ -418,13 +426,21 @@ let test_public_name_projection_uses_descriptor_resolution () =
     "tool_execute public projection"
     [ "Execute" ]
     (Resolution.public_names_for_internal "tool_execute");
+  Alcotest.(check (list string))
+    "tool_search_files public projections"
+    [ "Grep"; "Search" ]
+    (Resolution.public_names_for_internal "tool_search_files");
+  Alcotest.(check (option string))
+    "tool_search_files preferred public projection"
+    (Some "Grep")
+    (Resolution.public_name_for_internal "tool_search_files");
   Alcotest.(check (option string))
     "tool_write_file preferred public projection"
     (Some "Write")
     (Resolution.public_name_for_internal "tool_write_file");
   Alcotest.(check (list string))
     "allowed internal routes project to public names"
-    [ "Execute"; "Grep" ]
+    [ "Execute"; "Grep"; "Search" ]
     (Resolution.public_names_for_allowed_internal_names
        [ "tool_execute"; "tool_search_files" ])
 ;;
@@ -473,6 +489,10 @@ let test_mutation_boundary_delegates_to_descriptor_policy () =
     "Grep public alias is not mutating"
     false
     (Exec.has_mutating_side_effect_with_input ~tool_name:"Grep" ~input:search_input);
+  Alcotest.(check bool)
+    "Search public alias is not mutating"
+    false
+    (Exec.has_mutating_side_effect_with_input ~tool_name:"Search" ~input:search_input);
   Alcotest.(check bool)
     "MCP-prefixed Grep is not mutating"
     false

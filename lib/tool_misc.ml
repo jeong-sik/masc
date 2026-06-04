@@ -274,3 +274,9 @@ let redact_transport_error_detail = Tool_misc_web_search.redact_transport_error_
 let web_search_provider_plan = Tool_misc_web_search.provider_plan
 let web_search_simulate_for_test ~query ~limit outcomes =
   Tool_misc_web_search.simulate_for_test ~query ~limit outcomes
+
+let with_web_search_simulation_for_test ~outcomes f =
+  Tool_misc_web_search.with_simulated_search_for_test ~outcomes f
+
+let with_web_fetch_http_get_for_test http_get f =
+  Tool_misc_web_fetch.with_http_get_for_test http_get f

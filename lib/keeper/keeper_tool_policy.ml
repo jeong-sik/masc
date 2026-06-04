@@ -225,8 +225,8 @@ let tool_schema_names schemas =
 let descriptor_candidate_tool_names () =
   Keeper_tool_descriptor.all_descriptors ()
   |> List.concat_map (fun descriptor ->
-       descriptor.Keeper_tool_descriptor.public_name
-       :: Keeper_tool_descriptor.internal_names descriptor)
+    Keeper_tool_descriptor.public_names_of_descriptor descriptor
+    @ Keeper_tool_descriptor.internal_names descriptor)
   |> dedupe_tool_names
 
 let keeper_base_candidate_tool_names () =
@@ -286,6 +286,20 @@ type tool_access_lookup = {
 let tool_name_set names =
   List.fold_left (fun acc name -> StringSet.add name acc) StringSet.empty names
 
+let expand_descriptor_aliases name =
+  let stripped = Keeper_tool_alias.strip_mcp_masc_prefix name in
+  let canonical =
+    match Keeper_tool_descriptor_resolution.canonical_internal_name_for_tool_name stripped with
+    | Some internal_name -> internal_name
+    | None -> stripped
+  in
+  [ name; stripped; canonical ]
+  @ Keeper_tool_descriptor_resolution.public_names_for_internal canonical
+  |> dedupe_tool_names
+
+let expanded_tool_name_set names =
+  names |> List.concat_map expand_descriptor_aliases |> tool_name_set
+
 let tool_access_lookup_of_meta (meta : keeper_meta) =
   (* [allow_set] is retained for compatibility/telemetry consumers that still
      inspect the field. Runtime execution uses candidate_set - deny_set so
@@ -305,7 +319,7 @@ let tool_access_lookup_of_meta (meta : keeper_meta) =
     candidate_names;
     candidate_set;
     allow_set = tool_name_set allow_names;
-    deny_set = tool_name_set meta.tool_denylist;
+    deny_set = expanded_tool_name_set meta.tool_denylist;
   }
 
 let filter_by_access ~(lookup : tool_access_lookup) (name : string) : bool =

@@ -62,13 +62,13 @@ let make_tool_bundle
   in
   let alias_public_names_in_surface =
     Keeper_tool_descriptor.public_descriptors
-    |> List.filter_map (fun descriptor ->
+    |> List.concat_map (fun descriptor ->
       if
         List.exists
           (fun internal_name -> List.mem internal_name universe_names)
           (Keeper_tool_descriptor.internal_names descriptor)
-      then Some descriptor.public_name
-      else None)
+      then Keeper_tool_descriptor.public_names_of_descriptor descriptor
+      else [])
   in
   let assembled_surface_names =
     List.filter (fun n -> not (List.mem n aliased_internal_names)) universe_names
@@ -137,18 +137,18 @@ let make_tool_bundle
      [descriptor.translate] reshapes the LLM's payload before dispatch;
      [descriptor.input_schema] provides the LLM-facing schema. *)
   let alias_tools =
-    List.filter_map
+    List.concat_map
       (fun (descriptor : Keeper_tool_descriptor.t) ->
          let internal = descriptor.internal_name in
          if not (List.mem internal universe_names)
-         then None
+         then []
          else (
            match
              List.find_opt
                (fun (td : Masc_domain.tool_schema) -> String.equal td.name internal)
                tool_defs
            with
-           | None -> None
+           | None -> []
            | Some internal_def ->
              let h =
                Keeper_tools_oas_handler.make_keeper_tool_handler
@@ -166,12 +166,13 @@ let make_tool_bundle
                  ~failure_counts
                  ()
              in
-             Some
-               (Tool_bridge.oas_tool_of_masc
-                  ~name:descriptor.public_name
-                  ~description:descriptor.description
-                  ~input_schema:descriptor.input_schema
-                  (fun input -> h input))))
+             Keeper_tool_descriptor.public_names_of_descriptor descriptor
+             |> List.map (fun public_name ->
+               Tool_bridge.oas_tool_of_masc
+                 ~name:public_name
+                 ~description:descriptor.description
+                 ~input_schema:descriptor.input_schema
+                 (fun input -> h input))))
       Keeper_tool_descriptor.public_descriptors
   in
   let bundle =

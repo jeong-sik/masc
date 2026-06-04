@@ -15,11 +15,12 @@ let test_public_descriptor_admits_execute () =
                | TR.Alias_to { via; _ } -> "Alias_to via " ^ TR.string_of_tried_source via
                | TR.Unknown _ -> "Unknown"))
 
-let test_tool_name_variant_admits_keeper_board_post () =
+let test_registry_admits_keeper_board_post () =
   match TR.resolve "keeper_board_post" with
-  | TR.Resolved { via = TR.Tool_name_variant; _ } -> ()
+  | TR.Resolved { via = TR.Tool_name_variant; _ }
+  | TR.Resolved { via = TR.Registry_core_tools; _ } -> ()
   | other ->
-      fail (Printf.sprintf "expected Resolved via Tool_name_variant, got: %s"
+      fail (Printf.sprintf "expected keeper_board_post to resolve, got: %s"
               (match other with
                | TR.Resolved { via; _ } -> "Resolved via " ^ TR.string_of_tried_source via
                | TR.Alias_to { via; _ } -> "Alias_to via " ^ TR.string_of_tried_source via
@@ -103,6 +104,7 @@ let policy_validation_tool_names =
   ; "tool_execute"
   ; "Execute"
   ; "Read"
+  ; "Search"
   ; "keeper_task_done"
   ; "keeper_time_now"
   ; "masc_status"
@@ -119,10 +121,15 @@ let test_policy_validation_known_tools_resolve () =
 let test_policy_validation_unknown_tool_misses () =
   check bool "__missing_tool misses" false (resolves "__missing_tool")
 
+let test_public_descriptor_names_resolve () =
+  List.iter
+    (fun name -> check bool (name ^ " resolves") true (resolves name))
+    [ "Execute"; "Grep"; "Search"; "Read"; "Edit"; "Write"; "WebSearch"; "WebFetch" ]
+
 let test_retired_public_names_miss () =
   List.iter
     (fun name -> check bool (name ^ " misses") false (resolves name))
-    [ "Bash"; "Grep"; "Read"; "Edit"; "Write"; "WebSearch"; "WebFetch" ]
+    [ "Bash"; "SearchFiles"; "ReadFile"; "EditFile"; "WriteFile" ]
 
 (* ── Policy matrix: active tool_policy.toml names resolve ── *)
 
@@ -174,12 +181,10 @@ let policy_tool_names =
       "masc_goal_upsert";
       "masc_goal_verify";
       "masc_heartbeat";
-      "masc_bind";
       "masc_keeper_list";
       "masc_keeper_msg";
       "masc_keeper_msg_result";
       "masc_keeper_status";
-      "masc_unbind";
       "masc_messages";
       "masc_plan_get";
       "masc_plan_get_task";
@@ -291,7 +296,7 @@ let () =
   Alcotest.run "test_tool_resolution"
     [ "resolve", [
         test_case "Execute resolves via public descriptor" `Quick test_public_descriptor_admits_execute;
-        test_case "keeper_board_post resolves via Tool_name_variant" `Quick test_tool_name_variant_admits_keeper_board_post;
+        test_case "keeper_board_post resolves via registry" `Quick test_registry_admits_keeper_board_post;
         test_case "mcp prefix stripped and resolved" `Quick test_mcp_prefix_stripped;
         test_case "unknown returns tried list" `Quick test_unknown_returns_tried_list;
         test_case "extend_turns resolves" `Quick test_extend_turns_resolved;
@@ -302,6 +307,7 @@ let () =
     ; "policy_validation", [
         test_case "known tools resolve" `Quick test_policy_validation_known_tools_resolve;
         test_case "unknown tools miss" `Quick test_policy_validation_unknown_tool_misses;
+        test_case "public descriptor names resolve" `Quick test_public_descriptor_names_resolve;
         test_case "retired public names miss" `Quick test_retired_public_names_miss;
       ]
     ; "matrix", [

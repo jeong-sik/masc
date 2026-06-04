@@ -1,6 +1,7 @@
 (** Harness tests for WARN root cause fixes.
 
-    1. AllowList pruning: core_discovery_tools filtered by tool_access
+    1. Tool access discovery: core_discovery_tools stay candidate-visible
+       across narrow tool_access lists and are hidden by denylist
     2. Atomic agent JSON writes: no empty-file race condition *)
 
 open Alcotest
@@ -49,68 +50,62 @@ let make_meta ?(name = "test-keeper") () : Keeper_meta_contract.keeper_meta =
   | Ok meta -> meta
   | Error e -> failwith (Printf.sprintf "make_meta failed: %s" e)
 
-(** Build the policy_allowed_tool_set: tool_access-allowed internal names resolved to
-    public names (via descriptor registry) + core_always_tools.
-    RFC-0179 moved core_discovery_tools to public names while
-    keeper_allowed_tool_names still returns internal names. *)
+(** Build the visible policy set used by the local filter mirror. *)
 let build_policy_allowed_tool_set (meta : Keeper_meta_contract.keeper_meta) =
   let allowed_names = Keeper_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   let internal_set = Keeper_tool_policy.tool_name_set allowed_names in
-  (* Map internal names to public names via descriptor registry *)
   let public_of_internal name =
-    match Keeper_tool_descriptor.public_name_for_internal name with
-    | Some pub -> pub
-    | None -> name
+    match Keeper_tool_descriptor_resolution.public_names_for_internal name with
+    | [] -> [ name ]
+    | public_names -> public_names
   in
   let public_set =
     Keeper_tool_policy.StringSet.of_list
-      (List.map public_of_internal allowed_names)
+      (List.concat_map public_of_internal allowed_names)
   in
   Keeper_tool_policy.StringSet.union
     (Keeper_tool_policy.StringSet.union internal_set public_set)
     (Keeper_tool_policy.tool_name_set Keeper_tool_registry.core_always_tools)
 
-(** Filter core_discovery_tools by tool_access (the fix). *)
+(** Filter core_discovery_tools through the current policy-visible set. *)
 let filter_core_by_tool_access (meta : Keeper_meta_contract.keeper_meta) =
   let policy_allowed_tool_set = build_policy_allowed_tool_set meta in
   List.filter
     (fun name -> Keeper_tool_policy.StringSet.mem name policy_allowed_tool_set)
     Keeper_tool_registry.core_discovery_tools
 
-(* Direct write tools require explicit write-enabled tool_access. *)
-let write_only_tools = [ "Edit" ]
+let write_tools = [ "Edit" ]
 
-(* tool_execute stays visible across tool_access lists for read-only shell usage.
-   Mutating shell commands are gated separately by write-enabled tool_access. *)
 let shell_bridge_tools = [ "Execute" ]
+let read_alias_tools = [ "Grep"; "Search"; "Read" ]
 
 let write_enabled_tool_access =
   [ "tool_edit_file"; "tool_execute" ]
 
-let test_core_tools_filtered_by_empty_tool_access () =
+let test_core_tools_visible_with_empty_tool_access () =
   ignore (init_registry ());
   let meta =
     { (make_meta ~name:"test-empty-access" ()) with
       tool_access = [];
       tool_denylist = [] }
   in
-  (* Precondition: direct write tools ARE in unfiltered core *)
+  (* Precondition: descriptor-backed public tools are in unfiltered core. *)
   List.iter (fun t ->
     if not (List.mem t Keeper_tool_registry.core_discovery_tools) then
       fail (Printf.sprintf "precondition: %s missing from core_discovery_tools" t)
-  ) write_only_tools;
+  ) (write_tools @ read_alias_tools);
   let filtered = filter_core_by_tool_access meta in
   List.iter (fun t ->
-    if List.mem t filtered then
-      fail (Printf.sprintf "%s must be excluded without explicit tool_access" t)
-  ) write_only_tools;
+    if not (List.mem t filtered) then
+      fail (Printf.sprintf "%s must stay visible without explicit tool_access" t)
+  ) (write_tools @ read_alias_tools);
   (* Core always-tools must survive *)
   List.iter (fun t ->
     if not (List.mem t filtered) then
       fail (Printf.sprintf "core_always %s must survive tool_access filter" t)
   ) Keeper_tool_registry.core_always_tools
 
-let test_core_tools_filtered_by_read_only_tool_access () =
+let test_core_tools_visible_with_read_only_tool_access () =
   ignore (init_registry ());
   let meta =
     { (make_meta ~name:"test-read-only-access" ()) with
@@ -118,8 +113,10 @@ let test_core_tools_filtered_by_read_only_tool_access () =
       tool_denylist = [] }
   in
   let filtered = filter_core_by_tool_access meta in
-  if List.mem "Edit" filtered then
-    fail "Edit should be excluded for read-only tool_access"
+  List.iter (fun t ->
+    if not (List.mem t filtered) then
+      fail (Printf.sprintf "%s should stay visible for read-only tool_access" t)
+  ) (write_tools @ read_alias_tools)
 
 let test_core_tools_include_write_for_write_enabled_tool_access () =
   ignore (init_registry ());
@@ -132,7 +129,20 @@ let test_core_tools_include_write_for_write_enabled_tool_access () =
   List.iter (fun t ->
     if not (List.mem t filtered) then
       fail (Printf.sprintf "%s should be included for write-enabled tool_access" t)
-  ) (write_only_tools @ shell_bridge_tools)
+  ) (write_tools @ shell_bridge_tools)
+
+let test_core_tools_hidden_by_denylist () =
+  ignore (init_registry ());
+  let meta =
+    { (make_meta ~name:"test-deny-access" ()) with
+      tool_access = [];
+      tool_denylist = [ "Edit"; "Search" ] }
+  in
+  let filtered = filter_core_by_tool_access meta in
+  List.iter (fun t ->
+    if List.mem t filtered then
+      fail (Printf.sprintf "%s should be excluded by denylist" t)
+  ) [ "Edit"; "Grep"; "Search" ]
 
 (* ── Test 2: Atomic agent JSON writes ─────────────────────────── *)
 
@@ -279,12 +289,14 @@ let () =
     [
       ( "allowlist_tool_access_filter",
         [
-          test_case "empty tool_access excludes direct write tools" `Quick
-            test_core_tools_filtered_by_empty_tool_access;
-          test_case "read-only tool_access excludes direct write tools" `Quick
-            test_core_tools_filtered_by_read_only_tool_access;
+          test_case "empty tool_access keeps descriptor public tools visible" `Quick
+            test_core_tools_visible_with_empty_tool_access;
+          test_case "read-only tool_access keeps descriptor public tools visible" `Quick
+            test_core_tools_visible_with_read_only_tool_access;
           test_case "write-enabled tool_access includes shell + write tools" `Quick
             test_core_tools_include_write_for_write_enabled_tool_access;
+          test_case "denylist excludes descriptor public tools" `Quick
+            test_core_tools_hidden_by_denylist;
         ] );
       ( "atomic_agent_json",
         [

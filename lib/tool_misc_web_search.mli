@@ -173,3 +173,16 @@ val simulate_for_test :
     Bypasses cache, rate-limit, and secret detection — those
     are tested separately at {!handle}.  Pinned in the .mli so
     tests cannot rely on internal state cells. *)
+
+val with_simulated_search_for_test :
+  outcomes:(string * simulated_provider_outcome) list ->
+  (unit -> 'a) ->
+  'a
+(** [with_simulated_search_for_test ~outcomes f] temporarily replaces
+    {!handle}'s provider boundary with the same deterministic simulator
+    used by {!simulate_for_test}, then restores the production provider
+    chain after [f] returns or raises.
+
+    Test-only: validation, cache, rate-limit, result construction, and
+    dispatch wrappers still run; only the external web provider calls are
+    replaced. *)

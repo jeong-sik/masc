@@ -1471,6 +1471,26 @@ legacy_scope = "removed"
     check (list string) "base include is a loader key"
       ["keeper.legacy_scope"] unknown
 
+let test_detect_unknown_keys_flags_provider_health_table () =
+  let input = {|
+[keeper]
+goal = "g"
+mention_targets = ["a"]
+
+[provider_health]
+ttfrc_degraded_ms = 5000.0
+timeout_count_5m_unhealthy = 3
+|} in
+  match TL.parse_toml input with
+  | Error e -> fail e
+  | Ok doc ->
+    let unknown = KTP.detect_unknown_keeper_toml_keys doc in
+    check (list string) "provider health table is not keeper config"
+      [ "provider_health.timeout_count_5m_unhealthy"
+      ; "provider_health.ttfrc_degraded_ms"
+      ]
+      (List.sort String.compare unknown)
+
 let test_oas_env_parses_allowed_keys () =
   let input = {|
 [keeper]
@@ -1917,6 +1937,8 @@ let () =
             test_detect_unknown_keys_accepts_tool_access_array;
           test_case "accepts loader base include" `Quick
             test_detect_unknown_keys_accepts_loader_base;
+          test_case "flags provider_health table as unknown" `Quick
+            test_detect_unknown_keys_flags_provider_health_table;
           test_case "oas_env keys not flagged as unknown" `Quick
             test_oas_env_not_flagged_as_unknown;
           test_case "load_keeper_toml captures unknown keys on profile" `Quick

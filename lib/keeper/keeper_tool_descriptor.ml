@@ -68,6 +68,7 @@ type policy =
   ; retryable : bool
   ; cwd_scope : string option
   ; inline_safe : bool
+  ; maintenance_only : bool
   }
 
 type t =
@@ -149,7 +150,7 @@ let runtime_handler_to_string = function
 
 let policy ?(visibility = Tool_catalog.Default) ?readonly ?readonly_of_input
       ?effect_domain ?(approval = Policy_selected) ?cwd_scope ?(retryable = false)
-      ?(inline_safe = false) ()
+      ?(inline_safe = false) ?(maintenance_only = false) ()
   =
   let readonly_of_input =
     match readonly_of_input with
@@ -164,6 +165,7 @@ let policy ?(visibility = Tool_catalog.Default) ?readonly ?readonly_of_input
   ; retryable
   ; cwd_scope
   ; inline_safe
+  ; maintenance_only
   }
 ;;
 
@@ -572,7 +574,7 @@ let tool_search_schema =
     ]
 ;;
 
-let read_only_in_process_policy ?(inline_safe = false) () =
+let read_only_in_process_policy ?(inline_safe = false) ?(maintenance_only = false) () =
   policy
     ~visibility:Tool_catalog.Hidden
     ~readonly:true
@@ -580,10 +582,13 @@ let read_only_in_process_policy ?(inline_safe = false) () =
     ~approval:No_approval
     ~retryable:true
     ~inline_safe
+    ~maintenance_only
     ()
 ;;
 
-let write_in_process_policy ?(retryable = false) ?(inline_safe = false) () =
+let write_in_process_policy ?(retryable = false) ?(inline_safe = false)
+      ?(maintenance_only = false) ()
+  =
   policy
     ~visibility:Tool_catalog.Hidden
     ~readonly:false
@@ -591,6 +596,7 @@ let write_in_process_policy ?(retryable = false) ?(inline_safe = false) () =
     ~approval:No_approval
     ~retryable
     ~inline_safe
+    ~maintenance_only
     ()
 ;;
 
@@ -613,12 +619,14 @@ let in_process_descriptor ~id ~name ~description ~input_schema ~policy ~handler 
    [runtime_handler] variant but expose distinct [internal_name]s so each
    tool retains its own descriptor entry and receipt evidence. The
    [keeper_tool_in_process_runtime] handler routes by descriptor.internal_name. *)
-let cluster_descriptor ~id ~name ~description ~handler ~readonly ~inline_safe =
+let cluster_descriptor ~id ~name ~description ~handler ~readonly ~inline_safe
+      ~maintenance_only
+  =
   if inline_safe && not readonly then
     invalid_arg "inline_safe descriptors must declare readonly=true";
   let policy =
-    if readonly then read_only_in_process_policy ~inline_safe ()
-    else write_in_process_policy ~inline_safe ()
+    if readonly then read_only_in_process_policy ~inline_safe ~maintenance_only ()
+    else write_in_process_policy ~inline_safe ~maintenance_only ()
   in
   in_process_descriptor
     ~id
@@ -638,6 +646,7 @@ let board_descriptor name description ~readonly =
     ~handler:Tool_board_dispatch
     ~readonly
     ~inline_safe:false
+    ~maintenance_only:false
 ;;
 
 let masc_board_descriptor (schema : Masc_domain.tool_schema) =
@@ -685,6 +694,7 @@ let voice_descriptor name description ~readonly =
     ~handler:Tool_voice_dispatch
     ~readonly
     ~inline_safe:false
+    ~maintenance_only:false
 ;;
 
 let task_descriptor id name description ~readonly =
@@ -695,6 +705,7 @@ let task_descriptor id name description ~readonly =
     ~handler:Tool_task_dispatch
     ~readonly
     ~inline_safe:false
+    ~maintenance_only:false
 ;;
 
 (* RFC-0182 §3.1 — additional masc_* cluster descriptor helpers (task /
@@ -712,6 +723,7 @@ let masc_task_descriptor id name description ~readonly =
     ~handler:Tool_masc_task_dispatch
     ~readonly
     ~inline_safe:false
+    ~maintenance_only:false
 ;;
 
 let masc_plan_descriptor id name description ~readonly =
@@ -722,6 +734,7 @@ let masc_plan_descriptor id name description ~readonly =
     ~handler:Tool_masc_plan_dispatch
     ~readonly
     ~inline_safe:false
+    ~maintenance_only:false
 ;;
 
 let masc_run_descriptor name description ~readonly =
@@ -733,6 +746,7 @@ let masc_run_descriptor name description ~readonly =
     ~handler:Tool_masc_run_dispatch
     ~readonly
     ~inline_safe:false
+    ~maintenance_only:false
 ;;
 
 let masc_agent_descriptor id name description ~readonly =
@@ -743,9 +757,10 @@ let masc_agent_descriptor id name description ~readonly =
     ~handler:Tool_masc_agent_dispatch
     ~readonly
     ~inline_safe:false
+    ~maintenance_only:false
 ;;
 
-let masc_workspace_descriptor id name description ~readonly =
+let masc_workspace_descriptor ?(maintenance_only = false) id name description ~readonly =
   cluster_descriptor
     ~id:("masc.workspace." ^ id)
     ~name
@@ -753,6 +768,7 @@ let masc_workspace_descriptor id name description ~readonly =
     ~handler:Tool_masc_workspace_dispatch
     ~readonly
     ~inline_safe:false
+    ~maintenance_only
 ;;
 
 (* RFC-0182 §3.1 — additional cluster descriptor helpers (Phase 3:
@@ -765,6 +781,7 @@ let masc_misc_descriptor id name description ~readonly =
     ~handler:Tool_masc_misc_dispatch
     ~readonly
     ~inline_safe:false
+    ~maintenance_only:false
 ;;
 
 let masc_control_descriptor id name description ~readonly =
@@ -775,6 +792,7 @@ let masc_control_descriptor id name description ~readonly =
     ~handler:Tool_masc_control_dispatch
     ~readonly
     ~inline_safe:false
+    ~maintenance_only:false
 ;;
 
 let masc_agent_timeline_descriptor name description ~readonly =
@@ -785,6 +803,7 @@ let masc_agent_timeline_descriptor name description ~readonly =
     ~handler:Tool_masc_agent_timeline_dispatch
     ~readonly
     ~inline_safe:false
+    ~maintenance_only:false
 ;;
 
 let masc_local_runtime_descriptor id name description ~readonly =
@@ -795,6 +814,7 @@ let masc_local_runtime_descriptor id name description ~readonly =
     ~handler:Tool_masc_local_runtime_dispatch
     ~readonly
     ~inline_safe:false
+    ~maintenance_only:false
 ;;
 
 let masc_tool_shard_descriptor id name description ~readonly =
@@ -805,6 +825,7 @@ let masc_tool_shard_descriptor id name description ~readonly =
     ~handler:Tool_masc_tool_shard_dispatch
     ~readonly
     ~inline_safe:false
+    ~maintenance_only:false
 ;;
 
 let masc_approval_descriptor ?(inline_safe = false) id name description ~readonly =
@@ -815,6 +836,7 @@ let masc_approval_descriptor ?(inline_safe = false) id name description ~readonl
     ~description
     ~handler:Tool_masc_approval_dispatch
     ~readonly
+    ~maintenance_only:false
 ;;
 
 let masc_persona_descriptor id name description ~readonly =
@@ -825,6 +847,7 @@ let masc_persona_descriptor id name description ~readonly =
     ~handler:Tool_masc_persona_dispatch
     ~readonly
     ~inline_safe:false
+    ~maintenance_only:false
 ;;
 
 let masc_keeper_descriptor id name description ~readonly =
@@ -835,6 +858,7 @@ let masc_keeper_descriptor id name description ~readonly =
     ~handler:Tool_masc_keeper_dispatch
     ~readonly
     ~inline_safe:false
+    ~maintenance_only:false
 ;;
 
 let internal_descriptors : t list =
@@ -1114,7 +1138,7 @@ let internal_descriptors : t list =
   (* ── RFC-0182 §3.1 — masc_workspace_* cluster (8 entries) ────────── *)
   ; masc_workspace_descriptor "status" "masc_status"
       "Read overall workspace status." ~readonly:true
-  ; masc_workspace_descriptor "heartbeat" "masc_heartbeat"
+  ; masc_workspace_descriptor ~maintenance_only:true "heartbeat" "masc_heartbeat"
       "Emit an agent heartbeat." ~readonly:false
   ; masc_workspace_descriptor "check" "masc_check"
       "Read a workspace assertion check." ~readonly:true
@@ -1222,6 +1246,7 @@ let internal_descriptors : t list =
       ~handler:Tool_masc_surface_audit
       ~readonly:true
       ~inline_safe:false
+      ~maintenance_only:false
   ]
   @ masc_board_descriptors
 ;;
@@ -1272,6 +1297,13 @@ let keeper_safe_inline_names () =
   |> List.sort_uniq String.compare
 ;;
 
+let keeper_maintenance_only_names () =
+  all_descriptors ()
+  |> List.concat_map (fun d ->
+       if d.policy.maintenance_only then internal_names d else [])
+  |> List.sort_uniq String.compare
+;;
+
 let public_name_for_internal internal_name =
   match public_descriptors_for_internal internal_name with
   | [] -> None
@@ -1317,6 +1349,7 @@ let route_evidence_json d =
      ; "retryable", `Bool policy.retryable
      ; "cwd_scope", Json_util.string_opt_to_json policy.cwd_scope
      ; "inline_safe", `Bool policy.inline_safe
+     ; "maintenance_only", `Bool policy.maintenance_only
      ]
      @ policy_fields)
 ;;

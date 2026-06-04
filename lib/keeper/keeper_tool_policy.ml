@@ -223,11 +223,8 @@ let select_existing_masc_tool_names names =
   |> List.filter (fun name -> List.mem name injected)
   |> dedupe_tool_names
 
-let keeper_maintenance_only_tools =
-  [ "masc_heartbeat" ]
-
 let is_keeper_maintenance_only_tool name =
-  List.mem name keeper_maintenance_only_tools
+  List.mem name (Keeper_tool_descriptor.keeper_maintenance_only_names ())
 
 (* ── Candidate aggregation (descriptor/registry-driven) ───────── *)
 

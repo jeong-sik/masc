@@ -50,11 +50,15 @@ type semaphore_wait_timeout =
 (* RFC-0085 PR-11 — Dropped the [~deprecated] fallback; the typo legacy
    env MASC_KEEPER_AUTOBOT_MAX is no longer recognised. Operators
    must set MASC_KEEPER_AUTOBOOT_MAX. *)
+let clamp_int value ~min_v ~max_v =
+  max min_v (min max_v value)
+;;
+
 let int_of_env_default ~primary ~default ~min_v ~max_v =
   match Sys.getenv_opt primary with
   | None -> default
   | Some raw when String.trim raw = "" -> default
   | Some raw ->
     let v = Option.value ~default (int_of_string_opt (String.trim raw)) in
-    Keeper_config.clamp_int v ~min_v ~max_v
+    clamp_int v ~min_v ~max_v
 ;;

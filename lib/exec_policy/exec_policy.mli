@@ -21,6 +21,17 @@ val block_reason_to_string_with_allowlist :
 
 type parse_mode = Strict | Tool_execute
 
+(** Classification of path-like token prefixes. *)
+type path_prefix =
+  | Root_relative
+  | Current_dir
+  | Parent_dir
+  | Home_dir
+  | Dot_entry
+  | Not_a_path
+
+val classify_path_prefix : string -> path_prefix
+
 val parse_string_to_ir :
   mode:parse_mode -> string -> (Masc_exec.Shell_ir.t, block_reason) result
 

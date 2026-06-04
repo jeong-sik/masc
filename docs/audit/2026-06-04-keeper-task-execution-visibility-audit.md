@@ -232,18 +232,16 @@ Code anchor:
 
 ### 8. Task result and verification evidence
 
-Task completion and verification evidence are explicit task tool transitions.
+Task completion evidence is an explicit task tool transition.
 
 `keeper_task_done` requires `task_id` and `result`, maps the result into
 `handoff_context.summary`, and calls `Task.Tool.handle_transition` with
 `action=done`.
 
-`keeper_task_submit_for_verification` requires `task_id` and `notes`. The notes
-message is the primary evidence handoff: it must say what was done and how it can
-be verified. Optional structured `evidence_refs` can also carry PR URLs, commits,
-artifacts, receipts, test logs, task comments, or other concrete references.
-The wrapper maps these into `handoff_context` and calls
-`action=submit_for_verification`.
+The old task-verification wrapper is retired. PR URLs,
+commits, artifacts, receipts, test logs, task comments, or other concrete
+references belong in `keeper_task_done` result text or typed
+`handoff_context.evidence_refs` on the raw transition surface.
 
 Code anchors:
 
@@ -304,11 +302,9 @@ fast diagnosis path sees only counts.
    gate. The resolver now passes a goal-linked task filter into
    `Workspace.claim_next_r`, and no-scope results report excluded tasks instead
    of falling back to all work.
-5. **Done in PR #20055**: keep explicit
-   `keeper_task_submit_for_verification` as the task-verification SSOT, but make
-   it evidence-message based rather than PR-URL based. The Keeper submits notes,
-   with optional structured refs for PRs, commits, artifacts, receipts, logs, or
-   task comments; `gh pr create` alone does not mutate task verification state.
+5. **Superseded after PR #20055**: the explicit task-verification wrapper is retired. Keepers close PR
+   work with `keeper_task_done` and include PR/artifact evidence in `result`;
+   `gh pr create` alone does not mutate task completion state.
 6. **Done in PR #20055**: add a first-class "worktree selected" observation to
    Execute `execution_location`. This keeps repo/worktree choice tied to the
    actual `cwd` that runtime enforced, but surfaces the stable assignment as

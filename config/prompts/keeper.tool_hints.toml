@@ -73,12 +73,6 @@ name = "WebFetch"
 call = "`WebFetch` { url: \"https://example.com/page\", timeout: {{web_fetch_timeout}} }"
 description = "fetch and read a web page before citing it"
 
-[[hints]]
-name = "keeper_task_submit_for_verification"
-call = "`keeper_task_submit_for_verification` { notes: \"evidence\", handoff_context: { summary: \"review artifact attached\", evidence_refs: [\"https://github.com/OWNER/REPO/pull/NUMBER\"] } }"
-description = "submit PR/code work for verification"
-
-[[hints]]
 name = "masc_transition"
 call = "`masc_transition` { task_id: \"TASK_ID\", action: \"approve\", notes: \"verification evidence\" }"
 description = "approve or reject an awaiting_verification task after inspecting evidence"

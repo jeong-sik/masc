@@ -38,7 +38,6 @@ type t =
   | Task_claim
   | Task_create
   | Task_done
-  | Task_submit_for_verification
   | Task_force_done
   | Task_force_release
   | Tasks_audit

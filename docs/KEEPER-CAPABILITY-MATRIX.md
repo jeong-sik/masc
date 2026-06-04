@@ -25,7 +25,7 @@ Triage and trigger detection run on each heartbeat using the proactive idle/cool
 | **filesystem** | `tool_read_file`, `tool_edit_file`, `tool_write_file` | 3 | Yes |
 | **search_files** | `tool_search_files` | 1 | Yes |
 | **library** | `keeper_library_{search,read}` | 2 | Yes |
-| **taskboard** | `keeper_tasks_{list,audit}`, `keeper_task_{force_release,force_done,claim,done,submit_for_verification,create}`, `keeper_broadcast` | 9 | Yes |
+| **taskboard** | `keeper_tasks_{list,audit}`, `keeper_task_{force_release,force_done,claim,done,create}`, `keeper_broadcast` | 8 | Yes |
 | **voice** | `keeper_voice_{speak,listen,agent,sessions,session_start,session_end}` | 6 | Yes |
 
 Notes:

@@ -96,13 +96,6 @@ let validation_error_json message =
     ()
 ;;
 
-let string_list_arg name json =
-  json
-  |> Safe_ops.json_string_list name
-  |> List.map String.trim
-  |> List.filter (fun value -> not (String.equal value ""))
-;;
-
 let validate_goal_id config goal_id =
   match Goal_store.get_goal config ~goal_id with
   | Some _ -> Ok goal_id
@@ -331,7 +324,6 @@ type task_op =
   | Task_create
   | Task_claim
   | Task_done
-  | Task_submit_for_verification
 
 let task_op_of_name = function
   | "keeper_tasks_list" -> Some Tasks_list
@@ -342,7 +334,6 @@ let task_op_of_name = function
   | "keeper_task_create" -> Some Task_create
   | "keeper_task_claim" -> Some Task_claim
   | "keeper_task_done" -> Some Task_done
-  | "keeper_task_submit_for_verification" -> Some Task_submit_for_verification
   | _ -> None
 ;;
 
@@ -742,7 +733,7 @@ let handle_keeper_task_tool
          keeper-vocabulary error). Enforce the schema here so the
          error names the field the keeper actually sent. *)
       workflow_rejection_error_json
-        ~alternatives:[ "keeper_task_done"; "keeper_task_submit_for_verification" ]
+        ~alternatives:[ "keeper_task_done" ]
         "result is required. Audit trail: describe what you completed. \
          Example: result='Refactored module X, all tests green, no flake'."
     else (
@@ -769,57 +760,6 @@ let handle_keeper_task_tool
             sw = Eio_context.get_switch_opt ();
           }
           (`Assoc args_for_transition)
-      in
-      keeper_tool_result_json
-        ~typed_outcome:
-          (if Tool_result.is_success transition_result
-           then Some Keeper_tool_outcome.Progress
-           else None)
-        ~failure_class:(Tool_result.failure_class transition_result)
-        ~ok:(Tool_result.is_success transition_result)
-        ~message:(Tool_result.message transition_result)
-        ())
-    | Task_submit_for_verification ->
-    let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
-    let notes = Safe_ops.json_string ~default:"" "notes" args |> String.trim in
-    let evidence_refs = string_list_arg "evidence_refs" args in
-    if task_id = ""
-    then
-      workflow_rejection_error_json
-        ~alternatives:[ "keeper_task_claim"; "keeper_tasks_list" ]
-        "task_id is required. Use the task_id you got from keeper_task_claim."
-    else if notes = ""
-    then
-      workflow_rejection_error_json
-        ~alternatives:[ "keeper_task_submit_for_verification" ]
-        "notes is required. Include verification evidence and test summary."
-    else (
-      (* Keep keeper vocabulary thin: map notes/evidence_refs onto the
-         task-domain handoff_context and let Task.Tool/CDAL evidence gates
-         decide whether the evidence is sufficient. *)
-      let handoff_context =
-        `Assoc
-          [
-            "summary", `String notes;
-            "evidence_refs", Json_util.json_string_list evidence_refs;
-          ]
-      in
-      let transition_result =
-        Task.Tool.handle_transition
-          ~tool_name:"keeper_task_submit_for_verification"
-          ~start_time:0.0
-          {
-            Task.Tool.config;
-            agent_name = keeper_agent_sender ~meta;
-            sw = Eio_context.get_switch_opt ();
-          }
-          (`Assoc
-             [
-               "task_id", `String task_id;
-               "action", `String "submit_for_verification";
-               "notes", `String notes;
-               "handoff_context", handoff_context;
-             ])
       in
       keeper_tool_result_json
         ~typed_outcome:

@@ -77,8 +77,7 @@ let transition_task_r
           | Masc_domain.Release
           | Masc_domain.Submit_for_verification
           | Masc_domain.Approve_verification
-          | Masc_domain.Reject_verification
-          | Masc_domain.Submit_pr_evidence -> Ok ()
+          | Masc_domain.Reject_verification -> Ok ()
         in
         let* () =
           (match action, task.task_status with
@@ -99,7 +98,6 @@ let transition_task_r
             | Masc_domain.Cancel
             | Masc_domain.Release
             | Masc_domain.Submit_for_verification
-            | Masc_domain.Submit_pr_evidence
             | Masc_domain.Approve_verification
             | Masc_domain.Reject_verification ), _ -> Ok ())
           [@warning "-4"]
@@ -213,7 +211,7 @@ let transition_task_r
 (* WORKAROUND: action (9) × task_status (6) × new_status (6) × option (2) = 648 combos. *)
         let* () =
           (match action, task.task_status, new_status, prepare_verification_request with
-          | ( (Masc_domain.Submit_for_verification | Masc_domain.Submit_pr_evidence)
+          | ( Masc_domain.Submit_for_verification
             , _
             , Masc_domain.AwaitingVerification { assignee; verification_id; _ }
             , prepare_opt ) ->
@@ -241,7 +239,7 @@ let transition_task_r
                              task_id
                              verification_id
                              e)))))
-          | ( (Masc_domain.Submit_for_verification | Masc_domain.Submit_pr_evidence)
+          | ( Masc_domain.Submit_for_verification
             , _
             , _
             , Some _ ) ->
@@ -269,8 +267,7 @@ let transition_task_r
               | Masc_domain.Release
               | Masc_domain.Approve_verification
               | Masc_domain.Reject_verification
-              | Masc_domain.Submit_for_verification
-              | Masc_domain.Submit_pr_evidence )
+              | Masc_domain.Submit_for_verification )
             , _
             , _
             , None ) -> Ok ()) [@warning "-4"]
@@ -337,7 +334,7 @@ let transition_task_r
               | Masc_domain.Cancel
               | Masc_domain.Release
               | Masc_domain.Submit_for_verification
-              | Masc_domain.Submit_pr_evidence )
+              )
             , _
             , Some _ ) -> Ok ()
           | ( ( Masc_domain.Claim
@@ -346,7 +343,6 @@ let transition_task_r
               | Masc_domain.Cancel
               | Masc_domain.Release
               | Masc_domain.Submit_for_verification
-              | Masc_domain.Submit_pr_evidence
               | Masc_domain.Approve_verification
               | Masc_domain.Reject_verification )
             , _
@@ -383,13 +379,12 @@ let transition_task_r
          | Masc_domain.Release, Masc_domain.Todo ->
 (* Idempotent: already in backlog, nothing to release. *)
            Log.TaskState.debug "release on already-todo task %s — no-op" task_id
-         | Masc_domain.Claim, _
-         | Masc_domain.Start, _
-         | Masc_domain.Done_action, _
-         | Masc_domain.Cancel, _
-         | Masc_domain.Submit_for_verification, _
-         | Masc_domain.Submit_pr_evidence, _
-         | Masc_domain.Approve_verification, _
+        | Masc_domain.Claim, _
+        | Masc_domain.Start, _
+        | Masc_domain.Done_action, _
+        | Masc_domain.Cancel, _
+        | Masc_domain.Submit_for_verification, _
+        | Masc_domain.Approve_verification, _
          | Masc_domain.Reject_verification, _
          | Masc_domain.Release, Masc_domain.Claimed _
          | Masc_domain.Release, Masc_domain.InProgress _
@@ -427,7 +422,6 @@ let transition_task_r
          | Masc_domain.Done_action
          | Masc_domain.Cancel
          | Masc_domain.Submit_for_verification
-         | Masc_domain.Submit_pr_evidence
          | Masc_domain.Approve_verification
          | Masc_domain.Reject_verification -> ());
         if new_status = task.task_status && set_current = None
@@ -509,7 +503,7 @@ let transition_task_r
                           , Masc_domain.task_handoff_context_to_yojson handoff_context )
                         ]
                       | None -> []))
-           | Masc_domain.Submit_for_verification | Masc_domain.Submit_pr_evidence ->
+           | Masc_domain.Submit_for_verification ->
              let payload =
                `Assoc
                  ([ "task_id", `String task_id ]
@@ -548,7 +542,6 @@ let transition_task_r
             | Masc_domain.Start
             | Masc_domain.Release
             | Masc_domain.Submit_for_verification
-            | Masc_domain.Submit_pr_evidence
             | Masc_domain.Approve_verification
             | Masc_domain.Reject_verification -> None
           in
@@ -575,7 +568,6 @@ let transition_task_r
            | Masc_domain.Claim
            | Masc_domain.Start
            | Masc_domain.Submit_for_verification
-           | Masc_domain.Submit_pr_evidence
            | Masc_domain.Approve_verification
            | Masc_domain.Reject_verification -> ());
           Ok

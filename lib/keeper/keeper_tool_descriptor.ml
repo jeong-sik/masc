@@ -1091,12 +1091,6 @@ let internal_descriptors : t list =
       "Mark the claimed MASC task as done."
       ~last_turn_safe:true
       ~readonly:false
-  ; task_descriptor
-      "submit_for_verification"
-      "keeper_task_submit_for_verification"
-      "Submit task work for verification by another keeper."
-      ~last_turn_safe:true
-      ~readonly:false
     (* ── board cluster (RFC-0179 PR-3, 14 tools) ──────────────── *)
   ; board_descriptor
       "keeper_board_comment"

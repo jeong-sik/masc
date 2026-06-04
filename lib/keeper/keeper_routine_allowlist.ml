@@ -104,12 +104,6 @@ let rules : rule list =
       allowed_actions = None;
       label = "keeper_routine.keeper_task_done";
     };
-    {
-      tool = "keeper_task_submit_for_verification";
-      max_risk = RL.Medium;
-      allowed_actions = None;
-      label = "keeper_routine.keeper_task_submit_for_verification";
-    };
 
     (* Goal Store routine planning/proof surface. Lifecycle decisions that
        assert operator authority or drop goals stay High and are not listed

@@ -24,7 +24,7 @@ let target_iters = 5
 let inter_sleep_s = 0.02
 let total_expected_wall_clock_s = float_of_int target_iters *. inter_sleep_s
 
-(* Sentinel used to break out of [Switch.run] once the assertion data is
+(* Marker used to break out of [Switch.run] once the assertion data is
    collected. Using [Switch.fail] would propagate as the switch's
    failure exception; raising [Exit] is the simpler shape because
    [Switch.run] re-raises and the outer [try] cleans up. *)

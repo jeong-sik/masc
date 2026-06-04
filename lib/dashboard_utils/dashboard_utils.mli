@@ -52,10 +52,9 @@ val session_team_health_json : Yojson.Safe.t -> Yojson.Safe.t
 val session_communication_json : Yojson.Safe.t -> Yojson.Safe.t
 (** ["communication_metrics"] sub-key inside the payload. *)
 
-val session_status_string : Yojson.Safe.t -> string
+val session_status_opt : Yojson.Safe.t -> string option
 (** Resolve the status string by probing ["summary"] → ["meta"] →
-    top-level session JSON.  Returns a diagnostic placeholder when
-    no ["status"] field is found. *)
+    top-level session JSON.  Returns [None] when no ["status"] field is found. *)
 
 val session_recent_events : Yojson.Safe.t -> Yojson.Safe.t list
 (** ["recent_events"] list from the session JSON. *)

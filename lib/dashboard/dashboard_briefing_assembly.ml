@@ -185,8 +185,7 @@ let build_keeper_briefs (config : Workspace.config) (keepers : Yojson.Safe.t lis
          if name = "" then None
          else
            let status =
-             string_field ~default:Briefing_json_helpers.missing_status "status"
-               keeper
+             string_field "status" keeper
            in
            let context_ratio =
              match member_assoc "context_ratio" keeper with
@@ -339,18 +338,13 @@ let build_operation_contexts ~(tasks : Masc_domain.task list) =
              })
 
 let operation_badge_json (operation : operation_context) =
-  let status_str =
-    match operation.status with
-    | Some s -> s
-    | None -> Briefing_json_helpers.missing_status
-  in
   let detachment_status_str =
     operation.detachment_status
   in
   `Assoc
     [
       ("operation_id", `String operation.operation_id);
-      ("status", `String status_str);
+      ("status", Json_util.string_opt_to_json operation.status);
       ("detachment_status", Json_util.string_opt_to_json detachment_status_str);
       ("objective", Json_util.string_opt_to_json operation.objective);
       ("updated_at", Json_util.string_opt_to_json operation.updated_at);
@@ -379,7 +373,7 @@ let operation_badges_for_session session operation_contexts =
         `Assoc
           [
             ("operation_id", `String operation_id);
-            ("status", `String Briefing_json_helpers.missing_status);
+            ("status", `Null);
             ("stage", `Null);
             ("detachment_status", `Null);
             ("objective", `Null);

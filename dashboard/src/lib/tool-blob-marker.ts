@@ -1,5 +1,5 @@
 /**
- * Sentinel marker parser for tool outputs externalized via Tool_blob_store.
+ * Blob marker parser for tool outputs externalized via Tool_blob_store.
  *
  * Produced by `lib/tool_bridge.ml::maybe_externalize` when a tool output
  * exceeds the threshold. The OCaml encoder uses:
@@ -14,7 +14,7 @@
  * with `]` as the last character.
  */
 
-const SENTINEL_PREFIX = '[masc:blob '
+const MARKER_PREFIX = '[masc:blob '
 
 export interface ToolBlobMarker {
   sha256: string
@@ -31,7 +31,7 @@ const MARKER_RE =
  * Used by render code that needs to switch UI between inline and lazy modes.
  */
 export function parseToolBlobMarker(text: string): ToolBlobMarker | null {
-  if (!text.startsWith(SENTINEL_PREFIX)) return null
+  if (!text.startsWith(MARKER_PREFIX)) return null
   const m = text.match(MARKER_RE)
   if (!m) return null
   const [, sha, bytes, mime, preview] = m
@@ -48,7 +48,7 @@ export function parseToolBlobMarker(text: string): ToolBlobMarker | null {
 
 /** Cheap precheck — useful in hot loops before allocating regex captures. */
 export function isToolBlobMarker(text: string): boolean {
-  return text.startsWith(SENTINEL_PREFIX) && text.endsWith(']')
+  return text.startsWith(MARKER_PREFIX) && text.endsWith(']')
 }
 
 /**

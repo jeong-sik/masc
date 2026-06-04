@@ -7,7 +7,7 @@ include Dashboard_execution_helpers
 
 (* session_payload_json, session_meta_json, session_summary_json,
    session_team_health_json, session_communication_json,
-   session_status_string, session_recent_events, event_detail_json
+   session_status_opt, session_recent_events, event_detail_json
    are provided by Dashboard_utils (via include chain). *)
 
 let event_summary event_json =
@@ -154,7 +154,7 @@ let build_session_seed session_json _cards =
           (match String_util.trim_to_option (string_field "project" meta) with
           | Some _ as value -> value
           | None -> String_util.trim_to_option (string_field "workspace_id" meta));
-        status = session_status_string session_json;
+        status = session_status_opt session_json;
         health =
           (match session_card with
           | Some card ->
@@ -210,15 +210,20 @@ let build_session_contexts seeds operation_contexts : session_context list =
            | None -> (None, None)
          in
          let severity =
-           session_severity ~health:(Dashboard_utils.health_level_of_string seed.health) ~status:(Dashboard_utils.session_lifecycle_of_string seed.status)
+           let status =
+             match seed.status with
+             | Some value -> Dashboard_utils.session_lifecycle_of_string value
+             | None -> SL_unknown
+           in
+           session_severity ~health:(Dashboard_utils.health_level_of_string seed.health) ~status
              ~runtime_blocker:seed.runtime_blocker
          in
          let intervene_label =
            match seed.status with
-           | "completed" -> "세션 결과 보기"
-           | "interrupted" -> "중단 원인 보기"
-           | "failed" | "cancelled" -> "실패 원인 보기"
-           | _ -> "세션 개입 열기"
+           | Some "completed" -> "세션 결과 보기"
+           | Some "interrupted" -> "중단 원인 보기"
+           | Some ("failed" | "cancelled") -> "실패 원인 보기"
+           | Some _ | None -> "세션 개입 열기"
          in
          let intervene_handoff =
            handoff_json
@@ -262,7 +267,7 @@ let build_session_contexts seeds operation_contexts : session_context list =
                  ("session_id", `String seed.session_id);
                  ("goal", `String seed.goal);
                  ("namespace", Json_util.string_opt_to_json seed.namespace);
-                 ("status", `String seed.status);
+                 ("status", Json_util.string_opt_to_json seed.status);
                  ("health", `String seed.health);
                  ( "member_names",
                    `List (List.map (fun value -> `String value) seed.member_names) );

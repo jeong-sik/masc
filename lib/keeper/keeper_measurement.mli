@@ -50,7 +50,7 @@ type similarity_measurement = {
   similarity_measurable : bool;
   (** [false] when the turn lacked the user/assistant message pair (or goal horizon)
       needed to compute [goal_alignment] / [response_alignment] honestly. In that
-      case the two similarity floats are sentinel [0.0] — distinguishable from a
+      case the two similarity floats are marker [0.0] — distinguishable from a
       real measurement of [0.0] only by this flag. Gates that consume similarity
       must fail-closed when [similarity_measurable = false] (see Keeper_guard). *)
 }

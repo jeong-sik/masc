@@ -80,7 +80,7 @@ let test_concurrent_threads () =
         ())
   in
   List.iter Thread.join threads;
-  (* Ring's at_exit handler flushes; force a flush via a sentinel push
+  (* Ring's at_exit handler flushes; force a flush via a marker push
      and then re-open the file directly. *)
   let path = today_path dir in
   let lines = read_lines path in

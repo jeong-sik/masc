@@ -59,7 +59,7 @@ Acceptance:
 
 - [ ] `lib/keeper/keeper_agent_run.ml`
   - committed tool 이후 mutation boundary를 typed event/fact로 다룰 수 있는지 점검
-  - 현재 string sentinel에 의존하는 부분을 inventory
+  - 현재 string marker에 의존하는 부분을 inventory
 - [ ] `lib/keeper/keeper_post_turn.ml`
   - compaction / handoff / overflow retry가 replay target typed fact로 충분한지 점검
 

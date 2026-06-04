@@ -156,7 +156,7 @@ let test_non_tool_result_unchanged () =
 let test_hydration_miss_keeps_marker () =
   with_temp_dir (fun dir ->
       let store = B.create ~base_path:dir in
-      (* Construct a sentinel marker for content that was NEVER stored. *)
+      (* Construct a blob marker for content that was NEVER stored. *)
       let phantom =
         O.encode_for_oas
           (O.Stored

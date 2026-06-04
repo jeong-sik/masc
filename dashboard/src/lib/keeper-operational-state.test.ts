@@ -601,7 +601,7 @@ describe('KeeperOperationalState remaining Goal-2 axes — RFC-0135 strict close
     expect(state.turnPhase).toBe('failing')
   })
 
-  it('turnPhase uses explicit unknown sentinel when neither source is present', () => {
+  it('turnPhase uses explicit unknown marker when neither source is present', () => {
     const state = deriveKeeperOperationalState({
       keeper: makeKeeper(),
       composite: null,

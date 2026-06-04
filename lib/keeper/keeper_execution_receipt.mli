@@ -125,7 +125,7 @@ type runtime_outcome =
 val runtime_outcome_to_string : runtime_outcome -> string
 
 (** Receipt-level completion-contract evaluation result. Closed union of three
-    producer paths: (i) initial-state sentinel [Contract_unknown];
+    producer paths: (i) initial-state marker [Contract_unknown];
     (ii) boundary-state overrides [Contract_not_dispatched],
     [Contract_violated], [Contract_no_capable_provider]; (iii) the
     six classifier outcomes mirrored from

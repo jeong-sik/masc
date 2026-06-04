@@ -162,7 +162,7 @@ let display_disposition_of_receipt_json receipt =
      (2) [operator_disposition = "unknown"] — the producer explicitly
          declared the state unmapped at the runtime layer.
 
-     Using a bracketed sentinel as the default lets the match below
+     Using a bracketed marker as the default lets the match below
      fall through to the [_ -> "Alert"/"unmapped_operator_disposition"]
      catch-all, which is the more accurate classification for case (1).
      Both cases still surface as "Alert" severity (no operator-visible

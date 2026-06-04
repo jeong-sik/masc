@@ -2,7 +2,7 @@ module Types = Masc_domain
 
 (** test_turn_id_propagation — Step 15 partial.
 
-    Compile-time sentinel for the Step 0a (PR #11154 + #11156 + #11159)
+    Compile-time marker for the Step 0a (PR #11154 + #11156 + #11159)
     decision that wired [?turn_id] through [Log.Make] and every
     pre-defined module logger.  If a future PR strips [?turn_id] from
     the log surface, this file fails to type-check and the regression

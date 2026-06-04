@@ -330,7 +330,7 @@ let aggregate ?(n = 5000) ?window_hours () : Yojson.Safe.t =
            (* Fallback for old entries that pre-date [result_bytes].
               Output may be either an inline string (legacy) or a
               normalized blob object {"_blob":{...,"bytes":N,...}}
-              (new format introduced when sentinel double-escape was
+              (new format introduced when marker double-escape was
               eliminated from the telemetry layer). *)
            (match List.assoc_opt "output" fields with
             | Some (`String s) -> String.length s
@@ -393,7 +393,7 @@ let aggregate ?(n = 5000) ?window_hours () : Yojson.Safe.t =
            | Some (`Assoc [("_blob", `Assoc blob)]) ->
              (* Normalized blob object — failure classifier wants the
                 preview (where the error JSON body lives) rather than
-                the sentinel envelope. *)
+                the marker envelope. *)
              (match List.assoc_opt "preview" blob with
               | Some (`String p) -> p
               | _ -> "")

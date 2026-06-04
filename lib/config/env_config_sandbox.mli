@@ -77,7 +77,7 @@ module Cleanup : sig
       (5m). *)
 
   val managed_sleep_sec : unit -> int
-  (** Sentinel sleep duration for the [managed] container init loop
+  (** Marker sleep duration for the [managed] container init loop
       (currently [sleep 3600] in {!Keeper_sandbox_control}).
       Exposed here so a future PR can env-override; today this
       getter still returns the historical literal 3600 because no

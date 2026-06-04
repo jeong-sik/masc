@@ -1,4 +1,4 @@
-(** test_keeper_turn_fsm_wired_sites — Step 4 wiring sentinel.
+(** test_keeper_turn_fsm_wired_sites — Step 4 wiring marker.
 
     [test_keeper_turn_fsm_emit] pins the [Keeper_turn_fsm.emit_transition]
     *type surface*: a future signature drift fails compile.
@@ -11,7 +11,7 @@
     Grafana dashboard's panel goes flat, [bin/masc-trace]
     timeline jumps over a state).
 
-    This sentinel reads [lib/keeper/keeper_unified_turn.ml]
+    This marker reads [lib/keeper/keeper_unified_turn.ml]
     and asserts that the [Keeper_turn_fsm.emit_transition] call
     count meets the documented floor.  A delete fails this
     test with a clear message; an add (more emits) is a no-op

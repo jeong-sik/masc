@@ -562,8 +562,10 @@ function isExecutionAttentionCode(value: string | null | undefined): boolean {
   ) return false
   return normalized.includes('violat')
     || normalized.includes('missing')
+    || normalized.includes('mismatch')
     || normalized.includes('need')
     || normalized.includes('fail')
     || normalized.includes('error')
     || normalized.includes('passive')
+    || normalized === 'no_tool_capable_provider'
 }

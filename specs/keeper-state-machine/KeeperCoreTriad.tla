@@ -434,7 +434,7 @@ SideEffectContainment ==
 \* S5: Active turn has a runtime selected.
 \*
 \* Runtime-name abstraction: `"none"` here is the SPEC-LEVEL EMPTY-ROLE
-\* SENTINEL — it asserts "no runtime is selected", not a literal string
+\* MARKER — it asserts "no runtime is selected", not a literal string
 \* match against an OCaml return value.  The OCaml side has no literal
 \* "none"; the empty-role assertion is preserved structurally by the
 \* caller graph upstream gating runtime attempts for non-active

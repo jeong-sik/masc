@@ -247,6 +247,7 @@ const FAILURE_REASON_BASE_LABELS = {
   stale_termination_storm: 'Stale 종료 폭주',
   stale_fleet_batch: 'Fleet stale 배치',
   provider_runtime_error: '런타임 호출 오류',
+  tool_route_recoverable_failure: '도구 라우팅 복구 가능 실패',
   ambiguous_partial_commit: '부분 commit 모호',
   fiber_unresolved: 'Fiber 미해결',
   exception: '런타임 예외',

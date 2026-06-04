@@ -163,7 +163,6 @@ type t =
   | LifecycleTransitions
   | LifecycleCallbackFailures
   | CompactionCallbackRecoveries
-  | BriefingSessionLastEventSource
   | EventBusDrain
   | SupervisorCleanupFailures
   | SlotForceReleased

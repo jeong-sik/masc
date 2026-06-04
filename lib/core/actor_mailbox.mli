@@ -41,7 +41,7 @@ val stop : 'msg t -> unit
     reaches the [stop_signal] check exits without taking another
     message.  In-flight handler invocations complete first.  This
     does {b not} wake a fiber blocked on [Eio.Stream.take] — to
-    unblock a quiescent inbox the caller must also send a sentinel
+    unblock a quiescent inbox the caller must also send a marker
     message that the handler routes to a [Stop] outcome. *)
 
 val run :

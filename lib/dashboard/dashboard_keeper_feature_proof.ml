@@ -316,7 +316,7 @@ let board_reactive_feature snapshots =
       "Post board events and confirm every active keeper records board-reactive turns."
 
 let timestamp_within_window ?window_hours ~now ts =
-  (* Reject zero/negative timestamps (sentinel/unset) and future timestamps
+  (* Reject zero/negative timestamps (marker/unset) and future timestamps
      (clock skew or corrupted logs). Without the [ts <= now] guard, any
      future timestamp would satisfy the recency check because [now -. ts]
      would be negative and trivially [<= hours *. 3600.0]. *)

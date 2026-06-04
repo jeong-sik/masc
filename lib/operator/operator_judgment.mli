@@ -106,7 +106,7 @@ val load_all : Workspace.config -> record list
 
     Records are keyed by [(surface, target_type, target_id)]
     triple.  When [target_id] is [None] or empty/whitespace, the
-    composite key uses the literal [["__workspace__"]] sentinel —
+    composite key uses the literal [["__workspace__"]] marker —
     pinned because it must remain stable across runs. *)
 
 val latest_active :

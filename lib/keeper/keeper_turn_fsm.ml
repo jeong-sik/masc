@@ -94,7 +94,7 @@ let emit_transition ?ctx ~keeper_name ~turn_id ?prev state =
        guard_transition ?ctx ~keeper_name ~turn_id ~from_state ~to_state:state ()
    | None -> ());
   let state_label = turn_state_label state in
-  (* [action_label] used to be a single "unknown" sentinel for two
+  (* [action_label] used to be a single "unknown" marker for two
      distinct cases:
        1. [prev = None] — the first emit for a turn; there is no
           [from_state] to classify against, so "initial" is the

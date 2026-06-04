@@ -64,7 +64,7 @@ val worker_raw_trace_path :
 val ensure_worker_container_dirs :
   base_path:string -> worker_name:string -> unit
 (** Creates the {!worker_container_dir} chain if missing.
-    Idempotent — touches a [.keep] sentinel and removes
+    Idempotent — touches a [.keep] marker and removes
     it, so the directory always exists before subsequent
     writers run. *)
 

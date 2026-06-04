@@ -17,7 +17,7 @@ type outcome =
 
 (** Connector error-kind labels. Closed set mirroring the in-module
     producer surface: validation / keeper / dispatch_unavailable /
-    internal, plus [Ek_none] as the sentinel used by [Success] and
+    internal, plus [Ek_none] as the marker used by [Success] and
     [Duplicate] outcomes (previously the empty-string [Error_kind ""]).
 
     JSON/status surfaces render via [error_kind_to_string]; wire output

@@ -75,7 +75,7 @@ let keeper_trust_json ?(include_receipt = false)
         | None -> `String "no_receipt" );
       ( "completion_contract_result",
         match latest_receipt with
-        (* Missing receipt field stays a UI sentinel; this is not a runtime
+        (* Missing receipt field stays a UI marker; this is not a runtime
            contract decision. *)
         (* sound-partial: allow *)
         | Some receipt -> Option.value ~default:(`String "unknown") (Json_util.assoc_member_opt "completion_contract_result" receipt)

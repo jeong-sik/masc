@@ -260,7 +260,7 @@ let append_inference_event (json : Yojson.Safe.t) =
         (Printexc.to_string exn)
 
 (** Look up the cached provider for a model_id, returning the
-    [unknown_provider_label] sentinel when absent. *)
+    [unknown_provider_label] marker when absent. *)
 let provider_for_model model_id =
   Stdlib.Mutex.protect provider_cache_mutex (fun () ->
     Option.value ~default:unknown_provider_label

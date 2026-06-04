@@ -3,7 +3,7 @@
     Lazy-fetch endpoint for the dashboard. Tool outputs externalized by
     [Tool_bridge.maybe_externalize] live in
     [${MASC_BASE_PATH}/.masc/tool_blobs/<sha[0..1]>/<sha>]; the dashboard
-    UI displays the sentinel marker preview by default and fetches full
+    UI displays the blob marker preview by default and fetches full
     bytes on demand via:
 
       GET /api/v1/artifacts/<sha256>

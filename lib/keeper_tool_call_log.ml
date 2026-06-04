@@ -331,15 +331,15 @@ let start_flush_fiber ~sw ~clock =
 
 (** [blob_aware_output_json safe_output] wraps a tool-output string for
     persistence as the [output] field. When [safe_output] is the OCaml
-    [%S]-quoted [masc:blob ...] sentinel produced by
+    [%S]-quoted [masc:blob ...] marker produced by
     [Tool_output.encode_for_oas], the wire format escapes the inner
     preview JSON twice (OCaml string-literal + JSON string), which makes
     the telemetry record illegible and inflates disk usage by 30-40%.
 
-    We decode the sentinel and emit a structured object instead:
+    We decode the marker and emit a structured object instead:
       {"_blob": {"sha256":"...", "bytes":N, "mime":"...", "preview":"..."}}
 
-    Non-sentinel outputs keep the historical [String _] shape so that
+    Non-marker outputs keep the historical [String _] shape so that
     older readers (dashboard, jq scripts) keep working. The dashboard
     consumers are updated in the same change to accept either shape. *)
 let blob_aware_output_json (output : string) : Yojson.Safe.t =
@@ -392,7 +392,7 @@ let semantic_outcome_of_output ~success output =
 ;;
 
 let input_to_json (input : Yojson.Safe.t) : Yojson.Safe.t =
-  (* Per-leaf sentinel-aware truncation. Previously
+  (* Per-leaf marker-aware truncation. Previously
      [String.sub (Yojson.Safe.to_string input) 0 (max - suffix)] chopped
      through a [masc:blob ...] marker embedded in a nested JSON string
      value and stranded sha256/bytes/mime halfway, breaking the keeper

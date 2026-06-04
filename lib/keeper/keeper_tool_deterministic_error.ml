@@ -135,7 +135,7 @@ let deterministic_retry_fields reason =
   ]
 ;;
 
-(* Path-prefixed sentinel string (no substring search): path checks
+(* Path-prefixed marker string (no substring search): path checks
    compare the *full* value of the [error] field — or, when the
    payload nests the reason in [detail.path_check.reason], that field
    — but never accept a partial match. *)

@@ -49,7 +49,7 @@ let evaluate (s : measurement_snapshot) : event list =
   (* 1. Guardrail: 4-way AND gate.
      Fail-closed when similarity is not measurable (e.g. status_tick without
      a user/assistant pair) — the goal_alignment / response_alignment floats
-     are 0.0 sentinels in that case, which would otherwise satisfy the two
+     are 0.0 markers in that case, which would otherwise satisfy the two
      [<=] comparisons trivially. See #10012. *)
   let guardrail_fired =
     s.similarity.similarity_measurable

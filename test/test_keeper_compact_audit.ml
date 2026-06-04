@@ -241,7 +241,7 @@ let with_env_set v f =
   let restore () =
     match prev with
     | None ->
-      (* Best-effort: stdlib has no portable unset; set to a sentinel that
+      (* Best-effort: stdlib has no portable unset; set to a marker that
          the resolver itself treats as Parse_error, then leave it. Other
          tests in this binary do not depend on the env being absent. *)
       Unix.putenv env_var ""

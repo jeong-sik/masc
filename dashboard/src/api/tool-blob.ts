@@ -3,7 +3,7 @@
  * `lib/server/server_routes_http_routes_artifacts.ml`.
  *
  * Used by tool-result-display when the operator clicks "Show full output"
- * on a sentinel marker payload. The endpoint returns the full bytes
+ * on a blob marker payload. The endpoint returns the full bytes
  * inline — no streaming. Suitable for tool outputs up to a few MB.
  */
 

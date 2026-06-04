@@ -448,7 +448,7 @@ let test_route_evidence_stored_for_git_push () =
 
 let test_route_evidence_stored_for_blob_backed_git_push () =
   with_tmp_log (fun () ->
-    let sentinel =
+    let marker =
       Tool_output.encode_for_oas
         (Tool_output.Stored {
           sha256 = String.make 64 'b';
@@ -467,7 +467,7 @@ let test_route_evidence_stored_for_blob_backed_git_push () =
              ("cmd", `String "git push -u origin keeper/large-route-proof");
              ("cwd", `String "repos/masc-keeper-direct-proof");
            ])
-      ~output_text:sentinel
+      ~output_text:marker
       ~success:true
       ~duration_ms:42.0
       ();
@@ -934,14 +934,14 @@ let test_output_valid_utf8_untouched () =
         Alcotest.(check string) "valid UTF-8 preserved verbatim" korean output
     | _ -> Alcotest.fail "expected exactly one entry")
 
-(* When the tool output is the OCaml [%S]-quoted [masc:blob ...] sentinel
+(* When the tool output is the OCaml [%S]-quoted [masc:blob ...] marker
    produced by Tool_output.encode_for_oas, the persisted record must
    normalize it into a structured _blob object so that telemetry readers
    (UI, jq scripts) see a clean JSON shape instead of doubly-escaped
    string fields. *)
-let test_output_blob_sentinel_normalized () =
+let test_output_blob_marker_normalized () =
   with_tmp_log (fun () ->
-    let sentinel =
+    let marker =
       Tool_output.encode_for_oas
         (Tool_output.Stored {
           sha256 = String.make 64 'a';
@@ -952,7 +952,7 @@ let test_output_blob_sentinel_normalized () =
     in
     Keeper_tool_call_log.log_call
       ~keeper_name:"k" ~tool_name:"tool_blob"
-      ~input:(`Assoc []) ~output_text:sentinel
+      ~input:(`Assoc []) ~output_text:marker
       ~success:true ~duration_ms:1.0 ();
     let results = Keeper_tool_call_log.read_recent ~n:1 () in
     Alcotest.(check int) "entry persisted" 1 (List.length results);
@@ -1114,8 +1114,8 @@ let () =
             test_output_valid_utf8_untouched
         ] )
     ; ( "blob_normalize",
-        [ eio_test "blob sentinel persists as structured _blob object"
-            test_output_blob_sentinel_normalized
+        [ eio_test "blob marker persists as structured _blob object"
+            test_output_blob_marker_normalized
         ; eio_test "inline string output stays a JSON string"
             test_output_inline_string_preserved
         ] )

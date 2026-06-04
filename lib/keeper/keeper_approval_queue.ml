@@ -309,7 +309,7 @@ let sandbox_target_of_runtime_contract = function
 ;;
 
 let input_preview_of_json (json : Yojson.Safe.t) =
-  (* Per-leaf sentinel-aware truncation: a naive [String.sub] on the
+  (* Per-leaf marker-aware truncation: a naive [String.sub] on the
      serialized form would chop a [masc:blob ...] marker mid-field and
      leave sha256/bytes/mime malformed so the approval-queue viewer
      cannot round-trip the preview. *)

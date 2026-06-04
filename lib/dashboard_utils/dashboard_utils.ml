@@ -58,7 +58,7 @@ let status_rank = function
   | "idle" -> 1
   | _ -> 0
 
-let missing_status = "<missing status>"
+let unknown_status_label = "unknown"
 
 let rec take n items =
   if n <= 0 then [] else match items with [] -> [] | x :: xs -> x :: take (n - 1) xs
@@ -92,18 +92,15 @@ let session_team_health_json session_json =
 let session_communication_json session_json =
   session_payload_json session_json |> member_assoc "communication_metrics"
 
-let session_status_string session_json =
+let session_status_opt session_json =
   let summary = session_summary_json session_json in
   let meta = session_meta_json session_json in
   match String_util.trim_to_option (string_field "status" summary) with
-  | Some value -> value
+  | Some _ as value -> value
   | None -> (
       match String_util.trim_to_option (string_field "status" meta) with
-      | Some value -> value
-      | None ->
-          String_util.trim_to_option (string_field "status" session_json)
-          |> Option.value
-               ~default:"<missing status field in summary / meta / session>")
+      | Some _ as value -> value
+      | None -> String_util.trim_to_option (string_field "status" session_json))
 
 let session_recent_events session_json =
   list_field "recent_events" session_json
@@ -140,7 +137,7 @@ let string_of_health_level = function
   | HL_warn -> "warn"
   | HL_degraded -> "degraded"
   | HL_ok -> "ok"
-  | HL_unknown -> missing_status
+  | HL_unknown -> unknown_status_label
 
 let severity_rank_of_health_level = function
   | HL_critical | HL_bad | HL_risk -> 2
@@ -187,7 +184,7 @@ let string_of_session_lifecycle = function
   | SL_stopped -> "stopped"
   | SL_interrupted -> "interrupted"
   | SL_expired -> "expired"
-  | SL_unknown -> missing_status
+  | SL_unknown -> unknown_status_label
 
 (** Status/health classification predicates — single source of truth.
     Used across dashboard, briefing, and operator modules. *)

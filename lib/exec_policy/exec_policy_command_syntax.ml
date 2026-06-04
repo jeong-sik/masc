@@ -114,32 +114,32 @@ let rec command_after_env_prefix_tokens = function
 let opam_exec_command_tokens rest =
   match rest with
   | sub :: rest when String.equal (basename_token sub) "exec" ->
-    let rec find_sentinel = function
+    let rec find_marker = function
       | [] -> None
       | "--" :: rest -> skip_env_assignments_tokens rest
-      | _ :: rest -> find_sentinel rest
+      | _ :: rest -> find_marker rest
     in
-    let rec find_command_without_sentinel = function
+    let rec find_command_without_marker = function
       | [] -> None
       | token :: rest ->
         if is_env_assignment token
-        then find_command_without_sentinel rest
+        then find_command_without_marker rest
         else if token = "--switch" || token = "--color" || token = "--root" || token = "--cli"
         then (
           match rest with
-          | _ :: rest -> find_command_without_sentinel rest
+          | _ :: rest -> find_command_without_marker rest
           | [] -> None)
         else if String.starts_with ~prefix:"--switch=" token
                 || String.starts_with ~prefix:"--color=" token
                 || String.starts_with ~prefix:"--root=" token
                 || String.starts_with ~prefix:"--cli=" token
                 || String.starts_with ~prefix:"-" token
-        then find_command_without_sentinel rest
+        then find_command_without_marker rest
         else Some (token :: rest)
     in
-    (match find_sentinel rest with
+    (match find_marker rest with
      | Some _ as command -> command
-     | None -> find_command_without_sentinel rest)
+     | None -> find_command_without_marker rest)
   | [] -> Some [ "opam" ]
   | _non_exec_subcommand :: _rest -> Some [ "opam" ]
 ;;

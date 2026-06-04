@@ -12,6 +12,12 @@ let typed_ok input =
   | Error _ -> false
 ;;
 
+let typed_ok_readonly input =
+  match Execute_input.validate ~mode:Execute_input.Readonly input with
+  | Ok () -> true
+  | Error _ -> false
+;;
+
 let mk_exec executable argv =
   Execute_input.Exec
     { executable
@@ -350,6 +356,21 @@ let test_not_allowlisted_hints_self_correction () =
     ~mode:Execute_input.Dev_full
     ~needle:"typed task/board tools"
     ()
+;;
+
+let test_readonly_allowlist_accepts_repo_read_entrypoints () =
+  Alcotest.(check bool)
+    "readonly allows git entrypoint"
+    true
+    (typed_ok_readonly (mk_exec "git" [ "log"; "--oneline"; "-10" ]));
+  Alcotest.(check bool)
+    "readonly allows gh entrypoint"
+    true
+    (typed_ok_readonly (mk_exec "gh" [ "pr"; "view"; "123" ]));
+  Alcotest.(check bool)
+    "readonly still rejects destructive entrypoint"
+    false
+    (typed_ok_readonly (mk_exec "rm" [ "file.txt" ]))
 ;;
 
 let test_of_json_exec () =
@@ -1168,6 +1189,10 @@ let suite =
           "not_allowlisted_hints_self_correction"
           `Quick
           test_not_allowlisted_hints_self_correction
+      ; Alcotest.test_case
+          "readonly_allowlist_accepts_repo_read_entrypoints"
+          `Quick
+          test_readonly_allowlist_accepts_repo_read_entrypoints
       ; Alcotest.test_case "of_json_exec" `Quick test_of_json_exec
       ; Alcotest.test_case
           "of_json_rejects_argv_without_executable"

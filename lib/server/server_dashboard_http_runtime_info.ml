@@ -1090,7 +1090,10 @@ let dashboard_tools_cache_key ~base_path ~actor =
 
 let dashboard_tools_http_json ?actor ?timing (config : Workspace.config) : Yojson.Safe.t =
   let ctx : Tool_misc.context =
-    { config; agent_name = Option.value ~default:"dashboard" actor }
+    { config
+    ; agent_name = Option.value ~default:"dashboard" actor
+    ; deep_review_runner = Tool_deep_review.unavailable_runner
+    }
   in
   let run phase f =
     match timing with

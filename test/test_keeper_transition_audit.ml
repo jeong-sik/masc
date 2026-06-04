@@ -37,7 +37,47 @@ let with_env key value f =
       | None -> Unix.putenv key "")
     f
 
+let test_runtime_toml =
+  {|
+[runtime]
+default = "test_provider.test_model"
+
+[providers.test_provider]
+display-name = "Test Provider"
+protocol = "provider_d-http"
+endpoint = "http://127.0.0.1:1"
+
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[test_provider.test_model]
+is-default = true
+max-concurrent = 1
+|}
+
+let ensure_test_runtime =
+  let initialized = ref false in
+  fun () ->
+    if not !initialized then (
+      let path = Filename.temp_file "keeper_transition_audit_runtime_" ".toml" in
+      let oc = open_out path in
+      Fun.protect
+        ~finally:(fun () -> close_out_noerr oc)
+        (fun () -> output_string oc test_runtime_toml);
+      Fun.protect
+        ~finally:(fun () ->
+          try Sys.remove path with
+          | Sys_error _ -> ())
+        (fun () ->
+          match Masc.Runtime.init_default ~config_path:path with
+          | Ok () -> initialized := true
+          | Error msg -> fail msg))
+
 let keeper_meta name =
+  ensure_test_runtime ();
   match
     Masc_test_deps.meta_of_json_fixture
       (`Assoc

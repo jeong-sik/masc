@@ -263,6 +263,8 @@
    masc.keeper_container_name
    masc.keeper_runtime_manifest_types
    masc.keeper_registry_types_kill_class
+   masc.keeper_registry_types_decision
+   masc.keeper_registry_types_compaction
    masc.keeper_tool_name
    masc.keeper_id
    masc.keeper_terminal_reason

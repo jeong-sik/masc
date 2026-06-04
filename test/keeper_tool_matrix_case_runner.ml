@@ -2,7 +2,39 @@ module Types = Masc_domain
 
 module Cases = Test_keeper_tool_matrix_cases
 
-let () = Mirage_crypto_rng_unix.use_default ()
+let init_runtime_default_for_tests () =
+  let path = Filename.temp_file "keeper_tool_matrix_runtime_" ".toml" in
+  let oc = open_out path in
+  output_string oc {|
+[runtime]
+default = "test_provider.test_model"
+
+[providers.test_provider]
+display-name = "Test Provider"
+protocol = "provider_d-http"
+endpoint = "http://127.0.0.1:1"
+
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[test_provider.test_model]
+is-default = true
+max-concurrent = 1
+|};
+  close_out oc;
+  match Masc.Runtime.init_default ~config_path:path with
+  | Ok () -> ()
+  | Error e -> failwith ("Runtime.init_default failed: " ^ e)
+;;
+
+let () =
+  Mirage_crypto_rng_unix.use_default ();
+  init_runtime_default_for_tests ()
+;;
+
 
 let result_prefix = "__KEEPER_TOOL_MATRIX_RESULT__"
 

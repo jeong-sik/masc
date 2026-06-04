@@ -197,16 +197,17 @@ let prepare_keeper_name fixture name =
     List.mem name
       [ "keeper_task_claim"; "keeper_tasks_list"; "keeper_tasks_audit";
         "keeper_task_force_release"; "keeper_task_force_done";
-        "keeper_task_done" ]
+        "keeper_task_done"; "keeper_task_submit_for_verification" ]
   then
     ignore (Generic.ensure_task fixture.generic);
   if
     List.mem name
       [ "keeper_task_force_release"; "keeper_task_force_done";
-        "keeper_task_done" ]
+        "keeper_task_done"; "keeper_task_submit_for_verification" ]
   then
     ensure_keeper_claim fixture;
   if name = "keeper_voice_session_end" then ensure_voice_session fixture;
+  if name = "keeper_ide_annotate" then ignore (ensure_sample_file fixture);
   (* keeper_memory_search: needle "tool matrix memory needle" is already
      in ctx_snapshot from fixture creation (line ~128). No mutation needed. *)
   ignore (name = "keeper_memory_search")
@@ -318,7 +319,7 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
               "Validated the keeper tool matrix case as a follow-up smoke check, confirmed the task fixture was claimed, and recorded the successful completion path." );
         ]
   | "keeper_stay_silent" ->
-      `Assoc [ ("reason", `String "tool matrix silence") ]
+      `Assoc []
   | "keeper_task_create" ->
       `Assoc
         [
@@ -328,6 +329,28 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
         ]
   | "keeper_tool_search" ->
       `Assoc [ ("query", `String "tool matrix") ]
+  | "keeper_ide_annotate" ->
+      `Assoc
+        [
+          ("file_path", `String "keeper-tool-matrix.txt");
+          ("line_start", `Int 1);
+          ("kind", `String "Comment");
+          ("content", `String "tool matrix annotation");
+        ]
+  | "keeper_memory_write" ->
+      `Assoc
+        [
+          ("kind", `String "constraints");
+          ("title", `String "tool matrix constraint");
+          ("content", `String "tool matrix constraint details");
+        ]
+  | "keeper_task_submit_for_verification" ->
+      `Assoc
+        [
+          ("task_id", `String (Generic.ensure_task fixture.generic));
+          ("notes", `String "tool matrix verification notes");
+          ("evidence_refs", `List [ `String "ref1" ]);
+        ]
   | other -> failwith ("missing keeper arguments contract for " ^ other)
 
 let keeper_expectation_for_name name =
@@ -342,6 +365,15 @@ let keeper_expectation_for_name name =
           "Completion rejected by anti-rationalization gate";
           "review format unrecognized";
           "Revise your completion notes";
+        ]
+  | "keeper_task_submit_for_verification" ->
+      Expect_success_or_guard
+        [
+          "Completion rejected";
+          "review format unrecognized";
+          "validation error";
+          "not claimed";
+          "default runtime not initialized";
         ]
   | "tool_read_file" ->
       (* Playground resolves paths under .masc/playground/<agent>/ but

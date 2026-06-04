@@ -1,5 +1,4 @@
-(** Tool_shard_types_schemas_execute — [typed_execute_tools] tool_execute
-    schema.
+(** Tool_execute_schema — [tool_execute] descriptor schema producer.
 
     The public descriptor exposes only the typed argv / pipeline forms:
     [executable]/[argv] for a single process and [pipeline] for
@@ -101,31 +100,6 @@ let tool_execute_cwd_field =
         , `String
             "Optional working directory for the command. Must stay within the keeper \
              sandbox or an explicit allowed path." )
-      ] )
-;;
-
-let tool_execute_timeout_sec_field =
-  (* Issue #18472: the LLM emits the field as a JSON string (["30"])
-     about 60x/day, which the Anthropic SDK schema validator then rejects
-     under a strict ["type": "number"], routing the call through
-     [correction_pipeline] for a silent string-to-number coerce
-     ([oas:agent_tools] events ["fixed 1 field(s) fields=timeout_sec
-     stages=coercion"] on the [Execute] tool, 60/141 = 43% of the
-     5/29 correction load). The downstream handler
-     ([Keeper_tool_execute_timeout.clamp_shell_timeout]) reads the field
-     via [Safe_ops.json_float] which already coerces both shapes, so the
-     coercion is a wire-format quirk, not a semantic one. Widening the
-     advertised JSON Schema to accept either shape lets the LLM's typical
-     string representation pass validation directly. *)
-  ( "timeout_sec"
-  , `Assoc
-      [ ( "type"
-        , `List [ `String "number"; `String "string" ] )
-      ; ( "description"
-        , `String
-            "Timeout seconds for foreground typed execution (default: 30, max: \
-             180). Numeric strings (e.g. \"30\") are accepted and coerced; \
-             prefer the bare number form." )
       ] )
 ;;
 
@@ -241,7 +215,20 @@ let tool_execute_schema : Masc_domain.tool_schema =
     ; tool_execute_pipeline_field
     ; tool_execute_env_field
     ; tool_execute_cwd_field
-    ; tool_execute_timeout_sec_field
+    ; ( (* Issue #18472: the LLM often emits ["timeout_sec"] as a JSON
+           string, while the downstream handler already coerces number/string
+           shapes. Keep the schema tolerant without exposing a separately
+           test-pinned binding for this one field. *)
+        "timeout_sec"
+      , `Assoc
+          [ ( "type"
+            , `List [ `String "number"; `String "string" ] )
+          ; ( "description"
+            , `String
+                "Timeout seconds for foreground typed execution (default: 30, max: \
+                 180). Numeric strings (e.g. \"30\") are accepted and coerced; \
+                 prefer the bare number form." )
+          ] )
     ; tool_execute_stdin_field
     ; tool_execute_stdout_field
     ; tool_execute_stderr_field
@@ -280,8 +267,4 @@ let tool_execute_schema : Masc_domain.tool_schema =
               ] )
         ]
   }
-;;
-
-let typed_execute_tools : Masc_domain.tool_schema list =
-  [ tool_execute_schema ]
 ;;

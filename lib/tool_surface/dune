@@ -19,7 +19,6 @@
   tool_shard_types_enum_mirrors
   tool_shard_types_schemas_base
   tool_shard_types_schemas_board
-  tool_shard_types_schemas_execute
   tool_shard_types_schemas_filesystem
   tool_shard_types_schemas_library
   tool_shard_types_schemas_search_files

@@ -39,7 +39,7 @@ include Tool_shard_types
 (* search_files_tools schema list moved to Tool_shard_types. *)
 
 let unsharded_default_tools : Masc_domain.tool_schema list =
-  typed_execute_tools
+  [ Tool_execute_schema.tool_execute_schema ]
 ;;
 
 (* voice_tools, library_tools, taskboard_tools moved to Tool_shard_types. *)

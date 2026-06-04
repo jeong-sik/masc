@@ -25,7 +25,7 @@ module Float = Stdlib.Float
     This forces the reviewer to evaluate code structurally rather than
     relying on domain context that might mask bugs.
 
-    Uses the shared named-runtime review runner. *)
+    Uses an injected review runner supplied at the keeper boundary. *)
 
 open Printf
 

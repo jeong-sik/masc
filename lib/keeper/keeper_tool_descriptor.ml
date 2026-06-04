@@ -184,19 +184,7 @@ let object_schema ?(required = []) properties =
     ]
 ;;
 
-let required_tool_schema name schemas =
-  match
-    List.find_opt
-      (fun (schema : Masc_domain.tool_schema) -> String.equal schema.name name)
-      schemas
-  with
-  | Some schema -> schema
-  | None -> invalid_arg ("missing tool schema: " ^ name)
-;;
-
-let execute_schema =
-  (required_tool_schema "tool_execute" Tool_shard_types.typed_execute_tools).input_schema
-;;
+let execute_schema = Tool_execute_schema.tool_execute_schema.input_schema
 
 let read_file_schema =
   object_schema

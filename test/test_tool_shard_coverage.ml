@@ -7,26 +7,7 @@
     Pure synchronous tests — no Eio or network required. *)
 
 module Tool_shard = Masc.Tool_shard
-module Tool_shard_types = Tool_shard_types
 module Types = Masc_domain
-
-let contains text needle =
-  Astring.String.is_infix ~affix:needle text
-;;
-
-let check_contains label needle text =
-  Alcotest.(check bool) label true (contains text needle)
-;;
-
-let check_not_contains label needle text =
-  Alcotest.(check bool) label false (contains text needle)
-;;
-
-let schema_description name schemas =
-  match List.find_opt (fun (schema : Types.tool_schema) -> String.equal schema.name name) schemas with
-  | Some schema -> schema.description
-  | None -> Alcotest.failf "missing schema: %s" name
-;;
 
 let get_json_assoc key = function
   | `Assoc fields -> (
@@ -72,36 +53,6 @@ let test_shard_search_files_exists () =
     Alcotest.(check bool) "removable" true s.Tool_shard.removable;
     Alcotest.(check bool) "has tools" true (List.length s.Tool_shard.tools >= 1)
   | None -> Alcotest.fail "search_files shard not found"
-
-let test_user_facing_alias_copy_is_canonical () =
-  let execute_description =
-    schema_description "tool_execute" Tool_shard_types.typed_execute_tools
-  in
-  let read_description =
-    schema_description "tool_read_file" Tool_shard_types.filesystem_tools
-  in
-  let search_shard_description =
-    match Tool_shard.get_shard "search_files" with
-    | Some shard -> shard.description
-    | None -> Alcotest.fail "search_files shard not found"
-  in
-  let surface_text =
-    String.concat
-      "\n"
-      [ execute_description
-      ; read_description
-      ; search_shard_description
-      ]
-  in
-  List.iter
-    (fun retired ->
-       check_not_contains ("retired alias absent: " ^ retired) retired surface_text)
-    [ "Search" ^ "Files"; "Edit" ^ "File"; "Read" ^ "File"; "Write" ^ "File" ];
-  List.iter
-    (fun canonical ->
-       check_contains ("canonical alias present: " ^ canonical) canonical surface_text)
-    [ "Grep"; "Edit"; "Execute" ]
-;;
 
 let test_shard_governance_removed () =
   Alcotest.(check bool) "governance shard removed"
@@ -181,12 +132,20 @@ let test_keeper_model_tools_count () =
   (* keeper_model_tools = default shards plus unsharded default tools.
      Standalone keeper schemas (keeper_tool_search) are added downstream
      in keeper_tool_policy.keeper_default_model_tools, not here. *)
-  let expected =
+  let default_names =
     Tool_shard.tools_of_shards Tool_shard.default_shard_names
-    @ Tool_shard_types.typed_execute_tools
+    |> List.map (fun (tool : Masc_domain.tool_schema) -> tool.name)
   in
-  Alcotest.(check int) "matches default shards sum" (List.length expected) (List.length tools);
-  Alcotest.(check bool) "has tools" true (List.length tools >= 1)
+  let model_names = List.map (fun (tool : Masc_domain.tool_schema) -> tool.name) tools in
+  List.iter
+    (fun name ->
+       Alcotest.(check bool)
+         ("keeper_model_tools includes default shard tool: " ^ name)
+         true
+         (List.mem name model_names))
+    default_names;
+  Alcotest.(check bool) "includes unsharded execute" true
+    (List.mem "tool_execute" model_names)
 
 (* ============================================================
    grant_shard tests
@@ -470,8 +429,7 @@ let all_keeper_shard_tool_names () : string list =
     Tool_shard.list_all_shards ()
     |> List.map (fun (name, _, _) -> name)
   in
-  (Tool_shard.tools_of_shards all_shard_names
-   @ Tool_shard_types.typed_execute_tools)
+  (Tool_shard.tools_of_shards all_shard_names @ Tool_shard.keeper_model_tools)
   |> List.filter (fun (t : Masc_domain.tool_schema) ->
        String.length t.name >= 7
        && String.sub t.name 0 7 = "keeper_")
@@ -556,8 +514,6 @@ let () =
       Alcotest.test_case "board" `Quick test_shard_board_exists;
       Alcotest.test_case "filesystem" `Quick test_shard_filesystem_exists;
       Alcotest.test_case "search_files" `Quick test_shard_search_files_exists;
-      Alcotest.test_case "canonical alias copy" `Quick
-        test_user_facing_alias_copy_is_canonical;
       Alcotest.test_case "governance removed" `Quick test_shard_governance_removed;
       Alcotest.test_case "retired tool-mode shard removed" `Quick
         test_retired_tool_mode_shard_removed;

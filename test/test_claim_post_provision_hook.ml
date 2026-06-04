@@ -11,6 +11,8 @@ open Alcotest
 open Masc
 module CH = Workspace_hooks
 
+let () = Workspace_prometheus_hooks.install ()
+
 let failure_metric_value ~site ~agent_name =
   Prometheus.metric_value_or_zero
     Prometheus.metric_workspace_claim_post_provision_failures

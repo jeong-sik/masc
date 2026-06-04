@@ -67,6 +67,7 @@ DEFAULT_LEAVES: tuple[str, ...] = (
     "masc.runtime_provider_labels",
     "masc.runtime_model",
     "masc.model_inference_metrics",
+    "masc.keeper_attempt_liveness",
     # PR-S3 (LANE 2): Tool dispatch substrate. The gate enforces that the
     # Tool layer cannot pull keeper/runtime/telemetry back in via the mega-lib.
     "masc.masc_tool_dispatch",

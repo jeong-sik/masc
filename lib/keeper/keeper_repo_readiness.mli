@@ -86,10 +86,11 @@ val ensure_ready :
 
 (** [ensure_worktree_ready ~config ~meta ~repo_name ~task_name ~worktree_path ()]
     ensures a git worktree exists at [worktree_path] inside the sandbox clone.
-    If the worktree is missing, first ensures the parent repo is ready (reclone
-    if needed), then creates the worktree via [git worktree add].  Returns
-    [Ok ()] when the worktree is a valid git checkout, or [Error msg] if
-    creation failed. *)
+    If the worktree is missing, first ensures the parent repo is a valid git
+    clone (reclone if needed), then creates the worktree from the fetched
+    default origin branch. Parent clone dirtiness is preserved and does not block
+    creating a separate task worktree. Returns [Ok ()] when the worktree is a
+    valid git checkout, or [Error msg] if creation failed. *)
 val ensure_worktree_ready :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->

@@ -74,11 +74,7 @@ let validate_paths ?keeper_id ?base_path ~workdir ir =
   Exec_policy.validate_shell_ir_paths ?keeper_id ?base_path ~workdir ir
 ;;
 
-let tool_execute_command_context
-      ?(caller = Shell_gate.Keeper_tool_execute_shell_ir)
-      ?(allow_pipes = true)
-      ~allowed_commands
-      command
+let tool_execute_command_context ?(allow_pipes = true) ~allowed_commands command
   =
   match Exec_policy.parse_string_to_ir ~mode:Tool_execute command with
   | Error reason ->
@@ -89,7 +85,6 @@ let tool_execute_command_context
   | Ok ir -> (
     match
       Exec_policy.command_context_tool_execute_with_allowlist
-        ~caller
         ~allow_pipes
         ~allowed_commands
         ir
@@ -107,7 +102,6 @@ let tool_execute_command_context
 let dispatch_classified
       ?timeout_sec
       ?before_path_validation
-      ?(caller = Shell_gate.Keeper_tool_execute_shell_ir)
       ?(allow_pipes = true)
       ?(redirect_allowed = true)
       ~allowed_commands
@@ -120,7 +114,6 @@ let dispatch_classified
   let ir = envelope.Masc_exec.Shell_ir_risk.ir in
   let gate_verdict =
     Shell_gate.gate_typed
-      ~caller
       ~ir
       ~allowlist:{ allowed_commands; allow_pipes; redirect_allowed }
       ~path_policy:Shell_gate.forbid_masc_internal_state_paths
@@ -149,7 +142,6 @@ let dispatch_classified
 let dispatch
       ?timeout_sec
       ?before_path_validation
-      ?caller
       ?allow_pipes
       ?redirect_allowed
       ~allowed_commands
@@ -162,7 +154,6 @@ let dispatch
   dispatch_classified
     ?timeout_sec
     ?before_path_validation
-    ?caller
     ?allow_pipes
     ?redirect_allowed
     ~allowed_commands

@@ -56,7 +56,7 @@ tools = ["tool_execute"]
 [groups.filesystem]
 tools = ["tool_read_file"]
 
-[groups.filesystem_write]
+[groups.workspace_write]
 tools = ["tool_edit_file", "tool_write_file"]
 
 [groups.library]

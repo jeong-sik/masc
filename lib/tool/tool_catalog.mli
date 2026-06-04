@@ -34,7 +34,6 @@ type metadata = {
   mcp_context_required : bool option;
   destructive : bool option;
   idempotent : bool option;
-  required_permission : Masc_domain.permission option;
   effect_domain : effect_domain option;
   requires_actor_binding : bool option;
 }

@@ -334,11 +334,6 @@ let schemas : tool_schema list =
 
 let tool_spec_read_only = [ "masc_runtime_verify"; "masc_runtime_ollama_probe" ]
 
-let tool_required_permission = function
-  | "masc_runtime_verify" | "masc_runtime_ollama_probe" ->
-      Some Masc_domain.CanReadState
-  | _ -> None
-
 let () =
   List.iter
     (fun (s : tool_schema) ->
@@ -351,6 +346,5 @@ let () =
            ~handler_binding:Tag_dispatch
            ~is_read_only:(List.mem s.name tool_spec_read_only)
            ~is_idempotent:(List.mem s.name tool_spec_read_only)
-           ?required_permission:(tool_required_permission s.name)
            ()))
     schemas

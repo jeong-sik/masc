@@ -39,23 +39,6 @@ let resolved_tool_lane_label ~effective_tools ~runtime_mcp_policy =
   | false, false, Some _ -> "runtime_mcp_connect_only"
   | false, false, None -> "none"
 
-type empty_candidate_classification =
-  | Tool_capability_empty
-  | Provider_unavailable
-
-let classify_empty_candidates ~require_tool_choice_support ~require_tool_support
-    ~original_candidate_count ~tool_filtered_candidate_count =
-  if
-    (require_tool_choice_support || require_tool_support)
-    && original_candidate_count > 0
-    && tool_filtered_candidate_count = 0
-  then Tool_capability_empty
-  else Provider_unavailable
-
-let empty_candidate_classification_code = function
-  | Tool_capability_empty -> "tool_capability_empty"
-  | Provider_unavailable -> "provider_unavailable"
-
 let fail_open_health_filtered_candidates
     ~(tool_filtered_candidates : 'a list)
     ~(health_filtered_candidates : 'a list)

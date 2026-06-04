@@ -329,51 +329,6 @@ let build_oas_mcp_tools ~sw ~auth_token ~session_id ~worker_name =
                }))
     listed_schemas
 
-let local_worker_failure_class_of_error_kind = function
-  | Worker_dev_tools.Path_blocked -> Tool_result.Policy_rejection
-  | Worker_dev_tools.Command_blocked -> Tool_result.Workflow_rejection
-  | Worker_dev_tools.File_read_error
-  | Worker_dev_tools.File_write_error
-  | Worker_dev_tools.Shell_error ->
-    Tool_result.Runtime_failure
-
-let build_local_shell_tools ~workspace_config ~worker_name ~workdir =
-  match Process_eio.get_proc_mgr (), Process_eio.get_clock () with
-  | Ok proc_mgr, Ok clock -> (
-      (* #10358: forward error_kind / error_message from Worker_dev_tools
-         observers to the Telemetry_eio.track_tool_called row so the
-         ledger no longer carries blank-error failures from the local
-         worker tool path. *)
-      let on_exec ~tool_name ~success ~duration_ms
-          ?error_kind ?error_message () =
-        (match workspace_config, Fs_compat.get_fs_opt () with
-        | Some config, Some fs -> (
-            try
-              let kind =
-                Option.map
-                  (fun kind ->
-                    kind
-                    |> Worker_dev_tools.tool_exec_error_kind_to_string
-                    |> Telemetry_eio.error_kind_of_string)
-                  error_kind
-              in
-              let failure_class =
-                Option.map local_worker_failure_class_of_error_kind error_kind
-              in
-              Telemetry_eio.track_tool_called ~fs config ~tool_name ~success
-                ~duration_ms ~agent_id:worker_name
-                ?failure_class ?error_kind:kind ?error_message ()
-            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-              Log.LocalWorker.warn "telemetry error for %s/%s: %s"
-                worker_name tool_name (Printexc.to_string exn))
-        | Some _, None | None, Some _ | None, None -> ());
-        ()
-      in
-      Ok
-        (Worker_dev_tools.make_tools ~proc_mgr ~clock ~workdir
-           ~on_exec ()))
-  | Error e, _ | _, Error e -> Error e
-
 (** Convert a model label to an OAS Provider.config.
     Returns Error when the label cannot be parsed. *)
 let oas_provider_of_label (label : string) :

@@ -256,17 +256,6 @@ let dispatch ctx ~name ~args : Tool_result.result option =
 (* ================================================================ *)
 
 let tool_spec_read_only = [ "masc_plan_get" ]
-let tool_required_permission = function
-  | "masc_plan_get" | "masc_plan_get_task" ->
-      Some Masc_domain.CanReadState
-  | "masc_plan_init"
-  | "masc_plan_update"
-  | "masc_plan_set_task"
-  | "masc_plan_clear_task"
-  | "masc_note_add"
-  | "masc_deliver" ->
-      Some Masc_domain.CanBroadcast
-  | _ -> None
 
 let () =
   let is_plan = function
@@ -292,6 +281,5 @@ let () =
              ~handler_binding:Tag_dispatch
              ~is_read_only:(List.mem s.name tool_spec_read_only)
              ~is_idempotent:(List.mem s.name tool_spec_read_only)
-             ?required_permission:(tool_required_permission s.name)
              ()))
     Tool_schemas_misc.schemas

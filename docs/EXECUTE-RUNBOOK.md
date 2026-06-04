@@ -6,7 +6,7 @@ code_refs:
   - lib/exec/exec_buffer.ml
   - lib/exec_core.ml
   - lib/exec/command_gate/shell_command_gate.ml
-  - lib/worker_dev_tools.ml
+  - lib/exec_policy/exec_policy.ml
   - lib/keeper/keeper_tool_command_runtime.ml
 ---
 

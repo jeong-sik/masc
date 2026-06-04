@@ -7,7 +7,7 @@
     carries an explicit Good:/Bad: example; this test locks that in. *)
 
 module Shell = Masc.Keeper_tool_command_runtime
-module Worker = Masc.Worker_dev_tools
+module Policy = Exec_policy
 
 let contains needle haystack =
   let nlen = String.length needle in
@@ -55,17 +55,17 @@ let test_block_reason_diagnoses_use_public_tool_suggestions () =
     "direct dune suggests public Execute"
     (Some "Execute")
     (tool_suggestion_of_diagnosis
-       (Shell.diagnosis_of_block_reason Worker.Direct_dune_invocation));
+       (Shell.diagnosis_of_block_reason Policy.Direct_dune_invocation));
   Alcotest.(check (option string))
     "unsafe redirect suggests public Write"
     (Some "Write")
     (tool_suggestion_of_diagnosis
-       (Shell.diagnosis_of_block_reason Worker.Unsafe_redirect));
+       (Shell.diagnosis_of_block_reason Policy.Unsafe_redirect));
   Alcotest.(check (option string))
     "unknown command does not suggest internal shell"
     None
     (tool_suggestion_of_diagnosis
-       (Shell.diagnosis_of_block_reason (Worker.Command_not_allowed "foo")))
+       (Shell.diagnosis_of_block_reason (Policy.Command_not_allowed "foo")))
 
 let () =
   Alcotest.run "keeper_readonly_hints" [

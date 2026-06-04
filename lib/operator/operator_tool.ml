@@ -269,6 +269,7 @@ let judgment_write_schema =
 
 let dispatch (ctx : 'a context) ~name ~args : Tool_result.result option =
   let start = Time_compat.now () in
+  Log.Misc.debug "operator_dispatch: tool=%s agent=%s" name ctx.agent_name;
   let control_ctx : 'a Operator_control.context =
     {
       config = ctx.config;
@@ -318,7 +319,9 @@ let dispatch (ctx : 'a context) ~name ~args : Tool_result.result option =
       Some
         (result_of_json ~tool_name:name ~start_time:start
            (Operator_control.judgment_write_json control_ctx args))
-  | _ -> None
+  | _ ->
+      Log.Misc.warn "operator_dispatch_unknown: tool=%s agent=%s" name ctx.agent_name;
+      None
 
 let schemas : tool_schema list =
   [
@@ -351,14 +354,6 @@ let tool_spec_read_only = [ "masc_operator_snapshot"; "masc_operator_digest"; "m
 let tool_spec_hidden = [ "masc_operator_judgment_write"; "masc_surface_audit" ]
 let tool_spec_hidden_destructive = [ "masc_operator_action" ]
 
-let tool_required_permission = function
-  | "masc_operator_snapshot" | "masc_operator_digest" | "masc_surface_audit" ->
-      Some Masc_domain.CanReadState
-  | "masc_operator_action" | "masc_operator_confirm"
-  | "masc_operator_judgment_write" ->
-      Some Masc_domain.CanBroadcast
-  | _ -> None
-
 let () =
   List.iter
     (fun (s : tool_schema) ->
@@ -378,7 +373,6 @@ let () =
            ~is_destructive
            ~allow_direct_call_when_hidden:is_hidden
            ?reason:existing.reason
-           ?required_permission:(tool_required_permission s.name)
            ()))
     schemas
 

@@ -43,13 +43,56 @@ let is_destructive e = e.risk = Destructive_protected
 
 (* --- Write sub-classification --------------------------------------- *)
 
+let is_short_option arg = String.length arg > 1 && arg.[0] = '-' && arg.[1] <> '-'
+let has_short_flag flag arg = is_short_option arg && String.contains arg flag
+
+let is_eq_flag flag arg =
+  String.equal arg flag || String.starts_with ~prefix:(flag ^ "=") arg
+;;
+
+let git_branch_has_flag flags args =
+  List.exists
+    (fun arg ->
+       List.exists
+         (fun flag ->
+            if String.length flag = 2 && flag.[0] = '-'
+            then has_short_flag flag.[1] arg
+            else is_eq_flag flag arg)
+         flags)
+    args
+;;
+
+let git_branch_args_are_read_only args =
+  let mutating_flags =
+    [ "-d"; "-D"; "--delete"; "-m"; "-M"; "--move"; "-c"; "-C"; "--copy"
+    ; "-f"; "--force"; "-u"; "--set-upstream-to"; "--unset-upstream"
+    ; "--track"; "--no-track"; "--edit-description"; "--create-reflog"
+    ]
+  in
+  let read_flags =
+    [ "-l"; "--list"; "-a"; "--all"; "-r"; "--remotes"; "--show-current"
+    ; "-v"; "--contains"; "--no-contains"; "--merged"; "--no-merged"
+    ; "--points-at"; "--format"; "--sort"; "--color"; "--no-color"; "--column"
+    ; "--no-column"; "--ignore-case"; "--abbrev"; "--no-abbrev"
+    ]
+  in
+  match args with
+  | [] -> true
+  | _ when git_branch_has_flag mutating_flags args -> false
+  | _ -> git_branch_has_flag read_flags args
+;;
+
 let classify_write_detail (words : string list) : risk_class option =
   match words with
-  | "git" :: sub :: _ ->
+  | "git" :: sub :: rest ->
     (match sub with
      | "push" | "merge" | "rebase" | "commit" -> Some R1_Reversible_mutation
      | "reset" -> Some R2_Irreversible
-     | "checkout" | "branch" | "tag" | "stash" | "clone" | "init" ->
+     | "branch" ->
+       if git_branch_args_are_read_only rest
+       then None
+       else Some R1_Reversible_mutation
+     | "checkout" | "tag" | "stash" | "clone" | "init" ->
        Some R1_Reversible_mutation
      | _ -> None)
   | ("npm" | "pnpm" | "yarn") :: _ -> Some R1_Reversible_mutation
@@ -283,11 +326,12 @@ let flat_stage_words (ir : Shell_ir.t) : string list =
 
 let is_write_operation (words : string list) =
   match words with
+  | "git" :: "branch" :: rest -> not (git_branch_args_are_read_only rest)
   | "git" :: sub :: _ ->
     List.mem
       sub
-      [ "push"; "commit"; "merge"; "rebase"; "reset"; "checkout"; "branch";
-        "tag"; "stash"; "clone"; "init" ]
+      [ "push"; "commit"; "merge"; "rebase"; "reset"; "checkout"; "tag";
+        "stash"; "clone"; "init" ]
   | "dune" :: sub :: _ -> List.mem sub [ "clean"; "promote" ]
   | "make" :: sub :: _ -> List.mem sub [ "clean"; "deploy"; "install"; "publish" ]
   | ("npm" | "pnpm" | "yarn") :: sub :: _ ->
@@ -318,9 +362,6 @@ let is_write_operation (words : string list) =
       ]
   | [] -> false
 ;;
-
-let is_short_option arg = String.length arg > 1 && arg.[0] = '-' && arg.[1] <> '-'
-let has_short_flag flag arg = is_short_option arg && String.contains arg flag
 
 let is_protected_branch_target arg =
   let target = String.lowercase_ascii arg in

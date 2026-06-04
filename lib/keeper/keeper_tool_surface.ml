@@ -729,18 +729,6 @@ let tool_spec_read_only =
   [ "masc_persona_list"; "masc_persona_schema"; "masc_keeper_list";
     "masc_keeper_status"; "masc_keeper_persona_audit" ]
 
-let tool_required_permission = function
-  | "masc_persona_list" | "masc_persona_schema" | "masc_keeper_list"
-  | "masc_keeper_status" | "masc_keeper_persona_audit" ->
-      Some Masc_domain.CanReadState
-  | "masc_persona_save" | "masc_keeper_create_from_persona" | "masc_keeper_up"
-  | "masc_keeper_msg" | "masc_keeper_msg_result"
-  | "masc_keeper_repair"
-  | "masc_keeper_down" | "masc_keeper_reset"
-  | "masc_keeper_compact" | "masc_keeper_clear" ->
-      Some Masc_domain.CanBroadcast
-  | _ -> None
-
 let () =
   List.iter
     (fun (s : Masc_domain.tool_schema) ->
@@ -754,7 +742,6 @@ let () =
            ~is_read_only:(List.mem s.name tool_spec_read_only)
            ~is_idempotent:(List.mem s.name tool_spec_read_only)
            ~is_destructive:(String.equal s.name "masc_keeper_clear")
-           ?required_permission:(tool_required_permission s.name)
            ()))
     schemas
 

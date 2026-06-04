@@ -133,7 +133,7 @@ Representative code paths:
 - [`exec_semantic.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/exec/exec_semantic.ml)
 - [`exec_buffer.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/exec/exec_buffer.ml)
 - [`cdal_judge.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/cdal_judge.ml)
-- [`worker_dev_tools.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/worker_dev_tools.ml) — Shell_command_gate caller integration
+- [`exec_policy.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/exec_policy/exec_policy.ml) — Shell_command_gate policy integration
 
 Because every flag here is `request_dynamic` on the Execute path
 (read at tool-invocation time), operators can flip a flag without a

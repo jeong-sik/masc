@@ -46,7 +46,6 @@ type t = {
   reason : string option;
   allow_direct_call_when_hidden : bool;
   title : string option;
-  required_permission : Masc_domain.permission option;
   effect_domain : Tool_catalog.effect_domain option;
   requires_actor_binding : bool option;
 }
@@ -70,7 +69,6 @@ val create :
   ?reason:string ->
   ?allow_direct_call_when_hidden:bool ->
   ?title:string ->
-  ?required_permission:Masc_domain.permission ->
   ?effect_domain:Tool_catalog.effect_domain ->
   ?requires_actor_binding:bool ->
   unit -> t

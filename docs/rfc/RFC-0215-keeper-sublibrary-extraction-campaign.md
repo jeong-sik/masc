@@ -79,8 +79,8 @@ Lockfree_atomic Masc_context_injector Masc_eio_env Masc_event_bus
 Masc_oas_bridge Memory_hooks Memory_oas_bridge Observability_redact
 Persona_dispatch_ref Progress Prometheus Prometheus_hotpath
 Runtime_observation Runtime_observation_query_operation Runtime_params
-Sandbox_error Server_startup_state Shutdown Sse Task Telemetry_coverage_gap
-Timeout_policy Token_count Tool_agent Tool_agent_timeline
+Server_startup_state Shutdown Sse Task Telemetry_coverage_gap
+Timeout_policy Tool_agent Tool_agent_timeline
 Tool_assignment_telemetry Tool_board Tool_board_dispatch Tool_board_registry
 Tool_bridge Tool_control Tool_input_validation Tool_library
 Tool_local_runtime Tool_local_runtime_core Tool_misc Tool_misc_web_fetch
@@ -137,16 +137,14 @@ which clusters are attempted and the gate each must pass.
 
 ## 4. Decoupling pre-work — and what is NOT pre-work
 
-### 4.1 Residual Phase 2.A rename (3 files)
+### 4.1 Residual Phase 2.A rename (3 files) — implemented
 
-Three files under `lib/keeper/` still lack the `keeper_` prefix:
-`token_count.ml`, `sandbox_error.ml`, `provider_error_class.ml`. Under
-`(wrapped false)` these produce top-level modules `Token_count`,
-`Sandbox_error`, `Provider_error_class` that can collide with flat-ns peers
-(`Sandbox_error` and `Token_count` already appear in the §1.2 forward-ref list).
-A one-line-each rename to `keeper_*` (with `s/\bToken_count\b/Keeper_token_count/`
-caller fixups) clears the last collision risk before any `dune` stanza is
-written. This is the only RFC-0086 prerequisite still outstanding.
+Implemented by this PR (2026-06-04): the three residual non-prefixed files
+under `lib/keeper/` were renamed to `keeper_token_count.ml`,
+`keeper_sandbox_error.ml`, and `keeper_provider_error_class.ml`. Under
+`(wrapped false)`, they now produce `Keeper_token_count`,
+`Keeper_sandbox_error`, and `Keeper_provider_error_class`, avoiding collision
+with flat-ns peers before any keeper `dune` stanza is written.
 
 ### 4.2 The tool-enum decouple PRs are NOT keeper-lib prep
 
@@ -271,6 +269,8 @@ is more decoupling, not a catch-all or a lint suppression.
 
 ## 8. Status
 
-**Draft / Proposed.** No code changes under this RFC. The first concrete action
-this RFC authorizes is the §4.1 residual rename PR (3 files) followed by the
-§5.1 credential decoupling PR — each its own review, each gated by G1–G5.
+**Draft / Proposed.** This PR performs the §4.1 residual rename, clearing the
+final `keeper_`-prefix prerequisite (3 files). After it lands, the next
+concrete action this RFC authorizes is the §5.1 credential decoupling PR,
+followed by a separate credential extraction PR when G1–G5 prove the cluster is
+a leaf.

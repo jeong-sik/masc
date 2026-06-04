@@ -269,6 +269,7 @@ let judgment_write_schema =
 
 let dispatch (ctx : 'a context) ~name ~args : Tool_result.result option =
   let start = Time_compat.now () in
+  Log.Misc.debug "operator_dispatch: tool=%s agent=%s" name ctx.agent_name;
   let control_ctx : 'a Operator_control.context =
     {
       config = ctx.config;
@@ -318,7 +319,9 @@ let dispatch (ctx : 'a context) ~name ~args : Tool_result.result option =
       Some
         (result_of_json ~tool_name:name ~start_time:start
            (Operator_control.judgment_write_json control_ctx args))
-  | _ -> None
+  | _ ->
+      Log.Misc.warn "operator_dispatch_unknown: tool=%s agent=%s" name ctx.agent_name;
+      None
 
 let schemas : tool_schema list =
   [

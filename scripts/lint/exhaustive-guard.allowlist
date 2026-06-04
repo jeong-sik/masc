@@ -333,8 +333,8 @@ lib/governance_pipeline_risk.ml:316
 lib/governance_pipeline.ml:263
 lib/graphql_api.ml:699
 lib/graphql_api.ml:709
-lib/grpc/masc_grpc_service.ml:121
-lib/grpc/masc_grpc_service.ml:227
+lib/server/masc_grpc_service.ml:121
+lib/server/masc_grpc_service.ml:227
 lib/http_server_eio.ml:114
 lib/http_server_eio.ml:298
 lib/http_server_eio.ml:725

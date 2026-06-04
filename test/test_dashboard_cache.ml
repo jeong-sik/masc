@@ -598,6 +598,32 @@ let test_runtime_git_cache_returns_stale_and_refreshes ~clock () =
           Alcotest.(check int) "single background probe" 1
             (Atomic.get probes)))
 
+let test_runtime_git_cache_stale_worker_domain_does_not_touch_root_switch ~sw () =
+  let module Runtime = Server_dashboard_http_runtime_info in
+  Runtime.clear_git_rev_parse_short_cache_for_tests ();
+  with_temp_dir "runtime-git-cache-domain" (fun dir ->
+      Runtime.seed_git_rev_parse_short_cache_for_tests dir (Some "old")
+        ~refreshed_at:(Time_compat.now () -. 120.0);
+      let probes = Atomic.make 0 in
+      Runtime.set_git_rev_parse_short_probe_hook_for_tests (fun _ ->
+          Atomic.incr probes;
+          Some "new");
+      Fun.protect
+        ~finally:(fun () ->
+          Runtime.clear_git_rev_parse_short_probe_hook_for_tests ();
+          Runtime.clear_git_rev_parse_short_cache_for_tests ())
+        (fun () ->
+          Eio_context.set_switch sw;
+          let worker =
+            Domain.spawn (fun () -> Runtime.git_rev_parse_short dir)
+          in
+          Alcotest.(check (option string))
+            "worker-domain stale hit returns cached value"
+            (Some "old") (Domain.join worker);
+          Alcotest.(check int)
+            "worker-domain refresh is not forked through root switch"
+            0 (Atomic.get probes)))
+
 let test_runtime_git_upstream_cache_returns_stale_and_refreshes ~clock () =
   let module Runtime = Server_dashboard_http_runtime_info in
   let old_status =
@@ -709,6 +735,9 @@ let () =
           test_case "stampede protection" `Quick test_stampede;
           test_case "runtime git cache stale-first refresh" `Quick
             (test_runtime_git_cache_returns_stale_and_refreshes ~clock);
+          test_case "runtime git cache worker-domain stale hit" `Quick
+            (test_runtime_git_cache_stale_worker_domain_does_not_touch_root_switch
+               ~sw);
           test_case "runtime git upstream cache stale-first refresh" `Quick
             (test_runtime_git_upstream_cache_returns_stale_and_refreshes ~clock);
           test_case "runtime git probe disables optional locks" `Quick

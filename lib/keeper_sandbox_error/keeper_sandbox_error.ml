@@ -1,5 +1,5 @@
 (* Typed Docker sandbox daemon errors — RFC-0070 §2 G2.
-   See sandbox_error.mli for context and the constructor contract. *)
+   See keeper_sandbox_error.mli for context and the constructor contract. *)
 
 type t =
   | Daemon_unreachable of { message : string }

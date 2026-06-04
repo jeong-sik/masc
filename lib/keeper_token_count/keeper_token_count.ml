@@ -1,4 +1,4 @@
-(** See [token_count.mli] for the rationale (RFC-0149 §3.2). *)
+(** See [keeper_token_count.mli] for the rationale (RFC-0149 §3.2). *)
 
 type pre
 type post

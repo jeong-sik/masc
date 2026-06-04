@@ -1,5 +1,5 @@
 (* RFC-0142 §Phase 2 — PR-A.  SSOT for LLM-provider runtime error
-   classification.  See provider_error_class.mli for the contract.
+   classification.  See keeper_provider_error_class.mli for the contract.
 
    This module is intentionally dependency-free (no transitive [String_util],
    no Eio, no Unix) so the boundary type can land before any adapter or

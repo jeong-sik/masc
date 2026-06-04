@@ -38,9 +38,9 @@ let test_unknown_returns_tried_list () =
   match TR.resolve "__nonexistent_tool_xyz" with
   | TR.Unknown { name; tried } ->
       check string "name preserved" "__nonexistent_tool_xyz" name;
-      (* 9 base sources after the per-actor Surface sources were removed in the
-         surface-cut refactor (was >= 13 with the 5 surface admit sources). *)
-      check bool "at least 9 tried sources" true (List.length tried >= 9)
+      (* 8 base sources after the dead public MCP replacement source and the
+         per-actor Surface sources were removed. *)
+      check bool "at least 8 tried sources" true (List.length tried >= 8)
   | _ ->
       fail "__nonexistent_tool_xyz should be Unknown"
 
@@ -84,7 +84,7 @@ let test_tool_execute_resolves () =
       fail (Printf.sprintf "tool_execute should resolve, got Unknown (tried: %s)"
               (TR.string_of_tried tried))
 
-let test_alias_masc_to_internal () =
+let test_masc_board_post_resolves () =
   match TR.resolve "masc_board_post" with
   | TR.Resolved _ | TR.Alias_to _ -> ()
   | TR.Unknown { tried; _ } ->
@@ -302,7 +302,7 @@ let () =
         test_case "extend_turns resolves" `Quick test_extend_turns_resolved;
         test_case "tool_execute resolves" `Quick test_tool_execute_resolves;
         test_case "masc_keeper_* cluster resolves via descriptor registry (boot guard)" `Quick test_descriptor_registry_admits_masc_keeper_cluster;
-        test_case "masc_board_post resolves via alias" `Quick test_alias_masc_to_internal;
+        test_case "masc_board_post resolves" `Quick test_masc_board_post_resolves;
       ]
     ; "policy_validation", [
         test_case "known tools resolve" `Quick test_policy_validation_known_tools_resolve;

@@ -11,7 +11,6 @@ type tried_source =
   | Tool_name_variant           (** Tool_name.of_string *)
   | Public_descriptor           (** Keeper_tool_descriptor.find_public *)
   | Alias_internal              (** Keeper_tool_alias.is_known_internal *)
-  | Alias_masc_to_internal      (** Keeper_tool_alias.public_masc_to_internal *)
   | Registry_internal_candidate (** keeper_internal_candidate_tool_names *)
   | Registry_core_tools         (** effective_core_tools *)
   | Shard_schema                (** Tool_shard.all_keeper_tool_schemas *)
@@ -40,10 +39,6 @@ val all_admitting_sources : string -> tried_source list
 (** RFC-0084 §1.4 — Single-SSOT entry for runtime tool-name routing. *)
 
 type runtime_decision_outcome =
-  | Mcp_mapped of
-      { stripped : string
-      ; internal : string
-      }
   | Route_hit of { internal : string }
   | Already_internal of { canonical : string }
   | Miss
@@ -53,8 +48,6 @@ type runtime_decision_outcome =
     low-dependency SSOT for runtime tool-name routing.
 
     Result variants:
-    - [Mcp_mapped { stripped; internal }] — name was an MCP-prefixed
-      public alias resolved to an internal canonical name.
     - [Route_hit { internal }] — alias-table hit; internal name returned.
     - [Already_internal { canonical }] — name is already in internal form.
     - [Miss] — name does not resolve through any runtime route. *)

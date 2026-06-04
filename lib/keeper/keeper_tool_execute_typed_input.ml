@@ -545,10 +545,9 @@ let executable_not_allowlisted_hint ~name ~mode =
      descriptor/registry-backed so Keeper does not own the concrete tool-name
      universe. *)
   let is_masc_structured_tool =
-    Keeper_tool_alias.is_known_internal name
-    || Option.is_some (Keeper_tool_alias.public_masc_to_internal name)
+    Option.is_some (Keeper_tool_descriptor_resolution.descriptor_for_tool_name name)
+    || Keeper_tool_alias.is_known_internal name
     || Option.is_some (Keeper_tool_descriptor.find_public name)
-    || Option.is_some (Tool_name.Masc.of_string name)
   in
   if is_masc_structured_tool
   then

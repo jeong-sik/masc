@@ -75,7 +75,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
         Social.
           {
             social_model = meta.social_model;
-            belief_summary = "not_recorded";
+            belief_summary = "";
             active_desire = None;
             current_intention = None;
             blocker = None;

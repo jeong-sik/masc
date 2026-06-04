@@ -131,6 +131,20 @@ let start_keeper_loops
   Progress.set_sse_callback Sse.broadcast;
   (* Wire stop_keeper hook so zombie GC can terminate keeper fibers *)
   Atomic.set Workspace_hooks.stop_keeper_fn Keeper_keepalive.stop_keepalive;
+  Tool_deep_review.set_review_runner
+    (fun ~runtime_id ~goal ~max_turns ~temperature ~max_tokens ~approval () ->
+       Masc_oas_bridge.run_with_caller
+         ~caller:Env_config_oas_bridge.Tool_deep_review
+         (fun () ->
+            Keeper_turn_driver.run_named
+              ~runtime_id
+              ~goal
+              ~max_turns
+              ~temperature
+              ~max_tokens
+              ~approval
+              ())
+       |> Result.map_error Agent_sdk.Error.to_string);
   (* Wire claim_post_provision hook: create worktrees at task claim time
      so docker-backed keepers find them when the LLM picks a worktree cwd.
      Only Docker keepers benefit; local keepers operate on the project root. *)

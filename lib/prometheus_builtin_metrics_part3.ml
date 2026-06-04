@@ -368,7 +368,7 @@ let register
      because the [inter_chunk_ms] input was non-finite or non-positive. Labels: \
      provider, model, reason (not_finite | non_positive)."
     `Counter;
-  (* Process-level resource gauges.  Sampled on every /metrics scrape via
+  (* Process-level resource gauges.  Sampled on every OTel export tick via
      [update_fd_gauges] so a monotonic ramp (fd leak) is visible in the
      time series before it crosses the OS limit and crashes the server.
      Evidence: 2026-04-16 production incident, 4029 CLOSE_WAIT sockets

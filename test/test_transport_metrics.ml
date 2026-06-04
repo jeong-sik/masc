@@ -43,37 +43,20 @@ let with_env name value_opt f =
    ============================================================ *)
 
 let test_init () =
-  let text = Prometheus.to_prometheus_text () in
+  let has_metric name =
+    Prometheus.snapshot ()
+    |> List.exists (fun (m : Prometheus.metric) -> String.equal m.name name)
+  in
   check bool "sse sessions metric registered" true
-    (try
-       let _ = Str.search_forward
-         (Str.regexp_string "masc_sse_sessions_total") text 0 in
-       true
-     with Not_found -> false);
+    (has_metric "masc_sse_sessions_total");
   check bool "grpc active streams metric registered" true
-    (try
-       let _ = Str.search_forward
-         (Str.regexp_string "masc_grpc_active_streams_total") text 0 in
-       true
-     with Not_found -> false);
+    (has_metric "masc_grpc_active_streams_total");
   check bool "agent heartbeat age metric registered" true
-    (try
-       let _ = Str.search_forward
-         (Str.regexp_string "masc_agent_heartbeat_age_seconds") text 0 in
-       true
-     with Not_found -> false);
+    (has_metric "masc_agent_heartbeat_age_seconds");
   check bool "http accept metric registered" true
-    (try
-       let _ = Str.search_forward
-         (Str.regexp_string "masc_http_accepts_total") text 0 in
-       true
-     with Not_found -> false);
+    (has_metric "masc_http_accepts_total");
   check bool "ws hello latency metric registered" true
-    (try
-       let _ = Str.search_forward
-         (Str.regexp_string "masc_ws_dashboard_hello_latency_seconds") text 0 in
-       true
-     with Not_found -> false)
+    (has_metric "masc_ws_dashboard_hello_latency_seconds")
 
 (* ============================================================
    SSE Metrics

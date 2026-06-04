@@ -33,7 +33,7 @@ let register
     "Whether the shared keeper FD-pressure breaker is active (1 active, 0 inactive)."
     `Gauge;
   (* RFC-0107 Phase D.4 — piaf connection pool metrics.  Snapshot
-     pushed by [update_pool_metrics_gauges] inside [to_prometheus_text]. *)
+     pushed by [update_pool_metrics_gauges] during OTel export. *)
   add
     metric_pool_idle_total
     "Idle (reusable) connections held by the piaf-backed HTTP pool. \

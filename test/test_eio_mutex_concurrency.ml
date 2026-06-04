@@ -92,10 +92,8 @@ let test_prometheus_concurrent () =
         ~labels:[("fiber", string_of_int i)] ()
     done
   ));
-  let text = Prom.to_prometheus_text () in
-  check bool "has metric name" true
-    (try ignore (Str.search_forward (Str.regexp_string "test_concurrent_metric") text 0); true
-     with Not_found -> false)
+  check (float 0.0001) "counter total" 1000.0
+    (Prom.metric_total "test_concurrent_metric")
 
 let test_prometheus_gauge_concurrent () =
   Eio.Fiber.all (List.init 5 (fun i -> fun () ->
@@ -105,10 +103,8 @@ let test_prometheus_gauge_concurrent () =
         (float_of_int j)
     done
   ));
-  let text = Prom.to_prometheus_text () in
-  check bool "has gauge name" true
-    (try ignore (Str.search_forward (Str.regexp_string "test_concurrent_gauge") text 0); true
-     with Not_found -> false)
+  check (float 0.0001) "gauge total" 250.0
+    (Prom.metric_total "test_concurrent_gauge")
 
 (** {1 Streamable HTTP Session Concurrency} *)
 

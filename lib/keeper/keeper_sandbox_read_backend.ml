@@ -21,34 +21,16 @@ let should_route_read ~(meta : keeper_meta) : bool =
 let strip_trailing_slashes = Env_config_core.strip_trailing_slashes
 
 let host_playground_root ~config ~(meta : keeper_meta) =
-  Keeper_sandbox.host_root_abs_of_meta ~config meta
-  |> Keeper_alerting_path.normalize_path_for_check
-  |> strip_trailing_slashes
+  (Keeper_sandbox.docker_mount_layout_of_meta ~config meta).host_root
 
 let container_root ~(meta : keeper_meta) =
   Keeper_sandbox.container_root meta.name
 
 let container_path_of_host ~config ~(meta : keeper_meta) ~host_path
     : (string, string) result =
-  let host_root = host_playground_root ~config ~meta in
-  let host_norm =
-    Keeper_alerting_path.normalize_path_for_check host_path
-    |> strip_trailing_slashes
-  in
-  let croot = container_root ~meta in
-  if host_norm = host_root then Ok croot
-  else if String.starts_with ~prefix:(host_root ^ "/") host_norm then
-    let suffix =
-      String.sub host_norm
-        (String.length host_root + 1)
-        (String.length host_norm - String.length host_root - 1)
-    in
-    Ok (Filename.concat croot suffix)
-  else
-    Error
-      (Printf.sprintf
-         "container_path_of_host: %s is not inside playground %s"
-         host_norm host_root)
+  Keeper_sandbox.container_path_of_host
+    (Keeper_sandbox.docker_mount_layout_of_meta ~config meta)
+    ~host_path
 
 (* Argv prefix kept private — distinct from keeper_tool_command_runtime's bash
    argv to avoid coupling the two surfaces. The trailing

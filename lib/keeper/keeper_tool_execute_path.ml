@@ -287,6 +287,46 @@ let validate_repo_path_ready
 let validate_repo_cwd_ready ~(config : Workspace.config) ~(meta : keeper_meta) cwd =
   validate_repo_path_ready ~config ~meta ~probe_path:cwd cwd
 
+let raw_docker_host_path_of_normalized ~(config : Workspace.config) ~(meta : keeper_meta) path =
+  let layout = Keeper_sandbox.docker_mount_layout_of_meta ~config meta in
+  let path = normalize_repo_cwd_path path in
+  if String.equal path layout.host_root then
+    layout.host_root_raw
+  else if String.starts_with ~prefix:(layout.host_root ^ "/") path then (
+    let suffix =
+      String.sub
+        path
+        (String.length layout.host_root + 1)
+        (String.length path - String.length layout.host_root - 1)
+    in
+    Filename.concat layout.host_root_raw suffix)
+  else
+    path
+
+let docker_repo_worktree_cwd_fallback ~(config : Workspace.config) ~(meta : keeper_meta) cwd =
+  match meta.sandbox_profile with
+  | Local -> None
+  | Docker ->
+    (match repo_path_context ~config ~meta cwd with
+     | Some (repo_name, repo_root, path_root, _accepted_toplevels)
+       when not
+              (String.equal
+                 (normalize_repo_cwd_path repo_root)
+                 (normalize_repo_cwd_path path_root)) ->
+       (match validate_repo_path_ready ~config ~meta ~probe_path:repo_root repo_root with
+        | Ok () ->
+          let raw_repo_root =
+            raw_docker_host_path_of_normalized ~config ~meta repo_root
+          in
+          Log.Keeper.info
+            "docker cwd normalized from nested worktree %s to repo root %s for %s"
+            path_root
+            raw_repo_root
+            repo_name;
+          Some raw_repo_root
+        | Error _ -> None)
+     | _ -> None)
+
 let resolve_missing_cwd
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
@@ -300,6 +340,22 @@ let resolve_missing_cwd
   | None ->
     let _created_path = Keeper_fs.ensure_dir cwd in
     Ok cwd
+
+let resolve_repo_cwd_candidate_from_raw
+      ~(config : Workspace.config)
+      ~(meta : keeper_meta)
+      raw_cwd
+  =
+  match playground_relative_unless_allowed_root ~config ~meta raw_cwd with
+  | Error _ -> None
+  | Ok normalized ->
+    let root = Keeper_alerting_path.project_root_of_config config in
+    let candidate =
+      if Filename.is_relative normalized then Filename.concat root normalized else normalized
+    in
+    (match repo_path_context ~config ~meta candidate with
+     | Some _ -> Some candidate
+     | None -> None)
 
 let resolve_tool_read_cwd
       ~(config : Workspace.config)
@@ -424,17 +480,28 @@ let resolve_tool_write_cwd
   let resolved =
     if raw_cwd = ""
     then Ok (keeper_default_write_root ~config ~meta)
-    else resolve_keeper_path ~config ~meta ~raw_path:raw_cwd
+    else (
+      match resolve_keeper_path ~config ~meta ~raw_path:raw_cwd with
+      | Ok _ as ok -> ok
+      | Error _ as err ->
+        (match resolve_repo_cwd_candidate_from_raw ~config ~meta raw_cwd with
+         | Some cwd -> Ok cwd
+         | None -> err))
   in
   match resolved with
   | Error _ as err -> err
   | Ok cwd when Fs_compat.file_exists cwd && Sys.is_directory cwd ->
     (match validate_repo_cwd_ready ~config ~meta cwd with
      | Ok () -> Ok cwd
-     | Error _ as err -> err)
+     | Error _ as err ->
+       (match docker_repo_worktree_cwd_fallback ~config ~meta cwd with
+        | Some fallback -> Ok fallback
+        | None -> err))
   | Ok cwd ->
     if not (Fs_compat.file_exists cwd) then
-      resolve_missing_cwd ~config ~meta cwd
+      match docker_repo_worktree_cwd_fallback ~config ~meta cwd with
+      | Some fallback -> Ok fallback
+      | None -> resolve_missing_cwd ~config ~meta cwd
     else
       Error (Printf.sprintf "cwd_not_directory: %s (path_is_file_not_directory)" cwd)
 

@@ -23,7 +23,34 @@ type t =
   ; task_overlay_pattern : string
   }
 
+type docker_mount_layout =
+  { host_root_raw : string
+  ; host_root : string
+  ; container_root : string
+  }
+
 let strip_trailing_slashes = Env_config_core.strip_trailing_slashes
+
+let normalize_path path =
+  let normalized =
+    try Fs_compat.realpath path with
+    | Unix.Unix_error _ ->
+      let rec collect_suffix p acc =
+        let parent = Filename.dirname p in
+        if parent = p
+        then p, acc
+        else (
+          match
+            try Some (Fs_compat.realpath p) with
+            | Unix.Unix_error _ -> None
+          with
+          | Some resolved -> resolved, acc
+          | None -> collect_suffix parent (Filename.basename p :: acc))
+      in
+      let resolved_base, suffix_parts = collect_suffix path [] in
+      List.fold_left Filename.concat resolved_base suffix_parts
+  in
+  strip_trailing_slashes normalized
 
 let backend_of_profile = function
   | Keeper_types_profile_sandbox.Local -> Local
@@ -80,6 +107,60 @@ let host_root_abs_of_meta ~(config : Workspace.config)
 
 let container_root name =
   Keeper_sandbox_config.container_root_of_agent ~agent_name:name
+
+let docker_mount_layout_of_meta ~(config : Workspace.config)
+    (meta : Keeper_meta_contract.keeper_meta) =
+  let host_root_raw = host_root_abs_of_meta ~config meta |> strip_trailing_slashes in
+  { host_root_raw
+  ; host_root = normalize_path host_root_raw
+  ; container_root = container_root meta.name |> strip_trailing_slashes
+  }
+
+let container_path_of_host layout ~host_path =
+  let host_norm = normalize_path host_path in
+  if String.equal host_norm layout.host_root
+  then Ok layout.container_root
+  else if String.starts_with ~prefix:(layout.host_root ^ "/") host_norm
+  then (
+    let suffix =
+      String.sub
+        host_norm
+        (String.length layout.host_root + 1)
+        (String.length host_norm - String.length layout.host_root - 1)
+    in
+    Ok (Filename.concat layout.container_root suffix))
+  else
+    Error
+      (Printf.sprintf
+         "container_path_of_host: %s is not inside playground %s"
+         host_norm
+         layout.host_root)
+
+let container_cwd_of_host layout ~host_cwd =
+  match container_path_of_host layout ~host_path:host_cwd with
+  | Ok container_cwd -> container_cwd
+  | Error _ -> layout.container_root
+
+let rewrite_host_paths_to_container layout text =
+  let rewritten =
+    Keeper_sandbox_runtime.rewrite_host_root_to_container_root
+      ~host_root:layout.host_root_raw
+      ~container_root:layout.container_root
+      text
+  in
+  if String.equal layout.host_root_raw layout.host_root
+  then rewritten
+  else
+    Keeper_sandbox_runtime.rewrite_host_root_to_container_root
+      ~host_root:layout.host_root
+      ~container_root:layout.container_root
+      rewritten
+
+let rewrite_container_paths_to_host layout text =
+  Keeper_sandbox_runtime.rewrite_host_root_to_container_root
+    ~host_root:layout.container_root
+    ~container_root:layout.host_root_raw
+    text
 
 let host_path_of_visible_path ~config ~agent_name raw_path =
   if Filename.is_relative raw_path

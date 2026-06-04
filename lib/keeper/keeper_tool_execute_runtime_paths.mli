@@ -1,8 +1,5 @@
 (** Runtime path rewrites for tool execute responses and Docker commands. *)
 
-val replace_all_substrings :
-  needle:string -> replacement:string -> string -> string
-
 val rewrite_turn_runtime_paths_to_host :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->

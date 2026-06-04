@@ -593,6 +593,37 @@ let test_tool_execute_missing_worktree_cwd_does_not_create_directory () =
       (Sys.file_exists missing_worktree)
   | None -> Alcotest.fail ("expected error json, got: " ^ raw)
 
+let test_tool_execute_docker_worktree_cwd_falls_back_to_repo_root () =
+  with_eio_fs @@ fun () ->
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  let config = Workspace.default_config base in
+  let meta = make_docker_meta "sangsu" in
+  let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
+  let repo_dir = Filename.concat playground "repos/masc" in
+  let missing_worktree = Filename.concat repo_dir ".worktrees/task-missing" in
+  ensure_dir repo_dir;
+  run_process_ok ~cwd:repo_dir "git" [ "init"; "-q"; "--initial-branch=main" ];
+  let args =
+    `Assoc
+      [ "executable", `String "ls"
+      ; "argv", `List []
+      ; "cwd", `String "repos/masc/.worktrees/task-missing"
+      ]
+  in
+  match
+    Masc.Keeper_tool_execute_path.resolve_tool_write_cwd ~config ~meta ~args
+  with
+  | Ok cwd ->
+    Alcotest.(check string)
+      "docker nested worktree cwd normalizes to repo root"
+      repo_dir cwd;
+    Alcotest.(check bool)
+      "missing worktree was not materialized"
+      false
+      (Sys.file_exists missing_worktree)
+  | Error err -> Alcotest.failf "expected docker cwd fallback, got: %s" err
+
 let test_tool_execute_elapsed_duration_preserves_positive_sub_ms () =
   let elapsed = Keeper_tool_command_runtime.For_testing.elapsed_duration_ms in
   Alcotest.(check int) "sub-ms positive duration rounds up to 1" 1
@@ -1481,6 +1512,10 @@ let () =
             "missing worktree cwd rejects without mkdir"
             `Quick
             test_tool_execute_missing_worktree_cwd_does_not_create_directory
+        ; Alcotest.test_case
+            "docker worktree cwd falls back to repo root"
+            `Quick
+            test_tool_execute_docker_worktree_cwd_falls_back_to_repo_root
         ] )
     ; ( "edge"
       , [ Alcotest.test_case

@@ -26,6 +26,12 @@ type t = {
   task_overlay_pattern : string;
 }
 
+type docker_mount_layout = {
+  host_root_raw : string;
+  host_root : string;
+  container_root : string;
+}
+
 (** {1 Backend helpers} *)
 
 val backend_to_string : backend -> string
@@ -78,6 +84,46 @@ val host_root_abs_of_meta :
 (** [container_root name] returns the in-container path used by the
     hardened Docker backend. *)
 val container_root : string -> string
+
+(** [docker_mount_layout_of_meta ~config meta] is the single source of
+    truth for the Docker playground bind mount: host root, normalized host
+    root, and container root. Docker run/exec argv, cwd rendering, and
+    host-side validation should derive path translations from this value
+    instead of recomputing the three roots independently. *)
+val docker_mount_layout_of_meta :
+  config:Workspace.config ->
+  Keeper_meta_contract.keeper_meta ->
+  docker_mount_layout
+
+(** [container_path_of_host layout ~host_path] maps a host path under the
+    mounted playground to its container-visible path. *)
+val container_path_of_host :
+  docker_mount_layout ->
+  host_path:string ->
+  (string, string) result
+
+(** [container_cwd_of_host layout ~host_cwd] maps a host cwd into the
+    mounted container namespace and falls back to [layout.container_root]
+    when the cwd is outside the playground. *)
+val container_cwd_of_host :
+  docker_mount_layout ->
+  host_cwd:string ->
+  string
+
+(** Rewrite host playground paths in arbitrary text to container paths,
+    matching both raw and normalized host roots on path boundaries. *)
+val rewrite_host_paths_to_container :
+  docker_mount_layout ->
+  string ->
+  string
+
+(** Rewrite container playground paths in arbitrary text to raw host paths
+    on path boundaries. Used only for host-side validation and
+    operator-facing result normalization. *)
+val rewrite_container_paths_to_host :
+  docker_mount_layout ->
+  string ->
+  string
 
 (** [host_path_of_visible_path ~config ~agent_name raw_path] maps a
     sandbox-visible absolute path for [agent_name] back to the

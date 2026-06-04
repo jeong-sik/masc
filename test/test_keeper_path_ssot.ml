@@ -211,6 +211,66 @@ let test_config_agent_projection_rejects_legacy_alias () =
             ~base_path:config.Workspace.base_path
             ~agent_name:"keeper-sangsu-agent"))
 
+let test_docker_mount_layout_maps_host_to_container () =
+  let config = make_config () in
+  let meta = make_meta ~name:"analyst" ~sandbox:Keeper_types_profile_sandbox.Docker in
+  let layout = Keeper_sandbox.docker_mount_layout_of_meta ~config meta in
+  let host_repo =
+    Filename.concat (Filename.concat layout.host_root "repos") "masc-mcp"
+  in
+  let host_file = Filename.concat host_repo "lib/keeper/foo.ml" in
+  let container_file =
+    Filename.concat
+      (Filename.concat layout.container_root "repos/masc-mcp")
+      "lib/keeper/foo.ml"
+  in
+  Alcotest.(check string)
+    "host root"
+    (Keeper_sandbox.host_root_abs_of_meta ~config meta
+     |> Masc.Keeper_alerting_path.normalize_path_for_check
+     |> Masc.Keeper_alerting_path.strip_trailing_slashes)
+    layout.host_root;
+  Alcotest.(check string)
+    "container root"
+    (Keeper_sandbox.container_root meta.name)
+    layout.container_root;
+  (match Keeper_sandbox.container_path_of_host layout ~host_path:host_file with
+   | Ok actual ->
+     Alcotest.(check string)
+       "host path maps to container path"
+       container_file actual
+   | Error err -> Alcotest.failf "host path did not map to container path: %s" err);
+  Alcotest.(check string)
+    "host cwd maps to container cwd"
+    container_file
+    (Keeper_sandbox.container_cwd_of_host layout ~host_cwd:host_file)
+
+let test_docker_mount_layout_rewrites_raw_and_normalized_roots () =
+  let config = make_config () in
+  let meta = make_meta ~name:"analyst" ~sandbox:Keeper_types_profile_sandbox.Docker in
+  let layout = Keeper_sandbox.docker_mount_layout_of_meta ~config meta in
+  let raw_host =
+    Keeper_sandbox.host_root_abs_of_meta ~config meta
+    |> Masc.Keeper_alerting_path.strip_trailing_slashes
+  in
+  let text =
+    Printf.sprintf "cd %s/repos/masc && test -d %s2" raw_host raw_host
+  in
+  let rewritten = Keeper_sandbox.rewrite_host_paths_to_container layout text in
+  Alcotest.(check string)
+    "host root rewritten on path boundary only"
+    (Printf.sprintf
+       "cd %s/repos/masc && test -d %s2"
+       layout.container_root
+       raw_host)
+    rewritten;
+  Alcotest.(check string)
+    "container root rewrites back to raw host root"
+    (Printf.sprintf "cd %s/repos/masc" layout.host_root_raw)
+    (Keeper_sandbox.rewrite_container_paths_to_host
+       layout
+       (Printf.sprintf "cd %s/repos/masc" layout.container_root))
+
 (* ── Egress policy file path SSOT ─────────────────────────────────────────
 
    Leak 11 (2026-04-27): keeper "executor" had its egress.json placed at
@@ -304,6 +364,13 @@ let () =
           test_config_agent_projection_local;
         Alcotest.test_case "legacy profile rejected" `Quick
           test_config_agent_projection_rejects_legacy_alias;
+      ] );
+    ( "docker mount layout",
+      [
+        Alcotest.test_case "host paths map to container paths" `Quick
+          test_docker_mount_layout_maps_host_to_container;
+        Alcotest.test_case "path rewrites use boundary-safe roots" `Quick
+          test_docker_mount_layout_rewrites_raw_and_normalized_roots;
       ] );
     ( "egress_policy_path SSOT",
       [

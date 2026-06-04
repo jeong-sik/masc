@@ -43,24 +43,7 @@ let docker_private_workspace_cwd
       ~(meta : Keeper_meta_contract.keeper_meta)
       host_cwd
   =
-  let normalize_path_for_containment path =
-    Keeper_alerting_path.normalize_path_for_check_stripped path
-  in
-  let host_root =
-    Keeper_sandbox.host_root_abs_of_meta ~config meta |> normalize_path_for_containment
-  in
-  let container_root = keeper_private_container_root meta in
-  let host_cwd = normalize_path_for_containment host_cwd in
-  if host_cwd = host_root
-  then container_root
-  else if String.starts_with ~prefix:(host_root ^ "/") host_cwd
-  then (
-    let suffix =
-      String.sub
-        host_cwd
-        (String.length host_root + 1)
-        (String.length host_cwd - String.length host_root - 1)
-    in
-    Filename.concat container_root suffix)
-  else container_root
+  Keeper_sandbox.container_cwd_of_host
+    (Keeper_sandbox.docker_mount_layout_of_meta ~config meta)
+    ~host_cwd
 ;;

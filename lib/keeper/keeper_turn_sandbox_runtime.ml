@@ -10,7 +10,7 @@ type t =
   { config : Workspace.config
   ; meta : keeper_meta
   ; turn_id : int
-  ; raw_host_root : string
+  ; mount_layout : Keeper_sandbox.docker_mount_layout
   ; host_root : string
   ; container_root : string
   ; uid : int
@@ -30,18 +30,13 @@ let create
       ~turn_id
       ()
   =
-  let raw_host_root =
-    Keeper_sandbox.host_root_abs_of_meta ~config meta
-    |> Keeper_alerting_path.strip_trailing_slashes
-  in
+  let mount_layout = Keeper_sandbox.docker_mount_layout_of_meta ~config meta in
   { config
   ; meta
   ; turn_id
-  ; raw_host_root
-  ; host_root = raw_host_root |> normalize_path
-  ; container_root =
-      Keeper_sandbox.container_root meta.name
-      |> Keeper_alerting_path.strip_trailing_slashes
+  ; mount_layout
+  ; host_root = mount_layout.host_root
+  ; container_root = mount_layout.container_root
   ; uid = Unix.getuid ()
   ; gid = Unix.getgid ()
   ; network_mode
@@ -73,30 +68,11 @@ let container_name_of (t : t) =
 ;;
 
 let container_path_of_host (t : t) ~host_path =
-  let host_norm = normalize_path host_path in
-  if host_norm = t.host_root
-  then Ok t.container_root
-  else if String.starts_with ~prefix:(t.host_root ^ "/") host_norm
-  then (
-    let suffix =
-      String.sub
-        host_norm
-        (String.length t.host_root + 1)
-        (String.length host_norm - String.length t.host_root - 1)
-    in
-    Ok (Filename.concat t.container_root suffix))
-  else
-    Error
-      (Printf.sprintf
-         "container_path_of_host: %s is not inside playground %s"
-         host_norm
-         t.host_root)
+  Keeper_sandbox.container_path_of_host t.mount_layout ~host_path
 ;;
 
 let container_cwd_of_host (t : t) ~host_cwd =
-  match container_path_of_host t ~host_path:host_cwd with
-  | Ok container_cwd -> container_cwd
-  | Error _ -> t.container_root
+  Keeper_sandbox.container_cwd_of_host t.mount_layout ~host_cwd
 ;;
 
 let format_docker_exec_error ~head_program ~st ~out =
@@ -418,20 +394,7 @@ let run_exec_with_status_once
     let container_cwd = container_cwd_of_host t ~host_cwd:cwd in
     let command_argv =
       List.map
-        (fun arg ->
-           let rewritten =
-             Keeper_sandbox_runtime.rewrite_host_root_to_container_root
-               ~host_root:t.host_root
-               ~container_root:t.container_root
-               arg
-           in
-           if String.equal t.raw_host_root t.host_root
-           then rewritten
-           else
-             Keeper_sandbox_runtime.rewrite_host_root_to_container_root
-               ~host_root:t.raw_host_root
-               ~container_root:t.container_root
-               rewritten)
+        (Keeper_sandbox.rewrite_host_paths_to_container t.mount_layout)
         command_argv
     in
     let argv =
@@ -481,20 +444,7 @@ type exec_pipeline_stage = {
 
 let rewrite_command_argv (t : t) command_argv =
   List.map
-    (fun arg ->
-      let rewritten =
-        Keeper_sandbox_runtime.rewrite_host_root_to_container_root
-          ~host_root:t.host_root
-          ~container_root:t.container_root
-          arg
-      in
-      if String.equal t.raw_host_root t.host_root
-      then rewritten
-      else
-        Keeper_sandbox_runtime.rewrite_host_root_to_container_root
-          ~host_root:t.raw_host_root
-          ~container_root:t.container_root
-          rewritten)
+    (Keeper_sandbox.rewrite_host_paths_to_container t.mount_layout)
     command_argv
 ;;
 
@@ -575,12 +525,7 @@ let run_command ?(ok_exit_codes = [ 0 ]) t ~cwd ~command_argv ~max_bytes ~timeou
 
 let run_bash_with_status (t : t) ~(cwd : string) ~(cmd : string) ~(timeout_sec : float) ()
   =
-  let cmd =
-    Keeper_sandbox_runtime.rewrite_host_root_to_container_root
-      ~host_root:t.host_root
-      ~container_root:t.container_root
-      cmd
-  in
+  let cmd = Keeper_sandbox.rewrite_host_paths_to_container t.mount_layout cmd in
   let container_cwd = container_cwd_of_host t ~host_cwd:cwd in
   let docker_exec_argv ~container_name =
     Keeper_sandbox_runtime.docker_command_argv ()

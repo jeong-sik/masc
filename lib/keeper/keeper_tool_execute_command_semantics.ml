@@ -153,6 +153,59 @@ let repo_hosting_cli_repo_flag_api_misuse_of_stages stages =
   List.find_map (fun stage ->
     if normalize_command_name stage.bin = "gh" then scan_args stage.args else None) stages
 
+let gh_pr_diff_misuse_of_stages stages =
+  let scan_args args =
+    let rec filter_flags = function
+      | [] -> []
+      | "--" :: rest ->
+        "--" :: rest
+      | flag :: val_arg :: rest when flag = "--repo" || flag = "-R" || flag = "--color" ->
+        filter_flags rest
+      | flag :: rest when String.starts_with ~prefix:"--repo=" flag
+                       || String.starts_with ~prefix:"-R=" flag
+                       || String.starts_with ~prefix:"--color=" flag ->
+        filter_flags rest
+      | flag :: rest when String.starts_with ~prefix:"-" flag ->
+        filter_flags rest
+      | pos_arg :: rest ->
+        pos_arg :: filter_flags rest
+    in
+    let pos_args = filter_flags args in
+    if List.length pos_args > 1 || List.mem "--" pos_args then
+      Some pos_args
+    else
+      None
+  in
+  List.find_map (fun stage ->
+    if normalize_command_name stage.bin = "gh" then
+      match stage.args with
+      | "pr" :: "diff" :: rest -> scan_args rest
+      | _ -> None
+    else
+      None) stages
+
+let misuse_error_of_stages stages =
+  match repo_hosting_cli_repo_flag_api_misuse_of_stages stages with
+  | Some (repo_arg, endpoint) ->
+    Some
+      (Printf.sprintf
+         "잘못된 gh syntax: 'gh --repo %s api %s ...' — '--repo' 는 subcommand \
+          flag (gh issue/pr/release/run) 전용이고 'gh api' 에는 적용 안 됨. 올바른 형태: 'gh \
+          api repos/%s/%s' (endpoint 안에 org/repo 포함). 다음 turn 에서 cmd 를 수정하세요."
+         repo_arg
+         endpoint
+         repo_arg
+         endpoint)
+  | None ->
+    (match gh_pr_diff_misuse_of_stages stages with
+     | Some pos_args ->
+       Some
+         (Printf.sprintf
+            "잘못된 gh syntax: 'gh pr diff'는 파일 경로 필터링(예: '--', '*.ml')을 지원하지 않으며, positional argument는 최대 1개([<number> | <url> | <branch>])만 허용됩니다. (입력받은 positional args: %s). 전체 diff를 원하시면 파일 필터를 제거하시고, 특정 파일만 보시려면 git 저장소 내에서 'git diff origin/main <pr> -- <paths>'를 실행하세요."
+            (String.concat ", " pos_args))
+     | None -> None)
+
+
 let bare_worktrees_path token =
   let token = strip_simple_shell_quotes token in
   String.equal token ".worktrees"

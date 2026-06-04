@@ -1608,6 +1608,42 @@ let test_repo_hosting_cli_repo_api_misuse_uses_shell_semantics () =
     None
     "gh pr view --repo jeong-sik/masc 17214"
 
+let detect_gh_pr_diff_misuse_of_string cmd =
+  match Masc_exec_bash_parser.Bash.parse_string cmd with
+  | Masc_exec.Parsed.Parsed ir ->
+    let stages = Keeper_tool_execute_command_semantics.effective_stages_of_ir ir in
+    Keeper_tool_execute_command_semantics.gh_pr_diff_misuse_of_stages stages
+  | _ -> None
+
+let test_gh_pr_diff_misuse_uses_shell_semantics () =
+  let check label expected cmd =
+    Alcotest.(check (option (list string)))
+      label
+      expected
+      (detect_gh_pr_diff_misuse_of_string cmd)
+  in
+  check
+    "standard pr diff call with file filter"
+    (Some [ "20107"; "--"; "**/*.ml"; "**/*.mli" ])
+    "gh pr diff --repo jeong-sik/masc-mcp 20107 -- **/*.ml **/*.mli";
+  check
+    "pr diff call with multiple positional args without --"
+    (Some [ "20107"; "extra_arg" ])
+    "gh pr diff 20107 extra_arg";
+  check
+    "pr diff call with flags only is fine"
+    None
+    "gh pr diff 20107 --patch --name-only";
+  check
+    "pr diff call without args is fine"
+    None
+    "gh pr diff";
+  check
+    "pr diff call with repo and pr is fine"
+    None
+    "gh pr diff -R jeong-sik/masc-mcp 20107"
+
+
 let test_docker_shell_skips_missing_ssh_auth_sock () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
@@ -2141,6 +2177,10 @@ let () =
             "GitHub CLI --repo api misuse uses shell semantics"
             `Quick
             test_repo_hosting_cli_repo_api_misuse_uses_shell_semantics;
+          Alcotest.test_case
+            "GitHub CLI pr diff misuse uses shell semantics"
+            `Quick
+            test_gh_pr_diff_misuse_uses_shell_semantics;
           Alcotest.test_case
             "history cmd_prefix uses shell command words"
             `Quick

@@ -1588,9 +1588,6 @@
 
 (include stanzas/test_tool_help_metadata_rfc_0195.inc)
 
-(include stanzas/test_tool_inline_dispatch.inc)
-
-
 (include stanzas/test_tool_task_args.inc)
 
 (include stanzas/test_tool_task_completion_example.inc)

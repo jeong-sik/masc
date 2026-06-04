@@ -2,4 +2,5 @@
  (name ppx_safe_shell)
  (kind ppx_rewriter)
  (preprocess (pps ppxlib.metaquot))
- (libraries ppxlib masc.masc_exec masc.exec_policy))
+ (libraries ppxlib masc.masc_exec masc.masc_exec_bash_parser masc.exec_policy))
+

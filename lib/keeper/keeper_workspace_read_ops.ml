@@ -54,7 +54,8 @@ let try_handle
   (* TEL-OK: read-op adapter delegates to Keeper_tool_execute_shell_ir/Exec_dispatch or the
      sandbox read runner; execution telemetry stays with those runtime paths. *)
   let dispatch_host_shell_ir
-        ?(allowed_commands = Dev_exec_allowlist.readonly)
+        ?(allowed_commands = Exec_policy.readonly_allowed_commands)
+
         ?timeout_sec
         ~workdir
         ir
@@ -64,7 +65,8 @@ let try_handle
       ?timeout_sec ir
   in
   let run_host_shell_ir
-        ?(allowed_commands = Dev_exec_allowlist.readonly)
+        ?(allowed_commands = Exec_policy.readonly_allowed_commands)
+
         ?timeout_sec
         ?path
         ~workdir
@@ -121,7 +123,8 @@ let try_handle
     loop max_eintr_retries
   in
   let run_in_turn_runtime ?(ok_exit_codes = [ 0 ]) ~cwd ~cmd ~command_argv
-      ?host_ir ?(host_allowed_commands = Dev_exec_allowlist.readonly)
+      ?host_ir ?(host_allowed_commands = Exec_policy.readonly_allowed_commands)
+
       ~max_bytes ~timeout_sec ?(map_output = fun out -> out) ?(extra = []) () =
     match Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd with
     | Some runtime ->
@@ -220,7 +223,7 @@ let try_handle
                [ "--no-optional-locks"; "status"; "--short"; "--branch" ]
            in
            run_host_shell_ir
-             ~allowed_commands:Dev_exec_allowlist.dev
+             ~allowed_commands:Exec_policy.dev_allowed_commands
              ~workdir:cwd
              ~cmd:"git status"
              ~path:cwd
@@ -520,7 +523,8 @@ let try_handle
                 Keeper_tool_execute_shell_ir.simple ~cwd_raw:cwd ~cwd_base:root Masc_exec.Exec_program.Git args
               in
               run_host_shell_ir
-                ~allowed_commands:Dev_exec_allowlist.dev
+                ~allowed_commands:Exec_policy.dev_allowed_commands
+
                 ~workdir:cwd
                 ~cmd:"git log"
                 ~path:cwd

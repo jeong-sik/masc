@@ -36,6 +36,10 @@ val parse_string_to_ir :
   mode:parse_mode -> string -> (Masc_exec.Shell_ir.t, block_reason) result
 
 val dev_allowed_commands : string list
+val readonly_allowed_commands : string list
+val is_dev_allowed : string -> bool
+val is_readonly_allowed : string -> bool
+
 
 val command_context_with_allowlist :
   ?caller:Masc_exec_command_gate.Shell_command_gate.caller ->

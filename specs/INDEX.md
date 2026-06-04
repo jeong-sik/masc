@@ -5,7 +5,7 @@ Edit the generator, not this file. Re-run: scripts/gen-tla-index.sh > specs/INDE
 
 # TLA+ Spec Index
 
-Generated: 2026-06-04T14:38:04Z (HEAD: 6c78b39b08)
+Generated: 2026-06-04T15:39:29Z (HEAD: 470a26d7f8)
 
 Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to refresh.
 
@@ -13,12 +13,12 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 
 | Metric | Value |
 |--------|-------|
-| Total .tla files | 91 |
-| Manual specs | 91 |
+| Total .tla files | 92 |
+| Manual specs | 92 |
 | TTrace (auto-generated) | 0 |
 | Directories | 19 |
-| Total .cfg files | 188 |
-| Buggy .cfg (bug-model pair) | 96 |
+| Total .cfg files | 190 |
+| Buggy .cfg (bug-model pair) | 97 |
 
 `kind` column: **manual** = hand-authored spec; **ttrace** = TLC counterexample export (`*TTrace*` or trace marker in header). `cfg`/`buggy` columns count companion `.cfg` files. `invariants/properties` lists names per cfg label (`clean=...`, `buggy=...`). `source hash` is the tracked `.tla` blob fingerprint.
 
@@ -43,7 +43,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | AutonomousLoop.tla | AutonomousLoop | manual | 2 | 1 | clean={inv:TypeOK, inv:MetaPersistedAfterTick, inv:TickOnlyDuringRunning, inv:AutoTickReadOnly} buggy={inv:TypeOK, inv:MetaPersistedAfterTick, inv:TickOnlyDuringRunning, inv:AutoTickReadOnly} | 11f25e8d37df |
 | AutonomousPhase.tla | AutonomousPhase | manual | 2 | 1 | clean={inv:TypeOK, inv:StartedAtIdle, inv:CurrentMatchesHead, inv:OnlyLegalTransitions} buggy={inv:TypeOK, inv:StartedAtIdle, inv:CurrentMatchesHead, inv:OnlyLegalTransitions} | 54e3dc0e6baa |
 
-### specs/boundary (14 specs)
+### specs/boundary (15 specs)
 
 | File | Module | Kind | cfg | buggy | Invariants / Properties | Source Hash |
 |------|--------|------|-----|-------|-------------------------|---------------|
@@ -54,6 +54,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | Cancellation.tla | Cancellation | manual | 2 | 1 | clean={inv:TypeOK, inv:ReasonBeforeCancelled, inv:CallbacksFiredAtMostOnce} buggy={inv:ReasonBeforeCancelled, inv:CallbacksFiredAtMostOnce} | bbed415483ac |
 | KeeperContinueGate.tla | KeeperContinueGate | manual | 2 | 1 | clean={inv:Safety, prop:PendingEventuallyResolves} buggy={inv:ApprovedResolutionClearsFailure} | 7f71fad0d4cb |
 | KeeperContractViolated.tla | KeeperContractViolated | manual | 2 | 1 | clean={inv:Safety} buggy={inv:Safety} | ef2f8d4eb972 |
+| KeeperEmptyToolUniverse.tla | KeeperEmptyToolUniverse | manual | 2 | 1 | clean={inv:Safety} buggy={inv:Safety} | 51f293631b6b |
 | KeeperRecoveryOrchestration.tla | KeeperRecoveryOrchestration | manual | 2 | 1 | clean={inv:SafetyInvariant} buggy={inv:SafetyInvariant} | 27819eddb8ba |
 | KeeperStaleKilled.tla | KeeperStaleKilled | manual | 2 | 1 | clean={inv:Safety} buggy={inv:Safety} | 0a6650d26696 |
 | KeeperTurnScheduler.tla | KeeperTurnScheduler | manual | 2 | 1 | clean={inv:SafetyInvariant} buggy={inv:SafetyInvariant} | 3506f025e94c |

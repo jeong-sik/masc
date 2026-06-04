@@ -253,8 +253,6 @@ let run_try_provider
               ("resolved_lane", `String resolved_lane);
               ("effective_tool_count", `Int (List.length effective_tools));
               ("runtime_mcp_policy_present", `Bool (Option.is_some runtime_mcp_policy));
-              ( "tool_requirement",
-                `String "optional" );
             ])
         Keeper_runtime_manifest.Provider_lane_resolved;
       Ok

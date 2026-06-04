@@ -9,7 +9,6 @@ module EC = Keeper_error_classify
 let next_fail_open_runtime_for_turn
       ~(base_runtime : string)
       ~(effective_runtime : string)
-      ~(tool_requirement : Keeper_agent_tool_surface.tool_requirement)
       ~(attempted_runtimes : string list)
       (err : Agent_sdk.Error.sdk_error)
   : EC.degraded_retry option
@@ -17,7 +16,6 @@ let next_fail_open_runtime_for_turn
   EC.degraded_rotation_after_recoverable_error
     ~base_runtime
     ~effective_runtime
-    ~tool_requirement
     ~attempted_runtimes
     err
 

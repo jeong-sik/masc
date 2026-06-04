@@ -105,20 +105,9 @@ flowchart TD
 
 ## Tool Surface Vocabulary
 
-The Keeper has one `Allowed Tool` audit axis, but the code carries it through
-three different stages:
-
-- `allowed_tool_names`: the policy/candidate tool set after keeper profile and
-  denylist resolution.
-- `turn_allowed_tool_names`: the internal per-SDK-turn list produced by
-  `compute_tool_surface`; this is the exact list passed to
-  `Agent_sdk.Guardrails.AllowList`.
-- `tool_disclosure.allowed_tool_names`: the operator-facing JSONL field
-  for that same per-turn allowlist. It is not a separate permission system.
-
-When auditing "what could the Keeper call right now?", use
-`tool_disclosure.allowed_tool_names` for the specific turn and
-`allowed_tool_names` only for the broader policy/candidate boundary.
+The Keeper no longer carries a per-turn tool surface as an observable contract.
+The SDK receives a local schema filter for execution, while operator evidence
+comes from requested, reported, observed, and materialized tool-use records.
 
 ## Unified turn swimlane
 

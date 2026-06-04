@@ -21,8 +21,6 @@
     [context_max_of_telemetry]. *)
 include Keeper_hooks_oas_types
 
-open Keeper_hooks_oas_guard_attempt
-
 (** Keeper deny list. The legacy must-deny surface is gone; keep the hook
     argument explicit so callers still receive a stable field. *)
 let keeper_denied_tools = []
@@ -40,7 +38,7 @@ let keeper_denied_tools = []
    and [extract_command_from_input] now live in [Keeper_guards]. They
    are used only by the decomposed pre_tool_use guard chain, so keeping
    them there avoids a circular dependency and concentrates the
-   gate-level concerns in one module. *)
+   guard concerns in one module. *)
 
 (** Keeper-facing telemetry uses a neutral runtime lane.  Concrete
     provider/model identity belongs to OAS and lower-level runtime adapters.
@@ -49,6 +47,11 @@ let runtime_lane_label =
   Boundary_redaction.to_string Boundary_redaction.runtime_model_label
 
 let runtime_lane_of_model (_model : string) : string = runtime_lane_label
+
+let trajectory_duration_ms duration_ms =
+  if (not (Float.is_finite duration_ms)) || Float.compare duration_ms 0.0 <= 0
+  then 0
+  else max 1 (int_of_float (Float.round duration_ms))
 
 (* Inference telemetry redaction moved to Keeper_hooks_oas_types
    (intra-library file split, 2026-05-16). *)
@@ -238,13 +241,8 @@ let make_hooks
      [make_hooks] closure — one state per keeper. *)
   let streak_state = Keeper_guards.make_streak_state () in
   let streak_threshold = 5 in
-  let record_gate_decision event =
-    record_guard_attempt
-      ~meta_ref
-      ~tool_call_count_ref
-      ?trajectory_acc
-      event
-  in
+  ignore trajectory_acc;
+  let record_gate_decision = Keeper_guards.ignore_gate_decision in
   (* Build the pre_tool_use guard chain via Hooks.compose. Each guard
      lives in Keeper_guards and emits its own masc:keeper_gate event
      on override/approval decisions. The observer persists the same

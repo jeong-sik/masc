@@ -273,10 +273,6 @@ let frozen_operator_disposition (receipt : R.t)
 
 let base_tool_surface : R.tool_surface =
   { turn_lane = Masc.Keeper_agent_tool_surface.Lane_tool_optional
-  ; tool_surface_class = Masc.Keeper_agent_tool_surface.Surface_public_only
-  ; tool_requirement = Masc.Keeper_agent_tool_surface.Optional
-  ; allowed_tool_count = 3
-  ; tool_surface_fallback_used = false
   ; materialized_tools = []
   }
 ;;

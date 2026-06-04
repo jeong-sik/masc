@@ -117,7 +117,8 @@ let claim_task_r config ~agent_name ~task_id ()
     | Ok _, Ok _ -> Ok ()
   in
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
-  with_file_lock config backlog_path (fun () ->
+  let claim_result =
+    with_file_lock config backlog_path (fun () ->
     match read_backlog_r config with
     | Error msg -> Error (Masc_domain.System (Masc_domain.System_error.IoError msg))
     | Ok backlog ->
@@ -200,9 +201,10 @@ let claim_task_r config ~agent_name ~task_id ()
          | `Claimed_by other -> Error (Masc_domain.Task (Masc_domain.Task_error.AlreadyClaimed { task_id; by = other }))
          | `Already_mine ->
            Ok
-             { message = Printf.sprintf "Task %s is already claimed by you" task_id
-             ; auto_released_task_ids = []
-             }
+             (`Existing_claim
+               { message = Printf.sprintf "Task %s is already claimed by you" task_id
+               ; auto_released_task_ids = []
+               })
          | `Claimed_ok ->
            let new_backlog =
              { tasks = new_tasks
@@ -254,10 +256,23 @@ let claim_task_r config ~agent_name ~task_id ()
                Printf.sprintf "%s claimed %s (auto-released %s)"
                  agent_name task_id (String.concat ", " ids)
            in
-           Ok { message = claim_msg; auto_released_task_ids = auto_released_ids }
+           Ok
+             (`New_claim
+               { message = claim_msg; auto_released_task_ids = auto_released_ids })
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | e -> Error (Masc_domain.System (Masc_domain.System_error.IoError (Printexc.to_string e)))))
+  in
+  match claim_result with
+  | Ok (`New_claim outcome) ->
+    Workspace_hooks.run_claim_post_provision_best_effort
+      config
+      ~site:"claim_task"
+      ~agent_name
+      ~task_id;
+    Ok outcome
+  | Ok (`Existing_claim outcome) -> Ok outcome
+  | Error _ as err -> err
 ;;
 
 (** Legacy string-returning claim_task. Delegates to [claim_task_r]. *)

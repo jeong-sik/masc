@@ -143,6 +143,25 @@ let inline_err_workflow ~tool_name ~start_time msg : Tool_result.result =
     msg
 ;;
 
+let approval_error_message (json : Yojson.Safe.t) =
+  match json with
+  | `Assoc fields ->
+      (match List.assoc_opt "error" fields with
+       | Some (`String msg) -> Some msg
+       | Some value -> Some (Yojson.Safe.to_string value)
+       | None -> None)
+  | _ -> None
+;;
+
+let inline_approval_result ~tool_name ~start_time body =
+  match Tool_result.structured_payload_of_message body with
+  | Some json ->
+      (match approval_error_message json with
+       | Some msg -> inline_err_workflow ~tool_name ~start_time msg
+       | None -> inline_ok ~tool_name ~start_time body)
+  | None -> inline_ok ~tool_name ~start_time body
+;;
+
 (** Dispatch a tool call.
     Returns [Some (Tool_result.result)] if the tool name is handled,
     [None] if the tool name is not recognized by this module. *)
@@ -193,40 +212,16 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.result option =
       Tool_inline_dispatch_comm.handle_messages ~tool_name:name ~start_time:start ctx
 
   (* ── Approval queue (#5907) ─────────────────────────────────── *)
-  | "masc_approval_pending" ->
-      let json = Keeper_approval_queue.list_pending_json () in
-      Some (inline_ok ~tool_name:name ~start_time:start (Yojson.Safe.to_string json))
-  | "masc_approval_get" ->
-      let id = arg_get_string "id" "" in
-      if String.equal id "" then Some (inline_err_workflow ~tool_name:name ~start_time:start "id is required")
-      else
-        (match Keeper_approval_queue.get_pending_json ~id with
-         | Some json -> Some (inline_ok ~tool_name:name ~start_time:start (Yojson.Safe.to_string json))
-         | None ->
-           Some (inline_err_workflow ~tool_name:name ~start_time:start
-             (Printf.sprintf
-               "approval %s is no longer pending or was not found. Refresh with masc_approval_pending before approving/rejecting."
-               id)))
-  | "masc_approval_resolve" ->
-      let id = arg_get_string "id" "" in
-      let decision_str = arg_get_string "decision" "approve" in
-      if String.equal id "" then Some (inline_err_workflow ~tool_name:name ~start_time:start "id is required")
-      else
-        let decision = match String.lowercase_ascii decision_str with
-          | "approve" -> Agent_sdk.Hooks.Approve
-          | "reject" ->
-            let reason = arg_get_string "reason" "operator rejected" in
-            Agent_sdk.Hooks.Reject reason
-          | _ -> Agent_sdk.Hooks.Reject (Printf.sprintf "unknown decision: %s" decision_str)
-        in
-        (match (match Keeper_approval_queue.resolve ~id ~decision with
-                | Ok () -> Ok ()
-                | Error err -> Error (Keeper_approval_queue.resolve_error_to_string err)) with
-         | Ok () ->
-           Some (inline_ok ~tool_name:name ~start_time:start
-             (Printf.sprintf "{\"resolved\":\"%s\",\"decision\":\"%s\"}" id decision_str))
-         | Error err ->
-           Some (inline_err_workflow ~tool_name:name ~start_time:start err))
+  | "masc_approval_pending" | "masc_approval_get" | "masc_approval_resolve" ->
+      (match !Approval_dispatch_ref.dispatch ~name ~args:arguments with
+       | Some body ->
+           Some (inline_approval_result ~tool_name:name ~start_time:start body)
+       | None ->
+           Some
+             (inline_err_workflow
+                ~tool_name:name
+                ~start_time:start
+                "approval dispatch is not registered"))
 
   (* Verification tools removed: pruned *)
 

@@ -50,7 +50,7 @@ then: shell_ir path_reject keeper=umberto reason=sandbox_repo_not_ready
 
 - Emitter: `lib/keeper/keeper_tool_execute_path.ml` `repo_cwd_not_ready_error`
   (`~repo_name ~path_root ~git_toplevel`), guarded by the readiness probe in
-  `lib/keeper/keeper_repo_readiness.ml` (runs `git rev-parse --show-toplevel`;
+  `lib/playground_repo_readiness.ml` (runs `git rev-parse --show-toplevel`;
   `top.ok=false` → not ready).
 - The check is correct in intent: a cwd under `repos/<repo>` must be a real
   checkout. It fired because a nested `.worktrees/task-630` inside the

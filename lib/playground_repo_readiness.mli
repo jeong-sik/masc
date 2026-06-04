@@ -1,8 +1,8 @@
-(** Keeper repository readiness.
+(** Playground repository readiness.
 
-    Read-only probe for the single keeper sandbox repo clone under
-    the keeper's backend-scoped sandbox repo lane. Tells preflight
-    callers whether code work can safely start from that clone. *)
+    Owns repository clone/worktree readiness for playground repo lanes. Keeper
+    execution code should treat this as the provisioning boundary rather than
+    carrying repo lifecycle policy itself. *)
 
 (** Stdout/stderr/exit triple for a [run_git] invocation. *)
 type command_result =
@@ -31,8 +31,8 @@ val safe_repo_component : string -> bool
     bare repo name (basename, [.git] stripped). *)
 val repo_name_of_repo_arg : project_root:string -> string -> string
 
-(** Sandbox clone path for [repo_name] under the keeper's
-    backend-scoped repos lane. *)
+(** Sandbox clone path for [repo_name] under a backend-scoped playground repos
+    lane. *)
 val clone_path :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
@@ -86,10 +86,11 @@ val ensure_ready :
 
 (** [ensure_worktree_ready ~config ~meta ~repo_name ~task_name ~worktree_path ()]
     ensures a git worktree exists at [worktree_path] inside the sandbox clone.
-    If the worktree is missing, first ensures the parent repo is ready (reclone
-    if needed), then creates the worktree via [git worktree add].  Returns
-    [Ok ()] when the worktree is a valid git checkout, or [Error msg] if
-    creation failed. *)
+    If the worktree is missing, first ensures the parent repo is a valid git
+    clone (reclone if needed), then creates the worktree from the fetched
+    default origin branch. Parent clone dirtiness is preserved and does not block
+    creating a separate task worktree. Returns [Ok ()] when the worktree is a
+    valid git checkout, or [Error msg] if creation failed. *)
 val ensure_worktree_ready :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->

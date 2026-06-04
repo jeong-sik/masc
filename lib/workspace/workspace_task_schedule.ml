@@ -238,7 +238,7 @@ let claim_next_r
   let claim_under_lock () =
     try
       match read_backlog_r config with
-      | Error msg -> Claim_next_error msg
+      | Error msg -> Claim_next_error msg, None
       | Ok backlog ->
         reconcile_agent_current_task_with_backlog config ~agent_name backlog;
         (* #10421: If this agent already holds a Claimed or InProgress task,
@@ -449,7 +449,7 @@ let claim_next_r
               write_backlog config new_backlog
             | None -> ());
            clear_agent_state_after_release ();
-           Claim_next_no_unclaimed
+          Claim_next_no_unclaimed, None
          | _ :: _, [] ->
            (match released_task_id with
             | Some _ ->
@@ -462,14 +462,15 @@ let claim_next_r
               write_backlog config new_backlog
             | None -> ());
            clear_agent_state_after_release ();
-           Claim_next_no_eligible
-             { excluded_count = no_eligible_excluded_count
-             ; blocked_count = List.length blocked_todo
-             ; verification_blocked_count = List.length verification_blocked_todo
-             ; scope_excluded_count = List.length task_filter_excluded
-             ; explicit_excluded_count
-             ; claim_pool_candidate_count = List.length unclaimed
-             }
+          ( Claim_next_no_eligible
+              { excluded_count = no_eligible_excluded_count
+              ; blocked_count = List.length blocked_todo
+              ; verification_blocked_count = List.length verification_blocked_todo
+              ; scope_excluded_count = List.length task_filter_excluded
+              ; explicit_excluded_count
+              ; claim_pool_candidate_count = List.length unclaimed
+              }
+          , None )
          | _ :: _, task :: _ ->
            (* Claim this task *)
            let new_tasks =
@@ -541,22 +542,9 @@ let claim_next_r
                     (Masc_domain.Claimed
                        { assignee = agent_name; claimed_at = now_iso () })
                   ());
-           (try
-              (Atomic.get Workspace_hooks.claim_post_provision_fn)
-                config
-                ~agent_name
-                ~task_id:task.id
-            with
-            | Eio.Cancel.Cancelled _ as e -> raise e
-            | exn ->
-              Workspace_hooks.observe_claim_post_provision_failure
-                ~site:"claim_next"
-                ~agent_name
-                ~task_id:task.id
-                exn);
-           let message =
-             match released_task_id with
-             | Some rid ->
+          let message =
+            match released_task_id with
+            | Some rid ->
                Printf.sprintf
                  "%s released %s, then claimed [P%d] %s: %s"
                  agent_name
@@ -572,20 +560,30 @@ let claim_next_r
                  task.id
                  task.title
            in
-           Claim_next_claimed
-             { task_id = task.id
-             ; title = task.title
-             ; priority = task.priority
-             ; released_task_id
-             ; message
-             })
+          ( Claim_next_claimed
+              { task_id = task.id
+              ; title = task.title
+              ; priority = task.priority
+              ; released_task_id
+              ; message
+              }
+          , Some task.id ))
     with
-    | Existing_claim result -> result
+    | Existing_claim result -> result, None
     | Eio.Cancel.Cancelled _ as e -> raise e
-    | e -> Claim_next_error (Printexc.to_string e)
+    | e -> Claim_next_error (Printexc.to_string e), None
   in
   match with_file_lock_r config backlog_path claim_under_lock with
-  | Ok result -> result
+  | Ok (result, post_provision_task_id) ->
+    (match post_provision_task_id with
+     | Some task_id ->
+       Workspace_hooks.run_claim_post_provision_best_effort
+         config
+         ~site:"claim_next"
+         ~agent_name
+         ~task_id
+     | None -> ());
+    result
   | Error err -> Claim_next_error (Masc_domain.masc_error_to_string err)
 ;;
 

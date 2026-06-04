@@ -25,9 +25,29 @@ module Float = Stdlib.Float
     This forces the reviewer to evaluate code structurally rather than
     relying on domain context that might mask bugs.
 
-    Uses the shared named-runtime review runner. *)
+    Uses a registered named-runtime review runner. *)
 
 open Printf
+
+type review_runner =
+  runtime_id:string ->
+  goal:string ->
+  max_turns:int ->
+  temperature:float ->
+  max_tokens:int ->
+  approval:Agent_sdk.Hooks.approval_callback ->
+  unit ->
+  (Runtime_agent.run_result, string) result
+
+let review_runner_ref : review_runner Atomic.t =
+  Atomic.make
+    (fun ~runtime_id:_ ~goal:_ ~max_turns:_ ~temperature:_ ~max_tokens:_ ~approval:_ () ->
+       Error "tool_deep_review runner is not registered")
+;;
+
+let set_review_runner runner =
+  Atomic.set review_runner_ref runner
+;;
 
 let validate_target_files target_files =
   let inputs =
@@ -154,18 +174,16 @@ let handle_deep_review
         let runtime_id =
           Runtime.get_default_runtime_id ()
         in
+        let run_review = Atomic.get review_runner_ref in
         match
-          Masc_oas_bridge.run_with_caller
-            ~caller:Env_config_oas_bridge.Tool_deep_review (fun () ->
-            Keeper_turn_driver.run_named
-              ~runtime_id
-              ~goal:prompt
-              ~max_turns:1
-              ~temperature:0.5
-              ~max_tokens:500
-              ~approval:Approval_callbacks.auto_approve
-              ()
-          )
+          run_review
+            ~runtime_id
+            ~goal:prompt
+            ~max_turns:1
+            ~temperature:0.5
+            ~max_tokens:500
+            ~approval:Approval_callbacks.auto_approve
+            ()
         with
         | Ok result ->
             let text = Agent_sdk_response.text_of_response result.response in
@@ -180,8 +198,7 @@ let handle_deep_review
                 ("review", `String text);
                 ("files_reviewed", `Int (List.length target_files));
               ])
-        | Error err ->
-            let msg = Agent_sdk.Error.to_string err in
+        | Error msg ->
             Log.Misc.warn "adversarial review failed: %s" msg;
             (* Provider failure is surfaced as a successful tool call with
                verdict="unavailable" — the original handler returned

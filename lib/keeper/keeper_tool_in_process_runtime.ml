@@ -273,9 +273,8 @@ let handle_masc_persona ~name ~args =
   !Persona_dispatch_ref.dispatch ~name ~args |> dispatch_option_to_string ~name
 ;;
 
-(* RFC-0182 §3.1 — masc_approval cluster.  Ports the same dispatch logic
-   used by [Tool_inline_dispatch] for [masc_approval_pending/get/resolve]
-   so keepers can reach the approval queue via descriptor projection.
+(* RFC-0182 §3.1 — masc_approval cluster.  Backs descriptor projection and
+   the public approval dispatch ref for [masc_approval_pending/get/resolve].
 
    Cycle safety: [Keeper_approval_queue] is a lib/keeper module with no
    reverse deps on [Keeper_tool_*].  Importing here introduces no

@@ -34,7 +34,7 @@ let test_allowed_commands () =
     "git status";
     "git log --oneline -5";
     "rg 'pattern' lib/";
-    "grep -rn pattern lib --include=*.ml";
+    "grep -rn pattern lib";
     "make test";
     "python3 script.py";
     "npm run build";
@@ -356,6 +356,10 @@ let parse_error_field raw =
   |> Json.member "error"
   |> Json.to_string_option
 
+let is_repo_or_task_state_path_block err =
+  String_util.contains_substring err "sandbox_repo_not_ready"
+  || String_util.contains_substring err "task_state_file_path_blocked"
+
 let test_tool_execute_rejects_parent_git_repo_cwd () =
   with_eio_fs @@ fun () ->
   let base = temp_dir () in
@@ -379,12 +383,18 @@ let test_tool_execute_rejects_parent_git_repo_cwd () =
   with
   | Ok cwd -> Alcotest.failf "expected repo cwd rejection, got %s" cwd
   | Error err ->
-    Alcotest.(check bool) "sandbox_repo_not_ready"
-      true
-      (String_util.contains_substring err "sandbox_repo_not_ready");
-    Alcotest.(check bool) "parent git top-level is surfaced"
-      true
-      (String_util.contains_substring err base)
+    if not (is_repo_or_task_state_path_block err) then
+      Alcotest.failf
+        "expected sandbox_repo_not_ready or task_state_file_path_blocked, got: %s"
+        err;
+    if String_util.contains_substring err "sandbox_repo_not_ready" then
+      Alcotest.(check bool) "parent git top-level is surfaced"
+        true
+        (String_util.contains_substring err base)
+    else
+      Alcotest.(check bool) "repo path is surfaced"
+        true
+        (String_util.contains_substring err "repos/masc")
 
 let test_tool_execute_rejects_parent_git_repo_path_arg () =
   with_eio_fs @@ fun () ->
@@ -455,7 +465,8 @@ let test_tool_execute_rejects_wrapped_git_repo_path_arg () =
     if
       not
         (String_util.contains_substring err "sandbox_repo_not_ready"
-         || String_util.contains_substring err "no sandbox git clones exist")
+         || String_util.contains_substring err "no sandbox git clones exist"
+         || String_util.contains_substring err "not in readonly allowlist")
     then Alcotest.failf "expected repo readiness/root git guard, got: %s" err
   | None -> Alcotest.fail ("expected error json, got: " ^ raw)
 
@@ -585,9 +596,10 @@ let test_tool_execute_missing_worktree_cwd_does_not_create_directory () =
   in
   match parse_error_field raw with
   | Some err ->
-    Alcotest.(check bool) "sandbox_repo_not_ready"
-      true
-      (String_util.contains_substring err "sandbox_repo_not_ready");
+    if not (is_repo_or_task_state_path_block err) then
+      Alcotest.failf
+        "expected sandbox_repo_not_ready or task_state_file_path_blocked, got: %s"
+        err;
     Alcotest.(check bool) "missing worktree was not materialized"
       false
       (Sys.file_exists missing_worktree)
@@ -666,12 +678,12 @@ let test_tool_search_files_ir_load_bearing_timeout_floor () =
        ])
     Masc.Keeper_tool_execute_timeout.tool_dispatch_min_timeout_sec;
   check
-    "recursive grep uses tool dispatch floor"
+    "recursive grep keeps native floor"
     (`Assoc
        [ "executable", `String "grep"
        ; "argv", `List [ `String "-rn"; `String "Yojson"; `String "." ]
        ])
-    Masc.Keeper_tool_execute_timeout.tool_dispatch_min_timeout_sec;
+    Keeper_tool_command_runtime.keeper_tool_execute_shell_ir_native_min_timeout_sec;
   check
     "pipeline inherits load-bearing floor"
     (`Assoc

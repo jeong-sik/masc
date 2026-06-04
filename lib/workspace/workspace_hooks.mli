@@ -96,6 +96,12 @@ val claim_post_provision_failed_fn :
    unit) Atomic.t
 val observe_claim_post_provision_failure :
   site:string -> agent_name:string -> task_id:string -> exn -> unit
+val run_claim_post_provision_best_effort :
+  Workspace_utils_backend_setup.config ->
+  site:string ->
+  agent_name:string ->
+  task_id:string ->
+  unit
 
 val workspace_telemetry_drop_fn : (Workspace_telemetry_drop_event.t -> unit) Atomic.t
 val active_agents_change_fn : ([ `Inc | `Dec ] -> unit) Atomic.t
@@ -167,4 +173,3 @@ val cdal_evidence_gate_decide_fn :
    unit ->
    evidence_gate_verdict)
   Atomic.t
-

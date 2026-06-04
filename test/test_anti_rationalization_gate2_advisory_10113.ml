@@ -101,6 +101,31 @@ let test_build_prompt_no_advisory_section_without_input () =
     false
     (String_util.contains_substring prompt "<gate2_advisory>")
 
+let test_build_prompt_includes_verification_contract () =
+  let req =
+    make_request
+      ~notes:"Implemented feature X, ran test_feature_x, and attached PR #123."
+  in
+  let prompt =
+    AR.build_prompt
+      ~completion_contract:
+        [ "test_feature_x passes"; "PR artifact is attached" ]
+      req
+  in
+  let contains needle = String_util.contains_substring prompt needle in
+  Alcotest.(check bool)
+    "contract section appears in prompt"
+    true
+    (contains "<verification_contract>");
+  Alcotest.(check bool)
+    "first contract item appears"
+    true
+    (contains "test_feature_x passes");
+  Alcotest.(check bool)
+    "prompt tells LLM to reject unmet contract items"
+    true
+    (contains "Reject if the notes do not provide concrete evidence")
+
 (* Counter label vocabulary contract — pin each decision string
    so dashboards keyed on these labels do not silently break.
    These three strings are the only valid values; adding a new
@@ -161,6 +186,8 @@ let () =
             `Quick test_build_prompt_includes_advisory_when_supplied;
           Alcotest.test_case "no advisory section without input"
             `Quick test_build_prompt_no_advisory_section_without_input;
+          Alcotest.test_case "verification contract included"
+            `Quick test_build_prompt_includes_verification_contract;
         ] );
       ( "counter_labels",
         [

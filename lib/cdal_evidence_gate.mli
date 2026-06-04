@@ -1,10 +1,11 @@
-(** Cdal_evidence_gate — task/goal completion verification surface.
+(** Cdal_evidence_gate — explicit task verification evidence surface.
 
-    The single verification gate for [submit_for_verification] /
-    [submit_pr_evidence] / [Done_action when done_redirects_to_verification].
+    The evidence gate for [submit_for_verification] / [submit_pr_evidence].
+    Normal [Done_action] completion is LLM-reviewed by
+    {!Anti_rationalization}; it is not redirected through a verifier keeper.
 
-    Task/goal completion is verified by the presence of evidence the
-    verifier keeper / human reviewer can inspect downstream — substantive
+    Explicit verification submission is checked for the presence of evidence
+    the reviewer can inspect downstream — substantive
     notes plus the contract's [required_evidence] entries, or a handoff
     reference (file path, PR number, commit hash, trace id, or any
     reference URL). There is no internal proof/verdict pipeline.

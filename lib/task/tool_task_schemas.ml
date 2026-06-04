@@ -32,7 +32,7 @@ let schemas : Masc_domain.tool_schema list = [
     description = Printf.sprintf
       "Add a new task to the backlog for agents to claim. \
 Tasks default to an advisory verification contract with completion/evidence requirements. \
-Normal status flow is todo → claimed → awaiting_verification → done/cancelled when verification FSM is enabled. \
+Normal completion flow is todo → claimed → done/cancelled; explicit submit_for_verification routes through awaiting_verification. \
 Priority 1=urgent, 5=low (default 3). \
 Returns task-XXX ID for tracking. \
 Example: %s({title: 'Fix login bug', priority: 1, description: 'Users cannot login with SSO'})"
@@ -227,7 +227,8 @@ Use submit_pr_evidence to submit a merged PR as evidence for a todo task that re
 unavailable to you — this transitions the task directly to awaiting_verification so an agent \
 with the required tools can verify and close it. For compatibility, \
 submit_for_verification with evidence on a todo task is treated as submit_pr_evidence. \
-Tasks created through %s normally route action='done' into awaiting_verification rather than final done."
+Tasks created through %s complete via action='done' after LLM completion review; \
+they do not route normal completion through the verifier keeper."
       masc_add_task_name
       masc_claim_next_name
       masc_add_task_name;

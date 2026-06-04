@@ -648,5 +648,6 @@ let install () =
     | Cdal_evidence_gate.Reject { reason; rule_id; hint; payload_json } ->
       Workspace_hooks.Reject { reason; rule_id; hint; payload_json }
   in
-  Atomic.set Workspace_hooks.cdal_evidence_gate_decide_fn decide_hook
+  Atomic.set Workspace_hooks.cdal_evidence_gate_decide_fn decide_hook;
+  ()
 ;;

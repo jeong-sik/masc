@@ -606,6 +606,28 @@ jobs:
           wait "${heartbeat_pid}" 2>/dev/null || true
           exit "${build_status}"
 
+      - name: Sublib boundary gate against real dune graph (RFC-0056 G1)
+        # The self-test (in the Meta Guards job) only validates the checker
+        # against synthetic fixtures. This step runs the SAME checker against
+        # the REAL dependency graph emitted by `dune describe`, asserting that
+        # the extracted leaf libraries (masc_goal, attribution, exec_policy,
+        # keeper_state, masc_tool_dispatch) never re-acquire a transitive
+        # `requires` edge back into the flat mega-library `masc`.
+        #
+        # Hard-fail (no continue-on-error): a future PR that re-couples a leaf
+        # to the mega-lib via its dune (libraries ...) must block merge. As of
+        # wiring (2026-06-04) the real graph is CLEAN, so --fail mode is safe.
+        #
+        # Why here and not next to the self-test (Meta Guards, ~L385): that job
+        # is shell-only (ripgrep, no OCaml toolchain). `dune describe` requires
+        # the toolchain that only this Build job sets up. We invoke dune through
+        # `opam exec` (bare `dune` is not on PATH in CI) and feed the captured
+        # describe sexp to the pure-python checker via --describe-file.
+        # See: docs/rfc/RFC-0056-incremental-sublib-extraction.md G1, #19824.
+        run: |
+          opam exec -- dune describe --root . > "$RUNNER_TEMP/sublib-describe.sexp"
+          python3 scripts/audit-sublib-cycle.py --describe-file "$RUNNER_TEMP/sublib-describe.sexp"
+
       - name: Runtime TOML validity gate
         # RFC-0058 §9: config/keeper_runtime.toml is the authoring SSOT.
         # runtime.json is no longer generated or committed, so the old

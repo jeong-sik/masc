@@ -63,7 +63,7 @@ A directory `lib/<X>/` may be promoted to a wrapped sub-library if and only if a
 
 | Gate | Definition | Verification |
 |---|---|---|
-| **G1: No cycle** | The candidate's outbound module references resolve to (a) sub-libraries declared in its `dune` `(libraries ...)`, (b) the proposed sub-library's own modules, or (c) modules that the new sub-library declares as dependencies. No reference goes back into `masc` flat namespace. | `python3 scripts/audit-sublib-cycle.py lib/<X>` (to be added) |
+| **G1: No cycle** | The candidate's outbound module references resolve to (a) sub-libraries declared in its `dune` `(libraries ...)`, (b) the proposed sub-library's own modules, or (c) modules that the new sub-library declares as dependencies. No reference goes back into `masc` flat namespace. | `python3 scripts/audit-sublib-cycle.py --root .` — wired in CI (`.github/workflows/ci.yml`, Build and Test job) against the real `dune describe` graph (#19824, 2026-06-04). A `--self-test` fixture dual-check also runs in the Meta Guards job. As of wiring the real graph is clean, so the real-graph step runs in hard-fail mode (a future leaf re-coupling to `masc` blocks merge). |
 | **G2: No `.mli` change** | Public interfaces of moved modules remain byte-identical. Phase 0 may not narrow or widen any signature. | `git diff --stat lib/**/<X>*.mli == 0` |
 | **G3: No caller rename** | Callers of moved modules continue to write `Foo` (not `Bar.Foo`). Achieved via `(wrapped false)` on the new library. | `git diff lib/ test/ bin/` shows no `open` / module-prefix changes outside the moved files |
 | **G4: Build green on `@check`** | `dune build @check` succeeds locally and on CI Fundamental. | CI status |

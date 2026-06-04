@@ -7,7 +7,7 @@
     confirm the new module preserves the diagnostic. *)
 
 open Masc
-module J = Json_field
+module J = Masc.Json_field
 
 let assoc fields : Yojson.Safe.t = `Assoc fields
 

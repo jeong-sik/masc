@@ -566,12 +566,6 @@ let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
     | Skip_generate_probe Model_unloaded -> true
     | _ -> false
   in
-  (match generate_skip_reason with
-   | Some reason ->
-       Prometheus.inc_counter
-         Prometheus.metric_runtime_ollama_probe_generate_skips
-         ~labels:[("reason", reason)] ()
-   | None -> ());
   let after_status, loaded_after, after_error =
     fetch_ollama_ps ~timeout_sec:ps_timeout_sec ~server_url ()
   in

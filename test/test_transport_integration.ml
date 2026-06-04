@@ -272,7 +272,7 @@ let test_all_protocol_variants_roundtrip () =
   ) all
 
 let test_agent_transport_all_variants () =
-  let module At = Masc.Masc_grpc_transport in
+  let module At = Masc_grpc_transport in
   let all = [At.Http; At.Grpc; At.Ws; At.Webrtc; At.Local] in
   List.iter (fun t ->
     let s = At.to_string t in

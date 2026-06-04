@@ -1,0 +1,7 @@
+(include_subdirs no)
+
+(library
+ (name pool_metrics)
+ (public_name masc.pool_metrics)
+ (wrapped false)
+ (libraries masc.http_client))

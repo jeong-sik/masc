@@ -164,20 +164,20 @@ let test_transport_from_env_default () =
   (* When MASC_AGENT_TRANSPORT is not set, should return Local *)
   let saved = Sys.getenv_opt "MASC_AGENT_TRANSPORT" in
   Unix.putenv "MASC_AGENT_TRANSPORT" "";
-  let t = Masc.Masc_grpc_transport.from_env () in
+  let t = Masc_grpc_transport.from_env () in
   (match saved with
    | Some v -> Unix.putenv "MASC_AGENT_TRANSPORT" v
    | None -> Unix.putenv "MASC_AGENT_TRANSPORT" "");
   Alcotest.(check string) "default is local"
-    "local" (Masc.Masc_grpc_transport.to_string t)
+    "local" (Masc_grpc_transport.to_string t)
 
 let test_transport_to_string () =
   Alcotest.(check string) "http"
-    "http" (Masc.Masc_grpc_transport.to_string Masc.Masc_grpc_transport.Http);
+    "http" (Masc_grpc_transport.to_string Masc_grpc_transport.Http);
   Alcotest.(check string) "grpc"
-    "grpc" (Masc.Masc_grpc_transport.to_string Masc.Masc_grpc_transport.Grpc);
+    "grpc" (Masc_grpc_transport.to_string Masc_grpc_transport.Grpc);
   Alcotest.(check string) "local"
-    "local" (Masc.Masc_grpc_transport.to_string Masc.Masc_grpc_transport.Local)
+    "local" (Masc_grpc_transport.to_string Masc_grpc_transport.Local)
 
 let test_subscribe_request_serde () =
   let req : T.SubscribeRequest.t = {

@@ -49,7 +49,7 @@ max-concurrent = 1
 let init_runtime_default_for_tests () =
   let path = Filename.temp_file "keeper_effective_meta_runtime_" ".toml" in
   write_file path runtime_toml;
-  match Masc.Runtime.init_default ~config_path:path with
+  match Runtime.init_default ~config_path:path with
   | Ok () -> ()
   | Error e -> Alcotest.failf "Runtime.init_default failed: %s" e
 ;;

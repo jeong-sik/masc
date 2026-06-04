@@ -8,11 +8,6 @@ val keeper_allowed_tool_names
   -> keeper_meta
   -> string list
 
-val keeper_allowed_model_tools
-  :  ?write_done:bool
-  -> keeper_meta
-  -> Masc_domain.tool_schema list
-
 (** Universe tool names: candidates minus denied, no policy filter.
     Superset of [keeper_allowed_tool_names].  Used as the BM25 retrieval
     scope so progressive disclosure can surface tools beyond the active
@@ -145,9 +140,6 @@ val should_apply_circuit_breaker_to_failure_payload : string -> bool
 
 (** masc_* tool names available for a keeper (filtered by allowlist/denylist). *)
 val keeper_masc_tool_names : keeper_meta -> string list
-
-(** masc_* tool schemas available for a keeper (filtered by allowlist/denylist). *)
-val keeper_masc_tool_schemas : keeper_meta -> Masc_domain.tool_schema list
 
 (** Compute the keeper's sender identity for broadcasts.
     Guards against double "keeper-" prefix. See #5104. *)

@@ -2,7 +2,7 @@
 (** Tool_inline_dispatch — thin dispatch router for inline tool handlers.
 
     Delegates to sub-modules for workspace, comm, and extra tool handling.
-    Keeps inline: mcp_session, approval, spawn, discover_tools.
+    Keeps inline: mcp_session, approval, and spawn.
 
     @since 0.1.0 *)
 
@@ -37,11 +37,3 @@ type context = Tool_inline_dispatch_types.context = {
 (** {1 Dispatch} *)
 
 val dispatch : context -> name:string -> Tool_result.result option
-
-module For_testing : sig
-  val discover_tools_json :
-       query:string
-    -> limit:int
-    -> Masc_domain.tool_schema list
-    -> Yojson.Safe.t
-end

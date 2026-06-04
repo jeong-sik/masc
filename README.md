@@ -1,7 +1,7 @@
 # masc
 
 [![OCaml](https://img.shields.io/badge/OCaml-5.4+-orange.svg)](https://ocaml.org/)
-[![OAS](https://img.shields.io/badge/agent__sdk-%E2%89%A50.202.0-blue.svg)](https://github.com/jeong-sik/oas)
+[![OAS](https://img.shields.io/badge/agent__sdk-%E2%89%A50.203.0-blue.svg)](https://github.com/jeong-sik/oas)
 
 > **개인 프로젝트입니다. 저자(jeong-sik / yousleepwhen) 한 사람이 자기 노트북에서 자기 워크플로우를 위해 만든 도구입니다.** 프로덕션 SLA, 외부 지원, 호환성 보증, 응답 시간 약속이 *전혀* 없습니다. 외부에서 production 으로 쓰지 마세요. 스키마, 도구 surface, 대시보드, CLI flag 는 매우 빠르게 바뀝니다 — 이 README 가 본 1000 PR 윈도우 (#14012 → #15155) 는 2026-05-07 부터 2026-05-14 까지 7일 만에 머지된 분량입니다.
 >

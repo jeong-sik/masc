@@ -1,15 +1,15 @@
-(** Tool_inline_dispatch_types — shared types for inline dispatch modules.
+(** Mcp_tool_runtime_types — shared types for MCP server-local tool modules.
 
     Extracted to avoid circular dependencies between
-    [tool_inline_dispatch], [tool_inline_dispatch_workspace], and
-    [tool_inline_dispatch_comm]. *)
+    [mcp_tool_runtime], [mcp_tool_runtime_workspace], and
+    [mcp_tool_runtime_comm]. *)
 
 type tool_result = Tool_result.result
-(** Structural alias — all inline dispatch handlers return
+(** Structural alias — all MCP runtime handlers return
     [Tool_result.result option]. *)
 
 (** Context record capturing all bindings from [execute_tool_eio]
-    that the inline dispatch block needs. Pure data — callers
+    that the MCP runtime block needs. Pure data — callers
     populate all fields. *)
 type context = {
   config : Workspace.config;

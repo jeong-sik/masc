@@ -2,7 +2,7 @@
 
     Only schemas dispatched by Tool_workspace remain here.
     Other schemas have been moved to their owning modules:
-      Tool_inline_dispatch (via Tool_schemas_inline) *)
+      Mcp_tool_runtime (via Tool_schemas_inline) *)
 
 open Masc_domain
 

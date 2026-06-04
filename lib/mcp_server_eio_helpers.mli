@@ -1,6 +1,6 @@
 (** Mcp_server_eio_helpers — small utility functions extracted
     from [mcp_server_eio.ml] so [mcp_server_eio.ml] and
-    [tool_inline_dispatch.ml] can share them without a circular
+    [mcp_tool_runtime.ml] can share them without a circular
     dependency.
 
     Both helpers re-raise [Eio.Cancel.Cancelled] so an ambient

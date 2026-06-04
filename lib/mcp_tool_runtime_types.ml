@@ -15,15 +15,15 @@ module Char = Stdlib.Char
 module Int = Stdlib.Int
 module Float = Stdlib.Float
 
-(** Tool_inline_dispatch_types — shared types for inline dispatch modules.
+(** Mcp_tool_runtime_types — shared types for MCP server-local tool modules.
 
     Extracted to avoid circular dependencies between
-    tool_inline_dispatch, tool_inline_dispatch_workspace, and tool_inline_dispatch_comm. *)
+    mcp_tool_runtime, mcp_tool_runtime_workspace, and mcp_tool_runtime_comm. *)
 
 type tool_result = Tool_result.result
 
 (** Context record capturing all bindings from execute_tool_eio
-    that the inline dispatch block needs. *)
+    that the MCP runtime block needs. *)
 type context = {
   config : Workspace.config;
   agent_name : string;

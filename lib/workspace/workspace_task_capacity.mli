@@ -4,7 +4,7 @@
     By living in [lib/workspace/], the cap helpers are reachable from all 5 task
     creation entrypoints without violating layering (workspace ← keeper, but
     keeper ↛ workspace-callers like [tool_task], [task_dispatch],
-    [tool_inline_dispatch_workspace], [operator/operator_control]).
+    [mcp_tool_runtime_workspace], [operator/operator_control]).
 
     The cap rejects creation of a 4th open task linked to the same
     [goal_id]. Tasks with no [goal_id] (orphan tasks) are not capped. *)

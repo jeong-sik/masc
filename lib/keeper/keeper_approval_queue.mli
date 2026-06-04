@@ -257,7 +257,7 @@ val resolve_with_policy :
 
 (** Convenience over [resolve_with_policy] that discards the
     resolution result. Called from the dashboard approval HTTP
-    handler and the MCP inline dispatch. *)
+    handler and the MCP runtime. *)
 val resolve :
   id:string ->
   decision:Agent_sdk.Hooks.approval_decision ->

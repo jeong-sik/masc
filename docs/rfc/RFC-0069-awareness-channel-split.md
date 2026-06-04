@@ -101,7 +101,7 @@ let broadcast ?trace_context config ~from_agent ~content =
 | `workspace_lifecycle.rejoin` | `workspace_lifecycle.ml:108` | `👋 <agent> rebound the namespace` |
 | `workspace_lifecycle.join` | `workspace_lifecycle.ml:172` | `👋 <agent> bound the namespace` |
 | `workspace_lifecycle.leave` | `workspace_lifecycle.ml:237` | `👋 <agent> left the namespace` |
-| 사용자 채팅/멘션 | `tool_inline_dispatch_comm.ml:37` 경유 | 일반 broadcast (멘션 포함) |
+| 사용자 채팅/멘션 | `mcp_tool_runtime_comm.ml:37` 경유 | 일반 broadcast (멘션 포함) |
 
 확인된 사실: **`workspace_gc.ml:17` `heartbeat` 함수는 broadcast 채널에 publish하지 않는다.**
 heartbeat는 `agent_file`의 `last_seen`만 갱신한다. heartbeat가 채널 트래픽을 만드는

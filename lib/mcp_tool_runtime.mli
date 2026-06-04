@@ -1,16 +1,16 @@
 
-(** Tool_inline_dispatch — thin dispatch router for inline tool handlers.
+(** Mcp_tool_runtime — MCP server-local tool runtime.
 
-    Delegates to sub-modules for workspace, comm, and extra tool handling.
-    Keeps inline: mcp_session plus MCP-state helpers.
+    Delegates to sub-modules for workspace, comm, and board tool handling.
+    Keeps MCP-only server helpers that need per-request server state.
 
     @since 0.1.0 *)
 
-(** {1 Types} (re-exported from Tool_inline_dispatch_types) *)
+(** {1 Types} (re-exported from Mcp_tool_runtime_types) *)
 
-type tool_result = Tool_inline_dispatch_types.tool_result
+type tool_result = Mcp_tool_runtime_types.tool_result
 
-type context = Tool_inline_dispatch_types.context = {
+type context = Mcp_tool_runtime_types.context = {
   config : Workspace.config;
   agent_name : string;
   registry : Session.registry;

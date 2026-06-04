@@ -18,7 +18,7 @@ Both code phases shipped same-day as the RFC body:
 | Phase | PR | Scope | Merged |
 |-------|-----|------|--------|
 | PR-1 | #16948 | `lib/tool_error.{ml,mli}` 7-variant closed sum + `of_exn` mapping + 7 Alcotest cases | 2026-05-20 |
-| PR-2 | #16958 | 6 LLM-facing site codemod (`tool_library` 3 + `retired_file_write_tool` 2 + `tool_inline_dispatch_workspace` 1) + RFC §1.1 hallucination correction (audit-cited 8 sites → measured 6 sites with line-drift fixes) | 2026-05-20 |
+| PR-2 | #16958 | 6 LLM-facing site codemod (`tool_library` 3 + `retired_file_write_tool` 2 + `mcp_tool_runtime_workspace` 1) + RFC §1.1 hallucination correction (audit-cited 8 sites → measured 6 sites with line-drift fixes) | 2026-05-20 |
 
 The closed-sum post-condition described in §2 (compile-time exhaustive
 match across all LLM-facing failure surfaces) holds — `rg
@@ -85,7 +85,7 @@ LLM 이 호출하는 tool 들의 *실패 분류* 가 현재 `Failure msg` (catch
 | `lib/tool_library.ml` | 324 | `Tool_result.error ... (sprintf "Promote error: %s" ...)` | library promote 실패 |
 | `retired file-write tool module` | 452 | `Tool_result.error ... (Printf.sprintf "Write failed: %s" ...)` | write 분기 |
 | `retired file-write tool module` | 582 | `Tool_result.error ... (Printf.sprintf "Edit failed: %s" ...)` | edit 분기 |
-| `lib/tool_inline_dispatch_workspace.ml` | 95 | `let msg = Printexc.to_string exn in ... Error msg` → 후속 `Tool_result.error` | indirect surface — join 실패 |
+| `lib/mcp_tool_runtime_workspace.ml` | 95 | `let msg = Printexc.to_string exn in ... Error msg` → 후속 `Tool_result.error` | indirect surface — join 실패 |
 
 검증 grep:
 
@@ -97,7 +97,7 @@ rg 'Tool_result\.error.*Printexc\.to_string|let\s+\w+\s*=\s*Printexc\.to_string'
 
 다음 site 의 `Printexc.to_string exn` 은 *Log.warn/debug/error* 로만 흘러 LLM-facing 아님. 본 RFC 의 *비-목표*:
 
-- `lib/tool_inline_dispatch_workspace.ml:192,246` (`Log.Gc.debug/error`, `Log.Institution.warn`)
+- `lib/mcp_tool_runtime_workspace.ml:192,246` (`Log.Gc.debug/error`, `Log.Institution.warn`)
 - `lib/tool_workspace.ml:169,191,205,213,221` (모두 `Log.Workspace.warn`)
 - `lib/tool_agent.ml:230` (`Log.Agent.warn` 추정)
 - `lib/tool_assignment_telemetry.ml:342` (telemetry observation, LLM-facing 여부 별도 audit 필요 — 보수적으로 본 PR 제외)
@@ -204,7 +204,7 @@ LLM-side prompt 는 *kind* field 만으로 1차 분류 가능. *detail* 은 user
 | PR | Scope | LoC 추정 | Blocker |
 |----|-------|---------|---------|
 | **PR-1** | `Tool_error.t` 모듈 + 6 Alcotest | +250 / -0 | (본 RFC 머지) |
-| **PR-2** | **실측 6 site codemod** (`tool_library` × 3 + `retired_file_write_tool` × 2 + `tool_inline_dispatch_workspace` × 1) + backsliding lint. (원본 audit 의 "8 sites" 는 §1.3 hallucination — 실측 정정.) | +60 / -30 | PR-1 |
+| **PR-2** | **실측 6 site codemod** (`tool_library` × 3 + `retired_file_write_tool` × 2 + `mcp_tool_runtime_workspace` × 1) + backsliding lint. (원본 audit 의 "8 sites" 는 §1.3 hallucination — 실측 정정.) | +60 / -30 | PR-1 |
 | **PR-3** | LLM prompt 의 `kind` field 인식 추가 (`prompts/keeper-tool-error-instruct.md`) | +30 / -5 | PR-2 + 1주일 production canary |
 | **PR-4** (optional) | 2차 사이트 (~22) codemod — keeper hook / persistence 영역 | +400 / -150 | PR-2 |
 

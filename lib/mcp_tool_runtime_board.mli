@@ -1,10 +1,8 @@
-(** Tool_inline_dispatch_extra — fallback inline-tool dispatch
-    branch (board / mention handlers extracted from
-    {!Tool_inline_dispatch}).
+(** Mcp_tool_runtime_board — MCP server-local board tool runtime.
 
     Two external entries:
-    - {!dispatch}: invoked when the main inline dispatch table has
-      no match (catch-all branch in {!Tool_inline_dispatch.dispatch}).
+    - {!dispatch}: invoked when the main MCP runtime router has
+      no match (catch-all branch in {!Mcp_tool_runtime.dispatch}).
     - {!ensure_board_post_author}: caller-identity enforcement on
       [masc_board_post] [author] field, exposed for direct test
       coverage.
@@ -50,7 +48,7 @@ val enforce_caller_identity :
     [_comment_vote]).  Prefer {!ensure_board_post_author} for the
     [masc_board_post]/[author] specialisation. *)
 
-(** {1 Inline dispatch fallback} *)
+(** {1 MCP runtime fallback} *)
 
 val dispatch :
   config:Workspace.config ->
@@ -63,8 +61,8 @@ val dispatch :
   start_time:float ->
   Tool_result.result option
 (** [dispatch ~config ~agent_name ~arguments ~state ~sw ~clock
-      ~name ~start_time] handles inline dispatch for tool [name]
-    when the main table has no match.  Currently routes:
+      ~name ~start_time] handles MCP server-local routing for tool [name]
+    when the main runtime router has no match.  Currently routes:
 
     - [masc_board_post] -> identity enforcement +
       {!Board_dispatch.create_post} +

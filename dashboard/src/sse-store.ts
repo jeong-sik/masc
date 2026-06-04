@@ -132,16 +132,16 @@ interface SimpleRoute {
 // corresponding server emitter exists in lib/ are kept; dead keys were
 // removed after cross-referencing the OCaml sources under lib/.
 const SIMPLE_ROUTES: Record<string, SimpleRoute> = {
-  // Agent lifecycle — emitted by lib/tool_inline_dispatch_workspace.ml
+  // Agent lifecycle — emitted by lib/mcp_tool_runtime_workspace.ml
   'masc/agent_bound':  { target: 'execution' },
   'masc/agent_unbound':    { target: 'execution' },
-  // Broadcasts — emitted by lib/tool_inline_dispatch_comm.ml
+  // Broadcasts — emitted by lib/mcp_tool_runtime_comm.ml
   'masc/broadcast':     { target: 'execution' },
   // Keeper lifecycle (also triggers operator refresh via handler)
   keeper_handoff:       { target: 'execution' },
   keeper_compaction:    { target: 'execution' },
   keeper_phase_changed: { target: 'execution' },
-  // Board content — emitted by lib/tool_inline_dispatch_extra.ml
+  // Board content — emitted by lib/mcp_tool_runtime_board.ml
   'masc/board_post':    { target: 'board' },
   board_comment:        { target: 'board' },
   'masc/board_delete':  { target: 'board' },

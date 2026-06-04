@@ -11,7 +11,6 @@
 type call_source =
   | External_mcp
   | Agent_internal
-  | Inline_dispatch
 
 type call_stats = {
   call_count : int Atomic.t;
@@ -21,7 +20,6 @@ type call_stats = {
   total_duration_ms : int Atomic.t;
   external_mcp_count : int Atomic.t;
   agent_internal_count : int Atomic.t;
-  inline_dispatch_count : int Atomic.t;
   last_assignment_id : string option Atomic.t;
 }
 

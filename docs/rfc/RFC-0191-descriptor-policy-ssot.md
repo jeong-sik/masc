@@ -86,7 +86,7 @@ type policy =
     audience             : audience_class
     (* Tool-access grant required to expose this tool. *)
   ; required_tool_access : string option
-    (* Whether the tool is permitted on the inline-dispatch fast path
+    (* Whether the tool is permitted on the MCP-runtime fast path
        (no Eio plumbing). Currently a hand list. *)
   ; inline_safe          : bool
   ; (* Maintenance-only tools require an explicit operator gate. *)

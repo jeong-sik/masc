@@ -15,20 +15,20 @@ module Char = Stdlib.Char
 module Int = Stdlib.Int
 module Float = Stdlib.Float
 
-(** Tool_inline_dispatch_workspace — project startup tool handler.
+(** Mcp_tool_runtime_workspace — project startup tool handler.
 
     Handles: masc_start.
 
-    Extracted from tool_inline_dispatch.ml to reduce file size. *)
+    Extracted from mcp_tool_runtime.ml to keep the runtime router small. *)
 
 module Planning_eio = Task.Planning_eio
 
-open Tool_inline_dispatch_types
+open Mcp_tool_runtime_types
 
 (* RFC-0189 PR-2: lifecycle handlers return [Tool_result.result option]
-   directly, matching the shared inline dispatch alias. *)
+   directly, matching the shared MCP runtime alias. *)
 
-let inline_ok ~tool_name ~start_time body : Tool_result.result =
+let runtime_ok ~tool_name ~start_time body : Tool_result.result =
   let data =
     match Tool_result.structured_payload_of_message body with
     | Some json -> json
@@ -37,7 +37,7 @@ let inline_ok ~tool_name ~start_time body : Tool_result.result =
   Tool_result.make_ok ~tool_name ~start_time ~data ()
 ;;
 
-let inline_err_runtime ~tool_name ~start_time msg : Tool_result.result =
+let runtime_err_runtime ~tool_name ~start_time msg : Tool_result.result =
   Tool_result.make_err
     ~tool_name
     ~class_:Tool_result.Runtime_failure
@@ -45,7 +45,7 @@ let inline_err_runtime ~tool_name ~start_time msg : Tool_result.result =
     msg
 ;;
 
-let inline_err_workflow ~tool_name ~start_time msg : Tool_result.result =
+let runtime_err_workflow ~tool_name ~start_time msg : Tool_result.result =
   Tool_result.make_err
     ~tool_name
     ~class_:Tool_result.Workflow_rejection
@@ -112,7 +112,7 @@ let handle_start ~tool_name ~start_time (ctx : context) : Tool_result.result opt
       (* workspace_result Error sources are all caller-input rejections:
          missing [path] argument or non-existent directory. *)
       Some
-        (inline_err_workflow ~tool_name ~start_time
+        (runtime_err_workflow ~tool_name ~start_time
            (Printf.sprintf "masc_start failed while setting project scope: %s" e))
   | Ok active_config ->
     (* Step 2: bind session (idempotent) *)
@@ -128,13 +128,13 @@ let handle_start ~tool_name ~start_time (ctx : context) : Tool_result.result opt
     | Error e ->
       (* Session binding exception caught from [Workspace.bind_session] — internal failure. *)
       Some
-        (inline_err_runtime ~tool_name ~start_time
+        (runtime_err_runtime ~tool_name ~start_time
            (Printf.sprintf "masc_start failed while binding agent session: %s" e))
     | Ok () ->
       (* Step 3: add_task + claim + plan_set_task (if task_title provided) *)
       if String.equal task_title "" then
         Some
-          (inline_ok ~tool_name ~start_time
+          (runtime_ok ~tool_name ~start_time
              (Printf.sprintf
                 "masc_start complete (project scope set + session bound as %s). No task created — use %s to create one."
                 agent_name
@@ -167,7 +167,7 @@ let handle_start ~tool_name ~start_time (ctx : context) : Tool_result.result opt
         in
         if String.equal task_id "" then
           Some
-            (inline_ok ~tool_name ~start_time
+            (runtime_ok ~tool_name ~start_time
                (Printf.sprintf
                   "masc_start partial: session bound as %s, but task creation failed: %s"
                   agent_name add_result))
@@ -176,10 +176,10 @@ let handle_start ~tool_name ~start_time (ctx : context) : Tool_result.result opt
           match Planning_eio.set_current_task active_config ~task_id with
           | Error msg ->
             (* [Planning_eio.set_current_task] internal store failure. *)
-            Some (inline_err_runtime ~tool_name ~start_time msg)
+            Some (runtime_err_runtime ~tool_name ~start_time msg)
           | Ok () ->
               Some
-                (inline_ok ~tool_name ~start_time
+                (runtime_ok ~tool_name ~start_time
                    (Printf.sprintf
                       "masc_start complete: project scope set, session bound as %s, task %s created+claimed+set as current."
                       agent_name task_id))

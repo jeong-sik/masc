@@ -1,7 +1,7 @@
 (** Mcp_server_eio_governance — Governance configuration and MCP session helpers
 
     Extracted from mcp_server_eio.ml to reduce file size and enable reuse
-    from Tool_inline_dispatch without circular dependencies.
+    from Mcp_tool_runtime without circular dependencies.
 *)
 
 (** {1 Governance} *)

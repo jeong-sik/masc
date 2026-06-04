@@ -15,17 +15,17 @@ module Char = Stdlib.Char
 module Int = Stdlib.Int
 module Float = Stdlib.Float
 
-(** Tool_inline_dispatch_comm — communication tool handlers.
+(** Mcp_tool_runtime_comm — communication tool handlers.
 
     Handles: masc_broadcast, masc_messages.
 
-    Extracted from tool_inline_dispatch.ml to reduce file size. *)
+    Extracted from mcp_tool_runtime.ml to keep the runtime router small. *)
 
-open Tool_inline_dispatch_types
+open Mcp_tool_runtime_types
 
-type tool_result = Tool_inline_dispatch_types.tool_result
+type tool_result = Mcp_tool_runtime_types.tool_result
 
-type context = Tool_inline_dispatch_types.context
+type context = Mcp_tool_runtime_types.context
 
 (** Argument extraction helpers bound to ctx.arguments. *)
 let arg_get_string ctx key default =
@@ -69,7 +69,7 @@ let handle_broadcast ~tool_name ~start_time (ctx : context) : tool_result option
       Workspace_task_cache_invariant.rewrite_broadcast_content
         ~config
         ~from_agent:agent_name
-        ~module_name:"tool_inline_dispatch_comm"
+        ~module_name:"mcp_tool_runtime_comm"
         ~content:message
     in
     let trace_context = Otel_trace_context.from_ambient () in

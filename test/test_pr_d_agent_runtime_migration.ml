@@ -41,7 +41,7 @@ let count_across_files ~files ~needle =
 
 let consumer_files =
   [ "lib/mcp_server_eio_execute.ml"
-  ; "lib/tool_inline_dispatch_workspace.ml"
+  ; "lib/mcp_tool_runtime_workspace.ml"
   ]
 ;;
 

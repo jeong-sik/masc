@@ -91,6 +91,7 @@
   (re_export masc.keeper_sandbox_error)
   (re_export masc.keeper_provider_error_class)
   (re_export masc.keeper_failure_taxonomy)
+  (re_export masc.keeper_world_observation_turn_types)
   ;; Model inference metrics + runtime provider label leaves.
   (re_export masc.runtime_provider_labels)
   (re_export masc.model_inference_metrics)

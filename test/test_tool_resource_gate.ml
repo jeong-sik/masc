@@ -84,14 +84,14 @@ let test_classifies_host_local_bottlenecks () =
   check
     string
     "Write public alias"
-    "filesystem_write"
+    "workspace_write"
     (classify
        "Write"
        ~args:(`Assoc [ "file_path", `String "x"; "content", `String "y" ]));
   check
     string
     "Edit public alias"
-    "filesystem_write"
+    "workspace_write"
     (classify
        "Edit"
        ~args:
@@ -282,18 +282,16 @@ let test_mixed_24_keeper_burst_stays_bounded () =
            ~shell:2
            ~github:2
            ~docker:1
-           ~filesystem_write:3
            ~board_write:2
-           ~workspace_write:2
+           ~workspace_write:3
            ();
          with_env "MASC_TOOL_GATE_WAIT_TIMEOUT_SEC" "3.0" (fun () ->
            let clock = Eio.Stdenv.clock env in
            let shell = lane_tracker "shell" 2 in
            let github = lane_tracker "github" 2 in
            let docker = lane_tracker "docker" 1 in
-           let fs_write = lane_tracker "filesystem_write" 3 in
            let board = lane_tracker "board_write" 2 in
-           let workspace = lane_tracker "workspace_write" 2 in
+           let workspace = lane_tracker "workspace_write" 3 in
            let cases =
              []
              |> add_cases 4
@@ -315,7 +313,7 @@ let test_mixed_24_keeper_burst_stays_bounded () =
                       ; "argv", `List [ `String "ps" ]
                       ] )
              |> add_cases 4
-                  ( fs_write
+                  ( workspace
                   , "tool_write_file"
                   , `Assoc [ "path", `String "x"; "content", `String "y" ] )
              |> add_cases 4 (board, "masc_board_post", `Assoc [])
@@ -352,7 +350,7 @@ let test_mixed_24_keeper_burst_stays_bounded () =
                   (Atomic.get tracker.max_inflight <= tracker.limit);
                 check int (tracker.lane ^ " permit released") 0
                   (Atomic.get tracker.inflight))
-             [ shell; github; docker; fs_write; board; workspace ])))
+             [ shell; github; docker; board; workspace ])))
 ;;
 
 let () =

@@ -20,9 +20,9 @@ type cap_flags = {
 (** Deduce capability flags for a known binary. *)
 let classify_flags : Masc_exec.Exec_program.known -> cap_flags = function
   (* Read-only filesystem operations *)
-  | Ls | Cat | Pwd | Echo | Head | Tail | Rg | Grep | Find | Which 
-  | Test | Basename | Dirname | Stat | Du | Df | Sort | Uniq | Wc 
-  | Cut | Tr | File | Printf | Date | Env | Printenv | Hostname 
+  | Ls | Cat | Pwd | Echo | Head | Tail | Rg | Grep | Find | Which
+  | Test | Basename | Dirname | Stat | Du | Df | Sort | Uniq | Wc
+  | Cut | Tr | File | Printf | Date | Env | Printenv | Hostname
   | Whoami | Uname | Ps | Tty ->
       { read_fs = true; write_fs = false; network = false; spawn = false }
 
@@ -36,10 +36,10 @@ let classify_flags : Masc_exec.Exec_program.known -> cap_flags = function
 
   (* Write + Network + Spawn operations (highest capability required) *)
   | Sudo | Su | Chmod | Chown | Rm | Dd | Mkfs
-  | Docker | Npm | Node | Npx | Yarn | Pnpm | Pip | Python | Python3 
-  | Pytest | Pyright | Ruff | Opam | Ocamlfind | Tsc | Cargo | Rustc 
-  | Go | Gofmt | Gradle | Java | Javac | Mvn | Ninja | Uv | Make | Cmake 
-  | Dune_local_sh | Terminal_notifier | Osascript | Play | Rec | Ffplay 
+  | Docker | Npm | Node | Npx | Yarn | Pnpm | Pip | Python | Python3
+  | Pytest | Pyright | Ruff | Opam | Ocamlfind | Tsc | Cargo | Rustc
+  | Go | Gofmt | Gradle | Java | Javac | Mvn | Ninja | Uv | Make | Cmake
+  | Dune_local_sh | Terminal_notifier | Osascript | Play | Rec | Ffplay
   | Mpg123 | Open | Xargs ->
       { read_fs = true; write_fs = true; network = true; spawn = true }
 

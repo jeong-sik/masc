@@ -47,7 +47,6 @@ val validate_paths :
 (** Validate Shell IR path arguments through the keeper Shell IR facade. *)
 
 val tool_execute_command_context :
-  ?caller:Masc_exec_command_gate.Shell_command_gate.caller ->
   ?allow_pipes:bool ->
   allowed_commands:string list ->
   string ->
@@ -60,7 +59,6 @@ val tool_execute_command_context :
 val dispatch_classified :
   ?timeout_sec:float ->
   ?before_path_validation:(Masc_exec.Shell_ir.t -> (unit, string) result) ->
-  ?caller:Masc_exec_command_gate.Shell_command_gate.caller ->
   ?allow_pipes:bool ->
   ?redirect_allowed:bool ->
   allowed_commands:string list ->
@@ -78,7 +76,6 @@ val dispatch_classified :
 val dispatch :
   ?timeout_sec:float ->
   ?before_path_validation:(Masc_exec.Shell_ir.t -> (unit, string) result) ->
-  ?caller:Masc_exec_command_gate.Shell_command_gate.caller ->
   ?allow_pipes:bool ->
   ?redirect_allowed:bool ->
   allowed_commands:string list ->

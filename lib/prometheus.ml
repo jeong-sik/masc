@@ -95,10 +95,9 @@ let metric_workspace_claim_post_provision_failures =
    point lets the operator see WHICH caller is timing out at
    WHICH configured budget without grepping warn-level log
    lines.  Paired with per-caller env-overridable defaults in
-   [Env_config_oas_bridge] so 60s "fantasy" budgets in
-   [auto_responder] / [dashboard_provider_runs] no longer
-   silently masquerade as the same class of event as
-   intentional 120s/180s budgets in persona authoring / deep_review. *)
+   [Env_config_oas_bridge] so remaining evaluator/advisory callers
+   expose their own budgets instead of hiding behind one generic OAS
+   timeout class. *)
 include Prometheus_oas_metric_names
 
 
@@ -345,13 +344,37 @@ let update_pool_metrics_gauges () =
     set_gauge metric_pool_create_total (float_of_int stats.create_count_total)
 ;;
 
-let to_prometheus_text () =
+(* RFC-0217 S4 — export the in-process metric store to OTel as an observable
+   source. Defined after update_*_gauges so the export tick can refresh the lazy
+   Pool_metrics/Fd gauges into the store first — exactly the refresh that
+   to_prometheus_text did at scrape time. The store (Prometheus_store) stays the
+   accumulator; the backend polls snapshot each tick (push-model replacement for
+   /metrics scrape, S0 spike validated). Dual with to_prometheus_text until S4-2
+   retires the scrape path. register_source only enqueues the callback at module
+   load (no init dependency); the snapshot is read lazily at each tick. *)
+let otel_samples () : Otel_metrics.sample list =
   update_uptime ();
   update_fd_gauges ();
   update_fd_accountant_gauges ();
   update_pool_metrics_gauges ();
-  Prometheus_store.snapshot () |> Prometheus_render.render_snapshot
-;;
+  Prometheus_store.snapshot ()
+  |> List.map (fun (m : Prometheus_store.metric) ->
+         { Otel_metrics.name = m.name
+         ; value = m.value
+         ; labels = m.labels
+         ; kind =
+             (match m.metric_type with
+              | Prometheus_store.Counter -> Otel_metrics.Counter
+              | Prometheus_store.Gauge -> Otel_metrics.Gauge
+              | Prometheus_store.Histogram -> Otel_metrics.Histogram)
+         })
+
+let () = Otel_metrics.register_source otel_samples
+
+(* RFC-0217 S4-2 — to_prometheus_text (Prometheus /metrics scrape render) removed.
+   The lazy gauge refreshes it performed are now done by otel_samples before each
+   OTLP export tick (S4-1). Prometheus_render is deleted with it; metrics export
+   via OTLP push only. *)
 
 (** {1 Convenience Functions} *)
 let record_request () = inc_counter metric_mcp_requests ()

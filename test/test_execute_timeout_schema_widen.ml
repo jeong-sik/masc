@@ -11,10 +11,19 @@
    semantic change — only a wire-format widening. *)
 
 open Alcotest
-module S = Tool_shard_types_schemas_execute
+module S = Tool_shard_types
+
+let tool_execute_schema () =
+  match
+    List.find_opt
+      (fun (schema : Masc_domain.tool_schema) -> String.equal schema.name "tool_execute")
+      S.typed_execute_tools
+  with
+  | Some schema -> schema
+  | None -> Alcotest.fail "tool_execute schema is missing"
 
 let timeout_sec_field () =
-  match S.tool_execute_schema.input_schema with
+  match (tool_execute_schema ()).input_schema with
   | `Assoc schema_fields ->
     (match List.assoc_opt "properties" schema_fields with
      | Some (`Assoc properties) ->

@@ -24,7 +24,7 @@ module Exec = Masc.Keeper_tool_dispatch_runtime
 module Registry = Masc.Keeper_tool_registry
 module Resolution = Masc.Keeper_tool_descriptor_resolution
 module Surface = Masc.Keeper_agent_tool_surface
-module Board = Tool_shard_types_schemas_board
+module Board = Tool_shard_types
 module Tool_board_registry = Masc.Tool_board_registry
 
 let all_descriptors () : Descriptor.t list = Descriptor.all_descriptors ()

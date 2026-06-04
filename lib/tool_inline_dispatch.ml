@@ -213,15 +213,11 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.result option =
 
   (* ── Approval queue (#5907) ─────────────────────────────────── *)
   | "masc_approval_pending" | "masc_approval_get" | "masc_approval_resolve" ->
-      (match !Approval_dispatch_ref.dispatch ~name ~args:arguments with
-       | Some body ->
-           Some (inline_approval_result ~tool_name:name ~start_time:start body)
-       | None ->
-           Some
-             (inline_err_workflow
-                ~tool_name:name
-                ~start_time:start
-                "approval dispatch is not registered"))
+      Some
+        (Approval_queue_handlers.handle
+           ~tool_name:name
+           ~start_time:start
+           arguments)
 
   (* Verification tools removed: pruned *)
 
@@ -336,14 +332,6 @@ let inline_register_targets =
   [ "masc_broadcast"; "masc_messages"
   ; "masc_approval_get"; "masc_approval_pending" ]
 
-let inline_tool_required_permission name : Masc_domain.permission option =
-  match name with
-  | "masc_broadcast" -> Some Masc_domain.CanBroadcast
-  | "masc_messages" -> Some Masc_domain.CanReadState
-  | "masc_approval_get" -> Some Masc_domain.CanAdmin
-  | "masc_approval_pending" -> Some Masc_domain.CanReadState
-  | _ -> None
-
 let inline_tool_read_only =
   [ "masc_messages"; "masc_approval_get"; "masc_approval_pending" ]
 
@@ -379,5 +367,4 @@ let () =
            ~mcp_context_required:(List.mem name inline_tool_mcp_context_required)
            ~requires_actor_binding:(List.mem name inline_tool_requires_actor_binding)
            ~effect_domain:(inline_tool_effect_domain name)
-           ?required_permission:(inline_tool_required_permission name)
            ()))

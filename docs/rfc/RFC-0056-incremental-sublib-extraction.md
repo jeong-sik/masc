@@ -134,7 +134,7 @@ Add `masc.cdal` to the existing `(libraries ...)` list.
 
 Add `(re_export masc.cdal)` mirroring the existing `(re_export masc.cdal_runtime)` line — so test modules referencing `Cdal_types`, `Adversarial_eval`, `Labeling` keep resolving.
 
-**Caller delta after PoC build:** 9 files (1 in `bin/`, 8 in `test/`), each a single-line `s/Masc\.Cdal_types/Cdal_types/g` or `s/Masc\.Labeling/Labeling/g` — the qualifier-removal pattern G5 explicitly permits. The 11 callers that already wrote unprefixed `Cdal_types` / `Adversarial_eval` / `Labeling` (the unwrapped-import style) needed no change. `tool_deep_review.ml` (`Adversarial_eval` consumer) was unchanged. `lib/dune` adds one library to its deps; `test/deps/dune` adds one `re_export`; `bin/dune` adds the new sub-library to `cdal_label`'s deps so its qualifier removal still resolves.
+**Caller delta after PoC build:** 9 files (1 in `bin/`, 8 in `test/`), each a single-line `s/Masc\.Cdal_types/Cdal_types/g` or `s/Masc\.Labeling/Labeling/g` — the qualifier-removal pattern G5 explicitly permits. The 11 callers that already wrote unprefixed `Cdal_types` / `Adversarial_eval` / `Labeling` (the unwrapped-import style) needed no change. The former adversarial-review tool handler (`Adversarial_eval` consumer) was unchanged. `lib/dune` adds one library to its deps; `test/deps/dune` adds one `re_export`; `bin/dune` adds the new sub-library to `cdal_label`'s deps so its qualifier removal still resolves.
 
 ### 3.4 Phase 1+ (out of this RFC's scope)
 

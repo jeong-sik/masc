@@ -275,9 +275,8 @@ val metric_mention_dedup_decisions_total : string
 
 val set_tool_schema_stats : count:int -> approx_tokens:int -> unit
 
-(** {1 Prometheus Export} *)
-
-val to_prometheus_text : unit -> string
+(* RFC-0217 S4-2 — to_prometheus_text removed (Prometheus /metrics scrape
+   retired; metrics export via OTLP push). *)
 
 (** {1 Convenience Functions} *)
 

@@ -5,7 +5,7 @@
     - [StringMap] alias used by the registry
     - Schema lookup helpers ([select_named_schemas], [default_shard_names])
     - MCP surface metadata ([tool_spec_read_only], [tool_spec_destructive],
-      [tool_required_permission], [tool_effect_domain]) *)
+      [tool_effect_domain]) *)
 
 type shard =
   { name : string
@@ -33,12 +33,6 @@ let default_shard_names : string list =
 
 let tool_spec_read_only = [ "masc_tool_list" ]
 let tool_spec_destructive = [ "masc_tool_grant"; "masc_tool_revoke" ]
-
-let tool_required_permission = function
-  | "masc_tool_list" -> Some Masc_domain.CanReadState
-  | "masc_tool_grant" | "masc_tool_revoke" -> Some Masc_domain.CanAdmin
-  | _unknown -> None
-;;
 
 let tool_effect_domain name =
   match Tool_name.of_string name with

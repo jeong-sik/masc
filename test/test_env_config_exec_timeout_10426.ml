@@ -39,7 +39,6 @@ let cases =
     E.Graphql, 10.0;
     E.Http, 15.0;
     E.Startup, 30.0;
-    E.Auto_responder, 120.0;
     E.Build_identity, 5.0;
     E.Voice, 60.0;
     E.Workspace_identity, 5.0;

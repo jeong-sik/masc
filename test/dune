@@ -58,7 +58,6 @@
   test_streamable_http_upgrade
   test_mcp_session_id_header
   test_keeper_sdk_error_typed_bridge
-  test_openai_compat_error_map
   test_read_drop_reason
   test_log_ring_encoder
   test_eio_context_fiber_local
@@ -166,7 +165,6 @@
   test_keeper_meta_cwd_resilience
   test_keeper_effective_meta_overlay
   test_metrics_rotation
-  test_tool_access_role
   test_tool_error
   test_tool_token
   test_autonomy_liberation
@@ -233,7 +231,6 @@
   test_tool_output_washing_e2e
   test_keeper_context_core_dedup
   test_adversarial_eval
-  test_tool_deep_review
   test_tool_call_quality_benchmark
   test_keeper_prompt_metrics
   test_keeper_prompt_personality_field_aggregation
@@ -318,7 +315,6 @@
   test_streamable_http_upgrade
   test_mcp_session_id_header
   test_keeper_sdk_error_typed_bridge
-  test_openai_compat_error_map
   test_read_drop_reason
   test_log_ring_encoder
   test_eio_context_fiber_local
@@ -426,7 +422,6 @@
   test_keeper_meta_cwd_resilience
   test_keeper_effective_meta_overlay
   test_metrics_rotation
-  test_tool_access_role
   test_tool_error
   test_tool_token
   test_autonomy_liberation
@@ -496,7 +491,6 @@
   test_tool_output_washing_e2e
   test_keeper_context_core_dedup
   test_adversarial_eval
-  test_tool_deep_review
   test_tool_call_quality_benchmark
   test_keeper_prompt_metrics
   test_keeper_prompt_personality_field_aggregation
@@ -654,7 +648,6 @@
   test_capability_registry
   test_tool_local_runtime_probe
   test_board_ttl
-  test_worker_dev_tools
   test_keeper_path_check_error
   test_destructive_class
   test_board_content_dedup
@@ -840,7 +833,6 @@
   test_capability_registry
   test_tool_local_runtime_probe
   test_board_ttl
-  test_worker_dev_tools
   test_keeper_path_check_error
   test_destructive_class
   test_board_content_dedup
@@ -1028,7 +1020,6 @@
   test_workspace_utils_coverage
   test_orchestrator_coverage
   test_web_dashboard_coverage
-  test_auth_coverage
   test_mention_coverage
   test_resilience_coverage
   test_types_coverage
@@ -1042,7 +1033,6 @@
   test_http_server_eio_coverage
   test_telemetry_eio_coverage
   test_workspace_git_coverage
-  test_auto_responder_coverage
   test_tool_plan_coverage
   test_tool_agent_coverage
   test_tool_task_coverage
@@ -1075,7 +1065,6 @@
   test_workspace_utils_coverage
   test_orchestrator_coverage
   test_web_dashboard_coverage
-  test_auth_coverage
   test_mention_coverage
   test_resilience_coverage
   test_types_coverage
@@ -1089,7 +1078,6 @@
   test_http_server_eio_coverage
   test_telemetry_eio_coverage
   test_workspace_git_coverage
-  test_auto_responder_coverage
   test_tool_plan_coverage
   test_tool_agent_coverage
   test_tool_task_coverage
@@ -1753,18 +1741,6 @@
  (modules test_disclosure_strategy_config)
  (libraries masc_test_deps))
 
-; RFC-0084 host-config-cleanup-E — Fleet worker sandbox root migration.
-; Pins the old home-workspace literal count at 0 in
-; lib/worker_dev_tools.ml and asserts Host_config.host
-; is invoked there. Cross-checks sandbox_workspace_root contract from
-; PR-12. Requires masc_test_deps because it accesses
-; Masc.Host_config.host.
-
-(test
- (name test_pr_e_sandbox_root_migration)
- (modules test_pr_e_sandbox_root_migration)
- (libraries masc_test_deps))
-
 ; RFC-0084 host-config-cleanup-F — test-mode predicate migration.
 ; Pins `String.starts_with ~prefix:"test_"` literal count at 0 in
 ; lib/config_dir_resolver.ml, asserts helper signature is unit->bool
@@ -1841,13 +1817,6 @@
  (libraries alcotest))
 
 
-
-; RFC-0085 PR-2 — auto_responder log path absorbed into Host_config.log_dir.
-
-(test
- (name test_rfc_0085_pr2_auto_responder_log_dir)
- (modules test_rfc_0085_pr2_auto_responder_log_dir)
- (libraries alcotest ast_grep))
 
 ; RFC-0085 PR-3 — server runtime PID lock absorbed into Host_config.run_dir,
 ; and server bootstrap kept free of provider-specific OAS policy wiring.
@@ -2027,4 +1996,3 @@
  (modules test_ppx_safe_shell)
  (preprocess (pps ppx_safe_shell))
  (libraries alcotest masc.masc_exec masc.exec_policy))
-

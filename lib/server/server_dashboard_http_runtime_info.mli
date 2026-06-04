@@ -70,6 +70,12 @@ val dashboard_runtime_probe_http_json :
     includes a [cache_hit] flag so dashboards can show
     the freshness state. *)
 
+val runtime_inventory_json : unit -> Yojson.Safe.t
+(** Returns the materialized runtime.toml inventory loaded by
+    {!Runtime.init_default}. This is the dashboard-compatible projection for
+    the legacy [/api/v1/providers] route; it does not execute providers or
+    infer defaults outside the Runtime SSOT. *)
+
 val dashboard_perf_http_json : Workspace.config -> Yojson.Safe.t
 (** Renders the dashboard performance envelope (build
     identity, runtime / workspace commits, system clock

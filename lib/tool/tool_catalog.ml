@@ -68,7 +68,6 @@ type metadata = {
   mcp_context_required : bool option;
   destructive : bool option;
   idempotent : bool option;
-  required_permission : Masc_domain.permission option;
   effect_domain : effect_domain option;
   requires_actor_binding : bool option;
 }
@@ -90,7 +89,6 @@ let default_metadata =
     mcp_context_required = None;
     destructive = None;
     idempotent = None;
-    required_permission = None;
     effect_domain = None;
     requires_actor_binding = None;
   }
@@ -118,7 +116,6 @@ let hidden_active ?canonical_name ?replacement ?(allow_direct_call_when_hidden =
     mcp_context_required = None;
     destructive = None;
     idempotent = None;
-    required_permission = None;
     effect_domain = None;
     requires_actor_binding = None;
   }
@@ -160,35 +157,15 @@ let masc_workspace_tool =
 let actor_bound_masc_workspace_tool =
   with_semantic_flags ~requires_actor_binding:true masc_workspace_tool
 
-let with_required_permission permission meta =
-  { meta with required_permission = Some permission }
-
-let read_state_tool =
-  with_required_permission Masc_domain.CanReadState readonly_tool
-
-let broadcast_tool =
-  with_required_permission Masc_domain.CanBroadcast masc_workspace_tool
-
-let actor_broadcast_tool =
-  with_required_permission Masc_domain.CanBroadcast actor_bound_masc_workspace_tool
-
-let add_task_tool =
-  with_required_permission Masc_domain.CanAddTask masc_workspace_tool
-
-let claim_task_tool =
-  with_required_permission Masc_domain.CanClaimTask actor_bound_masc_workspace_tool
-
-let complete_task_tool =
-  with_required_permission Masc_domain.CanCompleteTask actor_bound_masc_workspace_tool
-
-let admin_tool =
-  with_required_permission Masc_domain.CanAdmin destructive_tool
-
-let admin_read_tool =
-  with_required_permission Masc_domain.CanAdmin readonly_tool
-
-let reset_tool =
-  with_required_permission Masc_domain.CanReset destructive_tool
+let read_state_tool = readonly_tool
+let broadcast_tool = masc_workspace_tool
+let actor_broadcast_tool = actor_bound_masc_workspace_tool
+let add_task_tool = masc_workspace_tool
+let claim_task_tool = actor_bound_masc_workspace_tool
+let complete_task_tool = actor_bound_masc_workspace_tool
+let admin_tool = destructive_tool
+let admin_read_tool = readonly_tool
+let reset_tool = destructive_tool
 
 let static_mcp_context_tool_names =
   [ "masc_start"
@@ -246,17 +223,11 @@ let explicit_metadata : (string * metadata) list =
        masc_execute) removed — no dispatch path, no schema, no caller. *)
     ( "masc_operator_action",
       with_semantic_flags ~destructive:true
-        { (hidden_active "Operator actions can execute privileged side effects and should be treated as destructive.") with
-          required_permission = Some Masc_domain.CanBroadcast;
-        } );
+        (hidden_active "Operator actions can execute privileged side effects and should be treated as destructive.") );
     ( "masc_set_param",
-      {
-        (with_semantic_flags ~destructive:true
-           (hidden_active
-              "Internal HTTP runtime-parameter mutation route; hidden from the public tool surface."))
-        with
-        required_permission = Some Masc_domain.CanAdmin;
-      } );
+      with_semantic_flags ~destructive:true
+        (hidden_active
+           "Internal HTTP runtime-parameter mutation route; hidden from the public tool surface.") );
     ("masc_tool_grant", admin_tool);
     ("masc_tool_revoke", admin_tool);
     (* Catalog-owned permissions for split/lazily registered tool modules. *)
@@ -294,7 +265,6 @@ let explicit_metadata : (string * metadata) list =
     ("masc_surface_audit", read_state_tool);
     ("masc_persona_list", read_state_tool);
     ("masc_persona_schema", read_state_tool);
-    ("masc_persona_generate", broadcast_tool);
     ("masc_persona_save", broadcast_tool);
     ("masc_runtime_verify", read_state_tool);
     ("masc_runtime_ollama_probe", read_state_tool);
@@ -330,7 +300,6 @@ let explicit_metadata : (string * metadata) list =
       {
         destructive_tool with
         visibility = Hidden;
-        required_permission = Some Masc_domain.CanBroadcast;
         effect_domain = Some Masc_workspace;
       } );
   ]
@@ -553,11 +522,7 @@ let metadata_to_fields name =
     | Some value -> ("requiresActorBinding", `Bool value) :: with_mcp_context_required
     | None -> with_mcp_context_required
   in
-  match meta.required_permission with
-  | Some permission ->
-      ("requiredPermission", `String (Masc_domain.permission_to_string permission))
-      :: with_actor_binding
-  | None -> with_actor_binding
+  with_actor_binding
 
 let public_contract_fields name =
   let meta = metadata name in

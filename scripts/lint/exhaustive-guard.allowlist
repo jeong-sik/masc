@@ -198,7 +198,6 @@ lib/core/safe_ops.ml:563
 lib/dashboard_runtime.ml:967
 lib/dashboard_runtime.ml:974
 lib/dashboard_runtime.ml:981
-lib/dashboard_provider_runs.ml:162
 lib/dashboard_tool_host_events.ml:43
 lib/dashboard_tool_host_events.ml:57
 lib/dashboard_tool_source_freshness.ml:24
@@ -333,8 +332,8 @@ lib/governance_pipeline_risk.ml:316
 lib/governance_pipeline.ml:263
 lib/graphql_api.ml:699
 lib/graphql_api.ml:709
-lib/grpc/masc_grpc_service.ml:121
-lib/grpc/masc_grpc_service.ml:227
+lib/server/masc_grpc_service.ml:121
+lib/server/masc_grpc_service.ml:227
 lib/http_server_eio.ml:114
 lib/http_server_eio.ml:298
 lib/http_server_eio.ml:725

@@ -51,10 +51,6 @@ val default_shard_names : string list
 val tool_spec_read_only : string list
 val tool_spec_destructive : string list
 
-val tool_required_permission :
-  string -> Masc_domain.permission option
-(** Pure: required keeper permission for invoking a Tool_shard MASC tool. *)
-
 val tool_effect_domain :
   string -> Tool_catalog.effect_domain option
 (** Pure: tool-catalog effect-domain classification for a Tool_shard MASC tool. *)
@@ -73,6 +69,9 @@ val search_files_tools : Masc_domain.tool_schema list
 
 val typed_execute_tools : Masc_domain.tool_schema list
 (** Pure: typed execution tool schemas. *)
+
+val tool_execute_schema : Masc_domain.tool_schema
+(** Canonical typed Execute schema exposed through the public facade. *)
 
 val voice_tools : Masc_domain.tool_schema list
 (** Voice tool schemas. *)

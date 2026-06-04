@@ -1,7 +1,7 @@
 (** Shared execution policy for shell-like tool frontends.
 
-    [Worker_dev_tools] is an Agent SDK tool bundle. This module is the common
-    policy substrate beneath that bundle plus keeper/code-shell callers. *)
+    This module is the common policy substrate behind Execute and code-shell
+    callers. *)
 
 module Paths = Exec_policy_paths
 module Log_sanitize = Exec_policy_log_sanitize
@@ -400,10 +400,9 @@ let parse_string_to_ir ~mode cmd =
     | Masc_exec.Parsed.Parsed ir -> Ok ir)
 ;;
 
-let command_context_with_allowlist ?caller ~allowed_commands ir =
+let command_context_with_allowlist ~allowed_commands ir =
   let verdict =
     Exec_shell_gate.gate_typed
-      ?caller
       ~ir
       ~allowlist:(strict_allowlist_policy ~allowed_commands)
       ~path_policy:Exec_shell_gate.allow_all_paths
@@ -431,24 +430,21 @@ let command_context_with_allowlist ?caller ~allowed_commands ir =
   | Too_complex { reason } -> Error (block_reason_of_exec_too_complex reason)
 ;;
 
-let validate_command_with_allowlist ?caller ~allowed_commands ir =
-  command_context_with_allowlist ?caller ~allowed_commands ir
-  |> Result.map (fun _ -> ())
+let validate_command_with_allowlist ~allowed_commands ir =
+  command_context_with_allowlist ~allowed_commands ir |> Result.map (fun _ -> ())
 ;;
 
-let validate_command ?caller ir =
-  validate_command_with_allowlist ?caller ~allowed_commands:dev_allowed_commands ir
+let validate_command ir =
+  validate_command_with_allowlist ~allowed_commands:dev_allowed_commands ir
 ;;
 
 let command_context_tool_execute_with_allowlist
-      ?caller
       ?(allow_pipes = true)
       ~(allowed_commands : string list)
       ir
   =
   let verdict =
     Exec_shell_gate.gate_typed
-      ?caller
       ~ir
       ~allowlist:(tool_execute_allowlist_policy ~allow_pipes ~allowed_commands ())
       ~path_policy:Exec_shell_gate.allow_all_paths
@@ -478,18 +474,16 @@ let command_context_tool_execute_with_allowlist
   | Too_complex { reason } -> Error (block_reason_of_exec_too_complex reason)
 ;;
 
-let validate_command_tool_execute_with_allowlist ?caller ?allow_pipes ~allowed_commands ir =
+let validate_command_tool_execute_with_allowlist ?allow_pipes ~allowed_commands ir =
   command_context_tool_execute_with_allowlist
-    ?caller
     ?allow_pipes
     ~allowed_commands
     ir
   |> Result.map (fun _ -> ())
 ;;
 
-let validate_command_tool_execute ?caller ir =
+let validate_command_tool_execute ir =
   validate_command_tool_execute_with_allowlist
-    ?caller
     ~allow_pipes:true
     ~allowed_commands:dev_allowed_commands
     ir
@@ -970,7 +964,7 @@ let attribution_of_validation ~cmd (result : (unit, block_reason) result) : Attr
   match result with
   | Ok () ->
     let evidence : Yojson.Safe.t = `Assoc [ "cmd", `String cmd ] in
-    Attribution.passed ~origin:Det ~gate:"worker_dev_tools" ~evidence
+    Attribution.passed ~origin:Det ~gate:"exec_policy" ~evidence
   | Error br ->
     let command_name =
       match br with
@@ -988,7 +982,7 @@ let attribution_of_validation ~cmd (result : (unit, block_reason) result) : Attr
     in
     Attribution.policy_failed
       ~origin:Det
-      ~gate:"worker_dev_tools"
+      ~gate:"exec_policy"
       ~evidence
       ~reason:(block_reason_to_string br)
 ;;
@@ -997,8 +991,8 @@ type safe = Typed_capabilities.safe
 type unsafe = Typed_capabilities.unsafe
 type 'a verified_ir = 'a Typed_capabilities.verified_ir
 
-let promote_to_safe ?caller ~allowed_commands ir =
-  match validate_command_with_allowlist ?caller ~allowed_commands ir with
+let promote_to_safe ~allowed_commands ir =
+  match validate_command_with_allowlist ~allowed_commands ir with
   | Ok () -> Ok (Typed_capabilities.Safe_IR ir)
   | Error br -> Error br
 ;;

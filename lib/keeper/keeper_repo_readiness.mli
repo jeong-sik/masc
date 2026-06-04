@@ -99,6 +99,18 @@ val ensure_worktree_ready :
   unit ->
   (unit, string) result
 
+(** [provision_worktrees_for_task ~config ~agent_name ~task_id ()] scans all
+    repos in the keeper's playground and creates a worktree for [task_id] in
+    each repo that is ready.  Called best-effort at task claim time so worktrees
+    exist before the LLM tries to use them.  Only operates for Docker-sandboxed
+    keepers.  Failures in individual repos are logged but do not propagate. *)
+val provision_worktrees_for_task :
+  config:Workspace.config ->
+  agent_name:string ->
+  task_id:string ->
+  unit ->
+  unit
+
 (** Outcome of an [ensure_current] pass. Every non-[Advanced] case leaves the
     working tree byte-for-byte untouched. *)
 type currency_outcome =

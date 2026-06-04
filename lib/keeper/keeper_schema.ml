@@ -402,6 +402,35 @@ let keeper_schemas : tool_schema list = [
   };
 
   {
+    name = "masc_keeper_msg_cancel";
+    description = "Cancel a running async keeper_msg request by request_id.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("request_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Request ID returned by masc_keeper_msg");
+        ]);
+      ]);
+      ("required", `List [`String "request_id"]);
+    ];
+  };
+
+  {
+    name = "masc_keeper_msg_queue";
+    description = "List all pending/running async keeper_msg requests, optionally filtered by keeper_name.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("keeper_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional: filter by keeper name");
+        ]);
+      ]);
+    ];
+  };
+
+  {
     name = "masc_keeper_repair";
     description = "Run a keeper-facing detachable repair loop for OCaml code and return the terminal state.";
     input_schema = `Assoc [

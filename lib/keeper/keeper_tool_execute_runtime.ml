@@ -443,8 +443,9 @@ let handle_tool_execute_typed
         else
           let allowed_commands =
             match mode with
-            | Keeper_tool_execute_typed_input.Dev_full -> Dev_exec_allowlist.dev
-            | Keeper_tool_execute_typed_input.Readonly -> Dev_exec_allowlist.readonly
+            | Keeper_tool_execute_typed_input.Dev_full -> Exec_policy.dev_allowed_commands
+            | Keeper_tool_execute_typed_input.Readonly -> Exec_policy.readonly_allowed_commands
+
           in
           let env_snap =
             Cancel_safe.protect

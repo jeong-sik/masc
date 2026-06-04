@@ -128,7 +128,7 @@ let test_keeper_msg_async_roundtrip () =
   Alcotest.(check int)
     "one pending entry"
     1
-    (List.length (Keeper_msg_async.list_for_keeper ~keeper_name:"alpha"))
+    (List.length (Keeper_msg_async.list_for_keeper ~keeper_name:"alpha" ()))
 ;;
 
 let test_keeper_msg_async_recovers_done_from_disk () =

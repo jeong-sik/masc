@@ -1,12 +1,13 @@
 (** Prometheus-Compatible Metrics for masc
 
-    Provides lightweight metrics collection and Prometheus text format export.
+    Provides lightweight metric accumulation. The in-process store is exported
+    through OTel observable callbacks.
 
     Usage:
     {[
       let () = Prometheus.inc_counter "masc_tasks_total" ~labels:[("status", "completed")]
       let () = Prometheus.set_gauge "masc_active_agents" 5.0
-      let text = Prometheus.to_prometheus_text ()
+      let snapshot = Prometheus.snapshot ()
     ]}
 
     @since 0.4.0
@@ -301,12 +302,12 @@ let set_tool_schema_stats ~count ~approx_tokens =
 ;;
 
 
-(* Track host labels seen in previous scrapes so we can zero out gauges
+(* Track host labels seen in previous exports so we can zero out gauges
    for hosts that disappeared from the pool. Without this, an evicted
    host's last non-zero idle value would persist in the registry forever
    and the metrics table would grow unboundedly with every unique host
    seen. Set is module-local: only [update_pool_metrics_gauges] reads
-   or writes it, and [to_prometheus_text]'s mutex serialises calls. *)
+   or writes it. *)
 let pool_idle_seen_hosts : (string, unit) Hashtbl.t = Hashtbl.create 16
 
 let update_pool_metrics_gauges () =
@@ -346,12 +347,11 @@ let update_pool_metrics_gauges () =
 
 (* RFC-0217 S4 — export the in-process metric store to OTel as an observable
    source. Defined after update_*_gauges so the export tick can refresh the lazy
-   Pool_metrics/Fd gauges into the store first — exactly the refresh that
-   to_prometheus_text did at scrape time. The store (Prometheus_store) stays the
-   accumulator; the backend polls snapshot each tick (push-model replacement for
-   /metrics scrape, S0 spike validated). Dual with to_prometheus_text until S4-2
-   retires the scrape path. register_source only enqueues the callback at module
-   load (no init dependency); the snapshot is read lazily at each tick. *)
+   Pool_metrics/Fd gauges into the store first. The store
+   (Prometheus_store) stays the accumulator; the backend polls snapshot
+   each tick (push-model replacement for the old scrape endpoint, S0 spike
+   validated). register_source only enqueues the callback at module load
+   (no init dependency); the snapshot is read lazily at each tick. *)
 let otel_samples () : Otel_metrics.sample list =
   update_uptime ();
   update_fd_gauges ();
@@ -371,10 +371,8 @@ let otel_samples () : Otel_metrics.sample list =
 
 let () = Otel_metrics.register_source otel_samples
 
-(* RFC-0217 S4-2 — to_prometheus_text (Prometheus /metrics scrape render) removed.
-   The lazy gauge refreshes it performed are now done by otel_samples before each
-   OTLP export tick (S4-1). Prometheus_render is deleted with it; metrics export
-   via OTLP push only. *)
+(* RFC-0217 S4-2 — text scrape rendering removed. Lazy gauge refreshes now
+   happen in [otel_samples] before each OTLP export tick. *)
 
 (** {1 Convenience Functions} *)
 let record_request () = inc_counter metric_mcp_requests ()

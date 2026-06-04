@@ -151,40 +151,35 @@ let test_counter_per_base_path_isolation () =
     (starts_for ~base_path:a)
 ;;
 
-(* The textual export uses [base_path] as the label key
-   for both metrics, so PromQL queries can join them on
-   that label. *)
-let test_prometheus_text_export_includes_metrics () =
+(* The registry uses [base_path] as the label key for both metrics, so
+   downstream OTel export keeps the join key intact. *)
+let test_registry_snapshot_includes_metrics () =
   let base_path = "/tmp/test-supervisor-obs-export-10125" in
+  let starts = Masc.Keeper_metrics.(to_string SupervisorSweepStarts) in
+  let last_sweep = Masc.Keeper_metrics.(to_string SupervisorLastSweepUnixtime) in
   Prom.inc_counter
-    Masc.Keeper_metrics.(to_string SupervisorSweepStarts)
+    starts
     ~labels:[ "base_path", base_path ]
     ();
   Prom.set_gauge
-    Masc.Keeper_metrics.(to_string SupervisorLastSweepUnixtime)
+    last_sweep
     ~labels:[ "base_path", base_path ]
     (Unix.gettimeofday ());
-  let text = Prom.to_prometheus_text () in
-  let contains s sub =
-    let n = String.length s
-    and m = String.length sub in
-    let rec loop i =
-      if i + m > n then false else if String.sub s i m = sub then true else loop (i + 1)
-    in
-    loop 0
+  let has_metric name metric_type =
+    Prom.snapshot ()
+    |> List.exists (fun (m : Prom.metric) ->
+      String.equal m.name name
+      && m.metric_type = metric_type
+      && List.mem ("base_path", base_path) m.labels)
   in
   Alcotest.(check bool)
-    "counter name appears in export"
+    "counter name appears in registry"
     true
-    (contains text Masc.Keeper_metrics.(to_string SupervisorSweepStarts));
+    (has_metric starts Prom.Counter);
   Alcotest.(check bool)
-    "gauge name appears in export"
+    "gauge name appears in registry"
     true
-    (contains text Masc.Keeper_metrics.(to_string SupervisorLastSweepUnixtime));
-  Alcotest.(check bool)
-    "base_path label appears for export"
-    true
-    (contains text "base_path=")
+    (has_metric last_sweep Prom.Gauge)
 ;;
 
 let () =
@@ -216,11 +211,11 @@ let () =
             `Quick
             test_counter_per_base_path_isolation
         ] )
-    ; ( "export"
+    ; ( "registry"
       , [ Alcotest.test_case
-            "metrics appear in /metrics text"
+            "metrics appear in registry"
             `Quick
-            test_prometheus_text_export_includes_metrics
+            test_registry_snapshot_includes_metrics
         ] )
     ]
 ;;

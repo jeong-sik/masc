@@ -104,17 +104,16 @@ let test_two_layer_independence () =
   check (float 0.1) "response cache unaffected by prefix cache"
     response_before response_after
 
-(* ── Prometheus export format test ────────────────────── *)
+(* ── Metric registry test ─────────────────────────────── *)
 
-let test_cache_metrics_in_export () =
-  let text = Prometheus.to_prometheus_text () in
-  let has needle =
-    try ignore (Str.search_forward (Str.regexp_string needle) text 0); true
-    with Not_found -> false
+let test_cache_metrics_in_registry () =
+  let has name =
+    Prometheus.snapshot ()
+    |> List.exists (fun (m : Prometheus.metric) -> String.equal m.name name)
   in
-  check bool "export has prefix creation metric" true
+  check bool "registry has prefix creation metric" true
     (has "masc_provider_prefix_cache_creation_tokens_total");
-  check bool "export has prefix read metric" true
+  check bool "registry has prefix read metric" true
     (has "masc_provider_prefix_cache_read_tokens_total")
 
 (* ── Suite ────────────────────────────────────────────── *)
@@ -143,9 +142,9 @@ let () =
           test_case "layers are independent" `Quick
             test_two_layer_independence;
         ] );
-      ( "prometheus_export",
+      ( "metric_registry",
         [
-          test_case "cache metrics in export text" `Quick
-            test_cache_metrics_in_export;
+          test_case "cache metrics in registry" `Quick
+            test_cache_metrics_in_registry;
         ] );
     ]

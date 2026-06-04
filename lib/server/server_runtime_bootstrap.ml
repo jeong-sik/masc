@@ -410,7 +410,17 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
          masc layer.  Backend/workspace sub-libraries cannot depend on
          Prometheus without creating dependency cycles, but the global
          observer refs can be wired before any FileSystem backend writes. *)
-      Backend_mutex_metrics.install ();
+      Backend.FileSystem.set_mutex_observers
+        ~acquire:(fun ~op ~seconds ->
+          Prometheus.observe_histogram
+            Prometheus.metric_backend_mutex_acquire_sec
+            ~labels:[ ("op", op) ]
+            seconds)
+        ~held:(fun ~op ~seconds ->
+          Prometheus.observe_histogram
+            Prometheus.metric_backend_mutex_held_sec
+            ~labels:[ ("op", op) ]
+            seconds);
       Log.Server.info "Backend_mutex_metrics installed (masc_backend_mutex_* metrics)";
       (* Forward Agent_sdk.Log records (per-turn timing from oas#816 and
          any subsequent structured emits) into the masc log ring so

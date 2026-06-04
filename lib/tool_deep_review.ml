@@ -157,7 +157,14 @@ let handle_deep_review
         match
           Masc_oas_bridge.run_with_caller
             ~caller:Env_config_oas_bridge.Tool_deep_review (fun () ->
-            Deep_review_runner.run_adversarial_review ~runtime_id ~prompt
+            Keeper_turn_driver.run_named
+              ~runtime_id
+              ~goal:prompt
+              ~max_turns:1
+              ~temperature:0.5
+              ~max_tokens:500
+              ~approval:Approval_callbacks.auto_approve
+              ()
           )
         with
         | Ok result ->

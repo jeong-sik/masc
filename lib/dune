@@ -9,10 +9,9 @@
  http_body_buffer
  http_response_payload
  error_event_type
- keeper_memory_llm_summary_outcome
  keeper_tool_call_log_route_evidence
- keeper_user_visible_reply_source
- keeper_continuity_summary_source
+ memory_oas_bridge_cache
+ memory_oas_bridge_op_outcome
  keeper_world_observation_board_signal
  keeper_world_observation_continuity
  keeper_world_observation_inputs
@@ -276,6 +275,7 @@
    masc.keeper_provider_error_class
    masc.keeper_failure_taxonomy
    masc.keeper_world_observation_turn_types
+   masc.keeper_memory_taxonomy
    ;; Runtime_provider_labels extracted to lib/runtime_provider_labels/.
    ;; Leaf boundary over agent_sdk.llm_provider canonical provider labels.
    masc.runtime_provider_labels

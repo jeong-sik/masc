@@ -16,8 +16,8 @@
          within 3600s of [now_ts] (even when status is dead).
 
     2. {b compact_session_json strict shape} — output assoc has
-       exactly 16 keys including [communication_summary] derived
-       as ["%s · broadcast %d · portal %d"].
+       exactly 15 keys including [communication_summary] derived
+       as ["%s · broadcast %d"].
 
     3. {b compact_session_json fallback contract} — empty
        [recent_events] produces a sentinel last_event with
@@ -51,7 +51,7 @@ let assoc_keys_sorted j =
 let session_fixture ?(session_id = "s-1") ?(project = "workspace-A")
     ?(workspace_id = "workspace-A") ?(goal = "ship feature") ?(status = "active")
     ?(summary_status = "active") ?(comm_mode = "async")
-    ?(broadcast = 3) ?(portal = 5) ?(recent = []) () =
+    ?(broadcast = 3) ?(recent = []) () =
   `Assoc
     [
       ("session_id", json_string session_id);
@@ -87,7 +87,6 @@ let session_fixture ?(session_id = "s-1") ?(project = "workspace-A")
                 [
                   ("mode", json_string comm_mode);
                   ("broadcast_count", `Int broadcast);
-                  ("portal_count", `Int portal);
                 ] );
           ] );
       ("recent_events", `List recent);
@@ -281,7 +280,7 @@ let test_compact_session_strict_keys () =
 let test_compact_session_communication_summary_format () =
   (* "%s · broadcast %d" *)
   let s =
-    session_fixture ~comm_mode:"async" ~broadcast:7 ~portal:11 ()
+    session_fixture ~comm_mode:"async" ~broadcast:7 ()
   in
   let out = C.compact_session_json s in
   match out with

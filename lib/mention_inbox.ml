@@ -22,8 +22,7 @@ type mention_record = {
 (* RNG for mention-id generation.  [Random.State.t] is NOT fiber-safe —
    the previous doc comment claiming otherwise was incorrect.  Guard
    the shared state with an [Eio.Mutex] and route every RNG access
-   through [with_mention_rng].
-   ([a2a_rng] / [a2a_rng_mutex]). *)
+   through [with_mention_rng]. *)
 let mention_rng = Random.State.make_self_init ()
 let mention_rng_mutex = Eio.Mutex.create ()
 let with_mention_rng f =

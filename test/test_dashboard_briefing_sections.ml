@@ -424,7 +424,6 @@ let test_build_briefing_sections_keeps_metadata_evidence_visible () =
         ("required_agents", `Int 1);
         ("communication_mode", `String "broadcast");
         ("broadcast_count", `Int 1);
-        ("portal_count", `Int 0);
         ("communication_summary", `String "broadcast · broadcast 1");
         ("last_event", `Assoc []);
       ]

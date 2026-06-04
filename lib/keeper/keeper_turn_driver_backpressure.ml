@@ -126,6 +126,5 @@ let capacity_backpressure_of_sdk_error
   | Agent_sdk.Error.Serialization _
   | Agent_sdk.Error.Io _
   | Agent_sdk.Error.Orchestration _
-  | Agent_sdk.Error.A2a _
   | Agent_sdk.Error.Internal _ ->
     None

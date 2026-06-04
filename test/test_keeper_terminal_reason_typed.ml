@@ -90,23 +90,13 @@ let () =
 ;;
 
 (* ------------------------------------------------------------------ *)
-(* 1b. is_completion_contract_violation: contract errors return true,  *)
-(*     all other error families return false. #19930                    *)
+(* 1b. is_completion_contract_violation: OAS no longer emits completion
+   contract SDK errors, so structured SDK errors all return false. #19930 *)
 (* ------------------------------------------------------------------ *)
 
 module EC = Masc.Keeper_error_classify
 
 let () =
-  (* Contract violation → true *)
-  check "contract violation: CompletionContractViolation"
-    (EC.is_completion_contract_violation
-       (Agent_sdk.Error.Agent
-          (Agent_sdk.Error.CompletionContractViolation
-             { contract = Agent_sdk.Completion_contract_id.Require_tool_use
-             ; reason = "test"
-             ; violation_detail = None
-             })));
-  (* Non-contract errors → false *)
   check "non-contract: provider timeout"
     (not (EC.is_completion_contract_violation
             (Agent_sdk.Error.Api

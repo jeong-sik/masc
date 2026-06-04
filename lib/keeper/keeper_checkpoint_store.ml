@@ -232,7 +232,7 @@ let classify_sdk_error (e : Agent_sdk.Error.sdk_error) : checkpoint_load_error =
   | Serialization (UnknownVariant r) ->
       Parse_error (sprintf "unknown variant %s: %s" r.type_name r.value)
   | Api _ | Provider _ | Agent _ | Mcp _ | Config _
-  | Orchestration _ | A2a _ | Internal _ ->
+  | Orchestration _ | Internal _ ->
       Sdk_other_error (Agent_sdk.Error.to_string e)
 
 let load_oas_history_file ~(session_dir : string) ~(snapshot_id : string) :

@@ -146,14 +146,7 @@ module Reg = Masc.Keeper_registry
     [None] is correct. *)
 
 let all_sdk_agent_variants : (string * SdkE.sdk_error) list =
-  [ ( "CompletionContractViolation"
-    , SdkE.Agent
-        (SdkE.CompletionContractViolation
-           { contract = Agent_sdk.Completion_contract_id.Allow_text_or_tool
-           ; reason = "test"
-           ; violation_detail = None
-           }) )
-  ; ( "AgentExecutionTimeout"
+  [ ( "AgentExecutionTimeout"
     , SdkE.Agent
         (SdkE.AgentExecutionTimeout
            { elapsed_sec = 10.0; timeout_sec = 5.0; turn_count = 3; max_turns = 10 })
@@ -191,7 +184,7 @@ let all_sdk_agent_variants : (string * SdkE.sdk_error) list =
   ]
 ;;
 
-let agent_variants_with_no_runtime_blocker = [ "CompletionContractViolation" ]
+let agent_variants_with_no_runtime_blocker = []
 
 let test_all_agent_variants_classified_intentionally () =
   List.iter
@@ -219,7 +212,7 @@ let test_all_agent_variants_classified_intentionally () =
 (** Pin the Agent sub-variant count so additions are visible in diffs.
     When the SDK adds a new [Agent] sub-variant, bump this number and add it
     to [all_sdk_agent_variants]. *)
-let expected_agent_variant_count = 13
+let expected_agent_variant_count = 12
 
 let test_agent_variant_count_pin () =
   let count = List.length all_sdk_agent_variants in

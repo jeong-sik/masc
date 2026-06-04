@@ -9,7 +9,6 @@ let sdk_error_kind = function
   | Agent_sdk.Error.Serialization _ -> "serialization"
   | Agent_sdk.Error.Io _ -> "io"
   | Agent_sdk.Error.Orchestration _ -> "orchestration"
-  | Agent_sdk.Error.A2a _ -> "a2a"
   | Agent_sdk.Error.Internal _ -> "internal"
 ;;
 
@@ -22,7 +21,6 @@ type sdk_termination_semantics =
   | Oas_token_budget_exhausted
   | Oas_cost_budget_exhausted
   | Oas_cost_budget_unenforceable
-  | Oas_contract_violation
   | Oas_tool_retry_exhausted
   | Oas_guardrail_violation
   | Oas_tripwire_violation
@@ -53,8 +51,6 @@ let sdk_termination_semantics = function
     Oas_cost_budget_exhausted
   | Agent_sdk.Error.Agent (Agent_sdk.Error.CostBudgetUnenforceable _) ->
     Oas_cost_budget_unenforceable
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.CompletionContractViolation _) ->
-    Oas_contract_violation
   | Agent_sdk.Error.Agent (Agent_sdk.Error.ToolRetryExhausted _) ->
     Oas_tool_retry_exhausted
   | Agent_sdk.Error.Agent (Agent_sdk.Error.GuardrailViolation _) ->
@@ -70,7 +66,6 @@ let sdk_termination_semantics = function
   | Agent_sdk.Error.Serialization _ -> Sdk_error_failure
   | Agent_sdk.Error.Io _ -> Sdk_error_failure
   | Agent_sdk.Error.Orchestration _ -> Sdk_error_failure
-  | Agent_sdk.Error.A2a _ -> Sdk_error_failure
   | Agent_sdk.Error.Internal _ -> Sdk_error_failure
 ;;
 
@@ -83,7 +78,6 @@ let sdk_termination_semantics_to_string = function
   | Oas_token_budget_exhausted -> "oas_token_budget_exhausted"
   | Oas_cost_budget_exhausted -> "oas_cost_budget_exhausted"
   | Oas_cost_budget_unenforceable -> "oas_cost_budget_unenforceable"
-  | Oas_contract_violation -> "oas_contract_violation"
   | Oas_tool_retry_exhausted -> "oas_tool_retry_exhausted"
   | Oas_guardrail_violation -> "oas_guardrail_violation"
   | Oas_tripwire_violation -> "oas_tripwire_violation"
@@ -171,16 +165,6 @@ let provider_error_terminal_reason_code
    Previously every Agent failure collapsed to "agent_error", mirroring
    the old Api behaviour. Memory: no-collapse-richer-enum-at-sdk-boundary. *)
 let agent_error_terminal_reason_code = function
-  | Agent_sdk.Error.CompletionContractViolation
-      { contract; violation_detail = Some detail; _ } ->
-    Keeper_execution_receipt.encode_contract_violation_reason
-      ~called_tools:detail.called_tools
-      ~satisfying_tools:detail.satisfying_tools
-      (Agent_sdk.Completion_contract_id.to_string contract)
-  | Agent_sdk.Error.CompletionContractViolation { contract; violation_detail = None; _ } ->
-    Printf.sprintf
-      "completion_contract_violation:%s"
-      (Agent_sdk.Completion_contract_id.to_string contract)
   | Agent_sdk.Error.MaxTurnsExceeded { turns; limit } ->
     (* SSOT prefix: [Keeper_execution_receipt.is_auto_recoverable_turn_budget_terminal]
        matches on it to route the disposition to [Reason_turn_budget_exhausted]. *)
@@ -295,7 +279,6 @@ let terminal_reason_code_of_sdk_error = function
   | Agent_sdk.Error.Serialization _ -> "serialization_error"
   | Agent_sdk.Error.Io _ -> "io_error"
   | Agent_sdk.Error.Orchestration _ -> "orchestration_error"
-  | Agent_sdk.Error.A2a _ -> "a2a_error"
   | Agent_sdk.Error.Internal msg -> (
     match Keeper_internal_error.classify_masc_internal_error_of_string msg with
     | Some err -> Keeper_internal_error.kind_of_masc_internal_error err
@@ -328,7 +311,6 @@ let receipt_outcome_kind_of_sdk_error err =
   | Oas_token_budget_exhausted
   | Oas_cost_budget_exhausted
   | Oas_cost_budget_unenforceable
-  | Oas_contract_violation
   | Oas_tool_retry_exhausted
   | Oas_guardrail_violation
   | Oas_tripwire_violation

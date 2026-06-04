@@ -147,8 +147,6 @@ let sdk_error_to_runtime_outcome err =
        Some (Runtime_attempt_fsm.Call_err http_err)
      | Agent_sdk.Error.Provider provider_err ->
        Some (Runtime_attempt_fsm.Call_err (provider_error_to_http_error provider_err))
-     | Agent_sdk.Error.Agent
-         (Agent_sdk.Error.CompletionContractViolation { reason; _ })
      | Agent_sdk.Error.Agent (Agent_sdk.Error.UnrecognizedStopReason { reason }) ->
        Some
          (Runtime_attempt_fsm.Call_err
@@ -164,7 +162,6 @@ let sdk_error_to_runtime_outcome err =
      | Agent_sdk.Error.Serialization _
      | Agent_sdk.Error.Io _
      | Agent_sdk.Error.Orchestration _
-     | Agent_sdk.Error.A2a _
      | Agent_sdk.Error.Internal _ -> None)
 
 let sdk_error_is_model_access_denied err =

@@ -56,3 +56,13 @@ type t =
 val to_string : t -> string
 val of_string : string -> t option
 val pp : Format.formatter -> t -> unit
+
+(** Public MCP-client names still accepted while runtime descriptors project
+    keeper-owned tools onto the public MCP surface. *)
+val legacy_masc_claim_next_name : string
+
+val legacy_masc_deliver_name : string
+
+(** Returns true for keeper board wrapper names and legacy public
+    [masc_board_*] names without depending on the central [Tool_name] enum. *)
+val is_board_surface_name : string -> bool

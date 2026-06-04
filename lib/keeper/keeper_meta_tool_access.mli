@@ -4,8 +4,9 @@
     [keeper_meta.tool_access : string list].  There is no wrapper type;
     the allowlist IS the policy. *)
 
-(** Returns true if any name in the list resolves to a [Tool_name.is_board]
-    tool. Used to detect implicit board surface. *)
+(** Returns true if any name in the list resolves to a keeper board wrapper or
+    legacy public [masc_board_*] surface. Used to detect implicit board
+    surface. *)
 val tool_names_include_board : string list -> bool
 
 (** Trim, drop blanks, dedupe (preserve first-seen order). *)

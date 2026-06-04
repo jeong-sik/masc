@@ -67,6 +67,8 @@ let removed_keeper_input_key_names =
     "initiative_cooldown_sec";
     "policy_mode";
     "policy_shell_mode";
+    "persona_ref";
+    "runtime_ref";
   ]
 
 let removed_keeper_sandbox_input_key_names =

@@ -29,7 +29,8 @@ let tool_error ?(recoverable = false) message : Agent_sdk.Types.tool_result =
     remains the Agent SDK file/shell tool bundle and re-exports this surface for
     compatibility with older call sites and tests. *)
 let dev_allowed_commands = Exec_policy.dev_allowed_commands
-let readonly_allowed_commands = Dev_exec_allowlist.readonly
+let readonly_allowed_commands = Exec_policy.readonly_allowed_commands
+
 
 type block_reason = Exec_policy.block_reason =
   | Empty_command

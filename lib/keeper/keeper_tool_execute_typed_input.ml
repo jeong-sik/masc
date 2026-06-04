@@ -56,8 +56,9 @@ type validation_error =
 
 let is_allowed ~mode name =
   match mode with
-  | Dev_full -> Dev_exec_allowlist.is_dev_allowed name
-  | Readonly -> Dev_exec_allowlist.is_readonly_allowed name
+  | Dev_full -> Exec_policy.is_dev_allowed name
+  | Readonly -> Exec_policy.is_readonly_allowed name
+
 ;;
 
 let json_type_name (json : Yojson.Safe.t) =

@@ -14,7 +14,89 @@ open Command_syntax
 let resolve_path = Paths.resolve_path
 let validate_path = Paths.validate_path
 
-let dev_allowed_commands = Dev_exec_allowlist.dev
+let dev_programs =
+  Masc_exec.Exec_program.
+    [ Cat
+    ; Cargo
+    ; Cmake
+    ; Cut
+    ; Dune_local_sh
+    ; Echo
+    ; Env
+    ; File
+    ; Find
+    ; Gh
+    ; Git
+    ; Go
+    ; Gofmt
+    ; Gradle
+    ; Head
+    ; Java
+    ; Javac
+    ; Ls
+    ; Make
+    ; Mvn
+    ; Node
+    ; Npm
+    ; Ninja
+    ; Npx
+    ; Opam
+    ; Pip
+    ; Pnpm
+    ; Printf
+    ; Pwd
+    ; Pyright
+    ; Pytest
+    ; Python
+    ; Python3
+    ; Rg
+    ; Grep
+    ; Ruff
+    ; Rustc
+    ; Sed
+    ; Sort
+    ; Stat
+    ; Tail
+    ; Tr
+    ; Uniq
+    ; Uv
+    ; Wc
+    ; Which
+    ; Yarn
+    ]
+;;
+
+let readonly_programs =
+  Masc_exec.Exec_program.
+    [ Cat
+    ; Cut
+    ; Echo
+    ; Env
+    ; File
+    ; Find
+    ; Head
+    ; Ls
+    ; Printf
+    ; Pwd
+    ; Rg
+    ; Grep
+    ; Sed
+    ; Sort
+    ; Stat
+    ; Tail
+    ; Tr
+    ; Uniq
+    ; Wc
+    ; Which
+    ]
+;;
+
+let dev_allowed_commands = List.map Masc_exec.Exec_program.name_of_known dev_programs
+let readonly_allowed_commands = List.map Masc_exec.Exec_program.name_of_known readonly_programs
+
+let is_dev_allowed name = List.mem name dev_allowed_commands
+let is_readonly_allowed name = List.mem name readonly_allowed_commands
+
 
 let default_common_allowed_commands_hint =
   "scripts/dune-local.sh, git, rg, ls, cat, head, tail, find, make, node, npm, \

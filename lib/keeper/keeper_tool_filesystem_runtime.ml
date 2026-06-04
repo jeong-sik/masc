@@ -163,6 +163,11 @@ let resolve_read_file_target
             ~projected_path:candidate
         with
         | Ok _ as ok -> ok
+        | Error e
+          when String.starts_with
+                 ~prefix:"path_not_found_under_allowed_roots:"
+                 e ->
+          Error (Missing_file { target = candidate; error = e })
         | Error e -> Error (Read_path_error e)
       in
       if resolver_input.projected_from_visible_cwd

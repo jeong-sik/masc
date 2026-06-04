@@ -82,6 +82,7 @@ DEFAULT_LEAVES: tuple[str, ...] = (
     "masc.keeper_failure_circuit_breaker_types",
     "masc.keeper_approval_queue_rules_types",
     "masc.keeper_toml_parser",
+    "masc.keeper_toml_loader",
     "masc.keeper_tool_name",
     "masc.keeper_id",
     "masc.keeper_terminal_reason",

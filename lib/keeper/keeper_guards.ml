@@ -131,7 +131,7 @@ let render_inline_skip_reason_with_source
 (** Broadcast a tool skip event via SSE for dashboard visibility.
     Also records in [Dashboard_governance_metrics] for aggregation. *)
 let broadcast_tool_skipped ~keeper_name ~tool_name ~reason_code =
-  Dashboard_governance_metrics.record_tool_skipped
+  !Keeper_keepalive_signal.record_tool_skipped_callback
     ~keeper_name ~tool_name ~reason_code;
   (try
     Sse.broadcast

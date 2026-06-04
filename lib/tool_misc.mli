@@ -60,3 +60,12 @@ val dispatch : context -> name:string -> args:Yojson.Safe.t -> Tool_result.resul
 
 val tool_inventory_json :
   context -> include_hidden:bool -> Yojson.Safe.t
+
+val register_dashboard_handler :
+  (tool_name:string ->
+   start_time:float ->
+   context ->
+   Yojson.Safe.t ->
+   Tool_result.result) ->
+  unit
+

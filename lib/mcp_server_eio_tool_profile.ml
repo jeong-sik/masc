@@ -97,7 +97,7 @@ let tool_schemas_for_profile ?(include_hidden = false)
         in
         dedupe_tool_schemas_by_name
           (Sdk_tool_contract.sdk_tool_schemas @ passthrough)
-    | Operator_remote -> Tool_operator.remote_schemas
+    | Operator_remote -> Tool_operator.remote_schemas ()
   in
   schemas
 
@@ -124,7 +124,7 @@ let tool_allowed_in_profile ?(internal_keeper_runtime = false) state profile
       || (tool_schemas_for_profile state Managed_agent
           |> List.exists (fun (schema : Masc_domain.tool_schema) ->
                  String.equal schema.name tool_name))
-  | Operator_remote -> List.mem tool_name Tool_operator.remote_tool_names
+  | Operator_remote -> List.mem tool_name (Tool_operator.remote_tool_names ())
 
 let tool_annotations_for_profile _profile tool_name =
   let read_only =

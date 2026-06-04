@@ -13,3 +13,7 @@ val handle_keeper_down :
 (** RFC-0182 §3.1 — ctx-free entry point for keeper_dispatch_ref path. *)
 val handle_keeper_down_config :
   config:Workspace.config -> Yojson.Safe.t -> tool_result
+
+val register_remove_pending_confirms_by_target :
+  (Workspace.config -> target_type:string -> target_id:string option -> int) ->
+  unit

@@ -9,7 +9,7 @@
 *)
 
 open Alcotest
-module Routes = Masc.Server_routes_http_routes_sidecar
+module Routes = Server_routes_http_routes_sidecar
 
 let result_of = function
   | Ok s -> "Ok " ^ s

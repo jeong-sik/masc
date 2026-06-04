@@ -3,7 +3,7 @@
     Tests offer/answer signaling flow, peer registry,
     and cleanup logic. No actual WebRTC connections. *)
 
-module Wrtc = Masc.Server_webrtc_transport
+module Wrtc = Server_webrtc_transport
 module Transport = Masc.Transport
 module Agent_transport = Masc.Masc_grpc_transport
 

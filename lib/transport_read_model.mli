@@ -105,3 +105,16 @@ val transport_status_json : http_context -> Yojson.Safe.t
     via env-var, distinct from the runtime listening state.
     Default ([false]) hides the configured fields so dashboard
     UI does not leak operator-only knobs. *)
+
+type webrtc_status =
+  { ice_server_urls : string list
+  ; pending_offers : int
+  ; active_peers : int
+  ; live_connections : int
+  ; connected_channels : int
+  }
+
+val register_grpc_service_name : string -> unit
+val register_grpc_health_service_name : string -> unit
+val register_webrtc_status : (unit -> webrtc_status) -> unit
+

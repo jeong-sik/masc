@@ -18,7 +18,7 @@ let () =
 ;;
 
 module Prom = Masc.Prometheus
-module Judge = Masc.Dashboard_governance_judge
+module Judge = Dashboard_governance_judge
 
 let metric_name = "masc_governance_response_model_empty_total"
 

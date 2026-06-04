@@ -11,15 +11,32 @@ open Keeper_types_profile
 open Keeper_memory
 open Keeper_execution
 
-(** Optional gRPC client + env — WORM Atomic: set at server bootstrap
-    when [MASC_AGENT_TRANSPORT=grpc]. *)
-let grpc_client_ref : Masc_grpc_client.t option Atomic.t = Atomic.make None
+type grpc_heartbeat_starter_fn = {
+  f : 'a. ctx:'a context -> m:keeper_meta -> stop:bool Atomic.t -> (unit -> unit) option;
+}
 
-let grpc_env_ref : Eio_unix.Stdenv.base option Atomic.t = Atomic.make None
+let grpc_heartbeat_starter_fn : grpc_heartbeat_starter_fn ref =
+  ref { f = (fun ~ctx:_ ~m:_ ~stop:_ -> None) }
 
-let set_grpc_client ?(env : Eio_unix.Stdenv.base option) c =
-  Atomic.set grpc_client_ref (Some c);
-  Atomic.set grpc_env_ref env
+let register_grpc_heartbeat_starter (f : grpc_heartbeat_starter_fn) =
+  grpc_heartbeat_starter_fn := f
+;;
+
+let grpc_heartbeat_starter ~ctx ~m ~stop =
+  (!grpc_heartbeat_starter_fn).f ~ctx ~m ~stop
+
+let record_wake_payload_callback : (keeper_name:string -> trace_id:string -> turn_index:int -> model_id:string -> context_window:int -> approx_body_bytes:int -> system_prompt_bytes:int -> tool_defs_bytes:int -> messages_bytes:int -> message_count:int -> role_counts:(string * int) list -> tool_count:int -> has_compact_happened:bool -> unit) ref =
+  ref (fun ~keeper_name:_ ~trace_id:_ ~turn_index:_ ~model_id:_ ~context_window:_ ~approx_body_bytes:_ ~system_prompt_bytes:_ ~tool_defs_bytes:_ ~messages_bytes:_ ~message_count:_ ~role_counts:_ ~tool_count:_ ~has_compact_happened:_ -> ())
+
+let register_record_wake_payload (f : (keeper_name:string -> trace_id:string -> turn_index:int -> model_id:string -> context_window:int -> approx_body_bytes:int -> system_prompt_bytes:int -> tool_defs_bytes:int -> messages_bytes:int -> message_count:int -> role_counts:(string * int) list -> tool_count:int -> has_compact_happened:bool -> unit)) =
+  record_wake_payload_callback := f
+;;
+
+let record_tool_skipped_callback : (keeper_name:string -> tool_name:string -> reason_code:string -> unit) ref =
+  ref (fun ~keeper_name:_ ~tool_name:_ ~reason_code:_ -> ())
+
+let register_record_tool_skipped (f : (keeper_name:string -> tool_name:string -> reason_code:string -> unit)) =
+  record_tool_skipped_callback := f
 ;;
 
 (* Skip log throttle removed with manual_reconcile blocker — no more

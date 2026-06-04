@@ -8,11 +8,7 @@ val set_bus : Agent_sdk.Event_bus.t -> unit
 (** Retrieve the shared Event_bus, if set. *)
 val get_bus : unit -> Agent_sdk.Event_bus.t option
 
-(** Inject a gRPC client for bidirectional heartbeat streaming.
-    When set and [MASC_AGENT_TRANSPORT=grpc], keepalive opens a
-    persistent bidi [Heartbeat] stream, sends [HeartbeatPing] at
-    each interval, and processes [HeartbeatAck] directives. *)
-val set_grpc_client : ?env:Eio_unix.Stdenv.base -> Masc_grpc_client.t -> unit
+val register_grpc_heartbeat_starter : Keeper_keepalive_signal.grpc_heartbeat_starter_fn -> unit
 
 (** Process a single directive string from a gRPC HeartbeatAck.
     Supported: "pause", "resume", "wakeup", "claim:<task_id>". *)

@@ -3,7 +3,7 @@ val json :
   ?force:bool ->
   config:Workspace.config ->
   sw:Eio.Switch.t ->
-  clock:'a Eio.Time.clock ->
+  clock:([> float Eio.Time.clock_ty ] as 'a) Eio.Resource.t ->
   proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t option ->
   unit ->
   Yojson.Safe.t
@@ -34,3 +34,6 @@ module For_test : sig
     metadata_gaps:Yojson.Safe.t list ->
     string * Yojson.Safe.t list
 end
+
+val register_operator_snapshot_json : Dashboard_projection_cache.operator_snapshot_fn -> unit
+

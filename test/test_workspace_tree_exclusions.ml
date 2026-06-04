@@ -11,7 +11,7 @@
 
 open Alcotest
 
-module W = Masc.Server_routes_http_routes_workspace
+module W = Server_routes_http_routes_workspace
 
 let rec rm_rf path =
   if Sys.file_exists path

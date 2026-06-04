@@ -20,6 +20,12 @@ val register_cancel_orchestrator : (unit -> unit) -> unit
     once silently overwrites the previous value (last-writer
     wins), matching the existing single-bootstrap pattern. *)
 
+val register_sse_cleanup : (unit -> int * int) -> unit
+(** Register a cleanup callback for SSE clients. Returns (closed_count, remaining_count). *)
+
+val register_ws_cleanup : (unit -> int * int) -> unit
+(** Register a cleanup callback for WebSocket sessions. Returns (closed_count, remaining_count). *)
+
 val run_all : unit -> unit
 (** Run the shutdown sequence in order:
 

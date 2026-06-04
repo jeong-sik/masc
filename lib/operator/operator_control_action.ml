@@ -1,5 +1,6 @@
 open Tool_args
 include Operator_control_snapshot
+type 'a context = 'a Tool_operator.context
 
 open Result.Syntax
 
@@ -144,7 +145,7 @@ let generate_confirm_token ~(clock : _ Eio.Time.clock) config =
   in
   loop 0
 
-let resolved_actor_for_args ?actor_hint ctx args =
+let resolved_actor_for_args ?actor_hint (ctx : 'a context) args =
   let payload_actor = get_string_opt args "actor" |> Option.map String.trim in
   let hinted_actor = actor_hint |> Option.map String.trim in
   Ok
@@ -153,7 +154,7 @@ let resolved_actor_for_args ?actor_hint ctx args =
        | Some actor when actor <> "" -> Some actor
        | _ -> payload_actor))
 
-let action_request_of_args ?actor_hint ctx args =
+let action_request_of_args ?actor_hint (ctx : 'a context) args =
   let action_type =
     get_string args "action_type" "" |> String.trim |> String.lowercase_ascii
     |> canonical_action_type

@@ -44,11 +44,11 @@ let string_list_member json key =
 ;;
 
 let test_tool_exec_decision_row_feeds_lightweight_tool_audit () =
-  Masc.Dashboard_cache.invalidate_all ();
+  Dashboard_cache.invalidate_all ();
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
-      Masc.Dashboard_cache.invalidate_all ();
+      Dashboard_cache.invalidate_all ();
       remove_tree base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
@@ -86,7 +86,7 @@ let test_tool_exec_decision_row_feeds_lightweight_tool_audit () =
         (Some "keeper_decision_log")
         snapshot.tool_audit_source;
       let audit =
-        Masc.Operator_control_snapshot.cached_tool_audit_json
+        Operator_control_snapshot.cached_tool_audit_json
           ~lightweight:true
           config
           (make_meta keeper_name)

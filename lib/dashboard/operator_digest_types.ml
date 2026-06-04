@@ -1,5 +1,3 @@
-open Operator_pending_confirm
-
 (** Severity levels for operator attention items and recommendations.
     Closed set — exhaustive matching catches new levels at compile time. *)
 type operator_severity = Sev_critical | Sev_bad | Sev_warn

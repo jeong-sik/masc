@@ -597,6 +597,7 @@ let assemble_hooks
                      ; "discovered_count", `Int computed_surface.discovered_count
                      ; "llm_selected_count", `Int computed_surface.llm_selected_count
                      ; "final_visible", `Int (List.length turn_visible_tool_names)
+                     ; "visible_tool_names", Json_util.json_string_list turn_visible_tool_names
                      ; ( "turn_lane"
                        , Keeper_agent_tool_surface.turn_lane_to_yojson lane )
                      ; ( "tool_surface_class"

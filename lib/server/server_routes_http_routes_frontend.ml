@@ -89,11 +89,8 @@ let add_routes ~port ~host router =
          Http.Response.json_value (Runtime.agent_card_json req) reqd)
          request reqd)
   |> Http.Router.get "/ws" websocket_discovery_handler
-  |> Http.Router.get "/metrics" (fun request reqd ->
-       with_read_auth (fun _state _req reqd ->
-         let body = Prometheus.to_prometheus_text () in
-         Http.Response.bytes ~content_type:"text/plain; version=0.0.4; charset=utf-8" body reqd
-       ) request reqd)
+  (* RFC-0217 S4-2 — Prometheus /metrics scrape endpoint removed; metrics now
+     export via OTLP push (Otel_metrics observable). *)
   |> Http.Router.get "/ag-ui/events" handle_ag_ui_events
   |> Http.Router.get "/events/presence" handle_presence_events
   (* Dashboard Bonsai island — static JS bundle and SPA shell.

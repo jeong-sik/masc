@@ -594,9 +594,9 @@
       <section id="runtime-flow">
         <h2>Runtime / OAS Boundary 순서도</h2>
         <div class="flow row">
-          <div class="node workspace"><h4>MASC decision</h4><p>task, goal, keeper profile, tool requirements.</p></div>
+          <div class="node workspace"><h4>MASC decision</h4><p>task, goal, keeper profile, tool surface.</p></div>
           <div class="node common"><h4>Runtime runtime</h4><p>named runtime -> model labels -> provider configs.</p></div>
-          <div class="node keeper"><h4>Tool lane filter</h4><p>runtime MCP policy, required tool support.</p></div>
+          <div class="node keeper"><h4>Tool lane filter</h4><p>runtime MCP policy and resolved tool surface.</p></div>
           <div class="node common"><h4>OAS execution</h4><p>Agent.run, context, checkpoint, provider stream.</p></div>
           <div class="node workspace"><h4>MASC projection</h4><p>receipt, manifest, dashboard redacted runtime lane.</p></div>
         </div>
@@ -1015,7 +1015,7 @@
               </li>
               <li>
                 <strong>Timed provider run starts with OTel and registry attempt markers</strong>
-                <span>Turn timeout, retry timing, max idle turns, required tool mode, and provider-attempt state are prepared before OAS call.</span>
+                <span>Turn timeout, retry timing, max idle turns, tool surface mode, and provider-attempt state are prepared before OAS call.</span>
                 <code>lib/keeper/keeper_unified_turn.ml:893-970</code>
               </li>
               <li>
@@ -1074,8 +1074,8 @@
                 <code>lib/tool_task.ml:1085-1145</code>
               </li>
               <li>
-                <strong>Claim validates initialization, identity, join, and required tools</strong>
-                <span><code>claim_task_r</code> locks backlog, validates bound agent, checks do-not-reclaim, ownership conflicts, and required-tool guards.</span>
+                <strong>Claim validates initialization, identity, join, and ownership</strong>
+                <span><code>claim_task_r</code> locks backlog, validates bound agent, checks do-not-reclaim, and rejects ownership conflicts.</span>
                 <code>lib/workspace/workspace_task_claim.ml:234-315</code>
               </li>
               <li>

@@ -18,7 +18,6 @@ type try_runtime_ctx =
   ; try_provider_ctx : Keeper_turn_driver_try_provider.try_provider_ctx
   ; runtime_mcp_policy : Llm_provider.Llm_transport.runtime_mcp_policy option
   ; tools : Agent_sdk.Tool.t list
-  ; require_tool_choice_support : bool
   ; required_lane_provider_rejections : Keeper_internal_error.provider_rejection list
   ; emit_runtime_manifest :
       ?status:string ->
@@ -138,7 +137,6 @@ let run
     , ctx.capture
     , ctx.runtime_mcp_policy
     , ctx.tools
-    , ctx.require_tool_choice_support
     , ctx.required_lane_provider_rejections
     , ctx.runtime_manifest_context
     , ctx.runtime_manifest_append

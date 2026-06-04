@@ -8,8 +8,8 @@
     1. [Masc_exec_command_gate.Shell_command_gate.gate_raw] verdict shape
        matches what {!test/fixtures/shell_gate/baseline.jsonl}
        records for each corpus row (Phase 0 - baseline pin).
-    2. [Masc.Worker_dev_tools.validate_command_tool_execute_with_allowlist]
-       worker verdict also matches the recorded baseline so any future
+    2. [Masc.Exec_policy.validate_command_tool_execute_with_allowlist]
+       policy verdict also matches the recorded baseline so any future
        behavior change (Phase 2+) is visible as a corpus diff, not as
        a silent flip.
     3. Phase 1 facade-specific Plan invariants that the JSONL corpus
@@ -18,12 +18,12 @@
        typed-pipeline lowering through [lower_typed_pipeline]. *)
 
 module Gate = Masc_exec_command_gate.Shell_command_gate
-module W = Masc.Worker_dev_tools
+module Policy = Exec_policy
 
 let allowed = [ "rg"; "sort"; "head"; "wc"; "cat"; "git"; "ls" ]
 
-let gate_from_raw ?caller ~raw ~allowlist ~path_policy ~sandbox () =
-  Gate.gate_raw ?caller ~text:raw ~allowlist ~path_policy ~sandbox ()
+let gate_from_raw ~raw ~allowlist ~path_policy ~sandbox () =
+  Gate.gate_raw ~text:raw ~allowlist ~path_policy ~sandbox ()
 let allowlist : Gate.allowlist_policy =
   { redirect_allowed = false; allowed_commands = allowed; allow_pipes = true }
 ;;
@@ -33,7 +33,7 @@ let allowlist : Gate.allowlist_policy =
 type fixture = {
   raw_cmd : string;
   category : string;
-  expected_worker_verdict : string;
+  expected_policy_verdict : string;
   expected_ir_verdict : string;
   ir_detail : string option;
   note : string;
@@ -74,7 +74,7 @@ let parse_fixture_line line =
   let json = Yojson.Safe.from_string line in
   { raw_cmd = assoc_string "raw_cmd" json
   ; category = assoc_string "category" json
-  ; expected_worker_verdict = assoc_string "expected_worker_verdict" json
+  ; expected_policy_verdict = assoc_string "expected_worker_verdict" json
   ; expected_ir_verdict = assoc_string "expected_ir_verdict" json
   ; ir_detail = assoc_string_opt "ir_detail" json
   ; note = assoc_string "note" json
@@ -99,25 +99,24 @@ let load_corpus () =
   fixtures
 ;;
 
-(* Worker verdict tagging — short string aligned with the JSONL
-   schema. The {!W.block_reason} variant is private to the module,
-   so we use {!W.block_reason_to_string} indirectly via tag mapping. *)
-let worker_tag (result : (unit, W.block_reason) result) : string =
+(* Policy verdict tagging — short string aligned with the JSONL schema. *)
+let policy_tag (result : (unit, Policy.block_reason) result) : string =
   match result with
   | Ok () -> "ok"
-  | Error W.Empty_command -> "empty_command"
-  | Error W.Chain_or_redirect -> "chain_or_redirect"
-  | Error W.Injection -> "injection"
-  | Error W.Process_substitution -> "process_substitution"
-  | Error W.Unsafe_redirect -> "unsafe_redirect"
-  | Error W.Pipes_not_allowed -> "pipes_not_allowed"
-  | Error W.Direct_dune_invocation -> "direct_dune_invocation"
-  | Error (W.Command_not_allowed _) -> "command_not_allowed"
+  | Error Policy.Empty_command -> "empty_command"
+  | Error Policy.Chain_or_redirect -> "chain_or_redirect"
+  | Error Policy.Injection -> "injection"
+  | Error Policy.Process_substitution -> "process_substitution"
+  | Error Policy.Unsafe_redirect -> "unsafe_redirect"
+  | Error Policy.Pipes_not_allowed -> "pipes_not_allowed"
+  | Error Policy.Direct_dune_invocation -> "direct_dune_invocation"
+  | Error (Policy.Command_not_allowed _) -> "command_not_allowed"
 ;;
 
-let validate_worker_execute_raw ~allowed_commands raw =
-  match Exec_policy.parse_string_to_ir ~mode:Tool_execute raw with
-  | Ok ir -> W.validate_command_tool_execute_with_allowlist ~allowed_commands ir
+let validate_policy_execute_raw ~allowed_commands raw =
+  match Policy.parse_string_to_ir ~mode:Tool_execute raw with
+  | Ok ir ->
+    Policy.validate_command_tool_execute_with_allowlist ~allowed_commands ir
   | Error reason -> Error reason
 ;;
 
@@ -137,13 +136,13 @@ let run_corpus_row fixture =
          String.sub fixture.raw_cmd 0 60 ^ "..."
        else fixture.raw_cmd)
   in
-  let worker =
-    validate_worker_execute_raw ~allowed_commands:allowed fixture.raw_cmd
+  let policy =
+    validate_policy_execute_raw ~allowed_commands:allowed fixture.raw_cmd
   in
   Alcotest.(check string)
-    (label ^ " worker verdict")
-    fixture.expected_worker_verdict
-    (worker_tag worker);
+    (label ^ " policy verdict")
+    fixture.expected_policy_verdict
+    (policy_tag policy);
   let ir =
     gate_from_raw
       ~raw:fixture.raw_cmd

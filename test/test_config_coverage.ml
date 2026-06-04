@@ -64,15 +64,6 @@ let test_shard_base_tools_registered_for_help () =
       | None -> failf "%s missing from tool help registry" tool.name)
     Tool_shard.base_tools
 
-let test_approval_get_requires_admin_permission () =
-  check bool "approval_pending is keeper-safe read" true
-    (Auth.permission_for_tool "masc_approval_pending"
-     = Some Masc_domain.CanReadState);
-  check bool "approval_get admin-only" true
-    (Auth.permission_for_tool "masc_approval_get" = Some Masc_domain.CanAdmin);
-  check bool "approval_resolve admin-only" true
-    (Auth.permission_for_tool "masc_approval_resolve" = Some Masc_domain.CanAdmin)
-
 let test_all_tool_names_omit_removed_mode_tools () =
   let names = Config.all_tool_names () in
   List.iter
@@ -124,8 +115,6 @@ let () =
             test_all_tool_names_contains_approval_pending;
           test_case "shard base tools registered for help" `Quick
             test_shard_base_tools_registered_for_help;
-          test_case "approval get requires admin permission" `Quick
-            test_approval_get_requires_admin_permission;
           test_case "removed mode tools omitted" `Quick
             test_all_tool_names_omit_removed_mode_tools;
           test_case "autoresearch tools omitted" `Quick

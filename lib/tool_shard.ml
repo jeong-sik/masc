@@ -337,8 +337,8 @@ let execute (tool_name : string) (arguments : Yojson.Safe.t) : bool * Yojson.Saf
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
 
-(* tool_spec_read_only / tool_spec_destructive / tool_required_permission /
-   tool_effect_domain moved to Tool_shard_types (intra-library file split,
+(* tool_spec_read_only / tool_spec_destructive / tool_effect_domain moved to
+   Tool_shard_types (intra-library file split,
    2026-05-16). *)
 
 let () =
@@ -354,7 +354,6 @@ let () =
             ~is_read_only:(List.mem s.name tool_spec_read_only)
             ~is_idempotent:(List.mem s.name tool_spec_read_only)
             ~is_destructive:(List.mem s.name tool_spec_destructive)
-            ?required_permission:(tool_required_permission s.name)
             ?effect_domain:(tool_effect_domain s.name)
             ()))
     schemas

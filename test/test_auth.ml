@@ -1385,22 +1385,6 @@ let test_tool_auth_strict_env_cannot_disable_fail_closed () =
   | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
   | Error e -> fail (Printf.sprintf "wrong error: %s" (Masc_domain.masc_error_to_string e))
 
-let test_declared_tool_permission_from_tool_spec () =
-  let name = "__test_declared_permission_tool" in
-  let spec =
-    Tool_spec.create
-      ~name
-      ~description:"declared permission tool"
-      ~module_tag:Tool_dispatch.Mod_misc
-      ~input_schema:(`Assoc [ ("type", `String "object") ])
-      ~handler_binding:Tag_dispatch
-      ~required_permission:Masc_domain.CanAdmin
-      ()
-  in
-  Tool_spec.register spec;
-  check bool "tool permission comes from Tool_spec metadata" true
-    (Auth.permission_for_tool name = Some Masc_domain.CanAdmin)
-
 (* ============================================ *)
 (* Enable/disable tests                         *)
 (* ============================================ *)
@@ -1528,8 +1512,6 @@ let () =
         `Quick test_authorize_tool_v2_unknown_keeper_prefix_strict_denied;
       test_case "tool auth strict env cannot disable fail-closed"
         `Quick test_tool_auth_strict_env_cannot_disable_fail_closed;
-      test_case "declared tool permission from Tool_spec"
-        `Quick test_declared_tool_permission_from_tool_spec;
     ];
     "enable_disable", [
       test_case "enable/disable auth" `Quick test_enable_disable_auth;

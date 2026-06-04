@@ -44,8 +44,6 @@ let run_named
     ?(keeper_name = "")
     ~goal
     ?provider_filter
-    ?(require_tool_choice_support = false)
-    ?(require_tool_support = false)
     ?priority
     ?session_id
     ?(system_prompt = "")
@@ -107,13 +105,6 @@ let run_named
   let runtime_id = String.trim runtime_id in
   let error_runtime_id = runtime_id in
   let runtime_mcp_policy = runtime_mcp_policy_for_tools ~keeper_name tools in
-  (* Keeper-internal tools cannot degrade to a text-only CLI palette: the model
-     would see no callable schema and emit misleading diagnostics. *)
-  let require_tool_support =
-    require_tool_support
-    || agent_internal_tools_require_materialized_runtime_surface
-         ~keeper_name tools
-  in
   (* Parameters that only fed the deleted multi-candidate machinery
      (provider selection, admission queue gating, per-candidate accept). *)
   ignore provider_filter;
@@ -151,8 +142,6 @@ let run_named
     keeper_name;
     name;
     goal;
-    require_tool_choice_support;
-    require_tool_support;
     priority;
     session_id;
     system_prompt;

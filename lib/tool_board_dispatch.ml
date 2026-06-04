@@ -118,28 +118,6 @@ let tool_spec_read_only =
 
 let register () =
   let handler ~name ~args = Some (handle_tool name args) in
-  let tool_required_permission = function
-    | "masc_board_list"
-    | "masc_board_get"
-    | "masc_board_stats"
-    | "masc_board_search"
-    | "masc_board_profile"
-    | "masc_board_hearths"
-    | "masc_board_curation_read"
-    | "masc_board_sub_board_list"
-    | "masc_board_sub_board_get" -> Some Masc_domain.CanReadState
-    | "masc_board_post"
-    | "masc_board_comment"
-    | "masc_board_vote"
-    | "masc_board_comment_vote"
-    | "masc_board_reaction"
-    | "masc_board_curation_submit" -> Some Masc_domain.CanBroadcast
-    | "masc_board_delete" | "masc_board_cleanup" -> Some Masc_domain.CanAdmin
-    | "masc_board_sub_board_create"
-    | "masc_board_sub_board_update"
-    | "masc_board_sub_board_delete" -> Some Masc_domain.CanBroadcast
-    | _ -> None
-  in
   let make_spec (s : Masc_domain.tool_schema) =
     let ro = List.mem s.name tool_spec_read_only in
     Tool_spec.create
@@ -151,7 +129,6 @@ let register () =
       ~is_read_only:ro
       ~is_idempotent:ro
       ~is_destructive:(String.equal s.name "masc_board_delete")
-      ?required_permission:(tool_required_permission s.name)
       ()
   in
   Tool_spec.register_all (List.map make_spec Tool_board_registry.tools)

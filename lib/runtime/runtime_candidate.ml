@@ -198,18 +198,6 @@ let effective_attempt_timeout_resolution ~is_last ~configured_timeout_s (_ : t) 
 let effective_attempt_timeout_s ~is_last ~configured_timeout_s t =
   (effective_attempt_timeout_resolution ~is_last ~configured_timeout_s t).timeout_s
 
-let tool_filter_rejection_label ~keeper_name ?runtime_mcp_policy ~tools
-    ~require_tool_choice_support ~require_tool_support (t : t) =
-  let _ =
-    ( keeper_name,
-      runtime_mcp_policy,
-      tools,
-      require_tool_choice_support,
-      require_tool_support,
-      t )
-  in
-  None
-
 let capacity_key (t : t) = health_key t
 
 let capacity_keys candidates =

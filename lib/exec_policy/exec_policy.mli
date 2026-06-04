@@ -1,8 +1,8 @@
 (** Shared execution policy for shell-like tool frontends.
 
     This module owns the command/Shell IR policy substrate used by
-    [worker_dev_tools], [tool_execute], and code-shell surfaces. Tool bundles
-    should adapt to this policy layer instead of becoming the policy owner. *)
+    [tool_execute] and code-shell surfaces. Tool bundles should adapt to this
+    policy layer instead of becoming the policy owner. *)
 
 type block_reason =
   | Empty_command
@@ -47,40 +47,30 @@ val is_readonly_allowed : string -> bool
 
 
 val command_context_with_allowlist :
-  ?caller:Masc_exec_command_gate.Shell_command_gate.caller ->
   allowed_commands:string list ->
   Masc_exec.Shell_ir.t ->
   (Masc_exec_command_gate.Shell_command_gate.parsed_context, block_reason) result
 
 val validate_command_with_allowlist :
-  ?caller:Masc_exec_command_gate.Shell_command_gate.caller ->
   allowed_commands:string list ->
   Masc_exec.Shell_ir.t ->
   (unit, block_reason) result
 
-val validate_command :
-  ?caller:Masc_exec_command_gate.Shell_command_gate.caller ->
-  Masc_exec.Shell_ir.t ->
-  (unit, block_reason) result
+val validate_command : Masc_exec.Shell_ir.t -> (unit, block_reason) result
 
 val command_context_tool_execute_with_allowlist :
-  ?caller:Masc_exec_command_gate.Shell_command_gate.caller ->
   ?allow_pipes:bool ->
   allowed_commands:string list ->
   Masc_exec.Shell_ir.t ->
   (Masc_exec_command_gate.Shell_command_gate.parsed_context, block_reason) result
 
 val validate_command_tool_execute_with_allowlist :
-  ?caller:Masc_exec_command_gate.Shell_command_gate.caller ->
   ?allow_pipes:bool ->
   allowed_commands:string list ->
   Masc_exec.Shell_ir.t ->
   (unit, block_reason) result
 
-val validate_command_tool_execute :
-  ?caller:Masc_exec_command_gate.Shell_command_gate.caller ->
-  Masc_exec.Shell_ir.t ->
-  (unit, block_reason) result
+val validate_command_tool_execute : Masc_exec.Shell_ir.t -> (unit, block_reason) result
 
 val simple_literal_args : Masc_exec.Shell_ir.simple -> string list option
 
@@ -124,7 +114,6 @@ type unsafe = Typed_capabilities.unsafe
 type 'a verified_ir = 'a Typed_capabilities.verified_ir
 
 val promote_to_safe :
-  ?caller:Masc_exec_command_gate.Shell_command_gate.caller ->
   allowed_commands:string list ->
   Masc_exec.Shell_ir.t ->
   (safe verified_ir, block_reason) result

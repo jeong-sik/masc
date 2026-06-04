@@ -21,8 +21,7 @@
     - Session id: {!resolved_mcp_session_id},
       {!evidence_session_id_of_worker_run}.
     - Tool catalogue: {!session_min_tool_names}.
-    - Tool builders: {!build_oas_mcp_tools},
-      {!build_local_shell_tools}.
+    - Tool builders: {!build_oas_mcp_tools}.
     - Provider: {!oas_provider_of_label},
       {!resolve_oas_provider_of_label}.
     - Audit + run helpers: {!append_worker_completion_log},
@@ -153,17 +152,6 @@ val build_oas_mcp_tools :
     a [call_fn] that injects [agent_name] when required,
     dispatches via {!call_masc_tool}, and converts MASC
     errors into [Agent_sdk.Types.tool_result]. *)
-
-val build_local_shell_tools :
-  workspace_config:Workspace.config option ->
-  worker_name:string ->
-  workdir:string ->
-  (Agent_sdk.Tool.t list, string) result
-(** Builds the local-shell tool subset (process exec /
-    file IO).  Errors when {!Process_eio.get_proc_mgr} or
-    {!Process_eio.get_clock} are unavailable.  Hooks
-    telemetry through [workspace_config] when an Eio fs is
-    present; missing either drops telemetry silently. *)
 
 (** {1 Provider resolution} *)
 

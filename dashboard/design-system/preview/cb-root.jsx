@@ -215,10 +215,8 @@ function App() {
         <DCArtboard id="ct-lat" label="C · Latency histogram + buckets"    width={920}  height={340}><CostLatency/></DCArtboard>
       </DCSection>
 
-      <DCSection id="heur" title="O5 · Heuristic + Stress" subtitle="keeper_hooks_oas firing log + agent_stress.jsonl.">
-        <DCArtboard id="hr-log" label="A · Heuristic firing log"           width={1080} height={420}><HeuristicLog/></DCArtboard>
-        <DCArtboard id="hr-st"  label="B · Stress board (per-agent)"       width={920}  height={240}><StressBoard/></DCArtboard>
-        <DCArtboard id="hr-mod" label="C · Firing rate by module"          width={920}  height={300}><HeuristicByModule/></DCArtboard>
+      <DCSection id="stress" title="O5 · Stress" subtitle="agent_stress.jsonl.">
+        <DCArtboard id="st-board" label="A · Stress board (per-agent)"       width={920}  height={240}><StressBoard/></DCArtboard>
       </DCSection>
 
       {/* ════════ PHASE 2 · TRACK 4 · COGNITION PLANE ════════ */}

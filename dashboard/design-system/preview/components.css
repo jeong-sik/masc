@@ -570,7 +570,7 @@
 
 
 /* ═══════════════════════════════════════════════════════════════════
-   Track 3 · OBSERVABILITY (O1 Runtime · O2 Audit · O3 SafeAuto · O4 Cost · O5 Heuristic)
+   Track 3 · OBSERVABILITY (O1 Runtime · O2 Audit · O3 SafeAuto · O4 Cost · O5 Stress)
    ═══════════════════════════════════════════════════════════════════ */
 
 /* ═════ O1 · RUNTIME INSPECTOR ═════ */
@@ -676,19 +676,7 @@
 .cs-mat td.z3 { color: var(--color-accent-fg); background: rgb(var(--color-accent-glow)/.22); font-weight:600; }
 .cs-mat td.z4 { color: var(--color-bg-page); background: var(--color-accent-fg); font-weight: 600; }
 
-/* ═════ O5 · HEURISTIC + STRESS ═════ */
-.hr-row { display:grid; grid-template-columns: 70px 130px 1fr 100px 60px 50px; gap: 6px; padding: 4px 8px; border-bottom: 1px solid var(--color-border-default); align-items: baseline; font-family: var(--font-mono); font-size: var(--fs-11); }
-.hr-row.fired { background: rgb(var(--err-glow,255 90 90)/.04); border-left: 2px solid var(--err); padding-left: 6px; }
-.hr-row .ts { color: var(--color-fg-disabled); font-size: var(--fs-10); }
-.hr-row .mod { color: var(--color-fg-primary); font-weight: 500; }
-.hr-row .site { color: var(--color-accent-fg); }
-.hr-row .det { color: var(--color-fg-muted); font-size: var(--fs-10); white-space: normal; }
-.hr-row .num { text-align: right; font-variant-numeric: tabular-nums; color: var(--color-fg-primary); }
-.hr-row .num.over { color: var(--err-fg); font-weight: 600; }
-.hr-row .fl { font-size: var(--fs-9); letter-spacing: .08em; text-transform: uppercase; padding: 1px 4px; border:1px solid var(--color-border-strong); text-align:center; }
-.hr-row .fl.t { color: var(--err-fg); border-color: var(--err-border); background: var(--err-soft); font-weight:600; }
-.hr-row .fl.f { color: var(--color-fg-disabled); }
-
+/* ═════ O5 · STRESS ═════ */
 .st-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 6px; }
 .st-grid .scard { padding: 7px 9px; background: var(--color-bg-surface); border: 1px solid var(--color-border-default); border-left: 3px solid var(--warn); display:flex; flex-direction:column; gap: 4px; }
 .st-grid .scard.runtime_burn { border-left-color: var(--err); }

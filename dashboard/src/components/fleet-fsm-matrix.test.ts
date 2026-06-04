@@ -227,7 +227,7 @@ describe('runtimeAttentionForSnapshot', () => {
     expect(attention.title).toContain('latest activity 10m ago')
   })
 
-  it('prefers backend runtime_attention over narrower frontend heuristics', () => {
+  it('prefers backend runtime_attention over narrower frontend fallback inference', () => {
     const snap = snapshot({
       is_live: false,
       execution: execution({

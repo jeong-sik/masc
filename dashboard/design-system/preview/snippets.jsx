@@ -287,30 +287,6 @@ const SNIPPETS = [
 </div>`,
   },
   {
-    id: 'heuristic-row', group: 'phase2', src: 'preview/components.css',
-    title: 'Heuristic firing row',
-    desc: 'Stress / heuristic firing entry. Add .fired class for left-accent + soft red bg.',
-    html:
-`<div style="display:flex;flex-direction:column">
-  <div class="hr-row fired">
-    <span class="ts">12:04</span>
-    <span class="mod">drift_threshold</span>
-    <span class="det">claim_holder churn &gt; 3 in 5min on t-4012</span>
-    <span class="site">runtime.py:412</span>
-    <span class="num over">0.84</span>
-    <span class="fl t">FIRED</span>
-  </div>
-  <div class="hr-row">
-    <span class="ts">12:06</span>
-    <span class="mod">probe_latency</span>
-    <span class="det">p95 above 1.5s on hop 4</span>
-    <span class="site">runtime.py:380</span>
-    <span class="num">1.62</span>
-    <span class="fl f">arm</span>
-  </div>
-</div>`,
-  },
-  {
     id: 'nudge-row', group: 'phase2', src: 'preview/components.css',
     title: 'Operator nudge row',
     desc: 'Operator → keeper nudge log entry.',
@@ -333,7 +309,7 @@ const SNIPPETS = [
 `<div class="ki-bdi">
   <div class="row"><span class="lbl">will</span><div class="v">resolve t-4012 by EOD without ceding claim to drift &gt; 0.5</div></div>
   <div class="row"><span class="lbl">needs</span><div class="v">stable probe latency on runtime-v3 hop 4 · operator approval for window extension</div></div>
-  <div class="row"><span class="lbl">desires</span><div class="v">verified patch in trunk · ep-882 closed · drift heuristic re-armed</div></div>
+  <div class="row"><span class="lbl">desires</span><div class="v">verified patch in trunk · ep-882 closed · drift monitor re-armed</div></div>
   <div class="hz">
     <span class="lbl">horizon</span><span class="v">3 turns</span>
     <span class="lbl">commit</span><span class="v">soft</span>
@@ -424,7 +400,7 @@ const SNIPPETS = [
 
 const GROUPS = [
   { id: 'atoms',  name: 'Atoms',                  desc: 'Smallest reusable building blocks — chips, bars, sparks, buttons.' },
-  { id: 'phase2', name: 'Phase 2 row primitives', desc: 'Reusable rows from board, decisions, memory, audit, runtime, heuristic, nudge, keeper, branch.' },
+  { id: 'phase2', name: 'Phase 2 row primitives', desc: 'Reusable rows from board, decisions, memory, audit, runtime, nudge, keeper, branch.' },
   { id: 'forms',  name: 'Form controls',          desc: 'Inputs, checkboxes, toggles, segmented controls.' },
 ];
 

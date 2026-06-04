@@ -239,17 +239,7 @@ window.MASC_P2 = (function () {
     p50: 1480, p95: 8210, total_cost_usd: 30.16,
   };
 
-  // ─── O5 · HEURISTIC + STRESS ─────────────────────────────────────
-  const heuristics = [
-    { ts:"16:32:18Z", module:"keeper_hooks_oas", site:"post_tool_use_failure",     value:1.0, threshold:0.0, triggered:true,  detail:"qa-king · suite-merge-blockers" },
-    { ts:"16:31:27Z", module:"runtime",          site:"runtime_exhausted",         value:1.0, threshold:0.0, triggered:true,  detail:"sangsu · keeper_unified" },
-    { ts:"16:30:42Z", module:"keeper_hooks_oas", site:"max_turns",                 value:15,  threshold:15,  triggered:true,  detail:"sangsu · 16 turns hit" },
-    { ts:"16:24:04Z", module:"compaction",       site:"context_ratio",             value:0.42,threshold:0.5, triggered:false, detail:"sangsu · within budget" },
-    { ts:"16:18:11Z", module:"keeper_hooks_oas", site:"permission_denial",         value:1.0, threshold:0.0, triggered:true,  detail:"sangsu · serena.activate_project" },
-    { ts:"16:14:00Z", module:"task",             site:"open_task_limit_per_goal",  value:3,   threshold:3,   triggered:true,  detail:"taskmaster · goal-merge-blockers" },
-    { ts:"16:08:33Z", module:"board",            site:"expired_post_count",        value:4,   threshold:5,   triggered:false, detail:"janitor · pruned" },
-    { ts:"15:54:12Z", module:"keeper_hooks_oas", site:"failure_streak",            value:1,   threshold:1,   triggered:true,  detail:"qa-king" },
-  ];
+  // ─── O5 · STRESS ─────────────────────────────────────────────────
   const stress = [
     { agent:"qa-king",       kind:"failure_streak", count:1, workspace:"default", at:"15:54:12Z" },
     { agent:"sangsu",        kind:"runtime_burn",   count:3, workspace:"default", at:"16:31:27Z" },
@@ -349,7 +339,7 @@ window.MASC_P2 = (function () {
     goals, goalSnapshots,
     tasks, ledger, responsibility,
     boardPosts, boardComments, workspaces, messages,
-    runtimeAudit, auditEvents, safeAutonomy, costs, heuristics, stress,
+    runtimeAudit, auditEvents, safeAutonomy, costs, stress,
     keepersFull, decisions, memoryEntries, episodes,
   };
 })();

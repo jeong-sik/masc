@@ -374,6 +374,52 @@ let run_process_ok ~cwd prog argv =
       (Masc.Keeper_sandbox_exec_failure.status_label status)
       stdout stderr
 
+let git_ok ~cwd args = run_process_ok ~cwd "git" args
+
+let write_file path content =
+  ensure_dir (Filename.dirname path);
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+
+let write_repositories_toml ~base_path ~repo_name ~url =
+  let config_dir = Filename.concat base_path ".masc/config" in
+  ensure_dir config_dir;
+  write_file
+    (Filename.concat config_dir "repositories.toml")
+    (Printf.sprintf
+       "[repository.%s]\nname = \"%s\"\nurl = \"%s\"\n"
+       repo_name
+       repo_name
+       (String.escaped url))
+
+let setup_preserved_sandbox_repo ~keeper_name =
+  let base_path, config = make_config () in
+  let meta = make_local_meta keeper_name in
+  let remote = Filename.concat base_path ".remote-masc.git" in
+  let seed = Filename.concat base_path "seed-masc" in
+  git_ok ~cwd:base_path
+    [ "init"; "--bare"; "-q"; "--initial-branch=main"; remote ];
+  git_ok ~cwd:base_path [ "clone"; "-q"; remote; seed ];
+  git_ok ~cwd:seed [ "config"; "user.email"; "test@example.com" ];
+  git_ok ~cwd:seed [ "config"; "user.name"; "Test" ];
+  write_file (Filename.concat seed "README.md") "v1\n";
+  git_ok ~cwd:seed [ "add"; "README.md" ];
+  git_ok ~cwd:seed [ "commit"; "-q"; "-m"; "init" ];
+  git_ok ~cwd:seed [ "push"; "-q"; "origin"; "main" ];
+  let playground = Filename.concat base_path (playground_path_of meta.name) in
+  let repo_dir = Filename.concat playground "repos/masc" in
+  ensure_dir (Filename.dirname repo_dir);
+  git_ok ~cwd:(Filename.dirname repo_dir) [ "clone"; "-q"; remote; repo_dir ];
+  write_repositories_toml ~base_path ~repo_name:"masc" ~url:remote;
+  write_file (Filename.concat seed "README.md") "v2\n";
+  git_ok ~cwd:seed [ "add"; "README.md" ];
+  git_ok ~cwd:seed [ "commit"; "-q"; "-m"; "advance" ];
+  git_ok ~cwd:seed [ "push"; "-q"; "origin"; "main" ];
+  write_file (Filename.concat repo_dir "local-dirty.txt") "dirty\n";
+  base_path, config, meta, repo_dir
+
 let parse_error_field raw =
   Yojson.Safe.from_string raw
   |> Json.member "error"
@@ -627,6 +673,71 @@ let test_tool_execute_missing_worktree_cwd_does_not_create_directory () =
       false
       (Sys.file_exists missing_worktree)
   | None -> Alcotest.fail ("expected error json, got: " ^ raw)
+
+let test_tool_execute_blocks_preserved_direct_repo_git_show () =
+  with_eio_fs @@ fun () ->
+  let base_path, config, meta, _repo_dir =
+    setup_preserved_sandbox_repo ~keeper_name:"stale-direct-git-show"
+  in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let raw =
+    Keeper_tool_command_runtime.handle_tool_execute
+      ~turn_sandbox_factory:None
+      ~exec_cache:None
+      ~config
+      ~meta
+      ~args:
+        (`Assoc
+           [ "executable", `String "git"
+           ; "argv", `List [ `String "show"; `String "origin/main:README.md" ]
+           ; "cwd", `String "repos/masc"
+           ])
+      ()
+  in
+  match parse_error_field raw with
+  | Some err ->
+    Alcotest.(check bool) "stale direct repo root is rejected" true
+      (String_util.contains_substring err "sandbox_repo_stale");
+    Alcotest.(check bool) "preserved reason is surfaced" true
+      (String_util.contains_substring err "uncommitted changes");
+    Alcotest.(check bool) "worktree remedy is surfaced" true
+      (String_util.contains_substring err "repos/masc/.worktrees/<task>");
+    Alcotest.(check bool) "git show did not execute" false
+      (String_util.contains_substring raw "v2")
+  | None -> Alcotest.fail ("expected stale repo error json, got: " ^ raw)
+
+let test_tool_execute_allows_preserved_direct_repo_git_status () =
+  with_eio_fs @@ fun () ->
+  let base_path, config, meta, _repo_dir =
+    setup_preserved_sandbox_repo ~keeper_name:"stale-direct-git-status"
+  in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let raw =
+    Keeper_tool_command_runtime.handle_tool_execute
+      ~turn_sandbox_factory:None
+      ~exec_cache:None
+      ~config
+      ~meta
+      ~args:
+        (`Assoc
+           [ "executable", `String "git"
+           ; "argv", `List [ `String "status"; `String "--short" ]
+           ; "cwd", `String "repos/masc"
+           ])
+      ()
+  in
+  let json = Yojson.Safe.from_string raw in
+  Alcotest.(check bool) "diagnostic git status succeeds" true
+    (json |> Json.member "ok" |> Json.to_bool);
+  Alcotest.(check bool) "dirty file is visible for diagnosis" true
+    (json
+     |> Json.member "output"
+     |> Json.to_string
+     |> fun output -> String_util.contains_substring output "local-dirty.txt");
+  Alcotest.(check bool) "stale gate did not block diagnostic" false
+    (String_util.contains_substring raw "sandbox_repo_stale")
 
 let test_tool_execute_elapsed_duration_preserves_positive_sub_ms () =
   let elapsed = Keeper_tool_command_runtime.For_testing.elapsed_duration_ms in
@@ -1642,6 +1753,14 @@ let () =
             "missing worktree cwd rejects without mkdir"
             `Quick
             test_tool_execute_missing_worktree_cwd_does_not_create_directory
+        ; Alcotest.test_case
+            "preserved direct repo root blocks git show"
+            `Quick
+            test_tool_execute_blocks_preserved_direct_repo_git_show
+        ; Alcotest.test_case
+            "preserved direct repo root allows git status"
+            `Quick
+            test_tool_execute_allows_preserved_direct_repo_git_status
         ] )
     ; ( "edge"
       , [ Alcotest.test_case

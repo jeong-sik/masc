@@ -94,7 +94,6 @@ val clock_refs :
   ?checkpoint_id:string ->
   ?compaction_id:string ->
   ?compaction_source:string ->
-  ?memory_injection_id:string ->
   ?event_bus_correlation_id:string ->
   ?event_bus_run_id:string ->
   ?parent_event_id:string ->

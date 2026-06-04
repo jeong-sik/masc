@@ -79,12 +79,6 @@ let fallback_compaction_id row idx =
     (turn_label row)
     idx
 
-let fallback_memory_injection_id row =
-  Printf.sprintf "%s:keeper-%s:memory-oas-%s"
-    row.Keeper_runtime_manifest.trace_id
-    (turn_label row)
-    (oas_turn_label row)
-
 let event_started_at row =
   match row.Keeper_runtime_manifest.event with
   | Keeper_runtime_manifest.Turn_started
@@ -96,13 +90,11 @@ let event_started_at row =
   | Keeper_runtime_manifest.Context_injected
   | Keeper_runtime_manifest.Context_compacted
   | Keeper_runtime_manifest.Event_bus_correlated
-  | Keeper_runtime_manifest.Memory_injected
   | Keeper_runtime_manifest.Checkpoint_loaded ->
     Some row.Keeper_runtime_manifest.ts
   | Keeper_runtime_manifest.Provider_attempt_finished
   | Keeper_runtime_manifest.State_snapshot_sidecar_saved
   | Keeper_runtime_manifest.Working_state_sidecar_saved
-  | Keeper_runtime_manifest.Memory_flushed
   | Keeper_runtime_manifest.Checkpoint_saved
   | Keeper_runtime_manifest.Pre_dispatch_blocked
   | Keeper_runtime_manifest.Receipt_appended
@@ -115,7 +107,6 @@ let event_finished_at row =
   | Keeper_runtime_manifest.Provider_attempt_finished
   | Keeper_runtime_manifest.State_snapshot_sidecar_saved
   | Keeper_runtime_manifest.Working_state_sidecar_saved
-  | Keeper_runtime_manifest.Memory_flushed
   | Keeper_runtime_manifest.Checkpoint_saved
   | Keeper_runtime_manifest.Pre_dispatch_blocked
   | Keeper_runtime_manifest.Receipt_appended
@@ -131,7 +122,6 @@ let event_finished_at row =
   | Keeper_runtime_manifest.Context_injected
   | Keeper_runtime_manifest.Context_compacted
   | Keeper_runtime_manifest.Event_bus_correlated
-  | Keeper_runtime_manifest.Memory_injected
   | Keeper_runtime_manifest.Checkpoint_loaded ->
     None
 
@@ -178,14 +168,6 @@ let clock_edge_json ~idx ~provider_attempt_index row =
     | Keeper_runtime_manifest.Event_bus_correlated ->
       first_string_opt [ clock_string row "compaction_id"; Some (fallback_compaction_id row idx) ]
     | _ -> clock_string row "compaction_id"
-  in
-  let memory_injection_id =
-    match event with
-    | Keeper_runtime_manifest.Memory_injected
-    | Keeper_runtime_manifest.Memory_flushed ->
-      first_string_opt
-        [ clock_string row "memory_injection_id"; Some (fallback_memory_injection_id row) ]
-    | _ -> clock_string row "memory_injection_id"
   in
   let event_bus_correlation_id =
     first_string_opt
@@ -256,7 +238,6 @@ let clock_edge_json ~idx ~provider_attempt_index row =
       ("tool_batch_id", Json_util.string_opt_to_json tool_batch_id);
       ("checkpoint_id", Json_util.string_opt_to_json checkpoint_id);
       ("compaction_id", Json_util.string_opt_to_json compaction_id);
-      ("memory_injection_id", Json_util.string_opt_to_json memory_injection_id);
       ("event_bus_correlation_id", Json_util.string_opt_to_json event_bus_correlation_id);
       ("event_bus_run_id", Json_util.string_opt_to_json event_bus_run_id);
       ("event_bus_event_count", Json_util.int_opt_to_json event_bus_event_count);

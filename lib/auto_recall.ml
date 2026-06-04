@@ -1,7 +1,7 @@
-(** Auto-Recall Memory - Agent Being Protocol Memory System
+(** Auto-Recall Context - Agent Being Protocol Context System
 
-    Automatic memory injection for MASC agents.
-    Fetches relevant context from multiple sources and injects into prompts.
+    Automatic context recall for MASC agents.
+    Fetches relevant context from multiple sources for prompt rendering.
 
     Sources:
     - Masc_cache: Shared context store (API responses, embeddings, summaries)
@@ -434,4 +434,3 @@ let content_matches_query content query =
       String.length hint >= 3
       && contains_lowered_substring ~haystack_lower:content_lower hint
     ) hints
-

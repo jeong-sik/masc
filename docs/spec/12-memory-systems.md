@@ -2,6 +2,7 @@
 status: reference
 last_verified: 2026-04-18
 code_refs:
+  - lib/memory.ml
   - lib/keeper/keeper_memory_bank.ml
   - lib/keeper/keeper_memory_policy.ml
   - lib/keeper/keeper_post_turn.ml
@@ -11,7 +12,6 @@ code_refs:
   - lib/procedural_memory.ml
   - lib/auto_recall.ml
   - lib/keeper/keeper_memory_recall.ml
-  - lib/memory_oas_bridge.ml
   - lib/context_compact_oas.ml
 ---
 
@@ -21,21 +21,20 @@ code_refs:
 |------|-----|
 | Status | Draft |
 | Team | Keeper |
-| Maps to | `lib/keeper/keeper_memory*.ml`, `lib/institution_eio.ml`, `lib/procedural_memory.ml`, `lib/context_*.ml`, `lib/memory_*.ml`, `lib/auto_recall.ml` |
+| Maps to | `lib/keeper/keeper_memory*.ml`, `lib/institution_eio.ml`, `lib/procedural_memory.ml`, `lib/context_*.ml`, `lib/auto_recall.ml` |
 | Dependencies | 05-keeper-agent, 13-oas-integration |
 
 ---
 
 ## 1. Purpose
 
-MASC의 메모리 시스템은 에이전트의 장기 기억, 조직 지식, 학습된 절차, 컨텍스트 예산을 관리한다. 4개 독립 서브시스템으로 구성되며, OAS Memory.t 5-tier 모델과 bridge를 통해 연결된다.
+MASC의 메모리 시스템은 에이전트의 장기 기억, 조직 지식, 학습된 절차, 컨텍스트 예산을 관리한다. `Masc.Memory.t`가 keeper memory bank / continuity snapshot / compaction result의 MASC-owned facade이며, OAS에는 메모리 객체를 만들거나 주입하지 않는다.
 
 메모리 시스템이 해결하는 문제:
 - 에이전트 세션 간 연속성 유지 (memory bank)
 - 조직 수준의 집단 지식 전달 (institution)
 - 반복 행동의 패턴 결정화 (procedural)
 - 컨텍스트 윈도우 한계 내에서 정보 우선순위 관리 (context budget)
-- 세대 교체 시 학습된 행동의 상속 (DNA injection)
 
 ---
 
@@ -60,17 +59,8 @@ graph TB
     CR[context_router.ml]
     AR[auto_recall.ml]
   end
-  subgraph "OAS Bridge"
-    MOB[memory_oas_bridge.ml]
-    MJ[memory_jsonl.ml]
-  end
-  MB --> MOB
-  IE --> MOB
-  PM --> MOB
-  MOB --> MJ
-  MOB -->|"5-tier"| OAS["OAS Memory.t"]
   CR --> AR
-  CC -->|"Context_reducer"| OAS
+  CC -->|"Context_reducer"| OAS["OAS runtime"]
 ```
 
 ---
@@ -291,9 +281,9 @@ type procedure = {
 - `MASC_PROC_MIN_EVIDENCE` (기본: 3)
 - `MASC_PROC_MIN_CONFIDENCE` (기본: 0.7)
 
-### 5.4 DNA Injection
+### 5.4 Runtime Injection
 
-`format_for_dna`가 결정화된 절차를 `[PROCEDURES]...[/PROCEDURES]` 블록으로 포맷하여 후속 세대 에이전트의 시스템 프롬프트에 주입한다.
+절차 기억은 더 이상 별도 DNA/capsule prompt block으로 주입하지 않는다. 필요한 조회는 MASC memory/search surface가 담당하며, OAS로 episode/procedure를 옮기지 않는다.
 
 ---
 
@@ -393,56 +383,19 @@ type recall_config = {
 
 ---
 
-## 9. OAS Memory Bridge
+## 9. MASC Memory Facade
 
-### 9.1 5-Tier 매핑
+`lib/memory.ml` exposes `Masc.Memory.t`, the canonical MASC facade for runtime
+memory state. It wraps the keeper state snapshot, memory-bank summary, and last
+compaction result, then delegates durable operations to the existing
+`Keeper_memory_bank` / `Keeper_memory_recall` modules.
 
-`memory_oas_bridge.ml`이 MASC 메모리 시스템을 OAS `Memory.t`의 5-tier 모델에 연결한다.
-
-| OAS Tier | MASC 소스 | 연결 방식 |
-|----------|----------|----------|
-| Scratchpad | OAS 내부 관리 | bridge 불필요 |
-| Working | OAS 내부 관리 | bridge 불필요 |
-| Long_term | JSONL/filesystem (`Memory_jsonl`) | `make_backend` |
-| Episodic | `Institution_eio` JSONL episodes | `load_episodes_text` / `flush_episodes` |
-| Procedural | `Procedural_memory` | `load_procedures_text` / `flush_procedures` |
-
-### 9.2 Storage Backends
-
-**JSONL** (`memory_jsonl.ml`):
-- 파일: `.masc/memory/<agent_name>/<session_id>.jsonl`
-- Append-only, latest entry wins on read
-- Tombstone: `{"key":"...","value":null,"ts":...}` -- 삭제 표시
-- 50MB 파일 크기 경고, 1MB 단일 값 경고 + 잘라내기
-- Current server bootstrap forces `MASC_STORAGE_TYPE=filesystem`; memory runtime state does not select a PostgreSQL backend.
-- PostgreSQL memory backend is not part of the runtime contract.
-
-### 9.3 Lifecycle
-
-```
-create_memory
-  1. make_backend (JSONL/filesystem)
-  2. Agent_sdk.Memory.create ~long_term:backend
-
-Prompt injection:
-  1. load_episodes_text (Institution JSONL -> prompt context)
-  2. load_procedures_text (crystallized procedures -> prompt context)
-  3. load_world_text (OAS long_term world keys -> prompt context)
-  4. load_institution_text (institution.json -> welcome/context text)
-
-Agent.run 완료 후:
-  flush_incremental
-    1. flush_episodes (OAS -> Institution JSONL, 중복 ID 제거)
-    2. flush_procedures (OAS -> Procedural_memory, 변경된 count만)
-```
-
-### 9.4 Episode Conversion
-
-Institution episode <-> OAS episode 변환 시:
-- `salience` 자동 계산: Success 0.75, Failure 0.95, Partial 0.6, + learning bonus (최대 0.15)
-- 메타데이터에 `event_type`, `institution_summary`, `learnings`, `context` 보존
-- Round-trip 시 원본 `institution_outcome` 문자열이 metadata에서 복원됨
-
+Current ownership:
+- `Masc.Memory.t` is the public MASC memory type.
+- Keeper memory bank writes stay in `lib/keeper/keeper_memory_bank.ml`.
+- Institution episodes stay in `lib/institution_eio.ml`.
+- Procedural records stay in `lib/procedural_memory.ml`.
+- OAS remains the runtime/checkpoint/context-reducer dependency, not the memory store.
 ---
 
 ## 10. Retired Hebbian Learning
@@ -451,7 +404,7 @@ Institution episode <-> OAS episode 변환 시:
 
 Hebbian collaboration-pattern learning was retired with the legacy team/swarm
 surface. Current memory recall lives in keeper memory, institution episodes,
-procedural memory, and the OAS bridge listed above.
+and procedural memory.
 
 The old `.masc/synapses/graph.json` path is historical and is not part of the
 current runtime contract.
@@ -485,11 +438,10 @@ type synapse = {
 1. **Compaction은 원자적이다**: memory bank 재작성은 .tmp 파일에 쓰고 rename한다. 실패 시 원본 불변.
 2. **Dedup은 정규화 기반이다**: `normalize_memory_text_key`가 공백/구두점 제거 + lowercase 후 비교한다.
 3. **kind가 우선순위를 결정한다**: 동일 kind + text는 항상 동일한 priority를 받는다. `signal_bonus`가 키워드 기반 보정을 추가한다.
-4. **OAS bridge는 비파괴적이다**: load는 prompt context만 만들고, flush 시 기존 데이터를 제거하지 않고 append 또는 update-in-place만 한다.
+4. **Memory storage is MASC-owned**: keeper turns must not create or pass OAS memory objects.
 5. **Context compaction은 기본적으로 결정론적이다**: Memory-bank progress consolidation만 opt-in LLM summarizer를 제공하며, off/fail/no-direct-provider 상태는 deterministic fallback을 사용한다.
-6. **OAS bridge storage follows current bootstrap truth**: filesystem/JSONL is the active runtime storage lane; PostgreSQL is not used as the primary or fallback backend.
+6. **Memory storage follows MASC ownership**: keeper memory/institution/procedural files are the runtime memory storage surfaces.
 7. **Procedural crystallization은 비가역적이다**: 일단 결정화되면 evidence가 줄어도 상태가 변하지 않는다.
-8. **Episode ID dedup이 flush boundary를 보호한다**: 이미 JSONL에 존재하는 ID는 다시 쓰지 않는다.
 
 ---
 
@@ -502,7 +454,6 @@ type synapse = {
 | `MASC_KEEPER_MEMORY_LLM_SUMMARY` | false | Memory-bank progress consolidation summarizer hook opt-in |
 | `MASC_CONTEXT_BUDGET_MAX` | 100,000 | Context budget 상한 (tokens) |
 | `MASC_CONTEXT_ROUTER_MODE` | heuristic | Intent classification 모드 |
-| `MASC_MEMORY_OAS_DEFAULT_IMPORTANCE` | 5 | OAS Memory store 기본 importance |
 | `MASC_PROC_MIN_EVIDENCE` | 3 | Crystallization 최소 증거 수 |
 | `MASC_PROC_MIN_CONFIDENCE` | 0.7 | Crystallization 최소 신뢰도 |
 | `MASC_OAS_SSE_DRAIN_INTERVAL_SEC` | 0.25 | Event_bus SSE relay 간격 |
@@ -512,6 +463,6 @@ type synapse = {
 ## 13. Future Work
 
 - `File_context` recall source 구현 (Auto_recall에서 TODO 상태)
-- Broader memory unification: MASC 자체 4개 메모리와 OAS Memory.t 완전 통합
+- Broader memory unification: MASC 자체 4개 메모리를 `Masc.Memory.t` 아래로 점진 정리
 - Vector DB 기반 semantic recall 도입 (현재 Jaccard 유사도만 사용)
 - Memory bank에 대한 cross-keeper sharing 메커니즘

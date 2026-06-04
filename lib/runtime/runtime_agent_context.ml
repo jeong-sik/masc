@@ -54,7 +54,6 @@ type config =
   ; checkpoint_dir : string option
   ; session_id : string option
   ; description : string option
-  ; memory : Agent_sdk.Memory.t option
   ; initial_messages : Agent_sdk.Types.message list
   ; raw_trace : Agent_sdk.Raw_trace.t option
   ; tool_retry_policy : Agent_sdk.Tool_retry_policy.t option
@@ -114,7 +113,6 @@ let default_config
   ; checkpoint_dir = None
   ; session_id = None
   ; description = None
-  ; memory = None
   ; initial_messages = []
   ; raw_trace = None
   ; tool_retry_policy = None
@@ -204,11 +202,6 @@ let builder_without_approval
   let builder =
     match config.description with
     | Some d -> Agent_sdk.Builder.with_description d builder
-    | None -> builder
-  in
-  let builder =
-    match config.memory with
-    | Some m -> Agent_sdk.Builder.with_memory m builder
     | None -> builder
   in
   let builder =
@@ -362,7 +355,6 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
     ; context_reducer = config.context_reducer
     ; context_injector = config.context_injector
     ; event_bus = config.event_bus
-    ; memory = config.memory
     ; raw_trace = config.raw_trace
     ; tool_retry_policy = config.tool_retry_policy
     ; allowed_paths = config.allowed_paths

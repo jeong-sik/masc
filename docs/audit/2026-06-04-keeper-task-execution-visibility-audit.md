@@ -86,7 +86,6 @@ Post-turn memory writes happen after response finalization:
 
 - reply-derived memory notes;
 - tool-result memory notes when tool emission is enabled;
-- episodic memory via `Memory_oas_bridge`;
 - memory-bank compaction if needed;
 - post-turn recall/goal-alignment evaluation.
 
@@ -94,8 +93,7 @@ Code anchors:
 
 - `lib/keeper/keeper_agent_run_post_turn_memory.ml:23` - memory notes from reply
 - `lib/keeper/keeper_agent_run_post_turn_memory.ml:40` - memory notes from tool results
-- `lib/keeper/keeper_agent_run_post_turn_memory.ml:76` - episodic memory
-- `lib/keeper/keeper_run_tools_hooks.ml:642` - OAS memory bridge creation
+- `lib/keeper/keeper_agent_run_post_turn_memory.ml:80` - memory-bank compaction
 
 ### 4. Tool surface selection
 

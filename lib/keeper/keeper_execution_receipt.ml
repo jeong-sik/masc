@@ -546,7 +546,6 @@ let to_json (receipt : t) =
             , Keeper_agent_tool_surface.tool_requirement_to_yojson
                 receipt.tool_surface.tool_requirement )
           ; "allowed_tool_count", `Int receipt.tool_surface.allowed_tool_count
-          ; "tool_gate_enabled", `Bool receipt.tool_surface.tool_gate_enabled
           ; ( "tool_surface_fallback_used"
             , `Bool receipt.tool_surface.tool_surface_fallback_used )
           ; ( "materialized_tools"

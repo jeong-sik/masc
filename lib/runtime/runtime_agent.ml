@@ -43,7 +43,6 @@ type config =
   checkpoint_dir : string option;
   session_id : string option;
   description : string option;
-  memory : Agent_sdk.Memory.t option;
   initial_messages : Agent_sdk.Types.message list;
   raw_trace : Agent_sdk.Raw_trace.t option;
   tool_retry_policy : Agent_sdk.Tool_retry_policy.t option;

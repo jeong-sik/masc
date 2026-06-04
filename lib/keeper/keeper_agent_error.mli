@@ -1,27 +1,5 @@
 (** Error translation helpers for keeper Agent.run orchestration. *)
 
-type keeper_internal_error =
-  | Keeper_tool_surface_empty of
-      { keeper_name : string
-      ; turn_lane : string
-      ; affordances : string list
-      ; fallback_used : bool
-      }
-
-(** Prefix prepended to the JSON-encoded internal-error message. *)
-val keeper_internal_error_prefix : string
-
-(** Encode a [keeper_internal_error] as a JSON object suitable for log
-    payloads and dashboard surfaces. *)
-val keeper_internal_error_to_json : keeper_internal_error -> Yojson.Safe.t
-
-(** Wrap a [keeper_internal_error] inside [Agent_sdk.Error.Internal] so it
-    flows through the standard SDK error channel with a recognizable
-    prefix. *)
-val sdk_error_of_keeper_internal_error
-  :  keeper_internal_error
-  -> Agent_sdk.Error.sdk_error
-
 (** Coarse categorisation of [Agent_sdk.Error.sdk_error] (for dashboards). *)
 val sdk_error_kind : Agent_sdk.Error.sdk_error -> string
 

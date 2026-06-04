@@ -166,8 +166,7 @@ const KeeperCompositeExecutionSchema = object({
       tool_requirement: nullable(string()),
       turn_lane: optional(nullable(string())),
       tool_surface_class: optional(nullable(string())),
-      visible_tool_count: optional(nullable(number())),
-      tool_gate_enabled: nullable(boolean()),
+      allowed_tool_count: optional(nullable(number())),
       tool_surface_fallback_used: optional(nullable(boolean())),
       // Tool-task coupling purged server-side (#19806): these fields may be
       // absent from newer runtimes. Kept optional for backward tolerance while

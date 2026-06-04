@@ -4,7 +4,6 @@ open Server_dashboard_http_keeper_runtime_lens_swimlane
 
 module Scan_summary = Server_dashboard_http_keeper_api_scan_summary
 
-let memory_summary_json = Scan_summary.memory_summary_json
 let selected_keeper_turn_id = Scan_summary.selected_keeper_turn_id
 let terminal_event_present_for_turn = Scan_summary.terminal_event_present_for_turn
 
@@ -168,9 +167,6 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                            Json_util.get_int tool_decision "allowed_tool_count";
                            Json_util.get_int lane_decision "effective_tool_count";
                          ]) );
-                  ( "tool_gate_enabled",
-                    Json_util.bool_opt_to_json
-                      (Json_util.get_bool tool_decision "tool_gate_enabled") );
                   ( "tool_surface_fallback_used",
                     Json_util.bool_opt_to_json
                       (Json_util.get_bool tool_decision "tool_surface_fallback_used") );
@@ -266,7 +262,6 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                     | Some value -> value
                     | None -> `Null );
                 ] );
-            ("memory", memory_summary_json scan);
           ] );
       ( "swimlanes",
         `Assoc
@@ -352,8 +347,6 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                     Keeper_runtime_manifest.Context_injected;
                     Keeper_runtime_manifest.Context_compacted;
                     Keeper_runtime_manifest.Event_bus_correlated;
-                    Keeper_runtime_manifest.Memory_injected;
-                    Keeper_runtime_manifest.Memory_flushed;
                     Keeper_runtime_manifest.Checkpoint_loaded;
                     Keeper_runtime_manifest.Checkpoint_saved;
                     Keeper_runtime_manifest.State_snapshot_sidecar_saved;

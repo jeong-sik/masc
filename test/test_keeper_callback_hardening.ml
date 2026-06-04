@@ -123,7 +123,7 @@ let test_documented_callback_label_vocabulary () =
     [
       "on_compaction_started";
       "on_handoff_started";
-      "gate_tool_call_log";
+      "guard_tool_call_log";
       "after_turn_sse_broadcast";
       "post_tool_log_write";
       "on_tool_executed";

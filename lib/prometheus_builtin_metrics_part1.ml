@@ -237,12 +237,6 @@ let register
      prune_stale_entries and get_entry. No labels."
     `Counter;
   add
-    metric_memory_jsonl_parse_drops
-    "Total Memory_jsonl.parse_line silent drop events. \
-     Labels: reason in {no_key | not_assoc | json_parse_error}. \
-     Empty lines not counted."
-    `Counter;
-  add
     metric_tool_keeper_cache_ttl_parse_failures
     "Total keeper_tool_surface.cache_ttl_seconds env-var parse fallback events. \
      Labels: env_var, reason in {invalid_float | negative_or_nan}."

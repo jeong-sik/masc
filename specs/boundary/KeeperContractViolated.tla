@@ -19,13 +19,10 @@
 \* but the next turn re-enters with the same contract context and prompt
 \* because no LLM-visible "you violated the contract last turn"
 \* feedback was written to chat-store — same root cause as the
-\* empty-tool-universe path (Phase B PR-4).  Phase A telemetry
-\* telemetry measures the volume; Phase B PR-4 promotes the gate to a
-\* typed terminal state with feedback.
+\* terminal error path without the retired empty-tool-universe gate branch.
 \*
 \* Pattern (clean Spec + buggy SpecBuggy gated by a separate Bug action)
-\* matches KeeperTurnTerminal.tla, KeeperEmptyToolUniverse.tla, and
-\* KeeperContinueGate.tla.
+\* matches KeeperTurnTerminal.tla and KeeperContinueGate.tla.
 
 EXTENDS FiniteSets, TLC
 

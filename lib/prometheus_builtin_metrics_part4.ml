@@ -350,17 +350,6 @@ let register
      strict), error_kind, agent."
     `Counter;
   add
-    metric_empty_tool_universe_observed
-    "Phase A F3 (2026-04-28): increments every time the keeper turn enters the \
-     [Keeper_tool_surface_empty] blocker branch, incremented from \
-     [Keeper_run_tools_hooks] (the pre-turn tool-surface check), i.e. \
-     tool_gate_requested && turn_allowed_tool_names = []. Pre-fix the blocker fired silently with \
-     no operator-visible counter; this surfaces the volume so Phase B PR-4 can promote \
-     it to a typed terminal state with LLM-visible feedback. Labels: keeper_name, \
-     turn_lane (text_only | tool_optional | tool_required | retry | tool_disabled), \
-     fallback_used (true | false)."
-    `Counter;
-  add
     metric_workspace_bind_normalize_outcome
     "Total Workspace.bind_session identity normalizations by Keeper_identity.normalize_all_names \
      (RFC P3-a). Labels: outcome (ok | empty_input | persona_not_found | \

@@ -149,7 +149,6 @@ type t =
   | ReplySkillRouteLinesRemoved
   | MemoryLlmSummaryOutcomes
   | MemoryLlmSummaryChainExhausted
-  | MemoryJsonlOps
   | UserVisibleReplySource
   | ContinuitySummarySource
   | SummarizerStateScrubs
@@ -373,7 +372,6 @@ let to_string = function
   | MemoryLlmSummaryOutcomes -> "masc_keeper_memory_llm_summary_outcomes_total"
   | MemoryLlmSummaryChainExhausted ->
     "masc_keeper_memory_llm_summary_chain_exhausted_total"
-  | MemoryJsonlOps -> "masc_keeper_memory_jsonl_ops_total"
   | UserVisibleReplySource -> "masc_keeper_user_visible_reply_source_total"
   | ContinuitySummarySource -> "masc_keeper_continuity_summary_source_total"
   | SummarizerStateScrubs -> "masc_keeper_summarizer_state_scrubs_total"

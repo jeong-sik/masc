@@ -76,10 +76,8 @@ type agent_setup =
   ; cleanup : unit -> unit
   ; hooks : Agent_sdk.Hooks.hooks
   ; reducer : Agent_sdk.Context_reducer.t
-  ; memory : Agent_sdk.Memory.t
   ; acc : hook_accumulator
   ; initial_tool_surface : computed_tool_surface
-  ; initial_tool_surface_blocker : Agent_sdk.Error.sdk_error option ref
   ; all_tool_names : string list
   ; tool_usage_before : (string * int) list
   ; receipt_turn_count_ref : int option ref

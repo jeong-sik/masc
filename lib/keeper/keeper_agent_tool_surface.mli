@@ -91,7 +91,6 @@ type tool_surface_metrics =
   ; tool_surface_class : tool_surface_class
   ; tool_requirement : tool_requirement
   ; allowed_tool_count : int
-  ; tool_gate_enabled : bool
   ; tool_surface_fallback_used : bool
   ; config_root : string
   ; runtime_config_path : string option
@@ -118,7 +117,6 @@ type computed_tool_surface =
   ; is_warning_zone : bool
   ; tool_surface_class : tool_surface_class
   ; tool_requirement : tool_requirement
-  ; tool_gate_requested : bool
   ; claim_context_allowed : bool
   ; tool_surface_fallback_used : bool
   ; lane : turn_lane

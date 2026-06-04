@@ -100,10 +100,6 @@ current_entries() {
     emit_rule_matches "turn_fsm_to_oas_provider" "$oas_provider_pattern" lib/turn_fsm
     emit_rule_matches "turn_fsm_to_workspace_task" "$workspace_task_pattern" lib/turn_fsm
 
-    emit_rule_matches "memory_jsonl_to_keeper_runtime" "$keeper_pattern" lib/memory_jsonl
-    emit_rule_matches "memory_jsonl_to_workspace_task" "$workspace_task_pattern" lib/memory_jsonl
-    emit_rule_matches "memory_jsonl_to_oas_provider" '\b(Provider_runtime_binding|Provider_kind_resolver|Provider_adapter|Masc_oas_bridge)\b|\bOas\.' lib/memory_jsonl
-
     emit_rule_matches "board_types_to_keeper_runtime" "$keeper_pattern" lib/board_types
     emit_rule_matches "board_types_to_oas_provider" "$oas_provider_pattern" lib/board_types
     emit_rule_matches "board_types_to_workspace_task" "$workspace_task_pattern" lib/board_types
@@ -112,7 +108,7 @@ current_entries() {
     emit_rule_matches "task_transition_to_oas_provider" "$oas_provider_pattern" lib/task_transition_state
 
     emit_rule_matches "leaf_state_to_db_backend" "$db_pattern" \
-      lib/board_types lib/goal lib/memory_jsonl lib/task_transition_state
+      lib/board_types lib/goal lib/task_transition_state
   } | sort -u
 }
 

@@ -125,7 +125,7 @@ function executionReceiptTitle(execution: KeeperCompositeExecution | undefined):
     surface?.tool_requirement ? `tool_requirement: ${toolRequirementLabel(surface.tool_requirement) ?? surface.tool_requirement}` : '',
     surface?.turn_lane ? `turn_lane: ${turnLaneLabel(surface.turn_lane) ?? surface.turn_lane}` : '',
     surface?.tool_surface_class ? `tool_surface: ${toolSurfaceClassLabel(surface.tool_surface_class) ?? surface.tool_surface_class}` : '',
-    typeof surface?.visible_tool_count === 'number' ? `visible_tools: ${surface.visible_tool_count}` : '',
+    typeof surface?.allowed_tool_count === 'number' ? `allowed_tools: ${surface.allowed_tool_count}` : '',
     surface?.tool_surface_fallback_used === true ? 'tool_surface_fallback: true' : '',
     execution.runtime?.fallback_reason ? `fallback: ${execution.runtime.fallback_reason}` : '',
     execution.error?.kind ? `error: ${execution.error.kind}` : '',

@@ -87,19 +87,6 @@ let test_resume_blocked () =
     | None ->
         fail "masc_resume returned None")
 
-let test_approval_pending_inline_allowed () =
-  with_workspace (fun config ->
-    match dispatch_inline config "masc_approval_pending" with
-    | Some tr when (Tool_result.is_success tr) ->
-        (match Yojson.Safe.from_string (Tool_result.message tr) with
-         | `List _ -> ()
-         | _ -> fail "masc_approval_pending should return a JSON list")
-    | Some tr ->
-        fail (Printf.sprintf "masc_approval_pending should succeed: %s"
-          (Tool_result.message tr))
-    | None ->
-        fail "masc_approval_pending returned None")
-
 let test_other_inline_blocked () =
   with_workspace (fun config ->
     match dispatch_inline config "masc_agents" with
@@ -119,8 +106,6 @@ let () =
       test_case "masc_resume blocked" `Quick test_resume_blocked;
     ];
     "Mod_inline gate", [
-      test_case "masc_approval_pending allowed" `Quick
-        test_approval_pending_inline_allowed;
-      test_case "other inline tools blocked" `Quick test_other_inline_blocked;
+      test_case "inline tools blocked" `Quick test_other_inline_blocked;
     ];
   ]

@@ -175,43 +175,6 @@ val handle_masc_agent_timeline
   -> args:Yojson.Safe.t
   -> string
 
-(** RFC-0182 §3.1 — [handle_masc_local_runtime] is the
-    descriptor-projection cluster handler for [masc_runtime_verify] /
-    [masc_runtime_ollama_probe]. [Tool_local_runtime.dispatch] takes a
-    polymorphic ctx that is ignored by the handlers; we pass [()]. *)
-val handle_masc_local_runtime
-  :  name:string
-  -> args:Yojson.Safe.t
-  -> string
-
-(** RFC-0182 §3.1 — [handle_masc_tool_shard] is the descriptor-projection
-    cluster handler for [masc_tool_list] / [masc_tool_grant] /
-    [masc_tool_revoke].  [Tool_shard.execute] is pure (no Keeper/Workspace
-    deps) and returns a [(bool * Yojson.Safe.t)] tuple. *)
-val handle_masc_tool_shard
-  :  name:string
-  -> args:Yojson.Safe.t
-  -> string
-
-(** RFC-0182 §3.1 — [handle_masc_approval] is the descriptor-projection
-    cluster handler for [masc_approval_pending] / [masc_approval_get] /
-    [masc_approval_resolve].  Reads from [Keeper_approval_queue]
-    directly; backs the inline approval dispatch ref. *)
-val handle_masc_approval
-  :  name:string
-  -> args:Yojson.Safe.t
-  -> string
-
-(** RFC-0182 §3.1 — [handle_masc_persona] is the descriptor-projection
-    cluster handler for [masc_persona_list] / [masc_persona_schema] /
-    [masc_persona_save].  Dispatches via [Persona_dispatch_ref] —
-    [Keeper_tool_surface] registers the ctx-free persona handlers at module
-    load to avoid a static cycle through [Keeper_turn_driver]. *)
-val handle_masc_persona
-  :  name:string
-  -> args:Yojson.Safe.t
-  -> string
-
 (** RFC-0182 §3.1 — [handle_masc_keeper] is the descriptor-projection
     cluster handler for the [masc_keeper_*] ctx-free tool surface.
     Dispatches via [Keeper_dispatch_ref] registered by [Keeper_tool_surface] at
@@ -235,4 +198,3 @@ val handle_masc_keeper
 val handle_masc_surface_audit : args:Yojson.Safe.t -> string
 
 val register_dashboard_surface_readiness : (?surface_id:string -> unit -> Yojson.Safe.t) -> unit
-

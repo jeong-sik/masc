@@ -59,10 +59,6 @@ let is_masc_mcp_descriptor (d : Keeper_tool_descriptor.t) =
   | Tool_masc_misc_dispatch
   | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch
-  | Tool_masc_local_runtime_dispatch
-  | Tool_masc_tool_shard_dispatch
-  | Tool_masc_approval_dispatch
-  | Tool_masc_persona_dispatch
   | Tool_masc_keeper_dispatch
   | Tool_masc_surface_audit -> true
   | Tool_execute
@@ -110,7 +106,7 @@ let known_runtime_names_tbl : (string, unit) Hashtbl.t =
     (Keeper_tool_descriptor.all_descriptors ());
   List.iter
     (fun public_mcp -> Hashtbl.replace t public_mcp ())
-    Keeper_tool_name.pending_public_mcp_inline_names;
+    Keeper_tool_name.public_mcp_non_descriptor_names;
   t
 ;;
 

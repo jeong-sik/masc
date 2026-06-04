@@ -52,10 +52,6 @@ type runtime_handler =
   | Tool_masc_misc_dispatch
   | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch
-  | Tool_masc_local_runtime_dispatch
-  | Tool_masc_tool_shard_dispatch
-  | Tool_masc_approval_dispatch
-  | Tool_masc_persona_dispatch
   | Tool_masc_keeper_dispatch
   | Tool_masc_surface_audit
 
@@ -142,10 +138,6 @@ let runtime_handler_to_string = function
   | Tool_masc_misc_dispatch -> "tool_masc_misc_dispatch"
   | Tool_masc_control_dispatch -> "tool_masc_control_dispatch"
   | Tool_masc_agent_timeline_dispatch -> "tool_masc_agent_timeline_dispatch"
-  | Tool_masc_local_runtime_dispatch -> "tool_masc_local_runtime_dispatch"
-  | Tool_masc_tool_shard_dispatch -> "tool_masc_tool_shard_dispatch"
-  | Tool_masc_approval_dispatch -> "tool_masc_approval_dispatch"
-  | Tool_masc_persona_dispatch -> "tool_masc_persona_dispatch"
   | Tool_masc_keeper_dispatch -> "tool_masc_keeper_dispatch"
   | Tool_masc_surface_audit -> "tool_masc_surface_audit"
 ;;
@@ -874,56 +866,6 @@ let masc_agent_timeline_descriptor ?(last_turn_safe = false) name description ~r
     ~maintenance_only:false
 ;;
 
-let masc_local_runtime_descriptor ?(last_turn_safe = false) id name description ~readonly =
-  cluster_descriptor
-    ~last_turn_safe
-    ~id:("masc.local_runtime." ^ id)
-    ~name
-    ~description
-    ~handler:Tool_masc_local_runtime_dispatch
-    ~readonly
-    ~inline_safe:false
-    ~maintenance_only:false
-;;
-
-let masc_tool_shard_descriptor ?(last_turn_safe = false) id name description ~readonly =
-  cluster_descriptor
-    ~last_turn_safe
-    ~id:("masc.tool_shard." ^ id)
-    ~name
-    ~description
-    ~handler:Tool_masc_tool_shard_dispatch
-    ~readonly
-    ~inline_safe:false
-    ~maintenance_only:false
-;;
-
-let masc_approval_descriptor ?(inline_safe = false) ?(last_turn_safe = false) id name
-      description ~readonly
-  =
-  cluster_descriptor
-    ~last_turn_safe
-    ~inline_safe
-    ~id:("masc.approval." ^ id)
-    ~name
-    ~description
-    ~handler:Tool_masc_approval_dispatch
-    ~readonly
-    ~maintenance_only:false
-;;
-
-let masc_persona_descriptor ?(last_turn_safe = false) id name description ~readonly =
-  cluster_descriptor
-    ~last_turn_safe
-    ~id:("masc.persona." ^ id)
-    ~name
-    ~description
-    ~handler:Tool_masc_persona_dispatch
-    ~readonly
-    ~inline_safe:false
-    ~maintenance_only:false
-;;
-
 let masc_keeper_descriptor ?(last_turn_safe = false) id name description ~readonly =
   cluster_descriptor
     ~last_turn_safe
@@ -1255,32 +1197,6 @@ let internal_descriptors : t list =
   (* ── RFC-0182 §3.1 — masc_agent_timeline singleton (1 entry) ── *)
   ; masc_agent_timeline_descriptor "masc_agent_timeline"
       "Read agent timeline events." ~readonly:true
-  (* ── RFC-0182 §3.1 — masc_local_runtime_* cluster (2 entries) ─ *)
-  ; masc_local_runtime_descriptor "verify" "masc_runtime_verify"
-      "Verify provider/runtime contract for swarm / benchmark." ~readonly:true
-  ; masc_local_runtime_descriptor "ollama_probe" "masc_runtime_ollama_probe"
-      "Probe Ollama runtime endpoint for diagnostics." ~readonly:true
-  (* ── RFC-0182 §3.1 — masc_tool_shard_* cluster (3 entries) ───── *)
-  ; masc_tool_shard_descriptor "list" "masc_tool_list"
-      "List installed tool shards plus the active set for an agent." ~readonly:true
-  ; masc_tool_shard_descriptor "grant" "masc_tool_grant"
-      "Grant an agent a named tool shard." ~readonly:false
-  ; masc_tool_shard_descriptor "revoke" "masc_tool_revoke"
-      "Revoke a previously-granted tool shard from an agent." ~readonly:false
-  (* ── RFC-0182 §3.1 — masc_approval_* cluster (3 entries) ─────── *)
-  ; masc_approval_descriptor ~inline_safe:true "pending" "masc_approval_pending"
-      "List pending operator approval requests." ~readonly:true
-  ; masc_approval_descriptor "get" "masc_approval_get"
-      "Read a single pending approval by id." ~readonly:true
-  ; masc_approval_descriptor "resolve" "masc_approval_resolve"
-      "Resolve a pending approval (approve / reject)." ~readonly:false
-  (* ── RFC-0182 §3.1 — masc_persona_* cluster ──────── *)
-  ; masc_persona_descriptor "list" "masc_persona_list"
-      "List configured personas plus summary metadata." ~readonly:true
-  ; masc_persona_descriptor "schema" "masc_persona_schema"
-      "Read the persona JSON schema (optionally with examples)." ~readonly:true
-  ; masc_persona_descriptor "save" "masc_persona_save"
-      "Persist a persona profile JSON (supports overwrite/dry-run)." ~readonly:false
   (* ── RFC-0182 §3.1 — masc_keeper cluster (1 entry today) ──── *)
   (* Other masc_keeper_ tools (status, msg, clear, compact, repair,
      sandbox lifecycle) use the keeper Eio context and are gated on

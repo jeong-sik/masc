@@ -57,12 +57,9 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Masc TM.Status
   | TN.Masc TM.Tool_admin_snapshot
   | TN.Masc TM.Tool_help
-  | TN.Masc TM.Tool_list
   | TN.Masc TM.Tool_stats
   | TN.Masc TM.Web_fetch
-  | TN.Masc TM.Web_search
-  | TN.Masc TM.Approval_pending
-  | TN.Masc TM.Approval_get ->
+  | TN.Masc TM.Web_search ->
       Some Read_only
   | TN.Masc TM.Agent_update
   | TN.Masc TM.Broadcast
@@ -77,9 +74,7 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Masc TM.Plan_update
   | TN.Masc TM.Reset
   | TN.Masc TM.Resume
-  | TN.Masc TM.Tool_admin_update
-  | TN.Masc TM.Tool_grant
-  | TN.Masc TM.Tool_revoke ->
+  | TN.Masc TM.Tool_admin_update ->
       Some Masc_workspace
 let inferred_effect_domain name =
   match Tool_name.of_string name with

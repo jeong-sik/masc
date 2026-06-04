@@ -124,11 +124,12 @@ val board_tools : Masc_domain.tool_schema list
 (** {1 MCP Interface} *)
 
 val schemas : Masc_domain.tool_schema list
-(** MCP tool schemas for masc_tool_grant, masc_tool_revoke, masc_tool_list. *)
+(** Empty: [masc_tool_*] callable tools are not exposed. *)
 
 val execute : string -> Yojson.Safe.t -> (bool * Yojson.Safe.t)
-(** Execute tool_shard MCP tools (grant, revoke, list).
-    Agent shard state is tracked in-memory per agent. *)
+(** Legacy compatibility entrypoint. [masc_tool_*] calls are no longer
+    exposed and return unknown. Internal shard state is managed through
+    keeper/persona configuration, not callable tools. *)
 
 val all_keeper_tool_schemas : Masc_domain.tool_schema list
 (** #10101: every keeper-facing tool schema exposed by this

@@ -23,7 +23,7 @@ module Float = Stdlib.Float
     - Tool_inline_dispatch_comm: masc_broadcast, masc_messages
     - Tool_inline_dispatch_extra: remaining tools (board, etc.)
 
-    Keeps inline: mcp_session, approval, and spawn.
+    Keeps inline: mcp_session, spawn, discover_tools.
 
     RFC-0062 Phase 4c-2: handlers now return [Tool_result.result] directly;
     [wrap_result] adapter removed. *)
@@ -63,8 +63,8 @@ type context = Tool_inline_dispatch_types.context = {
      plain strings fall through as [`String body].
    - [inline_err_workflow] commits caller-input rejections to
      [Workflow_rejection]: every error path in this dispatch
-     ("id is required", unknown enum action, not-found lookups,
-     approval-resolve errors) is caller-side. *)
+     (unknown enum action, "query is required", not-found lookups) is
+     caller-side. *)
 let inline_ok ~tool_name ~start_time body : Tool_result.result =
   let data =
     match Tool_result.structured_payload_of_message body with
@@ -80,25 +80,6 @@ let inline_err_workflow ~tool_name ~start_time msg : Tool_result.result =
     ~class_:Tool_result.Workflow_rejection
     ~start_time
     msg
-;;
-
-let approval_error_message (json : Yojson.Safe.t) =
-  match json with
-  | `Assoc fields ->
-      (match List.assoc_opt "error" fields with
-       | Some (`String msg) -> Some msg
-       | Some value -> Some (Yojson.Safe.to_string value)
-       | None -> None)
-  | _ -> None
-;;
-
-let inline_approval_result ~tool_name ~start_time body =
-  match Tool_result.structured_payload_of_message body with
-  | Some json ->
-      (match approval_error_message json with
-       | Some msg -> inline_err_workflow ~tool_name ~start_time msg
-       | None -> inline_ok ~tool_name ~start_time body)
-  | None -> inline_ok ~tool_name ~start_time body
 ;;
 
 (** Dispatch a tool call.
@@ -146,14 +127,6 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.result option =
       Tool_inline_dispatch_comm.handle_broadcast ~tool_name:name ~start_time:start ctx
   | "masc_messages" ->
       Tool_inline_dispatch_comm.handle_messages ~tool_name:name ~start_time:start ctx
-
-  (* ── Approval queue (#5907) ─────────────────────────────────── *)
-  | "masc_approval_pending" | "masc_approval_get" | "masc_approval_resolve" ->
-      Some
-        (Approval_queue_handlers.handle
-           ~tool_name:name
-           ~start_time:start
-           arguments)
 
   (* Verification tools removed: pruned *)
 
@@ -236,31 +209,30 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.result option =
 (* Tool_spec registration (RFC-0182 §3.2)                           *)
 (* ================================================================ *)
 
-(* Migrates the inline-dispatched workspace + approval tools from the legacy
+(* Migrates the inline-dispatched workspace tools from the legacy
    register_module_tag bootstrap (mcp_server_eio.ml) to the Tool_spec
-   single-call SSOT. Scope: 6 of 10 §3.2 live tools.
+   single-call SSOT.
 
    Excluded (deferred, semantic-widening would be required):
-   - [masc_approval_resolve], [masc_set_param], [channel_gate] —
+   - [masc_set_param], [channel_gate] —
      no Masc_domain.tool_schema record exists. They are dispatched via
      HTTP routes / inline arms but never advertised to MCP. Promoting
      them to Tool_spec.register requires authoring new input schemas
-     (and for [masc_set_param] / [channel_gate], deciding visibility
-     semantics for MCP exposure). Tracked as RFC-0182 follow-up scope.
-   - [masc_tool_revoke] — already registered via Tool_shard schemas
-     (lib/tool_shard.ml:348). Audit row was a false positive. *)
+     and deciding visibility semantics for MCP exposure. Tracked as
+     RFC-0182 follow-up scope.
+   The retired [masc_tool_*] shard-management tools are intentionally absent
+   from this list and from the MCP ToolSpec surface. *)
 
 let inline_register_targets =
-  [ "masc_broadcast"; "masc_messages"
-  ; "masc_approval_get"; "masc_approval_pending" ]
+  [ "masc_broadcast"; "masc_messages" ]
 
 let inline_tool_read_only =
-  [ "masc_messages"; "masc_approval_get"; "masc_approval_pending" ]
+  [ "masc_messages" ]
 
 let inline_tool_requires_actor_binding = []
 
 let inline_tool_mcp_context_required =
-  [ "masc_broadcast"; "masc_messages"; "masc_approval_get" ]
+  [ "masc_broadcast"; "masc_messages" ]
 
 let inline_tool_effect_domain name : Tool_catalog.effect_domain =
   if List.mem name inline_tool_read_only then Tool_catalog.Read_only

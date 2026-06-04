@@ -325,14 +325,9 @@ module Masc = struct
     | Plan_update
     | Reset
     | Status
-    | Tool_grant
     | Tool_help
-    | Tool_list
-    | Tool_revoke
     | Web_fetch
     | Web_search
-    | Approval_pending
-    | Approval_get
     | Config
     | Gc
     | Get_metrics
@@ -366,14 +361,9 @@ module Masc = struct
     | Plan_update -> "masc_plan_update"
     | Reset -> "masc_reset"
     | Status -> "masc_status"
-    | Tool_grant -> "masc_tool_grant"
     | Tool_help -> "masc_tool_help"
-    | Tool_list -> "masc_tool_list"
-    | Tool_revoke -> "masc_tool_revoke"
     | Web_fetch -> "masc_web_fetch"
     | Web_search -> "masc_web_search"
-    | Approval_pending -> "masc_approval_pending"
-    | Approval_get -> "masc_approval_get"
     | Config -> "masc_config"
     | Gc -> "masc_gc"
     | Get_metrics -> "masc_get_metrics"
@@ -415,14 +405,9 @@ module Masc = struct
             | "masc_plan_update" -> Some Plan_update
             | "masc_reset" -> Some Reset
             | "masc_status" -> Some Status
-            | "masc_tool_grant" -> Some Tool_grant
             | "masc_tool_help" -> Some Tool_help
-            | "masc_tool_list" -> Some Tool_list
-            | "masc_tool_revoke" -> Some Tool_revoke
             | "masc_web_fetch" -> Some Web_fetch
             | "masc_web_search" -> Some Web_search
-            | "masc_approval_pending" -> Some Approval_pending
-            | "masc_approval_get" -> Some Approval_get
             | "masc_config" -> Some Config
             | "masc_gc" -> Some Gc
             | "masc_get_metrics" -> Some Get_metrics

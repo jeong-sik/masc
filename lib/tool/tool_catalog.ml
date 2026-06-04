@@ -171,7 +171,6 @@ let static_mcp_context_tool_names =
   [ "masc_start"
   ; "masc_broadcast"
   ; "masc_messages"
-  ; "masc_approval_get"
   ; "masc_session"
   ]
 
@@ -228,8 +227,6 @@ let explicit_metadata : (string * metadata) list =
       with_semantic_flags ~destructive:true
         (hidden_active
            "Internal HTTP runtime-parameter mutation route; hidden from the public tool surface.") );
-    ("masc_tool_grant", admin_tool);
-    ("masc_tool_revoke", admin_tool);
     (* Catalog-owned permissions for split/lazily registered tool modules. *)
     ("masc_reset", reset_tool);
     ("masc_start", broadcast_tool);
@@ -252,9 +249,6 @@ let explicit_metadata : (string * metadata) list =
     ("masc_check", read_state_tool);
     ("masc_web_search", read_state_tool);
     ("masc_web_fetch", read_state_tool);
-    ("masc_approval_pending", read_state_tool);
-    ("masc_approval_get", admin_read_tool);
-    ("masc_approval_resolve", admin_tool);
     ("masc_agent_fitness", read_state_tool);
     ("masc_agent_timeline", read_state_tool);
     ("masc_agent_update", broadcast_tool);
@@ -285,7 +279,6 @@ let explicit_metadata : (string * metadata) list =
     ("masc_board_sub_board_delete", broadcast_tool);
     ("masc_board_delete", admin_tool);
     ("masc_tool_stats", read_state_tool);
-    ("masc_tool_list", read_state_tool);
     ("masc_tool_admin_snapshot", admin_read_tool);
     ("masc_tool_admin_update", admin_tool);
     ("masc_pause", broadcast_tool);

@@ -164,9 +164,9 @@ let risk_of_masc (m : Tool_name.Masc.t) : risk_level =
   | Cleanup_zombies | Dashboard | Deliver | Domain (Goal Goal_list) | Domain (Goal Goal_transition)
   | Heartbeat | Messages | Note_add | Domain (Operator Operator_action) | Domain (Operator Operator_digest)
   | Domain (Operator Operator_snapshot) | Plan_clear_task | Plan_get | Plan_get_task | Plan_init
-  | Plan_set_task | Status | Domain (Task Task_history) | Domain (Task Tasks) | Tool_grant | Tool_help
-  | Tool_list | Tool_revoke | Domain (Task Transition) | Web_fetch | Web_search
-  | Approval_pending | Approval_get | Config | Gc | Get_metrics | Mcp_session
+  | Plan_set_task | Status | Domain (Task Task_history) | Domain (Task Tasks) | Tool_help
+  | Domain (Task Transition) | Web_fetch | Web_search
+  | Config | Gc | Get_metrics | Mcp_session
   | Tool_admin_snapshot | Tool_stats -> Low
   | Domain (Task Claim_next) | Domain (Goal Goal_upsert) | Domain (Goal Goal_verify)
   | Domain (Operator Operator_confirm)

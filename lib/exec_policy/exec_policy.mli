@@ -36,6 +36,15 @@ val parse_string_to_ir :
   mode:parse_mode -> string -> (Masc_exec.Shell_ir.t, block_reason) result
 
 val dev_allowed_commands : string list
+val readonly_allowed_commands : string list
+(** Read-only executable entrypoints. Includes [git] and [gh] so read-only
+    status/log/view commands can run through the readonly Execute surface.
+    Mutating subcommands are still classified and blocked later by the Shell IR
+    risk gate when write-enabled tool access is absent. *)
+
+val is_dev_allowed : string -> bool
+val is_readonly_allowed : string -> bool
+
 
 val command_context_with_allowlist :
   ?caller:Masc_exec_command_gate.Shell_command_gate.caller ->
@@ -107,3 +116,15 @@ val block_reason_tag : block_reason -> string
 
 val attribution_of_validation :
   cmd:string -> (unit, block_reason) result -> Attribution.t
+
+(** RFC-0215 GADT Safety promotion types *)
+
+type safe = Typed_capabilities.safe
+type unsafe = Typed_capabilities.unsafe
+type 'a verified_ir = 'a Typed_capabilities.verified_ir
+
+val promote_to_safe :
+  ?caller:Masc_exec_command_gate.Shell_command_gate.caller ->
+  allowed_commands:string list ->
+  Masc_exec.Shell_ir.t ->
+  (safe verified_ir, block_reason) result

@@ -14,7 +14,7 @@ val string_array_schema : Yojson.Safe.t
 (** JSON schema fragment for a free-form [string list] field. *)
 
 val tool_access_schema : string -> Yojson.Safe.t
-(** Schema fragment for [meta.tool_access] (string-array tool allowlist);
+(** Schema fragment for [meta.tool_access] (string-array tool candidate profile list);
     parameterised on the property description so create vs update tools
     can vary the surface without duplicating the body. *)
 

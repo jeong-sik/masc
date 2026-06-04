@@ -135,7 +135,7 @@ let keeper_schemas : tool_schema list = [
         ]);
         ("tool_access",
           tool_access_schema
-            "Canonical tool allowlist, e.g. ['masc_status', 'tool_execute'].");
+            "Canonical tool candidate profile list, e.g. ['masc_status', 'tool_execute']. Runtime execution also applies descriptor availability, denylist, per-turn OAS allowlist, and eval gates.");
         ("tool_denylist", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
@@ -285,11 +285,11 @@ let keeper_schemas : tool_schema list = [
         ]);
         ("tool_access",
           tool_access_schema
-            "Canonical tool allowlist, e.g. ['masc_status', 'tool_execute'].");
+            "Canonical tool candidate profile list, e.g. ['masc_status', 'tool_execute']. Runtime execution also applies descriptor availability, denylist, per-turn OAS allowlist, and eval gates.");
         ("tool_denylist", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Tool names to remove after tool_access resolution.");
+          ("description", `String "Tool names to remove after tool_access candidate profile resolution.");
         ]);
       ]);
       ("required", `List [`String "name"]);

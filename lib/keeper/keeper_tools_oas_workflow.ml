@@ -318,7 +318,15 @@ let json_has_nonempty_evidence_refs json =
 ;;
 
 let workflow_submit_evidence_marker json =
-  if Option.is_some (json_nonempty_string_opt "pr_url" json)
+  if Option.is_some (json_nonempty_string_opt "notes" json)
+     || (match json_assoc_field_opt "evidence_refs" json with
+         | Some (`List refs) ->
+           List.exists
+             (function
+               | `String value -> not (String.equal (String.trim value) "")
+               | _ -> false)
+             refs
+         | _ -> false)
      || json_has_nonempty_evidence_refs json
   then "has_evidence"
   else "missing_evidence"

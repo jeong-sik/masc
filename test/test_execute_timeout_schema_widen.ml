@@ -24,23 +24,22 @@ let tool_execute_schema () =
 
 let timeout_sec_field () =
   match (tool_execute_schema ()).input_schema with
-  | `Assoc fields ->
-    (match List.assoc_opt "properties" fields with
-     | Some (`Assoc props) ->
-       (match List.assoc_opt "timeout_sec" props with
-        | Some field -> "timeout_sec", field
+  | `Assoc schema_fields ->
+    (match List.assoc_opt "properties" schema_fields with
+     | Some (`Assoc properties) ->
+       (match List.assoc_opt "timeout_sec" properties with
+        | Some (`Assoc fields) -> fields
+        | Some _ -> Alcotest.fail "timeout_sec field is not a JSON object"
         | None -> Alcotest.fail "timeout_sec field is missing")
-     | _ -> Alcotest.fail "properties object is missing")
-  | _ -> Alcotest.fail "tool_execute input_schema is not an object"
+     | Some _ -> Alcotest.fail "tool_execute properties is not a JSON object"
+     | None -> Alcotest.fail "tool_execute schema is missing properties")
+  | _ -> Alcotest.fail "tool_execute input_schema is not a JSON object"
 
 (* Pull the JSON associated with the [timeout_sec] field's [type] key. *)
 let type_value () =
-  match timeout_sec_field () with
-  | _name, `Assoc fields ->
-    (match List.assoc_opt "type" fields with
-     | Some v -> v
-     | None -> Alcotest.fail "timeout_sec field is missing the 'type' key")
-  | _ -> Alcotest.fail "timeout_sec field is not a JSON object"
+  match List.assoc_opt "type" (timeout_sec_field ()) with
+  | Some v -> v
+  | None -> Alcotest.fail "timeout_sec field is missing the 'type' key"
 
 let type_accepts_number_and_string () =
   match type_value () with
@@ -68,10 +67,8 @@ let type_accepts_number_and_string () =
 (* The widening must preserve the user-facing description so the LLM
    keepers' prompt context does not lose the default/max hint. *)
 let description_mentions_default_and_max () =
-  let _name, body = timeout_sec_field () in
-  let body = match body with `Assoc xs -> xs | _ -> Alcotest.fail "field not an object" in
   let desc =
-    match List.assoc_opt "description" body with
+    match List.assoc_opt "description" (timeout_sec_field ()) with
     | Some (`String s) -> s
     | _ -> Alcotest.fail "timeout_sec description missing or not a string"
   in

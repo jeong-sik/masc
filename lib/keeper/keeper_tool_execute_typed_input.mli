@@ -6,7 +6,7 @@
     {2 Design constraints}
 
     - **No shell-string parsing**.  Validation is membership against
-      {!Dev_exec_allowlist} plus structural checks on argv/cwd.
+      {!Exec_policy} command allowlists plus structural checks on argv/cwd.
       Allowlisted wrapper executables ([env], [opam exec]) are resolved
       over explicit argv tokens and their effective target executable is
       checked against the same allowlist.

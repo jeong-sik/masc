@@ -65,7 +65,8 @@ let handle_tool_search_files
     (* TEL-OK: adapter delegates to Keeper_tool_execute_shell_ir/Exec_dispatch; execution
        telemetry stays with the delegated runtime path. *)
     let dispatch_host_shell_ir
-          ?(allowed_commands = Dev_exec_allowlist.readonly)
+          ?(allowed_commands = Exec_policy.readonly_allowed_commands)
+
           ?timeout_sec
           ~workdir
           ir
@@ -75,7 +76,8 @@ let handle_tool_search_files
         ?timeout_sec ir
     in
     let run_host_shell_ir
-          ?(allowed_commands = Dev_exec_allowlist.readonly)
+          ?(allowed_commands = Exec_policy.readonly_allowed_commands)
+
           ?timeout_sec
           ?path
           ~workdir
@@ -101,7 +103,8 @@ let handle_tool_search_files
       if String.equal result.stderr "" then result.stdout else result.stdout ^ result.stderr
     in
     let run_in_turn_runtime ?(ok_exit_codes = [ 0 ]) ~cwd ~cmd ~command_argv
-        ?host_ir ?(host_allowed_commands = Dev_exec_allowlist.readonly)
+        ?host_ir ?(host_allowed_commands = Exec_policy.readonly_allowed_commands)
+
         ~max_bytes ~timeout_sec ?(map_output = fun out -> out) ?(extra = []) () =
       match Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd with
       | Some runtime ->
@@ -141,7 +144,8 @@ let handle_tool_search_files
           in
           run_in_turn_runtime ~cwd ~cmd:"git diff --stat"
             ~command_argv:[ "git"; "--no-optional-locks"; "diff"; "--stat" ]
-            ~host_ir ~host_allowed_commands:Dev_exec_allowlist.dev
+            ~host_ir ~host_allowed_commands:Exec_policy.dev_allowed_commands
+
             ~max_bytes:1_000_000
             ~timeout_sec:Keeper_tool_execute_timeout.read_timeout_sec ())
      | _ ->

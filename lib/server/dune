@@ -9,6 +9,11 @@
  (libraries
   masc
   masc.dashboard
+  ;; RFC-0056 #20086 extracted Dashboard_tla_specs out of the masc mega-lib into
+  ;; masc.dashboard_tla_specs; server_routes_http_routes_verification consumes it
+  ;; directly (specs_json / tlc_results_json) and dune does not re-export through
+  ;; the masc dep, so masc_server lists it explicitly.
+  masc.dashboard_tla_specs
   masc.masc_tool_surface
   masc.operator
   yojson
@@ -70,7 +75,6 @@
   masc.host_config
   masc.briefing_compactors
   masc.dashboard_eval_feed
-  masc.dashboard_tla_specs
   masc.sse_event
   masc.memory_jsonl
   masc.chronicle_event

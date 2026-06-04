@@ -16,6 +16,8 @@
     coverage for the new code paths. *)
 
 module Keeper_tool_memory_runtime = Masc.Keeper_tool_memory_runtime
+module Keeper_memory_bank = Masc.Keeper_memory_bank
+module Keeper_memory_policy = Masc.Keeper_memory_policy
 
 (* --- helpers ------------------------------------------------------- *)
 
@@ -172,6 +174,24 @@ let test_valid_call_empty_title_uses_content_alone () =
       (Keeper_tool_memory_runtime.memory_write_error_kind_to_string r.error_kind)
 ;;
 
+let test_synthetic_snapshot_source_drops_memory_candidates () =
+  let snapshot =
+    Keeper_memory_policy.synthesize_state_from_run_result
+      ~goal:"Fix task"
+      ~tools_used:["tool_execute"; "tool_read_file"]
+      ~stop_reason:"budget_exhausted"
+      ~response_text:"[turn budget exhausted: 8/8 turns used]"
+  in
+  let selection =
+    Keeper_memory_bank.memory_candidates_from_snapshot_source
+      ~state_snapshot_source:"synthesized"
+      snapshot
+  in
+  Alcotest.(check int)
+    "synthetic source writes no durable memory candidates"
+    0
+    (List.length selection.Keeper_memory_bank.selected)
+
 (* --- constants ----------------------------------------------------- *)
 
 let test_max_title_chars_constant () =
@@ -232,6 +252,10 @@ let () =
             "empty title -> content alone as body"
             `Quick
             test_valid_call_empty_title_uses_content_alone
+        ; Alcotest.test_case
+            "synthetic snapshot source drops candidates"
+            `Quick
+            test_synthetic_snapshot_source_drops_memory_candidates
         ] )
     ; ( "constants"
       , [ Alcotest.test_case "max_title_chars = 120" `Quick test_max_title_chars_constant

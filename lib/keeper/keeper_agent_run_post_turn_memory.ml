@@ -11,6 +11,7 @@ let run
   ~response_text
   ~actual_tools
   ~state_snapshot
+  ~state_snapshot_source
   ~post_turn_t0
   ?provider_filter
   ~runtime_id
@@ -26,6 +27,7 @@ let run
          config
          meta
          ~snapshot:state_snapshot
+         ~state_snapshot_source
          ~turn
          ~reply:response_text
          ()
@@ -80,6 +82,7 @@ let run
     ~turn
     ~oas_turn_count
     ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+    ~state_snapshot_source
     ~snapshot:state_snapshot
     ();
 

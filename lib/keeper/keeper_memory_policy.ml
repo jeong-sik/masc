@@ -109,6 +109,11 @@ let empty_keeper_state_snapshot = {
   constraints = [];
 }
 
+let state_snapshot_source_is_synthetic source =
+  let source = String.trim source in
+  String.equal source "synthesized"
+  || String.starts_with ~prefix:"synthesized_" source
+
 type keeper_memory_line = {
   kind: string;
   text: string;
@@ -822,10 +827,13 @@ let synthesize_state_from_run_result
       let unique = List.sort_uniq String.compare ts in
       Some (Printf.sprintf "Used: %s" (String.concat ", " unique))
   in
-  let next_items =
-    if stop_reason = "budget_exhausted" then
-      ["Continue previous work"; "Review results from last generation"]
-    else []
+  let next_summary =
+    if stop_reason = "budget_exhausted"
+    then
+      Some
+        "Resume from the OAS checkpoint and inspect the latest assistant/tool \
+         context before choosing the next action."
+    else None
   in
   let response_hint =
     let trimmed = String.trim response_text in
@@ -842,10 +850,8 @@ let synthesize_state_from_run_result
   { goal = (let g = String.trim goal in if g = "" then None else Some g);
     progress;
     done_summary = progress;
-    next_summary = (match next_items with
-                    | [] -> None
-                    | items -> Some (String.concat "; " items));
-    next_items;
+    next_summary;
+    next_items = [];
     decisions;
     open_questions = [];
     constraints = [];

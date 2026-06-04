@@ -259,6 +259,26 @@ let test_text_parse_matches_json_parse () =
        Alcotest.(check (list string)) "open_questions" text_snap.open_questions json_snap.open_questions;
        Alcotest.(check (list string)) "constraints" text_snap.constraints json_snap.constraints)
 
+let test_budget_synthesis_does_not_invent_next_items () =
+  let snapshot =
+    KMP.synthesize_state_from_run_result
+      ~goal:"Fix task"
+      ~tools_used:["tool_execute"; "tool_read_file"]
+      ~stop_reason:"budget_exhausted"
+      ~response_text:"[turn budget exhausted: 8/8 turns used]"
+  in
+  Alcotest.(check (list string)) "no invented next_items" [] snapshot.next_items;
+  Alcotest.(check bool)
+    "checkpoint resume summary present"
+    true
+    (match snapshot.next_summary with
+     | Some text -> contains_substring text "OAS checkpoint"
+     | None -> false);
+  Alcotest.(check bool)
+    "synthetic marker present"
+    true
+    (List.exists Masc.Keeper_synthetic_marker.contains_marker snapshot.decisions)
+
 (* ── Test runner ─────────────────────────────────────────────────── *)
 
 let () =
@@ -288,5 +308,9 @@ let () =
       ( "dual_source",
         [
           Alcotest.test_case "text matches json" `Quick test_text_parse_matches_json_parse;
+          Alcotest.test_case
+            "budget synthesis does not invent next items"
+            `Quick
+            test_budget_synthesis_does_not_invent_next_items;
         ] );
     ]

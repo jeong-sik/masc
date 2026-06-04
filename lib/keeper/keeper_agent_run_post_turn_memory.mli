@@ -17,6 +17,7 @@ val run :
   response_text:string ->
   actual_tools:string list ->
   state_snapshot:Keeper_memory_policy.keeper_state_snapshot ->
+  state_snapshot_source:string ->
   post_turn_t0:float ->
   ?provider_filter:string list ->
   runtime_id:string ->

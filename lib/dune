@@ -7,8 +7,6 @@
  http_response_payload
  error_event_type
  keeper_tool_call_log_route_evidence
- memory_oas_bridge_cache
- memory_oas_bridge_op_outcome
  keeper_world_observation_board_signal
  keeper_world_observation_continuity
  keeper_world_observation_inputs

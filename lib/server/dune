@@ -163,6 +163,7 @@
   masc.auth
   masc.fd_accountant
   masc.masc_event_bus
+  masc.otel_dispatch_hook
   masc.otel_spans
   masc.pool_metrics
   masc.prometheus

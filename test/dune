@@ -766,8 +766,7 @@
   test_set_util
   test_board_core_payload
   test_board_attachment_meta
-  test_board_moderation
-  test_voice_config)
+  test_board_moderation)
  (modules
   test_runtime_params
   test_config_dir_resolver
@@ -946,10 +945,14 @@
   test_set_util
   test_board_core_payload
   test_board_attachment_meta
-  test_board_moderation
-  test_voice_config)
+  test_board_moderation)
  (libraries masc_test_deps)
  (deps ../bin/main_eio.exe))
+
+(test
+ (name test_voice_config)
+ (modules test_voice_config)
+ (libraries alcotest yojson masc.voice_config))
 
 ; Focused dashboard nudge feed projection.
 

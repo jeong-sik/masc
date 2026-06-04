@@ -35,6 +35,7 @@
   (re_export masc.json_field)
   (re_export masc.lockfree_atomic)
   (re_export masc.otel_spans)
+  (re_export masc.voice_config)
   (re_export masc_log)
   (re_export masc)
   (re_export masc.activity_graph)

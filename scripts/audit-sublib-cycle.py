@@ -73,6 +73,10 @@ DEFAULT_LEAVES: tuple[str, ...] = (
     "masc.json_field",
     "masc.pool_metrics",
     "masc.otel_spans",
+    "masc.otel_genai",
+    "masc.otel_trace_context",
+    "masc.otel_dispatch_hook",
+    "masc.voice_config",
     # Keeper-owned pure/type leaves extracted from lib/keeper/.
     "masc.keeper_accountability_claim_types",
     "masc.keeper_runtime_manifest_types",
@@ -100,6 +104,7 @@ DEFAULT_LEAVES: tuple[str, ...] = (
     "masc.keeper_failure_taxonomy",
     "masc.keeper_world_observation_turn_types",
     "masc.keeper_memory_taxonomy",
+    "masc.keeper_memory_policy_summary_filter",
     "masc.keeper_tool_command_parse",
     "masc.keeper_outcome_taxonomy",
     "masc.keeper_metrics",

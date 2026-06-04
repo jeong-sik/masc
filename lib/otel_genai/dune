@@ -1,0 +1,8 @@
+(include_subdirs no)
+
+(library
+ (name otel_genai)
+ (public_name masc.otel_genai)
+ (wrapped false)
+ (modules otel_genai)
+ (libraries masc.otel_spans))

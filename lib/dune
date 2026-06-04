@@ -133,7 +133,6 @@
   worker_container_runners
   exec_shell_adapter
   ;; keeper_memory sub-modules
-  keeper_memory_policy_summary_filter
   keeper_memory_policy
   keeper_memory_bank
   keeper_memory_llm_summary
@@ -250,6 +249,10 @@
    masc.json_field
    masc.pool_metrics
    masc.otel_spans
+   masc.otel_genai
+   masc.otel_trace_context
+   masc.otel_dispatch_hook
+   masc.voice_config
    ;; RFC-0056 Phase 1L — Attribution envelope extracted to lib/attribution/.
    ;; Pure Attribution + phantom-tagged helpers, deps: stdlib + Yojson only.
    masc.attribution
@@ -286,6 +289,7 @@
    masc.keeper_failure_taxonomy
    masc.keeper_world_observation_turn_types
    masc.keeper_memory_taxonomy
+   masc.keeper_memory_policy_summary_filter
    masc.keeper_tool_command_parse
    masc.keeper_outcome_taxonomy
    masc.keeper_metrics

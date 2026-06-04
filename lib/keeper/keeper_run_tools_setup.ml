@@ -475,7 +475,7 @@ let prepare_agent_setup
         ~current_tool_choice
         ~decay_discovered
         ()
-    : string list * computed_tool_surface
+    : string list * turn_lane
     =
     let last_user_text =
       List.fold_left
@@ -633,27 +633,6 @@ let prepare_agent_setup
         all_tool_names
       |> validate_allow_list ~turn
     in
-    let per_call_turn = turn - start_turn_count in
-    let is_last_turn = per_call_turn >= max_turns in
-    let is_warning_zone = per_call_turn >= max_turns - 1 in
-    let last_turn_safe = Keeper_tool_policy.last_turn_safe_tool_names () in
-    (* Mirror policy_allowed_tool_names_with_public_descriptors: only include a public name
-       in the last-turn-safe set when its routed internal handler is also
-       last-turn-safe. Otherwise the public name could re-introduce a tool
-       the policy explicitly excluded from the final turn. PR #14574. *)
-    let descriptor_safe_public_names =
-      Keeper_tool_descriptor_resolution.public_names_for_allowed_internal_names
-        last_turn_safe
-    in
-    let safe_last_turn_tools = last_turn_safe @ descriptor_safe_public_names in
-    let schema_filter =
-      if is_last_turn
-      then
-        Agent_sdk.Tool_op.apply
-          (Agent_sdk.Tool_op.Intersect_with safe_last_turn_tools)
-          schema_filter
-      else schema_filter
-    in
     let lane : Keeper_agent_tool_surface.turn_lane =
       if is_retry
       then Lane_retry
@@ -664,15 +643,7 @@ let prepare_agent_setup
         | Some Agent_sdk.Types.None_ -> Lane_tool_disabled
         | _ -> Lane_text_only)
     in
-    ( schema_filter
-    , { absolute_turn = turn
-      ; checkpoint_start_turn = start_turn_count
-      ; per_call_turn
-      ; per_call_max_turns = max_turns
-      ; is_last_turn
-      ; is_warning_zone
-      ; lane
-      } )
+    (schema_filter, lane)
   in
 
   let ctx : Keeper_run_tools_hooks.ctx =
@@ -701,7 +672,7 @@ let prepare_agent_setup
   Keeper_run_tools_hooks.assemble_hooks
     ~ctx ~session ~user_message ~dynamic_context
     ~history_messages ~prompt_metrics ~shared_context
-    ~start_turn_count ~generation ~max_turns
+    ~start_turn_count ~generation
     ~runtime_id_string ~is_retry ~turn_affordances
     ~config_root ~runtime_config_path
     ~gemini_mcp_disabled ~approval_mode_effective

@@ -20,7 +20,7 @@
 \*
 \* This spec is ORTHOGONAL to its sibling Phase 5 specs:
 \*   - KeeperRuntimeAttemptFSM.tla  (B1, RFC-0065 Phase 5.1) — runtime FSM
-\*   - KeeperToolSurface.tla        (B2, RFC-0065 Phase 5.2) — tool surface pipeline
+\*   - Composite B2 projection      (RFC-0065 Phase 5.2) — schema filter computed
 \*   - KeeperRolloverDecision.tla   (Phase 4)                — rollover gate (this spec consumes its outcome class)
 \*
 \* OCaml ↔ TLA+ mapping.  Cited by `path.ml:<symbol>` anchors (the form

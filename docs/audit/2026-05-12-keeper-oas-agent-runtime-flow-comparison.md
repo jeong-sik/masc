@@ -211,7 +211,7 @@ flowchart TD
 | Search hits only already-allowed core tools | Search result says call them directly; no extra discovery needed. |
 | Search hits policy-denied tools | Hidden from allowed results and counted as filtered. |
 | Advisory tool already satisfied in prior tool calls | Strict `tool_choice` is cleared for that turn. |
-| Last OAS turn | Surface intersects last-turn-safe tools. |
+| Last OAS turn | OAS enforces `max_turns`; Keeper does not rewrite the schema for the final turn. |
 | Passive loop + actionable signal | Contract enforcement can narrow the surface to force progress. |
 | No tools after overlay/filter | Fallback floor tools may be injected; otherwise blocker/receipt mismatch. |
 | Provider lacks inline tool support | Provider-lane resolution happens later in `run_try_provider`; this must stay visible in receipt/debugging because tool policy was selected earlier. |

@@ -42,17 +42,6 @@ type tool_surface_metrics =
   ; approval_mode_derived : bool
   }
 
-(** Result of computing per-turn routing hints. *)
-type computed_tool_surface =
-  { absolute_turn : int
-  ; checkpoint_start_turn : int
-  ; per_call_turn : int
-  ; per_call_max_turns : int
-  ; is_last_turn : bool
-  ; is_warning_zone : bool
-  ; lane : turn_lane
-  }
-
 (** Affordances that influence per-turn tool gating. *)
 type turn_affordance =
   | Board_curation

@@ -515,30 +515,6 @@ let test_mcp_context_policy_uses_descriptor_resolution () =
     "maintenance-only tools project from descriptors"
     [ "masc_heartbeat" ]
     (Descriptor.keeper_maintenance_only_names ());
-  Alcotest.(check (list string))
-    "last-turn-safe tools project from descriptors"
-    [ "keeper_board_comment"
-    ; "keeper_board_curation_submit"
-    ; "keeper_board_post"
-    ; "keeper_broadcast"
-    ; "keeper_context_status"
-    ; "keeper_task_done"
-    ; "keeper_tasks_list"
-    ; "keeper_time_now"
-    ; "keeper_tool_search"
-    ; "masc_tasks"
-    ; "masc_transition"
-    ; "masc_web_fetch"
-    ; "masc_web_search"
-    ; "tool_execute"
-    ; "tool_read_file"
-    ; "tool_search_files"
-    ]
-    (Descriptor.keeper_last_turn_safe_names ());
-  Alcotest.(check bool)
-    "last-turn-safe fallback includes SDK core extend_turns"
-    true
-    (List.mem "extend_turns" (Policy.last_turn_safe_tool_names ()));
   ()
 ;;
 

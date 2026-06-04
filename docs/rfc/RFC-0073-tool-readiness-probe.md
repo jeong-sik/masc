@@ -79,7 +79,7 @@ val probe :
 
 ### 3.2 Runtime Probe 통합 지점
 
-`Keeper_run_tools.prepare_agent_setup` (lib/keeper/keeper_run_tools.ml:96-127) 의 `computed_tool_surface` 산출 직후 한 번 호출. 결과를 `agent_setup.readiness_snapshot` 필드에 보관 (신규 필드, 옵셔널).
+`Keeper_run_tools.prepare_agent_setup`의 schema-filter 산출 직후 한 번 호출. 결과를 `agent_setup.readiness_snapshot` 필드에 보관 (신규 필드, 옵셔널).
 
 ### 3.3 Dashboard API 응답 확장
 

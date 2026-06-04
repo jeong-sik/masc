@@ -181,8 +181,6 @@ run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperPostTurnOrchestration.tla
 run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperPostTurnOrchestration.tla"
 run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperRolloverDecision.tla"
 run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperRolloverDecision.tla"
-run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperToolSurface.tla"
-run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperToolSurface.tla"
 run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperLaunchPending.tla"
 run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperLaunchPending.tla"
 run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperConditionsGovernPhase.tla"

@@ -21,6 +21,8 @@ module Float = Stdlib.Float
 
     Extracted from tool_inline_dispatch.ml to reduce file size. *)
 
+module Planning_eio = Task.Planning_eio
+
 open Tool_inline_dispatch_types
 
 (* RFC-0189 PR-2: lifecycle handlers return [Tool_result.result option]

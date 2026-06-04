@@ -20,6 +20,8 @@ module Float = Stdlib.Float
     Note: stateful workspace helpers remain in server dispatch modules
 *)
 
+module Planning_eio = Task.Planning_eio
+
 open Workspace_types
 open Tool_args
 

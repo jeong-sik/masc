@@ -3,6 +3,7 @@ module Types = Masc_domain
 (** Coverage tests for Task.Tool *)
 
 open Masc
+module Planning_eio = Masc.Task.Planning_eio
 
 let () = Random.self_init ()
 let () = Keeper_task_owner_backend.install_hooks ()

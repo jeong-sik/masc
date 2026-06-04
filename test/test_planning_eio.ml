@@ -2,6 +2,7 @@
 
 open Alcotest
 open Masc
+module Planning_eio = Masc.Task.Planning_eio
 
 let temp_dir = ref ""
 

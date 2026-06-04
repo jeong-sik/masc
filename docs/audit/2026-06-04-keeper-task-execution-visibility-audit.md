@@ -54,15 +54,14 @@ Code anchors:
 - `lib/keeper/keeper_unified_prompt.ml:652` - continuity filtering
 - `lib/keeper/keeper_unified_prompt.ml:687` - claimable work guidance
 
-Finding: goals are visible, but goal assignment is not a hard claim boundary.
-`Keeper_runtime_contract.resolve_claim_goal_scope` explicitly treats
-`active_goal_ids` as advisory. If active goal IDs exist, tasks outside the goal
-scope are still claimable; the Keeper receives scope context but not a strict
-deny.
+Finding: goals are visible and active goal assignment is now a hard claim
+boundary. `Keeper_runtime_contract.resolve_claim_goal_scope` turns
+`active_goal_ids` into the `Workspace.claim_next_r` `task_filter`; tasks outside
+the active goal set are excluded and counted in `scope_excluded_count`.
 
 Code anchor:
 
-- `lib/keeper/keeper_runtime_contract.ml:62` - advisory active goal mode
+- `lib/keeper/keeper_runtime_contract.ml:49` - active goal task filter
 
 ### 3. Context, checkpoint, and memory
 
@@ -293,8 +292,10 @@ fast diagnosis path sees only counts.
    semantics in docs/UI/API. The field now reads as a candidate profile; actual
    execution still depends on descriptor/registry availability, denylist,
    per-turn OAS allowlist, and eval gates.
-4. Decide whether active goal scope must remain advisory or become a hard task
-   claim gate for specific Keeper profiles.
+4. **Done in PR #20055**: make `active_goal_ids` a hard `keeper_task_claim`
+   gate. The resolver now passes a goal-linked task filter into
+   `Workspace.claim_next_r`, and no-scope results report excluded tasks instead
+   of falling back to all work.
 5. Decide whether PR creation should become a structured Keeper workflow, or
    whether explicit `keeper_task_submit_for_verification` remains the SSOT.
 6. Add a first-class "worktree selected" observation if the Keeper should see a

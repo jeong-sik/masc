@@ -214,7 +214,7 @@ For the Keeper-eye view of a full work turn - task claim/start, repo/worktree
 writeback - see `docs/audit/2026-06-04-keeper-task-execution-visibility-audit.md`.
 
 That audit also tracks the current missing teeth in the contract:
-`tool_access` naming versus execution semantics, advisory goal scope, PR evidence
+`tool_access` naming versus execution semantics, active goal scope, PR evidence
 not being automatic from `gh pr create`, post-Execute git delta visibility, and
 per-turn tool disclosure detail.
 

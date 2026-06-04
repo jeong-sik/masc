@@ -180,12 +180,12 @@ let active_goal_scope_json
 
 let claim_scope_context_suffix ~(meta : keeper_meta) claim_goal_scope =
   match claim_goal_scope.Keeper_runtime_contract.mode with
-  | "active_goal_ids" | "active_goal_ids_advisory" ->
+  | "active_goal_ids" ->
     (match meta.active_goal_ids with
      | [] -> " in active goal scope"
      | goal_ids ->
        Printf.sprintf
-         " preferring active_goal_ids=[%s] (advisory)"
+         " within active_goal_ids=[%s]"
          (String.concat ", " goal_ids))
   | "all_tasks" -> " across all tasks"
   | "empty_goal_scope_fallback_all_tasks" ->
@@ -204,8 +204,8 @@ let no_eligible_action_for_claim_scope claim_goal_scope ~excluded_count =
   | None ->
     let scope_hint =
       match claim_goal_scope.Keeper_runtime_contract.mode with
-      | "active_goal_ids_advisory" ->
-        " All claimable tasks are blocked or already claimed (active_goal_ids is advisory, not a hard gate)."
+      | "active_goal_ids" ->
+        " Active goal scope is a hard claim gate; create/link a matching task or clear active_goal_ids."
       | _ -> ""
     in
     Printf.sprintf

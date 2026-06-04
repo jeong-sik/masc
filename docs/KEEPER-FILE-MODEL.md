@@ -136,7 +136,7 @@ persona_name = "analyst"
 | `sandbox_profile` | Optional | Process/filesystem sandbox profile | `local` runs on the host with fs scoped to the keeper playground. `docker` runs in a hardened ephemeral container. Hard mode requires `docker`. |
 | `network_mode` | Optional | Sandbox network policy | `docker` defaults to `none`; `local` defaults to `inherit`. Hard mode requires `none`. |
 | `tool_access` | Optional | Deployment-specific tool candidate profile override | Only when intentionally overriding persona default. |
-| `active_goal_ids` | Optional | Goal-scoped claim filter | When set, `keeper_task_claim` prefers tasks linked to these goals and reports scope health in audit/status surfaces. |
+| `active_goal_ids` | Optional | Goal-scoped claim filter | When set, `keeper_task_claim` only claims tasks linked to these goals and reports scope health in audit/status surfaces. |
 
 ### Additional supported overlay fields
 

@@ -18,7 +18,6 @@
  keeper_memory_llm_summary_outcome
  keeper_tool_call_log_route_evidence
  memory_oas_bridge_cache
- memory_oas_bridge_op_outcome
  keeper_user_visible_reply_source
  keeper_continuity_summary_source
  keeper_world_observation_board_signal
@@ -34,9 +33,6 @@
  atomic_orphan_size_class
  operator_control_context_snapshot
  silent_dashboard_actor_outcome
- sse_jsonrpc_filter
- prometheus_format
- prometheus_key
  prometheus_store
  prometheus_render
  prometheus_process

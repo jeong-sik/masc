@@ -193,6 +193,15 @@ let test_masc_transition_schema () =
   match find_registered_tool "masc_transition" with
   | None -> Alcotest.fail "masc_transition not found"
   | Some schema ->
+      Alcotest.(check bool) "description omits task required_tools"
+        false
+        (contains_substring ~needle:"required_tools" schema.description);
+      Alcotest.(check bool) "description omits required tools routing"
+        false
+        (contains_substring ~needle:"required tools" schema.description);
+      Alcotest.(check bool) "description omits requires tools routing"
+        false
+        (contains_substring ~needle:"requires tools" schema.description);
       (match get_json_assoc "properties" schema.input_schema with
       | Some props ->
           Alcotest.(check bool) "has completion_contract" true

@@ -223,9 +223,8 @@ submit_for_verification, approve, reject, or submit_pr_evidence. \
 Call when you pick up, finish, or abandon a task. Supports CAS via expected_version. \
 After %s or %s; pair with masc_deliver before action='done'. \
 Use submit_for_verification to request cross-agent review; approve/reject for verifier actions. \
-Use submit_pr_evidence to submit a merged PR as evidence for a todo task that requires tools \
-unavailable to you — this transitions the task directly to awaiting_verification so an agent \
-with the required tools can verify and close it. For compatibility, \
+Use submit_pr_evidence to submit a merged PR as evidence for a todo task you did not claim; \
+this transitions the task directly to awaiting_verification so a verifier can inspect and close it. For compatibility, \
 submit_for_verification with evidence on a todo task is treated as submit_pr_evidence. \
 Tasks created through %s complete via action='done' after LLM completion review; \
 they do not route normal completion through the verifier agent."

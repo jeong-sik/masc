@@ -104,6 +104,10 @@
   (re_export masc.keeper_measurement)
   (re_export masc.keeper_prompt_names)
   (re_export masc.keeper_event_bus)
+  (re_export masc.keeper_discovered_tools)
+  (re_export masc.keeper_tool_execute_timeout)
+  (re_export masc.keeper_tool_execute_shell_ir)
+  (re_export masc.keeper_workspace_op)
   ;; Model inference metrics + runtime provider label leaves.
   (re_export masc.runtime_provider_labels)
   (re_export masc.model_inference_metrics)

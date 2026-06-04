@@ -787,9 +787,9 @@ let test_tool_search_files_ir_timeout_floor_is_not_sub_io_latency () =
   Alcotest.(check (float 0.001))
     "tool_search_files_ir native timeout floor"
     Keeper_tool_command_runtime.keeper_tool_execute_shell_ir_native_min_timeout_sec
-    (Masc.Keeper_tool_execute_timeout.clamp_shell_timeout
+    (Keeper_tool_execute_timeout.clamp_shell_timeout
        ~min_sec:Keeper_tool_command_runtime.keeper_tool_execute_shell_ir_native_min_timeout_sec
-       ~default:Masc.Keeper_tool_execute_timeout.io_timeout_sec
+       ~default:Keeper_tool_execute_timeout.io_timeout_sec
        args)
 
 let test_tool_search_files_ir_load_bearing_timeout_floor () =
@@ -797,7 +797,7 @@ let test_tool_search_files_ir_load_bearing_timeout_floor () =
     Alcotest.(check (float 0.001))
       name
       expected
-      (Masc.Keeper_tool_execute_timeout.keeper_tool_execute_shell_ir_min_timeout_sec_for_args args)
+      (Keeper_tool_execute_timeout.keeper_tool_execute_shell_ir_min_timeout_sec_for_args args)
   in
   check
     "trivial command keeps native floor"
@@ -809,7 +809,7 @@ let test_tool_search_files_ir_load_bearing_timeout_floor () =
        [ "executable", `String "git"
        ; "argv", `List [ `String "log"; `String "--oneline"; `String "-5" ]
        ])
-    Masc.Keeper_tool_execute_timeout.tool_dispatch_min_timeout_sec;
+    Keeper_tool_execute_timeout.tool_dispatch_min_timeout_sec;
   check
     "recursive grep keeps native floor"
     (`Assoc
@@ -826,7 +826,7 @@ let test_tool_search_files_ir_load_bearing_timeout_floor () =
              ; `Assoc [ "executable", `String "head"; "argv", `List [ `String "-5" ] ]
              ] )
        ])
-    Masc.Keeper_tool_execute_timeout.tool_dispatch_min_timeout_sec
+    Keeper_tool_execute_timeout.tool_dispatch_min_timeout_sec
 ;;
 
 let test_nested_runtime_detector_ignores_git_commit_message () =

@@ -39,7 +39,6 @@
   keeper_tool_descriptor keeper_tool_descriptor_resolution keeper_tool_runtime keeper_tool_registry
   keeper_tool_resolution
   keeper_tool_policy_config
-  keeper_discovered_tools
   keeper_tool_affinity
   keeper_tool_shared_runtime
    keeper_tool_board_runtime
@@ -47,7 +46,7 @@
    keeper_tool_registered_runtime
    keeper_tool_ide_runtime
    keeper_sandbox_docker
-   keeper_workspace_op keeper_tool_execute_timeout keeper_tool_execute_runtime_paths keeper_tool_execute_path
+   keeper_tool_execute_runtime_paths keeper_tool_execute_path
    keeper_tool_execute_readonly_policy keeper_workspace_read_ops
    keeper_tool_execute_input
    keeper_tool_execute_runtime
@@ -282,6 +281,10 @@
    masc.keeper_measurement
    masc.keeper_prompt_names
    masc.keeper_event_bus
+   masc.keeper_discovered_tools
+   masc.keeper_tool_execute_timeout
+   masc.keeper_tool_execute_shell_ir
+   masc.keeper_workspace_op
    ;; Runtime_provider_labels extracted to lib/runtime_provider_labels/.
    ;; Leaf boundary over agent_sdk.llm_provider canonical provider labels.
    masc.runtime_provider_labels

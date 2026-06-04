@@ -329,11 +329,15 @@ let fallback_externalized_bullet key =
        not listed."
   else if String.equal key Keeper_prompt_names.turn_intent_board_activity_guidance then
     Some
-      "- See board activity? Use the listed post_id. If the preview is \
-       enough, comment directly with keeper_board_comment. If you need the \
-       full post, call keeper_board_get and keeper_board_comment in the same \
-       response when the post gives you a concrete reply. If it does not, \
-       report no-work or the blocker instead of inventing a comment."
+      "- See board activity? Use the listed post_id. If no post_id is \
+       listed, call keeper_board_list or keeper_board_search to discover one \
+       before any keeper_board_get, comment, or vote. Never call \
+       keeper_board_get with {} or without post_id. If the preview is enough, \
+       comment directly with keeper_board_comment. If you need the full post, \
+       call keeper_board_get with that post_id; pair it with \
+       keeper_board_comment in the same response only when the full post gives \
+       you a concrete reply. keeper_board_get alone is passive and fails \
+       actionable turns."
   else if String.equal key Keeper_prompt_names.turn_intent_board_post_guidance then
     Some
       "- Have a substantive finding or update? Call keeper_board_post with \

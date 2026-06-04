@@ -24,6 +24,7 @@ module Exec = Masc.Keeper_tool_dispatch_runtime
 module Registry = Masc.Keeper_tool_registry
 module Resolution = Masc.Keeper_tool_descriptor_resolution
 module Surface = Masc.Keeper_agent_tool_surface
+module Board = Tool_shard_types_schemas_board
 module Tool_board_registry = Masc.Tool_board_registry
 
 let all_descriptors () : Descriptor.t list = Descriptor.all_descriptors ()
@@ -175,10 +176,36 @@ let required_public_descriptor name =
   | None -> Alcotest.failf "missing public descriptor: %s" name
 ;;
 
+let required_internal_descriptor name =
+  match Descriptor.descriptors_for_internal name with
+  | descriptor :: _ -> descriptor
+  | [] -> Alcotest.failf "missing internal descriptor: %s" name
+;;
+
 let schema_property_description schema name =
   let open Yojson.Safe.Util in
   schema |> member "properties" |> member name |> member "description"
   |> to_string_option
+;;
+
+let required_board_schema name =
+  match List.find_opt (fun (s : Masc_domain.tool_schema) -> s.name = name) Board.board_tools with
+  | Some schema -> schema
+  | None -> Alcotest.failf "missing board schema: %s" name
+;;
+
+let required_masc_board_schema name =
+  match
+    List.find_opt
+      (fun (s : Masc_domain.tool_schema) -> s.name = name)
+      Tool_board_registry.tools
+  with
+  | Some schema -> schema
+  | None -> Alcotest.failf "missing masc board schema: %s" name
+;;
+
+let check_contains label ~sub text =
+  Alcotest.(check bool) label true (string_contains ~sub text)
 ;;
 
 let test_read_descriptor_spells_out_path_basis () =
@@ -223,6 +250,101 @@ let test_execute_descriptor_spells_out_argv_basis () =
     "Execute argv schema includes grep example"
     true
     (string_contains ~sub:"executable='grep', argv=['-rn', 'pattern', 'lib']" argv_description)
+;;
+
+let test_board_descriptions_disambiguate_post_id_flow () =
+  let get_descriptor = required_internal_descriptor "keeper_board_get" in
+  let get_schema = required_board_schema "keeper_board_get" in
+  let list_schema = required_board_schema "keeper_board_list" in
+  let search_schema = required_board_schema "keeper_board_search" in
+  let comment_schema = required_board_schema "keeper_board_comment" in
+  let vote_schema = required_board_schema "keeper_board_vote" in
+  let get_post_id_description =
+    schema_property_description get_schema.input_schema "post_id"
+    |> Option.value ~default:""
+  in
+  check_contains
+    "board_get descriptor points to list/search first"
+    ~sub:"Use keeper_board_list or keeper_board_search first"
+    get_descriptor.description;
+  check_contains
+    "board_get schema forbids empty args"
+    ~sub:"never call this tool with empty arguments"
+    get_schema.description;
+  check_contains
+    "board_get post_id field says exact ID is required"
+    ~sub:"Required exact board post ID"
+    get_post_id_description;
+  check_contains
+    "board_list schema says it discovers post_id"
+    ~sub:"discover post_id values"
+    list_schema.description;
+  check_contains
+    "board_search schema says it discovers post_id"
+    ~sub:"discover post_id values"
+    search_schema.description;
+  List.iter
+    (fun ((label, schema) : string * Masc_domain.tool_schema) ->
+       let post_id_description =
+         schema_property_description schema.input_schema "post_id"
+         |> Option.value ~default:""
+       in
+       check_contains
+         (label ^ " post_id field says exact ID is required")
+         ~sub:"Required exact board post ID"
+         post_id_description)
+    [ "board_comment", comment_schema; "board_vote", vote_schema ];
+  List.iter
+    (fun (schema : Masc_domain.tool_schema) ->
+       if string_contains ~sub:"BoardList" schema.description
+       then
+         Alcotest.failf
+           "%s description references non-canonical BoardList"
+           schema.name)
+    Board.board_tools
+;;
+
+let test_masc_board_descriptions_disambiguate_post_id_flow () =
+  let get_schema = required_masc_board_schema "masc_board_get" in
+  let list_schema = required_masc_board_schema "masc_board_list" in
+  let search_schema = required_masc_board_schema "masc_board_search" in
+  let comment_schema = required_masc_board_schema "masc_board_comment" in
+  let vote_schema = required_masc_board_schema "masc_board_vote" in
+  let get_post_id_description =
+    schema_property_description get_schema.input_schema "post_id"
+    |> Option.value ~default:""
+  in
+  check_contains
+    "masc_board_get schema points to list/search first"
+    ~sub:"masc_board_list or masc_board_search first"
+    get_schema.description;
+  check_contains
+    "masc_board_get schema forbids empty args"
+    ~sub:"never call this tool with empty arguments"
+    get_schema.description;
+  check_contains
+    "masc_board_get post_id field says exact ID is required"
+    ~sub:"Required exact board post ID"
+    get_post_id_description;
+  check_contains
+    "masc_board_list schema says it returns post_id"
+    ~sub:"return post_id values"
+    list_schema.description;
+  check_contains
+    "masc_board_search schema says it returns post_id"
+    ~sub:"return post_id values"
+    search_schema.description;
+  List.iter
+    (fun ((label, schema) : string * Masc_domain.tool_schema) ->
+       let post_id_description =
+         schema_property_description schema.input_schema "post_id"
+         |> Option.value ~default:""
+       in
+       check_contains
+         (label ^ " post_id field says exact ID is required")
+         ~sub:"Required exact board post ID"
+         post_id_description)
+    [ "masc_board_comment", comment_schema; "masc_board_vote", vote_schema ]
 ;;
 
 let test_masc_board_registry_has_descriptor_projection () =
@@ -634,6 +756,14 @@ let () =
             "Execute argv basis is explicit"
             `Quick
             test_execute_descriptor_spells_out_argv_basis
+        ; test_case
+            "Board get/list descriptions disambiguate post_id flow"
+            `Quick
+            test_board_descriptions_disambiguate_post_id_flow
+        ; test_case
+            "MASC board descriptions disambiguate post_id flow"
+            `Quick
+            test_masc_board_descriptions_disambiguate_post_id_flow
         ] )
     ; ( "masc-board"
       , [ test_case

@@ -22,6 +22,28 @@ let suggest_alternatives ~(allowed_tools : string list)
      if len <= max_suggestions then candidates
      else List.filteri (fun i _ -> i < max_suggestions) candidates
 
+let includes_tool name tools = List.exists (String.equal name) tools
+
+let board_get_recovery_hint ~allowed_tools ~tool_names =
+  if not (includes_tool "keeper_board_get" tool_names) then
+    None
+  else
+    let discovery_tools =
+      [ "keeper_board_list"; "keeper_board_search" ]
+      |> List.filter (fun name -> includes_tool name allowed_tools)
+    in
+    let discovery =
+      match discovery_tools with
+      | [] -> "a visible board activity post_id"
+      | [ one ] -> one
+      | many -> String.concat " or " many
+    in
+    Some
+      (Printf.sprintf
+         "keeper_board_get requires post_id; if no post_id is visible, use %s first. \
+          Do not call keeper_board_get with {}."
+         discovery)
+
 (** Pure decision logic for the on_idle hook.  Testable without Workspace.config.
 
     Graduated response to repeated tool calls uses the configured
@@ -55,20 +77,30 @@ let on_idle_decision_with_threshold ~skip_at ~consecutive_idle_turns
     | [] -> "keeper_tool_search or keeper_stay_silent"
     | alts -> String.concat ", " alts
   in
+  let recovery_hint =
+    board_get_recovery_hint ~allowed_tools ~tool_names
+  in
+  let append_hint msg =
+    match recovery_hint with
+    | None -> msg
+    | Some hint -> msg ^ " " ^ hint
+  in
   if consecutive_idle_turns >= skip_at then
     Agent_sdk.Hooks.Skip
   else if consecutive_idle_turns = skip_at - 1 then
     Agent_sdk.Hooks.Nudge
-      (Printf.sprintf
-         "FINAL WARNING: you repeated %s %d times. Next idle = turn ends. \
-          Use one of these instead: %s — or call keeper_stay_silent to do nothing."
-         tools_str consecutive_idle_turns alt_str)
+      (append_hint
+         (Printf.sprintf
+            "FINAL WARNING: you repeated %s %d times. Next idle = turn ends. \
+             Use one of these instead: %s — or call keeper_stay_silent to do nothing."
+            tools_str consecutive_idle_turns alt_str))
   else
     Agent_sdk.Hooks.Nudge
-      (Printf.sprintf
-         "You are repeating %s without progress. \
-          Available alternatives: %s."
-         tools_str alt_str)
+      (append_hint
+         (Printf.sprintf
+            "You are repeating %s without progress. \
+             Available alternatives: %s."
+            tools_str alt_str))
 
 (** Wrapper around {!on_idle_decision_with_threshold} that supplies the
     [idle_skip_threshold] constant from [Env_config_keeper.KeeperKeepalive].

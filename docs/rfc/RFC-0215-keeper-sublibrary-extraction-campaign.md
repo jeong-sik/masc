@@ -167,6 +167,14 @@ credential sub-lib must not reach `Masc_oas_bridge`). That inversion — callbac
 or interface, per the dependency-direction rule — is a separate PR that ships
 *before* the `dune` stanza.
 
+First code slice after the residual rename: remove stale persona-authoring
+runtime selection. Keeper TOML already fail-loud rejects `keeper.runtime_id` /
+`keeper.model` and routes runtime choice through `runtime.toml`
+`[[runtime.assignments]]`; persona authoring still advertised and normalized
+`keeper.runtime_id`, which forced `keeper_persona_authoring.ml` to call the flat
+`Runtime` module. The decoupling PR removes that schema/save path so credential
+authoring no longer reaches Runtime directly.
+
 ## 5. Extraction sequence
 
 Candidate clusters and their re-measured **flat-ns fan-out** (the G1 metric).

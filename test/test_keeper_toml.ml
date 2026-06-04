@@ -1300,6 +1300,34 @@ let test_persona_authoring_allowed_keeper_fields_follow_catalog () =
   check (list string) "allowed keeper fields follow schema catalog" keeper_fields
     (List.sort String.compare KPA.allowed_keeper_fields)
 
+let test_persona_authoring_schema_omits_runtime_selection () =
+  let json = KPA.schema_json () in
+  let rendered = Yojson.Safe.to_string json in
+  check bool "schema omits keeper.runtime_id" false
+    (contains_substring rendered "keeper.runtime_id");
+  check bool "allowed fields omit runtime_id" false
+    (List.mem "runtime_id" KPA.allowed_keeper_fields)
+
+let test_persona_authoring_rejects_runtime_selection () =
+  let profile =
+    `Assoc
+      [
+        ( "keeper",
+          `Assoc
+            [
+              ("goal", `String "test");
+              ("runtime_id", `String "runpod_mtp.qwen");
+            ] );
+      ]
+  in
+  match KPA.normalize_profile ~handle:"probe" profile with
+  | Ok _ -> fail "expected persona runtime selection rejection"
+  | Error e ->
+      check bool "mentions runtime field" true
+        (contains_substring e "keeper.runtime_id");
+      check bool "mentions runtime assignments" true
+        (contains_substring e "runtime.toml [[runtime.assignments]]")
+
 let test_persona_authoring_axes_validate () =
   let args =
     `Assoc
@@ -2013,6 +2041,10 @@ let () =
             test_persona_authoring_social_model_choices_follow_variant_ssot;
           test_case "persona authoring allowed keeper fields follow catalog" `Quick
             test_persona_authoring_allowed_keeper_fields_follow_catalog;
+          test_case "persona authoring schema omits runtime selection" `Quick
+            test_persona_authoring_schema_omits_runtime_selection;
+          test_case "persona authoring rejects runtime selection" `Quick
+            test_persona_authoring_rejects_runtime_selection;
           test_case "persona authoring axes validate" `Quick
             test_persona_authoring_axes_validate;
           test_case "persona authoring axes reject unknown choices" `Quick

@@ -221,12 +221,6 @@ let field_catalog_entries =
         ~choices:social_model_choices_json
         ~field_effect:"Optional social-model runtime for speech or ledger behavior."
         ()
-    ; field_catalog_entry
-        ~path:"keeper.runtime_id"
-        ~typ:"string"
-        ~field_effect:
-          "Optional runtime id override. Must resolve to a known runtime at runtime."
-        ()
   ]
 ;;
 
@@ -354,28 +348,7 @@ let normalize_social_model raw =
          (String.concat ", " Keeper_types_profile.valid_social_model_strings))
 ;;
 
-let normalize_runtime_id raw =
-  let normalized = String.trim raw in
-  (* RFC-0206: the runtime catalog is gone; the only valid runtime id beyond
-     the configured default name is the default runtime id itself. *)
-  let catalog =
-    try [ Runtime.get_default_runtime_id () ] with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | _ -> []
-  in
-  let known =
-    [ Keeper_config.default_runtime_id () ]
-    @ catalog
-  in
-  if List.mem (String.lowercase_ascii normalized) known
-  then Ok normalized
-  else
-    Error
-      (Printf.sprintf
-         "invalid keeper.runtime_id '%s' (known: %s)"
-         raw
-         (String.concat ", " known))
-;;
+let removed_runtime_selection_fields = [ "runtime_id"; "model" ]
 
 let add_optional_string key fields keeper_json =
   match json_trimmed_string_opt key keeper_json with
@@ -410,8 +383,21 @@ let add_optional_string_list key fields keeper_json =
 let normalize_keeper_json ~handle keeper_json =
   match keeper_json with
   | `Assoc _ ->
-    let unknown = validate_unknown_keeper_fields keeper_json in
-    if unknown <> []
+    let removed_runtime_fields =
+      assoc_keys keeper_json
+      |> List.filter (fun key -> List.mem key removed_runtime_selection_fields)
+    in
+    if removed_runtime_fields <> []
+    then
+      Error
+        (Printf.sprintf
+           "keeper.%s %s removed. Assign keeper runtime in runtime.toml \
+            [[runtime.assignments]] keyed by keeper name."
+           (String.concat " / keeper." removed_runtime_fields)
+           (if List.length removed_runtime_fields = 1 then "is" else "are"))
+    else
+      let unknown = validate_unknown_keeper_fields keeper_json in
+      if unknown <> []
     then
       Error
         (Printf.sprintf
@@ -432,82 +418,66 @@ let normalize_keeper_json ~handle keeper_json =
               Result.map (fun value -> Some value) (normalize_social_model raw)
           in
           Result.bind social_model_result (fun social_model ->
-            let runtime_id_result =
-              match json_trimmed_string_opt "runtime_id" keeper_json with
-              | Some raw ->
-                Result.map (fun value -> Some value) (normalize_runtime_id raw)
-              | None -> Ok None
+            let mention_targets =
+              match json_string_list_normalized "mention_targets" keeper_json with
+              | [] -> [ handle ]
+              | xs -> xs
             in
-            Result.map
-              (fun runtime_id ->
-                 let mention_targets =
-                   match json_string_list_normalized "mention_targets" keeper_json with
-                   | [] -> [ handle ]
-                   | xs -> xs
-                 in
-                 let get_goal_horizon key =
-                   json_trimmed_string_opt key keeper_json |> Option.value ~default:goal
-                 in
-                 let fields =
-                   [ "goal", `String goal
-                   ; "short_goal", `String (get_goal_horizon "short_goal")
-                   ; "mid_goal", `String (get_goal_horizon "mid_goal")
-                   ; "long_goal", `String (get_goal_horizon "long_goal")
-                   ; "mention_targets", string_list_to_json mention_targets
-                   ; ( "proactive_enabled"
-                     , `Bool
-                         (Safe_ops.json_bool
-                            ~default:false
-                            "proactive_enabled"
-                            keeper_json) )
-                   ]
-                 in
-                 let fields =
-                   [ "will"; "needs"; "desires"; "instructions" ]
-                   |> List.fold_left
-                        (fun acc key -> add_optional_string key acc keeper_json)
-                        fields
-                 in
-                 let fields =
-                   [ "telemetry_feedback_enabled"
-                   ; "always_approve"
-                   ]
-                   |> List.fold_left
-                        (fun acc key -> add_optional_bool key acc keeper_json)
-                        fields
-                 in
-                 let fields =
-                   [ "proactive_idle_sec"
-                   ; "proactive_cooldown_sec"
-                   ; "telemetry_feedback_window_hours"
-                   ; "max_turns_per_call"
-                   ; "max_turns_per_call_scheduled_autonomous"
-                   ]
-                   |> List.fold_left
-                        (fun acc key -> add_optional_int key acc keeper_json)
-                        fields
-                 in
-                 let fields =
-                   add_optional_float "per_provider_timeout" fields keeper_json
-                 in
-                 let fields =
-                   [ "tool_denylist"; "shards" ]
-                   |> List.fold_left
-                        (fun acc key -> add_optional_string_list key acc keeper_json)
-                        fields
-                 in
-                 let fields =
-                   match social_model with
-                   | Some value -> assoc_set "social_model" (`String value) fields
-                   | None -> assoc_without "social_model" fields
-                 in
-                 let fields =
-                   match runtime_id with
-                   | Some value -> assoc_set "runtime_id" (`String value) fields
-                   | None -> assoc_without "runtime_id" fields
-                 in
-                 `Assoc (List.rev fields))
-              runtime_id_result)))
+            let get_goal_horizon key =
+              match json_trimmed_string_opt key keeper_json with
+              | Some value -> value
+              | None -> goal
+            in
+            let fields =
+              [ "goal", `String goal
+              ; "short_goal", `String (get_goal_horizon "short_goal")
+              ; "mid_goal", `String (get_goal_horizon "mid_goal")
+              ; "long_goal", `String (get_goal_horizon "long_goal")
+              ; "mention_targets", string_list_to_json mention_targets
+              ; ( "proactive_enabled"
+                , `Bool
+                    (Safe_ops.json_bool
+                       ~default:false
+                       "proactive_enabled"
+                       keeper_json) )
+              ]
+            in
+            let fields =
+              [ "will"; "needs"; "desires"; "instructions" ]
+              |> List.fold_left
+                   (fun acc key -> add_optional_string key acc keeper_json)
+                   fields
+            in
+            let fields =
+              [ "telemetry_feedback_enabled"; "always_approve" ]
+              |> List.fold_left
+                   (fun acc key -> add_optional_bool key acc keeper_json)
+                   fields
+            in
+            let fields =
+              [ "proactive_idle_sec"
+              ; "proactive_cooldown_sec"
+              ; "telemetry_feedback_window_hours"
+              ; "max_turns_per_call"
+              ; "max_turns_per_call_scheduled_autonomous"
+              ]
+              |> List.fold_left
+                   (fun acc key -> add_optional_int key acc keeper_json)
+                   fields
+            in
+            let fields = add_optional_float "per_provider_timeout" fields keeper_json in
+            let fields =
+              [ "tool_denylist"; "shards" ]
+              |> List.fold_left
+                   (fun acc key -> add_optional_string_list key acc keeper_json)
+                   fields
+            in
+            let fields =
+              match social_model with
+              | Some value -> assoc_set "social_model" (`String value) fields
+              | None -> assoc_without "social_model" fields
+            in
+            Ok (`Assoc (List.rev fields)))))
   | other ->
     Error
       (Printf.sprintf

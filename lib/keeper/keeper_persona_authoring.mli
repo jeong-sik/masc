@@ -65,10 +65,10 @@ val schema_json : ?include_examples:bool -> unit -> Yojson.Safe.t
 
 (** Tool-handler entry for [keeper_persona_schema]. *)
 val handle_persona_schema :
-  _ Keeper_types_profile.context -> Yojson.Safe.t -> Keeper_types_profile.tool_result
+  'ctx -> Yojson.Safe.t -> Tool_result.result
 
 (** RFC-0182 §3.1 — ctx-free body for Persona_dispatch_ref path. *)
-val handle_persona_schema_no_ctx : Yojson.Safe.t -> Keeper_types_profile.tool_result
+val handle_persona_schema_no_ctx : Yojson.Safe.t -> Tool_result.result
 
 (** {1 Persona save / normalize} *)
 
@@ -98,10 +98,10 @@ val save_result_to_json :
 
 (** Tool-handler entry for [keeper_persona_save]. *)
 val handle_persona_save :
-  _ Keeper_types_profile.context -> Yojson.Safe.t -> Keeper_types_profile.tool_result
+  'ctx -> Yojson.Safe.t -> Tool_result.result
 
 (** RFC-0182 §3.1 — ctx-free body for Persona_dispatch_ref path. *)
-val handle_persona_save_no_ctx : Yojson.Safe.t -> Keeper_types_profile.tool_result
+val handle_persona_save_no_ctx : Yojson.Safe.t -> Tool_result.result
 
 (** {1 Persona archetype helpers} *)
 

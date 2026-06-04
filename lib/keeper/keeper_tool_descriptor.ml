@@ -1295,6 +1295,10 @@ let internal_descriptors : t list =
       "List configured keepers with optional detailed metadata." ~readonly:true
   ; masc_keeper_descriptor "msg_result" "masc_keeper_msg_result"
       "Poll an async keeper_msg dispatch by request_id." ~readonly:true
+  ; masc_keeper_descriptor "msg_cancel" "masc_keeper_msg_cancel"
+      "Cancel a running async keeper_msg turn by request_id." ~readonly:false
+  ; masc_keeper_descriptor "msg_queue" "masc_keeper_msg_queue"
+      "List all pending/running async keeper_msg requests, optionally filtered by keeper_name." ~readonly:true
   ; masc_keeper_descriptor "compact" "masc_keeper_compact"
       "Run operator-requested context compaction on a keeper." ~readonly:false
   ; masc_keeper_descriptor "clear" "masc_keeper_clear"

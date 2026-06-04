@@ -619,6 +619,40 @@ let keeper_msg_result_body ~(config : Workspace.config) args : tool_result =
 
 let handle_keeper_msg_result ctx args : tool_result =
   keeper_msg_result_body ~config:ctx.config args
+
+(* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
+let keeper_msg_cancel_body ~(config : Workspace.config) args : tool_result =
+  let request_id = get_string args "request_id" "" in
+  if String.equal request_id "" then
+    tool_result_error {|{"error":"request_id is required"}|}
+  else
+    if Keeper_msg_async.cancel ~base_path:config.base_path request_id then
+      let json =
+        `Assoc
+          [ "request_id", `String request_id
+          ; "status", `String "cancelled"
+          ; "message", `String "Keeper turn cancelled successfully."
+          ]
+      in
+      tool_result_ok (Yojson.Safe.to_string json)
+    else
+      tool_result_error
+        (Printf.sprintf
+           {|{"error":"request_id not found or already finished","request_id":"%s"}|}
+           request_id)
+
+let handle_keeper_msg_cancel ctx args : tool_result =
+  keeper_msg_cancel_body ~config:ctx.config args
+
+let keeper_msg_queue_body ~(config : Workspace.config) args : tool_result =
+  let keeper_name = get_string_opt args "keeper_name" in
+  let entries = Keeper_msg_async.list_for_keeper ?keeper_name () in
+  let json_list = List.map Keeper_msg_async.entry_to_json entries in
+  tool_result_ok (Yojson.Safe.to_string (`List json_list))
+
+let handle_keeper_msg_queue ctx args : tool_result =
+  keeper_msg_queue_body ~config:ctx.config args
+
 let handle_keeper_msg_stream ~on_text_delta ctx args : tool_result =
   match resolve_keeper_name ctx args with
   | Error err -> tool_result_error err

@@ -69,8 +69,6 @@ DEFAULT_LEAVES: tuple[str, ...] = (
     "masc.model_inference_metrics",
     # Keeper-owned pure/type leaves extracted from lib/keeper/.
     "masc.keeper_accountability_claim_types",
-    "masc.keeper_hash_algo",
-    "masc.keeper_container_name",
     "masc.keeper_runtime_manifest_types",
     "masc.keeper_registry_types_kill_class",
     "masc.keeper_registry_types_turn_phase",

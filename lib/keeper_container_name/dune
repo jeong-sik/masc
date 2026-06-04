@@ -1,8 +1,0 @@
-(include_subdirs no)
-
-(library
- (name masc_keeper_container_name)
- (public_name masc.keeper_container_name)
- (wrapped false)
- (modules keeper_container_name)
- (libraries masc.keeper_hash_algo))

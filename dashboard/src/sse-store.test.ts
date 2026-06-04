@@ -30,7 +30,7 @@ const refreshExecution = vi.fn<() => Promise<void>>(async () => {})
 const refreshBoard = vi.fn<() => void>(() => {})
 const invalidateDashboardCache = vi.fn<() => void>(() => {})
 const hydrateBoardSnapshot = vi.fn<(payload: unknown) => void>(() => {})
-const hydrateShellSnapshot = vi.fn<(payload: unknown) => void>(() => {})
+const hydrateShellSnapshot = vi.fn<(payload: unknown, opts?: unknown) => void>(() => {})
 const hydrateExecutionSnapshot = vi.fn<(payload: unknown) => void>(() => {})
 const hydratePlanningSnapshot = vi.fn<(payload: unknown) => void>(() => {})
 const removeBoardPost = vi.fn<(postId?: string) => void>(() => {})
@@ -516,7 +516,7 @@ describe('setupSSEReaction reconnect hydration', () => {
 
     expect(hydrateShellSnapshot).toHaveBeenCalledWith(
       payloads.shell,
-      { light: true },
+      { light: true, preserveAuth: true },
     )
     expect(hydrateExecutionSnapshot).toHaveBeenCalledWith(payloads.execution)
     expect(hydrateBoardSnapshot).toHaveBeenCalledWith(payloads.board)

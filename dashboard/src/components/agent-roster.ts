@@ -774,13 +774,6 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     keeperFilter === 'agent-only' || configuredKeeperDelta === 0
       ? null
       : `일시정지/미기동 ${configuredKeeperDelta}개`
-  const sourceMismatchNotice =
-    keeperFilter !== 'agent-only' && agentList.length === 0 && keeperList.length > 0
-      ? {
-          title: 'Source mismatch',
-          message: `agent registry 0 · keeper projection ${keeperList.length} 기준입니다. live presence는 keeper runtime 상태에서만 표시됩니다.`,
-        }
-      : null
   const fallbackStateTitle =
     executionError.value
       ? '상세 상태 불러오기 실패'
@@ -961,17 +954,6 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
               `
             : null}
 
-          ${sourceMismatchNotice ? html`
-            <div class="rounded-[var(--r-1)] border border-[var(--warn-border)] bg-[var(--warn-10)] px-4 py-3 shadow-[var(--shadow-panel)]">
-              <div class="flex flex-col gap-2">
-                <div class="flex flex-wrap items-center gap-2">
-                  <strong class="text-xs font-semibold text-[var(--color-fg-secondary)]">${sourceMismatchNotice.title}</strong>
-                  <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]">keeper fleet</span>
-                </div>
-                <p class="m-0 text-xs leading-paragraph text-[var(--color-fg-primary)]">${sourceMismatchNotice.message}</p>
-              </div>
-            </div>
-          ` : null}
         </div>
       </section>
 

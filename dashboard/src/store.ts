@@ -824,14 +824,20 @@ function normalizeShellAuthSummary(raw: unknown): DashboardShellAuthSummary | nu
   }
 }
 
-export function hydrateShellSnapshot(data: DashboardShellResponse, opts?: { light?: boolean }): void {
+export function hydrateShellSnapshot(
+  data: DashboardShellResponse,
+  opts?: { light?: boolean; preserveAuth?: boolean },
+): void {
   const wantsLight = opts?.light === true
+  const preserveAuth = opts?.preserveAuth === true
   const normalizedAuth = normalizeShellAuthSummary(data.auth)
-  setCanonicalDashboardActor(
-    normalizedAuth?.token_valid
-      ? normalizedAuth.effective_agent ?? normalizedAuth.token_agent ?? null
-      : null,
-  )
+  if (!preserveAuth) {
+    setCanonicalDashboardActor(
+      normalizedAuth?.token_valid
+        ? normalizedAuth.effective_agent ?? normalizedAuth.token_agent ?? null
+        : null,
+    )
+  }
   const normalizedStatus = normalizeServerStatus(data.status, data.generated_at)
   if (normalizedStatus) {
     serverStatus.value = mergeServerStatus(serverStatus.value, normalizedStatus)
@@ -845,7 +851,9 @@ export function hydrateShellSnapshot(data: DashboardShellResponse, opts?: { ligh
       configured_keepers: data.configured_keepers ?? 0,
     }
   }
-  shellAuthSummary.value = normalizedAuth
+  if (!preserveAuth) {
+    shellAuthSummary.value = normalizedAuth
+  }
   const normalizedConfigResolution = normalizeDashboardConfigResolution(data.config_resolution)
   const normalizedRuntimeResolution = normalizeDashboardRuntimeResolution(data.runtime_resolution)
   if (!wantsLight || normalizedConfigResolution) {

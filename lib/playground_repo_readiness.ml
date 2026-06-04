@@ -435,6 +435,85 @@ let worktree_base_ref ~repo_path =
   in
   first_existing_ref ~repo_path candidates
 
+let is_standard_worktree_path ~repo_path ~task_name ~worktree_path =
+  let expected_worktree_path =
+    Filename.concat (Filename.concat repo_path ".worktrees") task_name
+  in
+  same_path worktree_path expected_worktree_path
+
+let relative_gitdir_of_pointer ~repo_path pointer =
+  let prefix = "gitdir:" in
+  if not (String.starts_with ~prefix pointer) then
+    Error "worktree .git file is not a gitdir pointer"
+  else
+    let gitdir =
+      String.sub
+        pointer
+        (String.length prefix)
+        (String.length pointer - String.length prefix)
+      |> String.trim
+    in
+    if gitdir = "" then Error "worktree .git file has an empty gitdir pointer"
+    else if Filename.is_relative gitdir then Ok None
+    else
+      let gitdir = normalize_path gitdir in
+      let worktrees_dir =
+        Filename.concat (Filename.concat repo_path ".git") "worktrees"
+        |> normalize_path
+      in
+      if String.starts_with ~prefix:(worktrees_dir ^ "/") gitdir then
+        let suffix =
+          String.sub
+            gitdir
+            (String.length worktrees_dir + 1)
+            (String.length gitdir - String.length worktrees_dir - 1)
+        in
+        Ok (Some (Printf.sprintf "../../.git/worktrees/%s" suffix))
+      else
+        Error
+          (Printf.sprintf
+             "worktree gitdir %s is not under %s"
+             gitdir worktrees_dir)
+
+let read_file_trim path =
+  let ic = open_in path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () ->
+       let len = in_channel_length ic in
+       really_input_string ic len |> String.trim)
+
+let write_file path contents =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc contents)
+
+let normalize_worktree_gitdir_file ~repo_path ~task_name ~worktree_path =
+  if not (is_standard_worktree_path ~repo_path ~task_name ~worktree_path) then
+    Ok ()
+  else
+    let git_file = Filename.concat worktree_path ".git" in
+    if not (Sys.file_exists git_file) then
+      Error (Printf.sprintf "worktree %s has no .git file" worktree_path)
+    else if Sys.is_directory git_file then Ok ()
+    else (
+      try
+        let current = read_file_trim git_file in
+        match relative_gitdir_of_pointer ~repo_path current with
+        | Error msg ->
+          Error (Printf.sprintf "worktree %s %s" worktree_path msg)
+        | Ok None -> Ok ()
+        | Ok (Some relative_gitdir) ->
+          write_file git_file ("gitdir: " ^ relative_gitdir ^ "\n");
+          Ok ()
+      with
+      | Sys_error msg ->
+        Error
+          (Printf.sprintf
+             "failed to normalize worktree gitdir for %s: %s"
+             worktree_path msg))
+
 (** [ensure_worktree_ready ~config ~meta ~repo_name ~task_name ~worktree_path ()]
     ensures a git worktree exists at [worktree_path] inside the sandbox clone for
     [repo_name].  If the worktree is missing, first ensures the parent repo is a
@@ -443,11 +522,13 @@ let worktree_base_ref ~repo_path =
     not block creating a separate task worktree.  Returns [Ok ()] when the
     worktree is a valid git checkout, or [Error msg] if creation failed.
 
-    Root fix for the docker sandbox mount issue: when the keeper cwd targets a
-    worktree path that doesn't exist in the sandbox clone (e.g. because the
-    worktree was created on the host but the docker container's clone is fresh),
-    this function recreates the worktree instead of failing with
-    [sandbox_repo_not_ready]. *)
+    Root fixes for the Docker sandbox Git/CWD boundary:
+    - when the keeper cwd targets a worktree path that doesn't exist in the
+      sandbox clone, recreate it instead of failing with
+      [sandbox_repo_not_ready];
+    - when the worktree exists, normalize its [.git] gitdir pointer to a
+      relative path so Git can resolve the metadata from both the host and the
+      container mount. *)
 let ensure_worktree_ready
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
@@ -464,7 +545,9 @@ let ensure_worktree_ready
        Skip parent repo validation — the parent may be "dirty" from worktree
        metadata (.git/worktrees/), which is normal and expected. *)
     match git_toplevel worktree_path with
-    | Some top when same_path worktree_path top -> Ok ()
+    | Some top when same_path worktree_path top ->
+      let repo_path = clone_path ~config ~meta ~repo_name in
+      normalize_worktree_gitdir_file ~repo_path ~task_name ~worktree_path
     | Some top ->
       Error
         (Printf.sprintf
@@ -491,17 +574,22 @@ let ensure_worktree_ready
               [ "worktree"; "add"; "--detach"; worktree_path; base_ref ]
           in
           if add_result.ok then (
-            (* Create a task branch in the new worktree *)
-            let branch_name = Printf.sprintf "task/%s" task_name in
-            let checkout =
-              run_git ~timeout_sec:read_only_probe_timeout_sec
-                ~clone_path:worktree_path
-                [ "checkout"; "-b"; branch_name ]
-            in
-            if checkout.ok then Ok ()
-            else
-              (* worktree created but branch checkout failed — still usable *)
-              Ok ())
+            match
+              normalize_worktree_gitdir_file ~repo_path ~task_name ~worktree_path
+            with
+            | Error msg -> Error msg
+            | Ok () ->
+              (* Create a task branch in the new worktree *)
+              let branch_name = Printf.sprintf "task/%s" task_name in
+              let checkout =
+                run_git ~timeout_sec:read_only_probe_timeout_sec
+                  ~clone_path:worktree_path
+                  [ "checkout"; "-b"; branch_name ]
+              in
+              if checkout.ok then Ok ()
+              else
+                (* worktree created but branch checkout failed — still usable *)
+                Ok ())
           else
             Error
               (Printf.sprintf
@@ -577,6 +665,17 @@ let provision_worktrees_for_task
                          [ "worktree"; "add"; "--detach"; worktree_path; base_ref ]
                      in
                      if add_result.ok then (
+                       (match
+                          normalize_worktree_gitdir_file
+                            ~repo_path
+                            ~task_name:task_id
+                            ~worktree_path
+                        with
+                        | Ok () -> ()
+                        | Error msg ->
+                          Log.Workspace.debug
+                            "provision_worktrees: gitdir normalization failed for %s/%s: %s"
+                            repo_name task_id msg);
                        let branch_name =
                          Printf.sprintf "task/%s" task_id
                        in

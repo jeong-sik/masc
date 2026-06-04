@@ -207,11 +207,35 @@ let deterministic_retry_fields_for_process_result
   | _ -> []
 ;;
 
+let sandbox_extra_uses_docker sandbox_extra_fields =
+  List.exists
+    (function
+      | "via", `String "docker" -> true
+      | _ -> false)
+    sandbox_extra_fields
+
+let typed_execute_response_cwd_json
+      ~turn_sandbox_factory
+      ~cwd
+      ~sandbox_extra_fields
+  =
+  if sandbox_extra_uses_docker sandbox_extra_fields then
+    match Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd with
+    | Some runtime ->
+      let container_cwd =
+        Keeper_turn_sandbox_runtime.container_cwd_of_host runtime ~host_cwd:cwd
+      in
+      Keeper_cwd_response.docker ~host_cwd:cwd ~container_cwd
+      |> Keeper_cwd_response.to_yojson_response
+    | None -> `String cwd
+  else `String cwd
+
 module For_testing = struct
   let elapsed_duration_ms = elapsed_duration_ms
   let deterministic_retry_fields_for_process_result =
     deterministic_retry_fields_for_process_result
   let compute_command_descriptor = compute_command_descriptor
+  let typed_execute_response_cwd_json = typed_execute_response_cwd_json
 end
 
 (* Typed Execute input projections extracted to
@@ -343,11 +367,19 @@ let handle_tool_execute_typed
                 @ fields)
              message
          | Ok (dispatch_sandbox, sandbox_extra_fields) ->
+        let response_cwd_json =
+          typed_execute_response_cwd_json
+            ~turn_sandbox_factory
+            ~cwd
+            ~sandbox_extra_fields
+        in
+        let response_cwd_field = [ "cwd", response_cwd_json ] in
         match root_git_cwd_error with
         | Some e ->
           error_json
             ~fields:
-              ([ "typed", `Bool true; "cmd", `String cmd; "cwd", `String cwd ]
+              ([ "typed", `Bool true; "cmd", `String cmd ]
+               @ response_cwd_field
                @ execution_location_fields cwd)
             e
         | None ->
@@ -360,7 +392,8 @@ let handle_tool_execute_typed
         | Error e ->
           let alts = Keeper_tool_execute_typed_input.validation_error_alternatives e in
           let fields =
-            [ "typed", `Bool true; "cmd", `String cmd; "cwd", `String cwd ]
+            [ "typed", `Bool true; "cmd", `String cmd ]
+            @ response_cwd_field
             @ execution_location_fields cwd
             @
             (match alts with
@@ -382,7 +415,8 @@ let handle_tool_execute_typed
           |> Exec_policy.truncate_for_log
         in
         let typed_error_fields =
-          [ "typed", `Bool true; "cmd", `String cmd_for_log; "cwd", `String cwd ]
+          [ "typed", `Bool true; "cmd", `String cmd_for_log ]
+          @ response_cwd_field
           @ execution_location_fields cwd
         in
         let blocked_result ?deterministic_reason ~error ~reason ~alternatives () =
@@ -415,10 +449,10 @@ let handle_tool_execute_typed
                ~extra:
                  (deterministic_retry_fields
                   @ [ "cmd", `String cmd_for_log
-                    ; "cwd", `String cwd
                     ; "typed", `Bool true
                     ; "execution_time_ms", `Int 0
                     ]
+                  @ response_cwd_field
                   @ execution_location_fields cwd)
                ())
         in
@@ -560,11 +594,11 @@ let handle_tool_execute_typed
                    (deterministic_retry_fields
                     @ failure_error_fields
                     @ sandbox_extra_fields
-                    @ [ "cwd", `String cwd
-                      ; "typed", `Bool true
+                    @ [ "typed", `Bool true
                       ; "execution_time_ms", `Int elapsed_ms
                       ; "timeout_sec", `Float timeout_sec
                       ]
+                    @ response_cwd_field
                     @ descriptor_fields
                     @ execution_location_fields cwd)
                  ~status:result.status

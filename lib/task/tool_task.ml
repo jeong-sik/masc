@@ -229,6 +229,17 @@ and handle_transition ~tool_name ~start_time ctx args =
   match terminal_verdict_noop with
   | Some message -> Tool_result.ok ~tool_name ~start_time message
   | None ->
+  let completion_state_error =
+    if (=) action Masc_domain.Done_action && not force then
+      completion_state_error ~task_id ~agent_name:ctx.agent_name ~task_opt
+    else
+      None
+  in
+  match completion_state_error with
+  | Some err ->
+    log_task_transition_failed ~agent_name:ctx.agent_name err;
+    result_to_response ~tool_name ~start_time (Error err)
+  | None ->
   match client_side_transition_gate_error ~task_opt ~action ~action_s with
   | Some err ->
     log_task_transition_failed ~agent_name:ctx.agent_name (Masc_domain.Task err);
@@ -251,31 +262,11 @@ and handle_transition ~tool_name ~start_time ctx args =
       ~tool_name ~start_time
       "Strict task release requires handoff_context.summary"
   else
-  let completion_state_error =
-    if (=) action Masc_domain.Done_action && not force then
-      completion_state_error ~task_id ~agent_name:ctx.agent_name ~task_opt
-    else
-      None
-  in
-  match completion_state_error with
-  | Some err ->
-    log_task_transition_failed ~agent_name:ctx.agent_name err;
-    result_to_response ~tool_name ~start_time (Error err)
-  | None ->
   let completion_owned_by_caller =
     force || can_review_completion ~task_opt ~agent_name:ctx.agent_name
   in
-  let done_redirects_to_verification =
-    (=) action Masc_domain.Done_action
-    && Env_config_runtime.Verification.fsm_enabled ()
-    && completion_owned_by_caller
-    && task_requires_verification task_opt
-  in
   let persisted_gate_rejection =
-    if (=) action Masc_domain.Done_action
-       && not force
-       && not done_redirects_to_verification
-    then
+    if (=) action Masc_domain.Done_action && not force then
       if not completion_owned_by_caller then
         None
       else if task_has_persisted_contract task_opt then
@@ -324,39 +315,19 @@ and handle_transition ~tool_name ~start_time ctx args =
       ~tool_name ~start_time
       (completion_rejection_message ~allow_force:true reason)
   | None ->
-  (* Verifier gate: if the task has a completion_contract and the
-     verification FSM is enabled, redirect Done → Submit_for_verification
-     so a cross-agent verifier can independently validate the
-     quantitative criteria. Gates 1-3 (length, excuse, LLM) still run
-     above; this replaces Gate 2.5 (substring match) with real
-     measurement by the verifier. See issue #7598. *)
-  let action =
-    if done_redirects_to_verification then
-      match task_opt with
-      | Some task ->
-        (match task.contract with
-         | Some contract when contract_requires_verification contract ->
-           Log.Task.info
-             ~keeper_name:task_id
-             "[verifier-gate] redirecting Done→Submit_for_verification task=%s agent=%s contract_items=%d"
-             task_id ctx.agent_name
-             (List.length contract.completion_contract
-              + List.length contract.required_evidence
-              + List.length contract.verify_gate_evidence);
-           Masc_domain.Submit_for_verification
-         | _ -> action)
-      | None -> action
-    else action
-  in
+  (* Contracted Done actions are reviewed above by the LLM completion
+     reviewer with the persisted completion contract in prompt context.
+     Keep AwaitingVerification for explicit submit_for_verification /
+     submit_pr_evidence workflows only; a normal keeper_task_done must
+     not depend on the verifier keeper being alive. *)
   (* RFC-0109 Phase D hard cut: contracted verification submissions
-     require a typed CDAL verdict. Analysis-only tasks (no contract)
+     require substantive evidence. Analysis-only tasks (no contract)
      bypass the gate. *)
   let evidence_decision =
     let needs_gate =
       match requested_action with
       | Masc_domain.Submit_for_verification
       | Masc_domain.Submit_pr_evidence -> true
-      | Masc_domain.Done_action when done_redirects_to_verification -> true
       | Masc_domain.Claim
       | Masc_domain.Start
       | Masc_domain.Done_action

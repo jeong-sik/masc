@@ -39,8 +39,9 @@ let classify_contract_state (contract : Masc_domain.task_contract option) =
 ;;
 
 (* #10449: classify which FSM path produced a [Done] new_status.
-   Approve_verification trumps drift inspection because the verifier
-   redirect already cleared the drift signal upstream.  [forced_done]
+   Approve_verification remains an explicit verification-submission path.
+   Normal contracted [Done_action] completions are LLM-reviewed in
+   [Tool_task] and then complete through the ordinary Done path. [forced_done]
    only fires when [force=true] short-circuited the same-agent guard;
    the lifecycle module emits the same drift variant for both forced
    and consensual claimed→done jumps, so the [force] flag is the

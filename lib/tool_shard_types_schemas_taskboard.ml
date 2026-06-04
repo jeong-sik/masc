@@ -150,13 +150,11 @@ let taskboard_tools : Masc_domain.tool_schema list =
   ; { name = "keeper_task_done"
     ; description =
         "Mark your claimed task as complete with a result summary. The task must \
-         be claimed by you. For tasks with a verification contract the call is \
-         routed through Submit_for_verification and the Cdal evidence gate; \
-         supply either (a) pr_url with the draft/open PR URL, or (b) notes \
-         that mention every contract.required_evidence entry verbatim and at \
-         least one concrete artefact reference (file path, PR number, commit \
-         hash, trace id). Pure-placeholder notes ('done', 'ok', etc.) keep \
-         the gate closed. Tasks without a contract bypass the gate."
+         be claimed by you. For tasks with a verification contract, the LLM \
+         completion reviewer checks the result summary against the contract; \
+         include concrete evidence such as files changed, PR number, commit \
+         hash, trace id, or test output. Pure-placeholder notes ('done', \
+         'ok', etc.) are rejected."
     ; input_schema =
         `Assoc
           [ "type", `String "object"

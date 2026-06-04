@@ -27,16 +27,14 @@ val drift_variant_label : Workspace_task_lifecycle.drift -> string
     - ["empty_contract"] — contract record present but both
       [completion_contract] and [required_evidence] are empty lists
     - ["with_contract"] — at least one of those lists is non-empty,
-      so the verifier-gate redirect in [Task.Tool] would fire on a
-      [Done_action]
+      so [Tool_task]'s LLM completion reviewer receives contract context
 
     Used as the [contract_state] label of
     [masc_task_completion_path_total]. *)
 val classify_contract_state : Masc_domain.task_contract option -> string
 
 (** Classify the FSM path that produced a [Done] new_status:
-    - ["via_verification"] — [Approve_verification] action (verifier
-      redirect path)
+    - ["via_verification"] — explicit [Approve_verification] action
     - ["forced_done"] — [force=true] override regardless of drift
     - ["claimed_to_done_skip"] — drift signal from
       {!Workspace_task_lifecycle.Claimed_to_done_skip} without force

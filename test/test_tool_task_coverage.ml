@@ -68,6 +68,13 @@ let ensure_test_runtime =
            if not (Atomic.get initialized) then initialize_once ()))
 ;;
 
+let install_test_hooks () =
+  Atomic.set Workspace_hooks.get_default_runtime_id_fn Runtime.get_default_runtime_id;
+  Atomic.set Task.Handlers.record_verdict_fn
+    (fun ~task_id ~req ~result () ->
+       Eval_calibration.record_verdict ~task_id ~req ~result ());
+  Atomic.set Task.Handlers.get_few_shot_block_fn (fun () -> "")
+
 let with_env name value_opt f =
   let original = Sys.getenv_opt name in
   let restore () =
@@ -99,6 +106,7 @@ let test name f =
     Eio_main.run @@ fun env ->
     Fs_compat.set_fs (Eio.Stdenv.fs env);
     ensure_test_runtime ();
+    install_test_hooks ();
     with_isolated_runtime_env f) :: !test_cases
 
 (* Create test context *)
@@ -387,7 +395,7 @@ let () = test "handle_done_records_approved_calibration_verdict" (fun () ->
   let result = Task.Tool.handle_done ~tool_name:"test_tool" ~start_time:0.0 ctx
     (`Assoc [
       ("task_id", `String "task-001");
-      ("notes", `String "Implemented the calibration coverage path, verified the JSONL verdict store, and completed the task cleanly. commit:abc123")
+      ("notes", `String "Task scope satisfied: Approved calibration task. Implemented the calibration coverage path, verified the JSONL verdict store, and completed the task cleanly. commit:abc123")
     ]) in
   if not (Tool_result.is_success result) then failwith (Tool_result.message result);
   let store = Eval_calibration.get_store () in
@@ -400,14 +408,10 @@ let () = test "handle_done_records_approved_calibration_verdict" (fun () ->
 )
 
 let () = test "handle_transition_respects_completion_contract_and_records_custom_evaluator" (fun () ->
-  (* Legacy substring gate (Gate 2.5). Issue #7598 redirects
-     Done → Submit_for_verification when MASC_VERIFICATION_FSM_ENABLED
-     is true (default) so a cross-agent verifier can measure
-     the contract. That path requires Eio net scaffolding and does
-     not produce a "contract" calibration verdict. Pin the flag to
-     [false] here to exercise the legacy substring fallback this
-     test asserts. FSM-enabled behaviour is covered by
-     test_verification_fsm.ml. *)
+  (* Legacy substring gate (Gate 2.5). When
+     MASC_VERIFICATION_FSM_ENABLED=true, the persisted contract is passed to
+     the LLM completion reviewer prompt. Pin the flag to [false] here to
+     exercise the legacy local fallback this test asserts. *)
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "false") (fun () ->
     let ctx = make_test_ctx () in
     let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
@@ -521,7 +525,7 @@ let () = test "handle_batch_add_tasks_injects_default_verification_contracts" (f
     tasks
 )
 
-let () = test "handle_done_redirects_to_verification_before_cdal_gate" (fun () ->
+let () = test "handle_done_uses_llm_review_without_keeper_verifier_redirect" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
     with_env "MASC_CDAL_GATE_ENABLED" (Some "true") (fun () ->
       with_env "MASC_DATA_DIR" (Some (make_temp_dir "masc-cdal-empty")) (fun () ->
@@ -557,7 +561,13 @@ let () = test "handle_done_redirects_to_verification_before_cdal_gate" (fun () -
         in
         if not (Tool_result.is_success result_done) then
           failwith (Tool_result.message result_done);
-        assert_task_awaiting_verification_by ctx "test-agent"))))
+        match (only_task ctx).Masc_domain.task_status with
+        | Masc_domain.Done { assignee; _ } -> assert (String.equal assignee "test-agent")
+        | other ->
+          failwith
+            (Printf.sprintf
+               "expected Done after LLM review, got: %s"
+               (Masc_domain.task_status_to_string other))))))
 
 let () = test "handle_transition_release_requires_handoff_for_strict_task" (fun () ->
   let ctx = make_test_ctx () in
@@ -633,10 +643,10 @@ let () = test "handle_transition_start_on_todo_points_at_claim_first" (fun () ->
         ])
   in
   assert (not (Tool_result.is_success result));
-  assert (str_contains (Tool_result.message result) "Invalid transition");
+  assert (str_contains (Tool_result.message result) "Invalid task state");
   assert (str_contains (Tool_result.message result) "todo");
-  assert (str_contains (Tool_result.message result) "Remediation");
-  assert (str_contains (Tool_result.message result) "action=claim");
+  assert (str_contains (Tool_result.message result) "Valid actions");
+  assert (str_contains (Tool_result.message result) "claim");
   let task_entries =
     Log.Ring.recent ~limit:50 ~module_filter:"Task" ~since_seq:before_seq ()
   in
@@ -644,7 +654,8 @@ let () = test "handle_transition_start_on_todo_points_at_claim_first" (fun () ->
     List.find_opt
       (fun (entry : Log.Ring.entry) ->
          str_contains entry.message "task transition failed:"
-         && str_contains entry.message "Invalid transition: todo -> start")
+         && str_contains entry.message
+              "Transition 'start' from status 'todo'")
       task_entries
   with
   | Some entry ->
@@ -994,7 +1005,7 @@ let () = test "handle_transition_verifier_noops_terminal_verdicts" (fun () ->
             ])
       in
       if not (Tool_result.is_success result) then failwith (Tool_result.message result);
-      assert (str_contains (Tool_result.message result) "stale verdict ignored");
+      assert (str_contains (Tool_result.message result) "Stale verification verdict ignored");
       assert (str_contains (Tool_result.message result) "no-op"))
     [ "approve"; "reject" ];
   match (only_task ctx).Masc_domain.task_status with
@@ -1019,7 +1030,7 @@ let () = test "handle_transition_verifier_allows_verdict_actions" (fun () ->
           [
             ("task_id", `String "task-001");
             ("action", `String "submit_for_verification");
-            ("notes", `String "artifact: verifier-evidence.json ready for verifier");
+            ("notes", `String "completion_notes: verifier evidence prepared. pr_url_or_artifact_ref: artifact:verifier-evidence.json ready for verifier");
           ])
     in
     if not (Tool_result.is_success submit_result) then
@@ -1238,7 +1249,7 @@ let () = test "keeper_shaped_non_keeper_claim_updates_planning_current_task" (fu
   assert (Tool_result.is_success result);
   assert (Planning_eio.get_current_task ctx.config = Some "task-002"))
 
-let () = test "handle_claim_rejects_second_active_owned_task" (fun () ->
+let () = test "handle_claim_auto_releases_previous_claimed_task" (fun () ->
   let ctx = make_test_ctx () in
   let _ =
     Task.Tool.handle_add_task
@@ -1269,15 +1280,24 @@ let () = test "handle_claim_rejects_second_active_owned_task" (fun () ->
       ctx
       (`Assoc [ ("task_id", `String "task-002") ])
   in
-  assert (not (Tool_result.is_success second));
-  assert (str_contains (Tool_result.message second) "already owns active task(s)");
+  if not (Tool_result.is_success second) then failwith (Tool_result.message second);
+  assert (str_contains (Tool_result.message second) "auto-released task-001");
+  let task_001 =
+    Workspace.get_tasks_raw ctx.config
+    |> List.find_opt (fun (task : Masc_domain.task) -> String.equal task.id "task-001")
+  in
   let task_002 =
     Workspace.get_tasks_raw ctx.config
     |> List.find_opt (fun (task : Masc_domain.task) -> String.equal task.id "task-002")
   in
-  match task_002 with
+  (match task_001 with
   | Some { task_status = Masc_domain.Todo; _ } -> ()
-  | Some _ -> failwith "task-002 should remain todo"
+  | Some _ -> failwith "task-001 should be auto-released to todo"
+  | None -> failwith "task-001 missing");
+  match task_002 with
+  | Some { task_status = Masc_domain.Claimed { assignee; _ }; _ } ->
+    assert (String.equal assignee "test-agent")
+  | Some _ -> failwith "task-002 should be claimed"
   | None -> failwith "task-002 missing"
 )
 
@@ -1817,7 +1837,7 @@ let () = test "transition_release_clears_planning_current_task" (fun () ->
   assert (Planning_eio.get_current_task ctx.config = None)
 )
 
-let () = test "transition_done_redirects_to_verification_and_clears_planning_current_task" (fun () ->
+let () = test "transition_done_completes_after_llm_review_and_clears_planning_current_task" (fun () ->
   let ctx = make_test_ctx () in
   let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("title", `String "Transition done")]) in
   let claim_result =
@@ -1831,7 +1851,7 @@ let () = test "transition_done_redirects_to_verification_and_clears_planning_cur
         [
           ("task_id", `String "task-001");
           ("action", `String "done");
-          ("notes", `String "Implemented the transport parity checks and verified the result. commit:abc123");
+          ("notes", `String "Task scope satisfied: Transition done. Implemented the transport parity checks and verified the result. commit:abc123");
         ])
   in
   assert (Tool_result.is_success done_result);
@@ -1840,8 +1860,12 @@ let () = test "transition_done_redirects_to_verification_and_clears_planning_cur
   match Workspace.get_tasks_raw ctx.config with
   | [ task ] -> (
       match task.task_status with
-      | Masc_domain.AwaitingVerification _ -> ()
-      | _ -> failwith "expected task to be awaiting_verification after done")
+      | Masc_domain.Done { assignee; _ } -> assert (String.equal assignee "test-agent")
+      | other ->
+        failwith
+          (Printf.sprintf
+             "expected task to be done after LLM review, got: %s"
+             (Masc_domain.task_status_to_string other)))
   | _ -> failwith "expected exactly one task after done transition"
 )
 

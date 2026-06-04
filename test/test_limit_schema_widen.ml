@@ -18,9 +18,6 @@
 
 open Alcotest
 
-module Base = Tool_shard_types_schemas_base
-module Board = Tool_shard_types_schemas_board
-
 let find_tool_schema schemas name =
   List.find_opt (fun (s : Masc_domain.tool_schema) -> String.equal s.name name) schemas
   |> function
@@ -64,15 +61,15 @@ let check_widened name type_value =
       (Yojson.Safe.to_string other)
 
 let memory_search_limit_widened () =
-  let schema = find_tool_schema Base.base_tools "keeper_memory_search" in
+  let schema = find_tool_schema Tool_shard_types.base_tools "keeper_memory_search" in
   check_widened "keeper_memory_search" (limit_type schema)
 
 let board_list_limit_widened () =
-  let schema = find_tool_schema Board.board_tools "keeper_board_list" in
+  let schema = find_tool_schema Tool_shard_types.board_tools "keeper_board_list" in
   check_widened "keeper_board_list" (limit_type schema)
 
 let board_search_limit_widened () =
-  let schema = find_tool_schema Board.board_tools "keeper_board_search" in
+  let schema = find_tool_schema Tool_shard_types.board_tools "keeper_board_search" in
   check_widened "keeper_board_search" (limit_type schema)
 
 let () =

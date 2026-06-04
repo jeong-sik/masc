@@ -11,16 +11,30 @@
    semantic change — only a wire-format widening. *)
 
 open Alcotest
-module S = Tool_shard_types_schemas_execute
+
+let execute_schema =
+  Tool_shard_types.typed_execute_tools
+  |> List.find_opt (fun (schema : Masc_domain.tool_schema) ->
+    String.equal schema.name "tool_execute")
+  |> function
+  | Some schema -> schema
+  | None -> Alcotest.fail "tool_execute schema missing"
+;;
 
 (* Pull the JSON associated with the [timeout_sec] field's [type] key. *)
 let type_value () =
-  match S.tool_execute_timeout_sec_field with
-  | _name, `Assoc fields ->
-    (match List.assoc_opt "type" fields with
-     | Some v -> v
-     | None -> Alcotest.fail "timeout_sec field is missing the 'type' key")
-  | _ -> Alcotest.fail "timeout_sec field is not a JSON object"
+  match execute_schema.input_schema with
+  | `Assoc fields ->
+    (match List.assoc_opt "properties" fields with
+     | Some (`Assoc props) ->
+       (match List.assoc_opt "timeout_sec" props with
+        | Some (`Assoc timeout_sec_fields) ->
+          (match List.assoc_opt "type" timeout_sec_fields with
+           | Some v -> v
+           | None -> Alcotest.fail "timeout_sec field is missing the 'type' key")
+        | _ -> Alcotest.fail "timeout_sec field is missing from properties")
+     | _ -> Alcotest.fail "tool_execute properties missing or not an object")
+  | _ -> Alcotest.fail "tool_execute input_schema is not a JSON object"
 
 let type_accepts_number_and_string () =
   match type_value () with
@@ -48,8 +62,17 @@ let type_accepts_number_and_string () =
 (* The widening must preserve the user-facing description so the LLM
    keepers' prompt context does not lose the default/max hint. *)
 let description_mentions_default_and_max () =
-  let _name, body = S.tool_execute_timeout_sec_field in
-  let body = match body with `Assoc xs -> xs | _ -> Alcotest.fail "field not an object" in
+  let body =
+    match execute_schema.input_schema with
+    | `Assoc fields ->
+      (match List.assoc_opt "properties" fields with
+       | Some (`Assoc props) ->
+         (match List.assoc_opt "timeout_sec" props with
+          | Some (`Assoc timeout_sec_fields) -> timeout_sec_fields
+          | _ -> Alcotest.fail "timeout_sec field is missing from properties")
+       | _ -> Alcotest.fail "tool_execute properties missing or not an object")
+    | _ -> Alcotest.fail "tool_execute input_schema is not a JSON object"
+  in
   let desc =
     match List.assoc_opt "description" body with
     | Some (`String s) -> s

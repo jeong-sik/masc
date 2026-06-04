@@ -17,10 +17,12 @@
 #     Each such header signals a never-curated interface dump; the .mli
 #     content is verbatim inferred-type output that should be normalized
 #     to a real one-line docstring.
-#   - lib_other_mli_missing: long-tail .mli coverage — every lib/*/*.ml
-#     file outside lib/keeper/ and lib/workspace/ that lacks a sibling .mli.
+#   - lib_other_mli_missing: long-tail public .mli coverage — every
+#     lib/*/*.ml file outside lib/keeper/ and lib/workspace/ that lacks a
+#     sibling .mli, excluding modules hidden by Dune (private_modules).
 #     Captures lib/server/, lib/dashboard/, lib/config/, lib/local/,
-#     lib/types/, lib/voice/, etc.
+#     lib/types/, lib/voice/, etc. without forcing private implementation
+#     shards to grow fake public interfaces.
 #
 # Policy: ratchet only — current value must be <= committed baseline. PRs
 # that reduce debt may regenerate the baseline (intentional "downward
@@ -82,17 +84,68 @@ count_inferred_dump_headers() {
 
 count_lib_other_mli_missing() {
   # All lib/*/*.ml files without a sibling .mli, EXCLUDING lib/keeper/
-  # and lib/workspace/ which have dedicated metrics. Captures the long
-  # tail (lib/server/, lib/dashboard/, lib/config/, lib/local/, etc.).
+  # and lib/workspace/ which have dedicated metrics. Dune-private
+  # implementation modules are not public interface debt; the facade module's
+  # .mli owns that contract.
   python3 - <<'EOF' "${REPO_ROOT}"
 import os, sys, glob
 repo_root = sys.argv[1]
+lib_root = os.path.join(repo_root, 'lib')
+
+def dune_private_modules(dune_path):
+    if not os.path.exists(dune_path):
+        return set()
+    tokens = []
+    with open(dune_path, encoding='utf-8') as f:
+        for line in f:
+            line = line.split(';', 1)[0]
+            token = ''
+            for ch in line:
+                if ch in '()':
+                    if token:
+                        tokens.append(token)
+                        token = ''
+                    tokens.append(ch)
+                elif ch.isspace():
+                    if token:
+                        tokens.append(token)
+                        token = ''
+                else:
+                    token += ch
+            if token:
+                tokens.append(token)
+    private = set()
+    i = 0
+    while i + 1 < len(tokens):
+        if tokens[i] == '(' and tokens[i + 1] == 'private_modules':
+            depth = 1
+            j = i + 2
+            while j < len(tokens) and depth > 0:
+                if tokens[j] == '(':
+                    depth += 1
+                elif tokens[j] == ')':
+                    depth -= 1
+                elif depth == 1:
+                    private.add(tokens[j].lower())
+                j += 1
+            i = j
+        else:
+            i += 1
+    return private
+
+root_private = dune_private_modules(os.path.join(lib_root, 'dune'))
 total = 0
-for d in glob.glob(os.path.join(repo_root, 'lib', '*') + '/'):
+for d in glob.glob(os.path.join(lib_root, '*') + '/'):
     name = d.rstrip('/').rsplit('/', 1)[-1]
     if name in ('keeper', 'workspace'):
         continue
+    private = dune_private_modules(os.path.join(d, 'dune'))
+    if not private:
+        private = root_private
     for ml in glob.glob(d + '*.ml'):
+        module_name = os.path.splitext(os.path.basename(ml))[0].lower()
+        if module_name in private:
+            continue
         if not os.path.exists(ml + 'i'):
             total += 1
 print(total)
@@ -106,7 +159,7 @@ METRICS=(
   "godsplit_count|Do not add new ';; godsplit' markers in lib/dune — extract a real sub-library instead. See PR#7-10."
   "lib_dune_lines|lib/dune is growing — consider extracting modules into a sub-library (lib/keeper/dune, lib/oas/dune, lib/dashboard/dune)."
   "inferred_dump_headers|Replace the '(** X inferred mli **)' header with a real one-line docstring. See PR#11286/11290/11296/11303/11309/11321/11401 for the closure series."
-  "lib_other_mli_missing|Add .mli for the new lib/*/*.ml file (covers every dir except keeper/workspace which have their own metrics)."
+  "lib_other_mli_missing|Add .mli for the new public lib/*/*.ml file, or mark implementation-only modules as Dune private_modules (covers every dir except keeper/workspace which have their own metrics)."
 )
 
 current_value() {

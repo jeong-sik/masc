@@ -56,8 +56,7 @@ let bool_field (input_schema : Yojson.Safe.t) key =
 
 let test_descriptor_is_typed_only () =
   let execute_schema =
-    Tool_shard_types_schemas_execute.typed_execute_tools
-    |> find_execute_schema
+    Tool_shard_types.typed_execute_tools |> find_execute_schema
   in
   let props = property_names execute_schema.input_schema in
   Alcotest.(check bool)
@@ -92,8 +91,7 @@ let test_descriptor_is_typed_only () =
 
 let test_description_does_not_advertise_cmd () =
   let execute_schema =
-    Tool_shard_types_schemas_execute.typed_execute_tools
-    |> find_execute_schema
+    Tool_shard_types.typed_execute_tools |> find_execute_schema
   in
   Alcotest.(check bool)
     "description mentions typed argv"
@@ -113,8 +111,7 @@ let test_description_does_not_advertise_cmd () =
 
 let test_descriptions_do_not_advertise_raw_search_scans () =
   let execute_schema =
-    Tool_shard_types_schemas_execute.typed_execute_tools
-    |> find_execute_schema
+    Tool_shard_types.typed_execute_tools |> find_execute_schema
   in
   let combined =
     String.concat

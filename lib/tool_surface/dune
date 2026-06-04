@@ -14,6 +14,17 @@
  (name masc_tool_surface)
  (public_name masc.masc_tool_surface)
  (wrapped false)
+ (private_modules
+  tool_shard_types_core
+  tool_shard_types_enum_mirrors
+  tool_shard_types_schemas_base
+  tool_shard_types_schemas_board
+  tool_shard_types_schemas_execute
+  tool_shard_types_schemas_filesystem
+  tool_shard_types_schemas_library
+  tool_shard_types_schemas_search_files
+  tool_shard_types_schemas_taskboard
+  tool_shard_types_schemas_voice)
  (libraries
   masc_types
   masc_core

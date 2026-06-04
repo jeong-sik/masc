@@ -206,7 +206,8 @@ let tool_execute_description =
   "Execute one command through the typed execution gates via typed argv. \
    Provide EITHER executable/argv OR pipeline, never both. Use executable/argv for one process, \
    or pipeline for explicit Shell IR pipelines. IMPORTANT: there is no 'cmd' \
-   or 'command' field. Those fields are not supported and will be rejected. \
+   or 'command' field; the legacy 'cmd' string field is no longer accepted. \
+   Those fields are not supported and will be rejected. \
    Always use 'executable' (string) and 'argv' (string array) instead. \
    Accepted fields: executable, argv, pipeline, env, cwd, timeout_sec, stdin, stdout, stderr. \
    For I/O redirection use the typed stdin/stdout/stderr objects \

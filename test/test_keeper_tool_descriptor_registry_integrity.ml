@@ -24,7 +24,6 @@ module Exec = Masc.Keeper_tool_dispatch_runtime
 module Registry = Masc.Keeper_tool_registry
 module Resolution = Masc.Keeper_tool_descriptor_resolution
 module Surface = Masc.Keeper_agent_tool_surface
-module Board = Tool_shard_types_schemas_board
 module Tool_board_registry = Masc.Tool_board_registry
 
 let all_descriptors () : Descriptor.t list = Descriptor.all_descriptors ()
@@ -189,7 +188,11 @@ let schema_property_description schema name =
 ;;
 
 let required_board_schema name =
-  match List.find_opt (fun (s : Masc_domain.tool_schema) -> s.name = name) Board.board_tools with
+  match
+    List.find_opt
+      (fun (s : Masc_domain.tool_schema) -> s.name = name)
+      Tool_shard_types.board_tools
+  with
   | Some schema -> schema
   | None -> Alcotest.failf "missing board schema: %s" name
 ;;
@@ -301,7 +304,7 @@ let test_board_descriptions_disambiguate_post_id_flow () =
          Alcotest.failf
            "%s description references non-canonical BoardList"
            schema.name)
-    Board.board_tools
+    Tool_shard_types.board_tools
 ;;
 
 let test_masc_board_descriptions_disambiguate_post_id_flow () =

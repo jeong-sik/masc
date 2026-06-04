@@ -30,6 +30,13 @@ let meta_cognition_summary_key (config : Workspace.config) =
 
 let clear_meta_cognition_warm_flag = Mc_cache.clear_warm_flag
 
+let eio_switch_fork_unavailable = function
+  | Invalid_argument msg ->
+    String_util.contains_substring msg "Switch accessed from wrong domain"
+    || String_util.contains_substring msg "Switch finished"
+  | _ -> false
+;;
+
 let schedule_meta_cognition_summary_warm (config : Workspace.config) =
   let key = meta_cognition_summary_key config in
   let compute () = Meta_cognition.summary_json config in
@@ -37,7 +44,7 @@ let schedule_meta_cognition_summary_warm (config : Workspace.config) =
   then (
     match Eio_context.get_switch_opt () with
     | Some sw ->
-      Eio.Fiber.fork ~sw (fun () ->
+      let warm () =
         Eio_guard.protect
           ~finally:(fun () -> Mc_cache.clear_warm_flag key)
           (fun () ->
@@ -56,7 +63,14 @@ let schedule_meta_cognition_summary_warm (config : Workspace.config) =
              | exn ->
                Log.Server.warn
                  "dashboard shell meta_cognition warm failed: %s"
-                 (Printexc.to_string exn)))
+                 (Printexc.to_string exn))
+      in
+      (try Eio.Fiber.fork ~sw warm with
+       | exn when eio_switch_fork_unavailable exn ->
+         Mc_cache.clear_warm_flag key
+       | exn ->
+         Mc_cache.clear_warm_flag key;
+         raise exn)
     | None -> Mc_cache.clear_warm_flag key)
 ;;
 

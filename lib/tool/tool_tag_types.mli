@@ -1,8 +1,7 @@
 (** Tool_tag_types — neutral classification variants for the Tool substrate.
 
     Zero-dependency leaf module. Holds the two pure nullary sums that the
-    domain side ([Tool_name.Domain_tool]) attaches to each tool and that the
-    substrate ([Tool_dispatch], [Tool_catalog_inference]) consume.
+    substrate ([Tool_dispatch], [Tool_catalog_inference]) consumes.
 
     Constructors are exposed (not abstract): [Tool_dispatch] and
     [Tool_catalog_inference] re-export these types by type-equality, so the

@@ -72,6 +72,7 @@ type policy =
   ; approval : approval
   ; retryable : bool
   ; cwd_scope : string option
+  ; inline_safe : bool
   }
 
 type t =
@@ -127,6 +128,10 @@ val readonly_for_input : t -> input:Yojson.Safe.t -> bool option
 (** Descriptor-owned read-only projection. The returned names are internal
     handler names whose descriptor policy declares a static read-only hint. *)
 val readonly_internal_names : unit -> string list
+
+(** Descriptor-owned inline-safe projection. The returned names are internal
+    MASC tools safe for keeper use without an MCP session context. *)
+val keeper_safe_inline_names : unit -> string list
 
 val public_input_schema : string -> Yojson.Safe.t option
 val translate_input : public:string -> Yojson.Safe.t -> Yojson.Safe.t

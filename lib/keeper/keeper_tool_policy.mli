@@ -30,10 +30,6 @@ val reset_policy_config_for_test : unit -> unit
 
 (** {1 MASC Schema Injection} *)
 
-(** Inline MCP-runtime tools that are safe for keepers without an MCP session
-    context. Shared by keeper policy and MCP protocol context metadata. *)
-val keeper_safe_inline_tools : string list
-
 val is_keeper_safe_inline_tool : string -> bool
 
 (** Filter and inject MASC schemas for keeper tool selection.

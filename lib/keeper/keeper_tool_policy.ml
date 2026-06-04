@@ -133,11 +133,11 @@ let is_keeper_denied (name : string) : bool =
 
 (* ── Schema injection filter ──────────────────────────────────── *)
 
-let keeper_safe_inline_tools =
-  [ "masc_approval_pending" ]
+let keeper_safe_inline_tools () =
+  Keeper_tool_descriptor.keeper_safe_inline_names ()
 
 let is_keeper_safe_inline_tool name =
-  List.mem name keeper_safe_inline_tools
+  List.mem name (keeper_safe_inline_tools ())
 
 let is_keeper_mcp_context_required name =
   let stripped = Keeper_tool_alias.strip_mcp_masc_prefix name in
@@ -168,7 +168,7 @@ let keeper_supported_masc_schemas (schemas : Masc_domain.tool_schema list) =
       Keeper_types_profile.schemas
   in
   let supported_in_keeper name =
-    if List.mem name keeper_safe_inline_tools then
+    if is_keeper_safe_inline_tool name then
       true
     else if is_keeper_management_tool name then
       (* Reliable pre-init too: [Keeper_tool_surface.schemas] is a static list,

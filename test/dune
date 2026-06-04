@@ -133,8 +133,6 @@
   test_server_ide_lsp_proxy
   test_ide_paths
   test_ide_canonical_url_join
-  test_keeper_runtime_manifest_completeness
-  test_keeper_runtime_manifest_clock_separation
   test_keeper_runtime_contract
   test_schema_surface_index
   test_keeper_accountability
@@ -386,8 +384,6 @@
   test_server_ide_lsp_proxy
   test_ide_paths
   test_ide_canonical_url_join
-  test_keeper_runtime_manifest_completeness
-  test_keeper_runtime_manifest_clock_separation
   test_keeper_runtime_contract
   test_schema_surface_index
   test_keeper_accountability
@@ -1389,6 +1385,10 @@
 (include stanzas/test_keeper_hash_algo.inc)
 
 (include stanzas/test_keeper_container_name.inc)
+
+(include stanzas/test_keeper_runtime_manifest_completeness.inc)
+
+(include stanzas/test_keeper_runtime_manifest_clock_separation.inc)
 
 (include stanzas/test_keeper_invariant.inc)
 

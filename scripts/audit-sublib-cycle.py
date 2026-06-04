@@ -70,6 +70,7 @@ DEFAULT_LEAVES: tuple[str, ...] = (
     # Keeper-owned pure/type leaves extracted from lib/keeper/.
     "masc.keeper_hash_algo",
     "masc.keeper_container_name",
+    "masc.keeper_runtime_manifest_types",
     "masc.keeper_tool_name",
     "masc.keeper_id",
     "masc.keeper_terminal_reason",

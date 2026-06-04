@@ -87,7 +87,7 @@ KSM 의 13-phase `phase` type 은 *projection* 되어 다양한 observer spec �
 
 **Layer B — Lint script `scripts/lint-spec-mapping-drift.sh`**
 
-1. `lib/keeper/keeper_state_machine.ml` parse → KSM `phase` constructor list 추출.
+1. `lib/keeper_state/keeper_state_machine.ml` parse → KSM `phase` constructor list 추출.
 2. `specs/keeper-state-machine/*.tla` 안 `MAPPING-TABLE-BEGIN/END` 또는 `MAPPING-UNMODELED-BEGIN/END` 블록 추출.
 3. 각 observer spec 별로 *OCaml constructor 집합* vs *mapped + unmodeled 집합* 비교.
 4. 누락 시 fail + suggest patch.
@@ -131,7 +131,7 @@ P2 가 단발 fix (audit doc 추천). P3 가 sibling instance. P4-P6 가 enforce
 
 1. **Q1**: sentinel marker 가 TLA+ comment syntax 안 — 다른 reader (TLC, TLAPS) 무시? **잠정**: YES, comment 이므로 TLC 영향 0. P2 PR 가 검증.
 
-2. **Q2**: P5 lint 가 *OCaml parse* 필요 — heavy dependency? **잠정**: 단순 `rg` + `awk` 로 constructor name 추출 (lib/keeper/keeper_state_machine.ml 의 `type phase` block grep). PPX-based 보다 fragile 하지만 lightweight.
+2. **Q2**: P5 lint 가 *OCaml parse* 필요 — heavy dependency? **잠정**: 단순 `rg` + `awk` 로 constructor name 추출 (lib/keeper_state/keeper_state_machine.ml 의 `type phase` block grep). PPX-based 보다 fragile 하지만 lightweight.
 
 3. **Q3**: Multi-spec sweep (P3) 가 *5+ observer spec* 모두 확인 — 일부는 mapping table 없을 수 있음 (e.g. only-KSM spec). **잠정**: P3 의 첫 commit 가 inventory (which observer specs have mapping tables) 부터.
 

@@ -85,7 +85,7 @@ If iter 50 batch-fixes the count comments and iter 51 fixes the 3 mapping-table 
 ```bash
 # scripts/audit-tla-phase-count.sh (~40-60 LOC)
 # Read OCaml type phase constructor count from keeper_state_machine.ml
-# rg "type phase|^  | [A-Z]" lib/keeper/keeper_state_machine.ml
+# rg "type phase|^  | [A-Z]" lib/keeper_state/keeper_state_machine.ml
 # count = number of constructors
 # Then sweep specs/keeper-state-machine/*.tla for "N phases" / "N-phase" patterns
 # Flag where N != actual_count

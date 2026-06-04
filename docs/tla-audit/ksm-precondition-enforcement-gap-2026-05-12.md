@@ -1,7 +1,7 @@
 # KSM Precondition Enforcement Gap (2026-05-12)
 
 **Spec**: `specs/keeper-state-machine/KeeperStateMachine.tla` (all condition-setter actions)
-**OCaml**: `lib/keeper/keeper_state_machine.ml` (`update_conditions` lines 540-674)
+**OCaml**: `lib/keeper_state/keeper_state_machine.ml` (`update_conditions` lines 540-674)
 **Iteration**: 9 (Phase A-5 잔여 sweep, `/loop` plan)
 **Cross-ref**: iter 6 #14720 (Heartbeat/Turn_failed unconditional), iter 7 #14722 MERGED (root cause), iter 8 #14727 (R-A-8 PR-1).
 

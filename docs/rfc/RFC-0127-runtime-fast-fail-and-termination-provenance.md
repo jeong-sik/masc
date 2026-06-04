@@ -168,7 +168,7 @@ PR-2 changes. PR-2 reuses PR-1's structured error when feeding `record_attempt_r
 
 Five edit sites:
 
-**(1) `lib/keeper/keeper_state_machine.ml`** — widen `Fiber_terminated`:
+**(1) `lib/keeper_state/keeper_state_machine.ml`** — widen `Fiber_terminated`:
 
 ```ocaml
 (* before *)

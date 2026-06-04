@@ -2,7 +2,7 @@
 status: reference
 last_verified: 2026-04-17
 code_refs:
-  - lib/keeper/keeper_state_machine.ml
+  - lib/keeper_state/keeper_state_machine.ml
   - lib/keeper/keeper_compact_policy.ml
   - specs/keeper-state-machine/KeeperCompactionLifecycle.tla
 ---
@@ -78,19 +78,19 @@ No `-buggy.cfg` variant present (per `ls specs/keeper-state-machine/`) — **thi
 
 | Artifact | Location | Content (verified) |
 |----------|----------|--------------------|
-| Phase sum type | `lib/keeper/keeper_state_machine.mli:20-37` ✓ | 12 constructors: `Offline \| Running \| Failing \| Overflowed \| Compacting \| HandingOff \| Draining \| Paused \| Stopped \| Crashed \| Restarting \| Dead` |
-| Event sum type | `lib/keeper/keeper_state_machine.mli:139-` ✓ | 22+ constructors including `Compaction_started`, `Compaction_completed { before_tokens; after_tokens }`, `Compaction_failed { reason }`, `Context_overflow_detected`, `Auto_compact_triggered`, `Operator_compact_requested` |
-| `conditions` record | `lib/keeper/keeper_state_machine.mli:48-88` ✓ | 17 boolean fields including `compaction_active`, `context_overflow`, `compact_retry_exhausted`. Phase is **derived** from conditions (Kubernetes pattern). |
-| `Compaction_completed` handler | `lib/keeper/keeper_state_machine.ml:374-382` ✓ | Clears 3 fields: `compaction_active:=false; context_overflow:=false; compact_retry_exhausted:=false`. Comment explicitly explains retry-latch release intent. |
-| `Compaction_failed` handler | `lib/keeper/keeper_state_machine.ml:383-389` ✓ | Clears only `compaction_active:=false`. Leaves `context_overflow=true` intentionally (comment: overflow unresolved, retry-latch owned by `keeper_unified_turn`). |
-| `Turn_succeeded` handler | `lib/keeper/keeper_state_machine.ml:362-363` ✓ | Only `{ c with turn_healthy = true }`. Does **NOT** clear `manual_reconcile_required` — see §1.4 drift note. |
-| FSM entry | `lib/keeper/keeper_state_machine.ml` — `transition`, `entry_action` | 12-state FSM with RFC-0002 Det/NonDet layering (per .mli:1-12). |
+| Phase sum type | `lib/keeper_state/keeper_state_machine.mli:20-37` ✓ | 12 constructors: `Offline \| Running \| Failing \| Overflowed \| Compacting \| HandingOff \| Draining \| Paused \| Stopped \| Crashed \| Restarting \| Dead` |
+| Event sum type | `lib/keeper_state/keeper_state_machine.mli:139-` ✓ | 22+ constructors including `Compaction_started`, `Compaction_completed { before_tokens; after_tokens }`, `Compaction_failed { reason }`, `Context_overflow_detected`, `Auto_compact_triggered`, `Operator_compact_requested` |
+| `conditions` record | `lib/keeper_state/keeper_state_machine.mli:48-88` ✓ | 17 boolean fields including `compaction_active`, `context_overflow`, `compact_retry_exhausted`. Phase is **derived** from conditions (Kubernetes pattern). |
+| `Compaction_completed` handler | `lib/keeper_state/keeper_state_machine.ml:374-382` ✓ | Clears 3 fields: `compaction_active:=false; context_overflow:=false; compact_retry_exhausted:=false`. Comment explicitly explains retry-latch release intent. |
+| `Compaction_failed` handler | `lib/keeper_state/keeper_state_machine.ml:383-389` ✓ | Clears only `compaction_active:=false`. Leaves `context_overflow=true` intentionally (comment: overflow unresolved, retry-latch owned by `keeper_unified_turn`). |
+| `Turn_succeeded` handler | `lib/keeper_state/keeper_state_machine.ml:362-363` ✓ | Only `{ c with turn_healthy = true }`. Does **NOT** clear `manual_reconcile_required` — see §1.4 drift note. |
+| FSM entry | `lib/keeper_state/keeper_state_machine.ml` — `transition`, `entry_action` | 12-state FSM with RFC-0002 Det/NonDet layering (per .mli:1-12). |
 | Compaction policy | `lib/keeper/keeper_compact_policy.ml` — `compact_if_needed`, gate evaluation | 5 gates (see §1.3 row 4). |
 | Compaction execution | `lib/keeper/context_compact_oas.ml` — OAS strategy pipeline wrapper | PruneToolOutputs, MergeContiguous, DropLowImportance, stub_tool_results, repair_broken_tool_call_pairs, sync_oas_context. |
 | Checkpoint store | `lib/keeper/keeper_checkpoint_store.ml` — atomic write + auto-prune (keep_recent=3) | Filesystem-first (MASC principle). |
 | `compaction_policy` record | `lib/keeper/keeper_types.mli:12-19` ✓ | `{ profile; ratio_gate; message_gate; token_gate; cooldown_sec; max_checkpoint_messages }` |
 | `compaction_runtime` record | `lib/keeper/keeper_types.mli:58-65` ✓ | `{ count; last_ts; last_before_tokens; last_after_tokens; last_check_ts; last_decision }` — observability state already staged for Phase 2 retention. |
-| Post-turn lifecycle contract | `lib/keeper/keeper_state_machine.mli:110-138` ✓ | **`Compaction_started/_completed/_failed` MUST be dispatched only from `Keeper_post_turn.apply_post_turn_lifecycle`** (synchronous tail of keeper turn). Violating this reopens `KeepalivePhaseConsistency.tla` bug (`NoDrainTransition` / `GhostDispatch` actions catch it). Spec functions as a feature-flag-style guard. |
+| Post-turn lifecycle contract | `lib/keeper_state/keeper_state_machine.mli:110-138` ✓ | **`Compaction_started/_completed/_failed` MUST be dispatched only from `Keeper_post_turn.apply_post_turn_lifecycle`** (synchronous tail of keeper turn). Violating this reopens `KeepalivePhaseConsistency.tla` bug (`NoDrainTransition` / `GhostDispatch` actions catch it). Spec functions as a feature-flag-style guard. |
 
 ### 1.3 Traceability Matrix — TLA+ action ↔ OCaml
 
@@ -122,7 +122,7 @@ No `-buggy.cfg` variant present (per `ls specs/keeper-state-machine/`) — **thi
 
 5. **Compaction retry / exhaustion not modeled.** OCaml has `compact_retry_exhausted` latch (verified at `.mli:83-87` and handler behavior at `.ml:383-389`) routing overflow to `Paused` when set. TLA+ `KeeperContextLifecycle.tla` has no `CompactionFailed` action; `CompactionCompletes` always succeeds. **Recommendation**: extend spec with a `CompactionFailed(k)` action transitioning `compacting → overflow_retry` (retry) or `compacting → paused` (latch set). This would enable formal verification of the `Paused` sink property (keeper-observer invariant).
 
-6. **Post-turn lifecycle contract is informal**: `lib/keeper/keeper_state_machine.mli:110-138` states `Compaction_started`/`Handoff_started` must dispatch only from `Keeper_post_turn.apply_post_turn_lifecycle`. Violation reopens `KeepalivePhaseConsistency.tla` bug. **Positive finding**: spec-code coupling is explicit and reviewable. **Recommendation**: add a lint/CI check that greps for `Compaction_started` / `Handoff_started` outside allowed files and fails the build.
+6. **Post-turn lifecycle contract is informal**: `lib/keeper_state/keeper_state_machine.mli:110-138` states `Compaction_started`/`Handoff_started` must dispatch only from `Keeper_post_turn.apply_post_turn_lifecycle`. Violation reopens `KeepalivePhaseConsistency.tla` bug. **Positive finding**: spec-code coupling is explicit and reviewable. **Recommendation**: add a lint/CI check that greps for `Compaction_started` / `Handoff_started` outside allowed files and fails the build.
 
 ### 1.5 Reproduction Commands
 
@@ -144,7 +144,7 @@ java -XX:+UseParallelGC -Xmx2g -cp tla2tools.jar tlc2.TLC \
 
 ### 1.6 Phase Set Isomorphism (TLA+ vs OCaml — completed)
 
-OCaml phases verified at `lib/keeper/keeper_state_machine.mli:20-37`. TLA+ phases at `KeeperContextLifecycle.tla:51`.
+OCaml phases verified at `lib/keeper_state/keeper_state_machine.mli:20-37`. TLA+ phases at `KeeperContextLifecycle.tla:51`.
 
 | TLA+ phase (context spec) | OCaml phase | Mapping | Notes |
 |--------------------------|-------------|---------|-------|

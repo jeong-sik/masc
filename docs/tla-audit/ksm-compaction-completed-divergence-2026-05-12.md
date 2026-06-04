@@ -1,7 +1,7 @@
 # KSM `Compaction_completed` Divergence Audit (2026-05-12)
 
 **Spec**: `specs/keeper-state-machine/KeeperStateMachine.tla` (`CompactionCompleted` action)
-**OCaml**: `lib/keeper/keeper_state_machine.ml` (lines 559-588, `update_conditions` for `Compaction_completed`)
+**OCaml**: `lib/keeper_state/keeper_state_machine.ml` (lines 559-588, `update_conditions` for `Compaction_completed`)
 **Iteration**: 7 (Phase A-5 잔여, `/loop` plan)
 **Cross-ref**: Iter 4 #14707 (KNOWN_FAILURES skip), Iter 6 #14720 (first real semantic drift fix), GitHub #9988, #9935, #8710.
 
@@ -128,7 +128,7 @@ OCaml line 583-587의 warn 메시지가 `Printf.sprintf`-style — `before_token
 ## Verification
 
 - [x] TLA+ `CompactionCompleted` 본문 cross-check (specs/.../KeeperStateMachine.tla §CompactionCompleted)
-- [x] OCaml `Compaction_completed` 본문 cross-check (lib/keeper/keeper_state_machine.ml:559-588)
+- [x] OCaml `Compaction_completed` 본문 cross-check (lib/keeper_state/keeper_state_machine.ml:559-588)
 - [x] #8710 dependency 확인 (specs/Makefile:60 KeeperStateMachine in KNOWN_FAILURES)
 - [x] iter 4 #14707 ZombieIsForever / ZombieRequiresTerminalFailureLatched가 #8710 해결 대기 중임 확인 (PR body §"KNOWN limitation")
 

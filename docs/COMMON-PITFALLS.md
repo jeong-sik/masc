@@ -439,7 +439,7 @@ cd dashboard && pnpm run build  # TypeScript type check
 
 **PR 체크:**
 ```bash
-rg -nP 'inc_counter' lib/keeper/keeper_state_machine.ml lib/keeper/keeper_runtime_routing.ml
+rg -nP 'inc_counter' lib/keeper_state/keeper_state_machine.ml lib/keeper/keeper_runtime_routing.ml
 # 기대: 0 매치
 ```
 

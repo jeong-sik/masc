@@ -23,7 +23,7 @@ module Float = Stdlib.Float
 type tool_result = Tool_result.result
 
 (** Context record capturing all bindings from execute_tool_eio
-    that the inline dispatch block needs. *)
+    that the remaining inline dispatch block actually needs. *)
 type context = {
   config : Workspace.config;
   agent_name : string;
@@ -32,19 +32,6 @@ type context = {
   sw : Eio.Switch.t;
   clock : float Eio.Time.clock_ty Eio.Resource.t;
   arguments : Yojson.Safe.t;
-  mcp_session_id : string option;
-  (** Record the resolved agent name for this MCP session. *)
-  record_mcp_session_agent : string -> unit;
-  (** Wait for a message from a given agent *)
-  wait_for_message :
-    Session.registry ->
-    agent_name:string ->
-    timeout:float ->
-    Yojson.Safe.t option;
-  (** Governance types/helpers — passed in to avoid circular deps *)
-  governance_defaults : string -> Mcp_server_eio_governance.governance_config;
-  save_governance :
-    Workspace.config -> Mcp_server_eio_governance.governance_config -> unit;
   load_mcp_sessions : Workspace.config -> Mcp_server_eio_governance.mcp_session_record list;
   save_mcp_sessions :
     Workspace.config -> Mcp_server_eio_governance.mcp_session_record list -> unit;

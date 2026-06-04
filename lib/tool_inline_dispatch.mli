@@ -2,7 +2,7 @@
 (** Tool_inline_dispatch — thin dispatch router for inline tool handlers.
 
     Delegates to sub-modules for workspace, comm, and extra tool handling.
-    Keeps inline: mcp_session, approval, spawn, discover_tools.
+    Keeps inline: mcp_session, discover_tools, and MCP-state helpers.
 
     @since 0.1.0 *)
 
@@ -18,16 +18,6 @@ type context = Tool_inline_dispatch_types.context = {
   sw : Eio.Switch.t;
   clock : float Eio.Time.clock_ty Eio.Resource.t;
   arguments : Yojson.Safe.t;
-  mcp_session_id : string option;
-  record_mcp_session_agent : string -> unit;
-  wait_for_message :
-    Session.registry ->
-    agent_name:string ->
-    timeout:float ->
-    Yojson.Safe.t option;
-  governance_defaults : string -> Mcp_server_eio_governance.governance_config;
-  save_governance :
-    Workspace.config -> Mcp_server_eio_governance.governance_config -> unit;
   load_mcp_sessions :
     Workspace.config -> Mcp_server_eio_governance.mcp_session_record list;
   save_mcp_sessions :

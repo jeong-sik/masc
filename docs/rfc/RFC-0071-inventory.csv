@@ -410,7 +410,6 @@ lib/keeper/keeper_tool_execute_command_parse.ml,492,None,unclassified
 lib/keeper/keeper_tool_execute_command_parse.ml,520,None,unclassified
 lib/keeper/keeper_tool_execute_command_parse.ml,752,None,unclassified
 lib/keeper/keeper_tool_execute_command_parse.ml,769,None,unclassified
-lib/keeper/keeper_hash_algo.ml,18,None,unclassified
 lib/keeper/keeper_heartbeat_loop.ml,317,(),unclassified
 lib/keeper/keeper_heartbeat_loop.ml,388,(),unclassified
 lib/keeper/keeper_hooks_oas.ml,500,false,unclassified

@@ -75,7 +75,7 @@ description = "fetch and read a web page before citing it"
 
 [[hints]]
 name = "keeper_task_submit_for_verification"
-call = "`keeper_task_submit_for_verification` { notes: \"evidence\", pr_url: \"https://github.com/OWNER/REPO/pull/NUMBER\" }"
+call = "`keeper_task_submit_for_verification` { notes: \"evidence\", handoff_context: { summary: \"review artifact attached\", evidence_refs: [\"https://github.com/OWNER/REPO/pull/NUMBER\"] } }"
 description = "submit PR/code work for verification"
 
 [[hints]]

@@ -56,7 +56,7 @@ type tool_surface =
   { turn_lane : Keeper_agent_tool_surface.turn_lane
   ; tool_surface_class : Keeper_agent_tool_surface.tool_surface_class
   ; tool_requirement : Keeper_agent_tool_surface.tool_requirement
-  ; visible_tool_count : int
+  ; allowed_tool_count : int
   ; tool_gate_enabled : bool
   ; tool_surface_fallback_used : bool
   ; materialized_tools : string list

@@ -120,8 +120,8 @@ let assemble_hooks
   <- { turn_lane = initial_tool_surface.lane
      ; tool_surface_class = initial_tool_surface.tool_surface_class
      ; tool_requirement = initial_tool_surface.tool_requirement
-     ; visible_tool_count =
-         List.length initial_tool_surface.turn_visible_tool_names
+     ; allowed_tool_count =
+         List.length initial_tool_surface.turn_allowed_tool_names
      ; tool_gate_enabled = initial_tool_surface.tool_gate_requested
      ; tool_surface_fallback_used = initial_tool_surface.tool_surface_fallback_used
      ; config_root
@@ -134,7 +134,7 @@ let assemble_hooks
   let initial_tool_surface_result =
     if
       initial_tool_surface.tool_gate_requested
-      && initial_tool_surface.turn_visible_tool_names = []
+      && initial_tool_surface.turn_allowed_tool_names = []
     then (
       acc.receipt_completion_contract_result <-
         Keeper_execution_receipt.Contract_no_capable_provider;
@@ -168,11 +168,11 @@ let assemble_hooks
   | Ok initial_tool_surface ->
     Keeper_run_tools_hook_accumulator.record_requested_tool_names
       acc
-      initial_tool_surface.turn_visible_tool_names;
+      initial_tool_surface.turn_allowed_tool_names;
     let meta_ref = ref acc.meta in
     let public_alias_pre_tool_use_guard ~tool_name ~input:_ =
       Keeper_tool_resolution.public_alias_guidance_for_internal_call
-        ~visible_tool_names:acc.requested_tool_names
+        ~allowed_tool_names:acc.requested_tool_names
         tool_name
     in
     let base_hooks =
@@ -373,21 +373,21 @@ let assemble_hooks
                     computed_surface.discovered_count
                     computed_surface.llm_selected_count
                     (Keeper_config.keeper_llm_rerank_enabled ())
-                    (List.length computed_surface.turn_visible_tool_names)
+                    (List.length computed_surface.turn_allowed_tool_names)
                     (String.length computed_surface.query_text)
                     (Keeper_agent_tool_surface.tool_selection_mode_to_string
                        computed_surface.selection_mode);
-                let turn_visible_tool_names =
-                  computed_surface.turn_visible_tool_names
+                let turn_allowed_tool_names =
+                  computed_surface.turn_allowed_tool_names
                 in
-                let tool_visible name = List.mem name turn_visible_tool_names in
+                let tool_allowed name = List.mem name turn_allowed_tool_names in
                 let last_turn_decision_hint =
-                  if tool_visible "keeper_board_post"
+                  if tool_allowed "keeper_board_post"
                   then
                     "(2) call keeper_board_post to hand off the current task \
                      and ask another keeper or operator for judgment when the \
                      work needs a decision you cannot make alone"
-                  else if tool_visible "keeper_broadcast"
+                  else if tool_allowed "keeper_broadcast"
                   then
                     "(2) call keeper_broadcast to hand off the current task \
                      when the work needs a decision you cannot make alone"
@@ -397,8 +397,8 @@ let assemble_hooks
                 in
                 let last_turn_task_close_hint =
                   if
-                    tool_visible "keeper_task_done"
-                    || tool_visible "keeper_task_submit_for_verification"
+                    tool_allowed "keeper_task_done"
+                    || tool_allowed "keeper_task_submit_for_verification"
                   then
                     "; (3) if you claimed a task, close it NOW before session \
                      ends with keeper_task_done or \
@@ -406,13 +406,13 @@ let assemble_hooks
                   else ""
                 in
                 let budget_blocker_hint =
-                  if tool_visible "keeper_board_post"
+                  if tool_allowed "keeper_board_post"
                   then
                     "If you are blocked on a decision or external input, post \
                      a question to the board via keeper_board_post rather than \
                      burning turns retrying — that is the intended \
                      judgment-escalation path."
-                  else if tool_visible "keeper_broadcast"
+                  else if tool_allowed "keeper_broadcast"
                   then
                     "If you are blocked on a decision or external input, \
                      broadcast the blocker via keeper_broadcast rather than \
@@ -478,7 +478,7 @@ let assemble_hooks
                     computed_surface.per_call_max_turns
                     computed_surface.is_last_turn;
                 let tool_filter =
-                  Agent_sdk.Guardrails.AllowList turn_visible_tool_names
+                  Agent_sdk.Guardrails.AllowList turn_allowed_tool_names
                 in
                 let clear_inherited_strict_tool_choice = function
                   | Some (Agent_sdk.Types.Any | Agent_sdk.Types.Tool _) -> None
@@ -492,12 +492,12 @@ let assemble_hooks
                 let lane = computed_surface.lane in
                 Keeper_run_tools_hook_accumulator.record_requested_tool_names
                   acc
-                  turn_visible_tool_names;
+                  turn_allowed_tool_names;
                 acc.tool_surface
                 <- { turn_lane = lane
                    ; tool_surface_class = computed_surface.tool_surface_class
                    ; tool_requirement = computed_surface.tool_requirement
-                   ; visible_tool_count = List.length turn_visible_tool_names
+                   ; allowed_tool_count = List.length turn_allowed_tool_names
                    ; tool_gate_enabled = computed_surface.tool_gate_requested
                    ; tool_surface_fallback_used =
                        computed_surface.tool_surface_fallback_used
@@ -544,7 +544,7 @@ let assemble_hooks
                   ~tool_surface_class:
                     (Keeper_agent_tool_surface.tool_surface_class_to_string
                        computed_surface.tool_surface_class)
-                  ~visible_tool_count:(List.length turn_visible_tool_names)
+                  ~allowed_tool_count:(List.length turn_allowed_tool_names)
                   ~runtime_profile:runtime_id_string
                   ();
                 (let now = Time_compat.now () in
@@ -596,9 +596,9 @@ let assemble_hooks
                        , `Int computed_surface.deterministic_prefilter_count )
                      ; "discovered_count", `Int computed_surface.discovered_count
                      ; "llm_selected_count", `Int computed_surface.llm_selected_count
-                     ; "final_visible", `Int (List.length turn_visible_tool_names)
-                     ; ( "oas_allowlist_tool_names"
-                       , Json_util.json_string_list turn_visible_tool_names )
+                     ; "final_allowed", `Int (List.length turn_allowed_tool_names)
+                     ; ( "allowed_tool_names"
+                       , Json_util.json_string_list turn_allowed_tool_names )
                      ; ( "turn_lane"
                        , Keeper_agent_tool_surface.turn_lane_to_yojson lane )
                      ; ( "tool_surface_class"

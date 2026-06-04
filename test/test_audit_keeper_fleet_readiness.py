@@ -58,7 +58,6 @@ def audit_args(base_path: Path, expected_keepers: int):
         require_product_evidence=False,
         require_design_evidence=False,
         require_pr_created_evidence=False,
-        require_pr_url_evidence=False,
         require_provider_turn_evidence=False,
         require_checkpoint_evidence=False,
         require_history_evidence=False,
@@ -291,7 +290,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                 "tool": "tool_execute",
                 "ok": True,
                 "output": {
-                    "pr_url": "https://github.com/acme/repo/pull/123",
+                    "url": "https://github.com/acme/repo/pull/123",
                     "number": 123,
                 },
             }
@@ -312,7 +311,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                 "_source_path": "events.jsonl",
                 "tool": "tool_execute",
                 "ok": False,
-                "output": {"pr_url": "https://github.com/acme/repo/pull/123"},
+                "output": {"url": "https://github.com/acme/repo/pull/123"},
             }
         )
 
@@ -332,7 +331,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         self.assertEqual(refs, set())
         self.assertEqual(sources, set())
 
-    def test_pr_creation_evidence_reads_structured_pr_url(self):
+    def test_pr_creation_evidence_reads_structured_ref_url(self):
         refs, sources = audit.pr_evidence_from_row(
             {
                 "_source_path": "events.jsonl",
@@ -345,7 +344,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         self.assertEqual(refs, {"https://github.com/acme/repo/pull/124"})
         self.assertEqual(sources, {"events.jsonl"})
 
-    def test_pr_creation_evidence_ignores_freeform_pr_url_mentions(self):
+    def test_pr_creation_evidence_ignores_freeform_review_ref_mentions(self):
         refs, sources = audit.pr_evidence_from_row(
             {
                 "_source_path": "events.jsonl",
@@ -369,7 +368,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                         "tool": "tool_execute",
                         "ok": True,
                         "output": {
-                            "pr_url": "https://github.com/acme/repo/pull/125",
+                            "url": "https://github.com/acme/repo/pull/125",
                             "number": 125,
                         },
                     }
@@ -392,13 +391,13 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
             {str(keepers_dir / "alpha.decisions.jsonl")},
         )
 
-    def test_pr_creation_evidence_reads_route_evidence_pr_url(self):
+    def test_pr_creation_evidence_reads_route_evidence_ref_url(self):
         row = {
             "_source_path": "tool_calls.jsonl",
             "tool": "tool_execute",
             "success": True,
             "route_evidence": {
-                "pr_url": "https://github.com/acme/repo/pull/42\n",
+                "url": "https://github.com/acme/repo/pull/42\n",
                 "via": "docker",
             },
         }
@@ -766,7 +765,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                     "output": json.dumps(
                         {
                             "ok": True,
-                            "pr_url": "https://github.com/acme/repo/pull/2",
+                            "url": "https://github.com/acme/repo/pull/2",
                             "via": "docker",
                         }
                     ),

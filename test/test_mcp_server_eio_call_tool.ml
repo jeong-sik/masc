@@ -292,8 +292,8 @@ let test_runtime_mcp_keeper_log_context_uses_keeper_trace_and_current_turn () =
       check bool "network mode present" true (Option.is_some ctx.network_mode);
       check bool "tool surface class present" true
         (Option.is_some ctx.tool_surface_class);
-      check bool "visible tool count present" true
-        (Option.is_some ctx.visible_tool_count))
+      check bool "allowed tool count present" true
+        (Option.is_some ctx.allowed_tool_count))
 
 let test_runtime_mcp_keeper_log_context_loads_current_task_contract () =
   Eio_main.run @@ fun env ->
@@ -334,7 +334,7 @@ let test_runtime_mcp_keeper_log_context_loads_current_task_contract () =
           ~arguments:(`Assoc [])
       in
       check bool "runtime mcp keeps task contract out of log context" true
-        (Option.is_some ctx.visible_tool_count))
+        (Option.is_some ctx.allowed_tool_count))
 
 let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
   Eio_main.run @@ fun env ->
@@ -420,8 +420,8 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
         (runtime_contract |> U.member "allowed_paths" |> U.to_list
          |> List.length
          > 0);
-      check bool "runtime contract visible tool count present" true
-        (match runtime_contract |> U.member "visible_tool_count" with
+      check bool "runtime contract allowed tool count present" true
+        (match runtime_contract |> U.member "allowed_tool_count" with
          | `Int n -> n > 0
          | _ -> false);
       let omits_field name =

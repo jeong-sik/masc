@@ -20,7 +20,7 @@ type turn_context =
   ; network_mode : string option
   ; approval_mode : string option
   ; tool_surface_class : string option
-  ; visible_tool_count : int option
+  ; allowed_tool_count : int option
   ; runtime_profile : string option
   }
 
@@ -44,7 +44,7 @@ let empty_turn_context =
   ; network_mode = None
   ; approval_mode = None
   ; tool_surface_class = None
-  ; visible_tool_count = None
+  ; allowed_tool_count = None
   ; runtime_profile = None
   }
 ;;
@@ -72,7 +72,7 @@ let set_turn_context
       ?network_mode
       ?approval_mode
       ?tool_surface_class
-      ?visible_tool_count
+      ?allowed_tool_count
       ?runtime_profile
       ()
   =
@@ -98,7 +98,7 @@ let set_turn_context
     ; network_mode
     ; approval_mode
     ; tool_surface_class
-    ; visible_tool_count
+    ; allowed_tool_count
     ; runtime_profile
     }
 ;;
@@ -144,7 +144,7 @@ let runtime_observability_contract_json_for_call ~keeper_name () =
     ?network_mode:ctx.network_mode
     ?approval_mode:ctx.approval_mode
     ?tool_surface_class:ctx.tool_surface_class
-    ?visible_tool_count:ctx.visible_tool_count
+    ?allowed_tool_count:ctx.allowed_tool_count
     ?runtime_profile:ctx.runtime_profile
     ()
 ;;

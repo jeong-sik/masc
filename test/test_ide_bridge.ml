@@ -1,40 +1,40 @@
-(** Tests for IDE Bridge — event collection and PR URL parsing. *)
+(** Tests for IDE Bridge — event collection and pull request URL parsing. *)
 
 open Alcotest
 
-let test_parse_pr_url_simple () =
-  match Ide_bridge.parse_pr_url_from_output "https://github.com/jeong-sik/masc/pull/19872" with
+let test_parse_pull_request_url_simple () =
+  match Ide_bridge.parse_pull_request_link_from_output "https://github.com/jeong-sik/masc/pull/19872" with
   | Some (number, url) ->
     check int "pr number" 19872 number;
-    check string "pr url" "https://github.com/jeong-sik/masc/pull/19872" url
+    check string "pull request url" "https://github.com/jeong-sik/masc/pull/19872" url
   | None -> fail "expected Some"
 ;;
 
-let test_parse_pr_url_with_files () =
-  match Ide_bridge.parse_pr_url_from_output "https://github.com/jeong-sik/masc/pull/19872/files" with
+let test_parse_pull_request_url_with_files () =
+  match Ide_bridge.parse_pull_request_link_from_output "https://github.com/jeong-sik/masc/pull/19872/files" with
   | Some (number, url) ->
     check int "pr number" 19872 number;
-    check string "pr url" "https://github.com/jeong-sik/masc/pull/19872" url
+    check string "pull request url" "https://github.com/jeong-sik/masc/pull/19872" url
   | None -> fail "expected Some"
 ;;
 
-let test_parse_pr_url_in_output () =
+let test_parse_pull_request_url_in_output () =
   let output = "remote: Create a pull request for 'feat/branch' on GitHub by visiting:\nremote:      https://github.com/jeong-sik/masc/pull/123\n" in
-  match Ide_bridge.parse_pr_url_from_output output with
+  match Ide_bridge.parse_pull_request_link_from_output output with
   | Some (number, _) -> check int "pr number" 123 number
   | None -> fail "expected Some"
 ;;
 
-let test_parse_pr_url_no_match () =
-  check (option (pair int string)) "no pr url"
+let test_parse_pull_request_url_no_match () =
+  check (option (pair int string)) "no pull request url"
     None
-    (Ide_bridge.parse_pr_url_from_output "nothing here")
+    (Ide_bridge.parse_pull_request_link_from_output "nothing here")
 ;;
 
-let test_parse_pr_url_no_number () =
+let test_parse_pull_request_url_no_number () =
   check (option (pair int string)) "no number"
     None
-    (Ide_bridge.parse_pr_url_from_output "https://github.com/owner/repo/pull/abc")
+    (Ide_bridge.parse_pull_request_link_from_output "https://github.com/owner/repo/pull/abc")
 ;;
 
 let with_temp_dir f =
@@ -253,7 +253,7 @@ let test_pr_event_ingest () =
     Ide_bridge.ingest_pr_event
       ~base_path:base_dir
       ~pr_number:19872
-      ~pr_url:"https://github.com/jeong-sik/masc/pull/19872"
+      ~pull_request_url:"https://github.com/jeong-sik/masc/pull/19872"
       ~pr_title:"feat(ide): auto-collect tool/turn events"
       ~pr_state:"open"
       ~repo:"jeong-sik/masc"
@@ -270,9 +270,9 @@ let test_pr_event_ingest () =
     close_in ic;
     let json = Yojson.Safe.from_string line in
     let pr_number = Yojson.Safe.Util.member "pr_number" json |> Yojson.Safe.Util.to_int in
-    let pr_url = Yojson.Safe.Util.member "pr_url" json |> Yojson.Safe.Util.to_string in
+    let pull_request_url = Yojson.Safe.Util.member "pull_request_url" json |> Yojson.Safe.Util.to_string in
     check int "pr_number" 19872 pr_number;
-    check string "pr_url" "https://github.com/jeong-sik/masc/pull/19872" pr_url)
+    check string "pull_request_url" "https://github.com/jeong-sik/masc/pull/19872" pull_request_url)
 ;;
 
 let test_pr_event_from_hook_detects_url () =
@@ -397,12 +397,12 @@ let test_concurrent_ingest () =
 let () =
   run
     "ide_bridge"
-    [ ( "parse_pr_url"
-      , [ test_case "simple url" `Quick test_parse_pr_url_simple
-        ; test_case "url with /files" `Quick test_parse_pr_url_with_files
-        ; test_case "url in output" `Quick test_parse_pr_url_in_output
-        ; test_case "no match" `Quick test_parse_pr_url_no_match
-        ; test_case "no number" `Quick test_parse_pr_url_no_number
+    [ ( "parse_pull_request_url"
+      , [ test_case "simple url" `Quick test_parse_pull_request_url_simple
+        ; test_case "url with /files" `Quick test_parse_pull_request_url_with_files
+        ; test_case "url in output" `Quick test_parse_pull_request_url_in_output
+        ; test_case "no match" `Quick test_parse_pull_request_url_no_match
+        ; test_case "no number" `Quick test_parse_pull_request_url_no_number
         ] )
     ; ( "ingest"
       , [ test_case "tool event" `Quick test_ingest_tool_event

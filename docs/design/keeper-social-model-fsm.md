@@ -71,7 +71,7 @@ Every social model must be able to reason over a normalized observation bundle t
 - board and workspace activity
 - task availability / assigned task state
 - blocker signals
-- recent visible tool evidence
+- recent allowed tool evidence
 - quiet-workspace / idle context
 - worktree or file-change hints when relevant
 

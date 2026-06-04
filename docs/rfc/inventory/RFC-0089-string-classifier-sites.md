@@ -17,7 +17,7 @@ PR에서 줄여나간다.
 
 | count | file | classification |
 |---|---|---|
-| 16 | `lib/worker_dev_tools.ml` | **scope-out (RFC-0091 PR-2 delete target)** |
+| 16 | `lib/retired_worker_shell_facade` | **scope-out (RFC-0091 PR-2 delete target)** |
 | 15 | `lib/exec/output_parse.ml` | scope-out (LLM/exec stdout parser) |
 | 9 | `lib/server/server_routes_http_routes_workspace.ml` | scope-out (git porcelain + diff) |
 | 9 | `lib/server/server_dashboard_http_link_preview.ml` | scope-out (HTML/URL parsing) |
@@ -50,7 +50,7 @@ PR에서 줄여나간다.
 | Git porcelain output | server_routes_http_routes_workspace | 9 | producer is `git status --porcelain`; format is git stable wire |
 | TOML key matching | runtime_config, runtime_declarative_adapter | 8 | user-authored config; key string is the protocol |
 | HTTP/2 + MCP protocol marker | server_h2_gateway, mcp_server_eio_protocol, server_dashboard_http_runtime_info | 9 | wire protocol literals |
-| Worker dev tools shell parser | worker_dev_tools, agent_tool_execute_runtime | 19 | shell command string parser; deleted by **RFC-0091 PR-2** |
+| Worker dev tools shell parser | retired_worker_shell_facade, agent_tool_execute_runtime | 19 | shell command string parser; deleted by **RFC-0091 PR-2** |
 | Benchmark / file path classifier | tool_local_runtime_bench, ide/ide_region_tracker | 8 | output parser + path filter |
 
 **Subtotal scope-out: ~133 sites across the top 23 files.**

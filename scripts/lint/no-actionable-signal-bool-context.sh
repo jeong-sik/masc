@@ -8,7 +8,6 @@ patterns=(
   "actionable_signal_context : bool"
   "classify_actionable_signal_with_allowed_tools"
   "classify_actionable_signal_for_tools"
-  "requires_tool_support_for_allowed_tools"
   "actionable_signal_requires_tool_gate"
 )
 

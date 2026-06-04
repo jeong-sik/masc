@@ -68,7 +68,7 @@ val canonical_tool_name : string -> string
     [canonical_tool_name] to avoid double-counting. *)
 val canonical_tool_name_observed : string -> string
 
-(** Return a schema-visible correction when a tool call uses a keeper-internal
+(** Return a schema-allowed correction when a tool call uses a keeper-internal
     implementation name whose public alias is the supported LLM surface. *)
 val public_alias_guidance_for_internal_call
-  :  visible_tool_names:string list -> string -> string option
+  :  allowed_tool_names:string list -> string -> string option

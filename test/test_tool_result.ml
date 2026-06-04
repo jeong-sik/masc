@@ -318,14 +318,14 @@ let test_keeper_submit_schema_uses_notes_and_optional_evidence_refs () =
   let has_property name = List.exists (fun (key, _) -> String.equal key name) properties in
   let required = string_list_member "required" schema in
   Alcotest.(check bool) "evidence_refs property present" true (has_property "evidence_refs");
-  Alcotest.(check bool) "pr_url is not a keeper submit field" false (has_property "pr_url");
+  Alcotest.(check bool) "result is not a keeper submit field" false (has_property "result");
   Alcotest.(check (list string))
     "only task_id and notes are required"
     [ "task_id"; "notes" ]
     required
 ;;
 
-let test_keeper_done_schema_uses_result_not_pr_url () =
+let test_keeper_done_schema_uses_result_only () =
   let schema = keeper_taskboard_schema "keeper_task_done" in
   let properties =
     match object_member "properties" schema with
@@ -335,7 +335,8 @@ let test_keeper_done_schema_uses_result_not_pr_url () =
   let has_property name = List.exists (fun (key, _) -> String.equal key name) properties in
   let required = string_list_member "required" schema in
   Alcotest.(check bool) "result property present" true (has_property "result");
-  Alcotest.(check bool) "pr_url is not a keeper done field" false (has_property "pr_url");
+  Alcotest.(check bool) "evidence_refs is not a keeper done field" false
+    (has_property "evidence_refs");
   Alcotest.(check (list string))
     "only task_id and result are required"
     [ "task_id"; "result" ]
@@ -427,9 +428,9 @@ let () =
             `Quick
             test_keeper_submit_schema_uses_notes_and_optional_evidence_refs
         ; Alcotest.test_case
-            "done schema uses result without pr_url"
+            "done schema uses result only"
             `Quick
-            test_keeper_done_schema_uses_result_not_pr_url
+            test_keeper_done_schema_uses_result_only
         ; Alcotest.test_case
             "workflow marker accepts notes"
             `Quick

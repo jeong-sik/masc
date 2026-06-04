@@ -16,8 +16,8 @@ val all_tool_schemas : Masc_domain.tool_schema list
 val all_tool_names : unit -> string list
 (** List of all tool names. *)
 
-val is_tool_visible : string -> bool
-(** Check if a tool is visible. *)
+val is_tool_allowed : string -> bool
+(** Check if a tool is allowed on the public catalog surface. *)
 
 val is_raw_tool_name : string -> bool
 (** [is_raw_tool_name name] is [true] when [name] appears in
@@ -31,4 +31,3 @@ val visible_tool_schemas :
   ?include_hidden:bool ->
   unit -> Masc_domain.tool_schema list
 (** Get visible tool schemas. *)
-

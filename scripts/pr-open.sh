@@ -154,17 +154,17 @@ ensure_pr_is_draft() {
 arm_agent_draft_guard_status() {
   local pr_number="$1"
   local pr_meta
-  local pr_url
+  local pr_link
   local head_sha
 
   pr_meta="$(
     gh pr view "$pr_number" --repo "$repo" --json url,headRefOid \
       --jq '.url + " " + .headRefOid'
   )"
-  pr_url="${pr_meta% *}"
+  pr_link="${pr_meta% *}"
   head_sha="${pr_meta##* }"
 
-  if [[ -z "$head_sha" || "$head_sha" == "$pr_url" ]]; then
+  if [[ -z "$head_sha" || "$head_sha" == "$pr_link" ]]; then
     echo "could not resolve PR #$pr_number head SHA for immediate draft guard status" >&2
     exit 1
   fi
@@ -174,7 +174,7 @@ arm_agent_draft_guard_status() {
     -f state=failure \
     -f context="Draft Auto-Merge Guard" \
     -f description="Agent PR requires Approve Agent PR before ready/merge" \
-    -f target_url="$pr_url" \
+    -f target_url="$pr_link" \
     >/dev/null
 }
 
@@ -258,8 +258,8 @@ else
     create_args+=(--body-file "$body_file")
   fi
 
-  pr_url="$(gh "${create_args[@]}")"
-  pr_number="$(gh pr view "$pr_url" --repo "$repo" --json number --jq .number)"
+  pr_link="$(gh "${create_args[@]}")"
+  pr_number="$(gh pr view "$pr_link" --repo "$repo" --json number --jq .number)"
 fi
 
 ensure_pr_is_draft "$pr_number" "create/reuse"
@@ -314,8 +314,8 @@ ensure_pr_is_draft "$pr_number" "guard status arming"
 sync_commit_lineage "$pr_number"
 ensure_pr_is_draft "$pr_number" "commit lineage sync"
 
-pr_url="$(gh pr view "$pr_number" --repo "$repo" --json url --jq .url)"
-echo "PR: $pr_url"
+pr_link="$(gh pr view "$pr_number" --repo "$repo" --json url --jq .url)"
+echo "PR: $pr_link"
 
 if [[ $watch_checks -eq 1 ]]; then
   gh pr checks "$pr_number" --repo "$repo" --watch || true

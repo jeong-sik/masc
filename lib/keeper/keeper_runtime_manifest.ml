@@ -311,7 +311,7 @@ let tool_lineage_stage ~stage ~tool_names ~count () : Yojson.Safe.t =
       ("count", `Int count);
     ]
 
-let tool_lineage ?searched_tool_names ?visible_tool_names
+let tool_lineage ?searched_tool_names ?allowed_tool_names
     ?materialized_tool_names ?emitted_tool_names ?executed_tool_names
     ?verified_tool_names () : Yojson.Safe.t =
   let stage name tools =
@@ -324,7 +324,7 @@ let tool_lineage ?searched_tool_names ?visible_tool_names
        (fun (key, value) -> Option.map (fun v -> key, v) value)
        [
          "searched", stage "searched" searched_tool_names;
-         "visible", stage "visible" visible_tool_names;
+         "allowed", stage "allowed" allowed_tool_names;
          "materialized", stage "materialized" materialized_tool_names;
          "emitted", stage "emitted" emitted_tool_names;
          "executed", stage "executed" executed_tool_names;

@@ -153,10 +153,8 @@ let sdk_error_to_runtime_outcome err =
        Some
          (Runtime_attempt_fsm.Call_err
             (Llm_provider.Http_client.AcceptRejected { reason }))
-     | Agent_sdk.Error.Config
-         (Agent_sdk.Error.InvalidConfig { field = "runtime_mcp_auth"; detail })
-     | Agent_sdk.Error.Config
-         (Agent_sdk.Error.InvalidConfig { field = "tool_support"; detail }) ->
+    | Agent_sdk.Error.Config
+        (Agent_sdk.Error.InvalidConfig { field = "runtime_mcp_auth"; detail }) ->
        Some
          (Runtime_attempt_fsm.Call_err
             (Llm_provider.Http_client.AcceptRejected { reason = detail }))

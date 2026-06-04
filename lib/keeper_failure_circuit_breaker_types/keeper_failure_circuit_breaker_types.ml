@@ -11,7 +11,7 @@ type error_class =
   | Other
 
 module Path_check_error = Keeper_path_check_error
-module Path_rejection = Keeper_alerting_path
+module Path_rejection = Keeper_path_rejection
 
 let classify_path_check_prefix (error_msg : string) : error_class option =
   match Path_check_error.parse_prefix error_msg with

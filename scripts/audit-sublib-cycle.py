@@ -78,6 +78,8 @@ DEFAULT_LEAVES: tuple[str, ...] = (
     "masc.keeper_turn_slot_types",
     "masc.keeper_binding_health_config",
     "masc.keeper_transition_audit_types",
+    "masc.keeper_path_rejection",
+    "masc.keeper_failure_circuit_breaker_types",
     "masc.keeper_tool_name",
     "masc.keeper_id",
     "masc.keeper_terminal_reason",

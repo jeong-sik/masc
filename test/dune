@@ -1464,6 +1464,10 @@
 
 (include stanzas/test_keeper_transition_audit_types.inc)
 
+(include stanzas/test_keeper_path_rejection.inc)
+
+(include stanzas/test_keeper_failure_circuit_breaker_types.inc)
+
 (include stanzas/test_keeper_turn_slot_release_cancel_safe.inc)
 
 

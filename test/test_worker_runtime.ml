@@ -104,13 +104,13 @@ let test_worker_runtime_config_prefers_env_override () =
   Config_dir_resolver.reset ();
   Lib.Worker_runtime_config.reset ();
   check string "file config enables docker backend" "docker"
-    (Lib.Worker_execution_backend.to_string
+    (Worker_execution_backend.to_string
        (Lib.Worker_runtime_config.backend ()));
   with_env "MASC_WORKER_RUNTIME_BACKEND" (Some "local_playground") @@ fun () ->
   Config_dir_resolver.reset ();
   Lib.Worker_runtime_config.reset ();
   check string "env override forces local backend" "local_playground"
-    (Lib.Worker_execution_backend.to_string
+    (Worker_execution_backend.to_string
        (Lib.Worker_runtime_config.backend ()))
 
 let test_worker_runtime_helper_protocol_roundtrip () =
@@ -156,7 +156,7 @@ let test_worker_runtime_invalid_config_fails_closed () =
   Config_dir_resolver.reset ();
   Lib.Worker_runtime_config.reset ();
   check string "malformed config resolves to fail-closed docker backend" "docker"
-    (Lib.Worker_execution_backend.to_string
+    (Worker_execution_backend.to_string
        (Lib.Worker_runtime_config.backend ()));
   check string "malformed config clears docker image" ""
     (Lib.Worker_runtime_config.docker_image ())
@@ -176,7 +176,7 @@ let test_run_worker_oas_rejects_invalid_explicit_model_label () =
           worker_name = "worker-local";
           model_label = "not-a-model-label";
           working_dir = None;
-          runtime_backend = Masc.Worker_execution_backend.Local_playground;
+          runtime_backend = Worker_execution_backend.Local_playground;
           thinking_enabled = Some false;
           worker_run_id = Some "run-local";
           role = Some "worker";

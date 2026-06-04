@@ -80,6 +80,7 @@ DEFAULT_LEAVES: tuple[str, ...] = (
     "masc.voice_runtime_overlay",
     "masc.discovery_cache",
     "masc.local_runtime_pool",
+    "masc.worker_execution_backend",
     # Keeper-owned pure/type leaves extracted from lib/keeper/.
     "masc.keeper_accountability_claim_types",
     "masc.keeper_runtime_manifest_types",

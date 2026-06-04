@@ -6,7 +6,6 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_agent_tool_surface
 open Keeper_agent_result
-open Keeper_agent_error
 open Keeper_agent_prompt_metrics
 
 type hook_accumulator = Keeper_run_tools_hook_accumulator.hook_accumulator
@@ -16,10 +15,8 @@ type agent_setup =
   ; cleanup : unit -> unit
   ; hooks : Agent_sdk.Hooks.hooks
   ; reducer : Agent_sdk.Context_reducer.t
-  ; memory : Agent_sdk.Memory.t
   ; acc : hook_accumulator
   ; initial_tool_surface : computed_tool_surface
-  ; initial_tool_surface_blocker : Agent_sdk.Error.sdk_error option ref
   ; all_tool_names : string list
   ; tool_usage_before : (string * int) list
   ; receipt_turn_count_ref : int option ref
@@ -122,7 +119,6 @@ let assemble_hooks
      ; tool_requirement = initial_tool_surface.tool_requirement
      ; allowed_tool_count =
          List.length initial_tool_surface.turn_allowed_tool_names
-     ; tool_gate_enabled = initial_tool_surface.tool_gate_requested
      ; tool_surface_fallback_used = initial_tool_surface.tool_surface_fallback_used
      ; config_root
      ; runtime_config_path
@@ -130,43 +126,8 @@ let assemble_hooks
      ; approval_mode_effective
      ; approval_mode_derived
      };
-  let initial_tool_surface_blocker = ref None in
-  let initial_tool_surface_result =
-    if
-      initial_tool_surface.tool_gate_requested
-      && initial_tool_surface.turn_allowed_tool_names = []
-    then (
-      acc.receipt_completion_contract_result <-
-        Keeper_execution_receipt.Contract_no_capable_provider;
-      Prometheus.inc_counter
-        Prometheus.metric_empty_tool_universe_observed
-        ~labels:
-          [ "keeper_name", meta.name
-          ; ( "turn_lane"
-            , Keeper_agent_tool_surface.turn_lane_to_string
-                initial_tool_surface.lane )
-          ; ( "fallback_used"
-            , string_of_bool initial_tool_surface.tool_surface_fallback_used )
-          ]
-        ();
-      initial_tool_surface_blocker
-      := Some
-           (sdk_error_of_keeper_internal_error
-              (Keeper_tool_surface_empty
-                 { keeper_name = meta.name
-                 ; turn_lane =
-                     Keeper_agent_tool_surface.turn_lane_to_string
-                       initial_tool_surface.lane
-                 ; affordances = turn_affordances
-                 ; fallback_used = initial_tool_surface.tool_surface_fallback_used
-                 }));
-      Ok initial_tool_surface)
-    else Ok initial_tool_surface
-  in
-  match initial_tool_surface_result with
-  | Error err -> Error err
-  | Ok initial_tool_surface ->
-    Keeper_run_tools_hook_accumulator.record_requested_tool_names
+  let initial_tool_surface = initial_tool_surface in
+  Keeper_run_tools_hook_accumulator.record_requested_tool_names
       acc
       initial_tool_surface.turn_allowed_tool_names;
     let meta_ref = ref acc.meta in
@@ -494,7 +455,6 @@ let assemble_hooks
                    ; tool_surface_class = computed_surface.tool_surface_class
                    ; tool_requirement = computed_surface.tool_requirement
                    ; allowed_tool_count = List.length turn_allowed_tool_names
-                   ; tool_gate_enabled = computed_surface.tool_gate_requested
                    ; tool_surface_fallback_used =
                        computed_surface.tool_surface_fallback_used
                    ; config_root
@@ -602,7 +562,6 @@ let assemble_hooks
                            computed_surface.tool_surface_class )
                      ; ( "tool_requirement"
                        , tool_requirement_to_yojson computed_surface.tool_requirement )
-                     ; "tool_gate_enabled", `Bool computed_surface.tool_gate_requested
                      ; ( "tool_surface_fallback_used"
                        , `Bool computed_surface.tool_surface_fallback_used )
                      ; "hook_ms", `Float hook_elapsed_ms
@@ -634,32 +593,8 @@ let assemble_hooks
       }
     in
     let hooks = Agent_sdk.Hooks.compose ~outer:before_turn_hook ~inner:base_hooks in
-    let base_dir = Workspace.masc_root_dir config in
-    let memory_session_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
-    let memory_bundle =
-      Memory_oas_bridge.create_memory_with_backend
-        ~agent_name
-        ~base_dir
-        ~session_id:memory_session_id
-        ()
-    in
-    let memory = memory_bundle.created_memory in
-    let memory_backend = memory_bundle.created_memory_long_term_backend in
-    let hooks =
-      let mem_hooks =
-        Memory_hooks.make
-          ~agent_name
-          ~config
-          ~memory
-          ~world_backend:memory_backend
-          ~episode_limit:30
-          ~procedure_limit:10
-          ?runtime_manifest_context
-          ?runtime_manifest_append
-          ()
-      in
-      Memory_hooks.compose_with_inner ~memory_hooks:mem_hooks ~inner:hooks
-    in
+    ignore runtime_manifest_context;
+    ignore runtime_manifest_append;
     (* Tier K4b/K4c: install the tool-emission PostToolUse hook so
      tagged tool results flow into this keeper's own accumulator
      during Agent.run. The drain happens in keeper_post_turn.ml
@@ -731,10 +666,8 @@ let assemble_hooks
       ; cleanup = keeper_tool_bundle.cleanup
       ; hooks
       ; reducer
-      ; memory
       ; acc
       ; initial_tool_surface
-      ; initial_tool_surface_blocker
       ; all_tool_names
       ; tool_usage_before
       ; receipt_turn_count_ref

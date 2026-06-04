@@ -71,7 +71,6 @@ Scanning `specs/INDEX.md` for `clean={X} buggy={X}` matches:
 | `boundary/RuntimeKeeperRecovery.tla` | `{SafetyInvariant}` |
 | `boundary/RuntimeStrategyStateful.tla` | `{TypeOK, StickyDomainBounded, StickyMembersAreCandidates, RRBounded, NoExpiredEntriesUsable, prop:StickyEventuallyEvicts}` |
 | `boundary/KeeperContractViolated.tla` | `{Safety}` |
-| `boundary/KeeperEmptyToolUniverse.tla` | `{Safety}` |
 | `boundary/KeeperRecoveryOrchestration.tla` | `{SafetyInvariant}` |
 | `boundary/KeeperStaleKilled.tla` | `{Safety}` |
 | `boundary/KeeperTurnScheduler.tla` | `{SafetyInvariant}` |

@@ -140,7 +140,6 @@ type t =
   | ReplySkillRouteLinesRemoved
   | MemoryLlmSummaryOutcomes
   | MemoryLlmSummaryChainExhausted
-  | MemoryJsonlOps
   | UserVisibleReplySource
   | ContinuitySummarySource
   | SummarizerStateScrubs

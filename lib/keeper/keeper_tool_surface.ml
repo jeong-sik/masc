@@ -746,25 +746,6 @@ let register_keeper_surface_schema (s : Masc_domain.tool_schema) =
 let () =
   List.iter register_keeper_surface_schema schemas
 
-(* RFC-0182 §3.1 — register the ctx-free persona handlers with
-   [Persona_dispatch_ref] so [Keeper_tool_in_process_runtime]
-   (compiled early in lib/keeper) can dispatch them without taking
-   a static dependency on [Keeper_persona] / [Keeper_persona_authoring]
-   (which transitively pull in [Keeper_turn_driver] and close a
-   cycle). *)
-let () =
-  Persona_dispatch_ref.dispatch
-  := fun ~name ~args ->
-    match name with
-    | "masc_persona_list" ->
-      Some (tool_result_with_tool_name ~tool_name:name (Keeper_persona.persona_list_handler args))
-    | "masc_persona_schema" ->
-      Some (tool_result_with_tool_name ~tool_name:name (Keeper_persona.persona_schema_handler args))
-    | "masc_persona_save" ->
-      Some (tool_result_with_tool_name ~tool_name:name (Keeper_persona.persona_save_handler args))
-    | _ -> None
-;;
-
 (* RFC-0182 §3.1 — register ctx-free keeper handlers with
    [Keeper_dispatch_ref].  Only [masc_keeper_list] today; the
    remaining keeper tools (status, msg, clear, compact, repair,

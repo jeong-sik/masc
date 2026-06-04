@@ -188,7 +188,6 @@ let pre_dispatch_tool_surface : Keeper_execution_receipt.tool_surface =
   ; tool_surface_class = Keeper_agent_tool_surface.Surface_none
   ; tool_requirement = No_tools
   ; allowed_tool_count = 0
-  ; tool_gate_enabled = false
   ; tool_surface_fallback_used = false
   ; materialized_tools = []
   }

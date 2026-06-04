@@ -180,7 +180,7 @@ let test_synthetic_snapshot_source_drops_memory_candidates () =
       ~goal:"Fix task"
       ~tools_used:["tool_execute"; "tool_read_file"]
       ~stop_reason:"budget_exhausted"
-      ~response_text:"[turn budget exhausted: 8/8 turns used]"
+      ~response_text:"Continuation checkpoint saved; keeper remains scheduled"
   in
   let selection =
     Keeper_memory_bank.memory_candidates_from_snapshot_source

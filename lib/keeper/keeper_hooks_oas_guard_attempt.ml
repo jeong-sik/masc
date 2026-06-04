@@ -1,10 +1,10 @@
-(** Pre-tool gate attempt rendering and telemetry.
+(** Pre-tool guard attempt rendering and telemetry.
     Extracted from [Keeper_hooks_oas] to keep the parent module under
-    1000 lines (Step B of keeper_hooks_oas godfile reduction). *)
+    1000 lines. *)
 
 include Keeper_hooks_oas_types
 
-let render_pre_tool_gate_source_hint
+let render_guard_source_hint
     (event : Keeper_guards.gate_decision_event) =
   match event.source_path, event.source_line with
   | None, None -> ""
@@ -17,7 +17,7 @@ let render_pre_tool_gate_source_hint
 
 let tool_approval_required_tag = "[tool_approval_required]"
 
-let render_pre_tool_gate_output (event : Keeper_guards.gate_decision_event) =
+let render_guard_output (event : Keeper_guards.gate_decision_event) =
   if event.decision = Keeper_guards.Gate_approval_required then
     Printf.sprintf
       "%s tool=%s source=keeper_hook code=%s reason=%s%s"
@@ -25,7 +25,7 @@ let render_pre_tool_gate_output (event : Keeper_guards.gate_decision_event) =
       (Keeper_guards.escape_field event.tool_name)
       (Keeper_guards.escape_field event.reason_code)
       (Keeper_guards.escape_field event.reason_text)
-      (render_pre_tool_gate_source_hint event)
+      (render_guard_source_hint event)
   else
     match event.source_path, event.source_line with
     | Some source_path, Some source_line ->
@@ -41,7 +41,7 @@ let render_pre_tool_gate_output (event : Keeper_guards.gate_decision_event) =
           ~reason_code:event.reason_code
           ~reason_text:event.reason_text
 
-let pre_tool_gate_error (event : Keeper_guards.gate_decision_event) =
+let guard_error (event : Keeper_guards.gate_decision_event) =
   let decision = Keeper_guards.gate_decision_to_string event.decision in
   Printf.sprintf "%s:%s: %s" decision event.reason_code event.reason_text
 
@@ -54,7 +54,7 @@ let trajectory_duration_ms duration_ms =
   then 0
   else max 1 (int_of_float (Float.round duration_ms))
 
-let record_pre_tool_gate_attempt
+let record_guard_attempt
     ~(meta_ref : Keeper_meta_contract.keeper_meta ref)
     ~(tool_call_count_ref : int ref)
     ?(trajectory_acc : Trajectory.accumulator option)
@@ -64,8 +64,8 @@ let record_pre_tool_gate_attempt
   let keeper_name = meta.name in
   let model = current_keeper_model meta in
   let safe_input = Observability_redact.redact_json_value event.input in
-  let output_text = render_pre_tool_gate_output event in
-  let error = pre_tool_gate_error event in
+  let output_text = render_guard_output event in
+  let error = guard_error event in
   let duration_ms = Float.max 0.0 event.stage_latency_ms in
   (try
      Keeper_tool_call_log.log_call
@@ -81,17 +81,17 @@ let record_pre_tool_gate_attempt
    with
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn ->
-       let callback_label_gate_tool_call_log = "gate_tool_call_log" in
+       let callback_label = "guard_tool_call_log" in
        Prometheus.inc_counter
          Keeper_metrics.(to_string LifecycleCallbackFailures)
          ~labels:
            [
              (label_keeper, keeper_name);
-             (label_callback, callback_label_gate_tool_call_log);
+             (label_callback, callback_label);
            ]
          ();
        Log.Keeper.warn
-         "keeper:%s pre_tool_use gate tool_call log failed tool=%s err=%s"
+         "keeper:%s pre_tool_use guard tool_call log failed tool=%s err=%s"
          keeper_name event.tool_name (Printexc.to_string exn));
   match trajectory_acc with
   | None -> ()
@@ -142,11 +142,11 @@ let record_pre_tool_gate_attempt
           let dashboard_surface_tool_stats = "/api/v1/keepers/:name/tool-stats" in
           let stale_reason_trajectory_append = "trajectory_append_failed" in
           let telemetry_source_trajectory = "trajectory_tool_call" in
-          let telemetry_producer_pre_tool = "keeper_hooks_oas.pre_tool_use" in
+          let telemetry_producer = "keeper_hooks_oas.pre_tool_use" in
           Telemetry_coverage_gap.record
             ~masc_root:acc.Trajectory.masc_root
             ~source:telemetry_source_trajectory
-            ~producer:telemetry_producer_pre_tool
+            ~producer:telemetry_producer
             ~durable_store:
               (Trajectory.trajectory_path acc.Trajectory.masc_root
                  acc.Trajectory.keeper_name trace_id)

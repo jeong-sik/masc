@@ -114,7 +114,6 @@ let run_turn
     ~stop_reason:None
     ~duration_ms:None
     ~timestamp_ms:(Int64.of_float (Unix.gettimeofday () *. 1000.0));
-  Memory_hooks.clear_last_memory_injection meta.agent_name;
   (* Cancel-safe cleanup (#9747): stdlib [Fun.protect] wraps finally
      exceptions in [Fun.Finally_raised], masking the outer
      [Eio.Cancel.Cancelled] raised by the turn body during fleet-wide
@@ -358,10 +357,6 @@ let run_turn
       ~trajectory_acc
       ~tool_overlay
       ~runtime_manifest_context
-      ~runtime_manifest_append:
-        (Keeper_runtime_manifest.append_best_effort
-           ~site:"memory_hooks"
-           config)
       ()
   in
   (* Section 2: Tool surface — select tools, compute surface, validate contracts. *)
@@ -376,7 +371,6 @@ let run_turn
     let tools = s.Keeper_run_tools.tools in
     let hooks = s.Keeper_run_tools.hooks in
     let reducer = s.Keeper_run_tools.reducer in
-    let memory = s.Keeper_run_tools.memory in
     let acc = s.Keeper_run_tools.acc in
     append_manifest ~site:"tool_surface_selected"
       ~keeper_turn_id:manifest_keeper_turn_id
@@ -393,7 +387,6 @@ let run_turn
                 (tool_requirement_to_string acc.tool_surface.tool_requirement)
             );
             ("allowed_tool_count", `Int acc.tool_surface.allowed_tool_count);
-            ("tool_gate_enabled", `Bool acc.tool_surface.tool_gate_enabled);
             ( "tool_surface_fallback_used",
               `Bool acc.tool_surface.tool_surface_fallback_used );
             ("config_root", `String acc.tool_surface.config_root);
@@ -401,9 +394,6 @@ let run_turn
       Keeper_runtime_manifest.Tool_surface_selected;
     let agent_ref : Agent_sdk.Agent.t option ref = ref None in
     let initial_tool_surface = s.Keeper_run_tools.initial_tool_surface in
-    let initial_tool_surface_blocker_ref =
-      s.Keeper_run_tools.initial_tool_surface_blocker
-    in
     let tool_usage_before = s.Keeper_run_tools.tool_usage_before in
     let receipt_turn_count_ref = s.Keeper_run_tools.receipt_turn_count_ref in
     let receipt_model_used_ref = s.Keeper_run_tools.receipt_model_used_ref in
@@ -493,9 +483,6 @@ let run_turn
            (match pre_dispatch_max_tokens_error with
             | Some err -> Error err
             | None ->
-             (match !initial_tool_surface_blocker_ref with
-            | Some err -> Error err
-            | None ->
               let call_run_named ~initial_messages =
                 let bridge_timeout_s =
                   Keeper_llm_bridge.with_hitl_approval_headroom timeout_s
@@ -519,7 +506,6 @@ let run_turn
                     ~hooks
                     ~context_reducer:reducer
                    ~summarizer:Keeper_summarizer.keeper_summarizer
-                   ~memory
                    ~runtime_manifest_context
                    ~runtime_manifest_append:
                      (fun manifest ->
@@ -752,7 +738,7 @@ let run_turn
                         Keeper_agent_run_finalize_response.finalize
                           ~config ~meta ~generation ~manifest_keeper_turn_id
                           ~trace_id ~session ~append_manifest ~model
-                          ~acc ~memory
+                          ~acc
                           ~actual_keeper_tool_names ~actual_keeper_tool_names_ref
                           ~result ~checkpoint_persistence_error
                           ~post_turn_t0 ?provider_filter ~runtime_id_string
@@ -763,7 +749,7 @@ let run_turn
                           ~pre_dispatch_compaction_before_tokens:ctx.pre_dispatch_compaction_before_tokens
                           ~pre_dispatch_compaction_after_tokens:ctx.pre_dispatch_compaction_after_tokens
                           ~raw_response_text:response_text
-                          ())))))
+                          ()))))
                in
        Keeper_agent_run_receipt.finalize
          ~config
@@ -776,7 +762,6 @@ let run_turn
          ~runtime_manifest_context
          ~initial_tool_surface
          ~acc
-         ~memory
          ~pre_dispatch_compacted
          ~pre_dispatch_compaction_trigger:ctx.pre_dispatch_compaction_trigger
          ~pre_dispatch_compaction_before_tokens:ctx.pre_dispatch_compaction_before_tokens

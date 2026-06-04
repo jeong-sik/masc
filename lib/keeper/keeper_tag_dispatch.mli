@@ -16,7 +16,7 @@
     Returns:
     - [Some (Ok _)] on successful dispatch.
     - [Some (Error _)] when the tool is blocked in keeper context
-      ([Mod_control] mutators, [Mod_inline], [Mod_compact],
+      ([Mod_control] mutators, [Mod_inline] tools, [Mod_compact],
       [Mod_external], [Mod_operator]) or when the underlying dispatch reports
       failure.
     - [None] only if the selected module does not recognise [name] (does

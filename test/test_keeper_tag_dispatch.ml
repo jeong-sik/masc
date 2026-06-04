@@ -46,11 +46,11 @@ let dispatch config name =
     ~tag:Tool_dispatch.Mod_control
     ~name ~args:(`Assoc [])
 
-let dispatch_inline ?(args = `Assoc []) config name =
+let dispatch_inline config name =
   Keeper_tag_dispatch.dispatch
     ~config ~agent_name:"test-keeper"
     ~tag:Tool_dispatch.Mod_inline
-    ~name ~args
+    ~name ~args:(`Assoc [])
 
 (* masc_pause_status is read-only — should be allowed. *)
 let test_pause_status_allowed () =
@@ -106,6 +106,6 @@ let () =
       test_case "masc_resume blocked" `Quick test_resume_blocked;
     ];
     "Mod_inline gate", [
-      test_case "other inline tools blocked" `Quick test_other_inline_blocked;
+      test_case "inline tools blocked" `Quick test_other_inline_blocked;
     ];
   ]

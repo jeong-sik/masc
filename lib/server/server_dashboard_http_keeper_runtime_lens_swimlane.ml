@@ -64,11 +64,7 @@ let runtime_lens_provider_terminal_status scan =
   | None -> "unknown"
 
 let runtime_lens_memory_terminal_status scan =
-  if scan.memory_flush_error_count > 0 then "memory_error"
-  else if scan.memory_flush_success_count > 0 then "flushed"
-  else if scan.memory_injected_count > 0 then "injected"
-  else if
-    runtime_lens_event_count scan Keeper_runtime_manifest.Checkpoint_saved > 0
+  if runtime_lens_event_count scan Keeper_runtime_manifest.Checkpoint_saved > 0
   then "checkpoint_saved"
   else if
     runtime_lens_event_count scan Keeper_runtime_manifest.Checkpoint_loaded > 0
@@ -97,7 +93,7 @@ let runtime_lens_memory_terminal_status scan =
 
     Separation of "terminal" from "complete" is required because a turn can
     finish (Turn_finished) while a lane still lacks mandatory events
-    (e.g., missing checkpoint save, missing memory flush). *)
+    (e.g., missing checkpoint save). *)
 
 type lane_policy =
   { lane : string
@@ -140,9 +136,8 @@ let lane_policies =
         [ Keeper_runtime_manifest.Context_injected
         ; Keeper_runtime_manifest.Checkpoint_loaded
         ; Keeper_runtime_manifest.Checkpoint_saved
-        ; Keeper_runtime_manifest.Memory_flushed
         ]
-    ; terminal_events = [ Keeper_runtime_manifest.Memory_flushed ]
+    ; terminal_events = [ Keeper_runtime_manifest.Checkpoint_saved ]
     }
   ]
 
@@ -169,9 +164,7 @@ let event_lane = function
     "oas_agent"
   | Keeper_runtime_manifest.Context_injected
   | Keeper_runtime_manifest.Context_compacted
-  | Keeper_runtime_manifest.Event_bus_correlated
-  | Keeper_runtime_manifest.Memory_injected
-  | Keeper_runtime_manifest.Memory_flushed ->
+  | Keeper_runtime_manifest.Event_bus_correlated ->
     "memory_context"
 
 let lane_policy_for_lane lane =

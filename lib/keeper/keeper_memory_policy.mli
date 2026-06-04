@@ -78,8 +78,6 @@ val state_snapshot_source_is_synthetic : string -> bool
 type compaction_source =
   | Pre_dispatch_hygiene
   | MASC_policy
-  | OAS_proactive
-  | OAS_emergency
   | Memory_bank
 (** Closed-sum variant distinguishing which subsystem initiated a
     compaction. Replaces the previous generic "compacted" string. *)

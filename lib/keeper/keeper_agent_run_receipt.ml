@@ -54,7 +54,6 @@ let finalize
     ~runtime_manifest_context
     ~(initial_tool_surface : Keeper_agent_tool_surface.computed_tool_surface)
     ~(acc : Keeper_run_tools.hook_accumulator)
-    ~memory
     ~pre_dispatch_compacted
     ~pre_dispatch_compaction_trigger
     ~pre_dispatch_compaction_before_tokens
@@ -101,22 +100,6 @@ let finalize
          ~error:(Agent_sdk.Error.to_string err)
          ?exception_kind
          ());
-  (match turn_result with
-   | Ok _ -> ()
-   | Error err ->
-     let oas_turn_count = !receipt_turn_count_ref in
-     Keeper_agent_memory_episode.record_failure
-       ~config
-       ~keeper_name:meta.name
-       ~memory
-       ~turn:manifest_keeper_turn_id
-       ?oas_turn_count
-       ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-       ~error_kind:
-         (Memory_oas_bridge.error_kind_of_string
-            (Keeper_agent_error.sdk_error_kind err))
-       ~error_message:(Agent_sdk.Error.to_string err)
-       ());
   let receipt_ended_at = Masc_domain.now_iso () in
   let error_kind, error_message =
     match turn_result with
@@ -146,10 +129,7 @@ let finalize
   let ( extra_system_context_digest
       , extra_system_context_computed_size
       , extra_system_context_injected_size ) =
-    match Memory_hooks.get_last_memory_injection meta.agent_name with
-    | Some (digest, computed, injected) ->
-      Some digest, Some computed, Some injected
-    | None -> None, None, None
+    None, None, None
   in
   let receipt =
     { Keeper_execution_receipt.keeper_name = meta.name
@@ -183,7 +163,6 @@ let finalize
         ; tool_surface_class = acc.tool_surface.tool_surface_class
         ; tool_requirement = acc.tool_surface.tool_requirement
         ; allowed_tool_count = acc.tool_surface.allowed_tool_count
-        ; tool_gate_enabled = acc.tool_surface.tool_gate_enabled
         ; tool_surface_fallback_used = acc.tool_surface.tool_surface_fallback_used
         ; materialized_tools = !materialized_tool_names_ref
         }

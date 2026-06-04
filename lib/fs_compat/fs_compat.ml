@@ -149,8 +149,8 @@ let save_file_unix (path : string) (content : string) : unit =
    pointing at the cache. This PR extends the fix to
    [append_file_unix] (and removes the now-dead [Append_fd_cache]
    module and [at_exit] hook) so the ~15 [append_file] callers
-   (metrics_store_eio, memory_jsonl,
-   workspace_utils_ops, board_core, keeper_chat_store, etc.) get the
+   (metrics_store_eio, workspace_utils_ops, board_core,
+   keeper_chat_store, etc.) get the
    same guarantee.
 
    The mutex registry is shared between [append_file_unix] and

@@ -130,7 +130,6 @@ let read_receipt_rows = Scan_summary.read_receipt_rows
 let unique_ints = Scan_summary.unique_ints
 let json_int_list = Scan_summary.json_int_list
 let event_bus_summary_json = Scan_summary.event_bus_summary_json
-let memory_summary_json = Scan_summary.memory_summary_json
 
 let max_int_list_opt = Scan_summary.max_int_list_opt
 let selected_keeper_turn_id = Scan_summary.selected_keeper_turn_id
@@ -249,7 +248,6 @@ let keeper_runtime_trace_json (config : Workspace.config) (name : string)
                 turn_identity_summary_json ?turn_id manifest_scan receipts );
               ("provider_attempts", provider_attempts_summary_json manifest_scan);
               ("event_bus", event_bus_summary_json manifest_scan);
-              ("memory", memory_summary_json manifest_scan);
               ( "runtime_lens",
                 runtime_lens_json ~config ~keeper_name:name ~trace_id ?turn_id
                   manifest_scan );

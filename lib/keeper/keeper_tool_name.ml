@@ -158,12 +158,17 @@ let legacy_masc_claim_next_name = "masc_claim_next"
 let legacy_masc_broadcast_name = "masc_broadcast"
 let legacy_masc_deliver_name = "masc_deliver"
 
-let pending_public_mcp_inline_names =
+let public_mcp_non_descriptor_names =
   [ "masc_start"
   ; legacy_masc_broadcast_name
   ; "masc_messages"
   ; "masc_keeper_sandbox_status"
   ; "masc_keeper_create_from_persona"
+  ; "masc_persona_list"
+  ; "masc_persona_schema"
+  ; "masc_persona_save"
+  ; "masc_runtime_verify"
+  ; "masc_runtime_ollama_probe"
   ]
 ;;
 

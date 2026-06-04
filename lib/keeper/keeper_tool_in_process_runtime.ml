@@ -206,13 +206,6 @@ let handle_masc_agent_timeline ~(config : Workspace.config) ~(meta : keeper_meta
 
    TEL-OK: descriptor projection — telemetry lives in [Tool_shard.execute]
    and the upstream [Keeper_tool_dispatch_runtime] dispatch wrapper. *)
-let handle_masc_tool_shard ~name ~args =
-  let ok, payload = Tool_shard.execute name args in
-  if ok
-  then Yojson.Safe.to_string payload
-  else Yojson.Safe.to_string (`Assoc [ "error", payload ])
-;;
-
 let dashboard_surface_readiness_callback = ref (fun ?surface_id:_ () -> `Assoc [])
 let register_dashboard_surface_readiness fn = dashboard_surface_readiness_callback := fn
 
@@ -262,20 +255,4 @@ let handle_masc_keeper
       ()
   in
   dispatch_option_to_string ~name result
-;;
-
-(* RFC-0182 §3.1 — masc_persona cluster.  [Keeper_persona] /
-   [Keeper_persona_authoring] transitively pull in [Keeper_turn_driver],
-   which closes a cycle if imported here.  Resolution: dispatch
-   through [Persona_dispatch_ref].  Keeper_tool_surface (lib/, late) registers
-   the ctx-free entry points at module load.
-
-   TEL-OK: descriptor projection — telemetry lives in [Keeper_persona] /
-   [Keeper_persona_authoring] backing handlers. *)
-let handle_masc_persona ~name ~args =
-  !Persona_dispatch_ref.dispatch ~name ~args |> dispatch_option_to_string ~name
-;;
-
-let handle_masc_local_runtime ~name ~args =
-  Tool_local_runtime.dispatch () ~name ~args |> dispatch_option_to_string ~name
 ;;

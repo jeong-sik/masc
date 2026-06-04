@@ -1,5 +1,3 @@
-open Masc_domain
-
 (** Issue #8520: hand-mirrored from [Mcp_session.valid_action_strings].
     [masc_tool_schemas] only depends on [masc_types], so it cannot
     derive directly. The sync regression test in [test_types.ml ::
@@ -11,10 +9,9 @@ let mcp_session_action_enum_strings =
 (* masc_session remains here because its [action] enum is locked
    to [mcp_session_action_enum_strings] above by the SSOT regression
    test; codegen needs a shared enum source RFC before it can swap. Approval
-   queue tools are keeper-owned and register through the keeper surface, not
-   the inline MCP router. *)
+   queue access is not a MASC tool schema. *)
 
-let schemas : tool_schema list = [
+let schemas : Masc_domain.tool_schema list = [
   (* masc_session *)
   {
     name = "masc_session";

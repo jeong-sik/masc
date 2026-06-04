@@ -39,8 +39,6 @@ type compaction_source =
   Keeper_memory_policy.compaction_source =
     Pre_dispatch_hygiene
   | MASC_policy
-  | OAS_proactive
-  | OAS_emergency
   | Memory_bank
 val compaction_source_to_string : compaction_source -> string
 val compaction_source_of_string_opt : string -> compaction_source option

@@ -232,7 +232,7 @@ docs/spec/ 체계에서 아직 다루지 않는 영역.
 
 | Gap | 현재 상태 | 필요한 spec |
 |-----|----------|-------------|
-| **Memory system** | 없음 (design draft removed 2026-04-17) | Memory tier 계약 (OAS 5-tier 포함) |
+| **Memory system** | `12-memory-systems.md` + `Masc.Memory.t` facade | MASC-owned memory bank / institution / procedural 계약 |
 | **TRPG subsystem** | 7개 docs, 미통합 | 분리 패키지 후 자체 spec |
 | **Transport protocol detail** | TRANSPORT-VERIFICATION-CHECKLIST (401 lines) | 09-server-transport.md에 부분 포함, WebRTC/WS 미상세 |
 | **Keeper Autonomy identity** | docs/archive/keeper-autonomy-identity-v2/ (3 files) | 구현 후 spec 추가 |

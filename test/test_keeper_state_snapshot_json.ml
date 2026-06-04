@@ -265,19 +265,21 @@ let test_budget_synthesis_does_not_invent_next_items () =
       ~goal:"Fix task"
       ~tools_used:["tool_execute"; "tool_read_file"]
       ~stop_reason:"budget_exhausted"
-      ~response_text:"[turn budget exhausted: 8/8 turns used]"
+      ~response_text:"Continuation checkpoint saved; keeper remains scheduled"
   in
   Alcotest.(check (list string)) "no invented next_items" [] snapshot.next_items;
+  Alcotest.(check (option string)) "budget continuation is not done" None
+    snapshot.done_summary;
   Alcotest.(check bool)
     "checkpoint resume summary present"
     true
     (match snapshot.next_summary with
      | Some text -> contains_substring text "OAS checkpoint"
      | None -> false);
-  Alcotest.(check bool)
-    "synthetic marker present"
-    true
-    (List.exists Masc.Keeper_synthetic_marker.contains_marker snapshot.decisions)
+  Alcotest.(check (list string))
+    "budget continuation does not invent decisions"
+    []
+    snapshot.decisions
 
 (* ── Test runner ─────────────────────────────────────────────────── *)
 

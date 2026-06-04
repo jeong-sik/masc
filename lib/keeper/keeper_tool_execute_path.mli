@@ -23,6 +23,19 @@ val validate_repo_path_args_ready :
     commands run from the playground root with arguments like
     [./repos/masc/lib/foo.ml]. *)
 
+val validate_repo_cwd_currency_ready :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  cwd:string ->
+  Masc_exec.Shell_ir.t ->
+  (unit, string) result
+(** Reject non-diagnostic typed Execute commands from a direct sandbox
+    [repos/<repo>] cwd when the repo could not be advanced to
+    [origin/main]. Dirty, detached, task-branch, diverged, or unregistered
+    direct roots are preserved by the repo currency layer; this guard prevents
+    normal work from continuing against that stale root while still allowing
+    focused git diagnostics. Repo worktree cwd values are not gated here. *)
+
 val execution_location_json :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->

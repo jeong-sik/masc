@@ -95,7 +95,6 @@ specs/auth/AuthIdentityFSM.tla
 specs/boundary/AuditLog.tla
 specs/boundary/RuntimeKeeperRecovery.tla         ← partial overlap with Recovery.tla proposal
 specs/boundary/RuntimeStrategy.tla
-specs/boundary/KeeperEmptyToolUniverse.tla
 specs/boundary/ToolCallContract_TTrace_1776849071.tla
 specs/checkpoint-trim/CheckpointTrim.tla
 specs/closure/ContractClosure.tla

@@ -18,7 +18,7 @@ type tried_source =
   | Alias_internal              (** S4: Keeper_tool_alias.is_known_internal *)
   | Registry_internal_candidate (** S5: Keeper_tool_registry.keeper_internal_candidate_tool_names *)
   | Registry_core_tools         (** S6: Keeper_tool_registry.effective_core_tools *)
-  | Shard_schema                (** S7: Tool_shard.all_keeper_tool_schemas name extraction *)
+  | Tool_schema                 (** S7: policy tool-schema inventory name extraction *)
   | Descriptor_registry         (** S7.5: Keeper_tool_descriptor.all_descriptors public_name —
                                     flat SSOT incl. internal_descriptors (masc_keeper_* live here) *)
 
@@ -32,13 +32,16 @@ type resolution =
 let tool_schema_names schemas =
   List.map (fun (schema : Masc_domain.tool_schema) -> schema.name) schemas
 
+let policy_tool_schemas =
+  Tool_shard.all_keeper_tool_schemas @ Tool_schemas_inline.schemas
+
 let string_of_tried_source = function
   | Dispatch_table -> "dispatch_table"
   | Public_descriptor -> "public_descriptor"
   | Alias_internal -> "alias_internal"
   | Registry_internal_candidate -> "registry_internal_candidate"
   | Registry_core_tools -> "registry_core_tools"
-  | Shard_schema -> "shard_schema"
+  | Tool_schema -> "tool_schema"
   | Descriptor_registry -> "descriptor_registry"
 
 let string_of_tried sources =
@@ -68,8 +71,8 @@ let resolve name =
       else if List.mem normalized (Keeper_tool_registry.effective_core_tools ()) then
         Resolved { canonical = normalized; via = Registry_core_tools }
       else if
-        List.mem normalized (tool_schema_names Tool_shard.all_keeper_tool_schemas)
-      then Resolved { canonical = normalized; via = Shard_schema }
+        List.mem normalized (tool_schema_names policy_tool_schemas)
+      then Resolved { canonical = normalized; via = Tool_schema }
       else if
         List.exists
           (fun (d : Keeper_tool_descriptor.t) ->
@@ -98,7 +101,7 @@ let resolve name =
               ; Alias_internal
               ; Registry_internal_candidate
               ; Registry_core_tools
-              ; Shard_schema
+              ; Tool_schema
               ; Descriptor_registry
               ]
           }
@@ -121,8 +124,8 @@ let all_admitting_sources name =
     sources := Registry_internal_candidate :: !sources;
   if List.mem normalized (Keeper_tool_registry.effective_core_tools ()) then
     sources := Registry_core_tools :: !sources;
-  if List.mem normalized (tool_schema_names Tool_shard.all_keeper_tool_schemas) then
-    sources := Shard_schema :: !sources;
+  if List.mem normalized (tool_schema_names policy_tool_schemas) then
+    sources := Tool_schema :: !sources;
   if
     List.exists
       (fun (d : Keeper_tool_descriptor.t) ->

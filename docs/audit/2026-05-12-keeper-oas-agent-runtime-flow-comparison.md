@@ -31,7 +31,7 @@ MASC:
 - Direct non-heartbeat entry: `lib/tool_keeper.ml:462`, `:1633`, `lib/server/server_openai_compat.ml:87`, `lib/server/server_routes_http_keeper_stream.ml:52`, `lib/keeper/keeper_turn.ml:205`, `:481`.
 - Per-turn OAS setup and dispatch: `lib/keeper/keeper_agent_run.ml:103`, `:169`, `:231`, `:522`, `:1093`, `:1233`, `:1495`, `:1571`.
 - Context and checkpoint: `lib/keeper/keeper_run_context.ml:32`, `:80`, `:136`, `:164`, `:169`.
-- Prompt/context injection: `lib/keeper/keeper_run_prompt.ml:71`, `:100`, `:109`, `:166`, `:169`; `lib/memory_hooks.ml:1`, `:126`, `:148`.
+- Prompt/context assembly: `lib/keeper/keeper_run_prompt.ml:71`, `:100`, `:109`, `:166`, `:169`.
 - Tool search/selection: `lib/keeper/keeper_run_tools.ml:139`, `:278`, `:345`, `:640`, `:733`, `:752`, `:843`, `:908`, `:1035`, `:1219`, `:1464`, `:1483`, `:1650`.
 - Tool execution/observation: `lib/keeper/keeper_tools_oas.ml:481`, `:589`, `:947`; `lib/keeper/keeper_hooks_oas.ml:2173`; `lib/keeper/keeper_tool_observation.ml`, `lib/keeper/keeper_tool_resolution.ml`.
 - MASC runtime/provider loop: `lib/keeper/keeper_turn_driver.ml:34`, `:111`, `:150`, `:319`, `:404`, `:867`, `:952`; `lib/keeper/keeper_turn_driver_try_provider.ml:92`, `:118`, `:264`.
@@ -344,9 +344,8 @@ flowchart TD
     G --> H[render memory context for metrics + memory hook source]
     H --> I[render temporal context]
     I --> J[append user message to working_context and persist]
-    J --> K[Memory_oas_bridge.make_backend]
-    K --> L[Memory_hooks.before_turn_params injects memory as extra_system_context]
-    L --> M[Keeper BeforeTurnParams appends dynamic/temporal/task/budget context]
+    J --> K[Keeper memory bank remains MASC-owned]
+    K --> L[Keeper BeforeTurnParams appends dynamic/temporal/task/budget context]
     M --> N[OAS prepare_messages + Context_reducer]
     N --> O{OAS proactive/emergency compaction?}
     O -- yes --> P[Budget_strategy + Context_reducer + compact events]

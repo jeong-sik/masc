@@ -8,7 +8,6 @@
 #
 #   F1 — per-keeper raw token fallback fired
 #   F2 — silent_auth_token_resolve_error volume + would_reject mode mix
-#   F3 — empty_tool_universe blocker observed by lane
 #   F4 — string-match SSOT collapse (no contains_substring outside SSOT)
 #   F5 — typed gh-api / strip_keeper_prefix helpers in use (compile-only;
 #        dynamic check by scanning for legacy literal patterns)
@@ -128,12 +127,6 @@ if [ "$silent" -gt 0 ] && [ "$would" -lt "$silent" ]; then
   echo "  be Off in part of the window.  Check MASC_AUTH_STRICT env."
 fi
 
-# ----- F3: empty_tool_universe blocker observed --------------------------
-f3=$(count_pattern_in 'masc_empty_tool_universe_observed_total' "${kp_logs[@]}")
-echo
-echo "F3 empty_tool_universe blocker events:   $f3"
-echo "   (broken down by lane in dashboard via labels turn_lane / fallback_used)"
-
 # ----- F4: contains_substring SSOT --------------------------------------
 # Static check: count call sites of [String_util.contains_substring] only
 # (function calls, not the [_ci] sibling and not doc-comments referencing
@@ -215,13 +208,6 @@ elif [ "$would" -ge "$silent" ]; then
   echo "     before promoting Auth_strict_mode default to Strict."
 else
   echo "PR-2 (Strict reject): would_reject lags silent ($would < $silent) — investigate."
-fi
-
-if [ "$f3" -gt 0 ]; then
-  echo "PR-4 (Typed terminal state): empty_tool_universe blocker firing ($f3 events)."
-  echo "  -> Group by 'turn_lane' / 'fallback_used' label to design Tool_universe.t variant."
-else
-  echo "PR-4 (Typed terminal state): no empty_tool_universe events — soak inconclusive."
 fi
 
 echo

@@ -11,8 +11,8 @@
       — operate on raw [Yojson.Safe.t] rows + paths;
     - generic JSON helpers ({!unique_ints}, {!json_int_list},
       {!Json_util.json_string_list}) — local single-use sugar;
-    - per-section scan summaries ({!event_bus_summary_json},
-      {!memory_summary_json}) — fold the manifest scan record into a
+    - per-section scan summaries ({!event_bus_summary_json})
+      — fold the manifest scan record into a
       single [`Assoc] for dashboard payload;
     - turn-id selection helpers ({!max_int_list_opt},
       {!selected_keeper_turn_id}, {!terminal_event_present_for_turn})
@@ -64,20 +64,6 @@ let event_bus_summary_json
     ; "context_compact_started_count", `Int scan.context_compact_started_count
     ; "context_compacted_count", `Int scan.context_compacted_count
     ; "last_compaction", last_compaction
-    ]
-;;
-
-let memory_summary_json
-      (scan : Server_dashboard_http_keeper_runtime_manifest_scan.runtime_manifest_scan)
-  =
-  `Assoc
-    [ "memory_injected_count", `Int scan.memory_injected_count
-    ; "memory_injected_present_count", `Int scan.memory_injected_present_count
-    ; "memory_flushed_count", `Int scan.memory_flushed_count
-    ; "memory_flush_success_count", `Int scan.memory_flush_success_count
-    ; "memory_flush_error_count", `Int scan.memory_flush_error_count
-    ; "episodes_flushed", `Int scan.episodes_flushed
-    ; "procedures_flushed", `Int scan.procedures_flushed
     ]
 ;;
 

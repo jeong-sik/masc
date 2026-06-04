@@ -331,7 +331,6 @@ let schema_json ?(include_examples = false) () =
      @ examples)
 ;;
 
-(* RFC-0182 §3.1 — ctx-free body shared with Persona_dispatch_ref path. *)
 let handle_persona_schema_no_ctx args =
   let include_examples = get_bool args "include_examples" false in
   Keeper_types_profile.tool_result_ok (Yojson.Safe.to_string (schema_json ~include_examples ()))
@@ -609,7 +608,6 @@ let save_result_to_json ?(dry_run = false) result =
     ]
 ;;
 
-(* RFC-0182 §3.1 — ctx-free body shared with Persona_dispatch_ref path. *)
 let handle_persona_save_no_ctx args =
   let handle = get_string args "handle" "" |> String.trim in
   let overwrite = get_bool args "overwrite" false in

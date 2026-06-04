@@ -70,9 +70,6 @@ let handle_filesystem ctx descriptor args =
   | Tool_masc_misc_dispatch
   | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch
-  | Tool_masc_local_runtime_dispatch
-  | Tool_masc_tool_shard_dispatch
-  | Tool_masc_persona_dispatch
   | Tool_masc_keeper_dispatch
   | Tool_masc_surface_audit -> None
 ;;
@@ -124,9 +121,6 @@ let handle_shell_ir ctx descriptor args =
   | Tool_masc_misc_dispatch
   | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch
-  | Tool_masc_local_runtime_dispatch
-  | Tool_masc_tool_shard_dispatch
-  | Tool_masc_persona_dispatch
   | Tool_masc_keeper_dispatch
   | Tool_masc_surface_audit -> None
 ;;
@@ -246,12 +240,6 @@ let handle_in_process ctx descriptor args =
          ~meta:ctx.meta
          ~name
          ~args)
-  | Tool_masc_local_runtime_dispatch ->
-    Some (Keeper_tool_in_process_runtime.handle_masc_local_runtime ~name ~args)
-  | Tool_masc_tool_shard_dispatch ->
-    Some (Keeper_tool_in_process_runtime.handle_masc_tool_shard ~name ~args)
-  | Tool_masc_persona_dispatch ->
-    Some (Keeper_tool_in_process_runtime.handle_masc_persona ~name ~args)
   | Tool_masc_keeper_dispatch ->
     Some
       (Keeper_tool_in_process_runtime.handle_masc_keeper

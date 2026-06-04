@@ -194,8 +194,6 @@ let session_min_surface_tools =
 
 let admin_surface_tools =
   [ "masc_tool_admin_update"
-  ; "masc_tool_grant"
-  ; "masc_tool_revoke"
   ; "masc_tool_admin_snapshot"
   ; "masc_config"
   ; (* Phase 2: surface SSOT *)
@@ -205,7 +203,6 @@ let admin_surface_tools =
   ; "masc_resume"
   ; "masc_runtime_verify"
   ; "masc_runtime_ollama_probe"
-  ; "masc_tool_list"
   ]
 ;;
 

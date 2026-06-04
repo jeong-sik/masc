@@ -26,7 +26,6 @@ val run_model_by_label :
   ?guardrails:Agent_sdk.Guardrails.t ->
   ?hooks:Agent_sdk.Hooks.hooks ->
   ?context_reducer:Agent_sdk.Context_reducer.t ->
-  ?memory:Agent_sdk.Memory.t ->
   ?tool_retry_policy:Agent_sdk.Tool_retry_policy.t ->
   ?enable_thinking:bool ->
   ?compact_ratio:float ->
@@ -58,7 +57,6 @@ val run_named_with_masc_tools :
   ?accept:(Agent_sdk_response.api_response -> bool) ->
   ?guardrails:Agent_sdk.Guardrails.t ->
   ?hooks:Agent_sdk.Hooks.hooks ->
-  ?memory:Agent_sdk.Memory.t ->
   ?tool_retry_policy:Agent_sdk.Tool_retry_policy.t ->
   ?raw_trace:Agent_sdk.Raw_trace.t ->
   ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
@@ -90,7 +88,6 @@ val run_model_with_masc_tools :
   ?wait_timeout_sec:float ->
   ?guardrails:Agent_sdk.Guardrails.t ->
   ?hooks:Agent_sdk.Hooks.hooks ->
-  ?memory:Agent_sdk.Memory.t ->
   ?tool_retry_policy:Agent_sdk.Tool_retry_policy.t ->
   ?enable_thinking:bool ->
   ?compact_ratio:float ->

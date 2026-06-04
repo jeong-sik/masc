@@ -478,19 +478,10 @@ let run_docker_shell_command_with_status_internal
          sees a corrected-form hint in the same turn rather than gh's raw
          "unknown flag: --repo" error after the round-trip. *)
            (match
-              Keeper_tool_execute_command_semantics.repo_hosting_cli_repo_flag_api_misuse_of_stages
+              Keeper_tool_execute_command_semantics.misuse_error_of_stages
                 cmd_stages
             with
-            | Some (repo_arg, endpoint) ->
-              sandbox_error
-                (Printf.sprintf
-                   "잘못된 gh syntax: 'gh --repo %s api %s ...' — '--repo' 는 subcommand \
-                    flag (gh issue/pr/release/run) 전용이고 'gh api' 에는 적용 안 됨. 올바른 형태: 'gh \
-                    api repos/%s/%s' (endpoint 안에 org/repo 포함). 다음 turn 에서 cmd 를 수정하세요."
-                   repo_arg
-                   endpoint
-                   repo_arg
-                   endpoint)
+            | Some msg -> sandbox_error msg
             | None ->
               let container_name = keeper_sandbox_container_name meta in
               let container_root = keeper_private_container_root meta in

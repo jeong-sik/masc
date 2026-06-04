@@ -124,7 +124,6 @@
   test_keeper_wake_telemetry
   test_keeper_timing
   test_token_count
-  test_memory_jsonl_truncation
   test_keeper_chat_store
   test_keeper_runtime_trust_snapshot
   test_keeper_tool_audit_snapshot
@@ -221,7 +220,6 @@
   test_keeper_path_ssot
   test_keeper_egress_audit
   test_tool_input_validation
-  test_failure_learnings_10325
   test_cdal_evidence_gate
   test_ocaml_north_star_task_lifecycle
   test_tool_blob_store
@@ -258,8 +256,6 @@
   test_telemetry_error_occurred_wire_10358
   test_keeper_topk_llm
   test_warn_root_causes
-  test_keeper_agent_memory_episode_activity
-  test_institution_episodes_failure_learnings_10325
   test_institution_of_string_fail_closed
   test_mid_turn_resume
   test_lockfree_atomic
@@ -381,7 +377,6 @@
   test_keeper_wake_telemetry
   test_keeper_timing
   test_token_count
-  test_memory_jsonl_truncation
   test_keeper_chat_store
   test_keeper_runtime_trust_snapshot
   test_keeper_tool_audit_snapshot
@@ -478,7 +473,6 @@
   test_keeper_path_ssot
   test_keeper_egress_audit
   test_tool_input_validation
-  test_failure_learnings_10325
   ; test_contract_risk removed (team session cleanup)
   ; test_contract_composer removed (team session cleanup)
   test_cdal_evidence_gate
@@ -519,8 +513,6 @@
   test_telemetry_error_occurred_wire_10358
   test_keeper_topk_llm
   test_warn_root_causes
-  test_keeper_agent_memory_episode_activity
-  test_institution_episodes_failure_learnings_10325
   test_institution_of_string_fail_closed
   test_mid_turn_resume
   test_lockfree_atomic
@@ -651,7 +643,6 @@
   test_keeper_path_check_error
   test_destructive_class
   test_board_content_dedup
-  test_memory_oas_5tier
   test_verifier_oas_bridge
   test_oas_adapters
   test_cache_eio
@@ -836,7 +827,6 @@
   test_keeper_path_check_error
   test_destructive_class
   test_board_content_dedup
-  test_memory_oas_5tier
   test_verifier_oas_bridge
   test_oas_adapters
   test_cache_eio
@@ -1452,6 +1442,8 @@
 (include stanzas/test_failing_minimum_essential.inc)
 
 (include stanzas/test_keeper_memory_write.inc)
+
+(include stanzas/test_memory_facade.inc)
 
 (include stanzas/test_keeper_tool_emission_hook.inc)
 

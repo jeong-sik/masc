@@ -132,23 +132,17 @@ type keeper_memory_summary = {
 type compaction_source =
   | Pre_dispatch_hygiene
   | MASC_policy
-  | OAS_proactive
-  | OAS_emergency
   | Memory_bank
 
 let compaction_source_to_string = function
   | Pre_dispatch_hygiene -> "pre_dispatch_hygiene"
   | MASC_policy -> "masc_policy"
-  | OAS_proactive -> "oas_proactive"
-  | OAS_emergency -> "oas_emergency"
   | Memory_bank -> "memory_bank"
 
 let compaction_source_of_string_opt (s : string) : compaction_source option =
   match s with
   | "pre_dispatch_hygiene" -> Some Pre_dispatch_hygiene
   | "masc_policy" -> Some MASC_policy
-  | "oas_proactive" -> Some OAS_proactive
-  | "oas_emergency" -> Some OAS_emergency
   | "memory_bank" -> Some Memory_bank
   | _ -> None
 
@@ -374,8 +368,8 @@ let keeper_state_snapshot_to_summary_text (snapshot : keeper_state_snapshot) : s
 (* Gen7 (2026-04-17): snapshot size cap applied before persistence.
 
    Gen3 (PR #7647) trimmed backward fields at prompt injection and
-   Gen4 (PR #7668) scrubbed [STATE] blocks in OAS compaction, both on
-   the consumption side. Growth of [meta.continuity_summary] itself
+   Gen4 (PR #7668) scrubbed [STATE] blocks during runtime compaction
+   on the consumption side. Growth of [meta.continuity_summary] itself
    was still unbounded: if the LLM produces a longer [STATE] block
    each turn (more decisions, longer goal prose), the parsed snapshot
    and its rendered summary grow monotonically.
@@ -812,14 +806,16 @@ let cap_for_kind (caps : (string * int) list) (kind : string) : int =
 
 (** Synthesize a [STATE] block from run metadata when the model omits one.
     Produces a deterministic snapshot from tool usage, stop reason, and goal
-    so generation continuity is never broken. Tagged [SYNTHETIC] for
-    downstream consumers to distinguish from model-generated blocks. *)
+    so generation continuity is never broken. Budget exhaustion is a
+    continuation checkpoint, not a model-authored decision or task
+    completion, so it records only progress and next-cycle guidance. *)
 let synthesize_state_from_run_result
     ~(goal : string)
     ~(tools_used : string list)
     ~(stop_reason : string)
     ~(response_text : string)
     : keeper_state_snapshot =
+  let budget_exhausted = String.equal stop_reason "budget_exhausted" in
   let progress =
     match tools_used with
     | [] -> Some "No tools used this generation"
@@ -828,28 +824,34 @@ let synthesize_state_from_run_result
       Some (Printf.sprintf "Used: %s" (String.concat ", " unique))
   in
   let next_summary =
-    if stop_reason = "budget_exhausted"
+    if budget_exhausted
     then
       Some
         "Resume from the OAS checkpoint and inspect the latest assistant/tool \
          context before choosing the next action."
     else None
   in
-  let response_hint =
-    let trimmed = String.trim response_text in
-    if trimmed = "" then None
-    else
-      Some (String_util.utf8_safe ~max_bytes:103 ~suffix:"..." trimmed
-            |> String_util.to_string)
-  in
   let decisions =
-    match response_hint with
-    | Some hint -> [Keeper_synthetic_marker.tag (Printf.sprintf "Last output: %s" hint)]
-    | None -> [Keeper_synthetic_marker.tag "No visible output this generation"]
+    if budget_exhausted
+    then []
+    else (
+      let response_hint =
+        let trimmed = String.trim response_text in
+        if trimmed = ""
+        then None
+        else
+          Some
+            (String_util.utf8_safe ~max_bytes:103 ~suffix:"..." trimmed
+             |> String_util.to_string)
+      in
+      match response_hint with
+      | Some hint ->
+        [ Keeper_synthetic_marker.tag (Printf.sprintf "Last output: %s" hint) ]
+      | None -> [ Keeper_synthetic_marker.tag "No visible output this generation" ])
   in
   { goal = (let g = String.trim goal in if g = "" then None else Some g);
     progress;
-    done_summary = progress;
+    done_summary = (if budget_exhausted then None else progress);
     next_summary;
     next_items = [];
     decisions;

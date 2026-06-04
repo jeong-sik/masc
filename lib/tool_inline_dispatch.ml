@@ -218,10 +218,10 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.result option =
      no Masc_domain.tool_schema record exists. They are dispatched via
      HTTP routes / inline arms but never advertised to MCP. Promoting
      them to Tool_spec.register requires authoring new input schemas
-     (and for [masc_set_param] / [channel_gate], deciding visibility
-     semantics for MCP exposure). Tracked as RFC-0182 follow-up scope.
-   - [masc_tool_revoke] — already registered via Tool_shard schemas
-     (lib/tool_shard.ml:348). Audit row was a false positive. *)
+     and deciding visibility semantics for MCP exposure. Tracked as
+     RFC-0182 follow-up scope.
+   The retired [masc_tool_*] shard-management tools are intentionally absent
+   from this list and from the MCP ToolSpec surface. *)
 
 let inline_register_targets =
   [ "masc_broadcast"; "masc_messages" ]

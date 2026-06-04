@@ -160,6 +160,8 @@ let rule_label ~tool_name ~input ~risk_level =
 
 let known_code_write_tool tool_name =
   match String.lowercase_ascii (String.trim tool_name) with
+  | "edit"
+  | "write"
   | "writefile"
   | "editfile"
   | "tool_edit_file"

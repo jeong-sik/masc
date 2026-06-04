@@ -20,13 +20,6 @@ type runtime_manifest_scan =
   ; mutable context_compact_started_count : int
   ; mutable context_compacted_count : int
   ; mutable last_compaction : Yojson.Safe.t option
-  ; mutable memory_injected_count : int
-  ; mutable memory_injected_present_count : int
-  ; mutable memory_flushed_count : int
-  ; mutable memory_flush_success_count : int
-  ; mutable memory_flush_error_count : int
-  ; mutable episodes_flushed : int
-  ; mutable procedures_flushed : int
   ; mutable latest_tool_surface_decision : Yojson.Safe.t option
   ; mutable latest_provider_lane_decision : Yojson.Safe.t option
   ; mutable latest_provider_lane_row : Keeper_runtime_manifest.t option
@@ -42,7 +35,6 @@ type runtime_manifest_scan =
   ; mutable provider_terminal_row : Keeper_runtime_manifest.t option
   ; mutable latest_context_injected_row : Keeper_runtime_manifest.t option
   ; mutable latest_context_compacted_row : Keeper_runtime_manifest.t option
-  ; mutable latest_memory_injected_row : Keeper_runtime_manifest.t option
   ; mutable dag_edges : (string * string) list
   }
 

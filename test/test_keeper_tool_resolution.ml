@@ -17,7 +17,6 @@ let test_public_descriptor_admits_execute () =
 
 let test_registry_admits_keeper_board_post () =
   match TR.resolve "keeper_board_post" with
-  | TR.Resolved { via = TR.Tool_name_variant; _ }
   | TR.Resolved { via = TR.Registry_core_tools; _ } -> ()
   | other ->
       fail (Printf.sprintf "expected keeper_board_post to resolve, got: %s"
@@ -38,9 +37,9 @@ let test_unknown_returns_tried_list () =
   match TR.resolve "__nonexistent_tool_xyz" with
   | TR.Unknown { name; tried } ->
       check string "name preserved" "__nonexistent_tool_xyz" name;
-      (* 8 base sources after the dead public MCP replacement source and the
+      (* 7 base sources after Tool_name admission, the dead public MCP source, and the
          per-actor Surface sources were removed. *)
-      check bool "at least 8 tried sources" true (List.length tried >= 8)
+      check bool "at least 7 tried sources" true (List.length tried >= 7)
   | _ ->
       fail "__nonexistent_tool_xyz should be Unknown"
 
@@ -65,8 +64,7 @@ let test_descriptor_registry_admits_masc_keeper_cluster () =
     [ "masc_keeper_msg"; "masc_keeper_msg_result"; "masc_keeper_msg_cancel"; "masc_keeper_msg_queue"; "masc_keeper_list"; "masc_keeper_status" ]
 
 let test_extend_turns_resolved () =
-  (* extend_turns is in core_always_tools (S7: Registry_core_tools) or
-     Tool_name_variant depending on order *)
+  (* extend_turns is in core_always_tools (Registry_core_tools). *)
   match TR.resolve "extend_turns" with
   | TR.Resolved _ -> ()
   | TR.Alias_to _ -> ()
@@ -77,7 +75,7 @@ let test_extend_turns_resolved () =
 let test_tool_execute_resolves () =
   (* Was "resolves via surface"; the per-actor Surface source was removed in
      the surface-cut refactor. tool_execute now resolves via an earlier source
-     (Dispatch_table / Tool_name_variant / Public_descriptor). *)
+     (Dispatch_table / Public_descriptor). *)
   match TR.resolve "tool_execute" with
   | TR.Resolved _ | TR.Alias_to _ -> ()
   | TR.Unknown { tried; _ } ->
@@ -223,9 +221,9 @@ let test_all_policy_tools_resolve () =
       | TR.Unknown _ -> Some name
     ) policy_tool_names
   in
-  check int "all active policy tools should resolve" 0 (List.length unresolved);
   if unresolved <> [] then
-    fail (Printf.sprintf "unresolved: %s" (String.concat ", " unresolved))
+    fail (Printf.sprintf "unresolved: %s" (String.concat ", " unresolved));
+  check int "all active policy tools should resolve" 0 (List.length unresolved)
 
 let test_matrix_report () =
   let results =

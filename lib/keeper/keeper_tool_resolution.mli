@@ -12,7 +12,7 @@ type tried_source =
   | Alias_internal              (** Keeper_tool_alias.is_known_internal *)
   | Registry_internal_candidate (** keeper_internal_candidate_tool_names *)
   | Registry_core_tools         (** effective_core_tools *)
-  | Shard_schema                (** Tool_shard.all_keeper_tool_schemas *)
+  | Tool_schema                 (** Tool_shard.all_keeper_tool_schemas + inline schemas *)
   | Descriptor_registry         (** Keeper_tool_descriptor.all_descriptors public_name (flat SSOT) *)
 
 (** Resolution outcome for a tool name. *)

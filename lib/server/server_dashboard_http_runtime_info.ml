@@ -106,6 +106,57 @@ let git_rev_parse_short_cancel_refresh dir =
     (fun () -> Hashtbl.remove git_rev_parse_short_in_flight dir)
 ;;
 
+let eio_switch_fork_unavailable = function
+  | Invalid_argument msg ->
+    String_util.contains_substring msg "Switch accessed from wrong domain"
+    || String_util.contains_substring msg "Switch finished"
+  | _ -> false
+;;
+
+(* Dashboard shell projections may run on Domain_pool worker domains.  Those
+   domains can read the stale cache, but they must not fork fibers on the
+   server root switch owned by the main Eio domain. *)
+let background_refresh_unavailable_domains : (int, unit) Hashtbl.t = Hashtbl.create 4
+let background_refresh_unavailable_domains_mu = Stdlib.Mutex.create ()
+
+let current_domain_id () = (Domain.self () :> int)
+
+let background_refresh_domain_unavailable () =
+  Stdlib.Mutex.lock background_refresh_unavailable_domains_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock background_refresh_unavailable_domains_mu)
+    (fun () -> Hashtbl.mem background_refresh_unavailable_domains (current_domain_id ()))
+;;
+
+let background_refresh_mark_domain_unavailable () =
+  Stdlib.Mutex.lock background_refresh_unavailable_domains_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock background_refresh_unavailable_domains_mu)
+    (fun () -> Hashtbl.replace background_refresh_unavailable_domains (current_domain_id ()) ())
+;;
+
+let background_refresh_clear_unavailable_domains_for_tests () =
+  Stdlib.Mutex.lock background_refresh_unavailable_domains_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock background_refresh_unavailable_domains_mu)
+    (fun () -> Hashtbl.clear background_refresh_unavailable_domains)
+;;
+
+let fork_background_refresh_or_cancel ~dir ~cancel_refresh run =
+  if background_refresh_domain_unavailable ()
+  then cancel_refresh dir
+  else match Eio_context.get_switch_opt () with
+  | None -> cancel_refresh dir
+  | Some sw ->
+    (try Eio.Fiber.fork ~sw run with
+     | exn when eio_switch_fork_unavailable exn ->
+       background_refresh_mark_domain_unavailable ();
+       cancel_refresh dir
+     | exn ->
+       cancel_refresh dir;
+       raise exn)
+;;
+
 let git_rev_parse_short_probe_argv dir =
   [ "git"; "-C"; dir; "--no-optional-locks"; "rev-parse"; "--short"; "HEAD" ]
 ;;
@@ -151,12 +202,12 @@ let git_rev_parse_short_refresh dir =
 ;;
 
 let maybe_refresh_git_rev_parse_short_in_background dir =
-  match Eio_context.get_switch_opt () with
-  | None -> ()
-  | Some sw ->
-    if git_rev_parse_short_try_begin_refresh dir
-    then
-      Eio.Fiber.fork ~sw (fun () ->
+  if git_rev_parse_short_try_begin_refresh dir
+  then
+    fork_background_refresh_or_cancel
+      ~dir
+      ~cancel_refresh:git_rev_parse_short_cancel_refresh
+      (fun () ->
         try
           let _ = git_rev_parse_short_refresh dir in
           ()
@@ -362,12 +413,12 @@ let git_upstream_status_refresh dir =
 ;;
 
 let maybe_refresh_git_upstream_status_in_background dir =
-  match Eio_context.get_switch_opt () with
-  | None -> ()
-  | Some sw ->
-    if git_upstream_status_try_begin_refresh dir
-    then
-      Eio.Fiber.fork ~sw (fun () ->
+  if git_upstream_status_try_begin_refresh dir
+  then
+    fork_background_refresh_or_cancel
+      ~dir
+      ~cancel_refresh:git_upstream_status_cancel_refresh
+      (fun () ->
         try
           let _ = git_upstream_status_refresh dir in
           ()
@@ -529,6 +580,7 @@ let deployment_state_json
 ;;
 
 let clear_git_rev_parse_short_cache_for_tests () =
+  background_refresh_clear_unavailable_domains_for_tests ();
   Stdlib.Mutex.lock git_rev_parse_short_mu;
   Fun.protect
     ~finally:(fun () -> Stdlib.Mutex.unlock git_rev_parse_short_mu)
@@ -547,6 +599,7 @@ let seed_git_rev_parse_short_cache_for_tests dir value ~refreshed_at =
 ;;
 
 let clear_git_upstream_status_cache_for_tests () =
+  background_refresh_clear_unavailable_domains_for_tests ();
   Stdlib.Mutex.lock git_upstream_status_mu;
   Fun.protect
     ~finally:(fun () -> Stdlib.Mutex.unlock git_upstream_status_mu)

@@ -36,23 +36,21 @@ let all_descriptors () : Descriptor.t list = Descriptor.all_descriptors ()
    [filter (visibility = Public_mcp) all_descriptors], deleting the hand
    list entirely.
 
-   Until RFC-0190 P1-P3 land, 6 surface entries have no descriptor at all
-   because their handlers live in [Tool_inline_dispatch] (MCP server-level
-   inline path), not in the [runtime_handler] enum the descriptor system
-   dispatches through.  These 6 are enumerated below as the
-   [rfc_0190_pending_inline_migration] allowlist.
+   Some surface entries intentionally have no descriptor at all because their
+   handlers live outside the keeper descriptor spine. These entries are
+   enumerated below as the [public_mcp_non_descriptor] allowlist.
 
    This invariant test exists to ratchet that allowlist toward empty:
    - Adding a new surface entry without a descriptor fails the test.
-   - Adding a descriptor for any of the 9 allowlist entries fails the
+   - Adding a descriptor for any allowlist entry fails the
      test (allowlist must shrink), forcing the allowlist edit to live in
      the same PR as the descriptor add.
 
    When the allowlist hits zero, RFC-0190 P4 lands [public_mcp_surface_tools]
    as a function over [all_descriptors] and this test is rewritten to
    forbid any pending entries. *)
-let rfc_0190_pending_inline_migration =
-  Masc.Keeper_tool_name.pending_public_mcp_inline_names
+let public_mcp_non_descriptor =
+  Masc.Keeper_tool_name.public_mcp_non_descriptor_names
 ;;
 
 let descriptor_internal_name_set () =
@@ -505,7 +503,8 @@ let test_mcp_context_policy_uses_descriptor_resolution () =
   Alcotest.(check bool)
     "last-turn-safe fallback includes SDK core extend_turns"
     true
-    (List.mem "extend_turns" (Policy.last_turn_safe_tool_names ()))
+    (List.mem "extend_turns" (Policy.last_turn_safe_tool_names ()));
+  ()
 ;;
 
 let test_public_name_projection_uses_descriptor_resolution () =
@@ -611,21 +610,15 @@ let test_mutation_boundary_delegates_to_descriptor_policy () =
        ~tool_name:"Execute"
        ~input:(`Assoc [ "executable", `String "git"; "argv", `List [ `String "status" ] ]))
 
-(* RFC-0182 §3.1 — verify the tool_shard / persona /
-   keeper / surface_audit descriptors all project from name → descriptor
+(* RFC-0182 §3.1 — verify keeper / surface_audit descriptors project from name
+   → descriptor
    via [descriptors_for_internal] with the expected [runtime_handler].
 
    This catches future typos in the [~name:"masc_X"] strings (which the
    compiler cannot see) and missing cluster builder calls in
    [internal_descriptors]. *)
 let cluster_projection_table =
-  [ "masc_tool_list", "tool_masc_tool_shard_dispatch"
-  ; "masc_tool_grant", "tool_masc_tool_shard_dispatch"
-  ; "masc_tool_revoke", "tool_masc_tool_shard_dispatch"
-  ; "masc_persona_list", "tool_masc_persona_dispatch"
-  ; "masc_persona_schema", "tool_masc_persona_dispatch"
-  ; "masc_persona_save", "tool_masc_persona_dispatch"
-  ; "masc_keeper_list", "tool_masc_keeper_dispatch"
+  [ "masc_keeper_list", "tool_masc_keeper_dispatch"
   ; "masc_keeper_msg_result", "tool_masc_keeper_dispatch"
   ; "masc_keeper_msg_cancel", "tool_masc_keeper_dispatch"
   ; "masc_keeper_msg_queue", "tool_masc_keeper_dispatch"
@@ -659,13 +652,13 @@ let test_rfc_0182_clusters_have_descriptor_projection () =
 ;;
 
 (* RFC-0190 — every entry of [public_mcp_surface_tools] must either have
-   a descriptor or be on the [rfc_0190_pending_inline_migration]
+   a descriptor or be on the [public_mcp_non_descriptor]
    allowlist. New surface additions without a descriptor are rejected. *)
 let test_rfc_0190_surface_covered_by_descriptor_or_allowlist () =
   let descriptor_names = descriptor_internal_name_set () in
   let allowlist =
     let tbl = Hashtbl.create 16 in
-    List.iter (fun n -> Hashtbl.replace tbl n ()) rfc_0190_pending_inline_migration;
+    List.iter (fun n -> Hashtbl.replace tbl n ()) public_mcp_non_descriptor;
     tbl
   in
   let surface = Tool_catalog_surfaces.public_mcp_surface_tools in
@@ -680,9 +673,8 @@ let test_rfc_0190_surface_covered_by_descriptor_or_allowlist () =
   then
     Alcotest.failf
       "public_mcp_surface_tools has %d entries with no descriptor and no \
-       RFC-0190 allowlist slot: %s. Either add a descriptor (preferred, \
-       see RFC-0190 P1-P3) or extend [rfc_0190_pending_inline_migration] \
-       with explicit justification."
+       RFC-0190 allowlist slot: %s. Either add a descriptor or extend \
+       [public_mcp_non_descriptor] with explicit justification."
       (List.length missing)
       (String.concat ", " missing)
 ;;
@@ -694,12 +686,12 @@ let test_rfc_0190_surface_covered_by_descriptor_or_allowlist () =
 let test_rfc_0190_allowlist_has_no_descriptor () =
   let descriptor_names = descriptor_internal_name_set () in
   let stale =
-    List.filter (Hashtbl.mem descriptor_names) rfc_0190_pending_inline_migration
+    List.filter (Hashtbl.mem descriptor_names) public_mcp_non_descriptor
   in
   if stale <> []
   then
     Alcotest.failf
-      "rfc_0190_pending_inline_migration lists %d entries that now have \
+      "public_mcp_non_descriptor lists %d entries that now have \
        descriptors and must be removed from the allowlist: %s"
       (List.length stale)
       (String.concat ", " stale)
@@ -743,7 +735,7 @@ let () =
         ] )
     ; ( "rfc-0182-clusters"
       , [ test_case
-            "tool_shard/approval/persona/keeper/surface_audit project to descriptors"
+            "keeper/surface_audit project to descriptors"
             `Quick
             test_rfc_0182_clusters_have_descriptor_projection
         ] )
@@ -753,7 +745,7 @@ let () =
             `Quick
             test_rfc_0190_surface_covered_by_descriptor_or_allowlist
         ; test_case
-            "rfc_0190_pending_inline_migration shrinks when a descriptor lands"
+            "public_mcp_non_descriptor shrinks when a descriptor lands"
             `Quick
             test_rfc_0190_allowlist_has_no_descriptor
         ] )

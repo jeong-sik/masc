@@ -21,7 +21,7 @@
     [context_max_of_telemetry]. *)
 include Keeper_hooks_oas_types
 
-open Keeper_hooks_oas_gate_attempt
+open Keeper_hooks_oas_guard_attempt
 
 (** Keeper deny list. The legacy must-deny surface is gone; keep the hook
     argument explicit so callers still receive a stable field. *)
@@ -239,7 +239,7 @@ let make_hooks
   let streak_state = Keeper_guards.make_streak_state () in
   let streak_threshold = 5 in
   let record_gate_decision event =
-    record_pre_tool_gate_attempt
+    record_guard_attempt
       ~meta_ref
       ~tool_call_count_ref
       ?trajectory_acc

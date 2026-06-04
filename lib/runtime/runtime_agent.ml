@@ -43,7 +43,6 @@ type config =
   checkpoint_dir : string option;
   session_id : string option;
   description : string option;
-  memory : Agent_sdk.Memory.t option;
   initial_messages : Agent_sdk.Types.message list;
   raw_trace : Agent_sdk.Raw_trace.t option;
   tool_retry_policy : Agent_sdk.Tool_retry_policy.t option;
@@ -90,7 +89,7 @@ type worker_lifecycle_classification =
 let worker_lifecycle_classification_of_result = function
   | Ok _ -> { event = "completed"; status = "completed"; error = None }
   | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.MaxTurnsExceeded _)) ->
-    { event = "completed"; status = "budget_exhausted"; error = None }
+    { event = "completed"; status = "continuation_checkpoint"; error = None }
   | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionTimeout _)) ->
     { event = "failed"; status = "agent_execution_timeout"; error = None }
   | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionIdleTimeout _)) ->
@@ -385,7 +384,7 @@ let run_duration_ms_since started_at =
 
 let dashboard_status_of_stop_reason = function
   | Completed -> Dashboard_oas_bridge.Success
-  | TurnBudgetExhausted _ -> Dashboard_oas_bridge.Timeout
+  | TurnBudgetExhausted _ -> Dashboard_oas_bridge.Success
   | MutationBoundaryReached _ ->
       Dashboard_oas_bridge.Cancelled { reason = "mutation_boundary_reached" }
 
@@ -609,12 +608,15 @@ let run
       let partial_response =
         partial_response_of_stop
           ~session_id
-          ~text:(Printf.sprintf
-            "[turn budget exhausted: %d/%d turns used]" r.turns r.limit)
+          ~text:
+            "Continuation checkpoint saved; keeper remains scheduled for the \
+             next cycle."
       in
       record_dashboard_oas_response ~config
         ~total_duration_ms:run_total_duration_ms
-        ~status:Dashboard_oas_bridge.Timeout partial_response;
+        ~status:(dashboard_status_of_stop_reason
+                   (TurnBudgetExhausted { turns_used = r.turns; limit = r.limit }))
+        partial_response;
       let runtime_observation =
         runtime_observation_for_completed_config
           ~total_duration_ms:run_total_duration_ms config

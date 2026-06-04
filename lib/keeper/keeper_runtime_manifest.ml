@@ -90,7 +90,7 @@ let int_field_opt key value =
 
 let clock_refs ?edge_id ?lane ?source_clock ?observed_at ?started_at
     ?finished_at ?elapsed_ms ?provider_attempt_id ?tool_batch_id ?checkpoint_id
-    ?compaction_id ?compaction_source ?memory_injection_id ?event_bus_correlation_id
+    ?compaction_id ?compaction_source ?event_bus_correlation_id
     ?event_bus_run_id ?parent_event_id ?caused_by ?logical_seq () =
   `Assoc
     (List.filter_map
@@ -109,7 +109,6 @@ let clock_refs ?edge_id ?lane ?source_clock ?observed_at ?started_at
          string_field_opt "checkpoint_id" checkpoint_id;
          string_field_opt "compaction_id" compaction_id;
          string_field_opt "compaction_source" compaction_source;
-         string_field_opt "memory_injection_id" memory_injection_id;
          string_field_opt "event_bus_correlation_id" event_bus_correlation_id;
          string_field_opt "event_bus_run_id" event_bus_run_id;
          string_field_opt "parent_event_id" parent_event_id;
@@ -204,9 +203,7 @@ let clock_lane_of_event = function
     "oas_agent"
   | Context_injected
   | Context_compacted
-  | Event_bus_correlated
-  | Memory_injected
-  | Memory_flushed ->
+  | Event_bus_correlated ->
     "memory_context"
 
 let turn_label ctx =
@@ -233,10 +230,6 @@ let context_checkpoint_id ctx ?oas_turn_count () =
 let context_compaction_id ctx ~source =
   Printf.sprintf "%s:keeper-%s:compaction-%s"
     ctx.manifest_trace_id (turn_label ctx) source
-
-let context_memory_injection_id ctx ?oas_turn_count () =
-  Printf.sprintf "%s:keeper-%s:memory-oas-%s" ctx.manifest_trace_id
-    (turn_label ctx) (oas_turn_label oas_turn_count)
 
 let clock_refs_for_context ctx ~event ?oas_turn_count ?elapsed_ms
     ?event_bus_correlation_id ?event_bus_run_id ?parent_event_id ?caused_by
@@ -265,17 +258,10 @@ let clock_refs_for_context ctx ~event ?oas_turn_count ?elapsed_ms
       Some (context_compaction_id ctx ~source:(Option.value ~default:"event_bus" compaction_source))
     | _ -> None
   in
-  let memory_injection_id =
-    match event with
-    | Memory_injected
-    | Memory_flushed ->
-      Some (context_memory_injection_id ctx ?oas_turn_count ())
-    | _ -> None
-  in
   clock_refs ~edge_id:(context_edge_id ctx event)
     ~lane:(clock_lane_of_event event) ~source_clock:(source_clock_of_event event)
     ?elapsed_ms ?tool_batch_id
-    ?checkpoint_id ?compaction_id ?compaction_source ?memory_injection_id
+    ?checkpoint_id ?compaction_id ?compaction_source
     ?event_bus_correlation_id ?event_bus_run_id ?parent_event_id ?caused_by
     ?logical_seq ()
 
@@ -392,7 +378,7 @@ let decision_public_allowlist =
   StringSet.of_list
     [ "edge_id"; "lane"; "source_clock"; "observed_at"; "started_at"; "finished_at"
     ; "elapsed_ms"; "provider_attempt_id"; "tool_batch_id"; "checkpoint_id"
-    ; "compaction_id"; "memory_injection_id"; "event_bus_correlation_id"
+    ; "compaction_id"; "event_bus_correlation_id"
     ; "event_bus_run_id"; "parent_event_id"; "caused_by"; "logical_seq"
     ; "compaction_source"; "repair_reason"; "matched_started_ts"
     ; "matched_started_status"; "error"; "exception_kind"; "latency_ms"
@@ -401,7 +387,6 @@ let decision_public_allowlist =
     ; "liveness_mode"; "liveness_budget_source"
     ; "context_compact_started_count"; "context_compacted_count"
     ; "last_compaction"; "active_open_loop_count"
-    ; "episodes_flushed"; "procedures_flushed"
     ; "clock_refs"
     ]
 
@@ -409,9 +394,8 @@ let clock_refs_public_allowlist =
   StringSet.of_list
     [ "edge_id"; "lane"; "source_clock"; "observed_at"; "started_at"; "finished_at"
     ; "elapsed_ms"; "provider_attempt_id"; "tool_batch_id"; "checkpoint_id"
-    ; "compaction_id"; "compaction_source"; "memory_injection_id"
-    ; "event_bus_correlation_id"; "event_bus_run_id"; "parent_event_id"
-    ; "caused_by"; "logical_seq"
+    ; "compaction_id"; "compaction_source"; "event_bus_correlation_id"
+    ; "event_bus_run_id"; "parent_event_id"; "caused_by"; "logical_seq"
     ]
 
 let rec reject_unknown_fields ~allowlist path = function

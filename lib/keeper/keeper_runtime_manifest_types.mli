@@ -13,8 +13,6 @@ type event_kind =
   | State_snapshot_sidecar_saved
   | Working_state_sidecar_saved
   | Event_bus_correlated
-  | Memory_injected
-  | Memory_flushed
   | Checkpoint_loaded
   | Checkpoint_saved
   | Receipt_appended

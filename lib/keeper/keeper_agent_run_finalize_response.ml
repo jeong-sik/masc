@@ -19,7 +19,6 @@ let finalize
     ~(append_manifest : Keeper_agent_run_sidecar.append_manifest_fn)
     ~model
     ~(acc : Keeper_run_tools.hook_accumulator)
-    ~memory
     ~actual_keeper_tool_names
     ~actual_keeper_tool_names_ref
     ~(result : Runtime_agent.run_result)
@@ -168,7 +167,6 @@ let finalize
     Keeper_agent_run_post_turn_memory.run
       ~config
       ~meta
-      ~memory
       ~turn:manifest_keeper_turn_id
       ~oas_turn_count:result.turns
       ~response_text

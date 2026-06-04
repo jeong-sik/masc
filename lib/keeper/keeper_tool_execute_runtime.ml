@@ -302,6 +302,12 @@ let handle_tool_execute_typed
             ~cmd
             effective_stages
         in
+        let root_git_cwd_error =
+          match root_git_cwd_error with
+          | Some e -> Some e
+          | None ->
+            Keeper_tool_execute_command_semantics.misuse_error_of_stages effective_stages
+        in
         let input = input_with_cwd cwd input in
         let in_playground = Keeper_tool_execute_path.in_playground ~root ~cwd ~meta in
         let sandbox_profile, _sandbox_network_mode =
@@ -458,11 +464,20 @@ let handle_tool_execute_typed
           let dispatch_result =
             Keeper_tool_execute_shell_ir.dispatch_classified
               ~before_path_validation:(fun ir ->
-                Keeper_tool_execute_path.validate_repo_path_args_ready
-                  ~config
-                  ~meta
-                  ~cwd
-                  ir)
+                match
+                  Keeper_tool_execute_path.validate_repo_cwd_currency_ready
+                    ~config
+                    ~meta
+                    ~cwd
+                    ir
+                with
+                | Error _ as err -> err
+                | Ok () ->
+                  Keeper_tool_execute_path.validate_repo_path_args_ready
+                    ~config
+                    ~meta
+                    ~cwd
+                    ir)
               ~allowed_commands
               ~keeper_id:meta.name
               ~base_path:root

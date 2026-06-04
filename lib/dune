@@ -407,6 +407,12 @@
    ;; lib/dashboard_eval_feed/. 178+59 LoC, deps: stdlib + Yojson +
    ;; agent_sdk + masc_core (Json_util/Safe_ops).
    masc.dashboard_eval_feed
+   ;; RFC-0056 Phase 1 — Dashboard_tla_specs leaf module extracted to
+   ;; lib/dashboard_tla_specs/. 330+87 LoC, deps: stdlib + Yojson + Unix +
+   ;; fs_compat (Fs_compat) + masc_core (Json_util/String_util) +
+   ;; masc_types (Masc_domain). TLA+ spec / TLC-result dashboard projection;
+   ;; bare caller is server_routes_http_routes_verification (flat masc ns).
+   masc.dashboard_tla_specs
    ;; RFC-0004 Phase A0.1 PR-1 — Typed SSE event lib (lib/sse_event/).
    ;; atdgen-generated payload types + hand-rolled envelope wrap that
    ;; mirrors runtime_event_bridge.wrap_event and

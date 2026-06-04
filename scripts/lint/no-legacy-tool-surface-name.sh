@@ -1,17 +1,19 @@
 #!/usr/bin/env bash
 # Guard against re-emergence of pre-RFC-0064 public tool names in the
-# descriptor-backed tool surface and keeper-facing prompt/persona files.
+# descriptor-backed tool surface and keeper-facing prompt/persona/config files.
 #
 # After RFC-0202 tool name alignment, the active LLM-native public names are:
-#   Execute, Read, Edit, Write, Grep, WebSearch, WebFetch
+#   Execute, Read, Edit, Write, Grep, Search, WebSearch, WebFetch
 #
 # The retired names — Bash, ReadFile, WriteFile, EditFile, SearchFiles,
 # SearchWeb, FetchWeb — must not reappear as quoted string literals in active
-# tool-surface modules or as prompt-visible tool names in keeper prompts and
-# personas. This script is intentionally narrow: it only scans files that
-# declare/route public tool names plus prompt/persona files that tell keepers
-# what to call. Identifiers and code symbols (e.g. OCaml `Read` modules) are
-# untouched.
+# tool-surface modules or as prompt-visible tool names in keeper prompts,
+# personas, and keeper TOML configs. Prompt-visible text must also not tell
+# keepers to call stale implementation names such as keeper_bash or
+# keeper_shell. This script is intentionally narrow: it only scans files that
+# declare/route public tool names plus prompt/persona/config files that tell
+# keepers what to call. Identifiers and code symbols (e.g. OCaml `Read`
+# modules) are untouched.
 #
 # Baseline = 0 occurrences. Allowlist is a debt ledger; entries are exact
 # `path:line:literal` keys that drift with line numbers, forcing same-PR
@@ -65,15 +67,17 @@ SCAN_GLOBS=(
 )
 
 PROMPT_SCAN_FILES=("docs/KEEPER-CAPABILITY-MATRIX.md")
-for prompt_dir in config/prompts config/personas; do
+for prompt_dir in config/prompts config/personas config/keepers; do
   [[ -d "$prompt_dir" ]] || continue
   while IFS= read -r prompt_file; do
     PROMPT_SCAN_FILES+=("$prompt_file")
   done < <(find "$prompt_dir" -type f | sort)
 done
 
-LITERAL_PATTERN='"(Bash|ReadFile|WriteFile|EditFile|SearchFiles|SearchWeb|FetchWeb)"'
-PROMPT_TOKEN_PATTERN='\b(Bash|ReadFile|WriteFile|EditFile|SearchFiles|SearchWeb|FetchWeb)\b'
+RETIRED_PUBLIC_NAME_PATTERN='Bash|ReadFile|WriteFile|EditFile|SearchFiles|SearchWeb|FetchWeb'
+STALE_KEEPER_IMPLEMENTATION_PATTERN='keeper_bash|keeper_shell|keeper_fs_read|keeper_fs_edit|keeper_fs_write|keeper_fs_delete'
+LITERAL_PATTERN='"('"$RETIRED_PUBLIC_NAME_PATTERN"')"'
+PROMPT_TOKEN_PATTERN='\b('"$RETIRED_PUBLIC_NAME_PATTERN"'|'"$STALE_KEEPER_IMPLEMENTATION_PATTERN"')\b'
 
 current_tmp="$(mktemp -t legacy-tool-surface-name.current.XXXXXX)"
 allow_tmp="$(mktemp -t legacy-tool-surface-name.allow.XXXXXX)"
@@ -139,9 +143,9 @@ fail=0
 
 if [[ -s "$new_tmp" ]]; then
   echo
-  echo "[no-legacy-tool-surface-name] DRIFT UP: legacy public tool name re-emerged in active surface" >&2
+  echo "[no-legacy-tool-surface-name] DRIFT UP: legacy tool name re-emerged in active surface" >&2
   sed 's/^/  - /' "$new_tmp" >&2
-  echo "  Use the descriptor-owned name (Execute, Read, Edit, Write, Grep, WebSearch, WebFetch)." >&2
+  echo "  Use the descriptor-owned name (Execute, Read, Edit, Write, Grep, Search, WebSearch, WebFetch)." >&2
   echo "  See lib/keeper/keeper_tool_descriptor.ml for the canonical surface." >&2
   fail=1
 fi

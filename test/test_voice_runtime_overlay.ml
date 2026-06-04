@@ -1,5 +1,5 @@
 open Alcotest
-module Voice = Masc.Voice_runtime_overlay
+module Voice = Voice_runtime_overlay
 
 let with_env name value f =
   let previous = Sys.getenv_opt name in

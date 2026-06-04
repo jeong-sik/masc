@@ -54,7 +54,6 @@
    keeper_tool_dispatch_runtime
   keeper_status_metrics
   keeper_status_runtime
-  voice_runtime_overlay
   keeper_status_detail_observability
   keeper_status_detail
   keeper_tool_persona_runtime
@@ -253,6 +252,7 @@
    masc.otel_trace_context
    masc.otel_dispatch_hook
    masc.voice_config
+   masc.voice_runtime_overlay
    ;; RFC-0056 Phase 1L — Attribution envelope extracted to lib/attribution/.
    ;; Pure Attribution + phantom-tagged helpers, deps: stdlib + Yojson only.
    masc.attribution

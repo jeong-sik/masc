@@ -274,7 +274,8 @@ let test_descriptor_to_pr_event () =
       ~keeper_id:"k1"
       ~turn_id:"t1"
       ~output_text:output
-      ~tool_name:"execute";
+      ~tool_name:"execute"
+      ~success:true;
     let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Orphan in
     let path = Filename.concat dir "pr_events.jsonl" in
     check bool "file exists" true (Sys.file_exists path);
@@ -296,7 +297,8 @@ let test_descriptor_merge_event () =
       ~keeper_id:"k1"
       ~turn_id:"t1"
       ~output_text:output
-      ~tool_name:"execute";
+      ~tool_name:"execute"
+      ~success:true;
     let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Orphan in
     let path = Filename.concat dir "pr_events.jsonl" in
     check bool "file exists" true (Sys.file_exists path);

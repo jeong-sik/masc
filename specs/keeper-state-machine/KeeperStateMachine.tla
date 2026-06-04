@@ -12,7 +12,7 @@
 \*   - Budget monotonicity (restart_budget_remaining never revives)
 \*   - Overflowed transitions bounded (auto-compact or Paused, never loops)
 \*
-\* Mirrors: lib/keeper/keeper_state_machine.ml
+\* Mirrors: lib/keeper_state/keeper_state_machine.ml
 
 EXTENDS Naturals, FiniteSets
 
@@ -174,7 +174,7 @@ CompactionStarted ==
 \* Clears the overflow flags together with the retry latch; the keeper
 \* returns to a fresh post-compact state.  Mirrors the OCaml
 \* [Compaction_completed] arm when [before_tokens > after_tokens]
-\* (lib/keeper/keeper_state_machine.ml §saved_tokens > 0).
+\* (lib/keeper_state/keeper_state_machine.ml §saved_tokens > 0).
 CompactionCompletedWithSavings ==
     /\ NotTerminal /\ compaction_active
     /\ compaction_active' = FALSE

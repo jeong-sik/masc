@@ -57,11 +57,11 @@
 \*
 \* compaction_stage variant ↔ OCaml: TLA models {accumulating, compacting,
 \* done}; OCaml runtime uses the same labels in
-\* lib/keeper/keeper_registry.ml + lib/keeper/keeper_state_machine.ml
+\* lib/keeper/keeper_registry.ml + lib/keeper_state/keeper_state_machine.ml
 \* (search "compaction_stage").
 \*
 \* retry_exhausted boolean ↔ OCaml: latched by Compact_retry_exhausted
-\* event; cleared by Compaction_completed (lib/keeper/keeper_state_machine.ml).
+\* event; cleared by Compaction_completed (lib/keeper_state/keeper_state_machine.ml).
 
 EXTENDS TLC
 

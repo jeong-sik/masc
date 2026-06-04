@@ -272,14 +272,14 @@ let test_compact_session_strict_keys () =
         "session_id"; "goal"; "project"; "status"; "agent_names";
         "elapsed_sec"; "progress_pct"; "done_delta_total";
         "team_health"; "active_agents_count"; "required_agents";
-        "communication_mode"; "broadcast_count"; "portal_count";
+        "communication_mode"; "broadcast_count";
         "communication_summary"; "last_event";
       ]
   in
   assert (assoc_keys_sorted out = expected_keys)
 
 let test_compact_session_communication_summary_format () =
-  (* "%s · broadcast %d · portal %d" *)
+  (* "%s · broadcast %d" *)
   let s =
     session_fixture ~comm_mode:"async" ~broadcast:7 ~portal:11 ()
   in
@@ -291,7 +291,7 @@ let test_compact_session_communication_summary_format () =
         | Some (`String s) -> s
         | _ -> ""
       in
-      assert (summary = "async \xc2\xb7 broadcast 7 \xc2\xb7 portal 11")
+      assert (summary = "async \xc2\xb7 broadcast 7")
   | _ -> assert false
 
 (* ── (3) last_event sentinel when recent_events empty ─────── *)

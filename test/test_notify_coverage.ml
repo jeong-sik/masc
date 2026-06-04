@@ -1,7 +1,7 @@
 (** Notify Module Coverage Tests
 
     Tests for macOS Notification system:
-    - event type: Mention, Interrupt, PortalMessage, TaskCompleted, Custom
+    - event type: Mention, Interrupt, TaskCompleted, Custom
     - focus_payload record type
     - sanitize_token: shell-safe identifier sanitization
     - token_value: optional token extraction
@@ -284,19 +284,6 @@ let test_event_interrupt () =
     check string "action" "stop" action
   | _ -> fail "expected Interrupt"
 
-let test_event_portal_message () =
-  let e : Notify.event = PortalMessage {
-    from_agent = "agent_code";
-    target_agent = None;
-    message = "data";
-  } in
-  match e with
-  | Notify.PortalMessage { from_agent; target_agent; message } ->
-    check string "from_agent" "agent_code" from_agent;
-    check (option string) "target_agent" None target_agent;
-    check string "message" "data" message
-  | _ -> fail "expected PortalMessage"
-
 let test_event_task_completed () =
   let e : Notify.event = TaskCompleted { agent = "agent_llm_a"; task_id = "task-001" } in
   match e with
@@ -426,7 +413,6 @@ let () =
     "event", [
       test_case "mention" `Quick test_event_mention;
       test_case "interrupt" `Quick test_event_interrupt;
-      test_case "portal message" `Quick test_event_portal_message;
       test_case "task completed" `Quick test_event_task_completed;
       test_case "custom" `Quick test_event_custom;
     ];

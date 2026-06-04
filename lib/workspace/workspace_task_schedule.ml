@@ -627,7 +627,7 @@ let release_stale_claims config ~ttl_seconds =
              | InvalidJson _ | InvalidFilePath _ | StorageError _
              | ValidationError _) ->
       false
-    | Task _ | Agent _ | Auth _ | Portal _ | RateLimitExceeded _ | CacheError _ ->
+    | Task _ | Agent _ | Auth _ | RateLimitExceeded _ | CacheError _ ->
       false
   in
   let release_under_lock () =

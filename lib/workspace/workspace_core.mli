@@ -1,7 +1,7 @@
 (** MASC Workspace - Core workspace hub.
 
     This module ties together all Workspace sub-modules (utils, state, lifecycle,
-    init, status, task, query, agent, portal, gc). *)
+    init, status, task, query, agent, gc). *)
 
 (** {1 Included sub-modules} *)
 

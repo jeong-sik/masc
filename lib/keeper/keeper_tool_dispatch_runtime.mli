@@ -158,7 +158,7 @@ val keeper_masc_tool_names : keeper_meta -> string list
 (** masc_* tool schemas available for a keeper (filtered by allowlist/denylist). *)
 val keeper_masc_tool_schemas : keeper_meta -> Masc_domain.tool_schema list
 
-(** Compute the keeper's sender identity for portals and broadcasts.
+(** Compute the keeper's sender identity for broadcasts.
     Guards against double "keeper-" prefix. See #5104. *)
 
 val execute_keeper_tool_call_with_outcome

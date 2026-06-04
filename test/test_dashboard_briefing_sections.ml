@@ -199,7 +199,7 @@ let test_compact_session_json_normalizes_missing_fields () =
   check_int_field compact "active_agents_count" 0;
   check_string_field compact "communication_mode" "<missing status>";
   check_string_field compact "communication_summary"
-    "<missing status> · broadcast 0 · portal 0"
+    "<missing status> · broadcast 0"
 
 let test_compact_keeper_json_normalizes_missing_fields () =
   let json =
@@ -425,7 +425,7 @@ let test_build_briefing_sections_keeps_metadata_evidence_visible () =
         ("communication_mode", `String "broadcast");
         ("broadcast_count", `Int 1);
         ("portal_count", `Int 0);
-        ("communication_summary", `String "broadcast · broadcast 1 · portal 0");
+        ("communication_summary", `String "broadcast · broadcast 1");
         ("last_event", `Assoc []);
       ]
   in

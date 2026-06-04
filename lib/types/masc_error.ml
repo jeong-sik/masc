@@ -147,24 +147,6 @@ module Auth_error = struct
     | InvalidToken reason -> Printf.sprintf "[AuthError] Invalid token: %s" reason
 end
 
-module Portal_error = struct
-  type t =
-    | NotOpen of string
-    | AlreadyOpen of { agent: string; target: string }
-    | Closed of string
-
-  let to_string = function
-    | NotOpen agent ->
-        Printf.sprintf
-          "[PortalError] No portal open for %s. Use masc_portal_open first."
-          agent
-    | AlreadyOpen { agent; target } -> Printf.sprintf "[PortalError] Portal already open: %s <-> %s" agent target
-    | Closed agent ->
-        Printf.sprintf
-          "[PortalError] Portal is closed for %s. Use masc_portal_open to reopen."
-          agent
-end
-
 module System_error = struct
   type t =
     | NotInitialized
@@ -200,7 +182,6 @@ type t =
   | Task of Task_error.t
   | Agent of Agent_error.t
   | Auth of Auth_error.t
-  | Portal of Portal_error.t
   | System of System_error.t
   | RateLimitExceeded of rate_limit_error
   | CacheError of cache_error
@@ -209,7 +190,6 @@ let to_string = function
   | Task e -> Task_error.to_string e
   | Agent e -> Agent_error.to_string e
   | Auth e -> Auth_error.to_string e
-  | Portal e -> Portal_error.to_string e
   | System e -> System_error.to_string e
   | RateLimitExceeded e ->
       Printf.sprintf "[RateLimit] Rate limit exceeded (%s): %d/%d requests. Wait %d seconds."
@@ -237,9 +217,6 @@ let code = function
          | Task_error.InvalidState _
          | Task_error.InvalidId _) -> 400
   | Agent (Agent_error.InvalidName _) -> 400
-  | Portal (Portal_error.NotOpen _
-           | Portal_error.AlreadyOpen _
-           | Portal_error.Closed _) -> 400
   | System (System_error.NotInitialized
            | System_error.AlreadyInitialized
            | System_error.InvalidJson _
@@ -259,7 +236,7 @@ let code = function
    2026-04-29 OAS↔MASC Implementation Quality Audit
    §"Re-tryability". *)
 let is_retryable = function
-  | Task _ | Agent _ | Portal _ -> false
+  | Task _ | Agent _ -> false
   | Auth (Auth_error.TokenExpired _) -> true
   | Auth (Auth_error.Unauthorized _ | Auth_error.Forbidden _
          | Auth_error.InvalidToken _) -> false

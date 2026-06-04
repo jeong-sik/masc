@@ -100,7 +100,6 @@ let compact_session_json session_json =
     string_json ~default:missing_status (member_assoc "mode" communication)
   in
   let broadcast_count = int_json (member_assoc "broadcast_count" communication) in
-  let portal_count = int_json (member_assoc "portal_count" communication) in
   let communication_mode_text =
     match communication_mode with
     | `String value -> value
@@ -108,11 +107,6 @@ let compact_session_json session_json =
   in
   let broadcast_count_value =
     match broadcast_count with
-    | `Int value -> value
-    | _ -> 0
-  in
-  let portal_count_value =
-    match portal_count with
     | `Int value -> value
     | _ -> 0
   in
@@ -134,11 +128,10 @@ let compact_session_json session_json =
       ("required_agents", int_json ~default:1 (member_assoc "required_agents" team_health));
       ("communication_mode", communication_mode);
       ("broadcast_count", broadcast_count);
-      ("portal_count", portal_count);
       ( "communication_summary",
         `String
-          (Printf.sprintf "%s · broadcast %d · portal %d"
-             communication_mode_text broadcast_count_value portal_count_value) );
+          (Printf.sprintf "%s · broadcast %d"
+             communication_mode_text broadcast_count_value) );
       ("last_event", last_event);
     ]
 

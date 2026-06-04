@@ -86,6 +86,7 @@ let strict_success_names =
 let strict_guard_cases =
   [
     ("masc_reset", [ "confirm" ]);
+    ("masc_keeper_msg", [ "requires Eio context" ]);
   ]
 
 let endpoint_unavailable_guard_names =
@@ -563,7 +564,7 @@ let task_id_for_tool fixture _tool_name = ensure_task fixture
 let goal_principal fixture =
   `Assoc
     [
-      ("kind", `String "keeper");
+      ("kind", `String "agent");
       ("id", `String fixture.agent_name);
     ]
 
@@ -611,6 +612,7 @@ let field_value fixture ~tool_name field_name schema =
   | "progress" -> `String "tool matrix progress"
   | "reason" when tool_name = "masc_handover_create" -> `String "explicit"
   | "notes" | "note" | "reason" -> `String "tool matrix note"
+  | "override_note" -> `String "tool matrix override"
   | "priority" -> `Int 2
   | "assertions" -> `List [ `String "joined" ]
   | "agents" -> `List [ `String "definitely-missing-agent" ]
@@ -741,6 +743,8 @@ let tool_arguments fixture (schema : Masc_domain.tool_schema) =
              the handler layer so body/content aliases both work). Matrix
              test still needs to supply body so board_core accepts it. *)
           [ "body" ]
+      | "masc_goal_transition" ->
+          [ "override_note"; "note" ]
       | _ -> []
     in
     List.sort_uniq String.compare (required @ optional)

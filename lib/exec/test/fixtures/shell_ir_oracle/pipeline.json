@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "parser": "mvdan-sh-syntax-prototype",
+  "command": "cat file.txt | wc -l",
+  "parse_status": "ok",
+  "features": {
+    "pipeline": true,
+    "redirect": false,
+    "heredoc": false,
+    "subshell": false,
+    "command_substitution": false,
+    "variable": false,
+    "glob": false,
+    "env_assignment": false,
+    "process_substitution": false
+  },
+  "commands": [
+    { "name": "cat", "argv": ["cat", "file.txt"] },
+    { "name": "wc", "argv": ["wc", "-l"] }
+  ],
+  "error": null
+}

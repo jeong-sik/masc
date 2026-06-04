@@ -67,6 +67,7 @@ type policy =
   ; approval : approval
   ; retryable : bool
   ; cwd_scope : string option
+  ; inline_safe : bool
   }
 
 type t =
@@ -147,7 +148,8 @@ let runtime_handler_to_string = function
 ;;
 
 let policy ?(visibility = Tool_catalog.Default) ?readonly ?readonly_of_input
-      ?effect_domain ?(approval = Policy_selected) ?cwd_scope ?(retryable = false) ()
+      ?effect_domain ?(approval = Policy_selected) ?cwd_scope ?(retryable = false)
+      ?(inline_safe = false) ()
   =
   let readonly_of_input =
     match readonly_of_input with
@@ -161,6 +163,7 @@ let policy ?(visibility = Tool_catalog.Default) ?readonly ?readonly_of_input
   ; approval
   ; retryable
   ; cwd_scope
+  ; inline_safe
   }
 ;;
 
@@ -569,23 +572,25 @@ let tool_search_schema =
     ]
 ;;
 
-let read_only_in_process_policy () =
+let read_only_in_process_policy ?(inline_safe = false) () =
   policy
     ~visibility:Tool_catalog.Hidden
     ~readonly:true
     ~effect_domain:Tool_catalog.Read_only
     ~approval:No_approval
     ~retryable:true
+    ~inline_safe
     ()
 ;;
 
-let write_in_process_policy ?(retryable = false) () =
+let write_in_process_policy ?(retryable = false) ?(inline_safe = false) () =
   policy
     ~visibility:Tool_catalog.Hidden
     ~readonly:false
     ~effect_domain:Tool_catalog.Playground_write
     ~approval:No_approval
     ~retryable
+    ~inline_safe
     ()
 ;;
 
@@ -608,9 +613,12 @@ let in_process_descriptor ~id ~name ~description ~input_schema ~policy ~handler 
    [runtime_handler] variant but expose distinct [internal_name]s so each
    tool retains its own descriptor entry and receipt evidence. The
    [keeper_tool_in_process_runtime] handler routes by descriptor.internal_name. *)
-let cluster_descriptor ~id ~name ~description ~handler ~readonly =
+let cluster_descriptor ~id ~name ~description ~handler ~readonly ~inline_safe =
+  if inline_safe && not readonly then
+    invalid_arg "inline_safe descriptors must declare readonly=true";
   let policy =
-    if readonly then read_only_in_process_policy () else write_in_process_policy ()
+    if readonly then read_only_in_process_policy ~inline_safe ()
+    else write_in_process_policy ~inline_safe ()
   in
   in_process_descriptor
     ~id
@@ -629,6 +637,7 @@ let board_descriptor name description ~readonly =
     ~description
     ~handler:Tool_board_dispatch
     ~readonly
+    ~inline_safe:false
 ;;
 
 let masc_board_descriptor (schema : Masc_domain.tool_schema) =
@@ -675,6 +684,7 @@ let voice_descriptor name description ~readonly =
     ~description
     ~handler:Tool_voice_dispatch
     ~readonly
+    ~inline_safe:false
 ;;
 
 let task_descriptor id name description ~readonly =
@@ -684,6 +694,7 @@ let task_descriptor id name description ~readonly =
     ~description
     ~handler:Tool_task_dispatch
     ~readonly
+    ~inline_safe:false
 ;;
 
 (* RFC-0182 §3.1 — additional masc_* cluster descriptor helpers (task /
@@ -700,6 +711,7 @@ let masc_task_descriptor id name description ~readonly =
     ~description
     ~handler:Tool_masc_task_dispatch
     ~readonly
+    ~inline_safe:false
 ;;
 
 let masc_plan_descriptor id name description ~readonly =
@@ -709,6 +721,7 @@ let masc_plan_descriptor id name description ~readonly =
     ~description
     ~handler:Tool_masc_plan_dispatch
     ~readonly
+    ~inline_safe:false
 ;;
 
 let masc_run_descriptor name description ~readonly =
@@ -719,6 +732,7 @@ let masc_run_descriptor name description ~readonly =
     ~description
     ~handler:Tool_masc_run_dispatch
     ~readonly
+    ~inline_safe:false
 ;;
 
 let masc_agent_descriptor id name description ~readonly =
@@ -728,6 +742,7 @@ let masc_agent_descriptor id name description ~readonly =
     ~description
     ~handler:Tool_masc_agent_dispatch
     ~readonly
+    ~inline_safe:false
 ;;
 
 let masc_workspace_descriptor id name description ~readonly =
@@ -737,6 +752,7 @@ let masc_workspace_descriptor id name description ~readonly =
     ~description
     ~handler:Tool_masc_workspace_dispatch
     ~readonly
+    ~inline_safe:false
 ;;
 
 (* RFC-0182 §3.1 — additional cluster descriptor helpers (Phase 3:
@@ -748,6 +764,7 @@ let masc_misc_descriptor id name description ~readonly =
     ~description
     ~handler:Tool_masc_misc_dispatch
     ~readonly
+    ~inline_safe:false
 ;;
 
 let masc_control_descriptor id name description ~readonly =
@@ -757,6 +774,7 @@ let masc_control_descriptor id name description ~readonly =
     ~description
     ~handler:Tool_masc_control_dispatch
     ~readonly
+    ~inline_safe:false
 ;;
 
 let masc_agent_timeline_descriptor name description ~readonly =
@@ -766,6 +784,7 @@ let masc_agent_timeline_descriptor name description ~readonly =
     ~description
     ~handler:Tool_masc_agent_timeline_dispatch
     ~readonly
+    ~inline_safe:false
 ;;
 
 let masc_local_runtime_descriptor id name description ~readonly =
@@ -775,6 +794,7 @@ let masc_local_runtime_descriptor id name description ~readonly =
     ~description
     ~handler:Tool_masc_local_runtime_dispatch
     ~readonly
+    ~inline_safe:false
 ;;
 
 let masc_tool_shard_descriptor id name description ~readonly =
@@ -784,10 +804,12 @@ let masc_tool_shard_descriptor id name description ~readonly =
     ~description
     ~handler:Tool_masc_tool_shard_dispatch
     ~readonly
+    ~inline_safe:false
 ;;
 
-let masc_approval_descriptor id name description ~readonly =
+let masc_approval_descriptor ?(inline_safe = false) id name description ~readonly =
   cluster_descriptor
+    ~inline_safe
     ~id:("masc.approval." ^ id)
     ~name
     ~description
@@ -802,6 +824,7 @@ let masc_persona_descriptor id name description ~readonly =
     ~description
     ~handler:Tool_masc_persona_dispatch
     ~readonly
+    ~inline_safe:false
 ;;
 
 let masc_keeper_descriptor id name description ~readonly =
@@ -811,6 +834,7 @@ let masc_keeper_descriptor id name description ~readonly =
     ~description
     ~handler:Tool_masc_keeper_dispatch
     ~readonly
+    ~inline_safe:false
 ;;
 
 let internal_descriptors : t list =
@@ -1144,7 +1168,7 @@ let internal_descriptors : t list =
   ; masc_tool_shard_descriptor "revoke" "masc_tool_revoke"
       "Revoke a previously-granted tool shard from an agent." ~readonly:false
   (* ── RFC-0182 §3.1 — masc_approval_* cluster (3 entries) ─────── *)
-  ; masc_approval_descriptor "pending" "masc_approval_pending"
+  ; masc_approval_descriptor ~inline_safe:true "pending" "masc_approval_pending"
       "List pending operator approval requests." ~readonly:true
   ; masc_approval_descriptor "get" "masc_approval_get"
       "Read a single pending approval by id." ~readonly:true
@@ -1197,6 +1221,7 @@ let internal_descriptors : t list =
       ~description:"Read dashboard surface readiness snapshot (optionally for a single surface)."
       ~handler:Tool_masc_surface_audit
       ~readonly:true
+      ~inline_safe:false
   ]
   @ masc_board_descriptors
 ;;
@@ -1238,6 +1263,12 @@ let readonly_internal_names () =
     match readonly_static_hint d with
     | Some true -> internal_names d
     | Some false | None -> [])
+  |> List.sort_uniq String.compare
+;;
+
+let keeper_safe_inline_names () =
+  all_descriptors ()
+  |> List.concat_map (fun d -> if d.policy.inline_safe then internal_names d else [])
   |> List.sort_uniq String.compare
 ;;
 
@@ -1285,6 +1316,7 @@ let route_evidence_json d =
      ; "approval", `String (approval_to_string policy.approval)
      ; "retryable", `Bool policy.retryable
      ; "cwd_scope", Json_util.string_opt_to_json policy.cwd_scope
+     ; "inline_safe", `Bool policy.inline_safe
      ]
      @ policy_fields)
 ;;

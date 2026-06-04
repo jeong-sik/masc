@@ -11,8 +11,8 @@
       AuthError / InvalidRequest / NotFound / ContextOverflow /
       NetworkError / Timeout)
     - agent_error variants reached via [SdkE.Agent _] routing
-    - all 7 top-level non-Agent / non-Api wrappers (Mcp / Config /
-      Serialization / Io / Orchestration / A2a / Internal) *)
+    - all top-level non-Agent / non-Api wrappers (Mcp / Config /
+      Serialization / Io / Orchestration / Internal) *)
 
 module AE = Masc.Keeper_agent_error
 module Code = Masc.Keeper_turn_terminal_code
@@ -91,7 +91,6 @@ let sdk_cases : (string * SdkE.sdk_error * string) list =
   ; ( "Orchestration"
     , SdkE.Orchestration (SdkE.UnknownAgent { name = "ghost" })
     , "orchestration_error" )
-  ; "A2a", SdkE.A2a (SdkE.TaskNotFound { task_id = "id" }), "a2a_error"
   ; "Internal", SdkE.Internal "internal issue", "internal_error"
   ]
 ;;

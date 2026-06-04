@@ -28,5 +28,4 @@ let sdk_error_kind = function
   | Agent_sdk.Error.Serialization _ -> "serialization"
   | Agent_sdk.Error.Io _ -> "io"
   | Agent_sdk.Error.Orchestration _ -> "orchestration"
-  | Agent_sdk.Error.A2a _ -> "a2a"
   | Agent_sdk.Error.Internal _ -> "internal"

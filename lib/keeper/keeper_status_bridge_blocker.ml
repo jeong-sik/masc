@@ -47,8 +47,6 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
      | Agent_sdk.Error.Api (Agent_sdk.Retry.Timeout { message })
        when Keeper_error_classify.is_structural_oas_timeout_message message ->
        Some Oas_agent_execution_timeout
-     | Agent_sdk.Error.Agent (Agent_sdk.Error.CompletionContractViolation _) ->
-       None
      | Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionTimeout _)
      | Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionIdleTimeout _) ->
        Some Oas_agent_execution_timeout
@@ -72,8 +70,7 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
      | Agent_sdk.Error.Config _
      | Agent_sdk.Error.Serialization _
      | Agent_sdk.Error.Io _
-     | Agent_sdk.Error.Orchestration _
-     | Agent_sdk.Error.A2a _ -> None)
+     | Agent_sdk.Error.Orchestration _ -> None)
 ;;
 
 (* ── Runtime blocker surface ───────────────────────────────── *)

@@ -1100,7 +1100,7 @@ let internal_descriptors : t list =
     (* ── board cluster (RFC-0179 PR-3, 14 tools) ──────────────── *)
   ; board_descriptor
       "keeper_board_comment"
-      "Post a comment on a board entry."
+      "Comment on one board post. Requires an exact post_id from board activity, keeper_board_list, keeper_board_search, or keeper_board_get."
       ~last_turn_safe:true
       ~readonly:false
   ; board_descriptor
@@ -1118,11 +1118,11 @@ let internal_descriptors : t list =
       ~readonly:false
   ; board_descriptor
       "keeper_board_get"
-      "Fetch a single board entry."
+      "Read one board post by exact post_id. Use keeper_board_list or keeper_board_search first when no post_id is visible; do not call with empty arguments."
       ~readonly:true
   ; board_descriptor
       "keeper_board_list"
-      "List board entries."
+      "List recent board posts and return post_id values for follow-up board get/comment/vote calls."
       ~readonly:true
   ; board_descriptor
       "keeper_board_post"
@@ -1131,7 +1131,7 @@ let internal_descriptors : t list =
       ~readonly:false
   ; board_descriptor
       "keeper_board_search"
-      "Search board entries."
+      "Search board posts by keyword and return post_id values for follow-up board get/comment/vote calls."
       ~readonly:true
   ; board_descriptor
       "keeper_board_stats"
@@ -1159,7 +1159,7 @@ let internal_descriptors : t list =
       ~readonly:false
   ; board_descriptor
       "keeper_board_vote"
-      "Vote on a board entry."
+      "Vote on one board post. Requires an exact post_id from board activity, keeper_board_list, keeper_board_search, or keeper_board_get."
       ~readonly:false
   (* ── RFC-0182 §3.1 — masc_task_* cluster (7 entries) ─────────── *)
   ; masc_task_descriptor "add" "masc_add_task"

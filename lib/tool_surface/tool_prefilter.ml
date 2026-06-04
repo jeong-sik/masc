@@ -114,6 +114,8 @@ let synonyms : (string * string list) list =
       ; "view post"
       ; "get post"
       ; "board post detail"
+      ; "post id detail"
+      ; "read post by post_id"
       ; "show post"
       ; "inspect post"
       ] )
@@ -129,6 +131,8 @@ let synonyms : (string * string list) list =
     , [ "list posts"
       ; "browse board"
       ; "recent posts"
+      ; "find post id"
+      ; "discover post_id"
       ; "forum"
       ; "feed"
       ; "board posts"
@@ -139,7 +143,12 @@ let synonyms : (string * string list) list =
   ; ( "keeper_board_vote"
     , [ "upvote"; "downvote"; "rate"; "like"; "agree disagree"; "vote on" ] )
   ; ( "keeper_board_search"
-    , [ "search board"; "find post"; "search discussion"; "keyword search board" ] )
+    , [ "search board"
+      ; "find post"
+      ; "find post_id"
+      ; "search discussion"
+      ; "keyword search board"
+      ] )
   ; ( "keeper_board_stats"
     , [ "board statistics"; "activity stats"; "engagement"; "post count" ] )
   ; ( "keeper_tasks_list"

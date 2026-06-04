@@ -20,8 +20,8 @@ description = "create a new backlog task with keeper-native evidence"
 
 [[hints]]
 name = "keeper_board_get"
-call = "`keeper_board_get` { id: \"POST_ID\" }"
-description = "read a board post before replying"
+call = "`keeper_board_get` { post_id: \"POST_ID\" }"
+description = "read one board post only after you have its post_id"
 
 [[hints]]
 name = "keeper_board_comment"

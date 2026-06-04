@@ -138,7 +138,12 @@ let test_board_post_en () =
 let test_board_read_kr () =
   let idx = build_keeper_index () in
   ignore (assert_retrieves ~label:"board_read_kr" idx
-    "게시판 글 읽기 조회" "keeper_board_get")
+    "게시판 글 상세 단건 post_id 읽기" "keeper_board_get")
+
+let test_board_list_kr () =
+  let idx = build_keeper_index () in
+  ignore (assert_retrieves ~label:"board_list_kr" idx
+    "게시판 목록 조회 post_id 찾기" "keeper_board_list")
 
 (* ================================================================ *)
 (* Scenarios: build and test                                        *)
@@ -317,6 +322,7 @@ let () =
         [
           Alcotest.test_case "board post (en)" `Quick test_board_post_en;
           Alcotest.test_case "board read (kr)" `Quick test_board_read_kr;
+          Alcotest.test_case "board list (kr)" `Quick test_board_list_kr;
         ] );
       ( "build_test",
         [

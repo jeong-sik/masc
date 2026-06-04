@@ -5,18 +5,14 @@ let usage =
 
 Options:
   --base-path PATH        Runtime workspace root (default: MASC_BASE_PATH)
-  --n N                  Tool-quality recent sample size (default: 5000)
-  --window-hours HOURS   Use a time-window sample instead of recent N
-  --threshold PCT        Required tool success threshold (default: 80.0)
+  --window-hours HOURS   Limit decision-log evidence to this time window
   --strict               Exit 2 when any feature is warn/fail
   -h, --help             Print this help
 |}
 
 type config = {
   base_path : string option;
-  n : int;
   window_hours : float option;
-  threshold : float;
   strict : bool;
 }
 
@@ -33,16 +29,9 @@ let env_base_path () =
 let initial_config () =
   {
     base_path = env_base_path ();
-    n = 5000;
     window_hours = None;
-    threshold = 80.0;
     strict = false;
   }
-
-let parse_int_arg name value =
-  match int_of_string_opt value with
-  | Some n when n > 0 -> n
-  | _ -> error (Printf.sprintf "invalid %s: %S" name value)
 
 let parse_float_arg name value =
   match float_of_string_opt value with
@@ -60,9 +49,6 @@ let rec parse_args argv index cfg =
     | "--base-path" when index + 1 < Array.length argv ->
         parse_args argv (index + 2)
           { cfg with base_path = Some argv.(index + 1) }
-    | "--n" when index + 1 < Array.length argv ->
-        parse_args argv (index + 2)
-          { cfg with n = parse_int_arg "--n" argv.(index + 1) }
     | "--window-hours" when index + 1 < Array.length argv ->
         parse_args argv (index + 2)
           {
@@ -70,9 +56,6 @@ let rec parse_args argv index cfg =
             window_hours =
               Some (parse_float_arg "--window-hours" argv.(index + 1));
           }
-    | "--threshold" when index + 1 < Array.length argv ->
-        parse_args argv (index + 2)
-          { cfg with threshold = parse_float_arg "--threshold" argv.(index + 1) }
     | arg -> error (Printf.sprintf "unknown or incomplete argument: %S" arg)
 
 let resolve_base_path cfg =
@@ -95,9 +78,7 @@ let main () =
   let json =
     Dashboard_keeper_feature_proof.json
       ~config:workspace_config
-      ~n:cfg.n
       ?window_hours:cfg.window_hours
-      ~success_threshold_pct:cfg.threshold
       ()
   in
   print_endline (Yojson.Safe.pretty_to_string json);

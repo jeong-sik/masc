@@ -40,7 +40,6 @@ let handle_broadcast ~tool_name ~start_time (ctx : context) : tool_result option
   let agent_name = ctx.agent_name in
   let registry = ctx.registry in
   let state = ctx.state in
-  let sw = ctx.sw in
   let message = arg_get_string ctx "message" "" in
   let trimmed = String.trim message in
   if String.equal trimmed "" then

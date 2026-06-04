@@ -7,7 +7,7 @@
 
 ## Why this cluster (line-ref sweep #3, the last big one)
 
-iter 81's corpus survey flagged KeeperPostTurnOrchestration as the third cluster (~8-9 hits, mostly `keeper_post_turn.ml:NNN`). With this PR, all three big clusters (3-axis-type-def trio iter 82, KeeperToolSurface iter 83, KeeperPostTurnOrchestration iter 84) are converted; only scattered singles remain.
+iter 81's corpus survey flagged KeeperPostTurnOrchestration as the third cluster (~8-9 hits, mostly `keeper_post_turn.ml:NNN`). With this PR, all three big clusters (3-axis-type-def trio iter 82, retired surface pipeline spec iter 83, KeeperPostTurnOrchestration iter 84) are converted; only scattered singles remain.
 
 ## What was checked / fixed (sub-class 8: line-reference drift — *and a confirmation of the drift-tracks-growth pattern*)
 

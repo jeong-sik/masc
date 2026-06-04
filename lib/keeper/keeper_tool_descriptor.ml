@@ -65,7 +65,6 @@ type policy =
   ; cwd_scope : string option
   ; inline_safe : bool
   ; maintenance_only : bool
-  ; last_turn_safe : bool
   }
 
 type t =
@@ -144,7 +143,7 @@ let runtime_handler_to_string = function
 
 let policy ?(visibility = Tool_catalog.Default) ?readonly ?readonly_of_input
       ?effect_domain ?(approval = Policy_selected) ?cwd_scope ?(retryable = false)
-      ?(inline_safe = false) ?(maintenance_only = false) ?(last_turn_safe = false) ()
+      ?(inline_safe = false) ?(maintenance_only = false) ()
   =
   let readonly_of_input =
     match readonly_of_input with
@@ -160,7 +159,6 @@ let policy ?(visibility = Tool_catalog.Default) ?readonly ?readonly_of_input
   ; cwd_scope
   ; inline_safe
   ; maintenance_only
-  ; last_turn_safe
   }
 ;;
 
@@ -477,7 +475,6 @@ let public_descriptors =
            ~effect_domain:Tool_catalog.Playground_write
            ~cwd_scope:"keeper_sandbox_or_allowed_path"
            ~retryable:false
-           ~last_turn_safe:true
            ())
       ~executor:Shell_ir
       ~backend:Sandbox_process
@@ -501,7 +498,6 @@ let public_descriptors =
            ~effect_domain:Tool_catalog.Read_only
            ~cwd_scope:"keeper_sandbox_or_allowed_path"
            ~retryable:true
-           ~last_turn_safe:true
            ())
       ~executor:Shell_ir
       ~backend:Sandbox_process
@@ -523,7 +519,6 @@ let public_descriptors =
            ~effect_domain:Tool_catalog.Read_only
            ~cwd_scope:"keeper_sandbox_or_allowed_path"
            ~retryable:true
-           ~last_turn_safe:true
            ())
       ~executor:Filesystem
       ~backend:Sandbox_process
@@ -576,7 +571,6 @@ let public_descriptors =
            ~effect_domain:Tool_catalog.Read_only
            ~approval:Policy_selected
            ~retryable:true
-           ~last_turn_safe:true
            ())
       ~executor:In_process
       ~backend:Ocaml_runtime
@@ -595,7 +589,6 @@ let public_descriptors =
            ~effect_domain:Tool_catalog.Read_only
            ~approval:Policy_selected
            ~retryable:true
-           ~last_turn_safe:true
            ())
       ~executor:In_process
       ~backend:Ocaml_runtime
@@ -666,7 +659,7 @@ let library_read_schema =
 ;;
 
 let read_only_in_process_policy ?(inline_safe = false) ?(maintenance_only = false)
-      ?(last_turn_safe = false) ()
+      ()
   =
   policy
     ~visibility:Tool_catalog.Hidden
@@ -676,12 +669,11 @@ let read_only_in_process_policy ?(inline_safe = false) ?(maintenance_only = fals
     ~retryable:true
     ~inline_safe
     ~maintenance_only
-    ~last_turn_safe
     ()
 ;;
 
 let write_in_process_policy ?(retryable = false) ?(inline_safe = false)
-      ?(maintenance_only = false) ?(last_turn_safe = false) ()
+      ?(maintenance_only = false) ()
   =
   policy
     ~visibility:Tool_catalog.Hidden
@@ -691,7 +683,6 @@ let write_in_process_policy ?(retryable = false) ?(inline_safe = false)
     ~retryable
     ~inline_safe
     ~maintenance_only
-    ~last_turn_safe
     ()
 ;;
 
@@ -714,15 +705,15 @@ let in_process_descriptor ~id ~name ~description ~input_schema ~policy ~handler 
    [runtime_handler] variant but expose distinct [internal_name]s so each
    tool retains its own descriptor entry and receipt evidence. The
    [keeper_tool_in_process_runtime] handler routes by descriptor.internal_name. *)
-let cluster_descriptor ~last_turn_safe ~id ~name ~description ~handler ~readonly
+let cluster_descriptor ~id ~name ~description ~handler ~readonly
       ~inline_safe ~maintenance_only
   =
   if inline_safe && not readonly then
     invalid_arg "inline_safe descriptors must declare readonly=true";
   let policy =
     if readonly
-    then read_only_in_process_policy ~inline_safe ~maintenance_only ~last_turn_safe ()
-    else write_in_process_policy ~inline_safe ~maintenance_only ~last_turn_safe ()
+    then read_only_in_process_policy ~inline_safe ~maintenance_only ()
+    else write_in_process_policy ~inline_safe ~maintenance_only ()
   in
   in_process_descriptor
     ~id
@@ -733,9 +724,8 @@ let cluster_descriptor ~last_turn_safe ~id ~name ~description ~handler ~readonly
     ~handler
 ;;
 
-let board_descriptor ?(last_turn_safe = false) name description ~readonly =
+let board_descriptor name description ~readonly =
   cluster_descriptor
-    ~last_turn_safe
     ~id:("keeper.board." ^ String.sub name (String.length "keeper_board_")
          (String.length name - String.length "keeper_board_"))
     ~name
@@ -782,9 +772,8 @@ let masc_board_descriptors =
   List.map masc_board_descriptor Tool_board_registry.tools
 ;;
 
-let voice_descriptor ?(last_turn_safe = false) name description ~readonly =
+let voice_descriptor name description ~readonly =
   cluster_descriptor
-    ~last_turn_safe
     ~id:("keeper.voice." ^ String.sub name (String.length "keeper_voice_")
          (String.length name - String.length "keeper_voice_"))
     ~name
@@ -795,9 +784,8 @@ let voice_descriptor ?(last_turn_safe = false) name description ~readonly =
     ~maintenance_only:false
 ;;
 
-let task_descriptor ?(last_turn_safe = false) id name description ~readonly =
+let task_descriptor id name description ~readonly =
   cluster_descriptor
-    ~last_turn_safe
     ~id:("keeper.task." ^ id)
     ~name
     ~description
@@ -814,9 +802,8 @@ let task_descriptor ?(last_turn_safe = false) id name description ~readonly =
    (Task.Tool / Tool_plan / Tool_run / Tool_agent / Tool_workspace) are not
    schema-registry-backed. The handler routes by descriptor.internal_name
    through the existing typed dispatcher. *)
-let masc_task_descriptor ?(last_turn_safe = false) id name description ~readonly =
+let masc_task_descriptor id name description ~readonly =
   cluster_descriptor
-    ~last_turn_safe
     ~id:("masc.task." ^ id)
     ~name
     ~description
@@ -826,9 +813,8 @@ let masc_task_descriptor ?(last_turn_safe = false) id name description ~readonly
     ~maintenance_only:false
 ;;
 
-let masc_plan_descriptor ?(last_turn_safe = false) id name description ~readonly =
+let masc_plan_descriptor id name description ~readonly =
   cluster_descriptor
-    ~last_turn_safe
     ~id:("masc.plan." ^ id)
     ~name
     ~description
@@ -838,9 +824,8 @@ let masc_plan_descriptor ?(last_turn_safe = false) id name description ~readonly
     ~maintenance_only:false
 ;;
 
-let masc_run_descriptor ?(last_turn_safe = false) name description ~readonly =
+let masc_run_descriptor name description ~readonly =
   cluster_descriptor
-    ~last_turn_safe
     ~id:("masc.run." ^ String.sub name (String.length "masc_run_")
          (String.length name - String.length "masc_run_"))
     ~name
@@ -851,9 +836,8 @@ let masc_run_descriptor ?(last_turn_safe = false) name description ~readonly =
     ~maintenance_only:false
 ;;
 
-let masc_agent_descriptor ?(last_turn_safe = false) id name description ~readonly =
+let masc_agent_descriptor id name description ~readonly =
   cluster_descriptor
-    ~last_turn_safe
     ~id:("masc.agent." ^ id)
     ~name
     ~description
@@ -863,11 +847,10 @@ let masc_agent_descriptor ?(last_turn_safe = false) id name description ~readonl
     ~maintenance_only:false
 ;;
 
-let masc_workspace_descriptor ?(maintenance_only = false) ?(last_turn_safe = false) id
+let masc_workspace_descriptor ?(maintenance_only = false) id
       name description ~readonly
   =
   cluster_descriptor
-    ~last_turn_safe
     ~id:("masc.workspace." ^ id)
     ~name
     ~description
@@ -879,9 +862,8 @@ let masc_workspace_descriptor ?(maintenance_only = false) ?(last_turn_safe = fal
 
 (* RFC-0182 §3.1 — additional cluster descriptor helpers (Phase 3:
    misc / control / agent_timeline / local_runtime). *)
-let masc_misc_descriptor ?(last_turn_safe = false) id name description ~readonly =
+let masc_misc_descriptor id name description ~readonly =
   cluster_descriptor
-    ~last_turn_safe
     ~id:("masc.misc." ^ id)
     ~name
     ~description
@@ -891,9 +873,8 @@ let masc_misc_descriptor ?(last_turn_safe = false) id name description ~readonly
     ~maintenance_only:false
 ;;
 
-let masc_control_descriptor ?(last_turn_safe = false) id name description ~readonly =
+let masc_control_descriptor id name description ~readonly =
   cluster_descriptor
-    ~last_turn_safe
     ~id:("masc.control." ^ id)
     ~name
     ~description
@@ -903,9 +884,8 @@ let masc_control_descriptor ?(last_turn_safe = false) id name description ~reado
     ~maintenance_only:false
 ;;
 
-let masc_agent_timeline_descriptor ?(last_turn_safe = false) name description ~readonly =
+let masc_agent_timeline_descriptor name description ~readonly =
   cluster_descriptor
-    ~last_turn_safe
     ~id:"masc.agent_timeline"
     ~name
     ~description
@@ -915,9 +895,8 @@ let masc_agent_timeline_descriptor ?(last_turn_safe = false) name description ~r
     ~maintenance_only:false
 ;;
 
-let masc_keeper_descriptor ?(last_turn_safe = false) id name description ~readonly =
+let masc_keeper_descriptor id name description ~readonly =
   cluster_descriptor
-    ~last_turn_safe
     ~id:("masc.keeper." ^ id)
     ~name
     ~description
@@ -936,7 +915,7 @@ let internal_descriptors : t list =
         "Return the current wall-clock time as ISO 8601 and Unix epoch \
          seconds. No arguments."
       ~input_schema:empty_object_schema
-      ~policy:(read_only_in_process_policy ~last_turn_safe:true ())
+      ~policy:(read_only_in_process_policy ())
       ~handler:Tool_time_now
   ; in_process_descriptor
       ~id:"keeper.stay_silent"
@@ -963,7 +942,7 @@ let internal_descriptors : t list =
         "Search keeper tool schemas by free-text query. Returns ranked tool \
          descriptions and input schemas."
       ~input_schema:tool_search_schema
-      ~policy:(read_only_in_process_policy ~last_turn_safe:true ())
+      ~policy:(read_only_in_process_policy ())
       ~handler:Tool_tool_search
     (* ── memory / context (RFC-0179 PR-3) ─────────────────────── *)
   ; in_process_descriptor
@@ -973,7 +952,7 @@ let internal_descriptors : t list =
         "Return current context window usage and recent-message stats for \
          this keeper turn."
       ~input_schema:empty_object_schema
-      ~policy:(read_only_in_process_policy ~last_turn_safe:true ())
+      ~policy:(read_only_in_process_policy ())
       ~handler:Tool_context_status
   ; in_process_descriptor
       ~id:"keeper.memory.search"
@@ -1043,7 +1022,6 @@ let internal_descriptors : t list =
       "list"
       "keeper_tasks_list"
       "List MASC tasks visible to this keeper."
-      ~last_turn_safe:true
       ~readonly:true
   ; task_descriptor
       "audit"
@@ -1064,7 +1042,6 @@ let internal_descriptors : t list =
       "broadcast"
       "keeper_broadcast"
       "Broadcast a workspace message to the MASC workspace."
-      ~last_turn_safe:true
       ~readonly:false
   ; task_descriptor
       "claim"
@@ -1080,13 +1057,11 @@ let internal_descriptors : t list =
       "done"
       "keeper_task_done"
       "Mark the claimed MASC task as done."
-      ~last_turn_safe:true
       ~readonly:false
     (* ── board cluster (RFC-0179 PR-3, 14 tools) ──────────────── *)
   ; board_descriptor
       "keeper_board_comment"
       "Comment on one board post. Requires an exact post_id from board activity, keeper_board_list, keeper_board_search, or keeper_board_get."
-      ~last_turn_safe:true
       ~readonly:false
   ; board_descriptor
       "keeper_board_comment_vote"
@@ -1099,7 +1074,6 @@ let internal_descriptors : t list =
   ; board_descriptor
       "keeper_board_curation_submit"
       "Submit a board entry for curation."
-      ~last_turn_safe:true
       ~readonly:false
   ; board_descriptor
       "keeper_board_get"
@@ -1112,7 +1086,6 @@ let internal_descriptors : t list =
   ; board_descriptor
       "keeper_board_post"
       "Post a new board entry. Quantitative claims require code-anchor evidence."
-      ~last_turn_safe:true
       ~readonly:false
   ; board_descriptor
       "keeper_board_search"
@@ -1156,9 +1129,9 @@ let internal_descriptors : t list =
   ; masc_task_descriptor "task_history" "masc_task_history"
       "Read history events for a task." ~readonly:true
   ; masc_task_descriptor "tasks" "masc_tasks"
-      "List tasks visible to the caller." ~last_turn_safe:true ~readonly:true
+      "List tasks visible to the caller." ~readonly:true
   ; masc_task_descriptor "transition" "masc_transition"
-      "Transition a task to a new status." ~last_turn_safe:true ~readonly:false
+      "Transition a task to a new status." ~readonly:false
   ; masc_task_descriptor "update_priority" "masc_update_priority"
       "Update the priority of a task." ~readonly:false
   (* ── RFC-0182 §3.1 — masc_plan_* + note + deliver (8 entries) ── *)
@@ -1290,7 +1263,6 @@ let internal_descriptors : t list =
       ~readonly:true
       ~inline_safe:false
       ~maintenance_only:false
-      ~last_turn_safe:false
   ]
   @ masc_board_descriptors
 ;;
@@ -1352,12 +1324,6 @@ let keeper_maintenance_only_names () =
   |> List.sort_uniq String.compare
 ;;
 
-let keeper_last_turn_safe_names () =
-  all_descriptors ()
-  |> List.concat_map (fun d -> if d.policy.last_turn_safe then internal_names d else [])
-  |> List.sort_uniq String.compare
-;;
-
 let public_name_for_internal internal_name =
   match public_descriptors_for_internal internal_name with
   | [] -> None
@@ -1404,7 +1370,6 @@ let route_evidence_json d =
      ; "cwd_scope", Json_util.string_opt_to_json policy.cwd_scope
      ; "inline_safe", `Bool policy.inline_safe
      ; "maintenance_only", `Bool policy.maintenance_only
-     ; "last_turn_safe", `Bool policy.last_turn_safe
      ]
      @ policy_fields)
 ;;

@@ -382,7 +382,6 @@ let run_turn
           ])
       Keeper_runtime_manifest.Tool_surface_selected;
     let agent_ref : Agent_sdk.Agent.t option ref = ref None in
-    let initial_tool_surface = s.Keeper_run_tools.initial_tool_surface in
     let tool_usage_before = s.Keeper_run_tools.tool_usage_before in
     let receipt_turn_count_ref = s.Keeper_run_tools.receipt_turn_count_ref in
     let receipt_model_used_ref = s.Keeper_run_tools.receipt_model_used_ref in
@@ -749,7 +748,6 @@ let run_turn
          ~keeper_visible_sandbox_root
          ~receipt_started_at
          ~runtime_manifest_context
-         ~initial_tool_surface
          ~acc
          ~pre_dispatch_compacted
          ~pre_dispatch_compaction_trigger:ctx.pre_dispatch_compaction_trigger

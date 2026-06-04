@@ -126,9 +126,6 @@ val keeper_universe_tool_names : keeper_meta -> string list
 (** Tool search scope: active candidates + core_always - denied. *)
 val keeper_tool_search_scope : keeper_meta -> string list
 
-(** Tools safe to call on the keeper's last turn. *)
-val last_turn_safe_tool_names : unit -> string list
-
 (** {1 Tool Schema Assembly} *)
 
 (** Universe model tool schemas for Agent.run(). *)

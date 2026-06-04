@@ -52,7 +52,6 @@ let finalize
     ~keeper_visible_sandbox_root
     ~receipt_started_at
     ~runtime_manifest_context
-    ~(initial_tool_surface : Keeper_agent_tool_surface.computed_tool_surface)
     ~(acc : Keeper_run_tools.hook_accumulator)
     ~pre_dispatch_compacted
     ~pre_dispatch_compaction_trigger

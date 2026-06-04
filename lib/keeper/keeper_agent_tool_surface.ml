@@ -59,16 +59,6 @@ type tool_surface_metrics =
   ; approval_mode_derived : bool
   }
 
-type computed_tool_surface =
-  { absolute_turn : int
-  ; checkpoint_start_turn : int
-  ; per_call_turn : int
-  ; per_call_max_turns : int
-  ; is_last_turn : bool
-  ; is_warning_zone : bool
-  ; lane : turn_lane
-  }
-
 type turn_affordance =
   | Board_curation
   | Board_post_or_comment

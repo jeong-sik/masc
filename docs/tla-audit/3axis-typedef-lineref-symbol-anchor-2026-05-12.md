@@ -7,7 +7,7 @@
 
 ## Why this cluster (line-ref sweep #1)
 
-iter 81's corpus survey (`docs/tla-audit/kml-r8-...md`) identified the biggest remaining `\.ml:[0-9]` clusters: KeeperToolSurface (~15 hits, `keeper_run_tools.ml:NNN`) and the `keeper_registry.ml:63-81` 3-axis-type-def trio (3 specs sharing the same 3 refs). This PR takes the trio — it's the highest-leverage single fix (3 specs, one root cause: the 3-axis type defs moved).
+iter 81's corpus survey (`docs/tla-audit/kml-r8-...md`) identified the biggest remaining `\.ml:[0-9]` clusters: retired surface pipeline spec (~15 hits, `keeper_run_tools.ml:NNN`) and the `keeper_registry.ml:63-81` 3-axis-type-def trio (3 specs sharing the same 3 refs). This PR takes the trio — it's the highest-leverage single fix (3 specs, one root cause: the 3-axis type defs moved).
 
 ## What drifted (sub-class 8: line-reference drift)
 
@@ -34,6 +34,6 @@ What lines 63-81 actually contain now: a `terminal_reason` variant block (`Stale
 ## Sub-class placement & follow-up
 
 - Drift = **sub-class 8 (line-reference drift)** — and a *shared-root-cause* instance: one set of type-def moves invalidated citations in three specs at once, because they all map the same 3-axis FSM. Converting all three to symbol anchors in one PR is the right granularity.
-- **Remaining `\.ml:[0-9]` clusters** (from iter 81's survey, still open): KeeperToolSurface (`keeper_run_tools.ml:NNN`, ~15 hits, the biggest single-spec cluster — next sweep candidate), KeeperPostTurnOrchestration (`keeper_post_turn.ml:NNN`, ~8 hits), plus scattered singles (`keeper_unified_turn.ml:318/1640`, `keeper_state_machine.ml:402-408/754-758`, `keeper_social_model_magentic_ledger_v1.ml:204`, `keeper_composite_observer.ml:25-32`). Once those are converted, a `\.ml:[0-9]` zero-tolerance lint becomes a *house-clean guard* (not a "boost the classifier" workaround — same posture as the iter 74 OCaml-docstring baseline drain).
+- **Remaining `\.ml:[0-9]` clusters** (from iter 81's survey, still open): retired surface pipeline spec (`keeper_run_tools.ml:NNN`, ~15 hits, the biggest single-spec cluster — next sweep candidate), KeeperPostTurnOrchestration (`keeper_post_turn.ml:NNN`, ~8 hits), plus scattered singles (`keeper_unified_turn.ml:318/1640`, `keeper_state_machine.ml:402-408/754-758`, `keeper_social_model_magentic_ledger_v1.ml:204`, `keeper_composite_observer.ml:25-32`). Once those are converted, a `\.ml:[0-9]` zero-tolerance lint becomes a *house-clean guard* (not a "boost the classifier" workaround — same posture as the iter 74 OCaml-docstring baseline drain).
 - No follow-up PR owed for *these* specs. Comment-only changes — model bodies byte-identical; `specs/INDEX.md` regenerated (3 content-hash bumps). All three specs are in the `make -C specs check-clean` runner; CI re-checks them.
 - Description nit flagged but not fixed (out of scope): KeeperTurnCycle's "7 GADT transitions" — the OCaml says "19 valid pairs of the 7-variant turn_phase FSM"; the "7" should probably be "19 transitions" or "the 7-variant FSM's transitions". Softened to "declares the cross-state transitions" here; a precise re-count is a separate small finding.

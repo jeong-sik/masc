@@ -1,9 +1,9 @@
 (** Structured attribution envelope for gate decisions.
 
     Carries "who/where/what/why" for each pass/fail decision emitted
-    by the 8 verification gates (cdal_verdict, verification,
+    by the verification gates (cdal_verdict, verification,
     accountability, keeper_fsm, oas_completion, agent_lifecycle,
-    task_transition, worker_dev_tools). Propagates through SSE as an
+    task_transition, exec_policy). Propagates through SSE as an
     optional field on every event so the dashboard can trace causality.
 
     The existing [reason] / [reason_code] SSE fields remain untouched
@@ -56,7 +56,7 @@ type t = {
   gate : string;
       (** Gate identifier. One of [cdal_verdict], [verification],
           [accountability], [keeper_fsm], [oas_completion],
-          [agent_lifecycle], [task_transition], [worker_dev_tools].
+          [agent_lifecycle], [task_transition], [exec_policy].
           Future gates append to this list.
 
           Kept as [string] rather than a variant so new gates can emit

@@ -15,12 +15,8 @@ let board_write_tool_timeout_sec () =
   Env_config_runtime.Tools.board_write_timeout_sec ()
 ;;
 
-(* SSOT for which board tools mutate state lives in [Tool_board]'s
-   [tool_required_permission]: CanBroadcast (post/comment/vote/comment_vote/
-   reaction/curation_submit) and CanAdmin (delete/cleanup) are all writes.
-   Reads (list/get/stats/search/profile/hearths/curation_read) keep the global
-   default timeout. Keep this list in sync when new mutating board tools are
-   added. *)
+(* Board write tools receive a higher timeout ceiling than read tools. Keep
+   this list in sync when new mutating board tools are added. *)
 let is_board_write_tool_name = function
   | "keeper_board_post"
   | "keeper_board_comment"

@@ -1,5 +1,5 @@
 (** Closed sum type for keeper path-check errors emitted by
-    [worker_dev_tools] path validators.
+    Exec policy path validators.
 
     Before this module, path containment errors were rendered as ad-hoc
     [Printf.sprintf] strings at multiple emit sites and classified

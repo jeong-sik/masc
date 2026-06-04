@@ -427,7 +427,7 @@ let make_routes ~port ~host ~sw ~clock =
 | `Worker` | 도구 호출, broadcast, task claim/complete |
 | `Observer` | 읽기 전용 (status, messages 조회) |
 
-`permission_for_tool` 함수가 각 MCP 도구명을 필요 권한으로 매핑한다. 매핑되지 않은 내부 도구명은 `CanBroadcast` 이상을 요구하고, 매핑되지 않은 외부 도구명은 거부한다. 이 동작은 fail-closed 고정값이며 환경변수로 완화할 수 없다.
+도구 인증은 per-tool required-permission 매핑을 사용하지 않는다. 알려진 내부 도구와 `masc_*` 도구는 `CanBroadcast` 이상을 요구하고, unknown external 도구명은 거부한다. 이 동작은 fail-closed 고정값이며 환경변수로 완화할 수 없다.
 
 ### 7.5 Admin 인증
 

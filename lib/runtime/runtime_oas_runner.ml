@@ -43,18 +43,14 @@ let runtime_catalog_error_to_sdk_error detail =
     bypassing the old Model_spec facade. *)
 let resolve_runtime_providers
       ?provider_filter:_
-      ?(require_tool_choice_support = false)
-      ?(require_tool_support = false)
       ?runtime_mcp_policy:_
       ~runtime_id:_
       ()
   =
-  ignore require_tool_choice_support;
-  ignore require_tool_support;
   (* RFC-0206 single-binding: runtime catalog resolution removed. The providers
-     are the default runtime's single provider_config. [provider_filter] and
-     the historical require-tool gates are moot with one provider; runtime tool
-     surface compatibility is handled by runtime MCP policy resolution. *)
+     are the default runtime's single provider_config. [provider_filter] is
+     moot with one provider; runtime tool surface compatibility is handled by
+     runtime MCP policy resolution. *)
   match Runtime.get_default_runtime () with
   | None -> Error "no default runtime configured"
   | Some rt ->
@@ -113,23 +109,6 @@ let runtime_mcp_policy_for_tools ~(keeper_name : string) (tools : Agent_sdk.Tool
     Some (Runtime_agent.runtime_mcp_policy_with_masc_agent_name ~agent_name policy)
   | Some policy, None -> Some policy
   | None, _ -> None
-
-let agent_internal_tool_names_for_runtime_surface
-      ~(keeper_name : string)
-      (tools : Agent_sdk.Tool.t list)
-  =
-  (* The Agent_internal surface was empty (agent_internal_surface_tools = []),
-     so no tool was ever a member.  Surface deleted in the surface-cut
-     refactor; this always returns []. *)
-  ignore keeper_name;
-  ignore tools;
-  []
-
-let agent_internal_tools_require_materialized_runtime_surface
-      ~(keeper_name : string)
-      (tools : Agent_sdk.Tool.t list)
-  =
-  agent_internal_tool_names_for_runtime_surface ~keeper_name tools <> []
 
 let runtime_mcp_policy_for_provider
       ~(keeper_name : string)

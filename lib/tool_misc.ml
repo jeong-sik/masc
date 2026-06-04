@@ -235,16 +235,6 @@ let tool_spec_read_only =
     "masc_dashboard";
   ]
 
-let tool_required_permission = function
-  | "masc_config" | "masc_dashboard"
-  | "masc_tool_stats" | "masc_tool_help" | "masc_web_search" | "masc_web_fetch" ->
-      Some Masc_domain.CanReadState
-  | "masc_tool_admin_snapshot" | "masc_tool_admin_update" ->
-      Some Masc_domain.CanAdmin
-  | "masc_cleanup_zombies" ->
-      Some Masc_domain.CanBroadcast
-  | _ -> None
-
 let () =
   List.iter
     (fun (s : Masc_domain.tool_schema) ->
@@ -257,7 +247,6 @@ let () =
            ~handler_binding:Tag_dispatch
            ~is_read_only:(List.mem s.name tool_spec_read_only)
            ~is_idempotent:(List.mem s.name tool_spec_read_only)
-           ?required_permission:(tool_required_permission s.name)
            ()))
     schemas
 let looks_like_rss_payload = Tool_misc_web_search.looks_like_rss_payload

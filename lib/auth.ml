@@ -401,8 +401,6 @@ let check_permission config ~agent_name ~token ~permission : (unit, masc_error) 
         { reason = Missing_token; message = "Token required" })))
 ;;
 
-let permission_for_tool tool_name = Tool_permission_map.permission_for_tool tool_name
-
 (** Tool auth is always strict: unknown internal tools require at least
     worker-level permission, and unknown external tools are denied. *)
 let is_tool_auth_strict_enabled () = true
@@ -421,8 +419,9 @@ let has_internal_tool_prefix tool_name =
     internal_tool_prefixes
 ;;
 
-let is_unmapped_internal_tool_name tool_name =
+let is_known_or_internal_tool_name tool_name =
   has_internal_tool_prefix tool_name
+  || Option.is_some (Tool_catalog.registered_metadata tool_name)
 ;;
 
 let unknown_tool_class tool_name =
@@ -438,19 +437,14 @@ let record_strict_unknown_tool_denial ~agent_name ~tool_name =
 
 (** Check permission for a tool call *)
 let authorize_tool config ~agent_name ~token ~tool_name : (unit, masc_error) result =
-  match permission_for_tool tool_name with
-  | None ->
-    if is_unmapped_internal_tool_name tool_name
-    then
-      (* Conservative default for unmapped internal tools. *)
-      check_permission config ~agent_name ~token ~permission:CanBroadcast
-    else (
-      let () = record_strict_unknown_tool_denial ~agent_name ~tool_name in
-      Error
-        (Auth
-           (Auth_error.Forbidden
-              { agent = agent_name; action = "use unknown non-masc tool: " ^ tool_name })))
-  | Some perm -> check_permission config ~agent_name ~token ~permission:perm
+  if is_known_or_internal_tool_name tool_name
+  then check_permission config ~agent_name ~token ~permission:CanBroadcast
+  else (
+    let () = record_strict_unknown_tool_denial ~agent_name ~tool_name in
+    Error
+      (Auth
+         (Auth_error.Forbidden
+            { agent = agent_name; action = "use unknown non-masc tool: " ^ tool_name })))
 ;;
 
 (* ============================================ *)
@@ -491,34 +485,25 @@ let resolve_role config ~agent_name ~token : (agent_role, masc_error) result =
 ;;
 
 let authorize_tool_for_role ~agent_name ~role ~tool_name : (unit, masc_error) result =
-  match permission_for_tool tool_name with
-  | Some perm ->
-      if has_permission role perm
-      then Ok ()
-      else Error (Auth (Auth_error.Forbidden { agent = agent_name; action = tool_name }))
-  | None ->
-      if is_unmapped_internal_tool_name tool_name
-      then
-        (* Unmapped internal tool: require at least Worker *)
-        if has_permission role CanBroadcast
-        then Ok ()
-        else
-          Error (Auth (Auth_error.Forbidden { agent = agent_name; action = tool_name }))
-      else (
-        let () = record_strict_unknown_tool_denial ~agent_name ~tool_name in
-        Error
-          (Auth
-             (Auth_error.Forbidden
-                { agent = agent_name; action = "use unknown non-masc tool: " ^ tool_name })))
+  if is_known_or_internal_tool_name tool_name
+  then
+    if has_permission role CanBroadcast
+    then Ok ()
+    else Error (Auth (Auth_error.Forbidden { agent = agent_name; action = tool_name }))
+  else (
+    let () = record_strict_unknown_tool_denial ~agent_name ~tool_name in
+    Error
+      (Auth
+         (Auth_error.Forbidden
+            { agent = agent_name; action = "use unknown non-masc tool: " ^ tool_name })))
 ;;
 
 (** Role-based tool authorization.
-    Resolves the caller role and enforces the tool's required permission.
+    Resolves the caller role and enforces generic internal-tool access.
     Invalid/expired tokens are rejected (not silently downgraded).
 
-    Tools not mapped by permission_for_tool are subject to additional
-    checks — unmapped internal tools require at least Worker, and
-    unmapped external tools are forbidden. *)
+    Known or [masc_*] tools require at least Worker; unknown external tools are
+    forbidden. *)
 let authorize_tool_v2 config ~agent_name ~token ~tool_name : (unit, masc_error) result =
   match resolve_role config ~agent_name ~token with
   | Error e -> Error e

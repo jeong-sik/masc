@@ -6,8 +6,9 @@ Plan - 2026-05-18.html`, PR-A).
 Each row in `baseline.jsonl` is one fixture used by
 `test_exec_shell_command_gate.ml` to pin both:
 
-- The `Worker_dev_tools.validate_command_tool_execute_with_allowlist`
-  verdict (`worker_verdict`).
+- The `Exec_policy.validate_command_tool_execute_with_allowlist`
+  verdict (`policy_verdict`; stored under the legacy JSONL key
+  `expected_worker_verdict`).
 - The Phase 1 SSOT `Masc_exec_command_gate.Shell_command_gate.gate`
   verdict (`ir_verdict`).
 
@@ -32,20 +33,20 @@ Each line is a single object:
 
 `category` is one of:
 
-- `successful` — worker gate and IR both allow.
-- `rejected` — worker gate and IR both reject (or both classify outside
+- `successful` — Exec policy and IR both allow.
+- `rejected` — Exec policy and IR both reject (or both classify outside
   the allowlist) for the same root reason.
-- `false_positive` — worker gate rejects a benign command that IR
+- `false_positive` — Exec policy rejects a benign command that IR
   correctly allows. This is the bucket the quoted-pipe regex fix
   (#16110) and follow-ups continue to drain.
 - `too_complex` — IR classifies as `too_complex` (heredoc, cmd_subst,
-  proc_subst, logic_op, …); worker gate may allow or reject depending on
+  proc_subst, logic_op, …); Exec policy may allow or reject depending on
   metachar scan.
 - `quoted_pipe`, `regex_alternation`, `literal_pipe`, `real_pipeline`,
   `redirection`, `glob`, `path_traversal` — feature buckets for the
   Plan's "Phase 0 minimum set".
 
-## Worker verdict tags
+## Policy verdict tags
 
 `block_reason_to_string` cases map to short tags here:
 

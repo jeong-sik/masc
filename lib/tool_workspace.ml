@@ -738,16 +738,6 @@ let schemas = Tool_schemas_workspace.schemas
 let tool_spec_read_only = [ "masc_status"; "masc_goal_list" ];;
 
 let tool_spec_system_internal = [ "masc_reset" ]
-let tool_required_permission = function
-  | "masc_status"
-  | "masc_check"
-  | "masc_goal_list" -> Some Masc_domain.CanReadState
-  | "masc_goal_upsert" | "masc_goal_transition" | "masc_goal_verify" ->
-    Some Masc_domain.CanBroadcast
-  | "masc_heartbeat" -> Some Masc_domain.CanBroadcast
-  | "masc_reset" -> Some Masc_domain.CanReset
-  | _ -> None
-;;
 
 let () =
   List.iter
@@ -764,7 +754,6 @@ let () =
             ~is_idempotent:(List.mem s.name tool_spec_read_only)
             ~visibility:(if is_system then Tool_catalog.Hidden else Tool_catalog.Default)
             ~allow_direct_call_when_hidden:is_system
-            ?required_permission:(tool_required_permission s.name)
             ()))
     schemas
 ;;

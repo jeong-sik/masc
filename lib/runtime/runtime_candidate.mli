@@ -70,15 +70,6 @@ val runtime_mcp_policy_for_agent :
   Llm_provider.Llm_transport.runtime_mcp_policy option ->
   Llm_provider.Llm_transport.runtime_mcp_policy option
 
-val tool_filter_rejection_label :
-  keeper_name:string ->
-  ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy ->
-  tools:Agent_sdk.Tool.t list ->
-  require_tool_choice_support:bool ->
-  require_tool_support:bool ->
-  t ->
-  string option
-
 val capacity_key : t -> string
 val capacity_keys : t list -> string list
 val declared_client_capacity : t -> int option

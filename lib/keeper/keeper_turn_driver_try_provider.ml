@@ -23,8 +23,6 @@ type try_provider_ctx =
   ; name : string
   ; (* Agent config — fields passed through the runtime candidate boundary. *)
     goal : string
-  ; require_tool_choice_support : bool
-  ; require_tool_support : bool
   ; priority : Llm_provider.Request_priority.t option
   ; session_id : string option
   ; system_prompt : string

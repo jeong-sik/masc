@@ -68,7 +68,7 @@ let test_repo_capability_groups_present () =
         ("tool_policy.toml has [groups." ^ group ^ "] header")
         true
         (String_util.contains_substring content ("[groups." ^ group ^ "]")))
-    [ "filesystem"; "filesystem_write"; "search_files"; "execute" ]
+    [ "filesystem"; "workspace_write"; "search_files"; "execute" ]
 
 let test_repo_capability_groups_include_expected_tools () =
   let path = locate_tool_policy_toml () in
@@ -79,7 +79,7 @@ let test_repo_capability_groups_include_expected_tools () =
     | Some line -> List.iter (fun tool -> assert_tool_in_line ~group ~tool line) tools
   in
   check_group "filesystem" [ "tool_read_file" ];
-  check_group "filesystem_write" [ "tool_edit_file"; "tool_write_file" ];
+  check_group "workspace_write" [ "tool_edit_file"; "tool_write_file" ];
   check_group "search_files" [ "tool_search_files" ];
   check_group "execute" [ "tool_execute" ]
 

@@ -6,7 +6,6 @@ type t =
   | Github
   | Docker
   | Filesystem_read
-  | Filesystem_write
   | Board_write
   | Workspace_write
   | Web
@@ -18,7 +17,6 @@ let to_string = function
   | Github -> "github"
   | Docker -> "docker"
   | Filesystem_read -> "filesystem_read"
-  | Filesystem_write -> "filesystem_write"
   | Board_write -> "board_write"
   | Workspace_write -> "workspace_write"
   | Web -> "web"
@@ -261,7 +259,7 @@ let classify_descriptor_tool ~tool_name ~arguments =
   | "tool_execute" -> Some (typed_execute_args_class arguments)
   | "tool_search_files" -> Some (classify_structured_shell_op arguments)
   | "tool_read_file" -> Some Filesystem_read
-  | "tool_write_file" | "tool_edit_file" -> Some Filesystem_write
+  | "tool_write_file" | "tool_edit_file" -> Some Workspace_write
   | _ -> None
 ;;
 

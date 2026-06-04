@@ -132,27 +132,33 @@ let test_masc_gc_input_schema_matches () =
     gen.input_schema
 ;;
 
-let test_web_tools_absent_from_public_misc_schemas () =
+(* Regression guard for PR #19864 → keeper "AllowList pruned ... WebSearch,
+   WebFetch" spam. Web tools are descriptor-backed keeper tools: they MUST be
+   present in the raw substrate inventory (so the keeper progressive-disclosure
+   universe registers WebSearch/WebFetch and [validate_allow_list] keeps them),
+   and they MUST be absent from the public MCP allowlist (public exclusion is
+   the job of [public_mcp_surface_tools], not of trimming the inventory). *)
+let test_web_tools_present_in_misc_schemas () =
   Alcotest.(check bool)
-    "masc_web_search absent from public misc schemas"
-    false
+    "masc_web_search present in misc schemas"
+    true
     (has_schema "masc_web_search" Tool_schemas_misc.schemas);
   Alcotest.(check bool)
-    "masc_web_fetch absent from public misc schemas"
-    false
+    "masc_web_fetch present in misc schemas"
+    true
     (has_schema "masc_web_fetch" Tool_schemas_misc.schemas)
 ;;
 
-let test_web_tools_absent_from_mcp_inventory () =
+let test_web_tools_in_raw_inventory_but_not_public_mcp_surface () =
   List.iter
     (fun name ->
       Alcotest.(check bool)
-        (name ^ " absent from Config.raw_all_tool_schemas")
-        false
+        (name ^ " present in Config.raw_all_tool_schemas")
+        true
         (has_schema name Masc.Config.raw_all_tool_schemas);
       Alcotest.(check bool)
-        (name ^ " absent from Config.raw_tool_name_set")
-        false
+        (name ^ " present in Config.raw_tool_name_set")
+        true
         (Masc.Config.is_raw_tool_name name);
       Alcotest.(check bool)
         (name ^ " absent from public_mcp_surface_tools")
@@ -163,19 +169,19 @@ let test_web_tools_absent_from_mcp_inventory () =
 
 let test_masc_web_search_name_matches () =
   let gen = find_by_name "masc_web_search" Tool_descriptors_gen.schemas in
-  let hand = find_by_name "masc_web_search" Tool_schemas_misc.internal_handler_schemas in
+  let hand = find_by_name "masc_web_search" Tool_schemas_misc.schemas in
   Alcotest.(check string) "masc_web_search name" hand.name gen.name
 ;;
 
 let test_masc_web_search_description_matches () =
   let gen = find_by_name "masc_web_search" Tool_descriptors_gen.schemas in
-  let hand = find_by_name "masc_web_search" Tool_schemas_misc.internal_handler_schemas in
+  let hand = find_by_name "masc_web_search" Tool_schemas_misc.schemas in
   Alcotest.(check string) "masc_web_search description" hand.description gen.description
 ;;
 
 let test_masc_web_search_input_schema_matches () =
   let gen = find_by_name "masc_web_search" Tool_descriptors_gen.schemas in
-  let hand = find_by_name "masc_web_search" Tool_schemas_misc.internal_handler_schemas in
+  let hand = find_by_name "masc_web_search" Tool_schemas_misc.schemas in
   Alcotest.check
     yojson_testable
     "masc_web_search input_schema (Yojson.Safe.equal)"
@@ -185,19 +191,19 @@ let test_masc_web_search_input_schema_matches () =
 
 let test_masc_web_fetch_name_matches () =
   let gen = find_by_name "masc_web_fetch" Tool_descriptors_gen.schemas in
-  let hand = find_by_name "masc_web_fetch" Tool_schemas_misc.internal_handler_schemas in
+  let hand = find_by_name "masc_web_fetch" Tool_schemas_misc.schemas in
   Alcotest.(check string) "masc_web_fetch name" hand.name gen.name
 ;;
 
 let test_masc_web_fetch_description_matches () =
   let gen = find_by_name "masc_web_fetch" Tool_descriptors_gen.schemas in
-  let hand = find_by_name "masc_web_fetch" Tool_schemas_misc.internal_handler_schemas in
+  let hand = find_by_name "masc_web_fetch" Tool_schemas_misc.schemas in
   Alcotest.(check string) "masc_web_fetch description" hand.description gen.description
 ;;
 
 let test_masc_web_fetch_input_schema_matches () =
   let gen = find_by_name "masc_web_fetch" Tool_descriptors_gen.schemas in
-  let hand = find_by_name "masc_web_fetch" Tool_schemas_misc.internal_handler_schemas in
+  let hand = find_by_name "masc_web_fetch" Tool_schemas_misc.schemas in
   Alcotest.check
     yojson_testable
     "masc_web_fetch input_schema (Yojson.Safe.equal)"
@@ -337,15 +343,15 @@ let () =
         ; Alcotest.test_case "description" `Quick test_masc_gc_description_matches
         ; Alcotest.test_case "input_schema" `Quick test_masc_gc_input_schema_matches
         ] )
-    ; ( "keeper-internal web tools"
+    ; ( "descriptor-backed web tools"
       , [ Alcotest.test_case
-            "absent from public misc schemas"
+            "present in misc schemas"
             `Quick
-            test_web_tools_absent_from_public_misc_schemas
+            test_web_tools_present_in_misc_schemas
         ; Alcotest.test_case
-            "absent from MCP inventory"
+            "in raw inventory but not public MCP surface"
             `Quick
-            test_web_tools_absent_from_mcp_inventory
+            test_web_tools_in_raw_inventory_but_not_public_mcp_surface
         ; Alcotest.test_case "masc_web_search name" `Quick test_masc_web_search_name_matches
         ; Alcotest.test_case "description" `Quick test_masc_web_search_description_matches
         ; Alcotest.test_case

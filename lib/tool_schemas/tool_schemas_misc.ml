@@ -43,18 +43,19 @@ let config_category_enum_strings =
   ]
 ;;
 
-let keeper_internal_web_tool_names =
-  [ "masc_web_search"; "masc_web_fetch" ]
-;;
-
-let is_keeper_internal_web_tool (schema : tool_schema) =
-  List.mem schema.name keeper_internal_web_tool_names
-;;
-
-let internal_handler_schemas : tool_schema list = Tool_descriptors_gen.schemas
-
-let schemas : tool_schema list =
-  List.filter
-    (fun schema -> not (is_keeper_internal_web_tool schema))
-    internal_handler_schemas
-;;
+(* [schemas] is the full generated misc schema set, including the
+   descriptor-backed web tools (masc_web_search / masc_web_fetch).
+   Web tools must stay in this list because it feeds
+   [Config.raw_all_tool_schemas] — the substrate's "all tools that exist"
+   set, which is the source for both (a) the keeper progressive-disclosure
+   universe (Keeper_tool_dispatch_runtime.inject_masc_schemas) and (b) the
+   public MCP surface. Public exclusion is the job of
+   [Tool_catalog.public_mcp_surface_tools] / [is_public_mcp] (web tools are
+   absent from that allowlist), NOT of this inventory. PR #19864 filtered web
+   tools out here as a "keeper-only backend" optimisation; that excluded them
+   from the keeper universe too, so the descriptor bundle never registered
+   WebSearch/WebFetch while [effective_core_tools] still injected the public
+   names every turn — every keeper turn logged "AllowList pruned ... WebSearch,
+   WebFetch". The exclusion belonged on the public-surface layer, not the raw
+   inventory. *)
+let schemas : tool_schema list = Tool_descriptors_gen.schemas

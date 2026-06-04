@@ -183,6 +183,7 @@
   test_runtime_toml_overrides
   test_runtime_provider_auth_headers
   test_keeper_tool_policy_config
+  test_keeper_tool_policy_masc_surface
   test_keeper_tool_visibility_projection
   test_keeper_tool_capability_axis
   test_keeper_tool_resolution
@@ -441,6 +442,7 @@
   test_runtime_toml_overrides
   test_runtime_provider_auth_headers
   test_keeper_tool_policy_config
+  test_keeper_tool_policy_masc_surface
   test_keeper_tool_visibility_projection
   test_keeper_tool_capability_axis
   test_keeper_tool_resolution

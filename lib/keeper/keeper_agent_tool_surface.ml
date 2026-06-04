@@ -117,6 +117,14 @@ let tool_surface_class_of_string raw =
 let tool_surface_class_to_yojson cls =
   `String (tool_surface_class_to_string cls)
 
+let tool_surface_class_for_tool_names = function
+  | [] -> Surface_none
+  | names
+    when List.for_all
+           Keeper_tool_descriptor_resolution.is_public_mcp_surface_name
+           names -> Surface_public_only
+  | _ -> Surface_mixed
+
 type tool_surface_metrics =
   { turn_lane : turn_lane
   ; tool_surface_class : tool_surface_class

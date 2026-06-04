@@ -44,6 +44,15 @@ let public_names_for_allowed_internal_names internal_names =
   |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
 ;;
 
+let is_public_mcp_surface_name tool_name =
+  let stripped = Keeper_tool_alias.strip_mcp_masc_prefix tool_name in
+  match descriptor_for_tool_name stripped with
+  | Some descriptor ->
+    String.equal descriptor.Keeper_tool_descriptor.public_name stripped
+    && Tool_catalog.is_public_mcp stripped
+  | None -> false
+;;
+
 let effect_domain_for_tool_name tool_name =
   match descriptor_for_tool_name tool_name with
   | Some descriptor -> descriptor.Keeper_tool_descriptor.policy.effect_domain

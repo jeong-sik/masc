@@ -192,6 +192,11 @@ let () =
               (match by_source |> member "deprecated_alias" with
                | `Null -> true
                | _ -> false);
+            let removed_inline_source = "inline" ^ "_dispatch" in
+            check bool "legacy inline source removed" true
+              (match by_source |> member removed_inline_source with
+               | `Null -> true
+               | _ -> false);
             ())
         ; test_case "respects top_n" `Quick (fun () ->
             Tool_registry.reset ();

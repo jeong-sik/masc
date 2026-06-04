@@ -489,7 +489,7 @@ let test_inline_board_post_author_rewrites_caller_claim () =
       ]
   in
   let normalized =
-    Tool_inline_dispatch_extra.ensure_board_post_author
+    Mcp_tool_runtime_board.ensure_board_post_author
       ~agent_name:"keeper-velvet-hammer-agent" args
   in
   Alcotest.(check string) "author from ctx" "velvet-hammer"
@@ -512,7 +512,7 @@ let test_inline_board_post_author_accepts_matching_alias () =
       ]
   in
   let normalized =
-    Tool_inline_dispatch_extra.ensure_board_post_author
+    Mcp_tool_runtime_board.ensure_board_post_author
       ~agent_name:"keeper-analyst-agent" args
   in
   Alcotest.(check string) "author canonical" "analyst"
@@ -1122,47 +1122,47 @@ let test_board_curation_submit_roundtrips_to_read () =
     "Board has one high-priority routing item."
     Yojson.Safe.Util.(read_json |> member "summary" |> to_string)
 
-let inline_board_dispatch ~sw ~clock name args =
+let mcp_runtime_board_dispatch ~sw ~clock name args =
   let state = Mcp_server.create_state ~base_path:_test_base_path in
-  Tool_inline_dispatch_extra.dispatch ~config:state.Mcp_server.workspace_config
-    ~agent_name:"inline-curator" ~arguments:args ~state ~sw ~clock ~name
+  Mcp_tool_runtime_board.dispatch ~config:state.Mcp_server.workspace_config
+    ~agent_name:"mcp-runtime-curator" ~arguments:args ~state ~sw ~clock ~name
     ~start_time:(Unix.gettimeofday ())
 
-let require_inline_result ~sw ~clock name args =
-  match inline_board_dispatch ~sw ~clock name args with
+let require_mcp_runtime_result ~sw ~clock name args =
+  match mcp_runtime_board_dispatch ~sw ~clock name args with
   | Some result -> ((Tool_result.is_success result), (Tool_result.message result))
-  | None -> Alcotest.failf "%s not routed by inline board dispatch" name
+  | None -> Alcotest.failf "%s not routed by MCP runtime board dispatch" name
 
-let test_board_curation_inline_dispatch_routes_read_and_submit () =
+let test_board_curation_mcp_runtime_routes_read_and_submit () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   Eio.Switch.run @@ fun sw ->
   let clock = Eio.Stdenv.clock env in
   let read_ok, read_body =
-    require_inline_result ~sw ~clock "masc_board_curation_read" (make_args [])
+    require_mcp_runtime_result ~sw ~clock "masc_board_curation_read" (make_args [])
   in
-  Alcotest.(check bool) "inline curation read ok" true read_ok;
-  Alcotest.(check string) "inline curation read empty" "null" read_body;
+  Alcotest.(check bool) "MCP runtime curation read ok" true read_ok;
+  Alcotest.(check string) "MCP runtime curation read empty" "null" read_body;
   let submit_ok, submit_body =
-    require_inline_result ~sw ~clock "masc_board_curation_submit"
+    require_mcp_runtime_result ~sw ~clock "masc_board_curation_submit"
       (make_args
          [
-           ("submitted_by", `String "inline-curator");
-           ("summary", `String "Inline MCP curation route works.");
+           ("submitted_by", `String "mcp-runtime-curator");
+           ("summary", `String "MCP runtime curation route works.");
            ("rationale", `String "Pin schema-to-dispatch curation routing");
          ])
   in
-  Alcotest.(check bool) "inline curation submit ok" true submit_ok;
+  Alcotest.(check bool) "MCP runtime curation submit ok" true submit_ok;
   let submitted = Yojson.Safe.from_string submit_body in
-  Alcotest.(check string) "inline submitted_by persisted" "inline-curator"
+  Alcotest.(check string) "MCP runtime submitted_by persisted" "mcp-runtime-curator"
     Yojson.Safe.Util.(submitted |> member "submitted_by" |> to_string);
   let read2_ok, read2_body =
-    require_inline_result ~sw ~clock "masc_board_curation_read" (make_args [])
+    require_mcp_runtime_result ~sw ~clock "masc_board_curation_read" (make_args [])
   in
-  Alcotest.(check bool) "inline curation read after submit ok" true read2_ok;
-  Alcotest.(check string) "inline curation read after submit summary"
-    "Inline MCP curation route works."
+  Alcotest.(check bool) "MCP runtime curation read after submit ok" true read2_ok;
+  Alcotest.(check string) "MCP runtime curation read after submit summary"
+    "MCP runtime curation route works."
     Yojson.Safe.Util.(
       Yojson.Safe.from_string read2_body |> member "summary" |> to_string)
 
@@ -1852,9 +1852,9 @@ let () =
             `Quick test_board_dashboard_json_hides_unvoted_scores_when_blind;
           Alcotest.test_case "board dashboard json embeds contributor quality"
             `Quick test_board_dashboard_json_embeds_contributor_quality;
-          Alcotest.test_case "inline board post author rewrites caller claim"
+          Alcotest.test_case "MCP runtime board post author rewrites caller claim"
             `Quick test_inline_board_post_author_rewrites_caller_claim;
-          Alcotest.test_case "inline board post author accepts matching alias"
+          Alcotest.test_case "MCP runtime board post author accepts matching alias"
             `Quick test_inline_board_post_author_accepts_matching_alias;
         ] );
       ( "json_helpers",
@@ -1905,8 +1905,8 @@ let () =
             test_board_curation_read_empty_returns_json_null;
           Alcotest.test_case "curation submit roundtrips to read" `Quick
             test_board_curation_submit_roundtrips_to_read;
-          Alcotest.test_case "curation inline dispatch routes read and submit" `Quick
-            test_board_curation_inline_dispatch_routes_read_and_submit;
+          Alcotest.test_case "curation MCP runtime routes read and submit" `Quick
+            test_board_curation_mcp_runtime_routes_read_and_submit;
           Alcotest.test_case "accept automation reject system" `Quick
             test_post_create_accepts_automation_rejects_system;
           Alcotest.test_case "create empty content" `Quick test_post_create_empty_content;

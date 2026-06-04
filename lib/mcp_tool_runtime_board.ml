@@ -16,7 +16,7 @@ module Int = Stdlib.Int
 module Float = Stdlib.Float
 
 
-(** Tool_inline_dispatch_extra — additional inline tool dispatch arms
+(** Mcp_tool_runtime_board — MCP server-local board tool runtime
     (recall, board, conversation).
     Returns [Some (Tool_result.result)] if handled, [None] otherwise.
 

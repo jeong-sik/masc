@@ -827,10 +827,10 @@ lib/tool_workspace.ml:283
 lib/tool_workspace.ml:797
 lib/tool_workspace.ml:823
 lib/tool_help_registry.ml:231
-lib/tool_inline_dispatch_extra.ml:57
-lib/tool_inline_dispatch_extra.ml:451
-lib/tool_inline_dispatch.ml:235
-lib/tool_inline_dispatch.ml:253
+lib/mcp_tool_runtime_board.ml:57
+lib/mcp_tool_runtime_board.ml:451
+lib/mcp_tool_runtime.ml:235
+lib/mcp_tool_runtime.ml:253
 lib/tool_input_validation.ml:82
 lib/tool_keeper.ml:861
 lib/tool_keeper.ml:909

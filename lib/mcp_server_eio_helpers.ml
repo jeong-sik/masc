@@ -1,6 +1,6 @@
 (** Mcp_server_eio_helpers — Small utility functions extracted from mcp_server_eio.ml
 
-    Provides functions needed by both mcp_server_eio.ml and tool_inline_dispatch.ml
+    Provides functions needed by both mcp_server_eio.ml and mcp_tool_runtime.ml
     without circular dependencies.
 *)
 

@@ -18,7 +18,7 @@
 | `keeper/agent_tool_task_runtime.ml:336` (`keeper_task_create`) | ✅ 전달 (#13981) | cap 작동 |
 | `tool_task.ml:485` (`handle_add_task` for `masc_add_task`) | ❌ 미전달 | **cap 우회** |
 | `task_dispatch.ml:59` | ❌ 미전달 | cap 우회 |
-| `tool_inline_dispatch_workspace.ml:103` | ❌ 미전달 | cap 우회 |
+| `mcp_tool_runtime_workspace.ml:103` | ❌ 미전달 | cap 우회 |
 | `operator/operator_control.ml:235` | ❌ 미전달 | cap 우회 |
 
 board의 "8 tasks open in oas-bridge-stabilization"는 (2)~(5) 어느 경로로든 들어온 결과로 추정 — 가장 유력한 건 `masc_add_task` MCP tool.
@@ -89,7 +89,7 @@ Workspace.add_task config ?goal_id
   ~reject_if:(Workspace_task_capacity.rejection_for_add_task ?goal_id)
   ~title ~priority ~description
 
-(* lib/tool_inline_dispatch_workspace.ml:103 *)
+(* lib/mcp_tool_runtime_workspace.ml:103 *)
 Workspace_task.add_task active_config ?goal_id
   ~reject_if:(Workspace_task_capacity.rejection_for_add_task ?goal_id)
   ~title:task_title ~priority:3 ~description:""
@@ -110,7 +110,7 @@ caller 본문에 `goal_id`가 어떻게 전달되는지 확인 필요. 만약 ca
 
 - `masc_add_task`: 현재 `(false, "Error: ...")` 튜플 반환 → `Error: <message>` 형식 유지. 클라이언트 측 변경 불필요.
 - `task_dispatch`: 동일.
-- `tool_inline_dispatch_workspace`: 동일.
+- `mcp_tool_runtime_workspace`: 동일.
 - `operator_control`: 동일.
 
 ## 4. Migration
@@ -127,7 +127,7 @@ JSON 응답 형식 동일 — `error_to_json` 그대로. `keeper_task_create`의
 - 신규 테스트 4건 추가:
   - `test_masc_add_task_caps_per_goal` — masc_add_task가 4번째 같은 goal_id 거부
   - `test_task_dispatch_caps_per_goal` — task_dispatch path 거부
-  - `test_inline_dispatch_caps_per_goal` — inline dispatch path 거부
+  - `test_mcp_runtime_caps_per_goal` — MCP runtime path 거부
   - `test_operator_task_inject_caps_per_goal` — operator path 거부
 
 ## 5. TLA+ Spec 매핑

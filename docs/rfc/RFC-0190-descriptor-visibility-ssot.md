@@ -28,9 +28,9 @@ Result:
 | descriptor ∖ surface | 82 | `keeper_board_*` (managed-keeper twins), `masc_board_delete`, `masc_config`, `masc_get_metrics`, … (intentionally not operator-visible) |
 | intersect | 46 | already descriptor-backed surface entries |
 
-Two SSOTs that should be one. RFC-0179 + RFC-0182 brought descriptors to *most* of the `masc_*` operator surface, but **9 lifecycle/authoring tools never entered the descriptor system at all** because their handlers live in `lib/tool_inline_dispatch.ml` (MCP server-level inline path), not in `Tool_workspace.dispatch` or the cluster `*_dispatch_ref` references the descriptor `runtime_handler` enum routes to.
+Two SSOTs that should be one. RFC-0179 + RFC-0182 brought descriptors to *most* of the `masc_*` operator surface, but **9 lifecycle/authoring tools never entered the descriptor system at all** because their handlers live in `lib/mcp_tool_runtime.ml` (MCP server-level inline path), not in `Tool_workspace.dispatch` or the cluster `*_dispatch_ref` references the descriptor `runtime_handler` enum routes to.
 
-The descriptor enum (`In_process | Filesystem | Shell_ir`) is closed and assumes the descriptor *owns* execution. Tools handled by inline dispatch have no slot.
+The descriptor enum (`In_process | Filesystem | Shell_ir`) is closed and assumes the descriptor *owns* execution. Tools handled by MCP runtime have no slot.
 
 ## 1. Hypothesis the audit invalidated
 
@@ -48,7 +48,7 @@ Make `Agent_tool_descriptor.t` the single source of truth for *visibility and me
 - `Tool_catalog_surfaces.public_mcp_surface_tools` is computed as
   `filter (fun d -> d.policy.visibility = Public_mcp) all_descriptors`.
 - Every entry on every surface (`public_mcp_surface_tools`, `spawned_agent_surface_tools`, `local_worker_surface_tools`, `session_min_surface_tools`, `admin_surface_tools`) has a descriptor.
-- Dispatch routing remains opt-in: descriptors whose execution lives in `Tool_inline_dispatch` declare `executor = External_inline` and `runtime_handler = Tool_external_inline`, and the descriptor dispatcher returns `None` for them, leaving the inline path unchanged.
+- Dispatch routing remains opt-in: descriptors whose execution lives in `Mcp_tool_runtime` declare `executor = External_inline` and `runtime_handler = Tool_external_inline`, and the descriptor dispatcher returns `None` for them, leaving the inline path unchanged.
 - The surface↔descriptor diff becomes a compile-/test-time invariant (Phase 4).
 
 ## 3. Non-goals
@@ -65,7 +65,7 @@ type executor =
   | Filesystem
   | In_process
   | External_inline  (* NEW: descriptor is metadata-only;
-                        execution owned by tool_inline_dispatch *)
+                        execution owned by mcp_tool_runtime *)
 
 type runtime_handler =
   | ... (* existing variants *)
@@ -80,7 +80,7 @@ let handle ctx ~descriptor ~args =
   | Filesystem      -> handle_filesystem ctx descriptor args
   | Shell_ir        -> handle_shell_ir   ctx descriptor args
   | In_process      -> handle_in_process ctx descriptor args
-  | External_inline -> None  (* fall through to inline_dispatch *)
+  | External_inline -> None  (* fall through to MCP runtime *)
 ```
 
 `handle_internal` already returns `string option`; existing callers treat `None` as "descriptor system declines, let the next path handle." The inline path is *that* next path for MCP-server entry points; for keeper-facing entry it is unknown-tool (correct — these tools were never keeper-callable).
@@ -101,7 +101,7 @@ let handle ctx ~descriptor ~args =
 | `masc_persona_generate` | `masc.persona.generate` | persona authoring schema |
 | `masc_keeper_create_from_persona` | `masc.persona.create_from` | persona authoring schema |
 
-Each entry pulls `description` and `input_schema` from the inline dispatch's existing schema registration; **no duplication is introduced** — descriptors reference the same `Masc_domain.tool_schema` records the inline path already publishes.
+Each entry pulls `description` and `input_schema` from the MCP runtime's existing schema registration; **no duplication is introduced** — descriptors reference the same `Masc_domain.tool_schema` records the inline path already publishes.
 
 ## 6. Implementation phases
 
@@ -126,12 +126,12 @@ This RFC does *not* trigger workaround signatures:
 ## 8. Open questions
 
 1. Should `External_inline` permit a non-empty `runtime_handler` other than `Tool_external_inline` for future inline-cluster splits? Pinning to one variant is the conservative choice; reconsider only if a real second consumer appears.
-2. `masc_persona_generate` and `masc_keeper_create_from_persona` may have stricter `approval` semantics than current handler defaults — confirm against `tool_inline_dispatch` `inline_tool_requires_*` lists in P4.
+2. `masc_persona_generate` and `masc_keeper_create_from_persona` may have stricter `approval` semantics than current handler defaults — confirm against `mcp_tool_runtime` `inline_tool_requires_*` lists in P4.
 3. RFC-0064 hard-cut public set (7 LLM-native names) is unchanged; the visibility projection covers MCP surface only.
 
 ## 9. Rejected alternatives
 
-- **(A-pragmatic)** Add 9 descriptors with `In_process` executor + dispatch arms in `handle_masc_workspace` / `handle_masc_persona` / `handle_masc_keeper` that call back into `Tool_inline_dispatch`. Rejected: introduces dual handlers for the same tool name (descriptor cluster *and* inline path), guaranteed drift under future changes.
+- **(A-pragmatic)** Add 9 descriptors with `In_process` executor + dispatch arms in `handle_masc_workspace` / `handle_masc_persona` / `handle_masc_keeper` that call back into `Mcp_tool_runtime`. Rejected: introduces dual handlers for the same tool name (descriptor cluster *and* inline path), guaranteed drift under future changes.
 - **(B-only)** Keep the hand list, add a test that asserts every surface entry exists in *some* known set (descriptor or allowlist). Rejected as the *final* state — drift cannot be eliminated, only reported. Acceptable as an *interim* gate (see RFC-0190 implementation companion: invariant test PR can land before P1 to ratchet the count down).
 
 ## 10. Acceptance criteria

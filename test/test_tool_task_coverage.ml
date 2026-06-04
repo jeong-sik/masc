@@ -2184,11 +2184,11 @@ let () = test "rfc_0034_v2_task_dispatch_orphan_bypasses_cap" (fun () ->
            "task_dispatch orphan path returned Error: %s"
            (Masc_error.to_string err)))
 
-(* RFC-0034.v2 Test 3: Tool_inline_dispatch_workspace — verified through
+(* RFC-0034.v2 Test 3: Mcp_tool_runtime_workspace — verified through
    direct Workspace_task.add_task with the same [reject_if] hook the
-   inline dispatcher wires. Confirms the [rejection_for_add_task ?goal_id:None]
+   MCP runtime wires. Confirms the [rejection_for_add_task ?goal_id:None]
    call shape compiles AND is non-blocking for orphan tasks. *)
-let () = test "rfc_0034_v2_inline_dispatch_orphan_bypasses_cap" (fun () ->
+let () = test "rfc_0034_v2_mcp_runtime_orphan_bypasses_cap" (fun () ->
   let ctx = make_test_ctx () in
   let goal, _ =
     match Goal_store.upsert_goal ctx.config ~title:"RFC-0034 inline goal" () with
@@ -2216,11 +2216,11 @@ let () = test "rfc_0034_v2_inline_dispatch_orphan_bypasses_cap" (fun () ->
   then
     failwith
       (Printf.sprintf
-         "inline-dispatch orphan path should add, got: %s"
+         "MCP-runtime orphan path should add, got: %s"
          result))
 
 (* RFC-0034.v2 Test 4: operator_control task_inject — same shape as
-   inline dispatch. Pins that the orphan-task call site does not
+   MCP runtime. Pins that the orphan-task call site does not
    regress to a rejection. *)
 let () = test "rfc_0034_v2_operator_task_inject_orphan_bypasses_cap" (fun () ->
   let ctx = make_test_ctx () in

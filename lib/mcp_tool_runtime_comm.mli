@@ -1,4 +1,4 @@
-(** Tool_inline_dispatch_comm — communication tool handlers.
+(** Mcp_tool_runtime_comm — communication tool handlers.
 
     Handles: masc_broadcast, masc_messages.
 
@@ -7,7 +7,7 @@
 
     @since 0.1.0 *)
 
-type context = Tool_inline_dispatch_types.context
+type context = Mcp_tool_runtime_types.context
 
 (** {1 Handlers} *)
 

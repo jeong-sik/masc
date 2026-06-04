@@ -1,9 +1,9 @@
-(** Tool_inline_dispatch_workspace — project startup tool handler.
+(** Mcp_tool_runtime_workspace — project startup tool handler.
 
     Handles project root setup and optional task bootstrapping.
 
-    Extracted from {!Tool_inline_dispatch} to keep the dispatch
-    table file under the lint cap.  The handler returns
+    Extracted from {!Mcp_tool_runtime} to keep the runtime
+    router under the lint cap.  The handler returns
     [Tool_result.result option] — [Some] when the tool name matches,
     [None] when the dispatcher should fall through to a default handler.
 
@@ -12,7 +12,7 @@
 
 val handle_start :
   tool_name:string -> start_time:float ->
-  Tool_inline_dispatch_types.context ->
+  Mcp_tool_runtime_types.context ->
   Tool_result.result option
 (** [handle_start ~tool_name ~start_time ctx] handles [masc_start] —
     the compound "set project root + join + optional task" onboarding flow.

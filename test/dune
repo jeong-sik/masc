@@ -1790,7 +1790,7 @@
 
 ; RFC-0084 host-config-cleanup-D — agent runtime root migration.
 ; Pins 0 occurrences of /tmp/.masc_agent[_mcp]_<sid> literals
-; across mcp_server_eio_execute.ml + tool_inline_dispatch_workspace.ml
+; across mcp_server_eio_execute.ml + mcp_tool_runtime_workspace.ml
 ; and exactly 1 Host_config.host binding per module.
 
 (test

@@ -185,10 +185,10 @@
   tool_local_runtime_bench
   tool_local_runtime_status
   tool_local_runtime_probe
-  ;; tool_inline_dispatch sub-modules
-  tool_inline_dispatch_types
-  tool_inline_dispatch_workspace
-  tool_inline_dispatch_comm
+  ;; mcp_tool_runtime sub-modules
+  mcp_tool_runtime_types
+  mcp_tool_runtime_workspace
+  mcp_tool_runtime_comm
   workspace_goals_verification
   tool_misc_admin
   keeper_tool_persona_audit

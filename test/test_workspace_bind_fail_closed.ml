@@ -6,7 +6,7 @@
 
     This test verifies the gate function at the unit level.  It does NOT call
     [handle_join] directly (which requires a full
-    [Tool_inline_dispatch_types.context] with Eio fiber infrastructure).
+    [Mcp_tool_runtime_types.context] with Eio fiber infrastructure).
 
     Note on persona path resolution: [normalize_all_names] uses
     [Config_dir_resolver.personas_dir_opt()] first, which can ignore

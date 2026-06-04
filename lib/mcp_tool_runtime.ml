@@ -16,23 +16,23 @@ module Int = Stdlib.Int
 module Float = Stdlib.Float
 
 
-(** Tool_inline_dispatch — thin dispatch router for inline tool handlers.
+(** Mcp_tool_runtime — MCP server-local tool runtime.
 
     Delegates to sub-modules:
-    - Tool_inline_dispatch_workspace: masc_start
-    - Tool_inline_dispatch_comm: masc_broadcast, masc_messages
-    - Tool_inline_dispatch_extra: remaining tools (board, etc.)
+    - Mcp_tool_runtime_workspace: masc_start
+    - Mcp_tool_runtime_comm: masc_broadcast, masc_messages
+    - Mcp_tool_runtime_board: remaining tools (board, etc.)
 
-    Keeps inline: mcp_session plus MCP-state helpers.
+    Keeps MCP-only server helpers that need per-request server state.
 
     RFC-0062 Phase 4c-2: handlers now return [Tool_result.result] directly;
     [wrap_result] adapter removed. *)
 
 (** Re-export shared types so callers can use
-    [Tool_inline_dispatch.context] and [Tool_inline_dispatch.tool_result]
+    [Mcp_tool_runtime.context] and [Mcp_tool_runtime.tool_result]
     without knowing about the types sub-module. *)
-type tool_result = Tool_inline_dispatch_types.tool_result
-type context = Tool_inline_dispatch_types.context = {
+type tool_result = Mcp_tool_runtime_types.tool_result
+type context = Mcp_tool_runtime_types.context = {
   config : Workspace.config;
   agent_name : string;
   registry : Session.registry;
@@ -55,17 +55,17 @@ type context = Tool_inline_dispatch_types.context = {
     Workspace.config -> Mcp_server_eio_governance.mcp_session_record list -> unit;
 }
 
-(* RFC-0189 PR-2: inline helpers return [Tool_result.result] directly.
+(* RFC-0189 PR-2: MCP runtime helpers return [Tool_result.result] directly.
    Two patterns:
 
-   - [inline_ok] handles both plain-text and JSON-string success bodies.
+   - [runtime_ok] handles both plain-text and JSON-string success bodies.
      [structured_payload_of_message] lifts JSON envelopes into [data];
      plain strings fall through as [`String body].
-   - [inline_err_workflow] commits caller-input rejections to
+   - [runtime_err_workflow] commits caller-input rejections to
      [Workflow_rejection]: every error path in this dispatch
      ("id is required", unknown enum action, not-found lookups) is
      caller-side. *)
-let inline_ok ~tool_name ~start_time body : Tool_result.result =
+let runtime_ok ~tool_name ~start_time body : Tool_result.result =
   let data =
     match Tool_result.structured_payload_of_message body with
     | Some json -> json
@@ -74,7 +74,7 @@ let inline_ok ~tool_name ~start_time body : Tool_result.result =
   Tool_result.make_ok ~tool_name ~start_time ~data ()
 ;;
 
-let inline_err_workflow ~tool_name ~start_time msg : Tool_result.result =
+let runtime_err_workflow ~tool_name ~start_time msg : Tool_result.result =
   Tool_result.make_err
     ~tool_name
     ~class_:Tool_result.Workflow_rejection
@@ -120,13 +120,13 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.result option =
   match name with
   (* ── Workspace lifecycle (delegated) ─────────────────────────────── *)
   | "masc_start" ->
-      Tool_inline_dispatch_workspace.handle_start ~tool_name:name ~start_time:start ctx
+      Mcp_tool_runtime_workspace.handle_start ~tool_name:name ~start_time:start ctx
 
   (* ── Communication (delegated) ──────────────────────────────── *)
   | "masc_broadcast" ->
-      Tool_inline_dispatch_comm.handle_broadcast ~tool_name:name ~start_time:start ctx
+      Mcp_tool_runtime_comm.handle_broadcast ~tool_name:name ~start_time:start ctx
   | "masc_messages" ->
-      Tool_inline_dispatch_comm.handle_messages ~tool_name:name ~start_time:start ctx
+      Mcp_tool_runtime_comm.handle_messages ~tool_name:name ~start_time:start ctx
 
   (* Verification tools removed: pruned *)
 
@@ -138,7 +138,7 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.result option =
       let raw = arg_get_string "action" "" in
       (match Mcp_session.action_of_string_opt raw with
        | None ->
-         Some (inline_err_workflow ~tool_name:name ~start_time:start
+         Some (runtime_err_workflow ~tool_name:name ~start_time:start
            (Printf.sprintf
              "action must be one of [%s]; got %S"
              (String.concat "|" Mcp_session.valid_action_strings) raw))
@@ -198,48 +198,48 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.result option =
             end
       in
       (match response with
-       | Ok json -> Some (inline_ok ~tool_name:name ~start_time:start (Yojson.Safe.to_string json))
-       | Error e -> Some (inline_err_workflow ~tool_name:name ~start_time:start e)))
+       | Ok json -> Some (runtime_ok ~tool_name:name ~start_time:start (Yojson.Safe.to_string json))
+       | Error e -> Some (runtime_err_workflow ~tool_name:name ~start_time:start e)))
 
   (* ── Fallthrough to extra dispatch ──────────────────────────── *)
   | _ ->
-      Tool_inline_dispatch_extra.dispatch ~config ~agent_name ~arguments ~state ~sw ~clock ~name ~start_time:start
+      Mcp_tool_runtime_board.dispatch ~config ~agent_name ~arguments ~state ~sw ~clock ~name ~start_time:start
 
 (* ================================================================ *)
 (* Tool_spec registration (RFC-0182 §3.2)                           *)
 (* ================================================================ *)
 
-(* Migrates inline-dispatched workspace tools from the legacy
+(* Migrates MCP server-local workspace tools from the legacy
    register_module_tag bootstrap (mcp_server_eio.ml) to the Tool_spec
    single-call SSOT.
 
    Excluded (deferred, semantic-widening would be required):
    - [masc_set_param], [channel_gate] —
      no Masc_domain.tool_schema record exists. They are dispatched via
-     HTTP routes / inline arms but never advertised to MCP. Promoting
+     HTTP routes / MCP runtime arms but never advertised to MCP. Promoting
      them to Tool_spec.register requires authoring new input schemas
      and deciding visibility semantics for MCP exposure. Tracked as
      RFC-0182 follow-up scope.
    The retired [masc_tool_*] shard-management tools are intentionally absent
    from this list and from the MCP ToolSpec surface. *)
 
-let inline_register_targets =
+let runtime_register_targets =
   [ "masc_broadcast"; "masc_messages" ]
 
-let inline_tool_read_only =
+let runtime_tool_read_only =
   [ "masc_messages" ]
 
-let inline_tool_requires_actor_binding = []
+let runtime_tool_requires_actor_binding = []
 
-let inline_tool_mcp_context_required =
+let runtime_tool_mcp_context_required =
   [ "masc_broadcast"; "masc_messages" ]
 
-let inline_tool_effect_domain name : Tool_catalog.effect_domain =
-  if List.mem name inline_tool_read_only then Tool_catalog.Read_only
+let runtime_tool_effect_domain name : Tool_catalog.effect_domain =
+  if List.mem name runtime_tool_read_only then Tool_catalog.Read_only
   else Tool_catalog.Masc_workspace
 
 let () =
-  inline_register_targets
+  runtime_register_targets
   |> List.iter (fun name ->
     match
       List.find_opt
@@ -248,7 +248,7 @@ let () =
     with
     | None -> ()
     | Some (schema : Masc_domain.tool_schema) ->
-      let is_read_only = List.mem name inline_tool_read_only in
+      let is_read_only = List.mem name runtime_tool_read_only in
       Tool_spec.register
         (Tool_spec.create
            ~name:schema.name
@@ -258,7 +258,7 @@ let () =
            ~handler_binding:Tag_dispatch
            ~is_read_only
            ~is_idempotent:is_read_only
-           ~mcp_context_required:(List.mem name inline_tool_mcp_context_required)
-           ~requires_actor_binding:(List.mem name inline_tool_requires_actor_binding)
-           ~effect_domain:(inline_tool_effect_domain name)
+           ~mcp_context_required:(List.mem name runtime_tool_mcp_context_required)
+           ~requires_actor_binding:(List.mem name runtime_tool_requires_actor_binding)
+           ~effect_domain:(runtime_tool_effect_domain name)
            ()))

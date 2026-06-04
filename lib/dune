@@ -253,6 +253,7 @@
    masc.otel_dispatch_hook
    masc.voice_config
    masc.voice_runtime_overlay
+   masc.discovery_cache
    ;; RFC-0056 Phase 1L — Attribution envelope extracted to lib/attribution/.
    ;; Pure Attribution + phantom-tagged helpers, deps: stdlib + Yojson only.
    masc.attribution

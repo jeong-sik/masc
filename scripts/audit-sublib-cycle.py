@@ -78,6 +78,7 @@ DEFAULT_LEAVES: tuple[str, ...] = (
     "masc.otel_dispatch_hook",
     "masc.voice_config",
     "masc.voice_runtime_overlay",
+    "masc.discovery_cache",
     # Keeper-owned pure/type leaves extracted from lib/keeper/.
     "masc.keeper_accountability_claim_types",
     "masc.keeper_runtime_manifest_types",

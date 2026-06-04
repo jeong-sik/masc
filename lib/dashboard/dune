@@ -77,6 +77,7 @@
   masc.sse_event
   masc.chronicle_event
   masc.tool_call_quality_benchmark
+  masc.discovery_cache
   masc.keeper_event_queue
   masc.keeper_invariant
   masc.compaction_trigger

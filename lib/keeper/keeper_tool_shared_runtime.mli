@@ -138,6 +138,16 @@ val resolve_keeper_read_path
   -> raw_path:string
   -> (string, string) result
 
+(** Resolve an already projected host path that came from a
+    Keeper-visible [cwd] + relative [file_path] composition. [raw_for_error]
+    is the model-facing path to keep diagnostics in the visible namespace. *)
+val resolve_projected_keeper_read_path
+  :  config:Workspace.config
+  -> meta:Keeper_meta_contract.keeper_meta
+  -> raw_for_error:string
+  -> projected_path:string
+  -> (string, string) result
+
 val keeper_agent_sender : meta:Keeper_meta_contract.keeper_meta -> string
 
 (** Clamp [args.limit] to [1..200] (default 40) for read-only

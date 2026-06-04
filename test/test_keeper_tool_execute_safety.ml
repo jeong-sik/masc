@@ -1013,6 +1013,104 @@ let test_tool_execute_typed_process_runs_via_shell_ir () =
      |> Json.to_string
      |> fun output -> String_util.contains_substring output "typed-ok")
 
+let test_tool_execute_typed_duplicate_argv0_rejected_before_runtime () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_readonly_meta "typed-duplicate-argv0" in
+  let playground = Filename.concat base_path (playground_path_of meta.name) in
+  ensure_dir playground;
+  ignore
+    (Fs_compat.save_file_atomic
+       (Filename.concat playground "keeper_sandbox.mli")
+       "(** Keeper_sandbox contract fixture. *)\n");
+  let raw =
+    Keeper_tool_command_runtime.handle_tool_execute
+      ~turn_sandbox_factory:None
+      ~exec_cache:None
+      ~config
+      ~meta
+      ~args:
+        (`Assoc
+           [ "executable", `String "cat"
+           ; "argv", `List [ `String "cat"; `String "-n"; `String "keeper_sandbox.mli" ]
+           ; "cwd", `String playground
+           ])
+      ()
+  in
+  let json = Yojson.Safe.from_string raw in
+  let err = json |> Json.member "error" |> Json.to_string in
+  Alcotest.(check bool)
+    "error explains argv0 contract"
+    true
+    (String_util.contains_substring err "repeated as argv[0]");
+  Alcotest.(check bool)
+    "file content did not leak into validation error"
+    false
+    (String_util.contains_substring raw "Keeper_sandbox contract fixture")
+
+let test_tool_execute_typed_failure_error_prefers_stderr () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_readonly_meta "typed-failure-stderr" in
+  let playground = Filename.concat base_path (playground_path_of meta.name) in
+  ensure_dir playground;
+  ignore
+    (Fs_compat.save_file_atomic
+       (Filename.concat playground "keeper_sandbox.mli")
+       "(** Keeper_sandbox contract fixture. *)\n");
+  let raw =
+    Keeper_tool_command_runtime.handle_tool_execute
+      ~turn_sandbox_factory:None
+      ~exec_cache:None
+      ~config
+      ~meta
+      ~args:
+        (`Assoc
+           [ "executable", `String "cat"
+           ; "argv", `List [ `String "keeper_sandbox.mli"; `String "missing-file" ]
+           ; "cwd", `String playground
+           ])
+      ()
+  in
+  let json = Yojson.Safe.from_string raw in
+  Alcotest.(check bool) "cat failure is not ok" false
+    (json |> Json.member "ok" |> Json.to_bool);
+  let err = json |> Json.member "error" |> Json.to_string in
+  Alcotest.(check bool)
+    "top-level error uses stderr"
+    true
+    (String_util.contains_substring err "No such file or directory");
+  Alcotest.(check bool)
+    "top-level error excludes stdout file dump"
+    false
+    (String_util.contains_substring err "Keeper_sandbox contract fixture");
+  Alcotest.(check bool)
+    "raw output still preserves stdout for debugging"
+    true
+    (json
+     |> Json.member "output"
+     |> Json.to_string
+     |> fun output -> String_util.contains_substring output "Keeper_sandbox contract fixture");
+  let normalized =
+    Masc.Keeper_tools_oas.normalize_tool_result ~success:false raw
+    |> Yojson.Safe.from_string
+  in
+  let normalized_error = normalized |> Json.member "error" |> Json.to_string in
+  Alcotest.(check bool)
+    "OAS-normalized error also uses stderr"
+    true
+    (String_util.contains_substring normalized_error "No such file or directory");
+  Alcotest.(check bool)
+    "OAS-normalized error excludes stdout file dump"
+    false
+    (String_util.contains_substring
+       normalized_error
+       "Keeper_sandbox contract fixture")
+
 let test_tool_execute_typed_pipeline_runs_via_shell_ir () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
@@ -1596,6 +1694,14 @@ let () =
             "typed process runs via Shell IR"
             `Quick
             test_tool_execute_typed_process_runs_via_shell_ir
+        ; Alcotest.test_case
+            "typed duplicate argv0 rejects before runtime"
+            `Quick
+            test_tool_execute_typed_duplicate_argv0_rejected_before_runtime
+        ; Alcotest.test_case
+            "typed failure top-level error prefers stderr"
+            `Quick
+            test_tool_execute_typed_failure_error_prefers_stderr
         ; Alcotest.test_case
             "typed pipeline runs via Shell IR"
             `Quick

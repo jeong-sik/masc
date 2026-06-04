@@ -515,6 +515,11 @@ let handle_tool_execute_typed
               then result.stdout
               else result.stdout ^ result.stderr
             in
+            let failure_error_fields =
+              match result.status, String.trim result.stderr with
+              | Unix.WEXITED 0, _ | _, "" -> []
+              | _, stderr -> [ "error", `String stderr; "stderr", `String stderr ]
+            in
             let classification = Exec_core.classify_command_of_ir ir in
             let deterministic_retry_fields =
               deterministic_retry_fields_for_process_result
@@ -538,6 +543,7 @@ let handle_tool_execute_typed
                  ~cmd
                  ~extra:
                    (deterministic_retry_fields
+                    @ failure_error_fields
                     @ sandbox_extra_fields
                     @ [ "cwd", `String cwd
                       ; "typed", `Bool true

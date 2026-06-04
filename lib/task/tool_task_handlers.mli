@@ -58,7 +58,7 @@ val client_side_transition_gate_error :
   task_opt:Masc_domain.task option ->
   action:Masc_domain.task_action ->
   action_s:string ->
-  Masc_domain.task_error option
+  Masc_domain.Task_error.t option
 
 val sync_planning_current_task_with_owned_task : context -> unit
 val sync_owner_current_task_binding : context -> unit

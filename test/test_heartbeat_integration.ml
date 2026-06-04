@@ -18,7 +18,7 @@ module R = Masc.Keeper_registry
 module Keeper_types_profile = Masc.Keeper_types_profile
 module Sup = Masc.Keeper_supervisor
 module KT = Masc.Keeper_types
-module KSM = Masc.Keeper_state_machine
+module KSM = Keeper_state_machine
 module Cfg = Env_config
 
 let bp = "/tmp/test-heartbeat-integ"

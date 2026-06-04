@@ -5,7 +5,7 @@ open Alcotest
 
 module R = Masc.Keeper_registry
 module KT = Masc.Keeper_types
-module KSM = Masc.Keeper_state_machine
+module KSM = Keeper_state_machine
 module Cfg = Env_config
 
 let bp = "/tmp/test-phase2"

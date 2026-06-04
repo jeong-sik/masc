@@ -11,7 +11,7 @@
 open Alcotest
 
 module R = Masc.Keeper_registry
-module KSM = Masc.Keeper_state_machine
+module KSM = Keeper_state_machine
 module Keeper_types = Masc.Keeper_types
 
 let bp = "/tmp/test-chaos"

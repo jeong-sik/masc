@@ -93,8 +93,8 @@ let test_default_hook_ignores_phase_transition () =
   R.register_default_cleanup_hook ();
   H.run ~keeper_id:"k"
     (H.Phase_transition
-       { from_phase = Masc.Keeper_state_machine.Running;
-         to_phase   = Masc.Keeper_state_machine.Failing });
+       { from_phase = Keeper_state_machine.Running;
+         to_phase   = Keeper_state_machine.Failing });
   (* Phase_transition must not drain. *)
   check (list int) "still tracked" [ 0x7FFFFFF3 ] (R.pids_for ~keeper_id:"k")
 

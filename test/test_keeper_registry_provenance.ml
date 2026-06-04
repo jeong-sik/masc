@@ -16,8 +16,8 @@
 
 open Alcotest
 
-module KSM = Masc.Keeper_state_machine
-module KSM_json = Masc.Keeper_state_machine_json
+module KSM = Keeper_state_machine
+module KSM_json = Keeper_state_machine_json
 module R = Masc.Keeper_registry
 
 let test_fiber_terminated_carrier_none () =

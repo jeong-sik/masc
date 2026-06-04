@@ -24,6 +24,14 @@ val repo_hosting_cli_repo_flag_api_misuse_of_stages :
 (** Detect the invalid [gh --repo <repo> api <endpoint>] shape from
     pre-computed stages. *)
 
+val gh_pr_diff_misuse_of_stages :
+  parsed_stage list -> string list option
+(** Detect invalid [gh pr diff] usage with file filters or extra positional args. *)
+
+val misuse_error_of_stages : parsed_stage list -> string option
+(** Perform all command syntax misuse checks and return a descriptive error message if any. *)
+
+
 val resolve_sandbox_root_git_cwd_of_stages :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->

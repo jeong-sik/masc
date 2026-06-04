@@ -34,7 +34,8 @@ val classify : undecided t -> decided decided_ir
 (** Run the unified risk classifier over the wrapped IR.
     Uses [Exec_policy_mutation_classifier] for bash operations,
     then repo-hosting CLI subcommand tables for ["gh"] command operations,
-    defaulting to R0.
+    defaulting to R0. Write/append redirects add an R1 syntax floor because
+    redirects are not argv tokens and must not disappear from receipts.
 
     [Simple] commands are lowered to the [Shell_ir_typed] GADT and
     classified by [risk_of_typed]; the [Generic] escape hatch falls back

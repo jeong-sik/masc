@@ -70,6 +70,7 @@
   masc.host_config
   masc.briefing_compactors
   masc.dashboard_eval_feed
+  masc.dashboard_tla_specs
   masc.sse_event
   masc.memory_jsonl
   masc.chronicle_event

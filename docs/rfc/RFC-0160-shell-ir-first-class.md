@@ -177,7 +177,7 @@ type risk_class =
   | Destructive_protected
 ```
 
-`Worker_dev_tools.gh_reversibility` (R0/R1/R2) +
+`Retired_worker_shell_facade.gh_reversibility` (R0/R1/R2) +
 `Mutation_classifier.is_destructive_bash_operation` (Destructive_protected)
 become inhabitants of this single type. Caller branches use exhaustive
 match.

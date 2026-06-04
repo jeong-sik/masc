@@ -412,7 +412,7 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
               `Assoc
                 [
                   ("tool_requirement", `String "optional");
-                  ("visible_tool_count", `Int 8);
+                  ("allowed_tool_count", `Int 8);
                 ] );
             ( "sandbox",
               `Assoc

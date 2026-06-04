@@ -85,8 +85,8 @@ let compact_receipt_tool_surface_json receipt =
       ; "turn_lane", Json_util.string_opt_to_json turn_lane
       ; ( "tool_surface_class"
         , Json_util.string_opt_to_json (json_string "tool_surface_class" surface) )
-      ; ( "visible_tool_count"
-        , Json_util.int_opt_to_json (json_int "visible_tool_count" surface) )
+      ; ( "allowed_tool_count"
+        , Json_util.int_opt_to_json (json_int "allowed_tool_count" surface) )
       ; ( "tool_gate_enabled"
         , Json_util.bool_opt_to_json (json_bool "tool_gate_enabled" surface) )
       ; ( "tool_surface_fallback_used"

@@ -28,7 +28,7 @@ For each active canonical `<Spec>-buggy.cfg` in `specs/keeper-state-machine/`:
 | `KeeperPostTurnOrchestration` | `Next \/ BugWireinOutOfOrder` |
 | `KeeperReactionLiveness` | `Next \/ BugSilentStimulusDrop` |
 | `KeeperSocialModelMagenticLedger` | `Next \/ BugStalledWithoutCause` |
-| `KeeperToolSurface` | `Next \/ BugRequiredEscapesValidate` |
+| `KeeperToolSurface` | `Next \/ BugAllowedEscapesValidate` |
 | `KeeperTurnCycle` | `Next \/ BugSelectingWithoutToolPolicy` |
 
 Eight specs. The `CHECK_DEADLOCK FALSE` is *defensive belt-and-braces* here — the option matters only if `Next` itself can reach a deadlock (no enabled actions), which would already be a bug in the clean spec.

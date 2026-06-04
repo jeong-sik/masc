@@ -18,25 +18,25 @@ let contains needle haystack =
 let check_contains label needle text = check bool label true (contains needle text)
 let check_not_contains label needle text = check bool label false (contains needle text)
 
-let test_visible_public_alias_wins () =
+let test_allowed_public_alias_wins () =
   check
     (option string)
-    "tool_execute projects to visible Execute"
+    "tool_execute projects to allowed Execute"
     (Some "Execute")
-    (Projection.visible_name ~visible_tool_names:[ "Execute" ] "tool_execute");
+    (Projection.allowed_name ~allowed_tool_names:[ "Execute" ] "tool_execute");
   check
     (option string)
-    "mcp-prefixed public Execute remains visible"
+    "mcp-prefixed public Execute remains allowed"
     (Some "Execute")
-    (Projection.visible_name ~visible_tool_names:[ "Execute" ] "mcp__masc__Execute");
+    (Projection.allowed_name ~allowed_tool_names:[ "Execute" ] "mcp__masc__Execute");
   match
-    Projection.resolve_visible_name ~visible_tool_names:[ "tool_execute"; "Execute" ]
+    Projection.resolve_allowed_name ~allowed_tool_names:[ "tool_execute"; "Execute" ]
       "tool_execute"
   with
   | Use_public_name { public_name; internal_name } ->
     check string "public alias" "Execute" public_name;
     check string "internal handler" "tool_execute" internal_name
-  | _ -> fail "expected visible public alias to win over visible internal name"
+  | _ -> fail "expected allowed public alias to win over allowed internal name"
 ;;
 
 let test_hidden_alias_reports_blocker () =
@@ -44,11 +44,11 @@ let test_hidden_alias_reports_blocker () =
     (option string)
     "hidden tool_execute has no model-callable name"
     None
-    (Projection.visible_name ~visible_tool_names:[ "Read" ] "tool_execute");
+    (Projection.allowed_name ~allowed_tool_names:[ "Read" ] "tool_execute");
   let text =
     Projection.render_reference
-      ~context:Schema_visible
-      ~visible_tool_names:[ "Read" ]
+      ~context:Schema_allowed
+      ~allowed_tool_names:[ "Read" ]
       "tool_execute"
   in
   check_contains "blocker text mentions no active schema name" "No active schema name" text;
@@ -59,15 +59,15 @@ let test_hidden_alias_reports_blocker () =
 let test_internal_audit_context_is_explicit () =
   let model_text =
     Projection.render_reference
-      ~context:Schema_visible
-      ~visible_tool_names:[ "Execute" ]
+      ~context:Schema_allowed
+      ~allowed_tool_names:[ "Execute" ]
       "tool_execute"
   in
-  check string "schema-visible context uses public alias" "Execute" model_text;
+  check string "schema-allowed context uses public alias" "Execute" model_text;
   let audit_text =
     Projection.render_reference
       ~context:Internal_audit
-      ~visible_tool_names:[ "Execute" ]
+      ~allowed_tool_names:[ "Execute" ]
       "tool_execute"
   in
   check string "audit context may name internal handler" "tool_execute" audit_text
@@ -76,8 +76,8 @@ let test_internal_audit_context_is_explicit () =
 let test_unknown_name_does_not_gain_alias () =
   let text =
     Projection.render_reference
-      ~context:Schema_visible
-      ~visible_tool_names:[ "Execute" ]
+      ~context:Schema_allowed
+      ~allowed_tool_names:[ "Execute" ]
       "keeper_not_real"
   in
   check_contains "unknown guidance names unknown" "Unknown tool name keeper_not_real" text;
@@ -87,10 +87,10 @@ let test_unknown_name_does_not_gain_alias () =
 let test_blocker_guidance_only_when_hidden () =
   check
     (option string)
-    "visible alias has no blocker"
+    "allowed alias has no blocker"
     None
-    (Projection.blocker_guidance ~visible_tool_names:[ "Execute" ] "tool_execute");
-  match Projection.blocker_guidance ~visible_tool_names:[ "Read" ] "tool_execute" with
+    (Projection.blocker_guidance ~allowed_tool_names:[ "Execute" ] "tool_execute");
+  match Projection.blocker_guidance ~allowed_tool_names:[ "Read" ] "tool_execute" with
   | None -> fail "expected hidden alias blocker guidance"
   | Some text ->
     check_contains "blocker names internal subject" "tool_execute" text;
@@ -137,7 +137,7 @@ let () =
   run
     "keeper_tool_visibility_projection"
     [ ( "projection"
-      , [ test_case "visible public alias wins" `Quick test_visible_public_alias_wins
+      , [ test_case "allowed public alias wins" `Quick test_allowed_public_alias_wins
         ; test_case "hidden alias reports blocker" `Quick test_hidden_alias_reports_blocker
         ; test_case "internal audit context is explicit" `Quick
             test_internal_audit_context_is_explicit

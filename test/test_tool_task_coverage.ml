@@ -6,6 +6,7 @@ open Masc
 module Planning_eio = Masc.Task.Planning_eio
 
 let () = Random.self_init ()
+let () = Mirage_crypto_rng_unix.use_default ()
 let () = Keeper_task_owner_backend.install_hooks ()
 
 let test_runtime_toml =
@@ -486,9 +487,9 @@ let () = test "handle_add_task_injects_default_verification_contract" (fun () ->
           assert (not contract.strict);
           assert (contract.completion_contract <> []);
           assert (List.mem "completion_notes" contract.required_evidence);
-          assert (List.mem "pr_url_or_artifact_ref" contract.required_evidence);
+          assert (List.mem "reviewable_evidence_ref" contract.required_evidence);
           assert (List.mem "completion_notes" contract.verify_gate_evidence);
-          assert (List.mem "pr_url_or_artifact_ref" contract.verify_gate_evidence);
+          assert (List.mem "reviewable_evidence_ref" contract.verify_gate_evidence);
           assert (str_contains (List.hd contract.completion_contract)
                     "Default verification task")
       | None -> failwith "expected default verification contract")
@@ -1027,7 +1028,7 @@ let () = test "handle_transition_verifier_allows_verdict_actions" (fun () ->
           [
             ("task_id", `String "task-001");
             ("action", `String "submit_for_verification");
-            ("notes", `String "completion_notes: verifier evidence prepared. pr_url_or_artifact_ref: artifact:verifier-evidence.json ready for verifier");
+            ("notes", `String "completion_notes: verifier evidence prepared. reviewable_evidence_ref: artifact:verifier-evidence.json ready for verifier");
           ])
     in
     if not (Tool_result.is_success submit_result) then
@@ -1450,31 +1451,16 @@ let () = test "transition_claim_sets_planning_current_task" (fun () ->
 
 let task_submit_evidence_notes =
   "completion_notes: implementation completed with verification context. \
-   pr_url_or_artifact_ref: PR evidence is attached."
+   reviewable_evidence_ref: review evidence is attached."
 
-let () = test "transition_submit_pr_evidence_accepts_todo_pr_url_alias" (fun () ->
-  with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
-    let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
-    let pr_url = "https://github.com/jeong-sik/masc/pull/13169" in
-    add_priority_task ctx ~title:"CLI approval follow-up";
-    let result =
-      Task.Tool.handle_transition
-        ~tool_name:"test_tool" ~start_time:0.0
-        ctx
-        (`Assoc
-          [
-            ("task_id", `String "task-001");
-            ("action", `String "submit_pr_evidence");
-            ("pr_url", `String pr_url);
-            ("notes", `String task_submit_evidence_notes);
-          ])
-    in
-    if not (Tool_result.is_success result) then failwith (Tool_result.message result);
-    assert_task_awaiting_verification_by ctx "agent_code-mcp-client";
-    match (only_task ctx).handoff_context with
-    | Some hc -> assert (List.mem pr_url hc.evidence_refs)
-    | None -> failwith "expected handoff_context to receive pr_url evidence")
-)
+let task_submit_evidence_ref = "artifact:verifier-evidence.json"
+
+let submit_evidence_handoff_context ?(summary = "review evidence attached") refs =
+  `Assoc
+    [
+      ("summary", `String summary);
+      ("evidence_refs", `List (List.map (fun evidence_ref -> `String evidence_ref) refs));
+    ]
 
 (* RFC-0109 Phase E (#18822): the transition-layer substring gate that
    produced the "requires verification evidence" message no longer
@@ -1485,45 +1471,11 @@ let () = test "transition_submit_pr_evidence_accepts_todo_pr_url_alias" (fun () 
    covered by [test/test_cdal_evidence_gate.ml]'s missing-verdict
    arm. See issue #18830 Cluster A.1. *)
 
-(* Regression: the transport-level [pr_url] alias must be hoisted onto
-   the typed [handoff_context.evidence_refs] domain, not concatenated
-   into the [notes] string blob. *)
-let () = test "transition_normalize_pr_url_into_typed_handoff_context" (fun () ->
+let () = test "transition_submit_pr_evidence_uses_typed_evidence_refs" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
     let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
-    add_priority_task ctx ~title:"Typed pr_url normalize";
-    let pr_url = "https://github.com/jeong-sik/masc/pull/77777" in
-    let submit_result =
-      Task.Tool.handle_transition
-        ~tool_name:"test_tool" ~start_time:0.0
-        ctx
-        (`Assoc
-          [
-            ("task_id", `String "task-001");
-            ("action", `String "submit_pr_evidence");
-            ("pr_url", `String pr_url);
-            ("notes", `String task_submit_evidence_notes);
-          ])
-    in
-    if not (Tool_result.is_success submit_result) then
-      failwith (Tool_result.message submit_result);
-    let task = only_task ctx in
-    match task.handoff_context with
-    | Some hc ->
-      assert (List.mem pr_url hc.evidence_refs)
-    | None -> failwith "expected handoff_context to receive pr_url evidence")
-)
-
-(* Regression: when a caller supplies both [pr_url] and an explicit
-   [handoff_context] object, normalize_args must append pr_url to the
-   existing [evidence_refs] list rather than overwrite it or fall back
-   to the notes blob. *)
-let () = test "transition_normalize_pr_url_merges_into_existing_handoff_context" (fun () ->
-  with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
-    let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
-    add_priority_task ctx ~title:"pr_url merge";
+    add_priority_task ctx ~title:"typed evidence merge";
     let existing_ref = "logs/run-42.json" in
-    let pr_url = "https://github.com/jeong-sik/masc/pull/88888" in
     let submit_result =
       Task.Tool.handle_transition
         ~tool_name:"test_tool" ~start_time:0.0
@@ -1532,14 +1484,10 @@ let () = test "transition_normalize_pr_url_merges_into_existing_handoff_context"
           [
             ("task_id", `String "task-001");
             ("action", `String "submit_pr_evidence");
-            ("pr_url", `String pr_url);
             ("notes", `String task_submit_evidence_notes);
-            ( "handoff_context",
-              `Assoc
-                [
-                  ("summary", `String "tests pass");
-                  ("evidence_refs", `List [ `String existing_ref ]);
-                ] );
+            ( "handoff_context"
+            , submit_evidence_handoff_context ~summary:"tests pass"
+                [ existing_ref; task_submit_evidence_ref ] );
           ])
     in
     if not (Tool_result.is_success submit_result) then
@@ -1548,12 +1496,12 @@ let () = test "transition_normalize_pr_url_merges_into_existing_handoff_context"
     match task.handoff_context with
     | Some hc ->
       assert (List.mem existing_ref hc.evidence_refs);
-      assert (List.mem pr_url hc.evidence_refs);
+      assert (List.mem task_submit_evidence_ref hc.evidence_refs);
       assert (String.equal hc.summary "tests pass")
     | None -> failwith "expected handoff_context to be persisted")
 )
 
-let () = test "transition_submit_pr_evidence_accepts_todo_pr_evidence" (fun () ->
+let () = test "transition_submit_pr_evidence_accepts_todo_evidence" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
     let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
     add_priority_task ctx ~title:"CLI approval follow-up";
@@ -1565,8 +1513,9 @@ let () = test "transition_submit_pr_evidence_accepts_todo_pr_evidence" (fun () -
           [
             ("task_id", `String "task-001");
             ("action", `String "submit_pr_evidence");
-            ("pr_url", `String "https://github.com/jeong-sik/masc/pull/13169");
             ("notes", `String task_submit_evidence_notes);
+            ( "handoff_context"
+            , submit_evidence_handoff_context [ task_submit_evidence_ref ] );
           ])
     in
     if not (Tool_result.is_success submit_result) then failwith (Tool_result.message submit_result);
@@ -1734,13 +1683,14 @@ let () = test "submit_pr_evidence_accepts_todo_task_without_claiming" (fun () ->
     add_priority_task ctx ~title:"Needs bash";
     let result =
       Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
-        (`Assoc
-          [
-            ("task_id", `String "task-001");
-            ("action", `String "submit_pr_evidence");
-            ("notes", `String task_submit_evidence_notes);
-            ("pr_url", `String "https://github.com/jeong-sik/masc/pull/13169");
-          ])
+	        (`Assoc
+	          [
+	            ("task_id", `String "task-001");
+	            ("action", `String "submit_pr_evidence");
+	            ("notes", `String task_submit_evidence_notes);
+	            ( "handoff_context"
+	            , submit_evidence_handoff_context [ task_submit_evidence_ref ] );
+	          ])
     in
     if not (Tool_result.is_success result) then
       failwith (Printf.sprintf "expected submit_pr_evidence to succeed, got: %s" (Tool_result.message result));

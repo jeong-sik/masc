@@ -3,7 +3,7 @@
 **Date**: 2026-05-12 · **Iteration**: 83 (`/loop` FSM/TLA+/OCaml drift hunt) · **Phase**: R (line-ref sweep, cluster #2)
 **Spec**: `specs/keeper-state-machine/KeeperToolSurface.tla` (372 LOC, bug-model paired)
 **OCaml**: `lib/keeper/keeper_run_tools_setup.ml` — `compute_tool_surface` (the tool-surface construction pipeline, the function this spec models; relocated from `keeper_run_tools.ml` after this audit)
-**Verdict**: **~16 `keeper_run_tools.ml:NNN` line-range citations (lines 794-1011) all stale, symbol/stage-anchored comment-only**. `keeper_run_tools.ml` is ~1.7k LOC and the surface pipeline (`merged` → `required_tool_names` → `turn_visible_tool_names` through fallback floor / last-turn safety / affordance gate) all lives inside one function, `compute_tool_surface` (since relocated to `lib/keeper/keeper_run_tools_setup.ml`; `keeper_run_tools.ml` is now a ~100-LOC wrapper). The spec cited the pipeline's *stages* by line range; here's the re-anchoring (line numbers were all in the 794-1011 band, the pipeline body). Re-anchored: the 7-row OCaml↔TLA+ mapping table now carries the lint-checkable `lib/keeper/<file>.ml:<symbol>` form (verified by `scripts/lint/spec-line-refs.sh` — the symbol must resolve in the file) with the pipeline-stage detail in a separate "semantic" column; in-prose mentions use the bare `compute_tool_surface` symbol name + the stage's descriptive name. Model body unchanged; TLC re-verified (clean = no error, 814 distinct states; buggy = `SafetyInvariant` violated).
+**Verdict**: **~16 `keeper_run_tools.ml:NNN` line-range citations (lines 794-1011) all stale, symbol/stage-anchored comment-only**. `keeper_run_tools.ml` is ~1.7k LOC and the surface pipeline (`merged` → `required_tool_names` → `turn_allowed_tool_names` through fallback floor / last-turn safety / affordance gate) all lives inside one function, `compute_tool_surface` (since relocated to `lib/keeper/keeper_run_tools_setup.ml`; `keeper_run_tools.ml` is now a ~100-LOC wrapper). The spec cited the pipeline's *stages* by line range; here's the re-anchoring (line numbers were all in the 794-1011 band, the pipeline body). Re-anchored: the 7-row OCaml↔TLA+ mapping table now carries the lint-checkable `lib/keeper/<file>.ml:<symbol>` form (verified by `scripts/lint/spec-line-refs.sh` — the symbol must resolve in the file) with the pipeline-stage detail in a separate "semantic" column; in-prose mentions use the bare `compute_tool_surface` symbol name + the stage's descriptive name. Model body unchanged; TLC re-verified (clean = no error, 814 distinct states; buggy = `SafetyInvariant` violated).
 
 ## Why this cluster (line-ref sweep #2)
 
@@ -17,19 +17,19 @@ The whole surface pipeline is the body of `compute_tool_surface` (`lib/keeper/ke
 |---|---|---|
 | `pre_floor` (merged tools after overlay compose + validate) | `keeper_run_tools.ml:830-836` | `compute_tool_surface — merged-tools step (after overlay compose + validate)` |
 | `floor_fired` (`tool_surface_fallback_used = true`) | `keeper_run_tools.ml:844-850` (×3, incl. inline) | `compute_tool_surface — fallback-floor conditional (sets tool_surface_fallback_used)` |
-| `after_floor` (turn_visible_tool_names post fallback floor) | `keeper_run_tools.ml:850` | `compute_tool_surface — turn_visible_tool_names after the fallback floor` |
+| `after_floor` (turn_allowed_tool_names post fallback floor) | `keeper_run_tools.ml:850` | `compute_tool_surface — turn_allowed_tool_names after the fallback floor` |
 | `after_last_turn_safe` (`Intersect_with safe_last_turn_tools`) | `keeper_run_tools.ml:866-873` (×2) | `compute_tool_surface — Intersect_with safe_last_turn_tools step (when is_last_turn)` |
 | `after_passive` (passive streak observation) | `keeper_run_tools.ml:882-888` (×2) | `compute_tool_surface — passive streak gauge/advisory observation` |
-| `emitted` / final visible surface (turn_visible_tool_names final return) | `keeper_run_tools.ml:909-944` (×3) | `compute_tool_surface — final visible tool surface` |
+| `emitted` / final allowed surface (turn_allowed_tool_names final return) | `keeper_run_tools.ml:909-944` (×3) | `compute_tool_surface — final allowed tool surface` |
 | `required` (post-satisfaction required set) | `keeper_run_tools.ml:794-797` | `compute_tool_surface — outstanding_required_tool_names (post-satisfaction required set)` |
 | classification near the return (tool_surface_class / lane / tool_requirement) | `keeper_run_tools.ml:949-973` | `compute_tool_surface — classification block near the return (tool_surface_class / lane / tool_requirement)` |
 | validate gate + merged step | `keeper_run_tools.ml:805-806/830-836` | `compute_tool_surface — validate_allow_list gate + merged-tools step` |
 | safe_last_turn_tools construction | `keeper_run_tools.ml:856-865` | `compute_tool_surface — safe_last_turn_tools construction` |
 | returned tool_surface record (the "guard at the model-checking layer") | `keeper_run_tools.ml:998-1011` | `compute_tool_surface — returned tool_surface record` |
 
-**2026-06-03 update**: the old passive contract filter was removed. Passive streaks remain observable through the passive-loop detector and gauge, but they no longer rewrite the visible tool surface.
+**2026-06-03 update**: the old passive contract filter was removed. Passive streaks remain observable through the passive-loop detector and gauge, but they no longer rewrite the allowed tool surface.
 
-Verification of current positions (`keeper_run_tools.ml`, 1725 LOC): `compute_tool_surface`@640; `merged`@792/825; `required_tool_names_raw`@799, `outstanding_required_tool_names`@807; `turn_visible_tool_names`@842/856/878/894/915; `tool_surface_fallback_used` assignment@856-860; `safe_last_turn_tools`@877; `tool_surface_class`/`lane`/`tool_requirement`@~961-975; the returned record@~995-1010.
+Verification of current positions (`keeper_run_tools.ml`, 1725 LOC): `compute_tool_surface`@640; `merged`@792/825; `required_tool_names_raw`@799, `outstanding_required_tool_names`@807; `turn_allowed_tool_names`@842/856/878/894/915; `tool_surface_fallback_used` assignment@856-860; `safe_last_turn_tools`@877; `tool_surface_class`/`lane`/`tool_requirement`@~961-975; the returned record@~995-1010.
 
 ## Cross-checks (pass)
 

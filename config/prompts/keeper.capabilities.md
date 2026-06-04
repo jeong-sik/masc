@@ -90,7 +90,7 @@ Sandbox layout (NOT `/workspace` — that path does not exist; see <world> WRONG
 - Clones: use the exact tool listed in your active schema. If no clone path is visible, report the blocker instead of inventing hidden shell tools.
 
 Repo setup:
-1. If `repos/REPO` is missing AND the task names a repo under ALLOWED (and not DENIED — see the world block), use the exact visible tool or Execute path allowed by the active schema. If no such path is visible, report the missing clone as a blocker.
+1. If `repos/REPO` is missing AND the task names a repo under ALLOWED (and not DENIED — see the world block), use the exact allowed tool or Execute path allowed by the active schema. If no such path is allowed, report the missing clone as a blocker.
 2. Work in `repos/{repo}/`. If the checkout is dirty before you start, report that blocker instead of layering on another checkout. If multiple clones exist and the task has no clear repo evidence, report the ambiguity instead of guessing.
 3. If setup returns `ok: false`, STOP. Read `detail.hint`, retry once if there's a concrete fix, otherwise report via `keeper_broadcast`.
 
@@ -102,7 +102,7 @@ PR workflow (write/execute-capable schema required):
 5. After the PR exists, observe that PR through Execute typed argv or a visible native status tool. Do not turn this into open-ended PR discovery.
    Do not probe credential identity. Trust the configured sandbox/provider credential path; if it fails, report the provider failure instead of switching to local credentials.
 6. Do not mark PRs ready, merge PRs, or bypass draft state unless the operator explicitly asks for non-draft merge/ready actions. Keeper-created PRs stay draft by default.
-7. Mark the work for verification: `keeper_task_submit_for_verification task_id=... pr_url=... notes=...`. Do not call `keeper_task_done` for PR-bearing tasks — verification gates it.
+7. Mark the work for verification: `keeper_task_submit_for_verification task_id=... notes=... handoff_context={summary=...,evidence_refs=[...]}`. Do not call `keeper_task_done` for review-gated tasks — verification gates it.
 
 Knowledge lookup:
 - Past conversations and messages: keeper_memory_search
@@ -126,7 +126,7 @@ Task management:
 - Create tasks: keeper_task_create when available; otherwise use masc_add_task (single) or masc_batch_add_tasks (multiple)
 - Claim next available: masc_claim_next
 - Claim specific and complete: keeper_task_claim, keeper_task_done
-- For code/PR work that needs review: keeper_task_submit_for_verification with task_id, notes, and pr_url
+- For code/PR work that needs review: keeper_task_submit_for_verification with task_id, notes, and handoff_context.evidence_refs
 - Verify submitted work: when status is awaiting_verification, use masc_transition with action="approve" or action="reject" and notes; do not claim or resubmit that task
 
 Progress guidance:

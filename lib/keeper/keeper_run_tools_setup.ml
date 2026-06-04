@@ -80,7 +80,7 @@ let prepare_agent_setup
         { turn_lane = Keeper_agent_tool_surface.Lane_text_only
         ; tool_surface_class = Keeper_agent_tool_surface.Surface_none
         ; tool_requirement = No_tools
-        ; visible_tool_count = 0
+        ; allowed_tool_count = 0
         ; tool_gate_enabled = false
         ; tool_surface_fallback_used = false
         ; config_root
@@ -656,7 +656,7 @@ let prepare_agent_setup
       List.length
         (List.filter (fun n -> not (List.mem n deterministic_floor_set)) llm_selected)
     in
-    let turn_visible_tool_names =
+    let turn_allowed_tool_names =
       Agent_sdk.Tool_op.apply
         (Agent_sdk.Tool_op.compose
            [ Agent_sdk.Tool_op.Replace_with merged; acc.tool_overlay ])
@@ -671,14 +671,14 @@ let prepare_agent_setup
     let is_last_turn = per_call_turn >= max_turns in
     let is_warning_zone = per_call_turn >= max_turns - 1 in
     let claim_context_allowed = not (keeper_has_owned_active_task ()) in
-    let turn_visible_tool_names, tool_surface_fallback_used =
-      if turn_visible_tool_names = []
+    let turn_allowed_tool_names, tool_surface_fallback_used =
+      if turn_allowed_tool_names = []
       then (
-        let fallback_visible_tool_names = fallback_tool_surface ~turn in
-        if fallback_visible_tool_names <> []
-        then fallback_visible_tool_names, true
-        else turn_visible_tool_names, false)
-      else turn_visible_tool_names, false
+        let fallback_allowed_tool_names = fallback_tool_surface ~turn in
+        if fallback_allowed_tool_names <> []
+        then fallback_allowed_tool_names, true
+        else turn_allowed_tool_names, false)
+      else turn_allowed_tool_names, false
     in
     let last_turn_safe = Keeper_tool_policy.last_turn_safe_tool_names () in
     (* Mirror policy_allowed_tool_names_with_public_descriptors: only include a public name
@@ -690,24 +690,24 @@ let prepare_agent_setup
         last_turn_safe
     in
     let safe_last_turn_tools = last_turn_safe @ descriptor_safe_public_names in
-    let turn_visible_tool_names =
+    let turn_allowed_tool_names =
       if is_last_turn
       then
         Agent_sdk.Tool_op.apply
           (Agent_sdk.Tool_op.Intersect_with safe_last_turn_tools)
-          turn_visible_tool_names
-      else turn_visible_tool_names
+          turn_allowed_tool_names
+      else turn_allowed_tool_names
     in
     let tool_gate_requested =
       tool_gate_requested_for_turn ~current_tool_choice ~is_last_turn
     in
-    let visible_tool_count = List.length turn_visible_tool_names in
+    let allowed_tool_count = List.length turn_allowed_tool_names in
     let tool_surface_class : Keeper_agent_tool_surface.tool_surface_class =
       Keeper_agent_tool_surface.tool_surface_class_for_tool_names
-        turn_visible_tool_names
+        turn_allowed_tool_names
     in
     let tool_requirement =
-      if visible_tool_count = 0 then No_tools else Optional
+      if allowed_tool_count = 0 then No_tools else Optional
     in
     let lane : Keeper_agent_tool_surface.turn_lane =
       if is_retry
@@ -720,7 +720,7 @@ let prepare_agent_setup
            | Some Agent_sdk.Types.None_ -> Lane_tool_disabled
            | _ -> Lane_text_only))
     in
-    { turn_visible_tool_names
+    { turn_allowed_tool_names
     ; absolute_turn = turn
     ; checkpoint_start_turn = start_turn_count
     ; per_call_turn

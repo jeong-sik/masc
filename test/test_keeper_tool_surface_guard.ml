@@ -60,9 +60,9 @@ let test_public_alias_guidance_blocks_internal_bash () =
     "internal bash guidance"
     (Some
        "tool_execute is an internal keeper implementation tool name, not a \
-        schema-visible tool. Use Execute instead.")
+        schema-allowed tool. Use Execute instead.")
     (Resolution.public_alias_guidance_for_internal_call
-       ~visible_tool_names:[ "Execute"; "Read" ]
+       ~allowed_tool_names:[ "Execute"; "Read" ]
        "tool_execute")
 ;;
 
@@ -72,22 +72,22 @@ let test_public_alias_guidance_ignores_public_execute () =
     "public Execute is already model-facing"
     None
     (Resolution.public_alias_guidance_for_internal_call
-       ~visible_tool_names:[ "Execute" ]
+       ~allowed_tool_names:[ "Execute" ]
        "Execute")
 ;;
 
-let test_public_alias_guidance_prefers_visible_edit_alias () =
+let test_public_alias_guidance_prefers_allowed_edit_alias () =
   let expected =
     Some
       "tool_edit_file is an internal keeper implementation tool name, not a \
-       schema-visible tool. Use Edit instead."
+       schema-allowed tool. Use Edit instead."
   in
   check
     (option string)
-    "visible edit alias"
+    "allowed edit alias"
     expected
     (Resolution.public_alias_guidance_for_internal_call
-       ~visible_tool_names:[ "Edit" ]
+       ~allowed_tool_names:[ "Edit" ]
        "tool_edit_file")
 ;;
 
@@ -97,11 +97,11 @@ let test_public_alias_guidance_reports_alias_not_visible () =
     "alias not visible"
     (Some
        "tool_execute is an internal keeper implementation tool name, not a \
-        schema-visible tool. No public alias for it is visible in this turn; do \
-        not invent internal tool names. Wait for a visible tool or report the \
+        schema-allowed tool. No public alias for it is allowed in this turn; do \
+        not invent internal tool names. Wait for an allowed tool or report the \
         blocker. Public alias: Execute.")
     (Resolution.public_alias_guidance_for_internal_call
-       ~visible_tool_names:[ "keeper_tasks_list" ]
+       ~allowed_tool_names:[ "keeper_tasks_list" ]
        "tool_execute")
 ;;
 
@@ -186,7 +186,7 @@ let () =
         ; test_case
             "internal edit prefers visible Edit alias"
             `Quick
-            test_public_alias_guidance_prefers_visible_edit_alias
+            test_public_alias_guidance_prefers_allowed_edit_alias
         ; test_case
             "internal alias reports when public alias is not visible"
             `Quick

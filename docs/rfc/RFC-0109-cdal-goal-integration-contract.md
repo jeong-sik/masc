@@ -441,7 +441,7 @@ Estimated change: ~350 LoC.
 ### 6.5.5 Operator-visible improvement
 
 Today's reject message (from `text_has_verification_artifact_ref` hint):
-> "submit_for_verification requires verification evidence: include pr_url for the draft PR, a PR # reference, or an explicit artifact/file/path/commit/branch reference in notes."
+> "submit_for_verification requires verification evidence: include a review artifact reference, a PR # reference, or an explicit artifact/file/path/commit/branch reference in notes."
 
 Phase D reject message (from typed CDAL verdict):
 > "CDAL verdict for task `task-cdal-001` is Violated. Findings:
@@ -512,7 +512,7 @@ block" pain that triggered this amendment.
 - Phase D: a task with `Cdal_verdict.Satisfied` passes
   `keeper_task_done` without any notes-string artifact ref; a task
   with `Cdal_verdict.Violated` rejects with typed findings in the
-  error payload, NOT the legacy "include pr_url..." hint string.
+  error payload, NOT a URL-specific legacy hint string.
 - Operator override path tested end-to-end (manual
   `Approve_completion` wins over CDAL bridge auto-reject).
 

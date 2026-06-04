@@ -36,7 +36,7 @@ behavior changed.
 below (line: "codemod 가 기존 `required_evidence` string 을 자동 parse 할 수
 있는가?"). Re-adding an empty typed field ahead of a working evaluator + migration
 would just recreate the fan-in-0 scaffolding removed here. The free-form legacy
-strings (e.g. `completion_notes`, `pr_url_or_artifact_ref`, `board post`) have no
+strings (e.g. `completion_notes`, `reviewable_evidence_ref`, `board post`) have no
 lossless parse into the closed sum, so the migration is a real design task, not a
 mechanical codemod.
 

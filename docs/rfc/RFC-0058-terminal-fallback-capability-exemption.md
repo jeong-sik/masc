@@ -124,7 +124,7 @@ let required_capabilities_of = function
   | Local -> { all Optional }
 ```
 
-`Local_inline` encodes what Ollama actually provides: inline tool calling is required (non-negotiable), but runtime MCP and tool_choice are optional.
+`Local_inline` encodes what Ollama actually provides: inline tool calling is available, while runtime MCP and tool_choice are optional.
 
 With the terminal exemption (3.2), a `Tool_strict → Local_inline` edge where `Local_inline` is a terminal leaf would be allowed. The runtime filter handles per-turn acceptance.
 

@@ -289,7 +289,7 @@ let append_decision_record
                   , Keeper_agent_tool_surface.tool_surface_class_to_yojson
                       r.tool_surface.tool_surface_class );
                   ("tool_requirement", Keeper_agent_tool_surface.tool_requirement_to_yojson r.tool_surface.tool_requirement);
-                  ("visible_tool_count", `Int r.tool_surface.visible_tool_count);
+                  ("allowed_tool_count", `Int r.tool_surface.allowed_tool_count);
                   ("tool_gate_enabled", `Bool r.tool_surface.tool_gate_enabled);
                   ( "tool_surface_fallback_used",
                     `Bool r.tool_surface.tool_surface_fallback_used );

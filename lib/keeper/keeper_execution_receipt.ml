@@ -484,7 +484,7 @@ let to_json (receipt : t) =
       ~tool_surface_class:
         (Keeper_agent_tool_surface.tool_surface_class_to_string
            receipt.tool_surface.tool_surface_class)
-      ~visible_tool_count:receipt.tool_surface.visible_tool_count
+      ~allowed_tool_count:receipt.tool_surface.allowed_tool_count
       ~runtime_profile:(receipt.runtime_id)
       ()
   in
@@ -545,7 +545,7 @@ let to_json (receipt : t) =
           ; ( "tool_requirement"
             , Keeper_agent_tool_surface.tool_requirement_to_yojson
                 receipt.tool_surface.tool_requirement )
-          ; "visible_tool_count", `Int receipt.tool_surface.visible_tool_count
+          ; "allowed_tool_count", `Int receipt.tool_surface.allowed_tool_count
           ; "tool_gate_enabled", `Bool receipt.tool_surface.tool_gate_enabled
           ; ( "tool_surface_fallback_used"
             , `Bool receipt.tool_surface.tool_surface_fallback_used )

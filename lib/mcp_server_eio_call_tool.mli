@@ -112,7 +112,7 @@ type keeper_runtime_mcp_log_context = {
   network_mode : string option;
   approval_mode : string option;
   tool_surface_class : string option;
-  visible_tool_count : int option;
+  allowed_tool_count : int option;
   runtime_profile : string option;
 }
 (** Snapshot of the keeper-bound runtime-MCP context

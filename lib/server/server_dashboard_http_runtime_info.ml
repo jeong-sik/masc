@@ -1096,10 +1096,7 @@ let dashboard_actor_name = function
 let dashboard_tools_http_json ?actor ?timing (config : Workspace.config) : Yojson.Safe.t =
   let actor_name = dashboard_actor_name actor in
   let ctx : Tool_misc.context =
-    { config
-    ; agent_name = actor_name
-    ; deep_review_runner = Tool_deep_review.unavailable_runner
-    }
+    { config; agent_name = actor_name }
   in
   let run phase f =
     match timing with

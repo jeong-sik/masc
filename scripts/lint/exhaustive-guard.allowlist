@@ -374,7 +374,6 @@ lib/keeper/keeper_approval_queue.ml:158
 lib/keeper/keeper_approval_queue.ml:256
 lib/keeper/keeper_approval_queue.ml:1229
 lib/keeper/keeper_behavioral_regime.ml:19
-lib/keeper/keeper_cli_mcp_config.ml:64
 lib/keeper/keeper_compact_audit.ml:156
 lib/keeper/keeper_compact_audit.ml:172
 lib/keeper/keeper_compact_audit.ml:257

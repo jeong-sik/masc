@@ -361,7 +361,6 @@ lib/keeper/keeper_approval_queue.ml,158,None,unclassified
 lib/keeper/keeper_approval_queue.ml,256,None,unclassified
 lib/keeper/keeper_approval_queue.ml,1229,None,unclassified
 lib/keeper/keeper_behavioral_regime.ml,19,None,unclassified
-lib/keeper/keeper_cli_mcp_config.ml,64,None,unclassified
 lib/keeper/keeper_compact_audit.ml,156,None,unclassified
 lib/keeper/keeper_compact_audit.ml,172,None,unclassified
 lib/keeper/keeper_compact_audit.ml,257,None,unclassified

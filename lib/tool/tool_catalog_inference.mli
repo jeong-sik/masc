@@ -1,4 +1,4 @@
-(** Tool_catalog_inference — typed-tool-name -> effect_domain.
+(** Tool_catalog_inference — compatibility shim for effect_domain inference.
 
     Owns the {!effect_domain} type. [Tool_catalog] re-exports it via type
     aliasing so [tool_catalog.mli] stays byte-compatible.  (The [tool_group]
@@ -13,4 +13,4 @@ type effect_domain =
 val effect_domain_to_string : effect_domain -> string
 
 val inferred_effect_domain : string -> effect_domain option
-(** [None] when the name does not parse as a typed [Tool_name.t]. *)
+(** Always [None]. Effect metadata is descriptor/catalog-owned. *)

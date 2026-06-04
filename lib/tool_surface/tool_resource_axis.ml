@@ -164,88 +164,84 @@ let classify_structured_shell_op args =
   | None -> Ungated
 ;;
 
-let classify_masc_tool (tool : Tool_name.Masc.t) =
-  let open Tool_name.Masc in
-  let open Tool_name.Domain_tool in
-  (* PR-S2: domain tool names are carried behind one neutral [Domain] arm
-     ([Domain (Board _)] etc.). Resource classification is NON-uniform across
-     each domain (e.g. Board_post is Board_write but Board_list is Ungated), so
-     this consumer reaches the domain members through the neutral carrier and
-     keeps its flat per-member buckets — byte-for-byte unchanged behavior, with
-     the compiler still enforcing exhaustiveness over every variant. *)
-  match tool with
-  | Web_fetch | Web_search -> Web
-  | Domain (Board Board_post)
-  | Domain (Board Board_cleanup)
-  | Domain (Board Board_comment)
-  | Domain (Board Board_comment_vote)
-  | Domain (Board Board_curation_submit)
-  | Domain (Board Board_delete)
-  | Domain (Board Board_reaction)
-  | Domain (Board Board_sub_board_create)
-  | Domain (Board Board_sub_board_delete)
-  | Domain (Board Board_sub_board_update)
-  | Domain (Board Board_vote) -> Board_write
-  | Domain (Task Add_task)
-  | Domain (Task Batch_add_tasks)
-  | Domain (Task Claim_next)
-  | Deliver
-  | Domain (Goal Goal_transition)
-  | Domain (Goal Goal_upsert)
-  | Domain (Goal Goal_verify)
-  | Heartbeat
-  | Note_add
-  | Plan_clear_task
-  | Plan_init
-  | Plan_set_task
-  | Plan_update
-  | Reset
-  | Domain (Task Transition)
-  | Domain (Task Update_priority) -> Workspace_write
-  | Agent_update
-  | Broadcast
-  | Cleanup_zombies
-  | Gc
-  | Domain (Operator Operator_action)
-  | Domain (Operator Operator_confirm)
-  | Tool_admin_update -> Generic_write
-  | Agent_card
-  | Agent_fitness
-  | Agents
-  | Domain (Board Board_curation_read)
-  | Domain (Board Board_get)
-  | Domain (Board Board_hearths)
-  | Domain (Board Board_list)
-  | Domain (Board Board_profile)
-  | Domain (Board Board_search)
-  | Domain (Board Board_stats)
-  | Domain (Board Board_sub_board_get)
-  | Domain (Board Board_sub_board_list)
-  | Check
-  | Config
-  | Dashboard
-  | Get_metrics
-  | Domain (Goal Goal_list)
-  | Mcp_session
-  | Messages
-  | Domain (Operator Operator_digest)
-  | Domain (Operator Operator_snapshot)
-  | Pause
-  | Plan_get
-  | Plan_get_task
-  | Resume
-  | Start
-  | Status
-  | Domain (Task Task_history)
-  | Domain (Task Tasks)
-  | Tool_admin_snapshot
-  | Tool_help
-  | Tool_stats -> Ungated
-;;
-
 let classify_non_catalog_tool ~tool_name =
   match tool_name with
   | "shell_exec" -> Some Shell
+  | _ -> None
+;;
+
+let classify_catalog_tool ~tool_name =
+  match tool_name with
+  | "masc_web_fetch" | "masc_web_search" -> Some Web
+  | "masc_board_cleanup"
+  | "masc_board_comment"
+  | "masc_board_comment_vote"
+  | "masc_board_curation_submit"
+  | "masc_board_delete"
+  | "masc_board_post"
+  | "masc_board_reaction"
+  | "masc_board_sub_board_create"
+  | "masc_board_sub_board_delete"
+  | "masc_board_sub_board_update"
+  | "masc_board_vote" -> Some Board_write
+  | "masc_add_task"
+  | "masc_batch_add_tasks"
+  | "masc_claim_next"
+  | "masc_deliver"
+  | "masc_goal_transition"
+  | "masc_goal_upsert"
+  | "masc_goal_verify"
+  | "masc_heartbeat"
+  | "masc_note_add"
+  | "masc_plan_clear_task"
+  | "masc_plan_init"
+  | "masc_plan_set_task"
+  | "masc_plan_update"
+  | "masc_reset"
+  | "masc_tool_grant"
+  | "masc_tool_revoke"
+  | "masc_transition"
+  | "masc_update_priority" -> Some Workspace_write
+  | "masc_agent_update"
+  | "masc_broadcast"
+  | "masc_cleanup_zombies"
+  | "masc_gc"
+  | "masc_operator_action"
+  | "masc_operator_confirm"
+  | "masc_tool_admin_update" -> Some Generic_write
+  | "masc_agent_card"
+  | "masc_agent_fitness"
+  | "masc_agents"
+  | "masc_board_curation_read"
+  | "masc_board_get"
+  | "masc_board_hearths"
+  | "masc_board_list"
+  | "masc_board_profile"
+  | "masc_board_search"
+  | "masc_board_stats"
+  | "masc_board_sub_board_get"
+  | "masc_board_sub_board_list"
+  | "masc_check"
+  | "masc_config"
+  | "masc_dashboard"
+  | "masc_get_metrics"
+  | "masc_goal_list"
+  | "masc_messages"
+  | "masc_operator_digest"
+  | "masc_operator_snapshot"
+  | "masc_pause"
+  | "masc_plan_get"
+  | "masc_plan_get_task"
+  | "masc_resume"
+  | "masc_session"
+  | "masc_start"
+  | "masc_status"
+  | "masc_task_history"
+  | "masc_tasks"
+  | "masc_tool_admin_snapshot"
+  | "masc_tool_help"
+  | "masc_tool_list"
+  | "masc_tool_stats" -> Some Ungated
   | _ -> None
 ;;
 
@@ -262,8 +258,8 @@ let classify_normalized ~tool_name ~arguments ~is_read_only =
   match classify_descriptor_tool ~tool_name ~arguments with
   | Some resource_class -> resource_class
   | None ->
-    (match Tool_name.of_string tool_name with
-     | Some (Tool_name.Masc tool) -> classify_masc_tool tool
+    (match classify_catalog_tool ~tool_name with
+     | Some resource_class -> resource_class
      | None ->
        (match classify_non_catalog_tool ~tool_name with
         | Some resource_class -> resource_class

@@ -2,7 +2,7 @@
 (** Tool_inline_dispatch — thin dispatch router for inline tool handlers.
 
     Delegates to sub-modules for workspace, comm, and extra tool handling.
-    Keeps inline: mcp_session, approval, and spawn.
+    Keeps inline: mcp_session plus MCP-state helpers.
 
     @since 0.1.0 *)
 

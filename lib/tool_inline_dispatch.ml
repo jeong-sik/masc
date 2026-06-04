@@ -23,7 +23,7 @@ module Float = Stdlib.Float
     - Tool_inline_dispatch_comm: masc_broadcast, masc_messages
     - Tool_inline_dispatch_extra: remaining tools (board, etc.)
 
-    Keeps inline: mcp_session, spawn, discover_tools.
+    Keeps inline: mcp_session plus MCP-state helpers.
 
     RFC-0062 Phase 4c-2: handlers now return [Tool_result.result] directly;
     [wrap_result] adapter removed. *)
@@ -63,7 +63,7 @@ type context = Tool_inline_dispatch_types.context = {
      plain strings fall through as [`String body].
    - [inline_err_workflow] commits caller-input rejections to
      [Workflow_rejection]: every error path in this dispatch
-     (unknown enum action, "query is required", not-found lookups) is
+     ("id is required", unknown enum action, not-found lookups) is
      caller-side. *)
 let inline_ok ~tool_name ~start_time body : Tool_result.result =
   let data =
@@ -209,7 +209,7 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.result option =
 (* Tool_spec registration (RFC-0182 §3.2)                           *)
 (* ================================================================ *)
 
-(* Migrates the inline-dispatched workspace tools from the legacy
+(* Migrates inline-dispatched workspace tools from the legacy
    register_module_tag bootstrap (mcp_server_eio.ml) to the Tool_spec
    single-call SSOT.
 

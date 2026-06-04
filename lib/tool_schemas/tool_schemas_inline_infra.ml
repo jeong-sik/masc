@@ -6,6 +6,11 @@
 let mcp_session_action_enum_strings =
   [ "get"; "create"; "list"; "cleanup"; "remove" ]
 
+(* masc_session remains here because its [action] enum is locked
+   to [mcp_session_action_enum_strings] above by the SSOT regression
+   test; codegen needs a shared enum source RFC before it can swap. Approval
+   queue access is not a MASC tool schema. *)
+
 let schemas : Masc_domain.tool_schema list = [
   (* masc_session *)
   {

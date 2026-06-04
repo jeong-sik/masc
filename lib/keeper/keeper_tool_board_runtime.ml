@@ -81,7 +81,7 @@ let handle_keeper_board_tool
       (Tool_board.handle_tool tool_name tool_args)
   in
   (* PR-S1: the board runtime speaks the domain name type [Board_name.t]
-     directly rather than routing through the [Tool_name.Masc] god-enum. *)
+     directly rather than routing through the MASC god-enum. *)
   let dispatch_board (tool : Tool_name.Board_name.t) tool_args =
     dispatch (Tool_name.Board_name.to_string tool) tool_args
   in

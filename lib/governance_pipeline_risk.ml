@@ -125,61 +125,12 @@ let classify_name name =
   else if contains_pattern name medium_patterns then Medium
   else Low
 
-(* ── Typed per-tool risk SSOT (RFC-0193 / Issue #19032) ───────────────
+(* ── Keeper-native typed risk SSOT ────────────────────────────────
 
-   Exhaustive [Tool_name.t -> risk_level] tables replace [classify_name]'s
-   substring matching for the ~130 registered tools. A new [Tool_name]
-   variant fails to compile here (no [_ ->] catch-all), so it cannot
-   silently fall through to [Low] — the failure mode the substring
-   classifier + [risk_overrides] patch loop accumulated.
-
-   Values reproduce the prior (substring + override) verdict exactly,
-   so the eight typed entries of the former [risk_overrides] list are
-   folded into the tier they belong to (e.g. [Goal_upsert -> Medium],
-   [Memory_write -> Low]) rather than patched at runtime.
-   [residual_risk_overrides] is now empty (all overrides resolved).
-
-   [Goal_transition] / [Transition] sit in [Low] only for totality;
-   [baseline_risk] intercepts both before they reach these tables, since
-   their risk is input-action dependent. Mirrors [Tool_resource_axis]. *)
-
-let risk_of_masc (m : Tool_name.Masc.t) : risk_level =
-  let open Tool_name.Masc in
-  let open Tool_name.Domain_tool in
-  (* PR-S2: domain tool names are carried behind one neutral [Domain] arm
-     ([Domain (Board _)] etc.). Risk classification is NON-uniform across each
-     domain (e.g. Board_delete is Critical but Board_list is Low), so this
-     consumer reaches the domain members through the neutral carrier and keeps
-     its flat per-member buckets — byte-for-byte unchanged behavior, with the
-     compiler still enforcing exhaustiveness over every variant. *)
-  match m with
-  | Domain (Task Add_task) | Agent_fitness | Agent_card | Agents | Domain (Task Batch_add_tasks)
-  | Domain (Board Board_cleanup) | Domain (Board Board_comment) | Domain (Board Board_comment_vote)
-  | Domain (Board Board_curation_read)
-  | Domain (Board Board_curation_submit) | Domain (Board Board_get) | Domain (Board Board_hearths)
-  | Domain (Board Board_list) | Domain (Board Board_post)
-  | Domain (Board Board_profile) | Domain (Board Board_reaction) | Domain (Board Board_search)
-  | Domain (Board Board_stats) | Domain (Board Board_vote)
-  | Domain (Board Board_sub_board_get) | Domain (Board Board_sub_board_list) | Broadcast | Check
-  | Cleanup_zombies | Dashboard | Deliver | Domain (Goal Goal_list) | Domain (Goal Goal_transition)
-  | Heartbeat | Messages | Note_add | Domain (Operator Operator_action) | Domain (Operator Operator_digest)
-  | Domain (Operator Operator_snapshot) | Plan_clear_task | Plan_get | Plan_get_task | Plan_init
-  | Plan_set_task | Status | Domain (Task Task_history) | Domain (Task Tasks) | Tool_help
-  | Domain (Task Transition) | Web_fetch | Web_search
-  | Config | Gc | Get_metrics | Mcp_session
-  | Tool_admin_snapshot | Tool_stats -> Low
-  | Domain (Task Claim_next) | Domain (Goal Goal_upsert) | Domain (Goal Goal_verify)
-  | Domain (Operator Operator_confirm)
-  | Pause | Resume | Start -> Medium
-  | Agent_update | Domain (Board Board_sub_board_create) | Domain (Board Board_sub_board_update)
-  | Plan_update
-  | Domain (Task Update_priority) | Tool_admin_update -> High
-  | Domain (Board Board_delete) | Domain (Board Board_sub_board_delete) | Reset -> Critical
-;;
-
-let risk_of_typed : Tool_name.t -> risk_level = function
-  | Tool_name.Masc m -> risk_of_masc m
-;;
+   Public MASC tool names are owned by schema/descriptor registries, not by
+   [Tool_name]. Their risk comes from Tool_catalog metadata, explicit action
+   handling, and the fallback name patterns below. Keeper-native names still
+   have a closed local type and remain exhaustively classified here. *)
 
 let risk_of_keeper (k : Keeper_tool_name.t) : risk_level =
   let open Keeper_tool_name in
@@ -198,9 +149,8 @@ let risk_of_keeper (k : Keeper_tool_name.t) : risk_level =
   | Board_sub_board_delete | Task_force_done | Task_force_release -> Critical
 ;;
 
-(* Non-typed names absent from [Tool_name] keep an explicit override; the
-   substring path would misclassify them (e.g. "query_skill" contains
-   "kill" -> Critical). Empty = all known names are in [Tool_name]. *)
+(* Non-typed names keep explicit overrides when substring matching would
+   misclassify them (e.g. "query_skill" contains "kill" -> Critical). *)
 let residual_risk_overrides : (string * risk_level) list = []
 
 let transition_action input =
@@ -379,17 +329,12 @@ let baseline_risk ~tool_name ~input =
         | Some action -> classify_name action
         | None -> Low)
       else (
-        match Tool_name.of_string tool_name with
-        | Some typed -> risk_of_typed typed
+        match Keeper_tool_name.of_string tool_name with
+        | Some typed -> risk_of_keeper typed
         | None -> (
-            match Keeper_tool_name.of_string tool_name with
-            | Some typed -> risk_of_keeper typed
-            | None -> (
-                (* not a registered Tool_name: explicit residual override,
-                   else substring fallback (defense for unknown/typo names) *)
-                match List.assoc_opt tool_name residual_risk_overrides with
-                | Some level -> level
-                | None -> classify_name tool_name)))
+            match List.assoc_opt tool_name residual_risk_overrides with
+            | Some level -> level
+            | None -> classify_name tool_name))
 
 let keeper_mutation_requires_high_floor ~tool_name ~input =
   match tool_name with

@@ -8,23 +8,12 @@ let lane_pressure_ctx_ratio = 0.80
 
 include Dashboard_briefing_agents
 
-let keeper_tool_audit_json_fields config registry_lookup keeper agent_name =
+let keeper_tool_audit_json_fields config _registry_lookup keeper agent_name =
   let keeper_name =
     match member_assoc "name" keeper with
     | `String n ->
         (match String_util.trim_to_option n with Some v -> v | None -> agent_name)
     | _ -> agent_name
-  in
-  let fallback_allowed =
-    let raw_allowed = member_assoc "allowed_tool_names" keeper in
-    match raw_allowed with
-    | `Null ->
-        (* Realtime fallback: compute from registry meta when JSON field is absent/null *)
-        (match registry_lookup keeper_name with
-         | Some (entry : Keeper_registry.registry_entry) ->
-           Keeper_tool_dispatch_runtime.keeper_allowed_tool_names entry.meta
-         | None -> [])
-    | _ -> Dashboard_utils.string_list_of_json raw_allowed
   in
   let fallback_latest =
     Dashboard_utils.string_list_of_json (member_assoc "latest_tool_names" keeper)
@@ -60,12 +49,11 @@ let keeper_tool_audit_json_fields config registry_lookup keeper agent_name =
           }
     | None -> None
   in
-  let allowed_tool_names, latest_tool_names, latest_tool_call_count,
-      latest_action_source, tool_audit_source, tool_audit_at =
+  let latest_tool_names, latest_tool_call_count, latest_action_source,
+      tool_audit_source, tool_audit_at =
     (match file_snapshot with
         | Some snapshot ->
-            ( fallback_allowed,
-              snapshot.latest_tool_names,
+            ( snapshot.latest_tool_names,
               snapshot.latest_tool_call_count,
               snapshot.latest_action_source,
               snapshot.tool_audit_source,
@@ -80,17 +68,15 @@ let keeper_tool_audit_json_fields config registry_lookup keeper agent_name =
                 max acc e.Keeper_types.last_used_at) 0.0 tracked in
               let at_str = if latest_at > 0.0
                 then Some (Masc_domain.iso8601_of_unix_seconds latest_at) else None in
-              (fallback_allowed, names, Some total, None, Some "keeper_dispatch", at_str)
+              (names, Some total, None, Some "keeper_dispatch", at_str)
             else
-              ( fallback_allowed,
-                fallback_latest,
+              ( fallback_latest,
                 fallback_count,
                 fallback_action_source,
                 fallback_source,
                 fallback_at ))
   in
   [
-    ("allowed_tool_names", Json_util.json_string_list allowed_tool_names);
     ("latest_tool_names", Json_util.json_string_list latest_tool_names);
     ( "latest_tool_call_count",
       Json_util.option_to_yojson (fun value -> `Int value) latest_tool_call_count );

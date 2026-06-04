@@ -18,7 +18,6 @@ val assert_receipt_authoritative :
   turn_state:string -> (unit, receipt_authority_violation) result
 type tool_surface = {
   turn_lane : Keeper_agent_tool_surface.turn_lane;
-  materialized_tools : string list;
 }
 type slot_release_phase =
     Retry_setup_failed
@@ -95,12 +94,6 @@ type t = {
   terminal_reason_code : string;
   response_text_present : bool;
   model_used : string option;
-  requested_tools : string list;
-  reported_tools : string list;
-  observed_tools : string list;
-  canonical_tools : string list;
-  unexpected_tools : string list;
-  tools_used : string list;
   completion_contract_result : completion_contract_result;
   tool_surface : tool_surface;
   sandbox_kind : Keeper_types_profile_sandbox.sandbox_profile;

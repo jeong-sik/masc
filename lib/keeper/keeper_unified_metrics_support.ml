@@ -357,7 +357,7 @@ let error_category_of_no_result_outcome ~outcome ~error =
   | _ -> None
 
 let has_visible_tool_signal (result : Keeper_agent_run.run_result) : bool =
-  has_substantive_tool_calls result.tools_used
+  has_substantive_tool_calls (Keeper_agent_result.tool_names result)
   || Option.is_some (visible_run_validation result)
 
 let validated_evidence_preview
@@ -377,7 +377,7 @@ let accountability_evidence_refs
     ~(validated_evidence : Agent_sdk.Raw_trace.run_validation option) =
   let tool_refs =
     let stay_silent = "keeper_stay_silent" in
-    result.tools_used
+    Keeper_agent_result.tool_names result
     |> List.filter_map (fun tool_name ->
            let trimmed = String.trim tool_name in
            if trimmed = "" || String.equal trimmed stay_silent then None

@@ -146,9 +146,9 @@ describe('summarizeStatusTray', () => {
         keeper('gamma', {
           needs_attention: false,
           trust: {
-            execution_summary: {
-              tool_contract_result: 'tool_surface_mismatch',
-              missing_required_tools: ['Execute'],
+            latest_terminal_reason: {
+              code: 'runtime_exhausted',
+              severity: 'bad',
             },
           },
         }),
@@ -165,43 +165,6 @@ describe('summarizeStatusTray', () => {
     expect(summary.items.fleet.detail).toBe('1 keeper need attention')
     expect(summary.items.attention.tone).toBe('warn')
     expect(summary.items.attention.value).toBe('1')
-  })
-
-  it.each([
-    'tool_surface_mismatch',
-    'no_tool_capable_provider',
-    'claim_only_after_owned_task',
-  ] as const)('detects previously-missed attention code: %s', (code) => {
-    const summary = summarizeStatusTray({
-      wsOnly: false,
-      sseConnected: true,
-      wsConnected: true,
-      wsReady: true,
-      wsLastEventAt: NOW - 1000,
-      wsEventCount60s: 1,
-      wsLastPongAt: 0,
-      wsLastPongLatencyMs: null,
-      wsLastError: null,
-      reconnectCount: 0,
-      lastDisconnectedAt: 0,
-      keepers: [
-        keeper('delta', {
-          needs_attention: false,
-          trust: {
-            execution_summary: {
-              tool_contract_result: code,
-            },
-          },
-        }),
-      ],
-      staleKeeperNames: new Set(),
-      tasks: [],
-      journalEntries: [],
-      unacknowledgedErrors: 0,
-      now: NOW,
-    })
-
-    expect(summary.counts.keeperAttention).toBe(1)
   })
 
   it('keeps the client transport green when route events are idle but heartbeat is fresh', () => {

@@ -67,12 +67,6 @@ let finalize
     ~receipt_stop_reason_ref
     ~receipt_runtime_observation_ref
     ~receipt_response_text_present_ref
-    ~reported_tool_names_ref
-    ~observed_tool_names_ref
-    ~canonical_tool_names_ref
-    ~unexpected_tool_names_ref
-    ~actual_keeper_tool_names_ref
-    ~materialized_tool_names_ref
     () =
   (match turn_result with
    | Ok _ -> ()
@@ -150,17 +144,9 @@ let finalize
     ; terminal_reason_code
     ; response_text_present = !receipt_response_text_present_ref
     ; model_used = !receipt_model_used_ref
-    ; requested_tools = acc.requested_tool_names_seen
-    ; reported_tools = !reported_tool_names_ref
-    ; observed_tools = !observed_tool_names_ref
-    ; canonical_tools = !canonical_tool_names_ref
-    ; unexpected_tools = !unexpected_tool_names_ref
-    ; tools_used = !actual_keeper_tool_names_ref
     ; completion_contract_result
     ; tool_surface =
-        { turn_lane = acc.tool_surface.turn_lane
-        ; materialized_tools = !materialized_tool_names_ref
-        }
+        { turn_lane = acc.tool_surface.turn_lane }
     ; sandbox_kind = Keeper_execution_receipt.sandbox_kind_of_meta meta
     ; sandbox_root = Some keeper_visible_sandbox_root
     ; network_mode = meta.network_mode
@@ -222,11 +208,6 @@ let finalize
           `String
             (Keeper_execution_receipt.runtime_outcome_to_string
                receipt.runtime_outcome) );
-        ("requested_tools", Json_util.json_string_list receipt.requested_tools);
-        ("reported_tools", Json_util.json_string_list receipt.reported_tools);
-        ("observed_tools", Json_util.json_string_list receipt.observed_tools);
-        ("canonical_tools", Json_util.json_string_list receipt.canonical_tools);
-        ("tools_used", Json_util.json_string_list receipt.tools_used);
         ( "receipt_append_ok",
           match receipt_append_ok with
           | None -> `Null
@@ -247,7 +228,7 @@ let finalize
       | None -> receipt_manifest_decision ()
     in
     let tool_call_log_path =
-      match receipt.tools_used with
+      match acc.tool_calls with
       | [] -> None
       | _ -> Keeper_tool_call_log.current_log_path ()
     in
@@ -293,19 +274,6 @@ let finalize
     | Ok _ -> "ok"
     | Error _ -> "error"
   in
-  append_receipt_manifest
-    ~site:"tool_lineage"
-    ~status:"recorded"
-    ~decision:
-      (Keeper_runtime_manifest.tool_lineage
-         ~searched_tool_names:[]
-         ~allowed_tool_names:acc.requested_tool_names
-         ~materialized_tool_names:!materialized_tool_names_ref
-         ~emitted_tool_names:!reported_tool_names_ref
-         ~executed_tool_names:!observed_tool_names_ref
-         ~verified_tool_names:!actual_keeper_tool_names_ref
-         ())
-    Keeper_runtime_manifest.Tool_lineage_recorded;
   append_receipt_manifest
     ~site:"turn_finished"
     ~status:final_status

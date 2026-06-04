@@ -275,14 +275,8 @@
         <strong>Finding S1:</strong> Sandbox truth is split. `analyst.toml` declares docker, the latest receipt records docker, but `masc_keeper_sandbox_status` and top-level `masc_keeper_status` report local. This is the exact “Keeper does not know Sandbox” failure mode.
       </div>
 
-      <h3>2. Tool Surface Path</h3>
-      <p>The intended path is:</p>
-      <pre>keeper tool policy / descriptor catalog
-  -> Keeper_tool_policy.keeper_allowed_tool_names
-  -> Keeper_run_tools_setup.compute_tool_surface
-  -> Keeper_run_tools_hooks.set_turn_context
-  -> Agent/OAS materialized runtime tools
-  -> execution receipt + tool logs + dashboard telemetry</pre>
+      <h3>2. Tool Execution Path</h3>
+      <p>The current audit path is the tool call log plus hook/runtime events. The old dashboard projection that rebuilt allowed/requested/materialized tool summaries was removed.</p>
       <table>
         <thead>
           <tr><th>Code</th><th>Role</th><th>Risk</th></tr>

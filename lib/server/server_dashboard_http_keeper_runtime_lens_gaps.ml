@@ -1,4 +1,4 @@
-(** Runtime-lens tool surface extraction and gap detection.
+(** Runtime-lens gap detection.
 
     Split from {!Server_dashboard_http_keeper_api}; this module derives
     runtime-lens diagnostic gaps from the manifest scan and summary JSONs. *)
@@ -7,36 +7,7 @@ open Server_dashboard_http_keeper_api_types
 open Server_dashboard_http_keeper_runtime_manifest_scan
 open Server_dashboard_http_keeper_runtime_lens_swimlane
 
-let string_contains = String_util.string_contains_substring_ci
-
-let runtime_lens_tool_surface_parts scan =
-  (* sound-partial: allow absent runtime-lens decisions as empty evidence while
-     preserving explicit decision payloads when the scanner emits them. *)
-  let tool_decision =
-    match scan.latest_tool_surface_decision with
-    | Some decision -> decision
-    | None -> `Assoc []
-  in
-  (* sound-partial: allow absent lane decision as empty evidence. *)
-  let lane_decision =
-    match scan.latest_provider_lane_decision with
-    | Some decision -> decision
-    | None -> `Assoc []
-  in
-  let requested_tools =
-    Json_util.get_string_list lane_decision "requested_tool_names"
-  in
-  let materialized_tools =
-    Json_util.get_string_list lane_decision "materialized_tool_names"
-  in
-  ( tool_decision, lane_decision, requested_tools, materialized_tools )
-
 let runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan =
-  let has_tool_surface =
-    runtime_manifest_scan_event_count scan
-      Keeper_runtime_manifest.Tool_surface_selected
-    > 0
-  in
   let has_provider_lane =
     runtime_manifest_scan_event_count scan
       Keeper_runtime_manifest.Provider_lane_resolved
@@ -54,16 +25,6 @@ let runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan =
     Option.value
       (Json_util.get_bool config_drift "runtime_override")
       ~default:false
-  in
-  let pre_dispatch_reason =
-    match scan.latest_pre_dispatch_blocked_row with
-    | Some row ->
-      first_string_opt
-        [ Json_util.get_string row.Keeper_runtime_manifest.decision "reason"
-        ; Json_util.get_string row.Keeper_runtime_manifest.decision "terminal_reason_code"
-        ; Some row.Keeper_runtime_manifest.status
-        ]
-    | None -> None
   in
   let add gap gaps = gap :: gaps in
   []
@@ -127,31 +88,18 @@ let runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan =
            gaps
        else gaps)
   |> (fun gaps ->
-       match pre_dispatch_reason with
-       | Some reason when string_contains ~needle:"no_tool_capable_provider" reason ->
-         add
-           { code = "route_tool_capability_gap"
-           ; severity = "bad"
-           ; lane = "masc_policy_runtime"
-           ; detail = Some "pre-dispatch blocked because route cannot materialize tool lane"
-           }
-           gaps
-       | _ -> gaps)
-  |> (fun gaps ->
-       if (has_tool_surface || scan.provider_started_count > 0)
-          && not has_provider_lane
+       if scan.provider_started_count > 0 && not has_provider_lane
        then
          add
            { code = "provider_lane_unresolved"
            ; severity = "bad"
            ; lane = "masc_policy_runtime"
-           ; detail = Some "tool surface/provider attempt exists without provider_lane_resolved"
+           ; detail = Some "provider attempt exists without provider_lane_resolved"
            }
            gaps
        else gaps)
   |> (fun gaps ->
-       if (has_tool_surface || scan.provider_started_count > 0)
-          && not has_context_delta
+       if scan.provider_started_count > 0 && not has_context_delta
        then
          add
            { code = "context_delta_missing"
@@ -358,52 +306,6 @@ let runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan =
               ; detail = Some "terminal provider row lacks terminal_provider_kind"
               }
               :: gaps)
-         | None -> gaps)
-    |> (fun gaps ->
-         match scan.latest_tool_lineage_decision with
-         | Some decision ->
-           let has_emitted =
-             match Json_util.assoc_member_opt "emitted" decision with
-             | Some (`Assoc _) -> true
-             | _ -> false
-           in
-           let has_executed =
-             match Json_util.assoc_member_opt "executed" decision with
-             | Some (`Assoc _) -> true
-             | _ -> false
-           in
-           if has_emitted && not has_executed
-           then
-             { code = "tool_emitted_not_executed"
-             ; severity = "warn"
-             ; lane = "tool_runtime"
-             ; detail = Some "tool lineage shows emitted stage but no executed stage"
-             }
-             :: gaps
-           else gaps
-         | None -> gaps)
-    |> (fun gaps ->
-         match scan.latest_tool_lineage_decision with
-         | Some decision ->
-           let has_executed =
-             match Json_util.assoc_member_opt "executed" decision with
-             | Some (`Assoc _) -> true
-             | _ -> false
-           in
-           let has_verified =
-             match Json_util.assoc_member_opt "verified" decision with
-             | Some (`Assoc _) -> true
-             | _ -> false
-           in
-           if has_executed && not has_verified
-           then
-             { code = "tool_execution_unverified"
-             ; severity = "warn"
-             ; lane = "tool_runtime"
-             ; detail = Some "tool lineage shows executed stage but no verified stage"
-             }
-             :: gaps
-           else gaps
          | None -> gaps)
     |> (fun gaps ->
          match scan.latest_context_compacted_row with

@@ -40,21 +40,6 @@ let keeper_trust_json ?(include_receipt = false)
             ("outcome", `String "not_observed");
           ]
   in
-  let requested_tools =
-    match latest_receipt with
-    | Some receipt -> Json_util.get_string_list receipt "requested_tools"
-    | None -> []
-  in
-  let tools_used =
-    match latest_receipt with
-    | Some receipt -> Json_util.get_string_list receipt "tools_used"
-    | None -> []
-  in
-  let unexpected_tools =
-    match latest_receipt with
-    | Some receipt -> Json_util.get_string_list receipt "unexpected_tools"
-    | None -> []
-  in
   `Assoc
     [
       ( "last_outcome",
@@ -80,10 +65,6 @@ let keeper_trust_json ?(include_receipt = false)
         (* sound-partial: allow *)
         | Some receipt -> Option.value ~default:(`String "unknown") (Json_util.assoc_member_opt "completion_contract_result" receipt)
         | None -> `String "unknown" );
-      ("requested_tool_count", `Int (List.length requested_tools));
-      ("tools_used", `List (List.map (fun value -> `String value) tools_used));
-      ("unexpected_tools", `List (List.map (fun value -> `String value) unexpected_tools));
-      ("unexpected_tool_count", `Int (List.length unexpected_tools));
       ("sandbox", sandbox_json);
       ("approval", approval_json);
       ("runtime", runtime_json);

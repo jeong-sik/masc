@@ -220,14 +220,6 @@ let run_try_provider
             (Some policy)
         | _ -> runtime_mcp_policy
       in
-      let requested_tool_names =
-        List.map (fun (tool : Agent_sdk.Tool.t) -> tool.schema.name) ctx.tools
-      in
-      let materialized_tool_names =
-        Keeper_turn_driver_helpers.materialized_tool_names_after_lane
-          ~effective_tools
-          ~runtime_mcp_policy
-      in
       let resolved_lane =
         Keeper_turn_driver_helpers.resolved_tool_lane_label ~effective_tools
           ~runtime_mcp_policy
@@ -245,14 +237,7 @@ let run_try_provider
         ~decision:
           (`Assoc
             [
-              ( "requested_tool_names",
-                `List (List.map (fun name -> `String name) requested_tool_names) );
-              ( "materialized_tool_names",
-                `List
-                  (List.map (fun name -> `String name) materialized_tool_names) );
               ("resolved_lane", `String resolved_lane);
-              ("effective_tool_count", `Int (List.length effective_tools));
-              ("runtime_mcp_policy_present", `Bool (Option.is_some runtime_mcp_policy));
             ])
         Keeper_runtime_manifest.Provider_lane_resolved;
       Ok

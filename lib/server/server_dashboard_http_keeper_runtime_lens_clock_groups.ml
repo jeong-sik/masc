@@ -219,13 +219,6 @@ let runtime_lens_clock_group_gaps scan =
   []
   |> (fun gaps ->
        match
-         clock_group_open_gap ~code:"clock_tool_batch_open" ~severity:"warn"
-           ~lane:"tool_runtime" ~label:"tool_batch" (groups_of_type "tool_batch")
-       with
-       | Some gap -> gap :: gaps
-       | None -> gaps)
-  |> (fun gaps ->
-       match
          clock_group_open_gap ~code:"clock_provider_group_open"
            ~severity:(if scan.has_terminal then "bad" else "warn") ~lane:"provider"
            ~label:"provider_attempt" (groups_of_type "provider_attempt")
@@ -271,9 +264,6 @@ let runtime_lens_clock_group_gaps scan =
 
 let runtime_lens_clock_gaps scan =
   let event_count = runtime_manifest_scan_event_count scan in
-  let has_tool_surface =
-    event_count Keeper_runtime_manifest.Tool_surface_selected > 0
-  in
   let checkpoint_saved_count =
     event_count Keeper_runtime_manifest.Checkpoint_saved
   in
@@ -291,14 +281,6 @@ let runtime_lens_clock_gaps scan =
                 "clock_edges contains the latest %d of %d manifest rows; \
                  increase the runtime-trace limit to inspect the full clock"
                 returned_row_count scan.total_rows)
-           gaps
-       else gaps)
-  |> (fun gaps ->
-       if scan.provider_started_count > 0 && not has_tool_surface then
-         add ~code:"tool_surface_missing" ~severity:"bad"
-           ~lane:"tool_runtime"
-           ~detail:
-             "provider attempt exists without a tool_surface_selected row"
            gaps
        else gaps)
   |> (fun gaps ->

@@ -84,8 +84,6 @@ let mandatory_clock_refs_for_event = function
     [ "edge_id"; "lane"; "provider_attempt_id" ]
   | Provider_attempt_finished ->
     [ "edge_id"; "lane"; "provider_attempt_id"; "elapsed_ms" ]
-  | Tool_surface_selected ->
-    [ "edge_id"; "lane"; "tool_batch_id" ]
   | Provider_lane_resolved ->
     [ "edge_id"; "lane"; "tool_batch_id" ]
   | Context_compacted ->

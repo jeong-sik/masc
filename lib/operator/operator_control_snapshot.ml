@@ -270,9 +270,6 @@ let keepers_json
                     in
                     let t_audit = Time_compat.now () in
                     let audit_json = cached_tool_audit_json ~lightweight config meta in
-                    let allowed_tool_names =
-                      Json_util.get_string_list audit_json "allowed_tool_names"
-                    in
                     let recent_tool_names =
                       Json_util.get_string_list audit_json "recent_tool_names"
                     in
@@ -413,11 +410,6 @@ let keepers_json
                            ; ( "mention_reactive_turn_count"
                              , `Int meta.runtime.mention_reactive_turn_count )
                            ; "noop_turn_count", `Int meta.runtime.noop_turn_count
-                           ; ( "allowed_tool_names"
-                             , `List
-                                 (List.map
-                                    (fun value -> `String value)
-                                    allowed_tool_names) )
                            ; ( "latest_tool_names"
                              , `List
                                  (List.map (fun value -> `String value) latest_tool_names)

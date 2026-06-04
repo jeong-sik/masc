@@ -33,9 +33,9 @@ let append_decision_record
   let now_ts = Time_compat.now () in
   let trigger_signals = observed_triggers_of_observation ~meta observation in
   let affordances = observed_affordances_of_observation ~meta observation in
-  let tools_used =
+  let tool_names =
     match result with
-    | Some r -> r.tools_used
+    | Some r -> Keeper_agent_result.tool_names r
     | None -> []
   in
   let response_preview =
@@ -43,16 +43,6 @@ let append_decision_record
     | Some r when String.trim r.response_text <> "" ->
         Some (short_preview r.response_text)
     | _ -> None
-  in
-  let tool_call_count =
-    match result with
-    | Some r -> r.tool_calls_made
-    | None -> 0
-  in
-  let tool_calls =
-    match result with
-    | Some r -> r.tool_calls
-    | None -> []
   in
   let ( _turn_lane
       , _turn_tool_choice
@@ -95,7 +85,7 @@ let append_decision_record
     Keeper_approval_queue.pending_count_for_keeper ~keeper_name:meta.name
   in
   let claim_executed =
-    List.exists Keeper_tool_progress.is_claim_tool_name tools_used
+    List.exists Keeper_tool_progress.is_claim_tool_name tool_names
   in
   let social_fields =
     match social_state with
@@ -162,7 +152,7 @@ let append_decision_record
                terminal_reason.Keeper_turn_terminal.severity) );
         ("terminal_reason_source", `String terminal_reason.source);
         ("provider_context", provider_context_json ~meta result);
-        ("tool_surface", tool_surface_json ~tool_call_count ~tools_used result);
+        ("tool_surface", tool_surface_json result);
         ("pending_approval_count", `Int pending_approval_count);
         ("approval_mode", Json_util.string_opt_to_json approval_mode);
         ("channel", `String (decision_channel_of_observation observation));
@@ -199,9 +189,6 @@ let append_decision_record
               ("pending_verification_count", `Int observation.pending_verification_count);
               ("active_agent_count", `Int observation.active_agent_count);
             ] );
-        ("tool_call_count", `Int tool_call_count);
-        ("tools_used", `List (List.map (fun s -> `String s) tools_used));
-        ("tool_calls", `List (List.map tool_call_detail_to_json tool_calls));
         ("claim_absolute_available", `Bool (observation.unclaimed_task_count > 0));
         ("claim_matched_available", `Bool (observation.claimable_task_count > 0));
         ("claim_was_available", `Bool (observation.claimable_task_count > 0));

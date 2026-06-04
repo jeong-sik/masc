@@ -116,10 +116,6 @@ let lane_policies =
         ]
     ; terminal_events = [ Keeper_runtime_manifest.Provider_attempt_finished ]
     }
-  ; { lane = "tool_runtime"
-    ; mandatory_events = [ Keeper_runtime_manifest.Tool_surface_selected ]
-    ; terminal_events = []
-    }
   ; { lane = "masc_policy_runtime"
     ; mandatory_events = [ Keeper_runtime_manifest.Runtime_routed ]
     ; terminal_events = []
@@ -154,9 +150,6 @@ let event_lane = function
   | Keeper_runtime_manifest.Provider_attempt_started
   | Keeper_runtime_manifest.Provider_attempt_finished ->
     "provider"
-  | Keeper_runtime_manifest.Tool_surface_selected
-  | Keeper_runtime_manifest.Tool_lineage_recorded ->
-    "tool_runtime"
   | Keeper_runtime_manifest.Checkpoint_loaded
   | Keeper_runtime_manifest.State_snapshot_sidecar_saved
   | Keeper_runtime_manifest.Working_state_sidecar_saved

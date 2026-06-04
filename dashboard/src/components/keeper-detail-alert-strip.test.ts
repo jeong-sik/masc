@@ -25,56 +25,37 @@ describe('KeeperRuntimeAlertStrip', () => {
     expect(container).toBeEmptyDOMElement()
   })
 
-  it('renders execution receipt evidence even when the attention flag is false', () => {
+  it('renders runtime execution evidence even when the attention flag is false', () => {
     const { container } = render(h(KeeperRuntimeAlertStrip, {
       keeper: keeper({
         needs_attention: false,
         trust: {
           execution_summary: {
-            tool_contract_result: 'tool_surface_mismatch',
-            required_tools: ['keeper_task_done'],
-            missing_required_tools: ['keeper_task_done'],
+            runtime_outcome: 'fallback_exhausted',
+            provider_attempt_count: 2,
           },
         },
       }),
     }))
 
-    // Tool contract result is now rendered as scope-tagged evidence
-    // ("도구 계약") attached to a single typed verdict, using the Korean
-    // label from `toolContractLabel`. The prior sibling "증명" span and
-    // its raw English token are intentionally removed (모순 #2).
-    expect(container.textContent).toContain('도구 계약')
-    expect(container.textContent).toContain('도구 표면 불일치')
-    expect(container.textContent).not.toContain('증명')
-    expect(container.textContent).toContain('필요 도구')
-    expect(container.textContent).toContain('keeper_task_done')
-    expect(container.textContent).toContain('누락')
+    expect(container.textContent).toContain('마지막 시도')
+    expect(container.textContent).toContain('fallback_exhausted')
   })
 
-  it('closes 모순 #2: simultaneous failure verdict + tool-contract success collapse into one verdict', () => {
+  it('renders trust failure without tool-contract sibling evidence', () => {
     const { container } = render(h(KeeperRuntimeAlertStrip, {
       keeper: keeper({
         needs_attention: true,
         trust: {
           disposition: 'Alert',
           attention_reason: 'completion_contract_violation',
-          execution_summary: {
-            tool_contract_result: 'satisfied_execution',
-          },
         },
       }),
     }))
 
     const text = container.textContent ?? ''
-    // Verdict failure is surfaced under a single "검증" label.
     expect(text).toContain('검증')
-    expect(text).toContain('runtime_blocked')
     expect(text).not.toContain('completion_contract_violation')
-    // The tool contract success is preserved but tagged as scope
-    // evidence ("도구 계약"), not as a sibling "증명" claim that would
-    // read as the surface contradicting itself.
-    expect(text).toContain('도구 계약')
-    expect(text).toContain('계약 충족 (실행)')
     expect(text).not.toContain('증명')
   })
 
@@ -168,7 +149,6 @@ describe('KeeperRuntimeAlertStrip', () => {
         },
         trust: {
           execution_summary: {
-            tool_contract_result: 'satisfied_execution',
             runtime_outcome: 'completed',
             provider_attempt_count: 1,
           },

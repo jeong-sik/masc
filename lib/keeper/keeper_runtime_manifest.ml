@@ -194,8 +194,6 @@ let clock_lane_of_event = function
   | Provider_attempt_started
   | Provider_attempt_finished ->
     "provider"
-  | Tool_surface_selected
-  | Tool_lineage_recorded -> "tool_runtime"
   | Checkpoint_loaded
   | State_snapshot_sidecar_saved
   | Working_state_sidecar_saved
@@ -236,7 +234,6 @@ let clock_refs_for_context ctx ~event ?oas_turn_count ?elapsed_ms
     ?logical_seq ?compaction_source () =
   let tool_batch_id =
     match event with
-    | Tool_surface_selected
     | Provider_lane_resolved ->
       Some (context_tool_batch_id ctx ?oas_turn_count ())
     | _ -> None
@@ -288,34 +285,6 @@ let with_payload_role ~payload_role decision =
         ("decision", other);
         ("payload_role", `String (payload_role_to_string payload_role));
       ]
-
-let tool_lineage_stage ~stage ~tool_names ~count () : Yojson.Safe.t =
-  `Assoc
-    [
-      ("stage", `String stage);
-      ("tool_names", `List (List.map (fun n -> `String n) tool_names));
-      ("count", `Int count);
-    ]
-
-let tool_lineage ?searched_tool_names ?allowed_tool_names
-    ?materialized_tool_names ?emitted_tool_names ?executed_tool_names
-    ?verified_tool_names () : Yojson.Safe.t =
-  let stage name tools =
-    match tools with
-    | Some names -> Some (tool_lineage_stage ~stage:name ~tool_names:names ~count:(List.length names) ())
-    | None -> None
-  in
-  `Assoc
-    (List.filter_map
-       (fun (key, value) -> Option.map (fun v -> key, v) value)
-       [
-         "searched", stage "searched" searched_tool_names;
-         "allowed", stage "allowed" allowed_tool_names;
-         "materialized", stage "materialized" materialized_tool_names;
-         "emitted", stage "emitted" emitted_tool_names;
-         "executed", stage "executed" executed_tool_names;
-         "verified", stage "verified" verified_tool_names;
-       ])
 
 let make ?(ts = Masc_domain.now_iso ()) ~keeper_name ?agent_name ~trace_id
     ?generation ?keeper_turn_id ?oas_turn_count ?logical_seq ~event ?runtime_id

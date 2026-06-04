@@ -14,33 +14,24 @@ let stop_reason_label = function
      | None -> "mutation_boundary")
 ;;
 
-let final_tool_names ~actual_keeper_tool_names ~fallback_tool_names =
-  match actual_keeper_tool_names with
-  | [] -> fallback_tool_names
-  | names -> names
-;;
-
-let state_snapshot ~keeper_name ~goal ~actual_keeper_tool_names ~fallback_tool_names
+let state_snapshot ~keeper_name ~goal ~actual_keeper_tool_names
       ~stop_reason ~raw_response_text
   =
   match Keeper_memory_policy.parse_state_snapshot_from_reply raw_response_text with
   | Some snapshot -> snapshot
   | None ->
     let stop_reason_str = stop_reason_label stop_reason in
-    let final_tool_names =
-      final_tool_names ~actual_keeper_tool_names ~fallback_tool_names
-    in
     let synth =
       Keeper_memory_policy.synthesize_state_from_run_result
         ~goal
-        ~tools_used:final_tool_names
+        ~tools_used:actual_keeper_tool_names
         ~stop_reason:stop_reason_str
         ~response_text:raw_response_text
     in
     Log.Keeper.info
       "keeper:%s [STATE] missing, synthesized from %d tools (stop=%s)"
       keeper_name
-      (List.length final_tool_names)
+      (List.length actual_keeper_tool_names)
       stop_reason_str;
     synth
 ;;
@@ -54,7 +45,7 @@ let response_text ~state_snapshot ~raw_response_text =
   | None -> Keeper_text_processing.user_visible_reply_text raw_response_text
 ;;
 
-let finalize ~keeper_name ~goal ~actual_keeper_tool_names ~fallback_tool_names
+let finalize ~keeper_name ~goal ~actual_keeper_tool_names
       ~stop_reason ~raw_response_text
   =
   let state_snapshot =
@@ -62,7 +53,6 @@ let finalize ~keeper_name ~goal ~actual_keeper_tool_names ~fallback_tool_names
       ~keeper_name
       ~goal
       ~actual_keeper_tool_names
-      ~fallback_tool_names
       ~stop_reason
       ~raw_response_text
   in

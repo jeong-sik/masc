@@ -20,11 +20,9 @@ type runtime_manifest_scan =
   ; mutable context_compact_started_count : int
   ; mutable context_compacted_count : int
   ; mutable last_compaction : Yojson.Safe.t option
-  ; mutable latest_tool_surface_decision : Yojson.Safe.t option
   ; mutable latest_provider_lane_decision : Yojson.Safe.t option
   ; mutable latest_provider_lane_row : Keeper_runtime_manifest.t option
   ; mutable latest_pre_dispatch_blocked_row : Keeper_runtime_manifest.t option
-  ; mutable latest_tool_lineage_decision : Yojson.Safe.t option
   ; mutable payload_role_counts : (string, int) Hashtbl.t
   ; mutable source_clock_counts : (string, int) Hashtbl.t
   ; mutable context_injected_count : int

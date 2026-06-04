@@ -372,17 +372,7 @@ let run_turn
     let hooks = s.Keeper_run_tools.hooks in
     let reducer = s.Keeper_run_tools.reducer in
     let acc = s.Keeper_run_tools.acc in
-    append_manifest ~site:"tool_surface_selected"
-      ~keeper_turn_id:manifest_keeper_turn_id
-      ~decision:
-        (`Assoc
-          [
-            ("turn_lane", `String (turn_lane_to_string acc.tool_surface.turn_lane));
-            ("config_root", `String acc.tool_surface.config_root);
-          ])
-      Keeper_runtime_manifest.Tool_surface_selected;
     let agent_ref : Agent_sdk.Agent.t option ref = ref None in
-    let tool_usage_before = s.Keeper_run_tools.tool_usage_before in
     let receipt_turn_count_ref = s.Keeper_run_tools.receipt_turn_count_ref in
     let receipt_model_used_ref = s.Keeper_run_tools.receipt_model_used_ref in
     let receipt_stop_reason_ref = s.Keeper_run_tools.receipt_stop_reason_ref in
@@ -392,12 +382,6 @@ let run_turn
     let receipt_response_text_present_ref =
       s.Keeper_run_tools.receipt_response_text_present_ref
     in
-    let reported_tool_names_ref = s.Keeper_run_tools.reported_tool_names_ref in
-    let observed_tool_names_ref = s.Keeper_run_tools.observed_tool_names_ref in
-    let canonical_tool_names_ref = s.Keeper_run_tools.canonical_tool_names_ref in
-    let unexpected_tool_names_ref = s.Keeper_run_tools.unexpected_tool_names_ref in
-    let actual_keeper_tool_names_ref = s.Keeper_run_tools.actual_keeper_tool_names_ref in
-    let materialized_tool_names_ref : string list ref = ref [] in
     let keeper_has_owned_active_task () =
       Option.is_some (owned_active_task_id_for_meta ~config ~meta:acc.meta)
     in
@@ -497,21 +481,6 @@ let run_turn
                    ~runtime_manifest_context
                    ~runtime_manifest_append:
                      (fun manifest ->
-                        (match manifest.Keeper_runtime_manifest.event with
-                         | Keeper_runtime_manifest.Provider_lane_resolved ->
-                           (match manifest.Keeper_runtime_manifest.decision with
-                            | `Assoc fields ->
-                              (match List.assoc_opt "materialized_tool_names" fields with
-                               | Some (`List names) ->
-                                 materialized_tool_names_ref
-                                   := List.filter_map
-                                        (function
-                                         | `String s -> Some s
-                                         | _ -> None)
-                                        names
-                               | _ -> ())
-                            | _ -> ())
-                         | _ -> ());
                         Keeper_runtime_manifest.append_best_effort
                           ~site:"runtime_runtime"
                           config
@@ -593,101 +562,11 @@ let run_turn
                    ~keeper_name:meta.name
                    ~trajectory_acc
                    result.response.content;
-                 let tool_observation =
-                   Keeper_agent_run_tool_observation.analyze
-                     ~base_path:config.base_path
-                     ~keeper_name:meta.name
-                     ~requested_tool_names_seen:acc.requested_tool_names_seen
-                     ~tool_usage_before
-                     ~tool_calls:acc.tool_calls
-                     result.response.content
+                 let actual_keeper_tool_names =
+                   Keeper_agent_result.tool_names_of_calls (List.rev acc.tool_calls)
                  in
-                 let reported_tool_names =
-                   tool_observation.reported_tool_names
-                 in
-                 reported_tool_names_ref := reported_tool_names;
-                 let observed_tool_names =
-                   tool_observation.observed_tool_names
-                 in
-                 observed_tool_names_ref := observed_tool_names;
-                 (* RFC-0064: canonicalise observed tool names across all three
-                    input surfaces (LLM-native public / MCP protocol /
-                    already-internal) before the disclosure check. Without
-                    this, the disclosure check flags every Execute/Read call as
-                    "unexpected" and nukes turns where the LLM only used the
-                    alias names (≈18% of turns per #8778).
-
-                    [canonical_tool_name_observed] is the observation
-                    boundary — it emits exactly one
-                    [masc_keeper_tool_call_total] sample per observed
-                    name with bounded labels. Set-logic call sites
-                    (surface composition, provider routing) use the pure
-                    [canonical_tool_name] variant so a single observed call
-                    does not produce multiple counter samples (PR #14585
-                    review #3). *)
-                 let canonical_tool_names =
-                   tool_observation.canonical_tool_names
-                 in
-                 canonical_tool_names_ref := canonical_tool_names;
-                 let unexpected_tool_names =
-                   tool_observation.unexpected_tool_names
-                 in
-                 unexpected_tool_names_ref := unexpected_tool_names;
-                 (* Partial tolerance (#8471): when a turn mixes valid tool calls
-          with unexpected ones (LLM hallucinating Claude Code built-ins
-          like Execute/Read/Skill outside the keeper surface), do not nuke
-          the whole turn. OAS already returns tool_result="error" for the
-          unknown calls so the LLM can recover on the next step. We still
-          hard-fail when EVERY tool call is unexpected — that means the
-          turn produced no valid work. See feedback memory
-          feedback_tool-error-messages-teach-llm.md. *)
-                 let valid_tool_calls_present =
-                   tool_observation.valid_tool_calls_present
-                 in
-                 if valid_tool_calls_present then acc.keeper_surface_tool_used <- true;
-                 if unexpected_tool_names <> [] && not valid_tool_calls_present
-                 then (
-                   acc.receipt_completion_contract_result <-
-                     Keeper_execution_receipt.Contract_violated;
-                   Error
-                     (Keeper_agent_run_tool_surface_violation.to_sdk_error
-                        ~keeper_name:meta.name
-                        ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta meta)
-                        ~requested_tool_names_seen:acc.requested_tool_names_seen
-                        ~unexpected_tool_names))
-                 else (
-                   let should_log_unexpected_tool_partial =
-                     unexpected_tool_names <> []
-                     && should_log_unexpected_tool_partial_once
-                          ~keeper_name:meta.name
-                          ~unexpected_tool_names
-                   in
-                   if unexpected_tool_names <> []
-                   then
-                     Prometheus.inc_counter
-                       Keeper_metrics.(to_string UnexpectedToolPartialTolerance)
-                       ~labels:
-                         [ "keeper_name", meta.name
-                         ; "logged", string_of_bool should_log_unexpected_tool_partial
-                         ]
-                       ();
-                   if should_log_unexpected_tool_partial
-                   then
-                     Log.Keeper.warn
-                       "keeper:%s unexpected_tool_partial_tolerance tools=%s (cycle \
-                        continues; valid tools present)"
-                       meta.name
-                       (String.concat ", " unexpected_tool_names);
-                   let actual_keeper_tool_names =
-                     Keeper_tool_observation.final_keeper_tool_names
-                       ~reported_tool_names
-                       ~observed_tool_names
-                       ~allowed_tool_names:acc.requested_tool_names_seen
-                   in
-                   actual_keeper_tool_names_ref := actual_keeper_tool_names;
                    let progress_keeper_tool_names =
                      progress_keeper_tool_names_for_contract
-                       ~allowed_tool_names:acc.requested_tool_names_seen
                        ~actual_keeper_tool_names
                        ~tool_calls:acc.tool_calls
                    in
@@ -727,7 +606,7 @@ let run_turn
                           ~config ~meta ~generation ~manifest_keeper_turn_id
                           ~trace_id ~session ~append_manifest ~model
                           ~acc
-                          ~actual_keeper_tool_names ~actual_keeper_tool_names_ref
+                          ~actual_keeper_tool_names
                           ~result ~checkpoint_persistence_error
                           ~post_turn_t0 ?provider_filter ~runtime_id_string
                           ~prompt_metrics ~ctx_composition ~usage
@@ -737,7 +616,7 @@ let run_turn
                           ~pre_dispatch_compaction_before_tokens:ctx.pre_dispatch_compaction_before_tokens
                           ~pre_dispatch_compaction_after_tokens:ctx.pre_dispatch_compaction_after_tokens
                           ~raw_response_text:response_text
-                          ()))))
+                          ())))
                in
        Keeper_agent_run_receipt.finalize
          ~config
@@ -763,10 +642,4 @@ let run_turn
          ~receipt_stop_reason_ref
          ~receipt_runtime_observation_ref
          ~receipt_response_text_present_ref
-         ~reported_tool_names_ref
-         ~observed_tool_names_ref
-         ~canonical_tool_names_ref
-         ~unexpected_tool_names_ref
-         ~actual_keeper_tool_names_ref
-         ~materialized_tool_names_ref
          ())

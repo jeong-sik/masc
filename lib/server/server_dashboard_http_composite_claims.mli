@@ -5,7 +5,6 @@ val json_float : string -> Yojson.Safe.t -> float option
 val json_bool : string -> Yojson.Safe.t -> bool option
 val compact_receipt_error_json : Yojson.Safe.t -> Yojson.Safe.t
 val compact_receipt_runtime_json : Yojson.Safe.t -> Yojson.Safe.t
-val compact_receipt_tool_surface_json : Yojson.Safe.t -> Yojson.Safe.t
 val json_number : string -> Yojson.Safe.t -> float option
 val json_assoc : string -> Yojson.Safe.t -> Yojson.Safe.t option
 val string_has_prefix : prefix:string -> string -> bool
@@ -34,7 +33,6 @@ val json_string_eq : string -> Yojson.Safe.t -> String.t -> bool
 val composite_latest_activity_epoch :
   Yojson.Safe.t -> Yojson.Safe.t -> float option
 val composite_snapshot_is_idle : Yojson.Safe.t -> bool
-val composite_execution_tool_route_blocked : Yojson.Safe.t -> bool
 val composite_execution_config_blocked : Yojson.Safe.t -> bool
 val composite_execution_saturated : Yojson.Safe.t -> bool
 val composite_execution_claim_no_eligible : Yojson.Safe.t -> bool

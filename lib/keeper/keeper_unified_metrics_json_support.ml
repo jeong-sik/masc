@@ -85,10 +85,10 @@ let redacted_runtime_observation_to_json
     ]
 ;;
 
-let tool_surface_json ~(tool_call_count : int) ~(tools_used : string list)
-    (result : Keeper_agent_run.run_result option) =
-  ignore result;
+let tool_surface_json (result : Keeper_agent_run.run_result option) =
   `Assoc
-    [ ("tool_call_count", `Int tool_call_count)
-    ; ("tools_used", `List (List.map (fun value -> `String value) tools_used))
+    [ ( "turn_lane",
+        match result with
+        | Some r -> Keeper_agent_tool_surface.turn_lane_to_yojson r.tool_surface.turn_lane
+        | None -> `Null )
     ]

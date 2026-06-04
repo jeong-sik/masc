@@ -65,14 +65,6 @@ val risk_level_to_int : risk_level -> int
 val risk_level_of_string : string -> risk_level option
 val approval_decision_to_string : decision -> string
 
-val record_queue_failure
-  :  keeper_name:string
-  -> site:string
-  -> ?id:string
-  -> ?event_type:string
-  -> exn
-  -> unit
-
 val approval_audit_decision_to_string : approval_audit_decision -> string
 val string_opt_of_json : Yojson.Safe.t -> string option
 val string_opt_member : string -> Yojson.Safe.t -> string option

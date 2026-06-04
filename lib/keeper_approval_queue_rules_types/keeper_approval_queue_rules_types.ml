@@ -93,20 +93,6 @@ let approval_decision_to_string = function
   | Agent_sdk.Hooks.Edit _ -> "edit"
 ;;
 
-let record_queue_failure ~keeper_name ~site ?(id = "-") ?(event_type = "-") exn =
-  Prometheus.inc_counter
-    Keeper_metrics.(to_string ApprovalQueueFailures)
-    ~labels:[ "keeper", keeper_name; "site", site ]
-    ();
-  Log.Keeper.warn
-    "approval_queue: %s failed keeper=%s id=%s event=%s err=%s"
-    site
-    keeper_name
-    id
-    event_type
-    (Printexc.to_string exn)
-;;
-
 let approval_audit_decision_to_string = function
   | Approval_resolved decision -> approval_decision_to_string decision
   | Approval_expired reason -> "reject:" ^ reason

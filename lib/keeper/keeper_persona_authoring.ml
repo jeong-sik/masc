@@ -327,7 +327,10 @@ let schema_json ?(include_examples = false) () =
 
 let handle_persona_schema_no_ctx args =
   let include_examples = get_bool args "include_examples" false in
-  Keeper_types_profile.tool_result_ok (Yojson.Safe.to_string (schema_json ~include_examples ()))
+  Tool_result.ok
+    ~tool_name:""
+    ~start_time:(Time_compat.now ())
+    (Yojson.Safe.to_string (schema_json ~include_examples ()))
 ;;
 
 let handle_persona_schema _ctx args = handle_persona_schema_no_ctx args
@@ -584,14 +587,22 @@ let handle_persona_save_no_ctx args =
   let dry_run = get_bool args "dry_run" false in
   match assoc_get "profile" args with
   | None ->
-    Keeper_types_profile.tool_result_error
+    Tool_result.error
+      ~tool_name:""
+      ~start_time:(Time_compat.now ())
       (error_response_typed ~code:Validation_error "profile is required")
   | Some profile ->
     (match save_persona ~overwrite ~dry_run ~handle profile with
      | Error msg ->
-       Keeper_types_profile.tool_result_error (error_response_typed ~code:Validation_error msg)
+       Tool_result.error
+         ~tool_name:""
+         ~start_time:(Time_compat.now ())
+         (error_response_typed ~code:Validation_error msg)
      | Ok result ->
-       Keeper_types_profile.tool_result_ok (Yojson.Safe.to_string (save_result_to_json ~dry_run result)))
+       Tool_result.ok
+         ~tool_name:""
+         ~start_time:(Time_compat.now ())
+         (Yojson.Safe.to_string (save_result_to_json ~dry_run result)))
 ;;
 
 let handle_persona_save _ctx args = handle_persona_save_no_ctx args

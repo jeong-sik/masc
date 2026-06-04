@@ -87,10 +87,6 @@ These are the identity fields that should live in persona by default.
 | `short_goal` | Optional | Short-horizon goal | Defaults to `goal` in create paths. |
 | `mid_goal` | Optional | Mid-horizon goal | Defaults to `goal` in create paths. |
 | `long_goal` | Optional | Long-horizon goal | Defaults to `goal` in create paths. |
-| `will` | Optional | Keeper self-model: will | Identity field. |
-| `needs` | Optional | Keeper self-model: needs | Identity field. |
-| `desires` | Optional | Keeper self-model: desires | Identity field. |
-| `instructions` | Optional | Persona-specific instructions | Identity field. |
 | `mention_targets` | Optional | Default mention aliases | If omitted, create-from-persona falls back to `[persona_name]`. |
 | `tool_access` | Optional | Default tool allowlist | String array of callable tool names; omitted means `[]`. |
 | `tool_denylist` | Optional | Tools to remove from the allowlist | Optional policy refinement. |
@@ -104,7 +100,9 @@ These may still be parsed today, but they are **not** the preferred place to enc
 | Field | Status | Preferred owner |
 | --- | --- | --- |
 | `allowed_paths` | Ignored by design | nowhere in persona |
-| `runtime_id` | Compatibility-only | `keeper.toml` |
+| `will`, `needs`, `desires`, `instructions` | Ignored by design | existing keeper meta / `keeper.toml` overlay |
+| `runtime_id`, `model`, `runtime_ref` | Removed | `runtime.toml [[runtime.assignments]]` |
+| `persona_ref` | Removed | `keeper.persona_name` |
 | `telemetry_feedback_*` | Compatibility-only | `keeper.toml` or runtime policy |
 | `max_turns_per_call*` | Compatibility-only | `keeper.toml` |
 
@@ -137,7 +135,6 @@ persona_name = "analyst"
 | `name` | Optional | Override keeper handle | Usually redundant because filename is already the keeper name. |
 | `sandbox_profile` | Optional | Process/filesystem sandbox profile | `local` runs on the host with fs scoped to the keeper playground. `docker` runs in a hardened ephemeral container. Hard mode requires `docker`. |
 | `network_mode` | Optional | Sandbox network policy | `docker` defaults to `none`; `local` defaults to `inherit`. Hard mode requires `none`. |
-| `runtime_id` | Optional | Deployment-specific runtime override | Only when not using the default runtime. |
 | `tool_access` | Optional | Deployment-specific tool allowlist override | Only when intentionally overriding persona default. |
 | `active_goal_ids` | Optional | Goal-scoped claim filter | When set, `keeper_task_claim` prefers tasks linked to these goals and reports scope health in audit/status surfaces. |
 

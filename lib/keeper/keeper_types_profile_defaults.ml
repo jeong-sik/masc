@@ -46,13 +46,6 @@ type keeper_profile_defaults = {
      Applied via Unix.putenv right before each turn so OAS transport
      build_args picks them up.  Empty list = no overrides. *)
   oas_env : (string * string) list;
-  (* Referential separation fields for persona/runtime externalization.
-     When set, the keeper defers to the referenced persona/runtime file
-     instead of inline fields.  This enables the template-instance model
-     where persona (character) and runtime (execution environment) are
-     maintained independently of keeper (operational identity). *)
-  persona_ref : string option;
-  runtime_ref : string option;
   (* Keys present under [keeper] (or other tables) that are NOT in
      [canonical_keeper_toml_key_names].  Captured at load time so
      downstream surfaces (keeper_status_detail, dashboards) can show
@@ -98,8 +91,6 @@ let empty_keeper_profile_defaults =
     max_turns_per_call_scheduled_autonomous = None;
     unknown_toml_keys = [];
     oas_env = [];
-    persona_ref = None;
-    runtime_ref = None;
   }
 ;;
 

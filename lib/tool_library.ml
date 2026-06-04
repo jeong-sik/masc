@@ -453,7 +453,7 @@ let tool_definitions = [
     ("confidence", "number", true, "New confidence score (must be >= 0.5)");
   ]);
   ("masc_library_search", {|Search library documents by content or tags.|}, [
-    ("query", "string", true, "Search query");
+    ("query", "string", false, "Search query; empty or missing returns a workflow error");
   ]);
 ]
 
@@ -567,10 +567,9 @@ Pair with masc_library_read to fetch matching documents in full.";
       ("properties", `Assoc [
         ("query", `Assoc [
           ("type", `String "string");
-          ("description", `String "Search query");
+          ("description", `String "Search query; empty or missing returns a workflow error");
         ]);
       ]);
-      ("required", `List [`String "query"]);
     ];
   };
 

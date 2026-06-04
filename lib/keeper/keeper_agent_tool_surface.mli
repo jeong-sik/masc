@@ -83,6 +83,7 @@ type tool_surface_class =
 val tool_surface_class_to_string : tool_surface_class -> string
 val tool_surface_class_of_string : string -> tool_surface_class option
 val tool_surface_class_to_yojson : tool_surface_class -> Yojson.Safe.t
+val tool_surface_class_for_tool_names : string list -> tool_surface_class
 
 (** Diagnostic surface metrics emitted into trajectory entries. *)
 type tool_surface_metrics =

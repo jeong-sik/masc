@@ -703,11 +703,8 @@ let prepare_agent_setup
     in
     let visible_tool_count = List.length turn_visible_tool_names in
     let tool_surface_class : Keeper_agent_tool_surface.tool_surface_class =
-      if visible_tool_count = 0
-      then Surface_none
-      else if List.for_all Tool_catalog.is_public_mcp turn_visible_tool_names
-      then Surface_public_only
-      else Surface_mixed
+      Keeper_agent_tool_surface.tool_surface_class_for_tool_names
+        turn_visible_tool_names
     in
     let tool_requirement =
       if visible_tool_count = 0 then No_tools else Optional

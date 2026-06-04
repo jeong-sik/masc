@@ -23,6 +23,7 @@ module Policy = Masc.Keeper_tool_policy
 module Exec = Masc.Keeper_tool_dispatch_runtime
 module Registry = Masc.Keeper_tool_registry
 module Resolution = Masc.Keeper_tool_descriptor_resolution
+module Surface = Masc.Keeper_agent_tool_surface
 module Tool_board_registry = Masc.Tool_board_registry
 
 let all_descriptors () : Descriptor.t list = Descriptor.all_descriptors ()
@@ -65,6 +66,29 @@ let descriptor_internal_name_set () =
     (fun d -> Hashtbl.replace tbl d.Descriptor.internal_name ())
     (all_descriptors ());
   tbl
+;;
+
+let contains_substring haystack needle =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  if needle_len = 0
+  then true
+  else
+    let rec loop i =
+      i + needle_len <= haystack_len
+      &&
+      (String.equal (String.sub haystack i needle_len) needle || loop (i + 1))
+    in
+    loop 0
+;;
+
+let source_path rel =
+  let source_root =
+    match Sys.getenv_opt "DUNE_SOURCEROOT" with
+    | Some root -> root
+    | None -> Sys.getcwd ()
+  in
+  Filename.concat source_root rel
 ;;
 
 let find_duplicates ~key (xs : Descriptor.t list) : (string * int) list =
@@ -405,6 +429,44 @@ let test_public_name_projection_uses_descriptor_resolution () =
        [ "tool_execute"; "tool_search_files" ])
 ;;
 
+let test_surface_class_uses_keeper_projection () =
+  Alcotest.(check string)
+    "empty surface"
+    "none"
+    (Surface.tool_surface_class_to_string
+       (Surface.tool_surface_class_for_tool_names []));
+  Alcotest.(check string)
+    "descriptor-backed public MCP surface"
+    "public_only"
+    (Surface.tool_surface_class_to_string
+       (Surface.tool_surface_class_for_tool_names
+          [ "masc_tasks"; "mcp__masc__masc_transition" ]));
+  Alcotest.(check string)
+    "LLM-native keeper aliases are not public MCP"
+    "mixed"
+    (Surface.tool_surface_class_to_string
+       (Surface.tool_surface_class_for_tool_names [ "Execute" ]));
+  Alcotest.(check string)
+    "keeper private surface stays mixed"
+    "mixed"
+    (Surface.tool_surface_class_to_string
+       (Surface.tool_surface_class_for_tool_names
+          [ "keeper_board_post"; "masc_tasks" ]))
+;;
+
+let test_run_tools_setup_has_no_direct_public_mcp_catalog_read () =
+  let ic = open_in (source_path "lib/keeper/keeper_run_tools_setup.ml") in
+  let source =
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr ic)
+      (fun () -> really_input_string ic (in_channel_length ic))
+  in
+  Alcotest.(check bool)
+    "keeper_run_tools_setup does not classify with Tool_catalog.is_public_mcp"
+    false
+    (contains_substring source "Tool_catalog.is_public_mcp")
+;;
+
 let test_mutation_boundary_delegates_to_descriptor_policy () =
   let search_input = `Assoc [ "pattern", `String "Keeper_tool_descriptor" ] in
   Alcotest.(check bool)
@@ -602,6 +664,14 @@ let () =
             "public names project through descriptor resolution"
             `Quick
             test_public_name_projection_uses_descriptor_resolution
+        ; test_case
+            "tool surface class uses keeper projection"
+            `Quick
+            test_surface_class_uses_keeper_projection
+        ; test_case
+            "keeper_run_tools_setup avoids public MCP catalog classifier"
+            `Quick
+            test_run_tools_setup_has_no_direct_public_mcp_catalog_read
         ; test_case
             "mutation boundary delegates to descriptor policy"
             `Quick

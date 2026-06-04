@@ -659,6 +659,8 @@ let cluster_projection_table =
   ; "masc_persona_save", "tool_masc_persona_dispatch"
   ; "masc_keeper_list", "tool_masc_keeper_dispatch"
   ; "masc_keeper_msg_result", "tool_masc_keeper_dispatch"
+  ; "masc_keeper_msg_cancel", "tool_masc_keeper_dispatch"
+  ; "masc_keeper_msg_queue", "tool_masc_keeper_dispatch"
   ; "masc_keeper_compact", "tool_masc_keeper_dispatch"
   ; "masc_keeper_clear", "tool_masc_keeper_dispatch"
   ; "masc_keeper_sandbox_start", "tool_masc_keeper_dispatch"

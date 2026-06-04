@@ -358,7 +358,7 @@ let extra_guard_fragments_for_name = function
   | "masc_get_metrics" -> [ "no metrics found" ]
   | "masc_library_promote" -> [ "no candidate matching" ]
   | "masc_keeper_list" | "masc_keeper_msg" | "masc_keeper_msg_result"
-  | "masc_keeper_status" ->
+  | "masc_keeper_msg_cancel" | "masc_keeper_msg_queue" | "masc_keeper_status" ->
       [ "keeper management tool"; "use MCP client" ]
   | "tool_execute" -> [ "worktree not found" ]
   | _ -> []

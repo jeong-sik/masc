@@ -102,16 +102,16 @@ let test_worker_runtime_config_prefers_env_override () =
   with_env "MASC_CONFIG_DIR" (Some config_dir) @@ fun () ->
   with_env "MASC_WORKER_RUNTIME_BACKEND" None @@ fun () ->
   Config_dir_resolver.reset ();
-  Lib.Worker_runtime_config.reset ();
+  Worker_runtime_config.reset ();
   check string "file config enables docker backend" "docker"
     (Worker_execution_backend.to_string
-       (Lib.Worker_runtime_config.backend ()));
+       (Worker_runtime_config.backend ()));
   with_env "MASC_WORKER_RUNTIME_BACKEND" (Some "local_playground") @@ fun () ->
   Config_dir_resolver.reset ();
-  Lib.Worker_runtime_config.reset ();
+  Worker_runtime_config.reset ();
   check string "env override forces local backend" "local_playground"
     (Worker_execution_backend.to_string
-       (Lib.Worker_runtime_config.backend ()))
+       (Worker_runtime_config.backend ()))
 
 let test_worker_runtime_helper_protocol_roundtrip () =
   let run_result : Lib.Worker_container_types.run_result =
@@ -154,12 +154,12 @@ let test_worker_runtime_invalid_config_fails_closed () =
   with_env "MASC_CONFIG_DIR" (Some config_dir) @@ fun () ->
   with_env "MASC_WORKER_RUNTIME_BACKEND" None @@ fun () ->
   Config_dir_resolver.reset ();
-  Lib.Worker_runtime_config.reset ();
+  Worker_runtime_config.reset ();
   check string "malformed config resolves to fail-closed docker backend" "docker"
     (Worker_execution_backend.to_string
-       (Lib.Worker_runtime_config.backend ()));
+       (Worker_runtime_config.backend ()));
   check string "malformed config clears docker image" ""
-    (Lib.Worker_runtime_config.docker_image ())
+    (Worker_runtime_config.docker_image ())
 
 let test_run_worker_oas_rejects_invalid_explicit_model_label () =
   with_temp_dir "worker-runtime-local" @@ fun root ->

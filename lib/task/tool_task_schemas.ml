@@ -219,13 +219,10 @@ Tip: Look for status='todo' tasks to claim.";
     name = "masc_transition";
     description = Printf.sprintf
       "Move a task through its lifecycle: claim, start, done, cancel, release, \
-submit_for_verification, approve, reject, or submit_pr_evidence. \
+submit_for_verification, approve, or reject. \
 Call when you pick up, finish, or abandon a task. Supports CAS via expected_version. \
 After %s or %s; pair with masc_deliver before action='done'. \
-Use submit_for_verification to request cross-agent review; approve/reject for verifier actions. \
-Use submit_pr_evidence to submit a merged PR as evidence for a todo task you did not claim; \
-this transitions the task directly to awaiting_verification so a verifier can inspect and close it. For compatibility, \
-submit_for_verification with evidence on a todo task is treated as submit_pr_evidence. \
+Use submit_for_verification only for explicit review of a claimed/in_progress task you own; approve/reject for verifier actions. \
 Tasks created through %s complete via action='done' after LLM completion review; \
 they do not route normal completion through the verifier agent."
       masc_add_task_name
@@ -244,7 +241,7 @@ they do not route normal completion through the verifier agent."
         ]);
         ("action", `Assoc [
           ("type", `String "string");
-          ("description", `String "Transition action: claim | start | done | cancel | release | submit_for_verification | approve | reject | submit_pr_evidence");
+          ("description", `String "Transition action: claim | start | done | cancel | release | submit_for_verification | approve | reject");
         ]);
         ("expected_version", `Assoc [
           ("type", `String "integer");

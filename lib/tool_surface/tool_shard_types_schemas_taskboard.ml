@@ -189,45 +189,6 @@ let taskboard_tools : Masc_domain.tool_schema list =
           ; "required", `List [ `String "task_id"; `String "result" ]
           ]
     }
-  ; { name = "keeper_task_submit_for_verification"
-    ; description =
-        "Submit your claimed task to verification instead of marking it done directly. \
-         Use this when review evidence must be attached before \
-         final approval."
-    ; input_schema =
-        `Assoc
-          [ "type", `String "object"
-          ; ( "properties"
-            , `Assoc
-                [ ( "task_id"
-                  , `Assoc
-                      [ "type", `String "string"
-                      ; "description", `String "Task ID returned by keeper_task_claim"
-                      ; "minLength", `Int 1
-                      ] )
-                ; ( "notes"
-                  , `Assoc
-                      [ "type", `String "string"
-                      ; ( "description"
-                        , `String
-                            "Verification handoff notes: tests run, scope, remaining \
-                             review expectations" )
-                      ; "minLength", `Int 1
-                      ] )
-                ; ( "evidence_refs"
-                  , `Assoc
-                      [ "type", `String "array"
-                      ; "items", `Assoc [ "type", `String "string" ]
-                      ; ( "description"
-                        , `String
-                            "Structured verification evidence refs: PR URL, commit, \
-                             artifact, receipt, test log, task comment, or other \
-                             concrete reviewable reference" )
-                      ] )
-                ] )
-          ; "required", `List [ `String "task_id"; `String "notes" ]
-          ]
-    }
   ; { name = "keeper_task_create"
     ; description =
         "Create a new task on the MASC backlog. The task appears for any keeper to \

@@ -406,7 +406,7 @@ queryable via `Cdal_verdict_gate.lookup_latest_verdict ~task_id`:
 (* lib/tool_task.ml — replace the inline call site *)
 let submit_evidence_error =
   match requested_action with
-  | Submit_for_verification | Submit_pr_evidence
+  | Submit_for_verification
   | Done_action when done_redirects_to_verification ->
     (match Cdal_verdict_gate.lookup_latest_verdict ~task_id with
      | Some { status = Satisfied; _ } -> None

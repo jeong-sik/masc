@@ -170,7 +170,6 @@ let verifier_transition_action_denylist =
       "cancel";
       "release";
       "submit_for_verification";
-      "submit_pr_evidence";
     ]
 
 let register_test_keeper ?(tool_denylist = []) ctx ~keeper_name ~agent_name =
@@ -1453,14 +1452,65 @@ let task_submit_evidence_notes =
   "completion_notes: implementation completed with verification context. \
    reviewable_evidence_ref: review evidence is attached."
 
-let task_submit_evidence_ref = "artifact:verifier-evidence.json"
+let () = test "transition_submit_for_verification_todo_rejects_instead_of_alias" (fun () ->
+  with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
+    let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
+    add_priority_task ctx ~title:"No action alias";
+    let result =
+      Task.Tool.handle_transition
+        ~tool_name:"test_tool" ~start_time:0.0
+        ctx
+        (`Assoc
+          [
+            ("task_id", `String "task-001");
+            ("action", `String "submit_for_verification");
+            ("notes", `String task_submit_evidence_notes);
+          ])
+    in
+    assert (not (Tool_result.is_success result));
+    assert (str_contains (Tool_result.message result) "Transition 'submit_for_verification'");
+    assert (str_contains (Tool_result.message result) "from status 'todo' is not allowed");
+    assert_task_todo ctx)
+)
 
-let submit_evidence_handoff_context ?(summary = "review evidence attached") refs =
-  `Assoc
-    [
-      ("summary", `String summary);
-      ("evidence_refs", `List (List.map (fun evidence_ref -> `String evidence_ref) refs));
-    ]
+let () = test "transition_submit_pr_evidence_is_retired" (fun () ->
+  with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
+    let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
+    add_priority_task ctx ~title:"CLI approval follow-up";
+    let result =
+      Task.Tool.handle_transition
+        ~tool_name:"test_tool" ~start_time:0.0
+        ctx
+        (`Assoc
+          [
+            ("task_id", `String "task-001");
+            ("action", `String "submit_pr_evidence");
+            ("notes", `String task_submit_evidence_notes);
+          ])
+    in
+    assert (not (Tool_result.is_success result));
+    assert (str_contains (Tool_result.message result) "Unknown task action: submit_pr_evidence");
+    assert_task_todo ctx)
+)
+
+let () = test "transition_pr_url_top_level_is_retired" (fun () ->
+  let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
+  add_priority_task ctx ~title:"No transport pr_url alias";
+  let result =
+    Task.Tool.handle_transition
+      ~tool_name:"test_tool" ~start_time:0.0
+      ctx
+      (`Assoc
+        [
+          ("task_id", `String "task-001");
+          ("action", `String "claim");
+          ("pr_url", `String "https://github.com/jeong-sik/masc/pull/13169");
+        ])
+  in
+  assert (not (Tool_result.is_success result));
+  assert (str_contains (Tool_result.message result) "Unknown argument(s): pr_url");
+  assert_task_todo ctx
+)
 
 (* RFC-0109 Phase E (#18822): the transition-layer substring gate that
    produced the "requires verification evidence" message no longer
@@ -1470,58 +1520,6 @@ let submit_evidence_handoff_context ?(summary = "review evidence attached") refs
    rejection when no CDAL verdict and no substantive evidence — is
    covered by [test/test_cdal_evidence_gate.ml]'s missing-verdict
    arm. See issue #18830 Cluster A.1. *)
-
-let () = test "transition_submit_pr_evidence_uses_typed_evidence_refs" (fun () ->
-  with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
-    let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
-    add_priority_task ctx ~title:"typed evidence merge";
-    let existing_ref = "logs/run-42.json" in
-    let submit_result =
-      Task.Tool.handle_transition
-        ~tool_name:"test_tool" ~start_time:0.0
-        ctx
-        (`Assoc
-          [
-            ("task_id", `String "task-001");
-            ("action", `String "submit_pr_evidence");
-            ("notes", `String task_submit_evidence_notes);
-            ( "handoff_context"
-            , submit_evidence_handoff_context ~summary:"tests pass"
-                [ existing_ref; task_submit_evidence_ref ] );
-          ])
-    in
-    if not (Tool_result.is_success submit_result) then
-      failwith (Tool_result.message submit_result);
-    let task = only_task ctx in
-    match task.handoff_context with
-    | Some hc ->
-      assert (List.mem existing_ref hc.evidence_refs);
-      assert (List.mem task_submit_evidence_ref hc.evidence_refs);
-      assert (String.equal hc.summary "tests pass")
-    | None -> failwith "expected handoff_context to be persisted")
-)
-
-let () = test "transition_submit_pr_evidence_accepts_todo_evidence" (fun () ->
-  with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
-    let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
-    add_priority_task ctx ~title:"CLI approval follow-up";
-    let submit_result =
-      Task.Tool.handle_transition
-        ~tool_name:"test_tool" ~start_time:0.0
-        ctx
-        (`Assoc
-          [
-            ("task_id", `String "task-001");
-            ("action", `String "submit_pr_evidence");
-            ("notes", `String task_submit_evidence_notes);
-            ( "handoff_context"
-            , submit_evidence_handoff_context [ task_submit_evidence_ref ] );
-          ])
-    in
-    if not (Tool_result.is_success submit_result) then failwith (Tool_result.message submit_result);
-    assert_task_awaiting_verification_by ctx "agent_code-mcp-client";
-    assert (Planning_eio.get_current_task ctx.config = None))
-)
 
 let () = test "transition_claim_clears_legacy_cycle_do_not_reclaim_reason" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
@@ -1672,34 +1670,6 @@ let () = test "dispatch_transition_claim_uses_server_surface_not_payload_surface
       assert (Tool_result.is_success result);
       assert_task_claimed_by ctx ctx.agent_name
   | None -> failwith "dispatch returned None"
-)
-
-(* Regression for issue: tasks stay todo after merged PR evidence.
-   submit_pr_evidence must transition Todo -> AwaitingVerification without
-   claiming. *)
-let () = test "submit_pr_evidence_accepts_todo_task_without_claiming" (fun () ->
-  with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
-    let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
-    add_priority_task ctx ~title:"Needs bash";
-    let result =
-      Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
-	        (`Assoc
-	          [
-	            ("task_id", `String "task-001");
-	            ("action", `String "submit_pr_evidence");
-	            ("notes", `String task_submit_evidence_notes);
-	            ( "handoff_context"
-	            , submit_evidence_handoff_context [ task_submit_evidence_ref ] );
-	          ])
-    in
-    if not (Tool_result.is_success result) then
-      failwith (Printf.sprintf "expected submit_pr_evidence to succeed, got: %s" (Tool_result.message result));
-    match (only_task ctx).Masc_domain.task_status with
-    | Masc_domain.AwaitingVerification _ -> ()
-    | other ->
-        failwith
-          (Printf.sprintf "expected AwaitingVerification after submit_pr_evidence, got: %s"
-             (Masc_domain.task_status_to_string other)))
 )
 
 let () = test "transition_release_clears_planning_current_task" (fun () ->

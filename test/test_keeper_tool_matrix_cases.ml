@@ -197,13 +197,13 @@ let prepare_keeper_name fixture name =
     List.mem name
       [ "keeper_task_claim"; "keeper_tasks_list"; "keeper_tasks_audit";
         "keeper_task_force_release"; "keeper_task_force_done";
-        "keeper_task_done"; "keeper_task_submit_for_verification" ]
+        "keeper_task_done" ]
   then
     ignore (Generic.ensure_task fixture.generic);
   if
     List.mem name
       [ "keeper_task_force_release"; "keeper_task_force_done";
-        "keeper_task_done"; "keeper_task_submit_for_verification" ]
+        "keeper_task_done" ]
   then
     ensure_keeper_claim fixture;
   if name = "keeper_voice_session_end" then ensure_voice_session fixture;
@@ -344,13 +344,6 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
           ("title", `String "tool matrix constraint");
           ("content", `String "tool matrix constraint details");
         ]
-  | "keeper_task_submit_for_verification" ->
-      `Assoc
-        [
-          ("task_id", `String (Generic.ensure_task fixture.generic));
-          ("notes", `String "tool matrix verification notes");
-          ("evidence_refs", `List [ `String "ref1" ]);
-        ]
   | other -> failwith ("missing keeper arguments contract for " ^ other)
 
 let keeper_expectation_for_name name =
@@ -365,17 +358,6 @@ let keeper_expectation_for_name name =
           "Completion rejected by anti-rationalization gate";
           "review format unrecognized";
           "Revise your completion notes";
-        ]
-  | "keeper_task_submit_for_verification" ->
-      Expect_success_or_guard
-        [
-          "Completion rejected";
-          "review format unrecognized";
-          "validation error";
-          "not claimed";
-          "default runtime not initialized";
-          "evidence is insufficient";
-          "Task-completion evidence";
         ]
   | "tool_read_file" ->
       (* Playground resolves paths under .masc/playground/<agent>/ but

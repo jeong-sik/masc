@@ -180,13 +180,6 @@ let test_keeper_task_done_matches () =
        ~input:(`Assoc [])
        ~risk_level:RL.Medium)
 
-let test_keeper_task_submit_for_verification_matches () =
-  Alcotest.(check bool) "keeper_task_submit_for_verification matches"
-    true
-    (RA.matches ~tool_name:"keeper_task_submit_for_verification"
-       ~input:(`Assoc [])
-       ~risk_level:RL.Low)
-
 let force_release_input ?(reason = "assignee offline >10 min") task_id =
   `Assoc [ ("task_id", `String task_id); ("reason", `String reason) ]
 
@@ -485,8 +478,6 @@ let () =
             test_keeper_task_create_high_does_not_match;
           Alcotest.test_case "keeper_task_done" `Quick
             test_keeper_task_done_matches;
-          Alcotest.test_case "keeper_task_submit_for_verification" `Quick
-            test_keeper_task_submit_for_verification_matches;
         ] );
       ( "orphan_force_release",
         [

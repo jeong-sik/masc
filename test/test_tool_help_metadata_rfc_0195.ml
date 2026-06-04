@@ -57,16 +57,11 @@ let lookup name =
 let curated_with_examples =
   [
     "keeper_task_done";
-    "keeper_task_submit_for_verification";
     "keeper_memory_write";
     "keeper_tasks_list";
   ]
 
-let curated_with_alternatives =
-  [
-    "keeper_task_done", [ "keeper_task_submit_for_verification" ];
-    "keeper_task_submit_for_verification", [ "keeper_task_done" ];
-  ]
+let curated_with_alternatives = []
 
 let curated_terminal =
   [ "keeper_memory_write"; "keeper_tasks_list" ]
@@ -139,7 +134,7 @@ let test_entry_json_omits_empty_fields () =
   | _ -> Alcotest.fail "entry_json must return an Assoc"
 
 let test_entry_json_includes_populated_fields () =
-  let entry = lookup "keeper_task_submit_for_verification" in
+  let entry = lookup "keeper_task_done" in
   let json = Registry.entry_json entry in
   match json with
   | `Assoc kvs ->
@@ -147,7 +142,7 @@ let test_entry_json_includes_populated_fields () =
     Alcotest.(check bool)
       "populated examples list emitted in JSON" true (has_key "examples");
     Alcotest.(check bool)
-      "populated alternatives list emitted in JSON" true (has_key "alternatives")
+      "empty alternatives list omitted from JSON" false (has_key "alternatives")
   | _ -> Alcotest.fail "entry_json must return an Assoc"
 
 let () =

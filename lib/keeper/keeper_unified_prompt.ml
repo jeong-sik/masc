@@ -208,8 +208,6 @@ let sanitize_retired_tool_names text =
   |> remove_tool_tokens_with_prefix ~prefix:(retired_prefix "Masc" "code")
   |> remove_tool_tokens_with_prefix ~prefix:(retired_prefix "keeper" "pr")
   |> remove_tool_tokens_with_prefix ~prefix:(retired_prefix "keeper" "preflight_check")
-  |> remove_tool_tokens_with_prefix
-       ~prefix:(retired_prefix "keeper" "task_submit_for_verification")
   |> remove_tool_tokens_with_prefix ~prefix:(retired_prefix "keeper" "github")
   |> remove_tool_tokens_with_prefix ~prefix:(retired_prefix "github" "cli")
   |> replace_all ~needle:"``" ~replacement:""

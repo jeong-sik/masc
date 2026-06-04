@@ -502,7 +502,6 @@ let test_mcp_context_policy_uses_descriptor_resolution () =
     ; "keeper_broadcast"
     ; "keeper_context_status"
     ; "keeper_task_done"
-    ; "keeper_task_submit_for_verification"
     ; "keeper_tasks_list"
     ; "keeper_time_now"
     ; "keeper_tool_search"

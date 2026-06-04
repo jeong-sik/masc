@@ -477,7 +477,7 @@ let dashboard_verification_resolve_http_json
      | Masc_domain.Cancel
      | Masc_domain.Release
      | Masc_domain.Submit_for_verification
-     | Masc_domain.Submit_pr_evidence -> ());
+     -> ());
     Ok
       (`Assoc
           [ "ok", `Bool true

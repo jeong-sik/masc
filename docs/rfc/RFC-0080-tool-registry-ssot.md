@@ -205,7 +205,7 @@ keeper_fs_{edit,read}
 keeper_library_{read,search}
 keeper_memory_search
 tool_search_files
-keeper_task_{claim,create,done,force_release,submit_for_verification}
+keeper_task_{claim,create,done,force_release}
 keeper_tasks_{audit,list}
 keeper_time_now
 keeper_tool_search

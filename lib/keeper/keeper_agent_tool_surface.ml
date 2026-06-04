@@ -203,8 +203,7 @@ let tools_for_affordance = function
       "keeper_tasks_list"; "masc_tasks" ]
   | Task_verify ->
     [ "keeper_tasks_list"; "keeper_tasks_audit";
-      "keeper_task_done"; "keeper_task_submit_for_verification";
-      "masc_transition" ]
+      "keeper_task_done"; "masc_transition" ]
 
 let satisfying_tools_for_turn ~(turn_affordances : string list) ~(allowed_tool_names : string list)
   : string list
@@ -241,8 +240,7 @@ let preferred_tool_names_for_turn_affordances turn_affordances =
          [ "keeper_tasks_audit"; "keeper_task_force_release";
            "keeper_task_force_done" ]
        | Task_verify ->
-         [ "keeper_task_submit_for_verification"; "keeper_task_done";
-           "masc_transition" ]
+         [ "keeper_task_done"; "masc_transition" ]
        )
   |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
 
@@ -338,7 +336,6 @@ let tool_search_alias_entries =
   ; "keeper_task_claim", "태스크 가져오기 할당"
   ; "keeper_task_create", "태스크 생성 만들기 일감"
   ; "keeper_task_done", "태스크 완료 마감"
-  ; "keeper_task_submit_for_verification", "태스크 검증제출 리뷰요청 PR검토"
   ; "keeper_task_force_release", "태스크 강제해제 반환"
   ; "keeper_task_force_done", "태스크 강제완료"
   ; "keeper_voice_speak", "음성 말하기 보이스"

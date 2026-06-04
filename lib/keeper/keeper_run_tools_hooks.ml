@@ -396,13 +396,9 @@ let assemble_hooks
                      when the work needs a decision you cannot make alone"
                 in
                 let last_turn_task_close_hint =
-                  if
-                    tool_allowed "keeper_task_done"
-                    || tool_allowed "keeper_task_submit_for_verification"
-                  then
+                  if tool_allowed "keeper_task_done" then
                     "; (3) if you claimed a task, close it NOW before session \
-                     ends with keeper_task_done or \
-                     keeper_task_submit_for_verification"
+                     ends with keeper_task_done"
                   else ""
                 in
                 let budget_blocker_hint =

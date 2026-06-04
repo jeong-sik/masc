@@ -55,8 +55,7 @@ let classify_completion_path
   | Masc_domain.Approve_verification -> "via_verification"
   | Masc_domain.Claim | Masc_domain.Start | Masc_domain.Done_action
   | Masc_domain.Cancel | Masc_domain.Release
-  | Masc_domain.Submit_for_verification | Masc_domain.Reject_verification
-  | Masc_domain.Submit_pr_evidence ->
+  | Masc_domain.Submit_for_verification | Masc_domain.Reject_verification ->
     if force then "forced_done"
     else (match drift with
           | Some Workspace_task_lifecycle.Claimed_to_done_skip -> "claimed_to_done_skip"
@@ -337,8 +336,7 @@ let task_assignee_of_status = Masc_domain.task_assignee_of_status
 let valid_next_actions_for_status
   : Masc_domain.task_status -> Masc_domain.task_action list
   = function
-  | Masc_domain.Todo ->
-    [ Masc_domain.Claim; Masc_domain.Cancel; Masc_domain.Submit_pr_evidence ]
+  | Masc_domain.Todo -> [ Masc_domain.Claim; Masc_domain.Cancel ]
   | Masc_domain.Claimed _ ->
     [ Masc_domain.Start
     ; Masc_domain.Done_action

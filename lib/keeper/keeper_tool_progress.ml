@@ -73,7 +73,6 @@ let completion_tool_names : string list =
          ; Task_done
          ; Task_force_done
          ; Task_force_release
-         ; Task_submit_for_verification
          ]
 ;;
 

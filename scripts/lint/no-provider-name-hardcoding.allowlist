@@ -3,6 +3,6 @@
 # catalog/runtime-binding replacement task.
 #
 # Format: path:line:literal
-lib/runtime/provider_runtime_projection.ml:106:auto
-lib/runtime/provider_runtime_projection.ml:204:auto
-lib/runtime/provider_runtime_projection.ml:248:openrouter
+lib/runtime_model/provider_runtime_projection.ml:106:auto
+lib/runtime_model/provider_runtime_projection.ml:204:auto
+lib/runtime_model/provider_runtime_projection.ml:248:openrouter

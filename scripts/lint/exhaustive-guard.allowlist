@@ -675,7 +675,7 @@ lib/process/exec_tap.ml:171
 lib/process/process_eio.ml:113
 lib/process/process_eio.ml:809
 lib/prompt_registry/prompt_registry.ml:276
-lib/runtime/provider_kind_resolver.ml:38
+lib/runtime_model/provider_kind_resolver.ml:38
 lib/repo_manager/keeper_repo_mapping.ml:428
 lib/reputation_autonomy.ml:23
 lib/reputation_ledger_v2.ml:176

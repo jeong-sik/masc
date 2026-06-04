@@ -67,6 +67,12 @@ DEFAULT_LEAVES: tuple[str, ...] = (
     "masc.runtime_provider_labels",
     "masc.runtime_model",
     "masc.model_inference_metrics",
+    # Shared helper leaves carved out of lib/ subdirectories that were still
+    # owned by the unqualified mega-library include.
+    "masc.lockfree_atomic",
+    "masc.json_field",
+    "masc.pool_metrics",
+    "masc.otel_spans",
     # Keeper-owned pure/type leaves extracted from lib/keeper/.
     "masc.keeper_accountability_claim_types",
     "masc.keeper_runtime_manifest_types",

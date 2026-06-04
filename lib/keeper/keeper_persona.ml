@@ -7,7 +7,6 @@ open Keeper_types_profile
 open Keeper_tool_persona_runtime
 
 module Turn = Keeper_turn
-module Authoring = Keeper_persona_authoring
 type tool_result = Keeper_types_profile.tool_result
 
 let persona_list_handler args : tool_result =
@@ -30,14 +29,6 @@ let persona_list_handler args : tool_result =
 
 (* TEL-OK: thin wrapper — telemetry stays in [persona_list_handler]. *)
 let handle_persona_list _ctx args : tool_result = persona_list_handler args
-
-let handle_persona_schema = Authoring.handle_persona_schema
-let persona_schema_handler args : tool_result =
-  Authoring.handle_persona_schema_no_ctx args
-
-let handle_persona_save = Authoring.handle_persona_save
-let persona_save_handler args : tool_result =
-  Authoring.handle_persona_save_no_ctx args
 
 let handle_keeper_create_from_persona ctx args : tool_result =
   match resolved_keeper_args_from_persona args with

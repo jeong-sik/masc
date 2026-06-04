@@ -256,7 +256,6 @@
   test_warn_root_causes
   test_institution_of_string_fail_closed
   test_mid_turn_resume
-  test_lockfree_atomic
   test_telemetry_observe
   test_keeper_typed_labels
   test_shell_ir_typed_review_followup
@@ -511,7 +510,6 @@
   test_warn_root_causes
   test_institution_of_string_fail_closed
   test_mid_turn_resume
-  test_lockfree_atomic
   test_telemetry_observe
   test_keeper_typed_labels
   test_shell_ir_typed_review_followup
@@ -965,7 +963,14 @@
 (test
  (name test_json_field)
  (modules test_json_field)
- (libraries masc_test_deps))
+ (libraries alcotest masc.json_field yojson))
+
+; Lock-free atomic CAS helper leaf.
+
+(test
+ (name test_lockfree_atomic)
+ (modules test_lockfree_atomic)
+ (libraries alcotest masc.lockfree_atomic))
 
 ; Typed TOML field resolution helper (RFC-0141 Phase 1).
 
@@ -1663,7 +1668,7 @@
 (test
  (name test_pool_metrics)
  (modules test_pool_metrics)
- (libraries masc_test_deps))
+ (libraries alcotest masc.pool_metrics masc.prometheus))
 
 ; RFC-0084 PR-3 — Tool_telemetry.with_span + Tool_dispatch.guarded_dispatch
 ; skeleton tests. Verifies 4-tuple emission wrapper invariants (callback

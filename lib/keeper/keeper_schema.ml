@@ -45,48 +45,6 @@ let keeper_schemas : tool_schema list = [
     ];
   };
   {
-    name = "masc_persona_schema";
-    description = "Explain persona profile.json fields, allowed values, and how each field affects persona-backed keeper creation.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("include_examples", `Assoc [
-          ("type", `String "boolean");
-          ("default", `Bool false);
-          ("description", `String "If true, include a minimal profile.json example.");
-        ]);
-      ]);
-    ];
-  };
-  {
-    name = "masc_persona_save";
-    description = "Validate and atomically write a generated persona profile.json under the resolved personas root.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("handle", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Persona handle and directory name. Must match [A-Za-z0-9._-]+.");
-        ]);
-        ("profile", `Assoc [
-          ("type", `String "object");
-          ("description", `String "Persona profile.json object to validate and save.");
-        ]);
-        ("overwrite", `Assoc [
-          ("type", `String "boolean");
-          ("default", `Bool false);
-          ("description", `String "If false, reject when the persona already exists.");
-        ]);
-        ("dry_run", `Assoc [
-          ("type", `String "boolean");
-          ("default", `Bool false);
-          ("description", `String "If true, validate and return the target path without writing.");
-        ]);
-      ]);
-      ("required", `List [`String "handle"; `String "profile"]);
-    ];
-  };
-  {
     name = "masc_keeper_create_from_persona";
     description = "Create or dry-run a keeper configuration from a persona profile.json. Keepers are durable and auto-start on server boot.";
     input_schema = `Assoc [

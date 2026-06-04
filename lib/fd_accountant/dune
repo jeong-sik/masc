@@ -10,6 +10,7 @@
   unix
   yojson
   optint
+  masc.lockfree_atomic
   masc.masc_core
   masc.masc_types
   masc.fs_compat

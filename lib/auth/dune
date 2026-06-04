@@ -19,6 +19,8 @@
   digestif
   masc.fs_compat
   masc.masc_log
+  masc.masc_tool_dispatch
+  masc.tool_types
   time_compat
   masc.prometheus)
  (preprocess

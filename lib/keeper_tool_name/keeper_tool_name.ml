@@ -165,8 +165,6 @@ let public_mcp_non_descriptor_names =
   ; "masc_keeper_sandbox_status"
   ; "masc_keeper_create_from_persona"
   ; "masc_persona_list"
-  ; "masc_persona_schema"
-  ; "masc_persona_save"
   ; "masc_runtime_verify"
   ; "masc_runtime_ollama_probe"
   ]

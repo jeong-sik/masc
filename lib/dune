@@ -245,6 +245,11 @@
    ;; leaf sub-library. The parent library still references those modules
    ;; unqualified, so it must depend on the leaf explicitly.
    masc.tool_types
+   ;; Shared leaf helpers extracted out of include_subdirs-unqualified ownership.
+   masc.lockfree_atomic
+   masc.json_field
+   masc.pool_metrics
+   masc.otel_spans
    ;; RFC-0056 Phase 1L — Attribution envelope extracted to lib/attribution/.
    ;; Pure Attribution + phantom-tagged helpers, deps: stdlib + Yojson only.
    masc.attribution

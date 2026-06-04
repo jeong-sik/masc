@@ -90,6 +90,7 @@
   masc.keeper_event_queue
   masc.keeper_invariant
   masc.compaction_trigger
+  masc.json_field
   masc.bounded_event_dedupe
   masc.keeper_recording_error_state
   masc.keeper_livelock_state
@@ -158,7 +159,14 @@
   masc.resilience
   masc.multimodal
   masc.repo_manager
-  masc.parse_outcome)
+  masc.parse_outcome
+  masc.auth
+  masc.fd_accountant
+  masc.masc_event_bus
+  masc.otel_spans
+  masc.pool_metrics
+  masc.prometheus
+  masc.runtime)
  (preprocess
   (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq ppx_let ppx_tla))
  (instrumentation

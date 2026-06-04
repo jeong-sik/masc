@@ -216,7 +216,8 @@ writeback - see `docs/audit/2026-06-04-keeper-task-execution-visibility-audit.md
 That audit also tracks the current missing teeth in the contract:
 `tool_access` naming versus execution semantics, active goal scope, verification
 evidence not being automatic from `gh pr create`, post-Execute git delta
-visibility, and per-turn tool disclosure detail.
+visibility, first-class worktree selection observation, and per-turn tool
+disclosure detail.
 
 ## State machine
 

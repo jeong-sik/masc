@@ -191,9 +191,11 @@ Code anchors:
 - `lib/keeper/keeper_tool_execute_path.ml:267` - worktree repair path
 - `lib/keeper/keeper_tool_execute_path.ml:418` - write cwd resolution
 
-Finding: moving to a repo/worktree is a `cwd` discipline plus path repair, not a
-separate first-class state. The Keeper must call Execute/Edit/Read with the
-right repo/worktree path.
+Finding: moving to a repo/worktree is still a `cwd` discipline plus path repair,
+not a persistent global Keeper state. PR #20055 makes the selected worktree a
+first-class Execute observation: `execution_location.worktree_selected`,
+`worktree_name`, and `selected_worktree` identify the repo/worktree assignment
+without requiring the Keeper or operator to reparse `cwd`.
 
 ### 7. Tool dispatch and side-effect safety
 
@@ -228,7 +230,7 @@ Code anchor:
 - `lib/keeper/keeper_tools_oas_handler_exec.ml:13` - post-Execute git status helper
 - `lib/keeper/keeper_tools_oas_handler_exec.ml:435` - change block injected into the result envelope
 
-### 8. Task result and PR evidence
+### 8. Task result and verification evidence
 
 Task completion and verification evidence are explicit task tool transitions.
 
@@ -281,10 +283,11 @@ fast diagnosis path sees only counts.
 | --- | --- | --- | --- | --- |
 | Allowed Path | Tool schema and path errors; world prompt may not list exact paths | path/cwd resolver and sandbox/allowed-path checks | tool call log context and runtime contract include allowed paths | Partial |
 | Allowed Tool | OAS schemas filtered by `AllowList` | `turn_visible_tool_names` OAS allowlist plus candidate/deny execution gate | receipt/lineage names plus `tool_disclosure.oas_allowlist_tool_names` | Partial, first patch adds allowlist names |
-| Assign Task | task counts, claim guidance, current task context | claim/start transitions and current-task reconciliation | backlog, receipt current task, task events | Good after claim; acquisition is advisory |
-| Assign Goal | goal prompt and active-goal world state | advisory scope only | receipt goal IDs and goal progress JSON | Partial |
+| Repo / Worktree Seat | Execute result `execution_location.selected_worktree` after a worktree-scoped call | `cwd` resolver, repo readiness, and worktree repair | Execute result envelope and post-Execute change hook | Good after Execute; not a persistent assignment |
+| Assign Task | task counts, claim guidance, current task context | claim/start transitions and current-task reconciliation | backlog, receipt current task, task events | Good after claim/start |
+| Assign Goal | goal prompt and active-goal world state | `active_goal_ids` hard-gate `keeper_task_claim` | receipt goal IDs and goal progress JSON | Good for claim scope; goal progress remains observational |
 | Past Memory | memory context, checkpoint history, temporal context | memory hooks and checkpoint lifecycle | digests, memory files, post-turn eval | Good model-side; raw audit requires backing files |
-| PR evidence | only if tool output/notes/transition show it | task verification requires real PR URL | handoff evidence refs and task events | Partial; not automatic from `gh pr create` |
+| Verification evidence | only if tool output/notes/transition show it | task verification requires an evidence-bearing handoff, not a PR URL shape | notes, optional evidence refs, and task events | Good for wrapper; not automatic from `gh pr create` |
 
 ## Work Queue
 
@@ -306,5 +309,7 @@ fast diagnosis path sees only counts.
    it evidence-message based rather than PR-URL based. The Keeper submits notes,
    with optional structured refs for PRs, commits, artifacts, receipts, logs, or
    task comments; `gh pr create` alone does not mutate task verification state.
-6. Add a first-class "worktree selected" observation if the Keeper should see a
-   stable repo/worktree assignment rather than infer it from `cwd`.
+6. **Done in PR #20055**: add a first-class "worktree selected" observation to
+   Execute `execution_location`. This keeps repo/worktree choice tied to the
+   actual `cwd` that runtime enforced, but surfaces the stable assignment as
+   `selected_worktree` instead of requiring string parsing.

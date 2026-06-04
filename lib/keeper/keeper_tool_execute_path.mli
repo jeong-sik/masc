@@ -35,7 +35,9 @@ val execution_location_json :
     [repo_worktree_root], [repo_worktree_subpath]) or outside it
     ([outside_playground]).  [relative_cwd] is relative to [playground_root]
     for playground scopes and [null] when the cwd is outside the playground.
-    Relative argv paths resolve against the effective cwd. *)
+    Relative argv paths resolve against the effective cwd.  Worktree scopes also
+    carry [worktree_selected] and [selected_worktree] so the keeper can observe
+    the selected repo/worktree assignment without reparsing [cwd]. *)
 
 val auto_correct_path :
   meta:Keeper_meta_contract.keeper_meta -> string -> string option

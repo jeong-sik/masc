@@ -281,7 +281,6 @@
   tool_schema_dsl
   tool_misc_admin
   keeper_tool_persona_audit
-  enforcement_status
   tool_misc_web_search
   tool_misc_web_fetch
   meta_cognition_types

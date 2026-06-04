@@ -76,6 +76,9 @@
    (re_export masc.exec_policy)
    ;; RFC-0056 Phase 1N — Keeper state-machine leaf sub-library.
    (re_export masc.keeper_state)
+   ;; Model inference metrics + runtime provider label leaves.
+   (re_export masc.runtime_provider_labels)
+   (re_export masc.model_inference_metrics)
    ;; RFC-0058 Phase 1 — Declarative runtime TOML parser sub-library.
    (re_export masc.ag_ui)
    (re_export masc.config)

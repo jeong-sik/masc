@@ -63,6 +63,9 @@ DEFAULT_LEAVES: tuple[str, ...] = (
     "masc.exec_policy",
     # RFC-0056 Phase 1N: Keeper deterministic lifecycle FSM cluster.
     "masc.keeper_state",
+    # Model inference aggregate domain and its runtime label boundary.
+    "masc.runtime_provider_labels",
+    "masc.model_inference_metrics",
     # PR-S3 (LANE 2): Tool dispatch substrate. The gate enforces that the
     # Tool layer cannot pull keeper/runtime/telemetry back in via the mega-lib.
     "masc.masc_tool_dispatch",

@@ -191,12 +191,43 @@ let repo_cwd_not_ready_error ~repo_name ~path_root ~git_toplevel =
   Printf.sprintf
     "sandbox_repo_not_ready: sandbox path is under repos/%s, but %s is not an \
      independent git checkout (git_toplevel=%s). Repair or reclone the sandbox \
-     repo under repos/%s, then retry with cwd=\"repos/%s\"."
+     repo under repos/%s, then retry with cwd=\"repos/%s\". If the call is \
+     running inside a docker sandbox, ensure the docker playground mount \
+     includes the worktree subdirectory (or set cwd to the in-place repo root \
+     \"repos/%s\" if the keeper works directly in the clone)."
     repo_name
     path_root
     (Option.value ~default:"<none>" git_toplevel)
     repo_name
     repo_name
+    repo_name
+
+(** [extract_worktree_task_name cwd] extracts the task name if [cwd] is under a
+    [.worktrees/<task>] path.  Returns [Some (repo_name, task_name, worktree_root)]
+    or [None]. *)
+let extract_worktree_task_name ~(config : Workspace.config) ~(meta : keeper_meta) cwd =
+  let playground =
+    keeper_playground_root ~config ~meta
+    |> normalize_repo_cwd_path
+  in
+  let repos_root = Filename.concat playground "repos" |> normalize_repo_cwd_path in
+  let cwd = normalize_repo_cwd_path cwd in
+  let prefix = repos_root ^ "/" in
+  if not (String.starts_with ~prefix cwd) then None
+  else
+    let suffix =
+      String.sub cwd (String.length prefix) (String.length cwd - String.length prefix)
+    in
+    match String.split_on_char '/' suffix with
+    | repo_name :: ".worktrees" :: task_name :: _
+      when Keeper_repo_readiness.safe_repo_component repo_name
+           && Keeper_repo_readiness.safe_repo_component task_name ->
+      let worktree_root =
+        Filename.concat (Filename.concat (Filename.concat repos_root repo_name) ".worktrees") task_name
+        |> normalize_repo_cwd_path
+      in
+      Some (repo_name, task_name, worktree_root)
+    | _ -> None
 
 let validate_repo_path_ready
       ~(config : Workspace.config)
@@ -209,40 +240,49 @@ let validate_repo_path_ready
   | Some (repo_name, _repo_root, path_root, accepted_toplevels) ->
     sync_repo_currency_best_effort ~config ~meta ~repo_name;
     let check_probe () =
-      if not (safe_is_dir probe_path) then
-        Error
-          (repo_cwd_not_ready_error ~repo_name ~path_root ~git_toplevel:None)
+      let top =
+        Keeper_repo_readiness.run_git
+          ~timeout_sec:Keeper_repo_readiness.read_only_probe_timeout_sec
+          ~clone_path:probe_path
+          [ "rev-parse"; "--show-toplevel" ]
+      in
+      let top_opt = if top.ok then Some top.output else None in
+      let top_matches =
+        top.ok
+        && List.exists
+             (fun expected ->
+                String.equal
+                  (normalize_repo_cwd_path top.output)
+                  (normalize_repo_cwd_path expected))
+             accepted_toplevels
+      in
+      if top_matches then Ok ()
       else
-        let top =
-          Keeper_repo_readiness.run_git
-            ~timeout_sec:Keeper_repo_readiness.read_only_probe_timeout_sec
-            ~clone_path:probe_path
-            [ "rev-parse"; "--show-toplevel" ]
-        in
-        let top_opt = if top.ok then Some top.output else None in
-        let top_matches =
-          top.ok
-          && List.exists
-               (fun expected ->
-                  String.equal
-                    (normalize_repo_cwd_path top.output)
-                    (normalize_repo_cwd_path expected))
-               accepted_toplevels
-        in
-        if top_matches then Ok ()
-        else
-          Error
-            (repo_cwd_not_ready_error ~repo_name ~path_root ~git_toplevel:top_opt)
+        Error
+          (repo_cwd_not_ready_error ~repo_name ~path_root ~git_toplevel:top_opt)
     in
     match check_probe () with
     | Ok () -> Ok ()
     | Error _ as initial_err ->
-      (* Auto-repair: attempt reclone when sandbox repo is missing or corrupt *)
-      (match
-         Keeper_repo_readiness.ensure_ready ~config ~meta ~repo_name ()
-       with
-       | Ok () -> check_probe ()
-       | Error _repair_err -> initial_err)
+      (* Auto-repair: for worktree paths, try worktree creation first;
+         for direct repo paths, try reclone. *)
+      let worktree_result =
+        match extract_worktree_task_name ~config ~meta cwd with
+        | Some (wt_repo_name, task_name, worktree_root) ->
+          Keeper_repo_readiness.ensure_worktree_ready
+            ~config ~meta ~repo_name:wt_repo_name ~task_name
+            ~worktree_path:worktree_root ()
+        | None -> Error "not a worktree path"
+      in
+      match worktree_result with
+      | Ok () -> check_probe ()
+      | Error _ ->
+        (* Fall back to repo-level reclone *)
+        (match
+           Keeper_repo_readiness.ensure_ready ~config ~meta ~repo_name ()
+         with
+         | Ok () -> check_probe ()
+         | Error _repair_err -> initial_err)
 
 let validate_repo_cwd_ready ~(config : Workspace.config) ~(meta : keeper_meta) cwd =
   validate_repo_path_ready ~config ~meta ~probe_path:cwd cwd

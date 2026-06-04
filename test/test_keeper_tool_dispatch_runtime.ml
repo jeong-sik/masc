@@ -108,6 +108,14 @@ let contains_substring text needle =
   in
   needle_len = 0 || loop 0
 
+let parse_json raw =
+  try Yojson.Safe.from_string raw with
+  | Yojson.Json_error err -> fail ("invalid json: " ^ err)
+
+let outcome_label = function
+  | `Success -> "success"
+  | `Failure -> "failure"
+
 let non_empty_lines text =
   String.split_on_char '\n' text
   |> List.map String.trim
@@ -130,10 +138,6 @@ let json_contains_tool name = function
   | `Assoc fields ->
       List.exists (fun (_, value) -> json_list_contains name value) fields
   | _ -> false
-
-let outcome_label = function
-  | `Success -> "success"
-  | `Failure -> "failure"
 
 let json_bool_field ~default field json =
   Yojson.Safe.Util.(member field json |> to_bool_option)
@@ -478,6 +482,123 @@ let test_public_local_aliases_dispatch_to_runtime_handlers () =
       check bool "Execute ran in requested cwd" true
         (contains_substring execute_result.raw_output playground))
 
+let test_public_web_search_alias_dispatches_to_misc_runtime () =
+  with_exec_fixture "keeper_tool_dispatch_web_search_alias"
+    (fun ~config ~meta ~ctx_work ->
+      Masc.Tool_misc.with_web_search_simulation_for_test
+        ~outcomes:
+          [
+            ("brave", `Error "offline");
+            ( "duckduckgo",
+              `Hits
+                [
+                  ( "OCaml Eio runtime",
+                    "https://example.com/eio",
+                    "Fiber <b>runtime</b> evidence" );
+                ] );
+          ]
+        (fun () ->
+          let result =
+            KET.execute_keeper_tool_call_with_outcome
+              ~config
+              ~meta
+              ~ctx_work
+              ~exec_cache:None
+              ~name:"WebSearch"
+              ~input:
+                (`Assoc
+                  [
+                    ("query", `String "ocaml eio runtime alias test");
+                    ("limit", `Int 3);
+                  ])
+              ()
+          in
+          check string "web search alias outcome" "success"
+            (outcome_label result.outcome);
+          check string "web search alias payload shape" "structured_success"
+            (payload_kind result.payload_shape);
+          let json = parse_json result.raw_output in
+          let result_json = Yojson.Safe.Util.member "result" json in
+          check string "status" "ok"
+            Yojson.Safe.Util.(member "status" json |> to_string);
+          check string "query preserved" "ocaml eio runtime alias test"
+            Yojson.Safe.Util.(member "query" result_json |> to_string);
+          check string "fallback provider selected" "duckduckgo"
+            Yojson.Safe.Util.(member "engine" result_json |> to_string);
+          check string "simulated provider url" "test://duckduckgo"
+            Yojson.Safe.Util.(member "search_url" result_json |> to_string);
+          check int "result count" 1
+            Yojson.Safe.Util.(member "result_count" result_json |> to_int);
+          match Yojson.Safe.Util.(member "results" result_json |> to_list) with
+          | [ hit ] ->
+            check string "hit title" "OCaml Eio runtime"
+              Yojson.Safe.Util.(member "title" hit |> to_string);
+            check string "snippet cleaned" "Fiber runtime evidence"
+              Yojson.Safe.Util.(member "snippet" hit |> to_string)
+          | _ -> fail "expected one web search hit"))
+
+let test_public_web_fetch_alias_dispatches_to_misc_runtime () =
+  with_exec_fixture "keeper_tool_dispatch_web_fetch_alias"
+    (fun ~config ~meta ~ctx_work ->
+      let requested_url = "https://example.com/alias-web-fetch" in
+      let html =
+        {|
+<!doctype html>
+<html>
+  <head>
+    <title>Alias Title &amp; More</title>
+    <meta name="description" content="Alias description &amp; detail">
+  </head>
+  <body>
+    <h1>Alias Fetch</h1>
+    <p>Body <b>content</b> &amp; proof.</p>
+  </body>
+</html>|}
+      in
+      Masc.Tool_misc.with_web_fetch_http_get_for_test
+        (fun ~timeout_sec ~headers url ->
+          check int "timeout forwarded" 7 timeout_sec;
+          check string "url forwarded" requested_url url;
+          check bool "user agent header present" true
+            (List.exists
+               (fun (key, value) ->
+                 String.equal key "User-Agent"
+                 && contains_substring value "MASC-FetchWeb")
+               headers);
+          Ok (Some 200, html))
+        (fun () ->
+          let result =
+            KET.execute_keeper_tool_call_with_outcome
+              ~config
+              ~meta
+              ~ctx_work
+              ~exec_cache:None
+              ~name:"WebFetch"
+              ~input:
+                (`Assoc
+                  [ ("url", `String requested_url); ("timeout", `Int 7) ])
+              ()
+          in
+          check string "web fetch alias outcome" "success"
+            (outcome_label result.outcome);
+          check string "web fetch alias payload shape" "structured_success"
+            (payload_kind result.payload_shape);
+          let json = parse_json result.raw_output in
+          check string "status" "ok"
+            Yojson.Safe.Util.(member "status" json |> to_string);
+          check string "url" requested_url
+            Yojson.Safe.Util.(member "url" json |> to_string);
+          check int "http status" 200
+            Yojson.Safe.Util.(member "http_status" json |> to_int);
+          check string "title" "Alias Title & More"
+            Yojson.Safe.Util.(member "title" json |> to_string);
+          check string "description" "Alias description & detail"
+            Yojson.Safe.Util.(member "description" json |> to_string);
+          check bool "body text cleaned" true
+            (contains_substring
+               Yojson.Safe.Util.(member "text" json |> to_string)
+               "Body content & proof.")))
+
 let workflow_rejection_message =
   "Invalid task state: Self-approval not allowed: verifier must be a different agent"
 
@@ -702,6 +823,10 @@ let () =
         test_execute_with_outcome_bad_query_is_failure;
       test_case "public local aliases dispatch to runtime handlers" `Quick
         test_public_local_aliases_dispatch_to_runtime_handlers;
+      test_case "public WebSearch alias reaches misc runtime" `Quick
+        test_public_web_search_alias_dispatches_to_misc_runtime;
+      test_case "public WebFetch alias reaches misc runtime" `Quick
+        test_public_web_fetch_alias_dispatches_to_misc_runtime;
       test_case "task FSM errors require explicit failure_class" `Quick
         test_tool_result_does_not_infer_task_fsm_rejections_from_message;
       test_case "tool_result_or_error preserves failure_class" `Quick

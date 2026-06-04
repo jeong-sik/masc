@@ -37,6 +37,25 @@ val web_search_simulate_for_test :
   list ->
   Tool_result.result
 
+val with_web_search_simulation_for_test :
+  outcomes:
+    (string
+     * [ `Error of string
+       | `Empty
+       | `Hits of (string * string * string) list
+       ])
+    list ->
+  (unit -> 'a) ->
+  'a
+
+val with_web_fetch_http_get_for_test :
+  (timeout_sec:int ->
+   headers:(string * string) list ->
+   string ->
+   (int option * string, string) result) ->
+  (unit -> 'a) ->
+  'a
+
 val dispatch : context -> name:string -> args:Yojson.Safe.t -> Tool_result.result option
 
 val tool_inventory_json :

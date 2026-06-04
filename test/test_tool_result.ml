@@ -118,7 +118,7 @@ let test_error_uses_structured_failure_class () =
     Tool_result.error
       ~tool_name:"keeper_task_submit_for_verification"
       ~start_time:0.0
-      {|{"ok":false,"error":"pr_url is required","failure_class":"workflow_rejection"}|}
+      {|{"ok":false,"error":"evidence is required","failure_class":"workflow_rejection"}|}
   in
   Alcotest.(check bool) "failure" false (Tool_result.is_success r);
   Alcotest.(check string)
@@ -280,6 +280,94 @@ let test_result_is_stdlib_result_alias () =
   | Error _ -> Alcotest.fail "Stdlib.Result.map should preserve Ok"
 ;;
 
+let keeper_taskboard_schema name =
+  match
+    List.find_opt
+      (fun (schema : Masc_domain.tool_schema) ->
+         String.equal schema.name name)
+      Tool_shard_types.taskboard_tools
+  with
+  | Some schema -> schema.input_schema
+  | None -> Alcotest.failf "%s schema missing" name
+;;
+
+let object_member name = function
+  | `Assoc fields -> List.assoc_opt name fields
+  | _ -> None
+;;
+
+let string_list_member name json =
+  match object_member name json with
+  | Some (`List items) ->
+    List.filter_map
+      (function
+        | `String value -> Some value
+        | _ -> None)
+      items
+  | _ -> []
+;;
+
+let test_keeper_submit_schema_uses_notes_and_optional_evidence_refs () =
+  let schema = keeper_taskboard_schema "keeper_task_submit_for_verification" in
+  let properties =
+    match object_member "properties" schema with
+    | Some (`Assoc fields) -> fields
+    | _ -> Alcotest.fail "schema properties missing"
+  in
+  let has_property name = List.exists (fun (key, _) -> String.equal key name) properties in
+  let required = string_list_member "required" schema in
+  Alcotest.(check bool) "evidence_refs property present" true (has_property "evidence_refs");
+  Alcotest.(check bool) "pr_url is not a keeper submit field" false (has_property "pr_url");
+  Alcotest.(check (list string))
+    "only task_id and notes are required"
+    [ "task_id"; "notes" ]
+    required
+;;
+
+let test_keeper_done_schema_uses_result_not_pr_url () =
+  let schema = keeper_taskboard_schema "keeper_task_done" in
+  let properties =
+    match object_member "properties" schema with
+    | Some (`Assoc fields) -> fields
+    | _ -> Alcotest.fail "schema properties missing"
+  in
+  let has_property name = List.exists (fun (key, _) -> String.equal key name) properties in
+  let required = string_list_member "required" schema in
+  Alcotest.(check bool) "result property present" true (has_property "result");
+  Alcotest.(check bool) "pr_url is not a keeper done field" false (has_property "pr_url");
+  Alcotest.(check (list string))
+    "only task_id and result are required"
+    [ "task_id"; "result" ]
+    required
+;;
+
+let test_workflow_marker_accepts_notes_as_evidence_message () =
+  let input =
+    `Assoc
+      [ "task_id", `String "task-001"
+      ; "notes", `String "changed files, ran tests, see receipt:turn-1"
+      ]
+  in
+  Alcotest.(check string)
+    "notes count as the evidence-bearing handoff message"
+    "has_evidence"
+    (Keeper_tools_oas_workflow.workflow_submit_evidence_marker input)
+;;
+
+let test_workflow_marker_accepts_top_level_evidence_refs () =
+  let input =
+    `Assoc
+      [ "task_id", `String "task-001"
+      ; "notes", `String "verification notes"
+      ; "evidence_refs", `List [ `String "artifact:logs/test-output.txt" ]
+      ]
+  in
+  Alcotest.(check string)
+    "top-level evidence_refs count as evidence"
+    "has_evidence"
+    (Keeper_tools_oas_workflow.workflow_submit_evidence_marker input)
+;;
+
 let () =
   Alcotest.run
     "Tool_result"
@@ -331,6 +419,24 @@ let () =
             "result aliases Stdlib.Result.t"
             `Quick
             test_result_is_stdlib_result_alias
+        ] )
+    ; ( "keeper verification evidence schema"
+      , [ Alcotest.test_case
+            "schema uses notes and optional evidence_refs"
+            `Quick
+            test_keeper_submit_schema_uses_notes_and_optional_evidence_refs
+        ; Alcotest.test_case
+            "done schema uses result without pr_url"
+            `Quick
+            test_keeper_done_schema_uses_result_not_pr_url
+        ; Alcotest.test_case
+            "workflow marker accepts notes"
+            `Quick
+            test_workflow_marker_accepts_notes_as_evidence_message
+        ; Alcotest.test_case
+            "workflow marker accepts top-level evidence_refs"
+            `Quick
+            test_workflow_marker_accepts_top_level_evidence_refs
         ] )
     ]
 ;;

@@ -230,14 +230,17 @@ Code anchor:
 
 ### 8. Task result and PR evidence
 
-Task completion and PR evidence are explicit task tool transitions.
+Task completion and verification evidence are explicit task tool transitions.
 
 `keeper_task_done` requires `task_id` and `result`, maps the result into
 `handoff_context.summary`, and calls `Task.Tool.handle_transition` with
 `action=done`.
 
-`keeper_task_submit_for_verification` requires `task_id`, `notes`, and a valid
-`pr_url`, then maps the PR URL into `handoff_context.evidence_refs` and calls
+`keeper_task_submit_for_verification` requires `task_id` and `notes`. The notes
+message is the primary evidence handoff: it must say what was done and how it can
+be verified. Optional structured `evidence_refs` can also carry PR URLs, commits,
+artifacts, receipts, test logs, task comments, or other concrete references.
+The wrapper maps these into `handoff_context` and calls
 `action=submit_for_verification`.
 
 Code anchors:
@@ -249,9 +252,11 @@ Code anchors:
 - `lib/task/tool_task.ml:486` - persisted workspace transition
 - `lib/task/tool_task.ml:525` - verification notification path
 
-Finding: PR evidence can be persisted cleanly, but it is not automatic merely
-because the Keeper ran `gh pr create`. The Keeper must call the task transition
-tool or another explicit task/comment tool.
+Finding: verification evidence can be persisted cleanly, but it is not automatic
+merely because the Keeper ran `gh pr create`. The Keeper must call the task
+transition tool or another explicit task/comment tool. Keeper code must not
+treat PR URL or any single reference shape as the verification SSOT; evidence
+semantics live in the task/CDAL domain.
 
 ### 9. Receipt and lineage
 
@@ -296,7 +301,10 @@ fast diagnosis path sees only counts.
    gate. The resolver now passes a goal-linked task filter into
    `Workspace.claim_next_r`, and no-scope results report excluded tasks instead
    of falling back to all work.
-5. Decide whether PR creation should become a structured Keeper workflow, or
-   whether explicit `keeper_task_submit_for_verification` remains the SSOT.
+5. **Done in PR #20055**: keep explicit
+   `keeper_task_submit_for_verification` as the task-verification SSOT, but make
+   it evidence-message based rather than PR-URL based. The Keeper submits notes,
+   with optional structured refs for PRs, commits, artifacts, receipts, logs, or
+   task comments; `gh pr create` alone does not mutate task verification state.
 6. Add a first-class "worktree selected" observation if the Keeper should see a
    stable repo/worktree assignment rather than infer it from `cwd`.

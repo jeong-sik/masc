@@ -96,6 +96,13 @@ let validation_error_json message =
     ()
 ;;
 
+let string_list_arg name json =
+  json
+  |> Safe_ops.json_string_list name
+  |> List.map String.trim
+  |> List.filter (fun value -> not (String.equal value ""))
+;;
+
 let validate_goal_id config goal_id =
   match Goal_store.get_goal config ~goal_id with
   | Some _ -> Ok goal_id
@@ -775,7 +782,7 @@ let handle_keeper_task_tool
     | Task_submit_for_verification ->
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
     let notes = Safe_ops.json_string ~default:"" "notes" args |> String.trim in
-    let pr_url = Safe_ops.json_string ~default:"" "pr_url" args |> String.trim in
+    let evidence_refs = string_list_arg "evidence_refs" args in
     if task_id = ""
     then
       workflow_rejection_error_json
@@ -786,28 +793,15 @@ let handle_keeper_task_tool
       workflow_rejection_error_json
         ~alternatives:[ "keeper_task_submit_for_verification" ]
         "notes is required. Include verification evidence and test summary."
-    else if pr_url = ""
-    then
-      workflow_rejection_error_json
-        ~alternatives:
-          [ "keeper_task_submit_for_verification"; "keeper_task_done" ]
-        "pr_url is required. Include the PR opened for this task."
-    else if not (Task.Completion_review.pr_url_has_pull_ref pr_url)
-    then
-      workflow_rejection_error_json
-        ~alternatives:[ "keeper_task_submit_for_verification" ]
-        "pr_url must be a GitHub pull request URL or PR # reference. \
-         Do not submit placeholders like 'draft', 'none', or 'pending'."
     else (
-      (* Map keeper vocabulary (notes + pr_url) onto MASC domain typed
-         handoff_context fields: notes -> summary, [pr_url] ->
-         evidence_refs. The previous concat blob
-         ("notes\nPR: pr_url") had no in-repo reader and is removed. *)
+      (* Keep keeper vocabulary thin: map notes/evidence_refs onto the
+         task-domain handoff_context and let Task.Tool/CDAL evidence gates
+         decide whether the evidence is sufficient. *)
       let handoff_context =
         `Assoc
           [
             "summary", `String notes;
-            "evidence_refs", `List [ `String pr_url ];
+            "evidence_refs", Json_util.json_string_list evidence_refs;
           ]
       in
       let transition_result =

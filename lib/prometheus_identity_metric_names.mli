@@ -19,7 +19,6 @@ val metric_auth_credential_index_cache_misses : string
 val metric_silent_auth_token_resolve_error : string
 val metric_silent_dashboard_actor_fallback : string
 val metric_auth_strict_would_reject : string
-val metric_empty_tool_universe_observed : string
 val metric_workspace_bind_normalize_outcome : string
 val metric_config_unknown_keys_ignored : string
 val metric_governance_judge_unparseable : string

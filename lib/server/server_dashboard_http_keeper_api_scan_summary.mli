@@ -44,12 +44,6 @@ val event_bus_summary_json
   :  Server_dashboard_http_keeper_runtime_manifest_scan.runtime_manifest_scan
   -> Yojson.Safe.t
 
-(** [memory_summary_json scan] returns an [`Assoc] of the seven
-    memory-related counters held in [scan]. *)
-val memory_summary_json
-  :  Server_dashboard_http_keeper_runtime_manifest_scan.runtime_manifest_scan
-  -> Yojson.Safe.t
-
 (** [max_int_list_opt values] returns the maximum element of [values],
     or [None] when [values] is empty. *)
 val max_int_list_opt : int list -> int option

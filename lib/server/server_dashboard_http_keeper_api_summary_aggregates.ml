@@ -85,16 +85,6 @@ let turn_identity_summary_json
           (runtime_manifest_scan_event_count
              scan
              Keeper_runtime_manifest.Event_bus_correlated) )
-    ; ( "memory_injected_count"
-      , `Int
-          (runtime_manifest_scan_event_count
-             scan
-             Keeper_runtime_manifest.Memory_injected) )
-    ; ( "memory_flushed_count"
-      , `Int
-          (runtime_manifest_scan_event_count
-             scan
-             Keeper_runtime_manifest.Memory_flushed) )
     ; ( "receipt_appended_count"
       , `Int
           (runtime_manifest_scan_event_count

@@ -11,7 +11,6 @@
 val run :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
-  memory:Agent_sdk.Memory.t ->
   turn:int ->
   oas_turn_count:int ->
   response_text:string ->

@@ -24,7 +24,6 @@ module Random = Stdlib.Random
 
     Integration points:
     - Pre-action: is_healthy checks before decide_agent_action
-    - Post-action: record_outcome after execute_agent_action
     - Statistics: health_summary for dashboard/monitoring
 
     @since 2.75.0 *)

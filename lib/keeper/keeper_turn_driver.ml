@@ -61,7 +61,6 @@ let run_named
     ?guardrails
     ?hooks
     ?context_reducer
-    ?memory
     ?tool_retry_policy
     ?raw_trace
     ?on_event
@@ -157,7 +156,6 @@ let run_named
     guardrails;
     hooks;
     context_reducer;
-    memory;
     tool_retry_policy;
     raw_trace;
     transport_resolved;

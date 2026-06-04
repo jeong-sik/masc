@@ -762,8 +762,7 @@ export interface KeeperRuntimeLensToolSurfaceAxis {
   turn_lane: string | null
   tool_surface_class: string | null
   tool_requirement: string | null
-  visible_tool_count: number | null
-  tool_gate_enabled: boolean | null
+  allowed_tool_count: number | null
   tool_surface_fallback_used: boolean | null
   terminal_status: string
 }
@@ -930,7 +929,6 @@ export interface KeeperRuntimeLensClockEdge {
   tool_batch_id: string | null
   checkpoint_id: string | null
   compaction_id: string | null
-  memory_injection_id: string | null
   event_bus_correlation_id: string | null
   event_bus_run_id: string | null
   event_bus_event_count: number | null
@@ -1172,8 +1170,7 @@ function parseRuntimeLensToolSurfaceAxis(raw: unknown): KeeperRuntimeLensToolSur
     turn_lane: nullableStringField(obj, 'turn_lane'),
     tool_surface_class: nullableStringField(obj, 'tool_surface_class'),
     tool_requirement: nullableStringField(obj, 'tool_requirement'),
-    visible_tool_count: nullableNumberField(obj, 'visible_tool_count'),
-    tool_gate_enabled: nullableBooleanField(obj, 'tool_gate_enabled'),
+    allowed_tool_count: nullableNumberField(obj, 'allowed_tool_count'),
     tool_surface_fallback_used: nullableBooleanField(obj, 'tool_surface_fallback_used'),
     terminal_status: stringField(obj, 'terminal_status') || 'unknown',
   }
@@ -1418,7 +1415,6 @@ function parseRuntimeLensClockEdge(raw: unknown): KeeperRuntimeLensClockEdge {
     tool_batch_id: nullableStringField(obj, 'tool_batch_id'),
     checkpoint_id: nullableStringField(obj, 'checkpoint_id'),
     compaction_id: nullableStringField(obj, 'compaction_id'),
-    memory_injection_id: nullableStringField(obj, 'memory_injection_id'),
     event_bus_correlation_id: nullableStringField(obj, 'event_bus_correlation_id'),
     event_bus_run_id: nullableStringField(obj, 'event_bus_run_id'),
     event_bus_event_count: nullableNumberField(obj, 'event_bus_event_count'),

@@ -182,8 +182,7 @@ describe('parseKeeperCompositeSnapshot', () => {
           tool_requirement: 'required',
           turn_lane: 'tool_optional',
           tool_surface_class: 'runtime_mcp',
-          visible_tool_count: 2,
-          tool_gate_enabled: true,
+          allowed_tool_count: 2,
           tool_surface_fallback_used: false,
           missing_required_tools: ['keeper_task_claim'],
           required_tools: ['keeper_task_claim'],
@@ -198,7 +197,7 @@ describe('parseKeeperCompositeSnapshot', () => {
     expect(result.execution?.runtime?.fallback_reason).toBe('turn_timeout')
     expect(result.execution?.tool_surface?.turn_lane).toBe('tool_optional')
     expect(result.execution?.tool_surface?.tool_surface_class).toBe('runtime_mcp')
-    expect(result.execution?.tool_surface?.visible_tool_count).toBe(2)
+    expect(result.execution?.tool_surface?.allowed_tool_count).toBe(2)
     expect(result.execution?.tool_surface?.tool_surface_fallback_used).toBe(false)
     expect(result.execution?.unexpected_tools).toEqual(['keeper_board_list'])
     expect(result.execution?.unexpected_tool_count).toBe(1)

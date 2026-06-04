@@ -593,13 +593,6 @@ module Oas_sse = struct
     if v < 0.1 then 2.0 else v
 end
 
-(** {1 Memory OAS Bridge Configuration} *)
-
-module Memory_oas = struct
-  (** Default importance for OAS-stored memories, clamped to [1, 10]. Default: 5. *)
-  let default_importance = max 1 (min 10 (get_int ~default:5 "MASC_MEMORY_OAS_DEFAULT_IMPORTANCE"))
-end
-
 (** {1 Smart Heartbeat Tuning} *)
 
 module SmartHeartbeatTuning = struct

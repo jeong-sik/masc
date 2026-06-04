@@ -317,7 +317,7 @@ describe('keeper runtime trace', () => {
     expect(result.runtime_lens.turn_clock.trace_id).toBe('trace-lens')
     expect(result.runtime_lens.turn_clock.terminal_event_present).toBe(false)
     expect(result.runtime_lens.axes.tool_surface.requested_tools).toEqual(['read_file'])
-    expect(result.runtime_lens.axes.tool_surface.visible_tool_count).toBeNull()
+    expect(result.runtime_lens.axes.tool_surface.allowed_tool_count).toBeNull()
     expect(result.runtime_lens.axes.provider_lane.resolved).toBe(false)
     expect(result.runtime_lens.axes.provider_attempt.terminal_status).toBe('timeout')
     expect(result.runtime_lens.axes.runtime_proof.status).toBe('pass')

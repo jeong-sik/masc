@@ -33,7 +33,6 @@ For each spec:
 | RuntimeStrategyStateful | (no explicit ref) | likely | cross-domain or mappable (sticky/round-robin state) |
 | KeeperContinueGate | (no explicit ref) | unknown | cross-domain |
 | **KeeperContractViolated** | (multi-module: keeper_run_tools, keeper_turn_terminal) | no | **cross-domain** (per #12149) |
-| KeeperEmptyToolUniverse | (no explicit ref) | unknown | cross-domain |
 | KeeperRecoveryOrchestration | `keeper_keepalive`, `keeper_manual_reconcile`, `keeper_state_machine` | no — interaction | **cross-domain** |
 | KeeperStaleKilled | (no explicit ref) | unknown | cross-domain |
 | KeeperTurnScheduler | (no explicit ref) | unknown | cross-domain |

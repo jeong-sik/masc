@@ -45,7 +45,7 @@ INTEGRATED_BENCH_PHASES=control \
 - `control` fail
   - keeper fleet runtime evidence가 부족한 상태다.
   - observed keeper count, per-keeper successful provider turns, receipt/checkpoint
-    links, memory injection rows, tool-call log links를 먼저 본다.
+    links, memory-bank rows, tool-call log links를 먼저 본다.
 ## Related Docs
 
 - [BENCHMARK-RUNBOOK.md](./BENCHMARK-RUNBOOK.md)

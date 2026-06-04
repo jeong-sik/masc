@@ -85,7 +85,6 @@ type tool_surface =
   ; tool_surface_class : Keeper_agent_tool_surface.tool_surface_class
   ; tool_requirement : tool_requirement
   ; allowed_tool_count : int
-  ; tool_gate_enabled : bool
   ; tool_surface_fallback_used : bool
   ; materialized_tools : string list
   }

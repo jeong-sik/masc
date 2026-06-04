@@ -447,8 +447,7 @@ describe('runtimeAttentionForSnapshot', () => {
           tool_requirement: 'required',
           turn_lane: 'tool_optional',
           tool_surface_class: 'mixed',
-          visible_tool_count: 0,
-          tool_gate_enabled: true,
+          allowed_tool_count: 0,
           tool_surface_fallback_used: true,
           missing_required_tools: ['Execute'],
           required_tools: ['Execute'],
@@ -460,7 +459,7 @@ describe('runtimeAttentionForSnapshot', () => {
     expect(attention.level).toBe('blocked')
     expect(attention.cause).toContain('tool_surface_mismatch (Execute)')
     expect(attention.reason).toContain('turn_lane=tool_optional')
-    expect(attention.reason).toContain('visible_tools=0')
+    expect(attention.reason).toContain('allowed_tools=0')
     expect(attention.reason).toContain('tool_surface_fallback=true')
     expect(attention.nextStep).toContain('Execute')
   })
@@ -504,8 +503,7 @@ describe('fleetCellPresentation', () => {
           tool_requirement: 'required',
           turn_lane: 'tool_optional',
           tool_surface_class: 'mixed',
-          visible_tool_count: 0,
-          tool_gate_enabled: true,
+          allowed_tool_count: 0,
           tool_surface_fallback_used: true,
           missing_required_tools: ['Execute'],
           required_tools: ['Execute'],
@@ -555,8 +553,7 @@ describe('buildRuntimeAssistPrompt', () => {
           tool_requirement: 'required',
           turn_lane: 'tool_optional',
           tool_surface_class: 'mixed',
-          visible_tool_count: 0,
-          tool_gate_enabled: true,
+          allowed_tool_count: 0,
           tool_surface_fallback_used: true,
           missing_required_tools: ['Execute'],
           required_tools: ['Execute'],
@@ -571,7 +568,7 @@ describe('buildRuntimeAssistPrompt', () => {
     expect(prompt).toContain('blocked: tool_route_recoverable_failure')
     expect(prompt).toContain('evidence=')
     expect(prompt).toContain('"turn_lane":"tool_optional"')
-    expect(prompt).toContain('"visible_tool_count":0')
+    expect(prompt).toContain('"allowed_tool_count":0')
     expect(prompt).toContain('"tool_surface_fallback_used":true')
     expect(prompt).toContain('KSM=Running')
     expect(prompt).toContain('resolve 후보')

@@ -260,7 +260,6 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_LOCAL_WORKER_MAX_TOKENS` | typed:int | unclassified | unclassified | 584 | Local worker max tokens per request. Default: 1024. |
 | `MASC_LOCK_EXPIRY_WARNING_SEC` | typed:float | unclassified | unclassified | 26 | Lock expiry warning threshold (seconds before expiry) |
 | `MASC_LOCK_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 22 | Default lock timeout (seconds) |
-| `MASC_MEMORY_OAS_DEFAULT_IMPORTANCE` | typed:int | unclassified | unclassified | 603 | Default importance for OAS-stored memories, clamped to [1, 10]. Default: 5. |
 | `MASC_MESSAGE_MAX_COUNT` | typed:int | unclassified | unclassified | 226 | Maximum number of message files to retain per workspace (default 200). Oldest messages (by filename sort) are deleted... |
 | `MASC_METRICS_FLUSH_SEC` | typed:float | unclassified | unclassified | 791 | Tool metrics flush interval (seconds). Default: 300 (5 min). |
 | `MASC_OAS_SSE_DRAIN_INTERVAL_SEC` | typed:float | unclassified | unclassified | 595 | SSE drain interval (seconds). Default: 2.0. |

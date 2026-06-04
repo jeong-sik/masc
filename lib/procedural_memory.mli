@@ -50,19 +50,6 @@ val save_procedure : agent_name:string -> procedure -> unit
     logs via [Log.Config.warn] and returns [()]. *)
 val rewrite_procedures : agent_name:string -> procedure list -> unit
 
-(** {1 Outcomes} *)
-
-(** [record_outcome ~agent_name ~pattern ~evidence_id ~success] finds
-    an existing procedure with the same [pattern] and updates its
-    counts, or creates a new one. Persists the change and returns the
-    updated/new procedure. *)
-val record_outcome :
-  agent_name:string ->
-  pattern:string ->
-  evidence_id:string ->
-  success:bool ->
-  procedure
-
 (** {1 Crystallisation} *)
 
 (** Adaptive crystallisation check:
@@ -73,8 +60,3 @@ val is_crystallized : procedure -> bool
 
 (** Top-N crystallised procedures sorted by confidence (descending). *)
 val top_procedures : agent_name:string -> limit:int -> procedure list
-
-(** Format top-N crystallised procedures as a capsule-injection
-    fragment: ["[PROCEDURES]\n- <pattern> (confidence: N%, evidence: N)\n…[/PROCEDURES]"].
-    Empty string when no procedures qualify. *)
-val format_for_dna : agent_name:string -> limit:int -> string

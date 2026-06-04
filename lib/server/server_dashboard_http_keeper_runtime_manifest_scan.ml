@@ -22,13 +22,6 @@ type runtime_manifest_scan =
   ; mutable context_compact_started_count : int
   ; mutable context_compacted_count : int
   ; mutable last_compaction : Yojson.Safe.t option
-  ; mutable memory_injected_count : int
-  ; mutable memory_injected_present_count : int
-  ; mutable memory_flushed_count : int
-  ; mutable memory_flush_success_count : int
-  ; mutable memory_flush_error_count : int
-  ; mutable episodes_flushed : int
-  ; mutable procedures_flushed : int
   ; mutable latest_tool_surface_decision : Yojson.Safe.t option
   ; mutable latest_provider_lane_decision : Yojson.Safe.t option
   ; mutable latest_provider_lane_row : Keeper_runtime_manifest.t option
@@ -44,7 +37,6 @@ type runtime_manifest_scan =
   ; mutable provider_terminal_row : Keeper_runtime_manifest.t option
   ; mutable latest_context_injected_row : Keeper_runtime_manifest.t option
   ; mutable latest_context_compacted_row : Keeper_runtime_manifest.t option
-  ; mutable latest_memory_injected_row : Keeper_runtime_manifest.t option
   ; mutable dag_edges : (string * string) list
   }
 
@@ -65,13 +57,6 @@ let make_runtime_manifest_scan ~path ~limit =
   ; context_compact_started_count = 0
   ; context_compacted_count = 0
   ; last_compaction = None
-  ; memory_injected_count = 0
-  ; memory_injected_present_count = 0
-  ; memory_flushed_count = 0
-  ; memory_flush_success_count = 0
-  ; memory_flush_error_count = 0
-  ; episodes_flushed = 0
-  ; procedures_flushed = 0
   ; latest_tool_surface_decision = None
   ; latest_provider_lane_decision = None
   ; latest_provider_lane_row = None
@@ -87,7 +72,6 @@ let make_runtime_manifest_scan ~path ~limit =
   ; provider_terminal_row = None
   ; latest_context_injected_row = None
   ; latest_context_compacted_row = None
-  ; latest_memory_injected_row = None
   ; dag_edges = []
   }
 
@@ -224,24 +208,6 @@ let update_runtime_manifest_scan scan row =
      (match Json_util.assoc_member_opt "last_compaction" decision with
       | Some (`Assoc _ as obj) -> scan.last_compaction <- Some obj
       | _ -> ())
-   | Keeper_runtime_manifest.Memory_injected ->
-     scan.memory_injected_count <- scan.memory_injected_count + 1;
-     scan.latest_memory_injected_row <- Some row;
-     if String.equal row.Keeper_runtime_manifest.status "injected"
-     then scan.memory_injected_present_count <- scan.memory_injected_present_count + 1
-   | Keeper_runtime_manifest.Memory_flushed ->
-     let decision = row.Keeper_runtime_manifest.decision in
-     scan.memory_flushed_count <- scan.memory_flushed_count + 1;
-     if String.equal row.Keeper_runtime_manifest.status "success"
-     then scan.memory_flush_success_count <- scan.memory_flush_success_count + 1;
-     if String.equal row.Keeper_runtime_manifest.status "error"
-     then scan.memory_flush_error_count <- scan.memory_flush_error_count + 1;
-     scan.episodes_flushed <-
-       scan.episodes_flushed
-       + Option.value (Json_util.get_int decision "episodes_flushed") ~default:0;
-     scan.procedures_flushed <-
-       scan.procedures_flushed
-       + Option.value (Json_util.get_int decision "procedures_flushed") ~default:0
    | Keeper_runtime_manifest.Provider_attempt_started ->
      scan.provider_started_count <- scan.provider_started_count + 1;
      push_bounded scan.provider_attempt_rows scan.limit row

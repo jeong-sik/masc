@@ -20,8 +20,6 @@ type event_kind =
   | State_snapshot_sidecar_saved
   | Working_state_sidecar_saved
   | Event_bus_correlated
-  | Memory_injected
-  | Memory_flushed
   | Checkpoint_loaded
   | Checkpoint_saved
   | Receipt_appended
@@ -43,8 +41,6 @@ let all_event_kinds =
     State_snapshot_sidecar_saved;
     Working_state_sidecar_saved;
     Event_bus_correlated;
-    Memory_injected;
-    Memory_flushed;
     Checkpoint_loaded;
     Checkpoint_saved;
     Receipt_appended;
@@ -66,8 +62,6 @@ let event_kind_to_string = function
   | State_snapshot_sidecar_saved -> "state_snapshot_sidecar_saved"
   | Working_state_sidecar_saved -> "working_state_sidecar_saved"
   | Event_bus_correlated -> "event_bus_correlated"
-  | Memory_injected -> "memory_injected"
-  | Memory_flushed -> "memory_flushed"
   | Checkpoint_loaded -> "checkpoint_loaded"
   | Checkpoint_saved -> "checkpoint_saved"
   | Receipt_appended -> "receipt_appended"
@@ -88,8 +82,6 @@ let event_kind_of_string = function
   | "state_snapshot_sidecar_saved" -> Some State_snapshot_sidecar_saved
   | "working_state_sidecar_saved" -> Some Working_state_sidecar_saved
   | "event_bus_correlated" -> Some Event_bus_correlated
-  | "memory_injected" -> Some Memory_injected
-  | "memory_flushed" -> Some Memory_flushed
   | "checkpoint_loaded" -> Some Checkpoint_loaded
   | "checkpoint_saved" -> Some Checkpoint_saved
   | "receipt_appended" -> Some Receipt_appended

@@ -170,15 +170,6 @@ let metric_tool_keeper_cache_cas_conflicts =
 let metric_file_lock_table_cas_retries =
   "masc_file_lock_table_cas_retries_total"
 
-(* Memory_jsonl.parse_line silent drop counter (V15 / RFC-0109 §5.1
-   Option A).  Bumped from a callback wired in workspace.ml — the
-   masc_memory_jsonl leaf sub-library cannot depend on Prometheus
-   directly (cycle).  Closed-vocabulary [reason] in
-   {no_key | not_assoc | json_parse_error}.  Empty lines benign,
-   not counted. *)
-let metric_memory_jsonl_parse_drops =
-  "masc_memory_jsonl_parse_drops_total"
-
 (* keeper_tool_surface.cache_ttl_seconds env-var parse fallback observability.
    Operator-supplied env var (e.g. MASC_KEEPER_LIST_CACHE_TTL_S) is
    present but the value cannot be parsed as a non-negative float; the

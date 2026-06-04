@@ -928,7 +928,6 @@ function clockEdgeTitle(edge: KeeperRuntimeLensClockEdge): string {
     edge.provider_attempt_id ? `provider ${edge.provider_attempt_id}` : null,
     edge.tool_batch_id ? `tool ${edge.tool_batch_id}` : null,
     edge.checkpoint_id ? `checkpoint ${edge.checkpoint_id}` : null,
-    edge.memory_injection_id ? `memory ${edge.memory_injection_id}` : null,
     edge.event_bus_correlation_id ? `corr ${edge.event_bus_correlation_id}` : null,
     edge.event_bus_run_id ? `run ${edge.event_bus_run_id}` : null,
     edge.event_bus_event_count !== null ? `event-bus events ${edge.event_bus_event_count}` : null,

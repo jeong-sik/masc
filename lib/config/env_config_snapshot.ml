@@ -581,11 +581,7 @@ let lock_entries =
       "Default lock timeout (seconds, 30 min)";
   ]
 
-let memory_entries =
-  [
-    entry ~default:"5" "MASC_MEMORY_OAS_DEFAULT_IMPORTANCE"
-      "Default importance for OAS-stored memories (clamped 1-10)";
-  ]
+let memory_entries = []
 
 let message_gc_entries =
   [

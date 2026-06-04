@@ -306,13 +306,6 @@ let record_file_lock_table_cas_retry () =
     ()
 ;;
 
-let record_memory_jsonl_parse_drop ~reason =
-  Prometheus.inc_counter
-    Prometheus.metric_memory_jsonl_parse_drops
-    ~labels:[ ("reason", reason) ]
-    ()
-;;
-
 let process_timeout_metric = Prometheus.metric_process_timeout
 
 let record_process_timeout ~program ~timeout_sec ~origin =
@@ -460,7 +453,6 @@ let install () =
   Atomic.set Workspace_hooks.mention_dedup_decision_fn record_mention_dedup_decision;
   Atomic.set File_lock_eio.on_lock_attempt_fn record_file_lock_attempt;
   Atomic.set File_lock_eio.on_cas_retry_fn record_file_lock_table_cas_retry;
-  Atomic.set Memory_jsonl.on_parse_drop_fn record_memory_jsonl_parse_drop;
   Atomic.set Process_eio.process_timeout_observer_fn record_process_timeout;
   Atomic.set Workspace_hooks.distributed_lock_acquire_failed_fn record_distributed_lock_acquire_failed;
   Atomic.set Workspace_hooks.claim_post_provision_failed_fn record_claim_post_provision_failed;

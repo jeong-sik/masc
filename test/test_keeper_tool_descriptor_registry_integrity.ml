@@ -342,6 +342,10 @@ let test_mcp_context_policy_uses_descriptor_resolution () =
     "approval_resolve is not inline safe"
     false
     (Policy.is_keeper_safe_inline_tool "masc_approval_resolve");
+  Alcotest.(check (list string))
+    "maintenance-only tools project from descriptors"
+    [ "masc_heartbeat" ]
+    (Descriptor.keeper_maintenance_only_names ());
   Alcotest.(check bool)
     "approval_pending does not require MCP session"
     false

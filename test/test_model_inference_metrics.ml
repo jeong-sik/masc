@@ -1,6 +1,6 @@
 (** Tests for Model_inference_metrics — per-model aggregate inference stats. *)
 
-module M = Masc.Model_inference_metrics
+module M = Model_inference_metrics
 
 open Alcotest
 
@@ -68,6 +68,12 @@ let write_costs base entries =
   )
 
 let now_unix () = Unix.gettimeofday ()
+
+let recent_hour_bucket_timestamp () =
+  let now = now_unix () in
+  let hour_sec = 3600.0 in
+  let hour_start = floor (now /. hour_sec) *. hour_sec in
+  if now -. hour_start >= 120.0 then now -. 60.0 else hour_start -. 60.0
 
 let runtime_lane_label_for_test model_key =
   "runtime_lane_" ^ String.sub (Digest.to_hex (Digest.string model_key)) 0 12
@@ -1029,7 +1035,7 @@ let test_buckets_empty_dir () =
 let test_buckets_single_bucket () =
   let dir = test_dir () in
   let path = make_keeper_dir dir "single_bucket" in
-  let now = now_unix () in
+  let now = recent_hour_bucket_timestamp () in
   write_decisions path [
     success_entry ~model:"model-a" ~ts:now ();
     success_entry ~model:"model-a" ~ts:(now -. 30.0) ();

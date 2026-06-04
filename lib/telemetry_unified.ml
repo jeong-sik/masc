@@ -658,7 +658,9 @@ let read_unified_result ~base_path ~masc_root ?(sources = all_sources)
           ~n:per_source ()
       | Goal_event ->
         read_goal_events ~masc_root ?since_ts ?until_ts ~n:per_source ()
-      | _ ->
+      (* Fixed-path sources: Agent_event, Tool_call_io, Tool_usage,
+         Oas_event, Tool_metric use directory-based storage. *)
+      | Agent_event | Tool_call_io | Tool_usage | Oas_event | Tool_metric ->
         match fixed_store_dir ~masc_root ~base_path source with
         | Some dir ->
           read_fixed_source dir source ~n:per_source ?since_ts ?until_ts ()
@@ -948,7 +950,9 @@ let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
               ~optional_when_missing:(source_optional_when_missing source)
               ?coverage_gap ()),
         count )
-    | _ ->
+    (* Fixed-path sources: Agent_event, Tool_call_io, Tool_usage,
+       Oas_event, Tool_metric use directory-based storage. *)
+    | Agent_event | Tool_call_io | Tool_usage | Oas_event | Tool_metric ->
       let dir = match fixed_store_dir ~masc_root ~base_path source with
         | Some d -> d | None -> "" in
       let dir_state =

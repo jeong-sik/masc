@@ -323,23 +323,25 @@ let evaluate_all output criteria =
   | [] -> Pass  (* No criteria = auto-pass *)
   | _ ->
       let results = List.map (evaluate_criterion output) criteria in
-      let fails = List.filter (function Fail _ -> true | _ -> false) results in
-      let partials = List.filter (function Partial _ -> true | _ -> false) results in
+      let fails = List.filter (function Fail _ -> true | Pass | Partial _ -> false) results in
+      let partials = List.filter (function Partial _ -> true | Pass | Fail _ -> false) results in
       if fails <> [] then
+        (* [fails] was filtered to [Fail _] only; [Pass]/[Partial] are dead. *)
         let reasons = List.filter_map (function
           | Fail r -> Some r
-          | _ -> None
+          | Pass | Partial _ -> None
         ) fails in
         Fail (String.concat "; " reasons)
       else if partials <> [] then
+        (* [partials] was filtered to [Partial _] only; [Pass]/[Fail] are dead. *)
         let scores = List.filter_map (function
           | Partial (s, _) -> Some s
-          | _ -> None
+          | Pass | Fail _ -> None
         ) partials in
         let avg = List.fold_left (+.) 0.0 scores /. Float.of_int (List.length scores) in
         let reasons = List.filter_map (function
           | Partial (_, r) -> Some r
-          | _ -> None
+          | Pass | Fail _ -> None
         ) partials in
         Partial (avg, String.concat "; " reasons)
       else
@@ -557,7 +559,7 @@ let auto_verify ~base_path ~req_id =
   match load_request base_path req_id with
   | Error e -> Error e
   | Ok req ->
-      let has_custom = List.exists (function Custom _ -> true | _ -> false) req.criteria in
+      let has_custom = List.exists (function Custom _ -> true | Schema_match _ | Contains _ | Not_contains _ -> false) req.criteria in
       if has_custom then
         Error "Cannot auto-verify: custom criteria require agent judgment"
       else

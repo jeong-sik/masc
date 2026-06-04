@@ -32,3 +32,18 @@ val handle : tool_name:string -> start_time:float -> Yojson.Safe.t -> Tool_resul
     - [Transient_error]:    rate-limit hit + transport-layer failure;
                             both retry-friendly.
     - [Runtime_failure]:    upstream HTTP non-2xx or missing status. *)
+
+val with_http_get_for_test :
+  (timeout_sec:int ->
+   headers:(string * string) list ->
+   string ->
+   (int option * string, string) result) ->
+  (unit -> 'a) ->
+  'a
+(** [with_http_get_for_test http_get f] temporarily replaces the HTTP
+    GET boundary used by {!handle}, then restores the production curl
+    implementation after [f] returns or raises.
+
+    Test-only: URL validation, cache, rate-limit, status handling, HTML
+    cleanup, title/description extraction, and result construction still
+    run; only the external network request is replaced. *)

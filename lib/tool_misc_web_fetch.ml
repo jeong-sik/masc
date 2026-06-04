@@ -169,15 +169,42 @@ let fetch_failure_class : fetch_failure -> Tool_result.tool_failure_class =
   | Http_status _ -> Tool_result.Runtime_failure
   | No_http_status -> Tool_result.Runtime_failure
 
+type http_get =
+  timeout_sec:int ->
+  headers:(string * string) list ->
+  string ->
+  (int option * string, string) Result.t
+
+let default_http_get ~timeout_sec ~headers url =
+  Tool_local_runtime_http.http_get_text_with_status_with_headers
+    ~timeout_sec
+    ~headers
+    url
+
+let http_get_mutex = Mutex.create ()
+let http_get_ref = ref default_http_get
+
+let current_http_get () =
+  Mutex.protect http_get_mutex (fun () -> !http_get_ref)
+
+let with_http_get_for_test http_get f =
+  let previous =
+    Mutex.protect http_get_mutex (fun () ->
+        let previous = !http_get_ref in
+        http_get_ref := http_get;
+        previous)
+  in
+  Stdlib.Fun.protect
+    ~finally:(fun () ->
+      Mutex.protect http_get_mutex (fun () -> http_get_ref := previous))
+    f
+
 (** Main fetch implementation *)
 let fetch_impl ~url ~timeout_sec =
   let headers =
     [ ("User-Agent", "Mozilla/5.0 (compatible; MASC-FetchWeb/1.0)") ]
   in
-  match
-    Tool_local_runtime_http.http_get_text_with_status_with_headers
-      ~timeout_sec ~headers url
-  with
+  match (current_http_get ()) ~timeout_sec ~headers url with
   | Error detail ->
       Error (Transport_error (redact_transport_error_detail detail))
   | Ok (Some status, payload) when status >= 200 && status < 300 ->

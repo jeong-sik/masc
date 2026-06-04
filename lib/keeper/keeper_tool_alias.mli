@@ -6,7 +6,7 @@
     public schema.
 
     Two surfaces:
-    - LLM native tools (Execute, Grep, Read, Edit, Write, WebSearch, WebFetch)
+    - LLM native tools (Execute, Grep/Search, Read, Edit, Write, WebSearch, WebFetch)
     - MCP tools (masc_*, handled via Tool_catalog_surfaces)
 
     Internal [keeper_*] names are implementation details of the routing

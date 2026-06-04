@@ -506,7 +506,7 @@ lib/keeper/keeper_tool_execute_runtime.ml,744,false,unclassified
 lib/keeper_skill_routing/keeper_skill_routing.ml,111,None,unclassified
 lib/keeper/keeper_social_model.ml,164,None,unclassified
 lib/keeper/keeper_stale_watchdog.ml,257,None,unclassified
-lib/keeper/keeper_state_machine.ml,51,None,unclassified
+lib/keeper_state/keeper_state_machine.ml,51,None,unclassified
 lib/keeper/keeper_status_bridge.ml,686,None,unclassified
 lib/keeper/keeper_status_bridge.ml,703,false,unclassified
 lib/keeper/keeper_status_bridge.ml,863,false,unclassified

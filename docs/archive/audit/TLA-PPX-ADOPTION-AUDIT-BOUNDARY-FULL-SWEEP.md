@@ -80,7 +80,7 @@ For the 14 cross-domain specs, the instrumentation path is `[@@fsm_guard]` on th
 | Spec | Likely fsm_guard site |
 |---|---|
 | KeeperContractViolated | `lib/keeper/keeper_turn_terminal.ml` post-detection turn handoff |
-| KeeperRecoveryOrchestration | `lib/keeper/keeper_state_machine.ml` `Crashed → Restarting` transition |
+| KeeperRecoveryOrchestration | `lib/keeper_state/keeper_state_machine.ml` `Crashed → Restarting` transition |
 | KeeperContinueGate | `lib/keeper/keeper_run_tools.ml` continue-check |
 | etc. | per-spec |
 

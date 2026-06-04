@@ -3,7 +3,7 @@ status: reference
 last_verified: 2026-04-17
 code_refs:
   - lib/keeper/keeper_compact_policy.ml
-  - lib/keeper/keeper_state_machine.ml
+  - lib/keeper_state/keeper_state_machine.ml
   - lib/keeper/keeper_context_core.ml
 ---
 
@@ -40,9 +40,9 @@ failure reported by provider, not just a soft warning.
 
 ## 2. Phase Transitions
 
-Defined in [`lib/keeper/keeper_state_machine.mli:20-37`](../../lib/keeper/keeper_state_machine.mli)
+Defined in [`lib/keeper_state/keeper_state_machine.mli:20-37`](../../lib/keeper_state/keeper_state_machine.mli)
 (12-state enum). Event handlers in
-[`lib/keeper/keeper_state_machine.ml`](../../lib/keeper/keeper_state_machine.ml):
+[`lib/keeper_state/keeper_state_machine.ml`](../../lib/keeper_state/keeper_state_machine.ml):
 
 ```mermaid
 stateDiagram-v2
@@ -69,7 +69,7 @@ stateDiagram-v2
   operator intervention).
 
 **Post-turn lifecycle contract**
-([`keeper_state_machine.mli:110-138`](../../lib/keeper/keeper_state_machine.mli)):
+([`keeper_state_machine.mli:110-138`](../../lib/keeper_state/keeper_state_machine.mli)):
 `Compaction_started`/`Compaction_completed`/`Compaction_failed` MUST
 be dispatched only from `Keeper_post_turn.apply_post_turn_lifecycle_with_resilience_handles`.
 Violations reopen the

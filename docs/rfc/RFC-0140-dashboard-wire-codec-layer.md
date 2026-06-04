@@ -71,7 +71,7 @@ import { closedEnum, struct, optional } from './core'
 
 export const KeeperPhaseCodec = closedEnum({
   name: 'KeeperPhase',
-  // Backend SSOT: lib/keeper/keeper_state_machine.ml:6-19
+  // Backend SSOT: lib/keeper_state/keeper_state_machine.ml:6-19
   backend: ['offline', 'running', 'failing', 'overflowed', 'compacting',
             'handing_off', 'draining', 'paused', 'stopped', 'crashed',
             'restarting', 'dead', 'zombie'],

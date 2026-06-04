@@ -38,6 +38,8 @@ let test_r0_read_commands () =
   check "rg pattern lib/" Shell_ir_risk.R0_Read;
   check "git status" Shell_ir_risk.R0_Read;
   check "git log --oneline -5" Shell_ir_risk.R0_Read;
+  check "git branch -a --list '*20083*'" Shell_ir_risk.R0_Read;
+  check "git branch --show-current" Shell_ir_risk.R0_Read;
   check "gh pr view 123" Shell_ir_risk.R0_Read;
   check "dune build" Shell_ir_risk.R0_Read;
   check "npm run build" Shell_ir_risk.R0_Read
@@ -54,6 +56,9 @@ let test_r1_reversible_commands () =
   check "git push origin main" Shell_ir_risk.R1_Reversible_mutation;
   check "git commit -m msg" Shell_ir_risk.R1_Reversible_mutation;
   check "git checkout branch" Shell_ir_risk.R1_Reversible_mutation;
+  check "git branch new-branch" Shell_ir_risk.R1_Reversible_mutation;
+  check "git branch -d old-branch" Shell_ir_risk.R1_Reversible_mutation;
+  check "git branch -m old new" Shell_ir_risk.R1_Reversible_mutation;
   check "dune clean" Shell_ir_risk.R1_Reversible_mutation;
   check "make test" Shell_ir_risk.R1_Reversible_mutation;
   check "make install" Shell_ir_risk.R1_Reversible_mutation;

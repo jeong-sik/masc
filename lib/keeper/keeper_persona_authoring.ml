@@ -45,7 +45,8 @@ let json_trimmed_string_opt key json =
 ;;
 
 let json_string_list_normalized key json =
-  Safe_ops.json_string_list key json |> Keeper_types_profile.normalize_name_list
+  Safe_ops.json_string_list key json
+  |> Keeper_types_profile_toml_normalizers.normalize_name_list
 ;;
 
 type field_catalog_entry =
@@ -73,7 +74,7 @@ let field_catalog_entry_to_json entry =
 ;;
 
 let social_model_choices_json =
-  string_list_to_json Keeper_types_profile.valid_social_model_strings
+  string_list_to_json Keeper_types_profile_toml_normalizers.valid_social_model_strings
 ;;
 
 let alignment_choices = Archetypes.alignment_choices
@@ -342,14 +343,16 @@ let validate_unknown_keeper_fields keeper_json =
 ;;
 
 let normalize_social_model raw =
-  match Keeper_types_profile.normalize_social_model_opt (Some raw) with
+  match Keeper_types_profile_toml_normalizers.normalize_social_model_opt (Some raw) with
   | Some value -> Ok value
   | None ->
     Error
       (Printf.sprintf
          "invalid keeper.social_model '%s' (allowed: %s)"
          raw
-         (String.concat ", " Keeper_types_profile.valid_social_model_strings))
+         (String.concat
+            ", "
+            Keeper_types_profile_toml_normalizers.valid_social_model_strings))
 ;;
 
 let removed_runtime_selection_fields = [ "runtime_id"; "model" ]
@@ -492,7 +495,7 @@ let normalize_keeper_json ~handle keeper_json =
 let normalize_profile ~handle profile =
   if not (Keeper_config.validate_name handle)
   then Error "handle must match [A-Za-z0-9._-]+"
-  else if Keeper_types_profile.json_has_operator_todo_placeholder profile
+  else if Keeper_types_profile_persona.json_has_operator_todo_placeholder profile
   then
     Error
       "profile contains OPERATOR_TODO placeholder text; replace placeholders before saving"

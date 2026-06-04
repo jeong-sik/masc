@@ -3,9 +3,10 @@
 open Masc_domain
 
 (* Crypto utilities, file I/O, config, credential CRUD, token
-   verification — extracted to [Auth_credential] (godfile decomp). *)
+   verification — formerly re-exported via Auth_credential shim. *)
 
-include Auth_credential
+include Auth_credential_base
+include Auth_credential_token
 
 (* ============================================ *)
 (* Bare alias & archive                         *)

@@ -95,9 +95,7 @@ let main () =
   let json =
     Dashboard_keeper_feature_proof.json
       ~config:workspace_config
-      ~n:cfg.n
       ?window_hours:cfg.window_hours
-      ~success_threshold_pct:cfg.threshold
       ()
   in
   print_endline (Yojson.Safe.pretty_to_string json);

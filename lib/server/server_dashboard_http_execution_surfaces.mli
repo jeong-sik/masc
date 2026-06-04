@@ -64,7 +64,9 @@
 
 (** {1 Cache cells} *)
 
-val execution_cache : Server_dashboard_http_cache.cached_surface
+type cached_surface = Server_dashboard_http_cache.cached_surface
+
+val execution_cache : cached_surface
 (** Cached execution surface JSON.  Reached by
     [Server_dashboard_http_namespace_truth] (via the
     [Execution_surfaces] alias) for readiness gating —

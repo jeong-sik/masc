@@ -71,21 +71,20 @@ let workflow_err ~tool_name ~start_time msg : Tool_result.result =
     ~start_time
     msg
 
-let handle_dashboard ~tool_name ~start_time ctx args : Tool_result.result =
-  let compact = get_bool args "compact" false in
-  let scope_arg = String.lowercase_ascii (get_string args "scope" "all") in
-  match Dashboard.scope_of_string_opt scope_arg with
-  | None ->
-      workflow_err ~tool_name ~start_time
-        (Printf.sprintf "Invalid dashboard scope '%s' (expected: %s)"
-           scope_arg
-           (String.concat " | " Dashboard.valid_scope_strings))
-  | Some scope ->
-      let output =
-        if compact then Dashboard.generate_compact ~scope ctx.config
-        else Dashboard.generate ~scope ctx.config
-      in
-      text_ok ~tool_name ~start_time output
+let dashboard_handler =
+  ref (fun ~tool_name ~start_time:_ _ctx _args ->
+    Tool_result.make_err
+      ~tool_name
+      ~class_:Tool_result.Workflow_rejection
+      ~start_time:0.0
+      "Dashboard handler not registered"
+  )
+
+let register_dashboard_handler f =
+  dashboard_handler := f
+
+let handle_dashboard ~tool_name ~start_time ctx args =
+  !dashboard_handler ~tool_name ~start_time ctx args
 
 let handle_gc ~tool_name ~start_time ctx args : Tool_result.result =
   let days_raw = get_int args "days" 7 in

@@ -9,7 +9,7 @@
 
 open Alcotest
 
-module Http_transport = Masc.Server_mcp_transport_http
+module Http_transport = Server_mcp_transport_http
 module Session = Mcp_session
 
 let request_body ~method_ =

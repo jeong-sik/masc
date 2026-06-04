@@ -419,8 +419,8 @@ let test_remote_operator_action_schema_is_strict () =
     | Some schema -> schema
     | None -> Alcotest.failf "%s masc_operator_action schema not found" label
   in
-  check_schema "local" (find_operator_action Masc.Tool_operator.schemas "local");
-  check_schema "remote" (find_operator_action Masc.Tool_operator.remote_schemas "remote")
+  check_schema "local" (find_operator_action (Masc.Tool_operator.schemas ()) "local");
+  check_schema "remote" (find_operator_action (Masc.Tool_operator.remote_schemas ()) "remote")
 
 let test_retired_front_door_tools_absent_from_schema_inventory () =
   let retired_tools =

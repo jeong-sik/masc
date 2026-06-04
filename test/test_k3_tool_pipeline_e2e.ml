@@ -30,7 +30,7 @@ module W = Multimodal.Workspace
 module B = Multimodal.Multimodal_keeper_bridge
 module Wirein = Multimodal.Wirein_helpers
 module T = Multimodal.Tool_emission
-module Routes = Masc.Server_routes_http_routes_multimodal
+module Routes = Server_routes_http_routes_multimodal
 
 let emit = Multimodal.Keeper_emitter.emit
 

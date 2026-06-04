@@ -234,6 +234,7 @@ let test_full_registry_tools_call_matrix () =
         (String.concat "\n" failures)
 
 let () =
+  Mirage_crypto_rng_unix.use_default ();
   run "mcp_tool_matrix"
     [
       ( "inventory",

@@ -11,6 +11,12 @@ open Keeper_keepalive
 
 type tool_result = Keeper_types_profile.tool_result
 
+let remove_pending_confirms_by_target_callback =
+  ref (fun _config ~target_type:_ ~target_id:_ -> 0)
+
+let register_remove_pending_confirms_by_target fn =
+  remove_pending_confirms_by_target_callback := fn
+
 let handle_keeper_down_config ~(config : Workspace.config) args : tool_result =
   let requested_name = String.trim (get_string args "name" "") in
   if not (validate_name requested_name) then
@@ -28,7 +34,7 @@ let handle_keeper_down_config ~(config : Workspace.config) args : tool_result =
     | Ok None -> tool_result_ok (Printf.sprintf "keeper already absent: %s" requested_name)
     | Ok (Some (name, m)) ->
       let pending_confirms_removed =
-        Operator_pending_confirm.remove_pending_confirms_by_target config
+        (!remove_pending_confirms_by_target_callback) config
           ~target_type:"keeper" ~target_id:(Some name)
       in
       Log.Misc.info

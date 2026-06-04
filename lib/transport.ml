@@ -711,36 +711,36 @@ let get_bindings ~host ~port : binding list =
     ]
   in
   let bindings =
-    if Masc_grpc_server.is_enabled () then
+    if Env_config.Transport.grpc_enabled () then
       bindings
       @ [
           {
             protocol = Grpc;
             url =
               Printf.sprintf "grpc://%s:%d" host
-                (Masc_grpc_server.configured_port ());
-            options = [ ("health_service", Masc_grpc_server.health_service_name) ];
+                Env_config.Transport.grpc_port;
+            options = [ ("health_service", "grpc.health.v1.Health") ];
           };
         ]
     else
       bindings
   in
   let bindings =
-    if Server_ws_standalone.is_enabled () then
+    if Transport_metrics.ws_enabled () then
       bindings
       @ [
           {
             protocol = Ws;
             url =
               Printf.sprintf "ws://%s:%d/" host
-                (Server_ws_standalone.configured_port ());
+                Env_config.Transport.ws_port;
             options = [ ("mode", "standalone"); ("discovery_path", "/ws") ];
           };
         ]
     else
       bindings
   in
-  if Server_webrtc_transport.is_enabled () then
+  if Env_config.Transport.webrtc_enabled () then
     bindings
     @ [
         {

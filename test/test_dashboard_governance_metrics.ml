@@ -1,6 +1,6 @@
 (** Tests for Dashboard_governance_metrics — tool rejection ring + approval queue. *)
 
-module GM = Masc.Dashboard_governance_metrics
+module GM = Dashboard_governance_metrics
 module P = Masc.Prometheus
 
 open Alcotest

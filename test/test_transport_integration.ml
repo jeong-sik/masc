@@ -6,8 +6,8 @@
     3. WebRTC signaling full offer/answer/cleanup lifecycle
     4. Transport enum consistency across modules *)
 
-module T = Masc.Masc_grpc_types
-module Wrtc = Masc.Server_webrtc_transport
+module T = Masc_grpc_types
+module Wrtc = Server_webrtc_transport
 
 (* ============================================================
    1. gRPC Subscribe ← SSE Broadcast Integration
@@ -143,7 +143,7 @@ let test_ws_parse_handles_real_broadcast_wire_format () =
     match !captured with
     | None -> Alcotest.fail "callback never fired"
     | Some sse_event ->
-        match Masc.Server_mcp_transport_ws.parse_sse_dashboard_event
+        match Server_mcp_transport_ws.parse_sse_dashboard_event
                 sse_event with
         | None ->
             Alcotest.fail

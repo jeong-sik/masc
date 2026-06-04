@@ -45,3 +45,23 @@ val start :
     [Env_config.Operator.judge_enabled] and not already running.
     Backoff doubles up to 5x and caps at 300s when local runtime slots
     are saturated. Idempotent: subsequent calls are no-ops. *)
+
+val register_record_operator_judgment :
+  (Workspace.config ->
+   surface:string ->
+   target_type_str:string ->
+   target_id:string option ->
+   summary:string ->
+   confidence:float ->
+   ?model_name:string ->
+   ?recommended_action:Yojson.Safe.t ->
+   evidence_refs:string list ->
+   disagreement_with_truth:bool ->
+   generated_at:string ->
+   generated_at_unix:float ->
+   fresh_until:string ->
+   fresh_until_unix:float ->
+   keeper_name:string ->
+   unit ->
+   unit) ->
+  unit

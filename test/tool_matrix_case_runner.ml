@@ -31,6 +31,7 @@ let find_schema name =
   |> List.find_opt (fun (schema : Masc_domain.tool_schema) -> String.equal schema.name name)
 
 let () =
+  Mirage_crypto_rng_unix.use_default ();
   Printexc.record_backtrace true;
   if Array.length Sys.argv <> 2 then begin
     prerr_endline "usage: tool_matrix_case_runner.exe <tool-name>";

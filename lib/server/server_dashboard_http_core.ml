@@ -838,3 +838,8 @@ let dashboard_shell_http_json
   | None -> payload
   | Some request -> dashboard_shell_with_request_auth_json ~request config payload
 ;;
+
+let () =
+  Dashboard_snapshot.register_dashboard_shell_payload_json (fun ?light config ->
+      dashboard_shell_payload_json ?light config)
+;;

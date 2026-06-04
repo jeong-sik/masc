@@ -106,14 +106,21 @@ let annotate_delivery_state json ~cached ~stale ~refreshing ~last_error =
   |> upsert_field "refreshing" (`Bool refreshing)
   |> upsert_field "last_error" (Json_util.string_opt_to_json last_error)
 
+let operator_snapshot_json_ref : Dashboard_projection_cache.operator_snapshot_fn ref =
+  ref { Dashboard_projection_cache.snapshot = (fun ?actor:_ ?view:_ ?include_messages:_ ?include_keepers:_ ?include_summary_fields:_ ?lightweight_summary:_ _ctx ->
+    `Null) }
+
+let register_operator_snapshot_json fn =
+  operator_snapshot_json_ref := fn
+
 (* ── Compute ────────────────────────────────────────────────────── *)
 
-let compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () =
+let compute_briefing_json ~actor_name ~config ~sw ~(clock : [> float Eio.Time.clock_ty ] Eio.Resource.t) ~proc_mgr () =
   let now_ts = Unix.gettimeofday () in
     let briefing_json =
       Dashboard_briefing.json ~actor:actor_name ~config ~sw ~clock ~proc_mgr ()
     in
-    let ctx : _ Operator_control.context =
+    let ctx : _ Tool_operator.context =
       {
         config;
         agent_name = actor_name;
@@ -130,7 +137,7 @@ let compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () =
          keeper metadata can come from briefing_json. Pulling keepers,
          command-plane, and message payloads here duplicates the heaviest
          snapshot path and can spike memory on workspaces with many keepers. *)
-      Operator_control.snapshot_json ~actor:actor_name ~view:"summary"
+      (!operator_snapshot_json_ref).snapshot ~actor:actor_name ~view:"summary"
         ~include_messages:false ~include_keepers:false
         ~include_summary_fields:false
         ~lightweight_summary:true ctx
@@ -226,7 +233,7 @@ let compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () =
 
 (* ── Async refresh ──────────────────────────────────────────────── *)
 
-let start_async_refresh ~actor_name ~config ~sw ~clock ~proc_mgr () =
+let start_async_refresh ~actor_name ~config ~sw ~(clock : [> float Eio.Time.clock_ty ] Eio.Resource.t) ~proc_mgr () =
   let should_start =
     with_cache_lock (fun () ->
         if cache.refresh_in_flight then
@@ -243,6 +250,11 @@ let start_async_refresh ~actor_name ~config ~sw ~clock ~proc_mgr () =
   if should_start then
     Eio.Fiber.fork_daemon ~sw:refresh_sw (fun () ->
         (try
+           let clock =
+             match Eio_context.get_clock_opt () with
+             | Some c -> c
+             | None -> (clock :> float Eio.Time.clock_ty Eio.Resource.t)
+           in
            match
              compute_briefing_json ~actor_name ~config ~sw:refresh_sw ~clock
                ~proc_mgr ()
@@ -273,7 +285,7 @@ let actor_name = function
       if trimmed <> "" then trimmed else "dashboard"
   | None -> "dashboard"
 
-let json ?actor ?(force = false) ~config ~sw ~clock ~proc_mgr () =
+let json ?actor ?(force = false) ~config ~sw ~(clock : [> float Eio.Time.clock_ty ] Eio.Resource.t) ~proc_mgr () =
   let now_ts = Unix.gettimeofday () in
   let now_iso = Masc_domain.now_iso () in
   let actor_name = actor_name actor in

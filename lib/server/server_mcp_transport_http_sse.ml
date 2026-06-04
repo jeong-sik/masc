@@ -10,3 +10,10 @@ include Server_mcp_transport_http_conn
 
 let respond_sse_rate_limited =
   Server_mcp_transport_http_respond.respond_sse_rate_limited
+;;
+
+let () = Shutdown_hooks.register_sse_cleanup (fun () ->
+  let closed = Sse.close_all_clients () in
+  closed, active_session_count ()
+)
+

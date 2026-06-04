@@ -1,12 +1,4 @@
-type 'a context = {
-  config : Workspace.config;
-  agent_name : string;
-  sw : Eio.Switch.t;
-  clock : 'a Eio.Time.clock;
-  proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option;
-  net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option;
-  mcp_session_id : string option;
-}
+type 'a context = 'a Tool_operator.context
 
 
 let operator_dir config =

@@ -8,7 +8,7 @@
     keeps the field set/values the dashboard depends on. *)
 
 open Alcotest
-module F = Masc.Dashboard_http_keeper_feeds
+module F = Dashboard_http_keeper_feeds
 
 let member key (json : Yojson.Safe.t) : Yojson.Safe.t option =
   match json with `Assoc fields -> List.assoc_opt key fields | _ -> None

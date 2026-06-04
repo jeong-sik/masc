@@ -5,7 +5,7 @@
     PR-2. *)
 
 open Alcotest
-module R = Masc.Server_mcp_transport_http_respond
+module R = Server_mcp_transport_http_respond
 module C = Masc.Mcp_error_code
 
 (* JSON equality with stable key order: compare normalised string

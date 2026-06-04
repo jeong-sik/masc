@@ -23,11 +23,11 @@ module Keeper_memory = Masc.Keeper_memory
 module Keeper_execution = Masc.Keeper_execution
 module Keeper_runtime = Masc.Keeper_runtime
 module Tool_operator = Masc.Tool_operator
-module Operator_control = Masc.Operator_control
-module Dashboard_execution = Masc.Dashboard_execution
-module Dashboard_briefing = Masc.Dashboard_briefing
+module Operator_control = Operator_control
+module Dashboard_execution = Dashboard_execution
+module Dashboard_briefing = Dashboard_briefing
 (* module Dashboard_proof removed *)
-module Dashboard_briefing_sections = Masc.Dashboard_briefing_sections
+module Dashboard_briefing_sections = Dashboard_briefing_sections
 module Build_identity = Masc.Build_identity
 module Auth_login = Masc.Auth_login
 module Keeper_id = Masc.Keeper_id
@@ -47,20 +47,20 @@ module Progress = Masc.Progress
 module Sse = Masc.Sse
 module Safe_ops = Safe_ops
 module Tool_board = Masc.Tool_board
-module Server_mcp_transport_http = Masc.Server_mcp_transport_http
+module Server_mcp_transport_http = Server_mcp_transport_http
 
 
 (* ============================================ *)
 (* Extracted modules (lib/)                      *)
 (* ============================================ *)
 include Masc.Server_utils
-include Masc.Server_auth
-include Masc.Server_voice_config
-include Masc.Server_dashboard_http
-module Server_h2_gateway = Masc.Server_h2_gateway
-module Server_runtime_bootstrap = Masc.Server_runtime_bootstrap
-module Server_routes_http_runtime = Masc.Server_routes_http_runtime
-module Server_startup_takeover = Masc.Server_startup_takeover
+include Server_auth
+include Server_voice_config
+include Server_dashboard_http
+module Server_h2_gateway = Server_h2_gateway
+module Server_runtime_bootstrap = Server_runtime_bootstrap
+module Server_routes_http_runtime = Server_routes_http_runtime
+module Server_startup_takeover = Server_startup_takeover
 
 let mcp_protocol_versions = Server_mcp_transport_http.mcp_protocol_versions
 
@@ -103,7 +103,7 @@ let get_protocol_version = Server_mcp_transport_http.get_protocol_version
 let get_protocol_version_for_session =
   Server_mcp_transport_http.get_protocol_version_for_session
 
-module Server_routes_http = Masc.Server_routes_http
+module Server_routes_http = Server_routes_http
 
 open Server_routes_http
 
@@ -112,7 +112,7 @@ open Server_routes_http
    manual edit here. *)
 let is_rate_limit_exempt path =
   String.equal path "/health"
-  || Masc.Server_health_paths.is_public path
+  || Server_health_paths.is_public path
 
 (** [safe_reqd_respond reqd response body] guards all direct
     [Httpun.Reqd.respond_with_string] calls in the main request handler
@@ -234,16 +234,16 @@ let dispatch_route ~router ~request ~path reqd =
     ] in
     let response = Httpun.Response.create ~headers `OK in
     safe_reqd_respond reqd response body
-  | `POST, "/webrtc/offer" when Masc.Server_webrtc_transport.is_enabled () ->
+  | `POST, "/webrtc/offer" when Server_webrtc_transport.is_enabled () ->
     Http.Request.read_body_async reqd (fun body ->
-      match Masc.Server_webrtc_transport.handle_offer_request body with
+      match Server_webrtc_transport.handle_offer_request body with
       | Ok json -> Http.Response.json json reqd
       | Error msg ->
         Http.Response.json ~status:`Bad_request
           (Printf.sprintf {|{"error":"%s"}|} msg) reqd)
-  | `POST, "/webrtc/answer" when Masc.Server_webrtc_transport.is_enabled () ->
+  | `POST, "/webrtc/answer" when Server_webrtc_transport.is_enabled () ->
     Http.Request.read_body_async reqd (fun body ->
-      match Masc.Server_webrtc_transport.handle_answer_request body with
+      match Server_webrtc_transport.handle_answer_request body with
       | Ok json -> Http.Response.json json reqd
       | Error msg ->
         Http.Response.json ~status:`Bad_request
@@ -739,8 +739,8 @@ let run_cmd host port base_path =
               "[Shutdown] Phase 1/4 NOTIFY: sent to %d SSE clients (%.2fs) [active conn: %d, ws: %d]"
               (Sse.client_count ())
               (Unix.gettimeofday () -. t_phase)
-              (Masc.Server_mcp_transport_http_sse.active_session_count ())
-              (Masc.Server_mcp_transport_ws.session_count ());
+              (Server_mcp_transport_http_sse.active_session_count ())
+              (Server_mcp_transport_ws.session_count ());
 
             Eio.Time.sleep clock shutdown_cfg.notify_delay_s;
             (* Phase 2: Run shutdown hooks with cleanup timeout *)
@@ -766,8 +766,8 @@ let run_cmd host port base_path =
             Log.Server.info "[Shutdown] Phase 2/4 HOOKS: done (%.2fs, total=%.1fs) [active conn: %d, ws: %d]"
               (now -. t_phase)
               (now -. t_shutdown_start)
-              (Masc.Server_mcp_transport_http_sse.active_session_count ())
-              (Masc.Server_mcp_transport_ws.session_count ());
+              (Server_mcp_transport_http_sse.active_session_count ())
+              (Server_mcp_transport_ws.session_count ());
             (* Phase 3: Board flush with 2s timeout *)
             let t_phase = Unix.gettimeofday () in
             Log.Server.info "[Shutdown] Phase 3/4 BOARD: flush starting (timeout=2.0s)";
@@ -789,16 +789,16 @@ let run_cmd host port base_path =
             Log.Server.info "[Shutdown] Phase 3/4 BOARD: done (%.2fs, total=%.1fs) [active conn: %d, ws: %d]"
               (now -. t_phase)
               (now -. t_shutdown_start)
-              (Masc.Server_mcp_transport_http_sse.active_session_count ())
-              (Masc.Server_mcp_transport_ws.session_count ());
+              (Server_mcp_transport_http_sse.active_session_count ())
+              (Server_mcp_transport_ws.session_count ());
 
             (* Phase 4: Return normally — Eio.Fiber.first will cancel
                run_server cleanly via Eio.Cancel.Cancelled. *)
             Log.Server.info
               "[Shutdown] Phase 4/4 CANCEL: server cancel (total=%.1fs) [active conn: %d, ws: %d]"
               (Unix.gettimeofday () -. t_shutdown_start)
-              (Masc.Server_mcp_transport_http_sse.active_session_count ())
-              (Masc.Server_mcp_transport_ws.session_count ());
+              (Server_mcp_transport_http_sse.active_session_count ())
+              (Server_mcp_transport_ws.session_count ());
             ()
             in
             Eio.Fiber.first
@@ -812,8 +812,8 @@ let run_cmd host port base_path =
                 Log.Server.warn "shutdown: SSE close error: %s"
                   (Printexc.to_string exn));
             Log.Server.info "MASC MCP: Server stopped, waiting for background fibers... [active conn: %d, ws: %d]"
-            (Masc.Server_mcp_transport_http_sse.active_session_count ())
-            (Masc.Server_mcp_transport_ws.session_count ())
+            (Server_mcp_transport_http_sse.active_session_count ())
+            (Server_mcp_transport_ws.session_count ())
 
     with
     | Eio.Cancel.Cancelled _ ->

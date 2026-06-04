@@ -213,6 +213,9 @@ let handle_masc_tool_shard ~name ~args =
   else Yojson.Safe.to_string (`Assoc [ "error", payload ])
 ;;
 
+let dashboard_surface_readiness_callback = ref (fun ?surface_id:_ () -> `Assoc [])
+let register_dashboard_surface_readiness fn = dashboard_surface_readiness_callback := fn
+
 (* RFC-0182 §3.1 — masc_surface_audit singleton.  Body is pure
    ([Dashboard_surface_readiness.json ?surface_id ()]) with no ctx
    requirements; direct import is cycle-safe.
@@ -221,7 +224,7 @@ let handle_masc_tool_shard ~name ~args =
    [Dashboard_surface_readiness]. *)
 let handle_masc_surface_audit ~args =
   let surface_id = Safe_ops.json_string_opt "surface_id" args in
-  Yojson.Safe.to_string (Dashboard_surface_readiness.json ?surface_id ())
+  Yojson.Safe.to_string (!dashboard_surface_readiness_callback ?surface_id ())
 ;;
 
 (* RFC-0182 §3.1 — masc_keeper cluster.  [Keeper_tool_surface] lives in lib/

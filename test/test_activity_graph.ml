@@ -556,9 +556,9 @@ let test_agent_spans_json_honors_since_ms () =
 
 let test_parse_since_ms_supports_minutes () =
   check (option int) "5m parses" (Some (5 * 60 * 1000))
-    (Lib.Server_activity_http.parse_since_ms "5m");
+    (Server_activity_http.parse_since_ms "5m");
   check (option int) "1h still parses" (Some (3600 * 1000))
-    (Lib.Server_activity_http.parse_since_ms "1h")
+    (Server_activity_http.parse_since_ms "1h")
 
 let test_span_status_of_string_opt_returns_none_for_unknown () =
   (* #8605 family: strict variant exposes unknown wires explicitly so

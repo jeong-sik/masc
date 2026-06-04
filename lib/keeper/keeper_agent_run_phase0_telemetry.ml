@@ -25,8 +25,8 @@ let record_if_enabled
         | m :: _ -> m
         | [] -> "auto"
       in
-      let _event : Dashboard_harness_health.wake_payload_event =
-        Dashboard_harness_health.record_wake_payload
+      let () =
+        !Keeper_keepalive_signal.record_wake_payload_callback
           ~keeper_name:meta.name
           ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
           ~turn_index:start_turn_count

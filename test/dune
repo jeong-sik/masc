@@ -1404,6 +1404,8 @@
 
 (include stanzas/test_keeper_tool_command_runtime_cwd_response.inc)
 
+(include stanzas/test_keeper_tool_execute_path_message.inc)
+
 (include stanzas/test_keeper_tool_dispatch_runtime.inc)
 
 (include stanzas/test_keeper_fs.inc)

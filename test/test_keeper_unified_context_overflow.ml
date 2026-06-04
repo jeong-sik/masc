@@ -2,7 +2,7 @@ open Alcotest
 
 module EC = Masc.Keeper_error_classify
 module UT = Masc.Keeper_unified_turn
-module KP = Masc.Keeper_state_machine
+module KP = Keeper_state_machine
 
 let keeper_name = "test-keeper"
 

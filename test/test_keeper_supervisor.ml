@@ -12,7 +12,7 @@ module Reg = Masc.Keeper_registry
 module KT = Masc.Keeper_types
 module KR = Masc.Keeper_runtime
 module AQ = Masc.Keeper_approval_queue
-module KSM = Masc.Keeper_state_machine
+module KSM = Keeper_state_machine
 module KLH = Masc.Keeper_lifecycle_hooks
 module FD = Masc.Keeper_fd_pressure
 module KA = Masc.Keeper_keepalive
@@ -669,7 +669,7 @@ let test_self_preservation_subset () =
   let entries = List.map (fun name ->
     let _reg = Reg.register ~base_path:bp name (make_meta name) in
     ignore (Reg.dispatch_event ~base_path:bp name
-      (Masc.Keeper_state_machine.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }));
+      (Keeper_state_machine.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }));
     Reg.set_failure_reason ~base_path:bp name
       (Some (Reg.Heartbeat_consecutive_failures 3));
     match Reg.get ~base_path:bp name with
@@ -1067,10 +1067,10 @@ let test_max_restarts_exhaustion_emits_dead_alert () =
       (* Phase advanced to Dead. *)
       let phase =
         Reg.get_phase ~base_path:config.base_path name
-        |> Option.value ~default:Masc.Keeper_state_machine.Running
+        |> Option.value ~default:Keeper_state_machine.Running
       in
       check bool "keeper phase advanced to Dead"
-        true (phase = Masc.Keeper_state_machine.Dead))
+        true (phase = Keeper_state_machine.Dead))
 
 let with_reap_ready_dead_keeper name f =
   Eio_main.run @@ fun env ->

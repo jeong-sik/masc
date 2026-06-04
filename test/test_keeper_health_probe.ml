@@ -5,7 +5,7 @@
 
 module H = Masc.Keeper_health_probe
 module R = Masc.Keeper_registry
-module KSM = Masc.Keeper_state_machine
+module KSM = Keeper_state_machine
 
 let pressure_label_t = Alcotest.(option string)
 

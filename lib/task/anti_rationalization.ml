@@ -117,7 +117,7 @@ type review_result =
    needles like the Korean entries below match correctly without
    needing a Unicode-aware lowercase pass.
 
-   Korean coverage is the immediate gap to close — the keeper
+   Korean coverage is the immediate gap to close — the agent
    fleet's 한국어 LLM output produced 0% detection pre-fix while
    `<base_path>/.masc/institution_episodes.jsonl` carried real entries
    like "나중에", "범위 밖", "재현 안됨".  English false-positives
@@ -611,6 +611,21 @@ let review
      | None -> ());
     result
   in
+  let task_info fmt =
+    Stdlib.Format.ksprintf
+      (fun message -> Log.Task.info "task_id=%s %s" req.task_id message)
+      fmt
+  in
+  let task_warn fmt =
+    Stdlib.Format.ksprintf
+      (fun message -> Log.Task.warn "task_id=%s %s" req.task_id message)
+      fmt
+  in
+  let task_error fmt =
+    Stdlib.Format.ksprintf
+      (fun message -> Log.Task.error "task_id=%s %s" req.task_id message)
+      fmt
+  in
   (* Gate 1: empty or trivially short notes *)
   let notes_trimmed = String.trim req.completion_notes in
   if String.length notes_trimmed < min_notes_length
@@ -644,8 +659,7 @@ let review
     match excuse_match with
     | Some (pattern, reason) when Env_config.AntiRationalization.gate2_fail_closed ->
       (Atomic.get excuse_pattern_observer_fn) ~pattern ~outcome:Terminal_reject;
-      Log.Task.info
-        ~keeper_name:req.task_id
+      task_info
         "[anti-rationalization] agent=%s task=%s excuse_pattern=%s \
          gate2_fail_closed=true → terminal reject"
         req.agent_name
@@ -670,8 +684,7 @@ let review
         | None -> None
         | Some (pattern, reason) ->
           (Atomic.get excuse_pattern_observer_fn) ~pattern ~outcome:Advisory_to_llm;
-          Log.Task.info
-        ~keeper_name:req.task_id
+          task_info
             "[anti-rationalization] agent=%s task=%s excuse_pattern=%s (advisory; \
              deferring to LLM evaluator with context)"
             req.agent_name
@@ -681,7 +694,7 @@ let review
       in
       (* Gate 2.5: legacy local contract check. When the verification FSM is
      enabled, contract judgment is deferred to the Gate 3 LLM prompt instead
-     of routing normal completion through a verifier keeper. When FSM is
+     of routing normal completion through a verifier agent. When FSM is
      disabled, the historical substring check remains as a minimal local
      safety net. *)
       let contract_rejection =
@@ -695,8 +708,7 @@ let review
             if unmet = []
             then None
             else (
-              Log.Task.info
-        ~keeper_name:req.task_id
+              task_info
                 "[anti-rationalization] contract unmet (legacy): agent=%s task=%s \
                  unmet=[%s]"
                 req.agent_name
@@ -727,8 +739,7 @@ let review
          in
          (match generator_runtime with
           | Some gc when gc = evaluator_runtime ->
-            Log.Task.warn
-        ~keeper_name:req.task_id
+            task_warn
               "[anti-rationalization] same runtime for generator (%s) and evaluator (%s) \
                — cross-model separation not active"
               gc
@@ -746,11 +757,11 @@ let review
             let v, gate, fallback_reason =
               match verdict_opt with
               | Some v ->
-                Log.Task.info ~keeper_name:req.task_id "[anti-rationalization] verdict via structured tool call";
+                task_info "[anti-rationalization] verdict via structured tool call";
                 v, Structured_tool, None
               | None ->
                 (* LLM responded with text — lenient fallback *)
-                Log.Task.info ~keeper_name:req.task_id "[anti-rationalization] verdict via text fallback";
+                task_info "[anti-rationalization] verdict via text fallback";
                 (match parse_verdict text with
                  | Ok v -> v, Llm_text_fallback, None
                  | Error "empty review output" ->
@@ -759,18 +770,16 @@ let review
                  no signal, indistinguishable from an unavailable
                  evaluator. Approve by liveness — same policy as the
                  [Error err] branch below — instead of blaming the
-                 completing keeper for an evaluator-side gap. Observed
+                 completing agent for an evaluator-side gap. Observed
                  35 rejects in 2 days (#8688, <base-path>/.masc/tool_calls). *)
-                   Log.Task.warn
-        ~keeper_name:req.task_id
+                   task_warn
                      "[anti-rationalization] evaluator returned empty text (approving by \
                       liveness)";
                    Approve, Fallback, Some "evaluator returned empty response"
                  | Error parse_err ->
                    (* ADR D3: parse failure is NOT silently approved.
                  Use Reject instead of Approve for unknown format. *)
-                   Log.Task.warn
-        ~keeper_name:req.task_id
+                   task_warn
                      "[anti-rationalization] verdict parse failed: %s (rejecting)"
                      parse_err;
                    ( Reject (sprintf "review format unrecognized: %s" parse_err)
@@ -779,8 +788,7 @@ let review
             in
             (match v with
              | Reject reason ->
-               Log.Task.info
-        ~keeper_name:req.task_id
+               task_info
                  "[anti-rationalization] LLM rejected: agent=%s task=%s runtime=%s \
                   reason=%s"
                  req.agent_name
@@ -788,8 +796,7 @@ let review
                  evaluator_runtime
                  reason
              | Approve ->
-               Log.Task.info
-        ~keeper_name:req.task_id
+               task_info
                  "[anti-rationalization] LLM approved: agent=%s task=%s runtime=%s"
                  req.agent_name
                  req.task_title
@@ -810,9 +817,9 @@ let review
           tool-use gate at filter time — there are zero callable
           models, and there will not be any until the runtime config
           (or provider capabilities) changes.  Treating that as a
-          fail-closed safety-net reject blocks every keeper trying to
+          fail-closed safety-net reject blocks every agent trying to
           finish a task with a perfectly legitimate "out of scope"
-          phrase, which is the runtime's bug, not the keeper's
+          phrase, which is the runtime's bug, not the agent's
           purview.  Promote to operator-actionable ERROR and approve
           by liveness — the operator must fix the runtime definition
           before the safety net can do useful work. *)
@@ -835,7 +842,7 @@ let review
                  branches must agree on the excuse-advisory case.
 
                  The original liveness rationale (#10474: do not block
-                 every keeper waiting for a runtime fix) is preserved for
+                 every agent waiting for a runtime fix) is preserved for
                  the [None] case — the vast majority of tasks have no
                  active substring advisory and continue to approve. *)
               match excuse_advisory with
@@ -843,8 +850,7 @@ let review
                 (Atomic.get excuse_pattern_observer_fn)
                   ~pattern
                   ~outcome:Advisory_safety_net_reject_runtime_dead;
-                Log.Task.error
-        ~keeper_name:req.task_id
+                task_error
                   "[anti-rationalization] runtime %s permanently dead AND gate-2 \
                    advisory pattern=%s active: rejecting (safety net) rather than \
                    laundering excuse phrase through liveness.  OPERATOR ACTION \
@@ -873,10 +879,9 @@ let review
                            evaluator_runtime)
                   }
               | None ->
-                Log.Task.error
-        ~keeper_name:req.task_id
+                task_error
                   "[anti-rationalization] runtime %s has zero callable providers — \
-                   ALL keepers using this evaluator are blocked from task \
+                   ALL agents using this evaluator are blocked from task \
                    completion.  Approving by liveness; OPERATOR ACTION REQUIRED: \
                    fix the runtime definition (provider capabilities, MCP policy, \
                    or tool requirements).  See #10474.  err=%s"
@@ -909,8 +914,7 @@ let review
                 (Atomic.get excuse_pattern_observer_fn)
                   ~pattern
                   ~outcome:Advisory_safety_net_reject;
-                Log.Task.warn
-        ~keeper_name:req.task_id
+                task_warn
                   "[anti-rationalization] LLM unavailable + gate-2 advisory pattern=%s \
                    active: rejecting (safety net) (runtime=%s err=%s)"
                   pattern
@@ -931,8 +935,7 @@ let review
                   ; fallback_reason = Some msg
                   }
               | None, Env_config.AntiRationalization.Open ->
-                Log.Task.warn
-        ~keeper_name:req.task_id
+                task_warn
                   "[anti-rationalization] LLM unavailable: %s (approving by default; \
                    mode=open MASC_ANTI_RATIONALIZATION_FAIL_MODE=open)"
                   msg;
@@ -944,8 +947,7 @@ let review
                   ; fallback_reason = Some msg
                   }
               | None, Env_config.AntiRationalization.Closed ->
-                Log.Task.warn
-        ~keeper_name:req.task_id
+                task_warn
                   "[anti-rationalization] LLM unavailable: %s (rejecting by default; \
                    mode=closed MASC_ANTI_RATIONALIZATION_FAIL_MODE=closed)"
                   msg;

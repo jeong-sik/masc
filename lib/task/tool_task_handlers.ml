@@ -54,7 +54,6 @@ type context = {
 type task_owner_hooks =
   { is_registered_agent_alias : Workspace.config -> string -> bool
   ; sync_current_task_binding : Workspace.config -> agent_name:string -> unit
-  ; keeper_tool_names : Workspace.config -> agent_name:string -> string list option
   ; transition_action_denylist : Workspace.config -> agent_name:string -> string list
   ; active_goal_phases_for_agent : Workspace.config -> agent_name:string -> string list
   }
@@ -62,7 +61,6 @@ type task_owner_hooks =
 let default_task_owner_hooks =
   { is_registered_agent_alias = (fun _ _ -> false)
   ; sync_current_task_binding = (fun _ ~agent_name:_ -> ())
-  ; keeper_tool_names = (fun _ ~agent_name:_ -> None)
   ; transition_action_denylist = (fun _ ~agent_name:_ -> [])
   ; active_goal_phases_for_agent = (fun _ ~agent_name:_ -> [])
   }
@@ -73,6 +71,26 @@ let set_task_owner_hooks hooks = Atomic.set task_owner_hooks hooks
 let current_task_owner_hooks () = Atomic.get task_owner_hooks
 
 open Tool_args
+
+let task_log_warn ~task_id fmt =
+  Stdlib.Format.ksprintf
+    (fun message -> Log.Task.warn "task_id=%s %s" task_id message)
+    fmt
+
+let task_log_error ~task_id fmt =
+  Stdlib.Format.ksprintf
+    (fun message -> Log.Task.error "task_id=%s %s" task_id message)
+    fmt
+
+let task_agent_log_warn ~agent_name fmt =
+  Stdlib.Format.ksprintf
+    (fun message -> Log.Task.warn "agent_name=%s %s" agent_name message)
+    fmt
+
+let task_agent_log_error ~agent_name fmt =
+  Stdlib.Format.ksprintf
+    (fun message -> Log.Task.error "agent_name=%s %s" agent_name message)
+    fmt
 
 (* RFC-0189: [Masc_domain] backend Error variants (Task_error /
    Agent_error / etc.) currently surface as caller-actionable
@@ -93,8 +111,8 @@ let log_task_transition_failed ~agent_name err =
   let message = Masc_domain.masc_error_to_string err in
   match err with
   | Masc_domain.Task (Masc_domain.Task_error.InvalidState _) ->
-      Log.Task.warn ~keeper_name:agent_name "task transition failed: %s" message
-  | _ -> Log.Task.error ~keeper_name:agent_name "task transition failed: %s" message
+      task_agent_log_warn ~agent_name "task transition failed: %s" message
+  | _ -> task_agent_log_error ~agent_name "task transition failed: %s" message
 
 (** Client-side FSM gate: reject impossible transitions before server dispatch.
     Uses [Workspace_task_classify.valid_next_actions_for_status] as SSOT. *)
@@ -159,7 +177,7 @@ let sync_planning_current_task_with_owned_task (ctx : context) =
         (match Planning_eio.set_current_task ctx.config ~task_id with
          | Ok () -> ()
          | Error msg ->
-             Log.Task.warn ~keeper_name:task_id
+             task_log_warn ~task_id
                "failed to sync planning current_task to %s: %s"
                task_id msg)
     | None -> Planning_eio.clear_current_task ctx.config
@@ -168,9 +186,6 @@ let sync_owner_current_task_binding (ctx : context) =
   (current_task_owner_hooks ()).sync_current_task_binding
     ctx.config
     ~agent_name:ctx.agent_name
-
-let agent_allowed_tool_names (ctx : context) =
-  (current_task_owner_hooks ()).keeper_tool_names ctx.config ~agent_name:ctx.agent_name
 
 let owner_transition_action_denylist (ctx : context) =
   (current_task_owner_hooks ()).transition_action_denylist
@@ -412,7 +427,7 @@ let handle_claim ~tool_name ~start_time ctx args =
           ("auto_released_task_ids", auto_released_json);
           ("timestamp", `Float (Time_compat.now ()));
         ])
-   | Error e -> Log.Task.warn ~keeper_name:task_id "task claim failed for %s: %s" task_id (Masc_domain.masc_error_to_string e));
+   | Error e -> task_log_warn ~task_id "task claim failed for %s: %s" task_id (Masc_domain.masc_error_to_string e));
   let response_result =
     Result.map (fun (o : Workspace.claim_outcome) -> o.message) result
   in

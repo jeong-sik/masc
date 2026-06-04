@@ -296,7 +296,7 @@ let current_task_file (config : Workspace.config) =
 
 (* The planning [current_task] path must be a file, but runtime state can be
    corrupted by external writers. Keep these helpers total for directory-shaped
-   corruption so one bad path cannot wedge keeper claim/transition flows. *)
+   corruption so one bad path cannot wedge owner claim/transition flows. *)
 
 let is_directory_path path =
   try Sys.is_directory path with Sys_error _ -> false
@@ -320,13 +320,13 @@ let quarantine_dir_under_trash (config : Workspace.config) ~path ~op =
   in
   try
     Sys.rename path dest;
-    Log.Keeper.warn
+    Log.Task.warn
       "planning_eio.%s: current_task path was a directory; quarantined to %s"
       op dest;
     Ok dest
   with
   | Sys_error msg ->
-    Log.Keeper.warn
+    Log.Task.warn
       "planning_eio.%s: failed to quarantine directory at %s: %s"
       op path msg;
     Error msg
@@ -340,18 +340,18 @@ let remove_empty_current_task_dir ~path ~op =
          true
        with
        | Unix.Unix_error _ as e ->
-         Log.Keeper.warn
+         Log.Task.warn
            "planning_eio.%s: rmdir %s failed: %s"
            op path (Printexc.to_string e);
          false)
     | _ ->
-      Log.Keeper.warn
+      Log.Task.warn
         "planning_eio.%s: %s is a non-empty directory; leaving it in place"
         op path;
       false
   with
   | Sys_error msg ->
-    Log.Keeper.warn
+    Log.Task.warn
       "planning_eio.%s: failed to inspect directory at %s: %s"
       op path msg;
     false
@@ -361,7 +361,7 @@ let get_current_task (config : Workspace.config) : string option =
   let path = current_task_file config in
   if not (Sys.file_exists path) then None
   else if is_directory_path path then begin
-    Log.Keeper.warn
+    Log.Task.warn
       "planning_eio.get_current_task: %s is a directory; treating as cleared"
       path;
     None
@@ -369,7 +369,7 @@ let get_current_task (config : Workspace.config) : string option =
   else
     try Some (String.trim (read_file_content path)) with
     | Sys_error msg when is_directory_path path ->
-      Log.Keeper.warn
+      Log.Task.warn
         "planning_eio.get_current_task: %s became a directory during read: %s"
         path msg;
       None
@@ -384,7 +384,7 @@ let set_current_task (config : Workspace.config) ~task_id : (unit, string) resul
       Ok ()
     with
     | Sys_error msg when is_directory_path path ->
-      Log.Keeper.warn
+      Log.Task.warn
         "planning_eio.set_current_task: %s became a directory during write: %s"
         path msg;
       Error
@@ -399,7 +399,7 @@ let set_current_task (config : Workspace.config) ~task_id : (unit, string) resul
       if remove_empty_current_task_dir ~path ~op:"set_current_task" then
         write_current_task ()
       else begin
-        Log.Keeper.warn
+        Log.Task.warn
           "planning_eio.set_current_task: leaving directory in place after \
            quarantine failure: %s"
           msg;
@@ -420,7 +420,7 @@ let clear_current_task (config : Workspace.config) : unit =
   else
     try Sys.remove path with
     | Sys_error msg when is_directory_path path ->
-      Log.Keeper.warn
+      Log.Task.warn
         "planning_eio.clear_current_task: %s became a directory during remove: %s"
         path msg
 

@@ -21,7 +21,6 @@
     [classify_tool_failure_severity],
     [parse_status_from_message], [quality_issue],
     [nonempty_string_opt], [json_nonempty_string_opt],
-    [runtime_mcp_tool_surface_class],
     [runtime_mcp_keeper_error_preview],
     [runtime_mcp_keeper_tool_call_sse_payload],
     [runtime_mcp_masc_root],
@@ -111,8 +110,6 @@ type keeper_runtime_mcp_log_context = {
   allowed_paths : string list option;
   network_mode : string option;
   approval_mode : string option;
-  tool_surface_class : string option;
-  allowed_tool_count : int option;
   runtime_profile : string option;
 }
 (** Snapshot of the keeper-bound runtime-MCP context

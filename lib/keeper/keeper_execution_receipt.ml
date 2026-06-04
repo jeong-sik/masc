@@ -481,10 +481,6 @@ let to_json (receipt : t) =
       ?sandbox_root:receipt.sandbox_root
       ~network_mode:(Keeper_types_profile_sandbox.network_mode_to_string receipt.network_mode)
       ?approval_mode:receipt.approval_profile
-      ~tool_surface_class:
-        (Keeper_agent_tool_surface.tool_surface_class_to_string
-           receipt.tool_surface.tool_surface_class)
-      ~allowed_tool_count:receipt.tool_surface.allowed_tool_count
       ~runtime_profile:(receipt.runtime_id)
       ()
   in
@@ -539,15 +535,6 @@ let to_json (receipt : t) =
           [ ( "turn_lane"
             , Keeper_agent_tool_surface.turn_lane_to_yojson receipt.tool_surface.turn_lane
             )
-          ; ( "tool_surface_class"
-            , Keeper_agent_tool_surface.tool_surface_class_to_yojson
-                receipt.tool_surface.tool_surface_class )
-          ; ( "tool_requirement"
-            , Keeper_agent_tool_surface.tool_requirement_to_yojson
-                receipt.tool_surface.tool_requirement )
-          ; "allowed_tool_count", `Int receipt.tool_surface.allowed_tool_count
-          ; ( "tool_surface_fallback_used"
-            , `Bool receipt.tool_surface.tool_surface_fallback_used )
           ; ( "materialized_tools"
             , list_json receipt.tool_surface.materialized_tools )
           ] )

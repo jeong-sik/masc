@@ -285,13 +285,6 @@ let append_decision_record
                   ( "turn_lane"
                   , Keeper_agent_tool_surface.turn_lane_to_yojson
                       r.tool_surface.turn_lane );
-                  ( "tool_surface_class"
-                  , Keeper_agent_tool_surface.tool_surface_class_to_yojson
-                      r.tool_surface.tool_surface_class );
-                  ("tool_requirement", Keeper_agent_tool_surface.tool_requirement_to_yojson r.tool_surface.tool_requirement);
-                  ("allowed_tool_count", `Int r.tool_surface.allowed_tool_count);
-                  ( "tool_surface_fallback_used",
-                    `Bool r.tool_surface.tool_surface_fallback_used );
                   ("config_root", `String r.tool_surface.config_root);
                   ( "runtime_config_path",
                     Json_util.string_opt_to_json r.tool_surface.runtime_config_path );

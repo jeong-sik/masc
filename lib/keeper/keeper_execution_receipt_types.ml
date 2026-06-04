@@ -50,14 +50,8 @@ let assert_receipt_authoritative ~outcome ~turn_state =
   | (`Error | `Cancelled), _ -> Ok ()
 ;;
 
-type tool_requirement = Keeper_agent_tool_surface.tool_requirement
-
 type tool_surface =
   { turn_lane : Keeper_agent_tool_surface.turn_lane
-  ; tool_surface_class : Keeper_agent_tool_surface.tool_surface_class
-  ; tool_requirement : Keeper_agent_tool_surface.tool_requirement
-  ; allowed_tool_count : int
-  ; tool_surface_fallback_used : bool
   ; materialized_tools : string list
   }
 
@@ -77,7 +71,7 @@ type slot_release_phase =
    - all_symbols / all_states (ppx-generated) enumerate the type
    Defining slot_release_phase_to_string in terms of to_tla_symbol means
    JSON/Prometheus wire and TLA correspondence catalog cannot drift.
-   Mirrors the pattern applied to tool_surface_class in PR #14647 review. *)
+   Mirrors the receipt wire pattern from earlier correspondence checks. *)
 let slot_release_phase_to_string = to_tla_symbol
 
 (* Terminal classification of a runtime rotation attempt.  Producer-side

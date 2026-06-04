@@ -316,7 +316,6 @@ let fallback_runtime_for_unavailable_profile
 
 let degraded_retry_after_recoverable_error
     ~(effective_runtime : string)
-    ~(tool_requirement : Keeper_agent_tool_surface.tool_requirement)
     (err : Agent_sdk.Error.sdk_error) : degraded_retry option =
   let normalized_effective =
     String.trim effective_runtime
@@ -336,7 +335,6 @@ let degraded_retry_after_recoverable_error
         fallback_reason;
       }
   in
-  ignore tool_requirement;
   if effective_is_declared_phase_buffer
      || effective_is_declared_phase_recovery
      || String.equal normalized_effective (Keeper_config.default_runtime_id ())
@@ -533,9 +531,7 @@ let runtime_catalog_names () =
 
 let default_degraded_rotation_candidates
     ~catalog_names
-    ~(base_runtime : string)
-    ~(tool_requirement : Keeper_agent_tool_surface.tool_requirement) =
-  ignore tool_requirement;
+    ~(base_runtime : string) =
   let normalized_base = normalized_runtime_id ~catalog_names base_runtime in
   let default_runtime =
     normalized_runtime_id ~catalog_names (Keeper_config.default_runtime_id ())
@@ -558,14 +554,12 @@ let degraded_rotation_candidates
     ~catalog_names
     ~(fallback_hint : string option)
     ~(base_runtime : string)
-    ~(effective_runtime : string)
-    ~(tool_requirement : Keeper_agent_tool_surface.tool_requirement) =
+    ~(effective_runtime : string) =
   let normalized_effective =
     normalized_runtime_id ~catalog_names effective_runtime
   in
   let raw_candidates =
     default_degraded_rotation_candidates ~catalog_names ~base_runtime
-      ~tool_requirement
   in
   let fallback_hint_candidate =
     match fallback_hint with
@@ -580,7 +574,6 @@ let degraded_rotation_candidates
     | None -> raw_candidates
     | Some hint -> dedupe_keep_order (hint :: raw_candidates)
   in
-  ignore tool_requirement;
   candidates
   |> List.filter (fun candidate ->
          not (String.equal candidate normalized_effective))
@@ -609,7 +602,6 @@ let degraded_rotation_after_recoverable_error
     ?fallback_hint
     ~(base_runtime : string)
     ~(effective_runtime : string)
-    ~(tool_requirement : Keeper_agent_tool_surface.tool_requirement)
     ~(attempted_runtimes : string list)
     (err : Agent_sdk.Error.sdk_error) : degraded_retry option =
   match recoverable_runtime_failure_reason err with
@@ -628,7 +620,7 @@ let degraded_rotation_after_recoverable_error
         degraded_rotation_candidates
           ~catalog_names
           ~fallback_hint
-          ~base_runtime ~effective_runtime ~tool_requirement
+          ~base_runtime ~effective_runtime
       in
       let untried =
         List.find_opt

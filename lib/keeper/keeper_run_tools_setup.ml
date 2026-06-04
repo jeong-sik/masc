@@ -78,10 +78,6 @@ let prepare_agent_setup
          | None -> Agent_sdk.Tool_op.Keep_all)
     ; tool_surface =
         { turn_lane = Keeper_agent_tool_surface.Lane_text_only
-        ; tool_surface_class = Keeper_agent_tool_surface.Surface_none
-        ; tool_requirement = No_tools
-        ; allowed_tool_count = 0
-        ; tool_surface_fallback_used = false
         ; config_root
         ; runtime_config_path
         ; gemini_mcp_disabled
@@ -125,7 +121,7 @@ let prepare_agent_setup
               (fun (e : Keeper_tool_affinity.affinity_entry) ->
                  Printf.sprintf "%s(%.1f)" e.tool_name e.score)
               entries)));
-  let keeper_tool_bundle =
+  let { Keeper_tools_oas.tools = keeper_tools; cleanup = keeper_tools_cleanup } =
     Keeper_tools_oas_bundle.make_tool_bundle
       ~config
       ~meta
@@ -135,7 +131,6 @@ let prepare_agent_setup
         Keeper_discovered_tools.mark_used acc.discovered ~turn:acc.current_turn ~name)
       ()
   in
-  let keeper_tools = keeper_tool_bundle.tools in
   let extend_turns_tool = Keeper_extend_turns.make ~agent_ref ~max_turns () in
   let tools = extend_turns_tool :: keeper_tools in
   let tool_usage_before =
@@ -407,9 +402,6 @@ let prepare_agent_setup
     ref None
   in
   let receipt_response_text_present_ref = ref false in
-  let keeper_has_owned_active_task () =
-    Option.is_some (owned_active_task_id_for_meta ~config ~meta:acc.meta)
-  in
   let visible_policy_name name =
     (* Preserve names that are already valid public surface entries.
        tool_edit_file and tool_write_file have distinct public aliases
@@ -477,16 +469,13 @@ let prepare_agent_setup
         omitted_suffix);
     validated
   in
-  let fallback_tool_surface ~turn =
-    validate_allow_list ~turn fallback_floor_tool_names
-  in
   let compute_tool_surface
         ~turn
         ~messages
         ~current_tool_choice
         ~decay_discovered
         ()
-    : computed_tool_surface
+    : string list * computed_tool_surface
     =
     let last_user_text =
       List.fold_left
@@ -637,43 +626,16 @@ let prepare_agent_setup
       Keeper_types_profile_toml_normalizers.dedupe_keep_order
         (merged @ visible_affordance_tool_names)
     in
-    let selection_mode : Keeper_agent_tool_surface.tool_selection_mode =
-      if llm_rerank_enabled
-      then Selection_deterministic_plus_llm_hint
-      else Selection_core_plus_prefilter_plus_discovered
-    in
-    let deterministic_floor_set =
-      Keeper_types_profile_toml_normalizers.dedupe_keep_order
-        (core @ deterministic_prefilter @ List.sort String.compare discovered)
-    in
-    let llm_only_count =
-      List.length
-        (List.filter (fun n -> not (List.mem n deterministic_floor_set)) llm_selected)
-    in
-    let turn_allowed_tool_names =
+    let schema_filter =
       Agent_sdk.Tool_op.apply
         (Agent_sdk.Tool_op.compose
            [ Agent_sdk.Tool_op.Replace_with merged; acc.tool_overlay ])
         all_tool_names
       |> validate_allow_list ~turn
     in
-    let core_count = List.length (Keeper_tool_dispatch_runtime.effective_core_tools ()) in
-    let discovered_count =
-      List.length (Keeper_discovered_tools.active_names acc.discovered ~turn)
-    in
     let per_call_turn = turn - start_turn_count in
     let is_last_turn = per_call_turn >= max_turns in
     let is_warning_zone = per_call_turn >= max_turns - 1 in
-    let claim_context_allowed = not (keeper_has_owned_active_task ()) in
-    let turn_allowed_tool_names, tool_surface_fallback_used =
-      if turn_allowed_tool_names = []
-      then (
-        let fallback_allowed_tool_names = fallback_tool_surface ~turn in
-        if fallback_allowed_tool_names <> []
-        then fallback_allowed_tool_names, true
-        else turn_allowed_tool_names, false)
-      else turn_allowed_tool_names, false
-    in
     let last_turn_safe = Keeper_tool_policy.last_turn_safe_tool_names () in
     (* Mirror policy_allowed_tool_names_with_public_descriptors: only include a public name
        in the last-turn-safe set when its routed internal handler is also
@@ -684,53 +646,33 @@ let prepare_agent_setup
         last_turn_safe
     in
     let safe_last_turn_tools = last_turn_safe @ descriptor_safe_public_names in
-    let turn_allowed_tool_names =
+    let schema_filter =
       if is_last_turn
       then
         Agent_sdk.Tool_op.apply
           (Agent_sdk.Tool_op.Intersect_with safe_last_turn_tools)
-          turn_allowed_tool_names
-      else turn_allowed_tool_names
-    in
-    let allowed_tool_count = List.length turn_allowed_tool_names in
-    let tool_surface_class : Keeper_agent_tool_surface.tool_surface_class =
-      Keeper_agent_tool_surface.tool_surface_class_for_tool_names
-        turn_allowed_tool_names
-    in
-    let tool_requirement =
-      if allowed_tool_count = 0 then No_tools else Optional
+          schema_filter
+      else schema_filter
     in
     let lane : Keeper_agent_tool_surface.turn_lane =
       if is_retry
       then Lane_retry
+      else if schema_filter <> []
+      then Lane_tool_optional
       else (
-        match tool_requirement with
-        | Optional -> Lane_tool_optional
-        | No_tools ->
-          (match current_tool_choice with
-           | Some Agent_sdk.Types.None_ -> Lane_tool_disabled
-           | _ -> Lane_text_only))
+        match current_tool_choice with
+        | Some Agent_sdk.Types.None_ -> Lane_tool_disabled
+        | _ -> Lane_text_only)
     in
-    { turn_allowed_tool_names
-    ; absolute_turn = turn
-    ; checkpoint_start_turn = start_turn_count
-    ; per_call_turn
-    ; per_call_max_turns = max_turns
-    ; core_count
-    ; deterministic_prefilter
-    ; deterministic_prefilter_count = List.length deterministic_prefilter
-    ; discovered_count
-    ; llm_selected_count = llm_only_count
-    ; selection_mode
-    ; is_last_turn
-    ; is_warning_zone
-    ; tool_surface_class
-    ; tool_requirement
-    ; claim_context_allowed
-    ; tool_surface_fallback_used
-    ; lane
-    ; query_text
-    }
+    ( schema_filter
+    , { absolute_turn = turn
+      ; checkpoint_start_turn = start_turn_count
+      ; per_call_turn
+      ; per_call_max_turns = max_turns
+      ; is_last_turn
+      ; is_warning_zone
+      ; lane
+      } )
   in
 
   let ctx : Keeper_run_tools_hooks.ctx =
@@ -739,8 +681,7 @@ let prepare_agent_setup
     ; all_tool_names
     ; compute_tool_surface
     ; config
-    ; keeper_tool_bundle
-    ; keeper_has_owned_active_task
+    ; keeper_tools_cleanup
     ; manifest_keeper_turn_id
     ; meta
     ; reported_tool_names_ref

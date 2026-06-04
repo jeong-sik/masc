@@ -46,8 +46,6 @@ val set_turn_context :
   ?allowed_paths:string list ->
   ?network_mode:string ->
   ?approval_mode:string ->
-  ?tool_surface_class:string ->
-  ?allowed_tool_count:int ->
   ?runtime_profile:string ->
   unit ->
   unit
@@ -148,8 +146,6 @@ val log_call :
   ?allowed_paths:string list ->
   ?network_mode:string ->
   ?approval_mode:string ->
-  ?tool_surface_class:string ->
-  ?allowed_tool_count:int ->
   ?runtime_profile:string ->
   ?result_bytes:int ->
   ?truncated_to:int ->

@@ -359,7 +359,7 @@ let run_turn
       ~runtime_manifest_context
       ()
   in
-  (* Section 2: Tool surface — select tools, compute surface, validate contracts. *)
+  (* Section 2: prepare runtime tools and hooks. *)
   match setup with
   | Error e -> Error e
   | Ok s ->
@@ -378,17 +378,6 @@ let run_turn
         (`Assoc
           [
             ("turn_lane", `String (turn_lane_to_string acc.tool_surface.turn_lane));
-            ( "tool_surface_class",
-              `String
-                (tool_surface_class_to_string
-                   acc.tool_surface.tool_surface_class) );
-            ( "tool_requirement",
-              `String
-                (tool_requirement_to_string acc.tool_surface.tool_requirement)
-            );
-            ("allowed_tool_count", `Int acc.tool_surface.allowed_tool_count);
-            ( "tool_surface_fallback_used",
-              `Bool acc.tool_surface.tool_surface_fallback_used );
             ("config_root", `String acc.tool_surface.config_root);
           ])
       Keeper_runtime_manifest.Tool_surface_selected;

@@ -238,7 +238,6 @@ type degraded_retry_budget_decision =
 let next_fail_open_runtime_for_turn_with_budget
     ~(base_runtime : string)
     ~(effective_runtime : string)
-    ~(tool_requirement : Keeper_agent_tool_surface.tool_requirement)
     ~(attempted_runtimes : string list)
     ~(estimated_input_tokens : int)
     ~(max_turns : int)
@@ -247,7 +246,7 @@ let next_fail_open_runtime_for_turn_with_budget
     (err : Agent_sdk.Error.sdk_error) : degraded_retry_budget_decision =
   match
     next_fail_open_runtime_for_turn
-      ~base_runtime ~effective_runtime ~tool_requirement
+      ~base_runtime ~effective_runtime
       ~attempted_runtimes err
   with
   | None -> No_degraded_retry

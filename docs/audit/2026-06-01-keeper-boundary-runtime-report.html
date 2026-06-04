@@ -280,7 +280,7 @@
       <pre>keeper tool policy / descriptor catalog
   -> Keeper_tool_policy.keeper_allowed_tool_names
   -> Keeper_run_tools_setup.compute_tool_surface
-  -> Keeper_run_tools_hooks.set_turn_context + tool_disclosure
+  -> Keeper_run_tools_hooks.set_turn_context
   -> Agent/OAS materialized runtime tools
   -> execution receipt + tool logs + dashboard telemetry</pre>
       <table>
@@ -300,8 +300,8 @@
           </tr>
           <tr>
             <td>`lib/keeper/keeper_run_tools_hooks.ml:636-652`, `684-730`</td>
-            <td>Threads sandbox/profile/tool surface into tool-call context and writes `tool_disclosure` JSONL.</td>
-            <td>Append failures create dashboard coverage gaps.</td>
+            <td>Threads sandbox/profile context into tool-call context.</td>
+            <td>Dashboard evidence comes from receipts and actual tool-call logs.</td>
           </tr>
           <tr>
             <td>`lib/keeper/keeper_execution_receipt.ml:524-570`</td>

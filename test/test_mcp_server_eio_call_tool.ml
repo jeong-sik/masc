@@ -289,11 +289,7 @@ let test_runtime_mcp_keeper_log_context_uses_keeper_trace_and_current_turn () =
       check bool "sandbox profile present" true (Option.is_some ctx.sandbox_profile);
       check bool "sandbox root present" true (Option.is_some ctx.sandbox_root);
       check bool "allowed paths present" true (Option.is_some ctx.allowed_paths);
-      check bool "network mode present" true (Option.is_some ctx.network_mode);
-      check bool "tool surface class present" true
-        (Option.is_some ctx.tool_surface_class);
-      check bool "allowed tool count present" true
-        (Option.is_some ctx.allowed_tool_count))
+      check bool "network mode present" true (Option.is_some ctx.network_mode))
 
 let test_runtime_mcp_keeper_log_context_loads_current_task_contract () =
   Eio_main.run @@ fun env ->
@@ -334,7 +330,7 @@ let test_runtime_mcp_keeper_log_context_loads_current_task_contract () =
           ~arguments:(`Assoc [])
       in
       check bool "runtime mcp keeps task contract out of log context" true
-        (Option.is_some ctx.allowed_tool_count))
+        (Option.is_some ctx.task_id))
 
 let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
   Eio_main.run @@ fun env ->
@@ -420,10 +416,6 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
         (runtime_contract |> U.member "allowed_paths" |> U.to_list
          |> List.length
          > 0);
-      check bool "runtime contract allowed tool count present" true
-        (match runtime_contract |> U.member "allowed_tool_count" with
-         | `Int n -> n > 0
-         | _ -> false);
       let omits_field name =
         match runtime_contract with
         | `Assoc fields -> not (List.mem_assoc name fields)

@@ -430,8 +430,6 @@ let log_call
       ?allowed_paths
       ?network_mode
       ?approval_mode
-      ?tool_surface_class
-      ?allowed_tool_count
       ?runtime_profile
       ?result_bytes
       ?truncated_to
@@ -550,16 +548,6 @@ let log_call
         match allowed_paths with
         | Some _ -> allowed_paths
         | None -> ctx.allowed_paths
-      in
-      let tool_surface_class =
-        match tool_surface_class with
-        | Some _ -> tool_surface_class
-        | None -> ctx.tool_surface_class
-      in
-      let allowed_tool_count =
-        match allowed_tool_count with
-        | Some _ -> allowed_tool_count
-        | None -> ctx.allowed_tool_count
       in
       let runtime_profile =
         match runtime_profile with
@@ -683,8 +671,6 @@ let log_call
           ?allowed_paths
           ?network_mode
           ?approval_mode
-          ?tool_surface_class
-          ?allowed_tool_count
           ?runtime_profile
           ()
       in

@@ -55,9 +55,10 @@ TLA+ coverage audit at `origin/main` HEAD `f97b088f3` (post-#14613):
 8. affordance tool injection
 9. `Tool_op.compose` overlay + `validate_allow_list`
 10. fallback floor (when empty)
-11. last-turn safety intersect → passive loop strip → `Keeper_tool_surface_mismatch` guard
+11. last-turn safety intersect → passive loop observation
 
-There is no model-checking-time invariant. `Keeper_tool_surface_mismatch` (defined in `keeper_agent_error.ml`, raised from `keeper_run_tools_hooks.ml`) is *runtime*. If a refactor breaks the guarantee that `required ⊆ turn_allowed_tool_names`, TLC does not catch it.
+There is no model-checking-time invariant for the local runtime schema filter.
+The filter is execution input, not a Keeper-visible contract.
 
 ### 1.2 Stage 2 gap — Runtime Attempt FSM
 

@@ -8,8 +8,8 @@
 
 module Tool_shard = Masc.Tool_shard
 module Dashboard_keeper_feature_catalog = Masc.Dashboard_keeper_feature_catalog
-module Tool_shard_types = Masc.Tool_shard_types
-module Tool_shard_types_schemas_execute = Masc.Tool_shard_types_schemas_execute
+module Tool_shard_types = Tool_shard_types
+module Tool_shard_types_schemas_execute = Tool_shard_types_schemas_execute
 module Types = Masc_domain
 
 let contains text needle =

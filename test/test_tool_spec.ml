@@ -2,10 +2,10 @@ module Types = Masc_domain
 
 (** Tests for Tool_spec — unified tool specification and registration. *)
 
-module Tool_spec = Masc.Tool_spec
+module Tool_spec = Tool_spec
 module Tool_dispatch = Tool_dispatch
 module Tool_catalog = Tool_catalog
-module Tool_capability = Masc.Tool_capability
+module Tool_capability = Tool_capability
 
 (** Helper: minimal input_schema for test tools. *)
 let empty_schema = `Assoc [ ("type", `String "object") ]

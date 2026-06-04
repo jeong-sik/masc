@@ -8,7 +8,7 @@ open Alcotest
 module Config = Masc.Config
 module Auth = Masc.Auth
 module Tool_catalog = Tool_catalog
-module Tool_help_registry = Masc.Tool_help_registry
+module Tool_help_registry = Tool_help_registry
 module Tool_shard = Masc.Tool_shard
 module Types = Masc_domain
 

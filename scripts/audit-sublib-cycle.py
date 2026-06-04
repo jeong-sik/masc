@@ -70,6 +70,10 @@ DEFAULT_LEAVES: tuple[str, ...] = (
     # PR-S3 (LANE 2): Tool dispatch substrate. The gate enforces that the
     # Tool layer cannot pull keeper/runtime/telemetry back in via the mega-lib.
     "masc.masc_tool_dispatch",
+    # RFC-0056 Phase 2 (LANE 6): Pure tool surface leaf (schema/vocab/policy/
+    # shard-type) extracted above the dispatch substrate. The gate enforces that
+    # this layer cannot pull keeper/runtime/goal/task/board/server back in.
+    "masc.masc_tool_surface",
 )
 
 # Recursive s-expression value: an atom (str) or a list of values.

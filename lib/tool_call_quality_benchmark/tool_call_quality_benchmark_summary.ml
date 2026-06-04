@@ -246,7 +246,7 @@ let build_summary_rows view runs scores =
           task_pass_rate =
             grouped_scores |> List.map (fun (score : case_score) -> score.task_pass)
             |> avg_float;
-          correct_tool_rate =
+          tool_policy_rate =
             grouped_scores
             |> List.map (fun (score : case_score) -> score.tool_selection)
             |> avg_float;

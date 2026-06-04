@@ -148,17 +148,13 @@ let str_starts_with ~prefix s =
   let len_prefix = String.length prefix in
   len_s >= len_prefix && String.sub s 0 len_prefix = prefix
 
-let contract_requiring_tools tools =
-  `Assoc [ ("required_tools", `List (List.map (fun tool -> `String tool) tools)) ]
-
-let add_task_requiring_tools ctx ~title tools =
+let add_priority_task ctx ~title =
   let result =
     Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc
         [
           ("title", `String title);
           ("priority", `Int 1);
-          ("contract", contract_requiring_tools tools);
         ])
   in
   if not (Tool_result.is_success result) then failwith (Tool_result.message result)
@@ -1302,30 +1298,6 @@ let () = test "handle_claim_auto_releases_previous_claimed_task" (fun () ->
   | None -> failwith "task-002 missing"
 )
 
-let () = test "handle_claim_ignores_required_tools_without_server_surface" (fun () ->
-  let ctx = make_test_ctx () in
-  add_task_requiring_tools ctx ~title:"Needs bash" [ "tool_execute" ];
-  let result =
-    Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx
-      (`Assoc [ ("task_id", `String "task-001") ])
-  in
-  if not (Tool_result.is_success result) then failwith (Tool_result.message result);
-  assert_task_claimed_by ctx ctx.agent_name;
-  assert (Planning_eio.get_current_task ctx.config = Some "task-001")
-)
-
-let () = test "handle_claim_allows_required_tools_with_server_surface" (fun () ->
-  let ctx = make_test_ctx () in
-  add_task_requiring_tools ctx ~title:"Needs bash" [ "tool_execute" ];
-  let result =
-    Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx
-      (`Assoc [ ("task_id", `String "task-001") ])
-  in
-  if not (Tool_result.is_success result) then failwith (Tool_result.message result);
-  assert_task_claimed_by ctx ctx.agent_name;
-  assert (Planning_eio.get_current_task ctx.config = Some "task-001")
-)
-
 let () = test "handle_claim_rejects_removed_agent_role_argument" (fun () ->
   let ctx = make_test_ctx () in
   let _ =
@@ -1382,31 +1354,6 @@ let () = test "handle_claim_next_returns_claim_observation" (fun () ->
   assert (payload |> member "todo_claim" |> member "winner_actor_id" |> to_string
           = ctx.agent_name)
 )
-
-let () =
-  test "handle_claim_next_ignores_required_tools_without_server_surface" (fun () ->
-    let ctx = make_test_ctx () in
-    add_task_requiring_tools ctx ~title:"Needs bash" [ "tool_execute" ];
-    let result =
-      Task.Tool.handle_claim_next ~tool_name:"test_tool" ~start_time:0.0 ctx
-        (`Assoc [])
-    in
-    assert (Tool_result.is_success result);
-    assert_task_claimed_by ctx ctx.agent_name;
-    assert (Planning_eio.get_current_task ctx.config = Some "task-001"))
-
-let () =
-  test "handle_claim_next_allows_required_tools_with_server_surface" (fun () ->
-    let ctx = make_test_ctx () in
-    add_task_requiring_tools ctx ~title:"Needs bash" [ "tool_execute" ];
-    let result =
-      Task.Tool.handle_claim_next
-        ~tool_name:"test_tool" ~start_time:0.0
-        ctx (`Assoc [])
-    in
-    if not (Tool_result.is_success result) then failwith (Tool_result.message result);
-    assert_task_claimed_by ctx ctx.agent_name;
-    assert (Planning_eio.get_current_task ctx.config = Some "task-001"))
 
 let () =
   test "handle_claim_next_reports_internal_errors_as_tool_failure" (fun () ->
@@ -1489,23 +1436,6 @@ let () = test "transition_claim_sets_planning_current_task" (fun () ->
   assert (Planning_eio.get_current_task ctx.config = Some "task-001")
 )
 
-let () = test "transition_claim_ignores_required_tools_even_with_force" (fun () ->
-  let ctx = make_test_ctx () in
-  add_task_requiring_tools ctx ~title:"Needs bash" [ "tool_execute" ];
-  let result =
-    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
-      (`Assoc
-        [
-          ("task_id", `String "task-001");
-          ("action", `String "claim");
-          ("force", `Bool true);
-        ])
-  in
-  assert (Tool_result.is_success result);
-  assert_task_claimed_by ctx ctx.agent_name;
-  assert (Planning_eio.get_current_task ctx.config = Some "task-001")
-)
-
 (* RFC-0109 Phase E (#18822, 2026-05-27) retired the transition-layer
    substring evidence gate. The two tests that previously locked in
    the substring-reject behaviour
@@ -1526,7 +1456,7 @@ let () = test "transition_submit_pr_evidence_accepts_todo_pr_url_alias" (fun () 
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
     let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
     let pr_url = "https://github.com/jeong-sik/masc/pull/13169" in
-    add_task_requiring_tools ctx ~title:"CLI approval follow-up" [ "tool_execute" ];
+    add_priority_task ctx ~title:"CLI approval follow-up";
     let result =
       Task.Tool.handle_transition
         ~tool_name:"test_tool" ~start_time:0.0
@@ -1561,7 +1491,7 @@ let () = test "transition_submit_pr_evidence_accepts_todo_pr_url_alias" (fun () 
 let () = test "transition_normalize_pr_url_into_typed_handoff_context" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
     let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
-    add_task_requiring_tools ctx ~title:"Typed pr_url normalize" [ "tool_execute" ];
+    add_priority_task ctx ~title:"Typed pr_url normalize";
     let pr_url = "https://github.com/jeong-sik/masc/pull/77777" in
     let submit_result =
       Task.Tool.handle_transition
@@ -1591,7 +1521,7 @@ let () = test "transition_normalize_pr_url_into_typed_handoff_context" (fun () -
 let () = test "transition_normalize_pr_url_merges_into_existing_handoff_context" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
     let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
-    add_task_requiring_tools ctx ~title:"pr_url merge" [ "tool_execute" ];
+    add_priority_task ctx ~title:"pr_url merge";
     let existing_ref = "logs/run-42.json" in
     let pr_url = "https://github.com/jeong-sik/masc/pull/88888" in
     let submit_result =
@@ -1626,7 +1556,7 @@ let () = test "transition_normalize_pr_url_merges_into_existing_handoff_context"
 let () = test "transition_submit_pr_evidence_accepts_todo_pr_evidence" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
     let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
-    add_task_requiring_tools ctx ~title:"CLI approval follow-up" [ "tool_execute" ];
+    add_priority_task ctx ~title:"CLI approval follow-up";
     let submit_result =
       Task.Tool.handle_transition
         ~tool_name:"test_tool" ~start_time:0.0
@@ -1778,7 +1708,7 @@ let () = test "transition_release_block_reclaim_policy_closes_gate" (fun () ->
 
 let () = test "dispatch_transition_claim_uses_server_surface_not_payload_surface" (fun () ->
   let ctx = make_test_ctx () in
-  add_task_requiring_tools ctx ~title:"Needs bash" [ "tool_execute" ];
+  add_priority_task ctx ~title:"Needs bash";
   match
     Task.Tool.dispatch ctx
       ~name:"masc_transition"
@@ -1795,13 +1725,13 @@ let () = test "dispatch_transition_claim_uses_server_surface_not_payload_surface
   | None -> failwith "dispatch returned None"
 )
 
-(* Regression for issue: tool_execute-gated tasks stay todo after merged PR
-   evidence. submit_pr_evidence must ignore legacy required_tools task-contract
-   residue and transition Todo -> AwaitingVerification without claiming. *)
-let () = test "submit_pr_evidence_ignores_legacy_required_tools_on_todo_task" (fun () ->
+(* Regression for issue: tasks stay todo after merged PR evidence.
+   submit_pr_evidence must transition Todo -> AwaitingVerification without
+   claiming. *)
+let () = test "submit_pr_evidence_accepts_todo_task_without_claiming" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
     let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
-    add_task_requiring_tools ctx ~title:"Needs bash" [ "tool_execute" ];
+    add_priority_task ctx ~title:"Needs bash";
     let result =
       Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
         (`Assoc

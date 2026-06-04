@@ -2,7 +2,7 @@ open Alcotest
 open Masc
 
 let fixture_cases repo_root =
-  Filename.concat repo_root "benchmark/tool_call_quality_cases.json"
+  Tool_call_quality_benchmark.default_case_set_path ~repo_root
 
 let fixture_runs repo_root =
   Filename.concat repo_root
@@ -45,7 +45,7 @@ let test_summary_rollups_and_stability () =
   check int "runtime unreachable runs" 0 summary.runtime_unreachable_runs;
   let analyst_row =
     find_row
-      ~provider:(Some "provider_d")
+      ~provider:(Some "provider-d")
       ~model:(Some "model-d-5.4")
       ~keeper:(Some "bench-analyst")
       summary.grouped_by_provider_model_keeper
@@ -57,18 +57,18 @@ let test_summary_rollups_and_stability () =
   check int "analyst repeated groups" 1 analyst_row.repeated_case_groups;
   let executor_row =
     find_row
-      ~provider:(Some "provider_d")
+      ~provider:(Some "provider-d")
       ~model:(Some "model-d-5.4")
       ~keeper:(Some "bench-executor")
       summary.grouped_by_provider_model_keeper
   in
   check int "executor unique cases" 1 executor_row.cases_total;
   check int "executor passed cases" 0 executor_row.cases_passed;
-  check bool "executor tool selection degraded"
-    true (executor_row.correct_tool_rate < 1.0);
+  check bool "executor forbidden tool degraded selection"
+    true (executor_row.tool_policy_rate < 1.0);
   let verifier_row =
     find_row
-      ~provider:(Some "provider_d")
+      ~provider:(Some "provider-d")
       ~model:(Some "model-d-5.4-mini")
       ~keeper:(Some "bench-verifier")
       summary.grouped_by_provider_model_keeper
@@ -83,7 +83,7 @@ let test_summary_rollups_and_stability () =
   let provider_row =
     List.find
       (fun (row : Tool_call_quality_benchmark.summary_row) ->
-        row.provider = Some "provider_d"
+        row.provider = Some "provider-d"
         && row.model = Some "model-d-5.4"
         && row.keeper_profile = None)
       summary.grouped_by_provider_model

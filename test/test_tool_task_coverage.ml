@@ -1796,9 +1796,9 @@ let () = test "dispatch_transition_claim_uses_server_surface_not_payload_surface
 )
 
 (* Regression for issue: tool_execute-gated tasks stay todo after merged PR
-   evidence. submit_pr_evidence must bypass the required_tool claim guard and
-   transition Todo -> AwaitingVerification without claiming. *)
-let () = test "submit_pr_evidence_bypasses_required_tool_gate_on_todo_task" (fun () ->
+   evidence. submit_pr_evidence must ignore legacy required_tools task-contract
+   residue and transition Todo -> AwaitingVerification without claiming. *)
+let () = test "submit_pr_evidence_ignores_legacy_required_tools_on_todo_task" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
     let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
     add_task_requiring_tools ctx ~title:"Needs bash" [ "tool_execute" ];

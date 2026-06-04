@@ -74,6 +74,8 @@ let readonly_programs =
     ; Env
     ; File
     ; Find
+    ; Gh
+    ; Git
     ; Head
     ; Ls
     ; Printf
@@ -1000,4 +1002,3 @@ let promote_to_safe ?caller ~allowed_commands ir =
   | Ok () -> Ok (Typed_capabilities.Safe_IR ir)
   | Error br -> Error br
 ;;
-

@@ -1088,18 +1088,23 @@ let dashboard_tools_cache_ttl_sec = 30.0
 let dashboard_tools_cache_key ~base_path ~actor =
   Printf.sprintf "tools:%s:%s" base_path actor
 
+let dashboard_actor_name = function
+  | Some actor when String.trim actor <> "" -> actor
+  | Some _ | None -> "dashboard"
+;;
+
 let dashboard_tools_http_json ?actor ?timing (config : Workspace.config) : Yojson.Safe.t =
+  let actor_name = dashboard_actor_name actor in
   let ctx : Tool_misc.context =
-    { config; agent_name = Option.value ~default:"dashboard" actor }
+    { config; agent_name = actor_name }
   in
   let run phase f =
     match timing with
     | None -> f ()
     | Some t -> Server_timing.measure t phase f
   in
-  let actor_for_key = Option.value ~default:"dashboard" actor in
   let cache_key =
-    dashboard_tools_cache_key ~base_path:config.base_path ~actor:actor_for_key
+    dashboard_tools_cache_key ~base_path:config.base_path ~actor:actor_name
   in
   let compute () =
     let config_resolution =

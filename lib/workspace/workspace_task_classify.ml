@@ -197,7 +197,7 @@ let empty_task_contract =
   }
 ;;
 
-let default_verification_evidence_refs = [ "completion_notes"; "pr_url_or_artifact_ref" ]
+let default_verification_evidence_refs = [ "completion_notes"; "reviewable_evidence_ref" ]
 
 let first_line text =
   match String.index_opt text '\n' with

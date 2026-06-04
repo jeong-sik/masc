@@ -64,7 +64,7 @@ let tools_list_response ~clock ~sw ?(include_hidden = false) ?names state =
   in
   Mcp_eio.handle_request ~clock ~sw state request
 
-let test_visible_tools_expose_only_truthful_statuses () =
+let test_public_tools_expose_only_truthful_statuses () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
@@ -76,7 +76,7 @@ let test_visible_tools_expose_only_truthful_statuses () =
       List.iter
         (fun tool ->
           let status = tool_string_field tool "implementationStatus" in
-          check bool ("truthful visible status: " ^ tool_string_field tool "name")
+          check bool ("truthful public status: " ^ tool_string_field tool "name")
             true
             (String.equal status "real" || String.equal status "adapter"))
         tools)
@@ -106,6 +106,6 @@ let test_selected_tools_report_contract_status () =
 let () =
   run "tool contract truth"
     [
-      ("visible", [ test_case "visible tools stay truthful" `Quick test_visible_tools_expose_only_truthful_statuses ]);
+      ("public", [ test_case "public tools stay truthful" `Quick test_public_tools_expose_only_truthful_statuses ]);
       ("hidden", [ test_case "selected tools expose implementation status" `Quick test_selected_tools_report_contract_status ]);
     ]

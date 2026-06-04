@@ -57,7 +57,7 @@ TLA+ coverage audit at `origin/main` HEAD `f97b088f3` (post-#14613):
 10. fallback floor (when empty)
 11. last-turn safety intersect → passive loop strip → `Keeper_tool_surface_mismatch` guard
 
-There is no model-checking-time invariant. `Keeper_tool_surface_mismatch` (defined in `keeper_agent_error.ml`, raised from `keeper_run_tools_hooks.ml`) is *runtime*. If a refactor breaks the guarantee that `required ⊆ turn_visible_tool_names`, TLC does not catch it.
+There is no model-checking-time invariant. `Keeper_tool_surface_mismatch` (defined in `keeper_agent_error.ml`, raised from `keeper_run_tools_hooks.ml`) is *runtime*. If a refactor breaks the guarantee that `required ⊆ turn_allowed_tool_names`, TLC does not catch it.
 
 ### 1.2 Stage 2 gap — Runtime Attempt FSM
 
@@ -168,7 +168,7 @@ last_turn_safe → passive_filtered → truncated → emitted
 Each stage is a set transformation on `Tools` (the universe of tool names). Required tools are tracked as a separate set `Required`.
 
 **Invariants**:
-- `RequiredSubsetEmitted` — equivalent of `keeper_run_tools.ml:998-1011` mismatch guard at model-checking time: `Required ⊆ emitted ∨ Required ∩ AlwaysAffordanceless ≠ ∅` (the surface-mismatch branch must fire).
+- `AllowedSubsetEmitted` — equivalent of `keeper_run_tools.ml:998-1011` mismatch guard at model-checking time: `Allowed ⊆ emitted ∨ Allowed ∩ AlwaysAffordanceless ≠ ∅` (the surface-mismatch branch must fire).
 - `LastTurnSafeMonotone` — the last-turn safety filter only *removes* tools, never adds.
 - `FallbackFloorOnlyWhenEmpty` — the floor injects tools only when the upstream pipeline emits an empty set (covers `keeper_run_tools.ml:819-825`).
 - `MaxToolsCap` — `|emitted| ≤ MaxToolsPerTurn`, and the cap preserves all `Required` first.
@@ -177,10 +177,10 @@ Each stage is a set transformation on `Tools` (the universe of tool names). Requ
 
 | `BugAction` | OCaml regression it models | Invariant it violates |
 |---|---|---|
-| `RequiredEscapesValidate` | `validate_allow_list` is removed from the overlay compose path → required tools not in the universe leak through | `RequiredSubsetEmitted` |
+| `AllowedEscapesValidate` | `validate_allow_list` is removed from the overlay compose path → allowed tools not in the universe leak through | `AllowedSubsetEmitted` |
 | `LastTurnSafeAdds` | the last-turn safety filter is implemented as a union instead of an intersect | `LastTurnSafeMonotone` |
 | `FallbackFloorAlwaysOn` | floor fires unconditionally (defense-in-depth → permissive default; observed historically as the "always show floor" suspicion) | `FallbackFloorOnlyWhenEmpty` |
-| `MaxToolsDropsRequired` | truncation removes required tools instead of optional ones | `MaxToolsCap` (Required-preservation conjunct) |
+| `MaxToolsDropsAllowed` | truncation removes allowed tools instead of optional affordances | `MaxToolsCap` (Allowed-preservation conjunct) |
 
 LOC budget: ~260.
 

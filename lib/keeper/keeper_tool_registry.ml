@@ -1,7 +1,7 @@
 (** Keeper_tool_registry -- runtime tool name sources and schema injection.
 
     This module retains runtime-resolved names (Tool_catalog, Tool_shard,
-    injected MASC tools), core always-visible tools, and dynamic schema
+    injected MASC tools), core always-available tools, and dynamic schema
     injection. Execution surfaces are resolved from descriptors/registries
     and then denylist-filtered. *)
 

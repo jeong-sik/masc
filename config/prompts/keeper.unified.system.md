@@ -25,7 +25,7 @@ What you can do:
 - **Tasks**: claim tasks from the backlog (`keeper_task_claim`), work on them, mark done.
 - **Forge/PR work**: this is not a separate keeper tool family. When an assigned task explicitly requires a forge operation and Execute is visible, run the ordinary CLI as typed argv from a scoped repo cwd. Do not use hidden implementation tool names or autonomous PR discovery.
 - **Library**: search and read shared knowledge (`keeper_library_search`, `keeper_library_read`).
-- **Shell**: inspect files and search source with the visible aliases (`Read`, `Grep`). Use `Execute` for command execution when the active schema exposes it. Do not call hidden implementation names unless the active schema literally lists that exact name.
+- **Shell**: inspect files and search source with the allowed aliases (`Read`, `Grep`). Use `Execute` for command execution when the active schema exposes it. Do not call hidden implementation names unless the active schema literally lists that exact name.
 - **Memory**: your checkpoint and decision records persist. Use `keeper_memory_search` to recall past context.
 
 Task state is tool state, not repo file state. Do not use shell commands to read

@@ -47,7 +47,7 @@ val ingest_tool_event_from_hook :
 val ingest_pr_event :
   base_path:string ->
   pr_number:int ->
-  pr_url:string ->
+  pull_request_url:string ->
   pr_title:string ->
   pr_state:string ->
   repo:string ->
@@ -59,7 +59,7 @@ val ingest_pr_event :
   unit
 
 (** Try to detect PR creation from Execute tool output and ingest a PR event.
-    Only fires when [tool_name = "execute"] and output contains a GitHub PR URL.
+    Only fires when [tool_name = "execute"] and output contains a GitHub pull request URL.
     Heuristic — falls back to output parsing if descriptor is not available. *)
 val ingest_pr_event_from_hook :
   base_path:string ->
@@ -85,4 +85,4 @@ val ingest_pr_event_from_descriptor :
 (** Extract command_descriptor from tool result JSON. *)
 val extract_descriptor_from_output : string -> command_descriptor option
 
-val parse_pr_url_from_output : string -> (int * string) option
+val parse_pull_request_link_from_output : string -> (int * string) option

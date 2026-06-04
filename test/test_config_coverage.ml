@@ -90,11 +90,11 @@ let test_visible_tool_schemas_subset_of_all () =
   check bool "visible <= all" true
     (List.length visible <= List.length Config.all_tool_schemas)
 
-let test_is_tool_visible_pause () =
+let test_is_tool_allowed_pause () =
   (* masc_pause is an internal tool, auto-classified as Hidden *)
   check bool "pause hidden (not on public surface)" false
-    (Config.is_tool_visible "masc_pause");
-  check bool "pause visible with include_hidden" true
+    (Config.is_tool_allowed "masc_pause");
+  check bool "pause included with include_hidden" true
     (Tool_catalog.is_visible ~include_hidden:true "masc_pause")
 
 let () =
@@ -121,6 +121,6 @@ let () =
             test_tool_registry_omits_autoresearch_tools;
           test_case "visible is subset of all" `Quick
             test_visible_tool_schemas_subset_of_all;
-          test_case "pause visible" `Quick test_is_tool_visible_pause;
+          test_case "pause public catalog allowed" `Quick test_is_tool_allowed_pause;
         ] );
     ]

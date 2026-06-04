@@ -72,10 +72,10 @@ heuristic / LLM parse miss
 
 ### 2.3 Root cause path
 
-`lib/oas_worker_named.ml:193-197` — `require_tool_support` 가 keeper-internal MCP tools 보유 시 자동 true 로 승격:
+`lib/oas_worker_named.ml:193-197` — a legacy provider tool-capability flag was auto-enabled when keeper-internal MCP tools existed:
 ```ocaml
-let require_tool_support =
-  require_tool_support
+let legacy_tool_capability_required =
+  legacy_tool_capability_required
   || keeper_internal_tools_require_materialized_runtime_surface
        ~keeper_name tools
 in
@@ -86,7 +86,7 @@ in
 let candidate_cfgs =
   filter_candidate_providers_for_tool_support
     ~keeper_name ?runtime_mcp_policy ~tools
-    ~require_tool_choice_support ~require_tool_support
+    ~require_tool_choice_support ~legacy_tool_capability_required
     ?secondary_resolver ~label:runtime_id
     candidate_cfgs
 in
@@ -216,7 +216,7 @@ let cross_runtime_mode_current () = (* MASC_CROSS_RUNTIME_FALLBACK *)
 `lib/oas_worker_named.ml:270-312` 변경:
 - 기존: `candidate_cfgs = []` → `resolve_tool_capable_provider_across_runtimes` 호출
 - 변경:
-  - `Off`: 빈 candidate → 즉시 명시적 에러 `Runtime_local_only_filter_drained { runtime_id; ollama_dropped_count; require_tool_support_reason }`
+  - `Off`: 빈 candidate → 즉시 명시적 runtime-local-only filter error
   - `Explicit_chain_only` (default): runtime.toml 의 `fallback_runtime` chain 만 따라감 (기존 정상 코드 path 유지). cross-runtime resolver 는 호출 안 함.
   - `Legacy`: 기존 행동 (cross-runtime resolver 호출). RFC-0001 anti-pattern 으로 분류, deprecation warning 출력.
 

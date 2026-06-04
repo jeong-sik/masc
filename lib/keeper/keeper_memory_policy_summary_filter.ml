@@ -80,7 +80,7 @@ let filter_forward_looking_summary (summary : string) : string =
         || (String_util.contains_substring_ci payload "only"
             && (String_util.contains_substring_ci payload "allowed tool"
                 || String_util.contains_substring_ci payload "available tool"
-                || String_util.contains_substring_ci payload "visible tool"
+                || String_util.contains_substring_ci payload "allowed tool"
                 || String_util.contains_substring_ci payload "tool surface"
                 || String_util.contains_substring_ci payload "tool-surface")))
   in

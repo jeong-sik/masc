@@ -60,21 +60,6 @@ let is_placeholder_evidence_ref value =
   let value = value |> String.trim |> String.lowercase_ascii in
   value = "" || List.mem value placeholder_evidence_refs
 
-(* [pr_url_has_pull_ref] validates an explicit typed [pr_url] field
-   handed to the task completion adapter. The
-   substring shape match is a thin guard on a typed input — distinct
-   from the retired transition-layer substring gate (RFC-0109 Phase E,
-   2026-05-27). *)
-let pr_url_has_pull_ref pr_url =
-  let pr_url = String.trim pr_url in
-  (not (is_placeholder_evidence_ref pr_url))
-  && ((String_util.contains_substring_ci pr_url "github.com/"
-       && String_util.contains_substring_ci pr_url "/pull/")
-      || (String_util.contains_substring_ci pr_url "#"
-          && (String_util.contains_substring_ci pr_url "pr "
-              || String_util.contains_substring_ci pr_url "pr:"
-              || String_util.contains_substring_ci pr_url "pull request")))
-
 let non_empty_trimmed_strings values =
   values
   |> List.filter_map (fun value ->

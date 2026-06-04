@@ -9,10 +9,8 @@ let provider_effective_max_turns _kind requested = requested
 (* RFC-0167: the client-named omission-dedup module (#10097) was removed
    in the big-bang sweep. The structural omission of keeper-bound runtime
    MCP tools (when the runtime adapter requires per-keeper bridging
-   but no per-keeper bearer is available) is still detected and
-   reported through the [Error (invalid_runtime_config ...)] path
-   below — only the WARN-dedup + per-tool Prometheus counter were
-   removed. *)
+   but no per-keeper bearer is available) now degrades by dropping those
+   tools from the per-turn policy. *)
 
 (** Resolve a model label string to an OAS Provider.config.
     Uses MASC [Runtime_model_string.parse_model_string] (with Provider_registry as SSOT).
@@ -115,7 +113,6 @@ let provider_label (provider_cfg : Llm_provider.Provider_config.t) =
 
 let resolve_tool_lane_for_oas_tools
       ?agent_name
-      ?(tool_requirement = `Required)
       ~(provider_cfg : Llm_provider.Provider_config.t)
       ~(tools : Agent_sdk.Tool.t list)
       ()
@@ -155,22 +152,10 @@ let resolve_tool_lane_for_oas_tools
         (public_tool_names @ agent_internal_tool_names)
     | _ -> []
   in
-  (* RFC-0167: previously routed [omitted_keeper_bound_actor_tools] through
-     a client-named dedup adapter for WARN-dedup + per-tool counter.
-     The dedup module was a client-named adapter (cli_tool_a wire-quirk)
-     and is removed; the omission is now silently reflected only in the
-     [Error (invalid_runtime_config ...)] returned below. *)
-  if tool_requirement = `Required && omitted_keeper_bound_actor_tools <> []
-  then (
-    let detail =
-      Printf.sprintf
-        "%s cannot satisfy required keeper-bound runtime MCP tools omitted by the runtime adapter: \
-         %s"
-        (provider_label provider_cfg)
-        (String.concat ", " (List.sort String.compare omitted_keeper_bound_actor_tools))
-    in
-    Error (invalid_runtime_config "tool_support" detail))
-  else (
+  (* Tool calls are advisory on the keeper path. If a provider cannot expose
+     bound-actor runtime MCP tools for this keeper, drop only those tools and
+     keep the turn alive with the remaining supported lane. *)
+  (
     let public_tool_names =
       if omitted_keeper_bound_actor_tools = []
       then public_tool_names
@@ -193,10 +178,8 @@ let resolve_tool_lane_for_oas_tools
     (* RFC-0167 (was #12676): When all tools were bound-actor and got
        stripped on an optional turn, runtime_tool_names is empty. The
        keeper may still use an MCP connection for discovery, so build a
-       minimal connect-only
-       policy with the server URL and auth but no allowed_tool_names. Required
-       turns reject above because a zero-tool policy cannot satisfy the tool
-       contract. *)
+       minimal connect-only policy with the server URL and auth but no
+       allowed_tool_names. *)
     let runtime_mcp_policy =
       if runtime_tool_names = [] && omitted_keeper_bound_actor_tools <> []
       then (
@@ -247,35 +230,7 @@ let resolve_tool_lane_for_oas_tools
              runtime_mcp_policy -> Ok ([], Some runtime_mcp_policy)
     | _ when tools = [] -> Ok (tools, None)
     | _ when provider_supports_inline_tools provider_cfg -> Ok (tools, None)
-    | _ when tool_requirement = `Optional -> Ok ([], None)
-    | _ ->
-      let detail =
-        let runtime_mcp_requires_http_headers =
-          match runtime_mcp_policy with
-          | Some policy ->
-            Provider_tool_support.runtime_mcp_policy_requires_unsupported_http_headers
-              provider_cfg
-              policy
-          | None -> false
-        in
-        if
-          public_tool_names <> []
-          && runtime_mcp_requires_http_headers
-          && provider_supports_runtime_mcp_lane provider_cfg
-        then
-          Printf.sprintf
-            "%s does not support request-scoped runtime MCP HTTP headers required by \
-             public MCP tools"
-            (provider_label provider_cfg)
-        else if public_tool_names <> []
-        then
-          Printf.sprintf
-            "%s does not support inline tools or request-scoped runtime MCP tools"
-            (provider_label provider_cfg)
-        else
-          Printf.sprintf "%s does not support inline tools" (provider_label provider_cfg)
-      in
-      Error (invalid_runtime_config "tool_support" detail))
+    | _ -> Ok ([], None))
 ;;
 
 (* CLI subprocess transport (json-stream local transport, ctors, argv

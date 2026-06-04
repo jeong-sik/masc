@@ -56,7 +56,6 @@ val effective_attempt_timeout_s :
 
 val resolve_tool_lane_for_oas_tools :
   ?agent_name:string ->
-  ?tool_requirement:[ `Optional | `Required ] ->
   tools:Agent_sdk.Tool.t list ->
   t ->
   ( Agent_sdk.Tool.t list

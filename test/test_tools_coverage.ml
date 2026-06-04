@@ -196,9 +196,9 @@ let test_masc_transition_schema () =
       Alcotest.(check bool) "description omits task required_tools"
         false
         (contains_substring ~needle:"required_tools" schema.description);
-      Alcotest.(check bool) "description omits required tools routing"
+      Alcotest.(check bool) "description omits mandatory tools routing"
         false
-        (contains_substring ~needle:"required tools" schema.description);
+        (contains_substring ~needle:"mandatory tools" schema.description);
       Alcotest.(check bool) "description omits requires tools routing"
         false
         (contains_substring ~needle:"requires tools" schema.description);

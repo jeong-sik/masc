@@ -29,7 +29,7 @@ follow_up_prs:
   - "host-config-cleanup-B: shell (/bin/bash + /bin/zsh, 7 sites)"
   - "host-config-cleanup-C: coreutils (/bin/ls /usr/bin/head etc., 6 sites)"
   - "host-config-cleanup-D: agent-runtime (/tmp/.masc_agent_* 7 sites)"
-  - "host-config-cleanup-E: sandbox-root (worker_dev_tools.ml:85)"
+  - "host-config-cleanup-E: sandbox-root (retired_worker_shell_facade:85)"
   - "host-config-cleanup-F: test-mode (5 String.starts_with sites)"
   - "disclosure-activation-G: worker_oas.ml Builder.with_disclosure_level wiring"
   - "disclosure-activation-H: keeper_meta.ml TOML [disclosure] round-trip"
@@ -170,7 +170,7 @@ keeper→tool 실행이 *macOS 운영자 workstation의 특정 디렉토리 layo
 | `agent_tool_execute_command_parse.ml:217` | dispatch (gh family) | `[ "/bin/zsh"; "-lc"; ... ]` remaining gh command-parse site |
 | `lib/keeper/keeper_workspace_ops.ml:339,387,661,702,746` | dispatch (shell ops) | `"/bin/ls"`, `"/bin/cat"`, `"/bin/pwd"`, `"/usr/bin/head"`, `"/usr/bin/tail"`, `"/usr/bin/wc"` 6 sites |
 | `lib/tool_inline_dispatch_workspace.ml:185-187, 267-268`, `mcp_server_eio_execute.ml:191, 210, 253, 331, 570` | persistence (agent identity) | `Printf.sprintf "/tmp/.masc_agent[_mcp]_%s" sid` **7 sites**. `TERM_SESSION_ID` 없으면 `"default"` silent collision |
-| `lib/worker_dev_tools.ml:85` | dispatch (Fleet worker) | hard-coded home workspace root — 사용자별 binding |
+| `lib/retired_worker_shell_facade:85` | dispatch (Fleet worker) | hard-coded home workspace root — 사용자별 binding |
 | `lib/workspace/workspace_utils_backend_setup.ml:103`, `config_dir_resolver.ml:59`, `env_config_core.ml:353`, `cdal/adversarial_eval.ml:294, 301` | test-mode auto-detection | `String.starts_with ~prefix:"test_" executable` 5 sites — 보안 risk (binary rename으로 test mode silently 진입) |
 
 NixOS/Alpine/Linux server에서 silent fail.

@@ -20,7 +20,7 @@ type turn_context =
   ; network_mode : string option
   ; approval_mode : string option
   ; tool_surface_class : string option
-  ; visible_tool_count : int option
+  ; allowed_tool_count : int option
   ; runtime_profile : string option
   }
 
@@ -45,7 +45,7 @@ val set_turn_context :
   ?network_mode:string ->
   ?approval_mode:string ->
   ?tool_surface_class:string ->
-  ?visible_tool_count:int ->
+  ?allowed_tool_count:int ->
   ?runtime_profile:string ->
   unit ->
   unit

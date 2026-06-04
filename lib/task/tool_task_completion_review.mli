@@ -14,8 +14,6 @@ val placeholder_evidence_refs : string list
 
 val is_placeholder_evidence_ref : string -> bool
 
-val pr_url_has_pull_ref : string -> bool
-
 val non_empty_trimmed_strings : string list -> string list
 
 val concrete_verification_evidence_refs :

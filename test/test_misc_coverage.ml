@@ -127,7 +127,7 @@ let test_config_of_json_custom () =
 let test_config_of_json_invalid () =
   (* masc_pause is auto-classified as Hidden (not on public MCP surface) *)
   check bool "pause hidden (not on public surface)" false
-    (Config.is_tool_visible "masc_pause")
+    (Config.is_tool_allowed "masc_pause")
 
 (* ============================================================
    Env_config Tests

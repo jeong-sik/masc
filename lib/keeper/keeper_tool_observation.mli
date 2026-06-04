@@ -39,7 +39,7 @@ val merge_reported_and_observed_tool_names
 
 (** Merge reported/observed tool names after public-name canonicalization and
     filter to the keeper's canonical [allowed_tool_names]. The allowlist may
-    contain either LLM-visible aliases (e.g. [Execute]) or internal handler
+    contain either model-facing aliases (e.g. [Execute]) or internal handler
     names (e.g. [tool_execute]). *)
 val final_keeper_tool_names
   :  reported_tool_names:string list

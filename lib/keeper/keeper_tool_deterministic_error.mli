@@ -43,7 +43,7 @@ type deterministic_reason =
   | Completion_contract_violation
       (** keeper completion contract failed. *)
   | Structured_tool_payload
-      (** Raw shell rejected because a structured visible tool/native workflow should carry the payload. *)
+      (** Raw shell rejected because a structured allowed tool/native workflow should carry the payload. *)
   | Workflow_rejection_blocked
       (** typed workflow_rejection failure class — handled by a
           separate counter in [Keeper_tools_oas]. It is considered

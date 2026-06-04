@@ -490,7 +490,7 @@ A0 이후 이 9개 타입에 arm을 추가할 때:
 - `lib/keeper/agent_tool_command_runtime.ml` (19) 외
 
 #### A4d — 잔존 Unix.* + deprecation (2일, 9 + 삭제)
-- `lib/spawn.ml`, `worker_runtime_docker.ml` 등 + `retired_file_write_tool.ml:36-48` allowlist 삭제, `worker_dev_tools.ml:76-150,283-300` 삭제, `eval_gate.ml:100-130` `@@deprecated`
+- `lib/spawn.ml`, `worker_runtime_docker.ml` 등 + `retired_file_write_tool.ml:36-48` allowlist 삭제, `retired_worker_shell_facade:76-150,283-300` 삭제, `eval_gate.ml:100-130` `@@deprecated`
 
 **Exit criteria**:
 - `rg -e 'Process_eio\.run_argv' -e 'Unix\.(create_process|open_process|system)' lib/ | grep -v lib/exec/exec_gate` = 0

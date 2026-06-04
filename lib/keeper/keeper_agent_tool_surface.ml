@@ -129,7 +129,7 @@ type tool_surface_metrics =
   { turn_lane : turn_lane
   ; tool_surface_class : tool_surface_class
   ; tool_requirement : tool_requirement
-  ; visible_tool_count : int
+  ; allowed_tool_count : int
   ; tool_gate_enabled : bool
   ; tool_surface_fallback_used : bool
   ; config_root : string
@@ -140,7 +140,7 @@ type tool_surface_metrics =
   }
 
 type computed_tool_surface =
-  { turn_visible_tool_names : string list
+  { turn_allowed_tool_names : string list
   ; absolute_turn : int
   ; checkpoint_start_turn : int
   ; per_call_turn : int
@@ -302,7 +302,7 @@ let keeper_selection_bm25_prefilter_n = 30
    production Tool_index entry builder so tests cannot drift by copying a
    second alias/group table.
 
-   Entries stay keyed by canonical handler names. LLM-visible public aliases
+   Entries stay keyed by canonical handler names. Model-facing public aliases
    such as Execute/Grep project through Keeper_tool_descriptor_resolution
    below, so retrieval shares one public-alias axis instead of carrying duplicate
    Execute/Grep rows. *)

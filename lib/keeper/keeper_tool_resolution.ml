@@ -188,7 +188,7 @@ let public_aliases_for_internal_name internal_name =
 ;;
 
 let public_alias_guidance_for_internal_call
-      ~(visible_tool_names : string list)
+      ~(allowed_tool_names : string list)
       (tool_name : string)
   : string option
   =
@@ -200,22 +200,22 @@ let public_alias_guidance_for_internal_call
     (match public_aliases_for_internal_name canonical with
      | [] -> None
      | aliases ->
-       let visible_aliases =
-         List.filter (fun alias -> List.mem alias visible_tool_names) aliases
+       let allowed_aliases =
+         List.filter (fun alias -> List.mem alias allowed_tool_names) aliases
        in
        let alias_words =
-         match visible_aliases with
+         match allowed_aliases with
          | [] -> aliases
-         | _ -> visible_aliases
+         | _ -> allowed_aliases
        in
        let alias_text = String.concat " or " alias_words in
        let correction =
-         match visible_aliases with
+         match allowed_aliases with
          | _ :: _ -> Printf.sprintf "Use %s instead." alias_text
          | [] ->
            Printf.sprintf
-             "No public alias for it is visible in this turn; do not invent \
-              internal tool names. Wait for a visible tool or report the blocker. \
+             "No public alias for it is allowed in this turn; do not invent \
+              internal tool names. Wait for an allowed tool or report the blocker. \
               Public alias%s: %s."
              (if List.length aliases = 1 then "" else "es")
              alias_text
@@ -223,7 +223,7 @@ let public_alias_guidance_for_internal_call
        Some
          (Printf.sprintf
             "%s is an internal keeper implementation tool name, not a \
-             schema-visible tool. %s"
+             schema-allowed tool. %s"
             stripped
             correction))
 ;;

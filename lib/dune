@@ -12,14 +12,12 @@
  keeper_world_observation_inputs
  keeper_world_observation_message_scope
  keeper_event_bus_drain_site
- silent_dashboard_actor_outcome
  sse_jsonrpc_filter
  keeper_tool_call_log_context
 
  board_prometheus_hooks
  workspace_prometheus_hooks
 
- keeper_persona_authoring_contract
  keeper_types_profile_persona keeper_types_profile_persona_defaults
  keeper_types_profile_oas_env
  keeper_types_profile_defaults

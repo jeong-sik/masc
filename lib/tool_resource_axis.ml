@@ -58,7 +58,7 @@ let translate_search_files_public_args args =
 
 let translate_public_alias_args ~public args =
   match public with
-  | "Grep" -> translate_search_files_public_args args
+  | "Grep" | "Search" -> translate_search_files_public_args args
   | _ -> args
 ;;
 
@@ -256,13 +256,25 @@ let classify_non_catalog_tool ~tool_name =
   | _ -> None
 ;;
 
+let classify_descriptor_tool ~tool_name ~arguments =
+  match tool_name with
+  | "tool_execute" -> Some (typed_execute_args_class arguments)
+  | "tool_search_files" -> Some (classify_structured_shell_op arguments)
+  | "tool_read_file" -> Some Filesystem_read
+  | "tool_write_file" | "tool_edit_file" -> Some Filesystem_write
+  | _ -> None
+;;
+
 let classify_normalized ~tool_name ~arguments ~is_read_only =
-  match Tool_name.of_string tool_name with
-  | Some (Tool_name.Masc tool) -> classify_masc_tool tool
+  match classify_descriptor_tool ~tool_name ~arguments with
+  | Some resource_class -> resource_class
   | None ->
-    (match classify_non_catalog_tool ~tool_name with
-     | Some resource_class -> resource_class
-     | None -> if is_read_only then Ungated else Generic_write)
+    (match Tool_name.of_string tool_name with
+     | Some (Tool_name.Masc tool) -> classify_masc_tool tool
+     | None ->
+       (match classify_non_catalog_tool ~tool_name with
+        | Some resource_class -> resource_class
+        | None -> if is_read_only then Ungated else Generic_write))
 ;;
 
 let classify ~tool_name ~arguments ~is_read_only =

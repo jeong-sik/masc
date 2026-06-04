@@ -24,7 +24,7 @@ let canonical_internal_name_for_tool_name tool_name =
 
 let public_names_for_internal internal_name =
   Keeper_tool_descriptor.public_descriptors_for_internal internal_name
-  |> List.map (fun descriptor -> descriptor.Keeper_tool_descriptor.public_name)
+  |> List.concat_map Keeper_tool_descriptor.public_names_of_descriptor
   |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
 ;;
 
@@ -40,7 +40,7 @@ let public_names_for_allowed_internal_names internal_names =
   Keeper_tool_descriptor.public_descriptors
   |> List.filter (fun (descriptor : Keeper_tool_descriptor.t) ->
     Hashtbl.mem allowed descriptor.internal_name)
-  |> List.map (fun descriptor -> descriptor.Keeper_tool_descriptor.public_name)
+  |> List.concat_map Keeper_tool_descriptor.public_names_of_descriptor
   |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
 ;;
 

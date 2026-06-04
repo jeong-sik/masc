@@ -89,6 +89,11 @@ let test_annotations_use_descriptor_public_alias_capabilities () =
     (bool_annotation "readOnlyHint" "Grep");
   check
     bool
+    "Search secondary alias readOnlyHint from descriptor"
+    true
+    (bool_annotation "readOnlyHint" "Search");
+  check
+    bool
     "WriteFile readOnlyHint false from descriptor"
     false
     (bool_annotation "readOnlyHint" "Write");
@@ -138,7 +143,13 @@ let test_tool_json_projects_descriptor_metadata_for_public_aliases () =
     string
     "SearchFiles canonical descriptor name"
     "tool_search_files"
-    (json_string_field "descriptorCanonicalName" search_files)
+    (json_string_field "descriptorCanonicalName" search_files);
+  let search_alias = tool_json "Search" in
+  check
+    string
+    "Search alias canonical descriptor name"
+    "tool_search_files"
+    (json_string_field "descriptorCanonicalName" search_alias)
 ;;
 
 let test_descriptor_resolution_capabilities_for_public_aliases () =
@@ -155,6 +166,11 @@ let test_descriptor_resolution_capabilities_for_public_aliases () =
     "SearchFiles read-only via descriptor resolution"
     true
     (capability_has Masc.Tool_capability.Read_only "Grep");
+  check
+    bool
+    "Search secondary alias read-only via descriptor resolution"
+    true
+    (capability_has Masc.Tool_capability.Read_only "Search");
   check
     bool
     "mcp-prefixed SearchFiles read-only via descriptor resolution"

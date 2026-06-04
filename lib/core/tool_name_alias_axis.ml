@@ -11,6 +11,7 @@ let public_aliases =
   ; { public_name = "WebFetch"; internal_name = "masc_web_fetch" }
   ; { public_name = "Read"; internal_name = "tool_read_file" }
   ; { public_name = "Grep"; internal_name = "tool_search_files" }
+  ; { public_name = "Search"; internal_name = "tool_search_files" }
   ; { public_name = "WebSearch"; internal_name = "masc_web_search" }
   ; { public_name = "Write"; internal_name = "tool_write_file" }
   ]
@@ -46,4 +47,3 @@ let strip_mcp_masc_prefix name =
   then String.sub name 11 (String.length name - 11)
   else name
 ;;
-

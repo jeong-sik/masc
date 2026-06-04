@@ -6,7 +6,7 @@
     input translator, and an optional public schema.
 
     Two surfaces:
-    - LLM native tools: Execute, Grep, Read, Edit, Write, WebSearch, WebFetch
+    - LLM native tools: Execute, Grep/Search, Read, Edit, Write, WebSearch, WebFetch
     - MCP tools: masc_* (handled separately via Tool_catalog_surfaces)
 
     Internal [keeper_*] names are implementation details of the routing layer,
@@ -28,14 +28,17 @@ let routing_table : (string, route) Hashtbl.t =
   let t = Hashtbl.create 8 in
   List.iter
     (fun (d : Keeper_tool_descriptor.t) ->
-       Hashtbl.replace
-         t
-         d.public_name
-         { internal_name = d.internal_name
-         ; translate = d.translate
-         ; public_schema = Some d.input_schema
-         ; descriptor = d
-         })
+       List.iter
+         (fun public_name ->
+            Hashtbl.replace
+              t
+              public_name
+              { internal_name = d.internal_name
+              ; translate = d.translate
+              ; public_schema = Some d.input_schema
+              ; descriptor = d
+              })
+         (Keeper_tool_descriptor.public_names_of_descriptor d))
     Keeper_tool_descriptor.public_descriptors;
   t
 ;;

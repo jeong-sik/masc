@@ -467,6 +467,19 @@ let test_public_local_aliases_dispatch_to_runtime_handlers () =
         (contains_substring grep_result.raw_output "public-alias.txt");
       check bool "Grep match includes content" true
         (contains_substring grep_result.raw_output "gamma");
+      let search_result =
+        run
+          "Search"
+          (`Assoc
+             [ "pattern", `String "gamma"; "path", `String visible_file_path ])
+      in
+      let search_json = check_success_result "Search" search_result in
+      check string "Search translates to rg op" "rg"
+        (json_string_field ~default:"" "op" search_json);
+      check bool "Search returns real match" true
+        (contains_substring search_result.raw_output "public-alias.txt");
+      check bool "Search match includes content" true
+        (contains_substring search_result.raw_output "gamma");
       let execute_result =
         run
           "Execute"

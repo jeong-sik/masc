@@ -75,6 +75,7 @@ type policy =
 type t =
   { id : string
   ; public_name : string
+  ; public_aliases : string list
   ; internal_name : string
   ; description : string
   ; input_schema : Yojson.Safe.t
@@ -369,8 +370,19 @@ let search_files_readonly_of_input input =
   | None -> None
 ;;
 
-let descriptor ~id ~public_name ~internal_name ~description ~input_schema ~policy
-      ~executor ~backend ~sandbox ~runtime_handler ~translate
+let descriptor_with_public_aliases
+      ~public_aliases
+      ~id
+      ~public_name
+      ~internal_name
+      ~description
+      ~input_schema
+      ~policy
+      ~executor
+      ~backend
+      ~sandbox
+      ~runtime_handler
+      ~translate
   =
   let receipt_labels =
     [ "descriptor_id", id
@@ -384,6 +396,7 @@ let descriptor ~id ~public_name ~internal_name ~description ~input_schema ~polic
   in
   { id
   ; public_name
+  ; public_aliases
   ; internal_name
   ; description
   ; input_schema
@@ -395,6 +408,34 @@ let descriptor ~id ~public_name ~internal_name ~description ~input_schema ~polic
   ; translate
   ; receipt_labels
   }
+;;
+
+let descriptor
+      ~id
+      ~public_name
+      ~internal_name
+      ~description
+      ~input_schema
+      ~policy
+      ~executor
+      ~backend
+      ~sandbox
+      ~runtime_handler
+      ~translate
+  =
+  descriptor_with_public_aliases
+    ~public_aliases:[]
+    ~id
+    ~public_name
+    ~internal_name
+    ~description
+    ~input_schema
+    ~policy
+    ~executor
+    ~backend
+    ~sandbox
+    ~runtime_handler
+    ~translate
 ;;
 
 let public_descriptors =
@@ -421,9 +462,10 @@ let public_descriptors =
       ~sandbox:Backend_selected
       ~runtime_handler:Tool_execute
       ~translate:translate_identity
-  ; descriptor
+  ; descriptor_with_public_aliases
       ~id:"agent.search_files"
       ~public_name:"Grep"
+      ~public_aliases:[ "Search" ]
       ~internal_name:"tool_search_files"
       ~description:
         "Inspect the project workspace through structured read-only operations \
@@ -544,7 +586,8 @@ let public_descriptors =
 (* RFC-0179 list bifurcation. [internal_descriptors] hosts descriptor-backed
    workspace tools (keeper_* / masc_* clusters). Each cluster migration PR
    adds entries here. The LLM-native [public_descriptors] contract (RFC-0064
-   hard-cut, 7 entries) is preserved unchanged.
+   hard-cut) is preserved as preferred public descriptors; secondary aliases
+   reuse an existing descriptor instead of duplicating runtime ownership.
 
    RFC-0179 PR-3 (full keeper_* coverage). Every legacy match arm in
    [Keeper_tool_dispatch_runtime.execute_keeper_tool_call_with_outcome] is now backed by
@@ -1293,14 +1336,18 @@ let internal_descriptors : t list =
 
 let all_descriptors () = public_descriptors @ internal_descriptors
 
-let public_names () = List.map (fun d -> d.public_name) public_descriptors
+let public_names_of_descriptor d = d.public_name :: d.public_aliases
+
+let public_names () = List.concat_map public_names_of_descriptor public_descriptors
 
 let internal_names d =
   [ d.internal_name ]
 ;;
 
 let find_public name =
-  List.find_opt (fun d -> String.equal d.public_name name) public_descriptors
+  List.find_opt
+    (fun d -> List.exists (String.equal name) (public_names_of_descriptor d))
+    public_descriptors
 ;;
 
 let public_descriptors_for_internal internal_name =

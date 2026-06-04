@@ -80,6 +80,7 @@ type policy =
 type t =
   { id : string
   ; public_name : string
+  ; public_aliases : string list
   ; internal_name : string
   ; description : string
   ; input_schema : Yojson.Safe.t
@@ -98,8 +99,9 @@ val sandbox_to_string : sandbox -> string
 val approval_to_string : approval -> string
 val runtime_handler_to_string : runtime_handler -> string
 
-(** [public_descriptors] is the LLM-native public surface (RFC-0064 hard-cut, 7
-    entries pinned by [test_alias_table_is_stable]). *)
+(** [public_descriptors] is the LLM-native public surface (RFC-0064 hard-cut).
+    Each descriptor has one preferred [public_name] and may expose secondary
+    [public_aliases] that reuse the same schema/translation/runtime. *)
 val public_descriptors : t list
 
 (** [internal_descriptors] is the descriptor-backed workspace surface
@@ -113,6 +115,7 @@ val internal_descriptors : t list
     descriptor-backed tool, regardless of LLM-native vs workspace origin. *)
 val all_descriptors : unit -> t list
 
+val public_names_of_descriptor : t -> string list
 val public_names : unit -> string list
 val internal_names : t -> string list
 val find_public : string -> t option
@@ -121,7 +124,7 @@ val public_descriptors_for_internal : string -> t list
 
 (** [descriptors_for_internal name] walks [all_descriptors ()]. Use this from
     the runtime dispatcher to support descriptor-backed workspace tools
-    alongside the seven LLM-native descriptors. *)
+    alongside the LLM-native descriptors. *)
 val descriptors_for_internal : string -> t list
 
 val readonly_static_hint : t -> bool option

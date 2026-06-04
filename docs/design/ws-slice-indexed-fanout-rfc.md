@@ -5,7 +5,7 @@ code_refs:
   - lib/sse.ml
   - lib/server/server_mcp_transport_ws.ml
   - lib/server/server_ws_standalone.ml
-  - lib/grpc/masc_grpc_service.ml
+  - lib/server/masc_grpc_service.ml
 ---
 
 # WS Slice-Indexed Fan-Out (RFC)

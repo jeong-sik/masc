@@ -55,7 +55,6 @@
   workspace_prometheus_hooks
 
  keeper_persona_authoring_contract
- keeper_persona_authoring_slug
  keeper_types_profile_sandbox
  keeper_types_profile_persona keeper_types_profile_persona_defaults
  keeper_types_profile_oas_env
@@ -214,6 +213,7 @@
   tool_inline_dispatch_types
   tool_inline_dispatch_workspace
   tool_inline_dispatch_comm
+  approval_queue_handlers
   workspace_goals_verification
   tool_misc_admin
   keeper_tool_persona_audit

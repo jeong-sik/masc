@@ -40,7 +40,6 @@ let handle_broadcast ~tool_name ~start_time (ctx : context) : tool_result option
   let agent_name = ctx.agent_name in
   let registry = ctx.registry in
   let state = ctx.state in
-  let sw = ctx.sw in
   let message = arg_get_string ctx "message" "" in
   let trimmed = String.trim message in
   if String.equal trimmed "" then
@@ -93,12 +92,6 @@ let handle_broadcast ~tool_name ~start_time (ctx : context) : tool_result option
         (match mention with
          | Some target -> Notify.notify_mention ~from_agent:agent_name ~target_agent:target ~message ()
          | None -> ());
-        let _ = Auto_responder.maybe_respond          ~sw
-          ~base_path:config.base_path
-          ~from_agent:agent_name
-          ~content:message
-          ~mention
-        in
         ignore (config, agent_name);
         Audit_log.log_broadcast config ~agent_id:agent_name
           ~message_preview:message ();

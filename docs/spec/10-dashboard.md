@@ -3,7 +3,7 @@ status: reference
 last_verified: 2026-05-01
 code_refs:
   - lib/dashboard/
-  - lib/dashboard.ml
+  - lib/dashboard/dashboard.ml
   - dashboard/
 ---
 
@@ -128,7 +128,6 @@ OCaml Backend:
     |-- dashboard_attention.ml        (Attention item detection)
     |-- dashboard_agent_relations.ml  (GraphQL proxy for agent relations)
     |-- dashboard_utils.ml            (ISO timestamp, text normalization)
-    |-- dashboard_provider_runs.ml    (Provider run tracking)
     |
     |-- credits_dashboard.ml          (Standalone OCaml-rendered HTML dashboard)
     |-- web_dashboard.ml              (Static file serving wrapper)

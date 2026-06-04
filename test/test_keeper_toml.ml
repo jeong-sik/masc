@@ -1253,9 +1253,9 @@ let test_persona_authoring_schema_explains_effects () =
     (contains_substring rendered "choice_effects");
   check bool "documents generated fields" true
     (contains_substring rendered "generated_fields");
-  check string "draft tool" "masc_persona_generate"
+  check string "schema tool" "masc_persona_schema"
     (Yojson.Safe.Util.member "authoring_flow" json
-     |> Yojson.Safe.Util.member "draft_tool"
+     |> Yojson.Safe.Util.member "schema_tool"
      |> Yojson.Safe.Util.to_string);
   check string "save tool" "masc_persona_save"
     (Yojson.Safe.Util.member "authoring_flow" json

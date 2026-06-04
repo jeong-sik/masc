@@ -166,7 +166,6 @@ let pending_public_mcp_inline_names =
   ; legacy_masc_broadcast_name
   ; "masc_messages"
   ; "masc_keeper_sandbox_status"
-  ; "masc_persona_generate"
   ; "masc_keeper_create_from_persona"
   ]
 ;;

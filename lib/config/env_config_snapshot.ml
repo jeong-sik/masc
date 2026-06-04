@@ -45,7 +45,6 @@ let runtime_entries =
     entry ~default:"false" Env_config_core.parse_warn_env_key "Enable JSON parse warnings";
     entry ~default:"production" Env_config_core.governance_level_env_key
       "Governance enforcement level";
-    entry ~default:"(none)" "MASC_AUTO_RESPOND" "Auto-respond mode";
     entry ~default:"(none)" "MASC_SLOT_YIELD_ENABLED"
       "Release LLM slot during tool execution (feature flag)";
     entry ~default:"true" Env_config_core.telemetry_enabled_env_key
@@ -105,8 +104,6 @@ let transport_entries =
       "Startup watchdog timeout (seconds)";
     entry ~default:"(none)" "MASC_AGENT_TRANSPORT"
       "Agent transport preference";
-    entry ~default:"false" "MASC_OPENAI_COMPAT"
-      "Enable OpenAI-compatible endpoint";
   ]
 
 let inference_entries =

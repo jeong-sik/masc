@@ -184,7 +184,7 @@ let object_schema ?(required = []) properties =
     ]
 ;;
 
-let execute_schema = Tool_shard_types_schemas_execute.tool_execute_schema.input_schema
+let execute_schema = Tool_shard_types.tool_execute_schema.input_schema
 
 let read_file_schema =
   object_schema
@@ -1280,9 +1280,7 @@ let internal_descriptors : t list =
       "Read a single pending approval by id." ~readonly:true
   ; masc_approval_descriptor "resolve" "masc_approval_resolve"
       "Resolve a pending approval (approve / reject)." ~readonly:false
-  (* ── RFC-0182 §3.1 — masc_persona_* cluster (3 entries) ──────── *)
-  (* masc_persona_generate is omitted — its handler uses the keeper
-     Eio context and is gated on Phase 5 Eio plumbing scope. *)
+  (* ── RFC-0182 §3.1 — masc_persona_* cluster ──────── *)
   ; masc_persona_descriptor "list" "masc_persona_list"
       "List configured personas plus summary metadata." ~readonly:true
   ; masc_persona_descriptor "schema" "masc_persona_schema"

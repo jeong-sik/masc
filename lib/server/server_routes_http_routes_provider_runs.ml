@@ -130,7 +130,7 @@ let add_routes ~sw router =
   router
   |> Http.Router.get "/api/v1/providers" (fun request reqd ->
        with_public_read (fun _state req reqd ->
-         let json = Dashboard_provider_runs.provider_inventory_json () in
+         let json = Server_dashboard_http_runtime_info.runtime_inventory_json () in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/models/metrics" (fun request reqd ->
@@ -157,56 +157,6 @@ let add_routes ~sw router =
                Model_inference_metrics.to_json agg)
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
-       ) request reqd)
-  |> Http.Router.post "/api/v1/agent-runs" (fun request reqd ->
-       with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         (fun state _agent_name _req reqd ->
-         Http.Request.read_body_async reqd (fun body_str ->
-             try
-               let json = Yojson.Safe.from_string body_str in
-               let provider = (match Json_util.assoc_member_opt "provider" json with Some (`String s) -> s | _ -> "") in
-               let model_opt = Json_util.get_string json "model" in
-               let prompt = (match Json_util.assoc_member_opt "prompt" json with Some (`String s) -> s | _ -> "") in
-               match
-                 Dashboard_provider_runs.start_run ~sw
-                   ~net:state.Mcp_server.net ~provider ~model_opt
-                   ~prompt
-               with
-               | Ok payload ->
-                   respond_json_value_with_cors ~status:`Created request reqd payload
-               | Error message ->
-                   respond_json_value_with_cors ~status:`Bad_request request reqd
-                     (`Assoc [ ("error", `String message) ])
-             with
-             | Yojson.Json_error error ->
-                 respond_json_value_with_cors ~status:`Bad_request request reqd
-                   (`Assoc
-                      [
-                        ( "error",
-                          `String ("invalid json: " ^ error) );
-                      ])
-             | Yojson.Safe.Util.Type_error (error, _) ->
-                 respond_json_value_with_cors ~status:`Bad_request request reqd
-                   (`Assoc
-                      [
-                        ( "error",
-                          `String ("invalid request shape: " ^ error) );
-                      ]))
-       ) request reqd)
-  |> Http.Router.prefix_get "/api/v1/agent-runs/" (fun request reqd ->
-       with_read_auth (fun _state req reqd ->
-         let req_path = Http.Request.path req in
-         match extract_path_param ~prefix:"/api/v1/agent-runs/" req_path with
-         | None ->
-             respond_json_value_with_cors ~status:`Bad_request request reqd
-               (`Assoc [ ("error", `String "run_id is required") ])
-         | Some run_id ->
-             (match Dashboard_provider_runs.run_status_json run_id with
-             | Ok payload ->
-                 respond_json_value_with_cors request reqd payload
-             | Error message ->
-                 respond_json_value_with_cors ~status:`Not_found request reqd
-                   (`Assoc [ ("error", `String message) ]))
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/keeper-costs" (fun request reqd ->
        with_public_read (fun state req reqd ->

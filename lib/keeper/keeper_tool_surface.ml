@@ -692,7 +692,6 @@ let dispatch ctx ~name ~args : tool_result option =
   match name with
   | "masc_persona_list" -> Some (tool_result_with_tool_name ~tool_name:name (Persona.handle_persona_list ctx args))
   | "masc_persona_schema" -> Some (tool_result_with_tool_name ~tool_name:name (Persona.handle_persona_schema ctx args))
-  | "masc_persona_generate" -> Some (tool_result_with_tool_name ~tool_name:name (Persona.handle_persona_generate ctx args))
   | "masc_persona_save" -> Some (tool_result_with_tool_name ~tool_name:name (Persona.handle_persona_save ctx args))
   | "masc_keeper_create_from_persona" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_create_from_persona ctx args))
   | "masc_keeper_up" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_up ctx args))
@@ -751,8 +750,7 @@ let () =
    (compiled early in lib/keeper) can dispatch them without taking
    a static dependency on [Keeper_persona] / [Keeper_persona_authoring]
    (which transitively pull in [Keeper_turn_driver] and close a
-   cycle).  [masc_persona_generate] is intentionally excluded — its
-   handler uses the keeper Eio context. *)
+   cycle). *)
 let () =
   Persona_dispatch_ref.dispatch
   := fun ~name ~args ->

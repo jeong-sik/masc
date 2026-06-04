@@ -278,10 +278,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
         (match mention with
          | Some target ->
              Notify.notify_mention ~from_agent:author
-               ~target_agent:target ~message:content ();
-             ignore (Auto_responder.maybe_respond ~sw
-               ~base_path:config.base_path ~from_agent:author
-               ~content ~mention)
+               ~target_agent:target ~message:content ()
          | None -> ())
       end;
       Some result_tr
@@ -335,10 +332,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
         (match mention with
          | Some target ->
              Notify.notify_mention ~from_agent:author
-               ~target_agent:target ~message:content ();
-             ignore (Auto_responder.maybe_respond ~sw
-               ~base_path:config.base_path ~from_agent:author
-               ~content ~mention)
+               ~target_agent:target ~message:content ()
          | None -> ())
       end;
       Some result_tr

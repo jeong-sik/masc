@@ -52,8 +52,7 @@ done
 # Strip OCaml comments (nested-aware) and string literals from stdin, then
 # report whether a keeper-owned module token remains.
 # A char-state scanner is used because OCaml comments nest and a regex cannot
-# strip them reliably (a non-greedy `(*.*?*)` produced false negatives, e.g.
-# tool_deep_review.ml:160 was missed). Newlines are preserved in stripped
+  # strip them reliably. Newlines are preserved in stripped
 # regions so the scan stays line-faithful.
 keeper_call_in_file() {
   # Strip comments+strings into a variable, then match with a here-string.

@@ -310,9 +310,6 @@ module Transport = struct
     |> trim_opt
     |> Option.map agent_transport_of_string
 
-  (** Whether OpenAI-compatible endpoint is enabled. Default: false. *)
-  let openai_compat_enabled = Feature_flag_registry.get_bool "MASC_OPENAI_COMPAT"
-
   let _http_auth_strict_registry =
     Feature_flag_registry.get_bool "MASC_HTTP_AUTH_STRICT"
 

@@ -213,15 +213,11 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.result option =
 
   (* ── Approval queue (#5907) ─────────────────────────────────── *)
   | "masc_approval_pending" | "masc_approval_get" | "masc_approval_resolve" ->
-      (match !Approval_dispatch_ref.dispatch ~name ~args:arguments with
-       | Some body ->
-           Some (inline_approval_result ~tool_name:name ~start_time:start body)
-       | None ->
-           Some
-             (inline_err_workflow
-                ~tool_name:name
-                ~start_time:start
-                "approval dispatch is not registered"))
+      Some
+        (Approval_queue_handlers.handle
+           ~tool_name:name
+           ~start_time:start
+           arguments)
 
   (* Verification tools removed: pruned *)
 

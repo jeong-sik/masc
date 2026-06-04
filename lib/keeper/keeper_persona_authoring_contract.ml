@@ -1,9 +1,8 @@
 (** Shared persona authoring contract.
 
-    The persona generator schema, persona schema explanation, and generation
-    logic must agree on archetype choices, choice effects, and draft defaults.
-    Keep those values here so adding or renaming a choice is one edit instead
-    of a schema/runtime mirror. *)
+    The persona schema explanation and validation helpers must agree on
+    archetype choices and choice effects. Keep those values here so adding or
+    renaming a choice is one edit instead of a schema/runtime mirror. *)
 
 type archetype_choice_effect =
   { value : string
@@ -19,15 +18,6 @@ type archetype_axis =
   ; schema_description : string
   }
 
-let default_generation_language = "ko"
-(* Lazy: [Runtime.get_default_runtime_id] fail-fasts until [Runtime.init_default]
-   runs at startup (RFC-0206 §2.1). A module-level eager binding evaluates before
-   that, crashing boot; defer to first use so it resolves post-init. *)
-let default_generation_runtime_id =
-  lazy (Runtime.get_default_runtime_id ())
-let default_temperature = 0.7
-let default_max_tokens = 2500
-let default_generation_proactive_enabled = false
 let string_list_to_json = Json_util.json_string_list
 
 let option_field name value =

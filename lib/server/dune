@@ -4,6 +4,7 @@
  (name masc_server)
  (public_name masc.server)
  (wrapped false)
+ (private_modules keeper_grpc_heartbeat)
  (flags :standard -open Masc)
  (libraries
   masc

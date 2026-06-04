@@ -7,7 +7,6 @@
   (names nofile_stubs))
 (private_modules
  auth_nickname
- prometheus_text
  http_body_buffer
  http_response_payload
  error_event_type

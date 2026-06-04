@@ -434,6 +434,85 @@ let ensure_worktree_ready
                "worktree add failed for %s/%s at %s: %s"
                repo_name task_name worktree_path add_result.output)
 
+(** [provision_worktrees_for_task ~config ~agent_name ~task_id ()] scans all
+    repos in the keeper's docker playground and creates a worktree for [task_id]
+    in each repo that is ready.  Called best-effort at task claim time so that
+    worktrees exist before the LLM tries to use them.
+
+    Only operates for Docker-sandboxed keepers (local keepers use the project
+    root directly and don't need worktree provisioning).
+
+    Computes paths directly from [config.base_path] and [agent_name] to avoid
+    constructing a full [keeper_meta] record.  Uses [run_git] directly for
+    worktree operations.
+
+    Failures in individual repos are logged but do not propagate — the
+    validation-time [ensure_worktree_ready] safety net handles any misses. *)
+let provision_worktrees_for_task
+      ~(config : Workspace.config)
+      ~(agent_name : string)
+      ~(task_id : string)
+      () =
+  if not (safe_repo_component task_id) then
+    Log.Workspace.info "provision_worktrees: invalid task_id %S, skipping" task_id
+  else
+    let safe_name = Playground_paths.sanitize_keeper_name agent_name in
+    let playground =
+      Filename.concat config.Workspace.base_path
+        (Printf.sprintf ".masc/playground/docker/%s" safe_name)
+    in
+    let repos_dir = Filename.concat playground "repos" in
+    if not (safe_is_dir repos_dir) then ()
+    else
+      let entries =
+        try Sys.readdir repos_dir with Sys_error _ -> [||]
+      in
+      Array.iter
+        (fun repo_name ->
+           if not (safe_repo_component repo_name) then ()
+           else
+             let repo_path = Filename.concat repos_dir repo_name in
+             if not (safe_is_dir repo_path) then ()
+             else
+               let worktree_path =
+                 Filename.concat
+                   (Filename.concat repo_path ".worktrees")
+                   task_id
+               in
+               (* Fast path: worktree already exists *)
+               let probe =
+                 run_git ~timeout_sec:read_only_probe_timeout_sec
+                   ~clone_path:worktree_path
+                   [ "rev-parse"; "--show-toplevel" ]
+               in
+               if probe.ok then ()
+               else
+                 (* Create worktree in the sandbox clone *)
+                 let add_result =
+                   run_git
+                     ~timeout_sec:(read_only_probe_timeout_sec *. 2.0)
+                     ~clone_path:repo_path
+                     [ "worktree"; "add"; "--detach"; worktree_path ]
+                 in
+                 if add_result.ok then (
+                   let branch_name =
+                     Printf.sprintf "task/%s" task_id
+                   in
+                   let _checkout =
+                     run_git ~timeout_sec:read_only_probe_timeout_sec
+                       ~clone_path:worktree_path
+                       [ "checkout"; "-b"; branch_name ]
+                   in
+                   Log.Workspace.info
+                     "provision_worktrees: worktree created for %s/%s"
+                     repo_name task_id
+                 )
+                 else
+                   Log.Workspace.debug
+                     "provision_worktrees: skipped %s/%s: %s"
+                     repo_name task_id add_result.output)
+        entries
+
 (* ── Sandbox repo currency (fetch + work-preserving fast-forward) ──── *)
 
 (** Build a minimal [repository] record for the sandbox clone lane.

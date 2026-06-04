@@ -427,6 +427,47 @@ let test_ensure_worktree_ready_idempotent () =
   | Ok () -> ()
   | Error msg -> fail ("second call failed: " ^ msg)
 
+let test_provision_worktrees_creates_worktrees () =
+  (* Set up a docker playground with a repo *)
+  let base_path = temp_dir "masc-provision" in
+  let remote = Filename.concat base_path ".remote-masc.git" in
+  git_ok ~cwd:base_path [ "init"; "--bare"; "-q"; "--initial-branch=main"; remote ];
+  let config = Masc.Workspace.default_config base_path in
+  let agent_name = "keeper-provision-test" in
+  let safe_name = Playground_paths.sanitize_keeper_name agent_name in
+  let repo_dir =
+    Filename.concat base_path
+      (Printf.sprintf ".masc/playground/docker/%s/repos/test-repo" safe_name)
+  in
+  mkdir_p (Filename.dirname repo_dir);
+  git_ok ~cwd:base_path [ "clone"; "-q"; remote; repo_dir ];
+  git_ok ~cwd:repo_dir [ "config"; "user.email"; "test@example.com" ];
+  git_ok ~cwd:repo_dir [ "config"; "user.name"; "Test" ];
+  let readme = Filename.concat repo_dir "README.md" in
+  let oc = open_out readme in
+  output_string oc "# test\n";
+  close_out oc;
+  git_ok ~cwd:repo_dir [ "add"; "README.md" ];
+  git_ok ~cwd:repo_dir [ "commit"; "-q"; "-m"; "init" ];
+  git_ok ~cwd:repo_dir [ "push"; "-q"; "origin"; "main" ];
+  (* Call provision *)
+  let task_id = "task-provision-001" in
+  Masc.Keeper_repo_readiness.provision_worktrees_for_task
+    ~config ~agent_name ~task_id ();
+  (* Verify worktree was created *)
+  let worktree_path =
+    Filename.concat repo_dir (Printf.sprintf ".worktrees/%s" task_id)
+  in
+  check bool "worktree dir exists" true (Sys.file_exists worktree_path);
+  check bool "worktree is directory" true (Sys.is_directory worktree_path);
+  let probe =
+    Masc.Keeper_repo_readiness.run_git
+      ~timeout_sec:Masc.Keeper_repo_readiness.read_only_probe_timeout_sec
+      ~clone_path:worktree_path
+      [ "rev-parse"; "--show-toplevel" ]
+  in
+  check bool "worktree is valid git checkout" true probe.ok
+
 let () =
   Random.self_init ();
   run "Keeper_repo_readiness"
@@ -447,5 +488,10 @@ let () =
           test_ensure_worktree_ready_creates_worktree;
         test_case "idempotent" `Quick
           test_ensure_worktree_ready_idempotent;
+      ];
+      "provision_worktrees_for_task",
+      [
+        test_case "creates worktrees at claim time" `Quick
+          test_provision_worktrees_creates_worktrees;
       ];
     ]

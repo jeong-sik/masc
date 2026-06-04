@@ -698,6 +698,8 @@ let dispatch ctx ~name ~args : tool_result option =
   | "masc_keeper_status" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_status ctx args))
   | "masc_keeper_msg" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_msg ctx args))
   | "masc_keeper_msg_result" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_msg_result ctx args))
+  | "masc_keeper_msg_cancel" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_msg_cancel ctx args))
+  | "masc_keeper_msg_queue" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_msg_queue ctx args))
   | "masc_keeper_repair" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_repair ctx args))
   | "masc_keeper_down" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_down ctx args))
   | "masc_keeper_list" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_list ctx args))
@@ -727,8 +729,7 @@ let dispatch_stream ~on_text_delta ctx ~name ~args : tool_result option =
 
 let tool_spec_read_only =
   [ "masc_persona_list"; "masc_persona_schema"; "masc_keeper_list";
-    "masc_keeper_status"; "masc_keeper_persona_audit" ]
-
+    "masc_keeper_status"; "masc_keeper_persona_audit"; "masc_keeper_msg_queue" ]
 let () =
   List.iter
     (fun (s : Masc_domain.tool_schema) ->
@@ -794,6 +795,16 @@ let () =
         (tool_result_with_tool_name
            ~tool_name:name
            (Keeper_tool_surface_ops.keeper_msg_result_body ~config args))
+    | "masc_keeper_msg_cancel" ->
+      Some
+        (tool_result_with_tool_name
+           ~tool_name:name
+           (Keeper_tool_surface_ops.keeper_msg_cancel_body ~config args))
+    | "masc_keeper_msg_queue" ->
+      Some
+        (tool_result_with_tool_name
+           ~tool_name:name
+           (Keeper_tool_surface_ops.keeper_msg_queue_body ~config args))
     | "masc_keeper_compact" ->
       Some (tool_result_with_tool_name ~tool_name:name (keeper_compact_body ~config args))
     | "masc_keeper_clear" ->

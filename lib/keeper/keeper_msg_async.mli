@@ -52,9 +52,14 @@ val submit
     terminal lost state is persisted. *)
 val poll : ?base_path:string -> string -> entry option
 
-(** [list_for_keeper ~keeper_name] returns all entries for a keeper
+(** [cancel ?base_path request_id] aborts a running async keeper_msg request.
+    Returns [true] if it was successfully cancelled, [false] if not found
+    or already finished. *)
+val cancel : ?base_path:string -> string -> bool
+
+(** [list_for_keeper ?keeper_name ()] returns all entries for a keeper (or all keepers if omitted)
     sorted most-recent-first. *)
-val list_for_keeper : keeper_name:string -> entry list
+val list_for_keeper : ?keeper_name:string -> unit -> entry list
 
 (** {1 JSON output} *)
 

@@ -40,9 +40,9 @@ let sync_repo_currency_best_effort ~config ~meta ~repo_name =
         Log.Keeper.info "currency: advanced sandbox repo %s by %d commit(s)"
           repo_name commits
       | Preserved reason ->
-        (* Local/divergent work kept; expected when a keeper has uncommitted or
-           branched changes. Debug so it does not drown the actionable case. *)
-        Log.Keeper.debug "currency: preserved sandbox repo %s (%s)" repo_name reason
+        (* Local/divergent work kept. Keep this visible: otherwise a dirty or
+           task-branch sandbox looks like the runtime simply forgot to update. *)
+        Log.Keeper.info "currency: preserved sandbox repo %s (%s)" repo_name reason
       | Skipped reason ->
         (* Currency could not be established (missing/corrupt clone, no
            credential, or fetch failure). Visible by default so a recurring

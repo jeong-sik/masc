@@ -341,6 +341,92 @@ let test_auto_provisionable_workspace_repo_before_wide_workspace_storm () =
     Yojson.Safe.Util.(json |> member "workspace_repo_match" |> to_string)
 
 
+let test_ensure_worktree_ready_creates_worktree () =
+  let base_path = temp_dir "masc-worktree-ready" in
+  let remote = Filename.concat base_path ".remote-masc.git" in
+  (* Create a bare remote repo *)
+  git_ok ~cwd:base_path [ "init"; "--bare"; "-q"; "--initial-branch=main"; remote ];
+  (* Clone into the sandbox path *)
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "keeper-one" in
+  let clone_path =
+    Masc.Keeper_repo_readiness.clone_path ~config ~meta ~repo_name:"masc"
+  in
+  mkdir_p (Filename.dirname clone_path);
+  git_ok ~cwd:base_path [ "clone"; "-q"; remote; clone_path ];
+  git_ok ~cwd:clone_path [ "config"; "user.email"; "test@example.com" ];
+  git_ok ~cwd:clone_path [ "config"; "user.name"; "Test" ];
+  let readme = Filename.concat clone_path "README.md" in
+  let oc = open_out readme in
+  output_string oc "# test\n";
+  close_out oc;
+  git_ok ~cwd:clone_path [ "add"; "README.md" ];
+  git_ok ~cwd:clone_path [ "commit"; "-q"; "-m"; "init" ];
+  git_ok ~cwd:clone_path [ "push"; "-q"; "origin"; "main" ];
+  (* Worktree path *)
+  let worktree_path =
+    Filename.concat clone_path ".worktrees/task-575-test"
+  in
+  (* Call ensure_worktree_ready *)
+  let result =
+    Masc.Keeper_repo_readiness.ensure_worktree_ready
+      ~config ~meta ~repo_name:"masc" ~task_name:"task-575-test"
+      ~worktree_path ()
+  in
+  (match result with
+   | Ok () -> ()
+   | Error msg -> fail ("ensure_worktree_ready failed: " ^ msg));
+  (* Verify worktree exists and is a valid git checkout *)
+  check bool "worktree dir exists" true (Sys.file_exists worktree_path);
+  check bool "worktree is directory" true (Sys.is_directory worktree_path);
+  let probe =
+    Masc.Keeper_repo_readiness.run_git
+      ~timeout_sec:Masc.Keeper_repo_readiness.read_only_probe_timeout_sec
+      ~clone_path:worktree_path
+      [ "rev-parse"; "--show-toplevel" ]
+  in
+  check bool "worktree is valid git checkout" true probe.ok
+
+let test_ensure_worktree_ready_idempotent () =
+  let base_path = temp_dir "masc-worktree-ready" in
+  let remote = Filename.concat base_path ".remote-masc.git" in
+  git_ok ~cwd:base_path [ "init"; "--bare"; "-q"; "--initial-branch=main"; remote ];
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "keeper-one" in
+  let clone_path =
+    Masc.Keeper_repo_readiness.clone_path ~config ~meta ~repo_name:"masc"
+  in
+  mkdir_p (Filename.dirname clone_path);
+  git_ok ~cwd:base_path [ "clone"; "-q"; remote; clone_path ];
+  git_ok ~cwd:clone_path [ "config"; "user.email"; "test@example.com" ];
+  git_ok ~cwd:clone_path [ "config"; "user.name"; "Test" ];
+  let readme = Filename.concat clone_path "README.md" in
+  let oc = open_out readme in
+  output_string oc "# test\n";
+  close_out oc;
+  git_ok ~cwd:clone_path [ "add"; "README.md" ];
+  git_ok ~cwd:clone_path [ "commit"; "-q"; "-m"; "init" ];
+  git_ok ~cwd:clone_path [ "push"; "-q"; "origin"; "main" ];
+  let worktree_path =
+    Filename.concat clone_path ".worktrees/task-idem-test"
+  in
+  (* First call creates the worktree *)
+  let r1 =
+    Masc.Keeper_repo_readiness.ensure_worktree_ready
+      ~config ~meta ~repo_name:"masc" ~task_name:"task-idem-test"
+      ~worktree_path ()
+  in
+  (match r1 with Ok () -> () | Error msg -> fail ("first call failed: " ^ msg));
+  (* Second call should succeed without error (idempotent) *)
+  let r2 =
+    Masc.Keeper_repo_readiness.ensure_worktree_ready
+      ~config ~meta ~repo_name:"masc" ~task_name:"task-idem-test"
+      ~worktree_path ()
+  in
+  match r2 with
+  | Ok () -> ()
+  | Error msg -> fail ("second call failed: " ^ msg)
+
 let () =
   Random.self_init ();
   run "Keeper_repo_readiness"
@@ -354,5 +440,12 @@ let () =
         test_case "invalid repo_name" `Quick test_invalid_repo_name;
         test_case "missing clone skips workspace discovery" `Quick
           test_missing_clone_skips_workspace_discovery;
+      ];
+      "ensure_worktree_ready",
+      [
+        test_case "creates worktree" `Quick
+          test_ensure_worktree_ready_creates_worktree;
+        test_case "idempotent" `Quick
+          test_ensure_worktree_ready_idempotent;
       ];
     ]

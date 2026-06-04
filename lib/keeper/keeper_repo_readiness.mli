@@ -84,6 +84,21 @@ val ensure_ready :
   unit ->
   (unit, string) result
 
+(** [ensure_worktree_ready ~config ~meta ~repo_name ~task_name ~worktree_path ()]
+    ensures a git worktree exists at [worktree_path] inside the sandbox clone.
+    If the worktree is missing, first ensures the parent repo is ready (reclone
+    if needed), then creates the worktree via [git worktree add].  Returns
+    [Ok ()] when the worktree is a valid git checkout, or [Error msg] if
+    creation failed. *)
+val ensure_worktree_ready :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  repo_name:string ->
+  task_name:string ->
+  worktree_path:string ->
+  unit ->
+  (unit, string) result
+
 (** Outcome of an [ensure_current] pass. Every non-[Advanced] case leaves the
     working tree byte-for-byte untouched. *)
 type currency_outcome =

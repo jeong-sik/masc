@@ -35,7 +35,6 @@ type world_observation =
   ; active_goals : string list
   ; continuity_summary : string
   ; context_ratio : float
-  ; economic_pressure : Economy.pressure_mode
   ; unclaimed_task_count : int
   ; claimable_task_count : int
   ; provider_capacity_blocked_task_count : int
@@ -43,7 +42,6 @@ type world_observation =
   ; pending_verification_count : int
   ; backlog_updated_since_last_scheduled_autonomous : bool
   ; active_agent_count : int
-  ; last_turn_budget : (int * int) option
   }
 
 type keeper_cycle_channel =
@@ -450,9 +448,6 @@ let observe
   let idle_seconds = compute_idle_seconds ~meta in
   let context_ratio = read_context_ratio ~config ~meta in
   let continuity_summary = read_continuity_summary ~config ~meta in
-  let economic_pressure =
-    Economy.economic_pressure ~base_path:config.base_path ~agent_name:meta.name
-  in
   let pending_board_events =
     match pending_board_events with
     | Some events -> events
@@ -470,7 +465,6 @@ let observe
   ; active_goals = meta.active_goal_ids
   ; continuity_summary
   ; context_ratio
-  ; economic_pressure
   ; unclaimed_task_count
   ; claimable_task_count
   ; provider_capacity_blocked_task_count
@@ -478,7 +472,6 @@ let observe
   ; pending_verification_count
   ; backlog_updated_since_last_scheduled_autonomous
   ; active_agent_count
-  ; last_turn_budget = None
   }
 ;;
 
@@ -504,8 +497,6 @@ let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
   ; active_goals = meta.active_goal_ids
   ; continuity_summary = read_continuity_summary ~config ~meta
   ; context_ratio = read_context_ratio ~config ~meta
-  ; economic_pressure =
-      Economy.economic_pressure ~base_path:config.base_path ~agent_name:meta.name
   ; unclaimed_task_count
   ; claimable_task_count
   ; provider_capacity_blocked_task_count
@@ -513,7 +504,6 @@ let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
   ; pending_verification_count
   ; backlog_updated_since_last_scheduled_autonomous
   ; active_agent_count = count_active_agents ~config
-  ; last_turn_budget = None
   }
 ;;
 

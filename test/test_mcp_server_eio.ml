@@ -1026,7 +1026,7 @@ let test_handle_request_tools_call_transition_claim_guidance () =
   in
   let steps = workflow_next_step_names response in
   Alcotest.(check (option string)) "claim binds current_task" (Some "task-001")
-    (Masc.Planning_eio.get_current_task state.workspace_config);
+    (Masc.Task.Planning_eio.get_current_task state.workspace_config);
   Alcotest.(check bool) "claim guidance omits plan_set_task" false
     (List.mem "masc_plan_set_task" steps);
   cleanup_dir base_path
@@ -1551,7 +1551,7 @@ let test_execute_tool_hyphenated_generated_alias_claim_next_reuses_base_token ()
     (contains_substring ((Tool_result.message result)) "task-001");
   Alcotest.(check (option string)) "current task set after claim_next"
     (Some "task-001")
-    (Masc.Planning_eio.get_current_task state.workspace_config);
+    (Masc.Task.Planning_eio.get_current_task state.workspace_config);
   Alcotest.(check bool) "explicit alias joined" true
     (Masc.Workspace.is_agent_session_bound state.workspace_config
        ~agent_name:"qa-king-warm-heron");
@@ -1582,7 +1582,7 @@ let test_execute_tool_claim_next_requires_auth_before_mutation () =
     (Tool_result.is_success result) ((Tool_result.message result));
   check_task_still_todo state.workspace_config "task-001";
   Alcotest.(check (option string)) "no current task after rejected claim_next" None
-    (Masc.Planning_eio.get_current_task state.workspace_config);
+    (Masc.Task.Planning_eio.get_current_task state.workspace_config);
   cleanup_dir base_path
 
 let test_execute_tool_transition_requires_auth_before_mutation () =
@@ -1616,7 +1616,7 @@ let test_execute_tool_transition_requires_auth_before_mutation () =
     (Tool_result.is_success result) ((Tool_result.message result));
   check_task_still_todo state.workspace_config "task-001";
   Alcotest.(check (option string)) "no current task after rejected transition" None
-    (Masc.Planning_eio.get_current_task state.workspace_config);
+    (Masc.Task.Planning_eio.get_current_task state.workspace_config);
   cleanup_dir base_path
 
 let test_execute_tool_add_task_with_admin_token_without_join () =

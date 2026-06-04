@@ -10,6 +10,7 @@ module Types = Masc_domain
     - FSM disabled path: error message *)
 
 open Masc
+module Planning_eio = Masc.Task.Planning_eio
 
 let rng_initialized = ref false
 

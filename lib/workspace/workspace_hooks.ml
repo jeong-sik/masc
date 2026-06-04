@@ -317,6 +317,16 @@ let observe_claim_post_provision_failure ~site ~agent_name ~task_id exn =
       "claim_post_provision failed site=%s agent=%s task=%s err=%s"
       site agent_name task_id error)
 
+let run_claim_post_provision_best_effort
+      config
+      ~site
+      ~agent_name
+      ~task_id
+  =
+  try (Atomic.get claim_post_provision_fn) config ~agent_name ~task_id with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn -> observe_claim_post_provision_failure ~site ~agent_name ~task_id exn
+
 let workspace_telemetry_drop_fn
   : (Workspace_telemetry_drop_event.t -> unit) Atomic.t
   = Atomic.make (fun _ -> ())
@@ -421,7 +431,6 @@ let cdal_evidence_gate_decide_fn
         unit ->
         evidence_gate_verdict)
        Atomic.t)
-
 
 
 

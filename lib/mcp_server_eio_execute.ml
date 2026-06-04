@@ -570,3 +570,14 @@ let () =
   := fun ~config ~agent_name ~name ~args ->
     Tool_workspace.dispatch { config; agent_name } ~name ~args
 ;;
+
+(* Approval queue access remains keeper-owned.  Inline MCP dispatch reaches
+   the keeper implementation through this composition-root registration. *)
+let () =
+  Approval_dispatch_ref.dispatch
+  := fun ~name ~args ->
+    match name with
+    | "masc_approval_pending" | "masc_approval_get" | "masc_approval_resolve" ->
+      Some (Keeper_tool_in_process_runtime.handle_masc_approval ~name ~args)
+    | _ -> None
+;;

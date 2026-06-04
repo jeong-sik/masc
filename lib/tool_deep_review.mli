@@ -6,8 +6,21 @@
     Slack, memory, or institutional knowledge.
 
     This forces structural evaluation rather than relying on domain
-    context that might mask bugs. Uses the same
-    [Keeper_turn_driver.run_named] pattern as {!Verifier_oas}. *)
+    context that might mask bugs. Uses a registered named-runtime review
+    runner. *)
+
+type review_runner =
+  runtime_id:string ->
+  goal:string ->
+  max_turns:int ->
+  temperature:float ->
+  max_tokens:int ->
+  approval:Agent_sdk.Hooks.approval_callback ->
+  unit ->
+  (Runtime_agent.run_result, string) result
+
+(** Register the runtime runner used by [handle_deep_review]. *)
+val set_review_runner : review_runner -> unit
 
 (** [handle_deep_review ~tool_name ~start_time config args] runs a deep
     review as described by [args]. Returns [Tool_result.result] — error on

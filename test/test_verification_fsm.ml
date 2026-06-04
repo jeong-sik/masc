@@ -64,7 +64,6 @@ let add_strict_task config =
     required_evidence = [];
     inspect_gate_evidence = [];
     verify_gate_evidence = ["output.json"];
-    stale_claim_timeout_sec = 0;
     links = { operation_id = None; session_id = None };
   } in
   let _msg = Workspace.add_task ~contract config ~title
@@ -89,7 +88,6 @@ let add_required_evidence_only_task config =
     required_evidence = ["artifact://coverage.json"];
     inspect_gate_evidence = [];
     verify_gate_evidence = [];
-    stale_claim_timeout_sec = 0;
     links = { operation_id = None; session_id = None };
   } in
   let _msg =
@@ -116,7 +114,6 @@ let add_placeholder_evidence_task config =
     required_evidence = ["completion_notes"];
     inspect_gate_evidence = [];
     verify_gate_evidence = ["pr_url_or_artifact_ref"];
-    stale_claim_timeout_sec = 0;
     links = { operation_id = None; session_id = None };
   } in
   let _msg =

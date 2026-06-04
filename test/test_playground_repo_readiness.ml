@@ -1,4 +1,4 @@
-(** Keeper_repo_readiness tests. *)
+(** Playground_repo_readiness tests. *)
 
 open Alcotest
 
@@ -59,7 +59,7 @@ let test_missing_clone () =
   let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
   let json =
-    Masc.Keeper_repo_readiness.inspect ~config
+    Masc.Playground_repo_readiness.inspect ~config
       ~meta ~repo:"jeong-sik/masc" ()
   in
   check bool "not ok" false (json_bool "ok" json);
@@ -72,12 +72,12 @@ let test_non_git_clone () =
   let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
   let clone_path =
-    Masc.Keeper_repo_readiness.clone_path ~config
+    Masc.Playground_repo_readiness.clone_path ~config
       ~meta ~repo_name:"masc"
   in
   mkdir_p clone_path;
   let json =
-    Masc.Keeper_repo_readiness.inspect ~config
+    Masc.Playground_repo_readiness.inspect ~config
       ~meta ~repo:"jeong-sik/masc" ()
   in
   check bool "not ok" false (json_bool "ok" json);
@@ -90,7 +90,7 @@ let test_invalid_repo_name () =
   let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
   let json =
-    Masc.Keeper_repo_readiness.inspect ~config
+    Masc.Playground_repo_readiness.inspect ~config
       ~meta ~repo_name:"../escape" ()
   in
   check bool "not ok" false (json_bool "ok" json);
@@ -137,18 +137,32 @@ let run_process_ok ~cwd prog argv =
 let git_ok ~cwd args =
   run_process_ok ~cwd "git" (Array.of_list ("git" :: args))
 
+let git_output ~cwd args =
+  let result =
+    Masc.Playground_repo_readiness.run_git
+      ~timeout_sec:Masc.Playground_repo_readiness.read_only_probe_timeout_sec
+      ~clone_path:cwd
+      args
+  in
+  if result.ok then result.output
+  else
+    fail
+      (Printf.sprintf "git command failed: git -C %s %s\n%s" cwd
+         (String.concat " " args)
+         result.output)
+
 let test_parent_git_checkout_does_not_count_as_clone () =
   let base_path = temp_dir "masc-repo-readiness" in
   git_ok ~cwd:base_path [ "init"; "-q"; "--initial-branch=main" ];
   let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
   let clone_path =
-    Masc.Keeper_repo_readiness.clone_path ~config
+    Masc.Playground_repo_readiness.clone_path ~config
       ~meta ~repo_name:"masc"
   in
   mkdir_p clone_path;
   let json =
-    Masc.Keeper_repo_readiness.inspect ~config
+    Masc.Playground_repo_readiness.inspect ~config
       ~meta ~repo:"jeong-sik/masc" ()
   in
   check bool "not ok" false (json_bool "ok" json);
@@ -213,7 +227,7 @@ let test_auto_provisionable_workspace_repo () =
   let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
   let json =
-    Masc.Keeper_repo_readiness.inspect ~config
+    Masc.Playground_repo_readiness.inspect ~config
       ~meta ~repo_name:"masc" ()
   in
   check bool "ok" true (json_bool "ok" json);
@@ -247,7 +261,7 @@ let test_missing_clone_skips_workspace_discovery () =
   let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
   let json =
-    Masc.Keeper_repo_readiness.inspect ~config ~meta
+    Masc.Playground_repo_readiness.inspect ~config ~meta
       ~repo_name:"masc" ()
   in
   check bool "not ok" false (json_bool "ok" json);
@@ -274,7 +288,7 @@ let test_auto_provisionable_workspace_repo_after_file_storm () =
   let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
   let json =
-    Masc.Keeper_repo_readiness.inspect ~config
+    Masc.Playground_repo_readiness.inspect ~config
       ~meta ~repo_name:"masc" ()
   in
   check bool "ok" true (json_bool "ok" json);
@@ -303,7 +317,7 @@ let test_auto_provisionable_workspace_repo_before_hidden_dir_storm () =
   let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
   let json =
-    Masc.Keeper_repo_readiness.inspect ~config
+    Masc.Playground_repo_readiness.inspect ~config
       ~meta ~repo_name:"masc" ()
   in
   check bool "ok" true (json_bool "ok" json);
@@ -332,7 +346,7 @@ let test_auto_provisionable_workspace_repo_before_wide_workspace_storm () =
   let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
   let json =
-    Masc.Keeper_repo_readiness.inspect ~config
+    Masc.Playground_repo_readiness.inspect ~config
       ~meta ~repo_name:"masc" ()
   in
   check bool "ok" true (json_bool "ok" json);
@@ -350,7 +364,7 @@ let test_ensure_worktree_ready_creates_worktree () =
   let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
   let clone_path =
-    Masc.Keeper_repo_readiness.clone_path ~config ~meta ~repo_name:"masc"
+    Masc.Playground_repo_readiness.clone_path ~config ~meta ~repo_name:"masc"
   in
   mkdir_p (Filename.dirname clone_path);
   git_ok ~cwd:base_path [ "clone"; "-q"; remote; clone_path ];
@@ -369,7 +383,7 @@ let test_ensure_worktree_ready_creates_worktree () =
   in
   (* Call ensure_worktree_ready *)
   let result =
-    Masc.Keeper_repo_readiness.ensure_worktree_ready
+    Masc.Playground_repo_readiness.ensure_worktree_ready
       ~config ~meta ~repo_name:"masc" ~task_name:"task-575-test"
       ~worktree_path ()
   in
@@ -380,8 +394,8 @@ let test_ensure_worktree_ready_creates_worktree () =
   check bool "worktree dir exists" true (Sys.file_exists worktree_path);
   check bool "worktree is directory" true (Sys.is_directory worktree_path);
   let probe =
-    Masc.Keeper_repo_readiness.run_git
-      ~timeout_sec:Masc.Keeper_repo_readiness.read_only_probe_timeout_sec
+    Masc.Playground_repo_readiness.run_git
+      ~timeout_sec:Masc.Playground_repo_readiness.read_only_probe_timeout_sec
       ~clone_path:worktree_path
       [ "rev-parse"; "--show-toplevel" ]
   in
@@ -394,7 +408,7 @@ let test_ensure_worktree_ready_idempotent () =
   let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
   let clone_path =
-    Masc.Keeper_repo_readiness.clone_path ~config ~meta ~repo_name:"masc"
+    Masc.Playground_repo_readiness.clone_path ~config ~meta ~repo_name:"masc"
   in
   mkdir_p (Filename.dirname clone_path);
   git_ok ~cwd:base_path [ "clone"; "-q"; remote; clone_path ];
@@ -412,20 +426,62 @@ let test_ensure_worktree_ready_idempotent () =
   in
   (* First call creates the worktree *)
   let r1 =
-    Masc.Keeper_repo_readiness.ensure_worktree_ready
+    Masc.Playground_repo_readiness.ensure_worktree_ready
       ~config ~meta ~repo_name:"masc" ~task_name:"task-idem-test"
       ~worktree_path ()
   in
   (match r1 with Ok () -> () | Error msg -> fail ("first call failed: " ^ msg));
   (* Second call should succeed without error (idempotent) *)
   let r2 =
-    Masc.Keeper_repo_readiness.ensure_worktree_ready
+    Masc.Playground_repo_readiness.ensure_worktree_ready
       ~config ~meta ~repo_name:"masc" ~task_name:"task-idem-test"
       ~worktree_path ()
   in
   match r2 with
   | Ok () -> ()
   | Error msg -> fail ("second call failed: " ^ msg)
+
+let test_ensure_worktree_ready_rejects_nested_plain_directory () =
+  let base_path = temp_dir "masc-worktree-ready-nested" in
+  let remote = Filename.concat base_path ".remote-masc.git" in
+  git_ok ~cwd:base_path [ "init"; "--bare"; "-q"; "--initial-branch=main"; remote ];
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "keeper-one" in
+  let clone_path =
+    Masc.Playground_repo_readiness.clone_path ~config ~meta ~repo_name:"masc"
+  in
+  mkdir_p (Filename.dirname clone_path);
+  git_ok ~cwd:base_path [ "clone"; "-q"; remote; clone_path ];
+  git_ok ~cwd:clone_path [ "config"; "user.email"; "test@example.com" ];
+  git_ok ~cwd:clone_path [ "config"; "user.name"; "Test" ];
+  let readme = Filename.concat clone_path "README.md" in
+  let oc = open_out readme in
+  output_string oc "# test\n";
+  close_out oc;
+  git_ok ~cwd:clone_path [ "add"; "README.md" ];
+  git_ok ~cwd:clone_path [ "commit"; "-q"; "-m"; "init" ];
+  git_ok ~cwd:clone_path [ "push"; "-q"; "origin"; "main" ];
+  let worktree_path =
+    Filename.concat clone_path ".worktrees/task-nested-plain-dir"
+  in
+  mkdir_p worktree_path;
+  let result =
+    Masc.Playground_repo_readiness.ensure_worktree_ready
+      ~config ~meta ~repo_name:"masc" ~task_name:"task-nested-plain-dir"
+      ~worktree_path ()
+  in
+  (match result with
+   | Ok () -> fail "plain nested directory was accepted as a worktree"
+   | Error _ -> ());
+  let probe =
+    Masc.Playground_repo_readiness.run_git
+      ~timeout_sec:Masc.Playground_repo_readiness.read_only_probe_timeout_sec
+      ~clone_path:worktree_path
+      [ "rev-parse"; "--show-toplevel" ]
+  in
+  check bool "nested dir still resolves through parent git" true probe.ok;
+  check string "nested dir toplevel is parent clone" (normalize_path clone_path)
+    (normalize_path probe.output)
 
 let test_provision_worktrees_creates_worktrees () =
   (* Set up a docker playground with a repo *)
@@ -452,7 +508,7 @@ let test_provision_worktrees_creates_worktrees () =
   git_ok ~cwd:repo_dir [ "push"; "-q"; "origin"; "main" ];
   (* Call provision *)
   let task_id = "task-provision-001" in
-  Masc.Keeper_repo_readiness.provision_worktrees_for_task
+  Masc.Playground_repo_readiness.provision_worktrees_for_task
     ~config ~agent_name ~task_id ();
   (* Verify worktree was created *)
   let worktree_path =
@@ -461,16 +517,129 @@ let test_provision_worktrees_creates_worktrees () =
   check bool "worktree dir exists" true (Sys.file_exists worktree_path);
   check bool "worktree is directory" true (Sys.is_directory worktree_path);
   let probe =
-    Masc.Keeper_repo_readiness.run_git
-      ~timeout_sec:Masc.Keeper_repo_readiness.read_only_probe_timeout_sec
+    Masc.Playground_repo_readiness.run_git
+      ~timeout_sec:Masc.Playground_repo_readiness.read_only_probe_timeout_sec
       ~clone_path:worktree_path
       [ "rev-parse"; "--show-toplevel" ]
   in
   check bool "worktree is valid git checkout" true probe.ok
 
+let test_provision_worktrees_uses_origin_base_with_dirty_parent () =
+  let base_path = temp_dir "masc-provision-dirty-parent" in
+  let remote = Filename.concat base_path ".remote-masc.git" in
+  git_ok ~cwd:base_path [ "init"; "--bare"; "-q"; "--initial-branch=main"; remote ];
+  let config = Masc.Workspace.default_config base_path in
+  let agent_name = "keeper-provision-dirty-parent" in
+  let safe_name = Playground_paths.sanitize_keeper_name agent_name in
+  let repo_dir =
+    Filename.concat base_path
+      (Printf.sprintf ".masc/playground/docker/%s/repos/test-repo" safe_name)
+  in
+  mkdir_p (Filename.dirname repo_dir);
+  git_ok ~cwd:base_path [ "clone"; "-q"; remote; repo_dir ];
+  git_ok ~cwd:repo_dir [ "config"; "user.email"; "test@example.com" ];
+  git_ok ~cwd:repo_dir [ "config"; "user.name"; "Test" ];
+  let readme = Filename.concat repo_dir "README.md" in
+  let oc = open_out readme in
+  output_string oc "# test\n";
+  close_out oc;
+  git_ok ~cwd:repo_dir [ "add"; "README.md" ];
+  git_ok ~cwd:repo_dir [ "commit"; "-q"; "-m"; "init" ];
+  git_ok ~cwd:repo_dir [ "push"; "-q"; "origin"; "main" ];
+  git_ok ~cwd:repo_dir [ "checkout"; "-q"; "-b"; "task-575-existing-work" ];
+  let oc = open_out readme in
+  output_string oc "# dirty parent\n";
+  close_out oc;
+  let parent_branch = git_output ~cwd:repo_dir [ "branch"; "--show-current" ] in
+  let parent_status = git_output ~cwd:repo_dir [ "status"; "--porcelain" ] in
+  check string "parent branch" "task-575-existing-work" parent_branch;
+  check bool "parent is dirty before" true (String.trim parent_status <> "");
+  let origin_main = git_output ~cwd:repo_dir [ "rev-parse"; "origin/main" ] in
+  let task_id = "task-635-new-work" in
+  Masc.Playground_repo_readiness.provision_worktrees_for_task
+    ~config ~agent_name ~task_id ();
+  let worktree_path =
+    Filename.concat repo_dir (Printf.sprintf ".worktrees/%s" task_id)
+  in
+  let parent_branch_after =
+    git_output ~cwd:repo_dir [ "branch"; "--show-current" ]
+  in
+  let parent_status_after =
+    git_output ~cwd:repo_dir [ "status"; "--porcelain" ]
+  in
+  check string "parent branch preserved" parent_branch parent_branch_after;
+  check bool "parent dirtiness preserved" true
+    (String.trim parent_status_after <> "");
+  check bool "worktree dir exists" true (Sys.file_exists worktree_path);
+  let worktree_top =
+    git_output ~cwd:worktree_path [ "rev-parse"; "--show-toplevel" ]
+  in
+  check string "worktree top" (normalize_path worktree_path)
+    (normalize_path worktree_top);
+  let worktree_head = git_output ~cwd:worktree_path [ "rev-parse"; "HEAD" ] in
+  check string "worktree starts from origin/main" origin_main worktree_head
+
+let test_ensure_worktree_ready_allows_dirty_parent_clone () =
+  let base_path = temp_dir "masc-worktree-ready-dirty-parent" in
+  let remote = Filename.concat base_path ".remote-masc.git" in
+  git_ok ~cwd:base_path [ "init"; "--bare"; "-q"; "--initial-branch=main"; remote ];
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "keeper-one" in
+  let clone_path =
+    Masc.Playground_repo_readiness.clone_path ~config ~meta ~repo_name:"masc"
+  in
+  mkdir_p (Filename.dirname clone_path);
+  git_ok ~cwd:base_path [ "clone"; "-q"; remote; clone_path ];
+  git_ok ~cwd:clone_path [ "config"; "user.email"; "test@example.com" ];
+  git_ok ~cwd:clone_path [ "config"; "user.name"; "Test" ];
+  let readme = Filename.concat clone_path "README.md" in
+  let oc = open_out readme in
+  output_string oc "# test\n";
+  close_out oc;
+  git_ok ~cwd:clone_path [ "add"; "README.md" ];
+  git_ok ~cwd:clone_path [ "commit"; "-q"; "-m"; "init" ];
+  git_ok ~cwd:clone_path [ "push"; "-q"; "origin"; "main" ];
+  git_ok ~cwd:clone_path [ "checkout"; "-q"; "-b"; "task-575-existing-work" ];
+  let oc = open_out readme in
+  output_string oc "# dirty parent\n";
+  close_out oc;
+  let parent_branch = git_output ~cwd:clone_path [ "branch"; "--show-current" ] in
+  let parent_status = git_output ~cwd:clone_path [ "status"; "--porcelain" ] in
+  check string "parent branch" "task-575-existing-work" parent_branch;
+  check bool "parent is dirty before" true (String.trim parent_status <> "");
+  let origin_main = git_output ~cwd:clone_path [ "rev-parse"; "origin/main" ] in
+  let worktree_path =
+    Filename.concat clone_path ".worktrees/task-635-new-work"
+  in
+  let result =
+    Masc.Playground_repo_readiness.ensure_worktree_ready
+      ~config ~meta ~repo_name:"masc" ~task_name:"task-635-new-work"
+      ~worktree_path ()
+  in
+  (match result with
+   | Ok () -> ()
+   | Error msg -> fail ("ensure_worktree_ready failed: " ^ msg));
+  let parent_branch_after =
+    git_output ~cwd:clone_path [ "branch"; "--show-current" ]
+  in
+  let parent_status_after =
+    git_output ~cwd:clone_path [ "status"; "--porcelain" ]
+  in
+  check string "parent branch preserved" parent_branch parent_branch_after;
+  check bool "parent dirtiness preserved" true
+    (String.trim parent_status_after <> "");
+  check bool "worktree dir exists" true (Sys.file_exists worktree_path);
+  let worktree_top =
+    git_output ~cwd:worktree_path [ "rev-parse"; "--show-toplevel" ]
+  in
+  check string "worktree top" (normalize_path worktree_path)
+    (normalize_path worktree_top);
+  let worktree_head = git_output ~cwd:worktree_path [ "rev-parse"; "HEAD" ] in
+  check string "worktree starts from origin/main" origin_main worktree_head
+
 let () =
   Random.self_init ();
-  run "Keeper_repo_readiness"
+  run "Playground_repo_readiness"
     [
       "inspect",
       [
@@ -488,10 +657,16 @@ let () =
           test_ensure_worktree_ready_creates_worktree;
         test_case "idempotent" `Quick
           test_ensure_worktree_ready_idempotent;
+        test_case "rejects nested plain directory" `Quick
+          test_ensure_worktree_ready_rejects_nested_plain_directory;
+        test_case "creates worktree from dirty parent clone" `Quick
+          test_ensure_worktree_ready_allows_dirty_parent_clone;
       ];
       "provision_worktrees_for_task",
       [
         test_case "creates worktrees at claim time" `Quick
           test_provision_worktrees_creates_worktrees;
+        test_case "creates worktree from origin with dirty parent" `Quick
+          test_provision_worktrees_uses_origin_base_with_dirty_parent;
       ];
     ]

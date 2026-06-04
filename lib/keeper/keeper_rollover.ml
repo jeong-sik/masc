@@ -12,7 +12,7 @@
 
     Spec lines 10-13 already cite this module:
     "Modeled from: lib/keeper/keeper_post_turn.ml, lib/keeper/keeper_rollover.ml,
-    lib/keeper/keeper_types.mli".  This block is the reverse-direction
+    lib/keeper_types/keeper_types.mli".  This block is the reverse-direction
     citation so code search for "KeeperGenerationLineage" lands here.
 
     Spec semantics modelled (TLA+ -> OCaml):

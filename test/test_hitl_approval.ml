@@ -12,8 +12,8 @@ module Types = Masc_domain
 module GP = Masc.Governance_pipeline
 module Keeper_meta_json_parse = Masc.Keeper_meta_json_parse
 module AQ = Masc.Keeper_approval_queue
-module KT = Masc.Keeper_types
 module SDH = Server_dashboard_http
+module KT = Keeper_types
 module Mcp_eio = Masc.Mcp_server_eio
 
 let check = Alcotest.(check string)

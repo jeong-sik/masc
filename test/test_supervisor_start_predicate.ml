@@ -26,7 +26,7 @@ module Keeper_meta_contract = Masc.Keeper_meta_contract
 module Keeper_meta_store = Masc.Keeper_meta_store
 module Keeper_meta_json_parse = Masc.Keeper_meta_json_parse
 module KR = Masc.Keeper_runtime
-module KT = Masc.Keeper_types
+module KT = Keeper_types
 module Reg = Masc.Keeper_registry
 
 let rec rm_rf path =
@@ -85,6 +85,7 @@ let make_meta ?(paused = false) ?auto_resume_after_sec ?updated_at name =
       ; ("goal", `String "test")
       ; ("sandbox_profile", `String "local")
       ; ("network_mode", `String "inherit")
+      ; ("tool_access", `List [])
       ]
   in
   match Keeper_meta_json_parse.meta_of_json json with

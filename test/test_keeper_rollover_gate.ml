@@ -7,7 +7,7 @@ open Alcotest
 
 module KR = Masc.Keeper_context_runtime
 module Keeper_meta_contract = Masc.Keeper_meta_contract
-module KT = Masc.Keeper_types
+module KT = Keeper_types
 
 let decision_testable =
   let pp fmt = function

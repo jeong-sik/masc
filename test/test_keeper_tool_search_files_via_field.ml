@@ -10,7 +10,7 @@ module Workspace = Masc.Workspace
 module Keeper_tool_command_runtime = Masc.Keeper_tool_command_runtime
 module Keeper_registry = Masc.Keeper_registry
 module Keeper_sandbox = Masc.Keeper_sandbox
-module Keeper_types = Masc.Keeper_types
+module Keeper_types = Keeper_types
 module Fs_compat = Fs_compat
 module Json = Yojson.Safe.Util
 

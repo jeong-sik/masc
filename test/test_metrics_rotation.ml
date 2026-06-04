@@ -1,7 +1,7 @@
 (** Test suite for metrics file rotation in keeper_types.ml *)
 open Alcotest
 
-module Keeper_types = Masc.Keeper_types
+module Keeper_types = Keeper_types
 module Keeper_types_support = Masc.Keeper_types_support
 
 let tmpdir () =

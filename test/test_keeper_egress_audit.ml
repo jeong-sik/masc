@@ -6,7 +6,7 @@
 
 module Workspace = Masc.Workspace
 module Keeper_types_profile_sandbox = Masc.Keeper_types_profile_sandbox
-module Keeper_types = Masc.Keeper_types
+module Keeper_types = Keeper_types
 module Keeper_egress_audit = Masc.Keeper_egress_audit
 
 let temp_dir () =

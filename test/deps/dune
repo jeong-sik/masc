@@ -96,6 +96,7 @@
   (re_export masc.keeper_tool_command_parse)
   (re_export masc.keeper_outcome_taxonomy)
   (re_export masc.keeper_metrics)
+  (re_export masc.keeper_types)
   ;; Model inference metrics + runtime provider label leaves.
   (re_export masc.runtime_provider_labels)
   (re_export masc.model_inference_metrics)

@@ -10,7 +10,7 @@
 \* Modeled from:
 \*   - lib/keeper/keeper_post_turn.ml
 \*   - lib/keeper/keeper_rollover.ml
-\*   - lib/keeper/keeper_types.mli
+\*   - lib/keeper_types/keeper_types.mli
 \*
 \* Out of scope:
 \*   - compaction strategy selection

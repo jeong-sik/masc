@@ -29,7 +29,7 @@ let test_normalized_uniform () =
   check (float 0.001) "uniform = 1.0" 1.0 h
 
 let test_stats_of_registry () =
-  let entries : (string * Masc.Keeper_types.tool_call_entry) list = [
+  let entries : (string * Keeper_types.tool_call_entry) list = [
     ("tool_a", { count = 50; successes = 45; failures = 5; last_used_at = 0.0 });
     ("tool_b", { count = 10; successes = 10; failures = 0; last_used_at = 0.0 });
   ] in

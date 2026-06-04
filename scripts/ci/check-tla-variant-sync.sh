@@ -29,7 +29,7 @@ echo ""
 echo "=== Scan: OCaml lifecycle variants ==="
 lifecycle_variants=$(
   rg '^\s*\|\s+([A-Z][a-zA-Z_0-9]*)' \
-    lib/keeper/keeper_types.ml lib/keeper/keeper_registry_types.ml \
+    lib/keeper_types/keeper_types.ml lib/keeper/keeper_registry_types.ml \
     --type ml -o -r '$1' 2>/dev/null | sort -u || true
 )
 echo "  Found $(echo "$lifecycle_variants" | grep -c . || true) constructors"
@@ -65,7 +65,7 @@ if [ -n "$tla_domains" ] && [ -n "$lifecycle_variants" ]; then
 fi
 
 # ── 6. Flag OCaml files without corresponding TLA+ spec ───────────────────────
-for variant_file in lib/keeper/keeper_types.ml lib/keeper/keeper_types_profile.ml; do
+for variant_file in lib/keeper_types/keeper_types.ml lib/keeper/keeper_types_profile.ml; do
   if [ -f "$variant_file" ]; then
     base=$(basename "$variant_file" .ml)
     if [ ! -f "specs/${base}.tla" ]; then

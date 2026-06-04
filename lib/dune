@@ -259,6 +259,7 @@
    ;; lib/keeper_state/. Parent still references bare Keeper_state_* modules.
    masc.keeper_state
    ;; Keeper-owned pure/type leaves extracted from lib/keeper/.
+   masc.keeper_accountability_claim_types
    masc.keeper_hash_algo
    masc.keeper_container_name
    masc.keeper_runtime_manifest_types

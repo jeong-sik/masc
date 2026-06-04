@@ -62,7 +62,7 @@ let test_descriptor_registry_admits_masc_keeper_cluster () =
           fail (Printf.sprintf
                   "%s must resolve (boot policy gate would exit 1), got Unknown (tried: %s)"
                   name (TR.string_of_tried tried)))
-    [ "masc_keeper_msg"; "masc_keeper_msg_result"; "masc_keeper_list"; "masc_keeper_status" ]
+    [ "masc_keeper_msg"; "masc_keeper_msg_result"; "masc_keeper_msg_cancel"; "masc_keeper_msg_queue"; "masc_keeper_list"; "masc_keeper_status" ]
 
 let test_extend_turns_resolved () =
   (* extend_turns is in core_always_tools (S7: Registry_core_tools) or
@@ -184,6 +184,8 @@ let policy_tool_names =
       "masc_keeper_list";
       "masc_keeper_msg";
       "masc_keeper_msg_result";
+      "masc_keeper_msg_cancel";
+      "masc_keeper_msg_queue";
       "masc_keeper_status";
       "masc_messages";
       "masc_plan_get";

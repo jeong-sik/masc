@@ -351,6 +351,18 @@ let execute_tool_eio
                      ; sw
                      ; clock
                      ; arguments = coerced_args
+                     ; mcp_session_id
+                     ; (* The inline-dispatch surface caches under the
+                          already-resolved session identity, so carry the
+                          ephemerality decided above. *)
+                       record_mcp_session_agent =
+                         record_mcp_session_agent
+                           ~is_ephemeral:caller_identity.agent_name_is_ephemeral
+                     ; wait_for_message =
+                         (fun registry ~agent_name ~timeout ->
+                           wait_for_message_eio ~clock registry ~agent_name ~timeout)
+                     ; governance_defaults = Mcp_server_eio_governance.governance_defaults
+                     ; save_governance = Mcp_server_eio_governance.save_governance
                      ; load_mcp_sessions = Mcp_server_eio_governance.load_mcp_sessions
                      ; save_mcp_sessions = Mcp_server_eio_governance.save_mcp_sessions
                      }

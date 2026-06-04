@@ -118,7 +118,7 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
          (match Keeper_turn_driver.classify_masc_internal_error err with
           | Some (Keeper_turn_driver.Runtime_exhausted
 	                  { runtime_id
-	                  ; reason = Keeper_meta_contract.No_tool_capable _
+	                  ; reason = Keeper_turn_driver.No_tool_capable _
 	                  ; _
 	                  }) ->
             Prometheus.inc_counter

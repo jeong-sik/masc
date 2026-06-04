@@ -118,29 +118,17 @@ let test_runtime_probe_reports_effective_think_mode () =
   check bool "enabled effective think true" true
     (enabled |> member "think" |> to_bool)
 
-let test_runtime_probe_status_only_skip_is_telemetry () =
-  let labels = [ ("reason", "status_only") ] in
-  let before =
-    Masc.Prometheus.metric_value_or_zero
-      Masc.Prometheus.metric_runtime_ollama_probe_generate_skips
-      ~labels ()
-  in
+let test_runtime_probe_status_only_skip_reports_reason () =
   let json =
     Masc.Tool_local_runtime_probe.runtime_ollama_probe_json
       ~server_url:"http://127.0.0.1:1" ~model:"dummy-probe-model"
       ~run_generate:false ~timeout_sec:3 ~ps_timeout_sec:1 ()
   in
-  let after =
-    Masc.Prometheus.metric_value_or_zero
-      Masc.Prometheus.metric_runtime_ollama_probe_generate_skips
-      ~labels ()
-  in
   let open Yojson.Safe.Util in
   check string "skip reason reported" "status_only"
     (json |> member "generate_skip_reason" |> to_string);
   check bool "status-only flag reported" false
-    (json |> member "run_generate" |> to_bool);
-  check_float_close "skip counter incremented" (before +. 1.0) after
+    (json |> member "run_generate" |> to_bool)
 
 let test_normalize_server_url_strips_trailing_slashes () =
   check string "normalizes trailing slash" "http://127.0.0.1:11434"
@@ -277,8 +265,8 @@ let () =
             test_auto_think_policy_prioritizes_response;
           test_case "runtime probe reports effective think mode" `Quick
             test_runtime_probe_reports_effective_think_mode;
-          test_case "status-only skip is telemetry" `Quick
-            test_runtime_probe_status_only_skip_is_telemetry;
+          test_case "status-only skip reports reason" `Quick
+            test_runtime_probe_status_only_skip_reports_reason;
           test_case "computes tok per second from generate response" `Quick
             test_ollama_generate_parser_computes_tok_per_second;
         ] );

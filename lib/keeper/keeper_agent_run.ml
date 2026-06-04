@@ -457,8 +457,6 @@ let run_turn
      with
      | Error e -> Error (Agent_sdk.Error.Internal e)
      | Ok oas_allowed_paths ->
-       let require_tool_support = false in
-       let require_tool_choice_support = false in
        let timeout_s =
          match oas_timeout_s with
          | Some value -> value
@@ -507,11 +505,9 @@ let run_turn
                   (fun () ->
                           Keeper_turn_driver.run_named
                             ~runtime_id:runtime_id_string
-                            ~base_path:config.base_path
-                            ~keeper_name:meta.name
+                    ~base_path:config.base_path
+                    ~keeper_name:meta.name
                     ?provider_filter
-                    ~require_tool_choice_support
-                    ~require_tool_support
                     ~goal:user_message
                     ~priority
                     ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)

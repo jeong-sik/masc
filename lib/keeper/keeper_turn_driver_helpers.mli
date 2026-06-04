@@ -13,20 +13,6 @@ val resolved_tool_lane_label :
   runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy option ->
   string
 
-type empty_candidate_classification =
-  | Tool_capability_empty
-  | Provider_unavailable
-
-val classify_empty_candidates :
-  require_tool_choice_support:bool ->
-  require_tool_support:bool ->
-  original_candidate_count:int ->
-  tool_filtered_candidate_count:int ->
-  empty_candidate_classification
-
-val empty_candidate_classification_code :
-  empty_candidate_classification -> string
-
 val fail_open_health_filtered_candidates :
   tool_filtered_candidates:'a list ->
   health_filtered_candidates:'a list ->

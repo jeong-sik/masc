@@ -167,11 +167,6 @@ let dispatch ctx ~name ~args : Tool_result.result option =
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
 
-let tool_required_permission = function
-  | "masc_pause_status" -> Some Masc_domain.CanReadState
-  | "masc_pause" | "masc_resume" -> Some Masc_domain.CanBroadcast
-  | _ -> None
-
 (* RFC-0057 PR-1: control tool schemas now come from
    Tool_descriptors_gen via Tool_schemas_misc.schemas. Filter to the
    two control tools so they register with Mod_control. *)
@@ -190,6 +185,5 @@ let () =
              ~module_tag:Tool_dispatch.Mod_control
              ~input_schema:s.input_schema
              ~handler_binding:Tag_dispatch
-             ?required_permission:(tool_required_permission s.name)
              ()))
     Tool_schemas_misc.schemas

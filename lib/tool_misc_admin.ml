@@ -84,11 +84,6 @@ type context = {
 (* JSON builders                                                    *)
 (* ================================================================ *)
 
-let permission_to_json tool_name =
-  match Auth.permission_for_tool tool_name with
-  | Some permission -> `String (Masc_domain.permission_to_string permission)
-  | None -> `Null
-
 let base_url_has_non_loopback_host () =
   match Env_config_core.masc_http_base_url_result () with
   | Error _ -> false
@@ -183,7 +178,6 @@ let tool_inventory_json _ctx ~include_hidden =
                   `Bool (Option.is_some (Tool_dispatch.lookup_tag schema.name)) );
                 ("enabled_in_current_mode", `Bool false);
                 ("direct_call_allowed", `Bool (Tool_catalog.allow_direct_call schema.name));
-                ("required_permission", permission_to_json schema.name);
                 ("doc_refs", `List (List.map (fun value -> `String value) help_entry.doc_refs));
                 ("prompt_hints", `List (List.map (fun value -> `String value) help_entry.prompt_hints));
                 ("surfaces",

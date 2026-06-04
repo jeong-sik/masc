@@ -20,13 +20,13 @@ module Json = Yojson.Safe.Util
 
 let validate cmd =
   match Exec_policy.parse_string_to_ir ~mode:Strict cmd with
-  | Ok ir -> Masc.Worker_dev_tools.validate_command ir
+  | Ok ir -> Exec_policy.validate_command ir
   | Error reason -> Error reason
 ;;
 
 let is_ok = function Ok () -> true | Error _ -> false
 let is_error = function Error _ -> true | Ok () -> false
-let error_msg = function Error m -> Masc.Worker_dev_tools.block_reason_to_string m | Ok () -> ""
+let error_msg = function Error m -> Exec_policy.block_reason_to_string m | Ok () -> ""
 
 let test_allowed_commands () =
   let allowed = [

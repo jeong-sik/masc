@@ -40,8 +40,6 @@ let () =
             check bool "is_destructive default" false spec.is_destructive;
             check bool "is_idempotent default" false spec.is_idempotent;
             check bool "allow_direct_call default" false spec.allow_direct_call_when_hidden;
-            check bool "required_permission default" true
-              (Option.is_none spec.required_permission);
             check bool "canonical_name default" true (Option.is_none spec.canonical_name);
             check bool "replacement default" true (Option.is_none spec.replacement);
             check bool "reason default" true (Option.is_none spec.reason);
@@ -61,7 +59,6 @@ let () =
                 ~is_read_only:true
                 ~is_idempotent:true
                 ~visibility:Tool_catalog.Hidden
-                ~required_permission:Masc_domain.CanAdmin
                 ~effect_domain:Tool_catalog.Masc_workspace
                 ~requires_actor_binding:true
                 ~reason:"hidden for test"
@@ -70,8 +67,6 @@ let () =
             in
             check bool "is_read_only" true spec.is_read_only;
             check bool "is_idempotent" true spec.is_idempotent;
-            check bool "required_permission" true
-              (spec.required_permission = Some Masc_domain.CanAdmin);
             check bool "effect_domain" true
               (spec.effect_domain = Some Tool_catalog.Masc_workspace);
             check bool "requires_actor_binding" true
@@ -180,7 +175,6 @@ let () =
                 ~input_schema:empty_schema
                 ~handler_binding:Tag_dispatch
                 ~is_destructive:true
-                ~required_permission:Masc_domain.CanAdmin
                 ~effect_domain:Tool_catalog.Host_repo_write
                 ~requires_actor_binding:true
                 ~visibility:Tool_catalog.Hidden
@@ -190,8 +184,6 @@ let () =
             Tool_spec.register spec;
             let meta = Tool_catalog.metadata "__test_spec_catalog" in
             check bool "destructive" true (meta.destructive = Some true);
-            check bool "required_permission" true
-              (meta.required_permission = Some Masc_domain.CanAdmin);
             check bool "effect_domain" true
               (meta.effect_domain = Some Tool_catalog.Host_repo_write);
             check bool "requires_actor_binding" true

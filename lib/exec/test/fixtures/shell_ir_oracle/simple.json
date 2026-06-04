@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "parser": "mvdan-sh-syntax-prototype",
+  "parser": "mvdan.cc/sh/v3/syntax@v3.10.0",
   "command": "echo hello",
   "parse_status": "ok",
   "features": {

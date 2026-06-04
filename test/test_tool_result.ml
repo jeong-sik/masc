@@ -3,6 +3,7 @@
 module Tool_result = Tool_result
 module Tool_dispatch = Tool_dispatch
 module Time_compat = Time_compat
+module Keeper_tools_oas_workflow = Masc.Keeper_tools_oas_workflow
 
 let tool_ok ?(tool_name = "") message =
   Tool_result.make_ok ~tool_name ~start_time:0.0 ~data:(`String message) ()

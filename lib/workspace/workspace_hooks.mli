@@ -163,7 +163,7 @@ val cdal_evidence_gate_decide_fn :
   (task_id:string ->
    task_opt:Masc_domain.task option ->
    notes:string ->
-   handoff:Yojson.Safe.t option ->
+   handoff:Masc_domain.task_handoff_context option ->
    unit ->
    evidence_gate_verdict)
   Atomic.t

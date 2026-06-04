@@ -126,28 +126,6 @@ let empty_cost_latency_json ~window =
 let dashboard_feed_limit req =
   int_query_param req "limit" ~default:200 |> clamp ~min_v:1 ~max_v:200
 
-let dashboard_heuristics_json req =
-  let limit = int_query_param req "limit" ~default:100 in
-  let events = Heuristic_metrics.recent limit in
-  Heuristic_metrics.dashboard_feed_json ~limit events
-
-let dashboard_heuristics_coverage_json req =
-  let limit = int_query_param req "limit" ~default:100 in
-  Heuristic_metrics.recent_coverage limit
-  |> Heuristic_metrics.coverage_report_to_json
-
-let respond_dashboard_heuristics request reqd =
-  with_public_read (fun _state req reqd ->
-    let json = dashboard_heuristics_json req in
-    Http.Response.json_value ~compress:true ~request:req json reqd
-  ) request reqd
-
-let respond_dashboard_heuristics_coverage request reqd =
-  with_public_read (fun _state req reqd ->
-    let json = dashboard_heuristics_coverage_json req in
-    Http.Response.json_value ~compress:true ~request:req json reqd
-  ) request reqd
-
 let add_routes ~sw router =
   router
   |> Http.Router.get "/api/v1/providers" (fun request reqd ->
@@ -316,9 +294,3 @@ let add_routes ~sw router =
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
-  |> Http.Router.get "/api/v1/dashboard/heuristics" respond_dashboard_heuristics
-  |> Http.Router.get "/api/v1/heuristics" respond_dashboard_heuristics
-  |> Http.Router.get "/api/v1/dashboard/heuristics/coverage"
-       respond_dashboard_heuristics_coverage
-  |> Http.Router.get "/api/v1/heuristics/coverage"
-       respond_dashboard_heuristics_coverage

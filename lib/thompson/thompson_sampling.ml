@@ -11,8 +11,8 @@
 (** {1 Types} *)
 
 (* #9919 audit follow-up: Prometheus counter for priority-trigger
-   selections. Replaces a degenerate [Heuristic_metrics.record]
-   emit ([threshold=0.0, triggered=true] tautology). *)
+   selections. Replaces a degenerate metric emit
+   ([threshold=0.0, triggered=true] tautology). *)
 let priority_trigger_selected_metric =
   "masc_thompson_priority_trigger_selected_total"
 
@@ -513,15 +513,14 @@ let select_with_feedback
         let s = get_stats name in
         let ticks = ticks_since_selection ~stats:s ~tick_interval_s in
         let signal = starvation_bonus ~ticks in
-        (* #9919 audit follow-up: the prior [Heuristic_metrics.record]
-           at this site was semi-degenerate — [threshold=0.0] and
+        (* #9919 audit follow-up: the prior metric at this site was
+           semi-degenerate — [threshold=0.0] and
            [triggered=true] were tautological (caller already filtered
            by eligibility).  The real useful observation is "a priority
            trigger was selected with [signal=X]"; expose it as a
            Prometheus counter labelled by the trigger kind so operators
            can split mention-driven vs content-alert-driven selection
-           rates.  [Heuristic_metrics_diagnostics] will stop flagging
-           this site as instrumentation theatre. *)
+           rates. *)
         let trigger_label =
           match trigger with
           | Mentioned _ -> "mentioned"

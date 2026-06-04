@@ -429,31 +429,8 @@ function CostLatency() {
 }
 
 // ═════════════════════════════════════════════════════════════════
-// O5 · HEURISTIC + STRESS
+// O5 · STRESS
 // ═════════════════════════════════════════════════════════════════
-
-function HeuristicLog() {
-  return (
-    <section aria-label={`Heuristic firing log · ${P2f.heuristics.filter(h=>h.triggered).length} fired of ${P2f.heuristics.length}`} style={{background:'var(--color-bg-surface)',border:'1px solid var(--color-border-strong)'}}>
-      <div role="heading" aria-level={3} style={{padding:'5px 8px',borderBottom:'1px solid var(--color-border-strong)',display:'flex',gap:'8px',background:'var(--color-bg-panel-alt)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--color-fg-disabled)'}}>
-        <span>tail · keeper_hooks_oas.heuristics.jsonl</span>
-        <span style={{marginLeft:'auto',color:'var(--err-fg)'}}>{P2f.heuristics.filter(h=>h.triggered).length}/{P2f.heuristics.length} fired</span>
-      </div>
-      <div role="log" aria-live="polite" aria-label={`${P2f.heuristics.length} heuristic rows`}>
-        {P2f.heuristics.map((h, i) => (
-          <div key={i} role="listitem" aria-label={`${h.ts.replace('Z','')} · ${h.module} · ${h.site} · value ${h.value} threshold ${h.threshold} · ${h.triggered ? 'fire' : 'ok'}${h.detail ? ' · ' + h.detail : ''}`} className={`hr-row ${h.triggered ? 'fired' : ''}`}>
-            <span className="ts" aria-hidden="true">{h.ts.replace('Z','')}</span>
-            <span className="mod" aria-hidden="true">{h.module}</span>
-            <span className="site" aria-hidden="true">{h.site}<span className="det" style={{display:'block'}}>↳ {h.detail}</span></span>
-            <span className="num" aria-hidden="true">value · <span className={h.triggered?'over':''}>{h.value}</span></span>
-            <span className="num" aria-hidden="true">thr · {h.threshold}</span>
-            <span className={`fl ${h.triggered ? 't' : 'f'}`} aria-hidden="true">{h.triggered ? 'fire' : 'ok'}</span>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
 
 function StressBoard() {
   return (
@@ -478,44 +455,10 @@ function StressBoard() {
   );
 }
 
-function HeuristicByModule() {
-  const byMod = {};
-  P2f.heuristics.forEach(h => {
-    if (!byMod[h.module]) byMod[h.module] = { fired: 0, total: 0, sites: new Set() };
-    byMod[h.module].total++;
-    if (h.triggered) byMod[h.module].fired++;
-    byMod[h.module].sites.add(h.site);
-  });
-  const rows = Object.entries(byMod).sort((a,b) => b[1].fired - a[1].fired);
-  return (
-    <section aria-label={`Heuristic firing rate by module · ${rows.length} modules`} style={{display:'flex',flexDirection:'column',gap:'4px'}}>
-      <div role="heading" aria-level={3} style={{padding:'5px 8px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--color-border-strong)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--color-fg-disabled)',display:'flex'}}>
-        <span>heuristic firing rate · by module</span>
-      </div>
-      <div role="list">
-        {rows.map(([mod, v]) => {
-          const pct = v.total > 0 ? v.fired / v.total * 100 : 0;
-          return (
-            <div key={mod} role="listitem" aria-label={`${mod} · ${v.fired} of ${v.total} fired (${pct.toFixed(0)}%) · sites ${[...v.sites].join(', ')}`} style={{display:'grid',gridTemplateColumns:'160px 80px 1fr 60px',gap:'8px',alignItems:'center',padding:'5px 8px',background:'var(--color-bg-surface)',border:'1px solid var(--color-border-default)'}}>
-              <span aria-hidden="true" style={{fontFamily:'var(--font-mono)',fontSize:'var(--fs-11)',color:'var(--color-fg-primary)'}}>{mod}</span>
-              <span aria-hidden="true" style={{fontFamily:'var(--font-mono)',fontSize:'var(--fs-10)',color:'var(--color-fg-muted)'}}>{v.fired}/{v.total} fired</span>
-              <div aria-hidden="true" style={{height:'10px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--color-border-default)'}}>
-                <div style={{height:'100%',width:`${pct}%`,background: pct > 50 ? 'linear-gradient(90deg, var(--color-status-warn), var(--color-status-err))' : 'linear-gradient(90deg, var(--color-accent-fg-dim), var(--color-accent-fg))'}}></div>
-              </div>
-              <span aria-hidden="true" style={{fontFamily:'var(--font-mono)',fontSize:'var(--fs-11)',color: pct > 50 ? 'var(--err-fg)' : 'var(--color-accent-fg)',fontVariantNumeric:'tabular-nums',textAlign:'right'}}>{pct.toFixed(0)}%</span>
-              <span aria-hidden="true" style={{gridColumn:'1 / -1',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',color:'var(--color-fg-disabled)',letterSpacing:'.04em'}}>sites · {[...v.sites].join(' · ')}</span>
-            </div>
-          );
-        })}
-      </div>
-    </section>
-  );
-}
-
 Object.assign(window, {
   RuntimeList, RuntimeDeepDive, RuntimeCompare,
   AuditLedger, AuditByActor, AuditSummary,
   SafeAutoDashboard, SafeAutoByKeeper, SafeAutoTrend,
   CostPerAgent, CostMatrix, CostLatency,
-  HeuristicLog, StressBoard, HeuristicByModule,
+  StressBoard,
 });

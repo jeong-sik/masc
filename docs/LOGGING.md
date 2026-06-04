@@ -109,7 +109,7 @@ Non-canonical sites in `lib/` + `bin/`, before → after:
 | raw `Printf.eprintf` / `prerr_*` | 47 | 3 | 44 (log.ml, fs_compat, CLI tools, boot/FATAL) | 0 |
 
 The migration added per-module loggers for the components that previously only
-existed as `~ctx:"…"` strings (e.g. `Heuristic_metrics`, `Dashboard_provider_runs`,
+existed as `~ctx:"…"` strings (e.g. `Dashboard_provider_runs`,
 `Otel`, `H2_gateway`), preserving the exact component string operators see, plus
 domain-named modules (`Voice`, `ExecTap`, `ToolValidation`, `Discord`) for raw /
 `Logs.*` sites that previously carried no component.

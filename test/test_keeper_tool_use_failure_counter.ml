@@ -2,7 +2,7 @@
 
    #9919: verify that [post_tool_use_failure] in keeper_hooks_oas
    emits a proper Prometheus counter with [keeper] and [tool]
-   labels instead of the degenerate [Heuristic_metrics.record]
+   labels instead of the degenerate legacy heuristic metric
    that produced 51 identical 1-bit rows in production. *)
 
 module H = Masc.Keeper_hooks_oas

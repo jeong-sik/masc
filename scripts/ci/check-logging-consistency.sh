@@ -32,7 +32,7 @@
 #   actual call shape — `Log.<lvl>` followed (possibly across a newline) by
 #   either `~ctx` or a `"` string literal — which every real call has and no
 #   comment does. The canonical recognizer `Log\.[A-Z][A-Za-z0-9_]*\.`
-#   intentionally allows multi-segment module names (Heuristic_metrics,
+#   intentionally allows multi-segment module names (Dashboard_provider_runs,
 #   H2_gateway, ModelClient).
 
 set -euo pipefail

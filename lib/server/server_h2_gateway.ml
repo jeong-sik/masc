@@ -608,24 +608,6 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
             h2_respond_json_value h2_reqd json
               ~extra_headers:cors)
 
-      | `GET, "/api/v1/dashboard/heuristics"
-      | `GET, "/api/v1/heuristics" ->
-          let json =
-            Server_routes_http_routes_provider_runs.dashboard_heuristics_json
-              httpun_request
-          in
-          h2_respond_json_value h2_reqd json
-            ~extra_headers:cors
-
-      | `GET, "/api/v1/dashboard/heuristics/coverage"
-      | `GET, "/api/v1/heuristics/coverage" ->
-          let json =
-            Server_routes_http_routes_provider_runs.dashboard_heuristics_coverage_json
-              httpun_request
-          in
-          h2_respond_json_value h2_reqd json
-            ~extra_headers:cors
-
       | `GET, "/api/v1/dashboard/config" ->
           with_h2_public_read h2_reqd (fun _state ->
             let json = Env_config_introspect.to_json () in

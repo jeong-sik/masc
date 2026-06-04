@@ -16,17 +16,12 @@ import { computed } from '@preact/signals'
 import {
   fetchRuntimeModelMetrics,
   fetchKeeperCostMetrics,
-  fetchHeuristics,
-  fetchHeuristicCoverage,
   fetchStress,
   fetchAuditLedger,
   fetchKeeperDecisions,
   type DashboardRuntimeModelMetric,
   type KeeperCostMetric,
   type LatencyBucket,
-  type HeuristicEvent,
-  type HeuristicCoverage,
-  type CoverageSite,
   type StressEvent,
   type AgentStressRow,
   type AuditEntry,
@@ -57,9 +52,7 @@ import {
   viewMode,
   modelState,
   keeperState,
-  heuristicState,
   stressState,
-  coverageState,
   auditLedgerState,
   keeperDecisionsState,
   windowMinutes,
@@ -208,17 +201,6 @@ async function loadKeeperMetrics(window: number) {
   }
 }
 
-async function loadHeuristics(limit = 100) {
-  heuristicState.value = { status: 'loading' }
-  try {
-    const resp = await fetchHeuristics(limit)
-    heuristicState.value = { status: 'loaded', data: resp.events, limit: resp.limit, meta: resp }
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'heuristic metrics 불러오기 실패'
-    heuristicState.value = { status: 'error', message }
-  }
-}
-
 async function loadStress(limit = 100) {
   stressState.value = { status: 'loading' }
   try {
@@ -227,17 +209,6 @@ async function loadStress(limit = 100) {
   } catch (err) {
     const message = err instanceof Error ? err.message : 'stress events 불러오기 실패'
     stressState.value = { status: 'error', message }
-  }
-}
-
-async function loadHeuristicCoverage(limit = 100) {
-  coverageState.value = { status: 'loading' }
-  try {
-    const resp = await fetchHeuristicCoverage(limit)
-    coverageState.value = { status: 'loaded', data: resp }
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'heuristic coverage 불러오기 실패'
-    coverageState.value = { status: 'error', message }
   }
 }
 
@@ -270,10 +241,6 @@ function loadActiveView(window: number, view: CostView) {
     } else {
       void loadKeeperMetrics(window)
     }
-  }
-  if (view === 'heuristics') {
-    void loadHeuristics()
-    void loadHeuristicCoverage()
   }
   if (view === 'stress') {
     void loadStress()
@@ -708,57 +675,6 @@ function FeedSourceStrip({ meta }: { meta: DashboardFeedMetadata }) {
   `
 }
 
-function HeuristicLog({ events, limit, meta }: { events: HeuristicEvent[]; limit: number; meta: DashboardFeedMetadata }) {
-  const fmtTime = (ts: number): string => {
-    const d = unixSecondsToDate(ts)
-    return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
-  }
-
-  const triggeredCount = events.filter(e => e.triggered).length
-
-  return html`
-    <section class="flex flex-col gap-2" aria-label=${`Heuristic log · ${events.length} events`}>
-      <${FeedSourceStrip} meta=${meta} />
-      <div class="flex items-center justify-between rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2">
-        <span class="font-mono text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">heuristic log · ${events.length} events · ${triggeredCount} triggered</span>
-        <span class="font-mono text-2xs text-text-muted">limit ${limit}</span>
-      </div>
-      <div class="overflow-x-auto rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)]">
-        <table class="w-full" aria-label="Heuristic events">
-          <thead>
-            <tr class="border-b border-[var(--color-border-default)] text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">
-              <th scope="col" class="px-2 py-1.5 text-left">time</th>
-              <th scope="col" class="px-2 py-1.5 text-left">module</th>
-              <th scope="col" class="px-2 py-1.5 text-left">site</th>
-              <th scope="col" class="px-2 py-1.5 text-right">value</th>
-              <th scope="col" class="px-2 py-1.5 text-right">threshold</th>
-              <th scope="col" class="px-2 py-1.5 text-center">state</th>
-              <th scope="col" class="px-2 py-1.5 text-left">provenance</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${events.map((e, i) => html`
-              <tr key=${i} class="border-b border-[var(--color-border-default)]/50 text-2xs ${e.triggered ? 'bg-[var(--color-status-err)]/5' : ''}">
-                <td class="px-2 py-1.5 font-mono text-text-muted">${fmtTime(e.timestamp)}</td>
-                <td class="px-2 py-1.5 text-text-strong">${e.module}</td>
-                <td class="px-2 py-1.5 text-text-muted">${e.site}</td>
-                <td class="px-2 py-1.5 text-right font-mono">${e.raw_value.toFixed(3)}</td>
-                <td class="px-2 py-1.5 text-right font-mono text-text-muted">${e.threshold.toFixed(3)}</td>
-                <td class="px-2 py-1.5 text-center">
-                  <span class="inline-block rounded-[var(--r-1)] px-1.5 py-0.5 text-2xs font-semibold ${e.triggered ? 'bg-[var(--color-status-err)]/15 text-[var(--color-status-err)]' : 'bg-[var(--color-status-ok)]/15 text-[var(--color-status-ok)]'}">
-                    ${e.triggered ? 'TRIGGERED' : 'ok'}
-                  </span>
-                </td>
-                <td class="px-2 py-1.5 text-text-muted">${e.provenance.type}${e.provenance.detail ? ` · ${e.provenance.detail}` : ''}</td>
-              </tr>
-            `)}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  `
-}
-
 function StressBoard({ rows, events, limit, meta }: { rows: AgentStressRow[]; events: StressEvent[]; limit: number; meta: DashboardFeedMetadata }) {
   const fmtTime = (ts: number): string => {
     const d = unixSecondsToDate(ts)
@@ -864,62 +780,6 @@ function StressBoard({ rows, events, limit, meta }: { rows: AgentStressRow[]; ev
             `)}
           </tbody>
         </table>
-      </div>
-    </section>
-  `
-}
-
-function HeuristicByModule({ coverage }: { coverage: HeuristicCoverage }) {
-  const byModule = coverage.sites.reduce((acc, site) => {
-    const arr = acc.get(site.module) ?? []
-    arr.push(site)
-    acc.set(site.module, arr)
-    return acc
-  }, new Map<string, CoverageSite[]>())
-
-  const sortedModules = Array.from(byModule.entries()).sort((a, b) => b[1].length - a[1].length)
-
-  return html`
-    <section class="flex flex-col gap-2" aria-label="Heuristic by module">
-      <${FeedSourceStrip} meta=${coverage} />
-      <div class="flex items-center justify-between rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2">
-        <span class="font-mono text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">heuristic by module · ${coverage.total_events} events · ${coverage.decision_shape_count} decision shapes · ${coverage.mixed_outcome_sites} mixed sites</span>
-      </div>
-      <div class="flex flex-col gap-2">
-        ${sortedModules.map(([moduleName, sites]) => {
-          const totalCount = sites.reduce((s, x) => s + x.count, 0)
-          const totalTriggered = sites.reduce((s, x) => s + x.triggered_count, 0)
-          return html`
-            <div key=${moduleName} class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)]">
-              <div class="flex items-center justify-between border-b border-[var(--color-border-default)]/50 px-3 py-1.5">
-                <span class="text-xs font-semibold text-text-strong">${moduleName}</span>
-                <span class="font-mono text-2xs text-text-muted">${sites.length} sites · ${totalCount} obs · ${totalTriggered} triggered</span>
-              </div>
-              <div class="overflow-x-auto">
-                <table class="w-full" aria-label=${`Heuristic sites for ${moduleName}`}>
-                  <thead>
-                    <tr class="border-b border-[var(--color-border-default)]/30 text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">
-                      <th scope="col" class="px-2 py-1 text-left">site</th>
-                      <th scope="col" class="px-2 py-1 text-right">count</th>
-                      <th scope="col" class="px-2 py-1 text-right">triggered</th>
-                      <th scope="col" class="px-2 py-1 text-right">rate</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${sites.sort((a, b) => b.count - a.count).map((s, i) => html`
-                      <tr key=${i} class="border-b border-[var(--color-border-default)]/20 text-2xs">
-                        <td class="px-2 py-1 text-text-muted">${s.site}</td>
-                        <td class="px-2 py-1 text-right font-mono">${s.count}</td>
-                        <td class="px-2 py-1 text-right font-mono ${s.triggered_count > 0 ? 'text-[var(--color-status-err)]' : ''}">${s.triggered_count}</td>
-                        <td class="px-2 py-1 text-right font-mono text-text-muted">${s.count > 0 ? formatPct1(s.triggered_count / s.count) : '0.0%'}</td>
-                      </tr>
-                    `)}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          `
-        })}
       </div>
     </section>
   `
@@ -1428,30 +1288,6 @@ function CostDashboardContent({ view }: { view: CostView }) {
             </table>
           </div>
         `}
-      </section>
-    `
-  }
-
-  if (view === 'heuristics') {
-    if (heuristicState.value.status === 'idle') {
-      void loadHeuristics()
-      void loadHeuristicCoverage()
-    }
-    return html`
-      <section class="flex flex-col gap-4" aria-label="휴리스틱">
-        <header class="flex items-baseline justify-between gap-3">
-          <h2 class="text-base font-semibold text-text-strong">휴리스틱</h2>
-        </header>
-        ${heuristicState.value.status === 'loaded'
-          ? html`<${HeuristicLog} events=${heuristicState.value.data} limit=${heuristicState.value.limit} meta=${heuristicState.value.meta} />`
-          : heuristicState.value.status === 'error'
-            ? html`<${ErrorState} message=${heuristicState.value.message} onRetry=${() => void loadHeuristics()} />`
-            : html`<${LoadingState} />`}
-        ${coverageState.value.status === 'loaded'
-          ? html`<${HeuristicByModule} coverage=${coverageState.value.data} />`
-          : coverageState.value.status === 'error'
-            ? html`<${ErrorState} message=${coverageState.value.message} onRetry=${() => void loadHeuristicCoverage()} />`
-            : html`<${LoadingState} />`}
       </section>
     `
   }

@@ -1,6 +1,6 @@
 // preview/cb-group-f.jsx
 // Track 3 · OBSERVABILITY PLANE
-// O1 Runtime Inspector · O2 Audit Ledger · O3 Safe Autonomy · O4 Cost · O5 Heuristic + Stress
+// O1 Runtime Inspector · O2 Audit Ledger · O3 Safe Autonomy · O4 Cost · O5 Stress
 
 const P2f = window.MASC_P2;
 

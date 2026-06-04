@@ -87,7 +87,7 @@ const CRASH_PREFIX_MAP: readonly { prefix: string; category: LibCrashCategory }[
 ]
 
 /** Classify a raw crash reason string into a typed category.
- *  Exact match preferred over prefix heuristic to avoid ambiguity.
+ *  Exact match preferred over prefix matching to avoid ambiguity.
  *  RFC-0174 SSOT source — see file-level note for divergence from the
  *  production `categorizeCrashReason` UI helper. */
 export function classifyCrashReasonLib(raw: string): LibCrashCategory {

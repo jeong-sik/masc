@@ -210,7 +210,7 @@ function DCViewport({ children, minScale = 0.1, maxScale = 8, style = {} }) {
       apply();
     };
 
-    // Mouse-wheel vs trackpad-scroll heuristic. A physical wheel sends
+    // Mouse-wheel vs trackpad-scroll inference. A physical wheel sends
     // line-mode deltas (Firefox) or large integer pixel deltas with no X
     // component (Chrome/Safari, typically multiples of 100/120). Trackpad
     // two-finger scroll sends small/fractional pixel deltas, often with
@@ -622,4 +622,3 @@ function DCPostIt({ children, top, left, right, bottom, rotate = -2, width = 180
 }
 
 Object.assign(window, { DesignCanvas, DCSection, DCArtboard, DCPostIt });
-

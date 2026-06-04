@@ -58,7 +58,7 @@ describe('buildCompositeFsmMermaid', () => {
   })
 
   it('does not emit duplicate top-level node ids (no un-prefixed collisions)', () => {
-    // Heuristic: every declared `id["label"]` anchored on word chars
+    // Inference: every declared `id["label"]` anchored on word chars
     // should have at most one bracket declaration when the id is
     // prefixed. We extract ids and check that each appears exactly
     // once in an initial declaration.

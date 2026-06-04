@@ -285,9 +285,9 @@ let keeper_config_json (config : Workspace.config) (name : string)
             Json_util.float_opt_to_json per_provider_timeout );
           ( "per_provider_timeout_mode",
             `String
-              (match per_provider_timeout with
-               | Some _ -> "override"
-               | None -> "turn_budget_heuristic") );
+               (match per_provider_timeout with
+                | Some _ -> "override"
+                | None -> "turn_budget_default") );
           ("verify", `Bool false);
         ]
       in

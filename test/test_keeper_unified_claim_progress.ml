@@ -1,6 +1,7 @@
 open Alcotest
 
 module KAR = Masc.Keeper_agent_run
+module KMA = Masc.Keeper_meta_tool_access
 module KTP = Masc.Keeper_tool_progress
 
 let test_claim_tool_classification_covers_supported_claim_tools () =
@@ -29,6 +30,42 @@ let test_claim_tool_classification_covers_supported_claim_tools () =
     "task list is not claim tool"
     false
     (KTP.is_claim_tool_name "keeper_tasks_list")
+;;
+
+let test_completion_tool_classification_covers_keeper_and_public_projection () =
+  check
+    bool
+    "keeper task done is completion"
+    true
+    (KTP.is_completion_tool_name "keeper_task_done");
+  check
+    bool
+    "public masc deliver is completion"
+    true
+    (KTP.is_completion_tool_name "masc_deliver");
+  check
+    bool
+    "task list is not completion"
+    false
+    (KTP.is_completion_tool_name "keeper_tasks_list")
+;;
+
+let test_board_tool_access_uses_keeper_owned_surface_names () =
+  check
+    bool
+    "keeper board wrapper counts as board surface"
+    true
+    (KMA.tool_names_include_board [ "keeper_board_post" ]);
+  check
+    bool
+    "legacy public board name counts as board surface"
+    true
+    (KMA.tool_names_include_board [ "masc_board_post" ]);
+  check
+    bool
+    "non-board keeper task tool does not count as board surface"
+    false
+    (KMA.tool_names_include_board [ "keeper_task_claim" ])
 ;;
 
 let test_claim_contract_result_counts_initial_claim_as_execution () =
@@ -108,6 +145,14 @@ let () =
             "claim tool classification covers supported claim tools"
             `Quick
             test_claim_tool_classification_covers_supported_claim_tools
+        ; test_case
+            "completion classification covers keeper and public projection"
+            `Quick
+            test_completion_tool_classification_covers_keeper_and_public_projection
+        ; test_case
+            "board access check uses keeper-owned surface names"
+            `Quick
+            test_board_tool_access_uses_keeper_owned_surface_names
         ; test_case
             "initial claim counts as contract progress"
             `Quick

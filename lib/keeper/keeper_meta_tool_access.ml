@@ -8,12 +8,7 @@
 open Keeper_types_profile
 
 let tool_names_include_board name_list =
-  List.exists
-    (fun name ->
-       match Tool_name.of_string name with
-       | Some tool -> Tool_name.is_board tool
-       | None -> false)
-    name_list
+  List.exists Keeper_tool_name.is_board_surface_name name_list
 ;;
 
 let normalize_tool_names names =

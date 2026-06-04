@@ -53,9 +53,7 @@ let effect_of_progress_class = function
 ;;
 
 let claim_context_tool_names : string list =
-  [ Tool_name.Task_name.to_string Tool_name.Task_name.Claim_next
-  ; Keeper_tool_name.(to_string Task_claim)
-  ]
+  [ Keeper_tool_name.legacy_masc_claim_next_name; Keeper_tool_name.(to_string Task_claim) ]
 ;;
 
 let completion_tool_names : string list =
@@ -67,7 +65,7 @@ let completion_tool_names : string list =
      breaker). Without this, 4+ events/day were rejected as passive_only even
      though the LLM had decided no fit (sangsu/janitor/taskmaster on 2026-04-27
      00:17-00:58 UTC, idle_seconds 28-40h, claimable_count 44-46). *)
-  Tool_name.(to_string (Masc Deliver))
+  Keeper_tool_name.legacy_masc_deliver_name
   :: List.map
        Keeper_tool_name.to_string
        Keeper_tool_name.
@@ -81,36 +79,17 @@ let completion_tool_names : string list =
 
 let is_claim_tool_name name =
   let name = Keeper_tool_resolution.canonical_tool_name name in
-  (match Keeper_tool_name.of_string name with
-   | Some Task_claim -> true
-   | _ -> false)
-  || (match Tool_name.of_string name with
-      | Some
-          (Tool_name.Masc
-             (Tool_name.Masc.Domain
-                (Tool_name.Domain_tool.Task Tool_name.Task_name.Claim_next))) ->
-        true
-      | _ -> false)
+  List.mem name claim_context_tool_names
 ;;
 
 let is_claim_context_tool_name name =
   let name = Keeper_tool_resolution.canonical_tool_name name in
-  let canonical_name =
-    match Tool_name.of_string name with
-    | Some tool -> Tool_name.to_string tool
-    | None -> name
-  in
-  List.mem canonical_name claim_context_tool_names
+  List.mem name claim_context_tool_names
 ;;
 
 let is_completion_tool_name name =
   let name = Keeper_tool_resolution.canonical_tool_name name in
-  let canonical_name =
-    match Tool_name.of_string name with
-    | Some tool -> Tool_name.to_string tool
-    | None -> name
-  in
-  List.mem canonical_name completion_tool_names
+  List.mem name completion_tool_names
 ;;
 
 let is_stay_silent_tool_name name =

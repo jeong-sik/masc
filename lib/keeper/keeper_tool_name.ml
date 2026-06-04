@@ -155,3 +155,86 @@ let of_string = function
 ;;
 
 let pp fmt t = Format.pp_print_string fmt (to_string t)
+;;
+
+let legacy_masc_claim_next_name = "masc_claim_next"
+let legacy_masc_deliver_name = "masc_deliver"
+
+let is_keeper_board_tool = function
+  | Board_comment
+  | Board_comment_vote
+  | Board_curation_read
+  | Board_curation_submit
+  | Board_get
+  | Board_list
+  | Board_post
+  | Board_search
+  | Board_stats
+  | Board_sub_board_create
+  | Board_sub_board_delete
+  | Board_sub_board_get
+  | Board_sub_board_list
+  | Board_sub_board_update
+  | Board_vote -> true
+  | Execute
+  | Broadcast
+  | Context_status
+  | Fs_edit
+  | Fs_write
+  | Fs_read
+  | Ide_annotate
+  | Handoff
+  | Library_read
+  | Library_search
+  | Memory_search
+  | Memory_write
+  | Search_files
+  | Stay_silent
+  | Task_claim
+  | Task_create
+  | Task_done
+  | Task_submit_for_verification
+  | Task_force_done
+  | Task_force_release
+  | Tasks_audit
+  | Tasks_list
+  | Time_now
+  | Tool_search
+  | Tools_list
+  | Voice_agent
+  | Voice_listen
+  | Voice_session_end
+  | Voice_session_start
+  | Voice_sessions
+  | Voice_speak -> false
+;;
+
+let legacy_masc_board_surface_names =
+  [ "masc_board_cleanup"
+  ; "masc_board_comment"
+  ; "masc_board_comment_vote"
+  ; "masc_board_curation_read"
+  ; "masc_board_curation_submit"
+  ; "masc_board_delete"
+  ; "masc_board_get"
+  ; "masc_board_hearths"
+  ; "masc_board_list"
+  ; "masc_board_post"
+  ; "masc_board_profile"
+  ; "masc_board_reaction"
+  ; "masc_board_search"
+  ; "masc_board_stats"
+  ; "masc_board_sub_board_create"
+  ; "masc_board_sub_board_delete"
+  ; "masc_board_sub_board_get"
+  ; "masc_board_sub_board_list"
+  ; "masc_board_sub_board_update"
+  ; "masc_board_vote"
+  ]
+;;
+
+let is_board_surface_name name =
+  match of_string name with
+  | Some tool -> is_keeper_board_tool tool
+  | None -> List.mem name legacy_masc_board_surface_names
+;;

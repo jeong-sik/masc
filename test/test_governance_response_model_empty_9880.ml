@@ -130,21 +130,18 @@ let test_empty_canonical_id_uses_unknown_source () =
     ~expected_source:"unknown_source"
 ;;
 
-(* Prometheus text export must include the metric name and
-   the [source] label key — PromQL queries depend on this. *)
-let test_export () =
+(* The registry must include the metric name and [source] label key;
+   the OTel exporter reads this snapshot. *)
+let test_registry_snapshot () =
   Prom.inc_counter metric_name ~labels:[ "source", "telemetry_resolved" ] ();
-  let text = Prom.to_prometheus_text () in
-  let contains s sub =
-    let n = String.length s
-    and m = String.length sub in
-    let rec loop i =
-      if i + m > n then false else if String.sub s i m = sub then true else loop (i + 1)
-    in
-    loop 0
+  let has_metric =
+    Prom.snapshot ()
+    |> List.exists (fun (m : Prom.metric) ->
+      String.equal m.name metric_name
+      && m.metric_type = Prom.Counter
+      && List.mem ("source", "telemetry_resolved") m.labels)
   in
-  Alcotest.(check bool) "metric name in export" true (contains text metric_name);
-  Alcotest.(check bool) "source label key in export" true (contains text "source=")
+  Alcotest.(check bool) "metric source label in registry" true has_metric
 ;;
 
 let () =
@@ -182,6 +179,11 @@ let () =
             `Quick
             test_empty_canonical_id_uses_unknown_source
         ] )
-    ; "export", [ Alcotest.test_case "metric + label key in /metrics" `Quick test_export ]
+    ; ( "registry"
+      , [ Alcotest.test_case
+            "metric + label key in registry"
+            `Quick
+            test_registry_snapshot
+        ] )
     ]
 ;;

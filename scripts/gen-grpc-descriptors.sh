@@ -9,7 +9,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PROTO_DIR="${REPO_ROOT}/proto"
-TARGET_ML="${REPO_ROOT}/lib/grpc/masc_grpc_server.ml"
+TARGET_ML="${REPO_ROOT}/lib/server/masc_grpc_server.ml"
 
 check_protoc() {
   if ! command -v protoc &>/dev/null; then

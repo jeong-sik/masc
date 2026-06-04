@@ -232,6 +232,30 @@ let with_turn_sandbox_factory ~config ~meta f =
   Fun.protect ~finally:(fun () -> Keeper_sandbox_factory.cleanup factory) @@ fun () ->
   f factory
 
+let test_turn_sandbox_factory_uses_refreshed_registry_meta () =
+  setup ~sandbox:Keeper_types_profile_sandbox.Local
+  @@ fun ~config ~meta ~playground:_ ->
+  let docker_meta =
+    { meta with
+      Keeper_meta_contract.sandbox_profile = Keeper_types_profile_sandbox.Docker
+    }
+  in
+  let factory = Keeper_sandbox_factory.create ~config ~meta () in
+  ignore (Keeper_registry.register ~base_path:config.Workspace.base_path meta.name docker_meta);
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_sandbox_factory.cleanup factory;
+      Keeper_registry.unregister ~base_path:config.Workspace.base_path meta.name)
+  @@ fun () ->
+  let docker_playground = Keeper_sandbox.host_root_abs_of_meta ~config docker_meta in
+  match Keeper_sandbox_factory.resolve factory ~cwd:docker_playground with
+  | None -> Alcotest.fail "expected refreshed registry Docker meta to resolve a turn runtime"
+  | Some runtime ->
+    Alcotest.(check string)
+      "runtime host root follows refreshed Docker meta"
+      (Keeper_alerting_path.normalize_path_for_check_stripped docker_playground)
+      (Keeper_turn_sandbox_runtime.host_root runtime)
+
 let with_fake_docker script f =
   let dir = temp_dir () in
   let docker_path = Filename.concat dir "docker" in
@@ -2032,6 +2056,9 @@ let () =
           Alcotest.test_case
             "turn sandbox file writes use bind-mounted host path"
             `Quick test_turn_sandbox_file_write_uses_host_bind_mount;
+          Alcotest.test_case
+            "turn sandbox factory uses refreshed registry meta"
+            `Quick test_turn_sandbox_factory_uses_refreshed_registry_meta;
           Alcotest.test_case
             "tool_execute typed pipeline uses local shell ir dispatch"
             `Quick test_execute_typed_pipeline_uses_local_shell_ir_dispatch;

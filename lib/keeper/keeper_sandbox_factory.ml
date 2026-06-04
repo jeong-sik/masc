@@ -4,7 +4,7 @@ type t = {
   turn_id : int;
   default_network_override : Keeper_types_profile_sandbox.network_mode option;
   cache :
-    ((bool * string), Keeper_turn_sandbox_runtime.t) Hashtbl.t;
+    ((bool * string * string * string), Keeper_turn_sandbox_runtime.t) Hashtbl.t;
   mutex : Eio.Mutex.t;
 }
 
@@ -28,9 +28,19 @@ let normalize p =
   Keeper_alerting_path.normalize_path_for_check p
   |> strip_trailing_slashes
 
-let in_playground_of_cwd (t : t) ~cwd =
+let current_meta (t : t) =
+  match Keeper_registry.get ~base_path:t.config.base_path t.meta.name with
+  | Some entry -> entry.meta
+  | None -> t.meta
+
+let runtime_image (meta : Keeper_meta_contract.keeper_meta) =
+  match meta.sandbox_image with
+  | Some img when String.trim img <> "" -> img
+  | _ -> Env_config_sandbox.Runtime.docker_image ()
+
+let in_playground_of_cwd (t : t) ~meta ~cwd =
   let host_root =
-    Keeper_sandbox.host_root_abs_of_meta ~config:t.config t.meta
+    Keeper_sandbox.host_root_abs_of_meta ~config:t.config meta
     |> normalize
   in
   let cwd_norm = normalize cwd in
@@ -39,9 +49,10 @@ let in_playground_of_cwd (t : t) ~cwd =
 
 let resolve (t : t) ~cwd =
   with_lock t (fun () ->
-    let in_playground = in_playground_of_cwd t ~cwd in
+    let meta = current_meta t in
+    let in_playground = in_playground_of_cwd t ~meta ~cwd in
     let (effective_profile, effective_network) =
-      Keeper_sandbox_runner.effective_sandbox_profile ~meta:t.meta
+      Keeper_sandbox_runner.effective_sandbox_profile ~meta
     in
     let actual_network =
       Option.value t.default_network_override ~default:effective_network
@@ -49,8 +60,16 @@ let resolve (t : t) ~cwd =
     match effective_profile with
     | Keeper_types_profile_sandbox.Local -> None
     | Keeper_types_profile_sandbox.Docker ->
+      let host_root =
+        Keeper_sandbox.host_root_abs_of_meta ~config:t.config meta
+        |> normalize
+      in
+      let image = runtime_image meta in
       let key =
-        (in_playground, Keeper_types_profile_sandbox.network_mode_to_string actual_network)
+        ( in_playground
+        , Keeper_types_profile_sandbox.network_mode_to_string actual_network
+        , host_root
+        , image )
       in
       match Hashtbl.find_opt t.cache key with
       | Some r -> Some r
@@ -58,7 +77,7 @@ let resolve (t : t) ~cwd =
         let r =
           Keeper_turn_sandbox_runtime.create
             ~config:t.config
-            ~meta:t.meta
+            ~meta
             ~network_mode:actual_network
             ~turn_id:t.turn_id
             ()

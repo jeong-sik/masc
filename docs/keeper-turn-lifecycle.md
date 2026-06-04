@@ -103,6 +103,23 @@ flowchart TD
     N --> O[metrics snapshot + lifecycle/broadcast + keepalive wake + response JSON]
 ```
 
+## Tool Surface Vocabulary
+
+The Keeper has one `Allowed Tool` audit axis, but the code carries it through
+three different stages:
+
+- `allowed_tool_names`: the policy/candidate tool set after keeper profile and
+  denylist resolution.
+- `turn_visible_tool_names`: the internal per-SDK-turn list produced by
+  `compute_tool_surface`; this is the exact list passed to
+  `Agent_sdk.Guardrails.AllowList`.
+- `oas_allowlist_tool_names`: the operator-facing `tool_disclosure` JSONL field
+  for that same per-turn allowlist. It is not a separate permission system.
+
+When auditing "what could the Keeper call right now?", use
+`oas_allowlist_tool_names` for the specific turn and `allowed_tool_names` only
+for the broader policy/candidate boundary.
+
 ## Unified turn swimlane
 
 The two admission paths converge on the same execution engine. The diagram below places supervisor, heartbeat, direct message, and the shared `run_turn` + receipt path in a single sequence so the boundary between scheduling and dispatch is explicit.

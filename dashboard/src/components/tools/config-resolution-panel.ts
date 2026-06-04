@@ -108,6 +108,8 @@ function sourceLabel(source: string): string {
       return 'runtime data'
     case 'prompt_registry':
       return 'prompt registry'
+    case 'derived':
+      return 'default'
     default:
       return 'missing'
   }
@@ -381,7 +383,7 @@ function KeeperRuntimePanel({ runtime }: { runtime: KeeperRuntimeResolved | null
               <div class="text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">${row.label}</div>
               <div class="flex items-center gap-2">
                 <span class="font-mono text-xs text-[var(--color-fg-primary)]">${fmtKeeperValue(field.value, row.fmt)}</span>
-                <span class="text-3xs px-1.5 py-0.5 rounded-[var(--r-1)] ${sourceTone(field.source)}">${field.source}</span>
+                <span class="text-3xs px-1.5 py-0.5 rounded-[var(--r-1)] ${sourceTone(field.source)}">${sourceLabel(field.source)}</span>
               </div>
             </div>
           `

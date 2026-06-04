@@ -161,6 +161,8 @@ describe('ConfigResolutionPanel', () => {
     expect(container.textContent).toContain('keeper runtime limits')
     expect(container.textContent).toContain('Per-keeper runtime caps and timeouts. These values are not the live keeper count.')
     expect(container.textContent).toContain('bootstrap max active keepers')
+    expect(container.textContent).toContain('default')
+    expect(container.textContent).not.toContain('derived')
   })
   it('keeps the full path on hover title and hides duplicate source badges', () => {
     render(

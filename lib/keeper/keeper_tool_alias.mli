@@ -5,9 +5,9 @@
     the internal handler name, an input translator, and an optional
     public schema.
 
-    Two surfaces:
+    Two descriptor-backed surfaces:
     - LLM native tools (Execute, Grep/Search, Read, Edit, Write, WebSearch, WebFetch)
-    - MCP tools (masc_*, handled via Tool_catalog_surfaces)
+    - MCP tools (names with the masc_ prefix)
 
     Internal [keeper_*] names are implementation details of the routing
     layer, not a public surface. A tool call for a name not in the routing
@@ -28,9 +28,9 @@ type route =
     [None] means the name is not in our surface — a routing miss. *)
 val route : string -> route option
 
-(** [is_known_internal name] is [true] when [name] is a recognised descriptor
-    internal handler or public [masc_*] tool name. Callers use this to keep
-    Prometheus label cardinality bounded. *)
+(** [is_known_internal name] is [true] when [name] is a recognised LLM-native
+    descriptor internal handler name. Policy resolution uses this narrow source;
+    runtime telemetry has a wider private descriptor-backed label set. *)
 val is_known_internal : string -> bool
 
 (** [public_names ()] returns all LLM-native public names in stable order.
@@ -58,12 +58,7 @@ val public_name_for_internal : string -> string option
     [result] is ["ok"] for a successful route or ["miss"] for an unknown name. *)
 val record_route_outcome : tool:string -> routed_to:string -> result:string -> unit
 
-(** {1 MCP surface routing (separate concern)} *)
-
-(** [public_masc_to_internal name] is retained for callers that still route
-    through [canonical_resolution]. The old keeper-internal replacement table is
-    gone, so public [masc_*] names stay canonical. *)
-val public_masc_to_internal : string -> string option
+(** {1 MCP prefix normalisation} *)
 
 (** [strip_mcp_masc_prefix name] removes the ["mcp__masc__"] prefix if
     present. *)
@@ -72,22 +67,18 @@ val strip_mcp_masc_prefix : string -> string
 (** Pure canonical routing result for set-logic and routing callers that need
     the same alias interpretation without emitting telemetry. *)
 type canonical_resolution =
-  | Public_mcp of
-      { stripped : string
-      ; internal : string
-      }
   | Public_alias of { internal : string }
   | Internal of { canonical : string }
   | Unknown
 
-(** [canonical_resolution name] applies MCP-prefix stripping, public MCP
-    replacement, LLM-native alias routing, and known-internal detection. *)
+(** [canonical_resolution name] applies MCP-prefix stripping, descriptor-backed
+    public alias routing, and known-internal detection. *)
 val canonical_resolution : string -> canonical_resolution
 
 (** [canonical_internal_name name] returns the internal keeper/MASC tool name
-    used for pure set-logic comparisons after applying the same public alias
-    and MCP-prefix routing rules used by runtime dispatch. [None] means the
-    name is not a recognised public, public-MCP, or internal tool. *)
+    used for pure set-logic comparisons after applying the same descriptor
+    public alias and MCP-prefix routing rules used by runtime dispatch. [None]
+    means the name is not a recognised public or internal tool. *)
 val canonical_internal_name : string -> string option
 
 (** {1 Public schemas} *)

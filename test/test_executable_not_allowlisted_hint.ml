@@ -1,7 +1,6 @@
-(** RFC-0196 P0 §1 acceptance: typed lookup against [Keeper_tool_name] /
-    [Tool_name.Masc] for the "executable not in allowlist" hint. Verified
-    indirectly through [pp_validation_error] so the private helper stays
-    private (no test-backdoor mli widening).
+(** RFC-0196 P0 §1 acceptance: descriptor-backed lookup for the "executable
+    not in allowlist" hint. Verified indirectly through [pp_validation_error]
+    so the private helper stays private (no test-backdoor mli widening).
 
     The MASC tool hint must:
     - fire on real MASC tool names (e.g. [keeper_tasks_list], [masc_status])
@@ -62,7 +61,7 @@ let masc_prefixed_misspelling_no_masc_hint () =
 let bare_unrelated_name_no_masc_hint () =
   let msg = render ~name:"keeperish" ~mode:E.Dev_full in
   Alcotest.(check bool)
-    "unrelated name not in any MASC variant set → no MASC hint"
+    "unrelated name not in descriptor-backed surface → no MASC hint"
     false
     (contains msg masc_hint_text)
 

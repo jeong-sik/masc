@@ -17,11 +17,10 @@ type tried_source =
   | Tool_name_variant           (** S2: Tool_name.of_string *)
   | Public_descriptor           (** S3: Keeper_tool_descriptor.find_public *)
   | Alias_internal              (** S4: Keeper_tool_alias.is_known_internal *)
-  | Alias_masc_to_internal      (** S5: Keeper_tool_alias.public_masc_to_internal *)
-  | Registry_internal_candidate (** S6: Keeper_tool_registry.keeper_internal_candidate_tool_names *)
-  | Registry_core_tools         (** S7: Keeper_tool_registry.effective_core_tools *)
-  | Shard_schema                (** S8: Tool_shard.all_keeper_tool_schemas name extraction *)
-  | Descriptor_registry         (** S8.5: Keeper_tool_descriptor.all_descriptors public_name —
+  | Registry_internal_candidate (** S5: Keeper_tool_registry.keeper_internal_candidate_tool_names *)
+  | Registry_core_tools         (** S6: Keeper_tool_registry.effective_core_tools *)
+  | Shard_schema                (** S7: Tool_shard.all_keeper_tool_schemas name extraction *)
+  | Descriptor_registry         (** S7.5: Keeper_tool_descriptor.all_descriptors public_name —
                                     flat SSOT incl. internal_descriptors (masc_keeper_* live here) *)
 
 type resolution =
@@ -39,7 +38,6 @@ let string_of_tried_source = function
   | Tool_name_variant -> "tool_name_variant"
   | Public_descriptor -> "public_descriptor"
   | Alias_internal -> "alias_internal"
-  | Alias_masc_to_internal -> "alias_masc_to_internal"
   | Registry_internal_candidate -> "registry_internal_candidate"
   | Registry_core_tools -> "registry_core_tools"
   | Shard_schema -> "shard_schema"
@@ -60,67 +58,55 @@ let resolve name =
   else
     match Keeper_tool_descriptor.find_public normalized with
     | Some descriptor ->
-        Alias_to
-          { from_ = normalized
-          ; canonical = descriptor.Keeper_tool_descriptor.internal_name
-          ; via = Public_descriptor
-          }
+      Alias_to
+        { from_ = normalized
+        ; canonical = descriptor.Keeper_tool_descriptor.internal_name
+        ; via = Public_descriptor
+        }
     | None ->
-        if Keeper_tool_alias.is_known_internal normalized then
-          Resolved { canonical = normalized; via = Alias_internal }
-        else begin
-          match Keeper_tool_alias.public_masc_to_internal normalized with
-          | Some internal ->
-              Alias_to
-                { from_ = normalized; canonical = internal; via = Alias_masc_to_internal }
-          | None ->
-              if List.mem normalized Keeper_tool_registry.keeper_internal_candidate_tool_names
-              then
-                Resolved
-                  { canonical = normalized; via = Registry_internal_candidate }
-              else if List.mem normalized (Keeper_tool_registry.effective_core_tools ())
-              then
-                Resolved
-                  { canonical = normalized; via = Registry_core_tools }
-              else if
-                List.mem normalized (tool_schema_names Tool_shard.all_keeper_tool_schemas)
-              then Resolved { canonical = normalized; via = Shard_schema }
-              else if
-                List.exists
-                  (fun (d : Keeper_tool_descriptor.t) ->
-                    String.equal d.Keeper_tool_descriptor.public_name normalized)
-                  (Keeper_tool_descriptor.all_descriptors ())
-              then
-                (* Flat descriptor registry. Descriptor-backed tools live in
-                   [public_descriptors @ internal_descriptors]. masc_keeper_*
-                   (dispatched via Keeper_tool_surface.dispatch, not the handler
-                   registry) sit in internal_descriptors and were orphaned from
-                   resolution when #19797 purged the surface lists. This flat-name
-                   source restores admission without touching dispatch — resolve
-                   is a validity gate; [via] is only used for the error string. *)
-                Resolved
-                  { canonical = normalized; via = Descriptor_registry }
-              else
-                (* The per-actor surface coverage gate (RFC-0084 §1.3) was
-                   removed in the surface-cut refactor: the [surface] type and
-                   its lists are deleted, and keeper tools resolve through the
-                   flat Descriptor_registry source above. A name that reaches
-                   here is admitted by no source — Unknown. *)
-                Unknown
-                  { name
-                  ; tried =
-                      [ Dispatch_table
-                      ; Tool_name_variant
-                      ; Public_descriptor
-                      ; Alias_internal
-                      ; Alias_masc_to_internal
-                      ; Registry_internal_candidate
-                      ; Registry_core_tools
-                      ; Shard_schema
-                      ; Descriptor_registry
-                      ]
-                  }
-        end
+      if Keeper_tool_alias.is_known_internal normalized then
+        Resolved { canonical = normalized; via = Alias_internal }
+      else if
+        List.mem normalized Keeper_tool_registry.keeper_internal_candidate_tool_names
+      then Resolved { canonical = normalized; via = Registry_internal_candidate }
+      else if List.mem normalized (Keeper_tool_registry.effective_core_tools ()) then
+        Resolved { canonical = normalized; via = Registry_core_tools }
+      else if
+        List.mem normalized (tool_schema_names Tool_shard.all_keeper_tool_schemas)
+      then Resolved { canonical = normalized; via = Shard_schema }
+      else if
+        List.exists
+          (fun (d : Keeper_tool_descriptor.t) ->
+             String.equal d.Keeper_tool_descriptor.public_name normalized)
+          (Keeper_tool_descriptor.all_descriptors ())
+      then
+        (* Flat descriptor registry. Descriptor-backed tools live in
+           [public_descriptors @ internal_descriptors]. masc_keeper_* (dispatched
+           via Keeper_tool_surface.dispatch, not the handler registry) sit in
+           internal_descriptors and were orphaned from resolution when #19797
+           purged the surface lists. This flat-name source restores admission
+           without touching dispatch — resolve is a validity gate; [via] is only
+           used for the error string. *)
+        Resolved { canonical = normalized; via = Descriptor_registry }
+      else
+        (* The per-actor surface coverage gate (RFC-0084 §1.3) was removed in
+           the surface-cut refactor: the [surface] type and its lists are
+           deleted, and keeper tools resolve through the flat Descriptor_registry
+           source above. A name that reaches here is admitted by no source —
+           Unknown. *)
+        Unknown
+          { name
+          ; tried =
+              [ Dispatch_table
+              ; Tool_name_variant
+              ; Public_descriptor
+              ; Alias_internal
+              ; Registry_internal_candidate
+              ; Registry_core_tools
+              ; Shard_schema
+              ; Descriptor_registry
+              ]
+          }
 
 (* ── Phase 5: full-probe (no short-circuit) ────────────────────────── *)
 
@@ -138,9 +124,6 @@ let all_admitting_sources name =
     sources := Public_descriptor :: !sources;
   if Keeper_tool_alias.is_known_internal normalized then
     sources := Alias_internal :: !sources;
-  (match Keeper_tool_alias.public_masc_to_internal normalized with
-   | Some _ -> sources := Alias_masc_to_internal :: !sources
-   | None -> ());
   if List.mem normalized (Keeper_tool_registry.keeper_internal_candidate_tool_names) then
     sources := Registry_internal_candidate :: !sources;
   if List.mem normalized (Keeper_tool_registry.effective_core_tools ()) then
@@ -161,10 +144,6 @@ let all_admitting_sources name =
 (* ── RFC-0084 §1.4 — Runtime routing SSOT entry ──────────────────────── *)
 
 type runtime_decision_outcome =
-  | Mcp_mapped of
-      { stripped : string
-      ; internal : string
-      }
   | Route_hit of { internal : string }
   | Already_internal of { canonical : string }
   | Miss
@@ -176,15 +155,12 @@ type runtime_decision_outcome =
     need the pure or telemetry-emitting string projection. *)
 let runtime_decision name =
   match Keeper_tool_alias.canonical_resolution name with
-  | Keeper_tool_alias.Public_mcp { stripped; internal } ->
-    Mcp_mapped { stripped; internal }
   | Keeper_tool_alias.Public_alias { internal } -> Route_hit { internal }
   | Keeper_tool_alias.Internal { canonical } -> Already_internal { canonical }
   | Keeper_tool_alias.Unknown -> Miss
 
 let canonical_tool_name name =
   match runtime_decision name with
-  | Mcp_mapped { internal; _ } -> internal
   | Route_hit { internal } -> internal
   | Already_internal { canonical } -> canonical
   | Miss -> name
@@ -193,9 +169,6 @@ let canonical_tool_name name =
 let canonical_tool_name_observed name =
   let stripped = Keeper_tool_alias.strip_mcp_masc_prefix name in
   match runtime_decision name with
-  | Mcp_mapped { internal; _ } ->
-    Keeper_tool_alias.record_route_outcome ~tool:stripped ~routed_to:internal ~result:"ok";
-    internal
   | Route_hit { internal } ->
     Keeper_tool_alias.record_route_outcome ~tool:stripped ~routed_to:internal ~result:"ok";
     internal

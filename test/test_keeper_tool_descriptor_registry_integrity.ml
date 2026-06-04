@@ -51,13 +51,7 @@ let all_descriptors () : Descriptor.t list = Descriptor.all_descriptors ()
    as a function over [all_descriptors] and this test is rewritten to
    forbid any pending entries. *)
 let rfc_0190_pending_inline_migration =
-  [ "masc_start"
-  ; "masc_broadcast"
-  ; "masc_messages"
-  ; "masc_keeper_sandbox_status"
-  ; "masc_persona_generate"
-  ; "masc_keeper_create_from_persona"
-  ]
+  Masc.Keeper_tool_name.pending_public_mcp_inline_names
 ;;
 
 let descriptor_internal_name_set () =

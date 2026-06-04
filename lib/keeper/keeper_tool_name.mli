@@ -61,7 +61,15 @@ val pp : Format.formatter -> t -> unit
     keeper-owned tools onto the public MCP surface. *)
 val legacy_masc_claim_next_name : string
 
+val legacy_masc_broadcast_name : string
+
 val legacy_masc_deliver_name : string
+
+(** Public MCP names whose handlers still live in inline server dispatch while
+    RFC-0190 descriptor migration is incomplete. Keep this exact allowlist on
+    the keeper side so prefix canonicalisation does not depend on the MCP
+    catalog hand-list. *)
+val pending_public_mcp_inline_names : string list
 
 (** Returns true for keeper board wrapper names and legacy public
     [masc_board_*] names without depending on the central [Tool_name] enum. *)

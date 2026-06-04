@@ -158,7 +158,18 @@ let pp fmt t = Format.pp_print_string fmt (to_string t)
 ;;
 
 let legacy_masc_claim_next_name = "masc_claim_next"
+let legacy_masc_broadcast_name = "masc_broadcast"
 let legacy_masc_deliver_name = "masc_deliver"
+
+let pending_public_mcp_inline_names =
+  [ "masc_start"
+  ; legacy_masc_broadcast_name
+  ; "masc_messages"
+  ; "masc_keeper_sandbox_status"
+  ; "masc_persona_generate"
+  ; "masc_keeper_create_from_persona"
+  ]
+;;
 
 let is_keeper_board_tool = function
   | Board_comment

@@ -28,6 +28,7 @@ val record_success :
   turn:int ->
   ?oas_turn_count:int ->
   trace_id:string ->
+  ?state_snapshot_source:string ->
   snapshot:Keeper_memory_policy.keeper_state_snapshot ->
   unit ->
   unit

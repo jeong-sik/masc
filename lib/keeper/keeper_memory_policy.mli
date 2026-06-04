@@ -70,6 +70,11 @@ val empty_keeper_state_snapshot : keeper_state_snapshot
 (** All-empty snapshot used as a default when no [STATE] block was
     emitted. *)
 
+val state_snapshot_source_is_synthetic : string -> bool
+(** True for runtime-synthesized continuity snapshots. Synthetic snapshots may
+    remain in checkpoints/sidecars for resume, but must not be promoted as
+    model-authored durable memory or active work. *)
+
 type compaction_source =
   | Pre_dispatch_hygiene
   | MASC_policy

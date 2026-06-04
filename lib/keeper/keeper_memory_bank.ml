@@ -689,12 +689,14 @@ let append_memory_notes_from_reply
     (config : Workspace.config)
     (meta : keeper_meta)
     ?snapshot
+    ?state_snapshot_source
     ~(turn : int)
     ~(reply : string)
     () : (int * string list) =
   let (snapshot, source) =
     match snapshot with
-    | Some s -> (s, "message_metadata")
+    | Some s ->
+      (s, Option.value state_snapshot_source ~default:"message_metadata")
     | None ->
       (match parse_state_snapshot_from_reply reply with
     | Some s -> (s, "reply_state_block")
@@ -715,7 +717,9 @@ let append_memory_notes_from_reply
           },
           "meta_goal_fallback" ))
   in
-  let selection = memory_candidates_from_snapshot snapshot in
+  let selection =
+    memory_candidates_from_snapshot_source ~state_snapshot_source:source snapshot
+  in
   let notes = selection.selected in
   if selection.dropped_by_total_cap > 0 || selection.dropped_by_kind <> [] then
     Log.Keeper.warn

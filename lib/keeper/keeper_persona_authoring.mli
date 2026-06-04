@@ -7,7 +7,7 @@
 
     Selective .mli surface — internal helpers
     (assoc_*, normalize_*, add_optional_*, ensure_personas_root,
-    handle_from_concept, generation_prompt, etc.) stay private. *)
+    etc.) stay private. *)
 
 module Archetypes = Keeper_persona_authoring_contract
 
@@ -60,7 +60,7 @@ val allowed_keeper_fields : string list
 
 (** Render the complete persona schema (top-level fields + keeper
     sub-tree + archetype axes). [include_examples] flips whether
-    LLM-prompt example payloads are appended. *)
+    example payloads are appended. *)
 val schema_json : ?include_examples:bool -> unit -> Yojson.Safe.t
 
 (** Tool-handler entry for [keeper_persona_schema]. *)
@@ -103,7 +103,7 @@ val handle_persona_save :
 (** RFC-0182 §3.1 — ctx-free body for Persona_dispatch_ref path. *)
 val handle_persona_save_no_ctx : Yojson.Safe.t -> Keeper_types_profile.tool_result
 
-(** {1 Persona generation (LLM-assisted)} *)
+(** {1 Persona archetype helpers} *)
 
 (** Project archetype-axes args to the [archetype_axes] record;
     rejects unknown choice values. *)
@@ -116,7 +116,3 @@ val archetype_axes_to_json : archetype_axes -> Yojson.Safe.t
     chosen archetype values. *)
 val selected_archetype_effects_to_json :
   archetype_axes -> Yojson.Safe.t
-
-(** Tool-handler entry for [keeper_persona_generate]. *)
-val handle_persona_generate :
-  _ Keeper_types_profile.context -> Yojson.Safe.t -> Keeper_types_profile.tool_result

@@ -68,8 +68,7 @@ val dispatch :
 
     - [masc_board_post] -> identity enforcement +
       {!Board_dispatch.create_post} +
-      {!Notify.notify_mention} on [@target] +
-      {!Auto_responder.maybe_respond} for auto-reply.
+      {!Notify.notify_mention} on [@target].
     - everything else -> [None] (caller falls through to remaining
       dispatchers).
 

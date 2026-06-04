@@ -156,7 +156,6 @@ module Transport : sig
   val webrtc_enabled : unit -> bool
   val use_h2 : unit -> h2_mode
   val agent_transport_opt : unit -> agent_transport option
-  val openai_compat_enabled : bool
   val http_auth_strict_env_enabled : unit -> bool
   val startup_watchdog_sec : unit -> float
 end

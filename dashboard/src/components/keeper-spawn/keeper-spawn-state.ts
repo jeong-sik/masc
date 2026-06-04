@@ -189,7 +189,7 @@ export async function loadPersonaSchema(): Promise<void> {
 export const spawning = signal(false)
 export const spawnResult = signal<{ success: boolean; message: string } | null>(null)
 export const showSpawnPanel = signal(false)
-export const personaGenerating = signal(false)
+export const personaDrafting = signal(false)
 export const personaSaving = signal(false)
 export const personaDraft = signal<PersonaDraft | null>(null)
 export const personaSaveResult = signal<PersonaSaveResult | null>(null)
@@ -231,51 +231,63 @@ export async function spawnKeeperFromPersona(personaName: string, opts?: { dryRu
   }
 }
 
-export interface GeneratePersonaDraftInput {
+export interface PreparePersonaDraftInput {
   concept: string
   handle?: string
   displayName?: string
-  language?: string
   proactiveEnabled?: boolean
 }
 
-export async function generatePersonaDraft(input: GeneratePersonaDraftInput): Promise<void> {
-  const access = dashboardAuthAccess(shellAuthSummary.value, 'worker')
-  if (!access.allowed) {
-    const message = access.reason ?? '페르소나 생성 권한이 없습니다.'
-    personaAuthoringResult.value = { success: false, message }
-    showToast(message, 'error', 6000)
-    return
-  }
+function slugFromText(value: string): string {
+  const slug = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+  return slug || 'persona'
+}
+
+export async function preparePersonaDraft(input: PreparePersonaDraftInput): Promise<void> {
   const concept = input.concept.trim()
   if (!concept) {
     personaAuthoringResult.value = { success: false, message: '컨셉을 입력하세요.' }
     showToast('컨셉을 입력하세요.', 'error')
     return
   }
-  personaGenerating.value = true
+  personaDrafting.value = true
   personaAuthoringResult.value = null
   try {
-    const args: Record<string, unknown> = {
-      concept,
-      language: input.language?.trim() || 'ko',
-      proactive_enabled: input.proactiveEnabled === true,
+    const handle = slugFromText(input.handle?.trim() || input.displayName?.trim() || concept)
+    const displayName = input.displayName?.trim() || handle
+    const profile = {
+      name: displayName,
+      role: concept,
+      trait: concept,
+      keeper: {
+        goal: concept,
+        mention_targets: [handle],
+        proactive_enabled: input.proactiveEnabled === true,
+      },
     }
-    if (input.handle?.trim()) args.handle = input.handle.trim()
-    if (input.displayName?.trim()) args.display_name = input.displayName.trim()
-    const result = await callMcpTool('masc_persona_generate', args)
-    const draft = normalizePersonaDraft(parseToolJson(result))
-    if (!draft) throw new Error('페르소나 생성 결과를 해석할 수 없습니다.')
+    const draft: PersonaDraft = {
+      handle,
+      profile,
+      fieldExplanations: [
+        { path: 'name', value: displayName, effect: 'display label for profile.json' },
+        { path: 'keeper.goal', value: concept, effect: 'keeper creation goal' },
+        { path: 'keeper.mention_targets', value: [handle], effect: 'default mention target' },
+      ],
+    }
     personaDraft.value = draft
     personaSaveResult.value = null
-    personaAuthoringResult.value = { success: true, message: result }
-    showToast(`${draft.handle} 페르소나 초안 생성`, 'success')
+    personaAuthoringResult.value = { success: true, message: JSON.stringify(draft) }
+    showToast(`${draft.handle} 페르소나 초안 준비`, 'success')
   } catch (err) {
     const message = errorToString(err)
     personaAuthoringResult.value = { success: false, message }
-    showToast(`페르소나 생성 실패: ${message}`, 'error')
+    showToast(`페르소나 초안 준비 실패: ${message}`, 'error')
   } finally {
-    personaGenerating.value = false
+    personaDrafting.value = false
   }
 }
 
@@ -320,4 +332,3 @@ export async function savePersonaDraft(opts?: { overwrite?: boolean; dryRun?: bo
     personaSaving.value = false
   }
 }
-

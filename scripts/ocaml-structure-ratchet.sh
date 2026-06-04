@@ -82,17 +82,54 @@ count_inferred_dump_headers() {
 
 count_lib_other_mli_missing() {
   # All lib/*/*.ml files without a sibling .mli, EXCLUDING lib/keeper/
-  # and lib/workspace/ which have dedicated metrics. Captures the long
-  # tail (lib/server/, lib/dashboard/, lib/config/, lib/local/, etc.).
+  # and lib/workspace/ which have dedicated metrics. Dune
+  # (private_modules ...) entries are implementation details of their
+  # library and must not be counted as public interface debt. Captures the
+  # long tail (lib/server/, lib/dashboard/, lib/config/, lib/local/, etc.).
   python3 - <<'EOF' "${REPO_ROOT}"
-import os, sys, glob
+import glob
+import os
+import re
+import sys
 repo_root = sys.argv[1]
 total = 0
+
+def dune_private_modules(dune_path):
+    try:
+        with open(dune_path, encoding='utf-8') as f:
+            text = '\n'.join(line.split(';', 1)[0] for line in f)
+    except OSError:
+        return set()
+
+    tokens = re.findall(r'\(|\)|[^\s()]+', text)
+    private = set()
+    i = 0
+    while i < len(tokens):
+        if tokens[i] == '(' and i + 1 < len(tokens) and tokens[i + 1] == 'private_modules':
+            depth = 1
+            i += 2
+            while i < len(tokens) and depth > 0:
+                tok = tokens[i]
+                if tok == '(':
+                    depth += 1
+                elif tok == ')':
+                    depth -= 1
+                elif depth == 1:
+                    private.add(tok)
+                i += 1
+            continue
+        i += 1
+    return private
+
 for d in glob.glob(os.path.join(repo_root, 'lib', '*') + '/'):
     name = d.rstrip('/').rsplit('/', 1)[-1]
     if name in ('keeper', 'workspace'):
         continue
+    private = dune_private_modules(os.path.join(d, 'dune'))
     for ml in glob.glob(d + '*.ml'):
+        stem = os.path.splitext(os.path.basename(ml))[0]
+        if stem in private:
+            continue
         if not os.path.exists(ml + 'i'):
             total += 1
 print(total)
@@ -106,7 +143,7 @@ METRICS=(
   "godsplit_count|Do not add new ';; godsplit' markers in lib/dune — extract a real sub-library instead. See PR#7-10."
   "lib_dune_lines|lib/dune is growing — consider extracting modules into a sub-library (lib/keeper/dune, lib/oas/dune, lib/dashboard/dune)."
   "inferred_dump_headers|Replace the '(** X inferred mli **)' header with a real one-line docstring. See PR#11286/11290/11296/11303/11309/11321/11401 for the closure series."
-  "lib_other_mli_missing|Add .mli for the new lib/*/*.ml file (covers every dir except keeper/workspace which have their own metrics)."
+  "lib_other_mli_missing|Add .mli for the new public lib/*/*.ml file, or mark implementation-only modules private in the local dune stanza."
 )
 
 current_value() {

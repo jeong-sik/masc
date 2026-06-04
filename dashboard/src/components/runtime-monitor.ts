@@ -405,8 +405,8 @@ export function RuntimeMonitor() {
         <div class="grid grid-cols-2 gap-3 mb-4">
           <${StatTile}
             label="런타임"
-            value=${String(providers?.summary?.providers ?? providers?.providers.length ?? 0)}
-            delta=${{ direction: 'flat', text: providers?.updated_at ?? 'updated_at 없음' }}
+            value=${String(providers?.summary?.runtimes ?? providers?.providers.length ?? 0)}
+            delta=${{ direction: 'flat', text: `Providers ${providers?.summary?.providers ?? 0} · ${providers?.updated_at ?? 'updated_at 없음'}` }}
           />
           <${StatTile}
             label="로컬 런타임"
@@ -420,8 +420,8 @@ export function RuntimeMonitor() {
                 <article class="p-4 rounded-[var(--r-1)] border border-card-border bg-card/40 backdrop-blur-sm shadow-[var(--shadow-1)] flex flex-col gap-2">
                   <div class="flex justify-between gap-3 items-start flex-wrap">
                     <div class="grid gap-1">
-                      <strong class="text-sm text-text-strong">${provider.provider}</strong>
-                      <span class="text-xs text-text-muted">${provider.runtime_kind ?? '(unknown runtime_kind)'}</span>
+                      <strong class="text-sm text-text-strong">${provider.runtime_id ?? provider.provider}</strong>
+                      <span class="text-xs text-text-muted">${provider.provider_id ?? '(unknown provider)'}</span>
                     </div>
                     <${StatusChip}
                       label=${runtimeStatusLabel(provider)}
@@ -429,8 +429,10 @@ export function RuntimeMonitor() {
                     />
                   </div>
                   <div class="grid grid-cols-2 gap-3 text-xs text-text-body">
-                    <div>catalog entries · ${formatNumber(provider.model_count ?? provider.models.length)}</div>
-                    <div>single-run · ${provider.supports_single_agent_run ? 'yes' : 'no'}</div>
+                    <div>model · ${provider.model_api_name ?? provider.model_id ?? '-'}</div>
+                    <div>default · ${provider.is_default_runtime ? 'yes' : 'no'}</div>
+                    <div>transport · ${provider.runtime_kind ?? provider.transport ?? '-'}</div>
+                    <div>ctx · ${formatNumber(provider.max_context)}</div>
                   </div>
                   ${provider.discovery
                     ? html`<div class="grid grid-cols-2 gap-3 text-xs text-text-body pt-2 border-t border-card-border/50">

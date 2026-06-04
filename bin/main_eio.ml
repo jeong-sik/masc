@@ -60,7 +60,6 @@ include Server_dashboard_http
 module Server_h2_gateway = Server_h2_gateway
 module Server_runtime_bootstrap = Server_runtime_bootstrap
 module Server_routes_http_runtime = Server_routes_http_runtime
-module Server_openai_compat = Server_openai_compat
 module Server_startup_takeover = Server_startup_takeover
 
 let mcp_protocol_versions = Server_mcp_transport_http.mcp_protocol_versions
@@ -249,36 +248,6 @@ let dispatch_route ~router ~request ~path reqd =
       | Error msg ->
         Http.Response.json ~status:`Bad_request
           (Printf.sprintf {|{"error":"%s"}|} msg) reqd)
-  | `POST, "/v1/chat/completions" when Server_openai_compat.is_enabled () ->
-    Http.Request.read_body_async reqd (fun body ->
-      match !server_state with
-      | None ->
-        let origin = get_origin request in
-        Http.Response.json ~status:`Internal_server_error
-          ~extra_headers:(cors_headers origin)
-          (Server_openai_compat.error_response
-             ~status:"server_error" ~message:"Server not initialized" ())
-          reqd
-      | Some state ->
-        let config = state.Mcp_server.workspace_config in
-        (match state.Mcp_server.sw, state.Mcp_server.clock with
-        | Some sw, Some clock ->
-            let (status, resp_body) =
-              Server_openai_compat.handle_chat_completions
-                ~config ~sw ~clock body
-            in
-            let origin = get_origin request in
-            Http.Response.json ~status
-              ~extra_headers:(cors_headers origin)
-              resp_body reqd
-        | _ ->
-            let origin = get_origin request in
-            Http.Response.json ~status:`Internal_server_error
-              ~extra_headers:(cors_headers origin)
-              (Server_openai_compat.error_response
-                 ~status:"server_error"
-                 ~message:"Server runtime not fully initialized" ())
-              reqd))
   | `DELETE, "/mcp" -> handle_delete_mcp request reqd
   | `DELETE, "/mcp/managed" ->
       handle_delete_mcp

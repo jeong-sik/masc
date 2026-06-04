@@ -265,7 +265,6 @@ let explicit_metadata : (string * metadata) list =
     ("masc_surface_audit", read_state_tool);
     ("masc_persona_list", read_state_tool);
     ("masc_persona_schema", read_state_tool);
-    ("masc_persona_generate", broadcast_tool);
     ("masc_persona_save", broadcast_tool);
     ("masc_runtime_verify", read_state_tool);
     ("masc_runtime_ollama_probe", read_state_tool);

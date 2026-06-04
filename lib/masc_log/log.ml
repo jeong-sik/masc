@@ -905,7 +905,6 @@ module Discovery = Make(struct let name = "Discovery" end)
    component string operators see in [ts] [LEVEL] [<name>] output. The [name]
    string is the original [~ctx] value verbatim; the module identifier is its
    Capitalized form. See docs/LOGGING.md. *)
-module Dashboard_provider_runs = Make(struct let name = "dashboard_provider_runs" end)
 module Otel = Make(struct let name = "otel" end)
 module Agent_health = Make(struct let name = "agent_health" end)
 module Relay = Make(struct let name = "relay" end)

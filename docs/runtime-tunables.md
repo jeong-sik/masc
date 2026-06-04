@@ -14,16 +14,15 @@ the categorization roadmap. Newly-added typed getters in
 `lib/config/env_config_*.ml` must carry nearby `@category` and
 `@ops_class` tags; existing knobs remain in the backfill lane.
 
-**Total**: 355 unique knobs across 10 modules.
+**Total**: 353 unique knobs across 10 modules.
 
-**Typed getter classification**: 19/210 tagged (`operator`: 19, `algorithm`: 0, `unclassified`: 191).
+**Typed getter classification**: 19/209 tagged (`operator`: 19, `algorithm`: 0, `unclassified`: 190).
 
-## Env_config_core (29 knobs; typed classification 0/7)
+## Env_config_core (28 knobs; typed classification 0/7)
 
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
 | `MASC_ADMIN_TOKEN` | string_literal | n/a | n/a | 450 | SSOT for auth env-var names (issue 8352). |
-| `MASC_AUTO_RESPOND` | string_literal | n/a | n/a | 508 | Raw MASC_AUTO_RESPOND value for mode parsing. |
 | `MASC_BASE_PATH` | string_literal | n/a | n/a | 282 | Env var names exposed as SSOT constants so out-of-process callers that read/write the variable by name (docker worker... |
 | `MASC_BASE_PATH_INPUT` | string_literal | n/a | n/a | 283 | Env var names exposed as SSOT constants so out-of-process callers that read/write the variable by name (docker worker... |
 | `MASC_BUILD_GIT_COMMIT` | string_literal | n/a | n/a | 502 | Git commit hash override for build identity. |
@@ -203,7 +202,7 @@ the categorization roadmap. Newly-added typed getters in
 |---|---|---|---|---|---|
 | `MASC_OAS_BRIDGE_TIMEOUT_DEFAULT_SEC` | string_literal | n/a | n/a | 114 |  |
 
-## Env_config_runtime (113 knobs; typed classification 4/90)
+## Env_config_runtime (112 knobs; typed classification 4/89)
 
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
@@ -265,7 +264,6 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_MESSAGE_MAX_COUNT` | typed:int | unclassified | unclassified | 226 | Maximum number of message files to retain per workspace (default 200). Oldest messages (by filename sort) are deleted... |
 | `MASC_METRICS_FLUSH_SEC` | typed:float | unclassified | unclassified | 791 | Tool metrics flush interval (seconds). Default: 300 (5 min). |
 | `MASC_OAS_SSE_DRAIN_INTERVAL_SEC` | typed:float | unclassified | unclassified | 595 | SSE drain interval (seconds). Default: 2.0. |
-| `MASC_OPENAI_COMPAT` | feature_flag | n/a | n/a | 314 | Whether OpenAI-compatible endpoint is enabled. Default: false. |
 | `MASC_ORCHESTRATOR_AGENT` | typed:string | unclassified | unclassified | 101 | Orchestrator agent name |
 | `MASC_ORCHESTRATOR_INTERVAL` | typed:float | unclassified | unclassified | 97 | Orchestrator check interval (seconds) |
 | `MASC_ORCHESTRATOR_MIN_PRIORITY` | typed:int | unclassified | unclassified | 104 |  |

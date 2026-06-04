@@ -5,7 +5,7 @@ code_refs:
   - lib/server/server_mcp_transport_ws.ml
   - lib/sse.ml
   - lib/transport_metrics.ml
-  - lib/grpc/masc_grpc_service.ml
+  - lib/server/masc_grpc_service.ml
   - dashboard/src/dashboard-ws.ts
   - dashboard/src/sse.ts
   - dashboard/src/components/transport-health.ts

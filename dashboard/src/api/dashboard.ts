@@ -553,13 +553,22 @@ interface DashboardRuntimeProviderDiscovery {
 
 export interface DashboardRuntimeProviderSnapshot {
   provider: string
+  runtime_id?: string | null
+  provider_id?: string | null
+  provider_display_name?: string | null
+  model_id?: string | null
+  model_api_name?: string | null
+  protocol?: string | null
+  transport?: string | null
   kind?: string | null
   runtime_kind?: string | null
   auth_kind?: string | null
   status?: string | null
   available?: boolean
-  supports_single_agent_run?: boolean
-  default_model?: string | null
+  is_default_runtime?: boolean
+  max_context?: number | null
+  tools_support?: boolean
+  streaming?: boolean
   model_count?: number | null
   models: string[]
   source?: string | null
@@ -572,9 +581,11 @@ export interface DashboardRuntimeProvidersResponse {
   updated_at?: string
   summary?: {
     providers?: number
+    runtimes?: number
     local_models?: number
     cloud_models?: number
     cli_models?: number
+    default_runtime_id?: string | null
   } | null
   providers: DashboardRuntimeProviderSnapshot[]
 }
@@ -703,17 +714,26 @@ function decodeRuntimeProviderSnapshot(raw: unknown): DashboardRuntimeProviderSn
   if (!provider) return null
   return {
     provider,
-    kind: 'runtime',
+    runtime_id: asNullableString(raw.runtime_id),
+    provider_id: asNullableString(raw.provider_id),
+    provider_display_name: asNullableString(raw.provider_display_name),
+    model_id: asNullableString(raw.model_id),
+    model_api_name: asNullableString(raw.model_api_name),
+    protocol: asNullableString(raw.protocol),
+    transport: asNullableString(raw.transport),
+    kind: asNullableString(raw.kind),
     runtime_kind: asNullableString(raw.runtime_kind),
     auth_kind: asNullableString(raw.auth_kind),
     status: asNullableString(raw.status),
     available: asBoolean(raw.available),
-    supports_single_agent_run: asBoolean(raw.supports_single_agent_run),
-    default_model: null,
+    is_default_runtime: asBoolean(raw.is_default_runtime),
+    max_context: asNumber(raw.max_context) ?? null,
+    tools_support: asBoolean(raw.tools_support),
+    streaming: asBoolean(raw.streaming),
     model_count: asNumber(raw.model_count) ?? null,
-    models: [],
+    models: asStringArray(raw.models),
     source: asNullableString(raw.source),
-    endpoint_url: null,
+    endpoint_url: asNullableString(raw.endpoint_url),
     note: asNullableString(raw.note),
     discovery: decodeRuntimeProviderDiscovery(raw.discovery),
   }
@@ -727,9 +747,11 @@ function decodeRuntimeProvidersResponse(raw: unknown): DashboardRuntimeProviders
     summary: summary
       ? {
           providers: asNumber(summary.providers),
+          runtimes: asNumber(summary.runtimes),
           local_models: asNumber(summary.local_models),
           cloud_models: asNumber(summary.cloud_models),
           cli_models: asNumber(summary.cli_models),
+          default_runtime_id: asNullableString(summary.default_runtime_id),
         }
       : null,
     providers: asRecordArray(raw.providers)

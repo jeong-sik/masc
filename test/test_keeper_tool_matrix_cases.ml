@@ -160,7 +160,12 @@ let find_tool fixture name =
 
 let ensure_sample_file fixture =
   let relative = "keeper-tool-matrix.txt" in
-  let absolute = Filename.concat fixture.generic.base_path relative in
+  let absolute =
+    Filename.concat
+      (Masc.Keeper_sandbox.host_root_abs_of_meta ~config:fixture.config fixture.meta)
+      relative
+  in
+  Generic.mkdir_p (Filename.dirname absolute);
   Generic.write_text_file absolute "needle\nsecond line\n";
   relative
 

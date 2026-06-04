@@ -41,8 +41,6 @@ let handle_persona_schema = Authoring.handle_persona_schema
 let persona_schema_handler args : tool_result =
   Authoring.handle_persona_schema_no_ctx args
 
-let handle_persona_generate = Authoring.handle_persona_generate
-
 let handle_persona_save = Authoring.handle_persona_save
 let persona_save_handler args : tool_result =
   Authoring.handle_persona_save_no_ctx args

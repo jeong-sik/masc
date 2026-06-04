@@ -19,7 +19,6 @@ vi.mock('../../store', () => ({
 }))
 
 import {
-  generatePersonaDraft,
   normalizePersonaDraft,
   normalizePersonaSaveResult,
   normalizePersonaSchema,
@@ -28,6 +27,7 @@ import {
   personaAuthoringResult,
   personaDraft,
   personaSaveResult,
+  preparePersonaDraft,
   savePersonaDraft,
   spawnKeeperFromPersona,
   spawnResult,
@@ -166,27 +166,21 @@ describe('persona authoring normalization', () => {
 })
 
 describe('persona authoring actions', () => {
-  it('generates a persona draft through masc_persona_generate', async () => {
-    callMcpTool.mockResolvedValueOnce(JSON.stringify({
-      handle: 'chaos-researcher',
-      profile: { name: 'Chaos Researcher', keeper: { goal: 'test' } },
-      field_explanations: [],
-    }))
-
-    await generatePersonaDraft({
+  it('prepares a persona draft locally before masc_persona_save', async () => {
+    await preparePersonaDraft({
       concept: 'good evil chaos',
       handle: 'chaos-researcher',
       proactiveEnabled: true,
     })
 
-    expect(callMcpTool).toHaveBeenCalledWith('masc_persona_generate', {
-      concept: 'good evil chaos',
-      language: 'ko',
-      proactive_enabled: true,
-      handle: 'chaos-researcher',
-    })
+    expect(callMcpTool).not.toHaveBeenCalled()
     expect(personaDraft.value?.handle).toBe('chaos-researcher')
-    expect(showToast).toHaveBeenCalledWith('chaos-researcher 페르소나 초안 생성', 'success')
+    expect(personaDraft.value?.profile['keeper']).toEqual({
+      goal: 'good evil chaos',
+      mention_targets: ['chaos-researcher'],
+      proactive_enabled: true,
+    })
+    expect(showToast).toHaveBeenCalledWith('chaos-researcher 페르소나 초안 준비', 'success')
   })
 
   it('saves the current draft through masc_persona_save dry-run', async () => {

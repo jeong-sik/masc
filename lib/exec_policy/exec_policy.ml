@@ -446,25 +446,45 @@ let path_is_existing_dir ?workdir path =
   | Sys_error _ -> false
 ;;
 
+(** Classification of path-like token prefixes.
+    Replaces ad-hoc [String.starts_with] prefix matching with a typed
+    variant so the compiler enforces exhaustive handling. *)
+type path_prefix =
+  | Root_relative  (** Starts with "/" (absolute path) *)
+  | Current_dir  (** Starts with "./" (explicit current directory) *)
+  | Parent_dir  (** Starts with "../" (parent directory traversal) *)
+  | Home_dir  (** Starts with "~/" (home directory expansion) *)
+  | Dot_entry  (** Exactly "." or ".." (directory entry references) *)
+  | Not_a_path  (** No recognized path prefix *)
+
+let classify_path_prefix token : path_prefix =
+  if token = "." || token = ".." then Dot_entry
+  else (
+    let len = String.length token in
+    if len >= 1 && token.[0] = '/'
+    then Root_relative
+    else if len >= 2 && token.[0] = '.' && token.[1] = '/'
+    then Current_dir
+    else if len >= 3 && token.[0] = '.' && token.[1] = '.' && token.[2] = '/'
+    then Parent_dir
+    else if len >= 2 && token.[0] = '~' && token.[1] = '/'
+    then Home_dir
+    else Not_a_path)
+;;
+
+let is_path_prefix token =
+  match classify_path_prefix token with
+  | Root_relative | Current_dir | Parent_dir | Home_dir | Dot_entry -> true
+  | Not_a_path -> false
+;;
+
 let looks_like_path_token token =
   token <> ""
   && (not (looks_like_url token))
-  && (token = "."
-      || token = ".."
-      || String.starts_with ~prefix:"/" token
-      || String.starts_with ~prefix:"./" token
-      || String.starts_with ~prefix:"../" token
-      || String.starts_with ~prefix:"~/" token
-      || String.contains token '/')
+  && (is_path_prefix token || String.contains token '/')
 ;;
 
-let token_value_is_explicit_path token =
-  token = "."
-  || token = ".."
-  || String.starts_with ~prefix:"/" token
-  || String.starts_with ~prefix:"./" token
-  || String.starts_with ~prefix:"../" token
-  || String.starts_with ~prefix:"~/" token
+let token_value_is_explicit_path token = is_path_prefix token
 ;;
 
 let token_has_parent_dir_segment token =

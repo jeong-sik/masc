@@ -248,26 +248,6 @@ let metric_mention_dedup_decisions_total = "masc_mention_dedup_decisions_total"
 
 (** {1 Built-in Metrics} *)
 
-(* RFC-0217 S2 — export the in-process metric store to OTel as an observable
-   source. The store (Prometheus_store) stays the accumulator; OTel's backend
-   polls [snapshot] each export tick — the push-model replacement for /metrics
-   scrape (S0 spike validated). Dual with to_prometheus_text until S3/S4 retire
-   the scrape path and the Pool_metrics/render entanglement with it. *)
-let otel_samples () : Otel_metrics.sample list =
-  Prometheus_store.snapshot ()
-  |> List.map (fun (m : Prometheus_store.metric) ->
-         { Otel_metrics.name = m.name
-         ; value = m.value
-         ; labels = m.labels
-         ; kind =
-             (match m.metric_type with
-              | Prometheus_store.Counter -> Otel_metrics.Counter
-              | Prometheus_store.Gauge -> Otel_metrics.Gauge
-              | Prometheus_store.Histogram -> Otel_metrics.Histogram)
-         })
-
-let register_otel_export () = Otel_metrics.register_source otel_samples
-
 let init () =
   let add name help metric_kind =
     match metric_kind with
@@ -281,8 +261,7 @@ let init () =
     ~register_gauge
     ~inc_counter
     ();
-  install_backend_mutex_observers ();
-  register_otel_export ()
+  install_backend_mutex_observers ()
 ;;
 
 let start_time = Time_compat.now ()
@@ -365,6 +344,31 @@ let update_pool_metrics_gauges () =
       (float_of_int stats.evict_failure_count_total);
     set_gauge metric_pool_create_total (float_of_int stats.create_count_total)
 ;;
+
+(* RFC-0217 S4 — export the in-process metric store to OTel as an observable
+   source. Defined after update_*_gauges so the export tick can refresh the lazy
+   Pool_metrics/Fd gauges into the store first — exactly the refresh that
+   to_prometheus_text did at scrape time. The store (Prometheus_store) stays the
+   accumulator; the backend polls snapshot each tick (push-model replacement for
+   /metrics scrape, S0 spike validated). Dual with to_prometheus_text until S4-2
+   retires the scrape path. register_source only enqueues the callback at module
+   load (no init dependency); the snapshot is read lazily at each tick. *)
+let otel_samples () : Otel_metrics.sample list =
+  update_pool_metrics_gauges ();
+  update_fd_gauges ();
+  Prometheus_store.snapshot ()
+  |> List.map (fun (m : Prometheus_store.metric) ->
+         { Otel_metrics.name = m.name
+         ; value = m.value
+         ; labels = m.labels
+         ; kind =
+             (match m.metric_type with
+              | Prometheus_store.Counter -> Otel_metrics.Counter
+              | Prometheus_store.Gauge -> Otel_metrics.Gauge
+              | Prometheus_store.Histogram -> Otel_metrics.Histogram)
+         })
+
+let () = Otel_metrics.register_source otel_samples
 
 let to_prometheus_text () =
   update_uptime ();

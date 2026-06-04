@@ -175,6 +175,11 @@ runtime selection. Keeper TOML already fail-loud rejects `keeper.runtime_id` /
 `Runtime` module. The decoupling PR removes that schema/save path so credential
 authoring no longer reaches Runtime directly.
 
+Follow-up credential pre-work narrows persona authoring away from the flat
+`Keeper_types_profile` facade. The tool now calls the existing TOML
+normalizer and persona-placeholder modules directly, keeping the same behavior
+while removing a non-domain facade dependency from the first cluster.
+
 ## 5. Extraction sequence
 
 Candidate clusters and their re-measured **flat-ns fan-out** (the G1 metric).

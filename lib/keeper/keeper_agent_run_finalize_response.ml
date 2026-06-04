@@ -61,8 +61,14 @@ let finalize
      reminder, or the model emitted no [STATE] block at all (synthesized). On a
      normal model_state_block turn the snapshot is authoritative, so a dropped
      loop still clears. *)
+  let is_budget_exhausted = function
+    | Runtime_agent.TurnBudgetExhausted _ -> true
+    | _ -> false
+  in
   let resume_merge =
-    pre_dispatch_compacted || String.equal state_snapshot_source "synthesized"
+    pre_dispatch_compacted
+    || String.equal state_snapshot_source "synthesized"
+    || is_budget_exhausted result.stop_reason
   in
   let { Keeper_agent_run_sidecar.working_state = _
       ; state_snapshot_saved = _

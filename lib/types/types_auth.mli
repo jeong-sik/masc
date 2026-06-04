@@ -121,8 +121,6 @@ type permission =
   | CanClaimTask
   | CanCompleteTask
   | CanBroadcast
-  | CanOpenPortal
-  | CanSendPortal
   | CanVote
   | CanAdmin
 [@@deriving show { with_path = false }]

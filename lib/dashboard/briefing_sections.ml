@@ -79,14 +79,13 @@ let build_communication_section ~sessions ~recent_messages ~metadata_gaps
   let live_session_count = List.length sessions in
   let recent_message_count = List.length recent_messages in
   let broadcast_total = sum_int_field "broadcast_count" sessions in
-  let portal_total = sum_int_field "portal_count" sessions in
   let known_mode_count =
     count_matching_field "communication_mode" sessions ~predicate:(fun value ->
         not (is_missing_status_or_unknown value))
   in
   let metadata_evidence = evidence_of_metadata_gaps ~section:Communication metadata_gaps in
   let positive_signal =
-    recent_message_count > 0 || broadcast_total > 0 || portal_total > 0
+    recent_message_count > 0 || broadcast_total > 0
   in
   let positive_evidence =
     []
@@ -94,8 +93,6 @@ let build_communication_section ~sessions ~recent_messages ~metadata_gaps
          (Printf.sprintf "Recent namespace messages recorded: %d" recent_message_count)
     |> evidence_add_if (broadcast_total > 0)
          (Printf.sprintf "Session broadcasts recorded: %d" broadcast_total)
-    |> evidence_add_if (portal_total > 0)
-         (Printf.sprintf "Portal messages recorded: %d" portal_total)
   in
   let inactivity_evidence =
     []

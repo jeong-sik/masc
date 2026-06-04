@@ -46,14 +46,6 @@ module Auth_error : sig
   val to_string : t -> string
 end
 
-module Portal_error : sig
-  type t =
-    | NotOpen of string
-    | AlreadyOpen of { agent: string; target: string }
-    | Closed of string
-  val to_string : t -> string
-end
-
 module System_error : sig
   type t =
     | NotInitialized
@@ -75,7 +67,6 @@ type t =
   | Task of Task_error.t
   | Agent of Agent_error.t
   | Auth of Auth_error.t
-  | Portal of Portal_error.t
   | System of System_error.t
   | RateLimitExceeded of rate_limit_error
   | CacheError of cache_error
@@ -94,7 +85,7 @@ val is_retryable : t -> bool
     [false] so callers don't loop on deterministic failures.
 
     {ul
-    {- [Task _], [Agent _], [Portal _]: [false] (domain-state
+    {- [Task _], [Agent _]: [false] (domain-state
        errors — replaying changes nothing).}
     {- [Auth (TokenExpired _)]: [true] (clears once
        [masc_auth_refresh] runs); other [Auth] variants: [false].}

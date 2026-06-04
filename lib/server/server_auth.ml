@@ -559,7 +559,6 @@ let http_status_of_auth_error = function
       | Masc_domain.Task_error.InvalidState _
       | Masc_domain.Task_error.InvalidId _) -> `Bad_request
   | Masc_domain.Agent (Masc_domain.Agent_error.InvalidName _) -> `Bad_request
-  | Masc_domain.Portal _ -> `Bad_request
   | Masc_domain.System _ -> `Bad_request
   | Masc_domain.RateLimitExceeded _ -> `Too_many_requests
   | Masc_domain.CacheError _ -> `Internal_server_error

@@ -142,8 +142,6 @@ type permission =
   | CanClaimTask
   | CanCompleteTask
   | CanBroadcast
-  | CanOpenPortal
-  | CanSendPortal
   | CanVote
   | CanAdmin
 [@@deriving show { with_path = false }]
@@ -163,8 +161,6 @@ let permission_to_string = function
   | CanClaimTask -> "CanClaimTask"
   | CanCompleteTask -> "CanCompleteTask"
   | CanBroadcast -> "CanBroadcast"
-  | CanOpenPortal -> "CanOpenPortal"
-  | CanSendPortal -> "CanSendPortal"
   | CanVote -> "CanVote"
   | CanAdmin -> "CanAdmin"
 
@@ -174,7 +170,6 @@ let permissions_for_role = function
       CanReadState;
       CanAddTask; CanClaimTask; CanCompleteTask;
       CanBroadcast;
-      CanOpenPortal; CanSendPortal;
       CanVote;
     ]
   | Admin -> [
@@ -182,7 +177,6 @@ let permissions_for_role = function
       CanReadState;
       CanAddTask; CanClaimTask; CanCompleteTask;
       CanBroadcast;
-      CanOpenPortal; CanSendPortal;
       CanVote; CanAdmin;
     ]
 
@@ -202,7 +196,7 @@ let has_permission role permission =
   | Admin, _ -> true
   | Worker, (CanInit | CanReset | CanAdmin) -> false
   | Worker, ( CanReadState | CanAddTask | CanClaimTask | CanCompleteTask | CanBroadcast
-            | CanOpenPortal | CanSendPortal | CanVote ) -> true
+            | CanVote ) -> true
 
 (* ============================================ *)
 (* Rate limit role integration                  *)

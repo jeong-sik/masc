@@ -271,46 +271,6 @@ let test_tempo_config_roundtrip () =
   check bool "roundtrip ok" true (is_ok result)
 
 (* ============================================================ *)
-(* Masc_domain.a2a_task_status Tests                                   *)
-(* ============================================================ *)
-
-let test_a2a_task_status_all () =
-  let statuses = [
-    (Masc_domain.A2APending, "pending");
-    (Masc_domain.A2ARunning, "running");
-    (Masc_domain.A2ACompleted, "completed");
-    (Masc_domain.A2AFailed, "failed");
-    (Masc_domain.A2ACanceled, "canceled");
-  ] in
-  List.iter (fun (status, expected) ->
-    check string "to_string" expected (Masc_domain.a2a_task_status_to_string status);
-    let json = Masc_domain.a2a_task_status_to_yojson status in
-    let result = Masc_domain.a2a_task_status_of_yojson json in
-    check bool "roundtrip ok" true (is_ok result)
-  ) statuses
-
-let test_a2a_task_status_of_string_unknown () =
-  let result = Masc_domain.a2a_task_status_of_string "unknown" in
-  check bool "is error" true (is_error result)
-
-(* ============================================================ *)
-(* Masc_domain.portal_state Tests                                      *)
-(* ============================================================ *)
-
-let test_portal_state_all () =
-  let states = [(Masc_domain.PortalOpen, "open"); (Masc_domain.PortalClosed, "closed")] in
-  List.iter (fun (state, expected) ->
-    check string "to_string" expected (Masc_domain.portal_state_to_string state);
-    let json = Masc_domain.portal_state_to_yojson state in
-    let result = Masc_domain.portal_state_of_yojson json in
-    check bool "roundtrip ok" true (is_ok result)
-  ) states
-
-let test_portal_state_of_string_unknown () =
-  let result = Masc_domain.portal_state_of_string "half-open" in
-  check bool "is error" true (is_error result)
-
-(* ============================================================ *)
 (* Masc_domain.agent_role Tests                                        *)
 (* ============================================================ *)
 
@@ -457,56 +417,6 @@ let test_backlog_roundtrip () =
   } in
   let json = Masc_domain.backlog_to_yojson backlog in
   let result = Masc_domain.backlog_of_yojson json in
-  check bool "roundtrip ok" true (is_ok result)
-
-(* ============================================================ *)
-(* Masc_domain.a2a_task Tests                                          *)
-(* ============================================================ *)
-
-let test_a2a_task_roundtrip () =
-  let task = Masc_domain.{
-    a2a_id = "a2a-123";
-    from_agent = "agent_llm_a";
-    to_agent = "provider_f";
-    a2a_message = "Please review this code";
-    a2a_status = A2ARunning;
-    a2a_result = None;
-    created_at = "2024-01-01T00:00:00Z";
-    updated_at = "2024-01-01T01:00:00Z";
-  } in
-  let json = Masc_domain.a2a_task_to_yojson task in
-  let result = Masc_domain.a2a_task_of_yojson json in
-  check bool "roundtrip ok" true (is_ok result)
-
-let test_a2a_task_with_result () =
-  let task = Masc_domain.{
-    a2a_id = "a2a-456";
-    from_agent = "provider_f";
-    to_agent = "agent_code";
-    a2a_message = "Implement feature X";
-    a2a_status = A2ACompleted;
-    a2a_result = Some "Feature implemented successfully";
-    created_at = "2024-01-01T00:00:00Z";
-    updated_at = "2024-01-01T02:00:00Z";
-  } in
-  let json = Masc_domain.a2a_task_to_yojson task in
-  let result = Masc_domain.a2a_task_of_yojson json in
-  check bool "roundtrip ok" true (is_ok result)
-
-(* ============================================================ *)
-(* Masc_domain.portal Tests                                            *)
-(* ============================================================ *)
-
-let test_portal_roundtrip () =
-  let portal = Masc_domain.{
-    portal_from = "agent_llm_a";
-    portal_target = "provider_f";
-    portal_opened_at = "2024-01-01T00:00:00Z";
-    portal_status = PortalOpen;
-    task_count = 5;
-  } in
-  let json = Masc_domain.portal_to_yojson portal in
-  let result = Masc_domain.portal_of_yojson json in
   check bool "roundtrip ok" true (is_ok result)
 
 (* ============================================================ *)
@@ -848,19 +758,6 @@ let tempo_tests = [
   "config roundtrip", `Quick, test_tempo_config_roundtrip;
 ]
 
-let a2a_tests = [
-  "status all", `Quick, test_a2a_task_status_all;
-  "status unknown error", `Quick, test_a2a_task_status_of_string_unknown;
-  "task roundtrip", `Quick, test_a2a_task_roundtrip;
-  "task with result", `Quick, test_a2a_task_with_result;
-]
-
-let portal_tests = [
-  "state all", `Quick, test_portal_state_all;
-  "state unknown error", `Quick, test_portal_state_of_string_unknown;
-  "roundtrip", `Quick, test_portal_roundtrip;
-]
-
 let role_tests = [
   "all roles", `Quick, test_agent_role_all;
   "unknown error", `Quick, test_agent_role_of_string_unknown;
@@ -969,8 +866,6 @@ let () =
     "agent_status", agent_status_tests;
     "task_status", task_status_tests;
     "tempo", tempo_tests;
-    "a2a", a2a_tests;
-    "portal", portal_tests;
     "agent_role", role_tests;
     "rate_limit", rate_limit_tests;
     "masc_error", error_tests;

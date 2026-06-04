@@ -47,8 +47,6 @@ include Workspace_task_schedule
 include Workspace_query
 include Workspace_agent
 
-(* Portal / A2A Protocol *)
-
 (* Heartbeat & GC *)
 include Workspace_gc
 

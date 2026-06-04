@@ -42,18 +42,6 @@ let test_agent_errors_non_retryable () =
   assert (
     not (E.is_retryable (E.Agent (E.Agent_error.InvalidName "x"))))
 
-let test_portal_errors_non_retryable () =
-  assert (
-    not (E.is_retryable (E.Portal (E.Portal_error.NotOpen "a"))));
-  assert (
-    not
-      (E.is_retryable
-         (E.Portal
-            (E.Portal_error.AlreadyOpen
-               { agent = "a"; target = "b" }))));
-  assert (
-    not (E.is_retryable (E.Portal (E.Portal_error.Closed "a"))))
-
 (* ── (2) Auth: only TokenExpired retryable ─────────────── *)
 
 let test_auth_token_expired_retryable () =
@@ -136,7 +124,6 @@ let test_cache_corrupted_non_retryable () =
 let () =
   test_task_errors_non_retryable ();
   test_agent_errors_non_retryable ();
-  test_portal_errors_non_retryable ();
   test_auth_token_expired_retryable ();
   test_auth_other_non_retryable ();
   test_system_io_retryable ();

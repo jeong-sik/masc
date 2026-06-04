@@ -79,6 +79,8 @@ S2가 backend를 다 바꾸는 핵심 단계(엉킴 소멸). S4가 이름 숙청
 
 S1 전에 throwaway spike로 push 모델을 검증한다: 단일 counter를 `Atomic.t` 누적 → `Metrics_callbacks` observable 등록 → `Opentelemetry.Metrics.sum` → `send_metrics`(OTLP). collector 부재 시 인코딩+전송 시도까지 확인. 목적은 §4.1 누적 semantics 확정. **명시적 throwaway** — 1008의 site #1이 아니라 버리는 검증 코드.
 
+**검증 완료 (2026-06-04).** `bin/otel_spike/`(opentelemetry-only, masc 무관 → broken-main 격리). `Atomic.fetch_and_add` accumulator + `Metrics_callbacks.register` observable + cumulative-monotonic `Metrics.sum` + `Metrics.emit` 가 `dune build` 통과 및 실행(`accumulated=7`). §4.1 권장(Atomic accumulator + observable callback으로 Prometheus pull 의미 보존)이 API 레벨에서 실증. spike는 검증 후 삭제 — S1 `otel_metrics.ml`이 이 패턴을 labels 지원 형태로 일반화한다.
+
 ## 7. Non-Goals
 
 - JSONL durable 제거 (RFC-0214 §7 유지 — JSONL = durable truth, Otel = export 경로).

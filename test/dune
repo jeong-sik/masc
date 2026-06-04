@@ -1470,6 +1470,8 @@
 
 (include stanzas/test_keeper_approval_queue_rules_types.inc)
 
+(include stanzas/test_keeper_toml_parser.inc)
+
 (include stanzas/test_keeper_turn_slot_release_cancel_safe.inc)
 
 

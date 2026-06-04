@@ -621,18 +621,6 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
     (Printf.sprintf "### Context\n- Utilization: %.0f%%\n- Idle: %ds\n"
        (observation.context_ratio *. 100.0)
        observation.idle_seconds);
-  (match observation.last_turn_budget with
-   | Some (used, total) when used > 0 ->
-     Buffer.add_string ubuf
-       (Printf.sprintf "- Previous turn budget: %d/%d used\n" used total)
-   | _ -> ());
-  (match observation.economic_pressure with
-   | Economy.Normal -> ()
-   | Frugal ->
-       Buffer.add_string ubuf "- Economy: Frugal (reduce token usage)\n"
-   | Hustle ->
-        Buffer.add_string ubuf
-          "- Economy: Hustle (minimize actions, conserve budget)\n");
   (* 4. Autonomous trigger — lower churn than reactive inboxes *)
   let turn_decision =
     Keeper_world_observation.keeper_cycle_decision ~meta observation

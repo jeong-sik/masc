@@ -57,9 +57,6 @@ type world_observation = {
   context_ratio : float;
   (** Current context window utilization [0.0, 1.0]. *)
 
-  economic_pressure : Economy.pressure_mode;
-  (** Agent economy mode: Normal, Frugal, or Hustle. *)
-
   unclaimed_task_count : int;
   (** Number of unclaimed tasks in the workspace backlog. *)
 
@@ -84,9 +81,6 @@ type world_observation = {
 
   active_agent_count : int;
   (** Number of agents currently active in the workspace. *)
-
-  last_turn_budget : (int * int) option;
-  (** Previous generation's turn usage as [(used, total)], if available. *)
 }
 
 type keeper_cycle_channel =

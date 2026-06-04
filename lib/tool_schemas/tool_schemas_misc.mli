@@ -48,19 +48,14 @@ val config_category_enum_strings : string list
 (** {1 Tool schema list} *)
 
 val schemas : Masc_domain.tool_schema list
-(** [schemas] is the [Masc_domain.tool_schema list] for the
-    MCP-facing misc tools. Keeper-only web backend tools
-    ([masc_web_search] / [masc_web_fetch]) are intentionally
-    excluded from this public schema inventory. Consumed by
-    {!Config.visible_tool_schemas} via {!Tools.schemas}. The
-    schema [enum] fields derive from
-    {!admin_section_enum_strings} /
-    {!dashboard_scope_enum_strings} /
-    {!config_category_enum_strings} so adding a value updates
-    the schema automatically. *)
-
-val internal_handler_schemas : Masc_domain.tool_schema list
-(** [internal_handler_schemas] keeps the full generated misc schema
-    set for Tool_spec/tag registration. It may contain internal backend
-    tool names that are callable by keeper descriptors but absent from
-    the MCP-facing [schemas] list. *)
+(** [schemas] is the full generated [Masc_domain.tool_schema list] for the
+    misc tools, including the descriptor-backed web tools
+    ([masc_web_search] / [masc_web_fetch]). Consumed by
+    {!Config.raw_all_tool_schemas} (the substrate inventory feeding both the
+    keeper progressive-disclosure universe and the public MCP surface) and by
+    [Tool_misc] for Tool_spec registration. Public-surface exclusion is
+    enforced downstream by {!Tool_catalog.is_public_mcp} /
+    [public_mcp_surface_tools], not by trimming this inventory. The schema
+    [enum] fields derive from {!admin_section_enum_strings} /
+    {!dashboard_scope_enum_strings} / {!config_category_enum_strings} so
+    adding a value updates the schema automatically. *)

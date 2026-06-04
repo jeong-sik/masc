@@ -184,6 +184,11 @@ not a hot keeper runtime path, so it can create the persona profile directory
 with `Fs_compat.mkdir_p` and write JSON through `Fs_compat.save_file_atomic`
 without importing the keeper filesystem metrics/cache module.
 
+Keeper/persona handle validation now lives on the extracted type boundary:
+`Ids.Keeper_id.Name.validate`. `Keeper_config_text.validate_name` remains as a
+config-facing facade, but credential authoring no longer imports full
+`Keeper_config` just to validate a handle.
+
 ## 5. Extraction sequence
 
 Candidate clusters and their re-measured **flat-ns fan-out** (the G1 metric).
@@ -191,7 +196,7 @@ Fan-in is shown for context but does not gate extraction.
 
 | Order | Cluster | Modules | flat-ns fan-out (G1 blockers) | Distinct flat-ns refs |
 |---|---|---|---|---|
-| 1 | credential (`keeper_persona_authoring*`) | 3 | **3** | `Keeper_config`, `Keeper_types_profile_persona`, `Keeper_types_profile_toml_normalizers` |
+| 1 | credential (`keeper_persona_authoring*`) | 3 | **2** | `Keeper_types_profile_persona`, `Keeper_types_profile_toml_normalizers` |
 | 2 | registry (`keeper_registry_*`) | 19 | 6 | `Admission_queue`, `Governance_registry`, `Prometheus`, `Runtime_params`, `Shutdown`, `Sse` |
 | 3 | error-classify (`*failure*`, `*error_class*`) | 31 | 6 | `Governance_registry`, `Prometheus`, `Runtime_params`, `Shutdown`, `Telemetry_coverage_gap`, `Workspace` |
 | 4 | runtime-binding (`keeper_heartbeat*`/`keeper_runtime*`/`keeper_attempt*`) | 30 | 6 | `Governance_registry`, `Prometheus`, `Runtime_params`, `Sse`, `Telemetry_coverage_gap`, `Workspace` |
@@ -201,9 +206,9 @@ Fan-in is shown for context but does not gate extraction.
 | 8 | execution (`keeper_agent_run_*`, `keeper_tool_*`, `keeper_sandbox_*`, `keeper_run_*`) | ~70 | highest | last — the mesh hub |
 
 **Recommended first extraction: credential (`keeper_persona_authoring*`).**
-It is the smallest *decoupling surface* — 3 modules, 3 flat-ns refs to invert.
-As of the credential pre-work stack, those direct refs are profile/config
-support (`Keeper_config`, `Keeper_types_profile_persona`,
+It is the smallest *decoupling surface* — 3 modules, 2 flat-ns refs left to
+resolve. As of the credential pre-work stack, those direct refs are profile
+support (`Keeper_types_profile_persona`,
 `Keeper_types_profile_toml_normalizers`), not the older OAS/approval bridge
 refs. The remaining work is therefore to decide which profile support belongs
 inside the credential extraction unit and which parts should move behind a

@@ -131,6 +131,9 @@ module Keeper_id : sig
   val generate : name:string -> path:string -> t
   val to_yojson : t -> Yojson.Safe.t
   val of_yojson : Yojson.Safe.t -> (t, string) result
+  module Name : sig
+    val validate : string -> bool
+  end
   module Trace_id : sig
     type t
     val of_string : string -> (t, string) result
@@ -159,6 +162,22 @@ end = struct
         Error
           (Printf.sprintf "Expected string for Keeper_id (received %s)"
              (Json_util.kind_name other))
+  module Name = struct
+    let validate name =
+      let len = String.length name in
+      len > 0
+      &&
+      let rec check index =
+        if index = len then true
+        else
+          match name.[index] with
+          | 'a'..'z' | 'A'..'Z' | '0'..'9' | '.' | '_' | '-' ->
+            check (index + 1)
+          | _ -> false
+      in
+      check 0
+  end
+
   module Keeper_name = struct
     type t = string
     let is_valid s =

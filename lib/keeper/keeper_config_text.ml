@@ -37,10 +37,7 @@ let bool_of_env_opt name =
 
 (* ── Name validation ────────────────────────────────────────── *)
 
-let valid_name_re = Re.Pcre.re "^[A-Za-z0-9._-]+$" |> Re.compile
-
-let validate_name name =
-  name <> "" && Re.execp valid_name_re name
+let validate_name = Ids.Keeper_id.Name.validate
 
 (* ── Configuration constants ────────────────────────────────── *)
 

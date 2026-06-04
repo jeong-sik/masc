@@ -67,6 +67,9 @@ module Keeper_id : sig
   val generate : name:string -> path:string -> t
   val to_yojson : t -> Yojson.Safe.t
   val of_yojson : Yojson.Safe.t -> (t, string) result
+  module Name : sig
+    val validate : string -> bool
+  end
   module Trace_id : sig
     type t
     val of_string : string -> (t, string) result

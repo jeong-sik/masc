@@ -421,6 +421,20 @@ let resolve_tool_write_cwd
       ~(args : Yojson.Safe.t)
   =
   let raw_cwd = Safe_ops.json_string ~default:"" "cwd" args |> String.trim in
+  let raw_cwd_is_own_container_path =
+    if Filename.is_relative raw_cwd
+       || meta.sandbox_profile <> Keeper_types_profile_sandbox.Docker
+    then false
+    else (
+      let normalize path =
+        Keeper_alerting_path.normalize_path_for_check path
+        |> Keeper_alerting_path.strip_trailing_slashes
+      in
+      let container_root = Keeper_sandbox.container_root meta.name |> normalize in
+      let raw_norm = normalize raw_cwd in
+      String.equal raw_norm container_root
+      || String.starts_with ~prefix:(container_root ^ "/") raw_norm)
+  in
   let resolved =
     if raw_cwd = ""
     then Ok (keeper_default_write_root ~config ~meta)
@@ -429,9 +443,12 @@ let resolve_tool_write_cwd
   match resolved with
   | Error _ as err -> err
   | Ok cwd when Fs_compat.file_exists cwd && Sys.is_directory cwd ->
-    (match validate_repo_cwd_ready ~config ~meta cwd with
-     | Ok () -> Ok cwd
-     | Error _ as err -> err)
+    if raw_cwd_is_own_container_path
+    then Ok cwd
+    else (
+      match validate_repo_cwd_ready ~config ~meta cwd with
+      | Ok () -> Ok cwd
+      | Error _ as err -> err)
   | Ok cwd ->
     if not (Fs_compat.file_exists cwd) then
       resolve_missing_cwd ~config ~meta cwd
@@ -549,44 +566,18 @@ let resolve_tool_read_path
     let fallback_path = if raw_path = "" then "." else raw_path in
     resolve_with_autocorrect fallback_path
   | Ok cwd ->
-    let resolved_raw_path =
-      if raw_path = "" then
-        cwd
-      else if not (Filename.is_relative raw_path) then
-        raw_path
-      else
-        (* Guard against playground path doubling: when cwd already
-           contains a playground prefix (e.g. .../playground/keeper/)
-           and raw_path also starts with a playground-relative segment
-           (e.g. ".masc/playground/keeper/repos"), concatenating would
-           produce a doubled path.  Detect and resolve against project
-           root instead. *)
-        let pg = Playground_paths.all_playgrounds_prefix in
-        let contains s sub =
-          let sl = String.length s and nl = String.length sub in
-          if nl > sl then false
-          else
-            let rec scan i =
-              if i + nl > sl then false
-              else if String.sub s i nl = sub then true
-              else scan (i + 1)
-            in scan 0
-        in
-        let cwd_has_pg = contains cwd pg in
-        let path_has_pg = contains raw_path pg in
-        if cwd_has_pg && path_has_pg then
-          raw_path
-        else
-          Filename.concat cwd raw_path
-    in
-    let resolver_path =
-      if raw_path = "" || Filename.is_relative raw_path then
-        Option.value ~default:resolved_raw_path
-          (project_relative_host_path ~config resolved_raw_path)
-      else
-        resolved_raw_path
-    in
-    resolve_with_autocorrect resolver_path
+    if raw_path = ""
+    then Ok cwd
+    else if
+      (not (Filename.is_relative raw_path)) || is_playground_lane_relative_path raw_path
+    then resolve_with_autocorrect raw_path
+    else
+      let projected_path = Filename.concat cwd raw_path in
+      resolve_projected_keeper_read_path
+        ~config
+        ~meta
+        ~raw_for_error:raw_path
+        ~projected_path
 
 let executable_file path =
   try

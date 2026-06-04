@@ -412,14 +412,22 @@ let project_relative_host_path ~(config : Workspace.config) (path : string) =
   else None
 ;;
 
+type playground_projection =
+  { projected_path : string
+  ; projected_from_visible : bool
+  }
+
+let raw_projection projected_path = { projected_path; projected_from_visible = false }
+let visible_projection projected_path = { projected_path; projected_from_visible = true }
+
 (* Bare filenames and canonical sandbox lanes default to the keeper sandbox,
    but rooted-looking relative paths (for example
    "workspace/..." or "lib/...") keep project-root/boundary semantics. *)
-let playground_relative_unless_allowed_root
+let playground_relative_projection_unless_allowed_root
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       (raw : string)
-  : (string, string) result
+  : (playground_projection, string) result
   =
   let trimmed = String.trim raw in
   let mapped_from_container, trimmed =
@@ -439,16 +447,149 @@ let playground_relative_unless_allowed_root
   in
   match rewrite_single_repo_relative_path ~config ~meta trimmed with
   | Error _ as err -> err
-  | Ok (Some rewritten) -> Ok rewritten
+  | Ok (Some rewritten) -> Ok (visible_projection rewritten)
   | Ok None ->
     if
       trimmed = ""
       || (not (Filename.is_relative trimmed))
       || (String.contains trimmed '/' && not (is_playground_lane_relative_path trimmed))
       || relative_path_targets_allowed_root ~meta trimmed
-    then Ok trimmed
+    then Ok (if mapped_from_container then visible_projection trimmed else raw_projection trimmed)
     else (
-      Ok (keeper_playground_relative_path ~meta trimmed))
+      Ok (visible_projection (keeper_playground_relative_path ~meta trimmed)))
+;;
+
+let playground_relative_unless_allowed_root ~config ~meta raw =
+  match playground_relative_projection_unless_allowed_root ~config ~meta raw with
+  | Error _ as err -> err
+  | Ok projection -> Ok projection.projected_path
+;;
+
+type projected_allowed_path =
+  { candidate : string
+  ; search_roots : string list
+  }
+
+let user_message_error (rej : Keeper_alerting_path.keeper_path_rejection) =
+  Keeper_alerting_path.rejection_to_telemetry rej;
+  Error (Keeper_alerting_path.rejection_to_user_message rej)
+;;
+
+let resolve_projected_allowed_path
+      ~(config : Workspace.config)
+      ~(allowed_paths : string list)
+      ~(raw_for_error : string)
+      ~(projected_path : string)
+  : (projected_allowed_path, string) result
+  =
+  let root = Keeper_alerting_path.project_root_of_config config in
+  let candidate =
+    if Filename.is_relative projected_path
+    then Filename.concat root projected_path
+    else projected_path
+  in
+  let root_norm =
+    Keeper_alerting_path.normalize_path_for_check root
+    |> Keeper_alerting_path.strip_trailing_slashes
+  in
+  let target_norm =
+    Keeper_alerting_path.normalize_path_for_check candidate
+    |> Keeper_alerting_path.strip_trailing_slashes
+  in
+  let within_root =
+    target_norm = root_norm || String.starts_with ~prefix:(root_norm ^ "/") target_norm
+  in
+  if not within_root
+  then user_message_error (Keeper_alerting_path.Outside_project_root { raw = raw_for_error })
+  else (
+    let allowed_norms =
+      if allowed_paths = []
+      then []
+      else
+        allowed_paths
+        |> List.filter_map (Keeper_alerting_path.normalize_allowed_path_for_check ~root:root_norm)
+    in
+    if allowed_paths <> [] && allowed_norms = []
+    then
+      user_message_error
+        (Keeper_alerting_path.Allowed_paths_normalized_empty
+           { count = List.length allowed_paths })
+    else (
+      let within_allowed =
+        allowed_norms = []
+        || Keeper_alerting_path.is_within_allowed_norms ~target_norm allowed_norms
+      in
+      if not within_allowed
+      then user_message_error (Keeper_alerting_path.Outside_sandbox { raw = raw_for_error })
+      else (
+        let search_roots = if allowed_norms = [] then [ root_norm ] else allowed_norms in
+        Ok { candidate; search_roots })))
+;;
+
+let resolve_projected_read_path
+      ~(config : Workspace.config)
+      ~(allowed_paths : string list)
+      ~(raw_for_error : string)
+      ~(projected_path : string)
+  : (string, string) result
+  =
+  match
+    resolve_projected_allowed_path
+      ~config
+      ~allowed_paths
+      ~raw_for_error
+      ~projected_path
+  with
+  | Error _ as err -> err
+  | Ok { candidate; search_roots } ->
+    if
+      Keeper_alerting_path.path_exists candidate
+      || Keeper_alerting_path.allows_missing_leaf_read
+           ~raw:raw_for_error
+           ~candidate
+    then Ok candidate
+    else (
+      match
+        Keeper_alerting_path.maybe_resolve_missing_relative_read_path
+          ~roots:search_roots
+          ~raw_path:raw_for_error
+      with
+      | Ok (Some resolved) -> Ok resolved
+      | Ok None ->
+        user_message_error
+          (Keeper_alerting_path.Not_found_relative { raw = raw_for_error })
+      | Error e -> user_message_error e)
+;;
+
+let resolve_projected_write_path
+      ~(config : Workspace.config)
+      ~(allowed_paths : string list)
+      ~(raw_for_error : string)
+      ~(projected_path : string)
+  : (string, string) result
+  =
+  match
+    resolve_projected_allowed_path
+      ~config
+      ~allowed_paths
+      ~raw_for_error
+      ~projected_path
+  with
+  | Error _ as err -> err
+  | Ok { candidate; _ } -> Ok candidate
+;;
+
+let resolve_projected_keeper_read_path
+      ~(config : Workspace.config)
+      ~(meta : keeper_meta)
+      ~(raw_for_error : string)
+      ~(projected_path : string)
+  =
+  resolve_projected_read_path
+    ~config
+    ~allowed_paths:(keeper_effective_allowed_paths ~meta)
+    ~raw_for_error
+    ~projected_path
 ;;
 
 let resolve_keeper_path
@@ -456,13 +597,19 @@ let resolve_keeper_path
       ~(meta : keeper_meta)
       ~(raw_path : string)
   =
-  match playground_relative_unless_allowed_root ~config ~meta raw_path with
+  match playground_relative_projection_unless_allowed_root ~config ~meta raw_path with
   | Error e -> Error e
-  | Ok normalized ->
+  | Ok { projected_path; projected_from_visible = true } ->
+    resolve_projected_write_path
+      ~config
+      ~allowed_paths:(keeper_effective_write_allowed_paths ~meta)
+      ~raw_for_error:raw_path
+      ~projected_path
+  | Ok { projected_path; projected_from_visible = false } ->
     match Keeper_alerting_path.resolve_keeper_target_path
       ~config
       ~allowed_paths:(keeper_effective_write_allowed_paths ~meta)
-      ~raw_path:normalized
+      ~raw_path:projected_path
     with
     | Error rej -> Error (Keeper_alerting_path.rejection_to_user_message rej)
     | Ok p -> Ok p
@@ -473,13 +620,19 @@ let resolve_keeper_read_path
       ~(meta : keeper_meta)
       ~(raw_path : string)
   =
-  match playground_relative_unless_allowed_root ~config ~meta raw_path with
+  match playground_relative_projection_unless_allowed_root ~config ~meta raw_path with
   | Error e -> Error e
-  | Ok normalized ->
+  | Ok { projected_path; projected_from_visible = true } ->
+    resolve_projected_read_path
+      ~config
+      ~allowed_paths:(keeper_effective_allowed_paths ~meta)
+      ~raw_for_error:raw_path
+      ~projected_path
+  | Ok { projected_path; projected_from_visible = false } ->
     match Keeper_alerting_path.resolve_keeper_read_path
       ~config
       ~allowed_paths:(keeper_effective_allowed_paths ~meta)
-      ~raw_path:normalized
+      ~raw_path:projected_path
     with
     | Error rej -> Error (Keeper_alerting_path.rejection_to_user_message rej)
     | Ok p -> Ok p

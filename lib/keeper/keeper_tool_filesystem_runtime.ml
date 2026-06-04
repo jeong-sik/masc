@@ -54,6 +54,11 @@ type read_file_resolution_error =
       }
   | Read_path_error of string
 
+type read_file_resolver_input =
+  { resolver_path : string
+  ; projected_from_visible_cwd : bool
+  }
+
 let string_opt_nonempty name json =
   match Safe_ops.json_string_opt name json with
   | None -> None
@@ -89,20 +94,17 @@ let resolve_read_file_cwd ~(config : Workspace.config) ~(meta : keeper_meta) ~cw
             cwd))
 ;;
 
-let read_file_path_relative_to_project_root ~(config : Workspace.config) path =
-  match project_relative_host_path ~config path with
-  | Some relative -> relative
-  | None -> path
-;;
-
-let read_file_resolver_input ~(config : Workspace.config) ~cwd ~(raw_path : string) =
+let read_file_resolver_input ~cwd ~(raw_path : string) =
   let raw_path = String.trim raw_path in
   if
     raw_path = ""
     || (not (Filename.is_relative raw_path))
     || sandbox_rooted_relative_path raw_path
-  then raw_path
-  else Filename.concat cwd raw_path |> read_file_path_relative_to_project_root ~config
+  then { resolver_path = raw_path; projected_from_visible_cwd = false }
+  else
+    { resolver_path = Filename.concat cwd raw_path
+    ; projected_from_visible_cwd = true
+    }
 ;;
 
 let resolve_read_file_target
@@ -121,11 +123,9 @@ let resolve_read_file_target
   else match resolve_read_file_cwd ~config ~meta ~cwd with
   | Error e -> Error (Read_path_error e)
   | Ok cwd_abs ->
-    let resolver_input = read_file_resolver_input ~config ~cwd:cwd_abs ~raw_path in
+    let resolver_input = read_file_resolver_input ~cwd:cwd_abs ~raw_path in
     let resolve_once candidate =
-      match playground_relative_unless_allowed_root ~config ~meta candidate with
-      | Error e -> Error (Read_path_error e)
-      | Ok normalized ->
+      let resolve_alerting normalized =
         (match
            Keeper_alerting_path.resolve_keeper_read_path
              ~config
@@ -148,11 +148,39 @@ let resolve_read_file_target
          | Error rej ->
            Error
              (Read_path_error (Keeper_alerting_path.rejection_to_user_message rej)))
+      in
+      let resolve_shared candidate =
+        match resolve_keeper_read_path ~config ~meta ~raw_path:candidate with
+        | Ok _ as ok -> ok
+        | Error e -> Error (Read_path_error e)
+      in
+      let resolve_projected candidate =
+        match
+          resolve_projected_keeper_read_path
+            ~config
+            ~meta
+            ~raw_for_error:raw_path
+            ~projected_path:candidate
+        with
+        | Ok _ as ok -> ok
+        | Error e -> Error (Read_path_error e)
+      in
+      if resolver_input.projected_from_visible_cwd
+         || sandbox_rooted_relative_path candidate
+         || not (Filename.is_relative candidate)
+      then
+        if resolver_input.projected_from_visible_cwd
+        then resolve_projected candidate
+        else resolve_shared candidate
+      else (
+        match playground_relative_unless_allowed_root ~config ~meta candidate with
+        | Error e -> Error (Read_path_error e)
+        | Ok normalized -> resolve_alerting normalized)
     in
-    (match resolve_once resolver_input with
+    (match resolve_once resolver_input.resolver_path with
      | Ok _ as ok -> ok
      | Error original ->
-       (match Keeper_tool_execute_path.auto_correct_path ~meta resolver_input with
+       (match Keeper_tool_execute_path.auto_correct_path ~meta resolver_input.resolver_path with
         | Some corrected ->
           (match resolve_once corrected with
            | Ok _ as ok -> ok

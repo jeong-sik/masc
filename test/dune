@@ -2019,3 +2019,10 @@
  (name test_config_runtime_split)
  (modules test_config_runtime_split)
  (libraries masc_test_deps))
+
+(test
+ (name test_ppx_safe_shell)
+ (modules test_ppx_safe_shell)
+ (preprocess (pps ppx_safe_shell))
+ (libraries alcotest masc.masc_exec masc.exec_policy))
+

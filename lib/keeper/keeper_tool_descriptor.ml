@@ -265,10 +265,40 @@ let search_web_schema =
 ;;
 
 let fetch_web_schema =
-  object_schema
-    ~required:[ "url" ]
-    [ property "url" "string" "URL to fetch."
-    ; property "timeout" "integer" "Request timeout in seconds."
+  `Assoc
+    [ "type", `String "object"
+    ; ( "properties",
+        `Assoc
+          [ property "url" "string" "URL to fetch."
+          ; ( "timeout",
+              `Assoc
+                [ "type", `String "integer"
+                ; "description", `String "Request timeout in seconds."
+                ; "minimum", `Int 1
+                ; "maximum", `Int 60
+                ; "default", `Int 15
+                ] )
+          ; ( "extractMode",
+              `Assoc
+                [ "type", `String "string"
+                ; "enum", `List [ `String "markdown"; `String "text" ]
+                ; "description",
+                  `String
+                    "Output extraction mode. markdown preserves headings/lists/links; \
+                     text returns flattened plain text."
+                ; "default", `String "markdown"
+                ] )
+          ; ( "maxChars",
+              `Assoc
+                [ "type", `String "integer"
+                ; "description", `String "Maximum extracted content characters to return."
+                ; "minimum", `Int 1
+                ; "maximum", `Int 100000
+                ; "default", `Int 50000
+                ] )
+          ] )
+    ; "required", `List [ `String "url" ]
+    ; "additionalProperties", `Bool false
     ]
 ;;
 

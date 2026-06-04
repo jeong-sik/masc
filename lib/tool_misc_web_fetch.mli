@@ -11,20 +11,27 @@
 val default_timeout_sec : int
 (** Default timeout for HTTP fetch operations (seconds). *)
 
+val default_max_chars : int
+(** Default maximum output length for extracted content. *)
+
 val handle : tool_name:string -> start_time:float -> Yojson.Safe.t -> Tool_result.result
 (** [handle ~tool_name ~start_time args] handles [masc_web_fetch] tool dispatch.
     Required: [url] (string, http/https only).
     Optional: [timeout] (int, clamped to [\[1, 60\]], default {!default_timeout_sec}).
+    Optional: [extractMode] ("markdown" or "text", default "markdown").
+    Optional: [maxChars] (int, clamped to [\[1, 100000\]], default {!default_max_chars}).
 
     On success the payload [data] is wrapped as
     [`Assoc [ "text", `String json ]] where [json] is the serialized
     [Tool_args.ok_response] envelope holding:
-    - [url]: the requested URL
-    - [http_status]: HTTP status code
-    - [text]: cleaned text content (HTML tags stripped, entities decoded,
-      whitespace normalized, truncated at 100KB)
-    - [title]: optional, extracted from [<title>] tag
-    - [description]: optional, extracted from [<meta name="description">]
+	    - [url]: the requested URL
+	    - [http_status]: HTTP status code
+	    - [extract_mode]: output extraction mode
+	    - [text]: readable extracted content, truncated at [maxChars]
+	    - [content_chars]: length of [text]
+	    - [truncated]: whether output truncation was applied
+	    - [title]: optional, extracted from [<title>] tag
+	    - [description]: optional, extracted from [<meta name="description">]
       or [og:description]
 
     Failure classes (RFC-0189):
@@ -36,6 +43,7 @@ val handle : tool_name:string -> start_time:float -> Yojson.Safe.t -> Tool_resul
 val with_http_get_for_test :
   (timeout_sec:int ->
    headers:(string * string) list ->
+   max_response_bytes:int ->
    string ->
    (int option * string, string) result) ->
   (unit -> 'a) ->

@@ -156,6 +156,28 @@ let test_endpoint_urls_use_normalized_base () =
     (Masc.Tool_local_runtime_probe.ollama_generate_url
        "http://127.0.0.1:11434///")
 
+let test_curl_get_argv_keeps_curl_as_executable_with_headers () =
+  let argv =
+    Masc.Tool_local_runtime_http.curl_get_argv_for_test
+      ~timeout_sec:30
+      ~headers:
+        [
+          ("User-Agent", "Mozilla/5.0 (compatible; MASC-FetchWeb/1.0)");
+          ("Accept-Language", "en-US,en;q=0.8");
+        ]
+      ~follow_redirects:true
+      ~max_redirects:3
+      ~compressed:true
+      ~max_response_bytes:2_000_000
+      "https://example.com/page"
+  in
+  check string "argv0 remains curl" "curl" (List.hd argv);
+  check bool "header arg present" true (List.mem "-H" argv);
+  check bool "redirect arg present" true (List.mem "--location" argv);
+  check bool "compression arg present" true (List.mem "--compressed" argv);
+  check bool "body cap arg present" true (List.mem "--max-filesize" argv);
+  check bool "curl is not repeated after headers" false (List.mem "curl" (List.tl argv))
+
 let test_ollama_ps_non_200_is_reported_as_error () =
   check string "ps non-200 surfaced" "ollama ps returned http 503"
     (Masc.Tool_local_runtime_probe.ollama_http_error "ps" (Some 503))
@@ -238,6 +260,8 @@ let () =
             test_normalize_server_url_strips_trailing_slashes;
           test_case "builds normalized endpoint urls" `Quick
             test_endpoint_urls_use_normalized_base;
+          test_case "curl argv keeps executable before headers" `Quick
+            test_curl_get_argv_keeps_curl_as_executable_with_headers;
           test_case "reports ps non-200 as error" `Quick
             test_ollama_ps_non_200_is_reported_as_error;
           test_case "omits keep_alive by default" `Quick

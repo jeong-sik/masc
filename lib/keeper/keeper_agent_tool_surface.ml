@@ -308,11 +308,11 @@ let keeper_selection_bm25_prefilter_n = 30
    Execute/Grep rows. *)
 let tool_search_alias_entries =
   [ "keeper_board_post", "게시판 글 작성 올리기 포스트"
-  ; "keeper_board_get", "게시판 글 읽기 조회 확인"
-  ; "keeper_board_list", "게시판 목록 최근글"
+  ; "keeper_board_get", "게시판 글 상세 단건 본문 댓글 post_id 읽기 보기"
+  ; "keeper_board_list", "게시판 목록 최근글 post_id 찾기 조회 나열"
   ; "keeper_board_comment", "게시판 댓글 답글 코멘트"
   ; "keeper_board_vote", "게시판 투표 추천 반대"
-  ; "keeper_board_search", "게시판 검색 키워드 글찾기"
+  ; "keeper_board_search", "게시판 검색 키워드 post_id 찾기 과거글"
   ; "keeper_board_stats", "게시판 통계 활동 참여 게시글수"
   ; "keeper_board_curation_read", "게시판 AI 큐레이션 추천순서 하이라이트"
   ; "keeper_board_curation_submit", "게시판 AI 큐레이션 요약 태그 답변매칭 건강도 제출"

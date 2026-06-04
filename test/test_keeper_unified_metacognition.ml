@@ -43,6 +43,44 @@ let test_on_idle_nudge_at_first_idle () =
             (Agent_sdk.Hooks.classify_decision other)))
 ;;
 
+let test_on_idle_board_get_nudge_names_post_id_discovery () =
+  let decision =
+    HK.on_idle_decision_with_threshold
+      ~skip_at:3
+      ~consecutive_idle_turns:1
+      ~allowed_tools:
+        [ "keeper_board_get"
+        ; "keeper_board_list"
+        ; "keeper_board_search"
+        ; "keeper_stay_silent"
+        ]
+      ~tool_names:[ "keeper_board_get" ]
+  in
+  match decision with
+  | Agent_sdk.Hooks.Nudge msg ->
+    check
+      bool
+      "board_get nudge says post_id is required"
+      true
+      (contains_substring msg "keeper_board_get requires post_id");
+    check
+      bool
+      "board_get nudge points to board discovery tools"
+      true
+      (contains_substring msg "keeper_board_list or keeper_board_search");
+    check
+      bool
+      "board_get nudge forbids empty args"
+      true
+      (contains_substring msg "Do not call keeper_board_get with {}")
+  | other ->
+    fail
+      (Printf.sprintf
+         "expected Nudge, got %s"
+         (Agent_sdk.Hooks.decision_kind_to_string
+            (Agent_sdk.Hooks.classify_decision other)))
+;;
+
 let test_on_idle_final_warning_before_skip () =
   let decision =
     HK.on_idle_decision_with_threshold
@@ -136,6 +174,10 @@ let () =
     "keeper unified metacognition"
     [ ( "metacognition"
       , [ test_case "on_idle nudge at first idle" `Quick test_on_idle_nudge_at_first_idle
+        ; test_case
+            "on_idle board_get nudge names post_id discovery"
+            `Quick
+            test_on_idle_board_get_nudge_names_post_id_discovery
         ; test_case
             "on_idle final warning before skip"
             `Quick

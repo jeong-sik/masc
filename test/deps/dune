@@ -59,6 +59,10 @@
    (re_export masc.briefing_compactors)
    ;; RFC-0056 Phase 1E — Dashboard_eval_feed leaf module sub-library.
    (re_export masc.dashboard_eval_feed)
+   ;; RFC-0056 Phase 1 — Dashboard_tla_specs leaf module sub-library.
+   ;; Re-exported so test_dashboard_tla_specs keeps resolving the module
+   ;; after the carve (test rewrites Masc.Dashboard_tla_specs -> bare per G5).
+   (re_export masc.dashboard_tla_specs)
    ;; RFC-0056 Phase 1F — Memory_jsonl leaf module sub-library.
    (re_export masc.memory_jsonl)
    ;; RFC-0056 Phase 1G — Chronicle_event leaf module sub-library.

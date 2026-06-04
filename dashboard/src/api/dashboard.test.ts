@@ -1530,6 +1530,30 @@ describe('fetchKeeperConfig', () => {
     expect(result.runtime_trust?.disposition).toBe('Pass')
   })
 
+  it('normalizes default per-provider timeout mode without legacy label', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          name: 'keeper-sangsu',
+          execution: {
+            per_provider_timeout_sec: null,
+            per_provider_timeout_mode: 'legacy-value',
+          },
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchKeeperConfig('keeper-sangsu')
+
+    expect(result.execution.per_provider_timeout_sec).toBeNull()
+    expect(result.execution.per_provider_timeout_mode).toBe('turn_budget_default')
+  })
+
   it('preserves missing keeper config latency as null instead of zero', async () => {
     const cases: Array<[string, Record<string, unknown>]> = [
       ['null', { last_latency_ms: null }],

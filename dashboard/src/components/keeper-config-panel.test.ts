@@ -52,7 +52,7 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
       models: ['llama:test-balanced'],
       active_model: 'llama:test-balanced',
       per_provider_timeout_sec: null,
-      per_provider_timeout_mode: 'turn_budget_heuristic',
+      per_provider_timeout_mode: 'turn_budget_default',
       verify: true,
       selected_runtime_id: 'tier-group.keeper_unified',
       selected_runtime_canonical: 'tier-group.keeper_unified',

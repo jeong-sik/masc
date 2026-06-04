@@ -1193,7 +1193,7 @@ interface KeeperConfigExecution {
   active_model_label?: string | null
   last_model_used_label?: string | null
   per_provider_timeout_sec?: number | null
-  per_provider_timeout_mode: 'override' | 'turn_budget_heuristic'
+  per_provider_timeout_mode: 'override' | 'turn_budget_default'
   verify: boolean
   selected_runtime_id: string
   selected_runtime_canonical: string

@@ -95,12 +95,12 @@ function CommsPlane({ branch, keepers }) {
 }
 
 // ═════════════════════════════════════════════════════════════
-// OBSERVE PLANE — O1 Runtime · O2 Audit · O3 Safe Auto · O4 Cost · O5 Heuristic
+// OBSERVE PLANE — O1 Runtime · O2 Audit · O3 Safe Auto · O4 Cost · O5 Stress
 // ═════════════════════════════════════════════════════════════
 function ObservePlane({ branch, keepers }) {
   return (
     <PlaneShell
-      title="Observability" subtitle="Runtime · Audit · Safe Autonomy · Cost · Heuristic"
+      title="Observability" subtitle="Runtime · Audit · Safe Autonomy · Cost · Stress"
       popoutId="plane-observe"
       branch={branch} keepers={keepers}
       tabs={[
@@ -116,9 +116,7 @@ function ObservePlane({ branch, keepers }) {
         { id:"ct-agt",  label:"Cost · Per agent",     render: () => <window.CostPerAgent/> },
         { id:"ct-mtx",  label:"Cost · Matrix",        render: () => <window.CostMatrix/> },
         { id:"ct-lat",  label:"Cost · Latency",       render: () => <window.CostLatency/> },
-        { id:"hr-log",  label:"Heuristic · Log",      render: () => <window.HeuristicLog/> },
-        { id:"hr-st",   label:"Stress · Board",       render: () => <window.StressBoard/> },
-        { id:"hr-mod",  label:"Heuristic · By module",render: () => <window.HeuristicByModule/> },
+        { id:"st-board", label:"Stress · Board",      render: () => <window.StressBoard/> },
       ]}
     />
   );

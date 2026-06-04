@@ -2039,7 +2039,7 @@ function normalizePerProviderTimeoutMode(
 ): KeeperConfig['execution']['per_provider_timeout_mode'] {
   return asNullableString(raw) === 'override' || perProviderTimeoutSec != null
     ? 'override'
-    : 'turn_budget_heuristic'
+    : 'turn_budget_default'
 }
 
 function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfig {

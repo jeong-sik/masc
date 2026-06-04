@@ -18,7 +18,7 @@ function makeEntry(overrides: Partial<JournalEntry> = {}): JournalEntry {
 }
 
 describe('journal severity helpers', () => {
-  it('marks keeper guardrail entries as errors even without text heuristics', () => {
+  it('marks keeper guardrail entries as errors even without text matching', () => {
     expect(defaultJournalSeverity('keeper_guardrail')).toBe('error')
     expect(isErrorJournalEntry(makeEntry({ eventType: 'keeper_guardrail', text: 'stopped by guardrail' }))).toBe(true)
   })

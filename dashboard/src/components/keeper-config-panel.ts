@@ -347,7 +347,7 @@ function perProviderTimeoutLabel(execution: KeeperConfig['execution']): string {
   ) {
     return formatSeconds(execution.per_provider_timeout_sec)
   }
-  return 'turn budget heuristic'
+  return 'turn budget default'
 }
 
 function MajorSectionHeader({ title }: { title: string }) {

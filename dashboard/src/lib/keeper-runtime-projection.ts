@@ -551,21 +551,20 @@ function buildProjectionSignals({
   ]
 }
 
+// Closed set of wire-format values emitted by
+// keeper_execution_receipt.tool_contract_result_to_string.
+const EXECUTION_ATTENTION_CODES: ReadonlySet<string> = new Set([
+  'violated',
+  'tool_surface_mismatch',
+  'no_tool_capable_provider',
+  'claim_only_after_owned_task',
+  'needs_execution_progress',
+  'passive_only',
+  'not_dispatched',
+])
+
 function isExecutionAttentionCode(value: string | null | undefined): boolean {
   const normalized = value?.trim().toLowerCase()
   if (!normalized || normalized === 'unknown' || normalized === 'tool contract unknown') return false
-  if (
-    normalized === 'ok'
-    || normalized === 'pass'
-    || normalized === 'allowed_in_sandbox'
-    || normalized.startsWith('satisfied')
-  ) return false
-  return normalized.includes('violat')
-    || normalized.includes('missing')
-    || normalized.includes('mismatch')
-    || normalized.includes('need')
-    || normalized.includes('fail')
-    || normalized.includes('error')
-    || normalized.includes('passive')
-    || normalized === 'no_tool_capable_provider'
+  return EXECUTION_ATTENTION_CODES.has(normalized)
 }

@@ -13,4 +13,7 @@
   masc.host_config
   masc.repo_manager
   unix
-  yojson))
+  yojson
+  eio
+  eio.unix))
+

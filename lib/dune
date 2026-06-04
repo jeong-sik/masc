@@ -575,6 +575,9 @@
    ;; substrate. (libraries) admits no keeper/runtime/domain/server module, so a
    ;; re-coupling is a dune cycle. Pure schema/vocab/policy, zero mega-outbound.
    masc.masc_tool_surface
+   ;; RFC-0217 S2 — OTel metric bridge leaf (Prometheus_store snapshot -> OTLP
+   ;; observable). Prometheus depends on this; the leaf has no masc dep.
+   masc.otel_metrics
    ;; Thompson Sampling agent selection (extracted leaf — Health/Prometheus
    ;; edges inverted to callbacks; Board-callable record_vote without mega-lib cycle)
    masc_thompson

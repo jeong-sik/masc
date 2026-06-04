@@ -248,6 +248,26 @@ let metric_mention_dedup_decisions_total = "masc_mention_dedup_decisions_total"
 
 (** {1 Built-in Metrics} *)
 
+(* RFC-0217 S2 — export the in-process metric store to OTel as an observable
+   source. The store (Prometheus_store) stays the accumulator; OTel's backend
+   polls [snapshot] each export tick — the push-model replacement for /metrics
+   scrape (S0 spike validated). Dual with to_prometheus_text until S3/S4 retire
+   the scrape path and the Pool_metrics/render entanglement with it. *)
+let otel_samples () : Otel_metrics.sample list =
+  Prometheus_store.snapshot ()
+  |> List.map (fun (m : Prometheus_store.metric) ->
+         { Otel_metrics.name = m.name
+         ; value = m.value
+         ; labels = m.labels
+         ; kind =
+             (match m.metric_type with
+              | Prometheus_store.Counter -> Otel_metrics.Counter
+              | Prometheus_store.Gauge -> Otel_metrics.Gauge
+              | Prometheus_store.Histogram -> Otel_metrics.Histogram)
+         })
+
+let register_otel_export () = Otel_metrics.register_source otel_samples
+
 let init () =
   let add name help metric_kind =
     match metric_kind with
@@ -261,7 +281,8 @@ let init () =
     ~register_gauge
     ~inc_counter
     ();
-  install_backend_mutex_observers ()
+  install_backend_mutex_observers ();
+  register_otel_export ()
 ;;
 
 let start_time = Time_compat.now ()

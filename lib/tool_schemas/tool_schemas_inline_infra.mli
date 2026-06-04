@@ -9,6 +9,6 @@
     {!Mcp_session.valid_action_strings}. *)
 val mcp_session_action_enum_strings : string list
 
-(** Tool schema list: [masc_session], [masc_approval_pending],
-    [masc_approval_get]. *)
+(** Tool schema list: [masc_session]. Approval queue tools are keeper-owned
+    and register through the keeper surface. *)
 val schemas : Masc_domain.tool_schema list

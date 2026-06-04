@@ -3,7 +3,7 @@ status: reference
 last_verified: 2026-04-17
 code_refs:
   - lib/server/
-  - lib/grpc/
+  - lib/masc_grpc_transport.ml
   - lib/sse.ml
   - lib/transport.ml
   - bin/main_eio.ml
@@ -16,7 +16,7 @@ code_refs:
 |------|-----|
 | Status | Draft |
 | Team | Server |
-| Maps to | `lib/server/`, `lib/grpc/`, `lib/sse.ml`, `lib/transport.ml`, `lib/http_server_eio.ml`, `lib/http_server_h2.ml`, `lib/mcp_server_eio*.ml`, `bin/main_eio.ml`, `bin/main_stdio_eio.ml` |
+| Maps to | `lib/server/`, `lib/masc_grpc_transport.ml`, `lib/sse.ml`, `lib/transport.ml`, `lib/http_server_eio.ml`, `lib/http_server_h2.ml`, `lib/mcp_server_eio*.ml`, `bin/main_eio.ml`, `bin/main_stdio_eio.ml` |
 | Dependencies | 02-types-and-invariants |
 | Modules | 61 |
 | LOC | ~17,700 |
@@ -110,7 +110,7 @@ graph TB
 
 ### 3.1 Transport 선택 로직 (에이전트 측)
 
-`lib/grpc/masc_grpc_transport.ml`이 에이전트 측 트랜스포트 선택을 정의한다:
+`lib/masc_grpc_transport.ml`이 에이전트 측 트랜스포트 선택을 정의한다:
 
 ```ocaml
 type t = Http | Grpc | Ws | Webrtc | Local
@@ -503,7 +503,7 @@ WebSocket 세션은 `ws-{timestamp_ms}-{counter}` 형식 ID를 사용한다. SHA
 
 ## 10. gRPC Service
 
-**소스**: `lib/grpc/` (1,143 LOC)
+**소스**: `lib/server/masc_grpc_*.ml` + `lib/masc_grpc_transport.ml`
 
 ### 10.1 활성화
 
@@ -860,7 +860,7 @@ sequenceDiagram
 | `server_dashboard_http.ml` | 566 | Dashboard API 핸들러 |
 | `server_utils.ml` | 120 | 공용 유틸리티 |
 
-### 18.3 gRPC (lib/grpc/)
+### 18.3 gRPC (`lib/server/masc_grpc_*.ml`)
 
 | Module | LOC | 역할 |
 |--------|-----|------|

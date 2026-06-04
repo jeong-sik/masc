@@ -299,45 +299,52 @@ let approval_op_of_name = function
   | _ -> None
 ;;
 
-let handle_masc_approval ~name ~args =
+let approval_ok ~name ~start_time json =
+  Tool_result.make_ok ~tool_name:name ~start_time ~data:json ()
+;;
+
+let approval_err ~name ~start_time msg =
+  Tool_result.make_err
+    ~tool_name:name
+    ~class_:Tool_result.Workflow_rejection
+    ~start_time
+    msg
+;;
+
+let handle_masc_approval_result ~name ~args =
+  let start_time = Time_compat.now () in
   match approval_op_of_name name with
   | None ->
-    Yojson.Safe.to_string
-      (`Assoc
-         [ "error"
-         , `String
-             (Printf.sprintf
-                "descriptor projection: masc_approval cluster did not \
-                 recognise %S"
-                name)
-         ])
+    approval_err
+      ~name
+      ~start_time
+      (Printf.sprintf
+         "descriptor projection: masc_approval cluster did not recognise %S"
+         name)
   | Some op ->
     match op with
     | Pending ->
-      Yojson.Safe.to_string (Keeper_approval_queue.list_pending_json ())
+      approval_ok ~name ~start_time (Keeper_approval_queue.list_pending_json ())
     | Get ->
     let id = Safe_ops.json_string ~default:"" "id" args |> String.trim in
     if String.equal id ""
-    then Yojson.Safe.to_string (`Assoc [ "error", `String "id is required" ])
+    then approval_err ~name ~start_time "id is required"
     else (
       match Keeper_approval_queue.get_pending_json ~id with
-      | Some json -> Yojson.Safe.to_string json
+      | Some json -> approval_ok ~name ~start_time json
       | None ->
-        Yojson.Safe.to_string
-          (`Assoc
-             [ "error"
-             , `String
-                 (Printf.sprintf
-                    "approval %s is no longer pending or was not found. \
-                     Refresh with masc_approval_pending before \
-                     approving/rejecting."
-                    id)
-             ]))
+        approval_err
+          ~name
+          ~start_time
+          (Printf.sprintf
+             "approval %s is no longer pending or was not found. Refresh with \
+              masc_approval_pending before approving/rejecting."
+             id))
     | Resolve ->
     let id = Safe_ops.json_string ~default:"" "id" args |> String.trim in
     let decision_str = Safe_ops.json_string ~default:"approve" "decision" args in
     if String.equal id ""
-    then Yojson.Safe.to_string (`Assoc [ "error", `String "id is required" ])
+    then approval_err ~name ~start_time "id is required"
     else (
       let decision =
         match String.lowercase_ascii decision_str with
@@ -353,17 +360,22 @@ let handle_masc_approval ~name ~args =
       in
       match Keeper_approval_queue.resolve ~id ~decision with
       | Ok () ->
-        Yojson.Safe.to_string
+        approval_ok
+          ~name
+          ~start_time
           (`Assoc
              [ "resolved", `String id
              ; "decision", `String decision_str
              ])
       | Error err ->
-        Yojson.Safe.to_string
-          (`Assoc
-             [ "error"
-             , `String (Keeper_approval_queue.resolve_error_to_string err)
-             ]))
+        approval_err
+          ~name
+          ~start_time
+          (Keeper_approval_queue.resolve_error_to_string err))
+;;
+
+let handle_masc_approval ~name ~args =
+  Tool_result.message (handle_masc_approval_result ~name ~args)
 ;;
 
 let handle_masc_local_runtime ~name ~args =

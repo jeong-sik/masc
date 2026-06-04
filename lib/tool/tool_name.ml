@@ -333,6 +333,7 @@ module Masc = struct
     | Web_search
     | Approval_pending
     | Approval_get
+    | Approval_resolve
     | Config
     | Gc
     | Get_metrics
@@ -374,6 +375,7 @@ module Masc = struct
     | Web_search -> "masc_web_search"
     | Approval_pending -> "masc_approval_pending"
     | Approval_get -> "masc_approval_get"
+    | Approval_resolve -> "masc_approval_resolve"
     | Config -> "masc_config"
     | Gc -> "masc_gc"
     | Get_metrics -> "masc_get_metrics"
@@ -423,6 +425,7 @@ module Masc = struct
             | "masc_web_search" -> Some Web_search
             | "masc_approval_pending" -> Some Approval_pending
             | "masc_approval_get" -> Some Approval_get
+            | "masc_approval_resolve" -> Some Approval_resolve
             | "masc_config" -> Some Config
             | "masc_gc" -> Some Gc
             | "masc_get_metrics" -> Some Get_metrics

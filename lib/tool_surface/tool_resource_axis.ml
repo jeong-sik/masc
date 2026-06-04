@@ -193,6 +193,7 @@ let classify_masc_tool (tool : Tool_name.Masc.t) =
   | Domain (Goal Goal_transition)
   | Domain (Goal Goal_upsert)
   | Domain (Goal Goal_verify)
+  | Approval_resolve
   | Heartbeat
   | Note_add
   | Plan_clear_task

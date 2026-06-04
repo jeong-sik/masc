@@ -65,6 +65,7 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Masc TM.Approval_get ->
       Some Read_only
   | TN.Masc TM.Agent_update
+  | TN.Masc TM.Approval_resolve
   | TN.Masc TM.Broadcast
   | TN.Masc TM.Cleanup_zombies
   | TN.Masc TM.Gc

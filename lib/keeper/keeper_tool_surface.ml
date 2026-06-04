@@ -686,10 +686,28 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
 let handle_keeper_clear ctx args : tool_result =
   keeper_clear_body ~config:ctx.config args
 
+let approval_tool_names =
+  [ "masc_approval_pending"; "masc_approval_get"; "masc_approval_resolve" ]
+
+let approval_tool_descriptors =
+  List.filter_map
+    (fun name ->
+       match Keeper_tool_descriptor.descriptors_for_internal name with
+       | descriptor :: _ -> Some descriptor
+       | [] -> None)
+    approval_tool_names
+
+let is_approval_tool name = List.mem name approval_tool_names
+
+let handle_masc_approval name args =
+  Keeper_tool_in_process_runtime.handle_masc_approval_result ~name ~args
+  |> tool_result_with_tool_name ~tool_name:name
+
 let dispatch ctx ~name ~args : tool_result option =
   maybe_bootstrap_existing_keepalives ctx ~name ~args;
   let ctx = resolve_ctx ctx ~name args in
   match name with
+  | _ when is_approval_tool name -> Some (handle_masc_approval name args)
   | "masc_persona_list" -> Some (tool_result_with_tool_name ~tool_name:name (Persona.handle_persona_list ctx args))
   | "masc_persona_schema" -> Some (tool_result_with_tool_name ~tool_name:name (Persona.handle_persona_schema ctx args))
   | "masc_persona_generate" -> Some (tool_result_with_tool_name ~tool_name:name (Persona.handle_persona_generate ctx args))
@@ -730,21 +748,44 @@ let tool_spec_read_only =
   [ "masc_persona_list"; "masc_persona_schema"; "masc_keeper_list";
     "masc_keeper_status"; "masc_keeper_persona_audit" ]
 
+let register_keeper_surface_schema (s : Masc_domain.tool_schema) =
+  Tool_spec.register
+    (Tool_spec.create
+       ~name:s.name
+       ~description:s.description
+       ~module_tag:Tool_dispatch.Mod_external
+       ~input_schema:s.input_schema
+       ~handler_binding:Tag_dispatch
+       ~is_read_only:(List.mem s.name tool_spec_read_only)
+       ~is_idempotent:(List.mem s.name tool_spec_read_only)
+       ~is_destructive:(String.equal s.name "masc_keeper_clear")
+       ())
+
+let register_approval_descriptor (d : Keeper_tool_descriptor.t) =
+  let name = d.internal_name in
+  let is_read_only =
+    match Keeper_tool_descriptor.readonly_static_hint d with
+    | Some true -> true
+    | Some false | None -> false
+  in
+  Tool_spec.register
+    (Tool_spec.create
+       ~name
+       ~description:d.description
+       ~module_tag:Tool_dispatch.Mod_external
+       ~input_schema:d.input_schema
+       ~handler_binding:Tag_dispatch
+       ~is_read_only
+       ~is_idempotent:is_read_only
+       ~is_destructive:(String.equal name "masc_approval_resolve")
+       ~mcp_context_required:
+         (String.equal name "masc_approval_get"
+          || String.equal name "masc_approval_resolve")
+       ())
+
 let () =
-  List.iter
-    (fun (s : Masc_domain.tool_schema) ->
-      Tool_spec.register
-        (Tool_spec.create
-           ~name:s.name
-           ~description:s.description
-           ~module_tag:Tool_dispatch.Mod_external
-           ~input_schema:s.input_schema
-           ~handler_binding:Tag_dispatch
-           ~is_read_only:(List.mem s.name tool_spec_read_only)
-           ~is_idempotent:(List.mem s.name tool_spec_read_only)
-           ~is_destructive:(String.equal s.name "masc_keeper_clear")
-           ()))
-    schemas
+  List.iter register_keeper_surface_schema schemas;
+  List.iter register_approval_descriptor approval_tool_descriptors
 
 (* RFC-0182 §3.1 — register the ctx-free persona handlers with
    [Persona_dispatch_ref] so [Keeper_tool_in_process_runtime]

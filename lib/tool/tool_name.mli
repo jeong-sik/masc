@@ -125,6 +125,7 @@ module Masc : sig
     | Web_search
     | Approval_pending
     | Approval_get
+    | Approval_resolve
     | Config
     | Gc
     | Get_metrics

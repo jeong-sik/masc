@@ -171,7 +171,8 @@ let risk_of_masc (m : Tool_name.Masc.t) : risk_level =
   | Domain (Task Claim_next) | Domain (Goal Goal_upsert) | Domain (Goal Goal_verify)
   | Domain (Operator Operator_confirm)
   | Pause | Resume | Start -> Medium
-  | Agent_update | Domain (Board Board_sub_board_create) | Domain (Board Board_sub_board_update)
+  | Agent_update | Approval_resolve
+  | Domain (Board Board_sub_board_create) | Domain (Board Board_sub_board_update)
   | Plan_update
   | Domain (Task Update_priority) | Tool_admin_update -> High
   | Domain (Board Board_delete) | Domain (Board Board_sub_board_delete) | Reset -> Critical

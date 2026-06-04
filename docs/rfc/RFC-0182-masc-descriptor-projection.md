@@ -136,7 +136,7 @@ Each of the 10 live metadata-only tools gets a corresponding `Tool_spec.register
 | Tool | Proposed module | Q3 visibility |
 |---|---|---|
 | `masc_bind`, `masc_unbind`, `masc_broadcast`, `masc_messages`, `channel_gate` | `tool_inline_dispatch.ml` (Mod_inline) | `Default` (preserved) |
-| `masc_approval_get`, `masc_approval_pending`, `masc_approval_resolve` | `tool_inline_dispatch.ml` (Mod_inline) — existing approval dispatch lives here at `tool_inline_dispatch.ml:177,180,191` | `Default` (preserved) |
+| `masc_approval_get`, `masc_approval_pending`, `masc_approval_resolve` | `Keeper_tool_surface` / `Keeper_tool_in_process_runtime` (Mod_external) — approval queue state is keeper-owned, not inline-owned | `Default` (preserved) |
 | `masc_set_param` | `tool_inline_dispatch.ml` or new `tool_admin.ml` | **`Hidden`** (preserved from current `hidden_active`, Q3 decision) |
 | `masc_tool_revoke` | `tool_shard.ml` (Mod_shard) — existing `masc_tool_grant` is registered here | `Default` (preserved) |
 
@@ -246,7 +246,7 @@ Implementation PR target diff: ~1200-1800 LoC, ~8-9 files (`agent_tool_descripto
 
 The original §11 had three open architectural questions. The post-merge audit (§2a) and user decision chain resolved them as follows:
 
-- **Q1 (module layout)** — *resolved*: hybrid. No new `tool_admin.ml` or `tool_approval.ml` modules; reuse `tool_inline_dispatch.ml` (existing approval dispatch lives there) and `tool_shard.ml` (existing `masc_tool_grant` lives there). `masc_set_param` may either reuse `tool_inline_dispatch.ml` or get a new single-purpose module — implementer's choice with preference for the former. Rationale in §3.2.
+- **Q1 (module layout)** — *resolved*: hybrid. No new `tool_admin.ml` module; keep approval dispatch in the keeper-owned surface (`Keeper_tool_surface` / `Keeper_tool_in_process_runtime`) and reuse `tool_shard.ml` for shard tools (existing `masc_tool_grant` lives there). `masc_set_param` may either reuse `tool_inline_dispatch.ml` or get a new single-purpose module — implementer's choice with preference for the former. Rationale in §3.2.
 - **Q2 (`channel_gate` rename)** — *resolved*: keep as-is. The audit (§2a) confirmed `channel_gate` is live with HTTP subsystem dispatch (`server_routes_http_routes_channel_gate.ml`). Renaming would force prompt/persona/config updates with no architectural benefit; the unconventional name is preserved for backward compatibility. Migration is to `Tool_spec.register` only.
 - **Q3 (`masc_set_param` visibility)** — *resolved*: keep `Hidden`. The audit confirmed live HTTP dispatch with admin auth (`server_routes_http_routes_activity.ml:with_tool_auth`). Visibility-level isolation reflects the original design intent (internal HTTP runtime-parameter mutation route). Registered as `Tool_spec.create ~visibility:Hidden ~required_permission:(Some CanAdmin)`.
 

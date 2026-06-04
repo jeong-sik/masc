@@ -479,7 +479,7 @@ let test_mcp_context_policy_uses_descriptor_resolution () =
     [ "masc_approval_pending" ]
     (Descriptor.keeper_safe_inline_names ());
   Alcotest.(check bool)
-    "approval_pending is descriptor-marked inline safe"
+    "approval_pending is keeper-safe for keeper turns"
     true
     (Policy.is_keeper_safe_inline_tool "masc_approval_pending");
   Alcotest.(check bool)
@@ -524,7 +524,7 @@ let test_mcp_context_policy_uses_descriptor_resolution () =
     false
     (Policy.is_keeper_mcp_context_required "masc_approval_pending");
   Alcotest.(check bool)
-    "mcp-prefixed approval_pending keeps inline exemption"
+    "mcp-prefixed approval_pending remains keeper-safe without MCP session"
     false
     (Policy.is_keeper_mcp_context_required "mcp__masc__masc_approval_pending");
   Alcotest.(check bool)

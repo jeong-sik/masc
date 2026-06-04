@@ -215,7 +215,6 @@
   tool_inline_dispatch_types
   tool_inline_dispatch_workspace
   tool_inline_dispatch_comm
-  approval_queue_handlers
   workspace_goals_verification
   tool_misc_admin
   keeper_tool_persona_audit

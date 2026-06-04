@@ -202,6 +202,13 @@ val handle_masc_approval
   -> args:Yojson.Safe.t
   -> string
 
+(** Typed-result variant of {!handle_masc_approval} for MCP/server dispatch
+    paths that should not re-parse string JSON envelopes. *)
+val handle_masc_approval_result
+  :  name:string
+  -> args:Yojson.Safe.t
+  -> Tool_result.result
+
 (** RFC-0182 §3.1 — [handle_masc_persona] is the descriptor-projection
     cluster handler for [masc_persona_list] / [masc_persona_schema] /
     [masc_persona_save].  Dispatches via [Persona_dispatch_ref] —

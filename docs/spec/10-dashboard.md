@@ -3,7 +3,7 @@ status: reference
 last_verified: 2026-05-01
 code_refs:
   - lib/dashboard/
-  - lib/dashboard.ml
+  - lib/server/server_dashboard_http.ml
   - dashboard/
 ---
 

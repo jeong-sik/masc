@@ -291,6 +291,7 @@ let static_tag_of_tool_name (tool : Tool_name.t) : module_tag option =
     | Get_metrics -> Some Mod_agent
     | Approval_get
     | Approval_pending
+    | Approval_resolve -> Some Mod_external
     | Broadcast
     | Mcp_session
     | Messages

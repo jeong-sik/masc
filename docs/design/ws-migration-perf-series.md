@@ -5,7 +5,7 @@ code_refs:
   - lib/server/server_mcp_transport_ws.ml
   - lib/sse.ml
   - lib/transport_metrics.ml
-  - lib/grpc/masc_grpc_service.ml
+  - lib/server/masc_grpc_service.ml
   - dashboard/src/dashboard-ws.ts
   - dashboard/src/sse.ts
   - dashboard/src/components/transport-health.ts
@@ -215,7 +215,7 @@ Two format helpers (`formatHitRate`, `formatAvgBufferedBytes`) return
 ### 3.8 #10112 — gRPC events_dropped counter (server, observability)
 
 Mirrors #10104's drop signal for the gRPC subscriber path.  The
-gRPC callback in `lib/grpc/masc_grpc_service.ml:484` already drops
+gRPC callback in `lib/server/masc_grpc_service.ml` already drops
 events when its output stream's buffer is near capacity, but the
 drop was visible only in logs.
 
@@ -387,7 +387,7 @@ No timeline; depends on production confidence in the WS path.
 
 ### gRPC subscriber symmetry (addressed in #10112, #10114, #10117)
 
-The gRPC subscriber in `lib/grpc/masc_grpc_service.ml:477` had a
+The gRPC subscriber in `lib/server/masc_grpc_service.ml` had a
 similar fan-out shape to WS but no drop signal.  This is now
 covered:
 
@@ -467,4 +467,4 @@ All seven PRs are additive and flagged.  Emergency rollback steps:
 | Date | Change |
 |------|--------|
 | 2026-04-25 | Initial draft, covers #10089 through #10107. |
-| 2026-04-25 | Add §3.8–§3.12 for the four post-draft PRs (gRPC observability triple #10112/#10114/#10117, the slice-indexed RFC #10119, and the dashboard_snapshot chore #10120).  Update §5 deferred decisions: slice-indexed fan-out has an RFC (#10119); gRPC subscriber symmetry has landed.  Add `lib/grpc/masc_grpc_service.ml` to `code_refs`. |
+| 2026-04-25 | Add §3.8–§3.12 for the four post-draft PRs (gRPC observability triple #10112/#10114/#10117, the slice-indexed RFC #10119, and the dashboard_snapshot chore #10120).  Update §5 deferred decisions: slice-indexed fan-out has an RFC (#10119); gRPC subscriber symmetry has landed.  Add `lib/server/masc_grpc_service.ml` to `code_refs`. |

@@ -23,7 +23,7 @@ module Float = Stdlib.Float
     - Tool_inline_dispatch_comm: masc_broadcast, masc_messages
     - Tool_inline_dispatch_extra: remaining tools (board, etc.)
 
-    Keeps inline: mcp_session, approval, spawn, discover_tools.
+    Keeps inline: mcp_session and discover_tools plus MCP-state helpers.
 
     RFC-0062 Phase 4c-2: handlers now return [Tool_result.result] directly;
     [wrap_result] adapter removed. *)
@@ -125,7 +125,7 @@ end
    - [inline_err_workflow] commits caller-input rejections to
      [Workflow_rejection]: every error path in this dispatch
      ("id is required", unknown enum action, "query is required",
-     not-found lookups, approval-resolve errors) is caller-side. *)
+     not-found lookups) is caller-side. *)
 let inline_ok ~tool_name ~start_time body : Tool_result.result =
   let data =
     match Tool_result.structured_payload_of_message body with
@@ -191,14 +191,6 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.result option =
       Tool_inline_dispatch_comm.handle_broadcast ~tool_name:name ~start_time:start ctx
   | "masc_messages" ->
       Tool_inline_dispatch_comm.handle_messages ~tool_name:name ~start_time:start ctx
-
-  (* ── Approval queue (#5907) ─────────────────────────────────── *)
-  | "masc_approval_pending" | "masc_approval_get" | "masc_approval_resolve" ->
-      Some
-        (Approval_queue_handlers.handle
-           ~tool_name:name
-           ~start_time:start
-           arguments)
 
   (* Verification tools removed: pruned *)
 
@@ -295,12 +287,12 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.result option =
 (* Tool_spec registration (RFC-0182 §3.2)                           *)
 (* ================================================================ *)
 
-(* Migrates the inline-dispatched workspace + approval tools from the legacy
+(* Migrates inline-dispatched workspace tools from the legacy
    register_module_tag bootstrap (mcp_server_eio.ml) to the Tool_spec
-   single-call SSOT. Scope: 6 of 10 §3.2 live tools.
+   single-call SSOT.
 
    Excluded (deferred, semantic-widening would be required):
-   - [masc_approval_resolve], [masc_set_param], [channel_gate] —
+   - [masc_set_param], [channel_gate] —
      no Masc_domain.tool_schema record exists. They are dispatched via
      HTTP routes / inline arms but never advertised to MCP. Promoting
      them to Tool_spec.register requires authoring new input schemas
@@ -310,16 +302,15 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.result option =
      (lib/tool_shard.ml:348). Audit row was a false positive. *)
 
 let inline_register_targets =
-  [ "masc_broadcast"; "masc_messages"
-  ; "masc_approval_get"; "masc_approval_pending" ]
+  [ "masc_broadcast"; "masc_messages" ]
 
 let inline_tool_read_only =
-  [ "masc_messages"; "masc_approval_get"; "masc_approval_pending" ]
+  [ "masc_messages" ]
 
 let inline_tool_requires_actor_binding = []
 
 let inline_tool_mcp_context_required =
-  [ "masc_broadcast"; "masc_messages"; "masc_approval_get" ]
+  [ "masc_broadcast"; "masc_messages" ]
 
 let inline_tool_effect_domain name : Tool_catalog.effect_domain =
   if List.mem name inline_tool_read_only then Tool_catalog.Read_only

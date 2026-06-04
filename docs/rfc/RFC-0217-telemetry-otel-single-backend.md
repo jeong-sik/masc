@@ -1,4 +1,4 @@
-# RFC-0216: Telemetry Backend Otel 단일화 (Prometheus Purge)
+# RFC-0217: Telemetry Backend Otel 단일화 (Prometheus Purge)
 
 | | |
 |---|---|
@@ -89,7 +89,7 @@ S1 전에 throwaway spike로 push 모델을 검증한다: 단일 counter를 `Ato
 
 ## 8. RFC-0214 관계
 
-RFC-0214 = genai dual emission (transitional, Prometheus primary). RFC-0216 = 전체 Otel single (end-state, Prometheus purge). RFC-0214 §4.3 Phase C(deprecate `masc_llm_provider_*`) + §7(Prometheus 이름 변경 = separate RFC)를 본 RFC가 흡수한다. dual은 S2 shim까지의 transitional 상태이며 S4에서 종료된다.
+RFC-0214 = genai dual emission (transitional, Prometheus primary). RFC-0217 = 전체 Otel single (end-state, Prometheus purge). RFC-0214 §4.3 Phase C(deprecate `masc_llm_provider_*`) + §7(Prometheus 이름 변경 = separate RFC)를 본 RFC가 흡수한다. dual은 S2 shim까지의 transitional 상태이며 S4에서 종료된다.
 
 ## 9. References
 

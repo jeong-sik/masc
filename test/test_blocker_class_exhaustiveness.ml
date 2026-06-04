@@ -11,6 +11,21 @@ open Alcotest
 module Kmc = Masc.Keeper_meta_contract
 open Kmc
 
+let string_contains ~needle haystack =
+  let needle_len = String.length needle in
+  let haystack_len = String.length haystack in
+  if needle_len = 0
+  then true
+  else
+    let rec loop i =
+      if i + needle_len > haystack_len
+      then false
+      else
+        String.equal (String.sub haystack i needle_len) needle || loop (i + 1)
+    in
+    loop 0
+;;
+
 (* ── All variants listed exhaustively ──────────────────────────── *)
 
 (** Canonical list of all [blocker_class] variants.  When a new variant is
@@ -255,11 +270,16 @@ let test_structural_timeout_maps_to_oas_timeout () =
    non-no_tool_capable provider error still falls through to the
    provider_runtime_error catch-all (no widening). *)
 
-let no_tool_capable_surface_exn ~reason ~code =
+let no_tool_capable_surface_exn
+      ?(detail = "no tool-capable provider found (runtime=r labels=[a])")
+      ~reason
+      ~code
+      ()
+  =
   let failure_reason =
     Reg.Provider_runtime_error
       { code
-      ; detail = "no tool-capable provider found (runtime=r labels=[a])"
+      ; detail
       ; provider_id = None
       ; http_status = None
       ; runtime_id = Some "r"
@@ -281,11 +301,13 @@ let test_no_tool_capable_typed_reason_surface () =
            (No_tool_capable
               (Some { configured_labels = [ "a" ]; provider_rejections = [] })))
       ~code:"no_tool_capable_provider"
+      ()
   in
   let none_shape =
     no_tool_capable_surface_exn
       ~reason:(Some (No_tool_capable None))
       ~code:"no_tool_capable_provider"
+      ()
   in
   List.iter
     (fun (label, surface) ->
@@ -306,6 +328,7 @@ let test_non_no_tool_capable_provider_error_falls_through () =
     no_tool_capable_surface_exn
       ~reason:(Some Connection_refused)
       ~code:"runtime_exhausted_connection_refused"
+      ()
   in
   check string
     "non-NTC provider error -> provider_runtime_error catch-all"
@@ -316,11 +339,39 @@ let test_non_no_tool_capable_provider_error_falls_through () =
 let test_reason_none_provider_error_falls_through () =
   let surface =
     no_tool_capable_surface_exn ~reason:None ~code:"provider_error"
+      ()
   in
   check string
     "reason=None provider error -> provider_runtime_error catch-all"
     "provider_runtime_error"
     surface.KSB.blocker_class
+;;
+
+let test_tool_retry_provider_error_uses_sdk_surface () =
+  let surface =
+    no_tool_capable_surface_exn
+      ~reason:None
+      ~code:"agent_error_tool_retry_exhausted:attempts=2,limit=2"
+      ~detail:"Tool retry budget exhausted after 2/2 retries: masc_library_search {}"
+      ()
+  in
+  check string
+    "tool retry code -> sdk_tool_retry_exhausted surface"
+    "sdk_tool_retry_exhausted"
+    surface.KSB.blocker_class;
+  check bool "continue_gate false" false surface.KSB.continue_gate;
+  check bool
+    "summary points at tool args"
+    true
+    (string_contains ~needle:"tool arguments/schema" surface.KSB.summary);
+  check bool
+    "summary keeps retry detail"
+    true
+    (string_contains ~needle:"Tool retry budget exhausted" surface.KSB.summary);
+  check bool
+    "summary avoids provider catch-all wording"
+    false
+    (string_contains ~needle:"Provider runtime catch-all" surface.KSB.summary)
 ;;
 
 (* ── Runner ────────────────────────────────────────────────────── *)
@@ -349,6 +400,8 @@ let () =
             test_non_no_tool_capable_provider_error_falls_through
         ; test_case "reason=None provider error falls through" `Quick
             test_reason_none_provider_error_falls_through
+        ; test_case "tool retry provider record uses sdk surface" `Quick
+            test_tool_retry_provider_error_uses_sdk_surface
         ] )
     ]
 ;;

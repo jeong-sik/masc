@@ -646,6 +646,25 @@ let tool_search_schema =
     ]
 ;;
 
+let library_search_schema =
+  object_schema
+    [ property
+        "query"
+        "string"
+        "Search query string; empty or missing returns a workflow error."
+    ]
+;;
+
+let library_read_schema =
+  object_schema
+    ~required:[ "topic" ]
+    [ property
+        "topic"
+        "string"
+        "Exact document topic name from search results or known context."
+    ]
+;;
+
 let read_only_in_process_policy ?(inline_safe = false) ?(maintenance_only = false)
       ?(last_turn_safe = false) ()
   =
@@ -976,14 +995,14 @@ let internal_descriptors : t list =
       ~id:"keeper.library.search"
       ~name:"keeper_library_search"
       ~description:"Search the keeper library catalog."
-      ~input_schema:passthrough_object_schema
+      ~input_schema:library_search_schema
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_library_search
   ; in_process_descriptor
       ~id:"keeper.library.read"
       ~name:"keeper_library_read"
       ~description:"Read a library entry by id."
-      ~input_schema:passthrough_object_schema
+      ~input_schema:library_read_schema
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_library_read
     (* ── IDE (RFC-0179 PR-3) ──────────────────────────────────── *)

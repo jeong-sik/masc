@@ -186,6 +186,25 @@ let schema_property_description schema name =
   |> to_string_option
 ;;
 
+let schema_required_fields schema =
+  match schema with
+  | `Assoc fields ->
+    (match List.assoc_opt "required" fields with
+     | Some (`List values) ->
+       List.map
+         (function
+           | `String value -> value
+           | other ->
+             Alcotest.failf
+               "required contains non-string: %s"
+               (Yojson.Safe.to_string other))
+         values
+     | Some other ->
+       Alcotest.failf "required is not a list: %s" (Yojson.Safe.to_string other)
+     | None -> [])
+  | other -> Alcotest.failf "input_schema is not an object: %s" (Yojson.Safe.to_string other)
+;;
+
 let required_board_schema name =
   match List.find_opt (fun (s : Masc_domain.tool_schema) -> s.name = name) Board.board_tools with
   | Some schema -> schema
@@ -371,6 +390,22 @@ let test_masc_board_registry_has_descriptor_projection () =
        | [] -> Alcotest.failf "missing descriptor for %s" schema.name
        | _ :: _ :: _ -> Alcotest.failf "duplicate descriptor for %s" schema.name)
     Tool_board_registry.tools
+
+let test_library_search_descriptor_has_recoverable_query_schema () =
+  let descriptor = required_internal_descriptor "keeper_library_search" in
+  let query_description =
+    schema_property_description descriptor.Descriptor.input_schema "query"
+    |> Option.value ~default:""
+  in
+  check_contains
+    "keeper_library_search descriptor documents query"
+    ~sub:"Search query"
+    query_description;
+  Alcotest.(check bool)
+    "keeper_library_search query is not validation-required"
+    false
+    (List.mem "query" (schema_required_fields descriptor.input_schema))
+;;
 
 let test_readonly_policy_projects_to_registry () =
   let projected = Descriptor.readonly_internal_names () in
@@ -701,6 +736,10 @@ let () =
             "MASC board descriptions disambiguate post_id flow"
             `Quick
             test_masc_board_descriptions_disambiguate_post_id_flow
+        ; test_case
+            "Library search query is runtime-recoverable"
+            `Quick
+            test_library_search_descriptor_has_recoverable_query_schema
         ] )
     ; ( "masc-board"
       , [ test_case

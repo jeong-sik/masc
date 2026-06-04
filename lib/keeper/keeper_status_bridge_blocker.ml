@@ -208,6 +208,13 @@ let stale_kill_class_summary (kill_class : Keeper_registry.stale_kill_class) =
       noop_count
 ;;
 
+let sdk_tool_retry_exhausted_code_prefix = "agent_error_tool_retry_exhausted"
+
+let provider_runtime_code_is_sdk_tool_retry_exhausted code =
+  String.equal code sdk_tool_retry_exhausted_code_prefix
+  || String.starts_with ~prefix:(sdk_tool_retry_exhausted_code_prefix ^ ":") code
+;;
+
 let runtime_blocker_surface_of_failure_reason (reason : Keeper_registry.failure_reason) =
   match reason with
   | Keeper_registry.Heartbeat_consecutive_failures count ->
@@ -277,6 +284,16 @@ let runtime_blocker_surface_of_failure_reason (reason : Keeper_registry.failure_
               "No tool-capable provider available (registry path): %s"
               detail)
          (Runtime_exhausted no_tool_capable))
+  | Keeper_registry.Provider_runtime_error { code; detail; _ }
+    when provider_runtime_code_is_sdk_tool_retry_exhausted code ->
+    Some
+      (runtime_blocker_surface_of_typed_class
+         ~summary:
+           (Printf.sprintf
+              "OAS tool retry budget exhausted; inspect tool arguments/schema \
+               first. Detail: %s"
+              detail)
+         Sdk_tool_retry_exhausted)
   | Keeper_registry.Provider_runtime_error { code; detail; _ } ->
     Some
       { blocker_class = "provider_runtime_error"

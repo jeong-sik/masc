@@ -14,10 +14,12 @@ let library_tools : Masc_domain.tool_schema list =
                 [ ( "query"
                   , `Assoc
                       [ "type", `String "string"
-                      ; "description", `String "Search query string"
+                      ; ( "description"
+                        , `String
+                            "Search query string; empty or missing returns a \
+                             workflow error" )
                       ] )
                 ] )
-          ; "required", `List [ `String "query" ]
           ]
     }
   ; { name = "keeper_library_read"

@@ -322,13 +322,6 @@ lib/graphql_api.ml,699,None,unclassified
 lib/graphql_api.ml,709,None,unclassified
 lib/grpc/masc_grpc_service.ml,121,None,unclassified
 lib/grpc/masc_grpc_service.ml,227,None,unclassified
-lib/heuristic_metrics_diagnostics.ml,38,None,unclassified
-lib/heuristic_metrics_diagnostics.ml,45,None,unclassified
-lib/heuristic_metrics.ml,82,None,unclassified
-lib/heuristic_metrics.ml,89,None,unclassified
-lib/heuristic_metrics.ml,95,None,unclassified
-lib/heuristic_metrics.ml,129,None,unclassified
-lib/heuristic_metrics.ml,253,false,unclassified
 lib/http_server_eio.ml,114,None,unclassified
 lib/http_server_eio.ml,298,None,unclassified
 lib/http_server_eio.ml,725,false,unclassified

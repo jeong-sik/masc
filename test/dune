@@ -213,8 +213,6 @@
   test_keeper_tool_search_files_via_field
   test_env_git_noninteractive
   test_stay_silent_loop_detector
-  test_heuristic_metrics_boot_wireup
-  test_heuristic_metrics_periodic_flush_10348
   test_cap_blocker_structured_error
   test_context_overflow_action_tracker
   test_keeper_fs_edit_patch
@@ -472,8 +470,6 @@
   test_keeper_tool_search_files_via_field
   test_env_git_noninteractive
   test_stay_silent_loop_detector
-  test_heuristic_metrics_boot_wireup
-  test_heuristic_metrics_periodic_flush_10348
   test_cap_blocker_structured_error
   test_context_overflow_action_tracker
   test_keeper_fs_edit_patch
@@ -1359,10 +1355,6 @@
 
 (include stanzas/test_http_pages_asset_read.inc)
 
-(include stanzas/test_heuristic_metrics_diagnostics.inc)
-
-(include stanzas/test_heuristic_metrics_scrub.inc)
-
 (include stanzas/test_bounded_proc.inc)
 
 (include stanzas/test_bind_required_guard_counter.inc)
@@ -1616,11 +1608,6 @@
 (test
  (name test_dashboard_yjs)
  (modules test_dashboard_yjs)
- (libraries masc_test_deps))
-
-(test
- (name test_dashboard_o5_feeds)
- (modules test_dashboard_o5_feeds)
  (libraries masc_test_deps))
 
 (test

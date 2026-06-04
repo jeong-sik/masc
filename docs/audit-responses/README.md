@@ -48,7 +48,7 @@ false positive를 다시 내지 않게 하는 audit memory 역할을 합니다.
 
 (시간순)
 
-- `2026-05-05-dashboard-heuristic.md` — deep-review CI의 dashboard / heuristic_metrics
+- `2026-05-05-dashboard-heuristic.md` — deep-review CI의 dashboard
   / admission_queue / resilience / cancellation / local_runtime_pool / bounded /
   llm_metric_bridge / lockfree_atomic 9개 영역 24개 클레임 매트릭스.
 - `2026-05-05-integrated-improvement-design.md` — INTEGRATED_IMPROVEMENT_DESIGN.md

@@ -1,7 +1,7 @@
 // RuntimePanel — Monitor "Runtime" lane.
 // Renders OasHealthChip / RuntimeMonitor / PrometheusMetrics /
-// VerificationSpecsPanel inline, and delegates the four
-// telemetry views to TelemetryPanel (cost / audit / heuristics / stress).
+// VerificationSpecsPanel inline, and delegates telemetry views to
+// TelemetryPanel (cost / audit / stress).
 //
 // Progressive-disclosure default view (density reduction, 2026-04):
 //   Signal layer     — OasHealthChip always expanded (summary StatCells)
@@ -11,15 +11,15 @@
 //
 // Explicit drill-down via FilterChips, split into two strips (PR #17014):
 //   Primary strip   — default · providers · inspector
-//   Advanced strip  — cost · audit · heuristics · stress · prometheus · verification
-//                     (the first four are spread from TELEMETRY_VIEW_CHIPS,
+//   Advanced strip  — cost · audit · stress · prometheus · verification
+//                     (the first three are spread from TELEMETRY_VIEW_CHIPS,
 //                      owned by telemetry-panel.ts; PR #17044 / #17052)
 //
 // Per-view dispatch:
 //   default      — Signal strip + collapsed diagnostic/raw accordions
 //   providers    — OAS health chip + runtime monitor only
 //   inspector    — runtime strategy trace / lane health drill-down
-//   cost / audit / heuristics / stress — TelemetryPanel → CostDashboard
+//   cost / audit / stress — TelemetryPanel → CostDashboard
 //   prometheus   — raw Prometheus metrics only
 //   verification — formal specs only
 // Pattern: mirrors fleet-health-panel.ts (unidirectional flow via URL).
@@ -41,7 +41,6 @@ type RuntimeView =
   | 'providers'
   | 'cost'
   | 'audit'
-  | 'heuristics'
   | 'stress'
   | 'prometheus'
   | 'verification'
@@ -51,7 +50,6 @@ const RUNTIME_VIEWS: RuntimeView[] = [
   'providers',
   'cost',
   'audit',
-  'heuristics',
   'stress',
   'prometheus',
   'verification',
@@ -76,7 +74,7 @@ const PRIMARY_VIEW_CHIPS: Array<{ key: RuntimeView; label: string }> = [
 ]
 
 // Advanced chips are infra/billing telemetry plus the raw / formal layers.
-// The first four chips (cost / audit / heuristics / stress) are owned by
+// The first three chips (cost / audit / stress) are owned by
 // telemetry-panel.ts — both their labels and their dispatch live there.
 // The remaining two (prometheus / verification) stay inline because
 // runtime-panel still renders them directly.

@@ -2,9 +2,8 @@
 
     Wired into the SIGINT / SIGTERM signal handlers in
     [bin/main_eio] and [bin/main_stdio_eio]; cancels the
-    orchestrator first, then drains SSE / WebSocket sessions,
-    flushes metric buffers, and clears
-    session-identity state. Each step is timed via
+    orchestrator first, then drains SSE / WebSocket sessions and
+    clears session-identity state. Each step is timed via
     [Unix.gettimeofday] and logged through [Log.Server.info] so
     operators can attribute slow shutdowns to a specific stage.
 
@@ -28,12 +27,8 @@ val run_all : unit -> unit
     2. Close every SSE client via [Sse.close_all_clients].
     3. Close every WebSocket session via
        [Server_mcp_transport_ws.close_all].
-    4. Flush [Heuristic_metrics] buffers
-       (Eio.Cancel.Cancelled re-raised; any other exception is
-       logged at warn and swallowed so a partial flush failure
-       cannot block shutdown of the rest of the chain).
-    5. Clear [Client_registry_eio] session caches.
-    6. Best-effort purge of transient files under [<MASC_BASE_PATH>/.masc/tmp/].
+    4. Clear [Client_registry_eio] session caches.
+    5. Best-effort purge of transient files under [<MASC_BASE_PATH>/.masc/tmp/].
        Bounded by an inspect-budget (500 files) and a wall-time
        budget (250ms) so the synchronous Eio shutdown phase cannot
        overrun the configured force timeout. Per-file errors are

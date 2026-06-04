@@ -3,7 +3,6 @@
     All tests are pure (no Eio needed) since Post_verifier has no IO. *)
 
 module Pv = Post_verifier
-module Hm = Masc.Heuristic_metrics
 
 open Alcotest
 
@@ -153,68 +152,6 @@ let test_to_dimension_results () =
   check bool "has quality" true (List.mem "quality" dim_names);
   check bool "has safety" true (List.mem "safety" dim_names)
 
-let test_heuristic_coverage_report_groups_sites () =
-  let events =
-    [
-      Hm.event_to_json
-        {
-          module_name = "post_verifier";
-          site = "relevance";
-          raw_value = 0.7;
-          threshold = 0.5;
-          triggered = true;
-          provenance = Hm.Post_verifier "relevance";
-          timestamp = 1.0;
-        };
-      Hm.event_to_json
-        {
-          module_name = "post_verifier";
-          site = "relevance";
-          raw_value = 0.9;
-          threshold = 0.5;
-          triggered = true;
-          provenance = Hm.Post_verifier "relevance";
-          timestamp = 2.5;
-        };
-      Hm.event_to_json
-        {
-          module_name = "post_verifier";
-          site = "relevance";
-          raw_value = 0.2;
-          threshold = 0.5;
-          triggered = false;
-          provenance = Hm.Post_verifier "relevance";
-          timestamp = 2.0;
-        };
-      Hm.event_to_json
-        {
-          module_name = "keeper_alerting";
-          site = "keeper_alert_signal";
-          raw_value = 0.6;
-          threshold = 0.4;
-          triggered = true;
-          provenance = Hm.Alert_scoring "keyword";
-          timestamp = 3.0;
-        };
-    ]
-  in
-  let report = Hm.coverage_report_of_events events in
-  check int "total events" 4 report.total_events;
-  check int "two sites" 2 (List.length report.sites);
-  check int "three decision shapes" 3 report.decision_shape_count;
-  check int "compat tuple count aliases decision shapes" 3
-    report.unique_decision_tuples;
-  check int "one mixed outcome site" 1 report.mixed_outcome_sites;
-  let post_verifier_site =
-    List.find
-      (fun (site : Hm.coverage_site) ->
-         site.module_name = "post_verifier"
-         && site.site = "relevance")
-      report.sites
-  in
-  check int "site count" 3 post_verifier_site.count;
-  check int "site triggered count" 2 post_verifier_site.triggered_count
-
 (* ================================================================ *)
 (* Runner                                                           *)
 (* ================================================================ *)
@@ -252,9 +189,5 @@ let () =
       test_case "dimension_to_string" `Quick test_dimension_to_string;
       test_case "result_to_json" `Quick test_result_to_json;
       test_case "to_dimension_results" `Quick test_to_dimension_results;
-    ];
-    "heuristic_metrics", [
-      test_case "coverage report groups sites" `Quick
-        test_heuristic_coverage_report_groups_sites;
     ];
   ]

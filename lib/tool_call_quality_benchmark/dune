@@ -24,7 +24,7 @@
 ; Closed graph after bundle (verified via rg word-boundary scan).
 ;
 ; Fan-in outside the bundle: keeper_benchmark_canary, thompson_sampling,
-; heuristic_metrics, tool_task (all bare callers via re-export);
+; tool_task (bare callers via re-export);
 ; 1 wrapped-pattern test caller (test_reward_advice_artifact.ml).
 ;
 ; (include_subdirs no) opts out of parent's (include_subdirs unqualified).

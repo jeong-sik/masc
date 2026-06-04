@@ -196,9 +196,7 @@ export const COCKPIT_LEGACY_ENTRYPOINTS: CockpitEntrypoint[] = [
   { mode: 'observe', aliases: ['ct-agt', 'cost-per-agent'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'cost', focus: 'agent' } }, coverage: 'covered' },
   { mode: 'observe', aliases: ['ct-mtx', 'cost-matrix'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'cost', focus: 'matrix' } }, coverage: 'covered' },
   { mode: 'observe', aliases: ['ct-lat', 'cost-latency'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'cost', focus: 'latency' } }, coverage: 'covered' },
-  { mode: 'observe', aliases: ['hr-log', 'heuristic-log'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'heuristics', focus: 'log' } }, coverage: 'covered' },
   { mode: 'observe', aliases: ['hr-st', 'stress-board'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'stress' } }, coverage: 'covered' },
-  { mode: 'observe', aliases: ['hr-mod', 'heuristic-by-module'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'heuristics', focus: 'module' } }, coverage: 'covered' },
 
   // Cognition Plane legacy design subtabs.
   { mode: 'cognition', aliases: ['ki-bdi', 'keeper-bdi'], target: { tab: 'monitoring', params: { section: 'cognition', view: 'keeper', focus: 'bdi' } }, coverage: 'covered' },

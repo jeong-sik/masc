@@ -277,7 +277,7 @@ let test_compaction_completion_without_started_is_nonfatal () =
       in
       let before =
         Masc.Prometheus.get_metric_value
-          Masc.Keeper_metrics.(to_string LifecycleDispatchRejections)
+          Keeper_metrics.(to_string LifecycleDispatchRejections)
           ~labels ()
         |> Option.value ~default:0.0
       in
@@ -304,7 +304,7 @@ let test_compaction_completion_without_started_is_nonfatal () =
         lifecycle;
       let after =
         Masc.Prometheus.get_metric_value
-          Masc.Keeper_metrics.(to_string LifecycleDispatchRejections)
+          Keeper_metrics.(to_string LifecycleDispatchRejections)
           ~labels ()
         |> Option.value ~default:0.0
       in
@@ -387,7 +387,7 @@ let test_dispatch_keeper_phase_event_rejects_unscoped_lifecycle_event () =
       in
       let before =
         Masc.Prometheus.get_metric_value
-          Masc.Keeper_metrics.(to_string LifecycleDispatchRejections)
+          Keeper_metrics.(to_string LifecycleDispatchRejections)
           ~labels ()
         |> Option.value ~default:0.0
       in
@@ -397,7 +397,7 @@ let test_dispatch_keeper_phase_event_rejects_unscoped_lifecycle_event () =
         KST.Compaction_started;
       let after =
         Masc.Prometheus.get_metric_value
-          Masc.Keeper_metrics.(to_string LifecycleDispatchRejections)
+          Keeper_metrics.(to_string LifecycleDispatchRejections)
           ~labels ()
         |> Option.value ~default:0.0
       in
@@ -421,7 +421,7 @@ let test_dispatch_keeper_phase_event_rejection_increments_metric () =
       in
       let before =
         Masc.Prometheus.get_metric_value
-          Masc.Keeper_metrics.(to_string LifecycleDispatchRejections)
+          Keeper_metrics.(to_string LifecycleDispatchRejections)
           ~labels ()
         |> Option.value ~default:0.0
       in
@@ -431,7 +431,7 @@ let test_dispatch_keeper_phase_event_rejection_increments_metric () =
         KST.Compaction_started;
       let after =
         Masc.Prometheus.get_metric_value
-          Masc.Keeper_metrics.(to_string LifecycleDispatchRejections)
+          Keeper_metrics.(to_string LifecycleDispatchRejections)
           ~labels ()
         |> Option.value ~default:0.0
       in
@@ -464,7 +464,7 @@ let test_keepalive_dispatch_event_rejection_increments_metric () =
       in
       let before =
         Masc.Prometheus.get_metric_value
-          Masc.Keeper_metrics.(to_string DispatchEventFailures)
+          Keeper_metrics.(to_string DispatchEventFailures)
           ~labels ()
         |> Option.value ~default:0.0
       in
@@ -474,7 +474,7 @@ let test_keepalive_dispatch_event_rejection_increments_metric () =
         KST.Compaction_started;
       let after =
         Masc.Prometheus.get_metric_value
-          Masc.Keeper_metrics.(to_string DispatchEventFailures)
+          Keeper_metrics.(to_string DispatchEventFailures)
           ~labels ()
         |> Option.value ~default:0.0
       in

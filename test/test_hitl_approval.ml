@@ -115,7 +115,7 @@ let test_approval_queue_failure_metric_labels_site () =
   in
   let before =
     Masc.Prometheus.metric_value_or_zero
-      Masc.Keeper_metrics.(to_string ApprovalQueueFailures)
+      Keeper_metrics.(to_string ApprovalQueueFailures)
       ~labels
       ()
   in
@@ -136,7 +136,7 @@ let test_approval_queue_failure_metric_labels_site () =
         ~risk_level:AQ.Medium ();
       let after =
         Masc.Prometheus.metric_value_or_zero
-          Masc.Keeper_metrics.(to_string ApprovalQueueFailures)
+          Keeper_metrics.(to_string ApprovalQueueFailures)
           ~labels
           ()
       in

@@ -615,7 +615,7 @@ let test_spawn_admission_denial_does_not_register_or_fork () =
       net = Some (Eio.Stdenv.net env);
     }
   in
-  let denial_metric = Masc.Keeper_metrics.(to_string SpawnSlotDenied) in
+  let denial_metric = Keeper_metrics.(to_string SpawnSlotDenied) in
   let denial_count surface =
     Masc.Prometheus.metric_value_or_zero
       denial_metric
@@ -629,7 +629,7 @@ let test_spawn_admission_denial_does_not_register_or_fork () =
   in
   let fork_total () =
     Masc.Prometheus.metric_total
-      Masc.Keeper_metrics.(to_string DomainPoolFork)
+      Keeper_metrics.(to_string DomainPoolFork)
   in
   FD.note ~site:"test_spawn_admission_no_fork"
     ~detail:"Too many open files in system"
@@ -915,12 +915,12 @@ let test_restart_path_emits_attempt_and_started_outcome_metrics () =
       let outcome_labels = [ ("keeper", name); ("outcome", "started") ] in
       let attempts_before =
         Masc.Prometheus.metric_value_or_zero
-          Masc.Keeper_metrics.(to_string RestartAttempts)
+          Keeper_metrics.(to_string RestartAttempts)
           ~labels:attempt_labels ()
       in
       let outcomes_before =
         Masc.Prometheus.metric_value_or_zero
-          Masc.Keeper_metrics.(to_string RestartOutcomes)
+          Keeper_metrics.(to_string RestartOutcomes)
           ~labels:outcome_labels ()
       in
       let ctx : _ Keeper_types_profile.context =
@@ -937,12 +937,12 @@ let test_restart_path_emits_attempt_and_started_outcome_metrics () =
       check (float 0.001) "restart attempt metric incremented"
         (attempts_before +. 1.0)
         (Masc.Prometheus.metric_value_or_zero
-           Masc.Keeper_metrics.(to_string RestartAttempts)
+           Keeper_metrics.(to_string RestartAttempts)
            ~labels:attempt_labels ());
       check (float 0.001) "restart started outcome metric incremented"
         (outcomes_before +. 1.0)
         (Masc.Prometheus.metric_value_or_zero
-           Masc.Keeper_metrics.(to_string RestartOutcomes)
+           Keeper_metrics.(to_string RestartOutcomes)
            ~labels:outcome_labels ());
       match Reg.get ~base_path:config.base_path name with
       | None -> fail "expected restarted keeper in registry"
@@ -974,12 +974,12 @@ let test_restart_path_emits_meta_unavailable_outcome_metric () =
       in
       let attempts_before =
         Masc.Prometheus.metric_value_or_zero
-          Masc.Keeper_metrics.(to_string RestartAttempts)
+          Keeper_metrics.(to_string RestartAttempts)
           ~labels:attempt_labels ()
       in
       let outcomes_before =
         Masc.Prometheus.metric_value_or_zero
-          Masc.Keeper_metrics.(to_string RestartOutcomes)
+          Keeper_metrics.(to_string RestartOutcomes)
           ~labels:outcome_labels ()
       in
       let ctx : _ Keeper_types_profile.context =
@@ -996,12 +996,12 @@ let test_restart_path_emits_meta_unavailable_outcome_metric () =
       check (float 0.001) "restart attempt metric incremented"
         (attempts_before +. 1.0)
         (Masc.Prometheus.metric_value_or_zero
-           Masc.Keeper_metrics.(to_string RestartAttempts)
+           Keeper_metrics.(to_string RestartAttempts)
            ~labels:attempt_labels ());
       check (float 0.001) "missing-meta outcome metric incremented"
         (outcomes_before +. 1.0)
         (Masc.Prometheus.metric_value_or_zero
-           Masc.Keeper_metrics.(to_string RestartOutcomes)
+           Keeper_metrics.(to_string RestartOutcomes)
            ~labels:outcome_labels ());
       check bool "keeper unregistered after missing meta" false
         (Reg.is_registered ~base_path:config.base_path name))
@@ -1045,7 +1045,7 @@ let test_max_restarts_exhaustion_emits_dead_alert () =
         ~restart_count:max_restarts ~last_restart_ts:0.0 ~crash_log:[];
       let baseline =
         Masc.Prometheus.metric_total
-          Masc.Keeper_metrics.(to_string DeadTotal)
+          Keeper_metrics.(to_string DeadTotal)
       in
       let ctx : _ Keeper_types_profile.context =
         {
@@ -1060,7 +1060,7 @@ let test_max_restarts_exhaustion_emits_dead_alert () =
       Sup.sweep_and_recover ctx;
       let after =
         Masc.Prometheus.metric_total
-          Masc.Keeper_metrics.(to_string DeadTotal)
+          Keeper_metrics.(to_string DeadTotal)
       in
       check (float 0.001) "metric_keeper_dead_total incremented by 1"
         (baseline +. 1.0) after;
@@ -1188,7 +1188,7 @@ let test_stale_storm_pause_skips_restart () =
       in
       let baseline_dead =
         Masc.Prometheus.metric_total
-          Masc.Keeper_metrics.(to_string DeadTotal)
+          Keeper_metrics.(to_string DeadTotal)
       in
       let ctx : _ Keeper_types_profile.context =
         {
@@ -1206,7 +1206,7 @@ let test_stale_storm_pause_skips_restart () =
       in
       let after_dead =
         Masc.Prometheus.metric_total
-          Masc.Keeper_metrics.(to_string DeadTotal)
+          Keeper_metrics.(to_string DeadTotal)
       in
       check (float 0.001) "stale_storm_paused counter incremented by 1"
         (baseline_pause +. 1.0) after_pause;
@@ -1259,7 +1259,7 @@ let test_legacy_stale_fleet_batch_routes_to_restart_budget () =
         (Some (Reg.Stale_fleet_batch { distinct_count = 3 }));
       let baseline_dead =
         Masc.Prometheus.metric_total
-          Masc.Keeper_metrics.(to_string DeadTotal)
+          Keeper_metrics.(to_string DeadTotal)
       in
       let ctx : _ Keeper_types_profile.context =
         {
@@ -1274,7 +1274,7 @@ let test_legacy_stale_fleet_batch_routes_to_restart_budget () =
       Sup.sweep_and_recover ctx;
       let after_dead =
         Masc.Prometheus.metric_total
-          Masc.Keeper_metrics.(to_string DeadTotal)
+          Keeper_metrics.(to_string DeadTotal)
       in
       check (float 0.001) "legacy fleet batch follows restart/dead budget"
         (baseline_dead +. 1.0) after_dead;
@@ -1316,7 +1316,7 @@ let test_provider_timeout_loop_pause_skips_restart () =
       in
       let baseline_dead =
         Masc.Prometheus.metric_total
-          Masc.Keeper_metrics.(to_string DeadTotal)
+          Keeper_metrics.(to_string DeadTotal)
       in
       let ctx : _ Keeper_types_profile.context =
         {
@@ -1335,7 +1335,7 @@ let test_provider_timeout_loop_pause_skips_restart () =
       in
       let after_dead =
         Masc.Prometheus.metric_total
-          Masc.Keeper_metrics.(to_string DeadTotal)
+          Keeper_metrics.(to_string DeadTotal)
       in
       check (float 0.001) "provider_timeout_loop counter incremented by 1"
         (baseline_pause +. 1.0) after_pause;
@@ -1616,7 +1616,7 @@ let test_sweep_auto_resumes_after_backoff () =
         (List.mem name (KR.bootable_keeper_names config));
       let baseline_auto_resume =
         Masc.Prometheus.metric_total
-          Masc.Keeper_metrics.(to_string AutoResumedTotal)
+          Keeper_metrics.(to_string AutoResumedTotal)
       in
       let ctx : _ Keeper_types_profile.context =
         {
@@ -1647,7 +1647,7 @@ let test_sweep_auto_resumes_after_backoff () =
         (Reg.is_registered ~base_path:config.base_path name);
       let after_auto_resume =
         Masc.Prometheus.metric_total
-          Masc.Keeper_metrics.(to_string AutoResumedTotal)
+          Keeper_metrics.(to_string AutoResumedTotal)
       in
       check (float 0.001) "metric_keeper_auto_resumed_total incremented by 1"
         (baseline_auto_resume +. 1.0) after_auto_resume)
@@ -1760,7 +1760,7 @@ let test_operator_pause_not_auto_resumed () =
         (List.mem name (KR.bootable_keeper_names config));
       let baseline_auto_resume =
         Masc.Prometheus.metric_total
-          Masc.Keeper_metrics.(to_string AutoResumedTotal)
+          Keeper_metrics.(to_string AutoResumedTotal)
       in
       let ctx : _ Keeper_types_profile.context =
         {
@@ -1786,7 +1786,7 @@ let test_operator_pause_not_auto_resumed () =
         (Reg.is_registered ~base_path:config.base_path name);
       let after_auto_resume =
         Masc.Prometheus.metric_total
-          Masc.Keeper_metrics.(to_string AutoResumedTotal)
+          Keeper_metrics.(to_string AutoResumedTotal)
       in
       check (float 0.001) "metric_keeper_auto_resumed_total NOT incremented"
         baseline_auto_resume after_auto_resume)
@@ -1839,7 +1839,7 @@ let test_turn_timeout_blocker_without_resume_policy_not_auto_resumed () =
         (List.mem name (KR.bootable_keeper_names config));
       let baseline_auto_resume =
         Masc.Prometheus.metric_total
-          Masc.Keeper_metrics.(to_string AutoResumedTotal)
+          Keeper_metrics.(to_string AutoResumedTotal)
       in
       let ctx : _ Keeper_types_profile.context =
         {
@@ -1871,7 +1871,7 @@ let test_turn_timeout_blocker_without_resume_policy_not_auto_resumed () =
         (Reg.is_registered ~base_path:config.base_path name);
       let after_auto_resume =
         Masc.Prometheus.metric_total
-          Masc.Keeper_metrics.(to_string AutoResumedTotal)
+          Keeper_metrics.(to_string AutoResumedTotal)
       in
       check (float 0.001) "metric_keeper_auto_resumed_total NOT incremented"
         baseline_auto_resume after_auto_resume)
@@ -1928,7 +1928,7 @@ let test_capacity_blocker_without_resume_policy_not_auto_resumed () =
         (List.mem name (KR.bootable_keeper_names config));
       let baseline_auto_resume =
         Masc.Prometheus.metric_total
-          Masc.Keeper_metrics.(to_string AutoResumedTotal)
+          Keeper_metrics.(to_string AutoResumedTotal)
       in
       let ctx : _ Keeper_types_profile.context =
         {
@@ -1958,7 +1958,7 @@ let test_capacity_blocker_without_resume_policy_not_auto_resumed () =
         (Reg.is_registered ~base_path:config.base_path name);
       let after_auto_resume =
         Masc.Prometheus.metric_total
-          Masc.Keeper_metrics.(to_string AutoResumedTotal)
+          Keeper_metrics.(to_string AutoResumedTotal)
       in
       check (float 0.001) "metric_keeper_auto_resumed_total NOT incremented"
         baseline_auto_resume after_auto_resume)

@@ -228,7 +228,7 @@ let test_registered_descriptor_bypasses_tool_access_allowlist () =
 
 let counter_for_tool_not_allowed ~keeper ~tool ~reason =
   Masc.Prometheus.metric_value_or_zero
-    Masc.Keeper_metrics.(to_string ToolNotAllowed)
+    Keeper_metrics.(to_string ToolNotAllowed)
     ~labels:[ ("keeper", keeper); ("tool", tool); ("reason", reason) ]
     ()
 

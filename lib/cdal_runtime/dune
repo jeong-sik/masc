@@ -25,6 +25,7 @@
 ; with [(include_subdirs no)] opts out of the parent's traversal so this
 ; sub-library compiles as a separate unit, mirroring sibling sub-libs
 ; (lib/activity_graph, lib/embedded_config, lib/mcp_session, ...).
+
 (include_subdirs no)
 
 (library
@@ -72,4 +73,10 @@
  (flags
   (:standard -w +4 -open Agent_sdk_base -open Agent_sdk -open Agent_sdk__))
  (preprocess
-  (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq ppx_deriving.ord ppx_inline_test ppx_let)))
+  (pps
+   ppx_deriving_yojson
+   ppx_deriving.show
+   ppx_deriving.eq
+   ppx_deriving.ord
+   ppx_inline_test
+   ppx_let)))

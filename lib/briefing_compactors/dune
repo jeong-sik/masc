@@ -13,15 +13,13 @@
 ;
 ; (include_subdirs no) opts out of parent's (include_subdirs unqualified).
 ; (wrapped false) keeps the top-level identifier `Briefing_compactors`.
+
 (include_subdirs no)
 
 (library
  (name masc_briefing_compactors)
  (public_name masc.briefing_compactors)
  (wrapped false)
- (flags (:standard -w +4))
- (libraries
-  yojson
-  masc_core
-  masc.masc_types
-  masc.dashboard_utils))
+ (flags
+  (:standard -w +4))
+ (libraries yojson masc_core masc.masc_types masc.dashboard_utils))

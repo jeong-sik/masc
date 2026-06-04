@@ -67,19 +67,58 @@ let voice_guard_fragments =
     "tts endpoint";
   ]
 
-let init_keeper_bridge () =
-  Masc_test_deps.init_keeper_tool_registry ();
-  ignore (Masc.Mcp_server_eio.get_clock_opt ());
-  (* Use find_project_root — the test cwd is _build/default/test/ which
-     does not contain config/tool_policy.toml, so Sys.getcwd fails the
-     direct shortcut and falls into the exe-relative walk that picks up
-     the partial _build/default/config/runtime.json. *)
-  let base_path = Masc_test_deps.find_project_root () in
-  (match KET.init_policy_config ~base_path with
-   | Ok () -> ()
-   | Error err -> Printf.eprintf "[WARN] init_policy_config failed: %s\n" err);
-  Masc.Keeper_tool_shared_runtime.tag_dispatch_fn := Masc.Keeper_tag_dispatch.dispatch;
-  KET.inject_masc_schemas Masc.Config.raw_all_tool_schemas
+let test_runtime_toml =
+  {|
+[runtime]
+default = "test_provider.test_model"
+
+[providers.test_provider]
+display-name = "Test Provider"
+protocol = "provider_d-http"
+endpoint = "http://127.0.0.1:1"
+
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[test_provider.test_model]
+is-default = true
+max-concurrent = 1
+|}
+
+let init_keeper_bridge =
+  let initialized = ref false in
+  fun () ->
+    if not !initialized then (
+      initialized := true;
+      Masc_test_deps.init_keeper_tool_registry ();
+      ignore (Masc.Mcp_server_eio.get_clock_opt ());
+      (* Use find_project_root — the test cwd is _build/default/test/ which
+         does not contain config/tool_policy.toml, so Sys.getcwd fails the
+         direct shortcut and falls into the exe-relative walk that picks up
+         the partial _build/default/config/runtime.json. *)
+      let base_path = Masc_test_deps.find_project_root () in
+      (match KET.init_policy_config ~base_path with
+       | Ok () -> ()
+       | Error err -> Printf.eprintf "[WARN] init_policy_config failed: %s\n" err);
+      let runtime_config_path = Filename.concat base_path "config/runtime.toml" in
+      let config_path =
+        if Sys.file_exists runtime_config_path then
+          runtime_config_path
+        else (
+          let temp_path = Filename.temp_file "keeper_matrix_runtime_" ".toml" in
+          let oc = open_out temp_path in
+          output_string oc test_runtime_toml;
+          close_out oc;
+          temp_path)
+      in
+      (match Masc.Runtime.init_default ~config_path with
+       | Ok () -> ()
+       | Error err -> Printf.eprintf "[WARN] Runtime.init_default failed: %s\n" err);
+      Masc.Keeper_tool_shared_runtime.tag_dispatch_fn := Masc.Keeper_tag_dispatch.dispatch;
+      KET.inject_masc_schemas Masc.Config.raw_all_tool_schemas)
 
 let make_meta ?(name = "keeper-tool-matrix") () =
   match
@@ -129,6 +168,9 @@ let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode =
   in
   let ctx_snapshot = ctx in
   let meta = make_meta () in
+  Masc.Keeper_registry.clear ();
+  ignore (Masc.Keeper_registry.register ~base_path meta.name meta);
+  ignore (Masc.Keeper_registry.register ~base_path "tool-matrix" meta);
   let tools = KTO.make_tools ~config ~meta ~ctx_snapshot () in
   (match init_mode with
    | Init_joined ->
@@ -203,7 +245,7 @@ let prepare_keeper_name fixture name =
   if
     List.mem name
       [ "keeper_task_force_release"; "keeper_task_force_done";
-        "keeper_task_done" ]
+        "keeper_task_done"; "keeper_task_submit_for_verification" ]
   then
     ensure_keeper_claim fixture;
   if name = "keeper_voice_session_end" then ensure_voice_session fixture;
@@ -226,6 +268,15 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
       `Assoc []
   | "keeper_memory_search" ->
       `Assoc [ ("query", `String "memory needle"); ("limit", `Int 2) ]
+  | "keeper_memory_write" ->
+      `Assoc [ ("kind", `String "decision"); ("content", `String "tool matrix memory write content") ]
+  | "keeper_ide_annotate" ->
+      `Assoc
+        [
+          ("file_path", `String (ensure_sample_file fixture));
+          ("line_start", `Int 1);
+          ("content", `String "tool matrix ide annotation");
+        ]
   | "keeper_board_post" ->
       `Assoc
         [
@@ -289,6 +340,13 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
   | "keeper_library_read" ->
       `Assoc [ ("topic", `String (Generic.ensure_library_topic fixture.generic)) ]
   | "keeper_tasks_list" -> `Assoc [ ("include_done", `Bool true) ]
+  | "keeper_task_submit_for_verification" ->
+      `Assoc
+        [
+          ("task_id", `String (Generic.ensure_task fixture.generic));
+          ("notes", `String "tool matrix verification notes: completion_notes are done and pr_url_or_artifact_ref is set");
+          ("evidence_refs", `List [ `String "https://github.com/jeong-sik/me/pull/1" ]);
+        ]
   | "keeper_task_force_release" ->
       `Assoc
         [
@@ -364,10 +422,10 @@ let keeper_expectation_for_name name =
          the sample file is written at base_path. File-not-found in
          tests without a playground file is an acceptable outcome. *)
       Expect_success_or_guard
-        [ "file not found"; "keeper not found in registry" ]
+        [ "file not found"; "keeper not found in registry"; "path_not_found_under_allowed_roots" ]
   | "tool_edit_file" | "tool_search_files" | "tool_write_file" ->
       Expect_success_or_guard
-        [ "keeper not found in registry"; "tool call failed" ]
+        [ "keeper not found in registry"; "tool call failed"; "path_not_found_under_allowed_roots" ]
   | _ -> Expect_success
 
 let extra_guard_fragments_for_name = function

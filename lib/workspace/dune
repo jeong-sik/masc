@@ -1,9 +1,11 @@
 (include_subdirs no)
+
 (library
  (name masc_workspace)
  (public_name masc.masc_workspace)
  (wrapped false)
- (flags (:standard -w +4))
+ (flags
+  (:standard -w +4))
  (modules
   workspace_core
   telemetry_observe
@@ -78,4 +80,5 @@
   uuidm
   digestif
   masc_random_id)
- (preprocess (pps ppx_deriving.show ppx_deriving.eq ppx_deriving_yojson)))
+ (preprocess
+  (pps ppx_deriving.show ppx_deriving.eq ppx_deriving_yojson)))

@@ -9,16 +9,13 @@
 ;
 ; (include_subdirs no) opts out of parent's (include_subdirs unqualified).
 ; (wrapped false) keeps the top-level identifier `Dashboard_eval_feed`.
+
 (include_subdirs no)
 
 (library
  (name masc_dashboard_eval_feed)
  (public_name masc.dashboard_eval_feed)
  (wrapped false)
- (flags (:standard -w +4))
- (libraries
-  yojson
-  eio
-  agent_sdk
-  masc_log
-  masc_core))
+ (flags
+  (:standard -w +4))
+ (libraries yojson eio agent_sdk masc_log masc_core))

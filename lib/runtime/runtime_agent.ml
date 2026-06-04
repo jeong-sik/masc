@@ -6,6 +6,9 @@
 
     @since God file decomposition — extracted from oas_worker.ml *)
 
+let oas_tool_of_masc_hook = ref (fun ~name:_ ~description:_ ~input_schema:_ _handler -> failwith "oas_tool_of_masc_hook is not set")
+let set_oas_tool_of_masc_hook f = oas_tool_of_masc_hook := f
+
 (* ================================================================ *)
 (* Configuration                                                     *)
 (* ================================================================ *)
@@ -798,7 +801,7 @@ let run_with_masc_tools
       let oas_tools =
         List.map
           (fun (td : Masc_domain.tool_schema) ->
-            Tool_bridge.oas_tool_of_masc
+            (!oas_tool_of_masc_hook)
               ~name:td.name
               ~description:td.description
               ~input_schema:td.input_schema

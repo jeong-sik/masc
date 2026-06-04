@@ -16,19 +16,6 @@ include Prometheus_store
 
 include Prometheus_metric_names
 
-let backend_mutex_observers_installed = ref false
-
-let install_backend_mutex_observers () =
-  if not !backend_mutex_observers_installed
-  then (
-    Backend.FileSystem.set_mutex_observers
-      ~acquire:(fun ~op ~seconds ->
-        observe_histogram metric_backend_mutex_acquire_sec ~labels:[ "op", op ] seconds)
-      ~held:(fun ~op ~seconds ->
-        observe_histogram metric_backend_mutex_held_sec ~labels:[ "op", op ] seconds);
-    backend_mutex_observers_installed := true)
-;;
-
 (* #10097: a provider cannot carry keeper-bound runtime MCP tools that
    need request-scoped auth headers.  Every time
    oas_worker_exec_transport strips such a tool, this counter
@@ -261,7 +248,6 @@ let init () =
     ~register_gauge
     ~inc_counter
     ();
-  install_backend_mutex_observers ()
 ;;
 
 let start_time = Time_compat.now ()

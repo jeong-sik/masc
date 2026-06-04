@@ -76,6 +76,10 @@ type sample = {
           first attempt). *)
 }
 
+val set_broadcast_hook : (Yojson.Safe.t -> unit) -> unit
+(** [set_broadcast_hook f] registers a function to broadcast telemetry samples
+    via SSE. Used to decouple the [Sse] module. *)
+
 val record : sample -> unit
 (** [record s] appends [s] to the runtime-lane ring after normalizing
     [provider_id] and [model_id]. Thread-safe. When the cap is reached, the

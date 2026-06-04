@@ -961,3 +961,7 @@ let cleanup_stale ?(max_age_s=1800.0) () =
     unregister sid
   ) stale;
   List.map fst stale
+
+let () =
+  Dashboard_oas_bridge.set_broadcast_hook (fun json ->
+    broadcast_to Observers json)

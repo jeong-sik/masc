@@ -8,13 +8,15 @@
 ;
 ; (include_subdirs no) opts out of parent's (include_subdirs unqualified).
 ; (wrapped false) keeps the top-level identifier `Chronicle_event`.
+
 (include_subdirs no)
 
 (library
  (name masc_chronicle_event)
  (public_name masc.chronicle_event)
  (wrapped false)
- (flags (:standard -w +4))
- (libraries
-  yojson)
- (preprocess (pps ppx_deriving_yojson ppx_deriving.show)))
+ (flags
+  (:standard -w +4))
+ (libraries yojson)
+ (preprocess
+  (pps ppx_deriving_yojson ppx_deriving.show)))

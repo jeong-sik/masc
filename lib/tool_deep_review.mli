@@ -6,14 +6,24 @@
     Slack, memory, or institutional knowledge.
 
     This forces structural evaluation rather than relying on domain
-    context that might mask bugs. Uses the same
-    [Keeper_turn_driver.run_named] pattern as {!Verifier_oas}. *)
+    context that might mask bugs. Runtime execution is injected by the
+    caller so this tool parser stays independent of the keeper subsystem. *)
+
+type review_runner =
+  prompt:string ->
+  (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
+(** Boundary callback that runs the isolated review prompt. *)
 
 (** [handle_deep_review ~tool_name ~start_time config args] runs a deep
     review as described by [args]. Returns [Tool_result.result] — error on
     validation or dispatch failure, ok with the review output otherwise. *)
 val handle_deep_review :
-  tool_name:string -> start_time:float -> Workspace.config -> Yojson.Safe.t -> Tool_result.result
+  tool_name:string ->
+  start_time:float ->
+  Workspace.config ->
+  run_review:review_runner ->
+  Yojson.Safe.t ->
+  Tool_result.result
 
 (** Build the isolated review prompt. Returns [Ok prompt] or
     [Error reason] when no target files could be read or inputs

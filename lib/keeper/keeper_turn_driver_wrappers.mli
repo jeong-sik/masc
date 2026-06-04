@@ -75,6 +75,11 @@ val run_named_with_masc_tools :
 (** [run_named] variant that bridges MASC tool schemas into OAS tools
     via {!Tool_bridge.oas_tool_of_masc}. *)
 
+val run_tool_deep_review :
+  prompt:string ->
+  (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
+(** Run the isolated [masc_deep_review] prompt through the named runtime. *)
+
 val run_model_with_masc_tools :
   model_label:string ->
   goal:string ->

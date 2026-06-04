@@ -29,6 +29,10 @@ module Float = Stdlib.Float
 
 open Printf
 
+type review_runner =
+  prompt:string ->
+  (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
+
 let validate_target_files target_files =
   let inputs =
     List.map
@@ -123,6 +127,7 @@ let handle_deep_review
       ~tool_name
       ~start_time
       (config : Workspace.config)
+      ~(run_review : review_runner)
       args
   : Tool_result.result
   =
@@ -151,22 +156,7 @@ let handle_deep_review
         error_workflow_json ~tool_name ~start_time
           (`Assoc [ ("error", `String msg) ])
     | Ok prompt ->
-        let runtime_id =
-          Runtime.get_default_runtime_id ()
-        in
-        match
-          Masc_oas_bridge.run_with_caller
-            ~caller:Env_config_oas_bridge.Tool_deep_review (fun () ->
-            Keeper_turn_driver.run_named
-              ~runtime_id
-              ~goal:prompt
-              ~max_turns:1
-              ~temperature:0.5
-              ~max_tokens:500
-              ~approval:Approval_callbacks.auto_approve
-              ()
-          )
-        with
+        match run_review ~prompt with
         | Ok result ->
             let text = Agent_sdk_response.text_of_response result.response in
             let verdict =

@@ -208,6 +208,20 @@ let run_named_with_masc_tools
     ?raw_trace ?on_event ?on_yield ?on_resume 
     ?transport ~yield_on_tool ?sw ?net ()
 
+let run_tool_deep_review ~prompt =
+  Masc_oas_bridge.run_with_caller
+    ~caller:Env_config_oas_bridge.Tool_deep_review
+    (fun () ->
+       Keeper_turn_driver.run_named
+         ~runtime_id:(Runtime.get_default_runtime_id ())
+         ~goal:prompt
+         ~max_turns:1
+         ~temperature:0.5
+         ~max_tokens:500
+         ~approval:Approval_callbacks.auto_approve
+         ())
+;;
+
 let run_model_with_masc_tools
     ~(model_label : string)
     ~goal

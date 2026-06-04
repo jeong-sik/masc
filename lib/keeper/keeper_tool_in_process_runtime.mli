@@ -202,6 +202,14 @@ val handle_masc_approval
   -> args:Yojson.Safe.t
   -> string
 
+(** Server-bound inline approval dispatch. Preserves typed
+    [Tool_result.Workflow_rejection] semantics for invalid caller input. *)
+val handle_masc_approval_result
+  :  name:string
+  -> start_time:float
+  -> args:Yojson.Safe.t
+  -> Tool_result.result
+
 (** RFC-0182 §3.1 — [handle_masc_persona] is the descriptor-projection
     cluster handler for [masc_persona_list] / [masc_persona_schema] /
     [masc_persona_save].  Dispatches via [Persona_dispatch_ref] —

@@ -315,6 +315,7 @@ let execute_tool_eio
                      ~args:coerced_args
                  | Mod_misc ->
                    Tool_misc.dispatch
+                     ~deep_review_runner:Keeper_turn_driver_wrappers.run_tool_deep_review
                      { Tool_misc.config; agent_name }
                      ~name
                      ~args:coerced_args
@@ -365,6 +366,8 @@ let execute_tool_eio
                      ; save_governance = Mcp_server_eio_governance.save_governance
                      ; load_mcp_sessions = Mcp_server_eio_governance.load_mcp_sessions
                      ; save_mcp_sessions = Mcp_server_eio_governance.save_mcp_sessions
+                     ; approval_dispatch =
+                         Keeper_tool_in_process_runtime.handle_masc_approval_result
                      }
                    in
                    Tool_inline_dispatch.dispatch inline_ctx ~name)

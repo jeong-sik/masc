@@ -48,6 +48,11 @@ type context = {
   load_mcp_sessions : Workspace.config -> Mcp_server_eio_governance.mcp_session_record list;
   save_mcp_sessions :
     Workspace.config -> Mcp_server_eio_governance.mcp_session_record list -> unit;
+  approval_dispatch :
+    name:string ->
+    start_time:float ->
+    args:Yojson.Safe.t ->
+    Tool_result.result;
 }
 
 (** Helper: run subprocess — uses [Dispatch] caller (default 120s).

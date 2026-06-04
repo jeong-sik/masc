@@ -110,6 +110,63 @@ let test_build_prompt_rejects_task_state_history_paths () =
             (String.length msg > 0)
       | Ok _ -> fail "expected workspace/task history to be rejected")
 
+let make_run_result text : Masc.Runtime_agent.run_result =
+  let response : Agent_sdk.Types.api_response =
+    { id = "fake-review"
+    ; model = "unit-test"
+    ; stop_reason = Agent_sdk.Types.EndTurn
+    ; content = [ Agent_sdk.Types.Text text ]
+    ; usage = None
+    ; telemetry = None
+    }
+  in
+  { response
+  ; checkpoint = None
+  ; session_id = "fake-session"
+  ; turns = 1
+  ; trace_ref = None
+  ; run_validation = None
+  ; runtime_observation = None
+  ; stop_reason = Masc.Runtime_agent.Completed
+  }
+
+let test_handle_deep_review_uses_injected_runner () =
+  with_temp_dir (fun base ->
+      let file = Filename.concat base "lib/foo.ml" in
+      write_file file "let answer = 42\n";
+      let config = Masc.Workspace.default_config base in
+      let seen_prompt = ref None in
+      let run_review ~prompt =
+        seen_prompt := Some prompt;
+        Ok (make_run_result "NO_ISSUES_FOUND")
+      in
+      let args =
+        `Assoc
+          [ "target_files", `List [ `String "lib/foo.ml" ]
+          ; "question", `String "Is this safe?"
+          ]
+      in
+      let result =
+        TDR.handle_deep_review
+          ~tool_name:"masc_deep_review"
+          ~start_time:0.0
+          config
+          ~run_review
+          args
+      in
+      check bool "success" true (Tool_result.is_success result);
+      check bool "prompt contains file" true
+        (match !seen_prompt with
+         | Some prompt -> contains_substring prompt "lib/foo.ml"
+         | None -> false);
+      match Tool_result.data result with
+      | `Assoc fields ->
+          check (option string) "verdict" (Some "no_issues")
+            (match List.assoc_opt "verdict" fields with
+             | Some (`String verdict) -> Some verdict
+             | _ -> None)
+      | _ -> fail "expected structured result data")
+
 let () =
   run "tool_deep_review"
     [
@@ -122,7 +179,12 @@ let () =
             test_build_prompt_rejects_design_docs_by_full_path;
           test_case "reject rfc docs outside docs dir" `Quick
             test_build_prompt_rejects_rfc_docs_outside_docs_dir;
-          test_case "reject task state history" `Quick
-            test_build_prompt_rejects_task_state_history_paths;
+            test_case "reject task state history" `Quick
+              test_build_prompt_rejects_task_state_history_paths;
+        ] );
+      ( "handle_deep_review",
+        [
+          test_case "uses injected runner" `Quick
+            test_handle_deep_review_uses_injected_runner;
         ] );
     ]

@@ -56,7 +56,12 @@ val with_web_fetch_http_get_for_test :
   (unit -> 'a) ->
   'a
 
-val dispatch : context -> name:string -> args:Yojson.Safe.t -> Tool_result.result option
+val dispatch :
+  ?deep_review_runner:Tool_deep_review.review_runner ->
+  context ->
+  name:string ->
+  args:Yojson.Safe.t ->
+  Tool_result.result option
 
 val tool_inventory_json :
   context -> include_hidden:bool -> Yojson.Safe.t

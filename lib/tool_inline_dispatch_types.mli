@@ -38,4 +38,10 @@ type context = {
     Workspace.config ->
     Mcp_server_eio_governance.mcp_session_record list ->
     unit;
+  approval_dispatch :
+    name:string ->
+    start_time:float ->
+    args:Yojson.Safe.t ->
+    Tool_result.result;
+      (** Keeper-bound approval queue dispatch injected at the server boundary. *)
 }

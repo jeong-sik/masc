@@ -178,7 +178,7 @@ let tool_inventory_json ctx ~include_hidden =
 (* Dispatch (facade)                                                *)
 (* ================================================================ *)
 
-let dispatch ctx ~name ~args : Tool_result.result option =
+let dispatch ?deep_review_runner ctx ~name ~args : Tool_result.result option =
   let start = Time_compat.now () in
   let admin_ctx : Tool_misc_admin.context =
     { config = ctx.config; agent_name = ctx.agent_name }
@@ -214,12 +214,21 @@ let dispatch ctx ~name ~args : Tool_result.result option =
            admin_ctx
            args)
   | "masc_deep_review" ->
-      Some
-        (Tool_deep_review.handle_deep_review
-           ~tool_name:name
-           ~start_time:start
-           ctx.config
-           args)
+      (match deep_review_runner with
+       | None ->
+         Some
+           (workflow_err
+              ~tool_name:name
+              ~start_time:start
+              "masc_deep_review is unavailable at this boundary")
+       | Some run_review ->
+         Some
+           (Tool_deep_review.handle_deep_review
+              ~tool_name:name
+              ~start_time:start
+              ctx.config
+              ~run_review
+              args))
   | _ -> None
 
 let schemas = Tool_schemas_misc.schemas

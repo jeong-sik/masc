@@ -22,8 +22,7 @@ module Float = Stdlib.Float
 
     Each tool's required permission determines which role tier it belongs to:
     - Worker tier: CanReadState, CanAddTask, CanClaimTask,
-                   CanCompleteTask, CanBroadcast,
-                   CanOpenPortal, CanSendPortal
+                   CanCompleteTask, CanBroadcast, CanVote
     - Admin tier:  CanInit, CanReset, CanAdmin
 
     @since 2.204.0 *)
@@ -42,8 +41,6 @@ let required_role_of_permission = function
   | Masc_domain.CanClaimTask
   | Masc_domain.CanCompleteTask
   | Masc_domain.CanBroadcast
-  | Masc_domain.CanOpenPortal
-  | Masc_domain.CanSendPortal
   | Masc_domain.CanVote ->
       Worker_role
 
@@ -80,7 +77,7 @@ let admin_only_tools () = Lazy.force admin_only_tools_lazy
 
 (* ================================================================ *)
 (* Worker-only tools (CanAddTask + CanClaimTask + CanCompleteTask + *)
-(*                    CanBroadcast + CanOpenPortal + CanSendPortal + CanVote) *)
+(*                    CanBroadcast + CanVote) *)
 (* ================================================================ *)
 
 let worker_only_tools () = Lazy.force worker_only_tools_lazy

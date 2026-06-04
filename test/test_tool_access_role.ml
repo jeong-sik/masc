@@ -126,15 +126,6 @@ let test_channel_gate_requires_worker () =
   check bool "Worker allows channel_gate" true
     (Tool_access_policy.allows_name worker_policy "channel_gate")
 
-let test_portal_tools_require_worker () =
-  let worker_policy = Tool_access_role.policy_for_role Worker in
-  List.iter (fun tool_name ->
-    check bool
-      (Printf.sprintf "Worker allows %s" tool_name)
-      true
-      (Tool_access_policy.allows_name worker_policy tool_name))
-    [ "masc_portal_open"; "masc_portal_close"; "masc_portal_send" ]
-
 let test_sidecar_allowed_for_dashboard_worker () =
   let worker_policy = Tool_access_role.policy_for_role Worker in
   check bool "Worker (dashboard) allows sidecar tool" true
@@ -167,7 +158,6 @@ let test_permissions_promoted_to_metadata_ssot () =
       ("masc_keeper_reset", Masc_domain.CanBroadcast);
       ("masc_start", Masc_domain.CanBroadcast);
       ("masc_broadcast", Masc_domain.CanBroadcast);
-      ("masc_portal_send", Masc_domain.CanSendPortal);
       ("channel_gate", Masc_domain.CanBroadcast);
     ]
   in
@@ -254,8 +244,6 @@ let () =
             test_worker_allows_worker_only_tools;
           test_case "channel_gate requires worker" `Quick
             test_channel_gate_requires_worker;
-          test_case "portal tools require worker" `Quick
-            test_portal_tools_require_worker;
           test_case "sidecar tool allowed for dashboard worker" `Quick
             test_sidecar_allowed_for_dashboard_worker;
           test_case "permissions promoted to metadata ssot" `Quick

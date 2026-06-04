@@ -560,120 +560,6 @@ let test_backlog_of_yojson_error () =
   | Ok _ -> fail "expected Error"
 
 (* ============================================================
-   a2a_task_status Tests
-   ============================================================ *)
-
-let test_a2a_task_status_to_string_pending () =
-  check string "pending" "pending" (Masc_domain.a2a_task_status_to_string Masc_domain.A2APending)
-
-let test_a2a_task_status_to_string_running () =
-  check string "running" "running" (Masc_domain.a2a_task_status_to_string Masc_domain.A2ARunning)
-
-let test_a2a_task_status_to_string_completed () =
-  check string "completed" "completed" (Masc_domain.a2a_task_status_to_string Masc_domain.A2ACompleted)
-
-let test_a2a_task_status_to_string_failed () =
-  check string "failed" "failed" (Masc_domain.a2a_task_status_to_string Masc_domain.A2AFailed)
-
-let test_a2a_task_status_to_string_canceled () =
-  check string "canceled" "canceled" (Masc_domain.a2a_task_status_to_string Masc_domain.A2ACanceled)
-
-let test_a2a_task_status_of_string_pending () =
-  match Masc_domain.a2a_task_status_of_string "pending" with
-  | Ok Masc_domain.A2APending -> ()
-  | _ -> fail "expected Ok A2APending"
-
-let test_a2a_task_status_of_string_running () =
-  match Masc_domain.a2a_task_status_of_string "running" with
-  | Ok Masc_domain.A2ARunning -> ()
-  | _ -> fail "expected Ok A2ARunning"
-
-let test_a2a_task_status_of_string_completed () =
-  match Masc_domain.a2a_task_status_of_string "completed" with
-  | Ok Masc_domain.A2ACompleted -> ()
-  | _ -> fail "expected Ok A2ACompleted"
-
-let test_a2a_task_status_of_string_failed () =
-  match Masc_domain.a2a_task_status_of_string "failed" with
-  | Ok Masc_domain.A2AFailed -> ()
-  | _ -> fail "expected Ok A2AFailed"
-
-let test_a2a_task_status_of_string_canceled () =
-  match Masc_domain.a2a_task_status_of_string "canceled" with
-  | Ok Masc_domain.A2ACanceled -> ()
-  | _ -> fail "expected Ok A2ACanceled"
-
-let test_a2a_task_status_of_string_unknown () =
-  match Masc_domain.a2a_task_status_of_string "invalid" with
-  | Error e -> check bool "has error msg" true (String.length e > 0)
-  | Ok _ -> fail "expected Error"
-
-let test_a2a_task_status_to_yojson_pending () =
-  match Masc_domain.a2a_task_status_to_yojson Masc_domain.A2APending with
-  | `String "pending" -> ()
-  | _ -> fail "expected String pending"
-
-let test_a2a_task_status_to_yojson_completed () =
-  match Masc_domain.a2a_task_status_to_yojson Masc_domain.A2ACompleted with
-  | `String "completed" -> ()
-  | _ -> fail "expected String completed"
-
-let test_a2a_task_status_of_yojson_ok () =
-  match Masc_domain.a2a_task_status_of_yojson (`String "running") with
-  | Ok Masc_domain.A2ARunning -> ()
-  | _ -> fail "expected Ok A2ARunning"
-
-let test_a2a_task_status_of_yojson_unknown () =
-  match Masc_domain.a2a_task_status_of_yojson (`String "xyz") with
-  | Error _ -> ()
-  | Ok _ -> fail "expected Error"
-
-let test_a2a_task_status_of_yojson_wrong_type () =
-  match Masc_domain.a2a_task_status_of_yojson (`Int 42) with
-  | Error e -> check bool "has error" true (String.length e > 0)
-  | Ok _ -> fail "expected Error"
-
-(* ============================================================
-   portal_state Tests
-   ============================================================ *)
-
-let test_portal_state_to_string_open () =
-  check string "open" "open" (Masc_domain.portal_state_to_string Masc_domain.PortalOpen)
-
-let test_portal_state_to_string_closed () =
-  check string "closed" "closed" (Masc_domain.portal_state_to_string Masc_domain.PortalClosed)
-
-let test_portal_state_of_string_open () =
-  match Masc_domain.portal_state_of_string "open" with
-  | Ok Masc_domain.PortalOpen -> ()
-  | _ -> fail "expected Ok PortalOpen"
-
-let test_portal_state_of_string_closed () =
-  match Masc_domain.portal_state_of_string "closed" with
-  | Ok Masc_domain.PortalClosed -> ()
-  | _ -> fail "expected Ok PortalClosed"
-
-let test_portal_state_of_string_unknown () =
-  match Masc_domain.portal_state_of_string "invalid" with
-  | Error e -> check bool "has error" true (String.length e > 0)
-  | Ok _ -> fail "expected Error"
-
-let test_portal_state_to_yojson () =
-  match Masc_domain.portal_state_to_yojson Masc_domain.PortalOpen with
-  | `String "open" -> ()
-  | _ -> fail "expected String open"
-
-let test_portal_state_of_yojson_ok () =
-  match Masc_domain.portal_state_of_yojson (`String "closed") with
-  | Ok Masc_domain.PortalClosed -> ()
-  | _ -> fail "expected Ok PortalClosed"
-
-let test_portal_state_of_yojson_wrong_type () =
-  match Masc_domain.portal_state_of_yojson (`Int 1) with
-  | Error _ -> ()
-  | Ok _ -> fail "expected Error"
-
-(* ============================================================
    masc_error_to_string Tests
    ============================================================ *)
 
@@ -1073,18 +959,6 @@ let test_masc_error_task_invalid_state () =
   let s = Masc_domain.masc_error_to_string (Masc_domain.Task (Masc_domain.Task_error.InvalidState "cancelled")) in
   check bool "nonempty" true (String.length s > 0)
 
-let test_masc_error_portal_not_open () =
-  let s = Masc_domain.masc_error_to_string (Masc_domain.Portal (Masc_domain.Portal_error.NotOpen "agent")) in
-  check bool "nonempty" true (String.length s > 0)
-
-let test_masc_error_portal_already_open () =
-  let s = Masc_domain.masc_error_to_string (Masc_domain.Portal (Masc_domain.Portal_error.AlreadyOpen { agent = "a1"; target = "a2" })) in
-  check bool "nonempty" true (String.length s > 0)
-
-let test_masc_error_portal_closed () =
-  let s = Masc_domain.masc_error_to_string (Masc_domain.Portal (Masc_domain.Portal_error.Closed "agent")) in
-  check bool "nonempty" true (String.length s > 0)
-
 let test_masc_error_invalid_json () =
   let s = Masc_domain.masc_error_to_string (Masc_domain.System (Masc_domain.System_error.InvalidJson "bad json")) in
   check bool "nonempty" true (String.length s > 0)
@@ -1389,124 +1263,6 @@ let test_task_claim_next_action_policy_block_is_skip () =
     fail "todo task should not be classified as not-todo"
 
 (* ============================================================
-   a2a_task_to/of_yojson Tests
-   ============================================================ *)
-
-let test_a2a_task_to_yojson () =
-  let t : Masc_domain.a2a_task = {
-    a2a_id = "a2a-001";
-    from_agent = "agent_llm_a";
-    to_agent = "provider_f";
-    a2a_message = "Please review this";
-    a2a_status = Masc_domain.A2APending;
-    a2a_result = None;
-    created_at = "2024-01-15T12:00:00Z";
-    updated_at = "2024-01-15T12:00:00Z";
-  } in
-  let json = Masc_domain.a2a_task_to_yojson t in
-  match json with
-  | `Assoc fields ->
-    check bool "has id" true (List.mem_assoc "id" fields);
-    check bool "has from" true (List.mem_assoc "from" fields);
-    check bool "has to" true (List.mem_assoc "to" fields)
-  | _ -> fail "expected Assoc"
-
-let test_a2a_task_to_yojson_with_result () =
-  let t : Masc_domain.a2a_task = {
-    a2a_id = "a2a-002";
-    from_agent = "provider_f";
-    to_agent = "agent_llm_a";
-    a2a_message = "Task completed";
-    a2a_status = Masc_domain.A2ACompleted;
-    a2a_result = Some "Done successfully";
-    created_at = "2024-01-15T12:00:00Z";
-    updated_at = "2024-01-15T13:00:00Z";
-  } in
-  let json = Masc_domain.a2a_task_to_yojson t in
-  match json with
-  | `Assoc fields ->
-    (match List.assoc_opt "result" fields with
-     | Some (`String _) -> ()
-     | _ -> fail "expected string result")
-  | _ -> fail "expected Assoc"
-
-let test_a2a_task_of_yojson_ok () =
-  let json = `Assoc [
-    ("id", `String "a2a-003");
-    ("from", `String "ollama");
-    ("to", `String "agent_llm_a");
-    ("message", `String "Help needed");
-    ("status", `String "running");
-    ("result", `Null);
-    ("createdAt", `String "2024-01-15T12:00:00Z");
-    ("updatedAt", `String "2024-01-15T12:00:00Z");
-  ] in
-  match Masc_domain.a2a_task_of_yojson json with
-  | Ok t ->
-    check string "id" "a2a-003" t.a2a_id;
-    check string "from" "ollama" t.from_agent
-  | Error e -> fail ("expected Ok: " ^ e)
-
-let test_a2a_task_of_yojson_error () =
-  let json = `Assoc [("id", `String "bad")] in
-  match Masc_domain.a2a_task_of_yojson json with
-  | Error _ -> ()
-  | Ok _ -> fail "expected Error (missing fields)"
-
-(* ============================================================
-   portal_to/of_yojson Tests
-   ============================================================ *)
-
-let test_portal_to_yojson () =
-  let p : Masc_domain.portal = {
-    portal_from = "agent_llm_a";
-    portal_target = "provider_f";
-    portal_opened_at = "2024-01-15T12:00:00Z";
-    portal_status = Masc_domain.PortalOpen;
-    task_count = 5;
-  } in
-  let json = Masc_domain.portal_to_yojson p in
-  match json with
-  | `Assoc fields ->
-    check bool "has from" true (List.mem_assoc "from" fields);
-    check bool "has target" true (List.mem_assoc "target" fields);
-    check bool "has taskCount" true (List.mem_assoc "taskCount" fields)
-  | _ -> fail "expected Assoc"
-
-let test_portal_of_yojson_ok () =
-  let json = `Assoc [
-    ("from", `String "ollama");
-    ("target", `String "agent_code");
-    ("openedAt", `String "2024-01-15T12:00:00Z");
-    ("status", `String "open");
-    ("taskCount", `Int 3);
-  ] in
-  match Masc_domain.portal_of_yojson json with
-  | Ok p ->
-    check string "from" "ollama" p.portal_from;
-    check int "task_count" 3 p.task_count
-  | Error e -> fail ("expected Ok: " ^ e)
-
-let test_portal_of_yojson_closed () =
-  let json = `Assoc [
-    ("from", `String "a");
-    ("target", `String "b");
-    ("openedAt", `String "2024-01-15T12:00:00Z");
-    ("status", `String "closed");
-    ("taskCount", `Int 0);
-  ] in
-  match Masc_domain.portal_of_yojson json with
-  | Ok p ->
-    check string "status" "closed" (Masc_domain.portal_state_to_string p.portal_status)
-  | Error e -> fail ("expected Ok: " ^ e)
-
-let test_portal_of_yojson_error () =
-  let json = `Assoc [("from", `String "x")] in
-  match Masc_domain.portal_of_yojson json with
-  | Error _ -> ()
-  | Ok _ -> fail "expected Error (missing fields)"
-
-(* ============================================================
    Test Runners
    ============================================================ *)
 
@@ -1632,44 +1388,6 @@ let () =
       test_case "with task" `Quick test_backlog_of_yojson_with_task;
       test_case "error" `Quick test_backlog_of_yojson_error;
     ];
-    "a2a_task_status_to_string", [
-      test_case "pending" `Quick test_a2a_task_status_to_string_pending;
-      test_case "running" `Quick test_a2a_task_status_to_string_running;
-      test_case "completed" `Quick test_a2a_task_status_to_string_completed;
-      test_case "failed" `Quick test_a2a_task_status_to_string_failed;
-      test_case "canceled" `Quick test_a2a_task_status_to_string_canceled;
-    ];
-    "a2a_task_status_of_string", [
-      test_case "pending" `Quick test_a2a_task_status_of_string_pending;
-      test_case "running" `Quick test_a2a_task_status_of_string_running;
-      test_case "completed" `Quick test_a2a_task_status_of_string_completed;
-      test_case "failed" `Quick test_a2a_task_status_of_string_failed;
-      test_case "canceled" `Quick test_a2a_task_status_of_string_canceled;
-      test_case "unknown" `Quick test_a2a_task_status_of_string_unknown;
-    ];
-    "a2a_task_status_to_yojson", [
-      test_case "pending" `Quick test_a2a_task_status_to_yojson_pending;
-      test_case "completed" `Quick test_a2a_task_status_to_yojson_completed;
-    ];
-    "a2a_task_status_of_yojson", [
-      test_case "ok" `Quick test_a2a_task_status_of_yojson_ok;
-      test_case "unknown" `Quick test_a2a_task_status_of_yojson_unknown;
-      test_case "wrong type" `Quick test_a2a_task_status_of_yojson_wrong_type;
-    ];
-    "portal_state_to_string", [
-      test_case "open" `Quick test_portal_state_to_string_open;
-      test_case "closed" `Quick test_portal_state_to_string_closed;
-    ];
-    "portal_state_of_string", [
-      test_case "open" `Quick test_portal_state_of_string_open;
-      test_case "closed" `Quick test_portal_state_of_string_closed;
-      test_case "unknown" `Quick test_portal_state_of_string_unknown;
-    ];
-    "portal_state_yojson", [
-      test_case "to_yojson" `Quick test_portal_state_to_yojson;
-      test_case "of_yojson ok" `Quick test_portal_state_of_yojson_ok;
-      test_case "of_yojson wrong type" `Quick test_portal_state_of_yojson_wrong_type;
-    ];
     "masc_error_to_string", [
       test_case "not initialized" `Quick test_masc_error_not_initialized;
       test_case "already initialized" `Quick test_masc_error_already_initialized;
@@ -1740,9 +1458,6 @@ let () =
       test_case "agent invalid name" `Quick test_masc_error_agent_invalid_name;
       test_case "task not claimed" `Quick test_masc_error_task_not_claimed;
       test_case "task invalid state" `Quick test_masc_error_task_invalid_state;
-      test_case "portal not open" `Quick test_masc_error_portal_not_open;
-      test_case "portal already open" `Quick test_masc_error_portal_already_open;
-      test_case "portal closed" `Quick test_masc_error_portal_closed;
       test_case "invalid json" `Quick test_masc_error_invalid_json;
       test_case "io error" `Quick test_masc_error_io_error;
       test_case "invalid agent name" `Quick test_masc_error_invalid_agent_name;
@@ -1783,17 +1498,5 @@ let () =
       test_case "of_yojson error" `Quick test_task_of_yojson_error;
       test_case "claim next action policy block is skip" `Quick
         test_task_claim_next_action_policy_block_is_skip;
-    ];
-    "a2a_task_yojson", [
-      test_case "to_yojson" `Quick test_a2a_task_to_yojson;
-      test_case "to_yojson with result" `Quick test_a2a_task_to_yojson_with_result;
-      test_case "of_yojson ok" `Quick test_a2a_task_of_yojson_ok;
-      test_case "of_yojson error" `Quick test_a2a_task_of_yojson_error;
-    ];
-    "portal_yojson", [
-      test_case "to_yojson" `Quick test_portal_to_yojson;
-      test_case "of_yojson ok" `Quick test_portal_of_yojson_ok;
-      test_case "of_yojson closed" `Quick test_portal_of_yojson_closed;
-      test_case "of_yojson error" `Quick test_portal_of_yojson_error;
     ];
   ]

@@ -263,56 +263,6 @@ type backlog =
 val backlog_to_yojson : backlog -> Yojson.Safe.t
 val backlog_of_yojson : Yojson.Safe.t -> (backlog, string) result
 
-type a2a_task_status =
-  | A2APending
-  | A2ARunning
-  | A2ACompleted
-  | A2AFailed
-  | A2ACanceled
-[@@deriving show { with_path = false }]
-
-val a2a_task_status_to_string : a2a_task_status -> string
-val a2a_task_status_of_string : string -> (a2a_task_status, string) result
-val a2a_task_status_to_yojson : a2a_task_status -> Yojson.Safe.t
-val a2a_task_status_of_yojson : Yojson.Safe.t -> (a2a_task_status, string) result
-
-type portal_state =
-  | PortalOpen
-  | PortalClosed
-[@@deriving show { with_path = false }]
-
-val portal_state_to_string : portal_state -> string
-val portal_state_of_string : string -> (portal_state, string) result
-val portal_state_to_yojson : portal_state -> Yojson.Safe.t
-val portal_state_of_yojson : Yojson.Safe.t -> (portal_state, string) result
-
-type a2a_task =
-  { a2a_id : string [@key "id"]
-  ; from_agent : string [@key "from"]
-  ; to_agent : string [@key "to"]
-  ; a2a_message : string [@key "message"]
-  ; a2a_status : a2a_task_status [@key "status"]
-  ; a2a_result : string option [@key "result"] [@default None]
-  ; created_at : string [@key "createdAt"]
-  ; updated_at : string [@key "updatedAt"]
-  }
-[@@deriving show]
-
-val a2a_task_to_yojson : a2a_task -> Yojson.Safe.t
-val a2a_task_of_yojson : Yojson.Safe.t -> (a2a_task, string) result
-
-type portal =
-  { portal_from : string [@key "from"]
-  ; portal_target : string [@key "target"]
-  ; portal_opened_at : string [@key "openedAt"]
-  ; portal_status : portal_state [@key "status"]
-  ; task_count : int [@key "taskCount"]
-  }
-[@@deriving show]
-
-val portal_to_yojson : portal -> Yojson.Safe.t
-val portal_of_yojson : Yojson.Safe.t -> (portal, string) result
-
 type sse_session =
   { agent_name : string
   ; connected_at : string

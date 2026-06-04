@@ -240,12 +240,6 @@ let explicit_metadata : (string * metadata) list =
     ("masc_plan_set_task", actor_broadcast_tool);
     ("masc_broadcast", broadcast_tool);
     ("channel_gate", broadcast_tool);
-    ( "masc_portal_open",
-      { masc_workspace_tool with required_permission = Some Masc_domain.CanOpenPortal } );
-    ( "masc_portal_close",
-      { masc_workspace_tool with required_permission = Some Masc_domain.CanOpenPortal } );
-    ( "masc_portal_send",
-      { masc_workspace_tool with required_permission = Some Masc_domain.CanSendPortal } );
     (* Run schemas register from tool_run.ml; catalog still owns early auth metadata.
        RFC-0182: 7 dead admin tools (masc_execute_dry_run, masc_admin_cleanup,
        masc_admin_reset, masc_gc_force, masc_workspace_delete, masc_force_unbind,

@@ -124,7 +124,6 @@ let build_session_seed session_json _cards =
       |> Option.value ~default:"mode n/a"
     in
     let broadcast_count = Option.value ~default:0 (Json_util.assoc_int_opt "broadcast_count" communication) in
-    let portal_count = Option.value ~default:0 (Json_util.assoc_int_opt "portal_count" communication) in
     let seen_count = Option.value ~default:0 (Json_util.assoc_int_opt "seen_agents_count" summary) in
     let member_names =
       dedup_strings
@@ -177,8 +176,7 @@ let build_session_seed session_json _cards =
           | Some value -> event_summary value
           | None -> "최근 session event가 없습니다.");
         communication_summary =
-          Printf.sprintf "%s · broadcast %d · portal %d" mode broadcast_count
-            portal_count;
+          Printf.sprintf "%s · broadcast %d" mode broadcast_count;
         active_count = Option.value ~default:0 (Json_util.assoc_int_opt "active_agents_count" team_health);
         seen_count;
         planned_count;

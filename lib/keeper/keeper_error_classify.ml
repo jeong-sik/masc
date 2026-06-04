@@ -99,13 +99,44 @@ let is_provider_rejected_parse_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Provider
       (Llm_provider.Error.InvalidRequest { reason; _ }) ->
       server_parse_rejection_message_matches reason
-  | _ -> false
+  (* Not a provider-level parse rejection. *)
+  | Agent_sdk.Error.Provider
+      (Llm_provider.Error.NetworkError _ | Llm_provider.Error.Timeout _
+      | Llm_provider.Error.ServerError _ | Llm_provider.Error.RateLimit _
+      | Llm_provider.Error.AuthError _ | Llm_provider.Error.MissingApiKey _
+      | Llm_provider.Error.NotFound _ | Llm_provider.Error.CapacityExhausted _
+      | Llm_provider.Error.HardQuota _
+      | Llm_provider.Error.ProviderUnavailable _
+      | Llm_provider.Error.ProviderTerminal _
+      | Llm_provider.Error.InvalidConfig _
+      | Llm_provider.Error.UnknownVariant _) -> false
+  | Agent_sdk.Error.Api _ -> false
+  | Agent_sdk.Error.Agent _ -> false
+  | Agent_sdk.Error.Mcp _ -> false
+  | Agent_sdk.Error.Config _ -> false
+  | Agent_sdk.Error.Serialization _ -> false
+  | Agent_sdk.Error.Io _ -> false
+  | Agent_sdk.Error.Orchestration _ -> false
+  | Agent_sdk.Error.A2a _ -> false
+  | Agent_sdk.Error.Internal _ -> false
 
 let is_model_rejected_parse_error (err : Agent_sdk.Error.sdk_error) : bool =
   match err with
   | Agent_sdk.Error.Api (InvalidRequest { message }) ->
       server_parse_rejection_message_matches message
-  | _ -> false
+  (* Not a model-level parse rejection. *)
+  | Agent_sdk.Error.Api (NetworkError _ | Timeout _ | Overloaded _
+    | ServerError _ | RateLimited _ | AuthError _ | NotFound _
+    | ContextOverflow _) -> false
+  | Agent_sdk.Error.Provider _ -> false
+  | Agent_sdk.Error.Agent _ -> false
+  | Agent_sdk.Error.Mcp _ -> false
+  | Agent_sdk.Error.Config _ -> false
+  | Agent_sdk.Error.Serialization _ -> false
+  | Agent_sdk.Error.Io _ -> false
+  | Agent_sdk.Error.Orchestration _ -> false
+  | Agent_sdk.Error.A2a _ -> false
+  | Agent_sdk.Error.Internal _ -> false
 
 let is_server_rejected_parse_error (err : Agent_sdk.Error.sdk_error) : bool =
   is_provider_rejected_parse_error err || is_model_rejected_parse_error err
@@ -117,14 +148,43 @@ let is_receipt_lost_error (err : Agent_sdk.Error.sdk_error) : bool =
   match err with
   | Agent_sdk.Error.Internal msg ->
       string_contains_substring ~needle:"execution_receipt_append_failed" msg
-  | _ -> false
+  (* Not a receipt I/O failure. *)
+  | Agent_sdk.Error.Api _ -> false
+  | Agent_sdk.Error.Provider _ -> false
+  | Agent_sdk.Error.Agent _ -> false
+  | Agent_sdk.Error.Mcp _ -> false
+  | Agent_sdk.Error.Config _ -> false
+  | Agent_sdk.Error.Serialization _ -> false
+  | Agent_sdk.Error.Io _ -> false
+  | Agent_sdk.Error.Orchestration _ -> false
+  | Agent_sdk.Error.A2a _ -> false
 
 (** Provider-level timeout (not structural OAS wall-clock budget). *)
 let is_provider_timeout_error (err : Agent_sdk.Error.sdk_error) : bool =
   match err with
   | Agent_sdk.Error.Api (Timeout _) -> true
   | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _) -> true
-  | _ -> false
+  (* Not a provider-level timeout. *)
+  | Agent_sdk.Error.Api (NetworkError _ | Overloaded _ | ServerError _
+    | RateLimited _ | AuthError _ | InvalidRequest _ | NotFound _
+    | ContextOverflow _) -> false
+  | Agent_sdk.Error.Provider
+      (Llm_provider.Error.NetworkError _ | Llm_provider.Error.ServerError _
+      | Llm_provider.Error.RateLimit _ | Llm_provider.Error.AuthError _
+      | Llm_provider.Error.MissingApiKey _ | Llm_provider.Error.NotFound _
+      | Llm_provider.Error.CapacityExhausted _ | Llm_provider.Error.HardQuota _
+      | Llm_provider.Error.InvalidRequest _ | Llm_provider.Error.InvalidConfig _
+      | Llm_provider.Error.ParseError _ | Llm_provider.Error.ProviderUnavailable _
+      | Llm_provider.Error.ProviderTerminal _
+      | Llm_provider.Error.UnknownVariant _) -> false
+  | Agent_sdk.Error.Agent _ -> false
+  | Agent_sdk.Error.Mcp _ -> false
+  | Agent_sdk.Error.Config _ -> false
+  | Agent_sdk.Error.Serialization _ -> false
+  | Agent_sdk.Error.Io _ -> false
+  | Agent_sdk.Error.Orchestration _ -> false
+  | Agent_sdk.Error.A2a _ -> false
+  | Agent_sdk.Error.Internal _ -> false
 
 (* 524 is Cloudflare's "origin responded too slowly" timeout. At keeper
    orchestration level this means the current provider lane is saturated or

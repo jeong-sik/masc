@@ -130,6 +130,10 @@
    ;; Tool_registry.X / Tool_name.X / Tool_token.X / Dispatch_outcome.X /
    ;; Tool_catalog_inference.X resolves after the carve.
    (re_export masc.masc_tool_dispatch)
+   ;; Tool surface leaf extracted to lib/tool_surface/ (masc_tool_surface, RFC-0056
+   ;; Phase 2 / LANE 6). Re-export so test code using bare Tool_spec.X /
+   ;; Tool_capability.X / Tool_shard_types*.X / Tool_board.X etc. resolves.
+   (re_export masc.masc_tool_surface)
    ;; Thompson Sampling extracted to lib/thompson/ (masc_thompson). Re-export so
    ;; test code using bare Thompson_sampling.X resolves after the carve.
    (re_export masc_thompson)

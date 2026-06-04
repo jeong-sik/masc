@@ -33,7 +33,7 @@ let () =
   Unix.putenv "MASC_BASE_PATH" dir
 
 module Config = Masc.Config
-module Registry = Masc.Tool_help_registry
+module Registry = Tool_help_registry
 
 let lookup name =
   match Registry.find_entry Config.raw_all_tool_schemas name with

@@ -34,7 +34,7 @@ let test_finalize_handled_fires_observer () =
   Tool_dispatch.clear_hooks ();
   Tool_dispatch.register_dispatch_observer hook;
   let r = Some (mk_result ~tool_name:"t" ~text:"ok") in
-  let _ = Masc.Tool_dispatch_emit.finalize_from_handler r in
+  let _ = Tool_dispatch_emit.finalize_from_handler r in
   Tool_dispatch.clear_hooks ();
   match !seen with
   | [ (Handled, true) ] -> ()
@@ -49,7 +49,7 @@ let test_finalize_no_handler_fires_observer () =
   in
   Tool_dispatch.clear_hooks ();
   Tool_dispatch.register_dispatch_observer hook;
-  let _ = Masc.Tool_dispatch_emit.finalize_from_handler None in
+  let _ = Tool_dispatch_emit.finalize_from_handler None in
   Tool_dispatch.clear_hooks ();
   match !seen with
   | [ (No_handler, false) ] -> ()
@@ -73,7 +73,7 @@ let test_finalize_applies_transformer_before_observer () =
       | Handled, Some out -> observed_message := Some (Tool_result.message out)
       | _ -> fail "expected observer to see handled result");
   let r = Some (mk_result ~tool_name:"t" ~text:"raw") in
-  let r' = Masc.Tool_dispatch_emit.finalize_from_handler r in
+  let r' = Tool_dispatch_emit.finalize_from_handler r in
   Tool_dispatch.clear_hooks ();
   check int "transformer ran once" 1 !called;
   let suffix = "[capped]" in

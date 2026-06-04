@@ -33,7 +33,7 @@ let () =
 
 module Config = Masc.Config
 module Shard = Masc.Tool_shard
-module Registry = Masc.Tool_help_registry
+module Registry = Tool_help_registry
 
 let registry_has name =
   Option.is_some (Registry.find_entry Config.raw_all_tool_schemas name)

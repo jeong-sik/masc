@@ -160,37 +160,37 @@ let test_descriptor_resolution_capabilities_for_public_aliases () =
     bool
     "ReadFile read-only via descriptor resolution"
     true
-    (capability_has Masc.Tool_capability.Read_only "Read");
+    (capability_has Tool_capability.Read_only "Read");
   check
     bool
     "SearchFiles read-only via descriptor resolution"
     true
-    (capability_has Masc.Tool_capability.Read_only "Grep");
+    (capability_has Tool_capability.Read_only "Grep");
   check
     bool
     "Search secondary alias read-only via descriptor resolution"
     true
-    (capability_has Masc.Tool_capability.Read_only "Search");
+    (capability_has Tool_capability.Read_only "Search");
   check
     bool
     "mcp-prefixed SearchFiles read-only via descriptor resolution"
     true
-    (capability_has Masc.Tool_capability.Read_only "mcp__masc__Grep");
+    (capability_has Tool_capability.Read_only "mcp__masc__Grep");
   check
     bool
     "WriteFile destructive via descriptor resolution"
     true
-    (capability_has Masc.Tool_capability.Destructive "Write");
+    (capability_has Tool_capability.Destructive "Write");
   check
     bool
     "Execute destructive via descriptor resolution"
     true
-    (capability_has Masc.Tool_capability.Destructive "Execute");
+    (capability_has Tool_capability.Destructive "Execute");
   check
     bool
     "ReadFile not destructive via descriptor resolution"
     false
-    (capability_has Masc.Tool_capability.Destructive "Read")
+    (capability_has Tool_capability.Destructive "Read")
 ;;
 
 let () =

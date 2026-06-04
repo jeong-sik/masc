@@ -45,6 +45,8 @@ let test_classify_read () =
   let cmds =
     [ simple_ir "ls" []; simple_ir "cat" [ "file.txt" ]; simple_ir "rg" [ "pattern" ];
       simple_ir "git" [ "status" ]; simple_ir "git" [ "log"; "--oneline" ];
+      simple_ir "git" [ "branch"; "-a"; "--list"; "*20083*" ];
+      simple_ir "git" [ "branch"; "--show-current" ];
       simple_ir "gh" [ "pr"; "view"; "123" ]; simple_ir "gh" [ "issue"; "list" ];
       simple_ir "echo" [ "hello" ]; simple_ir "pwd" [] ]
   in
@@ -64,6 +66,9 @@ let test_classify_write_r1 () =
     [ simple_ir "git" [ "commit"; "-m"; "msg" ];
       simple_ir "git" [ "push" ];
       simple_ir "git" [ "checkout"; "-b"; "feature" ];
+      simple_ir "git" [ "branch"; "new-branch" ];
+      simple_ir "git" [ "branch"; "-d"; "old-branch" ];
+      simple_ir "git" [ "branch"; "-m"; "old"; "new" ];
       simple_ir "npm" [ "install" ];
       simple_ir "mkdir" [ "dir" ];
       simple_ir "touch" [ "file" ] ]

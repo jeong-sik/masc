@@ -73,8 +73,10 @@ val classify_words : string list -> risk_class
 
 val is_write_operation : string list -> bool
 (** [true] when the flattened word list indicates a write-level operation:
-    git push/commit/merge/rebase/reset/checkout -c/-C/-m/-M/branch,
-    or non-git commands that touch state.
+    git push/commit/merge/rebase/reset/checkout, branch create/delete/rename,
+    or non-git commands that touch state. Read-only branch inspection
+    ([git branch], [git branch -a --list PATTERN], [git branch --show-current])
+    remains R0.
 
     Used by [Exec_policy_mutation_classifier.is_write_operation] for
     the IR-typed entry point. *)

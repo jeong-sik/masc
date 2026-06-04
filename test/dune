@@ -529,7 +529,6 @@
   test_keeper_event_queue
   test_keeper_relevance_check
   test_actionable_path_action
-  test_keeper_synthetic_marker
   test_keeper_turn_fsm_wired_sites
   test_effective_oas_env
   test_workspace_routes_keeper

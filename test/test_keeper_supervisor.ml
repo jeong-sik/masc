@@ -16,7 +16,7 @@ module KSM = Keeper_state_machine
 module KLH = Masc.Keeper_lifecycle_hooks
 module FD = Keeper_fd_pressure
 module KA = Masc.Keeper_keepalive
-module KFP = Masc.Keeper_failure_policy
+module KFP = Keeper_failure_policy
 module KSP = Masc.Keeper_supervisor_self_preservation
 
 let temp_dir () =

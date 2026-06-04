@@ -81,7 +81,6 @@
   keeper_post_turn
   keeper_tool_progress
   keeper_tool_observation
-  keeper_tool_response
   keeper_tool_query
   keeper_tool_selection
   keeper_tool_capability_axis
@@ -281,6 +280,11 @@
    masc.keeper_measurement
    masc.keeper_prompt_names
    masc.keeper_event_bus
+   masc.keeper_failure_policy
+   masc.keeper_synthetic_marker
+   masc.keeper_oas_timeout_message
+   masc.keeper_tool_response
+   masc.keeper_social_model_types
    masc.keeper_discovered_tools
    masc.keeper_tool_execute_timeout
    masc.keeper_tool_execute_shell_ir

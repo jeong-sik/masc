@@ -140,7 +140,7 @@ let command_blocked_hint ?allowed_commands name =
     | "sed" | "awk" -> " Use Edit or Write for file changes."
     | "find" -> " Use rg --files or Grep."
     | "curl" | "wget" ->
-      " Use masc_web_fetch to fetch page content, or masc_web_search to find sources."
+      " Use WebFetch to fetch page content, or WebSearch to find sources."
     | "gh" ->
       " Use Execute from a repo worktree for direct commands, or masc_board_post \
        to escalate. Use git directly for repository/worktree/branch operations."
@@ -161,7 +161,7 @@ let command_blocked_hint ?allowed_commands name =
     | "ssh" | "scp" | "rsync" | "ftp" | "sftp" | "nc" ->
       Printf.sprintf
         " '%s' is a network primitive and is not permitted. Keeper network access goes \
-         through masc_web_search or masc_web_fetch tools."
+         through WebSearch or WebFetch tools."
         name
     | _ when looks_like_source_code name ->
       " This looks like source code, not a shell command - use Edit / Write / \

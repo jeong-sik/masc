@@ -73,6 +73,29 @@ let test_blocked_commands () =
       (Printf.sprintf "blocked: %s" cmd) true (is_error (validate cmd))
   ) blocked
 
+let test_network_block_guidance_uses_public_web_aliases () =
+  let check_guidance cmd =
+    let msg = error_msg (validate cmd) in
+    Alcotest.(check bool)
+      (cmd ^ " mentions WebSearch")
+      true
+      (String_util.contains_substring msg "WebSearch");
+    Alcotest.(check bool)
+      (cmd ^ " mentions WebFetch")
+      true
+      (String_util.contains_substring msg "WebFetch");
+    Alcotest.(check bool)
+      (cmd ^ " hides internal masc_web_search")
+      false
+      (String_util.contains_substring msg "masc_web_search");
+    Alcotest.(check bool)
+      (cmd ^ " hides internal masc_web_fetch")
+      false
+      (String_util.contains_substring msg "masc_web_fetch")
+  in
+  check_guidance "curl https://example.com";
+  check_guidance "ssh user@example.com"
+
 let test_shell_metachar_blocked () =
   let chained = [
     "ls; rm -rf /";
@@ -1449,6 +1472,10 @@ let () =
     [ ( "allowlist"
       , [ Alcotest.test_case "allowed dev commands pass" `Quick test_allowed_commands
         ; Alcotest.test_case "dangerous commands blocked" `Quick test_blocked_commands
+        ; Alcotest.test_case
+            "network blocks mention public web aliases"
+            `Quick
+            test_network_block_guidance_uses_public_web_aliases
         ] )
     ; ( "metachar"
       , [ Alcotest.test_case

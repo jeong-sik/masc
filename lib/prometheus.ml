@@ -98,7 +98,7 @@ let metric_workspace_claim_post_provision_failures =
    [Env_config_oas_bridge] so 60s "fantasy" budgets in
    [auto_responder] / [dashboard_provider_runs] no longer
    silently masquerade as the same class of event as
-   intentional 120s/180s budgets in persona authoring / deep_review. *)
+   intentional 120s/180s budgets in persona authoring paths. *)
 include Prometheus_oas_metric_names
 
 

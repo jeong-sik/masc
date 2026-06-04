@@ -4,8 +4,7 @@
     literals scattered across the lib tree.  Each caller is named so:
 
       1. its default is preserved when the original literal was a
-         deliberately-tuned value (tool_deep_review=180s,
-         anti_rationalization=180s);
+         deliberately-tuned value (anti_rationalization=180s);
       2. the two old "fantasy" 60s budgets ([auto_responder],
          [dashboard_provider_runs]) get raised to [default_timeout_sec]
          (300s) — the original 60s did not match observed p50 latency
@@ -30,7 +29,6 @@ type caller =
   | Dashboard_provider_runs
   | Keeper_persona_authoring
   | Server_openai_compat
-  | Tool_deep_review
   | Anti_rationalization
   | Governance_judge
   | Operator_judge
@@ -42,7 +40,7 @@ type caller =
     fantasy budgets called out in #10094.  When the original literal
     was 120/180s on a path that intentionally needed more compute,
     we preserve the value so the fix does not regress
-    deep_review / anti_rationalization. *)
+    anti_rationalization. *)
 let global_default_sec = 300.0
 
 (** Dashboard judges are background/advisory signal generators.  They run on the
@@ -58,7 +56,6 @@ let caller_key = function
   | Dashboard_provider_runs -> "dashboard_provider_runs"
   | Keeper_persona_authoring -> "keeper_persona_authoring"
   | Server_openai_compat -> "server_openai_compat"
-  | Tool_deep_review -> "tool_deep_review"
   | Anti_rationalization -> "anti_rationalization"
   | Governance_judge -> "governance_judge"
   | Operator_judge -> "operator_judge"
@@ -71,7 +68,6 @@ let known_callers () =
   ; Dashboard_provider_runs
   ; Keeper_persona_authoring
   ; Server_openai_compat
-  ; Tool_deep_review
   ; Anti_rationalization
   ; Governance_judge
   ; Operator_judge
@@ -86,7 +82,7 @@ let known_default_sec = function
   (* Preserved at original literal — these were tuned for the
      specific compute pattern of the caller. *)
   | Keeper_persona_authoring | Server_openai_compat -> Some 120.0
-  | Tool_deep_review | Anti_rationalization -> Some 180.0
+  | Anti_rationalization -> Some 180.0
   (* #9629 moved both judges into this SSOT after Operator_judge inherited a
      too-short generic inference timeout.  Live dashboard evidence showed the
      opposite failure mode: a 300s advisory judge budget can leave a

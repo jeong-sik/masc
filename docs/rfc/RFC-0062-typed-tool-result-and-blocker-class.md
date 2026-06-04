@@ -105,7 +105,7 @@ This RFC chooses the structural fix: **closed sum types + exhaustive match**. Ne
 | **3** | `execute_tool_eio` / `dispatch_by_tag` return `Tool_result.t` directly; remove `tuple_of_tool_result` reverse adapter | #14486 | Merged |
 | **4c-1** | 9 core tool handlers (`tool_args`, `retired_file_tool`, `retired_file_write_tool`, `tool_control`, `tool_library`, `tool_plan`, `tool_run`, `tool_task`, retired repo-isolation handler) + keeper dispatch handlers migrated | #14528 | Merged |
 | **4c-2** | `wrap_result` removal in `tool_operator`, `tool_misc` + sub-modules, `tool_autoresearch`, `tool_agent_timeline`, `tool_inline_dispatch` | superseded by RFC-0189 PR-2 | Removed |
-| **4d** | Standalone handlers (`progress`, `session`, `subscriptions`, `tool_deep_review`, `tool_bridge`); delete remaining Tool_result compatibility adapters and `Workspace_types.tool_result` | superseded by RFC-0189 PR-2 | Removed |
+| **4d** | Standalone handlers (`progress`, `session`, `subscriptions`, former adversarial review, `tool_bridge`); delete remaining Tool_result compatibility adapters and `Workspace_types.tool_result` | superseded by RFC-0189 PR-2 | Removed |
 
 ## 6. Test Strategy
 

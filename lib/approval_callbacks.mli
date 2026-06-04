@@ -7,7 +7,7 @@
 
 val auto_approve : Agent_sdk.Hooks.approval_callback
 (** Always-approve callback for system-level OAS runs that are
-    explicitly trusted by MASC: judges, auto_responder, deep_review,
+    explicitly trusted by MASC: judges, auto_responder,
     anti_rationalization, and the OpenAI-compat HTTP bridge.
 
     See the .ml file for the full rationale. TL;DR: keeper runs should

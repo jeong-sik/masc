@@ -11,7 +11,7 @@
      1. The known caller table preserves the deliberate 120s/180s
         budgets that were originally chosen for compute-heavy
         callers — a future refactor that drops them by accident
-        regresses persona authoring / deep_review / anti_rationalization
+        regresses persona authoring / anti_rationalization
         rather than just the fantasy 60s sites this PR fixed.
      2. The two fantasy 60s budgets are raised to the global
         default (300s) — the explicit symptom from the issue.
@@ -61,7 +61,6 @@ let test_intentional_budgets_preserved () =
     [
       Cfg.Keeper_persona_authoring, 120.0;
       Cfg.Server_openai_compat, 120.0;
-      Cfg.Tool_deep_review, 180.0;
       Cfg.Anti_rationalization, 180.0;
     ]
   in
@@ -98,9 +97,9 @@ let test_per_caller_env_override () =
     (Cfg.timeout_sec ~caller:Cfg.Auto_responder ());
   (* Other callers must NOT be affected by this single override. *)
   Alcotest.(check (float 0.0001))
-    "tool_deep_review unaffected"
+    "anti_rationalization unaffected"
     180.0
-    (Cfg.timeout_sec ~caller:Cfg.Tool_deep_review ());
+    (Cfg.timeout_sec ~caller:Cfg.Anti_rationalization ());
   clear_envs ()
 
 (* Global env var (MASC_OAS_BRIDGE_TIMEOUT_DEFAULT_SEC) is a
@@ -112,9 +111,9 @@ let test_global_env_does_not_override_known_callers () =
   clear_envs ();
   Unix.putenv Cfg.global_env_var "999.0";
   Alcotest.(check (float 0.0001))
-    "tool_deep_review keeps 180.0 (global env is a fallback, not an override)"
+    "anti_rationalization keeps 180.0 (global env is a fallback, not an override)"
     180.0
-    (Cfg.timeout_sec ~caller:Cfg.Tool_deep_review ());
+    (Cfg.timeout_sec ~caller:Cfg.Anti_rationalization ());
   Alcotest.(check (float 0.0001))
     "unknown caller picks up global env"
     999.0
@@ -128,12 +127,12 @@ let test_per_caller_env_beats_global_env () =
   clear_envs ();
   Unix.putenv Cfg.global_env_var "999.0";
   Unix.putenv
-    (Cfg.per_caller_env_var ~caller:Cfg.Tool_deep_review)
+    (Cfg.per_caller_env_var ~caller:Cfg.Anti_rationalization)
     "42.0";
   Alcotest.(check (float 0.0001))
     "per-caller env wins over global env"
     42.0
-    (Cfg.timeout_sec ~caller:Cfg.Tool_deep_review ());
+    (Cfg.timeout_sec ~caller:Cfg.Anti_rationalization ());
   clear_envs ()
 
 (* Per-caller env-var name follows the documented convention.
@@ -145,9 +144,9 @@ let test_env_var_name_convention () =
     "MASC_OAS_BRIDGE_TIMEOUT_AUTO_RESPONDER_SEC"
     (Cfg.per_caller_env_var ~caller:Cfg.Auto_responder);
   Alcotest.(check string)
-    "tool_deep_review env var"
-    "MASC_OAS_BRIDGE_TIMEOUT_TOOL_DEEP_REVIEW_SEC"
-    (Cfg.per_caller_env_var ~caller:Cfg.Tool_deep_review);
+    "anti_rationalization env var"
+    "MASC_OAS_BRIDGE_TIMEOUT_ANTI_RATIONALIZATION_SEC"
+    (Cfg.per_caller_env_var ~caller:Cfg.Anti_rationalization);
   Alcotest.(check string)
     "global env var"
     "MASC_OAS_BRIDGE_TIMEOUT_DEFAULT_SEC"

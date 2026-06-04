@@ -3,7 +3,7 @@
 
     Dispatches: transport_status, websocket_discovery, webrtc,
     dashboard, verify_handoff, gc, cleanup_zombies, tool_stats,
-    tool_help, tool_admin, deep_review. *)
+    tool_help, tool_admin. *)
 
 type tool_result = Tool_result.result
 (** Re-exported from {!Tool_result}.  RFC-0062 Phase 4c-2:

@@ -8,7 +8,7 @@
     [Eio.Cancel.Cancelled] is always re-raised to preserve structured concurrency.
 
     [caller] (#10094) is a free-form identifier ("auto_responder",
-    "tool_deep_review", ...) that flows into the timeout label so
+    "anti_rationalization", ...) that flows into the timeout label so
     operators can distinguish fantasy budgets from intentional ones
     when both fire timeouts in the same session.  Callers must
     pass [~caller] explicitly or use {!run_with_caller}, which
@@ -62,7 +62,7 @@ let run_safe ~caller ~timeout_s fn =
     (* #10094: per-caller timeout counter so the operator can see
        WHICH caller is timing out at WHICH configured budget — log
        lines alone collapsed all 27 [auto_responder] 60s-timeouts
-       and the 1 [tool_deep_review] 180s-timeout into the same
+       and the 180s tuned timeout callers into the same
        "after N.Ns" string. *)
     let wall = elapsed () in
     Prometheus.inc_counter
@@ -141,7 +141,7 @@ let run_safe ~caller ~timeout_s fn =
     the per-caller timeout from [Env_config_oas_bridge] and labels
     the resulting Prometheus counter.  Replaces the seven hardcoded
     [run_safe ~timeout_s:N.N] literals scattered across the lib
-    tree.  The original tuned values for persona authoring / deep_review
+    tree.  The original tuned values for persona authoring
     / anti_rationalization are preserved as per-caller defaults;
     the two fantasy 60s budgets ([auto_responder],
     [dashboard_provider_runs]) are raised to the global default

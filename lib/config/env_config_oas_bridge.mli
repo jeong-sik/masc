@@ -26,7 +26,6 @@ type caller =
   | Dashboard_provider_runs
   | Keeper_persona_authoring
   | Server_openai_compat
-  | Tool_deep_review
   | Anti_rationalization
   | Governance_judge
   | Operator_judge

@@ -193,40 +193,12 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.result option =
       Tool_inline_dispatch_comm.handle_messages ~tool_name:name ~start_time:start ctx
 
   (* ── Approval queue (#5907) ─────────────────────────────────── *)
-  | "masc_approval_pending" ->
-      let json = Keeper_approval_queue.list_pending_json () in
-      Some (inline_ok ~tool_name:name ~start_time:start (Yojson.Safe.to_string json))
-  | "masc_approval_get" ->
-      let id = arg_get_string "id" "" in
-      if String.equal id "" then Some (inline_err_workflow ~tool_name:name ~start_time:start "id is required")
-      else
-        (match Keeper_approval_queue.get_pending_json ~id with
-         | Some json -> Some (inline_ok ~tool_name:name ~start_time:start (Yojson.Safe.to_string json))
-         | None ->
-           Some (inline_err_workflow ~tool_name:name ~start_time:start
-             (Printf.sprintf
-               "approval %s is no longer pending or was not found. Refresh with masc_approval_pending before approving/rejecting."
-               id)))
-  | "masc_approval_resolve" ->
-      let id = arg_get_string "id" "" in
-      let decision_str = arg_get_string "decision" "approve" in
-      if String.equal id "" then Some (inline_err_workflow ~tool_name:name ~start_time:start "id is required")
-      else
-        let decision = match String.lowercase_ascii decision_str with
-          | "approve" -> Agent_sdk.Hooks.Approve
-          | "reject" ->
-            let reason = arg_get_string "reason" "operator rejected" in
-            Agent_sdk.Hooks.Reject reason
-          | _ -> Agent_sdk.Hooks.Reject (Printf.sprintf "unknown decision: %s" decision_str)
-        in
-        (match (match Keeper_approval_queue.resolve ~id ~decision with
-                | Ok () -> Ok ()
-                | Error err -> Error (Keeper_approval_queue.resolve_error_to_string err)) with
-         | Ok () ->
-           Some (inline_ok ~tool_name:name ~start_time:start
-             (Printf.sprintf "{\"resolved\":\"%s\",\"decision\":\"%s\"}" id decision_str))
-         | Error err ->
-           Some (inline_err_workflow ~tool_name:name ~start_time:start err))
+  | "masc_approval_pending" | "masc_approval_get" | "masc_approval_resolve" ->
+      Some
+        (Approval_queue_handlers.handle
+           ~tool_name:name
+           ~start_time:start
+           arguments)
 
   (* Verification tools removed: pruned *)
 

@@ -1,14 +1,14 @@
 (** OAS approval callbacks shared across call sites.
 
     Kept in a standalone module (not in [Governance_pipeline]) so callers
-    like [Dashboard_operator_judge] or [Tool_deep_review] can reference
+    like [Dashboard_operator_judge] can reference
     it without forming a dependency cycle through
     [Operator_pending_confirm] and the governance approval queue. *)
 
 (* #7883 *)
 
 (** Always-approve callback for system-level OAS runs that MASC has
-    already decided to trust (judges, auto_responder, deep_review,
+    already decided to trust (judges, auto_responder,
     anti_rationalization, OpenAI-compat bridge).
     Unreachable-by-policy tool calls will be accepted here — install only
     where the trust decision is made at the call site. *)

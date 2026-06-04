@@ -213,13 +213,6 @@ let dispatch ctx ~name ~args : Tool_result.result option =
            ~start_time:start
            admin_ctx
            args)
-  | "masc_deep_review" ->
-      Some
-        (Tool_deep_review.handle_deep_review
-           ~tool_name:name
-           ~start_time:start
-           ctx.config
-           args)
   | _ -> None
 
 let schemas = Tool_schemas_misc.schemas

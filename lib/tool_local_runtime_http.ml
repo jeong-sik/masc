@@ -38,13 +38,7 @@ let header_args headers =
 let max_response_args = function
   | None -> []
   | Some bytes when bytes <= 0 -> []
-  | Some bytes ->
-      [
-        "--max-filesize";
-        Int.to_string bytes;
-        "--range";
-        "0-" ^ Int.to_string (bytes - 1);
-      ]
+  | Some bytes -> [ "--max-filesize"; Int.to_string bytes ]
 
 let curl_get_argv ?(timeout_sec = default_timeout_sec) ?(headers = [])
     ?(follow_redirects = false) ?(max_redirects = 3) ?(compressed = false)

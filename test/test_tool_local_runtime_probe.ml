@@ -176,6 +176,7 @@ let test_curl_get_argv_keeps_curl_as_executable_with_headers () =
   check bool "redirect arg present" true (List.mem "--location" argv);
   check bool "compression arg present" true (List.mem "--compressed" argv);
   check bool "body cap arg present" true (List.mem "--max-filesize" argv);
+  check bool "body cap does not force range response" false (List.mem "--range" argv);
   check bool "curl is not repeated after headers" false (List.mem "curl" (List.tl argv))
 
 let test_ollama_ps_non_200_is_reported_as_error () =

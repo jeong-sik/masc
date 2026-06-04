@@ -73,7 +73,8 @@ let repo_currency_outcome_best_effort ~config ~meta ~repo_name =
     | None -> None
 
 let sync_repo_currency_best_effort ~config ~meta ~repo_name =
-  ignore (repo_currency_outcome_best_effort ~config ~meta ~repo_name)
+  let _outcome = repo_currency_outcome_best_effort ~config ~meta ~repo_name in
+  ()
 
 let repo_path_context ~(config : Workspace.config) ~(meta : keeper_meta) cwd =
   let playground =

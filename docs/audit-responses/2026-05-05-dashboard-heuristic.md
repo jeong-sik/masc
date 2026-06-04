@@ -1,9 +1,9 @@
-# Audit Response — 2026-05-05 Dashboard / Heuristic Metrics / Admission Queue / Resilience
+# Audit Response — 2026-05-05 Dashboard / Admission Queue / Resilience
 
 ## Source
 
 - **Audit**: `deep_audit_dashboard_heuristic.md` (deep-review CI runner)
-- **Scope (audit이 본 파일)**: dashboard_bonsai, heuristic_metrics, admission_queue,
+- **Scope (audit이 본 파일)**: dashboard_bonsai, admission_queue,
   bounded, cancellation, resilience, local_runtime_pool, lockfree_atomic,
   cockpit-kit, llm_metric_bridge — 24개 클레임
 - **Audit's framing**: "가짜 데이터·땜빵·no-op 복구"
@@ -87,11 +87,11 @@ read, (3) 관련 `.mli`/문서/RFC 인용, (4) `git log`로 최근 활동 확인
 | §5.1 `Cancellation.cancel`이 fiber 안 죽임 (flag만 설정) | **A but unused** | `lib/cancellation.ml:150-160` 클레임대로 동작. `rg "Cancellation\." --type ml -g '!_build/**' -g '!test/**'` zero hits — **production caller 0건**. 진짜 fiber cancel은 `keeper_unified_turn.ml`이 `Eio.Cancel.cancel` 직접 호출. | **PR-C** — `archive/2026-05-cancellation/`로 이동. mental model 오염 차단. |
 | §5.2 `TokenStore.with_lock`가 `init` 누락 시 lock 없이 실행 | B | 코드 인라인 코멘트가 명시: "non-Eio contexts or before init". | PR-C archive에 동반 (모듈 자체 archive). |
 
-### §6 Heuristic Metrics
+### §6 Retired Observation Surface
 
 | 클레임 | 분류 | 근거 | 해소 |
 |--------|------|------|------|
-| §6.1 `record`가 init 누락 시 silent no-op | **B** | `server_runtime_bootstrap.ml`이 startup에 `Heuristic_metrics.init` 호출. `test_heuristic_metrics_boot_wireup.ml`이 init→record→flush 검증. production caller는 init 보장 후에만 record. | 변경 없음. |
+| §6.1 `record`가 init 누락 시 silent no-op | **B** | Retired with the legacy heuristic observation surface. | 변경 없음. |
 | §6.2 `degenerate_min_records = 20` 매직 | C | issue #7718 evidence 코멘트 첨부. 매직이지만 정당화됨. | 변경 없음. |
 | §6.3 `unique_decision_tuples` vanity metric | **D**. audit이 caller를 못 찾음. | 변경 없음. |
 

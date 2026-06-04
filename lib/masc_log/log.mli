@@ -238,7 +238,6 @@ module Discovery : LOGGER
     component string operators see ([ts] [LEVEL] [<name>]). The second group
     replaces former raw-stderr / [Logs.*] sites that carried no context and are
     named after their domain. See [docs/LOGGING.md]. *)
-module Heuristic_metrics : LOGGER
 module Dashboard_provider_runs : LOGGER
 module Otel : LOGGER
 module Agent_health : LOGGER

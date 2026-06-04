@@ -272,17 +272,10 @@ handoff_context = {
 
 행동 변경 없이 관측부터 추가한다.
 
-#### 0.1 Heuristic metrics
+#### 0.1 Heuristic observation
 
-신규 `lib/heuristic_metrics.ml`:
-
-- heuristic site별 raw value, threshold, triggered, provenance 기록
-- 저장 위치: `.masc/heuristic_metrics.jsonl`
-- 사용처:
-  - `post_verifier`
-  - `thompson_sampling`
-  - `drift_guard`
-  - `anti_rationalization`
+Retired. The dedicated heuristic-observation JSONL/dashboard surface was
+removed after its production writers were eliminated.
   - `agent_reputation`
 
 #### 0.2 Agent stress indicators
@@ -297,7 +290,7 @@ handoff_context = {
 stress는 궁극적으로 scheduler와 keepalive가 참고하지만, rollout 순서는 두 단계로 나눈다.
 
 - 1차: stress inputs만 기록
-- 2차: typed boundary와 heuristic metrics가 쌓인 뒤 scheduling/keepalive에 연결
+- 2차: typed boundary와 calibration traces가 쌓인 뒤 scheduling/keepalive에 연결
 
 ### Phase 1. Typed Boundary for Uncertainty
 
@@ -351,7 +344,7 @@ and stress_context = {
 **캘리브레이션 루프 (기존 eval_calibration.ml 재사용):**
 
 ```text
-1. Phase 0에서 모든 Uncertain.t 생성 시 (value, confidence, provenance)를 heuristic_metrics.jsonl에 기록
+1. Phase 0에서 모든 Uncertain.t 생성 시 (value, confidence, provenance)를 calibration trace에 기록
 2. eval_calibration.ml의 기존 human labeling 체계로 ground truth 수집:
    - label_record = { notes_hash, human_verdict, labeler, reason }
    - 이미 Dated_jsonl store + divergence analysis 구현되어 있음
@@ -583,7 +576,7 @@ heuristic trigger
 
 ### Gate A: Instrumentation ready
 
-- heuristic metrics가 JSONL로 누적된다.
+- calibration traces가 JSONL로 누적된다.
 - fallback sites가 최소한 visibility를 가진다.
 - behavioral change는 없다.
 
@@ -615,7 +608,7 @@ heuristic trigger
 
 | Phase | Validation | KPI | 성공 기준 | Gate |
 |---|---|---|---|---|
-| 0 | `.masc/heuristic_metrics.jsonl` 누적, stress inputs 기록 | fallback 가시성 | 이전 invisible이던 fallback이 정량화됨 | A |
+| 0 | calibration trace 누적, stress inputs 기록 | fallback 가시성 | 이전 invisible이던 fallback이 정량화됨 | A |
 | 1 | `dune build` typed boundary, `unwrap` 모듈 제한 | raw string 직접 소비 0건 | critical path 전부 `Uncertain.t` 경유 | B |
 | 2 | Eio concurrency tests, invariant tests | 상태 불일치 0건 | race condition 재현 테스트 100% pass | C |
 | 3 | runtime override 후 behavior change | magic number 등록률 | 20/20 (100%) | - |

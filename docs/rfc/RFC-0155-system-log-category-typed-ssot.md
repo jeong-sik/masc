@@ -38,7 +38,7 @@ def system_category(message: str) -> str:
 
 ### 1.2 emit-side 측
 
-`rg "Log.warn|Log.error" lib/ --type ml -c` = **29 파일** (top: `lib/board_dispatch.ml` 12, `lib/heuristic_metrics.ml` 8, `lib/board_votes.ml` 8). emit-side 에는 **`category` 인자가 존재하지 않으며**, 모든 분류 정보가 *message string 안에 자유 텍스트* 로 묻혀 있다. measure.py 는 그 묻힌 텍스트를 다시 짜내는 *reverse engineering* 단계.
+`rg "Log.warn|Log.error" lib/ --type ml -c` = **29 파일** (top: `lib/board_dispatch.ml` 12, `lib/board_votes.ml` 8). emit-side 에는 **`category` 인자가 존재하지 않으며**, 모든 분류 정보가 *message string 안에 자유 텍스트* 로 묻혀 있다. measure.py 는 그 묻힌 텍스트를 다시 짜내는 *reverse engineering* 단계.
 
 ### 1.3 워크어라운드 시그니처 적용 분석
 
@@ -106,7 +106,7 @@ measure.py 는 *string match 제거* 하고 `obj["category"]` 직접 read. "othe
 - `lib/system_log/system_log_category.ml{,i}` (closed-sum) 추가.
 - `lib/log.ml{,i}` API 에 `?category` *optional* 인자 추가 (점진 안전).
 - emit envelope 에 category field 추가.
-- top-frequency 5-10 사이트 (board_dispatch.ml 12, heuristic_metrics.ml 8, board_votes.ml 8) Wave A 마이그레이션.
+- top-frequency 5-10 사이트 (board_dispatch.ml 12, board_votes.ml 8) Wave A 마이그레이션.
 - measure.py 가 *envelope category 우선, string match fallback* 로 dual-read 지원.
 - 예상 LoC: +250 / -50.
 

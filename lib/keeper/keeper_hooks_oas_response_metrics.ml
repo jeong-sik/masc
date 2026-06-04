@@ -4,7 +4,7 @@ open Keeper_hooks_oas_types
 
 (* #9919: counter for post_tool_use_failure events.
 
-   Replaces an earlier [Heuristic_metrics.record] emit that produced
+   Replaces an earlier low-signal metric emit that produced
    degenerate 1-bit records (51 identical rows in 48h of production,
    [threshold=0.0, raw=1.0, triggered=true]).  Per keeper + per tool
    labels let dashboards and #9880 governance judgments distinguish

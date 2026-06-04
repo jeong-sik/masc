@@ -673,19 +673,16 @@
       <div class="zone" id="o5">
         <div class="zhead">
           <span class="zid">O5</span>
-          <h3 class="ztitle">Heuristic / Stress</h3>
+          <h3 class="ztitle">Stress</h3>
           <span class="zkind">observability</span>
         </div>
-        <p class="lead">시스템이 자기 자신에게 보내는 알람. threshold 위반 + agent 실패 streak.</p>
+        <p class="lead">시스템이 자기 자신에게 보내는 알람. agent 실패 streak.</p>
         <p class="lbl">Real data</p>
         <p class="data">
-          <b>.masc/heuristic_metrics.jsonl</b> · 52 rows<br/>
-          예: <em>module=keeper_hooks_oas</em>, <em>site=post_tool_use_failure</em>, <em>triggered=true</em><br/>
           <b>.masc/agent_stress.jsonl</b> · <em>kind.type=failure_streak</em>, <em>count=N</em>
         </p>
         <p class="lbl">Variants</p>
         <ul class="vars">
-          <li><span><b>A · Triggered Feed</b>위반 발화 라인 스트림</span></li>
           <li><span><b>B · Per-Agent Stress</b>failure_streak 배지, sidebar/topbar로 노출</span></li>
         </ul>
         <div class="ide">

@@ -629,21 +629,11 @@ let install () =
         ~(task_id : string)
         ~(task_opt : Masc_domain.task option)
         ~(notes : string)
-        ~(handoff : Yojson.Safe.t option)
+        ~(handoff : Masc_domain.task_handoff_context option)
         ()
       : Workspace_hooks.evidence_gate_verdict
     =
-    let handoff_context_mapped =
-      match handoff with
-      | None -> None
-      | Some json ->
-        (match Masc_domain.task_handoff_context_of_yojson json with
-         | Ok h -> Some h
-         | Error msg ->
-           Log.Task.warn "[cdal-evidence-gate-hook] handoff_context parse failed: %s" msg;
-           None)
-    in
-    match Cdal_evidence_gate.decide ~task_id ~task_opt ~notes ~handoff_context:handoff_context_mapped () with
+    match Cdal_evidence_gate.decide ~task_id ~task_opt ~notes ~handoff_context:handoff () with
     | Cdal_evidence_gate.Pass -> Workspace_hooks.Pass
     | Cdal_evidence_gate.Reject { reason; rule_id; hint; payload_json } ->
       Workspace_hooks.Reject { reason; rule_id; hint; payload_json }

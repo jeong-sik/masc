@@ -358,7 +358,7 @@ and handle_transition ~tool_name ~start_time ctx args =
         ~task_id
         ~task_opt
         ~notes
-        ~handoff:(Option.map Masc_domain.task_handoff_context_to_yojson handoff_context)
+        ~handoff:handoff_context
         ()
   in
   match evidence_decision with

@@ -326,6 +326,22 @@ let test_readonly_policy_projects_to_input_aware_registry () =
        ~input:(`Assoc [ "path", `String "x"; "content", `String "y" ]))
 
 let test_mcp_context_policy_uses_descriptor_resolution () =
+  Alcotest.(check (list string))
+    "safe inline tools project from descriptors"
+    [ "masc_approval_pending" ]
+    (Descriptor.keeper_safe_inline_names ());
+  Alcotest.(check bool)
+    "approval_pending is descriptor-marked inline safe"
+    true
+    (Policy.is_keeper_safe_inline_tool "masc_approval_pending");
+  Alcotest.(check bool)
+    "approval_get is not inline safe"
+    false
+    (Policy.is_keeper_safe_inline_tool "masc_approval_get");
+  Alcotest.(check bool)
+    "approval_resolve is not inline safe"
+    false
+    (Policy.is_keeper_safe_inline_tool "masc_approval_resolve");
   Alcotest.(check bool)
     "approval_pending does not require MCP session"
     false

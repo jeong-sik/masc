@@ -73,6 +73,7 @@ val oas_procedure_of_masc :
 (** {1 Episode persistence} *)
 
 val store_episode_from_snapshot :
+  ?state_snapshot_source:string ->
   memory:Agent_sdk.Memory.t ->
   keeper_name:string ->
   turn:int ->

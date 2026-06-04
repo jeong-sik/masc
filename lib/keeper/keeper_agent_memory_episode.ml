@@ -81,10 +81,11 @@ let record_success
     ~(turn : int)
     ?(oas_turn_count : int option)
     ~(trace_id : string)
+    ?state_snapshot_source
     ~(snapshot : Keeper_memory_policy.keeper_state_snapshot)
     () : unit =
   try
-    Memory_oas_bridge.store_episode_from_snapshot ~memory
+    Memory_oas_bridge.store_episode_from_snapshot ?state_snapshot_source ~memory
       ~keeper_name ~turn ?oas_turn_count ~trace_id snapshot;
     let episodes, procedures =
       Memory_oas_bridge.flush_incremental ~memory ~agent_name:keeper_name

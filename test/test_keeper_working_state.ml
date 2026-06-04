@@ -124,10 +124,36 @@ let test_projector_maps_snapshot_items_to_active_loops () =
       ~updated_at_unix:3.0
       snapshot
   in
-  check int "deduped active loop count" 2 (WS.active_open_loop_count state);
+  check int "deduped active loop count" 1 (WS.active_open_loop_count state);
+  check (list string)
+    "open questions do not become active loops"
+    [ "finish PR" ]
+    (state.WS.active_loops |> List.map (fun loop -> loop.WS.title));
   check (list string) "digest covers active loops"
     (List.map (fun loop -> loop.WS.id) state.active_loops)
     state.prompt_digest_ids;
+  check bool "valid projected state" true (Result.is_ok (WS.validate state))
+
+let test_projector_ignores_budget_synthetic_summary_as_loop () =
+  let snapshot =
+    Masc.Keeper_memory_policy.synthesize_state_from_run_result
+      ~goal:"Fix task"
+      ~tools_used:["tool_execute"]
+      ~stop_reason:"budget_exhausted"
+      ~response_text:"[turn budget exhausted: 8/8 turns used]"
+  in
+  let state =
+    Masc.Keeper_working_state_projector.of_state_snapshot
+      ~keeper_name:"keeper-a"
+      ~trace_id:"trace-1"
+      ~keeper_turn_id:8
+      ~updated_at_iso:"2026-05-21T02:00:00+09:00"
+      ~updated_at_unix:4.0
+      snapshot
+  in
+  check int "synthetic budget summary is not an active loop" 0
+    (WS.active_open_loop_count state);
+  check (list string) "no prompt digest loops" [] state.prompt_digest_ids;
   check bool "valid projected state" true (Result.is_ok (WS.validate state))
 
 (* Resume-merge / readback (ResumeFromDigest) tests.
@@ -349,6 +375,8 @@ let () =
           test_case "json roundtrip" `Quick test_json_roundtrip;
           test_case "projector maps snapshot items to active loops" `Quick
             test_projector_maps_snapshot_items_to_active_loops;
+          test_case "projector ignores budget synthetic summary as loop" `Quick
+            test_projector_ignores_budget_synthetic_summary_as_loop;
         ] );
       ( "resume_merge",
         [

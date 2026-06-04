@@ -44,8 +44,6 @@ val keeper_supported_masc_schemas :
 val keeper_supported_masc_tool_names_from_schemas :
   Masc_domain.tool_schema list -> string list
 
-(** Filter names to only those present in the injected MASC set. *)
-val select_existing_masc_tool_names : string list -> string list
 
 (** {1 Tool Surface Lookup}
 

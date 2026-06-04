@@ -265,6 +265,7 @@
    masc.keeper_registry_types_compaction
    masc.keeper_hooks_oas_types
    masc.keeper_turn_slot_types
+   masc.keeper_binding_health_config
    masc.keeper_tool_name
    masc.keeper_id
    masc.keeper_terminal_reason

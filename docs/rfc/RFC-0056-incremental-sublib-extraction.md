@@ -172,3 +172,31 @@ These findings update the audit script (G1 verification) requirements: future ex
 ## 6. Decision
 
 Phase 0 PoC is included in this PR. RFC merges with Phase 0; Phase 1 RFC is a follow-up authored after Phase 0 lands on `main`.
+
+## 7. Phase 2 — Tool surface leaf (LANE 6)
+
+Status: implemented (PR #20057, 2026-06-04). Design ledger: jeong-sik/masc-oas-docs#132 (boundary-decoupling §27 / LANE 6).
+
+Phase 0/1 defined and validated the extraction gate (G1–G5). Phase 2 applies that gate to the tool **surface** layer and folds in the previously unowned tool⊥keeper invariant.
+
+### 7.1 Background
+
+The Tool **spine** (dispatch / catalog / vocabulary) was extracted to `lib/tool/` (`masc_tool_dispatch`) by PR-S3 (#19829). But the tool **handler / surface** modules (71 × `lib/tool_*.ml`, ~18.8k LoC) stayed in the flat `masc` mega-library. `docs/audit/2026-05-31-tool-keeper-boundary-severance.md` §2 named the structural root fix: *"split the tool surface into its own dune sub-library so the dependency direction is compiler-enforced; the lint holds the line until then."* That split is this Phase.
+
+### 7.2 Sequencing invariant (sharpens G1)
+
+A tool module is **movable iff its mega-outbound is zero.** With any mega-outbound remaining, the module's outbound + back-edges together form the lib-level cycle dune rejects (the campaign's SCC is currently 0 only because outbound and back-edge fall on *different* tool modules). Each PR drives a module's mega-outbound to zero — by leaf-extracting or callback-inverting the dependency (the `set_span_wrapper` precedent from PR-S3) — and only then moves it. Back-edges (dispatcher → tool) resolve for free once the move lands: they become a clean consumer → leaf edge.
+
+### 7.3 Resolves the §6 open decision of the 2026-05-31 severance
+
+The surface-wide invariant *"a tool surface module must not call a `Keeper_` module"* was unowned by any RFC. Phase 2 adopts it inline: enforcement is `scripts/lint/tool-keeper-boundary-ratchet.sh` (baseline = 0); the **root fix** is this sub-library split. Once `lib/tool_surface/` exists the lint is redundant, because `audit-sublib-cycle.py` (G1) makes the direction compiler-enforced — re-coupling becomes a dune cycle that fails the build. This is the deterministic-lint → compiler-enforcement promotion.
+
+### 7.4 PR-6.1 (implemented — PR #20057)
+
+24 pure tool-surface modules (`tool_shard_types` + `tool_shard_types_schemas_*` + `tool_shard_schemas` + `tool_spec` / `tool_capability` / `tool_prefilter` / `tool_access_policy` / `tool_permission_map` / `tool_resource_axis` / `tool_output_validation` / `tool_metrics` / `tool_help_registry` / `tool_dispatch_emit` / `tool_schema_dsl` / `tool_call_replay_harness`) → `lib/tool_surface/` (`masc_tool_surface`). Verified: green island `dune build lib/tool_surface/` EXIT=0; `@check` net-zero; G1 gate PASS (9 leaves clean); tool-keeper ratchet 0/0. Caller delta = G5 (`Masc.X → X` in 14 test files; rename-only otherwise).
+
+Domain adapters (`tool_board*` — `Board_dispatch` type alias; `tool_workspace`; `tool_operator`; `tool_local_runtime*`) are **excluded**: per §3 of the boundary model a module that routes domain operations is an adapter / composition-root concern, not a tool-surface leaf. They fold into LANE 1/3 (domain extraction) via the PR-S2 descriptor-registration seam.
+
+### 7.5 Follow-up
+
+PR-6.2a–d: telemetry (Prometheus/Otel → metric/span callback), server/session (Mcp_server/Session → port), config/auth, and local-runtime inversions zero each blocked module's mega-outbound, then move it. The blocker histogram in the ledger (§27) drives the batching.

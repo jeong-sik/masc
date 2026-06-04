@@ -908,3 +908,14 @@ let attribution_of_validation ~cmd (result : (unit, block_reason) result) : Attr
       ~evidence
       ~reason:(block_reason_to_string br)
 ;;
+
+type safe = Typed_capabilities.safe
+type unsafe = Typed_capabilities.unsafe
+type 'a verified_ir = 'a Typed_capabilities.verified_ir
+
+let promote_to_safe ?caller ~allowed_commands ir =
+  match validate_command_with_allowlist ?caller ~allowed_commands ir with
+  | Ok () -> Ok (Typed_capabilities.Safe_IR ir)
+  | Error br -> Error br
+;;
+

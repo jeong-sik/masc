@@ -1,5 +1,27 @@
 open Ppxlib
 
+let rec validate_ir_capabilities = function
+  | Masc_exec.Shell_ir.Simple simple ->
+      let flags = Typed_capabilities.classify_program_flags simple.bin in
+      let bin_name = Masc_exec.Exec_program.to_string simple.bin in
+      let is_dev = Exec_policy.is_dev_allowed bin_name in
+      if flags.spawn && not is_dev then
+        Error ("Command requires subprocess spawn capability but is not in dev allowlist: " ^ bin_name)
+      else if flags.network && not is_dev then
+        Error ("Command requires network capability but is not in dev allowlist: " ^ bin_name)
+      else
+        Ok ()
+  | Masc_exec.Shell_ir.Pipeline stages ->
+      let rec loop = function
+        | [] -> Ok ()
+        | stage :: rest ->
+            (match validate_ir_capabilities stage with
+             | Ok () -> loop rest
+             | Error _ as err -> err)
+      in
+      loop stages
+
+
 let expand ~loc ~path:_ (expr : expression) =
   match expr.pexp_desc with
   | Pexp_constant (Pconst_string (cmd_str, _, _)) ->
@@ -9,13 +31,16 @@ let expand ~loc ~path:_ (expr : expression) =
            let allowed = Exec_policy.dev_allowed_commands in
            (match Exec_policy.validate_command_with_allowlist ~allowed_commands:allowed ir with
             | Ok () ->
-                (* Statically rewrite to safe promotion signature *)
-                let loc = expr.pexp_loc in
-                [%expr 
-                  Exec_policy.promote_to_safe 
-                    ~allowed_commands:Exec_policy.dev_allowed_commands 
-                    (Obj.magic () : Masc_exec.Shell_ir.t)
-                ]
+                (match validate_ir_capabilities ir with
+                 | Ok () ->
+                     let loc = expr.pexp_loc in
+                     [%expr 
+                       Exec_policy.promote_to_safe 
+                         ~allowed_commands:Exec_policy.dev_allowed_commands 
+                         (Obj.magic () : Masc_exec.Shell_ir.t)
+                     ]
+                 | Error msg ->
+                     Location.raise_errorf ~loc "Compile-time capability violation: %s" msg)
             | Error br ->
                 let reason = Exec_policy.block_reason_to_string br in
                 Location.raise_errorf ~loc "Compile-time guardrail violation: %s" reason)
@@ -33,3 +58,4 @@ let ext =
     expand
 
 let () = Ppxlib.Driver.register_transformation "safe_sh" ~extensions:[ext]
+

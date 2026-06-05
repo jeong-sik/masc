@@ -164,6 +164,25 @@ let classify_structured_shell_op args =
   | None -> Ungated
 ;;
 
+let classify_non_catalog_tool ~tool_name =
+  match tool_name with
+  | "shell_exec" -> Some Shell
+  | _ -> None
+;;
+
+let classify_catalog_metadata_tool ~tool_name =
+  let meta = Tool_catalog.metadata tool_name in
+  match meta.readonly, meta.destructive, meta.requires_actor_binding, meta.effect_domain with
+  | Some true, _, _, _ -> Some Ungated
+  | _, Some true, _, _ -> Some Generic_write
+  | _, _, Some true, _ -> Some Generic_write
+  | _, _, _, Some Tool_catalog.Read_only -> Some Ungated
+  | _, _, _, Some Tool_catalog.Masc_workspace -> Some Workspace_write
+  | _, _, _, Some Tool_catalog.Playground_write
+  | _, _, _, Some Tool_catalog.Host_repo_write -> Some Workspace_write
+  | _ -> None
+;;
+
 let classify_catalog_tool ~tool_name =
   match tool_name with
   | "masc_web_fetch" | "masc_web_search" -> Some Web
@@ -199,12 +218,7 @@ let classify_catalog_tool ~tool_name =
   | "masc_agent_update"
   | "masc_broadcast"
   | "masc_cleanup_zombies"
-  | "masc_gc"
-  | "masc_operator_action"
-  | "masc_operator_confirm" -> Some Generic_write
-  | "masc_agent_card"
-  | "masc_agent_fitness"
-  | "masc_agents"
+  | "masc_gc" -> Some Generic_write
   | "masc_board_curation_read"
   | "masc_board_get"
   | "masc_board_hearths"
@@ -231,7 +245,6 @@ let classify_catalog_tool ~tool_name =
   | "masc_status"
   | "masc_task_history"
   | "masc_tasks"
-  | "masc_tool_help"
   | "masc_tool_list"
   | "masc_tool_stats" -> Some Ungated
   | _ -> None
@@ -253,7 +266,13 @@ let classify_normalized ~tool_name ~arguments ~is_read_only =
   | None ->
     (match classify_catalog_tool ~tool_name with
      | Some resource_class -> resource_class
-     | None -> if is_read_only then Ungated else Generic_write)
+     | None ->
+       (match classify_non_catalog_tool ~tool_name with
+        | Some resource_class -> resource_class
+        | None ->
+          (match classify_catalog_metadata_tool ~tool_name with
+           | Some resource_class -> resource_class
+           | None -> if is_read_only then Ungated else Generic_write)))
 ;;
 
 let classify ~tool_name ~arguments ~is_read_only =

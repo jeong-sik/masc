@@ -198,46 +198,26 @@ let test_autonomous_tool_count () =
     prefixed
 
 let test_finding_accumulation () =
-  let base_path =
-    Filename.concat (Filename.get_temp_dir_name ()) "test_findings_al"
-  in
-  let masc_dir = Filename.concat base_path Common.masc_dirname in
-  let session_dir = Filename.concat masc_dir "session_test_al" in
-  (try Sys.mkdir base_path 0o755 with Sys_error _ -> ());
-  (try Sys.mkdir masc_dir 0o755 with Sys_error _ -> ());
-  (try Sys.mkdir session_dir 0o755 with Sys_error _ -> ());
-  Team_context.add_finding ~base_path ~worker_name:"w1"
-    ~finding:"found issue A";
-  Team_context.add_finding ~base_path ~worker_name:"w2"
-    ~finding:"found issue B";
-  let findings = Team_context.load_findings ~base_path in
-  Alcotest.(check int) "two findings" 2 (List.length findings);
-  Alcotest.(check bool) "has issue A" true
-    (List.exists (fun f -> contains_s f "found issue A") findings);
-  Alcotest.(check bool) "has issue B" true
-    (List.exists (fun f -> contains_s f "found issue B") findings);
-  (* Cleanup *)
-  let findings_file =
-    Filename.concat session_dir "shared_findings.jsonl"
-  in
-  (try Sys.remove findings_file with Sys_error _ -> ());
-  (try Sys.rmdir session_dir with Sys_error _ -> ());
-  (try Sys.rmdir masc_dir with Sys_error _ -> ());
-  (try Sys.rmdir base_path with Sys_error _ -> ())
+  let base_path = temp_base_path "test-findings-al" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+      Team_context.add_finding ~base_path ~worker_name:"w1"
+        ~finding:"found issue A";
+      Team_context.add_finding ~base_path ~worker_name:"w2"
+        ~finding:"found issue B";
+      let findings = Team_context.load_findings ~base_path in
+      Alcotest.(check int) "two findings" 2 (List.length findings);
+      Alcotest.(check bool) "has issue A" true
+        (List.exists (fun f -> contains_s f "found issue A") findings);
+      Alcotest.(check bool) "has issue B" true
+        (List.exists (fun f -> contains_s f "found issue B") findings))
 
 let test_finding_accumulation_json_escaping () =
-  let base_path =
-    Filename.concat (Filename.get_temp_dir_name ()) "test_findings_escape"
-  in
-  let masc_dir = Filename.concat base_path Common.masc_dirname in
+  let base_path = temp_base_path "test-findings-escape" in
   Fun.protect
-    ~finally:(fun () ->
-      (try Sys.remove (Filename.concat masc_dir "shared_findings.jsonl") with Sys_error _ -> ());
-      (try Sys.rmdir masc_dir with Sys_error _ -> ());
-      (try Sys.rmdir base_path with Sys_error _ -> ()))
+    ~finally:(fun () -> rm_rf base_path)
     (fun () ->
-      (try Sys.mkdir base_path 0o755 with Sys_error _ -> ());
-      (try Sys.mkdir masc_dir 0o755 with Sys_error _ -> ());
       Team_context.add_finding ~base_path ~worker_name:"w\"1"
         ~finding:"quote \" and slash \\\\ and newline\nok";
       let findings = Team_context.load_findings ~base_path in
@@ -248,18 +228,10 @@ let test_finding_accumulation_json_escaping () =
            findings))
 
 let test_team_context_build_renders_findings_without_goal () =
-  let base_path =
-    Filename.concat (Filename.get_temp_dir_name ()) "test_findings_prompt"
-  in
-  let masc_dir = Filename.concat base_path Common.masc_dirname in
+  let base_path = temp_base_path "test-findings-prompt" in
   Fun.protect
-    ~finally:(fun () ->
-      (try Sys.remove (Filename.concat masc_dir "shared_findings.jsonl") with Sys_error _ -> ());
-      (try Sys.rmdir masc_dir with Sys_error _ -> ());
-      (try Sys.rmdir base_path with Sys_error _ -> ()))
+    ~finally:(fun () -> rm_rf base_path)
     (fun () ->
-      (try Sys.mkdir base_path 0o755 with Sys_error _ -> ());
-      (try Sys.mkdir masc_dir 0o755 with Sys_error _ -> ());
       Team_context.add_finding ~base_path ~worker_name:"w1"
         ~finding:"render me";
       let ctx = Team_context.build ~base_path in

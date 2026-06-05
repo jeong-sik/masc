@@ -325,7 +325,7 @@ let handle_gate_keepers ~sw ~clock state request reqd =
 (** GET /api/v1/gate/keeper-status?name=<keeper>
 
     Authenticated single-keeper status for connector control routes. *)
-let handle_gate_keeper_status ~sw ~clock state request reqd =
+let handle_gate_keeper_status_by_name ~sw ~clock state request reqd =
   match query_param request "name" with
   | Some raw_name ->
       let name = String.trim raw_name in
@@ -525,7 +525,7 @@ let add_routes ~sw ~clock router =
 
   |> Http.Router.get "/api/v1/gate/keeper-status" (fun request reqd ->
        with_tool_auth ~tool_name:"channel_gate" (fun state _req reqd ->
-         handle_gate_keeper_status ~sw ~clock state request reqd
+         handle_gate_keeper_status_by_name ~sw ~clock state request reqd
        ) request reqd)
 
   (* Generic connector routes — dispatch by ?name=<connector> *)

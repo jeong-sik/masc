@@ -857,11 +857,6 @@ lib/tool_local_runtime.ml:79
 lib/tool_local_runtime.ml:85
 lib/tool_local_runtime.ml:216
 lib/tool_local_runtime.ml:287
-lib/tool_misc_admin.ml:60
-lib/tool_misc_admin.ml:66
-lib/tool_misc_admin.ml:244
-lib/tool_misc_admin.ml:249
-lib/tool_misc_admin.ml:321
 lib/tool_misc_web_fetch.ml:86
 lib/tool_misc_web_search.ml:159
 lib/tool_misc_web_search.ml:268

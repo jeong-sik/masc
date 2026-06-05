@@ -1872,13 +1872,10 @@ export async function fetchDashboardTools(opts?: AbortableRequestOptions): Promi
     ...t,
     category: t.category ?? 'uncategorized',
     tier: t.tier ?? '(unknown tier)',
-    // Tool-layer decoupling groundwork: the OCaml tool layer is shedding actor
-    // classification (Tool_catalog.surface / tool_group). The `/dashboard/tools`
-    // endpoint still emits `surfaces` today (tool_misc_admin.ml), but will drop
-    // it once classification moves to consumers. Totalize here so the field is
-    // never absent downstream — consumers (tool-state.ts hasSurface /
-    // surfaceCountForFilter, tool-full-inventory) keep working with [] and the
-    // surface filter simply degrades to zero counts. Mirrors category/tier above.
+    // Tool-layer decoupling groundwork: surface membership is consumer-owned
+    // metadata, not an execution constraint. Totalize here so the field is
+    // never absent downstream; consumers keep working with [] and the surface
+    // filter simply degrades to zero counts. Mirrors category/tier above.
     surfaces: t.surfaces ?? [],
   }))
   return {

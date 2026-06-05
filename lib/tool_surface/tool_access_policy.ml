@@ -104,15 +104,15 @@ let allows_name policy name =
   selector_matches_name policy.allow name
   && not (selector_matches_name policy.deny name)
 
-(* Union of actor-facing and system-internal curated tool-name lists.  Replaces the former
-   [all_surfaces |> concat_map tools_for_surface] iteration over the deleted
-   [surface] type.  normalize_names dedupes. *)
-let default_candidates () =
-  ( Tool_catalog_surfaces.public_mcp_surface_tools
-  @ Tool_catalog_surfaces.spawned_agent_surface_tools
-  @ Tool_catalog_surfaces.local_worker_surface_tools
-  @ Tool_catalog_surfaces.session_min_surface_tools
-  @ Tool_catalog_surfaces.system_internal_hidden )
+(** Candidate universe fallback for selector [All].  This is deliberately
+    catalog-metadata-owned, not actor-surface-owned: surfaces answer "where is
+    this visible?", while access policy fallback needs "what tool names are
+    known in this layer?".  This lower library cannot depend on Config or
+    tool_schemas without creating cycles.  Callers that have a narrower runtime
+    universe should pass [?candidates] explicitly. *)
+let catalog_metadata_default_candidates () =
+  let explicit_metadata_names = List.map fst Tool_catalog.explicit_metadata in
+  (Tool_catalog_surfaces.system_internal_hidden @ explicit_metadata_names)
   |> normalize_names
 
 let rec resolve_selector ?candidates selector =
@@ -122,7 +122,7 @@ let rec resolve_selector ?candidates selector =
       normalize_names
         (match candidates with
         | Some names -> names
-        | None -> default_candidates ())
+        | None -> catalog_metadata_default_candidates ())
   | Names names -> normalize_names names
   | Union selectors ->
       selectors
@@ -134,7 +134,7 @@ let rec resolve_selector ?candidates selector =
           normalize_names
             (match candidates with
             | Some names -> names
-            | None -> default_candidates ())
+            | None -> catalog_metadata_default_candidates ())
       | first :: rest ->
           let first_set = resolve_selector ?candidates first in
           List.fold_left

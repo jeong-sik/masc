@@ -24,15 +24,18 @@ module GC_metrics : sig
   val add : Proto.Metrics.resource_metrics -> unit
   val drain : unit -> Proto.Metrics.resource_metrics list
 end = struct
-  let mutex = Eio.Mutex.create ()
+  (* Stdlib.Mutex, not Eio.Mutex: this queue only protects non-yielding ref
+     updates and can be touched from exporter shutdown/cancellation paths.
+     Eio.Mutex.use_rw would permanently poison the shared queue if an exception
+     escaped while held; there is no Eio-specific resource invariant here. *)
+  let mutex = Stdlib.Mutex.create ()
   let gc_metrics = ref []
+  let with_lock f = Stdlib.Mutex.protect mutex f
 
-  let add m =
-    Eio.Mutex.use_rw ~protect:true mutex (fun () -> gc_metrics := m :: !gc_metrics)
-  ;;
+  let add m = with_lock (fun () -> gc_metrics := m :: !gc_metrics)
 
   let drain () =
-    Eio.Mutex.use_rw ~protect:true mutex (fun () ->
+    with_lock (fun () ->
       let metrics = !gc_metrics in
       gc_metrics := [];
       metrics)
@@ -453,6 +456,10 @@ let create_backend ~sw ?(stop = Atomic.make false) ?(config = Config.make ()) en
       Eio.Time.sleep env#clock 0.5;
       try B.tick () with
       | Eio.Cancel.Cancelled _ as e -> raise e
+      | Eio.Mutex.Poisoned cause ->
+        Log.Telemetry.error
+          "otel tick failed with Eio.Mutex.Poisoned; underlying cause: %s"
+          (Printexc.to_string cause)
       | exn -> Log.Telemetry.warn "otel tick failed: %s" (Printexc.to_string exn)
     done);
   (module B)

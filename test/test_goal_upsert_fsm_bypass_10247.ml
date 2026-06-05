@@ -94,7 +94,7 @@ let string_field json field =
          (Yojson.Safe.to_string other))
 ;;
 
-let principal_json ~kind ~id = `Assoc [ "kind", `String kind; "id", `String id ]
+let principal_json ~id = `Assoc [ "id", `String id ]
 
 let create_goal_id config ~title =
   let body = dispatch_upsert_must_succeed (workspace_ctx config) [ "title", `String title ] in
@@ -110,7 +110,7 @@ let dispatch_transition_must_succeed ctx ~goal_id ~action =
         (`Assoc
             [ "goal_id", `String goal_id
             ; "action", `String action
-            ; "actor", principal_json ~kind:"operator" ~id:"planner"
+            ; "actor", principal_json ~id:"planner"
             ])
   with
   | Some result when (Tool_result.is_success result) -> ()

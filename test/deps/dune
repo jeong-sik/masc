@@ -131,7 +131,7 @@
   (re_export masc.keeper_synthetic_marker)
   (re_export masc.keeper_oas_timeout_message)
   (re_export masc.keeper_tool_response)
-  (re_export masc.keeper_social_model_types)
+  (re_export masc.keeper_social)
   ;; Model inference metrics + runtime provider label leaves.
   (re_export masc.runtime_provider_labels)
   (re_export masc.model_inference_metrics)

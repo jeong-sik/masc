@@ -756,15 +756,21 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
              match Keeper_chat_queue.dequeue ~keeper_name:payload.name with
              | None -> ()
              | Some queued ->
-                 let run_id = Printf.sprintf "keeper-run-%d" (now_id ()) in
-                 let message_id = Printf.sprintf "keeper-msg-%d" (now_id ()) in
-                 let queued_payload =
-                   { payload with
-                     message = queued.content;
-                     attachments = queued.attachments }
-                 in
-                 process_single_turn ~payload:queued_payload ~run_id ~message_id
-                   ~agent_name;
+                 (match queued.source with
+                  | Keeper_chat_queue.Dashboard ->
+                      let run_id = Printf.sprintf "keeper-run-%d" (now_id ()) in
+                      let message_id = Printf.sprintf "keeper-msg-%d" (now_id ()) in
+                      let queued_payload =
+                        { payload with
+                          message = queued.content;
+                          attachments = queued.attachments }
+                      in
+                      process_single_turn ~payload:queued_payload ~run_id ~message_id
+                        ~agent_name
+                  | Keeper_chat_queue.Discord _ | Keeper_chat_queue.Slack _ ->
+                      Log.Keeper.warn
+                        "keeper_chat_queue: non-Dashboard source dropped for keeper=%s"
+                        payload.name);
                  drain_queue ()
            in
            drain_queue ()))

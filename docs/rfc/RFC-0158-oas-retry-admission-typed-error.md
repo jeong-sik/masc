@@ -175,7 +175,7 @@ masc_oas_error_total{kind="retry_admission_denied", is_retry="false"}  # case 2.
 - Team OO POC commit (`decide_retry_admission_for_turn`) 머지
 - 신규 variant `Retry_admission_denied` 와 `retry_admission_denial` 타입을 `keeper_turn_driver.mli` 에 정의만 (caller 0)
 - `masc_internal_error_to_json`, `summary_of_masc_internal_error` 등 helper 함수에 신규 arm 추가
-- 신규 prometheus label 등록 (emit 0)
+- 신규 legacy metrics backend label 등록 (emit 0)
 - 검증: `dune build` GREEN, `Retry_admission_denied` 사용 site 0 (`rg -nc "Retry_admission_denied" lib/`)
 
 ### Phase B — downstream exhaustive match 채우기

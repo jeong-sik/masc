@@ -77,7 +77,7 @@ Drift_guard Eval_gate Eval_harness Exec_core Failure_envelope
 Governance_pipeline Governance_registry Inference_utils Llm_metric_bridge
 Lockfree_atomic Masc_context_injector Masc_eio_env Masc_event_bus
 Masc_oas_bridge Memory_hooks Memory_oas_bridge Observability_redact
-Persona_dispatch_ref Progress Prometheus Prometheus_hotpath
+Persona_dispatch_ref Progress Otel_metric_store Otel_metric_hotpath
 Runtime_observation Runtime_observation_query_operation Runtime_params
 Server_startup_state Shutdown Sse Task Telemetry_coverage_gap
 Timeout_policy Tool_agent Tool_agent_timeline
@@ -89,7 +89,7 @@ Tool_workspace Transport_metrics Turn_mode_codec Verification Workspace
 Workspace_dispatch_ref
 ```
 
-These fall into three families: cross-cutting infra (`Prometheus`,
+These fall into three families: cross-cutting infra (`legacy metrics backend`,
 `Governance_registry`, `Runtime_params`, `Shutdown`, `Sse`,
 `Telemetry_coverage_gap`), the tool surface (`Tool_*`), and the
 execution/board hub (`Board_*`, `Exec_core`, `Workspace`, `Eval_*`,
@@ -178,9 +178,9 @@ Fan-in is shown for context but does not gate extraction.
 
 | Order | Cluster | Modules | flat-ns fan-out (G1 blockers) | Distinct flat-ns refs |
 |---|---|---|---|---|
-| 1 | registry (`keeper_registry_*`) | 19 | 6 | `Admission_queue`, `Governance_registry`, `Prometheus`, `Runtime_params`, `Shutdown`, `Sse` |
-| 2 | error-classify (`*failure*`, `*error_class*`) | 31 | 6 | `Governance_registry`, `Prometheus`, `Runtime_params`, `Shutdown`, `Telemetry_coverage_gap`, `Workspace` |
-| 3 | runtime-binding (`keeper_heartbeat*`/`keeper_runtime*`/`keeper_attempt*`) | 30 | 6 | `Governance_registry`, `Prometheus`, `Runtime_params`, `Sse`, `Telemetry_coverage_gap`, `Workspace` |
+| 1 | registry (`keeper_registry_*`) | 19 | 6 | `Admission_queue`, `Governance_registry`, `legacy metrics backend`, `Runtime_params`, `Shutdown`, `Sse` |
+| 2 | error-classify (`*failure*`, `*error_class*`) | 31 | 6 | `Governance_registry`, `legacy metrics backend`, `Runtime_params`, `Shutdown`, `Telemetry_coverage_gap`, `Workspace` |
+| 3 | runtime-binding (`keeper_heartbeat*`/`keeper_runtime*`/`keeper_attempt*`) | 30 | 6 | `Governance_registry`, `legacy metrics backend`, `Runtime_params`, `Sse`, `Telemetry_coverage_gap`, `Workspace` |
 | 4 | hooks (`keeper_hook_oas_*`, `keeper_guard_*`) | ~9 | TBD (medium per workflow audit) | re-run G1 before scheduling |
 | 5 | state-fsm (`keeper_turn_*`, `keeper_working_*`, `keeper_reconcile_*`, `keeper_lifecycle_*`) | ~41 | TBD | extract after 1–4 establish base |
 | 6 | observability (`keeper_alert_*`, `keeper_metric_*`, `keeper_event_*`, `keeper_trace_*`) | ~13 | TBD (sink — many writers) | mid-campaign |
@@ -238,7 +238,7 @@ is more decoupling, not a catch-all or a lint suppression.
   would force a caller rewrite across the 140 call sites in one PR, violating
   G5's incremental budget. We accept the residual rename discipline.
 - **Shared-infra fan-out may resist inversion.** Clusters 2–4 reach
-  `Prometheus`, `Governance_registry`, `Runtime_params`. If these cannot be
+  `legacy metrics backend`, `Governance_registry`, `Runtime_params`. If these cannot be
   inverted to interfaces without a large blast radius, those clusters stall and
   the campaign halts at credential + whatever extracts cleanly. This RFC does
   not promise all eight clusters ship; it promises an *order* and a *gate* that

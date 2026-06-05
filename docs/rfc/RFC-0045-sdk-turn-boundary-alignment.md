@@ -240,7 +240,7 @@ Steps 1 and 2 can land in parallel. Step 3 should not land before Step 2
    `measurement`, or carry them forward across SDK turns inside one
    keeper-turn? The current bug only affects `turn_phase`, but consistency
    matters for the dashboard composite observer.
-2. Should there be a `keeper_sdk_turn_count` Prometheus gauge to give
+2. Should there be a `keeper_sdk_turn_count` legacy metrics backend gauge to give
    operators visibility into how often this happens? (Adds noise; defer to
    an audit pass that observes the count in production for a week.)
 3. Are there other writers (besides `set_turn_runtime_state` via

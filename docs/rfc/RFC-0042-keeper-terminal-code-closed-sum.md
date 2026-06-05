@@ -39,7 +39,7 @@ operator_disposition: unmapped (outcome=error runtime_outcome=not_dispatched
   terminal_reason=turn_livelock:stuck_age_exceeded ...)
 ```
 
-The `unmapped` counter (`Prometheus.metric_keeper_receipt_unmapped_disposition`) was
+The `unmapped` counter (`Otel_metric_store.metric_keeper_receipt_unmapped_disposition`) was
 introduced by PR #11717 (Cycle 51) on 2026-04-28 as a regression alert, not as a
 fix. Since then, the recurring pattern is:
 
@@ -139,7 +139,7 @@ WARN logs.
 |---|---------|
 | NG1 | Replacing `Keeper_registry.failure_reason` (already typed; only the boundary is fixed). |
 | NG2 | Reformatting the JSON wire (only the OCaml `code` field type changes; `to_json` still emits a string). |
-| NG3 | Solving `lib/prometheus.ml` godfile or other recurring-fix axes (out of scope; separate RFC). |
+| NG3 | Solving `legacy metrics backend module` godfile or other recurring-fix axes (out of scope; separate RFC). |
 
 ## 3. Design
 
@@ -268,7 +268,7 @@ is safe.
   strings for every `failure_reason` variant after the swap.
 - **PR-3**: emit-site coverage test — for each of the 8 sites, assert the emitted
   receipt's `terminal_reason_code` JSON value is unchanged from main.
-- **PR-4**: invariant test — `Prometheus.metric_keeper_receipt_unmapped_disposition`
+- **PR-4**: invariant test — `Otel_metric_store.metric_keeper_receipt_unmapped_disposition`
   cannot increment for any constructor of `Keeper_turn_terminal_code.t` (mechanically
   verifiable via match exhaustiveness; not a runtime test).
 
@@ -317,11 +317,11 @@ delete the function and its callers.
 
 ### 5.5 What this RFC explicitly does not do
 
-- Does not split `lib/prometheus.ml` (godfile). That is a separate axis with a
+- Does not split `legacy metrics backend module` (godfile). That is a separate axis with a
   user-rejected workaround (see PR #14166 closure note); RFC there will be
   metric-ownership distribution, not file-split.
 - Does not reorganise the dashboard surface that consumes `terminal_reason_code`.
-- Does not change the `Prometheus.metric_keeper_receipt_unmapped_disposition`
+- Does not change the `Otel_metric_store.metric_keeper_receipt_unmapped_disposition`
   counter; it remains as a regression alert. After PR-4 it is expected to read 0
   forever, but keeping it costs nothing.
 

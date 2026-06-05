@@ -83,7 +83,7 @@ Eleven files exceed 1000 LoC each. The larger ones (connector-status
 considers. **Component decomposition is RFC-0050 scope.** RFC-0048
 treats only IA — section list, ordering, default surface, redirects.
 File splits driven by LoC caps are out of scope and have already been
-rejected as a workaround pattern (see `prometheus.ml` extraction issue
+rejected as a workaround pattern (see `legacy metrics backend module` extraction issue
 #14166, closed by user).
 
 ## 2. Goals
@@ -180,7 +180,7 @@ dashboard_section_open_total{surface, section}
 dashboard_section_open_total{surface, section, redirected_from}
 ```
 
-PR-C consumes these via PromQL and emits a Markdown report into
+PR-C consumes these via legacy metrics query and emits a Markdown report into
 `docs/audits/2026-MM-dashboard-ia-usage.md`. Threshold-crossing rows
 become the candidate list for PR-D.
 

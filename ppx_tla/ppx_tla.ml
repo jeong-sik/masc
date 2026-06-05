@@ -601,7 +601,7 @@ let _ : Deriving.t =
          (fun () -> assert (state.phase = `Idle && not state.stop_signaled));
        body
 
-   [wrap_unit] records guard assertion failures in the Prometheus FSM
+   [wrap_unit] records guard assertion failures in the Otel_metric_store FSM
    guard counter and follows the runtime re-raise policy. For curried
    definitions ([let f x y = body]) the wrapped assert is injected into
    the innermost lambda body, so it fires per-application rather than
@@ -642,7 +642,7 @@ let make_wrap_unit_call ~loc ~action_str thunk =
 
 (* Generate: [wrap_unit ~action ~stage (fun () -> assert expr); body]
    The assert is isolated inside a unit thunk so that [wrap_unit] can
-   catch [Assert_failure] and bump a Prometheus counter.  The original
+   catch [Assert_failure] and bump an Otel_metric_store counter.  The original
    body follows as a sequence expression so its return type is preserved.
 
    Result for [let f x = body [@@fsm_guard "expr"]]:

@@ -422,7 +422,7 @@ Phase A (historical observation rollout) — **wiring landed (PR-2)**:
 
 Phase B (enforce with living budgets):
 - Flip liveness to `enforce` after observe-mode samples show the bootstrap and observed-success budgets are not producing false positives.
-- Watch `runtime_attempt_liveness_kill_total{kind=...}` Prometheus counter.
+- Watch `runtime_attempt_liveness_kill_total{kind=...}` legacy metrics backend counter.
 - Inspect budget source labels (`bootstrap` vs `observed_success`) in
   debug logs and receipts while candidate histories warm up.
 

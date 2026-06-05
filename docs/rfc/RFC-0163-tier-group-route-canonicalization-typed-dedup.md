@@ -102,7 +102,7 @@ val of_string_exn : string -> t
 
 val to_string : t -> string
 (** Extract canonical string for profile_lookup, manifest emission,
-    Prometheus labels. *)
+    legacy metrics backend labels. *)
 
 val pp : Format.formatter -> t -> unit
 ```

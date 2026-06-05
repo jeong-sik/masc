@@ -2,8 +2,8 @@
 // keeper system (KSM / KTC / KDP / KCL / KMC).
 //
 // Each labeled edge corresponds to a [edge=<label>] value emitted by
-// the Prometheus counter [masc_keeper_fsm_edge_transitions_total]
-// (declared in lib/prometheus.mli).
+// the legacy metrics backend counter [masc_keeper_fsm_edge_transitions_total]
+// (declared in legacy metrics backend interface).
 //
 // Render:
 //   dot -Tsvg docs/keeper-fsm-graph.dot -o docs/keeper-fsm-graph.svg
@@ -77,7 +77,7 @@ digraph keeper_fsm {
     color = "#888888";
     fontsize = 11;
 
-    legend_solid [label="solid edge = Prometheus instrumented", shape=plaintext];
+    legend_solid [label="solid edge = legacy metrics backend instrumented", shape=plaintext];
     legend_dashed [label="dashed edge = documented, not yet instrumented", shape=plaintext];
   }
 }

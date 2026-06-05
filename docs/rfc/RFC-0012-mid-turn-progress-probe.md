@@ -70,7 +70,7 @@ progress" from "hung turn that will never complete".
   declare local providers (for example, `tier_small` with its Ollama
   entries enabled). `keeper_diverse` remains a single checked-in
   profile, not a family of implicit local variants. The 1 800 s tier
-  is gated behind a follow-up RFC after one week of Prometheus data
+  is gated behind a follow-up RFC after one week of legacy metrics backend data
   demonstrates a 900 s ceiling hit. Implementation: see
   `feature/runtime-tiered-turn-timeout`.
 - Changing OAS execution to use chunked reads. That is an OAS-level
@@ -143,7 +143,7 @@ LOC estimate: 80–150 net additions.
    never killed by the new path, regardless of total duration.
 3. Test fixture verifies both, including the boundary at exactly
    `progress_timeout_sec`.
-4. Prometheus counter
+4. legacy metrics backend counter
    `masc_keeper_stale_termination_by_class_total{class="mid_turn_no_progress"}`
    is non-zero in synthetic reproducer.
 

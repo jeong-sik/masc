@@ -14,7 +14,7 @@ implementation_prs: [16665]
 ## Progress audit (2026-05-21)
 
 Status promoted Draft → Active. PR-1 landed (squash-merged with the
-RFC body as #16665); PR-2 (poller) and PR-3 (Prometheus metric)
+RFC body as #16665); PR-2 (poller) and PR-3 (legacy metrics backend metric)
 remain.
 
 | §4 Phase | PR | Scope | Merged |
@@ -42,7 +42,7 @@ landed, status not yet flipped".
 | §4 Phase | Scope | LoC | depends |
 |----------|------|-----|---------|
 | **PR-2** | `host_fd_pressure_poller.{ml,mli}` new module + wiring in `server_bootstrap_loops.ml` + tests | ~120 | PR-1 |
-| **PR-3 (optional)** | Prometheus metric `host_fd_pressure_*` registration | ~30 | PR-2 |
+| **PR-3 (optional)** | legacy metrics backend metric `host_fd_pressure_*` registration | ~30 | PR-2 |
 
 PR-2 is the load-bearing follow-up (the actual host-FD poller is what
 detects Docker Desktop VM XPC pressure outside masc's nofile
@@ -219,7 +219,7 @@ Durations are env-overrideable: `MASC_HOST_PRESSURE_COOLDOWN_WARN_SEC`,
 |---|---|---|---|
 | PR-1 | `keeper_fd_pressure.{ml,mli}` add `engage_external` + tests | ~60 | none |
 | PR-2 | `host_fd_pressure_poller.{ml,mli}` new module + wiring in `server_bootstrap_loops.ml` + tests | ~120 | PR-1 |
-| PR-3 (optional) | Prometheus metric `host_fd_pressure_*` registration | ~30 | PR-2 |
+| PR-3 (optional) | legacy metrics backend metric `host_fd_pressure_*` registration | ~30 | PR-2 |
 
 Each PR is Draft, follows `workflow-pr.md` (RFC-WAIVED line not needed;
 this RFC itself is the citation).

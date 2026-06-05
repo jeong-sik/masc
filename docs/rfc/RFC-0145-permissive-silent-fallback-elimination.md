@@ -17,7 +17,7 @@ implementation_prs: []
 
 `~/me/.tmp/pr-audit-2026-05-20/AUDIT-REPORT.md` Cluster A documents an
 iter-reproducible chain of 7 merged PRs that wrap silent parse failures
-with a warn + Prometheus counter while explicitly preserving the
+with a warn + legacy metrics backend counter while explicitly preserving the
 `None`/`[]`/default return value. AGENT-LLM-A.md §"워크어라운드 거부 기준"
 signature #1 (Telemetry-as-Fix) classifies this exact shape as a
 workaround: the counter is an *alarm*, not a *fix*.
@@ -142,7 +142,7 @@ in the per-site closeout commit.
 This RFC moves to `Implemented` when:
 
 1. 6 of 7 sites are migrated to `Parse_outcome.parse_safe`.
-2. The per-site Prometheus counter from the predecessor PR is removed
+2. The per-site legacy metrics backend counter from the predecessor PR is removed
    in the same per-site migration PR (no counter outlives its
    workaround tracker).
 3. A grep gate in CI rejects new `| exception _ -> (None|\[\]|true)`

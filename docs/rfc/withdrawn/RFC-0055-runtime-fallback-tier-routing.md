@@ -82,7 +82,7 @@ The runtime system has no terminal fallback that satisfies the capability requir
 
 This RFC explicitly refuses the following four workaround patterns per `~/me/instructions/software-development.md`:
 
-1. **Telemetry-as-fix**: Adding a Prometheus counter for `local_recovery` rejection rate makes the failure visible but does not fix the dead-end.
+1. **Telemetry-as-fix**: Adding a legacy metrics backend counter for `local_recovery` rejection rate makes the failure visible but does not fix the dead-end.
 2. **String/substring classifier**: Adding a `starts_with ~prefix:"ollama:"` guard in the fallback router is a string classifier where a typed capability check belongs.
 3. **N-of-M patch**: Fixing `primary` fallback only, leaving `retired_tool_profile` and `retired_fast_profile` unchanged, is an N-of-M patch.
 4. **Cap/cooldown/dedup/repair**: Raising the `ollama_bench` timeout or adding a cooldown between fallback attempts suppresses the symptom without resolving the structural issue.

@@ -401,6 +401,6 @@ Phase A PR 작업 항목 (참고 — 본 RFC 머지 후 별도 PR):
 2. `lib/runtime/runtime_candidate_skip_reason.ml{,i}` 신설 — §3.2 의 routing-affecting skip reason closed-sum + `to_manifest_tag`. `Runtime_preflight_state` 는 *건드리지 않는다* (cadence vs routing 관심사 분리)
 3. `lib/keeper/keeper_turn_driver.ml::try_runtime` 본체 (`Eio_guard.fair_yield ()` call 직후, health 게이트 진입 *앞*) 에 §3.3 게이트 wiring — Phase A 에서는 `None` 만 반환되므로 실 동작 변화 없음 (verify exact insertion line at PR time)
 4. unit test: `provider_capability_test.ml` 신설 — `None` / `Some true` / `Some false` 세 케이스 + `No_providers_satisfy_required_tools` typed error 발생
-5. counter 등록: `runtime_pre_dispatch_required_tool_filtered{provider, missing_count}` (Prometheus 자동 등록 path)
+5. counter 등록: `runtime_pre_dispatch_required_tool_filtered{provider, missing_count}` (legacy metrics backend 자동 등록 path)
 
 Phase B/C/D 작업은 본 RFC 의 evidence 가 수집된 후 별도 사용자 검토.

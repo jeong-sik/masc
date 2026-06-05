@@ -17,7 +17,7 @@ implementation_prs: []
 
 ## 1. Motivation
 
-A 2026-05-20 six-subsystem audit (Turn / Life / Memory / Compact / Tool / Runtime) identified 3 silent-failure pathways that an immediate follow-up sprint *fixed* by adding Prometheus counters / WARN-once logs while explicitly preserving the silent behavior. All three PR bodies state "Behavior is unchanged".
+A 2026-05-20 six-subsystem audit (Turn / Life / Memory / Compact / Tool / Runtime) identified 3 silent-failure pathways that an immediate follow-up sprint *fixed* by adding legacy metrics backend counters / WARN-once logs while explicitly preserving the silent behavior. All three PR bodies state "Behavior is unchanged".
 
 This pattern is the exact match for `~/me/instructions/software-development.md` §워크어라운드 거부 기준 §1 (텔레메트리-as-fix):
 

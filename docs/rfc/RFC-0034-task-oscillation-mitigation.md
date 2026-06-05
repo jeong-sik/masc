@@ -20,7 +20,7 @@ within 5 minutes. `task-150`, `task-185`, `task-151` show the same pattern.
 
 The detection is real, but the current implementation is narrower than the
 initial audit assumed: `workspace_task.ml` emits WARN lines at the 5/10/20 threshold
-crossings, and its own comment keeps Prometheus/JSONL as follow-up work rather
+crossings, and its own comment keeps legacy metrics backend/JSONL as follow-up work rather
 than an existing surface. The action surface is still observation-only:
 `workspace_task.ml:390` explicitly states "Pure observation: does not block the
 release." Cycle thresholds fire once per crossing and let the loop continue.
@@ -45,7 +45,7 @@ the RFC should be marked superseded by #10421.
    exists after #10421's claim-preservation behavior.
 2. **Escalate to human** when automated mitigation has been exhausted.
 3. **Extend observability without overstating current behavior**: preserve the
-   existing WARN surface and add JSONL/Prometheus wiring in the implementation
+   existing WARN surface and add JSONL/legacy metrics backend wiring in the implementation
    phase.
 
 ## Non-Goals
@@ -172,7 +172,7 @@ operator config):
 |---------|--------|
 | WARN | Existing oscillation_major/severe WARN augmented with `action=cooldown_applied` / `action=paused_human` |
 | JSONL event | `task_cooldown_applied { task_id, until }`, `task_oscillation_human_escalation { task_id, cycle_count }` |
-| Prometheus counter | New: `masc_task_cooldown_applied_total{task,reason}`, `masc_task_human_escalation_total{task}` |
+| legacy metrics backend counter | New: `masc_task_cooldown_applied_total{task,reason}`, `masc_task_human_escalation_total{task}` |
 | Dashboard | Show cooldown countdown + paused_human badge in task list |
 
 ### Recovery actions
@@ -213,7 +213,7 @@ operator config):
 | **PR-2** | Cooldown gate at oscillation_major | `lib/workspace/workspace_task.ml`, `lib/workspace/workspace_task_schedule.ml`, env_config |
 | **PR-3** | Severe-level paused_human + resume action | `lib/workspace/workspace_task.ml`, MCP tool addition |
 | **PR-4** | Dashboard surface | `dashboard/src/components/...` |
-| **PR-5** | Prometheus counters + alert rules | `lib/prometheus.ml`, monitoring config |
+| **PR-5** | legacy metrics backend counters + alert rules | `legacy metrics backend module`, monitoring config |
 
 PR-1 is prerequisite for PR-2/PR-3; PR-4/PR-5 can land in parallel after PR-3.
 
@@ -227,7 +227,7 @@ PR-1 is prerequisite for PR-2/PR-3; PR-4/PR-5 can land in parallel after PR-3.
    timeout (e.g. 24h with no further oscillation activity)? Or strictly manual
    intervention?
 3. **Cross-keeper attribution**: When task-125 oscillates between `executor` and
-   `scholar`, which agent gets attributed in the Prometheus counter? Consider
+   `scholar`, which agent gets attributed in the legacy metrics backend counter? Consider
    labeling by the keeper that triggered the threshold crossing.
 
 ## Decision log

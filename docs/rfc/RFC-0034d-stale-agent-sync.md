@@ -83,7 +83,7 @@ end else task
 
 - 기존 stale claim release 테스트 green
 - 신규 2건 green
-- `Prometheus.metric_keeper_slot_force_released` 등 기존 카운터 변경 없음 (count는 동일, agent state 동기화만 추가)
+- `Otel_metric_store.metric_keeper_slot_force_released` 등 기존 카운터 변경 없음 (count는 동일, agent state 동기화만 추가)
 
 ## 7. References
 

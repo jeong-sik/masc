@@ -124,8 +124,8 @@ correlate it to upstream identity. To diagnose 2026-05-17's outage we had to
 manually `ssh` into the RunPod pod and `grep` `llama-server.log` for
 `GGML_ASSERT` — a path that does not generalize.
 
-Meanwhile, Prometheus already has the structured info: the metric
-`masc_llm_provider_http_status_total` (lib/prometheus.ml) labels by
+Meanwhile, legacy metrics backend already has the structured info: the metric
+`masc_llm_provider_http_status_total` (legacy metrics backend module) labels by
 `provider` and `status_code`. The same labels SHOULD appear on the
 fiber-termination signal so dashboards stay consistent.
 
@@ -139,7 +139,7 @@ In-scope:
   by the runtime to *skip* unhealthy candidates in the per-turn lineup.
 - **(B)** Thread `provider_id : string option` and `http_status : int option`
   through `Fiber_terminated` → `failure_reason` → registry log. Add matching
-  labels to the related Prometheus counters.
+  labels to the related legacy metrics backend counters.
 - A small umbrella of tests at each boundary and one end-to-end integration
   test.
 
@@ -262,7 +262,7 @@ val record_attempt_result :
 (** Feed in-band per-turn results; affects state alongside probe results. *)
 
 val snapshot : t -> (string * health_state) list
-(** For dashboard / Prometheus gauge. *)
+(** For dashboard / legacy metrics backend gauge. *)
 ```
 
 State machine:
@@ -345,7 +345,7 @@ Wire-in:
 - `lib/runtime/runtime_attempt_fsm.ml:478` — `transient_http_status`
 - `lib/runtime/runtime_fsm.ml:48-52` — `Try_next` signal site
 - `lib/keeper/keeper_registry.ml:1792` — phase-transition log emit
-- `lib/prometheus.ml` — `masc_llm_provider_http_status_total` label semantics
+- `legacy metrics backend module` — `masc_llm_provider_http_status_total` label semantics
 - 2026-05-17 incident system log: `.masc/logs/system_log_2026-05-17.jsonl`
   (52 × `fiber_terminated(fiber_unresolved)` events)
 - llama.cpp PR #22673 (speculative decoding draft-mtp — the upstream root of

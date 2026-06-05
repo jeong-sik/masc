@@ -19,7 +19,7 @@ Files with >1000 lines of OCaml (.ml + .mli) under lib/.
 
 | Rank | File | Lines | Proposed Action |
 |------|------|-------|-----------------|
-| 1 | lib/prometheus.ml | 3,195 | Extract sub-lib lib/prometheus/; split constants + built-ins |
+| 1 | Retired metrics backend godfile | 3,195 | Extract metric-store sub-lib; split constants + built-ins |
 | 2 | lib/keeper/keeper_unified_turn.ml | 3,037 | Follow RFC-0072 pattern; extract sub-lib |
 | 3 | lib/keeper/keeper_hooks_oas.ml | 2,697 | Partially done in history; complete extraction |
 | 4 | lib/keeper/keeper_registry.ml | 2,659 | Extract sub-lib |
@@ -53,7 +53,7 @@ Files with >1000 lines of OCaml (.ml + .mli) under lib/.
 ### Phase 1: Root-level god files (highest impact)
 - [x] lib/tool_board.ml → tool_board_schemas extracted (469 lines, 2162→1706)
 - [x] lib/tool_shard.ml → tool_shard_schemas extracted (61 lines, 2152→2094)
-- [ ] lib/prometheus.ml → lib/prometheus/ sub-lib
+- [ ] Retired metrics backend godfile → metric-store sub-lib
 - [ ] lib/tool_board.ml → lib/tool_board/ sub-lib
 - [ ] lib/tool_shard.ml → lib/tool_shard/ sub-lib
 - [x] lib/provider_adapter.ml → removed after this audit

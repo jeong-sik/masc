@@ -77,7 +77,7 @@ val run_with_caller :
   ('a, Oas.Error.sdk_error) result
 ```
 
-Every OAS-bound operation in MASC core *should* go through `run_with_caller` so the per-caller timeout label is attached to Prometheus counters. Confirmed: the `caller` parameter is a typed enum (`Env_config_oas_bridge.caller`), not a string — caller-typo defenses are real.
+Every OAS-bound operation in MASC core *should* go through `run_with_caller` so the per-caller timeout label is attached to Otel_metric_store counters. Confirmed: the `caller` parameter is a typed enum (`Env_config_oas_bridge.caller`), not a string — caller-typo defenses are real.
 
 **Evidence**: `Caller of "unknown" for backwards compatibility` in the `.mli` — backward-compat path exists but is documented and labelled distinctly. No silent default.
 

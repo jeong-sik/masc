@@ -116,7 +116,7 @@ val should_skip :
 (** Test-only reset hook. *)
 val reset_for_test : unit -> unit
 
-(** Emit Prometheus metric on every check. *)
+(** Emit legacy metrics backend metric on every check. *)
 (* internal: metric_mention_dedup_decisions_total{outcome} *)
 ```
 
@@ -187,7 +187,7 @@ eio variant + grpc는 별도 stack — 본 RFC의 dedup이 *workspace_broadcast.
 | S1 | `lib/workspace/mention_dedup.{ml,mli}` 신설 | ~80 |
 | S2 | `workspace_broadcast.ml:122` 직후 dedup 호출 | ~10 |
 | S3 | `~bypass_dedup` 옵션 추가 + 시그니처 변경 | ~15 |
-| S4 | Prometheus counter `metric_mention_dedup_decisions_total{outcome}` | ~10 |
+| S4 | legacy metrics backend counter `metric_mention_dedup_decisions_total{outcome}` | ~10 |
 | S5 | 회귀 테스트 6건 | ~120 |
 | S6 | env `MASC_MENTION_DEDUP_TTL_S` 통합 | ~5 |
 | S7 | dune build + test green | — |

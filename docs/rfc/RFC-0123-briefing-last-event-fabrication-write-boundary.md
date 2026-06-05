@@ -61,7 +61,7 @@ scalars. They no longer depend on string placeholders for absent values.
 
 - `compact_session_json` emits `last_event = null` for empty sessions.
 - The last-event provenance module was removed.
-- The Prometheus counter for last-event provenance was removed.
+- The legacy metrics backend counter for last-event provenance was removed.
 - Briefing compactors now serialize missing optional scalars as JSON `null`.
 - Mission briefing gap/section tests cover the nullable contract.
 

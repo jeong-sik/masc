@@ -283,7 +283,7 @@
             <td class="num">114,203</td>
             <td class="num">9</td>
             <td class="num">2</td>
-            <td><code>lib/prometheus.ml</code> 3082 LOC</td>
+            <td><code>retired metrics backend godfile</code> 3082 LOC</td>
           </tr>
           <tr>
             <td>Current main</td>
@@ -292,7 +292,7 @@
             <td class="num">98,653</td>
             <td class="num">10</td>
             <td class="num">2</td>
-            <td><code>lib/prometheus.ml</code> 3082 LOC</td>
+            <td><code>retired metrics backend godfile</code> 3082 LOC</td>
           </tr>
           <tr>
             <td>Stack after #16206</td>
@@ -340,7 +340,7 @@
         <p>
           Progress 기준은 이 문서의 원래 범위와 동일하게 <code>lib/**/*.ml</code> 중 1000+ LOC만 센다.
           admin tranche는 오래된 stack을 그대로 누르지 않고 현재 <code>origin/main</code> 위에
-          <code>prometheus</code>, <code>keeper_unified_turn</code>,
+          retired metrics backend, <code>keeper_unified_turn</code>,
           <code>keeper_hooks_oas</code> split을 재적용한 경로다.
           stack 기준 수치는 51개까지 내려갔고, 최신 current-main 기준으로는 main에 이미
           병합된 metric-store, dashboard, keeper-agent-run split까지 포함되어 49개가 남는다.
@@ -357,8 +357,8 @@
         <tbody>
           <tr>
             <td class="rank-p0">P0</td><td class="num">3082</td>
-            <td><a href="../../lib/prometheus.ml">lib/prometheus.ml</a></td>
-            <td><code>Prometheus_store</code>, <code>Prometheus_registry</code>, <code>Prometheus_render</code>, domain-owned metric names</td>
+            <td>Retired metrics backend godfile</td>
+            <td><code>Otel_metric_store</code> storage/registry/render split, domain-owned metric names</td>
             <td>Most-imported hub. Stop metric-name growth and module-init side effects before other lanes add counters.</td>
           </tr>
           <tr>
@@ -427,7 +427,7 @@
         </thead>
         <tbody>
           <tr><td>Keeper</td><td class="num">29</td><td class="num">45,899</td><td><code>keeper_unified_turn</code>, <code>keeper_hooks_oas</code>, <code>keeper_supervisor</code>, <code>keeper_registry</code></td><td>Split internal seams first; promote only leaf closures after registry/type cycles are cut.</td></tr>
-          <tr><td>Root tools/metrics</td><td class="num">20</td><td class="num">29,566</td><td><code>prometheus</code>, <code>model_inference_metrics</code>, <code>retired_worker_shell_facade</code>, <code>tool_board</code>, <code>tool_keeper</code></td><td>Facade-compatible private modules, then low-dependency sub-libraries for metrics/schema/tool gates.</td></tr>
+          <tr><td>Root tools/metrics</td><td class="num">20</td><td class="num">29,566</td><td>retired metrics backend, <code>model_inference_metrics</code>, <code>retired_worker_shell_facade</code>, <code>tool_board</code>, <code>tool_keeper</code></td><td>Facade-compatible private modules, then low-dependency sub-libraries for metrics/schema/tool gates.</td></tr>
           <tr><td>Server</td><td class="num">9</td><td class="num">15,372</td><td><code>server_dashboard_http_keeper_api</code>, <code>server_runtime_bootstrap</code>, <code>server_dashboard_http_core</code></td><td>Handler seams first; route parity after handlers stabilize.</td></tr>
           <tr><td>Runtime</td><td class="num">6</td><td class="num">8,431</td><td><code>runtime_transport</code>, <code>runtime_catalog_runtime</code>, <code>runtime_config</code></td><td>Cut <code>Runtime_runner</code> ownership leak; extract refs/names before transport.</td></tr>
           <tr><td>Dashboard</td><td class="num">3</td><td class="num">5,093</td><td><code>dashboard_http_keeper</code>, <code>dashboard_goals_types</code>, <code>dashboard_safe_autonomy</code></td><td>Projection helpers and JSON builders; preserve compact mode.</td></tr>
@@ -487,7 +487,7 @@
       <div class="grid three">
         <div class="panel lane metrics">
           <h3>A. Metrics / Telemetry</h3>
-          <p><code>prometheus</code>, <code>model_inference_metrics</code>, <code>runtime_metrics</code>, <code>telemetry_unified</code>.</p>
+          <p>retired metrics backend, <code>model_inference_metrics</code>, <code>runtime_metrics</code>, <code>telemetry_unified</code>.</p>
           <p>Goal: metric name ownership, store/registry/render split, reader/aggregate/json split.</p>
         </div>
         <div class="panel lane keeper">
@@ -526,9 +526,9 @@
         </thead>
         <tbody>
           <tr><td class="rank-p0">00</td><td>Freeze measurement and guardrails</td><td><code>docs/audit/*</code>, optional inventory script</td><td>1000+ LOC list, fan-in/out, SCC, and godfile gate numbers are reproducible.</td></tr>
-          <tr><td class="rank-p0">01</td><td>Add behavior guard tests for high-risk split points</td><td>dashboard keeper routes, runtime manifest, registry lifecycle, Prometheus output</td><td>Focused tests fail on contract drift before refactors begin.</td></tr>
-          <tr><td class="rank-p0">02</td><td>Prometheus store/registry/render split</td><td><code>prometheus.ml</code>, <code>prometheus_store.ml</code>, <code>prometheus_registry.ml</code>, <code>prometheus_render.ml</code></td><td><code>Prometheus</code> facade unchanged; output text byte-equivalent.</td></tr>
-          <tr><td class="rank-p0">03</td><td>Metric-name ownership split</td><td><code>prometheus_metric_names</code>, <code>runtime_metrics</code>, keeper metric constants</td><td>New metric names land in domain modules; no duplicate runtime constants.</td></tr>
+          <tr><td class="rank-p0">01</td><td>Add behavior guard tests for high-risk split points</td><td>dashboard keeper routes, runtime manifest, registry lifecycle, metric export output</td><td>Focused tests fail on contract drift before refactors begin.</td></tr>
+          <tr><td class="rank-p0">02</td><td>Otel_metric_store storage/registry/render split</td><td><code>otel_metric_store.ml</code>, metric-store registry/render modules</td><td>Metric output text remains byte-equivalent.</td></tr>
+          <tr><td class="rank-p0">03</td><td>Metric-name ownership split</td><td>metric-name modules, <code>runtime_metrics</code>, keeper metric constants</td><td>New metric names land in domain modules; no duplicate runtime constants.</td></tr>
           <tr><td class="rank-p1">04</td><td>Model inference telemetry split</td><td><code>model_inference_metrics.ml</code></td><td><code>Model_inference_entry</code>, reader, aggregate, JSON render separated behind current API.</td></tr>
           <tr><td class="rank-p1">05</td><td>Worker command gate split</td><td><code>retired_worker_shell_facade</code></td><td>Path/shell/gh/destructive-op gates are individual modules; facade dispatch unchanged.</td></tr>
           <tr><td class="rank-p1">06</td><td>Workspace worktree safety split</td><td><code>workspace_worktree.ml</code>, <code>workspace_task*.ml</code></td><td>Policy, repo discovery, sandbox clone, lifecycle, task receipts have narrow interfaces.</td></tr>
@@ -564,7 +564,7 @@
           <tr><th>Lane</th><th>Focused checks</th><th>Always run</th></tr>
         </thead>
         <tbody>
-          <tr><td>Metrics</td><td><code>test_prometheus*</code>, text export snapshots, metric-name duplicate grep</td><td><code>scripts/dune-local.sh build lib/masc.cmxa</code></td></tr>
+          <tr><td>Metrics</td><td>metric-store tests, text export snapshots, metric-name duplicate grep</td><td><code>scripts/dune-local.sh build lib/masc.cmxa</code></td></tr>
           <tr><td>Keeper</td><td><code>test_keeper_registry</code>, <code>test_keeper_state_machine*</code>, <code>test_keeper_supervisor</code>, runtime manifest/receipt tests</td><td><code>scripts/dune-local.sh build test/test_rfc_0086_keeper_namespace_invariant.exe</code></td></tr>
           <tr><td>Server/Dashboard</td><td><code>test_dashboard_http_core</code>, <code>test_dashboard_keeper_routes</code>, <code>test_dashboard_goals</code>, bootstrap tests</td><td><code>scripts/dune-local.sh build @lib/check</code></td></tr>
           <tr><td>Runtime/Tools</td><td>Runtime catalog/transport tests, worker gate tests, tool schema snapshots</td><td><code>bash scripts/lint/godfile-size-regression.sh</code></td></tr>
@@ -591,7 +591,7 @@ ocamlformat --check &lt;touched .ml/.mli files&gt;</code></pre>
           <tr><th>LOC</th><th>File</th><th>Lane</th></tr>
         </thead>
         <tbody>
-          <tr><td class="num">3082</td><td><a href="../../lib/prometheus.ml">lib/prometheus.ml</a></td><td>metrics</td></tr>
+          <tr><td class="num">3082</td><td>retired metrics backend godfile</td><td>metrics</td></tr>
           <tr><td class="num">3022</td><td><a href="../../lib/server/server_dashboard_http_keeper_api.ml">lib/server/server_dashboard_http_keeper_api.ml</a></td><td>server</td></tr>
           <tr><td class="num">2890</td><td><a href="../../lib/keeper/keeper_unified_turn.ml">lib/keeper/keeper_unified_turn.ml</a></td><td>keeper</td></tr>
           <tr><td class="num">2496</td><td><a href="../../lib/keeper/keeper_hooks_oas.ml">lib/keeper/keeper_hooks_oas.ml</a></td><td>keeper</td></tr>

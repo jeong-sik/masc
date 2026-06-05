@@ -3,7 +3,7 @@ status: reference
 last_verified: 2026-04-30
 code_refs:
   - lib/keeper/keeper_composite_observer.ml
-  - lib/keeper_state/keeper_state_machine.ml
+  - lib/keeper_registry/keeper_state_machine.ml
   - lib/keeper/keeper_registry.ml
 ---
 

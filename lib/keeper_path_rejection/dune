@@ -1,7 +1,0 @@
-(include_subdirs no)
-
-(library
- (name masc_keeper_path_rejection)
- (public_name masc.keeper_path_rejection)
- (wrapped false)
- (modules keeper_path_rejection))

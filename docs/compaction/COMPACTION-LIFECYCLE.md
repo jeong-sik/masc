@@ -3,7 +3,7 @@ status: reference
 last_verified: 2026-04-17
 code_refs:
   - lib/keeper/keeper_compact_policy.ml
-  - lib/keeper_state/keeper_state_machine.ml
+  - lib/keeper_registry/keeper_state_machine.ml
   - lib/keeper/keeper_context_core.ml
 ---
 

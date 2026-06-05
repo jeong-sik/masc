@@ -40,7 +40,7 @@ done
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SPEC_DIR="${REPO_ROOT}/specs/keeper-state-machine"
-SSOT_FILE="${REPO_ROOT}/lib/keeper_state/keeper_state_machine.ml"
+SSOT_FILE="${REPO_ROOT}/lib/keeper_registry/keeper_state_machine.ml"
 
 VERBOSE=0
 while [[ $# -gt 0 ]]; do
@@ -57,6 +57,7 @@ module_file() {
     | perl -pe 's/([A-Z]+)([A-Z][a-z])/$1_$2/g; s/([a-z0-9])([A-Z])/$1_$2/g; y/A-Z/a-z/; s/[.]//g')"
   local candidate
   for candidate in \
+    "${REPO_ROOT}/lib/keeper_registry/${normalized}.ml" \
     "${REPO_ROOT}/lib/keeper_state/${normalized}.ml" \
     "${REPO_ROOT}/lib/keeper/${normalized}.ml"
   do
@@ -65,7 +66,7 @@ module_file() {
       return 0
     fi
   done
-  printf '%s/lib/keeper_state/%s.ml' "${REPO_ROOT}" "${normalized}"
+  printf '%s/lib/keeper_registry/%s.ml' "${REPO_ROOT}" "${normalized}"
 }
 
 # Resolve the file that actually defines concrete `phase` constructors.

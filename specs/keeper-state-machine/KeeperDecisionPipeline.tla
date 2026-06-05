@@ -56,7 +56,7 @@
 (*   - sibling KeeperConditionsGovernPhase covers the divergent-conditions *)
 (*     handoff signal that runs orthogonally.                              *)
 (*   The full keeper lifecycle FSM (Offline / Running / Crashed / etc.)    *)
-(*   in lib/keeper_state/keeper_state_machine.ml is OUT OF SCOPE here.     *)
+(*   in lib/keeper_registry/keeper_state_machine.ml is OUT OF SCOPE here.     *)
 (*                                                                         *)
 (* Spec evolution note: an earlier draft modelled a Thompson/tool_count    *)
 (* feedback loop. The runtime no longer carries that information on the    *)

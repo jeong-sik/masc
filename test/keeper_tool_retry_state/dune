@@ -4,4 +4,4 @@
 
 (tests
  (names test_keeper_tool_retry_state)
- (libraries alcotest masc.keeper_tool_retry_state))
+ (libraries alcotest masc.keeper_tooling))

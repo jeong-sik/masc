@@ -6,6 +6,8 @@ open Keeper_types_profile
 
 include Keeper_memory_bank
 
+module Log_memory = Log.Memory
+
 (* Static string-match patterns hoisted from evaluate_memory_recall.
    [Re.str] + [Re.compile] is pure, so a single DFA build at module
    load replaces one per-call compile on every weather/first-question
@@ -175,7 +177,7 @@ let recent_memory_texts_from_lines
              match memory_horizon_of_kind_opt row.kind with
              | Some horizon -> horizon
              | None ->
-                 Log.Memory.warn
+                 Log_memory.warn
                    "memory_horizon_recall: unknown kind %S -> mid_term (drift; see #8826)"
                    row.kind;
                  mid_term_horizon

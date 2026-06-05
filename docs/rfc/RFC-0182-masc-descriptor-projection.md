@@ -261,7 +261,7 @@ After PR #18823 (21 descriptors via dispatch-ref pattern, 83% non-portal coverag
 | `masc_keeper_msg` | `Keeper_msg_async.submit ~clock ~sw` + Turn dispatch | `Tool_keeper_ops.handle_keeper_msg` (lib/tool_keeper_ops.ml:438) |
 | `masc_keeper_sandbox_status` | `load_or_materialize_boot_meta` (clock-aware) | `Tool_keeper.handle_keeper_sandbox_status` |
 | `masc_keeper_create_from_persona` | `execute_keeper_up` → Turn lifecycle | `Tool_keeper_ops.handle_keeper_create_from_persona` |
-| `masc_persona_generate` | LLM call via Eio fiber | `Keeper_persona_authoring.handle_persona_generate` (line 812) |
+| `masc_persona_generate` | retired on main | no backing function |
 | `masc_operator_snapshot` | `Operator_control.context` (sw/clock/proc_mgr/net/mcp_session_id) | `Tool_operator.dispatch` |
 | `masc_operator_digest` | same | same |
 | `masc_operator_action` | same | same |
@@ -328,7 +328,7 @@ Each sub-PR independently mergeable, gated by PR-A.
 From the 17-iter /loop session that built PR #18823:
 
 1. `Eio_guard.with_mutex` (Eio.Mutex.create) — pure inside [`Keeper_status_detail`](../../lib/keeper/keeper_status_detail.ml).  Did NOT block status projection.
-2. `Keeper_persona_authoring → Keeper_turn_driver` transitive cycle (line 880) — resolved via [`Persona_dispatch_ref`](../../lib/persona_dispatch_ref.ml).
+2. The former persona-generate turn-driver cycle is gone on main; the tool is retired and has no backing function.
 3. `Keeper_turn_up.handle_keeper_up` surface ctx.config-only BUT `start_keepalive` transitively requires Eio.  Cannot ctx-free.
 4. `handle_keeper_repair` carried `ignore (ctx.sw, ctx.clock, ctx.config)` warning-suppression scaffolding — was phantom dependency, real body returns stub.
 

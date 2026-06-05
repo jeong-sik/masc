@@ -3,7 +3,7 @@ rfc: "0215"
 title: "Keeper sub-library extraction campaign — sequence and per-PR gates"
 status: Draft
 created: 2026-06-04
-updated: 2026-06-04
+updated: 2026-06-05
 author: jeong-sik (with Claude Opus 4.8)
 supersedes: []
 superseded_by: null
@@ -162,10 +162,14 @@ only to pre-empt that misattribution.
 
 The first cluster cannot extract as a pure leaf today because no cluster has
 zero flat-ns fan-out (§5 table). The pre-work is: relocate or invert the
-handful of flat-ns refs that are **not** of the cluster's own domain (a
-credential sub-lib must not reach `Masc_oas_bridge`). That inversion — callback
-or interface, per the dependency-direction rule — is a separate PR that ships
-*before* the `dune` stanza.
+handful of flat-ns refs that are **not** of the cluster's own domain. That
+inversion — callback or interface, per the dependency-direction rule — is a
+separate PR that ships *before* the `dune` stanza.
+
+2026-06-05 correction: the former split persona implementation
+module has been removed from current `main`; it is no longer an extraction
+candidate. Keep the public persona profile tools on the existing
+`keeper_persona` path instead of reviving a separate authoring module.
 
 ## 5. Extraction sequence
 
@@ -174,30 +178,21 @@ Fan-in is shown for context but does not gate extraction.
 
 | Order | Cluster | Modules | flat-ns fan-out (G1 blockers) | Distinct flat-ns refs |
 |---|---|---|---|---|
-| 1 | credential (`keeper_persona_authoring*`) | 3 | **3** | `Agent_sdk_response`, `Approval_callbacks`, `Masc_oas_bridge` |
-| 2 | registry (`keeper_registry_*`) | 19 | 6 | `Admission_queue`, `Governance_registry`, `Prometheus`, `Runtime_params`, `Shutdown`, `Sse` |
-| 3 | error-classify (`*failure*`, `*error_class*`) | 31 | 6 | `Governance_registry`, `Prometheus`, `Runtime_params`, `Shutdown`, `Telemetry_coverage_gap`, `Workspace` |
-| 4 | runtime-binding (`keeper_heartbeat*`/`keeper_runtime*`/`keeper_attempt*`) | 30 | 6 | `Governance_registry`, `Prometheus`, `Runtime_params`, `Sse`, `Telemetry_coverage_gap`, `Workspace` |
-| 5 | hooks (`keeper_hook_oas_*`, `keeper_guard_*`) | ~9 | TBD (medium per workflow audit) | re-run G1 before scheduling |
-| 6 | state-fsm (`keeper_turn_*`, `keeper_working_*`, `keeper_reconcile_*`, `keeper_lifecycle_*`) | ~41 | TBD | extract after 1–4 establish base |
-| 7 | observability (`keeper_alert_*`, `keeper_metric_*`, `keeper_event_*`, `keeper_trace_*`) | ~13 | TBD (sink — many writers) | mid-campaign |
-| 8 | execution (`keeper_agent_run_*`, `keeper_tool_*`, `keeper_sandbox_*`, `keeper_run_*`) | ~70 | highest | last — the mesh hub |
+| 1 | registry (`keeper_registry_*`) | 19 | 6 | `Admission_queue`, `Governance_registry`, `Prometheus`, `Runtime_params`, `Shutdown`, `Sse` |
+| 2 | error-classify (`*failure*`, `*error_class*`) | 31 | 6 | `Governance_registry`, `Prometheus`, `Runtime_params`, `Shutdown`, `Telemetry_coverage_gap`, `Workspace` |
+| 3 | runtime-binding (`keeper_heartbeat*`/`keeper_runtime*`/`keeper_attempt*`) | 30 | 6 | `Governance_registry`, `Prometheus`, `Runtime_params`, `Sse`, `Telemetry_coverage_gap`, `Workspace` |
+| 4 | hooks (`keeper_hook_oas_*`, `keeper_guard_*`) | ~9 | TBD (medium per workflow audit) | re-run G1 before scheduling |
+| 5 | state-fsm (`keeper_turn_*`, `keeper_working_*`, `keeper_reconcile_*`, `keeper_lifecycle_*`) | ~41 | TBD | extract after 1–4 establish base |
+| 6 | observability (`keeper_alert_*`, `keeper_metric_*`, `keeper_event_*`, `keeper_trace_*`) | ~13 | TBD (sink — many writers) | mid-campaign |
+| 7 | execution (`keeper_agent_run_*`, `keeper_tool_*`, `keeper_sandbox_*`, `keeper_run_*`) | ~70 | highest | last — the mesh hub |
 
-**Recommended first extraction: credential (`keeper_persona_authoring*`).**
-It is the smallest *decoupling surface* — 3 modules, 3 flat-ns refs to invert.
-But note the honest caveat: those 3 refs (`Agent_sdk_response`,
-`Approval_callbacks`, `Masc_oas_bridge`) are **not** credential-domain, so they
-cannot move into the credential sub-lib; they must be inverted (callback /
-interface) in a pre-work PR (§4.3) before the `dune` stanza. Clusters 2–4 have
-fan-out dominated by shared infra (`Prometheus`, `Governance_registry`,
-`Runtime_params`, `Sse`), which is harder to invert because it is genuinely
-cross-cutting. Credential's 3 refs are point fixes; the infra refs are systemic.
-That asymmetry — not fan-in — is why credential goes first.
-
-If the §4.3 inversion proves larger than a single PR, registry (cluster 2) is
-the fallback first move: its 6 refs are all shared-infra modules that several
-*future* clusters also reach, so an infra-facing interface built for registry
-amortizes across 2–4.
+**Recommended first extraction: registry (`keeper_registry_*`).** It is now the
+lowest live fan-out cluster after removing the retired split persona
+module from the extraction queue. Its 6 refs are shared-infra modules that
+several future clusters also reach, so an infra-facing interface built for
+registry amortizes across registry, error-classify, and runtime-binding. The
+tradeoff is that these refs are genuinely cross-cutting; each inversion must be
+small enough to avoid creating a new facade god-module.
 
 ### 5.1 Per-PR shape
 

@@ -150,8 +150,6 @@ lib/keeper/keeper_lifecycle_events.ml:2:Oas_events
 lib/keeper/keeper_lifecycle_events.ml:6:Oas_events
 lib/keeper/keeper_lifecycle_events.ml:89:Oas_events
 lib/keeper/keeper_lifecycle_events.mli:29:Oas_events
-lib/keeper/keeper_persona_authoring.ml:960:Oas_worker
-lib/keeper/keeper_persona_authoring.ml:979:Oas_worker
 lib/keeper/keeper_run_tools.ml:113:Oas_worker
 lib/keeper/keeper_run_tools.ml:477:Oas_worker
 lib/keeper/keeper_run_tools.mli:85:Oas_worker

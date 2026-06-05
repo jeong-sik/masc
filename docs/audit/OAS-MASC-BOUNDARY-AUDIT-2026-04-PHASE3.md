@@ -54,7 +54,6 @@ $ rg -l "Masc_oas_bridge\." \
     --glob 'lib/server/**/*.ml' \
     --glob 'lib/dashboard/**/*.ml' \
     --glob 'lib/local/**/*.ml'
-lib/keeper/keeper_persona_authoring.ml
 lib/dashboard/dashboard_operator_judge.ml
 lib/dashboard/dashboard_governance_judge.ml
 lib/server/server_openai_compat.ml

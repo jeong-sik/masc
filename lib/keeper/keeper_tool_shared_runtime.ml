@@ -304,8 +304,8 @@ let assoc_override_string (key : string) (value : string) = function
   | other -> other
 ;;
 
-let keeper_effective_allowed_paths ~(meta : keeper_meta) =
-  Keeper_alerting_path.effective_allowed_paths ~meta
+let keeper_effective_allowed_paths ~(config : Workspace.config) ~(meta : keeper_meta) =
+  Keeper_alerting_path.effective_allowed_paths_with_repos ~config ~meta
 ;;
 
 let keeper_effective_write_allowed_paths ~(meta : keeper_meta) =
@@ -363,7 +363,12 @@ let relative_path_targets_allowed_root ~(meta : keeper_meta) (raw : string) =
     prefix <> ""
     && (String.equal raw prefix || String.starts_with ~prefix:(prefix ^ "/") raw)
   in
-  keeper_effective_allowed_paths ~meta
+  (* Sandbox root only — does not need repo-specific paths.
+     [keeper_effective_allowed_paths] now requires [config] for
+     repo resolution (RFC-0218 Phase 4-B); this function only
+     checks if a relative path targets the sandbox root. *)
+  Keeper_sandbox.allowed_path_roots_of_meta ~meta
+  @ meta.allowed_paths
   |> List.filter Filename.is_relative
   |> List.exists boundary
 ;;
@@ -644,7 +649,7 @@ let resolve_projected_keeper_read_path
   =
   resolve_projected_read_path
     ~config
-    ~allowed_paths:(keeper_effective_allowed_paths ~meta)
+    ~allowed_paths:(keeper_effective_allowed_paths ~config ~meta)
     ~raw_for_error
     ~projected_path
 ;;
@@ -682,13 +687,13 @@ let resolve_keeper_read_path
   | Ok { projected_path; projected_from_visible = true } ->
     resolve_projected_read_path
       ~config
-      ~allowed_paths:(keeper_effective_allowed_paths ~meta)
+      ~allowed_paths:(keeper_effective_allowed_paths ~config ~meta)
       ~raw_for_error:raw_path
       ~projected_path
   | Ok { projected_path; projected_from_visible = false } ->
     match Keeper_alerting_path.resolve_keeper_read_path
       ~config
-      ~allowed_paths:(keeper_effective_allowed_paths ~meta)
+      ~allowed_paths:(keeper_effective_allowed_paths ~config ~meta)
       ~raw_path:projected_path
     with
     | Error rej -> Error (Keeper_alerting_path.rejection_to_user_message rej)

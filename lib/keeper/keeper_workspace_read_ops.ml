@@ -22,20 +22,15 @@ let try_handle
   let containment_check target =
     Keeper_sandbox_containment.check_read_target ~config ~meta ~target
   in
-  let repo_check target =
-    Keeper_repo_mapping.validate_path_access ~keeper_id:meta.name
-      ~base_path:root ~path:target
-  in
+  (* RFC-0218 Phase 4-C: repo_check removed. Repo-level access control
+     is now handled by pre-computed allowed_paths at session setup. *)
   let read_target () =
     match Keeper_tool_execute_path.resolve_tool_read_path ~config ~meta ~args with
     | Error _ as e -> e
     | Ok target ->
       (match containment_check target with
        | Error msg -> Error msg
-       | Ok () ->
-         match repo_check target with
-         | Error msg -> Error msg
-         | Ok () -> Ok target)
+       | Ok () -> Ok target)
   in
   let cwd_target () =
     match Keeper_tool_execute_path.resolve_tool_read_cwd ~config ~meta ~args with
@@ -43,10 +38,7 @@ let try_handle
     | Ok cwd ->
       (match containment_check cwd with
        | Error msg -> Error msg
-       | Ok () ->
-         match repo_check cwd with
-         | Error msg -> Error msg
-         | Ok () -> Ok cwd)
+       | Ok () -> Ok cwd)
   in
   let path_error e =
     actionable_path_error ~op ~meta ~raw_path ~error:e

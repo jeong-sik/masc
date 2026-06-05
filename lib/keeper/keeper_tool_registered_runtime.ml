@@ -19,7 +19,7 @@ let masc_path_blocked
     in
     let effective_paths =
       if is_read_only
-      then keeper_effective_allowed_paths ~meta
+      then keeper_effective_allowed_paths ~config ~meta
       else keeper_effective_write_allowed_paths ~meta
     in
   if effective_paths = []

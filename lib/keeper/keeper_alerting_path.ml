@@ -371,6 +371,41 @@ let effective_allowed_paths ~(meta : Keeper_meta_contract.keeper_meta) : string 
   sandbox_paths @ meta.allowed_paths
 ;;
 
+(** [RFC-0218 Phase 4-B] Compute effective allowed_paths with specific
+    repo paths instead of the broad sandbox root.
+
+    Replaces the broad sandbox root (which covers all repos/) with
+    explicit [mind/] + per-repo paths resolved from
+    [Keeper_repo_mapping].  This removes the need for downstream
+    [validate_path_access] calls — the pre-computed allowlist is
+    sufficient for both physical boundary (sandbox containment) and
+    logical boundary (repo access control).
+
+    Falls back to the broad sandbox root when repo mapping is
+    unavailable, preserving backward compatibility. *)
+let effective_allowed_paths_with_repos
+  ~(config : Workspace.config)
+  ~(meta : Keeper_meta_contract.keeper_meta)
+  : string list
+=
+  match Keeper_repo_mapping.allowed_repositories
+          ~keeper_id:meta.name
+          ~base_path:config.Workspace.base_path with
+  | Ok repo_ids ->
+    let repo_paths =
+      repo_ids
+      |> List.map (fun repo_id ->
+        Playground_paths.repos_path meta.name ^ repo_id)
+    in
+    Playground_paths.mind_path meta.name
+    :: repo_paths
+    @ meta.allowed_paths
+  | Error _ ->
+    (* Fallback: broad sandbox root when repo mapping unavailable *)
+    let sandbox_paths = Keeper_sandbox.allowed_path_roots_of_meta ~meta in
+    sandbox_paths @ meta.allowed_paths
+;;
+
 (** Compute effective write allowed_paths from keeper meta.
     Returns the single sandbox root plus any explicit [allowed_paths]
     entries. Every additional path must be listed explicitly in

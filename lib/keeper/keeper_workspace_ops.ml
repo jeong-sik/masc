@@ -44,20 +44,14 @@ let handle_tool_search_files
     let containment_check target =
       Keeper_sandbox_containment.check_read_target ~config ~meta ~target
     in
-    let repo_check target =
-      Keeper_repo_mapping.validate_path_access ~keeper_id:meta.name
-        ~base_path:root ~path:target
-    in
+    (* RFC-0218 Phase 4-C: repo_check removed. *)
     let cwd_target () =
       match Keeper_tool_execute_path.resolve_tool_read_cwd ~config ~meta ~args with
       | Error _ as e -> e
       | Ok cwd ->
         (match containment_check cwd with
          | Error msg -> Error msg
-         | Ok () ->
-           match repo_check cwd with
-           | Error msg -> Error msg
-           | Ok () -> Ok cwd)
+         | Ok () -> Ok cwd)
     in
     let path_error e =
       actionable_path_error ~op ~meta ~raw_path ~error:e

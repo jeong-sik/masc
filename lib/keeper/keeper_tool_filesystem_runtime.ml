@@ -129,7 +129,7 @@ let resolve_read_file_target
         (match
            Keeper_alerting_path.resolve_keeper_read_path
              ~config
-             ~allowed_paths:(keeper_effective_allowed_paths ~meta)
+             ~allowed_paths:(keeper_effective_allowed_paths ~config ~meta)
              ~raw_path:normalized
          with
          | Ok target -> Ok target
@@ -228,18 +228,9 @@ let handle_read_file
        (match Keeper_sandbox_containment.check_read_target ~config ~meta ~target with
         | Error e -> error_json ~fields:[ "path", `String target ] e
         | Ok () ->
-          (* Multi-repository Phase 2: repository-level access restriction.
-       If the resolved path is under a registered repository, enforce
-       keeper-to-repo mapping.  Paths outside all registered repos are
-       allowed (playground general files). *)
-          (match
-             Keeper_repo_mapping.validate_path_access
-               ~keeper_id:meta.name
-               ~base_path:(Keeper_alerting_path.project_root_of_config config)
-               ~path:target
-           with
-           | Error msg -> error_json ~fields:[ "path", `String target ] msg
-           | Ok () ->
+          (* RFC-0218 Phase 4-C: repo-level access control now handled by
+       pre-computed allowed_paths (effective_allowed_paths_with_repos).
+       The validate_path_access runtime call is no longer needed. *)
              (* RFC-0006 Phase B-2: sandbox-backed keepers route the actual
        byte read through the backend read runner so the backend mount
        restrictions are the load-bearing isolation. The host containment
@@ -568,14 +559,8 @@ let handle_file_write
              (match check_invariant_sandbox_isolation ~turn_sandbox_factory ~target with
               | Error msg -> error_json ~fields:[ "path", `String target ] msg
               | Ok () ->
-                (match
-                   Keeper_repo_mapping.validate_path_access
-                     ~keeper_id:meta.name
-                     ~base_path:(Keeper_alerting_path.project_root_of_config config)
-                     ~path:target
-                 with
-                 | Error msg -> error_json ~fields:[ "path", `String target ] msg
-                 | Ok () ->
+                (* RFC-0218 Phase 4-C: repo access handled by pre-computed
+               allowed_paths. validate_path_access removed. *)
                    (try
                       let current =
                         try Fs_compat.load_file target with
@@ -667,14 +652,8 @@ let handle_file_write
              (match check_invariant_sandbox_isolation ~turn_sandbox_factory ~target with
               | Error msg -> error_json ~fields:[ "path", `String target ] msg
               | Ok () ->
-                (match
-                   Keeper_repo_mapping.validate_path_access
-                     ~keeper_id:meta.name
-                     ~base_path:(Keeper_alerting_path.project_root_of_config config)
-                     ~path:target
-                 with
-                 | Error msg -> error_json ~fields:[ "path", `String target ] msg
-                 | Ok () ->
+                (* RFC-0218 Phase 4-C: repo access handled by pre-computed
+               allowed_paths. validate_path_access removed. *)
                    (try
                       let write_result =
                         match

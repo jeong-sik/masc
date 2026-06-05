@@ -144,6 +144,15 @@ val ensure_sandbox_bundle_for_profile :
 val effective_allowed_paths :
   meta:Keeper_meta_contract.keeper_meta -> string list
 
+(** [RFC-0218 Phase 4-B] Like [effective_allowed_paths] but replaces
+    the broad sandbox root with specific repo paths resolved from
+    [Keeper_repo_mapping].  Falls back to broad sandbox root when
+    repo mapping is unavailable. *)
+val effective_allowed_paths_with_repos :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  string list
+
 (** Effective WRITE allowed_paths from keeper meta — currently the
     same shape as [effective_allowed_paths]. *)
 val effective_write_allowed_paths :

@@ -56,8 +56,13 @@ val missing_file_error_json
     it to the front. Non-assoc values pass through unchanged. *)
 val assoc_override_string : string -> string -> Yojson.Safe.t -> Yojson.Safe.t
 
-(** Re-export of [Keeper_alerting_path.effective_allowed_paths]. *)
-val keeper_effective_allowed_paths : meta:Keeper_meta_contract.keeper_meta -> string list
+(** Re-export of [Keeper_alerting_path.effective_allowed_paths_with_repos].
+    RFC-0218 Phase 4-B: now includes specific repo paths pre-computed
+    from [Keeper_repo_mapping], replacing the broad sandbox root. *)
+val keeper_effective_allowed_paths :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  string list
 
 (** Re-export of [Keeper_alerting_path.effective_write_allowed_paths]. *)
 val keeper_effective_write_allowed_paths : meta:Keeper_meta_contract.keeper_meta -> string list

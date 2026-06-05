@@ -411,7 +411,14 @@ let run_turn
     let keeper_visible_sandbox_root =
       Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta
     in
-    let effective_allowed_paths = Keeper_alerting_path.effective_allowed_paths ~meta in
+    (* RFC-0218 Phase 4-B: pre-compute specific allowed paths at setup
+       time.  Replaces the broad sandbox root (which covers all repos/)
+       with explicit repo + mind paths.  Downstream filesystem tools
+       validate against this pre-computed allowlist instead of calling
+       Keeper_repo_mapping.validate_path_access at runtime. *)
+    let effective_allowed_paths =
+      Keeper_alerting_path.effective_allowed_paths_with_repos ~config ~meta
+    in
     (match
        Keeper_alerting_path.absolute_allowed_paths_result
          ~config

@@ -73,6 +73,20 @@ val keeper_chat_stream_error_json : string -> Yojson.Safe.t
 (** [{ "error": { "message": "…" } }] envelope for
     parse / handler errors. *)
 
+(** {1 Queue request handlers} *)
+
+val handle_keeper_chat_request_result :
+  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** Drives [GET /api/v1/keepers/chat/requests/<request_id>].
+    Reads the async keeper message request state directly from
+    {!Keeper_msg_async} without requiring an MCP session. *)
+
+val handle_keeper_chat_request_cancel :
+  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** Drives [POST /api/v1/keepers/chat/requests/<request_id>/cancel].
+    Cancels a live async keeper message request when it is still
+    cancellable. *)
+
 (** {1 SSE handler} *)
 
 val handle_keeper_chat_stream :

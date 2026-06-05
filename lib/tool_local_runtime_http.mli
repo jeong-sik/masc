@@ -42,6 +42,34 @@ val string_member : Yojson.Safe.t -> string -> string option
 
 (** {1 GET helpers} *)
 
+type http_get_response =
+  { http_status : int option
+  ; effective_url : string option
+  ; redirect_url : string option
+  ; content_type : string option
+  ; downloaded_bytes : int option
+  ; body : string
+  }
+(** Structured curl GET response metadata.  [body] is the response body with
+    curl's write-out metadata stripped.  [effective_url], [redirect_url],
+    [content_type], and [downloaded_bytes] are populated from curl write-out
+    fields when available. *)
+
+val http_get_text_response_with_headers :
+  ?timeout_sec:int ->
+  ?headers:(string * string) list ->
+  ?follow_redirects:bool ->
+  ?max_redirects:int ->
+  ?compressed:bool ->
+  ?max_response_bytes:int ->
+  string ->
+  (http_get_response, string) Result.t
+(** [http_get_text_response_with_headers ?timeout_sec ?headers url] issues a
+    [GET url] via curl and returns both body text and curl write-out metadata.
+
+    It is the metadata-preserving form of
+    {!http_get_text_with_status_with_headers}. *)
+
 val http_get_text_with_status_with_headers :
   ?timeout_sec:int ->
   ?headers:(string * string) list ->
@@ -65,7 +93,7 @@ val http_get_text_with_status_with_headers :
     [follow_redirects] defaults to [false]; when [true], curl follows
     redirects up to [max_redirects] (default 3).
     [compressed] enables curl's transparent compression handling.
-    [max_response_bytes], when set, asks curl to cap/range the response.
+    [max_response_bytes], when set, asks curl to cap the response.
 
     Errors include curl exit code, signals, and stop reasons. *)
 

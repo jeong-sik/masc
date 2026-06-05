@@ -4,6 +4,12 @@
  (name keeper_internal_error)
  (public_name masc.keeper_internal_error)
  (wrapped false)
- (libraries yojson agent_sdk masc.masc_core masc.masc_types masc.prometheus)
+ (libraries
+  yojson
+  agent_sdk
+  masc.masc_core
+  masc.masc_types
+  masc.prometheus
+  masc.json_field)
  (preprocess
   (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq)))

@@ -86,12 +86,12 @@ let metric_fd_warn_threshold = "masc_process_fd_warn_threshold"
 include Prometheus_core_metric_names
 
 (* RFC-0107 Phase D.4 — piaf-backed connection pool gauges/counters. *)
-let metric_pool_idle_total = Pool_metrics.metric_idle_total
-let metric_pool_inflight_total = Pool_metrics.metric_inflight_total
-let metric_pool_reuse_total = Pool_metrics.metric_reuse_total
-let metric_pool_evict_total = Pool_metrics.metric_evict_total
-let metric_pool_evict_failure_total = Pool_metrics.metric_evict_failure_total
-let metric_pool_create_total = Pool_metrics.metric_create_total
+let metric_pool_idle_total = "masc_pool_idle_total"
+let metric_pool_inflight_total = "masc_pool_inflight_total"
+let metric_pool_reuse_total = "masc_pool_reuse_total"
+let metric_pool_evict_total = "masc_pool_evict_total"
+let metric_pool_evict_failure_total = "masc_pool_evict_failure_total"
+let metric_pool_create_total = "masc_pool_create_total"
 
 include Prometheus_policy_metric_names
 
@@ -134,9 +134,12 @@ let metric_oas_bus_subscriber_stream_depth = "masc_oas_bus_subscriber_stream_dep
 let metric_oas_bus_publish_block_seconds = "masc_oas_bus_publish_block_seconds_total"
 let metric_oas_bus_publish = "masc_oas_bus_publish_total"
 let metric_oas_bus_capacity = "masc_oas_bus_capacity"
+let metric_oas_bridge_unmigrated_payload_kind =
+  "masc_oas_bridge_unmigrated_payload_kind_total"
+;;
 
-let metric_runtime_ollama_probe_generate_skips =
-  "masc_runtime_ollama_probe_generate_skips_total"
+let metric_keeper_context_tool_result_compacted =
+  "masc_keeper_context_tool_result_compacted_total"
 ;;
 
 let metric_process_timeout = "masc_process_timeout_total"

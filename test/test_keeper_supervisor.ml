@@ -412,7 +412,7 @@ let ensure_test_runtime =
           try Sys.remove path with
           | Sys_error _ -> ())
         (fun () ->
-          match Masc.Runtime.init_default ~config_path:path with
+          match Runtime.init_default ~config_path:path with
           | Ok () -> initialized := true
           | Error msg -> fail msg))
 

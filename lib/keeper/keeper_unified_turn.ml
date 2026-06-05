@@ -189,7 +189,7 @@ let run_keeper_cycle
               | Some
                   (Keeper_turn_driver.Runtime_exhausted
                      { runtime_id
-                     ; reason = Keeper_meta_contract.No_tool_capable _
+                     ; reason = Keeper_turn_driver.No_tool_capable _
                      ; _
                      }) ->
                 Keeper_turn_fsm.Failure_no_capable_provider
@@ -649,7 +649,7 @@ let run_keeper_cycle
                          | Some
                              (Keeper_turn_driver.Runtime_exhausted
                                 { runtime_id
-                                ; reason = Keeper_meta_contract.No_tool_capable _
+                                ; reason = Keeper_turn_driver.No_tool_capable _
                                 ; _
                                 }) ->
                            Keeper_turn_fsm.Failure_no_capable_provider

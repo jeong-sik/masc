@@ -116,20 +116,17 @@ let launch_supervised_fiber
          Setting the flag from the cancel handler keeps the typed
          [fiber_drop_cause] payload accurate. *)
       let cancelled_by_parent = ref false in
-      let resolve_done value =
+      let resolve_done ~source value =
         if not !resolved then
           (* Issue #18335: the keepalive layer (keeper_keepalive.ml:760-791)
              may have already resolved done_p via record_keeper_stopped.
              When the Promise is already resolved, treat it as success —
              the keeper completed normally via the keepalive exit path. *)
-          if Keeper_registry.try_resolve_done reg value then (
+          match Keeper_registry.resolve_done reg ~source value with
+          | Keeper_registry.Done_resolved _
+          | Keeper_registry.Done_already_resolved _ ->
             resolved := true;
-            true)
-          else if Option.is_some (Eio.Promise.peek reg.done_p) then (
-            resolved := true;
-            true)
-          else
-            false
+            true
         else
           false
       in
@@ -236,7 +233,7 @@ let launch_supervised_fiber
                   Log.Keeper.warn
                     "supervisor: Fiber_terminated dispatch failed: %s"
                     (Keeper_state_machine.transition_error_to_string e));
-               if resolve_done (`Crashed reason)
+               if resolve_done ~source:"supervisor_watchdog_crash" (`Crashed reason)
                then
                  publish_phase_lifecycle
                    ~phase:Keeper_state_machine.Crashed
@@ -275,7 +272,7 @@ let launch_supervised_fiber
                   Log.Keeper.warn
                     "supervisor: Drain_complete dispatch failed: %s"
                     (Keeper_state_machine.transition_error_to_string e));
-               if resolve_done `Stopped
+               if resolve_done ~source:"supervisor_normal_exit" `Stopped
                then
                  publish_phase_lifecycle
                    ~phase:Keeper_state_machine.Stopped
@@ -334,7 +331,7 @@ let launch_supervised_fiber
                ~reason
                ~restart_count:rc;
              Keeper_registry_error_recording.record ~base_path meta.name reason;
-             if resolve_done (`Crashed reason)
+             if resolve_done ~source:"supervisor_exception_handler" (`Crashed reason)
              then
                publish_phase_lifecycle
                  ~phase:Keeper_state_machine.Crashed
@@ -386,7 +383,10 @@ let launch_supervised_fiber
                   (Some (Keeper_registry.Fiber_unresolved Graceful_shutdown));
                 Keeper_registry.mark_dead ~base_path meta.name ~at:(Time_compat.now ());
                 (* fire-and-forget: resolve_done signals completion *)
-                ignore (resolve_done (`Crashed "shutdown")))
+                ignore
+                  (resolve_done
+                     ~source:"supervisor_shutdown_cleanup"
+                     (`Crashed "shutdown")))
               else if !cancelled_by_parent
               then (
                 (* Issue #18901 follow-up: parent-cancel branch. The
@@ -406,7 +406,10 @@ let launch_supervised_fiber
                   (Some (Keeper_registry.Fiber_unresolved Cancelled_by_parent));
                 Keeper_registry.mark_dead ~base_path meta.name ~at:(Time_compat.now ());
                 (* fire-and-forget: resolve_done signals completion *)
-                ignore (resolve_done (`Crashed "cancelled_by_parent")))
+                ignore
+                  (resolve_done
+                     ~source:"supervisor_parent_cancel_cleanup"
+                     (`Crashed "cancelled_by_parent")))
               else (
 	                let reason =
 	                  Keeper_registry.failure_reason_to_string
@@ -475,7 +478,7 @@ let launch_supervised_fiber
 	                  ~base_path
 	                  meta.name
 	                  (Keeper_state_machine.Fiber_terminated { outcome; provider_id = None; http_status = None });
-                if resolve_done (`Crashed reason)
+                if resolve_done ~source:"supervisor_unresolved_cleanup" (`Crashed reason)
                 then
                   publish_phase_lifecycle
                     ~phase:Keeper_state_machine.Crashed

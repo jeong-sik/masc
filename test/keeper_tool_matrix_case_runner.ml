@@ -25,7 +25,7 @@ is-default = true
 max-concurrent = 1
 |};
   close_out oc;
-  match Masc.Runtime.init_default ~config_path:path with
+  match Runtime.init_default ~config_path:path with
   | Ok () -> ()
   | Error e -> failwith ("Runtime.init_default failed: " ^ e)
 ;;

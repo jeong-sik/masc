@@ -9,10 +9,6 @@ vi.mock('./persona-browser', () => ({
   PersonaBrowser: () => h('div', { className: 'persona-browser-mock' }, 'Browser'),
 }))
 
-vi.mock('./persona-generator', () => ({
-  PersonaGenerator: () => h('div', { className: 'persona-generator-mock' }, 'Generator'),
-}))
-
 describe('KeeperSpawnPanel', () => {
   beforeEach(() => {
     showSpawnPanel.value = false
@@ -37,19 +33,6 @@ describe('KeeperSpawnPanel', () => {
     const container = document.createElement('div')
     render(h(KeeperSpawnPanel), container)
     expect(container.textContent).toContain('Browser')
-  })
-
-  it('switches to generate tab on click', () => {
-    showSpawnPanel.value = true
-    const container = document.createElement('div')
-    render(h(KeeperSpawnPanel), container)
-    const buttons = container.querySelectorAll('button')
-    const generateBtn = Array.from(buttons).find((b) => b.textContent?.includes('새 페르소나'))
-    expect(generateBtn).not.toBeUndefined()
-    generateBtn!.click()
-    render(null, container)
-    render(h(KeeperSpawnPanel), container)
-    expect(container.textContent).toContain('Generator')
   })
 
   it('switches to direct tab on click', () => {

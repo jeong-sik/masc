@@ -42,12 +42,6 @@ import { MeasurementCard, InvariantsPanel } from './fsm-hub-health-panels'
 import { ringFocusClasses } from './common/ring'
 import { formatIndependentCounters, formatRatioPair } from './counter-format'
 
-import {
-  toolRequirementLabel,
-  toolSurfaceClassLabel,
-  turnLaneLabel,
-} from './fsm-hub-types'
-
 export function shouldUseGateKeeperFallback(
   executionLoadedValue: boolean,
   storeNames: string[],
@@ -117,16 +111,10 @@ function executionReceiptLabel(execution: KeeperCompositeExecution | undefined):
 
 function executionReceiptTitle(execution: KeeperCompositeExecution | undefined): string {
   if (!execution?.latest_receipt_present) return '아직 execution receipt가 없습니다.'
-  const surface = execution.tool_surface
   return [
     execution.recorded_at ? `recorded_at: ${execution.recorded_at}` : '',
     execution.operator_disposition ? `operator: ${execution.operator_disposition}` : '',
     execution.operator_disposition_reason ? `reason: ${execution.operator_disposition_reason}` : '',
-    surface?.tool_requirement ? `tool_requirement: ${toolRequirementLabel(surface.tool_requirement) ?? surface.tool_requirement}` : '',
-    surface?.turn_lane ? `turn_lane: ${turnLaneLabel(surface.turn_lane) ?? surface.turn_lane}` : '',
-    surface?.tool_surface_class ? `tool_surface: ${toolSurfaceClassLabel(surface.tool_surface_class) ?? surface.tool_surface_class}` : '',
-    typeof surface?.allowed_tool_count === 'number' ? `allowed_tools: ${surface.allowed_tool_count}` : '',
-    surface?.tool_surface_fallback_used === true ? 'tool_surface_fallback: true' : '',
     execution.runtime?.fallback_reason ? `fallback: ${execution.runtime.fallback_reason}` : '',
     execution.error?.kind ? `error: ${execution.error.kind}` : '',
     execution.error?.message_preview ? execution.error.message_preview : '',

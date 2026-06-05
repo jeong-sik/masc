@@ -3,11 +3,6 @@
     See [.ml] for rationale. No behavior change from pre-RFC-0048 inline
     definitions. *)
 
-val materialized_tool_names_after_lane :
-  effective_tools:Agent_sdk.Tool.t list ->
-  runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy option ->
-  string list
-
 val resolved_tool_lane_label :
   effective_tools:Agent_sdk.Tool.t list ->
   runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy option ->

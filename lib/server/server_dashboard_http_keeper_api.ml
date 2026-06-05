@@ -475,14 +475,6 @@ let handle_keeper_get_subroutes state req request reqd =
       let stats = Thompson_sampling.get_stats name in
       let meta = Keeper_meta_store.read_meta
           state.Mcp_server.workspace_config name in
-      let tool_count = match meta with
-        | Ok (Some m) ->
-          List.length (Keeper_tool_dispatch_runtime.keeper_allowed_tool_names m)
-        | _ -> 0
-      in
-      let recovery_floor_count =
-        List.length (Keeper_tool_policy.failing_minimum_tool_names ())
-      in
       let turn_outcome : [`Ok | `Failed] option =
         match Keeper_registry.get ~base_path:state.Mcp_server.workspace_config.base_path name with
         | Some entry when entry.turn_consecutive_failures > 0 ->
@@ -497,8 +489,6 @@ let handle_keeper_get_subroutes state req request reqd =
           ~phase:current
           ~thompson_alpha:stats.alpha
           ~thompson_beta:stats.beta
-          ~tool_count
-          ~recovery_floor_count
           ()
       in
       let runtime_fsm_mermaid =
@@ -597,8 +587,6 @@ let handle_keeper_get_subroutes state req request reqd =
         "compaction_submachine_mermaid", compaction_submachine_mermaid;
         "thompson_alpha", `Float stats.alpha;
         "thompson_beta", `Float stats.beta;
-        "tool_count", `Int tool_count;
-        "recovery_floor_count", `Int recovery_floor_count;
         "runtime_models", `List (List.map (fun s -> `String s) runtime_models);
         "last_provider_result", last_provider;
         "memory_kind_usage", memory_kind_usage;

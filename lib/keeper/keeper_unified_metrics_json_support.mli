@@ -15,7 +15,5 @@ val redacted_runtime_observation_to_json :
   Runtime_observation.runtime_observation -> Yojson.Safe.t
 
 val tool_surface_json :
-  tool_call_count:int ->
-  tools_used:string list ->
   Keeper_agent_run.run_result option ->
   Yojson.Safe.t

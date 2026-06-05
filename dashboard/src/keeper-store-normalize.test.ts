@@ -329,7 +329,6 @@ describe('normalizeKeepers lifecycle metrics', () => {
             pending_count: 1,
           },
           execution_summary: {
-            tool_contract_result: 'unknown',
             sandbox_summary: 'docker / none',
             mutation_guard_summary: 'mutation_contract_not_observed',
             latest_receipt_at: '2026-04-23T00:10:00Z',
@@ -362,7 +361,6 @@ describe('normalizeKeepers lifecycle metrics', () => {
         pending_count: 1,
       },
       execution_summary: {
-        tool_contract_result: 'unknown',
         sandbox_summary: 'docker / none',
         mutation_guard_summary: 'mutation_contract_not_observed',
       },
@@ -475,11 +473,6 @@ describe('normalizeKeepers lifecycle metrics', () => {
             pending_count: 0,
           },
           execution: {
-            tool_contract_result: 'violated',
-            required_tools: ['masc_board_post'],
-            missing_required_tools: ['masc_board_post'],
-            unexpected_tools: ['keeper_board_list'],
-            unexpected_tool_count: 1,
             provider_attempt_count: 2,
             provider_fallback_applied: true,
             provider_selected_model: 'provider:runtime-lane',
@@ -507,11 +500,6 @@ describe('normalizeKeepers lifecycle metrics', () => {
         pending_count: 0,
       },
       execution_summary: {
-        tool_contract_result: 'violated',
-        required_tools: ['masc_board_post'],
-        missing_required_tools: ['masc_board_post'],
-        unexpected_tools: ['keeper_board_list'],
-        unexpected_tool_count: 1,
         provider_attempt_count: 2,
         provider_fallback_applied: true,
         provider_selected_model: 'provider:runtime-lane',

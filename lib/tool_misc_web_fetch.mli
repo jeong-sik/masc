@@ -25,11 +25,18 @@ val handle : tool_name:string -> start_time:float -> Yojson.Safe.t -> Tool_resul
     [`Assoc [ "text", `String json ]] where [json] is the serialized
     [Tool_args.ok_response] envelope holding:
 	    - [url]: the requested URL
+	    - [final_url]: final URL after validated redirects
 	    - [http_status]: HTTP status code
+	    - [redirect_count]: number of followed redirects
 	    - [extract_mode]: output extraction mode
+	    - [content_kind]: [html], [text], [json], or [xml]
+	    - [extraction_source]: [article], [main], [body], [document], or
+	      [raw_text]
 	    - [text]: readable extracted content, truncated at [maxChars]
 	    - [content_chars]: length of [text]
 	    - [truncated]: whether output truncation was applied
+	    - [content_type]: optional upstream content type
+	    - [downloaded_bytes]: optional curl-reported download size
 	    - [title]: optional, extracted from [<title>] tag
 	    - [description]: optional, extracted from [<meta name="description">]
       or [og:description]
@@ -39,6 +46,34 @@ val handle : tool_name:string -> start_time:float -> Yojson.Safe.t -> Tool_resul
     - [Transient_error]:    rate-limit hit + transport-layer failure;
                             both retry-friendly.
     - [Runtime_failure]:    upstream HTTP non-2xx or missing status. *)
+
+type fetch_response =
+  { http_status : int option
+  ; final_url : string
+  ; redirect_count : int
+  ; content_type : string option
+  ; downloaded_bytes : int option
+  ; body : string
+  }
+
+type fetch_failure =
+  | Transport_error of string
+  | Http_status of int
+  | No_http_status
+  | Redirect_blocked of string
+  | Redirect_limit_exceeded
+  | Unsupported_content_type of string
+
+val with_http_fetch_for_test :
+  (timeout_sec:int ->
+   headers:(string * string) list ->
+   max_response_bytes:int ->
+   string ->
+   (fetch_response, fetch_failure) result) ->
+  (unit -> 'a) ->
+  'a
+(** [with_http_fetch_for_test http_fetch f] temporarily replaces the
+    structured HTTP fetch boundary used by {!handle}. *)
 
 val with_http_get_for_test :
   (timeout_sec:int ->

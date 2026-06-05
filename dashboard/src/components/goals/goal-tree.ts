@@ -215,10 +215,6 @@ function healthLabel(health: GoalTreeNode['health']): string {
 // 4-entry inline label literal that also lived in
 // `keeper-detail-alert-strip.ts:201-205`. Same map, single SSOT.
 
-function compactTrustList(items: readonly string[] | null | undefined): string[] {
-  return (items ?? []).map(item => item.trim()).filter(Boolean)
-}
-
 function healthClass(health: GoalTreeNode['health']): string {
   switch (health) {
     case 'done': return 'border-[var(--color-ok-border)] bg-[var(--color-ok-soft)] text-[var(--color-ok-fg)]'
@@ -1157,16 +1153,6 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
     || execution?.mutation_guard_summary?.trim()
     || execution?.sandbox_summary?.trim()
     || null
-  const runtimeProofStatus = execution?.runtime_proof_status?.trim() || null
-  const toolContractResult = execution?.tool_contract_result?.trim() || null
-  const requiredTools = compactTrustList(execution?.required_tools)
-  const missingRequiredTools = compactTrustList(execution?.missing_required_tools)
-  const requestedTools = compactTrustList(execution?.requested_tools)
-  const toolsUsed = compactTrustList(execution?.tools_used)
-  const unexpectedTools = compactTrustList(execution?.unexpected_tools)
-  const requestedToolCount = execution?.requested_tool_count
-  const toolsUsedCount = execution?.tools_used_count
-  const unexpectedToolCount = execution?.unexpected_tool_count
   const runtimeAttemptCount = execution?.provider_attempt_count
   const runtimeFailoverApplied = execution?.provider_fallback_applied
   const runtimeSelectedLane = execution?.provider_selected_model?.trim() || null
@@ -1189,16 +1175,6 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
     || Boolean(trust?.next_human_action)
     || Boolean(latestTerminalCode)
     || Boolean(latestNextAction)
-    || Boolean(runtimeProofStatus)
-    || Boolean(toolContractResult)
-    || requiredTools.length > 0
-    || missingRequiredTools.length > 0
-    || requestedTools.length > 0
-    || toolsUsed.length > 0
-    || unexpectedTools.length > 0
-    || typeof requestedToolCount === 'number'
-    || typeof toolsUsedCount === 'number'
-    || typeof unexpectedToolCount === 'number'
     || typeof runtimeAttemptCount === 'number'
     || runtimeFailoverApplied === true
     || Boolean(runtimeSelectedLane)
@@ -1260,30 +1236,6 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
             ` : null}
             ${pendingApprovalBlocker ? html`
               <span>승인 차단 ${pendingApprovalBlocker}</span>
-            ` : null}
-            ${runtimeProofStatus ? html`
-              <span>증명 ${runtimeProofStatus}</span>
-            ` : null}
-            ${toolContractResult ? html`
-              <span>계약 ${toolContractResult}</span>
-            ` : null}
-            ${missingRequiredTools.length > 0 ? html`
-              <span class="text-[var(--color-status-err)]" title=${missingRequiredTools.join(', ')}>누락 ${missingRequiredTools.join(', ')}</span>
-            ` : null}
-            ${requiredTools.length > 0 ? html`
-              <span title=${requiredTools.join(', ')}>필요 ${requiredTools.join(', ')}</span>
-            ` : null}
-            ${toolsUsed.length > 0 ? html`
-              <span title=${toolsUsed.join(', ')}>사용 ${toolsUsed.join(', ')}</span>
-            ` : null}
-            ${unexpectedTools.length > 0 ? html`
-              <span class="text-[var(--color-status-err)]" title=${unexpectedTools.join(', ')}>외부 ${unexpectedTools.join(', ')}</span>
-            ` : null}
-            ${requestedTools.length > 0 ? html`
-              <span title=${requestedTools.join(', ')}>요청 ${requestedTools.join(', ')}</span>
-            ` : null}
-            ${typeof toolsUsedCount === 'number' || typeof requestedToolCount === 'number' || typeof unexpectedToolCount === 'number' ? html`
-              <span>도구 카운트 ${toolsUsedCount ?? '-'}/${requestedToolCount ?? '-'}${typeof unexpectedToolCount === 'number' ? ` · 외부 ${unexpectedToolCount}` : ''}</span>
             ` : null}
             ${typeof runtimeAttemptCount === 'number' || runtimeFailoverApplied === true || runtimeSelectedLane ? html`
               <span>

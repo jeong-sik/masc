@@ -12,8 +12,7 @@ let lightweight_tool_audit_fallback_json (meta : Keeper_meta_contract.keeper_met
     || meta.runtime.autonomous_action_count > 0
   in
   `Assoc
-    [ "allowed_tool_names", `List []
-    ; "recent_tool_names", `List []
+    [ "recent_tool_names", `List []
     ; "latest_tool_names", `List []
     ; ("latest_tool_call_count", if has_runtime_activity then `Int 0 else `Null)
     ; "latest_action_source", `Null
@@ -66,14 +65,7 @@ let recent_tool_names_from_files config keeper_name =
     (collect_recent_tool_names metrics_lines)
 ;;
 
-let keeper_tool_audit_fields
-      ?(include_allowed_tools = true)
-      config
-      (meta : Keeper_meta_contract.keeper_meta)
-  =
-  let fallback_allowed =
-    if include_allowed_tools then Keeper_tool_dispatch_runtime.keeper_allowed_tool_names meta else []
-  in
+let keeper_tool_audit_fields config (meta : Keeper_meta_contract.keeper_meta) =
   let recent_tool_names = recent_tool_names_from_files config meta.name in
   let last_autonomous = String.trim meta.runtime.last_autonomous_action_at in
   let fallback_snapshot =
@@ -108,8 +100,7 @@ let keeper_tool_audit_fields
            else None)
       }
   in
-  ( fallback_allowed
-  , recent_tool_names
+  ( recent_tool_names
   , fallback_snapshot.latest_tool_names
   , fallback_snapshot.latest_tool_call_count
   , fallback_snapshot.latest_action_source
@@ -126,8 +117,7 @@ let cached_tool_audit_json
   let cache_key = "kta:" ^ base_hash ^ ":" ^ meta.name in
   let ttl = 2.0 in
   Dashboard_cache.get_or_compute cache_key ~ttl (fun () ->
-    let ( allowed_tool_names
-        , recent_tool_names
+    let ( recent_tool_names
         , latest_tool_names
         , latest_tool_call_count
         , latest_action_source
@@ -136,18 +126,16 @@ let cached_tool_audit_json
       =
       if lightweight
       then (
-        let ( _
-            , recent_tool_names
+        let ( recent_tool_names
             , latest_tool_names
             , latest_tool_call_count
             , latest_action_source
             , tool_audit_source
             , tool_audit_at )
           =
-          keeper_tool_audit_fields ~include_allowed_tools:false config meta
+          keeper_tool_audit_fields config meta
         in
-        ( []
-        , recent_tool_names
+        ( recent_tool_names
         , latest_tool_names
         , latest_tool_call_count
         , latest_action_source
@@ -156,8 +144,7 @@ let cached_tool_audit_json
       else keeper_tool_audit_fields config meta
     in
     `Assoc
-      [ "allowed_tool_names", `List (List.map (fun v -> `String v) allowed_tool_names)
-      ; "recent_tool_names", `List (List.map (fun v -> `String v) recent_tool_names)
+      [ "recent_tool_names", `List (List.map (fun v -> `String v) recent_tool_names)
       ; "latest_tool_names", `List (List.map (fun v -> `String v) latest_tool_names)
       ; "latest_tool_call_count", Json_util.option_to_yojson (fun v -> `Int v) latest_tool_call_count
       ; "latest_action_source", Json_util.string_opt_to_json latest_action_source

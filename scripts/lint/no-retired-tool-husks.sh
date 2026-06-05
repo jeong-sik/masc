@@ -37,7 +37,7 @@ cd "$ROOT"
 ACTIVE_ROOTS=(lib test dashboard scripts config .github)
 
 RETIRED_FILE_PATTERN='(^|/)(tool_deep_review|test_tool_deep_review|auto_responder|dashboard_provider_runs|server_openai_compat|openai_compat_error_map)(\.[A-Za-z0-9_]+)?$|(^|/)tool_shard_types_[^/]*\.mli$'
-RETIRED_TOKEN_PATTERN='\b(masc_deep_review|Tool_deep_review|Deep_review_runtime_ref|tool_deep_review|auto_responder|Auto_responder|MASC_AUTO_RESPOND|dashboard_provider_runs|Dashboard_provider_runs|server_openai_compat|Server_openai_compat|openai_compat_error_map|Openai_compat_error_map|masc_persona_generate|Persona_generate)\b|/api/v1/agent-runs'
+RETIRED_TOKEN_PATTERN='\b(masc_deep_review|Tool_deep_review|Deep_review_runtime_ref|tool_deep_review|auto_responder|Auto_responder|MASC_AUTO_RESPOND|dashboard_provider_runs|Dashboard_provider_runs|server_openai_compat|Server_openai_compat|openai_compat_error_map|Openai_compat_error_map|masc_persona_schema|masc_persona_save|masc_persona_generate|Persona_schema|Persona_save|Persona_generate)\b|/api/v1/agent-runs'
 
 current_tmp="$(mktemp -t retired-tool-husks.current.XXXXXX)"
 trap 'rm -f "$current_tmp"' EXIT
@@ -91,7 +91,7 @@ if [[ -s "$current_tmp" ]]; then
   echo "[no-retired-tool-husks] DRIFT UP: retired tool/runtime husk reappeared in active surface" >&2
   sed 's/^/  - /' "$current_tmp" >&2
   echo "  Keep deleted deep-review, auto-responder, dashboard-provider-run," >&2
-  echo "  OpenAI-compat route, persona-generate, and public shard leaf surfaces out of active code." >&2
+  echo "  OpenAI-compat route, persona-authoring, and public shard leaf surfaces out of active code." >&2
   echo "  Historical docs/RFC inventories are intentionally not scanned by this guard." >&2
   exit 1
 fi

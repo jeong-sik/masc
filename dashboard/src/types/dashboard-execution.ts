@@ -588,8 +588,6 @@ export interface DashboardExecutionContinuityBrief {
   recent_input_preview?: string | null
   recent_output_preview?: string | null
   recent_tool_names?: string[]
-  allowed_tool_count?: number | null
-  allowed_tool_preview?: string[]
   latest_tool_names?: string[]
   latest_tool_call_count?: number | null
   tool_audit_source?: string | null
@@ -858,16 +856,6 @@ export interface GoalKeeperTrustApprovalState {
 }
 
 export interface GoalKeeperTrustExecutionSummary {
-  tool_contract_result?: string | null
-  runtime_proof_status?: string | null
-  required_tools?: string[] | null
-  missing_required_tools?: string[] | null
-  requested_tools?: string[] | null
-  tools_used?: string[] | null
-  unexpected_tools?: string[] | null
-  requested_tool_count?: number | null
-  tools_used_count?: number | null
-  unexpected_tool_count?: number | null
   provider_attempt_count?: number | null
   provider_fallback_applied?: boolean | null
   provider_selected_model?: string | null

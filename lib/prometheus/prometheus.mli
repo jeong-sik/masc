@@ -205,8 +205,6 @@ val metric_oas_bridge_unmigrated_payload_kind : string
     cap to revisit (per-result vs aggregate vs count). *)
 val metric_keeper_context_tool_result_compacted : string
 
-val metric_runtime_ollama_probe_generate_skips : string
-
 (** #9632: subprocess executions that exceeded their configured
     timeout. Labels: [program, timeout_sec]. *)
 val metric_process_timeout : string

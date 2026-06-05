@@ -454,9 +454,6 @@ lib/keeper/keeper_msg_async.ml,152,None,unclassified
 lib/keeper/keeper_msg_async.ml,304,None,unclassified
 lib/keeper/keeper_passive_loop_detector.ml,96,false,unclassified
 lib/keeper/keeper_passive_loop_detector.ml,101,false,unclassified
-lib/keeper/keeper_persona_authoring.ml,34,None,unclassified
-lib/keeper/keeper_persona_authoring.ml,671,None,unclassified
-lib/keeper/keeper_persona_authoring.ml,886,None,unclassified
 lib/keeper/keeper_post_turn.ml,123,None,unclassified
 lib/keeper/keeper_post_turn.ml,799,false,unclassified
 lib/keeper/keeper_post_turn.ml,844,None,unclassified

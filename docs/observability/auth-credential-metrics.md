@@ -1,13 +1,13 @@
 ---
 status: reference
-last_verified: 2026-05-14
+last_verified: 2026-06-05
 code_refs:
   - lib/auth.ml
-  - lib/auth.mli
+  - lib/auth/auth.mli
   - lib/server/server_runtime_bootstrap.ml
   - lib/server/server_bootstrap_loops.ml
   - lib/prometheus.ml
-  - lib/prometheus.mli
+  - lib/prometheus/prometheus.mli
   - infrastructure/monitoring/auth-credential-alerts.yml
 ---
 
@@ -21,7 +21,7 @@ The credential subsystem exposes its state on **seven surfaces** (six original +
 
 | Surface | Location | Information shape | Use case |
 |---------|----------|-------------------|----------|
-| 1. API (mli)            | `lib/auth.mli`                                            | typed contract              | Compile-time |
+| 1. API (mli)            | `lib/auth/auth.mli`                                       | typed contract              | Compile-time |
 | 2. Tests                | `test/test_auth.ml` (credentials group 22-32)             | assertions                  | CI guards |
 | 3. Boot log             | `[Server] startup bare alias audit: ...`                  | text (operator-readable)    | One-shot boot |
 | 4. Prom gauge (snapshot)| `masc_auth_bare_alias{state=...}`                          | numeric end-state           | Time-series + alert |

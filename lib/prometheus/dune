@@ -4,6 +4,24 @@
  (name masc_prometheus)
  (public_name masc.prometheus)
  (wrapped false)
+ (modules
+  agent_sdk_metrics_bridge
+  llm_metric_bridge
+  prometheus_key
+  prometheus_store
+  prometheus_metric_names
+  prometheus_builtin_metric_names
+  prometheus_oas_metric_names
+  prometheus_runtime_metric_names
+  prometheus_core_metric_names
+  prometheus_policy_metric_names
+  prometheus_identity_metric_names
+  prometheus_transport_metric_names
+  prometheus_hotpath
+  prometheus_process
+  prometheus)
+ (private_modules
+  prometheus_key)
  (libraries
   yojson
   unix
@@ -26,6 +44,4 @@
   eio
   masc.masc_log
   agent_sdk
-  agent_sdk.llm_provider)
- (preprocess
-  (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq)))
+  agent_sdk.llm_provider))

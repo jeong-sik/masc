@@ -65,7 +65,10 @@
   masc.keeper_tool_response
   masc.runtime_provider_labels
   masc.runtime_model
+  masc.runtime
   masc.model_inference_metrics
+  masc.prometheus
+  masc.json_field
   masc.types_boundary
   masc.cdal_runtime
   masc.cdal
@@ -84,7 +87,6 @@
   masc.keeper_event_queue
   masc.keeper_invariant
   masc.compaction_trigger
-  masc.json_field
   masc.bounded_event_dedupe
   masc.keeper_recording_error_state
   masc.keeper_livelock_state
@@ -154,9 +156,7 @@
   masc.resilience
   masc.multimodal
   masc.repo_manager
-  masc.parse_outcome
-  masc.prometheus
-  masc.runtime)
+  masc.parse_outcome)
  (preprocess
   (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq ppx_let ppx_tla))
  (instrumentation

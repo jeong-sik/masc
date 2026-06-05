@@ -38,18 +38,12 @@ Consumer count: 1 (single user). No backwards-compatibility tax. Deletion is the
 
 `Voice_bridge.agent_speak` is called from exactly one site — `lib/keeper/agent_tool_voice_runtime.ml:31` — and that site receives a `keeper_voice_speak` tool emission from the LLM. The handler does the HTTP call to ElevenLabs locally. **No provider sees this tool.** It is purely client-side.
 
-Yet when `voice_enabled = true`, the keeper's `required_tool_names` list emits these six tool names, and runtime pre-dispatch (RFC-0157) treats them as "required actions the provider must be able to execute." Live evidence (2026-05-23T11:26Z system log):
-
-```
-"required_tool_names":[..., "keeper_voice_speak", "keeper_voice_listen", ...]
-"rejection_reasons":[
-  "required_tool_unsupported: provider=provider-k-coding missing_required_tools=[tool_execute]",
-  "required_tool_unsupported: provider=provider-d missing_required_tools=[tool_execute]"
-]
-"rejected_candidate_count": 9
-```
-
-The proximate rejection cited `tool_execute`, but the *runtime-exhausted* condition only triggered *after* `voice_enabled=true` was toggled — empirically the voice tool inclusion is what tipped the matcher into wholesale rejection. The matcher's category is wrong: it should never have considered client-intercepted tools at all.
+Historically, when `voice_enabled = true`, the keeper emitted voice tool names
+into a provider-capability requirement list, and runtime pre-dispatch treated
+them as actions the provider itself had to execute. Live evidence from
+2026-05-23T11:26Z showed candidate providers being rejected by that matcher
+after voice was enabled. The matcher's category was wrong: it should never have
+considered client-intercepted tools at all.
 
 ### 1.2 The duplicate SSOT
 
@@ -137,7 +131,7 @@ All four sites delete cleanly when the field is removed from the record.
 
 ### 2.4 Other files in the deletion blast radius
 
-From earlier `rg` survey, 19 files in `lib/keeper/` reference `voice_enabled` / `voice_channel` / `default_voice_enabled_for` / `policy_voice_enabled` / `voice_agent_id`:
+From earlier `rg` survey, 18 files in `lib/keeper/` reference `voice_enabled` / `voice_channel` / `default_voice_enabled_for` / `policy_voice_enabled` / `voice_agent_id`:
 
 ```
 lib/keeper/keeper_meta_json_parse.{ml,mli}
@@ -147,7 +141,6 @@ lib/keeper/keeper_turn_up_update.ml
 lib/keeper/keeper_turn_up_args.{ml,mli}
 lib/keeper/keeper_types_profile.{ml,mli}
 lib/keeper/keeper_types_profile_defaults.{ml,mli}
-lib/keeper/keeper_persona_authoring.ml
 lib/keeper/keeper_schema.ml
 lib/keeper/keeper_meta_json.ml
 lib/keeper/keeper_meta_contract.{ml,mli}

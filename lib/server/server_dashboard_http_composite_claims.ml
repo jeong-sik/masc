@@ -17,10 +17,6 @@ let json_bool key json = Json_util.get_bool json key
 let compact_receipt_error_json = Server_dashboard_compact_receipt_json.compact_receipt_error_json
 let compact_receipt_runtime_json = Server_dashboard_compact_receipt_json.compact_receipt_runtime_json
 
-let compact_receipt_tool_surface_json =
-  Server_dashboard_compact_receipt_json.compact_receipt_tool_surface_json
-;;
-
 let json_number = Server_dashboard_http_json_utils.json_number
 let json_assoc = Server_dashboard_http_json_utils.json_assoc
 let string_has_prefix = Server_dashboard_http_json_utils.string_has_prefix
@@ -194,7 +190,6 @@ let composite_execution_receipt_json ~(config : Workspace.config) ~keeper_name =
       ; "duration_ms", `Null
       ; "error", `Null
       ; "runtime", `Null
-      ; "tool_surface", `Null
       ; "claim_scope", claim_scope
       ; "config_drift", config_drift
       ]
@@ -215,15 +210,10 @@ let composite_execution_receipt_json ~(config : Workspace.config) ~keeper_name =
       ; "stop_reason", Json_util.string_opt_to_json (json_string "stop_reason" receipt)
       ; ( "completion_contract_result"
         , Json_util.string_opt_to_json (json_string "completion_contract_result" receipt) )
-      ; ( "unexpected_tools"
-        , Json_util.json_string_list (Json_util.get_string_list receipt "unexpected_tools") )
-      ; ( "unexpected_tool_count"
-        , `Int (List.length (Json_util.get_string_list receipt "unexpected_tools")) )
       ; ( "duration_ms"
         , Json_util.float_opt_to_json (json_float "duration_ms" action_radius) )
       ; "error", compact_receipt_error_json receipt
       ; "runtime", compact_receipt_runtime_json receipt
-      ; "tool_surface", compact_receipt_tool_surface_json receipt
       ; "claim_scope", claim_scope
       ; "config_drift", config_drift
       ]
@@ -290,17 +280,6 @@ let composite_snapshot_is_idle snapshot =
   && Option.value ~default:"clean" breaker_state = "clean"
 ;;
 
-let composite_execution_tool_route_blocked execution =
-  string_opt_is_any
-    (json_string "completion_contract_result" execution)
-    [ "surface_mismatch"
-    ; "no_capable_provider"
-    ]
-  || string_opt_is_any
-       (json_string "operator_disposition_reason" execution)
-       [ "tool_route_recoverable_failure" ]
-;;
-
 let composite_execution_config_blocked execution =
   string_opt_is_any
     (json_string "operator_disposition_reason" execution)
@@ -331,8 +310,7 @@ let composite_execution_config_drift execution =
 let keeper_activation_readiness_json = Server_dashboard_fleet_readiness.keeper_activation_readiness_json
 
 let composite_execution_blocked execution =
-  composite_execution_tool_route_blocked execution
-  || composite_execution_claim_no_eligible execution
+  composite_execution_claim_no_eligible execution
   || string_opt_is_any (json_string "operator_disposition" execution) [ "pause_human" ]
   || (match lower_string_opt (json_string "terminal_reason_code" execution) with
       | Some terminal -> terminal <> "" && terminal <> "completed"

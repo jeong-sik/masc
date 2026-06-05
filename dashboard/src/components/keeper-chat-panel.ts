@@ -3,7 +3,7 @@
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
-import { useEffect } from 'preact/hooks'
+import { useEffect, useMemo, useRef } from 'preact/hooks'
 import {
   streamKeeperMessage,
   fetchKeeperChatHistory,
@@ -25,14 +25,6 @@ export interface ChatMessage {
   timestamp: number
 }
 
-const chatMessages = signal<ChatMessage[]>([])
-const chatInput = signal('')
-const streaming = signal(false)
-const streamBuffer = signal('')
-const streamStartedAt = signal<number | null>(null)
-const chatError = signal('')
-const searchQuery = signal('')
-
 /**
  * Pure filter: case-insensitive substring match over message content.
  * Empty or whitespace-only queries return the input unchanged.
@@ -42,8 +34,6 @@ export function filterChatMessages(messages: ChatMessage[], query: string): Chat
   if (!q) return messages
   return messages.filter((m) => m.content.toLowerCase().includes(q))
 }
-
-let activeAbort: AbortController | null = null
 
 function toConversationEntry(
   keeperName: string,
@@ -90,70 +80,78 @@ export function normalizeKeeperChatErrorValue(value: unknown): string {
   return '스트림 오류'
 }
 
-function cancelStream(): void {
-  if (activeAbort) activeAbort.abort()
-  activeAbort = null
-  streaming.value = false
-  streamBuffer.value = ''
-  streamStartedAt.value = null
-}
-
-async function sendChat(keeperName: string): Promise<void> {
-  const text = chatInput.value.trim()
-  if (!text || streaming.value) return
-
-  chatInput.value = ''
-  chatError.value = ''
-  streamBuffer.value = ''
-  streamStartedAt.value = Date.now()
-
-  chatMessages.value = [
-    ...chatMessages.value,
-    { role: 'user', content: text, timestamp: Date.now() },
-  ]
-
-  streaming.value = true
-  activeAbort = new AbortController()
-
-  try {
-    await streamKeeperMessage(keeperName, text, {
-      signal: activeAbort.signal,
-      onEvent: (event: KeeperChatStreamEvent) => {
-        if (isKeeperTextContentEvent(event) && typeof event.delta === 'string') {
-          streamBuffer.value += event.delta
-        } else if (event.type === 'RUN_FINISHED') {
-          const finalText = streamBuffer.value.trim() || '(no response)'
-          chatMessages.value = [
-            ...chatMessages.value,
-            { role: 'assistant', content: finalText, timestamp: Date.now() },
-          ]
-          streamBuffer.value = ''
-        } else if (event.type === 'RUN_ERROR') {
-          chatError.value = normalizeKeeperChatErrorValue(event.value)
-        }
-      },
-    })
-  } catch (err) {
-    if (err instanceof DOMException && err.name === 'AbortError') return
-    const msg = err instanceof Error ? err.message : '채팅 실패'
-    chatError.value = msg
-    showToast(msg, 'error')
-  } finally {
-    streaming.value = false
-    activeAbort = null
-    streamStartedAt.value = null
-  }
-}
-
 export function KeeperChatPanel({ name }: { name: string }) {
-  useEffect(() => {
-    cancelStream()
-    chatInput.value = ''
+  // Per-instance signals — each KeeperChatPanel has its own state.
+  // Fixes: global signal sharing caused cross-keeper state clobbering
+  // and effect re-initialization wiped messages on parent re-render.
+  const chatMessages = useMemo(() => signal<ChatMessage[]>([]), [])
+  const chatInput = useMemo(() => signal(''), [])
+  const streaming = useMemo(() => signal(false), [])
+  const streamBuffer = useMemo(() => signal(''), [])
+  const streamStartedAt = useMemo(() => signal<number | null>(null), [])
+  const chatError = useMemo(() => signal(''), [])
+  const searchQuery = useMemo(() => signal(''), [])
+
+  const activeAbortRef = useRef<AbortController | null>(null)
+
+  function cancelStream(): void {
+    if (activeAbortRef.current) activeAbortRef.current.abort()
+    activeAbortRef.current = null
+    streaming.value = false
     streamBuffer.value = ''
     streamStartedAt.value = null
+  }
+
+  async function sendChat(keeperName: string): Promise<void> {
+    const text = chatInput.value.trim()
+    if (!text || streaming.value) return
+
+    chatInput.value = ''
     chatError.value = ''
-    chatMessages.value = []
-    searchQuery.value = ''
+    streamBuffer.value = ''
+    streamStartedAt.value = Date.now()
+
+    chatMessages.value = [
+      ...chatMessages.value,
+      { role: 'user', content: text, timestamp: Date.now() },
+    ]
+
+    streaming.value = true
+    activeAbortRef.current = new AbortController()
+
+    try {
+      await streamKeeperMessage(keeperName, text, {
+        signal: activeAbortRef.current.signal,
+        onEvent: (event: KeeperChatStreamEvent) => {
+          if (isKeeperTextContentEvent(event) && typeof event.delta === 'string') {
+            streamBuffer.value += event.delta
+          } else if (event.type === 'RUN_FINISHED') {
+            const finalText = streamBuffer.value.trim() || '(no response)'
+            chatMessages.value = [
+              ...chatMessages.value,
+              { role: 'assistant', content: finalText, timestamp: Date.now() },
+            ]
+            streamBuffer.value = ''
+          } else if (event.type === 'RUN_ERROR') {
+            chatError.value = normalizeKeeperChatErrorValue(event.value)
+          }
+        },
+      })
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return
+      const msg = err instanceof Error ? err.message : '채팅 실패'
+      chatError.value = msg
+      showToast(msg, 'error')
+    } finally {
+      streaming.value = false
+      activeAbortRef.current = null
+      streamStartedAt.value = null
+    }
+  }
+
+  useEffect(() => {
+    // Only fetch history; do NOT wipe messages.
+    // Previous global-signal design wiped messages on every parent re-render.
     let stale = false
     void fetchKeeperChatHistory(name)
       .then((history) => {
@@ -167,10 +165,6 @@ export function KeeperChatPanel({ name }: { name: string }) {
         }
       })
       .catch((err: unknown) => {
-        // P1 silent-failure fix: fetchKeeperChatHistory now throws on
-        // HTTP non-2xx / network / shape errors instead of returning [].
-        // Surface via chatError so the operator distinguishes "no
-        // history yet" from "load failed" in the UI.
         if (stale) return
         const msg = errorToString(err)
         chatError.value = `이전 대화 불러오기 실패: ${msg}`
@@ -239,7 +233,7 @@ export function KeeperChatPanel({ name }: { name: string }) {
           entries=${transcriptEntries}
           emptyText=${hasQuery && messages.length > 0
             ? '검색어와 일치하는 메시지가 없습니다.'
-            : '직접 프롬프트를 보내 키퍼 대화를 시작하세요.'}
+            : '직접 프롬프트를 본내 키퍼 대화를 시작하세요.'}
           showMetadata=${false}
         />
       </div>

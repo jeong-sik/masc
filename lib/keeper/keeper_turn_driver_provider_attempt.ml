@@ -287,7 +287,7 @@ let sdk_error_is_max_turns_exceeded (err : Agent_sdk.Error.sdk_error) : bool =
   match Keeper_internal_error.classify_masc_internal_error err with
   | Some
       (Keeper_internal_error.Runtime_exhausted
-         { reason = Keeper_meta_contract.Max_turns_exceeded; _ }) -> true
+         { reason = Keeper_internal_error.Max_turns_exceeded; _ }) -> true
   | Some _ | None -> false
 
 let sdk_error_soft_rate_limited (err : Agent_sdk.Error.sdk_error)

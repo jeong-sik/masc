@@ -1,11 +1,11 @@
 ---
 status: reference
-last_verified: 2026-04-17
+last_verified: 2026-06-05
 code_refs:
   - lib/server/
   - lib/server/masc_grpc_server.ml
   - lib/server/masc_grpc_service.ml
-  - lib/masc_grpc_transport.ml
+  - lib/config/masc_grpc_transport.ml
   - lib/sse.ml
   - lib/transport.ml
   - bin/main_eio.ml
@@ -112,7 +112,7 @@ graph TB
 
 ### 3.1 Transport 선택 로직 (에이전트 측)
 
-`lib/masc_grpc_transport.ml`이 에이전트 측 트랜스포트 선택을 정의한다:
+`lib/config/masc_grpc_transport.ml`이 에이전트 측 트랜스포트 선택을 정의한다:
 
 ```ocaml
 type t = Http | Grpc | Ws | Webrtc | Local
@@ -388,7 +388,7 @@ let make_routes ~port ~host ~sw ~clock =
 
 ## 7. Authentication
 
-**소스**: `lib/auth.ml` (435 LOC), `lib/server/server_auth.ml` (491 LOC)
+**소스**: `lib/auth/auth.ml` (435 LOC), `lib/server/server_auth.ml` (491 LOC)
 
 ### 7.1 인증 모델
 
@@ -505,7 +505,7 @@ WebSocket 세션은 `ws-{timestamp_ms}-{counter}` 형식 ID를 사용한다. SHA
 
 ## 10. gRPC Service
 
-**소스**: `lib/server/masc_grpc_server.ml`, `lib/server/masc_grpc_service.ml`, `lib/server/masc_grpc_client.ml`, `lib/server/masc_grpc_types.ml`, `lib/masc_grpc_transport.ml`
+**소스**: `lib/server/masc_grpc_server.ml`, `lib/server/masc_grpc_service.ml`, `lib/server/masc_grpc_client.ml`, `lib/server/masc_grpc_types.ml`, `lib/config/masc_grpc_transport.ml`
 
 ### 10.1 활성화
 
@@ -870,7 +870,7 @@ sequenceDiagram
 | `lib/server/masc_grpc_service.ml` | 417 | gRPC 서비스 핸들러 |
 | `lib/server/masc_grpc_server.ml` | 67 | gRPC 서버 시작 |
 | `lib/server/masc_grpc_client.ml` | 150 | gRPC 클라이언트 |
-| `lib/masc_grpc_transport.ml` | 24 | 트랜스포트 선택 로직 |
+| `lib/config/masc_grpc_transport.ml` | 24 | 트랜스포트 선택 로직 |
 
 ---
 

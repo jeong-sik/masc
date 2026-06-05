@@ -80,9 +80,6 @@ val keeper_masc_tool_names : keeper_meta -> string list
 (** Universe (policy-independent) MASC tool schemas for BM25 indexing. *)
 val keeper_universe_masc_tool_schemas : keeper_meta -> Masc_domain.tool_schema list
 
-(** Default model tools (keeper_model_tools + voice + tool_search). *)
-val keeper_default_model_tools : keeper_meta -> Masc_domain.tool_schema list
-
 (** {1 E6: .masc/ Write Protection} *)
 
 (** Check if a path is in the keeper-writable whitelist.

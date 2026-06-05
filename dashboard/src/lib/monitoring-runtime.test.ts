@@ -211,35 +211,4 @@ describe('summarizeKeeperMonitoring', () => {
     expect(summary.hint).toBe('오래 응답이 없어 실제 상태 확인이 필요합니다.')
   })
 
-  it('routes current tool-contract attention through the runtime projection', () => {
-    const compositeToolAttention = {
-      keeper: 'keeper-tool',
-      phase: 'running',
-      turn_phase: 'idle',
-      decision: { stage: 'idle' },
-      runtime: { state: 'idle' },
-      compaction: { stage: 'idle' },
-      circuit_breaker: { state: 'closed' },
-      is_live: false,
-      execution: {
-        tool_contract_result: 'tool_surface_mismatch',
-      },
-      runtime_attention: {
-        blocked: false,
-        needs_attention: false,
-        execution_current: true,
-        stale_execution_receipt: false,
-      },
-    } as unknown as Parameters<typeof summarizeKeeperMonitoring>[1] extends infer C ? C : never
-    const summary = summarizeKeeperMonitoring({
-      name: 'keeper-tool',
-      status: 'idle',
-      phase: 'Running',
-      last_heartbeat: new Date().toISOString(),
-      keepalive_running: true,
-    } as Keeper, compositeToolAttention)
-
-    expect(summary.band.key).toBe('attention')
-    expect(summary.hint).toBe('도구 계약 결과가 tool_surface_mismatch입니다.')
-  })
 })

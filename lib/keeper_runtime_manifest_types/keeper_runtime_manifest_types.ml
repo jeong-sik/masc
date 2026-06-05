@@ -10,9 +10,7 @@ type event_kind =
   | Phase_gate_decided
   | Runtime_routed
   | Pre_dispatch_blocked
-  | Tool_surface_selected
   | Provider_lane_resolved
-  | Tool_lineage_recorded
   | Provider_attempt_started
   | Provider_attempt_finished
   | Context_injected
@@ -31,9 +29,7 @@ let all_event_kinds =
     Phase_gate_decided;
     Runtime_routed;
     Pre_dispatch_blocked;
-    Tool_surface_selected;
     Provider_lane_resolved;
-    Tool_lineage_recorded;
     Provider_attempt_started;
     Provider_attempt_finished;
     Context_injected;
@@ -52,9 +48,7 @@ let event_kind_to_string = function
   | Phase_gate_decided -> "phase_gate_decided"
   | Runtime_routed -> "runtime_routed"
   | Pre_dispatch_blocked -> "pre_dispatch_blocked"
-  | Tool_surface_selected -> "tool_surface_selected"
   | Provider_lane_resolved -> "provider_lane_resolved"
-  | Tool_lineage_recorded -> "tool_lineage_recorded"
   | Provider_attempt_started -> "provider_attempt_started"
   | Provider_attempt_finished -> "provider_attempt_finished"
   | Context_injected -> "context_injected"
@@ -72,9 +66,7 @@ let event_kind_of_string = function
   | "phase_gate_decided" -> Some Phase_gate_decided
   | "runtime_routed" -> Some Runtime_routed
   | "pre_dispatch_blocked" -> Some Pre_dispatch_blocked
-  | "tool_surface_selected" -> Some Tool_surface_selected
   | "provider_lane_resolved" -> Some Provider_lane_resolved
-  | "tool_lineage_recorded" -> Some Tool_lineage_recorded
   | "provider_attempt_started" -> Some Provider_attempt_started
   | "provider_attempt_finished" -> Some Provider_attempt_finished
   | "context_injected" -> Some Context_injected

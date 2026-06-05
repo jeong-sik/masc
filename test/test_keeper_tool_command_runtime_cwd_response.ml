@@ -63,10 +63,10 @@ let test_render_sandbox_process_result_uses_cwd_response () =
   | Some path ->
     let src = read_source path in
     check bool
-      "render_sandbox_process_result references Keeper_cwd_response.docker"
+      "render_sandbox_process_result references Keeper_cwd_response.of_sandbox"
       true
       (Astring.String.is_infix
-         ~affix:"Keeper_cwd_response.docker ~host_cwd:cwd"
+         ~affix:"Keeper_cwd_response.of_sandbox"
          src);
     check bool
       "Keeper_cwd_response.to_yojson_response is referenced \
@@ -92,16 +92,17 @@ let test_git_log_runtime_branch_uses_cwd_response () =
   | Some path ->
     let src = read_source path in
     (* The git_log runtime branch builds its own cwd_response.
-       Verify at least 2 distinct [cwd_response = Keeper_cwd_response.docker]
+       Verify at least 2 distinct [cwd_response =
+       Keeper_cwd_response.of_sandbox]
        constructions in the file (render_sandbox + git_log; the
        generic op=bash branch was removed and now falls through the
        unsupported-op response, so it no longer constructs cwd responses). *)
     let docker_ctor_uses =
-      count_substring src "Keeper_cwd_response.docker ~host_cwd:cwd"
+      count_substring src "Keeper_cwd_response.of_sandbox"
     in
     check bool
       (Printf.sprintf
-         "Keeper_cwd_response.docker constructor used >= 2 times \
+         "Keeper_cwd_response.of_sandbox constructor used >= 2 times \
           (found %d)"
          docker_ctor_uses)
       true (docker_ctor_uses >= 2)

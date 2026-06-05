@@ -105,7 +105,6 @@ let tool_call_detail ?(outcome = "ok") tool_name : KAR.tool_call_detail =
 ;;
 
 let test_contract_progress_filters_no_progress_tool_results () =
-  let allowed_tool_names = [ "keeper_task_claim"; "tool_execute" ] in
   let no_progress_only =
     [ tool_call_detail ~outcome:"ok_no_progress" "keeper_task_claim" ]
   in
@@ -114,7 +113,6 @@ let test_contract_progress_filters_no_progress_tool_results () =
     "claim-only result is not contract progress"
     []
     (KAR.For_testing.progress_keeper_tool_names_for_contract
-       ~allowed_tool_names
        ~actual_keeper_tool_names:[ "keeper_task_claim" ]
        ~tool_calls:no_progress_only);
   check
@@ -122,14 +120,12 @@ let test_contract_progress_filters_no_progress_tool_results () =
     "claim remains visible as no-progress success"
     [ "keeper_task_claim" ]
     (KAR.For_testing.no_progress_success_tool_names_for_contract
-       ~allowed_tool_names
        ~tool_calls:no_progress_only);
   check
     (list string)
     "follow-up shell keeps the turn as progress"
     [ "tool_execute" ]
     (KAR.For_testing.progress_keeper_tool_names_for_contract
-       ~allowed_tool_names
        ~actual_keeper_tool_names:[ "keeper_task_claim"; "tool_execute" ]
        ~tool_calls:
          [ tool_call_detail ~outcome:"ok_no_progress" "keeper_task_claim"

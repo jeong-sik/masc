@@ -157,7 +157,6 @@
   test_heartbeat_smart
   test_keeper_allowed_paths
   test_playground_repo_readiness
-  test_keeper_tool_surface_guard
   test_playground_paths
   test_keeper_meta_cwd_resilience
   test_keeper_effective_meta_overlay
@@ -167,7 +166,6 @@
   test_autonomy_liberation
   test_keeper_unified_claim_progress
   test_keeper_unified_context_overflow
-  test_keeper_unified_tool_observation
   test_keeper_unified_idle_cooldown
   test_keeper_unified_inline_skip
   test_keeper_unified_metacognition
@@ -407,7 +405,6 @@
   test_heartbeat_smart
   test_keeper_allowed_paths
   test_playground_repo_readiness
-  test_keeper_tool_surface_guard
   test_playground_paths
   test_keeper_meta_cwd_resilience
   test_keeper_effective_meta_overlay
@@ -417,7 +414,6 @@
   test_autonomy_liberation
   test_keeper_unified_claim_progress
   test_keeper_unified_context_overflow
-  test_keeper_unified_tool_observation
   test_keeper_unified_idle_cooldown
   test_keeper_unified_inline_skip
   test_keeper_unified_metacognition
@@ -628,6 +624,7 @@
   test_keeper_identity_outcome_label
   test_worker_runtime
   test_capability_registry
+  test_tool_misc_web_fetch
   test_tool_local_runtime_probe
   test_board_ttl
   test_keeper_path_check_error
@@ -808,6 +805,7 @@
   test_keeper_identity_outcome_label
   test_worker_runtime
   test_capability_registry
+  test_tool_misc_web_fetch
   test_tool_local_runtime_probe
   test_board_ttl
   test_keeper_path_check_error

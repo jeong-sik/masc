@@ -4,9 +4,7 @@ type event_kind =
   | Phase_gate_decided
   | Runtime_routed
   | Pre_dispatch_blocked
-  | Tool_surface_selected
   | Provider_lane_resolved
-  | Tool_lineage_recorded
   | Provider_attempt_started
   | Provider_attempt_finished
   | Context_injected

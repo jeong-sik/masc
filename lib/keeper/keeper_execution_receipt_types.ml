@@ -51,9 +51,7 @@ let assert_receipt_authoritative ~outcome ~turn_state =
 ;;
 
 type tool_surface =
-  { turn_lane : Keeper_agent_tool_surface.turn_lane
-  ; materialized_tools : string list
-  }
+  { turn_lane : Keeper_agent_tool_surface.turn_lane }
 
 (* Phase identifier emitted when a runtime rotation releases the in-flight
    turn slot.  Producer-side closed set; the JSON wire is the lowercase
@@ -275,12 +273,6 @@ type t =
   ; terminal_reason_code : string
   ; response_text_present : bool
   ; model_used : string option
-  ; requested_tools : string list
-  ; reported_tools : string list
-  ; observed_tools : string list
-  ; canonical_tools : string list
-  ; unexpected_tools : string list
-  ; tools_used : string list
   ; completion_contract_result : completion_contract_result
   ; tool_surface : tool_surface
   ; sandbox_kind : Keeper_types_profile_sandbox.sandbox_profile
@@ -322,32 +314,8 @@ let stop_reason_to_string = function
      | None -> Printf.sprintf "mutation_boundary:%d" turns_used)
 ;;
 
-(* Build an extended terminal_reason_code from a receipt whose
-   terminal_reason_code is already set to the legacy
-   "completion_contract_violation:<id>" form. Uses the receipt's
-   canonical_tools + observed_tools + tools_used as called_tools.
-   Returns the original code unchanged if it is not a contract-violation
-   code or is already enriched. *)
 let enrich_contract_violation_reason (receipt : t) : string =
-  match decode_contract_violation_reason receipt.terminal_reason_code with
-  | None -> receipt.terminal_reason_code
-  | Some (_contract_id, _called, _satisfying) ->
-    if _called <> [] || _satisfying <> []
-    then receipt.terminal_reason_code
-    else
-      let canonical_names names =
-        names
-        |> List.map Keeper_tool_resolution.canonical_tool_name
-        |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
-      in
-      let called =
-        canonical_names
-          (receipt.canonical_tools @ receipt.observed_tools @ receipt.tools_used)
-      in
-      encode_contract_violation_reason
-        ~called_tools:called
-        ~satisfying_tools:[]
-        _contract_id
+  receipt.terminal_reason_code
 ;;
 
 let sandbox_kind_of_meta (meta : Keeper_meta_contract.keeper_meta) : Keeper_types_profile_sandbox.sandbox_profile =

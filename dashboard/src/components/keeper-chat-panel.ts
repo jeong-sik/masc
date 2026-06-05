@@ -1,5 +1,9 @@
 // Keeper Chat Panel — SSE streaming conversation with a keeper agent.
 // Uses streamKeeperMessage() for real-time token-by-token responses.
+//
+// Messages are persisted via keeper-chat-store (sessionStorage) so they
+// survive tab navigation and page refreshes.  The web dashboard is one
+// connector among many (Discord, Slack, etc.).
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
@@ -18,12 +22,13 @@ import type { KeeperConversationEntry } from '../types'
 import { shellAuthSummary } from '../store'
 import { keeperDirectChatAccess } from '../lib/keeper-chat-access'
 import { errorToString } from '../lib/format-string'
-
-export interface ChatMessage {
-  role: 'user' | 'assistant'
-  content: string
-  timestamp: number
-}
+import {
+  type ChatMessage,
+  getChatMessageBuffer,
+  appendChatMessage,
+  mergeServerHistory,
+  flushStreamBuffer,
+} from '../keeper-chat-store'
 
 /**
  * Pure filter: case-insensitive substring match over message content.
@@ -84,13 +89,14 @@ export function KeeperChatPanel({ name }: { name: string }) {
   // Per-instance signals — each KeeperChatPanel has its own state.
   // Fixes: global signal sharing caused cross-keeper state clobbering
   // and effect re-initialization wiped messages on parent re-render.
-  const chatMessages = useMemo(() => signal<ChatMessage[]>([]), [])
+  const chatMessages = useMemo(() => signal<ChatMessage[]>(getChatMessageBuffer(name)), [name])
   const chatInput = useMemo(() => signal(''), [])
   const streaming = useMemo(() => signal(false), [])
   const streamBuffer = useMemo(() => signal(''), [])
   const streamStartedAt = useMemo(() => signal<number | null>(null), [])
   const chatError = useMemo(() => signal(''), [])
   const searchQuery = useMemo(() => signal(''), [])
+  const historyLoaded = useMemo(() => signal(false), [])
 
   const activeAbortRef = useRef<AbortController | null>(null)
 
@@ -102,7 +108,30 @@ export function KeeperChatPanel({ name }: { name: string }) {
     streamStartedAt.value = null
   }
 
+  async function loadHistory(keeperName: string): Promise<void> {
+    if (historyLoaded.value) return
+    historyLoaded.value = true
+    try {
+      const history = await fetchKeeperChatHistory(keeperName)
+      if (history.length > 0) {
+        const serverMsgs = history.map((m) => ({
+          role: m.role === 'assistant' ? 'assistant' as const : 'user' as const,
+          content: m.content,
+          timestamp: m.ts * 1000,
+          source: 'api' as const,
+        }))
+        mergeServerHistory(keeperName, serverMsgs)
+        chatMessages.value = getChatMessageBuffer(keeperName)
+      }
+    } catch (err: unknown) {
+      const msg = errorToString(err)
+      chatError.value = `이전 대화 불러오기 실패: ${msg}`
+    }
+  }
+
   async function sendChat(keeperName: string): Promise<void> {
+    await loadHistory(keeperName)
+
     const text = chatInput.value.trim()
     if (!text || streaming.value) return
 
@@ -111,10 +140,9 @@ export function KeeperChatPanel({ name }: { name: string }) {
     streamBuffer.value = ''
     streamStartedAt.value = Date.now()
 
-    chatMessages.value = [
-      ...chatMessages.value,
-      { role: 'user', content: text, timestamp: Date.now() },
-    ]
+    const userMsg: ChatMessage = { role: 'user', content: text, timestamp: Date.now(), source: 'dashboard' }
+    appendChatMessage(keeperName, userMsg)
+    chatMessages.value = getChatMessageBuffer(keeperName)
 
     streaming.value = true
     activeAbortRef.current = new AbortController()
@@ -127,10 +155,9 @@ export function KeeperChatPanel({ name }: { name: string }) {
             streamBuffer.value += event.delta
           } else if (event.type === 'RUN_FINISHED') {
             const finalText = streamBuffer.value.trim() || '(no response)'
-            chatMessages.value = [
-              ...chatMessages.value,
-              { role: 'assistant', content: finalText, timestamp: Date.now() },
-            ]
+            const assistantMsg: ChatMessage = { role: 'assistant', content: finalText, timestamp: Date.now(), source: 'dashboard' }
+            appendChatMessage(keeperName, assistantMsg)
+            chatMessages.value = getChatMessageBuffer(keeperName)
             streamBuffer.value = ''
           } else if (event.type === 'RUN_ERROR') {
             chatError.value = normalizeKeeperChatErrorValue(event.value)
@@ -150,26 +177,14 @@ export function KeeperChatPanel({ name }: { name: string }) {
   }
 
   useEffect(() => {
-    // Only fetch history; do NOT wipe messages.
-    // Previous global-signal design wiped messages on every parent re-render.
-    let stale = false
-    void fetchKeeperChatHistory(name)
-      .then((history) => {
-        if (stale) return
-        if (history.length > 0) {
-          chatMessages.value = history.map((m) => ({
-            role: m.role === 'assistant' ? 'assistant' as const : 'user' as const,
-            content: m.content,
-            timestamp: m.ts * 1000,
-          }))
-        }
-      })
-      .catch((err: unknown) => {
-        if (stale) return
-        const msg = errorToString(err)
-        chatError.value = `이전 대화 불러오기 실패: ${msg}`
-      })
-    return () => { stale = true }
+    // External-system sync: flush an in-progress stream buffer into the
+    // store when the component unmounts (tab change, route navigation).
+    // No data init here — history is loaded lazily on first interaction.
+    return () => {
+      if (streaming.value && streamBuffer.value.trim()) {
+        flushStreamBuffer(name, streamBuffer.value)
+      }
+    }
   }, [name])
 
   const messages = chatMessages.value

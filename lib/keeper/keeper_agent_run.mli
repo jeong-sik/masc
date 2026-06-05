@@ -32,6 +32,10 @@ module For_testing : sig
   val no_progress_success_tool_names_for_contract
     :  tool_calls:tool_call_detail list
     -> string list
+  val failed_tool_only_contract_violation
+    :  actual_keeper_tool_names:string list
+    -> tool_calls:tool_call_detail list
+    -> bool
 end
 
 val per_provider_timeout_for_turn

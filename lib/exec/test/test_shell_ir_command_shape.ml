@@ -39,6 +39,9 @@ let test_git_non_recovery_command_shapes () =
   check_recovery "git checkout other-branch" false;
   check_recovery "git checkout -b feature" false;
   check_recovery "git checkout HEAD -- ../outside.txt" false;
+  check_recovery "git -C ../other reset --hard HEAD" false;
+  check_recovery "git --work-tree ../other reset --hard HEAD" false;
+  check_recovery "git --git-dir=../other/.git clean -df" false;
   check_recovery "git reset --hard" false;
   check_recovery "git reset --hard HEAD~1" false;
   check_recovery "git reset --soft HEAD" false;

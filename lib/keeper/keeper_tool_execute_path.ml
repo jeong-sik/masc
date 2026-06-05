@@ -113,14 +113,22 @@ let cwd_is_sandbox_repo_context ~config ~meta ~cwd =
   | Some _ -> true
 
 let cwd_is_sandbox_repo_root ~config ~meta ~cwd =
+  let cwd = normalize_repo_cwd_path cwd in
   match repo_path_context ~config ~meta cwd with
-  | Some (_, repo_root, path_root, _) ->
-    String.equal repo_root path_root
+  | Some (_, repo_root, _, _) -> String.equal repo_root cwd
   | None -> false
 
 let invalidate_repo_currency_cache ~config ~meta ~repo_name =
   let cpath = Playground_repo_readiness.clone_path ~config ~meta ~repo_name in
   Hashtbl.remove currency_sync_cache cpath
+;;
+
+let invalidate_repo_currency_cache_for_cwd ~config ~meta ~cwd =
+  let cwd = normalize_repo_cwd_path cwd in
+  match repo_path_context ~config ~meta cwd with
+  | Some (repo_name, repo_root, _, _) when String.equal repo_root cwd ->
+    invalidate_repo_currency_cache ~config ~meta ~repo_name
+  | _ -> ()
 ;;
 
 let repo_currency_not_ready_error ~config ~meta ~repo_name ~reason ~cwd =
@@ -160,7 +168,7 @@ let validate_repo_cwd_currency_ready
   | Some (repo_name, _repo_root, _path_root, _accepted_toplevels) ->
     if
       Masc_exec.Shell_ir_command_shape.is_git_diagnostic_command ir
-      || (cwd_is_sandbox_repo_context ~config ~meta ~cwd
+      || (cwd_is_sandbox_repo_root ~config ~meta ~cwd
           && Masc_exec.Shell_ir_command_shape.is_git_recovery_command ir)
     then Ok ()
     else

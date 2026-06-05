@@ -45,6 +45,22 @@ val cwd_is_sandbox_repo_context :
     repo worktree path. This is cwd policy only; command-shape checks live under
     {!Masc_exec}. *)
 
+val cwd_is_sandbox_repo_root :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  cwd:string ->
+  bool
+(** [true] only when [cwd] resolves to the preserved direct sandbox repo root
+    ([repos/<repo>]), not a repo subdirectory or [.worktrees/<task>] path. *)
+
+val invalidate_repo_currency_cache_for_cwd :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  cwd:string ->
+  unit
+(** Clear the cached currency probe for a direct sandbox repo root cwd. Non-root
+    sandbox repo contexts are ignored. *)
+
 val execution_location_json :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->

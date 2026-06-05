@@ -469,23 +469,20 @@ let handle_tool_execute_typed
             ~reason:"This typed command is destructive and is blocked for every keeper execution surface."
             ~alternatives:[ "Use a non-destructive command or a dedicated structured tool." ]
             ()
-        let is_git_recovery =
-          Keeper_tool_execute_path.cwd_is_sandbox_repo_root ~config ~meta ~cwd
-          && Masc_exec.Shell_ir_command_shape.is_git_recovery_command ir
+        else
+        let is_git_recovery_command =
+          Masc_exec.Shell_ir_command_shape.is_git_recovery_command ir
         in
-        if is_git_recovery
-        then
-          (match Keeper_tool_execute_path.repo_path_context ~config ~meta cwd with
-           | Some (repo_name, _, _, _) ->
-             Keeper_tool_execute_path.invalidate_repo_currency_cache
-               ~config
-               ~meta
-               ~repo_name
-           | None -> ());
-        if (not write_enabled)
-           && (Masc_exec.Shell_ir_risk.is_r1 envelope
-              || Masc_exec.Shell_ir_risk.is_r2 envelope)
-           && not is_git_recovery
+        let is_direct_repo_git_recovery =
+          Keeper_tool_execute_path.cwd_is_sandbox_repo_root ~config ~meta ~cwd
+          && is_git_recovery_command
+        in
+        let readonly_write_like =
+          is_git_recovery_command
+          || Masc_exec.Shell_ir_risk.is_r1 envelope
+          || Masc_exec.Shell_ir_risk.is_r2 envelope
+        in
+        if (not write_enabled) && readonly_write_like && not is_direct_repo_git_recovery
         then
           blocked_result
             ~deterministic_reason:Keeper_tool_deterministic_error.Write_operation_gated
@@ -557,6 +554,13 @@ let handle_tool_execute_typed
               ~fields:(("blocked_cmd", `String cmd_for_log) :: typed_error_fields)
               e
           | Ok result ->
+            (match result.status with
+             | Unix.WEXITED 0 when is_direct_repo_git_recovery ->
+               Keeper_tool_execute_path.invalidate_repo_currency_cache_for_cwd
+                 ~config
+                 ~meta
+                 ~cwd
+             | _ -> ());
             let elapsed_ms =
               (* NDT-OK: second wall-clock read closes the elapsed telemetry
                  span recorded immediately below. *)

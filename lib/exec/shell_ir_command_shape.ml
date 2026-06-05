@@ -188,11 +188,11 @@ let git_clean_recovery_args args =
 let git_args_has_path_changing_option args =
   let rec scan = function
     | [] -> false
-    | ("-C" | "--git-dir" | "--work-tree") :: _ :: rest -> true
-    | arg :: rest
+    | ("-C" | "--git-dir" | "--work-tree") :: _ :: _rest -> true
+    | arg :: _rest
       when String.starts_with ~prefix:"-C" arg && String.length arg > 2 ->
       true
-    | arg :: rest
+    | arg :: _rest
       when String.starts_with ~prefix:"--git-dir=" arg
            || String.starts_with ~prefix:"--work-tree=" arg ->
       true

@@ -15,7 +15,7 @@ module Char = Stdlib.Char
 module Int = Stdlib.Int
 module Float = Stdlib.Float
 
-(** Tool_misc_admin — config and tool inventory handlers.
+(** Tool_misc_introspection — config and tool inventory handlers.
 
     Extracted from tool_misc.ml to reduce god file size.
     Contains read-only dashboard config and catalog inventory helpers.

@@ -120,12 +120,6 @@ val local_worker_tool_schemas :
     [Error] when [names] contains an unknown name (operator-
     visible message format from {!resolve_named_schemas}). *)
 
-(** {1 Admin surface} *)
-
-val admin_tool_names : string list
-(** SSOT: {!Tool_catalog_surfaces.admin_surface_tools}.  Admin tools that
-    should be excluded from autonomous agents. *)
-
 (** {1 Role-catalogue} *)
 
 val workspace_tool_names : string list
@@ -151,7 +145,7 @@ val build_tool_catalog : role:string -> unit -> string list
     |---|---|
     | [["worker"]] | {!execution_tool_names} ∩ available |
     | [["workspace_lead"]] / [["fleet_leader"]] | {!workspace_tool_names} ∩ available |
-    | other | all available tools minus {!admin_tool_names} |
+    | other | all available spawned/local worker tools |
 
     Available = {!spawned_agent_public_tool_names} ∪
     {!local_worker_public_tool_names}, deduped. *)

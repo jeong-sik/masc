@@ -74,7 +74,7 @@ flowchart TD
   MCP --> RL[resources/list read templates]
 
   TL --> Canon[Canonical tool surface]
-  TL --> Hidden[Hidden/admin tools not listed]
+  TL --> Hidden[Hidden/internal tools not listed]
 
   Canon --> Core[Namespace task keeper runtime]
   Canon --> Ecosystem[keeper always-on autonomy]

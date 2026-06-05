@@ -182,43 +182,7 @@ let test_shard_tools_overlap_with_agent_documented () =
   ) overlap
 
 (* ============================================================
-   Invariant 5: Research shard tools that overlap with admin list
-   (documenting the intentional design — keeper shard bypasses
-   the dispatch pre-hook permission check for these tools)
-   ============================================================ *)
-
-let test_research_admin_overlap_documented () =
-  let admin = Tool_catalog_surfaces.admin_surface_tools in
-  let meta = make_meta  () in
-  let keeper_names = Keeper_tool_dispatch_runtime.keeper_allowed_tool_names meta in
-  let overlap = List.filter (fun n -> List.mem n admin) keeper_names in
-  (* These research tools are intentionally in both lists.
-     Keepers access them via shard allocation, not dispatch pre-hook.
-     This test documents the overlap rather than preventing it. *)
-  List.iter (fun name ->
-    Alcotest.(check bool) (name ^ " is a research tool") true
-      (List.mem name (known_non_keeper_tool_names ()))
-  ) overlap
-
-(* ============================================================
-   Invariant 6: All keepers now have admin-listed tools (mode removed).
-   Document the overlap rather than preventing it.
-   ============================================================ *)
-
-let test_non_research_admin_tools_documented () =
-  let admin = Tool_catalog_surfaces.admin_surface_tools in
-  let meta = make_meta ~policy_voice_enabled:true () in
-  let keeper_names = Keeper_tool_dispatch_runtime.keeper_allowed_tool_names meta in
-  let overlap = List.filter (fun n -> List.mem n admin) keeper_names in
-  (* Mode removal: all keepers get all tools. Admin-listed tools that
-     appear in keeper tool set come from known sources (coding, research shards). *)
-  List.iter (fun name ->
-    Alcotest.(check bool) (name ^ " is from known source") true
-      (List.mem name (known_non_keeper_tool_names ()))
-  ) overlap
-
-(* ============================================================
-   Invariant 7: Tool count consistency across policy modes
+   Invariant 5: Tool count consistency across policy modes
    ============================================================ *)
 
 let test_heuristic_has_fewer_tools_than_learned () =
@@ -338,11 +302,6 @@ let () =
       Alcotest.test_case "heuristic vs agent" `Quick test_no_overlap_heuristic_vs_agent;
       Alcotest.test_case "research vs agent" `Quick test_no_overlap_research_vs_agent;
       Alcotest.test_case "shard vs agent" `Quick test_shard_tools_overlap_with_agent_documented;
-    ]);
-    ("admin_boundary", [
-      Alcotest.test_case "research admin overlap documented" `Quick
-        test_research_admin_overlap_documented;
-      Alcotest.test_case "non-research admin documented" `Quick test_non_research_admin_tools_documented;
     ]);
     ("policy_consistency", [
       Alcotest.test_case "learned >= heuristic" `Quick test_heuristic_has_fewer_tools_than_learned;

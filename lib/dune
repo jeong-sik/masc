@@ -190,7 +190,7 @@
   tool_inline_dispatch_workspace
   tool_inline_dispatch_comm
   workspace_goals_verification
-  tool_misc_admin
+  tool_misc_introspection
   keeper_tool_persona_audit
   tool_misc_web_search
   tool_misc_web_fetch

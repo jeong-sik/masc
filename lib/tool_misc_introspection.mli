@@ -1,4 +1,4 @@
-(** Tool_misc_admin — config and tool inventory handlers.
+(** Tool_misc_introspection — config and tool inventory handlers.
 
     Extracted from {!Tool_misc} to reduce god-file size.  Contains
     read-only helper handlers for the dashboard:

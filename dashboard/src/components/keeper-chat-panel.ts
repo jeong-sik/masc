@@ -67,7 +67,9 @@ async function resizeImage(file: File, maxWidth = 1920): Promise<File> {
   if (!file.type.startsWith('image/')) return file
   return new Promise((resolve) => {
     const img = new Image()
+    const objectUrl = URL.createObjectURL(file)
     img.onload = () => {
+      URL.revokeObjectURL(objectUrl)
       if (img.width <= maxWidth) { resolve(file); return }
       const canvas = document.createElement('canvas')
       const scale = maxWidth / img.width
@@ -81,8 +83,11 @@ async function resizeImage(file: File, maxWidth = 1920): Promise<File> {
         resolve(new File([blob], file.name, { type: file.type }))
       }, file.type)
     }
-    img.onerror = () => resolve(file)
-    img.src = URL.createObjectURL(file)
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl)
+      resolve(file)
+    }
+    img.src = objectUrl
   })
 }
 
@@ -112,7 +117,7 @@ function toConversationEntry(
     timestamp: new Date(msg.timestamp).toISOString(),
     delivery: 'delivered',
     streamState: null,
-    details: null,
+    details: msg.attachments ? { rawPayload: { attachments: msg.attachments } } : null,
   }
 }
 
@@ -422,7 +427,11 @@ export function KeeperChatPanel({ name }: { name: string }) {
             class="hidden"
             multiple
             accept="image/png,image/jpeg,image/gif,image/webp,text/plain,text/markdown,application/json,text/csv"
-            onChange=${(e: Event) => { void handleFileSelect((e.target as HTMLInputElement).files) }}
+            onChange=${(e: Event) => {
+              const target = e.target as HTMLInputElement
+              void handleFileSelect(target.files)
+              target.value = ''
+            }}
           />
           <div class="flex-1">
             <${ChatComposer}

@@ -42,6 +42,15 @@ val tool_names_of_calls : tool_call_detail list -> string list
 val tool_names : run_result -> string list
 val tool_call_count : run_result -> int
 
+val append_synthetic_tool_call
+  :  provider:string
+  -> ?route_evidence:Yojson.Safe.t
+  -> string
+  -> run_result
+  -> run_result
+(** [append_synthetic_tool_call ~provider ?route_evidence tool_name result] appends
+    a synthetic tool call detail to the end of the [result.tool_calls] list. *)
+
 val runtime_lane_label : string
 (** Boundary-redacted label used wherever MASC's keeper metrics surface
     exposes a model identity field. OAS owns concrete provider/model

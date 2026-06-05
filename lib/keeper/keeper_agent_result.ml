@@ -71,6 +71,20 @@ type run_result =
 let tool_names (result : run_result) = tool_names_of_calls result.tool_calls
 let tool_call_count (result : run_result) = List.length result.tool_calls
 
+let append_synthetic_tool_call ~provider ?route_evidence tool_name result =
+  let synthetic_call =
+    { tool_name
+    ; provider
+    ; outcome = "ok"
+    ; typed_outcome = None
+    ; latency_ms = 0.0
+    ; task_id = None
+    ; route_evidence
+    }
+  in
+  { result with tool_calls = result.tool_calls @ [ synthetic_call ] }
+;;
+
 (* RFC-0132 PR-2: agent-result surface label = external boundary; redact via SSOT. *)
 let runtime_lane_label =
   Boundary_redaction.to_string Boundary_redaction.runtime_model_label

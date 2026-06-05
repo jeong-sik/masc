@@ -587,13 +587,8 @@ let run_turn
                      ~had_owned_active_task_at_turn_start
                      ~actual_keeper_tool_names:progress_keeper_tool_names
                  in
-                 let text_result =
-                   acc.receipt_completion_contract_result <- completion_contract_status ();
-                   Ok (`Provider_text text)
-                 in
-                   match text_result with
-                   | Error e -> Error e
-                   | Ok (`Provider_text text) ->
+                 let contract_status = completion_contract_status () in
+                 acc.receipt_completion_contract_result <- contract_status;
                      (match
                         Keeper_tool_response.normalize_response_text
                           ~text

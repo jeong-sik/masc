@@ -24,6 +24,7 @@ import { keeperDirectChatAccess } from '../lib/keeper-chat-access'
 import { errorToString } from '../lib/format-string'
 import {
   type ChatMessage,
+  type Attachment,
   getChatMessageBuffer,
   appendChatMessage,
   mergeServerHistory,
@@ -34,6 +35,56 @@ import {
   clearInputQueue,
   getQueueLength,
 } from '../keeper-chat-store'
+
+const ALLOWED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
+const ALLOWED_FILE_TYPES = ['text/plain', 'text/markdown', 'application/json', 'text/csv']
+const MAX_IMAGE_SIZE = 5 * 1024 * 1024
+const MAX_FILE_SIZE = 2 * 1024 * 1024
+const MAX_TOTAL_PAYLOAD = 10 * 1024 * 1024
+const MAX_ATTACHMENTS = 5
+
+function validateFile(file: File): string | null {
+  if (file.type.startsWith('image/')) {
+    if (!ALLOWED_IMAGE_TYPES.includes(file.type)) return `지원하지 않는 이미지 형식: ${file.type}`
+    if (file.size > MAX_IMAGE_SIZE) return '이미지 크기 초과 (최대 5MB)'
+  } else {
+    if (!ALLOWED_FILE_TYPES.includes(file.type)) return `지원하지 않는 파일 형식: ${file.type}`
+    if (file.size > MAX_FILE_SIZE) return '파일 크기 초과 (최대 2MB)'
+  }
+  return null
+}
+
+function readFileAsDataURL(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as string)
+    reader.onerror = () => reject(new Error('파일 읽기 실패'))
+    reader.readAsDataURL(file)
+  })
+}
+
+async function resizeImage(file: File, maxWidth = 1920): Promise<File> {
+  if (!file.type.startsWith('image/')) return file
+  return new Promise((resolve) => {
+    const img = new Image()
+    img.onload = () => {
+      if (img.width <= maxWidth) { resolve(file); return }
+      const canvas = document.createElement('canvas')
+      const scale = maxWidth / img.width
+      canvas.width = maxWidth
+      canvas.height = Math.round(img.height * scale)
+      const ctx = canvas.getContext('2d')
+      if (!ctx) { resolve(file); return }
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+      canvas.toBlob((blob) => {
+        if (!blob) { resolve(file); return }
+        resolve(new File([blob], file.name, { type: file.type }))
+      }, file.type)
+    }
+    img.onerror = () => resolve(file)
+    img.src = URL.createObjectURL(file)
+  })
+}
 
 /**
  * Pure filter: case-insensitive substring match over message content.
@@ -104,6 +155,58 @@ export function KeeperChatPanel({ name }: { name: string }) {
   const historyLoaded = useMemo(() => signal(false), [])
 
   const activeAbortRef = useRef<AbortController | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const selectedAttachments = useMemo(() => signal<Attachment[]>([]), [])
+
+  async function handleFileSelect(files: FileList | null): Promise<void> {
+    if (!files) return
+    const newAttachments: Attachment[] = []
+    let totalSize = selectedAttachments.value.reduce((sum, a) => sum + a.size, 0)
+
+    for (const file of Array.from(files).slice(0, MAX_ATTACHMENTS - selectedAttachments.value.length)) {
+      const error = validateFile(file)
+      if (error) { showToast(error, 'error'); continue }
+      const resized = await resizeImage(file)
+      const dataUrl = await readFileAsDataURL(resized)
+      const base64Size = Math.ceil(dataUrl.length * 0.75)
+      totalSize += base64Size
+      if (totalSize > MAX_TOTAL_PAYLOAD) {
+        showToast('총 첨부 크기가 10MB를 초과합니다.', 'error')
+        break
+      }
+      newAttachments.push({
+        id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        type: resized.type.startsWith('image/') ? 'image' : 'file',
+        name: resized.name,
+        size: base64Size,
+        mimeType: resized.type,
+        data: dataUrl,
+      })
+    }
+    selectedAttachments.value = [...selectedAttachments.value, ...newAttachments]
+  }
+
+  function removeAttachment(id: string): void {
+    selectedAttachments.value = selectedAttachments.value.filter((a) => a.id !== id)
+  }
+
+  function handlePaste(event: ClipboardEvent): void {
+    const items = event.clipboardData?.items
+    if (!items) return
+    const imageFiles: File[] = []
+    for (const item of Array.from(items)) {
+      if (item.type.startsWith('image/')) {
+        const file = item.getAsFile()
+        if (file) imageFiles.push(file)
+      }
+    }
+    if (imageFiles.length > 0) {
+      event.preventDefault()
+      const dt = new DataTransfer()
+      for (const f of imageFiles) dt.items.add(f)
+      void handleFileSelect(dt.files)
+    }
+  }
 
   function cancelStream(): void {
     if (activeAbortRef.current) activeAbortRef.current.abort()
@@ -151,9 +254,16 @@ export function KeeperChatPanel({ name }: { name: string }) {
     streamBuffer.value = ''
     streamStartedAt.value = Date.now()
 
-    const userMsg: ChatMessage = { role: 'user', content: text, timestamp: Date.now(), source: 'dashboard' }
+    const userMsg: ChatMessage = {
+      role: 'user',
+      content: text,
+      timestamp: Date.now(),
+      source: 'dashboard',
+      attachments: selectedAttachments.value.length > 0 ? selectedAttachments.value : undefined,
+    }
     appendChatMessage(keeperName, userMsg)
     chatMessages.value = getChatMessageBuffer(keeperName)
+    selectedAttachments.value = []
 
     streaming.value = true
     activeAbortRef.current = new AbortController()
@@ -233,7 +343,7 @@ export function KeeperChatPanel({ name }: { name: string }) {
       : entries
 
   return html`
-    <div class="overflow-hidden rounded-[var(--radius-xl)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] shadow-[var(--shadow-raised)]">
+    <div class="overflow-hidden rounded-[var(--radius-xl)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] shadow-[var(--shadow-raised)]" onPaste=${handlePaste}>
       <div class="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--color-border-default)] px-4 py-4">
         <div class="min-w-55 flex-1">
           <div class="text-2xs font-semibold uppercase tracking-5 text-[var(--color-fg-muted)]">직접 대화</div>
@@ -282,22 +392,57 @@ export function KeeperChatPanel({ name }: { name: string }) {
               <button class="underline hover:text-[var(--color-fg-secondary)]" onClick=${() => { clearInputQueue(name); chatMessages.value = [...getChatMessageBuffer(name)] }}>취소</button>
             </div>`
           : null}
-        <${ChatComposer}
-          draft=${chatInput.value}
-          placeholder=${isStreaming ? '답변 중... 메시지를 입력하면 대기열에 추가됩니다' : chatAccess.blocked ? '현재 actor는 direct keeper chat 권한이 없습니다' : '메시지 입력...'}
-          disabled=${chatAccess.blocked}
-          streaming=${isStreaming}
-          streamStartedAt=${streamStartedAt.value}
-          onDraftChange=${(value: string) => { chatInput.value = value }}
-          onSend=${() => {
-            if (chatAccess.blocked) {
-              showToast(chatAccess.message, 'error')
-              return
-            }
-            void sendChat(name)
-          }}
-          onAbort=${cancelStream}
-        />
+        ${selectedAttachments.value.length > 0
+          ? html`<div class="mb-2 flex flex-wrap gap-2">
+              ${selectedAttachments.value.map((att) => html`
+                <div class="group relative inline-flex items-center gap-1.5 rounded-lg border border-[var(--color-border-default)] bg-[var(--color-bg-muted)] px-2 py-1 text-2xs">
+                  ${att.type === 'image'
+                    ? html`<img src=${att.data} class="h-6 w-6 rounded object-cover" alt="" />`
+                    : html`<span class="text-[var(--color-fg-muted)]">📄</span>`}
+                  <span class="max-w-32 truncate text-[var(--color-fg-secondary)]">${att.name}</span>
+                  <button
+                    class="ml-1 rounded-full p-0.5 text-[var(--color-fg-muted)] hover:bg-[var(--warn-20)] hover:text-[var(--warn-bright)]"
+                    onClick=${() => removeAttachment(att.id)}
+                    title="제거"
+                  >×</button>
+                </div>`)}`
+          : null}
+        <div class="flex items-end gap-2">
+          <button
+            class="flex-shrink-0 rounded-lg border border-[var(--color-border-default)] px-2.5 py-2 text-sm hover:bg-[var(--color-bg-muted)] disabled:opacity-50"
+            onClick=${() => fileInputRef.current?.click()}
+            disabled=${chatAccess.blocked}
+            title="파일 첨부"
+          >
+            📎
+          </button>
+          <input
+            type="file"
+            ref=${fileInputRef}
+            class="hidden"
+            multiple
+            accept="image/png,image/jpeg,image/gif,image/webp,text/plain,text/markdown,application/json,text/csv"
+            onChange=${(e: Event) => { void handleFileSelect((e.target as HTMLInputElement).files) }}
+          />
+          <div class="flex-1">
+            <${ChatComposer}
+              draft=${chatInput.value}
+              placeholder=${isStreaming ? '답변 중... 메시지를 입력하면 대기열에 추가됩니다' : chatAccess.blocked ? '현재 actor는 direct keeper chat 권한이 없습니다' : '메시지 입력...'}
+              disabled=${chatAccess.blocked}
+              streaming=${isStreaming}
+              streamStartedAt=${streamStartedAt.value}
+              onDraftChange=${(value: string) => { chatInput.value = value }}
+              onSend=${() => {
+                if (chatAccess.blocked) {
+                  showToast(chatAccess.message, 'error')
+                  return
+                }
+                void sendChat(name)
+              }}
+              onAbort=${cancelStream}
+            />
+          </div>
+        </div>
       </div>
     </div>
   `

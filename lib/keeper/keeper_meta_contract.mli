@@ -19,7 +19,7 @@
     {!map_runtime} / {!map_usage}).  All consumed only via the include
     runtime or the JSON pipeline. *)
 
-(** {1 Tool-access runtime re-export} *)
+(** {1 Tool-access persisted-meta helpers} *)
 
 include module type of Keeper_meta_tool_access
 

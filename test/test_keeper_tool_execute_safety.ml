@@ -505,15 +505,14 @@ let test_tool_execute_rejects_parent_git_repo_cwd () =
   | Error err -> Alcotest.failf "cwd resolution should be path-only, got: %s" err
   | Ok cwd ->
     (match
-       Masc.Keeper_tool_execute_repo_preflight.validate_cwd_ready
-         ~repo_currency_policy:
-           Masc.Keeper_tool_execute_repo_preflight.Allow_repo_currency_sync
+       Masc.Keeper_tool_execute_repo_readiness.validate_cwd_ready
+         ~repo_sync_policy:Masc.Keeper_tool_execute_repo_readiness.Allow_repo_sync
          ~config
          ~meta
          ~cwd
          ~allow_stale_preserved_repo_context:false
      with
-     | Ok () -> Alcotest.failf "expected repo preflight rejection, got %s" cwd
+     | Ok () -> Alcotest.failf "expected repo readiness rejection, got %s" cwd
      | Error err ->
     if not (is_repo_or_task_state_path_block err) then
       Alcotest.failf
@@ -903,7 +902,7 @@ let test_tool_execute_readonly_blocks_preserved_direct_repo_git_show_without_fet
   match parse_error_field raw with
   | Some err ->
     Alcotest.(check bool) "readonly direct repo root is rejected without sync" true
-      (String_util.contains_substring err "sandbox_repo_currency_sync_disabled");
+      (String_util.contains_substring err "sandbox_repo_sync_disabled");
     Alcotest.(check bool) "worktree remedy is surfaced" true
       (String_util.contains_substring err "repos/masc/.worktrees/<task>");
     Alcotest.(check bool) "git show did not execute" false
@@ -1046,7 +1045,7 @@ let test_tool_execute_allows_preserved_direct_repo_git_clean_df () =
   Alcotest.(check bool) "dirty fixture removed by clean" false
     (Sys.file_exists dirty_path)
 
-let test_tool_execute_git_recovery_invalidates_repo_currency_cache () =
+let test_tool_execute_git_recovery_invalidates_repo_sync_cache () =
   with_eio_fs @@ fun () ->
   let base_path, config, meta, _repo_dir =
     setup_preserved_sandbox_repo ~keeper_name:"stale-direct-git-clean-cache"
@@ -2205,9 +2204,9 @@ let () =
             `Quick
             test_tool_execute_allows_preserved_direct_repo_git_clean_df
         ; Alcotest.test_case
-            "git recovery invalidates stale currency cache"
+            "git recovery invalidates stale repo sync cache"
             `Quick
-            test_tool_execute_git_recovery_invalidates_repo_currency_cache
+            test_tool_execute_git_recovery_invalidates_repo_sync_cache
         ; Alcotest.test_case
             "readonly Execute blocks worktree git recovery"
             `Quick

@@ -28,11 +28,7 @@ let meta_from_json json =
   let json =
     match json with
     | `Assoc fields when not (List.mem_assoc "tool_access" fields) ->
-      let tool_access =
-        Masc.Keeper_meta_contract.default_tool_access_of_meta_json ()
-        |> List.map (fun name -> `String name)
-      in
-      `Assoc (("tool_access", `List tool_access) :: fields)
+      `Assoc (("tool_access", `List []) :: fields)
     | _ -> json
   in
   match Keeper_meta_json_parse.meta_of_json json with

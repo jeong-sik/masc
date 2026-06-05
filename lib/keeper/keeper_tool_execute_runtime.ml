@@ -535,24 +535,24 @@ let handle_tool_execute_typed
           let dispatch_result =
             Keeper_tool_execute_shell_ir.dispatch_classified
               ~before_path_validation:(fun ir ->
-                let repo_currency_policy =
+                let repo_sync_policy =
                   if write_enabled
                   then
-                    Keeper_tool_execute_repo_preflight.Allow_repo_currency_sync
+                    Keeper_tool_execute_repo_readiness.Allow_repo_sync
                   else
-                    Keeper_tool_execute_repo_preflight.Reject_repo_currency_sync
+                    Keeper_tool_execute_repo_readiness.Reject_repo_sync
                 in
                 match
-                  Keeper_tool_execute_repo_preflight.validate_cwd_ready
+                  Keeper_tool_execute_repo_readiness.validate_cwd_ready
                     ~config
                     ~meta
                     ~cwd
-                    ~repo_currency_policy
+                    ~repo_sync_policy
                     ~allow_stale_preserved_repo_context
                 with
                 | Error _ as err -> err
                 | Ok () ->
-                  Keeper_tool_execute_repo_preflight.validate_path_args_ready
+                  Keeper_tool_execute_repo_readiness.validate_path_args_ready
                     ~config
                     ~meta
                     ~cwd
@@ -588,7 +588,7 @@ let handle_tool_execute_typed
           | Ok result ->
             (match result.status, repo_cwd_context with
              | Unix.WEXITED 0, Some { repo_name; _ } when is_direct_repo_git_recovery ->
-               Keeper_tool_execute_repo_preflight.invalidate_currency_cache
+               Keeper_tool_execute_repo_readiness.invalidate_repo_sync_cache
                  ~config
                  ~meta
                  ~repo_name
@@ -666,15 +666,22 @@ let handle_tool_execute
       ~(args : Yojson.Safe.t)
       ()
   =
+  let execute_write_surface_enabled names =
+    let is_write_enabled_candidate = function
+      | "tool_edit_file" | "tool_write_file" | "tool_execute" -> true
+      | _ -> false
+    in
+    names
+    |> Keeper_meta_tool_access.normalize_tool_names
+    |> List.exists is_write_enabled_candidate
+  in
   let timeout_sec =
     Keeper_tool_execute_timeout.clamp_shell_timeout
       ~min_sec:(Keeper_tool_execute_timeout.keeper_tool_execute_shell_ir_min_timeout_sec_for_args args)
       ~default:Keeper_tool_execute_timeout.io_timeout_sec
       args
   in
-  let write_enabled =
-    Keeper_meta_tool_access.tool_access_allows_execute_write meta.tool_access
-  in
+  let write_enabled = execute_write_surface_enabled meta.tool_access in
   if has_typed_execute_input_key args
   then
     handle_tool_execute_typed

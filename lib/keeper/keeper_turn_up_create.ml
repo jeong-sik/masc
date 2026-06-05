@@ -170,7 +170,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                 | None ->
                     (match p.profile_defaults.tool_access with
                      | Some tools -> normalize_tool_names tools
-                     | None -> default_tool_access_of_meta_json ())
+                     | None -> [])
               in
               let tool_denylist =
                 resolve_tool_name_list

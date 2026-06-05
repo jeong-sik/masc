@@ -43,8 +43,7 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
     in
     fields
     |> add_if_missing "tool_access"
-         (Json_util.json_string_list
-            (Masc.Keeper_meta_tool_access.default_tool_access_of_meta_json ()))
+         (Json_util.json_string_list [])
   in
   let json' =
     match json with

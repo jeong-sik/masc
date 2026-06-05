@@ -1,45 +1,45 @@
 open Keeper_meta_contract
 
-type repo_currency_policy =
-  | Reject_repo_currency_sync
-  | Allow_repo_currency_sync
+type repo_sync_policy =
+  | Reject_repo_sync
+  | Allow_repo_sync
 
-type currency_cache_entry =
+type repo_sync_cache_entry =
   { at : float
   ; outcome : Playground_repo_readiness.currency_outcome option
   }
 
-(* Currency probe cache. [Playground_repo_readiness.ensure_current] may fetch
+(* Repo-sync probe cache. [Playground_repo_readiness.ensure_current] may fetch
    and fast-forward the in-place sandbox clone, so Execute runs it only from
-   this repo preflight layer, never from cwd/path resolution. *)
-let currency_sync_cache : (string, currency_cache_entry) Hashtbl.t =
+   this repo-readiness layer, never from cwd/path resolution. *)
+let repo_sync_cache : (string, repo_sync_cache_entry) Hashtbl.t =
   Hashtbl.create 64
 
-let currency_min_interval_sec = 30.0
+let repo_sync_min_interval_sec = 30.0
 
 let normalize_path path =
   Keeper_alerting_path.normalize_path_for_check path
   |> Keeper_alerting_path.strip_trailing_slashes
 
-let log_currency_outcome ~repo_name = function
+let log_repo_sync_outcome ~repo_name = function
   | Playground_repo_readiness.Up_to_date -> ()
   | Advanced commits ->
     Log.Keeper.info
-      "currency: advanced sandbox repo %s by %d commit(s)"
+      "repo_sync: advanced sandbox repo %s by %d commit(s)"
       repo_name
       commits
   | Preserved reason ->
-    Log.Keeper.info "currency: preserved sandbox repo %s (%s)" repo_name reason
+    Log.Keeper.info "repo_sync: preserved sandbox repo %s (%s)" repo_name reason
   | Skipped reason ->
-    Log.Keeper.info "currency: skipped sandbox repo %s (%s)" repo_name reason
+    Log.Keeper.info "repo_sync: skipped sandbox repo %s (%s)" repo_name reason
 
-let repo_currency_outcome_best_effort ~config ~meta ~repo_name =
+let repo_sync_outcome_best_effort ~config ~meta ~repo_name =
   let cpath = Playground_repo_readiness.clone_path ~config ~meta ~repo_name in
   let now = Unix.gettimeofday () in
-  let cached = Hashtbl.find_opt currency_sync_cache cpath in
+  let cached = Hashtbl.find_opt repo_sync_cache cpath in
   let due =
     match cached with
-    | Some { at; _ } -> now -. at >= currency_min_interval_sec
+    | Some { at; _ } -> now -. at >= repo_sync_min_interval_sec
     | None -> true
   in
   if due
@@ -48,25 +48,25 @@ let repo_currency_outcome_best_effort ~config ~meta ~repo_name =
       let outcome =
         Playground_repo_readiness.ensure_current ~config ~meta ~repo_name ()
       in
-      log_currency_outcome ~repo_name outcome;
-      Hashtbl.replace currency_sync_cache cpath { at = now; outcome = Some outcome };
+      log_repo_sync_outcome ~repo_name outcome;
+      Hashtbl.replace repo_sync_cache cpath { at = now; outcome = Some outcome };
       Some outcome
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | _ ->
-      Hashtbl.replace currency_sync_cache cpath { at = now; outcome = None };
+      Hashtbl.replace repo_sync_cache cpath { at = now; outcome = None };
       None)
   else (
     match cached with
     | Some { outcome; _ } -> outcome
     | None -> None)
 
-let invalidate_currency_cache ~config ~meta ~repo_name =
+let invalidate_repo_sync_cache ~config ~meta ~repo_name =
   let cpath = Playground_repo_readiness.clone_path ~config ~meta ~repo_name in
-  Hashtbl.remove currency_sync_cache cpath
+  Hashtbl.remove repo_sync_cache cpath
 ;;
 
-let repo_currency_not_ready_error ~config ~meta ~repo_name ~reason ~cwd =
+let repo_sync_not_ready_error ~config ~meta ~repo_name ~reason ~cwd =
   let clone_path = Playground_repo_readiness.clone_path ~config ~meta ~repo_name in
   let hint_suffix =
     match Playground_repo_readiness.deleted_tracked_files_restore_hint ~clone_path with
@@ -86,9 +86,9 @@ let repo_currency_not_ready_error ~config ~meta ~repo_name ~reason ~cwd =
     hint_suffix
     cwd
 
-let repo_currency_sync_disabled_error ~repo_name ~cwd =
+let repo_sync_disabled_error ~repo_name ~cwd =
   Printf.sprintf
-    "sandbox_repo_currency_sync_disabled: readonly Execute will not fetch or \
+    "sandbox_repo_sync_disabled: readonly Execute will not fetch or \
      fast-forward direct sandbox repo root repos/%s. Use cwd=\"repos/%s/.worktrees/<task>\" \
      for task work, or run an allowed git diagnostic/recovery command before retrying. \
      Execute cwd resolution does not create directories or change repo/worktree state. \
@@ -195,8 +195,8 @@ let validate_repo_path_ready
            ~git_toplevel:top_opt
            ~git_error)
 
-let validate_cwd_currency_ready
-      ~repo_currency_policy
+let validate_cwd_sync_ready
+      ~repo_sync_policy
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(cwd : string)
@@ -216,25 +216,25 @@ let validate_cwd_currency_ready
     if allow_stale_preserved_repo_context
     then Ok ()
     else (
-      match repo_currency_policy with
-      | Reject_repo_currency_sync ->
-        Error (repo_currency_sync_disabled_error ~repo_name ~cwd)
-      | Allow_repo_currency_sync ->
-        (match repo_currency_outcome_best_effort ~config ~meta ~repo_name with
+      match repo_sync_policy with
+      | Reject_repo_sync ->
+        Error (repo_sync_disabled_error ~repo_name ~cwd)
+      | Allow_repo_sync ->
+        (match repo_sync_outcome_best_effort ~config ~meta ~repo_name with
          | Some Playground_repo_readiness.Up_to_date | Some (Advanced _) -> Ok ()
          | Some (Preserved reason) | Some (Skipped reason) ->
-           Error (repo_currency_not_ready_error ~config ~meta ~repo_name ~reason ~cwd)
+           Error (repo_sync_not_ready_error ~config ~meta ~repo_name ~reason ~cwd)
          | None ->
            Error
-             (repo_currency_not_ready_error
+             (repo_sync_not_ready_error
                 ~config
                 ~meta
                 ~repo_name
-                ~reason:"currency probe failed"
+                ~reason:"repo sync probe failed"
                 ~cwd)))
 
 let validate_cwd_ready
-      ~repo_currency_policy
+      ~repo_sync_policy
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(cwd : string)
@@ -243,8 +243,8 @@ let validate_cwd_ready
   match validate_repo_path_ready ~config ~meta ~probe_path:cwd cwd with
   | Error _ as err -> err
   | Ok () ->
-    validate_cwd_currency_ready
-      ~repo_currency_policy
+    validate_cwd_sync_ready
+      ~repo_sync_policy
       ~config
       ~meta
       ~cwd

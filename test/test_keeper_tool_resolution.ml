@@ -127,7 +127,8 @@ let test_public_descriptor_names_resolve () =
 let test_retired_public_names_miss () =
   List.iter
     (fun name -> check bool (name ^ " misses") false (resolves name))
-    [ "Bash"; "SearchFiles"; "ReadFile"; "EditFile"; "WriteFile" ]
+    [ "Bash"; "SearchFiles"; "ReadFile"; "EditFile"; "WriteFile";
+      "keeper_task_submit_for_verification" ]
 
 (* ── Policy matrix: active tool_policy.toml names resolve ── *)
 

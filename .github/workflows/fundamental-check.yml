@@ -117,6 +117,16 @@ jobs:
       - name: Run lint
         run: bash scripts/lint/no-retired-tool-husks.sh --fail
 
+  no-synthetic-tool-call-residue:
+    name: Synthetic tool-call residue ratchet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ripgrep
+        run: sudo apt-get install -y -qq ripgrep
+      - name: Run lint
+        run: bash scripts/lint/no-synthetic-tool-call-residue.sh --fail
+
   no-tool-substrate-adapter-surface:
     name: Tool substrate adapter surface ratchet
     runs-on: ubuntu-latest

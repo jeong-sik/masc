@@ -7,7 +7,10 @@
  (modules voice_config)
  (libraries
   eio
+  otoml
   yojson
+  masc_log
+  masc.config_dir_resolver
   masc.masc_core
   masc.tool_types
   masc.config

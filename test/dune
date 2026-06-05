@@ -959,6 +959,13 @@
  (modules test_dashboard_operator_nudges)
  (libraries masc_test_deps))
 
+; Keeper composite attention preserves recoverable tool-route contract blockers.
+
+(test
+ (name test_server_dashboard_composite_attention)
+ (modules test_server_dashboard_composite_attention)
+ (libraries masc_test_deps))
+
 ; Typed JSON field extraction helper (RFC-0142 Phase 1).
 
 (test

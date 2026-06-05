@@ -148,9 +148,8 @@ val reclassify_provider_timeout_for_attempt :
   provider_timeout_budget:provider_timeout_budget option ->
   Agent_sdk.Error.sdk_error ->
   Agent_sdk.Error.sdk_error
-(** Preserve upstream structural timeout errors instead of minting a synthetic
-    [Provider_timeout] root cause.  Kept as a named hook while the
-    provider-timeout root-cause ADT is introduced in a later PR. *)
+(** Rewrap structural attempt watchdog timeouts as [Provider_timeout] when
+    the current attempt had an admitted provider-timeout budget. *)
 
 val attempt_watchdog_timeout_sec :
   remaining_turn_budget_s:float ->

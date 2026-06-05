@@ -203,8 +203,6 @@ let schemas = Tool_schemas_misc.schemas
 let tool_spec_read_only =
   [
     "masc_tool_help";
-    "masc_web_search";
-    "masc_web_fetch";
     "masc_dashboard";
   ]
 

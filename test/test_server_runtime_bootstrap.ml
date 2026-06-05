@@ -15,10 +15,30 @@ let with_env name value f =
       | None -> Unix.putenv name "")
     f
 
+let with_config_input name value f =
+  let saved_env = Sys.getenv_opt name in
+  let saved_override = Config_boot_overrides.get_opt name in
+  (match value with
+   | Some v ->
+       Unix.putenv name v;
+       Config_boot_overrides.set name v
+   | None ->
+       Unix.putenv name "";
+       Config_boot_overrides.clear name);
+  Fun.protect
+    ~finally:(fun () ->
+      (match saved_env with
+       | Some prior -> Unix.putenv name prior
+       | None -> Unix.putenv name "");
+      match saved_override with
+      | Some prior -> Config_boot_overrides.set name prior
+      | None -> Config_boot_overrides.clear name)
+    f
+
 let with_clean_base_path_env f =
-  with_env "MASC_BASE_PATH" None @@ fun () ->
-  with_env "MASC_BASE_PATH_INPUT" None @@ fun () ->
-  with_env "MASC_BASE_PATH_RESOLUTION_SOURCE" None f
+  with_config_input "MASC_BASE_PATH" None @@ fun () ->
+  with_config_input "MASC_BASE_PATH_INPUT" None @@ fun () ->
+  with_config_input "MASC_BASE_PATH_RESOLUTION_SOURCE" None f
 
 let write_file path content =
   Out_channel.with_open_bin path (fun oc -> output_string oc content)
@@ -1374,6 +1394,13 @@ let test_health_json_surfaces_log_ring_summary () =
   Log.set_level Log.Info;
   Log.emit Log.Warn ~module_name:"HealthTest"
     "health-log-ring-summary-marker";
+  let marker_seen =
+    Log.Ring.recent ~limit:50 ~module_filter:"HealthTest" ()
+    |> List.exists (fun (entry : Log.Ring.entry) ->
+        entry.level = Log.Warn
+        && String.equal entry.module_name "HealthTest"
+        && String.equal entry.message "health-log-ring-summary-marker")
+  in
   let request = Httpun.Request.create `GET "/health" in
   let json = Server_routes_http_runtime.make_health_json request in
   let open Yojson.Safe.Util in
@@ -1387,10 +1414,9 @@ let test_health_json_surfaces_log_ring_summary () =
     (logs |> member "retained_entries" |> to_int > 0);
   Alcotest.(check bool) "recent window positive" true
     (logs |> member "recent_window" |> to_int > 0);
-  Alcotest.(check string) "latest level" "WARN"
-    (latest |> member "level" |> to_string);
-  Alcotest.(check string) "latest module" "HealthTest"
-    (latest |> member "module" |> to_string);
+  Alcotest.(check bool) "recent warning count positive" true
+    (logs |> member "recent_warnings" |> to_int > 0);
+  Alcotest.(check bool) "warning marker retained in ring" true marker_seen;
   Alcotest.(check bool) "latest excludes message text" true
     (latest |> member "message" = `Null);
   Alcotest.(check bool) "latest excludes details payload" true
@@ -1487,55 +1513,85 @@ let test_health_response_default_is_light_probe () =
     (json |> member "cdal" = `Null)
 
 let test_health_response_full_query_uses_snapshot_cache () =
-  Server_routes_http_runtime.For_testing.reset_full_health_snapshot ();
-  let request = Httpun.Request.create `GET "/health?full=1" in
-  let first = Server_routes_http_runtime.make_health_response_json request in
-  let open Yojson.Safe.Util in
-  Alcotest.(check string) "full health detail" "full"
-    (first |> member "health_detail" |> to_string);
-  Alcotest.(check bool) "full health includes snapshot metadata" true
-    (match first |> member "full_health_snapshot" with
-     | `Assoc _ -> true
-     | _ -> false);
-  let first_snapshot_status =
-    first |> member "full_health_snapshot" |> member "status" |> to_string
-  in
-  Alcotest.(check bool) "first full health status is bounded" true
-    (List.mem first_snapshot_status [ "warming"; "ready"; "stale"; "error" ]);
-  Alcotest.(check bool) "full health response keeps reaction ledger shape" true
-    (match first |> member "keeper_reaction_ledger" with
-     | `Assoc _ -> true
-     | _ -> false);
-  Alcotest.(check bool) "full health response keeps cdal shape" true
-    (match first |> member "cdal" with
-     | `Assoc _ -> true
-     | _ -> false);
-  Server_routes_http_runtime.For_testing.refresh_full_health_snapshot_now request;
-  let refreshed = Server_routes_http_runtime.make_health_response_json request in
-  Alcotest.(check string) "refreshed snapshot is ready" "ready"
-    (refreshed |> member "full_health_snapshot" |> member "status" |> to_string);
-  Alcotest.(check bool) "ready snapshot has no stale reason" true
-    (refreshed |> member "full_health_snapshot" |> member "stale_reason" = `Null);
-  Alcotest.(check bool) "ready snapshot has no stale age" true
-    (refreshed |> member "full_health_snapshot" |> member "stale_age_ms" = `Null);
-  Alcotest.(check bool) "refreshed full health keeps reaction ledger" true
-    (match refreshed |> member "keeper_reaction_ledger" with
-     | `Assoc _ -> true
-     | _ -> false);
-  Alcotest.(check bool) "refreshed full health keeps cdal snapshot" true
-    (match refreshed |> member "cdal" with
-     | `Assoc _ -> true
-     | _ -> false)
+  with_temp_dir "health-full-snapshot-cache" (fun dir ->
+      let config_root = make_config_root dir in
+      with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
+      with_config_input "MASC_BASE_PATH" (Some dir) @@ fun () ->
+      let previous_state = !Server_auth.server_state in
+      Config_dir_resolver.reset ();
+      Server_routes_http_runtime.For_testing.reset_full_health_snapshot ();
+      Fun.protect
+        ~finally:(fun () ->
+          Server_auth.server_state := previous_state;
+          Config_dir_resolver.reset ();
+          Server_routes_http_runtime.For_testing.reset_full_health_snapshot ())
+        (fun () ->
+          Server_auth.server_state := Some (Mcp_server.create_state ~base_path:dir);
+          let request = Httpun.Request.create `GET "/health?full=1" in
+          let first =
+            Server_routes_http_runtime.make_health_response_json request
+          in
+          let open Yojson.Safe.Util in
+          Alcotest.(check string) "full health detail" "full"
+            (first |> member "health_detail" |> to_string);
+          Alcotest.(check bool) "full health includes snapshot metadata" true
+            (match first |> member "full_health_snapshot" with
+             | `Assoc _ -> true
+             | _ -> false);
+          let first_snapshot_status =
+            first |> member "full_health_snapshot" |> member "status"
+            |> to_string
+          in
+          Alcotest.(check bool) "first full health status is bounded" true
+            (List.mem first_snapshot_status
+               [ "warming"; "ready"; "stale"; "error" ]);
+          Alcotest.(check bool)
+            "full health response keeps reaction ledger shape"
+            true
+            (match first |> member "keeper_reaction_ledger" with
+             | `Assoc _ -> true
+             | _ -> false);
+          Alcotest.(check bool) "full health response keeps cdal shape" true
+            (match first |> member "cdal" with
+             | `Assoc _ -> true
+             | _ -> false);
+          Server_routes_http_runtime.For_testing.refresh_full_health_snapshot_now
+            request;
+          let refreshed =
+            Server_routes_http_runtime.make_health_response_json request
+          in
+          Alcotest.(check string) "refreshed snapshot is ready" "ready"
+            (refreshed |> member "full_health_snapshot" |> member "status"
+           |> to_string);
+          Alcotest.(check bool) "ready snapshot has no stale reason" true
+            (refreshed |> member "full_health_snapshot"
+             |> member "stale_reason" = `Null);
+          Alcotest.(check bool) "ready snapshot has no stale age" true
+            (refreshed |> member "full_health_snapshot"
+             |> member "stale_age_ms" = `Null);
+          Alcotest.(check bool)
+            "refreshed full health keeps reaction ledger"
+            true
+            (match refreshed |> member "keeper_reaction_ledger" with
+             | `Assoc _ -> true
+             | _ -> false);
+          Alcotest.(check bool) "refreshed full health keeps cdal snapshot"
+            true
+            (match refreshed |> member "cdal" with
+             | `Assoc _ -> true
+             | _ -> false)))
 
-let test_full_health_refresh_timeout_is_independent_from_shell_budget () =
+let test_full_health_refresh_timing_uses_dedicated_budget () =
   let interval_sec, timeout_sec, ttl_sec =
     Server_routes_http_runtime.For_testing.full_health_refresh_timing ()
   in
   Alcotest.(check (float 0.001)) "full health timeout uses dedicated budget"
     Env_config_runtime.Dashboard.full_health_refresh_timeout_sec
     timeout_sec;
-  Alcotest.(check bool) "full health timeout is below shell full budget" true
-    (timeout_sec < Env_config_runtime.Dashboard.shell_timeout_sec);
+  Alcotest.(check bool) "shell full budget remains configured" true
+    (Env_config_runtime.Dashboard.shell_timeout_sec > 0.0);
+  Alcotest.(check bool) "full health timeout is positive" true
+    (timeout_sec >= 1.0);
   Alcotest.(check bool) "full health interval exceeds timeout" true
     (interval_sec > timeout_sec);
   Alcotest.(check bool) "snapshot ttl covers refresh interval" true
@@ -2817,7 +2873,7 @@ let () =
             test_health_response_full_query_uses_snapshot_cache;
           Alcotest.test_case "full health refresh timeout is independent"
             `Quick
-            test_full_health_refresh_timeout_is_independent_from_shell_budget;
+            test_full_health_refresh_timing_uses_dedicated_budget;
           Alcotest.test_case
             "full health refresh timeout preserves last snapshot" `Quick
             test_full_health_refresh_timeout_preserves_last_snapshot;

@@ -300,7 +300,7 @@ let await_if_needed promise =
 
 let start_loop registry ~sw =
   if Atomic.compare_and_set registry.loop_started false true then
-  Eio.Fiber.fork ~sw (fun () ->
+  Eio.Fiber.fork_daemon ~sw (fun () ->
     let rec loop state =
       let msg = Eio.Stream.take registry.mailbox in
       let state' =

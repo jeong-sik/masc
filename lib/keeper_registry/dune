@@ -5,4 +5,6 @@
  (public_name masc.keeper_registry)
  (wrapped false)
  (modules keeper_registry_types_compaction keeper_registry_types_decision keeper_registry_types_kill_class keeper_registry_types_turn_phase)
- (libraries))
+ (libraries)
+ (preprocess
+  (pps ppx_tla)))

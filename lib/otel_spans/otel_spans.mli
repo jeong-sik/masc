@@ -1,7 +1,7 @@
 (** OTel Spans — OpenTelemetry span lifecycle for masc.
 
-    When [MASC_OTEL_ENABLED=true], creates real OTel spans exported via OTLP.
-    When disabled (default), all operations are zero-cost no-ops.
+    When [MASC_OTEL_ENABLED=true] (default), creates real OTel spans exported via OTLP.
+    When explicitly disabled, all operations are zero-cost no-ops.
 
     @since 2.103.0 *)
 

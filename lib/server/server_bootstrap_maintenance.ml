@@ -82,6 +82,10 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
      span / no [tool_dispatch_total] metric). *)
   Tool_dispatch.set_span_wrapper Tool_telemetry.with_span;
   Otel_spans.setup_exporter ~sw env;
+  (* RFC-0217 S5 — Wire Prometheus_store snapshot as an OTel observable source.
+     Previously the in-process store accumulated metrics but they were never
+     exported because [Otel_metrics.register_source] was never called. *)
+  Prometheus_store.register_otel_source ();
   Shutdown.register ~name:"otel_exporter" ~priority:20 Otel_spans.shutdown;
   (* Board_listener removed: filesystem-first principle.
      JSONL path emits SSE directly via Board_dispatch.emit_board_sse_event.

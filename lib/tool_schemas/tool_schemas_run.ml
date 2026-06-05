@@ -81,7 +81,7 @@ let schemas : Masc_domain.tool_schema list =
     {
       name = "masc_run_get";
       description =
-        "Retrieve the full execution history for a task including plan revisions, log notes, and deliverables. Use when reviewing progress before handoff or for post-mortem analysis.";
+        "Retrieve the full execution history for a task including plan revisions, log notes, and deliverables. If the task has no run record yet, create an empty run scaffold and return it. Use when reviewing progress before handoff or for post-mortem analysis.";
       input_schema =
         `Assoc
           [

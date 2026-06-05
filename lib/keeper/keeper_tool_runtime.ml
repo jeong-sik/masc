@@ -203,6 +203,7 @@ let handle_in_process ctx descriptor args =
     Some
       (Keeper_tool_in_process_runtime.handle_masc_run
          ~config:ctx.config
+         ~meta:ctx.meta
          ~name
          ~args)
   | Tool_masc_agent_dispatch ->

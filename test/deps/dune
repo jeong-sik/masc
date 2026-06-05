@@ -69,8 +69,6 @@
   ;; after this re-export they use bare `Trajectory.X` per the
   ;; G5 qualifier-removal budget.
   (re_export masc.trajectory)
-  ;; RFC-0056 Phase 1B — Keeper_skill_routing leaf utility sub-library.
-  (re_export masc.keeper_tooling)
   ;; RFC-0056 Phase 1C — Host_config leaf utility sub-library.
   (re_export masc.host_config)
   ;; RFC-0056 Phase 1D — Briefing_compactors leaf utility sub-library.
@@ -85,12 +83,6 @@
   (re_export masc.chronicle_event)
   ;; RFC-0056 Phase 1H — Tool_call_quality_benchmark family sub-library.
   (re_export masc.tool_call_quality_benchmark)
-  ;; RFC-0056 Phase 1I — Keeper_event_queue leaf module sub-library
-  ;; (first lib/keeper/ promotion).
-  (re_export masc.keeper_lifecycle)
-  ;; RFC-0056 Phase 1J — Keeper_invariant leaf module sub-library
-  ;; (second lib/keeper/ promotion).
-  (re_export masc.keeper_failure)
   ;; RFC-0056 Phase 1K — Compaction_trigger leaf sub-library.
   (re_export masc.compaction_trigger)
   ;; RFC-0056 Phase 1L — Attribution leaf sub-library.
@@ -99,7 +91,7 @@
   (re_export masc.exec_policy)
   ;; RFC-0056 Phase 1N — Keeper state-machine leaf sub-library.
   (re_export masc.keeper_state)
-  ;; Keeper-owned pure/type leaf sub-libraries.
+  ;; Keeper-owned boundary group sub-libraries.
   (re_export masc.keeper_core_types)
   (re_export masc.keeper_failure)
   (re_export masc.keeper_lifecycle)
@@ -134,7 +126,6 @@
   (re_export masc.runtime)
   (re_export masc.masc_event_bus)
   (re_export masc.provider_tool_support)
-  (re_export masc.keeper_failure)
   (re_export masc.pool_metrics)
   (re_export masc.auth)
   (re_export masc.fd_accountant)

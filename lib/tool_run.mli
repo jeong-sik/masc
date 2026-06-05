@@ -8,6 +8,7 @@
 (** Tool handler context *)
 type context = {
   config: Workspace.config;
+  agent_name: string option;
 }
 
 (** {1 Individual Handlers} *)

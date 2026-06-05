@@ -287,7 +287,10 @@ let execute_tool_eio
                  (* Mod_handover, Mod_heartbeat, Mod_auth removed: tools pruned *)
                  | Mod_compact -> None
                  | Mod_run ->
-                   Tool_run.dispatch { Tool_run.config } ~name ~args:coerced_args
+                   Tool_run.dispatch
+                     { Tool_run.config; agent_name = Some agent_name }
+                     ~name
+                     ~args:coerced_args
                  | Mod_agent ->
                    Tool_agent.dispatch
                      { Tool_agent.config; agent_name }

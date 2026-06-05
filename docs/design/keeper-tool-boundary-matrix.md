@@ -126,6 +126,8 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper_tool_execute_shell_ir/keeper_tool_execute_shell_ir.mli` - shell-surface
 - `lib/keeper/keeper_tool_execute_path.ml` - shell-surface
 - `lib/keeper/keeper_tool_execute_path.mli` - shell-surface
+- `lib/keeper/keeper_tool_execute_repo_preflight.ml` - shell-surface
+- `lib/keeper/keeper_tool_execute_repo_preflight.mli` - shell-surface
 - `lib/keeper/keeper_tool_execute_readonly_policy.ml` - shell-surface
 - `lib/keeper/keeper_tool_execute_readonly_policy.mli` - shell-surface
 - `lib/keeper/keeper_tool_execute_runtime_paths.ml` - shell-surface

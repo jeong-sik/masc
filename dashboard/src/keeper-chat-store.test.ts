@@ -261,7 +261,7 @@ describe('keeper-chat-store', () => {
         }],
       }
       appendChatMessage('keeper-att2', msg)
-      _resetChatStoreForTests(false)
+      _resetChatStoreForTests({ clearStorage: false })
       const restored = getChatMessageBuffer('keeper-att2')
       expect(restored[0]!.attachments![0]!.name).toBe('log.txt')
     })

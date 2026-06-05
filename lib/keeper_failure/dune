@@ -2,7 +2,6 @@
 
 (library
  (name masc_keeper_failure)
- (public_name masc.keeper_failure)
  (wrapped false)
  (modules keeper_failure_policy keeper_failure_circuit_breaker_types)
  (libraries

@@ -62,7 +62,7 @@ DEFAULT_LEAVES: tuple[str, ...] = (
     # RFC-0056 Phase 1M: Shell IR execution policy and typed path errors.
     "masc.exec_policy",
     # RFC-0056 Phase 1N: Keeper deterministic lifecycle FSM cluster.
-    "masc.keeper_state",
+    "masc.keeper_registry",
     # Model inference aggregate domain and its runtime label boundary.
     "masc.runtime_provider_labels",
     "masc.runtime_model",

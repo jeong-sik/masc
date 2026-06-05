@@ -12,86 +12,19 @@ type parsed_stage =
 
 let parse_cmd_to_ir_opt = Keeper_tool_execute_command_parse.parse_cmd_to_ir_opt
 
-let literal_args args =
-  let rec loop acc = function
-    | [] -> Some (List.rev acc)
-    | Masc_exec.Shell_ir.Lit (arg, _) :: rest -> loop (arg :: acc) rest
-    | Masc_exec.Shell_ir.Concat _ :: _ | Masc_exec.Shell_ir.Var (_, _) :: _ -> None
-  in
-  loop [] args
-
-let stage_of_simple simple =
-  match literal_args simple.Masc_exec.Shell_ir.args with
-  | None -> None
-  | Some args ->
-    Some { bin = Masc_exec.Exec_program.to_string simple.bin; args }
+let stage_of_shell_ir_shape (stage : Masc_exec.Shell_ir_command_shape.stage) =
+  { bin = stage.bin; args = stage.args }
 
 let parsed_stages_of_ir ir =
-  let rec loop acc = function
-    | Masc_exec.Shell_ir.Simple simple -> (
-        match stage_of_simple simple with
-        | Some stage -> Some (stage :: acc)
-        | None -> None)
-    | Masc_exec.Shell_ir.Pipeline stages ->
-      List.fold_left
-        (fun acc stage -> Option.bind acc (fun acc -> loop acc stage))
-        (Some acc)
-        stages
-  in
-  match loop [] ir with
-  | Some stages -> List.rev stages
-  | None -> []
-
-let is_shell_identifier name =
-  let len = String.length name in
-  let is_head = function
-    | 'A' .. 'Z' | 'a' .. 'z' | '_' -> true
-    | _ -> false
-  in
-  let is_tail = function
-    | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '_' -> true
-    | _ -> false
-  in
-  len > 0
-  && is_head name.[0]
-  && Seq.for_all is_tail (String.to_seq (String.sub name 1 (len - 1)))
-
-let is_env_assignment token =
-  match String.index_opt token '=' with
-  | None -> false
-  | Some 0 -> false
-  | Some i -> is_shell_identifier (String.sub token 0 i)
-
-let normalize_command_name command_name =
-  let command_name = Filename.basename command_name |> String.lowercase_ascii in
-  if String.ends_with ~suffix:".exe" command_name
-  then String.sub command_name 0 (String.length command_name - String.length ".exe")
-  else command_name
-
-let rec effective_stage stage =
-  match normalize_command_name stage.bin, stage.args with
-  | "env", args ->
-    let rec scan = function
-      | [] -> None
-      | ("-i" | "--ignore-environment") :: rest -> scan rest
-      | arg :: rest when is_env_assignment arg -> scan rest
-      | arg :: rest when String.starts_with ~prefix:"-" arg -> None
-      | bin :: args -> Some { bin; args }
-    in
-    scan args
-  | "opam", "exec" :: rest ->
-    (match rest with
-     | "--" :: bin :: args -> Some { bin; args }
-     | bin :: args when not (String.starts_with ~prefix:"-" bin) ->
-       Some { bin; args }
-     | _ -> None)
-  | _ ->
-    (* DET-OK: this is the parsed command itself, not an inferred fallback for
-       an unknown wrapper. *)
-    Some stage
+  Masc_exec.Shell_ir_command_shape.parsed_stages ir
+  |> List.map stage_of_shell_ir_shape
 
 let effective_stages_of_ir ir =
-  parsed_stages_of_ir ir |> List.filter_map effective_stage
+  Masc_exec.Shell_ir_command_shape.effective_stages ir
+  |> List.map stage_of_shell_ir_shape
+
+let normalize_command_name =
+  Masc_exec.Shell_ir_command_shape.normalize_command_name
 
 let strip_simple_shell_quotes token =
   let len = String.length token in

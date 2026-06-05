@@ -31,6 +31,69 @@ let run_git ~timeout_sec ~clone_path args =
   in
   { ok = status = Unix.WEXITED 0; output = String.trim output; status }
 
+let deleted_tracked_path_of_porcelain_line line =
+  let line = String.trim line in
+  let len = String.length line in
+  if len = 0 then None
+  else if String.starts_with ~prefix:"D  " line && len > 3
+  then Some (String.sub line 3 (len - 3))
+  else if String.starts_with ~prefix:"D " line && len > 2
+  then Some (String.sub line 2 (len - 2))
+  else None
+
+let shell_quote_path path =
+  let safe_char = function
+    | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '/' | '.' | '_' | '-' -> true
+    | _ -> false
+  in
+  if path <> "" && String.for_all safe_char path
+  then path
+  else
+    "'"
+    ^ (path
+       |> String.split_on_char '\''
+       |> String.concat "'\\''")
+    ^ "'"
+
+let deleted_tracked_files_restore_hint ~clone_path =
+  let status =
+    run_git
+      ~timeout_sec:read_only_probe_timeout_sec
+      ~clone_path
+      [ "status"; "--porcelain" ]
+  in
+  if not status.ok then None
+  else
+    let changes =
+      status.output
+      |> String.split_on_char '\n'
+      |> List.map String.trim
+      |> List.filter (fun line -> line <> "")
+    in
+    match changes with
+    | [] -> None
+    | changes ->
+      let deleted_paths =
+        List.filter_map deleted_tracked_path_of_porcelain_line changes
+      in
+      if List.length deleted_paths = List.length changes
+      then
+        let status_summary =
+          deleted_paths
+          |> List.map (fun path -> "D " ^ path)
+          |> String.concat "; "
+        in
+        let restore_args =
+          deleted_paths |> List.map shell_quote_path |> String.concat " "
+        in
+        Some
+          (Printf.sprintf
+             " Dirty status only contains deleted tracked files: %s. Restore \
+              them with: git checkout HEAD -- %s"
+             status_summary
+             restore_args)
+      else None
+
 let safe_is_dir path =
   try Sys.file_exists path && Sys.is_directory path with
   | Sys_error _ -> false

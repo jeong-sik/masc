@@ -36,16 +36,14 @@ val validate_repo_cwd_currency_ready :
     normal work from continuing against that stale root while still allowing
     focused git diagnostics. Repo worktree cwd values are not gated here. *)
 
-val readonly_git_recovery_command :
+val cwd_is_sandbox_repo_context :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   cwd:string ->
-  Masc_exec.Shell_ir.t ->
   bool
-(** [true] for narrow git cleanup/restore commands that are allowed through the
-    read-only Execute write gate when they run inside a sandbox repo/worktree.
-    The Shell IR risk class remains R1/R2; this is only a runtime recovery
-    exception for keeper sandbox repair. *)
+(** [true] when [cwd] resolves to a keeper sandbox repo root, repo subpath, or
+    repo worktree path. This is cwd policy only; command-shape checks live under
+    {!Masc_exec}. *)
 
 val execution_location_json :
   config:Workspace.config ->

@@ -20,6 +20,10 @@ val read_only_probe_timeout_sec : float
 val run_git :
   timeout_sec:float -> clone_path:string -> string list -> command_result
 
+val deleted_tracked_files_restore_hint : clone_path:string -> string option
+(** Return a concise restore hint when [git status --porcelain] contains only
+    tracked-file deletions, otherwise [None]. *)
+
 (** [safe_is_dir path] is [true] iff [path] exists and is a directory,
     swallowing [Sys_error]. *)
 val safe_is_dir : string -> bool

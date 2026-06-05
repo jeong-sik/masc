@@ -472,11 +472,11 @@ let handle_tool_execute_typed
              && (Masc_exec.Shell_ir_risk.is_r1 envelope
                 || Masc_exec.Shell_ir_risk.is_r2 envelope)
              && not
-                  (Keeper_tool_execute_path.readonly_git_recovery_command
+                  (Keeper_tool_execute_path.cwd_is_sandbox_repo_context
                      ~config
                      ~meta
                      ~cwd
-                     ir)
+                   && Masc_exec.Shell_ir_command_shape.is_git_recovery_command ir)
         then
           blocked_result
             ~deterministic_reason:Keeper_tool_deterministic_error.Write_operation_gated

@@ -175,8 +175,7 @@ let missing_file_error_json
       ~(fallback_dir : string)
       ~(error : string)
   =
-  (* RFC-0218: fallback_dir/config are intentionally unused after removing
-     repo-aware runtime FS probing from missing-file hints. *)
+  (* RFC-0218: fallback_dir/config unused after removing repo-aware FS hints. *)
   ignore (fallback_dir, config);
   (* RFC-0218 Phase 4-E: repo-aware FS probing and hints removed.
      Repo info is now injected into LLM turn context (Phase 4-D).

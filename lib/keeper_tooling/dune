@@ -1,0 +1,8 @@
+(include_subdirs no)
+
+(library
+ (name masc_keeper_tooling)
+ (public_name masc.keeper_tooling)
+ (wrapped false)
+ (modules keeper_tool_execute_shell_ir keeper_tool_command_parse keeper_provider_error_class)
+ (libraries))

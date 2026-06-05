@@ -2,6 +2,7 @@ module Workspace = Masc.Workspace
 module Store = Masc.Keeper_meta_store
 module Profile = Masc.Keeper_types_profile
 module Status_detail = Masc.Keeper_status_detail
+module Turn_setup = Masc.Keeper_turn_setup
 module Keeper_tool_surface = Masc.Keeper_tool_surface
 module Keeper_tool_surface_ops = Masc.Keeper_tool_surface_ops
 
@@ -183,6 +184,41 @@ tool_access = ["tool_execute", "tool_read_file"]
         [ "tool_execute"; "tool_read_file" ]
         meta.tool_access
 
+let test_turn_setup_uses_effective_meta () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
+  let name = "turnsetup" in
+  write_file
+    (Filename.concat keepers_dir (name ^ ".toml"))
+    {|[keeper]
+sandbox_profile = "docker"
+tool_access = ["tool_search_files", "tool_read_file"]
+|};
+  let config = Workspace.default_config base in
+  ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let ctx : _ Profile.context =
+    {
+      config;
+      agent_name = "test-agent";
+      sw;
+      clock = Eio.Stdenv.clock env;
+      proc_mgr = None;
+      net = None;
+    }
+  in
+  match Turn_setup.ensure_keeper_exists ~ctx ~name with
+  | Error err -> Alcotest.failf "ensure_keeper_exists failed: %s" err
+  | Ok meta ->
+      Alcotest.(check string)
+        "turn setup sees TOML sandbox overlay"
+        "docker"
+        (Profile.sandbox_profile_to_string meta.sandbox_profile);
+      Alcotest.(check (list string))
+        "turn setup sees TOML tool overlay"
+        [ "tool_search_files"; "tool_read_file" ]
+        meta.tool_access
+
 let test_missing_sandbox_profile_fails_loud_for_profile_source () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "nosandbox" in
@@ -349,6 +385,8 @@ let () =
         [
           Alcotest.test_case "TOML sandbox/tool overlay reaches effective meta"
             `Quick test_toml_overlay_reaches_effective_meta;
+          Alcotest.test_case "turn setup uses effective meta" `Quick
+            test_turn_setup_uses_effective_meta;
           Alcotest.test_case
             "profile source without sandbox_profile fails loudly"
             `Quick test_missing_sandbox_profile_fails_loud_for_profile_source;

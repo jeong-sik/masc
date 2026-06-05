@@ -10,6 +10,9 @@ code_refs:
   - lib/otel_metric_store/otel_identity_metric_names.mli
   - lib/server/server_runtime_bootstrap.ml
   - lib/server/server_bootstrap_loops.ml
+  - lib/server/server_runtime_startup_credentials.ml
+  - lib/server/server_runtime_startup_maintenance.ml
+  - lib/otel_metric_store/otel_metric_store_core.mli
 ---
 
 # Auth Credential Surface Metrics
@@ -31,7 +34,7 @@ The credential subsystem exposes its state on **seven surfaces** (six original +
 | 1. API (mli)            | `lib/auth/auth.mli`                                       | typed contract              | Compile-time |
 | 2. Tests                | `test/test_auth.ml` (credentials group 22-32)             | assertions                  | CI guards |
 | 3. Boot log             | `[Server] startup bare alias audit: ...`                  | text (operator-readable)    | One-shot boot |
-| 4. OTel gauge (snapshot)| `masc_auth_bare_alias{state=...}`                           | numeric end-state           | Time-series + alert |
+| 4. OTel gauge (snapshot)| `masc_auth_bare_alias{state=...}`                         | numeric end-state           | Time-series + alert |
 | 5. Periodic fiber       | `start_bare_alias_audit_fiber` (60s default)              | gauge refresh + heartbeat   | Mid-run regression |
 | 6. OTel counter (flow)  | `masc_auth_bare_alias_outcome_total{outcome=...}`         | per-call dispatch events    | Transient regression catch |
 | 7. External alert query | backend-specific config                                   | derived alarm               | Operator page |

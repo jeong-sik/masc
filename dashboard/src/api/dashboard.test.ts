@@ -926,15 +926,15 @@ describe('dashboard goals decoding', () => {
               id: 'gvr-1',
               goal_id: 'goal-1',
               target_phase: 'completed',
-              requested_by: { kind: 'operator', id: 'planner' },
+              requested_by: { id: 'planner' },
               policy_snapshot: {
-                principals: [{ kind: 'keeper', id: 'keeper-alpha' }],
-                eligible_principals: [{ kind: 'keeper', id: 'keeper-alpha' }],
+                principals: [{ id: 'keeper-alpha' }],
+                eligible_principals: [{ id: 'keeper-alpha' }],
                 required_verdicts: 1,
               },
               votes: [
                 {
-                  principal: { kind: 'keeper', id: 'keeper-alpha', display_name: 'keeper-alpha' },
+                  principal: { id: 'keeper-alpha', display_name: 'keeper-alpha' },
                   decision: 'approve',
                   note: 'checked receipt and tests',
                   evidence_refs: ['receipt:keeper-alpha:turn-7', 'test:test_goal_tools'],

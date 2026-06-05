@@ -794,6 +794,7 @@ let () =
       Alcotest.test_case "keeper-repair" `Quick
         test_masc_keeper_repair_schema;
     ];
+    (* Runtime verify stays on the runtime admin surface; no separate public group. *)
     "legacy_swarm_removed", [
       Alcotest.test_case "removed_from_public_schemas" `Quick
         test_legacy_swarm_tools_removed;

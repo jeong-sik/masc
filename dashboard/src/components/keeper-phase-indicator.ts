@@ -63,6 +63,30 @@ export const PHASE_STYLES: Record<KeeperPhase, PhaseStyle> = {
   Zombie:     { label: '좀비',         color: 'var(--bad-light)',  bg: 'var(--bad-10)',    border: 'var(--bad-20)',     glow: STRONG_GLOW,   icon: '☠' },
 }
 
+const PIPELINE_STAGE_DETAIL_LABELS: Record<string, string> = {
+  registry_absent: '레지스트리 없음',
+  launch_pending_no_fiber: '기동 대기',
+  phase_running_idle: '대기',
+  health_or_turn_failure_probe: '복구 확인',
+  context_overflow_pending_compaction: '압축 대기',
+  context_compaction_in_progress: '압축 진행',
+  generation_handoff_in_progress: '승계 진행',
+  graceful_shutdown_draining: '종료 정리',
+  operator_or_policy_paused: '일시정지',
+  clean_stop_terminal: '정상 정지',
+  crashed_restart_candidate: '재시작 후보',
+  supervisor_restart_backoff_elapsed: '재시작 대기',
+  restart_budget_exhausted_terminal: '재시작 한도 소진',
+  structural_failure_terminal: '구조 실패',
+}
+
+export function pipelineStageDetailLabel(detail: string | null | undefined): string | null {
+  if (!detail) return null
+  const trimmed = detail.trim()
+  if (!trimmed) return null
+  return PIPELINE_STAGE_DETAIL_LABELS[trimmed] ?? trimmed.replaceAll('_', ' ')
+}
+
 export function getPhaseStyle(phase: KeeperPhase | string | null | undefined): PhaseStyle {
   if (!phase) return PHASE_STYLES.Offline
   // Use the SSOT boundary parser (`toKeeperPhase`) instead of the raw
@@ -110,28 +134,42 @@ export function KeeperPhaseBadge({ phase, compact }: { phase?: KeeperPhase | str
 export function KeeperPhaseAndStage({
   phase,
   pipelineStage,
+  pipelineStageDetail,
   phaseEnteredAtSec,
 }: {
   phase?: KeeperPhase | string | null
   pipelineStage?: string | null
+  pipelineStageDetail?: string | null
   phaseEnteredAtSec?: number | null
 }) {
   const stageLabel = pipelineStage && pipelineStage !== 'idle' && pipelineStage !== 'offline'
     ? pipelineStage.replace('_', ' ')
     : null
+  const detailLabel = pipelineStage === 'offline' || pipelineStage === 'unknown'
+    ? pipelineStageDetailLabel(pipelineStageDetail)
+    : null
+  const title = [
+    phase ? `phase=${phase}` : null,
+    pipelineStage ? `stage=${pipelineStage}` : null,
+    detailLabel ? `reason=${detailLabel}` : null,
+    pipelineStageDetail ? `detail=${pipelineStageDetail}` : null,
+  ].filter((part): part is string => part !== null).join(' · ')
 
   const dwellText = (typeof phaseEnteredAtSec === 'number' && Number.isFinite(phaseEnteredAtSec))
     ? formatDuration(Math.max(0, Date.now() / 1000 - phaseEnteredAtSec))
     : null
 
   return html`
-    <div class="flex items-center gap-2">
+    <div class="flex items-center gap-2" title=${title || undefined}>
       <${KeeperPhaseBadge} phase=${phase} />
       ${dwellText ? html`
         <span class="text-3xs text-[var(--color-fg-muted)] font-mono tracking-tight" title="현재 phase에 머문 시간"><span aria-hidden="true">· </span>${dwellText}</span>
       ` : null}
       ${stageLabel ? html`
         <span class="text-3xs text-[var(--color-fg-disabled)] font-mono tracking-tight opacity-80">${stageLabel}</span>
+      ` : null}
+      ${detailLabel ? html`
+        <span class="text-3xs text-[var(--color-fg-disabled)] font-mono tracking-tight opacity-80">${detailLabel}</span>
       ` : null}
     </div>
   `

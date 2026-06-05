@@ -75,7 +75,7 @@ let sandbox_rooted_relative_path raw =
   Filename.is_relative raw
   && List.exists
        (fun prefix -> relative_path_has_segment_prefix prefix raw)
-       [ "repos"; "mind"; Common.masc_dirname; "playground" ]
+       [ Keeper_sandbox_layout.repos_subdir; Keeper_sandbox_layout.mind_subdir; Common.masc_dirname; "playground" ]
 ;;
 
 let resolve_read_file_cwd ~(config : Workspace.config) ~(meta : keeper_meta) ~cwd =

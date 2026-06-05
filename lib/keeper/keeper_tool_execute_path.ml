@@ -81,7 +81,7 @@ let repo_path_context ~(config : Workspace.config) ~(meta : keeper_meta) cwd =
     keeper_playground_root ~config ~meta
     |> normalize_repo_cwd_path
   in
-  let repos_root = Filename.concat playground "repos" |> normalize_repo_cwd_path in
+  let repos_root = Keeper_sandbox_layout.repos_dir ~sandbox_root:playground |> normalize_repo_cwd_path in
   let cwd = normalize_repo_cwd_path cwd in
   if String.equal cwd repos_root then None
   else
@@ -235,15 +235,16 @@ let execution_location_json
     match strip_segment_prefix ~prefix:playground_segments cwd_segments with
     | None -> Outside_playground, [], None, None, None, None
     | Some [] -> Playground_root, [], None, None, None, None
-    | Some ("repos" :: repo_name :: rest)
-      when Playground_repo_readiness.safe_repo_component repo_name ->
+    | Some (hd :: repo_name :: rest)
+      when String.equal hd Keeper_sandbox_layout.repos_subdir
+        && Playground_repo_readiness.safe_repo_component repo_name ->
       let repo_root =
-        Filename.concat (Filename.concat playground "repos") repo_name
+        Keeper_sandbox_layout.repo_physical_path ~sandbox_root:playground repo_name
         |> normalize_repo_cwd_path
       in
       (match rest with
        | [] ->
-         Repo_root, [ "repos"; repo_name ], Some repo_name, Some repo_root, None, None
+         Repo_root, [ Keeper_sandbox_layout.repos_subdir; repo_name ], Some repo_name, Some repo_root, None, None
        | ".worktrees" :: task_name :: tail
          when Playground_repo_readiness.safe_repo_component task_name ->
          let worktree_root =
@@ -256,13 +257,13 @@ let execution_location_json
            | _ -> Repo_worktree_subpath
          in
          ( scope
-         , [ "repos"; repo_name; ".worktrees"; task_name ] @ tail
+         , [ Keeper_sandbox_layout.repos_subdir; repo_name; ".worktrees"; task_name ] @ tail
          , Some repo_name
          , Some repo_root
          , Some task_name
          , Some worktree_root )
        | _ ->
-         Repo_subpath, [ "repos"; repo_name ] @ rest, Some repo_name, Some repo_root, None, None)
+         Repo_subpath, [ Keeper_sandbox_layout.repos_subdir; repo_name ] @ rest, Some repo_name, Some repo_root, None, None)
     | Some rest -> Playground_subpath, rest, None, None, None, None
   in
   let relative_cwd =
@@ -323,7 +324,7 @@ let extract_worktree_task_name ~(config : Workspace.config) ~(meta : keeper_meta
     keeper_playground_root ~config ~meta
     |> normalize_repo_cwd_path
   in
-  let repos_root = Filename.concat playground "repos" |> normalize_repo_cwd_path in
+  let repos_root = Keeper_sandbox_layout.repos_dir ~sandbox_root:playground |> normalize_repo_cwd_path in
   let cwd = normalize_repo_cwd_path cwd in
   let prefix = repos_root ^ "/" in
   if not (String.starts_with ~prefix cwd) then None

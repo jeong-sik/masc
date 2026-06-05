@@ -126,7 +126,7 @@ let dirname_opt path =
 
 let split_repo_relative raw =
   match String.split_on_char '/' raw with
-  | "repos" :: repo :: rest when repo <> "" ->
+  | hd :: repo :: rest when String.equal hd Keeper_sandbox_layout.repos_subdir && repo <> "" ->
     let rel = String.concat "/" rest in
     Some (repo, rel)
   | _ -> None
@@ -207,7 +207,7 @@ let missing_file_error_json
   in
   let available_repos =
     let repos_dir =
-      Filename.concat (Keeper_sandbox.host_root_abs_of_meta ~config meta) "repos"
+      Keeper_sandbox_layout.repos_dir ~sandbox_root:(Keeper_sandbox.host_root_abs_of_meta ~config meta)
     in
     if not (safe_is_dir repos_dir)
     then []
@@ -336,7 +336,7 @@ let safe_is_dir path =
 ;;
 
 let keeper_sandbox_repo_names ~(config : Workspace.config) ~(meta : keeper_meta) =
-  let repos_dir = Filename.concat (keeper_playground_root ~config ~meta) "repos" in
+  let repos_dir = Keeper_sandbox_layout.repos_dir ~sandbox_root:(keeper_playground_root ~config ~meta) in
   if not (safe_is_dir repos_dir)
   then []
   else
@@ -372,7 +372,7 @@ let is_playground_lane_relative_path (raw : string) =
   List.exists
     (fun prefix ->
        String.equal raw prefix || String.starts_with ~prefix:(prefix ^ "/") raw)
-    [ "mind"; "repos" ]
+    [ Keeper_sandbox_layout.mind_subdir; Keeper_sandbox_layout.repos_subdir ]
 ;;
 
 let repo_relative_path_candidate ~(meta : keeper_meta) (raw : string) =
@@ -407,7 +407,7 @@ let rewrite_single_repo_relative_path
     in
     match keeper_sandbox_repo_names ~config ~meta with
     | repo_names when List.mem first_segment repo_names ->
-      let sandbox_relative = Filename.concat "repos" raw in
+      let sandbox_relative = Filename.concat Keeper_sandbox_layout.repos_subdir raw in
       let rewritten = keeper_playground_relative_path ~meta sandbox_relative in
       Log.Keeper.debug "playground_relative: explicit repo rewrite %S → %S" raw rewritten;
       Ok (Some rewritten)

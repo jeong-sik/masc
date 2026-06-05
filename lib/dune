@@ -149,7 +149,6 @@
   keeper_tools_oas_bundle
   keeper_sandbox
   keeper_sandbox_control
-  keeper_sandbox_layout
   keeper_alerting_path
   keeper_sandbox_containment
   keeper_sandbox_runtime

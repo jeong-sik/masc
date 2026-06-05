@@ -37,6 +37,18 @@ let dedupe_preserve_order (items : string list) =
    used only by this sibling. *)
 ;;
 
+let workspace_auth_requires_bearer () =
+  try
+    let base_path = Env_config_core.base_path () in
+    let auth_config = Auth.load_auth_config base_path in
+    auth_config.Masc_domain.enabled && auth_config.Masc_domain.require_token
+  with
+  | Env_config_core.Config_error _ ->
+    (* No resolvable workspace auth state means we cannot safely build an
+       unauthenticated local-MASC runtime policy. *)
+    true
+;;
+
 let runtime_mcp_policy_of_tool_names
       ?agent_name
       ?(allow_agent_internal = false)
@@ -71,9 +83,10 @@ let runtime_mcp_policy_of_tool_names
             ~provider_label:"masc"
             ~outcome:
               (Ok { Auth_resolve.raw = token; source = Auth_resolve.Internal_keeper_env });
-          ("x-masc-internal-token", token)
-          :: ("x-masc-keeper-name", keeper_name)
-          :: agent_header
+          Some
+            (("x-masc-internal-token", token)
+             :: ("x-masc-keeper-name", keeper_name)
+             :: agent_header)
         | _ ->
           let env_token = Mcp_policy_helpers.first_nonempty_env [ "MASC_TOKEN" ] in
           (* Phase A F1: when MASC_TOKEN is unset, fall back to the
@@ -95,29 +108,33 @@ let runtime_mcp_policy_of_tool_names
             | None, None ->
               Error (Auth_resolve.Api_key_env_unset { var_name = "MASC_TOKEN" })
           in
-          Auth_resolve.emit_resolution_trace
-            ~runtime:"runtime_mcp_policy"
-            ~keeper_id:keeper_name
-            ~provider_label:"masc"
-            ~outcome:resolved;
           (match resolved with
-           | Ok { raw; _ } -> [ "Authorization", "Bearer " ^ raw ]
-           | Error _ -> [])
+           | Ok { raw; _ } ->
+             Auth_resolve.emit_resolution_trace
+               ~runtime:"runtime_mcp_policy"
+               ~keeper_id:keeper_name
+               ~provider_label:"masc"
+               ~outcome:resolved;
+             Some [ "Authorization", "Bearer " ^ raw ]
+           | Error _ when workspace_auth_requires_bearer () -> None
+           | Error _ -> Some [])
       in
-      Some
-        { Llm_provider.Llm_transport.empty_runtime_mcp_policy with
-          servers =
-            [ Llm_provider.Llm_transport.Http_server
-                { name = "masc"
-                ; url = Env_config_runtime.Local_runtime.mcp_url ()
-                ; headers = masc_headers
-                }
-            ]
-        ; allowed_server_names = [ "masc" ]
-        ; allowed_tool_names = tool_names
-        ; strict = true
-        ; disable_builtin_tools = true
-        })
+      Option.map
+        (fun masc_headers ->
+           { Llm_provider.Llm_transport.empty_runtime_mcp_policy with
+             servers =
+               [ Llm_provider.Llm_transport.Http_server
+                   { name = "masc"
+                   ; url = Env_config_runtime.Local_runtime.mcp_url ()
+                   ; headers = masc_headers
+                   }
+               ]
+           ; allowed_server_names = [ "masc" ]
+           ; allowed_tool_names = tool_names
+           ; strict = true
+           ; disable_builtin_tools = true
+           })
+        masc_headers)
 ;;
 
 let public_mcp_runtime_policy_of_tool_names ?agent_name (tool_names : string list)

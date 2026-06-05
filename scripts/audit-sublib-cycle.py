@@ -79,6 +79,9 @@ DEFAULT_LEAVES: tuple[str, ...] = (
     "masc.telemetry_coverage_gap",
     "masc.telemetry_unified_source",
     "masc.telemetry_unified",
+    # Board MCP adapter: depends on board domain + neutral tool substrate;
+    # neither side should depend back on the adapter.
+    "masc.board_tool_adapter",
     "masc.voice_config",
     "masc.voice_runtime_overlay",
     "masc.voice_bridge_core",

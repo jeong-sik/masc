@@ -38,7 +38,7 @@ let visibility_of_string = function
   | _ -> None
 
 (** Issue #8392: schema enums for [visibility] used to be hand-rolled
-    in [tool_board.ml:699], matching the same drift class as #8354
+    in [board_tool.ml:699], matching the same drift class as #8354
     (task_status), #8372 (agent_status), #8386 (agent_role). All
     constructors are nullary so the simple [List.map] trick works.
     Adding a 5th constructor will fail compilation in

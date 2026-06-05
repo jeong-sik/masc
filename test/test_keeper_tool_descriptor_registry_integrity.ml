@@ -25,7 +25,7 @@ module Registry = Masc.Keeper_tool_registry
 module Resolution = Masc.Keeper_tool_descriptor_resolution
 module Surface = Masc.Keeper_agent_tool_surface
 module Board = Tool_shard_types
-module Tool_board_registry = Masc.Tool_board_registry
+module Board_tool_registry = Board_tool_registry
 
 let all_descriptors () : Descriptor.t list = Descriptor.all_descriptors ()
 
@@ -215,7 +215,7 @@ let required_masc_board_schema name =
   match
     List.find_opt
       (fun (s : Masc_domain.tool_schema) -> s.name = name)
-      Tool_board_registry.tools
+      Board_tool_registry.tools
   with
   | Some schema -> schema
   | None -> Alcotest.failf "missing masc board schema: %s" name
@@ -389,7 +389,7 @@ let test_masc_board_registry_has_descriptor_projection () =
            (descriptor.input_schema = schema.input_schema)
        | [] -> Alcotest.failf "missing descriptor for %s" schema.name
        | _ :: _ :: _ -> Alcotest.failf "duplicate descriptor for %s" schema.name)
-    Tool_board_registry.tools
+    Board_tool_registry.tools
 
 let test_library_search_descriptor_has_recoverable_query_schema () =
   let descriptor = required_internal_descriptor "keeper_library_search" in
@@ -719,7 +719,7 @@ let () =
         ] )
     ; ( "masc-board"
       , [ test_case
-            "Tool_board_registry has descriptor projection"
+            "Board_tool_registry has descriptor projection"
             `Quick
             test_masc_board_registry_has_descriptor_projection
         ] )

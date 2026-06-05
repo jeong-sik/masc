@@ -52,6 +52,7 @@
   ;; Board handler shim removal — tests need direct access to
   ;; Masc_board_handlers for modules no longer re-exported via masc.
   (re_export masc.board_handlers)
+  (re_export masc.board_tool_adapter)
   ;; PR #14267 atomic flip moved Cdal_proof / Proof_store / Risk_class /
   ;; Execution_mode / Risk_contract from agent_sdk into this sub-library;
   ;; tests need it re-exported so [Masc_cdal_runtime.*] resolves.
@@ -193,7 +194,7 @@
   (re_export masc.masc_tool_dispatch)
   ;; Tool surface leaf extracted to lib/tool_surface/ (masc_tool_surface, RFC-0056
   ;; Phase 2 / LANE 6). Re-export so test code using bare Tool_spec.X /
-  ;; Tool_capability.X / Tool_shard_types*.X / Tool_board.X etc. resolves.
+  ;; Tool_capability.X / Tool_shard_types*.X / Board_tool.X etc. resolves.
   (re_export masc.masc_tool_surface)
   ;; Thompson Sampling extracted to lib/thompson/ (masc_thompson). Re-export so
   ;; test code using bare Thompson_sampling.X resolves after the carve.

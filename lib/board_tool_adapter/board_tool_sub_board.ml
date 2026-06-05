@@ -1,17 +1,18 @@
-(** Tool_board_sub_board — sub-board handlers (create / list / get /
+(** Board_tool_sub_board — sub-board handlers (create / list / get /
     update / delete).
 
-    Stage 10 split of lib/tool_board.ml — sub-domain split out of
-    [Tool_board_handlers] so both files stay under the godfile new-file
+    Stage 10 split of lib/board_tool.ml — sub-domain split out of
+    [Board_tool_handlers] so both files stay under the godfile new-file
     cap. *)
 
+open Masc_board_handlers
 open Tool_args
 
 (* RFC-0189 PR-1b.3 — handlers return typed [Tool_result.result].
    Sub-board Board_dispatch errors (slug already exists, owner not found,
    sub_board not found, etc.) are predominantly caller-input violations →
    [Workflow_rejection]. A future RFC may route through
-   [Tool_board_format.board_error_failure_class] for per-variant routing,
+   [Board_tool_format.board_error_failure_class] for per-variant routing,
    but for the current sub_board error vocabulary a uniform
    Workflow_rejection matches observed semantics. *)
 

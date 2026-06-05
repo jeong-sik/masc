@@ -1,3 +1,5 @@
+open Masc_board_handlers
+
 module Format = Stdlib.Format
 module Map = Stdlib.Map
 module Set = Stdlib.Set
@@ -15,9 +17,9 @@ module Char = Stdlib.Char
 module Int = Stdlib.Int
 module Float = Stdlib.Float
 
-(** Tool_board_format — formatters, parsers, JSON arg coercion,
+(** Board_tool_format — formatters, parsers, JSON arg coercion,
     truncated-markdown detector, and the Yojson-error boundary shared
-    across the [Tool_board] submodules. Stage 10 split. *)
+    across the [Board_tool] submodules. Stage 10 split. *)
 
 (** Strip [STATE]...[/STATE] blocks. Inlined to avoid the
     Keeper_prompt dependency cycle via Keeper_alerting. *)

@@ -1,58 +1,59 @@
-(** Tool_board_curation — board-curation handlers (read / submit) and
+(** Board_tool_curation — board-curation handlers (read / submit) and
     the curation-specific JSON argument coercers.
 
-    Stage 10 split of lib/tool_board.ml — sub-domain split out of
-    [Tool_board_handlers] so both files stay under the godfile new-file
+    Stage 10 split of lib/board_tool.ml — sub-domain split out of
+    [Board_tool_handlers] so both files stay under the godfile new-file
     cap. *)
 
+open Masc_board_handlers
 open Tool_args
 
 (** {1 Curation argument coercion} *)
 
 let curation_tag_suggestions_arg args =
-  Tool_board_format.object_list_arg args "tag_suggestions"
+  Board_tool_format.object_list_arg args "tag_suggestions"
   |> List.filter_map (fun fields ->
-    let post_id = Tool_board_format.string_field fields "post_id" "" in
+    let post_id = Board_tool_format.string_field fields "post_id" "" in
     if String.equal post_id ""
     then None
     else
       Some
         { Board_curation.post_id
-        ; tags = Tool_board_format.string_list_field fields "tags"
-        ; rationale = Tool_board_format.string_field fields "rationale" ""
+        ; tags = Board_tool_format.string_list_field fields "tags"
+        ; rationale = Board_tool_format.string_field fields "rationale" ""
         })
 ;;
 
 let curation_answer_matches_arg args =
-  Tool_board_format.object_list_arg args "answer_matches"
+  Board_tool_format.object_list_arg args "answer_matches"
   |> List.filter_map (fun fields ->
     let question_post_id =
-      Tool_board_format.string_field fields "question_post_id" ""
+      Board_tool_format.string_field fields "question_post_id" ""
     in
-    let answer_post_id = Tool_board_format.string_field fields "answer_post_id" "" in
+    let answer_post_id = Board_tool_format.string_field fields "answer_post_id" "" in
     if String.equal question_post_id "" || String.equal answer_post_id ""
     then None
     else
       Some
         { Board_curation.question_post_id
         ; answer_post_id
-        ; score = Tool_board_format.float_field fields "score" 0.0
-        ; rationale = Tool_board_format.string_field fields "rationale" ""
+        ; score = Board_tool_format.float_field fields "score" 0.0
+        ; rationale = Board_tool_format.string_field fields "rationale" ""
         })
 ;;
 
 let curation_health_components_arg args =
-  Tool_board_format.object_list_arg args "health_components"
+  Board_tool_format.object_list_arg args "health_components"
   |> List.filter_map (fun fields ->
-    let name = Tool_board_format.string_field fields "name" "" in
+    let name = Board_tool_format.string_field fields "name" "" in
     if String.equal name ""
     then None
     else
       Some
         { Board_curation.name
-        ; score = Tool_board_format.float_field fields "score" 0.0
-        ; weight = Tool_board_format.float_field fields "weight" 0.0
-        ; rationale = Tool_board_format.string_field fields "rationale" ""
+        ; score = Board_tool_format.float_field fields "score" 0.0
+        ; weight = Board_tool_format.float_field fields "weight" 0.0
+        ; rationale = Board_tool_format.string_field fields "rationale" ""
         })
 ;;
 
@@ -88,14 +89,14 @@ let handle_board_curation_submit ~tool_name ~start_time args : Tool_result.resul
       ~start_time
       "rationale required"
   else (
-    let summary = Tool_board_format.string_opt_arg args "summary" in
-    let ordering = Tool_board_format.string_list_arg args "ordering" in
-    let highlights = Tool_board_format.string_list_arg args "highlights" in
+    let summary = Board_tool_format.string_opt_arg args "summary" in
+    let ordering = Board_tool_format.string_list_arg args "ordering" in
+    let highlights = Board_tool_format.string_list_arg args "highlights" in
     let tag_suggestions = curation_tag_suggestions_arg args in
     let answer_matches = curation_answer_matches_arg args in
     let health_score = get_float_opt args "health_score" in
     let health_components = curation_health_components_arg args in
-    match Tool_board_format.provenance_arg args with
+    match Board_tool_format.provenance_arg args with
     | Error msg ->
       Tool_result.make_err
         ~tool_name

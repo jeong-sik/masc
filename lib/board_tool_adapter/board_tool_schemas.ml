@@ -1,6 +1,8 @@
-(** Tool_board_schemas - Board tool schema definitions.
-    Extracted from tool_board.ml to reduce godfile size.
+(** Board_tool_schemas - Board tool schema definitions.
+    Extracted from board_tool.ml to reduce godfile size.
 *)
+
+open Masc_board_handlers
 
 let tool_post_create : Masc_domain.tool_schema =
   { name = "masc_board_post"

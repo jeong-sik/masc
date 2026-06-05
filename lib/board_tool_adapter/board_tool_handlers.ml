@@ -1,3 +1,5 @@
+open Masc_board_handlers
+
 module Format = Stdlib.Format
 module Map = Stdlib.Map
 module Set = Stdlib.Set
@@ -15,16 +17,16 @@ module Char = Stdlib.Char
 module Int = Stdlib.Int
 module Float = Stdlib.Float
 
-(** Tool_board_handlers — non-post mutating / read handlers and the
+(** Board_tool_handlers — non-post mutating / read handlers and the
     shared agent-lookup / SOUL-evolution callbacks.
 
     Hosts the vote / search / profile / reaction / hearths / stats /
     delete / board_cleanup handlers along with the
     [agent_lookup_hook] / [evolution_hook] state. Post handlers live in
-    {!Tool_board_post}, sub-board handlers in {!Tool_board_sub_board},
-    curation handlers in {!Tool_board_curation}.
+    {!Board_tool_post}, sub-board handlers in {!Board_tool_sub_board},
+    curation handlers in {!Board_tool_curation}.
 
-    Stage 10 split of lib/tool_board.ml. *)
+    Stage 10 split of lib/board_tool.ml. *)
 
 open Tool_args
 
@@ -150,7 +152,7 @@ let handle_vote ~tool_name ~start_time args =
                | Error e ->
                  Log.Misc.warn
                    "[ToolBoard] get_reputation_evolution failed: %s"
-                   (Tool_board_format.board_error_to_string e);
+                   (Board_tool_format.board_error_to_string e);
                  "")
           in
           Tool_result.make_ok
@@ -188,7 +190,7 @@ let handle_vote ~tool_name ~start_time args =
                ~data:(`String "Already voted (idempotent). Score unchanged.")
                ())
         | Error e ->
-          Tool_board_format.error_of_board_error ~tool_name ~start_time e))
+          Board_tool_format.error_of_board_error ~tool_name ~start_time e))
 ;;
 
 let handle_stats ~tool_name ~start_time _args : Tool_result.result =
@@ -225,8 +227,8 @@ let handle_search ~tool_name ~start_time args : Tool_result.result =
     else (
       let fmt =
         if compact
-        then Tool_board_format.format_post_compact
-        else Tool_board_format.format_post
+        then Board_tool_format.format_post_compact
+        else Board_tool_format.format_post
       in
       let formatted = List.map fmt results in
       let separator = if compact then "\n" else "\n---\n" in
@@ -282,7 +284,7 @@ let handle_comment_vote ~tool_name ~start_time args : Tool_result.result =
                   (if String.equal direction_str "down" then "👎" else "👍")))
           ()
       | Error e ->
-        Tool_board_format.error_of_board_error ~tool_name ~start_time e)
+        Board_tool_format.error_of_board_error ~tool_name ~start_time e)
 ;;
 
 let handle_reaction ~tool_name ~start_time args : Tool_result.result =
@@ -326,7 +328,7 @@ let handle_reaction ~tool_name ~start_time args : Tool_result.result =
                   (Board.reaction_toggle_result_to_yojson result)))
           ()
       | Error e ->
-        Tool_board_format.error_of_board_error ~tool_name ~start_time e)
+        Board_tool_format.error_of_board_error ~tool_name ~start_time e)
 ;;
 
 (** Agent profile. *)
@@ -435,7 +437,7 @@ let handle_delete ~tool_name ~start_time args : Tool_result.result =
         ~start_time
         (Printf.sprintf
            "Delete failed: %s"
-           (Tool_board_format.board_error_to_string e)))
+           (Board_tool_format.board_error_to_string e)))
 ;;
 
 let handle_board_cleanup ~tool_name ~start_time args : Tool_result.result =
@@ -456,7 +458,7 @@ let handle_board_cleanup ~tool_name ~start_time args : Tool_result.result =
     | Some n -> String_util.contains_substring (String.lowercase_ascii s) n
   in
   let all_posts =
-    Board_dispatch.list_posts ~sort_by:Tool_board_format.Recent ~limit:500 ()
+    Board_dispatch.list_posts ~sort_by:Board_tool_format.Recent ~limit:500 ()
   in
   let candidates =
     List.filter
@@ -493,7 +495,7 @@ let handle_board_cleanup ~tool_name ~start_time args : Tool_result.result =
                (Board.Post_id.to_string p.id)
                p.title
                (Board.Agent_id.to_string p.author)
-               (Tool_board_format.format_timestamp_relative p.created_at)
+               (Board_tool_format.format_timestamp_relative p.created_at)
                p.reply_count
                (p.votes_up + p.votes_down))
           targets

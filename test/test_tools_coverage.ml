@@ -397,7 +397,7 @@ let test_retired_front_door_tools_absent_from_schema_inventory () =
     retired_tools
 
 let test_masc_board_post_schema_supports_judgment () =
-  let schema = Masc.Tool_board.tool_post_create in
+  let schema = Board_tool.tool_post_create in
   match get_json_assoc "properties" schema.input_schema with
   | Some props ->
       Alcotest.(check bool) "has classification_reason" true

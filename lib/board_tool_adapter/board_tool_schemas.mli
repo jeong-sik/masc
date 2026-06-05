@@ -1,7 +1,9 @@
-(** Tool_board_schemas - Board tool schema definitions.
+(** Board_tool_schemas - Board tool schema definitions.
 
-    Extracted from tool_board.ml to reduce godfile size.
+    Extracted from board_tool.ml to reduce godfile size.
 *)
+
+open Masc_board_handlers
 
 val tool_post_create : Masc_domain.tool_schema
 val tool_post_list : Masc_domain.tool_schema

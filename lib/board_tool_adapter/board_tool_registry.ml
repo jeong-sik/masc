@@ -1,12 +1,12 @@
-(** Tool_board_registry — tool schema list advertised to MCP clients.
+(** Board_tool_registry — tool schema list advertised to MCP clients.
 
-    Re-exports the per-tool schemas from {!Tool_board_schemas} and
+    Re-exports the per-tool schemas from {!Board_tool_schemas} and
     defines the inline-only ones (delete, cleanup, curation_read,
     curation_submit) for which a separate schemas module wasn't created
-    when the original tool_board.ml grew. Order in {!tools} matches the
-    original advertisement order from the pre-split tool_board.ml.
+    when the original board_tool.ml grew. Order in {!tools} matches the
+    original advertisement order from the pre-split board_tool.ml.
 
-    Stage 10 split of lib/tool_board.ml. *)
+    Stage 10 split of lib/board_tool.ml. *)
 
 (** {1 Inline schemas} *)
 
@@ -31,7 +31,7 @@ let tool_delete : Masc_domain.tool_schema =
   }
 ;;
 
-let tool_board_cleanup : Masc_domain.tool_schema =
+let board_tool_cleanup : Masc_domain.tool_schema =
   { name = "masc_board_cleanup"
   ; description =
       "Scan board posts matching filter criteria and delete or report them. Defaults to \
@@ -91,7 +91,7 @@ let tool_board_cleanup : Masc_domain.tool_schema =
 ;;
 
 (** All board tools. *)
-let tool_board_curation_read : Masc_domain.tool_schema =
+let board_tool_curation_read : Masc_domain.tool_schema =
   { name = "masc_board_curation_read"
   ; description =
       "Read the latest AI curation snapshot for the board: TL;DR summary, post ordering, \
@@ -102,7 +102,7 @@ let tool_board_curation_read : Masc_domain.tool_schema =
   }
 ;;
 
-let tool_board_curation_submit : Masc_domain.tool_schema =
+let board_tool_curation_submit : Masc_domain.tool_schema =
   { name = "masc_board_curation_submit"
   ; description =
       "Submit an AI curation snapshot for the board. This records summary, recommended \
@@ -184,26 +184,26 @@ let tool_board_curation_submit : Masc_domain.tool_schema =
 
 (** {1 Aggregate list advertised to MCP clients}
 
-    Order preserved from pre-split tool_board.ml. *)
+    Order preserved from pre-split board_tool.ml. *)
 let tools =
-  [ Tool_board_schemas.tool_post_create
-  ; Tool_board_schemas.tool_post_list
-  ; Tool_board_schemas.tool_post_get
-  ; Tool_board_schemas.tool_comment_add
-  ; Tool_board_schemas.tool_vote
-  ; Tool_board_schemas.tool_stats
-  ; Tool_board_schemas.tool_search
-  ; Tool_board_schemas.tool_comment_vote
-  ; Tool_board_schemas.tool_reaction
-  ; Tool_board_schemas.tool_profile
-  ; Tool_board_schemas.tool_hearth_list
-  ; tool_board_curation_read
-  ; tool_board_curation_submit
+  [ Board_tool_schemas.tool_post_create
+  ; Board_tool_schemas.tool_post_list
+  ; Board_tool_schemas.tool_post_get
+  ; Board_tool_schemas.tool_comment_add
+  ; Board_tool_schemas.tool_vote
+  ; Board_tool_schemas.tool_stats
+  ; Board_tool_schemas.tool_search
+  ; Board_tool_schemas.tool_comment_vote
+  ; Board_tool_schemas.tool_reaction
+  ; Board_tool_schemas.tool_profile
+  ; Board_tool_schemas.tool_hearth_list
+  ; board_tool_curation_read
+  ; board_tool_curation_submit
   ; tool_delete
-  ; Tool_board_schemas.tool_sub_board_create
-  ; Tool_board_schemas.tool_sub_board_list
-  ; Tool_board_schemas.tool_sub_board_get
-  ; Tool_board_schemas.tool_sub_board_update
-  ; Tool_board_schemas.tool_sub_board_delete
+  ; Board_tool_schemas.tool_sub_board_create
+  ; Board_tool_schemas.tool_sub_board_list
+  ; Board_tool_schemas.tool_sub_board_get
+  ; Board_tool_schemas.tool_sub_board_update
+  ; Board_tool_schemas.tool_sub_board_delete
   ]
 ;;

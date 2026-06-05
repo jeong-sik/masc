@@ -1,5 +1,5 @@
 
-(** Tool_board — MCP tool family for the internal board.
+(** Board_tool — MCP tool family for the internal board.
 
     Owns:
     - the {b agent-lookup callback} ({!set_agent_lookup} /
@@ -39,7 +39,9 @@
     [tool_post_get], [tool_comment_add], [tool_vote],
     [tool_stats], [tool_search], [tool_comment_vote],
     [tool_profile], [tool_hearth_list], [tool_delete],
-    [tool_board_cleanup], [tool_spec_read_only]). *)
+    [board_tool_cleanup], [tool_spec_read_only]). *)
+
+open Masc_board_handlers
 
 (** {1 Truncated markdown detection} *)
 
@@ -74,7 +76,7 @@ type sort_order = Board_dispatch.sort_order =
   | Updated
   | Discussed
 (** Type re-export from {!Board_dispatch.sort_order}.
-    Identity preserved so [Tool_board.sort_order] and
+    Identity preserved so [Board_tool.sort_order] and
     [Board_dispatch.sort_order] are interchangeable. *)
 
 val parse_sort_order : string -> (sort_order, string) Result.t
@@ -103,7 +105,7 @@ val board_error_to_string : Board.board_error -> string
 val visibility_of_string : string -> Board.visibility option
 (** Re-export of {!Board.visibility_of_string}.  Pinned at
     this boundary so callers reach it via
-    [Tool_board.visibility_of_string] without importing
+    [Board_tool.visibility_of_string] without importing
     {!Board} directly. *)
 
 (** {1 Agent lookup callback} *)

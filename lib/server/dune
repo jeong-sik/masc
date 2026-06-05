@@ -133,6 +133,7 @@
   masc.masc_exec_command_gate
   masc_board
   masc.board_handlers
+  masc.board_tool_adapter
   masc.task_handlers
   masc_random_id
   masc_workspace

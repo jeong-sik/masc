@@ -175,15 +175,6 @@
   meta_cognition_parse
   meta_cognition_interpret
   meta_cognition_digest
-  tool_board_schemas
-  tool_board_format
-  tool_board_cache
-  tool_board_handlers
-  tool_board_post
-  tool_board_sub_board
-  tool_board_curation
-  tool_board_registry
-  tool_board_dispatch
   )
  (libraries
    mcp_protocol
@@ -513,6 +504,8 @@
    masc_board
    ;; Decoupled board handlers
    masc.board_handlers
+   ;; Board MCP adapter: joins Board domain with neutral Tool substrate.
+   masc.board_tool_adapter
    ;; Decoupled task handlers
    masc.task_handlers
    ;; Random identifier helper — shared between masc_workspace and masc

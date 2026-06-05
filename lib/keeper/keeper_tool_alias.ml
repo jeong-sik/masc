@@ -78,7 +78,7 @@ let is_masc_mcp_descriptor (d : Keeper_tool_descriptor.t) =
   | Tool_ide_annotate
   | Tool_voice_dispatch
   | Tool_task_dispatch
-  | Tool_board_dispatch -> false
+  | Board_tool_dispatch -> false
 ;;
 
 let add_internal_names t (d : Keeper_tool_descriptor.t) =

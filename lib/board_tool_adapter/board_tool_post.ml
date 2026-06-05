@@ -1,3 +1,5 @@
+open Masc_board_handlers
+
 module Format = Stdlib.Format
 module Map = Stdlib.Map
 module Set = Stdlib.Set
@@ -15,11 +17,11 @@ module Char = Stdlib.Char
 module Int = Stdlib.Int
 module Float = Stdlib.Float
 
-(** Tool_board_post — post-lifecycle handlers (create / list / get /
+(** Board_tool_post — post-lifecycle handlers (create / list / get /
     comment_add).
 
-    Stage 10 split of lib/tool_board.ml — sub-domain split out of
-    [Tool_board_handlers] so both files stay under the godfile new-file
+    Stage 10 split of lib/board_tool.ml — sub-domain split out of
+    [Board_tool_handlers] so both files stay under the godfile new-file
     cap. *)
 
 open Tool_args
@@ -39,18 +41,18 @@ let handle_post_create ~tool_name ~start_time args : Tool_result.result =
       "Title must not be empty or whitespace-only"
   | _ ->
     let body_arg =
-      get_string_opt args "body" |> Option.map Tool_board_format.strip_state_blocks_text
+      get_string_opt args "body" |> Option.map Board_tool_format.strip_state_blocks_text
     in
     let raw_content =
       match body_arg with
       | Some value -> value
       | None -> get_string args "content" ""
     in
-    let sources = Tool_board_format.source_entries_arg args in
+    let sources = Board_tool_format.source_entries_arg args in
     let content =
-      let stripped = Tool_board_format.strip_state_blocks_text raw_content in
+      let stripped = Board_tool_format.strip_state_blocks_text raw_content in
       let content =
-        match Tool_board_format.detect_truncated_markdown_with_reason stripped with
+        match Board_tool_format.detect_truncated_markdown_with_reason stripped with
         | Some reason ->
           let author_label =
             match get_string_opt args "author" |> Option.map String.trim with
@@ -69,13 +71,13 @@ let handle_post_create ~tool_name ~start_time args : Tool_result.result =
              appending 잘림 marker"
             author_label
             (String.length stripped)
-            (Tool_board_format.truncation_signal_to_string reason);
+            (Board_tool_format.truncation_signal_to_string reason);
           stripped ^ "\n\n_…[잘림 — LLM 출력이 중간에 끊겼습니다]_"
         | None -> stripped
       in
       match sources with
       | Some entries when not (String.equal (String.trim content) "") ->
-        content ^ Tool_board_format.sources_footer entries
+        content ^ Board_tool_format.sources_footer entries
       | _ -> content
     in
     let body = Option.map (fun _ -> content) body_arg in
@@ -122,17 +124,17 @@ let handle_post_create ~tool_name ~start_time args : Tool_result.result =
       let meta_json =
         match sources with
         | Some entries ->
-          Tool_board_format.merge_sources_into_meta
-            (Tool_board_format.normalize_board_post_meta args)
+          Board_tool_format.merge_sources_into_meta
+            (Board_tool_format.normalize_board_post_meta args)
             entries
-        | None -> Tool_board_format.normalize_board_post_meta args
+        | None -> Board_tool_format.normalize_board_post_meta args
       in
       let visibility =
-        match Tool_board_format.visibility_of_string visibility_str with
+        match Board_tool_format.visibility_of_string visibility_str with
         | Some v -> v
         | None -> Board.Internal
       in
-      match Tool_board_handlers.resolve_board_post_kind ~author raw_post_kind with
+      match Board_tool_handlers.resolve_board_post_kind ~author raw_post_kind with
       | Error msg ->
         Tool_result.make_err
           ~tool_name
@@ -166,7 +168,7 @@ let handle_post_create ~tool_name ~start_time args : Tool_result.result =
                      (Yojson.Safe.pretty_to_string json)))
              ()
          | Error e ->
-           Tool_board_format.error_of_board_error ~tool_name ~start_time e))
+           Board_tool_format.error_of_board_error ~tool_name ~start_time e))
 ;;
 
 let handle_post_list_uncached ~tool_name ~start_time args : Tool_result.result =
@@ -193,13 +195,13 @@ let handle_post_list_uncached ~tool_name ~start_time args : Tool_result.result =
   let since = get_float_opt args "since" in
   let visibility_filter =
     match visibility_str with
-    | Some s -> Tool_board_format.visibility_of_string s
+    | Some s -> Board_tool_format.visibility_of_string s
     | None -> None
   in
   let sort_by_result =
     match sort_arg with
-    | None -> Ok Tool_board_format.Hot
-    | Some value -> Tool_board_format.parse_sort_order value
+    | None -> Ok Board_tool_format.Hot
+    | Some value -> Board_tool_format.parse_sort_order value
   in
   match sort_by_result with
   | Error msg ->
@@ -260,19 +262,19 @@ let handle_post_list_uncached ~tool_name ~start_time args : Tool_result.result =
         let indicator = if has_new_activity p then " 🔔" else "" in
         let fmt =
           if compact
-          then Tool_board_format.format_post_compact
-          else Tool_board_format.format_post
+          then Board_tool_format.format_post_compact
+          else Board_tool_format.format_post
         in
         fmt p ^ indicator
       in
       let formatted = List.map format_post_with_indicator posts in
       let sort_label =
         match sort_by with
-        | Tool_board_format.Hot -> "Hot"
-        | Tool_board_format.Trending -> "Trending"
-        | Tool_board_format.Recent -> "Recent"
-        | Tool_board_format.Updated -> "Recently Updated"
-        | Tool_board_format.Discussed -> "Most Discussed"
+        | Board_tool_format.Hot -> "Hot"
+        | Board_tool_format.Trending -> "Trending"
+        | Board_tool_format.Recent -> "Recent"
+        | Board_tool_format.Updated -> "Recently Updated"
+        | Board_tool_format.Discussed -> "Most Discussed"
       in
       let separator = if compact then "\n" else "\n\n---\n\n" in
       let mode_label = if compact then " (compact)" else "" in
@@ -292,8 +294,8 @@ let handle_post_list ~tool_name ~start_time args =
   if random
   then handle_post_list_uncached ~tool_name ~start_time args
   else (
-    let key = Tool_board_cache.board_list_cache_key args in
-    Tool_board_cache.cached_board_list ~key ~tool_name ~start_time (fun () ->
+    let key = Board_tool_cache.board_list_cache_key args in
+    Board_tool_cache.cached_board_list ~key ~tool_name ~start_time (fun () ->
       handle_post_list_uncached ~tool_name ~start_time args))
 ;;
 
@@ -312,14 +314,14 @@ let handle_post_get ~tool_name ~start_time args : Tool_result.result =
            (Printf.sprintf "Post %s no longer exists (deleted or expired)." post_id))
       ()
   | Error e ->
-    Tool_board_format.error_of_board_error ~tool_name ~start_time e
+    Board_tool_format.error_of_board_error ~tool_name ~start_time e
   | Ok (post, comments) ->
-    let post_str = Tool_board_format.format_post post in
+    let post_str = Board_tool_format.format_post post in
     let comments_str =
       if Stdlib.List.length comments = 0
       then "\n\nNo comments."
       else (
-        let formatted = Tool_board_format.format_comment_tree comments in
+        let formatted = Board_tool_format.format_comment_tree comments in
         Printf.sprintf
           "\n\n**Comments (%d)**:\n%s"
           (List.length comments)
@@ -394,5 +396,5 @@ let handle_comment_add ~tool_name ~start_time args : Tool_result.result =
                 (Yojson.Safe.pretty_to_string json)))
         ()
     | Error e ->
-      Tool_board_format.error_of_board_error ~tool_name ~start_time e)
+      Board_tool_format.error_of_board_error ~tool_name ~start_time e)
 ;;

@@ -78,15 +78,16 @@ let mcp_session_of_json = Mcp_server_eio_governance.mcp_session_of_json
 
 (* Tag registry initialization.
    Most modules register via Tool_spec.register at module load time.
-   Only Tool_schemas_inline (sub-library) and Board remain here. *)
+   Inline schemas and domain adapters that need composition-root wiring
+   remain here. *)
 let () =
   let open Tool_dispatch in
   register_module_tag ~schemas:Tool_schemas_inline.schemas ~tag:Mod_inline;
-  Tool_board.register ();
+  Board_tool.register ();
   mark_tag_registry_initialized ();
   (* Inject masc_* schemas into keeper bridge for surface/policy filtering.
-     Uses Config.raw_all_tool_schemas which includes Board schemas
-     not present in Tools.all_schemas_extended. *)
+     Uses Config.raw_all_tool_schemas, including domain-adapter schemas not
+     present in Tools.all_schemas_extended. *)
   Keeper_tool_dispatch_runtime.inject_masc_schemas Config.raw_all_tool_schemas;
   (* Report tool schema budget to Prometheus (#7483 Step 1). *)
   (let schemas = Config.visible_tool_schemas () in

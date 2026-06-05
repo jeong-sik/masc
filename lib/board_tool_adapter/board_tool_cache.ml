@@ -1,10 +1,10 @@
-(** Tool_board_cache — TTL cache for [masc_board_list] payloads.
+(** Board_tool_cache — TTL cache for [masc_board_list] payloads.
 
     Reduces redundant JSONL reads when multiple keepers poll
     board_list in the same analysis window. Invalidated on any board
     mutation (post, comment, vote, delete, cleanup).
 
-    Stage 10 split of lib/tool_board.ml. *)
+    Stage 10 split of lib/board_tool.ml. *)
 
 (* Cache only the rendered payload — never the full result record.
    Storing the whole record would let cache hits reuse the *original*

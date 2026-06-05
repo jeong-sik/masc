@@ -117,7 +117,8 @@ function toConversationEntry(
     timestamp: new Date(msg.timestamp).toISOString(),
     delivery: 'delivered',
     streamState: null,
-    details: msg.attachments ? { rawPayload: { attachments: msg.attachments } } : null,
+    attachments: msg.attachments,
+    details: null,
   }
 }
 

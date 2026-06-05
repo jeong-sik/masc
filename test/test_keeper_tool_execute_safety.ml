@@ -474,6 +474,7 @@ let check_sandbox_bundle_absent ~base_path ~meta =
 
 let is_repo_or_task_state_path_block err =
   String_util.contains_substring err "sandbox_repo_not_ready"
+  || String_util.contains_substring err "sandbox_worktree_not_ready"
   || String_util.contains_substring err "task_state_file_path_blocked"
 
 let test_tool_execute_rejects_parent_git_repo_cwd () =
@@ -688,12 +689,53 @@ let test_tool_execute_rejects_stale_worktree_path_arg () =
   in
   match parse_error_field raw with
   | Some err ->
-    Alcotest.(check bool) "sandbox_repo_not_ready"
+    Alcotest.(check bool) "sandbox_worktree_not_ready"
       true
-      (String_util.contains_substring err "sandbox_repo_not_ready");
+      (String_util.contains_substring err "sandbox_worktree_not_ready");
     if not (String_util.contains_substring err ".worktrees/task")
     then Alcotest.failf "expected stale worktree root, got: %s" err
   | None -> Alcotest.fail ("expected error json, got: " ^ raw)
+
+let test_tool_execute_rejects_broken_worktree_gitfile () =
+  with_eio_fs @@ fun () ->
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  let config = Workspace.default_config base in
+  let meta = make_local_meta "sangsu" in
+  let playground = Filename.concat base (playground_path_of meta.name) in
+  let repo_dir = Filename.concat playground "repos/masc" in
+  let worktree_dir = Filename.concat repo_dir ".worktrees/task-broken" in
+  ensure_dir worktree_dir;
+  run_process_ok ~cwd:repo_dir "git" [ "init"; "-q"; "--initial-branch=main" ];
+  write_file
+    (Filename.concat worktree_dir ".git")
+    (Printf.sprintf "gitdir: %s\n" (Filename.concat repo_dir ".git/worktrees/task-broken"));
+  let raw =
+    Keeper_tool_command_runtime.handle_tool_execute
+      ~turn_sandbox_factory:None
+      ~exec_cache:None
+      ~config
+      ~meta
+      ~args:
+        (`Assoc
+           [ "executable", `String "cat"
+           ; "argv", `List [ `String "README.md" ]
+           ; "cwd", `String "repos/masc/.worktrees/task-broken"
+           ])
+      ()
+  in
+  match parse_error_field raw with
+  | Some err ->
+    Alcotest.(check bool) "broken gitfile is worktree-not-ready"
+      true
+      (String_util.contains_substring err "sandbox_worktree_not_ready");
+    Alcotest.(check bool) "git probe failure is surfaced"
+      true
+      (String_util.contains_substring err "git_error=");
+    Alcotest.(check bool) "git error explains broken admin dir"
+      true
+      (String_util.contains_substring err "not a git repository")
+  | None -> Alcotest.fail ("expected broken worktree error json, got: " ^ raw)
 
 let test_tool_execute_readonly_missing_worktree_path_arg_does_not_materialize () =
   with_eio_fs @@ fun () ->
@@ -2115,6 +2157,10 @@ let () =
             "stale worktree path arg rejects parent clone"
             `Quick
             test_tool_execute_rejects_stale_worktree_path_arg
+        ; Alcotest.test_case
+            "broken worktree gitfile rejects as worktree not ready"
+            `Quick
+            test_tool_execute_rejects_broken_worktree_gitfile
         ; Alcotest.test_case
             "readonly missing worktree path arg rejects without materializing"
             `Quick

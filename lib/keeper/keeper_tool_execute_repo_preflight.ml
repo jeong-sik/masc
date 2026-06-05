@@ -93,17 +93,59 @@ let repo_currency_sync_disabled_error ~repo_name ~cwd =
     repo_name
     cwd
 
-let repo_checkout_not_ready_error ~repo_name ~path_root ~git_toplevel =
-  Printf.sprintf
-    "sandbox_repo_not_ready: sandbox path is under repos/%s, but %s is not an \
-     independent git checkout (git_toplevel=%s). Execute cwd/path resolution \
-     does not create directories or change repo/worktree state. Use an \
-     existing repo/worktree path under repos/%s, or provision the sandbox repo \
-     before retrying."
-    repo_name
-    path_root
-    (Option.value ~default:"<none>" git_toplevel)
-    repo_name
+let first_non_empty_line s =
+  s
+  |> String.split_on_char '\n'
+  |> List.map String.trim
+  |> List.find_opt (fun line -> not (String.equal line ""))
+
+let git_probe_detail top =
+  let git_toplevel = if top.Playground_repo_readiness.ok then Some top.output else None in
+  let git_error =
+    if top.Playground_repo_readiness.ok
+    then None
+    else first_non_empty_line top.Playground_repo_readiness.output
+  in
+  git_toplevel, git_error
+
+let git_error_suffix = function
+  | None -> ""
+  | Some git_error -> Printf.sprintf "; git_error=%s" git_error
+
+let repo_checkout_not_ready_error
+      ~repo_name
+      ~path_root
+      ~path_is_worktree
+      ~git_toplevel
+      ~git_error
+  =
+  let git_toplevel = Option.value ~default:"<none>" git_toplevel in
+  if path_is_worktree
+  then
+    Printf.sprintf
+      "sandbox_worktree_not_ready: sandbox path is under \
+       repos/%s/.worktrees, but %s is not a valid git worktree \
+       (git_toplevel=%s%s). Execute cwd/path resolution does not create \
+       directories or change repo/worktree state. Use an existing git \
+       worktree under repos/%s/.worktrees/<task>, or provision the sandbox \
+       worktree before retrying."
+      repo_name
+      path_root
+      git_toplevel
+      (git_error_suffix git_error)
+      repo_name
+  else
+    Printf.sprintf
+      "sandbox_repo_not_ready: sandbox path is under repos/%s, but %s is not \
+       an independent git checkout (git_toplevel=%s%s). Execute cwd/path \
+       resolution does not create directories or change repo/worktree state. \
+       Use an existing repo path under repos/%s, or provision the sandbox repo \
+       before retrying."
+      repo_name
+      path_root
+      git_toplevel
+      (git_error_suffix git_error)
+      repo_name
 
 let validate_repo_path_ready
       ~(config : Workspace.config)
@@ -116,6 +158,7 @@ let validate_repo_path_ready
   | Some
       { Keeper_tool_execute_path.path_repo_name = repo_name
       ; path_root
+      ; path_is_worktree
       ; accepted_toplevels
       ; _
       } ->
@@ -125,7 +168,7 @@ let validate_repo_path_ready
         ~clone_path:probe_path
         [ "rev-parse"; "--show-toplevel" ]
     in
-    let top_opt = if top.ok then Some top.output else None in
+    let top_opt, git_error = git_probe_detail top in
     let top_matches =
       top.ok
       && List.exists
@@ -135,7 +178,14 @@ let validate_repo_path_ready
     in
     if top_matches
     then Ok ()
-    else Error (repo_checkout_not_ready_error ~repo_name ~path_root ~git_toplevel:top_opt)
+    else
+      Error
+        (repo_checkout_not_ready_error
+           ~repo_name
+           ~path_root
+           ~path_is_worktree
+           ~git_toplevel:top_opt
+           ~git_error)
 
 let validate_cwd_currency_ready
       ~allow_currency_sync

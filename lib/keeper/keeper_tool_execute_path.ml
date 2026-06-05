@@ -31,6 +31,7 @@ type repo_path_context =
   { path_repo_name : string
   ; path_repo_root : string
   ; path_root : string
+  ; path_is_worktree : bool
   ; accepted_toplevels : string list
   }
 
@@ -61,6 +62,7 @@ let repo_path_context ~(config : Workspace.config) ~(meta : keeper_meta) ~path =
           { path_repo_name = repo_name
           ; path_repo_root = normalize_repo_cwd_path repo_root
           ; path_root = worktree_root
+          ; path_is_worktree = true
           ; accepted_toplevels = [ worktree_root ]
           }
       | repo_name :: _ when safe_repo_component repo_name ->
@@ -70,6 +72,7 @@ let repo_path_context ~(config : Workspace.config) ~(meta : keeper_meta) ~path =
           { path_repo_name = repo_name
           ; path_repo_root = repo_root
           ; path_root = repo_root
+          ; path_is_worktree = false
           ; accepted_toplevels = [ repo_root ]
           }
       | _ -> None

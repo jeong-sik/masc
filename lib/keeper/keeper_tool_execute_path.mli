@@ -28,6 +28,7 @@ type repo_path_context =
   { path_repo_name : string
   ; path_repo_root : string
   ; path_root : string
+  ; path_is_worktree : bool
   ; accepted_toplevels : string list
   }
 (** Path-only facts for any path inside a keeper sandbox repo. [path_root] is

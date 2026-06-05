@@ -396,7 +396,11 @@ let validate_docker_dispatch_context
       ~(cmd : string)
       ()
   =
-  let cmd_ir = Keeper_tool_execute_command_parse.parse_cmd_to_ir_opt cmd in
+  let cmd_ir =
+    match Exec_policy.parse_string_to_ir ~mode:Tool_execute cmd with
+    | Ok ir -> Some ir
+    | Error _ -> None
+  in
   let cwd, sandbox_root_git_blocker =
     match cmd_ir with
     | Some ir ->
@@ -413,14 +417,14 @@ let validate_docker_dispatch_context
         let validation_cmd =
           rewrite_docker_command_paths_for_host_validation ~config ~meta cmd
         in
-        match Keeper_tool_execute_command_parse.parse_cmd_to_ir_opt validation_cmd with
-        | Some validation_ir ->
+        match Exec_policy.parse_string_to_ir ~mode:Tool_execute validation_cmd with
+        | Ok validation_ir ->
           Keeper_tool_execute_shell_ir.validate_paths
             ~keeper_id:meta.name
             ~base_path:(Keeper_alerting_path.project_root_of_config config)
             ~workdir:cwd
             validation_ir
-        | None -> Ok ())
+        | Error _ -> Ok ())
       else Ok ()
     in
     match path_validation with

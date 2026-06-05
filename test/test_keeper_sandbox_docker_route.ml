@@ -1589,7 +1589,7 @@ let test_cmd_prefix_uses_shell_command_words () =
     Alcotest.(check string)
       label
       expected
-      (Keeper_tool_execute_command_words.cmd_prefix cmd)
+      (Keeper_tool_command_words.cmd_prefix cmd)
   in
   check "plain command" "git" "git status";
   check "env wrapper" "env" "env GH_TOKEN=redacted gh pr list";

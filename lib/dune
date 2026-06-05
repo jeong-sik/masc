@@ -251,50 +251,33 @@
    masc.keeper_contract
    masc.keeper_runtime_manifest_types
    masc.keeper_registry
-   masc.keeper_registry
-   masc.keeper_registry
-   masc.keeper_registry
    masc.keeper_hooks_oas_types
-   masc.keeper_contract
    masc.keeper_binding_health_config
-   masc.keeper_contract
    masc.keeper_path_rejection
    masc.keeper_failure_circuit_breaker_types
    masc.keeper_approval_queue_rules_types
    masc.keeper_toml
-   masc.keeper_toml
    masc.keeper_runtime
    masc.keeper_tool_name
    masc.keeper_id
-   masc.keeper_runtime
    masc.keeper_timing
    masc.keeper_metrics
-   masc.keeper_runtime
    masc.keeper_tooling
    masc.keeper_failure_taxonomy
-   masc.keeper_contract
    masc.keeper_memory_taxonomy
    masc.keeper_memory_policy_summary_filter
-   masc.keeper_tooling
    masc.keeper_outcome_taxonomy
-   masc.keeper_metrics
    masc.keeper_types
    masc.keeper_types_profile_sandbox
    masc.keeper_pressure
    masc.keeper_lifecycle_events
    masc.keeper_usage_trust
-   masc.keeper_metrics
-   masc.keeper_metrics
    masc.keeper_event_bus
    masc.keeper_failure_policy
-   masc.keeper_runtime
-   masc.keeper_runtime
    masc.keeper_tool_response
    masc.keeper_social
    masc.keeper_discovered_tools
    masc.keeper_tool_execute_timeout
-   masc.keeper_tooling
-   masc.keeper_contract
    ;; Runtime_provider_labels extracted to lib/runtime_provider_labels/.
    ;; Leaf boundary over agent_sdk.llm_provider canonical provider labels.
    masc.runtime_provider_labels

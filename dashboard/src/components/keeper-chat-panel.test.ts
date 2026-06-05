@@ -6,7 +6,6 @@ import {
   isKeeperTextContentEvent,
   normalizeKeeperChatErrorValue,
 } from './keeper-chat-panel'
-import type { ChatMessage } from '../keeper-chat-store'
 
 describe('isKeeperTextContentEvent', () => {
   it('accepts current AG-UI text content events', () => {

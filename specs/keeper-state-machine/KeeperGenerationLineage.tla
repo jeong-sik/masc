@@ -41,7 +41,7 @@ vars ==
        ckpt_valid, ckpt_generation, ckpt_trace_id, next_trace_id >>
 
 \* Issue #8642/#8701 family: explicit OCaml ↔ TLA+ mapping. SSOT for
-\* OCaml side is lib/keeper_state/keeper_state_machine.ml (13 phases;
+\* OCaml side is lib/keeper_registry/keeper_state_machine.ml (13 phases;
 \* Zombie added iter 4 #14707, terminal-terminal, not modeled here).
 \* This spec uses the smallest possible alphabet (3 symbols) because the
 \* generation-lineage contract only inspects whether the keeper is

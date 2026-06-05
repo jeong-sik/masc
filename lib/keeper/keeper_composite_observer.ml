@@ -413,7 +413,7 @@ let compute_invariants
   }
 
 (* Otel_metric_store bump — one counter tick per violated invariant per snapshot.
-   Called from [observe]. PromQL rate/increase distinguishes transient
+   Called from [observe]. Backend rate/increase queries distinguish transient
    from steady-state violations. Labels bounded: keeper × invariant (5)
    ≤ ~250 series on a 50-keeper host. Mirrors the naming pattern in
    [Runtime_strategy_trace.bump_otel_metric_store_counter]. *)

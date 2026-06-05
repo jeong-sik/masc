@@ -299,7 +299,7 @@ let run_with_timeout_and_fallback
           opaque message for both made root-cause attribution impossible.
           Categorize wall duration into a discrete bucket and surface the
           inner cancel exception so operators can split short_tail / mid_tail
-          / long_tail in PromQL and the inner reason ([Eio.Cancel.Cancel_hook]
+          / long_tail in metric queries and the inner reason ([Eio.Cancel.Cancel_hook]
           payload, parent-fiber Cancelled, etc.) appears in the log. Severity
           comes from the caller's explicit [cancel_classification], not the
           internal exception name or wall-clock bucket. *)

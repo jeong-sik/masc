@@ -36,7 +36,7 @@ val metric_agent_stale_total : string
     Populated by {!module:Gc_sampler} once per sampling interval from
     [Gc.quick_stat]. The cumulative word counters are exposed as [Gauge]
     because they are read from the OCaml runtime as point-in-time snapshots;
-    PromQL [rate()] still works on monotonic-by-construction gauges. *)
+    backend [rate] queries still work on monotonic-by-construction gauges. *)
 
 (** Cumulative words allocated in the minor heap since program start. *)
 val metric_gc_minor_words : string

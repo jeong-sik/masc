@@ -117,6 +117,16 @@ jobs:
       - name: Run lint
         run: bash scripts/lint/no-retired-tool-husks.sh --fail
 
+  no-retired-metrics-backend:
+    name: Retired metrics backend ratchet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ripgrep
+        run: sudo apt-get install -y -qq ripgrep
+      - name: Run lint
+        run: bash scripts/lint/no-retired-metrics-backend.sh --fail
+
   no-synthetic-tool-call-residue:
     name: Synthetic tool-call residue ratchet
     runs-on: ubuntu-latest

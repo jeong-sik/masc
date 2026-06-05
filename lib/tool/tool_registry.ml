@@ -68,42 +68,30 @@ let with_registry_ro f = Eio_guard.with_mutex_ro registry_mu f
 
 module StringSet = Set_util.StringSet
 
-(** Use schema-owner lists plus catalog-owned explicit metadata instead of
-    actor-facing surfaces.  Tool_registry sits below keeper/OAS dispatch, and
-    depending on Config creates Config -> keeper -> Tool_registry -> Config
-    cycles.  Explicit metadata is the local catalog truth for hidden callable
-    tools and descriptor-owned internal backend names that are not generated
-    in the schema library. *)
-let known_tool_names : StringSet.t Eio.Lazy.t =
+(** Use catalog-owned metadata instead of actor-facing surfaces. Tool_registry
+    sits below keeper/OAS dispatch; depending on Config or tool_schemas creates
+    cycles. Explicit metadata is the local catalog truth for hidden callable
+    tools and descriptor-owned internal backend names that are not on a public
+    actor surface. *)
+let stats_catalog_tool_names : StringSet.t Eio.Lazy.t =
   Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
-    let schema_owned_names =
-      [ Tool_schemas_workspace_core.schemas
-      ; Tool_schemas_workspace_extra.schemas
-      ; Tool_schemas_inline.schemas
-      ; Tool_schemas_agent.schemas
-      ; Tool_schemas_run.schemas
-      ; Tool_schemas_misc.schemas
-      ]
-      |> List.concat
-      |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
-    in
     let explicit_metadata_names =
       List.map fst Tool_catalog.explicit_metadata
     in
     List.fold_left
       (fun set name -> StringSet.add name set)
       StringSet.empty
-      ( schema_owned_names
-      @ Tool_catalog_surfaces.system_internal_hidden
-      @ explicit_metadata_names ))
+      (Tool_catalog_surfaces.system_internal_hidden @ explicit_metadata_names))
 ;;
 
 let is_keeper_internal_tool_name tool_name =
   String.starts_with ~prefix:"keeper_" tool_name
 
-let is_known_tool tool_name =
-  StringSet.mem tool_name (Eio.Lazy.force known_tool_names)
+let is_stats_known_tool tool_name =
+  StringSet.mem tool_name (Eio.Lazy.force stats_catalog_tool_names)
   || is_keeper_internal_tool_name tool_name
+
+let is_known_tool = is_stats_known_tool
 
 (** Record a tool call with source attribution.
 

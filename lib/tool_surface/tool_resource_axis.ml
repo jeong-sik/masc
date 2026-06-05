@@ -218,12 +218,7 @@ let classify_catalog_tool ~tool_name =
   | "masc_agent_update"
   | "masc_broadcast"
   | "masc_cleanup_zombies"
-  | "masc_gc"
-  | "masc_operator_action"
-  | "masc_operator_confirm" -> Some Generic_write
-  | "masc_agent_card"
-  | "masc_agent_fitness"
-  | "masc_agents"
+  | "masc_gc" -> Some Generic_write
   | "masc_board_curation_read"
   | "masc_board_get"
   | "masc_board_hearths"
@@ -250,7 +245,6 @@ let classify_catalog_tool ~tool_name =
   | "masc_status"
   | "masc_task_history"
   | "masc_tasks"
-  | "masc_tool_help"
   | "masc_tool_list"
   | "masc_tool_stats" -> Some Ungated
   | _ -> None

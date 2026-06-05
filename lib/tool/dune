@@ -39,7 +39,6 @@
   masc_config
   masc.tool_types
   masc.tool_catalog_surfaces
-  masc.tool_schemas
   time_compat
   yojson
   eio

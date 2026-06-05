@@ -160,8 +160,8 @@ let local_worker_tool_schemas ?names () :
 
 (** Role-catalog candidates for workspace leads and fleet leaders.
     SSOT: Tool_catalog_surfaces.workspace_role_tools.
-    [build_tool_catalog] filters against surfaced tool names so stale
-    entries cannot escape into prompts. *)
+    [build_tool_catalog] filters against resolvable surfaced tool names so
+    stale entries cannot escape into prompts. *)
 let workspace_tool_names : string list =
   Tool_catalog_surfaces.workspace_role_tools
 
@@ -202,13 +202,13 @@ let role_catalog_available_tool_names () =
     - [_]: all available spawned/local worker tools
     Returns tool names (unprefixed). *)
 let build_tool_catalog ~(role : string) () : string list =
-  let all_names = role_catalog_available_tool_names () in
+  let available_names = role_catalog_available_tool_names () in
   let filtered =
     match role with
     | "worker" ->
-        filter_catalog_to_available ~available:all_names execution_tool_names
+        filter_catalog_to_available ~available:available_names execution_tool_names
     | "workspace_lead" | "fleet_leader" ->
-        filter_catalog_to_available ~available:all_names workspace_tool_names
-    | _ -> all_names
+        filter_catalog_to_available ~available:available_names workspace_tool_names
+    | _ -> available_names
   in
   Json_util.dedupe_keep_order filtered

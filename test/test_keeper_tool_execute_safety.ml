@@ -374,7 +374,8 @@ let run_process_ok ~cwd prog argv =
       (Masc.Keeper_sandbox_exec_failure.status_label status)
       stdout stderr
 
-let git_ok ~cwd args = run_process_ok ~cwd "git" args
+let git_ok ~cwd args =
+  run_process_ok ~cwd "git" ("-c" :: "core.hooksPath=/dev/null" :: args)
 
 let write_file path content =
   ensure_dir (Filename.dirname path);
@@ -396,7 +397,7 @@ let write_repositories_toml ~base_path ~repo_name ~url =
 
 let setup_preserved_sandbox_repo ~keeper_name =
   let base_path, config = make_config () in
-  let meta = make_local_meta keeper_name in
+  let meta = { (make_local_meta keeper_name) with tool_access = [] } in
   let remote = Filename.concat base_path ".remote-masc.git" in
   let seed = Filename.concat base_path "seed-masc" in
   git_ok ~cwd:base_path
@@ -418,6 +419,37 @@ let setup_preserved_sandbox_repo ~keeper_name =
   git_ok ~cwd:seed [ "commit"; "-q"; "-m"; "advance" ];
   git_ok ~cwd:seed [ "push"; "-q"; "origin"; "main" ];
   write_file (Filename.concat repo_dir "local-dirty.txt") "dirty\n";
+  base_path, config, meta, repo_dir
+
+let setup_deleted_tracked_files_sandbox_repo ~keeper_name =
+  let base_path, config = make_config () in
+  let meta = { (make_local_meta keeper_name) with tool_access = [] } in
+  let remote = Filename.concat base_path ".remote-masc.git" in
+  let seed = Filename.concat base_path "seed-masc" in
+  git_ok ~cwd:base_path
+    [ "init"; "--bare"; "-q"; "--initial-branch=main"; remote ];
+  git_ok ~cwd:base_path [ "clone"; "-q"; remote; seed ];
+  git_ok ~cwd:seed [ "config"; "user.email"; "test@example.com" ];
+  git_ok ~cwd:seed [ "config"; "user.name"; "Test" ];
+  write_file (Filename.concat seed "README.md") "v1\n";
+  write_file (Filename.concat seed "config/deleted-one.txt") "tracked one\n";
+  write_file (Filename.concat seed "test/fixtures/deleted-two.txt") "tracked two\n";
+  git_ok
+    ~cwd:seed
+    [ "add"; "README.md"; "config/deleted-one.txt"; "test/fixtures/deleted-two.txt" ];
+  git_ok ~cwd:seed [ "commit"; "-q"; "-m"; "init" ];
+  git_ok ~cwd:seed [ "push"; "-q"; "origin"; "main" ];
+  let playground = Filename.concat base_path (playground_path_of meta.name) in
+  let repo_dir = Filename.concat playground "repos/masc" in
+  ensure_dir (Filename.dirname repo_dir);
+  git_ok ~cwd:(Filename.dirname repo_dir) [ "clone"; "-q"; remote; repo_dir ];
+  Sys.remove (Filename.concat repo_dir "config/deleted-one.txt");
+  Sys.remove (Filename.concat repo_dir "test/fixtures/deleted-two.txt");
+  write_repositories_toml ~base_path ~repo_name:"masc" ~url:remote;
+  write_file (Filename.concat seed "README.md") "v2\n";
+  git_ok ~cwd:seed [ "add"; "README.md" ];
+  git_ok ~cwd:seed [ "commit"; "-q"; "-m"; "advance" ];
+  git_ok ~cwd:seed [ "push"; "-q"; "origin"; "main" ];
   base_path, config, meta, repo_dir
 
 let parse_error_field raw =
@@ -738,6 +770,209 @@ let test_tool_execute_allows_preserved_direct_repo_git_status () =
      |> fun output -> String_util.contains_substring output "local-dirty.txt");
   Alcotest.(check bool) "stale gate did not block diagnostic" false
     (String_util.contains_substring raw "sandbox_repo_stale")
+
+let test_tool_execute_allows_preserved_direct_repo_git_checkout_head_restore () =
+  with_eio_fs @@ fun () ->
+  let base_path, config, meta, repo_dir =
+    setup_deleted_tracked_files_sandbox_repo
+      ~keeper_name:"stale-direct-git-checkout-head"
+  in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let raw =
+    Keeper_tool_command_runtime.handle_tool_execute
+      ~turn_sandbox_factory:None
+      ~exec_cache:None
+      ~config
+      ~meta
+      ~args:
+        (`Assoc
+           [ "executable", `String "git"
+           ; ( "argv"
+             , `List
+                 [ `String "checkout"
+                 ; `String "HEAD"
+                 ; `String "--"
+                 ; `String "config/deleted-one.txt"
+                 ; `String "test/fixtures/deleted-two.txt"
+                 ] )
+           ; "cwd", `String "repos/masc"
+           ])
+      ()
+  in
+  let json = Yojson.Safe.from_string raw in
+  Alcotest.(check bool) "recovery checkout succeeds" true
+    (json |> Json.member "ok" |> Json.to_bool);
+  Alcotest.(check bool) "write gate did not block recovery checkout" false
+    (String_util.contains_substring raw "write_operation_gated");
+  Alcotest.(check bool) "stale gate did not block recovery checkout" false
+    (String_util.contains_substring raw "sandbox_repo_stale");
+  Alcotest.(check bool) "first tracked file restored" true
+    (Sys.file_exists (Filename.concat repo_dir "config/deleted-one.txt"));
+  Alcotest.(check bool) "second tracked file restored" true
+    (Sys.file_exists (Filename.concat repo_dir "test/fixtures/deleted-two.txt"))
+
+let test_tool_execute_allows_preserved_direct_repo_git_reset_hard_head () =
+  with_eio_fs @@ fun () ->
+  let base_path, config, meta, _repo_dir =
+    setup_preserved_sandbox_repo ~keeper_name:"stale-direct-git-reset-head"
+  in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let raw =
+    Keeper_tool_command_runtime.handle_tool_execute
+      ~turn_sandbox_factory:None
+      ~exec_cache:None
+      ~config
+      ~meta
+      ~args:
+        (`Assoc
+           [ "executable", `String "git"
+           ; "argv", `List [ `String "reset"; `String "--hard"; `String "HEAD" ]
+           ; "cwd", `String "repos/masc"
+           ])
+      ()
+  in
+  let json = Yojson.Safe.from_string raw in
+  Alcotest.(check bool) "recovery reset succeeds" true
+    (json |> Json.member "ok" |> Json.to_bool);
+  Alcotest.(check bool) "write gate did not block recovery reset" false
+    (String_util.contains_substring raw "write_operation_gated");
+  Alcotest.(check bool) "stale gate did not block recovery reset" false
+    (String_util.contains_substring raw "sandbox_repo_stale")
+
+let test_tool_execute_allows_preserved_direct_repo_git_clean_df () =
+  with_eio_fs @@ fun () ->
+  let base_path, config, meta, repo_dir =
+    setup_preserved_sandbox_repo ~keeper_name:"stale-direct-git-clean-df"
+  in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let dirty_path = Filename.concat repo_dir "local-dirty.txt" in
+  Alcotest.(check bool) "dirty fixture exists before clean" true
+    (Sys.file_exists dirty_path);
+  let raw =
+    Keeper_tool_command_runtime.handle_tool_execute
+      ~turn_sandbox_factory:None
+      ~exec_cache:None
+      ~config
+      ~meta
+      ~args:
+        (`Assoc
+           [ "executable", `String "git"
+           ; "argv", `List [ `String "clean"; `String "-df" ]
+           ; "cwd", `String "repos/masc"
+           ])
+      ()
+  in
+  let json = Yojson.Safe.from_string raw in
+  Alcotest.(check bool) "recovery clean succeeds" true
+    (json |> Json.member "ok" |> Json.to_bool);
+  Alcotest.(check bool) "stale gate did not block recovery clean" false
+    (String_util.contains_substring raw "sandbox_repo_stale");
+  Alcotest.(check bool) "dirty fixture removed by clean" false
+    (Sys.file_exists dirty_path)
+
+let test_tool_execute_git_recovery_invalidates_repo_currency_cache () =
+  with_eio_fs @@ fun () ->
+  let base_path, config, meta, _repo_dir =
+    setup_preserved_sandbox_repo ~keeper_name:"stale-direct-git-clean-cache"
+  in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let run executable argv =
+    Keeper_tool_command_runtime.handle_tool_execute
+      ~turn_sandbox_factory:None
+      ~exec_cache:None
+      ~config
+      ~meta
+      ~args:
+        (`Assoc
+           [ "executable", `String executable
+           ; "argv", `List (List.map (fun arg -> `String arg) argv)
+           ; "cwd", `String "repos/masc"
+           ])
+      ()
+  in
+  let stale_raw = run "cat" [ "README.md" ] in
+  Alcotest.(check bool) "initial read populates stale cache" true
+    (String_util.contains_substring stale_raw "sandbox_repo_stale");
+  let clean_raw = run "git" [ "clean"; "-df" ] in
+  let clean_json = Yojson.Safe.from_string clean_raw in
+  Alcotest.(check bool) "recovery clean succeeds" true
+    (clean_json |> Json.member "ok" |> Json.to_bool);
+  let retry_raw = run "cat" [ "README.md" ] in
+  Alcotest.(check bool) "immediate retry is not stale-cached" false
+    (String_util.contains_substring retry_raw "sandbox_repo_stale");
+  let retry_json = Yojson.Safe.from_string retry_raw in
+  Alcotest.(check bool) "immediate retry succeeds" true
+    (retry_json |> Json.member "ok" |> Json.to_bool);
+  Alcotest.(check bool) "retry observes advanced repo" true
+    (retry_json
+     |> Json.member "output"
+     |> Json.to_string
+     |> fun output -> String_util.contains_substring output "v2")
+
+let test_tool_execute_readonly_blocks_worktree_git_recovery () =
+  with_eio_fs @@ fun () ->
+  let base_path, config, meta, repo_dir =
+    setup_preserved_sandbox_repo ~keeper_name:"worktree-git-recovery-block"
+  in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  ensure_dir (Filename.concat repo_dir ".worktrees");
+  git_ok ~cwd:repo_dir [ "worktree"; "add"; "-q"; "--detach"; ".worktrees/task"; "HEAD" ];
+  let raw =
+    Keeper_tool_command_runtime.handle_tool_execute
+      ~turn_sandbox_factory:None
+      ~exec_cache:None
+      ~config
+      ~meta
+      ~args:
+        (`Assoc
+           [ "executable", `String "git"
+           ; "argv", `List [ `String "clean"; `String "-df" ]
+           ; "cwd", `String "repos/masc/.worktrees/task"
+           ])
+      ()
+  in
+  Alcotest.(check (option string)) "worktree recovery is write-gated"
+    (Some "write_operation_gated")
+    (parse_error_field raw)
+
+let test_tool_execute_readonly_blocks_non_recovery_git_writes () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta =
+    { (make_local_meta "non-recovery-git-write") with tool_access = [] }
+  in
+  let playground = Filename.concat base_path (playground_path_of meta.name) in
+  let repo_dir = Filename.concat playground "repos/masc" in
+  ensure_dir repo_dir;
+  git_ok ~cwd:repo_dir [ "init"; "-q"; "--initial-branch=main" ];
+  let check argv =
+    let raw =
+      Keeper_tool_command_runtime.handle_tool_execute
+        ~turn_sandbox_factory:None
+        ~exec_cache:None
+        ~config
+        ~meta
+        ~args:
+          (`Assoc
+             [ "executable", `String "git"
+             ; "argv", `List (List.map (fun arg -> `String arg) argv)
+             ; "cwd", `String "repos/masc"
+             ])
+        ()
+    in
+    Alcotest.(check (option string)) "non-recovery git write is gated"
+      (Some "write_operation_gated")
+      (parse_error_field raw)
+  in
+  check [ "checkout"; "other-branch" ];
+  check [ "reset"; "--hard"; "HEAD~1" ]
 
 let test_tool_execute_elapsed_duration_preserves_positive_sub_ms () =
   let elapsed = Keeper_tool_command_runtime.For_testing.elapsed_duration_ms in
@@ -1269,7 +1504,11 @@ let test_tool_execute_typed_docker_falls_back_to_local_playground () =
   let base_path, config = make_config () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
   Keeper_registry.clear ();
-  let meta = make_docker_meta "typed-docker" in
+  let meta =
+    { (make_docker_meta "typed-docker") with
+      sandbox_image = Some "masc-test-missing-image:typed-fallback"
+    }
+  in
   let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   ensure_dir playground;
   let raw =
@@ -1761,6 +2000,30 @@ let () =
             "preserved direct repo root allows git status"
             `Quick
             test_tool_execute_allows_preserved_direct_repo_git_status
+        ; Alcotest.test_case
+            "preserved direct repo root allows git checkout HEAD restore"
+            `Quick
+            test_tool_execute_allows_preserved_direct_repo_git_checkout_head_restore
+        ; Alcotest.test_case
+            "preserved direct repo root allows git reset --hard HEAD"
+            `Quick
+            test_tool_execute_allows_preserved_direct_repo_git_reset_hard_head
+        ; Alcotest.test_case
+            "preserved direct repo root allows git clean -df"
+            `Quick
+            test_tool_execute_allows_preserved_direct_repo_git_clean_df
+        ; Alcotest.test_case
+            "git recovery invalidates stale currency cache"
+            `Quick
+            test_tool_execute_git_recovery_invalidates_repo_currency_cache
+        ; Alcotest.test_case
+            "readonly Execute blocks worktree git recovery"
+            `Quick
+            test_tool_execute_readonly_blocks_worktree_git_recovery
+        ; Alcotest.test_case
+            "readonly Execute blocks non-recovery git writes"
+            `Quick
+            test_tool_execute_readonly_blocks_non_recovery_git_writes
         ] )
     ; ( "edge"
       , [ Alcotest.test_case

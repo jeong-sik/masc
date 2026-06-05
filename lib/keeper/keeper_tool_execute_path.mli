@@ -27,14 +27,40 @@ val validate_repo_cwd_currency_ready :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   cwd:string ->
-  Masc_exec.Shell_ir.t ->
+  allow_stale_preserved_repo_context:bool ->
   (unit, string) result
-(** Reject non-diagnostic typed Execute commands from a direct sandbox
-    [repos/<repo>] cwd when the repo could not be advanced to
-    [origin/main]. Dirty, detached, task-branch, diverged, or unregistered
-    direct roots are preserved by the repo currency layer; this guard prevents
-    normal work from continuing against that stale root while still allowing
-    focused git diagnostics. Repo worktree cwd values are not gated here. *)
+(** Reject typed Execute commands from a preserved sandbox [repos/<repo>] root
+    or subpath when the repo could not be advanced to [origin/main]. Dirty,
+    detached, task-branch, diverged, or unregistered roots are preserved by the
+    repo currency layer; this guard prevents normal work from continuing against
+    that stale root. Repo worktree cwd values are not gated here. Command-shape
+    policy is decided by the caller through [allow_stale_preserved_repo_context]. *)
+
+type repo_cwd_context =
+  { repo_name : string
+  ; repo_root : string
+  ; path_root : string
+  ; is_direct_root : bool
+  }
+(** Path-only facts for a cwd inside a keeper sandbox repo. [path_root] is the
+    selected git toplevel expected for the cwd: either [repo_root] or a worktree
+    root. *)
+
+val repo_cwd_context :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  cwd:string ->
+  repo_cwd_context option
+(** Classify [cwd] as a keeper sandbox repo cwd. This reports path facts only;
+    callers own command-shape and write-gate policy. *)
+
+val invalidate_repo_currency_cache :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  repo_name:string ->
+  unit
+(** Clear the cached currency probe for [repo_name]. Callers decide when a
+    command is allowed to mutate repo currency. *)
 
 val execution_location_json :
   config:Workspace.config ->

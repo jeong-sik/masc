@@ -165,6 +165,54 @@ let git_output ~cwd args =
          (String.concat " " args)
          result.output)
 
+let test_deleted_tracked_files_restore_hint () =
+  let clone_path = temp_dir "masc-repo-readiness-status-hint" in
+  git_ok ~cwd:clone_path [ "init"; "-q"; "--initial-branch=main" ];
+  git_ok ~cwd:clone_path [ "config"; "user.email"; "test@example.com" ];
+  git_ok ~cwd:clone_path [ "config"; "user.name"; "Test" ];
+  mkdir_p (Filename.concat clone_path "config");
+  mkdir_p (Filename.concat clone_path "test/fixtures");
+  write_file (Filename.concat clone_path "config/deleted-one.txt") "tracked one\n";
+  write_file
+    (Filename.concat clone_path "test/fixtures/deleted-two.txt")
+    "tracked two\n";
+  git_ok
+    ~cwd:clone_path
+    [ "add"; "config/deleted-one.txt"; "test/fixtures/deleted-two.txt" ];
+  git_ok ~cwd:clone_path [ "commit"; "-q"; "-m"; "init" ];
+  Sys.remove (Filename.concat clone_path "config/deleted-one.txt");
+  Sys.remove (Filename.concat clone_path "test/fixtures/deleted-two.txt");
+  (match Masc.Playground_repo_readiness.deleted_tracked_files_restore_hint ~clone_path with
+   | Some hint ->
+     check bool "restore command surfaced" true
+       (String.equal
+          hint
+          "Dirty status only contains deleted tracked files: D config/deleted-one.txt; D \
+           test/fixtures/deleted-two.txt. Restore them with: git checkout HEAD -- \
+           config/deleted-one.txt test/fixtures/deleted-two.txt")
+   | None -> fail "expected deleted tracked files restore hint");
+  write_file (Filename.concat clone_path "untracked.txt") "untracked\n";
+  check (option string) "mixed dirty status has no restore hint" None
+    (Masc.Playground_repo_readiness.deleted_tracked_files_restore_hint ~clone_path)
+
+let test_deleted_tracked_files_restore_hint_uses_unquoted_porcelain_paths () =
+  let clone_path = temp_dir "masc-repo-readiness-status-hint-spaces" in
+  git_ok ~cwd:clone_path [ "init"; "-q"; "--initial-branch=main" ];
+  git_ok ~cwd:clone_path [ "config"; "user.email"; "test@example.com" ];
+  git_ok ~cwd:clone_path [ "config"; "user.name"; "Test" ];
+  write_file (Filename.concat clone_path "a b.txt") "tracked with space\n";
+  git_ok ~cwd:clone_path [ "add"; "a b.txt" ];
+  git_ok ~cwd:clone_path [ "commit"; "-q"; "-m"; "init" ];
+  Sys.remove (Filename.concat clone_path "a b.txt");
+  match Masc.Playground_repo_readiness.deleted_tracked_files_restore_hint ~clone_path with
+  | Some hint ->
+    check bool "restore command uses shell-quoted real path" true
+      (String.equal
+         hint
+         "Dirty status only contains deleted tracked files: D a b.txt. Restore them \
+          with: git checkout HEAD -- 'a b.txt'")
+  | None -> fail "expected deleted tracked file restore hint for path with spaces"
+
 let test_parent_git_checkout_does_not_count_as_clone () =
   let base_path = temp_dir "masc-repo-readiness" in
   git_ok ~cwd:base_path [ "init"; "-q"; "--initial-branch=main" ];
@@ -716,6 +764,13 @@ let () =
         test_case "invalid repo_name" `Quick test_invalid_repo_name;
         test_case "missing clone skips workspace discovery" `Quick
           test_missing_clone_skips_workspace_discovery;
+      ];
+      "status_hints",
+      [
+        test_case "deleted tracked files restore hint" `Quick
+          test_deleted_tracked_files_restore_hint;
+        test_case "deleted tracked file with spaces restore hint" `Quick
+          test_deleted_tracked_files_restore_hint_uses_unquoted_porcelain_paths;
       ];
       "ensure_worktree_ready",
       [

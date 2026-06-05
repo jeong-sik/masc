@@ -16,6 +16,7 @@
   test_exec_adaptive_timeout
   test_risk_classifier
   test_egress_policy
+  test_shell_ir_command_shape
   test_shell_ir_typed
   test_shell_ir_walkers_gen
   test_shell_ir_risk

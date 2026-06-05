@@ -53,13 +53,12 @@ Each is a *type annotation* on storage or a parameter. The actual `Oas.Agent.run
 rg -l "Masc_oas_bridge\." lib/keeper/ lib/server/ lib/dashboard/ lib/local/ 2>/dev/null
 ```
 
-Five files use `Masc_oas_bridge` directly:
-- `lib/keeper/keeper_persona_authoring.ml`
+Four files use `Masc_oas_bridge` directly:
 - `lib/dashboard/dashboard_operator_judge.ml`
 - `lib/dashboard/dashboard_governance_judge.ml`
 - `lib/server/server_openai_compat.{ml,mli}`
 
-This is the *intended* path: Layer C → `Masc_oas_bridge.run_with_caller` → Layer A. Five sites is fewer than expected for ~30 Layer C files; the remainder route through other Layer B modules (`Keeper_tools_oas`, `Oas_worker`, `Keeper_hooks_oas`). The *fan-in to Layer B is wide*, not a single throat.
+This is the *intended* path: Layer C → `Masc_oas_bridge.run_with_caller` → Layer A. Four sites is fewer than expected for ~30 Layer C files; the remainder route through other Layer B modules (`Keeper_tools_oas`, `Oas_worker`, `Keeper_hooks_oas`). The *fan-in to Layer B is wide*, not a single throat.
 
 ## 4. New module: `track2_sync_boundary` (PR #12102 MERGED)
 

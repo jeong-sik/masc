@@ -345,7 +345,6 @@ cleanup 트랙에 추가 가능.
 |------|------|
 | `lib/keeper/keeper_types_profile.ml:299, 473, 923` | `string list option` 타입 + default + ser/de |
 | `lib/keeper/keeper_meta_json_parse.ml:623-626` | TOML/JSON parse |
-| `lib/keeper/keeper_persona_authoring.ml:209, 544` | persona authoring path |
 | `lib/keeper/keeper_run_tools.ml:908` | `Option.value ~default:[] meta.work_discovery_sources` — runtime consumer |
 | `test/test_keeper_toml.ml:685, 712` | TOML round-trip 검증 |
 

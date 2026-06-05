@@ -25,10 +25,8 @@
 - `lib/keeper/keeper_identity.{ml,mli}`
 - `lib/workspace/workspace_identity.{ml,mli}`
 
-**Credential + allowlist (4 pairs)**:
+**Credential + allowlist (2 pairs)**:
 - `lib/keeper/credential_provider.{ml,mli}` — credential trait (RFC-0008)
-- `lib/keeper/keeper_persona_authoring.{ml,mli}`
-- `lib/keeper/keeper_persona_authoring_contract.{ml,mli}`
 - `lib/keeper/keeper_routine_allowlist.{ml,mli}`
 
 **Role (1 pair)**:
@@ -52,7 +50,6 @@ Phase 1 marks these as **candidates**, not certainties. Phase 2 will narrow per-
 
 Conservative candidates flagged for Phase 2 verification:
 - `auth_login.ml:refresh_bearer_token` — possibly inline rotation logic; Phase 2 will check whether a dedicated rotation module is needed
-- `keeper_persona_authoring_contract.ml` — "contract" suggests validation; Phase 2 will check property-test coverage
 - `auth_diagnostic.ml` — health check vs. live validation responsibilities may be conflated
 
 ## 3. Severity rationale

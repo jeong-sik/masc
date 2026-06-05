@@ -565,32 +565,32 @@ let run_turn
                  let actual_keeper_tool_names =
                    Keeper_agent_result.tool_names_of_calls (List.rev acc.tool_calls)
                  in
-                   let progress_keeper_tool_names =
-                     progress_keeper_tool_names_for_contract
-                       ~actual_keeper_tool_names
-                       ~tool_calls:acc.tool_calls
-                   in
-                   let usage = Keeper_context_runtime.usage_of_response result.response in
-                   let ctx_composition =
-                     build_ctx_composition_metrics
-                       ~system_prompt:turn_system_prompt
-                       ~dynamic_context
-                       ~memory_context
-                       ~temporal_context
-                       ~user_message
-                       ~history_messages
-                       ~actual_input_tokens:(Some usage.input_tokens)
-                   in
-                   let completion_contract_status ()
-                       : Keeper_execution_receipt.completion_contract_result =
-                     Contract_helpers.observed_completion_contract_status
-                       ~had_owned_active_task_at_turn_start
-                       ~actual_keeper_tool_names:progress_keeper_tool_names
-                   in
-                   let text_result =
-                     acc.receipt_completion_contract_result <- completion_contract_status ();
-                     Ok (`Provider_text text)
-                   in
+                 let progress_keeper_tool_names =
+                   progress_keeper_tool_names_for_contract
+                     ~actual_keeper_tool_names
+                     ~tool_calls:acc.tool_calls
+                 in
+                 let usage = Keeper_context_runtime.usage_of_response result.response in
+                 let ctx_composition =
+                   build_ctx_composition_metrics
+                     ~system_prompt:turn_system_prompt
+                     ~dynamic_context
+                     ~memory_context
+                     ~temporal_context
+                     ~user_message
+                     ~history_messages
+                     ~actual_input_tokens:(Some usage.input_tokens)
+                 in
+                 let completion_contract_status ()
+                     : Keeper_execution_receipt.completion_contract_result =
+                   Contract_helpers.observed_completion_contract_status
+                     ~had_owned_active_task_at_turn_start
+                     ~actual_keeper_tool_names:progress_keeper_tool_names
+                 in
+                 let text_result =
+                   acc.receipt_completion_contract_result <- completion_contract_status ();
+                   Ok (`Provider_text text)
+                 in
                    match text_result with
                    | Error e -> Error e
                    | Ok (`Provider_text text) ->

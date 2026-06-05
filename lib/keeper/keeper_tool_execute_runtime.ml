@@ -225,7 +225,8 @@ let typed_execute_response_cwd_json
       let container_cwd =
         Keeper_turn_sandbox_runtime.container_cwd_of_host runtime ~host_cwd:cwd
       in
-      Keeper_cwd_response.docker ~host_cwd:cwd ~container_cwd
+      Keeper_cwd_response.Sandboxed
+        { host_abs = cwd; container_abs = container_cwd }
       |> Keeper_cwd_response.to_yojson_response
     | None -> `String cwd
   else `String cwd

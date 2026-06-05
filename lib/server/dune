@@ -8,11 +8,8 @@
  (flags :standard -open Masc)
  (libraries
   masc
-  masc.auth
   masc.dashboard
   masc.fd_accountant
-  masc.prometheus
-  masc.runtime
   masc.masc_event_bus
   ;; RFC-0056 #20086 extracted Dashboard_tla_specs out of the masc mega-lib into
   ;; masc.dashboard_tla_specs; server_routes_http_routes_verification consumes it

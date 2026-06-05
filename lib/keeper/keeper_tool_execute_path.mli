@@ -15,6 +15,15 @@ val resolve_tool_write_cwd :
     resolution only: it never creates directories or changes repo/worktree
     state. *)
 
+val resolve_tool_readonly_execute_cwd :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  args:Yojson.Safe.t ->
+  (string, string) result
+(** Resolve typed Execute cwd for readonly profiles. This preserves Execute cwd
+    path semantics for explicit cwd values, but the omitted-cwd default computes
+    the keeper playground root without creating the sandbox bundle. *)
+
 type repo_path_context =
   { path_repo_name : string
   ; path_repo_root : string

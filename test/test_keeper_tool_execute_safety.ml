@@ -456,6 +456,22 @@ let parse_error_field raw =
   |> Json.member "error"
   |> Json.to_string_option
 
+let sandbox_bundle_paths ~base_path ~meta =
+  let playground =
+    Filename.concat base_path (playground_path_of meta.Keeper_types.name)
+    |> Masc.Keeper_alerting_path.strip_trailing_slashes
+  in
+  [ playground
+  ; Filename.concat playground "mind"
+  ; Filename.concat playground "repos"
+  ]
+
+let check_sandbox_bundle_absent ~base_path ~meta =
+  sandbox_bundle_paths ~base_path ~meta
+  |> List.iter (fun path ->
+    Alcotest.(check bool) ("sandbox bundle path absent: " ^ path) false
+      (Sys.file_exists path))
+
 let is_repo_or_task_state_path_block err =
   String_util.contains_substring err "sandbox_repo_not_ready"
   || String_util.contains_substring err "task_state_file_path_blocked"
@@ -777,13 +793,48 @@ let test_tool_execute_readonly_missing_cwd_does_not_create_directory () =
     if not (String_util.contains_substring err "cwd_not_directory") then
       Alcotest.failf "expected cwd_not_directory, got: %s" err;
     Alcotest.(check bool) "readonly preflight did not mkdir" false
-      (Sys.file_exists missing_cwd)
+      (Sys.file_exists missing_cwd);
+    check_sandbox_bundle_absent ~base_path:base ~meta
   | None -> Alcotest.fail ("expected missing cwd error json, got: " ^ raw)
 
-let test_tool_execute_blocks_preserved_direct_repo_git_show () =
+let test_tool_execute_readonly_default_cwd_does_not_create_sandbox_bundle () =
+  with_eio_fs @@ fun () ->
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  let config = Workspace.default_config base in
+  let meta = { (make_local_meta "readonly-default-cwd") with tool_access = [] } in
+  let raw =
+    Keeper_tool_command_runtime.handle_tool_execute
+      ~turn_sandbox_factory:None
+      ~exec_cache:None
+      ~config
+      ~meta
+      ~args:(`Assoc [ "executable", `String "ls"; "argv", `List [] ])
+      ()
+  in
+  match parse_error_field raw with
+  | Some err ->
+    if not (String_util.contains_substring err "cwd_not_directory") then
+      Alcotest.failf "expected cwd_not_directory, got: %s" err;
+    check_sandbox_bundle_absent ~base_path:base ~meta
+  | None -> Alcotest.fail ("expected default cwd error json, got: " ^ raw)
+
+let git_show_file ~cwd revspec =
+  match run_process ~cwd "git" [ "show"; revspec ] with
+  | Unix.WEXITED 0, stdout, _ -> stdout
+  | status, stdout, stderr ->
+    Alcotest.failf "git show failed: status=%s stdout=%s stderr=%s"
+      (Masc.Keeper_sandbox_exec_failure.status_label status)
+      stdout
+      stderr
+
+let test_tool_execute_readonly_blocks_preserved_direct_repo_git_show_without_fetch () =
   with_eio_fs @@ fun () ->
   let base_path, config, meta, _repo_dir =
     setup_preserved_sandbox_repo ~keeper_name:"stale-direct-git-show"
+  in
+  let base_path, config, meta, repo_dir =
+    base_path, config, meta, _repo_dir
   in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
   Keeper_registry.clear ();
@@ -803,14 +854,14 @@ let test_tool_execute_blocks_preserved_direct_repo_git_show () =
   in
   match parse_error_field raw with
   | Some err ->
-    Alcotest.(check bool) "stale direct repo root is rejected" true
-      (String_util.contains_substring err "sandbox_repo_stale");
-    Alcotest.(check bool) "preserved reason is surfaced" true
-      (String_util.contains_substring err "uncommitted changes");
+    Alcotest.(check bool) "readonly direct repo root is rejected without sync" true
+      (String_util.contains_substring err "sandbox_repo_currency_sync_disabled");
     Alcotest.(check bool) "worktree remedy is surfaced" true
       (String_util.contains_substring err "repos/masc/.worktrees/<task>");
     Alcotest.(check bool) "git show did not execute" false
-      (String_util.contains_substring raw "v2")
+      (String_util.contains_substring raw "v2");
+    Alcotest.(check string) "origin/main was not fetched" "v1\n"
+      (git_show_file ~cwd:repo_dir "origin/main:README.md")
   | None -> Alcotest.fail ("expected stale repo error json, got: " ^ raw)
 
 let test_tool_execute_allows_preserved_direct_repo_git_status () =

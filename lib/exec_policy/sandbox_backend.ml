@@ -6,7 +6,8 @@ type exec_result = {
   exit_code : int;
 }
 
-let run (Safe_IR ir : safe verified_ir) (_env : Eio_unix.Stdenv.base) : exec_result =
+let run (verified : safe verified_ir) (_env : Eio_unix.Stdenv.base) : exec_result =
+  let ir = shell_ir verified in
   match ir with
   | Masc_exec.Shell_ir.Simple simple ->
       let bin = Masc_exec.Exec_program.to_string simple.bin in

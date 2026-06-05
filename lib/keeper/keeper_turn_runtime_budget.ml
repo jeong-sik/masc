@@ -208,13 +208,16 @@ let reclassify_provider_timeout_for_attempt
   match err, provider_timeout_budget with
   | Agent_sdk.Error.Api (Timeout { message }), Some budget
     when EC.is_structural_oas_timeout_message message ->
+      let estimated_remaining_after_timeout =
+        Float.max 0.0 (budget.remaining_turn_budget_sec -. budget.effective_timeout_sec)
+      in
       Keeper_turn_driver.sdk_error_of_masc_internal_error
         (Keeper_turn_driver.Provider_timeout
            { budget_sec = budget.effective_timeout_sec
            ; keeper_turn_timeout_sec = budget.keeper_turn_timeout_sec
            ; estimated_input_tokens = budget.estimated_input_tokens
            ; source = budget.source
-           ; remaining_turn_budget_sec = Some budget.remaining_turn_budget_sec
+           ; remaining_turn_budget_sec = Some estimated_remaining_after_timeout
            ; min_required_sec = min_provider_timeout_budget_sec
            ; phase = "runtime_attempt_watchdog"
            })

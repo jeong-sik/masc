@@ -1,5 +1,5 @@
-// MASC Dashboard — Prometheus Metrics Surface
-// Fetches /metrics (Prometheus text format) and renders as categorized tables.
+// MASC Dashboard — OTel Metrics Surface
+// Fetches /metrics (OTel text format) and renders as categorized tables.
 
 import { html } from 'htm/preact'
 import { useSignal } from '@preact/signals'
@@ -9,10 +9,10 @@ import { EmptyState } from './common/feedback-state'
 import { ErrorState, LoadingState } from './common/feedback-state'
 import { TextInput } from './common/input'
 import { fetchWithTimeout, authHeaders } from '../api/core'
-import { PROMETHEUS_FETCH_TIMEOUT_MS } from '../config/constants'
+import { METRICS_FETCH_TIMEOUT_MS } from '../config/constants'
 import { navigate } from '../router'
 
-// --- Prometheus text format parser ---
+// --- OTel text format parser ---
 
 export interface ParsedMetric {
   name: string
@@ -27,7 +27,7 @@ interface MetricSample {
   value: number
 }
 
-export function parsePrometheusText(text: string): ParsedMetric[] {
+export function parseOpenMetricsText(text: string): ParsedMetric[] {
   const metrics: ParsedMetric[] = []
   const lines = text.split('\n')
   let current: ParsedMetric | null = null
@@ -192,11 +192,11 @@ function labelPills(labels: Record<string, string>): ReturnType<typeof html> | n
 
 // --- Fetch ---
 
-async function fetchPrometheusText(signal?: AbortSignal): Promise<string> {
+async function fetchMetricsText(signal?: AbortSignal): Promise<string> {
   const res = await fetchWithTimeout(
     '/metrics',
     { headers: authHeaders(), signal },
-    PROMETHEUS_FETCH_TIMEOUT_MS,
+    METRICS_FETCH_TIMEOUT_MS,
   )
   if (!res.ok) throw new Error(`/metrics returned ${res.status}`)
   return res.text()
@@ -216,7 +216,7 @@ function metricMatchesSearch(m: ParsedMetric, q: string): boolean {
 
 // --- Component ---
 
-export function PrometheusMetrics() {
+export function OtelMetrics() {
   const loading = useSignal(true)
   const error = useSignal<string | null>(null)
   const metrics = useSignal<ParsedMetric[]>([])
@@ -228,8 +228,8 @@ export function PrometheusMetrics() {
     loading.value = true
     error.value = null
     try {
-      const text = await fetchPrometheusText()
-      metrics.value = parsePrometheusText(text)
+      const text = await fetchMetricsText()
+      metrics.value = parseOpenMetricsText(text)
       lastUpdated.value = new Date().toLocaleTimeString('ko-KR')
     } catch (e) {
       error.value = e instanceof Error ? e.message : String(e)
@@ -241,7 +241,7 @@ export function PrometheusMetrics() {
   useEffect(() => { void refresh() }, [])
 
   if (loading.value && metrics.value.length === 0) {
-    return html`<${LoadingState} label="Prometheus /metrics" />`
+    return html`<${LoadingState} label="OTel /metrics" />`
   }
 
   if (error.value && metrics.value.length === 0) {
@@ -294,7 +294,7 @@ export function PrometheusMetrics() {
     <div class="flex flex-col gap-4">
       <div class="flex items-center justify-between">
         <div>
-          <h2 class="text-lg font-semibold text-[var(--text-heading)]">Prometheus 메트릭</h2>
+          <h2 class="text-lg font-semibold text-[var(--text-heading)]">OTel 메트릭</h2>
           <p class="text-xs text-[var(--color-fg-muted)]">
             /metrics endpoint (${totalMetrics}개 메트릭, ${totalSamples}개 샘플, ${nonZeroSamples}개 활성)
           </p>
@@ -370,7 +370,7 @@ export function PrometheusMetrics() {
 
             ${expanded && html`
               <div class="mt-3 overflow-x-auto">
-                <table class="w-full text-xs" aria-label="Prometheus 메트릭 시계열">
+                <table class="w-full text-xs" aria-label="OTel 메트릭 시계열">
                   <thead>
                     <tr class="border-b border-[var(--color-border-default)] text-[var(--color-fg-muted)]">
                       <th scope="col" class="pb-2 text-left font-normal">메트릭</th>

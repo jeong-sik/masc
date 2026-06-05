@@ -20,9 +20,9 @@ describe('isTelemetryView', () => {
   })
 
   it('returns false for raw / verification advanced views', () => {
-    // prometheus and verification live next to telemetry on the Advanced
+    // metrics and verification live next to telemetry on the Advanced
     // chip strip but are NOT routed through TelemetryPanel.
-    expect(isTelemetryView('prometheus')).toBe(false)
+    expect(isTelemetryView('metrics')).toBe(false)
     expect(isTelemetryView('verification')).toBe(false)
   })
 

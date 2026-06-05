@@ -112,7 +112,7 @@ export function escapeRegExp(value: string): string {
  * `components/ide/interject-store`, `components/journey-panel`,
  * `components/keeper-chat-panel`, `components/keeper-reactivity-monitor`,
  * `components/keeper-spawn/keeper-spawn-state`,
- * `components/prometheus-metrics`, `components/task-manage/task-manage-state`,
+ * `components/otel-metrics`, `components/task-manage/task-manage-state`,
  * `components/telemetry-unified`,
  * `components/tool-executor/tool-executor-state`,
  * `components/tool-executor/tool-result-display`,

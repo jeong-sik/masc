@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { KeeperChatStreamEvent } from '../api/keeper'
+import type { ChatMessage } from '../keeper-chat-store'
 import {
   filterChatMessages,
   isKeeperTextContentEvent,
   normalizeKeeperChatErrorValue,
-  type ChatMessage,
 } from './keeper-chat-panel'
 
 describe('isKeeperTextContentEvent', () => {

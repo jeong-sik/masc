@@ -14,23 +14,10 @@
  keeper_event_bus_drain_site
  sse_jsonrpc_filter
  keeper_tool_call_log_context
-
- board_metric_hooks_adapter
- workspace_metric_hooks
-
- keeper_types_profile_persona keeper_types_profile_persona_defaults
- keeper_types_profile_oas_env
- keeper_types_profile_defaults
- keeper_types_profile
- keeper_meta_tool_access
- keeper_meta_contract
- keeper_personality_io
- keeper_meta_json_parse
- keeper_meta_json
- keeper_types_support
- keeper_meta_store
-
-
+ board_metric_hooks_adapter workspace_metric_hooks
+ keeper_types_profile_persona keeper_types_profile_persona_defaults keeper_types_profile_oas_env
+ keeper_types_profile_defaults keeper_types_profile keeper_meta_tool_access keeper_meta_contract
+ keeper_personality_io keeper_meta_json_parse keeper_meta_json keeper_types_support keeper_meta_store
  mcp_server_eio_tool_timeout
   keeper_tool_descriptor keeper_tool_descriptor_resolution keeper_tool_runtime keeper_tool_registry
   keeper_tool_resolution
@@ -517,23 +504,14 @@
    masc_turn
    ;; Agent token-ledger domain (extracted leaf — earn/spend/balance, Board-callable)
    masc_economy
-   ;; Tool dispatch substrate (extracted lib — PR-S3, RFC-0056 LANE 2).
-   ;; tool_dispatch / tool_name / tool_catalog / tool_registry / tool_token /
-   ;; dispatch_outcome / tool_catalog_inference. The compiler enforces
-   ;; Tool⊥Keeper/Runtime/Goal/Task/Board: masc_tool_dispatch's (libraries)
-   ;; admits only neutral leaves. Telemetry (Tool_telemetry.with_span) and
-   ;; warm-up stats (Telemetry_eio) are injected at the composition root.
-   ;; (wrapped false) keeps bare Tool_dispatch.X / Tool_catalog.X refs working.
+   ;; Tool dispatch substrate. The compiler enforces Tool⊥Keeper/Runtime/Goal/Task/Board
+   ;; via masc_tool_dispatch's neutral-only (libraries).
    masc.masc_tool_dispatch
-   ;; RFC-0056 Phase 2 / LANE 6 — pure tool surface leaf, above the dispatch
-   ;; substrate. (libraries) admits no keeper/runtime/domain/server module, so a
-   ;; re-coupling is a dune cycle. Pure schema/vocab/policy, zero mega-outbound.
+   ;; Pure tool surface leaf above the dispatch substrate.
    masc.masc_tool_surface
-   ;; RFC-0217 S2 — OTel metric bridge leaf (Otel_metric_store_core snapshot -> OTLP
-   ;; observable). Otel_metric_store depends on this; the leaf has no masc dep.
+   ;; OTel metric bridge leaf (Otel_metric_store_core snapshot -> OTLP observable).
    masc.otel_metrics
-   ;; Thompson Sampling agent selection (extracted leaf — Health/Otel_metric_store
-   ;; edges inverted to callbacks; Board-callable record_vote without mega-lib cycle)
+   ;; Thompson Sampling leaf; health/Otel_metric_store edges are callbacks.
    masc_thompson
    ;; Environment configuration (extracted sub-library)
    masc.config

@@ -4,11 +4,11 @@
 // Implements five data views:
 //   1. Health Grid     — compact grid: phase, pause status, last activity
 //   2. Lifecycle       — transition timeline (delegates to KeeperPhaseTimeline)
-//   3. Auto-Pause      — keepers in Paused phase + Prometheus pause counters
+//   3. Auto-Pause      — keepers in Paused phase + OTel pause counters
 //   4. Proactive       — proactive turn skip reasons from /metrics
 //   5. Stale           — stale termination class breakdown from /metrics
 //
-// All Prometheus data is fetched lazily from the existing /metrics endpoint;
+// All OTel data is fetched lazily from the existing /metrics endpoint;
 // there are no new backend changes required.
 
 import { html } from 'htm/preact'
@@ -20,10 +20,10 @@ import { KeeperPhaseBadge } from './keeper-phase-indicator'
 import { KeeperPhaseTimeline, refreshKeeperPhaseTimeline } from './keeper-phase-strip'
 import { KeeperLifecycleTimeline, refreshKeeperLifecycleTimeline } from './keeper-lifecycle-timeline'
 import { TurnBudgetGaugePanel } from './turn-budget-gauge'
-import { parsePrometheusText, type ParsedMetric } from './prometheus-metrics'
+import { parseOpenMetricsText, type ParsedMetric } from './otel-metrics'
 import { isKeeperCrashed, isKeeperPaused } from '../lib/keeper-predicates'
 import { fetchWithTimeout, authHeaders } from '../api/core'
-import { PROMETHEUS_FETCH_TIMEOUT_MS } from '../config/constants'
+import { METRICS_FETCH_TIMEOUT_MS } from '../config/constants'
 import { TimeAgo } from './common/time-ago'
 import { LoadingState, ErrorRecoverable } from './common/feedback-state'
 import { EmptyState } from './common/feedback-state'
@@ -56,7 +56,7 @@ export interface BatchTerminationRow {
 
 // ── Helper functions ───────────────────────────────────────────────────────
 
-/** Extract per-keeper stop/pause summaries from parsed Prometheus metrics. */
+/** Extract per-keeper stop/pause summaries from parsed OTel metrics. */
 export function extractKeeperStopSummaries(
   metrics: ParsedMetric[],
 ): KeeperStopSummary[] {
@@ -167,10 +167,10 @@ export function extractBatchTerminations(
   return total > 0 ? [{ batch: 'fleet', count: total }] : []
 }
 
-// ── Prometheus fetch ───────────────────────────────────────────────────────
+// ── OTel fetch ───────────────────────────────────────────────────────
 
 async function fetchMetricsText(): Promise<string> {
-  const res = await fetchWithTimeout('/metrics', { headers: authHeaders() }, PROMETHEUS_FETCH_TIMEOUT_MS)
+  const res = await fetchWithTimeout('/metrics', { headers: authHeaders() }, METRICS_FETCH_TIMEOUT_MS)
   if (!res.ok) throw new Error(`/metrics returned ${res.status}`)
   return res.text()
 }
@@ -266,7 +266,7 @@ function HealthGrid({ allKeepers }: { allKeepers: Keeper[] }) {
   `
 }
 
-/** Auto-Pause panel — keepers in paused phase + Prometheus pause event counts. */
+/** Auto-Pause panel — keepers in paused phase + OTel pause event counts. */
 function AutoPausePanel({
   allKeepers,
   summaries,
@@ -341,7 +341,7 @@ function AutoPausePanel({
       ${summaries.some(s => s.storm_pauses > 0 || s.provider_timeout_loop_pauses > 0) ? html`
         <div>
           <div class="mb-2 text-2xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">
-            자동 일시정지 이력 (Prometheus)
+            자동 일시정지 이력 (OTel)
           </div>
           <div class="overflow-x-auto">
             <table class="w-full text-xs" aria-label="자동 일시정지 이력">
@@ -591,7 +591,7 @@ export function KeeperReactivityMonitor({ defaultView }: { defaultView?: Reactiv
     try {
       const text = await fetchMetricsText()
       if (gen !== loadGen.current) return  // a newer request superseded this one
-      parsedMetrics.value = parsePrometheusText(text)
+      parsedMetrics.value = parseOpenMetricsText(text)
       metricsUpdatedAt.value = new Date().toLocaleTimeString('ko-KR')
     } catch (e) {
       if (gen !== loadGen.current) return  // stale error — discard
@@ -651,12 +651,12 @@ export function KeeperReactivityMonitor({ defaultView }: { defaultView?: Reactiv
 
       ${metricsError.value && isNonLifecycle ? html`
         <${ErrorRecoverable}
-          title="Prometheus 메트릭을 불러오지 못했습니다"
+          title="OTel 메트릭을 불러오지 못했습니다"
           detail=${metricsError.value}
           onRetry=${() => { void loadMetrics() }}
         />
       ` : metricsLoading.value && parsedMetrics.value.length === 0 && isNonLifecycle ? html`
-        <${LoadingState}>Prometheus 메트릭 불러오는 중...<//>
+        <${LoadingState}>OTel 메트릭 불러오는 중...<//>
       ` : html`
         <div>
           ${activeView.value === 'health'

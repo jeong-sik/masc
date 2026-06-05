@@ -1565,7 +1565,7 @@ describe('fetchKeeperConfig', () => {
 
   it('preserves terminal runtime blocker classes through config fetch and display labeling', async () => {
     const cases = [
-      ['no_tool_capable_provider', '도구 실행 런타임 없음'],
+      ['runtime_exhausted', '런타임 후보 소진'],
       ['provider_runtime_error', '런타임 호출 오류'],
       ['tool_route_recoverable_failure', '도구 라우팅 복구 가능 실패'],
       ['fiber_unresolved', 'Fiber 미해결'],

@@ -85,8 +85,8 @@ export const TRUNCATE_DEFAULT = 260
 // --- TLA+ verification panel poll interval ---
 export const TLA_POLL_INTERVAL_MS = 60_000
 
-// --- Prometheus /metrics fetch timeout ---
-export const PROMETHEUS_FETCH_TIMEOUT_MS = 10_000
+// --- OTel /metrics fetch timeout ---
+export const METRICS_FETCH_TIMEOUT_MS = 10_000
 
 // --- Default query window (minutes) ---
 export const DEFAULT_WINDOW_MINUTES_24H = 1440

@@ -423,7 +423,6 @@ export const KEEPER_RUNTIME_BLOCKER_CLASSES = [
   'turn_livelock_blocked',
   'completion_contract_violation',
   'runtime_exhausted',
-  'no_tool_capable_provider',
   'provider_runtime_error',
   'tool_route_recoverable_failure',
   'fiber_unresolved',

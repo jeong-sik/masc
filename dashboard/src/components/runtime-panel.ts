@@ -1,17 +1,17 @@
 // RuntimePanel — Monitor "Runtime" lane.
-// Renders OasHealthChip / RuntimeMonitor / PrometheusMetrics /
+// Renders OasHealthChip / RuntimeMonitor / OtelMetrics /
 // VerificationSpecsPanel inline, and delegates telemetry views to
 // TelemetryPanel (cost / audit / stress).
 //
 // Progressive-disclosure default view (density reduction, 2026-04):
 //   Signal layer     — OasHealthChip always expanded (summary StatCells)
 //   Diagnostic layer — Runtime lanes via CollapsibleSection (closed)
-//   Raw layer        — Prometheus metrics, Formal specs via CollapsibleSection (closed)
+//   Raw layer        — OTel metrics, Formal specs via CollapsibleSection (closed)
 // NN/g progressive disclosure: respect working-memory limits, defer detail.
 //
 // Explicit drill-down via FilterChips, split into two strips (PR #17014):
 //   Primary strip   — default · providers · inspector
-//   Advanced strip  — cost · audit · stress · prometheus · verification
+//   Advanced strip  — cost · audit · stress · metrics · verification
 //                     (the first three are spread from TELEMETRY_VIEW_CHIPS,
 //                      owned by telemetry-panel.ts; PR #17044 / #17052)
 //
@@ -20,7 +20,7 @@
 //   providers    — OAS health chip + runtime monitor only
 //   inspector    — runtime strategy trace / lane health drill-down
 //   cost / audit / stress — TelemetryPanel → CostDashboard
-//   prometheus   — raw Prometheus metrics only
+//   metrics   — raw OTel metrics only
 //   verification — formal specs only
 // Pattern: mirrors fleet-health-panel.ts (unidirectional flow via URL).
 
@@ -31,7 +31,7 @@ import { FilterChips } from './common/filter-chips'
 import { CollapsibleSection } from './common/collapsible'
 import { OasHealthChip } from './oas-health-chip'
 import { RuntimeMonitor } from './runtime-monitor'
-import { PrometheusMetrics } from './prometheus-metrics'
+import { OtelMetrics } from './otel-metrics'
 import { VerificationSpecsPanel } from './verification-specs-panel'
 import { TelemetryPanel, isTelemetryView, TELEMETRY_VIEW_CHIPS } from './telemetry-panel'
 import { RouteLink } from './common/route-link'
@@ -42,7 +42,7 @@ type RuntimeView =
   | 'cost'
   | 'audit'
   | 'stress'
-  | 'prometheus'
+  | 'metrics'
   | 'verification'
 
 const RUNTIME_VIEWS: RuntimeView[] = [
@@ -51,7 +51,7 @@ const RUNTIME_VIEWS: RuntimeView[] = [
   'cost',
   'audit',
   'stress',
-  'prometheus',
+  'metrics',
   'verification',
 ]
 
@@ -76,11 +76,11 @@ const PRIMARY_VIEW_CHIPS: Array<{ key: RuntimeView; label: string }> = [
 // Advanced chips are infra/billing telemetry plus the raw / formal layers.
 // The first three chips (cost / audit / stress) are owned by
 // telemetry-panel.ts — both their labels and their dispatch live there.
-// The remaining two (prometheus / verification) stay inline because
+// The remaining two (metrics / verification) stay inline because
 // runtime-panel still renders them directly.
 const ADVANCED_VIEW_CHIPS: Array<{ key: RuntimeView; label: string }> = [
   ...TELEMETRY_VIEW_CHIPS,
-  { key: 'prometheus', label: '메트릭' },
+  { key: 'metrics', label: '메트릭' },
   { key: 'verification', label: '형식검증' },
 ]
 
@@ -167,8 +167,8 @@ export function RuntimePanel() {
           `
         : isTelemetryView(view)
           ? html`<${TelemetryPanel} view=${view} />`
-        : view === 'prometheus'
-          ? html`<${PrometheusMetrics} />`
+        : view === 'metrics'
+          ? html`<${OtelMetrics} />`
         : view === 'verification'
           ? html`<${VerificationSpecsPanel} />`
         : html`
@@ -177,8 +177,8 @@ export function RuntimePanel() {
             <${CollapsibleSection} id="runtime-details-providers" title="런타임">
               <${RuntimeMonitor} />
             <//>
-            <${CollapsibleSection} id="runtime-details-prometheus" title="메트릭">
-              <${PrometheusMetrics} />
+            <${CollapsibleSection} id="runtime-details-metrics" title="메트릭">
+              <${OtelMetrics} />
             <//>
             <${CollapsibleSection} id="runtime-details-verification" title="형식검증">
               <${VerificationSpecsPanel} />

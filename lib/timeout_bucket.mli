@@ -1,7 +1,7 @@
-(** Timeout_bucket — closed sum for Prometheus [timeout_bucket] label.
+(** Timeout_bucket — closed sum for Otel_metric_store [timeout_bucket] label.
 
     Continuous numeric labels (e.g. raw [Printf.sprintf "%.0f" timeout_sec])
-    pollute Prometheus cardinality because every distinct float value
+    pollute Otel_metric_store cardinality because every distinct float value
     becomes a new series.  Bucketing into 5 closed bands keeps the metric
     bounded while preserving operator-relevant granularity (sub-second
     vs short / medium / long / very-long budgets).

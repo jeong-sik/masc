@@ -247,7 +247,7 @@ let add_routes ~sw ~clock router =
                  (`Assoc [ ("ok", `Bool false); ("error", `String message) ])
                  reqd)
        ) request reqd)
-  (* RFC-0049 — surface/section open counters. Aggregate Prometheus
+  (* RFC-0049 — surface/section open counters. Aggregate Otel_metric_store
      counters only; the request body is discarded after increment. *)
   |> Http.Router.post "/api/v1/dashboard/nav-event" (fun request reqd ->
        with_public_read (fun _state req reqd ->
@@ -859,6 +859,18 @@ let add_routes ~sw ~clock router =
                  (keeper_chat_stream_error_json message)
          )
        ) request reqd)
+
+  |> Http.Router.prefix_get "/api/v1/keepers/chat/requests/" (fun request reqd ->
+       with_tool_auth ~tool_name:"masc_keeper_msg_result"
+         (fun state _req reqd ->
+           handle_keeper_chat_request_result state request reqd)
+         request reqd)
+
+  |> Http.Router.prefix_post "/api/v1/keepers/chat/requests/" (fun request reqd ->
+       with_tool_auth ~tool_name:"masc_keeper_msg_cancel"
+         (fun state _req reqd ->
+           handle_keeper_chat_request_cancel state request reqd)
+         request reqd)
 
   (* Keeper GET sub-routes: /config, /chat/history, /trajectory *)
   |> Http.Router.prefix_get "/api/v1/keepers/" (fun request reqd ->

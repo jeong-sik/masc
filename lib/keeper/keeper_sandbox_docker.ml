@@ -382,7 +382,7 @@ let sandbox_error ~(config : Workspace.config) ~(meta : keeper_meta) ?details me
 ;;
 
 (** Shared by [run_docker_bash] and [run_docker_shell_command_with_status_internal]:
-    parse cmd → resolve cwd → validate paths.  Returns [Ok (cwd, cmd_stages)]
+    parse cmd → resolve cwd → validate paths.  Returns [Ok (cwd, cmd_ir)]
     when every gate passes.
 
     [validate_command_paths] toggles the host-side path validation gate
@@ -396,14 +396,13 @@ let validate_docker_dispatch_context
       ~(cmd : string)
       ()
   =
-  let cmd_stages =
-    match Keeper_tool_execute_command_parse.parse_cmd_to_ir_opt cmd with
-    | Some ir -> Keeper_tool_execute_command_semantics.effective_stages_of_ir ir
-    | None -> []
-  in
+  let cmd_ir = Keeper_tool_execute_command_parse.parse_cmd_to_ir_opt cmd in
   let cwd, sandbox_root_git_blocker =
-    Keeper_tool_execute_command_semantics.resolve_sandbox_root_git_cwd_of_stages
-      ~config ~meta ~cwd ~cmd cmd_stages
+    match cmd_ir with
+    | Some ir ->
+      Keeper_tool_execute_command_semantics.resolve_sandbox_root_git_cwd
+        ~config ~meta ~cwd ~cmd ir
+    | None -> cwd, None
   in
   match sandbox_root_git_blocker with
   | Some message -> Error message
@@ -426,7 +425,7 @@ let validate_docker_dispatch_context
     in
     match path_validation with
     | Error err -> Error (Printf.sprintf "%s [blocked_cmd=%s]" err cmd)
-    | Ok () -> Ok (cwd, cmd_stages)
+    | Ok () -> Ok (cwd, cmd_ir)
 ;;
 
 let run_docker_shell_command_with_status_internal
@@ -458,7 +457,7 @@ let run_docker_shell_command_with_status_internal
           ()
       with
       | Error msg -> sandbox_error msg
-      | Ok (cwd, cmd_stages) ->
+      | Ok (cwd, cmd_ir) ->
       (match fd_admission_error ~config with
        | Some err -> sandbox_error err
        | None ->
@@ -477,10 +476,7 @@ let run_docker_shell_command_with_status_internal
         (* #10855: surface gh syntax misuse before docker exec so the LLM
          sees a corrected-form hint in the same turn rather than gh's raw
          "unknown flag: --repo" error after the round-trip. *)
-           (match
-              Keeper_tool_execute_command_semantics.misuse_error_of_stages
-                cmd_stages
-            with
+           (match Option.bind cmd_ir Keeper_tool_execute_command_semantics.misuse_error with
             | Some msg -> sandbox_error msg
             | None ->
               let container_name = keeper_sandbox_container_name meta in
@@ -683,9 +679,11 @@ let docker_bash_response ~ok ~network_label ~status ~output
     shared by container-backed bash paths. *)
 let docker_result_to_bash_response ~config ~meta result =
   let cwd_response =
-    Keeper_cwd_response.docker
+    Keeper_cwd_response.of_sandbox
+      ~sandbox:(Keeper_sandbox.of_meta ~config ~meta)
       ~host_cwd:result.cwd
-      ~container_cwd:(docker_private_workspace_cwd ~config ~meta result.cwd)
+      ~container_cwd_for_docker:
+        (docker_private_workspace_cwd ~config ~meta result.cwd)
   in
   docker_bash_response
     ~ok:result.semantic_ok
@@ -737,7 +735,7 @@ let run_docker_bash
     | Some runtime, Network_none ->
       (match validate_docker_dispatch_context ~config ~meta ~cwd ~cmd () with
        | Error message -> sandbox_error_json message
-       | Ok (cwd, cmd_stages) ->
+       | Ok (cwd, _cmd_ir) ->
          (match
             Keeper_turn_sandbox_runtime.run_bash_with_status
               runtime
@@ -764,9 +762,10 @@ let run_docker_bash
                 ~output:out
             else Keeper_registry.clear_error ~base_path:config.base_path meta.name;
             let cwd_response =
-              Keeper_cwd_response.docker
+              Keeper_cwd_response.of_sandbox
+                ~sandbox:(Keeper_sandbox.of_meta ~config ~meta)
                 ~host_cwd:cwd
-                ~container_cwd:
+                ~container_cwd_for_docker:
                   (Keeper_turn_sandbox_runtime.container_cwd_of_host
                      runtime
                      ~host_cwd:cwd)
@@ -782,7 +781,7 @@ let run_docker_bash
     | _ ->
       (match turn_sandbox_runtime with
        | Some _ ->
-         Prometheus.inc_counter
+         Otel_metric_store.inc_counter
            Keeper_metrics.(to_string DockerRuntimeDiscarded)
            ~labels:[ "keeper", meta.name; "reason", "network_mode_mismatch" ]
            ()

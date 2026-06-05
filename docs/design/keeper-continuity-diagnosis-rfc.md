@@ -132,7 +132,7 @@ Phase 1 결과에 따라 결정. 미리 설계하지 않는다.
 ### 수정 범위
 
 - `set_workspace`/`join` 시 해당 workspace에서 `cleanup_zombies` 1회 호출
-  - 구현 위치: `tool_inline_dispatch_workspace.ml:185` (set_workspace), `:226` (join)
+  - 구현 위치: `mcp_tool_runtime_workspace.ml:185` (set_workspace), `:226` (join)
   - **주의**: `set_workspace` 핸들러는 중간에 `state.Mcp_server.workspace_config`를 교체. `cleanup_zombies` 호출은 **새로 resolve된 config**로. 교체 전 `ctx.config`로 호출하면 이전 workspace에서 GC 실행.
 - multi-workspace gap 증명 필요: gap이 없으면 "set_workspace 시 1회 cleanup" 연결만으로 종결.
 

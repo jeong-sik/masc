@@ -9,7 +9,7 @@ module Json = Yojson.Safe.Util
 module Keeper_tool_filesystem_runtime = Masc.Keeper_tool_filesystem_runtime
 module Keeper_registry = Masc.Keeper_registry
 module Keeper_sandbox = Masc.Keeper_sandbox
-module Keeper_types = Masc.Keeper_types
+module Keeper_types = Keeper_types
 
 let temp_dir () =
   let d = Filename.temp_file "tool_edit_file_containment_" "" in

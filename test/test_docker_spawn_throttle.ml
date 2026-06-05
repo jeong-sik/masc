@@ -5,8 +5,8 @@
     - Layer B: fd_pressure trip degrades effective concurrency to 1 *)
 
 module DST = Masc.Docker_spawn_throttle
-module FA = Fd_accountant
-module FD = Masc.Keeper_fd_pressure
+module FA = Masc.Fd_accountant
+module FD = Keeper_fd_pressure
 
 let with_eio f =
   Eio_main.run (fun env -> ignore env; f ())

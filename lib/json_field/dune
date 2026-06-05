@@ -1,7 +1,7 @@
 (include_subdirs no)
 
 (library
- (name masc_json_field)
+ (name json_field)
  (public_name masc.json_field)
- (wrapped true)
+ (wrapped false)
  (libraries yojson masc.masc_log))

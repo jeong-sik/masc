@@ -255,7 +255,7 @@ let latest_metrics_json = Keeper_status_detail_observability.latest_metrics_json
 let model_observability_json = Keeper_status_detail_observability.model_observability_json
 
 (* TEL-OK: status handler — telemetry surfaces via the cache layer
-   ([_cache] mutex-protected reads/writes) and Prometheus counters in
+   ([_cache] mutex-protected reads/writes) and Otel_metric_store counters in
    the downstream [Keeper_status_runtime]/[Keeper_status_bridge] calls. *)
 let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : string) args : tool_result =
   match resolve_status_target_config ~config ~agent_name args with
@@ -665,13 +665,7 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
              let tail = List.filteri (fun i _ -> i >= start) events in
              (`List (apply_tail_order tail_order tail), total)
         in
-        let all_internal_tools =
-          keeper_model_tools |> List.map (fun tool -> tool.Masc_domain.name)
-        in
         let allowed_tools = keeper_allowed_tool_names m in
-        let allowed_tool_preview =
-          allowed_tools |> List.filteri (fun idx _ -> idx < 10)
-        in
         let last_autonomous = String.trim m.runtime.last_autonomous_action_at in
         let tool_audit_snapshot =
           match latest_tool_audit_snapshot_from_files config ~keeper_name:m.name with
@@ -702,10 +696,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
                    else if has_runtime_activity then Some m.updated_at
                    else None);
               }
-        in
-        let blocked_internal_tools =
-          all_internal_tools
-          |> List.filter (fun name -> not (List.mem name allowed_tools))
         in
          let sandbox_last_error =
            match Keeper_registry.get ~base_path:config.base_path m.name with
@@ -804,8 +794,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
              Json_util.string_opt_to_json sandbox_last_error);
            ("sandbox_live", sandbox_live);
            ("tool_denylist", Json_util.json_string_list m.tool_denylist);
-           ("allowed_tool_names", Json_util.json_string_list allowed_tools);
-           ("allowed_tool_preview", Json_util.json_string_list allowed_tool_preview);
            ("latest_tool_names",
              Json_util.json_string_list tool_audit_snapshot.latest_tool_names);
            ("latest_tool_call_count",
@@ -857,9 +845,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
              ("network_mode",
                `String (network_mode_to_string m.network_mode));
              ("allowed_paths", Json_util.json_string_list m.allowed_paths);
-           ("allowed_tools", Json_util.json_string_list allowed_tools);
-            ("available_internal_tools", Json_util.json_string_list all_internal_tools);
-            ("blocked_internal_tools", Json_util.json_string_list blocked_internal_tools);
            ]);
            ("auto_execution_session", auto_execution_session_surface_json ());
            ("auto_execution_session_enabled", `Bool false);

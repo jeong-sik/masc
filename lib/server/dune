@@ -5,11 +5,12 @@
  (public_name masc.server)
  (wrapped false)
  (private_modules keeper_grpc_heartbeat)
- (flags
-  (:standard -open Masc -open Masc_prometheus -open Masc_auth -open Masc_runtime -open Masc_json_field -open Masc_lockfree_atomic -open Masc_keeper_metrics -open Masc_pool_metrics))
+ (flags :standard -open Masc)
  (libraries
   masc
   masc.dashboard
+  masc.fd_accountant
+  masc.masc_event_bus
   ;; RFC-0056 #20086 extracted Dashboard_tla_specs out of the masc mega-lib into
   ;; masc.dashboard_tla_specs; server_routes_http_routes_verification consumes it
   ;; directly (specs_json / tlc_results_json) and dune does not re-export through
@@ -65,9 +66,21 @@
   masc.attribution
   masc.exec_policy
   masc.keeper_state
+  masc.keeper_id
+  masc.keeper_timing
+  masc.keeper_metrics
+  masc.keeper_types
+  masc.keeper_pressure
+  masc.keeper_failure_taxonomy
+  masc.keeper_memory_taxonomy
+  masc.keeper_toml_loader
+  masc.keeper_runtime_config
   masc.runtime_provider_labels
   masc.runtime_model
+  masc.runtime
   masc.model_inference_metrics
+  masc.auth
+  masc.json_field
   masc.types_boundary
   masc.cdal_runtime
   masc.cdal
@@ -79,6 +92,10 @@
   masc.sse_event
   masc.chronicle_event
   masc.tool_call_quality_benchmark
+  masc.telemetry_coverage_gap
+  masc.telemetry_unified
+  masc.discovery_cache
+  masc.local_runtime_pool
   masc.keeper_event_queue
   masc.keeper_invariant
   masc.compaction_trigger
@@ -120,6 +137,7 @@
   masc.masc_exec_command_gate
   masc_board
   masc.board_handlers
+  masc.board_tool_adapter
   masc.task_handlers
   masc_random_id
   masc_workspace
@@ -151,17 +169,9 @@
   masc.multimodal
   masc.repo_manager
   masc.parse_outcome
-  masc.runtime
-  masc.masc_event_bus
-  masc.provider_tool_support
-  masc.keeper_internal_error
-  masc.prometheus
-  masc.auth
-  masc.fd_accountant
-  masc.keeper_metrics
-  masc.pool_metrics
-  masc.lockfree_atomic
-  masc.json_field)
+  masc.otel_dispatch_hook
+  masc.otel_spans
+  masc.pool_metrics)
  (preprocess
   (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq ppx_let ppx_tla))
  (instrumentation

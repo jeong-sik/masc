@@ -20,9 +20,7 @@ let main_result () =
       2 )
   else
     let stdin_text = read_stdin_all () in
-    match
-      Yojson.Safe.from_string stdin_text |> Lib.Worker_execution_spec.of_yojson
-    with
+    match Yojson.Safe.from_string stdin_text |> Worker_execution_spec.of_yojson with
     | exception Yojson.Json_error msg ->
         ( Lib.Worker_runtime_helper_protocol.error_json
             {

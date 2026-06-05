@@ -40,6 +40,11 @@ let tool_call_detail_to_json (detail : tool_call_detail) =
      @ task_id_field
      @ route_evidence_field)
 
+let tool_names_of_calls (tool_calls : tool_call_detail list) : string list =
+  tool_calls
+  |> List.map (fun detail -> Keeper_tool_resolution.canonical_tool_name detail.tool_name)
+;;
+
 (** Result of a single Agent.run() keeper turn. *)
 type run_result =
   { response_text : string
@@ -48,10 +53,8 @@ type run_result =
   ; ctx_composition : ctx_composition_metrics
   ; runtime_observation : Runtime_observation.runtime_observation option
   ; turn_count : int
-  ; tool_calls_made : int
   ; usage : Agent_sdk.Types.api_usage
   ; usage_reported : bool
-  ; tools_used : string list
   ; tool_calls : tool_call_detail list
   ; checkpoint : Agent_sdk.Checkpoint.t option
   ; trace_ref : Agent_sdk.Raw_trace.run_ref option
@@ -64,6 +67,9 @@ type run_result =
   ; pre_dispatch_compaction_before_tokens : int option
   ; pre_dispatch_compaction_after_tokens : int option
   }
+
+let tool_names (result : run_result) = tool_names_of_calls result.tool_calls
+let tool_call_count (result : run_result) = List.length result.tool_calls
 
 (* RFC-0132 PR-2: agent-result surface label = external boundary; redact via SSOT. *)
 let runtime_lane_label =

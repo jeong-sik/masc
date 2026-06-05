@@ -53,7 +53,6 @@ let prepare_agent_setup
     { meta
     ; tool_calls = []
     ; current_turn = 0
-    ; keeper_surface_tool_used = false
     ; discovered =
         Keeper_discovered_tools.create
           ~decay_turns:
@@ -66,7 +65,7 @@ let prepare_agent_setup
                     "keeper: MASC_KEEPER_TOOL_DECAY_TURNS=%S is not a valid integer, \
                      using default 5"
                     s;
-                  Prometheus.inc_counter
+                  Otel_metric_store.inc_counter
                     Keeper_metrics.(to_string ConfigEnvParseFailures)
                     ~labels:[ "var", "MASC_KEEPER_TOOL_DECAY_TURNS" ]
                     ();
@@ -85,7 +84,6 @@ let prepare_agent_setup
         ; approval_mode_derived
         }
     ; requested_tool_names = []
-    ; requested_tool_names_seen = []
     ; receipt_completion_contract_result =
         Keeper_execution_receipt.Contract_unknown
     }
@@ -133,11 +131,6 @@ let prepare_agent_setup
   in
   let extend_turns_tool = Keeper_extend_turns.make ~agent_ref ~max_turns () in
   let tools = extend_turns_tool :: keeper_tools in
-  let tool_usage_before =
-    Keeper_tool_observation.keeper_tool_usage_snapshot
-      ~base_path:config.base_path
-      ~keeper_name:meta.name
-  in
   let tool_index_config =
     { Agent_sdk.Tool_index.default_config with
       top_k = Keeper_config.keeper_tool_search_top_k ()
@@ -384,13 +377,6 @@ let prepare_agent_setup
       Keeper_tool_policy.StringSet.mem public_name universe_set
       && Keeper_tool_policy.StringSet.mem public_name policy_allowed_tool_set)
   in
-  (* Receipt refs: written sequentially after OAS execution, kept as refs
-     because the facade (keeper_agent_run.ml) writes them post-run. *)
-  let reported_tool_names_ref : string list ref = ref [] in
-  let observed_tool_names_ref : string list ref = ref [] in
-  let canonical_tool_names_ref : string list ref = ref [] in
-  let unexpected_tool_names_ref : string list ref = ref [] in
-  let actual_keeper_tool_names_ref : string list ref = ref [] in
   let receipt_turn_count_ref : int option ref = ref None in
   let receipt_model_used_ref : string option ref = ref None in
   let receipt_stop_reason_ref : Runtime_agent.stop_reason option ref =
@@ -525,7 +511,7 @@ let prepare_agent_setup
                ()
            with
            | Error detail ->
-             Prometheus.inc_counter
+             Otel_metric_store.inc_counter
                Keeper_metrics.(to_string ToolSelectionFailures)
                ~labels:[ "keeper", meta.name; "phase", "runtime_resolve" ]
                ();
@@ -539,7 +525,7 @@ let prepare_agent_setup
            | Ok providers ->
              (match providers with
               | [] ->
-                Prometheus.inc_counter
+                Otel_metric_store.inc_counter
                   Keeper_metrics.(to_string ToolSelectionFailures)
                   ~labels:[ "keeper", meta.name; "phase", "runtime_no_provider" ]
                   ();
@@ -588,7 +574,7 @@ let prepare_agent_setup
                  with
                  | Eio.Cancel.Cancelled _ as e -> raise e
                  | exn ->
-                   Prometheus.inc_counter
+                   Otel_metric_store.inc_counter
                      Keeper_metrics.(to_string ToolSelectionFailures)
                      ~labels:[ "keeper", meta.name; "phase", "topk_llm" ]
                      ();
@@ -599,7 +585,7 @@ let prepare_agent_setup
                      (Printexc.to_string exn);
                    [])))
         | _ ->
-          Prometheus.inc_counter
+          Otel_metric_store.inc_counter
             Keeper_metrics.(to_string ToolSelectionFailures)
             ~labels:[ "keeper", meta.name; "phase", "topk_llm_no_eio" ]
             ();
@@ -655,17 +641,11 @@ let prepare_agent_setup
     ; keeper_tools_cleanup
     ; manifest_keeper_turn_id
     ; meta
-    ; reported_tool_names_ref
-    ; observed_tool_names_ref
-    ; canonical_tool_names_ref
-    ; unexpected_tool_names_ref
-    ; actual_keeper_tool_names_ref
     ; receipt_turn_count_ref
     ; receipt_model_used_ref
     ; receipt_stop_reason_ref
     ; receipt_runtime_observation_ref
     ; receipt_response_text_present_ref
-    ; tool_usage_before
     ; tools
     }
   in

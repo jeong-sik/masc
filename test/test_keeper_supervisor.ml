@@ -9,14 +9,14 @@ module Keeper_meta_store = Masc.Keeper_meta_store
 module Keeper_meta_json_parse = Masc.Keeper_meta_json_parse
 module Keeper_types_profile = Masc.Keeper_types_profile
 module Reg = Masc.Keeper_registry
-module KT = Masc.Keeper_types
+module KT = Keeper_types
 module KR = Masc.Keeper_runtime
 module AQ = Masc.Keeper_approval_queue
 module KSM = Keeper_state_machine
 module KLH = Masc.Keeper_lifecycle_hooks
-module FD = Masc.Keeper_fd_pressure
+module FD = Keeper_fd_pressure
 module KA = Masc.Keeper_keepalive
-module KFP = Masc.Keeper_failure_policy
+module KFP = Keeper_failure_policy
 module KSP = Masc.Keeper_supervisor_self_preservation
 
 let temp_dir () =
@@ -50,6 +50,9 @@ let rec mkdir_p path =
 
 let write_file path content =
   Out_channel.with_open_bin path (fun oc -> output_string oc content)
+
+let resolve_done_for_test reg value =
+  ignore (Reg.resolve_done reg ~source:"test_fixture" value)
 
 let restore_env name = function
   | Some value -> Unix.putenv name value
@@ -205,9 +208,7 @@ let test_supervisor_policy_runtime_exhausted_retryable_reasons () =
 
 let test_supervisor_policy_runtime_exhausted_terminal_reasons () =
   let terminal_reasons =
-    [ Keeper_meta_contract.No_tool_capable None
-    ; Keeper_meta_contract.Other_detail "opaque free-text"
-    ]
+    [ Keeper_meta_contract.Other_detail "opaque free-text" ]
   in
   List.iter
     (fun reason ->
@@ -351,6 +352,39 @@ let test_keep_last_n_never_exceeds () =
   done;
   check bool "length <= n" true (List.length !result <= n)
 
+let test_done_signal_publishes_only_for_fresh_resolution () =
+  check
+    bool
+    "fresh resolve publishes lifecycle"
+    true
+    (Sup.should_publish_lifecycle_for_done_signal Sup.Done_signal_resolved_now);
+  check
+    bool
+    "already resolved does not publish lifecycle"
+    false
+    (Sup.should_publish_lifecycle_for_done_signal Sup.Done_signal_already_resolved);
+  check
+    bool
+    "already seen does not publish lifecycle"
+    false
+    (Sup.should_publish_lifecycle_for_done_signal Sup.Done_signal_already_seen)
+
+let test_done_signal_maps_registry_result () =
+  check
+    bool
+    "registry fresh resolve publishes"
+    true
+    (Reg.Done_resolved { source = "test" }
+     |> Sup.done_signal_of_registry_result
+     |> Sup.should_publish_lifecycle_for_done_signal);
+  check
+    bool
+    "registry already-resolved suppresses publish"
+    false
+    (Reg.Done_already_resolved { source = "test"; previous = `Stopped }
+     |> Sup.done_signal_of_registry_result
+     |> Sup.should_publish_lifecycle_for_done_signal)
+
 (* ── Property: self-preservation subset ────────────────── *)
 
 let bp = "/tmp/test-sp-prop"
@@ -412,7 +446,7 @@ let ensure_test_runtime =
           try Sys.remove path with
           | Sys_error _ -> ())
         (fun () ->
-          match Masc.Runtime.init_default ~config_path:path with
+          match Runtime.init_default ~config_path:path with
           | Ok () -> initialized := true
           | Error msg -> fail msg))
 
@@ -615,9 +649,9 @@ let test_spawn_admission_denial_does_not_register_or_fork () =
       net = Some (Eio.Stdenv.net env);
     }
   in
-  let denial_metric = Masc.Keeper_metrics.(to_string SpawnSlotDenied) in
+  let denial_metric = Keeper_metrics.(to_string SpawnSlotDenied) in
   let denial_count surface =
-    Masc.Prometheus.metric_value_or_zero
+    Masc.Otel_metric_store.metric_value_or_zero
       denial_metric
       ~labels:
         [
@@ -628,8 +662,8 @@ let test_spawn_admission_denial_does_not_register_or_fork () =
       ()
   in
   let fork_total () =
-    Masc.Prometheus.metric_total
-      Masc.Keeper_metrics.(to_string DomainPoolFork)
+    Masc.Otel_metric_store.metric_total
+      Keeper_metrics.(to_string DomainPoolFork)
   in
   FD.note ~site:"test_spawn_admission_no_fork"
     ~detail:"Too many open files in system"
@@ -784,7 +818,7 @@ let test_fiber_health_respects_max_restarts_override () =
   let meta = make_meta name in
   let reg = Reg.register ~base_path:bp name meta in
   (* Simulate crash: resolve done_p as Crashed *)
-  Eio.Promise.resolve reg.done_r (`Crashed "test crash");
+  resolve_done_for_test reg (`Crashed "test crash");
   (* Set restart_count to 3 *)
   Reg.restore_supervisor_state ~base_path:bp name
     ~restart_count:3 ~last_restart_ts:0.0 ~crash_log:[];
@@ -908,19 +942,19 @@ let test_restart_path_emits_attempt_and_started_outcome_metrics () =
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.register ~base_path:config.base_path name meta in
-      Eio.Promise.resolve reg.done_r (`Crashed "ordinary crash");
+      resolve_done_for_test reg (`Crashed "ordinary crash");
       Reg.restore_supervisor_state ~base_path:config.base_path name
         ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
       let attempt_labels = [ ("keeper", name) ] in
       let outcome_labels = [ ("keeper", name); ("outcome", "started") ] in
       let attempts_before =
-        Masc.Prometheus.metric_value_or_zero
-          Masc.Keeper_metrics.(to_string RestartAttempts)
+        Masc.Otel_metric_store.metric_value_or_zero
+          Keeper_metrics.(to_string RestartAttempts)
           ~labels:attempt_labels ()
       in
       let outcomes_before =
-        Masc.Prometheus.metric_value_or_zero
-          Masc.Keeper_metrics.(to_string RestartOutcomes)
+        Masc.Otel_metric_store.metric_value_or_zero
+          Keeper_metrics.(to_string RestartOutcomes)
           ~labels:outcome_labels ()
       in
       let ctx : _ Keeper_types_profile.context =
@@ -936,13 +970,13 @@ let test_restart_path_emits_attempt_and_started_outcome_metrics () =
       Sup.sweep_and_recover ctx;
       check (float 0.001) "restart attempt metric incremented"
         (attempts_before +. 1.0)
-        (Masc.Prometheus.metric_value_or_zero
-           Masc.Keeper_metrics.(to_string RestartAttempts)
+        (Masc.Otel_metric_store.metric_value_or_zero
+           Keeper_metrics.(to_string RestartAttempts)
            ~labels:attempt_labels ());
       check (float 0.001) "restart started outcome metric incremented"
         (outcomes_before +. 1.0)
-        (Masc.Prometheus.metric_value_or_zero
-           Masc.Keeper_metrics.(to_string RestartOutcomes)
+        (Masc.Otel_metric_store.metric_value_or_zero
+           Keeper_metrics.(to_string RestartOutcomes)
            ~labels:outcome_labels ());
       match Reg.get ~base_path:config.base_path name with
       | None -> fail "expected restarted keeper in registry"
@@ -965,7 +999,7 @@ let test_restart_path_emits_meta_unavailable_outcome_metric () =
       ignore (Masc.Workspace.init config ~agent_name:(Some "supervisor"));
       let meta = make_meta name in
       let reg = Reg.register ~base_path:config.base_path name meta in
-      Eio.Promise.resolve reg.done_r (`Crashed "ordinary crash");
+      resolve_done_for_test reg (`Crashed "ordinary crash");
       Reg.restore_supervisor_state ~base_path:config.base_path name
         ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
       let attempt_labels = [ ("keeper", name) ] in
@@ -973,13 +1007,13 @@ let test_restart_path_emits_meta_unavailable_outcome_metric () =
         [ ("keeper", name); ("outcome", "meta_unavailable") ]
       in
       let attempts_before =
-        Masc.Prometheus.metric_value_or_zero
-          Masc.Keeper_metrics.(to_string RestartAttempts)
+        Masc.Otel_metric_store.metric_value_or_zero
+          Keeper_metrics.(to_string RestartAttempts)
           ~labels:attempt_labels ()
       in
       let outcomes_before =
-        Masc.Prometheus.metric_value_or_zero
-          Masc.Keeper_metrics.(to_string RestartOutcomes)
+        Masc.Otel_metric_store.metric_value_or_zero
+          Keeper_metrics.(to_string RestartOutcomes)
           ~labels:outcome_labels ()
       in
       let ctx : _ Keeper_types_profile.context =
@@ -995,13 +1029,13 @@ let test_restart_path_emits_meta_unavailable_outcome_metric () =
       Sup.sweep_and_recover ctx;
       check (float 0.001) "restart attempt metric incremented"
         (attempts_before +. 1.0)
-        (Masc.Prometheus.metric_value_or_zero
-           Masc.Keeper_metrics.(to_string RestartAttempts)
+        (Masc.Otel_metric_store.metric_value_or_zero
+           Keeper_metrics.(to_string RestartAttempts)
            ~labels:attempt_labels ());
       check (float 0.001) "missing-meta outcome metric incremented"
         (outcomes_before +. 1.0)
-        (Masc.Prometheus.metric_value_or_zero
-           Masc.Keeper_metrics.(to_string RestartOutcomes)
+        (Masc.Otel_metric_store.metric_value_or_zero
+           Keeper_metrics.(to_string RestartOutcomes)
            ~labels:outcome_labels ());
       check bool "keeper unregistered after missing meta" false
         (Reg.is_registered ~base_path:config.base_path name))
@@ -1009,7 +1043,7 @@ let test_restart_path_emits_meta_unavailable_outcome_metric () =
 (* ── Dead-state loud alert (PR-C) ──────────────────────── *)
 
 (* Reproduces the 2026-04-25 incident pattern: 8 keepers crashed silently
-   after the supervisor exhausted max_restarts. The ERROR log + Prometheus
+   after the supervisor exhausted max_restarts. The ERROR log + Otel_metric_store
    counter + structured OAS event emitted from sweep_and_recover give
    operators the signal that was missing. *)
 let test_max_restarts_exhaustion_emits_dead_alert () =
@@ -1034,7 +1068,7 @@ let test_max_restarts_exhaustion_emits_dead_alert () =
       (* Drive the entry to Crashed with restart_count already at the
          default budget (5) so sweep takes the Dead branch on the first
          pass, not the restart branch. *)
-      Eio.Promise.resolve reg.done_r (`Crashed "synthetic exhaustion");
+      resolve_done_for_test reg (`Crashed "synthetic exhaustion");
       Reg.set_failure_reason ~base_path:config.base_path name
         (Some (Reg.Heartbeat_consecutive_failures 9));
       let max_restarts =
@@ -1044,8 +1078,8 @@ let test_max_restarts_exhaustion_emits_dead_alert () =
       Reg.restore_supervisor_state ~base_path:config.base_path name
         ~restart_count:max_restarts ~last_restart_ts:0.0 ~crash_log:[];
       let baseline =
-        Masc.Prometheus.metric_total
-          Masc.Keeper_metrics.(to_string DeadTotal)
+        Masc.Otel_metric_store.metric_total
+          Keeper_metrics.(to_string DeadTotal)
       in
       let ctx : _ Keeper_types_profile.context =
         {
@@ -1059,8 +1093,8 @@ let test_max_restarts_exhaustion_emits_dead_alert () =
       in
       Sup.sweep_and_recover ctx;
       let after =
-        Masc.Prometheus.metric_total
-          Masc.Keeper_metrics.(to_string DeadTotal)
+        Masc.Otel_metric_store.metric_total
+          Keeper_metrics.(to_string DeadTotal)
       in
       check (float 0.001) "metric_keeper_dead_total incremented by 1"
         (baseline +. 1.0) after;
@@ -1174,7 +1208,7 @@ let test_stale_storm_pause_skips_restart () =
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.register ~base_path:config.base_path name meta in
-      Eio.Promise.resolve reg.done_r (`Crashed "synthetic stale storm");
+      resolve_done_for_test reg (`Crashed "synthetic stale storm");
       (* [restore_supervisor_state] resets [last_failure_reason] to [None],
          so it MUST run before [set_failure_reason] (otherwise the storm
          latch is wiped and the supervisor sweeps the entry through the
@@ -1184,11 +1218,11 @@ let test_stale_storm_pause_skips_restart () =
       Reg.set_failure_reason ~base_path:config.base_path name
         (Some (Reg.Stale_termination_storm { count = 5 }));
       let baseline_pause =
-        Masc.Prometheus.metric_total "masc_keeper_stale_storm_paused_total"
+        Masc.Otel_metric_store.metric_total "masc_keeper_stale_storm_paused_total"
       in
       let baseline_dead =
-        Masc.Prometheus.metric_total
-          Masc.Keeper_metrics.(to_string DeadTotal)
+        Masc.Otel_metric_store.metric_total
+          Keeper_metrics.(to_string DeadTotal)
       in
       let ctx : _ Keeper_types_profile.context =
         {
@@ -1202,11 +1236,11 @@ let test_stale_storm_pause_skips_restart () =
       in
       Sup.sweep_and_recover ctx;
       let after_pause =
-        Masc.Prometheus.metric_total "masc_keeper_stale_storm_paused_total"
+        Masc.Otel_metric_store.metric_total "masc_keeper_stale_storm_paused_total"
       in
       let after_dead =
-        Masc.Prometheus.metric_total
-          Masc.Keeper_metrics.(to_string DeadTotal)
+        Masc.Otel_metric_store.metric_total
+          Keeper_metrics.(to_string DeadTotal)
       in
       check (float 0.001) "stale_storm_paused counter incremented by 1"
         (baseline_pause +. 1.0) after_pause;
@@ -1248,7 +1282,7 @@ let test_legacy_stale_fleet_batch_routes_to_restart_budget () =
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.register ~base_path:config.base_path name meta in
-      Eio.Promise.resolve reg.done_r (`Crashed "legacy stale fleet batch");
+      resolve_done_for_test reg (`Crashed "legacy stale fleet batch");
       let max_restarts =
         Masc.Runtime_params.get
           Masc.Governance_registry.keeper_supervisor_max_restarts
@@ -1258,8 +1292,8 @@ let test_legacy_stale_fleet_batch_routes_to_restart_budget () =
       Reg.set_failure_reason ~base_path:config.base_path name
         (Some (Reg.Stale_fleet_batch { distinct_count = 3 }));
       let baseline_dead =
-        Masc.Prometheus.metric_total
-          Masc.Keeper_metrics.(to_string DeadTotal)
+        Masc.Otel_metric_store.metric_total
+          Keeper_metrics.(to_string DeadTotal)
       in
       let ctx : _ Keeper_types_profile.context =
         {
@@ -1273,8 +1307,8 @@ let test_legacy_stale_fleet_batch_routes_to_restart_budget () =
       in
       Sup.sweep_and_recover ctx;
       let after_dead =
-        Masc.Prometheus.metric_total
-          Masc.Keeper_metrics.(to_string DeadTotal)
+        Masc.Otel_metric_store.metric_total
+          Keeper_metrics.(to_string DeadTotal)
       in
       check (float 0.001) "legacy fleet batch follows restart/dead budget"
         (baseline_dead +. 1.0) after_dead;
@@ -1305,18 +1339,18 @@ let test_provider_timeout_loop_pause_skips_restart () =
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.register ~base_path:config.base_path name meta in
-      Eio.Promise.resolve reg.done_r (`Crashed "synthetic provider timeout loop");
+      resolve_done_for_test reg (`Crashed "synthetic provider timeout loop");
       Reg.restore_supervisor_state ~base_path:config.base_path name
         ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
       Reg.set_failure_reason ~base_path:config.base_path name
         (Some (Reg.Provider_timeout_loop { count = 3 }));
       let baseline_pause =
-        Masc.Prometheus.metric_total
+        Masc.Otel_metric_store.metric_total
           "masc_keeper_provider_timeout_loop_paused_total"
       in
       let baseline_dead =
-        Masc.Prometheus.metric_total
-          Masc.Keeper_metrics.(to_string DeadTotal)
+        Masc.Otel_metric_store.metric_total
+          Keeper_metrics.(to_string DeadTotal)
       in
       let ctx : _ Keeper_types_profile.context =
         {
@@ -1330,12 +1364,12 @@ let test_provider_timeout_loop_pause_skips_restart () =
       in
       Sup.sweep_and_recover ctx;
       let after_pause =
-        Masc.Prometheus.metric_total
+        Masc.Otel_metric_store.metric_total
           "masc_keeper_provider_timeout_loop_paused_total"
       in
       let after_dead =
-        Masc.Prometheus.metric_total
-          Masc.Keeper_metrics.(to_string DeadTotal)
+        Masc.Otel_metric_store.metric_total
+          Keeper_metrics.(to_string DeadTotal)
       in
       check (float 0.001) "provider_timeout_loop counter incremented by 1"
         (baseline_pause +. 1.0) after_pause;
@@ -1421,7 +1455,7 @@ let test_non_storm_crashed_restarts_normally () =
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.register ~base_path:config.base_path name meta in
-      Eio.Promise.resolve reg.done_r (`Crashed "ordinary crash");
+      resolve_done_for_test reg (`Crashed "ordinary crash");
       let max_restarts =
         Masc.Runtime_params.get
           Masc.Governance_registry.keeper_supervisor_max_restarts
@@ -1435,7 +1469,7 @@ let test_non_storm_crashed_restarts_normally () =
       Reg.set_failure_reason ~base_path:config.base_path name
         (Some (Reg.Heartbeat_consecutive_failures 3));
       let baseline_pause =
-        Masc.Prometheus.metric_total "masc_keeper_stale_storm_paused_total"
+        Masc.Otel_metric_store.metric_total "masc_keeper_stale_storm_paused_total"
       in
       let ctx : _ Keeper_types_profile.context =
         {
@@ -1449,7 +1483,7 @@ let test_non_storm_crashed_restarts_normally () =
       in
       Sup.sweep_and_recover ctx;
       let after_pause =
-        Masc.Prometheus.metric_total "masc_keeper_stale_storm_paused_total"
+        Masc.Otel_metric_store.metric_total "masc_keeper_stale_storm_paused_total"
       in
       check (float 0.001) "stale_storm_paused counter NOT incremented for non-storm"
         baseline_pause after_pause;
@@ -1486,7 +1520,7 @@ let test_storm_pause_requires_manual_resume () =
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.register ~base_path:config.base_path name meta in
-      Eio.Promise.resolve reg.done_r (`Crashed "storm");
+      resolve_done_for_test reg (`Crashed "storm");
       Reg.restore_supervisor_state ~base_path:config.base_path name
         ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
       Reg.set_failure_reason ~base_path:config.base_path name
@@ -1547,7 +1581,7 @@ let test_oas_auto_resume_after_sec_doubles_on_repause () =
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.register ~base_path:config.base_path name initial_meta in
-      Eio.Promise.resolve reg.done_r (`Crashed "provider timeout loop");
+      resolve_done_for_test reg (`Crashed "provider timeout loop");
       Reg.restore_supervisor_state ~base_path:config.base_path name
         ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
       Reg.set_failure_reason ~base_path:config.base_path name
@@ -1615,8 +1649,8 @@ let test_sweep_auto_resumes_after_backoff () =
       check bool "precondition: paused keeper is not bootable" false
         (List.mem name (KR.bootable_keeper_names config));
       let baseline_auto_resume =
-        Masc.Prometheus.metric_total
-          Masc.Keeper_metrics.(to_string AutoResumedTotal)
+        Masc.Otel_metric_store.metric_total
+          Keeper_metrics.(to_string AutoResumedTotal)
       in
       let ctx : _ Keeper_types_profile.context =
         {
@@ -1646,8 +1680,8 @@ let test_sweep_auto_resumes_after_backoff () =
       check bool "auto-resumed keeper is reconciled into registry" true
         (Reg.is_registered ~base_path:config.base_path name);
       let after_auto_resume =
-        Masc.Prometheus.metric_total
-          Masc.Keeper_metrics.(to_string AutoResumedTotal)
+        Masc.Otel_metric_store.metric_total
+          Keeper_metrics.(to_string AutoResumedTotal)
       in
       check (float 0.001) "metric_keeper_auto_resumed_total incremented by 1"
         (baseline_auto_resume +. 1.0) after_auto_resume)
@@ -1759,8 +1793,8 @@ let test_operator_pause_not_auto_resumed () =
       check bool "precondition: operator pause is not bootable" false
         (List.mem name (KR.bootable_keeper_names config));
       let baseline_auto_resume =
-        Masc.Prometheus.metric_total
-          Masc.Keeper_metrics.(to_string AutoResumedTotal)
+        Masc.Otel_metric_store.metric_total
+          Keeper_metrics.(to_string AutoResumedTotal)
       in
       let ctx : _ Keeper_types_profile.context =
         {
@@ -1785,8 +1819,8 @@ let test_operator_pause_not_auto_resumed () =
       check bool "operator pause is not reconciled into registry" false
         (Reg.is_registered ~base_path:config.base_path name);
       let after_auto_resume =
-        Masc.Prometheus.metric_total
-          Masc.Keeper_metrics.(to_string AutoResumedTotal)
+        Masc.Otel_metric_store.metric_total
+          Keeper_metrics.(to_string AutoResumedTotal)
       in
       check (float 0.001) "metric_keeper_auto_resumed_total NOT incremented"
         baseline_auto_resume after_auto_resume)
@@ -1838,8 +1872,8 @@ let test_turn_timeout_blocker_without_resume_policy_not_auto_resumed () =
       check bool "precondition: timeout pause is not bootable" false
         (List.mem name (KR.bootable_keeper_names config));
       let baseline_auto_resume =
-        Masc.Prometheus.metric_total
-          Masc.Keeper_metrics.(to_string AutoResumedTotal)
+        Masc.Otel_metric_store.metric_total
+          Keeper_metrics.(to_string AutoResumedTotal)
       in
       let ctx : _ Keeper_types_profile.context =
         {
@@ -1870,8 +1904,8 @@ let test_turn_timeout_blocker_without_resume_policy_not_auto_resumed () =
       check bool "timeout pause is not reconciled into registry" false
         (Reg.is_registered ~base_path:config.base_path name);
       let after_auto_resume =
-        Masc.Prometheus.metric_total
-          Masc.Keeper_metrics.(to_string AutoResumedTotal)
+        Masc.Otel_metric_store.metric_total
+          Keeper_metrics.(to_string AutoResumedTotal)
       in
       check (float 0.001) "metric_keeper_auto_resumed_total NOT incremented"
         baseline_auto_resume after_auto_resume)
@@ -1927,8 +1961,8 @@ let test_capacity_blocker_without_resume_policy_not_auto_resumed () =
       check bool "precondition: capacity pause is not bootable" false
         (List.mem name (KR.bootable_keeper_names config));
       let baseline_auto_resume =
-        Masc.Prometheus.metric_total
-          Masc.Keeper_metrics.(to_string AutoResumedTotal)
+        Masc.Otel_metric_store.metric_total
+          Keeper_metrics.(to_string AutoResumedTotal)
       in
       let ctx : _ Keeper_types_profile.context =
         {
@@ -1957,8 +1991,8 @@ let test_capacity_blocker_without_resume_policy_not_auto_resumed () =
       check bool "capacity pause is not reconciled into registry" false
         (Reg.is_registered ~base_path:config.base_path name);
       let after_auto_resume =
-        Masc.Prometheus.metric_total
-          Masc.Keeper_metrics.(to_string AutoResumedTotal)
+        Masc.Otel_metric_store.metric_total
+          Keeper_metrics.(to_string AutoResumedTotal)
       in
       check (float 0.001) "metric_keeper_auto_resumed_total NOT incremented"
         baseline_auto_resume after_auto_resume)
@@ -1988,7 +2022,7 @@ let test_initial_auto_resume_capped_at_max () =
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.register ~base_path:config.base_path name meta in
-      Eio.Promise.resolve reg.done_r (`Crashed "storm");
+      resolve_done_for_test reg (`Crashed "storm");
       Reg.restore_supervisor_state ~base_path:config.base_path name
         ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
       Reg.set_failure_reason ~base_path:config.base_path name
@@ -2048,7 +2082,7 @@ let test_persisted_blocker_survives_unregister () =
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.register ~base_path:config.base_path name meta in
-      Eio.Promise.resolve reg.done_r (`Crashed "storm");
+      resolve_done_for_test reg (`Crashed "storm");
       Reg.restore_supervisor_state ~base_path:config.base_path name
         ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
       Reg.set_failure_reason ~base_path:config.base_path name
@@ -2136,6 +2170,12 @@ let () =
     ];
     "keep_last_n_properties", [
       test_case "never exceeds limit" `Quick test_keep_last_n_never_exceeds;
+    ];
+    "done_signal", [
+      test_case "publish only for fresh resolution" `Quick
+        test_done_signal_publishes_only_for_fresh_resolution;
+      test_case "registry result mapping preserves lifecycle ownership" `Quick
+        test_done_signal_maps_registry_result;
     ];
     "supervision_cohorts", [
       test_case "64 keepers form 8 cohorts of 8" `Quick

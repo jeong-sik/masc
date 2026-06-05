@@ -49,7 +49,7 @@ let run_grpc_heartbeat_stream
          match recv () with
          | Ok ack -> handle_grpc_heartbeat_ack ~agent_name ack
          | Error err ->
-           Prometheus.inc_counter
+           Otel_metric_store.inc_counter
              Keeper_metrics.(to_string HeartbeatFailures)
              ~labels:[ "keeper", agent_name; "site", "grpc_recv" ]
              ();
@@ -58,7 +58,7 @@ let run_grpc_heartbeat_stream
        | Eio.Cancel.Cancelled _ as e -> raise e
        | End_of_file -> raise End_of_file
        | exn ->
-         Prometheus.inc_counter
+         Otel_metric_store.inc_counter
            Keeper_metrics.(to_string HeartbeatFailures)
            ~labels:[ "keeper", agent_name; "site", "grpc_tick" ]
            ();
@@ -82,7 +82,7 @@ let log_grpc_heartbeat_stream_failure ~agent_name ~attempts = function
       (attempts + 1)
       Env_config.KeeperGrpc.max_reconnect_attempts
   | `Error exn ->
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string HeartbeatFailures)
       ~labels:[ "keeper", agent_name; "site", "grpc_stream" ]
       ();
@@ -109,7 +109,7 @@ let run_grpc_heartbeat_fiber
   =
   match Eio_context.get_switch_opt (), Atomic.get grpc_env_ref with
   | None, _ | _, None ->
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string HeartbeatFailures)
       ~labels:[ "keeper", agent_name; "site", "grpc_no_eio_context" ]
       ();
@@ -123,7 +123,7 @@ let run_grpc_heartbeat_fiber
         then ()
         else if attempts >= max_reconnect_attempts
         then (
-          Prometheus.inc_counter
+          Otel_metric_store.inc_counter
             Keeper_metrics.(to_string HeartbeatFailures)
             ~labels:[ "keeper", agent_name; "site", "grpc_reconnect_exhausted" ]
             ();
@@ -191,7 +191,7 @@ let start_keeper_grpc_heartbeat
       ~interval_sec:interval
       ~clock:ctx.clock
   | Masc_grpc_transport.Grpc, None ->
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string HeartbeatFailures)
       ~labels:[ "keeper", m.name; "site", "grpc_no_client" ]
       ();

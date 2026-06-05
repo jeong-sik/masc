@@ -3,9 +3,11 @@
 (library
  (name masc_auth)
  (public_name masc.auth)
- (wrapped true)
- (flags
-  (:standard -open Masc_prometheus))
+ (wrapped false)
+ (private_modules
+  auth_credential_base
+  auth_credential_token
+  auth_metric_store)
  (libraries
   yojson
   unix
@@ -21,9 +23,8 @@
   digestif
   masc.fs_compat
   masc.masc_log
-  time_compat
-  masc.prometheus
+  masc.masc_tool_dispatch
   masc.tool_types
-  masc.masc_tool_dispatch)
+  time_compat)
  (preprocess
   (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq)))

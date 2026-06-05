@@ -4,7 +4,7 @@
     the godfile decomp campaign. Owns:
 
     - the [heartbeat_event_intake] record returned to the heartbeat loop;
-    - per-class string labels used in Prometheus and log lines;
+    - per-class string labels used in Otel_metric_store and log lines;
     - per-stimulus consumption ([consume_single_heartbeat_stimulus]) +
       board-batch consumption ([consume_board_stimulus_batch]);
     - the top-level RFC-0020 §3 Rule 4 draining function
@@ -70,7 +70,7 @@ let consume_single_heartbeat_stimulus
   =
   let stimulus_class = Keeper_event_queue.classify stim in
   let class_str = stimulus_class_to_string stimulus_class in
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     Keeper_metrics.(to_string StimulusConsumed)
     ~labels:[ "keeper", meta_after_triage.name; "class", class_str ]
     ();
@@ -101,7 +101,7 @@ let consume_single_heartbeat_stimulus
       stim;
     []
   | Unsupported prefix ->
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string UnsupportedStimulus)
       ~labels:[ "keeper", meta_after_triage.name ]
       ();
@@ -123,7 +123,7 @@ let consume_board_stimulus_batch ~meta_after_triage batch =
       meta_after_triage.name;
   List.filter_map
     (fun (stim : Keeper_event_queue.stimulus) ->
-       Prometheus.inc_counter
+       Otel_metric_store.inc_counter
          Keeper_metrics.(to_string StimulusConsumed)
          ~labels:[ "keeper", meta_after_triage.name; "class", "board_signal" ]
          ();

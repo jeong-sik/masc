@@ -4,7 +4,7 @@
 open Alcotest
 
 module R = Masc.Keeper_registry
-module KT = Masc.Keeper_types
+module KT = Keeper_types
 module KSM = Keeper_state_machine
 module Cfg = Env_config
 

@@ -371,57 +371,6 @@ let test_masc_goal_verify_schema () =
             (List.mem (`String "decision") reqs)
       | None -> Alcotest.fail "masc_goal_verify missing required field"
 
-let test_remote_operator_action_schema_is_strict () =
-  let check_schema label schema =
-  match get_json_assoc "properties" schema.input_schema with
-  | Some props ->
-      (match List.assoc_opt "action_type" props with
-       | Some (`Assoc fields) ->
-           (match List.assoc_opt "enum" fields with
-            | Some (`List enums) ->
-                Alcotest.(check bool) (label ^ " excludes team_turn") false
-                  (List.mem (`String "team_turn") enums);
-                (* Issue #8417: [task_inject] has a real handler +
-                   approval contract; promoted into the strict enum so
-                   remote operator callers and the LLM judge can
-                   discover the capability. *)
-                Alcotest.(check bool) (label ^ " includes task_inject") true
-                  (List.mem (`String "task_inject") enums);
-                Alcotest.(check bool) (label ^ " excludes keeper_msg") false
-                  (List.mem (`String "keeper_msg") enums);
-                Alcotest.(check bool) (label ^ " excludes team_note") false
-                  (List.mem (`String "team_note") enums);
-                Alcotest.(check bool) (label ^ " excludes team_broadcast") false
-                  (List.mem (`String "team_broadcast") enums);
-                Alcotest.(check bool) (label ^ " excludes team_task_inject") false
-                  (List.mem (`String "team_task_inject") enums);
-                Alcotest.(check bool) (label ^ " excludes team_worker_spawn_batch") false
-                  (List.mem (`String "team_worker_spawn_batch") enums);
-                Alcotest.(check bool) (label ^ " excludes team_stop") false
-                  (List.mem (`String "team_stop") enums);
-                Alcotest.(check bool) (label ^ " includes social_sweep") true
-                  (List.mem (`String "social_sweep") enums);
-                Alcotest.(check bool) (label ^ " excludes autonomy_tick alias") false
-                  (List.mem (`String "autonomy_tick") enums);
-                Alcotest.(check bool) (label ^ " includes keeper_probe") true
-                  (List.mem (`String "keeper_probe") enums);
-                Alcotest.(check bool) (label ^ " includes keeper_recover") true
-                  (List.mem (`String "keeper_recover") enums);
-                Alcotest.(check bool) (label ^ " includes keeper_message") true
-                  (List.mem (`String "keeper_message") enums);
-                ()
-            | _ -> Alcotest.failf "%s action_type missing enum" label)
-       | _ -> Alcotest.failf "%s action_type missing" label)
-  | None -> Alcotest.failf "%s masc_operator_action missing properties" label
-  in
-  let find_operator_action schemas label =
-    match List.find_opt (fun schema -> schema.name = "masc_operator_action") schemas with
-    | Some schema -> schema
-    | None -> Alcotest.failf "%s masc_operator_action schema not found" label
-  in
-  check_schema "local" (find_operator_action (Masc.Tool_operator.schemas ()) "local");
-  check_schema "remote" (find_operator_action (Masc.Tool_operator.remote_schemas ()) "remote")
-
 let test_retired_front_door_tools_absent_from_schema_inventory () =
   let retired_tools =
     [
@@ -448,7 +397,7 @@ let test_retired_front_door_tools_absent_from_schema_inventory () =
     retired_tools
 
 let test_masc_board_post_schema_supports_judgment () =
-  let schema = Masc.Tool_board.tool_post_create in
+  let schema = Board_tool.tool_post_create in
   match get_json_assoc "properties" schema.input_schema with
   | Some props ->
       Alcotest.(check bool) "has classification_reason" true
@@ -532,29 +481,9 @@ let test_masc_deliver_schema () =
 
 (* Dedicated runtime-verify schema coverage moved to runtime admin coverage. *)
 
-(* test_masc_persona_list_schema removed: persona list coverage is trivial. *)
-
-let test_masc_persona_authoring_schemas () =
-  (match find_registered_tool "masc_persona_schema" with
-  | None -> Alcotest.fail "masc_persona_schema not found"
-  | Some schema -> (
-      match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "schema has include_examples" true
-            (List.mem_assoc "include_examples" props)
-      | None -> Alcotest.fail "masc_persona_schema missing properties"));
-  match find_registered_tool "masc_persona_save" with
-  | None -> Alcotest.fail "masc_persona_save not found"
-  | Some schema -> (
-      match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "save has handle" true
-            (List.mem_assoc "handle" props);
-          Alcotest.(check bool) "save has profile" true
-            (List.mem_assoc "profile" props);
-          Alcotest.(check bool) "save has dry_run" true
-            (List.mem_assoc "dry_run" props)
-      | None -> Alcotest.fail "masc_persona_save missing properties")
+(* test_masc_persona_list_schema removed: persona list coverage is trivial.
+   Persona authoring schema/save tools were removed with their stale backing
+   surface. *)
 
 let test_masc_keeper_create_from_persona_schema () =
   match find_registered_tool "masc_keeper_create_from_persona" with
@@ -827,8 +756,6 @@ let () =
         test_masc_batch_add_tasks_schema;
       Alcotest.test_case "masc_board_post supports judgment" `Quick
         test_masc_board_post_schema_supports_judgment;
-      Alcotest.test_case "remote_operator_action_strict" `Quick
-        test_remote_operator_action_schema_is_strict;
       Alcotest.test_case "retired front-door tools absent" `Quick
         test_retired_front_door_tools_absent_from_schema_inventory;
     ];
@@ -856,8 +783,6 @@ let () =
        bounded_run removed: pruned from registry *)
     (* spawn_runtime_tools group removed: masc_spawn deleted in RFC-0182. *)
     "keeper_runtime_tools", [
-      Alcotest.test_case "persona-authoring" `Quick
-        test_masc_persona_authoring_schemas;
       Alcotest.test_case "keeper-create-from-persona" `Quick
         test_masc_keeper_create_from_persona_schema;
       Alcotest.test_case "keeper-up" `Quick

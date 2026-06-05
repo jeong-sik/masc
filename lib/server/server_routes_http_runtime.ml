@@ -439,14 +439,14 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref request =
       `Bool keeper_config_schema_blocking );
     (* P2 silent-failure fix: lazy_task_boot_guard fires when a keeper
        startup task exceeds the boot timeout (server_bootstrap_loops.ml:116).
-       The Prometheus counter `masc_lazy_task_boot_guard_fired_total`
+       The Otel_metric_store counter `masc_lazy_task_boot_guard_fired_total`
        was already incremented but `/health` did not surface it, so an
        operator hitting /health would see "ok" while keepers had
        silently failed to start.  Exposing the cumulative count here
        lets dashboards / health probes alert on a non-zero value. *)
     ("lazy_task_boot_guard_fires_total",
      `Int (int_of_float
-             (Prometheus.metric_total "masc_lazy_task_boot_guard_fired_total")));
+             (Otel_metric_store.metric_total "masc_lazy_task_boot_guard_fired_total")));
   ]
 
 (* [stale_since_ts] records the wall-clock time of the FIRST refresh
@@ -697,7 +697,7 @@ let mark_full_health_snapshot_error exn =
       full_health_refresh_started_at := None;
       full_health_refresh_requested := false;
       (* Increment the consecutive-failure counter and emit the
-         Prometheus critical-edge signal ONLY when we cross the
+         Otel_metric_store critical-edge signal ONLY when we cross the
          configured threshold on this exact failure.  Subsequent
          failures past the threshold do not re-emit — operators
          get one structural alert per outage, not a noisy stream
@@ -706,7 +706,7 @@ let mark_full_health_snapshot_error exn =
       if !full_health_consecutive_failures
          = full_health_critical_failure_threshold
       then
-        Prometheus.inc_counter
+        Otel_metric_store.inc_counter
           "masc_full_health_refresh_critical_total"
           ~labels:[ "reason", "consecutive_failures" ]
           ())

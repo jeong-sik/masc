@@ -76,7 +76,10 @@ let test_container_path_translation_under_sandbox () =
         (Astring.String.is_prefix ~affix:"/home/keeper/playground"
            container_cwd);
       let cwd_response =
-        Keeper_cwd_response.docker ~host_cwd ~container_cwd
+        Keeper_cwd_response.of_sandbox
+          ~sandbox:(Keeper_sandbox.of_meta ~config ~meta)
+          ~host_cwd
+          ~container_cwd_for_docker:container_cwd
       in
       let json_str =
         Keeper_cwd_response.to_yojson_response cwd_response
@@ -91,6 +94,45 @@ let test_container_path_translation_under_sandbox () =
       check string "operator_host accessor returns the host_cwd"
         host_cwd
         (Keeper_cwd_response.operator_host cwd_response))
+
+let test_typed_execute_response_cwd_uses_container_path () =
+  Eio_main.run @@ fun _env ->
+  let base = temp_dir "typed_exec_docker_cwd_resp_" in
+  let config = Workspace.default_config base in
+  let meta = make_docker_meta ~name:"typed-exec-cwd-pin" in
+  let factory = Keeper_sandbox_factory.create ~config ~meta ~turn_id:42 () in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_sandbox_factory.cleanup factory;
+      cleanup_dir base)
+    (fun () ->
+       let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
+       let host_cwd =
+         Filename.concat host_root "repos/masc/.worktrees/task-cwd-pin"
+       in
+       let response_cwd =
+         Keeper_tool_execute_runtime.For_testing.typed_execute_response_cwd_json
+           ~turn_sandbox_factory:(Some factory)
+           ~cwd:host_cwd
+           ~sandbox_extra_fields:
+             [
+               "requested_sandbox", `String "docker";
+               "via", `String "docker";
+               "sandbox_profile", `String "docker";
+             ]
+       in
+       let json_str = Yojson.Safe.to_string response_cwd in
+       check bool "typed Execute cwd JSON does NOT contain host base" false
+         (Astring.String.is_infix ~affix:base json_str);
+       check bool "typed Execute cwd JSON does NOT contain host cwd" false
+         (Astring.String.is_infix ~affix:host_cwd json_str);
+       match response_cwd with
+       | `String cwd ->
+         check bool
+           "typed Execute cwd is rooted at /home/keeper/playground"
+           true
+           (Astring.String.is_prefix ~affix:"/home/keeper/playground" cwd)
+       | _ -> fail "typed Execute cwd response should serialize as a string")
 
 (* Source-level pin: assert that no [("cwd", `String <ident>)]
    literal remains in keeper_sandbox_docker.ml. The four sites
@@ -140,6 +182,9 @@ let () =
           test_case
             "host_cwd → container_cwd → JSON does not leak host"
             `Quick test_container_path_translation_under_sandbox
+        ; test_case
+            "typed Execute Docker cwd response does not leak host"
+            `Quick test_typed_execute_response_cwd_uses_container_path
         ] )
     ; ( "source-pin"
       , [

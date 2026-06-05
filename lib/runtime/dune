@@ -3,9 +3,8 @@
 (library
  (name masc_runtime)
  (public_name masc.runtime)
- (wrapped true)
- (flags
-  (:standard -open Masc_prometheus -open Masc_auth))
+ (wrapped false)
+ (flags :standard)
  (libraries
   yojson
   otoml
@@ -26,7 +25,6 @@
   masc.tool_types
   masc.tool_catalog_surfaces
   masc.masc_tool_dispatch
-  masc.prometheus
   masc.config
   masc.config_dir_resolver
   masc.masc_event_bus

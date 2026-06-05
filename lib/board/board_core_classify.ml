@@ -38,7 +38,7 @@ let visibility_of_string = function
   | _ -> None
 
 (** Issue #8392: schema enums for [visibility] used to be hand-rolled
-    in [tool_board.ml:699], matching the same drift class as #8354
+    in [board_tool.ml:699], matching the same drift class as #8354
     (task_status), #8372 (agent_status), #8386 (agent_role). All
     constructors are nullary so the simple [List.map] trick works.
     Adding a 5th constructor will fail compilation in
@@ -115,7 +115,7 @@ let classify_author (author : string) : author_kind =
        | None -> Human_author)
 
 (* The automation-label -> metric-string rendering moved to the
-   Prometheus adapter (board_prometheus_hooks.ml,
+   Otel_metric_store adapter (board_metric_hooks_adapter.ml,
    [automation_label_to_label]). The hook now carries the typed
    [Board_types.automation_label] so the compiler checks every label
    value and the string lives only at the emission boundary. *)
@@ -201,7 +201,7 @@ let legacy_migrate_post_kind ~meta_json ~author ~visibility ~expires_at ~hearth 
       (* #9919 audit follow-up: emit a labelled metric hook so operators can
          see which legacy authors still drive the migration path.
          The typed [automation_label] flows through unchanged (the
-         metric-string rendering lives in the Prometheus adapter) to keep
+         metric-string rendering lives in the Otel_metric_store adapter) to keep
          label cardinality bounded (6 values) alongside the per-author
          label.  Both labels emitted so existing dashboards (keyed on raw
          [author]) keep working while operators gain a bounded breakdown.

@@ -125,7 +125,7 @@ let append_metrics_snapshot
       then "turn"
       else "scheduled_autonomous"
     in
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string MetricEmitDropped)
       ~labels:
         [ "keeper", updated_meta.name
@@ -136,7 +136,7 @@ let append_metrics_snapshot
     Log.Keeper.error
       "write metrics snapshot failed after keeper cycle: %s"
       (Printexc.to_string exn);
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string TurnMetricsSnapshotFailures)
       ~labels:
         [ "keeper", meta.Keeper_meta_contract.name
@@ -188,8 +188,6 @@ let emit_activity_graph
                         (KUM.usage_trust_reasons usage_trust)) )
                ; "turn_mode", `String turn_mode_label
                ; "context_ratio", `Float lifecycle.KEC.context_ratio
-               ; ( "tools_used"
-                 , `List (List.map (fun s -> `String s) result.tools_used) )
                ]
                @ (match wall_tokens_per_second with
                   | Some v -> [ "tokens_per_second", `Float v ]
@@ -233,7 +231,7 @@ let record_accountability ~config ~updated_meta ~social_state ~result claim =
   let trace_id = Keeper_id.Trace_id.to_string updated_meta.runtime.trace_id in
   let validated_evidence = KUM.visible_run_validation result in
   let strong_evidence =
-    KUM.has_substantive_tool_calls result.Keeper_agent_run.tools_used
+    KUM.has_substantive_tool_calls (Keeper_agent_result.tool_names result)
     || Option.is_some validated_evidence
   in
   Keeper_accountability.record_completion_claim
@@ -281,32 +279,32 @@ let emit_usage_metrics_and_log
     | Runtime_agent.TurnBudgetExhausted _ -> "budget_exhausted"
     | Runtime_agent.MutationBoundaryReached _ -> "mutation_boundary"
   in
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     Keeper_metrics.(to_string Turns)
     ~labels:[ "keeper_name", updated_meta.name; "outcome", outcome_label ]
     ();
   if usage_trusted
   then (
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string InputTokens)
       ~labels:[ "keeper_name", updated_meta.name; "model", runtime_lane_label ]
       ~delta:(float_of_int result.usage.input_tokens)
       ();
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string OutputTokens)
       ~labels:[ "keeper_name", updated_meta.name; "model", runtime_lane_label ]
       ~delta:(float_of_int result.usage.output_tokens)
       ();
     if result.usage.cache_creation_input_tokens > 0
     then
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string CacheCreationTokens)
         ~labels:[ "keeper_name", updated_meta.name; "model", runtime_lane_label ]
         ~delta:(float_of_int result.usage.cache_creation_input_tokens)
         ();
     if result.usage.cache_read_input_tokens > 0
     then
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string CacheReadTokens)
         ~labels:[ "keeper_name", updated_meta.name; "model", runtime_lane_label ]
         ~delta:(float_of_int result.usage.cache_read_input_tokens)
@@ -319,7 +317,7 @@ let emit_usage_metrics_and_log
     in
     List.iter
       (fun reason ->
-         Prometheus.inc_counter
+         Otel_metric_store.inc_counter
            Keeper_metrics.(to_string UsageAnomalies)
            ~labels:
              [ "keeper_name", updated_meta.name
@@ -372,7 +370,7 @@ let persist_success_meta ~config ~original_meta ~updated_meta =
    with
    | Ok () -> ()
    | Error msg ->
-     Prometheus.inc_counter
+     Otel_metric_store.inc_counter
        Keeper_metrics.(to_string WriteMetaFailures)
        ~labels:
          [ "keeper", updated_meta.name
@@ -385,7 +383,7 @@ let persist_success_meta ~config ~original_meta ~updated_meta =
      if Keeper_meta_store.is_version_conflict_error msg
      then Log.Keeper.warn "write_meta lost CAS race after retries (keeper cycle): %s" msg
      else Log.Keeper.error "write_meta failed after keeper cycle: %s" msg);
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     Keeper_metrics.(to_string WriteMetaCycleFailures)
     ~labels:
       [ "keeper", original_meta.name

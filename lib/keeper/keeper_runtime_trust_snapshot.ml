@@ -318,7 +318,7 @@ let decision_log_persistence_surface = "keeper_runtime_trust_decision_log"
 let report_decision_log_read_drop ~reason ~path ~detail =
   Safe_ops.report_persistence_read_drop
     ~on_drop:(fun () ->
-      Prometheus.inc_counter Prometheus.metric_persistence_read_drops
+      Otel_metric_store.inc_counter Otel_metric_store.metric_persistence_read_drops
         ~labels:[("surface", decision_log_persistence_surface); ("reason", reason)]
         ())
     ~surface:decision_log_persistence_surface
@@ -497,21 +497,6 @@ let execution_summary_json ~(meta : Keeper_meta_contract.keeper_meta) ~latest_re
   let completion_contract_result =
     Option.bind latest_receipt (json_string_opt_member "completion_contract_result")
   in
-  let requested_tools =
-    match latest_receipt with
-    | Some receipt -> json_string_list_member "requested_tools" receipt
-    | None -> []
-  in
-  let tools_used =
-    match latest_receipt with
-    | Some receipt -> json_string_list_member "tools_used" receipt
-    | None -> []
-  in
-  let unexpected_tools =
-    match latest_receipt with
-    | Some receipt -> json_string_list_member "unexpected_tools" receipt
-    | None -> []
-  in
   let runtime_json =
     match latest_receipt with
     | Some receipt -> json_member "runtime" receipt
@@ -548,14 +533,6 @@ let execution_summary_json ~(meta : Keeper_meta_contract.keeper_meta) ~latest_re
   `Assoc
     [
       ("completion_contract_result", Json_util.string_opt_to_json completion_contract_result);
-      ( "runtime_proof_status",
-        Json_util.string_opt_to_json completion_contract_result );
-      ("requested_tools", Json_util.json_string_list requested_tools);
-      ("tools_used", Json_util.json_string_list tools_used);
-      ("unexpected_tools", Json_util.json_string_list unexpected_tools);
-      ("requested_tool_count", `Int (List.length requested_tools));
-      ("tools_used_count", `Int (List.length tools_used));
-      ("unexpected_tool_count", `Int (List.length unexpected_tools));
       ( "provider_attempt_count",
         match runtime_attempt_count with
         | Some value -> `Int value

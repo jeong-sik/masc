@@ -51,7 +51,7 @@
     typed). Both are out of scope here. The [`Threshold_silence]
     outcome gives the operator a one-line ERROR after
     [default_silence_threshold] identical repetitions, plus a
-    Prometheus counter increment with site label
+    Otel_metric_store counter increment with site label
     [on_tool_error_threshold_silence] preserved at the call site.
 
     Closed sum type, no catch-all.
@@ -82,7 +82,7 @@
       running count at the moment the threshold tripped (>=
       [silence_threshold]). Emit one durable ERROR
       ("threshold-silence after N identical events") and bump the
-      Prometheus callback-failures counter with site label
+      Otel_metric_store callback-failures counter with site label
       [on_tool_error_threshold_silence]. Subsequent occurrences for
       the same triple return [`Repeated] (no second
       [`Threshold_silence] fires within the same process lifetime

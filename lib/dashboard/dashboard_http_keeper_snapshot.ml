@@ -350,6 +350,14 @@ let keeper_config_json (config : Workspace.config) (name : string)
         | Some phase -> Keeper_status_runtime.pipeline_stage_of_phase phase
         | None -> "offline"
       in
+      let lifecycle_phase =
+        Option.map Keeper_state_machine.phase_to_string current_phase
+      in
+      let pipeline_stage_detail =
+        match current_phase with
+        | Some phase -> Keeper_status_runtime.pipeline_stage_detail_of_phase phase
+        | None -> "registry_absent"
+      in
       let state_diagram =
         Keeper_state_machine_mermaid.phase_to_mermaid
           ~current:(Option.value ~default:Keeper_state_machine.Offline current_phase)
@@ -357,10 +365,6 @@ let keeper_config_json (config : Workspace.config) (name : string)
       let decision_pipeline_diagram =
         let phase = Option.value ~default:Keeper_state_machine.Offline current_phase in
         let stats = Thompson_sampling.get_stats m.agent_name in
-        let tool_count = List.length (Keeper_tool_dispatch_runtime.keeper_allowed_tool_names m) in
-        let recovery_floor_count =
-          List.length (Keeper_tool_policy.failing_minimum_tool_names ())
-        in
         let turn_outcome : [`Ok | `Failed] option =
           match Keeper_registry.get ~base_path:config.base_path m.name with
           | Some entry when entry.turn_consecutive_failures > 0 ->
@@ -374,23 +378,12 @@ let keeper_config_json (config : Workspace.config) (name : string)
           ~phase
           ~thompson_alpha:stats.alpha
           ~thompson_beta:stats.beta
-          ~tool_count
-          ~recovery_floor_count
           ()
       in
       let tools_access =
-        let allowed = Keeper_tool_dispatch_runtime.keeper_allowed_tool_names m in
-        let masc_tool_count =
-          List.length (Keeper_tool_dispatch_runtime.keeper_masc_tool_names m)
-        in
         `Assoc [
           ("tool_access", Keeper_meta_contract.tool_access_to_json m.tool_access);
-          ("resolved_allowlist", `List (List.map (fun s -> `String s) allowed));
           ("tool_denylist", `List (List.map (fun s -> `String s) m.tool_denylist));
-          ("active_masc_tool_count", `Int masc_tool_count);
-          ("active_keeper_tool_count",
-            `Int (List.length allowed - masc_tool_count));
-          ("total_active", `Int (List.length allowed));
         ]
       in
       let sandbox_last_error =
@@ -406,11 +399,13 @@ let keeper_config_json (config : Workspace.config) (name : string)
          ("network_mode", `String (Keeper_types_profile_sandbox.network_mode_to_string m.network_mode));         ("sandbox_last_error", Json_util.string_opt_to_json sandbox_last_error);
          ("allowed_paths",
            `List (List.map (fun s -> `String s) m.allowed_paths));
-         ("effective_allowed_paths",
-           `List (List.map (fun s -> `String s)
-             (Keeper_alerting_path.effective_allowed_paths ~meta:m)));
-         ("pipeline_stage", `String pipeline_stage);
-         ("state_diagram", `String state_diagram);
+	         ("effective_allowed_paths",
+	           `List (List.map (fun s -> `String s)
+	             (Keeper_alerting_path.effective_allowed_paths ~meta:m)));
+	         ("pipeline_stage", `String pipeline_stage);
+	         ("lifecycle_phase", Json_util.string_opt_to_json lifecycle_phase);
+	         ("pipeline_stage_detail", `String pipeline_stage_detail);
+	         ("state_diagram", `String state_diagram);
          ("decision_pipeline_diagram", `String decision_pipeline_diagram);
          ("prompt", prompt);
          ("execution", execution);

@@ -107,62 +107,50 @@ let repo_path_context ~(config : Workspace.config) ~(meta : keeper_meta) cwd =
         Some (repo_name, repo_root, repo_root, [ repo_root ])
       | _ -> None
 
-let normalize_command_name command_name =
-  let command_name = Filename.basename command_name |> String.lowercase_ascii in
-  if String.ends_with ~suffix:".exe" command_name
-  then String.sub command_name 0 (String.length command_name - String.length ".exe")
-  else command_name
+type repo_cwd_context =
+  { repo_name : string
+  ; repo_root : string
+  ; path_root : string
+  ; is_direct_root : bool
+  }
 
-let git_subcommand args =
-  let rec scan = function
-    | [] -> None
-    | ("-C" | "-c" | "--git-dir" | "--work-tree" | "--namespace") :: _value :: rest ->
-      scan rest
-    | arg :: rest
-      when String.starts_with ~prefix:"-C" arg && String.length arg > 2 ->
-      scan rest
-    | arg :: rest
-      when String.starts_with ~prefix:"--git-dir=" arg
-           || String.starts_with ~prefix:"--work-tree=" arg
-           || String.starts_with ~prefix:"--namespace=" arg ->
-      scan rest
-    | arg :: rest when String.starts_with ~prefix:"-" arg -> scan rest
-    | subcommand :: _ -> Some (String.lowercase_ascii subcommand)
+let repo_cwd_context ~config ~meta ~cwd =
+  let cwd = normalize_repo_cwd_path cwd in
+  match repo_path_context ~config ~meta cwd with
+  | Some (repo_name, repo_root, path_root, _) ->
+    Some { repo_name; repo_root; path_root; is_direct_root = String.equal repo_root cwd }
+  | None -> None
+
+let invalidate_repo_currency_cache ~config ~meta ~repo_name =
+  let cpath = Playground_repo_readiness.clone_path ~config ~meta ~repo_name in
+  Hashtbl.remove currency_sync_cache cpath
+;;
+
+let repo_currency_not_ready_error ~config ~meta ~repo_name ~reason ~cwd =
+  let clone_path = Playground_repo_readiness.clone_path ~config ~meta ~repo_name in
+  let hint_suffix =
+    match Playground_repo_readiness.deleted_tracked_files_restore_hint ~clone_path with
+    | Some hint -> " " ^ hint
+    | None -> ""
   in
-  scan args
-
-let git_subcommand_is_direct_repo_diagnostic = function
-  | "status" | "branch" | "log" | "diff" | "remote" | "rev-parse" | "fetch"
-  | "worktree" ->
-    true
-  | _ -> false
-
-let direct_repo_diagnostic_command ir =
-  match Keeper_tool_execute_command_semantics.effective_stages_of_ir ir with
-  | [ stage ] when String.equal (normalize_command_name stage.bin) "git" -> (
-    match git_subcommand stage.args with
-    | Some subcommand -> git_subcommand_is_direct_repo_diagnostic subcommand
-    | None -> false)
-  | _ -> false
-
-let repo_currency_not_ready_error ~repo_name ~reason ~cwd =
   Printf.sprintf
     "sandbox_repo_stale: sandbox repo root repos/%s is not current and was \
      preserved (%s). Direct repo-root Execute is blocked so the agent does not \
      run against stale local state. Use cwd=\"repos/%s/.worktrees/<task>\" for \
      task work, or run diagnostic git status/branch/log/diff/remote/rev-parse/\
      fetch/worktree and clean, stash, or repair the sandbox repo root before \
-     retrying. cwd=%s"
+     retrying.%s cwd=%s"
     repo_name
     reason
     repo_name
+    hint_suffix
     cwd
 
 let validate_repo_cwd_currency_ready
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(cwd : string)
-      (ir : Masc_exec.Shell_ir.t)
+      ~allow_stale_preserved_repo_context
   =
   match repo_path_context ~config ~meta cwd with
   | None -> Ok ()
@@ -173,15 +161,18 @@ let validate_repo_cwd_currency_ready
               (normalize_repo_cwd_path path_root)) ->
     Ok ()
   | Some (repo_name, _repo_root, _path_root, _accepted_toplevels) ->
-    if direct_repo_diagnostic_command ir then Ok ()
+    if allow_stale_preserved_repo_context
+    then Ok ()
     else
       match repo_currency_outcome_best_effort ~config ~meta ~repo_name with
       | Some Playground_repo_readiness.Up_to_date | Some (Advanced _) -> Ok ()
       | Some (Preserved reason) | Some (Skipped reason) ->
-        Error (repo_currency_not_ready_error ~repo_name ~reason ~cwd)
+        Error (repo_currency_not_ready_error ~config ~meta ~repo_name ~reason ~cwd)
       | None ->
         Error
           (repo_currency_not_ready_error
+             ~config
+             ~meta
              ~repo_name
              ~reason:"currency probe failed"
              ~cwd)
@@ -474,7 +465,7 @@ let validate_repo_path_args_ready
       | Some args -> Exec_policy.path_argument_values command_name args)
   in
   let path_args_of_effective_stage
-      (stage : Keeper_tool_execute_command_semantics.parsed_stage)
+      (stage : Masc_exec.Shell_ir_command_shape.stage)
     =
     let command_name =
       stage.bin |> Filename.basename |> normalize_repo_command_name
@@ -491,7 +482,7 @@ let validate_repo_path_args_ready
   in
   let all_path_args =
     path_args ir
-    @ (Keeper_tool_execute_command_semantics.effective_stages_of_ir ir
+    @ (Masc_exec.Shell_ir_command_shape.effective_stages ir
        |> List.concat_map path_args_of_effective_stage)
   in
   let validate_target seen raw =

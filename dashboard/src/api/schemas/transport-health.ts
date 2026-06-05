@@ -110,7 +110,7 @@ const GrpcSchema = object({
 
 // Diagnostic counters for the WS delivery path.  Each field falls back
 // to 0 so this remains forward-compatible with servers that have not
-// yet landed the corresponding Prometheus metric (e.g. a dashboard
+// yet landed the corresponding OTel metric (e.g. a dashboard
 // pointed at an older build should not surface schema errors, it
 // should show zeroes and let the operator know the metric is absent).
 const WebsocketDeliverySchema = object({

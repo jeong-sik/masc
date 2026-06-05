@@ -11,24 +11,23 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 
-let translate_detail (d : Keeper_turn_driver.no_tool_capable_detail option) : no_tool_capable_detail option =
-  match d with
-  | None -> None
-  | Some { Keeper_turn_driver.configured_labels; provider_rejections } ->
-    Some { configured_labels; provider_rejections }
-
-let translate_reason (r : Keeper_turn_driver.runtime_exhaustion_reason) : runtime_exhaustion_reason =
-  match r with
+let blocker_reason_of_turn_driver_reason
+    (reason : Keeper_turn_driver.runtime_exhaustion_reason)
+  : Keeper_meta_contract.runtime_exhaustion_reason
+  =
+  match reason with
   | Keeper_turn_driver.Connection_refused -> Connection_refused
   | Keeper_turn_driver.Dns_failure -> Dns_failure
   | Keeper_turn_driver.No_providers_available -> No_providers_available
   | Keeper_turn_driver.All_providers_failed -> All_providers_failed
-  | Keeper_turn_driver.Candidates_filtered_after_cycles -> Candidates_filtered_after_cycles
+  | Keeper_turn_driver.Candidates_filtered_after_cycles ->
+    Candidates_filtered_after_cycles
   | Keeper_turn_driver.Max_turns_exceeded -> Max_turns_exceeded
-  | Keeper_turn_driver.Structural_attempt_timeout { detail } -> Structural_attempt_timeout { detail }
+  | Keeper_turn_driver.Structural_attempt_timeout { detail } ->
+    Structural_attempt_timeout { detail }
   | Keeper_turn_driver.Capacity_exhausted -> Capacity_exhausted
-  | Keeper_turn_driver.No_tool_capable detail -> No_tool_capable (translate_detail detail)
-  | Keeper_turn_driver.Other_detail s -> Other_detail s
+  | Keeper_turn_driver.Other_detail detail -> Other_detail detail
+;;
 
 let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class option =
   match Keeper_error_classify.recoverable_runtime_failure_reason err with
@@ -37,7 +36,7 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
   match Keeper_turn_driver.classify_masc_internal_error err with
   | Some (Keeper_turn_driver.Capacity_backpressure _) -> Some Capacity_backpressure
   | Some (Keeper_turn_driver.Runtime_exhausted { reason; _ }) ->
-    Some (Runtime_exhausted (translate_reason reason))
+    Some (Runtime_exhausted (blocker_reason_of_turn_driver_reason reason))
   | Some (Keeper_turn_driver.Resumable_cli_session _) -> None
   | Some (Keeper_turn_driver.Accept_rejected _) -> None
   | Some (Keeper_turn_driver.Admission_queue_timeout _) ->
@@ -110,10 +109,6 @@ let is_runtime_exhausted_blocker_class blocker_class =
   String.equal
     blocker_class
     (blocker_class_to_string (Runtime_exhausted (Other_detail "")))
-;;
-
-let is_no_tool_capable_blocker_class blocker_class =
-  String.equal blocker_class "runtime_exhausted_no_tool_capable"
 ;;
 
 let is_provider_runtime_blocker_class blocker_class =
@@ -285,21 +280,6 @@ let runtime_blocker_surface_of_failure_reason (reason : Keeper_registry.failure_
                window; keeper was auto-paused before restart loop."
               distinct_count)
          Stale_fleet_batch)
-  | Keeper_registry.Provider_runtime_error
-      { reason = Some (No_tool_capable _ as no_tool_capable); detail; _ } ->
-    (* Typed no-tool-capable path: the producer
-       ([keeper_unified_turn_types.runtime_exhausted_failure_reason_of_raw_error])
-       carries the already-typed [No_tool_capable] reason on the record.
-       Reading the typed field instead of reparsing [code =
-       "no_tool_capable_provider"] removes a typed->string->typed round-trip;
-       the [code] string is retained on the record for wire/dashboard readers. *)
-    Some
-      (runtime_blocker_surface_of_typed_class
-         ~summary:
-           (Printf.sprintf
-              "No tool-capable provider available (registry path): %s"
-              detail)
-         (Runtime_exhausted no_tool_capable))
   | Keeper_registry.Provider_runtime_error { code; detail; _ }
     when provider_runtime_code_is_sdk_tool_retry_exhausted code ->
     Some

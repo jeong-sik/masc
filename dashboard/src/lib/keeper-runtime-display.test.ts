@@ -102,6 +102,34 @@ describe('keeperDisplayStatus', () => {
       })
       expect(keeperDisplayStatus(keeper)).toBe('stopped')
     })
+
+    it('uses lifecycle_phase when heartbeat is alive but status is offline', () => {
+      const keeper = makeKeeper({
+        status: 'offline',
+        phase: 'Running',
+        lifecycle_phase: 'Stopped',
+        last_heartbeat: new Date().toISOString(),
+      })
+      expect(keeperDisplayStatus(keeper)).toBe('stopped')
+    })
+
+    it('does not turn exact Offline lifecycle into idle just because heartbeat is recent', () => {
+      const keeper = makeKeeper({
+        status: 'offline',
+        lifecycle_phase: 'Offline',
+        last_heartbeat: new Date().toISOString(),
+      })
+      expect(keeperDisplayStatus(keeper)).toBe('unbooted')
+    })
+
+    it('lets terminal lifecycle override stale active status', () => {
+      const keeper = makeKeeper({
+        status: 'active',
+        phase: 'Running',
+        lifecycle_phase: 'Dead',
+      })
+      expect(keeperDisplayStatus(keeper)).toBe('dead')
+    })
   })
 })
 
@@ -201,7 +229,7 @@ describe('keeperRuntimeBlockerLabel', () => {
     expect(keeperRuntimeBlockerLabel('provider_runtime_error')).toBe(
       '런타임 호출 오류',
     )
-    expect(keeperRuntimeBlockerLabel('no_tool_capable_provider')).toBe('도구 실행 런타임 없음')
+    expect(keeperRuntimeBlockerLabel('runtime_exhausted')).toBe('런타임 후보 소진')
   })
 
   it('labels the 9 RFC-0062 SDK blocker variants', () => {
@@ -236,10 +264,10 @@ describe('keeperRuntimeBlockerHint', () => {
   it('explains recoverable tool-route failures when no summary is available', () => {
     expect(
       keeperRuntimeBlockerHint(makeKeeper({
-        runtime_blocker_class: 'no_tool_capable_provider',
-        runtime_blocker_summary: 'no_tool_capable_provider',
+        runtime_blocker_class: 'runtime_exhausted',
+        runtime_blocker_summary: 'runtime_exhausted',
       })),
-    ).toBe('요구 도구를 실행할 수 있는 runtime lane이 없어 descriptor 또는 tool surface 확인이 필요합니다.')
+    ).toBe('런타임 후보가 모두 소진되어 runtime 상태 확인이 필요합니다.')
   })
 
   it('explains admission queue waits as keeper FIFO waits, not OAS waits', () => {

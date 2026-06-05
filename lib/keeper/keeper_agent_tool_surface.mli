@@ -1,17 +1,5 @@
 (** Tool selection constants and backlog task reconciliation. *)
 
-(** Per-keeper dedupe set used by [should_log_unexpected_tool_partial_once]
-    so a partial-match warning fires once per (keeper, tool list) tuple. *)
-val unexpected_tool_partial_warned : (string, unit) Hashtbl.t
-
-(** Mutex guarding [unexpected_tool_partial_warned] mutation. *)
-val unexpected_tool_partial_warn_mu : Eio.Mutex.t
-
-(** [true] iff this is the first time the (keeper_name,
-    sorted unexpected_tool_names) tuple has been seen. *)
-val should_log_unexpected_tool_partial_once :
-  keeper_name:string -> unexpected_tool_names:string list -> bool
-
 (** Per-turn lane classification.  Closed sum type; the OCaml side
     pins the alphabet emitted by keeper_run_tools
     ({"text_only", "tool_optional", "tool_disabled", "retry"}).

@@ -12,8 +12,8 @@ module Types = Masc_domain
 module GP = Masc.Governance_pipeline
 module Keeper_meta_json_parse = Masc.Keeper_meta_json_parse
 module AQ = Masc.Keeper_approval_queue
-module KT = Masc.Keeper_types
 module SDH = Server_dashboard_http
+module KT = Keeper_types
 module Mcp_eio = Masc.Mcp_server_eio
 
 let check = Alcotest.(check string)
@@ -114,8 +114,8 @@ let test_approval_queue_failure_metric_labels_site () =
       "audit-approvals"
   in
   let before =
-    Masc.Prometheus.metric_value_or_zero
-      Masc.Keeper_metrics.(to_string ApprovalQueueFailures)
+    Masc.Otel_metric_store.metric_value_or_zero
+      Keeper_metrics.(to_string ApprovalQueueFailures)
       ~labels
       ()
   in
@@ -135,8 +135,8 @@ let test_approval_queue_failure_metric_labels_site () =
         ~id:"audit-failure-path-test" ~keeper_name ~tool_name:"tool_search_files"
         ~risk_level:AQ.Medium ();
       let after =
-        Masc.Prometheus.metric_value_or_zero
-          Masc.Keeper_metrics.(to_string ApprovalQueueFailures)
+        Masc.Otel_metric_store.metric_value_or_zero
+          Keeper_metrics.(to_string ApprovalQueueFailures)
           ~labels
           ()
       in

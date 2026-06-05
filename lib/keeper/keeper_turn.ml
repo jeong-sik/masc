@@ -538,7 +538,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                with
                | Ok () -> ()
                | Error msg ->
-                   Prometheus.inc_counter
+                   Otel_metric_store.inc_counter
                      Keeper_metrics.(to_string WriteMetaFailures)
                      ~labels:
                        [ ("keeper", updated_meta.name);
@@ -576,19 +576,19 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                with
                | Eio.Cancel.Cancelled _ as e -> raise e
                | exn ->
-                   (* #10047: surface the drop as a Prometheus counter so
+                   (* #10047: surface the drop as a Otel_metric_store counter so
                       dashboards can alert when state advances without a
                       matching metric record. The log alone was too easy
                       to miss and operators trusted metric jsonl as
                       ground truth. *)
-                   Prometheus.inc_counter
+                   Otel_metric_store.inc_counter
                      Keeper_metrics.(to_string MetricEmitDropped)
                      ~labels:[
                        ("keeper", updated_meta.name);
                        ("channel", "turn");
                        ("site", "keeper_turn_msg");
                      ] ();
-                   Prometheus.inc_counter
+                   Otel_metric_store.inc_counter
                      Keeper_metrics.(to_string TurnMetricsSnapshotFailures)
                      ~labels:[("keeper", updated_meta.name); ("site", "turn")]
                      ();
@@ -605,15 +605,16 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                   let trace_id =
                     Keeper_id.Trace_id.to_string updated_meta.runtime.trace_id
                   in
+                  let tool_names = Keeper_agent_result.tool_names result in
                   let strong_evidence =
-                    result.tools_used
+                    tool_names
                     |> List.exists (fun tool_name ->
                            let trimmed = String.trim tool_name in
                            trimmed <> ""
                            && not (String.equal trimmed "keeper_stay_silent"))
                   in
                   let tool_refs =
-                    result.tools_used
+                    tool_names
                     |> List.filter_map (fun tool_name ->
                            let trimmed = String.trim tool_name in
                            if trimmed = ""
@@ -640,7 +641,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
               | None -> ());
               start_keepalive ctx updated_meta;
               Progress.Tracker.complete turn_tracker
-                ~message:(Printf.sprintf "Turn completed: %d tool calls" result.tool_calls_made) ();
+                ~message:(Printf.sprintf "Turn completed: %d tool calls" (Keeper_agent_result.tool_call_count result)) ();
               let reply_json =
                 let surface_model_used = Keeper_agent_run.runtime_lane_label in
                 let u = result.usage in
@@ -663,7 +664,6 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                   ("model", `String surface_model_used);
                   ("model_used_raw", `String surface_model_used);
                   ("turns", `Int result.turn_count);
-                  ("tool_calls", `Int result.tool_calls_made);
                   ( "tool_call_evidence",
                     `List tool_call_evidence );
                   ("usage", `Assoc [

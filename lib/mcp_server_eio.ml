@@ -78,17 +78,18 @@ let mcp_session_of_json = Mcp_server_eio_governance.mcp_session_of_json
 
 (* Tag registry initialization.
    Most modules register via Tool_spec.register at module load time.
-   Only Tool_schemas_inline (sub-library) and Board remain here. *)
+   Inline schemas and domain adapters that need composition-root wiring
+   remain here. *)
 let () =
   let open Tool_dispatch in
   register_module_tag ~schemas:Tool_schemas_inline.schemas ~tag:Mod_inline;
-  Tool_board.register ();
+  Board_tool.register ();
   mark_tag_registry_initialized ();
   (* Inject masc_* schemas into keeper bridge for surface/policy filtering.
-     Uses Config.raw_all_tool_schemas which includes Board schemas
-     not present in Tools.all_schemas_extended. *)
+     Uses Config.raw_all_tool_schemas, including domain-adapter schemas not
+     present in Tools.all_schemas_extended. *)
   Keeper_tool_dispatch_runtime.inject_masc_schemas Config.raw_all_tool_schemas;
-  (* Report tool schema budget to Prometheus (#7483 Step 1). *)
+  (* Report tool schema budget to Otel_metric_store (#7483 Step 1). *)
   (let schemas = Config.visible_tool_schemas () in
    let count = List.length schemas in
    let chars =
@@ -101,7 +102,7 @@ let () =
        0
        schemas
    in
-   Prometheus.set_tool_schema_stats ~count ~approx_tokens:(chars / 4));
+   Otel_metric_store.set_tool_schema_stats ~count ~approx_tokens:(chars / 4));
   (* Wire tag-based dispatch for keeper masc_* tools.
      See #4579: keeper_tool_dispatch_runtime uses handler registry (Tool_Board only),
      this callback adds tag-registry dispatch for ~190 more tools. *)

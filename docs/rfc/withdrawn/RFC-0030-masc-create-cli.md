@@ -14,7 +14,7 @@ withdrawn_reason: "Authoring CLI never implemented. masc uses MCP tools + dashbo
 - **Created**: 2026-05-05
 - **Audit reference**: `docs/audit-responses/2026-05-05-integrated-improvement-design.md` §2-1, §2-2
 - **Related**: RFC-0027 (typed runtime), RFC-0019 (keeper credential unification),
-  RFC-0008 (credential provider), `lib/keeper/keeper_persona_authoring.ml`,
+  RFC-0008 (credential provider), `lib/keeper/keeper_persona.ml`,
   `lib/runtime/runtime_config.ml`
 
 ## 1. Problem
@@ -91,8 +91,8 @@ masc create persona \
 Implementation:
 
 - New module `lib/keeper/keeper_persona_create.ml` that owns the
-  TOML-write side. `keeper_persona_authoring.ml` already parses /
-  validates; this RFC adds the *generative* counterpart.
+  TOML-write side. `keeper_persona.ml` owns the current persona schema/save
+  tool path; this RFC adds the *generative* counterpart.
 - `--dry-run` writes nothing, prints the rendered TOML + the validation
   result to stdout. No filesystem effect.
 - Validation runs the same pipeline as autoboot (`keeper_meta_json_parse`
@@ -133,8 +133,8 @@ Implementation:
   preconditions for runtime reload — without it, this command does
   nothing safe.
 - `runtime delete` refuses if any keeper TOML references the profile.
-  The check uses `keeper_persona_authoring`'s reverse index (added in
-  the same PR).
+  The retired authoring reverse index no longer exists; reviving this withdrawn
+  command would need a fresh current-code check.
 
 This surface has the largest risk: runtime routing is hot-path.
 Mitigation:

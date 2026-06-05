@@ -2,59 +2,26 @@
 (library
  (name masc)
  (public_name masc)
- (flags
-  (:standard -open Masc_prometheus -open Masc_auth -open Masc_runtime -open Masc_json_field -open Masc_lockfree_atomic -open Masc_keeper_metrics -open Masc_pool_metrics))
- (foreign_stubs
-  (language c)
-  (names nofile_stubs))
 (private_modules
  http_body_buffer
  http_response_payload
  error_event_type
- keeper_alert_persist_kind
- keeper_metrics_sse_failure_kind
- keeper_paused_state_persist_phase
- keeper_bookkeeping_failure_kind
- keeper_checkpoint_failure_operation
- keeper_memory_llm_summary_outcome
  keeper_tool_call_log_route_evidence
- keeper_user_visible_reply_source
- keeper_continuity_summary_source
  keeper_world_observation_board_signal
  keeper_world_observation_continuity
  keeper_world_observation_inputs
  keeper_world_observation_message_scope
- keeper_profile_load_failure_site
- keeper_turn_cleanup_failure_site
  keeper_event_bus_drain_site
- keeper_turn_metrics_snapshot_failure_site
- keeper_metric_emit_dropped_site
- keeper_post_turn_wirein_failure_site
  sse_jsonrpc_filter
  keeper_tool_call_log_context
-
- board_prometheus_hooks
- workspace_prometheus_hooks
-
- keeper_types_profile_sandbox
- keeper_types_profile_persona keeper_types_profile_persona_defaults
- keeper_types_profile_oas_env
- keeper_types_profile_defaults
- keeper_types_profile
- keeper_meta_tool_access
- keeper_meta_contract
- keeper_personality_io
- keeper_meta_json_parse
- keeper_meta_json
- keeper_types_support
- keeper_meta_store
-
-
+ board_metric_hooks_adapter workspace_metric_hooks
+ keeper_types_profile_persona keeper_types_profile_persona_defaults keeper_types_profile_oas_env
+ keeper_types_profile_defaults keeper_types_profile keeper_meta_tool_access keeper_meta_contract
+ keeper_personality_io keeper_meta_json_parse keeper_meta_json keeper_types_support keeper_meta_store
  mcp_server_eio_tool_timeout
   keeper_tool_descriptor keeper_tool_descriptor_resolution keeper_tool_runtime keeper_tool_registry
   keeper_tool_resolution
   keeper_tool_policy_config
-  keeper_discovered_tools
   keeper_tool_affinity
   keeper_tool_shared_runtime
    keeper_tool_board_runtime
@@ -62,8 +29,8 @@
    keeper_tool_registered_runtime
    keeper_tool_ide_runtime
    keeper_sandbox_docker
-   keeper_workspace_op keeper_tool_execute_timeout keeper_tool_execute_runtime_paths keeper_tool_execute_path
-   keeper_tool_execute_readonly_policy keeper_tool_execute_command_parse keeper_tool_execute_command_words keeper_workspace_read_ops
+   keeper_tool_execute_runtime_paths keeper_tool_execute_path
+   keeper_tool_execute_readonly_policy keeper_workspace_read_ops
    keeper_tool_execute_input
    keeper_tool_execute_runtime
    keeper_workspace_ops
@@ -74,7 +41,6 @@
    keeper_tool_dispatch_runtime
   keeper_status_metrics
   keeper_status_runtime
-  voice_runtime_overlay
   keeper_status_detail_observability
   keeper_status_detail
   keeper_tool_persona_runtime
@@ -96,8 +62,6 @@
   keeper_approval_queue
   keeper_post_turn
   keeper_tool_progress
-  keeper_tool_observation
-  keeper_tool_response
   keeper_tool_query
   keeper_tool_selection
   keeper_tool_capability_axis
@@ -105,12 +69,11 @@
   keeper_agent_prompt_metrics keeper_agent_tool_surface
   keeper_agent_run_phase0_telemetry keeper_agent_run_post_turn_memory keeper_agent_run_phase5_task_link
   keeper_agent_run_contract_helpers keeper_agent_run_response_text keeper_agent_run_thinking_trajectory
-  keeper_agent_run_tool_observation keeper_agent_run_tool_surface_violation keeper_agent_run_receipt_append keeper_agent_run_receipt keeper_agent_run_sidecar keeper_agent_run_finalize_response
+  keeper_agent_run_receipt_append keeper_agent_run_receipt keeper_agent_run_sidecar keeper_agent_run_finalize_response
   keeper_agent_result keeper_agent_error
   keeper_run_tools_hooks
   keeper_run_tools_search
   keeper_run_tools_setup
-  voice_bridge_transport
   keeper_turn_driver_provider_attempt
   keeper_turn_driver
   keeper_turn_driver_helpers
@@ -141,7 +104,6 @@
   keeper_turn_up
   keeper_turn_lifecycle
   keeper_msg_async
-  keeper_event_bus
   keeper_heartbeat_loop_observations
   keeper_supervisor_startup_helpers
   keeper_supervisor_restart_noop
@@ -155,7 +117,6 @@
   worker_container_runners
   exec_shell_adapter
   ;; keeper_memory sub-modules
-  keeper_memory_policy_summary_filter
   keeper_memory_policy
   keeper_memory_bank
   keeper_memory_llm_summary
@@ -185,10 +146,10 @@
   tool_local_runtime_bench
   tool_local_runtime_status
   tool_local_runtime_probe
-  ;; tool_inline_dispatch sub-modules
-  tool_inline_dispatch_types
-  tool_inline_dispatch_workspace
-  tool_inline_dispatch_comm
+  ;; mcp_tool_runtime sub-modules
+  mcp_tool_runtime_types
+  mcp_tool_runtime_workspace
+  mcp_tool_runtime_comm
   workspace_goals_verification
   tool_misc_introspection
   keeper_tool_persona_audit
@@ -200,15 +161,6 @@
   meta_cognition_parse
   meta_cognition_interpret
   meta_cognition_digest
-  tool_board_schemas
-  tool_board_format
-  tool_board_cache
-  tool_board_handlers
-  tool_board_post
-  tool_board_sub_board
-  tool_board_curation
-  tool_board_registry
-  tool_board_dispatch
   )
  (libraries
    mcp_protocol
@@ -267,6 +219,25 @@
    ;; leaf sub-library. The parent library still references those modules
    ;; unqualified, so it must depend on the leaf explicitly.
    masc.tool_types
+   ;; Shared leaf helpers extracted out of include_subdirs-unqualified ownership.
+   masc.lockfree_atomic
+   masc.json_field
+   masc.pool_metrics
+   masc.otel_spans
+   masc.otel_genai
+   masc.otel_trace_context
+   masc.otel_dispatch_hook
+   masc.telemetry_coverage_gap
+   masc.telemetry_unified_source
+   masc.telemetry_unified
+   masc.voice_config
+   masc.voice_runtime_overlay
+   masc.voice_bridge_core
+   masc.discovery_cache
+   masc.local_runtime_pool
+   masc.worker_execution_backend
+   masc.worker_runtime_config
+   masc.worker_execution_spec
    ;; RFC-0056 Phase 1L — Attribution envelope extracted to lib/attribution/.
    ;; Pure Attribution + phantom-tagged helpers, deps: stdlib + Yojson only.
    masc.attribution
@@ -276,6 +247,54 @@
    ;; RFC-0056 Phase 1N — Keeper_state_* deterministic FSM cluster extracted to
    ;; lib/keeper_state/. Parent still references bare Keeper_state_* modules.
    masc.keeper_state
+   ;; Keeper-owned pure/type leaves extracted from lib/keeper/.
+   masc.keeper_accountability_claim_types
+   masc.keeper_runtime_manifest_types
+   masc.keeper_registry_types_kill_class
+   masc.keeper_registry_types_turn_phase
+   masc.keeper_registry_types_decision
+   masc.keeper_registry_types_compaction
+   masc.keeper_hooks_oas_types
+   masc.keeper_turn_slot_types
+   masc.keeper_binding_health_config
+   masc.keeper_transition_audit_types
+   masc.keeper_path_rejection
+   masc.keeper_failure_circuit_breaker_types
+   masc.keeper_approval_queue_rules_types
+   masc.keeper_toml_parser
+   masc.keeper_toml_loader
+   masc.keeper_runtime_config
+   masc.keeper_tool_name
+   masc.keeper_id
+   masc.keeper_terminal_reason
+   masc.keeper_timing
+   masc.keeper_token_count
+   masc.keeper_sandbox_error
+   masc.keeper_provider_error_class
+   masc.keeper_failure_taxonomy
+   masc.keeper_world_observation_turn_types
+   masc.keeper_memory_taxonomy
+   masc.keeper_memory_policy_summary_filter
+   masc.keeper_tool_command_parse
+   masc.keeper_outcome_taxonomy
+   masc.keeper_metrics
+   masc.keeper_types
+   masc.keeper_types_profile_sandbox
+   masc.keeper_pressure
+   masc.keeper_lifecycle_events
+   masc.keeper_usage_trust
+   masc.keeper_measurement
+   masc.keeper_prompt_names
+   masc.keeper_event_bus
+   masc.keeper_failure_policy
+   masc.keeper_synthetic_marker
+   masc.keeper_oas_timeout_message
+   masc.keeper_tool_response
+   masc.keeper_social_model_types
+   masc.keeper_discovered_tools
+   masc.keeper_tool_execute_timeout
+   masc.keeper_tool_execute_shell_ir
+   masc.keeper_workspace_op
    ;; Runtime_provider_labels extracted to lib/runtime_provider_labels/.
    ;; Leaf boundary over agent_sdk.llm_provider canonical provider labels.
    masc.runtime_provider_labels
@@ -286,16 +305,14 @@
      masc.masc_event_bus
      masc.provider_tool_support
      masc.keeper_internal_error
-     masc.prometheus
      masc.auth
      masc.fd_accountant
-     masc.keeper_metrics
-     masc.pool_metrics
-     masc.lockfree_atomic
-     masc.json_field
    ;; Model_inference_metrics facade + decomposition siblings extracted to
    ;; lib/model_inference_metrics/. Parent still references the bare facade.
    masc.model_inference_metrics
+   ;; Keeper_attempt_liveness extracted to lib/keeper_attempt_liveness/.
+   ;; Per-attempt streaming liveness FSM + config + observer glue.
+   masc.keeper_attempt_liveness
    ;; RFC-0132 PR-1 — Boundary_redaction SSOT for external-surface
    ;; provider/model label redaction. Codemod in PR-2 routes "runtime"
    ;; literals in lib/runtime and lib/keeper through this leaf.
@@ -472,6 +489,8 @@
    masc_board
    ;; Decoupled board handlers
    masc.board_handlers
+   ;; Board MCP adapter: joins Board domain with neutral Tool substrate.
+   masc.board_tool_adapter
    ;; Decoupled task handlers
    masc.task_handlers
    ;; Random identifier helper — shared between masc_workspace and masc
@@ -485,23 +504,14 @@
    masc_turn
    ;; Agent token-ledger domain (extracted leaf — earn/spend/balance, Board-callable)
    masc_economy
-   ;; Tool dispatch substrate (extracted lib — PR-S3, RFC-0056 LANE 2).
-   ;; tool_dispatch / tool_name / tool_catalog / tool_registry / tool_token /
-   ;; dispatch_outcome / tool_catalog_inference. The compiler enforces
-   ;; Tool⊥Keeper/Runtime/Goal/Task/Board: masc_tool_dispatch's (libraries)
-   ;; admits only neutral leaves. Telemetry (Tool_telemetry.with_span) and
-   ;; warm-up stats (Telemetry_eio) are injected at the composition root.
-   ;; (wrapped false) keeps bare Tool_dispatch.X / Tool_catalog.X refs working.
+   ;; Tool dispatch substrate. The compiler enforces Tool⊥Keeper/Runtime/Goal/Task/Board
+   ;; via masc_tool_dispatch's neutral-only (libraries).
    masc.masc_tool_dispatch
-   ;; RFC-0056 Phase 2 / LANE 6 — pure tool surface leaf, above the dispatch
-   ;; substrate. (libraries) admits no keeper/runtime/domain/server module, so a
-   ;; re-coupling is a dune cycle. Pure schema/vocab/policy, zero mega-outbound.
+   ;; Pure tool surface leaf above the dispatch substrate.
    masc.masc_tool_surface
-   ;; RFC-0217 S2 — OTel metric bridge leaf (Prometheus_store snapshot -> OTLP
-   ;; observable). Prometheus depends on this; the leaf has no masc dep.
+   ;; OTel metric bridge leaf (Otel_metric_store_core snapshot -> OTLP observable).
    masc.otel_metrics
-   ;; Thompson Sampling agent selection (extracted leaf — Health/Prometheus
-   ;; edges inverted to callbacks; Board-callable record_vote without mega-lib cycle)
+   ;; Thompson Sampling leaf; health/Otel_metric_store edges are callbacks.
    masc_thompson
    ;; Environment configuration (extracted sub-library)
    masc.config

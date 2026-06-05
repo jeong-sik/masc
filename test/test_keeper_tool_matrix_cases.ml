@@ -26,7 +26,7 @@ and fixture = {
   generic : Generic.fixture;
   config : Masc.Workspace.config;
   meta : Masc.Keeper_meta_contract.keeper_meta;
-  ctx_snapshot : Masc.Keeper_types.working_context;
+  ctx_snapshot : Keeper_types.working_context;
   tools : Agent_sdk.Tool.t list;
 }
 
@@ -114,7 +114,7 @@ let init_keeper_bridge =
           close_out oc;
           temp_path)
       in
-      (match Masc.Runtime.init_default ~config_path with
+      (match Runtime.init_default ~config_path with
        | Ok () -> ()
        | Error err -> Printf.eprintf "[WARN] Runtime.init_default failed: %s\n" err);
       Masc.Keeper_tool_shared_runtime.tag_dispatch_fn := Masc.Keeper_tag_dispatch.dispatch;
@@ -245,7 +245,7 @@ let prepare_keeper_name fixture name =
   if
     List.mem name
       [ "keeper_task_force_release"; "keeper_task_force_done";
-        "keeper_task_done"; "keeper_task_submit_for_verification" ]
+        "keeper_task_done" ]
   then
     ensure_keeper_claim fixture;
   if name = "keeper_voice_session_end" then ensure_voice_session fixture;
@@ -340,13 +340,6 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
   | "keeper_library_read" ->
       `Assoc [ ("topic", `String (Generic.ensure_library_topic fixture.generic)) ]
   | "keeper_tasks_list" -> `Assoc [ ("include_done", `Bool true) ]
-  | "keeper_task_submit_for_verification" ->
-      `Assoc
-        [
-          ("task_id", `String (Generic.ensure_task fixture.generic));
-          ("notes", `String "tool matrix verification notes: completion_notes are done and pr_url_or_artifact_ref is set");
-          ("evidence_refs", `List [ `String "https://github.com/jeong-sik/me/pull/1" ]);
-        ]
   | "keeper_task_force_release" ->
       `Assoc
         [

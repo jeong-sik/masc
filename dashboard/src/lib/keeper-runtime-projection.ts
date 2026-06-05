@@ -22,7 +22,6 @@ export type KeeperRuntimeProjectionSignalKind =
   | 'stop_requested'
   | 'runtime_trace'
   | 'runtime_warning'
-  | 'tool_contract'
   | 'fsm_raw_lanes'
 
 export type KeeperRuntimeProjectionSignalState =
@@ -99,7 +98,6 @@ export interface KeeperRuntimeProjection {
   readonly socialModel: KeeperSocialModelProjection
   readonly traceEvidence: KeeperRuntimeTraceProjection
   readonly runtimeWarnings: string[]
-  readonly toolContract: string
   readonly fsmLanes: KeeperRuntimeProjectionFsmLane[]
   readonly signals: KeeperRuntimeProjectionSignal[]
   readonly headline: string
@@ -165,10 +163,6 @@ export function deriveKeeperRuntimeProjection({
   const socialModel = deriveSocialModelProjection(keeper)
   const traceEvidence = terminalEventLabel(runtimeTrace)
   const runtimeWarnings = runtimeWarningList(runtimeResolution)
-  const toolContract = compactToken(composite?.execution?.tool_contract_result ?? null, 'tool contract unknown')
-  const executionCurrent =
-    composite?.runtime_attention?.execution_current !== false
-    && composite?.runtime_attention?.stale_execution_receipt !== true
   const fsmLanes = deriveFsmLanes(composite, opState)
   const idleLabel =
     typeof composite?.idle_seconds === 'number'
@@ -199,8 +193,6 @@ export function deriveKeeperRuntimeProjection({
     stopRequested,
     traceEvidence,
     runtimeWarnings,
-    toolContract,
-    executionCurrent,
     fsmLanes,
     runtimeReason,
   })
@@ -235,7 +227,6 @@ export function deriveKeeperRuntimeProjection({
     `social ${socialModel.recognized === false ? 'unrecognized' : socialModel.recognized === true ? 'recognized' : 'unknown'}`,
     `fiber ${fiberAlive.alive ? 'alive' : 'not_proven'}`,
     stopRequested ? 'stop requested' : 'stop clear',
-    `tool ${toolContract}`,
     fsmLaneSummary(fsmLanes),
   ].join(' · ')
 
@@ -251,7 +242,6 @@ export function deriveKeeperRuntimeProjection({
     socialModel,
     traceEvidence,
     runtimeWarnings,
-    toolContract,
     fsmLanes,
     signals,
     headline,
@@ -406,8 +396,6 @@ function buildProjectionSignals({
   stopRequested,
   traceEvidence,
   runtimeWarnings,
-  toolContract,
-  executionCurrent,
   fsmLanes,
   runtimeReason,
 }: {
@@ -419,8 +407,6 @@ function buildProjectionSignals({
   readonly stopRequested: boolean
   readonly traceEvidence: KeeperRuntimeTraceProjection
   readonly runtimeWarnings: readonly string[]
-  readonly toolContract: string
-  readonly executionCurrent: boolean
   readonly fsmLanes: readonly KeeperRuntimeProjectionFsmLane[]
   readonly runtimeReason: string
 }): KeeperRuntimeProjectionSignal[] {
@@ -435,7 +421,6 @@ function buildProjectionSignals({
       : socialModel.recognized === true
         ? 'recognized'
         : 'unknown'
-  const toolAttention = executionCurrent && isExecutionAttentionCode(toolContract)
   const blockerHint = blockerAttention && runtimeReason !== 'no blocker reason' ? runtimeReason : null
   return [
     {
@@ -529,16 +514,6 @@ function buildProjectionSignals({
       hint: runtimeWarnings[0] ?? null,
     },
     {
-      kind: 'tool_contract',
-      label: 'tool',
-      value: toolContract,
-      detail: executionCurrent ? 'execution.tool_contract_result' : 'stale execution receipt',
-      tone: toolAttention ? 'warn' : 'neutral',
-      state: toolAttention ? 'attention' : toolContract === 'tool contract unknown' ? 'unknown' : 'ok',
-      contributesToAttention: toolAttention,
-      hint: toolAttention ? `도구 계약 결과가 ${toolContract}입니다.` : null,
-    },
-    {
       kind: 'fsm_raw_lanes',
       label: 'fsm',
       value: fsmLaneSummary(fsmLanes),
@@ -549,22 +524,4 @@ function buildProjectionSignals({
       hint: null,
     },
   ]
-}
-
-// Closed set of wire-format values emitted by
-// keeper_execution_receipt.tool_contract_result_to_string.
-const EXECUTION_ATTENTION_CODES: ReadonlySet<string> = new Set([
-  'violated',
-  'tool_surface_mismatch',
-  'no_tool_capable_provider',
-  'claim_only_after_owned_task',
-  'needs_execution_progress',
-  'passive_only',
-  'not_dispatched',
-])
-
-function isExecutionAttentionCode(value: string | null | undefined): boolean {
-  const normalized = value?.trim().toLowerCase()
-  if (!normalized || normalized === 'unknown' || normalized === 'tool contract unknown') return false
-  return EXECUTION_ATTENTION_CODES.has(normalized)
 }

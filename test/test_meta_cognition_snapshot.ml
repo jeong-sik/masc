@@ -1,7 +1,7 @@
 module Tool_agent = Masc.Tool_agent
 module Workspace = Masc.Workspace
 module Meta_cognition = Masc.Meta_cognition
-module Prometheus = Masc.Prometheus
+module Otel_metric_store = Masc.Otel_metric_store
 
 let counter = ref 0
 let persistence_surface = "meta_cognition_snapshot"
@@ -96,7 +96,7 @@ let json_list_ids key json =
          | _ -> None)
 
 let persistence_counter reason =
-  Prometheus.metric_value_or_zero Prometheus.metric_persistence_read_drops
+  Otel_metric_store.metric_value_or_zero Otel_metric_store.metric_persistence_read_drops
     ~labels:[("surface", persistence_surface); ("reason", reason)] ()
 
 let test_snapshot_detects_signals () =

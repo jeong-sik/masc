@@ -16,9 +16,9 @@ module FileSystem : sig
   (** Install observers for write-mutex contention.
 
       Called once at startup from the main library to wire mutex
-      acquire/hold timings into Prometheus histograms.  The default
+      acquire/hold timings into Otel_metric_store histograms.  The default
       observers are no-ops, so [masc_backend] does not depend on
-      [Prometheus] at link time.
+      [Otel_metric_store] at link time.
 
       [acquire] receives the seconds a fiber waited before entering
       the lock; [held] receives the seconds spent in the write critical

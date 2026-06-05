@@ -10,8 +10,8 @@
    so Grafana / alerting rules cannot drift. *)
 
 let counter_for ~tool ~agent_name ~reason =
-  Masc.Prometheus.metric_value_or_zero
-    Masc.Prometheus.metric_tool_bind_required_guard
+  Masc.Otel_metric_store.metric_value_or_zero
+    Masc.Otel_metric_store.metric_tool_bind_required_guard
     ~labels:[
       ("tool", tool);
       ("agent_name", agent_name);
@@ -23,15 +23,15 @@ let test_metric_name_stable () =
   Alcotest.(check string)
     "bind-required guard canonical metric name"
     "masc_tool_bind_required_guard_total"
-    Masc.Prometheus.metric_tool_bind_required_guard
+    Masc.Otel_metric_store.metric_tool_bind_required_guard
 
 let test_increments_workspace_uninitialized () =
   let tool = "masc_claim_next" in
   let agent_name = "san-test-9770" in
   let reason = "workspace_uninitialized" in
   let before = counter_for ~tool ~agent_name ~reason in
-  Masc.Prometheus.inc_counter
-    Masc.Prometheus.metric_tool_bind_required_guard
+  Masc.Otel_metric_store.inc_counter
+    Masc.Otel_metric_store.metric_tool_bind_required_guard
     ~labels:[ ("tool", tool);
               ("agent_name", agent_name);
               ("reason", reason) ]
@@ -46,8 +46,8 @@ let test_increments_agent_not_bound () =
   let agent_name = "nic-test-9770" in
   let reason = "agent_not_bound" in
   let before = counter_for ~tool ~agent_name ~reason in
-  Masc.Prometheus.inc_counter
-    Masc.Prometheus.metric_tool_bind_required_guard
+  Masc.Otel_metric_store.inc_counter
+    Masc.Otel_metric_store.metric_tool_bind_required_guard
     ~labels:[ ("tool", tool);
               ("agent_name", agent_name);
               ("reason", reason) ]
@@ -66,8 +66,8 @@ let test_label_isolation_across_reasons () =
   let before_workspace =
     counter_for ~tool ~agent_name ~reason:"workspace_uninitialized"
   in
-  Masc.Prometheus.inc_counter
-    Masc.Prometheus.metric_tool_bind_required_guard
+  Masc.Otel_metric_store.inc_counter
+    Masc.Otel_metric_store.metric_tool_bind_required_guard
     ~labels:[ ("tool", tool);
               ("agent_name", agent_name);
               ("reason", "agent_not_bound") ]
@@ -83,8 +83,8 @@ let test_label_isolation_across_agents () =
   let agent_a = "alpha-9770" in
   let agent_b = "beta-9770" in
   let before_a = counter_for ~tool ~agent_name:agent_a ~reason in
-  Masc.Prometheus.inc_counter
-    Masc.Prometheus.metric_tool_bind_required_guard
+  Masc.Otel_metric_store.inc_counter
+    Masc.Otel_metric_store.metric_tool_bind_required_guard
     ~labels:[ ("tool", tool);
               ("agent_name", agent_b);
               ("reason", reason) ]

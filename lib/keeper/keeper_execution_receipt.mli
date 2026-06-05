@@ -79,9 +79,7 @@ val assert_receipt_authoritative
   -> (unit, receipt_authority_violation) result
 
 type tool_surface =
-  { turn_lane : Keeper_agent_tool_surface.turn_lane
-  ; materialized_tools : string list
-  }
+  { turn_lane : Keeper_agent_tool_surface.turn_lane }
 
 (** Phase identifier emitted when a runtime rotation releases the in-flight
     turn slot. Closed set; wire form is [slot_release_phase_to_string]. *)
@@ -194,12 +192,6 @@ type t =
   ; terminal_reason_code : string
   ; response_text_present : bool
   ; model_used : string option
-  ; requested_tools : string list
-  ; reported_tools : string list
-  ; observed_tools : string list
-  ; canonical_tools : string list
-  ; unexpected_tools : string list
-  ; tools_used : string list
   ; completion_contract_result : completion_contract_result
   ; tool_surface : tool_surface
   ; sandbox_kind : Keeper_types_profile_sandbox.sandbox_profile
@@ -235,10 +227,7 @@ val stop_reason_to_string : Runtime_agent.stop_reason -> string
 val sandbox_kind_of_meta : Keeper_meta_contract.keeper_meta -> Keeper_types_profile_sandbox.sandbox_profile
 val to_json : t -> Yojson.Safe.t
 
-(** Enrich a receipt's terminal_reason_code from legacy to extended format.
-    Uses [canonical_tools + observed_tools + tools_used] as called. Returns the original
-    code unchanged if it is not a contract-violation code or already
-    contains tool data. *)
+(** Return the receipt terminal reason without deriving extra tool evidence. *)
 val enrich_contract_violation_reason : t -> string
 
 (** Operator-facing classification of a finished turn. Closed set.

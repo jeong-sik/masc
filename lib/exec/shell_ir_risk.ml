@@ -82,12 +82,152 @@ let git_branch_args_are_read_only args =
   | _ -> git_branch_has_flag read_flags args
 ;;
 
+let is_env_assignment arg =
+  match String.index_opt arg '=' with
+  | None -> false
+  | Some 0 -> false
+  | Some i ->
+    let name = String.sub arg 0 i in
+    String.for_all
+      (function
+        | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '_' -> true
+        | _ -> false)
+      name
+;;
+
+let rec strip_env_prefix words =
+  let rec strip_env_args = function
+    | [] -> []
+    | "--" :: rest -> rest
+    | ("-i" | "--ignore-environment" | "--null" | "-0") :: rest ->
+      strip_env_args rest
+    | ("-u" | "--unset") :: _ :: rest -> strip_env_args rest
+    | arg :: rest
+      when String.starts_with ~prefix:"--unset=" arg
+           || String.starts_with ~prefix:"-u" arg
+           || is_env_assignment arg ->
+      strip_env_args rest
+    | rest -> rest
+  in
+  match words with
+  | "env" :: rest -> strip_env_prefix (strip_env_args rest)
+  | _ -> words
+;;
+
+let rec skip_git_global_options = function
+  | [] -> []
+  | "--" :: rest -> rest
+  | ("-C" | "-c" | "--git-dir" | "--work-tree" | "--namespace" | "--super-prefix"
+    | "--config-env" | "--exec-path") :: _ :: rest ->
+    skip_git_global_options rest
+  | ("--bare" | "--no-pager" | "--paginate" | "--no-replace-objects"
+    | "--literal-pathspecs" | "--glob-pathspecs" | "--noglob-pathspecs"
+    | "--icase-pathspecs" | "--no-optional-locks" | "--version" | "-v") :: rest ->
+    skip_git_global_options rest
+  | opt :: rest
+    when String.length opt > 1
+         && opt.[0] = '-'
+         && (String.starts_with ~prefix:"--git-dir=" opt
+             || String.starts_with ~prefix:"--work-tree=" opt
+             || String.starts_with ~prefix:"--namespace=" opt
+             || String.starts_with ~prefix:"--exec-path=" opt
+             || String.starts_with ~prefix:"--config-env=" opt
+             || String.starts_with ~prefix:"-c" opt) ->
+    skip_git_global_options rest
+  | parts -> parts
+;;
+
+let rec skip_gh_global_options = function
+  | [] -> []
+  | ("--repo" | "-R" | "--hostname" | "--config" | "--git-protocol") :: _ :: rest ->
+    skip_gh_global_options rest
+  | ("--help" | "-h" | "--version" | "--debug" | "--verbose" | "--no-color"
+    | "--paginate") :: rest ->
+    skip_gh_global_options rest
+  | opt :: rest
+    when String.length opt > 1
+         && opt.[0] = '-'
+         && (String.starts_with ~prefix:"--repo=" opt
+             || String.starts_with ~prefix:"-R=" opt
+             || String.starts_with ~prefix:"--hostname=" opt
+             || String.starts_with ~prefix:"--config=" opt
+             || String.starts_with ~prefix:"--git-protocol=" opt) ->
+    skip_gh_global_options rest
+  | parts -> parts
+;;
+
+let normalize_command_words words =
+  match strip_env_prefix words with
+  | "git" :: rest -> "git" :: skip_git_global_options rest
+  | "gh" :: rest -> "gh" :: skip_gh_global_options rest
+  | words -> words
+;;
+
+(* STR-OK: Shell argv boundary parser; git option strings are normalized here
+   before risk is converted into the typed [risk_class] envelope. *)
+let git_config_arg_is_read_flag = function
+  | "--get" | "--get-all" | "--get-regexp" | "--list" | "-l" | "--show-origin"
+  | "--show-scope" | "--name-only" | "--null" | "-z" ->
+    true
+  | _ -> false
+;;
+
+let git_config_arg_is_write_flag = function
+  | "--add" | "--replace-all" | "--unset" | "--unset-all" | "--remove-section"
+  | "--rename-section" | "--edit" | "-e" ->
+    true
+  | _ -> false
+;;
+
+let git_config_args_are_read_only args =
+  match args with
+  | [] -> false
+  | _ ->
+    List.exists git_config_arg_is_read_flag args
+    && not (List.exists git_config_arg_is_write_flag args)
+;;
+
+let git_remote_args_are_read_only = function
+  | [] -> true
+  | ("-v" | "--verbose") :: _ -> true
+  | ("show" | "get-url") :: _ -> true
+  | _ -> false
+;;
+
+let git_tag_args_are_read_only = function
+  | [] -> true
+  | args ->
+    let is_read_flag = function
+      | "-l" | "--list" | "-n" | "--points-at" -> true
+      | _ -> false
+    in
+    let is_write_flag = function
+      | "-a" | "--annotate" | "-s" | "--sign" | "-d" | "--delete" | "-f" ->
+        true
+      | _ -> false
+    in
+    List.exists is_read_flag args && not (List.exists is_write_flag args)
+;;
+
+let git_clean_args_are_dry_run args =
+  let is_dry_run_flag = function
+    | "-n" | "--dry-run" -> true
+    | _ -> false
+  in
+  List.exists is_dry_run_flag args
+;;
+
 let classify_write_detail (words : string list) : risk_class option =
   match words with
   | "git" :: sub :: rest ->
     (match sub with
-     | "push" | "merge" | "rebase" | "commit" -> Some R1_Reversible_mutation
+     | "push" | "merge" | "rebase" | "commit" | "add" | "apply" | "am"
+     | "cherry-pick" | "revert" | "switch" | "restore" | "pull" | "fetch"
+     | "worktree" | "submodule" | "config" | "remote" ->
+       Some R1_Reversible_mutation
      | "reset" -> Some R2_Irreversible
+     | "clean" ->
+       if git_clean_args_are_dry_run rest then None else Some R2_Irreversible
      | "branch" ->
        if git_branch_args_are_read_only rest
        then None
@@ -124,7 +264,7 @@ let repo_hosting_cli_irreversible_ops =
 let repo_hosting_cli_reversible_mutations =
   [
     ("pr",
-     [ "create"; "close"; "reopen"; "edit"; "comment"; "review"; "lock";
+     [ "create"; "close"; "reopen"; "edit"; "comment"; "review"; "lock"; "checkout";
        "unlock" ]);
     ("issue",
      [ "create"; "close"; "reopen"; "edit"; "comment"; "lock"; "unlock";
@@ -327,11 +467,17 @@ let flat_stage_words (ir : Shell_ir.t) : string list =
 let is_write_operation (words : string list) =
   match words with
   | "git" :: "branch" :: rest -> not (git_branch_args_are_read_only rest)
+  | "git" :: "clean" :: rest -> not (git_clean_args_are_dry_run rest)
+  | "git" :: "config" :: rest -> not (git_config_args_are_read_only rest)
+  | "git" :: "remote" :: rest -> not (git_remote_args_are_read_only rest)
+  | "git" :: "tag" :: rest -> not (git_tag_args_are_read_only rest)
   | "git" :: sub :: _ ->
-    List.mem
-      sub
-      [ "push"; "commit"; "merge"; "rebase"; "reset"; "checkout"; "tag";
-        "stash"; "clone"; "init" ]
+    not
+      (List.mem
+         sub
+         [ "status"; "log"; "show"; "diff"; "blame"; "rev-parse"; "merge-base";
+           "ls-files"; "ls-tree"; "cat-file"; "describe"; "name-rev"; "for-each-ref";
+           "shortlog"; "grep"; "help"; "--help"; "--version"; "version" ])
   | "dune" :: sub :: _ -> List.mem sub [ "clean"; "promote" ]
   | "make" :: sub :: _ -> List.mem sub [ "clean"; "deploy"; "install"; "publish" ]
   | ("npm" | "pnpm" | "yarn") :: sub :: _ ->
@@ -465,6 +611,7 @@ let action_flag_risk (words : string list) : risk_class =
    [risk_of_typed] must never under-classify. *)
 
 let classify_words (words : string list) : risk_class =
+  let words = normalize_command_words words in
   if is_destructive_bash_operation words then Destructive_protected
   else
     (* find/sed/sort action-flags are checked before the write/gh/R0

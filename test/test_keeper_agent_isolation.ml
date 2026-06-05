@@ -15,9 +15,10 @@ module Keeper_meta_contract = Masc.Keeper_meta_contract
 module Keeper_tool_surfaces = Masc.Keeper_tool_surfaces
 module Tool_shard = Masc.Tool_shard
 module Tool_catalog = Tool_catalog
-module Keeper_types = Masc.Keeper_types
+module Keeper_types = Keeper_types
 module Keeper_identity = Masc.Keeper_identity
 module Keeper_tool_registry = Masc.Keeper_tool_registry
+module Keeper_tool_descriptor = Masc.Keeper_tool_descriptor
 module Config = Masc.Config
 
 (* ============================================================
@@ -52,14 +53,28 @@ let has_keeper_prefix name =
     Derived from actual module exports — no prefix guessing.
     Must be a function (not a let-binding) because injected_masc_tool_names
     depends on inject_masc_schemas which runs after module init. *)
-let known_non_keeper_tool_names () : string list =
-  (Tool_shard.all_keeper_tool_schemas
+let descriptor_tool_names () : string list =
+  Keeper_tool_descriptor.all_descriptors ()
+  |> List.concat_map (fun descriptor ->
+    Keeper_tool_descriptor.public_names_of_descriptor descriptor
+    @ Keeper_tool_descriptor.internal_names descriptor)
+  |> List.sort_uniq String.compare
+
+let shard_tool_names () : string list =
+  Tool_shard.all_keeper_tool_schemas
    |> List.map (fun (t : Masc_domain.tool_schema) -> t.name)
+  |> List.sort_uniq String.compare
+
+let known_non_keeper_tool_names () : string list =
+  (shard_tool_names ()
    |> List.filter (fun name -> not (has_keeper_prefix name)))
+  @ Keeper_tool_registry.core_always_tools
+  @ Keeper_tool_registry.effective_core_tools ()
+  @ descriptor_tool_names ()
   @ Keeper_tool_registry.injected_masc_tool_names ()
   |> List.sort_uniq String.compare
 
-let known_shared_agent_keeper_tool_names : string list =
+let minimum_shared_agent_keeper_tool_names : string list =
   [
     "masc_status";
     "masc_tasks";
@@ -70,6 +85,16 @@ let known_shared_agent_keeper_tool_names : string list =
     "masc_heartbeat";
   ]
 
+let known_shared_agent_keeper_tool_names () : string list =
+  let keeper_known =
+    descriptor_tool_names ()
+    @ Keeper_tool_registry.injected_masc_tool_names ()
+    @ minimum_shared_agent_keeper_tool_names
+  in
+  Keeper_tool_surfaces.spawned_agent_public_tool_names
+  |> List.filter (fun name -> List.mem name keeper_known)
+  |> List.sort_uniq String.compare
+
 let test_known_shared_tools_exist_on_agent_surface () =
   let agent_names = Keeper_tool_surfaces.spawned_agent_public_tool_names in
   List.iter
@@ -77,7 +102,7 @@ let test_known_shared_tools_exist_on_agent_surface () =
       Alcotest.(check bool)
         (name ^ " is exposed on spawned agent surface")
         true (List.mem name agent_names))
-    known_shared_agent_keeper_tool_names
+    minimum_shared_agent_keeper_tool_names
 
 (* ============================================================
    Invariant 1: Non-research keepers only get keeper_* tools plus
@@ -146,7 +171,7 @@ let test_no_overlap_heuristic_vs_agent () =
     List.filter
       (fun n ->
         List.mem n agent_names
-        && not (List.mem n known_shared_agent_keeper_tool_names))
+        && not (List.mem n (known_shared_agent_keeper_tool_names ())))
       keeper_names
   in
   Alcotest.(check (list string))
@@ -162,7 +187,7 @@ let test_no_overlap_research_vs_agent () =
     List.filter
       (fun n ->
         List.mem n agent_names
-        && not (List.mem n known_shared_agent_keeper_tool_names))
+        && not (List.mem n (known_shared_agent_keeper_tool_names ())))
       keeper_names
   in
   Alcotest.(check (list string))
@@ -178,7 +203,7 @@ let test_shard_tools_overlap_with_agent_documented () =
   let overlap = List.filter (fun name -> List.mem name agent_tools) keeper_tools in
   List.iter (fun name ->
     Alcotest.(check bool) (name ^ " is approved shared tool") true
-      (List.mem name known_shared_agent_keeper_tool_names)
+      (List.mem name (known_shared_agent_keeper_tool_names ()))
   ) overlap
 
 (* ============================================================

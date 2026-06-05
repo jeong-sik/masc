@@ -6,7 +6,7 @@ code_refs:
   - lib/board_types/
   - lib/board_votes.ml
   - lib/board_dispatch.ml
-  - lib/tool_board.ml
+  - lib/board_tool_adapter/board_tool.ml
   - lib/server/server_h2_gateway_routes_extra.ml
 ---
 
@@ -16,7 +16,7 @@ code_refs:
 |------|-----|
 | Status | Draft |
 | Team | Workspace |
-| Maps to | `lib/board_types/` (sub-library), `lib/board.ml`, `lib/tool_board.ml` (successor to former `lib/tool_vote.ml` + `lib/tool_social.ml`, both folded into `tool_board.ml` — see that file's header "Replaces tool_social.ml for new installations") |
+| Maps to | `lib/board_types/` (sub-library), `lib/board.ml`, `lib/board_tool_adapter/board_tool.ml` facade and adapter submodules (successor to former `lib/tool_vote.ml` + `lib/tool_social.ml`) |
 | Dependencies | 09-server-transport |
 | LOC | ~4.1K |
 

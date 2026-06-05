@@ -85,7 +85,7 @@ let get_default_store () =
      with
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->
-       Prometheus.inc_counter
+       Otel_metric_store.inc_counter
          Keeper_metrics.(to_string TransitionAuditFailures)
          ~labels:[ "site", "default_store" ]
          ();
@@ -101,7 +101,7 @@ let observe_append_failure ~site exn =
     let bt = Printexc.get_raw_backtrace () in
     Printexc.raise_with_backtrace e bt
   | exn ->
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string TransitionAuditFailures)
       ~labels:[ "site", site ]
       ();

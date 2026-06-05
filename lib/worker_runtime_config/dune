@@ -1,0 +1,15 @@
+(include_subdirs no)
+
+(library
+ (name worker_runtime_config)
+ (public_name masc.worker_runtime_config)
+ (wrapped false)
+ (modules worker_runtime_config)
+ (libraries
+  eio
+  masc.config
+  masc.config_dir_resolver
+  masc.worker_execution_backend
+  masc_core
+  masc_log
+  yojson))

@@ -296,10 +296,6 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
     (if keeper_tools <> [] then keeper_tools else audit.latest_tool_names)
     |> cap_string_list
   in
-  let allowed_tool_names =
-    let keeper_tools = string_list_of_field "allowed_tool_names" keeper in
-    if keeper_tools <> [] then keeper_tools else audit.allowed_tool_names
-  in
   let latest_tool_names =
     let keeper_tools = string_list_of_field "latest_tool_names" keeper in
     (if keeper_tools <> [] then keeper_tools else audit.latest_tool_names)
@@ -338,9 +334,6 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
            ("recent_output_preview", Json_util.string_opt_to_json recent_output_preview);
            ("recent_tool_names", Json_util.json_string_list recent_tool_names);
            ("latest_tool_names", Json_util.json_string_list latest_tool_names);
-         ]
-        @ tool_preview_fields "allowed_tool" allowed_tool_names
-        @ [
             ("latest_tool_call_count", Json_util.option_to_yojson (fun value -> `Int value) audit.latest_tool_call_count);
             ("latest_action_source", Json_util.string_opt_to_json latest_action_source);
             ("tool_audit_source", Json_util.string_opt_to_json audit.tool_audit_source);

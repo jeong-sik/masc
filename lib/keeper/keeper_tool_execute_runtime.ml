@@ -207,11 +207,36 @@ let deterministic_retry_fields_for_process_result
   | _ -> []
 ;;
 
+let sandbox_extra_uses_docker sandbox_extra_fields =
+  List.exists
+    (function
+      | "via", `String "docker" -> true
+      | _ -> false)
+    sandbox_extra_fields
+
+let typed_execute_response_cwd_json
+      ~turn_sandbox_factory
+      ~cwd
+      ~sandbox_extra_fields
+  =
+  if sandbox_extra_uses_docker sandbox_extra_fields then
+    match
+      Keeper_sandbox_factory.container_cwd_of_host_opt
+        turn_sandbox_factory
+        ~host_cwd:cwd
+    with
+    | Some container_cwd ->
+      Keeper_cwd_response.docker ~host_cwd:cwd ~container_cwd
+      |> Keeper_cwd_response.to_yojson_response
+    | None -> `String cwd
+  else `String cwd
+
 module For_testing = struct
   let elapsed_duration_ms = elapsed_duration_ms
   let deterministic_retry_fields_for_process_result =
     deterministic_retry_fields_for_process_result
   let compute_command_descriptor = compute_command_descriptor
+  let typed_execute_response_cwd_json = typed_execute_response_cwd_json
 end
 
 (* Typed Execute input projections extracted to
@@ -246,19 +271,20 @@ let input_with_cwd cwd = function
   | Keeper_tool_execute_typed_input.Pipeline { stages; cwd = _; env } ->
     Keeper_tool_execute_typed_input.Pipeline { stages; cwd = Some cwd; env }
 
-let typed_input_effective_stages ~mode input =
+let typed_input_shell_ir_unvalidated ~mode input =
   match Keeper_tool_execute_typed_input.to_shell_ir_unvalidated ~mode input with
-  | Error _ -> []
-  | Ok ir ->
-    Keeper_tool_execute_command_semantics.effective_stages_of_ir ir
+  | Error _ -> None
+  | Ok ir -> Some ir
 
-let resolve_typed_git_cwd_of_stages ~config ~meta ~cwd ~cmd stages =
-    Keeper_tool_execute_command_semantics.resolve_sandbox_root_git_cwd_of_stages
+let resolve_typed_git_cwd ~config ~meta ~cwd ~cmd = function
+  | None -> cwd, None
+  | Some ir ->
+    Keeper_tool_execute_command_semantics.resolve_sandbox_root_git_cwd
       ~config
       ~meta
       ~cwd
       ~cmd
-      stages
+      ir
 
 let handle_tool_execute_typed
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
@@ -293,20 +319,20 @@ let handle_tool_execute_typed
           then Keeper_tool_execute_typed_input.Dev_full
           else Keeper_tool_execute_typed_input.Readonly
         in
-        let effective_stages = typed_input_effective_stages ~mode input in
+        let input_ir = typed_input_shell_ir_unvalidated ~mode input in
         let cwd, root_git_cwd_error =
-          resolve_typed_git_cwd_of_stages
+          resolve_typed_git_cwd
             ~config
             ~meta
             ~cwd
             ~cmd
-            effective_stages
+            input_ir
         in
         let root_git_cwd_error =
           match root_git_cwd_error with
           | Some e -> Some e
           | None ->
-            Keeper_tool_execute_command_semantics.misuse_error_of_stages effective_stages
+            Option.bind input_ir Keeper_tool_execute_command_semantics.misuse_error
         in
         let input = input_with_cwd cwd input in
         let in_playground = Keeper_tool_execute_path.in_playground ~root ~cwd ~meta in
@@ -343,11 +369,19 @@ let handle_tool_execute_typed
                 @ fields)
              message
          | Ok (dispatch_sandbox, sandbox_extra_fields) ->
+        let response_cwd_json =
+          typed_execute_response_cwd_json
+            ~turn_sandbox_factory
+            ~cwd
+            ~sandbox_extra_fields
+        in
+        let response_cwd_field = [ "cwd", response_cwd_json ] in
         match root_git_cwd_error with
         | Some e ->
           error_json
             ~fields:
-              ([ "typed", `Bool true; "cmd", `String cmd; "cwd", `String cwd ]
+              ([ "typed", `Bool true; "cmd", `String cmd ]
+               @ response_cwd_field
                @ execution_location_fields cwd)
             e
         | None ->
@@ -360,7 +394,8 @@ let handle_tool_execute_typed
         | Error e ->
           let alts = Keeper_tool_execute_typed_input.validation_error_alternatives e in
           let fields =
-            [ "typed", `Bool true; "cmd", `String cmd; "cwd", `String cwd ]
+            [ "typed", `Bool true; "cmd", `String cmd ]
+            @ response_cwd_field
             @ execution_location_fields cwd
             @
             (match alts with
@@ -382,7 +417,8 @@ let handle_tool_execute_typed
           |> Exec_policy.truncate_for_log
         in
         let typed_error_fields =
-          [ "typed", `Bool true; "cmd", `String cmd_for_log; "cwd", `String cwd ]
+          [ "typed", `Bool true; "cmd", `String cmd_for_log ]
+          @ response_cwd_field
           @ execution_location_fields cwd
         in
         let blocked_result ?deterministic_reason ~error ~reason ~alternatives () =
@@ -415,10 +451,10 @@ let handle_tool_execute_typed
                ~extra:
                  (deterministic_retry_fields
                   @ [ "cmd", `String cmd_for_log
-                    ; "cwd", `String cwd
                     ; "typed", `Bool true
                     ; "execution_time_ms", `Int 0
                     ]
+                  @ response_cwd_field
                   @ execution_location_fields cwd)
                ())
         in
@@ -433,9 +469,33 @@ let handle_tool_execute_typed
             ~reason:"This typed command is destructive and is blocked for every keeper execution surface."
             ~alternatives:[ "Use a non-destructive command or a dedicated structured tool." ]
             ()
-        else if (not write_enabled)
-             && (Masc_exec.Shell_ir_risk.is_r1 envelope
-                || Masc_exec.Shell_ir_risk.is_r2 envelope)
+        else
+        let repo_cwd_context =
+          Keeper_tool_execute_path.repo_cwd_context ~config ~meta ~cwd
+        in
+        let is_direct_sandbox_repo_root =
+          match repo_cwd_context with
+          | Some { Keeper_tool_execute_path.is_direct_root = true; _ } -> true
+          | Some _ | None -> false
+        in
+        let is_git_diagnostic_command =
+          Masc_exec.Shell_ir_command_shape.is_git_diagnostic_command ir
+        in
+        let is_git_recovery_command =
+          Masc_exec.Shell_ir_command_shape.is_git_recovery_command ir
+        in
+        let is_direct_repo_git_recovery =
+          is_direct_sandbox_repo_root && is_git_recovery_command
+        in
+        let allow_stale_preserved_repo_context =
+          is_git_diagnostic_command || is_direct_repo_git_recovery
+        in
+        let readonly_write_like =
+          is_git_recovery_command
+          || Masc_exec.Shell_ir_risk.is_r1 envelope
+          || Masc_exec.Shell_ir_risk.is_r2 envelope
+        in
+        if (not write_enabled) && readonly_write_like && not is_direct_repo_git_recovery
         then
           blocked_result
             ~deterministic_reason:Keeper_tool_deterministic_error.Write_operation_gated
@@ -469,7 +529,7 @@ let handle_tool_execute_typed
                     ~config
                     ~meta
                     ~cwd
-                    ir
+                    ~allow_stale_preserved_repo_context
                 with
                 | Error _ as err -> err
                 | Ok () ->
@@ -507,6 +567,13 @@ let handle_tool_execute_typed
               ~fields:(("blocked_cmd", `String cmd_for_log) :: typed_error_fields)
               e
           | Ok result ->
+            (match result.status, repo_cwd_context with
+             | Unix.WEXITED 0, Some { repo_name; _ } when is_direct_repo_git_recovery ->
+               Keeper_tool_execute_path.invalidate_repo_currency_cache
+                 ~config
+                 ~meta
+                 ~repo_name
+             | _ -> ());
             let elapsed_ms =
               (* NDT-OK: second wall-clock read closes the elapsed telemetry
                  span recorded immediately below. *)
@@ -560,11 +627,11 @@ let handle_tool_execute_typed
                    (deterministic_retry_fields
                     @ failure_error_fields
                     @ sandbox_extra_fields
-                    @ [ "cwd", `String cwd
-                      ; "typed", `Bool true
+                    @ [ "typed", `Bool true
                       ; "execution_time_ms", `Int elapsed_ms
                       ; "timeout_sec", `Float timeout_sec
                       ]
+                    @ response_cwd_field
                     @ descriptor_fields
                     @ execution_location_fields cwd)
                  ~status:result.status

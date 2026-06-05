@@ -1183,16 +1183,7 @@ describe('dashboard goals decoding', () => {
               },
             },
             execution: {
-              tool_contract_result: 'unknown',
-              runtime_proof_status: 'tool_surface_mismatch',
-              required_tools: ['keeper_task_done'],
-              missing_required_tools: ['keeper_task_done'],
-              requested_tools: ['keeper_task_claim', 'keeper_task_done'],
               tools_used: ['keeper_task_claim'],
-              unexpected_tools: ['keeper_board_list'],
-              requested_tool_count: 2,
-              tools_used_count: 1,
-              unexpected_tool_count: 1,
               provider_attempt_count: 2,
               provider_fallback_applied: true,
               provider_selected_model: 'runtime-lane',
@@ -1263,16 +1254,6 @@ describe('dashboard goals decoding', () => {
           },
         },
         execution_summary: {
-          tool_contract_result: 'unknown',
-          runtime_proof_status: 'tool_surface_mismatch',
-          required_tools: ['keeper_task_done'],
-          missing_required_tools: ['keeper_task_done'],
-          requested_tools: ['keeper_task_claim', 'keeper_task_done'],
-          tools_used: ['keeper_task_claim'],
-          unexpected_tools: ['keeper_board_list'],
-          requested_tool_count: 2,
-          tools_used_count: 1,
-          unexpected_tool_count: 1,
           provider_attempt_count: 2,
           provider_fallback_applied: true,
           provider_selected_model: 'runtime-lane',
@@ -1322,7 +1303,6 @@ describe('dashboard goals decoding', () => {
               pending_count: 0,
             },
             execution: {
-              tool_contract_result: 'allowed_in_sandbox',
               sandbox_summary: 'docker / none',
               mutation_guard_summary: 'allowed_in_sandbox',
               latest_receipt_at: '2026-04-23T00:10:00Z',
@@ -1354,7 +1334,6 @@ describe('dashboard goals decoding', () => {
         pending_count: 0,
       },
       execution_summary: {
-        tool_contract_result: 'allowed_in_sandbox',
         sandbox_summary: 'docker / none',
         mutation_guard_summary: 'allowed_in_sandbox',
         latest_receipt_at: '2026-04-23T00:10:00Z',
@@ -1586,7 +1565,7 @@ describe('fetchKeeperConfig', () => {
 
   it('preserves terminal runtime blocker classes through config fetch and display labeling', async () => {
     const cases = [
-      ['no_tool_capable_provider', '도구 실행 런타임 없음'],
+      ['runtime_exhausted', '런타임 후보 소진'],
       ['provider_runtime_error', '런타임 호출 오류'],
       ['tool_route_recoverable_failure', '도구 라우팅 복구 가능 실패'],
       ['fiber_unresolved', 'Fiber 미해결'],

@@ -82,7 +82,7 @@ let audit_all ~(config : Workspace.config) ~(metas : Keeper_meta_contract.keeper
 
 (** A grep-friendly one-line summary; the boot hook emits this so
     operators can locate drifted keepers from the system log without
-    reaching for Prometheus. *)
+    reaching for Otel_metric_store. *)
 let format_log_line (r : result) =
   let profile = Keeper_types_profile_sandbox.sandbox_profile_to_string r.sandbox_profile in
   match r.status with

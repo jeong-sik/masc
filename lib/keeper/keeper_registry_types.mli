@@ -412,6 +412,8 @@ type turn_measurement = {
   tm_auto_rules : Keeper_state_machine.auto_rule_summary;
 }
 
+type done_resolution = [ `Stopped | `Crashed of string ]
+
 type registry_entry = {
   base_path : string;
   name : string;
@@ -431,10 +433,11 @@ type registry_entry = {
           and the [TurnDequeue] action. *)
   started_at : float;
   grpc_close : (unit -> unit) option Atomic.t;
-  done_p : [ `Stopped | `Crashed of string ] Eio.Promise.t;
-  done_r : [ `Stopped | `Crashed of string ] Eio.Promise.u;
-      (** Exposed so keeper lifecycle agents can resolve stop/crash exactly once.
-          Callers must preserve a single terminal outcome per keeper run. *)
+  done_p : done_resolution Eio.Promise.t;
+  done_r : done_resolution Eio.Promise.u;
+      (** Completion resolver owned by {!resolve_done}. Runtime callers must
+          not resolve this field directly; use {!resolve_done} so
+          double-resolve races return the prior terminal outcome. *)
   restart_count : int;
   last_restart_ts : float;
   dead_since_ts : float option;
@@ -486,7 +489,7 @@ type registry_entry = {
           the most recent outcome in [last_outcome]. *)
   last_skip_observation : (float * string list) option;
       (** Most recent [keeper_cycle_decision] skip outcome captured by
-          the keepalive loop (#10940 follow-up).  The [Prometheus]
+          the keepalive loop (#10940 follow-up).  The [Otel_metric_store]
           [proactive_skip_reason_metric] aggregates skip reasons over
           time, but operators need recent skip verdict context when
           diagnosing idle/quiet keepers. [Some (ts, reasons)] = wall
@@ -531,10 +534,20 @@ and completed_turn_observation = {
   ct_selected_model : string option;
 }
 
+type done_resolve_result =
+  | Done_resolved of { source : string }
+  | Done_already_resolved of {
+      source : string;
+      previous : done_resolution;
+    }
+
 (** Resolve a keeper run completion promise at most once.
-    Returns [false] if another fiber won the resolve race. *)
-val try_resolve_done :
-  registry_entry -> [ `Stopped | `Crashed of string ] -> bool
+
+    [source] identifies the lifecycle branch attempting the resolve. The
+    function never raises on a double-resolve race; instead it returns the
+    already-resolved outcome. *)
+val resolve_done :
+  registry_entry -> source:string -> done_resolution -> done_resolve_result
 
 (** Internal: keeper registry key composition (base_path ^ \\x1f ^ name).
     Exposed via mli so keeper_registry.ml's state functions can use it

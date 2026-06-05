@@ -10,7 +10,7 @@
 open Alcotest
 module KG = Masc.Keeper_guards
 module HK = Masc.Keeper_hooks_oas
-module P = Masc.Prometheus
+module P = Masc.Otel_metric_store
 
 (* ----------------------------------------------------------------- *)
 (* Helpers                                                             *)
@@ -276,7 +276,7 @@ let test_gate_observer_failure_counts_actual_keeper () =
   let keeper = (!meta_ref).name in
   let labels = [ ("keeper", keeper); ("site", "gate_observer") ] in
   let before =
-    P.metric_value_or_zero Masc.Keeper_metrics.(to_string GuardsFailures) ~labels ()
+    P.metric_value_or_zero Keeper_metrics.(to_string GuardsFailures) ~labels ()
   in
   let on_gate_decision _event =
     raise (Failure "synthetic gate observer failure")
@@ -287,7 +287,7 @@ let test_gate_observer_failure_counts_actual_keeper () =
   let d = invoke hook (pre_tool_use_event ~tool_name:"dangerous_tool" ()) in
   check string "denied tool still overrides" "Override" (decision_kind d);
   let after =
-    P.metric_value_or_zero Masc.Keeper_metrics.(to_string GuardsFailures) ~labels ()
+    P.metric_value_or_zero Keeper_metrics.(to_string GuardsFailures) ~labels ()
   in
   check (float 0.0001) "observer failure counted for keeper"
     (before +. 1.0) after

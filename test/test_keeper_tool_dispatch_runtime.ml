@@ -26,6 +26,16 @@ let cleanup_dir path =
   in
   try rm path with _ -> ()
 
+let mkdir_p path =
+  let rec loop dir =
+    if dir = "" || dir = "." || Sys.file_exists dir then
+      ()
+    else (
+      loop (Filename.dirname dir);
+      Unix.mkdir dir 0o755)
+  in
+  loop path
+
 let with_env key value f =
   let prior = Sys.getenv_opt key in
   Unix.putenv key value;
@@ -227,12 +237,12 @@ let test_registered_descriptor_bypasses_tool_access_allowlist () =
          | _ -> false))
 
 let counter_for_tool_not_allowed ~keeper ~tool ~reason =
-  Masc.Prometheus.metric_value_or_zero
-    Masc.Keeper_metrics.(to_string ToolNotAllowed)
+  Masc.Otel_metric_store.metric_value_or_zero
+    Keeper_metrics.(to_string ToolNotAllowed)
     ~labels:[ ("keeper", keeper); ("tool", tool); ("reason", reason) ]
     ()
 
-(* #13xxx: tool_not_allowed Prometheus counter *)
+(* #13xxx: tool_not_allowed Otel_metric_store counter *)
 let test_tool_not_allowed_increments_counter_for_unknown_tool () =
   (* Unknown names are still rejected by the descriptor/registry existence
      gate. Registered tools are not rejected merely because tool_access is
@@ -367,11 +377,17 @@ let test_keeper_tools_list_json_uses_typed_groups () =
 let test_execute_with_outcome_missing_file_is_failure () =
   with_exec_fixture "keeper_tool_dispatch_runtime_missing_file"
     (fun ~config ~meta ~ctx_work ->
+      let repo_dir =
+        Filename.concat
+          (Filename.concat (KES.keeper_playground_root ~config ~meta) "repos")
+          "masc-mcp"
+      in
+      mkdir_p (Filename.concat repo_dir ".git");
       let result =
         KET.execute_keeper_tool_call_with_outcome
           ~config ~meta ~ctx_work ~exec_cache:None
           ~name:"Read"
-          ~input:(`Assoc [ ("file_path", `String "missing.txt") ])
+          ~input:(`Assoc [ ("file_path", `String "config/tool_policy.toml") ])
           ()
       in
       check string "missing file outcome" "failure"
@@ -380,12 +396,22 @@ let test_execute_with_outcome_missing_file_is_failure () =
         (payload_kind result.payload_shape);
       let json = Yojson.Safe.from_string result.raw_output in
       let path_resolution = Yojson.Safe.Util.member "path_resolution" json in
+      check string "single repo surfaced" "repos/masc-mcp"
+        Yojson.Safe.Util.(member "available_repos" json |> to_list |> List.hd |> to_string);
+      check string "repo cwd hint" "repos/masc-mcp"
+        Yojson.Safe.Util.(member "repo_cwd_hint" path_resolution |> to_string);
       check bool "same path retry marked as futile" true
         Yojson.Safe.Util.(member "same_path_retry_will_fail" path_resolution |> to_bool);
       check bool "retry policy discourages same Read" true
         (contains_substring
            Yojson.Safe.Util.(member "retry_policy" path_resolution |> to_string)
            "Do not retry Read");
+      check string "list recovery cwd" "repos/masc-mcp"
+        Yojson.Safe.Util.(
+          member "recovery_examples" path_resolution
+          |> member "list_parent"
+          |> member "cwd"
+          |> to_string);
       check string "grep recovery example" "Grep"
         Yojson.Safe.Util.(
           member "recovery_examples" path_resolution

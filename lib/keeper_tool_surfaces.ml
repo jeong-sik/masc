@@ -99,7 +99,7 @@ let local_worker_run_schemas : Masc_domain.tool_schema list =
 let select_public_local_worker_schemas () =
   let wanted_set = name_set local_worker_public_tool_names in
   dedupe_schemas
-    (Tool_board.tools
+    (Board_tool.tools
     @ Tool_schemas_workspace_core.schemas
     @ Tool_schemas_workspace_extra.schemas
     @ Task.Schemas.schemas

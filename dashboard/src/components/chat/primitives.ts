@@ -1,10 +1,12 @@
 import { html } from 'htm/preact'
+import { marked } from 'marked'
+import DOMPurify from 'dompurify'
 import { JsonViewerCard } from '../common/json-viewer'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { ActionButton } from '../common/button'
 import { formatTimeHms } from '../../lib/format-time'
 import { formatCost } from '../../lib/format-number'
-import type { KeeperConversationDetails, KeeperConversationEntry } from '../../types'
+import type { KeeperConversationAttachment, KeeperConversationDetails, KeeperConversationEntry } from '../../types'
 
 type ChatTranscriptVariant = 'default' | 'messenger'
 
@@ -17,6 +19,8 @@ function timeLabel(timestamp?: string | null): string | null {
 
 function deliveryLabel(entry: KeeperConversationEntry): string {
   switch (entry.delivery) {
+    case 'queued':
+      return 'queued'
     case 'sending':
       return 'sending'
     case 'streaming':
@@ -102,6 +106,79 @@ function overviewRows(details: KeeperConversationDetails): Array<{ label: string
   ].filter((row): row is { label: string; value: string } => Boolean(row))
 }
 
+function formatAttachmentSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
+  if (bytes < 1024) return `${Math.round(bytes)} B`
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function isSafeAttachmentHref(attachment: KeeperConversationAttachment): boolean {
+  if (attachment.type === 'image') return attachment.data.startsWith('data:image/')
+  return (
+    attachment.data.startsWith('data:text/')
+    || attachment.data.startsWith('data:application/json')
+  )
+}
+
+function isRenderableImageAttachment(attachment: KeeperConversationAttachment): boolean {
+  return attachment.type === 'image' && attachment.data.startsWith('data:image/')
+}
+
+function attachmentMeta(attachment: KeeperConversationAttachment): string {
+  return [attachment.mimeType, formatAttachmentSize(attachment.size)].filter(Boolean).join(' · ')
+}
+
+function renderAttachmentCard(attachment: KeeperConversationAttachment) {
+  const canLink = isSafeAttachmentHref(attachment)
+  const meta = attachmentMeta(attachment)
+  const content = isRenderableImageAttachment(attachment)
+    ? html`
+        <img
+          src=${attachment.data}
+          alt=${attachment.name}
+          class="max-h-52 w-full rounded-[var(--r-1)] object-contain"
+          loading="lazy"
+        />
+      `
+    : html`
+        <div class="flex min-h-18 items-center gap-3 px-3 py-3">
+          <span class="inline-flex h-9 w-11 shrink-0 items-center justify-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] text-3xs font-semibold uppercase tracking-3 text-[var(--color-fg-muted)]">
+            FILE
+          </span>
+          <div class="min-w-0">
+            <div class="truncate text-xs font-semibold text-[var(--color-fg-secondary)]">${attachment.name}</div>
+            <div class="mt-1 text-2xs text-[var(--color-fg-muted)]">${meta}</div>
+          </div>
+        </div>
+      `
+
+  return html`
+    <div class="overflow-hidden rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
+      ${canLink
+        ? html`
+            <a
+              href=${attachment.data}
+              download=${attachment.name}
+              class="block hover:bg-[var(--color-bg-hover)]"
+              aria-label=${`${attachment.name} 내려받기`}
+            >
+              ${content}
+            </a>
+          `
+        : content}
+      ${isRenderableImageAttachment(attachment)
+        ? html`
+            <div class="border-t border-[var(--color-border-default)] px-3 py-2">
+              <div class="truncate text-xs font-semibold text-[var(--color-fg-secondary)]">${attachment.name}</div>
+              <div class="mt-1 text-2xs text-[var(--color-fg-muted)]">${meta}</div>
+            </div>
+          `
+        : null}
+    </div>
+  `
+}
+
 function ChatMessageBubble({
   entry,
   showMetadata = true,
@@ -113,8 +190,13 @@ function ChatMessageBubble({
 }) {
   const [expandedRaw, setExpandedRaw] = useState(false)
   const [rawExpandedRaw, setRawExpandedRaw] = useState(false)
+  const [messageCollapsed, setMessageCollapsed] = useState(true)
   const expanded = showMetadata && expandedRaw
   const rawExpanded = showMetadata && rawExpandedRaw
+  const messageText = entry.text || (entry.delivery === 'streaming' || entry.delivery === 'queued' ? '' : '(empty reply)')
+  const messageLength = messageText.length
+  const collapseThreshold = 1200
+  const isCollapsible = messageLength > collapseThreshold
   const tone = bubbleTone(entry)
   const isMessenger = variant === 'messenger'
   const detailItems = detailSummary(entry.details)
@@ -123,6 +205,7 @@ function ChatMessageBubble({
   const state = stateRows(entry.details?.stateBlock)
   const delivery = deliveryLabel(entry)
   const timestamp = timeLabel(entry.timestamp)
+  const attachments = entry.attachments ?? []
 
   return html`
     <article
@@ -221,9 +304,33 @@ function ChatMessageBubble({
           </div>`
         : null}
 
-      <div class="whitespace-pre-wrap break-words text-base leading-airy text-[var(--color-fg-primary)]">
-        ${entry.text || (entry.delivery === 'streaming' ? '' : '(empty reply)')}
-      </div>
+      <div
+        class=${`markdown-body whitespace-pre-wrap break-words text-base leading-airy text-[var(--color-fg-primary)] ${isCollapsible && messageCollapsed ? 'max-h-96 overflow-hidden' : ''}`}
+        dangerouslySetInnerHTML=${{
+          __html: DOMPurify.sanitize(
+            marked.parse(messageText) as string,
+            { ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'code', 'pre', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'blockquote', 'a', 'hr'] }
+          )
+        }}
+      />
+      ${isCollapsible
+        ? html`
+            <button
+              type="button"
+              class="self-start rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-1 text-2xs font-medium text-[var(--color-fg-muted)] transition-colors hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)]"
+              onClick=${() => { setMessageCollapsed(!messageCollapsed) }}
+            >
+              ${messageCollapsed ? '더 보기' : '접기'}
+            </button>
+          `
+        : null}
+      ${attachments.length > 0
+        ? html`
+            <div class="grid grid-cols-[repeat(auto-fit,minmax(11rem,1fr))] gap-2">
+              ${attachments.map(attachment => renderAttachmentCard(attachment))}
+            </div>
+          `
+        : null}
       ${entry.error
         ? html`
             <div class="rounded-[var(--r-1)] border border-[var(--err-border)] bg-[var(--bad-soft)] px-3 py-2 text-xs leading-paragraph text-[var(--bad-light)]">

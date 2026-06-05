@@ -7,7 +7,7 @@
    different angles (#9982 trust pause, #10121 livelock).
 
    This test pins the observability surface that surfaces
-   such turns directly to Prometheus instead of leaving
+   such turns directly to Otel_metric_store instead of leaving
    the duration trapped in a single info log line:
 
      1. The bucket vocabulary is bounded to five labels
@@ -36,7 +36,7 @@ let () =
   Unix.putenv "MASC_BASE_PATH" dir
 
 module M = Masc.Keeper_unified_metrics
-module Prom = Masc.Prometheus
+module Prom = Masc.Otel_metric_store
 
 let bucket_count ~keeper ~bucket =
   Prom.metric_value_or_zero
@@ -47,7 +47,7 @@ let bucket_count ~keeper ~bucket =
 let model_bucket_count ~keeper ~channel ~provider_kind ~model_used
     ~resolved_model_id ~runtime_profile ~bucket =
   Prom.metric_value_or_zero
-    Masc.Keeper_metrics.(to_string TurnLatencyByModelBucket)
+    Keeper_metrics.(to_string TurnLatencyByModelBucket)
     ~labels:
       [ ("keeper", keeper)
       ; ("channel", channel)

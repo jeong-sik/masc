@@ -92,7 +92,7 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
     ~channel
     ~runtime_profile
     ~latency_ms;
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     Keeper_metrics.(to_string TurnCompleted)
     ~labels:[("keeper_name", meta.name)]
     ();
@@ -153,8 +153,6 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
           | Some outcome ->
               `String (proactive_cycle_outcome_to_string outcome)
           | None -> `Null );
-        ("tool_call_count", `Int result.tool_calls_made);
-        ("tools_used", `List (List.map (fun s -> `String s) result.tools_used));
         ( "action_source",
           match deliberation_execution with
           | Some execution ->
@@ -215,7 +213,7 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
        (* Closed label set (5 values) keeps the metric cardinality bound; the
           full numerical detail is preserved in the snapshot's
           [compaction_trigger_detail] JSON above. *)
-       Prometheus.inc_counter
+       Otel_metric_store.inc_counter
          Keeper_metrics.(to_string CompactionNoop)
          ~labels:
            [ ("keeper", meta.name)

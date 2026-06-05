@@ -55,12 +55,12 @@ module FileSystem = struct
   (** {2 Mutex contention observers}
 
       Hooks for write-mutex contention metrics.  Default is a no-op
-      so [masc_backend] does not depend on [Prometheus] at link time;
-      the main library wires Prometheus histograms via
+      so [masc_backend] does not depend on [Otel_metric_store] at link time;
+      the main library wires Otel_metric_store histograms via
       [set_mutex_observers] at startup.
 
       Observers run *outside* the critical section to avoid nested
-      locking against [Prometheus]'s internal Stdlib.Mutex. *)
+      locking against [Otel_metric_store]'s internal Stdlib.Mutex. *)
 
   let mutex_acquire_observer
     : (op:string -> seconds:float -> unit) ref =
@@ -87,7 +87,7 @@ module FileSystem = struct
       Acquire latency is measured as [now - call_start]; held latency
       as [now - mutex_acquired].  Observers run after the lock is
       released, so they cannot extend the critical section even if
-      the underlying Prometheus implementation contends on its own
+      the underlying Otel_metric_store implementation contends on its own
       mutex. *)
   let with_observed_mutex ~op ~key t f =
     let mutex = stripe_for_key t key in

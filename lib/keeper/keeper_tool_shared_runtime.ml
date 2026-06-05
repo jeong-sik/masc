@@ -132,7 +132,7 @@ let split_repo_relative raw =
   | _ -> None
 ;;
 
-let missing_file_recovery_examples ~(raw_path : string option) =
+let missing_file_recovery_examples ~(raw_path : string option) ~(repo_hint : string option) =
   match raw_path with
   | None -> `Assoc []
   | Some raw ->
@@ -140,11 +140,12 @@ let missing_file_recovery_examples ~(raw_path : string option) =
     let grep_filename =
       Filename.basename raw
       |> fun name ->
-      `Assoc
-        [ "tool", `String "Grep"
-        ; "pattern", `String name
-        ; "path", `String parent
-        ]
+      let path =
+        match split_repo_relative raw, repo_hint with
+        | Some _, _ | _, None -> parent
+        | None, Some repo -> Filename.concat ("repos/" ^ repo) parent
+      in
+      `Assoc [ "tool", `String "Grep"; "pattern", `String name; "path", `String path ]
     in
     let list_parent =
       match split_repo_relative raw with
@@ -157,13 +158,27 @@ let missing_file_recovery_examples ~(raw_path : string option) =
           ; "argv", `List [ `String repo_parent ]
           ]
       | None ->
-        `Assoc
-          [ "tool", `String "Execute"
-          ; "executable", `String "ls"
-          ; "argv", `List [ `String parent ]
-          ]
+        (match repo_hint with
+         | Some repo ->
+           `Assoc
+             [ "tool", `String "Execute"
+             ; "cwd", `String ("repos/" ^ repo)
+             ; "executable", `String "ls"
+             ; "argv", `List [ `String parent ]
+             ]
+         | None ->
+           `Assoc
+             [ "tool", `String "Execute"
+             ; "executable", `String "ls"
+             ; "argv", `List [ `String parent ]
+             ])
     in
     `Assoc [ "grep_filename", grep_filename; "list_parent", list_parent ]
+;;
+
+let visible_repo_hint = function
+  | [ repo ] -> Some repo
+  | _ -> None
 ;;
 
 let missing_file_error_json
@@ -175,41 +190,83 @@ let missing_file_error_json
       ~(fallback_dir : string)
       ~(error : string)
   =
-  ignore (config, fallback_dir);
+  ignore fallback_dir;
   (* #10349: do NOT echo directory entries back to the LLM.  When keeper
      identity drifts, the resolved parent may belong to a sibling sandbox,
      and listing its contents leaks its directory layout (oracle leak).
      The generic error string already contains the path that was tried,
      which is sufficient for the LLM to self-correct. *)
   let playground = Keeper_sandbox.allowed_root_rel_of_meta ~meta in
+  let safe_is_dir path =
+    try Sys.file_exists path && Sys.is_directory path with
+    | Sys_error _ -> false
+  in
+  let safe_file_exists path =
+    try Sys.file_exists path with
+    | Sys_error _ -> false
+  in
+  let available_repos =
+    let repos_dir =
+      Filename.concat (Keeper_sandbox.host_root_abs_of_meta ~config meta) "repos"
+    in
+    if not (safe_is_dir repos_dir)
+    then []
+    else
+      try
+        Sys.readdir repos_dir
+        |> Array.to_list
+        |> List.sort String.compare
+        |> List.filter (fun entry ->
+          let candidate = Filename.concat repos_dir entry in
+          safe_is_dir candidate && safe_file_exists (Filename.concat candidate ".git"))
+      with
+      | Sys_error _ -> []
+  in
+  let repo_hint = visible_repo_hint available_repos in
+  let next_action =
+    match raw_path, repo_hint with
+    | Some path, Some repo when Option.is_none (split_repo_relative path) ->
+      Printf.sprintf
+        "A single sandbox repo is available. Retry with cwd=\"repos/%s\" and \
+         file_path=%S, or use file_path=%S. Use Grep or Execute ls first when \
+         the exact path is unclear."
+        repo
+        path
+        (Filename.concat ("repos/" ^ repo) path)
+    | _ ->
+      "For repo-relative files, pass cwd=\"repos/<repo>\" with \
+       file_path=\"lib/...\", or pass file_path=\"repos/<repo>/lib/...\". \
+       Use Grep or Execute ls first when the exact path is unclear."
+  in
   Yojson.Safe.to_string
     (`Assoc
         [ "ok", `Bool false
         ; "error", `String error
         ; "path", `String target
         ; "your_playground", `String playground
+        ; ( "available_repos"
+          , `List (List.map (fun repo -> `String ("repos/" ^ repo)) available_repos) )
         ; "input_file_path", Json_util.string_opt_to_json raw_path
         ; ( "path_resolution"
           , `Assoc
               [ "implicit_cwd", `Bool false
               ; "explicit_cwd_supported", `Bool true
               ; "cwd", Json_util.string_opt_to_json cwd
+              ; ( "repo_cwd_hint"
+                , Json_util.string_opt_to_json
+                    (Option.map (fun repo -> "repos/" ^ repo) repo_hint) )
               ; "same_path_retry_will_fail", `Bool true
               ; ( "basis"
                 , `String
                     "Read resolves file_path against explicit cwd when cwd is provided; \
                      otherwise it resolves against the keeper sandbox or explicit \
                      allowed_paths. It does not inherit Execute cwd implicitly." )
-              ; ( "next_action"
-                , `String
-                    "For repo-relative files, pass cwd=\"repos/<repo>\" with \
-                     file_path=\"lib/...\", or pass file_path=\"repos/<repo>/lib/...\". \
-                     Use Grep or Execute ls first when the exact path is unclear." )
+              ; "next_action", `String next_action
               ; ( "retry_policy"
                 , `String
                     "Do not retry Read with the same file_path until Grep or Execute ls \
                      confirms the file exists." )
-              ; "recovery_examples", missing_file_recovery_examples ~raw_path
+              ; "recovery_examples", missing_file_recovery_examples ~raw_path ~repo_hint
               ] )
         ])
 ;;
@@ -219,14 +276,14 @@ let find_registry_meta ~(keeper_name : string) ~(source_layer : string)
   =
   match Keeper_registry_lookup.find_by_name keeper_name with
   | None ->
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string PathResolverIdentityMismatch)
       ~labels:[ "source_layer", source_layer; "field", "registry_missing" ]
       ();
     None
   | Some entry ->
     if not (String.equal entry.meta.name keeper_name) then
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string PathResolverIdentityMismatch)
         ~labels:[ "source_layer", source_layer; "field", "name_mismatch" ]
         ();

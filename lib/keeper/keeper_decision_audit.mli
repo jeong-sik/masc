@@ -67,8 +67,6 @@ val decision_pipeline_to_mermaid :
   phase:Keeper_state_machine.phase ->
   thompson_alpha:float ->
   thompson_beta:float ->
-  tool_count:int ->
-  recovery_floor_count:int ->
   unit ->
   string
 

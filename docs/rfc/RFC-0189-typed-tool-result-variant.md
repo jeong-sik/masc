@@ -97,7 +97,7 @@ Constructor distribution (`rg "Tool_result\.(ok|error|of_exn|quick_)" lib/`):
 | `mcp_server_eio_execute.ml` | 16 |
 | `tool_task.ml` | 14 |
 | `tool_types/tool_args.ml` | 13 |
-| `tool_inline_dispatch.ml` | 13 |
+| `mcp_tool_runtime.ml` | 13 |
 | ... (remaining) | 115 |
 | **Total** | **285** |
 

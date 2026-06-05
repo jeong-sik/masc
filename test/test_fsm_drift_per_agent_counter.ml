@@ -6,7 +6,7 @@
    variant-only counter and the new per-agent counter without
    double-counting either side. *)
 
-let () = Masc.Workspace_prometheus_hooks.install ()
+let () = Masc.Workspace_metric_hooks.install ()
 
 let fsm_drift_metric = "masc_task_fsm_drift_total"
 let fsm_drift_per_agent_metric = "masc_task_fsm_drift_per_agent_total"
@@ -16,7 +16,7 @@ let record_fsm_drift_with_agent ~variant ~force ~agent_name =
 ;;
 
 let counter_for_per_agent ~variant ~agent_name ~force =
-  Masc.Prometheus.metric_value_or_zero
+  Masc.Otel_metric_store.metric_value_or_zero
     fsm_drift_per_agent_metric
     ~labels:[
       ("variant", variant);
@@ -26,7 +26,7 @@ let counter_for_per_agent ~variant ~agent_name ~force =
     ()
 
 let counter_for_variant ~variant ~force =
-  Masc.Prometheus.metric_value_or_zero
+  Masc.Otel_metric_store.metric_value_or_zero
     fsm_drift_metric
     ~labels:[
       ("variant", variant);
@@ -36,15 +36,15 @@ let counter_for_variant ~variant ~force =
 
 let test_metric_name_stable () =
   let metric =
-    Masc.Prometheus.snapshot ()
-    |> List.find_opt (fun (m : Masc.Prometheus.metric) ->
+    Masc.Otel_metric_store.snapshot ()
+    |> List.find_opt (fun (m : Masc.Otel_metric_store.metric) ->
       String.equal m.name fsm_drift_per_agent_metric && m.labels = [])
   in
   Alcotest.(check bool)
     "per-agent registered as counter"
     true
     (match metric with
-     | Some m -> m.metric_type = Masc.Prometheus.Counter
+     | Some m -> m.metric_type = Masc.Otel_metric_store.Counter
      | None -> false)
 
 let test_emits_both_counters () =

@@ -1,7 +1,7 @@
-(** Transport_metrics — Prometheus observability for SSE, gRPC,
+(** Transport_metrics — Otel_metric_store observability for SSE, gRPC,
     WebSocket transports + agent heartbeat liveness.
 
-    Metric naming follows Prometheus conventions:
+    Metric naming follows Otel_metric_store conventions:
 
     - [masc_sse_*] for SSE transport
     - [masc_grpc_*] for gRPC transport
@@ -195,7 +195,7 @@ type ws_frame_json_parse_error_kind =
 (** Increments [masc_server_mcp_ws_frame_json_parse_failures_total] for a
     silent-drop visibility event in [parse_sse_dashboard_event].
     [error_kind] must be one of the closed vocab values
-    [{"yojson_parse_error"; "other"}] — keeps Prometheus cardinality
+    [{"yojson_parse_error"; "other"}] — keeps Otel_metric_store cardinality
     bounded. Iter 28. *)
 val inc_ws_frame_json_parse_failure :
   error_kind:ws_frame_json_parse_error_kind -> unit
@@ -305,7 +305,7 @@ val inc_agent_stale : unit -> unit
     SSE / gRPC / WebSocket / agent-health metric values plus
     derived fields ([primary_path], [queue_pressure],
     [http_listener_mode]).  Reads metric values via
-    [Prometheus.metric_value_or_zero] — never raises on missing
+    [Otel_metric_store.metric_value_or_zero] — never raises on missing
     metrics.  [~config] is currently used for workspace-id
     derivation; [cluster_summary_json] is intentionally [None]
     to keep transport health metrics-only (no command-plane I/O). *)

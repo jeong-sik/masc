@@ -30,7 +30,7 @@ let to_wire = function
   | Stale_turn_timeout_no_progress
   | Stale_turn_timeout_noop ->
     (* Existing wire emission collapses the three sub-classes into one
-         cohort key. Preserved here so dashboards / Prometheus labels do
+         cohort key. Preserved here so dashboards / Otel_metric_store labels do
          not see a sudden cardinality change at PR-3 cutover. *)
     "stale_turn_timeout"
   | Stale_termination_storm -> "stale_termination_storm"

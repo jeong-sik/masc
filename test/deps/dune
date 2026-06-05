@@ -5,8 +5,7 @@
 
 (library
  (name masc_test_deps)
- (flags
-  (:standard))
+ (modules masc_test_deps)
  (foreign_stubs
   (language c)
   (names test_env_stubs))
@@ -34,12 +33,28 @@
   (re_export masc_eio_context)
   ; RFC-0107 Phase D.2d — pool unit tests need access to Pool module.
   (re_export masc.http_client)
+  (re_export masc.discovery_cache)
+  (re_export masc.json_field)
+  (re_export masc.local_runtime_pool)
+  (re_export masc.lockfree_atomic)
+  (re_export masc.worker_execution_backend)
+  (re_export masc.worker_execution_spec)
+  (re_export masc.worker_runtime_config)
+  (re_export masc.otel_spans)
+  (re_export otel_metric_test_store)
+  (re_export masc.telemetry_coverage_gap)
+  (re_export masc.telemetry_unified)
+  (re_export masc.telemetry_unified_source)
+  (re_export masc.voice_bridge_core)
+  (re_export masc.voice_config)
+  (re_export masc.voice_runtime_overlay)
   (re_export masc_log)
   (re_export masc)
   (re_export masc.activity_graph)
   ;; Board handler shim removal — tests need direct access to
   ;; Masc_board_handlers for modules no longer re-exported via masc.
   (re_export masc.board_handlers)
+  (re_export masc.board_tool_adapter)
   ;; PR #14267 atomic flip moved Cdal_proof / Proof_store / Risk_class /
   ;; Execution_mode / Risk_contract from agent_sdk into this sub-library;
   ;; tests need it re-exported so [Masc_cdal_runtime.*] resolves.
@@ -84,6 +99,39 @@
   (re_export masc.exec_policy)
   ;; RFC-0056 Phase 1N — Keeper state-machine leaf sub-library.
   (re_export masc.keeper_state)
+  ;; Keeper-owned pure/type leaf sub-libraries.
+  (re_export masc.keeper_tool_name)
+  (re_export masc.keeper_id)
+  (re_export masc.keeper_terminal_reason)
+  (re_export masc.keeper_timing)
+  (re_export masc.keeper_token_count)
+  (re_export masc.keeper_sandbox_error)
+  (re_export masc.keeper_provider_error_class)
+  (re_export masc.keeper_failure_taxonomy)
+  (re_export masc.keeper_world_observation_turn_types)
+  (re_export masc.keeper_memory_taxonomy)
+  (re_export masc.keeper_tool_command_parse)
+  (re_export masc.keeper_outcome_taxonomy)
+  (re_export masc.keeper_metrics)
+  (re_export masc.keeper_types)
+  (re_export masc.keeper_types_profile_sandbox)
+  (re_export masc.keeper_pressure)
+  (re_export masc.keeper_lifecycle_events)
+  (re_export masc.keeper_usage_trust)
+  (re_export masc.keeper_measurement)
+  (re_export masc.keeper_prompt_names)
+  (re_export masc.keeper_event_bus)
+  (re_export masc.keeper_discovered_tools)
+  (re_export masc.keeper_toml_loader)
+  (re_export masc.keeper_runtime_config)
+  (re_export masc.keeper_tool_execute_timeout)
+  (re_export masc.keeper_tool_execute_shell_ir)
+  (re_export masc.keeper_workspace_op)
+  (re_export masc.keeper_failure_policy)
+  (re_export masc.keeper_synthetic_marker)
+  (re_export masc.keeper_oas_timeout_message)
+  (re_export masc.keeper_tool_response)
+  (re_export masc.keeper_social_model_types)
   ;; Model inference metrics + runtime provider label leaves.
   (re_export masc.runtime_provider_labels)
   (re_export masc.model_inference_metrics)
@@ -109,12 +157,8 @@
   (re_export masc.masc_event_bus)
   (re_export masc.provider_tool_support)
   (re_export masc.keeper_internal_error)
-  (re_export masc.prometheus)
-  (re_export masc.auth)
-  (re_export masc.json_field)
-  (re_export masc.lockfree_atomic)
-  (re_export masc.keeper_metrics)
   (re_export masc.pool_metrics)
+  (re_export masc.auth)
   (re_export masc.fd_accountant)
   (re_export masc.response)
   (re_export masc.shared_audit)
@@ -151,7 +195,7 @@
   (re_export masc.masc_tool_dispatch)
   ;; Tool surface leaf extracted to lib/tool_surface/ (masc_tool_surface, RFC-0056
   ;; Phase 2 / LANE 6). Re-export so test code using bare Tool_spec.X /
-  ;; Tool_capability.X / Tool_shard_types*.X / Tool_board.X etc. resolves.
+  ;; Tool_capability.X / Tool_shard_types*.X / Board_tool.X etc. resolves.
   (re_export masc.masc_tool_surface)
   ;; Thompson Sampling extracted to lib/thompson/ (masc_thompson). Re-export so
   ;; test code using bare Thompson_sampling.X resolves after the carve.
@@ -179,3 +223,8 @@
   (re_export otoml)
   (re_export yojson)
   (re_export zstd)))
+
+(library
+ (name otel_metric_test_store)
+ (wrapped false)
+ (modules otel_metric_store))

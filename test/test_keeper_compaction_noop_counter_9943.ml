@@ -26,7 +26,7 @@ let () =
   Unix.putenv "MASC_BASE_PATH" dir
 ;;
 
-module Prom = Masc.Prometheus
+module Prom = Masc.Otel_metric_store
 
 let noop_for ~keeper ~trigger =
   Prom.metric_value_or_zero
@@ -35,7 +35,7 @@ let noop_for ~keeper ~trigger =
     ()
 ;;
 
-(* Metric is registered at module init via [Prometheus.add ~labels:[]],
+(* Metric is registered at module init via [Otel_metric_store.add ~labels:[]],
    so [get_metric_value ~labels:[] ()] returns [Some 0.0] iff the
    registration ran. If a future refactor accidentally drops the
    [add metric_keeper_compaction_noop ...] call, this returns [None]
@@ -46,7 +46,7 @@ let noop_for ~keeper ~trigger =
    "registered but no observations yet". *)
 let test_metric_registered () =
   let registered =
-    Prom.get_metric_value Masc.Keeper_metrics.(to_string CompactionNoop) ()
+    Prom.get_metric_value Keeper_metrics.(to_string CompactionNoop) ()
   in
   Alcotest.(check bool) "metric registered at init" true (Option.is_some registered)
 ;;
@@ -59,7 +59,7 @@ let test_counter_advances_for_noop_pattern () =
   let trigger = "context_overflow_imminent" in
   let before = noop_for ~keeper ~trigger in
   Prom.inc_counter
-    Masc.Keeper_metrics.(to_string CompactionNoop)
+    Keeper_metrics.(to_string CompactionNoop)
     ~labels:[ "keeper", keeper; "trigger", trigger ]
     ();
   Alcotest.(check (float 0.0001))
@@ -76,11 +76,11 @@ let test_distinct_triggers_separate_rows () =
   let before_overflow = noop_for ~keeper ~trigger:"context_overflow_imminent" in
   let before_proactive = noop_for ~keeper ~trigger:"proactive_warmup" in
   Prom.inc_counter
-    Masc.Keeper_metrics.(to_string CompactionNoop)
+    Keeper_metrics.(to_string CompactionNoop)
     ~labels:[ "keeper", keeper; "trigger", "context_overflow_imminent" ]
     ();
   Prom.inc_counter
-    Masc.Keeper_metrics.(to_string CompactionNoop)
+    Keeper_metrics.(to_string CompactionNoop)
     ~labels:[ "keeper", keeper; "trigger", "proactive_warmup" ]
     ();
   Alcotest.(check (float 0.0001))
@@ -103,11 +103,11 @@ let test_per_keeper_isolation () =
   let trigger = "context_overflow_imminent" in
   let before_b = noop_for ~keeper:b ~trigger in
   Prom.inc_counter
-    Masc.Keeper_metrics.(to_string CompactionNoop)
+    Keeper_metrics.(to_string CompactionNoop)
     ~labels:[ "keeper", a; "trigger", trigger ]
     ();
   Prom.inc_counter
-    Masc.Keeper_metrics.(to_string CompactionNoop)
+    Keeper_metrics.(to_string CompactionNoop)
     ~labels:[ "keeper", a; "trigger", trigger ]
     ();
   Alcotest.(check (float 0.0001))
@@ -121,7 +121,7 @@ let test_per_keeper_isolation () =
 let test_registry_snapshot_includes_label_shape () =
   let keeper = "test-keeper-compaction-noop-9943-export" in
   let trigger = "context_overflow_imminent" in
-  let metric = Masc.Keeper_metrics.(to_string CompactionNoop) in
+  let metric = Keeper_metrics.(to_string CompactionNoop) in
   Prom.inc_counter
     metric
     ~labels:[ "keeper", keeper; "trigger", trigger ]

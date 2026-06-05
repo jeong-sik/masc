@@ -22,11 +22,9 @@ type runtime_manifest_scan =
   ; mutable context_compact_started_count : int
   ; mutable context_compacted_count : int
   ; mutable last_compaction : Yojson.Safe.t option
-  ; mutable latest_tool_surface_decision : Yojson.Safe.t option
   ; mutable latest_provider_lane_decision : Yojson.Safe.t option
   ; mutable latest_provider_lane_row : Keeper_runtime_manifest.t option
   ; mutable latest_pre_dispatch_blocked_row : Keeper_runtime_manifest.t option
-  ; mutable latest_tool_lineage_decision : Yojson.Safe.t option
   ; mutable payload_role_counts : (string, int) Hashtbl.t
   ; mutable source_clock_counts : (string, int) Hashtbl.t
   ; mutable context_injected_count : int
@@ -57,11 +55,9 @@ let make_runtime_manifest_scan ~path ~limit =
   ; context_compact_started_count = 0
   ; context_compacted_count = 0
   ; last_compaction = None
-  ; latest_tool_surface_decision = None
   ; latest_provider_lane_decision = None
   ; latest_provider_lane_row = None
   ; latest_pre_dispatch_blocked_row = None
-  ; latest_tool_lineage_decision = None
   ; payload_role_counts = Hashtbl.create 17
   ; source_clock_counts = Hashtbl.create 17
   ; context_injected_count = 0
@@ -166,15 +162,11 @@ let update_runtime_manifest_scan scan row =
       | Some value ->
         scan.terminal_keeper_turn_ids <- value :: scan.terminal_keeper_turn_ids
       | None -> ())
-   | Keeper_runtime_manifest.Tool_surface_selected ->
-     scan.latest_tool_surface_decision <- Some row.Keeper_runtime_manifest.decision
    | Keeper_runtime_manifest.Provider_lane_resolved ->
      scan.latest_provider_lane_decision <- Some row.Keeper_runtime_manifest.decision;
      scan.latest_provider_lane_row <- Some row
    | Keeper_runtime_manifest.Pre_dispatch_blocked ->
      scan.latest_pre_dispatch_blocked_row <- Some row
-   | Keeper_runtime_manifest.Tool_lineage_recorded ->
-     scan.latest_tool_lineage_decision <- Some row.Keeper_runtime_manifest.decision
    | Keeper_runtime_manifest.Context_injected ->
      scan.context_injected_count <- scan.context_injected_count + 1;
      scan.latest_context_injected_row <- Some row

@@ -361,7 +361,6 @@ lib/keeper/keeper_approval_queue.ml,158,None,unclassified
 lib/keeper/keeper_approval_queue.ml,256,None,unclassified
 lib/keeper/keeper_approval_queue.ml,1229,None,unclassified
 lib/keeper/keeper_behavioral_regime.ml,19,None,unclassified
-lib/keeper/keeper_cli_mcp_config.ml,64,None,unclassified
 lib/keeper/keeper_compact_audit.ml,156,None,unclassified
 lib/keeper/keeper_compact_audit.ml,172,None,unclassified
 lib/keeper/keeper_compact_audit.ml,257,None,unclassified
@@ -411,7 +410,6 @@ lib/keeper/keeper_tool_execute_command_parse.ml,492,None,unclassified
 lib/keeper/keeper_tool_execute_command_parse.ml,520,None,unclassified
 lib/keeper/keeper_tool_execute_command_parse.ml,752,None,unclassified
 lib/keeper/keeper_tool_execute_command_parse.ml,769,None,unclassified
-lib/keeper/keeper_hash_algo.ml,18,None,unclassified
 lib/keeper/keeper_heartbeat_loop.ml,317,(),unclassified
 lib/keeper/keeper_heartbeat_loop.ml,388,(),unclassified
 lib/keeper/keeper_hooks_oas.ml,500,false,unclassified
@@ -456,9 +454,6 @@ lib/keeper/keeper_msg_async.ml,152,None,unclassified
 lib/keeper/keeper_msg_async.ml,304,None,unclassified
 lib/keeper/keeper_passive_loop_detector.ml,96,false,unclassified
 lib/keeper/keeper_passive_loop_detector.ml,101,false,unclassified
-lib/keeper/keeper_persona_authoring.ml,34,None,unclassified
-lib/keeper/keeper_persona_authoring.ml,671,None,unclassified
-lib/keeper/keeper_persona_authoring.ml,886,None,unclassified
 lib/keeper/keeper_post_turn.ml,123,None,unclassified
 lib/keeper/keeper_post_turn.ml,799,false,unclassified
 lib/keeper/keeper_post_turn.ml,844,None,unclassified
@@ -840,10 +835,10 @@ lib/tool_workspace.ml,283,false,unclassified
 lib/tool_workspace.ml,797,None,unclassified
 lib/tool_workspace.ml,823,None,unclassified
 lib/tool_help_registry.ml,231,None,unclassified
-lib/tool_inline_dispatch_extra.ml,57,None,unclassified
-lib/tool_inline_dispatch_extra.ml,451,None,unclassified
-lib/tool_inline_dispatch.ml,235,None,unclassified
-lib/tool_inline_dispatch.ml,253,None,unclassified
+lib/mcp_tool_runtime_board.ml,57,None,unclassified
+lib/mcp_tool_runtime_board.ml,451,None,unclassified
+lib/mcp_tool_runtime.ml,235,None,unclassified
+lib/mcp_tool_runtime.ml,253,None,unclassified
 lib/tool_input_validation.ml,82,false,unclassified
 lib/tool_keeper.ml,861,None,unclassified
 lib/tool_keeper.ml,909,false,unclassified

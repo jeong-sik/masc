@@ -20,7 +20,7 @@
 ;;                              stats now (Telemetry_eio dependency inverted to the
 ;;                              composition root — see server_runtime_bootstrap.ml).
 ;;   - tool_dispatch          : single dispatch entry (registry + hooks). The
-;;                              Otel/Prometheus span wrapper is injected via
+;;                              Otel/Otel_metric_store span wrapper is injected via
 ;;                              [set_span_wrapper] (default identity) so this lib no
 ;;                              longer code-depends on tool_telemetry. The composition
 ;;                              root registers Tool_telemetry.with_span — see

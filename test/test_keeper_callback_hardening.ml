@@ -15,32 +15,32 @@
     constants are stable, label cardinality stays bounded, and
     distinct labels are isolated. *)
 
-module P = Masc.Prometheus
+module P = Masc.Otel_metric_store
 
-(* ── Counter constants (stable Prometheus series names) ───── *)
+(* ── Counter constants (stable Otel_metric_store series names) ───── *)
 
 let test_lifecycle_callback_metric_name () =
   Alcotest.(check string)
     "lifecycle callback failures counter has the documented series name"
     "masc_keeper_lifecycle_callback_failures_total"
-    Masc.Keeper_metrics.(to_string LifecycleCallbackFailures)
+    Keeper_metrics.(to_string LifecycleCallbackFailures)
 
 let test_event_bus_drain_metric_name () =
   Alcotest.(check string)
     "event-bus drain counter has the documented series name"
     "masc_keeper_event_bus_drain_total"
-    Masc.Keeper_metrics.(to_string EventBusDrain)
+    Keeper_metrics.(to_string EventBusDrain)
 
 (* ── Counter mechanics — labels distinct and isolated ────── *)
 
 let read_lifecycle_failure ~callback =
   P.metric_value_or_zero
-    Masc.Keeper_metrics.(to_string LifecycleCallbackFailures)
+    Keeper_metrics.(to_string LifecycleCallbackFailures)
     ~labels:[("callback", callback)] ()
 
 let read_keeper_hook_failure ~keeper ~callback =
   P.metric_value_or_zero
-    Masc.Keeper_metrics.(to_string LifecycleCallbackFailures)
+    Keeper_metrics.(to_string LifecycleCallbackFailures)
     ~labels:[("keeper", keeper); ("callback", callback)] ()
 
 let test_lifecycle_callback_label_isolation () =
@@ -48,7 +48,7 @@ let test_lifecycle_callback_label_isolation () =
   let cb_b = "on_handoff_started" in
   let a_before = read_lifecycle_failure ~callback:cb_a in
   let b_before = read_lifecycle_failure ~callback:cb_b in
-  P.inc_counter Masc.Keeper_metrics.(to_string LifecycleCallbackFailures)
+  P.inc_counter Keeper_metrics.(to_string LifecycleCallbackFailures)
     ~labels:[("callback", cb_a)] ();
   let a_after = read_lifecycle_failure ~callback:cb_a in
   let b_after = read_lifecycle_failure ~callback:cb_b in
@@ -64,7 +64,7 @@ let test_keeper_hook_label_shape_is_isolated () =
   let callback = "post_tool_log_write" in
   let keeper_before = read_keeper_hook_failure ~keeper ~callback in
   let lifecycle_before = read_lifecycle_failure ~callback in
-  P.inc_counter Masc.Keeper_metrics.(to_string LifecycleCallbackFailures)
+  P.inc_counter Keeper_metrics.(to_string LifecycleCallbackFailures)
     ~labels:[("keeper", keeper); ("callback", callback)] ();
   let keeper_after = read_keeper_hook_failure ~keeper ~callback in
   let lifecycle_after = read_lifecycle_failure ~callback in
@@ -77,7 +77,7 @@ let test_keeper_hook_label_shape_is_isolated () =
 
 let read_drain ~site ~outcome =
   P.metric_value_or_zero
-    Masc.Keeper_metrics.(to_string EventBusDrain)
+    Keeper_metrics.(to_string EventBusDrain)
     ~labels:[("site", site); ("outcome", outcome)] ()
 
 let test_drain_site_label_isolation () =
@@ -86,7 +86,7 @@ let test_drain_site_label_isolation () =
   let outcome = "empty" in
   let x_before = read_drain ~site:site_x ~outcome in
   let y_before = read_drain ~site:site_y ~outcome in
-  P.inc_counter Masc.Keeper_metrics.(to_string EventBusDrain)
+  P.inc_counter Keeper_metrics.(to_string EventBusDrain)
     ~labels:[("site", site_x); ("outcome", outcome)] ();
   let x_after = read_drain ~site:site_x ~outcome in
   let y_after = read_drain ~site:site_y ~outcome in
@@ -101,7 +101,7 @@ let test_drain_outcome_label_distinction () =
   let site = "test_outcome_isolation" in
   let drained_before = read_drain ~site ~outcome:"drained" in
   let empty_before = read_drain ~site ~outcome:"empty" in
-  P.inc_counter Masc.Keeper_metrics.(to_string EventBusDrain)
+  P.inc_counter Keeper_metrics.(to_string EventBusDrain)
     ~labels:[("site", site); ("outcome", "drained")] ();
   let drained_after = read_drain ~site ~outcome:"drained" in
   let empty_after = read_drain ~site ~outcome:"empty" in
@@ -115,7 +115,7 @@ let test_drain_outcome_label_distinction () =
 (* ── Documented label vocabulary check ──────────────────────
    The wrappers in keeper_post_turn.ml / keeper_rollover.ml and the
    per-keeper hook sites in keeper_hooks_oas.ml must stay aligned with
-   prometheus.mli. This test pins the callback vocabulary so a future
+   otel_metric_store.mli. This test pins the callback vocabulary so a future
    refactor that renames a label without updating the docs is caught. *)
 
 let test_documented_callback_label_vocabulary () =
@@ -133,7 +133,7 @@ let test_documented_callback_label_vocabulary () =
     ]
   in
   List.iter (fun label ->
-    P.inc_counter Masc.Keeper_metrics.(to_string LifecycleCallbackFailures)
+    P.inc_counter Keeper_metrics.(to_string LifecycleCallbackFailures)
       ~labels:[("callback", label)] ();
     let v = read_lifecycle_failure ~callback:label in
     Alcotest.(check bool)
@@ -146,7 +146,7 @@ let test_documented_drain_outcome_vocabulary () =
   let documented_outcomes = ["drained"; "empty"] in
   let site = "vocab_check" in
   List.iter (fun outcome ->
-    P.inc_counter Masc.Keeper_metrics.(to_string EventBusDrain)
+    P.inc_counter Keeper_metrics.(to_string EventBusDrain)
       ~labels:[("site", site); ("outcome", outcome)] ();
     let v = read_drain ~site ~outcome in
     Alcotest.(check bool)
@@ -175,9 +175,9 @@ let () =
         test_drain_outcome_label_distinction;
     ];
     "documented label vocabulary", [
-      test_case "callback labels match prometheus.mli docs" `Quick
+      test_case "callback labels match otel_metric_store.mli docs" `Quick
         test_documented_callback_label_vocabulary;
-      test_case "drain outcome labels match prometheus.mli docs" `Quick
+      test_case "drain outcome labels match otel_metric_store.mli docs" `Quick
         test_documented_drain_outcome_vocabulary;
     ];
   ]

@@ -31,6 +31,8 @@ type turn_measurement =
   ; tm_auto_rules : Keeper_state_machine.auto_rule_summary
   }
 
+type done_resolution = [ `Stopped | `Crashed of string ]
+
 type registry_entry =
   { base_path : string
   ; name : string
@@ -44,8 +46,8 @@ type registry_entry =
   ; event_queue : Keeper_event_queue.t Atomic.t
   ; started_at : float
   ; grpc_close : (unit -> unit) option Atomic.t
-  ; done_p : [ `Stopped | `Crashed of string ] Eio.Promise.t
-  ; done_r : [ `Stopped | `Crashed of string ] Eio.Promise.u
+  ; done_p : done_resolution Eio.Promise.t
+  ; done_r : done_resolution Eio.Promise.u
   ; restart_count : int
   ; last_restart_ts : float
   ; dead_since_ts : float option
@@ -92,15 +94,28 @@ and completed_turn_observation =
   ; ct_selected_model : string option
   }
 
-let try_resolve_done entry value =
+type done_resolve_result =
+  | Done_resolved of { source : string }
+  | Done_already_resolved of
+      { source : string
+      ; previous : done_resolution
+      }
+
+let resolve_done entry ~source (value : done_resolution) =
   match Eio.Promise.peek entry.done_p with
-  | Some _ -> false
+  | Some previous -> Done_already_resolved { source; previous }
   | None ->
     (try
        Eio.Promise.resolve entry.done_r value;
-       true
+       Done_resolved { source }
      with
-     | Invalid_argument _ -> false)
+     | Invalid_argument _ ->
+       let previous =
+         match Eio.Promise.peek entry.done_p with
+         | Some previous -> previous
+         | None -> value
+       in
+       Done_already_resolved { source; previous })
 ;;
 
 let registry_key ~base_path name =

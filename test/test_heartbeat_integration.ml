@@ -17,7 +17,7 @@ open Alcotest
 module R = Masc.Keeper_registry
 module Keeper_types_profile = Masc.Keeper_types_profile
 module Sup = Masc.Keeper_supervisor
-module KT = Masc.Keeper_types
+module KT = Keeper_types
 module KSM = Keeper_state_machine
 module Cfg = Env_config
 
@@ -58,6 +58,9 @@ let make_meta name =
   | Ok meta -> meta
   | Error err -> Alcotest.fail ("make_meta failed: " ^ err)
 
+let resolve_done_for_test reg value =
+  ignore (R.resolve_done reg ~source:"test_fixture" value)
+
 let eio_test name fn =
   test_case name `Quick (fun () -> Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env); fn ())
@@ -82,7 +85,7 @@ let test_crash_heartbeat_failure () =
     (KSM.Fiber_terminated { outcome = "heartbeat_failure"; provider_id = None; http_status = None }));
   R.record_crash ~base_path:bp "hb-crash" 1000.0 reason_str;
   Masc.Keeper_registry_error_recording.record ~base_path:bp "hb-crash" reason_str;
-  Eio.Promise.resolve reg.done_r (`Crashed reason_str);
+  resolve_done_for_test reg (`Crashed reason_str);
   (* Assert: registry state *)
   (match R.get ~base_path:bp "hb-crash" with
    | None -> fail "expected hb-crash in registry"
@@ -114,7 +117,7 @@ let test_crash_generic_exception () =
     (KSM.Fiber_terminated { outcome = "exception"; provider_id = None; http_status = None }));
   R.record_crash ~base_path:bp "exn-crash" 1001.0 reason_str;
   Masc.Keeper_registry_error_recording.record ~base_path:bp "exn-crash" reason_str;
-  Eio.Promise.resolve reg.done_r (`Crashed reason_str);
+  resolve_done_for_test reg (`Crashed reason_str);
   match R.get ~base_path:bp "exn-crash" with
   | None -> fail "expected exn-crash"
   | Some e ->
@@ -139,7 +142,7 @@ let test_crash_fiber_unresolved () =
   Masc.Keeper_registry_error_recording.record ~base_path:bp "unresolved" reason_str;
   ignore (R.dispatch_event ~base_path:bp "unresolved"
     (KSM.Fiber_terminated { outcome = "unresolved"; provider_id = None; http_status = None }));
-  Eio.Promise.resolve reg.done_r (`Crashed reason_str);
+  resolve_done_for_test reg (`Crashed reason_str);
   match R.get ~base_path:bp "unresolved" with
   | None -> fail "expected unresolved"
   | Some e ->
@@ -162,7 +165,7 @@ let test_dead_tombstone_full_lifecycle () =
   check string "initially running" "running"
     (KSM.phase_to_string (Option.get (R.get ~base_path:bp "mortal")).phase);
   (* Crash *)
-  Eio.Promise.resolve reg.done_r (`Crashed "test");
+  resolve_done_for_test reg (`Crashed "test");
   ignore (R.dispatch_event ~base_path:bp "mortal"
     (KSM.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }));
   (* Simulate budget exhaustion *)
@@ -303,7 +306,7 @@ let test_reconcile_predicate_stopped_resolved () =
   let reg = R.register ~base_path:bp "s1" (make_meta "s1") in
   ignore (R.dispatch_event ~base_path:bp "s1" KSM.Stop_requested);
   ignore (R.dispatch_event ~base_path:bp "s1" KSM.Drain_complete);
-  Eio.Promise.resolve reg.done_r `Stopped;
+  resolve_done_for_test reg `Stopped;
   (* Stopped + resolved done_p = reconcile-eligible *)
   (match R.get ~base_path:bp "s1" with
    | Some e ->
@@ -352,7 +355,7 @@ let test_restart_state_preservation () =
   R.clear ();
   let meta = make_meta "restartable" in
   let reg1 = R.register ~base_path:bp "restartable" meta in
-  Eio.Promise.resolve reg1.done_r (`Crashed "first crash");
+  resolve_done_for_test reg1 (`Crashed "first crash");
   ignore (R.dispatch_event ~base_path:bp "restartable"
     (KSM.Fiber_terminated { outcome = "first crash"; provider_id = None; http_status = None }));
   R.record_crash ~base_path:bp "restartable" 100.0 "first crash";
@@ -391,7 +394,7 @@ let test_crash_turn_failures () =
     (KSM.Fiber_terminated { outcome = "turn failure"; provider_id = None; http_status = None }));
   R.record_crash ~base_path:bp "turn-crash" 2000.0 reason_str;
   Masc.Keeper_registry_error_recording.record ~base_path:bp "turn-crash" reason_str;
-  Eio.Promise.resolve reg.done_r (`Crashed reason_str);
+  resolve_done_for_test reg (`Crashed reason_str);
   match R.get ~base_path:bp "turn-crash" with
   | None -> fail "expected turn-crash"
   | Some e ->
@@ -566,7 +569,10 @@ let test_stop_keepalive_preserves_existing_crash_outcome () =
   let reason = "already crashed" in
   ignore (R.dispatch_event ~base_path:bp keeper_name
     (KSM.Fiber_terminated { outcome = "already crashed"; provider_id = None; http_status = None }));
-  Eio.Promise.resolve reg.done_r (`Crashed reason);
+  (match R.resolve_done reg ~source:"test_existing_crash" (`Crashed reason) with
+   | R.Done_resolved { source } ->
+     check string "resolve source" "test_existing_crash" source
+   | R.Done_already_resolved _ -> fail "first resolve should win");
   Masc.Keeper_keepalive.stop_keepalive keeper_name;
   match R.get ~base_path:bp keeper_name with
   | None -> fail "expected crashed-before-stop in registry"
@@ -576,6 +582,21 @@ let test_stop_keepalive_preserves_existing_crash_outcome () =
      | Some (`Crashed msg) -> check string "crash reason preserved" reason msg
      | Some `Stopped -> fail "manual stop should not overwrite a crashed promise"
      | None -> fail "expected crash promise to remain resolved")
+
+let test_resolve_done_reports_prior_outcome () =
+  R.clear ();
+  let keeper_name = "double-resolve-contract" in
+  let reg = R.register ~base_path:bp keeper_name (make_meta keeper_name) in
+  (match R.resolve_done reg ~source:"test_first" (`Crashed "first") with
+   | R.Done_resolved { source } -> check string "first source" "test_first" source
+   | R.Done_already_resolved _ -> fail "first resolve should succeed");
+  match R.resolve_done reg ~source:"test_second" `Stopped with
+  | R.Done_resolved _ -> fail "second resolve must not overwrite prior outcome"
+  | R.Done_already_resolved { source; previous = `Crashed msg } ->
+    check string "second source" "test_second" source;
+    check string "previous outcome" "first" msg
+  | R.Done_already_resolved { previous = `Stopped; _ } ->
+    fail "previous outcome should remain crashed"
 
 (* ══════════════════════════════════════════════════════════
    9. RFC-0002: pipeline_stage_of_phase deterministic mapping
@@ -610,6 +631,24 @@ let test_pipeline_stage_of_phase_exhaustive () =
       (Printf.sprintf "%s → %s" (KSM.phase_to_string phase) expected)
       expected actual
   ) cases
+
+let test_pipeline_stage_detail_distinguishes_offline_projection () =
+  let cases = [
+    (KSM.Offline, "offline", "launch_pending_no_fiber");
+    (KSM.Stopped, "offline", "clean_stop_terminal");
+    (KSM.Dead, "offline", "restart_budget_exhausted_terminal");
+  ] in
+  List.iter
+    (fun (phase, expected_stage, expected_detail) ->
+       check string
+         (Printf.sprintf "%s stage" (KSM.phase_to_string phase))
+         expected_stage
+         (ES.pipeline_stage_of_phase phase);
+       check string
+         (Printf.sprintf "%s stage detail" (KSM.phase_to_string phase))
+         expected_detail
+         (ES.pipeline_stage_detail_of_phase phase))
+    cases
 
 (** Verify non-registered keepers → get_phase returns None, and
     registered keepers in every phase → pipeline_stage_of_phase produces
@@ -704,12 +743,16 @@ let () =
         test_stop_keepalive_force_releases_held_slots;
       test_case "manual stop preserves crashed outcome" `Quick
         test_stop_keepalive_preserves_existing_crash_outcome;
+      test_case "resolve_done reports prior outcome" `Quick
+        test_resolve_done_reports_prior_outcome;
     ];
-    "pipeline_stage_phase", [
-      test_case "exhaustive 11-phase mapping" `Quick
-        test_pipeline_stage_of_phase_exhaustive;
-      test_case "unregistered keeper → offline" `Quick
-        test_pipeline_stage_unregistered_is_offline;
+	    "pipeline_stage_phase", [
+	      test_case "exhaustive 11-phase mapping" `Quick
+	        test_pipeline_stage_of_phase_exhaustive;
+	      test_case "offline projection details remain distinct" `Quick
+	        test_pipeline_stage_detail_distinguishes_offline_projection;
+	      test_case "unregistered keeper → offline" `Quick
+	        test_pipeline_stage_unregistered_is_offline;
       test_case "sensitivity: active phases ≠ offline" `Quick
         test_pipeline_stage_sensitivity;
     ];

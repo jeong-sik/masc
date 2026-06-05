@@ -268,7 +268,6 @@ function isIdleComposite(snapshot: KeeperCompositeSnapshot): boolean {
 
 function executionEvidence(snapshot: KeeperCompositeSnapshot): string[] {
   const execution = snapshot.execution
-  const surface = execution?.tool_surface
   const parts: string[] = []
   const previousReceipt = hasPreviousTurnExecutionReceipt(snapshot)
   if (!snapshot.is_live) parts.push('is_live=false')
@@ -281,24 +280,6 @@ function executionEvidence(snapshot: KeeperCompositeSnapshot): string[] {
   }
   if (execution?.terminal_reason_code) {
     parts.push(`${previousReceipt ? 'previous_' : ''}terminal=${execution.terminal_reason_code}`)
-  }
-  if (execution?.tool_contract_result) {
-    parts.push(`${previousReceipt ? 'previous_' : ''}tool=${execution.tool_contract_result}`)
-  }
-  if (surface?.tool_requirement) {
-    parts.push(`tool_requirement=${surface.tool_requirement}`)
-  }
-  if (surface?.turn_lane) {
-    parts.push(`turn_lane=${surface.turn_lane}`)
-  }
-  if (surface?.tool_surface_class) {
-    parts.push(`tool_surface=${surface.tool_surface_class}`)
-  }
-  if (typeof surface?.allowed_tool_count === 'number') {
-    parts.push(`allowed_tools=${surface.allowed_tool_count}`)
-  }
-  if (surface?.tool_surface_fallback_used === true) {
-    parts.push('tool_surface_fallback=true')
   }
   if (execution?.error?.kind) {
     parts.push(`error=${execution.error.kind}`)
@@ -318,12 +299,7 @@ function hasBlockingExecutionEvidence(snapshot: KeeperCompositeSnapshot): boolea
   if (execution.operator_disposition === 'pause_human') return true
   if (execution.outcome === 'receipt_failed') return true
   if (execution.terminal_reason_code && execution.terminal_reason_code !== 'completed') return true
-  if (execution.tool_contract_result === 'unknown' && execution.error != null) return true
   return false
-}
-
-function toolListLabel(values: readonly string[] | null | undefined): string | null {
-  return values && values.length > 0 ? values.join(', ') : null
 }
 
 function backendRuntimeAttentionLevel(
@@ -401,7 +377,6 @@ function hasHealthyExecutionEvidence(snapshot: KeeperCompositeSnapshot): boolean
   // TLA-prefix wire format — see `hasBlockingExecutionEvidence` comment above.
   if (execution.outcome === 'receipt_done' || execution.outcome === 'receipt_skipped') return true
   if (execution.terminal_reason_code === 'completed') return true
-  if (execution.tool_contract_result?.startsWith('satisfied')) return true
   return false
 }
 
@@ -415,23 +390,6 @@ function blockingCause(snapshot: KeeperCompositeSnapshot): string {
         ? `blocked: ${execution.operator_disposition_reason}`
         : 'blocked by operator disposition',
     )
-  }
-  if (execution.tool_contract_result === 'tool_surface_mismatch') {
-    const missingTools = toolListLabel(execution.tool_surface?.missing_required_tools)
-    parts.push(
-      missingTools
-        ? `tool contract: tool_surface_mismatch (${missingTools})`
-        : 'tool contract: tool_surface_mismatch',
-    )
-  } else if (execution.tool_contract_result === 'no_tool_capable_provider') {
-    const requiredTools = toolListLabel(execution.tool_surface?.required_tools)
-    parts.push(
-      requiredTools
-        ? `tool contract: no_tool_capable_provider (${requiredTools})`
-        : 'tool contract: no_tool_capable_provider',
-    )
-  } else if (execution.tool_contract_result === 'unknown' && execution.error != null) {
-    parts.push('tool contract unknown with execution error')
   }
   if (execution.terminal_reason_code && execution.terminal_reason_code !== 'completed') {
     parts.push(`terminal: ${execution.terminal_reason_code}`)
@@ -448,18 +406,6 @@ function blockingCause(snapshot: KeeperCompositeSnapshot): string {
 function blockingNextStep(snapshot: KeeperCompositeSnapshot): string {
   const execution = snapshot.execution
   if (!execution) return 'latest execution receipt 확인'
-  if (
-    execution.tool_contract_result === 'tool_surface_mismatch' ||
-    execution.tool_contract_result === 'no_tool_capable_provider'
-  ) {
-    const missingTools = toolListLabel(execution.tool_surface?.missing_required_tools)
-    const requiredTools = toolListLabel(execution.tool_surface?.required_tools)
-    const toolHint = missingTools ?? requiredTools
-    if (toolHint) {
-      return `tool surface 또는 runtime lane 설정 확인: ${toolHint}`
-    }
-    return 'tool surface 또는 runtime lane 설정 확인'
-  }
   if (execution.terminal_reason_code === 'api_error_invalid_request') {
     return 'runtime auth/config receipt 확인'
   }
@@ -511,14 +457,6 @@ export function buildRuntimeAssistPrompt(
       terminal_reason_code: snapshot.execution.terminal_reason_code,
       operator_disposition: snapshot.execution.operator_disposition,
       operator_disposition_reason: snapshot.execution.operator_disposition_reason,
-      tool_contract_result: snapshot.execution.tool_contract_result,
-      required_tools: snapshot.execution.tool_surface?.required_tools ?? [],
-      missing_required_tools: snapshot.execution.tool_surface?.missing_required_tools ?? [],
-      tool_requirement: snapshot.execution.tool_surface?.tool_requirement ?? null,
-      turn_lane: snapshot.execution.tool_surface?.turn_lane ?? null,
-      tool_surface_class: snapshot.execution.tool_surface?.tool_surface_class ?? null,
-      allowed_tool_count: snapshot.execution.tool_surface?.allowed_tool_count ?? null,
-      tool_surface_fallback_used: snapshot.execution.tool_surface?.tool_surface_fallback_used ?? null,
       error_kind: snapshot.execution.error?.kind ?? null,
       error_preview: snapshot.execution.error?.message_preview ?? null,
     })
@@ -969,7 +907,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
     () => (data ? tallyInvariantViolations(data.snapshots) : null),
     [data],
   )
-  // Backend emits this Prometheus counter (`metric_fsm_guard_violation`)
+  // Backend emits this OTel counter (`metric_fsm_guard_violation`)
   // as a fleet-wide total duplicated onto every snapshot — see
   // keeper_composite_observer.ml:452. Reading [0] is intentional;
   // summing across snapshots would multiply the count by fleet size.

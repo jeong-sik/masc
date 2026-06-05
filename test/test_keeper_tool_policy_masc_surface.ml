@@ -2,7 +2,7 @@ open Alcotest
 
 let names_from_board_registry () =
   Masc.Keeper_tool_policy.keeper_supported_masc_tool_names_from_schemas
-    Masc.Tool_board_registry.tools
+    Board_tool_registry.tools
 
 let check_member label name expected names =
   check bool label expected (List.mem name names)

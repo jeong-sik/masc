@@ -1,97 +1,18 @@
 (** Execute command semantics.
 
-    This layer owns command-shape interpretation. Runtime backends call
-    into it when they need deterministic cwd policy for git/gh commands,
-    but it does not execute shell commands and does not construct Docker
-    invocations. *)
+    This layer owns keeper-specific cwd policy and user-facing command
+    guidance. Pure command-shape extraction stays in
+    [Masc_exec.Shell_ir_command_shape]. *)
 
-type parsed_stage =
+type stage = Masc_exec.Shell_ir_command_shape.stage =
   { bin : string
   ; args : string list
   }
 
-let parse_cmd_to_ir_opt = Keeper_tool_execute_command_parse.parse_cmd_to_ir_opt
+let effective_stages ir = Masc_exec.Shell_ir_command_shape.effective_stages ir
 
-let literal_args args =
-  let rec loop acc = function
-    | [] -> Some (List.rev acc)
-    | Masc_exec.Shell_ir.Lit (arg, _) :: rest -> loop (arg :: acc) rest
-    | Masc_exec.Shell_ir.Concat _ :: _ | Masc_exec.Shell_ir.Var (_, _) :: _ -> None
-  in
-  loop [] args
-
-let stage_of_simple simple =
-  match literal_args simple.Masc_exec.Shell_ir.args with
-  | None -> None
-  | Some args ->
-    Some { bin = Masc_exec.Exec_program.to_string simple.bin; args }
-
-let parsed_stages_of_ir ir =
-  let rec loop acc = function
-    | Masc_exec.Shell_ir.Simple simple -> (
-        match stage_of_simple simple with
-        | Some stage -> Some (stage :: acc)
-        | None -> None)
-    | Masc_exec.Shell_ir.Pipeline stages ->
-      List.fold_left
-        (fun acc stage -> Option.bind acc (fun acc -> loop acc stage))
-        (Some acc)
-        stages
-  in
-  match loop [] ir with
-  | Some stages -> List.rev stages
-  | None -> []
-
-let is_shell_identifier name =
-  let len = String.length name in
-  let is_head = function
-    | 'A' .. 'Z' | 'a' .. 'z' | '_' -> true
-    | _ -> false
-  in
-  let is_tail = function
-    | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '_' -> true
-    | _ -> false
-  in
-  len > 0
-  && is_head name.[0]
-  && Seq.for_all is_tail (String.to_seq (String.sub name 1 (len - 1)))
-
-let is_env_assignment token =
-  match String.index_opt token '=' with
-  | None -> false
-  | Some 0 -> false
-  | Some i -> is_shell_identifier (String.sub token 0 i)
-
-let normalize_command_name command_name =
-  let command_name = Filename.basename command_name |> String.lowercase_ascii in
-  if String.ends_with ~suffix:".exe" command_name
-  then String.sub command_name 0 (String.length command_name - String.length ".exe")
-  else command_name
-
-let rec effective_stage stage =
-  match normalize_command_name stage.bin, stage.args with
-  | "env", args ->
-    let rec scan = function
-      | [] -> None
-      | ("-i" | "--ignore-environment") :: rest -> scan rest
-      | arg :: rest when is_env_assignment arg -> scan rest
-      | arg :: rest when String.starts_with ~prefix:"-" arg -> None
-      | bin :: args -> Some { bin; args }
-    in
-    scan args
-  | "opam", "exec" :: rest ->
-    (match rest with
-     | "--" :: bin :: args -> Some { bin; args }
-     | bin :: args when not (String.starts_with ~prefix:"-" bin) ->
-       Some { bin; args }
-     | _ -> None)
-  | _ ->
-    (* DET-OK: this is the parsed command itself, not an inferred fallback for
-       an unknown wrapper. *)
-    Some stage
-
-let effective_stages_of_ir ir =
-  parsed_stages_of_ir ir |> List.filter_map effective_stage
+let normalize_command_name =
+  Masc_exec.Shell_ir_command_shape.normalize_command_name
 
 let strip_simple_shell_quotes token =
   let len = String.length token in
@@ -184,6 +105,12 @@ let gh_pr_diff_misuse_of_stages stages =
     else
       None) stages
 
+let repo_hosting_cli_repo_flag_api_misuse ir =
+  repo_hosting_cli_repo_flag_api_misuse_of_stages (effective_stages ir)
+
+let gh_pr_diff_misuse ir =
+  gh_pr_diff_misuse_of_stages (effective_stages ir)
+
 let misuse_error_of_stages stages =
   match repo_hosting_cli_repo_flag_api_misuse_of_stages stages with
   | Some (repo_arg, endpoint) ->
@@ -204,6 +131,8 @@ let misuse_error_of_stages stages =
             "잘못된 gh syntax: 'gh pr diff'는 파일 경로 필터링(예: '--', '*.ml')을 지원하지 않으며, positional argument는 최대 1개([<number> | <url> | <branch>])만 허용됩니다. (입력받은 positional args: %s). 전체 diff를 원하시면 파일 필터를 제거하시고, 특정 파일만 보시려면 git 저장소 내에서 'git diff origin/main <pr> -- <paths>'를 실행하세요."
             (String.concat ", " pos_args))
      | None -> None)
+
+let misuse_error ir = misuse_error_of_stages (effective_stages ir)
 
 
 let bare_worktrees_path token =
@@ -291,9 +220,10 @@ let repos_path_hint_of_stages ~cmd stages =
            | Some path -> Some (path, cmd)
            | None -> None)) stages
 
-let resolve_sandbox_root_git_cwd_of_stages
-    ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_meta) ~cwd ~cmd stages
+let resolve_sandbox_root_git_cwd
+    ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_meta) ~cwd ~cmd ir
   =
+  let stages = effective_stages ir in
   let host_root =
     Keeper_sandbox.host_root_abs_of_meta ~config meta
     |> Keeper_alerting_path.normalize_path_for_check
@@ -405,8 +335,3 @@ let resolve_sandbox_root_git_cwd_of_stages
          then resolve_without_explicit_git_c ()
          else cwd, None))
   else cwd, None
-
-let effective_stages_of_cmd cmd =
-  match parse_cmd_to_ir_opt cmd with
-  | Some ir -> effective_stages_of_ir ir
-  | None -> []

@@ -43,8 +43,7 @@ val build_keeper_briefs :
 (** Assembles the keeper brief list from a raw [keepers]
     JSON list.  Looks up each keeper through the
     {!Keeper_registry}, falling back to in-band fields
-    ([allowed_tool_names], [latest_tool_names]) when the
-    registry has no record.  Pinned because
+    ([latest_tool_names]) when file-backed audit data has no record.  Pinned because
     [test/test_dashboard_briefing.ml] exercises this path
     directly. *)
 

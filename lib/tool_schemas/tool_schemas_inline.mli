@@ -1,4 +1,4 @@
-(** MCP tool schemas for inline-dispatched tools (facade).
+(** MCP tool schemas for MCP-runtime tools (facade).
 
     Concatenates the [inline_workspace] subset of {!Tool_schemas_misc} (six
     [masc_*] names: start/join/leave/broadcast/messages/who, moved out

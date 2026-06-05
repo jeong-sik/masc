@@ -186,7 +186,7 @@ let load_keeper_profile_defaults_result_uncached name :
   result
 
 (* Classify a [load_keeper_toml] failure message into a low-cardinality
-   label suitable for Prometheus. The raw error string embeds user input
+   label suitable for Otel_metric_store. The raw error string embeds user input
    (invalid enum values etc.) and would blow up metric cardinality. *)
 let classify_toml_failure_reason (err : string) : string =
   let err_lc = String.lowercase_ascii err in
@@ -397,7 +397,7 @@ let persona_profile_candidate_paths name =
     try Config_dir_resolver.personas_dirs () with
     | Sys_error _ -> []
     | exn ->
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string ProfileLoadFailures)
         ~labels:[ "site", Keeper_profile_load_failure_site.(to_label Personas_dirs_resolve) ]
         ();
@@ -473,7 +473,7 @@ let load_keeper_profile_defaults name : keeper_profile_defaults =
     (match keeper_toml_path_opt name with
      | Some _ ->
        Log.Keeper.warn "toml config for %s failed (%s), falling back to persona" name e;
-       Prometheus.inc_counter Keeper_metrics.(to_string TomlInvalid)
+       Otel_metric_store.inc_counter Keeper_metrics.(to_string TomlInvalid)
          ~labels:[ ("keeper", name); ("reason", classify_toml_failure_reason e) ]
          ()
      | None -> ());
@@ -515,7 +515,7 @@ let keeper_default_source_snapshot name : keeper_default_source_snapshot =
       | Ok (_name, defaults) ->
           { source_kind = Some "toml"; defaults }
       | Error e ->
-          Prometheus.inc_counter
+          Otel_metric_store.inc_counter
             Keeper_metrics.(to_string ProfileLoadFailures)
             ~labels:[("site", Keeper_profile_load_failure_site.(to_label Toml_fallback))]
             ();

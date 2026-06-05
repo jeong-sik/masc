@@ -6,6 +6,8 @@ open Keeper_types_profile
 
 include Keeper_memory_bank
 
+module Log_memory = Log.Memory
+
 (* Static string-match patterns hoisted from evaluate_memory_recall.
    [Re.str] + [Re.compile] is pure, so a single DFA build at module
    load replaces one per-call compile on every weather/first-question
@@ -89,7 +91,7 @@ let record_memory_recall_read_error ~site path exn_class =
   Log.Keeper.warn
     "%s: dropping history read of %s: <error class=%s>"
     site path exn_label;
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     Keeper_metrics.(to_string MemoryRecallReadErrors)
     ~labels:[ ("exception_class", exn_label) ]
     ()
@@ -175,7 +177,7 @@ let recent_memory_texts_from_lines
              match memory_horizon_of_kind_opt row.kind with
              | Some horizon -> horizon
              | None ->
-                 Log.Memory.warn
+                 Log_memory.warn
                    "memory_horizon_recall: unknown kind %S -> mid_term (drift; see #8826)"
                    row.kind;
                  mid_term_horizon
@@ -719,7 +721,7 @@ let history_user_messages_from_lines
            Log.Keeper.warn
              "load_history_user_messages: skipping line in %s: %s"
              path exn_detail;
-           Prometheus.inc_counter
+           Otel_metric_store.inc_counter
              Keeper_metrics.(to_string MemoryBankLoadHistorySwallowedExceptions)
              ~labels:[ ("exception_class", exn_label) ]
              ();

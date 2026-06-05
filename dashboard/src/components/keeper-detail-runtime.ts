@@ -27,7 +27,6 @@ import type {
   KeeperRuntimeLensLane,
   KeeperRuntimeLensPayloadRoleAxis,
   KeeperRuntimeLensSourceClockAxis,
-  KeeperRuntimeLensToolLineageAxis,
   KeeperRuntimeTraceResponse,
 } from '../api/keeper'
 import { serverStatus, shellRuntimeResolution } from '../store'
@@ -179,8 +178,8 @@ export function deriveKeeperLiveTruth({
             ? compactToken(compositeSnapshot?.runtime_attention?.state, 'blocked')
             : 'none',
         detail: staleBlocker !== null
-          ? `${projection.runtimeReason} · ${projection.toolContract} · 이전 차단: ${staleBlocker}`
-          : `${projection.runtimeReason} · ${projection.toolContract}`,
+          ? `${projection.runtimeReason} · 이전 차단: ${staleBlocker}`
+          : projection.runtimeReason,
         tone: blocked ? 'warn' : 'ok',
       },
     ],
@@ -814,19 +813,6 @@ function formatLensList(values: string[], emptyLabel = 'none'): string {
   return `${values.slice(0, 3).join(', ')} +${values.length - 3}`
 }
 
-function formatToolLineage(lineage: KeeperRuntimeLensToolLineageAxis): string {
-  if (!lineage.recorded) return 'not recorded'
-  const stages = ['searched', 'visible', 'materialized', 'emitted', 'executed', 'verified']
-  const parts: string[] = []
-  for (const key of stages) {
-    const stage = lineage.decision?.[key]
-    if (stage) {
-      parts.push(`${key}:${stage.count}`)
-    }
-  }
-  return parts.length > 0 ? parts.join(' → ') : 'recorded (no stages)'
-}
-
 function formatPayloadRole(axis: KeeperRuntimeLensPayloadRoleAxis): string {
   const entries = Object.entries(axis.counts)
   if (entries.length === 0) return 'none'
@@ -1040,11 +1026,9 @@ export function RuntimeLensSection({
   }
 
   const lens = trace.runtime_lens
-  const tool = lens.axes.tool_surface
   const lane = lens.axes.provider_lane
   const claim = lens.axes.claim_scope
   const drift = lens.axes.config_drift
-  const proof = lens.axes.runtime_proof
   const context = lens.axes.context
   const memory = lens.axes.memory
   const clock = lens.turn_clock
@@ -1066,10 +1050,6 @@ export function RuntimeLensSection({
         <${SignalRow} label="keeper / agent turn" value=${`${clock.keeper_turn_id ?? '-'} / ${clock.max_oas_turn_count ?? '-'}`} />
         <${SignalRow} label="terminal event" value=${clock.terminal_event_present ? clock.terminal_event ?? 'present' : 'missing'} />
         <${SignalRow} label="runtime lane" value=${lane.resolved_lane ?? lane.status ?? 'unknown'} />
-        <${SignalRow} label="tool required" value=${formatLensList(tool.required_tools)} />
-        <${SignalRow} label="tool materialized" value=${formatLensList(tool.materialized_tools)} />
-        <${SignalRow} label="tool missing" value=${formatLensList(tool.missing_required_tools)} />
-        <${SignalRow} label="tool lineage" value=${formatToolLineage(lens.axes.tool_lineage)} />
         <${SignalRow} label="payload role" value=${formatPayloadRole(lens.axes.payload_role)} />
         <${SignalRow} label="source clock" value=${formatSourceClock(lens.axes.source_clock)} />
         <${SignalRow} label="claim scope" value=${claim.present ? `${claim.mode ?? 'unknown'} / ${claim.status}` : 'not observed'} />
@@ -1077,8 +1057,6 @@ export function RuntimeLensSection({
         <${SignalRow} label="claim goals" value=${formatLensList(claim.effective_goal_ids)} />
         <${SignalRow} label="runtime drift" value=${drift.runtime_override ? `${drift.default_runtime_id ?? '-'} -> ${drift.live_runtime_id ?? '-'}` : drift.status} />
         <${SignalRow} label="override fields" value=${formatLensList(drift.override_fields)} />
-        <${SignalRow} label="runtime proof" value=${`${proof.status} / ${proof.matched_tool_call_count} calls`} />
-        <${SignalRow} label="proof tools" value=${formatLensList(proof.tools)} />
         <${SignalRow} label="context compaction" value=${formatRatioPair({ numerator: context.context_compacted_count, denominator: context.context_compact_started_count })} />
         <${SignalRow} label="working loops" value=${context.active_open_loop_count} />
         <${SignalRow} label="memory flush" value=${formatIndependentCounters({ leftLabel: 'success', leftValue: memory.memory_flush_success_count, rightLabel: 'error', rightValue: memory.memory_flush_error_count })} />

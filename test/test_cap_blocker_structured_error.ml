@@ -17,7 +17,7 @@
    6. cap_social_state routes blocker through cap_blocker but leaves
       every other option field on the narrative cap *)
 
-module T = Masc.Keeper_social_model_types
+module T = Keeper_social_model_types
 
 let oas_error_payload_small =
   "[masc_oas_error] {\"kind\":\"provider_timeout\",\

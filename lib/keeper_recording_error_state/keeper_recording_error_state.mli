@@ -14,7 +14,7 @@
     line is dropped — but only the *first* occurrence of a given
     [(keeper, error)] fingerprint emits at ERROR. Subsequent
     occurrences within the process lifetime emit at DEBUG and bump a
-    Prometheus counter so the dashboard still shows the repetition
+    Otel_metric_store counter so the dashboard still shows the repetition
     rate.
 
     Closed sum type, no catch-all. The classifier [classify_error] is
@@ -42,7 +42,7 @@
 
 (** Closed-enum classification of the raw [err] string passed to
     [Keeper_registry.record_error]. Used both for the dedupe fingerprint
-    and for Prometheus metric labels.
+    and for Otel_metric_store metric labels.
 
     Add a new constructor (and a new arm in [classify_error]) when a
     new error family stabilises in production logs. Do not collapse
@@ -64,7 +64,7 @@ type error_kind =
   | Shutdown_artifact (** Shutdown artifact from supervisor. *)
   | Other (** Anything not yet promoted to its own arm. *)
 
-(** Stable label used in Prometheus dimensions and log dedupe keys.
+(** Stable label used in Otel_metric_store dimensions and log dedupe keys.
     Round-trips with [error_kind_of_string]. *)
 val error_kind_to_string : error_kind -> string
 

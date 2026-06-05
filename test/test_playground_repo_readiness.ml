@@ -2,8 +2,7 @@
 
 open Alcotest
 
-module Keeper_types = Masc.Keeper_types
-module Keeper_types_profile_sandbox = Masc.Keeper_types_profile_sandbox
+module Keeper_types = Keeper_types
 
 let make_meta ?(sandbox = Keeper_types_profile_sandbox.Docker) name =
   let json =
@@ -43,6 +42,20 @@ let mkdir_p path =
       Unix.mkdir dir 0o755)
   in
   ensure path
+
+let read_file_trim path =
+  let ic = open_in path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () ->
+       let len = in_channel_length ic in
+       really_input_string ic len |> String.trim)
+
+let write_file path contents =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc contents)
 
 let json_bool key json =
   Yojson.Safe.Util.(json |> member key |> to_bool)
@@ -150,6 +163,54 @@ let git_output ~cwd args =
       (Printf.sprintf "git command failed: git -C %s %s\n%s" cwd
          (String.concat " " args)
          result.output)
+
+let test_deleted_tracked_files_restore_hint () =
+  let clone_path = temp_dir "masc-repo-readiness-status-hint" in
+  git_ok ~cwd:clone_path [ "init"; "-q"; "--initial-branch=main" ];
+  git_ok ~cwd:clone_path [ "config"; "user.email"; "test@example.com" ];
+  git_ok ~cwd:clone_path [ "config"; "user.name"; "Test" ];
+  mkdir_p (Filename.concat clone_path "config");
+  mkdir_p (Filename.concat clone_path "test/fixtures");
+  write_file (Filename.concat clone_path "config/deleted-one.txt") "tracked one\n";
+  write_file
+    (Filename.concat clone_path "test/fixtures/deleted-two.txt")
+    "tracked two\n";
+  git_ok
+    ~cwd:clone_path
+    [ "add"; "config/deleted-one.txt"; "test/fixtures/deleted-two.txt" ];
+  git_ok ~cwd:clone_path [ "commit"; "-q"; "-m"; "init" ];
+  Sys.remove (Filename.concat clone_path "config/deleted-one.txt");
+  Sys.remove (Filename.concat clone_path "test/fixtures/deleted-two.txt");
+  (match Masc.Playground_repo_readiness.deleted_tracked_files_restore_hint ~clone_path with
+   | Some hint ->
+     check bool "restore command surfaced" true
+       (String.equal
+          hint
+          "Dirty status only contains deleted tracked files: D config/deleted-one.txt; D \
+           test/fixtures/deleted-two.txt. Restore them with: git checkout HEAD -- \
+           config/deleted-one.txt test/fixtures/deleted-two.txt")
+   | None -> fail "expected deleted tracked files restore hint");
+  write_file (Filename.concat clone_path "untracked.txt") "untracked\n";
+  check (option string) "mixed dirty status has no restore hint" None
+    (Masc.Playground_repo_readiness.deleted_tracked_files_restore_hint ~clone_path)
+
+let test_deleted_tracked_files_restore_hint_uses_unquoted_porcelain_paths () =
+  let clone_path = temp_dir "masc-repo-readiness-status-hint-spaces" in
+  git_ok ~cwd:clone_path [ "init"; "-q"; "--initial-branch=main" ];
+  git_ok ~cwd:clone_path [ "config"; "user.email"; "test@example.com" ];
+  git_ok ~cwd:clone_path [ "config"; "user.name"; "Test" ];
+  write_file (Filename.concat clone_path "a b.txt") "tracked with space\n";
+  git_ok ~cwd:clone_path [ "add"; "a b.txt" ];
+  git_ok ~cwd:clone_path [ "commit"; "-q"; "-m"; "init" ];
+  Sys.remove (Filename.concat clone_path "a b.txt");
+  match Masc.Playground_repo_readiness.deleted_tracked_files_restore_hint ~clone_path with
+  | Some hint ->
+    check bool "restore command uses shell-quoted real path" true
+      (String.equal
+         hint
+         "Dirty status only contains deleted tracked files: D a b.txt. Restore them \
+          with: git checkout HEAD -- 'a b.txt'")
+  | None -> fail "expected deleted tracked file restore hint for path with spaces"
 
 let test_parent_git_checkout_does_not_count_as_clone () =
   let base_path = temp_dir "masc-repo-readiness" in
@@ -441,6 +502,58 @@ let test_ensure_worktree_ready_idempotent () =
   | Ok () -> ()
   | Error msg -> fail ("second call failed: " ^ msg)
 
+let test_ensure_worktree_ready_normalizes_gitdir_pointer () =
+  let base_path = temp_dir "masc-worktree-ready-gitdir" in
+  let remote = Filename.concat base_path ".remote-masc.git" in
+  git_ok ~cwd:base_path [ "init"; "--bare"; "-q"; "--initial-branch=main"; remote ];
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "keeper-one" in
+  let clone_path =
+    Masc.Playground_repo_readiness.clone_path ~config ~meta ~repo_name:"masc"
+  in
+  mkdir_p (Filename.dirname clone_path);
+  git_ok ~cwd:base_path [ "clone"; "-q"; remote; clone_path ];
+  git_ok ~cwd:clone_path [ "config"; "user.email"; "test@example.com" ];
+  git_ok ~cwd:clone_path [ "config"; "user.name"; "Test" ];
+  let readme = Filename.concat clone_path "README.md" in
+  write_file readme "# test\n";
+  git_ok ~cwd:clone_path [ "add"; "README.md" ];
+  git_ok ~cwd:clone_path [ "commit"; "-q"; "-m"; "init" ];
+  git_ok ~cwd:clone_path [ "push"; "-q"; "origin"; "main" ];
+  let task_name = "task-relative-gitdir-test" in
+  let worktree_path = Filename.concat clone_path (".worktrees/" ^ task_name) in
+  let r1 =
+    Masc.Playground_repo_readiness.ensure_worktree_ready
+      ~config ~meta ~repo_name:"masc" ~task_name ~worktree_path ()
+  in
+  (match r1 with
+   | Ok () -> ()
+   | Error msg -> fail ("first call failed: " ^ msg));
+  let git_file = Filename.concat worktree_path ".git" in
+  let absolute_gitdir =
+    Filename.concat
+      (Filename.concat (Filename.concat clone_path ".git") "worktrees")
+      task_name
+  in
+  write_file git_file ("gitdir: " ^ absolute_gitdir ^ "\n");
+  let r2 =
+    Masc.Playground_repo_readiness.ensure_worktree_ready
+      ~config ~meta ~repo_name:"masc" ~task_name ~worktree_path ()
+  in
+  (match r2 with
+   | Ok () -> ()
+   | Error msg -> fail ("second call failed: " ^ msg));
+  check string "worktree gitdir is container-safe relative"
+    ("gitdir: ../../.git/worktrees/" ^ task_name)
+    (read_file_trim git_file);
+  let status =
+    Masc.Playground_repo_readiness.run_git
+      ~timeout_sec:Masc.Playground_repo_readiness.read_only_probe_timeout_sec
+      ~clone_path:worktree_path
+      [ "status"; "--short" ]
+  in
+  check bool "relative gitdir remains host-git usable" true status.ok
+
 let test_ensure_worktree_ready_rejects_nested_plain_directory () =
   let base_path = temp_dir "masc-worktree-ready-nested" in
   let remote = Filename.concat base_path ".remote-masc.git" in
@@ -651,12 +764,21 @@ let () =
         test_case "missing clone skips workspace discovery" `Quick
           test_missing_clone_skips_workspace_discovery;
       ];
+      "status_hints",
+      [
+        test_case "deleted tracked files restore hint" `Quick
+          test_deleted_tracked_files_restore_hint;
+        test_case "deleted tracked file with spaces restore hint" `Quick
+          test_deleted_tracked_files_restore_hint_uses_unquoted_porcelain_paths;
+      ];
       "ensure_worktree_ready",
       [
         test_case "creates worktree" `Quick
           test_ensure_worktree_ready_creates_worktree;
         test_case "idempotent" `Quick
           test_ensure_worktree_ready_idempotent;
+        test_case "normalizes worktree gitdir pointer" `Quick
+          test_ensure_worktree_ready_normalizes_gitdir_pointer;
         test_case "rejects nested plain directory" `Quick
           test_ensure_worktree_ready_rejects_nested_plain_directory;
         test_case "creates worktree from dirty parent clone" `Quick

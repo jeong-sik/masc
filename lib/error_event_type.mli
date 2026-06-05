@@ -3,7 +3,7 @@
 
     Replaces 6 hardcoded string literals scattered across 3 files
     (`tool_metrics_persist.ml`, `run_eio.ml`, `server_runtime_bootstrap.ml`).
-    The comment on the metric definition in `prometheus.ml` even
+    The comment on the metric definition in `otel_metric_store.ml` even
     spelled out the open-ended risk:
 
         "Error events by type (parsing, missing_config, etc.)"

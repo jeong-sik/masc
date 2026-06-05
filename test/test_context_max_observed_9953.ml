@@ -3,7 +3,7 @@
    #9953: same model label was recording 3 different
    [context_max] values across turns (cli_tool_d:auto getting
    42% / 17% / 41% split between 64k / 262k / 1M).  The data was
-   in the JSONL ledger but invisible to Prometheus dashboards.
+   in the JSONL ledger but invisible to Otel_metric_store dashboards.
 
    This test pins:
      1. The [context_max_bucket] string vocabulary — dashboards
@@ -32,9 +32,9 @@ let () =
   Unix.putenv "MASC_BASE_PATH" dir
 
 module UM = Masc.Keeper_unified_metrics
-module Prom = Masc.Prometheus
+module Prom = Masc.Otel_metric_store
 
-let metric = Masc.Keeper_metrics.(to_string ContextMaxObserved)
+let metric = Keeper_metrics.(to_string ContextMaxObserved)
 let runtime_label = "runtime"
 
 let counter_for ~keeper ~model_used ~resolved_model_id ~bucket =

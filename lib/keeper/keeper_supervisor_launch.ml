@@ -22,6 +22,22 @@ let committed_tools_of_ambiguous_blocker =
   Startup_helpers.committed_tools_of_ambiguous_blocker
 ;;
 
+type done_signal_resolution =
+  | Done_signal_resolved_now
+  | Done_signal_already_resolved
+  | Done_signal_already_seen
+
+let done_signal_of_registry_result = function
+  | Keeper_registry.Done_resolved _ -> Done_signal_resolved_now
+  | Keeper_registry.Done_already_resolved _ -> Done_signal_already_resolved
+;;
+
+let should_publish_lifecycle_for_done_signal = function
+  | Done_signal_resolved_now -> true
+  | Done_signal_already_resolved
+  | Done_signal_already_seen -> false
+;;
+
 (* ── Event publishing (see Keeper_supervisor_publish_lifecycle, #8856/#8605) ─ *)
 
 let publish_lifecycle = Keeper_supervisor_publish_lifecycle.publish_lifecycle
@@ -48,7 +64,7 @@ let launch_supervised_fiber
        "%s: Fiber_started rejected during supervised launch: %s"
        meta.name
        (Keeper_state_machine.transition_error_to_string err);
-     Prometheus.inc_counter
+     Otel_metric_store.inc_counter
        Keeper_metrics.(to_string SupervisorCleanupFailures)
        ~labels:
          [ "keeper", meta.name
@@ -78,11 +94,11 @@ let launch_supervised_fiber
     let domain_pool_flag = Env_config.KeeperSupervisor.domain_pool_enabled in
     let bump_fork_outcome outcome =
       (* Label order mirrors the other [keeper_supervisor.ml] inc_counter
-         call sites ([keeper] first, then the discriminator).  Prometheus
+         call sites ([keeper] first, then the discriminator).  Otel_metric_store
          label-set keys are order-sensitive, so a single per-metric
          convention prevents accidental time-series splitting when new
          call sites add the same labels in a different order. *)
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string DomainPoolFork)
         ~labels:[ "keeper", meta.name; "outcome", outcome ]
         ()
@@ -116,22 +132,21 @@ let launch_supervised_fiber
          Setting the flag from the cancel handler keeps the typed
          [fiber_drop_cause] payload accurate. *)
       let cancelled_by_parent = ref false in
-      let resolve_done value =
+      let resolve_done ~source value =
         if not !resolved then
           (* Issue #18335: the keepalive layer (keeper_keepalive.ml:760-791)
              may have already resolved done_p via record_keeper_stopped.
-             When the Promise is already resolved, treat it as success —
-             the keeper completed normally via the keepalive exit path. *)
-          if Keeper_registry.try_resolve_done reg value then (
-            resolved := true;
-            true)
-          else if Option.is_some (Eio.Promise.peek reg.done_p) then (
-            resolved := true;
-            true)
-          else
-            false
+             When the Promise is already resolved, suppress finally cleanup,
+             but do not let this supervisor branch publish a second lifecycle
+             event for an outcome it did not own. *)
+          let signal =
+            Keeper_registry.resolve_done reg ~source value
+            |> done_signal_of_registry_result
+          in
+          resolved := true;
+          signal
         else
-          false
+          Done_signal_already_seen
       in
       Eio_guard.protect
         (fun () ->
@@ -229,14 +244,16 @@ let launch_supervised_fiber
 	                with
                 | Ok _ -> ()
                 | Error e ->
-                  Prometheus.inc_counter
+                  Otel_metric_store.inc_counter
                     Keeper_metrics.(to_string DispatchEventFailures)
                     ~labels:[ "keeper", meta.name; "event", "fiber_terminated" ]
                     ();
                   Log.Keeper.warn
                     "supervisor: Fiber_terminated dispatch failed: %s"
                     (Keeper_state_machine.transition_error_to_string e));
-               if resolve_done (`Crashed reason)
+               if
+                 resolve_done ~source:"supervisor_watchdog_crash" (`Crashed reason)
+                 |> should_publish_lifecycle_for_done_signal
                then
                  publish_phase_lifecycle
                    ~phase:Keeper_state_machine.Crashed
@@ -253,7 +270,7 @@ let launch_supervised_fiber
                 with
                 | Ok _ -> ()
                 | Error e ->
-                  Prometheus.inc_counter
+                  Otel_metric_store.inc_counter
                     Keeper_metrics.(to_string DispatchEventFailures)
                     ~labels:[ "keeper", meta.name; "event", "stop_requested" ]
                     ();
@@ -268,14 +285,16 @@ let launch_supervised_fiber
                 with
                 | Ok _ -> ()
                 | Error e ->
-                  Prometheus.inc_counter
+                  Otel_metric_store.inc_counter
                     Keeper_metrics.(to_string DispatchEventFailures)
                     ~labels:[ "keeper", meta.name; "event", "drain_complete" ]
                     ();
                   Log.Keeper.warn
                     "supervisor: Drain_complete dispatch failed: %s"
                     (Keeper_state_machine.transition_error_to_string e));
-               if resolve_done `Stopped
+               if
+                 resolve_done ~source:"supervisor_normal_exit" `Stopped
+                 |> should_publish_lifecycle_for_done_signal
                then
                  publish_phase_lifecycle
                    ~phase:Keeper_state_machine.Stopped
@@ -313,7 +332,7 @@ let launch_supervised_fiber
 	              with
               | Ok _ -> ()
               | Error e ->
-                Prometheus.inc_counter
+                Otel_metric_store.inc_counter
                   Keeper_metrics.(to_string DispatchEventFailures)
                   ~labels:[ "keeper", meta.name; "event", "fiber_terminated" ]
                   ();
@@ -334,7 +353,9 @@ let launch_supervised_fiber
                ~reason
                ~restart_count:rc;
              Keeper_registry_error_recording.record ~base_path meta.name reason;
-             if resolve_done (`Crashed reason)
+             if
+               resolve_done ~source:"supervisor_exception_handler" (`Crashed reason)
+               |> should_publish_lifecycle_for_done_signal
              then
                publish_phase_lifecycle
                  ~phase:Keeper_state_machine.Crashed
@@ -386,7 +407,10 @@ let launch_supervised_fiber
                   (Some (Keeper_registry.Fiber_unresolved Graceful_shutdown));
                 Keeper_registry.mark_dead ~base_path meta.name ~at:(Time_compat.now ());
                 (* fire-and-forget: resolve_done signals completion *)
-                ignore (resolve_done (`Crashed "shutdown")))
+                ignore
+                  (resolve_done
+                     ~source:"supervisor_shutdown_cleanup"
+                     (`Crashed "shutdown")))
               else if !cancelled_by_parent
               then (
                 (* Issue #18901 follow-up: parent-cancel branch. The
@@ -406,7 +430,10 @@ let launch_supervised_fiber
                   (Some (Keeper_registry.Fiber_unresolved Cancelled_by_parent));
                 Keeper_registry.mark_dead ~base_path meta.name ~at:(Time_compat.now ());
                 (* fire-and-forget: resolve_done signals completion *)
-                ignore (resolve_done (`Crashed "cancelled_by_parent")))
+                ignore
+                  (resolve_done
+                     ~source:"supervisor_parent_cancel_cleanup"
+                     (`Crashed "cancelled_by_parent")))
               else (
 	                let reason =
 	                  Keeper_registry.failure_reason_to_string
@@ -448,7 +475,7 @@ let launch_supervised_fiber
                     with
                     | Ok () -> ()
                     | Error err ->
-                      Prometheus.inc_counter
+                      Otel_metric_store.inc_counter
                         Keeper_metrics.(to_string WriteMetaFailures)
                         ~labels:[ "keeper", meta.name; "phase", "fiber_unresolved_stamp" ]
                         ();
@@ -475,7 +502,9 @@ let launch_supervised_fiber
 	                  ~base_path
 	                  meta.name
 	                  (Keeper_state_machine.Fiber_terminated { outcome; provider_id = None; http_status = None });
-                if resolve_done (`Crashed reason)
+                if
+                  resolve_done ~source:"supervisor_unresolved_cleanup" (`Crashed reason)
+                  |> should_publish_lifecycle_for_done_signal
                 then
                   publish_phase_lifecycle
                     ~phase:Keeper_state_machine.Crashed
@@ -500,7 +529,7 @@ let launch_supervised_fiber
              advisory; re-raising here would still become [Fun.Finally_raised]
              and could mask the body outcome. Count only these unexpected
              cleanup exceptions so the metric remains actionable. *)
-            Prometheus.inc_counter
+            Otel_metric_store.inc_counter
               Keeper_metrics.(to_string SupervisorCleanupFailures)
               ~labels:[ "keeper", meta.name ]
               ();
@@ -514,7 +543,7 @@ let launch_supervised_fiber
 (* #10993: persona drift visibility.
 
    [Keeper_identity.normalize_all_names ~check_persona:true] runs on
-   every dispatch via [Tool_inline_dispatch_workspace] (RFC P3-a
+   every dispatch via [Mcp_tool_runtime_workspace] (RFC P3-a
    logging-only mode), but its [Persona_not_found] branch emits a
    Log.Misc.warn that is hard to triage:
 

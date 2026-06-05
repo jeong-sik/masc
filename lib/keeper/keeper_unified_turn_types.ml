@@ -85,76 +85,47 @@ let runtime_exhaustion_detail_code detail =
 ;;
 
 let runtime_exhaustion_reason_code
-      (reason : Keeper_meta_contract.runtime_exhaustion_reason)
+      (reason : Keeper_internal_error.runtime_exhaustion_reason)
   =
   match reason with
-  | Keeper_meta_contract.Connection_refused -> "runtime_exhausted_connection_refused"
-  | Keeper_meta_contract.Dns_failure -> "runtime_exhausted_dns_failure"
-  | Keeper_meta_contract.No_providers_available -> "runtime_exhausted_no_providers_available"
-  | Keeper_meta_contract.All_providers_failed -> "runtime_exhausted_all_providers_failed"
-  | Keeper_meta_contract.Candidates_filtered_after_cycles ->
+  | Keeper_internal_error.Connection_refused -> "runtime_exhausted_connection_refused"
+  | Keeper_internal_error.Dns_failure -> "runtime_exhausted_dns_failure"
+  | Keeper_internal_error.No_providers_available -> "runtime_exhausted_no_providers_available"
+  | Keeper_internal_error.All_providers_failed -> "runtime_exhausted_all_providers_failed"
+  | Keeper_internal_error.Candidates_filtered_after_cycles ->
     "runtime_exhausted_candidates_filtered"
-  | Keeper_meta_contract.Max_turns_exceeded -> "runtime_exhausted_max_turns"
-  | Keeper_meta_contract.Structural_attempt_timeout _ ->
+  | Keeper_internal_error.Max_turns_exceeded -> "runtime_exhausted_max_turns"
+  | Keeper_internal_error.Structural_attempt_timeout _ ->
     "runtime_exhausted_structural_attempt_timeout"
-  | Keeper_meta_contract.Capacity_exhausted -> "runtime_exhausted_capacity_exhausted"
-  | Keeper_meta_contract.No_tool_capable _ -> "runtime_exhausted_no_tool_capable"
-  | Keeper_meta_contract.Other_detail detail -> runtime_exhaustion_detail_code detail
+  | Keeper_internal_error.Capacity_exhausted -> "runtime_exhausted_capacity_exhausted"
+  | Keeper_internal_error.Other_detail detail -> runtime_exhaustion_detail_code detail
+;;
+
+let registry_reason_of_internal_reason
+    (reason : Keeper_internal_error.runtime_exhaustion_reason)
+  : Keeper_meta_contract.runtime_exhaustion_reason
+  =
+  match reason with
+  | Keeper_internal_error.Connection_refused -> Keeper_meta_contract.Connection_refused
+  | Keeper_internal_error.Dns_failure -> Keeper_meta_contract.Dns_failure
+  | Keeper_internal_error.No_providers_available ->
+    Keeper_meta_contract.No_providers_available
+  | Keeper_internal_error.All_providers_failed ->
+    Keeper_meta_contract.All_providers_failed
+  | Keeper_internal_error.Candidates_filtered_after_cycles ->
+    Keeper_meta_contract.Candidates_filtered_after_cycles
+  | Keeper_internal_error.Max_turns_exceeded ->
+    Keeper_meta_contract.Max_turns_exceeded
+  | Keeper_internal_error.Structural_attempt_timeout { detail } ->
+    Keeper_meta_contract.Structural_attempt_timeout { detail }
+  | Keeper_internal_error.Capacity_exhausted ->
+    Keeper_meta_contract.Capacity_exhausted
+  | Keeper_internal_error.Other_detail detail ->
+    Keeper_meta_contract.Other_detail detail
 ;;
 
 let runtime_exhausted_failure_reason_of_raw_error ~detail raw_error =
   match Keeper_internal_error.classify_masc_internal_error_of_string raw_error with
-  (* No_tool_capable specific cases first — more specific than generic Runtime_exhausted *)
-  | Some
-      (Keeper_internal_error.Runtime_exhausted
-         { runtime_id = ntcp_runtime_id
-         ; reason = Keeper_meta_contract.No_tool_capable (Some detail)
-         ; _
-         }) ->
-    let rejection_summary =
-      match detail.provider_rejections with
-      | [] -> ""
-      | rejections ->
-        Printf.sprintf
-          " [%d providers rejected: %s]"
-          (List.length rejections)
-          (String.concat
-             "; "
-             (List.map
-                (fun (label, reason) ->
-                   Printf.sprintf "%s: %s" label reason)
-                rejections))
-    in
-    Some
-      (Keeper_registry.Provider_runtime_error
-         { code = "no_tool_capable_provider"
-             ; detail =
-                 Printf.sprintf
-               "no tool-capable provider found (runtime=%s labels=[%s]%s)"
-               (ntcp_runtime_id)
-               (String.concat ", " detail.configured_labels)
-               rejection_summary
-             ; provider_id = None
-         ; http_status = None
-         ; runtime_id = Some (ntcp_runtime_id)
-         ; reason = Some (Keeper_meta_contract.No_tool_capable (Some detail))
-         })
-  | Some
-      (Keeper_internal_error.Runtime_exhausted
-         { runtime_id = ntcp_runtime_id
-         ; reason = Keeper_meta_contract.No_tool_capable None
-         ; _
-         }) ->
-    Some
-      (Keeper_registry.Provider_runtime_error
-         { code = "no_tool_capable_provider"
-         ; detail = "no tool-capable provider found"
-         ; provider_id = None
-         ; http_status = None
-         ; runtime_id = Some (ntcp_runtime_id)
-         ; reason = Some (Keeper_meta_contract.No_tool_capable None)
-         })
-  (* Generic Runtime_exhausted catch-all — after No_tool_capable specifics *)
   | Some (Keeper_internal_error.Runtime_exhausted { reason; runtime_id }) ->
     Some
       (Keeper_registry.Provider_runtime_error
@@ -163,7 +134,7 @@ let runtime_exhausted_failure_reason_of_raw_error ~detail raw_error =
          ; provider_id = None
          ; http_status = None
          ; runtime_id = Some (runtime_id)
-         ; reason = Some reason
+         ; reason = Some (registry_reason_of_internal_reason reason)
          })
   | Some (Keeper_internal_error.Capacity_backpressure { detail = capacity_detail; _ }) ->
     Some

@@ -1,5 +1,5 @@
 (** Closed sum type for the [(event_family, event_kind)] label pair of
-    [Prometheus.metric_workspace_telemetry_drop].
+    [Otel_metric_store.metric_workspace_telemetry_drop].
 
     Introduced by RFC-0088 §4 Option A (Counter-as-Fix umbrella scoping,
     Workspace async-context-free telemetry drop sub-scope) as a fold-in
@@ -54,14 +54,14 @@ type t =
           accountability records with the transition that produced
           them. *)
 
-(** Wire label for the [event_family] Prometheus label. Stable: matches
+(** Wire label for the [event_family] Otel_metric_store label. Stable: matches
     the byte-for-byte strings emitted before the typed swap-over
     (["agent_lifecycle"], ["task_transition"], ["accountability"]) so
-    Prometheus label cardinality does not change at the migration
+    Otel_metric_store label cardinality does not change at the migration
     boundary. *)
 val family_to_wire : t -> string
 
-(** Wire label for the [event_kind] Prometheus label. For
+(** Wire label for the [event_kind] Otel_metric_store label. For
     [Agent_lifecycle] this is one of ["session_bound" / "session_rebound" /
     "session_ended"]
     (matching {!Workspace_hooks.agent_lifecycle_event_to_string}). For
@@ -73,12 +73,12 @@ val family_to_wire : t -> string
     so existing Grafana dashboards / alerting rules keep matching. *)
 val kind_to_wire : t -> string
 
-(** Convenience: both labels in the order Prometheus expects, suitable
+(** Convenience: both labels in the order Otel_metric_store expects, suitable
     for direct splat into the [~labels] argument of
-    [Prometheus.inc_counter]. Equivalent to
+    [Otel_metric_store.inc_counter]. Equivalent to
     [[("event_family", family_to_wire t); ("event_kind", kind_to_wire t)]]
     but centralised so the label *names* are also locked at one site. *)
-val to_prometheus_labels : t -> (string * string) list
+val to_metric_labels : t -> (string * string) list
 
 (** Pretty-printer (emits ["family/kind"] using the wire labels). *)
 val pp : Format.formatter -> t -> unit

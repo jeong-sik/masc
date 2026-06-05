@@ -82,6 +82,5 @@ val masc_schemas_snapshot : unit -> Masc_domain.tool_schema list
 val injected_masc_tool_names : unit -> string list
 
 (** SSOT schema for [keeper_tool_search]. Defined here because this
-    module is the canonical owner of keeper-internal tool metadata.
-    Consumed by [Keeper_tool_policy.keeper_default_model_tools]. *)
+    module is the canonical owner of keeper-internal tool metadata. *)
 val keeper_tool_search_schema : Masc_domain.tool_schema

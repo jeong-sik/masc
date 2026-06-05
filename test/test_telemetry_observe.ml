@@ -21,7 +21,7 @@
 open Masc
 
 let failure_metric_value kind =
-  Prometheus.metric_value_or_zero Prometheus.metric_telemetry_observe_failures
+  Otel_metric_store.metric_value_or_zero Otel_metric_store.metric_telemetry_observe_failures
     ~labels:[("kind", kind)] ()
 
 let test_observe_or_fail_returns_ok () =

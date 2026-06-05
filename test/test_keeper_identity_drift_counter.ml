@@ -38,8 +38,8 @@ let make_meta name =
 ;;
 
 let counter_value ~source_layer ~field =
-  Masc.Prometheus.metric_value_or_zero
-    Masc.Keeper_metrics.(to_string PathResolverIdentityMismatch)
+  Masc.Otel_metric_store.metric_value_or_zero
+    Keeper_metrics.(to_string PathResolverIdentityMismatch)
     ~labels:[ ("source_layer", source_layer); ("field", field) ]
     ()
 ;;

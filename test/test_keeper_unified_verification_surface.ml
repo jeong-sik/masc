@@ -2,7 +2,6 @@ open Alcotest
 
 module WO = Masc.Keeper_world_observation
 module UM = Masc.Keeper_unified_metrics
-module AE = Economy
 
 let base_observation : WO.world_observation =
   {
@@ -14,7 +13,6 @@ let base_observation : WO.world_observation =
     active_goals = [];
     continuity_summary = "";
     context_ratio = 0.0;
-    economic_pressure = AE.Normal;
     unclaimed_task_count = 0;
     claimable_task_count = 0;
     provider_capacity_blocked_task_count = 0;
@@ -22,7 +20,6 @@ let base_observation : WO.world_observation =
     pending_verification_count = 0;
     backlog_updated_since_last_scheduled_autonomous = false;
     active_agent_count = 0;
-    last_turn_budget = None;
   }
 
 let sample_board_event : WO.pending_board_event =

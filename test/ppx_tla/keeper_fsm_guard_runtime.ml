@@ -3,7 +3,7 @@
    this stub provides the same signature so tests compile without
    the full keeper runtime.
 
-   Unlike the production version which bumps a Prometheus counter,
+   Unlike the production version which bumps a Otel_metric_store counter,
    this stub tracks invocations in a mutable ref for test inspection. *)
 
 let invocations : (string * string) list ref = ref []

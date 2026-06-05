@@ -506,7 +506,7 @@ let create_state ~base_path =
     mono_clock = None;
     net = None;
   } in
-  Tool_board.set_agent_lookup (fun name ->
+  Board_tool.set_agent_lookup (fun name ->
     try Workspace.is_agent_session_bound state.workspace_config ~agent_name:name
     with Sys_error _ | Not_found | Invalid_argument _ -> false);
   state
@@ -518,8 +518,8 @@ let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
       ~on_backend_ready:(fun _backend ->
         Log.Backend.info "Board: JSONL default backend";
         Board_agent_effect_hooks.install ();
-        Board_prometheus_hooks.install ();
-        Workspace_prometheus_hooks.install ();
+        Board_metric_hooks_adapter.install ();
+        Workspace_metric_hooks.install ();
         Atomic.set Workspace_hooks.get_default_runtime_id_fn Runtime.get_default_runtime_id;
         Atomic.set Task.Handlers.record_verdict_fn (fun ~task_id ~req ~result () ->
           Eval_calibration.record_verdict ~task_id ~req ~result ());
@@ -563,7 +563,7 @@ let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
   } in
   (* Board post kind auto-classification: reads state.workspace_config so
      workspace changes via set_workspace are reflected automatically. *)
-  Tool_board.set_agent_lookup (fun name ->
+  Board_tool.set_agent_lookup (fun name ->
     try Workspace.is_agent_session_bound state.workspace_config ~agent_name:name
     with Sys_error _ | Not_found | Invalid_argument _ -> false);
   state

@@ -46,6 +46,24 @@ describe('normalizeKeepers phase field', () => {
       { name: 'phase-test', status: 'active', phase: 'running' },
     ])
     expect(keeper?.phase).toBe('Running')
+    expect(keeper?.lifecycle_phase).toBe('Running')
+  })
+
+  it('preserves explicit lifecycle phase and pipeline stage detail', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'offline-detail-test',
+        status: 'offline',
+        phase: 'running',
+        lifecycle_phase: 'Offline',
+        pipeline_stage: 'offline',
+        pipeline_stage_detail: 'launch_pending_no_fiber',
+      },
+    ])
+    expect(keeper?.phase).toBe('Running')
+    expect(keeper?.lifecycle_phase).toBe('Offline')
+    expect(keeper?.pipeline_stage).toBe('offline')
+    expect(keeper?.pipeline_stage_detail).toBe('launch_pending_no_fiber')
   })
 
   it('normalizes handing_off to HandingOff', () => {
@@ -329,7 +347,6 @@ describe('normalizeKeepers lifecycle metrics', () => {
             pending_count: 1,
           },
           execution_summary: {
-            tool_contract_result: 'unknown',
             sandbox_summary: 'docker / none',
             mutation_guard_summary: 'mutation_contract_not_observed',
             latest_receipt_at: '2026-04-23T00:10:00Z',
@@ -362,7 +379,6 @@ describe('normalizeKeepers lifecycle metrics', () => {
         pending_count: 1,
       },
       execution_summary: {
-        tool_contract_result: 'unknown',
         sandbox_summary: 'docker / none',
         mutation_guard_summary: 'mutation_contract_not_observed',
       },
@@ -475,11 +491,6 @@ describe('normalizeKeepers lifecycle metrics', () => {
             pending_count: 0,
           },
           execution: {
-            tool_contract_result: 'violated',
-            required_tools: ['masc_board_post'],
-            missing_required_tools: ['masc_board_post'],
-            unexpected_tools: ['keeper_board_list'],
-            unexpected_tool_count: 1,
             provider_attempt_count: 2,
             provider_fallback_applied: true,
             provider_selected_model: 'provider:runtime-lane',
@@ -507,11 +518,6 @@ describe('normalizeKeepers lifecycle metrics', () => {
         pending_count: 0,
       },
       execution_summary: {
-        tool_contract_result: 'violated',
-        required_tools: ['masc_board_post'],
-        missing_required_tools: ['masc_board_post'],
-        unexpected_tools: ['keeper_board_list'],
-        unexpected_tool_count: 1,
         provider_attempt_count: 2,
         provider_fallback_applied: true,
         provider_selected_model: 'provider:runtime-lane',

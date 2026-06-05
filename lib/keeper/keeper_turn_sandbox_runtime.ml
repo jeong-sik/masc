@@ -96,7 +96,11 @@ let container_path_of_host (t : t) ~host_path =
 let container_cwd_of_host (t : t) ~host_cwd =
   match container_path_of_host t ~host_path:host_cwd with
   | Ok container_cwd -> container_cwd
-  | Error _ -> t.container_root
+  | Error _ ->
+    match Keeper_cwd_response.profile_independent_cwd
+            ~container_root:t.container_root ~host_cwd with
+    | Some cwd -> cwd
+    | None -> t.container_root
 ;;
 
 let format_docker_exec_error ~head_program ~st ~out =
@@ -748,7 +752,7 @@ let cleanup (t : t) =
               container_name
               (status_label final_st)
               (Exec_policy.truncate_for_log final_out);
-            Prometheus.inc_counter
+            Otel_metric_store.inc_counter
               Keeper_metrics.(to_string TurnCleanupFailures)
               ~labels:[ "keeper", t.meta.name; "site", "docker_rm" ]
               ())

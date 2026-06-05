@@ -220,14 +220,6 @@ let run_try_provider
             (Some policy)
         | _ -> runtime_mcp_policy
       in
-      let requested_tool_names =
-        List.map (fun (tool : Agent_sdk.Tool.t) -> tool.schema.name) ctx.tools
-      in
-      let materialized_tool_names =
-        Keeper_turn_driver_helpers.materialized_tool_names_after_lane
-          ~effective_tools
-          ~runtime_mcp_policy
-      in
       let resolved_lane =
         Keeper_turn_driver_helpers.resolved_tool_lane_label ~effective_tools
           ~runtime_mcp_policy
@@ -245,14 +237,7 @@ let run_try_provider
         ~decision:
           (`Assoc
             [
-              ( "requested_tool_names",
-                `List (List.map (fun name -> `String name) requested_tool_names) );
-              ( "materialized_tool_names",
-                `List
-                  (List.map (fun name -> `String name) materialized_tool_names) );
               ("resolved_lane", `String resolved_lane);
-              ("effective_tool_count", `Int (List.length effective_tools));
-              ("runtime_mcp_policy_present", `Bool (Option.is_some runtime_mcp_policy));
             ])
         Keeper_runtime_manifest.Provider_lane_resolved;
       Ok
@@ -315,7 +300,7 @@ let run_try_provider
   | Ok config ->
     let liveness_mode = Keeper_attempt_liveness_config.current_mode () in
     (* MASC stores one neutral runtime-lane budget; concrete provider/model
-       identities remain on the OAS side.  Prometheus receives only the public,
+       identities remain on the OAS side.  Otel_metric_store receives only the public,
        bounded provider bucket for TTFT/inter-chunk grouping. *)
     let candidate_key = Keeper_attempt_liveness_config.runtime_candidate_key in
     let provider_label = Runtime_candidate.provider_label candidate in

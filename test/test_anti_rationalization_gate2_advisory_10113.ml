@@ -13,7 +13,7 @@
    evaluator (Gate 3 needs an OAS runtime we don't stand up here),
    so the assertions focus on:
 
-     1. The Prometheus counter labels are correct for each
+     1. The Otel_metric_store counter labels are correct for each
         decision branch — operators read these to triangulate
         false-positive rate vs true-positive rate per pattern.
      2. The build_prompt advisory section appears with the
@@ -38,7 +38,7 @@ let () =
   Unix.putenv "MASC_BASE_PATH" dir
 
 module AR = Masc.Task.Anti_rationalization
-module Prom = Masc.Prometheus
+module Prom = Masc.Otel_metric_store
 
 let metric = Prom.metric_anti_rationalization_excuse_pattern
 
@@ -131,7 +131,7 @@ let test_build_prompt_includes_verification_contract () =
    These three strings are the only valid values; adding a new
    one is an explicit change.
 
-   We exercise the labels by directly calling Prometheus
+   We exercise the labels by directly calling Otel_metric_store
    inc_counter with the exact strings the production code will
    emit.  This pins the [decision=...] vocabulary independently
    of whether the gate-3 LLM is reachable in the test env. *)

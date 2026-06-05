@@ -19,8 +19,8 @@ let with_temp_file prefix contents f =
   Fun.protect ~finally:(fun () -> rm_rf path) (fun () -> f path)
 
 let persistence_read_drop_total ~surface ~reason =
-  Masc.Prometheus.metric_value_or_zero
-    Masc.Prometheus.metric_persistence_read_drops
+  Masc.Otel_metric_store.metric_value_or_zero
+    Masc.Otel_metric_store.metric_persistence_read_drops
     ~labels:[("surface", surface); ("reason", reason)]
     ()
 

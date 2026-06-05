@@ -326,7 +326,7 @@ val bare_alias_audit
   -> bare_alias_audit_result
 (** Audit bare/canonical alignment for the supplied canonical agent
     names. Read-only with respect to credential files. Side effect:
-    mirrors the counts into Prometheus gauges
+    mirrors the counts into Otel_metric_store gauges
     [masc_auth_bare_alias{state=alive|dead|no_bare}] so the values
     are repeatedly visible on every scrape, not only as a one-shot
     boot log line. A non-zero [dead_bares] surfaces a ping-pong

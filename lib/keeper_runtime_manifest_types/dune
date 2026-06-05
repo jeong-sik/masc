@@ -1,0 +1,7 @@
+(include_subdirs no)
+(library
+ (name masc_keeper_runtime_manifest_types)
+ (public_name masc.keeper_runtime_manifest_types)
+ (wrapped false)
+ (modules keeper_runtime_manifest_types)
+ (libraries yojson))

@@ -338,18 +338,18 @@ let make_hooks
            let cc = u.cache_creation_input_tokens in
            let cr = u.cache_read_input_tokens in
            if cc > 0 then
-             Prometheus.inc_counter
-               Prometheus.metric_provider_prefix_cache_creation_tokens
+             Otel_metric_store.inc_counter
+               Otel_metric_store.metric_provider_prefix_cache_creation_tokens
                ~delta:(Float.of_int cc) ();
            if cr > 0 then begin
-             Prometheus.inc_counter
-               Prometheus.metric_provider_prefix_cache_read_tokens
+             Otel_metric_store.inc_counter
+               Otel_metric_store.metric_provider_prefix_cache_read_tokens
                ~delta:(Float.of_int cr) ();
-             (* Per-provider/model cache-read counter for Prometheus
+             (* Per-provider/model cache-read counter for Otel_metric_store
                 dashboards.  The legacy unlabelled counter above
                 remains for backward compatibility. *)
-             Prometheus.inc_counter
-               Prometheus.metric_llm_provider_cache_read_tokens
+             Otel_metric_store.inc_counter
+               Otel_metric_store.metric_llm_provider_cache_read_tokens
                ~labels:[ ("provider", provider_label); ("model", model) ]
                ~delta:(Float.of_int cr)
                ()
@@ -360,8 +360,8 @@ let make_hooks
            (Anthropic extended thinking, DeepSeek, etc.). *)
         (match response.telemetry with
          | Some { reasoning_tokens = Some rt; _ } when usage_trusted && rt > 0 ->
-           Prometheus.inc_counter
-             Prometheus.metric_llm_provider_reasoning_tokens
+           Otel_metric_store.inc_counter
+             Otel_metric_store.metric_llm_provider_reasoning_tokens
              ~labels:[ ("provider", provider_label); ("model", model) ]
              ~delta:(Float.of_int rt)
              ()
@@ -461,7 +461,7 @@ let make_hooks
                 exceptions thrown from Sse.broadcast at the call boundary
                 bypass that counter.  Logging here makes the loss visible
                 at the producer site. *)
-             Prometheus.inc_counter
+             Otel_metric_store.inc_counter
                Keeper_metrics.(to_string LifecycleCallbackFailures)
                ~labels:[(label_keeper, meta.name); (label_callback, callback_label_after_turn_sse_broadcast)]
                ();
@@ -604,7 +604,7 @@ let make_hooks
                 were dropped without trace.  Loss of these rows leaves
                 downstream replay / debugging tools with gaps that look
                 identical to "no tool calls in this turn." *)
-             Prometheus.inc_counter
+             Otel_metric_store.inc_counter
                Keeper_metrics.(to_string LifecycleCallbackFailures)
                ~labels:[(label_keeper, (!meta_ref).name); (label_callback, callback_label_post_tool_log_write)]
                ();
@@ -685,7 +685,7 @@ let make_hooks
              ~typed_outcome
          with Eio.Cancel.Cancelled _ as e -> raise e
             | exn ->
-              Prometheus.inc_counter
+              Otel_metric_store.inc_counter
                 Keeper_metrics.(to_string LifecycleCallbackFailures)
                 ~labels:[(label_keeper, (!meta_ref).name); (label_callback, callback_label_on_tool_executed)]
                 ();
@@ -705,7 +705,7 @@ let make_hooks
     on_stop = Some (fun event ->
       match event with
       | Agent_sdk.Hooks.OnStop { reason; _ } ->
-        Prometheus.inc_counter Keeper_metrics.(to_string OasOnStop)
+        Otel_metric_store.inc_counter Keeper_metrics.(to_string OasOnStop)
           ~labels:
             [
               (label_keeper, (!meta_ref).name);
@@ -727,7 +727,7 @@ let make_hooks
           { severity; consecutive_idle_turns; tool_names; _ } ->
         let decision =
           keeper_idle_decision ~meta_ref ~consecutive_idle_turns ~tool_names in
-        Prometheus.inc_counter
+        Otel_metric_store.inc_counter
           Keeper_metrics.(to_string OasOnIdleEscalated)
           ~labels:
             [
@@ -741,7 +741,7 @@ let make_hooks
 
     on_error = Some (function
       | Agent_sdk.Hooks.OnError { detail; context = err_ctx } ->
-        Prometheus.inc_counter
+        Otel_metric_store.inc_counter
           Keeper_metrics.(to_string LifecycleCallbackFailures)
           ~labels:[(label_keeper, (!meta_ref).name); (label_callback, callback_label_on_error)]
           ();
@@ -758,12 +758,12 @@ let make_hooks
            Log.Keeper.warn "keeper:%s tool_%s: %s — %s"
              keeper_name failure_class tool_name error
          | None ->
-           (* Always increment the durable Prometheus signal for real
+           (* Always increment the durable Otel_metric_store signal for real
               tool/runtime failures: noise dedupe is a log-surface concern
               only; the counter carries the count for dashboards and alert
               rules. Deterministic workflow/policy rejections are handled
               above as self-correcting control flow. *)
-           Prometheus.inc_counter
+           Otel_metric_store.inc_counter
              Keeper_metrics.(to_string LifecycleCallbackFailures)
              ~labels:
                [ (label_keeper, keeper_name)
@@ -797,7 +797,7 @@ let make_hooks
               Log.Keeper.error
                 "keeper:%s tool_error threshold-silence after %d identical: %s — %s"
                 keeper_name n tool_name error;
-              Prometheus.inc_counter
+              Otel_metric_store.inc_counter
                 Keeper_metrics.(to_string LifecycleCallbackFailures)
                 ~labels:
                   [ (label_keeper, keeper_name)

@@ -65,8 +65,8 @@ let execute_tool_eio
      the current request scope. *)
   Eio_context.set_switch sw;
   Eio_context.set_clock clock;
-  (* Prometheus: count every inbound tool call *)
-  Prometheus.record_request ();
+  (* Otel_metric_store: count every inbound tool call *)
+  Otel_metric_store.record_request ();
   let config = state.Mcp_server.workspace_config in
   let registry = state.Mcp_server.session_registry in
   (* Fix 3: Cache workspace_initialized to avoid repeated stat syscalls.
@@ -343,7 +343,7 @@ let execute_tool_eio
                       then Tool_result.ok ~tool_name:name ~start_time message
                       else Tool_result.error ~tool_name:name ~start_time message)
                  | Mod_inline ->
-                   let inline_ctx : Tool_inline_dispatch.context =
+                   let mcp_runtime_ctx : Mcp_tool_runtime.context =
                      { config
                      ; agent_name
                      ; registry
@@ -352,7 +352,7 @@ let execute_tool_eio
                      ; clock
                      ; arguments = coerced_args
                      ; mcp_session_id
-                     ; (* The inline-dispatch surface caches under the
+                     ; (* The MCP runtime surface caches under the
                           already-resolved session identity, so carry the
                           ephemerality decided above. *)
                        record_mcp_session_agent =
@@ -367,7 +367,7 @@ let execute_tool_eio
                      ; save_mcp_sessions = Mcp_server_eio_governance.save_mcp_sessions
                      }
                    in
-                   Tool_inline_dispatch.dispatch inline_ctx ~name)
+                   Mcp_tool_runtime.dispatch mcp_runtime_ctx ~name)
             in
             (* #9784: enrich Unknown tool errors with closest-name suggestions so the
      LLM can self-correct on the next turn rather than re-emit the same

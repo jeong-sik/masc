@@ -78,7 +78,7 @@ let is_masc_mcp_descriptor (d : Keeper_tool_descriptor.t) =
   | Tool_ide_annotate
   | Tool_voice_dispatch
   | Tool_task_dispatch
-  | Tool_board_dispatch -> false
+  | Board_tool_dispatch -> false
 ;;
 
 let add_internal_names t (d : Keeper_tool_descriptor.t) =
@@ -115,7 +115,7 @@ let is_known_internal name = Hashtbl.mem known_internal_names_tbl name
 let is_known_runtime_name name = Hashtbl.mem known_runtime_names_tbl name
 
 (** Bound a label value to a closed set so hallucinated / unbounded
-    names never inflate Prometheus cardinality. *)
+    names never inflate Otel_metric_store cardinality. *)
 let safe_tool_label name =
   if is_known_public name
   then name
@@ -129,7 +129,7 @@ let safe_routed_to_label name =
 ;;
 
 let record_route_outcome ~tool ~routed_to ~result =
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     Keeper_metrics.(to_string ToolCallTotal)
     ~labels:
       [ "tool", safe_tool_label tool

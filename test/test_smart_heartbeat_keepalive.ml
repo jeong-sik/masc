@@ -325,7 +325,7 @@ let test_after_wake_emit_unchanged () =
    be registered (no dead series), accept a [keeper] label, and increment
    monotonically. *)
 
-module Prom = Masc.Prometheus
+module Prom = Masc.Otel_metric_store
 
 let test_skip_idle_wake_resumed_metric_registered () =
   let labels = [ ("keeper", "test_keeper_a") ] in
@@ -349,15 +349,15 @@ let test_skip_idle_wake_resumed_label_isolation () =
   let lb = [ ("keeper", "test_keeper_iso_b") ] in
   let b_before =
     Prom.metric_value_or_zero
-      Masc.Keeper_metrics.(to_string SkipIdleWakeResumed) ~labels:lb ()
+      Keeper_metrics.(to_string SkipIdleWakeResumed) ~labels:lb ()
   in
   Prom.inc_counter
-    Masc.Keeper_metrics.(to_string SkipIdleWakeResumed) ~labels:la ();
+    Keeper_metrics.(to_string SkipIdleWakeResumed) ~labels:la ();
   Prom.inc_counter
-    Masc.Keeper_metrics.(to_string SkipIdleWakeResumed) ~labels:la ();
+    Keeper_metrics.(to_string SkipIdleWakeResumed) ~labels:la ();
   let b_after =
     Prom.metric_value_or_zero
-      Masc.Keeper_metrics.(to_string SkipIdleWakeResumed) ~labels:lb ()
+      Keeper_metrics.(to_string SkipIdleWakeResumed) ~labels:lb ()
   in
   check (float 0.001) "keeper_b counter unchanged" 0.0
     (b_after -. b_before)

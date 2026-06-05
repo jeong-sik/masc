@@ -264,7 +264,7 @@ let contains_template_placeholder text =
   || String_util.contains_substring text "}}"
 
 let observe_turn_intent_render_failure message =
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     Keeper_metrics.(to_string PromptFailures)
     ~labels:[("prompt", Keeper_prompt_names.turn_intent)]
     ();
@@ -382,7 +382,7 @@ let load_externalized_bullet ~enabled key =
     if String.equal trimmed "" then
       match fallback_externalized_bullet key with
       | Some prose ->
-          Prometheus.inc_counter
+          Otel_metric_store.inc_counter
             Keeper_metrics.(to_string PromptFailures)
             ~labels:[("prompt", key)]
             ();
@@ -508,7 +508,7 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
      under config/prompts/. The OCaml side only computes the boolean toggle
      for each bullet and loads the prose via Prompt_registry; the prose
      itself (and any future edits) stay in the markdown files alongside the
-     other keeper prompts. See lib/keeper/keeper_prompt_names.ml for the
+     other keeper prompts. See lib/keeper_prompt_names/keeper_prompt_names.ml for the
      key set and fallback_externalized_bullet above for in-binary fallbacks. *)
   let board_activity_guidance =
     load_externalized_bullet
@@ -621,18 +621,6 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
     (Printf.sprintf "### Context\n- Utilization: %.0f%%\n- Idle: %ds\n"
        (observation.context_ratio *. 100.0)
        observation.idle_seconds);
-  (match observation.last_turn_budget with
-   | Some (used, total) when used > 0 ->
-     Buffer.add_string ubuf
-       (Printf.sprintf "- Previous turn budget: %d/%d used\n" used total)
-   | _ -> ());
-  (match observation.economic_pressure with
-   | Economy.Normal -> ()
-   | Frugal ->
-       Buffer.add_string ubuf "- Economy: Frugal (reduce token usage)\n"
-   | Hustle ->
-        Buffer.add_string ubuf
-          "- Economy: Hustle (minimize actions, conserve budget)\n");
   (* 4. Autonomous trigger — lower churn than reactive inboxes *)
   let turn_decision =
     Keeper_world_observation.keeper_cycle_decision ~meta observation

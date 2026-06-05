@@ -47,7 +47,7 @@ let report_keeper_cycle_side_effect_issue
   =
   let message = Printf.sprintf "keeper cycle %s failed: %s" side_effect detail in
   Keeper_registry_error_recording.record ~base_path:config.base_path keeper_name message;
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     Keeper_metrics.(to_string DispatchEventFailures)
     ~labels:[ "keeper", keeper_name; "site", side_effect_metric_label side_effect ]
     ();
@@ -128,7 +128,7 @@ let record_execution_receipt_gap
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string WriteMetaFailures)
       ~labels:[ "keeper", meta.name; "phase", "receipt_coverage_gap" ]
       ();
@@ -144,7 +144,7 @@ let record_execution_receipt_gap
    honest actions of [specs/keeper-state-machine/KeeperTaskAcquisition.tla].
    Each helper is wrapped at the call site by
    [Keeper_fsm_guard_runtime.wrap_unit] so an [Assert_failure] from a
-   PPX-injected guard increments the Prometheus violation counter and
+   PPX-injected guard increments the Otel_metric_store violation counter and
    re-raises. Bug-action [TaskRejected] is NOT
    instrumented -- it is the failure mode these guards are designed to
    detect.
@@ -184,9 +184,7 @@ let post_turn_complete_task ~(cycle_completed : bool ref) = ignore cycle_complet
 ;;
 
 let pre_dispatch_tool_surface : Keeper_execution_receipt.tool_surface =
-  { turn_lane = Keeper_agent_tool_surface.Lane_pre_dispatch
-  ; materialized_tools = []
-  }
+  { turn_lane = Keeper_agent_tool_surface.Lane_pre_dispatch }
 ;;
 
 let record_pre_dispatch_terminal_observation
@@ -233,12 +231,6 @@ let record_pre_dispatch_terminal_observation
     ; terminal_reason_code
     ; response_text_present = false
     ; model_used = None
-    ; requested_tools = []
-    ; reported_tools = []
-    ; observed_tools = []
-    ; canonical_tools = []
-    ; unexpected_tools = []
-    ; tools_used = []
     ; completion_contract_result = Keeper_execution_receipt.Contract_not_dispatched
     ; tool_surface = pre_dispatch_tool_surface
     ; sandbox_kind = Keeper_execution_receipt.sandbox_kind_of_meta meta
@@ -310,7 +302,7 @@ let record_pre_dispatch_terminal_observation
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
       let error = Printexc.to_string exn in
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string WriteMetaFailures)
         ~labels:[ "keeper", meta.name; "phase", "receipt_append" ]
         ();

@@ -133,6 +133,8 @@ export function keeperActivityDisplay(
 
 export function keeperDisplayStatus(keeper: Keeper | null | undefined, fallbackStatus?: string | null): string {
   if (keeper && isKeeperPaused(keeper)) return 'paused'
+  const lifecycleStatus = keeperLifecycleStatus(keeper?.lifecycle_phase)
+  if (lifecycleStatus && lifecycleStatus !== 'running') return lifecycleStatus
   const status = keeper?.status ?? fallbackStatus
   const normalized = (status ?? '').trim().toLowerCase()
 
@@ -142,6 +144,39 @@ export function keeperDisplayStatus(keeper: Keeper | null | undefined, fallbackS
   }
 
   return status && status.trim() !== '' ? status : 'unknown'
+}
+
+function keeperLifecycleStatus(phase: Keeper['lifecycle_phase'] | string | null | undefined): string | null {
+  switch (phase) {
+    case 'Offline':
+      return 'unbooted'
+    case 'Running':
+      return 'running'
+    case 'Failing':
+      return 'failing'
+    case 'Overflowed':
+      return 'overflowed'
+    case 'Compacting':
+      return 'compacting'
+    case 'HandingOff':
+      return 'handoff'
+    case 'Draining':
+      return 'draining'
+    case 'Paused':
+      return 'paused'
+    case 'Stopped':
+      return 'stopped'
+    case 'Crashed':
+      return 'crashed'
+    case 'Restarting':
+      return 'restarting'
+    case 'Dead':
+      return 'dead'
+    case 'Zombie':
+      return 'zombie'
+    default:
+      return null
+  }
 }
 
 function codeLabel(value: string | null | undefined): string | null {
@@ -228,7 +263,7 @@ function refineOfflineStatus(keeper: Keeper | null | undefined): string {
   // only the 13 PascalCase phases, none of which lowercase to
   // `'inactive'`), so the guard was dead defensive.
   if (keeper.last_heartbeat && isHeartbeatAlive(keeper.last_heartbeat)) {
-    const phase = keeper.phase?.trim().toLowerCase()
+    const phase = (keeper.lifecycle_phase ?? keeper.phase)?.trim().toLowerCase()
     if (phase && phase !== 'offline') return phase
     return 'idle'
   }
@@ -283,7 +318,6 @@ const runtimeBlockerLabels = {
   turn_livelock_blocked: '턴 livelock 차단',
   completion_contract_violation: '완료 계약 위반',
   runtime_exhausted: '런타임 후보 소진',
-  no_tool_capable_provider: '도구 실행 런타임 없음',
   provider_runtime_error: '런타임 호출 오류',
   tool_route_recoverable_failure: '도구 라우팅 복구 가능 실패',
   fiber_unresolved: 'Fiber 미해결',
@@ -348,9 +382,6 @@ export function keeperRuntimeBlockerHint(keeper: Keeper | null | undefined): str
   }
   if (blockerClass === 'runtime_exhausted') {
     return '런타임 후보가 모두 소진되어 runtime 상태 확인이 필요합니다.'
-  }
-  if (blockerClass === 'no_tool_capable_provider') {
-    return '요구 도구를 실행할 수 있는 runtime lane이 없어 descriptor 또는 tool surface 확인이 필요합니다.'
   }
   if (blockerClass === 'tool_route_recoverable_failure') {
     return '도구 라우팅이 복구 가능한 실패로 끝나 descriptor, tool surface, runtime lane 확인이 필요합니다.'

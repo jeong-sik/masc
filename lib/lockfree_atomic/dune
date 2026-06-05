@@ -1,7 +1,6 @@
 (include_subdirs no)
 
 (library
- (name masc_lockfree_atomic)
+ (name lockfree_atomic)
  (public_name masc.lockfree_atomic)
- (wrapped true)
- (libraries))
+ (wrapped false))

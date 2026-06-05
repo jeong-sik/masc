@@ -134,8 +134,7 @@ describe('resolveKeeperObservedToolAudit', () => {
 
     const missionBrief = {
       name: 'sangsu',
-      allowed_tool_names: ['compat_only_allowlist'],
-    } as DashboardMissionKeeperBrief & { allowed_tool_names: string[] }
+    } as DashboardMissionKeeperBrief
 
     expect(resolveKeeperObservedToolAudit(keeper, missionBrief)).toEqual({
       source: 'dashboard_summary',
@@ -464,36 +463,15 @@ describe('RuntimeLensSection', () => {
             turn_finished_count: 1,
             terminal_status: 'finished',
           },
-          tool_surface: {
-            requested_tools: ['read_file'],
-            required_tools: ['keeper_task_done'],
-            materialized_tools: ['read_file'],
-            missing_required_tools: ['keeper_task_done'],
-            turn_lane: 'tool_optional',
-            tool_surface_class: 'runtime_mcp',
-            tool_requirement: 'required',
-            allowed_tool_count: 1,
-            tool_surface_fallback_used: false,
-            terminal_status: 'missing_required_tool',
-          },
           provider_lane: {
             resolved: true,
             status: 'error',
             resolved_lane: 'inline',
-            effective_tool_count: 1,
-            runtime_mcp_policy_present: false,
-            required_tools: ['keeper_task_done'],
-            materialized_tools: ['read_file'],
-            missing_required_tools: ['keeper_task_done'],
           },
           provider_attempt: {
             started_count: 1,
             finished_count: 1,
             terminal_status: 'timeout',
-          },
-          tool_lineage: {
-            recorded: false,
-            decision: null,
           },
           payload_role: {
             counts: {},
@@ -529,17 +507,6 @@ describe('RuntimeLensSection', () => {
             active_config_root_source: null,
             default_manifest_path: null,
           },
-          runtime_proof: {
-            source: 'keeper_tool_call_log',
-            status: 'pass',
-            matched_tool_call_count: 2,
-            successful_tool_call_count: 2,
-            failed_tool_call_count: 0,
-            tools: ['Execute', 'SearchFiles'],
-            successful_tools: ['Execute', 'SearchFiles'],
-            failed_tools: [],
-            latest_at: '2026-05-13T00:00:01Z',
-          },
           context: {
             context_injected_count: 1,
             context_compacted_event_count: 1,
@@ -567,7 +534,7 @@ describe('RuntimeLensSection', () => {
           masc_policy_runtime: lane('masc_policy_runtime', 'MASC Runtime', 1, 'error'),
           oas_agent: lane('oas_agent', 'OAS', 2, 'checkpoint_saved'),
           provider: lane('provider', 'Provider', 2, 'timeout'),
-          tool_runtime: lane('tool_runtime', 'Tool Runtime', 1, 'missing_required_tool', ['required_tool_not_materialized']),
+          tool_runtime: lane('tool_runtime', 'Tool Runtime', 0, 'not_observed'),
           memory_context: lane('memory_context', 'Memory/Context', 3, 'flushed'),
         },
         clock_edges: [
@@ -619,14 +586,7 @@ describe('RuntimeLensSection', () => {
             event_bus_payload_kinds: ['tool_called', 'tool_completed'],
           },
         ],
-        gaps: [
-          {
-            code: 'required_tool_not_materialized',
-            severity: 'bad',
-            lane: 'tool_runtime',
-            detail: 'tool surface mismatch: keeper_task_done',
-          },
-        ],
+        gaps: [],
       },
       health: 'partial',
       linked_artifacts: {
@@ -720,15 +680,9 @@ describe('RuntimeLensSection', () => {
         operator_disposition_reason: 'healthy',
         model_used: null,
         stop_reason: 'completed',
-        tool_contract_result: 'needs_execution_progress',
         duration_ms: 16000,
         error: null,
         runtime: null,
-        tool_surface: {
-          tool_requirement: 'optional',
-          missing_required_tools: [],
-          required_tools: [],
-        },
       },
       runtime_attention: {
         state: 'blocked',
@@ -766,12 +720,6 @@ describe('RuntimeLensSection', () => {
     expect(screen.getByText('tool log artifacts')).toBeInTheDocument()
     expect(screen.getAllByText('1/1').length).toBeGreaterThan(1)
     expect(screen.getByText('0/1')).toBeInTheDocument()
-    expect(screen.getByText('runtime proof')).toBeInTheDocument()
-    expect(screen.getByText('pass / 2 calls')).toBeInTheDocument()
-    expect(screen.getByText('tool lineage')).toBeInTheDocument()
-    expect(screen.getByText('not recorded')).toBeInTheDocument()
-    expect(screen.getByText('proof tools')).toBeInTheDocument()
-    expect(screen.getByText('Execute, SearchFiles')).toBeInTheDocument()
     expect(screen.getByText('working loops')).toBeInTheDocument()
     expect(screen.getAllByText('2').length).toBeGreaterThan(0)
     expect(screen.getByText('provider attempts')).toBeInTheDocument()
@@ -790,10 +738,8 @@ describe('RuntimeLensSection', () => {
     expect(screen.getByText('corr corr-1 · run run-1')).toBeInTheDocument()
     expect(screen.getByText('memory evidence')).toBeInTheDocument()
     expect(screen.getByText('inj 1/1 · flush success 1 · error 0 · ep/proc ep 2 · proc 1')).toBeInTheDocument()
-    expect(screen.getAllByText('keeper_task_done').length).toBeGreaterThan(0)
     expect(screen.getByText('Provider')).toBeInTheDocument()
     expect(screen.getByText('Tool Runtime')).toBeInTheDocument()
-    expect(screen.getAllByText('required_tool_not_materialized').length).toBeGreaterThan(0)
   })
 
   it('renders an empty state while runtime trace is unavailable', () => {
@@ -815,12 +761,10 @@ describe('RuntimeLensSection', () => {
     })
 
     expect(summary.headline).toBe('조치 필요')
-    expect(summary.rows.find(row => row.label === '동기화')?.detail).toContain('tool needs_execution_progress')
     expect(summary.rows.find(row => row.label === '동기화')?.detail).toContain('KSM running')
     expect(summary.rows.find(row => row.label === '런타임')?.value).toBe('fiber alive')
     expect(summary.rows.find(row => row.label === '현재 턴')?.value).toBe('no live turn')
     expect(summary.rows.find(row => row.label === '최신 증거')?.value).toBe('turn #7 finished')
-    expect(summary.rows.find(row => row.label === '차단')?.detail).toContain('needs_execution_progress')
     // RFC-0046 §4.3 partial closure: the FSM lane is now rendered exclusively
     // by FsmHub mode='detail' under this panel. Asserting the absence here
     // prevents regressing back to dual-rendering of KSM/KTC.

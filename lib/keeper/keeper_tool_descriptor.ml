@@ -42,7 +42,7 @@ type runtime_handler =
   | Tool_ide_annotate
   | Tool_voice_dispatch
   | Tool_task_dispatch
-  | Tool_board_dispatch
+  | Board_tool_dispatch
   | Tool_masc_board_dispatch
   | Tool_masc_task_dispatch
   | Tool_masc_plan_dispatch
@@ -127,7 +127,7 @@ let runtime_handler_to_string = function
   | Tool_ide_annotate -> "tool_ide_annotate"
   | Tool_voice_dispatch -> "tool_voice_dispatch"
   | Tool_task_dispatch -> "tool_task_dispatch"
-  | Tool_board_dispatch -> "tool_board_dispatch"
+  | Board_tool_dispatch -> "board_tool_dispatch"
   | Tool_masc_board_dispatch -> "tool_masc_board_dispatch"
   | Tool_masc_task_dispatch -> "tool_masc_task_dispatch"
   | Tool_masc_plan_dispatch -> "tool_masc_plan_dispatch"
@@ -618,7 +618,7 @@ let empty_object_schema =
 ;;
 
 (* Workspace tools historically dispatched by name in [Keeper_tool_dispatch_runtime]
-   without input-schema validation — the underlying handlers (Tool_board,
+   without input-schema validation — the underlying handlers (Board_tool,
    Tool_library, Keeper_tool_task_runtime, Keeper_tool_voice_runtime, etc.) parse
    their own input. The descriptor input_schema is informational only
    (these tools are Hidden visibility; no LLM sees the schema). A
@@ -730,7 +730,7 @@ let board_descriptor name description ~readonly =
          (String.length name - String.length "keeper_board_"))
     ~name
     ~description
-    ~handler:Tool_board_dispatch
+    ~handler:Board_tool_dispatch
     ~readonly
     ~inline_safe:false
     ~maintenance_only:false
@@ -748,7 +748,7 @@ let masc_board_descriptor (schema : Masc_domain.tool_schema) =
   let readonly =
     match metadata.readonly with
     | Some readonly -> readonly
-    | None -> List.mem name Tool_board_dispatch.tool_spec_read_only
+    | None -> List.mem name Board_tool_dispatch.tool_spec_read_only
   in
   let policy =
     policy
@@ -769,7 +769,7 @@ let masc_board_descriptor (schema : Masc_domain.tool_schema) =
 ;;
 
 let masc_board_descriptors =
-  List.map masc_board_descriptor Tool_board_registry.tools
+  List.map masc_board_descriptor Board_tool_registry.tools
 ;;
 
 let voice_descriptor name description ~readonly =

@@ -51,7 +51,7 @@ module Dashboard_briefing_sections = Dashboard_briefing_sections
 module Build_identity = Build_identity
 module Graphql_api = Graphql_api
 module Tempo = Tempo
-module Auth = Masc_auth.Auth
+module Auth = Auth
 module Board = Board
 module Board_dispatch = Board_dispatch
 module Task_dispatch = Task.Dispatch
@@ -59,7 +59,7 @@ module Http_negotiation = Mcp_transport_protocol.Http_negotiation
 module Progress = Progress
 module Sse = Sse
 module Safe_ops = Safe_ops
-module Tool_board = Tool_board
+module Board_tool = Board_tool
 module Process_eio = Process_eio
 module Server_mcp_transport_http = Server_mcp_transport_http
 

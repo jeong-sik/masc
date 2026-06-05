@@ -154,22 +154,21 @@ let degraded_retry_slot_phase_available ~(time_spent_in_turn_s : float) : bool =
   Float.max 0.0 time_spent_in_turn_s < degraded_retry_slot_phase_budget_sec
 
 let runtime_reason_is_structural_attempt_timeout
-    (reason : Keeper_meta_contract.runtime_exhaustion_reason) : bool =
+    (reason : Keeper_turn_driver.runtime_exhaustion_reason) : bool =
   (* Typed match only. Producers must construct [Structural_attempt_timeout]
      explicitly; free-form OAS-ceiling-looking text remains [Other_detail].
      Enumerate every constructor so a new reason variant fails to compile here
      rather than silently falling through to [false]. *)
   match reason with
-  | Keeper_meta_contract.Structural_attempt_timeout _ -> true
-  | Keeper_meta_contract.Connection_refused
-  | Keeper_meta_contract.Dns_failure
-  | Keeper_meta_contract.No_providers_available
-  | Keeper_meta_contract.All_providers_failed
-  | Keeper_meta_contract.Candidates_filtered_after_cycles
-  | Keeper_meta_contract.Max_turns_exceeded
-  | Keeper_meta_contract.Capacity_exhausted
-  | Keeper_meta_contract.No_tool_capable _
-  | Keeper_meta_contract.Other_detail _ -> false
+  | Keeper_turn_driver.Structural_attempt_timeout _ -> true
+  | Keeper_turn_driver.Connection_refused
+  | Keeper_turn_driver.Dns_failure
+  | Keeper_turn_driver.No_providers_available
+  | Keeper_turn_driver.All_providers_failed
+  | Keeper_turn_driver.Candidates_filtered_after_cycles
+  | Keeper_turn_driver.Max_turns_exceeded
+  | Keeper_turn_driver.Capacity_exhausted
+  | Keeper_turn_driver.Other_detail _ -> false
 
 let degraded_retry_bypasses_slot_phase_guard
     (err : Agent_sdk.Error.sdk_error) : bool =
@@ -206,9 +205,21 @@ let reclassify_provider_timeout_for_attempt
     ~(provider_timeout_budget : provider_timeout_budget option)
     (err : Agent_sdk.Error.sdk_error) : Agent_sdk.Error.sdk_error =
   match err, provider_timeout_budget with
-  | Agent_sdk.Error.Api (Timeout { message }), Some _
+  | Agent_sdk.Error.Api (Timeout { message }), Some budget
     when EC.is_structural_oas_timeout_message message ->
-      err
+      let estimated_remaining_after_timeout =
+        Float.max 0.0 (budget.remaining_turn_budget_sec -. budget.effective_timeout_sec)
+      in
+      Keeper_turn_driver.sdk_error_of_masc_internal_error
+        (Keeper_turn_driver.Provider_timeout
+           { budget_sec = budget.effective_timeout_sec
+           ; keeper_turn_timeout_sec = budget.keeper_turn_timeout_sec
+           ; estimated_input_tokens = budget.estimated_input_tokens
+           ; source = budget.source
+           ; remaining_turn_budget_sec = Some estimated_remaining_after_timeout
+           ; min_required_sec = min_provider_timeout_budget_sec
+           ; phase = "runtime_attempt_watchdog"
+           })
   | _ -> err
 
 let attempt_watchdog_outer_turn_reserve_sec = 1.0
@@ -496,7 +507,7 @@ let sync_keeper_paused_state_impl
       config synced_meta
   with
   | Error err ->
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string WriteMetaFailures)
         ~labels:[("keeper", meta.name);
                  ("phase",
@@ -707,7 +718,7 @@ let post_turn_resilience_handles
        | exn -> Error (Printexc.to_string exn))
     with
     | Error detail ->
-        Prometheus.inc_counter Keeper_metrics.(to_string OasExecutionErrors)
+        Otel_metric_store.inc_counter Keeper_metrics.(to_string OasExecutionErrors)
           ~labels:[("keeper", meta.name); ("phase", Keeper_oas_execution_error_phase.(to_label Resilience_audit_store))]
           ();
         Log.Keeper.error
@@ -767,7 +778,7 @@ let enqueue_partial_commit_continue_gate
              Log.Keeper.error
                "%s: partial-commit continue gate approved but keeper resume sync failed: %s"
                meta.name err);
-             Prometheus.inc_counter
+             Otel_metric_store.inc_counter
                Keeper_metrics.(to_string RuntimeSyncFailures)
                ~labels:[("keeper", meta.name); ("site", "resume_sync")]
                ()
@@ -784,7 +795,7 @@ let enqueue_partial_commit_continue_gate
              Log.Keeper.error
                "%s: partial-commit continue gate rejected but keeper pause sync failed: %s (reason=%s)"
                meta.name err reason);
-             Prometheus.inc_counter
+             Otel_metric_store.inc_counter
                Keeper_metrics.(to_string RuntimeSyncFailures)
                ~labels:[("keeper", meta.name); ("site", "pause_sync")]
                ())

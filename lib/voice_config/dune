@@ -1,0 +1,18 @@
+(include_subdirs no)
+
+(library
+ (name voice_config)
+ (public_name masc.voice_config)
+ (wrapped false)
+ (modules voice_config)
+ (libraries
+  eio
+  otoml
+  yojson
+  masc_log
+  masc.config_dir_resolver
+  masc.masc_core
+  masc.tool_types
+  masc.config
+  masc.host_config
+  masc.masc_workspace))

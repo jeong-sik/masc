@@ -12,7 +12,7 @@ let prompt_markdown_dir_candidates ~workspace_path ~base_path =
 
 let install_prompt_registry_observers () =
   Prompt_registry.set_restore_failure_observer (fun () ->
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string PromptFailures)
         ~labels:[ ("prompt", "override_restore") ]
         ())

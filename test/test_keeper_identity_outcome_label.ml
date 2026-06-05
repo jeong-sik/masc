@@ -1,5 +1,5 @@
 (** Tests for [Keeper_identity.validation_error_outcome_label] — RFC P3-a
-    Prometheus label SSOT. The compiler enforces exhaustiveness on the
+    Otel_metric_store label SSOT. The compiler enforces exhaustiveness on the
     match in [keeper_identity.ml]; these tests fix the actual label
     strings so a rename in one variant doesn't silently break dashboards
     that pivot on [outcome=...]. *)

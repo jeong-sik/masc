@@ -22,13 +22,14 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
     ?(context_max = 0)
     (result : Keeper_agent_run.run_result) : keeper_meta =
   let now_ts = Time_compat.now () in
+  let tool_names = Keeper_agent_result.tool_names result in
   let usage_trust =
     classify_usage_trust
       ~usage_reported:result.usage_reported
       ~usage:result.usage
       ~context_max
   in
-  (* #9959: surface classification into Prometheus exactly once per
+  (* #9959: surface classification into Otel_metric_store exactly once per
      turn. Other [classify_usage_trust] call sites serialize the
      trust into JSONL but do not bump the counter. *)
   record_usage_trust ~keeper_name:meta.name ~trust:usage_trust;
@@ -49,11 +50,11 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
      independently of token-trust (token⊥cost). *)
   let turn_cost = estimate_usage_cost_usd result.usage in
   let substantive_tool_call_count =
-    result.tools_used
+    tool_names
     |> List.filter (fun name -> not (is_observation_only_tool_name name))
     |> List.length
   in
-  let has_substantive_tools = has_substantive_tool_calls result.tools_used in
+  let has_substantive_tools = has_substantive_tool_calls tool_names in
   let has_text = String.trim result.response_text <> "" in
   let validated_evidence = visible_run_validation result in
   let has_validated_evidence = Option.is_some validated_evidence in
@@ -88,11 +89,11 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
   if update_proactive_rt && is_scheduled_autonomous_cycle then begin
     let outcome =
       if has_substantive_tools then "tool_called"
-      else if is_noop_cycle ~has_text ~tools_used:result.tools_used
+      else if is_noop_cycle ~has_text ~tools_used:tool_names
       then "noop"
       else "tool_called"
     in
-    Prometheus.inc_counter Keeper_metrics.(to_string ProactiveOutcome)
+    Otel_metric_store.inc_counter Keeper_metrics.(to_string ProactiveOutcome)
       ~labels:[ ("keeper", meta.name); ("outcome", outcome) ]
       ()
   end;
@@ -150,7 +151,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
            then rt.proactive_rt.last_reason
            else if has_substantive_tools then
              Printf.sprintf "unified:tools=[%s]"
-               (String.concat "," result.tools_used)
+               (String.concat "," tool_names)
            else if has_validated_evidence then
              (match validated_evidence with
               | Some v ->
@@ -167,7 +168,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
            then rt.proactive_rt.last_preview
            else if has_text then short_preview result.response_text
            else if has_substantive_tools then
-             Printf.sprintf "(tools: %s)" (String.concat ", " result.tools_used)
+             Printf.sprintf "(tools: %s)" (String.concat ", " tool_names)
            else
              (match validated_evidence with
               | Some v -> validated_evidence_preview v
@@ -175,7 +176,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
           );
         consecutive_noop_count =
           (if update_proactive_rt && is_scheduled_autonomous_cycle then
-             if is_noop_cycle ~has_text ~tools_used:result.tools_used
+             if is_noop_cycle ~has_text ~tools_used:tool_names
              then rt.proactive_rt.consecutive_noop_count + 1
              else 0
            else rt.proactive_rt.consecutive_noop_count);

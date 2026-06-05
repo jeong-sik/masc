@@ -61,10 +61,10 @@ let startup_prune_auth_archive (state : Mcp_server.server_state) =
          ~retention_days:days
          ~min_keep
      in
-     Prometheus.set_gauge Prometheus.metric_auth_archive_epochs
+     Otel_metric_store.set_gauge Otel_metric_store.metric_auth_archive_epochs
        (float_of_int kept);
      if pruned > 0 then (
-       Prometheus.inc_counter Prometheus.metric_auth_archive_pruned_total
+       Otel_metric_store.inc_counter Otel_metric_store.metric_auth_archive_pruned_total
          ~delta:(float_of_int pruned)
          ();
        Log.Misc.info

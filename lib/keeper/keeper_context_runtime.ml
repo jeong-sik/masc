@@ -157,7 +157,7 @@ let recover_latest_checkpoint_for_overflow_retry =
   Keeper_post_turn.recover_latest_checkpoint_for_overflow_retry
 
 let record_lifecycle_dispatch_rejection ~keeper_name ~origin event ~error =
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     Keeper_metrics.(to_string LifecycleDispatchRejections)
     ~labels:[ ("keeper", keeper_name); ("event", Keeper_state_machine.event_to_string event) ]
     ();
@@ -208,7 +208,7 @@ let dispatch_keeper_phase_event
 let compaction_outcome_metric = "masc_keeper_compaction_outcome_total"
 
 let () =
-  Prometheus.register_counter
+  Otel_metric_store.register_counter
     ~name:compaction_outcome_metric
     ~help:
       "Total Compaction_completed dispatches classified by token \
@@ -225,7 +225,7 @@ let () =
 let record_compaction_outcome ~keeper_name ~before_tokens ~after_tokens =
   let saved_tokens = before_tokens - after_tokens in
   let outcome = if saved_tokens > 0 then "ok" else "noop" in
-  Prometheus.inc_counter compaction_outcome_metric
+  Otel_metric_store.inc_counter compaction_outcome_metric
     ~labels:[ ("keeper", keeper_name); ("outcome", outcome) ] ();
   if saved_tokens <= 0 then
     Log.Keeper.warn
@@ -242,7 +242,7 @@ let dispatch_compaction_completed
     ~before_tokens
     ~after_tokens =
   record_compaction_outcome ~keeper_name ~before_tokens ~after_tokens;
-  Prometheus.inc_counter Keeper_metrics.(to_string FsmEdgeTransitions)
+  Otel_metric_store.inc_counter Keeper_metrics.(to_string FsmEdgeTransitions)
     ~labels:[("edge", "kmc_to_ksm_compact_completed")] ();
   dispatch_keeper_phase_event ~config ~origin ~keeper_name
     (Keeper_state_machine.Compaction_completed
@@ -263,7 +263,7 @@ let dispatch_post_turn_lifecycle_events
          dispatch is idempotent from compacting, so this is safe in
          both cases. *)
       if not lifecycle.compaction.started_dispatched then begin
-        Prometheus.inc_counter Keeper_metrics.(to_string CompactionCallbackRecoveries)
+        Otel_metric_store.inc_counter Keeper_metrics.(to_string CompactionCallbackRecoveries)
           ~labels:[ ("keeper", keeper_name) ] ();
         Log.Keeper.warn
           "%s: on_compaction_started callback did not fire — \

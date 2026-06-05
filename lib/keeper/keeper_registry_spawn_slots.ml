@@ -62,7 +62,7 @@ let decision ?base_path ?fd_admitted ?disk_admitted ~running_count () =
 let record_denied ~keeper_name ~surface reason =
   let reason_label = to_label reason in
   let detail = to_detail reason in
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     Keeper_metrics.(to_string SpawnSlotDenied)
     ~labels:[ "keeper", keeper_name; "surface", surface; "reason", reason_label ]
     ();

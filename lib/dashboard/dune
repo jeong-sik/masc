@@ -4,8 +4,7 @@
  (name masc_dashboard)
  (public_name masc.dashboard)
  (wrapped false)
- (flags
-  (:standard -open Masc -open Masc_prometheus -open Masc_auth -open Masc_runtime -open Masc_json_field -open Masc_lockfree_atomic -open Masc_keeper_metrics -open Masc_pool_metrics))
+ (flags :standard -open Masc)
  (libraries
   masc
   yojson
@@ -56,9 +55,19 @@
   masc.attribution
   masc.exec_policy
   masc.keeper_state
+  masc.keeper_id
+  masc.keeper_metrics
+  masc.keeper_types
+  masc.keeper_types_profile_sandbox
+  masc.keeper_pressure
+  masc.keeper_memory_taxonomy
+  masc.keeper_prompt_names
+  masc.keeper_tool_response
   masc.runtime_provider_labels
   masc.runtime_model
+  masc.runtime
   masc.model_inference_metrics
+  masc.json_field
   masc.types_boundary
   masc.cdal_runtime
   masc.cdal
@@ -70,6 +79,10 @@
   masc.sse_event
   masc.chronicle_event
   masc.tool_call_quality_benchmark
+  masc.telemetry_coverage_gap
+  masc.telemetry_unified
+  masc.discovery_cache
+  masc.local_runtime_pool
   masc.keeper_event_queue
   masc.keeper_invariant
   masc.compaction_trigger
@@ -111,6 +124,7 @@
   masc.masc_exec_command_gate
   masc_board
   masc.board_handlers
+  masc.board_tool_adapter
   masc.task_handlers
   masc_random_id
   masc_workspace
@@ -141,18 +155,7 @@
   masc.resilience
   masc.multimodal
   masc.repo_manager
-  masc.parse_outcome
-  masc.runtime
-  masc.masc_event_bus
-  masc.provider_tool_support
-  masc.keeper_internal_error
-  masc.prometheus
-  masc.auth
-  masc.fd_accountant
-  masc.keeper_metrics
-  masc.pool_metrics
-  masc.lockfree_atomic
-  masc.json_field)
+  masc.parse_outcome)
  (preprocess
   (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq ppx_let ppx_tla))
  (instrumentation

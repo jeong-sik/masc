@@ -1,11 +1,11 @@
 (** Board-owned metric hooks.
 
     Board core modules call this neutral hook surface instead of reaching into
-    Prometheus directly. The composition layer installs the concrete observer.
+    Otel_metric_store directly. The composition layer installs the concrete observer.
 
     Label dimensions are typed closed sums so the compiler checks every label
-    value at each call site. The variant -> Prometheus label string mapping
-    lives only in the adapter (board_prometheus_hooks.ml). [author] on
+    value at each call site. The variant -> Otel_metric_store label string mapping
+    lives only in the adapter (board_metric_hooks_adapter.ml). [author] on
     {!inc_legacy_migrate_post_kind} is deliberately left as [string]: it is an
     unbounded external-identity label (a raw actor name), out of scope for this
     closed-sum pass. *)

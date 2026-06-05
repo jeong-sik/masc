@@ -137,7 +137,7 @@ let test_register_uses_successful_commit_time_after_retry () =
         (Some (fun () ->
            if Atomic.compare_and_set forced_retry false true then begin
              ignore
-               (Masc.Lockfree_atomic.update_with_commit Sse.clients (fun state ->
+               (Lockfree_atomic.update_with_commit Sse.clients (fun state ->
                     {
                       next_state = { state with count = state.count };
                       result = ();
@@ -268,7 +268,7 @@ let test_buffer_event_timestamps_successful_commit_after_retry () =
         (Some (fun () ->
            if Atomic.compare_and_set forced_retry false true then begin
              ignore
-               (Masc.Lockfree_atomic.update_with_commit Sse.event_buffer (fun buffer ->
+               (Lockfree_atomic.update_with_commit Sse.event_buffer (fun buffer ->
                     {
                       next_state = List.map (fun item -> item) buffer;
                       result = ();

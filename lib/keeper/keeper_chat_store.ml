@@ -20,8 +20,8 @@ let chat_path ~base_dir ~keeper_name =
 let persistence_surface = "keeper_chat_store"
 
 let record_persistence_read_drop ~reason () =
-  Prometheus.inc_counter
-    Prometheus.metric_persistence_read_drops
+  Otel_metric_store.inc_counter
+    Otel_metric_store.metric_persistence_read_drops
     ~labels:[("surface", persistence_surface); ("reason", reason)]
     ()
 
@@ -57,7 +57,7 @@ let append_pair ~base_dir ~keeper_name
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string ChatStoreFailures)
       ~labels:[("operation", Keeper_chat_store_operation.(to_label Append))]
       ();
@@ -122,7 +122,7 @@ let load ~base_dir ~keeper_name : chat_message list =
         ~detail;
       []
   | exn ->
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string ChatStoreFailures)
         ~labels:[("operation", Keeper_chat_store_operation.(to_label Load))]
         ();

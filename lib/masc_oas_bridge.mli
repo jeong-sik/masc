@@ -5,7 +5,7 @@
 
 (** Safe execution of a generic OAS operation with a mandatory timeout.
     Catches [Eio.Time.Timeout] and [Eio.Cancel.Cancelled] to perform functional rollback.
-    [caller] (#10094) labels the Prometheus timeout counter so the
+    [caller] (#10094) labels the Otel_metric_store timeout counter so the
     operator can attribute timeouts to specific call sites.
     Raises [Invalid_argument] when [timeout_s] is not positive and finite. *)
 val run_safe
@@ -15,7 +15,7 @@ val run_safe
   -> ('a, Agent_sdk.Error.sdk_error) result
 
 (** Single entry point that resolves the per-caller timeout from
-    [Env_config_oas_bridge] and labels the resulting Prometheus
+    [Env_config_oas_bridge] and labels the resulting Otel_metric_store
     counter.  Preferred over [run_safe] for new callers — the
     timeout is no longer a hardcoded literal but an
     env-overridable per-caller budget.  See [Env_config_oas_bridge]

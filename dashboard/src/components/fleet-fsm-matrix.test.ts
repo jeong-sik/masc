@@ -92,11 +92,9 @@ function execution(
     operator_disposition_reason: 'healthy',
     model_used: 'auto',
     stop_reason: 'completed',
-    tool_contract_result: 'satisfied_execution',
     duration_ms: 12_000,
     error: null,
     runtime: null,
-    tool_surface: null,
     ...overrides,
   }
 }
@@ -209,7 +207,6 @@ describe('runtimeAttentionForSnapshot', () => {
         terminal_reason_code: 'api_error',
         operator_disposition: 'pause_human',
         operator_disposition_reason: 'tool_route_recoverable_failure',
-        tool_contract_result: 'unknown',
         error: {
           kind: 'api',
           message_preview: 'Timeout after 1170s',
@@ -235,7 +232,6 @@ describe('runtimeAttentionForSnapshot', () => {
         terminal_reason_code: 'completed',
         operator_disposition: 'pass',
         operator_disposition_reason: 'healthy',
-        tool_contract_result: 'passive_only',
       }),
       runtime_attention: {
         state: 'blocked',
@@ -324,7 +320,6 @@ describe('runtimeAttentionForSnapshot', () => {
         terminal_reason_code: 'runtime_exhausted',
         operator_disposition: 'alert_exhausted',
         operator_disposition_reason: 'runtime_exhausted',
-        tool_contract_result: 'unknown',
         error: {
           kind: 'internal',
           message_preview: 'runtime exhausted',
@@ -439,29 +434,17 @@ describe('runtimeAttentionForSnapshot', () => {
       is_live: false,
       execution: execution({
         outcome: 'receipt_failed',
-        terminal_reason_code: 'completion_contract_violation:tool_contract',
+        terminal_reason_code: 'api_error_timeout',
         operator_disposition: 'pause_human',
-        operator_disposition_reason: 'tool_route_recoverable_failure',
-        tool_contract_result: 'tool_surface_mismatch',
-        tool_surface: {
-          tool_requirement: 'required',
-          turn_lane: 'tool_optional',
-          tool_surface_class: 'mixed',
-          allowed_tool_count: 0,
-          tool_surface_fallback_used: true,
-          missing_required_tools: ['Execute'],
-          required_tools: ['Execute'],
-        },
+        operator_disposition_reason: 'runtime_timeout',
       }),
     })
 
     const attention = runtimeAttentionForSnapshot(snap, generatedAt)
     expect(attention.level).toBe('blocked')
-    expect(attention.cause).toContain('tool_surface_mismatch (Execute)')
-    expect(attention.reason).toContain('turn_lane=tool_optional')
-    expect(attention.reason).toContain('allowed_tools=0')
-    expect(attention.reason).toContain('tool_surface_fallback=true')
-    expect(attention.nextStep).toContain('Execute')
+    expect(attention.cause).toContain('terminal: api_error_timeout')
+    expect(attention.reason).toContain('terminal=api_error_timeout')
+    expect(attention.nextStep).toBe('runtime timeout budget/lane 확인')
   })
 
   it('routes provider timeout blockers away from generic approval guidance', () => {
@@ -472,7 +455,6 @@ describe('runtimeAttentionForSnapshot', () => {
         terminal_reason_code: 'api_error_timeout',
         operator_disposition: 'pause_human',
         operator_disposition_reason: 'tool_route_recoverable_failure',
-        tool_contract_result: 'unknown',
         error: {
           kind: 'api',
           message_preview: 'Timeout after 1785s',
@@ -499,15 +481,6 @@ describe('fleetCellPresentation', () => {
         terminal_reason_code: 'api_error',
         operator_disposition: 'pause_human',
         operator_disposition_reason: 'tool_route_recoverable_failure',
-        tool_surface: {
-          tool_requirement: 'required',
-          turn_lane: 'tool_optional',
-          tool_surface_class: 'mixed',
-          allowed_tool_count: 0,
-          tool_surface_fallback_used: true,
-          missing_required_tools: ['Execute'],
-          required_tools: ['Execute'],
-        },
       }),
     })
     const attention = runtimeAttentionForSnapshot(snap, generatedAt)
@@ -549,15 +522,6 @@ describe('buildRuntimeAssistPrompt', () => {
         terminal_reason_code: 'api_error',
         operator_disposition: 'pause_human',
         operator_disposition_reason: 'tool_route_recoverable_failure',
-        tool_surface: {
-          tool_requirement: 'required',
-          turn_lane: 'tool_optional',
-          tool_surface_class: 'mixed',
-          allowed_tool_count: 0,
-          tool_surface_fallback_used: true,
-          missing_required_tools: ['Execute'],
-          required_tools: ['Execute'],
-        },
       }),
     })
     const attention = runtimeAttentionForSnapshot(snap, generatedAt)
@@ -567,9 +531,8 @@ describe('buildRuntimeAssistPrompt', () => {
     expect(prompt).toContain('cause=')
     expect(prompt).toContain('blocked: tool_route_recoverable_failure')
     expect(prompt).toContain('evidence=')
-    expect(prompt).toContain('"turn_lane":"tool_optional"')
-    expect(prompt).toContain('"allowed_tool_count":0')
-    expect(prompt).toContain('"tool_surface_fallback_used":true')
+    expect(prompt).toContain('"terminal_reason_code":"api_error"')
+    expect(prompt).toContain('"operator_disposition":"pause_human"')
     expect(prompt).toContain('KSM=Running')
     expect(prompt).toContain('resolve 후보')
     expect(prompt).toContain('keeper_probe')

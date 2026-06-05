@@ -423,7 +423,6 @@ export const KEEPER_RUNTIME_BLOCKER_CLASSES = [
   'turn_livelock_blocked',
   'completion_contract_violation',
   'runtime_exhausted',
-  'no_tool_capable_provider',
   'provider_runtime_error',
   'tool_route_recoverable_failure',
   'fiber_unresolved',
@@ -510,16 +509,6 @@ export interface KeeperTrustApprovalState {
 }
 
 export interface KeeperTrustExecutionSummary {
-  tool_contract_result?: string | null
-  runtime_proof_status?: string | null
-  required_tools?: string[] | null
-  missing_required_tools?: string[] | null
-  requested_tools?: string[] | null
-  tools_used?: string[] | null
-  unexpected_tools?: string[] | null
-  requested_tool_count?: number | null
-  tools_used_count?: number | null
-  unexpected_tool_count?: number | null
   provider_attempt_count?: number | null
   provider_fallback_applied?: boolean | null
   provider_selected_model?: string | null
@@ -677,6 +666,7 @@ export type KeeperConversationSource =
 
 export type KeeperConversationDelivery =
   | 'history'
+  | 'queued'
   | 'sending'
   | 'streaming'
   | 'delivered'
@@ -703,6 +693,15 @@ export interface KeeperConversationDetails {
   rawPayload?: unknown
 }
 
+export interface KeeperConversationAttachment {
+  id: string
+  type: 'image' | 'file'
+  name: string
+  size: number
+  mimeType: string
+  data: string
+}
+
 export type KeeperConversationStreamState =
   | 'opening'
   | 'streaming'
@@ -719,6 +718,7 @@ export interface KeeperConversationEntry {
   timestamp?: string | null
   delivery: KeeperConversationDelivery
   streamState?: KeeperConversationStreamState
+  attachments?: KeeperConversationAttachment[]
   details?: KeeperConversationDetails | null
   error?: string | null
 }
@@ -898,6 +898,8 @@ export interface Keeper {
   name: string
   keeper_id?: string | null
   pipeline_stage?: PipelineStage
+  pipeline_stage_detail?: string | null
+  lifecycle_phase?: KeeperPhase | null
   phase?: KeeperPhase | null
   runtime_class?: 'keeper'
   paused?: boolean

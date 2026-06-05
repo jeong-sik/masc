@@ -1,9 +1,9 @@
 (* Compact-receipt JSON builders for the dashboard composite endpoint.
 
    The dashboard composite surface ships a *summary* of the most recent
-   keeper receipt (error / runtime / tool-surface blocks) rather than
-   the raw receipt JSON.  These helpers do the field projection +
-   truncation so the wire payload stays bounded.
+   keeper receipt (error / runtime blocks) rather than the raw receipt
+   JSON.  These helpers do the field projection + truncation so the wire
+   payload stays bounded.
 
    Extracted from [Server_dashboard_http] (godfile decomp). Pure JSON
    mapping over receipt-shaped [Yojson.Safe.t] values.  No shared
@@ -57,24 +57,6 @@ let compact_receipt_runtime_json receipt =
         , Json_util.string_opt_to_json (json_string "degraded_retry_runtime" runtime) )
       ; ( "fallback_reason"
         , Json_util.string_opt_to_json (json_string "fallback_reason" runtime) )
-      ]
-  | _ -> `Null
-;;
-
-let compact_receipt_tool_surface_json receipt =
-  let surface =
-    match json_member "tool_surface" receipt with
-    | `Assoc _ as surface -> surface
-    | _ -> `Null
-  in
-  match surface with
-  | `Assoc _ as surface ->
-    let unexpected_tools = Json_util.get_string_list receipt "unexpected_tools" in
-    let turn_lane = json_string "turn_lane" surface in
-    `Assoc
-      [ "turn_lane", Json_util.string_opt_to_json turn_lane
-      ; "unexpected_tools", Json_util.json_string_list unexpected_tools
-      ; "unexpected_tool_count", `Int (List.length unexpected_tools)
       ]
   | _ -> `Null
 ;;

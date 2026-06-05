@@ -136,13 +136,14 @@ val make_health_json :
 
     [paused_keepers.count] and [paused_keepers.names] are the union of
     registry-visible paused keepers and durable [.masc/keepers/*.json]
-    metas with [paused = true].  The nested [running_*] and
+    metas with [paused = true].  The nested [registry_paused_*] and
     [durable_*] fields keep the two sources inspectable so a keeper
     that has been auto-paused and removed from the live keepalive set
-    does not disappear from [/health].  [autoboot_enabled_*] and
-    [details] distinguish auto-recoverable, operator-paused, and
-    reconcile-gated durable pauses without auto-unpausing them.
-    [missing_pause_root_cause] is true when a keeper is auto-recoverable
+    does not disappear from [/health].  [running_*] remains as a legacy
+    alias for [registry_paused_*]; it does not mean FSM phase [Running].
+    [autoboot_enabled_*] and [details] distinguish auto-recoverable,
+    operator-paused, and reconcile-gated durable pauses without auto-unpausing
+    them.  [missing_pause_root_cause] is true when a keeper is auto-recoverable
     but its persisted runtime has no typed [last_blocker].  [read_error_count]
     surfaces corrupt durable meta instead of silently reporting a clean zero.
 
@@ -181,7 +182,7 @@ val make_health_json :
     {2 lazy_task_boot_guard_fires_total contract (P2 silent-
     failure fix)}
 
-    Surfaces {!Prometheus.metric_total} for
+    Surfaces {!Otel_metric_store.metric_total} for
     [masc_lazy_task_boot_guard_fired_total].  Without this
     field, an operator hitting [/health] would see ["status":
     "ok"] while keepers had silently failed to start.  Pinning
@@ -239,7 +240,7 @@ val keeper_fleet_runtime_resolution_fields : unit -> (string * Yojson.Safe.t) li
     [/health] so the dashboard can render pending durable stimuli without a
     second endpoint.  [fd_accountant] is also projected here so the dashboard
     shell can show the same backpressure source as [/health] without scraping
-    Prometheus. *)
+    Otel_metric_store. *)
 
 val keeper_fleet_runtime_resolution_light_fields :
   unit -> (string * Yojson.Safe.t) list

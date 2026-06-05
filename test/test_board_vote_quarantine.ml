@@ -3,7 +3,7 @@
 open Alcotest
 
 module BV = Masc.Board_votes
-module P = Masc.Prometheus
+module P = Masc.Otel_metric_store
 
 let with_env key value f =
   let prev = Sys.getenv_opt key in

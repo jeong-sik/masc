@@ -43,7 +43,7 @@ let persist_message_cursor_updates ~config (meta : keeper_meta) updates =
       (match read_meta config updated.name with
        | Ok (Some latest) -> latest
        | Ok None ->
-         Prometheus.inc_counter
+         Otel_metric_store.inc_counter
            Keeper_metrics.(to_string MetaReadFailures)
            ~labels:[ "keeper", updated.name; "site", "cursor_update_none_after_write" ]
            ();
@@ -52,7 +52,7 @@ let persist_message_cursor_updates ~config (meta : keeper_meta) updates =
            updated.name;
          { updated with meta_version = updated.meta_version + 1 }
        | Error e ->
-         Prometheus.inc_counter
+         Otel_metric_store.inc_counter
            Keeper_metrics.(to_string MetaReadFailures)
            ~labels:[ "keeper", updated.name; "site", "cursor_update_read_after_write" ]
            ();
@@ -62,7 +62,7 @@ let persist_message_cursor_updates ~config (meta : keeper_meta) updates =
            e;
          { updated with meta_version = updated.meta_version + 1 })
     | Error e ->
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string WriteMetaFailures)
         ~labels:[ "keeper", updated.name; "phase", "cursor_update" ]
         ();

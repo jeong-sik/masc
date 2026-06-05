@@ -88,9 +88,43 @@ let resolve (t : t) ~cwd =
 let resolve_opt t_opt ~cwd =
   Option.bind t_opt (fun t -> resolve t ~cwd)
 
+let container_cwd_of_host t ~host_cwd =
+  let meta = current_meta t in
+  let host_root =
+    Keeper_sandbox.host_root_abs_of_meta ~config:t.config meta
+    |> normalize
+  in
+  let container_root =
+    Keeper_sandbox.container_root meta.name
+    |> strip_trailing_slashes
+  in
+  let host_norm = normalize host_cwd in
+  if String.equal host_norm host_root then container_root
+  else if String.starts_with ~prefix:(host_root ^ "/") host_norm then (
+    let suffix =
+      String.sub
+        host_norm
+        (String.length host_root + 1)
+        (String.length host_norm - String.length host_root - 1)
+    in
+    Filename.concat container_root suffix)
+  else
+    match
+      Keeper_cwd_response.profile_independent_cwd
+        ~container_root
+        ~host_cwd
+    with
+    | Some cwd -> cwd
+    | None -> container_root
+
+let container_cwd_of_host_opt t_opt ~host_cwd =
+  Option.map (fun t -> container_cwd_of_host t ~host_cwd) t_opt
+
 let cleanup (t : t) =
-  with_lock t (fun () ->
-    Hashtbl.iter
-      (fun _ r -> Keeper_turn_sandbox_runtime.cleanup r)
-      t.cache;
-    Hashtbl.reset t.cache)
+  if Hashtbl.length t.cache = 0 then ()
+  else
+    with_lock t (fun () ->
+      Hashtbl.iter
+        (fun _ r -> Keeper_turn_sandbox_runtime.cleanup r)
+        t.cache;
+      Hashtbl.reset t.cache)

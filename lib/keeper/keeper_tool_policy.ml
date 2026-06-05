@@ -82,7 +82,7 @@ let warn_unloaded_policy_config_once ~accessor ~outcome =
    [outcome] from the caller so the log line accurately describes
    what the call site did. *)
 let observe_unloaded_policy_config ~accessor ~outcome =
-  Prometheus.inc_counter Prometheus.metric_tool_policy_unloaded_query
+  Otel_metric_store.inc_counter Otel_metric_store.metric_tool_policy_unloaded_query
     ~labels:[("accessor", accessor)]
     ();
   warn_unloaded_policy_config_once ~accessor ~outcome
@@ -353,10 +353,6 @@ let keeper_universe_masc_tool_schemas (meta : keeper_meta) : Masc_domain.tool_sc
   |> List.filter (fun (schema : Masc_domain.tool_schema) ->
     filter_by_universe ~lookup schema.name)
 
-let keeper_default_model_tools (_meta : keeper_meta) : Masc_domain.tool_schema list =
-  keeper_model_tools @ keeper_voice_tool_schemas
-  @ [ keeper_tool_search_schema ]
-
 (** Recovery minimum tools: non-removable shards only.
     Used in Failing phase to guarantee minimum tool availability.
     Phase B2: TLA+ RecoveryFloorMaintained invariant.
@@ -436,7 +432,9 @@ let keeper_tool_search_scope = keeper_universe_tool_names
     depending on the caller's access scope. *)
 let all_keeper_schemas ~(masc_schemas_fn : keeper_meta -> Masc_domain.tool_schema list)
     (meta : keeper_meta) : Masc_domain.tool_schema list =
-  (keeper_default_model_tools meta)
+  keeper_model_tools
+  @ keeper_voice_tool_schemas
+  @ [ keeper_tool_search_schema ]
   @ (masc_schemas_fn meta)
 
 (** Filter schemas by a set of allowed names.  Uses Hashtbl for O(1) lookup
@@ -523,12 +521,11 @@ let required_hints_of_schema (schema : Yojson.Safe.t) : string =
 
 (** Lookup tool description by name from all available schema sources.
     Returns [Some first_sentence] + optional enum/required hints if found, [None] otherwise.
-    Searches shard-resolved tools, inline schemas, injected masc_* schemas,
-    code-write schemas, voice tools, and tool_search schema. *)
+    Searches shard-resolved tools (voice included via shard), inline schemas,
+    injected masc_* schemas, and tool_search schema. *)
 let tool_hint_of (name : string) : string option =
   let all_schemas =
     Tool_shard.keeper_model_tools
-    @ Keeper_tool_registry.keeper_voice_tool_schemas
     @ [ Keeper_tool_registry.keeper_tool_search_schema ]
     @ Tool_schemas_inline.schemas
     @ masc_schemas_snapshot ()

@@ -1,4 +1,8 @@
-(** GADT Capability and Verified Shell IR definitions. *)
+(** GADT Capability and Verified Shell IR definitions.
+
+    Risk classification is the single source of truth for shell safety.
+    [Safe_IR] wrapping happens after allowlist validation; no redundant
+    capability or mutation checks are performed here. *)
 
 type yes = Yes
 type no = No
@@ -19,3 +23,5 @@ type cap_flags = {
 
 val classify_flags : Masc_exec.Exec_program.known -> cap_flags
 val classify_program_flags : Masc_exec.Exec_program.t -> cap_flags
+
+val shell_ir : _ verified_ir -> Masc_exec.Shell_ir.t

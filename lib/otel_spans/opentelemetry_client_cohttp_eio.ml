@@ -300,12 +300,15 @@ let mk_emitter ~stop ~clock ~net (config : Config.t) : (module EMITTER) =
     let emit_logs_maybe = maybe_emit batch_logs config.url_logs Signal.Encode.logs
 
     let emit_all ~force : unit =
-      Switch.run
-      @@ fun sw ->
+      (* Sequential emit: avoids Eio.Cancel propagation through Switch.run
+         that can race Eio.Mutex.use_rw ~protect:true cleanup.
+         Each emit is independent HTTP POST; parallelism is unnecessary here.
+         See Eio.Cancel.protect docs: cancellation can bypass protect-style
+         cleanup in concurrent fiber forks. *)
       let now = Mtime_clock.now () in
-      Fiber.fork ~sw @@ emit_logs_maybe ~now ~force;
-      Fiber.fork ~sw @@ emit_metrics_maybe ~now ~force;
-      Fiber.fork ~sw @@ emit_traces_maybe ~now ~force
+      emit_logs_maybe ~now ~force ();
+      emit_metrics_maybe ~now ~force ();
+      emit_traces_maybe ~now ~force ()
     ;;
 
     let on_tick_cbs_ = Atomic.make (AList.make ())

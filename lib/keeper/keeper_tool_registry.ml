@@ -286,7 +286,7 @@ let injected_masc_tool_names () =
 
 (** SSOT schema for keeper_tool_search.  Defined here because this is
     the keeper tool registry — the canonical owner of keeper-internal tool
-    metadata.  Consumed by [keeper_tool_policy.keeper_default_model_tools]. *)
+    metadata. *)
 let keeper_tool_search_schema : Masc_domain.tool_schema =
   { name = Keeper_tool_name.to_string Keeper_tool_name.Tool_search
   ; description =

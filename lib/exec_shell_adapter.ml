@@ -1,7 +1,7 @@
 (** Shared helpers for shell-like tool frontends after command policy has
     already accepted a command and produced Shell IR. *)
 
-let shell_ir_with_default_cwd cwd ir =
+let shell_ir_with_default_cwd ?container_cwd cwd ir =
   match cwd with
   | None -> ir
   | Some dir ->

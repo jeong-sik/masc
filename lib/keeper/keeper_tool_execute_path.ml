@@ -113,7 +113,7 @@ let normalize_command_name command_name =
   then String.sub command_name 0 (String.length command_name - String.length ".exe")
   else command_name
 
-let git_subcommand args =
+let git_subcommand_with_args args =
   let rec scan = function
     | [] -> None
     | ("-C" | "-c" | "--git-dir" | "--work-tree" | "--namespace") :: _value :: rest ->
@@ -127,9 +127,12 @@ let git_subcommand args =
            || String.starts_with ~prefix:"--namespace=" arg ->
       scan rest
     | arg :: rest when String.starts_with ~prefix:"-" arg -> scan rest
-    | subcommand :: _ -> Some (String.lowercase_ascii subcommand)
+    | subcommand :: rest -> Some (String.lowercase_ascii subcommand, rest)
   in
   scan args
+
+let git_subcommand args =
+  Option.map fst (git_subcommand_with_args args)
 
 let git_subcommand_is_direct_repo_diagnostic = function
   | "status" | "branch" | "log" | "diff" | "remote" | "rev-parse" | "fetch"
@@ -145,17 +148,167 @@ let direct_repo_diagnostic_command ir =
     | None -> false)
   | _ -> false
 
-let repo_currency_not_ready_error ~repo_name ~reason ~cwd =
+let simple_relative_git_pathspec path =
+  let path = String.trim path in
+  path <> ""
+  && path <> ".."
+  && Filename.is_relative path
+  && not (String.starts_with ~prefix:"-" path)
+  && not (String.contains path '\x00')
+  && not
+       (path
+        |> String.split_on_char '/'
+        |> List.exists (fun segment -> String.equal segment ".."))
+
+let drop_git_quiet_flags args =
+  let rec loop = function
+    | ("-q" | "--quiet") :: rest -> loop rest
+    | rest -> rest
+  in
+  loop args
+
+let git_checkout_head_restore_args args =
+  match drop_git_quiet_flags args with
+  | ("HEAD" | "@") :: "--" :: paths ->
+    paths <> [] && List.for_all simple_relative_git_pathspec paths
+  | _ -> false
+
+let git_reset_hard_head_args args =
+  let rec loop ~hard ~target = function
+    | [] ->
+      hard
+      &&
+      (match target with
+       | None | Some "HEAD" | Some "@" -> true
+       | Some _ -> false)
+    | ("-q" | "--quiet") :: rest -> loop ~hard ~target rest
+    | "--hard" :: rest -> loop ~hard:true ~target rest
+    | "--" :: _ -> false
+    | arg :: _ when String.starts_with ~prefix:"-" arg -> false
+    | arg :: rest -> (
+      match target with
+      | None -> loop ~hard ~target:(Some arg) rest
+      | Some _ -> false)
+  in
+  loop ~hard:false ~target:None args
+
+let git_clean_short_flags_allowed arg =
+  let len = String.length arg in
+  len > 1
+  &&
+  let rec loop i ~force ~dir =
+    if i >= len then Some (force, dir)
+    else
+      match arg.[i] with
+      | 'f' -> loop (i + 1) ~force:true ~dir
+      | 'd' -> loop (i + 1) ~force ~dir:true
+      | 'q' -> loop (i + 1) ~force ~dir
+      | _ -> None
+  in
+  match loop 1 ~force:false ~dir:false with
+  | Some _ -> true
+  | None -> false
+
+let git_clean_recovery_args args =
+  let rec loop ~force ~dir = function
+    | [] -> force && dir
+    | "--" :: [] -> force && dir
+    | "--force" :: rest -> loop ~force:true ~dir rest
+    | "--dir" :: rest -> loop ~force ~dir:true rest
+    | "--quiet" :: rest -> loop ~force ~dir rest
+    | arg :: rest
+      when String.starts_with ~prefix:"-" arg && git_clean_short_flags_allowed arg ->
+      let force = force || String.contains arg 'f' in
+      let dir = dir || String.contains arg 'd' in
+      loop ~force ~dir rest
+    | _ -> false
+  in
+  loop ~force:false ~dir:false args
+
+let readonly_git_recovery_command ~config ~meta ~cwd ir =
+  match repo_path_context ~config ~meta cwd with
+  | None -> false
+  | Some _ -> (
+    match Keeper_tool_execute_command_semantics.effective_stages_of_ir ir with
+    | [ stage ] when String.equal (normalize_command_name stage.bin) "git" -> (
+      match git_subcommand_with_args stage.args with
+      | Some ("checkout", args) -> git_checkout_head_restore_args args
+      | Some ("reset", args) -> git_reset_hard_head_args args
+      | Some ("clean", args) -> git_clean_recovery_args args
+      | _ -> false)
+    | _ -> false)
+
+let cascade_restore_paths =
+  [ "config/cascade.toml"; "test/fixtures/cascade-phonebook.toml" ]
+
+let parse_porcelain_change line =
+  let line = String.trim line in
+  let len = String.length line in
+  if len = 0 then None
+  else if String.starts_with ~prefix:"D  " line && len > 3
+  then Some (`Deleted, String.sub line 3 (len - 3))
+  else if String.starts_with ~prefix:"D " line && len > 2
+  then Some (`Deleted, String.sub line 2 (len - 2))
+  else if len > 3 && Char.equal line.[1] 'D' && Char.equal line.[2] ' '
+  then Some (`Deleted, String.sub line 3 (len - 3))
+  else Some (`Other, line)
+
+let cascade_only_status_hint ~config ~meta ~repo_name =
+  let clone_path = Playground_repo_readiness.clone_path ~config ~meta ~repo_name in
+  let status =
+    Playground_repo_readiness.run_git
+      ~timeout_sec:Playground_repo_readiness.read_only_probe_timeout_sec
+      ~clone_path
+      [ "status"; "--porcelain" ]
+  in
+  if not status.ok then None
+  else
+    let changes =
+      status.output
+      |> String.split_on_char '\n'
+      |> List.filter_map parse_porcelain_change
+    in
+    match changes with
+    | [] -> None
+    | changes ->
+      let deleted_paths =
+        List.filter_map
+          (function
+            | `Deleted, path -> Some path
+            | `Other, _ -> None)
+          changes
+      in
+      if
+        List.length deleted_paths = List.length changes
+        && List.for_all
+             (fun path -> List.mem path cascade_restore_paths)
+             deleted_paths
+      then
+        Some
+          (Printf.sprintf
+             " Dirty status only contains deleted legacy cascade fixtures: %s. \
+              Restore them with: git checkout HEAD -- %s"
+             (String.concat "; " (List.map (fun p -> "D " ^ p) deleted_paths))
+             (String.concat " " deleted_paths))
+      else None
+
+let repo_currency_not_ready_error ~config ~meta ~repo_name ~reason ~cwd =
+  let hint =
+    match cascade_only_status_hint ~config ~meta ~repo_name with
+    | Some hint -> hint
+    | None -> ""
+  in
   Printf.sprintf
     "sandbox_repo_stale: sandbox repo root repos/%s is not current and was \
      preserved (%s). Direct repo-root Execute is blocked so the agent does not \
      run against stale local state. Use cwd=\"repos/%s/.worktrees/<task>\" for \
      task work, or run diagnostic git status/branch/log/diff/remote/rev-parse/\
      fetch/worktree and clean, stash, or repair the sandbox repo root before \
-     retrying. cwd=%s"
+     retrying.%s cwd=%s"
     repo_name
     reason
     repo_name
+    hint
     cwd
 
 let validate_repo_cwd_currency_ready
@@ -173,15 +326,20 @@ let validate_repo_cwd_currency_ready
               (normalize_repo_cwd_path path_root)) ->
     Ok ()
   | Some (repo_name, _repo_root, _path_root, _accepted_toplevels) ->
-    if direct_repo_diagnostic_command ir then Ok ()
+    if
+      direct_repo_diagnostic_command ir
+      || readonly_git_recovery_command ~config ~meta ~cwd ir
+    then Ok ()
     else
       match repo_currency_outcome_best_effort ~config ~meta ~repo_name with
       | Some Playground_repo_readiness.Up_to_date | Some (Advanced _) -> Ok ()
       | Some (Preserved reason) | Some (Skipped reason) ->
-        Error (repo_currency_not_ready_error ~repo_name ~reason ~cwd)
+        Error (repo_currency_not_ready_error ~config ~meta ~repo_name ~reason ~cwd)
       | None ->
         Error
           (repo_currency_not_ready_error
+             ~config
+             ~meta
              ~repo_name
              ~reason:"currency probe failed"
              ~cwd)

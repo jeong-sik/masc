@@ -471,6 +471,12 @@ let handle_tool_execute_typed
         else if (not write_enabled)
              && (Masc_exec.Shell_ir_risk.is_r1 envelope
                 || Masc_exec.Shell_ir_risk.is_r2 envelope)
+             && not
+                  (Keeper_tool_execute_path.readonly_git_recovery_command
+                     ~config
+                     ~meta
+                     ~cwd
+                     ir)
         then
           blocked_result
             ~deterministic_reason:Keeper_tool_deterministic_error.Write_operation_gated

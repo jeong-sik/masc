@@ -1,6 +1,6 @@
 ---
 status: runbook
-last_verified: 2026-05-12
+last_verified: 2026-06-05
 code_refs:
   - lib/core/masc_runtime_events.ml
   - lib/keeper/keeper_event_bridge.ml

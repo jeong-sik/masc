@@ -119,7 +119,11 @@ let repo_checkout_not_ready_error
       ~git_toplevel
       ~git_error
   =
-  let git_toplevel = Option.value ~default:"<none>" git_toplevel in
+  let git_toplevel =
+    match git_toplevel with
+    | Some top -> top
+    | None -> "<none>"
+  in
   if path_is_worktree
   then
     Printf.sprintf

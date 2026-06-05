@@ -446,6 +446,14 @@ module Backend (Emitter : EMITTER) : Opentelemetry.Collector.BACKEND = struct
   let set_on_tick_callbacks = Emitter.set_on_tick_callbacks
 end
 
+let stop_tick_after_poisoned_mutex ~stop cause =
+  Atomic.set stop true;
+  Log.Telemetry.error
+    "otel tick failed with Eio.Mutex.Poisoned; stopping tick fiber; OTEL metrics \
+     export degraded until backend restart; underlying cause: %s"
+    (Printexc.to_string cause)
+;;
+
 let create_backend ~sw ?(stop = Atomic.make false) ?(config = Config.make ()) env
   : (module OT.Collector.BACKEND)
   =
@@ -456,10 +464,7 @@ let create_backend ~sw ?(stop = Atomic.make false) ?(config = Config.make ()) en
       Eio.Time.sleep env#clock 0.5;
       try B.tick () with
       | Eio.Cancel.Cancelled _ as e -> raise e
-      | Eio.Mutex.Poisoned cause ->
-        Log.Telemetry.error
-          "otel tick failed with Eio.Mutex.Poisoned; underlying cause: %s"
-          (Printexc.to_string cause)
+      | Eio.Mutex.Poisoned cause -> stop_tick_after_poisoned_mutex ~stop cause
       | exn -> Log.Telemetry.warn "otel tick failed: %s" (Printexc.to_string exn)
     done);
   (module B)

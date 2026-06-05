@@ -1533,6 +1533,8 @@
 (include stanzas/test_operator_mcp_e2e.inc)
 
 
+(include stanzas/test_otel_tick_poison_source.inc)
+
 (include stanzas/test_otel_trace_context.inc)
 
 (include stanzas/test_personality_diff_summary_10269.inc)

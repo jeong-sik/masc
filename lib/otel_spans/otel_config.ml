@@ -1,12 +1,12 @@
 (** OTel Configuration — reads environment variables for OpenTelemetry setup.
 
-    Feature-flagged via [MASC_OTEL_ENABLED] (default: false).
-    When disabled, all span operations are no-ops with zero allocation. *)
+    Feature-flagged via [MASC_OTEL_ENABLED] (default: true).
+    When explicitly disabled, all span operations are no-ops with zero allocation. *)
 
 let enabled =
   match Sys.getenv_opt "MASC_OTEL_ENABLED" with
-  | Some "true" | Some "1" -> true
-  | _ -> false
+  | Some "false" | Some "0" -> false
+  | _ -> true
 
 let endpoint =
   Sys.getenv_opt "OTEL_EXPORTER_OTLP_ENDPOINT"

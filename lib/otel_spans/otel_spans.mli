@@ -12,6 +12,14 @@ val init : unit -> unit
 (** [is_exporter_active ()] reports whether an OTLP exporter backend is registered. *)
 val is_exporter_active : unit -> bool
 
+(** [last_successful_export ()] returns the Unix timestamp of the last
+    successful export, or [None] if the exporter has never been active. *)
+val last_successful_export : unit -> float option
+
+(** [consecutive_failures ()] returns the number of consecutive health check
+    or export failures since the last successful connection. *)
+val consecutive_failures : unit -> int
+
 (** Setup OTLP exporter with a custom setup thunk.
     No-op when [enabled=false]. Sets [is_exporter_active] accordingly. *)
 val setup_exporter_with :

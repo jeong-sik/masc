@@ -865,10 +865,6 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
   let result = make_response ~id (`Assoc result_fields) in
 
   maybe_emit_resource_notifications ~success ~tool_name:name;
-  if success
-     && List.mem name [ "masc_tool_admin_update" ]
-  then
-    broadcast_tools_list_changed ();
 
   (* Log result *)
   let preview =

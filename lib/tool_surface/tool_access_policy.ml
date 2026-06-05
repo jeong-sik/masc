@@ -104,17 +104,14 @@ let allows_name policy name =
   selector_matches_name policy.allow name
   && not (selector_matches_name policy.deny name)
 
-(* Union of every curated tool-name list.  Replaces the former
+(* Union of actor-facing and system-internal curated tool-name lists.  Replaces the former
    [all_surfaces |> concat_map tools_for_surface] iteration over the deleted
-   [surface] type.  The name set matches the pre-refactor base: the 5 actor
-   lists plus [system_internal_hidden] (which was the former System_internal
-   surface, included in [all_surfaces] at base).  normalize_names dedupes. *)
+   [surface] type.  normalize_names dedupes. *)
 let default_candidates () =
   ( Tool_catalog_surfaces.public_mcp_surface_tools
   @ Tool_catalog_surfaces.spawned_agent_surface_tools
   @ Tool_catalog_surfaces.local_worker_surface_tools
   @ Tool_catalog_surfaces.session_min_surface_tools
-  @ Tool_catalog_surfaces.admin_surface_tools
   @ Tool_catalog_surfaces.system_internal_hidden )
   |> normalize_names
 

@@ -27,5 +27,5 @@ val to_json_filtered :
     single entry whose key equals [cat] (case-sensitive). When
     [cat] is omitted or names a missing category, the [categories]
     object is empty for the latter case and unchanged from
-    {!to_json} for the former. Used by [tool_misc_admin] for the
-    operator [/admin/config?cat=...] endpoint. *)
+    {!to_json} for the former. Used by [tool_misc_introspection] for
+    the operator [/admin/config?cat=...] endpoint. *)

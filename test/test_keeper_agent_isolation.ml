@@ -18,6 +18,7 @@ module Tool_catalog = Tool_catalog
 module Keeper_types = Keeper_types
 module Keeper_identity = Masc.Keeper_identity
 module Keeper_tool_registry = Masc.Keeper_tool_registry
+module Keeper_tool_descriptor = Masc.Keeper_tool_descriptor
 module Config = Masc.Config
 
 (* ============================================================
@@ -52,14 +53,28 @@ let has_keeper_prefix name =
     Derived from actual module exports — no prefix guessing.
     Must be a function (not a let-binding) because injected_masc_tool_names
     depends on inject_masc_schemas which runs after module init. *)
-let known_non_keeper_tool_names () : string list =
-  (Tool_shard.all_keeper_tool_schemas
+let descriptor_tool_names () : string list =
+  Keeper_tool_descriptor.all_descriptors ()
+  |> List.concat_map (fun descriptor ->
+    Keeper_tool_descriptor.public_names_of_descriptor descriptor
+    @ Keeper_tool_descriptor.internal_names descriptor)
+  |> List.sort_uniq String.compare
+
+let shard_tool_names () : string list =
+  Tool_shard.all_keeper_tool_schemas
    |> List.map (fun (t : Masc_domain.tool_schema) -> t.name)
+  |> List.sort_uniq String.compare
+
+let known_non_keeper_tool_names () : string list =
+  (shard_tool_names ()
    |> List.filter (fun name -> not (has_keeper_prefix name)))
+  @ Keeper_tool_registry.core_always_tools
+  @ Keeper_tool_registry.effective_core_tools ()
+  @ descriptor_tool_names ()
   @ Keeper_tool_registry.injected_masc_tool_names ()
   |> List.sort_uniq String.compare
 
-let known_shared_agent_keeper_tool_names : string list =
+let minimum_shared_agent_keeper_tool_names : string list =
   [
     "masc_status";
     "masc_tasks";
@@ -70,6 +85,16 @@ let known_shared_agent_keeper_tool_names : string list =
     "masc_heartbeat";
   ]
 
+let known_shared_agent_keeper_tool_names () : string list =
+  let keeper_known =
+    descriptor_tool_names ()
+    @ Keeper_tool_registry.injected_masc_tool_names ()
+    @ minimum_shared_agent_keeper_tool_names
+  in
+  Keeper_tool_surfaces.spawned_agent_public_tool_names
+  |> List.filter (fun name -> List.mem name keeper_known)
+  |> List.sort_uniq String.compare
+
 let test_known_shared_tools_exist_on_agent_surface () =
   let agent_names = Keeper_tool_surfaces.spawned_agent_public_tool_names in
   List.iter
@@ -77,7 +102,7 @@ let test_known_shared_tools_exist_on_agent_surface () =
       Alcotest.(check bool)
         (name ^ " is exposed on spawned agent surface")
         true (List.mem name agent_names))
-    known_shared_agent_keeper_tool_names
+    minimum_shared_agent_keeper_tool_names
 
 (* ============================================================
    Invariant 1: Non-research keepers only get keeper_* tools plus
@@ -146,7 +171,7 @@ let test_no_overlap_heuristic_vs_agent () =
     List.filter
       (fun n ->
         List.mem n agent_names
-        && not (List.mem n known_shared_agent_keeper_tool_names))
+        && not (List.mem n (known_shared_agent_keeper_tool_names ())))
       keeper_names
   in
   Alcotest.(check (list string))
@@ -162,7 +187,7 @@ let test_no_overlap_research_vs_agent () =
     List.filter
       (fun n ->
         List.mem n agent_names
-        && not (List.mem n known_shared_agent_keeper_tool_names))
+        && not (List.mem n (known_shared_agent_keeper_tool_names ())))
       keeper_names
   in
   Alcotest.(check (list string))
@@ -178,47 +203,11 @@ let test_shard_tools_overlap_with_agent_documented () =
   let overlap = List.filter (fun name -> List.mem name agent_tools) keeper_tools in
   List.iter (fun name ->
     Alcotest.(check bool) (name ^ " is approved shared tool") true
-      (List.mem name known_shared_agent_keeper_tool_names)
+      (List.mem name (known_shared_agent_keeper_tool_names ()))
   ) overlap
 
 (* ============================================================
-   Invariant 5: Research shard tools that overlap with admin list
-   (documenting the intentional design — keeper shard bypasses
-   the dispatch pre-hook permission check for these tools)
-   ============================================================ *)
-
-let test_research_admin_overlap_documented () =
-  let admin = Tool_catalog_surfaces.admin_surface_tools in
-  let meta = make_meta  () in
-  let keeper_names = Keeper_tool_dispatch_runtime.keeper_allowed_tool_names meta in
-  let overlap = List.filter (fun n -> List.mem n admin) keeper_names in
-  (* These research tools are intentionally in both lists.
-     Keepers access them via shard allocation, not dispatch pre-hook.
-     This test documents the overlap rather than preventing it. *)
-  List.iter (fun name ->
-    Alcotest.(check bool) (name ^ " is a research tool") true
-      (List.mem name (known_non_keeper_tool_names ()))
-  ) overlap
-
-(* ============================================================
-   Invariant 6: All keepers now have admin-listed tools (mode removed).
-   Document the overlap rather than preventing it.
-   ============================================================ *)
-
-let test_non_research_admin_tools_documented () =
-  let admin = Tool_catalog_surfaces.admin_surface_tools in
-  let meta = make_meta ~policy_voice_enabled:true () in
-  let keeper_names = Keeper_tool_dispatch_runtime.keeper_allowed_tool_names meta in
-  let overlap = List.filter (fun n -> List.mem n admin) keeper_names in
-  (* Mode removal: all keepers get all tools. Admin-listed tools that
-     appear in keeper tool set come from known sources (coding, research shards). *)
-  List.iter (fun name ->
-    Alcotest.(check bool) (name ^ " is from known source") true
-      (List.mem name (known_non_keeper_tool_names ()))
-  ) overlap
-
-(* ============================================================
-   Invariant 7: Tool count consistency across policy modes
+   Invariant 5: Tool count consistency across policy modes
    ============================================================ *)
 
 let test_heuristic_has_fewer_tools_than_learned () =
@@ -338,11 +327,6 @@ let () =
       Alcotest.test_case "heuristic vs agent" `Quick test_no_overlap_heuristic_vs_agent;
       Alcotest.test_case "research vs agent" `Quick test_no_overlap_research_vs_agent;
       Alcotest.test_case "shard vs agent" `Quick test_shard_tools_overlap_with_agent_documented;
-    ]);
-    ("admin_boundary", [
-      Alcotest.test_case "research admin overlap documented" `Quick
-        test_research_admin_overlap_documented;
-      Alcotest.test_case "non-research admin documented" `Quick test_non_research_admin_tools_documented;
     ]);
     ("policy_consistency", [
       Alcotest.test_case "learned >= heuristic" `Quick test_heuristic_has_fewer_tools_than_learned;

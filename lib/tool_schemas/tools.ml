@@ -24,12 +24,10 @@ let raw_schemas : tool_schema list =
   Tool_schemas_workspace_core.schemas
   @ Tool_schemas_workspace_extra.schemas
   @ Tool_schemas_inline.schemas
-  (* Tool_schemas_plan.schemas moved into Tool_descriptors_gen
-     (Tool_schemas_misc.schemas chain) via RFC-0057 PR-2 *)
   @ Tool_schemas_agent.schemas
-  @ Tool_run.schemas
-  @ Task.Tool.schemas
-  @ Tool_library.schemas
+  @ Tool_schemas_run.schemas
+  @ Masc_task_handlers.Tool_task_schemas.schemas
+  @ Tool_schemas_library.schemas
 
 let all_schemas : tool_schema list = raw_schemas
 
@@ -37,7 +35,7 @@ let all_schemas : tool_schema list = raw_schemas
 let all_schemas_extended =
   (all_schemas
    @ Tool_schemas_misc.schemas
-   @ Tool_local_runtime.schemas @ Tool_shard.schemas)
+   @ Tool_schemas_local_runtime.schemas @ Tool_shard_schemas.schemas)
   |> dedupe_schemas_by_name
 
 (** Get tool by name *)

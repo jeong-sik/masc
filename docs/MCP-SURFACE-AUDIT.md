@@ -74,7 +74,7 @@ flowchart TD
   MCP --> RL[resources/list read templates]
 
   TL --> Canon[Canonical tool surface]
-  TL --> Hidden[Hidden/admin tools not listed]
+  TL --> Hidden[Hidden/internal tools not listed]
 
   Canon --> Core[Namespace task keeper runtime]
   Canon --> Ecosystem[keeper always-on autonomy]
@@ -168,7 +168,7 @@ flowchart TD
 | Question | Best Source |
 |---------|-------------|
 | What tools are truly public? | `tools/list` plus [README.md](../README.md) |
-| What hidden or deprecated tools still exist? | `masc_tool_admin_snapshot`, `masc_tool_help`, `Tool_catalog` |
+| What hidden or deprecated tools still exist? | `masc_tool_help`, `Tool_catalog` |
 | What prompts are public MCP prompts? | `prompts/list`, [mcp_prompt_surface.ml](../lib/mcp_prompt_surface.ml) |
 | What prompt templates exist internally? | `data/prompts/`, `config/prompts/`, `Prompt_registry` |
 | What resources exist? | `resources/list`, `resources/templates/list`, [mcp_server.ml](../lib/mcp_server.ml) |

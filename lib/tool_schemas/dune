@@ -13,6 +13,9 @@
   tool_schemas_inline_episodes
   tool_schemas_inline
   tool_schemas_run
+  tool_schemas_library
+  tool_schemas_local_runtime
+  tools
   ;; RFC-0057 Phase 0 — emitted by bin/gen_tool_descriptors.ml via the
   ;; (rule ...) below. Lives in the same module namespace as the
   ;; hand-written tool_schemas_*.ml so consumers can reach it as
@@ -22,7 +25,7 @@
  ; RFC-0071 §3.4 Phase 5 ratchet (warning 4)
  (flags
   (:standard -w +4))
- (libraries masc_types))
+ (libraries masc_types masc_core masc.task_handlers masc.masc_tool_surface))
 
 ;; RFC-0057 Phase 0 — capture bin/gen_tool_descriptors.exe stdout into
 ;; tool_descriptors_gen.ml. %{exe:...} gives dune the build-graph dep

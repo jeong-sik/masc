@@ -47,7 +47,7 @@ Make `Agent_tool_descriptor.t` the single source of truth for *visibility and me
 
 - `Tool_catalog_surfaces.public_mcp_surface_tools` is computed as
   `filter (fun d -> d.policy.visibility = Public_mcp) all_descriptors`.
-- Every entry on every surface (`public_mcp_surface_tools`, `spawned_agent_surface_tools`, `local_worker_surface_tools`, `session_min_surface_tools`, `admin_surface_tools`) has a descriptor.
+- Every entry on every surface (`public_mcp_surface_tools`, `spawned_agent_surface_tools`, `local_worker_surface_tools`, `session_min_surface_tools`) has a descriptor.
 - Dispatch routing remains opt-in: descriptors whose execution lives in `Mcp_tool_runtime` declare `executor = External_inline` and `runtime_handler = Tool_external_inline`, and the descriptor dispatcher returns `None` for them, leaving the inline path unchanged.
 - The surface↔descriptor diff becomes a compile-/test-time invariant (Phase 4).
 

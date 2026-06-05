@@ -246,60 +246,6 @@ let manual_help_entry name =
           examples = [ "status='todo' include_done=false limit=20" ];
           alternatives = [];
         }
-  | "masc_tool_admin_snapshot" ->
-      Some
-        {
-          name;
-          short_description =
-            "Return a unified admin snapshot covering tool inventory, auth, and command-plane policy surfaces.";
-          when_to_use =
-            "Use when you need one truthful view of what tools exist, what is visible, what auth/RBAC applies, and which policy surfaces are enforced versus advisory.";
-          key_constraints =
-            [
-              "Tool catalog visibility metadata is read-only in this snapshot.";
-              "Command-plane tool/model allowlists now constrain unit routing and assignment via tagged capabilities, but they do not yet hard-stop every per-tool worker invocation.";
-            ];
-          details_markdown =
-            "Provides a namespace-scoped control snapshot: auth config and credentials, command-plane policy topology, and the full tool inventory with metadata and permission hints.";
-          doc_refs =
-            [
-              "docs/COMMAND-PLANE-RUNBOOK.md";
-              "docs/SUPERVISOR-MODE.md";
-            ];
-          prompt_hints =
-            [
-              "Use before changing auth or unit policy to confirm what is actually enforced.";
-            ];
-          examples = [];
-          alternatives = [];
-        }
-  | "masc_tool_admin_update" ->
-      Some
-        {
-          name;
-          short_description =
-            "Apply auth or unit-policy updates through a single admin entrypoint.";
-          when_to_use =
-            "Use when you need to change auth settings.";
-          key_constraints =
-            [
-              (* Issue #8546: trimmed to current handler capability. *)
-              "Section must be: auth.";
-              "Unit tool/model allowlist plumbing is tracked separately and not yet exposed through this entrypoint.";
-            ];
-          details_markdown =
-            "Delegates to the existing truthful write paths: Config mode updates, Auth config persistence, and managed-operation unit policy updates. Command-plane unit policy now feeds routing/assignment gates; deeper worker-runtime enforcement remains a separate step.";
-          doc_refs =
-            [
-              "docs/COMMAND-PLANE-RUNBOOK.md";
-            ];
-          prompt_hints =
-            [
-              "Run masc_tool_admin_snapshot first, then apply the smallest necessary section update.";
-            ];
-          examples = [ "section='auth'" ];
-          alternatives = [];
-        }
   | "masc_plan_set_task" ->
       Some
         {

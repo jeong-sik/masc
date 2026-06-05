@@ -1,7 +1,7 @@
 (** Tool_schemas_misc — Tool schemas for [Tool_misc],
     separated to break the [Config] dependency cycle.
 
-    All 4 entries are SSOT mirrors of producer-side string
+    The enum lists are SSOT mirrors of producer-side string
     lists.  Adding / removing values requires synchronized
     updates at the SSOT (which lives in a downstream module
     that cannot be referenced here without re-introducing the
@@ -12,20 +12,9 @@
       [Dashboard.valid_scope_strings]
     - [test_types.ml :: config_category_ssot] —
       {!config_category_enum_strings} vs
-      [Env_config_snapshot.valid_config_category_strings]
-    - Issue #8546 — {!admin_section_enum_strings} vs
-      [Tool_misc_admin.valid_admin_section_strings] *)
+      [Env_config_snapshot.valid_config_category_strings] *)
 
 (** {1 Enum string mirrors (SSOT)} *)
-
-val admin_section_enum_strings : string list
-(** Mirror of [Tool_misc_admin.valid_admin_section_strings]
-    (issue #8546).  Currently [\["auth"\]] — drift would
-    re-introduce the schema-vs-handler mismatch where the
-    schema advertised values the handler did not implement,
-    causing [section must be one of: auth] errors for LLM
-    clients following the schema.  Pinned at the contract
-    seam — same cycle pattern as #8484 / #8490 / #8493. *)
 
 val dashboard_scope_enum_strings : string list
 (** Mirror of [Dashboard.valid_scope_strings] (issue #8592).
@@ -56,6 +45,6 @@ val schemas : Masc_domain.tool_schema list
     [Tool_misc] for Tool_spec registration. Public-surface exclusion is
     enforced downstream by {!Tool_catalog.is_public_mcp} /
     [public_mcp_surface_tools], not by trimming this inventory. The schema
-    [enum] fields derive from {!admin_section_enum_strings} /
-    {!dashboard_scope_enum_strings} / {!config_category_enum_strings} so
+    [enum] fields derive from {!dashboard_scope_enum_strings} /
+    {!config_category_enum_strings} so
     adding a value updates the schema automatically. *)

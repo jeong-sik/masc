@@ -15,6 +15,8 @@
     label shape so a future refactor cannot silently flip the
     cardinality or rename the labels. *)
 
+open Masc
+
 let () =
   let dir =
     Filename.concat

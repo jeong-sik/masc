@@ -178,9 +178,8 @@ let test_tools_of_shards_unknown_ignored () =
 
 let test_keeper_model_tools_count () =
   let tools = Tool_shard.keeper_model_tools in
-  (* keeper_model_tools = default shards plus unsharded default tools.
-     Standalone keeper schemas (keeper_tool_search) are added downstream
-     in keeper_tool_policy.keeper_default_model_tools, not here. *)
+  (* keeper_model_tools = default shards plus unsharded execute tools.
+     Standalone keeper schemas are assembled by keeper_tool_policy, not here. *)
   let expected =
     Tool_shard.tools_of_shards Tool_shard.default_shard_names
 	    @ Tool_shard_types.typed_execute_tools

@@ -56,15 +56,19 @@ val create_context : task_id:string -> planning_context
 val init :
   Workspace_core.config -> task_id:string -> (planning_context, string) result
 (** [init config ~task_id] creates the planning directory and an
-    empty Markdown skeleton.  Returns [Error _] when the directory
-    already has content. *)
+    empty Markdown skeleton. *)
 
 val load :
   Workspace_core.config -> task_id:string -> (planning_context, string) result
-(** [load config ~task_id] reads the persisted planning markdown
-    and parses sections via the internal markdown parser.  Returns
-    [Error _] when the directory does not exist or the markdown
-    is malformed. *)
+(** [load config ~task_id] reads the persisted planning context JSON.
+    Returns [Error _] when [context.json] does not exist or is malformed. *)
+
+val load_or_init :
+  Workspace_core.config -> task_id:string -> (planning_context, string) result
+(** [load_or_init config ~task_id] reads the persisted planning context,
+    creating a scaffold when [context.json] is missing.  Existing
+    [task_plan.md] and [deliverable.md] content is recovered into the new
+    context; existing malformed context still returns [Error _]. *)
 
 val update_plan :
   Workspace_core.config ->

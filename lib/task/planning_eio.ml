@@ -53,6 +53,8 @@ let create_context ~task_id =
 let planning_dir (config : Workspace.config) task_id =
   Filename.concat config.base_path (Printf.sprintf "planning/%s" task_id)
 
+let context_path config task_id = Filename.concat (planning_dir config task_id) "context.json"
+
 (** File read via Fs_compat (Eio-native when available, blocking fallback) *)
 let read_file_content path =
   if Fs_compat.file_exists path then
@@ -63,6 +65,13 @@ let read_file_content path =
 let write_file_content path content =
   Fs_compat.mkdir_p (Filename.dirname path);
   Fs_compat.save_file path content
+
+let write_file_if_missing path content =
+  if not (Fs_compat.file_exists path) then write_file_content path content
+
+let read_non_skeleton path skeleton =
+  let value = String.trim (read_file_content path) in
+  if String.equal value skeleton then "" else value
 
 let find_substring_from haystack ~needle ~from =
   if from > String.length haystack then None
@@ -137,11 +146,27 @@ let init (config : Workspace.config) ~task_id : (planning_context, string) resul
   | Eio.Cancel.Cancelled _ as e -> raise e
   | e -> Error (Printexc.to_string e)
 
+let init_missing (config : Workspace.config) ~task_id : (planning_context, string) result =
+  try
+    let dir = planning_dir config task_id in
+    Fs_compat.mkdir_p dir;
+    write_file_if_missing (Filename.concat dir "task_plan.md") "# Task Plan\n\n";
+    write_file_if_missing (Filename.concat dir "notes.md") "# Notes & Observations\n\n";
+    write_file_if_missing (Filename.concat dir "errors.md") "# Errors & Failures (PDCA Check)\n\n";
+    write_file_if_missing (Filename.concat dir "deliverable.md") "";
+    let task_plan = read_non_skeleton (Filename.concat dir "task_plan.md") "# Task Plan" in
+    let deliverable = String.trim (read_file_content (Filename.concat dir "deliverable.md")) in
+    let ctx = { (create_context ~task_id) with task_plan; deliverable } in
+    write_file_content (context_path config task_id) (Yojson.Safe.pretty_to_string (planning_context_to_yojson ctx));
+    Ok ctx
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e -> Error (Printexc.to_string e)
+
 (** Load planning context *)
 let load (config : Workspace.config) ~task_id : (planning_context, string) result =
   try
-    let dir = planning_dir config task_id in
-    let ctx_path = Filename.concat dir "context.json" in
+    let ctx_path = context_path config task_id in
     if not (Sys.file_exists ctx_path) then
       Error (Printf.sprintf "Planning context not found for task %s" task_id)
     else begin
@@ -153,11 +178,17 @@ let load (config : Workspace.config) ~task_id : (planning_context, string) resul
   | Eio.Cancel.Cancelled _ as e -> raise e
   | e -> Error (Printexc.to_string e)
 
+(** Load planning context, creating an empty scaffold when it has not been
+    initialized yet. Malformed existing context still fails loudly. *)
+let load_or_init (config : Workspace.config) ~task_id : (planning_context, string) result =
+  if Sys.file_exists (context_path config task_id) then load config ~task_id
+  else init_missing config ~task_id
+
 (** Update task plan *)
 let update_plan (config : Workspace.config) ~task_id ~content : (planning_context, string) result =
   try
     let dir = planning_dir config task_id in
-    match load config ~task_id with
+    match load_or_init config ~task_id with
     | Error e -> Error e
     | Ok ctx ->
         let parsed = parse_full_context_markdown content in
@@ -188,7 +219,7 @@ let update_plan (config : Workspace.config) ~task_id ~content : (planning_contex
 let add_note (config : Workspace.config) ~task_id ~note : (planning_context, string) result =
   try
     let dir = planning_dir config task_id in
-    match load config ~task_id with
+    match load_or_init config ~task_id with
     | Error e -> Error e
     | Ok ctx ->
         let timestamp = Masc_domain.now_iso () in

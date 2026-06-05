@@ -1140,7 +1140,8 @@ let internal_descriptors : t list =
   ; masc_plan_descriptor "update" "masc_plan_update"
       "Update a workspace plan." ~readonly:false
   ; masc_plan_descriptor "get" "masc_plan_get"
-      "Read the current plan." ~readonly:true
+      "Read the current plan, creating an empty planning context when missing."
+      ~readonly:false
   ; masc_plan_descriptor "set_task" "masc_plan_set_task"
       "Bind a task to a plan slot." ~readonly:false
   ; masc_plan_descriptor "get_task" "masc_plan_get_task"

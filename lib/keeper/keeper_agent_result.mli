@@ -39,21 +39,8 @@ val tool_call_detail_to_json : tool_call_detail -> Yojson.Safe.t
     the public surface is exposed under [Keeper_agent_run.mli]. *)
 
 val tool_names_of_calls : tool_call_detail list -> string list
-val synthetic_tool_call_detail :
-  ?provider:string ->
-  ?outcome:string ->
-  ?route_evidence:Yojson.Safe.t ->
-  string ->
-  tool_call_detail
 val tool_names : run_result -> string list
 val tool_call_count : run_result -> int
-val append_synthetic_tool_call :
-  ?provider:string ->
-  ?outcome:string ->
-  ?route_evidence:Yojson.Safe.t ->
-  string ->
-  run_result ->
-  run_result
 
 val runtime_lane_label : string
 (** Boundary-redacted label used wherever MASC's keeper metrics surface

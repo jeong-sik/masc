@@ -31,10 +31,11 @@ repo_root = pathlib.Path(sys.argv[1])
 matrix_file = pathlib.Path(sys.argv[2])
 
 scope_re = re.compile(
-    r"^lib/keeper/(?:keeper_tool_[^/]*_runtime|keeper_tool_execute_[^/]*|keeper_(?:gh|hooks|sandbox|exec|shell|tool|tools)[^/]*)\.mli?$"
+    r"^lib/(?:keeper|keeper_failure|keeper_outcome|keeper_tooling|keeper_workspace)/"
+    r"(?:keeper_tool_[^/]*_runtime|keeper_tool_execute_[^/]*|keeper_(?:gh|hooks|sandbox|exec|shell|tool|tools)[^/]*)\.mli?$"
 )
 manifest_re = re.compile(
-    r"^\s*-\s+`(?P<path>lib/keeper/[^`]+)`\s+-\s+(?P<owner>[a-z][a-z0-9-]*)\s*$"
+    r"^\s*-\s+`(?P<path>lib/(?:keeper|keeper_failure|keeper_outcome|keeper_tooling|keeper_workspace)/[^`]+)`\s+-\s+(?P<owner>[a-z][a-z0-9-]*)\s*$"
 )
 owners = {
     "execution-dispatch",
@@ -53,13 +54,22 @@ if not matrix_file.is_file():
     sys.exit(1)
 
 source_paths: set[str] = set()
-keeper_dir = repo_root / "lib" / "keeper"
-for path in keeper_dir.iterdir():
-    if not path.is_file():
+for group in (
+    "keeper",
+    "keeper_failure",
+    "keeper_outcome",
+    "keeper_tooling",
+    "keeper_workspace",
+):
+    keeper_dir = repo_root / "lib" / group
+    if not keeper_dir.is_dir():
         continue
-    rel = path.relative_to(repo_root).as_posix()
-    if scope_re.match(rel):
-        source_paths.add(rel)
+    for path in keeper_dir.iterdir():
+        if not path.is_file():
+            continue
+        rel = path.relative_to(repo_root).as_posix()
+        if scope_re.match(rel):
+            source_paths.add(rel)
 
 records: dict[str, list[tuple[int, str]]] = collections.defaultdict(list)
 with matrix_file.open(encoding="utf-8") as handle:

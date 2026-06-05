@@ -16,7 +16,7 @@ scripts/audit-keeper-tool-boundary-matrix.sh
 Scope:
 
 ```text
-^lib/keeper/keeper_(gh|hooks|sandbox|exec|shell|tool|tools)[^/]*\.mli?$
+^lib/(keeper|keeper_failure|keeper_outcome|keeper_tooling|keeper_workspace)/keeper_(gh|hooks|sandbox|exec|shell|tool|tools)[^/]*\.mli?$
 ```
 
 ## Owner Categories
@@ -62,10 +62,10 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tool_runtime.mli` - execution-dispatch
 - `lib/keeper/keeper_execution_receipt_types.ml` - execution-dispatch
 - `lib/keeper/keeper_execution_receipt_types.mli` - execution-dispatch
-- `lib/keeper_failure_taxonomy/keeper_execution_receipt_failure_site.ml` - execution-dispatch
-- `lib/keeper_failure_taxonomy/keeper_execution_receipt_failure_site.mli` - execution-dispatch
-- `lib/keeper_outcome_taxonomy/keeper_execution_receipt_outcome_kind.ml` - execution-dispatch
-- `lib/keeper_outcome_taxonomy/keeper_execution_receipt_outcome_kind.mli` - execution-dispatch
+- `lib/keeper_failure/keeper_execution_receipt_failure_site.ml` - execution-dispatch
+- `lib/keeper_failure/keeper_execution_receipt_failure_site.mli` - execution-dispatch
+- `lib/keeper_outcome/keeper_execution_receipt_outcome_kind.ml` - execution-dispatch
+- `lib/keeper_outcome/keeper_execution_receipt_outcome_kind.mli` - execution-dispatch
 - `lib/keeper/keeper_execution_receipt.ml` - execution-dispatch
 - `lib/keeper/keeper_execution_receipt.mli` - execution-dispatch
 - `lib/keeper/keeper_execution.ml` - execution-dispatch
@@ -78,8 +78,8 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_hooks_oas_introspection.mli` - hook-observation
 - `lib/keeper/keeper_hooks_oas_response_metrics.ml` - hook-observation
 - `lib/keeper/keeper_hooks_oas_response_metrics.mli` - hook-observation
-- `lib/keeper_hooks_oas_types/keeper_hooks_oas_types.ml` - hook-observation
-- `lib/keeper_hooks_oas_types/keeper_hooks_oas_types.mli` - hook-observation
+- `lib/keeper_workspace/keeper_hooks_oas_types.ml` - hook-observation
+- `lib/keeper_workspace/keeper_hooks_oas_types.mli` - hook-observation
 - `lib/keeper/keeper_hooks_oas.ml` - hook-observation
 - `lib/keeper/keeper_hooks_oas.mli` - hook-observation
 - `lib/keeper/keeper_sandbox_containment.ml` - sandbox-runtime
@@ -92,8 +92,8 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_sandbox_docker_nested_runtime.mli` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_docker.ml` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_docker.mli` - sandbox-runtime
-- `lib/keeper_sandbox_error/keeper_sandbox_error.ml` - sandbox-runtime
-- `lib/keeper_sandbox_error/keeper_sandbox_error.mli` - sandbox-runtime
+- `lib/keeper_workspace/keeper_sandbox_error.ml` - sandbox-runtime
+- `lib/keeper_workspace/keeper_sandbox_error.mli` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_exec_failure.ml` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_exec_failure.mli` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_factory.ml` - sandbox-runtime
@@ -120,26 +120,22 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tool_execute_input.mli` - shell-surface
 - `lib/keeper/keeper_tool_execute_runtime.ml` - shell-surface
 - `lib/keeper/keeper_tool_execute_runtime.mli` - shell-surface
-- `lib/keeper_tool_command_parse/keeper_tool_execute_command_parse.ml` - shell-surface
-- `lib/keeper_tool_command_parse/keeper_tool_execute_command_parse.mli` - shell-surface
-- `lib/keeper/keeper_tool_execute_command_parse.ml` - shell-surface
-- `lib/keeper/keeper_tool_execute_command_parse.mli` - shell-surface
+- `lib/keeper_tooling/keeper_tool_execute_command_parse.ml` - shell-surface
+- `lib/keeper_tooling/keeper_tool_execute_command_parse.mli` - shell-surface
 - `lib/keeper/keeper_tool_execute_command_semantics.ml` - shell-surface
 - `lib/keeper/keeper_tool_execute_command_semantics.mli` - shell-surface
-- `lib/keeper_tool_command_parse/keeper_tool_execute_command_words.ml` - shell-surface
-- `lib/keeper_tool_command_parse/keeper_tool_execute_command_words.mli` - shell-surface
-- `lib/keeper/keeper_tool_execute_command_words.ml` - shell-surface
-- `lib/keeper/keeper_tool_execute_command_words.mli` - shell-surface
-- `lib/keeper_tool_execute_shell_ir/keeper_tool_execute_shell_ir.ml` - shell-surface
-- `lib/keeper_tool_execute_shell_ir/keeper_tool_execute_shell_ir.mli` - shell-surface
+- `lib/keeper_tooling/keeper_tool_execute_command_words.ml` - shell-surface
+- `lib/keeper_tooling/keeper_tool_execute_command_words.mli` - shell-surface
+- `lib/keeper_tooling/keeper_tool_execute_shell_ir.ml` - shell-surface
+- `lib/keeper_tooling/keeper_tool_execute_shell_ir.mli` - shell-surface
 - `lib/keeper/keeper_tool_execute_path.ml` - shell-surface
 - `lib/keeper/keeper_tool_execute_path.mli` - shell-surface
 - `lib/keeper/keeper_tool_execute_readonly_policy.ml` - shell-surface
 - `lib/keeper/keeper_tool_execute_readonly_policy.mli` - shell-surface
 - `lib/keeper/keeper_tool_execute_runtime_paths.ml` - shell-surface
 - `lib/keeper/keeper_tool_execute_runtime_paths.mli` - shell-surface
-- `lib/keeper_tool_execute_timeout/keeper_tool_execute_timeout.ml` - shell-surface
-- `lib/keeper_tool_execute_timeout/keeper_tool_execute_timeout.mli` - shell-surface
+- `lib/keeper_tooling/keeper_tool_execute_timeout.ml` - shell-surface
+- `lib/keeper_tooling/keeper_tool_execute_timeout.mli` - shell-surface
 - `lib/keeper/keeper_tool_affinity.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_affinity.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_alias.ml` - tool-surface-policy
@@ -156,8 +152,8 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tool_descriptor.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_descriptor_resolution.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_descriptor_resolution.mli` - tool-surface-policy
-- `lib/keeper_tool_name/keeper_tool_name.ml` - tool-surface-policy
-- `lib/keeper_tool_name/keeper_tool_name.mli` - tool-surface-policy
+- `lib/keeper_tooling/keeper_tool_name.ml` - tool-surface-policy
+- `lib/keeper_tooling/keeper_tool_name.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_query.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_query.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_selection.ml` - tool-surface-policy
@@ -168,8 +164,8 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tool_emission_hook.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_guidance.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_guidance.mli` - tool-surface-policy
-- `lib/keeper_outcome_taxonomy/keeper_tool_outcome.ml` - tool-surface-policy
-- `lib/keeper_outcome_taxonomy/keeper_tool_outcome.mli` - tool-surface-policy
+- `lib/keeper_outcome/keeper_tool_outcome.ml` - tool-surface-policy
+- `lib/keeper_outcome/keeper_tool_outcome.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_path_validation.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_path_validation.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_persona_audit.ml` - tool-surface-policy
@@ -182,8 +178,12 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tool_progress.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_registry.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_registry.mli` - tool-surface-policy
-- `lib/keeper_tool_response/keeper_tool_response.ml` - tool-surface-policy
-- `lib/keeper_tool_response/keeper_tool_response.mli` - tool-surface-policy
+- `lib/keeper_tooling/keeper_tool_hook_error_state.ml` - tool-surface-policy
+- `lib/keeper_tooling/keeper_tool_hook_error_state.mli` - tool-surface-policy
+- `lib/keeper_tooling/keeper_tool_response.ml` - tool-surface-policy
+- `lib/keeper_tooling/keeper_tool_response.mli` - tool-surface-policy
+- `lib/keeper_tooling/keeper_tool_retry_state.ml` - tool-surface-policy
+- `lib/keeper_tooling/keeper_tool_retry_state.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_resolution.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_resolution.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_surface.ml` - tool-surface-policy

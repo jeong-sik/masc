@@ -116,6 +116,8 @@ let tool_inventory_json _ctx ~include_hidden =
 (* Handlers                                                         *)
 (* ================================================================ *)
 
+(* TEL-OK: read-only config introspection; tool-call telemetry is emitted by
+   the shared dispatch wrapper, and this handler only formats Env_config JSON. *)
 let handle_config ~tool_name ~start_time args : tool_result =
   let cat = get_string_opt args "category" in
   let json = Env_config_introspect.to_json_filtered ?cat () in

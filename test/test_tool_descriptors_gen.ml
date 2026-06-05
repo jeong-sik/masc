@@ -132,26 +132,46 @@ let test_masc_gc_input_schema_matches () =
     gen.input_schema
 ;;
 
-(* Regression guard for PR #19864 → keeper "AllowList pruned ... WebSearch,
-   WebFetch" spam. Web tools are descriptor-backed keeper tools: they MUST be
-   present in the raw substrate inventory (so the keeper progressive-disclosure
-   universe registers WebSearch/WebFetch and [validate_allow_list] keeps them),
-   and they MUST be absent from the public MCP allowlist (public exclusion is
-   the job of [public_mcp_surface_tools], not of trimming the inventory). *)
-let test_web_tools_present_in_misc_schemas () =
-  Alcotest.(check bool)
-    "masc_web_search present in misc schemas"
-    true
-    (has_schema "masc_web_search" Tool_schemas_misc.schemas);
-  Alcotest.(check bool)
-    "masc_web_fetch present in misc schemas"
-    true
-    (has_schema "masc_web_fetch" Tool_schemas_misc.schemas)
+let descriptor_internal_schema name : tool_schema =
+  match
+    Masc.Keeper_tool_descriptor.public_descriptors
+    |> List.find_opt (fun (descriptor : Masc.Keeper_tool_descriptor.t) ->
+           String.equal descriptor.internal_name name)
+  with
+  | Some descriptor ->
+      { name = descriptor.internal_name
+      ; description = descriptor.description
+      ; input_schema = descriptor.input_schema
+      }
+  | None -> Alcotest.failf "descriptor for internal tool %S not found" name
 ;;
 
-let test_web_tools_in_raw_inventory_but_not_public_mcp_surface () =
+(* Regression guard for PR #19864 -> keeper "AllowList pruned ... WebSearch,
+   WebFetch" spam. Web tools are descriptor-backed keeper tools: they MUST be
+   present in the raw substrate inventory, but their schema owner is
+   [Keeper_tool_descriptor.public_descriptors], not [Tool_descriptors_gen]. *)
+let test_web_tools_owned_by_keeper_descriptors () =
   List.iter
     (fun name ->
+      Alcotest.(check bool)
+        (name ^ " absent from generated misc schemas")
+        false
+        (has_schema name Tool_descriptors_gen.schemas);
+      Alcotest.(check bool)
+        (name ^ " absent from effective misc schemas")
+        false
+        (has_schema name Tool_schemas_misc.schemas);
+      let descriptor = descriptor_internal_schema name in
+      let raw = find_by_name name Masc.Config.raw_all_tool_schemas in
+      Alcotest.(check string)
+        (name ^ " raw inventory comes from descriptor")
+        descriptor.description
+        raw.description;
+      Alcotest.check
+        yojson_testable
+        (name ^ " raw input_schema comes from descriptor")
+        descriptor.input_schema
+        raw.input_schema;
       Alcotest.(check bool)
         (name ^ " present in Config.raw_all_tool_schemas")
         true
@@ -165,50 +185,6 @@ let test_web_tools_in_raw_inventory_but_not_public_mcp_surface () =
         false
         (List.mem name Tool_catalog_surfaces.public_mcp_surface_tools))
     [ "masc_web_search"; "masc_web_fetch" ]
-;;
-
-let test_masc_web_search_name_matches () =
-  let gen = find_by_name "masc_web_search" Tool_descriptors_gen.schemas in
-  let hand = find_by_name "masc_web_search" Tool_schemas_misc.schemas in
-  Alcotest.(check string) "masc_web_search name" hand.name gen.name
-;;
-
-let test_masc_web_search_description_matches () =
-  let gen = find_by_name "masc_web_search" Tool_descriptors_gen.schemas in
-  let hand = find_by_name "masc_web_search" Tool_schemas_misc.schemas in
-  Alcotest.(check string) "masc_web_search description" hand.description gen.description
-;;
-
-let test_masc_web_search_input_schema_matches () =
-  let gen = find_by_name "masc_web_search" Tool_descriptors_gen.schemas in
-  let hand = find_by_name "masc_web_search" Tool_schemas_misc.schemas in
-  Alcotest.check
-    yojson_testable
-    "masc_web_search input_schema (Yojson.Safe.equal)"
-    hand.input_schema
-    gen.input_schema
-;;
-
-let test_masc_web_fetch_name_matches () =
-  let gen = find_by_name "masc_web_fetch" Tool_descriptors_gen.schemas in
-  let hand = find_by_name "masc_web_fetch" Tool_schemas_misc.schemas in
-  Alcotest.(check string) "masc_web_fetch name" hand.name gen.name
-;;
-
-let test_masc_web_fetch_description_matches () =
-  let gen = find_by_name "masc_web_fetch" Tool_descriptors_gen.schemas in
-  let hand = find_by_name "masc_web_fetch" Tool_schemas_misc.schemas in
-  Alcotest.(check string) "masc_web_fetch description" hand.description gen.description
-;;
-
-let test_masc_web_fetch_input_schema_matches () =
-  let gen = find_by_name "masc_web_fetch" Tool_descriptors_gen.schemas in
-  let hand = find_by_name "masc_web_fetch" Tool_schemas_misc.schemas in
-  Alcotest.check
-    yojson_testable
-    "masc_web_fetch input_schema (Yojson.Safe.equal)"
-    hand.input_schema
-    gen.input_schema
 ;;
 
 let test_masc_tool_stats_name_matches () =
@@ -292,28 +268,9 @@ let () =
         ] )
     ; ( "descriptor-backed web tools"
       , [ Alcotest.test_case
-            "present in misc schemas"
+            "owned by keeper descriptors"
             `Quick
-            test_web_tools_present_in_misc_schemas
-        ; Alcotest.test_case
-            "in raw inventory but not public MCP surface"
-            `Quick
-            test_web_tools_in_raw_inventory_but_not_public_mcp_surface
-        ; Alcotest.test_case "masc_web_search name" `Quick test_masc_web_search_name_matches
-        ; Alcotest.test_case "description" `Quick test_masc_web_search_description_matches
-        ; Alcotest.test_case
-            "masc_web_search input_schema"
-            `Quick
-            test_masc_web_search_input_schema_matches
-        ; Alcotest.test_case "masc_web_fetch name" `Quick test_masc_web_fetch_name_matches
-        ; Alcotest.test_case
-            "masc_web_fetch description"
-            `Quick
-            test_masc_web_fetch_description_matches
-        ; Alcotest.test_case
-            "masc_web_fetch input_schema"
-            `Quick
-            test_masc_web_fetch_input_schema_matches
+            test_web_tools_owned_by_keeper_descriptors
         ] )
     ; ( "masc_tool_stats field-by-field"
       , [ Alcotest.test_case "name" `Quick test_masc_tool_stats_name_matches

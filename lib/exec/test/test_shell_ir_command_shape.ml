@@ -23,6 +23,7 @@ let test_git_diagnostic_command_shapes () =
   check_diagnostic "git status --short" true;
   check_diagnostic "env git log --oneline -5" true;
   check_diagnostic "git worktree list" true;
+  check_diagnostic "env GIT_DIR=../other/.git git status" false;
   check_diagnostic "git show HEAD:README.md" false;
   check_diagnostic "git checkout HEAD -- README.md" false
 
@@ -39,13 +40,20 @@ let test_git_non_recovery_command_shapes () =
   check_recovery "git checkout other-branch" false;
   check_recovery "git checkout -b feature" false;
   check_recovery "git checkout HEAD -- ../outside.txt" false;
+  check_recovery "git checkout HEAD -- :/" false;
+  check_recovery "git checkout HEAD -- ':(glob)*.ml'" false;
   check_recovery "git -C ../other reset --hard HEAD" false;
   check_recovery "git --work-tree ../other reset --hard HEAD" false;
   check_recovery "git --git-dir=../other/.git clean -df" false;
+  check_recovery
+    "env GIT_DIR=../other/.git GIT_WORK_TREE=../other git reset --hard HEAD"
+    false;
   check_recovery "git reset --hard" false;
   check_recovery "git reset --hard HEAD~1" false;
   check_recovery "git reset --soft HEAD" false;
   check_recovery "git clean -xdf" false;
+  check_recovery "git clean -ffd" false;
+  check_recovery "git clean -f --force -d" false;
   check_recovery "git clean -df some-path" false;
   check_recovery "git status" false
 

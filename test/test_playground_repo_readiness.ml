@@ -195,6 +195,24 @@ let test_deleted_tracked_files_restore_hint () =
   check (option string) "mixed dirty status has no restore hint" None
     (Masc.Playground_repo_readiness.deleted_tracked_files_restore_hint ~clone_path)
 
+let test_deleted_tracked_files_restore_hint_uses_unquoted_porcelain_paths () =
+  let clone_path = temp_dir "masc-repo-readiness-status-hint-spaces" in
+  git_ok ~cwd:clone_path [ "init"; "-q"; "--initial-branch=main" ];
+  git_ok ~cwd:clone_path [ "config"; "user.email"; "test@example.com" ];
+  git_ok ~cwd:clone_path [ "config"; "user.name"; "Test" ];
+  write_file (Filename.concat clone_path "a b.txt") "tracked with space\n";
+  git_ok ~cwd:clone_path [ "add"; "a b.txt" ];
+  git_ok ~cwd:clone_path [ "commit"; "-q"; "-m"; "init" ];
+  Sys.remove (Filename.concat clone_path "a b.txt");
+  match Masc.Playground_repo_readiness.deleted_tracked_files_restore_hint ~clone_path with
+  | Some hint ->
+    check bool "restore command uses shell-quoted real path" true
+      (String.equal
+         hint
+         "Dirty status only contains deleted tracked files: D a b.txt. Restore them \
+          with: git checkout HEAD -- 'a b.txt'")
+  | None -> fail "expected deleted tracked file restore hint for path with spaces"
+
 let test_parent_git_checkout_does_not_count_as_clone () =
   let base_path = temp_dir "masc-repo-readiness" in
   git_ok ~cwd:base_path [ "init"; "-q"; "--initial-branch=main" ];
@@ -747,8 +765,13 @@ let () =
         test_case "missing clone skips workspace discovery" `Quick
           test_missing_clone_skips_workspace_discovery;
       ];
-      "status_hints", [ test_case "deleted tracked files restore hint" `Quick
-                          test_deleted_tracked_files_restore_hint ];
+      "status_hints",
+      [
+        test_case "deleted tracked files restore hint" `Quick
+          test_deleted_tracked_files_restore_hint;
+        test_case "deleted tracked file with spaces restore hint" `Quick
+          test_deleted_tracked_files_restore_hint_uses_unquoted_porcelain_paths;
+      ];
       "ensure_worktree_ready",
       [
         test_case "creates worktree" `Quick

@@ -58,13 +58,29 @@ let is_env_assignment token =
   | Some 0 -> false
   | Some i -> is_shell_identifier (String.sub token 0 i)
 
+let env_assignment_name token =
+  match String.index_opt token '=' with
+  | None | Some 0 -> None
+  | Some i ->
+    let name = String.sub token 0 i in
+    if is_shell_identifier name then Some name else None
+
+let is_git_path_env_override = function
+  | "GIT_DIR" | "GIT_WORK_TREE" | "GIT_INDEX_FILE" | "GIT_OBJECT_DIRECTORY"
+  | "GIT_ALTERNATE_OBJECT_DIRECTORIES" | "GIT_COMMON_DIR" ->
+    true
+  | _ -> false
+
 let rec effective_stage stage =
   match normalize_command_name stage.bin, stage.args with
   | "env", args ->
     let rec scan = function
       | [] -> None
       | ("-i" | "--ignore-environment") :: rest -> scan rest
-      | arg :: rest when is_env_assignment arg -> scan rest
+      | arg :: rest when is_env_assignment arg ->
+        (match env_assignment_name arg with
+         | Some name when is_git_path_env_override name -> None
+         | Some _ | None -> scan rest)
       | arg :: _rest when String.starts_with ~prefix:"-" arg -> None
       | bin :: args -> Some { bin; args }
     in
@@ -123,6 +139,7 @@ let simple_relative_git_pathspec path =
   && path <> ".."
   && Filename.is_relative path
   && not (String.starts_with ~prefix:"-" path)
+  && not (String.starts_with ~prefix:":" path)
   && not (String.contains path '\x00')
   && not
        (path
@@ -169,21 +186,39 @@ let git_clean_short_flags_allowed arg =
   in
   loop 1
 
+let git_clean_short_flag_counts arg =
+  let len = String.length arg in
+  if len <= 1
+  then None
+  else
+    let rec loop i force_count dir =
+      if i >= len
+      then Some (force_count, dir)
+      else
+        match arg.[i] with
+        | 'f' -> loop (i + 1) (force_count + 1) dir
+        | 'd' -> loop (i + 1) force_count true
+        | 'q' -> loop (i + 1) force_count dir
+        | _ -> None
+    in
+    loop 1 0 false
+
 let git_clean_recovery_args args =
-  let rec loop ~force ~dir = function
-    | [] -> force && dir
-    | "--" :: [] -> force && dir
-    | "--force" :: rest -> loop ~force:true ~dir rest
-    | "--dir" :: rest -> loop ~force ~dir:true rest
-    | "--quiet" :: rest -> loop ~force ~dir rest
+  let rec loop ~force_count ~dir = function
+    | [] -> force_count = 1 && dir
+    | "--" :: [] -> force_count = 1 && dir
+    | "--force" :: rest -> loop ~force_count:(force_count + 1) ~dir rest
+    | "--dir" :: rest -> loop ~force_count ~dir:true rest
+    | "--quiet" :: rest -> loop ~force_count ~dir rest
     | arg :: rest
       when String.starts_with ~prefix:"-" arg && git_clean_short_flags_allowed arg ->
-      let force = force || String.contains arg 'f' in
-      let dir = dir || String.contains arg 'd' in
-      loop ~force ~dir rest
+      (match git_clean_short_flag_counts arg with
+       | Some (force_delta, short_dir) ->
+         loop ~force_count:(force_count + force_delta) ~dir:(dir || short_dir) rest
+       | None -> false)
     | _ -> false
   in
-  loop ~force:false ~dir:false args
+  loop ~force_count:0 ~dir:false args
 
 let git_args_has_path_changing_option args =
   let rec scan = function

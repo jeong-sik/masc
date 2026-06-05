@@ -60,15 +60,15 @@ let deleted_tracked_files_restore_hint ~clone_path =
     run_git
       ~timeout_sec:read_only_probe_timeout_sec
       ~clone_path
-      [ "status"; "--porcelain" ]
+      [ "status"; "--porcelain"; "-z" ]
   in
   if not status.ok then None
   else
     let changes =
       status.output
-      |> String.split_on_char '\n'
+      |> String.split_on_char '\x00'
       |> List.map String.trim
-      |> List.filter (fun line -> line <> "")
+      |> List.filter (fun record -> record <> "")
     in
     match changes with
     | [] -> None

@@ -1,4 +1,6 @@
 import { html } from 'htm/preact'
+import { marked } from 'marked'
+import DOMPurify from 'dompurify'
 import { JsonViewerCard } from '../common/json-viewer'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { ActionButton } from '../common/button'
@@ -221,9 +223,15 @@ function ChatMessageBubble({
           </div>`
         : null}
 
-      <div class="whitespace-pre-wrap break-words text-base leading-airy text-[var(--color-fg-primary)]">
-        ${entry.text || (entry.delivery === 'streaming' ? '' : '(empty reply)')}
-      </div>
+      <div
+        class="markdown-body whitespace-pre-wrap break-words text-base leading-airy text-[var(--color-fg-primary)]"
+        dangerouslySetInnerHTML=${{
+          __html: DOMPurify.sanitize(
+            marked.parse(entry.text || (entry.delivery === 'streaming' ? '' : '(empty reply)')) as string,
+            { ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'code', 'pre', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'blockquote', 'a', 'hr'] }
+          )
+        }}
+      />
       ${entry.error
         ? html`
             <div class="rounded-[var(--r-1)] border border-[var(--err-border)] bg-[var(--bad-soft)] px-3 py-2 text-xs leading-paragraph text-[var(--bad-light)]">

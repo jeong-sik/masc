@@ -89,13 +89,14 @@ export function KeeperChatPanel({ name }: { name: string }) {
   // Per-instance signals — each KeeperChatPanel has its own state.
   // Fixes: global signal sharing caused cross-keeper state clobbering
   // and effect re-initialization wiped messages on parent re-render.
-  const chatMessages = useMemo(() => signal<ChatMessage[]>(getChatMessageBuffer(name)), [])
+  const chatMessages = useMemo(() => signal<ChatMessage[]>(getChatMessageBuffer(name)), [name])
   const chatInput = useMemo(() => signal(''), [])
   const streaming = useMemo(() => signal(false), [])
   const streamBuffer = useMemo(() => signal(''), [])
   const streamStartedAt = useMemo(() => signal<number | null>(null), [])
   const chatError = useMemo(() => signal(''), [])
   const searchQuery = useMemo(() => signal(''), [])
+  const historyLoaded = useMemo(() => signal(false), [])
 
   const activeAbortRef = useRef<AbortController | null>(null)
 
@@ -107,7 +108,30 @@ export function KeeperChatPanel({ name }: { name: string }) {
     streamStartedAt.value = null
   }
 
+  async function loadHistory(keeperName: string): Promise<void> {
+    if (historyLoaded.value) return
+    historyLoaded.value = true
+    try {
+      const history = await fetchKeeperChatHistory(keeperName)
+      if (history.length > 0) {
+        const serverMsgs = history.map((m) => ({
+          role: m.role === 'assistant' ? 'assistant' as const : 'user' as const,
+          content: m.content,
+          timestamp: m.ts * 1000,
+          source: 'api' as const,
+        }))
+        mergeServerHistory(keeperName, serverMsgs)
+        chatMessages.value = getChatMessageBuffer(keeperName)
+      }
+    } catch (err: unknown) {
+      const msg = errorToString(err)
+      chatError.value = `이전 대화 불러오기 실패: ${msg}`
+    }
+  }
+
   async function sendChat(keeperName: string): Promise<void> {
+    await loadHistory(keeperName)
+
     const text = chatInput.value.trim()
     if (!text || streaming.value) return
 
@@ -118,7 +142,7 @@ export function KeeperChatPanel({ name }: { name: string }) {
 
     const userMsg: ChatMessage = { role: 'user', content: text, timestamp: Date.now(), source: 'dashboard' }
     appendChatMessage(keeperName, userMsg)
-    chatMessages.value = [...chatMessages.value, userMsg]
+    chatMessages.value = getChatMessageBuffer(keeperName)
 
     streaming.value = true
     activeAbortRef.current = new AbortController()
@@ -133,7 +157,7 @@ export function KeeperChatPanel({ name }: { name: string }) {
             const finalText = streamBuffer.value.trim() || '(no response)'
             const assistantMsg: ChatMessage = { role: 'assistant', content: finalText, timestamp: Date.now(), source: 'dashboard' }
             appendChatMessage(keeperName, assistantMsg)
-            chatMessages.value = [...chatMessages.value, assistantMsg]
+            chatMessages.value = getChatMessageBuffer(keeperName)
             streamBuffer.value = ''
           } else if (event.type === 'RUN_ERROR') {
             chatError.value = normalizeKeeperChatErrorValue(event.value)
@@ -153,39 +177,12 @@ export function KeeperChatPanel({ name }: { name: string }) {
   }
 
   useEffect(() => {
-    // Sync local buffer into the signal so the UI shows persisted messages
-    // immediately (zero server round-trip).  Then merge server history
-    // so external-connector messages (Discord, etc.) are incorporated.
-    chatMessages.value = getChatMessageBuffer(name)
-
-    let stale = false
-    void fetchKeeperChatHistory(name)
-      .then((history) => {
-        if (stale) return
-        if (history.length > 0) {
-          const serverMsgs = history.map((m) => ({
-            role: m.role === 'assistant' ? 'assistant' as const : 'user' as const,
-            content: m.content,
-            timestamp: m.ts * 1000,
-            source: 'api' as const,
-          }))
-          mergeServerHistory(name, serverMsgs)
-          chatMessages.value = getChatMessageBuffer(name)
-        }
-      })
-      .catch((err: unknown) => {
-        if (stale) return
-        const msg = errorToString(err)
-        chatError.value = `이전 대화 불러오기 실패: ${msg}`
-      })
+    // External-system sync: flush an in-progress stream buffer into the
+    // store when the component unmounts (tab change, route navigation).
+    // No data init here — history is loaded lazily on first interaction.
     return () => {
-      stale = true
-      // If a stream was in progress when the component unmounts
-      // (tab change, route navigation), flush the partial buffer
-      // into the store so the user does not lose the assistant's response.
       if (streaming.value && streamBuffer.value.trim()) {
         flushStreamBuffer(name, streamBuffer.value)
-        chatMessages.value = getChatMessageBuffer(name)
       }
     }
   }, [name])

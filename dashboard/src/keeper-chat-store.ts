@@ -10,8 +10,6 @@
 // - useEffect: not used for data init.  External system sync only.
 // - Component unmount: messages are preserved, not cleared.
 
-import { signal, type Signal } from '@preact/signals'
-
 export type ChatMessageRole = 'user' | 'assistant'
 export type ChatMessageSource = 'dashboard' | 'discord' | 'slack' | 'api'
 

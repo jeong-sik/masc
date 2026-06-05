@@ -208,7 +208,7 @@ let explicit_metadata : (string * metadata) list =
     ( "masc_board_curation_submit",
       actor_broadcast_tool );
     ("masc_tool_help", read_state_tool);
-    ("masc_plan_get", read_state_tool);
+    ("masc_plan_get", broadcast_tool);
     ("masc_claim_next", claim_task_tool);
     ("masc_transition", complete_task_tool);
     ("masc_plan_set_task", actor_broadcast_tool);

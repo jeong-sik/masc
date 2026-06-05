@@ -75,6 +75,8 @@ let rec effective_stage stage =
      | bin :: args when not (String.starts_with ~prefix:"-" bin) ->
        Some { bin; args }
      | _ -> None)
+  (* DET-OK: parsed_stages already rejected non-literal argv fragments; this
+     default preserves explicit command shape for later policy checks. *)
   | _ -> Some stage
 
 let effective_stages ir =

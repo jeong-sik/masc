@@ -110,9 +110,10 @@ val handle_masc_plan
 (** RFC-0182 §3.1 — [handle_masc_run] is the descriptor-projection
     cluster handler for [masc_run_*] tools (deliverable / get / init /
     list / log / plan). Constructs a [Tool_run.context] from [config] and
-    calls [Tool_run.dispatch]. *)
+    keeper [meta], then calls [Tool_run.dispatch]. *)
 val handle_masc_run
   :  config:Workspace.config
+  -> meta:keeper_meta
   -> name:string
   -> args:Yojson.Safe.t
   -> string

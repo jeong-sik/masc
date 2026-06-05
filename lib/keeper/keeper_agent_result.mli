@@ -47,3 +47,10 @@ val runtime_lane_label : string
     exposes a model identity field. OAS owns concrete provider/model
     identity; the keeper-side surface collapses to this single label
     via [Boundary_redaction]. *)
+
+val append_synthetic_tool_call :
+  provider:string ->
+  route_evidence:Yojson.Safe.t ->
+  string ->
+  run_result ->
+  run_result

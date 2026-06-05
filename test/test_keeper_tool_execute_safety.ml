@@ -374,7 +374,8 @@ let run_process_ok ~cwd prog argv =
       (Masc.Keeper_sandbox_exec_failure.status_label status)
       stdout stderr
 
-let git_ok ~cwd args = run_process_ok ~cwd "git" args
+let git_ok ~cwd args =
+  run_process_ok ~cwd "git" ("-c" :: "core.hooksPath=/dev/null" :: args)
 
 let write_file path content =
   ensure_dir (Filename.dirname path);
@@ -881,7 +882,9 @@ let test_tool_execute_readonly_blocks_non_recovery_git_writes () =
     { (make_local_meta "non-recovery-git-write") with tool_access = [] }
   in
   let playground = Filename.concat base_path (playground_path_of meta.name) in
-  ensure_dir (Filename.concat playground "repos/masc");
+  let repo_dir = Filename.concat playground "repos/masc" in
+  ensure_dir repo_dir;
+  git_ok ~cwd:repo_dir [ "init"; "-q"; "--initial-branch=main" ];
   let check argv =
     let raw =
       Keeper_tool_command_runtime.handle_tool_execute

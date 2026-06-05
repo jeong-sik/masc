@@ -187,7 +187,7 @@ let test_deleted_tracked_files_restore_hint () =
      check bool "restore command surfaced" true
        (String.equal
           hint
-          " Dirty status only contains deleted tracked files: D config/deleted-one.txt; D \
+          "Dirty status only contains deleted tracked files: D config/deleted-one.txt; D \
            test/fixtures/deleted-two.txt. Restore them with: git checkout HEAD -- \
            config/deleted-one.txt test/fixtures/deleted-two.txt")
    | None -> fail "expected deleted tracked files restore hint");

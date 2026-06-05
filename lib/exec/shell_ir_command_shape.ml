@@ -142,12 +142,7 @@ let git_checkout_head_restore_args args =
 
 let git_reset_hard_head_args args =
   let rec loop ~hard ~target = function
-    | [] ->
-      hard
-      &&
-      (match target with
-       | None | Some "HEAD" | Some "@" -> true
-       | Some _ -> false)
+    | [] -> hard && (match target with Some "HEAD" | Some "@" -> true | None | Some _ -> false)
     | ("-q" | "--quiet") :: rest -> loop ~hard ~target rest
     | "--hard" :: rest -> loop ~hard:true ~target rest
     | "--" :: _ -> false

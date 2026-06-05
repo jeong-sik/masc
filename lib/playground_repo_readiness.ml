@@ -88,7 +88,7 @@ let deleted_tracked_files_restore_hint ~clone_path =
         in
         Some
           (Printf.sprintf
-             " Dirty status only contains deleted tracked files: %s. Restore \
+             "Dirty status only contains deleted tracked files: %s. Restore \
               them with: git checkout HEAD -- %s"
              status_summary
              restore_args)

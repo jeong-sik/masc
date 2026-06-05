@@ -114,9 +114,9 @@ let cwd_is_sandbox_repo_context ~config ~meta ~cwd =
 
 let repo_currency_not_ready_error ~config ~meta ~repo_name ~reason ~cwd =
   let clone_path = Playground_repo_readiness.clone_path ~config ~meta ~repo_name in
-  let hint =
+  let hint_suffix =
     match Playground_repo_readiness.deleted_tracked_files_restore_hint ~clone_path with
-    | Some hint -> hint
+    | Some hint -> " " ^ hint
     | None -> ""
   in
   Printf.sprintf
@@ -129,7 +129,7 @@ let repo_currency_not_ready_error ~config ~meta ~repo_name ~reason ~cwd =
     repo_name
     reason
     repo_name
-    hint
+    hint_suffix
     cwd
 
 let validate_repo_cwd_currency_ready

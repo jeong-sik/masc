@@ -82,7 +82,6 @@ let goal_transition_action_strings =
 ;;
 
 let goal_vote_decision_strings = [ "approve"; "reject" ]
-let goal_principal_kind_strings = [ "operator"; "agent" ]
 
 let make_enum_field_error ~field ~allowed ~received =
   { field
@@ -310,8 +309,6 @@ let parse_optional_transition_action args field =
          ~received:(Yojson.Safe.to_string json))
 ;;
 
-let actor_must_be_operator = Workspace_goals_verification.actor_must_be_operator
-
 let task_has_goal_id ~goal_id (task : Masc_domain.task) =
   match task.goal_id with
   | Some task_goal_id -> String.equal task_goal_id goal_id
@@ -498,17 +495,7 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args : Tool_re
   | Ok goal_id, Ok (Some action), Ok (Some actor) ->
     let note = get_string_opt args "note" in
     let override_note = get_string_opt args "override_note" in
-    if
-      actor_must_be_operator action
-      && not (actor.Goal_verification.kind = Goal_verification.Operator)
-    then
-      error_result_typed
-        ~tool_name
-        ~start_time
-        ~code:Validation_error
-        "actor.kind must be operator for this transition"
-    else (
-      match Goal_store.get_goal ctx.config ~goal_id with
+    (match Goal_store.get_goal ctx.config ~goal_id with
       | None -> error_result_typed ~tool_name ~start_time ~code:Not_found "goal not found"
       | Some goal ->
         (match

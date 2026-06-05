@@ -584,7 +584,6 @@ export interface Goal {
 }
 
 export interface GoalVerifierPrincipal {
-  kind: 'operator' | 'keeper'
   id: string
   display_name?: string | null
 }

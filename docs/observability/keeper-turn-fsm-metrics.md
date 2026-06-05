@@ -5,6 +5,8 @@ code_refs:
   - lib/keeper/keeper_turn_fsm.ml
   - lib/keeper/keeper_unified_turn.ml
   - lib/keeper_metrics/keeper_metrics.ml
+  - lib/keeper_metrics.ml
+  - lib/otel_metric_store/otel_metric_store_core.ml
   - bin/masc_trace.ml
 ---
 

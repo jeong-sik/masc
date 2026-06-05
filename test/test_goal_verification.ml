@@ -31,10 +31,10 @@ let with_workspace f =
       f config)
 
 let operator ?display_name id : Goal_verification.goal_principal =
-  { kind = Goal_verification.Operator; id; display_name }
+  { id; display_name }
 
 let agent ?display_name id : Goal_verification.goal_principal =
-  { kind = Goal_verification.Agent; id; display_name }
+  { id; display_name }
 
 let request_snapshot ~requested_by =
   let reviewer = operator "reviewer-1" in

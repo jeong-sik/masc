@@ -365,7 +365,7 @@ let make_routes ~port ~host ~sw ~clock =
 
 | 그룹 | Prefix | 모듈 | 예시 경로 |
 |------|--------|------|----------|
-| Frontend | `/`, `/health`, `/metrics` | `_frontend` | `GET /health`, `GET /.well-known/agent.json` |
+| Frontend | `/`, `/health`, `/metrics` | `_frontend` | `GET /health`, `GET /.well-known/agent.json`, `GET /metrics` |
 | Dashboard | `/api/v1/dashboard/*` | `_dashboard` | `GET /api/v1/dashboard/shell` |
 | Workspace | `/api/v1/status`, `/api/v1/tasks`, `/api/v1/agents`, `/api/v1/messages` | `_workspace` | `GET /api/v1/status` |
 | Provider Runs | `/api/v1/chains/*` | `_provider_runs` | `GET /api/v1/chains/summary` |

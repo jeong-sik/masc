@@ -51,8 +51,8 @@ SSOT 다.
 
 | metric | 출처 | 수집 방법 | 비고 |
 |--------|------|----------|------|
-| WS parse cache hit ratio | `masc_ws_parse_cache_{hits,misses}_total` | `/metrics` 카운터 합산 | 이미 export 됨 |
-| WS bytes cache hit ratio | `masc_ws_bytes_cache_{hits,misses}_total` | `/metrics` 카운터 합산 | 이미 export 됨 |
+| WS parse cache hit ratio | `masc_ws_parse_cache_{hits,misses}_total` | OTel metric text 카운터 합산 | 이미 export 됨 |
+| WS bytes cache hit ratio | `masc_ws_bytes_cache_{hits,misses}_total` | OTel metric text 카운터 합산 | 이미 export 됨 |
 | in-process caches | `lib/cache_eio.ml`, `lib/dashboard/dashboard_cache.ml` | **미export** | Phase 0.2.A |
 
 `cache_eio` / `dashboard_cache` 는 hit/miss 카운터가 OTel metric store 에

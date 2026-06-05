@@ -115,8 +115,13 @@ function ChatMessageBubble({
 }) {
   const [expandedRaw, setExpandedRaw] = useState(false)
   const [rawExpandedRaw, setRawExpandedRaw] = useState(false)
+  const [messageCollapsed, setMessageCollapsed] = useState(true)
   const expanded = showMetadata && expandedRaw
   const rawExpanded = showMetadata && rawExpandedRaw
+  const messageText = entry.text || (entry.delivery === 'streaming' ? '' : '(empty reply)')
+  const messageLength = messageText.length
+  const collapseThreshold = 1200
+  const isCollapsible = messageLength > collapseThreshold
   const tone = bubbleTone(entry)
   const isMessenger = variant === 'messenger'
   const detailItems = detailSummary(entry.details)
@@ -224,14 +229,25 @@ function ChatMessageBubble({
         : null}
 
       <div
-        class="markdown-body whitespace-pre-wrap break-words text-base leading-airy text-[var(--color-fg-primary)]"
+        class=${`markdown-body whitespace-pre-wrap break-words text-base leading-airy text-[var(--color-fg-primary)] ${isCollapsible && messageCollapsed ? 'max-h-96 overflow-hidden' : ''}`}
         dangerouslySetInnerHTML=${{
           __html: DOMPurify.sanitize(
-            marked.parse(entry.text || (entry.delivery === 'streaming' ? '' : '(empty reply)')) as string,
+            marked.parse(messageText) as string,
             { ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'code', 'pre', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'blockquote', 'a', 'hr'] }
           )
         }}
       />
+      ${isCollapsible
+        ? html`
+            <button
+              type="button"
+              class="self-start rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-1 text-2xs font-medium text-[var(--color-fg-muted)] transition-colors hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)]"
+              onClick=${() => { setMessageCollapsed(!messageCollapsed) }}
+            >
+              ${messageCollapsed ? '더 보기' : '접기'}
+            </button>
+          `
+        : null}
       ${entry.error
         ? html`
             <div class="rounded-[var(--r-1)] border border-[var(--err-border)] bg-[var(--bad-soft)] px-3 py-2 text-xs leading-paragraph text-[var(--bad-light)]">

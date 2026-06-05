@@ -47,10 +47,9 @@ let no_progress_success_tool_names_for_contract
 ;;
 
 let observed_completion_contract_status
-      ~had_owned_active_task_at_turn_start ~actual_keeper_tool_names ~tool_calls
+      ~had_owned_active_task_at_turn_start ~actual_keeper_tool_names
   : Keeper_execution_receipt.completion_contract_result
   =
-  let _ = tool_calls in
   Keeper_agent_run_turn_helpers.completion_contract_result_for_progress_evidence
     ~had_owned_active_task_at_turn_start
     ~actual_keeper_tool_names
@@ -62,14 +61,4 @@ let text_only_violation_contract_status ~actual_keeper_tool_names ~fallback
   if actual_keeper_tool_names = []
   then Contract_violated
   else fallback ()
-;;
-
-let failed_tool_only_contract_violation
-      ~(actual_keeper_tool_names : string list)
-      ~(tool_calls : Keeper_agent_result.tool_call_detail list)
-  : bool
-  =
-  match tool_calls with
-  | [] -> false
-  | _ :: _ -> actual_keeper_tool_names = []
 ;;

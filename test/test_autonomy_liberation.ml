@@ -27,9 +27,7 @@ let test_build_tool_catalog_worker () =
   let tools = Keeper_tool_surfaces.build_tool_catalog ~role:"worker" () in
   Alcotest.(check bool) "non-empty" true (tools <> []);
   Alcotest.(check bool) "has heartbeat" true
-    (List.mem "masc_heartbeat" tools);
-  Alcotest.(check bool) "no admin tool" false
-    (List.mem "masc_tool_admin_snapshot" tools)
+    (List.mem "masc_heartbeat" tools)
 
 let test_build_tool_catalog_workspace_lead () =
   let tools = Keeper_tool_surfaces.build_tool_catalog ~role:"workspace_lead" () in
@@ -40,8 +38,6 @@ let test_build_tool_catalog_workspace_lead () =
 let test_build_tool_catalog_autonomous () =
   let tools = Keeper_tool_surfaces.build_tool_catalog ~role:"autonomous" () in
   Alcotest.(check bool) "non-empty" true (tools <> []);
-  Alcotest.(check bool) "excludes admin" false
-    (List.mem "masc_tool_admin_snapshot" tools);
   let worker_tools = Keeper_tool_surfaces.build_tool_catalog ~role:"worker" () in
   Alcotest.(check bool) "more tools than worker" true
     (List.length tools >= List.length worker_tools)

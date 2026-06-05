@@ -10,6 +10,7 @@ module Types = Masc_domain
     loop integration tests (which require Eio fibers + Workspace I/O). *)
 
 open Alcotest
+open Masc
 module HS = Masc.Keeper_heartbeat_smart
 
 (* ── agent_status derivation from keeper_meta fields ─── *)

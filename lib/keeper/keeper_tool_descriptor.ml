@@ -1207,10 +1207,6 @@ let internal_descriptors : t list =
      LLM-native WebSearch / WebFetch descriptors above. Do not add
      duplicate internal descriptors here; that would make runtime receipt
      projection depend on list order. *)
-  ; masc_misc_descriptor "tool_admin_snapshot" "masc_tool_admin_snapshot"
-      "Read tool-admin inventory snapshot." ~readonly:true
-  ; masc_misc_descriptor "tool_admin_update" "masc_tool_admin_update"
-      "Update tool-admin metadata." ~readonly:false
   (* ── RFC-0182 §3.1 — masc_control_* cluster (2 entries) ──────── *)
   ; masc_control_descriptor "pause" "masc_pause"
       "Pause a paused/runnable agent." ~readonly:false

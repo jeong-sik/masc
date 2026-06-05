@@ -26,6 +26,8 @@
    line, gauge sets before AND after each beat.
 *)
 
+open Masc
+
 let () =
   let dir =
     Filename.concat

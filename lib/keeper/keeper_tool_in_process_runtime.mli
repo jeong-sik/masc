@@ -143,7 +143,7 @@ val handle_masc_workspace
 (** RFC-0182 §3.1 — [handle_masc_misc] is the descriptor-projection
     cluster handler for [masc_config] / [masc_dashboard] /
     [masc_cleanup_zombies] / [masc_tool_stats] / [masc_tool_help] /
-    [masc_web_search] / [masc_web_fetch] / [masc_tool_admin_*].
+    [masc_web_search] / [masc_web_fetch].
     Constructs a [Tool_misc.context] from [config + meta.name] and calls
     [Tool_misc.dispatch]. *)
 val handle_masc_misc

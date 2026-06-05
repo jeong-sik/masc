@@ -9,7 +9,7 @@
       [Fd_accountant.with_slot ~kind:Docker_spawn]. *)
 
 open Alcotest
-module FA = Masc.Fd_accountant
+module FA = Fd_accountant
 module DST = Masc.Docker_spawn_throttle
 module DP = Domain_pool
 

@@ -109,7 +109,6 @@ let generic_matrix_excluded_names =
   [
     "masc_keeper_msg";
     "masc_operator_snapshot";
-    "masc_tool_admin_snapshot";
   ]
 
 let string_starts_with ~prefix s =

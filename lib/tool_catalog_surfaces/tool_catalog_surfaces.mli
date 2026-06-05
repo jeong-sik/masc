@@ -23,9 +23,6 @@ val local_worker_surface_tools : string list
 val session_min_surface_tools : string list
 (** Minimum session tools (initialization only). *)
 
-val admin_surface_tools : string list
-(** Admin / operator tools, excluded from autonomous agents. *)
-
 val workspace_role_tools : string list
 val execution_role_tools : string list
 

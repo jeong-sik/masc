@@ -25,6 +25,8 @@
         a restart.
 *)
 
+open Masc
+
 let () =
   let dir =
     Filename.concat (Filename.get_temp_dir_name ())

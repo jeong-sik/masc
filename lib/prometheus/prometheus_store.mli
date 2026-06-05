@@ -36,10 +36,6 @@ val metric_total : string -> float
     the lock. *)
 val snapshot : unit -> metric list
 
-(** Register the in-process metric store as an OTel observable source.
-    Idempotent; safe to call repeatedly. *)
-val register_otel_source : unit -> unit
-
 (** The most recent EDEADLK backtrace captured by the store lock. [None]
     until the first re-entrant lock failure. *)
 val last_deadlock_backtrace_for_test : unit -> string option

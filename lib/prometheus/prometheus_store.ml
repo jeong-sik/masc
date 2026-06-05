@@ -157,19 +157,3 @@ let observe_histogram name ?(labels = []) value =
         ; labels
         })
 ;;
-
-(** Register the in-process metric store as an OTel observable source.
-    The OTel backend polls [snapshot] on each export tick and emits
-    accumulated values as OTLP metrics. Idempotent: safe to call repeatedly. *)
-let register_otel_source () =
-  Otel_metrics.register_source (fun () ->
-    snapshot ()
-    |> List.map (fun (m : metric) ->
-         let kind : Otel_metrics.kind =
-           match m.metric_type with
-           | Counter -> Counter
-           | Gauge -> Gauge
-           | Histogram -> Histogram
-         in
-         { Otel_metrics.name = m.name; value = m.value; labels = m.labels; kind }))
-;;

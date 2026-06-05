@@ -1,10 +1,8 @@
-(** Retired Prometheus facade — bridged to OTel.
+(** Retired Prometheus facade.
 
-    The Prometheus exporter/registration stack was hard-cut (PR #20082 S4-2).
-    The in-process counter API remains as a compatibility boundary; accumulated
-    values are now exported via OTLP through [Prometheus_store.register_otel_source]
-    (wired in [Server_bootstrap_maintenance]). Callers will be migrated to native
-    OTel Metrics in follow-up slices. *)
+    The Prometheus exporter/registration stack was hard-cut; this module keeps
+    the historical metric-name and in-process counter API as a compatibility
+    boundary while callers are removed in follow-up slices. *)
 
 include Prometheus_store
 include Prometheus_metric_names

@@ -19,7 +19,7 @@ val setup_exporter_with :
 
 (** Setup OTLP exporter using the cohttp-eio HTTP/protobuf backend.
     Forks a 500ms tick fiber under [sw] for periodic batch flush.
-    No-op when [MASC_OTEL_ENABLED] is not set. *)
+    No-op when OTel is explicitly disabled. *)
 val setup_exporter : sw:Eio.Switch.t -> Eio_unix.Stdenv.base -> unit
 
 (** Flush pending spans and remove the OTLP backend.

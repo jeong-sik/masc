@@ -196,7 +196,7 @@ This document is the contract; existing 1516 callsites are unaudited. Migration 
 2. **Phase 1 — lint** — add `scripts/ci/check-log-severity-anti-patterns.sh` with rules L1–L5 enforced on `lib/`. Allowlist comments for known intentional deviations.
 3. **Phase 2 — top-5 hotspot reclassify** — `server_runtime_bootstrap.ml`, `keeper_keepalive.ml`, `keeper_unified_turn.ml`, `server_bootstrap_loops.ml`, `keeper_agent_run.ml` (319 sites). One PR per file; each PR audits + reclassifies + verifies cardinality.
 4. **Phase 3 — long tail** — remaining ~1200 sites swept in domain batches (server, keeper, dashboard, oas-bridge, workspace). Each batch ≤ 100 sites.
-5. **Phase 4 — cardinality dashboard** — Prometheus counter per `(file, level)` exposed on `/metrics`, dashboard surfaces deviations from § 5.
+5. **Phase 4 — cardinality dashboard** — OTel metric-store counter per `(file, level)`, dashboard surfaces deviations from § 5.
 
 Phases 1–4 are independent PRs. Migration order is not load-bearing — the lint catches drift even if Phase 2 is interleaved.
 

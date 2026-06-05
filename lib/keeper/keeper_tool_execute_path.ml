@@ -7,104 +7,68 @@ let normalize_repo_cwd_path path =
   Keeper_alerting_path.normalize_path_for_check path
   |> Keeper_alerting_path.strip_trailing_slashes
 
-type currency_cache_entry =
-  { at : float
-  ; outcome : Playground_repo_readiness.currency_outcome option
+let safe_repo_component s =
+  s <> ""
+  && s <> "."
+  && s <> ".."
+  && (not (String.contains s '/'))
+  && (not (String.contains s '\\'))
+  && (not (String.contains s '\x00'))
+  && String.for_all
+       (fun c ->
+          (c >= 'A' && c <= 'Z')
+          || (c >= 'a' && c <= 'z')
+          || (c >= '0' && c <= '9')
+          || c = '-'
+          || c = '_'
+          || c = '.')
+       s
+
+type repo_path_context =
+  { path_repo_name : string
+  ; path_repo_root : string
+  ; path_root : string
+  ; accepted_toplevels : string list
   }
 
-(* Currency-sync fetch-rate cache. [Playground_repo_readiness.ensure_current]
-   fetches origin before deciding whether to fast-forward, so calling it on
-   every repo-targeting tool call would refetch many times per turn. This is a
-   per-clone-path rate cache for an *idempotent* operation (not a failure
-   cooldown): the fetch+advance runs at most once per [currency_min_interval_sec]
-   per clone, which bounds the cost to roughly once per keeper turn. *)
-let currency_sync_cache : (string, currency_cache_entry) Hashtbl.t =
-  Hashtbl.create 64
-
-let currency_min_interval_sec = 30.0
-
-let log_currency_outcome ~repo_name = function
-  | Playground_repo_readiness.Up_to_date -> ()
-  | Advanced commits ->
-    Log.Keeper.info "currency: advanced sandbox repo %s by %d commit(s)"
-      repo_name commits
-  | Preserved reason ->
-    (* Local/divergent work kept. Keep this visible: otherwise a dirty or
-       task-branch sandbox looks like the runtime simply forgot to update. *)
-    Log.Keeper.info "currency: preserved sandbox repo %s (%s)" repo_name reason
-  | Skipped reason ->
-    (* Currency could not be established (missing/corrupt clone, no
-       credential, or fetch failure). Visible by default so a recurring
-       failure does not re-freeze the repo invisibly. *)
-    Log.Keeper.info "currency: skipped sandbox repo %s (%s)" repo_name reason
-
-(* Keep the keeper's sandbox clone current with origin/<default_branch> before
-   code work. Best-effort: a failed advance never fails the turn, but
-   [Eio.Cancel.Cancelled] is re-raised so turn cancellation is preserved. The
-   advance is fast-forward-only and work-preserving (see [Playground_repo_readiness]).
-   The typed outcome is logged rather than dropped: a [Skipped] sync is the very
-   "repo silently frozen" failure this exists to fix, so it stays visible. *)
-let repo_currency_outcome_best_effort ~config ~meta ~repo_name =
-  let cpath = Playground_repo_readiness.clone_path ~config ~meta ~repo_name in
-  let now = Unix.gettimeofday () in
-  let cached = Hashtbl.find_opt currency_sync_cache cpath in
-  let due =
-    match cached with
-    | Some { at; _ } -> now -. at >= currency_min_interval_sec
-    | None -> true
-  in
-  if due then begin
-    try
-      let outcome =
-        Playground_repo_readiness.ensure_current ~config ~meta ~repo_name ()
-      in
-      log_currency_outcome ~repo_name outcome;
-      Hashtbl.replace currency_sync_cache cpath { at = now; outcome = Some outcome };
-      Some outcome
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | _ ->
-      Hashtbl.replace currency_sync_cache cpath { at = now; outcome = None };
-      None
-  end
-  else
-    match cached with
-    | Some { outcome; _ } -> outcome
-    | None -> None
-
-let sync_repo_currency_best_effort ~config ~meta ~repo_name =
-  let _outcome = repo_currency_outcome_best_effort ~config ~meta ~repo_name in
-  ()
-
-let repo_path_context ~(config : Workspace.config) ~(meta : keeper_meta) cwd =
+let repo_path_context ~(config : Workspace.config) ~(meta : keeper_meta) ~path =
   let playground =
     keeper_playground_root ~config ~meta
     |> normalize_repo_cwd_path
   in
   let repos_root = Filename.concat playground "repos" |> normalize_repo_cwd_path in
-  let cwd = normalize_repo_cwd_path cwd in
-  if String.equal cwd repos_root then None
+  let path = normalize_repo_cwd_path path in
+  if String.equal path repos_root then None
   else
     let prefix = repos_root ^ "/" in
-    if not (String.starts_with ~prefix cwd) then None
+    if not (String.starts_with ~prefix path) then None
     else
       let suffix =
-        String.sub cwd (String.length prefix) (String.length cwd - String.length prefix)
+        String.sub path (String.length prefix) (String.length path - String.length prefix)
       in
       match String.split_on_char '/' suffix with
       | repo_name :: ".worktrees" :: task_name :: _
-        when Playground_repo_readiness.safe_repo_component repo_name
-             && Playground_repo_readiness.safe_repo_component task_name ->
+        when safe_repo_component repo_name && safe_repo_component task_name ->
         let repo_root = Filename.concat repos_root repo_name in
         let worktree_root =
           Filename.concat (Filename.concat repo_root ".worktrees") task_name
           |> normalize_repo_cwd_path
         in
-        Some (repo_name, normalize_repo_cwd_path repo_root, worktree_root, [ worktree_root ])
-      | repo_name :: _ when Playground_repo_readiness.safe_repo_component repo_name ->
+        Some
+          { path_repo_name = repo_name
+          ; path_repo_root = normalize_repo_cwd_path repo_root
+          ; path_root = worktree_root
+          ; accepted_toplevels = [ worktree_root ]
+          }
+      | repo_name :: _ when safe_repo_component repo_name ->
         let repo_root = Filename.concat repos_root repo_name in
         let repo_root = normalize_repo_cwd_path repo_root in
-        Some (repo_name, repo_root, repo_root, [ repo_root ])
+        Some
+          { path_repo_name = repo_name
+          ; path_repo_root = repo_root
+          ; path_root = repo_root
+          ; accepted_toplevels = [ repo_root ]
+          }
       | _ -> None
 
 type repo_cwd_context =
@@ -116,66 +80,15 @@ type repo_cwd_context =
 
 let repo_cwd_context ~config ~meta ~cwd =
   let cwd = normalize_repo_cwd_path cwd in
-  match repo_path_context ~config ~meta cwd with
-  | Some (repo_name, repo_root, path_root, _) ->
-    Some { repo_name; repo_root; path_root; is_direct_root = String.equal repo_root cwd }
+  match repo_path_context ~config ~meta ~path:cwd with
+  | Some { path_repo_name; path_repo_root; path_root; _ } ->
+    Some
+      { repo_name = path_repo_name
+      ; repo_root = path_repo_root
+      ; path_root
+      ; is_direct_root = String.equal path_repo_root cwd
+      }
   | None -> None
-
-let invalidate_repo_currency_cache ~config ~meta ~repo_name =
-  let cpath = Playground_repo_readiness.clone_path ~config ~meta ~repo_name in
-  Hashtbl.remove currency_sync_cache cpath
-;;
-
-let repo_currency_not_ready_error ~config ~meta ~repo_name ~reason ~cwd =
-  let clone_path = Playground_repo_readiness.clone_path ~config ~meta ~repo_name in
-  let hint_suffix =
-    match Playground_repo_readiness.deleted_tracked_files_restore_hint ~clone_path with
-    | Some hint -> " " ^ hint
-    | None -> ""
-  in
-  Printf.sprintf
-    "sandbox_repo_stale: sandbox repo root repos/%s is not current and was \
-     preserved (%s). Direct repo-root Execute is blocked so the agent does not \
-     run against stale local state. Use cwd=\"repos/%s/.worktrees/<task>\" for \
-     task work, or run diagnostic git status/branch/log/diff/remote/rev-parse/\
-     fetch/worktree and repair the sandbox repo root with an allowed recovery \
-     command before retrying.%s cwd=%s"
-    repo_name
-    reason
-    repo_name
-    hint_suffix
-    cwd
-
-let validate_repo_cwd_currency_ready
-      ~(config : Workspace.config)
-      ~(meta : keeper_meta)
-      ~(cwd : string)
-      ~allow_stale_preserved_repo_context
-  =
-  match repo_path_context ~config ~meta cwd with
-  | None -> Ok ()
-  | Some (repo_name, repo_root, path_root, _accepted_toplevels)
-    when not
-           (String.equal
-              (normalize_repo_cwd_path repo_root)
-              (normalize_repo_cwd_path path_root)) ->
-    Ok ()
-  | Some (repo_name, _repo_root, _path_root, _accepted_toplevels) ->
-    if allow_stale_preserved_repo_context
-    then Ok ()
-    else
-      match repo_currency_outcome_best_effort ~config ~meta ~repo_name with
-      | Some Playground_repo_readiness.Up_to_date | Some (Advanced _) -> Ok ()
-      | Some (Preserved reason) | Some (Skipped reason) ->
-        Error (repo_currency_not_ready_error ~config ~meta ~repo_name ~reason ~cwd)
-      | None ->
-        Error
-          (repo_currency_not_ready_error
-             ~config
-             ~meta
-             ~repo_name
-             ~reason:"currency probe failed"
-             ~cwd)
 
 type execution_location_scope =
   | Playground_root
@@ -236,7 +149,7 @@ let execution_location_json
     | None -> Outside_playground, [], None, None, None, None
     | Some [] -> Playground_root, [], None, None, None, None
     | Some ("repos" :: repo_name :: rest)
-      when Playground_repo_readiness.safe_repo_component repo_name ->
+      when safe_repo_component repo_name ->
       let repo_root =
         Filename.concat (Filename.concat playground "repos") repo_name
         |> normalize_repo_cwd_path
@@ -245,7 +158,7 @@ let execution_location_json
        | [] ->
          Repo_root, [ "repos"; repo_name ], Some repo_name, Some repo_root, None, None
        | ".worktrees" :: task_name :: tail
-         when Playground_repo_readiness.safe_repo_component task_name ->
+         when safe_repo_component task_name ->
          let worktree_root =
            Filename.concat (Filename.concat repo_root ".worktrees") task_name
            |> normalize_repo_cwd_path
@@ -300,132 +213,8 @@ let execution_location_json
     ; "selected_worktree", selected_worktree
     ]
 
-let repo_cwd_not_ready_error ~repo_name ~path_root ~git_toplevel =
-  Printf.sprintf
-    "sandbox_repo_not_ready: sandbox path is under repos/%s, but %s is not an \
-     independent git checkout (git_toplevel=%s). Repair or reclone the sandbox \
-     repo under repos/%s, then retry with cwd=\"repos/%s\". If the call is \
-     running inside a docker sandbox, ensure the docker playground mount \
-     includes the worktree subdirectory (or set cwd to the in-place repo root \
-     \"repos/%s\" if the keeper works directly in the clone)."
-    repo_name
-    path_root
-    (Option.value ~default:"<none>" git_toplevel)
-    repo_name
-    repo_name
-    repo_name
-
-(** [extract_worktree_task_name cwd] extracts the task name if [cwd] is under a
-    [.worktrees/<task>] path.  Returns [Some (repo_name, task_name, worktree_root)]
-    or [None]. *)
-let extract_worktree_task_name ~(config : Workspace.config) ~(meta : keeper_meta) cwd =
-  let playground =
-    keeper_playground_root ~config ~meta
-    |> normalize_repo_cwd_path
-  in
-  let repos_root = Filename.concat playground "repos" |> normalize_repo_cwd_path in
-  let cwd = normalize_repo_cwd_path cwd in
-  let prefix = repos_root ^ "/" in
-  if not (String.starts_with ~prefix cwd) then None
-  else
-    let suffix =
-      String.sub cwd (String.length prefix) (String.length cwd - String.length prefix)
-    in
-    match String.split_on_char '/' suffix with
-    | repo_name :: ".worktrees" :: task_name :: _
-      when Playground_repo_readiness.safe_repo_component repo_name
-           && Playground_repo_readiness.safe_repo_component task_name ->
-      let worktree_root =
-        Filename.concat (Filename.concat (Filename.concat repos_root repo_name) ".worktrees") task_name
-        |> normalize_repo_cwd_path
-      in
-      Some (repo_name, task_name, worktree_root)
-    | _ -> None
-
-let validate_repo_path_ready
-      ~(config : Workspace.config)
-      ~(meta : keeper_meta)
-      ?(allow_repair = true)
-      ~(probe_path : string)
-      cwd
-  =
-  match repo_path_context ~config ~meta cwd with
-  | None -> Ok ()
-  | Some (repo_name, _repo_root, path_root, accepted_toplevels) ->
-    if allow_repair then sync_repo_currency_best_effort ~config ~meta ~repo_name;
-    let check_probe () =
-      let top =
-        Playground_repo_readiness.run_git
-          ~timeout_sec:Playground_repo_readiness.read_only_probe_timeout_sec
-          ~clone_path:probe_path
-          [ "rev-parse"; "--show-toplevel" ]
-      in
-      let top_opt = if top.ok then Some top.output else None in
-      let top_matches =
-        top.ok
-        && List.exists
-             (fun expected ->
-                String.equal
-                  (normalize_repo_cwd_path top.output)
-                  (normalize_repo_cwd_path expected))
-             accepted_toplevels
-      in
-      if top_matches then Ok ()
-      else
-        Error
-          (repo_cwd_not_ready_error ~repo_name ~path_root ~git_toplevel:top_opt)
-    in
-    match check_probe () with
-    | Ok () -> Ok ()
-    | Error _ as initial_err ->
-      if not allow_repair
-      then initial_err
-      else (
-        (* Auto-repair: for worktree paths, try worktree creation first;
-           for direct repo paths, try reclone. *)
-        let worktree_result =
-          match extract_worktree_task_name ~config ~meta cwd with
-          | Some (wt_repo_name, task_name, worktree_root) ->
-            Playground_repo_readiness.ensure_worktree_ready
-              ~config ~meta ~repo_name:wt_repo_name ~task_name
-              ~worktree_path:worktree_root ()
-          | None -> Error "not a worktree path"
-        in
-        match worktree_result with
-        | Ok () -> check_probe ()
-        | Error _ ->
-          (* Fall back to repo-level reclone *)
-          (match
-             Playground_repo_readiness.ensure_ready ~config ~meta ~repo_name ()
-           with
-           | Ok () -> check_probe ()
-           | Error _repair_err -> initial_err))
-
-let validate_repo_cwd_ready
-      ~(config : Workspace.config)
-      ~(meta : keeper_meta)
-      ?(allow_repair = true)
-      cwd
-  =
-  validate_repo_path_ready ~config ~meta ~allow_repair ~probe_path:cwd cwd
-
-let resolve_missing_cwd
-      ~(config : Workspace.config)
-      ~(meta : keeper_meta)
-      ~allow_side_effects
-      cwd
-  =
-  match repo_path_context ~config ~meta cwd with
-  | Some _ ->
-    (match validate_repo_cwd_ready ~config ~meta ~allow_repair:allow_side_effects cwd with
-     | Ok () -> Ok cwd
-     | Error _ as err -> err)
-  | None ->
-    if not allow_side_effects
-    then Error (Printf.sprintf "cwd_not_directory: %s (directory does not exist)" cwd)
-    else
-    let _created_path = Keeper_fs.ensure_dir cwd in
-    Ok cwd
+let resolve_missing_cwd cwd =
+  Error (Printf.sprintf "cwd_not_directory: %s (directory does not exist)" cwd)
 
 let resolve_tool_read_cwd
       ~(config : Workspace.config)
@@ -442,128 +231,16 @@ let resolve_tool_read_cwd
   | Error _ as err -> err
   | Ok cwd when Fs_compat.file_exists cwd && Sys.is_directory cwd -> Ok cwd
   | Ok cwd ->
-    if not (Fs_compat.file_exists cwd) then
-      resolve_missing_cwd ~config ~meta ~allow_side_effects:true cwd
+    if not (Fs_compat.file_exists cwd) then resolve_missing_cwd cwd
     else
       Error (Printf.sprintf "cwd_not_directory: %s (path_is_file_not_directory)" cwd)
 
-let validate_repo_path_args_ready
-      ?(allow_repair = true)
-      ~(config : Workspace.config)
-      ~(meta : keeper_meta)
-      ~(cwd : string)
-      (ir : Masc_exec.Shell_ir.t)
-  =
-  let normalize_repo_command_name command_name =
-    let command_name = String.lowercase_ascii command_name in
-    if String.ends_with ~suffix:".exe" command_name
-    then String.sub command_name 0 (String.length command_name - String.length ".exe")
-    else command_name
-  in
-  let command_has_repo_path_args command_name =
-    command_name = "git"
-    || command_name = "gh"
-    || Exec_policy_path_arg_descriptor.command_materializes_path_arg command_name
-  in
-  let path_args_of_simple simple =
-    let command_name =
-      Masc_exec.Exec_program.to_string simple.Masc_exec.Shell_ir.bin
-      |> Filename.basename
-      |> normalize_repo_command_name
-    in
-    if not (command_has_repo_path_args command_name)
-    then []
-    else (
-      match Exec_policy.simple_literal_args simple with
-      | None -> []
-      | Some args -> Exec_policy.path_argument_values command_name args)
-  in
-  let path_args_of_effective_stage
-      (stage : Masc_exec.Shell_ir_command_shape.stage)
-    =
-    let command_name =
-      stage.bin |> Filename.basename |> normalize_repo_command_name
-    in
-    if command_has_repo_path_args command_name
-    then Exec_policy.path_argument_values command_name stage.args
-    else []
-  in
-  let rec path_args = function
-    | Masc_exec.Shell_ir.Simple simple ->
-      path_args_of_simple simple
-    | Masc_exec.Shell_ir.Pipeline stages ->
-      List.concat_map path_args stages
-  in
-  let all_path_args =
-    path_args ir
-    @ (Masc_exec.Shell_ir_command_shape.effective_stages ir
-       |> List.concat_map path_args_of_effective_stage)
-  in
-  let validate_target seen raw =
-    let trimmed = String.trim raw in
-    if trimmed = "" then Ok seen
-    else
-      let target =
-        if Filename.is_relative trimmed then Filename.concat cwd trimmed else trimmed
-      in
-      match repo_path_context ~config ~meta target with
-      | None -> Ok seen
-      | Some (_repo_name, _repo_root, path_root, _accepted_toplevels) ->
-        let key = normalize_repo_cwd_path path_root in
-        if List.mem key seen then Ok seen
-        else (
-          match
-            validate_repo_path_ready
-              ~config
-              ~meta
-              ~allow_repair
-              ~probe_path:path_root
-              target
-          with
-          | Ok () -> Ok (key :: seen)
-          | Error _ as err -> err)
-  in
-  let validate_seen (expect_separated_path, seen) raw =
-    let trimmed = String.trim raw in
-    if expect_separated_path
-    then Result.map (fun seen -> false, seen) (validate_target seen trimmed)
-    else (
-      match Exec_policy_path_arg_descriptor.path_value_of_flagged_token trimmed with
-      | Some path -> Result.map (fun seen -> false, seen) (validate_target seen path)
-      | None when Exec_policy_path_arg_descriptor.is_path_flag trimmed ->
-        Ok (true, seen)
-      | None -> Result.map (fun seen -> false, seen) (validate_target seen trimmed))
-  in
-  all_path_args
-  |> List.fold_left
-       (fun acc raw ->
-          match acc with
-          | Error _ as err -> err
-          | Ok seen -> validate_seen seen raw)
-       (Ok (false, []))
-  |> Result.map (fun _ -> ())
-
 let resolve_tool_write_cwd
-      ~allow_side_effects
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
   =
   let raw_cwd = Safe_ops.json_string ~default:"" "cwd" args |> String.trim in
-  let raw_cwd_is_own_container_path =
-    if Filename.is_relative raw_cwd
-       || meta.sandbox_profile <> Keeper_types_profile_sandbox.Docker
-    then false
-    else (
-      let normalize path =
-        Keeper_alerting_path.normalize_path_for_check path
-        |> Keeper_alerting_path.strip_trailing_slashes
-      in
-      let container_root = Keeper_sandbox.container_root meta.name |> normalize in
-      let raw_norm = normalize raw_cwd in
-      String.equal raw_norm container_root
-      || String.starts_with ~prefix:(container_root ^ "/") raw_norm)
-  in
   let resolved =
     if raw_cwd = ""
     then Ok (keeper_default_write_root ~config ~meta)
@@ -571,16 +248,9 @@ let resolve_tool_write_cwd
   in
   match resolved with
   | Error _ as err -> err
-  | Ok cwd when Fs_compat.file_exists cwd && Sys.is_directory cwd ->
-    if raw_cwd_is_own_container_path
-    then Ok cwd
-    else (
-      match validate_repo_cwd_ready ~config ~meta ~allow_repair:allow_side_effects cwd with
-      | Ok () -> Ok cwd
-      | Error _ as err -> err)
+  | Ok cwd when Fs_compat.file_exists cwd && Sys.is_directory cwd -> Ok cwd
   | Ok cwd ->
-    if not (Fs_compat.file_exists cwd) then
-      resolve_missing_cwd ~config ~meta ~allow_side_effects cwd
+    if not (Fs_compat.file_exists cwd) then resolve_missing_cwd cwd
     else
       Error (Printf.sprintf "cwd_not_directory: %s (path_is_file_not_directory)" cwd)
 

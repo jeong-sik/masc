@@ -370,11 +370,7 @@ let test_docker_container_cwd_maps_to_host_worktree () =
        (normalize_realpath cwd)
    | Error e -> Alcotest.fail ("read cwd should map container path: " ^ e));
   match
-    Keeper_tool_execute_path.resolve_tool_write_cwd
-      ~allow_side_effects:true
-      ~config
-      ~meta
-      ~args
+    Keeper_tool_execute_path.resolve_tool_write_cwd ~config ~meta ~args
   with
   | Ok cwd ->
     Alcotest.(check string) "write cwd maps to host" expect

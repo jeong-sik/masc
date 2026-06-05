@@ -7,39 +7,31 @@ val resolve_tool_read_cwd :
   (string, string) result
 
 val resolve_tool_write_cwd :
-  allow_side_effects:bool ->
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   args:Yojson.Safe.t ->
   (string, string) result
-(** Resolve an Execute cwd inside the keeper write boundary. When
-    [allow_side_effects] is [false], resolution performs no mkdir, repo
-    fast-forward, reclone, or worktree repair. *)
+(** Resolve an Execute cwd inside the keeper write boundary. This is path
+    resolution only: it never creates directories or changes repo/worktree
+    state. *)
 
-val validate_repo_path_args_ready :
-  ?allow_repair:bool ->
+type repo_path_context =
+  { path_repo_name : string
+  ; path_repo_root : string
+  ; path_root : string
+  ; accepted_toplevels : string list
+  }
+(** Path-only facts for any path inside a keeper sandbox repo. [path_root] is
+    the expected git toplevel for the path: either the in-place clone root or a
+    selected worktree root. *)
+
+val repo_path_context :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
-  cwd:string ->
-  Masc_exec.Shell_ir.t ->
-  (unit, string) result
-(** Reject typed Execute path arguments that point into a sandbox [repos/<repo>]
-    directory unless that repo is an independent git checkout. This catches
-    commands run from the playground root with arguments like
-    [./repos/masc/lib/foo.ml]. *)
-
-val validate_repo_cwd_currency_ready :
-  config:Workspace.config ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  cwd:string ->
-  allow_stale_preserved_repo_context:bool ->
-  (unit, string) result
-(** Reject typed Execute commands from a preserved sandbox [repos/<repo>] root
-    or subpath when the repo could not be advanced to [origin/main]. Dirty,
-    detached, task-branch, diverged, or unregistered roots are preserved by the
-    repo currency layer; this guard prevents normal work from continuing against
-    that stale root. Repo worktree cwd values are not gated here. Command-shape
-    policy is decided by the caller through [allow_stale_preserved_repo_context]. *)
+  path:string ->
+  repo_path_context option
+(** Classify [path] as a keeper sandbox repo path. This performs no git probes
+    and no repo setup. *)
 
 type repo_cwd_context =
   { repo_name : string
@@ -58,14 +50,6 @@ val repo_cwd_context :
   repo_cwd_context option
 (** Classify [cwd] as a keeper sandbox repo cwd. This reports path facts only;
     callers own command-shape and write-gate policy. *)
-
-val invalidate_repo_currency_cache :
-  config:Workspace.config ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  repo_name:string ->
-  unit
-(** Clear the cached currency probe for [repo_name]. Callers decide when a
-    command is allowed to mutate repo currency. *)
 
 val execution_location_json :
   config:Workspace.config ->

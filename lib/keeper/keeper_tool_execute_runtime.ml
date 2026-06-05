@@ -298,7 +298,6 @@ let handle_tool_execute_typed
   let root = Keeper_alerting_path.project_root_of_config config in
   match
     Keeper_tool_execute_path.resolve_tool_write_cwd
-      ~allow_side_effects:write_enabled
       ~config
       ~meta
       ~args
@@ -531,7 +530,7 @@ let handle_tool_execute_typed
             Keeper_tool_execute_shell_ir.dispatch_classified
               ~before_path_validation:(fun ir ->
                 match
-                  Keeper_tool_execute_path.validate_repo_cwd_currency_ready
+                  Keeper_tool_execute_repo_preflight.validate_cwd_ready
                     ~config
                     ~meta
                     ~cwd
@@ -539,10 +538,9 @@ let handle_tool_execute_typed
                 with
                 | Error _ as err -> err
                 | Ok () ->
-                  Keeper_tool_execute_path.validate_repo_path_args_ready
+                  Keeper_tool_execute_repo_preflight.validate_path_args_ready
                     ~config
                     ~meta
-                    ~allow_repair:write_enabled
                     ~cwd
                     ir)
               ~allowed_commands
@@ -576,7 +574,7 @@ let handle_tool_execute_typed
           | Ok result ->
             (match result.status, repo_cwd_context with
              | Unix.WEXITED 0, Some { repo_name; _ } when is_direct_repo_git_recovery ->
-               Keeper_tool_execute_path.invalidate_repo_currency_cache
+               Keeper_tool_execute_repo_preflight.invalidate_currency_cache
                  ~config
                  ~meta
                  ~repo_name

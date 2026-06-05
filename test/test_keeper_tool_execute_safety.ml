@@ -479,14 +479,19 @@ let test_tool_execute_rejects_parent_git_repo_cwd () =
       ]
   in
   match
-    Masc.Keeper_tool_execute_path.resolve_tool_write_cwd
-      ~allow_side_effects:true
-      ~config
-      ~meta
-      ~args
+    Masc.Keeper_tool_execute_path.resolve_tool_write_cwd ~config ~meta ~args
   with
-  | Ok cwd -> Alcotest.failf "expected repo cwd rejection, got %s" cwd
-  | Error err ->
+  | Error err -> Alcotest.failf "cwd resolution should be path-only, got: %s" err
+  | Ok cwd ->
+    (match
+       Masc.Keeper_tool_execute_repo_preflight.validate_cwd_ready
+         ~config
+         ~meta
+         ~cwd
+         ~allow_stale_preserved_repo_context:false
+     with
+     | Ok () -> Alcotest.failf "expected repo preflight rejection, got %s" cwd
+     | Error err ->
     if not (is_repo_or_task_state_path_block err) then
       Alcotest.failf
         "expected sandbox_repo_not_ready or task_state_file_path_blocked, got: %s"
@@ -498,7 +503,7 @@ let test_tool_execute_rejects_parent_git_repo_cwd () =
     else
       Alcotest.(check bool) "repo path is surfaced"
         true
-        (String_util.contains_substring err "repos/masc")
+        (String_util.contains_substring err "repos/masc"))
 
 let test_tool_execute_rejects_parent_git_repo_path_arg () =
   with_eio_fs @@ fun () ->
@@ -673,7 +678,7 @@ let test_tool_execute_rejects_stale_worktree_path_arg () =
     then Alcotest.failf "expected stale worktree root, got: %s" err
   | None -> Alcotest.fail ("expected error json, got: " ^ raw)
 
-let test_tool_execute_readonly_missing_worktree_path_arg_does_not_repair () =
+let test_tool_execute_readonly_missing_worktree_path_arg_does_not_materialize () =
   with_eio_fs @@ fun () ->
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
@@ -706,7 +711,7 @@ let test_tool_execute_readonly_missing_worktree_path_arg_does_not_repair () =
       Alcotest.failf
         "expected sandbox_repo_not_ready or task_state_file_path_blocked, got: %s"
         err;
-    Alcotest.(check bool) "missing worktree path arg was not repaired"
+    Alcotest.(check bool) "missing worktree path arg was not materialized"
       false
       (Sys.file_exists missing_worktree)
   | None -> Alcotest.fail ("expected error json, got: " ^ raw)
@@ -738,10 +743,8 @@ let test_tool_execute_missing_worktree_cwd_does_not_create_directory () =
   in
   match parse_error_field raw with
   | Some err ->
-    if not (is_repo_or_task_state_path_block err) then
-      Alcotest.failf
-        "expected sandbox_repo_not_ready or task_state_file_path_blocked, got: %s"
-        err;
+    if not (String_util.contains_substring err "cwd_not_directory") then
+      Alcotest.failf "expected cwd_not_directory, got: %s" err;
     Alcotest.(check bool) "missing worktree was not materialized"
       false
       (Sys.file_exists missing_worktree)
@@ -2060,9 +2063,9 @@ let () =
             `Quick
             test_tool_execute_rejects_stale_worktree_path_arg
         ; Alcotest.test_case
-            "readonly missing worktree path arg rejects without repair"
+            "readonly missing worktree path arg rejects without materializing"
             `Quick
-            test_tool_execute_readonly_missing_worktree_path_arg_does_not_repair
+            test_tool_execute_readonly_missing_worktree_path_arg_does_not_materialize
         ; Alcotest.test_case
             "missing worktree cwd rejects without mkdir"
             `Quick

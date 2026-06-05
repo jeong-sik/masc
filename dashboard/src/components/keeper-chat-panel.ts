@@ -12,6 +12,7 @@ import {
   streamKeeperMessage,
   fetchKeeperChatHistory,
   type KeeperChatStreamEvent,
+  type StreamAttachment,
 } from '../api/keeper'
 import { asString, isRecord } from './common/normalize'
 import { showToast } from './common/toast'
@@ -274,9 +275,20 @@ export function KeeperChatPanel({ name }: { name: string }) {
     streaming.value = true
     activeAbortRef.current = new AbortController()
 
+    const apiAttachments: StreamAttachment[] | undefined =
+      userMsg.attachments?.map((att) => ({
+        id: att.id,
+        type: att.type,
+        name: att.name,
+        size: att.size,
+        mimeType: att.mimeType,
+        data: att.data,
+      }))
+
     try {
       await streamKeeperMessage(keeperName, text, {
         signal: activeAbortRef.current.signal,
+        attachments: apiAttachments,
         onEvent: (event: KeeperChatStreamEvent) => {
           if (isKeeperTextContentEvent(event) && typeof event.delta === 'string') {
             streamBuffer.value += event.delta

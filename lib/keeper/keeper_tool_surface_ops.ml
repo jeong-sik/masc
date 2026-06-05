@@ -544,7 +544,8 @@ let append_direct_chat_pair_if_reply ~(config : Workspace.config) ~name ~args re
           ~base_dir:config.base_path
           ~keeper_name:name
           ~user_content
-          ~assistant_content)
+          ~assistant_content
+          ~user_attachments:[])
 ;;
 
 (* RFC-0182 Phase 5 PR-B: ctx-free body for [masc_keeper_msg] descriptor

@@ -357,28 +357,50 @@ function isTerminalKeeperStreamEvent(event: KeeperChatStreamEvent): boolean {
   return event.type === 'RUN_FINISHED' || event.type === 'RUN_ERROR'
 }
 
+export interface StreamAttachment {
+  id: string
+  type: 'image' | 'file'
+  name: string
+  size: number
+  mimeType: string
+  data: string
+}
+
 export async function streamKeeperMessage(
   name: string,
   message: string,
   {
     signal,
     onEvent,
+    attachments,
   }: {
     signal?: AbortSignal
     onEvent: (event: KeeperChatStreamEvent) => void
+    attachments?: StreamAttachment[]
   },
 ): Promise<void> {
+  const body: Record<string, unknown> = {
+    name,
+    message,
+    direct_reply: true,
+  }
+  if (attachments && attachments.length > 0) {
+    body.attachments = attachments.map(att => ({
+      id: att.id,
+      type: att.type,
+      name: att.name,
+      size: att.size,
+      mime_type: att.mimeType,
+      data: att.data,
+    }))
+  }
   const res = await fetch('/api/v1/keepers/chat/stream', {
     method: 'POST',
     headers: {
       ...jsonHeaders(),
       Accept: 'text/event-stream',
     },
-    body: JSON.stringify({
-      name,
-      message,
-      direct_reply: true,
-      }),
+    body: JSON.stringify(body),
     signal,
   })
 

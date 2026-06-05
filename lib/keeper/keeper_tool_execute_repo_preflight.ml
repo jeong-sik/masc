@@ -161,10 +161,10 @@ let validate_repo_path_ready
       ~(probe_path : string)
       path
   =
-  match Keeper_tool_execute_path.repo_path_context ~config ~meta ~path with
+  match Keeper_sandbox_repo_path.classify_path ~config ~meta ~path with
   | None -> Ok ()
   | Some
-      { Keeper_tool_execute_path.path_repo_name = repo_name
+      { Keeper_sandbox_repo_path.path_repo_name = repo_name
       ; path_root
       ; path_is_worktree
       ; accepted_toplevels
@@ -202,17 +202,17 @@ let validate_cwd_currency_ready
       ~(cwd : string)
       ~allow_stale_preserved_repo_context
   =
-  match Keeper_tool_execute_path.repo_path_context ~config ~meta ~path:cwd with
+  match Keeper_sandbox_repo_path.classify_path ~config ~meta ~path:cwd with
   | None -> Ok ()
   | Some
-      { Keeper_tool_execute_path.path_repo_name = repo_name
+      { Keeper_sandbox_repo_path.path_repo_name = repo_name
       ; path_repo_root = repo_root
       ; path_root
       ; _
       }
     when not (String.equal (normalize_path repo_root) (normalize_path path_root)) ->
     Ok ()
-  | Some { Keeper_tool_execute_path.path_repo_name = repo_name; _ } ->
+  | Some { Keeper_sandbox_repo_path.path_repo_name = repo_name; _ } ->
     if allow_stale_preserved_repo_context
     then Ok ()
     else (
@@ -307,9 +307,9 @@ let validate_path_args_ready
       let target =
         if Filename.is_relative trimmed then Filename.concat cwd trimmed else trimmed
       in
-      match Keeper_tool_execute_path.repo_path_context ~config ~meta ~path:target with
+      match Keeper_sandbox_repo_path.classify_path ~config ~meta ~path:target with
       | None -> Ok seen
-      | Some { Keeper_tool_execute_path.path_root; _ } ->
+      | Some { Keeper_sandbox_repo_path.path_root; _ } ->
         let key = normalize_path path_root in
         if List.mem key seen
         then Ok seen

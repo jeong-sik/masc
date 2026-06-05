@@ -23,59 +23,6 @@ val resolve_tool_execute_cwd :
     for omitted cwd. Explicit cwd resolution never creates directories or
     changes repo/worktree state. *)
 
-type repo_path_context =
-  { path_repo_name : string
-  ; path_repo_root : string
-  ; path_root : string
-  ; path_is_worktree : bool
-  ; accepted_toplevels : string list
-  }
-(** Path-only facts for any path inside a keeper sandbox repo. [path_root] is
-    the expected git toplevel for the path: either the in-place clone root or a
-    selected worktree root. *)
-
-val repo_path_context :
-  config:Workspace.config ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  path:string ->
-  repo_path_context option
-(** Classify [path] as a keeper sandbox repo path. This performs no git probes
-    and no repo setup. *)
-
-type repo_cwd_context =
-  { repo_name : string
-  ; repo_root : string
-  ; path_root : string
-  ; is_direct_root : bool
-  }
-(** Path-only facts for a cwd inside a keeper sandbox repo. [path_root] is the
-    selected git toplevel expected for the cwd: either [repo_root] or a worktree
-    root. *)
-
-val repo_cwd_context :
-  config:Workspace.config ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  cwd:string ->
-  repo_cwd_context option
-(** Classify [cwd] as a keeper sandbox repo cwd. This reports path facts only;
-    callers own command-shape and write-gate policy. *)
-
-val execution_location_json :
-  config:Workspace.config ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  args:Yojson.Safe.t ->
-  cwd:string ->
-  Yojson.Safe.t
-(** Structured cwd contract for Execute responses.  The JSON tells the agent
-    whether the effective cwd is inside the keeper playground
-    ([playground_root], [playground_subpath], [repo_root], [repo_subpath],
-    [repo_worktree_root], [repo_worktree_subpath]) or outside it
-    ([outside_playground]).  [relative_cwd] is relative to [playground_root]
-    for playground scopes and [null] when the cwd is outside the playground.
-    Relative argv paths resolve against the effective cwd.  Worktree scopes also
-    carry [worktree_selected] and [selected_worktree] so the keeper can observe
-    the selected repo/worktree assignment without reparsing [cwd]. *)
-
 val auto_correct_path :
   meta:Keeper_meta_contract.keeper_meta -> string -> string option
 (** Auto-correct common LLM-hallucinated path prefixes

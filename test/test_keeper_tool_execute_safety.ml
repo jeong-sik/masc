@@ -1431,7 +1431,7 @@ let test_execution_location_classifies_repo_worktree_subpath () =
     Filename.concat playground "repos/masc/.worktrees/task-123/lib"
   in
   let loc =
-    Masc.Keeper_tool_execute_path.execution_location_json
+    Masc.Keeper_sandbox_repo_path.execution_location_json
       ~config
       ~meta
       ~args:
@@ -1487,7 +1487,7 @@ let test_execution_location_outside_playground_has_null_relative_cwd () =
   let meta = make_readonly_meta "exec-location-outside" in
   let cwd = Filename.concat base_path "outside" in
   let loc =
-    Masc.Keeper_tool_execute_path.execution_location_json
+    Masc.Keeper_sandbox_repo_path.execution_location_json
       ~config
       ~meta
       ~args:(`Assoc [ "cwd", `String cwd ])

@@ -310,10 +310,10 @@ let handle_tool_execute_typed
   with
     | Error e -> error_json e
     | Ok cwd ->
-      let execution_location_fields cwd =
-        [ ( "execution_location"
-          , Keeper_tool_execute_path.execution_location_json ~config ~meta ~args ~cwd )
-        ]
+        let execution_location_fields cwd =
+          [ ( "execution_location"
+            , Keeper_sandbox_repo_path.execution_location_json ~config ~meta ~args ~cwd )
+          ]
       in
       let typed_args = assoc_upsert "cwd" (`String cwd) args in
       match Keeper_tool_execute_typed_input.of_json typed_args with
@@ -482,11 +482,11 @@ let handle_tool_execute_typed
             ()
         else
         let repo_cwd_context =
-          Keeper_tool_execute_path.repo_cwd_context ~config ~meta ~cwd
+          Keeper_sandbox_repo_path.classify_cwd ~config ~meta ~cwd
         in
         let is_direct_sandbox_repo_root =
           match repo_cwd_context with
-          | Some { Keeper_tool_execute_path.is_direct_root = true; _ } -> true
+          | Some { Keeper_sandbox_repo_path.is_direct_root = true; _ } -> true
           | Some _ | None -> false
         in
         let is_git_diagnostic_command =

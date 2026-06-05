@@ -304,7 +304,7 @@ BENCH_ITERATIONS=50 BENCH_WARMUP_ITERATIONS=1 \
   ./scripts/harness_tool_call_quality.sh --live --keepers bench-analyst \
     --models <provider:model>
 
-# 2. /metrics 스크레이프 + CSV 저장.
+# 2. OTel metric text snapshot + CSV 저장.
 ./scripts/harness_oas_dispatch.sh scrape --label baseline
 
 # 3. 비교 (e.g. memoization 적용 전후, 또는 hist on/off).

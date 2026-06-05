@@ -39,6 +39,21 @@ val backoff_delay : int -> float
 val keep_last_n : int -> 'a -> 'a list -> 'a list
 (** [keep_last_n n item lst] prepends [item] and keeps at most [n] entries. *)
 
+type done_signal_resolution =
+  | Done_signal_resolved_now
+  | Done_signal_already_resolved
+  | Done_signal_already_seen
+(** Supervisor-local classification for attempts to resolve a keeper done
+    promise. [Done_signal_already_resolved] still suppresses finally cleanup,
+    but it must not publish a lifecycle event for an already-owned outcome. *)
+
+val done_signal_of_registry_result :
+  Keeper_registry.done_resolve_result -> done_signal_resolution
+(** Collapse the registry result into supervisor-local lifecycle ownership. *)
+
+val should_publish_lifecycle_for_done_signal : done_signal_resolution -> bool
+(** True only when this supervisor branch resolved [done_p] itself. *)
+
 val persona_name_for_drift_check : keeper_meta -> string
 (** Resolve the persona handle used by supervisor persona-drift checks.
     Honors keeper TOML [persona_name] overlays before falling back to

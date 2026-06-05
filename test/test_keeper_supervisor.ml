@@ -354,6 +354,39 @@ let test_keep_last_n_never_exceeds () =
   done;
   check bool "length <= n" true (List.length !result <= n)
 
+let test_done_signal_publishes_only_for_fresh_resolution () =
+  check
+    bool
+    "fresh resolve publishes lifecycle"
+    true
+    (Sup.should_publish_lifecycle_for_done_signal Sup.Done_signal_resolved_now);
+  check
+    bool
+    "already resolved does not publish lifecycle"
+    false
+    (Sup.should_publish_lifecycle_for_done_signal Sup.Done_signal_already_resolved);
+  check
+    bool
+    "already seen does not publish lifecycle"
+    false
+    (Sup.should_publish_lifecycle_for_done_signal Sup.Done_signal_already_seen)
+
+let test_done_signal_maps_registry_result () =
+  check
+    bool
+    "registry fresh resolve publishes"
+    true
+    (Reg.Done_resolved { source = "test" }
+     |> Sup.done_signal_of_registry_result
+     |> Sup.should_publish_lifecycle_for_done_signal);
+  check
+    bool
+    "registry already-resolved suppresses publish"
+    false
+    (Reg.Done_already_resolved { source = "test"; previous = `Stopped }
+     |> Sup.done_signal_of_registry_result
+     |> Sup.should_publish_lifecycle_for_done_signal)
+
 (* ── Property: self-preservation subset ────────────────── *)
 
 let bp = "/tmp/test-sp-prop"
@@ -2139,6 +2172,12 @@ let () =
     ];
     "keep_last_n_properties", [
       test_case "never exceeds limit" `Quick test_keep_last_n_never_exceeds;
+    ];
+    "done_signal", [
+      test_case "publish only for fresh resolution" `Quick
+        test_done_signal_publishes_only_for_fresh_resolution;
+      test_case "registry result mapping preserves lifecycle ownership" `Quick
+        test_done_signal_maps_registry_result;
     ];
     "supervision_cohorts", [
       test_case "64 keepers form 8 cohorts of 8" `Quick

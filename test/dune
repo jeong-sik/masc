@@ -638,6 +638,7 @@
   test_keeper_container_name
   test_worker_runtime
   test_capability_registry
+  test_tool_misc_web_fetch
   test_tool_local_runtime_probe
   test_board_ttl
   test_keeper_path_check_error
@@ -822,6 +823,7 @@
   test_keeper_container_name
   test_worker_runtime
   test_capability_registry
+  test_tool_misc_web_fetch
   test_tool_local_runtime_probe
   test_board_ttl
   test_keeper_path_check_error

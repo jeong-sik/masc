@@ -320,12 +320,10 @@ let get_voice_for_agent agent_id =
     TTS Adapters
     ============================================ *)
 
-let elevenlabs_voice_ids = [
-  ("Sarah",  "EXAVITQu4vr4xnSDxMaL");
-  ("Roger",  "CwhRBWXzGAHq8TQ4Fs17");
-  ("George", "JBFqnCBsd6RMkjVDRZzb");
-  ("Laura",  "FGY2WhTYpPnrIDTdsKH5");
-]
+(* elevenlabs_voice_ids removed: dead code. Voice name → ID resolution
+   is config-driven via Voice_config.load () → agent_voices. The
+   ElevenLabs API accepts voice names directly, making a hardcoded
+   lookup table unnecessary. *)
 
 let trim_opt = Env_config_core.trim_opt
 

@@ -185,8 +185,6 @@ export function flushStreamBuffer(keeperName: string, buffer: string): void {
   })
 }
 
-// --- Test helpers ---
-
 // --- Input Queue (transient, not persisted) ---
 
 export interface QueuedMessage {
@@ -258,10 +256,10 @@ export function getQueueTotal(keeperName: string): number {
   return q.items.length + (q.sending ? 1 : 0)
 }
 
-export function _resetChatStoreForTests(clearStorage = true): void {
+export function _resetChatStoreForTests(options: { clearStorage?: boolean } = {}): void {
   _buffers.clear()
   _queues.clear()
-  if (!clearStorage) return
+  if (options.clearStorage === false) return
   const storage = _storage()
   if (!storage) return
   try {

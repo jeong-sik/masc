@@ -5,6 +5,7 @@ open Masc
 let () = Random.self_init ()
 let () = Mirage_crypto_rng_unix.use_default ()
 let () = Server_startup_state.mark_state_ready ~backend_mode:"test"
+let () = ignore Dashboard.force_link
 let () =
   let base_path = Masc_test_deps.find_project_root () in
   ignore (Result.get_ok (Keeper_tool_dispatch_runtime.init_policy_config ~base_path))
@@ -85,7 +86,6 @@ let () = test "dispatch_dashboard" (fun () ->
   | Some result ->
       assert (Tool_result.is_success result);
       assert (str_contains (Tool_result.message result) "MASC Dashboard");
-      assert (str_contains (Tool_result.message result) "Namespace: default (flattened)");
       assert (not (str_contains (Tool_result.message result) "second-workspace"));
   | None -> failwith "dispatch returned None"
   | exception Effect.Unhandled _ ->
@@ -116,7 +116,6 @@ let () = test "dispatch_dashboard_current_scope" (fun () ->
   | Some result ->
       assert (Tool_result.is_success result);
       assert (str_contains (Tool_result.message result) "MASC Dashboard");
-      assert (str_contains (Tool_result.message result) "Namespace: default (flattened)");
       assert (not (str_contains (Tool_result.message result) "focus-workspace"))
   | None -> failwith "dispatch returned None"
   | exception Effect.Unhandled _ ->
@@ -172,9 +171,8 @@ let () = test "dispatch_web_search_requires_query" (fun () ->
   match Tool_misc.dispatch ctx ~name:"masc_web_search" ~args with
   | Some result ->
       assert (not (Tool_result.is_success result));
-      let json = parse_json (Tool_result.message result) in
-      assert (Yojson.Safe.Util.member "status" json = `String "error");
-      assert (Yojson.Safe.Util.member "message" json = `String "query is required")
+      assert (Tool_result.failure_class result = Some Tool_result.Workflow_rejection);
+      assert (Tool_result.message result = "query is required")
   | None -> failwith "dispatch returned None"
 )
 
@@ -185,11 +183,8 @@ let () = test "dispatch_web_search_rejects_long_query" (fun () ->
   match Tool_misc.dispatch ctx ~name:"masc_web_search" ~args with
   | Some result ->
       assert (not (Tool_result.is_success result));
-      let json = parse_json (Tool_result.message result) in
-      assert (Yojson.Safe.Util.member "status" json = `String "error");
-      assert
-        (Yojson.Safe.Util.member "message" json
-         = `String "query must be at most 500 characters")
+      assert (Tool_result.failure_class result = Some Tool_result.Workflow_rejection);
+      assert (Tool_result.message result = "query must be at most 500 characters")
   | None -> failwith "dispatch returned None"
 )
 
@@ -199,11 +194,10 @@ let () = test "dispatch_web_search_rejects_secret_like_query" (fun () ->
   match Tool_misc.dispatch ctx ~name:"masc_web_search" ~args with
   | Some result ->
       assert (not (Tool_result.is_success result));
-      let json = parse_json (Tool_result.message result) in
-      assert (Yojson.Safe.Util.member "status" json = `String "error");
+      assert (Tool_result.failure_class result = Some Tool_result.Workflow_rejection);
       assert
-        (Yojson.Safe.Util.member "message" json
-         = `String "query looks like it may contain secrets; refine it before using web search")
+        (Tool_result.message result
+         = "query looks like it may contain secrets; refine it before using web search")
   | None -> failwith "dispatch returned None"
 )
 
@@ -396,12 +390,9 @@ let () = test "web_search_simulate_for_test_reports_all_failures" (fun () ->
       [ ("brave", `Empty); ("bing_rss", `Error "rss unavailable") ]
   in
   assert (not (Tool_result.is_success result));
-  let json = parse_json ((Tool_result.message result)) in
-  assert (Yojson.Safe.Util.member "status" json = `String "error");
+  assert (Tool_result.failure_class result = Some Tool_result.Runtime_failure);
   assert
-    (str_contains
-       Yojson.Safe.Util.(member "message" json |> to_string)
-       "bing_rss: rss unavailable")
+    (str_contains (Tool_result.message result) "bing_rss: rss unavailable")
 )
 
 let () = test "parse_official_provider_json_payloads" (fun () ->

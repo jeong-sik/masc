@@ -268,7 +268,7 @@
    masc.keeper_id
    masc.keeper_terminal_reason
    masc.keeper_timing
-   masc.keeper_token_count
+   masc.keeper_metrics
    masc.keeper_sandbox_error
    masc.keeper_provider_error_class
    masc.keeper_failure_taxonomy
@@ -283,8 +283,8 @@
    masc.keeper_pressure
    masc.keeper_lifecycle_events
    masc.keeper_usage_trust
-   masc.keeper_measurement
-   masc.keeper_prompt_names
+   masc.keeper_metrics
+   masc.keeper_metrics
    masc.keeper_event_bus
    masc.keeper_failure_policy
    masc.keeper_synthetic_marker

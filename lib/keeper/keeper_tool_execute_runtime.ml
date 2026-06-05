@@ -116,7 +116,7 @@ let compute_command_descriptor_simple (simple : Masc_exec.Shell_ir.simple) : Ide
       let parts = String.split_on_char '/' url in
       let find_repo parts =
         let rec scan = function
-          | hd :: owner :: repo :: _ when String.equal hd Keeper_sandbox_layout.repos_subdir -> Some (owner ^ "/" ^ repo)
+          | "repos" :: owner :: repo :: _ -> Some (owner ^ "/" ^ repo)
           | _ :: rest -> scan rest
           | [] -> None
         in

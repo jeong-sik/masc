@@ -241,10 +241,10 @@ let playground_root_of_allowed (allowed_norms : string list) : string option =
 ;;
 
 let raw_looks_like_playground_subdir (raw : string) : bool =
-  String.starts_with ~prefix:(Keeper_sandbox_layout.repos_subdir ^ "/") raw
-  || String.starts_with ~prefix:(Keeper_sandbox_layout.mind_subdir ^ "/") raw
-  || raw = Keeper_sandbox_layout.repos_subdir
-  || raw = Keeper_sandbox_layout.mind_subdir
+  String.starts_with ~prefix:"repos/" raw
+  || String.starts_with ~prefix:"mind/" raw
+  || raw = "repos"
+  || raw = "mind"
 ;;
 
 (** Detect paths that reference .masc/ internal state files.

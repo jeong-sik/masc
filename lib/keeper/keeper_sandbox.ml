@@ -125,9 +125,9 @@ let of_meta ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_me
        | Local -> None
        | Docker -> Some (container_root meta.name))
   ; root_arg = "."
-  ; mind_arg = Keeper_sandbox_layout.mind_subdir
-  ; repos_arg = Keeper_sandbox_layout.repos_subdir
-  ; task_overlay_pattern = Keeper_sandbox_layout.repos_subdir ^ "/<repo>"
+  ; mind_arg = "mind"
+  ; repos_arg = "repos"
+  ; task_overlay_pattern = "repos/<repo>"
   }
 
 let allowed_root_rel_of_meta ~(meta : Keeper_meta_contract.keeper_meta) : string =
@@ -157,6 +157,6 @@ let context_status_fields (t : t) : (string * Yojson.Safe.t) list =
     , `Assoc
         [ "root", `String t.root_arg
         ; "mind", `String t.mind_arg
-        ; Keeper_sandbox_layout.repos_subdir, `String t.repos_arg
+        ; "repos", `String t.repos_arg
         ] )
   ]

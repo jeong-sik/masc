@@ -348,7 +348,7 @@ let enrich_playground_repo_from_git
   let fields =
     fields
     |> upsert_assoc "name" (`String repo_name)
-    |> upsert_assoc "path" (`String (Keeper_sandbox_layout.repo_display_path repo_name))
+    |> upsert_assoc "path" (`String (Filename.concat "repos" repo_name))
     |> upsert_assoc "source" (`String source)
     |> upsert_assoc "observed_at"
          (`String (Masc_domain.iso8601_of_unix_seconds observed_at_unix))
@@ -384,7 +384,8 @@ let playground_repo_entry_json ~(source : string) ~(repo_name : string)
   in
   fields
   |> upsert_assoc "name" (`String repo_name)
-  |> upsert_assoc "path" (`String (Keeper_sandbox_layout.repo_display_path repo_name))
+  |> upsert_assoc "path" (`String (Filename.concat "repos" repo_name))
+  |> upsert_assoc "source" (`String source)
   |> upsert_assoc "observed_at"
        (`String (Masc_domain.iso8601_of_unix_seconds observed_at_unix))
   |> upsert_assoc "observed_at_unix" (`Float observed_at_unix)
@@ -395,7 +396,7 @@ let cached_playground_repo_entries playground_abs =
   try
     match Yojson.Safe.from_file cache_path with
     | `Assoc _ as json -> (
-        match Json_util.assoc_member_opt Keeper_sandbox_layout.repos_subdir json with
+        match Json_util.assoc_member_opt "repos" json with
         | Some (`List repos) -> repos
         | _ -> [])
     | _ -> []
@@ -403,7 +404,7 @@ let cached_playground_repo_entries playground_abs =
   | Sys_error _ | Yojson.Json_error _ -> []
 
 let filesystem_playground_repo_names playground_abs =
-  let repos_dir = Keeper_sandbox_layout.repos_dir ~sandbox_root:playground_abs in
+  let repos_dir = Filename.concat playground_abs "repos" in
   if not (safe_is_dir repos_dir) then []
   else
     try
@@ -422,7 +423,7 @@ let playground_repos_json ~(config : Workspace.config) ~(meta : keeper_meta) =
     Keeper_sandbox.host_root_abs_of_meta ~config meta
     |> normalize_path
   in
-  let repos_dir = Keeper_sandbox_layout.repos_dir ~sandbox_root:playground_abs in
+  let repos_dir = Filename.concat playground_abs "repos" in
   let live_enriched_count = ref 0 in
   let cached =
     cached_playground_repo_entries playground_abs

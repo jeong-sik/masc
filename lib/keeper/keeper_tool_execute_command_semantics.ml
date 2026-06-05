@@ -205,7 +205,7 @@ let normalize_repos_path_token token =
     else token
   in
   match String.split_on_char '/' token with
-  | hd :: repo :: _ when String.equal hd Keeper_sandbox_layout.repos_subdir && safe_repo_name repo -> Some token
+  | "repos" :: repo :: _ when safe_repo_name repo -> Some token
   | _ -> None
 
 let repos_path_hint_of_stages ~cmd stages =
@@ -234,7 +234,7 @@ let resolve_sandbox_root_git_cwd
     |> Keeper_alerting_path.strip_trailing_slashes
   in
   let repos_in_playground () =
-    let repos_dir = Keeper_sandbox_layout.repos_dir ~sandbox_root:host_root in
+    let repos_dir = Filename.concat host_root "repos" in
     if not (Sys.file_exists repos_dir && Sys.is_directory repos_dir)
     then []
     else (
@@ -258,7 +258,7 @@ let resolve_sandbox_root_git_cwd
     let resolve_without_explicit_git_c () =
       match repos_in_playground () with
       | [ single_repo ] ->
-        Keeper_sandbox_layout.repo_physical_path ~sandbox_root:host_root single_repo, None
+        Filename.concat (Filename.concat host_root "repos") single_repo, None
       | [] ->
         ( cwd
         , Some
@@ -289,7 +289,7 @@ let resolve_sandbox_root_git_cwd
       | first :: _ when bare_worktrees_path first ->
         (match repos_in_playground () with
          | [ single_repo ] ->
-           Some (Keeper_sandbox_layout.repo_physical_path ~sandbox_root:host_root single_repo)
+           Some (Filename.concat (Filename.concat host_root "repos") single_repo)
          | _ -> None)
       | _ -> Some cwd_normalized
     in

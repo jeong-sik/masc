@@ -51,6 +51,9 @@ type t =
   | Voice_session_start
   | Voice_sessions
   | Voice_speak
+  | Image_generate
+  | Image_search
+  | Image_preview
 
 val to_string : t -> string
 val of_string : string -> t option

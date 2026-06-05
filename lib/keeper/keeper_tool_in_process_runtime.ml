@@ -96,6 +96,10 @@ let handle_voice ~(meta : keeper_meta) ~name ~args =
   Keeper_tool_voice_runtime.handle_voice_tool ~meta ~name ~args
 ;;
 
+let handle_image ~(meta : keeper_meta) ~name ~args =
+  Keeper_tool_image_runtime.handle_image_tool ~meta ~name ~args
+;;
+
 let handle_task ~config ~(meta : keeper_meta) ~name ~args =
   Keeper_tool_task_runtime.handle_keeper_task_tool ~config ~meta ~name ~args
 ;;

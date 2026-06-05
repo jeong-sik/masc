@@ -777,6 +777,7 @@ let keeper_tools_list_json ~(meta : keeper_meta) =
   let categorize n =
     if has_prefix "keeper_board_" n || has_prefix "masc_board_" n then "board"
     else if has_prefix "keeper_voice_" n then "voice"
+    else if has_prefix "keeper_image_" n then "image"
     else if has_prefix "keeper_task_" n || has_prefix "keeper_tasks_" n then "workspace"
     else if String.equal n "tool_execute" then "execute"
     else if String.equal n "tool_search_files" then "search_files"

@@ -124,6 +124,15 @@ let shard_taskboard : shard =
   }
 ;;
 
+let shard_image : shard =
+  { name = "image"
+  ; tools = image_tools
+  ; read_only_tools = [ "keeper_image_search"; "keeper_image_preview" ]
+  ; removable = true
+  ; description = "Image generation, web search, and URL preview"
+  }
+;;
+
 (** Per-agent shard overrides.  Read-modify-write is serialised by
     [agent_shards_mutex] so concurrent keeper setup calls cannot lose updates.
 
@@ -169,6 +178,7 @@ let all_shards : shard StringMap.t =
     ; shard_voice
     ; shard_library
     ; shard_taskboard
+    ; shard_image
     ]
 ;;
 

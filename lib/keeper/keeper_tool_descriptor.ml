@@ -41,6 +41,7 @@ type runtime_handler =
   | Tool_library_read
   | Tool_ide_annotate
   | Tool_voice_dispatch
+  | Tool_image_dispatch
   | Tool_task_dispatch
   | Board_tool_dispatch
   | Tool_masc_board_dispatch
@@ -126,6 +127,7 @@ let runtime_handler_to_string = function
   | Tool_library_read -> "tool_library_read"
   | Tool_ide_annotate -> "tool_ide_annotate"
   | Tool_voice_dispatch -> "tool_voice_dispatch"
+  | Tool_image_dispatch -> "tool_image_dispatch"
   | Tool_task_dispatch -> "tool_task_dispatch"
   | Board_tool_dispatch -> "board_tool_dispatch"
   | Tool_masc_board_dispatch -> "tool_masc_board_dispatch"
@@ -795,6 +797,18 @@ let task_descriptor id name description ~readonly =
     ~maintenance_only:false
 ;;
 
+let image_descriptor name description ~readonly =
+  cluster_descriptor
+    ~id:("keeper.image." ^ String.sub name (String.length "keeper_image_")
+         (String.length name - String.length "keeper_image_"))
+    ~name
+    ~description
+    ~handler:Tool_image_dispatch
+    ~readonly
+    ~inline_safe:false
+    ~maintenance_only:true
+;;
+
 (* RFC-0182 §3.1 — additional masc_* cluster descriptor helpers (task /
    plan / run / agent / workspace). The masc_board_descriptor lives above
    (registry-driven); these helpers follow the same projection pattern
@@ -1017,6 +1031,19 @@ let internal_descriptors : t list =
       "keeper_voice_session_end"
       "End the current voice session."
       ~readonly:false
+    (* ── image cluster (placeholder, maintenance_only) ──────── *)
+  ; image_descriptor
+      "keeper_image_generate"
+      "Generate an image using AI image generation."
+      ~readonly:false
+  ; image_descriptor
+      "keeper_image_search"
+      "Search for images using web image search."
+      ~readonly:true
+  ; image_descriptor
+      "keeper_image_preview"
+      "Preview an image by URL."
+      ~readonly:true
     (* ── task / broadcast cluster (RFC-0179 PR-3, 9 tools) ────── *)
   ; task_descriptor
       "list"

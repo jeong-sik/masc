@@ -53,6 +53,9 @@ type t =
   | Voice_session_start
   | Voice_sessions
   | Voice_speak
+  | Image_generate
+  | Image_search
+  | Image_preview
 
 let to_string = function
   | Execute -> "tool_execute"
@@ -100,6 +103,9 @@ let to_string = function
   | Voice_session_start -> "keeper_voice_session_start"
   | Voice_sessions -> "keeper_voice_sessions"
   | Voice_speak -> "keeper_voice_speak"
+  | Image_generate -> "keeper_image_generate"
+  | Image_search -> "keeper_image_search"
+  | Image_preview -> "keeper_image_preview"
 ;;
 
 let of_string = function
@@ -215,7 +221,10 @@ let is_keeper_board_tool = function
   | Voice_session_end
   | Voice_session_start
   | Voice_sessions
-  | Voice_speak -> false
+  | Voice_speak
+  | Image_generate
+  | Image_search
+  | Image_preview -> false
 ;;
 
 let legacy_masc_board_surface_names =

@@ -25,7 +25,8 @@
   tool_shard_types_schemas_library
   tool_shard_types_schemas_search_files
   tool_shard_types_schemas_taskboard
-  tool_shard_types_schemas_voice)
+  tool_shard_types_schemas_voice
+  tool_shard_types_schemas_image)
  (libraries
   masc_types
   masc_core

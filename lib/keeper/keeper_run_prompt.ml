@@ -139,7 +139,27 @@ let build_turn_context
         ~keeper_name:meta.name
       |> render_recent_failure_context
     in
-    append_dynamic_context dynamic_context recent_failure_context
+    let dynamic_context =
+      append_dynamic_context dynamic_context recent_failure_context
+    in
+    (* RFC-0218 Phase 4-D: inject sandbox repo info into turn context.
+       LLM learns its available repos here, eliminating the need for
+       repo-aware error hints in tool responses (Phase 4-E). *)
+    let repo_context =
+      let repos =
+        Keeper_sandbox_control.playground_repos_json ~config ~meta
+      in
+      match repos with
+      | `List [] -> ""
+      | _ ->
+        Printf.sprintf
+          "--- Sandbox repositories ---\n\
+           Your sandbox contains these git repositories. Use repo names\n\
+           in paths like repos/<name>/path/to/file.\n\
+           %s"
+          (Yojson.Safe.pretty_to_string repos)
+    in
+    append_dynamic_context dynamic_context repo_context
   in
   let memory_context = "" in
   let temporal_context =

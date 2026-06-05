@@ -8,6 +8,12 @@ import {
   mergeServerHistory,
   flushStreamBuffer,
   _resetChatStoreForTests,
+  enqueueInput,
+  dequeueInput,
+  markInputSent,
+  clearInputQueue,
+  getQueueLength,
+  getQueueTotal,
 } from './keeper-chat-store'
 
 describe('keeper-chat-store', () => {
@@ -37,8 +43,8 @@ describe('keeper-chat-store', () => {
       expect(buf).toHaveLength(1)
       expect(buf[0]).toEqual(msg)
 
-      // sessionStorage round-trip
-      _resetChatStoreForTests()
+      // sessionStorage round-trip: clear in-memory buffer only, preserve storage
+      _resetChatStoreForTests(false)
       const restored = getChatMessageBuffer('keeper-a')
       expect(restored).toHaveLength(1)
       expect(restored[0]).toEqual(msg)
@@ -130,6 +136,68 @@ describe('keeper-chat-store', () => {
       expect(buf[0]!.role).toBe('assistant')
       expect(buf[0]!.content).toBe('partial response')
       expect(buf[0]!.source).toBe('dashboard')
+    })
+  })
+
+  describe('input queue', () => {
+    it('enqueues a message while streaming', () => {
+      enqueueInput('keeper-q', 'hello queue')
+      expect(getQueueLength('keeper-q')).toBe(1)
+    })
+
+    it('dequeues messages in FIFO order', () => {
+      enqueueInput('keeper-q', 'first')
+      enqueueInput('keeper-q', 'second')
+      const msg1 = dequeueInput('keeper-q')
+      expect(msg1!.content).toBe('first')
+      markInputSent('keeper-q')
+      const msg2 = dequeueInput('keeper-q')
+      expect(msg2!.content).toBe('second')
+      markInputSent('keeper-q')
+      expect(dequeueInput('keeper-q')).toBeNull()
+    })
+
+    it('prevents dequeue while sending', () => {
+      enqueueInput('keeper-q', 'only')
+      dequeueInput('keeper-q')
+      expect(dequeueInput('keeper-q')).toBeNull()
+    })
+
+    it('allows dequeue after markInputSent', () => {
+      enqueueInput('keeper-q', 'a')
+      enqueueInput('keeper-q', 'b')
+      dequeueInput('keeper-q')
+      markInputSent('keeper-q')
+      const next = dequeueInput('keeper-q')
+      expect(next!.content).toBe('b')
+    })
+
+    it('clearInputQueue removes all items', () => {
+      enqueueInput('keeper-q', 'x')
+      enqueueInput('keeper-q', 'y')
+      clearInputQueue('keeper-q')
+      expect(getQueueLength('keeper-q')).toBe(0)
+    })
+
+    it('is isolated per keeper', () => {
+      enqueueInput('keeper-a', 'a-msg')
+      enqueueInput('keeper-b', 'b-msg')
+      expect(getQueueLength('keeper-a')).toBe(1)
+      expect(getQueueLength('keeper-b')).toBe(1)
+    })
+
+    it('getQueueTotal includes sending item', () => {
+      enqueueInput('keeper-q', 'sending')
+      enqueueInput('keeper-q', 'waiting')
+      dequeueInput('keeper-q')
+      expect(getQueueTotal('keeper-q')).toBe(2)
+      expect(getQueueLength('keeper-q')).toBe(1)
+    })
+
+    it('_resetChatStoreForTests clears queues', () => {
+      enqueueInput('keeper-q', 'test')
+      _resetChatStoreForTests()
+      expect(getQueueLength('keeper-q')).toBe(0)
     })
   })
 })

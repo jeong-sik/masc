@@ -28,6 +28,11 @@ import {
   appendChatMessage,
   mergeServerHistory,
   flushStreamBuffer,
+  enqueueInput,
+  dequeueInput,
+  markInputSent,
+  clearInputQueue,
+  getQueueLength,
 } from '../keeper-chat-store'
 
 /**
@@ -129,13 +134,19 @@ export function KeeperChatPanel({ name }: { name: string }) {
     }
   }
 
-  async function sendChat(keeperName: string): Promise<void> {
+  async function sendChat(keeperName: string, queuedText?: string): Promise<void> {
     await loadHistory(keeperName)
 
-    const text = chatInput.value.trim()
-    if (!text || streaming.value) return
+    const text = queuedText ?? chatInput.value.trim()
+    if (!text) return
 
-    chatInput.value = ''
+    if (streaming.value && !queuedText) {
+      chatInput.value = ''
+      enqueueInput(keeperName, text)
+      return
+    }
+
+    if (!queuedText) chatInput.value = ''
     chatError.value = ''
     streamBuffer.value = ''
     streamStartedAt.value = Date.now()
@@ -173,6 +184,12 @@ export function KeeperChatPanel({ name }: { name: string }) {
       streaming.value = false
       activeAbortRef.current = null
       streamStartedAt.value = null
+
+      markInputSent(keeperName)
+      const next = dequeueInput(keeperName)
+      if (next) {
+        void sendChat(keeperName, next.content)
+      }
     }
   }
 
@@ -192,6 +209,7 @@ export function KeeperChatPanel({ name }: { name: string }) {
   const isStreaming = streaming.value
   const query = searchQuery.value
   const hasQuery = query.trim().length > 0
+  const queueCount = getQueueLength(name)
   const filteredMessages = filterChatMessages(messages, query)
   const entries = filteredMessages.map((msg, index) => toConversationEntry(name, msg, index))
   const chatAccess = keeperDirectChatAccess(shellAuthSummary.value)
@@ -258,9 +276,15 @@ export function KeeperChatPanel({ name }: { name: string }) {
         : null}
 
       <div class="border-t border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-4 py-4">
+        ${queueCount > 0
+          ? html`<div class="mb-2 flex items-center gap-2 text-2xs text-[var(--color-fg-muted)]">
+              <span class="inline-flex items-center rounded-full bg-[var(--accent-20)] px-2 py-0.5 font-medium text-[var(--color-fg-secondary)]">${queueCount}개 대기 중</span>
+              <button class="underline hover:text-[var(--color-fg-secondary)]" onClick=${() => { clearInputQueue(name); chatMessages.value = [...getChatMessageBuffer(name)] }}>취소</button>
+            </div>`
+          : null}
         <${ChatComposer}
           draft=${chatInput.value}
-          placeholder=${chatAccess.blocked ? '현재 actor는 direct keeper chat 권한이 없습니다' : '메시지 입력...'}
+          placeholder=${isStreaming ? '답변 중... 메시지를 입력하면 대기열에 추가됩니다' : chatAccess.blocked ? '현재 actor는 direct keeper chat 권한이 없습니다' : '메시지 입력...'}
           disabled=${chatAccess.blocked}
           streaming=${isStreaming}
           streamStartedAt=${streamStartedAt.value}

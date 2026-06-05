@@ -377,18 +377,6 @@ let apply_output_to_result ~(meta : keeper_meta)
   | Request_help, Board_post when tool_names = [] ->
       (match deliver_request_help_post ~meta ~state with
       | Request_help_posted ->
-          let result =
-            Keeper_agent_result.append_synthetic_tool_call
-              ~provider:"keeper_social_model"
-              ~route_evidence:
-                (`Assoc
-                  [ "source", `String "bdi_speech_v1"
-                  ; "speech_act", `String "request_help"
-                  ; "delivery_surface", `String "board_post"
-                  ])
-              "keeper_board_post"
-              result
-          in
           ({ result with response_text = "" }, state)
       | Request_help_deduped | Request_help_failed ->
           ({ result with response_text = "" }, state))

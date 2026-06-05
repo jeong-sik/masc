@@ -46,13 +46,29 @@ let no_progress_success_tool_names_for_contract
   keeper_tool_names_for_outcome ~tool_calls ~outcome:"ok_no_progress"
 ;;
 
+let failed_tool_only_contract_violation
+      ~(actual_keeper_tool_names : string list)
+      ~(tool_calls : Keeper_agent_result.tool_call_detail list)
+  =
+  actual_keeper_tool_names = []
+  && tool_calls <> []
+  && List.for_all
+       (fun (detail : Keeper_agent_result.tool_call_detail) ->
+          (not (String.equal detail.outcome "ok"))
+          && not (String.equal detail.outcome "ok_no_progress"))
+       tool_calls
+;;
+
 let observed_completion_contract_status
-      ~had_owned_active_task_at_turn_start ~actual_keeper_tool_names
+      ?(tool_calls = []) ~had_owned_active_task_at_turn_start ~actual_keeper_tool_names
   : Keeper_execution_receipt.completion_contract_result
   =
-  Keeper_agent_run_turn_helpers.completion_contract_result_for_progress_evidence
-    ~had_owned_active_task_at_turn_start
-    ~actual_keeper_tool_names
+  if failed_tool_only_contract_violation ~actual_keeper_tool_names ~tool_calls
+  then Contract_violated
+  else
+    Keeper_agent_run_turn_helpers.completion_contract_result_for_progress_evidence
+      ~had_owned_active_task_at_turn_start
+      ~actual_keeper_tool_names
 ;;
 
 let text_only_violation_contract_status ~actual_keeper_tool_names ~fallback

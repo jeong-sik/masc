@@ -1,10 +1,10 @@
 ---
 status: reference
-last_verified: 2026-04-28
+last_verified: 2026-06-05
 code_refs:
   - lib/keeper/keeper_turn_fsm.ml
   - lib/keeper/keeper_unified_turn.ml
-  - lib/prometheus/prometheus.ml
+  - lib/keeper_metrics/keeper_metrics.ml
   - bin/masc_trace.ml
 ---
 

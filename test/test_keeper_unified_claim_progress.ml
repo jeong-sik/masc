@@ -133,6 +133,37 @@ let test_contract_progress_filters_no_progress_tool_results () =
          ])
 ;;
 
+let test_failed_tool_only_turn_violates_contract () =
+  let failed_only = [ tool_call_detail ~outcome:"error" "ToolThatDoesNotExist" ] in
+  check
+    bool
+    "failed-only tool turn is a violation"
+    true
+    (KAR.For_testing.failed_tool_only_contract_violation
+       ~actual_keeper_tool_names:[]
+       ~tool_calls:failed_only);
+  check
+    string
+    "failed-only tool turn is not satisfied completion"
+    "violated"
+    (KAR.Contract_helpers.observed_completion_contract_status
+       ~had_owned_active_task_at_turn_start:false
+       ~actual_keeper_tool_names:[]
+       ~tool_calls:failed_only
+     |> Masc.Keeper_execution_receipt.completion_contract_result_to_string)
+;;
+
+let test_synthetic_board_post_tool_detail () =
+  let detail =
+    KAR.synthetic_tool_call_detail
+      ~provider:"keeper_social_model"
+      "keeper_board_post"
+  in
+  check string "synthetic tool name" "keeper_board_post" detail.tool_name;
+  check string "synthetic tool outcome" "ok" detail.outcome;
+  check string "synthetic provider" "keeper_social_model" detail.provider
+;;
+
 let () =
   run
     "keeper_unified_claim_progress"
@@ -157,6 +188,14 @@ let () =
             "contract progress filters no-progress tool results"
             `Quick
             test_contract_progress_filters_no_progress_tool_results
+        ; test_case
+            "failed tool-only turn violates contract"
+            `Quick
+            test_failed_tool_only_turn_violates_contract
+        ; test_case
+            "synthetic board-post evidence keeps progress visible"
+            `Quick
+            test_synthetic_board_post_tool_detail
         ] )
     ]
 ;;

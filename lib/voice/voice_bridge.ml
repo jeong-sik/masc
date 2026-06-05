@@ -700,6 +700,28 @@ let dequeue_speak_job () =
 let queue_size () =
   Stdlib.Mutex.protect speak_queue_mu (fun () -> List.length !speak_queue)
 
+let discard_queued_agent_speak ~agent_id =
+  let removed, remaining =
+    Stdlib.Mutex.protect speak_queue_mu (fun () ->
+      let rec loop kept removed = function
+        | [] -> removed, List.rev kept
+        | job :: rest when String.equal job.agent_id agent_id ->
+          loop kept (removed + 1) rest
+        | job :: rest -> loop (job :: kept) removed rest
+      in
+      let removed, kept = loop [] 0 !speak_queue in
+      speak_queue := kept;
+      removed, List.length kept)
+  in
+  if removed > 0
+  then
+    Log.Transport.warn
+      "voice_queue discarded queued jobs for ended session agent=%s removed=%d remaining=%d"
+      agent_id
+      removed
+      remaining;
+  removed
+
 let rec drain_agent_speak_queue ~sw ~clock ~net () =
   match dequeue_speak_job () with
   | None -> ()
@@ -738,7 +760,29 @@ let rec drain_agent_speak_queue ~sw ~clock ~net () =
          (Printexc.to_string exn));
     drain_agent_speak_queue ~sw ~clock ~net ()
 
-let enqueue_agent_speak ~sw ~clock ~net ~agent_id ~message ?provider ?(priority = 1) () =
+let reset_speak_worker_running () =
+  Stdlib.Mutex.protect speak_queue_mu (fun () -> speak_worker_running := false)
+
+let run_agent_speak_queue_worker ~sw ~clock ~net () =
+  try drain_agent_speak_queue ~sw ~clock ~net () with
+  | Eio.Cancel.Cancelled _ as exn ->
+    reset_speak_worker_running ();
+    raise exn
+  | exn ->
+    reset_speak_worker_running ();
+    raise exn
+
+let enqueue_agent_speak
+      ~sw
+      ~clock
+      ~net
+      ~agent_id
+      ~message
+      ?provider
+      ?(priority = 1)
+      ?(start_worker = true)
+      ()
+  =
   let message = String.trim message in
   if message = ""
   then Error "message is required. Good: message='Hello team.'. Bad: message=''."
@@ -777,12 +821,12 @@ let enqueue_agent_speak ~sw ~clock ~net ~agent_id ~message ?provider ?(priority 
         in
         let queue_position = position 1 !speak_queue in
         let queue_size = List.length !speak_queue in
-        let should_start = not !speak_worker_running in
+        let should_start = start_worker && not !speak_worker_running in
         if should_start then speak_worker_running := true;
         should_start, queue_position, queue_size)
     in
     if should_start
-    then Eio.Fiber.fork ~sw (fun () -> drain_agent_speak_queue ~sw ~clock ~net ());
+    then Eio.Fiber.fork ~sw (fun () -> run_agent_speak_queue_worker ~sw ~clock ~net ());
     Ok
       (`Assoc
           [ "status", `String "queued"

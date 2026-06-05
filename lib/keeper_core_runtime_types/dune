@@ -1,0 +1,12 @@
+(include_subdirs no)
+
+(library
+ (name masc_keeper_core_runtime_types)
+ (public_name masc.keeper_core_runtime_types)
+ (wrapped false)
+ (modules
+  keeper_oas_timeout_message
+  keeper_social_model_types
+  keeper_synthetic_marker
+  keeper_terminal_reason)
+ (libraries masc_core))

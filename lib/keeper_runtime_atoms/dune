@@ -1,0 +1,11 @@
+(include_subdirs no)
+
+(library
+ (name masc_keeper_runtime_atoms)
+ (public_name masc.keeper_runtime_atoms)
+ (wrapped false)
+ (modules
+  keeper_prompt_names
+  keeper_provider_error_class
+  keeper_sandbox_error
+  keeper_token_count))

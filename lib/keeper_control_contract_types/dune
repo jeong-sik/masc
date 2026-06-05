@@ -1,0 +1,11 @@
+(include_subdirs no)
+
+(library
+ (name masc_keeper_control_contract_types)
+ (public_name masc.keeper_control_contract_types)
+ (wrapped false)
+ (modules
+  keeper_accountability_claim_types
+  keeper_turn_slot_types
+  keeper_workspace_op
+  keeper_world_observation_turn_types))

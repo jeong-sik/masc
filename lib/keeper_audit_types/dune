@@ -1,0 +1,13 @@
+(include_subdirs no)
+
+(library
+ (name masc_keeper_audit_types)
+ (public_name masc.keeper_audit_types)
+ (wrapped false)
+ (modules
+  keeper_measurement
+  keeper_transition_audit_types)
+ (libraries
+  masc.keeper_state
+  masc.masc_core
+  yojson))

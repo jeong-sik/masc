@@ -30,9 +30,9 @@ echo "=== Scan: OCaml lifecycle variants ==="
 variant_sources=(
   lib/keeper_types/keeper_types.ml
   lib/keeper/keeper_registry_types.ml
-  lib/keeper_registry_types_turn_phase/keeper_registry_types_turn_phase.ml
-  lib/keeper_registry_types_decision/keeper_registry_types_decision.ml
-  lib/keeper_registry_types_compaction/keeper_registry_types_compaction.ml
+  lib/keeper_registry_types/keeper_registry_types_turn_phase.ml
+  lib/keeper_registry_types/keeper_registry_types_decision.ml
+  lib/keeper_registry_types/keeper_registry_types_compaction.ml
 )
 lifecycle_variants=$(
   rg '^\s*\|\s+([A-Z][a-zA-Z_0-9]*)' \

@@ -206,7 +206,7 @@ echo ""
 echo "=== Check 2: turn_phase (OCaml) vs KeeperRuntimeLifecycle.tla domain ==="
 
 KR_TYPES_ML="lib/keeper/keeper_registry_types.ml"
-KR_TURN_PHASE_ML="lib/keeper_registry_types_turn_phase/keeper_registry_types_turn_phase.ml"
+KR_TURN_PHASE_ML="lib/keeper_registry_types/keeper_registry_types_turn_phase.ml"
 KCL_TLA="specs/keeper-state-machine/KeeperRuntimeLifecycle.tla"
 
 if [ -f "$KR_TURN_PHASE_ML" ]; then

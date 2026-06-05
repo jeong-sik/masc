@@ -9,4 +9,4 @@
   fs_compat
   masc.config
   masc.config_dir_resolver
-  masc.keeper_toml_loader))
+  masc.keeper_toml))

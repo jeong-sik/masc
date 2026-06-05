@@ -8,6 +8,5 @@
  (libraries
   eio
   masc.config
-  masc.prometheus
   masc_log
   yojson))

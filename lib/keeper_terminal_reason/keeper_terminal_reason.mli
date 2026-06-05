@@ -90,7 +90,7 @@ type t =
           original string, carried only for [to_wire] round-trip fidelity. *)
   | Other of string
   (** Named typed escape for any wire string none of the above buckets
-          matched (e.g. [provider_error_server:500], [no_tool_capable_provider],
+          matched (e.g. [provider_error_server:500],
           [mcp_error], [registry_phase_missing], [supervisor_stop]). NOT a
           permissive default: the disposition classifier routes it to the
           same generic tool-gate logic the pre-typing fall-through used.

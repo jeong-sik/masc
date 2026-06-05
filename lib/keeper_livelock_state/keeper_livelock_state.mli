@@ -23,7 +23,7 @@
     The block itself is *not* the bug — the bug is that the operator
     sees the same fact restated 30× per turn. This module records
     each block and classifies the result so the caller can emit one
-    durable [Threshold_park] ERROR plus a Prometheus counter, and
+    durable [Threshold_park] ERROR plus a Otel_metric_store counter, and
     demote the noisy intermediate emissions to DEBUG.
 
     Closed sum type, no catch-all. The [gate_kind] mirrors
@@ -42,7 +42,7 @@
 
     For now, the [Threshold_park] outcome gives the operator a
     one-line ERROR after [default_park_threshold] identical blocks
-    and a Prometheus counter for dashboarding; subsequent blocks
+    and a Otel_metric_store counter for dashboarding; subsequent blocks
     return [`Repeated] and the caller is expected to DEBUG-log
     instead of ERROR-log.
 
@@ -59,7 +59,7 @@
 
 (** Closed-enum mirror of [Keeper_turn_livelock.gate_reason]
     constructors. The kind is used both as the dedupe fingerprint
-    component and as a stable Prometheus label.
+    component and as a stable Otel_metric_store label.
 
     The string form round-trips with [gate_kind_of_string] and is
     aligned with [Keeper_turn_livelock.gate_reason_kind] so the two

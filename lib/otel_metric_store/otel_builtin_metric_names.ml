@@ -1,6 +1,6 @@
-(** Metric names used by Prometheus built-in registration chunks. *)
+(** Metric names used by Otel_metric_store built-in registration chunks. *)
 
-include Prometheus_metric_names
+include Otel_metric_names
 
 
 (* #10097: a provider cannot carry keeper-bound runtime MCP tools that
@@ -21,7 +21,7 @@ include Prometheus_metric_names
 let metric_provider_mcp_tool_omission = "masc_provider_mcp_tool_omission_total"
 
 (* #9520: durable coverage-gap records must also have an alertable
-   Prometheus surface.  The labels deliberately avoid raw paths and
+   Otel_metric_store surface.  The labels deliberately avoid raw paths and
    error strings; [source], [producer], [dashboard_surface], and
    [stale_reason] are bounded vocabularies owned by telemetry
    producers. *)
@@ -73,17 +73,17 @@ let metric_workspace_claim_post_provision_failures =
    [Env_config_oas_bridge] so remaining evaluator/advisory callers
    expose their own budgets instead of hiding behind one generic OAS
    timeout class. *)
-include Prometheus_oas_metric_names
+include Otel_oas_metric_names
 
 
-include Prometheus_runtime_metric_names
+include Otel_runtime_metric_names
 
-include Prometheus_transport_metric_names
+include Otel_transport_metric_names
 
 (* Process-level FD gauges — used in init() and update_fd_gauges. *)
 let metric_open_fds = "masc_process_open_fds"
 let metric_fd_warn_threshold = "masc_process_fd_warn_threshold"
-include Prometheus_core_metric_names
+include Otel_core_metric_names
 
 (* RFC-0107 Phase D.4 — piaf-backed connection pool gauges/counters. *)
 let metric_pool_idle_total = "masc_pool_idle_total"
@@ -93,7 +93,7 @@ let metric_pool_evict_total = "masc_pool_evict_total"
 let metric_pool_evict_failure_total = "masc_pool_evict_failure_total"
 let metric_pool_create_total = "masc_pool_create_total"
 
-include Prometheus_policy_metric_names
+include Otel_policy_metric_names
 
 (* P0-2 (2026-05-07): observability for orphan turn loops.
    [_dropped] increments every time [Keeper_registry.update_entry] is
@@ -162,7 +162,7 @@ let metric_distributed_lock_acquire_failed = "masc_distributed_lock_acquire_fail
    (SIGKILL / ENFILE mid-write) that dropped the payload. *)
 let metric_fs_atomic_orphans_cleaned = "masc_fs_atomic_orphans_cleaned_total"
 
-include Prometheus_identity_metric_names
+include Otel_identity_metric_names
 
 (* Centralized metric names prevent typo-induced metric proliferation
    (a single-character typo creates a new invisible metric). *)

@@ -25,7 +25,7 @@ let observe_workspace_route_failure ?(warn_on_failure = true) ~site ~path exn =
       let site = sanitize_log_value ~max_bytes:64 site in
       let path = sanitize_log_value ~max_bytes:180 path in
       let error = sanitize_log_value (Printexc.to_string exn) in
-      Prometheus.inc_counter Prometheus.metric_workspace_route_failures
+      Otel_metric_store.inc_counter Otel_metric_store.metric_workspace_route_failures
         ~labels:[("site", site)]
         ();
       if warn_on_failure then

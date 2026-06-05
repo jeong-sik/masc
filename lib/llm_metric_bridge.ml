@@ -1,5 +1,5 @@
-let http_status_metric = "retired_prometheus_llm_provider_http_status_total"
-let fallback_triggered_metric = "retired_prometheus_fallback_triggered_total"
+let http_status_metric = "retired_otel_metric_store_llm_provider_http_status_total"
+let fallback_triggered_metric = "retired_otel_metric_store_fallback_triggered_total"
 
 let emit_http_status ~provider:_ ~model_id:_ ~status:_ = ()
 let emit_request_latency ?provider:_ ~model_id:_ ~latency_ms:_ () = ()

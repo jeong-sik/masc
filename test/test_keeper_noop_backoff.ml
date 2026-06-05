@@ -1,10 +1,6 @@
-(** test_keeper_noop_backoff — Verify noop cycle classification and
-    that No_tool_capable (inside Runtime_exhausted) does NOT count
-    toward proactive backoff.
-
-    The exclusion was introduced because No_tool_capable is a
-    configuration/capability mismatch (not transient), and counting it
-    caused 59 spurious keeper fiber kills per day (#18315, #18317). *)
+(** test_keeper_noop_backoff — Verify noop cycle classification and proactive
+    backoff does not conflate opaque terminal runtime errors with transient
+    verifier failures. *)
 
 open Alcotest
 module M = Masc.Keeper_unified_metrics_support

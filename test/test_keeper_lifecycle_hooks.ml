@@ -9,7 +9,7 @@
 open Alcotest
 
 module H = Masc.Keeper_lifecycle_hooks
-module P = Prometheus
+module P = Otel_metric_store
 module SM = Keeper_state_machine
 module TCG = Telemetry_coverage_gap
 

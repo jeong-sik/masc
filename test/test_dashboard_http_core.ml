@@ -629,8 +629,8 @@ let test_dashboard_planning_http_json_keeps_utf8_valid_after_truncation () =
 
 let credential_archived_starvation_total () =
   int_of_float
-    (Lib.Prometheus.metric_total
-       Lib.Prometheus.metric_config_credential_archived_starvation)
+    (Lib.Otel_metric_store.metric_total
+       Lib.Otel_metric_store.metric_config_credential_archived_starvation)
 
 let record_test_credential_archive () =
   let keeper_name =
@@ -638,8 +638,8 @@ let record_test_credential_archive () =
       (Unix.getpid ())
       (Random.bits ())
   in
-  Lib.Prometheus.inc_counter
-    Lib.Prometheus.metric_config_credential_archived_starvation
+  Lib.Otel_metric_store.inc_counter
+    Lib.Otel_metric_store.metric_config_credential_archived_starvation
     ~labels:[("keeper_name", keeper_name)]
     ()
 
@@ -652,7 +652,7 @@ let test_credential_monitoring_json_surfaces_archive_counter () =
     (before + 1)
     (json |> member "credential_archived_starvation_total" |> to_int);
   check string "metric name"
-    Lib.Prometheus.metric_config_credential_archived_starvation
+    Lib.Otel_metric_store.metric_config_credential_archived_starvation
     (json |> member "metric_name" |> to_string);
   check string "alert level" "bad"
     (json |> member "alert_level" |> to_string);

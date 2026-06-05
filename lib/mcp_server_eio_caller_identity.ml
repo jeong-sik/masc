@@ -180,8 +180,8 @@ let resolve_auth_fallback_agent_name
             "[silent:auth_token_resolve_error] agent=%s error_kind=%s - token resolve \
              failed, keeping caller alias"
             agent_name error_kind;
-          Prometheus.inc_counter
-            Prometheus.metric_silent_auth_token_resolve_error
+          Otel_metric_store.inc_counter
+            Otel_metric_store.metric_silent_auth_token_resolve_error
             ~labels:[ "error_kind", error_kind; "agent", agent_name ]
             ();
           let mode = Auth_strict_mode.current () in
@@ -193,8 +193,8 @@ let resolve_auth_fallback_agent_name
                 "[would_reject:auth_token_resolve_error] mode=%s agent=%s error_kind=%s \
                  - Phase B PR-2 will reject this request"
                 mode_label agent_name error_kind;
-              Prometheus.inc_counter
-                Prometheus.metric_auth_strict_would_reject
+              Otel_metric_store.inc_counter
+                Otel_metric_store.metric_auth_strict_would_reject
                 ~labels:
                   [ "mode", mode_label; "error_kind", error_kind; "agent", agent_name ]
                 ());

@@ -64,8 +64,8 @@ let run_safe ~caller ~timeout_s fn =
        of collapsing all OAS timeouts into the same "after N.Ns"
        string. *)
     let wall = elapsed () in
-    Prometheus.inc_counter
-      Prometheus.metric_oas_bridge_timeout
+    Otel_metric_store.inc_counter
+      Otel_metric_store.metric_oas_bridge_timeout
       ~labels:[
         ("caller", caller);
         ("timeout_s", Printf.sprintf "%.1f" timeout_s);
@@ -109,8 +109,8 @@ let run_safe ~caller ~timeout_s fn =
       | Failure msg -> "Failure(" ^ msg ^ ")"
       | _ -> Printexc.to_string inner_exn
     in
-    Prometheus.inc_counter
-      Prometheus.metric_oas_bridge_cancel
+    Otel_metric_store.inc_counter
+      Otel_metric_store.metric_oas_bridge_cancel
       ~labels:[
         ("caller", caller);
         ("bucket", bucket);
@@ -138,7 +138,7 @@ let run_safe ~caller ~timeout_s fn =
 
 (** [run_with_caller ~caller fn] — single entry point that resolves
     the per-caller timeout from [Env_config_oas_bridge] and labels
-    the resulting Prometheus counter.  The remaining trusted OAS
+    the resulting Otel_metric_store counter.  The remaining trusted OAS
     callers are evaluator/advisory flows with caller-specific defaults
     owned by [Env_config_oas_bridge]; removed runtime-invocation
     surfaces must not reappear as hidden timeout configuration. *)

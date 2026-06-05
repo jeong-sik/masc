@@ -1,4 +1,4 @@
-(** Keeper error recording: log + Prometheus dedup + last_error persistence. *)
+(** Keeper error recording: log + Otel_metric_store dedup + last_error persistence. *)
 
 (** Record [err] on keeper [name].
     - First occurrence emits at ERROR (with [?details] sandbox context).

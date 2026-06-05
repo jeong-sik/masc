@@ -79,7 +79,6 @@
   masc.runtime_model
   masc.runtime
   masc.model_inference_metrics
-  masc.prometheus
   masc.auth
   masc.json_field
   masc.types_boundary

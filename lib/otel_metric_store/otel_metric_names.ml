@@ -1,9 +1,9 @@
-(** Prometheus metric-name string constants — extracted from [Prometheus]
+(** Otel_metric_store metric-name string constants — extracted from [Otel_metric_store]
     to keep the parent file under the Godfile size cap. See
-    [Prometheus.ml] § "Metric Name Constants" for the convention.
+    [Otel_metric_store.ml] § "Metric Name Constants" for the convention.
 
-    This module is [include]d in [Prometheus] so callers reach every
-    binding via [Prometheus.metric_X] unchanged. *)
+    This module is [include]d in [Otel_metric_store] so callers reach every
+    binding via [Otel_metric_store.metric_X] unchanged. *)
 
 (** {1 Metric Name Constants}
 
@@ -12,9 +12,9 @@
     Without this, a typo on either side produces a dead series with
     no build error (the counter silently drifts to a new key).
 
-    Convention: constant name drops the Prometheus convention suffix
+    Convention: constant name drops the Otel_metric_store convention suffix
     ([_total] for counters), full metric name lives on the right-hand
-    side. Consumers import [Prometheus.<constant>] so the compiler
+    side. Consumers import [Otel_metric_store.<constant>] so the compiler
     catches typos. *)
 
 (* Keeper turn lifecycle (registered in init, incremented in
@@ -55,7 +55,7 @@
    #9733). *)
 
 (* #9943: per-keeper turn-latency bucket counter.  Each completed
-   turn lands in exactly one [latency_bucket] label so a Prometheus
+   turn lands in exactly one [latency_bucket] label so a Otel_metric_store
    query like
      rate(masc_keeper_turn_latency_bucket_total{bucket="600-1200s"}[5m])
    directly surfaces slow-turn keepers without needing the JSONL
@@ -139,7 +139,7 @@ let metric_backend_mutex_held_sec = "masc_backend_mutex_held_sec"
    Counts JSONL records dropped because the bounded write queue is full.
    No labels (single source). Existing in-memory [dropped_full_queue]
    Atomic counter is summarised by sampled WARN (every 1024th drop);
-   this Prometheus counter exposes per-drop emission so alerting on
+   this Otel_metric_store counter exposes per-drop emission so alerting on
    sustained pressure does not depend on log scraping. *)
 let metric_tool_metrics_persist_dropped =
   "masc_tool_metrics_persist_dropped_total"
@@ -166,7 +166,7 @@ let metric_tool_keeper_cache_cas_conflicts =
 (* File_lock_eio lock-table CAS retries (single shared atomic).
    Bumped from [atomic_update] / [atomic_update_with_result] retry
    branches via [on_cas_retry_fn] callback wired in workspace.ml — the
-   masc_process sub-library cannot depend on Prometheus directly. *)
+   masc_process sub-library cannot depend on Otel_metric_store directly. *)
 let metric_file_lock_table_cas_retries =
   "masc_file_lock_table_cas_retries_total"
 
@@ -196,7 +196,7 @@ let metric_tool_keeper_cache_ttl_parse_failures =
      - [turn]: shared turn semaphore acquire timed out
 
    Labels: [keeper, channel].  Cardinality = ~10 keepers × 3
-   channels = ~30 series, well within Prometheus best practice. *)
+   channels = ~30 series, well within Otel_metric_store best practice. *)
 
 (* Goal-loop Observe contract: the Grafana p99 query consumes
    [masc_keeper_semaphore_wait_seconds_bucket] grouped by keeper and runtime.
@@ -260,13 +260,13 @@ let metric_timeout_policy_overshoot = "masc_timeout_policy_overshoot_total"
               | "not_found_relative" (relative path matched no root) *)
 
 (* Retired RFC-0026 admission-router shadow metric name. Kept only for
-   historical Prometheus compatibility; active keeper scheduling uses the
+   historical Otel_metric_store compatibility; active keeper scheduling uses the
    runtime lane and semaphore path. *)
 
 (* Keeper keepalive (keeper_keepalive.ml). *)
 let metric_write_meta_cas_retry_total = "masc_write_meta_cas_retry_total"
 
-(* #10474: no_tool_capable_provider and proactive cycle outcome counters.
+(* #10474: proactive cycle outcome counters.
    [Keeper_metrics.(to_string NoToolProvider)] fires every time a keeper's
    runtime has zero tool-capable providers, labelled by runtime so
    the operator sees which runtime definition needs fixing.

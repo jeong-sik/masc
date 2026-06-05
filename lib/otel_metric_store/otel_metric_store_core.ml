@@ -1,8 +1,8 @@
-(** Mutex-backed Prometheus metric store. *)
+(** Mutex-backed Otel_metric_store metric store. *)
 
 type label = string * string
 
-let metric_key = Prometheus_key.metric_key
+let metric_key = Otel_metric_key.metric_key
 
 type metric_type =
   | Counter
@@ -32,9 +32,9 @@ let with_lock f =
   (try Stdlib.Mutex.lock metrics_mutex with
    | Sys_error msg as exn ->
      let trace = Printexc.raw_backtrace_to_string bt0 in
-     let dump = Printf.sprintf "Prometheus.with_lock: %s\nCaller stack:\n%s" msg trace in
+     let dump = Printf.sprintf "Otel_metric_store.with_lock: %s\nCaller stack:\n%s" msg trace in
      Atomic.set last_deadlock_backtrace (Some dump);
-     Log.Metrics.error "Prometheus mutex deadlock: %s" dump;
+     Log.Metrics.error "Otel_metric_store mutex deadlock: %s" dump;
      raise exn);
   Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock metrics_mutex) f
 ;;

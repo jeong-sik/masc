@@ -91,7 +91,7 @@ let record_memory_recall_read_error ~site path exn_class =
   Log.Keeper.warn
     "%s: dropping history read of %s: <error class=%s>"
     site path exn_label;
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     Keeper_metrics.(to_string MemoryRecallReadErrors)
     ~labels:[ ("exception_class", exn_label) ]
     ()
@@ -721,7 +721,7 @@ let history_user_messages_from_lines
            Log.Keeper.warn
              "load_history_user_messages: skipping line in %s: %s"
              path exn_detail;
-           Prometheus.inc_counter
+           Otel_metric_store.inc_counter
              Keeper_metrics.(to_string MemoryBankLoadHistorySwallowedExceptions)
              ~labels:[ ("exception_class", exn_label) ]
              ();

@@ -2,7 +2,7 @@
 
     Extracted from keeper_registry.ml (lines 1507-1555) as part of the
     godfile decomp campaign. Three pure side-effect helpers — log line
-    on a [Publish_lifecycle] entry action, Prometheus-instrumented
+    on a [Publish_lifecycle] entry action, Otel_metric_store-instrumented
     lookup of a follow-up event for [Overflowed/Start_compaction], and
     a counter bump on rejected follow-up dispatch. No registry state
     read or written. *)
@@ -42,7 +42,7 @@ let followup_event_of_action
   =
   match phase, action with
   | Keeper_state_machine.Overflowed, Start_compaction ->
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string FsmEdgeTransitions)
       ~labels:[ "edge", "ksm_to_kmc_compact_trigger" ]
       ();
@@ -51,7 +51,7 @@ let followup_event_of_action
 ;;
 
 let record_dispatch_rejection event =
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     Keeper_metrics.(to_string LifecycleDispatchRejections)
     ~labels:[ "event", Keeper_state_machine.event_to_string event ]
     ()

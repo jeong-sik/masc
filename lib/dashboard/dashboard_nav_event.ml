@@ -55,14 +55,14 @@ let counter_surface = "dashboard_surface_open_total"
 let counter_section = "dashboard_section_open_total"
 
 let () =
-  Prometheus.register_counter
+  Otel_metric_store.register_counter
     ~name:counter_surface
     ~help:"Top-level dashboard surface opens (RFC-0049). Aggregate, no PII."
     ()
 ;;
 
 let () =
-  Prometheus.register_counter
+  Otel_metric_store.register_counter
     ~name:counter_section
     ~help:
       "Section-level opens within a dashboard surface (RFC-0049). redirected_from \
@@ -143,7 +143,7 @@ let parse_event_json json =
 ;;
 
 let record { surface; section; redirected_from } =
-  Prometheus.inc_counter counter_surface ~labels:[ "surface", surface ] ~delta:1.0 ();
+  Otel_metric_store.inc_counter counter_surface ~labels:[ "surface", surface ] ~delta:1.0 ();
   match section with
   | None -> ()
   | Some s ->
@@ -153,5 +153,5 @@ let record { surface; section; redirected_from } =
       ; "redirected_from", Option.value ~default:"none" redirected_from
       ]
     in
-    Prometheus.inc_counter counter_section ~labels ~delta:1.0 ()
+    Otel_metric_store.inc_counter counter_section ~labels ~delta:1.0 ()
 ;;

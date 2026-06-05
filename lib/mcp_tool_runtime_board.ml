@@ -74,7 +74,7 @@ let json_upsert_meta_string_field name value fields =
     in
     json_upsert_assoc_field "meta" meta_json fields
 
-(** #10297: Prometheus counter recording the cycle when a board-tool
+(** #10297: Otel_metric_store counter recording the cycle when a board-tool
     caller supplied an identity field whose canonical form disagrees
     with the runtime contract's [agent_name].  Pre-fix the caller's
     value was accepted unconditionally; the counter makes spoof
@@ -87,7 +87,7 @@ let board_actor_identity_spoof_metric =
   "masc_board_actor_identity_spoof_total"
 
 let () =
-  Prometheus.register_counter
+  Otel_metric_store.register_counter
     ~name:board_actor_identity_spoof_metric
     ~help:
       "Total board-tool calls where the caller-supplied identity field \
@@ -184,7 +184,7 @@ let enforce_caller_identity ~tool ~field ~agent_name arguments =
             (* Mismatch: caller tried to author / vote under a different
                principal. Rewrite to ctx, preserve the claim, and count
                the rewrite. *)
-            Prometheus.inc_counter board_actor_identity_spoof_metric
+            Otel_metric_store.inc_counter board_actor_identity_spoof_metric
               ~labels:[ ("tool", tool); ("field", field) ]
               ();
             let fields =

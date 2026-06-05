@@ -53,7 +53,7 @@ let keeper_constitution () =
          appears in the prompt.  Any *other* unresolved variables remain
          visible as [{{name}}] placeholders, which is what the operator needs
          to see in order to fix the template. *)
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string PromptFailures)
         ~labels:[("prompt", Keeper_prompt_names.constitution)]
         ();
@@ -111,7 +111,7 @@ let critical_prompt_recovery_block () =
     match missing_critical_prompt_anchors from_registry with
     | [] -> from_registry
     | missing ->
-        Prometheus.inc_counter
+        Otel_metric_store.inc_counter
           Keeper_metrics.(to_string PromptFailures)
           ~labels:[("prompt", "keeper.recovery_block.anchors")]
           ();
@@ -128,7 +128,7 @@ let ensure_critical_prompt_anchors prompt =
   match missing_critical_prompt_anchors prompt with
   | [] -> prompt
   | missing ->
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string PromptFailures)
         ~labels:[("prompt", "critical_prompt_anchors")]
         ();
@@ -146,7 +146,7 @@ let render_world_prompt () : string =
   with
   | Ok rendered -> rendered
   | Error msg ->
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string PromptFailures)
         ~labels:[("prompt", Keeper_prompt_names.world)]
         ();
@@ -160,7 +160,7 @@ let behavior_prompt_block name =
   match Keeper_prompt_external.get name with
   | Some content -> String.trim content
   | None ->
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string PromptFailures)
         ~labels:[("prompt", "behavior/" ^ name)]
         ();
@@ -175,12 +175,12 @@ let behavior_prompt_block name =
         name
 
 let missing_personality_field_marker field =
-  (* F-3: per-field Prometheus counter retained (operator dashboards key on
+  (* F-3: per-field Otel_metric_store counter retained (operator dashboards key on
      specific field labels); WARN aggregation handled by caller so 3 missing
      fields per cycle emit 1 WARN with structured field list instead of 3
      separate WARNs. Pre-fix volume: ~666/24h (3 fields × 134 cycles + dups).
      Post-fix worst case: ~134/24h with field list preserved in message. *)
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     Keeper_metrics.(to_string PromptFailures)
     ~labels:[("prompt", "personality/" ^ field)]
     ();
@@ -226,7 +226,7 @@ let build_keeper_system_prompt
       { will; needs; desires; instructions = "" }
   in
   (* F-3: aggregate missing personality fields into a single WARN per
-     build_keeper_system_prompt call. Per-field Prometheus counters and the
+     build_keeper_system_prompt call. Per-field Otel_metric_store counters and the
      in-prompt config-drift marker remain unchanged so dashboards and the
      LLM-visible drift signal are preserved. *)
   let missing_personality = ref [] in

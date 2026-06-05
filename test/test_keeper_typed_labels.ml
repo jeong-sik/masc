@@ -3,7 +3,7 @@
 
     Step 15 (partial): catches the silent regression where two
     constructors of the same ADT collapse to the same string label. A
-    label collision would cause Prometheus dimensions to merge across
+    label collision would cause Otel_metric_store dimensions to merge across
     distinct semantic states, hiding the very signal these ADTs were
     introduced to make legible.
 

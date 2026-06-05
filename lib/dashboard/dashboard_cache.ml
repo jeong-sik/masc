@@ -231,7 +231,7 @@ let wait_poll_interval_sec = 0.25
     instrumentation — never branches on these counters. *)
 let cache_metric_label = [("cache", "dashboard")]
 
-(* Local hit/miss counters in addition to Prometheus, because Prometheus has
+(* Local hit/miss counters in addition to Otel_metric_store, because Otel_metric_store has
    no read-back API in this codebase and we want to surface live ratios via
    [stats ()] without forcing operators to scrape /metrics. *)
 let cache_hits_total = Atomic.make 0
@@ -239,12 +239,12 @@ let cache_misses_total = Atomic.make 0
 
 let inc_cache_hit () =
   Atomic.incr cache_hits_total;
-  Prometheus.inc_counter Prometheus.metric_cache_hits_total
+  Otel_metric_store.inc_counter Otel_metric_store.metric_cache_hits_total
     ~labels:cache_metric_label ()
 
 let inc_cache_miss () =
   Atomic.incr cache_misses_total;
-  Prometheus.inc_counter Prometheus.metric_cache_misses_total
+  Otel_metric_store.inc_counter Otel_metric_store.metric_cache_misses_total
     ~labels:cache_metric_label ()
 
 (** Eio path: per-key locking with stampede protection + stale-while-revalidate.
@@ -487,9 +487,9 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
          climbs sustainedly, [release_on_cancel] is not firing and the
          structural fix has regressed.  Telemetry-as-fix is forbidden by
          the workaround rejection bar; this is telemetry-on-fix-failure. *)
-      Prometheus.inc_counter Prometheus.metric_cache_stuck_evictions_total
+      Otel_metric_store.inc_counter Otel_metric_store.metric_cache_stuck_evictions_total
         ~labels:cache_metric_label ();
-      Prometheus.observe_histogram Prometheus.metric_cache_stuck_elapsed_seconds
+      Otel_metric_store.observe_histogram Otel_metric_store.metric_cache_stuck_elapsed_seconds
         ~labels:cache_metric_label elapsed;
       try_get ~waited ~watching_token
   in
@@ -692,7 +692,7 @@ let stats () =
     entries_acc := entry_json :: !entries_acc
   ) map;
   (* Truncate per-entry list to bound payload size — operators looking for
-     specific keys can read [/metrics] for the full prometheus surface. *)
+     specific keys can read [/metrics] for the full otel_metric_store surface. *)
   let entries_list =
     let all = List.rev !entries_acc in
     if List.length all <= max_entries_in_stats

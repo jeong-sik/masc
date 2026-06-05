@@ -255,7 +255,7 @@ let latest_metrics_json = Keeper_status_detail_observability.latest_metrics_json
 let model_observability_json = Keeper_status_detail_observability.model_observability_json
 
 (* TEL-OK: status handler — telemetry surfaces via the cache layer
-   ([_cache] mutex-protected reads/writes) and Prometheus counters in
+   ([_cache] mutex-protected reads/writes) and Otel_metric_store counters in
    the downstream [Keeper_status_runtime]/[Keeper_status_bridge] calls. *)
 let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : string) args : tool_result =
   match resolve_status_target_config ~config ~agent_name args with

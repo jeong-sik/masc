@@ -43,7 +43,7 @@ let test_trace_id_thunk_is_callable () =
 ;;
 
 let test_register_metrics_idempotent () =
-  (* Calling twice must not raise (Prometheus would otherwise reject
+  (* Calling twice must not raise (Otel_metric_store would otherwise reject
      duplicate counter registration). *)
   Masc.Tool_telemetry.register_metrics ();
   Masc.Tool_telemetry.register_metrics ();

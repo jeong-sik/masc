@@ -1,4 +1,4 @@
-(** Admission_queue_metrics — Prometheus integration for inference admission queue.
+(** Admission_queue_metrics — Otel_metric_store integration for inference admission queue.
 
     @since 3.0.0 *)
 
@@ -13,16 +13,16 @@ let rejection_reason_label = function
   | Host_resource_saturated -> "host_resource_saturated"
 
 let on_acquire ~keeper_name:_ ~runtime_id:_ ~wait_ms =
-  Prometheus.inc_gauge Prometheus.metric_inference_queue_inflight ();
-  Prometheus.inc_counter Prometheus.metric_inference_queue_acquired ();
+  Otel_metric_store.inc_gauge Otel_metric_store.metric_inference_queue_inflight ();
+  Otel_metric_store.inc_counter Otel_metric_store.metric_inference_queue_acquired ();
   let wait_sec = Float.of_int wait_ms /. 1000.0 in
-  Prometheus.observe_histogram Prometheus.metric_inference_queue_wait wait_sec
+  Otel_metric_store.observe_histogram Otel_metric_store.metric_inference_queue_wait wait_sec
 
 let on_release ~keeper_name:_ ~runtime_id:_ =
-  Prometheus.dec_gauge Prometheus.metric_inference_queue_inflight ()
+  Otel_metric_store.dec_gauge Otel_metric_store.metric_inference_queue_inflight ()
 
 let on_reject ~surface ~reason =
-  Prometheus.inc_counter Prometheus.metric_inference_queue_rejected
+  Otel_metric_store.inc_counter Otel_metric_store.metric_inference_queue_rejected
     ~labels:
       [
         ("surface", rejection_surface_label surface);
@@ -31,5 +31,5 @@ let on_reject ~surface ~reason =
     ()
 
 let set_max_concurrent value =
-  Prometheus.set_gauge Prometheus.metric_inference_queue_max_concurrent
+  Otel_metric_store.set_gauge Otel_metric_store.metric_inference_queue_max_concurrent
     (float_of_int value)

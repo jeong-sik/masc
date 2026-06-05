@@ -145,7 +145,7 @@ type t = {
 (** {1 String round-trips for the variant taxonomies}
 
     These are exposed because they are useful in tests and in
-    Prometheus label code; the JSON codecs ({!to_yojson} / {!of_yojson})
+    Otel_metric_store label code; the JSON codecs ({!to_yojson} / {!of_yojson})
     use them internally. *)
 
 val actor_kind_to_string : actor_kind -> string

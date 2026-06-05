@@ -247,7 +247,7 @@ let add_routes ~sw ~clock router =
                  (`Assoc [ ("ok", `Bool false); ("error", `String message) ])
                  reqd)
        ) request reqd)
-  (* RFC-0049 — surface/section open counters. Aggregate Prometheus
+  (* RFC-0049 — surface/section open counters. Aggregate Otel_metric_store
      counters only; the request body is discarded after increment. *)
   |> Http.Router.post "/api/v1/dashboard/nav-event" (fun request reqd ->
        with_public_read (fun _state req reqd ->

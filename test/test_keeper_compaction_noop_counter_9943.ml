@@ -24,7 +24,7 @@ let () =
   Unix.putenv "MASC_BASE_PATH" dir
 ;;
 
-module Prom = Masc.Prometheus
+module Prom = Masc.Otel_metric_store
 
 let noop_for ~keeper ~trigger =
   Prom.metric_value_or_zero
@@ -33,7 +33,7 @@ let noop_for ~keeper ~trigger =
     ()
 ;;
 
-(* Metric is registered at module init via [Prometheus.add ~labels:[]],
+(* Metric is registered at module init via [Otel_metric_store.add ~labels:[]],
    so [get_metric_value ~labels:[] ()] returns [Some 0.0] iff the
    registration ran. If a future refactor accidentally drops the
    [add metric_keeper_compaction_noop ...] call, this returns [None]

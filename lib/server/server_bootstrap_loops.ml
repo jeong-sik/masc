@@ -225,7 +225,7 @@ let start_keeper_loops
                  task
                  boot_guard_sec
                  elapsed;
-               Prometheus.inc_counter
+               Otel_metric_store.inc_counter
                  "masc_lazy_task_boot_guard_fired_total"
                  ~labels:[ "task", task ]
                  ();
@@ -342,11 +342,11 @@ let start_keeper_loops
                        (missing `event` or `keeper_name` field) were
                        silently dropped.  A systematic encoding bug
                        could lose every cache invalidation indefinitely
-                       with no signal.  Bumping a Prometheus counter
+                       with no signal.  Bumping a Otel_metric_store counter
                        lets `rate(...)` alerts catch the regression
                        even though the dashboard cache continues to
                        degrade gracefully (just stale, not broken). *)
-                   Prometheus.inc_counter "masc_keeper_lifecycle_malformed_total" ())
+                   Otel_metric_store.inc_counter "masc_keeper_lifecycle_malformed_total" ())
               | _ -> Log.Dashboard.debug "ignored non-lifecycle event")
            events;
          if events <> []

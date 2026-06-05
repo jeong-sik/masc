@@ -50,7 +50,7 @@
 include Keeper_approval_queue_rules_types
 
 let record_queue_failure ~keeper_name ~site ?(id = "-") ?(event_type = "-") exn =
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     Keeper_metrics.(to_string ApprovalQueueFailures)
     ~labels:[ "keeper", keeper_name; "site", site ]
     ();
@@ -259,7 +259,7 @@ let upsert_rule
       (match save_rules_unlocked ?base_path (candidate :: rules) with
        | Ok () -> ()
        | Error msg ->
-         Prometheus.inc_counter
+         Otel_metric_store.inc_counter
            Keeper_metrics.(to_string ApprovalQueueFailures)
            ~labels:[ "keeper", keeper_name; "site", Keeper_approval_queue_failure_site.(to_label Upsert_rule_save) ]
            ();
@@ -324,7 +324,7 @@ let find_matching_rule
       (match save_rules_unlocked ?base_path updated_rules with
        | Ok () -> ()
        | Error msg ->
-         Prometheus.inc_counter
+         Otel_metric_store.inc_counter
            Keeper_metrics.(to_string ApprovalQueueFailures)
            ~labels:[ "keeper", keeper_name; "site", Keeper_approval_queue_failure_site.(to_label Matching_rule_save) ]
            ();

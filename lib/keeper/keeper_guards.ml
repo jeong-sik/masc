@@ -145,7 +145,7 @@ let broadcast_tool_skipped ~keeper_name ~tool_name ~reason_code =
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string GuardsFailures)
         ~labels:[("keeper", keeper_name); ("site", "sse_broadcast")]
         ();
@@ -283,11 +283,11 @@ let notify_gate_decision on_gate_decision (event : gate_decision_event) =
     ~on_exn:(fun exn ->
       (* Keep existing GuardsFailures metric for backward compatibility
          (test_keeper_guards.ml asserts this counter). *)
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string GuardsFailures)
         ~labels:[("keeper", event.keeper_name); ("site", "gate_observer")]
         ();
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string LifecycleCallbackFailures)
         ~labels:[("keeper", event.keeper_name); ("callback", "on_gate_decision")]
         ();
@@ -320,11 +320,11 @@ let notify_gate_decision on_gate_decision (event : gate_decision_event) =
    becomes terminal WITHOUT any runtime tier ever being attempted.  A
    dashboard reading only the final outcome ("Turn_gate_rejected") cannot
    distinguish "all gates rejected, runtime=none" from "all runtimes
-   exhausted" — both surface as terminal failure.  We add a Prometheus
+   exhausted" — both surface as terminal failure.  We add a Otel_metric_store
    counter, an INFO log line, and a [runtime_attempted] payload field so
    the narrative is observable. *)
 
-(** Prometheus metric: turns terminated by a pre_tool_use gate rejection
+(** Otel_metric_store metric: turns terminated by a pre_tool_use gate rejection
     (Override or ApprovalRequired) without ever attempting a runtime
     tier.  See [emit_gate_event] for the firing site.
 
@@ -337,7 +337,7 @@ let gate_rejected_terminal_metric =
   Keeper_metrics.(to_string TurnGateRejectedTerminal)
 
 let () =
-  Prometheus.register_counter
+  Otel_metric_store.register_counter
     ~name:gate_rejected_terminal_metric
     ~help:
       "Total turns terminated by a pre_tool_use gate rejection \
@@ -359,7 +359,7 @@ let emit_gate_event
   let is_gate_rejection = gate_decision_is_rejection decision in
   if is_gate_rejection then begin
     Keeper_registry.mark_turn_gate_rejected_by_name agent_name;
-    Prometheus.inc_counter gate_rejected_terminal_metric
+    Otel_metric_store.inc_counter gate_rejected_terminal_metric
       ~labels:[
         ("keeper", agent_name);
         ("tool", tool_name);
@@ -405,7 +405,7 @@ let emit_gate_event
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string GuardsFailures)
         ~labels:[("keeper", agent_name); ("site", "event_emit")]
         ();
@@ -539,7 +539,7 @@ let streak_guard
             tool_name new_count
         in
         let latency_ms = (Time_compat.now () -. t0) *. 1000.0 in
-        Prometheus.inc_counter
+        Otel_metric_store.inc_counter
           Keeper_metrics.(to_string GuardsFailures)
           ~labels:[("keeper", keeper_name); ("site", "streak_gate")]
           ();
@@ -582,7 +582,7 @@ let deny_guard
       if List.mem tool_name denied then begin
         let reason_text = "tool is on the keeper deny list" in
         let latency_ms = (Time_compat.now () -. t0) *. 1000.0 in
-        Prometheus.inc_counter
+        Otel_metric_store.inc_counter
           Keeper_metrics.(to_string GuardsFailures)
           ~labels:[("keeper", keeper_name); ("site", "deny_list")]
           ();
@@ -630,7 +630,7 @@ let cost_guard
              accumulated_cost_usd limit
          in
          let latency_ms = (Time_compat.now () -. t0) *. 1000.0 in
-         Prometheus.inc_counter
+         Otel_metric_store.inc_counter
            Keeper_metrics.(to_string GuardsFailures)
            ~labels:[("keeper", keeper_name); ("site", "cost_gate")]
            ();
@@ -687,7 +687,7 @@ let destructive_guard
              Printf.sprintf "pattern='%s' (%s)" pattern desc
            in
            let latency_ms = (Time_compat.now () -. t0) *. 1000.0 in
-           Prometheus.inc_counter
+           Otel_metric_store.inc_counter
              Keeper_metrics.(to_string GuardsFailures)
              ~labels:[("keeper", keeper_name); ("site", "destructive_guard")]
              ();

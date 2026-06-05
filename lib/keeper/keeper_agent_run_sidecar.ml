@@ -198,7 +198,7 @@ let save_sidecars
       Log.Keeper.warn
         "keeper:%s state snapshot sidecar save failed: %s"
         keeper_name e;
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string CheckpointFailures)
         ~labels:[ "keeper", keeper_name; "site", "state_snapshot_sidecar" ]
         ();
@@ -231,7 +231,7 @@ let save_sidecars
       Log.Keeper.warn
         "keeper:%s working state sidecar save failed: %s"
         keeper_name e;
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string CheckpointFailures)
         ~labels:[ "keeper", keeper_name; "site", "working_state_sidecar" ]
         ();

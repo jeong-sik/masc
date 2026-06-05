@@ -270,8 +270,8 @@ let empty_tool_args = function
 ;;
 
 let emit_validation_telemetry ~tool ~result ~reason =
-  Prometheus.inc_counter
-    Prometheus.metric_tool_input_validation
+  Otel_metric_store.inc_counter
+    Otel_metric_store.metric_tool_input_validation
     ~labels:[ "tool", tool; "result", result; "reason", reason ]
     ();
   Otel_spans.add_event

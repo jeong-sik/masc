@@ -7,7 +7,7 @@
 
     RFC-0088 §4 Option A (2026-05-15): [For_testing.warn_telemetry_drop]
     now takes a typed [Workspace_telemetry_drop_event.t] instead of two free
-    strings. The Prometheus label values remain byte-for-byte identical
+    strings. The Otel_metric_store label values remain byte-for-byte identical
     (["agent_lifecycle", "session_ended"] / ["agent_lifecycle", "session_bound"]) so the
     assertions below — which still pin the wire label values — are the
     correct regression coverage for the swap-over. *)
@@ -15,8 +15,8 @@
 open Masc
 
 let counter_value ~event_family ~event_kind =
-  Prometheus.metric_value_or_zero
-    Prometheus.metric_workspace_telemetry_drop
+  Otel_metric_store.metric_value_or_zero
+    Otel_metric_store.metric_workspace_telemetry_drop
     ~labels:[ ("event_family", event_family); ("event_kind", event_kind) ]
     ()
 

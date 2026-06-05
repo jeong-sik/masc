@@ -163,8 +163,8 @@ let wrap_event
       offending [kind], correlation ids, timestamp, and the explicit
       file:function where the migration arm should be added.
     - Counter [masc_oas_bridge_unmigrated_payload_kind_total{kind}]
-      ({!Prometheus.metric_oas_bridge_unmigrated_payload_kind}) so the
-      degradation rate is visible to Prometheus without log scraping.
+      ({!Otel_metric_store.metric_oas_bridge_unmigrated_payload_kind}) so the
+      degradation rate is visible to Otel_metric_store without log scraping.
     - SSE payload [note] + [migration_target] fields so dashboard code
       can render the partial-data row distinctly and link the operator
       back to the file that needs editing.
@@ -281,8 +281,8 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
          overflow (no compact_started/compacted within grace
          window) is observable via metric + warn log, rather
          than silently burning out as provider_timeout. *)
-    Prometheus.set_gauge
-      Prometheus.metric_oas_context_overflow_ratio
+    Otel_metric_store.set_gauge
+      Otel_metric_store.metric_oas_context_overflow_ratio
       ~labels:[ "agent_name", agent_name ]
       ratio;
     Context_overflow_action_tracker.record_imminent
@@ -301,8 +301,8 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
     (* #9935: compaction started — clears pending imminent
          and fires action-taken counter. *)
     Context_overflow_action_tracker.record_action ~keeper_name:agent_name;
-    Prometheus.inc_counter
-      Prometheus.metric_oas_context_compaction_total
+    Otel_metric_store.inc_counter
+      Otel_metric_store.metric_oas_context_compaction_total
       ~labels:[ "agent_name", agent_name; "trigger", trigger ]
       ();
     let payload =
@@ -376,7 +376,7 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
       ; _
       } ->
     (* Per-token telemetry from OAS#1202; not surfaced over SSE. Preserve
-         the aggregate signal with bounded Prometheus labels so operators can
+         the aggregate signal with bounded Otel_metric_store labels so operators can
          see model-family/token-bin trends without flooding SSE consumers or
          creating raw-model cardinality. *)
     observe_inference_telemetry
@@ -409,11 +409,11 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
          signal that an OAS variant has shipped without a masc
          consumer migration; the
          [masc_oas_bridge_unmigrated_payload_kind_total{kind}] counter
-         gives them the per-process *rate*, surfaced on the Prometheus
+         gives them the per-process *rate*, surfaced on the Otel_metric_store
          scrape so dashboards can alert without log scraping. *)
     let kind = Agent_sdk.Event_bus.payload_kind other in
-    Prometheus.inc_counter
-      Prometheus.metric_oas_bridge_unmigrated_payload_kind
+    Otel_metric_store.inc_counter
+      Otel_metric_store.metric_oas_bridge_unmigrated_payload_kind
       ~labels:[ "kind", kind ]
       ();
     Log.Misc.warn
@@ -486,8 +486,8 @@ let broadcast_relay_json json =
 ;;
 
 let update_relay_queue_depth pending =
-  Prometheus.set_gauge
-    Prometheus.metric_oas_sse_relay_queue_depth
+  Otel_metric_store.set_gauge
+    Otel_metric_store.metric_oas_sse_relay_queue_depth
     (float_of_int (List.length pending))
 ;;
 
@@ -665,8 +665,8 @@ let rec process_pending ?store_ref acc = function
        then (
          if fd_pressure
          then Keeper_fd_pressure.note_exception ~site:"oas_event_bridge.relay" exn;
-         Prometheus.inc_counter
-           Prometheus.metric_oas_sse_relay_drops
+         Otel_metric_store.inc_counter
+           Otel_metric_store.metric_oas_sse_relay_drops
            ~labels:[ "stage", relay_stage_to_string stage ]
            ();
          let stage_label =
@@ -678,8 +678,8 @@ let rec process_pending ?store_ref acc = function
          process_pending ?store_ref acc rest)
        else if attempt >= relay_max_attempts
        then (
-         Prometheus.inc_counter
-           Prometheus.metric_oas_sse_relay_drops
+         Otel_metric_store.inc_counter
+           Otel_metric_store.metric_oas_sse_relay_drops
            ~labels:[ "stage", relay_stage_to_string stage ]
            ();
          emit_relay_drop_log
@@ -692,8 +692,8 @@ let rec process_pending ?store_ref acc = function
            ~attempts:attempt;
          process_pending ?store_ref acc rest)
        else (
-         Prometheus.inc_counter
-           Prometheus.metric_oas_sse_relay_retries
+         Otel_metric_store.inc_counter
+           Otel_metric_store.metric_oas_sse_relay_retries
            ~labels:[ "stage", relay_stage_to_string stage ]
            ();
          emit_relay_retry_log ~pending ~stage ~attempt exn;

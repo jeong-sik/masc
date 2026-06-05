@@ -1,5 +1,5 @@
-module Bridge = Llm_metric_bridge
-module Prom = Prometheus
+module Bridge = Masc.Llm_metric_bridge
+module Prom = Otel_metric_store
 
 let metric name ~labels =
   Prom.metric_value_or_zero name ~labels ()

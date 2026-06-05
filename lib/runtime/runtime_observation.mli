@@ -153,7 +153,7 @@ val runtime_metrics_for_candidates :
     metrics path consumes.  Wires
     [Llm_metric_bridge.emit_request_latency] and
     [emit_http_status] into the metrics callbacks so the
-    Prometheus dashboard does not blackhole captured
+    Otel_metric_store dashboard does not blackhole captured
     turns (the per-call sink takes precedence over the
     global [Llm_metric_bridge] when both are wired). *)
 

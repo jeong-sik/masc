@@ -10,7 +10,7 @@
 
 (** {1 Types} *)
 
-(* #9919 audit follow-up: Prometheus counter for priority-trigger
+(* #9919 audit follow-up: Otel_metric_store counter for priority-trigger
    selections. Replaces a degenerate metric emit
    ([threshold=0.0, triggered=true] tautology). *)
 let priority_trigger_selected_metric =
@@ -464,10 +464,10 @@ let record_quality_signal ~agent_name ~(verdict : Post_verifier.verdict) =
 
 (* [on_priority_selected] is an injected observability hook for the
    priority-trigger selection path. Previously this site called
-   [Prometheus.inc_counter] directly, coupling this module to the masc
+   [Otel_metric_store.inc_counter] directly, coupling this module to the masc
    mega-library root. Defaulted to a no-op (observability, not behavior) so
    non-instrumented callers stay simple; an instrumented caller supplies the
-   real Prometheus increment. *)
+   real Otel_metric_store increment. *)
 let select_with_feedback
     ~is_healthy
     ?(on_priority_selected = fun ~agent_name:_ ~trigger_label:_ -> ())
@@ -518,7 +518,7 @@ let select_with_feedback
            [triggered=true] were tautological (caller already filtered
            by eligibility).  The real useful observation is "a priority
            trigger was selected with [signal=X]"; expose it as a
-           Prometheus counter labelled by the trigger kind so operators
+           Otel_metric_store counter labelled by the trigger kind so operators
            can split mention-driven vs content-alert-driven selection
            rates. *)
         let trigger_label =

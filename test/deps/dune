@@ -5,6 +5,7 @@
 
 (library
  (name masc_test_deps)
+ (modules masc_test_deps)
  (foreign_stubs
   (language c)
   (names test_env_stubs))
@@ -40,6 +41,7 @@
   (re_export masc.worker_execution_spec)
   (re_export masc.worker_runtime_config)
   (re_export masc.otel_spans)
+  (re_export otel_metric_test_store)
   (re_export masc.telemetry_coverage_gap)
   (re_export masc.telemetry_unified)
   (re_export masc.telemetry_unified_source)
@@ -156,7 +158,6 @@
   (re_export masc.provider_tool_support)
   (re_export masc.keeper_internal_error)
   (re_export masc.pool_metrics)
-  (re_export masc.prometheus)
   (re_export masc.auth)
   (re_export masc.fd_accountant)
   (re_export masc.response)
@@ -222,3 +223,8 @@
   (re_export otoml)
   (re_export yojson)
   (re_export zstd)))
+
+(library
+ (name otel_metric_test_store)
+ (wrapped false)
+ (modules otel_metric_store))

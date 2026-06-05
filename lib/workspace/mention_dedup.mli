@@ -29,7 +29,7 @@ val default_ttl_seconds : float
     - Updates the in-process Hashtbl entry for the triple to [now].
     - Increments the
       [masc_mention_dedup_decisions_total]{outcome=skipped|passed}
-      Prometheus counter.
+      Otel_metric_store counter.
 
     Thread safety: caller-side mutex; safe for concurrent fibers. *)
 val should_skip :

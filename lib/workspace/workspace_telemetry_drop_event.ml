@@ -1,5 +1,5 @@
 (* RFC-0088 §4 Option A — typed event for the Workspace async-context-free
-   telemetry drop counter [Prometheus.metric_workspace_telemetry_drop].
+   telemetry drop counter [Otel_metric_store.metric_workspace_telemetry_drop].
 
    See [.mli] for the public contract. The wire strings are chosen to be
    explicit names owned by the typed call sites in
@@ -36,7 +36,7 @@ let kind_to_wire = function
     Masc_domain.task_action_to_string action
 ;;
 
-let to_prometheus_labels t =
+let to_metric_labels t =
   [ "event_family", family_to_wire t; "event_kind", kind_to_wire t ]
 ;;
 

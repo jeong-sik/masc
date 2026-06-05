@@ -9,7 +9,7 @@
    - Per-keeper isolation *)
 
 module D = Masc.Keeper_stay_silent_loop_detector
-module Prom = Masc.Prometheus
+module Prom = Masc.Otel_metric_store
 
 (* Detector now uses Eio.Mutex (was Stdlib.Mutex; the latter raised EDEADLK
    under any fiber contention). Every public entry needs an Eio fiber

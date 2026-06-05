@@ -2,7 +2,7 @@
 
 module Keeper_tool_surfaces = Masc.Keeper_tool_surfaces
 module Keeper_deliberation = Masc.Keeper_deliberation
-module Prometheus = Masc.Prometheus
+module Otel_metric_store = Masc.Otel_metric_store
 
 (* New modules may not be visible via Masc wrapper in large libraries
    due to dune's incremental wrapper compilation. Use internal names. *)
@@ -110,7 +110,7 @@ let write_file path content =
     (fun () -> output_string oc content)
 
 let team_context_drop_value reason =
-  Prometheus.metric_value_or_zero Prometheus.metric_persistence_read_drops
+  Otel_metric_store.metric_value_or_zero Otel_metric_store.metric_persistence_read_drops
     ~labels:[("surface", "team_context_findings"); ("reason", reason)]
     ()
 

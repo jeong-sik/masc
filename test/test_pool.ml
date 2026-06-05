@@ -113,7 +113,7 @@ let test_http_method_variants () =
   Alcotest.(check string) "method variants stable" "GET"
     (_exhaustive `GET)
 
-(* ── stats type shape — Prometheus consumer schema ───────────── *)
+(* ── stats type shape — Otel_metric_store consumer schema ───────────── *)
 
 let test_stats_zero_state_shape () =
   (* When the pool is fresh, all counters are zero and there are no

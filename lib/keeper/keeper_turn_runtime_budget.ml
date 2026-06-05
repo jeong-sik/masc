@@ -168,7 +168,6 @@ let runtime_reason_is_structural_attempt_timeout
   | Keeper_turn_driver.Candidates_filtered_after_cycles
   | Keeper_turn_driver.Max_turns_exceeded
   | Keeper_turn_driver.Capacity_exhausted
-  | Keeper_turn_driver.No_tool_capable _
   | Keeper_turn_driver.Other_detail _ -> false
 
 let degraded_retry_bypasses_slot_phase_guard
@@ -506,7 +505,7 @@ let sync_keeper_paused_state_impl
       config synced_meta
   with
   | Error err ->
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string WriteMetaFailures)
         ~labels:[("keeper", meta.name);
                  ("phase",
@@ -717,7 +716,7 @@ let post_turn_resilience_handles
        | exn -> Error (Printexc.to_string exn))
     with
     | Error detail ->
-        Prometheus.inc_counter Keeper_metrics.(to_string OasExecutionErrors)
+        Otel_metric_store.inc_counter Keeper_metrics.(to_string OasExecutionErrors)
           ~labels:[("keeper", meta.name); ("phase", Keeper_oas_execution_error_phase.(to_label Resilience_audit_store))]
           ();
         Log.Keeper.error
@@ -777,7 +776,7 @@ let enqueue_partial_commit_continue_gate
              Log.Keeper.error
                "%s: partial-commit continue gate approved but keeper resume sync failed: %s"
                meta.name err);
-             Prometheus.inc_counter
+             Otel_metric_store.inc_counter
                Keeper_metrics.(to_string RuntimeSyncFailures)
                ~labels:[("keeper", meta.name); ("site", "resume_sync")]
                ()
@@ -794,7 +793,7 @@ let enqueue_partial_commit_continue_gate
              Log.Keeper.error
                "%s: partial-commit continue gate rejected but keeper pause sync failed: %s (reason=%s)"
                meta.name err reason);
-             Prometheus.inc_counter
+             Otel_metric_store.inc_counter
                Keeper_metrics.(to_string RuntimeSyncFailures)
                ~labels:[("keeper", meta.name); ("site", "pause_sync")]
                ())

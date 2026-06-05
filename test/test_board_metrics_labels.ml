@@ -1,17 +1,17 @@
 (* test/test_board_metrics_labels.ml
 
-   Pins the Prometheus label strings emitted for the typed metric-label
+   Pins the Otel_metric_store label strings emitted for the typed metric-label
    closed sums on [Board_metrics_hooks.observer]. The refactor replaced
    bare [string] label params with closed sums; the [variant -> string]
-   mapping lives only in the Prometheus adapter
-   ([Board_prometheus_hooks.*_to_label]).
+   mapping lives only in the Otel_metric_store adapter
+   ([Board_metric_hooks_adapter.*_to_label]).
 
    These strings are wire contracts: dashboards and alerts are keyed on
    them. The expected values below are the exact strings the pre-typed
    string hooks passed, so this test fails if any future variant change
-   drifts a Prometheus label. *)
+   drifts a Otel_metric_store label. *)
 
-module BPH = Masc.Board_prometheus_hooks
+module BPH = Masc.Board_metric_hooks_adapter
 module BMH = Masc.Board_metrics_hooks
 module BCC = Masc.Board_core_classify
 module RDR = Read_drop_reason

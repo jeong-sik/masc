@@ -62,14 +62,14 @@ let write_cred ~base ~agent_name ~token_hash =
   close_out oc
 
 let counter_for ~first_match =
-  Masc.Prometheus.metric_value_or_zero
-    Masc.Prometheus.metric_auth_credential_ambiguous_lookup
+  Masc.Otel_metric_store.metric_value_or_zero
+    Masc.Otel_metric_store.metric_auth_credential_ambiguous_lookup
     ~labels:[ ("first_match", first_match) ]
     ()
 
 let ambiguous_lookup_total () =
-  Masc.Prometheus.metric_total
-    Masc.Prometheus.metric_auth_credential_ambiguous_lookup
+  Masc.Otel_metric_store.metric_total
+    Masc.Otel_metric_store.metric_auth_credential_ambiguous_lookup
 
 let first_match_for_hash ~base ~token_hash =
   Masc.Auth.list_credentials base
@@ -81,7 +81,7 @@ let test_metric_name_stable () =
   Alcotest.(check string)
     "canonical metric name"
     "masc_auth_credential_ambiguous_lookup_total"
-    Masc.Prometheus.metric_auth_credential_ambiguous_lookup
+    Masc.Otel_metric_store.metric_auth_credential_ambiguous_lookup
 
 let test_single_match_no_counter () =
   with_temp_base (fun base ->

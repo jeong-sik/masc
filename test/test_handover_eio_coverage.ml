@@ -10,12 +10,12 @@
 open Alcotest
 
 module Handover_eio = Masc.Handover_eio
-module Prometheus = Masc.Prometheus
+module Otel_metric_store = Masc.Otel_metric_store
 
 let persistence_surface = "handover_eio"
 
 let persistence_counter reason =
-  Prometheus.metric_value_or_zero Prometheus.metric_persistence_read_drops
+  Otel_metric_store.metric_value_or_zero Otel_metric_store.metric_persistence_read_drops
     ~labels:[("surface", persistence_surface); ("reason", reason)] ()
 
 (* ============================================================

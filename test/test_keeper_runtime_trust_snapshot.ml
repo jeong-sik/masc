@@ -1,6 +1,6 @@
 module K = Masc.Keeper_runtime_trust_snapshot
 module O = Masc.Keeper_status_detail_observability
-module P = Masc.Prometheus
+module P = Masc.Otel_metric_store
 
 let rec remove_tree path =
   if Sys.file_exists path

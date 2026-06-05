@@ -53,7 +53,7 @@ let default_overshoot_slack_s = 5.0
                 not user-supplied identifiers.
 
    Cardinality: ~5 layers × ~20 origins = ~100 series. *)
-let metric_overshoot_total = Prometheus.metric_timeout_policy_overshoot
+let metric_overshoot_total = Otel_metric_store.metric_timeout_policy_overshoot
 
 let overshoot_warn ?(slack_s = default_overshoot_slack_s) ~deadline ~actual_wall_s () =
   let excess = actual_wall_s -. deadline.Deadline.wall_cap_s in
@@ -66,7 +66,7 @@ let overshoot_warn ?(slack_s = default_overshoot_slack_s) ~deadline ~actual_wall
       actual_wall_s
       excess
       slack_s;
-    Prometheus.inc_counter metric_overshoot_total
+    Otel_metric_store.inc_counter metric_overshoot_total
       ~labels:[ ("layer", Layer.to_string deadline.Deadline.layer);
                 ("origin", deadline.Deadline.origin) ]
       ();

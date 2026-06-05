@@ -28,7 +28,7 @@ let read_meta_file_path path : (Keeper_meta_contract.keeper_meta option, string)
       (match meta_of_json json with
        | Ok meta -> Ok (Some meta)
        | Error e ->
-         Prometheus.inc_counter
+         Otel_metric_store.inc_counter
            Keeper_metrics.(to_string MetaReadFailures)
            ~labels:[("keeper", "aggregate"); ("site", "meta_parse")]
            ();
@@ -61,7 +61,7 @@ let persisted_keeper_names config =
   let dir = keeper_dir config in
   match Safe_ops.list_dir_safe dir with
   | Error e ->
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string MetaReadFailures)
       ~labels:[("keeper", "aggregate"); ("site", "persisted_listdir")]
       ();
@@ -118,7 +118,7 @@ let keepalive_keeper_names config =
          treat a corrupt meta file as if the keeper was deleted,
          hiding the operational issue. Now logs and excludes so the
          degraded state is operator-visible. *)
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string MetaReadFailures)
         ~labels:[("keeper", name); ("site", "keepalive_read")]
         ();
@@ -150,7 +150,7 @@ let persistent_agent_names config =
          Error was silently collapsed into None. Operator can't
          distinguish "keeper intentionally not persistent" from
          "meta file is corrupt and we couldn't read it". *)
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string MetaReadFailures)
         ~labels:[("keeper", name); ("site", "persistent_read")]
         ();
@@ -225,7 +225,7 @@ let read_meta_if_changed config name ~(last_mtime : float) : (Keeper_meta_contra
            (* Issue #8377: was [_ -> None] which silently treated a
               read/parse failure as "no change". Now logs so an
               operator can correlate stale UI with bad meta JSON. *)
-           Prometheus.inc_counter
+           Otel_metric_store.inc_counter
              Keeper_metrics.(to_string MetaReadFailures)
              ~labels:[("keeper", "aggregate"); ("site", "changed_parse")]
              ();
@@ -267,7 +267,7 @@ let refresh_progress_updated_line config name =
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn when is_missing_progress_file_error exn -> ()
   | exn ->
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string ProgressUpdatedLineFailures)
       ~labels:[("keeper", name)]
       ();
@@ -344,8 +344,8 @@ let write_meta_with_merge
     | Error _ ->
       (match read_meta_file_path path with
        | Ok (Some latest) ->
-         Prometheus.inc_counter
-           Prometheus.metric_write_meta_cas_retry_total
+         Otel_metric_store.inc_counter
+           Otel_metric_store.metric_write_meta_cas_retry_total
            ~labels:[("keeper_name", caller.name)]
            ();
          Log.Keeper.info

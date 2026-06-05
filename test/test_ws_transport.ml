@@ -193,11 +193,11 @@ let test_parse_sse_dashboard_event_finds_data_line () =
    must register as a hit, distinct strings must register as misses.
    Read counter deltas because the global state is shared across tests. *)
 let read_counter name =
-  Masc.Prometheus.metric_value_or_zero name ()
+  Masc.Otel_metric_store.metric_value_or_zero name ()
 
 let test_parse_cache_counters () =
-  let hits_name = Masc.Prometheus.metric_ws_parse_cache_hits in
-  let misses_name = Masc.Prometheus.metric_ws_parse_cache_misses in
+  let hits_name = Masc.Otel_metric_store.metric_ws_parse_cache_hits in
+  let misses_name = Masc.Otel_metric_store.metric_ws_parse_cache_misses in
   let hits0 = read_counter hits_name in
   let misses0 = read_counter misses_name in
   let e =
@@ -284,15 +284,15 @@ let test_bytes_of_shared_text_invalidates_on_new_ref () =
   Alcotest.(check string) "content still correct for B"
     b (Bytes.to_string bb)
 
-(* Observability: the Prometheus counters must account exactly for the
+(* Observability: the Otel_metric_store counters must account exactly for the
    traffic the cache absorbs — hits for reuse, misses for fresh
    allocations.  Delta-check against shared module-level state so other
    tests running before us do not poison the expected values. *)
-let read_counter name = Masc.Prometheus.metric_value_or_zero name ()
+let read_counter name = Masc.Otel_metric_store.metric_value_or_zero name ()
 
 let test_bytes_cache_counters () =
-  let hits_name = Masc.Prometheus.metric_ws_bytes_cache_hits in
-  let misses_name = Masc.Prometheus.metric_ws_bytes_cache_misses in
+  let hits_name = Masc.Otel_metric_store.metric_ws_bytes_cache_hits in
+  let misses_name = Masc.Otel_metric_store.metric_ws_bytes_cache_misses in
   let hits0 = read_counter hits_name in
   let misses0 = read_counter misses_name in
   let text = String.make 16 'z' in
@@ -320,7 +320,7 @@ let test_bytes_cache_counters () =
    the dispatcher calls with the extracted value. *)
 
 module Metrics = Masc.Transport_metrics
-module Prom = Masc.Prometheus
+module Prom = Masc.Otel_metric_store
 
 let read_counter name = Prom.metric_value_or_zero name ()
 
@@ -587,8 +587,8 @@ let test_slice_index_add_is_idempotent () =
    events (no slice mapping) still raw-forward to every session. *)
 
 let read_skip_counter () =
-  Masc.Prometheus.metric_value_or_zero
-    Masc.Prometheus.metric_ws_slice_fanout_skipped ()
+  Masc.Otel_metric_store.metric_value_or_zero
+    Masc.Otel_metric_store.metric_ws_slice_fanout_skipped ()
 
 let with_env_var key value f =
   let prev = Sys.getenv_opt key in

@@ -242,8 +242,14 @@ let sweep_and_recover (ctx : _ context) =
          "%s: force-released stale slots after watchdog crash: %s"
          entry.name
          summary);
-	    if Keeper_registry.try_resolve_done entry (`Crashed msg)
-	    then (
+	    (match
+         Keeper_registry.resolve_done
+           entry
+           ~source:"supervisor_force_watchdog_crash"
+           (`Crashed msg)
+       with
+       | Keeper_registry.Done_already_resolved _ -> ()
+       | Keeper_registry.Done_resolved _ ->
 	      let outcome = msg in
 	      ignore
 	        (Keeper_registry.dispatch_event_and_log

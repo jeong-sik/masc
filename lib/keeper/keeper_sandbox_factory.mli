@@ -57,5 +57,9 @@ val resolve_opt :
     on [Keeper_turn_sandbox_runtime.t option] keep the same shape after
     the factory rewrite. *)
 
+val container_cwd_of_host_opt : t option -> host_cwd:string -> string option
+(** Pure Docker CWD projection for response shaping. Unlike {!resolve_opt},
+    this does not create or memoize a turn sandbox runtime. *)
+
 val cleanup : t -> unit
 (** Tears down every runtime created via {!resolve}.  Idempotent. *)

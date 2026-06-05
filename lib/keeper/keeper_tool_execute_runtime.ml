@@ -220,13 +220,13 @@ let typed_execute_response_cwd_json
       ~sandbox_extra_fields
   =
   if sandbox_extra_uses_docker sandbox_extra_fields then
-    match Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd with
-    | Some runtime ->
-      let container_cwd =
-        Keeper_turn_sandbox_runtime.container_cwd_of_host runtime ~host_cwd:cwd
-      in
-      Keeper_cwd_response.Sandboxed
-        { host_abs = cwd; container_abs = container_cwd }
+    match
+      Keeper_sandbox_factory.container_cwd_of_host_opt
+        turn_sandbox_factory
+        ~host_cwd:cwd
+    with
+    | Some container_cwd ->
+      Keeper_cwd_response.docker ~host_cwd:cwd ~container_cwd
       |> Keeper_cwd_response.to_yojson_response
     | None -> `String cwd
   else `String cwd

@@ -1437,7 +1437,11 @@ let test_tool_execute_typed_docker_falls_back_to_local_playground () =
   let base_path, config = make_config () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
   Keeper_registry.clear ();
-  let meta = make_docker_meta "typed-docker" in
+  let meta =
+    { (make_docker_meta "typed-docker") with
+      sandbox_image = Some "masc-test-missing-image:typed-fallback"
+    }
+  in
   let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   ensure_dir playground;
   let raw =

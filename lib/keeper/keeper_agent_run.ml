@@ -589,29 +589,29 @@ let run_turn
                  in
                  let contract_status = completion_contract_status () in
                  acc.receipt_completion_contract_result <- contract_status;
-                     (match
-                        Keeper_tool_response.normalize_response_text
-                          ~text
-                          ~tool_names:actual_keeper_tool_names
-                          ()
-                      with
-                      | Error e -> Error (Agent_sdk.Error.Internal e)
-                      | Ok response_text ->
-                        Keeper_agent_run_finalize_response.finalize
-                          ~config ~meta ~generation ~manifest_keeper_turn_id
-                          ~trace_id ~session ~append_manifest ~model
-                          ~acc
-                          ~actual_keeper_tool_names
-                          ~result ~checkpoint_persistence_error
-                          ~post_turn_t0 ?provider_filter ~runtime_id_string
-                          ~prompt_metrics ~ctx_composition ~usage
-                          ~receipt_response_text_present_ref ~history_assistant_source
-                          ~pre_dispatch_compacted:ctx.pre_dispatch_compacted
-                          ~pre_dispatch_compaction_trigger:ctx.pre_dispatch_compaction_trigger
-                          ~pre_dispatch_compaction_before_tokens:ctx.pre_dispatch_compaction_before_tokens
-                          ~pre_dispatch_compaction_after_tokens:ctx.pre_dispatch_compaction_after_tokens
-                          ~raw_response_text:response_text
-                          ())))
+                 (match
+                    Keeper_tool_response.normalize_response_text
+                      ~text
+                      ~tool_names:actual_keeper_tool_names
+                      ()
+                  with
+                  | Error e -> Error (Agent_sdk.Error.Internal e)
+                  | Ok response_text ->
+                    Keeper_agent_run_finalize_response.finalize
+                      ~config ~meta ~generation ~manifest_keeper_turn_id
+                      ~trace_id ~session ~append_manifest ~model
+                      ~acc
+                      ~actual_keeper_tool_names
+                      ~result ~checkpoint_persistence_error
+                      ~post_turn_t0 ?provider_filter ~runtime_id_string
+                      ~prompt_metrics ~ctx_composition ~usage
+                      ~receipt_response_text_present_ref ~history_assistant_source
+                      ~pre_dispatch_compacted:ctx.pre_dispatch_compacted
+                      ~pre_dispatch_compaction_trigger:ctx.pre_dispatch_compaction_trigger
+                      ~pre_dispatch_compaction_before_tokens:ctx.pre_dispatch_compaction_before_tokens
+                      ~pre_dispatch_compaction_after_tokens:ctx.pre_dispatch_compaction_after_tokens
+                      ~raw_response_text:response_text
+                      ())))
                in
        Keeper_agent_run_receipt.finalize
          ~config

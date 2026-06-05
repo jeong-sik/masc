@@ -185,6 +185,24 @@ let test_property_docker_response_never_leaks_host () =
         (Astring.String.is_infix ~affix:container_cwd json_str))
     cases
 
+(* --- profile_independent_cwd fallback ---------------- *)
+
+let test_profile_independent_cwd_empty_root () =
+  let r = Keeper_cwd_response.profile_independent_cwd ~container_root:"" ~host_cwd:"/home/keeper/repos" in
+  Alcotest.(check (option string)) "empty container_root returns None" None r
+
+let test_profile_independent_cwd_exact_match () =
+  let cwd = Keeper_cwd_response.profile_independent_cwd ~container_root:"/home/keeper" ~host_cwd:"/home/keeper" in
+  Alcotest.(check (option string)) "exact match returns Some" (Some "/home/keeper") cwd
+
+let test_profile_independent_cwd_prefix_match () =
+  let cwd = Keeper_cwd_response.profile_independent_cwd ~container_root:"/home/keeper" ~host_cwd:"/home/keeper/playground/test/repos/foo" in
+  Alcotest.(check (option string)) "prefix match returns Some" (Some "/home/keeper/playground/test/repos/foo") cwd
+
+let test_profile_independent_cwd_no_match () =
+  let r = Keeper_cwd_response.profile_independent_cwd ~container_root:"/home/docker" ~host_cwd:"/other/profile/path" in
+  Alcotest.(check (option string)) "no match returns None" None r
+
 let () =
   run "keeper_cwd_response"
     [
@@ -213,5 +231,16 @@ let () =
           test_case
             "docker response JSON never contains host_cwd substring"
             `Quick test_property_docker_response_never_leaks_host
+        ] )
+    ; ( "profile-independent-cwd"
+      , [
+          test_case "empty container_root returns None" `Quick
+            test_profile_independent_cwd_empty_root
+        ; test_case "exact match returns Some" `Quick
+            test_profile_independent_cwd_exact_match
+        ; test_case "prefix match returns Some" `Quick
+            test_profile_independent_cwd_prefix_match
+        ; test_case "no match returns None" `Quick
+            test_profile_independent_cwd_no_match
         ] )
     ]

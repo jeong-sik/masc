@@ -277,7 +277,7 @@ let explicit_metadata : (string * metadata) list =
     ("masc_tool_stats", read_state_tool);
     ("masc_pause", broadcast_tool);
     ("masc_resume", broadcast_tool);
-    ("masc_run_get", read_state_tool);
+    ("masc_run_get", broadcast_tool);
     ("masc_run_list", read_state_tool);
     ("masc_run_init", broadcast_tool);
     ("masc_run_plan", broadcast_tool);

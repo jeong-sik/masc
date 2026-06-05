@@ -1157,7 +1157,8 @@ let internal_descriptors : t list =
   ; masc_run_descriptor "masc_run_list"
       "List recent runs." ~readonly:true
   ; masc_run_descriptor "masc_run_get"
-      "Read a single run by id." ~readonly:true
+      "Read a single run by id, creating an empty run record when missing."
+      ~readonly:false
   ; masc_run_descriptor "masc_run_log"
       "Read or append run log events." ~readonly:false
   ; masc_run_descriptor "masc_run_plan"

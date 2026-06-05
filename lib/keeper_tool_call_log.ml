@@ -541,11 +541,7 @@ let log_call
         | Some _ -> generation
         | None -> ctx.generation
       in
-      let sandbox_root =
-        match sandbox_root with
-        | Some _ -> sandbox_root
-        | None -> ctx.sandbox_root
-      in
+      let sandbox_root = Option.first_some sandbox_root ctx.sandbox_root in
       let allowed_paths =
         match allowed_paths with
         | Some _ -> allowed_paths

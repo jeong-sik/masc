@@ -107,28 +107,23 @@ let repo_path_context ~(config : Workspace.config) ~(meta : keeper_meta) cwd =
         Some (repo_name, repo_root, repo_root, [ repo_root ])
       | _ -> None
 
-let cwd_is_sandbox_repo_context ~config ~meta ~cwd =
-  match repo_path_context ~config ~meta cwd with
-  | None -> false
-  | Some _ -> true
+type repo_cwd_context =
+  { repo_name : string
+  ; repo_root : string
+  ; path_root : string
+  ; is_direct_root : bool
+  }
 
-let cwd_is_sandbox_repo_root ~config ~meta ~cwd =
+let repo_cwd_context ~config ~meta ~cwd =
   let cwd = normalize_repo_cwd_path cwd in
   match repo_path_context ~config ~meta cwd with
-  | Some (_, repo_root, _, _) -> String.equal repo_root cwd
-  | None -> false
+  | Some (repo_name, repo_root, path_root, _) ->
+    Some { repo_name; repo_root; path_root; is_direct_root = String.equal repo_root cwd }
+  | None -> None
 
 let invalidate_repo_currency_cache ~config ~meta ~repo_name =
   let cpath = Playground_repo_readiness.clone_path ~config ~meta ~repo_name in
   Hashtbl.remove currency_sync_cache cpath
-;;
-
-let invalidate_repo_currency_cache_for_cwd ~config ~meta ~cwd =
-  let cwd = normalize_repo_cwd_path cwd in
-  match repo_path_context ~config ~meta cwd with
-  | Some (repo_name, repo_root, _, _) when String.equal repo_root cwd ->
-    invalidate_repo_currency_cache ~config ~meta ~repo_name
-  | _ -> ()
 ;;
 
 let repo_currency_not_ready_error ~config ~meta ~repo_name ~reason ~cwd =
@@ -155,7 +150,7 @@ let validate_repo_cwd_currency_ready
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(cwd : string)
-      (ir : Masc_exec.Shell_ir.t)
+      ~allow_stale_preserved_repo_context
   =
   match repo_path_context ~config ~meta cwd with
   | None -> Ok ()
@@ -166,10 +161,7 @@ let validate_repo_cwd_currency_ready
               (normalize_repo_cwd_path path_root)) ->
     Ok ()
   | Some (repo_name, _repo_root, _path_root, _accepted_toplevels) ->
-    if
-      Masc_exec.Shell_ir_command_shape.is_git_diagnostic_command ir
-      || (cwd_is_sandbox_repo_root ~config ~meta ~cwd
-          && Masc_exec.Shell_ir_command_shape.is_git_recovery_command ir)
+    if allow_stale_preserved_repo_context
     then Ok ()
     else
       match repo_currency_outcome_best_effort ~config ~meta ~repo_name with

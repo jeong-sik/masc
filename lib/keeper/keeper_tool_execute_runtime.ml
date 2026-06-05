@@ -470,12 +470,25 @@ let handle_tool_execute_typed
             ~alternatives:[ "Use a non-destructive command or a dedicated structured tool." ]
             ()
         else
+        let repo_cwd_context =
+          Keeper_tool_execute_path.repo_cwd_context ~config ~meta ~cwd
+        in
+        let is_direct_sandbox_repo_root =
+          match repo_cwd_context with
+          | Some { Keeper_tool_execute_path.is_direct_root = true; _ } -> true
+          | Some _ | None -> false
+        in
+        let is_git_diagnostic_command =
+          Masc_exec.Shell_ir_command_shape.is_git_diagnostic_command ir
+        in
         let is_git_recovery_command =
           Masc_exec.Shell_ir_command_shape.is_git_recovery_command ir
         in
         let is_direct_repo_git_recovery =
-          Keeper_tool_execute_path.cwd_is_sandbox_repo_root ~config ~meta ~cwd
-          && is_git_recovery_command
+          is_direct_sandbox_repo_root && is_git_recovery_command
+        in
+        let allow_stale_preserved_repo_context =
+          is_git_diagnostic_command || is_direct_repo_git_recovery
         in
         let readonly_write_like =
           is_git_recovery_command
@@ -516,7 +529,7 @@ let handle_tool_execute_typed
                     ~config
                     ~meta
                     ~cwd
-                    ir
+                    ~allow_stale_preserved_repo_context
                 with
                 | Error _ as err -> err
                 | Ok () ->
@@ -554,12 +567,12 @@ let handle_tool_execute_typed
               ~fields:(("blocked_cmd", `String cmd_for_log) :: typed_error_fields)
               e
           | Ok result ->
-            (match result.status with
-             | Unix.WEXITED 0 when is_direct_repo_git_recovery ->
-               Keeper_tool_execute_path.invalidate_repo_currency_cache_for_cwd
+            (match result.status, repo_cwd_context with
+             | Unix.WEXITED 0, Some { repo_name; _ } when is_direct_repo_git_recovery ->
+               Keeper_tool_execute_path.invalidate_repo_currency_cache
                  ~config
                  ~meta
-                 ~cwd
+                 ~repo_name
              | _ -> ());
             let elapsed_ms =
               (* NDT-OK: second wall-clock read closes the elapsed telemetry

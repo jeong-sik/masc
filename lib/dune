@@ -248,16 +248,16 @@
    ;; lib/keeper_state/. Parent still references bare Keeper_state_* modules.
    masc.keeper_state
    ;; Keeper-owned pure/type leaves extracted from lib/keeper/.
-   masc.keeper_accountability_claim_types
+   masc.keeper_contract
    masc.keeper_runtime_manifest_types
    masc.keeper_registry
    masc.keeper_registry
    masc.keeper_registry
    masc.keeper_registry
    masc.keeper_hooks_oas_types
-   masc.keeper_turn_slot_types
+   masc.keeper_contract
    masc.keeper_binding_health_config
-   masc.keeper_transition_audit_types
+   masc.keeper_contract
    masc.keeper_path_rejection
    masc.keeper_failure_circuit_breaker_types
    masc.keeper_approval_queue_rules_types
@@ -272,7 +272,7 @@
    masc.keeper_sandbox_error
    masc.keeper_provider_error_class
    masc.keeper_failure_taxonomy
-   masc.keeper_world_observation_turn_types
+   masc.keeper_contract
    masc.keeper_memory_taxonomy
    masc.keeper_memory_policy_summary_filter
    masc.keeper_tool_command_parse
@@ -294,7 +294,7 @@
    masc.keeper_discovered_tools
    masc.keeper_tool_execute_timeout
    masc.keeper_tool_execute_shell_ir
-   masc.keeper_workspace_op
+   masc.keeper_contract
    ;; Runtime_provider_labels extracted to lib/runtime_provider_labels/.
    ;; Leaf boundary over agent_sdk.llm_provider canonical provider labels.
    masc.runtime_provider_labels

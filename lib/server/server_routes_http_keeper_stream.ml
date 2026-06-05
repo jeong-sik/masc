@@ -526,224 +526,247 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
   in
   let now_id () = int_of_float (Time_compat.now () *. 1000.0) in
   let thread_id = "keeper:" ^ payload.name in
-  let run_id = Printf.sprintf "keeper-run-%d" (now_id ()) in
-  let message_id = Printf.sprintf "keeper-msg-%d" (now_id ()) in
+
+  let process_single_turn ~payload ~run_id ~message_id ~agent_name =
+    ignore
+      (keeper_stream_send_event writer mutex closed
+         Ag_ui.(
+           make_event ~thread_id ~run_id:(Some run_id) Run_started));
+    ignore
+      (keeper_stream_send_event writer mutex closed
+         Ag_ui.(
+           make_event ~thread_id ~run_id:(Some run_id)
+             ~message_id:(Some message_id)
+             ~role:(Some Assistant) Text_message_start));
+    let has_connector_context =
+      payload.channel <> "" && payload.channel_user_id <> ""
+    in
+    let message =
+      if has_connector_context then
+        Gate_keeper_backend.contextualize_message
+          ~channel:payload.channel
+          ~channel_user_id:payload.channel_user_id
+          ~channel_user_name:payload.channel_user_name
+          ~channel_workspace_id:payload.channel_workspace_id
+          ~content:payload.message
+      else
+        payload.message
+    in
+    let attachment_json att =
+      `Assoc
+        [ ("id", `String att.Keeper_chat_store.id);
+          ("type", `String att.att_type);
+          ("name", `String att.name);
+          ("size", `Int att.size);
+          ("mime_type", `String att.mime_type);
+          ("data", `String att.data) ]
+    in
+    let args =
+      let base_fields =
+        [ ("name", `String payload.name);
+          ("message", `String message);
+          ("direct_reply", `Bool true) ]
+        @
+        (match payload.timeout_sec with
+         | Some timeout_sec -> [ ("timeout_sec", `Int timeout_sec) ]
+         | None -> [])
+      in
+      `Assoc
+        (if payload.attachments = [] then base_fields
+         else ("attachments", `List (List.map attachment_json payload.attachments)) :: base_fields)
+    in
+    (* Track whether any text deltas were streamed to the client.
+       When streaming is active, the MODEL text is sent token-by-token
+       during the call; we only need to send the final batch chunks
+       if no deltas were emitted (fallback path). *)
+    let deltas_sent = ref false in
+    let worker_events = Eio.Stream.create 512 in
+    let push_worker_event event =
+      if not !closed then
+        try Eio.Stream.add worker_events event
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
+            Log.Keeper.warn
+              "keeper_stream: worker event push failed: %s"
+              (Printexc.to_string exn)
+    in
+    let on_text_delta text =
+      if String.length text > 0 then
+        push_worker_event (Stream_delta text)
+    in
+    let timeout_sec = Option.map float_of_int payload.timeout_sec in
+    let request_id =
+      Keeper_msg_async.submit ?timeout_sec ~clock ~sw
+        ~base_path:state.Mcp_server.workspace_config.base_path
+        ~keeper_name:payload.name
+        ~f:(fun () ->
+          let start_time = Time_compat.now () in
+          let dispatch_result =
+            try
+              Ok
+                (execute_keeper_stream_tool_streaming ~sw ~clock
+                   ?auth_token:(auth_token_from_request request)
+                   state ~agent_name ~arguments:args ~on_text_delta)
+            with
+            | Eio.Cancel.Cancelled _ as e -> raise e
+            | exn ->
+                Log.Keeper.warn
+                  "keeper_stream: streaming dispatch raised: %s"
+                  (Printexc.to_string exn);
+                (try
+                   Ok
+                     (execute_keeper_stream_tool ~sw ~clock
+                        ?auth_token:(auth_token_from_request request)
+                        state ~agent_name ~arguments:args)
+                 with
+                 | Eio.Cancel.Cancelled _ as e -> raise e
+                 | exn2 -> Error (Printexc.to_string exn2))
+          in
+          match dispatch_result with
+          | Ok (true, body) ->
+              let _payload_json_opt, visible_reply = extract_visible_reply body in
+              if not (is_continuation_checkpoint_reply visible_reply) then
+                Keeper_chat_store.append_pair
+                  ~base_dir:state.Mcp_server.workspace_config.base_path
+                  ~keeper_name:payload.name
+                  ~user_content:payload.message
+                  ~user_attachments:payload.attachments
+                  ~assistant_content:visible_reply;
+              push_worker_event (Stream_terminal (true, body));
+              Tool_result.ok ~tool_name:"masc_keeper_msg" ~start_time body
+          | Ok (false, err) ->
+              push_worker_event (Stream_terminal (false, err));
+              Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time err
+          | Error err ->
+              push_worker_event (Stream_terminal (false, err));
+              Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time err)
+        ()
+    in
+    ignore
+      (keeper_stream_send_event writer mutex closed
+         Ag_ui.(
+           make_event ~thread_id ~run_id:(Some run_id)
+             ~custom_name:(Some "KEEPER_QUEUE_REQUEST")
+             ~custom_value:
+               (Some
+                  (Gate_protocol.message_request_to_json
+                     { request_id;
+                       destination_type = "keeper";
+                       destination_id = payload.name;
+                       channel =
+                         (if has_connector_context then payload.channel
+                          else "dashboard");
+                       actor_id = Some agent_name;
+                       status = Gate_protocol.Queued;
+                       modalities = [ "text" ];
+                       transport = Some "sse";
+                       metadata =
+                         [
+                           ("projection", "keeper_chat_stream");
+                           ("protocol", "gate_message_request");
+                         ];
+                     }))
+             Custom));
+    let rec consume_worker_events () =
+      match Eio.Stream.take worker_events with
+      | Stream_delta text ->
+          deltas_sent := true;
+          if
+            keeper_stream_send_event writer mutex closed
+              Ag_ui.(
+                make_event ~thread_id ~run_id:(Some run_id)
+                  ~message_id:(Some message_id)
+                  ~delta:(Some text) Text_message_content)
+          then consume_worker_events ()
+      | Stream_terminal (false, err) ->
+          send_keeper_error writer mutex closed ~thread_id ~run_id err
+      | Stream_terminal (true, body) -> (
+          try
+            let payload_json_opt, visible_reply = extract_visible_reply body in
+            let is_checkpoint =
+              is_continuation_checkpoint_reply visible_reply
+            in
+            if (not !deltas_sent) && not is_checkpoint then
+              split_keeper_reply_chunks visible_reply
+              |> List.iter (fun chunk ->
+                     ignore
+                       (keeper_stream_send_event writer mutex closed
+                          Ag_ui.(
+                            make_event ~thread_id ~run_id:(Some run_id)
+                              ~message_id:(Some message_id)
+                              ~delta:(Some chunk) Text_message_content)));
+            (match payload_json_opt with
+             | Some payload_json ->
+                 ignore
+                   (keeper_stream_send_event writer mutex closed
+                      Ag_ui.(
+                        make_event ~thread_id ~run_id:(Some run_id)
+                          ~custom_name:(Some "KEEPER_REPLY_DETAILS")
+                          ~custom_value:(Some payload_json) Custom))
+             | None -> ());
+            if is_checkpoint then
+              ignore
+                (keeper_stream_send_event writer mutex closed
+                   Ag_ui.(
+                     make_event ~thread_id ~run_id:(Some run_id)
+                       ~custom_name:(Some "KEEPER_CONTINUATION_CHECKPOINT")
+                       ~custom_value:
+                         (Some
+                            (`Assoc
+                              [ ("request_id", `String request_id);
+                                ("message", `String visible_reply) ]))
+                       Custom));
+            send_keeper_stream_finish writer mutex closed ~thread_id ~run_id
+              ~message_id
+          with
+          | Eio.Cancel.Cancelled _ as e -> raise e
+          | exn ->
+              send_keeper_error writer mutex closed ~thread_id ~run_id
+                (Printexc.to_string exn))
+    in
+    consume_worker_events ()
+  in
+
   ignore (keeper_stream_send_raw writer mutex closed "retry: 1500\n\n");
   Eio.Fiber.fork ~sw (fun () ->
       ignore
         (Eio.Switch.run @@ fun stream_sw ->
            Eio.Switch.on_release stream_sw close_stream;
-          (* --- 1. Lifecycle: Run_started + Text_message_start --- *)
-          ignore
-            (keeper_stream_send_event writer mutex closed
-               Ag_ui.(
-                 make_event ~thread_id ~run_id:(Some run_id) Run_started));
-          ignore
-            (keeper_stream_send_event writer mutex closed
-               Ag_ui.(
-                 make_event ~thread_id ~run_id:(Some run_id)
-                   ~message_id:(Some message_id)
-                   ~role:(Some Assistant) Text_message_start));
-          let has_connector_context =
-            payload.channel <> "" && payload.channel_user_id <> ""
-          in
-          let message =
-            if has_connector_context then
-              Gate_keeper_backend.contextualize_message
-                ~channel:payload.channel
-                ~channel_user_id:payload.channel_user_id
-                ~channel_user_name:payload.channel_user_name
-                ~channel_workspace_id:payload.channel_workspace_id
-                ~content:payload.message
-            else
-              payload.message
-          in
-          let attachment_json att =
-            `Assoc
-              [ ("id", `String att.Keeper_chat_store.id);
-                ("type", `String att.att_type);
-                ("name", `String att.name);
-                ("size", `Int att.size);
-                ("mime_type", `String att.mime_type);
-                ("data", `String att.data) ]
-          in
-          let args =
-            let base_fields =
-              [ ("name", `String payload.name);
-                ("message", `String message);
-                ("direct_reply", `Bool true) ]
-              @
-              (match payload.timeout_sec with
-               | Some timeout_sec -> [ ("timeout_sec", `Int timeout_sec) ]
-               | None -> [])
-            in
-            `Assoc
-              (if payload.attachments = [] then base_fields
-               else ("attachments", `List (List.map attachment_json payload.attachments)) :: base_fields)
-          in
-          let agent_name =
-            if has_connector_context then
-              Gate_keeper_backend.agent_name_for_channel_actor
-                ~channel:payload.channel
-                ~channel_workspace_id:payload.channel_workspace_id
-                ~channel_user_id:payload.channel_user_id
-            else
-              match agent_from_request request with
-              | Some raw ->
-                  let trimmed = String.trim raw in
-                  if trimmed <> "" then trimmed else "unknown"
-              | None -> "unknown"
-          in
-          (* Track whether any text deltas were streamed to the client.
-             When streaming is active, the MODEL text is sent token-by-token
-             during the call; we only need to send the final batch chunks
-             if no deltas were emitted (fallback path). *)
-          let deltas_sent = ref false in
-          let worker_events = Eio.Stream.create 512 in
-          let push_worker_event event =
-            if not !closed then
-              try Eio.Stream.add worker_events event
-              with
-              | Eio.Cancel.Cancelled _ as e -> raise e
-              | exn ->
-                  Log.Keeper.warn
-                    "keeper_stream: worker event push failed: %s"
-                    (Printexc.to_string exn)
-          in
-          let on_text_delta text =
-            if String.length text > 0 then
-              push_worker_event (Stream_delta text)
-          in
-          let timeout_sec = Option.map float_of_int payload.timeout_sec in
-          let request_id =
-            Keeper_msg_async.submit ?timeout_sec ~clock ~sw
-              ~base_path:state.Mcp_server.workspace_config.base_path
-              ~keeper_name:payload.name
-              ~f:(fun () ->
-                let start_time = Time_compat.now () in
-                let dispatch_result =
-                  try
-                    Ok
-                      (execute_keeper_stream_tool_streaming ~sw ~clock
-                         ?auth_token:(auth_token_from_request request)
-                         state ~agent_name ~arguments:args ~on_text_delta)
-                  with
-                  | Eio.Cancel.Cancelled _ as e -> raise e
-                  | exn ->
-                      Log.Keeper.warn
-                        "keeper_stream: streaming dispatch raised: %s"
-                        (Printexc.to_string exn);
-                      (try
-                         Ok
-                           (execute_keeper_stream_tool ~sw ~clock
-                              ?auth_token:(auth_token_from_request request)
-                              state ~agent_name ~arguments:args)
-                       with
-                       | Eio.Cancel.Cancelled _ as e -> raise e
-                       | exn2 -> Error (Printexc.to_string exn2))
-                in
-                match dispatch_result with
-                | Ok (true, body) ->
-                    let _payload_json_opt, visible_reply = extract_visible_reply body in
-                    if not (is_continuation_checkpoint_reply visible_reply) then
-                      Keeper_chat_store.append_pair
-                        ~base_dir:state.Mcp_server.workspace_config.base_path
-                        ~keeper_name:payload.name
-                        ~user_content:payload.message
-                        ~user_attachments:payload.attachments
-                        ~assistant_content:visible_reply;
-                    push_worker_event (Stream_terminal (true, body));
-                    Tool_result.ok ~tool_name:"masc_keeper_msg" ~start_time body
-                | Ok (false, err) ->
-                    push_worker_event (Stream_terminal (false, err));
-                    Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time err
-                | Error err ->
-                    push_worker_event (Stream_terminal (false, err));
-                    Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time err)
-              ()
-          in
-          ignore
-            (keeper_stream_send_event writer mutex closed
-               Ag_ui.(
-                 make_event ~thread_id ~run_id:(Some run_id)
-                   ~custom_name:(Some "KEEPER_QUEUE_REQUEST")
-                   ~custom_value:
-                     (Some
-                        (Gate_protocol.message_request_to_json
-                           { request_id;
-                             destination_type = "keeper";
-                             destination_id = payload.name;
-                             channel =
-                               (if has_connector_context then payload.channel
-                                else "dashboard");
-                             actor_id = Some agent_name;
-                             status = Gate_protocol.Queued;
-                             modalities = [ "text" ];
-                             transport = Some "sse";
-                             metadata =
-                               [
-                                 ("projection", "keeper_chat_stream");
-                                 ("protocol", "gate_message_request");
-                               ];
-                           }))
-                   Custom));
-          let rec consume_worker_events () =
-            match Eio.Stream.take worker_events with
-            | Stream_delta text ->
-                deltas_sent := true;
-                if
-                  keeper_stream_send_event writer mutex closed
-                    Ag_ui.(
-                      make_event ~thread_id ~run_id:(Some run_id)
-                        ~message_id:(Some message_id)
-                        ~delta:(Some text) Text_message_content)
-                then consume_worker_events ()
-            | Stream_terminal (false, err) ->
-                send_keeper_error writer mutex closed ~thread_id ~run_id err
-            | Stream_terminal (true, body) -> (
-                try
-                  let payload_json_opt, visible_reply = extract_visible_reply body in
-                  let is_checkpoint =
-                    is_continuation_checkpoint_reply visible_reply
-                  in
-                  if (not !deltas_sent) && not is_checkpoint then
-                    split_keeper_reply_chunks visible_reply
-                    |> List.iter (fun chunk ->
-                           ignore
-                             (keeper_stream_send_event writer mutex closed
-                                Ag_ui.(
-                                  make_event ~thread_id ~run_id:(Some run_id)
-                                    ~message_id:(Some message_id)
-                                    ~delta:(Some chunk) Text_message_content)));
-                  (match payload_json_opt with
-                   | Some payload_json ->
-                       ignore
-                         (keeper_stream_send_event writer mutex closed
-                            Ag_ui.(
-                              make_event ~thread_id ~run_id:(Some run_id)
-                                ~custom_name:(Some "KEEPER_REPLY_DETAILS")
-                                ~custom_value:(Some payload_json) Custom))
-                   | None -> ());
-                  if is_checkpoint then
-                    ignore
-                      (keeper_stream_send_event writer mutex closed
-                         Ag_ui.(
-                           make_event ~thread_id ~run_id:(Some run_id)
-                             ~custom_name:(Some "KEEPER_CONTINUATION_CHECKPOINT")
-                             ~custom_value:
-                               (Some
-                                  (`Assoc
-                                    [ ("request_id", `String request_id);
-                                      ("message", `String visible_reply) ]))
-                             Custom));
-                  send_keeper_stream_finish writer mutex closed ~thread_id ~run_id
-                    ~message_id
-                with
-                | Eio.Cancel.Cancelled _ as e -> raise e
-                | exn ->
-                    send_keeper_error writer mutex closed ~thread_id ~run_id
-                      (Printexc.to_string exn))
-          in
-          consume_worker_events ()))
+           let has_connector_context =
+             payload.channel <> "" && payload.channel_user_id <> ""
+           in
+           let agent_name =
+             if has_connector_context then
+               Gate_keeper_backend.agent_name_for_channel_actor
+                 ~channel:payload.channel
+                 ~channel_workspace_id:payload.channel_workspace_id
+                 ~channel_user_id:payload.channel_user_id
+             else
+               match agent_from_request request with
+               | Some raw ->
+                   let trimmed = String.trim raw in
+                   if trimmed <> "" then trimmed else "unknown"
+               | None -> "unknown"
+           in
+           let run_id = Printf.sprintf "keeper-run-%d" (now_id ()) in
+           let message_id = Printf.sprintf "keeper-msg-%d" (now_id ()) in
+           process_single_turn ~payload ~run_id ~message_id ~agent_name;
+           let rec drain_queue () =
+             match Keeper_chat_queue.dequeue ~keeper_name:payload.name with
+             | None -> ()
+             | Some queued ->
+                 let run_id = Printf.sprintf "keeper-run-%d" (now_id ()) in
+                 let message_id = Printf.sprintf "keeper-msg-%d" (now_id ()) in
+                 let queued_payload =
+                   { payload with
+                     message = queued.content;
+                     attachments = queued.attachments }
+                 in
+                 process_single_turn ~payload:queued_payload ~run_id ~message_id
+                   ~agent_name;
+                 drain_queue ()
+           in
+           drain_queue ()))
 
 (** Build routes for MCP server *)

@@ -692,6 +692,15 @@ export interface KeeperConversationDetails {
   rawPayload?: unknown
 }
 
+export interface KeeperConversationAttachment {
+  id: string
+  type: 'image' | 'file'
+  name: string
+  size: number
+  mimeType: string
+  data: string
+}
+
 export type KeeperConversationStreamState =
   | 'opening'
   | 'streaming'
@@ -708,6 +717,7 @@ export interface KeeperConversationEntry {
   timestamp?: string | null
   delivery: KeeperConversationDelivery
   streamState?: KeeperConversationStreamState
+  attachments?: KeeperConversationAttachment[]
   details?: KeeperConversationDetails | null
   error?: string | null
 }

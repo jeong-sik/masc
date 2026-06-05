@@ -9,9 +9,9 @@
 open Alcotest
 
 module H = Masc.Keeper_lifecycle_hooks
-module P = Masc.Prometheus
+module P = Prometheus
 module SM = Keeper_state_machine
-module TCG = Masc.Telemetry_coverage_gap
+module TCG = Telemetry_coverage_gap
 
 let setup () = H.reset_for_testing ()
 

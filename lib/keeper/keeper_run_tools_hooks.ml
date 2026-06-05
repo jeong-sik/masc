@@ -17,17 +17,11 @@ type agent_setup =
   ; reducer : Agent_sdk.Context_reducer.t
   ; acc : hook_accumulator
   ; all_tool_names : string list
-  ; tool_usage_before : (string * int) list
   ; receipt_turn_count_ref : int option ref
   ; receipt_model_used_ref : string option ref
   ; receipt_stop_reason_ref : Runtime_agent.stop_reason option ref
   ; receipt_runtime_observation_ref : Runtime_observation.runtime_observation option ref
   ; receipt_response_text_present_ref : bool ref
-  ; reported_tool_names_ref : string list ref
-  ; observed_tool_names_ref : string list ref
-  ; canonical_tool_names_ref : string list ref
-  ; unexpected_tool_names_ref : string list ref
-  ; actual_keeper_tool_names_ref : string list ref
   }
 
 type ctx =
@@ -43,17 +37,11 @@ type ctx =
   ; keeper_tools_cleanup : unit -> unit
   ; manifest_keeper_turn_id : int option
   ; meta : Keeper_meta_contract.keeper_meta
-  ; reported_tool_names_ref : string list ref
-  ; observed_tool_names_ref : string list ref
-  ; canonical_tool_names_ref : string list ref
-  ; unexpected_tool_names_ref : string list ref
-  ; actual_keeper_tool_names_ref : string list ref
   ; receipt_turn_count_ref : int option ref
   ; receipt_model_used_ref : string option ref
   ; receipt_stop_reason_ref : Runtime_agent.stop_reason option ref
   ; receipt_runtime_observation_ref : Runtime_observation.runtime_observation option ref
   ; receipt_response_text_present_ref : bool ref
-  ; tool_usage_before : (string * int) list
   ; tools : Agent_sdk.Tool.t list
   }
 
@@ -89,17 +77,11 @@ let assemble_hooks
   let keeper_tools_cleanup = ctx.keeper_tools_cleanup in
   let manifest_keeper_turn_id = ctx.manifest_keeper_turn_id in
   let meta = ctx.meta in
-  let reported_tool_names_ref = ctx.reported_tool_names_ref in
-  let observed_tool_names_ref = ctx.observed_tool_names_ref in
-  let canonical_tool_names_ref = ctx.canonical_tool_names_ref in
-  let unexpected_tool_names_ref = ctx.unexpected_tool_names_ref in
-  let actual_keeper_tool_names_ref = ctx.actual_keeper_tool_names_ref in
   let receipt_turn_count_ref = ctx.receipt_turn_count_ref in
   let receipt_model_used_ref = ctx.receipt_model_used_ref in
   let receipt_stop_reason_ref = ctx.receipt_stop_reason_ref in
   let receipt_runtime_observation_ref = ctx.receipt_runtime_observation_ref in
   let receipt_response_text_present_ref = ctx.receipt_response_text_present_ref in
-  let tool_usage_before = ctx.tool_usage_before in
   let tools = ctx.tools in
   let all_tool_names = ctx.all_tool_names in
   let initial_schema_filter, initial_turn_lane =
@@ -147,7 +129,7 @@ let assemble_hooks
             if not success
             then "error"
             else if
-              Keeper_tool_observation.tool_result_has_material_progress
+              Keeper_tool_progress.tool_result_has_material_progress
                 ~tool_name
                 ~output_text
             then "ok"
@@ -502,16 +484,10 @@ let assemble_hooks
       ; reducer
       ; acc
       ; all_tool_names
-      ; tool_usage_before
       ; receipt_turn_count_ref
       ; receipt_model_used_ref
       ; receipt_stop_reason_ref
       ; receipt_runtime_observation_ref
       ; receipt_response_text_present_ref
-      ; reported_tool_names_ref
-      ; observed_tool_names_ref
-      ; canonical_tool_names_ref
-      ; unexpected_tool_names_ref
-      ; actual_keeper_tool_names_ref
       }
 ;;

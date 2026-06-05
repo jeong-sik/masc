@@ -127,7 +127,6 @@ export interface DashboardMissionAgentBrief {
   recent_input_preview?: string | null
   recent_event?: string | null
   recent_tool_names: string[]
-  allowed_tool_names?: string[]
   latest_tool_names?: string[]
   latest_tool_call_count?: number | null
   tool_audit_source?: string | null

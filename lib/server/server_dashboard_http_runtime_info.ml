@@ -1007,7 +1007,7 @@ let runtime_resolution_json (config : Workspace.config) =
         Printf.sprintf
           "Runtime source snapshot (%s) differs from server repo HEAD (%s), \
            but the binary commit is unknown. Rebuild/restart before trusting \
-           runtime proof."
+           runtime identity."
           runtime_head
           server_head
         :: acc
@@ -1031,7 +1031,7 @@ let runtime_resolution_json (config : Workspace.config) =
       Printf.sprintf
         "Server source branch %s is behind %s by %d commit(s); running runtime \
          identity (%s) differs from upstream %s. Fetch/build/restart from \
-         current main before trusting runtime proof."
+         current main before trusting runtime identity."
         branch
         upstream_ref
         behind

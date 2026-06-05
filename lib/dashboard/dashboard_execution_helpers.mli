@@ -31,8 +31,7 @@
     [is_keeper_offline] / [is_health_at_risk] /
     [is_session_terminal] / [option_or_else] /
     [string_list_json] / [latest_iso_timestamp] /
-    [cap_string_list] / [tool_preview_fields] /
-    [execution_tool_preview_limit] / [tool_audit_snapshot]
+    [cap_string_list] / [execution_tool_preview_limit] / [tool_audit_snapshot]
     / [skill_route_summary_of_keeper] /
     [string_list_of_field]). *)
 
@@ -112,7 +111,6 @@ type continuity_context = {
 }
 
 type tool_audit_snapshot = {
-  allowed_tool_names : string list;
   latest_tool_names : string list;
   latest_tool_call_count : int option;
   latest_action_source : string option;
@@ -162,8 +160,6 @@ val severity_rank : string -> int
 val dashboard_fixture_name : ?fixture:string -> unit -> string option
 val execution_tool_preview_limit : int
 val cap_string_list : ?limit:int -> string list -> string list
-val tool_preview_fields :
-  ?limit:int -> string -> string list -> (string * Yojson.Safe.t) list
 
 (** {1 Health predicates} *)
 

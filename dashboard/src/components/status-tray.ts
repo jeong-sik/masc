@@ -3,7 +3,6 @@ import { useEffect, useRef, useState } from 'preact/hooks'
 import { Activity, AlertTriangle, Bell, Radio, Users, X } from 'lucide-preact'
 import type { JournalEntry, Keeper, Task } from '../types'
 import { isKeeperCrashed } from '../lib/keeper-predicates'
-import { isAttentionCodeSatisfied } from '../lib/keeper-classifiers'
 import { dashboardWsOnlyEnabled } from '../dashboard-ws-cutover'
 import {
   dashboardWsConnected,
@@ -138,37 +137,12 @@ function countPendingVerification(tasksInput: readonly Task[]): number {
   return tasksInput.filter(task => task.status === 'awaiting_verification').length
 }
 
-// Closed set of wire-format values emitted by the backend
-// keeper_execution_receipt.tool_contract_result_to_string (11 variants).
-// Both runtime_proof_status and tool_contract_result use the same values.
-const EXECUTION_ATTENTION_SET: ReadonlySet<string> = new Set([
-  'violated',
-  'tool_surface_mismatch',
-  'no_tool_capable_provider',
-  'claim_only_after_owned_task',
-  'needs_execution_progress',
-  'passive_only',
-  'not_dispatched',
-])
-
-function isExecutionAttentionCode(value: string | null | undefined): boolean {
-  if (!value) return false
-  const normalized = value.trim().toLowerCase()
-  if (!normalized || normalized === 'unknown') return false
-  if (isAttentionCodeSatisfied(normalized)) return false
-  return EXECUTION_ATTENTION_SET.has(normalized)
-}
-
 function hasExecutionAttentionEvidence(keeper: Keeper): boolean {
   const trust = keeper.trust
   if (trust?.needs_attention === true) return true
   const terminalSeverity = trust?.latest_terminal_reason?.severity?.trim().toLowerCase()
   if (terminalSeverity === 'bad' || terminalSeverity === 'warn') return true
-  const execution = trust?.execution_summary
-  if (!execution) return false
-  if ((execution.missing_required_tools ?? []).length > 0) return true
-  return isExecutionAttentionCode(execution.runtime_proof_status)
-    || isExecutionAttentionCode(execution.tool_contract_result)
+  return false
 }
 
 function countKeeperAttention(keeperInput: readonly Keeper[]): number {

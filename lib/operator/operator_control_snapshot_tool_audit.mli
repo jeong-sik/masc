@@ -6,11 +6,9 @@ val lightweight_tool_audit_fallback_json :
 val recent_tool_names_from_files : Workspace.config -> string -> string list
 
 val keeper_tool_audit_fields :
-  ?include_allowed_tools:bool ->
   Workspace.config ->
   Keeper_meta_contract.keeper_meta ->
   string list
-  * string list
   * string list
   * int option
   * string option

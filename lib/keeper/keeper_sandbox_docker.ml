@@ -683,9 +683,11 @@ let docker_bash_response ~ok ~network_label ~status ~output
     shared by container-backed bash paths. *)
 let docker_result_to_bash_response ~config ~meta result =
   let cwd_response =
-    Keeper_cwd_response.docker
+    Keeper_cwd_response.of_sandbox
+      ~sandbox:(Keeper_sandbox.of_meta ~config ~meta)
       ~host_cwd:result.cwd
-      ~container_cwd:(docker_private_workspace_cwd ~config ~meta result.cwd)
+      ~container_cwd_for_docker:
+        (docker_private_workspace_cwd ~config ~meta result.cwd)
   in
   docker_bash_response
     ~ok:result.semantic_ok
@@ -764,9 +766,10 @@ let run_docker_bash
                 ~output:out
             else Keeper_registry.clear_error ~base_path:config.base_path meta.name;
             let cwd_response =
-              Keeper_cwd_response.docker
+              Keeper_cwd_response.of_sandbox
+                ~sandbox:(Keeper_sandbox.of_meta ~config ~meta)
                 ~host_cwd:cwd
-                ~container_cwd:
+                ~container_cwd_for_docker:
                   (Keeper_turn_sandbox_runtime.container_cwd_of_host
                      runtime
                      ~host_cwd:cwd)

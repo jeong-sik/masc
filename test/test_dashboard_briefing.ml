@@ -153,8 +153,6 @@ let test_dashboard_briefing_projection () =
         (contains alpha_input "@llama-local-alpha");
       check bool "recent input excludes unrelated beta mention" false
         (contains alpha_input "@llama-local-beta");
-      check bool "agent brief omits old audit surface" true
-        (alpha_brief |> member "allowed_tool_names" = `Null);
       check bool "agent brief omits social context fields" true
         (alpha_brief |> member "where" = `Null);
       check string "agent brief signal truth" "message"
@@ -330,7 +328,6 @@ let test_dashboard_briefing_keeper_tool_audit_keeps_inband_tools_without_evidenc
                 ("agent_name", `String keeper_name);
                 ("status", `String "offline");
                 ("updated_at", `String (Masc_domain.now_iso ()));
-                ("allowed_tool_names", `List [ `String "masc_board_get"; `String "masc_board_vote" ]);
                 ("latest_tool_names", `List []);
                 ("latest_tool_call_count", `Null);
                 ("latest_action_source", `String "structured_model");
@@ -343,8 +340,6 @@ let test_dashboard_briefing_keeper_tool_audit_keeps_inband_tools_without_evidenc
       let brief =
         briefs |> List.find (fun row -> row |> member "name" |> to_string = keeper_name)
       in
-      check bool "heartbeat task allowed tools present" true
-        ((brief |> member "allowed_tool_names" |> to_list) <> []);
       check bool "no synthetic audit source without evidence" true
         (brief |> member "tool_audit_source" = `Null);
       check string "in-band action source is preserved" "structured_model"
@@ -381,7 +376,6 @@ let test_dashboard_briefing_keeper_tool_audit_uses_decision_log () =
                 ("agent_name", `String keeper_name);
                 ("status", `String "active");
                 ("updated_at", `String (Masc_domain.now_iso ()));
-                ("allowed_tool_names", `List [ `String "masc_board_get" ]);
                 ("latest_tool_names", `List []);
                 ("latest_tool_call_count", `Null);
                 ("tool_audit_source", `Null);
@@ -403,75 +397,6 @@ let test_dashboard_briefing_keeper_tool_audit_uses_decision_log () =
       check bool "decision log still reports empty tool list" true
         ((brief |> member "latest_tool_names" |> to_list) = []))
 
-let test_dashboard_briefing_keeper_brief_registry_lookup_scoped_to_base_path () =
-  let root_dir = test_dir () in
-  let dir_a = Filename.concat root_dir "a-scope" in
-  let dir_z = Filename.concat root_dir "z-scope" in
-  let keeper_name = "shared-dashboard-keeper" in
-  let make_meta ~tool_access name =
-    match
-      Masc_test_deps.meta_of_json_fixture
-        (`Assoc
-          [
-            ("name", `String name);
-            ("agent_name", `String name);
-            ("trace_id", `String ("trace-" ^ name));
-            ( "tool_access",
-              Lib.Keeper_meta_tool_access.tool_access_to_json
-                tool_access );
-          ])
-    with
-    | Ok meta -> meta
-    | Error err -> failwith ("make_meta failed: " ^ err)
-  in
-  Fun.protect
-    ~finally:(fun () ->
-      Lib.Keeper_registry.clear ();
-      cleanup_dir root_dir)
-    (fun () ->
-      with_test_env @@ fun ~clock:_ ~sw:_ ->
-      Unix.mkdir dir_a 0o755;
-      Unix.mkdir dir_z 0o755;
-      Masc_test_deps.init_keeper_tool_registry ();
-      let policy_base_path = Masc_test_deps.find_project_root () in
-      ignore (Result.get_ok (Lib.Keeper_tool_dispatch_runtime.init_policy_config ~base_path:policy_base_path));
-      let config_a = Workspace_utils.default_config dir_a in
-      let config_z = Workspace_utils.default_config dir_z in
-      ignore
-        (Lib.Keeper_registry.register ~base_path:config_a.base_path keeper_name
-           (make_meta ~tool_access:[ "keeper_board_vote" ] keeper_name));
-      ignore
-        (Lib.Keeper_registry.register ~base_path:config_z.base_path keeper_name
-           (make_meta ~tool_access:[ "keeper_board_post" ] keeper_name));
-      let briefs =
-        Dashboard_briefing_assembly.build_keeper_briefs config_a
-          [
-            `Assoc
-              [
-                ("name", `String keeper_name);
-                ("agent_name", `String keeper_name);
-                ("status", `String "idle");
-                ("updated_at", `String (Masc_domain.now_iso ()));
-                ("allowed_tool_names", `Null);
-                ("latest_tool_names", `List []);
-                ("latest_tool_call_count", `Null);
-                ("tool_audit_source", `Null);
-                ("tool_audit_at", `Null);
-              ];
-          ]
-      in
-      let open Yojson.Safe.Util in
-      let brief =
-        briefs |> List.find (fun row -> row |> member "name" |> to_string = keeper_name)
-      in
-      let allowed_tool_names =
-        brief |> member "allowed_tool_names" |> to_list |> List.map to_string
-      in
-      check bool "current base path registry tools included" true
-        (List.mem "keeper_board_vote" allowed_tool_names);
-      check bool "other base path registry tools excluded" false
-        (List.mem "keeper_board_post" allowed_tool_names))
-
 let () =
   Alcotest.run "Dashboard Mission"
     [
@@ -491,8 +416,5 @@ let () =
             test_dashboard_briefing_keeper_tool_audit_keeps_inband_tools_without_evidence;
           Alcotest.test_case "keeper brief uses decision log fallback" `Quick
             test_dashboard_briefing_keeper_tool_audit_uses_decision_log;
-          Alcotest.test_case "keeper brief registry lookup scoped to base path"
-            `Quick
-            test_dashboard_briefing_keeper_brief_registry_lookup_scoped_to_base_path;
         ] );
     ]

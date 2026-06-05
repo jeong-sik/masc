@@ -17,41 +17,33 @@ let cdal_verdict_persist_decision = function
   | _ -> `Skip_missing_task_scope
 ;;
 
-let keeper_tool_names_for_outcome
-      ~(allowed_tool_names : string list)
-      ~(tool_calls : Keeper_agent_result.tool_call_detail list)
+let keeper_tool_names_for_outcome ~(tool_calls : Keeper_agent_result.tool_call_detail list)
       ~(outcome : string)
   : string list
   =
-  let observed_tool_names =
-    tool_calls
-    |> List.rev
-    |> List.filter_map (fun (detail : Keeper_agent_result.tool_call_detail) ->
-      if String.equal detail.outcome outcome then Some detail.tool_name else None)
-  in
-  Keeper_tool_observation.final_keeper_tool_names
-    ~reported_tool_names:[]
-    ~observed_tool_names
-    ~allowed_tool_names
+  tool_calls
+  |> List.rev
+  |> List.filter_map (fun (detail : Keeper_agent_result.tool_call_detail) ->
+    if String.equal detail.outcome outcome
+    then Some (Keeper_tool_resolution.canonical_tool_name detail.tool_name)
+    else None)
 ;;
 
 let progress_keeper_tool_names_for_contract
-      ~(allowed_tool_names : string list)
       ~(actual_keeper_tool_names : string list)
       ~(tool_calls : Keeper_agent_result.tool_call_detail list)
   : string list
   =
   match tool_calls with
   | [] -> actual_keeper_tool_names
-  | _ :: _ -> keeper_tool_names_for_outcome ~allowed_tool_names ~tool_calls ~outcome:"ok"
+  | _ :: _ -> keeper_tool_names_for_outcome ~tool_calls ~outcome:"ok"
 ;;
 
 let no_progress_success_tool_names_for_contract
-      ~(allowed_tool_names : string list)
       ~(tool_calls : Keeper_agent_result.tool_call_detail list)
   : string list
   =
-  keeper_tool_names_for_outcome ~allowed_tool_names ~tool_calls ~outcome:"ok_no_progress"
+  keeper_tool_names_for_outcome ~tool_calls ~outcome:"ok_no_progress"
 ;;
 
 let observed_completion_contract_status

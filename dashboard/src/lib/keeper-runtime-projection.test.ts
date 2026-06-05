@@ -76,11 +76,9 @@ function composite(overrides: Partial<KeeperCompositeSnapshot> = {}): KeeperComp
       operator_disposition_reason: 'healthy',
       model_used: null,
       stop_reason: 'completed',
-      tool_contract_result: 'satisfied_execution',
       duration_ms: 1000,
       error: null,
       runtime: null,
-      tool_surface: null,
     },
     runtime_attention: {
       state: 'ok',
@@ -149,10 +147,6 @@ describe('deriveKeeperRuntimeProjection', () => {
         runtime: { state: 'degraded_retry' },
         compaction: { stage: 'idle' },
         circuit_breaker: { state: 'closed' },
-        execution: {
-          ...composite().execution!,
-          tool_contract_result: 'tool_surface_mismatch',
-        },
       }),
       runtimeTrace: runtimeTrace(),
       runtimeResolution: {
@@ -167,7 +161,6 @@ describe('deriveKeeperRuntimeProjection', () => {
     expect(projection.context.breach).toBe(true)
     expect(projection.socialModel.recognized).toBe(false)
     expect(projection.fiberAlive.alive).toBe(true)
-    expect(projection.toolContract).toBe('tool_surface_mismatch')
     expect(projection.fsmLanes.map(lane => lane.axis)).toEqual(['KSM', 'KTC', 'KDP', 'KCL', 'KMC', 'KCB'])
     expect(projection.signals.map(signal => signal.kind)).toEqual([
       'operational_state',
@@ -179,7 +172,6 @@ describe('deriveKeeperRuntimeProjection', () => {
       'stop_requested',
       'runtime_trace',
       'runtime_warning',
-      'tool_contract',
       'fsm_raw_lanes',
     ])
     expect(projection.synchronizationDetail).toContain('hb stale')
@@ -187,7 +179,6 @@ describe('deriveKeeperRuntimeProjection', () => {
     expect(projection.synchronizationDetail).toContain('social unrecognized')
     expect(projection.synchronizationDetail).toContain('fiber alive')
     expect(projection.synchronizationDetail).toContain('stop clear')
-    expect(projection.synchronizationDetail).toContain('tool tool_surface_mismatch')
     expect(projection.synchronizationDetail).toContain('KSM failing')
   })
 
@@ -208,16 +199,12 @@ describe('deriveKeeperRuntimeProjection', () => {
     expect(projection.tone).toBe('bad')
   })
 
-  it('does not turn a stale execution receipt tool contract into current attention', () => {
+  it('does not turn a stale execution receipt into current attention', () => {
     const projection = deriveKeeperRuntimeProjection({
       keeper: keeper(),
       composite: composite({
         is_live: true,
         turn_phase: 'executing',
-        execution: {
-          ...composite().execution!,
-          tool_contract_result: 'needs_execution_progress',
-        },
         runtime_attention: {
           ...composite().runtime_attention!,
           execution_current: false,
@@ -229,7 +216,6 @@ describe('deriveKeeperRuntimeProjection', () => {
       nowMs: NOW_MS,
     })
 
-    expect(projection.signals.find(signal => signal.kind === 'tool_contract')?.contributesToAttention).toBe(false)
     expect(projection.headline).toBe('턴 진행 중')
     expect(projection.tone).toBe('ok')
   })

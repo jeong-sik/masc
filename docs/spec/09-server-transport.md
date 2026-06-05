@@ -388,7 +388,7 @@ let make_routes ~port ~host ~sw ~clock =
 
 ## 7. Authentication
 
-**소스**: `lib/auth.ml` (435 LOC), `lib/server/server_auth.ml` (491 LOC)
+**소스**: `lib/auth/auth.ml` (435 LOC), `lib/server/server_auth.ml` (491 LOC)
 
 ### 7.1 인증 모델
 

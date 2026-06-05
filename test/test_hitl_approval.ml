@@ -111,7 +111,7 @@ let test_approval_queue_failure_metric_labels_site () =
   in
   let before =
     Masc.Otel_metric_store.metric_value_or_zero
-      Keeper_metrics.(to_string ApprovalQueueFailures)
+      Masc.Keeper_metrics.(to_string ApprovalQueueFailures)
       ~labels
       ()
   in
@@ -132,7 +132,7 @@ let test_approval_queue_failure_metric_labels_site () =
         ~risk_level:AQ.Medium ();
       let after =
         Masc.Otel_metric_store.metric_value_or_zero
-          Keeper_metrics.(to_string ApprovalQueueFailures)
+          Masc.Keeper_metrics.(to_string ApprovalQueueFailures)
           ~labels
           ()
       in

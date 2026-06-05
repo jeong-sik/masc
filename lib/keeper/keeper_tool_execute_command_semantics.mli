@@ -14,6 +14,9 @@ val gh_pr_diff_misuse :
   Masc_exec.Shell_ir.t -> string list option
 (** Detect invalid [gh pr diff] usage with file filters or extra positional args. *)
 
+val cmd_prefix : string -> string
+(** Return the leading command token used for user-facing Execute guidance. *)
+
 val misuse_error : Masc_exec.Shell_ir.t -> string option
 (** Perform all command syntax misuse checks and return a descriptive error message if any. *)
 

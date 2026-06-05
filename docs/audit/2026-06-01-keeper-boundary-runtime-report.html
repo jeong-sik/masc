@@ -255,8 +255,8 @@
             <td>Config migration is sharp. During audit this blocker appeared, then config was repaired to `runtime_id`.</td>
           </tr>
           <tr>
-            <td>`lib/keeper/keeper_meta_tool_access.ml:80-96` and `lib/keeper/keeper_meta_json_parse.ml:164-172`</td>
-            <td>Persisted meta JSON must include `tool_access` as an array.</td>
+            <td>`lib/keeper/keeper_meta_tool_access.ml:39-53` and `lib/keeper/keeper_meta_json_parse.ml:166-172`</td>
+            <td>Persisted meta JSON must include `tool_access` as a canonical string array.</td>
             <td>Meta files without `tool_access` hard-fail. Tests now cover defaults for fixtures, but production decode still rejects missing field.</td>
           </tr>
           <tr>

@@ -296,11 +296,13 @@ let handle_tool_execute_typed
       ()
   =
   let root = Keeper_alerting_path.project_root_of_config config in
+  let resolve_cwd =
+    if write_enabled
+    then Keeper_tool_execute_path.resolve_tool_write_cwd
+    else Keeper_tool_execute_path.resolve_tool_readonly_execute_cwd
+  in
   match
-    Keeper_tool_execute_path.resolve_tool_write_cwd
-      ~config
-      ~meta
-      ~args
+    resolve_cwd ~config ~meta ~args
   with
     | Error e -> error_json e
     | Ok cwd ->
@@ -534,6 +536,7 @@ let handle_tool_execute_typed
                     ~config
                     ~meta
                     ~cwd
+                    ~allow_currency_sync:write_enabled
                     ~allow_stale_preserved_repo_context
                 with
                 | Error _ as err -> err

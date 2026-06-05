@@ -7,6 +7,9 @@ let normalize_repo_cwd_path path =
   Keeper_alerting_path.normalize_path_for_check path
   |> Keeper_alerting_path.strip_trailing_slashes
 
+let keeper_playground_root_no_create ~(config : Workspace.config) ~(meta : keeper_meta) =
+  Keeper_sandbox.host_root_abs_of_meta ~config meta
+
 let safe_repo_component s =
   s <> ""
   && s <> "."
@@ -33,7 +36,7 @@ type repo_path_context =
 
 let repo_path_context ~(config : Workspace.config) ~(meta : keeper_meta) ~path =
   let playground =
-    keeper_playground_root ~config ~meta
+    keeper_playground_root_no_create ~config ~meta
     |> normalize_repo_cwd_path
   in
   let repos_root = Filename.concat playground "repos" |> normalize_repo_cwd_path in
@@ -138,7 +141,7 @@ let execution_location_json
     if String.equal raw_cwd "" then "default_playground_root" else "explicit_cwd"
   in
   let playground =
-    keeper_playground_root ~config ~meta
+    keeper_playground_root_no_create ~config ~meta
     |> normalize_repo_cwd_path
   in
   let cwd = normalize_repo_cwd_path cwd in
@@ -224,7 +227,7 @@ let resolve_tool_read_cwd
   let raw_cwd = Safe_ops.json_string ~default:"" "cwd" args |> String.trim in
   let resolved =
     if raw_cwd = ""
-    then Ok (keeper_default_read_root ~config ~meta)
+    then Ok (keeper_playground_root_no_create ~config ~meta)
     else resolve_keeper_read_path ~config ~meta ~raw_path:raw_cwd
   in
   match resolved with
@@ -244,6 +247,25 @@ let resolve_tool_write_cwd
   let resolved =
     if raw_cwd = ""
     then Ok (keeper_default_write_root ~config ~meta)
+    else resolve_keeper_path ~config ~meta ~raw_path:raw_cwd
+  in
+  match resolved with
+  | Error _ as err -> err
+  | Ok cwd when Fs_compat.file_exists cwd && Sys.is_directory cwd -> Ok cwd
+  | Ok cwd ->
+    if not (Fs_compat.file_exists cwd) then resolve_missing_cwd cwd
+    else
+      Error (Printf.sprintf "cwd_not_directory: %s (path_is_file_not_directory)" cwd)
+
+let resolve_tool_readonly_execute_cwd
+      ~(config : Workspace.config)
+      ~(meta : keeper_meta)
+      ~(args : Yojson.Safe.t)
+  =
+  let raw_cwd = Safe_ops.json_string ~default:"" "cwd" args |> String.trim in
+  let resolved =
+    if raw_cwd = ""
+    then Ok (keeper_playground_root_no_create ~config ~meta)
     else resolve_keeper_path ~config ~meta ~raw_path:raw_cwd
   in
   match resolved with

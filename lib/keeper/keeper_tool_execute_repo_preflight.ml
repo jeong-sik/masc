@@ -82,6 +82,17 @@ let repo_currency_not_ready_error ~config ~meta ~repo_name ~reason ~cwd =
     hint_suffix
     cwd
 
+let repo_currency_sync_disabled_error ~repo_name ~cwd =
+  Printf.sprintf
+    "sandbox_repo_currency_sync_disabled: readonly Execute will not fetch or \
+     fast-forward direct sandbox repo root repos/%s. Use cwd=\"repos/%s/.worktrees/<task>\" \
+     for task work, or run an allowed git diagnostic/recovery command before retrying. \
+     Execute cwd resolution does not create directories or change repo/worktree state. \
+     cwd=%s"
+    repo_name
+    repo_name
+    cwd
+
 let repo_checkout_not_ready_error ~repo_name ~path_root ~git_toplevel =
   Printf.sprintf
     "sandbox_repo_not_ready: sandbox path is under repos/%s, but %s is not an \
@@ -127,6 +138,7 @@ let validate_repo_path_ready
     else Error (repo_checkout_not_ready_error ~repo_name ~path_root ~git_toplevel:top_opt)
 
 let validate_cwd_currency_ready
+      ?(allow_currency_sync = true)
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(cwd : string)
@@ -145,6 +157,8 @@ let validate_cwd_currency_ready
   | Some { Keeper_tool_execute_path.path_repo_name = repo_name; _ } ->
     if allow_stale_preserved_repo_context
     then Ok ()
+    else if not allow_currency_sync
+    then Error (repo_currency_sync_disabled_error ~repo_name ~cwd)
     else (
       match repo_currency_outcome_best_effort ~config ~meta ~repo_name with
       | Some Playground_repo_readiness.Up_to_date | Some (Advanced _) -> Ok ()
@@ -160,6 +174,7 @@ let validate_cwd_currency_ready
              ~cwd))
 
 let validate_cwd_ready
+      ?(allow_currency_sync = true)
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(cwd : string)
@@ -169,6 +184,7 @@ let validate_cwd_ready
   | Error _ as err -> err
   | Ok () ->
     validate_cwd_currency_ready
+      ~allow_currency_sync
       ~config
       ~meta
       ~cwd

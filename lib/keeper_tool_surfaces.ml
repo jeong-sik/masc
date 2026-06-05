@@ -160,8 +160,8 @@ let local_worker_tool_schemas ?names () :
 
 (** Role-catalog candidates for workspace leads and fleet leaders.
     SSOT: Tool_catalog_surfaces.workspace_role_tools.
-    [build_tool_catalog] filters against surfaced tool names so stale
-    entries cannot escape into prompts. *)
+    [build_tool_catalog] filters against resolvable surfaced tool names so
+    stale entries cannot escape into prompts. *)
 let workspace_tool_names : string list =
   Tool_catalog_surfaces.workspace_role_tools
 
@@ -176,32 +176,8 @@ let filter_catalog_to_available ~available names =
   |> List.filter (fun name -> SS.mem name available)
   |> Json_util.dedupe_keep_order
 
-(** Build a role-based tool catalog from the full registered tool set.
-    [role] determines which subset of tools the agent sees:
-    - ["worker"]: execution-focused tools
-    - ["workspace_lead"]: workspace and orchestration tools
-    - [_]: all available spawned/local worker tools
-    Returns tool names (unprefixed). *)
-let build_tool_catalog ~(role : string) () : string list =
-  let all_names =
-    spawned_agent_public_tool_names @ local_worker_public_tool_names
-    |> Json_util.dedupe_keep_order
-  in
-  let filtered =
-    match role with
-    | "worker" ->
-        filter_catalog_to_available ~available:all_names execution_tool_names
-    | "workspace_lead" | "fleet_leader" ->
-        filter_catalog_to_available ~available:all_names workspace_tool_names
-    | _ -> all_names
-  in
-  Json_util.dedupe_keep_order filtered
-
 (** [local_worker_resolvable_tool_names ()] returns only the tool names
-    that [local_worker_tool_schemas] can actually resolve.  Use this to
-    intersect with [build_tool_catalog] output before passing to
-    [run_worker], so that the autonomous catalog does not include names
-    unknown to the local worker schema registry. *)
+    that [local_worker_tool_schemas] can actually resolve. *)
 let local_worker_resolvable_tool_names () : string list =
   match local_worker_tool_schemas () with
   | Ok schemas ->
@@ -209,3 +185,30 @@ let local_worker_resolvable_tool_names () : string list =
   | Error msg ->
       Log.Misc.warn "[AgentToolSurfaces] local_worker_tool_schemas failed: %s" msg;
       []
+
+let role_catalog_available_tool_names () =
+  let surfaced =
+    spawned_agent_public_tool_names @ local_worker_public_tool_names
+    |> Json_util.dedupe_keep_order
+  in
+  filter_catalog_to_available
+    ~available:(local_worker_resolvable_tool_names ())
+    surfaced
+
+(** Build a role-based tool catalog from the full registered tool set.
+    [role] determines which subset of tools the agent sees:
+    - ["worker"]: execution-focused tools
+    - ["workspace_lead"]: workspace and orchestration tools
+    - [_]: all available spawned/local worker tools
+    Returns tool names (unprefixed). *)
+let build_tool_catalog ~(role : string) () : string list =
+  let available_names = role_catalog_available_tool_names () in
+  let filtered =
+    match role with
+    | "worker" ->
+        filter_catalog_to_available ~available:available_names execution_tool_names
+    | "workspace_lead" | "fleet_leader" ->
+        filter_catalog_to_available ~available:available_names workspace_tool_names
+    | _ -> available_names
+  in
+  Json_util.dedupe_keep_order filtered

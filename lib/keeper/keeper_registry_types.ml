@@ -26,6 +26,44 @@ include Keeper_registry_types_decision
    lifecycle is the surviving [turn_phase] FSM. *)
 include Keeper_registry_types_compaction
 
+(* The root interface still exposes the ppx_tla helpers generated for the
+   re-exported [compaction_stage] type. Keep those aliases explicit so the
+   keeper aggregate remains compatible while the implementation delegates the
+   FSM body to [Keeper_registry_types_compaction]. *)
+let to_tla_symbol (stage : compaction_stage) =
+  match stage with
+  | Compaction_accumulating -> "compaction_accumulating"
+  | Compaction_compacting -> "compaction_compacting"
+  | Compaction_done -> "compaction_done"
+;;
+
+let all_states : compaction_stage list =
+  [ Compaction_accumulating; Compaction_compacting; Compaction_done ]
+;;
+
+let all_symbols = List.map to_tla_symbol all_states
+let terminal_symbols = [ to_tla_symbol Compaction_done ]
+let active_symbols = [ to_tla_symbol Compaction_compacting ]
+let idle_symbols = [ to_tla_symbol Compaction_accumulating ]
+
+let is_terminal (stage : compaction_stage) =
+  match stage with
+  | Compaction_done -> true
+  | Compaction_accumulating | Compaction_compacting -> false
+;;
+
+let is_active (stage : compaction_stage) =
+  match stage with
+  | Compaction_compacting -> true
+  | Compaction_accumulating | Compaction_done -> false
+;;
+
+let is_idle (stage : compaction_stage) =
+  match stage with
+  | Compaction_accumulating -> true
+  | Compaction_compacting | Compaction_done -> false
+;;
+
 type turn_measurement =
   { tm_captured_at : float
   ; tm_auto_rules : Keeper_state_machine.auto_rule_summary

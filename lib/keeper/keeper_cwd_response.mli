@@ -5,6 +5,10 @@ type t =
   | Local of { abs : string }
   | Sandboxed of { host_abs : string; container_abs : string }
 
+val local : host_cwd:string -> t
+
+val docker : host_cwd:string -> container_cwd:string -> t
+
 (** [of_sandbox ~sandbox ~host_cwd ~container_cwd_for_docker] builds
     a {!t} according to the backend kind (Local or Docker). *)
 val of_sandbox

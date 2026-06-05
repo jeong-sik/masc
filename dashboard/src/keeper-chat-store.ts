@@ -13,11 +13,21 @@
 export type ChatMessageRole = 'user' | 'assistant'
 export type ChatMessageSource = 'dashboard' | 'discord' | 'slack' | 'api'
 
+export interface Attachment {
+  id: string
+  type: 'image' | 'file'
+  name: string
+  size: number
+  mimeType: string
+  data: string
+}
+
 export interface ChatMessage {
   role: ChatMessageRole
   content: string
   timestamp: number
   source?: ChatMessageSource
+  attachments?: Attachment[]
 }
 
 interface StoredSession {

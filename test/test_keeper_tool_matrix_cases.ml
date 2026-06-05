@@ -94,6 +94,7 @@ let init_keeper_bridge =
     if not !initialized then (
       initialized := true;
       Masc_test_deps.init_keeper_tool_registry ();
+      ignore Dashboard.force_link;
       ignore (Masc.Mcp_server_eio.get_clock_opt ());
       (* Use find_project_root — the test cwd is _build/default/test/ which
          does not contain config/tool_policy.toml, so Sys.getcwd fails the
@@ -218,9 +219,9 @@ let ensure_keeper_claim fixture =
        ~agent_name:fixture.meta.agent_name)
 
 let ensure_voice_session fixture =
-  let mgr = Masc.Keeper_voice_local.get_session_manager () in
+  let mgr = Keeper_voice_local.get_session_manager () in
   ignore
-    (Masc.Voice_session_manager.start_session mgr ~agent_id:fixture.meta.name
+    (Voice_session_manager.start_session mgr ~agent_id:fixture.meta.name
        ~voice:"tool-matrix" ())
 
 let prepare_keeper_name fixture name =

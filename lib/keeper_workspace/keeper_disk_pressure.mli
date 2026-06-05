@@ -1,4 +1,4 @@
-(** Process-local disk exhaustion guard. *)
+(** Disk exhaustion guard and keeper admission projection. *)
 
 type disk_snapshot = {
   path : string;
@@ -34,6 +34,7 @@ type admission_decision =
 
 val is_disk_exhaustion_text : string -> bool
 val is_disk_exhaustion_exn : exn -> bool
+val note : ?site:string -> ?detail:string -> unit -> unit
 val note_if_disk_exhaustion : ?site:string -> string -> unit
 val note_exception : ?site:string -> exn -> unit
 val active : ?now:float -> unit -> bool
@@ -43,16 +44,19 @@ val probe_path : ?now:float -> string -> snapshot_result
 val probe_masc_root : ?now:float -> masc_root:string -> unit -> snapshot_result
 val admission_decision_of_snapshot : ?now:float -> snapshot_result -> admission_decision
 val admission_decision : ?now:float -> masc_root:string -> unit -> admission_decision
+val admitted : admission_decision -> bool
 val admit_turn : ?now:float -> masc_root:string -> unit -> bool
 val disk_snapshot_to_json : disk_snapshot -> Yojson.Safe.t
 val snapshot_result_to_json : snapshot_result -> Yojson.Safe.t
 val admission_block_to_json : admission_block -> Yojson.Safe.t
 val admission_decision_to_json : admission_decision -> Yojson.Safe.t
+val playground_paths_json : masc_root:string -> Yojson.Safe.t
 val snapshot_json : ?now:float -> masc_root:string -> unit -> Yojson.Safe.t
 
 module For_testing : sig
   val reset : unit -> unit
   val is_disk_exhaustion_text : string -> bool
   val is_disk_exhaustion_exn : exn -> bool
-  val admission_decision_of_snapshot : ?now:float -> snapshot_result -> admission_decision
+  val admission_decision_of_snapshot :
+    ?now:float -> snapshot_result -> admission_decision
 end

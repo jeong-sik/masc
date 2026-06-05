@@ -93,6 +93,7 @@
   masc.tool_call_quality_benchmark
   masc.telemetry_coverage_gap
   masc.telemetry_unified
+  masc.voice_bridge_core
   masc.discovery_cache
   masc.local_runtime_pool
   masc.compaction_trigger

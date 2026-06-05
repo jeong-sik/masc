@@ -257,11 +257,9 @@ let strip_mcp_masc_prefix name =
 let is_board_write_surface_name name =
   let name = strip_mcp_masc_prefix name in
   match of_string name with
-  | Some Board_comment
-  | Some Board_curation_submit
-  | Some Board_post
-  | Some Board_vote -> true
-  | Some _ | None ->
+  | Some tool ->
+    List.mem tool [ Board_comment; Board_curation_submit; Board_post; Board_vote ]
+  | None ->
     List.mem
       name
       [ "masc_board_comment"

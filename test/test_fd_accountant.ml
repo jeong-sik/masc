@@ -13,6 +13,11 @@ module FA = Fd_accountant
 module DST = Masc.Docker_spawn_throttle
 module DP = Domain_pool
 
+let () =
+  FA.set_pressure_hooks
+    ~active:Keeper_fd_pressure.active
+    ~nofile_soft_limit:Keeper_fd_pressure.process_nofile_soft_limit
+
 let bg_spawn_error_to_string = function
   | Bg_task.Spawn_failed msg -> "Spawn_failed: " ^ msg
   | Bg_task.Too_many_tasks { keeper; limit } ->

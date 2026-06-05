@@ -4,13 +4,20 @@
  (name voice_bridge_core)
  (public_name masc.voice_bridge_core)
  (wrapped false)
- (modules voice_bridge_core voice_bridge_transport)
+ (modules
+  voice_bridge
+  voice_bridge_core
+  voice_bridge_transport
+  voice_session_manager)
  (libraries
   eio
   fs_compat
   masc.config
   masc.host_config
+  masc.http_client
   masc.masc_exec
+  masc.masc_workspace
+  masc.tool_types
   masc.voice_config
   masc.voice_runtime_overlay
   masc_core

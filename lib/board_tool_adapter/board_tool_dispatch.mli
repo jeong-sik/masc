@@ -1,4 +1,4 @@
-(** Tool routing and registration for the board MCP adapter. *)
+(** Board tool dispatch and Tool_dispatch registration. *)
 
 val handle_tool : string -> Yojson.Safe.t -> Tool_result.result
 val tool_spec_read_only : string list

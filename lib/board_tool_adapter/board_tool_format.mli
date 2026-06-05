@@ -1,6 +1,23 @@
-(** Formatting and JSON-boundary helpers for the board MCP adapter. *)
+(** Shared board-tool formatting, parsing, and JSON coercion helpers. *)
 
 open Masc_board_handlers
+
+val strip_state_blocks_text : string -> string
+val format_timestamp_relative : float -> string
+val format_ttl_remaining : float -> string
+val board_error_to_string : Board.board_error -> string
+val board_error_failure_class : Board.board_error -> Tool_result.tool_failure_class
+
+val error_of_board_error :
+  tool_name:string -> start_time:float -> Board.board_error -> Tool_result.result
+
+val visibility_of_string : string -> Board.visibility option
+val format_post : Board.post -> string
+val format_post_compact : Board.post -> string
+val format_comment : ?indent:int -> Board.comment -> string
+val format_comment_tree : ?max_depth:int -> Board.comment list -> string list
+val normalize_source_string : string -> string
+val sources_footer : Yojson.Safe.t list -> string
 
 type truncation_signal =
   | Odd_fence
@@ -9,6 +26,9 @@ type truncation_signal =
   | Unfinished_image
   | Odd_double_asterisk
 
+val truncation_signal_to_string : truncation_signal -> string
+val detect_truncated_markdown_with_reason : string -> truncation_signal option
+
 type sort_order = Board_dispatch.sort_order =
   | Hot
   | Trending
@@ -16,28 +36,21 @@ type sort_order = Board_dispatch.sort_order =
   | Updated
   | Discussed
 
-val strip_state_blocks_text : string -> string
-val format_timestamp_relative : float -> string
-val board_error_to_string : Board.board_error -> string
-val board_error_failure_class : Board.board_error -> Tool_result.tool_failure_class
-val error_of_board_error : tool_name:string -> start_time:float -> Board.board_error -> Tool_result.result
-val visibility_of_string : string -> Board.visibility option
-val format_post : Board.post -> string
-val format_post_compact : Board.post -> string
-val format_comment_tree : ?max_depth:int -> Board.comment list -> string list
-val sources_footer : Yojson.Safe.t list -> string
-val truncation_signal_to_string : truncation_signal -> string
-val detect_truncated_markdown_with_reason : string -> truncation_signal option
-val parse_sort_order : string -> (sort_order, string) Result.t
+val parse_sort_order : string -> (sort_order, string) result
+val assoc_replace : string -> Yojson.Safe.t -> (string * Yojson.Safe.t) list -> (string * Yojson.Safe.t) list
 val judgment_arg : Yojson.Safe.t -> Yojson.Safe.t option
 val normalize_board_post_meta : Yojson.Safe.t -> Yojson.Safe.t option
 val source_entries_arg : Yojson.Safe.t -> Yojson.Safe.t list option
 val merge_sources_into_meta : Yojson.Safe.t option -> Yojson.Safe.t list -> Yojson.Safe.t option
+val assoc_field : (string * Yojson.Safe.t) list -> string -> Yojson.Safe.t option
 val string_field : (string * Yojson.Safe.t) list -> string -> string -> string
 val float_field : (string * Yojson.Safe.t) list -> string -> float -> float
 val string_list_field : (string * Yojson.Safe.t) list -> string -> string list
+val trim_nonempty_string : string -> string option
 val string_opt_arg : Yojson.Safe.t -> string -> string option
 val string_list_arg : Yojson.Safe.t -> string -> string list
 val object_list_arg : Yojson.Safe.t -> string -> (string * Yojson.Safe.t) list list
 val provenance_arg : Yojson.Safe.t -> (Yojson.Safe.t, string) result
-val with_yojson_boundary : tool_name:string -> start_time:float -> (unit -> Tool_result.result) -> Tool_result.result
+
+val with_yojson_boundary :
+  tool_name:string -> start_time:float -> (unit -> Tool_result.result) -> Tool_result.result

@@ -13,13 +13,16 @@
   keeper_voice_local)
  (libraries
   agent_sdk
+  masc.host_config
   masc.masc_core
+  masc.masc_workspace
   masc.types_boundary
   masc.keeper_tooling
   unix
   str
   yojson
   eio
+  masc.voice_bridge_core
   masc_config
   masc_cancel_safe
   masc_process

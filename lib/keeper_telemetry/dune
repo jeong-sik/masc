@@ -8,8 +8,7 @@
   keeper_measurement
   keeper_timing
   keeper_token_count
-  keeper_usage_trust
-  keeper_benchmark_canary)
+  keeper_usage_trust)
  (libraries
   agent_sdk
   yojson

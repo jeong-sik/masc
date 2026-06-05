@@ -442,7 +442,20 @@ let summary_of_masc_internal_error = function
            is_retry
            (retry_admission_denial_to_yojson denial_reason
             |> Yojson.Safe.to_string))
-  | Runtime_exhausted _
+  | Runtime_exhausted
+      {
+        reason =
+          ( Connection_refused
+          | Dns_failure
+          | No_providers_available
+          | All_providers_failed
+          | Candidates_filtered_after_cycles
+          | Max_turns_exceeded
+          | Structural_attempt_timeout _
+          | Capacity_exhausted
+          | Other_detail _ );
+        runtime_id = _;
+      }
   | Resumable_cli_session _
   | Accept_rejected _
   | Admission_queue_timeout _
@@ -733,4 +746,11 @@ let classify_masc_internal_error (err : Agent_sdk.Error.sdk_error) :
     masc_internal_error option =
   match err with
   | Agent_sdk.Error.Internal msg -> classify_masc_internal_error_of_string msg
-  | _ -> None
+  | Agent_sdk.Error.Api _
+  | Agent_sdk.Error.Provider _
+  | Agent_sdk.Error.Agent _
+  | Agent_sdk.Error.Mcp _
+  | Agent_sdk.Error.Config _
+  | Agent_sdk.Error.Serialization _
+  | Agent_sdk.Error.Io _
+  | Agent_sdk.Error.Orchestration _ -> None

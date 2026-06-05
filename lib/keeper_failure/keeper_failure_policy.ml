@@ -133,6 +133,47 @@ let timeout_phase_is_streaming_activity = function
   | Unknown_timeout -> false
 ;;
 
+let timeout_phase_option_to_label = function
+  | None -> None
+  | Some Admission -> Some (timeout_phase_to_label Admission)
+  | Some Queue -> Some (timeout_phase_to_label Queue)
+  | Some First_token -> Some (timeout_phase_to_label First_token)
+  | Some Http_operation -> Some (timeout_phase_to_label Http_operation)
+  | Some Non_streaming_body -> Some (timeout_phase_to_label Non_streaming_body)
+  | Some Stream_body -> Some (timeout_phase_to_label Stream_body)
+  | Some (Stream_idle state) ->
+    Some (timeout_phase_to_label (Stream_idle state))
+  | Some Provider_step -> Some (timeout_phase_to_label Provider_step)
+  | Some Cli_stdout_idle -> Some (timeout_phase_to_label Cli_stdout_idle)
+  | Some Caller_budget -> Some (timeout_phase_to_label Caller_budget)
+  | Some Wall_clock -> Some (timeout_phase_to_label Wall_clock)
+  | Some Capacity_backpressure -> Some (timeout_phase_to_label Capacity_backpressure)
+  | Some Unknown_timeout -> Some (timeout_phase_to_label Unknown_timeout)
+;;
+
+let timeout_phase_option_is_capacity_backpressure = function
+  | Some Capacity_backpressure -> true
+  | None
+  | Some Admission
+  | Some Queue
+  | Some First_token
+  | Some Http_operation
+  | Some Non_streaming_body
+  | Some Stream_body
+  | Some (Stream_idle _)
+  | Some Provider_step
+  | Some Cli_stdout_idle
+  | Some Caller_budget
+  | Some Wall_clock
+  | Some Unknown_timeout -> false
+;;
+
+let provider_timeout_reason prefix phase =
+  match timeout_phase_option_to_label phase with
+  | Some phase_label -> prefix ^ ":" ^ phase_label
+  | None -> prefix
+;;
+
 type liveness_evidence =
   | Recent_heartbeat
   | In_turn_progress
@@ -253,17 +294,87 @@ let liveness_is_lost = function
 ;;
 
 let provider_timeout_policy_effect ~phase ~strikes ~liveness =
-  match phase, strikes with
-  | _, Some n when n >= 3 && liveness_is_lost liveness ->
+  let repeated_timeout =
+    match strikes with
+    | Some n when n >= 3 -> true
+    | Some _ | None -> false
+  in
+  if repeated_timeout && liveness_is_lost liveness
+  then
     ( Pause_keeper
     , Operator_breaker
     , Inspect_keeper_liveness
     , "keeper_liveness_lost_after_timeout" )
-  | _, Some n when n >= 3 ->
+  else if repeated_timeout
+  then
     Pause_current_work, Provider_cooldown, Reroute_or_tune_provider, "provider_timeout_loop"
-  | Some Capacity_backpressure, _ ->
+  else if timeout_phase_option_is_capacity_backpressure phase
+  then
     Soft_fail_turn, Provider_cooldown, Reroute_or_tune_provider, "provider_timeout"
-  | _ -> Soft_fail_turn, Provider_cooldown, Inspect_provider_stream, "provider_timeout"
+  else Soft_fail_turn, Provider_cooldown, Inspect_provider_stream, "provider_timeout"
+;;
+
+let provider_timeout_without_strikes_decision phase =
+  match phase with
+  | Some (Stream_idle state) ->
+    let has_activity = stream_idle_state_is_activity state in
+    make_decision
+      ~failure_scope:Provider_scope
+      ~lifecycle_effect:Soft_fail_turn
+      ~circuit_effect:Provider_cooldown
+      ~operator_action:Inspect_provider_stream
+      ~keeper_death_allowed:false
+      ~reason:
+        (if has_activity
+         then "provider_stream_idle_active:" ^ stream_idle_state_to_label state
+         else "provider_stream_idle:" ^ stream_idle_state_to_label state)
+  | Some Capacity_backpressure ->
+    make_decision
+      ~failure_scope:Provider_scope
+      ~lifecycle_effect:Soft_fail_turn
+      ~circuit_effect:Provider_cooldown
+      ~operator_action:Reroute_or_tune_provider
+      ~keeper_death_allowed:false
+      ~reason:"provider_timeout:capacity_backpressure"
+  | None
+  | Some Admission
+  | Some Queue
+  | Some First_token
+  | Some Http_operation
+  | Some Non_streaming_body
+  | Some Stream_body
+  | Some Provider_step
+  | Some Cli_stdout_idle
+  | Some Caller_budget
+  | Some Wall_clock
+  | Some Unknown_timeout ->
+    make_decision
+      ~failure_scope:Provider_scope
+      ~lifecycle_effect:Soft_fail_turn
+      ~circuit_effect:Provider_cooldown
+      ~operator_action:Inspect_provider_stream
+      ~keeper_death_allowed:false
+      ~reason:(provider_timeout_reason "provider_timeout" phase)
+;;
+
+let provider_timeout_decision ~phase ~strikes ~liveness =
+  match strikes with
+  | Some _ ->
+    let lifecycle_effect, circuit_effect, operator_action, reason =
+      provider_timeout_policy_effect ~phase ~strikes ~liveness
+    in
+    let reason = provider_timeout_reason reason phase in
+    let failure_scope =
+      if liveness_is_lost liveness then Keeper_liveness_scope else Provider_scope
+    in
+    make_decision
+      ~failure_scope
+      ~lifecycle_effect
+      ~circuit_effect
+      ~operator_action
+      ~keeper_death_allowed:false
+      ~reason
+  | None -> provider_timeout_without_strikes_decision phase
 ;;
 
 let decide = function
@@ -280,60 +391,8 @@ let decide = function
       ~operator_action:Fix_invocation
       ~keeper_death_allowed:false
       ~reason
-  | Provider_timeout { phase; strikes = (Some _ as strikes); liveness } ->
-    let lifecycle_effect, circuit_effect, operator_action, reason =
-      provider_timeout_policy_effect ~phase ~strikes ~liveness
-    in
-    let reason =
-      match phase with
-      | Some phase -> reason ^ ":" ^ timeout_phase_to_label phase
-      | None -> reason
-    in
-    let failure_scope =
-      if liveness_is_lost liveness then Keeper_liveness_scope else Provider_scope
-    in
-    make_decision
-      ~failure_scope
-      ~lifecycle_effect
-      ~circuit_effect
-      ~operator_action
-      ~keeper_death_allowed:false
-      ~reason
-  | Provider_timeout
-      { phase = Some (Stream_idle state); strikes = None; liveness = _ } ->
-    let has_activity = stream_idle_state_is_activity state in
-    make_decision
-      ~failure_scope:Provider_scope
-      ~lifecycle_effect:Soft_fail_turn
-      ~circuit_effect:Provider_cooldown
-      ~operator_action:Inspect_provider_stream
-      ~keeper_death_allowed:false
-      ~reason:
-        (if has_activity
-         then "provider_stream_idle_active:" ^ stream_idle_state_to_label state
-         else "provider_stream_idle:" ^ stream_idle_state_to_label state)
-  | Provider_timeout
-      { phase = Some Capacity_backpressure; strikes = None; liveness = _ } ->
-    make_decision
-      ~failure_scope:Provider_scope
-      ~lifecycle_effect:Soft_fail_turn
-      ~circuit_effect:Provider_cooldown
-      ~operator_action:Reroute_or_tune_provider
-      ~keeper_death_allowed:false
-      ~reason:"provider_timeout:capacity_backpressure"
-  | Provider_timeout { phase; strikes = None; liveness = _ } ->
-    let reason =
-      match phase with
-      | Some phase -> "provider_timeout:" ^ timeout_phase_to_label phase
-      | None -> "provider_timeout"
-    in
-    make_decision
-      ~failure_scope:Provider_scope
-      ~lifecycle_effect:Soft_fail_turn
-      ~circuit_effect:Provider_cooldown
-      ~operator_action:Inspect_provider_stream
-      ~keeper_death_allowed:false
-      ~reason
+  | Provider_timeout { phase; strikes; liveness } ->
+    provider_timeout_decision ~phase ~strikes ~liveness
   | Transient_provider_failure ->
     make_decision
       ~failure_scope:Provider_scope

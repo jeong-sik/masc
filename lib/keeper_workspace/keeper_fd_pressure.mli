@@ -1,4 +1,4 @@
-(** Process-local file-descriptor exhaustion guard. *)
+(** FD exhaustion guard and keeper admission budget projection. *)
 
 type nofile_cache =
   | Uninitialized
@@ -56,12 +56,12 @@ type external_level =
   | External_crit
 
 val is_fd_exhaustion_text : string -> bool
-val is_fd_exhaustion_exn : exn -> bool
-val cooldown_sec : unit -> float
-val cas_monotonic_max : atom:float Atomic.t -> float -> bool
 val note : ?site:string -> ?detail:string -> unit -> unit
 val note_if_fd_exhaustion : ?site:string -> string -> unit
+val is_fd_exhaustion_exn : exn -> bool
 val note_exception : ?site:string -> exn -> unit
+val cooldown_sec : unit -> float
+val cas_monotonic_max : atom:float Atomic.t -> float -> bool
 val active : ?now:float -> unit -> bool
 val remaining_sec : ?now:float -> unit -> float
 val projection_fields : ?now:float -> unit -> (string * Yojson.Safe.t) list
@@ -71,7 +71,18 @@ val engage_external : reason:string -> level:external_level -> ts:float -> unit 
 val reset_for_tests : unit -> unit
 val process_nofile_soft_limit : unit -> int option
 val process_open_fd_count : unit -> int option
+val system_fd_snapshot : ?now:float -> unit -> system_fd_snapshot option
 val min_nofile_for_fleet : unit -> int
+val fd_headroom : unit -> int
+val fd_per_active_keeper : unit -> int
+
+val projected_fd_budget :
+  ?open_fds:int ->
+  active_keepers:int ->
+  starting_keepers:int ->
+  unit ->
+  int
+
 val admission_decision :
   ?soft_limit:int option ->
   ?open_fds:int option ->
@@ -80,9 +91,12 @@ val admission_decision :
   starting_keepers:int ->
   unit ->
   admission_decision
+
+val admitted : admission_decision -> bool
 val admission_block_to_json : admission_block -> Yojson.Safe.t
 val admission_decision_to_json : admission_decision -> Yojson.Safe.t
 val admission_block_kind : admission_block -> string
+
 val runtime_state_json :
   ?soft_limit:int option ->
   ?open_fds:int option ->
@@ -92,6 +106,7 @@ val runtime_state_json :
   requested_keepers:int ->
   unit ->
   Yojson.Safe.t
+
 val admit_start :
   ?soft_limit:int option ->
   ?open_fds:int option ->
@@ -100,6 +115,7 @@ val admit_start :
   starting_keepers:int ->
   unit ->
   bool
+
 val admit_turn :
   ?soft_limit:int option ->
   ?open_fds:int option ->
@@ -107,4 +123,5 @@ val admit_turn :
   active_keepers:int ->
   unit ->
   bool
+
 val cap_active_keepers_for_nofile : ?soft_limit:int option -> int -> int

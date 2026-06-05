@@ -138,7 +138,7 @@ describe('KeeperConversationPanel', () => {
     expect(container.textContent).toContain('@sangsu')
     expect(container.textContent).toContain('메타데이터 표시')
     expect(container.textContent).toContain('내부 메시지 숨김')
-    expect(container.textContent).toContain('## Current World State')
+    expect(container.textContent).toContain('Current World State')
     expect(container.textContent).not.toContain('Conversation Lane')
     expect(container.textContent).not.toContain('Visible thread')
     expect(container.textContent).not.toContain('Hidden internal')

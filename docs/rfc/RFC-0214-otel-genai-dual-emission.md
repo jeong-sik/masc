@@ -9,7 +9,7 @@
 
 ## 1. Problem
 
-masc-mcp의 LLM 텔레메트리는 **Prometheus 전용 커스텀 메트릭**(`masc_llm_provider_*`)을 사용한다. OTel GenAI Semantic Convention(`gen_ai.*`)을 따르지 않아:
+masc-mcp의 LLM 텔레메트리는 **legacy Prometheus 커스텀 메트릭 (제거됨, PR #20189)**(`masc_llm_provider_*`)을 사용한다. OTel GenAI Semantic Convention(`gen_ai.*`)을 따르지 않아:
 
 1. Grafana/Datadog/New Relic이 LLM 메트릭을 자동 분류하지 못함
 2. OTLP export 시 메트릭명 매핑이 필요
@@ -17,9 +17,9 @@ masc-mcp의 LLM 텔레메트리는 **Prometheus 전용 커스텀 메트릭**(`ma
 
 ## 2. Current State
 
-### 2.1 Prometheus Metrics (Internal)
+### 2.1 Legacy Prometheus Metrics (Removed, PR #20189)
 
-| Prometheus Name | Type | Labels |
+| Legacy Name | Type | Labels |
 |-----------------|------|--------|
 | `masc_llm_provider_input_tokens_total` | counter | provider, model |
 | `masc_llm_provider_output_tokens_total` | counter | provider, model |
@@ -82,17 +82,17 @@ Attributes to add per-inference:
 | `gen_ai.response.finish_reasons` | `stop_reason` |
 | `gen_ai.response.model` | `resolved_model_id` |
 
-## 4. Approach: Dual Emission
+## 4. Approach: OTel Migration
 
 ### 4.1 Strategy
 
-Emit **both** Prometheus counters AND OTel metrics/attributes simultaneously.
+Emit OTel metrics/attributes simultaneously.
 
-Why dual instead of migration:
-- Existing Prometheus dashboards/alerts continue to work
-- Gradual adoption — no breaking change
+Why OTel-only migration:
+- Legacy Prometheus dashboards removed (PR #20189)
+- Breaking change already applied (PR #20189)
 - OTLP-enabled environments get automatic LLM dashboards
-- Prometheus remains the primary internal metric source
+- OTel is the primary internal metric source
 
 ### 4.2 Implementation Layers
 
@@ -124,10 +124,13 @@ In `lib/llm_metric_bridge.ml`, add OTel span attributes to `emit_token_usage`:
 
 ```ocaml
 let emit_token_usage ~provider ~model_id ~input_tokens ~output_tokens =
-  (* Existing Prometheus *)
-  Prometheus.inc_counter input_token_metric ...;
-  Prometheus.inc_counter output_token_metric ...;
-  (* NEW: OTel span attributes *)
+  (* Legacy Prometheus counters removed (PR #20189) *)
+  (* OTel metric store: counter increment *)
+  Otel_metric_store.inc_counter ~name:"masc_llm_provider_input_tokens_total"
+    ~labels:["provider", provider; "model", model_id] input_tokens;
+  Otel_metric_store.inc_counter ~name:"masc_llm_provider_output_tokens_total"
+    ~labels:["provider", provider; "model", model_id] output_tokens;
+  (* OTel span attributes *)
   Otel_spans.add_event
     ~name:"gen_ai.client.token.usage"
     ~attrs:
@@ -143,25 +146,22 @@ Similarly for `emit_error` (span status), `emit_streaming_first_chunk` (already 
 
 #### Phase B: OTel Metric Export (Medium risk)
 
-Add a thin OTel metric exporter alongside Prometheus in the bridge:
+Add a thin OTel metric exporter (Prometheus removed, PR #20189):
 
 ```ocaml
-(* Dual emission helper *)
-let emit_metric_prometheus_and_otel ~name ~value ~attrs =
-  (* Prometheus: existing counters *)
-  emit_prometheus name value attrs;
+(* OTel-only emission helper *)
+let emit_metric_otel ~name ~value ~attrs =
   (* OTel: standard metric *)
   Otel_metrics.record ~name ~value ~attrs
 ```
 
 This requires the `opentelemetry` OCaml library (already in dune-project).
 
-#### Phase C: Custom→Standard Migration (Future)
+#### Phase C: Custom→Standard Migration (Completed)
 
-After Phase B is validated:
-1. Add Prometheus → OTel name mapping table
-2. Grafana dashboards switch to OTel metric names
-3. Eventually deprecate `masc_llm_provider_*` (breaking change, major version bump)
+Prometheus removed (PR #20189). Remaining work:
+1. Grafana dashboards use OTel metric names directly
+2. Legacy `masc_llm_provider_*` counters emit via OTel only
 
 ## 5. Scope & Effort
 
@@ -173,13 +173,15 @@ After Phase B is validated:
 
 ## 6. Decision Points
 
-1. **Dual emission vs replacement?** — Dual (recommended). Zero downtime.
+## 6. Decision Points
+
+1. **OTel-only vs dual emission?** — OTel-only (PR #20189 removed Prometheus).
 2. **OTLP endpoint configuration?** — Use existing `opentelemetry` lib config (env vars).
-3. **Custom attributes (`masc.gen_ai.*`) migration?** — Phase C, with deprecation period.
+3. **Custom attributes (`masc.gen_ai.*`) migration?** — Phase C, direct OTel export.
 
 ## 7. Non-Goals
 
-- Changing Prometheus metric names (breaking change, separate RFC)
+- Restoring Prometheus metric names (already removed, PR #20189)
 - OTel Logs integration (JSONL → OTLP logs bridge is a separate concern)
 - Replacing JSONL persistence with OTel-only (JSONL remains the durable truth)
 

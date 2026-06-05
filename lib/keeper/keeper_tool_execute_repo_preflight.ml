@@ -138,7 +138,7 @@ let validate_repo_path_ready
     else Error (repo_checkout_not_ready_error ~repo_name ~path_root ~git_toplevel:top_opt)
 
 let validate_cwd_currency_ready
-      ?(allow_currency_sync = true)
+      ~allow_currency_sync
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(cwd : string)
@@ -174,7 +174,7 @@ let validate_cwd_currency_ready
              ~cwd))
 
 let validate_cwd_ready
-      ?(allow_currency_sync = true)
+      ~allow_currency_sync
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(cwd : string)

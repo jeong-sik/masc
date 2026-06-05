@@ -5,10 +5,10 @@
     command-shape decisions explicitly. *)
 
 val validate_cwd_ready :
+  allow_currency_sync:bool ->
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   cwd:string ->
-  ?allow_currency_sync:bool ->
   allow_stale_preserved_repo_context:bool ->
   (unit, string) result
 (** Reject typed Execute commands from a sandbox [repos/<repo>] path unless the

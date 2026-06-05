@@ -456,9 +456,9 @@ let parse_error_field raw =
   |> Json.member "error"
   |> Json.to_string_option
 
-let sandbox_bundle_paths ~base_path ~meta =
+let sandbox_bundle_paths ~base_path ~(meta : Masc.Keeper_meta_contract.keeper_meta) =
   let playground =
-    Filename.concat base_path (playground_path_of meta.Keeper_types.name)
+    Filename.concat base_path (playground_path_of meta.name)
     |> Masc.Keeper_alerting_path.strip_trailing_slashes
   in
   [ playground
@@ -501,6 +501,7 @@ let test_tool_execute_rejects_parent_git_repo_cwd () =
   | Ok cwd ->
     (match
        Masc.Keeper_tool_execute_repo_preflight.validate_cwd_ready
+         ~allow_currency_sync:true
          ~config
          ~meta
          ~cwd
@@ -1005,6 +1006,7 @@ let test_tool_execute_git_recovery_invalidates_repo_currency_cache () =
   in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
   Keeper_registry.clear ();
+  let meta = { meta with tool_access = [ "tool_write_file" ] } in
   let run executable argv =
     Keeper_tool_command_runtime.handle_tool_execute
       ~turn_sandbox_factory:None
@@ -2126,9 +2128,13 @@ let () =
             `Quick
             test_tool_execute_readonly_missing_cwd_does_not_create_directory
         ; Alcotest.test_case
-            "preserved direct repo root blocks git show"
+            "readonly default cwd rejects without sandbox bundle"
             `Quick
-            test_tool_execute_blocks_preserved_direct_repo_git_show
+            test_tool_execute_readonly_default_cwd_does_not_create_sandbox_bundle
+        ; Alcotest.test_case
+            "readonly preserved direct repo root blocks git show without fetch"
+            `Quick
+            test_tool_execute_readonly_blocks_preserved_direct_repo_git_show_without_fetch
         ; Alcotest.test_case
             "preserved direct repo root allows git status"
             `Quick

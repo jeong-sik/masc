@@ -453,7 +453,28 @@ let create_backend ~sw ?(stop = Atomic.make false) ?(config = Config.make ()) en
       Eio.Time.sleep env#clock 0.5;
       try B.tick () with
       | Eio.Cancel.Cancelled _ as e -> raise e
-      | exn -> Log.Telemetry.warn "otel tick failed: %s" (Printexc.to_string exn)
+      | exn ->
+        let msg = Printexc.to_string exn in
+        (* Eio_mutex.Poisoned is unrecoverable — the internal GC_metrics mutex
+           is permanently damaged and every subsequent tick will fail with the
+           same error.  Stop the fiber instead of spamming WARN every 500ms.
+           Otel data is already lost; the next server restart will recreate
+           the backend. *)
+        let is_poisoned =
+          let target = "Poisoned" in
+          let tlen = String.length target in
+          let mlen = String.length msg in
+          let rec scan i =
+            i + tlen <= mlen &&
+            (String.sub msg i tlen = target || scan (i + 1))
+          in
+          scan 0
+        in
+        if is_poisoned then begin
+          Log.Otel.warn "otel tick mutex poisoned, stopping tick fiber (otel degraded until restart)";
+          Atomic.set stop true
+        end else
+          Log.Telemetry.warn "otel tick failed: %s" msg
     done);
   (module B)
 ;;

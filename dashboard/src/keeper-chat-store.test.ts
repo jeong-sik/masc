@@ -200,4 +200,48 @@ describe('keeper-chat-store', () => {
       expect(getQueueLength('keeper-q')).toBe(0)
     })
   })
+
+  describe('attachments', () => {
+    it('stores messages with attachments', () => {
+      const msg: ChatMessage = {
+        role: 'user',
+        content: 'check this',
+        timestamp: 1000,
+        source: 'dashboard',
+        attachments: [{
+          id: 'att-1',
+          type: 'image',
+          name: 'screenshot.png',
+          size: 1024,
+          mimeType: 'image/png',
+          data: 'data:image/png;base64,abc123',
+        }],
+      }
+      appendChatMessage('keeper-att', msg)
+      const buf = getChatMessageBuffer('keeper-att')
+      expect(buf).toHaveLength(1)
+      expect(buf[0]!.attachments).toHaveLength(1)
+      expect(buf[0]!.attachments![0]!.name).toBe('screenshot.png')
+    })
+
+    it('round-trips attachments through sessionStorage', () => {
+      const msg: ChatMessage = {
+        role: 'user',
+        content: 'with file',
+        timestamp: 2000,
+        attachments: [{
+          id: 'att-2',
+          type: 'file',
+          name: 'log.txt',
+          size: 512,
+          mimeType: 'text/plain',
+          data: 'data:text/plain;base64,abc',
+        }],
+      }
+      appendChatMessage('keeper-att2', msg)
+      _resetChatStoreForTests(false)
+      const restored = getChatMessageBuffer('keeper-att2')
+      expect(restored[0]!.attachments![0]!.name).toBe('log.txt')
+    })
+  })
 })

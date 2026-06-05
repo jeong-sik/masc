@@ -1,6 +1,6 @@
 ---
 status: reference
-last_verified: 2026-04-17
+last_verified: 2026-06-05
 code_refs:
   - lib/keeper/keeper_composite_observer.ml
   - lib/keeper_metrics/keeper_measurement.ml

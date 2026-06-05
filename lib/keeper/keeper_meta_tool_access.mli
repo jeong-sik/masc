@@ -14,15 +14,9 @@ val tool_names_include_board : string list -> bool
 (** Trim, drop blanks, dedupe (preserve first-seen order). *)
 val normalize_tool_names : string list -> string list
 
-(** Trim, drop blanks, dedupe a tool candidate profile (alias of
-    {!normalize_tool_names}, kept for call-site clarity). *)
-val normalize_tool_access : string list -> string list
-
-(** Tool candidate names that mark Execute as write-capable. *)
-val write_tools : string list
-
-(** Encode a tool candidate profile as a JSON array of tool names. *)
-val tool_access_to_json : string list -> Yojson.Safe.t
+(** True when a normalized keeper tool candidate profile grants typed Execute
+    the write-enabled policy. *)
+val tool_access_allows_execute_write : string list -> bool
 
 (** True if [json] has a non-null member at [key] (top level). *)
 val json_member_present : string -> Yojson.Safe.t -> bool

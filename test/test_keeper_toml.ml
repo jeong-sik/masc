@@ -1132,7 +1132,7 @@ let test_persona_resolver_preserves_canonical_tool_access_and_allowed_paths () =
 }
 |};
   let expected_tool_access =
-    Masc.Keeper_meta_tool_access.tool_access_to_json
+    Json_util.json_string_list
       ([ "masc_status" ])
   in
   match

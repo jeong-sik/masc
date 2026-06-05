@@ -1,5 +1,9 @@
 open Keeper_meta_contract
 
+type repo_currency_policy =
+  | Reject_repo_currency_sync
+  | Allow_repo_currency_sync
+
 type currency_cache_entry =
   { at : float
   ; outcome : Playground_repo_readiness.currency_outcome option
@@ -192,7 +196,7 @@ let validate_repo_path_ready
            ~git_error)
 
 let validate_cwd_currency_ready
-      ~allow_currency_sync
+      ~repo_currency_policy
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(cwd : string)
@@ -211,24 +215,26 @@ let validate_cwd_currency_ready
   | Some { Keeper_tool_execute_path.path_repo_name = repo_name; _ } ->
     if allow_stale_preserved_repo_context
     then Ok ()
-    else if not allow_currency_sync
-    then Error (repo_currency_sync_disabled_error ~repo_name ~cwd)
     else (
-      match repo_currency_outcome_best_effort ~config ~meta ~repo_name with
-      | Some Playground_repo_readiness.Up_to_date | Some (Advanced _) -> Ok ()
-      | Some (Preserved reason) | Some (Skipped reason) ->
-        Error (repo_currency_not_ready_error ~config ~meta ~repo_name ~reason ~cwd)
-      | None ->
-        Error
-          (repo_currency_not_ready_error
-             ~config
-             ~meta
-             ~repo_name
-             ~reason:"currency probe failed"
-             ~cwd))
+      match repo_currency_policy with
+      | Reject_repo_currency_sync ->
+        Error (repo_currency_sync_disabled_error ~repo_name ~cwd)
+      | Allow_repo_currency_sync ->
+        (match repo_currency_outcome_best_effort ~config ~meta ~repo_name with
+         | Some Playground_repo_readiness.Up_to_date | Some (Advanced _) -> Ok ()
+         | Some (Preserved reason) | Some (Skipped reason) ->
+           Error (repo_currency_not_ready_error ~config ~meta ~repo_name ~reason ~cwd)
+         | None ->
+           Error
+             (repo_currency_not_ready_error
+                ~config
+                ~meta
+                ~repo_name
+                ~reason:"currency probe failed"
+                ~cwd)))
 
 let validate_cwd_ready
-      ~allow_currency_sync
+      ~repo_currency_policy
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(cwd : string)
@@ -238,7 +244,7 @@ let validate_cwd_ready
   | Error _ as err -> err
   | Ok () ->
     validate_cwd_currency_ready
-      ~allow_currency_sync
+      ~repo_currency_policy
       ~config
       ~meta
       ~cwd

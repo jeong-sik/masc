@@ -194,7 +194,7 @@ let make_meta ?tool_access ~name ~sandbox () =
     | Some tool_access ->
       fields
       @ [ ( "tool_access",
-            Keeper_meta_tool_access.tool_access_to_json tool_access ) ]
+            Json_util.json_string_list tool_access ) ]
   in
   let json =
     `Assoc fields

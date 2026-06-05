@@ -296,13 +296,17 @@ let handle_tool_execute_typed
       ()
   =
   let root = Keeper_alerting_path.project_root_of_config config in
-  let resolve_cwd =
+  let execute_cwd_policy =
     if write_enabled
-    then Keeper_tool_execute_path.resolve_tool_write_cwd
-    else Keeper_tool_execute_path.resolve_tool_readonly_execute_cwd
+    then Keeper_tool_execute_path.Write_enabled_execute_cwd
+    else Keeper_tool_execute_path.Readonly_execute_cwd
   in
   match
-    resolve_cwd ~config ~meta ~args
+    Keeper_tool_execute_path.resolve_tool_execute_cwd
+      ~policy:execute_cwd_policy
+      ~config
+      ~meta
+      ~args
   with
     | Error e -> error_json e
     | Ok cwd ->
@@ -531,12 +535,19 @@ let handle_tool_execute_typed
           let dispatch_result =
             Keeper_tool_execute_shell_ir.dispatch_classified
               ~before_path_validation:(fun ir ->
+                let repo_currency_policy =
+                  if write_enabled
+                  then
+                    Keeper_tool_execute_repo_preflight.Allow_repo_currency_sync
+                  else
+                    Keeper_tool_execute_repo_preflight.Reject_repo_currency_sync
+                in
                 match
                   Keeper_tool_execute_repo_preflight.validate_cwd_ready
                     ~config
                     ~meta
                     ~cwd
-                    ~allow_currency_sync:write_enabled
+                    ~repo_currency_policy
                     ~allow_stale_preserved_repo_context
                 with
                 | Error _ as err -> err
@@ -662,9 +673,7 @@ let handle_tool_execute
       args
   in
   let write_enabled =
-    List.exists
-      (fun n -> List.mem n Keeper_meta_tool_access.write_tools)
-      meta.tool_access
+    Keeper_meta_tool_access.tool_access_allows_execute_write meta.tool_access
   in
   if has_typed_execute_input_key args
   then

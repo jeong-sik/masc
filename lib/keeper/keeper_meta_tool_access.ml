@@ -19,13 +19,14 @@ let normalize_tool_names names =
   |> dedupe_keep_order
 ;;
 
-let write_tools = [ "tool_edit_file"; "tool_write_file"; "tool_execute" ]
+let is_execute_write_candidate = function
+  | "tool_edit_file" | "tool_write_file" | "tool_execute" -> true
+  | _ -> false
 ;;
 
-let normalize_tool_access names = normalize_tool_names names
-
-(** Encode a tool candidate profile as a JSON array of tool names. *)
-let tool_access_to_json names = `List (List.map (fun s -> `String s) names)
+let tool_access_allows_execute_write names =
+  names |> normalize_tool_names |> List.exists is_execute_write_candidate
+;;
 
 let json_member_present key (json : Yojson.Safe.t) =
   match json with
@@ -80,7 +81,7 @@ let tool_access_of_meta_json (json : Yojson.Safe.t) =
        string_list_field_result ~field_name:"tool_access"
          (`Assoc [ "tool_access", list_json ])
      with
-     | Ok tools -> Ok (normalize_tool_access tools)
+     | Ok tools -> Ok (normalize_tool_names tools)
      | Error msg -> Error msg)
   | Some other ->
     Error

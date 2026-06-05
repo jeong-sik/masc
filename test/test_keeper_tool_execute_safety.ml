@@ -496,13 +496,18 @@ let test_tool_execute_rejects_parent_git_repo_cwd () =
       ]
   in
   match
-    Masc.Keeper_tool_execute_path.resolve_tool_write_cwd ~config ~meta ~args
+    Masc.Keeper_tool_execute_path.resolve_tool_execute_cwd
+      ~policy:Masc.Keeper_tool_execute_path.Write_enabled_execute_cwd
+      ~config
+      ~meta
+      ~args
   with
   | Error err -> Alcotest.failf "cwd resolution should be path-only, got: %s" err
   | Ok cwd ->
     (match
        Masc.Keeper_tool_execute_repo_preflight.validate_cwd_ready
-         ~allow_currency_sync:true
+         ~repo_currency_policy:
+           Masc.Keeper_tool_execute_repo_preflight.Allow_repo_currency_sync
          ~config
          ~meta
          ~cwd
@@ -1048,7 +1053,9 @@ let test_tool_execute_git_recovery_invalidates_repo_currency_cache () =
   in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
   Keeper_registry.clear ();
-  let meta = { meta with tool_access = Keeper_meta_tool_access.write_tools } in
+  let meta =
+    { meta with tool_access = [ "tool_edit_file"; "tool_write_file"; "tool_execute" ] }
+  in
   let run executable argv =
     Keeper_tool_command_runtime.handle_tool_execute
       ~turn_sandbox_factory:None
@@ -1354,7 +1361,7 @@ let make_write_enabled_meta name =
         ("agent_name", `String ("agent-" ^ name));
         ("trace_id", `String ("trace-" ^ name));
         ( "tool_access",
-          Keeper_meta_tool_access.tool_access_to_json
+          Json_util.json_string_list
             (["tool_edit_file"; "tool_write_file"]) );
       ]
   in

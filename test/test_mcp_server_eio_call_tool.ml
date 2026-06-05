@@ -62,7 +62,7 @@ let make_keeper_meta ?agent_name ?current_task_id ?(goal_ids = [])
      | Some tool_access ->
          [
            ( "tool_access",
-             Masc.Keeper_meta_tool_access.tool_access_to_json tool_access );
+             Json_util.json_string_list tool_access );
          ]
      | None -> [])
   in

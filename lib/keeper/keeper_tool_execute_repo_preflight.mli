@@ -4,8 +4,12 @@
     only maps cwd/path strings; repo state checks live here so callers can make
     command-shape decisions explicitly. *)
 
+type repo_currency_policy =
+  | Reject_repo_currency_sync
+  | Allow_repo_currency_sync
+
 val validate_cwd_ready :
-  allow_currency_sync:bool ->
+  repo_currency_policy:repo_currency_policy ->
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   cwd:string ->
@@ -15,8 +19,8 @@ val validate_cwd_ready :
     cwd is already an independent git checkout/worktree. For direct repo roots,
     also reject normal work when the repo currency probe preserves or skips the
     clone; diagnostic/recovery policy is supplied by the caller. When
-    [allow_currency_sync] is [false], direct repo-root normal work is rejected
-    without fetch/fast-forward side effects. *)
+    [repo_currency_policy] is [Reject_repo_currency_sync], direct repo-root
+    normal work is rejected without fetch/fast-forward side effects. *)
 
 val validate_path_args_ready :
   config:Workspace.config ->

@@ -560,7 +560,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           ("desires", `String meta.desires);
           ("instructions", `String meta.instructions);
           ("social_model", `String meta.social_model);
-          ("tool_access", tool_access_to_json meta.tool_access);
+          ("tool_access", Json_util.json_string_list meta.tool_access);
           ("tool_denylist",
             `List (List.map (fun value -> `String value) meta.tool_denylist));
           ("proactive_enabled", `Bool meta.proactive.enabled);

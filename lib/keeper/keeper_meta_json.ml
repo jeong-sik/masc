@@ -20,7 +20,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
         | Some s -> `String s
         | None -> `Null )
     ; "trace_id", `String (Keeper_id.Trace_id.to_string rt.trace_id)
-    ; "tool_access", tool_access_to_json m.tool_access
+    ; "tool_access", Json_util.json_string_list m.tool_access
     ; "trace_history", `List (List.map (fun s -> `String s) rt.trace_history)
     ; "generation", `Int rt.generation
     ; "last_handoff_ts", `Float rt.last_handoff_ts

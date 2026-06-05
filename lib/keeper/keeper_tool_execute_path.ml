@@ -241,7 +241,11 @@ let resolve_tool_read_cwd
     else
       Error (Printf.sprintf "cwd_not_directory: %s (path_is_file_not_directory)" cwd)
 
-let resolve_tool_write_cwd
+type execute_cwd_policy =
+  | Readonly_execute_cwd
+  | Write_enabled_execute_cwd
+
+let resolve_write_enabled_execute_cwd
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
@@ -260,7 +264,7 @@ let resolve_tool_write_cwd
     else
       Error (Printf.sprintf "cwd_not_directory: %s (path_is_file_not_directory)" cwd)
 
-let resolve_tool_readonly_execute_cwd
+let resolve_readonly_execute_cwd
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
@@ -278,6 +282,11 @@ let resolve_tool_readonly_execute_cwd
     if not (Fs_compat.file_exists cwd) then resolve_missing_cwd cwd
     else
       Error (Printf.sprintf "cwd_not_directory: %s (path_is_file_not_directory)" cwd)
+
+let resolve_tool_execute_cwd ~policy ~config ~meta ~args =
+  match policy with
+  | Readonly_execute_cwd -> resolve_readonly_execute_cwd ~config ~meta ~args
+  | Write_enabled_execute_cwd -> resolve_write_enabled_execute_cwd ~config ~meta ~args
 
 (* Docker playground path mapping: host → container.
    Host:      <base_path>/.masc/playground/<keeper>/repos/X

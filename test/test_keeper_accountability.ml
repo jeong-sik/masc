@@ -39,7 +39,7 @@ let make_test_meta ?(name = "keeper-sangsu") ?(agent_name = "keeper-sangsu-agent
                ("agent_name", `String agent_name);
                ("trace_id", `String "test-trace-accountability");
                ( "tool_access",
-                 Keeper_meta_tool_access.tool_access_to_json
+                 Json_util.json_string_list
                    ([]) );
              ])
   with

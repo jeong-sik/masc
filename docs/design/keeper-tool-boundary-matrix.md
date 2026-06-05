@@ -120,12 +120,16 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tool_execute_input.mli` - shell-surface
 - `lib/keeper/keeper_tool_execute_runtime.ml` - shell-surface
 - `lib/keeper/keeper_tool_execute_runtime.mli` - shell-surface
+- `lib/keeper/keeper_tool_execute_command_parse.ml` - shell-surface
+- `lib/keeper/keeper_tool_execute_command_parse.mli` - shell-surface
 - `lib/keeper_tool_command_parse/keeper_tool_execute_command_parse.ml` - shell-surface
 - `lib/keeper_tool_command_parse/keeper_tool_execute_command_parse.mli` - shell-surface
 - `lib/keeper/keeper_tool_execute_command_parse.ml` - shell-surface
 - `lib/keeper/keeper_tool_execute_command_parse.mli` - shell-surface
 - `lib/keeper/keeper_tool_execute_command_semantics.ml` - shell-surface
 - `lib/keeper/keeper_tool_execute_command_semantics.mli` - shell-surface
+- `lib/keeper/keeper_tool_execute_command_words.ml` - shell-surface
+- `lib/keeper/keeper_tool_execute_command_words.mli` - shell-surface
 - `lib/keeper_tool_command_parse/keeper_tool_execute_command_words.ml` - shell-surface
 - `lib/keeper_tool_command_parse/keeper_tool_execute_command_words.mli` - shell-surface
 - `lib/keeper/keeper_tool_execute_command_words.ml` - shell-surface

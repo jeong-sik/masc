@@ -302,6 +302,8 @@ describe('countRuntimeKinds', () => {
       agents: 0,
       keepers: 1,
       pausedKeepers: 0,
+      offlineKeepers: 0,
+      keeperRows: 1,
       totalRuntimes: 1,
     })
   })
@@ -332,6 +334,8 @@ describe('countRuntimeKinds', () => {
       agents: 0,
       keepers: 0,
       pausedKeepers: 1,
+      offlineKeepers: 0,
+      keeperRows: 1,
       totalRuntimes: 1,
     })
   })
@@ -360,6 +364,8 @@ describe('countRuntimeKinds', () => {
       agents: 0,
       keepers: 1,
       pausedKeepers: 0,
+      offlineKeepers: 0,
+      keeperRows: 1,
       totalRuntimes: 1,
     })
   })
@@ -389,6 +395,8 @@ describe('countRuntimeKinds', () => {
       agents: 0,
       keepers: 1,
       pausedKeepers: 0,
+      offlineKeepers: 0,
+      keeperRows: 1,
       totalRuntimes: 1,
     })
   })
@@ -414,7 +422,46 @@ describe('countRuntimeKinds', () => {
       agents: 1,
       keepers: 1,
       pausedKeepers: 0,
+      offlineKeepers: 0,
+      keeperRows: 1,
       totalRuntimes: 2,
+    })
+  })
+
+  it('does not count offline non-paused keeper rows as running fibers', () => {
+    const runningKeepers = Array.from({ length: 2 }, (_, index) => ({
+      name: `running-${index}`,
+      status: 'active',
+      registered: true,
+      keepalive_running: true,
+    } as Keeper))
+    const pausedKeepers = Array.from({ length: 6 }, (_, index) => ({
+      name: `paused-${index}`,
+      status: 'paused',
+      paused: true,
+      registered: true,
+      keepalive_running: false,
+    } as Keeper))
+    const offlineKeepers = Array.from({ length: 9 }, (_, index) => ({
+      name: `offline-${index}`,
+      status: 'offline',
+      registered: true,
+      keepalive_running: false,
+    } as Keeper))
+
+    const result = countRuntimeKinds([], [
+      ...runningKeepers,
+      ...pausedKeepers,
+      ...offlineKeepers,
+    ])
+
+    expect(result).toEqual({
+      agents: 0,
+      keepers: 2,
+      pausedKeepers: 6,
+      offlineKeepers: 9,
+      keeperRows: 17,
+      totalRuntimes: 17,
     })
   })
 })

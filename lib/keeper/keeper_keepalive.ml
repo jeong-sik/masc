@@ -383,10 +383,13 @@ let dispatch_fiber_started ~base_path keeper_name =
 
 let resolve_registry_done
       (entry : Keeper_registry.registry_entry)
+      ~source
       (value : [ `Stopped | `Crashed of string ])
   : bool
   =
-  Keeper_registry.try_resolve_done entry value
+  match Keeper_registry.resolve_done entry ~source value with
+  | Keeper_registry.Done_resolved _ -> true
+  | Keeper_registry.Done_already_resolved _ -> false
 ;;
 
 let record_keeper_stopped
@@ -396,7 +399,7 @@ let record_keeper_stopped
       ~detail
   : bool
   =
-  if resolve_registry_done entry `Stopped
+  if resolve_registry_done entry ~source:"keepalive_record_stopped" `Stopped
   then (
     Keeper_registry.dispatch_event_unit
       ~base_path
@@ -423,7 +426,7 @@ let record_keeper_crashed
   : unit
   =
   let reason = Keeper_registry.failure_reason_to_string failure_reason in
-  if resolve_registry_done entry (`Crashed reason)
+  if resolve_registry_done entry ~source:"keepalive_record_crashed" (`Crashed reason)
   then (
     let outcome = reason in
     Keeper_registry.set_failure_reason ~base_path keeper_name (Some failure_reason);

@@ -51,6 +51,9 @@ let rec mkdir_p path =
 let write_file path content =
   Out_channel.with_open_bin path (fun oc -> output_string oc content)
 
+let resolve_done_for_test reg value =
+  ignore (Reg.resolve_done reg ~source:"test_fixture" value)
+
 let restore_env name = function
   | Some value -> Unix.putenv name value
   | None -> Unix.putenv name ""
@@ -784,7 +787,7 @@ let test_fiber_health_respects_max_restarts_override () =
   let meta = make_meta name in
   let reg = Reg.register ~base_path:bp name meta in
   (* Simulate crash: resolve done_p as Crashed *)
-  Eio.Promise.resolve reg.done_r (`Crashed "test crash");
+  resolve_done_for_test reg (`Crashed "test crash");
   (* Set restart_count to 3 *)
   Reg.restore_supervisor_state ~base_path:bp name
     ~restart_count:3 ~last_restart_ts:0.0 ~crash_log:[];
@@ -908,7 +911,7 @@ let test_restart_path_emits_attempt_and_started_outcome_metrics () =
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.register ~base_path:config.base_path name meta in
-      Eio.Promise.resolve reg.done_r (`Crashed "ordinary crash");
+      resolve_done_for_test reg (`Crashed "ordinary crash");
       Reg.restore_supervisor_state ~base_path:config.base_path name
         ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
       let attempt_labels = [ ("keeper", name) ] in
@@ -965,7 +968,7 @@ let test_restart_path_emits_meta_unavailable_outcome_metric () =
       ignore (Masc.Workspace.init config ~agent_name:(Some "supervisor"));
       let meta = make_meta name in
       let reg = Reg.register ~base_path:config.base_path name meta in
-      Eio.Promise.resolve reg.done_r (`Crashed "ordinary crash");
+      resolve_done_for_test reg (`Crashed "ordinary crash");
       Reg.restore_supervisor_state ~base_path:config.base_path name
         ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
       let attempt_labels = [ ("keeper", name) ] in
@@ -1034,7 +1037,7 @@ let test_max_restarts_exhaustion_emits_dead_alert () =
       (* Drive the entry to Crashed with restart_count already at the
          default budget (5) so sweep takes the Dead branch on the first
          pass, not the restart branch. *)
-      Eio.Promise.resolve reg.done_r (`Crashed "synthetic exhaustion");
+      resolve_done_for_test reg (`Crashed "synthetic exhaustion");
       Reg.set_failure_reason ~base_path:config.base_path name
         (Some (Reg.Heartbeat_consecutive_failures 9));
       let max_restarts =
@@ -1174,7 +1177,7 @@ let test_stale_storm_pause_skips_restart () =
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.register ~base_path:config.base_path name meta in
-      Eio.Promise.resolve reg.done_r (`Crashed "synthetic stale storm");
+      resolve_done_for_test reg (`Crashed "synthetic stale storm");
       (* [restore_supervisor_state] resets [last_failure_reason] to [None],
          so it MUST run before [set_failure_reason] (otherwise the storm
          latch is wiped and the supervisor sweeps the entry through the
@@ -1248,7 +1251,7 @@ let test_legacy_stale_fleet_batch_routes_to_restart_budget () =
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.register ~base_path:config.base_path name meta in
-      Eio.Promise.resolve reg.done_r (`Crashed "legacy stale fleet batch");
+      resolve_done_for_test reg (`Crashed "legacy stale fleet batch");
       let max_restarts =
         Masc.Runtime_params.get
           Masc.Governance_registry.keeper_supervisor_max_restarts
@@ -1305,7 +1308,7 @@ let test_provider_timeout_loop_pause_skips_restart () =
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.register ~base_path:config.base_path name meta in
-      Eio.Promise.resolve reg.done_r (`Crashed "synthetic provider timeout loop");
+      resolve_done_for_test reg (`Crashed "synthetic provider timeout loop");
       Reg.restore_supervisor_state ~base_path:config.base_path name
         ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
       Reg.set_failure_reason ~base_path:config.base_path name
@@ -1421,7 +1424,7 @@ let test_non_storm_crashed_restarts_normally () =
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.register ~base_path:config.base_path name meta in
-      Eio.Promise.resolve reg.done_r (`Crashed "ordinary crash");
+      resolve_done_for_test reg (`Crashed "ordinary crash");
       let max_restarts =
         Masc.Runtime_params.get
           Masc.Governance_registry.keeper_supervisor_max_restarts
@@ -1486,7 +1489,7 @@ let test_storm_pause_requires_manual_resume () =
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.register ~base_path:config.base_path name meta in
-      Eio.Promise.resolve reg.done_r (`Crashed "storm");
+      resolve_done_for_test reg (`Crashed "storm");
       Reg.restore_supervisor_state ~base_path:config.base_path name
         ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
       Reg.set_failure_reason ~base_path:config.base_path name
@@ -1547,7 +1550,7 @@ let test_oas_auto_resume_after_sec_doubles_on_repause () =
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.register ~base_path:config.base_path name initial_meta in
-      Eio.Promise.resolve reg.done_r (`Crashed "provider timeout loop");
+      resolve_done_for_test reg (`Crashed "provider timeout loop");
       Reg.restore_supervisor_state ~base_path:config.base_path name
         ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
       Reg.set_failure_reason ~base_path:config.base_path name
@@ -1988,7 +1991,7 @@ let test_initial_auto_resume_capped_at_max () =
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.register ~base_path:config.base_path name meta in
-      Eio.Promise.resolve reg.done_r (`Crashed "storm");
+      resolve_done_for_test reg (`Crashed "storm");
       Reg.restore_supervisor_state ~base_path:config.base_path name
         ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
       Reg.set_failure_reason ~base_path:config.base_path name
@@ -2048,7 +2051,7 @@ let test_persisted_blocker_survives_unregister () =
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.register ~base_path:config.base_path name meta in
-      Eio.Promise.resolve reg.done_r (`Crashed "storm");
+      resolve_done_for_test reg (`Crashed "storm");
       Reg.restore_supervisor_state ~base_path:config.base_path name
         ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
       Reg.set_failure_reason ~base_path:config.base_path name

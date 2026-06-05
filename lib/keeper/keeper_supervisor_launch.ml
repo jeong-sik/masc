@@ -22,6 +22,22 @@ let committed_tools_of_ambiguous_blocker =
   Startup_helpers.committed_tools_of_ambiguous_blocker
 ;;
 
+type done_signal_resolution =
+  | Done_signal_resolved_now
+  | Done_signal_already_resolved
+  | Done_signal_already_seen
+
+let done_signal_of_registry_result = function
+  | Keeper_registry.Done_resolved _ -> Done_signal_resolved_now
+  | Keeper_registry.Done_already_resolved _ -> Done_signal_already_resolved
+;;
+
+let should_publish_lifecycle_for_done_signal = function
+  | Done_signal_resolved_now -> true
+  | Done_signal_already_resolved
+  | Done_signal_already_seen -> false
+;;
+
 (* ── Event publishing (see Keeper_supervisor_publish_lifecycle, #8856/#8605) ─ *)
 
 let publish_lifecycle = Keeper_supervisor_publish_lifecycle.publish_lifecycle
@@ -120,15 +136,17 @@ let launch_supervised_fiber
         if not !resolved then
           (* Issue #18335: the keepalive layer (keeper_keepalive.ml:760-791)
              may have already resolved done_p via record_keeper_stopped.
-             When the Promise is already resolved, treat it as success —
-             the keeper completed normally via the keepalive exit path. *)
-          match Keeper_registry.resolve_done reg ~source value with
-          | Keeper_registry.Done_resolved _
-          | Keeper_registry.Done_already_resolved _ ->
-            resolved := true;
-            true
+             When the Promise is already resolved, suppress finally cleanup,
+             but do not let this supervisor branch publish a second lifecycle
+             event for an outcome it did not own. *)
+          let signal =
+            Keeper_registry.resolve_done reg ~source value
+            |> done_signal_of_registry_result
+          in
+          resolved := true;
+          signal
         else
-          false
+          Done_signal_already_seen
       in
       Eio_guard.protect
         (fun () ->
@@ -233,7 +251,9 @@ let launch_supervised_fiber
                   Log.Keeper.warn
                     "supervisor: Fiber_terminated dispatch failed: %s"
                     (Keeper_state_machine.transition_error_to_string e));
-               if resolve_done ~source:"supervisor_watchdog_crash" (`Crashed reason)
+               if
+                 resolve_done ~source:"supervisor_watchdog_crash" (`Crashed reason)
+                 |> should_publish_lifecycle_for_done_signal
                then
                  publish_phase_lifecycle
                    ~phase:Keeper_state_machine.Crashed
@@ -272,7 +292,9 @@ let launch_supervised_fiber
                   Log.Keeper.warn
                     "supervisor: Drain_complete dispatch failed: %s"
                     (Keeper_state_machine.transition_error_to_string e));
-               if resolve_done ~source:"supervisor_normal_exit" `Stopped
+               if
+                 resolve_done ~source:"supervisor_normal_exit" `Stopped
+                 |> should_publish_lifecycle_for_done_signal
                then
                  publish_phase_lifecycle
                    ~phase:Keeper_state_machine.Stopped
@@ -331,7 +353,9 @@ let launch_supervised_fiber
                ~reason
                ~restart_count:rc;
              Keeper_registry_error_recording.record ~base_path meta.name reason;
-             if resolve_done ~source:"supervisor_exception_handler" (`Crashed reason)
+             if
+               resolve_done ~source:"supervisor_exception_handler" (`Crashed reason)
+               |> should_publish_lifecycle_for_done_signal
              then
                publish_phase_lifecycle
                  ~phase:Keeper_state_machine.Crashed
@@ -478,7 +502,9 @@ let launch_supervised_fiber
 	                  ~base_path
 	                  meta.name
 	                  (Keeper_state_machine.Fiber_terminated { outcome; provider_id = None; http_status = None });
-                if resolve_done ~source:"supervisor_unresolved_cleanup" (`Crashed reason)
+                if
+                  resolve_done ~source:"supervisor_unresolved_cleanup" (`Crashed reason)
+                  |> should_publish_lifecycle_for_done_signal
                 then
                   publish_phase_lifecycle
                     ~phase:Keeper_state_machine.Crashed

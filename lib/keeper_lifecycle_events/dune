@@ -1,0 +1,7 @@
+(include_subdirs no)
+(library
+ (name masc_keeper_lifecycle_events)
+ (public_name masc.keeper_lifecycle_events)
+ (wrapped false)
+ (modules keeper_lifecycle_events)
+ (libraries masc.keeper_state))

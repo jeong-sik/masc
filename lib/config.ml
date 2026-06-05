@@ -17,7 +17,9 @@ let raw_all_tool_schemas : Masc_domain.tool_schema list =
   dedupe_schemas
     (Tools.raw_schemas
      @ Tool_schemas_misc.schemas
-     @ Tool_board.tools
+     (* Board MCP adapter schemas live outside neutral Tool substrate and
+        outside Board domain. *)
+     @ Board_tool.tools
      @ Keeper_types_profile.schemas
      @ Tool_local_runtime.schemas
      @ Tool_agent_timeline.schemas
@@ -108,4 +110,3 @@ let visible_tool_schemas ?(include_hidden = false) () :
     Masc_domain.tool_schema list =
   Capability_registry.visible_public_tool_schemas_from ~include_hidden
     front_door_tool_schemas
-

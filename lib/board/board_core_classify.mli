@@ -53,7 +53,7 @@ val all_visibilities : visibility list
 
 val valid_visibility_strings : string list
 (** [List.map visibility_to_string all_visibilities].  Used as the
-    allowed-values set in the [tool_board] argv schema (#8392). *)
+    allowed-values set in the [board_tool] argv schema (#8392). *)
 
 (** {1 Post kind round-trip} *)
 

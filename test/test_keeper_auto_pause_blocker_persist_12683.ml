@@ -11,7 +11,7 @@
     related test rows have been removed accordingly.) *)
 
 open Alcotest
-module KT = Masc.Keeper_types
+module KT = Keeper_types
 module Keeper_meta_contract = Masc.Keeper_meta_contract
 module Keeper_meta_json_parse = Masc.Keeper_meta_json_parse
 module Keeper_meta_json = Masc.Keeper_meta_json

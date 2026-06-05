@@ -9,6 +9,7 @@
   masc
   masc.dashboard
   masc.masc_tool_surface
+  masc.auth
   yojson
   otoml
   base64
@@ -57,11 +58,13 @@
   masc.attribution
   masc.exec_policy
   masc.keeper_state
+  masc.keeper_id
+  masc.keeper_types
+  masc.keeper_pressure
   masc.runtime_provider_labels
   masc.runtime_model
   masc.runtime
   masc.model_inference_metrics
-  masc.auth
   masc.types_boundary
   masc.cdal_runtime
   masc.cdal

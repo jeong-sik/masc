@@ -7,13 +7,12 @@
     module. *)
 
 module Workspace = Masc.Workspace
-module Keeper_types_profile_sandbox = Masc.Keeper_types_profile_sandbox
 module Keeper_tool_command_runtime = Masc.Keeper_tool_command_runtime
 module Keeper_registry = Masc.Keeper_registry
 module Keeper_sandbox = Masc.Keeper_sandbox
 module Keeper_sandbox_factory = Masc.Keeper_sandbox_factory
 module Keeper_tool_execute_path = Masc.Keeper_tool_execute_path
-module Keeper_types = Masc.Keeper_types
+module Keeper_types = Keeper_types
 module Keeper_alerting_path = Masc.Keeper_alerting_path
 module Keeper_tool_policy = Masc.Keeper_tool_policy
 module Fs_compat = Fs_compat

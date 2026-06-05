@@ -31,7 +31,7 @@ module Http_negotiation = Mcp_transport_protocol.Http_negotiation
 module Progress = Progress
 module Sse = Sse
 module Safe_ops = Safe_ops
-module Tool_board = Tool_board
+module Board_tool = Board_tool
 module Process_eio = Process_eio
 module Server_mcp_transport_http = Server_mcp_transport_http
 

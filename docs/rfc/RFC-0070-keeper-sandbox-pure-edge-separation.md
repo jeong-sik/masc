@@ -362,11 +362,14 @@ Covers `keeper_turn_sandbox_runtime:184` (persistent session). The startup argv 
 
 The named one-shot Execute path is *not* a third sibling type. It is `Oneshot_plan` with caller-observable `container_name`. The existing `container_name` field is already exposed by `Oneshot_plan.container_name`; the only delta is that the Execute one-shot path will *consume* the field for probe/cleanup, where `keeper_sandbox_runtime` ignores it. No type extension required.
 
-#### 3.1.4 `Container_name.t` derivation (unchanged)
+#### 3.1.4 Container name derivation (current implementation)
 
-`Container_name.t` is a private string derived as `"masc-keeper-" ^ hex(Keeper_hash_algo.digest_bytes hash_algo (turn_id ‖ attempt ‖ suffix))[0..31]`, where `Keeper_hash_algo.t = SHA_256 | SHA_512` (closed variant, default `SHA_256` per §8 Q1). The hex slice takes the first **32 hex chars = 16 bytes (128 bits)** of the digest. Direct collision probability is 1/2^128; birthday-bound collision threshold (concurrent keepers in the same fleet) is ~2^64 ≈ 1.8×10^19. Both Oneshot and Session Plan share this derivation. `Container_name.of_external_string` (#14871) remains the unsafe-wrap escape hatch for `docker ps` output ingestion.
-
-(BLAKE3 was originally in the variant; deferred to a follow-up — opam `digestif` 1.3.0 ships BLAKE2B/2S but not BLAKE3. Hex encoding chosen over base36 to match the existing `Digestif.to_hex` convention used 8+ times elsewhere in `lib/`.)
+The current keeper sandbox implementation does not expose a standalone hash
+algorithm module or configurable hash algorithm. Container names are produced by
+`Keeper_sandbox_docker_container_name.keeper_sandbox_container_name` as
+`masc-keeper-<safe agent name>-<pid>-<millis>-<seq>`, where `<seq>` is an
+`Atomic` counter that closes the millisecond-resolution collision window inside
+one process. This keeps the naming policy local to the sandbox implementation.
 
 ### 3.2 Edge layer (Docker_client + executors)
 
@@ -599,7 +602,7 @@ Phases are independently mergeable and revertible. Phase 5 closes the loop by ma
 | Alert flood from quarantine path | Alert dedup TTL: same `Container_name.t` quarantine event suppresses re-alert within 1h. Recorded in `Quarantine.t` state. |
 | Mock vs real daemon divergence | Phase 4 integration test runs both paths; mock impl reviewed against `docker --version` output diff suite. |
 | RFC-0036 lifecycle hook (`Keeper_lifecycle_hooks`) coexists with this RFC's `Sandbox_cleanup.cleanup_tick` | Per §2 / §3.4: the two are **sibling** paths (not layered). The lifecycle hook fires on `Tombstone_reaped`; `cleanup_tick` produces `cleanup_outcome` consumed by the internal `Quarantine.t`. No `Sandbox_cleanup.adapter` is introduced. The Result.t escalation stays internal to the sandbox subsystem. |
-| BLAKE3 dependency in OCaml — current opam constraints | RESOLVED Phase 3b-i (#14741 follow-up): `digestif` 1.3.0 (already present, used 8+ times in `lib/`) ships BLAKE2B/2S/SHA-256/SHA-512 but **not BLAKE3**. Adopted `Keeper_hash_algo.t = SHA_256 \| SHA_512` for Phase 3b. Future BLAKE3 = separate PR adding `blake3` opam dep + variant arm. |
+| Configurable hash algorithm for container names | Not implemented. Current code keeps container naming inside `Keeper_sandbox_docker_container_name` and uses safe agent name + pid + milliseconds + atomic sequence, so no standalone hash boundary is needed. |
 
 ## 7. Out of Scope
 
@@ -612,13 +615,12 @@ Phases are independently mergeable and revertible. Phase 5 closes the loop by ma
 
 ## 8. Open Questions
 
-1. **Default Keeper_hash_algo.t** — RESOLVED Phase 3b-i: variant is `SHA_256 | SHA_512`, default `SHA_256`. BLAKE3 deferred (digestif 1.3.0 lacks it). Future expansion = variant arm + opam dep in a separate PR.
-2. **`Container_name.t` representation** — RESOLVED Phase 3b-ii (#14764): `private string` with `to_string` accessor and `of_external_string` unsafe-wrap escape hatch (#14871) for docker ps output ingestion.
-3. **Mock client thread safety** — RESOLVED Phase 3b-iv.1b (#14808 → Queue.t perf fix #14814): single-fiber strict-FIFO injection.
-4. **Quarantine persistence across server restart** — in-memory only, or JSONL trail? Default: in-memory; restart loses state, restart-cleanup catches it via labels. (Phase 3c.2 implements the `Quarantine.t` state machine; the `Keeper_lifecycle_hooks` dependency cited in earlier drafts is removed — see §2 / §3.4.)
-5. **Session container `--rm` flag** *(v2)* — `Session_plan` startup will use `docker run -d --rm --name <n>` to match current `keeper_turn_sandbox_runtime` behavior. `--rm` means the container is *auto-removed on stop* — explicit `Session.cleanup` (calling `D.rm`) handles the *normal* shutdown path; `--rm` is a backstop for crash/kill exits. Open: should `Session.cleanup` log a warning if the container is already gone (auto-removed by docker)? Default: silent success (idempotent), since `D.rm` returns Ok on a vanished container would be ambiguous vs Cleanup_failed.
-6. **Session.exec timeout policy** *(v2)* — Each `exec` call carries its own timeout (per-command), while the Session_plan has no aggregate session lifetime budget. Open: should there be a session-wide deadline that fires when sum-of-exec-timeouts exceeds it, or is per-call sufficient? Default: per-call; turn-level orchestrator (the caller) is responsible for aggregate budget. The session itself is an indefinite resource lease.
-7. **`run_detached` vs `start_session`** *(v2)* — §3.2.3 declares `Docker_client.S.run_detached : Keeper_sandbox_session_plan.t -> (Container_name.t, sandbox_error) result` as a new edge primitive. Alternative considered: a higher-level `Sandbox_session_executor.start` that calls `D.run` with a synthesised plan whose result is discarded and whose name is extracted post-hoc from `D.ps_query`. Decision: `run_detached` is cleaner — `-d` flag is not representable in `D.run`'s `Oneshot_plan` input (which carries `image + command`, not lifecycle), so introducing it would distort the one-shot type. Cost: two `Docker_client.S` primitives instead of one. Benefit: each carries a typed lifetime contract.
+1. **`Container_name.t` representation** — RESOLVED Phase 3b-ii (#14764): `private string` with `to_string` accessor and `of_external_string` unsafe-wrap escape hatch (#14871) for docker ps output ingestion.
+2. **Mock client thread safety** — RESOLVED Phase 3b-iv.1b (#14808 → Queue.t perf fix #14814): single-fiber strict-FIFO injection.
+3. **Quarantine persistence across server restart** — in-memory only, or JSONL trail? Default: in-memory; restart loses state, restart-cleanup catches it via labels. (Phase 3c.2 implements the `Quarantine.t` state machine; the `Keeper_lifecycle_hooks` dependency cited in earlier drafts is removed — see §2 / §3.4.)
+4. **Session container `--rm` flag** *(v2)* — `Session_plan` startup will use `docker run -d --rm --name <n>` to match current `keeper_turn_sandbox_runtime` behavior. `--rm` means the container is *auto-removed on stop* — explicit `Session.cleanup` (calling `D.rm`) handles the *normal* shutdown path; `--rm` is a backstop for crash/kill exits. Open: should `Session.cleanup` log a warning if the container is already gone (auto-removed by docker)? Default: silent success (idempotent), since `D.rm` returns Ok on a vanished container would be ambiguous vs Cleanup_failed.
+5. **Session.exec timeout policy** *(v2)* — Each `exec` call carries its own timeout (per-command), while the Session_plan has no aggregate session lifetime budget. Open: should there be a session-wide deadline that fires when sum-of-exec-timeouts exceeds it, or is per-call sufficient? Default: per-call; turn-level orchestrator (the caller) is responsible for aggregate budget. The session itself is an indefinite resource lease.
+6. **`run_detached` vs `start_session`** *(v2)* — §3.2.3 declares `Docker_client.S.run_detached : Keeper_sandbox_session_plan.t -> (Container_name.t, sandbox_error) result` as a new edge primitive. Alternative considered: a higher-level `Sandbox_session_executor.start` that calls `D.run` with a synthesised plan whose result is discarded and whose name is extracted post-hoc from `D.ps_query`. Decision: `run_detached` is cleaner — `-d` flag is not representable in `D.run`'s `Oneshot_plan` input (which carries `image + command`, not lifecycle), so introducing it would distort the one-shot type. Cost: two `Docker_client.S` primitives instead of one. Benefit: each carries a typed lifetime contract.
 
 ## 9. Rollback
 

@@ -7,9 +7,9 @@
  (libraries
   yojson
   agent_sdk
+  masc.json_field
   masc.masc_core
   masc.masc_types
-  masc.prometheus
-  masc.json_field)
+  masc.prometheus)
  (preprocess
   (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq)))

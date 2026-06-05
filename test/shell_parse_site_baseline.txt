@@ -49,7 +49,7 @@ lib/tool_local_runtime_core.ml:119  # argv_dispatch
 lib/tool_local_runtime_core.ml:181  # argv_dispatch
 lib/tool_local_runtime_http.ml:113  # argv_dispatch
 lib/tool_local_runtime_http.ml:63  # argv_dispatch
-lib/voice/voice_bridge_core.ml:225  # argv_subsystem
-lib/voice/voice_bridge_transport.ml:59  # argv_subsystem
+lib/voice_bridge_core/voice_bridge_core.ml:225  # argv_subsystem
+lib/voice_bridge_core/voice_bridge_transport.ml:59  # argv_subsystem
 lib/worker_runtime_docker.ml:76  # argv_subsystem
 lib/worker_runtime_docker.ml:85  # argv_subsystem

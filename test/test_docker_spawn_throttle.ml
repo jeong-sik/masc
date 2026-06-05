@@ -6,7 +6,7 @@
 
 module DST = Masc.Docker_spawn_throttle
 module FA = Masc.Fd_accountant
-module FD = Masc.Keeper_fd_pressure
+module FD = Keeper_fd_pressure
 
 let with_eio f =
   Eio_main.run (fun env -> ignore env; f ())

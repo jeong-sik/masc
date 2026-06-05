@@ -9,9 +9,9 @@
 open Alcotest
 
 module H = Masc.Keeper_lifecycle_hooks
-module P = Masc.Prometheus
+module P = Prometheus
 module SM = Keeper_state_machine
-module TCG = Masc.Telemetry_coverage_gap
+module TCG = Telemetry_coverage_gap
 
 let setup () = H.reset_for_testing ()
 
@@ -48,7 +48,7 @@ let make_keeper_meta ~name ~trace_id =
 
 let lifecycle_hook_failure_count ~keeper =
   P.metric_value_or_zero
-    Masc.Keeper_metrics.(to_string LifecycleCallbackFailures)
+    Keeper_metrics.(to_string LifecycleCallbackFailures)
     ~labels:
       [
         ("keeper", keeper);

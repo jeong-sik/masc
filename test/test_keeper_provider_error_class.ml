@@ -9,7 +9,7 @@
 
 open Alcotest
 
-module P = Masc.Keeper_provider_error_class
+module P = Keeper_provider_error_class
 
 let tag = testable Fmt.string String.equal
 

@@ -1,0 +1,23 @@
+; Keeper_attempt_liveness — runtime attempt streaming liveness boundary.
+;
+; Bundles the pure FSM, env/budget config, and Eio observer glue for one
+; provider attempt. The parent keeper driver still references the bare
+; Keeper_attempt_liveness* modules.
+;
+; (include_subdirs no) opts out of parent's (include_subdirs unqualified).
+; (wrapped false) preserves the existing module names at call sites.
+(include_subdirs no)
+
+(library
+ (name masc_keeper_attempt_liveness)
+ (public_name masc.keeper_attempt_liveness)
+ (wrapped false)
+ (libraries
+  agent_sdk
+  agent_sdk.llm_provider
+  eio
+  masc.config
+  masc.types_boundary
+  masc_core
+  masc_log
+  time_compat))

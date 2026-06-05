@@ -1,6 +1,6 @@
 open Alcotest
 
-module Vc = Masc.Voice_config
+module Vc = Voice_config
 
 let minimal_config_json ~session_endpoints =
   Printf.sprintf {|{

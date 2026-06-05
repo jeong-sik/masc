@@ -2,8 +2,7 @@
 
 open Alcotest
 
-module Keeper_types = Masc.Keeper_types
-module Keeper_types_profile_sandbox = Masc.Keeper_types_profile_sandbox
+module Keeper_types = Keeper_types
 
 let make_meta ?(sandbox = Keeper_types_profile_sandbox.Docker) name =
   let json =

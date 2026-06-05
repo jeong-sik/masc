@@ -26,7 +26,7 @@ module Float = Stdlib.Float
 type sort_order = Hot | Trending | Recent | Updated | Discussed
 
 (** Issue #8449: SSOT helpers for [sort_order]. Three call sites used to
-    own private parsers and a separate Variant in [Tool_board]; this PR
+    own private parsers and a separate Variant in [Board_tool]; this PR
     A introduces the canonical helpers here so the schema enum can derive
     from the Variant. PR B will collapse the duplicate Variant; PR C
     will route [server_utils] through these parsers.
@@ -43,7 +43,7 @@ let sort_order_to_string = function
 
 let valid_sort_order_strings = List.map sort_order_to_string all_sort_orders
 
-(** Canonical parser shared by Tool_board and HTTP query-param handling. *)
+(** Canonical parser shared by Board_tool and HTTP query-param handling. *)
 let sort_order_of_string_opt s =
   match String.lowercase_ascii (String.trim s) with
   | "hot" -> Some Hot

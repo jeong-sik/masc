@@ -1,0 +1,12 @@
+(include_subdirs no)
+
+(library
+ (name masc_keeper_runtime_config)
+ (public_name masc.keeper_runtime_config)
+ (wrapped false)
+ (modules keeper_runtime_config)
+ (libraries
+  fs_compat
+  masc.config
+  masc.config_dir_resolver
+  masc.keeper_toml_loader))

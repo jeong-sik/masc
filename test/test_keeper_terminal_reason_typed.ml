@@ -18,7 +18,7 @@
       caught here. *)
 
 module R = Masc.Keeper_execution_receipt
-module Tr = Masc.Keeper_terminal_reason
+module Tr = Keeper_terminal_reason
 
 let failures = ref []
 let check name cond = if not cond then failures := name :: !failures
@@ -282,9 +282,9 @@ let base_receipt : R.t =
   ; model_used = None
   ; completion_contract_result = R.Contract_unknown
   ; tool_surface = base_tool_surface
-  ; sandbox_kind = Masc.Keeper_types_profile_sandbox.Local
+  ; sandbox_kind = Keeper_types_profile_sandbox.Local
   ; sandbox_root = None
-  ; network_mode = Masc.Keeper_types_profile_sandbox.Network_none
+  ; network_mode = Keeper_types_profile_sandbox.Network_none
   ; approval_profile = None
   ; approval_profile_derived = false
   ; runtime_id = "runtime-1"

@@ -58,7 +58,7 @@ SCAN_FILES=(
   "lib/keeper/keeper_status_runtime.ml"
   "lib/keeper/keeper_generation_lineage.ml"
   "lib/keeper/keeper_hooks_oas.ml"
-  "lib/keeper/keeper_hooks_oas_types.ml"
+  "lib/keeper_hooks_oas_types/keeper_hooks_oas_types.ml"
   "lib/keeper/keeper_oas_checkpoint.ml"
   "lib/keeper/keeper_rollover.ml"
   "lib/keeper/keeper_runtime_contract.ml"

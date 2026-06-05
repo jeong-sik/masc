@@ -228,7 +228,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
   in
   match (name : string) with
   | "masc_board_post" ->
-      let result_tr = Tool_board.handle_tool name arguments in
+      let result_tr = Board_tool.handle_tool name arguments in
       if Tool_result.is_success result_tr then begin
         let author = Safe_ops.json_string ~default:"anonymous" "author" arguments in
         let content = Safe_ops.json_string ~default:"" "content" arguments in
@@ -284,7 +284,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
       Some result_tr
 
   | "masc_board_comment" ->
-      let result_tr = Tool_board.handle_tool name arguments in
+      let result_tr = Board_tool.handle_tool name arguments in
       if Tool_result.is_success result_tr then begin
         let author = Safe_ops.json_string ~default:"anonymous" "author" arguments in
         let content = Safe_ops.json_string ~default:"" "content" arguments in
@@ -338,7 +338,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
       Some result_tr
 
   | "masc_board_vote" | "masc_board_comment_vote" ->
-      let result_tr = Tool_board.handle_tool name arguments in
+      let result_tr = Board_tool.handle_tool name arguments in
       (* Record vote activity as a fitness metric (Issue #1861). *)
       if Tool_result.is_success result_tr then begin
         let voter = Safe_ops.json_string ~default:"anonymous" "voter" arguments in
@@ -383,7 +383,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
       Some result_tr
 
   | "masc_board_delete" ->
-      let result_tr = Tool_board.handle_tool name arguments in
+      let result_tr = Board_tool.handle_tool name arguments in
       if Tool_result.is_success result_tr then begin
         let post_id = Safe_ops.json_string ~default:"unknown" "post_id" arguments in
         let notification = `Assoc [
@@ -412,6 +412,6 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
   | "masc_board_sub_board_get"
   | "masc_board_sub_board_update"
   | "masc_board_sub_board_delete" ->
-      Some (Tool_board.handle_tool name arguments)
+      Some (Board_tool.handle_tool name arguments)
 
   | _ -> None

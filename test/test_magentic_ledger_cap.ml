@@ -10,7 +10,7 @@
     This test locks the final emission contract: for any (oversized)
     input, the returned social_state must satisfy the Gen8 budget. *)
 
-module T = Masc.Keeper_social_model_types
+module T = Keeper_social_model_types
 
 (* overlay_ledger_state is internal; we check the invariant at the
    emission level by constructing a synthetic state that would bypass

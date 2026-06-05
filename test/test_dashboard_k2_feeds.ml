@@ -13,7 +13,7 @@ module Workspace = Masc.Workspace
 module Dash = Dashboard_http_keeper
 module Keeper_config = Masc.Keeper_config
 module Keeper_fs = Masc.Keeper_fs
-module Keeper_types = Masc.Keeper_types
+module Keeper_types = Keeper_types
 module Json = Yojson.Safe.Util
 
 let test_counter = ref 0

@@ -25,8 +25,7 @@
     should still pass and the diagnosis must look elsewhere. *)
 
 module Workspace = Masc.Workspace
-module Keeper_types_profile_sandbox = Masc.Keeper_types_profile_sandbox
-module Keeper_types = Masc.Keeper_types
+module Keeper_types = Keeper_types
 module Keeper_sandbox = Masc.Keeper_sandbox
 module Keeper_sandbox_docker = Masc.Keeper_sandbox_docker
 

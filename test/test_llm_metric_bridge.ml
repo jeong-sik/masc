@@ -1,6 +1,5 @@
-module Bridge = Masc.Llm_metric_bridge
-module Otel_spans = Masc.Otel_spans
-module Prom = Masc.Prometheus
+module Bridge = Llm_metric_bridge
+module Prom = Prometheus
 
 let metric name ~labels =
   Prom.metric_value_or_zero name ~labels ()

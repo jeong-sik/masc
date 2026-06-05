@@ -106,7 +106,7 @@ let handle_board ~(meta : keeper_meta) ~name ~args =
 
 let handle_masc_board ~name ~args =
   let result =
-    Tool_board_dispatch.handle_tool name args
+    Board_tool_dispatch.handle_tool name args
   in
   if Tool_result.is_success result
   then Tool_result.message result

@@ -10,7 +10,6 @@
 
 module Workspace = Masc.Workspace
 module Keeper_meta_contract = Masc.Keeper_meta_contract
-module Keeper_types_profile_sandbox = Masc.Keeper_types_profile_sandbox
 module Keeper_meta_tool_access = Masc.Keeper_meta_tool_access
 module Keeper_tool_command_runtime = Masc.Keeper_tool_command_runtime
 module Keeper_tool_dispatch_runtime = Masc.Keeper_tool_dispatch_runtime
@@ -21,9 +20,8 @@ module Keeper_sandbox_factory = Masc.Keeper_sandbox_factory
 module Keeper_sandbox_runtime = Masc.Keeper_sandbox_runtime
 module Keeper_turn_sandbox_runtime = Masc.Keeper_turn_sandbox_runtime
 module Keeper_tool_execute_command_semantics = Masc.Keeper_tool_execute_command_semantics
-module Keeper_tool_execute_command_words = Masc.Keeper_tool_execute_command_words
 module Keeper_sandbox_docker = Masc.Keeper_sandbox_docker
-module Keeper_types = Masc.Keeper_types
+module Keeper_types = Keeper_types
 module Keeper_alerting_path = Masc.Keeper_alerting_path
 module Fs_compat = Fs_compat
 module Json = Yojson.Safe.Util

@@ -16,7 +16,7 @@ code_refs:
 |------|-----|
 | Status | Draft |
 | Team | Workspace |
-| Maps to | `lib/board_types/` (sub-library), `lib/board.ml`, `lib/board_tool_adapter/board_tool.ml` |
+| Maps to | `lib/board_types/` (sub-library), `lib/board.ml`, `lib/board_tool_adapter/board_tool.ml` facade and adapter submodules (successor to former `lib/tool_vote.ml` + `lib/tool_social.ml`) |
 | Dependencies | 09-server-transport |
 | LOC | ~4.1K |
 

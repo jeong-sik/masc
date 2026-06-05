@@ -19,6 +19,8 @@ function timeLabel(timestamp?: string | null): string | null {
 
 function deliveryLabel(entry: KeeperConversationEntry): string {
   switch (entry.delivery) {
+    case 'queued':
+      return 'queued'
     case 'sending':
       return 'sending'
     case 'streaming':
@@ -191,7 +193,7 @@ function ChatMessageBubble({
   const [messageCollapsed, setMessageCollapsed] = useState(true)
   const expanded = showMetadata && expandedRaw
   const rawExpanded = showMetadata && rawExpandedRaw
-  const messageText = entry.text || (entry.delivery === 'streaming' ? '' : '(empty reply)')
+  const messageText = entry.text || (entry.delivery === 'streaming' || entry.delivery === 'queued' ? '' : '(empty reply)')
   const messageLength = messageText.length
   const collapseThreshold = 1200
   const isCollapsible = messageLength > collapseThreshold

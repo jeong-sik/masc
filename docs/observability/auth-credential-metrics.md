@@ -5,7 +5,9 @@ code_refs:
   - lib/auth.ml
   - lib/auth/auth.mli
   - lib/auth/auth_metric_store.ml
+  - lib/otel_metric_store.ml
   - lib/otel_metric_store/otel_identity_metric_names.ml
+  - lib/otel_metric_store/otel_identity_metric_names.mli
   - lib/server/server_runtime_bootstrap.ml
   - lib/server/server_bootstrap_loops.ml
   - infrastructure/monitoring/auth-credential-alerts.yml

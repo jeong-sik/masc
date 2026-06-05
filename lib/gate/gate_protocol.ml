@@ -27,6 +27,60 @@ type outbound_message = {
   turn_stats : turn_stats option;
 }
 
+type message_request_status =
+  | Accepted
+  | Queued
+  | Running
+  | Done
+  | Failed
+  | Lost
+  | Cancelled
+
+type message_request = {
+  request_id : string;
+  destination_type : string;
+  destination_id : string;
+  channel : string;
+  actor_id : string option;
+  status : message_request_status;
+  modalities : string list;
+  transport : string option;
+  metadata : (string * string) list;
+}
+
+let message_request_status_to_string = function
+  | Accepted -> "accepted"
+  | Queued -> "queued"
+  | Running -> "running"
+  | Done -> "done"
+  | Failed -> "error"
+  | Lost -> "lost"
+  | Cancelled -> "cancelled"
+
+let string_list_json values =
+  `List (List.map (fun value -> `String value) values)
+
+let string_assoc_json fields =
+  `Assoc (List.map (fun (key, value) -> (key, `String value)) fields)
+
+let message_request_to_json request =
+  let optional_string = function
+    | None -> `Null
+    | Some value -> `String value
+  in
+  `Assoc
+    [
+      ("request_id", `String request.request_id);
+      ("destination_type", `String request.destination_type);
+      ("destination_id", `String request.destination_id);
+      ("channel", `String request.channel);
+      ("actor_id", optional_string request.actor_id);
+      ("status", `String (message_request_status_to_string request.status));
+      ("modalities", string_list_json request.modalities);
+      ("transport", optional_string request.transport);
+      ("metadata", string_assoc_json request.metadata);
+    ]
+
 (* ── Validation ──────────────────────────────────────────────── *)
 
 type validation_error =

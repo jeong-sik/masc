@@ -666,6 +666,7 @@ export type KeeperConversationSource =
 
 export type KeeperConversationDelivery =
   | 'history'
+  | 'queued'
   | 'sending'
   | 'streaming'
   | 'delivered'

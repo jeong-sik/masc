@@ -19,6 +19,7 @@ import {
   clearKeeper,
   deleteKeeperHistorySnapshots,
   fetchKeeperCheckpoints,
+  fetchQueuedKeeperMessageResult,
   fetchKeeperRuntimeTrace,
   pauseKeeper,
   parseKeeperRuntimeTrace,
@@ -26,6 +27,7 @@ import {
   sendKeeperMessageDetailed,
   shutdownKeeper,
   streamKeeperMessage,
+  submitQueuedKeeperMessage,
   wakeKeeper,
 } from './keeper'
 
@@ -62,6 +64,67 @@ describe('sendKeeperMessageDetailed', () => {
       },
     })
     expect(reply.text).toBe('pong')
+  })
+})
+
+describe('submitQueuedKeeperMessage', () => {
+  it('submits direct keeper input through the async queue', async () => {
+    runOperatorAction.mockResolvedValueOnce({
+      result: {
+        tool_name: 'masc_keeper_msg',
+        result: {
+          request_id: 'kmsg_sangsu_1',
+          keeper_name: 'sangsu',
+          status: 'queued',
+        },
+      },
+    })
+
+    const submitted = await submitQueuedKeeperMessage('sangsu', 'ping')
+
+    expect(runOperatorAction).toHaveBeenCalledWith({
+      actor: 'dashboard',
+      action_type: 'keeper_message',
+      target_type: 'keeper',
+      target_id: 'sangsu',
+      payload: {
+        message: 'ping',
+        direct_reply: true,
+      },
+    })
+    expect(submitted).toEqual({
+      requestId: 'kmsg_sangsu_1',
+      keeperName: 'sangsu',
+      status: 'queued',
+      message: undefined,
+    })
+  })
+})
+
+describe('fetchQueuedKeeperMessageResult', () => {
+  it('polls the keeper chat request HTTP wrapper instead of MCP session state', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        request_id: 'kmsg_sangsu_1',
+        keeper_name: 'sangsu',
+        status: 'done',
+        ok: true,
+        result: { reply: 'pong' },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchQueuedKeeperMessageResult('kmsg_sangsu_1')
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/v1/gate/message/requests/kmsg_sangsu_1')
+    expect(init.headers).toMatchObject({ 'Content-Type': 'application/json' })
+    expect(result.status).toBe('done')
+    expect(result.result).toEqual({ reply: 'pong' })
   })
 })
 

@@ -381,26 +381,19 @@ let dispatch_fiber_started ~base_path keeper_name =
 
 (* ── Registry lifecycle helpers ── *)
 
-let resolve_registry_done
-      (entry : Keeper_registry.registry_entry)
-      ~source
-      (value : [ `Stopped | `Crashed of string ])
-  : bool
-  =
-  match Keeper_registry.resolve_done entry ~source value with
-  | Keeper_registry.Done_resolved _ -> true
-  | Keeper_registry.Done_already_resolved _ -> false
-;;
-
 let record_keeper_stopped
       (entry : Keeper_registry.registry_entry)
       ~base_path
       ~keeper_name
       ~detail
-  : bool
+  : Keeper_registry.done_resolve_result
   =
-  if resolve_registry_done entry ~source:"keepalive_record_stopped" `Stopped
-  then (
+  let resolution =
+    Keeper_registry.resolve_done entry ~source:"keepalive_record_stopped" `Stopped
+  in
+  (match resolution with
+   | Keeper_registry.Done_already_resolved _ -> ()
+   | Keeper_registry.Done_resolved _ ->
     Keeper_registry.dispatch_event_unit
       ~base_path
       keeper_name
@@ -413,9 +406,8 @@ let record_keeper_stopped
       ~phase:Keeper_state_machine.Stopped
       ~keeper_name
       ~detail
-      ();
-    true)
-  else false
+      ());
+  resolution
 ;;
 
 let record_keeper_crashed
@@ -426,8 +418,14 @@ let record_keeper_crashed
   : unit
   =
   let reason = Keeper_registry.failure_reason_to_string failure_reason in
-  if resolve_registry_done entry ~source:"keepalive_record_crashed" (`Crashed reason)
-  then (
+  match
+    Keeper_registry.resolve_done
+      entry
+      ~source:"keepalive_record_crashed"
+      (`Crashed reason)
+  with
+  | Keeper_registry.Done_already_resolved _ -> ()
+  | Keeper_registry.Done_resolved _ ->
     let outcome = reason in
     Keeper_registry.set_failure_reason ~base_path keeper_name (Some failure_reason);
     Keeper_registry.dispatch_event_unit
@@ -440,7 +438,7 @@ let record_keeper_crashed
       ~phase:Keeper_state_machine.Crashed
       ~keeper_name
       ~detail:reason
-      ())
+      ()
 ;;
 
 (* ── Keeper lifecycle start/stop ── *)
@@ -639,13 +637,16 @@ let stop_keepalive ?base_path name =
              "%s: manual stop force-released holder slot(s) [%s] before marking stopped"
              entry.name
              (String.concat "," (List.map fst released_slots));
-         if
+         match
            record_keeper_stopped
              entry
              ~base_path:entry.base_path
              ~keeper_name:entry.name
              ~detail:"manual stop"
-         then Keeper_registry.cleanup_tracking ~base_path:entry.base_path entry.name)
+         with
+         | Keeper_registry.Done_resolved _ ->
+           Keeper_registry.cleanup_tracking ~base_path:entry.base_path entry.name
+         | Keeper_registry.Done_already_resolved _ -> ())
     entries
 ;;
 

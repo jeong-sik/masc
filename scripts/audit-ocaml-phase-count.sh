@@ -15,7 +15,7 @@
 #
 # Rule (mirrors audit-tla-phase-count.sh, OCaml comment syntax):
 #   - SSOT: resolve the concrete `phase` constructor source from
-#     lib/keeper_state/keeper_state_machine.ml, then count `  | <CamelCase>`
+#     lib/keeper_registry/keeper_state_machine.ml, then count `  | <CamelCase>`
 #     constructors between `type phase =` and the next blank line.
 #   - Sweep keeper FSM source files for `\b(\d{1,2})[ -]state\b` and
 #     `\b(\d{1,2})[ -]phase(s)?\b` inside comment lines (`(*`/`(**` or
@@ -45,8 +45,20 @@ for tool in rg awk grep; do
 done
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-KEEPER_DIRS=("${REPO_ROOT}/lib/keeper" "${REPO_ROOT}/lib/keeper_state")
-SSOT_FILE="${REPO_ROOT}/lib/keeper_state/keeper_state_machine.ml"
+KEEPER_DIR_CANDIDATES=(
+  "${REPO_ROOT}/lib/keeper"
+  "${REPO_ROOT}/lib/keeper_registry"
+  "${REPO_ROOT}/lib/keeper_state"
+)
+KEEPER_DIRS=()
+for keeper_dir in "${KEEPER_DIR_CANDIDATES[@]}"; do
+  [[ -d "${keeper_dir}" ]] && KEEPER_DIRS+=("${keeper_dir}")
+done
+if [[ "${#KEEPER_DIRS[@]}" -eq 0 ]]; then
+  echo "error: no keeper source directories found" >&2
+  exit 2
+fi
+SSOT_FILE="${REPO_ROOT}/lib/keeper_registry/keeper_state_machine.ml"
 
 VERBOSE=0
 BASELINE_FILE=""
@@ -96,6 +108,7 @@ module_file() {
     | perl -pe 's/([A-Z]+)([A-Z][a-z])/$1_$2/g; s/([a-z0-9])([A-Z])/$1_$2/g; y/A-Z/a-z/; s/[.]//g')"
   local candidate
   for candidate in \
+    "${REPO_ROOT}/lib/keeper_registry/${normalized}.ml" \
     "${REPO_ROOT}/lib/keeper_state/${normalized}.ml" \
     "${REPO_ROOT}/lib/keeper/${normalized}.ml"
   do
@@ -104,7 +117,7 @@ module_file() {
       return 0
     fi
   done
-  printf '%s/lib/keeper_state/%s.ml' "${REPO_ROOT}" "${normalized}"
+  printf '%s/lib/keeper_registry/%s.ml' "${REPO_ROOT}" "${normalized}"
 }
 
 phase_file() {
@@ -314,7 +327,7 @@ while IFS= read -r entry; do
     continue
   fi
 
-  printf 'drift: %s — mentions "%s" but SSOT (lib/keeper_state/keeper_state_machine.ml type phase) has %s constructors\n' \
+  printf 'drift: %s — mentions "%s" but SSOT (lib/keeper_registry/keeper_state_machine.ml type phase) has %s constructors\n' \
     "${key}" "${matched_n}-state/phase" "${SSOT_COUNT}"
   drift_count=$((drift_count + 1))
 done < "${tmpfile}"

@@ -185,12 +185,31 @@ let git_clean_recovery_args args =
   in
   loop ~force:false ~dir:false args
 
+let git_args_has_path_changing_option args =
+  let rec scan = function
+    | [] -> false
+    | ("-C" | "--git-dir" | "--work-tree") :: _ :: rest -> true
+    | arg :: rest
+      when String.starts_with ~prefix:"-C" arg && String.length arg > 2 ->
+      true
+    | arg :: rest
+      when String.starts_with ~prefix:"--git-dir=" arg
+           || String.starts_with ~prefix:"--work-tree=" arg ->
+      true
+    | _ :: rest -> scan rest
+  in
+  scan args
+;;
+
 let is_git_recovery_command ir =
   match effective_stages ir with
   | [ stage ] when String.equal (normalize_command_name stage.bin) "git" -> (
-    match git_subcommand_with_args stage.args with
-    | Some ("checkout", args) -> git_checkout_head_restore_args args
-    | Some ("reset", args) -> git_reset_hard_head_args args
-    | Some ("clean", args) -> git_clean_recovery_args args
-    | _ -> false)
+    if git_args_has_path_changing_option stage.args
+    then false
+    else
+      match git_subcommand_with_args stage.args with
+      | Some ("checkout", args) -> git_checkout_head_restore_args args
+      | Some ("reset", args) -> git_reset_hard_head_args args
+      | Some ("clean", args) -> git_clean_recovery_args args
+      | _ -> false)
   | _ -> false

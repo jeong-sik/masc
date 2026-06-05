@@ -112,6 +112,17 @@ let cwd_is_sandbox_repo_context ~config ~meta ~cwd =
   | None -> false
   | Some _ -> true
 
+let cwd_is_sandbox_repo_root ~config ~meta ~cwd =
+  match repo_path_context ~config ~meta cwd with
+  | Some (_, repo_root, path_root, _) ->
+    String.equal repo_root path_root
+  | None -> false
+
+let invalidate_repo_currency_cache ~config ~meta ~repo_name =
+  let cpath = Playground_repo_readiness.clone_path ~config ~meta ~repo_name in
+  Hashtbl.remove currency_sync_cache cpath
+;;
+
 let repo_currency_not_ready_error ~config ~meta ~repo_name ~reason ~cwd =
   let clone_path = Playground_repo_readiness.clone_path ~config ~meta ~repo_name in
   let hint_suffix =
@@ -454,7 +465,7 @@ let validate_repo_path_args_ready
       | Some args -> Exec_policy.path_argument_values command_name args)
   in
   let path_args_of_effective_stage
-      (stage : Keeper_tool_execute_command_semantics.parsed_stage)
+      (stage : Masc_exec.Shell_ir_command_shape.stage)
     =
     let command_name =
       stage.bin |> Filename.basename |> normalize_repo_command_name
@@ -471,7 +482,7 @@ let validate_repo_path_args_ready
   in
   let all_path_args =
     path_args ir
-    @ (Keeper_tool_execute_command_semantics.effective_stages_of_ir ir
+    @ (Masc_exec.Shell_ir_command_shape.effective_stages ir
        |> List.concat_map path_args_of_effective_stage)
   in
   let validate_target seen raw =

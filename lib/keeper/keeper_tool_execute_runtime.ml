@@ -271,19 +271,20 @@ let input_with_cwd cwd = function
   | Keeper_tool_execute_typed_input.Pipeline { stages; cwd = _; env } ->
     Keeper_tool_execute_typed_input.Pipeline { stages; cwd = Some cwd; env }
 
-let typed_input_effective_stages ~mode input =
+let typed_input_shell_ir_unvalidated ~mode input =
   match Keeper_tool_execute_typed_input.to_shell_ir_unvalidated ~mode input with
-  | Error _ -> []
-  | Ok ir ->
-    Keeper_tool_execute_command_semantics.effective_stages_of_ir ir
+  | Error _ -> None
+  | Ok ir -> Some ir
 
-let resolve_typed_git_cwd_of_stages ~config ~meta ~cwd ~cmd stages =
-    Keeper_tool_execute_command_semantics.resolve_sandbox_root_git_cwd_of_stages
+let resolve_typed_git_cwd ~config ~meta ~cwd ~cmd = function
+  | None -> cwd, None
+  | Some ir ->
+    Keeper_tool_execute_command_semantics.resolve_sandbox_root_git_cwd
       ~config
       ~meta
       ~cwd
       ~cmd
-      stages
+      ir
 
 let handle_tool_execute_typed
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
@@ -318,20 +319,20 @@ let handle_tool_execute_typed
           then Keeper_tool_execute_typed_input.Dev_full
           else Keeper_tool_execute_typed_input.Readonly
         in
-        let effective_stages = typed_input_effective_stages ~mode input in
+        let input_ir = typed_input_shell_ir_unvalidated ~mode input in
         let cwd, root_git_cwd_error =
-          resolve_typed_git_cwd_of_stages
+          resolve_typed_git_cwd
             ~config
             ~meta
             ~cwd
             ~cmd
-            effective_stages
+            input_ir
         in
         let root_git_cwd_error =
           match root_git_cwd_error with
           | Some e -> Some e
           | None ->
-            Keeper_tool_execute_command_semantics.misuse_error_of_stages effective_stages
+            Option.bind input_ir Keeper_tool_execute_command_semantics.misuse_error
         in
         let input = input_with_cwd cwd input in
         let in_playground = Keeper_tool_execute_path.in_playground ~root ~cwd ~meta in
@@ -468,15 +469,23 @@ let handle_tool_execute_typed
             ~reason:"This typed command is destructive and is blocked for every keeper execution surface."
             ~alternatives:[ "Use a non-destructive command or a dedicated structured tool." ]
             ()
-        else if (not write_enabled)
-             && (Masc_exec.Shell_ir_risk.is_r1 envelope
-                || Masc_exec.Shell_ir_risk.is_r2 envelope)
-             && not
-                  (Keeper_tool_execute_path.cwd_is_sandbox_repo_context
-                     ~config
-                     ~meta
-                     ~cwd
-                   && Masc_exec.Shell_ir_command_shape.is_git_recovery_command ir)
+        let is_git_recovery =
+          Keeper_tool_execute_path.cwd_is_sandbox_repo_root ~config ~meta ~cwd
+          && Masc_exec.Shell_ir_command_shape.is_git_recovery_command ir
+        in
+        if is_git_recovery
+        then
+          (match Keeper_tool_execute_path.repo_path_context ~config ~meta cwd with
+           | Some (repo_name, _, _, _) ->
+             Keeper_tool_execute_path.invalidate_repo_currency_cache
+               ~config
+               ~meta
+               ~repo_name
+           | None -> ());
+        if (not write_enabled)
+           && (Masc_exec.Shell_ir_risk.is_r1 envelope
+              || Masc_exec.Shell_ir_risk.is_r2 envelope)
+           && not is_git_recovery
         then
           blocked_result
             ~deterministic_reason:Keeper_tool_deterministic_error.Write_operation_gated

@@ -31,14 +31,11 @@ module Json = Yojson.Safe.Util
 (* ── Helpers ─────────────────────────────────────────────────────── *)
 
 let resolve_sandbox_root_git_cwd_string ~config ~meta ~cwd ~cmd =
-  let stages =
-    match Masc_exec_bash_parser.Bash.parse_string cmd with
-    | Masc_exec.Parsed.Parsed ir ->
-      Keeper_tool_execute_command_semantics.effective_stages_of_ir ir
-    | _ -> []
-  in
-  Keeper_tool_execute_command_semantics.resolve_sandbox_root_git_cwd_of_stages
-    ~config ~meta ~cwd ~cmd stages
+  match Masc_exec_bash_parser.Bash.parse_string cmd with
+  | Masc_exec.Parsed.Parsed ir ->
+    Keeper_tool_execute_command_semantics.resolve_sandbox_root_git_cwd
+      ~config ~meta ~cwd ~cmd ir
+  | _ -> cwd, None
 
 let with_env key value f =
   let prior = try Some (Sys.getenv key) with Not_found -> None in
@@ -143,6 +140,36 @@ let run_process_ok ~cwd prog argv =
 
 let git_ok ~cwd args =
   run_process_ok ~cwd "git" (Array.of_list ("git" :: args))
+
+let write_repositories_toml ~base_path ~repo_name ~url =
+  let config_dir =
+    Filename.concat (Filename.concat base_path Common.masc_dirname) "config"
+  in
+  ensure_dir config_dir;
+  write_file
+    (Filename.concat config_dir "repositories.toml")
+    (Printf.sprintf
+       "[repository.%s]\nname = \"%s\"\nurl = \"%s\"\n"
+       repo_name
+       repo_name
+       (String.escaped url))
+
+let setup_ready_repo_with_origin ~config ~repo_name ~repo =
+  let base_path = config.Workspace.base_path in
+  let remote = Filename.concat base_path (Printf.sprintf ".remote-%s.git" repo_name) in
+  let seed = Filename.concat base_path (Printf.sprintf "seed-%s" repo_name) in
+  git_ok ~cwd:base_path
+    [ "init"; "--bare"; "-q"; "--initial-branch=main"; remote ];
+  git_ok ~cwd:base_path [ "clone"; "-q"; remote; seed ];
+  git_ok ~cwd:seed [ "config"; "user.email"; "test@example.com" ];
+  git_ok ~cwd:seed [ "config"; "user.name"; "Test" ];
+  write_file (Filename.concat seed "README.md") "v1\n";
+  git_ok ~cwd:seed [ "add"; "README.md" ];
+  git_ok ~cwd:seed [ "commit"; "-q"; "-m"; "init" ];
+  git_ok ~cwd:seed [ "push"; "-q"; "origin"; "main" ];
+  ensure_dir (Filename.dirname repo);
+  git_ok ~cwd:(Filename.dirname repo) [ "clone"; "-q"; remote; repo ];
+  write_repositories_toml ~base_path ~repo_name ~url:remote
 
 let ensure_git_repo repo =
   ensure_dir repo;
@@ -892,8 +919,7 @@ let test_execute_git_uses_turn_runtime () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup_with_tool_access ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
   let repo = Filename.concat (Filename.concat playground "repos") "masc" in
-  ensure_dir repo;
-  git_ok ~cwd:repo [ "init"; "-q" ];
+  setup_ready_repo_with_origin ~config ~repo_name:"masc" ~repo;
   let log_path = Filename.concat config.Workspace.base_path "docker.log" in
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
@@ -927,8 +953,7 @@ let test_execute_git_without_github_bundle_succeeds () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup_with_tool_access ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
   let repo = Filename.concat (Filename.concat playground "repos") "masc" in
-  ensure_dir repo;
-  git_ok ~cwd:repo [ "init"; "-q" ];
+  setup_ready_repo_with_origin ~config ~repo_name:"masc" ~repo;
   let log_path = Filename.concat config.Workspace.base_path "docker.log" in
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
@@ -1580,8 +1605,7 @@ let test_cmd_prefix_uses_shell_command_words () =
 let detect_repo_hosting_cli_repo_api_misuse_of_string cmd =
   match Masc_exec_bash_parser.Bash.parse_string cmd with
   | Masc_exec.Parsed.Parsed ir ->
-    let stages = Keeper_tool_execute_command_semantics.effective_stages_of_ir ir in
-    Keeper_tool_execute_command_semantics.repo_hosting_cli_repo_flag_api_misuse_of_stages stages
+    Keeper_tool_execute_command_semantics.repo_hosting_cli_repo_flag_api_misuse ir
   | _ -> None
 
 let test_repo_hosting_cli_repo_api_misuse_uses_shell_semantics () =
@@ -1611,8 +1635,7 @@ let test_repo_hosting_cli_repo_api_misuse_uses_shell_semantics () =
 let detect_gh_pr_diff_misuse_of_string cmd =
   match Masc_exec_bash_parser.Bash.parse_string cmd with
   | Masc_exec.Parsed.Parsed ir ->
-    let stages = Keeper_tool_execute_command_semantics.effective_stages_of_ir ir in
-    Keeper_tool_execute_command_semantics.gh_pr_diff_misuse_of_stages stages
+    Keeper_tool_execute_command_semantics.gh_pr_diff_misuse ir
   | _ -> None
 
 let test_gh_pr_diff_misuse_uses_shell_semantics () =

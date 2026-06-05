@@ -1,27 +1,15 @@
 (** Execute command semantics.
 
-    This layer owns command-shape interpretation. Runtime backends call
-    into it when they need deterministic cwd policy for git/gh commands,
-    but it does not execute shell commands and does not construct Docker
-    invocations. *)
+    This layer owns keeper-specific cwd policy and user-facing command
+    guidance. Pure command-shape extraction stays in
+    [Masc_exec.Shell_ir_command_shape]. *)
 
-type parsed_stage =
+type stage = Masc_exec.Shell_ir_command_shape.stage =
   { bin : string
   ; args : string list
   }
 
-let parse_cmd_to_ir_opt = Keeper_tool_execute_command_parse.parse_cmd_to_ir_opt
-
-let stage_of_shell_ir_shape (stage : Masc_exec.Shell_ir_command_shape.stage) =
-  { bin = stage.bin; args = stage.args }
-
-let parsed_stages_of_ir ir =
-  Masc_exec.Shell_ir_command_shape.parsed_stages ir
-  |> List.map stage_of_shell_ir_shape
-
-let effective_stages_of_ir ir =
-  Masc_exec.Shell_ir_command_shape.effective_stages ir
-  |> List.map stage_of_shell_ir_shape
+let effective_stages ir = Masc_exec.Shell_ir_command_shape.effective_stages ir
 
 let normalize_command_name =
   Masc_exec.Shell_ir_command_shape.normalize_command_name
@@ -117,6 +105,12 @@ let gh_pr_diff_misuse_of_stages stages =
     else
       None) stages
 
+let repo_hosting_cli_repo_flag_api_misuse ir =
+  repo_hosting_cli_repo_flag_api_misuse_of_stages (effective_stages ir)
+
+let gh_pr_diff_misuse ir =
+  gh_pr_diff_misuse_of_stages (effective_stages ir)
+
 let misuse_error_of_stages stages =
   match repo_hosting_cli_repo_flag_api_misuse_of_stages stages with
   | Some (repo_arg, endpoint) ->
@@ -137,6 +131,8 @@ let misuse_error_of_stages stages =
             "잘못된 gh syntax: 'gh pr diff'는 파일 경로 필터링(예: '--', '*.ml')을 지원하지 않으며, positional argument는 최대 1개([<number> | <url> | <branch>])만 허용됩니다. (입력받은 positional args: %s). 전체 diff를 원하시면 파일 필터를 제거하시고, 특정 파일만 보시려면 git 저장소 내에서 'git diff origin/main <pr> -- <paths>'를 실행하세요."
             (String.concat ", " pos_args))
      | None -> None)
+
+let misuse_error ir = misuse_error_of_stages (effective_stages ir)
 
 
 let bare_worktrees_path token =
@@ -224,9 +220,10 @@ let repos_path_hint_of_stages ~cmd stages =
            | Some path -> Some (path, cmd)
            | None -> None)) stages
 
-let resolve_sandbox_root_git_cwd_of_stages
-    ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_meta) ~cwd ~cmd stages
+let resolve_sandbox_root_git_cwd
+    ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_meta) ~cwd ~cmd ir
   =
+  let stages = effective_stages ir in
   let host_root =
     Keeper_sandbox.host_root_abs_of_meta ~config meta
     |> Keeper_alerting_path.normalize_path_for_check
@@ -338,8 +335,3 @@ let resolve_sandbox_root_git_cwd_of_stages
          then resolve_without_explicit_git_c ()
          else cwd, None))
   else cwd, None
-
-let effective_stages_of_cmd cmd =
-  match parse_cmd_to_ir_opt cmd with
-  | Some ir -> effective_stages_of_ir ir
-  | None -> []

@@ -13,10 +13,22 @@ let dedupe_schemas (schemas : Masc_domain.tool_schema list) =
   in
   List.rev unique
 
+let descriptor_owned_internal_tool_schemas : Masc_domain.tool_schema list =
+  Keeper_tool_descriptor.public_descriptors
+  |> List.filter_map (fun (descriptor : Keeper_tool_descriptor.t) ->
+    if String.starts_with ~prefix:"masc_" descriptor.internal_name then
+      Some
+        { Masc_domain.name = descriptor.internal_name
+        ; description = descriptor.description
+        ; input_schema = descriptor.input_schema
+        }
+    else None)
+
 let raw_all_tool_schemas : Masc_domain.tool_schema list =
   dedupe_schemas
     (Tools.raw_schemas
      @ Tool_schemas_misc.schemas
+     @ descriptor_owned_internal_tool_schemas
      (* Board MCP adapter schemas live outside neutral Tool substrate and
         outside Board domain. *)
      @ Board_tool.tools

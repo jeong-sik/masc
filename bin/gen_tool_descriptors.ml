@@ -126,67 +126,6 @@ let masc_gc_spec : tool_spec =
   }
 ;;
 
-let masc_web_search_spec : tool_spec =
-  { name = "masc_web_search"
-  ; description =
-      "Search the public web and return top result titles, URLs, and snippets. Read-only \
-       helper for current-information lookups before deeper file or repo work. Uses \
-       configured web-search providers with structured fallback behavior and returns \
-       structured JSON."
-  ; parameters =
-      [ { p_name = "query"
-        ; p_type = T_string { enum = None; default = None }
-        ; p_description = "Search query text"
-        ; p_required = true
-        }
-      ; { p_name = "limit"
-        ; p_type = T_int { min = Some 1; max = Some 10; default = Some 5 }
-        ; p_description = "Maximum number of results to return (default 5, max 10)"
-        ; p_required = false
-        }
-      ]
-  ; additional_properties = false
-  ; behavior_contract = []
-  }
-;;
-
-let masc_web_fetch_spec : tool_spec =
-  { name = "masc_web_fetch"
-  ; description =
-      "Fetch a web page by URL and return agent-readable extracted content. Read-only \
-       helper for reading selected sources after web search before citing them. Prefers \
-       article/main/body content, strips script/style/navigation noise, returns markdown \
-       by default, and extracts <title> plus description metadata when present."
-  ; parameters =
-      [ { p_name = "url"
-        ; p_type = T_string { enum = None; default = None }
-        ; p_description = "URL to fetch (http or https only)"
-        ; p_required = true
-        }
-      ; { p_name = "timeout"
-        ; p_type = T_int { min = Some 1; max = Some 60; default = Some 15 }
-        ; p_description = "Request timeout in seconds (default 15, max 60)"
-        ; p_required = false
-        }
-      ; { p_name = "extractMode"
-        ; p_type =
-            T_string { enum = Some [ "markdown"; "text" ]; default = Some "markdown" }
-        ; p_description =
-            "Output extraction mode. markdown preserves readable headings/lists/links; \
-             text returns flattened plain text."
-        ; p_required = false
-        }
-      ; { p_name = "maxChars"
-        ; p_type = T_int { min = Some 1; max = Some 100000; default = Some 50000 }
-        ; p_description = "Maximum extracted content characters to return"
-        ; p_required = false
-        }
-      ]
-  ; additional_properties = false
-  ; behavior_contract = []
-  }
-;;
-
 let masc_tool_stats_spec : tool_spec =
   { name = "masc_tool_stats"
   ; description =
@@ -477,8 +416,6 @@ let phase6_specs : tool_spec list =
   ; masc_tool_help_spec
   ; masc_dashboard_spec
   ; masc_gc_spec
-  ; masc_web_search_spec
-  ; masc_web_fetch_spec
   ; masc_tool_stats_spec
   ; masc_cleanup_zombies_spec
     (* PR-1 (paving stone): control group *)

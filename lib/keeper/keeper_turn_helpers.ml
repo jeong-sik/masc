@@ -184,9 +184,7 @@ let post_turn_complete_task ~(cycle_completed : bool ref) = ignore cycle_complet
 ;;
 
 let pre_dispatch_tool_surface : Keeper_execution_receipt.tool_surface =
-  { turn_lane = Keeper_agent_tool_surface.Lane_pre_dispatch
-  ; materialized_tools = []
-  }
+  { turn_lane = Keeper_agent_tool_surface.Lane_pre_dispatch }
 ;;
 
 let record_pre_dispatch_terminal_observation
@@ -233,12 +231,6 @@ let record_pre_dispatch_terminal_observation
     ; terminal_reason_code
     ; response_text_present = false
     ; model_used = None
-    ; requested_tools = []
-    ; reported_tools = []
-    ; observed_tools = []
-    ; canonical_tools = []
-    ; unexpected_tools = []
-    ; tools_used = []
     ; completion_contract_result = Keeper_execution_receipt.Contract_not_dispatched
     ; tool_surface = pre_dispatch_tool_surface
     ; sandbox_kind = Keeper_execution_receipt.sandbox_kind_of_meta meta

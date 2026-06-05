@@ -20,7 +20,6 @@ let finalize
     ~model
     ~(acc : Keeper_run_tools.hook_accumulator)
     ~actual_keeper_tool_names
-    ~actual_keeper_tool_names_ref
     ~(result : Runtime_agent.run_result)
     ~checkpoint_persistence_error
     ~post_turn_t0
@@ -43,8 +42,7 @@ let finalize
     Keeper_agent_run_response_text.finalize
       ~keeper_name:meta.name
       ~goal:meta.goal
-      ~actual_keeper_tool_names:!actual_keeper_tool_names_ref
-      ~fallback_tool_names:actual_keeper_tool_names
+      ~actual_keeper_tool_names
       ~stop_reason:result.stop_reason
       ~raw_response_text
   in
@@ -191,10 +189,8 @@ let finalize
       ; ctx_composition
       ; runtime_observation = result.runtime_observation
       ; turn_count = result.turns
-      ; tool_calls_made = List.length actual_keeper_tool_names
       ; usage
       ; usage_reported = Option.is_some result.response.usage
-      ; tools_used = actual_keeper_tool_names
       ; tool_calls = List.rev acc.tool_calls
       ; checkpoint = saved_checkpoint
       ; trace_ref = result.trace_ref

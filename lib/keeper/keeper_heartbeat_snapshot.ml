@@ -434,8 +434,6 @@ let write_heartbeat_snapshot
           "compaction_before_tokens", `Int 0
         ; "compaction_after_tokens", `Int 0
         ; "work_kind", `String "status_tick"
-        ; "tool_call_count", `Int 0
-        ; "tools_used", `List []
         ; "snapshot_source", `String "keeper_context_status"
         ; "memory_check", memory_check_default_json ()
         ; "auto_rules", keeper_auto_rule_eval_to_json auto_rules

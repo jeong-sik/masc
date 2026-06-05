@@ -2,22 +2,6 @@
 
 module String_set = Set_util.StringSet
 
-let unexpected_tool_partial_warned : (string, unit) Hashtbl.t =
-  Hashtbl.create 32
-
-let unexpected_tool_partial_warn_mu = Eio.Mutex.create ()
-
-let should_log_unexpected_tool_partial_once ~keeper_name ~unexpected_tool_names =
-  let key =
-    String.concat "\000" (keeper_name :: List.sort String.compare unexpected_tool_names)
-  in
-  Eio_guard.with_mutex unexpected_tool_partial_warn_mu (fun () ->
-      if Hashtbl.mem unexpected_tool_partial_warned key then
-        false
-      else (
-        Hashtbl.replace unexpected_tool_partial_warned key ();
-        true))
-
 (* Closed sum type for turn_lane.  Two producers emit values:
    - keeper_run_tools.ml emits the per-turn lanes
      (text_only, tool_optional, tool_disabled, retry).

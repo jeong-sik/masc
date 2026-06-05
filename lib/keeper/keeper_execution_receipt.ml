@@ -3,30 +3,6 @@
 include Keeper_execution_receipt_types
 
 
-let last_nonempty values =
-  List.fold_left
-    (fun acc value -> if String.trim value = "" then acc else Some value)
-    None
-    values
-;;
-
-let last_tool_name receipt =
-  let rec choose = function
-    | [] -> None
-    | values :: rest ->
-      (match last_nonempty values with
-       | Some _ as value -> value
-       | None -> choose rest)
-  in
-  choose
-    [ receipt.observed_tools
-    ; receipt.canonical_tools
-    ; receipt.tools_used
-    ; receipt.reported_tools
-    ; receipt.requested_tools
-    ]
-;;
-
 let runtime_rotation_attempt_to_json attempt =
   `Assoc
     [ "from_runtime", `String (attempt.from_runtime)
@@ -57,93 +33,6 @@ let receipt_duration_ms receipt =
 ;;
 
 let string_contains_ci = String_util.contains_substring_ci
-
-let bump_count name counts =
-  let rec loop prefix = function
-    | [] -> List.rev ((name, 1) :: prefix)
-    | (existing, count) :: rest when String.equal existing name ->
-      List.rev_append prefix ((existing, count + 1) :: rest)
-    | item :: rest -> loop (item :: prefix) rest
-  in
-  loop [] counts
-;;
-
-let count_json values =
-  values
-  |> List.map (fun (name, count) ->
-    `Assoc [ "name", `String name; "count", `Int count ])
-  |> fun values -> `List values
-;;
-
-let count_descriptors ~f descriptors =
-  descriptors
-  |> List.fold_left
-       (fun counts descriptor -> bump_count (f descriptor) counts)
-       []
-  |> count_json
-;;
-
-let descriptor_receipt_labels_json descriptors =
-  descriptors
-  |> List.map (fun (descriptor : Keeper_tool_descriptor.t) ->
-    `Assoc
-      [ "descriptor_id", `String descriptor.id
-      ; "labels", Keeper_tool_descriptor.receipt_labels_json descriptor
-      ])
-  |> fun values -> `List values
-;;
-
-let policy_decision_failed receipt =
-  let candidates =
-    [ receipt.terminal_reason_code
-    ; Option.value
-        (Option.map error_kind_to_string receipt.error_kind)
-        ~default:""
-    ; Option.value receipt.error_message ~default:""
-    ]
-  in
-  List.exists
-    (fun value ->
-       string_contains_ci value "policy_denied"
-       || string_contains_ci value "denied_by_policy"
-       || string_contains_ci value "approval_required"
-       || string_contains_ci value "governance_approval")
-    candidates
-;;
-
-let tool_descriptor_summary_json receipt =
-  let descriptors =
-    receipt.observed_tools
-    @ receipt.canonical_tools
-    @ receipt.tools_used
-    @ receipt.reported_tools
-    |> Keeper_tool_descriptor_resolution.descriptors_for_tool_names
-  in
-  `Assoc
-    [ "source", `String "receipt_tool_sets"
-    ; ( "observed_descriptor_ids"
-      , list_json (List.map (fun (d : Keeper_tool_descriptor.t) -> d.id) descriptors) )
-    ; "descriptor_count", `Int (List.length descriptors)
-    ; "receipt_labels_by_descriptor", descriptor_receipt_labels_json descriptors
-    ; ( "executor_counts"
-      , count_descriptors
-          ~f:(fun (d : Keeper_tool_descriptor.t) ->
-            Keeper_tool_descriptor.executor_to_string d.executor)
-          descriptors )
-    ; ( "backend_counts"
-      , count_descriptors
-          ~f:(fun (d : Keeper_tool_descriptor.t) ->
-            Keeper_tool_descriptor.backend_to_string d.backend)
-          descriptors )
-    ; ( "sandbox_counts"
-      , count_descriptors
-          ~f:(fun (d : Keeper_tool_descriptor.t) ->
-            Keeper_tool_descriptor.sandbox_to_string d.sandbox)
-          descriptors )
-    ; ( "failed_policy_decision_count"
-      , `Int (if policy_decision_failed receipt then 1 else 0) )
-    ]
-;;
 
 (* Cycle 51 observability: alert when [operator_disposition] cannot
    classify a receipt and falls through to the catch-all
@@ -521,13 +410,6 @@ let to_json (receipt : t) =
     ; "action_radius", action_radius
     ; "response_text_present", `Bool receipt.response_text_present
     ; "model_used", `Null
-    ; "requested_tools", list_json receipt.requested_tools
-    ; "reported_tools", list_json receipt.reported_tools
-    ; "observed_tools", list_json receipt.observed_tools
-    ; "canonical_tools", list_json receipt.canonical_tools
-    ; "unexpected_tools", list_json receipt.unexpected_tools
-    ; "tools_used", list_json receipt.tools_used
-    ; "tool_descriptor_summary", tool_descriptor_summary_json receipt
     ; ( "completion_contract_result"
       , `String (completion_contract_result_to_string receipt.completion_contract_result) )
     ; ( "tool_surface"
@@ -535,8 +417,6 @@ let to_json (receipt : t) =
           [ ( "turn_lane"
             , Keeper_agent_tool_surface.turn_lane_to_yojson receipt.tool_surface.turn_lane
             )
-          ; ( "materialized_tools"
-            , list_json receipt.tool_surface.materialized_tools )
           ] )
     ; ( "sandbox"
       , `Assoc
@@ -719,8 +599,6 @@ let operator_broadcast_payload (receipt : t) ~disposition ~reason =
     ; "runtime_outcome", `String (runtime_outcome_to_string receipt.runtime_outcome)
     ; ( "completion_contract_result"
       , `String (completion_contract_result_to_string receipt.completion_contract_result) )
-    ; ( "last_tool_name", string_opt_json (last_tool_name receipt) )
-    ; "tools_used", list_json receipt.tools_used
     ; ( "contract_violation_detail"
       , match decode_contract_violation_reason terminal_reason_code with
         | None -> `Null

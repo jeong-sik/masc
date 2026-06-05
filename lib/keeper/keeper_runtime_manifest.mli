@@ -23,9 +23,9 @@
       wall / monotonic / logical / provider / event_bus provenance.
       SSOT is the runtime clock snapshot taken when the event is emitted.
 
-    - {b Layer 3 — Lineage}: [event_kind], [tool_lineage] (6 stages:
-      searched / visible / materialized / emitted / executed / verified).
-      Tracks the tool lifecycle.  SSOT is the tool dispatch pipeline.
+    - {b Layer 3 — Event}: [event_kind].  Tracks turn/routing/context
+      lifecycle boundaries. Tool calls are recorded by the hook-owned
+      tool-call log, not duplicated in manifest lineage rows.
 
     - {b Layer 4 — Payload}: [payload_role] ([Model_input],
       [Operator_evidence], [Checkpoint], [Memory_store]).  Classifies the
@@ -119,16 +119,6 @@ val clock_refs_for_context :
 val with_clock_refs : clock_refs:Yojson.Safe.t -> Yojson.Safe.t -> Yojson.Safe.t
 
 val with_payload_role : payload_role:payload_role -> Yojson.Safe.t -> Yojson.Safe.t
-
-val tool_lineage :
-  ?searched_tool_names:string list ->
-  ?allowed_tool_names:string list ->
-  ?materialized_tool_names:string list ->
-  ?emitted_tool_names:string list ->
-  ?executed_tool_names:string list ->
-  ?verified_tool_names:string list ->
-  unit ->
-  Yojson.Safe.t
 
 val make :
   ?ts:string ->

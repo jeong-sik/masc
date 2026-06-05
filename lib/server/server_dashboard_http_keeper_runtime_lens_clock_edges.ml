@@ -84,7 +84,6 @@ let event_started_at row =
   | Keeper_runtime_manifest.Turn_started
   | Keeper_runtime_manifest.Phase_gate_decided
   | Keeper_runtime_manifest.Runtime_routed
-  | Keeper_runtime_manifest.Tool_surface_selected
   | Keeper_runtime_manifest.Provider_lane_resolved
   | Keeper_runtime_manifest.Provider_attempt_started
   | Keeper_runtime_manifest.Context_injected
@@ -98,7 +97,6 @@ let event_started_at row =
   | Keeper_runtime_manifest.Checkpoint_saved
   | Keeper_runtime_manifest.Pre_dispatch_blocked
   | Keeper_runtime_manifest.Receipt_appended
-  | Keeper_runtime_manifest.Tool_lineage_recorded
   | Keeper_runtime_manifest.Turn_finished ->
     None
 
@@ -110,13 +108,11 @@ let event_finished_at row =
   | Keeper_runtime_manifest.Checkpoint_saved
   | Keeper_runtime_manifest.Pre_dispatch_blocked
   | Keeper_runtime_manifest.Receipt_appended
-  | Keeper_runtime_manifest.Tool_lineage_recorded
   | Keeper_runtime_manifest.Turn_finished ->
     Some row.Keeper_runtime_manifest.ts
   | Keeper_runtime_manifest.Turn_started
   | Keeper_runtime_manifest.Phase_gate_decided
   | Keeper_runtime_manifest.Runtime_routed
-  | Keeper_runtime_manifest.Tool_surface_selected
   | Keeper_runtime_manifest.Provider_lane_resolved
   | Keeper_runtime_manifest.Provider_attempt_started
   | Keeper_runtime_manifest.Context_injected
@@ -147,9 +143,7 @@ let clock_edge_json ~idx ~provider_attempt_index row =
   in
   let tool_batch_id =
     match event with
-    | Keeper_runtime_manifest.Tool_surface_selected
-    | Keeper_runtime_manifest.Provider_lane_resolved
-    | Keeper_runtime_manifest.Tool_lineage_recorded ->
+    | Keeper_runtime_manifest.Provider_lane_resolved ->
       first_string_opt [ clock_string row "tool_batch_id"; Some (fallback_tool_batch_id row) ]
     | _ -> clock_string row "tool_batch_id"
   in

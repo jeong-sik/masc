@@ -190,3 +190,21 @@ let is_execution_progress_tool_name name =
   | Execution | Completion -> true
   | Passive_status | Claim_context -> false
 ;;
+
+let result_text_for_progress_check output_text =
+  match Tool_output.decode_from_oas output_text with
+  | Tool_output.Stored { preview; _ } -> preview
+  | Tool_output.Inline value -> value
+;;
+
+let tool_result_has_material_progress ~(tool_name : string) ~(output_text : string)
+  : bool
+  =
+  let tool_name = Keeper_tool_resolution.canonical_tool_name tool_name in
+  let output_text = result_text_for_progress_check output_text |> String.trim in
+  let idempotent_worktree_noop =
+    String.equal tool_name "tool_execute"
+    && String.starts_with ~prefix:"Worktree already exists:" output_text
+  in
+  (not (String.equal output_text "")) && not idempotent_worktree_noop
+;;

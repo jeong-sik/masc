@@ -59,13 +59,27 @@ let mk_docker_sandbox () : Keeper_sandbox.t =
   ; task_overlay_pattern = "repos/<repo>"
   }
 
+let local_response ~host_cwd =
+  Keeper_cwd_response.of_sandbox
+    ~sandbox:(mk_local_sandbox ())
+    ~host_cwd
+    ~container_cwd_for_docker:"IGNORED_FOR_LOCAL_BACKEND"
+;;
+
+let docker_response ~host_cwd ~container_cwd =
+  Keeper_cwd_response.of_sandbox
+    ~sandbox:(mk_docker_sandbox ())
+    ~host_cwd
+    ~container_cwd_for_docker:container_cwd
+;;
+
 (* --- Local backend: passthrough semantics ------------------- *)
 
-let test_local_constructor_passthrough () =
+let test_local_backend_passthrough () =
   let host_cwd =
     host_root_marker ^ "/.masc/playground/test-local/repos/foo"
   in
-  let r = Keeper_cwd_response.local ~host_cwd in
+  let r = local_response ~host_cwd in
   check string "keeper_visible == host_cwd" host_cwd
     (Keeper_cwd_response.keeper_visible r);
   check string "operator_host == host_cwd" host_cwd
@@ -79,7 +93,7 @@ let test_local_json_emits_host_path () =
   let host_cwd =
     host_root_marker ^ "/.masc/playground/test-local/repos/foo"
   in
-  let r = Keeper_cwd_response.local ~host_cwd in
+  let r = local_response ~host_cwd in
   let json = Keeper_cwd_response.to_yojson_response r in
   match json with
   | `String s -> check string "JSON String == host_cwd" host_cwd s
@@ -87,12 +101,12 @@ let test_local_json_emits_host_path () =
 
 (* --- Docker backend: container path in response, host hidden  *)
 
-let test_docker_constructor_keeper_visible_is_container () =
+let test_docker_backend_keeper_visible_is_container () =
   let host_cwd =
     host_root_marker ^ "/.masc/playground/docker/test-docker/repos/foo"
   in
   let container_cwd = "/home/keeper/playground/test-docker/repos/foo" in
-  let r = Keeper_cwd_response.docker ~host_cwd ~container_cwd in
+  let r = docker_response ~host_cwd ~container_cwd in
   check string "keeper_visible == container_cwd" container_cwd
     (Keeper_cwd_response.keeper_visible r);
   check string "operator_host == host_cwd (retained for logs)"
@@ -104,7 +118,7 @@ let test_docker_json_does_not_leak_host_root () =
     host_root_marker ^ "/.masc/playground/docker/test-docker/repos/foo"
   in
   let container_cwd = "/home/keeper/playground/test-docker/repos/foo" in
-  let r = Keeper_cwd_response.docker ~host_cwd ~container_cwd in
+  let r = docker_response ~host_cwd ~container_cwd in
   let json_str =
     Keeper_cwd_response.to_yojson_response r |> Yojson.Safe.to_string
   in
@@ -169,7 +183,7 @@ let test_property_docker_response_never_leaks_host () =
   in
   List.iter
     (fun (host_cwd, container_cwd) ->
-      let r = Keeper_cwd_response.docker ~host_cwd ~container_cwd in
+      let r = docker_response ~host_cwd ~container_cwd in
       let json_str =
         Keeper_cwd_response.to_yojson_response r
         |> Yojson.Safe.to_string
@@ -208,8 +222,8 @@ let () =
     [
       ( "local-backend"
       , [
-          test_case "local constructor: passthrough" `Quick
-            test_local_constructor_passthrough
+          test_case "local backend: passthrough" `Quick
+            test_local_backend_passthrough
         ; test_case "local JSON emits host path (== visible)" `Quick
             test_local_json_emits_host_path
         ; test_case "of_sandbox dispatches Local to host path" `Quick
@@ -218,9 +232,9 @@ let () =
     ; ( "docker-backend"
       , [
           test_case
-            "docker constructor: keeper_visible is container path"
+            "docker backend: keeper_visible is container path"
             `Quick
-            test_docker_constructor_keeper_visible_is_container
+            test_docker_backend_keeper_visible_is_container
         ; test_case "docker JSON does not leak host root marker"
             `Quick test_docker_json_does_not_leak_host_root
         ; test_case "of_sandbox dispatches Docker to container path"

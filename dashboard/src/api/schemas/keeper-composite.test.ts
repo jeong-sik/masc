@@ -159,9 +159,6 @@ describe('parseKeeperCompositeSnapshot', () => {
         operator_disposition_reason: 'tool_route_recoverable_failure',
         model_used: 'cli-tool-d:auto',
         stop_reason: 'max_turns',
-        tool_contract_result: 'violated',
-        unexpected_tools: ['keeper_board_list'],
-        unexpected_tool_count: 1,
         duration_ms: 87736,
         error: {
           kind: 'config',
@@ -178,31 +175,12 @@ describe('parseKeeperCompositeSnapshot', () => {
           degraded_retry_runtime: null,
           fallback_reason: 'turn_timeout',
         },
-        tool_surface: {
-          tool_requirement: 'required',
-          turn_lane: 'tool_optional',
-          tool_surface_class: 'runtime_mcp',
-          allowed_tool_count: 2,
-          tool_surface_fallback_used: false,
-          missing_required_tools: ['keeper_task_claim'],
-          required_tools: ['keeper_task_claim'],
-          unexpected_tools: ['keeper_board_list'],
-          unexpected_tool_count: 1,
-        },
       },
     })
 
     expect(result.execution?.latest_receipt_present).toBe(true)
     expect(result.execution?.terminal_reason_code).toBe('config_error')
     expect(result.execution?.runtime?.fallback_reason).toBe('turn_timeout')
-    expect(result.execution?.tool_surface?.turn_lane).toBe('tool_optional')
-    expect(result.execution?.tool_surface?.tool_surface_class).toBe('runtime_mcp')
-    expect(result.execution?.tool_surface?.allowed_tool_count).toBe(2)
-    expect(result.execution?.tool_surface?.tool_surface_fallback_used).toBe(false)
-    expect(result.execution?.unexpected_tools).toEqual(['keeper_board_list'])
-    expect(result.execution?.unexpected_tool_count).toBe(1)
-    expect(result.execution?.tool_surface?.unexpected_tools).toEqual(['keeper_board_list'])
-    expect(result.execution?.tool_surface?.unexpected_tool_count).toBe(1)
     expect(result.execution?.error?.message_preview).toContain('fallback_runtime')
   })
 

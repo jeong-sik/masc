@@ -62,7 +62,6 @@ type continuity_context = {
 }
 
 type tool_audit_snapshot = {
-  allowed_tool_names : string list;
   latest_tool_names : string list;
   latest_tool_call_count : int option;
   latest_action_source : string option;
@@ -117,16 +116,8 @@ let execution_tool_preview_limit = 8
 let cap_string_list ?(limit = execution_tool_preview_limit) values =
   take limit values
 
-let tool_preview_fields ?(limit = execution_tool_preview_limit) field values =
-  let preview = cap_string_list ~limit values in
-  [
-    (field ^ "_count", `Int (List.length values));
-    (field ^ "_preview", Json_util.json_string_list preview);
-  ]
-
 let tool_audit_snapshot agent_name =
   {
-    allowed_tool_names = [];
     latest_tool_names = [];
     latest_tool_call_count = None;
     latest_action_source = None;

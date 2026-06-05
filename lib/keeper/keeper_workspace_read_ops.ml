@@ -160,8 +160,10 @@ let try_handle
     | Error msg -> error_json ~fields:[ "op", `String op; "cwd", `String cwd ] msg
     | Ok result ->
       let cwd_response =
-        Keeper_cwd_response.docker ~host_cwd:cwd
-          ~container_cwd:
+        Keeper_cwd_response.of_sandbox
+          ~sandbox:(Keeper_sandbox.of_meta ~config ~meta)
+          ~host_cwd:cwd
+          ~container_cwd_for_docker:
             (Keeper_sandbox_runner.private_workspace_cwd ~config
                ~meta cwd)
       in
@@ -488,8 +490,10 @@ let try_handle
                    ~fields:[ "op", `String op; "cwd", `String cwd ] msg
                | Ok (st, out) ->
                  let cwd_response =
-                   Keeper_cwd_response.docker ~host_cwd:cwd
-                     ~container_cwd:
+                   Keeper_cwd_response.of_sandbox
+                     ~sandbox:(Keeper_sandbox.of_meta ~config ~meta)
+                     ~host_cwd:cwd
+                     ~container_cwd_for_docker:
                        (Keeper_turn_sandbox_runtime.container_cwd_of_host
                           runtime ~host_cwd:cwd)
                  in

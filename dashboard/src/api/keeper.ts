@@ -754,45 +754,16 @@ export interface KeeperRuntimeLensLifecycleAxis {
   terminal_status: string
 }
 
-export interface KeeperRuntimeLensToolSurfaceAxis {
-  requested_tools: string[]
-  required_tools: string[]
-  materialized_tools: string[]
-  missing_required_tools: string[]
-  turn_lane: string | null
-  tool_surface_class: string | null
-  tool_requirement: string | null
-  allowed_tool_count: number | null
-  tool_surface_fallback_used: boolean | null
-  terminal_status: string
-}
-
 export interface KeeperRuntimeLensProviderLaneAxis {
   resolved: boolean
   status: string | null
   resolved_lane: string | null
-  effective_tool_count: number | null
-  runtime_mcp_policy_present: boolean | null
-  required_tools: string[]
-  materialized_tools: string[]
-  missing_required_tools: string[]
 }
 
 export interface KeeperRuntimeLensProviderAttemptAxis {
   started_count: number
   finished_count: number
   terminal_status: string | null
-}
-
-export interface KeeperRuntimeLensToolLineageStage {
-  stage: string
-  tool_names: string[]
-  count: number
-}
-
-export interface KeeperRuntimeLensToolLineageAxis {
-  recorded: boolean
-  decision: Record<string, KeeperRuntimeLensToolLineageStage> | null
 }
 
 export interface KeeperRuntimeLensPayloadRoleAxis {
@@ -833,18 +804,6 @@ export interface KeeperRuntimeLensConfigDriftAxis {
   default_manifest_path: string | null
 }
 
-export interface KeeperRuntimeLensRuntimeProofAxis {
-  source: string
-  status: string
-  matched_tool_call_count: number
-  successful_tool_call_count: number
-  failed_tool_call_count: number
-  tools: string[]
-  successful_tools: string[]
-  failed_tools: string[]
-  latest_at: string | null
-}
-
 export interface KeeperRuntimeLensContextAxis {
   context_injected_count: number
   context_compacted_event_count: number
@@ -862,15 +821,12 @@ export interface KeeperRuntimeLensMemoryAxis extends KeeperRuntimeTraceMemorySum
 
 export interface KeeperRuntimeLensAxes {
   lifecycle: KeeperRuntimeLensLifecycleAxis
-  tool_surface: KeeperRuntimeLensToolSurfaceAxis
   provider_lane: KeeperRuntimeLensProviderLaneAxis
   provider_attempt: KeeperRuntimeLensProviderAttemptAxis
-  tool_lineage: KeeperRuntimeLensToolLineageAxis
   payload_role: KeeperRuntimeLensPayloadRoleAxis
   source_clock: KeeperRuntimeLensSourceClockAxis
   claim_scope: KeeperRuntimeLensClaimScopeAxis
   config_drift: KeeperRuntimeLensConfigDriftAxis
-  runtime_proof: KeeperRuntimeLensRuntimeProofAxis
   context: KeeperRuntimeLensContextAxis
   memory: KeeperRuntimeLensMemoryAxis
 }
@@ -1160,33 +1116,12 @@ function parseRuntimeLensLifecycleAxis(raw: unknown): KeeperRuntimeLensLifecycle
   }
 }
 
-function parseRuntimeLensToolSurfaceAxis(raw: unknown): KeeperRuntimeLensToolSurfaceAxis {
-  const obj = isRecord(raw) ? raw : {}
-  return {
-    requested_tools: stringListField(obj, 'requested_tools'),
-    required_tools: stringListField(obj, 'required_tools'),
-    materialized_tools: stringListField(obj, 'materialized_tools'),
-    missing_required_tools: stringListField(obj, 'missing_required_tools'),
-    turn_lane: nullableStringField(obj, 'turn_lane'),
-    tool_surface_class: nullableStringField(obj, 'tool_surface_class'),
-    tool_requirement: nullableStringField(obj, 'tool_requirement'),
-    allowed_tool_count: nullableNumberField(obj, 'allowed_tool_count'),
-    tool_surface_fallback_used: nullableBooleanField(obj, 'tool_surface_fallback_used'),
-    terminal_status: stringField(obj, 'terminal_status') || 'unknown',
-  }
-}
-
 function parseRuntimeLensProviderLaneAxis(raw: unknown): KeeperRuntimeLensProviderLaneAxis {
   const obj = isRecord(raw) ? raw : {}
   return {
     resolved: obj.resolved === true,
     status: nullableStringField(obj, 'status'),
     resolved_lane: nullableStringField(obj, 'resolved_lane'),
-    effective_tool_count: nullableNumberField(obj, 'effective_tool_count'),
-    runtime_mcp_policy_present: nullableBooleanField(obj, 'runtime_mcp_policy_present'),
-    required_tools: stringListField(obj, 'required_tools'),
-    materialized_tools: stringListField(obj, 'materialized_tools'),
-    missing_required_tools: stringListField(obj, 'missing_required_tools'),
   }
 }
 
@@ -1196,35 +1131,6 @@ function parseRuntimeLensProviderAttemptAxis(raw: unknown): KeeperRuntimeLensPro
     started_count: numberField(obj, 'started_count'),
     finished_count: numberField(obj, 'finished_count'),
     terminal_status: nullableStringField(obj, 'terminal_status'),
-  }
-}
-
-function parseRuntimeLensToolLineageStage(raw: unknown): KeeperRuntimeLensToolLineageStage {
-  const obj = isRecord(raw) ? raw : {}
-  return {
-    stage: stringField(obj, 'stage'),
-    tool_names: stringListField(obj, 'tool_names'),
-    count: numberField(obj, 'count'),
-  }
-}
-
-function parseRuntimeLensToolLineageAxis(raw: unknown): KeeperRuntimeLensToolLineageAxis {
-  const obj = isRecord(raw) ? raw : {}
-  const decisionRaw = obj.decision
-  let decision: Record<string, KeeperRuntimeLensToolLineageStage> | null = null
-  if (isRecord(decisionRaw)) {
-    const parsed: Record<string, KeeperRuntimeLensToolLineageStage> = {}
-    for (const key of Object.keys(decisionRaw)) {
-      const stage = parseRuntimeLensToolLineageStage(decisionRaw[key])
-      if (stage.stage !== '' || stage.count > 0 || stage.tool_names.length > 0) {
-        parsed[key] = stage
-      }
-    }
-    decision = Object.keys(parsed).length > 0 ? parsed : null
-  }
-  return {
-    recorded: obj.recorded === true,
-    decision,
   }
 }
 
@@ -1292,21 +1198,6 @@ function parseRuntimeLensConfigDriftAxis(raw: unknown): KeeperRuntimeLensConfigD
   }
 }
 
-function parseRuntimeLensRuntimeProofAxis(raw: unknown): KeeperRuntimeLensRuntimeProofAxis {
-  const obj = isRecord(raw) ? raw : {}
-  return {
-    source: stringField(obj, 'source') || 'keeper_tool_call_log',
-    status: stringField(obj, 'status') || 'missing',
-    matched_tool_call_count: numberField(obj, 'matched_tool_call_count'),
-    successful_tool_call_count: numberField(obj, 'successful_tool_call_count'),
-    failed_tool_call_count: numberField(obj, 'failed_tool_call_count'),
-    tools: stringListField(obj, 'tools'),
-    successful_tools: stringListField(obj, 'successful_tools'),
-    failed_tools: stringListField(obj, 'failed_tools'),
-    latest_at: nullableStringField(obj, 'latest_at'),
-  }
-}
-
 function parseRuntimeLensContextAxis(raw: unknown): KeeperRuntimeLensContextAxis {
   const obj = isRecord(raw) ? raw : {}
   return {
@@ -1327,15 +1218,12 @@ function parseRuntimeLensAxes(raw: unknown): KeeperRuntimeLensAxes {
   const obj = isRecord(raw) ? raw : {}
   return {
     lifecycle: parseRuntimeLensLifecycleAxis(obj.lifecycle),
-    tool_surface: parseRuntimeLensToolSurfaceAxis(obj.tool_surface),
     provider_lane: parseRuntimeLensProviderLaneAxis(obj.provider_lane),
     provider_attempt: parseRuntimeLensProviderAttemptAxis(obj.provider_attempt),
-    tool_lineage: parseRuntimeLensToolLineageAxis(obj.tool_lineage),
     payload_role: parseRuntimeLensPayloadRoleAxis(obj.payload_role),
     source_clock: parseRuntimeLensSourceClockAxis(obj.source_clock),
     claim_scope: parseRuntimeLensClaimScopeAxis(obj.claim_scope),
     config_drift: parseRuntimeLensConfigDriftAxis(obj.config_drift),
-    runtime_proof: parseRuntimeLensRuntimeProofAxis(obj.runtime_proof),
     context: parseRuntimeLensContextAxis(obj.context),
     memory: parseRuntimeTraceMemory(obj.memory),
   }

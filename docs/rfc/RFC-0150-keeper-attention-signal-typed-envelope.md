@@ -49,7 +49,7 @@ PR #16908 PR-1 ckpt-1(commit `be17dd75db`)이 이 4쌍을 dashboard `ATTENTION_P
 
 ```ocaml
 type attention_signal =
-  | Runtime_blocked of { blocker_class: string; runtime_proof_url: string option }
+  | Runtime_blocked of { blocker_class: string }
   | Paused_blocked of { since: float }
   | Provider_timeout of { elapsed_sec: float; budget_sec: float }
   | Social_model_fallback of { fallback_provider: string }

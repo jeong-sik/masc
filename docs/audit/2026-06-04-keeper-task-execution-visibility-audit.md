@@ -248,22 +248,21 @@ transition tool or another explicit task/comment tool. Keeper code must not
 treat PR URL or any single reference shape as the verification SSOT; evidence
 semantics live in the task/CDAL domain.
 
-### 9. Receipt and lineage
+### 9. Receipt
 
-The receipt records current task, goal IDs, requested/reported/observed/canonical
-tools, final tool surface metrics, materialized tools, sandbox root, network
-mode, approval profile, runtime, and context/memory injection sizes.
+The receipt records current task, goal IDs, sandbox root, network mode,
+approval profile, runtime, and context/memory injection sizes. Tool-call detail
+is kept in the tool call log instead of being reconstructed as requested,
+materialized, or lineage summary fields on the receipt.
 
 Code anchors:
 
-- `lib/keeper/keeper_agent_run_receipt.ml:154` - receipt fields
-- `lib/keeper/keeper_agent_run_receipt.ml:174` - requested/reported/observed tools
-- `lib/keeper/keeper_agent_run_receipt.ml:181` - tool surface summary
-- `lib/keeper/keeper_agent_run_receipt.ml:322` - tool lineage manifest
+- `lib/keeper/keeper_agent_run_receipt.ml` - receipt fields
+- `lib/keeper_tool_call_log.ml` - tool call log entries
 
-Finding: receipt and `Tool_lineage_recorded` reconstruct requested,
-materialized, emitted, observed, and verified tools. The fast diagnosis path
-should use those concrete evidence streams, not a separate candidate-list log.
+Finding: the old receipt lineage summary was removed. Fast diagnosis should read
+the concrete tool call log and hook/runtime events, not duplicate candidate-list
+or lineage projections.
 
 ## Visibility Matrix
 

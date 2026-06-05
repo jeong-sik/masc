@@ -248,8 +248,6 @@ let decision_pipeline_to_mermaid
     ~(phase : Keeper_state_machine.phase)
     ~(thompson_alpha : float)
     ~(thompson_beta : float)
-    ~(tool_count : int)
-    ~(recovery_floor_count : int)
     ()
     : string =
   let b = Buffer.create 512 in
@@ -268,9 +266,8 @@ let decision_pipeline_to_mermaid
   p "        ThompsonPenalty --> NormalOps: cap 1/cycle\n";
   p "    }\n";
   p "    state Failing {\n";
-  p "        [*] --> ToolRestricted\n";
-  p "        ToolRestricted --> TurnAttempt: recovery floor (%d tools)\n"
-    recovery_floor_count;
+  p "        [*] --> RecoveryPending\n";
+  p "        RecoveryPending --> TurnAttempt: recovery floor\n";
   p "        TurnAttempt --> TurnAttempt: turn fails\n";
   p "        TurnAttempt --> RecoveryReady: turn succeeds\n";
   p "    }\n";
@@ -301,7 +298,6 @@ let decision_pipeline_to_mermaid
   in
   p "    note right of Running\n";
   p "      Thompson: %.2f (α=%.1f β=%.1f)\n" score thompson_alpha thompson_beta;
-  p "      Tools: %d / floor %d\n" tool_count recovery_floor_count;
   p "      Level: %d\n" level;
   p "      Guard pen this cycle: %s\n" penalty_str;
   p "      Turn outcome: %s\n" outcome_str;

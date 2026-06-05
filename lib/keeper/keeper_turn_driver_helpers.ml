@@ -3,7 +3,7 @@
 
     These are top-level pure functions (no closures over outer state)
     that compute provider-attempt timeout bounds, health-key derivations,
-    tool-name aggregations, etc. Lifting them out of the 1459-LOC
+    lane labels, etc. Lifting them out of the 1459-LOC
     [keeper_turn_driver.ml] is a foundation step toward the eventual
     A/B/C decomposition (Agent SDK call / runtime strategy / keeper
     bookkeeping) deferred from RFC-0047 Phase 4.
@@ -11,17 +11,6 @@
     No behavior change. Mechanical extraction.
 
     @since RFC-0048 — keeper_turn_driver split, helpers slice *)
-
-let materialized_tool_names_after_lane ~effective_tools ~runtime_mcp_policy =
-  let inline_names =
-    List.map (fun (tool : Agent_sdk.Tool.t) -> tool.schema.name) effective_tools
-  in
-  let runtime_ids =
-    match runtime_mcp_policy with
-    | Some policy -> policy.Llm_provider.Llm_transport.allowed_tool_names
-    | None -> []
-  in
-  Json_util.dedupe_keep_order (inline_names @ runtime_ids)
 
 let resolved_tool_lane_label ~effective_tools ~runtime_mcp_policy =
   let inline_names =

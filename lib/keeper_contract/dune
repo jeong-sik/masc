@@ -4,9 +4,21 @@
  (name masc_keeper_contract)
  (public_name masc.keeper_contract)
  (wrapped false)
- (modules keeper_accountability_claim_types keeper_transition_audit_types keeper_turn_slot_types keeper_workspace_op keeper_world_observation_turn_types)
+ (modules
+  keeper_accountability_claim_types
+  keeper_transition_audit_types
+  keeper_turn_slot_types
+  keeper_workspace_op
+  keeper_world_observation_turn_types
+  keeper_approval_queue_rules_types
+  keeper_invariant
+  keeper_path_rejection)
  (libraries
-  masc.keeper_state
+  agent_sdk
+  eio
+  masc.keeper_registry
   masc.keeper_metrics
   masc.masc_core
+  masc.masc_types
+  unix
   yojson))

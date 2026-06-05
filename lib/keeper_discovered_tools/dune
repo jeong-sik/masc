@@ -1,8 +1,0 @@
-(include_subdirs no)
-
-(library
- (name masc_keeper_discovered_tools)
- (public_name masc.keeper_discovered_tools)
- (wrapped false)
- (modules keeper_discovered_tools)
- (libraries yojson))

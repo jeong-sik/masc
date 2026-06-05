@@ -4,5 +4,5 @@
  (libraries
   alcotest
   masc.keeper_failure_circuit_breaker_types
-  masc.keeper_path_rejection
+  masc.keeper_contract
   yojson))

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { parsePrometheusText } from './prometheus-metrics'
+import { parseOpenMetricsText } from './otel-metrics'
 
 const SAMPLE = `# HELP masc_uptime_seconds Server uptime in seconds
 # TYPE masc_uptime_seconds gauge
@@ -21,9 +21,9 @@ masc_inference_duration_seconds{quantile="0.99"} 5.67
 masc_sse_connections 3
 `
 
-describe('parsePrometheusText', () => {
+describe('parseOpenMetricsText', () => {
   it('parses HELP + TYPE + sample lines', () => {
-    const metrics = parsePrometheusText(SAMPLE)
+    const metrics = parseOpenMetricsText(SAMPLE)
     expect(metrics.length).toBe(5)
 
     const uptime = metrics.find(m => m.name === 'masc_uptime_seconds')!
@@ -34,7 +34,7 @@ describe('parsePrometheusText', () => {
   })
 
   it('parses labels from samples', () => {
-    const metrics = parsePrometheusText(SAMPLE)
+    const metrics = parseOpenMetricsText(SAMPLE)
     const heartbeat = metrics.find(m => m.name === 'masc_agent_heartbeat_age_seconds')!
     expect(heartbeat.samples.length).toBe(2)
     expect(heartbeat.samples[0]!.labels).toEqual({ keeper: 'janitor' })
@@ -42,8 +42,8 @@ describe('parsePrometheusText', () => {
   })
 
   it('handles empty input', () => {
-    expect(parsePrometheusText('')).toEqual([])
-    expect(parsePrometheusText('# only comments')).toEqual([])
+    expect(parseOpenMetricsText('')).toEqual([])
+    expect(parseOpenMetricsText('# only comments')).toEqual([])
   })
 })
 

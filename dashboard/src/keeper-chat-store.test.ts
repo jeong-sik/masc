@@ -62,7 +62,7 @@ describe('keeper-chat-store', () => {
 
       const buf = getChatMessageBuffer('keeper-c')
       expect(buf).toHaveLength(1)
-      expect(buf[0].content).toBe('new')
+      expect(buf[0]!.content).toBe('new')
     })
   })
 
@@ -113,7 +113,7 @@ describe('keeper-chat-store', () => {
       ])
 
       const buf = getChatMessageBuffer('keeper-g')
-      expect(buf[0].source).toBe('dashboard')
+      expect(buf[0]!.source).toBe('dashboard')
     })
   })
 
@@ -127,9 +127,9 @@ describe('keeper-chat-store', () => {
       flushStreamBuffer('keeper-i', 'partial response')
       const buf = getChatMessageBuffer('keeper-i')
       expect(buf).toHaveLength(1)
-      expect(buf[0].role).toBe('assistant')
-      expect(buf[0].content).toBe('partial response')
-      expect(buf[0].source).toBe('dashboard')
+      expect(buf[0]!.role).toBe('assistant')
+      expect(buf[0]!.content).toBe('partial response')
+      expect(buf[0]!.source).toBe('dashboard')
     })
   })
 })

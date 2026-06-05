@@ -118,7 +118,7 @@ let handle_sessions () =
 
 let handle_session_start ~(meta : keeper_meta) ~(args : Yojson.Safe.t) =
   let voice =
-    Safe_ops.json_string_opt "session_name" args
+    Safe_ops.json_string_opt "voice" args
     |> Option.map String.trim
     |> function
     | Some s when s <> "" -> Some s
@@ -130,11 +130,15 @@ let handle_session_start ~(meta : keeper_meta) ~(args : Yojson.Safe.t) =
 
 let handle_session_end ~(meta : keeper_meta) =
   let mgr = Keeper_voice_local.get_session_manager () in
+  let discarded_voice_queue_jobs =
+    Voice_bridge.discard_queued_agent_speak ~agent_id:meta.name
+  in
   let ended = Voice_session_manager.end_session mgr ~agent_id:meta.name in
   Yojson.Safe.to_string
     (`Assoc
         [ "status", `String (if ended then "ended" else "no_active_session")
         ; "agent_id", `String meta.name
+        ; "discarded_voice_queue_jobs", `Int discarded_voice_queue_jobs
         ])
 
 let handle ~(meta : keeper_meta) ~(command : voice_command) ~(args : Yojson.Safe.t) =

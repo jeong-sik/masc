@@ -7,7 +7,6 @@
     4. Empty commands are rejected *)
 
 module Workspace = Masc.Workspace
-module Keeper_meta_tool_access = Masc.Keeper_meta_tool_access
 module Exec_core = Masc.Exec_core
 module Keeper_tool_command_runtime = Masc.Keeper_tool_command_runtime
 module Keeper_registry = Masc.Keeper_registry

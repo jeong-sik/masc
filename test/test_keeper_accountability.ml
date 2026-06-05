@@ -675,7 +675,6 @@ let test_summary_json_memoizes_window_across_agents () =
 
 module A = Attribution
 module Keeper_meta_contract = Masc.Keeper_meta_contract
-module Keeper_meta_tool_access = Masc.Keeper_meta_tool_access
 module KA = Masc.Keeper_accountability
 
 let outcome_kind = function

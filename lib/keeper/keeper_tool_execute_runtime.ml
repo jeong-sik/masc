@@ -672,7 +672,7 @@ let handle_tool_execute
       | _ -> false
     in
     names
-    |> Keeper_meta_tool_access.normalize_tool_names
+    |> Keeper_meta_contract.normalize_tool_names
     |> List.exists is_write_enabled_candidate
   in
   let timeout_sec =

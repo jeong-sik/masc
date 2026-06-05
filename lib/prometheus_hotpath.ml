@@ -1,0 +1,1 @@
+include Masc_prometheus.Prometheus_hotpath

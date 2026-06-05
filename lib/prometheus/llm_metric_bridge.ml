@@ -333,6 +333,20 @@ let emit_tool_calls ~provider ~model_id ~count =
       ~delta:(Float.of_int count)
       ()
 
+type otel_event_attr = string * Yojson.Safe.t
+type otel_event_hook =
+  name:string -> attrs:otel_event_attr list -> unit -> unit
+
+let otel_event_hook : otel_event_hook option Atomic.t = Atomic.make None
+let set_otel_event_hook hook = Atomic.set otel_event_hook (Some hook)
+let clear_otel_event_hook () = Atomic.set otel_event_hook None
+
+let emit_otel_event ~name ~attrs () =
+  match Atomic.get otel_event_hook with
+  | None -> ()
+  | Some hook -> hook ~name ~attrs ()
+;;
+
 (** Validation outcome for a streaming or latency duration carried in
     milliseconds. Internal — kept out of [.mli] so callers stay
     byte-identical.
@@ -379,7 +393,7 @@ let emit_streaming_first_chunk ~provider ~model_id ~ttfrc_ms =
   remember_provider ~model_id ~provider;
   match classify_ms ttfrc_ms with
   | Ms_valid seconds ->
-    Otel_spans.add_event
+    emit_otel_event
       ~name:"ttfrc.received"
       ~attrs:
         [ "gen_ai.provider.name", `String provider
@@ -403,7 +417,7 @@ let emit_streaming_chunk ~provider ~model_id ~chunk_index ~inter_chunk_ms =
   remember_provider ~model_id ~provider;
   match classify_ms inter_chunk_ms with
   | Ms_valid seconds ->
-    Otel_spans.add_event
+    emit_otel_event
       ~name:"streaming.chunk"
       ~attrs:
         [ "gen_ai.provider.name", `String provider

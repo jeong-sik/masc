@@ -7,6 +7,8 @@
  (flags
   :standard
   -open
+  Masc_prometheus
+  -open
   Masc_json_field)
  (libraries yojson agent_sdk masc.masc_core masc.masc_types masc.prometheus masc.json_field)
  (preprocess

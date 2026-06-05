@@ -81,6 +81,19 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
      Without this call [guarded_dispatch] runs with the identity wrapper (no
      span / no [tool_dispatch_total] metric). *)
   Tool_dispatch.set_span_wrapper Tool_telemetry.with_span;
+  Llm_metric_bridge.set_otel_event_hook (fun ~name ~attrs () ->
+    let attrs =
+      List.map
+        (fun (key, value) ->
+          match value with
+          | `String s -> key, `String s
+          | `Float f -> key, `Float f
+          | `Int i -> key, `Int i
+          | `Bool b -> key, `Bool b
+          | other -> key, `String (Yojson.Safe.to_string other))
+        attrs
+    in
+    Otel_spans.add_event ~name ~attrs ());
   Otel_spans.setup_exporter ~sw env;
   Shutdown.register ~name:"otel_exporter" ~priority:20 Otel_spans.shutdown;
   (* Board_listener removed: filesystem-first principle.

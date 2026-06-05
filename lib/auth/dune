@@ -4,6 +4,10 @@
  (name masc_auth)
  (public_name masc.auth)
  (wrapped false)
+ (flags
+  :standard
+  -open
+  Masc_prometheus)
  (libraries
   yojson
   unix
@@ -20,6 +24,8 @@
   masc.fs_compat
   masc.masc_log
   time_compat
+  masc.tool_types
+  masc.masc_tool_dispatch
   masc.prometheus)
  (preprocess
   (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq)))

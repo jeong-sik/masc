@@ -1,5 +1,4 @@
 module Bridge = Masc.Llm_metric_bridge
-module Otel_spans = Masc.Otel_spans
 module Prom = Masc.Prometheus
 
 let metric name ~labels =
@@ -303,9 +302,11 @@ let test_streaming_callbacks_emit_otel_events () =
   let events = ref [] in
   let provider = "bridge-otel-provider" in
   let model_id = Printf.sprintf "bridge-otel-model-%d" (Unix.getpid ()) in
-  Otel_spans.with_test_event_emitter ~enabled:true
-    ~emit_event:(fun ~name ~attrs -> events := (name, attrs) :: !events)
+  Fun.protect
+    ~finally:Bridge.clear_otel_event_hook
     (fun () ->
+       Bridge.set_otel_event_hook (fun ~name ~attrs () ->
+         events := (name, attrs) :: !events);
        Bridge.emit_streaming_first_chunk ~provider ~model_id ~ttfrc_ms:25.0;
        Bridge.emit_streaming_chunk
          ~provider ~model_id ~chunk_index:3 ~inter_chunk_ms:7.5);

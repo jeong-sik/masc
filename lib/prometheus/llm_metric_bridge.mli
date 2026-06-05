@@ -77,6 +77,13 @@ val emit_streaming_chunk :
   inter_chunk_ms:float ->
   unit
 
+type otel_event_attr = string * Yojson.Safe.t
+type otel_event_hook =
+  name:string -> attrs:otel_event_attr list -> unit -> unit
+
+val set_otel_event_hook : otel_event_hook -> unit
+val clear_otel_event_hook : unit -> unit
+
 (** Canonical metric name for the §7.3.2 unified fallback counter. *)
 val fallback_triggered_metric : string
 

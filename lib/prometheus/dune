@@ -3,7 +3,6 @@
 (library
  (name masc_prometheus)
  (public_name masc.prometheus)
- (wrapped false)
  (flags
   :standard
   -open
@@ -22,6 +21,10 @@
   masc.masc_log
   agent_sdk
   agent_sdk.llm_provider
+  masc.masc_types
+  masc.fd_accountant
+  masc.masc_process
+  masc.otel_metrics
   masc.keeper_metrics
   masc.pool_metrics
   masc.config_dir_resolver

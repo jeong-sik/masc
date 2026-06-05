@@ -1,0 +1,3 @@
+include module type of struct
+  include Masc_prometheus.Prometheus_hotpath
+end

@@ -2,7 +2,7 @@
 
 open Masc_domain
 
-let schema_inventory = Masc.Tools.all_schemas_extended
+let schema_inventory = Tools.all_schemas_extended
 let registered_schema_inventory = Masc.Config.raw_all_tool_schemas
 
 let find_schema_in schemas name =

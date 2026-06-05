@@ -2,6 +2,8 @@
 (library
  (name masc)
  (public_name masc)
+ (flags
+  (:standard -open Masc_prometheus -open Masc_auth -open Masc_runtime -open Masc_json_field -open Masc_lockfree_atomic -open Masc_keeper_metrics -open Masc_pool_metrics))
  (foreign_stubs
   (language c)
   (names nofile_stubs))
@@ -28,14 +30,12 @@
  keeper_turn_metrics_snapshot_failure_site
  keeper_metric_emit_dropped_site
  keeper_post_turn_wirein_failure_site
- silent_dashboard_actor_outcome
  sse_jsonrpc_filter
  keeper_tool_call_log_context
 
  board_prometheus_hooks
  workspace_prometheus_hooks
 
- keeper_persona_authoring_contract
  keeper_types_profile_sandbox
  keeper_types_profile_persona keeper_types_profile_persona_defaults
  keeper_types_profile_oas_env
@@ -289,6 +289,10 @@
      masc.prometheus
      masc.auth
      masc.fd_accountant
+     masc.keeper_metrics
+     masc.pool_metrics
+     masc.lockfree_atomic
+     masc.json_field
    ;; Model_inference_metrics facade + decomposition siblings extracted to
    ;; lib/model_inference_metrics/. Parent still references the bare facade.
    masc.model_inference_metrics

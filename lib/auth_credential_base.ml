@@ -1,0 +1,1 @@
+include Masc_auth.Auth_credential_base

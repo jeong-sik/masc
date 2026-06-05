@@ -17,6 +17,9 @@
 
     @since 0.4.x (telemetry chain: oas#804 + oas#807) *)
 
+let otel_add_event_hook = ref (fun ~name:_ ~attrs:_ () -> ())
+let set_otel_add_event_hook f = otel_add_event_hook := f
+
 (** Canonical metric name for provider HTTP response counts.
 
     Label cardinality (practical upper bound as of v0.4.x):
@@ -379,7 +382,7 @@ let emit_streaming_first_chunk ~provider ~model_id ~ttfrc_ms =
   remember_provider ~model_id ~provider;
   match classify_ms ttfrc_ms with
   | Ms_valid seconds ->
-    Otel_spans.add_event
+    !otel_add_event_hook
       ~name:"ttfrc.received"
       ~attrs:
         [ "gen_ai.provider.name", `String provider
@@ -403,7 +406,7 @@ let emit_streaming_chunk ~provider ~model_id ~chunk_index ~inter_chunk_ms =
   remember_provider ~model_id ~provider;
   match classify_ms inter_chunk_ms with
   | Ms_valid seconds ->
-    Otel_spans.add_event
+    !otel_add_event_hook
       ~name:"streaming.chunk"
       ~attrs:
         [ "gen_ai.provider.name", `String provider

@@ -11,6 +11,25 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 
+let translate_detail (d : Keeper_turn_driver.no_tool_capable_detail option) : no_tool_capable_detail option =
+  match d with
+  | None -> None
+  | Some { Keeper_turn_driver.configured_labels; provider_rejections } ->
+    Some { configured_labels; provider_rejections }
+
+let translate_reason (r : Keeper_turn_driver.runtime_exhaustion_reason) : runtime_exhaustion_reason =
+  match r with
+  | Keeper_turn_driver.Connection_refused -> Connection_refused
+  | Keeper_turn_driver.Dns_failure -> Dns_failure
+  | Keeper_turn_driver.No_providers_available -> No_providers_available
+  | Keeper_turn_driver.All_providers_failed -> All_providers_failed
+  | Keeper_turn_driver.Candidates_filtered_after_cycles -> Candidates_filtered_after_cycles
+  | Keeper_turn_driver.Max_turns_exceeded -> Max_turns_exceeded
+  | Keeper_turn_driver.Structural_attempt_timeout { detail } -> Structural_attempt_timeout { detail }
+  | Keeper_turn_driver.Capacity_exhausted -> Capacity_exhausted
+  | Keeper_turn_driver.No_tool_capable detail -> No_tool_capable (translate_detail detail)
+  | Keeper_turn_driver.Other_detail s -> Other_detail s
+
 let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class option =
   match Keeper_error_classify.recoverable_runtime_failure_reason err with
   | Some Keeper_error_classify.Capacity_backpressure -> Some Capacity_backpressure
@@ -18,7 +37,7 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
   match Keeper_turn_driver.classify_masc_internal_error err with
   | Some (Keeper_turn_driver.Capacity_backpressure _) -> Some Capacity_backpressure
   | Some (Keeper_turn_driver.Runtime_exhausted { reason; _ }) ->
-    Some (Runtime_exhausted reason)
+    Some (Runtime_exhausted (translate_reason reason))
   | Some (Keeper_turn_driver.Resumable_cli_session _) -> None
   | Some (Keeper_turn_driver.Accept_rejected _) -> None
   | Some (Keeper_turn_driver.Admission_queue_timeout _) ->

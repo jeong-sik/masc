@@ -10,6 +10,7 @@ module Types = Masc_domain
     loop integration tests (which require Eio fibers + Workspace I/O). *)
 
 open Alcotest
+open Masc
 module HS = Masc.Keeper_heartbeat_smart
 
 (* ── agent_status derivation from keeper_meta fields ─── *)
@@ -330,13 +331,13 @@ let test_skip_idle_wake_resumed_metric_registered () =
   let labels = [ ("keeper", "test_keeper_a") ] in
   let before =
     Prom.metric_value_or_zero
-      Masc.Keeper_metrics.(to_string SkipIdleWakeResumed) ~labels ()
+      Keeper_metrics.(to_string SkipIdleWakeResumed) ~labels ()
   in
   Prom.inc_counter
-    Masc.Keeper_metrics.(to_string SkipIdleWakeResumed) ~labels ();
+    Keeper_metrics.(to_string SkipIdleWakeResumed) ~labels ();
   let after =
     Prom.metric_value_or_zero
-      Masc.Keeper_metrics.(to_string SkipIdleWakeResumed) ~labels ()
+      Keeper_metrics.(to_string SkipIdleWakeResumed) ~labels ()
   in
   check (float 0.001) "counter increments by 1" 1.0 (after -. before)
 

@@ -387,21 +387,6 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
         ]
   | "keeper_tool_search" ->
       `Assoc [ ("query", `String "tool matrix") ]
-  | "keeper_ide_annotate" ->
-      `Assoc
-        [
-          ("file_path", `String "keeper-tool-matrix.txt");
-          ("line_start", `Int 1);
-          ("kind", `String "Comment");
-          ("content", `String "tool matrix annotation");
-        ]
-  | "keeper_memory_write" ->
-      `Assoc
-        [
-          ("kind", `String "constraints");
-          ("title", `String "tool matrix constraint");
-          ("content", `String "tool matrix constraint details");
-        ]
   | other -> failwith ("missing keeper arguments contract for " ^ other)
 
 let keeper_expectation_for_name name =

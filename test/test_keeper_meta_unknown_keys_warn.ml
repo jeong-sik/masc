@@ -17,7 +17,7 @@
 open Masc
 
 let counter_total () =
-  Prometheus.metric_total Masc.Keeper_metrics.(to_string MetaJsonFailures)
+  Prometheus.metric_total Keeper_metrics.(to_string MetaJsonFailures)
 
 let canonical_only_meta_json () =
   (* Build an `Assoc whose every key is in [canonical_keeper_meta_key_names].

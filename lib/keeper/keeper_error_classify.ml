@@ -191,15 +191,15 @@ let is_auto_recoverable_runtime_exhausted_error (err : Agent_sdk.Error.sdk_error
   match Keeper_turn_driver.classify_masc_internal_error err with
   | Some
       (Keeper_turn_driver.Runtime_exhausted
-         { reason = Keeper_meta_contract.Candidates_filtered_after_cycles; _ }) ->
+         { reason = Keeper_turn_driver.Candidates_filtered_after_cycles; _ }) ->
       true
   | Some
       (Keeper_turn_driver.Runtime_exhausted
-         { reason = Keeper_meta_contract.Max_turns_exceeded; _ }) ->
+         { reason = Keeper_turn_driver.Max_turns_exceeded; _ }) ->
       true
   | Some
       (Keeper_turn_driver.Runtime_exhausted
-         { reason = Keeper_meta_contract.Capacity_exhausted; _ }) ->
+         { reason = Keeper_turn_driver.Capacity_exhausted; _ }) ->
       true
   | Some (Keeper_turn_driver.Capacity_backpressure _) ->
       true
@@ -353,15 +353,15 @@ let degraded_retry_after_recoverable_error
         phase_recovery_retry Capacity_backpressure
     | Some
         (Keeper_turn_driver.Runtime_exhausted
-           { reason = Keeper_meta_contract.Capacity_exhausted; _ }) ->
+           { reason = Keeper_turn_driver.Capacity_exhausted; _ }) ->
         phase_recovery_retry Capacity_backpressure
     | Some
         (Keeper_turn_driver.Runtime_exhausted
-           { reason = Keeper_meta_contract.Candidates_filtered_after_cycles; _ }) ->
+           { reason = Keeper_turn_driver.Candidates_filtered_after_cycles; _ }) ->
         phase_recovery_retry Runtime_candidates_filtered
     | Some
         (Keeper_turn_driver.Runtime_exhausted
-           { reason = Keeper_meta_contract.Max_turns_exceeded; _ }) ->
+           { reason = Keeper_turn_driver.Max_turns_exceeded; _ }) ->
         phase_recovery_retry Max_turns
     | Some (Keeper_turn_driver.Runtime_exhausted _)
     | Some (Keeper_turn_driver.Accept_rejected _)
@@ -398,15 +398,15 @@ let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
         Some Capacity_backpressure
     | Some
         (Keeper_turn_driver.Runtime_exhausted
-           { reason = Keeper_meta_contract.Capacity_exhausted; _ }) ->
+           { reason = Keeper_turn_driver.Capacity_exhausted; _ }) ->
         Some Capacity_backpressure
     | Some
         (Keeper_turn_driver.Runtime_exhausted
-           { reason = Keeper_meta_contract.Candidates_filtered_after_cycles; _ }) ->
+           { reason = Keeper_turn_driver.Candidates_filtered_after_cycles; _ }) ->
         Some Runtime_candidates_filtered
     | Some
         (Keeper_turn_driver.Runtime_exhausted
-           { reason = Keeper_meta_contract.Max_turns_exceeded; _ }) ->
+           { reason = Keeper_turn_driver.Max_turns_exceeded; _ }) ->
         Some Max_turns
     | Some (Keeper_turn_driver.Runtime_exhausted _) ->
         (* Generic runtime exhaustion: all candidates failed without a more

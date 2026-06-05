@@ -15,6 +15,8 @@
     label shape so a future refactor cannot silently flip the
     cardinality or rename the labels. *)
 
+open Masc
+
 let () =
   let dir =
     Filename.concat
@@ -28,7 +30,7 @@ module Prom = Masc.Prometheus
 
 let noop_for ~keeper ~trigger =
   Prom.metric_value_or_zero
-    Masc.Keeper_metrics.(to_string CompactionNoop)
+    Keeper_metrics.(to_string CompactionNoop)
     ~labels:[ "keeper", keeper; "trigger", trigger ]
     ()
 ;;

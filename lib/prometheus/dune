@@ -3,18 +3,30 @@
 (library
  (name masc_prometheus)
  (public_name masc.prometheus)
- (wrapped false)
+ (wrapped true)
+ (flags
+  (:standard -open Masc_keeper_metrics -open Masc_pool_metrics))
  (libraries
   yojson
   unix
   logs
   time_compat
   masc.masc_core
+  masc.masc_types
   mtime
+  mtime.clock.os
   masc.config
   eio
   masc.masc_log
   agent_sdk
-  agent_sdk.llm_provider)
+  agent_sdk.llm_provider
+  masc.keeper_metrics
+  masc.pool_metrics
+  masc.dated_jsonl
+  masc.fd_accountant
+  masc.masc_process
+  masc.config_dir_resolver
+  masc.otel_metrics
+  masc.fs_compat)
  (preprocess
   (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq)))

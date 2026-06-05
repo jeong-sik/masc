@@ -127,43 +127,18 @@ type usage_metrics = {
 
 (** {1 Blocker classification} *)
 
-type no_tool_capable_detail =
-  { configured_labels : string list
-  ; provider_rejections : (string * string) list
-  }
-
-type runtime_exhaustion_reason =
+type no_tool_capable_detail = Keeper_internal_error.no_tool_capable_detail
+type runtime_exhaustion_reason = Keeper_internal_error.runtime_exhaustion_reason =
   | Connection_refused
   | Dns_failure
-      (** RFC-0142 PR-2: typed surface for hostname-resolution failure.
-          Closes the dominant Other_detail share (50% live on 5/21,
-          "failed to resolve hostname: ...") by mapping the existing
-          [Llm_provider.Http_client.network_error_kind.Dns_failure] kind
-          directly to a typed runtime reason instead of routing through
-          the substring SSOT. *)
   | No_providers_available
   | All_providers_failed
   | Candidates_filtered_after_cycles
   | Max_turns_exceeded
   | Structural_attempt_timeout of { detail : string }
-      (** Agent SDK [with_optional_timeout] wrapper fired its per-OAS-call
-          ceiling ([max_execution_time_s]). Distinct from transport-level
-          provider timeouts. This variant is accepted only from typed
-          envelopes; free-form messages stay [Other_detail]. *)
   | Capacity_exhausted
-      (** Typed surface for capacity-induced runtime exhaustion.
-          Previously [ProviderFailure { kind = Capacity_exhausted _ }] fell
-          through to [Other_detail message], losing auto-recovery eligibility
-          and triggering the harsher failure policy. *)
   | No_tool_capable of no_tool_capable_detail option
-      (** Runtime exhausted because no configured provider can satisfy the
-          requested tool surface.  Previously a standalone [blocker_class] variant;
-          reclassified here because the runtime rotation filtered all candidates
-          before dispatch — a semantic subset of runtime exhaustion.
-          The optional detail carries telemetry from the former
-          [No_tool_capable_provider] variant of [masc_internal_error]. *)
   | Other_detail of string
-
 type blocker_class =
   | Runtime_exhausted of runtime_exhaustion_reason
   | Capacity_backpressure

@@ -8,6 +8,7 @@
  (package masc)
  (libraries
   masc
+  masc.auth
   masc.dashboard
   masc.operator
   masc.server

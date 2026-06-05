@@ -5,7 +5,8 @@
  (public_name masc.server)
  (wrapped false)
  (private_modules keeper_grpc_heartbeat)
- (flags :standard -open Masc)
+ (flags
+  (:standard -open Masc -open Masc_prometheus -open Masc_auth -open Masc_runtime -open Masc_json_field -open Masc_lockfree_atomic -open Masc_keeper_metrics -open Masc_pool_metrics))
  (libraries
   masc
   masc.dashboard
@@ -149,7 +150,18 @@
   masc.resilience
   masc.multimodal
   masc.repo_manager
-  masc.parse_outcome)
+  masc.parse_outcome
+  masc.runtime
+  masc.masc_event_bus
+  masc.provider_tool_support
+  masc.keeper_internal_error
+  masc.prometheus
+  masc.auth
+  masc.fd_accountant
+  masc.keeper_metrics
+  masc.pool_metrics
+  masc.lockfree_atomic
+  masc.json_field)
  (preprocess
   (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq ppx_let ppx_tla))
  (instrumentation

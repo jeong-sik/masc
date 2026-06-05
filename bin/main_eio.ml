@@ -29,7 +29,7 @@ module Dashboard_briefing = Dashboard_briefing
 (* module Dashboard_proof removed *)
 module Dashboard_briefing_sections = Dashboard_briefing_sections
 module Build_identity = Masc.Build_identity
-module Auth_login = Masc.Auth_login
+module Auth_login = Masc_auth.Auth_login
 module Keeper_id = Masc.Keeper_id
 module Keeper_msg_async = Masc.Keeper_msg_async
 module Keeper_status_bridge = Masc.Keeper_status_bridge
@@ -37,7 +37,7 @@ module Keeper_tool_call_log = Masc.Keeper_tool_call_log
 module Graphql_api = Masc.Graphql_api
 module Types = Masc_domain
 module Tempo = Masc.Tempo
-module Auth = Masc.Auth
+module Auth = Masc_auth.Auth
 module Board = Masc.Board
 module Board_curation = Masc.Board_curation
 module Board_dispatch = Masc.Board_dispatch

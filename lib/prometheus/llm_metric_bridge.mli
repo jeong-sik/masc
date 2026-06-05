@@ -102,3 +102,6 @@ val init : base_path:string -> unit
     Idempotent; should be called once during server bootstrap
     before any keeper turn fires its first LLM call. *)
 val install : unit -> unit
+
+val set_otel_add_event_hook :
+  (name:string -> attrs:(string * [ `String of string | `Float of float | `Int of int ]) list -> unit -> unit) -> unit

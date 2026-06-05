@@ -3,8 +3,9 @@
 (library
  (name masc_runtime)
  (public_name masc.runtime)
- (wrapped false)
- (flags :standard)
+ (wrapped true)
+ (flags
+  (:standard -open Masc_prometheus -open Masc_auth))
  (libraries
   yojson
   otoml

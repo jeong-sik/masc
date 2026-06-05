@@ -417,6 +417,9 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
          call (e.g. a warmup probe, early keeper fiber) to capture
          the default noop sink instead of the Prometheus-backed one. *)
       Llm_metric_bridge.install ();
+      Llm_metric_bridge.set_otel_add_event_hook (fun ~name ~attrs () ->
+        let otel_attrs = List.map (fun (k, v) -> (k, (v :> Opentelemetry.value))) attrs in
+        Otel_spans.add_event ~name ~attrs:otel_attrs ());
       Llm_metric_bridge.init ~base_path;
       Log.Server.info "Llm_metric_bridge installed (masc_llm_provider_http_status_total, inference-events JSONL)";
       (* #13885: install backend mutex observers from the top-level

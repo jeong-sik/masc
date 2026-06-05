@@ -26,6 +26,8 @@
    line, gauge sets before AND after each beat.
 *)
 
+open Masc
+
 let () =
   let dir =
     Filename.concat
@@ -40,14 +42,14 @@ module Prom = Masc.Prometheus
 
 let starts_for ~base_path =
   Prom.metric_value_or_zero
-    Masc.Keeper_metrics.(to_string SupervisorSweepStarts)
+    Keeper_metrics.(to_string SupervisorSweepStarts)
     ~labels:[ "base_path", base_path ]
     ()
 ;;
 
 let last_sweep_for ~base_path =
   Prom.get_metric_value
-    Masc.Keeper_metrics.(to_string SupervisorLastSweepUnixtime)
+    Keeper_metrics.(to_string SupervisorLastSweepUnixtime)
     ~labels:[ "base_path", base_path ]
     ()
 ;;

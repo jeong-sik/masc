@@ -282,6 +282,13 @@ let run (ctx : ctx)
           ~remaining_turn_budget_s:(remaining_turn_budget_s ())
       with
       | None ->
+        let translate_denial (d : Keeper_internal_error.retry_admission_denial) : Keeper_turn_driver.retry_admission_denial =
+          match d with
+          | Keeper_internal_error.Retry_budget_below_min { projected_usable_budget_s; min_required_s; remaining_turn_budget_s; adaptive_timeout_s; allow_wall_clock_retry_budget } ->
+            Keeper_turn_driver.Retry_budget_below_min { projected_usable_budget_s; min_required_s; remaining_turn_budget_s; adaptive_timeout_s; allow_wall_clock_retry_budget }
+          | Keeper_internal_error.First_attempt_budget_below_min { projected_usable_budget_s; min_required_s; remaining_turn_budget_s } ->
+            Keeper_turn_driver.First_attempt_budget_below_min { projected_usable_budget_s; min_required_s; remaining_turn_budget_s }
+        in
         let remaining_turn_budget_sec =
           remaining_turn_budget_s ()
         in
@@ -303,7 +310,7 @@ let run (ctx : ctx)
             (Keeper_turn_driver.sdk_error_of_masc_internal_error
                (Keeper_turn_driver.Retry_admission_denied
                   {
-                    denial_reason = denial;
+                    denial_reason = translate_denial denial;
                     is_retry;
                   }))
         | Ok () ->

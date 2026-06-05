@@ -5,6 +5,8 @@
 
 (library
  (name masc_test_deps)
+ (flags
+  (:standard))
  (foreign_stubs
   (language c)
   (names test_env_stubs))
@@ -109,6 +111,10 @@
   (re_export masc.keeper_internal_error)
   (re_export masc.prometheus)
   (re_export masc.auth)
+  (re_export masc.json_field)
+  (re_export masc.lockfree_atomic)
+  (re_export masc.keeper_metrics)
+  (re_export masc.pool_metrics)
   (re_export masc.fd_accountant)
   (re_export masc.response)
   (re_export masc.shared_audit)

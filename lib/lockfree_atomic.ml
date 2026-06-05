@@ -1,0 +1,1 @@
+include Masc_lockfree_atomic.Lockfree_atomic

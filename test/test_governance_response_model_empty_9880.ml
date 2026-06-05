@@ -8,6 +8,8 @@
     degrade into a metric-only smoke test that never proves
     [model_used] is actually filled. *)
 
+open Masc
+
 let () =
   let dir =
     Filename.concat

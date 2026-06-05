@@ -1,0 +1,7 @@
+(include_subdirs no)
+
+(library
+ (name masc_keeper_metrics)
+ (public_name masc.keeper_metrics)
+ (wrapped true)
+ (libraries))

@@ -48,7 +48,7 @@ print_first_lines() {
 file_has_telemetry_reference() {
   local path="$1"
   [ -f "$path" ] || return 1
-  rg -q 'Metrics_store_eio|Log\.[A-Za-z_]+|telemetry|Prometheus\.|metric_' "$path"
+  rg -q 'Metrics_store_eio|Otel(_|\.)|Log\.[A-Za-z_]+|telemetry|metric_' "$path"
 }
 
 is_action_handler_line() {
@@ -128,7 +128,7 @@ scan_new_action_handlers_without_telemetry() {
     echo "FAIL: new significant action handler has no visible telemetry in its file:"
     printf '%s\n' "${failures[@]}" | print_first_lines 40
     echo
-    echo "Add Metrics_store_eio/Log/Prometheus telemetry, or add a nearby TEL-OK comment with rationale."
+    echo "Add Metrics_store_eio/Log/OTel telemetry, or add a nearby TEL-OK comment with rationale."
     return 1
   fi
 

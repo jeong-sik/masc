@@ -9,7 +9,7 @@
 val metric_oas_bridge_timeout : string
 
 (** Labelled [caller, bucket] where bucket is a wall-clock class shared with
-    [masc_keeper_oas_cancel_total], allowing PromQL to union the two sources
+    [masc_keeper_oas_cancel_total], allowing backend queries to union the two sources
     for a fleet-wide bimodal view. *)
 val metric_oas_bridge_cancel : string
 

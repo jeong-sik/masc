@@ -11,11 +11,11 @@
 # Operating context (per RFC PR-0.2 Q&A):
 #   - 12+ keepers on a single Railway instance.
 #   - 50+ keepers is aspirational, not the baseline target.
-#   - Prometheus scrape is local to this script (curl /metrics);
-#     external Prometheus/Grafana wiring is out of scope.
+#   - OTel metric text is fetched locally from /metrics;
+#     external dashboard wiring is out of scope.
 #
 # Sources:
-#   - lib/prometheus.ml + /metrics endpoint  (counters/gauges/histograms)
+#   - OTel metric store + /metrics endpoint  (counters/gauges/histograms)
 #   - lib/core/masc_runtime_events.ml        (turn span events for olly)
 #   - benchmarks/quick-bench.sh              (MCP latency lanes)
 #
@@ -104,7 +104,7 @@ server_reachable() {
 }
 
 # ---------------------------------------------------------------------------
-# Prometheus helpers
+# Metric text helpers
 # ---------------------------------------------------------------------------
 
 # fetch_metrics: dump /metrics to a file. Aborts on HTTP failure.
@@ -340,7 +340,7 @@ section_gc_rss() {
 | host_rss_kb (pid=${pid:-?}) | ps/proc | ${rss_kb:-unavailable} |
 
 OCaml GC stats (minor pause P99, major pause P99, heap_words,
-live_words) are **not registered** in \`lib/prometheus.ml\` today.
+live_words) are **not exported through the OTel metric store** today.
 Phase 0.2.D: wire \`Gc.quick_stat\` into a periodic gauge sampler so
 that minor/major pause distributions become first-class metrics.
 Until then, treat host RSS as a coarse placeholder.

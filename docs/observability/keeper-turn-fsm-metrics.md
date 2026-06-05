@@ -62,11 +62,11 @@ Bumped exactly once per `Keeper_turn_fsm.emit_transition` call.
 
 ### Distinct from `masc_keeper_fsm_edge_transitions_total`
 
-The older counter encodes **cross sub-FSM** edges (`ksm_to_kcl_routing`, `kmc_to_ksm_compact_completed`, etc.) used by `docs/keeper-fsm-graph.dot`. It is a different abstraction level — sub-FSM coupling vs. typed turn-state ADT. Both counters live alongside; PromQL filters should pick the one whose vocabulary matches the question.
+The older counter encodes **cross sub-FSM** edges (`ksm_to_kcl_routing`, `kmc_to_ksm_compact_completed`, etc.) used by `docs/keeper-fsm-graph.dot`. It is a different abstraction level — sub-FSM coupling vs. typed turn-state ADT. Both counters live alongside; backend query filters should pick the one whose vocabulary matches the question.
 
-## PromQL examples
+## Backend Query Examples
 
-```promql
+```text
 # Phase-gate skip rate per keeper (5m window).
 rate(masc_keeper_turn_fsm_transitions_total{
   from="phase_gating", to="done"

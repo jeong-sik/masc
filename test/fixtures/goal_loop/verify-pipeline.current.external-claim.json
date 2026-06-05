@@ -27,7 +27,7 @@
         "metric_snapshot_key": "keeper_turn_success_rate",
         "metric_source": "GOAL_LOOP_METRICS_JSON (--metrics-json)",
         "predicate": "> 0.95",
-        "prometheus_sources": [
+        "metric_series_sources": [
           "masc_keeper_turns_total"
         ],
         "value": null
@@ -49,7 +49,7 @@
         "metric_snapshot_key": "keeper_skipping_turn_rate_5m",
         "metric_source": "GOAL_LOOP_METRICS_JSON (--metrics-json)",
         "predicate": "== 0",
-        "prometheus_sources": [
+        "metric_series_sources": [
           "masc_keeper_semaphore_wait_timeout_total"
         ],
         "value": null
@@ -71,7 +71,7 @@
         "metric_snapshot_key": "pricing_catalog_miss_total",
         "metric_source": "GOAL_LOOP_METRICS_JSON (--metrics-json)",
         "predicate": "== 0",
-        "prometheus_sources": [
+        "metric_series_sources": [
           "masc_pricing_catalog_miss_total"
         ],
         "value": null
@@ -93,7 +93,7 @@
         "metric_snapshot_key": "persistence_utf8_repair_total",
         "metric_source": "GOAL_LOOP_METRICS_JSON (--metrics-json)",
         "predicate": "== 0",
-        "prometheus_sources": [
+        "metric_series_sources": [
           "masc_persistence_utf8_repair_total"
         ],
         "value": null
@@ -115,7 +115,7 @@
         "metric_snapshot_key": "recovery_strategy_executed_total_1h",
         "metric_source": "GOAL_LOOP_METRICS_JSON (--metrics-json)",
         "predicate": "> 0",
-        "prometheus_sources": [],
+        "metric_series_sources": [],
         "value": null
       },
       "gate_id": "recovery_executed",
@@ -135,7 +135,7 @@
         "admission_queue_wait_ms": null,
         "metric_source": "GOAL_LOOP_METRICS_JSON (--metrics-json)",
         "predicate": "admission_queue_depth > 0 || admission_queue_wait_ms > 0",
-        "prometheus_sources": {
+        "metric_series_sources": {
           "admission_queue_depth": [
             "masc_inference_queue_depth"
           ],
@@ -161,7 +161,7 @@
         "metric_snapshot_key": "dashboard_snapshot_latency_p99",
         "metric_source": "GOAL_LOOP_METRICS_JSON (--metrics-json)",
         "predicate": "< 5.0",
-        "prometheus_sources": [
+        "metric_series_sources": [
           "masc_dashboard_snapshot_latency_seconds_bucket"
         ],
         "value": null
@@ -185,7 +185,7 @@
         "metric_snapshot_key": "orient_recheck_still_present",
         "metric_source": "GOAL_LOOP_METRICS_JSON (--metrics-json)",
         "predicate": "== 0",
-        "prometheus_sources": [],
+        "metric_series_sources": [],
         "value": null
       },
       "gate_id": "orient_recheck_no_still_present",
@@ -207,7 +207,7 @@
         "metric_snapshot_key": "orient_recheck_new_finding",
         "metric_source": "GOAL_LOOP_METRICS_JSON (--metrics-json)",
         "predicate": "== 0",
-        "prometheus_sources": [],
+        "metric_series_sources": [],
         "value": null
       },
       "gate_id": "orient_recheck_no_new_finding",

@@ -307,7 +307,7 @@ let run_keeper_cycle
                let turn_event_bus_state =
                  Keeper_unified_turn_event_bus.create ~keeper_name:meta.name ()
                in
-               (* PR-J: [?site] labels the call-site so PromQL can attribute
+               (* PR-J: [?site] labels the call-site so metric queries can attribute
          drain pressure to background polling vs unsubscribe vs the
          retry path. [outcome=drained] when at least one event was
          pulled, [outcome=empty] otherwise (the latter is the no-op

@@ -119,9 +119,9 @@ let apply_result_transformer (r : Tool_result.result) : Tool_result.result =
 
 (** Dispatch span wrapper surface.
 
-    The OTel/Prometheus 4-tuple emission ([Tool_telemetry.with_span]) is
+    The OTel/Otel_metric_store 4-tuple emission ([Tool_telemetry.with_span]) is
     {e injected} rather than referenced inline, so this library does not
-    code-depend on [Tool_telemetry] / [Otel_spans] / [Prometheus]. That keeps
+    code-depend on [Tool_telemetry] / [Otel_spans] / [Otel_metric_store]. That keeps
     the Tool dispatch substrate (lib/tool/, [masc_tool_dispatch]) free of the
     telemetry stack — the compiler enforces "Tool is just Tool".
 
@@ -204,7 +204,7 @@ let guarded_dispatch ~(token : Tool_token.t) ~args () : Tool_result.result optio
   let result, _outcome =
     (* Injected telemetry span wrapper (default identity). The composition
        root registers [Tool_telemetry.with_span] so this lib stays free of
-       the Otel/Prometheus stack. *)
+       the Otel/Otel_metric_store stack. *)
     !span_wrapper_ref ~tool_name:token.name (fun _trace_id_thunk ->
       let name = token.name in
       let r =

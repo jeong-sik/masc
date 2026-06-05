@@ -19,7 +19,7 @@
 
     Pure helpers (no callback injection). All references reach
     external modules (Keeper_heartbeat_snapshot, Keeper_keepalive_signal,
-    Eio, Prometheus, Keeper_metrics, Log) directly. *)
+    Eio, Otel_metric_store, Keeper_metrics, Log) directly. *)
 
 open Keeper_types
 open Keeper_meta_contract
@@ -49,7 +49,7 @@ let maybe_write_heartbeat_snapshot
      with
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->
-       Prometheus.inc_counter
+       Otel_metric_store.inc_counter
          Keeper_metrics.(to_string SnapshotWriteFailures)
          ~labels:[ "keeper", meta_current.name ]
          ();

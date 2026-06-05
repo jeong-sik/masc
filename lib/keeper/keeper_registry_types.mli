@@ -489,7 +489,7 @@ type registry_entry = {
           the most recent outcome in [last_outcome]. *)
   last_skip_observation : (float * string list) option;
       (** Most recent [keeper_cycle_decision] skip outcome captured by
-          the keepalive loop (#10940 follow-up).  The [Prometheus]
+          the keepalive loop (#10940 follow-up).  The [Otel_metric_store]
           [proactive_skip_reason_metric] aggregates skip reasons over
           time, but operators need recent skip verdict context when
           diagnosing idle/quiet keepers. [Some (ts, reasons)] = wall

@@ -7,20 +7,19 @@ let publish_lifecycle _bus ~name ~event ~detail ?error ?session_id ?status
     ?(attrs = []) () =
   match Masc_event_bus.get () with
   | None -> ()
-  | Some mb ->
+  | Some _mb ->
       let optional_string_field key = function
         | Some value when String.trim value <> "" -> [ (key, `String value) ]
         | _ -> []
       in
-      Agent_sdk_metrics_bridge.publish mb
+      ignore
         (Agent_sdk.Event_bus.mk_event
            (Custom
-              ( Printf.sprintf "masc.oas_worker.%s" event,
-                `Assoc
-                  ([
-                     ("agent", `String name);
-                     ("detail", `String detail);
-                     ("timestamp", `Float (Time_compat.now ()));
+              ( Printf.sprintf "masc.oas_worker.%s" event
+              , `Assoc
+                  ([ ("agent", `String name)
+                   ; ("detail", `String detail)
+                   ; ("timestamp", `Float (Time_compat.now ()))
                    ]
                    @ optional_string_field "error" error
                    @ optional_string_field "session_id" session_id

@@ -181,7 +181,7 @@ val make_health_json :
     {2 lazy_task_boot_guard_fires_total contract (P2 silent-
     failure fix)}
 
-    Surfaces {!Prometheus.metric_total} for
+    Surfaces {!Otel_metric_store.metric_total} for
     [masc_lazy_task_boot_guard_fired_total].  Without this
     field, an operator hitting [/health] would see ["status":
     "ok"] while keepers had silently failed to start.  Pinning
@@ -239,7 +239,7 @@ val keeper_fleet_runtime_resolution_fields : unit -> (string * Yojson.Safe.t) li
     [/health] so the dashboard can render pending durable stimuli without a
     second endpoint.  [fd_accountant] is also projected here so the dashboard
     shell can show the same backpressure source as [/health] without scraping
-    Prometheus. *)
+    Otel_metric_store. *)
 
 val keeper_fleet_runtime_resolution_light_fields :
   unit -> (string * Yojson.Safe.t) list

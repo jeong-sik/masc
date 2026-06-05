@@ -75,9 +75,9 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     ();
   Keeper_tool_call_log.start_flush_fiber ~sw ~clock;
   Otel_dispatch_hook.install ();
-  (* PR-S3: register the OTel/Prometheus dispatch span wrapper. [Tool_dispatch]
+  (* PR-S3: register the OTel/Otel_metric_store dispatch span wrapper. [Tool_dispatch]
      (lib/tool/, masc_tool_dispatch) no longer code-depends on [Tool_telemetry]
-     / Otel / Prometheus; the wrapper is injected here at the composition root.
+     / Otel / Otel_metric_store; the wrapper is injected here at the composition root.
      Without this call [guarded_dispatch] runs with the identity wrapper (no
      span / no [tool_dispatch_total] metric). *)
   Tool_dispatch.set_span_wrapper Tool_telemetry.with_span;

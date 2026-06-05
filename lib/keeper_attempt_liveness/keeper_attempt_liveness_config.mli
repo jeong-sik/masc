@@ -30,7 +30,7 @@ val current_mode : unit -> mode
     calls return the cached value. *)
 
 val mode_label : mode -> string
-(** Stable label for telemetry / Prometheus counter values. One of
+(** Stable label for telemetry / Otel_metric_store counter values. One of
     [off | observe | enforce]. *)
 
 type success_sample =

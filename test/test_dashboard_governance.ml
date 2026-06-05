@@ -125,7 +125,7 @@ let test_empty_governance_structure () =
 
 let governance_fallback_count metric_name =
   int_of_float
-    (Lib.Prometheus.metric_value_or_zero
+    (Lib.Otel_metric_store.metric_value_or_zero
        metric_name
        ~labels:[("judge", "governance")]
        ())
@@ -141,11 +141,11 @@ let test_dashboard_surfaces_lenient_fallback_metrics () =
       ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
       let before_unparseable =
         governance_fallback_count
-          Lib.Prometheus.metric_governance_judge_unparseable
+          Lib.Otel_metric_store.metric_governance_judge_unparseable
       in
       let before_fallback =
         governance_fallback_count
-          Lib.Prometheus.metric_governance_lenient_json_fallback_hit
+          Lib.Otel_metric_store.metric_governance_lenient_json_fallback_hit
       in
       ignore
         (Judge_diagnostics.record_lenient_fallback

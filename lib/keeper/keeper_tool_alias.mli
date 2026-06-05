@@ -53,7 +53,7 @@ val public_name_for_internal : string -> string option
     ["unknown"] when the supplied value is neither a known public name
     nor a known internal handler. Raw unrecognised strings never become
     new label values, so hallucinated tool names cannot inflate the
-    Prometheus time series.
+    Otel_metric_store time series.
 
     [result] is ["ok"] for a successful route or ["miss"] for an unknown name. *)
 val record_route_outcome : tool:string -> routed_to:string -> result:string -> unit

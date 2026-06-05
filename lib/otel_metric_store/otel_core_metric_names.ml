@@ -1,8 +1,8 @@
 (** Core runtime, LLM, provider, task, goal, and SSE activity metric-name
     constants.
 
-    Included by {!Prometheus} so existing callers keep using
-    [Prometheus.metric_*] bindings unchanged. *)
+    Included by {!Otel_metric_store} so existing callers keep using
+    [Otel_metric_store.metric_*] bindings unchanged. *)
 
 let metric_fd_open = "masc_fd_open"
 let metric_fd_limit = "masc_fd_limit"

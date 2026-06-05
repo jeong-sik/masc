@@ -10,7 +10,7 @@
     audit history compared to the intended window).
 
     Resolution returns one of four variants so the caller can:
-    - emit a Prometheus counter labelled by [to_label]
+    - emit a Otel_metric_store counter labelled by [to_label]
     - log a [Log.Keeper.warn] on [Parse_error] / [Out_of_range] with the
       raw value and the default that was substituted
     - keep the silent-default behaviour for [Unset_default] (normal path)
@@ -34,6 +34,6 @@ type t =
           1_000_000). *)
 
 val to_label : t -> string
-(** Lowercase snake_case label for the [outcome] Prometheus label.
+(** Lowercase snake_case label for the [outcome] Otel_metric_store label.
     One of: ["parsed_ok"], ["unset_default"], ["parse_error"],
     ["out_of_range"]. *)

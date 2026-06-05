@@ -67,7 +67,6 @@
   masc.runtime_model
   masc.runtime
   masc.model_inference_metrics
-  masc.prometheus
   masc.json_field
   masc.types_boundary
   masc.cdal_runtime

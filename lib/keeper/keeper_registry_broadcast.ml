@@ -2,7 +2,7 @@
 
     Extracted from keeper_registry.ml (lines 610-652) as part of the
     godfile decomp campaign. Two pure side-effect wrappers around
-    [Sse.broadcast] / [Sse.broadcast_presence] with Prometheus counter
+    [Sse.broadcast] / [Sse.broadcast_presence] with Otel_metric_store counter
     + log on failure. No registry state touched. *)
 
 let composite_changed ~name ~ts_unix =
@@ -28,7 +28,7 @@ let composite_changed ~name ~ts_unix =
          inside broadcast_impl — exceptions thrown out of
          Sse.broadcast itself bypass that counter.  Logging here
          makes the exception visible at the call site. *)
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string LifecycleDispatchRejections)
       ~labels:[ "keeper", name; "event", "broadcast_composite_failed" ]
       ();
@@ -39,7 +39,7 @@ let composite_changed ~name ~ts_unix =
 ;;
 
 let record_phase_failure ~name exn =
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     Keeper_metrics.(to_string SseBroadcastFailures)
     ~labels:[ "keeper", name; "site", "phase_changed" ]
     ();

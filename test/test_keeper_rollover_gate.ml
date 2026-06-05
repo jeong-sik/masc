@@ -50,7 +50,7 @@ let non_overflow_classes_are_not_matched () =
     Keeper_meta_contract.Turn_timeout;
     Keeper_meta_contract.Turn_livelock_blocked;
     Keeper_meta_contract.Completion_contract_violation;
-    (Keeper_meta_contract.Runtime_exhausted (Keeper_meta_contract.No_tool_capable None));
+    (Keeper_meta_contract.Runtime_exhausted (Keeper_meta_contract.Other_detail "opaque"));
     Keeper_meta_contract.Fiber_unresolved;
     Keeper_meta_contract.Stale_turn_timeout;
     Keeper_meta_contract.Stale_fleet_batch;

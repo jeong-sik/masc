@@ -108,7 +108,7 @@ val record_context_max_observation :
     [turn_latency_bucket ms] returns the bucket label for a turn that
     took [ms] milliseconds.  The vocabulary is bounded
     ([under_60s | 60-300s | 300-600s | 600-1200s | over_1200s]) so
-    Prometheus cardinality stays at [keeper × 5].
+    Otel_metric_store cardinality stays at [keeper × 5].
 
     [record_turn_latency_bucket] increments
     {!Keeper_metrics.(to_string TurnLatencyBucket)} on the matching

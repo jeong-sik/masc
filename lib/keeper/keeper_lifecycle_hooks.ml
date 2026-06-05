@@ -67,7 +67,7 @@ let run ?base_dir ?meta ~keeper_id (ev : event) : unit =
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
         let error = Printexc.to_string exn in
-        Prometheus.inc_counter
+        Otel_metric_store.inc_counter
           Keeper_metrics.(to_string LifecycleCallbackFailures)
           ~labels:
             [

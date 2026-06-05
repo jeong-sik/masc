@@ -80,8 +80,8 @@ let source_summary source_name = function
   | _ -> Alcotest.fail "expected summary object"
 
 let source_read_failure_metric source site =
-  Prometheus.metric_value_or_zero
-    Prometheus.metric_telemetry_unified_source_read_failures
+  Otel_metric_store.metric_value_or_zero
+    Otel_metric_store.metric_telemetry_unified_source_read_failures
     ~labels:[ ("source", source); ("site", site) ]
     ()
 
@@ -1028,7 +1028,7 @@ let test_summary_surfaces_coverage_gaps () =
     ]
   in
   let before =
-    Prometheus.metric_value_or_zero Prometheus.metric_telemetry_coverage_gap
+    Otel_metric_store.metric_value_or_zero Otel_metric_store.metric_telemetry_coverage_gap
       ~labels ()
   in
   Telemetry_coverage_gap.record
@@ -1041,8 +1041,8 @@ let test_summary_surfaces_coverage_gaps () =
     ~error:"disk full"
     ();
   Alcotest.(check (float 0.001))
-    "coverage gap Prometheus counter increments" (before +. 1.0)
-    (Prometheus.metric_value_or_zero Prometheus.metric_telemetry_coverage_gap
+    "coverage gap Otel_metric_store counter increments" (before +. 1.0)
+    (Otel_metric_store.metric_value_or_zero Otel_metric_store.metric_telemetry_coverage_gap
        ~labels ());
   let json = Telemetry_unified.summary_json ~base_path:dir ~masc_root:root () in
   match json with

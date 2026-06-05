@@ -7,7 +7,7 @@
     [emit_transition] call sites in [keeper_unified_turn.ml]
     without breaking the build -- the build doesn't care if a
     function is called.  Result: the fleet observability stack
-    silently regresses (Prometheus counter loses a series, the
+    silently regresses (Otel_metric_store counter loses a series, the
     Grafana dashboard's panel goes flat, [bin/masc-trace]
     timeline jumps over a state).
 

@@ -9,7 +9,6 @@
   agent_sdk
   masc.json_field
   masc.masc_core
-  masc.masc_types
-  masc.prometheus)
+  masc.masc_types)
  (preprocess
   (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq)))

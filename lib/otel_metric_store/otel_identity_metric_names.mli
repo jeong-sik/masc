@@ -1,7 +1,7 @@
 (** Auth, identity, config, and governance metric-name constants.
 
-    Included by {!Prometheus} so existing callers keep using
-    [Prometheus.metric_*] bindings unchanged. *)
+    Included by {!Otel_metric_store} so existing callers keep using
+    [Otel_metric_store.metric_*] bindings unchanged. *)
 
 val metric_auth_bearer_token_mismatch : string
 val metric_auth_strict_unknown_tool_denials : string

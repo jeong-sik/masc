@@ -2,7 +2,7 @@
 
 open Alcotest
 module Rec = Masc.Keeper_recurring
-module Prom = Masc.Prometheus
+module Prom = Masc.Otel_metric_store
 
 let check = Alcotest.check
 

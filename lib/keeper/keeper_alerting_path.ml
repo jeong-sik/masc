@@ -17,7 +17,7 @@ let rejection_to_telemetry (r : keeper_path_rejection) : unit =
     | Ambiguous_relative_read_path _ -> "ambiguous_relative_read_path"
     | Task_state_file_path_blocked _ -> "task_state_file_path_blocked"
   in
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     Keeper_metrics.(to_string PathRejection)
     ~labels:[ "kind", kind ]
     ()
@@ -468,7 +468,7 @@ let resolve_keeper_read_path
           | Ok (Some resolved) -> Ok resolved
           | Ok None ->
             (* #10349: keep the rejection signal in the
-                Prometheus counter; do NOT echo the resolved
+                Otel_metric_store counter; do NOT echo the resolved
                 roots back to the LLM.  When keeper identity
                 drifts (turn 433 evidence), the roots can
                 belong to a sibling sandbox, leaking its

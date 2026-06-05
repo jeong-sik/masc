@@ -176,7 +176,7 @@ let force_release_holder_for ~keeper_name : (string * float) list =
          let age = now -. acquired_at in
          Eio.Semaphore.release sem;
          released_with_age := (label_str, age) :: !released_with_age;
-         Prometheus.inc_counter
+         Otel_metric_store.inc_counter
            Keeper_metrics.(to_string SlotForceReleased)
            ~labels:[ "keeper", keeper_name; "label", label_str ]
            ();
@@ -395,7 +395,7 @@ let rec wait_for_autonomous_queue_head
       (* #9771: surface the timeout as a fleet-wide metric so
          operators can detect chronic slot starvation without
          scraping the WARN log. *)
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string SemaphoreWaitTimeout)
         ~labels:[ "keeper", keeper_name; "channel", "autonomous_queue_head" ]
         ();
@@ -425,12 +425,12 @@ let observe_semaphore_wait_seconds ~keeper_name ~runtime_profile ~channel second
   let labels =
     [ "keeper_name", keeper_name; "runtime_profile", runtime_profile; "channel", channel ]
   in
-  Prometheus.observe_histogram
+  Otel_metric_store.observe_histogram
     Keeper_metrics.(to_string SemaphoreWaitSeconds)
     ~labels
     seconds;
   let inc_bucket le =
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string SemaphoreWaitSecondsBucket)
       ~labels:(labels @ [ "le", le ])
       ()
@@ -498,7 +498,7 @@ let with_keeper_turn_slot_control ?(runtime_profile = "unknown") ~keeper_name ~c
          (* #9771: per-keeper × per-acquire-channel counter so
            operators can attribute slot starvation to autonomous
            vs turn semaphore pressure. *)
-         Prometheus.inc_counter
+         Otel_metric_store.inc_counter
            Keeper_metrics.(to_string SemaphoreWaitTimeout)
            ~labels:[ "keeper", keeper_name; "channel", label_str ]
            ();
@@ -527,7 +527,7 @@ let with_keeper_turn_slot_control ?(runtime_profile = "unknown") ~keeper_name ~c
           "semaphore_wait: no Eio clock available and %s semaphore has no permits; \
            failing closed instead of waiting unboundedly"
           label_str;
-        Prometheus.inc_counter
+        Otel_metric_store.inc_counter
           Keeper_metrics.(to_string SemaphoreWaitTimeout)
           ~labels:[ "keeper", keeper_name; "channel", label_str ]
           ();
@@ -544,7 +544,7 @@ let with_keeper_turn_slot_control ?(runtime_profile = "unknown") ~keeper_name ~c
       (Eio.Semaphore.get_value autonomous_turn_semaphore)
       (Eio.Semaphore.get_value turn_semaphore)
       queue_depth;
-    Prometheus.set_gauge
+    Otel_metric_store.set_gauge
       Keeper_metrics.(to_string TurnQueueDepth)
       ~labels:[ "keeper", keeper_name; "channel", channel_label ]
       (float_of_int queue_depth)

@@ -65,8 +65,8 @@ let execute_tool_eio
      the current request scope. *)
   Eio_context.set_switch sw;
   Eio_context.set_clock clock;
-  (* Prometheus: count every inbound tool call *)
-  Prometheus.record_request ();
+  (* Otel_metric_store: count every inbound tool call *)
+  Otel_metric_store.record_request ();
   let config = state.Mcp_server.workspace_config in
   let registry = state.Mcp_server.session_registry in
   (* Fix 3: Cache workspace_initialized to avoid repeated stat syscalls.

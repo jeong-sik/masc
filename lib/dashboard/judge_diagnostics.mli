@@ -25,5 +25,5 @@ val record_unparseable_response :
     {!format_unparseable_response}. *)
 
 val lenient_fallback_metrics_json : judge_label:string -> Yojson.Safe.t
-(** Current Prometheus counter values for a judge label, formatted for
+(** Current Otel_metric_store counter values for a judge label, formatted for
     dashboard/runtime JSON surfaces. *)

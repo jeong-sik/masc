@@ -143,8 +143,8 @@ let subscribe_messages_fn
 (** #9795: FSM drift observability.  [Workspace_task.transition]
     signals TLA+ KeeperTaskInterlock violations (currently the
     [Claimed_to_done_skip] branch) through this hook; [lib/workspace.ml]
-    wires it to a Prometheus counter emit at startup.  Keeping the
-    hook here avoids a [masc_workspace → masc.Prometheus]
+    wires it to a Otel_metric_store counter emit at startup.  Keeping the
+    hook here avoids a [masc_workspace → masc.Otel_metric_store]
     dependency cycle. *)
 let fsm_drift_observer_fn
   : (variant:string -> force:bool -> agent_name:string -> unit) Atomic.t
@@ -160,11 +160,11 @@ let fsm_drift_observer_fn
     is no fleet-wide rate metric for "how often does this fail,
     on which key?".
 
-    This hook decouples the emit from [masc.Prometheus] (which
+    This hook decouples the emit from [masc.Otel_metric_store] (which
     sits above [masc_workspace] in the dep graph).  [lib/workspace.ml]
-    wires it to a Prometheus counter at startup; [masc_workspace]
+    wires it to a Otel_metric_store counter at startup; [masc_workspace]
     callers fire it from the failure branches without taking a
-    direct Prometheus dependency. *)
+    direct Otel_metric_store dependency. *)
 let distributed_lock_acquire_failed_fn
   : (key:string -> attempts:int -> unit) Atomic.t
   = Atomic.make (fun ~key:_ ~attempts:_ -> ())
@@ -208,8 +208,8 @@ let tool_assigned_fn
       ["with_contract"]
 
     Cardinality is bounded at ~4 × 3 × fleet_size series, safe
-    for Prometheus.  Emit lives in [lib/workspace.ml] to avoid a
-    [masc_workspace → Prometheus] dep cycle. *)
+    for Otel_metric_store.  Emit lives in [lib/workspace.ml] to avoid a
+    [masc_workspace → Otel_metric_store] dep cycle. *)
 let task_completion_path_observed_fn
   : (path:string -> contract_state:string -> agent_name:string -> unit) Atomic.t
   = Atomic.make (fun ~path:_ ~contract_state:_ ~agent_name:_ -> ())
@@ -225,7 +225,7 @@ let task_completion_path_observed_fn
     5x as keepers churned through claim_next without finishing.
 
     The structured event already carries [reason] and
-    [from_status], but a Prometheus counter is the missing surface:
+    [from_status], but a Otel_metric_store counter is the missing surface:
     operators cannot alert on auto-release rate or split it by
     keeper from a JSONL tail alone.  The split by [from_status]
     matters because [Claimed → Todo] (just claimed, no work yet)
@@ -234,7 +234,7 @@ let task_completion_path_observed_fn
 
     Cardinality bounded by fleet size (~10 keepers) ×
     [from_status] (claimed | in_progress) = ~20 series.  Emit at
-    [lib/workspace.ml] to avoid a [masc_workspace → Prometheus] dep cycle. *)
+    [lib/workspace.ml] to avoid a [masc_workspace → Otel_metric_store] dep cycle. *)
 let task_auto_release_observed_fn
   : (agent_name:string -> from_status:string -> unit) Atomic.t
   = Atomic.make (fun ~agent_name:_ ~from_status:_ -> ())
@@ -246,7 +246,7 @@ let task_auto_release_observed_fn
     Labelled by [msg_type] so [cache_invalidated] follow-ups (which
     skip the agent.json read + use the rewritten content) are
     distinguishable from regular broadcasts.  Default no-op; emit
-    lives in [lib/workspace.ml] to avoid a [masc_workspace → Prometheus] dep
+    lives in [lib/workspace.ml] to avoid a [masc_workspace → Otel_metric_store] dep
     cycle. *)
 let workspace_broadcast_observed_fn
   : (msg_type:string -> elapsed_s:float -> unit) Atomic.t
@@ -254,7 +254,7 @@ let workspace_broadcast_observed_fn
 
 (** RFC-0040: sender-side mention dedup decision counter.  Default
     no-op; emit lives in [lib/workspace.ml] to avoid a
-    [masc_workspace → Prometheus] dep cycle.
+    [masc_workspace → Otel_metric_store] dep cycle.
     Outcome vocabulary: [skipped|passed|no_target|bypassed]. *)
 let mention_dedup_decision_fn
   : (outcome:string -> unit) Atomic.t
@@ -263,8 +263,8 @@ let mention_dedup_decision_fn
 (** #13460: stale task-state cache emission observability.
     Workspace sub-modules fire this when they replace a stale active-task
     broadcast/mention with a cache invalidation message. [lib/workspace.ml]
-    clears workspace-owned task caches and wires observability to Prometheus
-    to avoid a [masc_workspace -> Prometheus] dependency. *)
+    clears workspace-owned task caches and wires observability to Otel_metric_store
+    to avoid a [masc_workspace -> Otel_metric_store] dependency. *)
 let cache_desync_cleared_fn
   : (Workspace_utils_backend_setup.config ->
      module_name:string -> task_id:string -> status:string -> unit) Atomic.t

@@ -5,7 +5,7 @@
     that produced ~666 WARN entries.
 
     Post-fix: [build_keeper_system_prompt] emits a single WARN per build
-    that lists every missing field.  Per-field Prometheus counters and the
+    that lists every missing field.  Per-field Otel_metric_store counters and the
     in-prompt config-drift markers stay identical so dashboards and the
     LLM-visible drift signal are unchanged. *)
 

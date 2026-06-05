@@ -8,7 +8,7 @@
    below the observed p50 of LLM-via-OAS-worker calls — and produced
    the "Execution timed out after 60.0s" warnings reported in the
    issue.  Governance_judge had a 300s default but lived outside the
-   per-caller Prometheus counter.
+   per-caller Otel_metric_store counter.
 
    #13113 follow-up: live /Users/dancer/me evidence showed the opposite
    failure mode once both judges shared the 300s worker default: a dashboard

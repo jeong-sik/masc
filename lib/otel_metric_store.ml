@@ -1,18 +1,18 @@
-(** Retired Prometheus facade.
+(** Retired Otel_metric_store facade.
 
-    The Prometheus exporter/registration stack was hard-cut; this module keeps
+    The Otel_metric_store exporter/registration stack was hard-cut; this module keeps
     the historical metric-name and in-process counter API as a compatibility
     boundary while callers are removed in follow-up slices. *)
 
-include Prometheus_store
-include Prometheus_metric_names
-include Prometheus_builtin_metric_names
-include Prometheus_oas_metric_names
-include Prometheus_runtime_metric_names
-include Prometheus_core_metric_names
-include Prometheus_policy_metric_names
-include Prometheus_identity_metric_names
-include Prometheus_transport_metric_names
+include Otel_metric_store_core
+include Otel_metric_names
+include Otel_builtin_metric_names
+include Otel_oas_metric_names
+include Otel_runtime_metric_names
+include Otel_core_metric_names
+include Otel_policy_metric_names
+include Otel_identity_metric_names
+include Otel_transport_metric_names
 
 let set_tool_schema_stats ~count ~approx_tokens =
   set_gauge metric_mcp_tool_schema_count (Float.of_int count);

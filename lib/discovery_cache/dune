@@ -9,7 +9,6 @@
   agent_sdk.llm_provider
   dated_jsonl
   eio
-  masc.prometheus
   masc_core
   masc_log
   time_compat

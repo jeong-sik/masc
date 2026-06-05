@@ -103,7 +103,7 @@ type span_wrapper =
 val set_span_wrapper : span_wrapper -> unit
 (** Install the dispatch span wrapper. The composition root registers
     [Tool_telemetry.with_span] so this library (lib/tool/, [masc_tool_dispatch])
-    does not code-depend on the Otel/Prometheus telemetry stack — the compiler
+    does not code-depend on the Otel/Otel_metric_store telemetry stack — the compiler
     enforces "Tool is just Tool". See
     [Server_bootstrap_maintenance.start_background_maintenance]. *)
 

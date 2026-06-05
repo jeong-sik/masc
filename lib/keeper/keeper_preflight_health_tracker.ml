@@ -38,7 +38,7 @@ let reason_slug = function
 ;;
 
 (* Owned metric names. Following the runtime_metrics.ml RFC-0043 pattern
-   (module owns its constants; [Prometheus.ml]'s register_all() may mirror
+   (module owns its constants; [Otel_metric_store.ml]'s register_all() may mirror
    for /metrics endpoint registration later). *)
 let metric_preflight_unhealthy_skip =
   "masc_runtime_preflight_unhealthy_skip_total"
@@ -112,7 +112,7 @@ let record ?(clock = Time_compat.now) t ~runtime_id ~provider ~reason : record_o
   with_lock t (fun () ->
     (* Always tick the per-call counter so dashboards see absolute
        skip volume (independent of disable transitions). *)
-    Prometheus.inc_counter metric_preflight_unhealthy_skip
+    Otel_metric_store.inc_counter metric_preflight_unhealthy_skip
       ~labels:
         [ ("runtime", runtime_id)
         ; ("provider", provider)
@@ -130,7 +130,7 @@ let record ?(clock = Time_compat.now) t ~runtime_id ~provider ~reason : record_o
       else if next >= t.threshold
       then (
         StrTbl.replace t.disabled provider (clock (), runtime_id);
-        Prometheus.inc_counter metric_provider_disabled
+        Otel_metric_store.inc_counter metric_provider_disabled
           ~labels:
             [ ("runtime", runtime_id)
             ; ("provider", provider)
@@ -161,7 +161,7 @@ let is_disabled ?(clock = Time_compat.now) t ~provider =
             []
         in
         List.iter (fun fp -> FpTbl.remove t.counts fp) stale_keys;
-        Prometheus.inc_counter metric_provider_re_enabled
+        Otel_metric_store.inc_counter metric_provider_re_enabled
           ~labels:[ ("provider", provider); ("reason", "ttl_auto_expire") ]
           ();
         false)
@@ -183,7 +183,7 @@ let reset_on_health_recovery t ~provider =
     List.iter (fun fp -> FpTbl.remove t.counts fp) stale_keys;
     if was_disabled
     then
-      Prometheus.inc_counter metric_provider_re_enabled
+      Otel_metric_store.inc_counter metric_provider_re_enabled
         ~labels:[ ("provider", provider) ]
         ();
     was_disabled)

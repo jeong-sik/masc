@@ -14,7 +14,7 @@ let runtime_lane_label =
 
 let runtime_lane_of_model (_model : string) : string = runtime_lane_label
 
-(** Prometheus + JSON label keys used across keeper_hooks_oas.ml call sites.
+(** Otel_metric_store + JSON label keys used across keeper_hooks_oas.ml call sites.
     Exposed via mli so the rest of the godfile keeps referencing them through
     `include Keeper_hooks_oas_types`. *)
 let label_keeper = "keeper"
@@ -93,7 +93,7 @@ let key_duration_ms = "duration_ms"
 let key_channel = "channel"
 let key_error = "error"
 
-(** Callback name labels used as Prometheus + log identifiers. *)
+(** Callback name labels used as Otel_metric_store + log identifiers. *)
 let callback_label_after_turn_sse_broadcast = "after_turn_sse_broadcast"
 let callback_label_post_tool_log_write = "post_tool_log_write"
 let callback_label_on_tool_executed = "on_tool_executed"

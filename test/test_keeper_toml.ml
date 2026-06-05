@@ -1465,8 +1465,8 @@ typo_field = 42
 |};
   close_out oc;
   let unknown_metric () =
-    Prometheus.metric_value_or_zero
-      Prometheus.metric_config_unknown_keys_ignored
+    Otel_metric_store.metric_value_or_zero
+      Otel_metric_store.metric_config_unknown_keys_ignored
       ~labels:[("file_path", tmp)]
       ()
   in
@@ -1534,8 +1534,8 @@ base = "base.toml"
 legacy_scope = "removed"
 |};
   let unknown_metric () =
-    Prometheus.metric_value_or_zero
-      Prometheus.metric_config_unknown_keys_ignored
+    Otel_metric_store.metric_value_or_zero
+      Otel_metric_store.metric_config_unknown_keys_ignored
       ~labels:[("file_path", Filename.concat keepers_dir "alpha.toml")]
       ()
   in

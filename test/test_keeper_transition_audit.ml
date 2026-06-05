@@ -6,7 +6,7 @@ open Alcotest
 module Audit = Masc.Keeper_transition_audit
 module KTF = Masc.Keeper_turn_fsm
 module KSM = Keeper_state_machine
-module P = Masc.Prometheus
+module P = Masc.Otel_metric_store
 
 let fail = Alcotest.fail
 
@@ -72,7 +72,7 @@ let ensure_test_runtime =
           try Sys.remove path with
           | Sys_error _ -> ())
         (fun () ->
-          match Masc.Runtime.init_default ~config_path:path with
+          match Runtime.init_default ~config_path:path with
           | Ok () -> initialized := true
           | Error msg -> fail msg))
 

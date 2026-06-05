@@ -140,7 +140,7 @@ let finalize
            meta.name
            (Keeper_meta_contract.runtime_id_of_meta meta)
            e;
-         Prometheus.inc_counter
+         Otel_metric_store.inc_counter
            Keeper_metrics.(to_string CheckpointFailures)
            ~labels:[ "keeper", meta.name; "site", "save" ]
            ();
@@ -153,7 +153,7 @@ let finalize
         "keeper:%s runtime=%s missing OAS checkpoint after run"
         meta.name
         (Keeper_meta_contract.runtime_id_of_meta meta);
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string CheckpointFailures)
         ~labels:[ "keeper", meta.name; "site", "missing" ]
         ();

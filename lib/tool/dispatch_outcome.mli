@@ -23,7 +23,7 @@ type t =
           miss).  The string outcome ["no_handler"] maps to this arm. *)
 [@@deriving show, eq]
 
-(** [to_string t] returns the label used by Prometheus counters /
+(** [to_string t] returns the label used by Otel_metric_store counters /
     [Tool_telemetry.with_span] outcome strings ("handled" / "no_handler"). *)
 val to_string : t -> string
 

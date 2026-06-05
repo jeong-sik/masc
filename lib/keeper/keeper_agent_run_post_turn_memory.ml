@@ -65,7 +65,7 @@ let run
        "keeper:%s memory_write failed: %s"
        meta.name
        (Printexc.to_string exn);
-     Prometheus.inc_counter
+     Otel_metric_store.inc_counter
        Keeper_metrics.(to_string MemoryWriteFailures)
        ~labels:[ "keeper", meta.name ]
        ());
@@ -96,7 +96,7 @@ let run
    with
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn ->
-     Prometheus.inc_counter
+     Otel_metric_store.inc_counter
        Keeper_metrics.(to_string DispatchEventFailures)
        ~labels:[ "keeper", meta.name; "site", "memory_bank_compaction" ]
        ();
@@ -140,7 +140,7 @@ let run
              let exn_label =
                Keeper_memory_recall_exn_class.to_label exn_class
              in
-             Prometheus.inc_counter
+             Otel_metric_store.inc_counter
                Keeper_metrics.(to_string DispatchEventFailures)
                ~labels:
                  [ "keeper", meta.name; "site", "memory_recall" ]
@@ -196,7 +196,7 @@ let run
    with
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn ->
-     Prometheus.inc_counter
+     Otel_metric_store.inc_counter
        Keeper_metrics.(to_string DispatchEventFailures)
        ~labels:[ "keeper", meta.name; "site", "post_turn_eval" ]
        ();

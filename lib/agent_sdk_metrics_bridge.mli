@@ -1,6 +1,6 @@
 (** Compatibility wrapper around [Agent_sdk.Event_bus].
 
-    Prometheus instrumentation was retired from this module.  The wrapper
+    Otel_metric_store instrumentation was retired from this module.  The wrapper
     remains because keeper/runtime code uses it as the local Event_bus
     boundary. *)
 

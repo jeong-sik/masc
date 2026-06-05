@@ -43,13 +43,13 @@ let update_entry ~base_path name f =
     match StringMap.find_opt key current with
     | None ->
       let count, breached = Orphan_drops.record ~base_path name in
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string RegistryUpdateDropped)
         ~labels:[ "name", name ]
         ();
       if breached
       then (
-        Prometheus.inc_counter
+        Otel_metric_store.inc_counter
           Keeper_metrics.(to_string RegistryOrphanThresholdBreached)
           ~labels:[ "name", name ]
           ();
@@ -108,7 +108,7 @@ let register_with_state
   let key = registry_key ~base_path name in
   (match StringMap.find_opt key (Atomic.get registry) with
    | Some entry when entry.phase = Running ->
-     Prometheus.inc_counter
+     Otel_metric_store.inc_counter
        Keeper_metrics.(to_string LifecycleDispatchRejections)
        ~labels:[ "keeper", name; "event", "register_overwrite_running" ]
        ();

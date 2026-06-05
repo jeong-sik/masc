@@ -45,7 +45,7 @@ let repair_identity_drift_for_keepalive ~(ctx : _ context) (meta : keeper_meta)
         meta.name
         new_trace_id_raw
         err;
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string HeartbeatFailures)
         ~labels:[ "keeper", meta.name; "phase", "identity_repair" ]
         ();
@@ -78,7 +78,7 @@ let repair_identity_drift_for_keepalive ~(ctx : _ context) (meta : keeper_meta)
            expected_agent_name;
          Some repaired
        | Error err ->
-         Prometheus.inc_counter
+         Otel_metric_store.inc_counter
            Keeper_metrics.(to_string WriteMetaFailures)
            ~labels:[ "keeper", meta.name; "phase", "identity_repair" ]
            ();
@@ -156,7 +156,7 @@ let sync_keeper_presence
           (Keeper_heartbeat_snapshot.max_consecutive_heartbeat_failures ());
         (* RFC-0002: dispatch heartbeat failure *)
         (* RFC-0002: dispatch heartbeat failure *)
-        Prometheus.inc_counter
+        Otel_metric_store.inc_counter
           Keeper_metrics.(to_string HeartbeatFailures)
           ~labels:[ "keeper", meta_current.name ]
           ();
@@ -176,7 +176,7 @@ let sync_keeper_presence
           ~base_path:ctx.config.base_path
           meta_current.name
           Keeper_state_machine.Heartbeat_ok;
-        Prometheus.inc_counter
+        Otel_metric_store.inc_counter
           Keeper_metrics.(to_string HeartbeatSuccesses)
           ~labels:[ "keeper", meta_current.name ]
           ();
@@ -184,7 +184,7 @@ let sync_keeper_presence
       match write_meta ctx.config synced with
       | Ok () -> synced
       | Error e ->
-        Prometheus.inc_counter
+        Otel_metric_store.inc_counter
           Keeper_metrics.(to_string WriteMetaFailures)
           ~labels:[ "keeper", synced.name; "phase", "heartbeat" ]
           ();
@@ -194,7 +194,7 @@ let sync_keeper_presence
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
       incr consecutive_failures;
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string WorkspaceHeartbeatFailures)
         ~labels:[ "keeper", meta_current.name ]
         ();

@@ -7,7 +7,7 @@
     or empty values without side effects.
 
     Boundary: this module does NOT touch [Otel_spans], [Otel_dispatch_hook],
-    or Prometheus metrics. It only converts between W3C traceparent strings
+    or Otel_metric_store metrics. It only converts between W3C traceparent strings
     and the library's typed representations.
 
     @since 2.105.0 *)

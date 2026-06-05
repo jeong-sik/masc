@@ -1,4 +1,4 @@
-(** Retired Prometheus bridge for OAS [Llm_provider.Metrics.t].
+(** Retired Otel_metric_store bridge for OAS [Llm_provider.Metrics.t].
 
     The process-wide sink remains installable so callers keep their
     initialization order, but callbacks are intentionally no-op until the OTel

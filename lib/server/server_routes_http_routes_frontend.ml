@@ -89,7 +89,7 @@ let add_routes ~port ~host router =
          Http.Response.json_value (Runtime.agent_card_json req) reqd)
          request reqd)
   |> Http.Router.get "/ws" websocket_discovery_handler
-  (* RFC-0217 S4-2 — Prometheus /metrics scrape endpoint removed; metrics now
+  (* RFC-0217 S4-2 — Otel_metric_store /metrics scrape endpoint removed; metrics now
      export via OTLP push (Otel_metrics observable). *)
   |> Http.Router.get "/ag-ui/events" handle_ag_ui_events
   |> Http.Router.get "/events/presence" handle_presence_events

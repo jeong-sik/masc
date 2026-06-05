@@ -1,4 +1,4 @@
-(** Admission_queue_metrics — Prometheus integration for inference admission queue.
+(** Admission_queue_metrics — Otel_metric_store integration for inference admission queue.
 
     Emits metrics on every acquire/release event.
     Called internally by [Admission_queue]; callers do not invoke directly.
@@ -12,10 +12,10 @@ type rejection_reason = Host_resource_saturated
 (** Bounded [reason] label vocabulary for rejected admission requests. *)
 
 val rejection_surface_label : rejection_surface -> string
-(** Prometheus label value for a rejection surface. *)
+(** Otel_metric_store label value for a rejection surface. *)
 
 val rejection_reason_label : rejection_reason -> string
-(** Prometheus label value for a rejection reason. *)
+(** Otel_metric_store label value for a rejection reason. *)
 
 val on_acquire :
   keeper_name:string ->
@@ -35,4 +35,4 @@ val on_reject : surface:rejection_surface -> reason:rejection_reason -> unit
     [reason=host_resource_saturated]. *)
 
 val set_max_concurrent : int -> unit
-(** Syncs the configured admission queue capacity into Prometheus. *)
+(** Syncs the configured admission queue capacity into Otel_metric_store. *)

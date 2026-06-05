@@ -102,8 +102,8 @@ let capture_stderr f =
   Buffer.contents buf
 
 let strict_unknown_tool_denial_count ~agent_name ~tool_class =
-  Masc.Prometheus.metric_value_or_zero
-    Masc.Prometheus.metric_auth_strict_unknown_tool_denials
+  Masc.Otel_metric_store.metric_value_or_zero
+    Masc.Otel_metric_store.metric_auth_strict_unknown_tool_denials
     ~labels:[ ("agent_name", agent_name); ("tool_class", tool_class) ]
     ()
 
@@ -667,8 +667,8 @@ let test_ensure_keeper_credential_archives_dual_identity_bare () =
       let bare_path = Auth.credential_file dir "sangsu" in
       check bool "bare credential pre-exists" true (Sys.file_exists bare_path);
       let archive_metric () =
-        Masc.Prometheus.metric_value_or_zero
-          Masc.Prometheus.metric_config_credential_archived_starvation
+        Masc.Otel_metric_store.metric_value_or_zero
+          Masc.Otel_metric_store.metric_config_credential_archived_starvation
           ~labels:[("keeper_name", "sangsu")]
           ()
       in
@@ -851,11 +851,11 @@ let test_no_ping_pong_across_repeated_boots () =
       check int "audit no_bares=0" 0 audit.no_bares)
 
 (* Surface assertion: [bare_alias_audit] mirrors counts into the
-   Prometheus gauges so every scrape (not only the boot INFO line)
+   Otel_metric_store gauges so every scrape (not only the boot INFO line)
    exposes the current alive/dead/no_bare split. A regression that
    stops emitting the gauges fails this test even if the in-process
    return value is still correct. *)
-let test_bare_alias_audit_emits_prometheus_gauges () =
+let test_bare_alias_audit_emits_otel_metric_store_gauges () =
   let dir = setup_test_workspace () in
   Fun.protect
     ~finally:(fun () -> cleanup_test_workspace dir)
@@ -880,8 +880,8 @@ let test_bare_alias_audit_emits_prometheus_gauges () =
           ~canonical_names:["keeper-sangsu-agent"]
       in
       let read state =
-        Masc.Prometheus.metric_value_or_zero
-          Masc.Prometheus.metric_auth_bare_alias
+        Masc.Otel_metric_store.metric_value_or_zero
+          Masc.Otel_metric_store.metric_auth_bare_alias
           ~labels:[("state", state)]
           ()
       in
@@ -978,8 +978,8 @@ let test_archive_bare_outcome_counter_increments_per_branch () =
         (Auth.enable_auth dir ~require_token:true
            ~agent_name:"bootstrap-admin");
       let read outcome =
-        Masc.Prometheus.metric_value_or_zero
-          Masc.Prometheus.metric_auth_bare_alias_outcome_total
+        Masc.Otel_metric_store.metric_value_or_zero
+          Masc.Otel_metric_store.metric_auth_bare_alias_outcome_total
           ~labels:[("outcome", outcome)]
           ()
       in
@@ -1036,8 +1036,8 @@ let test_bare_alias_audit_fiber_emits_heartbeat () =
        | Ok _ -> ()
        | Error e -> fail (Masc_domain.masc_error_to_string e));
       let read () =
-        Masc.Prometheus.metric_value_or_zero
-          Masc.Prometheus.metric_auth_bare_alias_audit_ticks_total
+        Masc.Otel_metric_store.metric_value_or_zero
+          Masc.Otel_metric_store.metric_auth_bare_alias_audit_ticks_total
           ()
       in
       let baseline = read () in
@@ -1473,8 +1473,8 @@ let () =
         test_no_ping_pong_across_repeated_boots;
       test_case "bare_alias_audit classifies states" `Quick
         test_bare_alias_audit_classifies_states;
-      test_case "bare_alias_audit emits Prometheus gauges" `Quick
-        test_bare_alias_audit_emits_prometheus_gauges;
+      test_case "bare_alias_audit emits Otel_metric_store gauges" `Quick
+        test_bare_alias_audit_emits_otel_metric_store_gauges;
       test_case "prune_archive drops aged epoch dirs" `Quick
         test_prune_archive_retains_recent_and_drops_old;
       test_case "prune_archive honors min_keep" `Quick

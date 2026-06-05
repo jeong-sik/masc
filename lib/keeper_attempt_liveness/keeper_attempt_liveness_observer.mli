@@ -9,7 +9,7 @@
     - Tick fiber forked under the caller's [Eio.Switch.t] that polls
       the FSM at [min(ttft_max, inter_chunk_max) / 4] cadence and can be
       stopped explicitly when the provider attempt has already returned.
-    - Prometheus counter emission per outcome.
+    - Otel_metric_store counter emission per outcome.
 
     {1 No-kill in Observe mode}
 
@@ -58,13 +58,13 @@ val create :
 (** Build an observer for one runtime attempt.
 
     [provider_label], when supplied, is a public bounded provider bucket used
-    for Prometheus grouping. Empty or unrecognized labels fall back to a stable
+    for Otel_metric_store grouping. Empty or unrecognized labels fall back to a stable
     non-raw bucket.
 
     [candidate_key], when supplied, is the OAS/provider-runtime candidate key
     used only for internal budget history and any successful timing sample
     exposed by {!success_sample_for_candidate}. It is not emitted as a public
-    Prometheus label.
+    Otel_metric_store label.
 
     [external_wait], when supplied, returns true while the attempt is blocked
     on a non-provider wait such as MASC HITL approval. During that window the

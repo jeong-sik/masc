@@ -6,7 +6,7 @@
     Modules tested:
     - Rate_limit (token bucket under contention)
     - Circuit_breaker (state transitions under contention)
-    - Prometheus (metric increments under contention)
+    - Otel_metric_store (metric increments under contention)
     - Streamable_http.Session (session CRUD under contention)
     - Client_registry_eio (identity resolution under contention)
 *)
@@ -15,7 +15,7 @@ open Alcotest
 
 module RL = Masc.Rate_limit
 module CB = Circuit_breaker
-module Prom = Masc.Prometheus
+module Prom = Masc.Otel_metric_store
 module SH = Masc.Streamable_http
 
 (** {1 Rate Limit Concurrency} *)
@@ -83,9 +83,9 @@ let test_circuit_breaker_multi_agent () =
   let all = CB.list_all_breakers cb in
   check int "5 breakers exist" 5 (List.length all)
 
-(** {1 Prometheus Concurrency} *)
+(** {1 Otel_metric_store Concurrency} *)
 
-let test_prometheus_concurrent () =
+let test_otel_metric_store_concurrent () =
   Eio.Fiber.all (List.init 10 (fun i -> fun () ->
     for _ = 1 to 100 do
       Prom.inc_counter "test_concurrent_metric"
@@ -95,7 +95,7 @@ let test_prometheus_concurrent () =
   check (float 0.0001) "counter total" 1000.0
     (Prom.metric_total "test_concurrent_metric")
 
-let test_prometheus_gauge_concurrent () =
+let test_otel_metric_store_gauge_concurrent () =
   Eio.Fiber.all (List.init 5 (fun i -> fun () ->
     for j = 1 to 50 do
       Prom.set_gauge "test_concurrent_gauge"
@@ -137,9 +137,9 @@ let () =
       test_case "concurrent failure/check" `Quick test_circuit_breaker_concurrent;
       test_case "concurrent multi-agent" `Quick test_circuit_breaker_multi_agent;
     ];
-    "Prometheus", [
-      test_case "concurrent counter" `Quick test_prometheus_concurrent;
-      test_case "concurrent gauge" `Quick test_prometheus_gauge_concurrent;
+    "Otel_metric_store", [
+      test_case "concurrent counter" `Quick test_otel_metric_store_concurrent;
+      test_case "concurrent gauge" `Quick test_otel_metric_store_gauge_concurrent;
     ];
     "Streamable HTTP Session", [
       test_case "concurrent create/find" `Quick test_session_concurrent_create_find;

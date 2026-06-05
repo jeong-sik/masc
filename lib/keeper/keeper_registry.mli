@@ -169,7 +169,7 @@ val set_turn_phase :
     3×3 match raising the typed [Compaction_transition_violation] on a
     forbidden pair (RFC-0072 Phase 6 — no GADT/resolver indirection,
     the axis has 3 states and a single consumer).  Both bump
-    [Prometheus.metric_fsm_guard_violation] via
+    [Otel_metric_store.metric_fsm_guard_violation] via
     [Keeper_fsm_guard_runtime.wrap_unit]. *)
 val validate_turn_phase_transition :
   from:packed_turn_phase -> to_:packed_turn_phase -> unit
@@ -391,7 +391,7 @@ val dispatch_event_with_audit :
   string -> Keeper_state_machine.event ->
   (Keeper_state_machine.transition_result, Keeper_state_machine.transition_error) result
 
-(** Like [dispatch_event], but logs and emits a Prometheus counter on
+(** Like [dispatch_event], but logs and emits a Otel_metric_store counter on
     [Error] so silent-failure call sites do not lose the signal.
     Same return type — callers that need the result can still match. *)
 val dispatch_event_and_log :
@@ -407,7 +407,7 @@ val dispatch_event_unit :
   base_path:string ->
   ?origin:lifecycle_event_origin ->
   string -> Keeper_state_machine.event -> unit
-(** Like [dispatch_event_with_audit], but logs and emits a Prometheus
+(** Like [dispatch_event_with_audit], but logs and emits a Otel_metric_store
     counter on [Error]. *)
 val dispatch_event_with_audit_and_log :
   base_path:string ->

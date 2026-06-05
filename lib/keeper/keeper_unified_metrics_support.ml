@@ -58,7 +58,7 @@ type usage_trust = Keeper_usage_trust.t =
   | Usage_trusted
   | Usage_untrusted of string list
 
-(* RFC-0132 PR-2: Prometheus metric label = external boundary; redact via SSOT. *)
+(* RFC-0132 PR-2: Otel_metric_store metric label = external boundary; redact via SSOT. *)
 let runtime_lane_label =
   Boundary_redaction.to_string Boundary_redaction.runtime_model_label
 
@@ -68,7 +68,7 @@ let classify_usage_trust ~(usage_reported : bool)
   Keeper_usage_trust.classify ~usage_reported ~usage ~context_max
 
 (* #9953: bucket the raw [context_max] integer into a tightly
-   bounded vocabulary so the Prometheus label cardinality stays
+   bounded vocabulary so the Otel_metric_store label cardinality stays
    small AND the dashboards see the same drift the issue
    reported (42% / 17% / 41% three-way split for one model).
 
@@ -92,7 +92,7 @@ let context_max_bucket (n : int) : string =
 let record_context_max_observation
     ~(keeper : string)
     ~(context_max : int) : unit =
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     Keeper_metrics.(to_string ContextMaxObserved)
     ~labels:
       [
@@ -142,7 +142,7 @@ let record_turn_latency_bucket
     ~(keeper : string)
     ~(latency_ms : int) : unit =
   let bucket = turn_latency_bucket latency_ms in
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     Keeper_metrics.(to_string TurnLatencyBucket)
     ~labels:[ ("keeper", keeper); ("bucket", bucket) ]
     ();
@@ -169,7 +169,7 @@ let record_turn_latency_by_model_bucket
     Boundary_redaction.to_string Boundary_redaction.runtime_provider_label
   in
   let runtime_profile = label_or_unknown runtime_profile in
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     Keeper_metrics.(to_string TurnLatencyByModelBucket)
     ~labels:
       [ ("keeper", label_or_unknown keeper)
@@ -202,7 +202,7 @@ let usage_trust_reasons = Keeper_usage_trust.reasons
 let usage_trust_json_fields = Keeper_usage_trust.json_fields
 
 (* #9959 defensive observability: surface usage-field trust into
-   Prometheus so operators can alert on rising untrusted/missing
+   Otel_metric_store so operators can alert on rising untrusted/missing
    rates while the upstream OAS fix (jeong-sik/oas#1181 —
    accumulated values leaking into per-response [api_usage]) lands.
 
@@ -226,13 +226,13 @@ let keeper_total_cost_usd_help =
 
 let record_usage_trust ~keeper_name ~(trust : usage_trust) =
   let outcome = usage_trust_to_string trust in
-  Prometheus.inc_counter usage_trust_outcome_metric
+  Otel_metric_store.inc_counter usage_trust_outcome_metric
     ~labels:[ ("keeper", keeper_name); ("outcome", outcome) ] ();
   match trust with
   | Usage_untrusted reasons ->
     List.iter
       (fun reason ->
-        Prometheus.inc_counter usage_anomaly_reason_metric
+        Otel_metric_store.inc_counter usage_anomaly_reason_metric
           ~labels:[ ("keeper", keeper_name); ("reason", reason) ] ())
       reasons;
     let warns_operator = Keeper_usage_trust.warns_operator trust in
@@ -250,18 +250,18 @@ let record_usage_trust ~keeper_name ~(trust : usage_trust) =
 
 let record_keeper_total_cost_usd ~keeper_name ~total_cost_usd =
   let labels = [ ("keeper_name", keeper_name) ] in
-  Prometheus.register_gauge
+  Otel_metric_store.register_gauge
     ~name:Keeper_metrics.(to_string TotalCostUsd)
     ~help:keeper_total_cost_usd_help
     ~labels
     ();
-  Prometheus.set_gauge
+  Otel_metric_store.set_gauge
     Keeper_metrics.(to_string TotalCostUsd)
     ~labels
     total_cost_usd
 
 let record_keeper_idle_seconds ~keeper_name ~idle_seconds =
-  Prometheus.set_gauge
+  Otel_metric_store.set_gauge
     Keeper_metrics.(to_string IdleSeconds)
     ~labels:[ ("keeper_name", keeper_name) ]
     (float_of_int (max 0 idle_seconds))

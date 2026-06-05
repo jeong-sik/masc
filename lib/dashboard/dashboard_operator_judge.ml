@@ -230,7 +230,7 @@ let compute_judgments
   match
     (* #9629: caller uses run_with_caller so this judge inherits
        Operator_judge's 300s default and surfaces in the per-caller
-       Prometheus counter. *)
+       Otel_metric_store counter. *)
     Masc_oas_bridge.run_with_caller
       ~caller:Env_config_oas_bridge.Operator_judge (fun () ->
       Keeper_turn_driver_wrappers.run_named_with_masc_tools ~runtime_id

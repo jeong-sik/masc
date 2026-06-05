@@ -67,7 +67,7 @@ let with_clean_env f =
     f
 
 let counter_value labels =
-  Prometheus.metric_value_or_zero
+  Otel_metric_store.metric_value_or_zero
     Keeper_metrics.(to_string PathRejection)
     ~labels ()
 

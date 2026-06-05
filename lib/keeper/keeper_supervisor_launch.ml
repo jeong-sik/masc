@@ -64,7 +64,7 @@ let launch_supervised_fiber
        "%s: Fiber_started rejected during supervised launch: %s"
        meta.name
        (Keeper_state_machine.transition_error_to_string err);
-     Prometheus.inc_counter
+     Otel_metric_store.inc_counter
        Keeper_metrics.(to_string SupervisorCleanupFailures)
        ~labels:
          [ "keeper", meta.name
@@ -94,11 +94,11 @@ let launch_supervised_fiber
     let domain_pool_flag = Env_config.KeeperSupervisor.domain_pool_enabled in
     let bump_fork_outcome outcome =
       (* Label order mirrors the other [keeper_supervisor.ml] inc_counter
-         call sites ([keeper] first, then the discriminator).  Prometheus
+         call sites ([keeper] first, then the discriminator).  Otel_metric_store
          label-set keys are order-sensitive, so a single per-metric
          convention prevents accidental time-series splitting when new
          call sites add the same labels in a different order. *)
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string DomainPoolFork)
         ~labels:[ "keeper", meta.name; "outcome", outcome ]
         ()
@@ -244,7 +244,7 @@ let launch_supervised_fiber
 	                with
                 | Ok _ -> ()
                 | Error e ->
-                  Prometheus.inc_counter
+                  Otel_metric_store.inc_counter
                     Keeper_metrics.(to_string DispatchEventFailures)
                     ~labels:[ "keeper", meta.name; "event", "fiber_terminated" ]
                     ();
@@ -270,7 +270,7 @@ let launch_supervised_fiber
                 with
                 | Ok _ -> ()
                 | Error e ->
-                  Prometheus.inc_counter
+                  Otel_metric_store.inc_counter
                     Keeper_metrics.(to_string DispatchEventFailures)
                     ~labels:[ "keeper", meta.name; "event", "stop_requested" ]
                     ();
@@ -285,7 +285,7 @@ let launch_supervised_fiber
                 with
                 | Ok _ -> ()
                 | Error e ->
-                  Prometheus.inc_counter
+                  Otel_metric_store.inc_counter
                     Keeper_metrics.(to_string DispatchEventFailures)
                     ~labels:[ "keeper", meta.name; "event", "drain_complete" ]
                     ();
@@ -332,7 +332,7 @@ let launch_supervised_fiber
 	              with
               | Ok _ -> ()
               | Error e ->
-                Prometheus.inc_counter
+                Otel_metric_store.inc_counter
                   Keeper_metrics.(to_string DispatchEventFailures)
                   ~labels:[ "keeper", meta.name; "event", "fiber_terminated" ]
                   ();
@@ -475,7 +475,7 @@ let launch_supervised_fiber
                     with
                     | Ok () -> ()
                     | Error err ->
-                      Prometheus.inc_counter
+                      Otel_metric_store.inc_counter
                         Keeper_metrics.(to_string WriteMetaFailures)
                         ~labels:[ "keeper", meta.name; "phase", "fiber_unresolved_stamp" ]
                         ();
@@ -529,7 +529,7 @@ let launch_supervised_fiber
              advisory; re-raising here would still become [Fun.Finally_raised]
              and could mask the body outcome. Count only these unexpected
              cleanup exceptions so the metric remains actionable. *)
-            Prometheus.inc_counter
+            Otel_metric_store.inc_counter
               Keeper_metrics.(to_string SupervisorCleanupFailures)
               ~labels:[ "keeper", meta.name ]
               ();

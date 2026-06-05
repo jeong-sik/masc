@@ -100,38 +100,13 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
             | Keeper_turn_driver.Admission_queue_rejected _
             | Keeper_turn_driver.Resumable_cli_session _
             | Keeper_turn_driver.Capacity_backpressure _
-            (* No_tool_capable (inside Runtime_exhausted) excluded:
-               this is a configuration/capability mismatch, not a
-               transient condition.  Counting it toward noop_backoff
-               causes spurious keeper fiber kills (59/day on 2026-05-24)
-               without resolving the underlying filter mismatch.
-               See #18317, #18315. *)
             | Keeper_turn_driver.Retry_admission_denied _) ->
             true
         | Some _ | None -> false)
     | None -> false
   in
-  (* #10474: emit Prometheus counters for no_tool_provider and proactive
-     cycle outcomes so Grafana can surface fleet-wide health ratios. *)
-  (match sdk_error with
-     | Some err ->
-         (match Keeper_turn_driver.classify_masc_internal_error err with
-          | Some (Keeper_turn_driver.Runtime_exhausted
-	                  { runtime_id
-	                  ; reason = Keeper_turn_driver.No_tool_capable _
-	                  ; _
-	                  }) ->
-            Prometheus.inc_counter
-              Keeper_metrics.(to_string NoToolProvider)
-              ~labels:
-                [ ("keeper", meta.name)
-                ; ("runtime_id", runtime_id)
-                ]
-              ()
-        | _ -> ())
-   | None -> ());
   if is_scheduled_autonomous_cycle then
-    Prometheus.inc_counter Keeper_metrics.(to_string ProactiveOutcome)
+    Otel_metric_store.inc_counter Keeper_metrics.(to_string ProactiveOutcome)
       ~labels:[ ("keeper", meta.name); ("outcome", "error") ]
       ();
   let preview =

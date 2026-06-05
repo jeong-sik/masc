@@ -46,7 +46,7 @@ let profile_file base_path agent_id =
     (agent_id ^ ".json")
 
 let anomaly_profile_drop_value reason =
-  Prometheus.metric_value_or_zero Prometheus.metric_persistence_read_drops
+  Otel_metric_store.metric_value_or_zero Otel_metric_store.metric_persistence_read_drops
     ~labels:[("surface", "governance_anomaly_profile"); ("reason", reason)]
     ()
 

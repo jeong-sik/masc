@@ -2,7 +2,7 @@
    for the accountability ledger.
    Extracted from keeper_accountability.ml during godfile decomposition.
    Contains claim/resolution types, JSON serialization, Dated_jsonl store
-   management, Prometheus emit-skip counter, and window entry reader. *)
+   management, Otel_metric_store emit-skip counter, and window entry reader. *)
 
 type claim_kind = Keeper_accountability_claim_types.claim_kind =
   | Task_commitment
@@ -72,7 +72,7 @@ let is_keeper_agent_name agent_name =
   Option.is_some (Keeper_identity.canonical_keeper_name_from_agent_name agent_name)
 ;;
 
-(** #10314: surface accountability ledger emit drops as a Prometheus
+(** #10314: surface accountability ledger emit drops as a Otel_metric_store
     counter so operators can distinguish "no emits because no work"
     from "no emits because the agent_name gate rejected the call".
 
@@ -92,7 +92,7 @@ let is_keeper_agent_name agent_name =
 let accountability_emit_skip_metric = "masc_accountability_emit_skip_total"
 
 let () =
-  Prometheus.register_counter
+  Otel_metric_store.register_counter
     ~name:accountability_emit_skip_metric
     ~help:
       "Total accountability ledger calls dropped before append because a precondition \
@@ -103,7 +103,7 @@ let () =
 ;;
 
 let record_emit_skip ~kind ~reason =
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     accountability_emit_skip_metric
     ~labels:[ "kind", kind; "reason", reason ]
     ()

@@ -1,7 +1,7 @@
 (** Auth, identity, config, and governance metric-name constants.
 
-    Included by {!Prometheus} so existing callers keep using
-    [Prometheus.metric_*] bindings unchanged. *)
+    Included by {!Otel_metric_store} so existing callers keep using
+    [Otel_metric_store.metric_*] bindings unchanged. *)
 
 let metric_auth_bearer_token_mismatch = "masc_auth_bearer_token_mismatch_total"
 

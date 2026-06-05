@@ -715,9 +715,9 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
             log_mcp_exn ~label:"telemetry tracking failed" exn)
      | None -> ());
 
-  (* Prometheus: record errors for failed tool calls *)
+  (* Otel_metric_store: record errors for failed tool calls *)
   if not success then
-    Prometheus.record_error ~error_type:name ();
+    Otel_metric_store.record_error ~error_type:name ();
 
   (* Track in-memory call counter for all declared tool names (including hidden). *)
   (* Tool assignment telemetry: Called → Completed causal chain.

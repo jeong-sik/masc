@@ -48,7 +48,7 @@ val keeper_turn_throttle_source : Keeper_turn_slot.throttle_source
     @since issue #17192 *)
 
 val proactive_skip_reason_metric : string
-(** Canonical Prometheus metric name for the proactive-scheduler
+(** Canonical Otel_metric_store metric name for the proactive-scheduler
     skip-reason counter.  Labels: [("keeper", <name>); ("reason",
     <skip_reason_label>)].  [reason] is produced by
     [Keeper_world_observation.verdict_reasons_to_strings] and is

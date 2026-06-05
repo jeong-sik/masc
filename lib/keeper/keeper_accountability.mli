@@ -10,7 +10,7 @@ type claim_status =
   | Partial
 
 val accountability_emit_skip_metric : string
-(** #10314: Prometheus counter name surfaced for tests and dashboards.
+(** #10314: Otel_metric_store counter name surfaced for tests and dashboards.
     Labels:
     - [kind] ∈ task_transition | completion_claim
     - [reason] ∈ not_keeper_agent_name | empty_subject

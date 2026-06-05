@@ -66,7 +66,7 @@ let handle_keeper_down_config ~(config : Workspace.config) args : tool_result =
            with
            | Ok () -> ()
            | Error err ->
-               Prometheus.inc_counter
+               Otel_metric_store.inc_counter
                  Keeper_metrics.(to_string WriteMetaFailures)
                  ~labels:[("keeper", name);
                           ("phase",
@@ -96,7 +96,7 @@ let handle_keeper_down_config ~(config : Workspace.config) args : tool_result =
         if validate_name (Keeper_id.Trace_id.to_string m.runtime.trace_id) then (
           let dir = Filename.concat (session_base_dir config) (Keeper_id.Trace_id.to_string m.runtime.trace_id) in
           try rm_rf dir with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-            Prometheus.inc_counter
+            Otel_metric_store.inc_counter
               Keeper_metrics.(to_string SessionCleanupFailures)
               ();
             Log.Keeper.error "session dir cleanup failed: %s"

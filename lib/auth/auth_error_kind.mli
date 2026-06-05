@@ -1,5 +1,5 @@
 (** Closed-enum classification of [Masc_domain.t] for auth-related logging
-    and prometheus metric labels. See [auth_error_kind.ml] for the
+    and otel_metric_store metric labels. See [auth_error_kind.ml] for the
     rationale and migration scope. *)
 
 type t =
@@ -12,7 +12,7 @@ type t =
   | Invalid_json
   | Other
 
-(** Stable string label used in prometheus metric dimensions and log lines.
+(** Stable string label used in otel_metric_store metric dimensions and log lines.
     Round-trips with [of_string]. *)
 val to_string : t -> string
 
@@ -80,13 +80,13 @@ type dashboard_actor_fallback =
 
 (** Render the byte-equivalent warn-log message for a fallback event.
     Used by the consolidated helper at the callsite; the format strings
-    match the prior inline [Log.Auth.warn] templates so prometheus log
+    match the prior inline [Log.Auth.warn] templates so otel_metric_store log
     queries and alerting rules keyed on the [silent:dashboard_actor_fallback]
     prefix continue to fire unchanged. *)
 val dashboard_actor_fallback_log_message : dashboard_actor_fallback -> string
 
-(** Prometheus counter labels for a fallback event. Always includes the
+(** Otel_metric_store counter labels for a fallback event. Always includes the
     [outcome] dimension; the [Outcome_error] case additionally carries
     the [err_kind] dimension. *)
-val dashboard_actor_fallback_prometheus_labels :
+val dashboard_actor_fallback_metric_labels :
   dashboard_actor_fallback -> (string * string) list

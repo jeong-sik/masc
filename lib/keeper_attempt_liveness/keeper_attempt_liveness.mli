@@ -102,7 +102,7 @@ type failure =
   | Provider_error of string
 
 val failure_kind_label : failure -> string
-(** Stable label for telemetry / Prometheus counter. One of
+(** Stable label for telemetry / Otel_metric_store counter. One of
     [no_first_token | inter_chunk_idle | wall_exceeded | provider_error]. *)
 
 (** {1 FSM state} *)
@@ -163,7 +163,7 @@ type event =
 (** {1 Output}
 
     Side-effect signal returned alongside the next state. Callers in
-    PR-2 emit Prometheus counters and structured logs based on
+    PR-2 emit Otel_metric_store counters and structured logs based on
     [Outcome]. *)
 
 type output =

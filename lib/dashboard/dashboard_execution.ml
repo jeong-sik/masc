@@ -136,8 +136,8 @@ let format_slow_render_timings (t : render_phase_timings_ms) =
 let render_phase_seconds ms = if ms <= 0.0 then 0.0 else ms /. 1000.0
 
 let observe_render_phase phase ms =
-  Prometheus.observe_histogram
-    Prometheus.metric_dashboard_execution_render_phase_sec
+  Otel_metric_store.observe_histogram
+    Otel_metric_store.metric_dashboard_execution_render_phase_sec
     ~labels:[ "phase", phase ]
     (render_phase_seconds ms)
 ;;
@@ -148,12 +148,12 @@ let dashboard_snapshot_latency_seconds_buckets =
 
 let observe_dashboard_snapshot_latency ms =
   let seconds = render_phase_seconds ms in
-  Prometheus.observe_histogram
-    Prometheus.metric_dashboard_snapshot_latency_seconds
+  Otel_metric_store.observe_histogram
+    Otel_metric_store.metric_dashboard_snapshot_latency_seconds
     seconds;
   let inc_bucket le =
-    Prometheus.inc_counter
-      Prometheus.metric_dashboard_snapshot_latency_seconds_bucket
+    Otel_metric_store.inc_counter
+      Otel_metric_store.metric_dashboard_snapshot_latency_seconds_bucket
       ~labels:[ "le", le ]
       ()
   in
@@ -176,8 +176,8 @@ let render_sub_operation_timings_all_zero (t : render_phase_timings_ms) =
 
 let record_dashboard_all_zero_metric t =
   let value = if render_sub_operation_timings_all_zero t then 1.0 else 0.0 in
-  Prometheus.set_gauge
-    Prometheus.metric_dashboard_metric_all_zeros
+  Otel_metric_store.set_gauge
+    Otel_metric_store.metric_dashboard_metric_all_zeros
     ~labels:dashboard_all_zero_labels
     value
 ;;
@@ -191,7 +191,7 @@ let record_render_phase_timings (t : render_phase_timings_ms) =
   observe_render_phase "enrich" t.enrich_ms;
   (* Idle renders (n_keepers = 0) would otherwise inject a fake 0s sample
      that drags the per-keeper average toward zero and hides slow renders.
-     Observe once per keeper so Prometheus [sum / count] yields the actual
+     Observe once per keeper so Otel_metric_store [sum / count] yields the actual
      average per-keeper enrich time, weighted by fleet size, instead of
      averaging render-level means (a 1-keeper render and a 100-keeper
      render contributing equally). *)

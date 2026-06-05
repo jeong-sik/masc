@@ -37,7 +37,7 @@ let substitute_web_fetch_timeout s =
 ;;
 
 let observe_guidance_config_drift ~label ~detail =
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     Keeper_metrics.(to_string PromptFailures)
     ~labels:[ "prompt", label ]
     ();

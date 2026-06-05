@@ -34,6 +34,5 @@
   masc.board_handlers
   masc.masc_tool_dispatch
   masc.masc_tool_surface
-  masc.prometheus
   masc.tool_types
   masc_types))

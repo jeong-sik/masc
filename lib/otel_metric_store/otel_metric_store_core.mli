@@ -1,7 +1,7 @@
-(** Mutex-backed Prometheus metric store.
+(** Mutex-backed Otel_metric_store metric store.
 
     This module owns the shared metric table and primitive
-    register/update/query operations. [Prometheus] includes this signature
+    register/update/query operations. [Otel_metric_store] includes this signature
     to keep the public facade stable while the godfile is decomposed. *)
 
 type label = string * string

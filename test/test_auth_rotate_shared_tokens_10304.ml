@@ -3,7 +3,7 @@ module Types = Masc_domain
 (** #10304 — pin the shared-token rotation contract.
 
     #9786 shipped detection only ([Auth.audit_token_uniqueness] +
-    boot-time WARN + Prometheus counter).  #10304 reports the
+    boot-time WARN + Otel_metric_store counter).  #10304 reports the
     detection fires again in production: 14 agents shared one token
     (3 distinct [token_hash_prefix] in one day).  The WARN message
     instructs operators to "rotate via Auth.create_token" but no

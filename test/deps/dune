@@ -70,7 +70,7 @@
   ;; G5 qualifier-removal budget.
   (re_export masc.trajectory)
   ;; RFC-0056 Phase 1B — Keeper_skill_routing leaf utility sub-library.
-  (re_export masc.keeper_skill_routing)
+  (re_export masc.keeper_tooling)
   ;; RFC-0056 Phase 1C — Host_config leaf utility sub-library.
   (re_export masc.host_config)
   ;; RFC-0056 Phase 1D — Briefing_compactors leaf utility sub-library.
@@ -87,10 +87,10 @@
   (re_export masc.tool_call_quality_benchmark)
   ;; RFC-0056 Phase 1I — Keeper_event_queue leaf module sub-library
   ;; (first lib/keeper/ promotion).
-  (re_export masc.keeper_event_queue)
+  (re_export masc.keeper_lifecycle)
   ;; RFC-0056 Phase 1J — Keeper_invariant leaf module sub-library
   ;; (second lib/keeper/ promotion).
-  (re_export masc.keeper_invariant)
+  (re_export masc.keeper_failure)
   ;; RFC-0056 Phase 1K — Compaction_trigger leaf sub-library.
   (re_export masc.compaction_trigger)
   ;; RFC-0056 Phase 1L — Attribution leaf sub-library.
@@ -100,28 +100,16 @@
   ;; RFC-0056 Phase 1N — Keeper state-machine leaf sub-library.
   (re_export masc.keeper_state)
   ;; Keeper-owned pure/type leaf sub-libraries.
-  (re_export masc.keeper_tool_name)
-  (re_export masc.keeper_id)
+  (re_export masc.keeper_core_types)
+  (re_export masc.keeper_failure)
+  (re_export masc.keeper_lifecycle)
+  (re_export masc.keeper_memory)
+  (re_export masc.keeper_outcome)
   (re_export masc.keeper_runtime)
-  (re_export masc.keeper_timing)
-  (re_export masc.keeper_metrics)
+  (re_export masc.keeper_telemetry)
   (re_export masc.keeper_tooling)
-  (re_export masc.keeper_failure_taxonomy)
-  (re_export masc.keeper_contract)
-  (re_export masc.keeper_memory_taxonomy)
-  (re_export masc.keeper_outcome_taxonomy)
-  (re_export masc.keeper_types)
-  (re_export masc.keeper_types_profile_sandbox)
-  (re_export masc.keeper_pressure)
-  (re_export masc.keeper_lifecycle_events)
-  (re_export masc.keeper_usage_trust)
-  (re_export masc.keeper_event_bus)
-  (re_export masc.keeper_discovered_tools)
-  (re_export masc.keeper_toml)
-  (re_export masc.keeper_tool_execute_timeout)
-  (re_export masc.keeper_failure_policy)
-  (re_export masc.keeper_tool_response)
-  (re_export masc.keeper_social)
+  (re_export masc.keeper_workspace)
+  (re_export masc.keeper_world)
   ;; Model inference metrics + runtime provider label leaves.
   (re_export masc.runtime_provider_labels)
   (re_export masc.model_inference_metrics)
@@ -146,7 +134,7 @@
   (re_export masc.runtime)
   (re_export masc.masc_event_bus)
   (re_export masc.provider_tool_support)
-  (re_export masc.keeper_internal_error)
+  (re_export masc.keeper_failure)
   (re_export masc.pool_metrics)
   (re_export masc.auth)
   (re_export masc.fd_accountant)

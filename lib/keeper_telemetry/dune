@@ -1,0 +1,16 @@
+(include_subdirs no)
+(library
+ (name masc_keeper_telemetry)
+ (public_name masc.keeper_telemetry)
+ (wrapped false)
+ (modules
+  keeper_metrics
+  keeper_measurement
+  keeper_timing
+  keeper_token_count
+  keeper_usage_trust
+  keeper_benchmark_canary)
+ (libraries
+  agent_sdk
+  yojson
+  time_compat))

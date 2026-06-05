@@ -55,13 +55,12 @@
   masc.attribution
   masc.exec_policy
   masc.keeper_state
-  masc.keeper_id
-  masc.keeper_metrics
-  masc.keeper_types
-  masc.keeper_types_profile_sandbox
-  masc.keeper_pressure
-  masc.keeper_memory_taxonomy
-  masc.keeper_tool_response
+  masc.keeper_core_types
+  masc.keeper_telemetry
+  masc.keeper_workspace
+  masc.keeper_memory
+  masc.keeper_world
+  masc.keeper_tooling
   masc.runtime_provider_labels
   masc.runtime_model
   masc.runtime
@@ -71,7 +70,7 @@
   masc.cdal_runtime
   masc.cdal
   masc.trajectory
-  masc.keeper_skill_routing
+  masc.keeper_tooling
   masc.host_config
   masc.briefing_compactors
   masc.dashboard_eval_feed
@@ -82,14 +81,13 @@
   masc.telemetry_unified
   masc.discovery_cache
   masc.local_runtime_pool
-  masc.keeper_event_queue
-  masc.keeper_invariant
+  masc.keeper_lifecycle
+  masc.keeper_failure
   masc.compaction_trigger
   masc.bounded_event_dedupe
-  masc.keeper_recording_error_state
+  masc.keeper_failure
   masc.keeper_livelock_state
-  masc.keeper_tool_retry_state
-  masc.keeper_tool_hook_error_state
+  masc.keeper_tooling
   masc.tool_catalog_surfaces
   masc.config_dir_resolver
   uri

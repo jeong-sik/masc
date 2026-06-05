@@ -30,7 +30,7 @@
    keeper_tool_ide_runtime
    keeper_sandbox_docker
    keeper_tool_execute_runtime_paths keeper_tool_execute_path
-   keeper_tool_execute_readonly_policy keeper_tool_execute_command_parse keeper_tool_execute_command_words keeper_workspace_read_ops
+   keeper_tool_execute_readonly_policy keeper_workspace_read_ops
    keeper_tool_execute_input
    keeper_tool_execute_runtime
    keeper_workspace_ops
@@ -247,37 +247,17 @@
    ;; RFC-0056 Phase 1N — Keeper_state_* deterministic FSM cluster extracted to
    ;; lib/keeper_state/. Parent still references bare Keeper_state_* modules.
    masc.keeper_state
-   ;; Keeper-owned pure/type leaves extracted from lib/keeper/.
-   masc.keeper_contract
-   masc.keeper_runtime_manifest_types
-   masc.keeper_registry
-   masc.keeper_hooks_oas_types
-   masc.keeper_binding_health_config
-   masc.keeper_path_rejection
-   masc.keeper_failure_circuit_breaker_types
-   masc.keeper_approval_queue_rules_types
-   masc.keeper_toml
+   ;; Keeper-owned groups extracted from fine-grained sub-libraries.
+   masc.keeper_core_types
+   masc.keeper_failure
+   masc.keeper_lifecycle
+   masc.keeper_memory
+   masc.keeper_outcome
    masc.keeper_runtime
-   masc.keeper_tool_name
-   masc.keeper_id
-   masc.keeper_timing
-   masc.keeper_metrics
+   masc.keeper_telemetry
    masc.keeper_tooling
-   masc.keeper_failure_taxonomy
-   masc.keeper_memory_taxonomy
-   masc.keeper_memory_policy_summary_filter
-   masc.keeper_outcome_taxonomy
-   masc.keeper_types
-   masc.keeper_types_profile_sandbox
-   masc.keeper_pressure
-   masc.keeper_lifecycle_events
-   masc.keeper_usage_trust
-   masc.keeper_event_bus
-   masc.keeper_failure_policy
-   masc.keeper_tool_response
-   masc.keeper_social
-   masc.keeper_discovered_tools
-   masc.keeper_tool_execute_timeout
+   masc.keeper_workspace
+   masc.keeper_world
    ;; Runtime_provider_labels extracted to lib/runtime_provider_labels/.
    ;; Leaf boundary over agent_sdk.llm_provider canonical provider labels.
    masc.runtime_provider_labels
@@ -287,7 +267,7 @@
      masc.runtime
      masc.masc_event_bus
      masc.provider_tool_support
-     masc.keeper_internal_error
+     masc.keeper_failure
      masc.auth
      masc.fd_accountant
    ;; Model_inference_metrics facade + decomposition siblings extracted to
@@ -295,7 +275,7 @@
    masc.model_inference_metrics
    ;; Keeper_attempt_liveness extracted to lib/keeper_attempt_liveness/.
    ;; Per-attempt streaming liveness FSM + config + observer glue.
-   masc.keeper_attempt_liveness
+   masc.keeper_lifecycle
    ;; RFC-0132 PR-1 — Boundary_redaction SSOT for external-surface
    ;; provider/model label redaction. Codemod in PR-2 routes "runtime"
    ;; literals in lib/runtime and lib/keeper through this leaf.
@@ -316,7 +296,7 @@
    ;; RFC-0056 Phase 1B — Keeper_skill_routing leaf utility extracted to
    ;; lib/keeper_skill_routing/. 215 LoC, only stdlib + masc_core deps.
    ;; First step in unblocking lib/keeper/ flat-namespace decoupling.
-   masc.keeper_skill_routing
+   masc.keeper_tooling
    ;; RFC-0056 Phase 1C — Host_config leaf module extracted to
    ;; lib/host_config/. RFC-0084 §1.5/§3.4 typed host configuration record;
    ;; deps: stdlib + masc.workspace (already sub-library).
@@ -359,11 +339,11 @@
    ;; Unix only. Pure data structure (urgency variants + FIFO + dedup)
    ;; backed by specs/keeper-state-machine/KeeperEventQueue.tla.
    ;; Referenced by keeper_supervisor + keeper_registry godfiles.
-   masc.keeper_event_queue
+   masc.keeper_lifecycle
    ;; RFC-0056 Phase 1J — Keeper_invariant (second lib/keeper/ leaf)
    ;; extracted to lib/keeper_invariant/. 119+77 LoC, stdlib-only
    ;; (List/Printf/Set/String/StringSet/Result). Fan-in: 1 lib + 1 test.
-   masc.keeper_invariant
+   masc.keeper_failure
    ;; RFC-0056 Phase 1K — Compaction_trigger (third lib/keeper/ leaf)
    ;; extracted to lib/compaction_trigger/. 94+45 LoC, deps: stdlib +
    ;; Yojson + masc_log. Compaction trigger heuristic + JSON serializer.
@@ -376,7 +356,7 @@
    ;; Reduction Goal §P6). Domain adapter over Bounded_event_dedupe so
    ;; the standalone test executable can link in seconds without the
    ;; main library.
-   masc.keeper_recording_error_state
+   masc.keeper_failure
    ;; ETA-LIVELOCK (2026-05-19): typed escalation state for the
    ;; Keeper_turn_livelock dispatch-guard log noise (~15K ERROR/day
    ;; from 4 keepers re-blocking the same turn_id every ~30 s).
@@ -391,7 +371,7 @@
    ;; lib/keeper/keeper_tools_oas.ml:733. Domain adapter over
    ;; Bounded_event_dedupe so the standalone alcotest builds in seconds
    ;; without dragging the main library.
-   masc.keeper_tool_retry_state
+   masc.keeper_tooling
    ;; LAMBDA-HOOK-ERROR (2026-05-19): typed dedupe state for the
    ;; Keeper_hooks_oas on_tool_error hook ERROR log noise (8 events
    ;; from 4 distinct (keeper, tool) triples in a 1000-line system_log
@@ -402,7 +382,7 @@
    ;; keeper_tool_retry_state with a (keeper, tool, signature) key.
    ;; Domain adapter over Bounded_event_dedupe so the standalone
    ;; alcotest builds in seconds without dragging the main library.
-   masc.keeper_tool_hook_error_state
+   masc.keeper_tooling
    ;; RFC-0086 Phase 2.B prereq — Tool_catalog_surfaces (lib/ root, 554+103 LoC)
    ;; extracted to lib/tool_catalog_surfaces/. deps: Agent_sdk + stdlib only.
    ;; Unblocks one of 6 cycle modules identified in plan §8.14 iter-2.

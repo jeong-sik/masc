@@ -29,7 +29,7 @@
   masc.config_dir_resolver
   masc.masc_event_bus
   masc.provider_tool_support
-  masc.keeper_internal_error
+  masc.keeper_failure
   masc.auth
   masc.fs_compat
   masc.fd_accountant

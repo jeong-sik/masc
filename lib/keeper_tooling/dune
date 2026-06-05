@@ -4,8 +4,25 @@
  (name masc_keeper_tooling)
  (public_name masc.keeper_tooling)
  (wrapped false)
- (modules keeper_tool_execute_shell_ir keeper_provider_error_class)
+ (modules
+  keeper_discovered_tools
+  keeper_tool_execute_command_parse
+  keeper_tool_execute_command_words
+  keeper_tool_execute_shell_ir
+  keeper_tool_execute_timeout
+  keeper_tool_hook_error_state
+  keeper_tool_name
+  keeper_tool_response
+  keeper_tool_retry_state
+  keeper_skill_routing)
  (libraries
+  agent_sdk
+  masc.bounded_event_dedupe
+  masc.config
   masc.exec_policy
+  masc.masc_core
   masc.masc_exec
-  masc.masc_exec_command_gate))
+  masc.masc_exec_command_gate
+  masc_core
+  yojson)
+ (flags (:standard -w +4)))

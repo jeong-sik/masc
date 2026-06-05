@@ -4,10 +4,16 @@
  (name masc_keeper_runtime)
  (public_name masc.keeper_runtime)
  (wrapped false)
- (modules keeper_oas_timeout_message keeper_sandbox_error keeper_terminal_reason keeper_synthetic_marker keeper_runtime_config)
+ (modules
+  keeper_runtime_config
+  keeper_runtime_manifest_types
+  keeper_toml_loader
+  keeper_toml_parser)
  (libraries
+  eio
+  fs_compat
   masc.config
-  masc.keeper_toml
   masc.config_dir_resolver
-  masc.fs_compat
-  masc.masc_core))
+  masc.masc_core
+  yojson)
+ (preprocess (pps ppx_tla)))

@@ -1,7 +1,0 @@
-(include_subdirs no)
-
-(library
- (name masc_keeper_failure_policy)
- (public_name masc.keeper_failure_policy)
- (wrapped false)
- (modules keeper_failure_policy))

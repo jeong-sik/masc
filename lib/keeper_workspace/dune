@@ -1,0 +1,30 @@
+(include_subdirs no)
+(library
+ (name masc_keeper_workspace)
+ (public_name masc.keeper_workspace)
+ (wrapped false)
+ (modules
+  keeper_workspace_op
+  keeper_provider_error_class
+  keeper_hooks_oas_types
+  keeper_sandbox_error
+  keeper_fd_pressure
+  keeper_disk_pressure
+  keeper_voice_local)
+ (libraries
+  agent_sdk
+  masc.masc_core
+  masc.types_boundary
+  masc.keeper_tooling
+  unix
+  str
+  yojson
+  eio
+  masc_config
+  masc_cancel_safe
+  masc_process
+  masc_log
+  time_compat)
+ (foreign_stubs
+  (language c)
+  (names nofile_stubs)))

@@ -1,0 +1,12 @@
+(include_subdirs no)
+(library
+ (name masc_keeper_world)
+ (public_name masc.keeper_world)
+ (wrapped false)
+ (modules
+  keeper_social_model_types
+  keeper_synthetic_marker
+  keeper_prompt_names
+  keeper_world_observation_turn_types)
+ (libraries
+  masc_core))

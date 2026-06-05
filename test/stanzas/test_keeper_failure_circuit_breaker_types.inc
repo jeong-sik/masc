@@ -3,6 +3,6 @@
  (modules test_keeper_failure_circuit_breaker_types)
  (libraries
   alcotest
-  masc.keeper_failure_circuit_breaker_types
-  masc.keeper_path_rejection
+  masc.keeper_core_types
+  masc.keeper_failure
   yojson))

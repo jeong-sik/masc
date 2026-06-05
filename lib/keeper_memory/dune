@@ -1,0 +1,16 @@
+(include_subdirs no)
+
+(library
+ (name masc_keeper_memory)
+ (public_name masc.keeper_memory)
+ (wrapped false)
+ (modules
+  keeper_memory_policy_summary_filter
+  keeper_continuity_summary_source
+  keeper_memory_llm_summary_outcome
+  keeper_memory_recall_exn_class
+  keeper_user_visible_reply_source)
+ (libraries
+  masc.masc_core
+  unix
+  yojson))

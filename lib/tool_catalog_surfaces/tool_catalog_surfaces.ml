@@ -193,9 +193,7 @@ let session_min_surface_tools =
 ;;
 
 let admin_surface_tools =
-  [ "masc_tool_admin_update"
-  ; "masc_tool_admin_snapshot"
-  ; "masc_config"
+  [ "masc_config"
   ; (* Phase 2: surface SSOT *)
     "masc_persona_save"
   ; "masc_board_delete"

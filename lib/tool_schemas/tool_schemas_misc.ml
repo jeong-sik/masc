@@ -2,12 +2,6 @@
 
 open Masc_domain
 
-(** Issue #8546: [masc_tool_admin_update] section enum strings mirror
-    [Tool_misc_admin.valid_admin_section_strings]. Cycle constraint —
-    this library cannot depend on [masc_tool_misc] directly. The sync
-    test in [test_types.ml :: admin_section_ssot] keeps this aligned. *)
-let admin_section_enum_strings = [ "auth" ]
-
 (** Issue #8592: hand-mirrored from [Dashboard.valid_scope_strings].
     Cycle constraint — Tool_schemas_misc is upstream of Dashboard.
     The test [test_types.ml :: dashboard_scope_ssot] asserts this

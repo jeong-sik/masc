@@ -658,28 +658,6 @@ let test_masc_keeper_repair_schema () =
 
 (* keeper policy schema tests removed — policy tool schemas no longer exist *)
 
-let test_masc_tool_admin_snapshot_schema () =
-  match find_registered_tool "masc_tool_admin_snapshot" with
-  | None -> Alcotest.fail "masc_tool_admin_snapshot not found"
-  | Some schema ->
-      match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "has include_hidden" true
-            (List.mem_assoc "include_hidden" props);
-          Alcotest.(check int) "admin snapshot property count" 1
-            (List.length props)
-      | None -> Alcotest.fail "masc_tool_admin_snapshot missing properties"
-
-let test_masc_tool_admin_update_schema () =
-  match find_registered_tool "masc_tool_admin_update" with
-  | None -> Alcotest.fail "masc_tool_admin_update not found"
-  | Some schema ->
-      match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "has section" true (List.mem_assoc "section" props);
-          Alcotest.(check bool) "has policy" true (List.mem_assoc "policy" props)
-      | None -> Alcotest.fail "masc_tool_admin_update missing properties"
-
 (* ============================================================ *)
 (* 14. Handover Tool Tests                                       *)
 (* ============================================================ *)
@@ -890,12 +868,6 @@ let () =
         test_masc_keeper_msg_schema;
       Alcotest.test_case "keeper-repair" `Quick
         test_masc_keeper_repair_schema;
-    ];
-    "runtime_admin_tools", [
-      Alcotest.test_case "tool-admin-snapshot" `Quick
-        test_masc_tool_admin_snapshot_schema;
-      Alcotest.test_case "tool-admin-update" `Quick
-        test_masc_tool_admin_update_schema;
     ];
     (* Runtime verify stays on the runtime admin surface; no separate public group. *)
     "legacy_swarm_removed", [

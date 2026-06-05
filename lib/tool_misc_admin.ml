@@ -15,11 +15,10 @@ module Char = Stdlib.Char
 module Int = Stdlib.Int
 module Float = Stdlib.Float
 
-(** Tool_misc_admin — Auth, config, tool inventory, and feature flag handlers.
+(** Tool_misc_admin — config and tool inventory handlers.
 
     Extracted from tool_misc.ml to reduce god file size.
-    Contains administrative tool handlers: auth config, tool admin snapshot/update,
-    feature flags, enforcement summary, and tool inventory.
+    Contains read-only dashboard config and catalog inventory helpers.
 
     @since 2.187.0 — God file decomposition Phase 1 *)
 
@@ -27,24 +26,11 @@ open Tool_args
 
 type tool_result = Tool_result.result
 
-(* RFC-0189: typed [Tool_result.result] helpers, scoped to this module.
+(* RFC-0189: typed [Tool_result.result] helper, scoped to this module.
 
-   - [ok_result_typed]: structured success — uses [data] field directly,
-     mirroring the [Tool_args.ok_response]/[ok_assoc] envelope.
    - [text_ok]: success carrying a free-form (often JSON-string) body.
      Falls back to [`String body] when [structured_payload_of_message]
-     can't parse — same pattern as #18767.
-   - [error_workflow]: caller-input rejection (auth section unknown,
-     deprecated field, validation failure).  All three error paths
-     here surface caller-side issues, so they share
-     [Workflow_rejection]. *)
-let ok_result_typed ~tool_name ~start_time fields : Tool_result.result =
-  Tool_result.make_ok
-    ~tool_name
-    ~start_time
-    ~data:(Tool_args.ok_assoc fields)
-    ()
-;;
+     can't parse — same pattern as #18767. *)
 
 let text_ok ~tool_name ~start_time body : Tool_result.result =
   let data =
@@ -55,79 +41,9 @@ let text_ok ~tool_name ~start_time body : Tool_result.result =
   Tool_result.make_ok ~tool_name ~start_time ~data ()
 ;;
 
-let error_workflow ~tool_name ~start_time msg : Tool_result.result =
-  Tool_result.make_err
-    ~tool_name
-    ~class_:Tool_result.Workflow_rejection
-    ~start_time
-    msg
-;;
-
-(** SSOT for canonical `section` values accepted by
-    [masc_tool_admin_update]. Adding a new section requires:
-    (1) a new branch in the dispatcher match below,
-    (2) this list gets the new string,
-    (3) [Tool_schemas_misc.admin_section_enum_strings] mirror (sync test
-    in [test_types.ml :: admin_section_ssot] catches drift).
-
-    Issue #8546: schema advertised [auth; unit_policy] but the handler
-    only implemented `auth`, so LLM clients following the schema got
-    `"section must be one of: auth"` — fictional sections removed. *)
-let valid_admin_section_strings : string list = [ "auth" ]
-
-type context = {
-  config: Workspace.config;
-  agent_name: string;
-}
-
 (* ================================================================ *)
 (* JSON builders                                                    *)
 (* ================================================================ *)
-
-let base_url_has_non_loopback_host () =
-  match Env_config_core.masc_http_base_url_result () with
-  | Error _ -> false
-  | Ok url -> (
-      match Uri.host (Uri.of_string url) with
-      | None -> true
-      | Some host -> not (Masc_network_defaults.is_loopback_host host))
-
-let http_auth_strict_enabled ~bind_is_loopback =
-  Env_config.Transport.http_auth_strict_env_enabled ()
-  || not bind_is_loopback
-  || base_url_has_non_loopback_host ()
-
-let auth_snapshot_json ctx =
-  let cfg = Auth.load_auth_config ctx.config.base_path in
-  let bind_host = Env_config_core.masc_host () in
-  let bind_is_loopback = Masc_network_defaults.is_loopback_host bind_host in
-  let http_auth_strict = http_auth_strict_enabled ~bind_is_loopback in
-  let credentials =
-    Auth.list_credentials ctx.config.base_path
-    |> List.sort (fun (left : Masc_domain.agent_credential) right ->
-           String.compare left.agent_name right.agent_name)
-    |> List.map (fun (cred : Masc_domain.agent_credential) ->
-           `Assoc
-             [
-               ("agent_name", `String cred.agent_name);
-               ("admin", `Bool ((=) cred.role Masc_domain.Admin));
-               ("created_at", `String cred.created_at);
-               ("expires_at", Json_util.string_opt_to_json_trimmed cred.expires_at);
-             ])
-  in
-  `Assoc
-    [
-      ("enabled", `Bool cfg.enabled);
-      ("require_token", `Bool cfg.require_token);
-      ("token_expiry_hours", `Int cfg.token_expiry_hours);
-      ("tool_auth_strict", `Bool (Auth.is_tool_auth_strict_enabled ()));
-      ("http_auth_strict", `Bool http_auth_strict);
-      ("bind_host", `String bind_host);
-      ("bind_is_loopback", `Bool bind_is_loopback);
-      ("operator_remote_requires_token", `Bool true);
-      ("credential_count", `Int (List.length credentials));
-      ("credentials", `List credentials);
-    ]
 
 let tool_inventory_json _ctx ~include_hidden =
   (* Returns all tool schemas from catalog with metadata.
@@ -204,75 +120,4 @@ let handle_config ~tool_name ~start_time args : tool_result =
   let cat = get_string_opt args "category" in
   let json = Env_config_introspect.to_json_filtered ?cat () in
   text_ok ~tool_name ~start_time (Yojson.Safe.to_string json)
-;;
-
-let handle_tool_admin_snapshot ~tool_name ~start_time ctx args : tool_result =
-  let include_hidden = get_bool args "include_hidden" true in
-  ok_result_typed ~tool_name ~start_time
-    [
-      ("generated_at", `String (Masc_domain.now_iso ()));
-      ("auth", auth_snapshot_json ctx);
-      ( "tool_inventory",
-        tool_inventory_json ctx ~include_hidden );
-    ]
-;;
-
-let handle_tool_admin_update ~tool_name ~start_time ctx args : tool_result =
-  let section =
-    get_string args "section" "" |> String.trim |> String.lowercase_ascii
-  in
-  match section with
-  | "auth" ->
-      let current = Auth.load_auth_config ctx.config.base_path in
-      if Option.is_some (Json_util.get_string args "default_role") then
-        error_workflow ~tool_name ~start_time "default_role is no longer supported"
-      else
-      let require_token =
-        match Json_util.get_bool args "require_token" with
-        | Some value -> value
-        | None -> current.require_token
-      in
-      let enabled_opt = Json_util.get_bool args "enabled" in
-      let expiry_hours =
-        match Json_util.get_int args "token_expiry_hours" with
-        | Some value when value > 0 -> Ok value
-        | Some _ -> Error "token_expiry_hours must be > 0"
-        | None -> Ok current.token_expiry_hours
-      in
-      (match expiry_hours with
-      | Error err -> error_workflow ~tool_name ~start_time err
-      | Ok token_expiry_hours ->
-          let workspace_secret =
-            match enabled_opt with
-            | Some true when not current.enabled ->
-                let (secret, _bootstrap) =
-                  Auth.enable_auth ctx.config.base_path ~require_token ~agent_name:ctx.agent_name
-                in
-                Some secret
-            | Some false when current.enabled ->
-                Auth.disable_auth ctx.config.base_path;
-                None
-            | _ -> None
-          in
-          let refreshed = Auth.load_auth_config ctx.config.base_path in
-          let updated =
-            {
-              refreshed with
-              require_token;
-              token_expiry_hours;
-              enabled =
-                (match enabled_opt with Some value -> value | None -> refreshed.enabled);
-            }
-          in
-          Auth.save_auth_config ctx.config.base_path updated;
-          ok_result_typed ~tool_name ~start_time
-            [
-              ("section", `String "auth");
-              ("workspace_secret", Json_util.string_opt_to_json_trimmed workspace_secret);
-              ("result", auth_snapshot_json ctx);
-            ])
-  | _ ->
-      error_workflow ~tool_name ~start_time
-        (Printf.sprintf "section must be one of: %s"
-           (String.concat " | " valid_admin_section_strings))
 ;;

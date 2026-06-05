@@ -23,9 +23,6 @@ open Tool_schemas_specs_types
    hand-written schema, and Phase 1 collapses all three into a typed
    SSOT. *)
 
-let admin_section_enum_strings = [ "auth" ]
-;;
-
 let config_category_enum_strings =
   [ "server"
   ; "auth"
@@ -190,23 +187,6 @@ let masc_web_fetch_spec : tool_spec =
   }
 ;;
 
-let masc_tool_admin_snapshot_spec : tool_spec =
-  { name = "masc_tool_admin_snapshot"
-  ; description =
-      "Return a unified admin snapshot of tool inventory, auth/RBAC, and command-plane \
-       surfaces."
-  ; parameters =
-      [ { p_name = "include_hidden"
-        ; p_type = T_bool { default = Some true }
-        ; p_description = "Include hidden tools in tool_inventory (default: true)"
-        ; p_required = false
-        }
-      ]
-  ; additional_properties = false
-  ; behavior_contract = []
-  }
-;;
-
 let masc_tool_stats_spec : tool_spec =
   { name = "masc_tool_stats"
   ; description =
@@ -229,55 +209,6 @@ let masc_cleanup_zombies_spec : tool_spec =
   ; description =
       "Remove zombie agents (no heartbeat for 5+ min) and release their file locks."
   ; parameters = []
-  ; additional_properties = false
-  ; behavior_contract = []
-  }
-;;
-
-let masc_tool_admin_update_spec : tool_spec =
-  { name = "masc_tool_admin_update"
-  ; description =
-      "Apply auth updates through a single admin entrypoint. Use after \
-       masc_tool_admin_snapshot to review current state before making changes. \
-       Additional sections (unit_policy, keeper_policy) are not yet implemented and \
-       will be added here when their handlers land."
-  ; parameters =
-      [ { p_name = "section"
-        ; p_type = T_string { enum = Some admin_section_enum_strings; default = None }
-        ; p_description = "Config section to update (currently only auth is implemented)"
-        ; p_required = true
-        }
-      ; { p_name = "enabled"
-        ; p_type = T_bool { default = None }
-        ; p_description = "Enable or disable auth for section=auth"
-        ; p_required = false
-        }
-      ; { p_name = "require_token"
-        ; p_type = T_bool { default = None }
-        ; p_description = "Require tokens for section=auth"
-        ; p_required = false
-        }
-      ; { p_name = "token_expiry_hours"
-        ; p_type = T_int { min = None; max = None; default = None }
-        ; p_description = "Token expiry in hours for section=auth"
-        ; p_required = false
-        }
-      ; { p_name = "unit_id"
-        ; p_type = T_string { enum = None; default = None }
-        ; p_description = "Managed unit id for section=unit_policy"
-        ; p_required = false
-        }
-      ; { p_name = "policy"
-        ; p_type = T_object { default = None }
-        ; p_description = "Unit policy envelope for section=unit_policy"
-        ; p_required = false
-        }
-      ; { p_name = "budget"
-        ; p_type = T_object { default = None }
-        ; p_description = "Unit budget envelope for section=unit_policy"
-        ; p_required = false
-        }
-      ]
   ; additional_properties = false
   ; behavior_contract = []
   }
@@ -548,10 +479,8 @@ let phase6_specs : tool_spec list =
   ; masc_gc_spec
   ; masc_web_search_spec
   ; masc_web_fetch_spec
-  ; masc_tool_admin_snapshot_spec
   ; masc_tool_stats_spec
   ; masc_cleanup_zombies_spec
-  ; masc_tool_admin_update_spec
     (* PR-1 (paving stone): control group *)
   ; masc_pause_spec
   ; masc_resume_spec

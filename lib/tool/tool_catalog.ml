@@ -164,7 +164,6 @@ let add_task_tool = masc_workspace_tool
 let claim_task_tool = actor_bound_masc_workspace_tool
 let complete_task_tool = actor_bound_masc_workspace_tool
 let admin_tool = destructive_tool
-let admin_read_tool = readonly_tool
 let reset_tool = destructive_tool
 
 let static_mcp_context_tool_names =
@@ -279,8 +278,6 @@ let explicit_metadata : (string * metadata) list =
     ("masc_board_sub_board_delete", broadcast_tool);
     ("masc_board_delete", admin_tool);
     ("masc_tool_stats", read_state_tool);
-    ("masc_tool_admin_snapshot", admin_read_tool);
-    ("masc_tool_admin_update", admin_tool);
     ("masc_pause", broadcast_tool);
     ("masc_resume", broadcast_tool);
     ("masc_run_get", read_state_tool);

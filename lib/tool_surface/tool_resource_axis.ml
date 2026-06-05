@@ -207,8 +207,7 @@ let classify_catalog_tool ~tool_name =
   | "masc_cleanup_zombies"
   | "masc_gc"
   | "masc_operator_action"
-  | "masc_operator_confirm"
-  | "masc_tool_admin_update" -> Some Generic_write
+  | "masc_operator_confirm" -> Some Generic_write
   | "masc_agent_card"
   | "masc_agent_fitness"
   | "masc_agents"
@@ -238,7 +237,6 @@ let classify_catalog_tool ~tool_name =
   | "masc_status"
   | "masc_task_history"
   | "masc_tasks"
-  | "masc_tool_admin_snapshot"
   | "masc_tool_help"
   | "masc_tool_list"
   | "masc_tool_stats" -> Some Ungated

@@ -211,31 +211,6 @@ let test_masc_web_fetch_input_schema_matches () =
     gen.input_schema
 ;;
 
-let test_masc_tool_admin_snapshot_name_matches () =
-  let gen = find_by_name "masc_tool_admin_snapshot" Tool_descriptors_gen.schemas in
-  let hand = find_by_name "masc_tool_admin_snapshot" Tool_schemas_misc.schemas in
-  Alcotest.(check string) "masc_tool_admin_snapshot name" hand.name gen.name
-;;
-
-let test_masc_tool_admin_snapshot_description_matches () =
-  let gen = find_by_name "masc_tool_admin_snapshot" Tool_descriptors_gen.schemas in
-  let hand = find_by_name "masc_tool_admin_snapshot" Tool_schemas_misc.schemas in
-  Alcotest.(check string)
-    "masc_tool_admin_snapshot description"
-    hand.description
-    gen.description
-;;
-
-let test_masc_tool_admin_snapshot_input_schema_matches () =
-  let gen = find_by_name "masc_tool_admin_snapshot" Tool_descriptors_gen.schemas in
-  let hand = find_by_name "masc_tool_admin_snapshot" Tool_schemas_misc.schemas in
-  Alcotest.check
-    yojson_testable
-    "masc_tool_admin_snapshot input_schema (Yojson.Safe.equal)"
-    hand.input_schema
-    gen.input_schema
-;;
-
 let test_masc_tool_stats_name_matches () =
   let gen = find_by_name "masc_tool_stats" Tool_descriptors_gen.schemas in
   let hand = find_by_name "masc_tool_stats" Tool_schemas_misc.schemas in
@@ -279,34 +254,6 @@ let test_masc_cleanup_zombies_input_schema_matches () =
   Alcotest.check
     yojson_testable
     "masc_cleanup_zombies input_schema (Yojson.Safe.equal)"
-    hand.input_schema
-    gen.input_schema
-;;
-
-let test_masc_tool_admin_update_name_matches () =
-  let gen = find_by_name "masc_tool_admin_update" Tool_descriptors_gen.schemas in
-  let hand = find_by_name "masc_tool_admin_update" Tool_schemas_misc.schemas in
-  Alcotest.(check string)
-    "masc_tool_admin_update name"
-    hand.name
-    gen.name
-;;
-
-let test_masc_tool_admin_update_description_matches () =
-  let gen = find_by_name "masc_tool_admin_update" Tool_descriptors_gen.schemas in
-  let hand = find_by_name "masc_tool_admin_update" Tool_schemas_misc.schemas in
-  Alcotest.(check string)
-    "masc_tool_admin_update description"
-    hand.description
-    gen.description
-;;
-
-let test_masc_tool_admin_update_input_schema_matches () =
-  let gen = find_by_name "masc_tool_admin_update" Tool_descriptors_gen.schemas in
-  let hand = find_by_name "masc_tool_admin_update" Tool_schemas_misc.schemas in
-  Alcotest.check
-    yojson_testable
-    "masc_tool_admin_update input_schema (Yojson.Safe.equal)"
     hand.input_schema
     gen.input_schema
 ;;
@@ -368,17 +315,6 @@ let () =
             `Quick
             test_masc_web_fetch_input_schema_matches
         ] )
-    ; ( "masc_tool_admin_snapshot field-by-field"
-      , [ Alcotest.test_case "name" `Quick test_masc_tool_admin_snapshot_name_matches
-        ; Alcotest.test_case
-            "description"
-            `Quick
-            test_masc_tool_admin_snapshot_description_matches
-        ; Alcotest.test_case
-            "input_schema"
-            `Quick
-            test_masc_tool_admin_snapshot_input_schema_matches
-        ] )
     ; ( "masc_tool_stats field-by-field"
       , [ Alcotest.test_case "name" `Quick test_masc_tool_stats_name_matches
         ; Alcotest.test_case "description" `Quick test_masc_tool_stats_description_matches
@@ -397,17 +333,6 @@ let () =
             "input_schema"
             `Quick
             test_masc_cleanup_zombies_input_schema_matches
-        ] )
-    ; ( "masc_tool_admin_update field-by-field"
-      , [ Alcotest.test_case "name" `Quick test_masc_tool_admin_update_name_matches
-        ; Alcotest.test_case
-            "description"
-            `Quick
-            test_masc_tool_admin_update_description_matches
-        ; Alcotest.test_case
-            "input_schema"
-            `Quick
-            test_masc_tool_admin_update_input_schema_matches
         ] )
     ]
 ;;

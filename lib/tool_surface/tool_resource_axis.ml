@@ -219,9 +219,6 @@ let classify_catalog_tool ~tool_name =
   | "masc_broadcast"
   | "masc_cleanup_zombies"
   | "masc_gc" -> Some Generic_write
-  | "masc_agent_card"
-  | "masc_agent_fitness"
-  | "masc_agents"
   | "masc_board_curation_read"
   | "masc_board_get"
   | "masc_board_hearths"

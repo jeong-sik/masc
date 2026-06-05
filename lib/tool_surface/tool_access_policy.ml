@@ -105,26 +105,14 @@ let allows_name policy name =
   && not (selector_matches_name policy.deny name)
 
 (** Candidate universe fallback for selector [All].  This is deliberately
-    schema/metadata-owned, not actor-surface-owned: surfaces answer "where is
-    this visible?", while access policy fallback needs "what tool names exist
-    in this layer?".  Callers that have a narrower runtime universe should pass
-    [?candidates] explicitly. *)
-let default_candidates () =
-  let schema_owned_names =
-    [ Tool_schemas_workspace_core.schemas
-    ; Tool_schemas_workspace_extra.schemas
-    ; Tool_schemas_inline.schemas
-    ; Tool_schemas_agent.schemas
-    ; Tool_schemas_run.schemas
-    ; Tool_schemas_misc.schemas
-    ]
-    |> List.concat
-    |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
-  in
+    catalog-metadata-owned, not actor-surface-owned: surfaces answer "where is
+    this visible?", while access policy fallback needs "what tool names are
+    known in this layer?".  This lower library cannot depend on Config or
+    tool_schemas without creating cycles.  Callers that have a narrower runtime
+    universe should pass [?candidates] explicitly. *)
+let catalog_metadata_default_candidates () =
   let explicit_metadata_names = List.map fst Tool_catalog.explicit_metadata in
-  ( schema_owned_names
-  @ Tool_catalog_surfaces.system_internal_hidden
-  @ explicit_metadata_names )
+  (Tool_catalog_surfaces.system_internal_hidden @ explicit_metadata_names)
   |> normalize_names
 
 let rec resolve_selector ?candidates selector =
@@ -134,7 +122,7 @@ let rec resolve_selector ?candidates selector =
       normalize_names
         (match candidates with
         | Some names -> names
-        | None -> default_candidates ())
+        | None -> catalog_metadata_default_candidates ())
   | Names names -> normalize_names names
   | Union selectors ->
       selectors
@@ -146,7 +134,7 @@ let rec resolve_selector ?candidates selector =
           normalize_names
             (match candidates with
             | Some names -> names
-            | None -> default_candidates ())
+            | None -> catalog_metadata_default_candidates ())
       | first :: rest ->
           let first_set = resolve_selector ?candidates first in
           List.fold_left

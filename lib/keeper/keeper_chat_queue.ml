@@ -8,10 +8,16 @@
 
     @since 2.145.0 *)
 
+type message_source =
+  | Dashboard
+  | Discord of { channel_id : string; user_id : string }
+  | Slack of { channel : string; user_id : string }
+
 type queued_message = {
   content : string;
   attachments : Keeper_chat_store.attachment list;
   timestamp : float;
+  source : message_source;
 }
 
 type queue_entry = {

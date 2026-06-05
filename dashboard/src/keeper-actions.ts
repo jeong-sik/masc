@@ -122,7 +122,7 @@ export async function loadFullKeeperHistory(name: string): Promise<void> {
   try {
     const text = await callMcpTool('masc_keeper_status', {
       name: keeperName,
-      fast: true,
+      fast: false,
       include_context: false,
       include_metrics_overview: false,
       include_memory_bank: false,

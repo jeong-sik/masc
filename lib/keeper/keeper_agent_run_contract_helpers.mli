@@ -18,7 +18,7 @@ val no_progress_success_tool_names_for_contract :
   string list
 
 val observed_completion_contract_status :
-  ?tool_calls:Keeper_agent_result.tool_call_detail list ->
+  tool_calls:Keeper_agent_result.tool_call_detail list ->
   had_owned_active_task_at_turn_start:bool ->
   actual_keeper_tool_names:string list ->
   Keeper_execution_receipt.completion_contract_result

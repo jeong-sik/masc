@@ -31,6 +31,9 @@ module For_testing = struct
     Contract_helpers.progress_keeper_tool_names_for_contract
   let no_progress_success_tool_names_for_contract =
     Contract_helpers.no_progress_success_tool_names_for_contract
+
+  let failed_tool_only_contract_violation =
+    Contract_helpers.failed_tool_only_contract_violation
 end
 
 (** Run a single keeper turn via OAS Agent.run().
@@ -586,10 +589,24 @@ let run_turn
                    Contract_helpers.observed_completion_contract_status
                      ~had_owned_active_task_at_turn_start
                      ~actual_keeper_tool_names:progress_keeper_tool_names
+                     ~tool_calls:acc.tool_calls
                  in
                  let text_result =
-                   acc.receipt_completion_contract_result <- completion_contract_status ();
-                   Ok (`Provider_text text)
+                   let contract_status = completion_contract_status () in
+                   acc.receipt_completion_contract_result <- contract_status;
+                   if
+                     Contract_helpers.failed_tool_only_contract_violation
+                       ~actual_keeper_tool_names:progress_keeper_tool_names
+                       ~tool_calls:acc.tool_calls
+                   then
+                     Error
+                       (Keeper_internal_error.sdk_error_of_masc_internal_error
+                          (Keeper_internal_error.Internal_contract_rejected
+                             {
+                               reason =
+                                 "completion_contract_violation: failed tool-only turn";
+                             }))
+                   else Ok (`Provider_text text)
                  in
                    match text_result with
                    | Error e -> Error e

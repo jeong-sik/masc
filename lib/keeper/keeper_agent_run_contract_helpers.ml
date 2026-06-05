@@ -60,7 +60,7 @@ let failed_tool_only_contract_violation
 ;;
 
 let observed_completion_contract_status
-      ?(tool_calls = []) ~had_owned_active_task_at_turn_start ~actual_keeper_tool_names
+      ~tool_calls ~had_owned_active_task_at_turn_start ~actual_keeper_tool_names
   : Keeper_execution_receipt.completion_contract_result
   =
   if failed_tool_only_contract_violation ~actual_keeper_tool_names ~tool_calls

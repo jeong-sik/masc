@@ -309,8 +309,22 @@ let composite_execution_config_drift execution =
 
 let keeper_activation_readiness_json = Server_dashboard_fleet_readiness.keeper_activation_readiness_json
 
+let composite_execution_contract_blocker_reason execution =
+  match lower_string_opt (json_string "completion_contract_result" execution) with
+  | Some ("surface_mismatch" as reason) | Some ("no_capable_provider" as reason) ->
+    Some ("completion_contract_result:" ^ reason)
+  | _ -> None
+;;
+
+let composite_execution_contract_blocked execution =
+  match composite_execution_contract_blocker_reason execution with
+  | Some _ -> true
+  | None -> false
+;;
+
 let composite_execution_blocked execution =
   composite_execution_claim_no_eligible execution
+  || composite_execution_contract_blocked execution
   || string_opt_is_any (json_string "operator_disposition" execution) [ "pause_human" ]
   || (match lower_string_opt (json_string "terminal_reason_code" execution) with
       | Some terminal -> terminal <> "" && terminal <> "completed"
@@ -406,15 +420,18 @@ let composite_runtime_attention ~snapshot ~execution =
     then None
     else if composite_execution_claim_no_eligible execution
     then Some "claim_scope_no_eligible"
-    else match json_string "operator_disposition_reason" execution with
-    | Some value -> String_util.trim_to_option value
-    | _ ->
-      (match json_string "terminal_reason_code" execution with
+    else match composite_execution_contract_blocker_reason execution with
+    | Some _ as reason -> reason
+    | None ->
+      (match json_string "operator_disposition_reason" execution with
        | Some value -> String_util.trim_to_option value
-       | _ when needs_attention && composite_execution_config_drift execution ->
-         Some "keeper_runtime_override_drift"
-       | _ when blocked -> Some "runtime_blocked"
-       | _ -> None)
+       | _ ->
+         (match json_string "terminal_reason_code" execution with
+          | Some value -> String_util.trim_to_option value
+          | _ when needs_attention && composite_execution_config_drift execution ->
+            Some "keeper_runtime_override_drift"
+          | _ when blocked -> Some "runtime_blocked"
+          | _ -> None))
   in
   let reason =
     match execution_reason with

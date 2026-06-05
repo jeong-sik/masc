@@ -62,7 +62,7 @@ let test_runtime_adapter_keeps_auth_out_of_headers () =
     ; keeper_assignments = []
     }
   in
-  match Masc.Runtime_adapter.binding_to_provider_config cfg runpod_binding with
+  match Runtime_adapter.binding_to_provider_config cfg runpod_binding with
   | Error msg -> failf "unexpected adapter error: %s" msg
   | Ok provider_cfg ->
     check string "api key" "rp-test-token" provider_cfg.api_key;
@@ -91,7 +91,7 @@ let test_runtime_adapter_filters_toml_auth_headers () =
     ; keeper_assignments = []
     }
   in
-  match Masc.Runtime_adapter.binding_to_provider_config cfg runpod_binding with
+  match Runtime_adapter.binding_to_provider_config cfg runpod_binding with
   | Error msg -> failf "unexpected adapter error: %s" msg
   | Ok provider_cfg ->
     check string "api key" "rp-test-token" provider_cfg.api_key;
@@ -121,7 +121,7 @@ let provider_cfg () =
     ; keeper_assignments = []
     }
   in
-  match Masc.Runtime_adapter.binding_to_provider_config cfg runpod_binding with
+  match Runtime_adapter.binding_to_provider_config cfg runpod_binding with
   | Ok provider_cfg -> provider_cfg
   | Error msg -> failf "unexpected adapter error: %s" msg
 

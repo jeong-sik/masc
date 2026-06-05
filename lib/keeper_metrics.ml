@@ -1,6 +1,6 @@
 (** Keeper domain metrics.
 
-    Each keeper metric is owned by this module; Prometheus.ml only provides
+    Each keeper metric is owned by this module; Otel_metric_store.ml only provides
     the generic registry. *)
 
 (** Variant type

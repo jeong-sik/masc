@@ -29,7 +29,7 @@
 open Alcotest
 
 module D = Masc.Mcp_tool_runtime_board
-module Prom = Masc.Prometheus
+module Prom = Masc.Otel_metric_store
 
 (* --- helpers ----------------------------------------------------- *)
 

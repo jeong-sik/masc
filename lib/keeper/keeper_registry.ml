@@ -34,7 +34,7 @@ let set_turn_phase ~base_path name (turn_phase : packed_turn_phase) =
         }
       | Resolved_turn_violation violation ->
         (* #14926: route the violation raise through [wrap_unit] so the
-           guard's Prometheus counter [metric_fsm_guard_violation]
+           guard's Otel_metric_store counter [metric_fsm_guard_violation]
            (action=turn_phase_transition, stage=guard) keeps firing for
            forbidden transitions reached via this setter — prior to
            RFC-0072 Phase 4b (#14918) the instrumentation was transitive
@@ -645,7 +645,7 @@ let rec dispatch_event_with_audit
         | Running, phase when phase <> Running -> decr_running_count_clamped ()
         | phase, Running when phase <> Running -> Atomic.incr running_count_atomic
         | _ -> ());
-       Prometheus.inc_counter
+       Otel_metric_store.inc_counter
          Keeper_metrics.(to_string LifecycleTransitions)
          ~labels:
            [ "keeper", name
@@ -751,7 +751,7 @@ let rec dispatch_event_with_audit
        broadcast_composite_changed ~name ~ts_unix:now;
        Ok tr
      | Error e ->
-       Prometheus.inc_counter
+       Otel_metric_store.inc_counter
          Keeper_metrics.(to_string LifecycleDispatchRejections)
          ~labels:[ "event", Keeper_state_machine.event_to_string event ]
          ();
@@ -776,7 +776,7 @@ let dispatch_event_and_log ~base_path ?(origin = Generic_dispatch) name event =
       | Keeper_state_machine.Invalid_transition _ -> "invalid_transition"
       | Keeper_state_machine.Precondition_violation _ -> "precondition_violation"
     in
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string DispatchEventFailures)
       ~labels:[ "keeper", name; "reason", reason_label ]
       ();
@@ -820,7 +820,7 @@ let dispatch_event_with_audit_and_log
       | Keeper_state_machine.Invalid_transition _ -> "invalid_transition"
       | Keeper_state_machine.Precondition_violation _ -> "precondition_violation"
     in
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string DispatchEventFailures)
       ~labels:[ "keeper", name; "reason", reason_label ]
       ();

@@ -53,7 +53,7 @@ let format_since_last_scheduled_autonomous = function
    honest actions of [specs/keeper-state-machine/KeeperHeartbeat.tla].
    Each helper is wrapped at the call site by
    [Keeper_fsm_guard_runtime.wrap_unit], so an [Assert_failure] from a
-   PPX-injected guard increments the Prometheus violation counter and
+   PPX-injected guard increments the Otel_metric_store violation counter and
    re-raises. The bug-action [MissedWakeup] is
    intentionally NOT instrumented — it is the failure mode these guards
    are designed to detect, not to enforce. *)
@@ -301,7 +301,7 @@ let board_signal_wake_paused_keeper
     Keeper_registry.wakeup ~base_path:config.base_path resumed_meta.name;
     Ok ()
   | Error err ->
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string WriteMetaFailures)
       ~labels:[ ("keeper", meta.name); ("phase", "board_signal_resume_sync") ]
       ();
@@ -359,7 +359,7 @@ let wakeup_relevant_keeper_for_board_signal
              keeper whose mention_targets configuration is too narrow. *)
           (match wake_reason, entry.phase with
            | None, Keeper_state_machine.Running ->
-             Prometheus.inc_counter
+             Otel_metric_store.inc_counter
                Keeper_metrics.(to_string BoardSignalNoWakeTotal)
                ~labels:[
                  ("keeper", meta.name);
@@ -411,7 +411,7 @@ let wakeup_relevant_keeper_for_board_signal
     (* Counter tracks wakeups dropped by the cap, not capped events; under
        high fanout [dropped] can be >1 per signal, so add the actual amount
        (not a fixed 1) to keep BOARD-CAPPED accurate on the compact dashboard. *)
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string BoardSignalWakeupCappedTotal)
       ~labels:[("kind", signal_kind_label)]
       ~delta:(float_of_int dropped)
@@ -505,7 +505,7 @@ let dispatch_keepalive_event_with_audit
      with
      | Ok _ -> ()
      | Error err ->
-         Prometheus.inc_counter
+         Otel_metric_store.inc_counter
            Keeper_metrics.(to_string KeepaliveSignalFailures)
            ~labels:[("keeper", keeper_name); ("site", "late_event_rejected")]
            ();

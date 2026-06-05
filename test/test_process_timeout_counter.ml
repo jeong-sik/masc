@@ -1,6 +1,6 @@
 (* test/test_process_timeout_counter.ml
 
-   #9632: pin the canonical Prometheus metric name + label
+   #9632: pin the canonical Otel_metric_store metric name + label
    shape for [Process_eio] timeout observability.
 
    Background: [run_argv] / [run_argv_with_stdin] /
@@ -10,23 +10,23 @@
    operators could not answer "which command is timing out
    and is 15s/60s the right budget?" without log scraping.
 
-   Layering: [masc_process] sits below [masc.Prometheus]
+   Layering: [masc_process] sits below [masc.Otel_metric_store]
    in the library dep graph, so the emit runs through
    [Process_eio.process_timeout_observer_fn] which
-   [Workspace_prometheus_hooks.install] wires to the Prometheus adapter.
+   [Workspace_metric_hooks.install] wires to the Otel_metric_store adapter.
    This test exercises the wired observer
    directly for counter mechanics, and [Process_eio.argv_program]
    for the cardinality-bounding helper. *)
 
-let () = Masc.Workspace_prometheus_hooks.install ()
+let () = Masc.Workspace_metric_hooks.install ()
 
 let record_process_timeout ~program ~timeout_sec ~origin =
   (Atomic.get Process_eio.process_timeout_observer_fn) ~program ~timeout_sec ~origin
 ;;
 
 let counter_for ?(origin = Timeout_origin.Command) ~program ~timeout_sec () =
-  Masc.Prometheus.metric_value_or_zero
-    Masc.Prometheus.metric_process_timeout
+  Masc.Otel_metric_store.metric_value_or_zero
+    Masc.Otel_metric_store.metric_process_timeout
     ~labels:
       [ "program", program
       ; ("timeout_bucket", Masc.Timeout_bucket.(to_label (of_seconds timeout_sec)))
@@ -38,15 +38,15 @@ let counter_for ?(origin = Timeout_origin.Command) ~program ~timeout_sec () =
 let test_metric_name_stable () =
   Alcotest.(check string)
     "process timeout canonical metric name"
-    Masc.Prometheus.metric_process_timeout
-    Masc.Prometheus.metric_process_timeout
+    Masc.Otel_metric_store.metric_process_timeout
+    Masc.Otel_metric_store.metric_process_timeout
 ;;
 
 let test_metric_registered_at_init () =
   let metric =
-    Masc.Prometheus.snapshot ()
-    |> List.find_opt (fun (m : Masc.Prometheus.metric) ->
-      String.equal m.name Masc.Prometheus.metric_process_timeout && m.labels = [])
+    Masc.Otel_metric_store.snapshot ()
+    |> List.find_opt (fun (m : Masc.Otel_metric_store.metric) ->
+      String.equal m.name Masc.Otel_metric_store.metric_process_timeout && m.labels = [])
   in
   Alcotest.(check bool)
     "process timeout registered"
@@ -56,7 +56,7 @@ let test_metric_registered_at_init () =
     "process timeout registered as counter"
     true
     (match metric with
-     | Some m -> m.metric_type = Masc.Prometheus.Counter
+     | Some m -> m.metric_type = Masc.Otel_metric_store.Counter
      | None -> false)
 ;;
 
@@ -192,7 +192,7 @@ let () =
     [ ( "metric_name"
       , [ Alcotest.test_case "canonical name stable" `Quick test_metric_name_stable
         ; Alcotest.test_case
-            "registered in Prometheus init"
+            "registered in Otel_metric_store init"
             `Quick
             test_metric_registered_at_init
         ] )

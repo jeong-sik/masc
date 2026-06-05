@@ -54,7 +54,7 @@ module Deadline : sig
 end
 
 val metric_overshoot_total : string
-(** Canonical Prometheus counter name (pinned by #9662 contract test):
+(** Canonical Otel_metric_store counter name (pinned by #9662 contract test):
     [masc_timeout_policy_overshoot_total].  Incremented by
     [overshoot_warn] with [layer] and [origin] labels. *)
 

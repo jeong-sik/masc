@@ -15,7 +15,7 @@
     > [MASC_OAS_BRIDGE_TIMEOUT_DEFAULT_SEC] > 300.0.  An unknown
     caller (future caller without a typed default) falls through to
     the global default rather than failing closed — the operator will
-    see [metric_oas_bridge_timeout{caller=...}] in Prometheus
+    see [metric_oas_bridge_timeout{caller=...}] in Otel_metric_store
     regardless. *)
 
 type caller =

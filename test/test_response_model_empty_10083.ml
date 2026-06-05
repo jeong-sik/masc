@@ -17,7 +17,7 @@
    returned keeper-facing model string or metric alias label. *)
 
 module Hooks = Masc.Keeper_hooks_oas
-module Prom = Masc.Prometheus
+module Prom = Masc.Otel_metric_store
 
 let runtime_lane = "runtime"
 let metric_name = Prom.metric_after_turn_response_model_empty

@@ -391,14 +391,14 @@ let keepers_section now : section =
   in
   let content = List.map format_entry sorted in
   let guard_violations =
-    Prometheus.metric_total Prometheus.metric_fsm_guard_violation |> int_of_float
+    Otel_metric_store.metric_total Otel_metric_store.metric_fsm_guard_violation |> int_of_float
   in
   let write_meta_failures =
-    Prometheus.metric_total Keeper_metrics.(to_string WriteMetaFailures) |> int_of_float
+    Otel_metric_store.metric_total Keeper_metrics.(to_string WriteMetaFailures) |> int_of_float
   in
   let tool_failures =
-    (Prometheus.metric_total Keeper_metrics.(to_string ToolSelectionFailures) |> int_of_float)
-    + (Prometheus.metric_total Keeper_metrics.(to_string TaskLoadFailures) |> int_of_float)
+    (Otel_metric_store.metric_total Keeper_metrics.(to_string ToolSelectionFailures) |> int_of_float)
+    + (Otel_metric_store.metric_total Keeper_metrics.(to_string TaskLoadFailures) |> int_of_float)
   in
   let title =
     match guard_violations, write_meta_failures, tool_failures with
@@ -527,78 +527,78 @@ let generate_compact ?(scope = All) (config : Workspace_utils.config) : string =
         (List.length active_tasks) (List.length pending_tasks)
         (List.length blocked_tasks);
       let guard_violations =
-        Prometheus.metric_total Prometheus.metric_fsm_guard_violation |> int_of_float
+        Otel_metric_store.metric_total Otel_metric_store.metric_fsm_guard_violation |> int_of_float
       in
       let write_meta_failures =
-        Prometheus.metric_total Keeper_metrics.(to_string WriteMetaFailures) |> int_of_float
+        Otel_metric_store.metric_total Keeper_metrics.(to_string WriteMetaFailures) |> int_of_float
       in
       let board_capped =
-        Prometheus.metric_total
+        Otel_metric_store.metric_total
           Keeper_metrics.(to_string BoardSignalWakeupCappedTotal)
         |> int_of_float
       in
       let tool_failures =
-        (Prometheus.metric_total Keeper_metrics.(to_string ToolSelectionFailures) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string TaskLoadFailures) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string ReconcileFailures) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string DecisionAuditFlushFailures) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string PersonaDriftMissing) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string WorkspaceInitFailures) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string PresenceSyncFailures) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string SelfPreservationUniversal) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string CycleExceptions) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string SnapshotWriteFailures) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string SseBroadcastFailures) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string WorkspaceHeartbeatFailures) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string TurnMetricsSnapshotFailures) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string OasExecutionErrors) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string EpisodeCreateFailures) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string MemoryActivityEmitFailures) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string SupervisorSweepFailures) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string TomlReconcileSweepFailures) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string ToolUsageFlushFailures) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string TurnLivelockBlocks) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string TurnTimeoutCommitted) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string TurnErrorAfterTools) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string TurnCleanupFailures) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string CleanupTrackingFailures) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string RuntimeSyncFailures) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string LocalDiscoveryFailures) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string ThinkingPersistFailures) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string CheckpointFailures) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string MemoryWriteFailures) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string WriteMetaCycleFailures) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string AlertPersistFailures) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string MetricsSseFailures) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string DispatchEventFailures) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string SessionCleanupFailures) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string ChatStoreFailures) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string ObservationQueryFailures) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string StaleTerminationThresholdBreached) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string StaleTerminationBatch) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string StaleBroadcastEmitFailures) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string ToolUseFailure) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string ConfigEnvParseFailures) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string TurnGateRejectedTerminal) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string ReceiptUnmappedDisposition) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string PostTurnWireinFailures) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string MetaReadFailures) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string ApprovalQueueFailures) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string GuardsFailures) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string ProfileLoadFailures) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string CompactAuditFailures) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string FsFailures) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string CrashPersistenceFailures) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string GenerationLineageFailures) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string KeepaliveSignalFailures) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string MetaJsonFailures) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string ToolsOasFailures) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string TurnUpUpdateFailures) |> int_of_float)
-+ (Prometheus.metric_total Keeper_metrics.(to_string ExecutionReceiptFailures) |> int_of_float)
-+ (Prometheus.metric_total Keeper_metrics.(to_string LlmBridgeFailures) |> int_of_float)
-+ (Prometheus.metric_total Keeper_metrics.(to_string ToolExecuteFailures) |> int_of_float)
-      + (Prometheus.metric_total Keeper_metrics.(to_string RolloverFailures) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string RecurringFailures) |> int_of_float)
+        (Otel_metric_store.metric_total Keeper_metrics.(to_string ToolSelectionFailures) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string TaskLoadFailures) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string ReconcileFailures) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string DecisionAuditFlushFailures) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string PersonaDriftMissing) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string WorkspaceInitFailures) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string PresenceSyncFailures) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string SelfPreservationUniversal) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string CycleExceptions) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string SnapshotWriteFailures) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string SseBroadcastFailures) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string WorkspaceHeartbeatFailures) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string TurnMetricsSnapshotFailures) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string OasExecutionErrors) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string EpisodeCreateFailures) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string MemoryActivityEmitFailures) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string SupervisorSweepFailures) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string TomlReconcileSweepFailures) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string ToolUsageFlushFailures) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string TurnLivelockBlocks) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string TurnTimeoutCommitted) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string TurnErrorAfterTools) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string TurnCleanupFailures) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string CleanupTrackingFailures) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string RuntimeSyncFailures) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string LocalDiscoveryFailures) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string ThinkingPersistFailures) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string CheckpointFailures) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string MemoryWriteFailures) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string WriteMetaCycleFailures) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string AlertPersistFailures) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string MetricsSseFailures) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string DispatchEventFailures) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string SessionCleanupFailures) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string ChatStoreFailures) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string ObservationQueryFailures) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string StaleTerminationThresholdBreached) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string StaleTerminationBatch) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string StaleBroadcastEmitFailures) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string ToolUseFailure) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string ConfigEnvParseFailures) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string TurnGateRejectedTerminal) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string ReceiptUnmappedDisposition) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string PostTurnWireinFailures) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string MetaReadFailures) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string ApprovalQueueFailures) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string GuardsFailures) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string ProfileLoadFailures) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string CompactAuditFailures) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string FsFailures) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string CrashPersistenceFailures) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string GenerationLineageFailures) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string KeepaliveSignalFailures) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string MetaJsonFailures) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string ToolsOasFailures) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string TurnUpUpdateFailures) |> int_of_float)
++ (Otel_metric_store.metric_total Keeper_metrics.(to_string ExecutionReceiptFailures) |> int_of_float)
++ (Otel_metric_store.metric_total Keeper_metrics.(to_string LlmBridgeFailures) |> int_of_float)
++ (Otel_metric_store.metric_total Keeper_metrics.(to_string ToolExecuteFailures) |> int_of_float)
+      + (Otel_metric_store.metric_total Keeper_metrics.(to_string RolloverFailures) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string RecurringFailures) |> int_of_float)
       in
       let tool_suffix =
         if tool_failures > 0

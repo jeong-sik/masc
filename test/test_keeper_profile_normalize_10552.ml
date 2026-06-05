@@ -73,7 +73,7 @@ let test_profile_toml_normalizes_desires () =
     ^ "\"\n"
   in
   let doc =
-    match Masc.Keeper_toml_loader.parse_toml toml_text with
+    match Keeper_toml_loader.parse_toml toml_text with
     | Ok d -> d
     | Error e -> Alcotest.failf "TOML parse failed: %s" e
   in

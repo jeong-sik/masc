@@ -4,8 +4,7 @@
     A "coverage gap" is a moment when one telemetry lane wrote
     successfully but another did not, leaving the dashboards
     showing stale data even though the producer is healthy.
-    {!record} stamps both a Prometheus counter
-    ([metric_telemetry_coverage_gap]) and a JSONL row under
+    {!record} stamps a JSONL row under
     [<masc_root>/telemetry-coverage-gaps/] so unified telemetry
     can surface the gap on its next read.
 
@@ -27,10 +26,7 @@ val record :
   unit ->
   unit
 (** Append one [masc.telemetry_coverage_gap.v1] JSONL row to the
-    durable store and bump
-    [Prometheus.metric_telemetry_coverage_gap] with the
-    ([source] / [producer] / [dashboard_surface] / [stale_reason])
-    label tuple.
+    durable store.
 
     [keeper_name] / [trace_id] / [error] are optional contextual
     fields — when omitted (or empty after trim) the JSON value

@@ -24,8 +24,6 @@ include
      and type retry_admission_denial =
       Keeper_internal_error.retry_admission_denial
      and type capacity_retry_after = Keeper_internal_error.capacity_retry_after
-     and type no_tool_capable_detail =
-      Keeper_internal_error.no_tool_capable_detail
      and type runtime_exhaustion_reason =
       Keeper_internal_error.runtime_exhaustion_reason
      and type masc_internal_error = Keeper_internal_error.masc_internal_error

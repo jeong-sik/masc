@@ -56,7 +56,7 @@ let metrics_tool_audit_persistence_surface =
 let report_persistence_read_drop ~surface ~reason ~path ~detail =
   Safe_ops.report_persistence_read_drop
     ~on_drop:(fun () ->
-      Prometheus.inc_counter Prometheus.metric_persistence_read_drops
+      Otel_metric_store.inc_counter Otel_metric_store.metric_persistence_read_drops
         ~labels:[("surface", surface); ("reason", reason)]
         ())
     ~surface

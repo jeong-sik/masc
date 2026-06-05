@@ -59,10 +59,6 @@ let handle_post_create ~tool_name ~start_time args : Tool_result.result =
             | Some a when not (String.equal a "") -> a
             | _ -> "unknown"
           in
-          Prometheus.inc_counter
-            Prometheus.metric_board_truncated_posts
-            ~labels:[ "author", author_label ]
-            ();
           (* #9777: body_len is the LLM's own output length AFTER state-block
              stripping, not a MASC-imposed limit. The signal name explains
              which structural pattern triggered the marker. *)

@@ -41,7 +41,7 @@ module For_testing : sig
 
       RFC-0088 §4 Option A (2026-05-15): the previous
       [~event_family:string -> ~event_kind:string] surface was replaced
-      by the typed {!Workspace_telemetry_drop_event.t} sum. The Prometheus
+      by the typed {!Workspace_telemetry_drop_event.t} sum. The Otel_metric_store
       label wire format is unchanged ([family_to_wire] / [kind_to_wire]
       are byte-for-byte compatible with the prior free-string values). *)
 end

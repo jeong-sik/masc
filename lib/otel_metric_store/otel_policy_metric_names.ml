@@ -1,7 +1,7 @@
 (** Policy, board, FSM guard, and memory pipeline metric-name constants.
 
-    Included by {!Prometheus} so existing callers keep using
-    [Prometheus.metric_*] bindings unchanged. *)
+    Included by {!Otel_metric_store} so existing callers keep using
+    [Otel_metric_store.metric_*] bindings unchanged. *)
 
 let metric_anti_rationalization_fallback = "masc_anti_rationalization_fallback_total"
 

@@ -1,6 +1,6 @@
-(** Prometheus adapter for neutral Board metric hooks.
+(** Otel_metric_store adapter for neutral Board metric hooks.
 
-    Holds the only [variant -> Prometheus label string] mappings for the
+    Holds the only [variant -> Otel_metric_store label string] mappings for the
     typed label dimensions on {!Board_metrics_hooks.observer}. The emitted
     strings are byte-identical to the values the pre-typed string hooks
     passed, so existing dashboards and alerts keyed on these labels keep
@@ -38,31 +38,31 @@ let install () =
     {
       observe_persist_lock_acquire_sec =
         (fun seconds ->
-           Prometheus.observe_histogram
-             Prometheus.metric_board_persist_lock_acquire_sec
+           Otel_metric_store.observe_histogram
+             Otel_metric_store.metric_board_persist_lock_acquire_sec
              seconds);
       observe_persist_lock_held_sec =
         (fun seconds ->
-           Prometheus.observe_histogram
-             Prometheus.metric_board_persist_lock_held_sec
+           Otel_metric_store.observe_histogram
+             Otel_metric_store.metric_board_persist_lock_held_sec
              seconds);
       inc_dispatch_flusher_start_outcome =
         (fun ~outcome ->
-           Prometheus.inc_counter
-             Prometheus.metric_board_dispatch_flusher_start_outcomes
+           Otel_metric_store.inc_counter
+             Otel_metric_store.metric_board_dispatch_flusher_start_outcomes
              ~labels:[ ("outcome", flusher_outcome_to_label outcome) ]
              ());
       inc_vote_fixture_detected =
         (fun ~count ->
            if count > 0 then
-             Prometheus.inc_counter
+             Otel_metric_store.inc_counter
                "masc_board_vote_fixture_detected_total"
                ~delta:(Float.of_int count)
                ());
       inc_persistence_read_drop =
         (fun ~surface ~reason ->
-           Prometheus.inc_counter
-             Prometheus.metric_persistence_read_drops
+           Otel_metric_store.inc_counter
+             Otel_metric_store.metric_persistence_read_drops
              ~labels:
                [ ("surface", board_persist_surface_to_label surface)
                ; ("reason", read_drop_reason_to_label reason)
@@ -70,7 +70,7 @@ let install () =
              ());
       inc_legacy_migrate_post_kind =
         (fun ~author ~automation_label ->
-           Prometheus.inc_counter
+           Otel_metric_store.inc_counter
              "masc_board_legacy_migrate_post_kind_total"
              ~labels:
                [ ("author", author)

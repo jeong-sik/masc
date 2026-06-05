@@ -39,7 +39,7 @@ let record_failure_callback_label =
   "dashboard_governance_tool_skipped_record"
 
 let record_tool_skipped_failure exn =
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     Keeper_metrics.(to_string LifecycleCallbackFailures)
     ~labels:[ ("callback", record_failure_callback_label) ]
     ();

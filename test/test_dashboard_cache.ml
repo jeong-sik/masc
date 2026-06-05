@@ -304,7 +304,7 @@ let test_stats_detail_surface () =
 
 let test_stats_handles_empty_table () =
   (* [invalidate_all] only clears the entry table; hit/miss counters are
-     cumulative monotonic (Prometheus convention). So after other tests in
+     cumulative monotonic (Otel_metric_store convention). So after other tests in
      the same harness, hit_ratio is non-zero — we assert it is still in
      [0,1] and that the entries surface itself is empty.  This is the
      invariant operators actually care about (no NaN, no negative). *)

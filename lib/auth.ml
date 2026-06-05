@@ -51,8 +51,8 @@ let archive_credential_file config ~agent_name ~reason =
       Log.Auth.warn "archived credential %s -> %s (reason: %s)" src dest reason;
       if String.equal reason "bare-form keeper credential is dead after PR-3b1 starvation"
       then
-        Prometheus.inc_counter
-          Prometheus.metric_config_credential_archived_starvation
+        Otel_metric_store.inc_counter
+          Otel_metric_store.metric_config_credential_archived_starvation
           ~labels:[ "keeper_name", agent_name ]
           ()
     with
@@ -182,8 +182,8 @@ let classify_bare_for_canonical config ~canonical_name =
 ;;
 
 let inc_bare_alias_outcome ~outcome =
-  Prometheus.inc_counter
-    Prometheus.metric_auth_bare_alias_outcome_total
+  Otel_metric_store.inc_counter
+    Otel_metric_store.metric_auth_bare_alias_outcome_total
     ~labels:[ "outcome", outcome ]
     ~delta:1.0
     ()
@@ -230,18 +230,18 @@ let bare_alias_audit ~base_path ~canonical_names =
       canonical_names
   in
   (* Observability sink: gauges idempotently mirror the current
-     classifier state so every Prometheus scrape (post-call) reports
+     classifier state so every Otel_metric_store scrape (post-call) reports
      the same value, not just the boot-time INFO line. *)
-  Prometheus.set_gauge
-    Prometheus.metric_auth_bare_alias
+  Otel_metric_store.set_gauge
+    Otel_metric_store.metric_auth_bare_alias
     ~labels:[ "state", "alive" ]
     (float_of_int result.alive_aliases);
-  Prometheus.set_gauge
-    Prometheus.metric_auth_bare_alias
+  Otel_metric_store.set_gauge
+    Otel_metric_store.metric_auth_bare_alias
     ~labels:[ "state", "dead" ]
     (float_of_int result.dead_bares);
-  Prometheus.set_gauge
-    Prometheus.metric_auth_bare_alias
+  Otel_metric_store.set_gauge
+    Otel_metric_store.metric_auth_bare_alias
     ~labels:[ "state", "no_bare" ]
     (float_of_int result.no_bares);
   result
@@ -431,8 +431,8 @@ let unknown_tool_class tool_name =
 ;;
 
 let record_strict_unknown_tool_denial ~agent_name ~tool_name =
-  Prometheus.inc_counter
-    Prometheus.metric_auth_strict_unknown_tool_denials
+  Otel_metric_store.inc_counter
+    Otel_metric_store.metric_auth_strict_unknown_tool_denials
     ~labels:[ "agent_name", agent_name; "tool_class", unknown_tool_class tool_name ]
     ()
 ;;
@@ -618,8 +618,8 @@ let start_bare_alias_audit_fiber ~sw ~clock ~base_path
            bare_alias_audit ~base_path
              ~canonical_names:(canonical_names_fn ())
          in
-         Prometheus.inc_counter
-           Prometheus.metric_auth_bare_alias_audit_ticks_total
+         Otel_metric_store.inc_counter
+           Otel_metric_store.metric_auth_bare_alias_audit_ticks_total
            ~delta:1.0
            ()
        with

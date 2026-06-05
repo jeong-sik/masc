@@ -66,7 +66,7 @@ type caller =
   | Unknown of string
 
 (** [caller_key c] is the lowercase identifier embedded in env var
-    names and Prometheus labels. *)
+    names and Otel_metric_store labels. *)
 val caller_key : caller -> string
 
 (** [known_callers ()] exposes the typed-default table for pinning

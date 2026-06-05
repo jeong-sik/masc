@@ -62,7 +62,7 @@ let parse_record (json : Yojson.Safe.t)
       |> List.filter_map (fun (field, is_missing) ->
         if is_missing then Some field else None)
     in
-    Prometheus.inc_counter Prometheus.metric_error_events ~labels:[("type", Error_event_type.(to_label Parsing))] ();
+    Otel_metric_store.inc_counter Otel_metric_store.metric_error_events ~labels:[("type", Error_event_type.(to_label Parsing))] ();
     Error
       (Printf.sprintf "missing required field(s): %s"
          (String.concat ", " missing))
@@ -129,8 +129,8 @@ let enqueue (result : Tool_result.result) =
   in
   if dropped_for_full_queue
   then begin
-    Prometheus.inc_counter
-      Prometheus.metric_tool_metrics_persist_dropped ();
+    Otel_metric_store.inc_counter
+      Otel_metric_store.metric_tool_metrics_persist_dropped ();
     let dropped = Atomic.fetch_and_add dropped_full_queue 1 + 1 in
     if dropped = 1 || dropped mod 1024 = 0 then
       Log.Metrics.warn

@@ -37,7 +37,7 @@
     For now, the [`Threshold_silence] outcome gives the operator a
     one-line ERROR after [default_silence_threshold] identical
     (tool, signature) repetitions across cycles, and the existing
-    Prometheus counter
+    Otel_metric_store counter
     [Keeper_metrics.(to_string ToolsOasFailures)] (with site label
     [retry_threshold_silence]) carries the durable signal.
 

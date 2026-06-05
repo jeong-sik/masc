@@ -10,7 +10,7 @@ open Auth_credential_base
     match - the root of the [bearer token belongs to X]
     regression.  We keep the legacy first-match return so
     existing callers do not need migration, but we WARN and
-    increment {!Prometheus.metric_auth_credential_ambiguous_lookup}
+    increment {!Auth_metric_store.metric_auth_credential_ambiguous_lookup}
     so an alert can fire on the live blast radius rather than
     just the one-shot boot audit. *)
 let find_credential_by_token config ~token : (agent_credential, masc_error) result =
@@ -32,8 +32,8 @@ let find_credential_by_token config ~token : (agent_credential, masc_error) resu
          (List.length matches)
          (String.concat ", " names)
          first.agent_name;
-       Prometheus.inc_counter
-         Prometheus.metric_auth_credential_ambiguous_lookup
+       Auth_metric_store.inc_counter
+         Auth_metric_store.metric_auth_credential_ambiguous_lookup
          ~labels:[ "first_match", first.agent_name ]
          ());
     (match first.expires_at with
@@ -223,8 +223,8 @@ let rotate_shared_tokens_for_agents config ~agent_names : rotation_outcome list 
    label shape.  Non-mismatch rejects (no owner found at all) are
    NOT counted here — they have a different root cause. *)
 let record_bearer_token_mismatch ~expected_agent ~actual_agent =
-  Prometheus.inc_counter
-    Prometheus.metric_auth_bearer_token_mismatch
+  Auth_metric_store.inc_counter
+    Auth_metric_store.metric_auth_bearer_token_mismatch
     ~labels:[ "expected_agent", expected_agent; "actual_agent", actual_agent ]
     ()
 ;;

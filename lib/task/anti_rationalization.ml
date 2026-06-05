@@ -808,21 +808,12 @@ let review
           between liveness (Open: approve, original behavior) and safety
           (Closed: reject so the action stays gated). The choice is config-
           driven; see Env_config.AntiRationalization. Both paths emit the
-          same Prometheus counter so monitoring sees the fallback rate
+          same Otel_metric_store counter so monitoring sees the fallback rate
           regardless of the chosen policy. *)
             let msg = Agent_sdk.Error.to_string err in
-            (* #10474: discriminate "permanent runtime configuration issue"
-          from "transient verifier failure".  [No_tool_capable_provider]
-          means every provider in the [evaluator_runtime] failed the
-          tool-use gate at filter time — there are zero callable
-          models, and there will not be any until the runtime config
-          (or provider capabilities) changes.  Treating that as a
-          fail-closed safety-net reject blocks every agent trying to
-          finish a task with a perfectly legitimate "out of scope"
-          phrase, which is the runtime's bug, not the agent's
-          purview.  Promote to operator-actionable ERROR and approve
-          by liveness — the operator must fix the runtime definition
-          before the safety net can do useful work. *)
+            (* #10474: let the workspace integration distinguish permanent
+               runtime configuration failures from transient verifier
+               failures. *)
             let runtime_permanently_dead =
               (Atomic.get is_runtime_permanently_dead_fn) err
             in

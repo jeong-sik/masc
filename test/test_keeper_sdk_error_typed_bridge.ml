@@ -4,7 +4,7 @@
     canonical wire strings byte-for-byte identical to the historical
     untyped output.  PR-3 retired the untyped accessors; this test
     now guards the wire format directly so dashboards /
-    [bin/masc-trace] / Prometheus labels do not drift.
+    [bin/masc-trace] / Otel_metric_store labels do not drift.
 
     Coverage:
     - all [api_error] variants (RateLimited / Overloaded / ServerError /

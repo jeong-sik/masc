@@ -11,7 +11,7 @@
     Env override: [MASC_KEEPER_EMERGENCY_COMPACT_RATIO_THRESHOLD]
     (default 0.8, valid range \[0.5, 0.99\]; out-of-range falls back
     to default with warn). Read once at module init; restart required
-    to change. Effective value is exported as Prometheus gauge
+    to change. Effective value is exported as Otel_metric_store gauge
     {!Keeper_metrics.(to_string EmergencyCompactRatioThreshold)}. *)
 val emergency_compact_ratio_threshold : float
 

@@ -31,7 +31,7 @@
    .tmp/memory-compacting-analysis.html (summarizer STATE scrub
    visibility). *)
 let () =
-  Prometheus.register_counter
+  Otel_metric_store.register_counter
     ~name:Keeper_metrics.(to_string SummarizerStateScrubs)
     ~help:
       "Total [Keeper_summarizer.keeper_summarizer] invocations, \
@@ -39,7 +39,7 @@ let () =
        Rising [with_scrub] rate is the resonance-loop input \
        indicator at the compaction layer."
     ();
-  Prometheus.register_counter
+  Otel_metric_store.register_counter
     ~name:Keeper_metrics.(to_string SummarizerStateBlocksRemoved)
     ~help:
       "Total [STATE] block start markers scrubbed across all \
@@ -97,12 +97,12 @@ let keeper_summarizer (messages : Agent_sdk.Types.message list) : string =
   let outcome =
     if total_removed > 0 then "with_scrub" else "without_scrub"
   in
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     Keeper_metrics.(to_string SummarizerStateScrubs)
     ~labels:[("outcome", outcome)]
     ();
   if total_removed > 0 then
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string SummarizerStateBlocksRemoved)
       ~delta:(float_of_int total_removed)
       ();

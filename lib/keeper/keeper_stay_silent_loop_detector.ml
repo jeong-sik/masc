@@ -37,7 +37,7 @@ let get_or_create keeper_name =
       s
 
 let update_streak_gauge keeper_name value =
-  Prometheus.set_gauge
+  Otel_metric_store.set_gauge
     "masc_keeper_stay_silent_streak"
     ~labels:[ ("keeper", keeper_name) ]
     (Float.of_int value)
@@ -51,7 +51,7 @@ let record_turn ~keeper_name ~speech_act =
       let t = threshold () in
       if s.streak >= t && not s.detected_latched then begin
         s.detected_latched <- true;
-        Prometheus.inc_counter
+        Otel_metric_store.inc_counter
           Keeper_metrics.(to_string StaySilentLoopDetected)
           ~labels:[ ("keeper", keeper_name) ] ();
         Log.Keeper.error

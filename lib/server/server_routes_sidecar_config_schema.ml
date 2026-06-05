@@ -153,7 +153,7 @@ let schema_field_types ?base_path id : (string * declared_type) list =
         counter + warn now distinguish "schema present but malformed"
         from "schema missing". [Eio.Cancel.Cancelled] is re-raised so
         cancellation semantics are preserved. Closed error_kind vocab
-        keeps Prometheus label cardinality bounded.
+        keeps Otel_metric_store label cardinality bounded.
         Same pattern as iter 28 (#15820, mcp-ws transport) and iter 29
         (#15840, runtime_http_probe). *)
      | exception Eio.Cancel.Cancelled e -> raise (Eio.Cancel.Cancelled e)
@@ -165,8 +165,8 @@ let schema_field_types ?base_path id : (string * declared_type) list =
          id
          msg
          (String.sub json_str 0 preview_len);
-       Prometheus.inc_counter
-         Prometheus.metric_sidecar_schema_field_types_json_parse_failures
+       Otel_metric_store.inc_counter
+         Otel_metric_store.metric_sidecar_schema_field_types_json_parse_failures
          ~labels:[ "error_kind", "json_parse_error" ]
          ();
        []
@@ -178,8 +178,8 @@ let schema_field_types ?base_path id : (string * declared_type) list =
          id
          (Printexc.to_string exn)
          (String.sub json_str 0 preview_len);
-       Prometheus.inc_counter
-         Prometheus.metric_sidecar_schema_field_types_json_parse_failures
+       Otel_metric_store.inc_counter
+         Otel_metric_store.metric_sidecar_schema_field_types_json_parse_failures
          ~labels:[ "error_kind", "other" ]
          ();
        [])

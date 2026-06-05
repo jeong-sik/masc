@@ -26,16 +26,6 @@ let blocker_reason_of_turn_driver_reason
   | Keeper_turn_driver.Structural_attempt_timeout { detail } ->
     Structural_attempt_timeout { detail }
   | Keeper_turn_driver.Capacity_exhausted -> Capacity_exhausted
-  | Keeper_turn_driver.No_tool_capable detail ->
-    let detail =
-      Option.map
-        (fun (detail : Keeper_turn_driver.no_tool_capable_detail) ->
-           { configured_labels = detail.configured_labels
-           ; provider_rejections = detail.provider_rejections
-           })
-        detail
-    in
-    No_tool_capable detail
   | Keeper_turn_driver.Other_detail detail -> Other_detail detail
 ;;
 
@@ -119,10 +109,6 @@ let is_runtime_exhausted_blocker_class blocker_class =
   String.equal
     blocker_class
     (blocker_class_to_string (Runtime_exhausted (Other_detail "")))
-;;
-
-let is_no_tool_capable_blocker_class blocker_class =
-  String.equal blocker_class "runtime_exhausted_no_tool_capable"
 ;;
 
 let is_provider_runtime_blocker_class blocker_class =
@@ -294,21 +280,6 @@ let runtime_blocker_surface_of_failure_reason (reason : Keeper_registry.failure_
                window; keeper was auto-paused before restart loop."
               distinct_count)
          Stale_fleet_batch)
-  | Keeper_registry.Provider_runtime_error
-      { reason = Some (No_tool_capable _ as no_tool_capable); detail; _ } ->
-    (* Typed no-tool-capable path: the producer
-       ([keeper_unified_turn_types.runtime_exhausted_failure_reason_of_raw_error])
-       carries the already-typed [No_tool_capable] reason on the record.
-       Reading the typed field instead of reparsing [code =
-       "no_tool_capable_provider"] removes a typed->string->typed round-trip;
-       the [code] string is retained on the record for wire/dashboard readers. *)
-    Some
-      (runtime_blocker_surface_of_typed_class
-         ~summary:
-           (Printf.sprintf
-              "No tool-capable provider available (registry path): %s"
-              detail)
-         (Runtime_exhausted no_tool_capable))
   | Keeper_registry.Provider_runtime_error { code; detail; _ }
     when provider_runtime_code_is_sdk_tool_retry_exhausted code ->
     Some

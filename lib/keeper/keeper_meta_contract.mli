@@ -127,11 +127,6 @@ type usage_metrics = {
 
 (** {1 Blocker classification} *)
 
-type no_tool_capable_detail = Keeper_internal_error.no_tool_capable_detail =
-  { configured_labels : string list
-  ; provider_rejections : (string * string) list
-  }
-
 type runtime_exhaustion_reason = Keeper_internal_error.runtime_exhaustion_reason =
   | Connection_refused
   | Dns_failure
@@ -155,13 +150,6 @@ type runtime_exhaustion_reason = Keeper_internal_error.runtime_exhaustion_reason
           Previously [ProviderFailure { kind = Capacity_exhausted _ }] fell
           through to [Other_detail message], losing auto-recovery eligibility
           and triggering the harsher failure policy. *)
-  | No_tool_capable of no_tool_capable_detail option
-      (** Runtime exhausted because no configured provider can satisfy the
-          requested tool surface.  Previously a standalone [blocker_class] variant;
-          reclassified here because the runtime rotation filtered all candidates
-          before dispatch — a semantic subset of runtime exhaustion.
-          The optional detail carries telemetry from the former
-          [No_tool_capable_provider] variant of [masc_internal_error]. *)
   | Other_detail of string
 
 type blocker_class =
@@ -203,9 +191,9 @@ val runtime_exhaustion_summary :
 val runtime_exhaustion_reason_retryable : runtime_exhaustion_reason -> bool
 (** Total typed retryability per reason variant. Transient/connectivity
     reasons and bounded-cycle/turn/capacity exhaustion are retryable;
-    [No_tool_capable] (capability gap) and [Other_detail] (unknown
-    free-text) are not. Replaces a string-prefix reparse with a
-    [_ -> false] catch-all that mis-biased transient faults to terminal. *)
+    [Other_detail] (unknown free-text) is not. Replaces a string-prefix
+    reparse with a [_ -> false] catch-all that mis-biased transient faults
+    to terminal. *)
 
 val blocker_class_continue_gate : blocker_class -> bool
 (** [blocker_class_continue_gate b] is [true] iff the supervisor
@@ -240,7 +228,7 @@ type blocker_info = {
   detail : string;
 }
 (** Authoritative blocker representation: a typed [blocker_class]
-    paired with optional free-form [detail] (UI / Prometheus label).
+    paired with optional free-form [detail] (UI / Otel_metric_store label).
     Replaces the deprecated split blocker fields, so substring
     classification is no longer load-bearing for persisted keeper_meta.
     When there is no

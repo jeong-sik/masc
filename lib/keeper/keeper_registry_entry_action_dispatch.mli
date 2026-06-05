@@ -1,6 +1,6 @@
 (** Entry-action dispatch observability helpers (RFC-0002).
 
-    Pure side-effect wrappers (log + Prometheus) — no registry state
+    Pure side-effect wrappers (log + Otel_metric_store) — no registry state
     read or written. *)
 
 (** Emit the lifecycle log line for a [Publish_lifecycle] entry action;

@@ -11,7 +11,7 @@ open Alcotest
 
 module Telemetry_eio = Masc.Telemetry_eio
 module Workspace = Masc.Workspace
-module Prometheus = Masc.Prometheus
+module Otel_metric_store = Masc.Otel_metric_store
 
 let error_kind value = Telemetry_eio.error_kind_of_string value
 let error_kind_to_string = Telemetry_eio.error_kind_to_string
@@ -397,14 +397,14 @@ let test_legacy_agent_left_migration () =
    masc_persistence_read_drops_total{surface=telemetry_eio,reason=invalid_payload}.
    Pairs with WARN log via Safe_ops.report_persistence_read_drop. *)
 let test_parse_event_records_drop_increments_counter () =
-  let metric = Prometheus.metric_persistence_read_drops in
+  let metric = Otel_metric_store.metric_persistence_read_drops in
   let labels =
     [
       ("surface", "telemetry_eio");
       ("reason", Safe_ops.persistence_read_drop_reason_invalid_payload);
     ]
   in
-  let before = Prometheus.metric_value_or_zero metric ~labels () in
+  let before = Otel_metric_store.metric_value_or_zero metric ~labels () in
   let malformed =
     `Assoc
       [
@@ -415,7 +415,7 @@ let test_parse_event_records_drop_increments_counter () =
   in
   let parsed = Telemetry_eio.parse_event_records [ malformed ] in
   check int "malformed payload produces zero records" 0 (List.length parsed);
-  let after = Prometheus.metric_value_or_zero metric ~labels () in
+  let after = Otel_metric_store.metric_value_or_zero metric ~labels () in
   check (float 0.001) "drop counter incremented by 1" 1.0 (after -. before)
 
 let test_metrics_json_roundtrip () =

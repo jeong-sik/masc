@@ -752,7 +752,7 @@ let cleanup (t : t) =
               container_name
               (status_label final_st)
               (Exec_policy.truncate_for_log final_out);
-            Prometheus.inc_counter
+            Otel_metric_store.inc_counter
               Keeper_metrics.(to_string TurnCleanupFailures)
               ~labels:[ "keeper", t.meta.name; "site", "docker_rm" ]
               ())

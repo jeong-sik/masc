@@ -7,23 +7,23 @@
    observed [tasks:.backlog] starvation under 16-keeper load —
    the counter lets operators rate-alert without log scraping. *)
 
-let () = Masc.Workspace_prometheus_hooks.install ()
+let () = Masc.Workspace_metric_hooks.install ()
 
 let record_distributed_lock_acquire_failed ~key ~attempts =
   (Atomic.get Workspace_hooks.distributed_lock_acquire_failed_fn) ~key ~attempts
 ;;
 
 let counter_for ~key ~attempts =
-  Masc.Prometheus.metric_value_or_zero
-    Masc.Prometheus.metric_distributed_lock_acquire_failed
+  Masc.Otel_metric_store.metric_value_or_zero
+    Masc.Otel_metric_store.metric_distributed_lock_acquire_failed
     ~labels:[ ("key", key); ("attempts", string_of_int attempts) ]
     ()
 
 let test_metric_name_stable () =
   Alcotest.(check string)
     "distributed lock acquire failed canonical name"
-    Masc.Prometheus.metric_distributed_lock_acquire_failed
-    Masc.Prometheus.metric_distributed_lock_acquire_failed
+    Masc.Otel_metric_store.metric_distributed_lock_acquire_failed
+    Masc.Otel_metric_store.metric_distributed_lock_acquire_failed
 
 let test_record_increments () =
   let key = "tasks:.backlog-9645-test" in

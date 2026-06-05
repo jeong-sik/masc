@@ -397,7 +397,7 @@ let with_autonomous_wait_queue f =
 ;;
 let autonomous_queue_depth_labels = [ "channel", "autonomous_queue" ]
 let record_autonomous_queue_depth depth =
-  Prometheus.set_gauge
+  Otel_metric_store.set_gauge
     Keeper_metrics.(to_string TurnQueueDepth)
     ~labels:autonomous_queue_depth_labels
     (float_of_int depth)
@@ -570,7 +570,7 @@ let run_after_acquire_flag_hook_for_test ~label ~keeper_name =
   | Some hook -> hook ~label ~keeper_name
 ;;
 let observe_bookkeeping_failure ~op ~(kind : Keeper_bookkeeping_failure_kind.t) =
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     Keeper_metrics.(to_string TurnSlotBookkeepingFailures)
     ~labels:[ "op", op; "kind", Keeper_bookkeeping_failure_kind.to_label kind ]
     ()

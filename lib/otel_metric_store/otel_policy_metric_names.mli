@@ -1,7 +1,7 @@
 (** Policy, board, FSM guard, and memory pipeline metric-name constants.
 
-    Included by {!Prometheus} so existing callers keep using
-    [Prometheus.metric_*] bindings unchanged. *)
+    Included by {!Otel_metric_store} so existing callers keep using
+    [Otel_metric_store.metric_*] bindings unchanged. *)
 
 (** Aggregate counter for every fallback event across the runtime pipeline.
     Labels: [kind] enumerates the fallback class and [detail] carries the

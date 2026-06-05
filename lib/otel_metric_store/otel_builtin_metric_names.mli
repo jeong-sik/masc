@@ -1,11 +1,11 @@
-(** Metric names used by Prometheus built-in registration chunks. *)
+(** Metric names used by Otel_metric_store built-in registration chunks. *)
 
-include module type of Prometheus_metric_names
+include module type of Otel_metric_names
 
 
 (** #10097: per-(provider, tool) counter for keeper-bound runtime MCP
     omissions.  Paired with a once-per-fingerprint WARN log so logs
-    carry structural facts and Prometheus carries frequency.
+    carry structural facts and Otel_metric_store carries frequency.
 
     RFC-0058 §2.4 / Phase 5.4: renamed from
     `masc_cli_tool_a_mcp_tool_omission_total` to keep provider identity
@@ -68,13 +68,13 @@ val metric_workspace_claim_post_provision_failures : string
 (** Total best-effort claim post-provision hook failures. Labels: [site]
     and [agent_name]. *)
 
-include module type of Prometheus_oas_metric_names
+include module type of Otel_oas_metric_names
 
-include module type of Prometheus_runtime_metric_names
+include module type of Otel_runtime_metric_names
 
 (** {1 Core counters / gauges} *)
 
-include module type of Prometheus_core_metric_names
+include module type of Otel_core_metric_names
 
 val metric_open_fds : string
 val metric_fd_warn_threshold : string
@@ -85,7 +85,7 @@ val metric_pool_evict_total : string
 val metric_pool_evict_failure_total : string
 val metric_pool_create_total : string
 
-include module type of Prometheus_policy_metric_names
+include module type of Otel_policy_metric_names
 
 (** Total keepers auto-resumed by the self-healing circuit breaker in
     [Keeper_supervisor.sweep_and_recover] after the per-keeper back-off
@@ -198,11 +198,11 @@ val metric_distributed_lock_acquire_failed : string
     Labels: [size_class = empty | with_data]. *)
 val metric_fs_atomic_orphans_cleaned : string
 
-include module type of Prometheus_identity_metric_names
+include module type of Otel_identity_metric_names
 
 (** {1 Transport metrics} *)
 
-include module type of Prometheus_transport_metric_names
+include module type of Otel_transport_metric_names
 
 (** [masc_keeper_oas_run_timeout_total] counter incremented in the
     runtime FSM each time an [Agent.run] / [run_stream] returns

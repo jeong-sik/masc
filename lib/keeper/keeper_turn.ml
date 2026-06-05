@@ -538,7 +538,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                with
                | Ok () -> ()
                | Error msg ->
-                   Prometheus.inc_counter
+                   Otel_metric_store.inc_counter
                      Keeper_metrics.(to_string WriteMetaFailures)
                      ~labels:
                        [ ("keeper", updated_meta.name);
@@ -576,19 +576,19 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                with
                | Eio.Cancel.Cancelled _ as e -> raise e
                | exn ->
-                   (* #10047: surface the drop as a Prometheus counter so
+                   (* #10047: surface the drop as a Otel_metric_store counter so
                       dashboards can alert when state advances without a
                       matching metric record. The log alone was too easy
                       to miss and operators trusted metric jsonl as
                       ground truth. *)
-                   Prometheus.inc_counter
+                   Otel_metric_store.inc_counter
                      Keeper_metrics.(to_string MetricEmitDropped)
                      ~labels:[
                        ("keeper", updated_meta.name);
                        ("channel", "turn");
                        ("site", "keeper_turn_msg");
                      ] ();
-                   Prometheus.inc_counter
+                   Otel_metric_store.inc_counter
                      Keeper_metrics.(to_string TurnMetricsSnapshotFailures)
                      ~labels:[("keeper", updated_meta.name); ("site", "turn")]
                      ();

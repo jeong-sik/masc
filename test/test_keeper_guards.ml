@@ -10,7 +10,7 @@
 open Alcotest
 module KG = Masc.Keeper_guards
 module HK = Masc.Keeper_hooks_oas
-module P = Masc.Prometheus
+module P = Masc.Otel_metric_store
 
 (* ----------------------------------------------------------------- *)
 (* Helpers                                                             *)

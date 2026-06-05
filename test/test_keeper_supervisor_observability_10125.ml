@@ -36,7 +36,7 @@ let () =
 ;;
 
 module R = Masc.Keeper_runtime
-module Prom = Masc.Prometheus
+module Prom = Masc.Otel_metric_store
 
 let starts_for ~base_path =
   Prom.metric_value_or_zero
@@ -52,7 +52,7 @@ let last_sweep_for ~base_path =
     ()
 ;;
 
-(* Both metrics are declared at init via [Prometheus.add ~labels:[]],
+(* Both metrics are declared at init via [Otel_metric_store.add ~labels:[]],
    so [get_metric_value ~labels:[] ()] returns [Some 0.0] if and only
    if the registration block actually ran. Pins that the #10125
    dashboard wiring is present — if either name is missing the whole

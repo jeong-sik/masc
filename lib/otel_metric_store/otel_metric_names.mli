@@ -1,15 +1,15 @@
-(** Prometheus metric-name string constants — public counterpart to
-    [Prometheus_metric_names.ml]. Extracted from [Prometheus] to keep
+(** Otel_metric_store metric-name string constants — public counterpart to
+    [Otel_metric_names.ml]. Extracted from [Otel_metric_store] to keep
     the parent interface under the Godfile size cap.
 
-    [Prometheus.mli] uses [include module type of Prometheus_metric_names]
-    so callers see every [val metric_X : string] under the [Prometheus]
+    [Otel_metric_store.mli] uses [include module type of Otel_metric_names]
+    so callers see every [val metric_X : string] under the [Otel_metric_store]
     namespace unchanged. *)
 
 (** {1 Metric Name Constants}
 
     Shared SSOT between registration (in [init]) and call-sites in
-    keeper/bridge modules. Importing [Prometheus.<constant>] ensures
+    keeper/bridge modules. Importing [Otel_metric_store.<constant>] ensures
     the compiler catches typos that would otherwise silently create
     dead series. *)
 
@@ -92,7 +92,7 @@ val metric_board_persist_lock_held_sec : string
 
     Wired by [Backend.FileSystem.set_mutex_observers] from the main
     library at startup so that [masc_backend] does not depend on
-    [Prometheus]. *)
+    [Otel_metric_store]. *)
 val metric_backend_mutex_acquire_sec : string
 
 (** Time spent inside the backend persist lock, from acquisition to
@@ -106,7 +106,7 @@ val metric_backend_mutex_held_sec : string
     surfaced so operators can alert on queue pressure without log
     parsing.  Labels: [keeper, channel]. *)
 
-(** #10125: supervisor sweep liveness counters.  See {!Prometheus.ml}
+(** #10125: supervisor sweep liveness counters.  See {!Otel_metric_store.ml}
     for the rationale.  Counter increments on each Pulse start;
     gauge advances on every successful beat. *)
 

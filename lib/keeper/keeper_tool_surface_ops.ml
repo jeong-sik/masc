@@ -40,8 +40,8 @@ let cache_ttl_seconds env_var ~default =
   | Some raw ->
       let trimmed = String.trim raw in
       let emit_failure reason =
-        Prometheus.inc_counter
-          Prometheus.metric_tool_keeper_cache_ttl_parse_failures
+        Otel_metric_store.inc_counter
+          Otel_metric_store.metric_tool_keeper_cache_ttl_parse_failures
           ~labels:[ ("env_var", env_var); ("reason", reason) ]
           ();
         Log.Keeper.warn
@@ -85,8 +85,8 @@ let rec cached_text_by_key cache_ref ~key ~ttl_s compute =
       in
       if Atomic.compare_and_set cache_ref cache next then value
       else begin
-        Prometheus.inc_counter
-          Prometheus.metric_tool_keeper_cache_cas_conflicts ();
+        Otel_metric_store.inc_counter
+          Otel_metric_store.metric_tool_keeper_cache_cas_conflicts ();
         cached_text_by_key cache_ref ~key ~ttl_s compute
       end
 module For_testing = struct

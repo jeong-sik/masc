@@ -88,7 +88,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       validate_sandbox_settings ~allowed_paths
     with
     | Error err ->
-        Prometheus.inc_counter
+        Otel_metric_store.inc_counter
           Keeper_metrics.(to_string LifecycleDispatchRejections)
           ~labels:[("keeper", p.name); ("event", "create_sandbox_validation")]
           ();
@@ -101,7 +101,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Turn_up ()) ~sandbox_profile
         with
         | Error err ->
-            Prometheus.inc_counter
+            Otel_metric_store.inc_counter
               Keeper_metrics.(to_string LifecycleDispatchRejections)
               ~labels:[("keeper", p.name); ("event", "create_sandbox_preflight")]
               ();
@@ -114,7 +114,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             in
             let active_keepers = Keeper_registry.count_running () in
             if max_active_keepers > 0 && active_keepers >= max_active_keepers then begin
-              Prometheus.inc_counter
+              Otel_metric_store.inc_counter
                 Keeper_metrics.(to_string LifecycleDispatchRejections)
                 ~labels:[("keeper", p.name); ("event", "create_max_active_reached")]
                 ();
@@ -266,7 +266,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
               let trace_id = generate_trace_id () in
               match Keeper_id.Trace_id.of_string trace_id with
               | Error err ->
-                  Prometheus.inc_counter
+                  Otel_metric_store.inc_counter
                     Keeper_metrics.(to_string LifecycleDispatchRejections)
                     ~labels:[("keeper", p.name); ("event", "create_invalid_trace_id")]
                     ();
@@ -288,13 +288,13 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                       (* Surface masc-improver/sangsu sandbox boot
                          silent-failure (2026-05-05).  Keeper_fs.ensure_dir
                          raises on filesystem error; the previous [ignore]
-                         discarded it.  Now we log + emit a Prometheus
+                         discarded it.  Now we log + emit a Otel_metric_store
                          counter so the dashboard makes failure visible
                          without aborting keeper boot. *)
                       Log.Keeper.error
                         "create_keeper sandbox bundle init raised: keeper=%s exn=%s"
                         p.name (Printexc.to_string exn);
-                      Prometheus.inc_counter
+                      Otel_metric_store.inc_counter
                         Keeper_metrics.(to_string LifecycleDispatchRejections)
                         ~labels:[("keeper", p.name);
                                  ("event", "sandbox_bundle_init_raised")]
@@ -306,7 +306,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                       Log.Keeper.warn
                         "create_keeper sandbox bundle path missing post-init: keeper=%s path=%s"
                         p.name bp;
-                      Prometheus.inc_counter
+                      Otel_metric_store.inc_counter
                         Keeper_metrics.(to_string LifecycleDispatchRejections)
                         ~labels:[("keeper", p.name);
                                  ("event", "sandbox_bundle_missing_post_init")]
@@ -491,7 +491,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       in
       match init_save_result with
       | Error e ->
-        Prometheus.inc_counter
+        Otel_metric_store.inc_counter
           Keeper_metrics.(to_string CheckpointFailures)
           ~labels:[("keeper", p.name); ("site", Keeper_checkpoint_failure_operation.(to_label Create_initial_save))]
           ();
@@ -512,7 +512,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       in
       (match runtime_assignment_result with
        | Error e ->
-         Prometheus.inc_counter
+         Otel_metric_store.inc_counter
            Keeper_metrics.(to_string LifecycleDispatchRejections)
            ~labels:[("keeper", p.name); ("event", "create_runtime_assignment")]
            ();
@@ -526,7 +526,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       Progress.Tracker.step tracker ~message:"Writing keeper metadata" ();
       match write_initial_meta ctx.config meta with
       | Error e ->
-        Prometheus.inc_counter Keeper_metrics.(to_string WriteMetaFailures)
+        Otel_metric_store.inc_counter Keeper_metrics.(to_string WriteMetaFailures)
           ~labels:[("keeper", p.name); ("phase", "create_keeper")] ();
         Log.Keeper.error "create_keeper failed: write_meta error for name=%s: %s" p.name e;
         Progress.stop_tracking task_id;

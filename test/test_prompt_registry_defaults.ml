@@ -285,7 +285,7 @@ let () =
               with_registry @@ fun ~dir ~prompts_dir:_ ->
               let labels = [ ("prompt", "override_restore") ] in
               let before =
-                Lib.Prometheus.metric_value_or_zero
+                Lib.Otel_metric_store.metric_value_or_zero
                   Keeper_metrics.(to_string PromptFailures)
                   ~labels
                   ()
@@ -298,7 +298,7 @@ let () =
               Prompt_registry.restore_overrides dir;
               check (float 0.0001) "restore rejection counted"
                 (before +. 1.0)
-                (Lib.Prometheus.metric_value_or_zero
+                (Lib.Otel_metric_store.metric_value_or_zero
                    Keeper_metrics.(to_string PromptFailures)
                    ~labels
                    ());

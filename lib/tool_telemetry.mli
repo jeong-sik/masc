@@ -4,7 +4,7 @@
     This module wraps the three existing emission surfaces in masc:
 
     - [Otel_spans.with_span] for the OTel trace span
-    - [Prometheus.inc_counter "tool_dispatch_total"] for the metric
+    - [Otel_metric_store.inc_counter "tool_dispatch_total"] for the metric
     - [Otel_spans.current_trace_id] (passed as a thunk) for trace_id propagation
 
     The audit emission slot is filled by callers via [Audit_log.log_action]
@@ -35,7 +35,7 @@ val with_span
   -> ((unit -> trace_id option) -> 'a * string)
   -> 'a * string
 
-(** Register the [tool_dispatch_total] Prometheus counter with labels
+(** Register the [tool_dispatch_total] Otel_metric_store counter with labels
     [tool] and [outcome]. Call once at server startup. Subsequent calls
     are idempotent (no-op). *)
 val register_metrics : unit -> unit

@@ -15,9 +15,9 @@
     constants are stable, label cardinality stays bounded, and
     distinct labels are isolated. *)
 
-module P = Masc.Prometheus
+module P = Masc.Otel_metric_store
 
-(* ── Counter constants (stable Prometheus series names) ───── *)
+(* ── Counter constants (stable Otel_metric_store series names) ───── *)
 
 let test_lifecycle_callback_metric_name () =
   Alcotest.(check string)
@@ -115,7 +115,7 @@ let test_drain_outcome_label_distinction () =
 (* ── Documented label vocabulary check ──────────────────────
    The wrappers in keeper_post_turn.ml / keeper_rollover.ml and the
    per-keeper hook sites in keeper_hooks_oas.ml must stay aligned with
-   prometheus.mli. This test pins the callback vocabulary so a future
+   otel_metric_store.mli. This test pins the callback vocabulary so a future
    refactor that renames a label without updating the docs is caught. *)
 
 let test_documented_callback_label_vocabulary () =
@@ -175,9 +175,9 @@ let () =
         test_drain_outcome_label_distinction;
     ];
     "documented label vocabulary", [
-      test_case "callback labels match prometheus.mli docs" `Quick
+      test_case "callback labels match otel_metric_store.mli docs" `Quick
         test_documented_callback_label_vocabulary;
-      test_case "drain outcome labels match prometheus.mli docs" `Quick
+      test_case "drain outcome labels match otel_metric_store.mli docs" `Quick
         test_documented_drain_outcome_vocabulary;
     ];
   ]

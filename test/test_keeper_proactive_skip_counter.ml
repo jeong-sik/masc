@@ -1,6 +1,6 @@
 (* test/test_keeper_proactive_skip_counter.ml
 
-   #10008 failure mode 3: pin the canonical Prometheus metric
+   #10008 failure mode 3: pin the canonical Otel_metric_store metric
    name for the proactive-scheduler skip-reason counter and
    spot-check that the [skip_reason_to_string] vocabulary
    matches the labels the counter will carry.

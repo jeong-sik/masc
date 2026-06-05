@@ -1669,14 +1669,14 @@
 ; count so future additions surface in the diff. Requires masc_test_deps
 ; because it accesses Masc.Tool_name.* values directly.
 
-; RFC-0107 Phase D.4 — Pool_metrics Prometheus exporter regression test.
+; RFC-0107 Phase D.4 — Pool_metrics Otel_metric_store exporter regression test.
 ; Pins the 5 metric name constants, register () idempotency, and the
 ; /metrics text contains the metric families with correct TYPE lines.
 
 (test
  (name test_pool_metrics)
  (modules test_pool_metrics)
- (libraries alcotest masc.pool_metrics masc.prometheus))
+ (libraries masc_test_deps))
 
 ; RFC-0084 PR-3 — Tool_telemetry.with_span + Tool_dispatch.guarded_dispatch
 ; skeleton tests. Verifies 4-tuple emission wrapper invariants (callback

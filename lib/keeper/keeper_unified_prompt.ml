@@ -264,7 +264,7 @@ let contains_template_placeholder text =
   || String_util.contains_substring text "}}"
 
 let observe_turn_intent_render_failure message =
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     Keeper_metrics.(to_string PromptFailures)
     ~labels:[("prompt", Keeper_prompt_names.turn_intent)]
     ();
@@ -382,7 +382,7 @@ let load_externalized_bullet ~enabled key =
     if String.equal trimmed "" then
       match fallback_externalized_bullet key with
       | Some prose ->
-          Prometheus.inc_counter
+          Otel_metric_store.inc_counter
             Keeper_metrics.(to_string PromptFailures)
             ~labels:[("prompt", key)]
             ();

@@ -15,7 +15,7 @@
 
 (** {1 Types} *)
 
-(** Canonical Prometheus metric name for priority-trigger selection
+(** Canonical Otel_metric_store metric name for priority-trigger selection
     events.  Labels: [("agent", <name>); ("trigger", "mentioned" |
     "content_alert" | "other")].  Exposed so tests and Grafana
     rules can pin the name without hard-coding a string literal.
@@ -94,7 +94,7 @@ val init_agent : string -> unit
     @param on_priority_selected Injected observability hook fired once per
       priority-trigger selection (Mentioned/ContentAlert), with the agent
       name and trigger label ("mentioned" | "content_alert"). Defaults to a
-      no-op; an instrumented caller supplies the Prometheus increment for
+      no-op; an instrumented caller supplies the Otel_metric_store increment for
       [priority_trigger_selected_metric].
     @param agents List of agent names to consider
     @param max_n Maximum number of agents to select

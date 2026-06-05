@@ -627,13 +627,13 @@ let credential_token_index config
   in
   match cached with
   | Some by_token ->
-    Prometheus.inc_counter
-      Prometheus.metric_auth_credential_index_cache_hits
+    Otel_metric_store.inc_counter
+      Otel_metric_store.metric_auth_credential_index_cache_hits
       ();
     by_token
   | None ->
-    Prometheus.inc_counter
-      Prometheus.metric_auth_credential_index_cache_misses
+    Otel_metric_store.inc_counter
+      Otel_metric_store.metric_auth_credential_index_cache_misses
       ();
     let creds = list_credentials config in
     let by_token = build_token_index creds in

@@ -182,7 +182,7 @@ let load_handover ~fs config handover_id : (handover_record, string) result =
 let list_handovers ~fs config : handover_record list =
   let surface = "handover_eio" in
   let observe_drop ~reason =
-    Prometheus.inc_counter Prometheus.metric_persistence_read_drops
+    Otel_metric_store.inc_counter Otel_metric_store.metric_persistence_read_drops
       ~labels:[("surface", surface); ("reason", reason)] ()
   in
   let report_drop ~reason ~path ~detail =

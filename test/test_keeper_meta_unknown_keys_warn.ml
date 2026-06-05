@@ -8,7 +8,7 @@
     (empty tail = String.concat ", " []) at every dashboard tick across
     14 keepers — observed live 2026-05-05 ~01:50 KST.
 
-    The Prometheus counter [metric_keeper_meta_json_failures] with
+    The Otel_metric_store counter [metric_keeper_meta_json_failures] with
     label site=unknown_keys is the only durable side-effect we can
     assert from outside the logger; the structural fix protects both
     the counter and the warn line, so a green counter assertion is
@@ -17,7 +17,7 @@
 open Masc
 
 let counter_total () =
-  Prometheus.metric_total Keeper_metrics.(to_string MetaJsonFailures)
+  Otel_metric_store.metric_total Keeper_metrics.(to_string MetaJsonFailures)
 
 let canonical_only_meta_json () =
   (* Build an `Assoc whose every key is in [canonical_keeper_meta_key_names].
@@ -76,12 +76,12 @@ let test_progress_updated_line_failure_is_observable () =
     in
     let (_ : string) = Keeper_fs.ensure_dir progress_path in
     let before =
-      Prometheus.metric_total
+      Otel_metric_store.metric_total
         Keeper_metrics.(to_string ProgressUpdatedLineFailures)
     in
     Keeper_meta_store.refresh_progress_updated_line config keeper_name;
     let after =
-      Prometheus.metric_total
+      Otel_metric_store.metric_total
         Keeper_metrics.(to_string ProgressUpdatedLineFailures)
     in
     Alcotest.(check bool)

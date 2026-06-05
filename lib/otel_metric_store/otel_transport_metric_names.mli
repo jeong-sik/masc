@@ -1,8 +1,8 @@
 (** Transport, websocket, gRPC, HTTP, dashboard, and cache metric-name
     constants.
 
-    Included by {!Prometheus} so existing callers keep using
-    [Prometheus.metric_*] bindings unchanged. *)
+    Included by {!Otel_metric_store} so existing callers keep using
+    [Otel_metric_store.metric_*] bindings unchanged. *)
 
 val metric_sse_sessions : string
 val metric_sse_broadcast_duration : string

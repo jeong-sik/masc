@@ -35,7 +35,7 @@ let spawn_subscriber ~sw ~clock ~bus =
            (fun (evt : Agent_sdk.Event_bus.event) ->
               match evt.payload with
               | Agent_sdk.Event_bus.Custom ("telemetry_event", _) ->
-                  Prometheus.inc_counter
+                  Otel_metric_store.inc_counter
                     telemetry_event_counter
                     ~labels:[ "result", "observed" ]
                     ()

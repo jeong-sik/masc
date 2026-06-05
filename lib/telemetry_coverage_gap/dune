@@ -7,7 +7,6 @@
  (modules telemetry_coverage_gap)
  (libraries
   dated_jsonl
-  masc.prometheus
   masc_core
   masc_types
   time_compat

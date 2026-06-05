@@ -1,6 +1,6 @@
 (* RFC-0217 S1 — OTel metric bridge. See otel_metrics.mli.
    opentelemetry + stdlib only; no masc dep (broken-main isolated, RFC-0056 leaf).
-   Preserves Prometheus pull semantics: the in-process accumulator stays the
+   Preserves Otel_metric_store pull semantics: the in-process accumulator stays the
    source of truth, and a Metrics_callbacks observable reports its current value
    as a cumulative metric at each OTLP export tick (validated by the S0 spike). *)
 
@@ -31,7 +31,7 @@ let metric_of_sample (s : sample) : M.t =
   | Histogram ->
     (* store keeps a single accumulated value (not bucketed); export as a
        cumulative non-monotonic sum so the value is preserved. Real buckets are
-       a follow-up once Prometheus_store grows them. *)
+       a follow-up once Otel_metric_store_core grows them. *)
     M.sum ~name:s.name ~is_monotonic:false
       ~aggregation_temporality:M.Aggregation_temporality_cumulative [ dp ]
 

@@ -7,7 +7,7 @@
     - [register ()] is idempotent and does not raise.
     - [current_snapshot ()] returns [None] before the pool is
       lazy-initialized (no HTTP traffic from the test).
-    - The Prometheus store registers all metric families with the intended
+    - The Otel_metric_store store registers all metric families with the intended
       counter/gauge type for the OTel observable source.
 *)
 
@@ -38,14 +38,14 @@ let test_current_snapshot_none_when_pool_uninit () =
   (* In a unit-test context with no prior HTTP traffic, the pool
      singleton has not been initialized, so the snapshot accessor
      returns [None].  This is the "no-op" invariant relied on by
-     [Prometheus.update_pool_metrics_gauges]. *)
+     [Otel_metric_store.update_pool_metrics_gauges]. *)
   (match PM.current_snapshot () with
    | None -> ()
    | Some _ -> fail "pool snapshot should be None before first HTTP call")
 
 let find_metric name =
-  Prometheus.snapshot ()
-  |> List.find_opt (fun (m : Prometheus.metric) ->
+  Otel_metric_store.snapshot ()
+  |> List.find_opt (fun (m : Otel_metric_store.metric) ->
     String.equal m.name name && m.labels = [])
 
 let test_registry_contains_metric_families () =
@@ -64,11 +64,11 @@ let test_metric_types_match_intent () =
     | None -> false
   in
   check bool "inflight_total is gauge" true
-    (has_type "masc_pool_inflight_total" Prometheus.Gauge);
+    (has_type "masc_pool_inflight_total" Otel_metric_store.Gauge);
   check bool "reuse_total is counter" true
-    (has_type "masc_pool_reuse_total" Prometheus.Counter);
+    (has_type "masc_pool_reuse_total" Otel_metric_store.Counter);
   check bool "create_total is counter" true
-    (has_type "masc_pool_create_total" Prometheus.Counter)
+    (has_type "masc_pool_create_total" Otel_metric_store.Counter)
 
 let () =
   run "Pool_metrics" [

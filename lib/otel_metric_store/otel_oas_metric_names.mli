@@ -1,7 +1,7 @@
 (** OAS bridge, relay, inference, and context metric-name constants.
 
-    Included by {!Prometheus} so existing callers keep using
-    [Prometheus.metric_*] bindings unchanged. *)
+    Included by {!Otel_metric_store} so existing callers keep using
+    [Otel_metric_store.metric_*] bindings unchanged. *)
 
 (** Labelled [caller, timeout_s] so operators can distinguish short budgets
     from intentional 120/180s budgets when both fire timeouts in the same

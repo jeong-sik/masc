@@ -20,9 +20,9 @@ let warn_telemetry_drop ~(event : Workspace_telemetry_drop_event.t) exn =
          event_family
          event_kind));
   Telemetry_observe.observe_silent ~kind:"workspace_telemetry_drop_metric" (fun () ->
-    Prometheus.inc_counter
-      Prometheus.metric_workspace_telemetry_drop
-      ~labels:(Workspace_telemetry_drop_event.to_prometheus_labels event)
+    Otel_metric_store.inc_counter
+      Otel_metric_store.metric_workspace_telemetry_drop
+      ~labels:(Workspace_telemetry_drop_event.to_metric_labels event)
       ())
 ;;
 
@@ -156,11 +156,11 @@ let observe_task_transition_event
        | Masc_domain.Done_action | Masc_domain.Approve_verification ->
          let duration_ms = Safe_ops.json_int ~default:0 "duration_ms" details in
          Telemetry_eio.track_task_completed config ~task_id ~duration_ms ~success:true;
-         Prometheus.record_task_completed ()
+         Otel_metric_store.record_task_completed ()
        | Masc_domain.Cancel ->
          let duration_ms = Safe_ops.json_int ~default:0 "duration_ms" details in
          Telemetry_eio.track_task_completed config ~task_id ~duration_ms ~success:false;
-         Prometheus.record_task_failed ()
+         Otel_metric_store.record_task_failed ()
        | Masc_domain.Release
        | Masc_domain.Submit_for_verification
        | Masc_domain.Reject_verification -> ())
@@ -179,11 +179,11 @@ let observe_task_transition_event
     warn_telemetry_drop ~event:(Accountability transition) exn
 ;;
 
-(* #9795: wire the FSM drift hook to a Prometheus counter emit. *)
+(* #9795: wire the FSM drift hook to a Otel_metric_store counter emit. *)
 let fsm_drift_metric = "masc_task_fsm_drift_total"
 
 let () =
-  Prometheus.register_counter
+  Otel_metric_store.register_counter
     ~name:fsm_drift_metric
     ~help:
       "Total task FSM drift transitions observed by Workspace_task_lifecycle.decide (e.g. \
@@ -194,7 +194,7 @@ let () =
 ;;
 
 let record_fsm_drift ~variant ~force =
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     fsm_drift_metric
     ~labels:[ "variant", variant; ("force", if force then "true" else "false") ]
     ()
@@ -205,7 +205,7 @@ let record_fsm_drift ~variant ~force =
 let fsm_drift_per_agent_metric = "masc_task_fsm_drift_per_agent_total"
 
 let () =
-  Prometheus.register_counter
+  Otel_metric_store.register_counter
     ~name:fsm_drift_per_agent_metric
     ~help:
       "Per-agent breakout of task FSM drift transitions (companion to \
@@ -217,7 +217,7 @@ let () =
 
 let record_fsm_drift_with_agent ~variant ~force ~agent_name =
   record_fsm_drift ~variant ~force;
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     fsm_drift_per_agent_metric
     ~labels:
       [ "variant", variant
@@ -231,7 +231,7 @@ let record_fsm_drift_with_agent ~variant ~force ~agent_name =
 let task_completion_path_metric = "masc_task_completion_path_total"
 
 let () =
-  Prometheus.register_counter
+  Otel_metric_store.register_counter
     ~name:task_completion_path_metric
     ~help:
       "Total task Done emits classified by completion path and contract presence. Lets \
@@ -244,7 +244,7 @@ let () =
 ;;
 
 let record_task_completion_path ~path ~contract_state ~agent_name =
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     task_completion_path_metric
     ~labels:[ "path", path; "contract_state", contract_state; "agent_name", agent_name ]
     ()
@@ -254,7 +254,7 @@ let record_task_completion_path ~path ~contract_state ~agent_name =
 let task_auto_release_metric = "masc_task_auto_release_total"
 
 let () =
-  Prometheus.register_counter
+  Otel_metric_store.register_counter
     ~name:task_auto_release_metric
     ~help:
       "Total implicit task auto-releases triggered by [task_claim_next] (mid-work churn \
@@ -266,22 +266,22 @@ let () =
 ;;
 
 let record_task_auto_release ~agent_name ~from_status =
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     task_auto_release_metric
     ~labels:[ "agent_name", agent_name; "from_status", from_status ]
     ()
 ;;
 
 let record_workspace_broadcast ~msg_type ~elapsed_s =
-  Prometheus.observe_histogram
-    Prometheus.metric_workspace_broadcast_duration
+  Otel_metric_store.observe_histogram
+    Otel_metric_store.metric_workspace_broadcast_duration
     ~labels:[ "msg_type", msg_type ]
     elapsed_s
 ;;
 
 let record_mention_dedup_decision ~outcome =
-  Prometheus.inc_counter
-    Prometheus.metric_mention_dedup_decisions_total
+  Otel_metric_store.inc_counter
+    Otel_metric_store.metric_mention_dedup_decisions_total
     ~labels:[ "outcome", outcome ]
     ()
 ;;
@@ -289,28 +289,28 @@ let record_mention_dedup_decision ~outcome =
 let record_file_lock_attempt ~caller ~retries ~elapsed_s ~outcome =
   if retries > 0
   then
-    Prometheus.inc_counter
-      Prometheus.metric_file_lock_retries
+    Otel_metric_store.inc_counter
+      Otel_metric_store.metric_file_lock_retries
       ~labels:[ "caller", caller ]
       ~delta:(float_of_int retries)
       ();
-  Prometheus.observe_histogram
-    Prometheus.metric_file_lock_acquire_seconds
+  Otel_metric_store.observe_histogram
+    Otel_metric_store.metric_file_lock_acquire_seconds
     ~labels:[ "caller", caller; "outcome", outcome ]
     elapsed_s
 ;;
 
 let record_file_lock_table_cas_retry () =
-  Prometheus.inc_counter
-    Prometheus.metric_file_lock_table_cas_retries
+  Otel_metric_store.inc_counter
+    Otel_metric_store.metric_file_lock_table_cas_retries
     ()
 ;;
 
-let process_timeout_metric = Prometheus.metric_process_timeout
+let process_timeout_metric = Otel_metric_store.metric_process_timeout
 
 let record_process_timeout ~program ~timeout_sec ~origin =
   let stage_label = Timeout_origin.to_label origin in
-  Prometheus.inc_counter process_timeout_metric
+  Otel_metric_store.inc_counter process_timeout_metric
     ~labels:
       [ "program", program
       ; ("timeout_bucket", Timeout_bucket.(to_label (of_seconds timeout_sec)))
@@ -320,52 +320,52 @@ let record_process_timeout ~program ~timeout_sec ~origin =
 ;;
 
 let distributed_lock_acquire_failed_metric =
-  Prometheus.metric_distributed_lock_acquire_failed
+  Otel_metric_store.metric_distributed_lock_acquire_failed
 ;;
 
 let record_distributed_lock_acquire_failed ~key ~attempts =
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     distributed_lock_acquire_failed_metric
     ~labels:[ "key", key; "attempts", string_of_int attempts ]
     ()
 ;;
 
 let record_claim_post_provision_failed ~site ~agent_name ~task_id:_ ~error:_ =
-  Prometheus.inc_counter
-    Prometheus.metric_workspace_claim_post_provision_failures
+  Otel_metric_store.inc_counter
+    Otel_metric_store.metric_workspace_claim_post_provision_failures
     ~labels:[ "site", site; "agent_name", agent_name ]
     ()
 ;;
 
 let record_active_agents_change = function
-  | `Inc -> Prometheus.inc_gauge Prometheus.metric_active_agents ()
-  | `Dec -> Prometheus.dec_gauge Prometheus.metric_active_agents ()
+  | `Inc -> Otel_metric_store.inc_gauge Otel_metric_store.metric_active_agents ()
+  | `Dec -> Otel_metric_store.dec_gauge Otel_metric_store.metric_active_agents ()
 ;;
 
 let record_workspace_telemetry_drop event =
-  Prometheus.inc_counter
-    Prometheus.metric_workspace_telemetry_drop
-    ~labels:(Workspace_telemetry_drop_event.to_prometheus_labels event)
+  Otel_metric_store.inc_counter
+    Otel_metric_store.metric_workspace_telemetry_drop
+    ~labels:(Workspace_telemetry_drop_event.to_metric_labels event)
     ()
 ;;
 
 let record_telemetry_observe_failure kind =
-  Prometheus.inc_counter
-    Prometheus.metric_telemetry_observe_failures
+  Otel_metric_store.inc_counter
+    Otel_metric_store.metric_telemetry_observe_failures
     ~labels:[("kind", kind)] ()
 ;;
 
 let record_anti_rationalization_excuse_pattern ~pattern ~outcome =
   let decision = Task.Anti_rationalization.excuse_pattern_decision_to_string outcome in
-  Prometheus.inc_counter
-    Prometheus.metric_anti_rationalization_excuse_pattern
+  Otel_metric_store.inc_counter
+    Otel_metric_store.metric_anti_rationalization_excuse_pattern
     ~labels:[ "pattern", pattern; "decision", decision ]
     ()
 ;;
 
 let record_anti_rationalization_fallback ~mode ~runtime =
-  Prometheus.inc_counter
-    Prometheus.metric_anti_rationalization_fallback
+  Otel_metric_store.inc_counter
+    Otel_metric_store.metric_anti_rationalization_fallback
     ~labels:[ "mode", mode; "runtime", runtime ]
     ()
 ;;
@@ -526,7 +526,6 @@ let install () =
 
   Atomic.set Task.Anti_rationalization.is_runtime_permanently_dead_fn (fun err ->
     match Keeper_turn_driver.classify_masc_internal_error err with
-    | Some (Keeper_turn_driver.Runtime_exhausted { reason = Keeper_turn_driver.No_tool_capable _; _ }) -> true
     | _ -> false);
 
   Atomic.set Workspace_hooks.record_thompson_result_fn (fun ~agent_name ~success ~reason ->
@@ -609,8 +608,8 @@ let install () =
   let original_cache_desync = Atomic.get Workspace_hooks.cache_desync_cleared_fn in
   Atomic.set Workspace_hooks.cache_desync_cleared_fn (fun config ~module_name ~task_id ~status ->
     original_cache_desync config ~module_name ~task_id ~status;
-    Prometheus.inc_counter
-      Prometheus.metric_cache_desync_cleared
+    Otel_metric_store.inc_counter
+      Otel_metric_store.metric_cache_desync_cleared
       ~labels:[ "module", module_name; "status", status ]
       ());
 

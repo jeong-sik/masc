@@ -137,12 +137,12 @@ let get_or_create_ring name =
    unflushed decision_record — the flush loop has not kept up with
    the append rate and a forensic record is being silently dropped.
    Without this counter, ring overflow was invisible: [unflushed]
-   stayed pegged at [cap] and no Prometheus signal fired.  Closes
+   stayed pegged at [cap] and no Otel_metric_store signal fired.  Closes
    the silent data-loss gap noted in
    .tmp/memory-compacting-analysis.html (decision_audit ring
    overflow). *)
 let () =
-  Prometheus.register_counter
+  Otel_metric_store.register_counter
     ~name:Keeper_metrics.(to_string DecisionAuditRingOverflows)
     ~help:
       "Total [Keeper_decision_audit.append] events where the ring \
@@ -159,7 +159,7 @@ let append ~keeper_name (rec_ : decision_record) =
     let ring = get_or_create_ring keeper_name in
     let cap = Array.length ring.buf in
     if ring.unflushed >= cap then
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string DecisionAuditRingOverflows)
         ~labels:[("keeper", keeper_name)]
         ();
@@ -230,7 +230,7 @@ let flush_if_needed ~base_path ~keeper_name =
           ring.unflushed <- 0
         with Eio.Cancel.Cancelled _ as e -> raise e
            | e ->
-             Prometheus.inc_counter
+             Otel_metric_store.inc_counter
                Keeper_metrics.(to_string DecisionAuditFlushFailures)
                ~labels:[("keeper", keeper_name)]
                ();

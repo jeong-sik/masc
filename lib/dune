@@ -15,8 +15,8 @@
  sse_jsonrpc_filter
  keeper_tool_call_log_context
 
- board_prometheus_hooks
- workspace_prometheus_hooks
+ board_metric_hooks_adapter
+ workspace_metric_hooks
 
  keeper_types_profile_persona keeper_types_profile_persona_defaults
  keeper_types_profile_oas_env
@@ -318,7 +318,6 @@
      masc.masc_event_bus
      masc.provider_tool_support
      masc.keeper_internal_error
-     masc.prometheus
      masc.auth
      masc.fd_accountant
    ;; Model_inference_metrics facade + decomposition siblings extracted to
@@ -530,10 +529,10 @@
    ;; substrate. (libraries) admits no keeper/runtime/domain/server module, so a
    ;; re-coupling is a dune cycle. Pure schema/vocab/policy, zero mega-outbound.
    masc.masc_tool_surface
-   ;; RFC-0217 S2 — OTel metric bridge leaf (Prometheus_store snapshot -> OTLP
-   ;; observable). Prometheus depends on this; the leaf has no masc dep.
+   ;; RFC-0217 S2 — OTel metric bridge leaf (Otel_metric_store_core snapshot -> OTLP
+   ;; observable). Otel_metric_store depends on this; the leaf has no masc dep.
    masc.otel_metrics
-   ;; Thompson Sampling agent selection (extracted leaf — Health/Prometheus
+   ;; Thompson Sampling agent selection (extracted leaf — Health/Otel_metric_store
    ;; edges inverted to callbacks; Board-callable record_vote without mega-lib cycle)
    masc_thompson
    ;; Environment configuration (extracted sub-library)

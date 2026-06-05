@@ -350,6 +350,14 @@ let keeper_config_json (config : Workspace.config) (name : string)
         | Some phase -> Keeper_status_runtime.pipeline_stage_of_phase phase
         | None -> "offline"
       in
+      let lifecycle_phase =
+        Option.map Keeper_state_machine.phase_to_string current_phase
+      in
+      let pipeline_stage_detail =
+        match current_phase with
+        | Some phase -> Keeper_status_runtime.pipeline_stage_detail_of_phase phase
+        | None -> "registry_absent"
+      in
       let state_diagram =
         Keeper_state_machine_mermaid.phase_to_mermaid
           ~current:(Option.value ~default:Keeper_state_machine.Offline current_phase)
@@ -391,11 +399,13 @@ let keeper_config_json (config : Workspace.config) (name : string)
          ("network_mode", `String (Keeper_types_profile_sandbox.network_mode_to_string m.network_mode));         ("sandbox_last_error", Json_util.string_opt_to_json sandbox_last_error);
          ("allowed_paths",
            `List (List.map (fun s -> `String s) m.allowed_paths));
-         ("effective_allowed_paths",
-           `List (List.map (fun s -> `String s)
-             (Keeper_alerting_path.effective_allowed_paths ~meta:m)));
-         ("pipeline_stage", `String pipeline_stage);
-         ("state_diagram", `String state_diagram);
+	         ("effective_allowed_paths",
+	           `List (List.map (fun s -> `String s)
+	             (Keeper_alerting_path.effective_allowed_paths ~meta:m)));
+	         ("pipeline_stage", `String pipeline_stage);
+	         ("lifecycle_phase", Json_util.string_opt_to_json lifecycle_phase);
+	         ("pipeline_stage_detail", `String pipeline_stage_detail);
+	         ("state_diagram", `String state_diagram);
          ("decision_pipeline_diagram", `String decision_pipeline_diagram);
          ("prompt", prompt);
          ("execution", execution);

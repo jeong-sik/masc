@@ -887,6 +887,8 @@ export interface Keeper {
   name: string
   keeper_id?: string | null
   pipeline_stage?: PipelineStage
+  pipeline_stage_detail?: string | null
+  lifecycle_phase?: KeeperPhase | null
   phase?: KeeperPhase | null
   runtime_class?: 'keeper'
   paused?: boolean

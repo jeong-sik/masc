@@ -102,6 +102,34 @@ describe('keeperDisplayStatus', () => {
       })
       expect(keeperDisplayStatus(keeper)).toBe('stopped')
     })
+
+    it('uses lifecycle_phase when heartbeat is alive but status is offline', () => {
+      const keeper = makeKeeper({
+        status: 'offline',
+        phase: 'Running',
+        lifecycle_phase: 'Stopped',
+        last_heartbeat: new Date().toISOString(),
+      })
+      expect(keeperDisplayStatus(keeper)).toBe('stopped')
+    })
+
+    it('does not turn exact Offline lifecycle into idle just because heartbeat is recent', () => {
+      const keeper = makeKeeper({
+        status: 'offline',
+        lifecycle_phase: 'Offline',
+        last_heartbeat: new Date().toISOString(),
+      })
+      expect(keeperDisplayStatus(keeper)).toBe('unbooted')
+    })
+
+    it('lets terminal lifecycle override stale active status', () => {
+      const keeper = makeKeeper({
+        status: 'active',
+        phase: 'Running',
+        lifecycle_phase: 'Dead',
+      })
+      expect(keeperDisplayStatus(keeper)).toBe('dead')
+    })
   })
 })
 

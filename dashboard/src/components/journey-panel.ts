@@ -23,6 +23,7 @@ import { Select } from './common/select'
 import { StatusChip, keeperStateTone } from './common/status-chip'
 import { TimeAgo } from './common/time-ago'
 import { formatIndependentCounters } from './counter-format'
+import { pipelineStageDetailLabel } from './keeper-phase-indicator'
 import {
   buildJourneyWaterfall,
   selectDefaultJourneyKeeper,
@@ -493,7 +494,7 @@ export function JourneyPanel() {
                 <div class="flex flex-wrap items-center gap-2 text-2xs">
                   <${StatusChip} tone=${keeperStateTone(selected.status)} uppercase=${false}>${selected.status}<//>
                   ${selected.pipeline_stage
-                    ? html`<${StatusChip} tone="info" uppercase=${false}>${selected.pipeline_stage}<//>`
+                    ? html`<${StatusChip} tone="info" uppercase=${false} title=${selected.pipeline_stage_detail ? pipelineStageDetailLabel(selected.pipeline_stage_detail) ?? selected.pipeline_stage_detail : undefined}>${selected.pipeline_stage}<//>`
                     : null}
                   <span class="font-mono text-[var(--color-fg-muted)]">turns ${selected.turn_count ?? selected.total_turns ?? 'not recorded'}</span>
                 </div>

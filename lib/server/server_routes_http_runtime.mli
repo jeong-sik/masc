@@ -136,13 +136,14 @@ val make_health_json :
 
     [paused_keepers.count] and [paused_keepers.names] are the union of
     registry-visible paused keepers and durable [.masc/keepers/*.json]
-    metas with [paused = true].  The nested [running_*] and
+    metas with [paused = true].  The nested [registry_paused_*] and
     [durable_*] fields keep the two sources inspectable so a keeper
     that has been auto-paused and removed from the live keepalive set
-    does not disappear from [/health].  [autoboot_enabled_*] and
-    [details] distinguish auto-recoverable, operator-paused, and
-    reconcile-gated durable pauses without auto-unpausing them.
-    [missing_pause_root_cause] is true when a keeper is auto-recoverable
+    does not disappear from [/health].  [running_*] remains as a legacy
+    alias for [registry_paused_*]; it does not mean FSM phase [Running].
+    [autoboot_enabled_*] and [details] distinguish auto-recoverable,
+    operator-paused, and reconcile-gated durable pauses without auto-unpausing
+    them.  [missing_pause_root_cause] is true when a keeper is auto-recoverable
     but its persisted runtime has no typed [last_blocker].  [read_error_count]
     surfaces corrupt durable meta instead of silently reporting a clean zero.
 

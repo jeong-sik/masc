@@ -633,6 +633,10 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         // can render the keeper as "stage not known yet" rather than
         // routing an arbitrary backend string through a lying type.
         pipeline_stage: toPipelineStage(asString(row.pipeline_stage)) ?? 'unknown',
+        pipeline_stage_detail: asString(row.pipeline_stage_detail) ?? null,
+        lifecycle_phase:
+          toKeeperPhase(asString(row.lifecycle_phase))
+          ?? toKeeperPhase(asString(row.phase)),
         phase: toKeeperPhase(asString(row.phase)),
         paused: asBoolean(row.paused),
         registered:

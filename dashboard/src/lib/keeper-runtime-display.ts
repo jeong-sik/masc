@@ -133,6 +133,8 @@ export function keeperActivityDisplay(
 
 export function keeperDisplayStatus(keeper: Keeper | null | undefined, fallbackStatus?: string | null): string {
   if (keeper && isKeeperPaused(keeper)) return 'paused'
+  const lifecycleStatus = keeperLifecycleStatus(keeper?.lifecycle_phase)
+  if (lifecycleStatus && lifecycleStatus !== 'running') return lifecycleStatus
   const status = keeper?.status ?? fallbackStatus
   const normalized = (status ?? '').trim().toLowerCase()
 
@@ -142,6 +144,39 @@ export function keeperDisplayStatus(keeper: Keeper | null | undefined, fallbackS
   }
 
   return status && status.trim() !== '' ? status : 'unknown'
+}
+
+function keeperLifecycleStatus(phase: Keeper['lifecycle_phase'] | string | null | undefined): string | null {
+  switch (phase) {
+    case 'Offline':
+      return 'unbooted'
+    case 'Running':
+      return 'running'
+    case 'Failing':
+      return 'failing'
+    case 'Overflowed':
+      return 'overflowed'
+    case 'Compacting':
+      return 'compacting'
+    case 'HandingOff':
+      return 'handoff'
+    case 'Draining':
+      return 'draining'
+    case 'Paused':
+      return 'paused'
+    case 'Stopped':
+      return 'stopped'
+    case 'Crashed':
+      return 'crashed'
+    case 'Restarting':
+      return 'restarting'
+    case 'Dead':
+      return 'dead'
+    case 'Zombie':
+      return 'zombie'
+    default:
+      return null
+  }
 }
 
 function codeLabel(value: string | null | undefined): string | null {
@@ -228,7 +263,7 @@ function refineOfflineStatus(keeper: Keeper | null | undefined): string {
   // only the 13 PascalCase phases, none of which lowercase to
   // `'inactive'`), so the guard was dead defensive.
   if (keeper.last_heartbeat && isHeartbeatAlive(keeper.last_heartbeat)) {
-    const phase = keeper.phase?.trim().toLowerCase()
+    const phase = (keeper.lifecycle_phase ?? keeper.phase)?.trim().toLowerCase()
     if (phase && phase !== 'offline') return phase
     return 'idle'
   }

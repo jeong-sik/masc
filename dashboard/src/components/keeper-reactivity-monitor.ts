@@ -16,7 +16,7 @@ import { useSignal } from '@preact/signals'
 import { useEffect, useRef } from 'preact/hooks'
 import { keepers } from '../store'
 import { navigate } from '../router'
-import { KeeperPhaseBadge } from './keeper-phase-indicator'
+import { KeeperPhaseBadge, pipelineStageDetailLabel } from './keeper-phase-indicator'
 import { KeeperPhaseTimeline, refreshKeeperPhaseTimeline } from './keeper-phase-strip'
 import { KeeperLifecycleTimeline, refreshKeeperLifecycleTimeline } from './keeper-lifecycle-timeline'
 import { TurnBudgetGaugePanel } from './turn-budget-gauge'
@@ -240,13 +240,19 @@ function HealthGrid({ allKeepers }: { allKeepers: Keeper[] }) {
                   </button>
                 </td>
                 <td class="py-2 pr-3">
-                  <${PhaseDot} phase=${k.phase} />
+                  <${PhaseDot} phase=${k.lifecycle_phase ?? k.phase} />
                   ${isPaused ? html`
                     <span class="ml-1.5 inline-flex items-center text-3xs text-[var(--paused)] font-semibold">⏸ 일시정지</span>
                   ` : null}
                 </td>
-                <td class="py-2 pr-3 text-[var(--color-fg-muted)] capitalize">
-                  ${k.pipeline_stage ?? '—'}
+                <td
+                  class="py-2 pr-3 text-[var(--color-fg-muted)] capitalize"
+                  title=${k.pipeline_stage_detail ? `${k.pipeline_stage ?? 'unknown'} · ${pipelineStageDetailLabel(k.pipeline_stage_detail)} · ${k.pipeline_stage_detail}` : undefined}
+                >
+                  <span>${k.pipeline_stage ?? '—'}</span>
+                  ${k.pipeline_stage === 'offline' && k.pipeline_stage_detail ? html`
+                    <span class="ml-1.5 text-3xs opacity-70">${pipelineStageDetailLabel(k.pipeline_stage_detail)}</span>
+                  ` : null}
                 </td>
                 <td class="py-2 pr-3 text-[var(--color-fg-muted)] tabular-nums whitespace-nowrap">
                   ${lastActivityMs

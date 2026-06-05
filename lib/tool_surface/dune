@@ -33,6 +33,7 @@
   masc_log
   masc.tool_types
   masc.tool_catalog_surfaces
+  masc.tool_schemas
   masc.masc_tool_dispatch
   masc.masc_exec
   agent_sdk

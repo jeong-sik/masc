@@ -104,15 +104,27 @@ let allows_name policy name =
   selector_matches_name policy.allow name
   && not (selector_matches_name policy.deny name)
 
-(* Union of actor-facing and system-internal curated tool-name lists.  Replaces the former
-   [all_surfaces |> concat_map tools_for_surface] iteration over the deleted
-   [surface] type.  normalize_names dedupes. *)
+(** Candidate universe fallback for selector [All].  This is deliberately
+    schema/metadata-owned, not actor-surface-owned: surfaces answer "where is
+    this visible?", while access policy fallback needs "what tool names exist
+    in this layer?".  Callers that have a narrower runtime universe should pass
+    [?candidates] explicitly. *)
 let default_candidates () =
-  ( Tool_catalog_surfaces.public_mcp_surface_tools
-  @ Tool_catalog_surfaces.spawned_agent_surface_tools
-  @ Tool_catalog_surfaces.local_worker_surface_tools
-  @ Tool_catalog_surfaces.session_min_surface_tools
-  @ Tool_catalog_surfaces.system_internal_hidden )
+  let schema_owned_names =
+    [ Tool_schemas_workspace_core.schemas
+    ; Tool_schemas_workspace_extra.schemas
+    ; Tool_schemas_inline.schemas
+    ; Tool_schemas_agent.schemas
+    ; Tool_schemas_run.schemas
+    ; Tool_schemas_misc.schemas
+    ]
+    |> List.concat
+    |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
+  in
+  let explicit_metadata_names = List.map fst Tool_catalog.explicit_metadata in
+  ( schema_owned_names
+  @ Tool_catalog_surfaces.system_internal_hidden
+  @ explicit_metadata_names )
   |> normalize_names
 
 let rec resolve_selector ?candidates selector =

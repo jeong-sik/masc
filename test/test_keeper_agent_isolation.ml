@@ -13,7 +13,6 @@ module Types = Masc_domain
 module Keeper_tool_dispatch_runtime = Masc.Keeper_tool_dispatch_runtime
 module Keeper_meta_contract = Masc.Keeper_meta_contract
 module Keeper_tool_surfaces = Masc.Keeper_tool_surfaces
-module Keeper_tool_descriptor = Masc.Keeper_tool_descriptor
 module Tool_shard = Masc.Tool_shard
 module Keeper_types = Keeper_types
 module Keeper_identity = Masc.Keeper_identity

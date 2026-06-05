@@ -176,6 +176,25 @@ let filter_catalog_to_available ~available names =
   |> List.filter (fun name -> SS.mem name available)
   |> Json_util.dedupe_keep_order
 
+(** [local_worker_resolvable_tool_names ()] returns only the tool names
+    that [local_worker_tool_schemas] can actually resolve. *)
+let local_worker_resolvable_tool_names () : string list =
+  match local_worker_tool_schemas () with
+  | Ok schemas ->
+      List.map (fun (s : Masc_domain.tool_schema) -> s.name) schemas
+  | Error msg ->
+      Log.Misc.warn "[AgentToolSurfaces] local_worker_tool_schemas failed: %s" msg;
+      []
+
+let role_catalog_available_tool_names () =
+  let surfaced =
+    spawned_agent_public_tool_names @ local_worker_public_tool_names
+    |> Json_util.dedupe_keep_order
+  in
+  filter_catalog_to_available
+    ~available:(local_worker_resolvable_tool_names ())
+    surfaced
+
 (** Build a role-based tool catalog from the full registered tool set.
     [role] determines which subset of tools the agent sees:
     - ["worker"]: execution-focused tools
@@ -183,10 +202,7 @@ let filter_catalog_to_available ~available names =
     - [_]: all available spawned/local worker tools
     Returns tool names (unprefixed). *)
 let build_tool_catalog ~(role : string) () : string list =
-  let all_names =
-    spawned_agent_public_tool_names @ local_worker_public_tool_names
-    |> Json_util.dedupe_keep_order
-  in
+  let all_names = role_catalog_available_tool_names () in
   let filtered =
     match role with
     | "worker" ->
@@ -196,16 +212,3 @@ let build_tool_catalog ~(role : string) () : string list =
     | _ -> all_names
   in
   Json_util.dedupe_keep_order filtered
-
-(** [local_worker_resolvable_tool_names ()] returns only the tool names
-    that [local_worker_tool_schemas] can actually resolve.  Use this to
-    intersect with [build_tool_catalog] output before passing to
-    [run_worker], so that the autonomous catalog does not include names
-    unknown to the local worker schema registry. *)
-let local_worker_resolvable_tool_names () : string list =
-  match local_worker_tool_schemas () with
-  | Ok schemas ->
-      List.map (fun (s : Masc_domain.tool_schema) -> s.name) schemas
-  | Error msg ->
-      Log.Misc.warn "[AgentToolSurfaces] local_worker_tool_schemas failed: %s" msg;
-      []

@@ -164,6 +164,25 @@ let classify_structured_shell_op args =
   | None -> Ungated
 ;;
 
+let classify_non_catalog_tool ~tool_name =
+  match tool_name with
+  | "shell_exec" -> Some Shell
+  | _ -> None
+;;
+
+let classify_catalog_metadata_tool ~tool_name =
+  let meta = Tool_catalog.metadata tool_name in
+  match meta.readonly, meta.destructive, meta.requires_actor_binding, meta.effect_domain with
+  | Some true, _, _, _ -> Some Ungated
+  | _, Some true, _, _ -> Some Generic_write
+  | _, _, Some true, _ -> Some Generic_write
+  | _, _, _, Some Tool_catalog.Read_only -> Some Ungated
+  | _, _, _, Some Tool_catalog.Masc_workspace -> Some Workspace_write
+  | _, _, _, Some Tool_catalog.Playground_write
+  | _, _, _, Some Tool_catalog.Host_repo_write -> Some Workspace_write
+  | _ -> None
+;;
+
 let classify_catalog_tool ~tool_name =
   match tool_name with
   | "masc_web_fetch" | "masc_web_search" -> Some Web
@@ -253,7 +272,13 @@ let classify_normalized ~tool_name ~arguments ~is_read_only =
   | None ->
     (match classify_catalog_tool ~tool_name with
      | Some resource_class -> resource_class
-     | None -> if is_read_only then Ungated else Generic_write)
+     | None ->
+       (match classify_non_catalog_tool ~tool_name with
+        | Some resource_class -> resource_class
+        | None ->
+          (match classify_catalog_metadata_tool ~tool_name with
+           | Some resource_class -> resource_class
+           | None -> if is_read_only then Ungated else Generic_write)))
 ;;
 
 let classify ~tool_name ~arguments ~is_read_only =

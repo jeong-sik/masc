@@ -148,11 +148,24 @@ let test_masc_gc_input_schema_matches () =
     gen.input_schema
 ;;
 
+let descriptor_internal_schema name : tool_schema =
+  match
+    Masc.Keeper_tool_descriptor.public_descriptors
+    |> List.find_opt (fun (descriptor : Masc.Keeper_tool_descriptor.t) ->
+           String.equal descriptor.internal_name name)
+  with
+  | Some descriptor ->
+      { name = descriptor.internal_name
+      ; description = descriptor.description
+      ; input_schema = descriptor.input_schema
+      }
+  | None -> Alcotest.failf "descriptor for internal tool %S not found" name
+;;
+
 (* Regression guard for PR #19864 -> keeper "AllowList pruned ... WebSearch,
-   WebFetch" spam. Web tools are descriptor-owned keeper tools: they MUST be
-   absent from generated misc schemas, present in the raw substrate inventory
-   through Config's descriptor projection, and absent from the public MCP
-   allowlist. *)
+   WebFetch" spam. Web tools are descriptor-backed keeper tools: they MUST be
+   present in the raw substrate inventory, but their schema owner is
+   [Keeper_tool_descriptor.public_descriptors], not [Tool_descriptors_gen]. *)
 let test_web_tools_owned_by_keeper_descriptors () =
   List.iter
     (fun name ->

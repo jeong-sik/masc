@@ -147,15 +147,16 @@ val build_tool_catalog : role:string -> unit -> string list
     | [["workspace_lead"]] / [["fleet_leader"]] | {!workspace_tool_names} ∩ available |
     | other | all available spawned/local worker tools |
 
-    Available = {!spawned_agent_public_tool_names} ∪
-    {!local_worker_public_tool_names}, deduped. *)
+    Available = ({!spawned_agent_public_tool_names} ∪
+    {!local_worker_public_tool_names}) ∩
+    {!local_worker_resolvable_tool_names}, deduped. *)
 
 val local_worker_resolvable_tool_names : unit -> string list
 (** [local_worker_resolvable_tool_names ()] returns only the tool
     names that {!local_worker_tool_schemas} can actually resolve.
-    Use this to intersect with {!build_tool_catalog} output before
-    passing to [run_worker], so the autonomous catalogue does not
-    include names unknown to the local worker schema registry.
+    {!build_tool_catalog} applies this gate before returning an
+    autonomous catalogue, so prompts do not include names unknown to
+    the local worker schema registry.
 
     On [Error] from {!local_worker_tool_schemas}, traces via
     {!Eio.traceln}

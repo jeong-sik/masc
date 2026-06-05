@@ -27,14 +27,16 @@ let promote cmd =
        ~allowed_commands:Exec_policy.readonly_allowed_commands
 ;;
 
-let test_promote_rejects_risk_mutation () =
+let test_promote_accepts_git_push () =
   match promote "git push --force origin main" with
-  | Error (Exec_policy.Unsafe_capability "git") -> ()
+  | Ok verified ->
+    let ir = Typed_capabilities.shell_ir verified in
+    let rendered = Format.asprintf "%a" Masc_exec.Shell_ir.pp ir in
+    Alcotest.(check string) "preserves checked IR" "git:push --force origin main" rendered
   | Error reason ->
     Alcotest.failf
-      "expected git unsafe capability, got %s"
+      "expected git push to be allowed, got %s"
       (Exec_policy.block_reason_tag reason)
-  | Ok _ -> Alcotest.fail "expected git push to be rejected"
 ;;
 
 let test_promote_rejects_dev_mutation () =
@@ -53,7 +55,7 @@ let () =
       test_case "safe_sh ls" `Quick test_valid_safe_sh;
     ];
     "promotion", [
-      test_case "rejects git mutation" `Quick test_promote_rejects_risk_mutation;
+      test_case "accepts git push" `Quick test_promote_accepts_git_push;
       test_case "rejects dev mutation" `Quick test_promote_rejects_dev_mutation;
     ];
   ]

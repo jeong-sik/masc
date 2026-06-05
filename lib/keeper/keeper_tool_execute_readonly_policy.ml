@@ -230,27 +230,6 @@ let diagnosis_of_block_reason reason =
       ; rewrite = None
       ; tool_suggestion = None
       }
-  | Exec_policy.Unsafe_capability name ->
-    Some
-      { Exec_core.rule_id = "unsafe_capability"
-      ; explanation =
-          Printf.sprintf
-            "'%s' requires write, network, spawn, or wrapper capability and cannot \
-             be promoted as a safe shell IR."
-            name
-      ; rewrite = None
-      ; tool_suggestion = None
-      }
-  | Exec_policy.Mutation_not_allowed risk ->
-    Some
-      { Exec_core.rule_id = "mutation_not_allowed"
-      ; explanation =
-          Printf.sprintf
-            "The shell IR was classified as %s, so it cannot be promoted as safe."
-            risk
-      ; rewrite = None
-      ; tool_suggestion = None
-      }
   | Exec_policy.Empty_command ->
     Some
       { Exec_core.rule_id = "command_empty"

@@ -191,8 +191,6 @@ type block_reason =
   | Unsafe_redirect
   | Pipes_not_allowed
   | Direct_dune_invocation
-  | Unsafe_capability of string
-  | Mutation_not_allowed of string
   | Command_not_allowed of string
 
 let block_reason_to_string = function
@@ -219,15 +217,6 @@ let block_reason_to_string = function
      scripts/dune-local.sh's machine-wide build lock and can trigger \
      host-wide ENFILE/EMFILE pressure. Use `scripts/dune-local.sh build ...` \
      from the repo root instead."
-  | Unsafe_capability name ->
-    Printf.sprintf
-      "Command blocked: '%s' requires write, network, spawn, or wrapper capability \
-       and cannot be promoted to Safe_IR."
-      name
-  | Mutation_not_allowed risk ->
-    Printf.sprintf
-      "Command blocked: shell IR risk %s cannot be promoted to Safe_IR."
-      risk
   | Command_not_allowed name -> command_blocked_hint name
 ;;
 
@@ -968,8 +957,6 @@ let block_reason_tag = function
   | Unsafe_redirect -> "unsafe_redirect"
   | Pipes_not_allowed -> "pipes_not_allowed"
   | Direct_dune_invocation -> "direct_dune_invocation"
-  | Unsafe_capability _ -> "unsafe_capability"
-  | Mutation_not_allowed _ -> "mutation_not_allowed"
   | Command_not_allowed _ -> "command_not_allowed"
 ;;
 
@@ -982,7 +969,6 @@ let attribution_of_validation ~cmd (result : (unit, block_reason) result) : Attr
     let command_name =
       match br with
       | Command_not_allowed name -> Some name
-      | Unsafe_capability name -> Some name
       | Direct_dune_invocation -> Some "dune"
       | _ -> None
     in
@@ -1005,16 +991,8 @@ type safe = Typed_capabilities.safe
 type unsafe = Typed_capabilities.unsafe
 type 'a verified_ir = 'a Typed_capabilities.verified_ir
 
-let block_reason_of_promotion_error = function
-  | Typed_capabilities.Unsafe_capability name -> Unsafe_capability name
-  | Typed_capabilities.Mutation_not_allowed risk -> Mutation_not_allowed risk
-;;
-
 let promote_to_safe ~allowed_commands ir =
   match validate_command_with_allowlist ~allowed_commands ir with
-  | Error _ as error -> error
-  | Ok () ->
-    (match Typed_capabilities.promote ir with
-     | Ok verified -> Ok verified
-     | Error error -> Error (block_reason_of_promotion_error error))
+  | Ok () -> Ok (Typed_capabilities.Safe_IR ir)
+  | Error br -> Error br
 ;;

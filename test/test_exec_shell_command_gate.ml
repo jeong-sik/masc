@@ -110,8 +110,6 @@ let policy_tag (result : (unit, Policy.block_reason) result) : string =
   | Error Policy.Unsafe_redirect -> "unsafe_redirect"
   | Error Policy.Pipes_not_allowed -> "pipes_not_allowed"
   | Error Policy.Direct_dune_invocation -> "direct_dune_invocation"
-  | Error (Policy.Unsafe_capability _) -> "unsafe_capability"
-  | Error (Policy.Mutation_not_allowed _) -> "mutation_not_allowed"
   | Error (Policy.Command_not_allowed _) -> "command_not_allowed"
 ;;
 

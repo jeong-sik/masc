@@ -101,6 +101,44 @@ describe('ChatTranscript', () => {
     expect(latestBody).toBe('')
   })
 
+  it('renders attachments even when metadata is hidden', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'u1',
+            text: '첨부 확인',
+            attachments: [
+              {
+                id: 'att-1',
+                type: 'image',
+                name: 'screenshot.png',
+                size: 1024,
+                mimeType: 'image/png',
+                data: 'data:image/png;base64,abc123',
+              },
+              {
+                id: 'att-2',
+                type: 'file',
+                name: 'log.txt',
+                size: 512,
+                mimeType: 'text/plain',
+                data: 'data:text/plain;base64,bG9n',
+              },
+            ],
+          }),
+        ]}
+        emptyText="empty"
+        showMetadata=${false}
+      />`,
+      container,
+    )
+
+    expect(container.querySelector('img[alt="screenshot.png"]')).not.toBeNull()
+    expect(container.textContent).toContain('log.txt')
+    expect(container.textContent).not.toContain('상세 보기')
+  })
+
   it('does not show streaming ellipsis before elapsed time starts', () => {
     render(
       html`<${ChatComposer}

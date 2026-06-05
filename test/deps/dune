@@ -122,7 +122,7 @@
   (re_export masc.keeper_prompt_names)
   (re_export masc.keeper_event_bus)
   (re_export masc.keeper_discovered_tools)
-  (re_export masc.keeper_toml_loader)
+  (re_export masc.keeper_toml)
   (re_export masc.keeper_runtime_config)
   (re_export masc.keeper_tool_execute_timeout)
   (re_export masc.keeper_tool_execute_shell_ir)

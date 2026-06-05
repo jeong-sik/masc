@@ -78,6 +78,7 @@
   masc.chronicle_event
   masc.tool_call_quality_benchmark
   masc.telemetry_coverage_gap
+  masc.telemetry_unified
   masc.discovery_cache
   masc.local_runtime_pool
   masc.keeper_event_queue

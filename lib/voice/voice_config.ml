@@ -356,21 +356,97 @@ let parse_json json =
   let* local_playback = parse_local_playback json in
   Ok { tts; stt; session; local_playback }
 
-let load () =
-  let path = config_path () in
-  if not (Sys.file_exists path) then
-    Error (Printf.sprintf "voice config missing at %s" path)
-  else
+(** ── runtime.toml [voice] section loading ─────────────────────
+    Otoml → Yojson bridge so {!parse_json} can consume a TOML
+    [\[voice\]] section without a dedicated TOML parser.
+    The bridge handles only the types that appear in voice_config:
+    integers, floats, strings, booleans, tables (objects), and arrays.
+    TOML arrays-of-tables ([[\[voice.tts.endpoints\]]]) become JSON
+    arrays of objects — matching what [parse_json] expects. *)
+
+let rec toml_to_json = function
+  | Otoml.TomlInteger i -> `Int i
+  | Otoml.TomlFloat f -> `Float f
+  | Otoml.TomlString s -> `String s
+  | Otoml.TomlBoolean b -> `Bool b
+  | Otoml.TomlOffsetDateTime d
+  | Otoml.TomlLocalDateTime d
+  | Otoml.TomlLocalDate d
+  | Otoml.TomlLocalTime d -> `String d
+  | Otoml.TomlTable pairs
+  | Otoml.TomlInlineTable pairs ->
+      `Assoc (List.map (fun (k, v) -> (k, toml_to_json v)) pairs)
+  | Otoml.TomlArray elems -> `List (List.map toml_to_json elems)
+  | Otoml.TomlTableArray elems -> `List (List.map toml_to_json elems)
+
+(** Resolve the runtime.toml path from the config root.
+    Uses {!Config_dir_resolver} (SSOT) so the path stays in sync
+    with the rest of the config loading pipeline. *)
+let runtime_toml_path () : string option =
+  let resolution = Config_dir_resolver.resolve () in
+  if resolution.config_root.exists then
+    let path =
+      Filename.concat resolution.config_root.path
+        Config_dir_resolver.runtime_toml_filename
+    in
+    if Sys.file_exists path then Some path else None
+  else None
+
+(** Try loading voice config from the [\[voice\]] section of
+    runtime.toml.  Returns [Ok config] when the section exists
+    and parses cleanly.  Returns [Error _] when:
+    - no runtime.toml in config root (expected — fall back to JSON)
+    - no [\[voice\]] section (expected — fall back to JSON)
+    - TOML parse error in [\[voice\]] (unexpected — surfaced, NOT
+      silently swallowed, so the operator knows the TOML is broken) *)
+let load_from_runtime_toml () =
+  match runtime_toml_path () with
+  | None -> Error "no runtime.toml in config root"
+  | Some path ->
     try
-      let json = Safe_ops.read_json_eio path in
-      parse_json json
+      let toml = Otoml.Parser.from_file path in
+      (match Otoml.find_opt toml Fun.id [ "voice" ] with
+       | None -> Error "no [voice] section in runtime.toml"
+       | Some _ ->
+         (* Fun.id returns the raw Otoml.t value; toml_to_json
+            pattern-matches on its constructors. *)
+         let voice_value =
+           match Otoml.find_opt toml Fun.id [ "voice" ] with
+           | Some v -> v
+           | None -> Otoml.TomlTable []
+         in
+         let json = toml_to_json voice_value in
+         parse_json json)
     with
-    | Yojson.Json_error error ->
-        Error (Printf.sprintf "invalid voice config json: %s" error)
-    | Sys_error error ->
-        Error (Printf.sprintf "voice config read failed: %s" error)
-    | Eio.Io _ as exn ->
-        Error (Printf.sprintf "voice config Eio read failed: %s" (Printexc.to_string exn))
+    | Otoml.Parse_error (_, msg) ->
+        Error (Printf.sprintf "runtime.toml parse error: %s" msg)
+    | Sys_error msg ->
+        Error (Printf.sprintf "runtime.toml read failed: %s" msg)
+
+let load () =
+  (* Prefer runtime.toml [voice] section over standalone JSON.
+     Only fall back when the file or section is absent — TOML
+     parse errors are surfaced to the operator. *)
+  match load_from_runtime_toml () with
+  | Ok config -> Ok config
+  | Error msg ->
+    Log.Runtime.info
+      "voice_config: falling back to JSON (%s)" msg;
+    let path = config_path () in
+    if not (Sys.file_exists path) then
+      Error (Printf.sprintf "voice config missing at %s" path)
+    else
+      try
+        let json = Safe_ops.read_json_eio path in
+        parse_json json
+      with
+      | Yojson.Json_error error ->
+          Error (Printf.sprintf "invalid voice config json: %s" error)
+      | Sys_error error ->
+          Error (Printf.sprintf "voice config read failed: %s" error)
+      | Eio.Io _ as exn ->
+          Error (Printf.sprintf "voice config Eio read failed: %s"
+                   (Printexc.to_string exn))
 
 let enabled_endpoints (endpoints : endpoint list) =
   List.filter (fun (endpoint : endpoint) -> endpoint.enabled) endpoints

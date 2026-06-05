@@ -39,13 +39,6 @@ let progress_keeper_tool_names_for_contract
   | _ :: _ -> keeper_tool_names_for_outcome ~tool_calls ~outcome:"ok"
 ;;
 
-let no_progress_success_tool_names_for_contract
-      ~(tool_calls : Keeper_agent_result.tool_call_detail list)
-  : string list
-  =
-  keeper_tool_names_for_outcome ~tool_calls ~outcome:"ok_no_progress"
-;;
-
 let observed_completion_contract_status
       ~had_owned_active_task_at_turn_start ~actual_keeper_tool_names
   : Keeper_execution_receipt.completion_contract_result

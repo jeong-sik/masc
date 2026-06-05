@@ -7,12 +7,17 @@ val resolve_tool_read_cwd :
   (string, string) result
 
 val resolve_tool_write_cwd :
+  allow_side_effects:bool ->
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   args:Yojson.Safe.t ->
   (string, string) result
+(** Resolve an Execute cwd inside the keeper write boundary. When
+    [allow_side_effects] is [false], resolution performs no mkdir, repo
+    fast-forward, reclone, or worktree repair. *)
 
 val validate_repo_path_args_ready :
+  ?allow_repair:bool ->
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   cwd:string ->

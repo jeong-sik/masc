@@ -138,8 +138,8 @@ let repo_currency_not_ready_error ~config ~meta ~repo_name ~reason ~cwd =
      preserved (%s). Direct repo-root Execute is blocked so the agent does not \
      run against stale local state. Use cwd=\"repos/%s/.worktrees/<task>\" for \
      task work, or run diagnostic git status/branch/log/diff/remote/rev-parse/\
-     fetch/worktree and clean, stash, or repair the sandbox repo root before \
-     retrying.%s cwd=%s"
+     fetch/worktree and repair the sandbox repo root with an allowed recovery \
+     command before retrying.%s cwd=%s"
     repo_name
     reason
     repo_name
@@ -345,13 +345,14 @@ let extract_worktree_task_name ~(config : Workspace.config) ~(meta : keeper_meta
 let validate_repo_path_ready
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
+      ?(allow_repair = true)
       ~(probe_path : string)
       cwd
   =
   match repo_path_context ~config ~meta cwd with
   | None -> Ok ()
   | Some (repo_name, _repo_root, path_root, accepted_toplevels) ->
-    sync_repo_currency_best_effort ~config ~meta ~repo_name;
+    if allow_repair then sync_repo_currency_best_effort ~config ~meta ~repo_name;
     let check_probe () =
       let top =
         Playground_repo_readiness.run_git
@@ -377,40 +378,52 @@ let validate_repo_path_ready
     match check_probe () with
     | Ok () -> Ok ()
     | Error _ as initial_err ->
-      (* Auto-repair: for worktree paths, try worktree creation first;
-         for direct repo paths, try reclone. *)
-      let worktree_result =
-        match extract_worktree_task_name ~config ~meta cwd with
-        | Some (wt_repo_name, task_name, worktree_root) ->
-          Playground_repo_readiness.ensure_worktree_ready
-            ~config ~meta ~repo_name:wt_repo_name ~task_name
-            ~worktree_path:worktree_root ()
-        | None -> Error "not a worktree path"
-      in
-      match worktree_result with
-      | Ok () -> check_probe ()
-      | Error _ ->
-        (* Fall back to repo-level reclone *)
-        (match
-           Playground_repo_readiness.ensure_ready ~config ~meta ~repo_name ()
-         with
-         | Ok () -> check_probe ()
-         | Error _repair_err -> initial_err)
+      if not allow_repair
+      then initial_err
+      else (
+        (* Auto-repair: for worktree paths, try worktree creation first;
+           for direct repo paths, try reclone. *)
+        let worktree_result =
+          match extract_worktree_task_name ~config ~meta cwd with
+          | Some (wt_repo_name, task_name, worktree_root) ->
+            Playground_repo_readiness.ensure_worktree_ready
+              ~config ~meta ~repo_name:wt_repo_name ~task_name
+              ~worktree_path:worktree_root ()
+          | None -> Error "not a worktree path"
+        in
+        match worktree_result with
+        | Ok () -> check_probe ()
+        | Error _ ->
+          (* Fall back to repo-level reclone *)
+          (match
+             Playground_repo_readiness.ensure_ready ~config ~meta ~repo_name ()
+           with
+           | Ok () -> check_probe ()
+           | Error _repair_err -> initial_err))
 
-let validate_repo_cwd_ready ~(config : Workspace.config) ~(meta : keeper_meta) cwd =
-  validate_repo_path_ready ~config ~meta ~probe_path:cwd cwd
+let validate_repo_cwd_ready
+      ~(config : Workspace.config)
+      ~(meta : keeper_meta)
+      ?(allow_repair = true)
+      cwd
+  =
+  validate_repo_path_ready ~config ~meta ~allow_repair ~probe_path:cwd cwd
 
 let resolve_missing_cwd
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
+      ~allow_side_effects
       cwd
   =
   match repo_path_context ~config ~meta cwd with
   | Some _ ->
-    (match validate_repo_cwd_ready ~config ~meta cwd with
+    (match validate_repo_cwd_ready ~config ~meta ~allow_repair:allow_side_effects cwd with
      | Ok () -> Ok cwd
      | Error _ as err -> err)
   | None ->
+    if not allow_side_effects
+    then Error (Printf.sprintf "cwd_not_directory: %s (directory does not exist)" cwd)
+    else
     let _created_path = Keeper_fs.ensure_dir cwd in
     Ok cwd
 
@@ -430,11 +443,12 @@ let resolve_tool_read_cwd
   | Ok cwd when Fs_compat.file_exists cwd && Sys.is_directory cwd -> Ok cwd
   | Ok cwd ->
     if not (Fs_compat.file_exists cwd) then
-      resolve_missing_cwd ~config ~meta cwd
+      resolve_missing_cwd ~config ~meta ~allow_side_effects:true cwd
     else
       Error (Printf.sprintf "cwd_not_directory: %s (path_is_file_not_directory)" cwd)
 
 let validate_repo_path_args_ready
+      ?(allow_repair = true)
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(cwd : string)
@@ -502,6 +516,7 @@ let validate_repo_path_args_ready
             validate_repo_path_ready
               ~config
               ~meta
+              ~allow_repair
               ~probe_path:path_root
               target
           with
@@ -529,6 +544,7 @@ let validate_repo_path_args_ready
   |> Result.map (fun _ -> ())
 
 let resolve_tool_write_cwd
+      ~allow_side_effects
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
@@ -559,12 +575,12 @@ let resolve_tool_write_cwd
     if raw_cwd_is_own_container_path
     then Ok cwd
     else (
-      match validate_repo_cwd_ready ~config ~meta cwd with
+      match validate_repo_cwd_ready ~config ~meta ~allow_repair:allow_side_effects cwd with
       | Ok () -> Ok cwd
       | Error _ as err -> err)
   | Ok cwd ->
     if not (Fs_compat.file_exists cwd) then
-      resolve_missing_cwd ~config ~meta cwd
+      resolve_missing_cwd ~config ~meta ~allow_side_effects cwd
     else
       Error (Printf.sprintf "cwd_not_directory: %s (path_is_file_not_directory)" cwd)
 

@@ -479,7 +479,11 @@ let test_tool_execute_rejects_parent_git_repo_cwd () =
       ]
   in
   match
-    Masc.Keeper_tool_execute_path.resolve_tool_write_cwd ~config ~meta ~args
+    Masc.Keeper_tool_execute_path.resolve_tool_write_cwd
+      ~allow_side_effects:true
+      ~config
+      ~meta
+      ~args
   with
   | Ok cwd -> Alcotest.failf "expected repo cwd rejection, got %s" cwd
   | Error err ->
@@ -669,6 +673,44 @@ let test_tool_execute_rejects_stale_worktree_path_arg () =
     then Alcotest.failf "expected stale worktree root, got: %s" err
   | None -> Alcotest.fail ("expected error json, got: " ^ raw)
 
+let test_tool_execute_readonly_missing_worktree_path_arg_does_not_repair () =
+  with_eio_fs @@ fun () ->
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  let config = Workspace.default_config base in
+  let meta = { (make_local_meta "readonly-missing-path-arg") with tool_access = [] } in
+  let playground = Filename.concat base (playground_path_of meta.name) in
+  let repo_dir = Filename.concat playground "repos/masc" in
+  let missing_worktree = Filename.concat repo_dir ".worktrees/task-missing" in
+  ensure_dir repo_dir;
+  run_process_ok ~cwd:repo_dir "git" [ "init"; "-q"; "--initial-branch=main" ];
+  let raw =
+    Keeper_tool_command_runtime.handle_tool_execute
+      ~turn_sandbox_factory:None
+      ~exec_cache:None
+      ~config
+      ~meta
+      ~args:
+        (`Assoc
+           [ "executable", `String "cat"
+           ; ( "argv"
+             , `List
+                 [ `String "./repos/masc/.worktrees/task-missing/.missing.ml" ] )
+           ; "cwd", `String playground
+           ])
+      ()
+  in
+  match parse_error_field raw with
+  | Some err ->
+    if not (is_repo_or_task_state_path_block err) then
+      Alcotest.failf
+        "expected sandbox_repo_not_ready or task_state_file_path_blocked, got: %s"
+        err;
+    Alcotest.(check bool) "missing worktree path arg was not repaired"
+      false
+      (Sys.file_exists missing_worktree)
+  | None -> Alcotest.fail ("expected error json, got: " ^ raw)
+
 let test_tool_execute_missing_worktree_cwd_does_not_create_directory () =
   with_eio_fs @@ fun () ->
   let base = temp_dir () in
@@ -704,6 +746,36 @@ let test_tool_execute_missing_worktree_cwd_does_not_create_directory () =
       false
       (Sys.file_exists missing_worktree)
   | None -> Alcotest.fail ("expected error json, got: " ^ raw)
+
+let test_tool_execute_readonly_missing_cwd_does_not_create_directory () =
+  with_eio_fs @@ fun () ->
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  let config = Workspace.default_config base in
+  let meta = { (make_local_meta "readonly-missing-cwd") with tool_access = [] } in
+  let playground = Filename.concat base (playground_path_of meta.name) in
+  let missing_cwd = Filename.concat playground "mind/missing-cwd" in
+  let raw =
+    Keeper_tool_command_runtime.handle_tool_execute
+      ~turn_sandbox_factory:None
+      ~exec_cache:None
+      ~config
+      ~meta
+      ~args:
+        (`Assoc
+           [ "executable", `String "ls"
+           ; "argv", `List []
+           ; "cwd", `String missing_cwd
+           ])
+      ()
+  in
+  match parse_error_field raw with
+  | Some err ->
+    if not (String_util.contains_substring err "cwd_not_directory") then
+      Alcotest.failf "expected cwd_not_directory, got: %s" err;
+    Alcotest.(check bool) "readonly preflight did not mkdir" false
+      (Sys.file_exists missing_cwd)
+  | None -> Alcotest.fail ("expected missing cwd error json, got: " ^ raw)
 
 let test_tool_execute_blocks_preserved_direct_repo_git_show () =
   with_eio_fs @@ fun () ->
@@ -1988,9 +2060,17 @@ let () =
             `Quick
             test_tool_execute_rejects_stale_worktree_path_arg
         ; Alcotest.test_case
+            "readonly missing worktree path arg rejects without repair"
+            `Quick
+            test_tool_execute_readonly_missing_worktree_path_arg_does_not_repair
+        ; Alcotest.test_case
             "missing worktree cwd rejects without mkdir"
             `Quick
             test_tool_execute_missing_worktree_cwd_does_not_create_directory
+        ; Alcotest.test_case
+            "readonly missing cwd rejects without mkdir"
+            `Quick
+            test_tool_execute_readonly_missing_cwd_does_not_create_directory
         ; Alcotest.test_case
             "preserved direct repo root blocks git show"
             `Quick

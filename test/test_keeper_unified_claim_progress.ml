@@ -117,12 +117,6 @@ let test_contract_progress_filters_no_progress_tool_results () =
        ~tool_calls:no_progress_only);
   check
     (list string)
-    "claim remains visible as no-progress success"
-    [ "keeper_task_claim" ]
-    (KAR.For_testing.no_progress_success_tool_names_for_contract
-       ~tool_calls:no_progress_only);
-  check
-    (list string)
     "follow-up shell keeps the turn as progress"
     [ "tool_execute" ]
     (KAR.For_testing.progress_keeper_tool_names_for_contract

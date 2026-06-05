@@ -296,7 +296,13 @@ let handle_tool_execute_typed
       ()
   =
   let root = Keeper_alerting_path.project_root_of_config config in
-  match Keeper_tool_execute_path.resolve_tool_write_cwd ~config ~meta ~args with
+  match
+    Keeper_tool_execute_path.resolve_tool_write_cwd
+      ~allow_side_effects:write_enabled
+      ~config
+      ~meta
+      ~args
+  with
     | Error e -> error_json e
     | Ok cwd ->
       let execution_location_fields cwd =
@@ -536,6 +542,7 @@ let handle_tool_execute_typed
                   Keeper_tool_execute_path.validate_repo_path_args_ready
                     ~config
                     ~meta
+                    ~allow_repair:write_enabled
                     ~cwd
                     ir)
               ~allowed_commands

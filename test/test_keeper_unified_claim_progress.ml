@@ -133,6 +133,25 @@ let test_contract_progress_filters_no_progress_tool_results () =
          ])
 ;;
 
+let test_failed_tool_only_turn_does_not_fabricate_progress () =
+  let failed_only = [ tool_call_detail ~outcome:"error" "ToolThatDoesNotExist" ] in
+  check
+    (list string)
+    "failed-only tool turn has no progress tools"
+    []
+    (KAR.For_testing.progress_keeper_tool_names_for_contract
+       ~actual_keeper_tool_names:[]
+       ~tool_calls:failed_only);
+  check
+    string
+    "failed-only tool turn falls back to text completion contract"
+    "satisfied_completion"
+    (KAR.Contract_helpers.observed_completion_contract_status
+       ~had_owned_active_task_at_turn_start:false
+       ~actual_keeper_tool_names:[]
+     |> Masc.Keeper_execution_receipt.completion_contract_result_to_string)
+;;
+
 let () =
   run
     "keeper_unified_claim_progress"
@@ -157,6 +176,10 @@ let () =
             "contract progress filters no-progress tool results"
             `Quick
             test_contract_progress_filters_no_progress_tool_results
+        ; test_case
+            "failed tool-only turn does not fabricate progress"
+            `Quick
+            test_failed_tool_only_turn_does_not_fabricate_progress
         ] )
     ]
 ;;

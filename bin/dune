@@ -16,6 +16,7 @@
   masc.host_config
   masc.mcp_session
   masc.mcp_transport_protocol
+  masc.board_tool_adapter
   masc_eio_context
   cmdliner
   eio
@@ -216,6 +217,7 @@
   masc
   masc.dashboard
   masc.server
+  masc.worker_execution_spec
   yojson
   unix
   eio_main

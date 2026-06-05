@@ -2,7 +2,7 @@
 
 module Affinity = Masc.Keeper_tool_affinity
 module Trajectory = Trajectory
-module Discovered = Masc.Keeper_discovered_tools
+module Discovered = Keeper_discovered_tools
 
 (* Helper: build a tool_stat record *)
 let stat ?(successes = 5) ?(failures = 0) ?(last = "2026-04-06T12:00:00Z") name =

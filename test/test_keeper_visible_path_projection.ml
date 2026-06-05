@@ -4,7 +4,6 @@ module Keeper_registry = Masc.Keeper_registry
 module Keeper_sandbox = Masc.Keeper_sandbox
 module Keeper_tool_filesystem_runtime = Masc.Keeper_tool_filesystem_runtime
 module Keeper_tool_shared_runtime = Masc.Keeper_tool_shared_runtime
-module Keeper_types_profile_sandbox = Masc.Keeper_types_profile_sandbox
 
 let temp_dir () =
   let d = Filename.temp_file "keeper-visible-path-projection-" "" in

@@ -23,8 +23,25 @@
  (private_modules
   prometheus_key)
  (libraries
-  agent_sdk
-  agent_sdk.llm_provider
-  eio
+  yojson
+  unix
+  logs
+  fs_compat
+  time_compat
+  masc.masc_core
+  masc.masc_types
   mtime
-  masc.masc_log))
+  mtime.clock.os
+  masc.config_dir_resolver
+  masc.dated_jsonl
+  masc.fd_accountant
+  masc.keeper_metrics
+  masc.otel_metrics
+  masc.otel_spans
+  masc.pool_metrics
+  masc_process
+  masc.config
+  eio
+  masc.masc_log
+  agent_sdk
+  agent_sdk.llm_provider))

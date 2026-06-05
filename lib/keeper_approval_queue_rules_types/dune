@@ -1,0 +1,14 @@
+(include_subdirs no)
+
+(library
+ (name masc_keeper_approval_queue_rules_types)
+ (public_name masc.keeper_approval_queue_rules_types)
+ (wrapped false)
+ (modules keeper_approval_queue_rules_types)
+ (libraries
+  agent_sdk
+  eio
+  masc.masc_core
+  masc.masc_types
+  unix
+  yojson))

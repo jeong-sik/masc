@@ -288,16 +288,15 @@ After PR #18823 (21 descriptors via dispatch-ref pattern, 83% non-portal coverag
 - Caller (`Agent_tool_dispatch_runtime.execute_keeper_tool_call_with_outcome`) constructs the full ctx from the existing keeper Eio context.
 - `Agent_tool_in_process_runtime.handle_masc_keeper` (and new `handle_masc_operator`) receive these via the existing handler signature pattern: `~config ~meta ~sw ~clock ~proc_mgr ~net ~name ~args`.
 - Cycle-safety preserved: `Agent_tool_runtime.ctx` already imports Eio types — adding fields adds no new module deps.
-- Pro: one structural change unlocks 10 tools.  Con: signature ripple across all 11 handler dispatch arms in `Agent_tool_runtime.handle_in_process`.
+- Pro: one structural change unlocks the remaining keeper/operator tools.  Con: signature ripple across the affected handler dispatch arms in `Agent_tool_runtime.handle_in_process`.
 
-**Recommendation: Option B.**  Single ctx extension, hits OCaml record-update sites once.  Persona_generate and operator cluster naturally use this without dispatch-ref indirection (their backing modules are in lib/ late enough to import directly).
+**Recommendation: Option B.**  Single ctx extension, hits OCaml record-update sites once.  The operator cluster can use this without dispatch-ref indirection if its backing modules stay late enough to import directly.
 
 ### 12.3 Per-cluster wiring after ctx extension
 
 | Cluster | Mechanism | Notes |
 |---|---|---|
 | `masc_keeper_{up,msg,sandbox_status,create_from_persona}` | Keeper_dispatch_ref signature extension (Tool_keeper-side registration) | Same dispatch-ref pattern; ref signature adds `~sw ~clock ~proc_mgr ~net` |
-| `masc_persona_generate` | Persona_dispatch_ref signature extension OR direct extraction of generate body to ctx-free | LLM call via Eio fiber — natural choice is dispatch-ref since LLM provider sits late |
 | `masc_operator_*` (5) | New `Operator_dispatch_ref` OR direct `Tool_operator.dispatch` import | Tool_operator is in lib/, sits LATE.  Direct import from Agent_tool_in_process_runtime closes cycle (Tool_operator → Operator_control → Keeper_runtime → ...).  Use dispatch-ref. |
 
 ### 12.4 Estimated PR sizes
@@ -306,8 +305,7 @@ After PR #18823 (21 descriptors via dispatch-ref pattern, 83% non-portal coverag
 |---|---|---|---|
 | PR-A: ctx Eio extension | ~50 | 2 (agent_tool_runtime.ml/.mli + Agent_tool_dispatch_runtime caller) | low (compile-error-driven ripple) |
 | PR-B: keeper Eio cluster (4 tools) | ~150 | 4 (Keeper_dispatch_ref sig extend + Tool_keeper register + handler + descriptor) | medium |
-| PR-C: persona_generate | ~80 | 3 (Persona_dispatch_ref extend + Tool_keeper register + descriptor) | medium |
-| PR-D: operator cluster (5 tools) | ~200 | 4 (Operator_dispatch_ref new + Tool_operator register + handler + 5 descriptors) | medium |
+| PR-C: operator cluster (5 tools) | ~200 | 4 (Operator_dispatch_ref new + Tool_operator register + handler + 5 descriptors) | medium |
 
 Each sub-PR independently mergeable, gated by PR-A.
 
@@ -328,7 +326,7 @@ Each sub-PR independently mergeable, gated by PR-A.
 From the 17-iter /loop session that built PR #18823:
 
 1. `Eio_guard.with_mutex` (Eio.Mutex.create) — pure inside [`Keeper_status_detail`](../../lib/keeper/keeper_status_detail.ml).  Did NOT block status projection.
-2. The former persona-generate turn-driver cycle is gone on main; the tool is retired and has no backing function.
+2. Persona authoring schema/save/generate surfaces are retired on main; persona creation now routes through `masc_keeper_create_from_persona`, and the former persona-generate turn-driver cycle has no backing function.
 3. `Keeper_turn_up.handle_keeper_up` surface ctx.config-only BUT `start_keepalive` transitively requires Eio.  Cannot ctx-free.
 4. `handle_keeper_repair` carried `ignore (ctx.sw, ctx.clock, ctx.config)` warning-suppression scaffolding — was phantom dependency, real body returns stub.
 

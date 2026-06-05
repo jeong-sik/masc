@@ -1,6 +1,6 @@
 open Alcotest
 
-module TL = Masc.Keeper_toml_loader
+module TL = Keeper_toml_loader
 module KTP = Masc.Keeper_types_profile
 module KEP = Masc.Keeper_tool_persona_runtime
 module Runtime = Server_routes_http_runtime
@@ -917,7 +917,7 @@ let test_persona_resolver_omits_unspecified_tool_access () =
 }
 |};
   match
-    Masc.Keeper_tool_persona_runtime.resolved_keeper_args_from_persona
+    KEP.resolved_keeper_args_from_persona
       (`Assoc [ ("persona_name", `String "probe") ])
   with
   | Error e -> fail ("resolver failed: " ^ e)
@@ -1074,7 +1074,7 @@ let test_persona_resolver_ignores_non_public_social_model_arg () =
 }
 |};
   match
-    Masc.Keeper_tool_persona_runtime.resolved_keeper_args_from_persona
+    KEP.resolved_keeper_args_from_persona
       (`Assoc
         [
           ("persona_name", `String "probe");
@@ -1103,7 +1103,7 @@ let test_persona_resolver_preserves_autoboot_enabled_arg () =
 }
 |};
   match
-    Masc.Keeper_tool_persona_runtime.resolved_keeper_args_from_persona
+    KEP.resolved_keeper_args_from_persona
       (`Assoc
         [
           ("persona_name", `String "probe");
@@ -1136,7 +1136,7 @@ let test_persona_resolver_preserves_canonical_tool_access_and_allowed_paths () =
       ([ "masc_status" ])
   in
   match
-    Masc.Keeper_tool_persona_runtime.resolved_keeper_args_from_persona
+    KEP.resolved_keeper_args_from_persona
       (`Assoc
         [
           ("persona_name", `String "probe");
@@ -1465,8 +1465,8 @@ typo_field = 42
 |};
   close_out oc;
   let unknown_metric () =
-    Masc.Prometheus.metric_value_or_zero
-      Masc.Prometheus.metric_config_unknown_keys_ignored
+    Prometheus.metric_value_or_zero
+      Prometheus.metric_config_unknown_keys_ignored
       ~labels:[("file_path", tmp)]
       ()
   in
@@ -1534,8 +1534,8 @@ base = "base.toml"
 legacy_scope = "removed"
 |};
   let unknown_metric () =
-    Masc.Prometheus.metric_value_or_zero
-      Masc.Prometheus.metric_config_unknown_keys_ignored
+    Prometheus.metric_value_or_zero
+      Prometheus.metric_config_unknown_keys_ignored
       ~labels:[("file_path", Filename.concat keepers_dir "alpha.toml")]
       ()
   in

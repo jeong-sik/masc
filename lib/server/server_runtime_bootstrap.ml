@@ -83,6 +83,34 @@ let record_tool_policy_init_failure ~base_path msg =
     ();
   Log.Server.error "Fatal tool policy config load failure: %s" msg
 
+let metric_keeper_runtime_config_load_failures =
+  "masc_keeper_runtime_config_load_failures_total"
+
+let () =
+  Prometheus.register_counter
+    ~name:metric_keeper_runtime_config_load_failures
+    ~help:
+      "Total Keeper_runtime_config.load_and_apply failures. Bootstrap logs WARN; \
+       this counter exposes the same event to monitoring aggregation. Labels: \
+       reason in {read_error | parse_error}."
+    ()
+
+let record_runtime_toml_load_failure msg =
+  let reason =
+    if String.starts_with ~prefix:"read " msg
+    then Some "read_error"
+    else if String.starts_with ~prefix:"parse " msg
+    then Some "parse_error"
+    else None
+  in
+  Option.iter
+    (fun reason ->
+       Prometheus.inc_counter
+         metric_keeper_runtime_config_load_failures
+         ~labels:[ "reason", reason ]
+         ())
+    reason
+
 let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
     ?env ()
     : Mcp_server.server_state =
@@ -121,6 +149,7 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
    | Ok n ->
        Log.Server.info "runtime.toml: applied %d override(s)" n
    | Error msg ->
+       record_runtime_toml_load_failure msg;
        Log.Server.warn "runtime.toml load failed: %s (continuing with env defaults)" msg);
   Keeper_runtime_resolved.init ();
   Keeper_task_owner_backend.install_hooks ();

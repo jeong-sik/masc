@@ -1,0 +1,8 @@
+(include_subdirs no)
+
+(library
+ (name masc_keeper_id)
+ (public_name masc.keeper_id)
+ (wrapped false)
+ (modules keeper_id)
+ (libraries eio uuidm yojson masc_core))

@@ -22,7 +22,7 @@
       - lib/keeper/keeper_post_turn.ml   (this file — post-turn pipeline)
       - lib/keeper/keeper_rollover.ml    (rollover semantics — anchored
                                           in #11612)
-      - lib/keeper/keeper_types.mli      (type lineage — anchor deferred)
+      - lib/keeper_types/keeper_types.mli (type lineage — anchor deferred)
 
     This block is the reverse-direction citation so code search for
     "KeeperGenerationLineage" lands here.

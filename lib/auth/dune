@@ -22,9 +22,9 @@
   digestif
   masc.fs_compat
   masc.masc_log
-  time_compat
-  masc.prometheus
+  masc.masc_tool_dispatch
   masc.tool_types
-  masc.masc_tool_dispatch)
+  time_compat
+  masc.prometheus)
  (preprocess
   (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq)))

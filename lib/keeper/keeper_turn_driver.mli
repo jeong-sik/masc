@@ -12,11 +12,23 @@
 
 (** {1 MASC/OAS structured errors}
 
-    Re-exported from {!Keeper_internal_error}. Using [include module type of]
-    instead of a manual type copy so the interface stays structurally identical
-    to the implementation's [include Keeper_internal_error]. *)
+    Re-exported from {!Keeper_internal_error}. The manifest aliases keep the
+    facade's public types identical to the internal-error SSOT instead of
+    copying fresh nominal types into this interface. *)
 
-include module type of Keeper_internal_error
+include
+  module type of Keeper_internal_error
+    with type provider_rejection = Keeper_internal_error.provider_rejection
+     and type capacity_backpressure_source =
+      Keeper_internal_error.capacity_backpressure_source
+     and type retry_admission_denial =
+      Keeper_internal_error.retry_admission_denial
+     and type capacity_retry_after = Keeper_internal_error.capacity_retry_after
+     and type no_tool_capable_detail =
+      Keeper_internal_error.no_tool_capable_detail
+     and type runtime_exhaustion_reason =
+      Keeper_internal_error.runtime_exhaustion_reason
+     and type masc_internal_error = Keeper_internal_error.masc_internal_error
 
 (** {1 Provider error helpers} *)
 

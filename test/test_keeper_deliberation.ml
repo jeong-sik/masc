@@ -1,7 +1,7 @@
 open Alcotest
 
 module D = Masc.Keeper_deliberation
-module Keeper_types = Masc.Keeper_types
+module Keeper_types = Keeper_types
 
 let has_prompt_root path =
   Sys.file_exists (Filename.concat path "config/prompts/keeper.deliberation.md")

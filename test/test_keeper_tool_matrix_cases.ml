@@ -26,7 +26,7 @@ and fixture = {
   generic : Generic.fixture;
   config : Masc.Workspace.config;
   meta : Masc.Keeper_meta_contract.keeper_meta;
-  ctx_snapshot : Masc.Keeper_types.working_context;
+  ctx_snapshot : Keeper_types.working_context;
   tools : Agent_sdk.Tool.t list;
 }
 

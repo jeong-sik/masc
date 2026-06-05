@@ -726,7 +726,7 @@ let get_bindings ~host ~port : binding list =
       bindings
   in
   let bindings =
-    if Transport_metrics.ws_enabled () then
+    if Env_config.Transport.ws_enabled () then
       bindings
       @ [
           {

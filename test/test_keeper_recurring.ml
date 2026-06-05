@@ -12,7 +12,7 @@ let task_by_label label =
 
 let recurring_failure_value ~task ~phase =
   Prom.metric_value_or_zero
-    Masc.Keeper_metrics.(to_string RecurringFailures)
+    Keeper_metrics.(to_string RecurringFailures)
     ~labels:[("task", task); ("phase", phase)]
     ()
 ;;

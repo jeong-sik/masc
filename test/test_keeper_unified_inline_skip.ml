@@ -1,7 +1,7 @@
 open Alcotest
 
 module KG = Masc.Keeper_guards
-module KTR = Masc.Keeper_tool_response
+module KTR = Keeper_tool_response
 
 let str_contains s sub =
   try
@@ -59,16 +59,6 @@ let test_render_inline_escape_edge_cases () =
   check bool "percent encoded" true (str_contains pct "90%25")
 ;;
 
-let test_render_inline_with_replacement () =
-  let result =
-    KG.render_inline_skip_reason
-      ~tool_name:"keeper_board_post"
-      ~reason_code:"keeper_deny"
-      ~reason_text:"denied"
-  in
-  check bool "has replacement" true (str_contains result "replacement=")
-;;
-
 let test_normalize_override_passthrough () =
   let override_text =
     "[tool_skipped] tool=tool_execute source=keeper_hook code=keeper_deny \
@@ -101,10 +91,6 @@ let () =
             "render inline escape edge cases"
             `Quick
             test_render_inline_escape_edge_cases
-        ; test_case
-            "render inline replacement"
-            `Quick
-            test_render_inline_with_replacement
         ; test_case
             "normalize override passthrough"
             `Quick

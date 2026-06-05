@@ -1,0 +1,13 @@
+(include_subdirs no)
+
+(library
+ (name masc_keeper_binding_health_config)
+ (public_name masc.keeper_binding_health_config)
+ (wrapped false)
+ (modules keeper_binding_health_config)
+ (libraries
+  agent_sdk
+  masc.config
+  masc_core
+  masc_log
+  uri))

@@ -49,6 +49,20 @@
 
 include Keeper_approval_queue_rules_types
 
+let record_queue_failure ~keeper_name ~site ?(id = "-") ?(event_type = "-") exn =
+  Prometheus.inc_counter
+    Keeper_metrics.(to_string ApprovalQueueFailures)
+    ~labels:[ "keeper", keeper_name; "site", site ]
+    ();
+  Log.Keeper.warn
+    "approval_queue: %s failed keeper=%s id=%s event=%s err=%s"
+    site
+    keeper_name
+    id
+    event_type
+    (Printexc.to_string exn)
+;;
+
 (* ── Global queue (Lock-free Atomic.t) ───────────────────── *)
 
 module SMap = Set_util.StringMap

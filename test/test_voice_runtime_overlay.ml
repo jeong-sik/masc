@@ -1,5 +1,5 @@
 open Alcotest
-module Voice = Masc.Voice_runtime_overlay
+module Voice = Voice_runtime_overlay
 
 let with_env name value f =
   let previous = Sys.getenv_opt name in
@@ -58,9 +58,9 @@ let test_voice_mcp_env_no_longer_overrides_default_session_url () =
 ;;
 
 let test_stt_request_elevenlabs_direct () =
-  let endpoint : Masc.Voice_config.endpoint =
+  let endpoint : Voice_config.endpoint =
     { id = "test-stt"
-    ; kind = Elevenlabs_direct
+    ; kind = Voice_config.Elevenlabs_direct
     ; base_url = Some "https://api.elevenlabs.io/v1"
     ; mcp_url = None
     ; health_url = None
@@ -97,9 +97,9 @@ let test_stt_request_elevenlabs_direct () =
 ;;
 
 let test_stt_request_openai_compat () =
-  let endpoint : Masc.Voice_config.endpoint =
+  let endpoint : Voice_config.endpoint =
     { id = "test-provider_d-stt"
-    ; kind = Openai_compat
+    ; kind = Voice_config.Openai_compat
     ; base_url = Some "https://api.provider_d.com/v1"
     ; mcp_url = None
     ; health_url = None
@@ -132,9 +132,9 @@ let test_stt_request_openai_compat () =
 ;;
 
 let test_stt_request_mcp_rejected () =
-  let endpoint : Masc.Voice_config.endpoint =
+  let endpoint : Voice_config.endpoint =
     { id = "test-mcp-stt"
-    ; kind = Voice_mcp
+    ; kind = Voice_config.Voice_mcp
     ; base_url = None
     ; mcp_url = Some "http://localhost:8936"
     ; health_url = None

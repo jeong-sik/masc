@@ -213,7 +213,7 @@ let test_generate_compact_surfaces_board_cap_without_failure () =
   let config = Workspace_utils.default_config dir in
   setup_workspace config;
   Lib.Prometheus.inc_counter
-    Lib.Keeper_metrics.(to_string BoardSignalWakeupCappedTotal)
+    Keeper_metrics.(to_string BoardSignalWakeupCappedTotal)
     ~labels:[("kind", "task")]
     ();
   let output = Dashboard.generate_compact config in

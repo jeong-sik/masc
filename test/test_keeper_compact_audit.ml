@@ -218,7 +218,7 @@ let test_pending_ttl_uses_receive_time () =
 
 (* ── Retention parse outcome ───────────────────────────────────── *)
 
-module KCARO = Masc.Keeper_compact_audit_retention_outcome
+module KCARO = Keeper_compact_audit_retention_outcome
 
 let env_var = "MASC_COMPACTION_AUDIT_RETENTION_DAYS"
 

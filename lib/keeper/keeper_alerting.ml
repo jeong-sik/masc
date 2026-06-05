@@ -292,7 +292,7 @@ let post_keeper_alert_board
   let visibility = let v = String.trim Env_config.KeeperAlert.board_visibility in
     if v = "" then "internal" else v in
   let visibility =
-    match Tool_board.visibility_of_string visibility with
+    match Board_tool.visibility_of_string visibility with
     | Some value -> value
     | None -> Board.Internal
   in

@@ -16,7 +16,6 @@ module Mcp_server = Masc.Mcp_server
 module Mcp_eio = Masc.Mcp_server_eio
 module Workspace = Masc.Workspace
 module Workspace_utils = Workspace_utils
-module Keeper_types = Masc.Keeper_types
 module Keeper_meta_store = Masc.Keeper_meta_store
 module Keeper_meta_contract = Masc.Keeper_meta_contract
 module Keeper_memory = Masc.Keeper_memory
@@ -30,7 +29,6 @@ module Dashboard_briefing = Dashboard_briefing
 module Dashboard_briefing_sections = Dashboard_briefing_sections
 module Build_identity = Masc.Build_identity
 module Auth_login = Masc.Auth_login
-module Keeper_id = Masc.Keeper_id
 module Keeper_msg_async = Masc.Keeper_msg_async
 module Keeper_status_bridge = Masc.Keeper_status_bridge
 module Keeper_tool_call_log = Masc.Keeper_tool_call_log
@@ -46,7 +44,7 @@ module Http_negotiation = Mcp_transport_protocol.Http_negotiation
 module Progress = Masc.Progress
 module Sse = Masc.Sse
 module Safe_ops = Safe_ops
-module Tool_board = Masc.Tool_board
+module Tool_board = Board_tool
 module Server_mcp_transport_http = Server_mcp_transport_http
 
 

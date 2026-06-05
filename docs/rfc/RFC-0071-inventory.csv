@@ -361,7 +361,6 @@ lib/keeper/keeper_approval_queue.ml,158,None,unclassified
 lib/keeper/keeper_approval_queue.ml,256,None,unclassified
 lib/keeper/keeper_approval_queue.ml,1229,None,unclassified
 lib/keeper/keeper_behavioral_regime.ml,19,None,unclassified
-lib/keeper/keeper_cli_mcp_config.ml,64,None,unclassified
 lib/keeper/keeper_compact_audit.ml,156,None,unclassified
 lib/keeper/keeper_compact_audit.ml,172,None,unclassified
 lib/keeper/keeper_compact_audit.ml,257,None,unclassified
@@ -411,7 +410,6 @@ lib/keeper/keeper_tool_execute_command_parse.ml,492,None,unclassified
 lib/keeper/keeper_tool_execute_command_parse.ml,520,None,unclassified
 lib/keeper/keeper_tool_execute_command_parse.ml,752,None,unclassified
 lib/keeper/keeper_tool_execute_command_parse.ml,769,None,unclassified
-lib/keeper/keeper_hash_algo.ml,18,None,unclassified
 lib/keeper/keeper_heartbeat_loop.ml,317,(),unclassified
 lib/keeper/keeper_heartbeat_loop.ml,388,(),unclassified
 lib/keeper/keeper_hooks_oas.ml,500,false,unclassified

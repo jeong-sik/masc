@@ -691,8 +691,6 @@ let dispatch ctx ~name ~args : tool_result option =
   let ctx = resolve_ctx ctx ~name args in
   match name with
   | "masc_persona_list" -> Some (tool_result_with_tool_name ~tool_name:name (Persona.handle_persona_list ctx args))
-  | "masc_persona_schema" -> Some (tool_result_with_tool_name ~tool_name:name (Persona.handle_persona_schema ctx args))
-  | "masc_persona_save" -> Some (tool_result_with_tool_name ~tool_name:name (Persona.handle_persona_save ctx args))
   | "masc_keeper_create_from_persona" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_create_from_persona ctx args))
   | "masc_keeper_up" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_up ctx args))
   | "masc_keeper_status" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_status ctx args))
@@ -728,7 +726,7 @@ let dispatch_stream ~on_text_delta ctx ~name ~args : tool_result option =
 (* ================================================================ *)
 
 let tool_spec_read_only =
-  [ "masc_persona_list"; "masc_persona_schema"; "masc_keeper_list";
+  [ "masc_persona_list"; "masc_keeper_list";
     "masc_keeper_status"; "masc_keeper_persona_audit"; "masc_keeper_msg_queue" ]
 
 let register_keeper_surface_schema (s : Masc_domain.tool_schema) =

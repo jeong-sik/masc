@@ -506,7 +506,7 @@ let create_state ~base_path =
     mono_clock = None;
     net = None;
   } in
-  Tool_board.set_agent_lookup (fun name ->
+  Board_tool.set_agent_lookup (fun name ->
     try Workspace.is_agent_session_bound state.workspace_config ~agent_name:name
     with Sys_error _ | Not_found | Invalid_argument _ -> false);
   state
@@ -563,7 +563,7 @@ let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
   } in
   (* Board post kind auto-classification: reads state.workspace_config so
      workspace changes via set_workspace are reflected automatically. *)
-  Tool_board.set_agent_lookup (fun name ->
+  Board_tool.set_agent_lookup (fun name ->
     try Workspace.is_agent_session_bound state.workspace_config ~agent_name:name
     with Sys_error _ | Not_found | Invalid_argument _ -> false);
   state

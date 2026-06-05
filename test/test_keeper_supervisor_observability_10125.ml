@@ -40,14 +40,14 @@ module Prom = Masc.Prometheus
 
 let starts_for ~base_path =
   Prom.metric_value_or_zero
-    Masc.Keeper_metrics.(to_string SupervisorSweepStarts)
+    Keeper_metrics.(to_string SupervisorSweepStarts)
     ~labels:[ "base_path", base_path ]
     ()
 ;;
 
 let last_sweep_for ~base_path =
   Prom.get_metric_value
-    Masc.Keeper_metrics.(to_string SupervisorLastSweepUnixtime)
+    Keeper_metrics.(to_string SupervisorLastSweepUnixtime)
     ~labels:[ "base_path", base_path ]
     ()
 ;;
@@ -63,11 +63,11 @@ let last_sweep_for ~base_path =
    "not registered" and "registered but no observations yet". *)
 let test_metrics_registered () =
   let starts =
-    Prom.get_metric_value Masc.Keeper_metrics.(to_string SupervisorSweepStarts) ()
+    Prom.get_metric_value Keeper_metrics.(to_string SupervisorSweepStarts) ()
   in
   let last_sweep =
     Prom.get_metric_value
-      Masc.Keeper_metrics.(to_string SupervisorLastSweepUnixtime)
+      Keeper_metrics.(to_string SupervisorLastSweepUnixtime)
       ()
   in
   Alcotest.(check bool) "sweep_starts registered" true (Option.is_some starts);
@@ -98,7 +98,7 @@ let test_age_helper_returns_none_before_first_sweep () =
 let test_age_helper_advances_after_gauge_set () =
   let base_path = "/tmp/test-supervisor-obs-advances-10125" in
   Prom.set_gauge
-    Masc.Keeper_metrics.(to_string SupervisorLastSweepUnixtime)
+    Keeper_metrics.(to_string SupervisorLastSweepUnixtime)
     ~labels:[ "base_path", base_path ]
     (Unix.gettimeofday ());
   match R.supervisor_sweep_age_seconds ~base_path with
@@ -118,7 +118,7 @@ let test_age_helper_reports_stale_when_gauge_old () =
   let base_path = "/tmp/test-supervisor-obs-stale-10125" in
   let stale_ts = Unix.gettimeofday () -. 3600.0 in
   Prom.set_gauge
-    Masc.Keeper_metrics.(to_string SupervisorLastSweepUnixtime)
+    Keeper_metrics.(to_string SupervisorLastSweepUnixtime)
     ~labels:[ "base_path", base_path ]
     stale_ts;
   match R.supervisor_sweep_age_seconds ~base_path with
@@ -134,11 +134,11 @@ let test_counter_per_base_path_isolation () =
   let b = "/tmp/test-supervisor-obs-iso-B-10125" in
   let before_b = starts_for ~base_path:b in
   Prom.inc_counter
-    Masc.Keeper_metrics.(to_string SupervisorSweepStarts)
+    Keeper_metrics.(to_string SupervisorSweepStarts)
     ~labels:[ "base_path", a ]
     ();
   Prom.inc_counter
-    Masc.Keeper_metrics.(to_string SupervisorSweepStarts)
+    Keeper_metrics.(to_string SupervisorSweepStarts)
     ~labels:[ "base_path", a ]
     ();
   Alcotest.(check (float 0.0001))
@@ -155,8 +155,8 @@ let test_counter_per_base_path_isolation () =
    downstream OTel export keeps the join key intact. *)
 let test_registry_snapshot_includes_metrics () =
   let base_path = "/tmp/test-supervisor-obs-export-10125" in
-  let starts = Masc.Keeper_metrics.(to_string SupervisorSweepStarts) in
-  let last_sweep = Masc.Keeper_metrics.(to_string SupervisorLastSweepUnixtime) in
+  let starts = Keeper_metrics.(to_string SupervisorSweepStarts) in
+  let last_sweep = Keeper_metrics.(to_string SupervisorLastSweepUnixtime) in
   Prom.inc_counter
     starts
     ~labels:[ "base_path", base_path ]

@@ -174,10 +174,6 @@ let worker_meta_of_yojson json =
                         Json_util.get_string json "turn_log_path"
                         |> Option.value ~default:"";
                       last_run_at = Json_util.get_float json "last_run_at";
-                      (* RFC-0084 host-config-cleanup-H — JSON I/O
-                         round-trip deferred; always [None] until a
-                         follow-up cleanup adds the schema. *)
-                      disclosure_strategy = None;
                     })))
   | _ -> Error "worker meta must be a JSON object"
 
@@ -374,7 +370,6 @@ let make_worker_meta ~base_path ~workspace_path ~worker_name
     turn_log_path =
       worker_turn_log_path ~base_path ~worker_name;
     last_run_at = None;
-    disclosure_strategy = None;
   }
 
 let append_worker_completion_log ~base_path ~worker_name

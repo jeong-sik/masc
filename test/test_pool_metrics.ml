@@ -12,7 +12,7 @@
 *)
 
 open Alcotest
-module PM = Masc.Pool_metrics
+module PM = Pool_metrics
 
 let metric_names = [
   PM.metric_idle_total, "masc_pool_idle_total";
@@ -44,8 +44,8 @@ let test_current_snapshot_none_when_pool_uninit () =
    | Some _ -> fail "pool snapshot should be None before first HTTP call")
 
 let find_metric name =
-  Masc.Prometheus.snapshot ()
-  |> List.find_opt (fun (m : Masc.Prometheus.metric) ->
+  Prometheus.snapshot ()
+  |> List.find_opt (fun (m : Prometheus.metric) ->
     String.equal m.name name && m.labels = [])
 
 let test_registry_contains_metric_families () =
@@ -64,11 +64,11 @@ let test_metric_types_match_intent () =
     | None -> false
   in
   check bool "inflight_total is gauge" true
-    (has_type "masc_pool_inflight_total" Masc.Prometheus.Gauge);
+    (has_type "masc_pool_inflight_total" Prometheus.Gauge);
   check bool "reuse_total is counter" true
-    (has_type "masc_pool_reuse_total" Masc.Prometheus.Counter);
+    (has_type "masc_pool_reuse_total" Prometheus.Counter);
   check bool "create_total is counter" true
-    (has_type "masc_pool_create_total" Masc.Prometheus.Counter)
+    (has_type "masc_pool_create_total" Prometheus.Counter)
 
 let () =
   run "Pool_metrics" [

@@ -5,8 +5,8 @@
     backward-compatibility (model_id stays populated). *)
 
 open Alcotest
-module DH = Masc.Discovery_history
-module P = Masc.Prometheus
+module DH = Discovery_history
+module P = Prometheus
 
 let make ~models : DH.probe_record = {
   ts = 1777129200.0;

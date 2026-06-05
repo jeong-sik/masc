@@ -60,7 +60,7 @@ let handle_filesystem ctx descriptor args =
   | Tool_ide_annotate
   | Tool_voice_dispatch
   | Tool_task_dispatch
-  | Tool_board_dispatch
+  | Board_tool_dispatch
   | Tool_masc_board_dispatch
   | Tool_masc_task_dispatch
   | Tool_masc_plan_dispatch
@@ -111,7 +111,7 @@ let handle_shell_ir ctx descriptor args =
   | Tool_ide_annotate
   | Tool_voice_dispatch
   | Tool_task_dispatch
-  | Tool_board_dispatch
+  | Board_tool_dispatch
   | Tool_masc_board_dispatch
   | Tool_masc_task_dispatch
   | Tool_masc_plan_dispatch
@@ -181,7 +181,7 @@ let handle_in_process ctx descriptor args =
          ~meta:ctx.meta
          ~name
          ~args)
-  | Tool_board_dispatch ->
+  | Board_tool_dispatch ->
     Some
       (Keeper_tool_in_process_runtime.handle_board ~meta:ctx.meta ~name ~args)
   | Tool_masc_board_dispatch ->

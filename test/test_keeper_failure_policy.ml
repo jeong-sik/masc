@@ -1,6 +1,6 @@
 open Alcotest
 
-module Policy = Masc.Keeper_failure_policy
+module Policy = Keeper_failure_policy
 
 let check_lifecycle label expected actual =
   check string label expected (Policy.lifecycle_effect_to_label actual)

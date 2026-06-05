@@ -2,8 +2,6 @@
 
 open Alcotest
 
-module Keeper_token_count = Masc.Keeper_token_count
-
 let result_pp ppf = function
   | `Saved n -> Format.fprintf ppf "`Saved %d" n
   | `Divergent n -> Format.fprintf ppf "`Divergent %d" n

@@ -11,7 +11,7 @@
 open Alcotest
 module SM = Keeper_state_machine
 module SM_json = Keeper_state_machine_json
-module Meas = Masc.Keeper_measurement
+module Meas = Keeper_measurement
 module Guard = Masc.Keeper_guard
 module KSP = Test_keeper_state_machine_preconditions
 

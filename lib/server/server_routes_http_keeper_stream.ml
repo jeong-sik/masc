@@ -12,6 +12,7 @@ type keeper_chat_stream_request = {
   channel_user_id : string;
   channel_user_name : string;
   channel_workspace_id : string;
+  attachments : Keeper_chat_store.attachment list;
 }
 
 let keeper_chat_stream_error_json message =
@@ -219,6 +220,41 @@ let parse_keeper_chat_stream_request body_str =
         | Some (`Int _) | Some (`Float _) -> Ok None
         | Some _ -> Error "timeout_sec must be a positive number"
       in
+      let attachments : Keeper_chat_store.attachment list =
+        match Json_util.assoc_member_opt "attachments" json with
+        | Some (`List att_list) ->
+            List.filter_map
+              (fun att_json ->
+                match att_json with
+                | `Assoc _ -> (
+                    try
+                      let id =
+                        Json_util.get_string_with_default att_json ~key:"id" ~default:""
+                      in
+                      let att_type =
+                        Json_util.get_string_with_default att_json ~key:"type" ~default:""
+                      in
+                      let name =
+                        Json_util.get_string_with_default att_json ~key:"name" ~default:""
+                      in
+                      let size =
+                        match Json_util.assoc_member_opt "size" att_json with
+                        | Some (`Int i) -> i
+                        | _ -> 0
+                      in
+                      let mime_type =
+                        Json_util.get_string_with_default att_json ~key:"mime_type" ~default:""
+                      in
+                      let data =
+                        Json_util.get_string_with_default att_json ~key:"data" ~default:""
+                      in
+                      if id = "" || data = "" then None
+                      else Some { Keeper_chat_store.id; att_type; name; size; mime_type; data }
+                    with _ -> None)
+                | _ -> None)
+              att_list
+        | _ -> []
+      in
       if name = "" then
         Error "name is required"
       else if message = "" then
@@ -245,6 +281,7 @@ let parse_keeper_chat_stream_request body_str =
                   channel_user_id;
                   channel_user_name;
                   channel_workspace_id;
+                  attachments;
                 }
           | Error err -> Error err )
   with Yojson.Json_error e ->
@@ -521,15 +558,28 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
             else
               payload.message
           in
-          let args =
+          let attachment_json att =
             `Assoc
-              ([ ("name", `String payload.name);
-                 ("message", `String message);
-                 ("direct_reply", `Bool true) ]
-               @
-               match payload.timeout_sec with
+              [ ("id", `String att.Keeper_chat_store.id);
+                ("type", `String att.att_type);
+                ("name", `String att.name);
+                ("size", `Int att.size);
+                ("mime_type", `String att.mime_type);
+                ("data", `String att.data) ]
+          in
+          let args =
+            let base_fields =
+              [ ("name", `String payload.name);
+                ("message", `String message);
+                ("direct_reply", `Bool true) ]
+              @
+              (match payload.timeout_sec with
                | Some timeout_sec -> [ ("timeout_sec", `Int timeout_sec) ]
                | None -> [])
+            in
+            `Assoc
+              (if payload.attachments = [] then base_fields
+               else ("attachments", `List (List.map attachment_json payload.attachments)) :: base_fields)
           in
           let agent_name =
             if has_connector_context then
@@ -600,6 +650,7 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
                         ~base_dir:state.Mcp_server.workspace_config.base_path
                         ~keeper_name:payload.name
                         ~user_content:payload.message
+                        ~user_attachments:payload.attachments
                         ~assistant_content:visible_reply;
                     push_worker_event (Stream_terminal (true, body));
                     Tool_result.ok ~tool_name:"masc_keeper_msg" ~start_time body

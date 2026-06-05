@@ -48,6 +48,7 @@ type keeper_chat_stream_request = {
   channel_user_id : string;
   channel_user_name : string;
   channel_workspace_id : string;
+  attachments : Keeper_chat_store.attachment list;
 }
 (** Parsed payload of a keeper chat-stream HTTP request.
     [timeout_sec] is clamped to [\[5, 300\]] when

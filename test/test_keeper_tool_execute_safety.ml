@@ -1006,7 +1006,7 @@ let test_tool_execute_git_recovery_invalidates_repo_currency_cache () =
   in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
   Keeper_registry.clear ();
-  let meta = { meta with tool_access = [ "tool_write_file" ] } in
+  let meta = { meta with tool_access = Keeper_meta_tool_access.write_tools } in
   let run executable argv =
     Keeper_tool_command_runtime.handle_tool_execute
       ~turn_sandbox_factory:None

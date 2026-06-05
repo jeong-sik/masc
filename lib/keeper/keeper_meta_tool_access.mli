@@ -18,6 +18,9 @@ val normalize_tool_names : string list -> string list
     {!normalize_tool_names}, kept for call-site clarity). *)
 val normalize_tool_access : string list -> string list
 
+(** Tool candidate names that mark Execute as write-capable. *)
+val write_tools : string list
+
 (** Encode a tool candidate profile as a JSON array of tool names. *)
 val tool_access_to_json : string list -> Yojson.Safe.t
 

@@ -663,7 +663,7 @@ let handle_tool_execute
   in
   let write_enabled =
     List.exists
-      (fun n -> n = "tool_edit_file" || n = "tool_write_file")
+      (fun n -> List.mem n Keeper_meta_tool_access.write_tools)
       meta.tool_access
   in
   if has_typed_execute_input_key args

@@ -57,6 +57,40 @@ describe('applyKeeperStreamEvent', () => {
     expect(entry?.text).toBe('')
   })
 
+  it('marks the assistant entry queued when the server accepts a request', () => {
+    assistantEntry()
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_QUEUE_REQUEST',
+      value: {
+        request_id: 'kmsg_sangsu_1',
+        status: 'queued',
+        modalities: ['text'],
+      },
+    })).toBeNull()
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(entry?.delivery).toBe('queued')
+    expect(entry?.streamState).toBe('opening')
+  })
+
+  it('does not render continuation checkpoint text as a chat reply', () => {
+    assistantEntry()
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_REPLY_DETAILS',
+      value: {
+        reply: 'Continuation checkpoint saved; keeper remains scheduled for the next cycle.',
+      },
+    })).toBeNull()
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(entry?.text).toBe('')
+    expect(entry?.rawText).toBe('Continuation checkpoint saved; keeper remains scheduled for the next cycle.')
+    expect(entry?.delivery).toBe('queued')
+    expect(entry?.streamState).toBeNull()
+  })
+
   it('extracts error messages from events', () => {
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'RUN_ERROR',

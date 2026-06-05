@@ -14,6 +14,8 @@ import {
 } from './keeper-state'
 import { isRecord, asString } from './components/common/normalize'
 
+const CONTINUATION_CHECKPOINT_PREFIX = 'Continuation checkpoint saved;'
+
 export function abortKeeperThreadMessage(name: string): void {
   const keeperName = name.trim()
   if (!keeperName) return
@@ -25,7 +27,7 @@ export function abortKeeperThreadMessage(name: string): void {
     finalizeAssistantEntry(keeperName, entryId, {
       delivery: 'timeout',
       streamState: null,
-      error: '스트림 취소됨',
+      error: '요청 취소됨',
       timestamp: new Date().toISOString(),
     })
   }
@@ -59,11 +61,38 @@ export function applyKeeperStreamEvent(
       setAssistantStreamState(keeperName, assistantEntryId, 'finalizing', 'streaming')
       return null
     case 'CUSTOM':
+      if (event.name === 'KEEPER_QUEUE_REQUEST') {
+        setAssistantStreamState(keeperName, assistantEntryId, 'opening', 'queued')
+        return null
+      }
+      if (event.name === 'KEEPER_CONTINUATION_CHECKPOINT') {
+        const rawText = isRecord(event.value)
+          ? asString(event.value.message, '')
+          : ''
+        updateThreadEntry(keeperName, assistantEntryId, entry => ({
+          ...entry,
+          text: '',
+          rawText: rawText || entry.rawText,
+          delivery: 'queued',
+          streamState: null,
+        }))
+        return null
+      }
       if (event.name === 'KEEPER_REPLY_DETAILS') {
         const details = normalizeKeeperConversationDetails(event.value)
         if (details) {
           updateThreadEntry(keeperName, assistantEntryId, entry => {
             const rawText = details.replyText ?? entry.rawText ?? entry.text
+            if (rawText.trim().startsWith(CONTINUATION_CHECKPOINT_PREFIX)) {
+              return {
+                ...entry,
+                details,
+                rawText,
+                text: '',
+                delivery: 'queued',
+                streamState: null,
+              }
+            }
             const text = formatKeeperVisibleReply(rawText)
             return {
               ...entry,

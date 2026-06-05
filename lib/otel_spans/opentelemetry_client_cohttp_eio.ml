@@ -103,8 +103,8 @@ end = struct
 
   type https_connector =
     Uri.t
-    -> [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t
-    -> [ `Close | `Flow | `R | `Shutdown | `W ] Eio.Resource.t
+    -> [ Eio.Flow.two_way_ty | Eio.Resource.close_ty ] r
+    -> [ Eio.Flow.two_way_ty | Eio.Resource.close_ty ] r
 
   type t =
     { net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
@@ -137,71 +137,87 @@ end = struct
     let authenticator = authenticator () in
     let https uri raw =
       (https ~authenticator uri raw
-        :> [ `Close | `Flow | `R | `Shutdown | `W ] Eio.Resource.t)
+        :> [ Eio.Flow.two_way_ty | Eio.Resource.close_ty ] r)
     in
     { net :> [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t; https = Some https }
   ;;
 
-  (* [client.net] / [client.https] fields of [t] are kept on the
-     record so the public [create] signature stays stable, but the
-     pool owns the transport — those fields are unused on this path. *)
-  let send (_client : t) ~url ~decode (body : string) : ('a, error) result =
+  let read_body body =
+    let buf = Buffer.create 4096 in
+    Eio.Flow.copy body (Eio.Flow.buffer_sink buf);
+    Buffer.contents buf
+  ;;
+
+  let decode_response ~url ~decode ~code body =
+    (* HTTP error if status >= 400 (Cohttp.Code.is_error equivalent). *)
+    if code < 400
+    then (
+      match decode with
+      | `Ret x -> Ok x
+      | `Dec f ->
+        let dec = Pbrt.Decoder.of_string body in
+        let r =
+          try Ok (f dec) with
+          | e ->
+            let bt = Printexc.get_backtrace () in
+            Error
+              (`Failure (spf "decoding failed with:\n%s\n%s" (Printexc.to_string e) bt))
+        in
+        r)
+    else (
+      let dec = Pbrt.Decoder.of_string body in
+      let r =
+        try
+          let status = Status.decode_pb_status dec in
+          Error (`Status (code, status))
+        with
+        | e ->
+          let bt = Printexc.get_backtrace () in
+          Error
+            (`Failure
+                (spf
+                   "httpc: decoding of status (url=%S, code=%d) failed with:\n\
+                    %s\n\
+                    status: %S\n\
+                    %s"
+                   url
+                   code
+                   (Printexc.to_string e)
+                   body
+                   bt))
+      in
+      r)
+  ;;
+
+  let send (client : t) ~url ~decode (body : string) : ('a, error) result =
     let headers =
       ("Content-Type", "application/x-protobuf") :: Config.Env.get_headers ()
     in
-    match Masc_http_client.post_sync ~url ~headers ~body () with
-    | Error err_msg ->
-      (* RFC-0106: re-raise Eio.Cancel.Cancelled when the exporter fiber
-         was cancelled. Masc_http_client.post_sync's piaf pool catches
-         all exceptions (including Cancelled) and reports them as Error
-         strings; without this check the exporter would log a spurious
-         "export failed" instead of unwinding cancellation. *)
-      Eio.Fiber.check ();
+    try
+      Eio.Switch.run (fun sw ->
+        let http_client = Httpc.make ~https:client.https client.net in
+        let response, response_body =
+          Httpc.post
+            http_client
+            ~sw
+            ~headers:(Cohttp.Header.of_list headers)
+            ~body:(Cohttp_eio.Body.of_string body)
+            (Uri.of_string url)
+        in
+        let code = Cohttp.Code.code_of_status (Cohttp.Response.status response) in
+        let body = read_body response_body in
+        decode_response ~url ~decode ~code body)
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | Sys.Break -> Error `Sysbreak
+    | exn ->
+      let bt = Printexc.get_backtrace () in
       Error
         (`Failure
            (spf
               "sending signals via http POST to %S\nfailed with:\n%s"
               url
-              err_msg))
-    | Ok (code, body) ->
-      (* HTTP error if status >= 400 (Cohttp.Code.is_error equivalent). *)
-      if code < 400
-      then (
-        match decode with
-        | `Ret x -> Ok x
-        | `Dec f ->
-          let dec = Pbrt.Decoder.of_string body in
-          let r =
-            try Ok (f dec) with
-            | e ->
-              let bt = Printexc.get_backtrace () in
-              Error
-                (`Failure (spf "decoding failed with:\n%s\n%s" (Printexc.to_string e) bt))
-          in
-          r)
-      else (
-        let dec = Pbrt.Decoder.of_string body in
-        let r =
-          try
-            let status = Status.decode_pb_status dec in
-            Error (`Status (code, status))
-          with
-          | e ->
-            let bt = Printexc.get_backtrace () in
-            Error
-              (`Failure
-                  (spf
-                     "httpc: decoding of status (url=%S, code=%d) failed with:\n\
-                      %s\n\
-                      status: %S\n\
-                      %s"
-                     url
-                     code
-                     (Printexc.to_string e)
-                     body
-                     bt))
-        in
-        r)
+              (Printexc.to_string exn ^ "\n" ^ bt)))
   ;;
 end
 

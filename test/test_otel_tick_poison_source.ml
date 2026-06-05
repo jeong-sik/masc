@@ -27,6 +27,10 @@ let assert_contains ~label haystack needle =
   if not (contains haystack needle)
   then failwith (Printf.sprintf "[%s] expected source to contain %S" label needle)
 
+let assert_not_contains ~label haystack needle =
+  if contains haystack needle
+  then failwith (Printf.sprintf "[%s] expected source not to contain %S" label needle)
+
 let assert_order ~label haystack first second =
   match position haystack first, position haystack second with
   | Some a, Some b when a < b -> ()
@@ -67,11 +71,15 @@ let () =
   let poison_catch =
     "| Eio.Mutex.Poisoned cause -> stop_tick_after_poisoned_mutex ~stop cause"
   in
+  let local_post = "Httpc.post" in
+  let global_pool_post = "Masc_http_client.post_sync" in
   assert_contains ~label:"poison helper" src helper;
   assert_contains ~label:"poison helper stops tick loop" src stop_flag;
   assert_contains ~label:"poison log explains degradation prefix" src degraded_log_prefix;
   assert_contains ~label:"poison log explains degradation suffix" src degraded_log_suffix;
   assert_contains ~label:"tick catch delegates to poison helper" src poison_catch;
+  assert_contains ~label:"otel uses local cohttp client" src local_post;
+  assert_not_contains ~label:"otel avoids process-global http pool" src global_pool_post;
   assert_order ~label:"stop before degraded log" src stop_flag degraded_log_prefix;
   assert_order ~label:"helper before catch" src helper poison_catch;
   print_endline "test_otel_tick_poison_source: OK"

@@ -1,7 +1,7 @@
 (** OTel Spans — OpenTelemetry span lifecycle for masc.
 
-    When [MASC_OTEL_ENABLED=true], creates real OTel spans exported via OTLP.
-    When disabled (default), all operations are zero-cost no-ops.
+    When [MASC_OTEL_ENABLED=true] (default), creates real OTel spans exported via OTLP.
+    When explicitly disabled, all operations are zero-cost no-ops.
 
     @since 2.103.0 *)
 
@@ -35,7 +35,7 @@ let init () =
 (** Setup OTLP exporter — registers the cohttp-eio backend that ships spans,
     metrics, and logs to the configured OTLP collector via HTTP/protobuf.
     Internally forks a 500ms tick fiber under [sw] for periodic batch flush.
-    No-op when [MASC_OTEL_ENABLED] is not set. *)
+    No-op when OTel is explicitly disabled. *)
 let is_exporter_active () = Atomic.get exporter_active
 
 let setup_exporter_with ?(enabled = Otel_config.enabled) ~endpoint ~setup () =

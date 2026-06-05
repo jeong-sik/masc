@@ -4,4 +4,4 @@
 
 (tests
  (names test_keeper_recording_error_state)
- (libraries alcotest masc.keeper_recording_error_state))
+ (libraries alcotest masc.keeper_runtime))

@@ -1,8 +1,0 @@
-(include_subdirs no)
-
-(library
- (name masc_keeper_tool_response)
- (public_name masc.keeper_tool_response)
- (wrapped false)
- (modules keeper_tool_response)
- (libraries agent_sdk))

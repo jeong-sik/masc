@@ -99,7 +99,7 @@ vars == <<phase, turn_status, effective_runtime, provider_idx,
 \* ── Type Invariant ───────────────────────────────────────
 
 \* Issue #8642/#8701 family: explicit OCaml ↔ TLA+ mapping. SSOT for
-\* OCaml side is lib/keeper_state/keeper_state_machine.ml (13 phases;
+\* OCaml side is lib/keeper_registry/keeper_state_machine.ml (13 phases;
 \* Zombie added iter 4 #14707).  This spec collapses the 12 non-Zombie
 \* phases into a 7-symbol "core triad" alphabet
 \* because the triad invariants only depend on running/failure/

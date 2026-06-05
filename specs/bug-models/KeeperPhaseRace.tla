@@ -5,9 +5,9 @@
 \* (running -> failing -> cooldown -> handing_off -> idle). That race is
 \* structurally impossible in the current runtime: phase is *derived*
 \* from a `conditions` record by `derive_phase` at
-\* lib/keeper_state/keeper_state_machine.ml:derive_phase; events update conditions
-\* via lib/keeper_state/keeper_state_machine.ml:update_conditions and the new phase
-\* is derived by lib/keeper_state/keeper_state_machine.ml:apply_event. There
+\* lib/keeper_registry/keeper_state_machine.ml:derive_phase; events update conditions
+\* via lib/keeper_registry/keeper_state_machine.ml:update_conditions and the new phase
+\* is derived by lib/keeper_registry/keeper_state_machine.ml:apply_event. There
 \* is no event handler that writes `phase` directly, so two handlers
 \* cannot race a `phase` write.
 \*

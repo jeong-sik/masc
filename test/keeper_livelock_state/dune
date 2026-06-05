@@ -4,4 +4,4 @@
 
 (tests
  (names test_keeper_livelock_state)
- (libraries alcotest masc.keeper_livelock_state))
+ (libraries alcotest masc.keeper_runtime))

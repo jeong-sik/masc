@@ -45,19 +45,6 @@ let tool_names_of_calls (tool_calls : tool_call_detail list) : string list =
   |> List.map (fun detail -> Keeper_tool_resolution.canonical_tool_name detail.tool_name)
 ;;
 
-let synthetic_tool_call_detail ?(provider = "keeper_synthetic") ?(outcome = "ok")
-      ?route_evidence tool_name
-  =
-  { tool_name
-  ; provider
-  ; outcome
-  ; typed_outcome = None
-  ; latency_ms = 0.0
-  ; task_id = None
-  ; route_evidence
-  }
-;;
-
 (** Result of a single Agent.run() keeper turn. *)
 type run_result =
   { response_text : string
@@ -83,11 +70,6 @@ type run_result =
 
 let tool_names (result : run_result) = tool_names_of_calls result.tool_calls
 let tool_call_count (result : run_result) = List.length result.tool_calls
-
-let append_synthetic_tool_call ?provider ?outcome ?route_evidence tool_name result =
-  let detail = synthetic_tool_call_detail ?provider ?outcome ?route_evidence tool_name in
-  { result with tool_calls = result.tool_calls @ [ detail ] }
-;;
 
 (* RFC-0132 PR-2: agent-result surface label = external boundary; redact via SSOT. *)
 let runtime_lane_label =

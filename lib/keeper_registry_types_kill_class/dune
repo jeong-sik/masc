@@ -1,6 +1,0 @@
-(include_subdirs no)
-(library
- (name masc_keeper_registry_types_kill_class)
- (public_name masc.keeper_registry_types_kill_class)
- (wrapped false)
- (modules keeper_registry_types_kill_class))

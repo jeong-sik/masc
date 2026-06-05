@@ -1,7 +1,0 @@
-(include_subdirs no)
-
-(library
- (name masc_keeper_workspace_op)
- (public_name masc.keeper_workspace_op)
- (wrapped false)
- (modules keeper_workspace_op))

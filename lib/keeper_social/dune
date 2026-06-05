@@ -1,8 +1,8 @@
 (include_subdirs no)
 
 (library
- (name masc_keeper_social_model_types)
- (public_name masc.keeper_social_model_types)
+ (name masc_keeper_social)
+ (public_name masc.keeper_social)
  (wrapped false)
  (modules keeper_social_model_types)
  (libraries masc_core))

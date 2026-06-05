@@ -63,6 +63,7 @@ let voice_guard_fragments =
     "microphone";
     "audio";
     "rec exit";
+    "no enabled STT endpoints configured";
     "no configured tts endpoint";
     "tts endpoint";
   ]

@@ -41,60 +41,76 @@ let with_lock f =
 
 let last_deadlock_backtrace_for_test () = Atomic.get last_deadlock_backtrace
 
+(** Best-effort wrapper: never crash the caller fiber for a metrics update.
+    Metrics are advisory; losing one sample must not take down the OTel tick
+    fiber or the keeper turn. *)
+let best_effort f =
+  try f () with
+  | exn ->
+    Log.Metrics.warn "Otel_metric_store update failed (non-fatal): %s"
+      (Printexc.to_string exn)
+;;
+
 let register_counter ~name ~help ?(labels = []) () =
-  let key = metric_key name labels in
-  with_lock (fun () ->
-    if not (Hashtbl.mem metrics key)
-    then
-      Hashtbl.add metrics key { name; help; metric_type = Counter; value = 0.0; labels })
+  best_effort (fun () ->
+    let key = metric_key name labels in
+    with_lock (fun () ->
+      if not (Hashtbl.mem metrics key)
+      then
+        Hashtbl.add metrics key { name; help; metric_type = Counter; value = 0.0; labels }))
 ;;
 
 let register_gauge ~name ~help ?(labels = []) () =
-  let key = metric_key name labels in
-  with_lock (fun () ->
-    if not (Hashtbl.mem metrics key)
-    then Hashtbl.add metrics key { name; help; metric_type = Gauge; value = 0.0; labels })
+  best_effort (fun () ->
+    let key = metric_key name labels in
+    with_lock (fun () ->
+      if not (Hashtbl.mem metrics key)
+      then Hashtbl.add metrics key { name; help; metric_type = Gauge; value = 0.0; labels }))
 ;;
 
 let register_histogram ~name ~help ?(labels = []) () =
-  let key = metric_key name labels in
-  with_lock (fun () ->
-    if not (Hashtbl.mem metrics key)
-    then
-      Hashtbl.add metrics key { name; help; metric_type = Histogram; value = 0.0; labels })
+  best_effort (fun () ->
+    let key = metric_key name labels in
+    with_lock (fun () ->
+      if not (Hashtbl.mem metrics key)
+      then
+        Hashtbl.add metrics key { name; help; metric_type = Histogram; value = 0.0; labels }))
 ;;
 
 let inc_counter name ?(labels = []) ?(delta = 1.0) () =
-  let key = metric_key name labels in
-  with_lock (fun () ->
-    match Hashtbl.find_opt metrics key with
-    | Some m -> m.value <- m.value +. delta
-    | None ->
-      Hashtbl.add
-        metrics
-        key
-        { name; help = name; metric_type = Counter; value = delta; labels })
+  best_effort (fun () ->
+    let key = metric_key name labels in
+    with_lock (fun () ->
+      match Hashtbl.find_opt metrics key with
+      | Some m -> m.value <- m.value +. delta
+      | None ->
+        Hashtbl.add
+          metrics
+          key
+          { name; help = name; metric_type = Counter; value = delta; labels }))
 ;;
 
 let set_gauge name ?(labels = []) value =
-  let key = metric_key name labels in
-  with_lock (fun () ->
-    match Hashtbl.find_opt metrics key with
-    | Some m -> m.value <- value
-    | None ->
-      Hashtbl.add metrics key { name; help = name; metric_type = Gauge; value; labels })
+  best_effort (fun () ->
+    let key = metric_key name labels in
+    with_lock (fun () ->
+      match Hashtbl.find_opt metrics key with
+      | Some m -> m.value <- value
+      | None ->
+        Hashtbl.add metrics key { name; help = name; metric_type = Gauge; value; labels }))
 ;;
 
 let inc_gauge name ?(labels = []) ?(delta = 1.0) () =
-  let key = metric_key name labels in
-  with_lock (fun () ->
-    match Hashtbl.find_opt metrics key with
-    | Some m -> m.value <- m.value +. delta
-    | None ->
-      Hashtbl.add
-        metrics
-        key
-        { name; help = name; metric_type = Gauge; value = delta; labels })
+  best_effort (fun () ->
+    let key = metric_key name labels in
+    with_lock (fun () ->
+      match Hashtbl.find_opt metrics key with
+      | Some m -> m.value <- m.value +. delta
+      | None ->
+        Hashtbl.add
+          metrics
+          key
+          { name; help = name; metric_type = Gauge; value = delta; labels }))
 ;;
 
 let dec_gauge name ?(labels = []) ?(delta = 1.0) () =
@@ -134,26 +150,27 @@ let snapshot () =
 ;;
 
 let observe_histogram name ?(labels = []) value =
-  let key = metric_key name labels in
-  let count_key = metric_key (name ^ "_count") labels in
-  with_lock (fun () ->
-    (match Hashtbl.find_opt metrics key with
-     | Some m -> m.value <- m.value +. value
-     | None ->
-       Hashtbl.add
-         metrics
-         key
-         { name; help = name; metric_type = Histogram; value; labels });
-    match Hashtbl.find_opt metrics count_key with
-    | Some m -> m.value <- m.value +. 1.0
-    | None ->
-      Hashtbl.add
-        metrics
-        count_key
-        { name = name ^ "_count"
-        ; help = name ^ " observation count"
-        ; metric_type = Counter
-        ; value = 1.0
-        ; labels
-        })
+  best_effort (fun () ->
+    let key = metric_key name labels in
+    let count_key = metric_key (name ^ "_count") labels in
+    with_lock (fun () ->
+      (match Hashtbl.find_opt metrics key with
+       | Some m -> m.value <- m.value +. value
+       | None ->
+         Hashtbl.add
+           metrics
+           key
+           { name; help = name; metric_type = Histogram; value; labels });
+      match Hashtbl.find_opt metrics count_key with
+      | Some m -> m.value <- m.value +. 1.0
+      | None ->
+        Hashtbl.add
+          metrics
+          count_key
+          { name = name ^ "_count"
+          ; help = name ^ " observation count"
+          ; metric_type = Counter
+          ; value = 1.0
+          ; labels
+          }))
 ;;

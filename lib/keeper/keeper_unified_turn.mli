@@ -54,10 +54,10 @@ val provider_retry_budget_available_for_turn
 val degraded_retry_slot_phase_budget_sec : float
 val degraded_retry_slot_phase_available : time_spent_in_turn_s:float -> bool
 
-(** Reclassify a structural OAS timeout only when the current attempt
-    actually dispatched with an provider timeout budget. This prevents a
-    pre-retry turn-budget exhaustion from borrowing a stale previous
-    attempt budget and incorrectly rotating runtimes. *)
+(** Reclassify a structural OAS timeout as [Provider_timeout] only when the
+    current attempt actually dispatched with a provider timeout budget. This
+    prevents a pre-retry turn-budget exhaustion from borrowing a stale
+    previous attempt budget and incorrectly rotating runtimes. *)
 val reclassify_provider_timeout_for_attempt
   :  provider_timeout_budget:provider_timeout_budget option
   -> Agent_sdk.Error.sdk_error

@@ -61,12 +61,18 @@ val enqueue_agent_speak :
   message:string ->
   ?provider:string ->
   ?priority:int ->
+  ?start_worker:bool ->
   unit ->
   (Yojson.Safe.t, string) result
 (** Queue speech for serialized background playback. The caller gets a
     [status="queued"] result immediately; a single worker drains queued
     speech by priority and FIFO sequence so multiple keepers do not overlap
-    local playback. *)
+    local playback. [start_worker] defaults to [true]; tests may set it
+    to [false] to assert queue lifecycle behavior before the worker drains. *)
+
+val discard_queued_agent_speak : agent_id:string -> int
+(** Drop queued, not-yet-started speech jobs for [agent_id]. Returns the number
+    of jobs discarded. The current in-flight playback, if any, is not cancelled. *)
 
 val get_agent_voice :
   agent_id:string -> (Yojson.Safe.t, string) result

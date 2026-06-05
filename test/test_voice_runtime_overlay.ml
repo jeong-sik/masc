@@ -14,6 +14,28 @@ let with_env name value f =
     f
 ;;
 
+let rec rm_rf path =
+  if Sys.file_exists path
+  then if Sys.is_directory path
+  then (
+    Sys.readdir path |> Array.iter (fun entry -> rm_rf (Filename.concat path entry));
+    Unix.rmdir path)
+  else Sys.remove path
+;;
+
+let voice_session_test_base =
+  let path = Filename.temp_file "voice-runtime-overlay-" "" in
+  Sys.remove path;
+  Unix.mkdir path 0o755;
+  path
+;;
+
+let () =
+  Unix.putenv "MASC_BASE_PATH" voice_session_test_base;
+  Unix.putenv "MASC_BASE_PATH_INPUT" voice_session_test_base;
+  at_exit (fun () -> rm_rf voice_session_test_base)
+;;
+
 let test_resolve_voice_aliases () =
   let elevenlabs = Option.get (Voice.resolve_adapter "elevenlabs") in
   check string "elevenlabs alias" "elevenlabs-direct" elevenlabs.canonical_name;
@@ -191,7 +213,79 @@ let test_keeper_voice_speak_returns_queued_with_root_switch () =
     check string "queued status" "queued"
       Yojson.Safe.Util.(member "status" json |> to_string);
     check string "background execution" "background_voice_queue"
-      Yojson.Safe.Util.(member "execution" json |> to_string))
+      Yojson.Safe.Util.(member "execution" json |> to_string);
+    ignore (Masc.Voice_bridge.discard_queued_agent_speak ~agent_id:meta.name))
+;;
+
+let test_keeper_voice_session_start_does_not_store_session_name_as_voice () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let clock = Eio.Stdenv.clock env in
+  let mono_clock = Eio.Stdenv.mono_clock env in
+  Eio_context.with_test_env ~net ~clock ~mono_clock ~sw (fun () ->
+    let meta = make_keeper_meta "voice-session-name-regression" in
+    let session_name = "shutup-shutup-shutup" in
+    let raw =
+      Masc.Keeper_tool_voice_runtime.handle_voice_tool
+        ~meta
+        ~name:"keeper_voice_session_start"
+        ~args:(`Assoc [ "session_name", `String session_name ])
+    in
+    let json = Yojson.Safe.from_string raw in
+    let voice = Yojson.Safe.Util.(member "voice" json |> to_string) in
+    check bool "session_name is not persisted as voice" true
+      (not (String.equal session_name voice));
+    ignore
+      (Masc.Keeper_tool_voice_runtime.handle_voice_tool
+         ~meta
+         ~name:"keeper_voice_session_end"
+         ~args:(`Assoc [])))
+;;
+
+let test_keeper_voice_session_end_discards_queued_speech () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let clock = Eio.Stdenv.clock env in
+  let mono_clock = Eio.Stdenv.mono_clock env in
+  Eio_context.with_test_env ~net ~clock ~mono_clock ~sw (fun () ->
+    let meta = make_keeper_meta "voice-session-drain-keeper" in
+    ignore
+      (Masc.Keeper_tool_voice_runtime.handle_voice_tool
+         ~meta
+         ~name:"keeper_voice_session_start"
+         ~args:(`Assoc [ "session_name", `String "drain regression" ]));
+    let queued =
+      Masc.Voice_bridge.enqueue_agent_speak
+        ~sw
+        ~clock
+        ~net
+        ~agent_id:meta.name
+        ~message:"queued voice should be discarded"
+        ~start_worker:false
+        ()
+    in
+    (match queued with
+     | Ok speak_json ->
+       check string "queued status" "queued"
+         Yojson.Safe.Util.(member "status" speak_json |> to_string)
+     | Error err -> fail ("expected queued speech, got error: " ^ err));
+    let end_raw =
+      Masc.Keeper_tool_voice_runtime.handle_voice_tool
+        ~meta
+        ~name:"keeper_voice_session_end"
+        ~args:(`Assoc [])
+    in
+    let end_json = Yojson.Safe.from_string end_raw in
+    check string "session ended" "ended"
+      Yojson.Safe.Util.(member "status" end_json |> to_string);
+    check int "discarded queued job" 1
+      Yojson.Safe.Util.(member "discarded_voice_queue_jobs" end_json |> to_int))
 ;;
 
 let () =
@@ -222,6 +316,14 @@ let () =
             "keeper_voice_speak queues on root switch"
             `Quick
             test_keeper_voice_speak_returns_queued_with_root_switch
+        ; test_case
+            "session_start does not store session_name as voice"
+            `Quick
+            test_keeper_voice_session_start_does_not_store_session_name_as_voice
+        ; test_case
+            "session_end discards queued speech"
+            `Quick
+            test_keeper_voice_session_end_discards_queued_speech
         ] )
     ]
 ;;

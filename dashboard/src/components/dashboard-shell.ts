@@ -15,6 +15,7 @@ import { namespaceTruth, namespaceTruthInitializing } from '../namespace-truth-s
 import {
   configuredCountSourceLabel,
   formatKeeperCountBreakdown,
+  keeperRowLooksRunning,
   resolveRuntimeCounts,
   runtimeCountSourceLabel,
 } from '../runtime-counts'
@@ -457,12 +458,15 @@ export function dashboardHealthChips(input: DashboardHealthInput): DashboardHeal
   }
 
   const pausedKeepers = input.keepers.filter(isKeeperPaused).length
-  const fallbackRunningKeepers = Math.max(0, input.keepers.length - pausedKeepers)
+  const fallbackRunningKeepers = input.keepers.filter(keeperRowLooksRunning).length
+  const fallbackOfflineKeepers = Math.max(0, input.keepers.length - fallbackRunningKeepers - pausedKeepers)
   const runtimeCounts = resolveRuntimeCounts({
     executionLoaded: input.counts !== null || input.keepers.length > 0,
     agentsCount: input.counts?.agents ?? 0,
     keepersCount: input.counts?.keepers ?? fallbackRunningKeepers,
     pausedKeepersCount: pausedKeepers,
+    offlineKeepersCount: input.counts !== null ? 0 : fallbackOfflineKeepers,
+    keeperRowsCount: input.keepers.length,
     namespaceTruthCounts: input.namespaceTruthCounts,
     namespaceTruthConfiguredKeepers: input.namespaceTruthConfiguredKeepers,
     shellCounts: input.counts,
@@ -470,20 +474,21 @@ export function dashboardHealthChips(input: DashboardHealthInput): DashboardHeal
   })
   const configured = runtimeCounts.configured.keepers
   const liveKeepers = runtimeCounts.live.keepers
-  const activeCountSource = input.counts !== null
+  const runningCountSource = input.counts !== null
     ? 'shell'
     : input.keepers.length > 0
       ? '상세 행'
       : runtimeCountSourceLabel(runtimeCounts.source)
-  if (configured > 0 && (configured !== liveKeepers || pausedKeepers > 0)) {
+  if (configured > 0 && (configured !== liveKeepers || pausedKeepers > 0 || runtimeCounts.live.offlineKeepers > 0)) {
     chips.push({
       key: 'keeper-count-basis',
       label: formatKeeperCountBreakdown({
         liveKeepers,
         pausedKeepers,
+        offlineKeepers: runtimeCounts.live.offlineKeepers,
         configuredKeepers: configured,
       }),
-      detail: `활성=${activeCountSource} runtime, paused=상세 행 lifecycle, 설정=${configuredCountSourceLabel(runtimeCounts.configured.source)} keeper inventory.`,
+      detail: `런타임 가동=${runningCountSource}, paused=상세 행 lifecycle, offline=상세 행 status, 설정=${configuredCountSourceLabel(runtimeCounts.configured.source)} keeper inventory.`,
       tone: 'muted',
     })
   }

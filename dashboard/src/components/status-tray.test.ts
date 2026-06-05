@@ -116,10 +116,12 @@ describe('summarizeStatusTray', () => {
 
     expect(summary.items.transport.tone).toBe('ok')
     expect(summary.items.fleet.tone).toBe('warn')
-    expect(summary.items.fleet.value).toBe('1/2')
+    expect(summary.items.fleet.value).toBe('fresh 1/2')
+    expect(summary.items.fleet.detail).toBe('1 stale heartbeat; freshness is separate from running fibers')
     expect(summary.items.attention.tone).toBe('err')
     expect(summary.items.attention.value).toBe('4')
     expect(summary.counts).toMatchObject({
+      freshKeepers: 1,
       staleKeepers: 1,
       keeperAttention: 1,
       pendingVerificationTasks: 1,
@@ -162,7 +164,7 @@ describe('summarizeStatusTray', () => {
 
     expect(summary.counts.keeperAttention).toBe(1)
     expect(summary.items.fleet.tone).toBe('warn')
-    expect(summary.items.fleet.detail).toBe('1 keeper need attention')
+    expect(summary.items.fleet.detail).toBe('1 keeper need attention; heartbeat freshness is current')
     expect(summary.items.attention.tone).toBe('warn')
     expect(summary.items.attention.value).toBe('1')
   })

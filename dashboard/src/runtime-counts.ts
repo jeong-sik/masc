@@ -13,6 +13,8 @@ export interface LiveRuntimeView {
   agents: number
   keepers: number
   pausedKeepers: number
+  offlineKeepers: number
+  keeperRows: number
   tasks: number
   totalRuntimes: number
   available: boolean
@@ -33,6 +35,7 @@ export interface RuntimeCounts {
 export interface KeeperCountBreakdownInput {
   liveKeepers: number
   pausedKeepers?: number
+  offlineKeepers?: number
   configuredKeepers: number
 }
 
@@ -43,6 +46,8 @@ interface ResolveRuntimeCountsOptions {
   agentsCount: number
   keepersCount: number
   pausedKeepersCount?: number
+  offlineKeepersCount?: number
+  keeperRowsCount?: number
   tasksCount?: number
   namespaceTruthCounts?: DashboardNamespaceTruthResponse['root']['counts']
   namespaceTruthConfiguredKeepers?: number
@@ -54,6 +59,50 @@ function normalizeCount(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0
     ? Math.floor(value)
     : 0
+}
+
+function normalizeRuntimeToken(value: unknown): string {
+  return typeof value === 'string' ? value.trim().toLowerCase() : ''
+}
+
+export interface KeeperRuntimeCountRow {
+  status?: string | null
+  phase?: string | null
+  pipeline_stage?: string | null
+  paused?: boolean | null
+  keepalive_running?: boolean | null
+}
+
+const TERMINAL_KEEPER_RUNTIME_TOKENS = new Set(['paused', 'stopped', 'dead', 'zombie', 'crashed'])
+const OFFLINE_KEEPER_RUNTIME_TOKENS = new Set(['offline', 'inactive'])
+const RUNNING_KEEPER_RUNTIME_TOKENS = new Set(['active', 'busy', 'listening', 'idle', 'running'])
+
+export function keeperRowLooksRunning(row: KeeperRuntimeCountRow | null | undefined): boolean {
+  if (!row || row.paused === true) return false
+
+  const status = normalizeRuntimeToken(row.status)
+  const phase = normalizeRuntimeToken(row.phase)
+  const stage = normalizeRuntimeToken(row.pipeline_stage)
+  if (
+    TERMINAL_KEEPER_RUNTIME_TOKENS.has(status)
+    || TERMINAL_KEEPER_RUNTIME_TOKENS.has(phase)
+    || TERMINAL_KEEPER_RUNTIME_TOKENS.has(stage)
+  ) return false
+
+  if (row.keepalive_running === true) return true
+  if (row.keepalive_running === false) return false
+
+  if (
+    OFFLINE_KEEPER_RUNTIME_TOKENS.has(status)
+    || OFFLINE_KEEPER_RUNTIME_TOKENS.has(phase)
+    || OFFLINE_KEEPER_RUNTIME_TOKENS.has(stage)
+  ) return false
+
+  return (
+    RUNNING_KEEPER_RUNTIME_TOKENS.has(status)
+    || RUNNING_KEEPER_RUNTIME_TOKENS.has(phase)
+    || RUNNING_KEEPER_RUNTIME_TOKENS.has(stage)
+  )
 }
 
 function normalizeCounts(
@@ -119,10 +168,11 @@ function deriveStatusSource({
   live: LiveRuntimeView
   configured: ConfiguredRuntimeView
 }): RuntimeCountSource {
-  if (executionLoaded && (live.totalRuntimes > 0 || configured.totalRuntimes === 0)) {
+  const liveDetailRows = live.agents + live.keeperRows
+  if (executionLoaded && (liveDetailRows > 0 || configured.totalRuntimes === 0)) {
     return 'execution'
   }
-  if (live.totalRuntimes > 0) return 'partial'
+  if (liveDetailRows > 0) return 'partial'
   if (configured.source === 'namespace-truth') return 'project-snapshot'
   if (configured.source === 'shell') return 'shell'
   return executionLoaded ? 'execution' : 'unknown'
@@ -133,6 +183,8 @@ export function resolveRuntimeCounts({
   agentsCount,
   keepersCount,
   pausedKeepersCount = 0,
+  offlineKeepersCount,
+  keeperRowsCount,
   tasksCount = 0,
   namespaceTruthCounts,
   namespaceTruthConfiguredKeepers,
@@ -142,11 +194,18 @@ export function resolveRuntimeCounts({
   const liveAgents = normalizeCount(agentsCount)
   const liveKeepers = normalizeCount(keepersCount)
   const livePausedKeepers = normalizeCount(pausedKeepersCount)
+  const liveOfflineKeepers = normalizeCount(offlineKeepersCount)
+  const liveKeeperRows = Math.max(
+    normalizeCount(keeperRowsCount),
+    liveKeepers + livePausedKeepers + liveOfflineKeepers,
+  )
   const liveTasks = normalizeCount(tasksCount)
   const live: LiveRuntimeView = {
     agents: liveAgents,
     keepers: liveKeepers,
     pausedKeepers: livePausedKeepers,
+    offlineKeepers: Math.max(0, liveKeeperRows - liveKeepers - livePausedKeepers),
+    keeperRows: liveKeeperRows,
     tasks: liveTasks,
     totalRuntimes: liveAgents + liveKeepers,
     available: executionLoaded,
@@ -205,17 +264,19 @@ export function formatActiveOverConfigured(
   if (kind === 'keeper') {
     const running = counts.live.keepers
     const paused = counts.live.pausedKeepers
+    const offline = counts.live.offlineKeepers
     const configured = counts.configured.keepers
-    const parts = [`활성 ${running}`]
+    const parts = [`런타임 가동 ${running}`]
     if (paused > 0) parts.push(`일시정지 ${paused}`)
+    if (offline > 0) parts.push(`오프라인 ${offline}`)
     parts.push(`설정 ${configured}`)
     return parts.join(' / ')
   }
-  return `활성 ${counts.live.totalRuntimes} / 설정 ${counts.configured.totalRuntimes}`
+  return `런타임 가동 ${counts.live.totalRuntimes} / 설정 ${counts.configured.totalRuntimes}`
 }
 
 export function keeperDetailRows(counts: Pick<RuntimeCounts, 'live'>): number {
-  return counts.live.keepers + counts.live.pausedKeepers
+  return counts.live.keeperRows
 }
 
 export function runtimeDetailRows(counts: Pick<RuntimeCounts, 'live'>): number {
@@ -233,11 +294,14 @@ export function expectedRuntimeDetailRows(counts: Pick<RuntimeCounts, 'live' | '
 export function formatKeeperCountBreakdown({
   liveKeepers,
   pausedKeepers = 0,
+  offlineKeepers = 0,
   configuredKeepers,
 }: KeeperCountBreakdownInput): string {
-  const parts = [`키퍼 활성 ${normalizeCount(liveKeepers)}`]
+  const parts = [`키퍼 런타임 가동 ${normalizeCount(liveKeepers)}`]
   const paused = normalizeCount(pausedKeepers)
+  const offline = normalizeCount(offlineKeepers)
   if (paused > 0) parts.push(`일시정지 ${paused}`)
+  if (offline > 0) parts.push(`오프라인 ${offline}`)
   parts.push(`설정 ${normalizeCount(configuredKeepers)}`)
   return parts.join(' / ')
 }
@@ -248,6 +312,7 @@ export function formatKeeperRosterCount(counts: Pick<RuntimeCounts, 'live' | 'co
     formatKeeperCountBreakdown({
       liveKeepers: counts.live.keepers,
       pausedKeepers: counts.live.pausedKeepers,
+      offlineKeepers: counts.live.offlineKeepers,
       configuredKeepers: counts.configured.keepers,
     }).replace(/^키퍼 /, ''),
   ].join(' / ')
@@ -256,7 +321,7 @@ export function formatKeeperRosterCount(counts: Pick<RuntimeCounts, 'live' | 'co
 export function formatRuntimeRosterCount(counts: Pick<RuntimeCounts, 'live' | 'configured'>): string {
   return [
     `상세 ${runtimeDetailRows(counts)}`,
-    `활성 ${counts.live.totalRuntimes}`,
+    `런타임 가동 ${counts.live.totalRuntimes}`,
     `키퍼 설정 ${counts.configured.keepers}`,
   ].join(' / ')
 }

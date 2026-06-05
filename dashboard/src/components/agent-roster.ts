@@ -50,6 +50,7 @@ import {
   expectedRuntimeDetailRows,
   formatKeeperCountBreakdown,
   formatRuntimeRosterCount,
+  keeperRowLooksRunning,
   resolveRuntimeCounts,
   runtimeDetailRows,
   runtimeCountSourceLabel,
@@ -345,7 +346,7 @@ function expectedCountForKeeperFilter(
   keeperFilter: KeeperFilterMode,
   counts: ReturnType<typeof resolveRuntimeCounts>,
 ): number {
-  // Roster fallback messages compare against detail rows, not active runtime
+  // Roster fallback messages compare against detail rows, not running runtime
   // fibers. A paused keeper is not live capacity, but it is still a row the
   // operator expects to see in the directory.
   const useDetailRows = runtimeDetailRows(counts) > 0
@@ -357,7 +358,7 @@ function expectedCountForKeeperFilter(
 const FILTER_META: Record<StatusFilter, { label: string; description: string }> = {
   all: {
     label: '전체 상세',
-    description: 'execution 상세 행 전체를 보여줍니다. 활성 runtime 총계와는 별도 기준입니다.',
+    description: 'execution 상세 행 전체를 보여줍니다. 런타임 가동 총계와는 별도 기준입니다.',
   },
   active: { label: runtimeBandMeta('active').label, description: runtimeBandMeta('active').description },
   attention: { label: runtimeBandMeta('attention').label, description: runtimeBandMeta('attention').description },
@@ -561,7 +562,14 @@ function countAgentsByStatus(
 export function countRuntimeKinds(
   agentList: Agent[],
   keeperList: Keeper[],
-): { agents: number; keepers: number; pausedKeepers: number; totalRuntimes: number } {
+): {
+  agents: number
+  keepers: number
+  pausedKeepers: number
+  offlineKeepers: number
+  keeperRows: number
+  totalRuntimes: number
+} {
   const runtimeKeepers = runtimeBackedKeepers(keeperList, agentList)
   const rosterAgents = buildAgentRoster(agentList, runtimeKeepers)
   const keeperLookup = buildKeeperRuntimeLookup(runtimeKeepers)
@@ -570,17 +578,25 @@ export function countRuntimeKinds(
   // Agent rows only carry `keeper_id`/`keeper_name`, not the full Keeper, so
   // `a.keeper` was undefined here and `isKeeperPaused(undefined)` silently
   // returned false, leaving the paused count stuck at 0.
-  const pausedKeepers = allKeepers.filter(a => {
-    const keeper = findKeeperRuntimeForAgent(a, keeperLookup)
-    return keeper ? isKeeperPaused(keeper) : false
-  }).length
-  const runningKeepers = allKeepers.length - pausedKeepers
+  let pausedKeepers = 0
+  let runningKeepers = 0
+  for (const row of allKeepers) {
+    const keeper = findKeeperRuntimeForAgent(row, keeperLookup)
+    if (keeper && isKeeperPaused(keeper)) {
+      pausedKeepers += 1
+    } else if (keeperRowLooksRunning(keeper)) {
+      runningKeepers += 1
+    }
+  }
   const agentCount = scopeAgentsByKeeperFilter(rosterAgents, runtimeKeepers, 'agent-only', keeperLookup).length
+  const keeperRows = allKeepers.length
 
   return {
     agents: agentCount,
     keepers: runningKeepers,
     pausedKeepers,
+    offlineKeepers: Math.max(0, keeperRows - runningKeepers - pausedKeepers),
+    keeperRows,
     totalRuntimes: rosterAgents.length,
   }
 }
@@ -634,13 +650,26 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     const allKeepers = scopeAgentsByKeeperFilter(rosterAgents, runtimeKeeperList, 'keeper-only', keeperRuntimeLookup)
     // See countRuntimeKinds(): Agent rows expose only keeper identifiers, so
     // `a.keeper` is undefined and isKeeperPaused needs the hydrated Keeper.
-    const pausedCount = allKeepers.filter(a => {
-      const keeper = findKeeperRuntimeForAgent(a, keeperRuntimeLookup)
-      return keeper ? isKeeperPaused(keeper) : false
-    }).length
-    const runningCount = allKeepers.length - pausedCount
+    let pausedCount = 0
+    let runningCount = 0
+    for (const row of allKeepers) {
+      const keeper = findKeeperRuntimeForAgent(row, keeperRuntimeLookup)
+      if (keeper && isKeeperPaused(keeper)) {
+        pausedCount += 1
+      } else if (keeperRowLooksRunning(keeper)) {
+        runningCount += 1
+      }
+    }
     const agentCount = scopeAgentsByKeeperFilter(rosterAgents, runtimeKeeperList, 'agent-only', keeperRuntimeLookup).length
-    return { agents: agentCount, keepers: runningCount, pausedKeepers: pausedCount, totalRuntimes: rosterAgents.length }
+    const keeperRows = allKeepers.length
+    return {
+      agents: agentCount,
+      keepers: runningCount,
+      pausedKeepers: pausedCount,
+      offlineKeepers: Math.max(0, keeperRows - runningCount - pausedCount),
+      keeperRows,
+      totalRuntimes: rosterAgents.length,
+    }
   }, [rosterAgents, runtimeKeeperList, keeperRuntimeLookup])
 
   const runtimeCounts = resolveRuntimeCounts({
@@ -648,6 +677,8 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     agentsCount: liveRuntimeCounts.agents,
     keepersCount: liveRuntimeCounts.keepers,
     pausedKeepersCount: liveRuntimeCounts.pausedKeepers,
+    offlineKeepersCount: liveRuntimeCounts.offlineKeepers,
+    keeperRowsCount: liveRuntimeCounts.keeperRows,
     namespaceTruthCounts: namespaceTruth.value?.root.counts,
     namespaceTruthConfiguredKeepers: namespaceTruth.value?.root.configured_keepers,
     shellCounts: shellCounts.value,
@@ -759,21 +790,39 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
   }))
   const liveKeepers = runtimeCounts.live.keepers
   const livePausedKeepers = runtimeCounts.live.pausedKeepers
+  const liveOfflineKeepers = runtimeCounts.live.offlineKeepers
   const configuredKeepers = runtimeCounts.configured.keepers
-  const configuredKeeperDelta = Math.max(0, configuredKeepers - liveKeepers - livePausedKeepers)
+  const configuredKeeperDelta = Math.max(0, configuredKeepers - runtimeCounts.live.keeperRows)
+  const rawPausedKeepers = keeperList.filter(isKeeperPaused).length
+  const pausedOutsideDetail = Math.max(0, rawPausedKeepers - livePausedKeepers)
+  const notStartedKeepers = Math.max(0, configuredKeeperDelta - pausedOutsideDetail)
   const scopeLabel = keeperFilter === 'keeper-only'
     ? formatKeeperCountBreakdown({
         liveKeepers,
         pausedKeepers: livePausedKeepers,
+        offlineKeepers: liveOfflineKeepers,
         configuredKeepers,
       })
     : keeperFilter === 'agent-only'
-      ? `일반 에이전트 활성 ${runtimeCounts.live.agents}`
+      ? `일반 에이전트 런타임 가동 ${runtimeCounts.live.agents}`
       : formatRuntimeRosterCount(runtimeCounts)
+  const keeperStateHints = (
+    keeperFilter === 'keeper-only'
+      ? [
+          pausedOutsideDetail > 0 ? `목록 밖 일시정지 ${pausedOutsideDetail}개` : null,
+          notStartedKeepers > 0 ? `미기동 ${notStartedKeepers}개` : null,
+        ]
+      : [
+          livePausedKeepers > 0 ? `일시정지 ${livePausedKeepers}개` : null,
+          liveOfflineKeepers > 0 ? `오프라인 ${liveOfflineKeepers}개` : null,
+          pausedOutsideDetail > 0 ? `목록 밖 일시정지 ${pausedOutsideDetail}개` : null,
+          notStartedKeepers > 0 ? `미기동 ${notStartedKeepers}개` : null,
+        ]
+  ).filter((item): item is string => item != null)
   const configuredIdleHint =
-    keeperFilter === 'agent-only' || configuredKeeperDelta === 0
+    keeperFilter === 'agent-only' || keeperStateHints.length === 0
       ? null
-      : `일시정지/미기동 ${configuredKeeperDelta}개`
+      : `키퍼 ${keeperStateHints.join(' · ')}`
   const fallbackStateTitle =
     executionError.value
       ? '상세 상태 불러오기 실패'

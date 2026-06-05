@@ -299,11 +299,38 @@ let run (ctx : ctx)
              ~max_turns
          with
         | Error (denial : Keeper_internal_error.retry_admission_denial) ->
+          let denial_reason : Keeper_turn_driver.retry_admission_denial =
+            match denial with
+            | Keeper_internal_error.Retry_budget_below_min
+                { projected_usable_budget_s
+                ; min_required_s
+                ; remaining_turn_budget_s
+                ; adaptive_timeout_s
+                ; allow_wall_clock_retry_budget
+                } ->
+              Keeper_turn_driver.Retry_budget_below_min
+                { projected_usable_budget_s
+                ; min_required_s
+                ; remaining_turn_budget_s
+                ; adaptive_timeout_s
+                ; allow_wall_clock_retry_budget
+                }
+            | Keeper_internal_error.First_attempt_budget_below_min
+                { projected_usable_budget_s
+                ; min_required_s
+                ; remaining_turn_budget_s
+                } ->
+              Keeper_turn_driver.First_attempt_budget_below_min
+                { projected_usable_budget_s
+                ; min_required_s
+                ; remaining_turn_budget_s
+                }
+          in
           Error
             (Keeper_turn_driver.sdk_error_of_masc_internal_error
                (Keeper_turn_driver.Retry_admission_denied
                   {
-                    denial_reason = denial;
+                    denial_reason;
                     is_retry;
                   }))
         | Ok () ->

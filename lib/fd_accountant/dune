@@ -15,6 +15,7 @@
   masc.fs_compat
   masc.dated_jsonl
   masc.cdal_runtime
-  masc.masc_process)
+  masc.masc_process
+  masc.lockfree_atomic)
  (preprocess
   (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq)))

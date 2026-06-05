@@ -526,7 +526,7 @@ let install () =
 
   Atomic.set Task.Anti_rationalization.is_runtime_permanently_dead_fn (fun err ->
     match Keeper_turn_driver.classify_masc_internal_error err with
-    | Some (Keeper_turn_driver.Runtime_exhausted { reason = Keeper_meta_contract.No_tool_capable _; _ }) -> true
+    | Some (Keeper_turn_driver.Runtime_exhausted { reason = Keeper_turn_driver.No_tool_capable _; _ }) -> true
     | _ -> false);
 
   Atomic.set Workspace_hooks.record_thompson_result_fn (fun ~agent_name ~success ~reason ->

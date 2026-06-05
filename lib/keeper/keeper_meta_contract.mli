@@ -127,12 +127,12 @@ type usage_metrics = {
 
 (** {1 Blocker classification} *)
 
-type no_tool_capable_detail =
+type no_tool_capable_detail = Keeper_internal_error.no_tool_capable_detail =
   { configured_labels : string list
   ; provider_rejections : (string * string) list
   }
 
-type runtime_exhaustion_reason =
+type runtime_exhaustion_reason = Keeper_internal_error.runtime_exhaustion_reason =
   | Connection_refused
   | Dns_failure
       (** RFC-0142 PR-2: typed surface for hostname-resolution failure.

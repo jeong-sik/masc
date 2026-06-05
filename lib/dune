@@ -28,14 +28,12 @@
  keeper_turn_metrics_snapshot_failure_site
  keeper_metric_emit_dropped_site
  keeper_post_turn_wirein_failure_site
- silent_dashboard_actor_outcome
  sse_jsonrpc_filter
  keeper_tool_call_log_context
 
  board_prometheus_hooks
  workspace_prometheus_hooks
 
- keeper_persona_authoring_contract
  keeper_types_profile_sandbox
  keeper_types_profile_persona keeper_types_profile_persona_defaults
  keeper_types_profile_oas_env
@@ -267,6 +265,9 @@
    ;; leaf sub-library. The parent library still references those modules
    ;; unqualified, so it must depend on the leaf explicitly.
    masc.tool_types
+   masc.json_field
+   masc.lockfree_atomic
+   masc.keeper_metrics
    ;; RFC-0056 Phase 1L — Attribution envelope extracted to lib/attribution/.
    ;; Pure Attribution + phantom-tagged helpers, deps: stdlib + Yojson only.
    masc.attribution
@@ -289,6 +290,7 @@
      masc.prometheus
      masc.auth
      masc.fd_accountant
+     masc.pool_metrics
    ;; Model_inference_metrics facade + decomposition siblings extracted to
    ;; lib/model_inference_metrics/. Parent still references the bare facade.
    masc.model_inference_metrics

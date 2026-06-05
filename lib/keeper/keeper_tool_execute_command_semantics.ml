@@ -14,7 +14,7 @@ let effective_stages ir = Masc_exec.Shell_ir_command_shape.effective_stages ir
 let normalize_command_name =
   Masc_exec.Shell_ir_command_shape.normalize_command_name
 
-let cmd_prefix = Keeper_tool_execute_command_words.cmd_prefix
+let cmd_prefix = Keeper_tool_command_words.cmd_prefix
 
 let strip_simple_shell_quotes token =
   let len = String.length token in

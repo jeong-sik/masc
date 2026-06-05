@@ -4,10 +4,10 @@ last_verified: 2026-06-05
 code_refs:
   - lib/auth.ml
   - lib/auth/auth.mli
+  - lib/auth/auth_metric_store.ml
   - lib/server/server_runtime_bootstrap.ml
   - lib/server/server_bootstrap_loops.ml
-  - lib/prometheus.ml
-  - lib/prometheus/prometheus.mli
+  - lib/otel_metric_store.ml
   - infrastructure/monitoring/auth-credential-alerts.yml
 ---
 

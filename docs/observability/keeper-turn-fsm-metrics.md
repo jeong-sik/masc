@@ -4,7 +4,8 @@ last_verified: 2026-04-28
 code_refs:
   - lib/keeper/keeper_turn_fsm.ml
   - lib/keeper/keeper_unified_turn.ml
-  - lib/prometheus/prometheus.ml
+  - lib/keeper_metrics/keeper_metrics.ml
+  - lib/otel_metric_store.ml
   - bin/masc_trace.ml
 ---
 

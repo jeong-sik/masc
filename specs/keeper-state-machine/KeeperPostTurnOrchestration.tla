@@ -315,7 +315,7 @@ BugWireinOutOfOrder ==
 
 \* BugAction #2: blocker_info detail is stamped but klass remains
 \* "none".  This is the historical 4/14 keepers case: dashboard /
-\* Prometheus sees the text but the typed enum is null, so downstream
+\* Metric output sees the text but the typed enum is null, so downstream
 \* gates (Track A's blocker_class_indicates_overflow) never fire.
 \* Track A closed the consumer half; this spec catches the producer half.
 BugStampGap ==

@@ -94,9 +94,9 @@ When a count > 0, clicking it filters the matrix to show only keepers whose tran
 | Component         | `dashboard/src/components/fleet-fsm-matrix.ts`     | new    |
 | Component tests   | `dashboard/src/components/fleet-fsm-matrix.test.ts`| new    |
 | Dashboard mount   | `agents-unified.ts`                                | extend (new sub-view or tab) |
-| Prometheus counter| `masc_fleet_invariant_violations_total{invariant}` | new (LT-13) |
-| Alerting rules    | `infrastructure/monitoring/runtime-alerts.yml`     | extend (LT-13) |
-| Grafana panel     | `infrastructure/monitoring/grafana-runtime-dashboard.json` | extend (LT-13) |
+| OTel counter      | `masc_fleet_invariant_violations_total{invariant}` | new (LT-13) |
+| Alerting rules    | backend-specific config                            | extend (LT-13) |
+| Dashboard panel   | backend-specific dashboard                         | extend (LT-13) |
 | Spec cross-check  | `docs/observability/composite-fsm-matrix-design.md`| this file |
 
 ## 4. Spec ↔ code contract
@@ -108,7 +108,7 @@ Any state-label change is forbidden in exactly one place and required in every o
 3. `dashboard/src/api/schemas/keeper-composite.ts` `fallback()` union.
 4. `fsm-hub-types.ts:displayState` mapping.
 5. `fleet-fsm-matrix.ts` color map (new).
-6. Grafana legend (new in LT-13).
+6. Dashboard legend (new in LT-13).
 
 `runtime-metrics.md` already documents this contract for the runtime axis; this doc extends it to all five.
 
@@ -120,7 +120,7 @@ Each 20-minute tick lands at most one PR. Order minimises rebase contention.
 | ---- | ----------------------------------------- | ------------------------------------------------------ |
 | T+1  | **LT-12** (this file)                     | Design doc only. 0 runtime change. Draft.              |
 | T+2  | **LT-15** drift audit table               | `docs/observability/fsm-spec-code-drift.md`. 0 runtime change. |
-| T+3  | **LT-13** invariant counts → Prometheus   | counter + alert + Grafana panel. Back-end + infra only.|
+| T+3  | **LT-13** invariant counts → OTel         | counter + alert + dashboard panel. Back-end + infra only.|
 | T+4  | **LT-16a** backend fleet endpoint         | `keeper_composite_observer:all_snapshots` + route.     |
 | T+5  | **LT-16b** frontend matrix component      | `fleet-fsm-matrix.ts` + tests + mount.                 |
 | T+6  | **LT-14** OAS silent FSMs → event_bus     | runtime fallback, content_replacement, slot_scheduler. |

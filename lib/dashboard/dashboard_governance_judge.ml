@@ -46,7 +46,7 @@ type state = {
    [masc_after_turn_response_model_empty_total] introduced by
    #10083; separate metric name keeps governance vs keeper
    attribution clean while sharing the [unknown_provider]
-   marker string so PromQL can union-aggregate across both. *)
+   marker string so metric queries can union-aggregate across both. *)
 let governance_response_model_empty_metric =
   "masc_governance_response_model_empty_total"
 

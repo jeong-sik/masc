@@ -97,7 +97,7 @@ List.filter_map (function Ok t -> Some t | Error _ -> None)
 
 ### 5.1. Naked Callback Invocation (PR #11134, 2026-04-27)
 
-`~on_compaction_started` / `~on_handoff_started` 같은 lifecycle callback closure를 `try/with` 없이 호출하면 callback 내부(예: SSE/Prometheus dispatch) 실패가 caller(KCL/Rollover) 본체를 abort.
+`~on_compaction_started` / `~on_handoff_started` 같은 lifecycle callback closure를 `try/with` 없이 호출하면 callback 내부(예: SSE/metric dispatch) 실패가 caller(KCL/Rollover) 본체를 abort.
 
 **❌ DON'T:**
 ```ocaml
@@ -146,7 +146,7 @@ let _ = drain_turn_event_bus () in
 **✅ DO:**
 ```ocaml
 let _ = drain_turn_event_bus ~site:"background_poll" () in
-(* drain helper가 Prometheus.metric_keeper_event_bus_drain_total
+(* drain helper가 keeper_event_bus_drain_total
    {site, outcome} 자동 emit *)
 ```
 
@@ -429,7 +429,7 @@ cd dashboard && pnpm run build  # TypeScript type check
 
 ### 14.1. Pure Function 불변량
 
-`Keeper_state_machine.apply_event`와 `Keeper_runtime_routing.select_runtime`는 mli에 "Pure function — no I/O" 명시. 안에 `Prometheus.inc_counter` 추가하면:
+`Keeper_state_machine.apply_event`와 `Keeper_runtime_routing.select_runtime`는 mli에 "Pure function — no I/O" 명시. 안에 counter emission을 추가하면:
 - property test의 idempotency 가 false로 깨짐
 - counter label 결정이 함수 내부로 들어가 caller-context를 잃음 (edge label 결정 사이트가 흩어짐)
 

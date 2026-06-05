@@ -335,7 +335,7 @@ let sweep_and_recover (ctx : _ context) =
        publish_phase_lifecycle ~phase:Keeper_state_machine.Dead entry.name detail ();
        (* Loud alert: structured Dead event + Otel_metric_store counter so a fleet-wide
        silent crash (8 keepers, 2026-04-25) is impossible to miss in dashboard
-       or PromQL. The free-form [event="dead"] on masc.keeper.lifecycle does
+       or metric queries. The free-form [event="dead"] on masc.keeper.lifecycle does
        not carry restart_count or the structured failure reason. *)
        let last_fr_str =
          Option.map Keeper_registry.failure_reason_to_string entry.last_failure_reason

@@ -90,7 +90,7 @@ let run_safe ~caller ~timeout_s fn =
   | Eio.Cancel.Cancelled inner_exn as exn ->
     (* Mirror of #10942 (keeper_llm_bridge) for masc_oas_bridge: same opaque
        cancel message ate both wall-duration class and the inner cancel reason.
-       Bucket boundaries are kept identical so PromQL can union the two
+       Bucket boundaries are kept identical so metric queries can union the two
        sources into one bimodal view (fast/short_tail/mid_tail/long_mid/
        long_tail). [inner=...] surfaces the parent fiber's exception payload
        so [Eio.Cancel.Cancel_hook] vs supervisor-pause vs runtime-rotation

@@ -1,4 +1,4 @@
-(** Stable metric key encoding for the in-memory OTel metric store. *)
+(** Stable metric-key encoding for metric name plus label pairs. *)
 
 type label = string * string
 

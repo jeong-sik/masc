@@ -267,7 +267,6 @@
      masc.runtime
      masc.masc_event_bus
      masc.provider_tool_support
-     masc.keeper_failure
      masc.auth
      masc.fd_accountant
    ;; Model_inference_metrics facade + decomposition siblings extracted to

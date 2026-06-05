@@ -702,6 +702,11 @@ let dispatch ctx ~name ~args : tool_result option =
   | "masc_keeper_down" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_down ctx args))
   | "masc_keeper_list" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_list ctx args))
   | "masc_keeper_persona_audit" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_persona_audit ctx args))
+  | "masc_keeper_sandbox_status" ->
+      Some
+        (tool_result_with_tool_name
+           ~tool_name:name
+           (handle_keeper_sandbox_status ctx args))
   | "masc_keeper_reset" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_reset ctx args))
   | "masc_keeper_compact" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_compact ctx args))
   | "masc_keeper_clear" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_clear ctx args))
@@ -727,7 +732,8 @@ let dispatch_stream ~on_text_delta ctx ~name ~args : tool_result option =
 
 let tool_spec_read_only =
   [ "masc_persona_list"; "masc_keeper_list";
-    "masc_keeper_status"; "masc_keeper_persona_audit"; "masc_keeper_msg_queue" ]
+    "masc_keeper_status"; "masc_keeper_persona_audit";
+    "masc_keeper_sandbox_status"; "masc_keeper_msg_queue" ]
 
 let register_keeper_surface_schema (s : Masc_domain.tool_schema) =
   Tool_spec.register
@@ -805,6 +811,17 @@ let () =
         (tool_result_with_tool_name
            ~tool_name:name
            (Keeper_tool_surface_ops.keeper_repair_body ~config ~agent_name args))
+    | "masc_keeper_sandbox_status" ->
+      (match sw, clock with
+       | Some sw, Some clock ->
+         let ctx : _ Keeper_types_profile.context =
+           { config; agent_name; sw; clock; proc_mgr; net }
+         in
+         Some
+           (tool_result_with_tool_name
+              ~tool_name:name
+              (handle_keeper_sandbox_status ctx args))
+       | _ -> eio_context_missing name)
     | "masc_keeper_down" ->
       Keeper_tool_surface_ops.invalidate_keeper_list_cache ();
       Keeper_tool_surface_ops.invalidate_status_cache (Tool_args.get_string args "name" "");

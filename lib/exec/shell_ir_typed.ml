@@ -752,6 +752,7 @@ let path_args : wrapped -> string list = function
   | W (Java _) -> []
   | W (Javac _) -> []
   | W (Mvn _) -> []
+  | W (Cargo _) -> []
   | W (Cmake _) -> []
   | W (Dune_local_sh _) -> []
   | W (Osascript _) -> []

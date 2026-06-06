@@ -588,7 +588,11 @@ let handle_tool_execute_typed
           || Masc_exec.Shell_ir_risk.is_r1 envelope
           || Masc_exec.Shell_ir_risk.is_r2 envelope
         in
-        if (not write_enabled) && readonly_write_like && not is_direct_repo_git_recovery
+        if
+          (not write_enabled)
+          && readonly_write_like
+          && not is_git_diagnostic_command
+          && not is_direct_repo_git_recovery
         then
           blocked_result
             ~deterministic_reason:Keeper_tool_deterministic_error.Write_operation_gated

@@ -4,40 +4,34 @@ open Virtual_dom.Vdom
 
 let selected_name_var : string option Bonsai.Expert.Var.t =
   Bonsai.Expert.Var.create None
-;;
 
-type band =
-  [ `Active
-  | `Attention
-  | `Paused
-  | `Offline
-  ]
+type band = [ `Active | `Attention | `Paused | `Offline ]
 
-type row =
-  { name : string
-  ; band : band
-  ; status_label : string
-  ; status_color : Pill.color
-  ; phase_label : string option
-  ; context_pct : int option
-  ; context_detail : string option
-  ; recent_label : string
-  ; recent_value : string
-  ; keeper : Keepers_types.keeper
-  }
+type row = {
+  name : string;
+  band : band;
+  status_label : string;
+  status_color : Pill.color;
+  phase_label : string option;
+  context_pct : int option;
+  context_detail : string option;
+  recent_label : string;
+  recent_value : string;
+  keeper : Keepers_types.keeper;
+}
 
-type counts =
-  { total : int
-  ; active : int
-  ; attention : int
-  ; paused : int
-  ; offline : int
-  }
+type counts = {
+  total : int;
+  active : int;
+  attention : int;
+  paused : int;
+  offline : int;
+}
 
 module Style =
-[%css
-stylesheet
-  {|
+  [%css
+  stylesheet
+    {|
   .directory {
     border: 1px solid var(--color-border-default);
     background: color-mix(in oklab, var(--color-bg-page) 48%, transparent);
@@ -557,10 +551,7 @@ stylesheet
 |}]
 
 let row_sigil name =
-  if String.is_empty name
-  then "·"
-  else Char.to_string (Char.uppercase name.[0])
-;;
+  if String.is_empty name then "·" else Char.to_string (Char.uppercase name.[0])
 
 let phase_label_of_stat stat =
   match String.lowercase (String.strip stat) with
@@ -582,263 +573,271 @@ let phase_label_of_stat stat =
   | "restarting" -> Some "재시작중"
   | "" -> None
   | _ -> Some stat
-;;
 
 let format_compact_int value =
   let f = Float.of_int value in
-  if value >= 1_000_000
-  then Printf.sprintf "%.1fM" (f /. 1_000_000.0)
-  else if value >= 1000
-  then Printf.sprintf "%.1fK" (f /. 1000.0)
+  if value >= 1_000_000 then Printf.sprintf "%.1fM" (f /. 1_000_000.0)
+  else if value >= 1000 then Printf.sprintf "%.1fK" (f /. 1000.0)
   else Int.to_string value
-;;
 
 let band_of_keeper (keeper : Keepers_types.keeper) =
   match keeper.status with
   | Dead -> `Offline
   | Warn -> `Attention
   | Live -> `Active
-;;
 
 let status_meta (keeper : Keepers_types.keeper) (band : band) =
   let phase_label = phase_label_of_stat keeper.stat in
   let status_label, status_color =
     match band with
-    | `Active -> "가동중", `Ok
-    | `Attention -> "주의 필요", `Warn
-    | `Paused -> "일시정지", `Paused
-    | `Offline -> "오프라인", `Neutral
+    | `Active -> ("가동중", `Ok)
+    | `Attention -> ("주의 필요", `Warn)
+    | `Paused -> ("일시정지", `Paused)
+    | `Offline -> ("오프라인", `Neutral)
   in
-  phase_label, status_label, status_color
-;;
+  (phase_label, status_label, status_color)
 
 let build_rows ~(keepers : Keepers_types.response) : row list =
   List.map keepers.keepers ~f:(fun keeper ->
-    let band = band_of_keeper keeper in
-    let phase_label, status_label, status_color = status_meta keeper band in
-    let context_pct =
-      if keeper.ctx_pct > 0
-      then Some (Int.min 100 keeper.ctx_pct)
-      else None
-    in
-    let context_detail =
-      if keeper.mem_kb > 0
-      then Some (format_compact_int keeper.mem_kb)
-      else None
-    in
-    let recent_label, recent_value =
-      if keeper.turn > 0
-      then "턴", Printf.sprintf "%d/%d" keeper.turn keeper.turn_cap
-      else "최근성", "기록 없음"
-    in
-    { name = keeper.name
-    ; band
-    ; status_label
-    ; status_color
-    ; phase_label
-    ; context_pct
-    ; context_detail
-    ; recent_label
-    ; recent_value
-    ; keeper
-    })
-;;
+      let band = band_of_keeper keeper in
+      let phase_label, status_label, status_color = status_meta keeper band in
+      let context_pct =
+        if keeper.ctx_pct > 0 then Some (Int.min 100 keeper.ctx_pct) else None
+      in
+      let context_detail =
+        if keeper.mem_kb > 0 then Some (format_compact_int keeper.mem_kb)
+        else None
+      in
+      let recent_label, recent_value =
+        if keeper.turn > 0 then
+          ("턴", Printf.sprintf "%d/%d" keeper.turn keeper.turn_cap)
+        else ("최근성", "기록 없음")
+      in
+      {
+        name = keeper.name;
+        band;
+        status_label;
+        status_color;
+        phase_label;
+        context_pct;
+        context_detail;
+        recent_label;
+        recent_value;
+        keeper;
+      })
 
 let counts rows =
-  List.fold rows ~init:{ total = 0; active = 0; attention = 0; paused = 0; offline = 0 }
+  List.fold rows
+    ~init:{ total = 0; active = 0; attention = 0; paused = 0; offline = 0 }
     ~f:(fun acc row ->
       match row.band with
-      | `Active ->
-        { acc with total = acc.total + 1; active = acc.active + 1 }
+      | `Active -> { acc with total = acc.total + 1; active = acc.active + 1 }
       | `Attention ->
-        { acc with total = acc.total + 1; attention = acc.attention + 1 }
-      | `Paused ->
-        { acc with total = acc.total + 1; paused = acc.paused + 1 }
+          { acc with total = acc.total + 1; attention = acc.attention + 1 }
+      | `Paused -> { acc with total = acc.total + 1; paused = acc.paused + 1 }
       | `Offline ->
-        { acc with total = acc.total + 1; offline = acc.offline + 1 })
-;;
+          { acc with total = acc.total + 1; offline = acc.offline + 1 })
 
 let default_selected_name rows =
   List.find_map rows ~f:(fun row ->
-    match row.band with
-    | `Active | `Attention -> Some row.name
-    | `Paused | `Offline -> None)
-  |> Option.first_some (match rows with first :: _ -> Some first.name | [] -> None)
-;;
+      match row.band with
+      | `Active | `Attention -> Some row.name
+      | `Paused | `Offline -> None)
+  |> Option.first_some
+       (match rows with first :: _ -> Some first.name | [] -> None)
 
 let selected_row rows selected_name =
   let chosen_name =
     match selected_name with
-    | Some name when List.exists rows ~f:(fun row -> String.equal row.name name) ->
-      Some name
+    | Some name when List.exists rows ~f:(fun row -> String.equal row.name name)
+      ->
+        Some name
     | _ -> default_selected_name rows
   in
   Option.bind chosen_name ~f:(fun name ->
-    List.find rows ~f:(fun row -> String.equal row.name name))
-;;
+      List.find rows ~f:(fun row -> String.equal row.name name))
 
 let row_click_effect name =
   let select () = Bonsai.Expert.Var.set selected_name_var (Some name) in
-  [ Attr.on_click (fun _ -> Effect.of_sync_fun select ())
-  ; Attr.on_keydown (fun ev ->
-      (* Vdom keyboard event API moved out of Virtual_dom.Vdom.Event
+  [
+    Attr.on_click (fun _ -> Effect.of_sync_fun select ());
+    Attr.on_keydown (fun ev ->
+        (* Vdom keyboard event API moved out of Virtual_dom.Vdom.Event
          in newer bonsai_web; read the raw JS [key] field instead.
          Same activation contract as the click handler. *)
-      let key_str =
-        Js_of_ocaml.Js.Optdef.case
-          ev##.key
-          (fun () -> "")
-          Js_of_ocaml.Js.to_string
-      in
-      if String.equal key_str "Enter" || String.equal key_str " "
-      then Effect.of_sync_fun select ()
-      else Effect.of_sync_fun (fun () -> ()) ())
+        let key_str =
+          Js_of_ocaml.Js.Optdef.case ev##.key
+            (fun () -> "")
+            Js_of_ocaml.Js.to_string
+        in
+        if String.equal key_str "Enter" || String.equal key_str " " then
+          Effect.of_sync_fun select ()
+        else Effect.of_sync_fun (fun () -> ()) ());
   ]
-;;
 
 let context_class pct =
   match pct with
   | Some value when value >= 95 -> Style.metric_v_bad
   | Some value when value >= 80 -> Style.metric_v_warn
   | _ -> Style.metric_v
-;;
 
 let view_summary_strip ~(rows : row list) =
   let summary = counts rows in
-  Meta.strip
-    ~label:"Keepers summary"
-    [ Meta.cell
-        ~color:`Ok
-        ~k:"total"
-        ~v:(Printf.sprintf "%d" summary.total)
-        ()
-    ; Meta.cell
+  Meta.strip ~label:"Keepers summary"
+    [
+      Meta.cell ~color:`Ok ~k:"total" ~v:(Printf.sprintf "%d" summary.total) ();
+      Meta.cell
         ~color:(if summary.attention > 0 then `Blood else `Default)
         ~k:"attention"
         ~v:(Printf.sprintf "%d" summary.attention)
-        ()
-    ; Meta.cell
+        ();
+      Meta.cell
         ~color:(if summary.offline > 0 then `Default else `Brass)
         ~k:"offline"
         ~v:(Printf.sprintf "%d" summary.offline)
-        ()
+        ();
     ]
-;;
 
-let view
-      ~(rows : row list)
-      ~(selected_name : string option)
-  : Node.t
-  =
+let view ~(rows : row list) ~(selected_name : string option) : Node.t =
   match rows with
   | [] ->
-    Node.div
-      ~attrs:[ Style.quiet; Attr.role "status"; Attr.create "aria-label" "Directory loading" ]
-      [ Node.span ~attrs:[ Attr.create "lang" "ko" ]
-          [ Node.text
-              "keepers summary가 아직 조용합니다."
+      Node.div
+        ~attrs:
+          [
+            Style.quiet;
+            Attr.role "status";
+            Attr.create "aria-label" "Directory loading";
           ]
-      ]
+        [
+          Node.span
+            ~attrs:[ Attr.create "lang" "ko" ]
+            [ Node.text "keepers summary가 아직 조용합니다." ];
+        ]
   | _ ->
-    let selected = selected_row rows selected_name in
-    Node.div
-      ~attrs:[ Style.directory; Attr.role "table"; Attr.create "aria-label" "Keepers directory" ]
-      ([ Node.div
-           ~attrs:[ Style.head; Attr.role "row" ]
-           [ Node.div ~attrs:[ Attr.role "columnheader" ] [ Node.text "Sigil" ]
-           ; Node.div ~attrs:[ Attr.role "columnheader" ] [ Node.text "Keeper" ]
-           ; Node.div ~attrs:[ Attr.role "columnheader" ] [ Node.text "Brief" ]
-           ; Node.div ~attrs:[ Attr.role "columnheader" ] [ Node.text "State" ]
-           ; Node.div ~attrs:[ Attr.role "columnheader"; Style.metric ] [ Node.text "Recent" ]
-           ]
-       ]
-       @ List.map rows ~f:(fun row ->
-         let is_selected =
-           Option.exists selected ~f:(fun current ->
-             String.equal current.name row.name)
-         in
-         let subtitle_bits =
-           List.filter_opt
-             [ row.keeper.last_tool
-             ; (match row.keeper.turn_cap with
-                | 0 -> None
-                | cap -> Some (Printf.sprintf "cap:%d" cap))
-             ]
-         in
-         let summary_k, summary_v =
-           match row.keeper.last_tool with
-           | Some tool -> "최근 도구", tool
-           | None -> "상태", row.keeper.stat
-         in
-         let row_attrs =
-           [ Style.row
-           ; Attr.tabindex 0
-           ; Attr.role "row"
-           ; Attr.create "aria-label" row.name
-           ; Attr.create "aria-selected" (if is_selected then "true" else "false")
-           ]
-           @ row_click_effect row.name
-           @ if is_selected then [ Style.row_selected ] else []
-         in
-         Node.div
-           ~attrs:row_attrs
-           [ Node.div ~attrs:[ Style.sigil; Attr.role "cell" ] [ Node.text (row_sigil row.name) ]
-           ; Node.div
-               ~attrs:[ Style.identity; Attr.role "cell" ]
-               [ Node.div ~attrs:[ Style.name ] [ Node.text row.name ]
-               ; Node.div
-                   ~attrs:[ Style.subline ]
-                   [ Node.text (String.concat ~sep:" · " subtitle_bits) ]
-               ]
-           ; Node.div
-               ~attrs:[ Style.summary; Attr.role "cell" ]
-               [ Node.div ~attrs:[ Style.summary_k ] [ Node.text summary_k ]
-               ; Node.div ~attrs:[ Style.summary_v ] [ Node.text summary_v ]
-               ]
-           ; Node.div
-               ~attrs:[ Style.chip_stack; Attr.role "cell" ]
-               [ Node.div
-                   ~attrs:[ Style.chip_row ]
-                   [ Pill.view ~size:`Sm ~color:row.status_color
-                       ~label:row.status_label ()
-                   ]
-               ; Node.div
-                   ~attrs:[ Style.subline ]
-                   [ Node.text
-                       (Option.value
-                          row.phase_label
-                          ~default:"상세 phase 없음")
-                   ]
-               ]
-           ; Node.div
-               ~attrs:[ Style.metric; Attr.role "cell" ]
-               [ Node.div
-                   ~attrs:[ context_class row.context_pct ]
-                   [ Node.text
-                       (match row.context_pct with
-                        | Some pct -> Printf.sprintf "%d%%" pct
-                        | None -> "—")
-                   ]
-               ; Node.div
-                   ~attrs:[ Style.metric_sub ]
-                   [ Node.text
-                       (Option.value
-                          (Option.first_some row.context_detail (Some row.recent_value))
-                          ~default:"—")
-                   ]
-               ; Node.div
-                   ~attrs:[ Style.metric_sub ]
-                   [ Node.text (row.recent_label ^ " · " ^ row.recent_value) ]
-               ]
-           ]))
-;;
+      let selected = selected_row rows selected_name in
+      Node.div
+        ~attrs:
+          [
+            Style.directory;
+            Attr.role "table";
+            Attr.create "aria-label" "Keepers directory";
+          ]
+        ([
+           Node.div
+             ~attrs:[ Style.head; Attr.role "row" ]
+             [
+               Node.div
+                 ~attrs:[ Attr.role "columnheader" ]
+                 [ Node.text "Sigil" ];
+               Node.div
+                 ~attrs:[ Attr.role "columnheader" ]
+                 [ Node.text "Keeper" ];
+               Node.div
+                 ~attrs:[ Attr.role "columnheader" ]
+                 [ Node.text "Brief" ];
+               Node.div
+                 ~attrs:[ Attr.role "columnheader" ]
+                 [ Node.text "State" ];
+               Node.div
+                 ~attrs:[ Attr.role "columnheader"; Style.metric ]
+                 [ Node.text "Recent" ];
+             ];
+         ]
+        @ List.map rows ~f:(fun row ->
+            let is_selected =
+              Option.exists selected ~f:(fun current ->
+                  String.equal current.name row.name)
+            in
+            let subtitle_bits =
+              List.filter_opt
+                [
+                  row.keeper.last_tool;
+                  (match row.keeper.turn_cap with
+                  | 0 -> None
+                  | cap -> Some (Printf.sprintf "cap:%d" cap));
+                ]
+            in
+            let summary_k, summary_v =
+              match row.keeper.last_tool with
+              | Some tool -> ("최근 도구", tool)
+              | None -> ("상태", row.keeper.stat)
+            in
+            let row_attrs =
+              [
+                Style.row;
+                Attr.tabindex 0;
+                Attr.role "row";
+                Attr.create "aria-label" row.name;
+                Attr.create "aria-selected"
+                  (if is_selected then "true" else "false");
+              ]
+              @ row_click_effect row.name
+              @ if is_selected then [ Style.row_selected ] else []
+            in
+            Node.div ~attrs:row_attrs
+              [
+                Node.div
+                  ~attrs:[ Style.sigil; Attr.role "cell" ]
+                  [ Node.text (row_sigil row.name) ];
+                Node.div
+                  ~attrs:[ Style.identity; Attr.role "cell" ]
+                  [
+                    Node.div ~attrs:[ Style.name ] [ Node.text row.name ];
+                    Node.div ~attrs:[ Style.subline ]
+                      [ Node.text (String.concat ~sep:" · " subtitle_bits) ];
+                  ];
+                Node.div
+                  ~attrs:[ Style.summary; Attr.role "cell" ]
+                  [
+                    Node.div ~attrs:[ Style.summary_k ] [ Node.text summary_k ];
+                    Node.div ~attrs:[ Style.summary_v ] [ Node.text summary_v ];
+                  ];
+                Node.div
+                  ~attrs:[ Style.chip_stack; Attr.role "cell" ]
+                  [
+                    Node.div ~attrs:[ Style.chip_row ]
+                      [
+                        Pill.view ~size:`Sm ~color:row.status_color
+                          ~label:row.status_label ();
+                      ];
+                    Node.div ~attrs:[ Style.subline ]
+                      [
+                        Node.text
+                          (Option.value row.phase_label ~default:"상세 phase 없음");
+                      ];
+                  ];
+                Node.div
+                  ~attrs:[ Style.metric; Attr.role "cell" ]
+                  [
+                    Node.div
+                      ~attrs:[ context_class row.context_pct ]
+                      [
+                        Node.text
+                          (match row.context_pct with
+                          | Some pct -> Printf.sprintf "%d%%" pct
+                          | None -> "—");
+                      ];
+                    Node.div ~attrs:[ Style.metric_sub ]
+                      [
+                        Node.text
+                          (Option.value
+                             (Option.first_some row.context_detail
+                                (Some row.recent_value))
+                             ~default:"—");
+                      ];
+                    Node.div ~attrs:[ Style.metric_sub ]
+                      [
+                        Node.text (row.recent_label ^ " · " ^ row.recent_value);
+                      ];
+                  ];
+              ]))
 
 let stat_cell ~label ~value =
   Node.div
-    [ Node.div ~attrs:[ Shell_view.Style.stat_l ] [ Node.text label ]
-    ; Node.div ~attrs:[ Shell_view.Style.stat_v ] [ Node.text value ]
+    [
+      Node.div ~attrs:[ Shell_view.Style.stat_l ] [ Node.text label ];
+      Node.div ~attrs:[ Shell_view.Style.stat_v ] [ Node.text value ];
     ]
-;;
 
 let focus_card row =
   let vial_pct = Option.value row.context_pct ~default:0 in
@@ -848,81 +847,93 @@ let focus_card row =
   in
   let vial_fill_attrs =
     [ vial_style ]
-    @ if Option.exists row.context_pct ~f:(fun pct -> pct >= 95)
-      then [ Style.vial_fill_bad ]
-      else if Option.exists row.context_pct ~f:(fun pct -> pct >= 80)
-      then [ Style.vial_fill_warn ]
-      else []
+    @
+    if Option.exists row.context_pct ~f:(fun pct -> pct >= 95) then
+      [ Style.vial_fill_bad ]
+    else if Option.exists row.context_pct ~f:(fun pct -> pct >= 80) then
+      [ Style.vial_fill_warn ]
+    else []
   in
   Node.div
-    [ Shell_view.aside_title ~right:row.status_label "Focus"
-    ; Node.div
-        ~attrs:[ Shell_view.Style.focus ]
-        [ Node.div
+    [
+      Shell_view.aside_title ~right:row.status_label "Focus";
+      Node.div ~attrs:[ Shell_view.Style.focus ]
+        [
+          Node.div
             ~attrs:[ Shell_view.Style.focus_inner ]
-            [ Node.div
+            [
+              Node.div
                 ~attrs:[ Shell_view.Style.focus_row ]
-                [ Node.div ~attrs:[ Shell_view.Style.portrait ]
-                    [ Node.text (row_sigil row.name) ]
-                ; Node.div
-                    [ Node.div ~attrs:[ Shell_view.Style.focus_name ] [ Node.text row.name ]
-                    ; Node.div
+                [
+                  Node.div
+                    ~attrs:[ Shell_view.Style.portrait ]
+                    [ Node.text (row_sigil row.name) ];
+                  Node.div
+                    [
+                      Node.div
+                        ~attrs:[ Shell_view.Style.focus_name ]
+                        [ Node.text row.name ];
+                      Node.div
                         ~attrs:[ Shell_view.Style.focus_role ]
-                        [ Node.text row.keeper.stat ]
-                    ]
-                ]
-            ; Node.div
-                [ Node.div
+                        [ Node.text row.keeper.stat ];
+                    ];
+                ];
+              Node.div
+                [
+                  Node.div
                     ~attrs:[ Shell_view.Style.vial_lbl ]
-                    [ Node.span [ Node.text "Context" ]
-                    ; Node.span
-                        [ Node.b
-                            [ Node.text
+                    [
+                      Node.span [ Node.text "Context" ];
+                      Node.span
+                        [
+                          Node.b
+                            [
+                              Node.text
                                 (match row.context_pct with
-                                 | Some pct -> Printf.sprintf "%d%%" pct
-                                 | None -> "—") ]
-                        ; Node.text
+                                | Some pct -> Printf.sprintf "%d%%" pct
+                                | None -> "—");
+                            ];
+                          Node.text
                             (match row.context_detail with
-                             | Some detail -> " . " ^ detail
-                             | None -> "")
-                        ]
-                    ]
-                ; Node.div
-                    ~attrs:[ Shell_view.Style.vial ]
-                    [ Node.span ~attrs:(Attr.create "aria-hidden" "true" :: vial_fill_attrs) [] ]
-                ]
-            ; Node.div
-                ~attrs:[ Shell_view.Style.stats ]
-                [ stat_cell ~label:"상태" ~value:row.status_label
-                ; stat_cell ~label:"최근성" ~value:row.recent_value
-                ; stat_cell
-                    ~label:"Phase"
-                    ~value:(Option.value row.phase_label ~default:"—")
-                ; stat_cell
-                    ~label:"Turn"
-                    ~value:(Printf.sprintf "%d/%d" row.keeper.turn row.keeper.turn_cap)
-                ; stat_cell
-                    ~label:"Latency"
-                    ~value:(Printf.sprintf "%dms" row.keeper.latency_ms)
-                ; stat_cell
-                    ~label:"Memory"
-                    ~value:(format_compact_int row.keeper.mem_kb)
-                ]
-            ]
-        ]
+                            | Some detail -> " . " ^ detail
+                            | None -> "");
+                        ];
+                    ];
+                  Node.div ~attrs:[ Shell_view.Style.vial ]
+                    [
+                      Node.span
+                        ~attrs:
+                          (Attr.create "aria-hidden" "true" :: vial_fill_attrs)
+                        [];
+                    ];
+                ];
+              Node.div ~attrs:[ Shell_view.Style.stats ]
+                [
+                  stat_cell ~label:"상태" ~value:row.status_label;
+                  stat_cell ~label:"최근성" ~value:row.recent_value;
+                  stat_cell ~label:"Phase"
+                    ~value:(Option.value row.phase_label ~default:"—");
+                  stat_cell ~label:"Turn"
+                    ~value:
+                      (Printf.sprintf "%d/%d" row.keeper.turn
+                         row.keeper.turn_cap);
+                  stat_cell ~label:"Latency"
+                    ~value:(Printf.sprintf "%dms" row.keeper.latency_ms);
+                  stat_cell ~label:"Memory"
+                    ~value:(format_compact_int row.keeper.mem_kb);
+                ];
+            ];
+        ];
     ]
-;;
 
 let clamp_pct value = Int.max 0 (Int.min 100 value)
-;;
 
 let scope_chip ~k ~v =
-  Node.span
-    ~attrs:[ Style.scope_chip ]
-    [ Node.span ~attrs:[ Style.scope_k ] [ Node.text k ]
-    ; Node.span ~attrs:[ Style.scope_v ] [ Node.text v ]
+  Node.span ~attrs:[ Style.scope_chip ]
+    [
+      Node.span ~attrs:[ Style.scope_k ] [ Node.text k ];
+      Node.span ~attrs:[ Style.scope_v ] [ Node.text v ];
     ]
-;;
 
 let view_scope_strip row =
   let ctx =
@@ -931,123 +942,139 @@ let view_scope_strip row =
     | None -> "—"
   in
   Node.div
-    [ Shell_view.aside_title ~right:"scope" "Snapshot"
-    ; Node.div
-        ~attrs:[ Style.scope_strip; Attr.create "aria-label" "Selected keeper scope" ]
-        [ scope_chip ~k:"state" ~v:row.status_label
-        ; scope_chip ~k:"phase" ~v:(Option.value row.phase_label ~default:"—")
-        ; scope_chip
-            ~k:"turn"
-            ~v:(Printf.sprintf "%d/%d" row.keeper.turn row.keeper.turn_cap)
-        ; scope_chip ~k:"ctx" ~v:ctx
-        ; scope_chip ~k:"lat" ~v:(Printf.sprintf "%dms" row.keeper.latency_ms)
-        ]
+    [
+      Shell_view.aside_title ~right:"scope" "Snapshot";
+      Node.div
+        ~attrs:
+          [
+            Style.scope_strip; Attr.create "aria-label" "Selected keeper scope";
+          ]
+        [
+          scope_chip ~k:"state" ~v:row.status_label;
+          scope_chip ~k:"phase" ~v:(Option.value row.phase_label ~default:"—");
+          scope_chip ~k:"turn"
+            ~v:(Printf.sprintf "%d/%d" row.keeper.turn row.keeper.turn_cap);
+          scope_chip ~k:"ctx" ~v:ctx;
+          scope_chip ~k:"lat" ~v:(Printf.sprintf "%dms" row.keeper.latency_ms);
+        ];
     ]
-;;
 
-type evidence_item =
-  { title : string
-  ; meta : string
-  ; tail : string
-  }
+type evidence_item = { title : string; meta : string; tail : string }
 
 let evidence_items row =
   let tool_item =
     match row.keeper.last_tool with
     | Some tool ->
-      { title = tool
-      ; meta = "last tool observed from keeper summary"
-      ; tail = "tool"
-      }
+        {
+          title = tool;
+          meta = "last tool observed from keeper summary";
+          tail = "tool";
+        }
     | None ->
-      { title = "tool surface quiet"
-      ; meta = "no last_tool in current snapshot"
-      ; tail = "quiet"
-      }
+        {
+          title = "tool surface quiet";
+          meta = "no last_tool in current snapshot";
+          tail = "quiet";
+        }
   in
   let turn_item =
-    { title = "turn budget"
-    ; meta = Printf.sprintf "%d of %d turns consumed" row.keeper.turn row.keeper.turn_cap
-    ; tail = "turn"
+    {
+      title = "turn budget";
+      meta =
+        Printf.sprintf "%d of %d turns consumed" row.keeper.turn
+          row.keeper.turn_cap;
+      tail = "turn";
     }
   in
   let frame_count = List.length row.keeper.lane_frames in
   let frame_item =
-    { title = "activity frames"
-    ; meta =
-        if frame_count = 0
-        then "no lane frame emitted in this summary"
-        else Printf.sprintf "%d lane frames in current window" frame_count
-    ; tail = "lane"
+    {
+      title = "activity frames";
+      meta =
+        (if frame_count = 0 then "no lane frame emitted in this summary"
+         else Printf.sprintf "%d lane frames in current window" frame_count);
+      tail = "lane";
     }
   in
   let ctx_count = List.length row.keeper.ctx_history in
   let ctx_item =
-    { title = "context pressure"
-    ; meta =
-        (match row.context_pct, row.context_detail with
-         | Some pct, Some detail -> Printf.sprintf "%d%% · %s memory" pct detail
-         | Some pct, None -> Printf.sprintf "%d%% current context" pct
-         | None, Some detail -> Printf.sprintf "%s memory" detail
-         | None, None -> "no context pressure sample")
-    ; tail = if ctx_count = 0 then "ctx" else Printf.sprintf "%d pts" ctx_count
+    {
+      title = "context pressure";
+      meta =
+        (match (row.context_pct, row.context_detail) with
+        | Some pct, Some detail -> Printf.sprintf "%d%% · %s memory" pct detail
+        | Some pct, None -> Printf.sprintf "%d%% current context" pct
+        | None, Some detail -> Printf.sprintf "%s memory" detail
+        | None, None -> "no context pressure sample");
+      tail =
+        (if ctx_count = 0 then "ctx" else Printf.sprintf "%d pts" ctx_count);
     }
   in
   [ tool_item; turn_item; frame_item; ctx_item ]
-;;
 
 let evidence_row item =
   Node.div
     ~attrs:[ Style.evidence_row; Attr.role "listitem" ]
-    [ Node.span ~attrs:[ Style.evidence_icon; Attr.create "aria-hidden" "true" ] []
-    ; Node.span
-        ~attrs:[ Style.evidence_main ]
-        [ Node.span ~attrs:[ Style.evidence_title ] [ Node.text item.title ]
-        ; Node.span ~attrs:[ Style.evidence_meta ] [ Node.text item.meta ]
-        ]
-    ; Node.span ~attrs:[ Style.evidence_tail ] [ Node.text item.tail ]
+    [
+      Node.span
+        ~attrs:[ Style.evidence_icon; Attr.create "aria-hidden" "true" ]
+        [];
+      Node.span ~attrs:[ Style.evidence_main ]
+        [
+          Node.span ~attrs:[ Style.evidence_title ] [ Node.text item.title ];
+          Node.span ~attrs:[ Style.evidence_meta ] [ Node.text item.meta ];
+        ];
+      Node.span ~attrs:[ Style.evidence_tail ] [ Node.text item.tail ];
     ]
-;;
 
 let view_evidence row =
-  Node.div
-    ~attrs:[ Style.detail_block ]
-    [ Shell_view.aside_title ~right:"from summary" "Evidence"
-    ; Node.div
-        ~attrs:[ Style.evidence_list; Attr.role "list"; Attr.create "aria-label" "Keeper evidence rail" ]
-        (List.map (evidence_items row) ~f:evidence_row)
+  Node.div ~attrs:[ Style.detail_block ]
+    [
+      Shell_view.aside_title ~right:"from summary" "Evidence";
+      Node.div
+        ~attrs:
+          [
+            Style.evidence_list;
+            Attr.role "list";
+            Attr.create "aria-label" "Keeper evidence rail";
+          ]
+        (List.map (evidence_items row) ~f:evidence_row);
     ]
-;;
 
 let outcome_copy row =
   match row.band with
   | `Active ->
-    "현재 턴/컨텍스트/도구 신호가 살아 있습니다. 다음 판단은 activity frame과 last tool에서 이어집니다."
+      "현재 턴/컨텍스트/도구 신호가 살아 있습니다. 다음 판단은 activity frame과 last tool에서 이어집니다."
   | `Attention ->
-    "주의 상태입니다. 최근 도구, latency, context pressure를 먼저 확인하고 필요하면 Keeper 로그로 내려가야 합니다."
-  | `Paused ->
-    "일시정지 상태입니다. 운영자 의도에 따른 pause인지, 재개 가능한 상태인지 확인해야 합니다."
+      "주의 상태입니다. 최근 도구, latency, context pressure를 먼저 확인하고 필요하면 Keeper 로그로 \
+       내려가야 합니다."
+  | `Paused -> "일시정지 상태입니다. 운영자 의도에 따른 pause인지, 재개 가능한 상태인지 확인해야 합니다."
   | `Offline ->
-    "오프라인 상태입니다. keepalive, runtime receipt, supervisor 복구 흔적을 우선 확인해야 합니다."
-;;
+      "오프라인 상태입니다. keepalive, runtime receipt, supervisor 복구 흔적을 우선 확인해야 합니다."
 
 let view_outcome row =
-  Node.div
-    ~attrs:[ Style.detail_block ]
-    [ Shell_view.aside_title ~right:"next read" "Outcome"
-    ; Node.div
-        ~attrs:[ Style.outcome; Attr.role "note"; Attr.create "aria-label" "Keeper outcome summary" ]
-        [ Node.div
-            ~attrs:[ Style.outcome_head ]
-            [ Pill.view ~size:`Sm ~color:row.status_color ~label:row.status_label ()
-            ; Node.div ~attrs:[ Style.outcome_title ] [ Node.text row.name ]
-            ]
-        ; Node.div
+  Node.div ~attrs:[ Style.detail_block ]
+    [
+      Shell_view.aside_title ~right:"next read" "Outcome";
+      Node.div
+        ~attrs:
+          [
+            Style.outcome;
+            Attr.role "note";
+            Attr.create "aria-label" "Keeper outcome summary";
+          ]
+        [
+          Node.div ~attrs:[ Style.outcome_head ]
+            [
+              Pill.view ~size:`Sm ~color:row.status_color
+                ~label:row.status_label ();
+              Node.div ~attrs:[ Style.outcome_title ] [ Node.text row.name ];
+            ];
+          Node.div
             ~attrs:[ Style.outcome_copy; Attr.create "lang" "ko" ]
-            [ Node.text (outcome_copy row) ]
-        ]
+            [ Node.text (outcome_copy row) ];
+        ];
     ]
-;;
 
 let frame_kind_label kind =
   match String.lowercase (String.strip kind) with
@@ -1058,7 +1085,6 @@ let frame_kind_label kind =
   | "err" | "error" -> "error"
   | "" -> "frame"
   | other -> other
-;;
 
 let frame_fill_class kind =
   match String.lowercase (String.strip kind) with
@@ -1067,83 +1093,84 @@ let frame_fill_class kind =
   | "wait" -> Style.frame_wait
   | "err" | "error" -> Style.frame_err
   | _ -> Style.frame_fill
-;;
 
 let frame_stat ~k ~v =
   Node.div
-    [ Node.div ~attrs:[ Style.frame_k ] [ Node.text k ]
-    ; Node.div ~attrs:[ Style.frame_v ] [ Node.text v ]
+    [
+      Node.div ~attrs:[ Style.frame_k ] [ Node.text k ];
+      Node.div ~attrs:[ Style.frame_v ] [ Node.text v ];
     ]
-;;
 
 let view_frame ~(index : int) (frame : Keepers_types.lane_frame) =
   let left = clamp_pct frame.left in
   let width = clamp_pct frame.width in
   let title =
-    if String.is_empty (String.strip frame.label)
-    then frame_kind_label frame.kind
+    if String.is_empty (String.strip frame.label) then
+      frame_kind_label frame.kind
     else frame.label
   in
   let lead_attrs =
-    [ Style.frame_lead
-    ; Attr.style (Css_gen.create ~field:"width" ~value:(Printf.sprintf "%d%%" left))
+    [
+      Style.frame_lead;
+      Attr.style
+        (Css_gen.create ~field:"width" ~value:(Printf.sprintf "%d%%" left));
     ]
   in
   let fill_attrs =
-    [ Style.frame_fill
-    ; frame_fill_class frame.kind
-    ; Attr.style (Css_gen.create ~field:"width" ~value:(Printf.sprintf "%d%%" width))
+    [
+      Style.frame_fill;
+      frame_fill_class frame.kind;
+      Attr.style
+        (Css_gen.create ~field:"width" ~value:(Printf.sprintf "%d%%" width));
     ]
   in
   let details_attrs =
-    [ Style.timeline_item
-    ; Attr.create "aria-label" (Printf.sprintf "Activity frame %d" (index + 1))
+    [
+      Style.timeline_item;
+      Attr.create "aria-label" (Printf.sprintf "Activity frame %d" (index + 1));
     ]
     @ if index = 0 then [ Attr.create "open" "" ] else []
   in
-  Node.create
-    "details"
-    ~attrs:details_attrs
-    [ Node.create
-        "summary"
-        ~attrs:[ Style.timeline_summary ]
-        [ Node.span ~attrs:[ Style.timeline_toggle; Attr.create "aria-hidden" "true" ] []
-        ; Node.span ~attrs:[ Style.timeline_title ] [ Node.text title ]
-        ; Node.span
-            ~attrs:[ Style.timeline_meta ]
-            [ Node.text (Printf.sprintf "%s · %d%%" (frame_kind_label frame.kind) width) ]
-        ]
-    ; Node.div
-        ~attrs:[ Style.timeline_body ]
-        [ Node.div
-            ~attrs:[ Style.frame_track ]
-            [ Node.div ~attrs:lead_attrs []; Node.div ~attrs:fill_attrs [] ]
-        ; Node.div
-            ~attrs:[ Style.frame_grid ]
-            [ frame_stat ~k:"start" ~v:(Printf.sprintf "%d%%" left)
-            ; frame_stat ~k:"width" ~v:(Printf.sprintf "%d%%" width)
-            ; frame_stat ~k:"kind" ~v:(frame_kind_label frame.kind)
-            ]
-        ]
+  Node.create "details" ~attrs:details_attrs
+    [
+      Node.create "summary" ~attrs:[ Style.timeline_summary ]
+        [
+          Node.span
+            ~attrs:[ Style.timeline_toggle; Attr.create "aria-hidden" "true" ]
+            [];
+          Node.span ~attrs:[ Style.timeline_title ] [ Node.text title ];
+          Node.span ~attrs:[ Style.timeline_meta ]
+            [
+              Node.text
+                (Printf.sprintf "%s · %d%%" (frame_kind_label frame.kind) width);
+            ];
+        ];
+      Node.div ~attrs:[ Style.timeline_body ]
+        [
+          Node.div ~attrs:[ Style.frame_track ]
+            [ Node.div ~attrs:lead_attrs []; Node.div ~attrs:fill_attrs [] ];
+          Node.div ~attrs:[ Style.frame_grid ]
+            [
+              frame_stat ~k:"start" ~v:(Printf.sprintf "%d%%" left);
+              frame_stat ~k:"width" ~v:(Printf.sprintf "%d%%" width);
+              frame_stat ~k:"kind" ~v:(frame_kind_label frame.kind);
+            ];
+        ];
     ]
-;;
 
 let synthetic_frame row : Keepers_types.lane_frame =
-  { kind =
-      (match row.keeper.last_tool with
-       | Some _ -> "tool"
-       | None -> "wait")
-  ; left = 0
-  ; width =
+  {
+    kind = (match row.keeper.last_tool with Some _ -> "tool" | None -> "wait");
+    left = 0;
+    width =
       (match row.context_pct with
-       | Some pct -> Int.max 8 (Int.min 100 pct)
-       | None -> 12)
-  ; label =
+      | Some pct -> Int.max 8 (Int.min 100 pct)
+      | None -> 12);
+    label =
       (match row.keeper.last_tool with
-       | Some tool -> "last tool · " ^ tool
-       | None -> Option.value row.phase_label ~default:row.keeper.stat)
+      | Some tool -> "last tool · " ^ tool
+      | None -> Option.value row.phase_label ~default:row.keeper.stat);
   }
-;;
 
 let view_activity row =
   let frame_count = List.length row.keeper.lane_frames in
@@ -1151,45 +1178,66 @@ let view_activity row =
     match row.keeper.lane_frames with
     | [] -> [ synthetic_frame row ]
     | frames ->
-      List.sort frames ~compare:(fun a b ->
-        Int.compare a.Keepers_types.left b.Keepers_types.left)
+        List.sort frames ~compare:(fun a b ->
+            Int.compare a.Keepers_types.left b.Keepers_types.left)
   in
   let right =
-    if frame_count = 0
-    then "summary fallback"
+    if frame_count = 0 then "summary fallback"
     else Printf.sprintf "%d frames" frame_count
   in
-  Node.div
-    ~attrs:[ Style.detail_block ]
-    [ Shell_view.aside_title ~right "Activity"
-    ; Node.div
-        ~attrs:[ Style.timeline; Attr.role "list"; Attr.create "aria-label" "Keeper activity timeline" ]
+  Node.div ~attrs:[ Style.detail_block ]
+    [
+      Shell_view.aside_title ~right "Activity";
+      Node.div
+        ~attrs:
+          [
+            Style.timeline;
+            Attr.role "list";
+            Attr.create "aria-label" "Keeper activity timeline";
+          ]
         (List.mapi frames ~f:(fun index frame ->
-           Node.div ~attrs:[ Attr.role "listitem" ] [ view_frame ~index frame ]))
+             Node.div
+               ~attrs:[ Attr.role "listitem" ]
+               [ view_frame ~index frame ]));
     ]
-;;
 
-let aside
-      ~(rows : row list)
-      ~(selected_name : string option)
-  : Node.t
-  =
+let aside ~(rows : row list) ~(selected_name : string option) : Node.t =
   match selected_row rows selected_name with
   | None ->
-    Node.div
-      ~attrs:[ Shell_view.Style.aside; Attr.role "complementary"; Attr.create "aria-label" "Keeper details" ]
-      [ Shell_view.aside_title ~right:"fleet quiet" "Focus"
-      ; Node.div
-          ~attrs:[ Style.quiet; Attr.role "status"; Attr.create "aria-label" "No directory row selected" ]
-          [ Node.span ~attrs:[ Attr.create "lang" "ko" ] [ Node.text "선택 가능한 directory row가 아직 없습니다." ] ]
-      ]
+      Node.div
+        ~attrs:
+          [
+            Shell_view.Style.aside;
+            Attr.role "complementary";
+            Attr.create "aria-label" "Keeper details";
+          ]
+        [
+          Shell_view.aside_title ~right:"fleet quiet" "Focus";
+          Node.div
+            ~attrs:
+              [
+                Style.quiet;
+                Attr.role "status";
+                Attr.create "aria-label" "No directory row selected";
+              ]
+            [
+              Node.span
+                ~attrs:[ Attr.create "lang" "ko" ]
+                [ Node.text "선택 가능한 directory row가 아직 없습니다." ];
+            ];
+        ]
   | Some row ->
-    Node.div
-      ~attrs:[ Shell_view.Style.aside; Attr.role "complementary"; Attr.create "aria-label" "Keeper details" ]
-      [ focus_card row
-      ; view_scope_strip row
-      ; view_evidence row
-      ; view_activity row
-      ; view_outcome row
-      ]
-;;
+      Node.div
+        ~attrs:
+          [
+            Shell_view.Style.aside;
+            Attr.role "complementary";
+            Attr.create "aria-label" "Keeper details";
+          ]
+        [
+          focus_card row;
+          view_scope_strip row;
+          view_evidence row;
+          view_activity row;
+          view_outcome row;
+        ]

@@ -233,11 +233,8 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
         | None -> Error "payload.message is required"
       in
       let* () =
-        match Json_util.get_object request.payload "models" with
-        | None -> Ok ()
-        | Some _ ->
-            Error
-              "legacy keeper model args removed for masc_keeper_msg: models. Use runtime_id; concrete provider/model identity is resolved from the default runtime."
+        Keeper_meta_contract.reject_removed_model_args ~tool_name:"masc_keeper_msg"
+          request.payload
       in
       let direct_reply =
         Json_util.get_bool request.payload "direct_reply" |> Option.value ~default:false

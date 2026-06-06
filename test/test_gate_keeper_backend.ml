@@ -103,7 +103,7 @@ let test_parse_keeper_chat_stream_request_rejects_legacy_model_args () =
       | Error err ->
           check string ("legacy field rejected: " ^ field)
             (Printf.sprintf
-               "legacy keeper model args removed for masc_keeper_msg: %s. Use runtime_id; concrete provider/model identity is resolved from the default runtime."
+               "removed keeper model args for masc_keeper_msg: %s. Use runtime_id; concrete provider/model identity is resolved from the default runtime."
                field)
             err)
     cases

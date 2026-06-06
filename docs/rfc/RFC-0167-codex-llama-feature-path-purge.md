@@ -12,7 +12,7 @@
 
 RFC-0166 (rev1 + rev2) cleared all client/provider name literals from `lib/` and `bin/` source except for two feature paths held back in §9 because removing them in that PR would have cut the feature itself:
 
-1. `runtime_transport_codex_omission_dedup` (#10097): a 5-function module that fingerprints per-keeper cli-tool-a MCP-tool omissions and emits WARN-dedup + per-tool Prometheus counter.
+1. `runtime_transport_codex_omission_dedup` (#10097): a 5-function module that fingerprints per-keeper cli-tool-a MCP-tool omissions and emits WARN-dedup + per-tool legacy metrics backend counter.
 2. `runtime_config_provider_filter.ml:38` `Some ("llama", model_id)`: model-aware endpoint resolution for Llama labels, with a round-robin fallback to `Llm_provider.Provider_registry.current_llama_endpoint`.
 
 The operator deferred §9 explicitly and confirmed in the follow-up turn that both should be removed. This RFC closes them.

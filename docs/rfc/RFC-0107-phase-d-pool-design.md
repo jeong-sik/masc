@@ -172,7 +172,7 @@ type stats = {
 }
 
 val stats : t -> stats
-(** Non-mutating snapshot for Prometheus exporter / dashboard. *)
+(** Non-mutating snapshot for legacy metrics backend exporter / dashboard. *)
 ```
 
 ### 3.2 Migration shim — Masc_http_client unchanged
@@ -234,7 +234,7 @@ Phase D step 2 가 그 결정 위에 구현.
 | **D.1 (이 PR)** | interface design + skeleton mli + design 노트 | Phase C.1 머지 | ~150 (mli + 노트) |
 | **D.2** | piaf wrapper or cohttp patched 구현 + 13 callsite migration (shim 유지) | D.1 + Phase B 결과 | ~400 |
 | **D.3** | stream callsite migration (voice_bridge 2개) | D.2 | ~80 |
-| **D.4** | Prometheus export + dashboard tile | D.2 | ~120 |
+| **D.4** | legacy metrics backend export + dashboard tile | D.2 | ~120 |
 | **D.5** | runtime-storm reproducer (16 keepers × 5 turn) — fd 평탄 검증 | D.2 + D.4 | ~150 |
 
 ## 5. Trade-offs & open questions

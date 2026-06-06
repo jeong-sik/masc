@@ -19,7 +19,7 @@ implementation_prs: ["15519"]
 
 > counter is *alarm* not *fix*. PR makes silent failure *visible* but data loss continues. AI agents inherit the pattern as precedent.
 
-Bug-hunter audit (2026-05-15) on `lib/` enumerated 16+ candidate sites following this shape (`Prometheus.inc_counter Prometheus.metric_silent_* | metric_*_drop | metric_*_failures` paired with `Log.<area>.warn "[silent:...]"` and a default return). On verification (§3) the inventory partitions into four buckets, **three of which are already covered by accepted RFCs or an in-flight Phase B switch**.
+Bug-hunter audit (2026-05-15) on `lib/` enumerated 16+ candidate sites following this shape (`Otel_metric_store.inc_counter Otel_metric_store.metric_silent_* | metric_*_drop | metric_*_failures` paired with `Log.<area>.warn "[silent:...]"` and a default return). On verification (§3) the inventory partitions into four buckets, **three of which are already covered by accepted RFCs or an in-flight Phase B switch**.
 
 This RFC's purpose is **not** to introduce a new pattern. It is to:
 
@@ -69,7 +69,7 @@ The 16+ headcount from the audit dissolves into **3 active counters that have a 
 ```
 Log.Misc.warn ... "telemetry/audit dropped (non-Eio context): %s/%s" event_family event_kind;
 Telemetry_observe.observe_silent ~kind:"workspace_telemetry_drop_metric" (fun () ->
-  Prometheus.inc_counter Prometheus.metric_workspace_telemetry_drop ~labels:[...] ())
+  Otel_metric_store.inc_counter Otel_metric_store.metric_workspace_telemetry_drop ~labels:[...] ())
 ```
 
 ### 4.1 Why this is not a "telemetry-as-fix" violation in the §1 sense
@@ -89,7 +89,7 @@ Two options were considered:
 
 | Option | Outcome | Cost |
 |--------|---------|------|
-| **A — typed event next to RFC-0044 family** *(chosen)* | Closed sum `Workspace_telemetry_drop_event.t` (`Agent_lifecycle | Task_transition | Accountability`) in `lib/workspace/workspace_telemetry_drop_event.{ml,mli}`. Updates Workspace 3 call sites + `Prometheus.metric_workspace_telemetry_drop` label encoding via `family_to_wire` / `kind_to_wire` / `to_prometheus_labels`. | Single PR (~80 LoC). Zero behavior change; only label cardinality is now compiler-bounded. |
+| **A — typed event next to RFC-0044 family** *(chosen)* | Closed sum `Workspace_telemetry_drop_event.t` (`Agent_lifecycle | Task_transition | Accountability`) in `lib/workspace/workspace_telemetry_drop_event.{ml,mli}`. Updates Workspace 3 call sites + `Otel_metric_store.metric_workspace_telemetry_drop` label encoding via `family_to_wire` / `kind_to_wire` / `to_metric_labels`. | Single PR (~80 LoC). Zero behavior change; only label cardinality is now compiler-bounded. |
 | **B — buffered replay** *(rejected for now)* | Introduce `lib/workspace/telemetry_buffer.ml` (bounded `Eio.Stream`) + drain fiber in `server_runtime_bootstrap`. Workspace enqueues; drain replays inside Eio. Drop counter retained only as overflow signal. | RFC-scope. Touches bootstrap + ordering invariants. Re-open as a follow-up RFC only if dashboard data shows non-trivial drop volume. |
 
 Implementation note: instead of merging the typed reason *into* RFC-0044's `Read_drop_reason.t` (the original "tentative amendment to RFC-0044" framing in Open question Q2), PR #15519 placed it in a sibling module under `lib/workspace/`. This keeps RFC-0044 focused on persistence read-drops and avoids cross-domain coupling. The Q2 wording in §9 is therefore superseded by what shipped.
@@ -98,10 +98,10 @@ Implementation note: instead of merging the typed reason *into* RFC-0044's `Read
 
 A PR that adds a new emit site of any of the following without citing an owning RFC and the §3 partition row is rejected:
 
-1. `Prometheus.metric_silent_*` (auth-strict family) → owner = auth-strict track; new emit sites blocked until Phase B PR-2 lands.
-2. `Prometheus.metric_persistence_read_drops` → owner = RFC-0044.
-3. `Prometheus.metric_keeper_write_meta_failures` (and adjacent write counters) → owner = RFC-0077.
-4. `Prometheus.metric_workspace_telemetry_drop` → owner = this RFC §4.
+1. `Otel_metric_store.metric_silent_*` (auth-strict family) → owner = auth-strict track; new emit sites blocked until Phase B PR-2 lands.
+2. `Otel_metric_store.metric_persistence_read_drops` → owner = RFC-0044.
+3. `Otel_metric_store.metric_keeper_write_meta_failures` (and adjacent write counters) → owner = RFC-0077.
+4. `Otel_metric_store.metric_workspace_telemetry_drop` → owner = this RFC §4.
 
 Net-new "silent counter + warn + default" emit site that does **not** fit any of the four families requires:
 

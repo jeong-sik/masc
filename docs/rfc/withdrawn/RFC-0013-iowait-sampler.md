@@ -37,7 +37,7 @@ gauges. The PR-0.2 baseline therefore cannot answer "is the process
 starved on syscalls?" — only "is wall time worse?".
 
 This RFC scopes a sampler module that would expose
-`masc_io_wait_ratio` as a Prometheus gauge derived from OCaml 5
+`masc_io_wait_ratio` as a legacy metrics backend gauge derived from OCaml 5
 `Runtime_events` `Io` entries.
 
 ## Why this is a separate, deferred sub-PR
@@ -94,7 +94,7 @@ session does not re-derive the trade-off.
 
 ## Non-goals
 
-- No new Prometheus dependency.
+- No new legacy metrics backend dependency.
 - No change to existing `Runtime_events` registrations
   (`lib/core/masc_runtime_events.ml`).
 - No change to `scripts/perf-baseline.sh` until path A or B is

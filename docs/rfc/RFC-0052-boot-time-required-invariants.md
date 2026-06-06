@@ -174,7 +174,7 @@ type init_error =
 
 1. `Eio.Switch` 안에서 `Masc_eio_env.initialize` 시점은? (Switch 시작 전 vs 첫 fiber)
 2. `[`Initialized] t`를 모든 caller에 전달하는 cost (signature pollution)
-3. 기존 `Prometheus.metric_*` global state도 같은 패턴 적용? → RFC-0051 영역
+3. 기존 `Otel_metric_store.metric_*` global state도 같은 패턴 적용? → RFC-0051 영역
 4. sub-agent Topic A.4 결과로 phantom 적용 대상 추가
 
 ## §7 References

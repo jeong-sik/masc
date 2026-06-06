@@ -23,7 +23,7 @@
 
 | Rank | Module | Dependents |
 | --- | --- | --- |
-| 1 | Prometheus | 230 |
+| 1 | Otel_metric_store | 230 |
 | 2 | Keeper_types | 224 |
 | 3 | Workspace | 193 |
 | 4 | Keeper_metrics | 151 |
@@ -54,7 +54,7 @@
 | Prefix | Modules | Coupling | External Deps | Internal Edges |
 | --- | --- | --- | --- | --- |
 | model_inference | 6 | 0.889 | 1 | 8 |
-| prometheus_builtin | 7 | 0.833 | 2 | 10 |
+| otel_metric_store_builtin | 7 | 0.833 | 2 | 10 |
 | server_mcp | 13 | 0.690 | 9 | 20 |
 | keeper_state | 4 | 0.667 | 1 | 2 |
 | tool_board | 10 | 0.650 | 7 | 13 |

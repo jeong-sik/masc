@@ -56,7 +56,7 @@ Agent_sdk.Event_bus  (bounded Eio.Stream, default depth 256)
    │
    │  Custom("telemetry_event", json) payloads
    ▼
-Agent_sdk_metrics_bridge   ── start_sampler ──▶ Prometheus depth gauge
+Agent_sdk_metrics_bridge   ── start_sampler ──▶ legacy metrics backend depth gauge
    │
    │  bounded subscription per consumer
    ▼

@@ -132,7 +132,7 @@ the *no recovery, only telemetry* property.
 
 ## 2. Non-goals
 
--   Removing `Read_drop_reason.t` or the Prometheus counter
+-   Removing `Read_drop_reason.t` or the legacy metrics backend counter
     `metric_persistence_read_drops`. The counter remains as a real
     drop signal once the false positives (TOCTOU + ENFILE) are
     classified out.
@@ -181,7 +181,7 @@ Wire mapping:
 -   `Concurrent_removal` → `"concurrent_removal"`
 -   `Transient_fd_pressure` → `"transient_fd_pressure"`
 
-Both are byte-stable additions; Prometheus label cardinality grows by
+Both are byte-stable additions; legacy metrics backend label cardinality grows by
 2.
 
 ### 3.2 Classify at the boundary
@@ -314,7 +314,7 @@ This RFC is itself audited against the seven-item checklist:
 | | Pro | Con |
 |---|---|---|
 | Read-side classification only | Localised change, reversible, no writer workspace collaboration cost | TOCTOU window still exists; if a writer is *also* buggy the bug is now invisible at this surface |
-| Two new `Read_drop_reason.t` variants | Compile-time exhaustiveness everywhere | Prometheus label cardinality +2 |
+| Two new `Read_drop_reason.t` variants | Compile-time exhaustiveness everywhere | legacy metrics backend label cardinality +2 |
 | Separate metric for FD pressure (PR-4) | Data-integrity counter stops being polluted | One more metric to monitor |
 | No write-side WAL | Matches measured cause distribution (0 corruption events) | If write-side corruption ever appears, follow-up RFC needed |
 

@@ -13,7 +13,7 @@ Author: jeong-sik
 Date: 2026-05-08
 Supersedes: —
 Related: RFC-0042 (closed sum for keeper turn terminal code), RFC-0043
-(distribute prometheus metric ownership)
+(distribute legacy metrics backend metric ownership)
 
 ## 1. Problem
 
@@ -38,7 +38,7 @@ same shape:
 Each PR does the same three things at a new persistence surface:
 
 1.  Catches an exception around a JSON read or directory list.
-2.  Calls `Prometheus.inc_counter Prometheus.metric_persistence_read_drops
+2.  Calls `Otel_metric_store.inc_counter Otel_metric_store.metric_persistence_read_drops
     ~labels:[("surface", S); ("reason", R)]` with `R` chosen ad-hoc from
     a free string.
 3.  Returns an empty list / default record / `None` so the caller continues.
@@ -59,7 +59,7 @@ A second, narrower, problem rides along: the `reason` argument at every
 callsite is a free string. `lib/core/safe_ops.ml` exposes three named
 constants (`persistence_read_drop_reason_list_dir_error`,
 `_entry_load_error`, `_invalid_payload`) but call sites freely add new
-values. The Prometheus label is therefore not bounded by the type
+values. The legacy metrics backend label is therefore not bounded by the type
 system; new reasons are silently accepted, dashboards built around the
 old set silently miss them.
 
@@ -105,7 +105,7 @@ val of_wire : string -> t option
 
 `to_wire` produces strings byte-for-byte compatible with the existing
 constants (`list_dir_error`, `entry_load_error`, `invalid_payload`) so
-Prometheus label cardinality does not change at swap-over.
+legacy metrics backend label cardinality does not change at swap-over.
 
 ### 3.2 Result-based read helpers (PR-3, optional)
 
@@ -129,7 +129,7 @@ mirroring RFC-0042 PR-1. No callsite change, no behavior change.
 
 PR-2: change `report_persistence_read_drop` signature from
 `~reason:string` to `~reason:Read_drop_reason.t`, with internal
-`to_wire` for the Prometheus label. Existing `safe_ops.ml` constants
+`to_wire` for the legacy metrics backend label. Existing `safe_ops.ml` constants
 become `Read_drop_reason.to_wire List_dir_error` etc.; no wire change.
 Callsites pass typed values.
 
@@ -154,7 +154,7 @@ declined.
 
 ## 4. Stable wire format guarantee
 
-The Prometheus metric `masc_persistence_read_drops_total` keeps its
+The legacy metrics backend metric `masc_persistence_read_drops_total` keeps its
 existing label set `(surface, reason)`. `Read_drop_reason.to_wire`
 produces:
 
@@ -178,7 +178,7 @@ growth is bounded by the closed sum.
 ## 5. Drift guards
 
 -   `scripts/lint/no-free-string-read-drop-reason.sh`: greps for
-    `Prometheus.inc_counter ... metric_persistence_read_drops`
+    `Otel_metric_store.inc_counter ... metric_persistence_read_drops`
     invocations whose `reason` argument is a string literal not
     sourced from `Read_drop_reason.to_wire`. Runs in
     `fundamental-check.yml`.

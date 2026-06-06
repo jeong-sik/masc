@@ -193,7 +193,7 @@ retired_tool_profile (tool_strict)
 ## 6. Open Questions
 
 1. **`Local_inline` vs unnamed terminal**: Should we define `Local_inline` as a first-class profile, or just exempt all terminal runtimes regardless of profile? The profile makes intent explicit but adds a name that must be maintained.
-2. **Metric: degraded dispatch**: When a turn is dispatched to a terminal fallback with degraded capabilities, should we emit a structured event (`runtime_degraded_dispatch`) in addition to the existing Prometheus counter?
+2. **Metric: degraded dispatch**: When a turn is dispatched to a terminal fallback with degraded capabilities, should we emit a structured event (`runtime_degraded_dispatch`) in addition to the existing legacy metrics backend counter?
 3. **Interaction with RFC-0055 GADT**: When RFC-0055's phantom-typed `Sink` is implemented, does `Local_inline` become the `Sink`'s declared capability, or do `Sink` entries bypass capability declaration entirely?
 
 ---

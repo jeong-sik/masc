@@ -473,7 +473,7 @@
               <span class="chip">JSONL / date-split append</span>
               <span class="chip">capability registry</span>
               <span class="chip">SSE freshness</span>
-              <span class="chip">Prometheus / audit rows</span>
+              <span class="chip">legacy metrics backend / audit rows</span>
               <span class="chip">TLA mirrors</span>
             </div>
           </div>
@@ -653,7 +653,7 @@
             <tr><td>Config root</td><td><code>Config_dir_resolver</code></td><td><code>MASC_CONFIG_DIR</code> wins; checked-in repo config is seed, not active fallback.</td></tr>
             <tr><td>Bearer auth</td><td><code>Auth</code> + <code>Server_auth</code></td><td>Raw tokens live under <code>&lt;base&gt;/.masc/auth</code>; credentials are hashed and role/permission-gated.</td></tr>
             <tr><td>Repository git</td><td><code>Repo_git</code> + repository routes</td><td>Repository operations run with non-interactive git environment only; repo-manager does not own GitHub identity materialization.</td></tr>
-            <tr><td>Metrics</td><td><code>Prometheus</code> + domain metric modules</td><td>In-process metrics endpoint, with some transitional split ownership such as runtime metric names.</td></tr>
+            <tr><td>Metrics</td><td><code>legacy metrics backend</code> + domain metric modules</td><td>In-process metrics endpoint, with some transitional split ownership such as runtime metric names.</td></tr>
           </tbody>
         </table>
       </section>
@@ -778,8 +778,8 @@
             </tr>
             <tr>
               <td>Metrics SSOT is transitional.</td>
-              <td><code>Runtime_metrics</code> owns runtime names while <code>Prometheus.ml</code> still mirrors registration for <code>/metrics</code>.</td>
-              <td>Move metric definitions to domain modules and keep Prometheus as registry/exporter only.</td>
+              <td><code>Runtime_metrics</code> owns runtime names while the legacy metrics backend still mirrors registration for <code>/metrics</code>.</td>
+              <td>Move metric definitions to domain modules and keep legacy metrics backend as registry/exporter only.</td>
               <td><span class="heat med">Medium</span></td>
             </tr>
           </tbody>
@@ -849,10 +849,10 @@
               <td>goal tools tests + dashboard planning projection</td>
             </tr>
             <tr>
-              <td><code>prometheus.ml</code> + metric modules</td>
+              <td><code>legacy metrics backend module</code> + metric modules</td>
               <td>large registry</td>
               <td>metric declaration, registration, exporter, domain labels</td>
-              <td>domain-owned metric descriptors, exporter-only Prometheus registry</td>
+              <td>domain-owned metric descriptors, exporter-only legacy metrics backend registry</td>
               <td>metrics endpoint snapshot + runtime metric tests</td>
             </tr>
           </tbody>

@@ -101,7 +101,7 @@ mutable 필드 고밀도 sub-lib: `keeper`(69), `dashboard`(50), `gate`(35), `se
 | 위치 | 사유 |
 |------|------|
 | `lib/core/safe_ops.ml:69-92` | UTF-8 repair 카운터/dedup mutable (`utf8_repaired_reads`/`utf8_repaired_bytes`/`utf8_repair_path_samples` ref + `utf8_repair_log_seen` Hashtbl). telemetry-as-fix 워크어라운드 패턴 — AGENT-LLM-A.md §워크어라운드 거부 기준. 별도 RFC 로 흡수. |
-| `lib/prometheus.ml` 중앙 `metrics : (string, metric) Hashtbl.t` (`:77` 부근) | godfile — `docs/audit/godfile-inventory-2026-05-12.md` + 별도 RFC. metric 소유권 분산이 근본 해결. |
+| Retired metrics backend 중앙 `metrics : (string, metric) Hashtbl.t` (`:77` 부근) | godfile — `docs/audit/godfile-inventory-2026-05-12.md` + 별도 RFC. metric 소유권 분산이 근본 해결. |
 | `lib/keeper/credential_*`, `lib/repo_manager/`, `lib/operator/operator_control*` | AGENT-LLM-A.md `<agent_delegation>` RFC-gate 대상. 이번 작업 대상 파일 (`board_*`, `runtime_*`, `thompson_sampling`, `keeper_run_tools`, `exec_cache`, `fs_compat`, `streamable_http`, `cdal_runtime/*`, `server_dashboard_http_core`) 은 gate 목록 밖. push 전 `bash ~/me/scripts/pr-rfc-check.sh` 재확인. |
 
 ## 3. 모듈 전역 `ref` (96개) — 분류
@@ -109,7 +109,7 @@ mutable 필드 고밀도 sub-lib: `keeper`(69), `dashboard`(50), `gate`(35), `se
 대다수는 다음 중 하나:
 - **init guard** (`let initialized = ref false` — `lib/multimodal/workspace_id.ml:22`, `lib/shared_types/artifact_id.ml:3`, `lib/shared_audit/envelope.ml`, `lib/server_base_path_diagnostics.ml:153` 등): 정당. idempotent 초기화 1회 가드.
 - **lazy-init store handle** (`let store_ref : Dated_jsonl.t option ref = ref None` — `lib/tool_metrics_persist.ml:74`, `lib/eval_calibration.ml:100`, `lib/tool_usage_log.ml:42`, `lib/discovery_history.ml:11`): 서버 init 시 1회 set, 이후 읽기. 대부분 전용 Mutex 또는 `Stdlib.Mutex.protect` 로 보호됨 (예: `lib/tool_shard.ml:1837` `agent_shards_mutex`, `lib/agent_sdk_metrics_bridge.ml:37` `registry_mutex`). 해당 모듈은 "no Eio context" 주석으로 Stdlib.Mutex 선택 근거 명시 — 정당.
-- **dedup / "logged once" 상태** (`lib/config_dir_resolver.ml:537,554` `last_logged_*_signature`, `lib/prometheus.ml:334` `backend_mutex_observers_installed`): 로그 노이즈 억제 — 동작에 영향 없으나 mutable 전역.
+- **dedup / "logged once" 상태** (`lib/config_dir_resolver.ml:537,554` `last_logged_*_signature`, retired metrics backend `backend_mutex_observers_installed`): 로그 노이즈 억제 — 동작에 영향 없으나 mutable 전역.
 
 이미 식별된 위험/흠 (버킷 A/B 와 중복): `lib/runtime/runtime_client_capacity_history.ml:53-56` (4-ref 링버퍼). `lib/core/safe_ops.ml:69-71` 는 버킷 E.
 

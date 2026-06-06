@@ -196,7 +196,7 @@ NixOS/Alpine/Linux server에서 silent fail.
 |---|---|---|
 | `Span` | `Tracing.with_span ~kind:Tool_dispatch ~name ~tool_id ~trace_id` open/close pair | trace 단절 — root cause 추적 불가 |
 | `Audit` | `Audit_log.record ~event:Tool_dispatched ~outcome ~keeper_id ~tool_id` | audit gap — 어떤 keeper가 무엇을 호출했는지 미상 |
-| `Metric` | `Prometheus.inc_counter tool_dispatch_total{outcome,tool,surface}` | dashboard 0 — alert 미발화 |
+| `Metric` | `Otel_metric_store.inc_counter tool_dispatch_total{outcome,tool,surface}` | dashboard 0 — alert 미발화 |
 | `Trace_id` | LLM turn에서 시작된 `Trace_id.t`가 handler에 전달 + result에 stamp | turn ↔ tool ↔ side-effect 연결 단절 |
 
 PR-14 property test가 100 random tool calls × 모든 entry path에 대해 4-tuple emission count = 4 × 100 = 400임을 검증.

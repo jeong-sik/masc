@@ -203,8 +203,8 @@ LOC moves since plan (size monolith-reduction proxy):
 - **PR-able**: each domain projection (keeper, OAS telemetry, planning, governance) can wrap independently. **RFC required** for the envelope contract version 2 if cache state / stale fallback / broadcast hook fields need extension.
 
 ### Plan #refactor row "Metrics SSOT transitional" — substantial progress
-- 6 prometheus-split PRs landed (#16193, #16192, #16196, #16199, #16277, #16278, #16291): core/transport/runtime/oas/policy/runtime metric names split into separate modules.
-- Plan `#gaps` row 10 (runtime vs prometheus drift) likely resolved. Recommend close.
+- 6 metrics-backend split PRs landed (#16193, #16192, #16196, #16199, #16277, #16278, #16291): core/transport/runtime/oas/policy/runtime metric names split into separate modules.
+- Plan `#gaps` row 10 (runtime vs retired metrics backend drift) likely resolved. Recommend close.
 
 ---
 

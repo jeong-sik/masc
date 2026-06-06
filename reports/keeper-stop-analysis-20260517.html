@@ -698,7 +698,7 @@ tool requires approval
       <h3>MASC P0: launch/admission silent failure 제거</h3>
       <ul>
         <li><code>Keeper_registry.spawn_slots_decision</code>을 bool gate에서 typed denial reason으로 확장.</li>
-        <li><code>keeper_supervisor</code>와 <code>keeper_keepalive</code>의 no-op skip을 <code>admission_denied</code> lifecycle event + Prometheus counter + WARN log로 전환.</li>
+        <li><code>keeper_supervisor</code>와 <code>keeper_keepalive</code>의 no-op skip을 <code>admission_denied</code> lifecycle event + Otel_metric_store counter + WARN log로 전환.</li>
         <li><code>masc_keeper_spawn_slot_denied_total</code> metric 추가. labels: <code>keeper</code>, <code>surface</code>, <code>reason</code>.</li>
         <li>dashboard lifecycle patcher가 <code>admission_denied</code>를 Offline 상태로 반영하도록 확장.</li>
         <li>설계 SSOT: <code>docs/rfc/RFC-0124-keeper-admission-denial-boundary.md</code>.</li>

@@ -89,4 +89,4 @@ continuous-loop sprint이 *false-positive ratio 증가*로 진정 단계 도달.
 
 1. **7 OPEN PR 머지 후 main 안정화** — base에서 잔존 audit 재실행
 2. **사용자 식별** — PR-3 (`policy_path` 코드 삭제), PR-7 (`retired_pg_env_keys`) 같은 plan-너머 legacy
-3. **운영 데이터** — Prometheus telemetry, 사용자 dashboard에서 새 hardcode 패턴
+3. **운영 데이터** — legacy metrics backend telemetry, 사용자 dashboard에서 새 hardcode 패턴

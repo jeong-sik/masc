@@ -28,7 +28,7 @@ implementation_prs: []
 semantically independent roles. Because one type carries all three, a change to
 one role silently perturbs the others. This RFC separates **keeper-exposure
 policy** into its own typed axis that does not read the dispatch tag, and pins
-the **Prometheus label** to its own closed sum, leaving `module_tag` to mean
+the **legacy metrics backend label** to its own closed sum, leaving `module_tag` to mean
 only "which handler dispatches this tool".
 
 This is the same class of error RFC-0042 closed for `terminal_reason_code`: a
@@ -62,7 +62,7 @@ carrier by a catch-all match. The load-bearing failure here is the
    `keeper_tag_dispatch.ml:116`. Per CLAUDE.md, a `Some _ -> true` / `_ -> false`
    catch-all on a policy decision is the FSM-sparse-match anti-pattern.
 
-3. **Prometheus label (cardinality coupling).** `keeper_tag_dispatch.ml:45`
+3. **legacy metrics backend label (cardinality coupling).** `keeper_tag_dispatch.ml:45`
    `string_of_tag` turns the routing constructor name into a metric label
    (`~labels:[ "tag", string_of_tag tag ]`, line 184). Renaming a routing
    variant silently shifts metric cardinality / breaks dashboards.
@@ -119,7 +119,7 @@ typed `Tool_name` domain), defined once, consumed by BOTH the listing filter
 **exhaustive match** — no `Some _ -> true`. "How a tool dispatches" and "may a
 keeper list/call it" become orthogonal.
 
-**The Prometheus label gets its own closed sum** `tag_metric_label` with a total
+**The legacy metrics backend label gets its own closed sum** `tag_metric_label` with a total
 `metric_label_of_module_tag : module_tag -> tag_metric_label`, so the label
 vocabulary is a contract independent of routing-constructor renames.
 
@@ -168,6 +168,6 @@ after the `Tool_name` split.
 ## 7. Out of scope
 
 - The `Tool_name` god-enum split itself (separate RFC / PR).
-- The `module_tag`-as-Prometheus-label inversion beyond pinning the label sum
-  (the broader keeper→Prometheus inversion is RFC-pending under the
+- The `module_tag`-as-legacy metrics backend-label inversion beyond pinning the label sum
+  (the broader keeper→legacy metrics backend inversion is RFC-pending under the
   domain_infra_inversion lens).

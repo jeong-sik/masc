@@ -303,7 +303,7 @@ val maybe_react :
 | `lib/cdal/cdal_eval_v1.ml` | Call `Goal_phase_bridge.maybe_react` after persist |
 | `lib/goal/goal_verification.{ml,mli}` | Add `policy_allows_cdal_auto_approve : bool` (default `false`) |
 | `test/test_goal_phase_bridge.ml` | New — 3 cases (Violated→Reject, Satisfied+opt-in→Approve, Inconclusive→noop) |
-| Prometheus counter | `cdal_goal_phase_transitions_total{outcome=...}` |
+| legacy metrics backend counter | `cdal_goal_phase_transitions_total{outcome=...}` |
 
 Estimated change: ~300 LoC.
 

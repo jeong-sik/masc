@@ -98,7 +98,7 @@ let apply_event ~current_phase ~conditions ~event ~now =
 | P3 | `apply_event` 보강 (precondition gate). Caller policy: 기존 caller 4개 inventory + `Result.bind` chain 또는 명시적 `log+skip`. | PBT (`test_pbt_apply_event_preconditions.ml`) PASS — 5 scenarios (A/B/C + 2 추가 edge case) violation 시 `Error` 반환 |
 | P4 | KSM TLA+ spec 의 buggy.cfg 에 `BuggyApplyEvent` action 추가 | TLC: KSM.cfg PASS, KSM-buggy.cfg invariant violation |
 | P5 | Caller migration sweep. 4 caller 가 모두 `Result.t` 처리. Silent unwrap 0. | `rg "apply_event" lib/ \| grep -v Result" = 0` 또는 모두 명시적 ignore |
-| P6 | metrics: `keeper_apply_event_precondition_violation_total{event=...}` Prometheus counter | dashboard 가 0 violation 4주 monitoring 후 P5 caller 정책 default-on |
+| P6 | metrics: `keeper_apply_event_precondition_violation_total{event=...}` legacy metrics backend counter | dashboard 가 0 violation 4주 monitoring 후 P5 caller 정책 default-on |
 
 P3 가 핵심 — 첫 spec-runtime invariant 정합. P6 는 telemetry-as-validator (counter 가 0 이어야 spec 정합) — **이번에는 Counter-as-Fix 가 아닌 Counter-as-Validator**. AGENT-LLM-A.md §"Counter-as-Fix" 구분: data loss 가 *이미 막혔다는 증거* 로 counter 사용 OK.
 
@@ -134,7 +134,7 @@ Rollback: 각 Phase 별 PR. P3 의 `apply_event` 변경은 backward-compat (Resu
 - [ ] P3: `apply_event` 보강. 5 scenarios PBT PASS.
 - [ ] P4: KSM-buggy.cfg 에 `BuggyApplyEvent` action 추가. TLC PASS clean + FAIL buggy.
 - [ ] P5: 4 caller 모두 typed Result 처리. silent unwrap = 0.
-- [ ] P6: `keeper_apply_event_precondition_violation_total` Prometheus counter. 4주 dashboard monitoring 후 default-on.
+- [ ] P6: `keeper_apply_event_precondition_violation_total` legacy metrics backend counter. 4주 dashboard monitoring 후 default-on.
 
 ## §8 Number allocation note
 

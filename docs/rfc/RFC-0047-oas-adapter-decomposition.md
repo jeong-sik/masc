@@ -369,7 +369,7 @@ to Phase 4, when its dependents are dissolved.
   documented per-file allowlist).
 - **Production canary**: after Phase 4 merge, run a single
   `retired_tool_profile` for 24h and confirm zero new asserts/regressions
-  via Prometheus `keeper_assert_failure_total` counter.
+  via legacy metrics backend `keeper_assert_failure_total` counter.
 - **RFC-0045 regression fixture**: existing 4 tests in
   `test_keeper_registry.ml` `rfc_0045_sdk_turn_boundary` group must
   continue to pass after Phase 4 (the file split must not change the

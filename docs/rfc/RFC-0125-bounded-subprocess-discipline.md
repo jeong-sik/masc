@@ -230,7 +230,7 @@ P1+ 머지 조건 (각 Phase 별):
 
 1. 해당 site 의 기존 test 가 동일 동작 (regression 0).
 2. timeout 발동 시 process 가 OS 차원에서 사라지는 integration test (`pgrep -f <argv>` 0 결과).
-3. Prometheus `metric_keeper_provider_timeout_watchdog_termination` 30일 trend 감소.
+3. legacy metrics backend `metric_keeper_provider_timeout_watchdog_termination` 30일 trend 감소.
 
 ## 6. Evidence
 

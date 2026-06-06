@@ -12,7 +12,7 @@ Status: Active (frontmatter SSOT)
 Author: jeong-sik (with Agent-LLM-A Opus 4.7)
 Date: 2026-05-09
 Supersedes: —
-Related: RFC-0048 (Dashboard IA Phase 2), `prometheus.ml` extraction issue
+Related: RFC-0048 (Dashboard IA Phase 2), `legacy metrics backend module` extraction issue
 #14166 (closed by user as "회피형, 근본해결 아님"; informs the rejection
 bar in §3 below)
 
@@ -46,7 +46,7 @@ LoC inventory at origin/main @ eeddea6095:
 
 > "We have a 1689-LoC file. Let's split it on a line-count cap."
 
-That is the path #14166 took for `prometheus.ml` and was rejected with
+That is the path #14166 took for `legacy metrics backend module` and was rejected with
 "회피형, 근본해결 아님 — 이거 해결책이 너무 바보같음." The split moved 367
 metric constants to N files and re-exported them through an `include`
 shim. The central registry pattern stayed; ownership stayed centralized;
@@ -106,7 +106,7 @@ of shared render logic in `connector-status.ts` — exactly the §2
 anti-pattern (mechanical line-count split with no ownership distribution).
 The proposal was based on a research summary that counted *data rows*
 rather than verifying *implementation structure*; this RFC must not
-reproduce the `prometheus.ml` cap-fix pattern that issue #14166 was
+reproduce the `legacy metrics backend module` cap-fix pattern that issue #14166 was
 rejected for.
 
 Reclassified to §4.2 (out of scope). If `connector-status.ts` later

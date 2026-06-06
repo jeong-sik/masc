@@ -19,10 +19,20 @@ let test_path_not_found () =
     actionable_path_action_for_class
       ~playground:pg ~raw_path:"missing.ml" CB.Path_not_found
   in
-  Alcotest.(check bool) "mentions ls hint" true
+  Alcotest.(check bool) "mentions visible path inspection" true
     (try
-       Str.search_forward (Str.regexp_string "Execute executable='ls'") action 0
-       >= 0
+       ignore (Str.search_forward (Str.regexp_string "Inspect visible paths") action 0);
+       true
+     with Not_found -> false);
+  Alcotest.(check bool) "does not mention Execute" false
+    (try
+       ignore (Str.search_forward (Str.regexp_string "Execute") action 0);
+       true
+     with Not_found -> false);
+  Alcotest.(check bool) "does not invent Grep op syntax" false
+    (try
+       ignore (Str.search_forward (Str.regexp_string "Grep op=") action 0);
+       true
      with Not_found -> false);
   Alcotest.(check bool) "mentions playground" true
     (try

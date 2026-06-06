@@ -23,7 +23,7 @@ let reconcile_keepalive_keepers
   let reconcile_ym = Eio_guard.create_yield_meter () in
   List.iter
     (fun name ->
-       (match read_meta ctx.config name with
+       (match read_effective_meta ctx.config name with
         | Ok (Some meta) when not meta.paused ->
           let dominated_by_sweep =
             match Keeper_registry.get ~base_path meta.name with
@@ -69,7 +69,7 @@ let reconcile_keepalive_keepers
               [ ("operation", Runtime_observation_query_operation.(to_label Reconcile_read_meta))
               ]
             ();
-          Log.Keeper.warn "reconcile: read_meta failed for %s: %s" name err);
+          Log.Keeper.warn "reconcile: read_effective_meta failed for %s: %s" name err);
        Eio_guard.yield_step reconcile_ym)
     names;
   Log.Keeper.debug

@@ -6,6 +6,7 @@ module Turn_setup = Masc.Keeper_turn_setup
 module Turn = Masc.Keeper_turn
 module Keeper_tool_surface = Masc.Keeper_tool_surface
 module Keeper_tool_surface_ops = Masc.Keeper_tool_surface_ops
+module Heartbeat_presence = Masc.Keeper_heartbeat_loop_presence
 
 let temp_dir () =
   let path = Filename.temp_file "keeper-effective-meta-" "" in
@@ -219,6 +220,36 @@ tool_access = ["tool_search_files", "tool_read_file"]
         "turn setup sees TOML tool overlay"
         [ "tool_search_files"; "tool_read_file" ]
         meta.tool_access
+
+let test_keepalive_meta_selection_overlays_disk_meta () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
+  let name = "taskmaster" in
+  write_file
+    (Filename.concat keepers_dir (name ^ ".toml"))
+    {|[keeper]
+sandbox_profile = "docker"
+network_mode = "inherit"
+|};
+  let config = Workspace.default_config base in
+  let raw_meta = seed_runtime_meta config name in
+  Alcotest.(check string)
+    "fixture raw meta starts from persisted/default sandbox"
+    "local"
+    (Profile.sandbox_profile_to_string raw_meta.sandbox_profile);
+  let effective =
+    Heartbeat_presence.effective_keepalive_meta
+      ~base_path:config.base_path
+      ~fallback:raw_meta
+      ~disk_meta_opt:(Some raw_meta)
+  in
+  Alcotest.(check string)
+    "keepalive disk meta selection applies TOML sandbox overlay"
+    "docker"
+    (Profile.sandbox_profile_to_string effective.sandbox_profile);
+  Alcotest.(check string)
+    "keepalive disk meta selection applies TOML network overlay"
+    "inherit"
+    (Profile.network_mode_to_string effective.network_mode)
 
 let test_missing_sandbox_profile_fails_loud_for_profile_source () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
@@ -447,6 +478,9 @@ let () =
             `Quick test_toml_overlay_reaches_effective_meta;
           Alcotest.test_case "turn setup uses effective meta" `Quick
             test_turn_setup_uses_effective_meta;
+          Alcotest.test_case
+            "keepalive meta selection overlays disk meta"
+            `Quick test_keepalive_meta_selection_overlays_disk_meta;
           Alcotest.test_case
             "profile source without sandbox_profile fails loudly"
             `Quick test_missing_sandbox_profile_fails_loud_for_profile_source;

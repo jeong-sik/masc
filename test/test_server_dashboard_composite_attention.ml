@@ -26,6 +26,20 @@ let execution completion_contract_result =
     ]
 ;;
 
+let completed_budget_execution =
+  `Assoc
+    [ "latest_receipt_present", `Bool true
+    ; "recorded_at", `String "2999-01-01T00:00:00Z"
+    ; "completion_contract_result", `Null
+    ; "operator_disposition", `String "pass"
+    ; "operator_disposition_reason", `String "healthy"
+    ; "terminal_reason_code", `String "turn_budget_exhausted:1070/1070"
+    ; "error", `Null
+    ; "claim_scope", `Assoc [ "status", `String "ok" ]
+    ; "config_drift", `Assoc [ "runtime_override", `Bool false ]
+    ]
+;;
+
 let test_contract_blocker_marks_attention () =
   let execution = execution "surface_mismatch" in
   let attention =
@@ -74,6 +88,18 @@ let test_contract_blocker_recommends_route_actions () =
             reason))
 ;;
 
+let test_completed_budget_exhaustion_is_not_blocked () =
+  let attention =
+    Server_dashboard_http_composite.composite_runtime_attention
+      ~snapshot
+      ~execution:completed_budget_execution
+  in
+  check bool "blocked" false attention.cra_blocked;
+  check bool "needs_attention" false attention.cra_needs_attention;
+  check string "state" "ok" attention.cra_state;
+  check (option string) "reason" None attention.cra_reason
+;;
+
 let () =
   run
     "server_dashboard_composite_attention"
@@ -81,6 +107,12 @@ let () =
       , [ test_case "marks runtime attention" `Quick test_contract_blocker_marks_attention
         ; test_case "emits route actions" `Quick
             test_contract_blocker_recommends_route_actions
+        ] )
+    ; ( "completed receipt semantics"
+      , [ test_case
+            "pass/healthy turn-budget exhaustion is not blocked"
+            `Quick
+            test_completed_budget_exhaustion_is_not_blocked
         ] )
     ]
 ;;

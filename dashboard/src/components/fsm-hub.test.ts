@@ -207,7 +207,7 @@ describe('fsm-hub derived state', () => {
     )
 
     expect(result.tone).toBe('ok')
-    expect(result.headline).toContain('Idle 스냅샷 정상')
+    expect(result.headline).toContain('대기 상태 정상')
     expect(result.detail).toContain('25s')
   })
 

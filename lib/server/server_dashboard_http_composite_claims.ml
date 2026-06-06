@@ -235,6 +235,12 @@ let string_opt_present value =
   | None -> false
 ;;
 
+let string_opt_has_prefix value ~prefix =
+  match lower_string_opt value with
+  | Some value -> string_has_prefix ~prefix value
+  | None -> false
+;;
+
 let json_string_eq key json expected =
   match json_string key json with
   | Some value -> String.equal value expected
@@ -330,12 +336,28 @@ let composite_execution_config_drift execution =
 
 let keeper_activation_readiness_json = Server_dashboard_fleet_readiness.keeper_activation_readiness_json
 
+let composite_execution_budget_exhausted_pass execution =
+  string_opt_is_any (json_string "operator_disposition" execution) [ "pass" ]
+  && string_opt_has_prefix
+       (json_string "terminal_reason_code" execution)
+       ~prefix:"turn_budget_exhausted"
+  &&
+  match lower_string_opt (json_string "operator_disposition_reason" execution) with
+  | None -> true
+  | Some "" -> true
+  | Some "healthy" -> true
+  | Some reason -> string_has_prefix ~prefix:"turn_budget_exhausted" reason
+;;
+
 let composite_execution_blocked execution =
   composite_execution_claim_no_eligible execution
   || composite_execution_contract_blocked execution
   || string_opt_is_any (json_string "operator_disposition" execution) [ "pause_human" ]
   || (match lower_string_opt (json_string "terminal_reason_code" execution) with
-      | Some terminal -> terminal <> "" && terminal <> "completed"
+      | Some terminal ->
+        terminal <> ""
+        && terminal <> "completed"
+        && not (composite_execution_budget_exhausted_pass execution)
       | None -> false)
   ||
   match json_member "error" execution with
@@ -430,6 +452,7 @@ let composite_runtime_attention ~snapshot ~execution =
     then Some "claim_scope_no_eligible"
     else match composite_execution_contract_blocker_reason execution with
     | Some _ as reason -> reason
+    | None when not blocked -> None
     | None ->
       (match json_string "operator_disposition_reason" execution with
        | Some value -> String_util.trim_to_option value

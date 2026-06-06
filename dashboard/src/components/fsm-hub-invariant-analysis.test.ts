@@ -257,7 +257,7 @@ describe('deriveOperationalInsight', () => {
       now,
     )
     expect(insight.tone).toBe('ok')
-    expect(insight.headline).toContain('Idle')
+    expect(insight.headline).toContain('대기')
   })
 
   it('reports ok when not live without last_outcome', () => {
@@ -267,7 +267,7 @@ describe('deriveOperationalInsight', () => {
       now,
     )
     expect(insight.tone).toBe('ok')
-    expect(insight.detail).toContain('not captured')
+    expect(insight.detail).toContain('아직 완료된 turn')
   })
 
   it('reports info when runtime is selecting', () => {
@@ -358,7 +358,7 @@ describe('deriveOperationalInsight', () => {
       noObservations,
       now,
     )
-    expect(insight.nextStep).toContain('first live turn')
+    expect(insight.nextStep).toContain('첫 live turn')
   })
 
   it('gives correct nextStep for Failing+exhausted', () => {

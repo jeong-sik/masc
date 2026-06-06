@@ -392,48 +392,27 @@ let test_force_released_autonomous_holder_does_not_stamp_completion () =
          "force-released autonomous holder stamped normal completion: delay=%.3f"
          delay)
 
-let test_no_clock_exhausted_turn_slot_fails_closed () =
-  match Eio_context.get_clock_opt () with
-  | Some _ ->
-      (* This executable normally runs without a global Eio_context clock.
-         If a wider test runner has installed one, the no-clock branch is
-         not reachable in this process. *)
+let test_distinct_keepers_acquire_independently () =
+  (* Per-keeper slots: each keeper acquires only its own slot.
+     14 distinct keepers should all succeed simultaneously. *)
+  let rec acquire_distinct_keepers idx =
+    if idx = 14 then
       ()
-  | None ->
-      let rec acquire_all acquired =
-        if Eio.Semaphore.get_value KTS.turn_semaphore <= 0 then acquired
-        else begin
-          Eio.Semaphore.acquire KTS.turn_semaphore;
-          acquire_all (acquired + 1)
-        end
+    else (
+      let keeper_name = Printf.sprintf "independent-%02d" idx in
+      let result =
+        KK.with_keeper_turn_slot_for_test
+          ~keeper_name
+          ~channel:Masc.Keeper_world_observation.Scheduled_autonomous
+          (fun ~semaphore_wait_ms:_ ->
+             acquire_distinct_keepers (idx + 1))
       in
-      let rec release_n = function
-        | n when n <= 0 -> ()
-        | n ->
-            Eio.Semaphore.release KTS.turn_semaphore;
-            release_n (n - 1)
-      in
-      let acquired = acquire_all 0 in
-      Fun.protect
-        ~finally:(fun () -> release_n acquired)
-        (fun () ->
-          let result =
-            KK.with_keeper_turn_slot_for_test
-              ~keeper_name:"diag-no-clock-exhausted"
-              ~channel:Masc.Keeper_world_observation.Reactive
-              (fun ~semaphore_wait_ms:_ ->
-                failwith "exhausted turn slot should fail before body runs")
-          in
-          match result with
-          | Error (`Semaphore_wait_timeout snapshot) ->
-              if snapshot.timeout_phase <> KK.Turn_slot then
-                failwith
-                  (Printf.sprintf
-                     "expected Turn_slot timeout, got %s"
-                     (KK.semaphore_wait_phase_to_string
-                        snapshot.timeout_phase))
-          | Ok _ ->
-              failwith "exhausted no-clock acquire should fail closed")
+      match result with
+      | Ok () -> ()
+      | Error (`Semaphore_wait_timeout _) ->
+        failwith "unexpected semaphore wait timeout — cross-keeper contention detected")
+  in
+  acquire_distinct_keepers 0
 
 let test_force_release_marker_ttl_bounds_unfinalized_fibers () =
   KK.clear_force_released_markers_for_test ();
@@ -477,8 +456,8 @@ let () =
         test_force_release_marker_does_not_leak_to_replacement;
       "force released autonomous holder skips completion stamp",
         test_force_released_autonomous_holder_does_not_stamp_completion;
-      "no-clock exhausted turn slot fails closed",
-        test_no_clock_exhausted_turn_slot_fails_closed;
+      "distinct keepers acquire independent per-keeper slots",
+        test_distinct_keepers_acquire_independently;
       "force release marker ttl bounds unfinalized fibers",
         test_force_release_marker_ttl_bounds_unfinalized_fibers;
     ]

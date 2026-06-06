@@ -5,15 +5,15 @@
     body, board-reactive wakeup filtering, and optional gRPC heartbeat
     fiber.
 
-    [MASC_KEEPER_*] env vars read here (semaphore timeout, concurrency,
-    fairness cooldown, autoboot max) can also be set in
+    [MASC_KEEPER_*] env vars read here (slot wait timeout,
+    compatibility counters, autoboot max) can also be set in
     [<resolved config root>/runtime.toml].
     See {!Keeper_runtime_config} and [docs/BOOT-ENV-STATE-INVENTORY.md]
     section 1.3.
 
     Structure (facade decomposition):
-    - [Keeper_turn_slot]      — semaphores, autonomous wait queue,
-                                 fairness cooldown, [with_keeper_turn_slot]
+    - [Keeper_turn_slot]      — runtime-concurrent budget + per-keeper turn slot,
+                                 [with_keeper_turn_slot]
     - [Keeper_keepalive_signal] — gRPC client refs, FSM guard identity
                                    helpers, interruptible sleep, wakeup
                                    dispatch, board-reactive wakeup,

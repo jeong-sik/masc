@@ -58,11 +58,9 @@ val proactive_skip_reason_metric : string
     #10008 failure mode 3. *)
 
 val semaphore_wait_timeout_sec : float
-(** Wall-clock cap on [Eio.Semaphore.acquire] when waiting for a keeper
-    turn slot. Derived from [MASC_KEEPER_SEMAPHORE_WAIT_TIMEOUT_SEC]
-    (default 60.0, range [5, 600]). Keepers whose peers hold slots past
-    this cap are skipped for the current cycle and retry on the next
-    heartbeat. *)
+(** Wall-clock cap while a keeper waits to enter its own turn lane and then
+    consume the shared runtime-concurrent budget. Derived from
+    [MASC_KEEPER_SEMAPHORE_WAIT_TIMEOUT_SEC]. *)
 
 exception Semaphore_wait_timeout of float
 (** Legacy exception form. The [with_keeper_turn_slot*] result path below
@@ -89,13 +87,15 @@ type semaphore_wait_timeout = {
   timeout_holders : (string * float) list;
 }
 
-(** Test-only reset for the autonomous FIFO wait queue. *)
+(** Test-only compatibility model for the removed autonomous FIFO wait queue. *)
 val reset_autonomous_turn_queue_for_test : unit -> unit
 
 (** Test-only snapshot of keeper names currently queued for an autonomous turn. *)
 val autonomous_waiter_snapshot_for_test : unit -> string list
 
-(** Test-only snapshots of the current semaphore availability. *)
+(** Test-only runtime-concurrent capacity snapshots. Reactive/autonomous
+    helpers report the same shared budget because those legacy pool-specific
+    gates no longer exist. *)
 val turn_semaphore_value_for_test : unit -> int
 val autonomous_turn_semaphore_value_for_test : unit -> int
 val reactive_turn_semaphore_value_for_test : unit -> int
@@ -112,8 +112,8 @@ val turn_slot_holders : now:float -> (string * float) list
 val autonomous_slot_holders : now:float -> (string * float) list
 val reactive_slot_holders : now:float -> (string * float) list
 
-(** Force-release semaphore permits held by [keeper_name] after watchdog stale
-    classification. Returns released pool labels. *)
+(** Force-release [keeper_name]'s per-keeper slot after watchdog stale
+    classification. Returns released diagnostic labels. *)
 val force_release_stale_holder : keeper_name:string -> string list
 
 (** Test-only: TTL used to bound orphaned force-release markers left behind
@@ -124,8 +124,9 @@ val force_released_marker_ttl_sec_for_test : float
     consumption or expiry pruning. *)
 val force_released_marker_count_for_test : unit -> int
 
-(** Test-only: inject a marker without touching semaphores, so marker-retention
-    behavior can be exercised without creating a double-release path. *)
+(** Test-only: inject a marker without touching the per-keeper slot, so
+    marker-retention behavior can be exercised without creating a
+    double-release path. *)
 val add_force_released_marker_for_test :
   label:Keeper_turn_slot.slot_pool ->
   keeper_name:string ->
@@ -152,8 +153,9 @@ val slot_holders_summary : ?limit:int -> now:float -> unit -> string
     snapshot accessors. *)
 val force_release_holder_for : keeper_name:string -> (string * float) list
 
-(** Test-only FIFO queue primitives for autonomous fairness regression tests.
-    [enqueue_autonomous_waiter_for_test] defaults [runtime_id] to ["test"]. *)
+(** Test-only queue primitives for compatibility tests. Production admission
+    no longer uses this queue. [enqueue_autonomous_waiter_for_test] defaults
+    [runtime_id] to ["test"]. *)
 val enqueue_autonomous_waiter_for_test : ?runtime_id:string -> string -> int
 val drop_autonomous_waiter_for_test : int -> unit
 

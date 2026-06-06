@@ -101,7 +101,7 @@ describe('ChatTranscript', () => {
     expect(latestBody).toBe('')
   })
 
-  it('uses a viewport-bounded transcript height in primary mode', () => {
+  it('uses a parent-bounded flexible transcript in primary mode', () => {
     render(
       html`<${ChatTranscript}
         entries=${[entry({ id: 'u1', text: 'ping' })]}
@@ -113,10 +113,10 @@ describe('ChatTranscript', () => {
     )
 
     const transcript = container.querySelector('[data-chat-variant="messenger"]')
-    expect(transcript?.classList.contains('min-h-[18rem]')).toBe(true)
-    expect(transcript?.classList.contains('max-h-[42vh]')).toBe(true)
-    expect(transcript?.classList.contains('sm:min-h-[28rem]')).toBe(true)
-    expect(transcript?.classList.contains('sm:max-h-[54vh]')).toBe(true)
+    expect(transcript?.getAttribute('data-chat-size')).toBe('primary')
+    expect(transcript?.classList.contains('min-h-0')).toBe(true)
+    expect(transcript?.classList.contains('flex-1')).toBe(true)
+    expect(transcript?.classList.contains('max-h-[42vh]')).toBe(false)
     expect(transcript?.classList.contains('chat-transcript-airy')).toBe(true)
   })
 

@@ -318,8 +318,11 @@ export function KeeperConversationPanel({
 
   if (layout === 'primary') {
     return html`
-      <div class="flex flex-col gap-4" data-keeper-chat-layout="primary">
-        <div class="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-border-default)] pb-3">
+      <div
+        class="flex h-[clamp(30rem,calc(100svh-13rem),52rem)] min-h-0 flex-col gap-4 overflow-hidden rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4 shadow-none"
+        data-keeper-chat-layout="primary"
+      >
+        <div class="shrink-0 flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-border-default)] pb-3">
           <div class="min-w-0">
             <div class="text-2xs font-semibold uppercase tracking-5 text-[var(--color-fg-muted)]">직접 대화</div>
             <div class="mt-1.5 flex flex-wrap items-center gap-2">
@@ -356,7 +359,7 @@ export function KeeperConversationPanel({
 
         ${chatAccess.message
           ? html`
-              <div class="rounded-[var(--r-2)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2.5 text-xs leading-loose text-[var(--warn-bright)]">
+              <div class="shrink-0 rounded-[var(--r-2)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2.5 text-xs leading-loose text-[var(--warn-bright)]">
                 ${chatAccess.message}
               </div>
             `
@@ -372,13 +375,13 @@ export function KeeperConversationPanel({
 
         ${!showInternal && hiddenCount > 0
           ? html`
-              <div class="rounded-[var(--r-2)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs leading-paragraph text-[var(--warn-bright)]">
+              <div class="shrink-0 rounded-[var(--r-2)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs leading-paragraph text-[var(--warn-bright)]">
                 ${hiddenCount}개의 내부 메시지가 숨겨져 있습니다. "내부 메시지 표시"로 볼 수 있습니다.
               </div>
             `
           : null}
 
-        <div class="rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-4 py-4 shadow-none">
+        <div class="shrink-0 rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-4 py-4 shadow-none">
           <${ChatComposer}
             draft=${draft}
             placeholder=${chatAccess.blocked ? '현재 actor는 direct keeper chat 권한이 없습니다' : placeholder}
@@ -392,7 +395,7 @@ export function KeeperConversationPanel({
           />
         </div>
 
-        ${error ? html`<div class="text-xs text-[var(--bad-light)] leading-relaxed">${error}</div>` : null}
+        ${error ? html`<div class="shrink-0 text-xs text-[var(--bad-light)] leading-relaxed">${error}</div>` : null}
       </div>
     `
   }

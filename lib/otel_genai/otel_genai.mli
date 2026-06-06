@@ -9,6 +9,15 @@ module Attr_key : sig
   val gen_ai_agent_id : string
   val gen_ai_conversation_id : string
   val gen_ai_tool_name : string
+  val gen_ai_request_model : string
+  val gen_ai_response_model : string
+  val gen_ai_token_type : string
+  val gen_ai_usage_input_tokens : string
+  val gen_ai_usage_output_tokens : string
+  val gen_ai_usage_cache_creation_input_tokens : string
+  val gen_ai_usage_cache_read_input_tokens : string
+  val gen_ai_usage_reasoning_output_tokens : string
+  val gen_ai_response_time_to_first_chunk : string
   val masc_gen_ai_keeper_name : string
   val masc_gen_ai_runtime_id : string
   val keeper_name : string
@@ -35,6 +44,18 @@ module Attr_key : sig
   val legacy : string list
   val is_official_gen_ai : string -> bool
   val is_masc_extension : string -> bool
+end
+
+module Metric_name : sig
+  val client_token_usage : string
+  val client_operation_duration : string
+  val client_operation_time_to_first_chunk : string
+  val client_operation_time_per_output_chunk : string
+end
+
+module Event_name : sig
+  val client_inference_operation_details : string
+  val client_operation_exception : string
 end
 
 val keeper_turn_span_name : keeper_name:string -> string

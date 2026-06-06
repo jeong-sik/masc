@@ -36,6 +36,25 @@ let provider_seen_for_model ~model_id =
 let model_labels ~model_id = [ ("model", model_id) ]
 let provider_model_labels ~provider ~model_id = [ ("provider", provider); ("model", model_id) ]
 
+let genai_operation_name = "chat"
+
+let genai_provider_for_model ~model_id =
+  if String.equal model_id "" then "unknown"
+  else provider_seen_for_model ~model_id |> Option.value ~default:"unknown"
+;;
+
+let genai_base_labels ~provider ~model_id =
+  [ Otel_genai.Attr_key.gen_ai_operation_name, genai_operation_name
+  ; Otel_genai.Attr_key.gen_ai_provider_name, provider
+  ; Otel_genai.Attr_key.gen_ai_request_model, model_id
+  ]
+;;
+
+let genai_token_labels ~provider ~model_id ~token_type =
+  genai_base_labels ~provider ~model_id
+  @ [ Otel_genai.Attr_key.gen_ai_token_type, token_type ]
+;;
+
 let inc_counter ?(delta = 1.0) name ~labels =
   Otel_metric_store.inc_counter name ~labels ~delta ()
 ;;
@@ -44,6 +63,74 @@ let set_gauge name ~labels value = Otel_metric_store.set_gauge name ~labels valu
 
 let observe_seconds name ~labels seconds =
   Otel_metric_store.observe_histogram name ~labels seconds
+;;
+
+let observe_genai_seconds name ~provider ~model_id seconds =
+  observe_seconds name ~labels:(genai_base_labels ~provider ~model_id) seconds
+;;
+
+let observe_genai_tokens ~provider ~model_id ~token_type tokens =
+  Otel_metric_store.observe_histogram
+    Otel_genai.Metric_name.client_token_usage
+    ~labels:(genai_token_labels ~provider ~model_id ~token_type)
+    (float_of_int tokens)
+;;
+
+let add_genai_attrs attrs =
+  Otel_spans.add_attrs
+    ~attrs:
+      ((Otel_genai.Attr_key.gen_ai_operation_name, `String genai_operation_name)
+       :: attrs)
+    ()
+;;
+
+let positive_int_attrs attrs =
+  attrs
+  |> List.filter_map (fun (key, value_opt) ->
+    match value_opt with
+    | Some value when value > 0 -> Some (key, `Int value)
+    | Some _ | None -> None)
+;;
+
+let emit_usage_details
+      ?input_tokens
+      ?output_tokens
+      ?cache_creation_input_tokens
+      ?cache_read_input_tokens
+      ?reasoning_output_tokens
+      ~provider
+      ~model_id
+      ()
+  =
+  let detail_attrs =
+    positive_int_attrs
+      [ Otel_genai.Attr_key.gen_ai_usage_input_tokens, input_tokens
+      ; Otel_genai.Attr_key.gen_ai_usage_output_tokens, output_tokens
+      ; ( Otel_genai.Attr_key.gen_ai_usage_cache_creation_input_tokens
+        , cache_creation_input_tokens )
+      ; Otel_genai.Attr_key.gen_ai_usage_cache_read_input_tokens, cache_read_input_tokens
+      ; ( Otel_genai.Attr_key.gen_ai_usage_reasoning_output_tokens
+        , reasoning_output_tokens )
+      ]
+  in
+  match detail_attrs with
+  | [] -> ()
+  | _ ->
+    note_provider ~model_id ~provider;
+    let attrs =
+      [ Otel_genai.Attr_key.gen_ai_provider_name, `String provider
+      ; Otel_genai.Attr_key.gen_ai_request_model, `String model_id
+      ; Otel_genai.Attr_key.gen_ai_response_model, `String model_id
+      ]
+      @ detail_attrs
+    in
+    add_genai_attrs attrs;
+    Otel_spans.add_event
+      ~name:Otel_genai.Event_name.client_inference_operation_details
+      ~attrs:
+        ((Otel_genai.Attr_key.gen_ai_operation_name, `String genai_operation_name)
+         :: attrs)
+      ()
 ;;
 
 let emit_http_status ~provider ~model_id ~status =
@@ -92,6 +179,11 @@ let emit_request_latency ?provider ~model_id ~latency_ms () =
   observe_seconds
     Otel_metric_store.metric_llm_provider_request_latency
     ~labels:(provider_model_labels ~provider ~model_id)
+    seconds;
+  observe_genai_seconds
+    Otel_genai.Metric_name.client_operation_duration
+    ~provider
+    ~model_id
     seconds
 ;;
 
@@ -132,12 +224,23 @@ let error_reason error =
 ;;
 
 let emit_error ~model_id ~error =
+  let reason = error_reason error in
+  let provider = genai_provider_for_model ~model_id in
   inc_counter
     Otel_metric_store.metric_llm_provider_errors
     ~labels:(model_labels ~model_id);
   inc_counter
     Otel_metric_store.metric_llm_provider_errors_by_reason
-    ~labels:[ ("model", model_id); ("error_reason", error_reason error) ]
+    ~labels:[ ("model", model_id); ("error_reason", reason) ];
+  Otel_spans.record_error
+    ~message:error
+    ~error_type:reason
+    ~attrs:
+      [ Otel_genai.Attr_key.gen_ai_operation_name, `String genai_operation_name
+      ; Otel_genai.Attr_key.gen_ai_provider_name, `String provider
+      ; Otel_genai.Attr_key.gen_ai_request_model, `String model_id
+      ]
+    ()
 ;;
 
 let emit_retry ~provider ~model_id ~attempt =
@@ -173,7 +276,10 @@ let emit_token_usage ~provider ~model_id ~input_tokens ~output_tokens =
   inc_counter
     Otel_metric_store.metric_llm_provider_output_tokens
     ~labels
-    ~delta:(float_of_int output_tokens)
+    ~delta:(float_of_int output_tokens);
+  observe_genai_tokens ~provider ~model_id ~token_type:"input" input_tokens;
+  observe_genai_tokens ~provider ~model_id ~token_type:"output" output_tokens;
+  emit_usage_details ~provider ~model_id ~input_tokens ~output_tokens ()
 ;;
 
 let emit_tool_calls ~provider ~model_id ~count =
@@ -211,6 +317,17 @@ let emit_streaming_first_chunk ~provider ~model_id ~ttfrc_ms =
       Otel_metric_store.metric_llm_provider_streaming_first_chunk
       ~labels:(provider_model_labels ~provider ~model_id)
       (ttfrc_ms /. 1000.0);
+    observe_genai_seconds
+      Otel_genai.Metric_name.client_operation_time_to_first_chunk
+      ~provider
+      ~model_id
+      (ttfrc_ms /. 1000.0);
+    add_genai_attrs
+      [ Otel_genai.Attr_key.gen_ai_provider_name, `String provider
+      ; Otel_genai.Attr_key.gen_ai_request_model, `String model_id
+      ; Otel_genai.Attr_key.gen_ai_response_time_to_first_chunk
+        , `Float (ttfrc_ms /. 1000.0)
+      ];
     Otel_spans.add_event
       ~name:"ttfrc.received"
       ~attrs:
@@ -232,6 +349,11 @@ let emit_streaming_chunk ~provider ~model_id ~chunk_index ~inter_chunk_ms =
     observe_seconds
       Otel_metric_store.metric_llm_provider_streaming_inter_chunk
       ~labels:(provider_model_labels ~provider ~model_id)
+      (inter_chunk_ms /. 1000.0);
+    observe_genai_seconds
+      Otel_genai.Metric_name.client_operation_time_per_output_chunk
+      ~provider
+      ~model_id
       (inter_chunk_ms /. 1000.0);
     Otel_spans.add_event
       ~name:"streaming.chunk"

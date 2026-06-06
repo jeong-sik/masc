@@ -2,9 +2,10 @@
 
 | | |
 |---|---|
-| **Status** | Draft |
+| **Status** | Implemented |
 | **Author** | Claude Opus 4.8 |
 | **Date** | 2026-06-04 |
+| **Last Updated** | 2026-06-06 |
 | **Supersedes** | — |
 
 ## 1. Problem
@@ -16,6 +17,22 @@ masc-mcp의 LLM 텔레메트리는 이전에 **legacy backend 전용 커스텀 �
 3. span attributes와 metric labels 간 불일치
 
 ## 2. Current State
+
+Implementation status as of 2026-06-06:
+
+- Legacy `masc_llm_provider_*` metrics remain emitted from `Otel_metric_store`
+  for existing dashboards.
+- `lib/llm_metric_bridge.ml` now also emits standard GenAI OTel client metrics:
+  `gen_ai.client.token.usage`,
+  `gen_ai.client.operation.duration`,
+  `gen_ai.client.operation.time_to_first_chunk`, and
+  `gen_ai.client.operation.time_per_output_chunk`.
+- Token usage, cache details, reasoning-token details, streaming timing, and
+  bounded error classification are projected to GenAI span attributes/events.
+- `tool.name` telemetry used by tool-input validation remains a separate
+  historical tool telemetry surface. It is not the same as the GenAI/MCP
+  semantic-convention `gen_ai.tool.name` attribute used for model/tool-call
+  spans.
 
 ### 2.1 Legacy Metric Names
 
@@ -35,21 +52,23 @@ masc-mcp의 LLM 텔레메트리는 이전에 **legacy backend 전용 커스텀 �
 | `masc_llm_provider_cache_misses_total` | counter | provider, model |
 | `masc_llm_provider_circuit_state` | gauge | provider, model |
 
-### 2.2 OTel Span Events (Partial)
+### 2.2 OTel Span Events And Attributes
 
-Only streaming events emit OTel span attributes:
-
-| Span Event | Attributes |
-|------------|------------|
-| `ttfrc.received` | `gen_ai.provider.name`, `gen_ai.request.model`, `masc.gen_ai.streaming.ttfrc_ms` |
+| Surface | Attributes |
+|---------|------------|
+| `gen_ai.client.inference.operation.details` | `gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.response.model`, usage token attributes |
+| `gen_ai.client.operation.exception` | `exception.message`, `exception.type`, plus low-cardinality `error.type` on the span |
+| `ttfrc.received` | `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.response.time_to_first_chunk`, `masc.gen_ai.streaming.ttfrc_ms` |
 | `streaming.chunk` | `gen_ai.provider.name`, `gen_ai.request.model`, `masc.gen_ai.streaming.chunk_index`, `masc.gen_ai.streaming.inter_chunk_ms` |
 
-### 2.3 Missing OTel Integration
+### 2.3 Remaining Constraints
 
-- Token usage → NOT as OTel metric or span attribute
-- Error events → NOT as OTel span status
-- Cache metrics → NOT in OTel
-- Request duration → NOT as OTel metric
+- The standard `gen_ai.client.token.usage` metric only uses
+  `gen_ai.token.type=input|output`. Cache and reasoning tokens are represented
+  as usage detail attributes, not as additional token-type label values.
+- The current bridge intentionally does not record opt-in prompt/response
+  content attributes such as `gen_ai.input.messages` or
+  `gen_ai.output.messages`.
 
 ## 3. Target State (OTel GenAI Semconv)
 
@@ -57,15 +76,17 @@ Reference: [OTel GenAI Semantic Conventions](https://opentelemetry.io/docs/specs
 
 ### 3.1 OTel Metric: `gen_ai.client.token.usage`
 
-Counter with `gen_ai.token.type` attribute:
+Histogram with `gen_ai.token.type` attribute:
 
 | `gen_ai.token.type` value | Source |
 |--------------------------|--------|
 | `input` | `masc_llm_provider_input_tokens_total` |
 | `output` | `masc_llm_provider_output_tokens_total` |
-| `cache_read` | `masc_llm_provider_cache_read_tokens_total` |
-| `cache_creation` | `masc_llm_provider_cache_creation_tokens_total` |
-| `reasoning` | `masc_llm_provider_reasoning_tokens_total` |
+
+Do not encode `cache_read`, `cache_creation`, or `reasoning` as
+`gen_ai.token.type` values. The OpenTelemetry well-known values are
+`input` and `output`; provider cache/reasoning details belong on the
+`gen_ai.usage.*` attributes below.
 
 ### 3.2 OTel Span Event: `gen_ai.client.inference.operation.details`
 
@@ -88,9 +109,11 @@ Attributes to add per-inference:
 
 Emit OTel metrics/attributes directly.
 
-Why OTel-only migration:
+Why OTel-backed migration:
 - legacy backend was removed by RFC-0217 / PR #20189
-- The compatibility target is now OTel metric store + OTLP, not dual emission
+- The compatibility target is now OTel metric store + OTLP
+- Existing `masc_llm_provider_*` metric names remain in the OTel metric store
+  until dashboard consumers migrate to `gen_ai.*`
 - OTLP-enabled environments get automatic LLM dashboards
 - OTel is the primary metric backend
 
@@ -115,63 +138,31 @@ Why OTel-only migration:
               └────────────┘  └──────────────┘
 ```
 
-### 4.3 Code Changes
+### 4.3 Implemented Changes
 
-#### Phase A: Span Attributes (Low risk)
+| File | Change |
+|------|--------|
+| `lib/otel_genai/otel_genai.ml` | Centralized GenAI metric, event, and attribute names including usage detail attributes. |
+| `lib/otel_spans/otel_spans.ml` | Added testable span attribute/status hooks and GenAI exception recording. |
+| `lib/llm_metric_bridge.ml` | Emits standard GenAI client metrics, operation-details events, usage attributes, streaming timings, and bounded error status. |
+| `lib/keeper/keeper_hooks_oas.ml` | Projects trusted cache/reasoning token details into GenAI usage attributes without inventing extra `gen_ai.token.type` values. |
+| `test/test_llm_metric_bridge.ml` | Covers standard metric names, event names, span attrs/status, and the cache/reasoning token-type guardrail. |
 
-In `lib/llm_metric_bridge.ml`, add OTel span attributes to `emit_token_usage`:
+## 5. Remaining Migration Work
 
-```ocaml
-let emit_token_usage ~provider ~model_id ~input_tokens ~output_tokens =
-  (* OTel metric store counters *)
-  Otel_metric_store.inc_counter input_token_metric ...;
-  Otel_metric_store.inc_counter output_token_metric ...;
-  (* OTel span attributes *)
-  Otel_spans.add_event
-    ~name:"gen_ai.client.token.usage"
-    ~attrs:
-      [ "gen_ai.provider.name", `String provider
-      ; "gen_ai.request.model", `String model_id
-      ; "gen_ai.usage.input_tokens", `Int input_tokens
-      ; "gen_ai.usage.output_tokens", `Int output_tokens
-      ]
-    ()
-```
-
-Similarly for `emit_error` (span status), `emit_streaming_first_chunk` (already partially done).
-
-#### Phase B: OTel Metric Export (Medium risk)
-
-Add a thin OTel metric exporter in the bridge:
-
-```ocaml
-(* OTel emission helper *)
-let emit_metric_otel ~name ~value ~attrs =
-  Otel_metrics.record ~name ~value ~attrs
-```
-
-This requires the `opentelemetry` OCaml library (already in dune-project).
-
-#### Phase C: Custom→Standard Migration (Future)
-
-After Phase B is validated:
-1. Add legacy → OTel name mapping table where compatibility is still needed
-2. Grafana dashboards use OTel metric names
-3. Deprecate legacy `masc_llm_provider_*` names once dashboard consumers are updated
-
-## 5. Scope & Effort
-
-| Phase | Files | Effort | Risk |
-|-------|-------|--------|------|
-| A: Span attributes | `llm_metric_bridge.ml`, `keeper_hooks_oas.ml` | ~50 lines | Low |
-| B: OTel metric export | `llm_metric_bridge.ml`, new `otel_llm_metrics.ml` | ~200 lines | Medium |
-| C: Deprecation | Dashboard, alert configs | ~100 files | High |
+| Area | Status |
+|------|--------|
+| Dashboard queries | Can migrate from `masc_llm_provider_*` to `gen_ai.*`; legacy names remain available for now. |
+| Prompt/response content events | Intentionally not emitted by default because `gen_ai.input.messages` and `gen_ai.output.messages` are opt-in and can contain sensitive data. |
+| MCP tool-call semantic convention | Separate from LLM GenAI client metrics. Use `gen_ai.tool.name` / `mcp.*` only when instrumenting MCP tool-call spans. |
 
 ## 6. Decision Points
 
-1. **Dual emission vs replacement?** — Replacement. RFC-0217 / PR #20189 retired the legacy backend.
+1. **Dual emission vs replacement?** — Dual metric names in the OTel metric
+   store for compatibility; no restoration of the retired legacy backend.
 2. **OTLP endpoint configuration?** — Use existing `opentelemetry` lib config (env vars).
-3. **Custom attributes (`masc.gen_ai.*`) migration?** — Phase C, with deprecation period.
+3. **Custom attributes (`masc.gen_ai.*`) migration?** — Keep as MASC-owned
+   extensions where no current GenAI convention exists.
 
 ## 7. Non-Goals
 
@@ -181,8 +172,12 @@ After Phase B is validated:
 
 ## 8. References
 
-- [OTel GenAI Semantic Conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/)
-- [OTel GenAI Metrics](https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-metrics/)
+- [OTel GenAI Semantic Conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/) — checked 2026-06-06, confidence High.
+- [OTel GenAI Metrics](https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-metrics/) — checked 2026-06-06, confidence High.
+- [OTel GenAI Events](https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-events/) — checked 2026-06-06, confidence High.
+- [OTel GenAI Exceptions](https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-exceptions/) — checked 2026-06-06, confidence High.
+- [OTel GenAI Attribute Registry](https://opentelemetry.io/docs/specs/semconv/registry/attributes/gen-ai/) — checked 2026-06-06, confidence High.
+- [OTel MCP Semantic Conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/mcp/) — checked 2026-06-06, confidence High.
 - PR #19957 — Telemetry pipeline gap fixes (error/retry JSONL, cache_creation pipeline)
-- `lib/llm_metric_bridge.ml` — Bridge layer with partial OTel span events
+- `lib/llm_metric_bridge.ml` — Bridge layer with GenAI client metric/span/event emission
 - `lib/opentelemetry_client_cohttp_eio.ml` — OTLP exporter (Eio transport)

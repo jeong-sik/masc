@@ -56,10 +56,29 @@ val with_span :
 val add_event :
   name:string -> ?attrs:Opentelemetry.key_value list -> unit -> unit
 
+(** [add_attrs ~attrs ()] appends attributes to the active OTel span.
+    No-op when OTel is disabled or when no ambient span exists. *)
+val add_attrs : ?attrs:Opentelemetry.key_value list -> unit -> unit
+
+(** [set_status status] sets the active span status.
+    No-op when OTel is disabled or when no ambient span exists. *)
+val set_status : Opentelemetry.Span_status.t -> unit
+
+(** [record_error ~message ~error_type] marks the active span as errored and
+    emits the GenAI exception event. *)
+val record_error :
+  ?attrs:Opentelemetry.key_value list ->
+  message:string ->
+  error_type:string ->
+  unit ->
+  unit
+
 (** Temporarily override event emission for focused tests. *)
 val with_test_event_emitter :
   enabled:bool ->
   emit_event:(name:string -> attrs:Opentelemetry.key_value list -> unit) ->
+  ?emit_attrs:(attrs:Opentelemetry.key_value list -> unit) ->
+  ?set_status:(Opentelemetry.Span_status.t -> unit) ->
   (unit -> 'a) ->
   'a
 

@@ -40,6 +40,7 @@
   (re_export masc.worker_execution_backend)
   (re_export masc.worker_execution_spec)
   (re_export masc.worker_runtime_config)
+  (re_export masc.otel_genai)
   (re_export masc.otel_metrics)
   (re_export masc.otel_spans)
   (re_export otel_metric_test_store)
@@ -178,6 +179,7 @@
   (re_export multimodal)
   (re_export ocaml-protoc-plugin)
   (re_export ocaml-webrtc)
+  (re_export opentelemetry)
   ; RFC-0129 — Pool.For_testing.read_body_with_idle tests build a mock
   ; Piaf.Body via Piaf.Stream.create + Piaf.Body.of_string_stream.
   (re_export piaf)

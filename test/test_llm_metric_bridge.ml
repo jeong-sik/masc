@@ -340,6 +340,229 @@ let assoc_int key attrs =
   | Some _ -> Alcotest.failf "expected int attr %s" key
   | None -> Alcotest.failf "missing attr %s" key
 
+let genai_base_labels ~provider ~model_id =
+  [ (Otel_genai.Attr_key.gen_ai_operation_name, "chat")
+  ; (Otel_genai.Attr_key.gen_ai_provider_name, provider)
+  ; (Otel_genai.Attr_key.gen_ai_request_model, model_id)
+  ]
+
+let genai_token_labels ~provider ~model_id ~token_type =
+  genai_base_labels ~provider ~model_id
+  @ [ (Otel_genai.Attr_key.gen_ai_token_type, token_type) ]
+
+let test_token_usage_emits_genai_otel_surface () =
+  let events = ref [] in
+  let span_attrs = ref [] in
+  let provider = "bridge-genai-provider" in
+  let model_id = Printf.sprintf "bridge-genai-token-%d" (Unix.getpid ()) in
+  let input_labels = genai_token_labels ~provider ~model_id ~token_type:"input" in
+  let output_labels = genai_token_labels ~provider ~model_id ~token_type:"output" in
+  let before_input =
+    metric Otel_genai.Metric_name.client_token_usage ~labels:input_labels
+  in
+  let before_output =
+    metric Otel_genai.Metric_name.client_token_usage ~labels:output_labels
+  in
+  Otel_spans.with_test_event_emitter ~enabled:true
+    ~emit_event:(fun ~name ~attrs -> events := (name, attrs) :: !events)
+    ~emit_attrs:(fun ~attrs -> span_attrs := attrs @ !span_attrs)
+    (fun () ->
+       Bridge.emit_token_usage
+         ~provider
+         ~model_id
+         ~input_tokens:17
+         ~output_tokens:23);
+  check_metric_delta "genai input token usage +17"
+    Otel_genai.Metric_name.client_token_usage
+    ~labels:input_labels
+    ~before:before_input
+    ~delta:17.0;
+  check_metric_delta "genai output token usage +23"
+    Otel_genai.Metric_name.client_token_usage
+    ~labels:output_labels
+    ~before:before_output
+    ~delta:23.0;
+  (match find_otel_sample Otel_genai.Metric_name.client_token_usage ~labels:input_labels with
+   | Some { kind = Otel_metrics.Histogram; _ } -> ()
+   | Some _ -> Alcotest.fail "genai token usage must export as OTel histogram"
+   | None -> Alcotest.fail "missing genai token usage sample");
+  Alcotest.(check int)
+    "span attr input tokens"
+    17
+    (assoc_int Otel_genai.Attr_key.gen_ai_usage_input_tokens !span_attrs);
+  Alcotest.(check int)
+    "span attr output tokens"
+    23
+    (assoc_int Otel_genai.Attr_key.gen_ai_usage_output_tokens !span_attrs);
+  Alcotest.(check string)
+    "span attr provider"
+    provider
+    (assoc_string Otel_genai.Attr_key.gen_ai_provider_name !span_attrs);
+  (match List.rev !events with
+   | [ name, attrs ] ->
+     Alcotest.(check string)
+       "operation details event"
+       Otel_genai.Event_name.client_inference_operation_details
+       name;
+     Alcotest.(check int)
+       "event input tokens"
+       17
+       (assoc_int Otel_genai.Attr_key.gen_ai_usage_input_tokens attrs)
+   | other ->
+     Alcotest.failf "expected one token usage OTel event, got %d"
+       (List.length other))
+
+let test_usage_details_emit_cache_reasoning_attrs_without_token_type_aliases () =
+  let events = ref [] in
+  let span_attrs = ref [] in
+  let provider = "bridge-genai-detail-provider" in
+  let model_id = Printf.sprintf "bridge-genai-detail-%d" (Unix.getpid ()) in
+  let cache_read_labels =
+    genai_token_labels ~provider ~model_id ~token_type:"cache_read"
+  in
+  let reasoning_labels =
+    genai_token_labels ~provider ~model_id ~token_type:"reasoning"
+  in
+  let before_cache_read =
+    metric Otel_genai.Metric_name.client_token_usage ~labels:cache_read_labels
+  in
+  let before_reasoning =
+    metric Otel_genai.Metric_name.client_token_usage ~labels:reasoning_labels
+  in
+  Otel_spans.with_test_event_emitter ~enabled:true
+    ~emit_event:(fun ~name ~attrs -> events := (name, attrs) :: !events)
+    ~emit_attrs:(fun ~attrs -> span_attrs := attrs @ !span_attrs)
+    (fun () ->
+       Bridge.emit_usage_details
+         ~provider
+         ~model_id
+         ~cache_creation_input_tokens:5
+         ~cache_read_input_tokens:7
+         ~reasoning_output_tokens:11
+         ());
+  check_metric_delta "cache_read is not a gen_ai.token.type alias"
+    Otel_genai.Metric_name.client_token_usage
+    ~labels:cache_read_labels
+    ~before:before_cache_read
+    ~delta:0.0;
+  check_metric_delta "reasoning is not a gen_ai.token.type alias"
+    Otel_genai.Metric_name.client_token_usage
+    ~labels:reasoning_labels
+    ~before:before_reasoning
+    ~delta:0.0;
+  Alcotest.(check int)
+    "span cache creation tokens"
+    5
+    (assoc_int
+       Otel_genai.Attr_key.gen_ai_usage_cache_creation_input_tokens
+       !span_attrs);
+  Alcotest.(check int)
+    "span cache read tokens"
+    7
+    (assoc_int
+       Otel_genai.Attr_key.gen_ai_usage_cache_read_input_tokens
+       !span_attrs);
+  Alcotest.(check int)
+    "span reasoning tokens"
+    11
+    (assoc_int
+       Otel_genai.Attr_key.gen_ai_usage_reasoning_output_tokens
+       !span_attrs);
+  (match List.rev !events with
+   | [ name, attrs ] ->
+     Alcotest.(check string)
+       "operation details event"
+       Otel_genai.Event_name.client_inference_operation_details
+       name;
+     Alcotest.(check int)
+       "event cache read tokens"
+       7
+       (assoc_int Otel_genai.Attr_key.gen_ai_usage_cache_read_input_tokens attrs)
+   | other ->
+     Alcotest.failf "expected one GenAI usage-details event, got %d"
+       (List.length other))
+
+let test_latency_and_streaming_emit_genai_metrics () =
+  let provider = "bridge-genai-latency-provider" in
+  let model_id = Printf.sprintf "bridge-genai-latency-%d" (Unix.getpid ()) in
+  let labels = genai_base_labels ~provider ~model_id in
+  let before_duration =
+    metric Otel_genai.Metric_name.client_operation_duration ~labels
+  in
+  let before_ttf =
+    metric Otel_genai.Metric_name.client_operation_time_to_first_chunk ~labels
+  in
+  let before_chunk =
+    metric Otel_genai.Metric_name.client_operation_time_per_output_chunk ~labels
+  in
+  Bridge.emit_request_latency ~provider ~model_id ~latency_ms:125 ();
+  Bridge.emit_streaming_first_chunk ~provider ~model_id ~ttfrc_ms:25.0;
+  Bridge.emit_streaming_chunk
+    ~provider
+    ~model_id
+    ~chunk_index:3
+    ~inter_chunk_ms:7.5;
+  check_metric_delta "genai operation duration +0.125s"
+    Otel_genai.Metric_name.client_operation_duration
+    ~labels
+    ~before:before_duration
+    ~delta:0.125;
+  check_metric_delta "genai time to first chunk +0.025s"
+    Otel_genai.Metric_name.client_operation_time_to_first_chunk
+    ~labels
+    ~before:before_ttf
+    ~delta:0.025;
+  check_metric_delta "genai time per output chunk +0.0075s"
+    Otel_genai.Metric_name.client_operation_time_per_output_chunk
+    ~labels
+    ~before:before_chunk
+    ~delta:0.0075
+
+let test_error_records_genai_exception_span_signal () =
+  let events = ref [] in
+  let span_attrs = ref [] in
+  let span_status = ref None in
+  let provider = "bridge-genai-error-provider" in
+  let model_id = Printf.sprintf "bridge-genai-error-%d" (Unix.getpid ()) in
+  Bridge.emit_http_status ~provider ~model_id ~status:200;
+  Otel_spans.with_test_event_emitter ~enabled:true
+    ~emit_event:(fun ~name ~attrs -> events := (name, attrs) :: !events)
+    ~emit_attrs:(fun ~attrs -> span_attrs := attrs @ !span_attrs)
+    ~set_status:(fun status -> span_status := Some status)
+    (fun () -> Bridge.emit_error ~model_id ~error:"deadline exceeded after 30s");
+  (match !span_status with
+   | Some { Opentelemetry.Span_status.message; code } ->
+     Alcotest.(check string)
+       "span status message"
+       "deadline exceeded after 30s"
+       message;
+     Alcotest.(check bool)
+       "span status error code"
+       true
+       (code = Opentelemetry.Span_status.Status_code_error)
+   | None -> Alcotest.fail "missing GenAI error span status");
+  Alcotest.(check string)
+    "span error.type"
+    "timeout"
+    (assoc_string "error.type" !span_attrs);
+  Alcotest.(check string)
+    "span provider"
+    provider
+    (assoc_string Otel_genai.Attr_key.gen_ai_provider_name !span_attrs);
+  (match List.rev !events with
+   | [ name, attrs ] ->
+     Alcotest.(check string)
+       "exception event name"
+       "gen_ai.client.operation.exception"
+       name;
+     Alcotest.(check string)
+       "exception type"
+       "timeout"
+       (assoc_string "exception.type" attrs)
+   | other ->
+     Alcotest.failf "expected one GenAI exception event, got %d"
+       (List.length other))
+
 let test_streaming_callbacks_emit_otel_events () =
   let events = ref [] in
   let provider = "bridge-otel-provider" in
@@ -501,6 +724,18 @@ let () =
           Alcotest.test_case
             "request latency no model_id increments typed clamp reason" `Quick
             test_request_latency_no_model_id_clamped_counter;
+          Alcotest.test_case
+            "token usage emits GenAI OTel surface" `Quick
+            test_token_usage_emits_genai_otel_surface;
+          Alcotest.test_case
+            "usage details keep cache and reasoning out of token.type" `Quick
+            test_usage_details_emit_cache_reasoning_attrs_without_token_type_aliases;
+          Alcotest.test_case
+            "latency and streaming emit GenAI metrics" `Quick
+            test_latency_and_streaming_emit_genai_metrics;
+          Alcotest.test_case
+            "error records GenAI exception span signal" `Quick
+            test_error_records_genai_exception_span_signal;
           Alcotest.test_case "streaming callbacks emit OTel events" `Quick
             test_streaming_callbacks_emit_otel_events;
           Alcotest.test_case "request latency floors zero ms" `Quick

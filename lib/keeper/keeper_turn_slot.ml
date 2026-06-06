@@ -545,6 +545,7 @@ let update_budget_exhaustions f =
 
 let bump_budget_exhaustion_seeded ~keeper_name ~prior_strikes =
   update_budget_exhaustions (fun () ->
+    (* DET-OK: budget_exhaustions is advisory; absence = 0 strikes (no exhaustion recorded) *)
     let current = Option.value ~default:0 (Hashtbl.find_opt budget_exhaustions keeper_name) in
     let next = max current prior_strikes + 1 in
     Hashtbl.replace budget_exhaustions keeper_name next;
@@ -561,6 +562,7 @@ let reset_budget_exhaustion ~keeper_name =
 ;;
 
 let peek_budget_exhaustion_for_test ~keeper_name =
+  (* DET-OK: budget_exhaustions is advisory; absence = 0 strikes (no exhaustion recorded) *)
   Option.value ~default:0 (Hashtbl.find_opt budget_exhaustions keeper_name)
 ;;
 

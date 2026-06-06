@@ -504,8 +504,8 @@ let test_tool_execute_rejects_parent_git_repo_cwd () =
   | Error err -> Alcotest.failf "cwd resolution should be path-only, got: %s" err
   | Ok cwd ->
     (match
-       Masc.Keeper_tool_execute_repo_readiness.validate_cwd_ready
-         ~repo_sync_policy:Masc.Keeper_tool_execute_repo_readiness.Allow_repo_sync
+       Masc.Keeper_sandbox_repo_lifecycle.validate_cwd_ready
+         ~repo_sync_policy:Masc.Keeper_sandbox_repo_lifecycle.Allow_repo_sync
          ~config
          ~meta
          ~cwd

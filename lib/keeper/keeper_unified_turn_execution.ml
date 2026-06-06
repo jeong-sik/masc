@@ -580,15 +580,14 @@ let run (ctx : ctx)
             err;
           Log.Keeper.warn
             "%s: recoverable runtime failure in %s suggested \
-             degraded retry to %s (reason=%s), but remaining turn \
-             budget %.1fs is below the OAS retry guard/minimum; \
+             degraded retry to %s (reason=%s), but retry provider \
+             timeout admission was unavailable; \
              ending this cycle: %s"
             meta.name
             execution_runtime_id
             degraded_retry.next_runtime
             (EC.degraded_retry_reason_to_string
                degraded_retry.fallback_reason)
-            (remaining_turn_budget_s ())
             (short_preview (Agent_sdk.Error.to_string err));
           mark_terminal_error err;
           Error err
@@ -705,8 +704,8 @@ let run (ctx : ctx)
      Long voice/OAS turns can keep making stream or tool progress beyond the
      legacy 600s cap. Runaway detection is owned by stream idle, provider
      attempt liveness, tool-level timeouts, max-turn limits, and the optional
-     supervisor stale-turn watchdog. Retry budgeting still consults the
-     remaining turn budget between provider attempts. *)
+     supervisor stale-turn watchdog. Retry admission must not reintroduce the
+     cumulative wall-clock cap between provider attempts. *)
   retry_loop
     { run_meta = meta
     ; execution = initial_execution

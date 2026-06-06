@@ -87,49 +87,13 @@ let decide_retry_admission_for_turn
     ~(allow_wall_clock_retry_budget : bool)
     ~(estimated_input_tokens : int)
     ~(max_turns : int) : (unit, retry_admission_denial) result =
-  let runtime = Keeper_runtime_resolved.current () in
-  let adaptive_timeout_sec = Keeper_runtime_resolved.oas_call_timeout_sec () in
   let is_retry = attempt_kind_is_retry attempt_kind in
   if is_retry then
-    let time_spent_in_turn =
-      runtime.turn_timeout_sec.value -. remaining_turn_budget_s
-    in
-    let usable_retry_budget = adaptive_timeout_sec -. time_spent_in_turn in
-    let usable_wall_clock_budget =
-      remaining_turn_budget_s -. provider_timeout_guard_sec
-    in
-    let projected_usable_budget_s =
-      if usable_retry_budget >= min_provider_timeout_budget_sec then
-        usable_retry_budget
-      else if allow_wall_clock_retry_budget then usable_wall_clock_budget
-      else usable_retry_budget
-    in
-    if remaining_turn_budget_s <= 0.0 then
-      Error
-        (Retry_budget_below_min
-           {
-             projected_usable_budget_s;
-             min_required_s = min_provider_timeout_budget_sec;
-             remaining_turn_budget_s;
-             adaptive_timeout_s = adaptive_timeout_sec;
-             allow_wall_clock_retry_budget;
-           })
-    else if usable_retry_budget >= min_provider_timeout_budget_sec then Ok ()
-    else if
-      allow_wall_clock_retry_budget
-      && usable_wall_clock_budget >= min_provider_timeout_budget_sec
-    then Ok ()
-    else
-      Error
-        (Retry_budget_below_min
-           {
-             projected_usable_budget_s;
-             min_required_s = min_provider_timeout_budget_sec;
-             remaining_turn_budget_s;
-             adaptive_timeout_s = adaptive_timeout_sec;
-             allow_wall_clock_retry_budget;
-           })
+    Ok ()
   else
+    let _ = allow_wall_clock_retry_budget in
+    let _ = estimated_input_tokens in
+    let _ = max_turns in
     let usable_budget = remaining_turn_budget_s -. provider_timeout_guard_sec in
     if usable_budget >= min_provider_timeout_budget_sec then Ok ()
     else

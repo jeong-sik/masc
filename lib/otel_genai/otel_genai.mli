@@ -10,6 +10,7 @@ module Attr_key : sig
   val gen_ai_conversation_id : string
   val gen_ai_tool_name : string
   val gen_ai_request_model : string
+  val gen_ai_request_stream : string
   val gen_ai_response_model : string
   val gen_ai_token_type : string
   val gen_ai_usage_input_tokens : string
@@ -20,6 +21,7 @@ module Attr_key : sig
   val gen_ai_response_time_to_first_chunk : string
   val masc_gen_ai_keeper_name : string
   val masc_gen_ai_runtime_id : string
+  val masc_gen_ai_response_finish_reason : string
   val keeper_name : string
   val keeper_agent_name : string
   val keeper_trace_id : string

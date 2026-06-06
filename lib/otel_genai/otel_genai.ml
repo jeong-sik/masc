@@ -32,6 +32,7 @@ module Attr_key = struct
 
   let gen_ai_tool_name = register Official_gen_ai "gen_ai.tool.name"
   let gen_ai_request_model = register Official_gen_ai "gen_ai.request.model"
+  let gen_ai_request_stream = register Official_gen_ai "gen_ai.request.stream"
   let gen_ai_response_model = register Official_gen_ai "gen_ai.response.model"
   let gen_ai_token_type = register Official_gen_ai "gen_ai.token.type"
   let gen_ai_usage_input_tokens =
@@ -64,6 +65,10 @@ module Attr_key = struct
 
   let masc_gen_ai_runtime_id =
     register Masc_extension "masc.gen_ai.runtime_id"
+  ;;
+
+  let masc_gen_ai_response_finish_reason =
+    register Masc_extension "masc.gen_ai.response.finish_reason"
   ;;
 
   let keeper_name = register Legacy "keeper.name"

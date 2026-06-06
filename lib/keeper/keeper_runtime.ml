@@ -125,6 +125,24 @@ let canonicalize_if_keeper config name =
     [Some v] from TOML overrides; [None] keeps the current runtime value. *)
 let apply_default opt current = match opt with Some v -> v | None -> current
 
+let prune_unknown_active_goal_ids config ~keeper_name active_goal_ids =
+  match active_goal_ids with
+  | [] -> []
+  | ids ->
+    let known_goal_ids =
+      Goal_store.list_goals config ()
+      |> List.map (fun (goal : Goal_store.goal) -> goal.id)
+    in
+    let kept, missing =
+      List.partition (fun goal_id -> List.mem goal_id known_goal_ids) ids
+    in
+    if missing <> [] then
+      Log.Keeper.warn
+        "ensure_keeper_meta: pruning unknown active_goal_ids for %s: %s"
+        keeper_name
+        (String.concat ", " missing);
+    kept
+
 (** Same as [apply_default] but both TOML and meta are option-typed. *)
 let apply_default_opt opt current = match opt with Some _ -> opt | None -> current
 
@@ -200,7 +218,9 @@ let ensure_keeper_meta config name =
     let target_mention_targets =
       match defaults.mention_targets with [] -> meta.mention_targets | xs -> xs in
     let target_active_goal_ids =
-      apply_default defaults.active_goal_ids meta.active_goal_ids in
+      apply_default defaults.active_goal_ids meta.active_goal_ids
+      |> prune_unknown_active_goal_ids config ~keeper_name:meta.name
+    in
     (* Defense-in-depth (#11080 sibling): keeper sandbox_profile MUST be
        declared. The previous behaviour silently fell through to
        [default_sandbox_profile = Local] when TOML omitted the key,

@@ -140,7 +140,7 @@ tool_denylist = ["toml-tool-x", "toml-tool-y"]
           check int "no TOML-only write bump" (initial_meta.meta_version + 1)
             persisted.Keeper_meta_contract.meta_version))
 
-let test_ensure_keeper_meta_persists_active_goal_ids () =
+let test_ensure_keeper_meta_prunes_unknown_active_goal_ids () =
   with_runtime_default @@ fun () ->
   with_temp_dir "keeper-runtime-active-goal-workspace" @@ fun workspace_dir ->
   with_config_dir @@ fun config_dir ->
@@ -155,9 +155,12 @@ let test_ensure_keeper_meta_persists_active_goal_ids () =
     {|[keeper]
 goal = "Test active goal resync"
 sandbox_profile = "local"
-active_goal_ids = ["goal-runtime"]
+active_goal_ids = ["goal-runtime", "goal-ghost"]
 |};
   let config = Workspace.default_config workspace_dir in
+  (match Goal_store.upsert_goal config ~id:"goal-runtime" ~title:"Runtime goal" () with
+  | Ok _ -> ()
+  | Error e -> fail ("upsert_goal failed: " ^ e));
   let initial_meta =
     match
       Masc_test_deps.meta_of_json_fixture
@@ -179,7 +182,7 @@ active_goal_ids = ["goal-runtime"]
   | Ok updated ->
       check
         (list string)
-        "returned meta active_goal_ids overlaid from TOML"
+        "returned meta active_goal_ids pruned to known TOML goals"
         [ "goal-runtime" ]
         updated.Keeper_meta_contract.active_goal_ids;
       (match Keeper_meta_store.read_meta config keeper_name with
@@ -188,7 +191,7 @@ active_goal_ids = ["goal-runtime"]
       | Ok (Some persisted) ->
           check
             (list string)
-            "persisted meta keeps active_goal_ids"
+            "persisted meta prunes unknown active_goal_ids"
             [ "goal-runtime" ]
             persisted.Keeper_meta_contract.active_goal_ids;
           check int "persisted write bumps meta_version"
@@ -205,8 +208,8 @@ let () =
             `Quick
             test_ensure_keeper_meta_overlays_denylist_from_toml;
           test_case
-            "persists active_goal_ids from TOML on bootstrap"
+            "prunes unknown active_goal_ids from TOML on bootstrap"
             `Quick
-            test_ensure_keeper_meta_persists_active_goal_ids;
+            test_ensure_keeper_meta_prunes_unknown_active_goal_ids;
         ] );
     ]

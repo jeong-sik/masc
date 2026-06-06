@@ -33,17 +33,22 @@ let extract_number_from_rest rest =
   scan rest
 ;;
 
+let string_or default = function
+  | Some value -> value
+  | None -> default
+;;
+
 let compute_typed : type i o r s. (i, o, r, s) Typed.command -> command_descriptor =
   function
   | Typed.Gh { subcommand; action; title; draft; squash; body; rest; _ } ->
     (match subcommand, action with
      | "pr", Some "create" ->
        let base = extract_flag_from_rest rest ~flag:"--base" ~short:(Some "-b") ~default:"main" in
-       Gh_pr_create { title = Option.value title ~default:""; base; draft }
+       Gh_pr_create { title = string_or "" title; base; draft }
      | "pr", Some "merge" ->
        Gh_pr_merge { pr_number = extract_number_from_rest rest; squash }
      | "pr", Some "comment" ->
-       Gh_pr_comment { pr_number = extract_number_from_rest rest; body = Option.value body ~default:"" }
+       Gh_pr_comment { pr_number = extract_number_from_rest rest; body = string_or "" body }
      | "pr", Some "close" ->
        Gh_pr_close { pr_number = extract_number_from_rest rest }
      | "pr", Some "edit" ->
@@ -55,7 +60,7 @@ let compute_typed : type i o r s. (i, o, r, s) Typed.command -> command_descript
      | "pr", Some "ready" ->
        Gh_pr_review { pr_number = extract_number_from_rest rest }
      | "issue", Some "create" ->
-       Gh_issue_create { title = Option.value title ~default:""; body = Option.value body ~default:"" }
+       Gh_issue_create { title = string_or "" title; body = string_or "" body }
      | "issue", Some "close" ->
        Gh_issue_close { issue_number = extract_number_from_rest rest }
      | "issue", Some "reopen" ->
@@ -63,8 +68,8 @@ let compute_typed : type i o r s. (i, o, r, s) Typed.command -> command_descript
      | _ -> Generic)
   | Typed.Git_push { force; force_with_lease; remote; branch; _ } ->
     Git_push
-      { remote = Option.value remote ~default:"origin"
-      ; branch = Option.value branch ~default:"main"
+      { remote = string_or "origin" remote
+      ; branch = string_or "main" branch
       ; force = force || force_with_lease
       }
   | Typed.Git_commit { message; amend } ->
@@ -240,10 +245,11 @@ let rec compute ir =
      | last_cmd :: _ ->
        (match compute last_cmd with
         | Generic ->
-          let first_cmd = Option.value (Shape.first_command_name ir) ~default:"" in
-          let last_cmd = Option.value (Shape.last_command_name ir) ~default:"" in
-          let length = Shape.top_level_stage_count ir in
-          Pipe_chain { first_cmd; last_cmd; length }
+          (match Shape.first_command_name ir, Shape.last_command_name ir with
+           | Some first_cmd, Some last_cmd ->
+             let length = Shape.top_level_stage_count ir in
+             Pipe_chain { first_cmd; last_cmd; length }
+           | (None, Some _) | (Some _, None) | (None, None) -> Generic)
         | ( Gh_pr_create _
           | Gh_pr_merge _
           | Gh_pr_comment _

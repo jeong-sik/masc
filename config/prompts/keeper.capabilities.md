@@ -77,7 +77,7 @@ File operations:
 - List directory contents: one scoped Execute `ls` typed argv call when Execute is visible.
 - Git history: Execute `executable="git" argv=["log","--oneline","-10"]` with cwd inside the target repo.
 - Git status: Execute `executable="git" argv=["status","--short"]` with cwd inside the target repo.
-- Read-only branch/worktree inspection: use `git status --short --branch`, `git branch --show-current`, or `git worktree list`. Never run `git checkout main`, `git switch main`, `git add`, `git commit`, `git push`, or `git worktree add` unless the active schema explicitly exposes write-capable Execute and the task is assigned code work.
+- Read-only branch/worktree inspection: use `git status --short --branch`, `git branch --show-current`, or `git worktree list`. `git checkout main` and `git switch main` are allowed as local main-branch recovery commands; do not use arbitrary branch checkout, `git add`, `git commit`, `git push`, or `git worktree add` unless the active schema explicitly exposes write-capable Execute and the task is assigned code work.
 - Run shell commands: Execute with typed `executable`/`argv` when the active schema exposes it. ONE command per call unless using explicit `pipeline: [{ executable, argv }, ...]`. For code/PR work and repo-hosting CLIs, set cwd to `repos/REPO_NAME/.worktrees/TASK_NAME`; never run from sandbox root when more than one clone exists. Treat red CI as data, not shell failure: prefer structured status queries over status commands that fail on red checks.
 - Execute returns stdout/stderr automatically. Do not pass `stdout` or `stderr` objects unless you explicitly want to discard output.
 - Write or create a file: Edit/Write when the active schema exposes them. Writable scope: your sandbox only.

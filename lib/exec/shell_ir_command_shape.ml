@@ -159,6 +159,16 @@ let git_checkout_head_restore_args args =
     paths <> [] && List.for_all simple_relative_git_pathspec paths
   | _ -> false
 
+let git_checkout_main_recovery_args args =
+  match drop_git_quiet_flags args with
+  | [ "main" ] -> true
+  | _ -> false
+
+let git_switch_main_recovery_args args =
+  match drop_git_quiet_flags args with
+  | [ "main" ] -> true
+  | _ -> false
+
 let git_reset_hard_head_args args =
   let rec loop ~hard ~target = function
     | [] -> hard && (match target with Some "HEAD" | Some "@" -> true | None | Some _ -> false)
@@ -243,7 +253,9 @@ let is_git_recovery_command ir =
     then false
     else
       match git_subcommand_with_args stage.args with
-      | Some ("checkout", args) -> git_checkout_head_restore_args args
+      | Some ("checkout", args) ->
+        git_checkout_head_restore_args args || git_checkout_main_recovery_args args
+      | Some ("switch", args) -> git_switch_main_recovery_args args
       | Some ("reset", args) -> git_reset_hard_head_args args
       | Some ("clean", args) -> git_clean_recovery_args args
       | _ -> false)

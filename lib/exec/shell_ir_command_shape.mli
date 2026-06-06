@@ -25,6 +25,7 @@ val is_git_diagnostic_command : Shell_ir.t -> bool
 
 val is_git_recovery_command : Shell_ir.t -> bool
 (** [true] for narrow local git recovery forms:
+    [git checkout main], [git switch main],
     [git checkout HEAD -- <relative-path>...], [git reset --hard HEAD], and
     [git clean -df]. This does not lower risk; it is only command-shape data for
     callers with separate cwd/sandbox policy. *)

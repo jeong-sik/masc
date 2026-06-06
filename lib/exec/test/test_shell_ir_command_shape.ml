@@ -32,13 +32,19 @@ let test_git_recovery_command_shapes () =
   check_recovery
     "env FOO=bar git checkout HEAD -- test/fixtures/deleted-two.txt"
     true;
+  check_recovery "git checkout main" true;
+  check_recovery "git checkout -q main" true;
+  check_recovery "git switch main" true;
   check_recovery "opam exec -- git reset --hard HEAD" true;
   check_recovery "git clean -df" true;
   check_recovery "git clean -qfd" true
 
 let test_git_non_recovery_command_shapes () =
   check_recovery "git checkout other-branch" false;
+  check_recovery "git checkout master" false;
   check_recovery "git checkout -b feature" false;
+  check_recovery "git switch -c feature" false;
+  check_recovery "git switch feature" false;
   check_recovery "git checkout HEAD -- ../outside.txt" false;
   check_recovery "git checkout HEAD -- :/" false;
   check_recovery "git checkout HEAD -- ':(glob)*.ml'" false;

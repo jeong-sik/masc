@@ -332,23 +332,21 @@ module KeeperKeepalive = struct
       ≥600 s can now opt in via env or the upcoming runtime.toml
       override; remote runtimes stay at the global default 600.
 
-      Promotion to 1 800 s requires a follow-up RFC plus one week of
-      [masc_keeper_turns_total{terminated_by="turn_timeout"}] and p95
-      duration data — see RFC-0012 §Out of scope. *)
+      Promotion above 900 s requires a follow-up RFC plus one week of
+      retry-admission and p95 duration data — see RFC-0012 §Out of scope. *)
   let timeout_hard_ceiling_sec = 900.0
 
-  (** Wall-clock timeout in seconds for a single unified turn (including all
-      retries and runtime fallbacks). Prevents indefinite blocking when an
-      upstream LLM hangs at the TCP level.
+  (** Retry/admission budget in seconds for a single unified turn (including all
+      retries and runtime fallbacks). This value no longer kills an active turn
+      solely because cumulative wall-clock elapsed.
       Env: [MASC_KEEPER_TURN_TIMEOUT_SEC]. Default: 600. Range: [60, 900].
 
       The default stays at 600 (the prior hard ceiling) so existing
       remote runtimes keep their budget unchanged; the lifted ceiling
       only fires when an operator opts in via env or runtime override.
-      RFC-0156: post-removal there is no per-provider OAS cap layered
-      below this — [oas_call_timeout_sec] reuses [turn_timeout_sec]
-      directly; runtime rotation is driven by [stream_idle_timeout_sec]
-      + HTTP error + completion contract. *)
+      Active-runaway detection is driven by [stream_idle_timeout_sec],
+      provider-attempt liveness, tool timeouts, OAS max-turn limits, HTTP error,
+      and the optional supervisor stale-turn watchdog. *)
   let turn_timeout_sec =
     Float.max
       60.0
@@ -391,8 +389,7 @@ module KeeperKeepalive = struct
   (** Per-call OAS timeout override in seconds.
 
       Legacy/env override value is clamped to the active keepalive
-      wall-clock cap so this does not extend a single attempt beyond the
-      keeper turn budget. The override is still parsed for observability
+      retry/admission budget. The override is still parsed for observability
       and to preserve compatibility with existing profiles, but it is not
       guaranteed to represent a distinct timeout policy anymore.
 
@@ -447,10 +444,10 @@ module KeeperKeepalive = struct
             (get_int ~default "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS")))
   ;;
 
-  (* RFC-0156: OAS total timeout removed. Resolved OAS-call timeout = override
-     when set, else turn_timeout_sec (wall-clock cap). stream_idle_timeout
-     handles per-stream cap; runtime rotation triggers on stream_idle + HTTP
-     error + completion contract. Historic names
+  (* RFC-0156/RFC-020x: OAS total timeout removed. Resolved OAS-call budget =
+     override when set, else turn_timeout_sec. stream_idle_timeout handles
+     per-stream idle; runtime rotation triggers on stream_idle + HTTP error +
+     completion contract. Historic names
      ([oas_timeout_for_estimated_input_tokens] /
      [oas_timeout_for_estimated_input_tokens_with_turn_budget]) ignored the
      [estimated_input_tokens] and [max_turns] args — function-name-lying. *)

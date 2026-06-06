@@ -28,9 +28,9 @@ val resolve_bounded_provider_timeout_budget_with_turn_budget
 (** See [Keeper_turn_runtime_budget] for first-attempt retry reserve and
     retry-attempt budget semantics. *)
 
-(** Per-attempt watchdog used around the OAS call. It fires before the
-    enclosing keeper-turn wall-clock timeout so recoverable provider stalls can
-    still rotate through the degraded runtime path. *)
+(** Legacy per-attempt watchdog budget. Progress-based liveness modes return no
+    watchdog so healthy active streams are not killed by cumulative wall time;
+    the budget remains for retry/admission compatibility and off-mode tests. *)
 val attempt_watchdog_timeout_sec
   :  remaining_turn_budget_s:float
   -> provider_timeout_budget

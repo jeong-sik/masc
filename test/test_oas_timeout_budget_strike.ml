@@ -89,7 +89,7 @@ let test_cycle_failed_log_level_is_policy_aware () =
     (EC.should_warn_keeper_cycle_failed
        (provider_timeout_error ~phase:"runtime_attempt_watchdog"));
   Alcotest.(check bool)
-    "turn wall-clock timeout remains error"
+    "turn timeout remains error"
     false
     (EC.should_warn_keeper_cycle_failed (turn_timeout_error ()))
 
@@ -260,6 +260,33 @@ let test_concurrent_bumps_do_not_lose_updates () =
       (workers * bumps_per_worker)
       (KK.peek_budget_exhaustion_for_test ~keeper_name:keeper))
 
+let read_file path = In_channel.with_open_text path In_channel.input_all
+
+let contains_substring haystack needle =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  let rec loop index =
+    if needle_len = 0 then true
+    else if index + needle_len > haystack_len then false
+    else if String.sub haystack index needle_len = needle then true
+    else loop (index + 1)
+  in
+  loop 0
+
+let test_keeper_turn_has_no_total_wall_clock_kill () =
+  let source = read_file "lib/keeper/keeper_unified_turn_execution.ml" in
+  Alcotest.(check bool)
+    "no cumulative keeper turn with_timeout"
+    false
+    (contains_substring source "Eio.Time.with_timeout_exn clock timeout_sec")
+
+let test_keeper_oas_path_has_no_bridge_total_timeout () =
+  let source = read_file "lib/keeper/keeper_agent_run.ml" in
+  Alcotest.(check bool)
+    "keeper run_named path is not bridge-timeout wrapped"
+    false
+    (contains_substring source "Keeper_llm_bridge.run_with_timeout_and_fallback")
+
 let () =
   Alcotest.run "provider_timeout_strike"
   [
@@ -300,5 +327,9 @@ let () =
           test_capacity_phase_routes_to_provider_tuning;
         Alcotest.test_case "concurrent bumps do not lose updates" `Quick
           test_concurrent_bumps_do_not_lose_updates;
+        Alcotest.test_case "keeper turn has no total wall-clock kill" `Quick
+          test_keeper_turn_has_no_total_wall_clock_kill;
+        Alcotest.test_case "keeper OAS path has no bridge total timeout" `Quick
+          test_keeper_oas_path_has_no_bridge_total_timeout;
       ] );
   ]

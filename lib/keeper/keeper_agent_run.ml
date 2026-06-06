@@ -466,14 +466,12 @@ let run_turn
                 keeper_oas_visibility_neutral_guardrails ?guardrails ()
               in
               let call_run_named ~initial_messages =
-                let bridge_timeout_s =
-                  Keeper_llm_bridge.with_hitl_approval_headroom timeout_s
-                in
-                Keeper_llm_bridge.run_with_timeout_and_fallback
-                  ~timeout_s:bridge_timeout_s
-                  (fun () ->
-                          Keeper_turn_driver.run_named
-                            ~runtime_id:runtime_id_string
+                (* This path must not impose a cumulative OAS bridge timeout.
+                   Progressing streams are bounded by stream idle and attempt
+                   liveness; completed attempts are bounded before retry by
+                   turn-budget admission. *)
+                Keeper_turn_driver.run_named
+                  ~runtime_id:runtime_id_string
                     ~base_path:config.base_path
                     ~keeper_name:meta.name
                     ?provider_filter
@@ -543,7 +541,7 @@ let run_turn
                     ?oas_checkpoint:resume_oas_checkpoint
                     ?event_bus
                     ?per_provider_timeout_s
-                    ())
+                    ()
               in
               (match call_run_named ~initial_messages:history_messages with
                | Error e -> Error e

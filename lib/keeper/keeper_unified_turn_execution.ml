@@ -1,8 +1,8 @@
 (** Keeper_unified_turn_execution — Execution body for unified keeper cycles.
 
     Extracted from [Keeper_unified_turn.run_keeper_cycle]. Contains the
-    [do_run] closure, [retry_loop] recursive function, wall-clock timeout
-    wrapper, and cleanup/finalization logic.
+    [do_run] closure, [retry_loop] recursive function, retry/admission
+    budgeting, and cleanup/finalization logic.
 
     @since God file decomposition *)
 
@@ -786,116 +786,21 @@ let run (ctx : ctx)
           mark_terminal_error err;
           Error err)
   in
-  try
-    Eio.Time.with_timeout_exn clock timeout_sec (fun () ->
-      retry_loop
-        { run_meta = meta
-        ; execution = initial_execution
-        ; run_generation = generation
-        ; attempt = 1
-        ; is_retry = false
-        ; allow_degraded_wall_clock_retry_budget = false
-        ; attempted_runtimes =
-            [ initial_execution.runtime_id
-            ]
-        })
-  with
-  | Eio.Time.Timeout ->
-     let msg =
-       Printf.sprintf
-         "Turn wall-clock timeout after %.0fs \
-          (MASC_KEEPER_TURN_TIMEOUT_SEC)"
-         timeout_sec
-     in
-     Log.Keeper.error "%s: %s" meta.name msg;
-     Otel_metric_store.inc_counter
-       Keeper_metrics.(to_string TurnTimeoutCommitted)
-       ~labels:[ "keeper", meta.name ]
-       ();
-     let _ = drain_turn_event_bus ~site:"error_path_drain" () in
-     (match event_bus_integrity_error_snapshot () with
-      | Some integrity_err ->
-        Log.Keeper.error
-          "%s: event-bus order violation during timeout path; \
-           treating turn as failed before retry/reconcile decisions"
-          meta.name;
-        Keeper_registry.set_turn_phase
-          ~base_path:config.base_path
-          meta.name
-          Keeper_registry.(Packed Turn_finalizing);
-        Error integrity_err
-      | None ->
-        let committed_tools = committed_mutating_tools_snapshot () in
-        if
-          committed_tools <> []
-          && Keeper_tool_registry.all_tools_reconcile_safe
-               committed_tools
-        then (
-          Log.Keeper.warn
-            "%s: turn wall-clock timeout after committed \
-             reconcile-safe tool(s) [%s] — auto-recovering \
-             (timeout: %s)"
-            meta.name
-            (String.concat ", " committed_tools)
-            msg;
-          Otel_metric_store.inc_counter
-            Keeper_metrics.(to_string TurnTimeoutCommitted)
-            ~labels:[ "keeper", meta.name ]
-            ();
-          Keeper_registry.set_turn_phase
-            ~base_path:config.base_path
-            meta.name
-            Keeper_registry.(Packed Turn_finalizing);
-          Error (Agent_sdk.Error.Api (Timeout { message = msg })))
-        else if committed_tools <> []
-        then (
-          let timeout_err =
-            Agent_sdk.Error.Api (Timeout { message = msg })
-          in
-          let reclassified, failure_reason =
-            match
-              EC.classify_post_commit_failure
-                ~tool_names:committed_tools
-                ~kind:Keeper_registry.Post_commit_timeout
-                timeout_err
-            with
-            | Some classified -> classified
-            | None ->
-              ( EC.reclassify_error_after_side_effect
-                  ~tool_names:committed_tools
-                  timeout_err
-              , Keeper_registry.Ambiguous_partial_commit
-                  { kind = Keeper_registry.Post_commit_timeout
-                  ; detail =
-                      EC.summarize_post_commit_failure
-                        ~tool_names:committed_tools
-                        ~kind:Keeper_registry.Post_commit_timeout
-                        timeout_err
-                  } )
-          in
-          post_commit_failure_reason := Some failure_reason;
-          Log.Keeper.error
-            "%s: turn wall-clock timeout after committed mutating \
-             tool call(s) [%s] — treating as integrity failure; \
-             evidence recorded for next-turn observation"
-            meta.name
-            (String.concat ", " committed_tools);
-          Otel_metric_store.inc_counter
-            Keeper_metrics.(to_string TurnTimeoutCommitted)
-            ~labels:[ "keeper", meta.name ]
-            ();
-          Keeper_registry.set_turn_phase
-            ~base_path:config.base_path
-            meta.name
-            Keeper_registry.(Packed Turn_finalizing);
-          Error reclassified)
-        else (
-          Keeper_registry.set_turn_phase
-            ~base_path:config.base_path
-            meta.name
-            Keeper_registry.(Packed Turn_finalizing);
-          Error
-            (Keeper_turn_driver.sdk_error_of_masc_internal_error
-               (Keeper_turn_driver.Turn_timeout
-                  { elapsed_sec = timeout_sec }))))
+  (* Do not wrap the full keeper turn in a cumulative wall-clock timeout.
+     Long voice/OAS turns can keep making stream or tool progress beyond the
+     legacy 600s cap. Runaway detection is owned by stream idle, provider
+     attempt liveness, tool-level timeouts, max-turn limits, and the optional
+     supervisor stale-turn watchdog. Retry admission still consults the
+     remaining turn budget between provider attempts. *)
+  retry_loop
+    { run_meta = meta
+    ; execution = initial_execution
+    ; run_generation = generation
+    ; attempt = 1
+    ; is_retry = false
+    ; allow_degraded_wall_clock_retry_budget = false
+    ; attempted_runtimes =
+        [ initial_execution.runtime_id
+        ]
+    }
 )

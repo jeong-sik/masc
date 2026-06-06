@@ -1440,6 +1440,7 @@
 
 (include stanzas/test_keeper_semaphore_fairness.inc)
 
+(include stanzas/test_keeper_turn_slot_lane_isolation.inc)
 
 (include stanzas/test_keeper_sandbox_docker_cwd_response.inc)
 

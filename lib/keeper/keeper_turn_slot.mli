@@ -61,6 +61,7 @@ val semaphore_wait_timeout_sec : float
 type autonomous_waiter = {
   ticket : int;
   keeper_name : string;
+  runtime_id : string;
 }
 
 (** Test-only reset for the autonomous FIFO wait queue. *)
@@ -130,19 +131,29 @@ val format_slot_holders : ?limit:int -> (string * float) list -> string
 (** Operator-facing one-line summary of all holder pools. *)
 val slot_holders_summary : ?limit:int -> now:float -> unit -> string
 
-(** Test-only FIFO queue primitives for autonomous fairness regression tests. *)
-val enqueue_autonomous_waiter_for_test : string -> int
+(** Test-only FIFO queue primitives for autonomous fairness regression tests.
+    [enqueue_autonomous_waiter_for_test] defaults [runtime_id] to ["test"]. *)
+val enqueue_autonomous_waiter_for_test : ?runtime_id:string -> string -> int
 val drop_autonomous_waiter_for_test : int -> unit
+
+(** Test-only: head ticket of a specific runtime lane, or [None] if empty. *)
+val autonomous_waiter_head_ticket_for_test : runtime_id:string -> int option
+
+(** Test-only: aggregate queue depth across all runtime lanes. *)
+val autonomous_wait_queue_depth_for_test : unit -> int
 
 (** Test-only: drive the queue-head wait loop directly with an injected
     [~started_at]. Exposed so a regression test can assert that a stale
     [started_at] (e.g. one captured before a fairness cooldown) immediately
     returns [Error `Semaphore_wait_timeout] — proving the parameter is the
-    timing knob whose freshness must be controlled at every call site. *)
+    timing knob whose freshness must be controlled at every call site.
+    [~runtime_id] defaults to ["test"]. *)
 val wait_for_autonomous_queue_head_for_test :
+  ?runtime_id:string ->
   keeper_name:string ->
   ticket:int ->
   started_at:float ->
+  unit ->
   (unit, [> `Semaphore_wait_timeout of semaphore_wait_timeout ]) result
 
 (** Pure computation: seconds keeper should yield before re-entering queue

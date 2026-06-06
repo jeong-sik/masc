@@ -307,20 +307,9 @@ let autonomous_fairness_cooldown_sec =
     ~max_v:60.0
 ;;
 
-let others_waiting_in_queue ~(keeper_name : string) : bool =
-  with_autonomous_wait_queue (fun () ->
-    prune_autonomous_wait_queue_locked ();
-    let found = ref false in
-    Queue.iter
-      (fun w ->
-         if
-           (not !found)
-           && Hashtbl.mem autonomous_wait_queue_active_tickets w.ticket
-           && w.keeper_name <> keeper_name
-         then found := true)
-      autonomous_wait_queue;
-    !found)
-;;
+(* [others_waiting_in_queue] is now defined in [Keeper_turn_slot_acquire] and
+   included above. It checks across all per-runtime lanes for any active waiter
+   other than the named keeper. *)
 
 (** Pure computation: how many seconds [keeper_name] should yield before
     re-entering the queue at time [now].  Returns [0.0] when no yield is
@@ -366,10 +355,11 @@ let maybe_yield_for_fairness ~(keeper_name : string) : unit =
 let rec wait_for_autonomous_queue_head
           ~(keeper_name : string)
           ~(ticket : int)
+          ~(runtime_id : string)
           ~(started_at : float)
   : (unit, [> `Semaphore_wait_timeout of semaphore_wait_timeout ]) result
   =
-  if Option.equal Int.equal (autonomous_waiter_head_ticket ()) (Some ticket)
+  if Option.equal Int.equal (autonomous_waiter_head_ticket ~runtime_id) (Some ticket)
   then Ok ()
   else (
     let waited_sec = Time_compat.now () -. started_at in
@@ -413,7 +403,7 @@ let rec wait_for_autonomous_queue_head
               Yield cooperatively instead of using a blocking Unix sleep so
               the Eio convention guard remains satisfied. *)
          Eio.Fiber.yield ());
-      wait_for_autonomous_queue_head ~keeper_name ~ticket ~started_at))
+      wait_for_autonomous_queue_head ~keeper_name ~ticket ~runtime_id ~started_at))
 ;;
 
 let semaphore_wait_seconds_buckets =
@@ -560,7 +550,7 @@ let with_keeper_turn_slot_control ?(runtime_profile = "unknown") ~keeper_name ~c
              queue to give peers a chance to reach head-of-queue first.
              See [maybe_yield_for_fairness] and #6810. *)
         maybe_yield_for_fairness ~keeper_name;
-        let ticket = enqueue_autonomous_waiter ~keeper_name in
+        let ticket = enqueue_autonomous_waiter ~keeper_name ~runtime_id:runtime_profile in
         slot_state.autonomous_ticket := Some ticket;
         (* Reset the queue-head timeout clock to the moment we bound the
              queue, NOT [t0] (slot-entry). Otherwise [maybe_yield_for_fairness]
@@ -571,7 +561,8 @@ let with_keeper_turn_slot_control ?(runtime_profile = "unknown") ~keeper_name ~c
              free but we ran out of budget while sleeping in fairness yield. *)
         let queue_entered_at = Time_compat.now () in
         match
-          wait_for_autonomous_queue_head ~keeper_name ~ticket ~started_at:queue_entered_at
+          wait_for_autonomous_queue_head
+            ~keeper_name ~ticket ~runtime_id:runtime_profile ~started_at:queue_entered_at
         with
         | Error _ as e -> e
         | Ok () ->
@@ -711,6 +702,18 @@ let with_keeper_turn_slot_for_test ?runtime_profile ~keeper_name ~channel f =
   with_keeper_turn_slot ?runtime_profile ~keeper_name ~channel f
 ;;
 
-let wait_for_autonomous_queue_head_for_test ~keeper_name ~ticket ~started_at =
-  wait_for_autonomous_queue_head ~keeper_name ~ticket ~started_at
+let wait_for_autonomous_queue_head_for_test
+      ?(runtime_id = "test") ~keeper_name ~ticket ~started_at ()
+  =
+  wait_for_autonomous_queue_head ~keeper_name ~ticket ~runtime_id ~started_at
+;;
+
+(** Test-only: expose per-lane head ticket check. *)
+let autonomous_waiter_head_ticket_for_test ~runtime_id =
+  autonomous_waiter_head_ticket ~runtime_id
+;;
+
+(** Test-only: expose aggregate queue depth. *)
+let autonomous_wait_queue_depth_for_test () =
+  autonomous_wait_queue_depth ()
 ;;

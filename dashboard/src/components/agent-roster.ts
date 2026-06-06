@@ -78,12 +78,12 @@ type StatusFilter = 'all' | RuntimeBand
 type RosterStateNote = { label: string; text: string; kind?: string }
 type RosterPresenceDisplay = { status: string | null; detail: string | null }
 
-function rosterBandActionHint(band: RuntimeBand): string {
+function rosterBandActionHint(band: RuntimeBand, isKeeper: boolean): string {
   switch (band) {
     case 'active': return '감시 중'
     case 'attention': return '확인 필요'
     case 'paused': return '재개 대기'
-    case 'offline': return '기동 필요'
+    case 'offline': return isKeeper ? '기동 필요' : '연결 없음'
   }
 }
 
@@ -930,8 +930,8 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
       agent,
       keeperRuntime,
       band,
-      bandActionHint: rosterBandActionHint(band.key),
       isKeeper,
+      bandActionHint: rosterBandActionHint(band.key, isKeeper),
       displayName,
       currentWork,
       summaryText,

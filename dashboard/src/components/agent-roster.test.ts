@@ -642,6 +642,27 @@ describe('AgentRoster live-only cards', () => {
     expect(text).not.toContain('상세 상태 부분 동기화')
   })
 
+  it('does not show keeper boot hints on offline non-keeper agent rows', async () => {
+    agents.value = [
+      makeAgent({
+        name: 'mission-shadow',
+        status: 'offline',
+      }),
+    ]
+    keepers.value = []
+
+    await act(async () => {
+      render(html`<${AgentRoster} keeperFilter="agent-only" />`, container)
+    })
+    await flushUi()
+
+    const text = container.textContent ?? ''
+    expect(text).toContain('mission-shadow')
+    expect(text).toContain('오프라인')
+    expect(text).toContain('연결 없음')
+    expect(text).not.toContain('기동 필요')
+  })
+
   it('does not report source mismatch on default keeper ops when keeper projection has rows', async () => {
     agents.value = []
     keepers.value = [

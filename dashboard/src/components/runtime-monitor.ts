@@ -198,6 +198,11 @@ function runtimeProbeLabel(probe: DashboardRuntimeProviderProbe | null | undefin
   }
 }
 
+function runtimeProbeAuthLabel(probe: DashboardRuntimeProviderProbe | null | undefined): string {
+  if (probe?.credential_required !== true) return 'none'
+  return probe.auth_present === true ? 'present' : 'missing'
+}
+
 function runtimeProbeSummaryText(probe: DashboardRuntimeProbeResponse | null): string {
   const summary = probe?.probe?.summary
   if (!summary) return 'live probe 없음'
@@ -530,7 +535,7 @@ export function RuntimeMonitor() {
                     <div>http · ${fmtProbeHttpStatus(liveProbe)}</div>
                     <div>latency · ${fmtProbeLatency(liveProbe)}</div>
                     <div>models · ${formatNumber(liveProbe?.model_count)}</div>
-                    <div>auth · ${liveProbe?.credential_required ? (liveProbe.auth_present ? 'present' : 'missing') : 'none'}</div>
+                    <div>auth · ${runtimeProbeAuthLabel(liveProbe)}</div>
                   </div>
                   ${liveProbe?.probe_url || provider.endpoint_url
                     ? html`<div class="truncate text-2xs text-text-muted" title=${liveProbe?.probe_url ?? provider.endpoint_url ?? ''}>

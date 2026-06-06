@@ -23,6 +23,51 @@ const baseConfig = {
   reloaded: false,
 }
 
+const richSourceText = `[runtime]
+default = "runpod_mtp.qwen"
+
+[providers.runpod_mtp]
+display-name = "RunPod"
+protocol = "provider_d-http"
+endpoint = "https://runpod.example/v1"
+
+[providers.runpod_mtp.credentials]
+type = "env"
+key = "RUNPOD_API_KEY"
+
+[providers.openai]
+display-name = "OpenAI"
+protocol = "provider_d-http"
+endpoint = "https://api.openai.example/v1"
+
+[models.qwen]
+api-name = "qwen"
+max-context = 128000
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.gpt]
+api-name = "gpt"
+max-context = 64000
+tools-support = true
+streaming = true
+
+[runpod_mtp.qwen]
+is-default = true
+max-concurrent = 4
+keep-alive = "10m"
+
+[openai.gpt]
+is-default = true
+max-concurrent = 1
+`
+
+const richConfig = {
+  ...baseConfig,
+  source_text: richSourceText,
+}
+
 describe('RuntimeTomlEditor', () => {
   let container: HTMLDivElement
   const realClipboard = typeof navigator !== 'undefined' ? navigator.clipboard : undefined
@@ -109,6 +154,55 @@ describe('RuntimeTomlEditor', () => {
     })
     expect(saveButton.disabled).toBe(true)
     expect((container.querySelector('textarea') as HTMLTextAreaElement).value).toBe(nextSource)
+  })
+
+  it('edits runtime environment fields through the structured controls', async () => {
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
+    render(html`<${RuntimeTomlEditor} />`, container)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('런타임 환경')
+      expect((container.querySelector('[aria-label="provider transport value"]') as HTMLInputElement | null)?.value)
+        .toBe('https://runpod.example/v1')
+    })
+
+    fireEvent.input(container.querySelector('[aria-label="provider transport value"]') as HTMLInputElement, {
+      target: { value: 'https://runpod.example/v2' },
+    })
+    await waitFor(() => {
+      expect((container.querySelector('textarea') as HTMLTextAreaElement).value).toContain('endpoint = "https://runpod.example/v2"')
+    })
+    fireEvent.input(container.querySelector('[aria-label="model max-context"]') as HTMLInputElement, {
+      target: { value: '262144' },
+    })
+    fireEvent.click(container.querySelector('[data-testid="runtime-environment-save"]') as HTMLButtonElement)
+
+    await waitFor(() => {
+      expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledTimes(1)
+    })
+    const savedSource = apiMocks.saveRuntimeTomlConfig.mock.calls[0]?.[0] as string
+    expect(savedSource).toContain('endpoint = "https://runpod.example/v2"')
+    expect(savedSource).toContain('max-context = 262144')
+    expect(savedSource).toContain('[providers.openai]')
+  })
+
+  it('switches the default runtime from the structured runtime selector', async () => {
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
+    render(html`<${RuntimeTomlEditor} />`, container)
+
+    await waitFor(() => {
+      expect((container.querySelector('[aria-label="default runtime"]') as HTMLSelectElement | null)?.value)
+        .toBe('runpod_mtp.qwen')
+    })
+
+    fireEvent.change(container.querySelector('[aria-label="default runtime"]') as HTMLSelectElement, {
+      target: { value: 'openai.gpt' },
+    })
+
+    await waitFor(() => {
+      expect((container.querySelector('textarea') as HTMLTextAreaElement).value).toContain('default = "openai.gpt"')
+    })
+    expect(container.querySelector('[data-testid="runtime-toml-status"]')?.textContent).toContain('modified')
   })
 
   it('saves from the editor keyboard shortcut', async () => {

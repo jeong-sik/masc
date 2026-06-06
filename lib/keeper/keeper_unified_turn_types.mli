@@ -9,11 +9,6 @@
 val turn_event_bus_manifest_decision :
   Keeper_turn_runtime_budget.turn_event_bus_summary -> Yojson.Safe.t
 
-val sdk_error_of_retry_slot_reacquire_timeout :
-  keeper_name:string ->
-  Keeper_turn_slot.semaphore_wait_timeout ->
-  Agent_sdk.Error.sdk_error
-
 (** [registry_failure_reason_of_terminal_reason terminal ~raw_error]
     maps a [Keeper_turn_terminal.t] disposition to the corresponding
     [Keeper_registry.failure_reason], or [None] for benign terminals

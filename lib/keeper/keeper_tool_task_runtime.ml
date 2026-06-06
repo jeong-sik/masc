@@ -736,6 +736,7 @@ let handle_keeper_task_tool
          match accountability_warning with
          | Some warning -> [ ("routing_warning", `String warning) ]
          | None -> []))
+    | State_report -> state_report_result_json args
     | Task_done ->
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
     let result_text = Safe_ops.json_string ~default:"" "result" args |> String.trim in

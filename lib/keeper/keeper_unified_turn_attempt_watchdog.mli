@@ -1,24 +1,24 @@
-(** RFC-0136 PR-4-c: wrap [Eio.Time.with_timeout_exn] + the
-    [Eio.Cancel.Cancelled] / [Eio.Time.Timeout] handling for a single
-    keeper turn runtime attempt.  Extracted from
-    [keeper_unified_turn.ml] do_run closure (L490-L577).
+(** Per-attempt cancel handler for a single keeper turn runtime attempt.
 
-    Three outcomes:
+    RFC-XXXX: the per-attempt wall-clock watchdog was removed.
+    Provider-attempt liveness is progress-based:
+      - [stream_idle_timeout_s] catches inter-line stalls
+      - [Keeper_attempt_liveness] catches no-first-token / inter-chunk gaps
+      - The keeper turn watchdog is the outer runaway guard
+
+    Two outcomes:
 
     - normal completion: pass-through of [run]'s [result]
     - [Eio.Cancel.Cancelled]: invoke [on_cancelled] for the terminal
       receipt + FSM transition, then re-raise so the outer cleanup
       handler observes the cancellation
-    - [Eio.Time.Timeout]: return [Error (Api (Timeout {message}))]
-      with the budget / watchdog values inlined for operator
-      diagnostics
 
     The Cancelled re-raise path is the outer catch for cancellations
     that escape the in-band receipt builder in
-    [Keeper_agent_run.run_turn]: the 14 inner Cancel handlers all
+    [Keeper_agent_run.run_turn]: the inner Cancel handlers all
     re-raise, so without [on_cancelled] the FSM emits Streaming and
     then nothing — the turn silently disappears from the operator's
-    timeline.  Cycle 1b-iv. *)
+    timeline. *)
 val dispatch
   :  clock:_ Eio.Time.clock
   -> attempt_watchdog_s:float

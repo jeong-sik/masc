@@ -53,12 +53,11 @@ val admission_wait_timeout_sec : unit -> float
 val stream_idle_timeout_sec : unit -> float
 val stream_idle_timeout_for_total_timeout : total_timeout_s:float -> float
 
-(** Total HTTP body-consumption deadline override.
-    [None] (env unset) lets the runtime attempt fall back to the per-
-    attempt [max_execution_time]. [Some s] is forwarded to
-    [Runtime_agent_context.body_timeout_s] -> [Builder.with_body_timeout],
-    surfacing [Retry.Timeout] before the turn cap so runtime falls
-    forward at the attempt boundary.
+(** Non-streaming HTTP body-consumption deadline override.
+    [None] (env unset) skips [Builder.with_body_timeout]. [Some s] is
+    forwarded through [Runtime_agent_context.body_timeout_s] for OAS sync
+    completion paths. Streaming paths ignore this knob and rely on
+    [stream_idle_timeout_sec] plus the attempt liveness observer.
 
     SSOT: {!Env_config_keeper.KeeperKeepalive.body_timeout_sec_override}. *)
 val body_timeout_override_sec : unit -> float option

@@ -149,8 +149,8 @@ A single, narrow change scope:
 2. **Update** the stale comment block to reflect the cap chain that
    now exists end-to-end.
 3. **Keep** the streaming-progress wiring: `with_stream_idle_timeout`
-   continues to bound inter-line silence; OAS `body_timeout_s` remains
-   opt-in for explicit non-streaming body ceilings.
+   continues to bound inter-line silence; OAS `body_timeout_s` is
+   sync-only and remains opt-in for explicit non-streaming body ceilings.
 
 Two related-but-non-gating tracks are explicitly separated below
 (§4.2, §4.3) so they cannot stall the fleet fix.
@@ -263,8 +263,10 @@ Expected:
 - Self-admitting comment at
   `lib/keeper/keeper_turn_runtime_budget.ml:173-174` (replaced by
   PR-2).
-- OAS `body_timeout_s` since 0.195.0, `complete.ml:656-686`.
-- OAS streaming `idle_timeout` at `http_client.mli:204-243`.
+- OAS `body_timeout_s` on the non-streaming `Complete.complete` path since
+  0.195.0, `complete.ml:656-686`.
+- OAS streaming `idle_timeout` at `http_client.mli:204-243`; streaming has
+  no total body-duration cap.
 - masc `stream_idle_timeout_s` wiring at
   `runtime_agent_context.ml:174-180`.
 

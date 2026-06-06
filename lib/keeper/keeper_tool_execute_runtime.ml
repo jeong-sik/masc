@@ -207,6 +207,88 @@ let deterministic_retry_fields_for_process_result
   | _ -> []
 ;;
 
+let token_looks_like_shell_glob token =
+  String.exists
+    (function
+      | '*' | '?' -> true
+      | _ -> false)
+    token
+  ||
+  (String.contains token '[' && String.contains token ']')
+;;
+
+let path_not_found_output text =
+  String_util.contains_substring text "No such file or directory"
+  || String_util.contains_substring text "cannot access"
+;;
+
+let glob_prone_file_command executable =
+  match String.trim executable with
+  | "ls" | "cat" | "head" | "tail" | "wc" | "stat" -> true
+  | _ -> false
+;;
+
+let directory_and_pattern_of_glob_token token =
+  match String.rindex_opt token '/' with
+  | None -> ".", token
+  | Some 0 -> "/", String.sub token 1 (String.length token - 1)
+  | Some idx ->
+    ( String.sub token 0 idx
+    , String.sub token (idx + 1) (String.length token - idx - 1) )
+;;
+
+let glob_literal_failure_fields ~input ~status ~stderr =
+  match status, String.trim stderr with
+  | Unix.WEXITED 0, _ | _, "" -> []
+  | _, stderr when not (path_not_found_output stderr) -> []
+  | _ ->
+    let matching_stage =
+      let stage executable argv =
+        if glob_prone_file_command executable
+        then
+          match List.find_opt token_looks_like_shell_glob argv with
+          | Some token -> Some (executable, token)
+          | None -> None
+        else None
+      in
+      match input with
+      | Keeper_tool_execute_typed_input.Exec { executable; argv; _ } ->
+        stage executable argv
+      | Keeper_tool_execute_typed_input.Pipeline { stages; _ } ->
+        List.find_map
+          (fun { Keeper_tool_execute_typed_input.executable; argv } ->
+             stage executable argv)
+          stages
+    in
+    (match matching_stage with
+     | None -> []
+     | Some (_, token) ->
+       let dir, pattern = directory_and_pattern_of_glob_token token in
+       let hint =
+         "Typed Execute uses execve-style argv; shell glob characters in argv \
+          are passed literally and are not shell-expanded. For wildcard file \
+          discovery, run find with -name or rg --files with -g."
+       in
+       let find_alt =
+         Printf.sprintf
+           "Use executable=\"find\" argv=[%S, \"-name\", %S]."
+           dir
+           pattern
+       in
+       let rg_alt =
+         Printf.sprintf
+           "Use executable=\"rg\" argv=[\"--files\", %S, \"-g\", %S]."
+           dir
+           pattern
+       in
+       [ "execution_hint", `String hint
+       ; "shell_ir_hint", `String hint
+       ; "typed_glob_not_expanded", `Bool true
+       ; "literal_glob_token", `String token
+       ; "alternatives", `List [ `String find_alt; `String rg_alt ]
+       ])
+;;
+
 let sandbox_extra_uses_docker sandbox_extra_fields =
   List.exists
     (function
@@ -621,6 +703,12 @@ let handle_tool_execute_typed
               | Unix.WEXITED 0, _ | _, "" -> []
               | _, stderr -> [ "error", `String stderr; "stderr", `String stderr ]
             in
+            let glob_literal_failure_fields =
+              glob_literal_failure_fields
+                ~input
+                ~status:result.status
+                ~stderr:result.stderr
+            in
             let classification = Exec_core.classify_command_of_ir ir in
             let deterministic_retry_fields =
               deterministic_retry_fields_for_process_result
@@ -645,6 +733,7 @@ let handle_tool_execute_typed
                  ~extra:
                    (deterministic_retry_fields
                     @ failure_error_fields
+                    @ glob_literal_failure_fields
                     @ sandbox_extra_fields
                     @ [ "typed", `Bool true
                       ; "execution_time_ms", `Int elapsed_ms

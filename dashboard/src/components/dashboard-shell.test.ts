@@ -124,6 +124,75 @@ describe('dashboardHealthChips', () => {
     }))
   })
 
+  it('promotes runtime provider probe failures into a routed health chip', () => {
+    const chips = dashboardHealthChips({
+      connected: true,
+      counts: { keepers: 1, configured_keepers: 1 },
+      keepers: [{ name: 'keeper-a', status: 'running' } as any],
+      runtimeResolution: {
+        status: 'ready',
+        warnings: [],
+        source_mismatch: false,
+        server_workspace_mismatch: false,
+      } as any,
+      runtimeProviderProbe: {
+        status: 'unreachable',
+        summary: {
+          runtimes: 1,
+          probed: 1,
+          reachable: 0,
+          failed: 1,
+          skipped: 0,
+          default_runtime_id: 'runpod_mtp.qwen',
+        },
+        providers: [{
+          runtime_id: 'runpod_mtp.qwen',
+          provider_id: 'runpod_mtp',
+          status: 'missing_auth',
+          reachable: false,
+          credential_required: true,
+          auth_present: false,
+        }],
+      },
+      executionError: null,
+      loading: false,
+    })
+
+    expect(chips).toContainEqual(expect.objectContaining({
+      key: 'runtime-provider-health',
+      label: 'Runtime auth missing 1',
+      tone: 'bad',
+      detail: 'default=runpod_mtp.qwen, reachable=0, failed=1, skipped=0, providers=runpod_mtp.qwen: missing_auth',
+      route: { tab: 'monitoring', params: { section: 'runtime', view: 'providers' } },
+    }))
+  })
+
+  it('surfaces runtime probe fetch failures when provider status is unavailable', () => {
+    const chips = dashboardHealthChips({
+      connected: true,
+      counts: { keepers: 1, configured_keepers: 1 },
+      keepers: [{ name: 'keeper-a', status: 'running' } as any],
+      runtimeResolution: {
+        status: 'ready',
+        warnings: [],
+        source_mismatch: false,
+        server_workspace_mismatch: false,
+      } as any,
+      runtimeProviderProbe: null,
+      runtimeProviderProbeError: 'runtime probe fetch failed: 503',
+      executionError: null,
+      loading: false,
+    })
+
+    expect(chips).toContainEqual(expect.objectContaining({
+      key: 'runtime-probe-unavailable',
+      label: 'Runtime probe unavailable',
+      tone: 'warn',
+      detail: 'runtime probe fetch failed: 503',
+      route: { tab: 'monitoring', params: { section: 'runtime', view: 'providers' } },
+    }))
+  })
+
   it('uses namespace truth as the configured keeper count authority in health chips', () => {
     const chips = dashboardHealthChips({
       connected: true,

@@ -16,6 +16,7 @@ interface RouteLinkProps {
   ariaControls?: string
   ariaCurrent?: 'page' | 'location' | undefined
   ariaSelected?: boolean | 'true' | 'false'
+  'data-testid'?: string
   onKeyDown?: (event: KeyboardEvent) => void
   children: ComponentChildren
 }
@@ -32,6 +33,7 @@ export function RouteLink({
   ariaControls,
   ariaCurrent,
   ariaSelected,
+  'data-testid': dataTestId,
   onKeyDown,
   children,
 }: RouteLinkProps) {
@@ -53,6 +55,7 @@ export function RouteLink({
       aria-controls=${ariaControls}
       aria-current=${ariaCurrent}
       aria-selected=${ariaSelected}
+      data-testid=${dataTestId}
       onKeyDown=${onKeyDown}
       onClick=${(event: MouseEvent) => {
         if (

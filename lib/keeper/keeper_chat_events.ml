@@ -6,7 +6,7 @@ type keeper_chat_event =
   | Text_delta of string
   | Text_message_end
   | Run_finished of { run_id : string }
-  | Error of { message : string }
+  | Event_error of { message : string }
   | Custom of { name : string; value : Yojson.Safe.t }
 
 let create () = Eio.Stream.create 512

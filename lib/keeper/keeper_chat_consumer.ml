@@ -14,7 +14,7 @@ let start ~sw ~clock ~handle_turn =
          match Keeper_chat_queue.dequeue ~keeper_name with
          | None -> ()
          | Some queued ->
-             (try handle_turn ~keeper_name ~queued_message:queued with
+             (try handle_turn ~sw ~keeper_name ~queued_message:queued with
               | Eio.Cancel.Cancelled _ as e -> raise e
               | exn ->
                   Log.Keeper.warn

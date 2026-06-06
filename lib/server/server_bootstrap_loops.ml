@@ -862,7 +862,7 @@ let start_keeper_loops
          handle_turn wires process_single_turn for actual turn execution. *)
       (try
          Keeper_chat_consumer.start ~sw ~clock
-           ~handle_turn:(fun ~keeper_name ~queued_message ->
+           ~handle_turn:(fun ~sw ~keeper_name ~queued_message ->
              let open Server_routes_http_keeper_stream in
              let now = Time_compat.now () in
              let run_id =
@@ -917,16 +917,38 @@ let start_keeper_loops
                     "keeper_chat_consumer: processing dashboard queue \
                      message for keeper=%s"
                     keeper_name
-              | Keeper_chat_queue.Discord _ ->
+              | Keeper_chat_queue.Discord { channel_id; _ } ->
                   Log.Keeper.info
-                    "keeper_chat_consumer: Discord adapter not yet \
-                     implemented for keeper=%s"
-                    keeper_name
-              | Keeper_chat_queue.Slack _ ->
+                    "keeper_chat_consumer: forking Discord adapter \
+                     for keeper=%s"
+                    keeper_name;
+                  (match Sys.getenv_opt "MASC_DISCORD_BOT_TOKEN" with
+                   | Some token ->
+                       Eio.Fiber.fork ~sw (fun () ->
+                         Keeper_chat_discord.adapter_loop ~token
+                           ~channel_id ~events)
+                   | None ->
+                       Log.Keeper.warn
+                         "keeper_chat_consumer: \
+                          MASC_DISCORD_BOT_TOKEN not set, \
+                          skipping Discord delivery for keeper=%s"
+                         keeper_name)
+              | Keeper_chat_queue.Slack { channel; _ } ->
                   Log.Keeper.info
-                    "keeper_chat_consumer: Slack adapter not yet \
-                     implemented for keeper=%s"
-                    keeper_name);
+                    "keeper_chat_consumer: forking Slack adapter \
+                     for keeper=%s"
+                    keeper_name;
+                  (match Sys.getenv_opt "MASC_SLACK_BOT_TOKEN" with
+                   | Some token ->
+                       Eio.Fiber.fork ~sw (fun () ->
+                         Keeper_chat_slack.adapter_loop ~token
+                           ~channel ~events)
+                   | None ->
+                       Log.Keeper.warn
+                         "keeper_chat_consumer: \
+                          MASC_SLACK_BOT_TOKEN not set, \
+                          skipping Slack delivery for keeper=%s"
+                         keeper_name));
              process_single_turn ~state ~clock ~sw ~auth_token:None
                ~thread_id ~closed ~payload ~run_id ~message_id
                ~agent_name ~events)

@@ -10,6 +10,22 @@ let primary_goal_id_opt (meta : keeper_meta) =
   | goal_id :: _ -> Some goal_id
   | [] -> None
 
+(** Cross-check [meta.active_goal_ids] against the live MASC goal store.
+    Returns only goal IDs that actually exist. Logs pruned IDs at warn level. *)
+let validate_active_goal_ids ~(config : Workspace.config) ~(meta : keeper_meta) () =
+  let valid_goal_ids, invalid_goal_ids =
+    List.partition
+      (fun goal_id -> Option.is_some (Goal_store.get_goal config ~goal_id))
+      meta.active_goal_ids
+  in
+  if invalid_goal_ids <> [] then
+    Log.Keeper.warn
+      "keeper:%s pruned %d invalid goal_ids from active_goal_ids: %s"
+      meta.name
+      (List.length invalid_goal_ids)
+      (String.concat ", " invalid_goal_ids);
+  valid_goal_ids
+
 let backend_of_meta (meta : keeper_meta) =
   match meta.sandbox_profile with
   | Docker -> "docker"

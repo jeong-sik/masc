@@ -49,6 +49,15 @@ let prepare_run_context
   =
   let receipt_started_at = Masc_domain.now_iso () in
   let meta = Keeper_agent_tool_surface.sync_current_task_id_from_backlog ~config meta in
+  let validated_goal_ids =
+    Keeper_runtime_contract.validate_active_goal_ids ~config ~meta ()
+  in
+  let meta =
+    if List.length validated_goal_ids <> List.length meta.active_goal_ids then
+      { meta with active_goal_ids = validated_goal_ids }
+    else
+      meta
+  in
   let profile_defaults = Keeper_types_profile.load_keeper_profile_defaults meta.name in
   (* 0. Resolve inference parameters via Runtime_inference *)
   let temperature =

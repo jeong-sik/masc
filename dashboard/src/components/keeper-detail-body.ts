@@ -28,7 +28,7 @@ import {
   KeeperNeighborhood,
 } from './keeper-detail-runtime'
 import {
-  KeeperDetailOverviewSidebar,
+  KeeperDetailSectionRail,
   KeeperDetailSection,
 } from './keeper-detail-shell'
 import {
@@ -101,16 +101,28 @@ export function KeeperDetailBody({
   onSocialSweep,
 }: KeeperDetailBodyProps) {
   return html`
-    <div class="grid gap-5 xl:grid-cols-[280px_minmax(0,1fr)]">
-      <${KeeperDetailOverviewSidebar} />
-
-      <div class="order-1 xl:order-2 flex flex-col gap-5">
+    <div class="flex flex-col gap-4">
         <${KeeperRuntimeAlertStrip} keeper=${keeper} />
+        <${KeeperDetailSectionRail} />
+
+        <${KeeperDetailSection}
+          id="keeper-comms"
+          eyebrow="대화 & 세션"
+          title="대화 / 세션"
+          lockedOpen=${true}
+          variant="primary"
+        >
+          <${KeeperCommsPanel} keeper=${keeper} />
+          <${CollapsibleSection} title="세션 활동 로그" open=${false} mountWhenOpen=${true}>
+            <${SessionTraceView} agentName=${keeper.name} isKeeper=${true} keeperStatus=${keeper.status} keeperGeneration=${keeper.generation} />
+          <//>
+        <//>
 
         <${KeeperDetailSection}
           id="keeper-summary"
           eyebrow="상태 개요"
           title="운영 상태 개요"
+          defaultCollapsed=${true}
         >
       ${'' /* KeeperLiveTruthPanel (derived "Live truth / 런타임 / 현재 턴 / 최신 증거 / 차단" composite) moved to the 진단 / 운영 section as a default-closed CollapsibleSection. It is a derived synthesis on top of composite + keeper + runtime_trace + linked_state and lives below the raw-state alert-strip in information hierarchy. */}
       ${'' /* RFC-0046: 6-axis composite snapshot (KSM/KTC/KDP/KCL/KMC/breaker) — SSOT for keeper FSM state */}
@@ -157,18 +169,6 @@ export function KeeperDetailBody({
 
       ${'' /* ── Inference Telemetry (tok/s, cache, reasoning) ── */}
       <${InferenceTelemetryPanel} keeper=${keeper} />
-        <//>
-
-        <${KeeperDetailSection}
-          id="keeper-comms"
-          eyebrow="대화 & 세션"
-          title="대화 / 활동 흐름"
-          defaultCollapsed=${true}
-        >
-          <${KeeperCommsPanel} keeper=${keeper} />
-          <${PanelCard} title="세션 활동 로그">
-            <${SessionTraceView} agentName=${keeper.name} isKeeper=${true} keeperStatus=${keeper.status} keeperGeneration=${keeper.generation} />
-          <//>
         <//>
 
         <${KeeperDetailSection}
@@ -338,7 +338,6 @@ export function KeeperDetailBody({
         onPreserveToggle=${onPreserveToggle}
         onSubmit=${onClearSubmit}
       />
-      </div>
     </div>
   `
 }

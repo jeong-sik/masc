@@ -107,6 +107,20 @@ function toConversationEntry(
   msg: ChatMessage,
   index: number,
 ): KeeperConversationEntry {
+  if (msg.role === 'tool') {
+    return {
+      id: `${msg.role}-${msg.timestamp}-${index}`,
+      role: 'tool',
+      source: 'tool_result',
+      label: msg.toolCallName ?? 'tool',
+      text: msg.content,
+      rawText: msg.content,
+      timestamp: new Date(msg.timestamp).toISOString(),
+      delivery: 'delivered',
+      streamState: null,
+      details: null,
+    }
+  }
   const source = msg.role === 'user' ? 'direct_user' : 'direct_assistant'
   return {
     id: `${msg.role}-${msg.timestamp}-${index}`,
@@ -285,6 +299,9 @@ export function KeeperChatPanel({ name }: { name: string }) {
         data: att.data,
       }))
 
+    // Track pending tool call args during streaming (keyed by toolCallId)
+    const pendingToolArgs = new Map<string, { name: string; args: string }>()
+
     try {
       await streamKeeperMessage(keeperName, text, {
         signal: activeAbortRef.current.signal,
@@ -292,6 +309,32 @@ export function KeeperChatPanel({ name }: { name: string }) {
         onEvent: (event: KeeperChatStreamEvent) => {
           if (isKeeperTextContentEvent(event) && typeof event.delta === 'string') {
             streamBuffer.value += event.delta
+          } else if (event.type === 'TOOL_CALL_START') {
+            const tcId = event.toolCallId ?? `tc-${Date.now()}`
+            const tcName = event.toolCallName ?? event.name ?? 'unknown'
+            pendingToolArgs.set(tcId, { name: tcName, args: '' })
+          } else if (event.type === 'TOOL_CALL_ARGS') {
+            const tcId = event.toolCallId ?? ''
+            const entry = tcId ? pendingToolArgs.get(tcId) : undefined
+            if (entry && typeof event.delta === 'string') {
+              entry.args += event.delta
+            }
+          } else if (event.type === 'TOOL_CALL_END') {
+            const tcId = event.toolCallId ?? ''
+            const entry = tcId ? pendingToolArgs.get(tcId) : undefined
+            if (entry) {
+              const toolMsg: ChatMessage = {
+                role: 'tool',
+                content: entry.args || '(no args)',
+                timestamp: Date.now(),
+                source: 'dashboard',
+                toolCallId: tcId,
+                toolCallName: entry.name,
+              }
+              appendChatMessage(keeperName, toolMsg)
+              chatMessages.value = getChatMessageBuffer(keeperName)
+              pendingToolArgs.delete(tcId)
+            }
           } else if (event.type === 'RUN_FINISHED') {
             const finalText = streamBuffer.value.trim() || '(no response)'
             const assistantMsg: ChatMessage = { role: 'assistant', content: finalText, timestamp: Date.now(), source: 'dashboard' }

@@ -9,6 +9,40 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_agent_result
 
+let reported_state_snapshot_from_checkpoint
+    (checkpoint : Agent_sdk.Checkpoint.t option)
+  : Keeper_memory_policy.keeper_state_snapshot option =
+  let snapshot_of_content = function
+    | Agent_sdk.Types.ToolUse { name; input; _ }
+      when String.equal name
+             (Keeper_tool_name.to_string Keeper_tool_name.State_report) ->
+      (match Keeper_memory_policy.structured_state_snapshot_schema.parse input with
+       | Ok snapshot -> Some snapshot
+       | Error detail ->
+         Log.Keeper.warn
+           "keeper_report_state input ignored: invalid structured state: %s"
+           detail;
+         None)
+    | Agent_sdk.Types.Text _
+    | Agent_sdk.Types.Thinking _
+    | Agent_sdk.Types.RedactedThinking _
+    | Agent_sdk.Types.Image _
+    | Agent_sdk.Types.Document _
+    | Agent_sdk.Types.Audio _
+    | Agent_sdk.Types.ToolUse _
+    | Agent_sdk.Types.ToolResult _ -> None
+  in
+  let rec messages_loop = function
+    | [] -> None
+    | (msg : Agent_sdk.Types.message) :: rest ->
+      (match List.find_map snapshot_of_content msg.content with
+       | Some _ as snapshot -> snapshot
+       | None -> messages_loop rest)
+  in
+  match checkpoint with
+  | None -> None
+  | Some checkpoint -> messages_loop (List.rev checkpoint.messages)
+
 let finalize
     ~config
     ~meta
@@ -36,29 +70,29 @@ let finalize
     ~pre_dispatch_compaction_after_tokens
     ~raw_response_text
     () =
+  let reported_state_snapshot =
+    reported_state_snapshot_from_checkpoint result.checkpoint
+  in
   let
-    { Keeper_agent_run_response_text.state_snapshot; response_text }
+    { Keeper_agent_run_response_text.state_snapshot
+    ; state_snapshot_source
+    ; response_text
+    }
     =
     Keeper_agent_run_response_text.finalize
+      ~reported_state_snapshot
       ~keeper_name:meta.name
       ~goal:meta.goal
       ~actual_keeper_tool_names
       ~stop_reason:result.stop_reason
       ~raw_response_text
-  in
-  let state_snapshot_source =
-    if
-      Option.is_some
-        (Keeper_memory_policy.parse_state_snapshot_from_reply
-           raw_response_text)
-    then "model_state_block"
-    else "synthesized"
+      ()
   in
   (* Gate the working-state resume merge (ResumeFromDigest) to turns where active
      loops can be silently lost: a pre-dispatch compaction may have dropped the
-     reminder, or the model emitted no [STATE] block at all (synthesized). On a
-     normal model_state_block turn the snapshot is authoritative, so a dropped
-     loop still clears. *)
+     reminder, or the model emitted no structured state at all (synthesized). On
+     a normal model-authored state turn the snapshot is authoritative, so a
+     dropped loop still clears. *)
   let is_budget_exhausted = function
     | Runtime_agent.TurnBudgetExhausted _ -> true
     | _ -> false

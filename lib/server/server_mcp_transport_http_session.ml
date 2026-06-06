@@ -114,7 +114,8 @@ let is_known_session session_id =
 
 let remember_mcp_profile ?otel_transport_context session_id profile =
   atomic_update mcp_profile_by_session (fun map -> SMap.add session_id profile map);
-  remember_session_activity ?otel_transport_context session_id
+  if is_known_session session_id then
+    remember_session_activity ?otel_transport_context session_id
 
 let forget_mcp_session session_id =
   record_mcp_server_session_duration session_id;

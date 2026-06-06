@@ -287,6 +287,29 @@ let test_records_mcp_server_session_duration_metric () =
     (before_count +. 1.0)
     after_count
 
+let test_uninitialized_profile_does_not_start_session_duration_metric () =
+  let session_id = "h1-h2-parity-profile-only-session" in
+  let transport_context =
+    Otel_dispatch_hook.http_transport_context ~protocol_version:"1.1"
+  in
+  let count_metric =
+    Otel_genai.Mcp_metric_name.server_session_duration ^ "_count"
+  in
+  let before_count = metric_value count_metric [] in
+  Fun.protect
+    ~finally:(fun () -> Transport.forget_mcp_session session_id)
+    (fun () ->
+      Transport.remember_mcp_profile
+        ~otel_transport_context:transport_context
+        session_id
+        Transport.Full;
+      Transport.forget_mcp_session session_id);
+  let after_count = metric_value count_metric [] in
+  check (float 0.0001)
+    "profile-only uninitialized session does not record duration"
+    before_count
+    after_count
+
 let test_h1_h2_post_route_wiring_parity () =
   let h1 = source_file "lib/server/server_mcp_transport_http.ml" in
   let h2 = source_file "lib/server/server_h2_gateway.ml" in
@@ -345,6 +368,8 @@ let () =
             test_shared_protocol_and_delete_matrix;
           test_case "server session duration metric" `Quick
             test_records_mcp_server_session_duration_metric;
+          test_case "profile-only session does not start duration metric" `Quick
+            test_uninitialized_profile_does_not_start_session_duration_metric;
         ] );
       ( "route-wiring",
         [

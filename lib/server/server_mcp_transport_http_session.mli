@@ -46,6 +46,10 @@ val is_known_session : string -> bool
 val remember_mcp_profile :
   ?otel_transport_context:Otel_dispatch_hook.transport_context ->
   string -> Server_mcp_transport_http_types.tool_profile -> unit
+(** [remember_mcp_profile session_id profile] records the transport
+    profile.  For sessions that have completed initialize, it also
+    refreshes activity/transport telemetry; uninitialized profile-only
+    ids do not start session-duration state. *)
 
 val forget_mcp_session : string -> unit
 (** Removes both the protocol-version and tool-profile entries

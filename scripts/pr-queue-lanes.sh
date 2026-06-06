@@ -93,12 +93,12 @@ jq -r \
         real_failures:
           [ $checks[]
             | select((.conclusion // "") == "FAILURE")
-            | select((.name // "") | test("^(Draft Auto-Merge Guard|PR Live Gate)$") | not)
+            | select((.name // "") | test("^PR Live Gate$") | not)
           ],
-        draft_policy_failures:
+        live_gate_failures:
           [ $checks[]
             | select((.conclusion // "") == "FAILURE")
-            | select((.name // "") | test("^(Draft Auto-Merge Guard|PR Live Gate)$"))
+            | select((.name // "") | test("^PR Live Gate$"))
           ],
         pending:
           [ $checks[]
@@ -137,7 +137,7 @@ jq -r \
         check_total: $c.total,
         real_failure_count: ($c.real_failures | length),
         real_failures: ($c.real_failures | map(.name)),
-        draft_policy_failure_count: ($c.draft_policy_failures | length),
+        live_gate_failure_count: ($c.live_gate_failures | length),
         pending_count: ($c.pending | length),
         pending_checks: ($c.pending | map(.name))
       }

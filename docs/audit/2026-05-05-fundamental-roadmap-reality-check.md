@@ -110,11 +110,10 @@ docs/MASC_A2A.tla
 
 `.github/workflows/`:
 ```
-approve-agent-pr.yml      ci-cancel-closed-pr.yml
-ci.yml                    dashboard-lighthouse.yml
-dashboard-ws-load.yml     deploy-railway.yml
-main-nightly-health.yml   odoc.yml
-perf-baseline.yml         pr-automation.yml
+ci-cancel-closed-pr.yml   ci.yml
+dashboard-lighthouse.yml  dashboard-ws-load.yml
+deploy-railway.yml        main-nightly-health.yml
+odoc.yml                  perf-baseline.yml
 ```
 
 **No `fundamental-check.yml`-style guard** for: model-name hardcoding regression, `Math.random` in source, oversized files, new `Mutex` introductions without RFC. Sprint 0 closes this gap.

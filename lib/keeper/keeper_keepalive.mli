@@ -58,9 +58,9 @@ val proactive_skip_reason_metric : string
     #10008 failure mode 3. *)
 
 val semaphore_wait_timeout_sec : float
-(** Wall-clock cap when a keeper waits on its own previous turn slot.
-    Derived from [MASC_KEEPER_SEMAPHORE_WAIT_TIMEOUT_SEC]. Other keepers no
-    longer share this admission slot. *)
+(** Wall-clock cap while a keeper waits to enter its own turn lane and then
+    consume the shared runtime-concurrent budget. Derived from
+    [MASC_KEEPER_SEMAPHORE_WAIT_TIMEOUT_SEC]. *)
 
 exception Semaphore_wait_timeout of float
 (** Legacy exception form. The [with_keeper_turn_slot*] result path below
@@ -93,7 +93,9 @@ val reset_autonomous_turn_queue_for_test : unit -> unit
 (** Test-only snapshot of keeper names currently queued for an autonomous turn. *)
 val autonomous_waiter_snapshot_for_test : unit -> string list
 
-(** Test-only legacy capacity snapshots; not admission capacity. *)
+(** Test-only runtime-concurrent capacity snapshots. Reactive/autonomous
+    helpers report the same shared budget because those legacy pool-specific
+    gates no longer exist. *)
 val turn_semaphore_value_for_test : unit -> int
 val autonomous_turn_semaphore_value_for_test : unit -> int
 val reactive_turn_semaphore_value_for_test : unit -> int

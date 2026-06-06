@@ -1,9 +1,9 @@
-(* keeper_turn_slot — per-keeper independent turn execution.
+(* keeper_turn_slot — runtime-concurrent budget plus per-keeper turns.
 
-   Replaces the previous global semaphore pool with:
-   1. Per-keeper semaphore: each keeper acquires only its own slot,
-      eliminating cross-keeper contention.
-   2. Global inflight counter: diagnostic gauge only, not an admission gate.
+   Admission is intentionally two-stage:
+   1. Per-keeper semaphore: preserve each keeper's own turn order.
+   2. Runtime-concurrent semaphore: shared global budget consumed by the
+      per-keeper turn that is ready to run.
 
    The autonomous FIFO queue and reactive/autonomous semaphores are removed
    from production admission. Channel holder rows remain as diagnostics. *)
@@ -139,11 +139,9 @@ let check_throttle_divergence () =
 ;;
 let () = check_throttle_divergence ()
 
-(* Cross-keeper admission is intentionally gone.  The counter below is
-   observational only: it tells operators how many keeper turns are currently
-   active, but it must never decide whether a different keeper may run. *)
-let global_inflight = Atomic.make 0
 let global_turn_limit = effective_turn_throttle_limit
+let runtime_concurrent_semaphore = Eio.Semaphore.make global_turn_limit
+let global_inflight = Atomic.make 0
 
 (* Per-keeper slot table.  Each keeper gets one independent counting
    semaphore, so a zombie taskmaster turn can only block taskmaster's next
@@ -299,6 +297,7 @@ let complete_force_release ~keeper_name released =
   | [] -> []
   | _ :: _ ->
     Atomic.decr global_inflight;
+    Eio.Semaphore.release runtime_concurrent_semaphore;
     Eio.Semaphore.release (get_or_create_keeper_slot keeper_name);
     released
 ;;
@@ -367,11 +366,12 @@ let semaphore_wait_timeout_sec =
 ;;
 
 let semaphore_wait_timeout_snapshot ~phase ?queue_ahead ?(holders = []) () =
+  let runtime_concurrent_available = Eio.Semaphore.get_value runtime_concurrent_semaphore in
   { timeout_wait_sec = semaphore_wait_timeout_sec
   ; timeout_phase = phase
-  ; timeout_autonomous_available = max 0 (global_turn_limit - Atomic.get global_inflight)
-  ; timeout_reactive_available = max 0 (global_turn_limit - Atomic.get global_inflight)
-  ; timeout_turn_available = 0
+  ; timeout_autonomous_available = runtime_concurrent_available
+  ; timeout_reactive_available = runtime_concurrent_available
+  ; timeout_turn_available = runtime_concurrent_available
   ; timeout_queue_depth = 0
   ; timeout_queue_ahead = queue_ahead
   ; timeout_holders = holders
@@ -484,6 +484,7 @@ let release_keeper_turn_slot_impl ~keeper_name state =
   in
   if not (turn_was_force_released || channel_was_force_released) then (
     Atomic.decr global_inflight;
+    Eio.Semaphore.release runtime_concurrent_semaphore;
     match !(state.keeper_slot) with
     | None -> ()
     | Some sem -> Eio.Semaphore.release sem)
@@ -602,8 +603,44 @@ let channel_holder_label = function
   | Keeper_world_observation.Scheduled_autonomous -> Some Autonomous_pool
 ;;
 
-let remaining_legacy_capacity () =
-  max 0 (global_turn_limit - Atomic.get global_inflight)
+let remaining_runtime_concurrent_capacity () =
+  Eio.Semaphore.get_value runtime_concurrent_semaphore
+;;
+
+let release_acquired_slots ~keeper_slot_acquired ~runtime_budget_acquired slot_sem =
+  if !runtime_budget_acquired then (
+    runtime_budget_acquired := false;
+    Eio.Semaphore.release runtime_concurrent_semaphore);
+  if !keeper_slot_acquired then (
+    keeper_slot_acquired := false;
+    Eio.Semaphore.release slot_sem)
+;;
+
+let acquire_keeper_then_runtime_budget ?clock slot_sem =
+  let keeper_slot_acquired = ref false in
+  let runtime_budget_acquired = ref false in
+  let acquire () =
+    Eio.Semaphore.acquire slot_sem;
+    keeper_slot_acquired := true;
+    Eio.Semaphore.acquire runtime_concurrent_semaphore;
+    runtime_budget_acquired := true
+  in
+  let cleanup_on_error () =
+    release_acquired_slots ~keeper_slot_acquired ~runtime_budget_acquired slot_sem
+  in
+  try
+    (match clock with
+     | Some clock ->
+       Eio.Time.with_timeout_exn clock semaphore_wait_timeout_sec acquire
+     | None -> acquire ());
+    Ok ()
+  with
+  | Eio.Time.Timeout ->
+    cleanup_on_error ();
+    Error `Timeout
+  | exn ->
+    cleanup_on_error ();
+    raise exn
 ;;
 
 let run_with_acquired_slot
@@ -656,36 +693,14 @@ let run_with_acquired_slot
        Ok (f ~semaphore_wait_ms ~slot_control))
 ;;
 
-(* Main entry point — per-keeper slot only. *)
+(* Main entry point — per-keeper turn order consuming runtime-concurrent budget. *)
 let with_keeper_turn_slot_control ?(runtime_profile = "unknown") ~keeper_name ~channel f =
   let channel_label = Keeper_world_observation.channel_to_string channel in
   let t0 = Time_compat.now () in
   let slot_sem = get_or_create_keeper_slot keeper_name in
-  match Eio_context.get_clock_opt () with
-  | Some clock ->
-    (try
-       Eio.Time.with_timeout_exn clock semaphore_wait_timeout_sec (fun () ->
-         Eio.Semaphore.acquire slot_sem);
-       run_with_acquired_slot
-         ~runtime_profile
-         ~keeper_name
-         ~channel
-         ~channel_label
-         ~slot_sem
-         ~started_at:t0
-         f
-     with
-     | Eio.Time.Timeout ->
-       let holders = snapshot_holders ~label:Turn_pool ~now:t0 in
-       Error
-         (`Semaphore_wait_timeout
-            (semaphore_wait_timeout_snapshot
-               ~phase:Turn_slot
-               ~holders
-               ())))
-  | None ->
-    (* No clock: run without timeout. This should not happen in production. *)
-    Eio.Semaphore.acquire slot_sem;
+  let clock = Eio_context.get_clock_opt () in
+  match acquire_keeper_then_runtime_budget ?clock slot_sem with
+  | Ok () ->
     run_with_acquired_slot
       ~runtime_profile
       ~keeper_name
@@ -694,6 +709,14 @@ let with_keeper_turn_slot_control ?(runtime_profile = "unknown") ~keeper_name ~c
       ~slot_sem
       ~started_at:t0
       f
+  | Error `Timeout ->
+    let holders = snapshot_holders ~label:Turn_pool ~now:t0 in
+    Error
+      (`Semaphore_wait_timeout
+         (semaphore_wait_timeout_snapshot
+            ~phase:Turn_slot
+            ~holders
+            ()))
 ;;
 
 let with_keeper_turn_slot ?runtime_profile ~keeper_name ~channel f =
@@ -716,10 +739,10 @@ let with_keeper_turn_slot_for_test ?runtime_profile ~keeper_name ~channel f =
 let global_inflight_for_test () = Atomic.get global_inflight
 let global_turn_limit_for_test () = global_turn_limit
 
-(* Obsolete test helpers — retained as no-ops or redirects for backward compat. *)
-let turn_semaphore_value_for_test () = remaining_legacy_capacity ()
-let autonomous_turn_semaphore_value_for_test () = remaining_legacy_capacity ()
-let reactive_turn_semaphore_value_for_test () = remaining_legacy_capacity ()
+(* Legacy pool-specific helpers now expose the shared runtime-concurrent pool. *)
+let turn_semaphore_value_for_test () = remaining_runtime_concurrent_capacity ()
+let autonomous_turn_semaphore_value_for_test () = remaining_runtime_concurrent_capacity ()
+let reactive_turn_semaphore_value_for_test () = remaining_runtime_concurrent_capacity ()
 let turn_concurrency_int_of_env_default_for_test name ~default ~min_v ~max_v =
   if Env_config_core.running_under_test_executable ()
   then default

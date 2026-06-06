@@ -392,10 +392,48 @@ let test_force_released_autonomous_holder_does_not_stamp_completion () =
          "force-released autonomous holder stamped normal completion: delay=%.3f"
          delay)
 
-let test_no_clock_exhausted_turn_slot_fails_closed () =
-  (* Obsolete: cross-keeper global admission was replaced by per-keeper slots.
-     The old no-clock exhausted-global-pool path no longer applies. *)
-  ()
+let test_distinct_keepers_share_runtime_concurrent_budget () =
+  let baseline = KK.turn_semaphore_value_for_test () in
+  let limit = KTS.global_turn_limit_for_test () in
+  if baseline <> limit then
+    failwith
+      (Printf.sprintf
+         "test requires a fresh runtime-concurrent pool: baseline=%d limit=%d"
+         baseline
+         limit);
+  let rec acquire_distinct_keepers idx =
+    if idx = limit then
+      assert_eq
+        ~msg:"runtime-concurrent budget exhausted by distinct keepers"
+        ~expected:0
+        ~actual:(KK.turn_semaphore_value_for_test ())
+    else (
+      let keeper_name = Printf.sprintf "runtime-budget-%02d" idx in
+      let result =
+        KK.with_keeper_turn_slot_for_test
+          ~keeper_name
+          ~channel:Masc.Keeper_world_observation.Scheduled_autonomous
+          (fun ~semaphore_wait_ms:_ ->
+             assert_eq
+               ~msg:"distinct keeper consumed one runtime-concurrent token"
+               ~expected:(baseline - idx - 1)
+               ~actual:(KK.turn_semaphore_value_for_test ());
+             acquire_distinct_keepers (idx + 1))
+      in
+      match result with
+      | Ok () -> ()
+      | Error (`Semaphore_wait_timeout snapshot) ->
+        failwith
+          (Printf.sprintf
+             "unexpected semaphore wait timeout: wait=%.0fs turn_avail=%d"
+             snapshot.timeout_wait_sec
+             snapshot.timeout_turn_available))
+  in
+  acquire_distinct_keepers 0;
+  assert_eq
+    ~msg:"runtime-concurrent budget restored after distinct keepers exit"
+    ~expected:baseline
+    ~actual:(KK.turn_semaphore_value_for_test ())
 
 let test_force_release_marker_ttl_bounds_unfinalized_fibers () =
   KK.clear_force_released_markers_for_test ();
@@ -439,8 +477,8 @@ let () =
         test_force_release_marker_does_not_leak_to_replacement;
       "force released autonomous holder skips completion stamp",
         test_force_released_autonomous_holder_does_not_stamp_completion;
-      "no-clock exhausted turn slot fails closed",
-        test_no_clock_exhausted_turn_slot_fails_closed;
+      "distinct keepers share runtime-concurrent budget",
+        test_distinct_keepers_share_runtime_concurrent_budget;
       "force release marker ttl bounds unfinalized fibers",
         test_force_release_marker_ttl_bounds_unfinalized_fibers;
     ]

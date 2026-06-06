@@ -12,7 +12,7 @@
     section 1.3.
 
     Structure (facade decomposition):
-    - [Keeper_turn_slot]      — per-keeper turn slot,
+    - [Keeper_turn_slot]      — runtime-concurrent budget + per-keeper turn slot,
                                  [with_keeper_turn_slot]
     - [Keeper_keepalive_signal] — gRPC client refs, FSM guard identity
                                    helpers, interruptible sleep, wakeup

@@ -207,6 +207,7 @@ let run (ctx : ctx)
                ~is_retry
                ?shared_context
                ?event_bus:(Keeper_event_bus.get ())
+               ?turn_slot_control
                ()))
   in
   let rec retry_loop (input : retry_loop_input) =

@@ -93,6 +93,7 @@ let execute_with_observers
       ~(exec_cache : Masc_exec.Exec_cache.t option)
       ?search_fn
       ?on_tool_called
+      ?turn_slot_control
       ~(failure_counts : failure_counts)
       ~(key : string)
       ~(input : Yojson.Safe.t)
@@ -110,6 +111,7 @@ let execute_with_observers
             ?turn_sandbox_factory
             ~exec_cache
           ?search_fn
+          ?turn_slot_control
           ~name
           ~input
           ())

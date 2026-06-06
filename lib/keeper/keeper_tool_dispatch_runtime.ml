@@ -294,6 +294,7 @@ let execute_keeper_tool_call_with_outcome
       ?proc_mgr
       ?net
       ?mcp_session_id
+      ?turn_slot_control
       ~(name : string)
       ~(input : Yojson.Safe.t)
       ()
@@ -410,6 +411,7 @@ let execute_keeper_tool_call_with_outcome
            ; proc_mgr
            ; net
            ; mcp_session_id
+           ; turn_slot_control
            }
        in
        let descriptor_output =
@@ -513,6 +515,7 @@ let execute_keeper_tool_call
       ?turn_sandbox_factory
       ~(exec_cache : Masc_exec.Exec_cache.t option)
       ?search_fn
+      ?turn_slot_control
       ~(name : string)
       ~(input : Yojson.Safe.t)
       ()
@@ -526,6 +529,7 @@ let execute_keeper_tool_call
                   ?turn_sandbox_factory
                   ~exec_cache
       ?search_fn
+      ?turn_slot_control
       ~name
       ~input
       ()

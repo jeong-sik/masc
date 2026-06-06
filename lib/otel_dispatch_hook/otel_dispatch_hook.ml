@@ -91,10 +91,9 @@ let tool_failure_class_attrs (result : Tool_result.result) =
 let tool_span_attrs (result : Tool_result.result) =
   let status_attrs =
     if Tool_result.is_success result
-    then [ "otel.status_code", `String "OK" ]
+    then []
     else
-      [ "otel.status_code", `String "ERROR"
-      ; ( Otel_genai.Mcp_attr_key.error_type
+      [ ( Otel_genai.Mcp_attr_key.error_type
         , `String Otel_genai.Mcp_value.tool_error_type )
       ]
       @ tool_failure_class_attrs result

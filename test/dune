@@ -259,6 +259,7 @@
   test_shell_ir_typed_review_followup
   test_exec_shell_command_gate
   test_auth_resolve_labels
+  test_runtime_mcp_policy_auth
   test_keeper_classifier_helper
   test_persona_tool_reachability
   test_turn_id_propagation
@@ -511,6 +512,7 @@
   test_shell_ir_typed_review_followup
   test_exec_shell_command_gate
   test_auth_resolve_labels
+  test_runtime_mcp_policy_auth
   test_keeper_classifier_helper
   test_persona_tool_reachability
   test_turn_id_propagation

@@ -430,6 +430,7 @@ let prune_lane_locked lane =
       if Hashtbl.mem autonomous_tickets waiter.ticket
       then ()
       else (
+        (* fire-and-forget: drain tombstoned queue element *)
         ignore (Queue.take lane.queue);
         loop ())
   in

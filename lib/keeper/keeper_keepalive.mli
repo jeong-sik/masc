@@ -152,9 +152,16 @@ val slot_holders_summary : ?limit:int -> now:float -> unit -> string
     snapshot accessors. *)
 val force_release_holder_for : keeper_name:string -> (string * float) list
 
-(** Test-only FIFO queue primitives for autonomous fairness regression tests. *)
-val enqueue_autonomous_waiter_for_test : string -> int
+(** Test-only FIFO queue primitives for autonomous fairness regression tests.
+    [enqueue_autonomous_waiter_for_test] defaults [runtime_id] to ["test"]. *)
+val enqueue_autonomous_waiter_for_test : ?runtime_id:string -> string -> int
 val drop_autonomous_waiter_for_test : int -> unit
+
+(** Test-only: head ticket of a specific runtime lane. *)
+val autonomous_waiter_head_ticket_for_test : runtime_id:string -> int option
+
+(** Test-only: aggregate queue depth across all runtime lanes. *)
+val autonomous_wait_queue_depth_for_test : unit -> int
 
 (** Pure computation: seconds keeper should yield before re-entering queue
     at time [now].  0.0 = no yield needed.  Exposed for unit testing. *)

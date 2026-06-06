@@ -3,36 +3,6 @@ import { h } from 'preact'
 import { render } from 'preact'
 import { fireEvent, waitFor } from '@testing-library/preact'
 
-vi.mock('../../api/git-graph', () => ({
-  fetchGitGraph: vi.fn(() => Promise.resolve({
-    generated_at: '2026-05-06T00:00:00Z',
-    repos: [{
-      id: 'masc',
-      root: '/workspace/masc',
-      label: 'masc',
-      current_branch: 'main',
-      head: 'abc123',
-      dirty: false,
-      conflict_count: 0,
-      branch_count: 2,
-      commit_count: 8,
-      worktree_count: 1,
-    }],
-    agents: [],
-    nodes: [],
-    edges: [],
-    stats: {
-      repo_count: 1,
-      agent_count: 0,
-      branch_count: 2,
-      commit_count: 8,
-      conflict_count: 0,
-      dirty_count: 0,
-    },
-    warnings: [],
-  })),
-}))
-
 vi.mock('../../api/repositories', () => ({
   discoverRepositories: vi.fn(() => Promise.resolve([])),
   fetchRepositoriesList: vi.fn(() => Promise.resolve([{
@@ -345,14 +315,14 @@ describe('IdeShell', () => {
             id: 'pr:15035',
             label: 'PR',
             tab: 'workspace',
-            params: { section: 'repositories', view: 'graph', pr: '15035' },
+            params: { section: 'repositories', pr: '15035' },
             evidence: 'PR 15035',
           },
           {
             id: 'git:main',
             label: 'Git',
             tab: 'workspace',
-            params: { section: 'repositories', view: 'graph', ref: 'main' },
+            params: { section: 'repositories', ref: 'main' },
             evidence: 'Git main',
           },
           {
@@ -762,19 +732,6 @@ describe('IdeShell', () => {
     fireEvent.click(btn)
     expect(route.value.params.layers).toBeUndefined()
     expect(btn.getAttribute('aria-pressed')).toBe('false')
-  })
-
-  it('renders IDE branch graph context in the review rail', async () => {
-    route.value = {
-      tab: 'code',
-      params: { section: 'ide-shell', view: 'source' },
-      postId: null,
-    }
-
-    render(h(IdeShell, {}), container)
-
-    expect(container.textContent).toContain('BRANCH GRAPH')
-    await waitFor(() => expect(container.textContent).toContain('masc'))
   })
 
   it('keeps the right diagnostics bounded above the primary conversation rail', () => {

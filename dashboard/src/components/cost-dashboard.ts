@@ -16,14 +16,11 @@ import { computed } from '@preact/signals'
 import {
   fetchRuntimeModelMetrics,
   fetchKeeperCostMetrics,
-  fetchStress,
   fetchAuditLedger,
   fetchKeeperDecisions,
   type DashboardRuntimeModelMetric,
   type KeeperCostMetric,
   type LatencyBucket,
-  type StressEvent,
-  type AgentStressRow,
   type AuditEntry,
   type KeeperDecision,
   type DashboardFeedMetadata,
@@ -52,7 +49,6 @@ import {
   viewMode,
   modelState,
   keeperState,
-  stressState,
   auditLedgerState,
   keeperDecisionsState,
   windowMinutes,
@@ -201,17 +197,6 @@ async function loadKeeperMetrics(window: number) {
   }
 }
 
-async function loadStress(limit = 100) {
-  stressState.value = { status: 'loading' }
-  try {
-    const resp = await fetchStress(limit)
-    stressState.value = { status: 'loaded', events: resp.events, board: resp.agent_stress, limit: resp.limit, meta: resp }
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'stress events 불러오기 실패'
-    stressState.value = { status: 'error', message }
-  }
-}
-
 async function loadAuditLedger(limit = 50) {
   auditLedgerState.value = { status: 'loading' }
   try {
@@ -241,9 +226,6 @@ function loadActiveView(window: number, view: CostView) {
     } else {
       void loadKeeperMetrics(window)
     }
-  }
-  if (view === 'stress') {
-    void loadStress()
   }
   if (view === 'audit') {
     void loadAuditLedger()
@@ -672,116 +654,6 @@ function FeedSourceStrip({ meta }: { meta: DashboardFeedMetadata }) {
     <div class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2 font-mono text-2xs text-text-muted">
       ${items.join(' · ')}
     </div>
-  `
-}
-
-function StressBoard({ rows, events, limit, meta }: { rows: AgentStressRow[]; events: StressEvent[]; limit: number; meta: DashboardFeedMetadata }) {
-  const fmtTime = (ts: number): string => {
-    const d = unixSecondsToDate(ts)
-    return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
-  }
-
-  const fmtKind = (kind: StressEvent['kind']): string => {
-    switch (kind.type) {
-      case 'failure_streak': return `failure_streak · ${kind.count ?? '?'}`
-      case 'turn_failure': return `turn_failure · c=${kind.consecutive ?? '?'} t=${kind.threshold ?? '?'}`
-      case 'fallback_approval': return 'fallback_approval'
-      case 'timeout': return 'timeout'
-      case 'parse_degraded': return 'parse_degraded'
-      case 'task_released': return 'task_released'
-      default: return kind.type
-    }
-  }
-
-  const severityClass = (kind: StressEvent['kind']): string => {
-    switch (kind.type) {
-      case 'failure_streak':
-      case 'turn_failure':
-        return 'bg-[var(--color-status-err)]/15 text-[var(--color-status-err)]'
-      case 'timeout':
-      case 'parse_degraded':
-        return 'bg-[var(--color-status-warn)]/15 text-[var(--color-status-warn)]'
-      default:
-        return 'bg-[var(--color-status-ok)]/15 text-[var(--color-status-ok)]'
-    }
-  }
-
-  const pressureTone = (value: number): string => {
-    if (value >= 0.75) return 'text-[var(--color-status-err)]'
-    if (value >= 0.45) return 'text-[var(--color-status-warn)]'
-    return 'text-[var(--color-status-ok)]'
-  }
-
-  const sourceHint = (row: AgentStressRow): string => {
-    return [
-      row.budget_pressure_source ? `budget=${row.budget_pressure_source}` : '',
-      row.ctx_pressure_source ? `ctx=${row.ctx_pressure_source}` : '',
-      row.queue_depth_source ? `queue=${row.queue_depth_source}` : '',
-    ].filter(Boolean).join(' · ')
-  }
-
-  return html`
-    <section class="flex flex-col gap-2" aria-label=${`Stress board · ${rows.length} agents · ${events.length} events`}>
-      <${FeedSourceStrip} meta=${meta} />
-      <div class="flex items-center justify-between rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2">
-        <span class="font-mono text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">stress board · ${rows.length} agents · ${events.length} events</span>
-        <span class="font-mono text-2xs text-text-muted">limit ${limit}</span>
-      </div>
-      <div class="overflow-x-auto rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)]">
-        <table class="w-full" aria-label="Agent stress board">
-          <thead>
-            <tr class="border-b border-[var(--color-border-default)] text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">
-              <th scope="col" class="px-2 py-1.5 text-left">agent</th>
-              <th scope="col" class="px-2 py-1.5 text-right">budget</th>
-              <th scope="col" class="px-2 py-1.5 text-right">context</th>
-              <th scope="col" class="px-2 py-1.5 text-right">queue</th>
-              <th scope="col" class="px-2 py-1.5 text-left">blocked</th>
-              <th scope="col" class="px-2 py-1.5 text-left">source</th>
-              <th scope="col" class="px-2 py-1.5 text-left">time</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rows.map((row, i) => html`
-              <tr key=${i} class="border-b border-[var(--color-border-default)]/50 text-2xs">
-                <td class="px-2 py-1.5 text-text-strong">${row.agent}</td>
-                <td class=${`px-2 py-1.5 text-right font-mono ${pressureTone(row.budget_pressure)}`}>${formatPct1(row.budget_pressure)}</td>
-                <td class=${`px-2 py-1.5 text-right font-mono ${pressureTone(row.ctx_pressure)}`}>${formatPct1(row.ctx_pressure)}</td>
-                <td class="px-2 py-1.5 text-right font-mono text-text-muted">${row.queue_depth}</td>
-                <td class="px-2 py-1.5 text-text-muted">${row.blocked_on ?? '—'}</td>
-                <td class="px-2 py-1.5 text-text-muted">${sourceHint(row)}</td>
-                <td class="px-2 py-1.5 font-mono text-text-muted">${row.ts > 0 ? fmtTime(row.ts) : '—'}</td>
-              </tr>
-            `)}
-          </tbody>
-        </table>
-      </div>
-      <div class="overflow-x-auto rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)]">
-        <table class="w-full" aria-label="Recent stress events">
-          <thead>
-            <tr class="border-b border-[var(--color-border-default)] text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">
-              <th scope="col" class="px-2 py-1.5 text-left">time</th>
-              <th scope="col" class="px-2 py-1.5 text-left">agent</th>
-              <th scope="col" class="px-2 py-1.5 text-left">workspace</th>
-              <th scope="col" class="px-2 py-1.5 text-left">kind</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${events.map((e, i) => html`
-              <tr key=${i} class="border-b border-[var(--color-border-default)]/50 text-2xs">
-                <td class="px-2 py-1.5 font-mono text-text-muted">${fmtTime(e.timestamp)}</td>
-                <td class="px-2 py-1.5 text-text-strong">${e.agent_name}</td>
-                <td class="px-2 py-1.5 font-mono text-text-muted">${e.workspace_id}</td>
-                <td class="px-2 py-1.5">
-                  <span class="inline-block rounded-[var(--r-1)] px-1.5 py-0.5 text-2xs font-semibold ${severityClass(e.kind)}">
-                    ${fmtKind(e.kind)}
-                  </span>
-                </td>
-              </tr>
-            `)}
-          </tbody>
-        </table>
-      </div>
-    </section>
   `
 }
 
@@ -1288,24 +1160,6 @@ function CostDashboardContent({ view }: { view: CostView }) {
             </table>
           </div>
         `}
-      </section>
-    `
-  }
-
-  if (view === 'stress') {
-    if (stressState.value.status === 'idle') {
-      void loadStress()
-    }
-    return html`
-      <section class="flex flex-col gap-4" aria-label="스트레스">
-        <header class="flex items-baseline justify-between gap-3">
-          <h2 class="text-base font-semibold text-text-strong">스트레스 이벤트</h2>
-        </header>
-        ${stressState.value.status === 'loaded'
-          ? html`<${StressBoard} rows=${stressState.value.board} events=${stressState.value.events} limit=${stressState.value.limit} meta=${stressState.value.meta} />`
-          : stressState.value.status === 'error'
-            ? html`<${ErrorState} message=${stressState.value.message} onRetry=${() => void loadStress()} />`
-            : html`<${LoadingState} />`}
       </section>
     `
   }

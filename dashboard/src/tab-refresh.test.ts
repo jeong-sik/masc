@@ -40,12 +40,7 @@ vi.mock('./components/observatory/observatory', () => ({
   refreshObservatorySurface: vi.fn(),
 }))
 
-vi.mock('./components/git-graph-store', () => ({
-  refreshGitGraph: vi.fn(),
-}))
-
 import { refreshFeatureHealth } from './components/feature-health'
-import { refreshGitGraph } from './components/git-graph-store'
 import { refreshObservatorySurface } from './components/observatory/observatory'
 import { refreshServerConfig } from './components/server-config'
 import { refreshSurfaceReadiness } from './components/surface-readiness-panel'
@@ -125,11 +120,6 @@ describe('refreshPlanForRoute', () => {
     })).toEqual(['board'])
 
     expect(refreshPlanForRoute({
-      tab: 'workspace',
-      params: { section: 'repositories', view: 'graph' },
-    })).toEqual(['gitGraph'])
-
-    expect(refreshPlanForRoute({
       tab: 'lab',
       params: { section: 'harness' },
     })).toEqual(['harness'])
@@ -194,17 +184,6 @@ describe('refreshPlanForRoute', () => {
 
     await waitFor(() => {
       expect(refreshObservatorySurface).toHaveBeenCalledTimes(1)
-    })
-  })
-
-  it('refreshes the repository Git graph view on route entry', async () => {
-    refreshForRoute({
-      tab: 'workspace',
-      params: { section: 'repositories', view: 'graph' },
-    })
-
-    await waitFor(() => {
-      expect(refreshGitGraph).toHaveBeenCalledTimes(1)
     })
   })
 

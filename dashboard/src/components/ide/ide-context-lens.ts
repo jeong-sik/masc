@@ -1204,7 +1204,7 @@ export function routeLinksForContext(
       id: `pr:${prId}`,
       label: 'PR',
       tab: 'workspace',
-      params: { section: 'repositories', view: 'graph', pr: prId },
+      params: { section: 'repositories', pr: prId },
       evidence: `PR ${prId}`,
     })
   }
@@ -1214,7 +1214,7 @@ export function routeLinksForContext(
       id: `git:${gitRef}`,
       label: 'Git',
       tab: 'workspace',
-      params: { section: 'repositories', view: 'graph', ref: gitRef },
+      params: { section: 'repositories', ref: gitRef },
       evidence: `Git ${gitRef}`,
     })
   }
@@ -1273,4 +1273,3 @@ function cleanId(value: string | null | undefined): string | null {
   const trimmed = value?.trim()
   return trimmed ? trimmed : null
 }
-

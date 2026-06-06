@@ -56,7 +56,7 @@ describe('cockpit entrypoint registry', () => {
     expect(COGNITIVE_MODE_STATES.explode).toMatchObject({
       load: 'exploratory',
       layout: 'graph-map',
-      target: { tab: 'workspace', params: { section: 'repositories', view: 'graph' } },
+      target: { tab: 'workspace', params: { section: 'repositories' } },
     })
   })
 
@@ -105,7 +105,7 @@ describe('cockpit entrypoint registry', () => {
     expect(cognitiveModeForRoute('overview')).toBe('cockpit')
     expect(cognitiveModeForRoute('code', { section: 'ide-shell', view: 'source' })).toBe('code')
     expect(cognitiveModeForRoute('code', { section: 'ide-shell', view: 'split-diff' })).toBe('split')
-    expect(cognitiveModeForRoute('workspace', { section: 'repositories', view: 'graph' })).toBe('explode')
+    expect(cognitiveModeForRoute('workspace', { section: 'repositories' })).toBe('explode')
     expect(cognitiveModeForRoute('workspace', { mode: 'observe' })).toBe('cockpit')
   })
 
@@ -158,7 +158,7 @@ describe('cockpit entrypoint registry', () => {
     })
     expect(cockpitTargetForParams({ mode: 'EXPLODE' })).toEqual({
       tab: 'workspace',
-      params: { section: 'repositories', view: 'graph' },
+      params: { section: 'repositories' },
     })
     expect(cockpitTargetForParams({ mode: 'Cognition', tab: 'dc-str' })).toEqual({
       tab: 'monitoring',
@@ -179,10 +179,6 @@ describe('cockpit entrypoint registry', () => {
     expect(cockpitTargetForParams({ mode: 'Observe', tab: 'sa-dash' })).toEqual({
       tab: 'command',
       params: { section: 'operations', view: 'safety' },
-    })
-    expect(cockpitTargetForParams({ mode: 'CODE', tab: 'graph' })).toEqual({
-      tab: 'workspace',
-      params: { section: 'repositories', view: 'graph' },
     })
     expect(cockpitTargetForParams({ mode: 'IDE', tab: 'pr-thread' })).toEqual({
       tab: 'code',

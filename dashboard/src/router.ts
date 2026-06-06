@@ -31,7 +31,6 @@ export const CROSS_SURFACE_SECTION_REDIRECTS: Record<TabSectionKey, CrossSurface
   'monitoring:git-graph': {
     tab: 'workspace',
     section: 'repositories',
-    view: 'graph',
   },
   'monitoring:goal-loop': {
     tab: 'workspace',

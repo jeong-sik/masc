@@ -17,11 +17,8 @@ import type {
   DashboardRuntimeModelMetric,
   KeeperCostMetric,
   LatencyBucket,
-  StressEvent,
-  AgentStressRow,
   AuditLedgerResponse,
   KeeperDecisionsResponse,
-  DashboardFeedMetadata,
 } from '../../api/dashboard'
 import type { ViewMode } from './cost-types'
 
@@ -35,12 +32,6 @@ export type KeeperLoadState =
   | { status: 'idle' }
   | { status: 'loading' }
   | { status: 'loaded'; data: KeeperCostMetric[]; windowMinutes: number }
-  | { status: 'error'; message: string }
-
-export type StressLoadState =
-  | { status: 'idle' }
-  | { status: 'loading' }
-  | { status: 'loaded'; events: StressEvent[]; board: AgentStressRow[]; limit: number; meta: DashboardFeedMetadata }
   | { status: 'error'; message: string }
 
 export type AuditLedgerLoadState =
@@ -58,7 +49,6 @@ export type KeeperDecisionsLoadState =
 export const viewMode = signal<ViewMode>('model')
 export const modelState = signal<ModelLoadState>({ status: 'idle' })
 export const keeperState = signal<KeeperLoadState>({ status: 'idle' })
-export const stressState = signal<StressLoadState>({ status: 'idle' })
 export const auditLedgerState = signal<AuditLedgerLoadState>({ status: 'idle' })
 export const keeperDecisionsState = signal<KeeperDecisionsLoadState>({ status: 'idle' })
 export const windowMinutes = signal<number>(60)

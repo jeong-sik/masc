@@ -22,7 +22,6 @@ import { InspectorKeeperBDI } from './inspector-keeper-bdi'
 import { pinKeeper } from './multi-keeper-pin-store'
 import { OverlayKeeperTrace } from './overlay-keeper-trace'
 import { IdePersistencePanel } from './ide-persistence-panel'
-import { IdeBranchContextPanel } from './ide-branch-context-panel'
 import { IdeMemoryPanel } from './ide-memory-panel'
 import { cursorOverlaySignal, getKeeperColor, type KeeperCursor } from './keeper-cursor-overlay'
 import { routeLinksForContext } from './ide-context-lens'
@@ -695,10 +694,6 @@ export function IdeShell() {
                 class="ide-plane-context-stack"
                 data-testid="ide-right-context-stack"
               >
-                <${IdeBranchContextPanel}
-                  activeRepositoryId=${workspaceStore.activeRepositoryId}
-                  subscribeActiveRepositoryId=${workspaceStore.subscribeActiveRepositoryId}
-                />
                 <${IdeKeeperWorkPanel} keeperName=${terminalKeeper} />
                 <${IdePersistencePanel} keeperName=${terminalKeeper} />
                 <${IdeMemoryPanel} keeperName=${terminalKeeper} />
@@ -788,7 +783,7 @@ function IdeReviewFocusStrip({ activeLayers }: { readonly activeLayers: Readonly
       <span class="font-mono">UNIFIED</span>
       <span class="text-[var(--color-fg-disabled)]">·</span>
       <span class="font-mono">${layerLabels.length > 0 ? layerLabels.join(' / ') : 'custom layers'}</span>
-      <span class="ml-auto font-mono text-[var(--color-fg-disabled)]">branch graph rail</span>
+      <span class="ml-auto font-mono text-[var(--color-fg-disabled)]">context rail</span>
     </div>
   `
 }

@@ -275,7 +275,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     {
       id: 'repositories',
       label: 'Repositories',
-      description: 'Registered repos, Git graph, branches, and keeper access scope.',
+      description: 'Registered repos, branches, and keeper access scope.',
       params: { section: 'repositories' },
     },
     {
@@ -429,7 +429,7 @@ export function normalizeRouteParams(tabId: TabId, params: Record<string, string
   // `repositories` / `operations` / `ide-shell` are redirect targets in
   // `CROSS_SURFACE_SECTION_REDIRECTS` (router.ts) and `SECTION_REDIRECTS`
   // (this file, line 332+) that carry `view` as part of the canonical destination
-  // (e.g. `monitoring:git-graph → workspace:repositories?view=graph`,
+  // (e.g. `monitoring:git-graph → workspace:repositories`,
   // cockpit IDE `?mode=Split → code:ide-shell?view=split-diff`).
   // `planning` does not gain `view` via redirect (`workspace:goals → planning`
   // drops view); instead, direct `replaceRoute` callers pass `view: 'default'`

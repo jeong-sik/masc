@@ -18,7 +18,6 @@ import {
 describe("isCostView", () => {
   it.each([
     ["cost", true],
-    ["stress", true],
     ["audit", true],
     ["decisions", true],
   ])("returns true for %s", (v, expected) => {

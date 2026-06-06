@@ -98,6 +98,10 @@ let safe_is_dir path =
   try Sys.file_exists path && Sys.is_directory path with
   | Sys_error _ -> false
 
+let safe_exists path =
+  try Sys.file_exists path with
+  | Sys_error _ -> false
+
 let normalize_path path =
   Keeper_alerting_path.normalize_path_for_check path
   |> Keeper_alerting_path.strip_trailing_slashes
@@ -113,6 +117,7 @@ let git_toplevel path =
 
 let safe_repo_component s =
   s <> "" && s <> "." && s <> ".."
+  && not (String.starts_with ~prefix:"." s)
   && not (String.contains s '/')
   && not (String.contains s '\\')
   && not (String.contains s '\x00')
@@ -552,11 +557,50 @@ let write_file path contents =
     ~finally:(fun () -> close_out_noerr oc)
     (fun () -> output_string oc contents)
 
+let worktree_git_marker_path worktree_path =
+  Filename.concat worktree_path ".git"
+
+let quarantine_candidate path =
+  let rec loop n =
+    let candidate =
+      if n = 0 then path ^ ".broken"
+      else Printf.sprintf "%s.broken-%d" path n
+    in
+    if safe_exists candidate then loop (n + 1) else candidate
+  in
+  loop 0
+
+let quarantine_broken_worktree_slot ~worktree_path =
+  let quarantine = quarantine_candidate worktree_path in
+  try
+    Sys.rename worktree_path quarantine;
+    Ok quarantine
+  with
+  | Sys_error msg ->
+    Error
+      (Printf.sprintf
+         "failed to quarantine broken worktree %s to %s: %s"
+         worktree_path quarantine msg)
+
+let prepare_worktree_path_for_add ~worktree_path =
+  if not (safe_exists worktree_path) then Ok None
+  else if safe_is_dir worktree_path
+          && safe_exists (worktree_git_marker_path worktree_path)
+  then
+    quarantine_broken_worktree_slot ~worktree_path
+    |> Result.map (fun path -> Some path)
+  else
+    Error
+      (Printf.sprintf
+         "worktree path %s already exists but is not a git checkout and has no \
+          .git marker; refusing to overwrite"
+         worktree_path)
+
 let normalize_worktree_gitdir_file ~repo_path ~task_name ~worktree_path =
   if not (is_standard_worktree_path ~repo_path ~task_name ~worktree_path) then
     Ok ()
   else
-    let git_file = Filename.concat worktree_path ".git" in
+    let git_file = worktree_git_marker_path worktree_path in
     if not (Sys.file_exists git_file) then
       Error (Printf.sprintf "worktree %s has no .git file" worktree_path)
     else if Sys.is_directory git_file then Ok ()
@@ -622,7 +666,10 @@ let ensure_worktree_ready
       | Error msg ->
         Error (Printf.sprintf "parent repo %s not usable for worktree: %s" repo_name msg)
       | Ok repo_path -> (
-        match worktree_base_ref ~repo_path with
+        match prepare_worktree_path_for_add ~worktree_path with
+        | Error msg -> Error msg
+        | Ok _quarantined -> (
+          match worktree_base_ref ~repo_path with
         | None ->
           Error
             (Printf.sprintf
@@ -657,7 +704,7 @@ let ensure_worktree_ready
             Error
               (Printf.sprintf
                  "worktree add failed for %s/%s at %s from %s: %s"
-                 repo_name task_name worktree_path base_ref add_result.output))
+                 repo_name task_name worktree_path base_ref add_result.output)))
 
 (** [provision_worktrees_for_task ~config ~agent_name ~task_id ()] scans all
     repos in the keeper's docker playground and creates a worktree for [task_id]
@@ -712,7 +759,13 @@ let provision_worktrees_for_task
                     git checkout (git_toplevel=%s)"
                    repo_name task_id worktree_path top
                | None -> (
-                   match worktree_base_ref ~repo_path with
+                   match prepare_worktree_path_for_add ~worktree_path with
+                   | Error msg ->
+                     Log.Workspace.debug
+                       "provision_worktrees: skipped %s/%s: %s"
+                       repo_name task_id msg
+                   | Ok _quarantined -> (
+                     match worktree_base_ref ~repo_path with
                    | None ->
                      Log.Workspace.debug
                        "provision_worktrees: skipped %s/%s: no base ref found"
@@ -754,7 +807,7 @@ let provision_worktrees_for_task
                      else
                        Log.Workspace.debug
                          "provision_worktrees: skipped %s/%s from %s: %s"
-                         repo_name task_id base_ref add_result.output))
+                         repo_name task_id base_ref add_result.output)))
         entries
 
 (* ── Sandbox repo currency (fetch + work-preserving fast-forward) ──── *)

@@ -30,6 +30,7 @@ import {
   DashboardHealthStrip,
   DashboardMain,
   ErrorCounterBadge,
+  isKeeperDetailDashboardRoute,
   SideRail,
 } from './components/dashboard-shell'
 import { ThemeSwitch } from './components/theme-switch'
@@ -100,6 +101,18 @@ function refreshCurrentRoute(options?: { recordVisit?: boolean }): void {
     .catch(err => {
       console.warn('[app] route refresh unavailable', err instanceof Error ? err.message : err)
     })
+}
+
+export function shouldUseCompactDashboardChrome({
+  widgetSoloMode,
+  focusMode,
+  keeperDetailMode,
+}: {
+  widgetSoloMode: boolean
+  focusMode: boolean
+  keeperDetailMode: boolean
+}): boolean {
+  return widgetSoloMode || focusMode || keeperDetailMode
 }
 
 export function App() {
@@ -235,14 +248,20 @@ export function App() {
   const currentSection = currentSectionForRoute(route.value)
   const isCodeSurface = currentTab === 'code'
   const widgetSoloMode = isWidgetSoloRoute(route.value)
+  const keeperDetailMode = isKeeperDetailDashboardRoute(route.value)
   const focusMode = dashboardFocusMode.value
-  const compactChromeMode = widgetSoloMode || focusMode
+  const compactChromeMode = shouldUseCompactDashboardChrome({
+    widgetSoloMode,
+    focusMode,
+    keeperDetailMode,
+  })
 
   return html`
     <div
       class="flex min-h-screen h-screen flex-col overflow-hidden bg-[var(--color-bg-page)] text-[var(--color-fg-primary)]"
       data-widget-solo=${widgetSoloMode ? 'true' : 'false'}
       data-focus-mode=${focusMode ? 'true' : 'false'}
+      data-keeper-detail-mode=${keeperDetailMode ? 'true' : 'false'}
     >
       <${SkipLink} />
       <header class="${compactChromeMode ? 'hidden' : 'relative'} z-10 shrink-0 border-b border-[var(--color-border-default)] bg-[var(--shell-header-bg)] px-3 py-1.5 backdrop-blur-xl">
@@ -312,7 +331,7 @@ export function App() {
           </div>
         `
         : null}
-      ${focusMode ? null : html`
+      ${focusMode || keeperDetailMode ? null : html`
         <${Suspense} fallback=${null}>
           <${LazyRemoteWarningBanner} />
         <//>
@@ -341,8 +360,10 @@ export function App() {
       ${selectedTask.value
         ? html`<${Suspense} fallback=${null}><${LazyTaskDetailOverlay} /><//>`
         : null}
-      <${DashboardStatusTray} sideRailCollapsed=${sidebarCollapsed.value} />
-      <${DashboardFocusModeToggle} />
+      ${keeperDetailMode ? null : html`
+        <${DashboardStatusTray} sideRailCollapsed=${sidebarCollapsed.value} />
+        <${DashboardFocusModeToggle} />
+      `}
       <${ToastContainer} />
       <${ConfirmDialogOverlay} />
       <${Suspense} fallback=${null}>

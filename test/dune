@@ -107,6 +107,7 @@
   test_keeper_compaction_outcome_counter
   test_keeper_usage_trust_counter
   test_llm_metric_bridge
+  test_otel_dispatch_hook
   test_cost_usd_source_attribution_10318
   test_cost_token_decouple
   test_response_model_empty_10083
@@ -358,6 +359,7 @@
   test_keeper_compaction_outcome_counter
   test_keeper_usage_trust_counter
   test_llm_metric_bridge
+  test_otel_dispatch_hook
   test_cost_usd_source_attribution_10318
   test_cost_token_decouple
   test_response_model_empty_10083

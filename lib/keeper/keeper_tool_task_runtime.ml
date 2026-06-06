@@ -795,5 +795,4 @@ let handle_keeper_task_tool
         ~ok:(Tool_result.is_success transition_result)
         ~message:(Tool_result.message transition_result)
         ())
-    | State_report -> state_report_result_json args
 ;;

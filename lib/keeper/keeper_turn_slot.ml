@@ -595,6 +595,9 @@ type keeper_turn_slot_state =
 
 type keeper_turn_slot_control =
   { is_held : unit -> bool
+  ; release_for_retry : unit -> unit
+  ; reacquire_after_retry :
+      unit -> (int, [ `Semaphore_wait_timeout of semaphore_wait_timeout ]) result
   }
 
 let make_keeper_turn_slot_state () =
@@ -1293,6 +1296,21 @@ let with_keeper_turn_slot_control ?(runtime_profile = "unknown") ~keeper_name ~c
   in
   let slot_control =
     { is_held = (fun () -> keeper_turn_slot_is_held slot_state)
+    ; release_for_retry =
+        (fun () ->
+           release_keeper_turn_slot_impl
+             ~keeper_name
+             ~stamp_autonomous_completion:false
+             slot_state)
+    ; reacquire_after_retry =
+        (fun () ->
+           if keeper_turn_slot_is_held slot_state
+           then Ok 0
+           else
+             match acquire_all () with
+             | Ok wait_ms -> Ok wait_ms
+             | Error (`Semaphore_wait_timeout timeout) ->
+               Error (`Semaphore_wait_timeout timeout))
     }
   in
   Eio_guard.protect

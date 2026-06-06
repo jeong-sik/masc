@@ -26,6 +26,7 @@ val make_keeper_tool_handler
   -> ?search_fn:(query:string -> max_results:int -> Yojson.Safe.t)
   -> ?on_tool_called:(string -> unit)
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> ?turn_slot_control:Keeper_turn_slot.keeper_turn_slot_control
   -> ?translate_input:(Yojson.Safe.t -> Yojson.Safe.t)
   -> failure_counts:Keeper_tools_oas.failure_counts
   -> unit

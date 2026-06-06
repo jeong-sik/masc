@@ -251,6 +251,10 @@ val set_budget_exhaustion_for_test :
 
 type keeper_turn_slot_control = Keeper_turn_slot.keeper_turn_slot_control = {
   is_held : unit -> bool;
+  release_for_retry : unit -> unit;
+  reacquire_after_retry :
+    unit ->
+    (int, [ `Semaphore_wait_timeout of Keeper_turn_slot.semaphore_wait_timeout ]) result;
 }
 
 (** Test-only wrapper around the keeper turn slot acquisition path with

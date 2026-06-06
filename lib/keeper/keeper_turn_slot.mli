@@ -234,6 +234,9 @@ type keeper_turn_slot_state
 
 type keeper_turn_slot_control = {
   is_held : unit -> bool;
+  release_for_retry : unit -> unit;
+  reacquire_after_retry :
+    unit -> (int, [ `Semaphore_wait_timeout of semaphore_wait_timeout ]) result;
 }
 
 val with_keeper_turn_slot_control :

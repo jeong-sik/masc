@@ -222,64 +222,24 @@ let artifact_threshold_bytes =
   max 1024 (env_int "MASC_EXEC_ARTIFACT_THRESHOLD_BYTES" 16384)
 ;;
 
-let command_word_stages cmd =
+let last_base_command cmd =
   match Exec_policy.parse_string_to_ir ~mode:Strict cmd with
-  | Error _ -> []
-  | Ok ir -> Exec_policy_mutation_classifier.stages_words_of_ir ir
+  | Error _ -> None
+  | Ok ir ->
+    Masc_exec.Shell_ir_command_shape.last_command_name ir
+    |> Option.map Masc_exec.Shell_ir_command_shape.normalize_command_name
 ;;
 
-let first_segment_tokens cmd =
-  match command_word_stages cmd with
-  | [] -> []
-  | tokens :: _ -> tokens
-;;
-
-let last_segment_tokens cmd =
-  match List.rev (command_word_stages cmd) with
-  | [] -> []
-  | tokens :: _ -> tokens
-;;
-
-let git_global_option_takes_value = function
-  | "-c"
-  | "-C"
-  | "--exec-path"
-  | "--git-dir"
-  | "--work-tree"
-  | "--namespace"
-  | "--super-prefix"
-  | "--config-env" -> true
-  | _ -> false
-;;
-
-let git_global_option_has_inline_value token =
-  List.exists
-    (fun prefix -> String.starts_with ~prefix token)
-    [ "--exec-path="; "--git-dir="; "--work-tree="; "--namespace="; "--config-env=" ]
-;;
-
-let rec first_git_subcommand = function
+let first_effective_stage ir =
+  match Masc_exec.Shell_ir_command_shape.effective_stages ir with
+  | stage :: _ -> Some stage
   | [] -> None
-  | token :: rest when git_global_option_takes_value token ->
-    (match rest with
-     | _value :: tail -> first_git_subcommand tail
-     | [] -> None)
-  | token :: rest when git_global_option_has_inline_value token ->
-    first_git_subcommand rest
-  | token :: rest when String.starts_with ~prefix:"-" token -> first_git_subcommand rest
-  | token :: _ -> Some token
 ;;
 
-let base_command_of_tokens = function
+let first_stage_arg { Masc_exec.Shell_ir_command_shape.args; _ } =
+  match args with
+  | sub :: _ -> Some sub
   | [] -> None
-  | token :: _ -> Some (Filename.basename token)
-;;
-
-let last_base_command cmd = last_segment_tokens cmd |> base_command_of_tokens
-
-let second_token = function
-  | _cmd :: sub :: _ -> Some sub
-  | _ -> None
 ;;
 
 let looks_like_test_command ~base ~sub =
@@ -293,15 +253,17 @@ let looks_like_test_command ~base ~sub =
   | _ -> false
 ;;
 
-let family_of_base_command ~risk_class ~tokens ~base =
-  let sub = second_token tokens in
+let family_of_stage ~risk_class stage =
+  let base =
+    Masc_exec.Shell_ir_command_shape.normalize_command_name
+      stage.Masc_exec.Shell_ir_command_shape.bin
+  in
+  let sub = first_stage_arg stage in
   match String.lowercase_ascii base with
   | "git" ->
     (match
-       first_git_subcommand
-         (match tokens with
-          | _ :: rest -> rest
-          | [] -> [])
+       Masc_exec.Shell_ir_command_shape.git_subcommand
+         stage.Masc_exec.Shell_ir_command_shape.args
      with
      | Some "clone" -> Clone
      | _ ->
@@ -370,15 +332,14 @@ let risk_of_command ~risk_class ~is_destructive family =
 ;;
 
 let classify_command_of_ir ir =
-  let tokens = Exec_policy_mutation_classifier.flat_stage_words ir in
   let envelope =
     Masc_exec.Shell_ir_risk.classify (Masc_exec.Shell_ir_risk.undecided ir)
   in
   let risk_class = envelope.Masc_exec.Shell_ir_risk.risk in
   let is_destructive = Exec_policy.is_destructive_bash_operation ir in
   let family =
-    match base_command_of_tokens tokens with
-    | Some base -> family_of_base_command ~risk_class ~tokens ~base
+    match first_effective_stage ir with
+    | Some stage -> family_of_stage ~risk_class stage
     | None -> Unknown
   in
   { family

@@ -19,6 +19,18 @@ let check_diagnostic cmd expected =
     expected
     (Shell_ir_command_shape.is_git_diagnostic_command (parse cmd))
 
+let test_pipeline_edge_command_names () =
+  let ir = parse "rg foo | grep bar | head -n 1" in
+  Alcotest.(check (option string))
+    "first command"
+    (Some "rg")
+    (Shell_ir_command_shape.first_command_name ir);
+  Alcotest.(check (option string))
+    "last command"
+    (Some "head")
+    (Shell_ir_command_shape.last_command_name ir);
+  Alcotest.(check int) "top-level stage count" 3 (Shell_ir_command_shape.top_level_stage_count ir)
+
 let test_git_diagnostic_command_shapes () =
   check_diagnostic "git status --short" true;
   check_diagnostic "env git log --oneline -5" true;
@@ -66,7 +78,13 @@ let test_git_non_recovery_command_shapes () =
 let () =
   Alcotest.run
     "Shell_ir_command_shape"
-    [ ( "git_recovery"
+    [ ( "pipeline_shape"
+      , [ Alcotest.test_case
+            "projects edge command names"
+            `Quick
+            test_pipeline_edge_command_names
+        ] )
+    ; ( "git_recovery"
       , [ Alcotest.test_case
             "recognizes diagnostic commands"
             `Quick

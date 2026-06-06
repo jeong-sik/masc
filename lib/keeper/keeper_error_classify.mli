@@ -55,6 +55,14 @@ val post_commit_failure_kind_of_error :
     mutating tool call succeeded but the turn failed before a clean result. *)
 val is_ambiguous_side_effect_error : Agent_sdk.Error.sdk_error -> bool
 
+val ambiguous_side_effect_commit_tools :
+  tool_names:string list ->
+  Agent_sdk.Error.sdk_error -> string list
+
+val has_ambiguous_side_effect_commit :
+  tool_names:string list ->
+  Agent_sdk.Error.sdk_error -> bool
+
 (** [true] when a structured error indicates context overflow. *)
 val is_context_overflow : Agent_sdk.Error.sdk_error -> bool
 

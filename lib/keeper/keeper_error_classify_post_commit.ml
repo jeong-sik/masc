@@ -56,6 +56,37 @@ let is_ambiguous_side_effect_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Some (Keeper_turn_driver.Internal_contract_rejected _) ->
       false
 
+let ambiguous_side_effect_error_tools (err : Agent_sdk.Error.sdk_error) =
+  match Keeper_turn_driver.classify_masc_internal_error err with
+  | Some (Keeper_turn_driver.Ambiguous_post_commit { tools; _ }) ->
+      committed_mutating_tools tools
+  | Some
+      ( Keeper_turn_driver.Runtime_exhausted _
+      | Keeper_turn_driver.Capacity_backpressure _
+      | Keeper_turn_driver.Accept_rejected _
+      | Keeper_turn_driver.Resumable_cli_session _
+      | Keeper_turn_driver.Admission_queue_rejected _
+      | Keeper_turn_driver.Admission_queue_timeout _
+      | Keeper_turn_driver.Turn_timeout _
+      | Keeper_turn_driver.Provider_timeout _
+      | Keeper_turn_driver.Max_tokens_ceiling_violation _
+      | Keeper_turn_driver.Retry_admission_denied _
+      | Keeper_turn_driver.Internal_unhandled_exception _
+      | Keeper_turn_driver.Internal_bridge_exception _
+      | Keeper_turn_driver.Internal_contract_rejected _ )
+  | None ->
+      []
+
+let ambiguous_side_effect_commit_tools ~(tool_names : string list)
+    (err : Agent_sdk.Error.sdk_error) : string list =
+  if not (is_ambiguous_side_effect_error err)
+  then []
+  else committed_mutating_tools (tool_names @ ambiguous_side_effect_error_tools err)
+
+let has_ambiguous_side_effect_commit ~(tool_names : string list)
+    (err : Agent_sdk.Error.sdk_error) : bool =
+  ambiguous_side_effect_commit_tools ~tool_names err <> []
+
 let reclassify_error_after_side_effect
     ~(tool_names : string list)
     (err : Agent_sdk.Error.sdk_error) : Agent_sdk.Error.sdk_error =

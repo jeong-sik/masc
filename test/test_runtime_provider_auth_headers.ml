@@ -53,6 +53,94 @@ let runpod_binding =
   ; num_ctx = None
   }
 
+let runtime_toml_with_credentials credentials =
+  Printf.sprintf
+    {|
+[runtime]
+default = "runpod_mtp.qwen"
+
+[providers.runpod_mtp]
+display-name = "RunPod"
+protocol = "provider_d-http"
+endpoint = "https://example-runpod.proxy.runpod.net/v1"
+
+%s
+
+[models.qwen]
+api-name = "qwen"
+max-context = 160000
+tools-support = true
+
+[runpod_mtp.qwen]
+is-default = true
+max-concurrent = 4
+|}
+    credentials
+
+let check_parse_error errors expected_path expected_message =
+  let matches =
+    List.exists
+      (fun (err : Runtime_toml.parse_error) ->
+         String.equal err.path expected_path
+         && String.equal err.message expected_message)
+      errors
+  in
+  check bool "expected parse error" true matches
+
+let test_runtime_toml_rejects_blank_env_credential_key () =
+  let content =
+    runtime_toml_with_credentials
+      {|
+[providers.runpod_mtp.credentials]
+type = "env"
+key = ""
+|}
+  in
+  match Runtime_toml.parse_string content with
+  | Ok _ -> fail "expected runtime TOML credential parse error"
+  | Error errors ->
+    check_parse_error
+      errors
+      "providers.runpod_mtp.credentials.key"
+      "credential type 'env' requires non-empty 'key'"
+
+let test_runtime_toml_rejects_missing_env_credential_key () =
+  let content =
+    runtime_toml_with_credentials
+      {|
+[providers.runpod_mtp.credentials]
+type = "env"
+|}
+  in
+  match Runtime_toml.parse_string content with
+  | Ok _ -> fail "expected runtime TOML credential parse error"
+  | Error errors ->
+    check_parse_error
+      errors
+      "providers.runpod_mtp.credentials.key"
+      "credential type 'env' requires non-empty 'key'"
+
+let test_runtime_toml_trims_env_credential_key () =
+  let content =
+    runtime_toml_with_credentials
+      {|
+[providers.runpod_mtp.credentials]
+type = "env"
+key = " OLLAMA_CLOUD_API_KEY "
+|}
+  in
+  match Runtime_toml.parse_string content with
+  | Error _ -> fail "expected runtime TOML to parse"
+  | Ok config ->
+    (match config.providers with
+     | [ provider ] ->
+       (match provider.credentials with
+        | Some (Runtime_schema.Env key) ->
+          check string "trimmed env key" "OLLAMA_CLOUD_API_KEY" key
+        | Some _ -> fail "expected env credential"
+        | None -> fail "expected credential")
+     | _ -> fail "expected one provider")
+
 let test_runtime_adapter_keeps_auth_out_of_headers () =
   let cfg =
     { Runtime_schema.providers = [ runpod_provider ]
@@ -296,6 +384,18 @@ let () =
             "runtime adapter filters TOML auth headers"
             `Quick
             test_runtime_adapter_filters_toml_auth_headers
+        ; test_case
+            "runtime TOML rejects blank env credential key"
+            `Quick
+            test_runtime_toml_rejects_blank_env_credential_key
+        ; test_case
+            "runtime TOML rejects missing env credential key"
+            `Quick
+            test_runtime_toml_rejects_missing_env_credential_key
+        ; test_case
+            "runtime TOML trims env credential key"
+            `Quick
+            test_runtime_toml_trims_env_credential_key
         ; test_case
             "runtime agent terminal observation carries model identity"
             `Quick

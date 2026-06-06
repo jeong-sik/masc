@@ -106,6 +106,24 @@ describe('runtime TOML dashboard editing helpers', () => {
     expect(next).not.toContain('key = "RUNPOD_API_KEY"')
   })
 
+  it('deletes credential sections instead of writing blank credential values', () => {
+    const next = setRuntimeTomlProviderCredential(sourceText, 'runpod_mtp', 'env', '   ')
+
+    expect(next).not.toContain('[providers.runpod_mtp.credentials]')
+    expect(next).not.toContain('key = ""')
+  })
+
+  it('trims env credential names before writing them', () => {
+    const next = setRuntimeTomlProviderCredential(
+      sourceText,
+      'runpod_mtp',
+      'env',
+      ' OLLAMA_CLOUD_API_KEY ',
+    )
+
+    expect(next).toContain('key = "OLLAMA_CLOUD_API_KEY"')
+  })
+
   it('deletes optional keys when requested', () => {
     const next = deleteRuntimeTomlKey(sourceText, 'runpod_mtp.qwen', 'keep-alive')
 

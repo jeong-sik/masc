@@ -33,6 +33,11 @@ Implementation status as of 2026-06-06:
   historical tool telemetry surface. It is not the same as the GenAI/MCP
   semantic-convention `gen_ai.tool.name` attribute used for model/tool-call
   spans.
+- MCP tool-call spans emitted by `lib/otel_dispatch_hook.ml` use
+  `tools/call <tool-name>` span names, `mcp.method.name=tools/call`, and
+  `gen_ai.tool.name=<tool-name>`. Failed tool results set span status ERROR
+  and use the typed `Tool_result.tool_failure_class` string as low-cardinality
+  `error.type`.
 
 ### 2.1 Legacy Metric Names
 
@@ -143,10 +148,12 @@ Why OTel-backed migration:
 | File | Change |
 |------|--------|
 | `lib/otel_genai/otel_genai.ml` | Centralized GenAI metric, event, and attribute names including usage detail attributes. |
+| `lib/otel_dispatch_hook/otel_dispatch_hook.ml` | Emits MCP tool-call spans with `tools/call <tool-name>` names, `mcp.method.name=tools/call`, `gen_ai.tool.name`, CLIENT span kind, and typed `error.type`/ERROR status for failed tool results. |
 | `lib/otel_spans/otel_spans.ml` | Added testable span attribute/status hooks and GenAI exception recording. |
 | `lib/llm_metric_bridge.ml` | Emits standard GenAI client metrics, operation-details events, usage attributes, streaming timings, and bounded error status. |
 | `lib/keeper/keeper_hooks_oas.ml` | Projects trusted cache/reasoning token details into GenAI usage attributes without inventing extra `gen_ai.token.type` values. |
 | `test/test_llm_metric_bridge.ml` | Covers standard metric names, event names, span attrs/status, and the cache/reasoning token-type guardrail. |
+| `test/test_otel_dispatch_hook.ml` | Covers MCP tool-call span name, `gen_ai.tool.name`, `mcp.method.name`, CLIENT kind, and typed failure status/error attributes. |
 
 ## 5. Remaining Migration Work
 
@@ -154,7 +161,7 @@ Why OTel-backed migration:
 |------|--------|
 | Dashboard queries | Can migrate from `masc_llm_provider_*` to `gen_ai.*`; legacy names remain available for now. |
 | Prompt/response content events | Intentionally not emitted by default because `gen_ai.input.messages` and `gen_ai.output.messages` are opt-in and can contain sensitive data. |
-| MCP tool-call semantic convention | Separate from LLM GenAI client metrics. Use `gen_ai.tool.name` / `mcp.*` only when instrumenting MCP tool-call spans. |
+| MCP tool-call semantic convention | Implemented for handled `Tool_dispatch` results; still intentionally separate from LLM GenAI client metrics and from historical `tool.name` validation telemetry. |
 
 ## 6. Decision Points
 

@@ -2,9 +2,10 @@
     records each handled tool call as an OpenTelemetry span gated by
     {!Otel_config.enabled}.
 
-    Span attributes use OpenTelemetry GenAI semantic-convention keys
-    ([gen_ai.tool.name], [gen_ai.operation.name]) so Datadog
-    v1.37+/Grafana auto-categorise these spans as AI/LLM activity.
+    Span attributes use OpenTelemetry GenAI + MCP semantic-convention keys
+    ([gen_ai.tool.name], [gen_ai.operation.name], [mcp.method.name]) so Datadog
+    v1.37+/Grafana auto-categorise these spans as AI/LLM activity while still
+    seeing the underlying MCP [tools/call] method.
 
     Internal helper [on_tool_result] is intentionally hidden — the
     hook is registered through {!install} once at startup, after
@@ -14,7 +15,12 @@
 
 val with_test_span_emitter :
   enabled:bool ->
-  emit_span:(name:string -> attrs:Opentelemetry.key_value list -> unit) ->
+  emit_span:
+    (name:string ->
+     attrs:Opentelemetry.key_value list ->
+     kind:Opentelemetry.Span_kind.t ->
+     status:Opentelemetry.Span_status.t option ->
+     unit) ->
   (unit -> 'a) ->
   'a
 (** Temporarily override OTel enablement and span emission for focused

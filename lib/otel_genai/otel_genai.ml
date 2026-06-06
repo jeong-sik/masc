@@ -31,6 +31,32 @@ module Attr_key = struct
   ;;
 
   let gen_ai_tool_name = register Official_gen_ai "gen_ai.tool.name"
+  let gen_ai_request_model = register Official_gen_ai "gen_ai.request.model"
+  let gen_ai_response_model = register Official_gen_ai "gen_ai.response.model"
+  let gen_ai_token_type = register Official_gen_ai "gen_ai.token.type"
+  let gen_ai_usage_input_tokens =
+    register Official_gen_ai "gen_ai.usage.input_tokens"
+  ;;
+
+  let gen_ai_usage_output_tokens =
+    register Official_gen_ai "gen_ai.usage.output_tokens"
+  ;;
+
+  let gen_ai_usage_cache_creation_input_tokens =
+    register Official_gen_ai "gen_ai.usage.cache_creation.input_tokens"
+  ;;
+
+  let gen_ai_usage_cache_read_input_tokens =
+    register Official_gen_ai "gen_ai.usage.cache_read.input_tokens"
+  ;;
+
+  let gen_ai_usage_reasoning_output_tokens =
+    register Official_gen_ai "gen_ai.usage.reasoning.output_tokens"
+  ;;
+
+  let gen_ai_response_time_to_first_chunk =
+    register Official_gen_ai "gen_ai.response.time_to_first_chunk"
+  ;;
 
   let masc_gen_ai_keeper_name =
     register Masc_extension "masc.gen_ai.keeper.name"
@@ -66,6 +92,26 @@ module Attr_key = struct
 
   let is_official_gen_ai key = List.mem key official_gen_ai
   let is_masc_extension key = List.mem key masc_extensions
+end
+
+module Metric_name = struct
+  let client_token_usage = "gen_ai.client.token.usage"
+  let client_operation_duration = "gen_ai.client.operation.duration"
+  let client_operation_time_to_first_chunk =
+    "gen_ai.client.operation.time_to_first_chunk"
+  ;;
+
+  let client_operation_time_per_output_chunk =
+    "gen_ai.client.operation.time_per_output_chunk"
+  ;;
+end
+
+module Event_name = struct
+  let client_inference_operation_details =
+    "gen_ai.client.inference.operation.details"
+  ;;
+
+  let client_operation_exception = "gen_ai.client.operation.exception"
 end
 
 let keeper_turn_span_name ~keeper_name = "invoke_agent " ^ keeper_name

@@ -20,6 +20,12 @@ let event_emitter_override
   ref None
 ;;
 
+let attrs_emitter_override : (attrs:OT.key_value list -> unit) option ref =
+  ref None
+;;
+
+let status_emitter_override : (OT.Span_status.t -> unit) option ref = ref None
+
 let enabled () =
   match !enabled_override with
   | Some value -> value
@@ -193,15 +199,65 @@ let add_event ~name ?(attrs = []) () =
        | None -> ())
 ;;
 
-let with_test_event_emitter ~enabled:enabled_value ~emit_event f =
+let add_attrs ?(attrs = []) () =
+  if enabled ()
+  then
+    match !attrs_emitter_override with
+    | Some emit -> emit ~attrs
+    | None ->
+      (match OT.Scope.get_ambient_scope () with
+       | Some scope -> OT.Scope.add_attrs scope (fun () -> attrs)
+       | None -> ())
+;;
+
+let set_status status =
+  if enabled ()
+  then
+    match !status_emitter_override with
+    | Some emit -> emit status
+    | None ->
+      (match OT.Scope.get_ambient_scope () with
+       | Some scope -> OT.Scope.set_status scope status
+       | None -> ())
+;;
+
+let record_error ?(attrs = []) ~message ~error_type () =
+  let status =
+    OT.Span_status.make ~message ~code:OT.Span_status.Status_code_error
+  in
+  let span_attrs = ("error.type", `String error_type) :: attrs in
+  set_status status;
+  add_attrs ~attrs:span_attrs ();
+  add_event
+    ~name:"gen_ai.client.operation.exception"
+    ~attrs:
+      [ "exception.message", `String message
+      ; "exception.type", `String error_type
+      ]
+    ()
+;;
+
+let with_test_event_emitter
+      ~enabled:enabled_value
+      ~emit_event
+      ?emit_attrs
+      ?set_status:set_status_hook
+      f
+  =
   let prev_enabled = !enabled_override in
   let prev_emitter = !event_emitter_override in
+  let prev_attrs_emitter = !attrs_emitter_override in
+  let prev_status_emitter = !status_emitter_override in
   enabled_override := Some enabled_value;
   event_emitter_override := Some emit_event;
+  attrs_emitter_override := emit_attrs;
+  status_emitter_override := set_status_hook;
   Eio_guard.protect
     ~finally:(fun () ->
       enabled_override := prev_enabled;
-      event_emitter_override := prev_emitter)
+      event_emitter_override := prev_emitter;
+      attrs_emitter_override := prev_attrs_emitter;
+      status_emitter_override := prev_status_emitter)
     f
 ;;
 

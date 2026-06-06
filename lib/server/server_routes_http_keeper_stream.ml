@@ -481,6 +481,30 @@ let extract_visible_reply body =
   in
   (payload_json_opt, visible_reply)
 
+let persisted_error_reply err =
+  let detail =
+    match String.trim err with
+    | "" -> "unknown error"
+    | trimmed -> trimmed
+  in
+  "Keeper request failed: " ^ detail
+
+let keeper_request_terminal_payload ~request_id ~keeper_name ~status ~ok
+    ?(message = "") () =
+  let fields =
+    [
+      ("request_id", `String request_id);
+      ("keeper_name", `String keeper_name);
+      ("status", `String status);
+      ("ok", `Bool ok);
+    ]
+  in
+  let fields =
+    if String.trim message = "" then fields
+    else ("message", `String message) :: fields
+  in
+  `Assoc fields
+
 type keeper_stream_worker_event =
   | Stream_delta of string
   | Stream_terminal of bool * string
@@ -549,6 +573,14 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
     if String.length text > 0 then
       push_worker_event (Stream_delta text)
   in
+  let persist_failure_reply err =
+    Keeper_chat_store.append_pair
+      ~base_dir:state.Mcp_server.workspace_config.base_path
+      ~keeper_name:payload.name
+      ~user_content:payload.message
+      ~user_attachments:payload.attachments
+      ~assistant_content:(persisted_error_reply err)
+  in
   let timeout_sec = Option.map float_of_int payload.timeout_sec in
   let request_id =
     Keeper_msg_async.submit ?timeout_sec ~clock ~sw
@@ -590,13 +622,19 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
             push_worker_event (Stream_terminal (true, body));
             Tool_result.ok ~tool_name:"masc_keeper_msg" ~start_time body
         | Ok (false, err) ->
+            persist_failure_reply err;
             push_worker_event (Stream_terminal (false, err));
             Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time err
         | Error err ->
+            persist_failure_reply err;
             push_worker_event (Stream_terminal (false, err));
             Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time err)
       ()
   in
+  Log.Keeper.info
+    "keeper_stream: queued request keeper=%s request_id=%s surface=%s"
+    payload.name request_id
+    (if has_connector_context then payload.channel else "dashboard");
   Keeper_chat_events.publish events
     (Custom
        { name = "KEEPER_QUEUE_REQUEST";
@@ -619,6 +657,22 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
                  ];
              }
        });
+  let publish_terminal ~status ~ok ?(message = "") () =
+    let payload_json =
+      keeper_request_terminal_payload ~request_id ~keeper_name:payload.name
+        ~status ~ok ~message ()
+    in
+    if ok then
+      Log.Keeper.info
+        "keeper_stream: request terminal keeper=%s request_id=%s status=%s"
+        payload.name request_id status
+    else
+      Log.Keeper.warn
+        "keeper_stream: request terminal keeper=%s request_id=%s status=%s message=%s"
+        payload.name request_id status message;
+    Keeper_chat_events.publish events
+      (Custom { name = "KEEPER_REQUEST_TERMINAL"; value = payload_json })
+  in
   let rec consume_worker_events () =
     match Eio.Stream.take worker_events with
     | Stream_delta text ->
@@ -626,6 +680,7 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
         Keeper_chat_events.publish events (Text_delta text);
         consume_worker_events ()
     | Stream_terminal (false, err) ->
+        publish_terminal ~status:"error" ~ok:false ~message:err ();
         Keeper_chat_events.publish events (Event_error { message = err })
     | Stream_terminal (true, body) -> (
         try
@@ -651,13 +706,16 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
                        [ ("request_id", `String request_id);
                          ("message", `String visible_reply) ]
                  });
+          publish_terminal ~status:"done" ~ok:true ();
           Keeper_chat_events.publish events Text_message_end;
           Keeper_chat_events.publish events (Run_finished { run_id })
         with
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn ->
+            let message = Printexc.to_string exn in
+            publish_terminal ~status:"error" ~ok:false ~message ();
             Keeper_chat_events.publish events
-              (Event_error { message = Printexc.to_string exn }))
+              (Event_error { message }))
   in
   consume_worker_events ()
 

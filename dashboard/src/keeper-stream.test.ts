@@ -74,6 +74,26 @@ describe('applyKeeperStreamEvent', () => {
     expect(entry?.streamState).toBe('opening')
   })
 
+  it('surfaces failed request terminal events before stream error close', () => {
+    assistantEntry()
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_REQUEST_TERMINAL',
+      value: {
+        request_id: 'kmsg_sangsu_1',
+        status: 'error',
+        ok: false,
+        message: 'Timeout after 630.0s',
+      },
+    })).toBe('Timeout after 630.0s')
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(entry?.delivery).toBe('error')
+    expect(entry?.streamState).toBeNull()
+    expect(entry?.error).toBe('Timeout after 630.0s')
+    expect(entry?.text).toBe('Keeper request failed: Timeout after 630.0s')
+  })
+
   it('does not render continuation checkpoint text as a chat reply', () => {
     assistantEntry()
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {

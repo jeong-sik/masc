@@ -55,6 +55,29 @@ let stop_keeper_fn
   : (string -> unit) Atomic.t
   = Atomic.make (fun _name -> ())
 
+(** Fleet admission pause/resume/snapshot hooks.
+    Tool surfaces stay below Keeper in the dependency graph, so they call these
+    callbacks instead of mentioning keeper-owned admission modules directly. *)
+let fleet_admission_pause_fn
+  : (base_path:string -> reason:string -> updated_by:string -> unit) Atomic.t
+  = Atomic.make (fun ~base_path:_ ~reason:_ ~updated_by:_ -> ())
+
+let fleet_admission_resume_fn
+  : (base_path:string -> updated_by:string -> unit) Atomic.t
+  = Atomic.make (fun ~base_path:_ ~updated_by:_ -> ())
+
+let fleet_admission_snapshot_json_fn
+  : (base_path:string -> unit -> Yojson.Safe.t) Atomic.t
+  = Atomic.make
+      (fun ~base_path:_ () ->
+         `Assoc
+           [ "state", `String "unknown"
+           ; "global_inflight", `Null
+           ; "global_limit", `Null
+           ; "available", `Null
+           ; "queue_depth", `Null
+           ])
+
 (** Relation materializer: agent session end — wraps Relation_materializer.on_agent_session_ended. *)
 let relation_on_leave_fn
   : (leaving_agent:string -> active_agents:string list -> unit) Atomic.t
@@ -431,6 +454,5 @@ let cdal_evidence_gate_decide_fn
         unit ->
         evidence_gate_verdict)
        Atomic.t)
-
 
 

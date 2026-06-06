@@ -6,17 +6,17 @@
    directly. These functions use [Eio.Mutex.use_rw ~protect:true],
    which can raise [Eio.Cancel.Cancelled] when the fiber is being
    torn down. Because the call sat in a [Fun.protect ~finally]
-   block, the [Eio.Semaphore.release] line was never reached and
+   block, the admission-token release line was never reached and
    the slot leaked permanently — turn_available pinned at 0 while
    the entire 14-keeper fleet skipped turns with "wait > 180s".
 
-   The fix keeps each bookkeeping failure isolated from the semaphore
-   release: standalone cleanup callbacks go through [safe_bookkeeping ~op],
-   while recorded-holder cleanup catches [consume_force_release] failures
-   inside [release_recorded_holder]. Both paths now emit a metric before
-   continuing. This test asserts the structural pattern by anchored
-   substring search, so a future refactor that removes the guard fails CI
-   before it deadlocks production.
+   The current fix makes [Keeper_turn_admission.token] the single ownership
+   object: normal finalization releases that token, force-release releases the
+   same token by keeper name, and fleet stop resolves the token cancellation
+   promise so the surrounding switch fails instead of waiting for a natural
+   return. This test asserts the structural pattern by anchored substring
+   search, so a future refactor that removes the guard fails CI before it
+   deadlocks production.
 
    Why structural rather than behavioural: deterministically
    raising Cancelled inside a sub-mutex during fiber teardown
@@ -82,73 +82,47 @@ let () =
            (Sys.getcwd ()) exe (String.concat ", " candidates))
   in
   (* The cancel-safe release path has two cleanup shapes:
-     [safe_bookkeeping] wraps standalone cleanup callbacks, while
-     recorded-holder release catches [consume_force_release] failures
-     and still releases the semaphore. Ordering is not asserted
-     (release order is quota-independent); the source contract only
-     pins each labeled cleanup site. *)
+     recorded-holder release catches [consume_force_release] failures, while
+     token release is wired through the switch finalizer and force-release
+     path. Ordering is not asserted; the source contract only pins each
+     ownership path. *)
   let must_contain =
-    [ "drop_autonomous_waiter wrap",
-      {|safe_bookkeeping ~op:"drop_autonomous_waiter"|}
-    ; "record_autonomous_completion wrap",
-      {|safe_bookkeeping ~op:"record_autonomous_completion"|}
-    ; "drop_holder metric op",
-      {|~op:("drop_holder " ^ label_str)|}
+    [ "token field",
+      {|admission_token : Keeper_turn_admission.token option ref|}
+    ; "normal token release",
+      {|Keeper_turn_admission.release_turn token|}
+    ; "force release token",
+      {|Keeper_turn_admission.force_release_keeper ~keeper_name|}
+    ; "switch finalizer cleanup",
+      {|Eio.Switch.on_release turn_sw cleanup|}
+    ; "fleet stop cancellation promise",
+      {|Keeper_turn_admission.token_cancel_p admission_token|}
+    ; "fleet stop switch failure",
+      {|Eio.Switch.fail turn_sw Keeper_turn_admission.Fleet_stopped_by_operator|}
     ; "drop_holder cancellation catch",
-      {|release_keeper_turn_slot: drop_holder %s skipped (Cancelled)|}
+      {|release_keeper_turn_slot: drop_holder skipped (Cancelled)|}
     ]
   in
   List.iter
     (fun (label, needle) -> assert_contains ~label src needle)
     must_contain;
-  (* The helper itself must catch Cancelled — assert the catch
-     arm exists so a future refactor can't silently widen
-     [safe_bookkeeping] to swallow only generic [exn]. *)
+  (* The cleanup helpers must catch Cancelled — assert the catch arm exists
+     so a future refactor can't silently widen cleanup to swallow only generic
+     [exn]. *)
   assert_contains
-    ~label:"safe_bookkeeping catches Cancelled"
+    ~label:"cleanup catches Cancelled"
     src
     "Eio.Cancel.Cancelled _ ->";
   assert_contains
-    ~label:"safe_bookkeeping metrics cancelled"
-    src
-    {|observe_bookkeeping_failure ~op ~kind:Keeper_bookkeeping_failure_kind.Cancelled|};
-  assert_contains
-    ~label:"safe_bookkeeping metrics exception"
-    src
-    {|observe_bookkeeping_failure ~op ~kind:Keeper_bookkeeping_failure_kind.Exception|};
-  assert_contains
-    ~label:"safe_bookkeeping metric name"
-    src
-    "Keeper_metrics.(to_string TurnSlotBookkeepingFailures)";
-  assert_contains
     ~label:"drop_holder metrics cancelled"
     src
-    {|~op:("drop_holder " ^ label_str) ~kind:Keeper_bookkeeping_failure_kind.Cancelled|};
+    {|observe_bookkeeping_failure ~op:"drop_holder" ~kind:Keeper_bookkeeping_failure_kind.Cancelled|};
   assert_contains
     ~label:"drop_holder metrics exception"
     src
-    {|~op:("drop_holder " ^ label_str) ~kind:Keeper_bookkeeping_failure_kind.Exception|};
+    {|observe_bookkeeping_failure ~op:"drop_holder" ~kind:Keeper_bookkeeping_failure_kind.Exception|};
   assert_contains
-    ~label:"force-release finalizer marker is debug"
+    ~label:"bookkeeping metric name"
     src
-    "Log.Keeper.debug\n        \"release_keeper_turn_slot: %s holder for %s was already force-released\"";
-  (* All three semaphore releases must remain reachable
-     (turn / autonomous / reactive). *)
-  let count_substring ~needle s =
-    let n = String.length needle in
-    let h = String.length s in
-    let rec loop i acc =
-      if i + n > h then acc
-      else if String.sub s i n = needle then loop (i + 1) (acc + 1)
-      else loop (i + 1) acc
-    in
-    loop 0 0
-  in
-  let releases = count_substring ~needle:"Eio.Semaphore.release" src in
-  if releases < 3 then
-    failwith
-      (Printf.sprintf
-         "expected ≥3 Eio.Semaphore.release sites \
-          (turn / autonomous / reactive); found %d"
-         releases);
+    "Keeper_metrics.(to_string TurnSlotBookkeepingFailures)";
   print_endline "test_keeper_turn_slot_release_cancel_safe: OK"

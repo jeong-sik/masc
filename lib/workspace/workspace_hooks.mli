@@ -27,6 +27,12 @@ val activity_emit_fn : (Workspace_utils_backend_setup.config ->
 val agent_economy_earn_fn : (base_path:string -> agent_name:string -> reason:string -> unit)
            Atomic.t
 val stop_keeper_fn : (string -> unit) Atomic.t
+val fleet_admission_pause_fn :
+  (base_path:string -> reason:string -> updated_by:string -> unit) Atomic.t
+val fleet_admission_resume_fn :
+  (base_path:string -> updated_by:string -> unit) Atomic.t
+val fleet_admission_snapshot_json_fn :
+  (base_path:string -> unit -> Yojson.Safe.t) Atomic.t
 val relation_on_leave_fn : (leaving_agent:string -> active_agents:string list -> unit)
            Atomic.t
 val relation_on_task_done_fn : (assignee:string -> active_agents:string list -> unit) Atomic.t

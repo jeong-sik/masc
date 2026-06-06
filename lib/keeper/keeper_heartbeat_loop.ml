@@ -396,7 +396,23 @@ let run_keepalive_unified_turn
         with
         | Ok meta -> meta
         | Error (`Semaphore_wait_timeout timeout) ->
-          handle_semaphore_wait_timeout ~ctx ~meta_after_triage ~turn_decision timeout)
+          handle_semaphore_wait_timeout ~ctx ~meta_after_triage ~turn_decision timeout
+        | Error (`Turn_admission_rejected rejection) ->
+          (match rejection with
+           | Keeper_turn_admission.Fleet_paused ->
+             Log.Keeper.info
+               "%s: skipping turn because fleet admission is paused"
+               meta_after_triage.name
+           | Keeper_turn_admission.Fleet_stopped ->
+             Log.Keeper.warn
+               "%s: rejecting turn because fleet admission is stopped"
+               meta_after_triage.name
+           | Keeper_turn_admission.Global_inflight_exceeded ->
+             Log.Keeper.routine
+               "%s: skipping turn because global turn admission is at cap=%d"
+               meta_after_triage.name
+               Keeper_turn_slot.effective_turn_throttle_limit);
+          meta_after_cursor_persist)
       else if obs.message_cursor_updates <> []
       then meta_after_cursor_persist
       else meta_after_triage

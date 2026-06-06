@@ -121,7 +121,11 @@ let test_autonomous_ticket_dropped_before_semaphore_acquire_hook () =
         with
         | Ok () -> ()
         | Error (`Semaphore_wait_timeout _) ->
-          Alcotest.fail "unexpected semaphore wait timeout");
+          Alcotest.fail "unexpected semaphore wait timeout"
+        | Error (`Turn_admission_rejected rejection) ->
+          Alcotest.failf
+            "unexpected turn admission rejection: %s"
+            (Keeper_turn_admission.rejection_to_string rejection));
        Alcotest.(check (option (list string)))
          "ticket is no longer in FIFO by autonomous acquire hook"
          (Some [])

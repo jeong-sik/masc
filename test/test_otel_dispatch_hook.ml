@@ -87,8 +87,12 @@ let test_failure_span_records_typed_error_status () =
     span.name;
   Alcotest.(check string)
     "error.type"
-    "policy_rejection"
+    "tool_error"
     (assoc_string Genai.Mcp_attr_key.error_type span.attrs);
+  Alcotest.(check string)
+    "masc.mcp.tool.failure_class"
+    "policy_rejection"
+    (assoc_string Genai.Mcp_attr_key.masc_mcp_tool_failure_class span.attrs);
   Alcotest.(check string)
     "otel.status_code"
     "ERROR"

@@ -5,7 +5,9 @@
     Span attributes use OpenTelemetry GenAI + MCP semantic-convention keys
     ([gen_ai.tool.name], [gen_ai.operation.name], [mcp.method.name]) so Datadog
     v1.37+/Grafana auto-categorise these spans as AI/LLM activity while still
-    seeing the underlying MCP [tools/call] method.
+    seeing the underlying MCP [tools/call] method. Payload-level MCP tool
+    failures use [error.type=tool_error]; the MASC failure taxonomy is kept in
+    [masc.mcp.tool.failure_class].
 
     Internal helper [on_tool_result] is intentionally hidden — the
     hook is registered through {!install} once at startup, after

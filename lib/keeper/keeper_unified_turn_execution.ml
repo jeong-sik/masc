@@ -53,8 +53,7 @@ type ctx =
   ; profile_defaults : Keeper_types_profile.keeper_profile_defaults
   ; prompt_timeout_estimate_tokens : int
   ; record_runtime_rotation_attempt
-      : ?slot_release_at_phase:Keeper_execution_receipt.slot_release_phase
-      -> ?productive_phase_elapsed_ms:int
+      : ?productive_phase_elapsed_ms:int
       -> ?retry_phase_elapsed_ms:int
       -> from_runtime:string
       -> retry:EC.degraded_retry
@@ -498,8 +497,6 @@ let run (ctx : ctx)
                current_turn_phase_elapsed_ms ()
              in
              record_runtime_rotation_attempt
-               ~slot_release_at_phase:
-                 Keeper_execution_receipt.Retry_setup_failed
                ~productive_phase_elapsed_ms
                ?retry_phase_elapsed_ms
                ~from_runtime:execution.runtime_id
@@ -574,8 +571,6 @@ let run (ctx : ctx)
             current_turn_phase_elapsed_ms ()
           in
           record_runtime_rotation_attempt
-            ~slot_release_at_phase:
-              Keeper_execution_receipt.Retry_budget_exhausted
             ~productive_phase_elapsed_ms
             ?retry_phase_elapsed_ms
             ~from_runtime:execution.runtime_id
@@ -602,8 +597,6 @@ let run (ctx : ctx)
             current_turn_phase_elapsed_ms ()
           in
           record_runtime_rotation_attempt
-            ~slot_release_at_phase:
-              Keeper_execution_receipt.Productive_phase_exhausted
             ~productive_phase_elapsed_ms
             ?retry_phase_elapsed_ms
             ~from_runtime:execution.runtime_id

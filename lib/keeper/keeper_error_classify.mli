@@ -35,6 +35,11 @@ val is_model_rejected_parse_error : Agent_sdk.Error.sdk_error -> bool
     failure counting, even if same-turn retry is still disabled. *)
 val is_auto_recoverable_turn_error : Agent_sdk.Error.sdk_error -> bool
 
+(** [true] when OAS exhausted retries for malformed tool-call arguments.
+    The turn failed, but this is a model/tool-call validation miss, not a
+    runtime/provider health failure. *)
+val is_tool_retry_exhausted_error : Agent_sdk.Error.sdk_error -> bool
+
 (** [true] when the turn runner should record the immediate
     ["keeper cycle FAILED"] line as WARN instead of ERROR because the
     heartbeat policy layer will handle the failure as a provider/OAS budget

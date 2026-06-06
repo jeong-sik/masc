@@ -53,32 +53,12 @@ let assert_receipt_authoritative ~outcome ~turn_state =
 type tool_surface =
   { turn_lane : Keeper_agent_tool_surface.turn_lane }
 
-(* Phase identifier emitted when a runtime rotation releases the in-flight
-   turn slot.  Producer-side closed set; the JSON wire is the lowercase
-   string form via [slot_release_phase_to_string].  [@@deriving tla] so the
-   RFC-0065 correspondence harness picks the symbols up automatically. *)
-type slot_release_phase =
-  | Retry_setup_failed [@tla.symbol "retry_setup_failed"]
-  | Retry_scheduled [@tla.symbol "retry_scheduled"]
-  | Retry_budget_exhausted [@tla.symbol "retry_budget_exhausted"]
-  | Productive_phase_exhausted [@tla.symbol "productive_phase_exhausted"]
-[@@deriving tla]
-
-(* [@tla.symbol] is the single source of truth for the wire form:
-   - to_tla_symbol (ppx-generated) emits the symbol attached per variant
-   - all_symbols / all_states (ppx-generated) enumerate the type
-   Defining slot_release_phase_to_string in terms of to_tla_symbol means
-   JSON/Otel_metric_store wire and TLA correspondence catalog cannot drift.
-   Mirrors the receipt wire pattern from earlier correspondence checks. *)
-let slot_release_phase_to_string = to_tla_symbol
-
 (* Terminal classification of a runtime rotation attempt.  Producer-side
    closed set in [keeper_unified_turn.ml]; JSON wire form is the lowercase
    string via [runtime_rotation_outcome_to_string].
 
-   No [@@deriving tla] here because [slot_release_phase] above already
-   binds module-level [all_symbols]; following the precedent in
-   [keeper_types_profile.ml] a follow-up can wrap a TLA mirror in a
+   This type intentionally has no [@@deriving tla]; following the precedent
+   in [keeper_types_profile.ml], a follow-up can wrap a TLA mirror in a
    submodule when a spec actually models rotation outcomes. *)
 type runtime_rotation_outcome =
   | Rotation_setup_failed
@@ -250,7 +230,6 @@ type runtime_rotation_attempt =
   ; to_runtime : string
   ; reason : Keeper_error_classify.degraded_retry_reason
   ; outcome : runtime_rotation_outcome
-  ; slot_release_at_phase : slot_release_phase option
   ; productive_phase_elapsed_ms : int option
   ; retry_phase_elapsed_ms : int option
   ; error_kind : error_kind option

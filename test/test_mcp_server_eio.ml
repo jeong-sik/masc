@@ -966,14 +966,38 @@ let test_handle_request_tools_call_managed_profile_rejects_hidden_claim_alias ()
       ("arguments", `Assoc [ ("task_id", `String "task-001") ]);
     ]);
   ]) in
+  let metric_name = Otel_genai.Mcp_metric_name.server_operation_duration in
+  let labels =
+    [
+      Otel_genai.Mcp_attr_key.mcp_method_name,
+      Otel_genai.Mcp_value.tools_call_method;
+      Otel_genai.Attr_key.gen_ai_operation_name, "execute_tool";
+      Otel_genai.Attr_key.gen_ai_tool_name, "masc_claim_task";
+      Otel_genai.Mcp_attr_key.mcp_protocol_version, "2025-06-18";
+      Otel_genai.Mcp_attr_key.network_protocol_name, "http";
+      Otel_genai.Mcp_attr_key.network_protocol_version, "2";
+      Otel_genai.Mcp_attr_key.network_transport, "tcp";
+      Otel_genai.Mcp_attr_key.error_type, Otel_genai.Mcp_value.tool_error_type;
+    ]
+  in
+  let before_count =
+    Masc.Otel_metric_store.metric_value_or_zero (metric_name ^ "_count") ~labels ()
+  in
   let response =
     Mcp_eio.handle_request ~clock ~sw ~profile:Mcp_eio.Managed_agent
-      ~mcp_session_id:sid state request
+      ~mcp_session_id:sid
+      ~otel_mcp_protocol_version:"2025-06-18"
+      ~otel_transport_context:(Otel_dispatch_hook.http_transport_context ~protocol_version:"2")
+      state request
   in
   let response_text = Yojson.Safe.to_string response in
   Alcotest.(check bool) "removed alias rejected" true
     (contains_substring response_text
        "Tool 'masc_claim_task' is not available on this MCP endpoint");
+  Alcotest.(check (float 0.0001)) "rejected tools/call records duration count"
+    1.0
+    (Masc.Otel_metric_store.metric_value_or_zero (metric_name ^ "_count") ~labels ()
+     -. before_count);
   cleanup_dir base_path
 
 let test_handle_request_tools_call_transition_claim_guidance () =

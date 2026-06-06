@@ -62,6 +62,13 @@ val quality_from_result :
     / generic) and emits a single issue entry with
     [severity], [code], [message], [attempts]. *)
 
+val record_mcp_server_operation_duration_sample :
+  tool_name:string -> success:bool -> duration_seconds:float -> unit
+(** Records one [mcp.server.operation.duration] sample for [tools/call].
+    Used by the protocol layer for rejected calls that never enter
+    {!handle_call_tool_eio}. Requires an active
+    {!Otel_dispatch_hook.with_request_context}. *)
+
 module For_testing : sig
   val activity_tool_called_payload :
     tool_name:string ->
@@ -73,7 +80,11 @@ module For_testing : sig
     Yojson.Safe.t ->
     Yojson.Safe.t
 
-  val record_mcp_server_operation_duration : Tool_result.result -> unit
+  val record_mcp_server_operation_duration :
+    Tool_result.result -> duration_ms:int -> unit
+
+  val record_mcp_server_operation_duration_sample :
+    tool_name:string -> success:bool -> duration_seconds:float -> unit
 end
 
 (** {1 Per-tool timeout} *)

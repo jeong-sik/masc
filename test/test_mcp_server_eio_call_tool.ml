@@ -202,8 +202,9 @@ let test_records_mcp_server_operation_duration_metric () =
   Eio_main.run (fun _env ->
     Otel_dispatch_hook.with_request_context context (fun () ->
       Masc.Mcp_server_eio_call_tool.For_testing.record_mcp_server_operation_duration
-        result));
-  check (float 0.0001) "duration seconds delta" 0.123
+        result
+        ~duration_ms:250));
+  check (float 0.0001) "duration seconds delta" 0.250
     (Masc.Otel_metric_store.metric_value_or_zero metric_name ~labels ()
      -. before_value);
   check (float 0.0001) "duration count delta" 1.0

@@ -262,8 +262,8 @@ let workflow_rejection_recovery_instruction ~tool_name ~count (info : workflow_r
       next_tool
   | Some next_tool ->
     Printf.sprintf
-      "Do not retry this %s call. Call %s next and follow the hint/alternatives \
-       in detail."
+      "Revise your approach and retry this %s call, or call %s next and follow \
+       the hint/alternatives in detail."
       tool_name
       next_tool
   | None when count >= 2 ->
@@ -273,7 +273,7 @@ let workflow_rejection_recovery_instruction ~tool_name ~count (info : workflow_r
       tool_name
   | None ->
     Printf.sprintf
-      "Do not retry this %s call. Use the hint/alternatives in detail."
+      "Revise your approach and retry this %s call. Use the hint/alternatives in detail."
       tool_name
 ;;
 
@@ -297,7 +297,6 @@ let workflow_rejection_recovery_fields ~tool_name ~count raw =
         ]
     in
     [ "self_correction_required", `Bool true
-    ; "do_not_retry_tool", `String tool_name
     ; "workflow_rejection_recovery", `Assoc recovery
     ]
     @ optional_string "required_next_tool" info.tool_suggestion

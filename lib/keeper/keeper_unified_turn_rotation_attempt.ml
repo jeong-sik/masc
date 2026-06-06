@@ -1,6 +1,5 @@
 let build
       ~recorded_at
-      ?slot_release_at_phase
       ?productive_phase_elapsed_ms
       ?retry_phase_elapsed_ms
       ~(from_runtime : string)
@@ -15,7 +14,6 @@ let build
     to_runtime = retry.next_runtime
   ; reason = retry.fallback_reason
   ; outcome
-  ; slot_release_at_phase
   ; productive_phase_elapsed_ms
   ; retry_phase_elapsed_ms
   ; error_kind =

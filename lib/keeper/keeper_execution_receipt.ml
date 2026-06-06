@@ -10,9 +10,6 @@ let runtime_rotation_attempt_to_json attempt =
     ; ( "reason"
       , `String (Keeper_error_classify.degraded_retry_reason_to_string attempt.reason) )
     ; "outcome", `String (runtime_rotation_outcome_to_string attempt.outcome)
-    ; ( "slot_release_at_phase"
-      , string_opt_json
-          (Option.map slot_release_phase_to_string attempt.slot_release_at_phase) )
     ; ( "productive_phase_elapsed_ms"
       , Json_util.int_opt_to_json attempt.productive_phase_elapsed_ms )
     ; ( "retry_phase_elapsed_ms"

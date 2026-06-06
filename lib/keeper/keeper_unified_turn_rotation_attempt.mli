@@ -6,7 +6,6 @@
 
 val build
   :  recorded_at:string
-  -> ?slot_release_at_phase:Keeper_execution_receipt.slot_release_phase
   -> ?productive_phase_elapsed_ms:int
   -> ?retry_phase_elapsed_ms:int
   -> from_runtime:string

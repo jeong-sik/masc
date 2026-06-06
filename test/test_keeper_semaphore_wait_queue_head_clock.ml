@@ -114,10 +114,10 @@ let test_autonomous_ticket_dropped_before_semaphore_acquire_hook () =
       Keeper_turn_slot.reset_autonomous_turn_queue_for_test ())
     (fun () ->
        (match
-          Keeper_turn_slot.with_keeper_turn_slot_control_for_test
+          Keeper_turn_slot.with_keeper_turn_slot_for_test
             ~keeper_name:"ours"
             ~channel:Keeper_world_observation.Scheduled_autonomous
-            (fun ~semaphore_wait_ms:_ ~slot_control:_ -> ())
+            (fun ~semaphore_wait_ms:_ -> ())
         with
         | Ok () -> ()
         | Error (`Semaphore_wait_timeout _) ->

@@ -392,110 +392,6 @@ let test_force_released_autonomous_holder_does_not_stamp_completion () =
          "force-released autonomous holder stamped normal completion: delay=%.3f"
          delay)
 
-let test_retry_control_keeps_reactive_slot_in_same_turn () =
-  let keeper_name = "diag-retry-reactive" in
-  let turn_before = KK.turn_semaphore_value_for_test () in
-  let reactive_before = KK.reactive_turn_semaphore_value_for_test () in
-  let result =
-    KK.with_keeper_turn_slot_control_for_test
-      ~keeper_name
-      ~channel:Masc.Keeper_world_observation.Reactive
-      (fun ~semaphore_wait_ms:_ ~slot_control ->
-         assert_eq ~msg:"turn acquired before retry boundary"
-           ~expected:(turn_before - 1)
-           ~actual:(KK.turn_semaphore_value_for_test ());
-         assert_eq ~msg:"reactive acquired before retry boundary"
-           ~expected:(reactive_before - 1)
-           ~actual:(KK.reactive_turn_semaphore_value_for_test ());
-         if not (slot_control.is_held ()) then
-           failwith "retry control reported no held slot during active turn";
-         Eio.Fiber.yield ();
-         assert_eq ~msg:"turn remains held across retry boundary"
-           ~expected:(turn_before - 1)
-           ~actual:(KK.turn_semaphore_value_for_test ());
-         assert_eq ~msg:"reactive remains held across retry boundary"
-           ~expected:(reactive_before - 1)
-           ~actual:(KK.reactive_turn_semaphore_value_for_test ());
-         let names =
-           List.map fst (KK.reactive_slot_holders ~now:(Time_compat.now ()))
-         in
-         if not (List.mem keeper_name names) then
-           failwith "reactive holder missing across retry boundary";
-         assert_eq ~msg:"turn still held before finalizer"
-           ~expected:(turn_before - 1)
-           ~actual:(KK.turn_semaphore_value_for_test ());
-         assert_eq ~msg:"reactive still held before finalizer"
-           ~expected:(reactive_before - 1)
-           ~actual:(KK.reactive_turn_semaphore_value_for_test ()))
-  in
-  (match result with
-   | Ok () -> ()
-   | Error (`Semaphore_wait_timeout _) ->
-       failwith "unexpected semaphore wait timeout in test");
-  assert_eq ~msg:"turn baseline after retry observation finalizer"
-    ~expected:turn_before
-    ~actual:(KK.turn_semaphore_value_for_test ());
-  assert_eq ~msg:"reactive baseline after retry observation finalizer"
-    ~expected:reactive_before
-    ~actual:(KK.reactive_turn_semaphore_value_for_test ())
-
-let test_retry_control_keeps_autonomous_slot_in_same_turn () =
-  let keeper_name = "diag-retry-autonomous" in
-  let turn_before = KK.turn_semaphore_value_for_test () in
-  let autonomous_before = KK.autonomous_turn_semaphore_value_for_test () in
-  let result =
-    KK.with_keeper_turn_slot_control_for_test
-      ~keeper_name
-      ~channel:Masc.Keeper_world_observation.Scheduled_autonomous
-      (fun ~semaphore_wait_ms:_ ~slot_control ->
-         assert_eq ~msg:"turn acquired before autonomous retry boundary"
-           ~expected:(turn_before - 1)
-           ~actual:(KK.turn_semaphore_value_for_test ());
-         assert_eq ~msg:"autonomous acquired before retry boundary"
-           ~expected:(autonomous_before - 1)
-           ~actual:(KK.autonomous_turn_semaphore_value_for_test ());
-         if not (slot_control.is_held ()) then
-           failwith "retry control reported no held autonomous slot";
-         Eio.Fiber.yield ();
-         assert_eq ~msg:"turn remains held across autonomous retry boundary"
-           ~expected:(turn_before - 1)
-           ~actual:(KK.turn_semaphore_value_for_test ());
-         assert_eq ~msg:"autonomous remains held across retry boundary"
-           ~expected:(autonomous_before - 1)
-           ~actual:(KK.autonomous_turn_semaphore_value_for_test ());
-         let delay =
-           let ticket =
-             KK.enqueue_autonomous_waiter_for_test "diag-retry-waiting-peer"
-           in
-           Fun.protect
-             ~finally:(fun () -> KK.drop_autonomous_waiter_for_test ticket)
-             (fun () ->
-                KK.fairness_delay_sec_at
-                  ~keeper_name ~now:(Time_compat.now ()))
-         in
-         if delay <> 0.0 then
-           failwith
-             (Printf.sprintf
-                "retry boundary stamped normal autonomous completion: delay=%.3f"
-                delay);
-         assert_eq ~msg:"turn still held before autonomous finalizer"
-           ~expected:(turn_before - 1)
-           ~actual:(KK.turn_semaphore_value_for_test ());
-         assert_eq ~msg:"autonomous still held before finalizer"
-           ~expected:(autonomous_before - 1)
-           ~actual:(KK.autonomous_turn_semaphore_value_for_test ()))
-  in
-  (match result with
-   | Ok () -> ()
-   | Error (`Semaphore_wait_timeout _) ->
-       failwith "unexpected semaphore wait timeout in test");
-  assert_eq ~msg:"turn baseline after autonomous retry observation"
-    ~expected:turn_before
-    ~actual:(KK.turn_semaphore_value_for_test ());
-  assert_eq ~msg:"autonomous baseline after retry observation"
-    ~expected:autonomous_before
-    ~actual:(KK.autonomous_turn_semaphore_value_for_test ())
-
 let test_no_clock_exhausted_turn_slot_fails_closed () =
   match Eio_context.get_clock_opt () with
   | Some _ ->
@@ -581,10 +477,6 @@ let () =
         test_force_release_marker_does_not_leak_to_replacement;
       "force released autonomous holder skips completion stamp",
         test_force_released_autonomous_holder_does_not_stamp_completion;
-      "retry control keeps reactive slot in same turn",
-        test_retry_control_keeps_reactive_slot_in_same_turn;
-      "retry control keeps autonomous slot in same turn",
-        test_retry_control_keeps_autonomous_slot_in_same_turn;
       "no-clock exhausted turn slot fails closed",
         test_no_clock_exhausted_turn_slot_fails_closed;
       "force release marker ttl bounds unfinalized fibers",

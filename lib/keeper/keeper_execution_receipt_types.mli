@@ -19,21 +19,6 @@ val assert_receipt_authoritative :
 type tool_surface = {
   turn_lane : Keeper_agent_tool_surface.turn_lane;
 }
-type slot_release_phase =
-    Retry_setup_failed
-  | Retry_scheduled
-  | Retry_budget_exhausted
-  | Productive_phase_exhausted
-val to_tla_symbol : slot_release_phase -> string
-val all_symbols : string list
-val all_states : slot_release_phase list
-val terminal_symbols : 'a list
-val active_symbols : 'a list
-val idle_symbols : 'a list
-val is_terminal : slot_release_phase -> bool
-val is_active : slot_release_phase -> bool
-val is_idle : slot_release_phase -> bool
-val slot_release_phase_to_string : slot_release_phase -> string
 type runtime_rotation_outcome =
     Rotation_setup_failed
   | Rotation_retry_scheduled
@@ -72,7 +57,6 @@ type runtime_rotation_attempt = {
   to_runtime : string;
   reason : Keeper_error_classify.degraded_retry_reason;
   outcome : runtime_rotation_outcome;
-  slot_release_at_phase : slot_release_phase option;
   productive_phase_elapsed_ms : int option;
   retry_phase_elapsed_ms : int option;
   error_kind : error_kind option;

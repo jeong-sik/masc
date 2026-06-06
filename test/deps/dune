@@ -40,6 +40,7 @@
   (re_export masc.worker_execution_backend)
   (re_export masc.worker_execution_spec)
   (re_export masc.worker_runtime_config)
+  (re_export masc.otel_metrics)
   (re_export masc.otel_spans)
   (re_export otel_metric_test_store)
   (re_export masc.telemetry_coverage_gap)

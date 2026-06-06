@@ -1,5 +1,5 @@
 module Bridge = Masc.Llm_metric_bridge
-module Prom = Otel_metric_store
+module Prom = Masc.Otel_metric_store
 
 let metric name ~labels =
   Prom.metric_value_or_zero name ~labels ()
@@ -9,6 +9,16 @@ let check_metric_delta label name ~labels ~before ~delta =
     label
     (before +. delta)
     (metric name ~labels)
+
+let same_labels expected actual =
+  List.sort compare expected = List.sort compare actual
+;;
+
+let find_otel_sample name ~labels =
+  Prom.otel_samples_for_test ()
+  |> List.find_opt (fun (sample : Otel_metrics.sample) ->
+    String.equal sample.name name && same_labels labels sample.labels)
+;;
 
 let test_metric_names_stable () =
   Alcotest.(check string)
@@ -63,6 +73,38 @@ let test_metric_names_stable () =
     "streaming inter chunk metric"
     "masc_llm_provider_streaming_inter_chunk_seconds"
     Prom.metric_llm_provider_streaming_inter_chunk
+
+let test_metric_store_exports_otel_samples () =
+  let model_id = Printf.sprintf "bridge-otel-sample-%d" (Unix.getpid ()) in
+  let labels = [ ("model", model_id) ] in
+  let before = metric Prom.metric_llm_provider_cache_hits ~labels in
+  Bridge.emit_cache_hit ~model_id;
+  match find_otel_sample Prom.metric_llm_provider_cache_hits ~labels with
+  | None -> Alcotest.fail "missing cache hit metric in OTel sample snapshot"
+  | Some sample ->
+    Alcotest.(check (float 0.0001))
+      "sample value reflects metric store"
+      (before +. 1.0)
+      sample.value;
+    (match sample.kind with
+     | Otel_metrics.Counter -> ()
+     | _ -> Alcotest.fail "cache hit metric must export as OTel counter")
+
+let test_metric_store_registers_otel_source_once () =
+  Alcotest.(check bool)
+    "source starts unregistered in this test process"
+    false
+    (Prom.otel_source_registered_for_test ());
+  Prom.register_otel_source_once ();
+  Alcotest.(check bool)
+    "source is marked registered"
+    true
+    (Prom.otel_source_registered_for_test ());
+  Prom.register_otel_source_once ();
+  Alcotest.(check bool)
+    "second registration stays registered"
+    true
+    (Prom.otel_source_registered_for_test ())
 
 let test_sink_records_oas_callbacks () =
   let sink : Llm_provider.Metrics.t = Bridge.make_sink () in
@@ -438,6 +480,10 @@ let () =
         [
           Alcotest.test_case "metric names are stable" `Quick
             test_metric_names_stable;
+          Alcotest.test_case "metric store exports OTel samples" `Quick
+            test_metric_store_exports_otel_samples;
+          Alcotest.test_case "metric store registers OTel source once" `Quick
+            test_metric_store_registers_otel_source_once;
           Alcotest.test_case "sink records OAS callbacks" `Quick
             test_sink_records_oas_callbacks;
           Alcotest.test_case "streaming metrics ignore invalid ms" `Quick

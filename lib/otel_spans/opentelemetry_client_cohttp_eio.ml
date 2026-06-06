@@ -462,8 +462,21 @@ module Backend (Emitter : EMITTER) : Opentelemetry.Collector.BACKEND = struct
   let set_on_tick_callbacks = Emitter.set_on_tick_callbacks
 end
 
+let tick_degraded_state = Atomic.make false
+let last_tick_poisoned_error_state : string option Atomic.t = Atomic.make None
+
+let tick_degraded () = Atomic.get tick_degraded_state
+let last_tick_poisoned_error () = Atomic.get last_tick_poisoned_error_state
+
+let reset_tick_health () =
+  Atomic.set tick_degraded_state false;
+  Atomic.set last_tick_poisoned_error_state None
+;;
+
 let stop_tick_after_poisoned_mutex ~stop cause =
   Atomic.set stop true;
+  Atomic.set tick_degraded_state true;
+  Atomic.set last_tick_poisoned_error_state (Some (Printexc.to_string cause));
   Log.Telemetry.error
     "otel tick failed with Eio.Mutex.Poisoned; stopping tick fiber; OTEL metrics \
      export degraded until backend restart; underlying cause: %s"
@@ -487,6 +500,7 @@ let create_backend ~sw ?(stop = Atomic.make false) ?(config = Config.make ()) en
 ;;
 
 let setup_ ~sw ?stop ?config env : unit =
+  reset_tick_health ();
   let backend = create_backend ?stop ?config ~sw env in
   OT.Collector.set_backend backend
 ;;
@@ -495,7 +509,10 @@ let setup ?stop ?config ?(enable = true) ~sw env =
   if enable then setup_ ~sw ?stop ?config env
 ;;
 
-let remove_backend () = OT.Collector.remove_backend ~on_done:ignore ()
+let remove_backend () =
+  reset_tick_health ();
+  OT.Collector.remove_backend ~on_done:ignore ()
+;;
 
 let with_setup ?stop ?config ?(enable = true) f env =
   if enable

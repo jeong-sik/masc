@@ -1493,6 +1493,23 @@ let test_health_json_surfaces_internal_mcp_auth_diagnostics () =
   Alcotest.(check bool) "mismatch reason is explicit" true
     (List.mem "token_hash_mismatch" (missing_names mismatch))
 
+let check_otel_health_shape label json =
+  let open Yojson.Safe.Util in
+  let otel = json |> member "otel" in
+  Alcotest.(check bool) (label ^ " otel object") true
+    (match otel with `Assoc _ -> true | _ -> false);
+  ignore (otel |> member "enabled" |> to_bool);
+  Alcotest.(check bool) (label ^ " otel status bounded") true
+    (List.mem
+       (otel |> member "status" |> to_string)
+       [ "ok"; "inactive"; "degraded"; "disabled" ]);
+  ignore (otel |> member "endpoint" |> to_string);
+  ignore (otel |> member "service_name" |> to_string);
+  ignore (otel |> member "exporter_active" |> to_bool);
+  ignore (otel |> member "exporter_degraded" |> to_bool);
+  ignore (otel |> member "consecutive_failures" |> to_int)
+;;
+
 let test_health_response_default_is_light_probe () =
   let request = Httpun.Request.create `GET "/health" in
   let json = Server_routes_http_runtime.make_health_response_json request in
@@ -1507,6 +1524,7 @@ let test_health_response_default_is_light_probe () =
     (match json |> member "paths" with `Assoc _ -> true | _ -> false);
   Alcotest.(check bool) "internal mcp auth stays on default health" true
     (match json |> member "internal_mcp_auth" with `Assoc _ -> true | _ -> false);
+  check_otel_health_shape "default health" json;
   Alcotest.(check bool) "default health skips reaction ledger" true
     (json |> member "keeper_reaction_ledger" = `Null);
   Alcotest.(check bool) "default health skips cdal snapshot" true
@@ -1534,6 +1552,7 @@ let test_health_response_full_query_uses_snapshot_cache () =
           let open Yojson.Safe.Util in
           Alcotest.(check string) "full health detail" "full"
             (first |> member "health_detail" |> to_string);
+          check_otel_health_shape "full health" first;
           Alcotest.(check bool) "full health includes snapshot metadata" true
             (match first |> member "full_health_snapshot" with
              | `Assoc _ -> true

@@ -2,7 +2,7 @@
     connection pool defined in {!Masc_http_client.Pool}.
 
     Read-only adapter: snapshots [Pool.stats] and pushes 5 metric
-    families to the Otel_metric_store registry on each scrape.  The pool
+    families to the Otel_metric_store registry on each export.  The pool
     itself is not modified; the lazy singleton is observed via
     {!Masc_http_client.pool_singleton_opt}.
 

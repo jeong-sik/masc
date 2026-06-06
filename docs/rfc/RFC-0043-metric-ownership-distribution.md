@@ -97,7 +97,7 @@ Owner 분산이 안 되어 있어 다음 두 비용이 영구 발생:
 | G2 | `legacy metrics backend module` 은 *runtime registry* + *wire format* (collect / expose) 만 |
 | G3 | godfile cap 위반 자연 해소 (3059 → 예상 ~600 LOC) |
 | G4 | 신규 telemetry 추가 시 도메인 모듈 single-file 변경으로 완료 |
-| G5 | `/metrics` HTTP endpoint 의 wire output 변경 0 |
+| G5 | retired scrape endpoint 의 wire output 변경 0 |
 
 ### Non-goals
 
@@ -217,7 +217,7 @@ let register_all () =
 | `metric_name` abstract type + smart constructor | ~30 |
 | `register_counter / register_gauge / register_histogram` | ~150 |
 | `inc_counter / set_gauge / observe` runtime API | ~100 |
-| Collect / Wire format (`/metrics` endpoint) | ~250 |
+| Collect / Wire format (retired scrape endpoint) | ~250 |
 | Bucket sets (default histogram buckets) | ~40 |
 | **합계** | **~570** |
 
@@ -268,19 +268,19 @@ godfile cap (3000) 은 PR-2 단독으로 통과. PR-3/4 가 추가로 legacy met
 
 - **PR-1**: `register_all` no-op 호출 후 metric registry size 변화 0 (golden
   test). 빈 모듈만 도입.
-- **PR-2**: `/metrics` HTTP endpoint output **byte-for-byte stable** (PR 전후
+- **PR-2**: retired scrape endpoint output **byte-for-byte stable** (PR 전후
   diff 0).
-- **PR-3, PR-4**: 동일 (`/metrics` byte-equal 유지).
-- **PR-5**: caller 마이그 후 build clean + `/metrics` byte-equal.
+- **PR-3, PR-4**: 동일 (retired scrape output byte-equal 유지).
+- **PR-5**: caller 마이그 후 build clean + retired scrape output byte-equal.
 
-#### `/metrics` byte-equal 검증 수단
+#### Retired Scrape Byte-Equal 검증 수단
 
 1. **현재 collect 함수**: `legacy metrics backend module` 의 collect/expose API
    (`get_metric_value`, `metric_value_or_zero`, `metric_total`)
    가 출력하는 wire format. legacy metrics backend exposition format 표준 (도메인 sort,
    label sort) 을 자체 구현하는지, 아니면 legacy metrics backend client lib 위임인지는
-   PR-2 전 측정 필요 (`rg 'expose|/metrics' legacy metrics backend module lib/server/`).
-2. **기준 dump**: PR-2 base 에서 서버 부팅 → `curl /metrics > before.txt`,
+   PR-2 전 측정 필요 (`rg 'expose|retired scrape' legacy metrics backend module lib/server/`).
+2. **기준 dump**: PR-2 base 에서 서버 부팅 → retired scrape output 저장,
    sort label keys, save.
 3. **diff 검증**: PR-2 변경 후 동일 절차 → `diff before.txt after.txt` 가
    비어있어야 함.

@@ -688,7 +688,7 @@ let transport_health_json ~config =
                 ; ( "throttled_deliveries"
                   , `Int (int_of_float (v ws_delivery_metrics.throttled_deliveries ())) )
                 ; (* Histogram sum + auto _count give operators enough to compute
-           average buffered bytes per ack without scraping /metrics. *)
+           average buffered bytes per ack without external telemetry queries. *)
                   ( "client_buffered_bytes_sum"
                   , `Float (v ws_delivery_metrics.client_buffered_bytes ()) )
                 ; ( "client_buffered_bytes_count"

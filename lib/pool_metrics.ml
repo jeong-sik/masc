@@ -22,6 +22,6 @@ let register () =
   (* Idempotent: metric registration happens in [Otel_metric_store.init].
      This entry point exists so bootstrap can express the dependency
      order explicitly; we touch the snapshot once so a misconfigured
-     pool surfaces during startup instead of at first scrape. *)
+     pool surfaces during startup instead of at first export. *)
   let _ : Masc_http_client.Pool.stats option = current_snapshot () in
   ()

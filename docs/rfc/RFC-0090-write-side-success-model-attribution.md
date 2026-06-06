@@ -172,7 +172,7 @@ grep -c "missing_success_model" "$MASC_BASE_PATH/.masc/logs/system_log_$(date +%
 
 ```bash
 # fallback hit counter (legacy metrics backend)
-curl -s http://localhost:<port>/metrics | grep runtime_model_attribution_fallback_hits
+query the configured telemetry backend for runtime_model_attribution_fallback_hits
 # PR-2 머지 + 7 일 후: 0
 ```
 

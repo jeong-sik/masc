@@ -21,9 +21,6 @@ async function loadRuntimePanel() {
   vi.doMock('./runtime-toml-editor', () => ({
     RuntimeTomlEditor: () => html`<div data-testid="runtime-toml-editor">RuntimeTomlEditor</div>`,
   }))
-  vi.doMock('./otel-metrics', () => ({
-    OtelMetrics: () => html`<div data-testid="metrics">OtelMetrics</div>`,
-  }))
   vi.doMock('./verification-specs-panel', () => ({
     VerificationSpecsPanel: () => html`<div data-testid="verification-specs">VerificationSpecsPanel</div>`,
   }))
@@ -66,7 +63,6 @@ describe('RuntimePanel', () => {
     vi.doUnmock('./oas-health-chip')
     vi.doUnmock('./runtime-monitor')
     vi.doUnmock('./runtime-toml-editor')
-    vi.doUnmock('./otel-metrics')
     vi.doUnmock('./verification-specs-panel')
     vi.doUnmock('./cost-dashboard')
     vi.doUnmock('./common/filter-chips')
@@ -90,7 +86,6 @@ describe('RuntimePanel', () => {
     expect(container.textContent).toContain('Transport diagnostics')
     expect(container.textContent).toContain('Feature cleanup')
     expect(container.textContent).toContain('RuntimeMonitor')
-    expect(container.textContent).toContain('OtelMetrics')
     expect(container.textContent).toContain('VerificationSpecsPanel')
   })
 
@@ -106,7 +101,6 @@ describe('RuntimePanel', () => {
 
     const detailIds = [
       'runtime-details-providers',
-      'runtime-details-metrics',
       'runtime-details-verification',
     ]
     for (const id of detailIds) {
@@ -118,14 +112,14 @@ describe('RuntimePanel', () => {
   })
 
   it('explicit drill-down views bypass progressive disclosure', async () => {
-    route.value.params = { view: 'metrics' }
+    route.value.params = { view: 'verification' }
     const { RuntimePanel } = await loadRuntimePanel()
     render(html`<${RuntimePanel} />`, container)
     await flushUi()
 
-    const metrics = container.querySelector('[data-testid="metrics"]')
-    expect(metrics).not.toBeNull()
-    expect(metrics?.closest('details')).toBeNull()
+    const specs = container.querySelector('[data-testid="verification-specs"]')
+    expect(specs).not.toBeNull()
+    expect(specs?.closest('details')).toBeNull()
   })
 
   it('renders only OasHealthChip and RuntimeMonitor for providers view', async () => {
@@ -136,7 +130,6 @@ describe('RuntimePanel', () => {
 
     expect(container.textContent).toContain('OasHealthChip')
     expect(container.textContent).toContain('RuntimeMonitor')
-    expect(container.textContent).not.toContain('OtelMetrics')
   })
 
   it('renders the raw runtime.toml editor for config view', async () => {
@@ -150,17 +143,6 @@ describe('RuntimePanel', () => {
     expect(container.textContent).not.toContain('RuntimeMonitor')
   })
 
-  it('renders only OtelMetrics for metrics view', async () => {
-    route.value.params = { view: 'metrics' }
-    const { RuntimePanel } = await loadRuntimePanel()
-    render(html`<${RuntimePanel} />`, container)
-    await flushUi()
-
-    expect(container.textContent).not.toContain('OasHealthChip')
-    expect(container.textContent).not.toContain('RuntimeMonitor')
-    expect(container.textContent).toContain('OtelMetrics')
-  })
-
   it('renders FilterChips with runtime view options', async () => {
     route.value.params = {}
     const { RuntimePanel } = await loadRuntimePanel()
@@ -171,16 +153,15 @@ describe('RuntimePanel', () => {
     // Chips are split across two FilterChips strips (Primary then Advanced)
     // with a divider between them. The positional order reflects the
     // Primary[default, providers, runtime.toml] → Advanced[cost, audit, stress,
-    // metrics, verification] layout.
-    expect(chips.length).toBe(8)
+    // verification] layout.
+    expect(chips.length).toBe(7)
     expect(chips[0]?.textContent).toBe('전체')
     expect(chips[1]?.textContent).toBe('런타임')
     expect(chips[2]?.textContent).toBe('runtime.toml')
     expect(chips[3]?.textContent).toBe('비용 / 지연')
     expect(chips[4]?.textContent).toBe('감사')
     expect(chips[5]?.textContent).toBe('스트레스')
-    expect(chips[6]?.textContent).toBe('메트릭')
-    expect(chips[7]?.textContent).toBe('형식검증')
+    expect(chips[6]?.textContent).toBe('형식검증')
   })
 
   it('routes runtime diagnostic views through CostDashboard', async () => {
@@ -203,7 +184,6 @@ describe('RuntimePanel', () => {
 
     expect(container.textContent).toContain('OasHealthChip')
     expect(container.textContent).toContain('RuntimeMonitor')
-    expect(container.textContent).toContain('OtelMetrics')
   })
 
   it('passes current view value to FilterChips', async () => {

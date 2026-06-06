@@ -6,10 +6,10 @@
    that produced 51 identical 1-bit rows in production. *)
 
 module H = Masc.Keeper_hooks_oas
-module Prom = Masc.Otel_metric_store
+module Metrics = Masc.Otel_metric_store
 
 let counter_for ~keeper ~tool =
-  Prom.metric_value_or_zero
+  Metrics.metric_value_or_zero
     H.tool_use_failure_metric
     ~labels:[ ("keeper", keeper); ("tool", tool) ]
     ()

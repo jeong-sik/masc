@@ -27,7 +27,7 @@ RFC-0214가 genai 텔레메트리(`masc_llm_provider_*` 13개)를 OTel GenAI sem
 | | Retired backend | Otel |
 |---|---|---|
 | 모델 | **pull** (scrape) | **push** (OTLP) |
-| 누적 | in-process counter 누적 → `/metrics` 렌더 | data point + `send_metrics`, 또는 observable callback |
+| 누적 | in-process counter 누적 → retired scrape renderer | data point + `send_metrics`, 또는 observable callback |
 | API | `inc_counter name ~labels ()` (동기 증분) | `Metrics.sum/gauge/histogram` (배치) + `Metrics_callbacks` (observable) |
 
 1008개 `inc_counter`는 **동기 in-process 누적**이다. Otel로 옮기는 것은 단순 치환이 아니라 누적 상태를 유지하고 OTLP push 시점에 보고하는 **semantic re-platform**이다. 이 모델 차이가 본 RFC가 codemod가 아니라 설계인 이유다.

@@ -233,7 +233,7 @@ let cache_metric_label = [("cache", "dashboard")]
 
 (* Local hit/miss counters in addition to Otel_metric_store, because Otel_metric_store has
    no read-back API in this codebase and we want to surface live ratios via
-   [stats ()] without forcing operators to scrape /metrics. *)
+   [stats ()] without forcing operators through an external metrics backend. *)
 let cache_hits_total = Atomic.make 0
 let cache_misses_total = Atomic.make 0
 
@@ -692,7 +692,7 @@ let stats () =
     entries_acc := entry_json :: !entries_acc
   ) map;
   (* Truncate per-entry list to bound payload size — operators looking for
-     specific keys can read [/metrics] for the full otel_metric_store surface. *)
+     specific keys can use the configured telemetry backend for the full surface. *)
   let entries_list =
     let all = List.rev !entries_acc in
     if List.length all <= max_entries_in_stats

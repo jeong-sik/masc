@@ -32,13 +32,13 @@ let () =
   Unix.putenv "MASC_BASE_PATH" dir
 
 module UM = Masc.Keeper_unified_metrics
-module Prom = Masc.Otel_metric_store
+module Metrics = Masc.Otel_metric_store
 
 let metric = Keeper_metrics.(to_string ContextMaxObserved)
 let runtime_label = "runtime"
 
 let counter_for ~keeper ~model_used ~resolved_model_id ~bucket =
-  Prom.metric_value_or_zero metric
+  Metrics.metric_value_or_zero metric
     ~labels:[
       ("keeper", keeper);
       ("model_used", model_used);

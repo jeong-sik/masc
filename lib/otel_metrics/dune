@@ -1,6 +1,6 @@
 ;; RFC-0217 S1 — masc_otel_metrics leaf. Bridges in-process accumulated metric
 ;; samples (the Otel_metric_store_core snapshot) to OTel via Metrics_callbacks, the
-;; observable push-model replacement for /metrics scrape. opentelemetry + stdlib
+;; observable push-model replacement for the retired scrape endpoint. opentelemetry + stdlib
 ;; only: no masc dep, so it builds independently of the (broken) mega-lib and is
 ;; a clean RFC-0056 leaf. Otel_metric_store_core (S2) depends on THIS, not the reverse.
 

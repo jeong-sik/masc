@@ -227,8 +227,8 @@ PR-1 (this RFC's first implementation PR):
 PR-2 (consumed by RFC-0048):
 
 - Add a Grafana panel sourcing the counters.
-- Add a small CLI: `scripts/dashboard-ia-usage.sh --since=7d` that
-  produces the Markdown report RFC-0048 PR-C consumes.
+- Produce the Markdown report RFC-0048 PR-C consumes from the configured
+  OTel backend.
 
 PR-3 (deferred until RFC-0048 PR-C asks for it):
 
@@ -265,7 +265,7 @@ would not be acceptable for SLO measurement; that is out of scope.
 
 Hard ceiling: at most `|surfaces| × |sections| × (|redirects| + 1)`
 distinct label combinations. Today: 9 × 20 × 4 ≈ 720, well under any
-legacy metrics backend limit. If we ever cross 10k we add an opt-in flag.
+OTel backend cardinality budget. If we ever cross 10k we add an opt-in flag.
 
 ## 6. Open questions
 
@@ -273,7 +273,7 @@ legacy metrics backend limit. If we ever cross 10k we add an opt-in flag.
    already uses the same origin for its other writes. We default to
    the existing CSRF middleware; if there is none on the dashboard
    write path, the answer is "yes, add one before this RFC merges."
-2. **Test fakes.** RFC-0048 PR-C reads from legacy metrics backend via legacy metrics query.
+2. **Test fakes.** RFC-0048 PR-C reads from the configured OTel backend.
    Should we expose a fake-clock test mode? Not in this RFC — defer
    until a consumer asks.
 3. **`redirected_from` chain.** If A redirects to B which redirects to
@@ -283,8 +283,8 @@ legacy metrics backend limit. If we ever cross 10k we add an opt-in flag.
 
 ## 7. Done criteria
 
-1. Both counters appear in `/metrics` after the first navigation.
-2. The Markdown report in PR-2 produces a non-empty section list with
+1. Both counters appear in the configured OTel backend after the first navigation.
+2. The Markdown report source produces a non-empty section list with
    non-zero counts after 24 hours of dashboard use.
 3. `redirected_from` distribution across `dashboard_section_open_total`
    matches the redirect map cardinality (no leaks, no missing

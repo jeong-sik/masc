@@ -139,17 +139,24 @@ let prepare_run_context
          | None -> None)
       meta.active_goal_ids
   in
+  let prompt_profile_default default current =
+    (* DET-OK: keeper TOML/persona profile defaults are the declarative
+       prompt-config boundary; persisted meta is the legacy fallback. *)
+    match default with
+    | Some value -> value
+    | None -> current
+  in
   let base_system_prompt =
     Keeper_prompt.build_keeper_system_prompt
-      ~goal:(Option.value profile_defaults.goal ~default:meta.goal)
-      ~short_goal:(Option.value profile_defaults.short_goal ~default:meta.short_goal)
-      ~mid_goal:(Option.value profile_defaults.mid_goal ~default:meta.mid_goal)
-      ~long_goal:(Option.value profile_defaults.long_goal ~default:meta.long_goal)
-      ~will:(Option.value profile_defaults.will ~default:meta.will)
-      ~needs:(Option.value profile_defaults.needs ~default:meta.needs)
-      ~desires:(Option.value profile_defaults.desires ~default:meta.desires)
+      ~goal:(prompt_profile_default profile_defaults.goal meta.goal)
+      ~short_goal:(prompt_profile_default profile_defaults.short_goal meta.short_goal)
+      ~mid_goal:(prompt_profile_default profile_defaults.mid_goal meta.mid_goal)
+      ~long_goal:(prompt_profile_default profile_defaults.long_goal meta.long_goal)
+      ~will:(prompt_profile_default profile_defaults.will meta.will)
+      ~needs:(prompt_profile_default profile_defaults.needs meta.needs)
+      ~desires:(prompt_profile_default profile_defaults.desires meta.desires)
       ~instructions:
-        (Option.value profile_defaults.instructions ~default:meta.instructions)
+        (prompt_profile_default profile_defaults.instructions meta.instructions)
       ~persona_extended
       ~keeper_name:meta.name
       ~active_goals

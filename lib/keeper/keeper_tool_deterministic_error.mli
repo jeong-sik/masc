@@ -49,12 +49,6 @@ type deterministic_reason =
           separate counter in [Keeper_tools_oas]. It is considered
           deterministic only when the payload explicitly carries
           [error_class="deterministic"] and [recoverable=false]. *)
-  | Git_precondition_failed
-      (** git process precondition failed. Typed shell producers may
-          emit this for git exit 128 from structured command
-          classification plus process status; the deterministic
-          classifier intentionally does not re-parse stderr/output to
-          split missing refs from command usage. *)
 
 type classification_source =
   | Deterministic_retry_marker
@@ -80,8 +74,10 @@ type classification =
 
     There is no [error] string fallback and no [_ ->] catch-all that
     admits new prefixes silently. Producers that know same-argument
-    retry cannot succeed, including typed shell producers handling git
-    process failures, must emit [deterministic_retry_fields]. *)
+    retry cannot succeed must emit [deterministic_retry_fields]. Plain
+    git process failures intentionally stay outside this deterministic
+    surface so sandbox/worktree recovery can adapt with different refs,
+    paths, or branch names. *)
 val classify : Yojson.Safe.t -> deterministic_reason option
 
 val classify_with_source : Yojson.Safe.t -> classification option

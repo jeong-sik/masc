@@ -207,7 +207,7 @@ describe('deriveKeeperOperationalState — offline branch', () => {
 })
 
 describe('deriveKeeperOperationalState — stuck branch (RFC-0135 §1.1 root)', () => {
-  it('blocker without composite ⇒ stuck reason=blocker_class', () => {
+  it('synthetic_stall without composite ⇒ running because it is diagnostic-only', () => {
     const state = deriveKeeperOperationalState({
       keeper: makeKeeper({
         runtime_blocker_class: 'synthetic_stall',
@@ -215,8 +215,24 @@ describe('deriveKeeperOperationalState — stuck branch (RFC-0135 §1.1 root)', 
       composite: null,
     })
     expect(state).toMatchObject({
-      kind: 'stuck',
+      kind: 'running',
       attention: 'clean',
+      staleBlocker: null,
+    })
+  })
+
+  it('synthetic_stall with blocked runtime_attention ⇒ stuck', () => {
+    const state = deriveKeeperOperationalState({
+      keeper: makeKeeper({
+        runtime_blocker_class: 'synthetic_stall',
+      }),
+      composite: makeComposite({
+        runtime_attention: attention({ execution_current: true, blocked: true }),
+      }),
+    })
+    expect(state).toMatchObject({
+      kind: 'stuck',
+      attention: 'blocked',
       reason: 'synthetic_stall',
     })
   })
@@ -276,7 +292,9 @@ describe('deriveKeeperOperationalState — stuck branch (RFC-0135 §1.1 root)', 
     for (const cls of KEEPER_RUNTIME_BLOCKER_CLASSES) {
       const state = deriveKeeperOperationalState({
         keeper: makeKeeper({ runtime_blocker_class: cls as KeeperRuntimeBlockerClass }),
-        composite: null,
+        composite: cls === 'synthetic_stall'
+          ? makeComposite({ runtime_attention: attention({ execution_current: true, blocked: true }) })
+          : null,
       })
       expect(state.kind === 'stuck' && state.reason === cls).toBe(true)
     }

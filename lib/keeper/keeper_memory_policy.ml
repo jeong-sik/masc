@@ -729,6 +729,99 @@ let snapshot_of_structured_working_context
             | None -> None)
        | _ -> None)
 
+let structured_state_snapshot_of_json
+    (json : Yojson.Safe.t) : keeper_state_snapshot option =
+  match snapshot_of_structured_working_context json with
+  | Some _ as snapshot -> snapshot
+  | None -> keeper_state_snapshot_of_json json
+
+let structured_param ~name ~description ~param_type ~required =
+  { Agent_sdk.Types.name = name; description; param_type; required }
+
+let structured_state_snapshot_schema :
+    keeper_state_snapshot Agent_sdk.Structured.schema =
+  { Agent_sdk.Structured.name = "keeper_state_snapshot";
+    description =
+      "Structured keeper continuity state for the completed turn. Return only \
+       this JSON object when the runtime requests structured state.";
+    params =
+      [ structured_param
+          ~name:"goal"
+          ~description:"Current keeper goal, if still relevant."
+          ~param_type:Agent_sdk.Types.String
+          ~required:false
+      ; structured_param
+          ~name:"progress"
+          ~description:"Short factual progress summary for this generation."
+          ~param_type:Agent_sdk.Types.String
+          ~required:false
+      ; structured_param
+          ~name:"done_summary"
+          ~description:"What was completed this generation."
+          ~param_type:Agent_sdk.Types.String
+          ~required:false
+      ; structured_param
+          ~name:"next_summary"
+          ~description:"What the next generation should do or inspect first."
+          ~param_type:Agent_sdk.Types.String
+          ~required:false
+      ; structured_param
+          ~name:"next_items"
+          ~description:"Concrete next items as strings."
+          ~param_type:Agent_sdk.Types.Array
+          ~required:false
+      ; structured_param
+          ~name:"decisions"
+          ~description:"Model-authored decisions from this generation."
+          ~param_type:Agent_sdk.Types.Array
+          ~required:false
+      ; structured_param
+          ~name:"open_questions"
+          ~description:"Unresolved questions as strings."
+          ~param_type:Agent_sdk.Types.Array
+          ~required:false
+      ; structured_param
+          ~name:"constraints"
+          ~description:"Active constraints as strings."
+          ~param_type:Agent_sdk.Types.Array
+          ~required:false
+      ];
+    parse =
+      (fun json ->
+        match structured_state_snapshot_of_json json with
+        | Some snapshot -> Ok snapshot
+        | None ->
+            Error
+              "structured keeper state is empty or does not match the snapshot \
+               schema");
+  }
+
+let strip_json_markdown_fences (text : string) : string =
+  let trimmed = String.trim text in
+  if not (String.starts_with ~prefix:"```" trimmed) then trimmed
+  else
+    match String.split_on_char '\n' trimmed with
+    | first :: body when String.starts_with ~prefix:"```" (String.trim first) ->
+        let body =
+          match List.rev body with
+          | last :: rest when String.starts_with ~prefix:"```" (String.trim last) ->
+              List.rev rest
+          | _ -> body
+        in
+        String.concat "\n" body |> String.trim
+    | _ -> trimmed
+
+let parse_structured_state_snapshot_from_reply
+    (reply : string) : keeper_state_snapshot option =
+  let text = strip_json_markdown_fences reply in
+  if String.trim text = "" then None
+  else
+    try
+      Yojson.Safe.from_string text
+      |> structured_state_snapshot_of_json
+    with
+    | Yojson.Json_error _ -> None
+
 let latest_state_snapshot_from_messages (messages : Agent_sdk.Types.message list) :
     keeper_state_snapshot option =
   let rec loop (msgs : Agent_sdk.Types.message list) =

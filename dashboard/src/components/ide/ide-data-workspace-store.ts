@@ -80,23 +80,28 @@ function isWorkspaceRepository(repository: Repository): boolean {
   return isAbsolute && !localPath.includes('/.masc/')
 }
 
-function isMascMcpRepository(repository: Repository): boolean {
-  return repository.id === 'masc' || repository.name === 'masc'
-}
+/** Repo is not reachable — server reported it as missing or unknown. */
+const UNREACHABLE_WORKSPACE_SOURCES: ReadonlySet<string> = new Set([
+  'repository_missing',
+  'repository_unknown',
+])
 
 export function selectPreferredIdeRepositoryId(
   repositories: ReadonlyArray<Repository>,
   current: string | null,
+  excludeIds?: ReadonlySet<string>,
 ): string | null {
-  if (current && repositories.some(repository => repository.id === current)) {
+  if (current && !excludeIds?.has(current) && repositories.some(repository => repository.id === current)) {
     return current
   }
 
-  return repositories.find(repository => isMascMcpRepository(repository) && isWorkspaceRepository(repository))?.id
-    ?? repositories.find(isWorkspaceRepository)?.id
-    ?? repositories.find(isMascMcpRepository)?.id
-    ?? repositories.find(repository => !isManagedMirrorRepository(repository))?.id
-    ?? repositories[0]?.id
+  const candidates = excludeIds && excludeIds.size > 0
+    ? repositories.filter(r => !excludeIds.has(r.id))
+    : repositories
+
+  return candidates.find(isWorkspaceRepository)?.id
+    ?? candidates.find(repository => !isManagedMirrorRepository(repository))?.id
+    ?? candidates[0]?.id
     ?? null
 }
 
@@ -115,11 +120,14 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
   const activeRepositoryIdSignal = signal<string | null>(null)
   const annotationsSignal = signal<ReadonlyArray<IdeAnnotation>>([])
 
+  /** Track repo IDs that returned unreachable workspace sources, to avoid re-selecting them. */
+  const unreachableRepoIds = new Set<string>()
+
   let abortController = new AbortController()
 
   const applyRepositories = (repositories: ReadonlyArray<Repository>): void => {
     const current = activeRepositoryIdSignal.value
-    activeRepositoryIdSignal.value = selectPreferredIdeRepositoryId(repositories, current)
+    activeRepositoryIdSignal.value = selectPreferredIdeRepositoryId(repositories, current, unreachableRepoIds)
     repositoriesSignal.value = repositories
   }
 
@@ -162,6 +170,20 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
       if (signal.aborted) return
       fileTreeStore.seed(nodes)
       workspaceSourceSignal.value = source
+
+      // Self-healing: if the selected repo is unreachable (missing .git,
+      // path does not exist, etc.), exclude it and auto-switch to the next
+      // preferred repo so the IDE does not land on a blank screen.
+      if (repoId && UNREACHABLE_WORKSPACE_SOURCES.has(source.kind)) {
+        unreachableRepoIds.add(repoId)
+        const repos = repositoriesSignal.value
+        const nextId = selectPreferredIdeRepositoryId(repos, null, unreachableRepoIds)
+        if (nextId && nextId !== repoId) {
+          activeRepositoryIdSignal.value = nextId
+          return  // effect will re-fire with the new repoId
+        }
+      }
+
       const hasCurrentFile =
         filePath !== null && nodes.some(node => node.path === filePath && !node.hasChildren)
       const nextFile = hasCurrentFile ? null : firstFilePath(nodes)

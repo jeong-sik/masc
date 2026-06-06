@@ -153,48 +153,22 @@ let handle_speak
            (keeper_text_fallback_json ~agent_id:meta.name ~message)
            memory_status))
 
-let handle_listen ~(meta : keeper_meta) ~(args : Yojson.Safe.t) ?turn_slot_control () =
+let handle_listen ~(meta : keeper_meta) ~(args : Yojson.Safe.t) ?turn_slot_control:_ () =
   let timeout_sec = Safe_ops.json_float ~default:60.0 "timeout_seconds" args in
   let language_code = Safe_ops.json_string_opt "language_code" args in
-  let released =
-    match turn_slot_control with
-    | Some ctrl ->
-      ctrl.Keeper_turn_slot.release_for_retry ();
-      true
-    | None -> false
-  in
-  let result =
-    match
-      Voice_bridge.record_and_transcribe
-        ~agent_id:meta.name
-        ~timeout_sec
-        ?language_code
-        ()
-    with
-    | Ok json -> Yojson.Safe.to_string json
-    | Error err ->
-      Tool_args.error_response_with
-        [ "error", `String err
-        ; "agent_id", `String meta.name
-        ]
-  in
-  if released
-  then (
-    match turn_slot_control with
-    | Some ctrl ->
-      (match ctrl.Keeper_turn_slot.reacquire_after_retry () with
-       | Ok wait_ms ->
-         Log.Keeper.info
-           "%s: reacquired keeper turn slot after voice listen (wait_ms=%d)"
-           meta.name
-           wait_ms
-       | Error (`Semaphore_wait_timeout timeout) ->
-         Log.Keeper.warn
-           "%s: semaphore reacquire timeout after voice listen (waited %.0fs)"
-           meta.name
-           timeout.timeout_wait_sec)
-    | None -> ());
-  result
+  match
+    Voice_bridge.record_and_transcribe
+      ~agent_id:meta.name
+      ~timeout_sec
+      ?language_code
+      ()
+  with
+  | Ok json -> Yojson.Safe.to_string json
+  | Error err ->
+    Tool_args.error_response_with
+      [ "error", `String err
+      ; "agent_id", `String meta.name
+      ]
 
 let handle_agent ~(meta : keeper_meta) =
   match Voice_bridge.get_agent_voice ~agent_id:meta.name with

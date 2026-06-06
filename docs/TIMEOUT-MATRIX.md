@@ -4,16 +4,18 @@ Status: Phase 1 — observability + module stub. Migration of call sites is trac
 
 ## Layer model
 
-MASC timeouts nest innermost-first. Every inner layer's wall cap MUST be
-`<=` its enclosing layer's cap. An inner "hard cap" that exceeds the outer cap
-is effectively advisory.
+MASC timeout policy is progress-first. Tool calls and streaming gaps have
+bounded idle or invocation timeouts, but a keeper turn that is still producing
+stream or tool progress must not be killed only because cumulative wall-clock
+elapsed. `MASC_KEEPER_TURN_TIMEOUT_SEC` is now a retry/admission budget between
+provider attempts, not the hard execution deadline for an active turn.
 
 | Layer | Role | Typical cap | Source of truth |
 |-------|------|-------------|-----------------|
 | `Tool` | per-tool HTTP / shell invocation | 10–60 s | `Env_config_runtime.*`, `lib/tool_local_runtime_http.ml` |
 | `MCP tools/call` | outer per-tool dispatcher cap | 60 s default; board writes 90 s default | `MASC_TOOL_TIMEOUT_DEFAULT_SEC`, `MASC_TOOL_TIMEOUT_BOARD_SEC`, `Mcp_server_eio_call_tool.tool_timeout_sec_opt` |
-| `Oas_bridge` | single OAS `Agent.run` / `Model.call` | 300 s default; provider attempt caps may be lower | `Env_config_keeper.oas_timeout_sec*`, `Keeper_turn_driver.effective_provider_attempt_timeout_s` |
-| `Keeper_turn` | one keeper turn (may issue many OAS calls) | 600 s default/hard ceiling | `MASC_KEEPER_TURN_TIMEOUT_SEC` |
+| `Oas_bridge` | single OAS `Agent.run` / `Model.call` | no cumulative cap on the keeper `run_named` path; stream idle / liveness caps apply | `Env_config_keeper.stream_idle_timeout_sec`, `Keeper_attempt_liveness` |
+| `Keeper_turn` | one keeper turn (may issue many OAS calls) | 600 s default retry/admission budget; not a hard execution kill | `MASC_KEEPER_TURN_TIMEOUT_SEC`, `Keeper_turn_runtime_budget*` |
 | `Keeper_cycle` | full keeper lifecycle | N×turn | cycle supervisor |
 | `Shutdown` | graceful shutdown board flush | 2 s | `bin/main_eio.ml` |
 
@@ -42,14 +44,14 @@ warning preserves the same fields (`layer`, `origin`, `budget`, `actual`,
 ## Operator outcome
 
 Provider timeout failures are not global shutdown signals. A single
-`provider_timeout` is scoped to the provider attempt or keeper turn whose
-provider wait exceeded the active budget. The turn ledger and runtime-trust
+`provider_timeout` is scoped to the provider attempt whose stream idle or
+attempt-liveness budget was exceeded. The turn ledger and runtime-trust
 snapshot must surface provider-owned timeout evidence as provider timeout
-detail, while turn-owned wall-clock exhaustion surfaces as
-`terminal_reason.code = "turn_wall_clock_timeout"` with
-`terminal_reason.next_action = "inspect_turn_timeout"`. The runtime-trust
-snapshot mirrors that as `latest_next_action`, and the runtime surface marks
-the keeper as needing attention with
+detail. Turn-owned retry/admission budget exhaustion may still surface as
+`turn_timeout`, but active stream/tool progress must not become
+`terminal_reason.code = "turn_wall_clock_timeout"` merely because cumulative
+wall time crossed 600 s. The runtime-trust snapshot mirrors the latest
+action, and the runtime surface marks the keeper as needing attention with
 `next_human_action = "inspect_runtime_blocker"` when the keeper is not paused.
 Paused provider-timeout cases keep the paused workflow
 (`attention_reason = "paused"`,
@@ -105,8 +107,9 @@ logs. Candidates:
 ## Non-goals
 
 - This policy module does NOT reimplement OAS retry/budget semantics — OAS
-  owns its own `max_turns` and `max_duration` (see `feedback_no-lifecycle-
-  invasion-from-masc.md`). The MASC-side deadline is the outer hard cap;
-  OAS-side budgets are clamped within it by the caller, not mutated here.
+  owns its own `max_turns` and progress/idle liveness (see `feedback_no-lifecycle-
+  invasion-from-masc.md`). MASC-side retry/admission budgets decide whether a
+  new provider attempt may start; they are not a cumulative hard cap on an
+  active stream.
 - This module does NOT perform forced cancellation. It only makes cooperative
   overshoot observable.

@@ -110,8 +110,9 @@ let cli_subprocess_idle_sec = cli_subprocess_idle_sec_live
 let oas_timeout_override_sec_live ~turn_timeout_sec =
   match Env_config_core.raw_value_opt "MASC_KEEPER_OAS_TIMEOUT_SEC" with
   | Some raw ->
-      (* DET-OK: env override is parsed at the keeper runtime boundary; malformed
-         values resolve to wall-clock cap for compatibility with previous behavior. *)
+      (* DET-OK: env override is parsed at the keeper runtime boundary;
+         malformed values resolve to the turn budget for compatibility with
+         previous behavior. *)
       (match Float.of_string_opt (String.trim raw) with
        | Some parsed -> Some (Float.max 30.0 (Float.min turn_timeout_sec parsed))
        | None -> Some turn_timeout_sec)
@@ -297,8 +298,9 @@ let stream_idle_timeout_for_total_timeout ~(total_timeout_s : float) =
 let body_timeout_override_sec () =
   (current ()).body_timeout_override_sec.value
 
-(* RFC-0156: OAS total timeout removed — turn_timeout_sec is the wall-clock
-   cap, stream_idle_timeout is the per-stream cap. Kept in lockstep with
+(* RFC-0156/RFC-020x: OAS total timeout removed — turn_timeout_sec is the
+   retry/admission budget, not a cumulative hard kill for active streams.
+   stream_idle_timeout is the per-stream idle cap. Kept in lockstep with
    [Env_config.KeeperKeepalive.oas_call_timeout_sec]. Historic names
    ([oas_timeout_for_estimated_input_tokens] /
    [oas_timeout_for_estimated_input_tokens_with_turn_budget]) ignored their

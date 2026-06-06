@@ -155,14 +155,12 @@ val attempt_watchdog_timeout_sec :
   remaining_turn_budget_s:float ->
   provider_timeout_budget ->
   float
-(** Wall-clock watchdog for a single runtime attempt.
+(** Legacy wall-clock watchdog budget for a single runtime attempt.
 
-    The watchdog fires after the OAS per-attempt budget plus the normal
-    finalization guard, while reserving a small outer-turn margin before the
-    enclosing keeper turn wall-clock timeout. This keeps a hung provider
-    attempt on the structured [provider_timeout] path, where degraded runtime
-    rotation can still run, instead of falling through to terminal
-    [turn_timeout]. *)
+    Off-mode uses this after the OAS per-attempt budget plus the normal
+    finalization guard. Progress-based liveness modes return [None] from
+    [attempt_watchdog_timeout_sec_opt] so healthy active streams are not killed
+    by cumulative wall-clock elapsed. *)
 
 val attempt_watchdog_timeout_sec_opt :
   liveness_mode:Keeper_attempt_liveness_config.mode ->

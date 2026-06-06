@@ -32,8 +32,35 @@ let string_contains_substring = String_util.string_contains_substring
 let is_structural_oas_timeout_message message =
   Keeper_oas_timeout_message.is_structural message
 
+let is_transient_internal_runner_error (err : Agent_sdk.Error.sdk_error) : bool =
+  match Keeper_turn_driver.classify_masc_internal_error err with
+  | Some (Keeper_turn_driver.Internal_unhandled_exception { site; exn_repr })
+    when String.equal site "runtime_runner.execute" ->
+    let lower = String.lowercase_ascii exn_repr in
+    string_contains_substring ~needle:"tls alert" lower
+    || string_contains_substring ~needle:"handshake failure" lower
+    || string_contains_substring ~needle:"tls_error" lower
+  | Some
+      ( Keeper_turn_driver.Internal_unhandled_exception _
+      | Keeper_turn_driver.Runtime_exhausted _
+      | Keeper_turn_driver.Capacity_backpressure _
+      | Keeper_turn_driver.Resumable_cli_session _
+      | Keeper_turn_driver.Accept_rejected _
+      | Keeper_turn_driver.Admission_queue_timeout _
+      | Keeper_turn_driver.Admission_queue_rejected _
+      | Keeper_turn_driver.Provider_timeout _
+      | Keeper_turn_driver.Turn_timeout _
+      | Keeper_turn_driver.Max_tokens_ceiling_violation _
+      | Keeper_turn_driver.Ambiguous_post_commit _
+      | Keeper_turn_driver.Retry_admission_denied _
+      | Keeper_turn_driver.Internal_bridge_exception _
+      | Keeper_turn_driver.Internal_contract_rejected _ )
+  | None -> false
+
 let is_transient_network_error (err : Agent_sdk.Error.sdk_error) : bool =
-  match err with
+  if is_transient_internal_runner_error err
+  then true
+  else match err with
   | Agent_sdk.Error.Api (NetworkError _) -> true
   | Agent_sdk.Error.Api (Timeout { message }) ->
       not (is_structural_oas_timeout_message message)

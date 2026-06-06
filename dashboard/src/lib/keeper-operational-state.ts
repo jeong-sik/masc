@@ -46,7 +46,10 @@ import type {
   KeeperCompositeSnapshot,
 } from '../api/schemas/keeper-composite'
 import { deriveBlockerReason } from './keeper-blocker-reason'
-import { keeperDisplayStatus } from './keeper-runtime-display'
+import {
+  isKeeperAutoRecoverPause,
+  keeperDisplayStatus,
+} from './keeper-runtime-display'
 import {
   isKeeperOffline,
   isKeeperPaused,
@@ -177,6 +180,7 @@ function isPaused(k: Keeper, c: KeeperCompositeSnapshot | null): boolean {
 
 function derivePausedCause(k: Keeper, c: KeeperCompositeSnapshot | null): PausedCause {
   if (k.runtime_blocker_class === 'supervisor_paused') return 'supervisor'
+  if (isKeeperAutoRecoverPause(k)) return 'auto_recover'
   if (c?.phase_diagnosis?.conditions.operator_paused === true) return 'operator'
   if (k.pause_state === 'paused') return 'operator'
   if (k.phase === 'Paused') return 'operator'

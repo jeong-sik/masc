@@ -1214,16 +1214,16 @@ let test_health_json_keeps_timeout_pause_without_policy_manual () =
           |> List.find (fun row ->
                row |> member "name" |> to_string = "timeout-without-policy")
         in
-        Alcotest.(check string) "pause kind" "operator_paused"
+        Alcotest.(check string) "pause kind" "auto_recoverable"
           (detail |> member "pause_kind" |> to_string);
-        Alcotest.(check (option (float 0.0001))) "effective auto resume"
-          None
-          (detail |> member "auto_resume_after_sec" |> to_float_option);
+        Alcotest.(check bool) "effective auto resume is present" true
+          (Option.is_some
+             (detail |> member "auto_resume_after_sec" |> to_float_option));
         Alcotest.(check (option (float 0.0001))) "persisted auto resume remains absent"
           None
           (detail |> member "persisted_auto_resume_after_sec" |> to_float_option);
-        Alcotest.(check bool) "auto resume source is absent" true
-          (Yojson.Safe.Util.member "auto_resume_source" detail = `Null);
+        Alcotest.(check string) "auto resume source" "implicit_turn_timeout"
+          (detail |> member "auto_resume_source" |> to_string);
         Alcotest.(check string) "last blocker class" "turn_timeout"
           (detail |> member "last_blocker" |> member "klass" |> to_string)))
 

@@ -545,7 +545,7 @@ let sweep_and_recover (ctx : _ context) =
                                   paused so the registry has no entries
                                   to score).  Defaulting to "block" here
                                   is the bug PR #14146 shipped: it turned
-                                  the boot-time race window into a
+           the boot-time race window into a
                                   permanent lockout.  See instructions/
                                   software-development.md anti-pattern
                                   "Unknown -> Permissive Default". *)
@@ -564,7 +564,8 @@ let sweep_and_recover (ctx : _ context) =
            let resume_after_sec =
              Option.value
                ~default:0.0
-               meta.auto_resume_after_sec
+               (Keeper_supervisor_types.paused_meta_effective_auto_resume_after_sec
+                  meta)
            in
            let paused_ts =
              Workspace_resilience.Time.parse_iso8601_opt meta.updated_at

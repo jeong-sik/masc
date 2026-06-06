@@ -9,6 +9,10 @@
     Uses structured [Agent_sdk.Error.sdk_error] pattern matching. *)
 val is_transient_network_error : Agent_sdk.Error.sdk_error -> bool
 
+(** [true] when a typed internal runner exception preserves a transient
+    transport failure that was raised inside [runtime_runner.execute]. *)
+val is_transient_internal_runner_error : Agent_sdk.Error.sdk_error -> bool
+
 (** [true] when an OAS timeout message describes an execution budget expiry,
     not a transport-level timeout. *)
 val is_structural_oas_timeout_message : string -> bool

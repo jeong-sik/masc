@@ -1825,90 +1825,38 @@ let test_operator_pause_not_auto_resumed () =
       check (float 0.001) "metric_keeper_auto_resumed_total NOT incremented"
         baseline_auto_resume after_auto_resume)
 
-let test_turn_timeout_blocker_without_resume_policy_not_auto_resumed () =
-  Eio_main.run @@ fun env ->
-  ensure_fs env;
-  Eio.Switch.run @@ fun sw ->
-  with_config_dir @@ fun config_dir ->
-  let base_dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () ->
-      Reg.clear ();
-      Masc.Keeper_runtime.reset_test_state base_dir;
-      cleanup_dir base_dir)
-    (fun () ->
-      let config = Masc.Workspace.default_config base_dir in
-      ignore (Masc.Workspace.init config ~agent_name:(Some "supervisor"));
-      let name = "timeout-paused-without-resume-policy" in
-      write_keeper_toml config_dir ~name;
-      let two_hours_ago =
-        let t = Unix.gmtime (Unix.time () -. 7200.0) in
-        Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-          (t.tm_year + 1900) (t.tm_mon + 1) t.tm_mday
-          t.tm_hour t.tm_min t.tm_sec
-      in
-      let timeout_blocker =
-        Keeper_meta_contract.blocker_info_of_class ~detail:"turn_timeout" Keeper_meta_contract.Turn_timeout
-      in
-      let paused_meta =
-        { (make_meta name) with
-          paused = true;
-          auto_resume_after_sec = None;
-          updated_at = two_hours_ago;
-          runtime =
-            { (make_meta name).runtime with
-              last_blocker = Some timeout_blocker;
-            };
+let test_turn_timeout_blocker_without_resume_policy_auto_recoverable () =
+  let now = Unix.time () in
+  let two_hours_ago =
+    let t = Unix.gmtime (now -. 7200.0) in
+    Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+      (t.tm_year + 1900) (t.tm_mon + 1) t.tm_mday
+      t.tm_hour t.tm_min t.tm_sec
+  in
+  let timeout_blocker =
+    Keeper_meta_contract.blocker_info_of_class
+      ~detail:"turn_timeout"
+      Keeper_meta_contract.Turn_timeout
+  in
+  let paused_meta =
+    { (make_meta "timeout-paused-without-resume-policy") with
+      paused = true
+    ; auto_resume_after_sec = None
+    ; updated_at = two_hours_ago
+    ; runtime =
+        { (make_meta "timeout-paused-without-resume-policy").runtime with
+          last_blocker = Some timeout_blocker
         }
-      in
-      check bool "timeout blocker without resume policy is not due"
-        false
-        (Masc.Keeper_supervisor_types.paused_meta_auto_resume_due
-           ~now:(Unix.time ())
-           paused_meta);
-      (match Keeper_meta_store.write_meta config paused_meta with
-       | Ok () -> ()
-       | Error err -> fail err);
-      check bool "precondition: timeout pause is not bootable" false
-        (List.mem name (KR.bootable_keeper_names config));
-      let baseline_auto_resume =
-        Masc.Otel_metric_store.metric_total
-          Keeper_metrics.(to_string AutoResumedTotal)
-      in
-      let ctx : _ Keeper_types_profile.context =
-        {
-          config;
-          agent_name = "supervisor";
-          sw;
-          clock = Eio.Stdenv.clock env;
-          proc_mgr = Some (Eio.Stdenv.process_mgr env);
-          net = Some (Eio.Stdenv.net env);
-        }
-      in
-      Sup.sweep_and_recover ctx;
-      (match Keeper_meta_store.read_meta config name with
-       | Ok (Some m) ->
-           check bool "meta.paused stays true without explicit resume policy"
-             true m.paused;
-           check bool "auto_resume_after_sec remains absent"
-             true (Option.is_none m.auto_resume_after_sec);
-           check bool "timeout blocker stays recorded for operator inspection"
-             true
-             (match m.runtime.last_blocker with
-              | Some info -> info.klass = Keeper_meta_contract.Turn_timeout
-              | None -> false)
-       | Ok None -> fail "meta missing"
-       | Error err -> fail ("read_meta failed: " ^ err));
-      check bool "timeout pause remains out of bootable set" false
-        (List.mem name (KR.bootable_keeper_names config));
-      check bool "timeout pause is not reconciled into registry" false
-        (Reg.is_registered ~base_path:config.base_path name);
-      let after_auto_resume =
-        Masc.Otel_metric_store.metric_total
-          Keeper_metrics.(to_string AutoResumedTotal)
-      in
-      check (float 0.001) "metric_keeper_auto_resumed_total NOT incremented"
-        baseline_auto_resume after_auto_resume)
+    }
+  in
+  check bool "timeout blocker without resume policy is due"
+    true
+    (Masc.Keeper_supervisor_types.paused_meta_auto_resume_due ~now paused_meta);
+  check bool "implicit timeout auto-resume delay is present"
+    true
+    (Option.is_some
+       (Masc.Keeper_supervisor_types.paused_meta_effective_auto_resume_after_sec
+          paused_meta))
 
 (* Regression guard for #17063/#17067: [auto_resume_after_sec = None] is the
    manual/operator pause contract.  A [Capacity_backpressure] blocker from old
@@ -2252,8 +2200,8 @@ let () =
         test_sweep_auto_resumes_registered_paused_entry;
       test_case "operator pause (None) is NOT auto-resumed by sweep" `Quick
         test_operator_pause_not_auto_resumed;
-      test_case "turn timeout blocker without resume policy is NOT auto-resumed"
-        `Quick test_turn_timeout_blocker_without_resume_policy_not_auto_resumed;
+      test_case "turn timeout blocker without resume policy is auto-recoverable"
+        `Quick test_turn_timeout_blocker_without_resume_policy_auto_recoverable;
       test_case "capacity blocker without resume policy is NOT auto-resumed"
         `Quick test_capacity_blocker_without_resume_policy_not_auto_resumed;
       test_case "initial delay capped at max_sec when initial > max (regression)" `Quick

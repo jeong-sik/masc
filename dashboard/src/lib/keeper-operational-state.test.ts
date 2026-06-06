@@ -101,6 +101,21 @@ describe('deriveKeeperOperationalState — paused branch', () => {
     })
   })
 
+  it('paused auto_recover cause when blocker is retryable timeout', () => {
+    const state = deriveKeeperOperationalState({
+      keeper: makeKeeper({
+        paused: true,
+        runtime_blocker_class: 'turn_timeout',
+      }),
+      composite: null,
+    })
+    expect(state).toMatchObject({
+      kind: 'paused',
+      attention: 'clean',
+      cause: 'auto_recover',
+    })
+  })
+
   it('paused operator cause when pause_state === paused', () => {
     const state = deriveKeeperOperationalState({
       keeper: makeKeeper({ pause_state: 'paused' }),

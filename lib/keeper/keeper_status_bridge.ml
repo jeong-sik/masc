@@ -191,18 +191,10 @@ let narrative_summary line =
   String_util.utf8_safe ~max_bytes:220 ~suffix:"..." line |> String_util.to_string
 ;;
 
-let snapshot_text_indicates_synthetic_stall text =
-  Keeper_synthetic_marker.contains_marker text
-  && has_any_ci
-       text
-       [ "no visible output"; "belief_summary"; "social_model"; "실제 막힘" ]
-;;
-
 let runtime_blocker_surface_of_progress_snapshot
       (snapshot : Keeper_memory_policy.keeper_state_snapshot)
   =
   let lines = progress_snapshot_narrative_lines snapshot in
-  let text = String.concat "\n" lines in
   let line_with needles = List.find_opt (fun line -> has_any_ci line needles) lines in
   let surface blocker_class line =
     Some { blocker_class; summary = narrative_summary line; continue_gate = false }
@@ -257,36 +249,18 @@ let runtime_blocker_surface_of_progress_snapshot
                    ; "manual"
                    ] -> surface "awaiting_operator" line
           | _ ->
-            if snapshot_text_indicates_synthetic_stall text
-            then
-              (* The outer [if lines = [] then None] guard (line 168)
-                 already returns early on an empty narrative; the
-                 [[]] arm below is unreachable here but typed for
-                 exhaustiveness so a future refactor that drops the
-                 outer guard does not silently fall through to a
-                 Sys_error from [List.hd]. *)
-              let first_line =
-                match lines with
-                | [] -> ""
-                | h :: _ -> h
-              in
-              surface
-                "synthetic_stall"
-                (line_with [ Keeper_synthetic_marker.marker_prefix ]
-                 |> Option.value ~default:first_line)
-            else (
-              match
-                line_with
-                  [ "watching"
-                  ; "monitor"
-                  ; "no action"
-                  ; "no next action"
-                  ; "자체 action 부재"
-                  ; "감시"
-                  ]
-              with
-              | Some line -> surface "self_imposed_idle" line
-              | None -> None))))
+            (match
+               line_with
+                 [ "watching"
+                 ; "monitor"
+                 ; "no action"
+                 ; "no next action"
+                 ; "자체 action 부재"
+                 ; "감시"
+                 ]
+             with
+             | Some line -> surface "self_imposed_idle" line
+             | None -> None))))
 ;;
 
 let runtime_blocker_surface_of_progress_narrative config (meta : keeper_meta) =

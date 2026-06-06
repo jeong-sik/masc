@@ -34,7 +34,7 @@ let workflow_rejection_error_json
      candidates. *)
   Task.Payloads.workflow_rejection_payload_json
     ~rule_id
-    ~scope_policy:"block_scope"
+    ~scope_policy:"observe"
     ~alternatives
     message
 ;;

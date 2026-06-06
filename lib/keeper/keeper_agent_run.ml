@@ -20,11 +20,24 @@ let progress_keeper_tool_names_for_contract =
 let completion_contract_result_for_progress_evidence =
   Turn_helpers.completion_contract_result_for_progress_evidence
 
+let keeper_oas_visibility_neutral_guardrails ?guardrails () =
+  let max_tool_calls_per_turn =
+    match guardrails with
+    | Some guardrails -> guardrails.Agent_sdk.Guardrails.max_tool_calls_per_turn
+    | None -> Agent_sdk.Guardrails.default.max_tool_calls_per_turn
+  in
+  { Agent_sdk.Guardrails.tool_filter = Agent_sdk.Guardrails.AllowAll
+  ; max_tool_calls_per_turn
+  }
+;;
+
 module For_testing = struct
   let sse_event_progress_kind = Turn_helpers.sse_event_progress_kind
   let registry_progress_on_event = Turn_helpers.registry_progress_on_event
   let progress_keeper_tool_names_for_contract =
     Contract_helpers.progress_keeper_tool_names_for_contract
+  let keeper_oas_visibility_neutral_guardrails =
+    keeper_oas_visibility_neutral_guardrails
 end
 
 (** Run a single keeper turn via OAS Agent.run().
@@ -449,6 +462,9 @@ let run_turn
            (match pre_dispatch_max_tokens_error with
             | Some err -> Error err
             | None ->
+              let keeper_oas_guardrails =
+                keeper_oas_visibility_neutral_guardrails ?guardrails ()
+              in
               let call_run_named ~initial_messages =
                 let bridge_timeout_s =
                   Keeper_llm_bridge.with_hitl_approval_headroom timeout_s
@@ -501,7 +517,7 @@ let run_turn
                     ?wait_timeout_sec:admission_wait_timeout_sec
                     ~accept:
                       Keeper_tool_response.response_has_text_or_tool_progress
-                    ?guardrails
+                    ~guardrails:keeper_oas_guardrails
                     ?on_event
                     ?on_yield
                     ?on_resume

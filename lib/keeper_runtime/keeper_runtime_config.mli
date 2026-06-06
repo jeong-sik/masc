@@ -61,7 +61,7 @@ val resolve_overrides :
     {[
       [autonomous]
       max_turns_per_call          = 7
-      semaphore_wait_timeout_sec  = 60
+      semaphore_wait_timeout_sec  = 180
       concurrency                 = 3
 
       [reactive]

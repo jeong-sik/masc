@@ -61,6 +61,11 @@ let run_all () =
     ws_count
     (Unix.gettimeofday () -. t_ws)
     remaining_ws;
+  let t_registered = Unix.gettimeofday () in
+  Shutdown.run_registered_hooks ();
+  Log.Server.info
+    "[Shutdown] registered hooks completed (%.2fs)"
+    (Unix.gettimeofday () -. t_registered);
   (* Clear transient A2A state to free memory *)
   (* Clear session identity caches *)
   Client_registry_eio.clear_session_caches ();

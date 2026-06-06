@@ -527,17 +527,12 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
   let now_id () = int_of_float (Time_compat.now () *. 1000.0) in
   let thread_id = "keeper:" ^ payload.name in
 
-  let process_single_turn ~payload ~run_id ~message_id ~agent_name =
-    ignore
-      (keeper_stream_send_event writer mutex closed
-         Ag_ui.(
-           make_event ~thread_id ~run_id:(Some run_id) Run_started));
-    ignore
-      (keeper_stream_send_event writer mutex closed
-         Ag_ui.(
-           make_event ~thread_id ~run_id:(Some run_id)
-             ~message_id:(Some message_id)
-             ~role:(Some Assistant) Text_message_start));
+  let process_single_turn ~payload ~run_id ~message_id ~agent_name
+      ~(events : Keeper_chat_events.keeper_chat_event Eio.Stream.t) =
+    Keeper_chat_events.publish events
+      (Run_started { run_id; thread_id });
+    Keeper_chat_events.publish events
+      (Text_message_start { message_id; role = Assistant });
     let has_connector_context =
       payload.channel <> "" && payload.channel_user_id <> ""
     in
@@ -643,44 +638,36 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
               Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time err)
         ()
     in
-    ignore
-      (keeper_stream_send_event writer mutex closed
-         Ag_ui.(
-           make_event ~thread_id ~run_id:(Some run_id)
-             ~custom_name:(Some "KEEPER_QUEUE_REQUEST")
-             ~custom_value:
-               (Some
-                  (Gate_protocol.message_request_to_json
-                     { request_id;
-                       destination_type = "keeper";
-                       destination_id = payload.name;
-                       channel =
-                         (if has_connector_context then payload.channel
-                          else "dashboard");
-                       actor_id = Some agent_name;
-                       status = Gate_protocol.Queued;
-                       modalities = [ "text" ];
-                       transport = Some "sse";
-                       metadata =
-                         [
-                           ("projection", "keeper_chat_stream");
-                           ("protocol", "gate_message_request");
-                         ];
-                     }))
-             Custom));
+    Keeper_chat_events.publish events
+      (Custom
+         { name = "KEEPER_QUEUE_REQUEST";
+           value =
+             Gate_protocol.message_request_to_json
+               { request_id;
+                 destination_type = "keeper";
+                 destination_id = payload.name;
+                 channel =
+                   (if has_connector_context then payload.channel
+                    else "dashboard");
+                 actor_id = Some agent_name;
+                 status = Gate_protocol.Queued;
+                 modalities = [ "text" ];
+                 transport = Some "sse";
+                 metadata =
+                   [
+                     ("projection", "keeper_chat_stream");
+                     ("protocol", "gate_message_request");
+                   ];
+               }
+         });
     let rec consume_worker_events () =
       match Eio.Stream.take worker_events with
       | Stream_delta text ->
           deltas_sent := true;
-          if
-            keeper_stream_send_event writer mutex closed
-              Ag_ui.(
-                make_event ~thread_id ~run_id:(Some run_id)
-                  ~message_id:(Some message_id)
-                  ~delta:(Some text) Text_message_content)
-          then consume_worker_events ()
+          Keeper_chat_events.publish events (Text_delta text);
+          consume_worker_events ()
       | Stream_terminal (false, err) ->
-          send_keeper_error writer mutex closed ~thread_id ~run_id err
+          Keeper_chat_events.publish events (Error { message = err })
       | Stream_terminal (true, body) -> (
           try
             let payload_json_opt, visible_reply = extract_visible_reply body in
@@ -690,40 +677,28 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
             if (not !deltas_sent) && not is_checkpoint then
               split_keeper_reply_chunks visible_reply
               |> List.iter (fun chunk ->
-                     ignore
-                       (keeper_stream_send_event writer mutex closed
-                          Ag_ui.(
-                            make_event ~thread_id ~run_id:(Some run_id)
-                              ~message_id:(Some message_id)
-                              ~delta:(Some chunk) Text_message_content)));
+                     Keeper_chat_events.publish events (Text_delta chunk));
             (match payload_json_opt with
              | Some payload_json ->
-                 ignore
-                   (keeper_stream_send_event writer mutex closed
-                      Ag_ui.(
-                        make_event ~thread_id ~run_id:(Some run_id)
-                          ~custom_name:(Some "KEEPER_REPLY_DETAILS")
-                          ~custom_value:(Some payload_json) Custom))
+                 Keeper_chat_events.publish events
+                   (Custom { name = "KEEPER_REPLY_DETAILS"; value = payload_json })
              | None -> ());
             if is_checkpoint then
-              ignore
-                (keeper_stream_send_event writer mutex closed
-                   Ag_ui.(
-                     make_event ~thread_id ~run_id:(Some run_id)
-                       ~custom_name:(Some "KEEPER_CONTINUATION_CHECKPOINT")
-                       ~custom_value:
-                         (Some
-                            (`Assoc
-                              [ ("request_id", `String request_id);
-                                ("message", `String visible_reply) ]))
-                       Custom));
-            send_keeper_stream_finish writer mutex closed ~thread_id ~run_id
-              ~message_id
+              Keeper_chat_events.publish events
+                (Custom
+                   { name = "KEEPER_CONTINUATION_CHECKPOINT";
+                     value =
+                       `Assoc
+                         [ ("request_id", `String request_id);
+                           ("message", `String visible_reply) ]
+                   });
+            Keeper_chat_events.publish events Text_message_end;
+            Keeper_chat_events.publish events (Run_finished { run_id })
           with
           | Eio.Cancel.Cancelled _ as e -> raise e
           | exn ->
-              send_keeper_error writer mutex closed ~thread_id ~run_id
-                (Printexc.to_string exn))
+              Keeper_chat_events.publish events
+                (Error { message = Printexc.to_string exn }))
     in
     consume_worker_events ()
   in
@@ -751,7 +726,10 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
            in
            let run_id = Printf.sprintf "keeper-run-%d" (now_id ()) in
            let message_id = Printf.sprintf "keeper-msg-%d" (now_id ()) in
-           process_single_turn ~payload ~run_id ~message_id ~agent_name;
+           let events = Keeper_chat_events.create () in
+           Eio.Fiber.fork ~sw:stream_sw (fun () ->
+             sse_adapter_loop ~events ~writer ~mutex ~closed);
+           process_single_turn ~payload ~run_id ~message_id ~agent_name ~events;
            let rec drain_queue () =
              match Keeper_chat_queue.dequeue ~keeper_name:payload.name with
              | None -> ()
@@ -765,8 +743,11 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
                           message = queued.content;
                           attachments = queued.attachments }
                       in
+                      let events = Keeper_chat_events.create () in
+                      Eio.Fiber.fork ~sw:stream_sw (fun () ->
+                        sse_adapter_loop ~events ~writer ~mutex ~closed);
                       process_single_turn ~payload:queued_payload ~run_id ~message_id
-                        ~agent_name
+                        ~agent_name ~events
                   | Keeper_chat_queue.Discord _ | Keeper_chat_queue.Slack _ ->
                       Log.Keeper.warn
                         "keeper_chat_queue: non-Dashboard source dropped for keeper=%s"

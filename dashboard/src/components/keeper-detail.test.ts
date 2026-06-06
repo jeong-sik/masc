@@ -117,7 +117,7 @@ vi.mock('./agent-detail-journal', () => ({
 }))
 
 vi.mock('./keeper-shared', () => ({
-  KeeperConversationPanel: () => null,
+  KeeperConversationPanel: ({ keeperName }: { keeperName: string }) => `direct chat ${keeperName}`,
   KeeperDiagnosticSummary: () => null,
   KeeperRuntimeActions: () => null,
 }))
@@ -327,8 +327,13 @@ describe('KeeperDetailPage', () => {
     } as unknown as Keeper
     keepers.value = [analyst]
 
-    render(html`<${KeeperDetailPage} />`)
+    const { container } = render(html`<${KeeperDetailPage} />`)
     expect(screen.getByText('analyst')).toBeTruthy()
+    expect(screen.getByText('direct chat analyst')).toBeTruthy()
+    expect(screen.queryByText('FSM Hub (6축 상태 머신)')).toBeNull()
+    const pageText = container.textContent ?? ''
+    expect(pageText.indexOf('대화 / 세션')).toBeGreaterThanOrEqual(0)
+    expect(pageText.indexOf('운영 상태 개요')).toBeGreaterThan(pageText.indexOf('대화 / 세션'))
     expect(mocks.selectKeeper).toHaveBeenCalledWith('analyst')
   })
 

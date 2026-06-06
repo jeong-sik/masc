@@ -259,9 +259,11 @@ export function KeeperDiagnosticSummary({
 export function KeeperConversationPanel({
   keeperName,
   placeholder,
+  layout = 'default',
 }: {
   keeperName: string
   placeholder: string
+  layout?: 'default' | 'primary'
 }) {
   const [draft, setDraft] = useState('')
   const [showMetadata, setShowMetadata] = useState(readKeeperChatMetadataVisible())
@@ -365,6 +367,7 @@ export function KeeperConversationPanel({
             emptyText="아직 표시할 대화가 없습니다. 내부 메시지와 도구 호출은 토글로 전환할 수 있습니다."
             showMetadata=${showMetadata}
             variant="messenger"
+            size=${layout === 'primary' ? 'primary' : 'default'}
           />
         </div>
 

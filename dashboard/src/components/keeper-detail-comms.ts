@@ -14,11 +14,9 @@ export function KeeperCommsPanel({ keeper }: { keeper: Keeper }) {
   const isOffline = isKeeperOffline(keeper)
 
   return html`
-    <div class="border-t border-[var(--color-border-divider)] pt-5">
-      <h3 class="m-0 mb-3 text-sm font-semibold text-[var(--color-fg-secondary)] uppercase tracking-[var(--track-sub)]">직접 통신</h3>
-
+    <div class="flex flex-col gap-3">
       ${isOffline ? html`
-        <div class="px-4 py-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-sm text-[var(--color-fg-muted)]">
+        <div class="px-4 py-3 rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-sm text-[var(--color-fg-muted)]">
           이 키퍼는 현재 비활동 상태입니다. 기동 후 메시지를 볼 수 있습니다.
         </div>
       ` : html`
@@ -26,6 +24,7 @@ export function KeeperCommsPanel({ keeper }: { keeper: Keeper }) {
           <${KeeperConversationPanel}
             keeperName=${keeper.name}
             placeholder=${'이 키퍼에게 직접 프롬프트 전송'}
+            layout="primary"
           />
         </div>
       `}

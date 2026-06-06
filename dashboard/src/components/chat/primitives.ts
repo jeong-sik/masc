@@ -9,6 +9,7 @@ import { formatCost } from '../../lib/format-number'
 import type { KeeperConversationAttachment, KeeperConversationDetails, KeeperConversationEntry } from '../../types'
 
 type ChatTranscriptVariant = 'default' | 'messenger'
+type ChatTranscriptSize = 'default' | 'primary'
 
 function timeLabel(timestamp?: string | null): string | null {
   if (!timestamp) return null
@@ -408,11 +409,13 @@ export function ChatTranscript({
   emptyText,
   showMetadata,
   variant = 'default',
+  size = 'default',
 }: {
   entries: KeeperConversationEntry[]
   emptyText: string
   showMetadata?: boolean
   variant?: ChatTranscriptVariant
+  size?: ChatTranscriptSize
 }) {
   const scrollerRef = useRef<HTMLDivElement | null>(null)
   const lastSignature = useMemo(
@@ -426,9 +429,13 @@ export function ChatTranscript({
     el.scrollTop = el.scrollHeight
   }, [lastSignature])
 
+  const heightClass = size === 'primary'
+    ? 'min-h-[18rem] max-h-[42vh] xl:max-h-[46vh]'
+    : 'min-h-75 max-h-130'
+
   return html`
     <div
-      class=${`chat-transcript flex min-h-75 max-h-130 flex-col overflow-y-auto border border-[var(--color-border-default)] shadow-[inset_0_1px_0_var(--color-border-default)] ${
+      class=${`chat-transcript flex ${heightClass} flex-col overflow-y-auto border border-[var(--color-border-default)] shadow-[inset_0_1px_0_var(--color-border-default)] ${
         variant === 'messenger'
           ? 'gap-4 rounded-[var(--radius-xl)] px-4 py-5 sm:px-5'
           : 'gap-3 rounded-[var(--radius-xl)] px-3 py-4'

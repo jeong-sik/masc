@@ -45,26 +45,6 @@ let turn_event_bus_manifest_decision
     ]
 ;;
 
-(* Pure constructor for the SDK retry-timeout error wire shape. *)
-let sdk_error_of_retry_slot_reacquire_timeout
-      ~(keeper_name : string)
-      (timeout : Keeper_turn_slot.semaphore_wait_timeout)
-  =
-  let phase = Keeper_turn_slot.semaphore_wait_phase_to_string timeout.timeout_phase in
-  let holder_summary = Keeper_turn_slot.format_slot_holders timeout.timeout_holders in
-  Agent_sdk.Error.Api
-    (Agent_sdk.Retry.Timeout
-       { message =
-           Printf.sprintf
-             "keeper turn slot reacquire timed out after degraded retry (keeper=%s \
-              phase=%s wait=%.0fs holders=%s)"
-             keeper_name
-             phase
-             timeout.timeout_wait_sec
-             holder_summary
-       })
-;;
-
 let runtime_exhaustion_detail_code detail =
   let contains needle = String_util.contains_substring_ci detail needle in
   if contains "no_first_token"

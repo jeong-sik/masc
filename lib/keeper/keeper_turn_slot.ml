@@ -575,6 +575,14 @@ let with_keeper_turn_slot_control ?(runtime_profile = "unknown") ~keeper_name ~c
         with
         | Error _ as e -> e
         | Ok () ->
+          (* The FIFO should order admission into the semaphore wait queue,
+             not hold the queue head hostage while this fiber waits for an
+             autonomous permit. Once we are at the head, drop the ticket
+             before [acquire_bounded] so tail keepers can also enter the
+             semaphore wait queue instead of burning their whole
+             queue-head timeout behind one slow head waiter. *)
+          drop_autonomous_waiter ~ticket;
+          slot_state.autonomous_ticket := None;
           (match
              acquire_bounded
                ~label:Autonomous_pool
@@ -602,8 +610,6 @@ let with_keeper_turn_slot_control ?(runtime_profile = "unknown") ~keeper_name ~c
                  ~acquired_at:(Time_compat.now ())
              in
              slot_state.autonomous_acquisition_id := Some acquisition_id;
-             drop_autonomous_waiter ~ticket;
-             slot_state.autonomous_ticket := None;
              Ok ()))
       else Ok ()
     in

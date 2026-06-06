@@ -25,10 +25,21 @@ val start_keeper_loops :
     shutdown cancels them in order. *)
 
 module For_testing : sig
+  type queued_chat_projection = {
+    payload_channel : string;
+    payload_channel_user_id : string;
+    payload_channel_user_name : string;
+    payload_channel_workspace_id : string;
+    agent_name : string;
+  }
+
   val autoboot_proactive_warmup_sec :
     base_warmup:int -> stagger_window_sec:int -> keeper_name:string -> int
 
   val board_sse_event_params : Board_dispatch.board_sse_event -> Yojson.Safe.t
+
+  val queued_chat_projection :
+    Keeper_chat_queue.queued_message -> queued_chat_projection
 end
 
 val start_background_maintenance :

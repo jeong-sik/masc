@@ -491,10 +491,12 @@ let create_backend ~sw ?(stop = Atomic.make false) ?(config = Config.make ()) en
   Eio.Fiber.fork ~sw (fun () ->
     while not @@ Atomic.get stop do
       Eio.Time.sleep env#clock 0.5;
-      try B.tick () with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | Eio.Mutex.Poisoned cause -> stop_tick_after_poisoned_mutex ~stop cause
-      | exn -> Log.Telemetry.warn "otel tick failed: %s" (Printexc.to_string exn)
+      if not (Atomic.get stop)
+      then
+        try B.tick () with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | Eio.Mutex.Poisoned cause -> stop_tick_after_poisoned_mutex ~stop cause
+        | exn -> Log.Telemetry.warn "otel tick failed: %s" (Printexc.to_string exn)
     done);
   (module B)
 ;;

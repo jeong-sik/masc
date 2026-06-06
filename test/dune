@@ -1543,6 +1543,8 @@
 
 (include stanzas/test_otel_trace_context.inc)
 
+(include stanzas/test_otel_otlp_export_e2e.inc)
+
 (include stanzas/test_personality_diff_summary_10269.inc)
 
 (include stanzas/test_personality_text_equal.inc)

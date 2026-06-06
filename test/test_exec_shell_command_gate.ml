@@ -25,7 +25,7 @@ let allowed = [ "rg"; "sort"; "head"; "wc"; "cat"; "git"; "ls" ]
 let gate_from_raw ~raw ~allowlist ~path_policy ~sandbox () =
   Gate.gate_raw ~text:raw ~allowlist ~path_policy ~sandbox ()
 let allowlist : Gate.allowlist_policy =
-  { redirect_allowed = false; allowed_commands = allowed; allow_pipes = true }
+  { redirect_allowed = false; allow_pipes = true }
 ;;
 
 (* {1 Baseline corpus} *)
@@ -282,7 +282,7 @@ let test_pipeline_segment_rejection_carries_stage_index () =
 
 let test_pipes_disabled () =
   let policy : Gate.allowlist_policy =
-    { redirect_allowed = false; allowed_commands = allowed; allow_pipes = false }
+    { redirect_allowed = false; allow_pipes = false }
   in
   match
     gate_from_raw

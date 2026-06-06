@@ -201,14 +201,13 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
     let instructions_arg = get_string_opt args "instructions" in
     let profile_defaults = load_keeper_profile_defaults name in
     let sandbox_profile_error =
-      match profile_defaults.sandbox_profile, profile_defaults.manifest_path with
-      | None, Some _ ->
+      match profile_defaults.sandbox_profile with
+      | None ->
         Some
           (missing_required_sandbox_profile_error
              ~keeper_name:name
              profile_defaults)
-      | Some _, _
-      | None, None -> None
+      | Some _ -> None
     in
     (* The previous implementation read [<base>/memory/souls/<name>/SOUL.md]
        on every keeper turn-up and wrapped the resulting (or "not found")

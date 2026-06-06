@@ -17,10 +17,6 @@ let progress_keeper_tool_names_for_contract =
   Contract_helpers.progress_keeper_tool_names_for_contract
 ;;
 
-let no_progress_success_tool_names_for_contract =
-  Contract_helpers.no_progress_success_tool_names_for_contract
-;;
-
 let completion_contract_result_for_progress_evidence =
   Turn_helpers.completion_contract_result_for_progress_evidence
 
@@ -29,8 +25,6 @@ module For_testing = struct
   let registry_progress_on_event = Turn_helpers.registry_progress_on_event
   let progress_keeper_tool_names_for_contract =
     Contract_helpers.progress_keeper_tool_names_for_contract
-  let no_progress_success_tool_names_for_contract =
-    Contract_helpers.no_progress_success_tool_names_for_contract
 end
 
 (** Run a single keeper turn via OAS Agent.run().

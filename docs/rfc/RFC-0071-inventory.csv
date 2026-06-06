@@ -444,8 +444,6 @@ lib/keeper/keeper_meta_contract.ml,285,None,unclassified
 lib/keeper/keeper_meta_contract.ml,295,None,unclassified
 lib/keeper/keeper_meta_json_parse.ml,508,None,unclassified
 lib/keeper/keeper_meta_json.ml,325,(),unclassified
-lib/keeper/keeper_meta_tool_access.ml,105,None,unclassified
-lib/keeper/keeper_meta_tool_access.ml,145,false,unclassified
 lib/keeper/keeper_msg_async.ml,100,None,unclassified
 lib/keeper/keeper_msg_async.ml,107,None,unclassified
 lib/keeper/keeper_msg_async.ml,113,None,unclassified

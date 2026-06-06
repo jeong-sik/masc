@@ -64,9 +64,15 @@ let host () =
     | None -> None
     | Some s -> if String.trim s = "" then None else Some s
   in
+  let base_path_raw =
+    Env_config_core.base_path_source_opt () |> Option.map snd
+  in
+  let base_path =
+    base_path_raw |> Option.map Env_config_core.normalize_masc_base_path_input
+  in
   let default_workspace_root fallback =
-    match get_opt "MASC_BASE_PATH" with
-    | Some root -> Env_config_core.normalize_masc_base_path_input root
+    match base_path with
+    | Some root -> root
     | None -> fallback
   in
   { cred_root = Filename.concat tmp "keeper-creds"
@@ -89,12 +95,8 @@ let host () =
          (previously Env_config_core.base_path_opt).  Empty / missing
          env returns None; non-empty trimmed values are passed through
          Env_config_core.normalize_masc_base_path_input. *)
-      get_opt "MASC_BASE_PATH"
-      |> Option.map Env_config_core.normalize_masc_base_path_input
-      |> (function
-        | Some "" -> None
-        | other -> other)
-  ; base_path_raw = get_opt "MASC_BASE_PATH"
+      base_path
+  ; base_path_raw
   ; config_dir = get_opt "MASC_CONFIG_DIR"
   ; data_dir = get_opt "MASC_DATA_DIR"
   ; personas_dir = get_opt "MASC_PERSONAS_DIR"

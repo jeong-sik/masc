@@ -73,7 +73,7 @@ let make_meta ?(name = "keeper-exec-tools") ?(policy_voice_enabled = false) ?too
           ("allowed_paths", `List [ `String "*" ]);
           ("policy_voice_enabled", `Bool policy_voice_enabled);
           ( "tool_access",
-            Masc.Keeper_meta_tool_access.tool_access_to_json tool_access );
+            Json_util.json_string_list tool_access );
         ])
   with
   | Ok meta -> meta
@@ -284,7 +284,7 @@ let test_tool_not_allowed_denied_by_policy_counter () =
           ; ("trace_id", `String "test-not-allowed-b")
           ; ("allowed_paths", `List [ `String "*" ])
           ; ( "tool_access"
-            , Masc.Keeper_meta_tool_access.tool_access_to_json
+            , Json_util.json_string_list
                 ([ "keeper_board_post" ]) )
           ; ( "tool_denylist"
             , `List [ `String "keeper_board_post" ] )

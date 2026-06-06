@@ -296,13 +296,24 @@ let handle_tool_execute_typed
       ()
   =
   let root = Keeper_alerting_path.project_root_of_config config in
-  match Keeper_tool_execute_path.resolve_tool_write_cwd ~config ~meta ~args with
+  let execute_cwd_policy =
+    if write_enabled
+    then Keeper_tool_execute_path.Write_enabled_execute_cwd
+    else Keeper_tool_execute_path.Readonly_execute_cwd
+  in
+  match
+    Keeper_tool_execute_path.resolve_tool_execute_cwd
+      ~policy:execute_cwd_policy
+      ~config
+      ~meta
+      ~args
+  with
     | Error e -> error_json e
     | Ok cwd ->
-      let execution_location_fields cwd =
-        [ ( "execution_location"
-          , Keeper_tool_execute_path.execution_location_json ~config ~meta ~args ~cwd )
-        ]
+        let execution_location_fields cwd =
+          [ ( "execution_location"
+            , Keeper_sandbox_repo_path.execution_location_json ~config ~meta ~args ~cwd )
+          ]
       in
       let typed_args = assoc_upsert "cwd" (`String cwd) args in
       match Keeper_tool_execute_typed_input.of_json typed_args with
@@ -471,11 +482,11 @@ let handle_tool_execute_typed
             ()
         else
         let repo_cwd_context =
-          Keeper_tool_execute_path.repo_cwd_context ~config ~meta ~cwd
+          Keeper_sandbox_repo_path.classify_cwd ~config ~meta ~cwd
         in
         let is_direct_sandbox_repo_root =
           match repo_cwd_context with
-          | Some { Keeper_tool_execute_path.is_direct_root = true; _ } -> true
+          | Some { Keeper_sandbox_repo_path.is_direct_root = true; _ } -> true
           | Some _ | None -> false
         in
         let is_git_diagnostic_command =
@@ -524,16 +535,24 @@ let handle_tool_execute_typed
           let dispatch_result =
             Keeper_tool_execute_shell_ir.dispatch_classified
               ~before_path_validation:(fun ir ->
+                let repo_sync_policy =
+                  if write_enabled
+                  then
+                    Keeper_tool_execute_repo_readiness.Allow_repo_sync
+                  else
+                    Keeper_tool_execute_repo_readiness.Reject_repo_sync
+                in
                 match
-                  Keeper_tool_execute_path.validate_repo_cwd_currency_ready
+                  Keeper_tool_execute_repo_readiness.validate_cwd_ready
                     ~config
                     ~meta
                     ~cwd
+                    ~repo_sync_policy
                     ~allow_stale_preserved_repo_context
                 with
                 | Error _ as err -> err
                 | Ok () ->
-                  Keeper_tool_execute_path.validate_repo_path_args_ready
+                  Keeper_tool_execute_repo_readiness.validate_path_args_ready
                     ~config
                     ~meta
                     ~cwd
@@ -569,7 +588,7 @@ let handle_tool_execute_typed
           | Ok result ->
             (match result.status, repo_cwd_context with
              | Unix.WEXITED 0, Some { repo_name; _ } when is_direct_repo_git_recovery ->
-               Keeper_tool_execute_path.invalidate_repo_currency_cache
+               Keeper_tool_execute_repo_readiness.invalidate_repo_sync_cache
                  ~config
                  ~meta
                  ~repo_name
@@ -647,17 +666,22 @@ let handle_tool_execute
       ~(args : Yojson.Safe.t)
       ()
   =
+  let execute_write_surface_enabled names =
+    let is_write_enabled_candidate = function
+      | "tool_edit_file" | "tool_write_file" | "tool_execute" -> true
+      | _ -> false
+    in
+    names
+    |> Keeper_meta_contract.normalize_tool_names
+    |> List.exists is_write_enabled_candidate
+  in
   let timeout_sec =
     Keeper_tool_execute_timeout.clamp_shell_timeout
       ~min_sec:(Keeper_tool_execute_timeout.keeper_tool_execute_shell_ir_min_timeout_sec_for_args args)
       ~default:Keeper_tool_execute_timeout.io_timeout_sec
       args
   in
-  let write_enabled =
-    List.exists
-      (fun n -> n = "tool_edit_file" || n = "tool_write_file")
-      meta.tool_access
-  in
+  let write_enabled = execute_write_surface_enabled meta.tool_access in
   if has_typed_execute_input_key args
   then
     handle_tool_execute_typed

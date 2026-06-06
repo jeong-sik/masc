@@ -1,7 +1,7 @@
 open Alcotest
 
 module KAR = Masc.Keeper_agent_run
-module KMA = Masc.Keeper_meta_tool_access
+module KTN = Keeper_tool_name
 module KTP = Masc.Keeper_tool_progress
 
 let test_claim_tool_classification_covers_supported_claim_tools () =
@@ -55,17 +55,17 @@ let test_board_tool_access_uses_keeper_owned_surface_names () =
     bool
     "keeper board wrapper counts as board surface"
     true
-    (KMA.tool_names_include_board [ "keeper_board_post" ]);
+    (KTN.is_board_surface_name "keeper_board_post");
   check
     bool
     "legacy public board name counts as board surface"
     true
-    (KMA.tool_names_include_board [ "masc_board_post" ]);
+    (KTN.is_board_surface_name "masc_board_post");
   check
     bool
     "non-board keeper task tool does not count as board surface"
     false
-    (KMA.tool_names_include_board [ "keeper_task_claim" ])
+    (KTN.is_board_surface_name "keeper_task_claim")
 ;;
 
 let test_claim_contract_result_counts_initial_claim_as_execution () =
@@ -114,12 +114,6 @@ let test_contract_progress_filters_no_progress_tool_results () =
     []
     (KAR.For_testing.progress_keeper_tool_names_for_contract
        ~actual_keeper_tool_names:[ "keeper_task_claim" ]
-       ~tool_calls:no_progress_only);
-  check
-    (list string)
-    "claim remains visible as no-progress success"
-    [ "keeper_task_claim" ]
-    (KAR.For_testing.no_progress_success_tool_names_for_contract
        ~tool_calls:no_progress_only);
   check
     (list string)

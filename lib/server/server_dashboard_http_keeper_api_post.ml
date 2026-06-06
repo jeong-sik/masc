@@ -27,7 +27,7 @@ let keeper_tools_response_json (meta : Keeper_meta_contract.keeper_meta) =
   `Assoc
     [
       ("ok", `Bool true);
-      ("tool_access", Keeper_meta_contract.tool_access_to_json meta.tool_access);
+      ("tool_access", Json_util.json_string_list meta.tool_access);
       ("resolved_allowlist", `List (List.map (fun s -> `String s) allowed));
       ("tool_denylist", `List (List.map (fun s -> `String s) meta.tool_denylist));
       ("active_masc_tool_count", `Int masc_count);

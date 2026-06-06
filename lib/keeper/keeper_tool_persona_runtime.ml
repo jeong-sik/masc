@@ -82,7 +82,7 @@ let resolved_keeper_args_to_json
   in
   let tool_policy_field =
     match tool_access_opt with
-    | Some tool_access -> [("tool_access", tool_access_to_json tool_access)]
+    | Some tool_access -> [("tool_access", Json_util.json_string_list tool_access)]
     | None -> []
   in
   let shards_field =

@@ -6,22 +6,23 @@
     type-heavy contract from JSON parsing
     ({!Keeper_meta_json}) and store I/O.
 
-    Re-exports {!Keeper_meta_tool_access} via [include] for the
-    [tool_access] ADT — callers can reach it via
-    {!Keeper_meta_contract.tool_access} (type identity preserved
-    through the runtime).
-
     Internal: ~3 helpers stay private —
     \[blocker_class_of_serialized_string] (deserializer used
     only by JSON parsing), \[map_compaction_rt] /
     \[map_proactive_rt]
     (nested-record updaters that callers reach via the higher-level
-    {!map_runtime} / {!map_usage}).  All consumed only via the include
-    runtime or the JSON pipeline. *)
+    {!map_runtime} / {!map_usage}).  All consumed only via the runtime
+    contract or the JSON pipeline. *)
 
-(** {1 Tool-access runtime re-export} *)
+(** {1 Tool-access persisted-meta helpers} *)
 
-include module type of Keeper_meta_tool_access
+(** Trim, drop blanks, dedupe (preserve first-seen order). *)
+val normalize_tool_names : string list -> string list
+
+(** Parse [tool_access] from persisted meta JSON. Canonical form is a JSON
+    array of tool names. *)
+val tool_access_of_meta_json :
+  Yojson.Safe.t -> (string list, string) result
 
 (** {1 Policy types} *)
 

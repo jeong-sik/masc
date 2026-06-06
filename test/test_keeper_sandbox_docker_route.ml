@@ -10,7 +10,6 @@
 
 module Workspace = Masc.Workspace
 module Keeper_meta_contract = Masc.Keeper_meta_contract
-module Keeper_meta_tool_access = Masc.Keeper_meta_tool_access
 module Keeper_tool_command_runtime = Masc.Keeper_tool_command_runtime
 module Keeper_tool_dispatch_runtime = Masc.Keeper_tool_dispatch_runtime
 module Keeper_registry = Masc.Keeper_registry
@@ -194,7 +193,7 @@ let make_meta ?tool_access ~name ~sandbox () =
     | Some tool_access ->
       fields
       @ [ ( "tool_access",
-            Keeper_meta_tool_access.tool_access_to_json tool_access ) ]
+            Json_util.json_string_list tool_access ) ]
   in
   let json =
     `Assoc fields

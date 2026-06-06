@@ -7,7 +7,6 @@
     4. Empty commands are rejected *)
 
 module Workspace = Masc.Workspace
-module Keeper_meta_tool_access = Masc.Keeper_meta_tool_access
 module Exec_core = Masc.Exec_core
 module Keeper_tool_command_runtime = Masc.Keeper_tool_command_runtime
 module Keeper_registry = Masc.Keeper_registry
@@ -456,8 +455,25 @@ let parse_error_field raw =
   |> Json.member "error"
   |> Json.to_string_option
 
+let sandbox_bundle_paths ~base_path ~(meta : Masc.Keeper_meta_contract.keeper_meta) =
+  let playground =
+    Filename.concat base_path (playground_path_of meta.name)
+    |> Masc.Keeper_alerting_path.strip_trailing_slashes
+  in
+  [ playground
+  ; Filename.concat playground "mind"
+  ; Filename.concat playground "repos"
+  ]
+
+let check_sandbox_bundle_absent ~base_path ~meta =
+  sandbox_bundle_paths ~base_path ~meta
+  |> List.iter (fun path ->
+    Alcotest.(check bool) ("sandbox bundle path absent: " ^ path) false
+      (Sys.file_exists path))
+
 let is_repo_or_task_state_path_block err =
   String_util.contains_substring err "sandbox_repo_not_ready"
+  || String_util.contains_substring err "sandbox_worktree_not_ready"
   || String_util.contains_substring err "task_state_file_path_blocked"
 
 let test_tool_execute_rejects_parent_git_repo_cwd () =
@@ -479,10 +495,24 @@ let test_tool_execute_rejects_parent_git_repo_cwd () =
       ]
   in
   match
-    Masc.Keeper_tool_execute_path.resolve_tool_write_cwd ~config ~meta ~args
+    Masc.Keeper_tool_execute_path.resolve_tool_execute_cwd
+      ~policy:Masc.Keeper_tool_execute_path.Write_enabled_execute_cwd
+      ~config
+      ~meta
+      ~args
   with
-  | Ok cwd -> Alcotest.failf "expected repo cwd rejection, got %s" cwd
-  | Error err ->
+  | Error err -> Alcotest.failf "cwd resolution should be path-only, got: %s" err
+  | Ok cwd ->
+    (match
+       Masc.Keeper_tool_execute_repo_readiness.validate_cwd_ready
+         ~repo_sync_policy:Masc.Keeper_tool_execute_repo_readiness.Allow_repo_sync
+         ~config
+         ~meta
+         ~cwd
+         ~allow_stale_preserved_repo_context:false
+     with
+     | Ok () -> Alcotest.failf "expected repo readiness rejection, got %s" cwd
+     | Error err ->
     if not (is_repo_or_task_state_path_block err) then
       Alcotest.failf
         "expected sandbox_repo_not_ready or task_state_file_path_blocked, got: %s"
@@ -494,7 +524,7 @@ let test_tool_execute_rejects_parent_git_repo_cwd () =
     else
       Alcotest.(check bool) "repo path is surfaced"
         true
-        (String_util.contains_substring err "repos/masc")
+        (String_util.contains_substring err "repos/masc"))
 
 let test_tool_execute_rejects_parent_git_repo_path_arg () =
   with_eio_fs @@ fun () ->
@@ -662,11 +692,90 @@ let test_tool_execute_rejects_stale_worktree_path_arg () =
   in
   match parse_error_field raw with
   | Some err ->
-    Alcotest.(check bool) "sandbox_repo_not_ready"
+    Alcotest.(check bool) "sandbox_worktree_not_ready"
       true
-      (String_util.contains_substring err "sandbox_repo_not_ready");
+      (String_util.contains_substring err "sandbox_worktree_not_ready");
     if not (String_util.contains_substring err ".worktrees/task")
     then Alcotest.failf "expected stale worktree root, got: %s" err
+  | None -> Alcotest.fail ("expected error json, got: " ^ raw)
+
+let test_tool_execute_rejects_broken_worktree_gitfile () =
+  with_eio_fs @@ fun () ->
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  let config = Workspace.default_config base in
+  let meta = make_local_meta "sangsu" in
+  let playground = Filename.concat base (playground_path_of meta.name) in
+  let repo_dir = Filename.concat playground "repos/masc" in
+  let worktree_dir = Filename.concat repo_dir ".worktrees/task-broken" in
+  ensure_dir worktree_dir;
+  run_process_ok ~cwd:repo_dir "git" [ "init"; "-q"; "--initial-branch=main" ];
+  write_file
+    (Filename.concat worktree_dir ".git")
+    (Printf.sprintf "gitdir: %s\n" (Filename.concat repo_dir ".git/worktrees/task-broken"));
+  let raw =
+    Keeper_tool_command_runtime.handle_tool_execute
+      ~turn_sandbox_factory:None
+      ~exec_cache:None
+      ~config
+      ~meta
+      ~args:
+        (`Assoc
+           [ "executable", `String "cat"
+           ; "argv", `List [ `String "README.md" ]
+           ; "cwd", `String "repos/masc/.worktrees/task-broken"
+           ])
+      ()
+  in
+  match parse_error_field raw with
+  | Some err ->
+    Alcotest.(check bool) "broken gitfile is worktree-not-ready"
+      true
+      (String_util.contains_substring err "sandbox_worktree_not_ready");
+    Alcotest.(check bool) "git probe failure is surfaced"
+      true
+      (String_util.contains_substring err "git_error=");
+    Alcotest.(check bool) "git error explains broken admin dir"
+      true
+      (String_util.contains_substring err "not a git repository")
+  | None -> Alcotest.fail ("expected broken worktree error json, got: " ^ raw)
+
+let test_tool_execute_readonly_missing_worktree_path_arg_does_not_materialize () =
+  with_eio_fs @@ fun () ->
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  let config = Workspace.default_config base in
+  let meta = { (make_local_meta "readonly-missing-path-arg") with tool_access = [] } in
+  let playground = Filename.concat base (playground_path_of meta.name) in
+  let repo_dir = Filename.concat playground "repos/masc" in
+  let missing_worktree = Filename.concat repo_dir ".worktrees/task-missing" in
+  ensure_dir repo_dir;
+  run_process_ok ~cwd:repo_dir "git" [ "init"; "-q"; "--initial-branch=main" ];
+  let raw =
+    Keeper_tool_command_runtime.handle_tool_execute
+      ~turn_sandbox_factory:None
+      ~exec_cache:None
+      ~config
+      ~meta
+      ~args:
+        (`Assoc
+           [ "executable", `String "cat"
+           ; ( "argv"
+             , `List
+                 [ `String "./repos/masc/.worktrees/task-missing/.missing.ml" ] )
+           ; "cwd", `String playground
+           ])
+      ()
+  in
+  match parse_error_field raw with
+  | Some err ->
+    if not (is_repo_or_task_state_path_block err) then
+      Alcotest.failf
+        "expected sandbox_repo_not_ready or task_state_file_path_blocked, got: %s"
+        err;
+    Alcotest.(check bool) "missing worktree path arg was not materialized"
+      false
+      (Sys.file_exists missing_worktree)
   | None -> Alcotest.fail ("expected error json, got: " ^ raw)
 
 let test_tool_execute_missing_worktree_cwd_does_not_create_directory () =
@@ -696,19 +805,82 @@ let test_tool_execute_missing_worktree_cwd_does_not_create_directory () =
   in
   match parse_error_field raw with
   | Some err ->
-    if not (is_repo_or_task_state_path_block err) then
-      Alcotest.failf
-        "expected sandbox_repo_not_ready or task_state_file_path_blocked, got: %s"
-        err;
+    if not (String_util.contains_substring err "cwd_not_directory") then
+      Alcotest.failf "expected cwd_not_directory, got: %s" err;
     Alcotest.(check bool) "missing worktree was not materialized"
       false
       (Sys.file_exists missing_worktree)
   | None -> Alcotest.fail ("expected error json, got: " ^ raw)
 
-let test_tool_execute_blocks_preserved_direct_repo_git_show () =
+let test_tool_execute_readonly_missing_cwd_does_not_create_directory () =
+  with_eio_fs @@ fun () ->
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  let config = Workspace.default_config base in
+  let meta = { (make_local_meta "readonly-missing-cwd") with tool_access = [] } in
+  let playground = Filename.concat base (playground_path_of meta.name) in
+  let missing_cwd = Filename.concat playground "mind/missing-cwd" in
+  let raw =
+    Keeper_tool_command_runtime.handle_tool_execute
+      ~turn_sandbox_factory:None
+      ~exec_cache:None
+      ~config
+      ~meta
+      ~args:
+        (`Assoc
+           [ "executable", `String "ls"
+           ; "argv", `List []
+           ; "cwd", `String missing_cwd
+           ])
+      ()
+  in
+  match parse_error_field raw with
+  | Some err ->
+    if not (String_util.contains_substring err "cwd_not_directory") then
+      Alcotest.failf "expected cwd_not_directory, got: %s" err;
+    Alcotest.(check bool) "readonly preflight did not mkdir" false
+      (Sys.file_exists missing_cwd);
+    check_sandbox_bundle_absent ~base_path:base ~meta
+  | None -> Alcotest.fail ("expected missing cwd error json, got: " ^ raw)
+
+let test_tool_execute_readonly_default_cwd_does_not_create_sandbox_bundle () =
+  with_eio_fs @@ fun () ->
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  let config = Workspace.default_config base in
+  let meta = { (make_local_meta "readonly-default-cwd") with tool_access = [] } in
+  let raw =
+    Keeper_tool_command_runtime.handle_tool_execute
+      ~turn_sandbox_factory:None
+      ~exec_cache:None
+      ~config
+      ~meta
+      ~args:(`Assoc [ "executable", `String "ls"; "argv", `List [] ])
+      ()
+  in
+  match parse_error_field raw with
+  | Some err ->
+    if not (String_util.contains_substring err "cwd_not_directory") then
+      Alcotest.failf "expected cwd_not_directory, got: %s" err;
+    check_sandbox_bundle_absent ~base_path:base ~meta
+  | None -> Alcotest.fail ("expected default cwd error json, got: " ^ raw)
+
+let git_show_file ~cwd revspec =
+  match run_process ~cwd "git" [ "show"; revspec ] with
+  | Unix.WEXITED 0, stdout, _ -> stdout
+  | status, stdout, stderr ->
+    Alcotest.failf "git show failed: status=%s stdout=%s stderr=%s"
+      (Masc.Keeper_sandbox_exec_failure.status_label status)
+      stdout
+      stderr
+
+let test_tool_execute_readonly_blocks_preserved_direct_repo_git_show_without_fetch () =
   with_eio_fs @@ fun () ->
   let base_path, config, meta, _repo_dir =
     setup_preserved_sandbox_repo ~keeper_name:"stale-direct-git-show"
+  in
+  let base_path, config, meta, repo_dir =
+    base_path, config, meta, _repo_dir
   in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
   Keeper_registry.clear ();
@@ -728,14 +900,14 @@ let test_tool_execute_blocks_preserved_direct_repo_git_show () =
   in
   match parse_error_field raw with
   | Some err ->
-    Alcotest.(check bool) "stale direct repo root is rejected" true
-      (String_util.contains_substring err "sandbox_repo_stale");
-    Alcotest.(check bool) "preserved reason is surfaced" true
-      (String_util.contains_substring err "uncommitted changes");
+    Alcotest.(check bool) "readonly direct repo root is rejected without sync" true
+      (String_util.contains_substring err "sandbox_repo_sync_disabled");
     Alcotest.(check bool) "worktree remedy is surfaced" true
       (String_util.contains_substring err "repos/masc/.worktrees/<task>");
     Alcotest.(check bool) "git show did not execute" false
-      (String_util.contains_substring raw "v2")
+      (String_util.contains_substring raw "v2");
+    Alcotest.(check string) "origin/main was not fetched" "v1\n"
+      (git_show_file ~cwd:repo_dir "origin/main:README.md")
   | None -> Alcotest.fail ("expected stale repo error json, got: " ^ raw)
 
 let test_tool_execute_allows_preserved_direct_repo_git_status () =
@@ -872,13 +1044,16 @@ let test_tool_execute_allows_preserved_direct_repo_git_clean_df () =
   Alcotest.(check bool) "dirty fixture removed by clean" false
     (Sys.file_exists dirty_path)
 
-let test_tool_execute_git_recovery_invalidates_repo_currency_cache () =
+let test_tool_execute_git_recovery_invalidates_repo_sync_cache () =
   with_eio_fs @@ fun () ->
   let base_path, config, meta, _repo_dir =
     setup_preserved_sandbox_repo ~keeper_name:"stale-direct-git-clean-cache"
   in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
   Keeper_registry.clear ();
+  let meta =
+    { meta with tool_access = [ "tool_edit_file"; "tool_write_file"; "tool_execute" ] }
+  in
   let run executable argv =
     Keeper_tool_command_runtime.handle_tool_execute
       ~turn_sandbox_factory:None
@@ -1184,7 +1359,7 @@ let make_write_enabled_meta name =
         ("agent_name", `String ("agent-" ^ name));
         ("trace_id", `String ("trace-" ^ name));
         ( "tool_access",
-          Keeper_meta_tool_access.tool_access_to_json
+          Json_util.json_string_list
             (["tool_edit_file"; "tool_write_file"]) );
       ]
   in
@@ -1254,7 +1429,7 @@ let test_execution_location_classifies_repo_worktree_subpath () =
     Filename.concat playground "repos/masc/.worktrees/task-123/lib"
   in
   let loc =
-    Masc.Keeper_tool_execute_path.execution_location_json
+    Masc.Keeper_sandbox_repo_path.execution_location_json
       ~config
       ~meta
       ~args:
@@ -1310,7 +1485,7 @@ let test_execution_location_outside_playground_has_null_relative_cwd () =
   let meta = make_readonly_meta "exec-location-outside" in
   let cwd = Filename.concat base_path "outside" in
   let loc =
-    Masc.Keeper_tool_execute_path.execution_location_json
+    Masc.Keeper_sandbox_repo_path.execution_location_json
       ~config
       ~meta
       ~args:(`Assoc [ "cwd", `String cwd ])
@@ -1988,13 +2163,29 @@ let () =
             `Quick
             test_tool_execute_rejects_stale_worktree_path_arg
         ; Alcotest.test_case
+            "broken worktree gitfile rejects as worktree not ready"
+            `Quick
+            test_tool_execute_rejects_broken_worktree_gitfile
+        ; Alcotest.test_case
+            "readonly missing worktree path arg rejects without materializing"
+            `Quick
+            test_tool_execute_readonly_missing_worktree_path_arg_does_not_materialize
+        ; Alcotest.test_case
             "missing worktree cwd rejects without mkdir"
             `Quick
             test_tool_execute_missing_worktree_cwd_does_not_create_directory
         ; Alcotest.test_case
-            "preserved direct repo root blocks git show"
+            "readonly missing cwd rejects without mkdir"
             `Quick
-            test_tool_execute_blocks_preserved_direct_repo_git_show
+            test_tool_execute_readonly_missing_cwd_does_not_create_directory
+        ; Alcotest.test_case
+            "readonly default cwd rejects without sandbox bundle"
+            `Quick
+            test_tool_execute_readonly_default_cwd_does_not_create_sandbox_bundle
+        ; Alcotest.test_case
+            "readonly preserved direct repo root blocks git show without fetch"
+            `Quick
+            test_tool_execute_readonly_blocks_preserved_direct_repo_git_show_without_fetch
         ; Alcotest.test_case
             "preserved direct repo root allows git status"
             `Quick
@@ -2012,9 +2203,9 @@ let () =
             `Quick
             test_tool_execute_allows_preserved_direct_repo_git_clean_df
         ; Alcotest.test_case
-            "git recovery invalidates stale currency cache"
+            "git recovery invalidates stale repo sync cache"
             `Quick
-            test_tool_execute_git_recovery_invalidates_repo_currency_cache
+            test_tool_execute_git_recovery_invalidates_repo_sync_cache
         ; Alcotest.test_case
             "readonly Execute blocks worktree git recovery"
             `Quick

@@ -382,7 +382,7 @@ let keeper_config_json (config : Workspace.config) (name : string)
       in
       let tools_access =
         `Assoc [
-          ("tool_access", Keeper_meta_contract.tool_access_to_json m.tool_access);
+          ("tool_access", Json_util.json_string_list m.tool_access);
           ("tool_denylist", `List (List.map (fun s -> `String s) m.tool_denylist));
         ]
       in

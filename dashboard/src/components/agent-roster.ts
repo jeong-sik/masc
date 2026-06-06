@@ -128,6 +128,7 @@ function rosterContextMeta(
  * Display rules per typed state:
  *  - stuck             → `현재 차단`  (text: backend summary or typed reason)
  *  - running + staleBlocker → `이전 차단` (informational; not a headline)
+ *  - running + synthetic_stall → `상태 추정` (diagnostic; not a blocker)
  *  - running           → fallback to diagnostic error / monitoring hint
  *  - paused           → pause cause when available, because it explains the
  *                       resume gate.
@@ -191,6 +192,15 @@ export function rosterStateNote(
       label: '이전 차단',
       text: `이전 턴 차단 (${state.staleBlocker}) — 현재는 실행 중`,
       kind: state.staleBlocker,
+    }
+  }
+
+  if (state.kind === 'running' && keeper.runtime_blocker_class === 'synthetic_stall') {
+    const summary = keeper.runtime_blocker_summary?.trim()
+    return {
+      label: '상태 추정',
+      text: summary || '실제 STATE 없이 합성된 진행 기록만 남아 최근 턴 산출물 재확인이 필요합니다.',
+      kind: 'synthetic_stall',
     }
   }
 

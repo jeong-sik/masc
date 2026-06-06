@@ -384,9 +384,9 @@ OAS Agent.run의 hook lifecycle에 keeper 동작을 주입:
 
 | 검사 | 동작 |
 |------|------|
-| Cost budget | 누적 cost가 한도 초과 시 tool call 거부 |
 | Destructive pattern | `rm -rf`, `drop table`, `force push` 등 위험 패턴 감지 시 거부 |
 | Autonomy filter | autonomy_level에 따라 허용 tool 목록 필터링 |
+| Cost telemetry | 비용은 ledger/dashboard에 기록한다. Cost threshold는 tool call 거부 사유가 아니다. |
 
 Destructive check 대상 도구: `tool_execute`, `tool_edit_file`, `keeper_edit`
 

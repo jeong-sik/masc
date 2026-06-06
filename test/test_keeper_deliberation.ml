@@ -582,15 +582,15 @@ let test_budget_check_under_budget () =
     (D.deliberation_budget_check ~daily_budget_usd:0.10 ~cost_today_usd:0.05)
 
 let test_budget_check_at_budget () =
-  check bool "at budget (should fail)" false
+  check bool "at budget remains advisory" true
     (D.deliberation_budget_check ~daily_budget_usd:0.10 ~cost_today_usd:0.10)
 
 let test_budget_check_over_budget () =
-  check bool "over budget" false
+  check bool "over budget remains advisory" true
     (D.deliberation_budget_check ~daily_budget_usd:0.10 ~cost_today_usd:0.15)
 
 let test_budget_check_zero_budget () =
-  check bool "zero budget always fails" false
+  check bool "zero budget remains advisory" true
     (D.deliberation_budget_check ~daily_budget_usd:0.0 ~cost_today_usd:0.0)
 
 let test_budget_check_zero_cost () =
@@ -1135,11 +1135,11 @@ let () =
         [
           test_case "under budget returns true" `Quick
             test_budget_check_under_budget;
-          test_case "at budget returns false" `Quick
+          test_case "at budget remains advisory" `Quick
             test_budget_check_at_budget;
-          test_case "over budget returns false" `Quick
+          test_case "over budget remains advisory" `Quick
             test_budget_check_over_budget;
-          test_case "zero budget always false" `Quick
+          test_case "zero budget remains advisory" `Quick
             test_budget_check_zero_budget;
           test_case "zero cost under positive budget" `Quick
             test_budget_check_zero_cost;

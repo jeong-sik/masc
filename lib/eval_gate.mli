@@ -1,15 +1,17 @@
 (** Eval_gate — Pre/Post execution gates for Keeper tool calls.
 
     Multi-layer defense (Swiss Cheese Model):
-    1. Cost budget check
-    2. Destructive operation detection
-    3. Tool allowlist
-    4. Entropy check *)
+    1. Destructive operation detection
+    2. Tool allowlist
+    3. Entropy check
+
+    Cost thresholds are advisory telemetry only and must not reject execution. *)
 
 (** {1 Configuration} *)
 
 type gate_config = {
   max_cost_usd : float;
+  (** Advisory cost threshold used for reporting/warnings only. *)
   max_tool_calls_per_turn : int;
   entropy_threshold : int;
   destructive_check_enabled : bool;

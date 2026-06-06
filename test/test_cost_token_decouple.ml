@@ -4,7 +4,7 @@
     [zero_token_usage_reported]) forced the accounted [cost_usd] to 0.0 and the
     source label to [usage_untrusted], even when the provider reported a positive
     authoritative cost. Empirically this had never suppressed a real dollar (all
-    untrusted ledger rows carried raw_cost_usd=0.0), so the gate was a no-op that
+    untrusted ledger rows carried raw_cost_usd=0.0), so the coupling was a no-op that
     carried a latent footgun: a future provider reporting 0 tokens + nonzero
     cost_usd would have real spend silently dropped from accounting.
 

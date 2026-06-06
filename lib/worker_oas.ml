@@ -298,11 +298,12 @@ let render_worker_skip_reason ~tool_name ~reason_code ~reason_text =
 
 (** Build pre_tool_use hook with optional safety gates.
 
-    When [gate_config] is provided, adds 3-gate defense-in-depth
+    When [gate_config] is provided, adds safety defense-in-depth
     (same pattern as keeper_hooks_oas.ml):
     - Gate 0: Deny list — reject tools in [gate_config.denied_tools]
-    - Gate 1: Cost budget — reject when [accumulated_cost_usd >= max_cost_usd]
-    - Gate 2: Destructive pattern detection — reject dangerous shell commands
+    - Gate 1: Destructive pattern detection — reject dangerous shell commands
+
+    [gate_config.max_cost_usd] is advisory telemetry only and must not reject.
 
     When [gate_config] is None, only name tracking is performed (backward compat).
 
@@ -315,7 +316,7 @@ let make_tool_tracking_hooks ?gate_config ?context () =
         Some
           (fun event ->
             match event with
-            | Agent_sdk.Hooks.PreToolUse { tool_name; input; accumulated_cost_usd; _ } ->
+            | Agent_sdk.Hooks.PreToolUse { tool_name; input; _ } ->
               (* Always track tool names *)
               tool_names_ref := tool_name :: !tool_names_ref;
               (* Safety gates (when gate_config is provided) *)
@@ -335,27 +336,7 @@ let make_tool_tracking_hooks ?gate_config ?context () =
                         ~reason_code:"worker_deny"
                         ~reason_text:"tool is on the worker deny list"))
                  else if
-                   (* Gate 1: Cost budget *)
-                   accumulated_cost_usd >= gate.max_cost_usd
-                 then (
-                   let reason_text =
-                     Printf.sprintf
-                       "accumulated_cost_usd=%.4f exceeded limit=%.4f"
-                       accumulated_cost_usd
-                       gate.max_cost_usd
-                   in
-                   Log.LocalWorker.warn
-                     "worker cost gate: $%.4f >= $%.4f limit, skipping %s"
-                     accumulated_cost_usd
-                     gate.max_cost_usd
-                     tool_name;
-                   Agent_sdk.Hooks.Override
-                     (render_worker_skip_reason
-                        ~tool_name
-                        ~reason_code:"cost_gate"
-                        ~reason_text))
-                 else if
-                   (* Gate 2: Destructive pattern detection *)
+                   (* Gate 1: Destructive pattern detection *)
                    gate.destructive_check_enabled
                    && Tool_capability.has Tool_capability.Destructive tool_name
                  then (

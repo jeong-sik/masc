@@ -63,7 +63,7 @@ type scenario = {
   tool_expectations : tool_expectation list;
   graders : grader list;
   max_turns : int;                    (** Max turns before timeout *)
-  max_cost_usd : float;              (** Cost budget for this scenario *)
+  max_cost_usd : float;              (** Advisory cost threshold for this scenario *)
   tags : string list;                 (** Filtering tags: "regression", "smoke", etc. *)
 }
 

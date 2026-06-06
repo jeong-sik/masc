@@ -135,6 +135,43 @@ max-concurrent = 1
 |}
 ;;
 
+let runtime_config_openai_default =
+  {|
+[runtime]
+default = "openai.gpt"
+
+[providers.runpod_mtp]
+display-name = "RunPod"
+protocol = "provider_d-http"
+endpoint = "https://runpod.example/v1"
+
+[providers.openai]
+display-name = "OpenAI"
+protocol = "provider_d-http"
+endpoint = "https://api.openai.example/v1"
+
+[models.qwen]
+api-name = "qwen"
+max-context = 128000
+tools-support = true
+streaming = true
+
+[models.gpt]
+api-name = "gpt"
+max-context = 64000
+tools-support = true
+streaming = true
+
+[runpod_mtp.qwen]
+is-default = true
+max-concurrent = 4
+
+[openai.gpt]
+is-default = true
+max-concurrent = 1
+|}
+;;
+
 let with_runtime_file f =
   with_temp_dir "runtime-per-keeper-routing-runtime" @@ fun dir ->
   let path = Filename.concat dir "runtime.toml" in
@@ -211,6 +248,58 @@ let test_runtime_assignment_writer_rejects_unknown_runtime_without_write () =
       "in-process assignment cache unchanged"
       (Some "openai.gpt")
       (Runtime.runtime_id_for_keeper "routingtest"))
+;;
+
+let test_runtime_config_text_loads_runtime_toml () =
+  with_runtime_file (fun path ->
+    match Runtime.load_config_text ~runtime_config_path:path () with
+    | Error msg -> Alcotest.failf "load_config_text failed: %s" msg
+    | Ok (loaded_path, source_text) ->
+      Alcotest.(check string) "loaded path" path loaded_path;
+      Alcotest.(check string) "loaded source text" runtime_config source_text)
+;;
+
+let test_runtime_config_text_save_reloads_runtime_cache () =
+  with_runtime_file (fun path ->
+    (match
+       Runtime.save_config_text
+         ~runtime_config_path:path
+         runtime_config_openai_default
+     with
+     | Ok () -> ()
+     | Error msg -> Alcotest.failf "save_config_text failed: %s" msg);
+    Alcotest.(check string)
+      "runtime.toml raw source saved exactly"
+      runtime_config_openai_default
+      (Fs_compat.load_file path);
+    Alcotest.(check string)
+      "runtime cache reloaded"
+      "openai.gpt"
+      (Runtime.get_default_runtime_id ()))
+;;
+
+let test_runtime_config_text_save_rejects_invalid_without_write () =
+  with_runtime_file (fun path ->
+    let before = Fs_compat.load_file path in
+    (match
+       Runtime.save_config_text
+         ~runtime_config_path:path
+         "[runtime]\ndefault = \"missing.runtime\"\n"
+     with
+     | Ok () -> Alcotest.fail "expected invalid raw runtime.toml to fail"
+     | Error msg ->
+       Alcotest.(check bool)
+         "error mentions unresolved default"
+         true
+         (string_contains msg "missing.runtime"));
+    Alcotest.(check string)
+      "runtime.toml unchanged after raw validation failure"
+      before
+      (Fs_compat.load_file path);
+    Alcotest.(check string)
+      "runtime cache unchanged"
+      "runpod_mtp.qwen"
+      (Runtime.get_default_runtime_id ()))
 ;;
 
 let test_runtime_id_tool_arg_is_not_removed_keeper_arg () =
@@ -325,6 +414,18 @@ let () =
             "unknown assignment is rejected before runtime.toml write"
             `Quick
             test_runtime_assignment_writer_rejects_unknown_runtime_without_write
+        ; Alcotest.test_case
+            "dashboard raw runtime.toml load returns full source"
+            `Quick
+            test_runtime_config_text_loads_runtime_toml
+        ; Alcotest.test_case
+            "dashboard raw runtime.toml save validates and reloads cache"
+            `Quick
+            test_runtime_config_text_save_reloads_runtime_cache
+        ; Alcotest.test_case
+            "dashboard raw runtime.toml save rejects invalid source before write"
+            `Quick
+            test_runtime_config_text_save_rejects_invalid_without_write
         ; Alcotest.test_case
             "runtime_id API arg is not rejected as a removed keeper arg"
             `Quick

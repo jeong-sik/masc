@@ -232,13 +232,13 @@ Reload 계약 ([docs/TOML-RELOAD-MATRIX.md](docs/TOML-RELOAD-MATRIX.md)):
 
 - env vars → boot 시점 고정 (런타임 control plane 이 명시적으로 reload 하지 않는 한)
 - `config/keepers/*.toml` → 다음 supervisor sweep 에서 reconcile
-- `config/keeper_runtime.toml` → 다음 model resolve / turn 에서 in-memory render
-- `config/keeper_runtime.toml`, `config/tool_policy.toml` → restart 필요
+- `config/runtime.toml` runtime catalog / assignments → 다음 model resolve / turn 에서 in-memory render
+- `config/runtime.toml` 의 boot-only keeper env seed, `config/tool_policy.toml` → restart 필요
 
 ## Model Runtime
 
 - 작성 매뉴얼: [docs/spec/14-configuration.md](docs/spec/14-configuration.md)
-- live SSOT: `config/keeper_runtime.toml` (`config/runtime.json` 은 retired, 더 이상 생성/소비되지 않음)
+- live SSOT: `config/runtime.toml` (`config/runtime.json` 은 retired, 더 이상 생성/소비되지 않음)
 - 스키마 / parsing / 선택 정책 은 MASC 소유. OAS 에는 *해결된 단일 provider/model* 만 넘어갑니다.
 - keeper TOML 안의 `runtime_id` 으로 per-keeper override 가능.
 - 시드에서 keeper 가 정상 선택할 수 있는 프로필은 `primary` 뿐. `default`, `local_only`, `local_recovery`, `scoring` 은 시스템 전용 plumbing.
@@ -386,7 +386,7 @@ raw `opam exec -- dune ...` 은 의도적인 CI-parity 점검 때만. 평소 개
 | [docs/QUICK-START.md](docs/QUICK-START.md) | 설치, health, 첫 워크플로 |
 | [docs/BOOT-ENV-STATE-INVENTORY.md](docs/BOOT-ENV-STATE-INVENTORY.md) | boot / path / state / active config inventory |
 | [docs/MCP-TEMPLATE.md](docs/MCP-TEMPLATE.md) | HTTP / stdio MCP 클라이언트 템플릿 |
-| [docs/spec/14-configuration.md](docs/spec/14-configuration.md) | keeper_runtime.toml 작성 매뉴얼 |
+| [docs/spec/14-configuration.md](docs/spec/14-configuration.md) | runtime.toml 작성 매뉴얼 |
 | [docs/OAS-MASC-BOUNDARY.md](docs/OAS-MASC-BOUNDARY.md) | OAS / MASC 소유 경계 |
 | [docs/KEEPER-USER-MANUAL.md](docs/KEEPER-USER-MANUAL.md) | keeper 라이프사이클, sandbox profile, Docker one-shot/managed 실행, 트러블슈팅 |
 | [docs/SUPERVISOR-MODE.md](docs/SUPERVISOR-MODE.md) | supervisor / operator 워크플로 |

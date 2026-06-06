@@ -2254,6 +2254,37 @@ export function patchKeeperConfig(
   ).then(raw => normalizeKeeperConfig(raw, name))
 }
 
+// --- Runtime config (raw runtime.toml editor) ---
+
+export interface RuntimeTomlConfig {
+  ok: boolean
+  path: string | null
+  file_name: string
+  source_text: string
+  reloaded: boolean
+}
+
+function normalizeRuntimeTomlConfig(raw: unknown): RuntimeTomlConfig {
+  const record = isRecord(raw) ? raw : {}
+  return {
+    ok: asBoolean(record.ok) ?? true,
+    path: asNullableString(record.path),
+    file_name: asString(record.file_name) ?? 'runtime.toml',
+    source_text: asString(record.source_text, ''),
+    reloaded: asBoolean(record.reloaded) ?? false,
+  }
+}
+
+export function fetchRuntimeTomlConfig(): Promise<RuntimeTomlConfig> {
+  return get<unknown>('/api/v1/runtime/config/raw').then(normalizeRuntimeTomlConfig)
+}
+
+export function saveRuntimeTomlConfig(sourceText: string): Promise<RuntimeTomlConfig> {
+  return post<unknown>('/api/v1/runtime/config/raw', {
+    source_text: sourceText,
+  }).then(normalizeRuntimeTomlConfig)
+}
+
 // --- Keeper trajectory (tool call history) ---
 
 type TrajectoryGate = {

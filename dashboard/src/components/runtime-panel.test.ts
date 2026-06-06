@@ -18,6 +18,9 @@ async function loadRuntimePanel() {
   vi.doMock('./runtime-monitor', () => ({
     RuntimeMonitor: () => html`<div data-testid="runtime-monitor">RuntimeMonitor</div>`,
   }))
+  vi.doMock('./runtime-toml-editor', () => ({
+    RuntimeTomlEditor: () => html`<div data-testid="runtime-toml-editor">RuntimeTomlEditor</div>`,
+  }))
   vi.doMock('./otel-metrics', () => ({
     OtelMetrics: () => html`<div data-testid="metrics">OtelMetrics</div>`,
   }))
@@ -62,6 +65,7 @@ describe('RuntimePanel', () => {
     vi.doUnmock('../router')
     vi.doUnmock('./oas-health-chip')
     vi.doUnmock('./runtime-monitor')
+    vi.doUnmock('./runtime-toml-editor')
     vi.doUnmock('./otel-metrics')
     vi.doUnmock('./verification-specs-panel')
     vi.doUnmock('./cost-dashboard')
@@ -135,6 +139,17 @@ describe('RuntimePanel', () => {
     expect(container.textContent).not.toContain('OtelMetrics')
   })
 
+  it('renders the raw runtime.toml editor for config view', async () => {
+    route.value.params = { view: 'config' }
+    const { RuntimePanel } = await loadRuntimePanel()
+    render(html`<${RuntimePanel} />`, container)
+    await flushUi()
+
+    expect(container.textContent).toContain('RuntimeTomlEditor')
+    expect(container.textContent).not.toContain('OasHealthChip')
+    expect(container.textContent).not.toContain('RuntimeMonitor')
+  })
+
   it('renders only OtelMetrics for metrics view', async () => {
     route.value.params = { view: 'metrics' }
     const { RuntimePanel } = await loadRuntimePanel()
@@ -155,16 +170,17 @@ describe('RuntimePanel', () => {
     const chips = container.querySelectorAll('[data-testid="chip"]')
     // Chips are split across two FilterChips strips (Primary then Advanced)
     // with a divider between them. The positional order reflects the
-    // Primary[default, providers] → Advanced[cost, audit, stress,
+    // Primary[default, providers, runtime.toml] → Advanced[cost, audit, stress,
     // metrics, verification] layout.
-    expect(chips.length).toBe(7)
+    expect(chips.length).toBe(8)
     expect(chips[0]?.textContent).toBe('전체')
     expect(chips[1]?.textContent).toBe('런타임')
-    expect(chips[2]?.textContent).toBe('비용 / 지연')
-    expect(chips[3]?.textContent).toBe('감사')
-    expect(chips[4]?.textContent).toBe('스트레스')
-    expect(chips[5]?.textContent).toBe('메트릭')
-    expect(chips[6]?.textContent).toBe('형식검증')
+    expect(chips[2]?.textContent).toBe('runtime.toml')
+    expect(chips[3]?.textContent).toBe('비용 / 지연')
+    expect(chips[4]?.textContent).toBe('감사')
+    expect(chips[5]?.textContent).toBe('스트레스')
+    expect(chips[6]?.textContent).toBe('메트릭')
+    expect(chips[7]?.textContent).toBe('형식검증')
   })
 
   it('routes runtime diagnostic views through CostDashboard', async () => {

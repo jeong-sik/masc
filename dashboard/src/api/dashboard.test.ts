@@ -18,7 +18,9 @@ import {
   fetchKeeperDecisions,
   fetchMemorySubsystems,
   fetchRuntimeProviders,
+  fetchRuntimeTomlConfig,
   fetchRuntimeModelMetrics,
+  saveRuntimeTomlConfig,
   fetchDashboardCacheStats,
   fetchTelemetry,
   fetchTelemetrySummary,
@@ -1609,6 +1611,59 @@ describe('fetchKeeperConfig', () => {
       expect(result.runtime.runtime_blocker_class).toBe(blockerClass)
       expect(keeperRuntimeBlockerLabel(result.runtime.runtime_blocker_class)).toBe(label)
     }
+  })
+})
+
+describe('runtime.toml raw config API', () => {
+  it('fetches and normalizes the raw runtime.toml source', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        ok: true,
+        path: '/tmp/.masc/config/runtime.toml',
+        file_name: 'runtime.toml',
+        source_text: '[runtime]\ndefault = "runpod_mtp.qwen"\n',
+        reloaded: false,
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchRuntimeTomlConfig()
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/runtime/config/raw')
+    expect(result.path).toBe('/tmp/.masc/config/runtime.toml')
+    expect(result.file_name).toBe('runtime.toml')
+    expect(result.source_text).toContain('[runtime]')
+    expect(result.reloaded).toBe(false)
+  })
+
+  it('posts the full raw TOML source through source_text', async () => {
+    const sourceText = '[runtime]\ndefault = "openai.gpt"\n'
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        ok: true,
+        path: '/tmp/.masc/config/runtime.toml',
+        file_name: 'runtime.toml',
+        source_text: sourceText,
+        reloaded: true,
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await saveRuntimeTomlConfig(sourceText)
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/v1/runtime/config/raw')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body as string)).toEqual({ source_text: sourceText })
+    expect(result.reloaded).toBe(true)
+    expect(result.source_text).toBe(sourceText)
   })
 })
 

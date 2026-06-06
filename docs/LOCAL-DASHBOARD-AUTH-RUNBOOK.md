@@ -371,7 +371,7 @@ curl -sS -X POST http://127.0.0.1:8935/api/v1/runtime/config/raw \
 
 ```json
 {
-  "source_text": "{ ...raw runtime json... }"
+  "source_text": "[runtime]\ndefault = \"provider.model\"\n"
 }
 ```
 

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Keeper } from '../types'
 import {
   keeperDisplayStatus,
+  isKeeperAutoRecoverPause,
   keeperRuntimeBlockerLabel,
   keeperRecentActionLabel,
   keeperRecentHeartbeatLabel,
@@ -55,6 +56,38 @@ describe('mission keeper runtime helpers', () => {
     } as Keeper
 
     expect(keeperRuntimeHint(keeper)).toBe('일시정지됨')
+  })
+
+  it('labels timeout pauses as auto-retry wait instead of operator pause', () => {
+    const keeper = {
+      name: 'timeout-paused',
+      status: 'paused',
+      paused: true,
+      keepalive_running: false,
+      runtime_blocker_class: 'turn_timeout',
+      runtime_blocker_summary: 'turn_timeout',
+    } as Keeper
+
+    expect(isKeeperAutoRecoverPause(keeper)).toBe(true)
+    expect(keeperRuntimeHint(keeper)).toBe(
+      '자동 재시도 대기 · 턴 실행 시간이 제한 시간을 초과했습니다.',
+    )
+  })
+
+  it('labels TLS handshake provider-runtime pauses as auto-retry wait', () => {
+    const keeper = {
+      name: 'tls-paused',
+      status: 'paused',
+      paused: true,
+      runtime_blocker_class: 'provider_runtime_error',
+      runtime_blocker_summary:
+        'Provider runtime catch-all (internal_unhandled_exception): TLS alert from peer: handshake failure',
+    } as Keeper
+
+    expect(isKeeperAutoRecoverPause(keeper)).toBe(true)
+    expect(keeperRuntimeHint(keeper)).toBe(
+      '자동 재시도 대기 · Provider runtime catch-all (internal_unhandled_exception): TLS alert from peer: handshake failure',
+    )
   })
 
   it('prefers structured runtime blocker hints over paused/blocker text', () => {

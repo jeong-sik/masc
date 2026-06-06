@@ -74,6 +74,13 @@ let provider_timeout_error ~phase =
 let turn_timeout_error () =
   KTD.sdk_error_of_masc_internal_error (KTD.Turn_timeout { elapsed_sec = 600.0 })
 
+let tls_handshake_internal_error () =
+  KTD.sdk_error_of_masc_internal_error
+    (KTD.Internal_unhandled_exception
+       { site = "runtime_runner.execute"
+       ; exn_repr = "TLS alert from peer: handshake failure"
+       })
+
 let test_cycle_failed_log_level_is_policy_aware () =
   Alcotest.(check bool)
     "provider timeout cycle failure is warn"
@@ -84,6 +91,21 @@ let test_cycle_failed_log_level_is_policy_aware () =
     "turn wall-clock timeout remains error"
     false
     (EC.should_warn_keeper_cycle_failed (turn_timeout_error ()))
+
+let test_tls_handshake_internal_error_is_transient () =
+  let err = tls_handshake_internal_error () in
+  Alcotest.(check bool)
+    "runtime_runner TLS handshake failure is a transient runner error"
+    true
+    (EC.is_transient_internal_runner_error err);
+  Alcotest.(check bool)
+    "runtime_runner TLS handshake failure enters transient network retry"
+    true
+    (EC.is_transient_network_error err);
+  Alcotest.(check bool)
+    "runtime_runner TLS handshake failure is auto-recoverable at turn level"
+    true
+    (EC.is_auto_recoverable_turn_error err)
 
 let test_attempt_watchdog_timeout_reclassifies_as_provider_timeout () =
   let budget : KCB.provider_timeout_budget =
@@ -223,6 +245,8 @@ let () =
           test_strike_limit_is_soft_backoff;
         Alcotest.test_case "cycle failure log level is policy-aware" `Quick
           test_cycle_failed_log_level_is_policy_aware;
+        Alcotest.test_case "TLS handshake internal error is transient" `Quick
+          test_tls_handshake_internal_error_is_transient;
         Alcotest.test_case
           "attempt watchdog timeout reclassifies as provider timeout"
           `Quick

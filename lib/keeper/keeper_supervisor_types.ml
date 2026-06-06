@@ -121,6 +121,49 @@ let paused_meta_requires_reconcile_recovery (meta : keeper_meta) =
   | None -> false
 ;;
 
+let paused_meta_legacy_auto_resume_after_sec (meta : keeper_meta) =
+  match meta.runtime.last_blocker with
+  | Some { klass = Turn_timeout; _ } ->
+    let initial_sec = Env_config.KeeperSupervisor.auto_resume_initial_sec in
+    let max_sec = Env_config.KeeperSupervisor.auto_resume_max_sec in
+    if initial_sec <= 0.0 then None else Some (Float.min max_sec initial_sec)
+  | Some
+      { klass =
+          ( Runtime_exhausted _
+          | Capacity_backpressure
+          | Ambiguous_post_commit_timeout
+          | Ambiguous_post_commit_failure
+          | Autonomous_slot_wait_timeout
+          | Admission_queue_wait_timeout
+          | Turn_timeout_after_queue_wait
+          | Turn_livelock_blocked
+          | Completion_contract_violation
+          | Stay_silent_loop
+          | Fiber_unresolved
+          | Stale_turn_timeout
+          | Stale_fleet_batch
+          | Oas_agent_execution_timeout
+          | Sdk_max_turns_exceeded
+          | Sdk_token_budget_exceeded
+          | Sdk_cost_budget_exceeded
+          | Sdk_unrecognized_stop_reason
+          | Sdk_idle_detected
+          | Sdk_tool_retry_exhausted
+          | Sdk_guardrail_violation
+          | Sdk_tripwire_violation
+          | Sdk_exit_condition_met
+          | Sdk_input_required )
+      ; _
+      }
+  | None -> None
+;;
+
+let paused_meta_effective_auto_resume_after_sec (meta : keeper_meta) =
+  match meta.auto_resume_after_sec with
+  | Some _ as explicit -> explicit
+  | None -> paused_meta_legacy_auto_resume_after_sec meta
+;;
+
 let next_auto_resume_after_sec ~initial_sec ~max_sec previous =
   if initial_sec <= 0.0
   then None
@@ -135,7 +178,7 @@ let paused_meta_auto_resume_due ~now (meta : keeper_meta) =
   if (not meta.paused) || paused_meta_requires_reconcile_recovery meta
   then false
   else
-    match meta.auto_resume_after_sec with
+    match paused_meta_effective_auto_resume_after_sec meta with
     | None -> false
     | Some resume_after_sec ->
       (match Workspace_resilience.Time.parse_iso8601_opt meta.updated_at with

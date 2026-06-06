@@ -349,6 +349,11 @@ let make_hooks
           | Some { reasoning_tokens = Some rt; _ } when usage_trusted && rt > 0 -> rt
           | _ -> 0
         in
+        let request_stream =
+          match response.telemetry with
+          | Some { ttfrc_ms = Some _; _ } -> Some true
+          | _ -> None
+        in
         (* Cache-token tracking uses OAS-reported counters only. *)
         let cc = cache_creation_input_tokens in
         let cr = cache_read_input_tokens in
@@ -384,6 +389,8 @@ let make_hooks
           ~cache_creation_input_tokens
           ~cache_read_input_tokens
           ~reasoning_output_tokens
+          ?request_stream
+          ~finish_reason:(stop_reason_to_label response.stop_reason)
           ();
         (* Inference latency histogram for telemetry export.
            Missing telemetry stays a separate counter; zero/negative latency

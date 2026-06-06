@@ -95,12 +95,24 @@ let positive_int_attrs attrs =
     | Some _ | None -> None)
 ;;
 
+let non_empty_string_attr key = function
+  | Some value when not (String.equal value "") -> [ key, `String value ]
+  | Some _ | None -> []
+;;
+
+let bool_attr key = function
+  | Some value -> [ key, `Bool value ]
+  | None -> []
+;;
+
 let emit_usage_details
       ?input_tokens
       ?output_tokens
       ?cache_creation_input_tokens
       ?cache_read_input_tokens
       ?reasoning_output_tokens
+      ?request_stream
+      ?finish_reason
       ~provider
       ~model_id
       ()
@@ -116,8 +128,16 @@ let emit_usage_details
         , reasoning_output_tokens )
       ]
   in
-  match detail_attrs with
-  | [] -> ()
+  let finish_attrs =
+    non_empty_string_attr
+      Otel_genai.Attr_key.masc_gen_ai_response_finish_reason
+      finish_reason
+  in
+  let request_stream_attrs =
+    bool_attr Otel_genai.Attr_key.gen_ai_request_stream request_stream
+  in
+  match detail_attrs, finish_attrs, request_stream_attrs with
+  | [], [], [] -> ()
   | _ ->
     note_provider ~model_id ~provider;
     let attrs =
@@ -126,6 +146,8 @@ let emit_usage_details
       ; Otel_genai.Attr_key.gen_ai_response_model, `String model_id
       ]
       @ detail_attrs
+      @ finish_attrs
+      @ request_stream_attrs
     in
     add_genai_attrs attrs;
     Otel_spans.add_event
@@ -303,7 +325,8 @@ let invalid_ms_reason value =
 
 let streaming_attrs ~provider ~model_id extra =
   [ Otel_genai.Attr_key.gen_ai_provider_name, `String provider
-  ; "gen_ai.request.model", `String model_id
+  ; Otel_genai.Attr_key.gen_ai_request_model, `String model_id
+  ; Otel_genai.Attr_key.gen_ai_request_stream, `Bool true
   ]
   @ extra
 ;;
@@ -328,6 +351,7 @@ let emit_streaming_first_chunk ~provider ~model_id ~ttfrc_ms =
     add_genai_attrs
       [ Otel_genai.Attr_key.gen_ai_provider_name, `String provider
       ; Otel_genai.Attr_key.gen_ai_request_model, `String model_id
+      ; Otel_genai.Attr_key.gen_ai_request_stream, `Bool true
       ; Otel_genai.Attr_key.gen_ai_response_time_to_first_chunk
         , `Float (ttfrc_ms /. 1000.0)
       ];

@@ -6,15 +6,11 @@
 
     The queue is transient (not persisted).  Lost on server restart.
 
-    NOTE: Queue drain is currently coupled to the HTTP request
-    lifecycle in [Server_routes_http_keeper_stream].  External
-    connectors (Discord, Slack, etc.) that enqueue messages here
-    will not see them auto-drained unless a Dashboard HTTP request
-    also arrives for the same keeper.  See RFC-0217 §Future Work.
-
-    TODO: Add [source] field to [queued_message] for multi-channel
-    delivery, and extract the consumer from the HTTP handler into a
-    standalone polling fiber.
+    Queue drain is handled by [Keeper_chat_consumer], started from
+    server bootstrap.  The [source] field preserves connector context
+    so queued dashboard, Discord, and Slack messages can be projected
+    into the same keeper-chat execution path without losing reply
+    routing metadata.
 
     @since 2.145.0 *)
 

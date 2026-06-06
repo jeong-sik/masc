@@ -14,17 +14,21 @@
       verbatim to the child process; the implementation invokes the
       executable directly (no [/bin/sh -c "..."] wrapping).  Therefore
       shell metacharacters like [*], [?], [|], [&], [;], [>], [<],
-      [`], [$], [\n], and [\r] inside an argv token are *literal
+      [`], [$], [\n], and [\r] inside a payload argv token are *literal
       characters*, not shell operators.  For example, the typed schema accepts
       [find . -name *.ml] because [*.ml] is a [find]-internal pattern, not a
       shell glob; it also accepts multiline `gh --body` text because the
       argument is passed directly to [gh].
     - **Pipelines are explicit**.  [Pipeline.stages] enumerates each
-      [exec_stage] separately; [|]-delimited strings are never parsed.
-    - **Forbidden in argv tokens**: only [NUL], which cannot be represented in
-      an execve argv string.  The validator rejects it via
-      {!Argv_contains_shell_metachar}; the variant name is kept for log
-      continuity, but the semantics are NUL-only.
+      [exec_stage] separately; [|]-delimited strings are never parsed.  A
+      standalone pipe operator token (["|"] / ["|&"]) in direct [Exec.argv] is
+      rejected because it can only become bogus argv data (for example
+      [tail: |: No such file or directory]); use [Pipeline] instead.
+    - **Forbidden argv shapes**: [NUL], standalone pipe operator tokens, and
+      shell redirection operator tokens.  [NUL] cannot be represented in an
+      execve argv string.  Pipe/redirection operator tokens are rejected as
+      command-shape mistakes while payload tokens that merely contain those
+      characters remain allowed.
     - **Cwd is a string for now**.  Path SSOT does not yet expose a
       [Path.t] type (RFC-0091 §2.3 mis-cited [Host_config.cwd_for_keeper]
       which does not exist).  Absolute-path enforcement happens in
@@ -91,6 +95,16 @@ type validation_error =
       index : int;
       token : string;
     }
+  | Argv_contains_shell_pipeline_operator of {
+      executable : string;
+      index : int;
+      token : string;
+    }
+      (** Standalone shell pipeline operator token (["|"] or ["|&"]) in
+          [Exec.argv].  These tokens are never interpreted as pipelines by
+          execve and commonly become bogus filenames/arguments.  Use
+          [Pipeline.stages]; payload tokens containing pipe characters (for
+          example ["foo|bar"] or multiline markdown bodies) remain valid. *)
   | Argv_contains_shell_redirection of {
       executable : string;
       index : int;
@@ -148,12 +162,13 @@ val to_shell_ir :
   execute_input ->
   (Masc_exec.Shell_ir.t, validation_error) result
 (** Validate and lower [input] into {!Masc_exec.Shell_ir.t}.  [Pipeline]
-    inputs become an explicit {!Masc_exec.Shell_ir.Pipeline}; literal ["|"]
-    argv tokens remain ordinary argument data and never create a pipeline.
-    [Exec] argv is passed through as authored after validation; duplicated
-    executable tokens at [argv[0]] are rejected rather than silently stripped.
-    [sandbox] defaults to host execution; keeper callers may provide Docker
-    runtime targets after sandbox/profile resolution. *)
+    inputs become an explicit {!Masc_exec.Shell_ir.Pipeline}; embedded pipe
+    characters inside payload argv tokens remain ordinary argument data, while
+    standalone pipe operator argv tokens are rejected before lowering.  [Exec]
+    argv is passed through as authored after validation; duplicated executable
+    tokens at [argv[0]] are rejected rather than silently stripped.  [sandbox]
+    defaults to host execution; keeper callers may provide Docker runtime
+    targets after sandbox/profile resolution. *)
 
 val pp_validation_error : Format.formatter -> validation_error -> unit
 (** Human-readable formatter for {!validation_error}.  Stable across

@@ -15,6 +15,21 @@ let contains_substring s needle =
   in
   if n_len = 0 then true else loop 0
 
+let has_repo_keeper_config root =
+  Sys.file_exists (Filename.concat root "config/keepers/base.toml")
+
+let repo_root () =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root when has_repo_keeper_config root -> root
+  | _ ->
+    let rec ascend path =
+      if has_repo_keeper_config path then path
+      else
+        let parent = Filename.dirname path in
+        if String.equal parent path then Sys.getcwd () else ascend parent
+    in
+    ascend (Sys.getcwd ())
+
 let with_env_restore keys f =
   let prev = List.map (fun key -> key, Sys.getenv_opt key) keys in
   Fun.protect
@@ -733,6 +748,33 @@ goal = "works"
     (fun f -> Sys.remove (Filename.concat tmp_dir f))
     (Sys.readdir tmp_dir);
   Unix.rmdir tmp_dir
+
+let require_nonempty_option path field value =
+  match value with
+  | Some text when String.trim text <> "" -> ()
+  | _ ->
+    fail
+      (Printf.sprintf
+         "%s must declare non-empty keeper.%s; persona profile self-model \
+          fields are legacy and ignored by the prompt defaults loader"
+         path
+         field)
+
+let test_bundled_keeper_tomls_declare_prompt_self_model () =
+  let keepers_dir = Filename.concat (repo_root ()) "config/keepers" in
+  Sys.readdir keepers_dir
+  |> Array.to_list
+  |> List.filter (fun file ->
+       Filename.check_suffix file ".toml"
+       && not (String.equal file "base.toml"))
+  |> List.iter (fun file ->
+       let path = Filename.concat keepers_dir file in
+       match KTP.load_keeper_toml path with
+       | Error e -> fail (Printf.sprintf "%s failed to load: %s" path e)
+       | Ok (_, defaults) ->
+         require_nonempty_option path "will" defaults.will;
+         require_nonempty_option path "needs" defaults.needs;
+         require_nonempty_option path "desires" defaults.desires)
 
 let with_temp_dir prefix f =
   let dir = Filename.temp_file prefix "" in
@@ -1465,8 +1507,8 @@ typo_field = 42
 |};
   close_out oc;
   let unknown_metric () =
-    Otel_metric_store.metric_value_or_zero
-      Otel_metric_store.metric_config_unknown_keys_ignored
+    Masc.Otel_metric_store.metric_value_or_zero
+      Masc.Otel_metric_store.metric_config_unknown_keys_ignored
       ~labels:[("file_path", tmp)]
       ()
   in
@@ -1534,8 +1576,8 @@ base = "base.toml"
 legacy_scope = "removed"
 |};
   let unknown_metric () =
-    Otel_metric_store.metric_value_or_zero
-      Otel_metric_store.metric_config_unknown_keys_ignored
+    Masc.Otel_metric_store.metric_value_or_zero
+      Masc.Otel_metric_store.metric_config_unknown_keys_ignored
       ~labels:[("file_path", Filename.concat keepers_dir "alpha.toml")]
       ()
   in
@@ -1801,6 +1843,8 @@ let () =
           test_case "with files" `Quick test_discover_with_files;
           test_case "nonexistent dir" `Quick test_discover_nonexistent_dir;
           test_case "skips bad files" `Quick test_discover_skips_bad_files;
+          test_case "bundled keeper TOMLs declare prompt self-model" `Quick
+            test_bundled_keeper_tomls_declare_prompt_self_model;
           test_case "persona resolver omits unspecified tool_access" `Quick
             test_persona_resolver_omits_unspecified_tool_access;
           test_case "persona defaults ignore legacy self-model fields" `Quick

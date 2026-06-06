@@ -610,6 +610,14 @@ let make_keeper_turn_slot_state () =
   ; autonomous_ticket = ref None
   }
 ;;
+
+let keeper_turn_slot_is_held state =
+  !(state.acquired_autonomous)
+  || !(state.acquired_reactive)
+  || !(state.acquired_turn)
+  || Option.is_some !(state.autonomous_ticket)
+;;
+
 let after_acquire_flag_hook_for_test
   : (label:string -> keeper_name:string -> unit) option ref
   =

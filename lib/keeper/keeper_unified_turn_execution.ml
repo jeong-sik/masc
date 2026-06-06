@@ -62,6 +62,7 @@ type ctx =
       -> unit
   ; shared_context : Agent_sdk.Context.t option
   ; trajectory_acc : Trajectory.accumulator
+  ; turn_slot_control : Keeper_turn_slot.keeper_turn_slot_control option
   ; turn_affordances : string list
   ; turn_id : int
   }

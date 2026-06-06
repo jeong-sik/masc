@@ -8,5 +8,6 @@ val run_keeper_cycle_with_slot
   -> turn_decision:Keeper_world_observation.keeper_cycle_decision
   -> shared_context:Agent_sdk.Context.t
   -> semaphore_wait_ms:int
+  -> ?turn_slot_control:Keeper_turn_slot.keeper_turn_slot_control
   -> unit
   -> Keeper_meta_contract.keeper_meta

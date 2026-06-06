@@ -379,11 +379,11 @@ let run_keepalive_unified_turn
           ~kind:Semaphore_wait_pending
           ();
         match
-          Keeper_turn_slot.with_keeper_turn_slot
+          Keeper_turn_slot.with_keeper_turn_slot_control
             ~runtime_profile:(runtime_id_of_meta meta_after_triage)
             ~keeper_name:meta_after_triage.name
             ~channel:turn_decision.channel
-            (fun ~semaphore_wait_ms ->
+            (fun ~semaphore_wait_ms ~slot_control ->
                run_keeper_cycle_with_slot
                  ~ctx
                  ~meta_after_cursor_persist
@@ -392,6 +392,7 @@ let run_keepalive_unified_turn
                  ~turn_decision
                  ~shared_context
                  ~semaphore_wait_ms
+                 ~turn_slot_control:slot_control
                  ())
         with
         | Ok meta -> meta

@@ -646,13 +646,6 @@ let handle_tool_execute_typed
               ~fields:(("blocked_cmd", `String cmd_for_log) :: typed_error_fields)
               e
           | Ok result ->
-            (match result.status, repo_cwd_context with
-             | Unix.WEXITED 0, Some { repo_name; _ } when is_direct_repo_git_recovery ->
-               Keeper_sandbox_repo_lifecycle.invalidate_repo_sync_cache
-                 ~config
-                 ~meta
-                 ~repo_name
-             | _ -> ());
             let elapsed_ms =
               (* NDT-OK: second wall-clock read closes the elapsed telemetry
                  span recorded immediately below. *)

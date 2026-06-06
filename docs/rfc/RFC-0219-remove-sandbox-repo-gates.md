@@ -1,6 +1,6 @@
 # RFC-0219: Remove Sandbox Repo Patrol Gates
 
-**Status**: Draft
+**Status**: Implemented
 **Date**: 2026-06-06
 **Author**: Vincent + Claude
 **Subsystem**: `lib/keeper/keeper_sandbox_repo_lifecycle.ml`, `lib/keeper/keeper_tool_execute_runtime.ml`
@@ -64,7 +64,7 @@ without adding safety — the failure mode is identical either way.
 
 These are safety-critical and do not cause deadlocks.
 
-## Proposed Change
+## Implemented Change
 
 Remove the `before_path_validation` callback that calls
 `validate_cwd_ready` and `validate_path_args_ready`. The callback is the
@@ -75,9 +75,13 @@ for future "keeper self-sync" tools, but do not gate Execute on it.
 
 ### Files Changed
 
-- `lib/keeper/keeper_tool_execute_runtime.ml` — remove `before_path_validation` callback
-- `lib/keeper/keeper_sandbox_repo_lifecycle.ml` — remove error constructors, keep types for backward compat
-- `lib/playground_repo_readiness.ml` — keep `ensure_current` (may be used by future keeper self-sync)
+- `lib/keeper_tooling/keeper_tool_execute_shell_ir.ml` — remove optional `before_path_validation` hook
+- `lib/keeper_tooling/keeper_tool_execute_shell_ir.mli` — remove the hook from public dispatch APIs
+- `lib/keeper/keeper_tool_execute_runtime.ml` — remove stale repo-sync cache invalidation residue
+- `lib/keeper/keeper_sandbox_repo_lifecycle.ml` — remove the retired repo patrol gate module
+
+`lib/playground_repo_readiness.ml` is intentionally left intact. Its
+`ensure_current` utility remains available for future explicit self-sync tools.
 
 ### Migration
 

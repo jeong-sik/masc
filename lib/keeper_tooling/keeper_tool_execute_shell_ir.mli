@@ -58,7 +58,6 @@ val tool_execute_command_context :
 
 val dispatch_classified :
   ?timeout_sec:float ->
-  ?before_path_validation:(Masc_exec.Shell_ir.t -> (unit, string) result) ->
   ?allow_pipes:bool ->
   ?redirect_allowed:bool ->
   allowed_commands:string list ->
@@ -69,13 +68,12 @@ val dispatch_classified :
   Masc_exec.Shell_ir_risk.decided Masc_exec.Shell_ir_risk.decided_ir ->
   (Masc_exec.Exec_dispatch.dispatch_result, dispatch_error) result
 (** Run the canonical keeper Shell IR pipeline for an already-classified IR:
-    typed gate -> optional pre-path validation -> path validation ->
-    dispatch_decided. [redirect_allowed] defaults to [true] for the historical
-    tool execute path; legacy code-shell callers pass [false]. *)
+    typed gate -> path validation -> dispatch_decided. [redirect_allowed]
+    defaults to [true] for the historical tool execute path; legacy code-shell
+    callers pass [false]. *)
 
 val dispatch :
   ?timeout_sec:float ->
-  ?before_path_validation:(Masc_exec.Shell_ir.t -> (unit, string) result) ->
   ?allow_pipes:bool ->
   ?redirect_allowed:bool ->
   allowed_commands:string list ->
@@ -86,5 +84,4 @@ val dispatch :
   Masc_exec.Shell_ir.t ->
   (Masc_exec.Exec_dispatch.dispatch_result, dispatch_error) result
 (** Run the canonical keeper Shell IR pipeline:
-    classify -> typed gate -> optional pre-path validation -> path validation ->
-    dispatch_decided. *)
+    classify -> typed gate -> path validation -> dispatch_decided. *)

@@ -626,7 +626,7 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
         Keeper_chat_events.publish events (Text_delta text);
         consume_worker_events ()
     | Stream_terminal (false, err) ->
-        Keeper_chat_events.publish events (Error { message = err })
+        Keeper_chat_events.publish events (Event_error { message = err })
     | Stream_terminal (true, body) -> (
         try
           let payload_json_opt, visible_reply = extract_visible_reply body in
@@ -657,7 +657,7 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn ->
             Keeper_chat_events.publish events
-              (Error { message = Printexc.to_string exn }))
+              (Event_error { message = Printexc.to_string exn }))
   in
   consume_worker_events ()
 
@@ -756,7 +756,7 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
                   make_event ~thread_id:!current_thread_id ~run_id:!current_run_id
                     ~custom_name:(Some name) ~custom_value:(Some value) Custom)
             then loop ()
-        | Error { message } -> send_error message
+        | Event_error { message } -> send_error message
         | Run_finished { run_id } ->
             current_run_id := Some run_id;
             ignore

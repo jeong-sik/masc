@@ -29,7 +29,7 @@ let adapter_loop ~token ~channel_id ~events =
           send_message ~token ~channel_id ~content:acc_text;
         (* Loop exits after one turn. *)
         ()
-    | Error { message } ->
+    | Event_error { message } ->
         send_message ~token ~channel_id
           ~content:("Keeper error: " ^ message);
         (* Loop exits after error. *)

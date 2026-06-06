@@ -340,14 +340,16 @@ export function setRuntimeTomlProviderCredential(
 ): string {
   const section = `providers.${providerId}.credentials`
   if (credentialType === 'none') return deleteRuntimeTomlSection(sourceText, section)
+  const normalizedValue = value.trim()
+  if (!normalizedValue) return deleteRuntimeTomlSection(sourceText, section)
   let next = setRuntimeTomlKey(sourceText, section, 'type', credentialType)
   if (credentialType === 'env') {
-    next = setRuntimeTomlKey(next, section, 'key', value)
+    next = setRuntimeTomlKey(next, section, 'key', normalizedValue)
     next = deleteRuntimeTomlKey(next, section, 'path')
     return deleteRuntimeTomlKey(next, section, 'value')
   }
   if (credentialType === 'file') {
-    next = setRuntimeTomlKey(next, section, 'path', value)
+    next = setRuntimeTomlKey(next, section, 'path', normalizedValue)
     next = deleteRuntimeTomlKey(next, section, 'key')
     return deleteRuntimeTomlKey(next, section, 'value')
   }

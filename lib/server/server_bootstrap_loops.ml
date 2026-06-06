@@ -859,13 +859,77 @@ let start_keeper_loops
           "autoboot: supervisor sweep failed to start: %s"
           (Printexc.to_string exn)));
       (* Start queue consumer fiber for async queue drain.
-         handle_turn is a no-op until Phase 3b wires process_single_turn. *)
+         handle_turn wires process_single_turn for actual turn execution. *)
       (try
          Keeper_chat_consumer.start ~sw ~clock
-           ~handle_turn:(fun ~keeper_name ~queued_message:_ ->
-             Log.Keeper.info
-               "keeper_chat_consumer: would drain queued message for keeper=%s"
-               keeper_name)
+           ~handle_turn:(fun ~keeper_name ~queued_message ->
+             let open Server_routes_http_keeper_stream in
+             let now = Time_compat.now () in
+             let run_id =
+               Printf.sprintf "keeper-consumer-run-%d"
+                 (int_of_float (now *. 1000.0))
+             in
+             let message_id =
+               Printf.sprintf "keeper-consumer-msg-%d"
+                 (int_of_float ((now +. 0.001) *. 1000.0))
+             in
+             let payload =
+               {
+                 name = keeper_name;
+                 message = queued_message.content;
+                 timeout_sec = None;
+                 channel =
+                   (match queued_message.source with
+                    | Keeper_chat_queue.Dashboard -> ""
+                    | Keeper_chat_queue.Discord { channel_id; _ } ->
+                        channel_id
+                    | Keeper_chat_queue.Slack { channel; _ } -> channel);
+                 channel_user_id =
+                   (match queued_message.source with
+                    | Keeper_chat_queue.Dashboard -> ""
+                    | Keeper_chat_queue.Discord { user_id; _ } -> user_id
+                    | Keeper_chat_queue.Slack { user_id; _ } -> user_id);
+                 channel_user_name = "";
+                 channel_workspace_id = "";
+                 attachments = queued_message.attachments;
+               }
+             in
+             let agent_name =
+               match queued_message.source with
+               | Keeper_chat_queue.Dashboard -> "dashboard"
+               | Keeper_chat_queue.Discord { channel_id; user_id } ->
+                   Gate_keeper_backend.agent_name_for_channel_actor
+                     ~channel:channel_id
+                     ~channel_workspace_id:""
+                     ~channel_user_id:user_id
+               | Keeper_chat_queue.Slack { channel; user_id } ->
+                   Gate_keeper_backend.agent_name_for_channel_actor
+                     ~channel
+                     ~channel_workspace_id:""
+                     ~channel_user_id:user_id
+             in
+             let events = Keeper_chat_events.create () in
+             let closed = ref false in
+             let thread_id = "keeper-consumer:" ^ keeper_name in
+             (match queued_message.source with
+              | Keeper_chat_queue.Dashboard ->
+                  Log.Keeper.info
+                    "keeper_chat_consumer: processing dashboard queue \
+                     message for keeper=%s"
+                    keeper_name
+              | Keeper_chat_queue.Discord _ ->
+                  Log.Keeper.info
+                    "keeper_chat_consumer: Discord adapter not yet \
+                     implemented for keeper=%s"
+                    keeper_name
+              | Keeper_chat_queue.Slack _ ->
+                  Log.Keeper.info
+                    "keeper_chat_consumer: Slack adapter not yet \
+                     implemented for keeper=%s"
+                    keeper_name);
+             process_single_turn ~state ~clock ~sw ~auth_token:None
+               ~thread_id ~closed ~payload ~run_id ~message_id
+               ~agent_name ~events)
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->

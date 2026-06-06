@@ -104,6 +104,46 @@ describe('normalizeKeepers phase field', () => {
 })
 
 describe('normalizeKeepers lifecycle metrics', () => {
+  it('normalizes live activity projection and current approval gate', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'sangsu',
+        status: 'active',
+        last_activity_at: '2026-06-06T02:49:01Z',
+        last_activity_source: 'approval_pending',
+        live_activity: {
+          source: 'approval_pending',
+          at: '2026-06-06T02:49:01Z',
+          age_s: 5,
+          tool: 'Write',
+        },
+        current_gate: {
+          kind: 'approval_required',
+          source: 'audit_approvals',
+          tool: 'Write',
+          risk: 'high',
+          turn_id: 178,
+          at: '2026-06-06T02:49:01Z',
+        },
+      },
+    ])
+
+    expect(keeper?.last_activity_source).toBe('approval_pending')
+    expect(keeper?.last_activity_at).toBe('2026-06-06T02:49:01Z')
+    expect(keeper?.live_activity).toMatchObject({
+      source: 'approval_pending',
+      tool: 'Write',
+      age_s: 5,
+    })
+    expect(keeper?.current_gate).toMatchObject({
+      kind: 'approval_required',
+      source: 'audit_approvals',
+      tool: 'Write',
+      risk: 'high',
+      turn_id: 178,
+    })
+  })
+
   it('accepts flat backend handoff fields', () => {
     const [keeper] = normalizeKeepers([
       {

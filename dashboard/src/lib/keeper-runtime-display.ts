@@ -9,6 +9,9 @@ const HEARTBEAT_ALIVE_THRESHOLD_S = 120
 export type KeeperActivitySource =
   | 'autonomous_action'
   | 'heartbeat'
+  | 'keeper_meta'
+  | 'tool_call'
+  | 'approval_pending'
   | 'last_activity'
   | 'last_turn'
   | 'agent_seen'
@@ -48,6 +51,8 @@ type KeeperModelDisplaySource = {
 type KeeperActivityDisplaySource = {
   last_autonomous_action_at?: string | null
   last_heartbeat?: string | null
+  last_activity_at?: string | null
+  last_activity_source?: Keeper['last_activity_source'] | null
   last_activity_ago_s?: number | null
   last_turn_ago_s?: number | null
   created_at?: string | null
@@ -102,11 +107,44 @@ function ageCandidate(
   }
 }
 
+function activitySourceLabel(source: Keeper['last_activity_source'] | null | undefined): string {
+  switch (source) {
+    case 'approval_pending':
+      return '승인 대기'
+    case 'tool_call':
+      return '도구 활동'
+    case 'keeper_meta':
+      return '최근 활동'
+    case null:
+    case undefined:
+      return '최근 활동'
+  }
+}
+
+function activityDisplaySource(source: Keeper['last_activity_source'] | null | undefined): KeeperActivitySource {
+  switch (source) {
+    case 'approval_pending':
+      return 'approval_pending'
+    case 'tool_call':
+      return 'tool_call'
+    case 'keeper_meta':
+      return 'keeper_meta'
+    case null:
+    case undefined:
+      return 'last_activity'
+  }
+}
+
 export function keeperActivityDisplay(
   keeper: KeeperActivityDisplaySource | null | undefined,
   fallbackAgentLastSeen?: string | null,
 ): KeeperActivityDisplay {
   const candidates = [
+    timestampCandidate(
+      activityDisplaySource(keeper?.last_activity_source),
+      activitySourceLabel(keeper?.last_activity_source),
+      keeper?.last_activity_at,
+    ),
     timestampCandidate('autonomous_action', '마지막 행동', keeper?.last_autonomous_action_at),
     timestampCandidate('heartbeat', '하트비트', keeper?.last_heartbeat),
     ageCandidate('last_activity', '최근 활동', keeper?.last_activity_ago_s),

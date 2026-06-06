@@ -94,6 +94,28 @@ describe('rosterStateNote — RFC-0135 §1.1 typed-state conditioning', () => {
     })
   })
 
+  it('shows a pending approval gate before stale runtime blocker summaries', () => {
+    const note = rosterStateNote(
+      k({
+        runtime_blocker_class: 'turn_timeout',
+        runtime_blocker_summary: '턴 응답 만료',
+        current_gate: {
+          kind: 'approval_required',
+          source: 'audit_approvals',
+          tool: 'Write',
+          risk: 'high',
+          disposition_reason: 'waiting_approval',
+        },
+      }),
+      null,
+      null,
+    )
+    expect(note).toEqual({
+      label: '승인 대기',
+      text: '도구 Write · 위험도 high · 사유 waiting_approval',
+    })
+  })
+
   it('RFC §1.1 EXACT — blocker set BUT receipt is stale (execution_current=false) → 이전 차단', () => {
     // The exact 2026-05-19 lifecycle-worker scenario. Backend emits
     // execution_current=false (`server_dashboard_http.ml:1061-1074`)

@@ -355,6 +355,29 @@ describe('keeperActivityDisplay', () => {
     })
   })
 
+  it('uses live activity source labels for tool and approval activity', () => {
+    expect(
+      keeperActivityDisplay({
+        last_activity_at: '2026-04-24T17:59:30Z',
+        last_activity_source: 'approval_pending',
+        last_heartbeat: '2026-04-24T17:54:00Z',
+      }),
+    ).toEqual({
+      source: 'approval_pending',
+      label: '승인 대기',
+      timestamp: '2026-04-24T17:59:30Z',
+      ageSeconds: 30,
+    })
+
+    const toolActivity = keeperActivityDisplay({
+      last_activity_at: '2026-04-24T17:58:00Z',
+      last_activity_source: 'tool_call',
+      last_turn_ago_s: 180,
+    })
+    expect(toolActivity.source).toBe('tool_call')
+    expect(toolActivity.label).toBe('도구 활동')
+  })
+
   it('does not let agent last_seen override keeper runtime signals', () => {
     expect(
       keeperActivityDisplay(

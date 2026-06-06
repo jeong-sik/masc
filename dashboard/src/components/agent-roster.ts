@@ -132,6 +132,19 @@ export function rosterStateNote(
 ): RosterStateNote | null {
   if (!keeper) return null
 
+  const gate = keeper.current_gate
+  if (gate?.kind === 'approval_required') {
+    const tool = gate.tool?.trim()
+    const risk = gate.risk?.trim()
+    const reason = gate.disposition_reason?.trim()
+    const text = [
+      tool ? `도구 ${tool}` : '도구 승인 필요',
+      risk ? `위험도 ${risk}` : null,
+      reason ? `사유 ${reason}` : null,
+    ].filter((part): part is string => part !== null).join(' · ')
+    return { label: '승인 대기', text }
+  }
+
   const state = deriveKeeperOperationalState({ keeper, composite })
 
   if (state.kind === 'paused') {

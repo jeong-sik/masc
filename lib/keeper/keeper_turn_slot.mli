@@ -1,13 +1,11 @@
-(** Keeper Turn Slot — concurrency control for keeper turn execution.
+(** Keeper Turn Slot — per-keeper independent turn execution.
 
-    Manages semaphores, fairness queuing, and slot diagnostics for
-    keeper turn concurrency.
+    Each keeper acquires only its own mutex, eliminating cross-keeper
+    contention. A global inflight counter limits total concurrent turns
+    for backpressure.
 
-    All type definitions ([slot_pool], [semaphore_wait_phase],
-    [semaphore_wait_timeout]) and their pure converters live in
-    {!Keeper_turn_slot_types}.  Re-exported here so callers can
-    continue using [Keeper_turn_slot.slot_pool] etc. without reaching
-    into the types submodule. *)
+    The autonomous FIFO queue, fairness cooldown, and reactive/autonomous
+    pool distinction have been removed. *)
 
 (** {1 SSOT Types} *)
 include module type of struct
@@ -19,10 +17,7 @@ end
 (** Global turn slot cap. Safety ceiling for ALL keeper turns. *)
 val keeper_turn_throttle_limit : int
 
-(** Effective throttle limit after applying the 2x TOML cap (issue #17192).
-    When the env override exceeds 2x the TOML baseline, this is capped to
-    [toml_value * 2]. Otherwise equal to {!keeper_turn_throttle_limit}.
-    The semaphore is initialized with this value, not the raw env limit. *)
+(** Effective throttle limit after applying the 2x TOML cap (issue #17192). *)
 val effective_turn_throttle_limit : int
 
 (** Which configuration layer supplied the effective throttle limit. *)
@@ -32,84 +27,41 @@ type throttle_source =
   | Default
 
 val keeper_turn_throttle_source : throttle_source
-(** Source of {!keeper_turn_throttle_limit}.
-    - [Env_override] — [MASC_KEEPER_AUTOBOOT_MAX] was set in the process
-      environment; it takes precedence over TOML.
-    - [Toml] — the value came from [runtime.toml].
-    - [Default] — neither env nor TOML supplied a value; the hardcoded
-      default (32) is in effect.
-
-    @since issue #17192 *)
-
 val throttle_source_to_string : throttle_source -> string
-(** Canonical string representation for logs and JSON surfaces:
-    ["env_override" | "toml" | "default"]. *)
-
-val turn_semaphore : Eio.Semaphore.t
-val autonomous_turn_semaphore : Eio.Semaphore.t
-val reactive_turn_semaphore : Eio.Semaphore.t
 
 (** Test-only: resolve a keeper turn concurrency env var through the same
     test-executable isolation gate used at module initialization. *)
 val turn_concurrency_int_of_env_default_for_test :
   string -> default:int -> min_v:int -> max_v:int -> int
 
-(** Wall-clock cap on [Eio.Semaphore.acquire] when waiting for a keeper
-    turn slot. Derived from [MASC_KEEPER_SEMAPHORE_WAIT_TIMEOUT_SEC]. *)
+(** Wall-clock cap on mutex acquisition when waiting for a keeper turn slot.
+    Derived from [MASC_KEEPER_SEMAPHORE_WAIT_TIMEOUT_SEC]. *)
 val semaphore_wait_timeout_sec : float
 
-type autonomous_waiter = {
-  ticket : int;
-  keeper_name : string;
-  runtime_id : string;
-}
-
-(** Test-only reset for the autonomous FIFO wait queue. *)
-val reset_autonomous_turn_queue_for_test : unit -> unit
-
-(** Test-only snapshot of keeper names currently queued for an autonomous turn. *)
-val autonomous_waiter_snapshot_for_test : unit -> string list
-
-(** Test-only snapshots of the current semaphore availability. *)
+(** Test-only snapshots of available capacity. [turn] reports
+    [global_turn_limit - global_inflight]; autonomous/reactive are always 0. *)
 val turn_semaphore_value_for_test : unit -> int
 val autonomous_turn_semaphore_value_for_test : unit -> int
 val reactive_turn_semaphore_value_for_test : unit -> int
 
 (** Diagnostic: keepers currently holding a slot in each pool, paired
     with how long (in seconds, relative to [now]) they have held it.
-    Sorted by descending hold time so the longest-holding peer is first
-    — that is typically the actual fleet blocker when [turn_available=0]
-    starves the rest. Pure read; no mutation.
-
-    [~now] MUST come from {!Time_compat.now}, the same clock source
-    used to record [acquired_at] inside this module. Mixing
-    [Unix.gettimeofday ()] or any other clock can produce nonsense
-    hold-time values (negative, or off by the clock skew). *)
+    Sorted by descending hold time so the longest-holding peer is first.
+    Pure read; no mutation. *)
 val turn_slot_holders : now:float -> (string * float) list
 val autonomous_slot_holders : now:float -> (string * float) list
 val reactive_slot_holders : now:float -> (string * float) list
 
-(** Force-release semaphore permits held by [keeper_name] after the watchdog
-    has classified the holder as stale. Returns the labels actually released.
-
-    This is intentionally narrower than normal cleanup: it only releases
-    holders still present in the diagnostic holder table, and the normal
-    [with_keeper_turn_slot] finalizer consumes the same acquisition's
-    force-release marker so a late-returning fiber cannot double-release the
-    same permit, and a newer keeper generation cannot consume the stale
-    predecessor's marker. *)
+(** Force-release stale holders for [keeper_name]. Returns the labels released. *)
 val force_release_stale_holder : keeper_name:string -> string list
 
-(** Test-only: TTL used to bound orphaned force-release markers left behind
-    when a cancelled stale fiber never reaches its finalizer. *)
+(** Test-only: TTL used to bound orphaned force-release markers. *)
 val force_released_marker_ttl_sec_for_test : float
 
-(** Test-only: count force-release markers still awaiting finalizer
-    consumption or expiry pruning. *)
+(** Test-only: count force-release markers still awaiting finalizer. *)
 val force_released_marker_count_for_test : unit -> int
 
-(** Test-only: inject a marker without touching semaphores, so marker-retention
-    behavior can be exercised without creating a double-release path. *)
+(** Test-only: inject a marker without touching inflight counter. *)
 val add_force_released_marker_for_test :
   label:slot_pool ->
   keeper_name:string ->
@@ -123,97 +75,25 @@ val purge_force_released_markers_for_test : now:float -> unit
 (** Test-only: clear force-release markers between tests. *)
 val clear_force_released_markers_for_test : unit -> unit
 
-(** Render a compact holder list such as [[keeper-a/181s, +2 more]].
-    The input is expected to be sorted longest-first, as returned by the
-    holder accessors above. *)
+(** Render a compact holder list such as [[keeper-a/181s, +2 more]]. *)
 val format_slot_holders : ?limit:int -> (string * float) list -> string
 
 (** Operator-facing one-line summary of all holder pools. *)
 val slot_holders_summary : ?limit:int -> now:float -> unit -> string
 
-(** Test-only FIFO queue primitives for autonomous fairness regression tests.
-    [enqueue_autonomous_waiter_for_test] defaults [runtime_id] to ["test"]. *)
-val enqueue_autonomous_waiter_for_test : ?runtime_id:string -> string -> int
-val drop_autonomous_waiter_for_test : int -> unit
-
-(** Test-only: head ticket of a specific runtime lane, or [None] if empty. *)
-val autonomous_waiter_head_ticket_for_test : runtime_id:string -> int option
-
-(** Test-only: aggregate queue depth across all runtime lanes. *)
-val autonomous_wait_queue_depth_for_test : unit -> int
-
-(** Test-only: drive the queue-head wait loop directly with an injected
-    [~started_at]. Exposed so a regression test can assert that a stale
-    [started_at] (e.g. one captured before a fairness cooldown) immediately
-    returns [Error `Semaphore_wait_timeout] — proving the parameter is the
-    timing knob whose freshness must be controlled at every call site.
-    [~runtime_id] defaults to ["test"]. *)
-val wait_for_autonomous_queue_head_for_test :
-  ?runtime_id:string ->
-  keeper_name:string ->
-  ticket:int ->
-  started_at:float ->
-  unit ->
-  (unit, [> `Semaphore_wait_timeout of semaphore_wait_timeout ]) result
-
-(** Pure computation: seconds keeper should yield before re-entering queue
-    at time [now].  0.0 = no yield needed. *)
-val fairness_delay_sec_at : now:float -> keeper_name:string -> float
-
 (** Force-release every slot recorded for [keeper_name] in the holder
-    table. Returns the [(label, age_sec)] pairs that were released so the
-    caller can stamp the diagnosis. Empty list means nothing was held.
+    table. Returns the [(label, age_sec)] pairs that were released.
+    Empty list means nothing was held.
 
-    Intended caller: the supervisor's [force_unresolved_watchdog_crash]
-    path, which fires when a keeper fiber is declared crashed but did
-    not return through the natural [Fun.protect] release. Without this,
-    the slot is leaked until process restart (fleet starvation behind
-    [reactive_turn_semaphore]).
-
-    Side effects: [Eio.Semaphore.release] on each held semaphore plus
-    [Keeper_metrics.(to_string SlotForceReleased)]. A late-returning
-    fiber may double-release; Eio counting semaphores tolerate this
-    bounded over-release.
-
-    See [keeper_turn_slot.ml] doc for full design rationale.
-
-    {b WORKAROUND (RFC-0125)}: This function only releases the semaphore
-    permit. The underlying stuck OS subprocess (LLM HTTPS read,
-    [docker exec]) keeps running until process restart. The structural
-    fix is RFC-0125 P4 [keeper-level max-turn watchdog]
-    (PR #15964), which cancels the keepalive fiber at a typed wall-clock
-    boundary BEFORE the slot is leaked, so this rescue path stops being
-    reached. Removal target: 30-day soak on
-    stale-watchdog timeout termination metric reaching
-    zero after `MASC_KEEPER_MAX_TURN_WATCHDOG_TIMEOUT_SEC` is enabled
-    fleet-wide. Do not invoke from new call sites. Existing legitimate
-    callers (slated to be unwound under removal target above):
-    - [Keeper_supervisor.force_unresolved_watchdog_crash] — primary
-      watchdog rescue.
-    - [Keeper_keepalive.stop_keepalive] — manual stop path
-      (`lib/keeper/keeper_keepalive.ml`). *)
+    Also decrements the global inflight counter. *)
 val force_release_holder_for : keeper_name:string -> (string * float) list
 
-(** Test-only: stamp a completion time directly (bypasses [Time_compat.now]). *)
-val record_autonomous_completion_at_for_test : keeper_name:string -> ts:float -> unit
-
-(** Test-only: clear all per-keeper completion timestamps. *)
-val reset_autonomous_completion_for_test : unit -> unit
-
 (** Test-only: inject a callback immediately after an acquire flag is set
-    and before the diagnostic holder row is recorded.  Used to pin that
-    exception/cancel paths reclaim the semaphore even when no holder row
-    exists yet. *)
+    and before the diagnostic holder row is recorded. *)
 val set_after_acquire_flag_hook_for_test :
   (label:string -> keeper_name:string -> unit) option -> unit
 
-(** PR-M (Leak 9): consecutive [provider_timeout] cycle FAILED strikes
-    per keeper. The heartbeat loop feeds this count into
-    [Keeper_failure_policy] before choosing any lifecycle effect.
-
-    Counts are stored in an in-process CAS map and can be seeded from the
-    persisted [Provider_timeout_loop] failure reason on the first bump after
-    restart or another process update. *)
+(** Provider timeout strike limit and classification. *)
 val provider_timeout_strike_limit : int
 
 type provider_timeout_strike_outcome =
@@ -230,8 +110,38 @@ val reset_budget_exhaustion : keeper_name:string -> unit
 val peek_budget_exhaustion_for_test : keeper_name:string -> int
 val set_budget_exhaustion_for_test : keeper_name:string -> strikes:int -> unit
 
+(** Test-only: expose global inflight count. *)
+val global_inflight_for_test : unit -> int
+
+(** Test-only: expose global turn limit. *)
+val global_turn_limit_for_test : unit -> int
+
+(** Test-only: no-op backward-compat stubs for removed autonomous queue. *)
+val reset_autonomous_turn_queue_for_test : unit -> unit
+val autonomous_waiter_snapshot_for_test : unit -> string list
+val enqueue_autonomous_waiter_for_test : ?runtime_id:string -> string -> int
+val drop_autonomous_waiter_for_test : int -> unit
+val autonomous_waiter_head_ticket_for_test : runtime_id:string -> int option
+val autonomous_wait_queue_depth_for_test : unit -> int
+val wait_for_autonomous_queue_head_for_test :
+  ?runtime_id:string ->
+  keeper_name:string ->
+  ticket:int ->
+  started_at:float ->
+  unit ->
+  (unit, [> `Semaphore_wait_timeout of semaphore_wait_timeout ]) result
+val fairness_delay_sec_at : now:float -> keeper_name:string -> float
+val record_autonomous_completion_at_for_test : keeper_name:string -> ts:float -> unit
+val reset_autonomous_completion_for_test : unit -> unit
+
 type keeper_turn_slot_state
 
+type keeper_turn_slot_control =
+  { is_held : unit -> bool
+  }
+
+(** Main entry point. Acquires per-keeper mutex + global inflight slot,
+    then runs [f] with diagnostic [slot_control]. *)
 val with_keeper_turn_slot :
   ?runtime_profile:string ->
   keeper_name:string ->
@@ -239,10 +149,25 @@ val with_keeper_turn_slot :
   (semaphore_wait_ms:int -> 'a) ->
   ('a, [> `Semaphore_wait_timeout of semaphore_wait_timeout ]) result
 
-(** Test-only wrapper around the keeper turn slot acquisition path. *)
+(** Like [with_keeper_turn_slot] but exposes [slot_control] to the callback. *)
+val with_keeper_turn_slot_control :
+  ?runtime_profile:string ->
+  keeper_name:string ->
+  channel:Keeper_world_observation.keeper_cycle_channel ->
+  (semaphore_wait_ms:int -> slot_control:keeper_turn_slot_control -> 'a) ->
+  ('a, [> `Semaphore_wait_timeout of semaphore_wait_timeout ]) result
+
+(** Test-only wrappers. *)
 val with_keeper_turn_slot_for_test :
   ?runtime_profile:string ->
   keeper_name:string ->
   channel:Keeper_world_observation.keeper_cycle_channel ->
   (semaphore_wait_ms:int -> 'a) ->
+  ('a, [> `Semaphore_wait_timeout of semaphore_wait_timeout ]) result
+
+val with_keeper_turn_slot_control_for_test :
+  ?runtime_profile:string ->
+  keeper_name:string ->
+  channel:Keeper_world_observation.keeper_cycle_channel ->
+  (semaphore_wait_ms:int -> slot_control:keeper_turn_slot_control -> 'a) ->
   ('a, [> `Semaphore_wait_timeout of semaphore_wait_timeout ]) result

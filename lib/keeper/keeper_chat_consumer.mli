@@ -21,5 +21,5 @@
 val start :
   sw:Eio.Switch.t ->
   clock:_ Eio.Time.clock ->
-  handle_turn:(keeper_name:string -> queued_message:Keeper_chat_queue.queued_message -> unit) ->
+  handle_turn:(sw:Eio.Switch.t -> keeper_name:string -> queued_message:Keeper_chat_queue.queued_message -> unit) ->
   unit

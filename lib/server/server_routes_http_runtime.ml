@@ -201,6 +201,34 @@ let internal_mcp_auth_json ~base_path =
     ; "operator_next_action", `String operator_next_action
     ]
 
+let otel_health_json () =
+  let enabled = Otel_config.enabled in
+  let degraded = Otel_spans.is_exporter_degraded () in
+  let exporter_active = Otel_spans.is_exporter_active () in
+  let status =
+    if not enabled
+    then "disabled"
+    else if degraded
+    then "degraded"
+    else if exporter_active
+    then "ok"
+    else "inactive"
+  in
+  `Assoc
+    [ "enabled", `Bool enabled
+    ; "status", `String status
+    ; "endpoint", `String Otel_config.endpoint
+    ; "service_name", `String Otel_config.service_name
+    ; "exporter_active", `Bool exporter_active
+    ; "exporter_degraded", `Bool degraded
+    ; "consecutive_failures", `Int (Otel_spans.consecutive_failures ())
+    ; ( "last_successful_export_unix",
+        Json_util.float_opt_to_json (Otel_spans.last_successful_export ()) )
+    ; ( "last_degradation_error",
+        Json_util.string_opt_to_json (Otel_spans.last_degradation_error ()) )
+    ]
+;;
+
 let make_health_probe_fields ?(listener = "http/1.1") ?full_health_url
     ?(health_detail = "probe") request =
   let uptime_secs = health_uptime_secs () in
@@ -226,6 +254,7 @@ let make_health_probe_fields ?(listener = "http/1.1") ?full_health_url
       ("paths", Server_base_path_diagnostics.to_yojson path_diagnostics);
       ( "internal_mcp_auth"
       , internal_mcp_auth_json ~base_path:path_diagnostics.effective_base_path );
+      ("otel", otel_health_json ());
       ("uptime", `String (health_uptime_string uptime_secs));
       ("sse_clients", `Int (Sse.client_count ()));
       ("startup", Server_startup_state.to_yojson ());
@@ -389,6 +418,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref request =
     ("paths", Server_base_path_diagnostics.to_yojson path_diagnostics);
     ( "internal_mcp_auth"
     , internal_mcp_auth_json ~base_path:path_diagnostics.effective_base_path );
+    ("otel", otel_health_json ());
     ( "runtime_truth"
     , runtime_truth_json ~build ~path_diagnostics ~keeper_fibers
         ~fd_accountant:fd_accountant_json );

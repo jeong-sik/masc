@@ -2,15 +2,13 @@
     exporter (cohttp-eio backend) wrapped behind a tiny
     pinned surface.
 
-    The .ml is 475 lines: the bulk of it implements the
+    The .ml is intentionally private-heavy: the bulk of it implements the
     full {!Opentelemetry.Collector.BACKEND} module
     (Httpc client, Batch / Signal helpers, GC metrics
-    sampler, custom emitter pipeline).  External callers
-    reach exactly three entry points — [Config], [setup],
-    and [remove_backend] — through {!Otel_spans.start} and
-    {!Otel_spans.shutdown}.  Pinning that minimal surface
-    lets the BACKEND machinery evolve internally without
-    contract churn.
+    sampler, custom emitter pipeline). External callers get only backend
+    lifecycle entry points plus the small tick-health accessors that
+    {!Otel_spans} surfaces in [/health]. Pinning that minimal surface lets the
+    BACKEND machinery evolve internally without contract churn.
 
     Internal helpers stay private at this boundary
     (the [OT] / [Signal] / [Batch] aliases, the
@@ -21,8 +19,8 @@
     [sample_gc_metrics_if_needed], [error] type, the
     [n_errors] / [n_dropped] counters, [report_err_],
     the {!Httpc} module, the {!EMITTER} module type,
-    [mk_emitter], the {!Backend} functor, [create_backend],
-    [setup_], [with_setup]). *)
+    [mk_emitter], the {!Backend} functor, [create_backend], [setup_],
+    [with_setup]). *)
 
 module Config : sig
   type t
@@ -69,6 +67,16 @@ val setup :
     short-circuits the install when set to [false] so
     callers can keep a single boot path while toggling
     OTel via configuration. *)
+
+val tick_degraded : unit -> bool
+(** [true] once the exporter tick fiber has stopped after
+    [Eio.Mutex.Poisoned]. The backend must be restarted to clear this state. *)
+
+val last_tick_poisoned_error : unit -> string option
+(** Last poison cause captured by the tick fiber, if any. *)
+
+val reset_tick_health : unit -> unit
+(** Clear tick degraded state before installing a fresh backend. *)
 
 val remove_backend : unit -> unit
 (** Uninstalls the active backend (counterpart to

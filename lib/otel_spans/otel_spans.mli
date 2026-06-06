@@ -12,6 +12,13 @@ val init : unit -> unit
 (** [is_exporter_active ()] reports whether an OTLP exporter backend is registered. *)
 val is_exporter_active : unit -> bool
 
+(** [is_exporter_degraded ()] reports whether the exporter backend exists but
+    its tick fiber stopped after an unrecoverable internal error. *)
+val is_exporter_degraded : unit -> bool
+
+(** [last_degradation_error ()] returns the last exporter degradation cause. *)
+val last_degradation_error : unit -> string option
+
 (** [last_successful_export ()] returns the Unix timestamp of the last
     successful export, or [None] if the exporter has never been active. *)
 val last_successful_export : unit -> float option

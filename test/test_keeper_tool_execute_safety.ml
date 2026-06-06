@@ -1217,39 +1217,6 @@ let test_tool_execute_elapsed_duration_preserves_positive_sub_ms () =
   Alcotest.(check int) "nan duration is zero" 0
     (elapsed ~start_time:Float.nan ~end_time:10.0)
 
-let classification family =
-  { Exec_core.family = family
-  ; reversibility = Exec_core.Read_only
-  ; risk = Exec_core.Low
-  ; risk_class = Masc_exec.Shell_ir_risk.R0_Read
-  }
-;;
-
-let test_git_exit_128_emits_typed_deterministic_retry_marker () =
-  let fields =
-    Keeper_tool_command_runtime.For_testing.deterministic_retry_fields_for_process_result
-      ~classification:(classification Exec_core.Git_read)
-      ~status:(Unix.WEXITED 128)
-  in
-  let json = `Assoc fields in
-  let marker = json |> Json.member "deterministic_retry" in
-  Alcotest.(check string)
-    "reason"
-    "git_precondition_failed"
-    (marker |> Json.member "reason" |> Json.to_string);
-  Alcotest.(check bool)
-    "retry_same_args=false"
-    false
-    (marker |> Json.member "retry_same_args" |> Json.to_bool)
-
-let test_non_git_exit_128_has_no_deterministic_retry_marker () =
-  let fields =
-    Keeper_tool_command_runtime.For_testing.deterministic_retry_fields_for_process_result
-      ~classification:(classification Exec_core.Build)
-      ~status:(Unix.WEXITED 128)
-  in
-  Alcotest.(check int) "no fields" 0 (List.length fields)
-
 let test_tool_search_files_ir_timeout_floor_is_not_sub_io_latency () =
   let args = `Assoc [ "timeout_sec", `Float 1.0 ] in
   Alcotest.(check (float 0.001))
@@ -2363,14 +2330,6 @@ let () =
             "tool_search_files_ir load-bearing timeout floor"
             `Quick
             test_tool_search_files_ir_load_bearing_timeout_floor
-        ; Alcotest.test_case
-            "git exit 128 emits typed deterministic retry marker"
-            `Quick
-            test_git_exit_128_emits_typed_deterministic_retry_marker
-        ; Alcotest.test_case
-            "non-git exit 128 has no deterministic retry marker"
-            `Quick
-            test_non_git_exit_128_has_no_deterministic_retry_marker
         ; Alcotest.test_case
             "nested runtime detector ignores commit messages"
             `Quick

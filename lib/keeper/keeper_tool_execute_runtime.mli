@@ -14,10 +14,6 @@ val handle_tool_execute :
 
 module For_testing : sig
   val elapsed_duration_ms : start_time:float -> end_time:float -> int
-  val deterministic_retry_fields_for_process_result :
-    classification:Exec_core.classification ->
-    status:Unix.process_status ->
-    (string * Yojson.Safe.t) list
   val compute_command_descriptor : Masc_exec.Shell_ir.t -> Ide_event_types.command_descriptor
   val typed_execute_response_cwd_json :
     turn_sandbox_factory:Keeper_sandbox_factory.t option ->

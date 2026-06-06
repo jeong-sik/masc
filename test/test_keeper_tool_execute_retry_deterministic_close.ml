@@ -270,30 +270,15 @@ let test_workflow_rejection_nested_under_detail () =
     raw
 ;;
 
-(* ── Deterministic — typed git process markers ────────────────── *)
+(* ── Git process failures stay recoverable ────────────────────── *)
 
-let test_git_precondition_marker_is_deterministic () =
+let test_retired_git_precondition_marker_is_observed_only () =
   let raw =
-    deterministic_marker_raw
-      ~error:"git_exit_128"
-      D.Git_precondition_failed
+    {|{"ok":false,"error":"git_exit_128","deterministic_retry":{"reason":"git_precondition_failed","retry_same_args":false}}|}
   in
   check_classify
-    ~name:"git precondition marker"
-    ~expected:(Some D.Git_precondition_failed)
-    raw
-;;
-
-let test_git_precondition_marker_reports_source () =
-  let raw =
-    deterministic_marker_raw
-      ~error:"git_exit_128"
-      D.Git_precondition_failed
-  in
-  check_classify_source
-    ~name:"git precondition marker source"
-    ~expected_reason:D.Git_precondition_failed
-    ~expected_source:D.Deterministic_retry_marker
+    ~name:"retired git precondition marker"
+    ~expected:None
     raw
 ;;
 
@@ -374,7 +359,6 @@ let test_to_string_non_empty_for_every_variant () =
     ; D.Completion_contract_violation
     ; D.Structured_tool_payload
     ; D.Workflow_rejection_blocked
-    ; D.Git_precondition_failed
     ]
   in
   List.iter
@@ -472,13 +456,9 @@ let () =
         ] )
     ; ( "classify_git_markers"
       , [ Alcotest.test_case
-            "git_precondition_marker"
+            "retired_git_precondition_marker_observed_only"
             `Quick
-            test_git_precondition_marker_is_deterministic
-        ; Alcotest.test_case
-            "git_precondition_marker_reports_source"
-            `Quick
-            test_git_precondition_marker_reports_source
+            test_retired_git_precondition_marker_is_observed_only
         ; Alcotest.test_case
             "plain_git_exit_128_observed_only"
             `Quick

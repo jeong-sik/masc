@@ -38,6 +38,4 @@ include Keeper_workspace_ops
 
 module For_testing = struct
   let elapsed_duration_ms = Keeper_tool_execute_runtime.For_testing.elapsed_duration_ms
-  let deterministic_retry_fields_for_process_result =
-    Keeper_tool_execute_runtime.For_testing.deterministic_retry_fields_for_process_result
 end

@@ -12,7 +12,6 @@ type deterministic_reason =
   | Completion_contract_violation
   | Structured_tool_payload
   | Workflow_rejection_blocked
-  | Git_precondition_failed
 
 type classification_source =
   | Deterministic_retry_marker
@@ -45,7 +44,6 @@ let to_telemetry_key = function
     "deterministic_error_completion_contract_violation"
   | Structured_tool_payload -> "deterministic_error_structured_tool_payload"
   | Workflow_rejection_blocked -> "deterministic_error_workflow_rejection_blocked"
-  | Git_precondition_failed -> "deterministic_error_git_precondition_failed"
 ;;
 
 let to_string = function
@@ -68,8 +66,6 @@ let to_string = function
     "raw shell rejected; caller must use the visible structured tool from the recovery plan"
   | Workflow_rejection_blocked ->
     "workflow rejection explicitly marked deterministic and unrecoverable"
-  | Git_precondition_failed ->
-    "git command failed a process precondition; inspect repository/ref state or change the command"
 ;;
 
 (* ── JSON helpers ─────────────────────────────────────────────── *)
@@ -107,7 +103,6 @@ let reason_to_wire = function
   | Completion_contract_violation -> "completion_contract_violation"
   | Structured_tool_payload -> "structured_tool_payload"
   | Workflow_rejection_blocked -> "workflow_rejection_blocked"
-  | Git_precondition_failed -> "git_precondition_failed"
 ;;
 
 let reason_of_wire = function
@@ -122,7 +117,6 @@ let reason_of_wire = function
   | "completion_contract_violation" -> Some Completion_contract_violation
   | "structured_tool_payload" -> Some Structured_tool_payload
   | "workflow_rejection_blocked" -> Some Workflow_rejection_blocked
-  | "git_precondition_failed" -> Some Git_precondition_failed
   | _ -> None
 ;;
 
@@ -203,10 +197,9 @@ let classify_with_source (json : Yojson.Safe.t) : classification option =
      dedicated counter in [Keeper_tools_oas]). Once observed, it must
      not fall through to [error] string fallbacks; only explicit
      deterministic workflow markers may short-circuit retry. Path
-     checks have their own typed surface. Generic [error] codes and
-     retryability-only fields are observational metadata, not a
-     deterministic reason. Git process failures must be marked by
-     their typed producer instead of re-parsed from stderr here. *)
+     checks have their own typed surface. Generic [error] codes,
+     retryability-only fields, and git process failures are
+     observational metadata, not a deterministic reason. *)
   match classify_deterministic_retry json with
   | Some reason -> Some { reason; source = Deterministic_retry_marker }
   | None ->

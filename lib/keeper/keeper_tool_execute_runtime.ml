@@ -196,17 +196,6 @@ let elapsed_duration_ms ~start_time ~end_time =
   | _ when elapsed_ms < 1. -> 1
   | _ -> int_of_float elapsed_ms
 
-let deterministic_retry_fields_for_process_result
-      ~(classification : Exec_core.classification)
-      ~status
-  =
-  match status, classification.Exec_core.family with
-  | Unix.WEXITED 128, (Exec_core.Git_read | Exec_core.Git_write) ->
-    Keeper_tool_deterministic_error.deterministic_retry_fields
-      Keeper_tool_deterministic_error.Git_precondition_failed
-  | _ -> []
-;;
-
 let token_looks_like_shell_glob token =
   String.exists
     (function
@@ -315,8 +304,6 @@ let typed_execute_response_cwd_json
 
 module For_testing = struct
   let elapsed_duration_ms = elapsed_duration_ms
-  let deterministic_retry_fields_for_process_result =
-    deterministic_retry_fields_for_process_result
   let compute_command_descriptor = compute_command_descriptor
   let typed_execute_response_cwd_json = typed_execute_response_cwd_json
 end
@@ -688,11 +675,6 @@ let handle_tool_execute_typed
                 ~stderr:result.stderr
             in
             let classification = Exec_core.classify_command_of_ir ir in
-            let deterministic_retry_fields =
-              deterministic_retry_fields_for_process_result
-                ~classification
-                ~status:result.status
-            in
             (* Only include command_descriptor on success — errors already carry
                sufficient diagnostic info (exit code, stderr, classification). *)
             let descriptor_fields =
@@ -709,8 +691,7 @@ let handle_tool_execute_typed
                  ~keeper_name:meta.name
                  ~cmd
                  ~extra:
-                   (deterministic_retry_fields
-                    @ failure_error_fields
+                   (failure_error_fields
                     @ glob_literal_failure_fields
                     @ sandbox_extra_fields
                     @ [ "typed", `Bool true

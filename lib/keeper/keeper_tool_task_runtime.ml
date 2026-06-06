@@ -347,9 +347,9 @@ let task_op_of_name name =
 
 let state_report_result_json args =
   let snapshot =
-    match Keeper_memory_policy.keeper_state_snapshot_of_json args with
-    | Some snapshot -> snapshot
-    | None -> Keeper_memory_policy.empty_keeper_state_snapshot
+    match Keeper_memory_policy.structured_state_snapshot_schema.parse args with
+    | Ok snapshot -> snapshot
+    | Error _ -> Keeper_memory_policy.empty_keeper_state_snapshot
   in
   Yojson.Safe.to_string
     (`Assoc
@@ -794,4 +794,5 @@ let handle_keeper_task_tool
         ~ok:(Tool_result.is_success transition_result)
         ~message:(Tool_result.message transition_result)
         ())
+    | State_report -> state_report_result_json args
 ;;

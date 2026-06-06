@@ -30,6 +30,7 @@ end
 module Session : sig
   val max_age_seconds : float
   val rate_limit_window_seconds : float
+  val sse_grace_period_seconds : float
 end
 
 (** {1 Tempo (polling interval)} *)

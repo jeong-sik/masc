@@ -160,9 +160,9 @@ let path_resolution_contract_json =
            Execute cwd implicitly." )
     ; ( "discover_before_read"
       , `String
-          "When unsure, use Grep or Execute ls to discover concrete paths before Read. \
-           For repo files, use cwd=\"repos/<repo>\" plus file_path=\"lib/...\", or use \
-           file_path=\"repos/<repo>/lib/...\"."
+          "When unsure, inspect visible paths with the currently exposed read/listing \
+           tools before Read. For repo files, use cwd=\"repos/<repo>\" plus \
+           file_path=\"lib/...\", or use file_path=\"repos/<repo>/lib/...\"."
       )
     ]
 

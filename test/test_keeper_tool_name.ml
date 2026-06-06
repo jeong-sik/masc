@@ -33,6 +33,24 @@ let test_non_write_board_surface_names () =
     ]
 ;;
 
+let test_state_report_name_round_trips () =
+  check
+    (option (testable Keeper_tool_name.pp ( = )))
+    "of_string"
+    (Some Keeper_tool_name.State_report)
+    (Keeper_tool_name.of_string "keeper_report_state");
+  check
+    string
+    "to_string"
+    "keeper_report_state"
+    (Keeper_tool_name.to_string Keeper_tool_name.State_report);
+  check
+    bool
+    "not board write"
+    false
+    (Keeper_tool_name.is_board_write_surface_name "keeper_report_state")
+;;
+
 let () =
   run
     "Keeper_tool_name"
@@ -42,6 +60,10 @@ let () =
             "rejects non-write and unknown surfaces"
             `Quick
             test_non_write_board_surface_names
+        ; test_case
+            "state report name round-trips"
+            `Quick
+            test_state_report_name_round_trips
         ] )
     ]
 ;;

@@ -1,14 +1,13 @@
 (** Keeper_tools_oas_handler — Tool handler factory for Agent.run().
 
-    Skeleton module: validation, circuit-breaking, workflow-rejection
-    gating, and resource-gate wrapping.  The heavy execution body lives
+    Skeleton module: validation, repeated-failure circuit-breaking,
+    and resource-gate wrapping.  The heavy execution body lives
     in [Keeper_tools_oas_handler_exec]; telemetry helpers live in
     [Keeper_tools_oas_handler_telemetry].
 
     @since P1 extraction *)
 
 open Keeper_tools_oas
-open Keeper_tools_oas_workflow
 open Keeper_tools_oas_deterministic_error
 open Keeper_tools_oas_handler_telemetry
 
@@ -120,42 +119,6 @@ let make_keeper_tool_handler
           ~start_time:t0
           output_text)
       else (
-        match
-          Option.bind
-            (workflow_scope_key_of_input ~tool_name:name input)
-            (workflow_rejection_scope_block_get failure_counts)
-        with
-        | Some block ->
-          Otel_metric_store.inc_counter
-            Keeper_metrics.(to_string ToolsOasFailures)
-            ~labels:[ "tool", name; "site", "workflow_scope_blocked" ]
-            ();
-          record_deterministic_tool_failure_metric
-            ~tool_name:name
-            Keeper_tool_deterministic_error.Workflow_rejection_blocked;
-          Log.Keeper.warn
-            "tool %s workflow rejection retry skipped for same task/action scope"
-            name;
-          let raw_result =
-            workflow_rejection_payload_json
-              ~scope_policy:Block_scope
-              ~error_class:Workflow_error_deterministic
-              ~recoverability:Workflow_unrecoverable
-              "workflow_rejection_open_loop_blocked"
-          in
-          let output_text =
-            normalize_tool_result
-              ~workflow_rejection_recovery_fields:
-                (workflow_rejection_scope_block_fields ~tool_name:name block)
-              ~success:false
-              raw_result
-          in
-          Tool_result.error
-            ~failure_class:(Some Tool_result.Workflow_rejection)
-            ~tool_name:name
-            ~start_time:t0
-            output_text
-        | None ->
           let gate_clock =
             match clock with
             | Some clock -> Some clock

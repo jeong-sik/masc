@@ -145,16 +145,10 @@ let execute_with_observers
           | Some info ->
             let family_key = workflow_rejection_family_key ~tool_name:name info in
             let count = workflow_rejection_count_record failure_counts family_key in
-            if workflow_rejection_should_scope_block info
-            then (
-              match workflow_scope_key_of_input ~tool_name:name input with
-              | Some scope_key ->
-                ignore
-                  (workflow_rejection_scope_block_record
-                     failure_counts
-                     scope_key
-                     info)
-              | None -> ());
+            (* Workflow rejections are recovery guidance, not an execution
+               ban.  The former scope-block table turned a normal
+               self-correction hint into a 30-minute pre-dispatch gate for
+               the same task/action scope. *)
             workflow_rejection_recovery_fields ~tool_name:name ~count raw_result
           | None -> [])
         else []

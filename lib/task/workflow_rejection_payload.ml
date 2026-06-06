@@ -2,6 +2,8 @@
 
 type scope_policy =
   | Observe_scope
+  (* Legacy diagnostic value accepted for compatibility with older
+     payloads. Runtime scope blocking is not driven by this field. *)
   | Block_scope
 
 let scope_policy_to_string = function

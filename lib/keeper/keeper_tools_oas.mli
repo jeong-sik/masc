@@ -41,8 +41,6 @@ val max_consecutive_failures : int
 
 (** Thread-safe per-tool consecutive-failure counters shared by the
     handler closures in one tool bundle. *)
-type workflow_rejection_block = Keeper_tools_oas_workflow.workflow_rejection_block
-
 type workflow_rejection_info = Keeper_tools_oas_workflow.workflow_rejection_info
 
 type failure_counts
@@ -61,17 +59,6 @@ val workflow_rejection_count_record : failure_counts -> string -> int
 
 val workflow_rejection_count_reset : failure_counts -> unit
 
-val workflow_rejection_scope_block_get
-  :  failure_counts
-  -> string
-  -> Keeper_tools_oas_workflow.workflow_rejection_block option
-
-val workflow_rejection_scope_block_record
-  :  failure_counts
-  -> string
-  -> Keeper_tools_oas_workflow.workflow_rejection_info
-  -> int
-
 (** Test-only: inject a failure counter with [blocked_at] set to
     [failure_count_ttl_seconds + 60] seconds in the past.
     The next [failure_count_get] call for [key] will treat it as
@@ -82,12 +69,6 @@ val inject_stale_failure_count_for_test : failure_counts -> string -> int -> uni
     for suites that assert the first occurrence of a tool failure emits
     at ERROR. *)
 val reset_tool_retry_dedupe_for_testing : unit -> unit
-
-(** Test-only: inject a scope block with [blocked_at] set to
-    [workflow_block_ttl_seconds + 60] seconds in the past.
-    The next [workflow_rejection_scope_block_get] call for [key]
-    will treat it as expired and return [None]. *)
-val inject_stale_workflow_block_for_test : failure_counts -> string -> unit
 
 (** Normalize a raw tool result string into the canonical JSON
     envelope. Success → [{"ok":true,"result":...}]; failure →

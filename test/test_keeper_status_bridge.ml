@@ -68,11 +68,11 @@ let test_synthetic_idle_last_output_is_not_blocker () =
     (Option.map (fun b -> b.Keeper_status_bridge.blocker_class) (blocker_of_summary summary))
 ;;
 
-let test_synthetic_no_visible_output_remains_blocker () =
+let test_synthetic_no_visible_output_is_not_blocker () =
   let summary = "Decisions: [SYNTHETIC] No visible output this generation" in
   Alcotest.(check (option string))
-    "no visible output remains synthetic_stall"
-    (Some "synthetic_stall")
+    "synthetic fallback output is not a blocker"
+    None
     (Option.map (fun b -> b.Keeper_status_bridge.blocker_class) (blocker_of_summary summary))
 ;;
 
@@ -139,9 +139,9 @@ let () =
             `Quick
             test_synthetic_idle_last_output_is_not_blocker;
           Alcotest.test_case
-            "no visible synthetic output remains blocker"
+            "no visible synthetic output is not blocker"
             `Quick
-            test_synthetic_no_visible_output_remains_blocker;
+            test_synthetic_no_visible_output_is_not_blocker;
         ] );
       ( "profile default override provenance",
         [

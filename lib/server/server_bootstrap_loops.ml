@@ -933,11 +933,22 @@ let start_keeper_loops
                           MASC_DISCORD_BOT_TOKEN not set, \
                           skipping Discord delivery for keeper=%s"
                          keeper_name)
-              | Keeper_chat_queue.Slack _ ->
+              | Keeper_chat_queue.Slack { channel; _ } ->
                   Log.Keeper.info
-                    "keeper_chat_consumer: Slack adapter not yet \
-                     implemented for keeper=%s"
-                    keeper_name);
+                    "keeper_chat_consumer: forking Slack adapter \
+                     for keeper=%s"
+                    keeper_name;
+                  (match Sys.getenv_opt "MASC_SLACK_BOT_TOKEN" with
+                   | Some token ->
+                       Eio.Fiber.fork ~sw (fun () ->
+                         Keeper_chat_slack.adapter_loop ~token
+                           ~channel ~events)
+                   | None ->
+                       Log.Keeper.warn
+                         "keeper_chat_consumer: \
+                          MASC_SLACK_BOT_TOKEN not set, \
+                          skipping Slack delivery for keeper=%s"
+                         keeper_name));
              process_single_turn ~state ~clock ~sw ~auth_token:None
                ~thread_id ~closed ~payload ~run_id ~message_id
                ~agent_name ~events)

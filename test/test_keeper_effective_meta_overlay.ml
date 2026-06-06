@@ -270,6 +270,33 @@ goal = "missing sandbox profile"
        ~needle:"sandbox_profile is required"
        (Profile.tool_result_body result))
 
+let test_keeper_up_rejects_missing_profile_source () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir:_ ->
+  let name = "nosourceup" in
+  let config = Workspace.default_config base in
+  ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let ctx : _ Profile.context =
+    {
+      config;
+      agent_name = "test-agent";
+      sw;
+      clock = Eio.Stdenv.clock env;
+      proc_mgr = None;
+      net = None;
+    }
+  in
+  let result = Turn.handle_keeper_up ctx (`Assoc [ ("name", `String name) ]) in
+  if Profile.tool_result_success result then
+    Alcotest.fail "keeper_up should reject missing TOML/persona source";
+  Alcotest.(check bool)
+    "keeper_up missing source error names sandbox_profile"
+    true
+    (contains_substring
+       ~needle:"sandbox_profile is required"
+       (Profile.tool_result_body result))
+
 let test_missing_profile_source_fails_loud () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir:_ ->
   let name = "nosource" in
@@ -426,6 +453,8 @@ let () =
           Alcotest.test_case
             "keeper_up rejects profile source without sandbox_profile"
             `Quick test_keeper_up_rejects_profile_source_without_sandbox_profile;
+          Alcotest.test_case "keeper_up rejects missing profile source" `Quick
+            test_keeper_up_rejects_missing_profile_source;
           Alcotest.test_case
             "missing profile source fails loudly"
             `Quick test_missing_profile_source_fails_loud;

@@ -32,7 +32,6 @@ let make_tool_bundle
       ?search_fn
       ?on_tool_called
       ?clock
-      ?turn_slot_control
       ()
   : tool_bundle
   =
@@ -114,7 +113,6 @@ let make_tool_bundle
                ?search_fn
                ?on_tool_called
                ?clock
-               ?turn_slot_control
                ~failure_counts
                ()
            in
@@ -169,7 +167,6 @@ let make_tool_bundle
                ?search_fn
                ?on_tool_called
                ?clock
-               ?turn_slot_control
                ~translate_input:descriptor.translate
                ~failure_counts
                ()

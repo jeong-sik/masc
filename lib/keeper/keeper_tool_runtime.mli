@@ -21,7 +21,6 @@ type context =
   ; proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option
   ; net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option
   ; mcp_session_id : string option
-  ; turn_slot_control : Keeper_turn_slot.keeper_turn_slot_control option
   }
 
 val descriptor_for_internal : string -> Keeper_tool_descriptor.t option

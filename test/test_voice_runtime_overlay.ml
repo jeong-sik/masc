@@ -230,6 +230,7 @@ let test_keeper_voice_speak_returns_queued_with_root_switch () =
         ~meta
         ~name:"keeper_voice_speak"
         ~args:(`Assoc [ "message", `String "hello from queued voice test" ])
+        ()
     in
     let json = Yojson.Safe.from_string raw in
     check string "queued status" "queued"
@@ -259,6 +260,7 @@ let test_keeper_voice_speak_records_memory_bank_row () =
         ~meta
         ~name:"keeper_voice_speak"
         ~args:(`Assoc [ "message", `String message; "priority", `Int 3 ])
+        ()
     in
     let json = Yojson.Safe.from_string raw in
     check bool "memory recorded" true
@@ -298,6 +300,7 @@ let test_keeper_voice_speak_text_fallback_records_memory_bank_row () =
       ~meta
       ~name:"keeper_voice_speak"
       ~args:(`Assoc [ "message", `String message ])
+      ()
   in
   let json = Yojson.Safe.from_string raw in
   check string "text fallback status" "text_fallback"
@@ -341,6 +344,7 @@ let test_keeper_voice_session_start_does_not_store_session_name_as_voice () =
         ~meta
         ~name:"keeper_voice_session_start"
         ~args:(`Assoc [ "session_name", `String session_name ])
+        ()
     in
     let json = Yojson.Safe.from_string raw in
     let voice = Yojson.Safe.Util.(member "voice" json |> to_string) in
@@ -351,7 +355,8 @@ let test_keeper_voice_session_start_does_not_store_session_name_as_voice () =
          ~config
          ~meta
          ~name:"keeper_voice_session_end"
-         ~args:(`Assoc [])))
+         ~args:(`Assoc [])
+         ()))
 ;;
 
 let test_keeper_voice_session_end_discards_queued_speech () =
@@ -370,7 +375,8 @@ let test_keeper_voice_session_end_discards_queued_speech () =
          ~config
          ~meta
          ~name:"keeper_voice_session_start"
-         ~args:(`Assoc [ "session_name", `String "drain regression" ]));
+         ~args:(`Assoc [ "session_name", `String "drain regression" ])
+         ());
     let queued =
       Masc.Voice_bridge.enqueue_agent_speak
         ~sw
@@ -392,6 +398,7 @@ let test_keeper_voice_session_end_discards_queued_speech () =
         ~meta
         ~name:"keeper_voice_session_end"
         ~args:(`Assoc [])
+        ()
     in
     let end_json = Yojson.Safe.from_string end_raw in
     check string "session ended" "ended"

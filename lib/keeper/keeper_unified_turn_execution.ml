@@ -65,7 +65,6 @@ type ctx =
   ; trajectory_acc : Trajectory.accumulator
   ; turn_affordances : string list
   ; turn_id : int
-  ; turn_slot_control : Keeper_turn_slot.keeper_turn_slot_control option
   }
 
 let run (ctx : ctx)
@@ -92,7 +91,6 @@ let run (ctx : ctx)
       ; keeper_turn_id
       ; turn_id
       ; channel
-      ; turn_slot_control = _
       ; shared_context
       ; base_dir
       ; build_turn_prompt
@@ -207,7 +205,6 @@ let run (ctx : ctx)
                ~is_retry
                ?shared_context
                ?event_bus:(Keeper_event_bus.get ())
-               ?turn_slot_control
                ()))
   in
   let rec retry_loop (input : retry_loop_input) =

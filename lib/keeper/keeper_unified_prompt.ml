@@ -475,6 +475,14 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
         line_block "Primary goal"
           (if has_valid_primary_goal then meta.goal
            else "(no valid active goal — awaiting assignment)");
+        (if not has_valid_primary_goal then
+           "\n\
+            You have no active goal. Pick ONE action this turn to self-assign a purpose:\n\
+            - Scan the backlog with keeper_tasks_list and claim a matching task.\n\
+            - Read the board with keeper_board_list and join an active discussion.\n\
+            - Post your intended focus to the board so other keepers can align.\n\
+            Do not stay silent when you have no goal.\n"
+         else "");
         (if meta.short_goal <> "" && meta.short_goal <> meta.goal then
            line_block "Short-term goal" meta.short_goal
          else "");

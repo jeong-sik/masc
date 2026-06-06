@@ -283,7 +283,7 @@ let test_script_runs_under_system_bash_without_watch () =
         (contains_substring stderr "mapfile: command not found");
       let log = read_file gh_log in
       check bool "creates draft PR" true (contains_substring log "pr create");
-      check bool "does not arm draft guard status" false
+      check bool "does not create legacy failing status" false
         (contains_substring log "api repos/example/test/statuses/abc123");
       check bool "skips watched checks with --no-watch" false
         (contains_substring log "pr checks");

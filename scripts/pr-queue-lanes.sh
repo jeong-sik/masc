@@ -6,7 +6,7 @@
 #
 # Lanes are ordered by the next human/operator action:
 #   conflict    mergeStateStatus=DIRTY
-#   ci_fail     one or more non-draft-policy check failures
+#   ci_fail     one or more real check failures
 #   ci_pending  no real failures, at least one check still running/queued
 #   review_wait reviewDecision=REVIEW_REQUIRED or CHANGES_REQUESTED
 #   blocked     mergeStateStatus=BLOCKED after checks/review are accounted for

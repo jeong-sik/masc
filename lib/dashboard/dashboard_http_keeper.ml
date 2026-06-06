@@ -72,7 +72,9 @@ let activity_source_ts meta_ts = function
   | Keeper_meta -> meta_ts
   | Tool_call json
   | Approval_pending json ->
-      positive_json_float_opt "ts" json |> Option.value ~default:0.0
+      (match positive_json_float_opt "ts" json with
+       | Some ts -> ts
+       | None -> 0.0)
 
 let activity_source_tool_opt = function
   | Keeper_meta -> None
@@ -102,9 +104,11 @@ let latest_keeper_tool_activity keeper_name =
       None
 
 let approval_row_newer left right =
-  let left_ts = positive_json_float_opt "ts" left |> Option.value ~default:0.0 in
-  let right_ts = positive_json_float_opt "ts" right |> Option.value ~default:0.0 in
-  left_ts > right_ts
+  match positive_json_float_opt "ts" left, positive_json_float_opt "ts" right with
+  | Some left_ts, Some right_ts -> left_ts > right_ts
+  | Some _, None -> true
+  | None, Some _
+  | None, None -> false
 
 let latest_rows_by_approval_id rows =
   let table = Hashtbl.create 16 in
@@ -201,7 +205,11 @@ let live_activity_json ~now_ts ~meta_ts source =
   ]
 
 let pending_approval_gate_json ~now_ts row =
-  let ts = positive_json_float_opt "ts" row |> Option.value ~default:0.0 in
+  let ts =
+    match positive_json_float_opt "ts" row with
+    | Some ts -> ts
+    | None -> 0.0
+  in
   `Assoc [
     ("kind", `String "approval_required");
     ("source", `String "audit_approvals");
@@ -217,7 +225,11 @@ let pending_approval_gate_json ~now_ts row =
   ]
 
 let pending_approval_summary row =
-  let tool = activity_source_tool_opt (Approval_pending row) |> Option.value ~default:"tool" in
+  let tool =
+    match activity_source_tool_opt (Approval_pending row) with
+    | Some tool -> tool
+    | None -> "tool"
+  in
   match nonempty_json_string_opt "risk" row with
   | Some risk -> Printf.sprintf "승인 대기 · %s (%s)" tool risk
   | None -> Printf.sprintf "승인 대기 · %s" tool

@@ -593,10 +593,6 @@ type keeper_turn_slot_state =
   ; autonomous_ticket : int option ref
   }
 
-type keeper_turn_slot_control =
-  { is_held : unit -> bool
-  }
-
 let make_keeper_turn_slot_state () =
   { acquired_autonomous = ref false
   ; acquired_reactive = ref false
@@ -606,12 +602,6 @@ let make_keeper_turn_slot_state () =
   ; turn_acquisition_id = ref None
   ; autonomous_ticket = ref None
   }
-;;
-let keeper_turn_slot_is_held state =
-  !(state.acquired_autonomous)
-  || !(state.acquired_reactive)
-  || !(state.acquired_turn)
-  || Option.is_some !(state.autonomous_ticket)
 ;;
 let after_acquire_flag_hook_for_test
   : (label:string -> keeper_name:string -> unit) option ref
@@ -1059,7 +1049,7 @@ let observe_semaphore_wait_seconds ~keeper_name ~runtime_profile ~channel second
   inc_bucket "+Inf"
 ;;
 
-let with_keeper_turn_slot_control ?(runtime_profile = "unknown") ~keeper_name ~channel f =
+let with_keeper_turn_slot ?(runtime_profile = "unknown") ~keeper_name ~channel f =
   let is_autonomous =
     match channel with
     | Keeper_world_observation.Scheduled_autonomous -> true
@@ -1291,28 +1281,12 @@ let with_keeper_turn_slot_control ?(runtime_profile = "unknown") ~keeper_name ~c
             in
             Ok semaphore_wait_ms))
   in
-  let slot_control =
-    { is_held = (fun () -> keeper_turn_slot_is_held slot_state)
-    }
-  in
   Eio_guard.protect
     ~finally:(fun () -> release_keeper_turn_slot ~keeper_name slot_state)
     (fun () ->
        match acquire_all () with
        | Error _ as e -> e
-       | Ok semaphore_wait_ms -> Ok (f ~semaphore_wait_ms ~slot_control))
-;;
-
-let with_keeper_turn_slot ?runtime_profile ~keeper_name ~channel f =
-  with_keeper_turn_slot_control
-    ?runtime_profile
-    ~keeper_name
-    ~channel
-    (fun ~semaphore_wait_ms ~slot_control:_ -> f ~semaphore_wait_ms)
-;;
-
-let with_keeper_turn_slot_control_for_test ?runtime_profile ~keeper_name ~channel f =
-  with_keeper_turn_slot_control ?runtime_profile ~keeper_name ~channel f
+       | Ok semaphore_wait_ms -> Ok (f ~semaphore_wait_ms))
 ;;
 
 let with_keeper_turn_slot_for_test ?runtime_profile ~keeper_name ~channel f =

@@ -22,7 +22,6 @@ type context =
   ; proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option
   ; net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option
   ; mcp_session_id : string option
-  ; turn_slot_control : Keeper_turn_slot.keeper_turn_slot_control option
   }
 
 let descriptor_for_internal internal_name =
@@ -179,7 +178,6 @@ let handle_in_process ctx descriptor args =
          ~meta:ctx.meta
          ~name
          ~args
-         ?turn_slot_control:ctx.turn_slot_control
          ())
   | Tool_task_dispatch ->
     Some

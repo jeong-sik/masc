@@ -53,8 +53,7 @@ type ctx =
   ; profile_defaults : Keeper_types_profile.keeper_profile_defaults
   ; prompt_timeout_estimate_tokens : int
   ; record_runtime_rotation_attempt
-      : ?slot_release_at_phase:Keeper_execution_receipt.slot_release_phase
-      -> ?productive_phase_elapsed_ms:int
+      : ?productive_phase_elapsed_ms:int
       -> ?retry_phase_elapsed_ms:int
       -> from_runtime:string
       -> retry:EC.degraded_retry
@@ -65,7 +64,6 @@ type ctx =
   ; trajectory_acc : Trajectory.accumulator
   ; turn_affordances : string list
   ; turn_id : int
-  ; turn_slot_control : Keeper_turn_slot.keeper_turn_slot_control option
   }
 
 let run (ctx : ctx)
@@ -92,7 +90,6 @@ let run (ctx : ctx)
       ; keeper_turn_id
       ; turn_id
       ; channel
-      ; turn_slot_control = _
       ; shared_context
       ; base_dir
       ; build_turn_prompt
@@ -207,7 +204,6 @@ let run (ctx : ctx)
                ~is_retry
                ?shared_context
                ?event_bus:(Keeper_event_bus.get ())
-               ?turn_slot_control
                ()))
   in
   let rec retry_loop (input : retry_loop_input) =
@@ -501,8 +497,6 @@ let run (ctx : ctx)
                current_turn_phase_elapsed_ms ()
              in
              record_runtime_rotation_attempt
-               ~slot_release_at_phase:
-                 Keeper_execution_receipt.Retry_setup_failed
                ~productive_phase_elapsed_ms
                ?retry_phase_elapsed_ms
                ~from_runtime:execution.runtime_id
@@ -577,8 +571,6 @@ let run (ctx : ctx)
             current_turn_phase_elapsed_ms ()
           in
           record_runtime_rotation_attempt
-            ~slot_release_at_phase:
-              Keeper_execution_receipt.Retry_budget_exhausted
             ~productive_phase_elapsed_ms
             ?retry_phase_elapsed_ms
             ~from_runtime:execution.runtime_id
@@ -605,8 +597,6 @@ let run (ctx : ctx)
             current_turn_phase_elapsed_ms ()
           in
           record_runtime_rotation_attempt
-            ~slot_release_at_phase:
-              Keeper_execution_receipt.Productive_phase_exhausted
             ~productive_phase_elapsed_ms
             ?retry_phase_elapsed_ms
             ~from_runtime:execution.runtime_id

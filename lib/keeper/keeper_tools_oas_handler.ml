@@ -22,7 +22,6 @@ let make_keeper_tool_handler
       ?search_fn
       ?on_tool_called
       ?clock
-      ?turn_slot_control
       ?(translate_input = fun j -> j)
       ~(failure_counts : failure_counts)
       ()
@@ -136,7 +135,6 @@ let make_keeper_tool_handler
                 ~exec_cache
               ?search_fn
               ?on_tool_called
-              ?turn_slot_control
               ~failure_counts
               ~key
               ~input
@@ -181,7 +179,6 @@ let make_keeper_tool_handler
                     ~exec_cache
                   ?search_fn
                   ?on_tool_called
-                  ?turn_slot_control
                   ~failure_counts
                   ~key
                   ~input

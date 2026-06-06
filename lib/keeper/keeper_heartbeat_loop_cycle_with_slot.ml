@@ -47,7 +47,6 @@ let run_keeper_cycle_with_slot
       ~(turn_decision : Keeper_world_observation.keeper_cycle_decision)
       ~shared_context
       ~semaphore_wait_ms
-      ~slot_control
       ()
   =
   match
@@ -59,7 +58,6 @@ let run_keeper_cycle_with_slot
         ~generation:meta_after_cursor_persist.runtime.generation
         ~channel:turn_decision.channel
         ~semaphore_wait_ms
-        ~turn_slot_control:slot_control
         ~shared_context
         ())
   with

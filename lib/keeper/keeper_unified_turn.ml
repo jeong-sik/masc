@@ -28,7 +28,6 @@ let run_keeper_cycle
       ~(generation : int)
       ?(channel : Keeper_world_observation.keeper_cycle_channel = Scheduled_autonomous)
       ?(semaphore_wait_ms = 0)
-      ?turn_slot_control
       ?shared_context
       ()
   : (keeper_meta, Agent_sdk.Error.sdk_error) result
@@ -376,7 +375,6 @@ let run_keeper_cycle
                let degraded_retry_info = ref None in
                let runtime_rotation_attempts = ref [] in
                let record_runtime_rotation_attempt
-                     ?slot_release_at_phase
                      ?productive_phase_elapsed_ms
                      ?retry_phase_elapsed_ms
                      ~(from_runtime : string)
@@ -387,7 +385,6 @@ let run_keeper_cycle
                  let attempt : Keeper_execution_receipt.runtime_rotation_attempt =
                    Keeper_unified_turn_rotation_attempt.build
                      ~recorded_at:(now_iso ())
-                     ?slot_release_at_phase
                      ?productive_phase_elapsed_ms
                      ?retry_phase_elapsed_ms
                      ~from_runtime
@@ -484,7 +481,6 @@ let run_keeper_cycle
                           ; trajectory_acc
                           ; turn_affordances
                           ; turn_id = keeper_turn_id
-                          ; turn_slot_control
                           }
                           ~initial_execution
                           ~timeout_sec

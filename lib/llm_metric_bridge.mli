@@ -47,6 +47,8 @@ val emit_usage_details
   -> ?cache_creation_input_tokens:int
   -> ?cache_read_input_tokens:int
   -> ?reasoning_output_tokens:int
+  -> ?request_stream:bool
+  -> ?finish_reason:string
   -> provider:string
   -> model_id:string
   -> unit

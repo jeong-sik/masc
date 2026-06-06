@@ -105,8 +105,14 @@ Attributes to add per-inference:
 | `gen_ai.usage.cache_creation.input_tokens` | `response.usage.cache_creation_input_tokens` |
 | `gen_ai.usage.reasoning.output_tokens` | `response.telemetry.reasoning_tokens` |
 | `gen_ai.response.time_to_first_chunk` | `streaming_ttfrc_ms / 1000` |
-| `gen_ai.response.finish_reasons` | `stop_reason` |
+| `gen_ai.request.stream` | `true` on streaming callbacks |
+| `masc.gen_ai.response.finish_reason` | `stop_reason` |
 | `gen_ai.response.model` | `resolved_model_id` |
+
+`gen_ai.response.finish_reasons` is the upstream OpenTelemetry key, but it is a
+`string[]` attribute. The current opentelemetry-ocaml `key_value` type only
+supports scalar values, so MASC emits the scalar stop reason under the
+MASC-owned extension above instead of string-encoding the official array key.
 
 ## 4. Approach: OTel Migration
 

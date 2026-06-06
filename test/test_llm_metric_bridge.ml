@@ -340,6 +340,12 @@ let assoc_int key attrs =
   | Some _ -> Alcotest.failf "expected int attr %s" key
   | None -> Alcotest.failf "missing attr %s" key
 
+let assoc_bool key attrs =
+  match List.assoc_opt key attrs with
+  | Some (`Bool value) -> value
+  | Some _ -> Alcotest.failf "expected bool attr %s" key
+  | None -> Alcotest.failf "missing attr %s" key
+
 let genai_base_labels ~provider ~model_id =
   [ (Otel_genai.Attr_key.gen_ai_operation_name, "chat")
   ; (Otel_genai.Attr_key.gen_ai_provider_name, provider)
@@ -478,8 +484,57 @@ let test_usage_details_emit_cache_reasoning_attrs_without_token_type_aliases () 
        "event cache read tokens"
        7
        (assoc_int Otel_genai.Attr_key.gen_ai_usage_cache_read_input_tokens attrs)
-   | other ->
+  | other ->
      Alcotest.failf "expected one GenAI usage-details event, got %d"
+       (List.length other))
+
+let test_usage_details_emit_masc_finish_reason_extension () =
+  let events = ref [] in
+  let span_attrs = ref [] in
+  let provider = "bridge-genai-finish-provider" in
+  let model_id = Printf.sprintf "bridge-genai-finish-%d" (Unix.getpid ()) in
+  Otel_spans.with_test_event_emitter ~enabled:true
+    ~emit_event:(fun ~name ~attrs -> events := (name, attrs) :: !events)
+    ~emit_attrs:(fun ~attrs -> span_attrs := attrs @ !span_attrs)
+    (fun () ->
+       Bridge.emit_usage_details
+         ~provider
+         ~model_id
+         ~request_stream:true
+         ~finish_reason:"end_turn"
+         ());
+  Alcotest.(check string)
+    "span finish reason extension"
+    "end_turn"
+    (assoc_string
+       Otel_genai.Attr_key.masc_gen_ai_response_finish_reason
+       !span_attrs);
+  Alcotest.(check bool)
+    "official finish_reasons is not string-encoded"
+    false
+    (List.mem_assoc "gen_ai.response.finish_reasons" !span_attrs);
+  Alcotest.(check bool)
+    "span request stream"
+    true
+    (assoc_bool Otel_genai.Attr_key.gen_ai_request_stream !span_attrs);
+  (match List.rev !events with
+   | [ name, attrs ] ->
+     Alcotest.(check string)
+       "operation details event"
+       Otel_genai.Event_name.client_inference_operation_details
+       name;
+     Alcotest.(check string)
+       "event finish reason extension"
+       "end_turn"
+       (assoc_string
+          Otel_genai.Attr_key.masc_gen_ai_response_finish_reason
+          attrs);
+     Alcotest.(check bool)
+       "event request stream"
+       true
+       (assoc_bool Otel_genai.Attr_key.gen_ai_request_stream attrs)
+   | other ->
+     Alcotest.failf "expected one GenAI finish-reason event, got %d"
        (List.length other))
 
 let test_latency_and_streaming_emit_genai_metrics () =
@@ -585,6 +640,10 @@ let test_streaming_callbacks_emit_otel_events () =
       "first model"
       model_id
       (assoc_string "gen_ai.request.model" first_attrs);
+    Alcotest.(check bool)
+      "first stream attr"
+      true
+      (assoc_bool Otel_genai.Attr_key.gen_ai_request_stream first_attrs);
     Alcotest.(check (float 0.0001))
       "ttfrc ms"
       25.0
@@ -601,6 +660,10 @@ let test_streaming_callbacks_emit_otel_events () =
       "chunk model"
       model_id
       (assoc_string "gen_ai.request.model" chunk_attrs);
+    Alcotest.(check bool)
+      "chunk stream attr"
+      true
+      (assoc_bool Otel_genai.Attr_key.gen_ai_request_stream chunk_attrs);
     Alcotest.(check (float 0.0001))
       "inter chunk ms"
       7.5
@@ -730,6 +793,9 @@ let () =
           Alcotest.test_case
             "usage details keep cache and reasoning out of token.type" `Quick
             test_usage_details_emit_cache_reasoning_attrs_without_token_type_aliases;
+          Alcotest.test_case
+            "usage details emit MASC finish reason extension" `Quick
+            test_usage_details_emit_masc_finish_reason_extension;
           Alcotest.test_case
             "latency and streaming emit GenAI metrics" `Quick
             test_latency_and_streaming_emit_genai_metrics;

@@ -338,40 +338,53 @@ let make_hooks
             Llm_provider.Provider_kind.to_string pk
           | _ -> runtime_lane_label
         in
+        let cache_creation_input_tokens, cache_read_input_tokens =
+          match response.usage with
+          | Some u when usage_trusted ->
+              u.cache_creation_input_tokens, u.cache_read_input_tokens
+          | Some _ | None -> 0, 0
+        in
+        let reasoning_output_tokens =
+          match response.telemetry with
+          | Some { reasoning_tokens = Some rt; _ } when usage_trusted && rt > 0 -> rt
+          | _ -> 0
+        in
         (* Cache-token tracking uses OAS-reported counters only. *)
-        (match response.usage with
-         | Some u when usage_trusted ->
-           let cc = u.cache_creation_input_tokens in
-           let cr = u.cache_read_input_tokens in
-           if cc > 0 then
+        let cc = cache_creation_input_tokens in
+        let cr = cache_read_input_tokens in
+        if cc > 0 then
              Otel_metric_store.inc_counter
                Otel_metric_store.metric_provider_prefix_cache_creation_tokens
                ~delta:(Float.of_int cc) ();
-           if cr > 0 then begin
-             Otel_metric_store.inc_counter
-               Otel_metric_store.metric_provider_prefix_cache_read_tokens
-               ~delta:(Float.of_int cr) ();
-             (* Per-provider/model cache-read counter for Otel_metric_store
-                dashboards.  The legacy unlabelled counter above
-                remains for backward compatibility. *)
-             Otel_metric_store.inc_counter
-               Otel_metric_store.metric_llm_provider_cache_read_tokens
-               ~labels:[ ("provider", provider_label); ("model", model) ]
-               ~delta:(Float.of_int cr)
-               ()
-           end
-         | Some _ | None -> ());
+        if cr > 0 then begin
+          Otel_metric_store.inc_counter
+            Otel_metric_store.metric_provider_prefix_cache_read_tokens
+            ~delta:(Float.of_int cr) ();
+          (* Per-provider/model cache-read counter for Otel_metric_store
+             dashboards.  The legacy unlabelled counter above
+             remains for backward compatibility. *)
+          Otel_metric_store.inc_counter
+            Otel_metric_store.metric_llm_provider_cache_read_tokens
+            ~labels:[ ("provider", provider_label); ("model", model) ]
+            ~delta:(Float.of_int cr)
+            ()
+        end;
         (* Per-provider/model reasoning-token counter.  Available via
            [inference_telemetry.reasoning_tokens] on select providers
            (Anthropic extended thinking, DeepSeek, etc.). *)
-        (match response.telemetry with
-         | Some { reasoning_tokens = Some rt; _ } when usage_trusted && rt > 0 ->
+        if reasoning_output_tokens > 0 then
            Otel_metric_store.inc_counter
              Otel_metric_store.metric_llm_provider_reasoning_tokens
              ~labels:[ ("provider", provider_label); ("model", model) ]
-             ~delta:(Float.of_int rt)
-             ()
-         | _ -> ());
+             ~delta:(Float.of_int reasoning_output_tokens)
+             ();
+        Llm_metric_bridge.emit_usage_details
+          ~provider:provider_label
+          ~model_id:model
+          ~cache_creation_input_tokens
+          ~cache_read_input_tokens
+          ~reasoning_output_tokens
+          ();
         (* Inference latency histogram for telemetry export.
            Missing telemetry stays a separate counter; zero/negative latency
            increments the zero-latency counter and observes a 1ms floor so the

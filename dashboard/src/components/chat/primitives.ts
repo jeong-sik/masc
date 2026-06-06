@@ -37,6 +37,16 @@ function deliveryLabel(entry: KeeperConversationEntry): string {
   }
 }
 
+function liveMessageLabel(entry: KeeperConversationEntry): string | null {
+  if (entry.text.trim()) return null
+  if (entry.delivery === 'streaming') {
+    return entry.streamState === 'finalizing' ? '응답 마무리 중...' : '응답 작성 중...'
+  }
+  if (entry.delivery === 'sending') return '응답 연결 중...'
+  if (entry.delivery === 'queued') return '응답 대기 중...'
+  return null
+}
+
 function bubbleTone(entry: KeeperConversationEntry): string {
   if (entry.delivery === 'error' || entry.delivery === 'timeout') return 'error'
   if (entry.role === 'user') return 'user'
@@ -130,6 +140,22 @@ function attachmentMeta(attachment: KeeperConversationAttachment): string {
   return [attachment.mimeType, formatAttachmentSize(attachment.size)].filter(Boolean).join(' · ')
 }
 
+function LiveMessagePlaceholder({ label }: { label: string }) {
+  return html`
+    <div
+      class="flex items-center gap-2 text-base leading-airy text-[var(--color-fg-secondary)]"
+      data-chat-stream-placeholder
+    >
+      <span>${label}</span>
+      <span class="inline-flex items-center gap-1" aria-hidden="true">
+        <span class="h-1.5 w-1.5 rounded-full bg-[var(--color-fg-muted)] animate-pulse"></span>
+        <span class="h-1.5 w-1.5 rounded-full bg-[var(--color-fg-muted)] animate-pulse"></span>
+        <span class="h-1.5 w-1.5 rounded-full bg-[var(--color-fg-muted)] animate-pulse"></span>
+      </span>
+    </div>
+  `
+}
+
 function renderAttachmentCard(attachment: KeeperConversationAttachment) {
   const canLink = isSafeAttachmentHref(attachment)
   const meta = attachmentMeta(attachment)
@@ -194,7 +220,8 @@ function ChatMessageBubble({
   const [messageCollapsed, setMessageCollapsed] = useState(true)
   const expanded = showMetadata && expandedRaw
   const rawExpanded = showMetadata && rawExpandedRaw
-  const messageText = entry.text || (entry.delivery === 'streaming' || entry.delivery === 'queued' ? '' : '(empty reply)')
+  const liveLabel = liveMessageLabel(entry)
+  const messageText = liveLabel ? '' : entry.text || '(empty reply)'
   const messageLength = messageText.length
   const collapseThreshold = 1200
   const isCollapsible = messageLength > collapseThreshold
@@ -305,15 +332,19 @@ function ChatMessageBubble({
           </div>`
         : null}
 
-      <div
-        class=${`markdown-body whitespace-pre-wrap break-words text-base leading-airy text-[var(--color-fg-primary)] ${isCollapsible && messageCollapsed ? 'max-h-96 overflow-hidden' : ''}`}
-        dangerouslySetInnerHTML=${{
-          __html: DOMPurify.sanitize(
-            marked.parse(messageText) as string,
-            { ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'code', 'pre', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'blockquote', 'a', 'hr'] }
-          )
-        }}
-      />
+      ${liveLabel
+        ? html`<${LiveMessagePlaceholder} label=${liveLabel} />`
+        : html`
+            <div
+              class=${`markdown-body whitespace-pre-wrap break-words text-base leading-airy text-[var(--color-fg-primary)] ${isCollapsible && messageCollapsed ? 'max-h-96 overflow-hidden' : ''}`}
+              dangerouslySetInnerHTML=${{
+                __html: DOMPurify.sanitize(
+                  marked.parse(messageText) as string,
+                  { ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'code', 'pre', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'blockquote', 'a', 'hr'] }
+                )
+              }}
+            />
+          `}
       ${isCollapsible
         ? html`
             <button
@@ -419,7 +450,7 @@ export function ChatTranscript({
 }) {
   const scrollerRef = useRef<HTMLDivElement | null>(null)
   const lastSignature = useMemo(
-    () => entries.map(entry => `${entry.id}:${entry.text.length}:${entry.delivery}`).join('|'),
+    () => entries.map(entry => `${entry.id}:${entry.text.length}:${entry.delivery}:${entry.streamState ?? ''}`).join('|'),
     [entries],
   )
 

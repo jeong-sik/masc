@@ -75,7 +75,7 @@ describe('ChatTranscript', () => {
     expect(container.querySelector('[data-chat-delivery="live"]')).not.toBeNull()
   })
 
-  it('does not render an ellipsis for empty streaming text', () => {
+  it('renders a live placeholder for empty streaming text', () => {
     render(
       html`<${ChatTranscript}
         entries=${[
@@ -96,9 +96,10 @@ describe('ChatTranscript', () => {
       container,
     )
 
-    const bodies = [...container.querySelectorAll('.whitespace-pre-wrap')]
-    const latestBody = (bodies[bodies.length - 1]?.textContent ?? '').trim()
-    expect(latestBody).toBe('')
+    const placeholder = container.querySelector('[data-chat-stream-placeholder]')
+    expect(placeholder).not.toBeNull()
+    expect(placeholder?.textContent).toContain('응답 작성 중...')
+    expect(container.querySelector('[data-chat-delivery="live"]')).not.toBeNull()
   })
 
   it('uses a parent-bounded flexible transcript in primary mode', () => {

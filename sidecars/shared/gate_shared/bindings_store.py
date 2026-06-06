@@ -13,6 +13,16 @@ import os
 from pathlib import Path
 
 
+def resolve_runtime_path(path: str | Path) -> Path:
+    target = Path(path).expanduser()
+    if target.is_absolute():
+        return target
+    raw_base = os.getenv("MASC_BASE_PATH", "").strip()
+    if raw_base:
+        return Path(raw_base).expanduser() / target
+    return target
+
+
 def load_bindings(
     default_path: str | Path,
     *,
@@ -25,7 +35,7 @@ def load_bindings(
     preserve the `str -> str` contract.
     """
     log = logger or logging.getLogger(__name__)
-    path = Path(default_path)
+    path = resolve_runtime_path(default_path)
     if not path.exists():
         return {}
     try:
@@ -35,9 +45,7 @@ def load_bindings(
         return {}
     if not isinstance(data, dict):
         return {}
-    bindings = {
-        str(k): str(v) for k, v in data.items() if isinstance(v, str)
-    }
+    bindings = {str(k): str(v) for k, v in data.items() if isinstance(v, str)}
     log.info("Loaded %d binding(s)", len(bindings))
     return bindings
 
@@ -50,7 +58,7 @@ def save_bindings(
 ) -> None:
     """Persist bindings atomically via a hidden tempfile + os.replace."""
     log = logger or logging.getLogger(__name__)
-    target = Path(path)
+    target = resolve_runtime_path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp = target.with_name(f".{target.name}.tmp")
     try:

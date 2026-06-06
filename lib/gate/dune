@@ -10,6 +10,9 @@
   channel_gate_discord_names
   channel_gate_discord_state
   channel_gate_imessage_state
+  channel_gate_sidecar_state
+  channel_gate_slack_state
+  channel_gate_telegram_state
   channel_gate_metrics
   discord_gateway_client
   discord_gateway_state

@@ -442,6 +442,17 @@ let apply_post_turn_lifecycle_with_resilience_handles
             };
         }
     | Some snapshot ->
+        (* Gen7: sanitize snapshot goal against validated active_goal_ids.
+           Prevents ghost goals from persisting into progress.md. *)
+        let snapshot =
+          match snapshot.goal with
+          | Some goal_id when not (List.mem goal_id meta.active_goal_ids) ->
+              Log.Keeper.warn
+                "keeper:%s snapshot goal %s not in active_goal_ids, clearing"
+                meta.name goal_id;
+              { snapshot with goal = None }
+          | _ -> snapshot
+        in
         (* Gen7: cap snapshot size before rendering + persisting.
            Bounds string prose and list items so meta.continuity_summary
            cannot grow unboundedly even when the LLM produces a longer

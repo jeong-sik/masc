@@ -22,7 +22,9 @@ let semaphore_wait_timeout_blocker_class
   match timeout.timeout_phase with
   | Keeper_turn_slot.Autonomous_queue_head -> Keeper_meta_contract.Admission_queue_wait_timeout
   | Keeper_turn_slot.Autonomous_slot -> Keeper_meta_contract.Autonomous_slot_wait_timeout
-  | Keeper_turn_slot.Reactive_slot | Keeper_turn_slot.Turn_slot ->
+  | Keeper_turn_slot.Reactive_slot
+  | Keeper_turn_slot.Keeper_lane_slot
+  | Keeper_turn_slot.Turn_slot ->
     Keeper_meta_contract.Turn_timeout_after_queue_wait
 ;;
 
@@ -70,6 +72,7 @@ let semaphore_wait_timeout_diagnostics
         timeout.timeout_queue_depth
     | Keeper_turn_slot.Autonomous_slot
     | Keeper_turn_slot.Reactive_slot
+    | Keeper_turn_slot.Keeper_lane_slot
     | Keeper_turn_slot.Turn_slot ->
       let holder_text =
         match timeout.timeout_holders with

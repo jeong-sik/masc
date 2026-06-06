@@ -74,6 +74,7 @@ type semaphore_wait_phase =
   | Autonomous_queue_head
   | Autonomous_slot
   | Reactive_slot
+  | Keeper_lane_slot
   | Turn_slot
 
 val semaphore_wait_phase_to_string : semaphore_wait_phase -> string

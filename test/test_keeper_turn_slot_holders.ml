@@ -13,13 +13,26 @@ module KTS = Masc.Keeper_turn_slot
 
 exception After_flag_injected
 
+let current_test_clock = ref None
+let current_test_net = ref None
+let current_test_mono_clock = ref None
+
 let with_fresh_state body () =
-  Eio_main.run @@ fun _env ->
-    KK.set_after_acquire_flag_hook_for_test None;
-    KK.clear_force_released_markers_for_test ();
-    KK.reset_autonomous_completion_for_test ();
-    KK.reset_autonomous_turn_queue_for_test ();
-    body ()
+  Eio_main.run @@ fun env ->
+    current_test_clock := Some (Eio.Stdenv.clock env);
+    current_test_net := Some (Eio.Stdenv.net env);
+    current_test_mono_clock := Some (Eio.Stdenv.mono_clock env);
+    Fun.protect
+      ~finally:(fun () ->
+        current_test_clock := None;
+        current_test_net := None;
+        current_test_mono_clock := None)
+      (fun () ->
+        KK.set_after_acquire_flag_hook_for_test None;
+        KK.clear_force_released_markers_for_test ();
+        KK.reset_autonomous_completion_for_test ();
+        KK.reset_autonomous_turn_queue_for_test ();
+        body ())
 
 let assert_eq ~msg ~expected ~actual =
   if expected <> actual then
@@ -435,6 +448,129 @@ let test_no_clock_exhausted_turn_slot_fails_closed () =
           | Ok _ ->
               failwith "exhausted no-clock acquire should fail closed")
 
+let eio_clock_or_fail () =
+  match !current_test_clock with
+  | Some clock -> clock
+  | None -> failwith "expected Eio clock in keeper turn-slot concurrency test"
+
+let with_current_test_eio_context f =
+  match !current_test_net, !current_test_clock, !current_test_mono_clock with
+  | Some net, Some clock, Some mono_clock ->
+    Eio.Switch.run @@ fun sw ->
+    Eio_context.with_test_env ~net ~clock ~mono_clock ~sw f
+  | _ -> failwith "expected Eio env in keeper turn-slot concurrency test"
+
+let await_with_timeout ~clock ~seconds promise ~msg =
+  try Eio.Time.with_timeout_exn clock seconds (fun () -> Eio.Promise.await promise)
+  with Eio.Time.Timeout -> failwith msg
+
+let test_same_keeper_lane_serializes_turns () =
+  with_current_test_eio_context @@ fun () ->
+  let clock = eio_clock_or_fail () in
+  Eio.Switch.run @@ fun sw ->
+  let first_entered, notify_first_entered = Eio.Promise.create () in
+  let release_first, notify_release_first = Eio.Promise.create () in
+  let second_entered, notify_second_entered = Eio.Promise.create () in
+  let second_done, notify_second_done = Eio.Promise.create () in
+  let keeper_name = "diag-same-keeper-lane" in
+  Eio.Fiber.fork ~sw (fun () ->
+    match
+      KK.with_keeper_turn_slot_for_test
+        ~keeper_name
+        ~channel:Masc.Keeper_world_observation.Reactive
+        (fun ~semaphore_wait_ms:_ ->
+          Eio.Promise.resolve notify_first_entered ();
+          Eio.Promise.await release_first)
+    with
+    | Ok () -> ()
+    | Error (`Semaphore_wait_timeout _) ->
+        failwith "first same-keeper lane turn timed out");
+  await_with_timeout
+    ~clock
+    ~seconds:1.0
+    first_entered
+    ~msg:"first same-keeper lane turn did not enter";
+  Eio.Fiber.fork ~sw (fun () ->
+    match
+      KK.with_keeper_turn_slot_for_test
+        ~keeper_name
+        ~channel:Masc.Keeper_world_observation.Reactive
+        (fun ~semaphore_wait_ms:_ ->
+          Eio.Promise.resolve notify_second_entered ())
+    with
+    | Ok () -> Eio.Promise.resolve notify_second_done ()
+    | Error (`Semaphore_wait_timeout _) ->
+        failwith "second same-keeper lane turn timed out");
+  Eio.Time.sleep clock 0.05;
+  (match Eio.Promise.peek second_entered with
+   | Some () -> failwith "same keeper re-entered before its lane was released"
+   | None -> ());
+  Eio.Promise.resolve notify_release_first ();
+  await_with_timeout
+    ~clock
+    ~seconds:1.0
+    second_entered
+    ~msg:"second same-keeper lane turn did not enter after release";
+  await_with_timeout
+    ~clock
+    ~seconds:1.0
+    second_done
+    ~msg:"second same-keeper lane turn did not finish"
+
+let test_distinct_keeper_lanes_share_runtime_concurrent_budget () =
+  with_current_test_eio_context @@ fun () ->
+  let clock = eio_clock_or_fail () in
+  Eio.Switch.run @@ fun sw ->
+  let first_entered, notify_first_entered = Eio.Promise.create () in
+  let release_first, notify_release_first = Eio.Promise.create () in
+  let first_done, notify_first_done = Eio.Promise.create () in
+  let second_entered, notify_second_entered = Eio.Promise.create () in
+  let second_done, notify_second_done = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    match
+      KK.with_keeper_turn_slot_for_test
+        ~keeper_name:"diag-lane-a"
+        ~channel:Masc.Keeper_world_observation.Reactive
+        (fun ~semaphore_wait_ms:_ ->
+          Eio.Promise.resolve notify_first_entered ();
+          Eio.Promise.await release_first)
+    with
+    | Ok () -> Eio.Promise.resolve notify_first_done ()
+    | Error (`Semaphore_wait_timeout _) ->
+        failwith "first distinct-keeper lane turn timed out");
+  await_with_timeout
+    ~clock
+    ~seconds:1.0
+    first_entered
+    ~msg:"first distinct-keeper lane turn did not enter";
+  Eio.Fiber.fork ~sw (fun () ->
+    match
+      KK.with_keeper_turn_slot_for_test
+        ~keeper_name:"diag-lane-b"
+        ~channel:Masc.Keeper_world_observation.Reactive
+        (fun ~semaphore_wait_ms:_ ->
+          Eio.Promise.resolve notify_second_entered ())
+    with
+    | Ok () -> Eio.Promise.resolve notify_second_done ()
+    | Error (`Semaphore_wait_timeout _) ->
+        failwith "second distinct-keeper lane turn timed out");
+  await_with_timeout
+    ~clock
+    ~seconds:1.0
+    second_entered
+    ~msg:"distinct keeper did not enter while another keeper held its own lane";
+  await_with_timeout
+    ~clock
+    ~seconds:1.0
+    second_done
+    ~msg:"second distinct-keeper lane turn did not finish";
+  Eio.Promise.resolve notify_release_first ();
+  await_with_timeout
+    ~clock
+    ~seconds:1.0
+    first_done
+    ~msg:"first distinct-keeper lane turn did not finish"
+
 let test_force_release_marker_ttl_bounds_unfinalized_fibers () =
   KK.clear_force_released_markers_for_test ();
   let marked_at = 1_000.0 in
@@ -479,6 +615,10 @@ let () =
         test_force_released_autonomous_holder_does_not_stamp_completion;
       "no-clock exhausted turn slot fails closed",
         test_no_clock_exhausted_turn_slot_fails_closed;
+      "same keeper lane serializes turns",
+        test_same_keeper_lane_serializes_turns;
+      "distinct keeper lanes share runtime concurrent budget",
+        test_distinct_keeper_lanes_share_runtime_concurrent_budget;
       "force release marker ttl bounds unfinalized fibers",
         test_force_release_marker_ttl_bounds_unfinalized_fibers;
     ]

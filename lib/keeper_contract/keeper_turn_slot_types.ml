@@ -11,11 +11,13 @@
     patterns continue to match. *)
 
 type slot_pool =
+  | Keeper_pool
   | Turn_pool
   | Autonomous_pool
   | Reactive_pool
 
 let slot_pool_to_string = function
+  | Keeper_pool -> "keeper_lane"
   | Turn_pool -> "turn"
   | Autonomous_pool -> "autonomous"
   | Reactive_pool -> "reactive"
@@ -27,12 +29,14 @@ type semaphore_wait_phase =
   | Autonomous_queue_head
   | Autonomous_slot
   | Reactive_slot
+  | Keeper_lane_slot
   | Turn_slot
 
 let semaphore_wait_phase_to_string = function
   | Autonomous_queue_head -> "autonomous_queue_head"
   | Autonomous_slot -> "autonomous_slot"
   | Reactive_slot -> "reactive_slot"
+  | Keeper_lane_slot -> "keeper_lane_slot"
   | Turn_slot -> "turn_slot"
 ;;
 

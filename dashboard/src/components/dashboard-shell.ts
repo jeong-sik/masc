@@ -4,6 +4,8 @@ import { lazy, Suspense } from 'preact/compat'
 import { useEffect } from 'preact/hooks'
 import type { RouteState, TabId } from '../types'
 import type { DashboardCdalHealth, DashboardFleetSafetyHealth, DashboardKeeperReactionLedgerHealth, DashboardRuntimeResolution, Keeper } from '../types'
+import type { DashboardRuntimeProbePayload } from '../api/dashboard'
+import { fetchDashboardRuntimeProbe } from '../api/dashboard'
 import { hashForRoute, navigate, route } from '../router'
 import { connected, reconnectCount, lastDisconnectedAt } from '../sse'
 import { dashboardWsOnlyEnabled } from '../dashboard-ws-cutover'
@@ -48,6 +50,8 @@ import {
 } from './widget-solo'
 
 const buildIdentityOpen = signal(false)
+const shellRuntimeProviderProbe = signal<DashboardRuntimeProbePayload | null>(null)
+const shellRuntimeProviderProbeError = signal<string | null>(null)
 
 function BuildInfoRow({ label, children }: { label: string; children: unknown }) {
   return html`
@@ -190,6 +194,8 @@ interface DashboardHealthInput {
   namespaceTruthConfiguredKeepers?: number
   keepers: Keeper[]
   runtimeResolution: DashboardRuntimeResolution | null
+  runtimeProviderProbe?: DashboardRuntimeProbePayload | null
+  runtimeProviderProbeError?: string | null
   executionError: string | null
   loading: boolean
 }
@@ -411,6 +417,9 @@ function chipRouteFor(key: string): DashboardHealthChipRoute | undefined {
     case 'server-workspace-split':
     case 'runtime-warning':
       return { tab: 'monitoring', params: { section: 'runtime' } }
+    case 'runtime-provider-health':
+    case 'runtime-probe-unavailable':
+      return { tab: 'monitoring', params: { section: 'runtime', view: 'providers' } }
     case 'paused-keepers':
     case 'fleet-liveness-risk':
     case 'no-keeper-rows':
@@ -419,6 +428,58 @@ function chipRouteFor(key: string): DashboardHealthChipRoute | undefined {
       return { tab: 'monitoring', params: { section: 'agents', view: 'keepers' } }
     default:
       return undefined
+  }
+}
+
+function runtimeProviderFailureChip(probe: DashboardRuntimeProbePayload | null | undefined): DashboardHealthChip | null {
+  if (!probe) return null
+  const summary = probe.summary ?? null
+  const providers = probe.providers ?? []
+  const failedProviders = providers.filter(provider => provider.reachable === false)
+  const failed = summary?.failed ?? failedProviders.length
+  if (failed <= 0) return null
+
+  const missingAuth = failedProviders.filter(provider => provider.status === 'missing_auth').length
+  const reachable = summary?.reachable ?? providers.filter(provider => provider.reachable === true).length
+  const probed = summary?.probed ?? providers.filter(provider => provider.reachable !== null && provider.reachable !== undefined).length
+  const skipped = summary?.skipped ?? providers.filter(provider => provider.status === 'skipped_cli').length
+  const label = missingAuth > 0
+    ? `Runtime auth missing ${missingAuth}`
+    : reachable > 0
+      ? `Runtime providers degraded ${reachable}/${Math.max(probed, reachable + failed)}`
+      : `Runtime providers unreachable ${failed}`
+  const failedDetails = failedProviders.slice(0, 3).map(provider => {
+    const runtimeId = provider.runtime_id ?? provider.provider_id ?? '(unknown runtime)'
+    return `${runtimeId}: ${provider.status ?? 'failed'}`
+  })
+  const hiddenFailed = Math.max(0, failedProviders.length - failedDetails.length)
+  if (hiddenFailed > 0) {
+    failedDetails.push(`+${hiddenFailed} more`)
+  }
+  const detailParts = [
+    `default=${summary?.default_runtime_id ?? '-'}`,
+    `reachable=${reachable}`,
+    `failed=${failed}`,
+    `skipped=${skipped}`,
+  ]
+  if (failedDetails.length > 0) {
+    detailParts.push(`providers=${failedDetails.join('; ')}`)
+  }
+  return {
+    key: 'runtime-provider-health',
+    label,
+    detail: detailParts.join(', '),
+    tone: reachable > 0 ? 'warn' : 'bad',
+  }
+}
+
+function runtimeProbeErrorChip(error: string | null | undefined): DashboardHealthChip | null {
+  if (!error) return null
+  return {
+    key: 'runtime-probe-unavailable',
+    label: 'Runtime probe unavailable',
+    detail: error,
+    tone: 'warn',
   }
 }
 
@@ -512,6 +573,16 @@ export function dashboardHealthChips(input: DashboardHealthInput): DashboardHeal
     chips.push(reactionLedgerChip)
   }
 
+  const providerHealthChip = runtimeProviderFailureChip(input.runtimeProviderProbe)
+  if (providerHealthChip) {
+    chips.push(providerHealthChip)
+  } else {
+    const probeErrorChip = runtimeProbeErrorChip(input.runtimeProviderProbeError)
+    if (probeErrorChip) {
+      chips.push(probeErrorChip)
+    }
+  }
+
   const cdalChip = cdalHealthChip(runtime?.cdal)
   if (cdalChip) {
     chips.push(cdalChip)
@@ -565,6 +636,41 @@ function healthChipClass(tone: DashboardHealthChipTone): string {
 }
 
 export function DashboardHealthStrip() {
+  useEffect(() => {
+    let disposed = false
+    let inFlight = false
+    let activeController: AbortController | null = null
+    const refresh = async () => {
+      if (inFlight) return
+      inFlight = true
+      activeController = new AbortController()
+      try {
+        const response = await fetchDashboardRuntimeProbe(false, { signal: activeController.signal })
+        if (!disposed) {
+          shellRuntimeProviderProbe.value = response.probe ?? null
+          shellRuntimeProviderProbeError.value = null
+        }
+      } catch (error) {
+        const name = typeof error === 'object' && error !== null && 'name' in error
+          ? String((error as { name?: unknown }).name)
+          : ''
+        if (!disposed && name !== 'AbortError') {
+          shellRuntimeProviderProbe.value = null
+          shellRuntimeProviderProbeError.value = error instanceof Error ? error.message : String(error)
+        }
+      } finally {
+        inFlight = false
+      }
+    }
+    void refresh()
+    const interval = window.setInterval(() => void refresh(), 30_000)
+    return () => {
+      disposed = true
+      window.clearInterval(interval)
+      activeController?.abort()
+    }
+  }, [])
+
   const wsOnly = dashboardWsOnlyEnabled()
   const live = wsOnly
     ? dashboardWsConnected.value || dashboardWsSseFallbackActive.value
@@ -576,6 +682,8 @@ export function DashboardHealthStrip() {
     namespaceTruthConfiguredKeepers: namespaceTruth.value?.root.configured_keepers,
     keepers: keepers.value,
     runtimeResolution: shellRuntimeResolution.value,
+    runtimeProviderProbe: shellRuntimeProviderProbe.value,
+    runtimeProviderProbeError: shellRuntimeProviderProbeError.value,
     executionError: executionError.value,
     loading: dashboardLoading.value || namespaceTruthInitializing.value,
   })

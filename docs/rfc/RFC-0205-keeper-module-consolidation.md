@@ -137,7 +137,7 @@ Consolidate related single-type modules into cohesive groups:
 | New Module | Absorbs | Rationale |
 |------------|---------|-----------|
 | `keeper_identity` | `keeper_id`, `keeper_container_name`, `keeper_workspace_op` | Identity & workspace |
-| `keeper_turn_types` | `keeper_turn_terminal`, `keeper_turn_terminal_code`, `keeper_turn_disposition`, `keeper_turn_slot_acquire` | Turn lifecycle types |
+| `keeper_turn_types` | `keeper_turn_terminal`, `keeper_turn_terminal_code`, `keeper_turn_disposition` | Turn lifecycle types |
 | `keeper_registry_types` | 6 `keeper_registry_types_*.ml` files | Undo the split that created 6 files for one namespace |
 | `keeper_failure_types` | `keeper_*_failure_site.ml` (~12 files) | Failure classification variants |
 

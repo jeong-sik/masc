@@ -23,6 +23,20 @@ type parse_error =
 
 let error path message = [ { path; message } ]
 
+let required_non_empty_string
+      ?(trim_result = false)
+      (tbl : Otoml.t)
+      ~(path : string)
+      ~(key : string)
+      ~(message : string)
+  : (string, parse_error list) result
+  =
+  match Otoml.find_opt tbl Otoml.get_string [ key ] with
+  | Some value when String.trim value <> "" ->
+    Ok (if trim_result then String.trim value else value)
+  | Some _ | None -> Error (error (path ^ "." ^ key) message)
+;;
+
 (* Partition a list of per-entry parse results into a single
    collected result. Either every entry parsed (return [Ok all]),
    or at least one entry failed (return [Error] with every error
@@ -85,21 +99,44 @@ let transport_of_provider (tbl : Otoml.t) (id : string)
 let parse_credential (tbl : Otoml.t) (path : string)
   : (Runtime_schema.credential, parse_error list) result
   =
-  let cred_type = Otoml.find tbl Otoml.get_string [ "type" ] in
-  match cred_type with
-  | "env" ->
-    (match Otoml.find_opt tbl Otoml.get_string [ "key" ] with
-     | Some key -> Ok (Runtime_schema.Env key)
-     | None -> Error (error (path ^ ".key") "credential type 'env' requires 'key'"))
-  | "file" ->
-    (match Otoml.find_opt tbl Otoml.get_string [ "path" ] with
-     | Some p -> Ok (Runtime_schema.File p)
-     | None -> Error (error (path ^ ".path") "credential type 'file' requires 'path'"))
-  | "inline" ->
-    (match Otoml.find_opt tbl Otoml.get_string [ "value" ] with
-     | Some v -> Ok (Runtime_schema.Inline v)
-     | None -> Error (error (path ^ ".value") "credential type 'inline' requires 'value'"))
-  | t -> Error (error (path ^ ".type") (Printf.sprintf "unknown credential type %S" t))
+  match
+    required_non_empty_string
+      ~trim_result:true
+      tbl
+      ~path
+      ~key:"type"
+      ~message:"credential requires non-empty 'type'"
+  with
+  | Error errs -> Error errs
+  | Ok cred_type ->
+    (match cred_type with
+     | "env" ->
+       Result.map
+         (fun key -> Runtime_schema.Env key)
+         (required_non_empty_string
+            ~trim_result:true
+            tbl
+            ~path
+            ~key:"key"
+            ~message:"credential type 'env' requires non-empty 'key'")
+     | "file" ->
+       Result.map
+         (fun path -> Runtime_schema.File path)
+         (required_non_empty_string
+            ~trim_result:true
+            tbl
+            ~path
+            ~key:"path"
+            ~message:"credential type 'file' requires non-empty 'path'")
+     | "inline" ->
+       Result.map
+         (fun value -> Runtime_schema.Inline value)
+         (required_non_empty_string
+            tbl
+            ~path
+            ~key:"value"
+            ~message:"credential type 'inline' requires non-empty 'value'")
+     | t -> Error (error (path ^ ".type") (Printf.sprintf "unknown credential type %S" t)))
 ;;
 
 let parse_capabilities ~(path : string) (tbl : Otoml.t) : Runtime_schema.capabilities =
@@ -206,50 +243,39 @@ let parse_provider (id : string) (tbl : Otoml.t)
     let is_non_interactive =
       Otoml.find_or ~default:false tbl Otoml.get_boolean [ "is-non-interactive" ]
     in
-    let credentials =
+    let credentials_result =
       match Otoml.find_opt tbl Fun.id [ "credentials" ] with
       | Some cred_tbl ->
-        (match parse_credential cred_tbl (path ^ ".credentials") with
-         | Ok c -> Some c
-         | Error errs ->
-           (* [parse_credential] always wraps its single failure through
-              the [error] helper which builds a 1-element list, so the
-              [[]] branch is unreachable.  Typed for exhaustiveness so a
-              future change to the error-shape contract does not silently
-              lose the diagnostic. *)
-           let detail =
-             match errs with
-             | [] -> "<empty error list>"
-             | e :: _ -> Printf.sprintf "%s: %s" e.path e.message
-           in
-           Log.Runtime.warn "runtime_toml: %s" detail;
-           None)
-      | None -> None
+        Result.map Option.some (parse_credential cred_tbl (path ^ ".credentials"))
+      | None -> Ok None
     in
-    let capabilities =
-      Otoml.find_opt tbl Fun.id [ "capabilities" ]
-      |> Option.map (parse_capabilities ~path)
-    in
-    (* [providers.<id>.log] and [providers.<id>.healthcheck] sub-tables are
-       parse-and-ignore: their fields were dropped from
-       {!Runtime_schema.provider}, so they are neither read nor populated.
-       Leaving them in a TOML file is not an error. *)
-    let headers =
-      match Otoml.find_opt tbl Fun.id [ "headers" ] with
-      | None -> None
-      | Some h_tbl -> Some (parse_headers h_tbl (path ^ ".headers"))
-    in
-    Ok
-      { Runtime_schema.id
-      ; display_name
-      ; protocol
-      ; api_format
-      ; transport
-      ; is_non_interactive
-      ; credentials
-      ; capabilities
-      ; headers
-      }
+    (match credentials_result with
+     | Error errs -> Error errs
+     | Ok credentials ->
+       let capabilities =
+         Otoml.find_opt tbl Fun.id [ "capabilities" ]
+         |> Option.map (parse_capabilities ~path)
+       in
+       (* [providers.<id>.log] and [providers.<id>.healthcheck] sub-tables are
+          parse-and-ignore: their fields were dropped from
+          {!Runtime_schema.provider}, so they are neither read nor populated.
+          Leaving them in a TOML file is not an error. *)
+       let headers =
+         match Otoml.find_opt tbl Fun.id [ "headers" ] with
+         | None -> None
+         | Some h_tbl -> Some (parse_headers h_tbl (path ^ ".headers"))
+       in
+       Ok
+         { Runtime_schema.id
+         ; display_name
+         ; protocol
+         ; api_format
+         ; transport
+         ; is_non_interactive
+         ; credentials
+         ; capabilities
+         ; headers
+         })
 ;;
 
 let parse_providers (toml : Otoml.t)

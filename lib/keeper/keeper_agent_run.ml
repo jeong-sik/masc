@@ -80,6 +80,7 @@ let run_turn
       ~(runtime_id : string)
       ?world_observation
       ?(turn_affordances = [])
+      ?turn_slot_control
       ?provider_filter
       ~(generation : int)
       ?(max_turns : int = Keeper_runtime_resolved.reactive_max_turns_per_call ())
@@ -363,6 +364,7 @@ let run_turn
       ?max_cost_usd
       ~trajectory_acc
       ~tool_overlay
+      ?turn_slot_control
       ~runtime_manifest_context
       ()
   in

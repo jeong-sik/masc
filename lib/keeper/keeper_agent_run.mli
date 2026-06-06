@@ -86,6 +86,7 @@ val run_turn
   -> runtime_id:string
   -> ?world_observation:Keeper_world_observation.world_observation
   -> ?turn_affordances:string list
+  -> ?turn_slot_control:Keeper_turn_slot.keeper_turn_slot_control
   -> ?provider_filter:string list
   -> generation:int
   -> ?max_turns:int

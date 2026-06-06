@@ -175,6 +175,7 @@ let run (ctx : ctx)
                ~runtime_id:execution.runtime_id
                ~world_observation:observation
                ~turn_affordances
+               ?turn_slot_control
                ?provider_filter:
                  (Env_config_keeper.KeeperRuntimeProviderFilter.provider_allowlist ())
                ~generation:run_generation

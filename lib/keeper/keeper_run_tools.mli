@@ -95,6 +95,7 @@ val prepare_agent_setup
   -> runtime_id:string
   -> is_retry:bool
   -> turn_affordances:string list
+  -> ?turn_slot_control:Keeper_turn_slot.keeper_turn_slot_control
   -> config_root:string
   -> runtime_config_path:string option
   -> gemini_mcp_disabled:bool

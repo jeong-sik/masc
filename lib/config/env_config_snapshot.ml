@@ -683,6 +683,8 @@ let session_entries =
       "Maximum session age before cleanup (seconds, 1 hour)";
     entry ~default:"60.0" "MASC_SESSION_RATE_LIMIT_WINDOW_SEC"
       "Rate limit window (seconds)";
+    entry ~default:"300.0" "MASC_SESSION_SSE_GRACE_PERIOD_SEC"
+      "Grace period after SSE disconnect before reaping transport session (seconds, 5 min)";
   ]
 
 let shutdown_entries =

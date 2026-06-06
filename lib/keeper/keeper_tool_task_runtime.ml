@@ -324,6 +324,7 @@ type task_op =
   | Task_create
   | Task_claim
   | Task_done
+  | State_report
 
 let task_op_of_name = function
   | "keeper_tasks_list" -> Some Tasks_list
@@ -334,6 +335,7 @@ let task_op_of_name = function
   | "keeper_task_create" -> Some Task_create
   | "keeper_task_claim" -> Some Task_claim
   | "keeper_task_done" -> Some Task_done
+  | "keeper_report_state" -> Some State_report
   | _ -> None
 ;;
 

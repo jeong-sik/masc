@@ -1631,6 +1631,75 @@ let test_tool_execute_typed_failure_error_prefers_stderr () =
        normalized_error
        "Keeper_sandbox contract fixture")
 
+let test_tool_execute_typed_literal_glob_failure_guides_retry () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_readonly_meta "typed-literal-glob-failure" in
+  let playground = Filename.concat base_path (playground_path_of meta.name) in
+  ensure_dir playground;
+  let raw =
+    Keeper_tool_command_runtime.handle_tool_execute
+      ~turn_sandbox_factory:None
+      ~exec_cache:None
+      ~config
+      ~meta
+      ~args:
+        (`Assoc
+           [ "executable", `String "ls"
+           ; "argv", `List [ `String "keeper_execution_receipt*" ]
+           ; "cwd", `String playground
+           ])
+      ()
+  in
+  let json = Yojson.Safe.from_string raw in
+  Alcotest.(check bool) "glob literal failure is not ok" false
+    (json |> Json.member "ok" |> Json.to_bool);
+  let err = json |> Json.member "error" |> Json.to_string in
+  Alcotest.(check bool)
+    "top-level error keeps stderr"
+    true
+    (String_util.contains_substring err "No such file or directory");
+  let hint = json |> Json.member "execution_hint" |> Json.to_string in
+  Alcotest.(check bool)
+    "hint explains glob is literal"
+    true
+    (String_util.contains_substring hint "not shell-expanded");
+  Alcotest.(check bool) "glob marker is structured" true
+    (json |> Json.member "typed_glob_not_expanded" |> Json.to_bool);
+  Alcotest.(check string)
+    "literal token preserved"
+    "keeper_execution_receipt*"
+    (json |> Json.member "literal_glob_token" |> Json.to_string);
+  let alternatives =
+    json
+    |> Json.member "alternatives"
+    |> Json.to_list
+    |> List.map Json.to_string
+    |> String.concat "\n"
+  in
+  Alcotest.(check bool)
+    "find alternative is present"
+    true
+    (String_util.contains_substring alternatives "executable=\"find\"");
+  Alcotest.(check bool)
+    "rg alternative is present"
+    true
+    (String_util.contains_substring alternatives "executable=\"rg\"");
+  let normalized =
+    Masc.Keeper_tools_oas.normalize_tool_result ~success:false raw
+    |> Yojson.Safe.from_string
+  in
+  Alcotest.(check bool)
+    "OAS-normalized result preserves execution hint"
+    true
+    (normalized
+     |> Json.member "execution_hint"
+     |> Json.to_string
+     |> fun normalized_hint ->
+     String_util.contains_substring normalized_hint "not shell-expanded")
+
 let test_tool_execute_typed_pipeline_runs_via_shell_ir () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
@@ -2274,6 +2343,10 @@ let () =
             "typed failure top-level error prefers stderr"
             `Quick
             test_tool_execute_typed_failure_error_prefers_stderr
+        ; Alcotest.test_case
+            "typed literal glob failure guides retry"
+            `Quick
+            test_tool_execute_typed_literal_glob_failure_guides_retry
         ; Alcotest.test_case
             "typed pipeline runs via Shell IR"
             `Quick

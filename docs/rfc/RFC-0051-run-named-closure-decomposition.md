@@ -313,7 +313,7 @@ PR-3a 머지 후 OpenTelemetry span name 변동을 *허용하지 않는다*. 새
 
 본 RFC 머지 후 PR-3a 시작 전:
 
-1. [ ] 사용자 명시 승인 (`human-approved-ready` 또는 직접 합의 문구).
+1. [ ] 사용자 명시 승인 또는 직접 합의 문구.
 2. [ ] §6 open question 1 (ctx 명명) 결정.
 3. [ ] 새 worktree (`rfc-0051-pr-3a-try-provider`).
 4. [ ] §3.2 사전 측정 결과를 `.tmp/rfc-0051-pr-3a-capture-inventory.md`에 기록 후 PR-3a body에서 인용.

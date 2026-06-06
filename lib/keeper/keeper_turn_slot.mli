@@ -233,10 +233,7 @@ val set_budget_exhaustion_for_test : keeper_name:string -> strikes:int -> unit
 type keeper_turn_slot_state
 
 type keeper_turn_slot_control = {
-  release_for_retry : unit -> unit;
-  reacquire_after_retry :
-    unit ->
-    (int, [ `Semaphore_wait_timeout of semaphore_wait_timeout ]) result;
+  is_held : unit -> bool;
 }
 
 val with_keeper_turn_slot_control :
@@ -254,7 +251,7 @@ val with_keeper_turn_slot :
   ('a, [> `Semaphore_wait_timeout of semaphore_wait_timeout ]) result
 
 (** Test-only wrapper around the keeper turn slot acquisition path with
-    explicit in-turn release/reacquire controls. *)
+    in-turn slot ownership observation. *)
 val with_keeper_turn_slot_control_for_test :
   ?runtime_profile:string ->
   keeper_name:string ->

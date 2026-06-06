@@ -594,9 +594,7 @@ type keeper_turn_slot_state =
   }
 
 type keeper_turn_slot_control =
-  { release_for_retry : unit -> unit
-  ; reacquire_after_retry :
-      unit -> (int, [ `Semaphore_wait_timeout of semaphore_wait_timeout ]) result
+  { is_held : unit -> bool
   }
 
 let make_keeper_turn_slot_state () =
@@ -739,10 +737,6 @@ let release_keeper_turn_slot_impl ~keeper_name ~(stamp_autonomous_completion : b
 
 let release_keeper_turn_slot ~keeper_name state =
   release_keeper_turn_slot_impl ~keeper_name ~stamp_autonomous_completion:true state
-;;
-
-let release_keeper_turn_slot_for_retry ~keeper_name state =
-  release_keeper_turn_slot_impl ~keeper_name ~stamp_autonomous_completion:false state
 ;;
 
 (** Force-release every slot recorded for [keeper_name] in [holder_table].
@@ -1298,24 +1292,7 @@ let with_keeper_turn_slot_control ?(runtime_profile = "unknown") ~keeper_name ~c
             Ok semaphore_wait_ms))
   in
   let slot_control =
-    { release_for_retry =
-        (fun () ->
-          if keeper_turn_slot_is_held slot_state
-          then (
-            Log.Keeper.info
-              "%s: releasing keeper turn slot before degraded retry"
-              keeper_name;
-            release_keeper_turn_slot_for_retry ~keeper_name slot_state))
-    ; reacquire_after_retry =
-        (fun () ->
-          if keeper_turn_slot_is_held slot_state
-          then (
-            Log.Keeper.warn
-              "%s: retry slot reacquire requested while a slot is still held; releasing \
-               first"
-              keeper_name;
-            release_keeper_turn_slot_for_retry ~keeper_name slot_state);
-          acquire_all ())
+    { is_held = (fun () -> keeper_turn_slot_is_held slot_state)
     }
   in
   Eio_guard.protect

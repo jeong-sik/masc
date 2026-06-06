@@ -113,6 +113,9 @@ end
 
 module Mcp_attr_key = struct
   let mcp_method_name = "mcp.method.name"
+  let jsonrpc_request_id = "jsonrpc.request.id"
+  let mcp_protocol_version = "mcp.protocol.version"
+  let mcp_session_id = "mcp.session.id"
   let error_type = "error.type"
   let masc_mcp_tool_failure_class = "masc.mcp.tool.failure_class"
 end

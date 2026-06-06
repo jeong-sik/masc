@@ -70,7 +70,48 @@ let test_success_span_uses_mcp_tool_call_semconv () =
     "mcp.method.name"
     "tools/call"
     (assoc_string Genai.Mcp_attr_key.mcp_method_name span.attrs);
+  check_no_attr Genai.Mcp_attr_key.jsonrpc_request_id span.attrs;
+  check_no_attr Genai.Mcp_attr_key.mcp_session_id span.attrs;
+  check_no_attr Genai.Mcp_attr_key.mcp_protocol_version span.attrs;
   check_no_attr "otel.status_code" span.attrs
+;;
+
+let test_request_context_span_records_mcp_server_attrs () =
+  let result =
+    Tool_result.make_ok
+      ~tool_name:"get-weather"
+      ~start_time:(Unix.gettimeofday ())
+      ~data:(`Assoc [ "ok", `Bool true ])
+      ()
+  in
+  let context : Hook.request_context =
+    { jsonrpc_request_id = Some "42"
+    ; mcp_session_id = Some "session-otel"
+    ; mcp_protocol_version = Some "2026-07-28"
+    }
+  in
+  let span =
+    Eio_main.run (fun _env ->
+      capture (fun () ->
+        Hook.with_request_context context (fun () ->
+          Tool_dispatch.run_dispatch_observers Dispatch_outcome.Handled (Some result))))
+  in
+  Alcotest.(check bool)
+    "MCP request tool call span kind SERVER"
+    true
+    (span.kind = OT.Span_kind.Span_kind_server);
+  Alcotest.(check string)
+    "jsonrpc.request.id"
+    "42"
+    (assoc_string Genai.Mcp_attr_key.jsonrpc_request_id span.attrs);
+  Alcotest.(check string)
+    "mcp.session.id"
+    "session-otel"
+    (assoc_string Genai.Mcp_attr_key.mcp_session_id span.attrs);
+  Alcotest.(check string)
+    "mcp.protocol.version"
+    "2026-07-28"
+    (assoc_string Genai.Mcp_attr_key.mcp_protocol_version span.attrs)
 ;;
 
 let test_failure_span_records_typed_error_status () =
@@ -117,6 +158,10 @@ let () =
             "success span uses MCP tool-call semantic convention"
             `Quick
             test_success_span_uses_mcp_tool_call_semconv
+        ; Alcotest.test_case
+            "request context records MCP server attributes"
+            `Quick
+            test_request_context_span_records_mcp_server_attrs
         ; Alcotest.test_case
             "failure span records typed error status"
             `Quick

@@ -281,6 +281,36 @@ let test_docker_keeper_blocks_rg_outside () =
   Alcotest.(check bool) "rg outside playground blocked" true
     (blocked_by_sandbox_boundary raw)
 
+let test_local_keeper_rg_file_path_uses_parent_workdir () =
+  setup ~keeper_name:"garnet" ~sandbox:Keeper_types_profile_sandbox.Local
+  @@ fun ~base:_ ~config ~meta ~playground ->
+  if not (Keeper_tool_execute_path.shell_command_available "rg") then ()
+  else (
+    let file_path = Filename.concat playground "demo.ml" in
+    ignore (Fs_compat.save_file_atomic file_path "let run_named = true\n");
+    let raw =
+      Keeper_tool_command_runtime.handle_tool_search_files
+        ~turn_sandbox_factory:None
+        ~exec_cache:None
+        ~config
+        ~meta
+        ~args:
+          (`Assoc
+            [
+              ("op", `String "rg");
+              ("pattern", `String "run_named");
+              ("path", `String "demo.ml");
+            ])
+    in
+    (match parse_bool_field raw "ok" with
+     | Some true -> ()
+     | got -> Alcotest.failf "rg file path succeeds: got %s raw=%s"
+                (Yojson.Safe.to_string (`List [ (match got with Some b -> `Bool b | None -> `Null) ]))
+                raw);
+    Alcotest.(check (option string)) "rg file path does not surface usage error"
+      None
+      (parse_field raw "error"))
+
 let test_docker_keeper_blocks_find_outside () =
   setup ~keeper_name:"minjae" ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~base ~config ~meta ~playground:_ ->
@@ -453,6 +483,8 @@ let () =
             test_docker_keeper_blocks_cat_outside;
           Alcotest.test_case "docker keeper blocks rg outside" `Quick
             test_docker_keeper_blocks_rg_outside;
+          Alcotest.test_case "local keeper rg file path uses parent workdir"
+            `Quick test_local_keeper_rg_file_path_uses_parent_workdir;
           Alcotest.test_case "docker keeper blocks find outside" `Quick
             test_docker_keeper_blocks_find_outside;
           Alcotest.test_case "docker keeper allows inside playground"

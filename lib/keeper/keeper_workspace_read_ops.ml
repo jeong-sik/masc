@@ -190,6 +190,9 @@ let try_handle
     else
       Keeper_sandbox_read_runner.container_path_of_host ~config ~meta ~host_path
   in
+  let host_search_workdir target =
+    if safe_is_dir target then target else Filename.dirname target
+  in
   match op with
   | "pwd" ->
     Some
@@ -396,7 +399,7 @@ let try_handle
                in
                let ir = Keeper_tool_execute_shell_ir.simple Masc_exec.Exec_program.Rg argv in
                run_host_shell_ir
-                 ~workdir:target
+                 ~workdir:(host_search_workdir target)
                  ~cmd:op
                  ~path:target
                  ir

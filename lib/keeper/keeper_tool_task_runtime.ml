@@ -281,6 +281,81 @@ let merge_current_task_id ~(latest : keeper_meta) ~(caller : keeper_meta) =
   }
 ;;
 
+let merge_state_report_continuity ~(latest : keeper_meta) ~(caller : keeper_meta) =
+  {
+    latest with
+    continuity_summary = caller.continuity_summary;
+    runtime =
+      {
+        latest.runtime with
+        last_continuity_update_ts = caller.runtime.last_continuity_update_ts;
+      };
+    updated_at = caller.updated_at;
+  }
+;;
+
+let nonempty_string_opt key args =
+  match Safe_ops.json_string_opt key args with
+  | None -> None
+  | Some value ->
+    let value = String.trim value in
+    if value = "" then None else Some value
+;;
+
+let nonempty_string_list key args =
+  Safe_ops.json_string_list key args
+  |> List.map String.trim
+  |> List.filter (fun value -> value <> "")
+;;
+
+let state_report_snapshot_of_args args =
+  ({
+    goal = nonempty_string_opt "goal" args;
+    progress = nonempty_string_opt "progress" args;
+    done_summary = nonempty_string_opt "done_summary" args;
+    next_summary = nonempty_string_opt "next_summary" args;
+    next_items = nonempty_string_list "next_items" args;
+    decisions = nonempty_string_list "decisions" args;
+    open_questions = nonempty_string_list "open_questions" args;
+    constraints = nonempty_string_list "constraints" args;
+  } : Keeper_memory_policy.keeper_state_snapshot)
+  |> Keeper_memory_policy.cap_snapshot
+;;
+
+let persist_state_report_snapshot ~(config : Workspace.config) ~(meta : keeper_meta) snapshot =
+  let now_ts = Time_compat.now () in
+  let updated_at = now_iso () in
+  let progress_path = Keeper_types_support.keeper_progress_path config meta.name in
+  let progress_snapshot = Keeper_memory_policy.forward_looking_snapshot snapshot in
+  let progress_write =
+    Keeper_memory_policy.write_progress_snapshot_path
+      ~path:progress_path
+      ~generation:meta.runtime.generation
+      ~updated_at
+      progress_snapshot
+  in
+  let continuity_summary =
+    Keeper_memory_policy.keeper_state_snapshot_to_summary_text snapshot
+    |> Keeper_memory_policy.cap_continuity_summary_text
+  in
+  let updated_meta =
+    {
+      meta with
+      continuity_summary;
+      updated_at;
+      runtime = { meta.runtime with last_continuity_update_ts = now_ts };
+    }
+  in
+  Keeper_registry.update_meta ~base_path:config.base_path meta.name updated_meta;
+  let meta_write =
+    Keeper_meta_store.write_meta_with_merge
+      ~merge:merge_state_report_continuity
+      config
+      updated_meta
+  in
+  progress_path, progress_write, meta_write
+;;
+
 let sync_keeper_meta_current_task
     ~(config : Workspace.config)
     ~(meta : keeper_meta)
@@ -736,7 +811,6 @@ let handle_keeper_task_tool
          match accountability_warning with
          | Some warning -> [ ("routing_warning", `String warning) ]
          | None -> []))
-    | State_report -> state_report_result_json args
     | Task_done ->
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
     let result_text = Safe_ops.json_string ~default:"" "result" args |> String.trim in
@@ -795,5 +869,35 @@ let handle_keeper_task_tool
         ~ok:(Tool_result.is_success transition_result)
         ~message:(Tool_result.message transition_result)
         ())
-    | State_report -> state_report_result_json args
+    | State_report ->
+    let snapshot = state_report_snapshot_of_args args in
+    let progress_path, progress_write, meta_write =
+      persist_state_report_snapshot ~config ~meta snapshot
+    in
+    (match progress_write, meta_write with
+     | Ok (), Ok () ->
+       Yojson.Safe.to_string
+         (`Assoc
+            [ "ok", `Bool true
+            ; "result", `String "state reported"
+            ; "progress_path", `String progress_path
+            ; "state_snapshot", Keeper_memory_policy.keeper_state_snapshot_to_json snapshot
+            ; "typed_outcome", Keeper_tool_outcome.to_json Keeper_tool_outcome.Progress
+            ])
+     | _ ->
+       let errors =
+         [ (match progress_write with
+            | Ok () -> None
+            | Error err -> Some ("progress_snapshot: " ^ err))
+         ; (match meta_write with
+            | Ok () -> None
+            | Error err -> Some ("keeper_meta: " ^ err))
+         ]
+         |> List.filter_map Fun.id
+       in
+       keeper_tool_result_json
+         ~failure_class:(Some Tool_result.Runtime_failure)
+         ~ok:false
+         ~message:("failed to persist state report: " ^ String.concat "; " errors)
+         ())
 ;;

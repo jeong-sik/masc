@@ -111,6 +111,22 @@ let register ~name ?(priority = 50) action =
 let sorted_hooks () =
   List.sort (fun a b -> compare a.priority b.priority) !hooks
 
+let run_registered_hooks () =
+  let all_hooks = sorted_hooks () in
+  List.iter
+    (fun hook ->
+      try
+        hook.action ();
+        Log.Server.debug "[Shutdown] hook '%s' completed" hook.name
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
+        Log.Server.warn
+          "[Shutdown] hook '%s' failed: %s"
+          hook.name
+          (Printexc.to_string exn))
+    all_hooks
+
 (** {1 Phase Execution} *)
 
 (** Execute notify phase: broadcast shutdown to clients. *)
@@ -144,14 +160,7 @@ let phase_cleanup state ~clock =
   Log.Server.info "[Shutdown] Phase 3/4: CLEANUP (%d hooks, timeout=%.1fs)"
     (List.length all_hooks) state.config.cleanup_timeout_s;
   (try
-    Eio.Time.with_timeout_exn clock state.config.cleanup_timeout_s (fun () ->
-      List.iter (fun hook ->
-        try
-          hook.action ();
-          Log.Server.debug "[Shutdown] hook '%s' completed" hook.name
-        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-          Log.Server.warn "[Shutdown] hook '%s' failed: %s" hook.name (Printexc.to_string exn)
-      ) all_hooks)
+    Eio.Time.with_timeout_exn clock state.config.cleanup_timeout_s run_registered_hooks
   with Eio.Time.Timeout ->
     Log.Server.warn "[Shutdown] cleanup timeout (%.1fs) exceeded, proceeding"
       state.config.cleanup_timeout_s)

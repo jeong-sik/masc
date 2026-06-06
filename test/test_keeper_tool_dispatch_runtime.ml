@@ -406,17 +406,15 @@ let test_execute_with_outcome_missing_file_is_failure () =
         (contains_substring
            Yojson.Safe.Util.(member "retry_policy" path_resolution |> to_string)
            "Do not retry Read");
-      check string "list recovery cwd" "repos/masc-mcp"
+      check string "recovery parent path" "repos/masc-mcp/config"
         Yojson.Safe.Util.(
           member "recovery_examples" path_resolution
-          |> member "list_parent"
-          |> member "cwd"
+          |> member "parent_path_hint"
           |> to_string);
-      check string "grep recovery example" "Grep"
+      check string "recovery basename hint" "tool_policy.toml"
         Yojson.Safe.Util.(
           member "recovery_examples" path_resolution
-          |> member "grep_filename"
-          |> member "tool"
+          |> member "basename_hint"
           |> to_string))
 
 let test_execute_with_outcome_bad_query_is_failure () =

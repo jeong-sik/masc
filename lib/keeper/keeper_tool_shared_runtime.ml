@@ -60,8 +60,9 @@ let actionable_path_action_for_class
     match cls with
     | Path_not_found ->
       Printf.sprintf
-        "File does not exist. Use Execute executable='ls' argv=['%s'] first to see available \
-         files, or use a visible file-listing tool if one is present."
+        "File does not exist under %s. Inspect visible paths with the currently \
+         exposed read/listing tools before retrying. Use keeper task/context tools \
+         for .masc state."
         playground
     | Path_not_allowed ->
       Printf.sprintf
@@ -137,43 +138,24 @@ let missing_file_recovery_examples ~(raw_path : string option) ~(repo_hint : str
   | None -> `Assoc []
   | Some raw ->
     let parent = dirname_opt raw |> Option.value ~default:"." in
-    let grep_filename =
-      Filename.basename raw
-      |> fun name ->
-      let path =
-        match split_repo_relative raw, repo_hint with
-        | Some _, _ | _, None -> parent
-        | None, Some repo -> Filename.concat ("repos/" ^ repo) parent
-      in
-      `Assoc [ "tool", `String "Grep"; "pattern", `String name; "path", `String path ]
-    in
-    let list_parent =
+    let parent_path_hint =
       match split_repo_relative raw with
       | Some (repo, rel) ->
         let repo_parent = dirname_opt rel |> Option.value ~default:"." in
-        `Assoc
-          [ "tool", `String "Execute"
-          ; "cwd", `String ("repos/" ^ repo)
-          ; "executable", `String "ls"
-          ; "argv", `List [ `String repo_parent ]
-          ]
+        Filename.concat ("repos/" ^ repo) repo_parent
       | None ->
         (match repo_hint with
-         | Some repo ->
-           `Assoc
-             [ "tool", `String "Execute"
-             ; "cwd", `String ("repos/" ^ repo)
-             ; "executable", `String "ls"
-             ; "argv", `List [ `String parent ]
-             ]
-         | None ->
-           `Assoc
-             [ "tool", `String "Execute"
-             ; "executable", `String "ls"
-             ; "argv", `List [ `String parent ]
-             ])
+         | Some repo -> Filename.concat ("repos/" ^ repo) parent
+         | None -> parent)
     in
-    `Assoc [ "grep_filename", grep_filename; "list_parent", list_parent ]
+    `Assoc
+      [ "basename_hint", `String (Filename.basename raw)
+      ; "parent_path_hint", `String parent_path_hint
+      ; ( "instruction"
+        , `String
+            "Use the currently exposed read/listing tools and their visible schema to \
+             confirm this parent path before retrying." )
+      ]
 ;;
 
 let visible_repo_hint = function
@@ -228,15 +210,16 @@ let missing_file_error_json
     | Some path, Some repo when Option.is_none (split_repo_relative path) ->
       Printf.sprintf
         "A single sandbox repo is available. Retry with cwd=\"repos/%s\" and \
-         file_path=%S, or use file_path=%S. Use Grep or Execute ls first when \
-         the exact path is unclear."
+         file_path=%S, or use file_path=%S. Inspect visible paths with the \
+         currently exposed read/listing tools first when the exact path is unclear."
         repo
         path
         (Filename.concat ("repos/" ^ repo) path)
     | _ ->
       "For repo-relative files, pass cwd=\"repos/<repo>\" with \
        file_path=\"lib/...\", or pass file_path=\"repos/<repo>/lib/...\". \
-       Use Grep or Execute ls first when the exact path is unclear."
+       Inspect visible paths with the currently exposed read/listing tools first \
+       when the exact path is unclear."
   in
   Yojson.Safe.to_string
     (`Assoc
@@ -264,8 +247,8 @@ let missing_file_error_json
               ; "next_action", `String next_action
               ; ( "retry_policy"
                 , `String
-                    "Do not retry Read with the same file_path until Grep or Execute ls \
-                     confirms the file exists." )
+                    "Do not retry Read with the same file_path until a visible \
+                     read/listing tool confirms the file exists." )
               ; "recovery_examples", missing_file_recovery_examples ~raw_path ~repo_hint
               ] )
         ])

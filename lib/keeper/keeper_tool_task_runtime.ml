@@ -736,7 +736,6 @@ let handle_keeper_task_tool
          match accountability_warning with
          | Some warning -> [ ("routing_warning", `String warning) ]
          | None -> []))
-    | State_report -> state_report_result_json args
     | Task_done ->
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
     let result_text = Safe_ops.json_string ~default:"" "result" args |> String.trim in
@@ -795,4 +794,73 @@ let handle_keeper_task_tool
         ~ok:(Tool_result.is_success transition_result)
         ~message:(Tool_result.message transition_result)
         ())
+    | State_report ->
+    (* keeper_report_state: structured state reporting across turns.
+       Accepts typed fields and formats them as a text block compatible
+       with the existing [STATE] extraction pipeline (board_core_payload). *)
+    let string_field name =
+      let v = Safe_ops.json_string_opt name args in
+      (match v with
+       | Some s when String.trim s <> "" -> Some s
+       | _ -> None)
+    in
+    let string_list_field name =
+      match Yojson.Safe.Util.member name args with
+      | `List items ->
+          List.filter_map (function `String s when String.trim s <> "" -> Some s | _ -> None) items
+      | _ -> []
+    in
+    let goal = string_field "goal" in
+    let progress = string_field "progress" in
+    let done_summary = string_field "done_summary" in
+    let next_summary = string_field "next_summary" in
+    let next_items = string_list_field "next_items" in
+    let decisions = string_list_field "decisions" in
+    let open_questions = string_list_field "open_questions" in
+    let constraints = string_list_field "constraints" in
+    let parts = [] in
+    let parts = match goal with Some g -> ("Goal: " ^ g) :: parts | None -> parts in
+    let parts = match progress with Some p -> ("Progress: " ^ p) :: parts | None -> parts in
+    let parts = match done_summary with Some d -> ("Done: " ^ d) :: parts | None -> parts in
+    let parts = match next_summary with Some n -> ("Next: " ^ n) :: parts | None -> parts in
+    let parts =
+      if next_items <> [] then
+        ("Next items: " ^ String.concat "; " next_items) :: parts
+      else parts
+    in
+    let parts =
+      if decisions <> [] then
+        ("Decisions: " ^ String.concat "; " decisions) :: parts
+      else parts
+    in
+    let parts =
+      if open_questions <> [] then
+        ("Open questions: " ^ String.concat "; " open_questions) :: parts
+      else parts
+    in
+    let parts =
+      if constraints <> [] then
+        ("Constraints: " ^ String.concat "; " constraints) :: parts
+      else parts
+    in
+    let state_text = String.concat "\n" (List.rev parts) in
+    let field_count =
+      List.length
+        (List.filter (function Some _ -> true | None -> false)
+           [ goal; progress; done_summary; next_summary ])
+      + List.length next_items + List.length decisions
+      + List.length open_questions + List.length constraints
+    in
+    if field_count = 0 then
+      workflow_rejection_error_json
+        ~alternatives:[ "keeper_report_state" ]
+        "At least one state field is required. Provide goal, progress, done_summary, \
+         next_summary, next_items, decisions, open_questions, or constraints."
+    else
+      keeper_tool_result_json
+        ~typed_outcome:(Some Keeper_tool_outcome.Progress)
+        ~failure_class:None
+        ~ok:true
+        ~message:(Printf.sprintf "State reported (%d fields). %s" field_count state_text)
+        ()
 ;;

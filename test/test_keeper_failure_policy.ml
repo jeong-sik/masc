@@ -69,6 +69,7 @@ let test_provider_streaming_thinking_timeout_does_not_kill_keeper () =
            phase = Some (Policy.Stream_idle Policy.Streaming_thinking);
            strikes = None;
            liveness = Policy.In_turn_progress;
+           source = "test";
          })
   in
   check_scope "scope" "provider" decision.failure_scope;
@@ -90,6 +91,7 @@ let test_provider_capacity_backpressure_reroutes_provider () =
            phase = Some Policy.Capacity_backpressure;
            strikes = None;
            liveness = Policy.Recent_heartbeat;
+           source = "test";
          })
   in
   check_scope "scope" "provider" decision.failure_scope;
@@ -107,6 +109,7 @@ let test_provider_timeout_strike_capacity_backpressure_reroutes_provider () =
            phase = Some Policy.Capacity_backpressure;
            strikes = Some 1;
            liveness = Policy.Recent_heartbeat;
+           source = "test";
          })
   in
   check_scope "scope" "provider" decision.failure_scope;
@@ -124,6 +127,7 @@ let test_provider_timeout_loop_with_live_keeper_pauses_work_not_keeper () =
            phase = Some Policy.Caller_budget;
            strikes = Some 6;
            liveness = Policy.Recent_heartbeat;
+           source = "test";
          })
   in
   check_scope "scope" "provider" decision.failure_scope;
@@ -141,6 +145,7 @@ let test_provider_timeout_loop_with_lost_liveness_pauses_keeper_without_death ()
            phase = Some (Policy.Stream_idle Policy.Awaiting_first_event);
            strikes = Some 3;
            liveness = Policy.Watchdog_stale;
+           source = "test";
          })
   in
   check_lifecycle "lifecycle" "pause_keeper" decision.lifecycle_effect;

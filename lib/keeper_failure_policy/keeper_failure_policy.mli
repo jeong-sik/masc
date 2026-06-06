@@ -53,6 +53,7 @@ type failure =
       { phase : timeout_phase option
       ; strikes : int option
       ; liveness : liveness_evidence
+      ; source : string
       }
   | Transient_provider_failure
   | Runtime_exhausted of { retryable : bool }

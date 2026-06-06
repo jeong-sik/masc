@@ -104,6 +104,7 @@ let run_turn
       ?(is_retry = false)
       ?shared_context
       ?event_bus
+      ?turn_slot_control
       ()
   : (run_result, Agent_sdk.Error.sdk_error) result
   =
@@ -364,6 +365,7 @@ let run_turn
       ~trajectory_acc
       ~tool_overlay
       ~runtime_manifest_context
+      ?turn_slot_control
       ()
   in
   (* Section 2: prepare runtime tools and hooks. *)

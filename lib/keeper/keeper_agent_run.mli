@@ -109,5 +109,6 @@ val run_turn
   -> ?is_retry:bool
   -> ?shared_context:Agent_sdk.Context.t
   -> ?event_bus:Agent_sdk.Event_bus.t
+  -> ?turn_slot_control:Keeper_turn_slot.keeper_turn_slot_control
   -> unit
   -> (run_result, Agent_sdk.Error.sdk_error) result

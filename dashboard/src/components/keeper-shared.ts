@@ -5,7 +5,7 @@ import { useState } from 'preact/hooks'
 import { keeperDirectChatAccess } from '../lib/keeper-chat-access'
 import { relativeTime, NO_TIME_INFO } from '../lib/format-time'
 import { isAbortError } from '../lib/async-state'
-import type { Keeper, KeeperDiagnostic } from '../types'
+import type { Keeper, KeeperConversationEntry, KeeperDiagnostic } from '../types'
 import {
   abortKeeperThreadMessage,
   hydrateKeeperStatus,
@@ -169,6 +169,30 @@ function conversationStateClass(sending: boolean, hydrating: boolean): string {
   return 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-primary)]'
 }
 
+function isActiveAssistantEntry(entry: KeeperConversationEntry): boolean {
+  return (
+    entry.role === 'assistant'
+    && entry.source === 'direct_assistant'
+    && (entry.delivery === 'sending' || entry.delivery === 'streaming' || entry.delivery === 'queued')
+  )
+}
+
+function liveAssistantPlaceholder(keeperName: string): KeeperConversationEntry {
+  return {
+    id: `live-assistant-placeholder-${keeperName}`,
+    role: 'assistant',
+    source: 'direct_assistant',
+    label: keeperName,
+    text: '',
+    rawText: '',
+    timestamp: null,
+    delivery: 'streaming',
+    streamState: 'streaming',
+    details: null,
+    error: null,
+  }
+}
+
 function effectiveDiagnostic(keeper: Keeper | null | undefined): KeeperDiagnostic | null {
   if (!keeper) return null
   const detail = keeperStatusDetails.value[keeper.name]
@@ -289,6 +313,10 @@ export function KeeperConversationPanel({
   const thread = showInternal ? rawThread : rawThread.filter(isVisibleDirectConversationEntry)
   const hiddenCount = rawThread.length - thread.length
   const sending = keeperSending.value[keeperName] ?? false
+  const visibleThread =
+    sending && !thread.some(isActiveAssistantEntry)
+      ? [...thread, liveAssistantPlaceholder(keeperName)]
+      : thread
   const hydrating = keeperHydrating.value[keeperName] ?? false
   const error = keeperActionErrors.value[keeperName]
   const chatAccess = keeperDirectChatAccess(shellAuthSummary.value)
@@ -366,7 +394,7 @@ export function KeeperConversationPanel({
           : null}
 
         <${ChatTranscript}
-          entries=${thread}
+          entries=${visibleThread}
           emptyText="아직 표시할 대화가 없습니다. 내부 메시지와 도구 호출은 토글로 전환할 수 있습니다."
           showMetadata=${showMetadata}
           variant="messenger"
@@ -447,7 +475,7 @@ export function KeeperConversationPanel({
               `
             : null}
           <${ChatTranscript}
-            entries=${thread}
+            entries=${visibleThread}
             emptyText="아직 표시할 대화가 없습니다. 내부 메시지와 도구 호출은 토글로 전환할 수 있습니다."
             showMetadata=${showMetadata}
             variant="messenger"

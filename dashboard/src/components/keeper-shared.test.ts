@@ -184,6 +184,38 @@ describe('KeeperConversationPanel', () => {
     expect(container.textContent).not.toContain('Enter로 전송')
   })
 
+  it('shows a live assistant placeholder while streaming without a reply entry', async () => {
+    keeperThreads.value = {
+      echo: [
+        {
+          id: 'direct-user',
+          role: 'user',
+          source: 'direct_user',
+          label: '사용자',
+          text: '왜 PR 안함?',
+          rawText: '왜 PR 안함?',
+          timestamp: '2026-03-24T00:01:00.000Z',
+          delivery: 'history',
+          streamState: null,
+          details: null,
+          error: null,
+        },
+      ],
+    }
+    keeperSending.value = { echo: true }
+
+    render(
+      html`<${KeeperConversationPanel} keeperName="echo" placeholder="메시지 입력..." layout="primary" />`,
+      container,
+    )
+    await Promise.resolve()
+
+    const placeholder = container.querySelector('[data-chat-stream-placeholder]')
+    expect(placeholder).not.toBeNull()
+    expect(placeholder?.textContent).toContain('응답 작성 중...')
+    expect(container.querySelector('[data-chat-delivery="live"]')).not.toBeNull()
+  })
+
   it('renders probe and recover buttons in RuntimeActions', async () => {
     const keeper = { name: 'sangsu', status: 'running' } as any
 

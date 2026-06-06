@@ -201,7 +201,7 @@ export function KeeperDetailSection({
     ? 'scroll-mt-24 rounded-[var(--r-2)] bg-transparent shadow-none'
     : 'scroll-mt-24 rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] shadow-none'
   const headerClass = variant === 'primary'
-    ? 'flex w-full items-center justify-between gap-3 px-0 pb-2 pt-1 text-left'
+    ? 'sr-only'
     : 'flex w-full items-center justify-between gap-3 border-b border-[var(--color-border-default)] px-4 py-3 text-left transition-colors hover:bg-[var(--color-bg-hover)] sm:px-5'
   const headerContent = html`
     <div class="min-w-0">

@@ -201,11 +201,11 @@ Cross-model review evidence should use direct `sb glm-text` when available. If a
 
 ### MODEL Runtime
 
-- Runtime order is controlled by `Provider_registry` and `config/keeper_runtime.toml` (hot-reloaded)
-- Missing or invalid `keeper_runtime.toml` is a config error; the retired `runtime.json` fallback is not used.
+- Runtime order is controlled by `runtime.toml` at the resolved config root.
+- Missing or invalid `runtime.toml` is a config error; the retired `runtime.json` fallback is not used.
 - If a slot returns empty or errors, the next slot is tried
 - Claude API keys are rotated round-robin per heartbeat tick
-- Configuration in `config/keeper_runtime.toml`, hot-reloaded by mtime check
+- Runtime catalog changes in `runtime.toml` apply on the next runtime resolve.
 
 ### Runtime Lens Boundary (provider/model identity in JSON)
 

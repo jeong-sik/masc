@@ -10,7 +10,7 @@
 // NN/g progressive disclosure: respect working-memory limits, defer detail.
 //
 // Explicit drill-down via FilterChips, split into two strips (PR #17014):
-//   Primary strip   — default · providers · inspector
+//   Primary strip   — default · providers · runtime.toml
 //   Advanced strip  — cost · audit · stress · metrics · verification
 //                     (the first three are spread from TELEMETRY_VIEW_CHIPS,
 //                      owned by telemetry-panel.ts; PR #17044 / #17052)
@@ -18,7 +18,7 @@
 // Per-view dispatch:
 //   default      — Signal strip + collapsed diagnostic/raw accordions
 //   providers    — OAS health chip + runtime monitor only
-//   inspector    — runtime strategy trace / lane health drill-down
+//   config       — raw runtime.toml editor
 //   cost / audit / stress — TelemetryPanel → CostDashboard
 //   metrics   — raw OTel metrics only
 //   verification — formal specs only
@@ -31,6 +31,7 @@ import { FilterChips } from './common/filter-chips'
 import { CollapsibleSection } from './common/collapsible'
 import { OasHealthChip } from './oas-health-chip'
 import { RuntimeMonitor } from './runtime-monitor'
+import { RuntimeTomlEditor } from './runtime-toml-editor'
 import { OtelMetrics } from './otel-metrics'
 import { VerificationSpecsPanel } from './verification-specs-panel'
 import { TelemetryPanel, isTelemetryView, TELEMETRY_VIEW_CHIPS } from './telemetry-panel'
@@ -39,6 +40,7 @@ import { RouteLink } from './common/route-link'
 type RuntimeView =
   | 'default'
   | 'providers'
+  | 'config'
   | 'cost'
   | 'audit'
   | 'stress'
@@ -48,6 +50,7 @@ type RuntimeView =
 const RUNTIME_VIEWS: RuntimeView[] = [
   'default',
   'providers',
+  'config',
   'cost',
   'audit',
   'stress',
@@ -71,6 +74,7 @@ const activeView = computed<RuntimeView>(() => {
 const PRIMARY_VIEW_CHIPS: Array<{ key: RuntimeView; label: string }> = [
   { key: 'default', label: '전체' },
   { key: 'providers', label: '런타임' },
+  { key: 'config', label: 'runtime.toml' },
 ]
 
 // Advanced chips are infra/billing telemetry plus the raw / formal layers.
@@ -165,6 +169,8 @@ export function RuntimePanel() {
             <${OasHealthChip} />
             <${RuntimeMonitor} />
           `
+        : view === 'config'
+          ? html`<${RuntimeTomlEditor} />`
         : isTelemetryView(view)
           ? html`<${TelemetryPanel} view=${view} />`
         : view === 'metrics'

@@ -469,18 +469,15 @@ module KeeperKeepalive = struct
       (Float.min 600.0 (get_float ~default:120.0 "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC"))
   ;;
 
-  (** Total HTTP body-consumption deadline for one OAS streaming call.
-      Wraps the body callback in [Eio.Time.with_timeout_exn] in agent_sdk;
-      on expiry [Retry.Timeout] surfaces and runtime falls forward to the
-      next provider at the attempt boundary. Complements
-      [stream_idle_timeout_sec] (which only caps inter-line silence):
-      this catches the case where a single bulk read hangs without
-      producing line breaks.
+  (** Total HTTP body-consumption deadline for non-streaming OAS completion
+      calls. In agent_sdk this wraps [Complete.complete]'s synchronous HTTP
+      body read; streaming calls deliberately ignore the knob so active
+      long streams are not killed by total duration. Streaming liveness is
+      handled by [stream_idle_timeout_sec] and the attempt liveness observer.
 
       Opt-in: unset env leaves [None] so {!Runtime_agent_context} skips
-      the builder wiring. Set to a value strictly less than the effective
-      OAS attempt cap for attempt-level fall-forward; set
-      [<= stream_idle_timeout_sec] for a strict overall cap.
+      the builder wiring. Set only for sync completion callers that need a
+      body-read ceiling before the outer turn cap.
 
       Env: [MASC_KEEPER_BODY_TIMEOUT_SEC]. Default: unset → [None].
       Range when set: [10, 600]. *)

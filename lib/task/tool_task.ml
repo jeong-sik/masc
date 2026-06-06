@@ -320,7 +320,7 @@ and handle_transition ~tool_name ~start_time ctx args =
       (workflow_rejection_payload_json
          ~rule_id
          ~hint
-         ~scope_policy:"block_scope"
+         ~scope_policy:"observe"
          ~extra_fields
          reason)
   | Workspace_hooks.Pass ->

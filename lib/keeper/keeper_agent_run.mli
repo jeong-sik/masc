@@ -29,6 +29,11 @@ module For_testing : sig
     :  actual_keeper_tool_names:string list
     -> tool_calls:tool_call_detail list
     -> string list
+
+  val keeper_oas_visibility_neutral_guardrails
+    :  ?guardrails:Agent_sdk.Guardrails.t
+    -> unit
+    -> Agent_sdk.Guardrails.t
 end
 
 val per_provider_timeout_for_turn

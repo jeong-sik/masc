@@ -268,6 +268,10 @@ let test_state_block_guard_is_runtime_managed_not_absolute_never () =
   let guard = KP.state_block_output_guard_text in
   check bool "guard mentions runtime-managed continuity" true
     (has_in guard "runtime-managed continuity");
+  check bool "guard prefers structured output" true
+    (has_in guard "structured output");
+  check bool "guard names keeper_report_state" true
+    (has_in guard "keeper_report_state");
   check bool "guard avoids absolute NEVER state wording" false
     (has_in guard ("NEVER output " ^ "[STATE]"));
   check bool "guard names raw state markers" true
@@ -279,10 +283,12 @@ let test_unified_state_instruction_respects_turn_level_guard () =
   let text = KUP.state_block_instruction_text in
   check bool "instruction is scoped to non-direct turns" true
     (has_in text "For non-direct keeper turns");
-  check bool "instruction names turn-level override" true
-    (has_in text "turn-level output guard");
-  check bool "instruction mentions runtime-managed continuity" true
-    (has_in text "runtime-managed");
+  check bool "instruction prefers structured output" true
+    (has_in text "structured output");
+  check bool "instruction names keeper_report_state" true
+    (has_in text "keeper_report_state");
+  check bool "instruction keeps raw state fallback scoped" true
+    (has_in text "Only if keeper_report_state is unavailable");
   check bool "instruction avoids old unconditional wording" false
     (has_in text
        ("End every response with a "
@@ -330,6 +336,26 @@ let test_prompt_mentions_runtime_operator_approval_for_risky_actions () =
   check bool "does not claim no permission is needed" false
     (has_in prompt "You do not need permission to act")
 
+let test_keeper_oas_guardrails_are_visibility_neutral () =
+  let source_guardrails =
+    { Agent_sdk.Guardrails.tool_filter =
+        Agent_sdk.Guardrails.AllowList [ "keeper_report_state" ]
+    ; max_tool_calls_per_turn = Some 7
+    }
+  in
+  let guardrails =
+    KAR.For_testing.keeper_oas_visibility_neutral_guardrails
+      ~guardrails:source_guardrails
+      ()
+  in
+  check bool "OAS base guardrails allow all tools" true
+    (match guardrails.Agent_sdk.Guardrails.tool_filter with
+     | Agent_sdk.Guardrails.AllowAll -> true
+     | Agent_sdk.Guardrails.AllowList _
+     | Agent_sdk.Guardrails.DenyList _
+     | Agent_sdk.Guardrails.Custom _ -> false);
+  check (option int) "max tool call cap is preserved" (Some 7)
+    guardrails.Agent_sdk.Guardrails.max_tool_calls_per_turn
 
 let test_user_message_sanitizer_preserves_normal_text () =
   let text = "Please inspect the current board status." in
@@ -513,6 +539,8 @@ let () =
             test_state_block_schema_is_canonical_six_field_shape;
           test_case "constitution uses canonical state instruction" `Quick
             test_constitution_uses_canonical_state_instruction;
+          test_case "keeper OAS base guardrails are visibility-neutral" `Quick
+            test_keeper_oas_guardrails_are_visibility_neutral;
           test_case "prompt mentions runtime operator approval for risky actions" `Quick
             test_prompt_mentions_runtime_operator_approval_for_risky_actions;
           test_case "user message sanitizer preserves normal text" `Quick

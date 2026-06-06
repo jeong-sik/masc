@@ -48,7 +48,7 @@ describe('IdeToolbar', () => {
           id: 'pr:15035',
           label: 'PR',
           tab: 'workspace',
-          params: { section: 'repositories', view: 'graph', pr: '15035' },
+          params: { section: 'repositories', pr: '15035' },
           evidence: 'PR 15035',
         },
         {
@@ -182,7 +182,7 @@ describe('IdeToolbar', () => {
           id: 'git:abc123',
           label: 'Git',
           tab: 'workspace',
-          params: { section: 'repositories', view: 'graph', ref: 'abc123' },
+          params: { section: 'repositories', ref: 'abc123' },
           evidence: 'Git abc123',
         },
       ],

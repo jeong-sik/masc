@@ -215,7 +215,6 @@ describe('presenceContextAnchor', () => {
     ])
     expect(anchor?.route_links?.find(link => link.label === 'PR')?.params).toMatchObject({
       section: 'repositories',
-      view: 'graph',
       pr: '88',
     })
     expect(anchor?.route_links?.find(link => link.label === 'Git')?.params).toMatchObject({

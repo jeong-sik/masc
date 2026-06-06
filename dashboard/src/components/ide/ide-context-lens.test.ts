@@ -117,7 +117,7 @@ describe('IdeContextLens', () => {
     })
     expect(model.surfaces.find(surface => surface.id === 'pr')?.routeLink).toMatchObject({
       label: 'PR',
-      params: { section: 'repositories', view: 'graph', pr: '15000' },
+      params: { section: 'repositories', pr: '15000' },
     })
     expect(model.surfaces.find(surface => surface.id === 'telemetry')?.routeLink).toMatchObject({
       label: 'Telemetry',
@@ -187,7 +187,7 @@ describe('IdeContextLens', () => {
     fireEvent.click(surfaceButtons.find(button => button.textContent === 'PR1')!)
     expect(activated[0]).toMatchObject({
       label: 'PR',
-      params: { section: 'repositories', view: 'graph', pr: '15000' },
+      params: { section: 'repositories', pr: '15000' },
     })
 
     fireEvent.click(surfaceButtons.find(button => button.textContent === 'Comment1')!)
@@ -558,7 +558,7 @@ describe('IdeContextLens', () => {
     })
     expect(model.surfaces.find(surface => surface.id === 'pr')?.routeLink).toMatchObject({
       label: 'PR',
-      params: { section: 'repositories', view: 'graph', pr: '15035' },
+      params: { section: 'repositories', pr: '15035' },
     })
     expect(model.surfaces.find(surface => surface.id === 'telemetry')?.routeLink).toMatchObject({
       label: 'Telemetry',

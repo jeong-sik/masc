@@ -4,11 +4,6 @@ import { requestNamespaceTruth } from './namespace-truth-store'
 import { refreshMissionSnapshot } from './mission-store'
 import { refreshOperatorWorkspaceDigest, refreshOperatorSnapshot } from './operator-store'
 
-async function refreshGitGraphSurface(): Promise<void> {
-  const { refreshGitGraph } = await import('./components/git-graph-store')
-  await refreshGitGraph()
-}
-
 async function refreshObservatoryPanel(): Promise<void> {
   const { refreshObservatorySurface } = await import('./components/observatory/observatory')
   refreshObservatorySurface()
@@ -45,7 +40,6 @@ type RefreshTask =
   | 'missionSnapshot'
   | 'execution'
   | 'observatory'
-  | 'gitGraph'
   | 'board'
   | 'goals'
   | 'harness'
@@ -110,9 +104,6 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
       if (routeState.params.section === 'board') {
         return ['board']
       }
-      if (routeState.params.section === 'repositories' && routeState.params.view === 'graph') {
-        return ['gitGraph']
-      }
       return []
     case 'lab':
       if (routeState.params.section === 'harness') {
@@ -137,7 +128,6 @@ const REFRESHERS: Record<RefreshTask, (routeState: Pick<RouteState, 'tab' | 'par
   // through that budgeted path instead of bypassing it.
   execution: () => { void refreshExecution() },
   observatory: () => { void refreshObservatoryPanel() },
-  gitGraph: () => { void refreshGitGraphSurface() },
   board: () => { void refreshBoard() },
   goals: () => { void refreshGoals() },
   harness: () => { void refreshHarnessLabSurface() },

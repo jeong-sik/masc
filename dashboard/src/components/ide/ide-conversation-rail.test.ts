@@ -480,7 +480,7 @@ describe('IdeConversationRail', () => {
     expect(window.location.hash).toBe('#workspace?section=board&post=thread-line&comment=comment-1')
 
     fireEvent.click(links.find(link => link.textContent === 'PR')!)
-    expect(window.location.hash).toBe('#workspace?section=repositories&view=graph&pr=15035')
+    expect(window.location.hash).toBe('#workspace?section=repositories&pr=15035')
 
     fireEvent.click(links.find(link => link.textContent === 'Keeper')!)
     expect(window.location.hash).toBe('#monitoring?section=agents&view=keepers&keeper=scholar')

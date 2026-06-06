@@ -164,27 +164,26 @@ describe('RuntimePanel', () => {
     const chips = container.querySelectorAll('[data-testid="chip"]')
     // Chips are split across two FilterChips strips (Primary then Advanced)
     // with a divider between them. The positional order reflects the
-    // Primary[default, providers, runtime.toml] → Advanced[cost, audit, stress,
+    // Primary[default, providers, runtime.toml] → Advanced[cost, audit,
     // verification] layout.
-    expect(chips.length).toBe(7)
+    expect(chips.length).toBe(6)
     expect(chips[0]?.textContent).toBe('전체')
     expect(chips[1]?.textContent).toBe('런타임')
     expect(chips[2]?.textContent).toBe('runtime.toml')
     expect(chips[3]?.textContent).toBe('비용 / 지연')
     expect(chips[4]?.textContent).toBe('감사')
-    expect(chips[5]?.textContent).toBe('스트레스')
-    expect(chips[6]?.textContent).toBe('형식검증')
+    expect(chips[5]?.textContent).toBe('형식검증')
   })
 
   it('routes runtime diagnostic views through CostDashboard', async () => {
-    route.value.params = { view: 'stress' }
+    route.value.params = { view: 'audit' }
     const { RuntimePanel } = await loadRuntimePanel()
     render(html`<${RuntimePanel} />`, container)
     await flushUi()
 
     const costDashboard = container.querySelector('[data-testid="cost-dashboard"]')
     expect(costDashboard).not.toBeNull()
-    expect(costDashboard?.getAttribute('data-view')).toBe('stress')
+    expect(costDashboard?.getAttribute('data-view')).toBe('audit')
     expect(container.textContent).not.toContain('RuntimeMonitor')
   })
 

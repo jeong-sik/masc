@@ -10,7 +10,6 @@ describe('isTelemetryView', () => {
   it('returns true for each telemetry view key', () => {
     expect(isTelemetryView('cost')).toBe(true)
     expect(isTelemetryView('audit')).toBe(true)
-    expect(isTelemetryView('stress')).toBe(true)
   })
 
   it('returns false for primary runtime views', () => {
@@ -37,7 +36,7 @@ describe('isTelemetryView', () => {
 describe('TELEMETRY_VIEW_CHIPS', () => {
   it('exposes exactly the telemetry view keys', () => {
     const keys = TELEMETRY_VIEW_CHIPS.map(chip => chip.key)
-    expect(keys).toEqual(['cost', 'audit', 'stress'])
+    expect(keys).toEqual(['cost', 'audit'])
   })
 
   it('every chip key passes isTelemetryView (round-trip consistency)', () => {

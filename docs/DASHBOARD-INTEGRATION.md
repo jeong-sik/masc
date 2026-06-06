@@ -91,7 +91,7 @@ code_refs:
 - `monitoring:metrics -> monitoring:runtime`
 - `monitoring:runtime-inspector -> monitoring:runtime&view=inspector`
 - `monitoring:cost -> monitoring:runtime&view=cost`
-- `monitoring:git-graph -> workspace:repositories&view=graph`
+- `monitoring:git-graph -> workspace:repositories`
 - `command:intervene -> command:operations`
 - `command:governance -> command:operations`
 - `command:connectors -> connectors:connector-status`
@@ -166,8 +166,6 @@ code_refs:
   - workspace named board spaces
 - `GET /api/v1/dashboard/planning`
   - planning + goal tree
-- `GET /api/v1/git/graph`
-  - workspace repository graph view
 - `GET /api/v1/repositories`, `GET /api/v1/workspace/tree`
   - workspace repository registry and source tree browser read models
 - `GET /api/v1/verification/requests`, `GET /api/v1/verification/summary`

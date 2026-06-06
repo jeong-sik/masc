@@ -187,7 +187,7 @@ describe('IdeActivityPanel', () => {
       'Telemetry1',
     ])
     fireEvent.click(surfaceLinks.find(link => link.textContent === 'PR1')!)
-    expect(window.location.hash).toBe('#workspace?section=repositories&view=graph&pr=15000')
+    expect(window.location.hash).toBe('#workspace?section=repositories&pr=15000')
     fireEvent.click(surfaceLinks.find(link => link.textContent === 'Session1')!)
     expect(window.location.hash).toBe('#monitoring?section=fleet-health&view=event-log&session_id=sess-runtime&operation_id=op-runtime&worker_run_id=wr-runtime&q=turn-1')
     fireEvent.click(surfaceLinks.find(link => link.textContent === 'Telemetry1')!)
@@ -802,7 +802,7 @@ describe('IdeActivityPanel', () => {
     ])
     expect(summary.surfaceCounts.find(surface => surface.label === 'PR')?.routeLink).toMatchObject({
       label: 'PR',
-      params: { section: 'repositories', view: 'graph', pr: '15000' },
+      params: { section: 'repositories', pr: '15000' },
     })
     expect(summary.surfaceCounts.find(surface => surface.label === 'Telemetry')?.routeLink).toMatchObject({
       label: 'Telemetry',
@@ -862,7 +862,7 @@ describe('IdeActivityPanel', () => {
 
     expect(summary.surfaceCounts.find(surface => surface.label === 'PR')?.routeLink).toMatchObject({
       label: 'PR',
-      params: { section: 'repositories', view: 'graph', pr: '15000' },
+      params: { section: 'repositories', pr: '15000' },
     })
     expect(summary.surfaceCounts.find(surface => surface.label === 'Telemetry')?.routeLink).toMatchObject({
       label: 'Telemetry',

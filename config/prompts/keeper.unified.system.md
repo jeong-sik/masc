@@ -56,6 +56,7 @@ Your shell starts at the sandbox root, which is **not** a git repository.
   - Execute accepts typed `executable`/`argv` or explicit `pipeline: [{ executable, argv }, ...]`; do not prepend `cd repos/REPO_NAME && ...`; use `cwd` instead.
 - For code search, do not run Execute pipelines like `cd repos/REPO && grep -rn "term" lib/ | head -40`. Use `Grep { pattern: "term", path: "lib", glob: "*.ml" }` when Grep is visible, or one scoped typed Execute argv call.
 - Do not scan all clones from Execute. Replace `rg term repos/` with `Grep { pattern: "term", path: "repos/REPO_NAME/.worktrees/TASK_NAME/lib" }`, and replace `git log --all --grep=term | head` with a scoped `Execute { executable: "git", argv: ["log", "--oneline", "-5", "--grep=term"], cwd: "repos/REPO_NAME/.worktrees/TASK_NAME" }`.
+- Read-only Execute cannot change repo state. For branch checks, use `git status --short --branch`, `git branch --show-current`, or `git worktree list`; do not run `git checkout main` or `git switch main` as a probe.
 - Do not use shell existence tests or shell control flow such as `ls path 2>/dev/null && echo EXISTS || echo NOT_FOUND`. Use `Read`, `Grep`, or one typed `Execute` argv call and let the tool error explain missing paths.
 - Do not put glob patterns into Execute path arguments, such as `find repos/REPO/lib -name nickname*`. Use Grep so the structured tool owns the pattern.
 - Do not add `stdout` or `stderr` objects to Execute just to capture output. Tool output is returned automatically. Only use typed discard fields when you explicitly want output dropped.

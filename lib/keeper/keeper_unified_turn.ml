@@ -615,7 +615,12 @@ let run_keeper_cycle
                       | _ -> ()));
                   let is_server_parse_rejection = EC.is_server_rejected_parse_error err in
                   let is_auto_recoverable = EC.is_auto_recoverable_turn_error err in
-                  let is_ambiguous_partial = EC.is_ambiguous_side_effect_error err in
+                  let ambiguous_commit_tools =
+                    EC.ambiguous_side_effect_commit_tools
+                      ~tool_names:(committed_mutating_tools_snapshot ())
+                      err
+                  in
+                  let is_ambiguous_partial = ambiguous_commit_tools <> [] in
                   Otel_metric_store.inc_counter
                     Keeper_metrics.(to_string Turns)
                     ~labels:[ "keeper_name", meta.name; "outcome", "failure" ]
@@ -709,7 +714,7 @@ let run_keeper_cycle
                  The keeper is paused and an explicit continue gate is
                  raised for the operator. Approving the gate auto-resumes
                  the keeper; rejecting it leaves the keeper paused. *)
-                      let committed_tools = committed_mutating_tools_snapshot () in
+                      let committed_tools = ambiguous_commit_tools in
                       let turn_event_summary = turn_event_bus in
                       let failure_reason =
                         Option.value
@@ -856,7 +861,7 @@ dominant source of the observed CAS race exhaustion after
                       ~base_path:config.base_path
                       meta.name
                       (Some failure_reason);
-                    let committed_tools = committed_mutating_tools_snapshot () in
+                    let committed_tools = ambiguous_commit_tools in
                     let turn_event_summary = turn_event_bus in
                     Log.Keeper.info
                       "%s: reconcile-required failure latched as %s after \

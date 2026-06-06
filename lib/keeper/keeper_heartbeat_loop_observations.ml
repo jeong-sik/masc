@@ -218,13 +218,14 @@ let provider_timeout_policy_decision
   : Keeper_failure_policy.decision option
   =
   match Keeper_turn_driver.classify_masc_internal_error err with
-  | Some (Keeper_turn_driver.Provider_timeout { phase; _ }) ->
+  | Some (Keeper_turn_driver.Provider_timeout { phase; source; _ }) ->
     Some
       (Keeper_failure_policy.decide
          (Keeper_failure_policy.Provider_timeout
             { phase = timeout_phase_of_provider_timeout_phase phase
             ; strikes = Some strikes
             ; liveness = Keeper_failure_policy.Recent_heartbeat
+            ; source
             }))
   | Some
       ( Keeper_turn_driver.Runtime_exhausted _

@@ -146,6 +146,7 @@ type failure =
       { phase : timeout_phase option
       ; strikes : int option
       ; liveness : liveness_evidence
+      ; source : string
       }
   | Transient_provider_failure
   | Runtime_exhausted of { retryable : bool }
@@ -280,25 +281,44 @@ let decide = function
       ~operator_action:Fix_invocation
       ~keeper_death_allowed:false
       ~reason
-  | Provider_timeout { phase; strikes = (Some _ as strikes); liveness } ->
-    let lifecycle_effect, circuit_effect, operator_action, reason =
-      provider_timeout_policy_effect ~phase ~strikes ~liveness
-    in
-    let reason =
-      match phase with
-      | Some phase -> reason ^ ":" ^ timeout_phase_to_label phase
-      | None -> reason
-    in
-    let failure_scope =
-      if liveness_is_lost liveness then Keeper_liveness_scope else Provider_scope
-    in
-    make_decision
-      ~failure_scope
-      ~lifecycle_effect
-      ~circuit_effect
-      ~operator_action
-      ~keeper_death_allowed:false
-      ~reason
+  | Provider_timeout { phase; strikes = (Some _ as strikes); liveness; source } ->
+    (* First-attempt provider timeouts are never the keeper's fault.
+       The provider was unresponsive before the keeper got any work done.
+       Treat as soft fail regardless of strike count to prevent unjust
+       escalation to Pause_current_work / Pause_keeper. *)
+    if String.starts_with ~prefix:"first_attempt_" source then begin
+      let reason =
+        match phase with
+        | Some p -> "provider_timeout:first_attempt:" ^ timeout_phase_to_label p
+        | None -> "provider_timeout:first_attempt"
+      in
+      make_decision
+        ~failure_scope:Provider_scope
+        ~lifecycle_effect:Soft_fail_turn
+        ~circuit_effect:Provider_cooldown
+        ~operator_action:Reroute_or_tune_provider
+        ~keeper_death_allowed:false
+        ~reason
+    end else begin
+      let lifecycle_effect, circuit_effect, operator_action, reason =
+        provider_timeout_policy_effect ~phase ~strikes ~liveness
+      in
+      let reason =
+        match phase with
+        | Some phase -> reason ^ ":" ^ timeout_phase_to_label phase
+        | None -> reason
+      in
+      let failure_scope =
+        if liveness_is_lost liveness then Keeper_liveness_scope else Provider_scope
+      in
+      make_decision
+        ~failure_scope
+        ~lifecycle_effect
+        ~circuit_effect
+        ~operator_action
+        ~keeper_death_allowed:false
+        ~reason
+    end
   | Provider_timeout
       { phase = Some (Stream_idle state); strikes = None; liveness = _ } ->
     let has_activity = stream_idle_state_is_activity state in

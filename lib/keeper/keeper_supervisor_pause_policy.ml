@@ -199,6 +199,7 @@ let failure_reason_policy_decision
             { phase = None
             ; strikes = Some count
             ; liveness = Keeper_failure_policy.Watchdog_stale
+            ; source = "supervisor_loop_strike"
             }))
   | Some (Keeper_registry.Stale_termination_storm { count }) ->
     Some

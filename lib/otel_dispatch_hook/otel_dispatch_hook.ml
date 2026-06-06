@@ -52,8 +52,8 @@ let current_request_context () =
 
 let in_eio_fiber_context () =
   try
-    ignore (Eio.Fiber.get request_context_key);
-    true
+    match Eio.Fiber.get request_context_key with
+    | Some _ | None -> true
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | _ -> false

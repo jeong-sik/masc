@@ -460,6 +460,21 @@ let assoc_string key json =
   | `String value -> value
   | _ -> failwith ("expected string field: " ^ key)
 
+let assert_policy_validation_payload ~label result =
+  let data = Tool_result.data result in
+  Alcotest.(check string)
+    (label ^ " reason")
+    "invalid_args"
+    (assoc_string "reason" data);
+  Alcotest.(check string)
+    (label ^ " failure_class payload")
+    "policy_rejection"
+    (assoc_string "failure_class" data);
+  Alcotest.(check bool)
+    (label ^ " typed failure_class")
+    true
+    (Tool_result.failure_class result = Some Tool_result.Policy_rejection)
+
 let test_registered_hook_tool_edit_file_patch_args () =
   let args =
     `Assoc
@@ -574,6 +589,27 @@ let test_tool_execute_schema_exposes_typed_boundary () =
     true
     (Option.is_none (param_by_name legacy_background_flag_name params))
 
+let test_validate_args_tool_execute_rejects_empty_object_with_policy_class () =
+  let args = `Assoc [] in
+  match
+    Tool_input_validation.validate_args
+      ~schema:tool_execute_schema
+      ~name:"tool_execute"
+      ~args
+      ()
+  with
+  | Error result ->
+    let msg = Yojson.Safe.to_string (Tool_result.data result) in
+    Alcotest.(check bool)
+      "empty Execute mentions exact-one-of"
+      true
+      (string_contains msg "exactly one of");
+    assert_policy_validation_payload ~label:"empty Execute" result
+  | Ok forwarded ->
+    Alcotest.failf
+      "expected empty tool_execute args to fail, got %s"
+      (Yojson.Safe.to_string forwarded)
+
 let test_validate_args_tool_execute_rejects_cmd_string () =
   let args = `Assoc [ "cmd", `String "pwd" ] in
   match
@@ -590,6 +626,7 @@ let test_validate_args_tool_execute_rejects_cmd_string () =
       "validation error returned"
       true
       (String.length msg > 0);
+    assert_policy_validation_payload ~label:"cmd string" result;
     Alcotest.(check bool)
       "validation error points to typed argv"
       true
@@ -1535,6 +1572,8 @@ let () =
         test_registered_hook_keeper_board_post_accepts_sources_array;
       Alcotest.test_case "tool_execute exposes typed boundary" `Quick
         test_tool_execute_schema_exposes_typed_boundary;
+      Alcotest.test_case "tool_execute rejects empty args with class" `Quick
+        test_validate_args_tool_execute_rejects_empty_object_with_policy_class;
       Alcotest.test_case "tool_execute rejects cmd string" `Quick
         test_validate_args_tool_execute_rejects_cmd_string;
       Alcotest.test_case "tool_execute rejects command string" `Quick

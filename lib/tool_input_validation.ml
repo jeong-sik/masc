@@ -312,6 +312,10 @@ let reject_validation ~name ~reason ~message =
              [ "error", `String message
              ; "validation", `String "oas_tool_middleware"
              ; "reason", `String reason
+             ; ( "failure_class"
+               , `String
+                   (Tool_result.tool_failure_class_to_string
+                      Tool_result.Policy_rejection) )
              ]
        ; tool_name = name
        ; duration_ms = 0.0
@@ -443,6 +447,11 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
                `Assoc
                  [ "error", `String message
                  ; "validation", `String "oas_tool_middleware"
+                 ; "reason", `String "invalid_args"
+                 ; ( "failure_class"
+                   , `String
+                       (Tool_result.tool_failure_class_to_string
+                          Tool_result.Policy_rejection) )
                  ]
            ; tool_name = name
            ; duration_ms = 0.0

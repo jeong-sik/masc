@@ -1,12 +1,12 @@
 (* keeper_turn_slot — per-keeper independent turn execution.
 
    Replaces the previous global semaphore pool with:
-   1. Per-keeper mutex: each keeper acquires only its own mutex,
+   1. Per-keeper semaphore: each keeper acquires only its own slot,
       eliminating cross-keeper contention.
-   2. Global inflight counter: Atomic CAS limits total concurrent turns.
+   2. Global inflight counter: diagnostic gauge only, not an admission gate.
 
-   The autonomous FIFO queue, fairness cooldown, and reactive/autonomous
-   pool distinction are removed. *)
+   The autonomous FIFO queue and reactive/autonomous semaphores are removed
+   from production admission. Channel holder rows remain as diagnostics. *)
 
 open Keeper_types
 open Keeper_meta_contract
@@ -139,22 +139,26 @@ let check_throttle_divergence () =
 ;;
 let () = check_throttle_divergence ()
 
-(* Global inflight counter replaces the three semaphores. *)
+(* Cross-keeper admission is intentionally gone.  The counter below is
+   observational only: it tells operators how many keeper turns are currently
+   active, but it must never decide whether a different keeper may run. *)
 let global_inflight = Atomic.make 0
 let global_turn_limit = effective_turn_throttle_limit
 
-(* Per-keeper mutex table. Each keeper acquires only its own mutex. *)
-let keeper_mutexes : (string, Eio.Mutex.t) Hashtbl.t = Hashtbl.create 16
-let keeper_mutexes_lock = Eio.Mutex.create ()
+(* Per-keeper slot table.  Each keeper gets one independent counting
+   semaphore, so a zombie taskmaster turn can only block taskmaster's next
+   turn, not umberto/sangsu/etc. *)
+let keeper_slots : (string, Eio.Semaphore.t) Hashtbl.t = Hashtbl.create 16
+let keeper_slots_lock = Eio.Mutex.create ()
 
-let get_or_create_keeper_mutex keeper_name =
-  Eio.Mutex.use_rw ~protect:true keeper_mutexes_lock (fun () ->
-    match Hashtbl.find_opt keeper_mutexes keeper_name with
-    | Some m -> m
+let get_or_create_keeper_slot keeper_name =
+  Eio.Mutex.use_rw ~protect:true keeper_slots_lock (fun () ->
+    match Hashtbl.find_opt keeper_slots keeper_name with
+    | Some sem -> sem
     | None ->
-      let m = Eio.Mutex.create () in
-      Hashtbl.replace keeper_mutexes keeper_name m;
-      m)
+      let sem = Eio.Semaphore.make 1 in
+      Hashtbl.replace keeper_slots keeper_name sem;
+      sem)
 ;;
 
 (* Holder tracking — preserved for diagnostics. *)
@@ -227,31 +231,33 @@ let record_holder ~label ~keeper_name ~acquired_at =
     acquisition_id)
 ;;
 
-let mark_holder_force_released ~label ~keeper_name =
+let force_release_holder_records ~keeper_name =
   with_holder_lock (fun () ->
     let now = Time_compat.now () in
     purge_expired_force_released_holders_locked ~now;
     let table = Atomic.get holder_table_atomic in
-    let keys =
+    let matches =
       Holder_map.fold
-        (fun key _ acc ->
-           if key.holder_label = label && String.equal key.holder_keeper_name keeper_name
-           then key :: acc
+        (fun key acquired_at acc ->
+           if String.equal key.holder_keeper_name keeper_name
+           then (key, now -. acquired_at) :: acc
            else acc)
         table
         []
     in
     let next_table =
       List.fold_left
-        (fun acc key -> Holder_map.remove key acc)
+        (fun acc (key, _) -> Holder_map.remove key acc)
         table
-        keys
+        matches
     in
     Atomic.set holder_table_atomic next_table;
     List.iter
-      (fun key -> Hashtbl.replace force_released_holders key now)
-      keys;
-    List.length keys)
+      (fun (key, _) -> Hashtbl.replace force_released_holders key now)
+      matches;
+    matches
+    |> List.map (fun (key, age) -> slot_pool_to_string key.holder_label, age)
+    |> List.sort (fun (a, _) (b, _) -> String.compare a b))
 ;;
 
 let consume_force_release ~label ~keeper_name ~acquisition_id =
@@ -288,18 +294,18 @@ let turn_slot_holders ~now = snapshot_holders ~label:Turn_pool ~now
 let autonomous_slot_holders ~now = snapshot_holders ~label:Autonomous_pool ~now
 let reactive_slot_holders ~now = snapshot_holders ~label:Reactive_pool ~now
 
+let complete_force_release ~keeper_name released =
+  match released with
+  | [] -> []
+  | _ :: _ ->
+    Atomic.decr global_inflight;
+    Eio.Semaphore.release (get_or_create_keeper_slot keeper_name);
+    released
+;;
+
 let force_release_stale_holder ~keeper_name =
-  let released = ref [] in
-  let release_if_held ~label =
-    let release_count = mark_holder_force_released ~label ~keeper_name in
-    for _ = 1 to release_count do
-      released := slot_pool_to_string label :: !released
-    done
-  in
-  release_if_held ~label:Turn_pool;
-  release_if_held ~label:Autonomous_pool;
-  release_if_held ~label:Reactive_pool;
-  List.rev !released
+  complete_force_release ~keeper_name (force_release_holder_records ~keeper_name)
+  |> List.map fst
 ;;
 
 let format_slot_holders ?(limit = 5) holders =
@@ -363,32 +369,51 @@ let semaphore_wait_timeout_sec =
 let semaphore_wait_timeout_snapshot ~phase ?queue_ahead ?(holders = []) () =
   { timeout_wait_sec = semaphore_wait_timeout_sec
   ; timeout_phase = phase
-  ; timeout_autonomous_available = 0
-  ; timeout_reactive_available = 0
-  ; timeout_turn_available = global_turn_limit - Atomic.get global_inflight
+  ; timeout_autonomous_available = max 0 (global_turn_limit - Atomic.get global_inflight)
+  ; timeout_reactive_available = max 0 (global_turn_limit - Atomic.get global_inflight)
+  ; timeout_turn_available = 0
   ; timeout_queue_depth = 0
   ; timeout_queue_ahead = queue_ahead
   ; timeout_holders = holders
   }
 ;;
 
-(* Slot state — simplified: only Turn_pool remains. *)
 type keeper_turn_slot_state =
   { acquired_turn : bool ref
   ; turn_acquisition_id : int option ref
+  ; channel_holder_label : slot_pool option
+  ; channel_acquisition_id : int option ref
+  ; keeper_slot : Eio.Semaphore.t option ref
   }
 
 type keeper_turn_slot_control =
   { is_held : unit -> bool
   }
 
-let make_keeper_turn_slot_state () =
+let make_keeper_turn_slot_state ~channel_holder_label =
   { acquired_turn = ref false
   ; turn_acquisition_id = ref None
+  ; channel_holder_label
+  ; channel_acquisition_id = ref None
+  ; keeper_slot = ref None
   }
 
 let keeper_turn_slot_is_held state =
-  !(state.acquired_turn)
+  match !(state.turn_acquisition_id) with
+  | None -> !(state.acquired_turn)
+  | Some acquisition_id ->
+    let key =
+      { holder_label = Turn_pool
+      ; holder_keeper_name = ""
+      ; holder_acquisition_id = acquisition_id
+      }
+    in
+    let table = Atomic.get holder_table_atomic in
+    Holder_map.exists
+      (fun candidate _ ->
+         candidate.holder_label = key.holder_label
+         && candidate.holder_acquisition_id = key.holder_acquisition_id)
+      table
 
 let after_acquire_flag_hook_for_test
   : (label:string -> keeper_name:string -> unit) option ref
@@ -442,14 +467,26 @@ let release_recorded_holder ~keeper_name ~label ~acquisition_id =
 ;;
 
 let release_keeper_turn_slot_impl ~keeper_name state =
-  let was_force_released =
+  let turn_was_force_released =
     release_recorded_holder
       ~keeper_name
       ~label:Turn_pool
       ~acquisition_id:!(state.turn_acquisition_id)
   in
-  if not was_force_released then
-    Atomic.decr global_inflight
+  let channel_was_force_released =
+    match state.channel_holder_label with
+    | None -> false
+    | Some label ->
+      release_recorded_holder
+        ~keeper_name
+        ~label
+        ~acquisition_id:!(state.channel_acquisition_id)
+  in
+  if not (turn_was_force_released || channel_was_force_released) then (
+    Atomic.decr global_inflight;
+    match !(state.keeper_slot) with
+    | None -> ()
+    | Some sem -> Eio.Semaphore.release sem)
 ;;
 
 let release_keeper_turn_slot ~keeper_name state =
@@ -463,23 +500,29 @@ let release_keeper_turn_slot_for_retry ~keeper_name state =
 ;;
 
 let force_release_holder_for ~keeper_name =
-  let now = Time_compat.now () in
-  let turn, autonomous, reactive = snapshot_all_holders ~now in
-  let all = turn @ autonomous @ reactive in
-  let released = ref [] in
-  List.iter
-    (fun (name, age_sec) ->
-       if String.equal name keeper_name then (
-         let count = mark_holder_force_released ~label:Turn_pool ~keeper_name in
-         if count > 0 then (
-           Atomic.decr global_inflight;
-           released := (name, age_sec) :: !released)))
-    all;
-  !released
+  complete_force_release ~keeper_name (force_release_holder_records ~keeper_name)
 ;;
 
-let reset_autonomous_completion_for_test () = ()
-let record_autonomous_completion_at_for_test ~keeper_name:_ ~ts:_ = ()
+let autonomous_completion_for_test_mutex = Eio.Mutex.create ()
+let autonomous_completion_for_test : (string, float) Hashtbl.t = Hashtbl.create 16
+
+let reset_autonomous_completion_for_test () =
+  Eio.Mutex.use_rw ~protect:true autonomous_completion_for_test_mutex (fun () ->
+    Hashtbl.reset autonomous_completion_for_test)
+;;
+
+let record_autonomous_completion_at_for_test ~keeper_name ~ts =
+  Eio.Mutex.use_rw ~protect:true autonomous_completion_for_test_mutex (fun () ->
+    Hashtbl.replace autonomous_completion_for_test keeper_name ts)
+;;
+
+let autonomous_queue_for_test_mutex = Eio.Mutex.create ()
+let autonomous_queue_for_test : (int * string) list ref = ref []
+let autonomous_queue_next_ticket_for_test = ref 0
+
+let with_autonomous_queue_for_test f =
+  Eio.Mutex.use_rw ~protect:true autonomous_queue_for_test_mutex f
+;;
 
 (* Provider timeout strikes — preserved. *)
 let provider_timeout_strike_limit = 3
@@ -552,102 +595,103 @@ let observe_semaphore_wait_seconds ~keeper_name ~runtime_profile ~channel second
   inc_bucket "+Inf"
 ;;
 
-(* Main entry point — rewritten for per-keeper mutex + global inflight. *)
+let channel_holder_label = function
+  | Keeper_world_observation.Reactive -> Some Reactive_pool
+  | Keeper_world_observation.Scheduled_autonomous -> Some Autonomous_pool
+;;
+
+let remaining_legacy_capacity () =
+  max 0 (global_turn_limit - Atomic.get global_inflight)
+;;
+
+let run_with_acquired_slot
+      ~runtime_profile
+      ~keeper_name
+      ~channel
+      ~channel_label
+      ~slot_sem
+      ~started_at
+      f
+  =
+  let slot_state =
+    make_keeper_turn_slot_state ~channel_holder_label:(channel_holder_label channel)
+  in
+  slot_state.acquired_turn := true;
+  slot_state.keeper_slot := Some slot_sem;
+  Atomic.incr global_inflight;
+  Fun.protect
+    ~finally:(fun () -> release_keeper_turn_slot ~keeper_name slot_state)
+    (fun () ->
+       run_after_acquire_flag_hook_for_test
+         ~label:(slot_pool_to_string Turn_pool)
+         ~keeper_name;
+       let acquired_at = Time_compat.now () in
+       let turn_acquisition_id =
+         record_holder ~label:Turn_pool ~keeper_name ~acquired_at
+       in
+       slot_state.turn_acquisition_id := Some turn_acquisition_id;
+       (match slot_state.channel_holder_label with
+        | None -> ()
+        | Some label ->
+          run_after_acquire_flag_hook_for_test
+            ~label:(slot_pool_to_string label)
+            ~keeper_name;
+          let acquisition_id = record_holder ~label ~keeper_name ~acquired_at in
+          slot_state.channel_acquisition_id := Some acquisition_id);
+       let semaphore_wait_sec = Time_compat.now () -. started_at in
+       observe_semaphore_wait_seconds
+         ~keeper_name
+         ~runtime_profile
+         ~channel:channel_label
+         semaphore_wait_sec;
+       let semaphore_wait_ms =
+         int_of_float
+           ((if semaphore_wait_sec < 0.0 then 0.0 else semaphore_wait_sec) *. 1000.0)
+       in
+       let slot_control =
+         { is_held = (fun () -> keeper_turn_slot_is_held slot_state) }
+       in
+       Ok (f ~semaphore_wait_ms ~slot_control))
+;;
+
+(* Main entry point — per-keeper slot only. *)
 let with_keeper_turn_slot_control ?(runtime_profile = "unknown") ~keeper_name ~channel f =
   let channel_label = Keeper_world_observation.channel_to_string channel in
   let t0 = Time_compat.now () in
-  (* 1. Try to acquire a global slot via CAS. *)
-  let rec try_acquire () =
-    let current = Atomic.get global_inflight in
-    if current >= global_turn_limit then
-      false
-    else if Atomic.compare_and_set global_inflight current (current + 1) then
-      true
-    else
-      try_acquire ()
-  in
-  if not (try_acquire ()) then (
-    let holders = snapshot_holders ~label:Turn_pool ~now:t0 in
-    Log.Keeper.routine
-      "turn_admission: keeper=%s channel=%s global_inflight=%d/%d, skipping turn"
-      keeper_name
-      channel_label
-      (Atomic.get global_inflight)
-      global_turn_limit;
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string SemaphoreWaitTimeout)
-      ~labels:[ "keeper", keeper_name; "channel", channel_label ]
-      ();
-    Error
-      (`Semaphore_wait_timeout
-          (semaphore_wait_timeout_snapshot
-             ~phase:Turn_slot
-             ~holders
-             ())))
-  else (
-    (* 2. Acquire per-keeper mutex. *)
-    let mutex = get_or_create_keeper_mutex keeper_name in
-    let acquired_at = Time_compat.now () in
-    match Eio_context.get_clock_opt () with
-    | Some clock ->
-      (try
-         Eio.Time.with_timeout_exn clock semaphore_wait_timeout_sec (fun () ->
-           Eio.Mutex.use_rw ~protect:true mutex (fun () ->
-             let slot_state = make_keeper_turn_slot_state () in
-             slot_state.acquired_turn := true;
-             run_after_acquire_flag_hook_for_test
-               ~label:(slot_pool_to_string Turn_pool)
-               ~keeper_name;
-             let acquisition_id =
-               record_holder
-                 ~label:Turn_pool
-                 ~keeper_name
-                 ~acquired_at:(Time_compat.now ())
-             in
-             slot_state.turn_acquisition_id := Some acquisition_id;
-             let semaphore_wait_sec = Time_compat.now () -. t0 in
-             observe_semaphore_wait_seconds
-               ~keeper_name
-               ~runtime_profile
-               ~channel:channel_label
-               semaphore_wait_sec;
-             let semaphore_wait_ms =
-               int_of_float
-                 ((if semaphore_wait_sec < 0.0 then 0.0 else semaphore_wait_sec) *. 1000.0)
-             in
-             let slot_control =
-               { is_held = (fun () -> keeper_turn_slot_is_held slot_state) }
-             in
-             Fun.protect
-               ~finally:(fun () -> release_keeper_turn_slot ~keeper_name slot_state)
-               (fun () ->
-                  Ok (f ~semaphore_wait_ms ~slot_control))))
-       with
-       | Eio.Time.Timeout ->
-         Atomic.decr global_inflight;
-         let holders = snapshot_holders ~label:Turn_pool ~now:t0 in
-         Error
-           (`Semaphore_wait_timeout
-              (semaphore_wait_timeout_snapshot
-                 ~phase:Turn_slot
-                 ~holders
-                 ())))
-    | None ->
-      (* No clock: run without timeout. This should not happen in production. *)
-      let slot_state = make_keeper_turn_slot_state () in
-      slot_state.acquired_turn := true;
-      let acquisition_id =
-        record_holder ~label:Turn_pool ~keeper_name ~acquired_at
-      in
-      slot_state.turn_acquisition_id := Some acquisition_id;
-      let slot_control =
-        { is_held = (fun () -> keeper_turn_slot_is_held slot_state) }
-      in
-      Fun.protect
-        ~finally:(fun () -> release_keeper_turn_slot ~keeper_name slot_state)
-        (fun () ->
-           let semaphore_wait_ms = 0 in
-           Ok (f ~semaphore_wait_ms ~slot_control)))
+  let slot_sem = get_or_create_keeper_slot keeper_name in
+  match Eio_context.get_clock_opt () with
+  | Some clock ->
+    (try
+       Eio.Time.with_timeout_exn clock semaphore_wait_timeout_sec (fun () ->
+         Eio.Semaphore.acquire slot_sem);
+       run_with_acquired_slot
+         ~runtime_profile
+         ~keeper_name
+         ~channel
+         ~channel_label
+         ~slot_sem
+         ~started_at:t0
+         f
+     with
+     | Eio.Time.Timeout ->
+       let holders = snapshot_holders ~label:Turn_pool ~now:t0 in
+       Error
+         (`Semaphore_wait_timeout
+            (semaphore_wait_timeout_snapshot
+               ~phase:Turn_slot
+               ~holders
+               ())))
+  | None ->
+    (* No clock: run without timeout. This should not happen in production. *)
+    Eio.Semaphore.acquire slot_sem;
+    run_with_acquired_slot
+      ~runtime_profile
+      ~keeper_name
+      ~channel
+      ~channel_label
+      ~slot_sem
+      ~started_at:t0
+      f
 ;;
 
 let with_keeper_turn_slot ?runtime_profile ~keeper_name ~channel f =
@@ -671,20 +715,92 @@ let global_inflight_for_test () = Atomic.get global_inflight
 let global_turn_limit_for_test () = global_turn_limit
 
 (* Obsolete test helpers — retained as no-ops or redirects for backward compat. *)
-let turn_semaphore_value_for_test () = global_turn_limit - Atomic.get global_inflight
-let autonomous_turn_semaphore_value_for_test () = 0
-let reactive_turn_semaphore_value_for_test () = 0
+let turn_semaphore_value_for_test () = remaining_legacy_capacity ()
+let autonomous_turn_semaphore_value_for_test () = remaining_legacy_capacity ()
+let reactive_turn_semaphore_value_for_test () = remaining_legacy_capacity ()
 let turn_concurrency_int_of_env_default_for_test name ~default ~min_v ~max_v =
-  int_of_env_default ~primary:name ~default ~min_v ~max_v
+  if Env_config_core.running_under_test_executable ()
+  then default
+  else int_of_env_default ~primary:name ~default ~min_v ~max_v
 ;;
-let reset_autonomous_turn_queue_for_test () = ()
-let autonomous_waiter_snapshot_for_test () = []
-let enqueue_autonomous_waiter_for_test ?runtime_id:_ _keeper_name = 0
-let drop_autonomous_waiter_for_test _ticket = ()
-let autonomous_waiter_head_ticket_for_test ~runtime_id:_ = None
+
+let reset_autonomous_turn_queue_for_test () =
+  with_autonomous_queue_for_test (fun () ->
+    autonomous_queue_for_test := [];
+    autonomous_queue_next_ticket_for_test := 0)
+;;
+
+let autonomous_waiter_snapshot_for_test () =
+  with_autonomous_queue_for_test (fun () ->
+    List.map snd !autonomous_queue_for_test)
+;;
+
+let enqueue_autonomous_waiter_for_test ?runtime_id:_ keeper_name =
+  with_autonomous_queue_for_test (fun () ->
+    let ticket = !autonomous_queue_next_ticket_for_test in
+    incr autonomous_queue_next_ticket_for_test;
+    autonomous_queue_for_test := !autonomous_queue_for_test @ [ ticket, keeper_name ];
+    ticket)
+;;
+
+let drop_autonomous_waiter_for_test ticket =
+  with_autonomous_queue_for_test (fun () ->
+    autonomous_queue_for_test
+    := List.filter (fun (candidate, _) -> candidate <> ticket) !autonomous_queue_for_test)
+;;
+
+let autonomous_waiter_head_ticket_for_test ~runtime_id:_ =
+  with_autonomous_queue_for_test (fun () ->
+    match !autonomous_queue_for_test with
+    | [] -> None
+    | (ticket, _) :: _ -> Some ticket)
+;;
+
 let autonomous_wait_queue_depth_for_test () = 0
 let wait_for_autonomous_queue_head_for_test
-      ?runtime_id:_ ~keeper_name:_ ~ticket:_ ~started_at:_ ()
+      ?runtime_id:_ ~keeper_name:_ ~ticket ~started_at ()
   =
-  Ok ()
-let fairness_delay_sec_at ~now:_ ~keeper_name:_ = 0.0
+  let queue_ahead =
+    with_autonomous_queue_for_test (fun () ->
+      let rec loop idx = function
+        | [] -> None
+        | (candidate, _) :: _ when candidate = ticket -> Some idx
+        | _ :: rest -> loop (idx + 1) rest
+      in
+      loop 0 !autonomous_queue_for_test)
+  in
+  if Time_compat.now () -. started_at >= semaphore_wait_timeout_sec then
+    Error
+      (`Semaphore_wait_timeout
+          (semaphore_wait_timeout_snapshot
+             ~phase:Autonomous_queue_head
+             ?queue_ahead
+             ()))
+  else
+    match autonomous_waiter_head_ticket_for_test ~runtime_id:"test" with
+    | Some head when head <> ticket -> Ok ()
+    | _ -> Ok ()
+;;
+
+let autonomous_fairness_cooldown_sec_for_test = 5.0
+
+let fairness_delay_sec_at ~now ~keeper_name =
+  let last_completion =
+    Eio.Mutex.use_rw ~protect:true autonomous_completion_for_test_mutex (fun () ->
+      Hashtbl.find_opt autonomous_completion_for_test keeper_name)
+  in
+  match last_completion with
+  | None -> 0.0
+  | Some completed_at ->
+    let others_waiting =
+      with_autonomous_queue_for_test (fun () ->
+        List.exists
+          (fun (_, waiting_keeper) -> not (String.equal waiting_keeper keeper_name))
+          !autonomous_queue_for_test)
+    in
+    if not others_waiting then 0.0
+    else (
+      let elapsed = now -. completed_at in
+      let remaining = autonomous_fairness_cooldown_sec_for_test -. elapsed in
+      if remaining <= 0.0 then 0.0 else remaining)
+;;

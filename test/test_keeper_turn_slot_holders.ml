@@ -393,8 +393,8 @@ let test_force_released_autonomous_holder_does_not_stamp_completion () =
          delay)
 
 let test_no_clock_exhausted_turn_slot_fails_closed () =
-  (* Obsolete: global semaphore pool replaced by per-keeper mutex + global
-     inflight counter. The no-clock exhausted-slot path no longer applies. *)
+  (* Obsolete: cross-keeper global admission was replaced by per-keeper slots.
+     The old no-clock exhausted-global-pool path no longer applies. *)
   ()
 
 let test_force_release_marker_ttl_bounds_unfinalized_fibers () =

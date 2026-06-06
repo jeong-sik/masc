@@ -1,11 +1,13 @@
 (** Keeper Turn Slot — per-keeper independent turn execution.
 
-    Each keeper acquires only its own mutex, eliminating cross-keeper
-    contention. A global inflight counter limits total concurrent turns
-    for backpressure.
+    Each keeper acquires only its own slot, eliminating cross-keeper
+    contention. A global inflight counter remains for diagnostics and
+    legacy test surfaces, but it is not an admission gate.
 
-    The autonomous FIFO queue, fairness cooldown, and reactive/autonomous
-    pool distinction have been removed. *)
+    The autonomous FIFO queue and reactive/autonomous semaphores have been
+    removed from production admission. Reactive/autonomous holder accessors
+    are preserved as diagnostic channel labels for the single per-keeper
+    slot. *)
 
 (** {1 SSOT Types} *)
 include module type of struct
@@ -14,7 +16,8 @@ end
 
 (** {1 Own-module types and vals} *)
 
-(** Global turn slot cap. Safety ceiling for ALL keeper turns. *)
+(** Legacy throttle value. It no longer blocks cross-keeper turn admission in
+    this module; active turn count is tracked separately by [global_inflight]. *)
 val keeper_turn_throttle_limit : int
 
 (** Effective throttle limit after applying the 2x TOML cap (issue #17192). *)
@@ -34,12 +37,13 @@ val throttle_source_to_string : throttle_source -> string
 val turn_concurrency_int_of_env_default_for_test :
   string -> default:int -> min_v:int -> max_v:int -> int
 
-(** Wall-clock cap on mutex acquisition when waiting for a keeper turn slot.
+(** Wall-clock cap when a keeper waits on its own previous turn slot.
     Derived from [MASC_KEEPER_SEMAPHORE_WAIT_TIMEOUT_SEC]. *)
 val semaphore_wait_timeout_sec : float
 
-(** Test-only snapshots of available capacity. [turn] reports
-    [global_turn_limit - global_inflight]; autonomous/reactive are always 0. *)
+(** Test-only legacy capacity snapshots. These report
+    [global_turn_limit - global_inflight] for old assertions; they do not
+    represent admission capacity. *)
 val turn_semaphore_value_for_test : unit -> int
 val autonomous_turn_semaphore_value_for_test : unit -> int
 val reactive_turn_semaphore_value_for_test : unit -> int
@@ -81,11 +85,11 @@ val format_slot_holders : ?limit:int -> (string * float) list -> string
 (** Operator-facing one-line summary of all holder pools. *)
 val slot_holders_summary : ?limit:int -> now:float -> unit -> string
 
-(** Force-release every slot recorded for [keeper_name] in the holder
+(** Force-release the per-keeper slot recorded for [keeper_name] in the holder
     table. Returns the [(label, age_sec)] pairs that were released.
     Empty list means nothing was held.
 
-    Also decrements the global inflight counter. *)
+    Also decrements the diagnostic global inflight counter. *)
 val force_release_holder_for : keeper_name:string -> (string * float) list
 
 (** Test-only: inject a callback immediately after an acquire flag is set
@@ -116,7 +120,8 @@ val global_inflight_for_test : unit -> int
 (** Test-only: expose global turn limit. *)
 val global_turn_limit_for_test : unit -> int
 
-(** Test-only: no-op backward-compat stubs for removed autonomous queue. *)
+(** Test-only compatibility model for removed autonomous queue behavior. These
+    helpers are not used by production admission. *)
 val reset_autonomous_turn_queue_for_test : unit -> unit
 val autonomous_waiter_snapshot_for_test : unit -> string list
 val enqueue_autonomous_waiter_for_test : ?runtime_id:string -> string -> int
@@ -140,7 +145,7 @@ type keeper_turn_slot_control =
   { is_held : unit -> bool
   }
 
-(** Main entry point. Acquires per-keeper mutex + global inflight slot,
+(** Main entry point. Acquires only the keeper's own slot,
     then runs [f] with diagnostic [slot_control]. *)
 val with_keeper_turn_slot :
   ?runtime_profile:string ->

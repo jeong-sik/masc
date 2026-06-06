@@ -50,6 +50,9 @@ end
 
 module Mcp_attr_key : sig
   val mcp_method_name : string
+  val jsonrpc_request_id : string
+  val mcp_protocol_version : string
+  val mcp_session_id : string
   val error_type : string
   val masc_mcp_tool_failure_class : string
 end

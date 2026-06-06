@@ -15,6 +15,20 @@
 
     @since 2.103.0 *)
 
+type request_context =
+  { jsonrpc_request_id : string option
+  ; mcp_session_id : string option
+  ; mcp_protocol_version : string option
+  }
+(** Request-local MCP context available while handling a JSON-RPC
+    [tools/call] request. Fields are optional because internal dispatches and
+    notifications do not always have a request id/session/protocol version. *)
+
+val with_request_context : request_context -> (unit -> 'a) -> 'a
+(** Bind MCP request context for spans emitted by dispatch observers inside
+    [f]. Outside an Eio fiber this degrades to [f ()], so non-Eio unit tests
+    and pre-bootstrap callers do not crash. *)
+
 val with_test_span_emitter :
   enabled:bool ->
   emit_span:

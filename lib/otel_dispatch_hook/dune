@@ -6,6 +6,7 @@
  (wrapped false)
  (modules otel_dispatch_hook)
  (libraries
+  eio
   opentelemetry
   unix
   masc.masc_core

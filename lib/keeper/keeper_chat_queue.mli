@@ -47,3 +47,7 @@ val length : keeper_name:string -> int
 
 (** [clear keeper_name] empties the queue. *)
 val clear : keeper_name:string -> unit
+
+(** [all_keeper_names ()] returns a snapshot list of all keeper names
+    that currently have a queue in the registry. *)
+val all_keeper_names : unit -> string list

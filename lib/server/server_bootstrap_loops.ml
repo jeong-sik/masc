@@ -106,9 +106,81 @@ let board_sse_event_params event =
       ]
 ;;
 
+type queued_chat_projection = {
+  payload_channel : string;
+  payload_channel_user_id : string;
+  payload_channel_user_name : string;
+  payload_channel_workspace_id : string;
+  agent_name : string;
+}
+
+let discord_channel_label = "discord"
+
+let queued_chat_projection (queued_message : Keeper_chat_queue.queued_message) =
+  match queued_message.source with
+  | Keeper_chat_queue.Dashboard ->
+    {
+      payload_channel = "";
+      payload_channel_user_id = "";
+      payload_channel_user_name = "";
+      payload_channel_workspace_id = "";
+      agent_name = "dashboard";
+    }
+  | Keeper_chat_queue.Discord { channel_id; user_id } ->
+    {
+      payload_channel = discord_channel_label;
+      payload_channel_user_id = user_id;
+      payload_channel_user_name = "";
+      payload_channel_workspace_id = channel_id;
+      agent_name =
+        Gate_keeper_backend.agent_name_for_channel_actor
+          ~channel:discord_channel_label
+          ~channel_workspace_id:channel_id
+          ~channel_user_id:user_id;
+    }
+  | Keeper_chat_queue.Slack { channel; user_id } ->
+    {
+      payload_channel = channel;
+      payload_channel_user_id = user_id;
+      payload_channel_user_name = "";
+      payload_channel_workspace_id = "";
+      agent_name =
+        Gate_keeper_backend.agent_name_for_channel_actor
+          ~channel
+          ~channel_workspace_id:""
+          ~channel_user_id:user_id;
+    }
+
+let trimmed_env_opt name =
+  match Sys.getenv_opt name with
+  | None -> None
+  | Some raw ->
+    let trimmed = String.trim raw in
+    if String.equal trimmed "" then None else Some trimmed
+
+let discord_bot_token_opt () = trimmed_env_opt "DISCORD_BOT_TOKEN"
+
 module For_testing = struct
+  type queued_chat_projection = {
+    payload_channel : string;
+    payload_channel_user_id : string;
+    payload_channel_user_name : string;
+    payload_channel_workspace_id : string;
+    agent_name : string;
+  }
+
   let autoboot_proactive_warmup_sec = autoboot_proactive_warmup_sec
   let board_sse_event_params = board_sse_event_params
+
+  let queued_chat_projection queued_message : queued_chat_projection =
+    let projection = queued_chat_projection queued_message in
+    {
+      payload_channel = projection.payload_channel;
+      payload_channel_user_id = projection.payload_channel_user_id;
+      payload_channel_user_name = projection.payload_channel_user_name;
+      payload_channel_workspace_id = projection.payload_channel_workspace_id;
+      agent_name = projection.agent_name;
+    }
 end
 
 let fork_logged_fiber = Server_bootstrap_loops_fiber.fork_logged_fiber
@@ -873,41 +945,20 @@ let start_keeper_loops
                Printf.sprintf "keeper-consumer-msg-%d"
                  (int_of_float ((now +. 0.001) *. 1000.0))
              in
+             let projection = queued_chat_projection queued_message in
              let payload =
                {
                  name = keeper_name;
                  message = queued_message.content;
                  timeout_sec = None;
-                 channel =
-                   (match queued_message.source with
-                    | Keeper_chat_queue.Dashboard -> ""
-                    | Keeper_chat_queue.Discord { channel_id; _ } ->
-                        channel_id
-                    | Keeper_chat_queue.Slack { channel; _ } -> channel);
-                 channel_user_id =
-                   (match queued_message.source with
-                    | Keeper_chat_queue.Dashboard -> ""
-                    | Keeper_chat_queue.Discord { user_id; _ } -> user_id
-                    | Keeper_chat_queue.Slack { user_id; _ } -> user_id);
-                 channel_user_name = "";
-                 channel_workspace_id = "";
+                 channel = projection.payload_channel;
+                 channel_user_id = projection.payload_channel_user_id;
+                 channel_user_name = projection.payload_channel_user_name;
+                 channel_workspace_id = projection.payload_channel_workspace_id;
                  attachments = queued_message.attachments;
                }
              in
-             let agent_name =
-               match queued_message.source with
-               | Keeper_chat_queue.Dashboard -> "dashboard"
-               | Keeper_chat_queue.Discord { channel_id; user_id } ->
-                   Gate_keeper_backend.agent_name_for_channel_actor
-                     ~channel:channel_id
-                     ~channel_workspace_id:""
-                     ~channel_user_id:user_id
-               | Keeper_chat_queue.Slack { channel; user_id } ->
-                   Gate_keeper_backend.agent_name_for_channel_actor
-                     ~channel
-                     ~channel_workspace_id:""
-                     ~channel_user_id:user_id
-             in
+             let agent_name = projection.agent_name in
              let events = Keeper_chat_events.create () in
              let closed = ref false in
              let thread_id = "keeper-consumer:" ^ keeper_name in
@@ -922,7 +973,7 @@ let start_keeper_loops
                     "keeper_chat_consumer: forking Discord adapter \
                      for keeper=%s"
                     keeper_name;
-                  (match Sys.getenv_opt "MASC_DISCORD_BOT_TOKEN" with
+                  (match discord_bot_token_opt () with
                    | Some token ->
                        Eio.Fiber.fork ~sw (fun () ->
                          Keeper_chat_discord.adapter_loop ~token
@@ -930,7 +981,7 @@ let start_keeper_loops
                    | None ->
                        Log.Keeper.warn
                          "keeper_chat_consumer: \
-                          MASC_DISCORD_BOT_TOKEN not set, \
+                          DISCORD_BOT_TOKEN not set, \
                           skipping Discord delivery for keeper=%s"
                          keeper_name)
               | Keeper_chat_queue.Slack { channel; _ } ->

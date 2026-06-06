@@ -866,30 +866,8 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
            Eio.Fiber.fork ~sw:stream_sw (fun () ->
              sse_adapter_loop ~events ~writer ~mutex ~closed);
            process_single_turn ~payload ~run_id ~message_id ~agent_name ~events;
-           let rec drain_queue () =
-             match Keeper_chat_queue.dequeue ~keeper_name:payload.name with
-             | None -> ()
-             | Some queued ->
-                 (match queued.source with
-                  | Keeper_chat_queue.Dashboard ->
-                      let run_id = Printf.sprintf "keeper-run-%d" (now_id ()) in
-                      let message_id = Printf.sprintf "keeper-msg-%d" (now_id ()) in
-                      let queued_payload =
-                        { payload with
-                          message = queued.content;
-                          attachments = queued.attachments }
-                      in
-                      let events = Keeper_chat_events.create () in
-                      Eio.Fiber.fork ~sw:stream_sw (fun () ->
-                        sse_adapter_loop ~events ~writer ~mutex ~closed);
-                      process_single_turn ~payload:queued_payload ~run_id ~message_id
-                        ~agent_name ~events
-                  | Keeper_chat_queue.Discord _ | Keeper_chat_queue.Slack _ ->
-                      Log.Keeper.warn
-                        "keeper_chat_queue: non-Dashboard source dropped for keeper=%s"
-                        payload.name);
-                 drain_queue ()
-           in
-           drain_queue ()))
+           (* Queue drain is now handled by Keeper_chat_consumer
+              (started in server_bootstrap_loops). *)
+           ))
 
 (** Build routes for MCP server *)

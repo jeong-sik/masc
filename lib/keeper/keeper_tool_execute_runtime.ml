@@ -580,9 +580,6 @@ let handle_tool_execute_typed
         let is_direct_repo_git_recovery =
           is_direct_sandbox_repo_root && is_git_recovery_command
         in
-        let allow_stale_preserved_repo_context =
-          is_git_diagnostic_command || is_direct_repo_git_recovery
-        in
         let readonly_write_like =
           is_git_recovery_command
           || Masc_exec.Shell_ir_risk.is_r1 envelope
@@ -620,29 +617,6 @@ let handle_tool_execute_typed
           let t0 = Unix.gettimeofday () in
           let dispatch_result =
             Keeper_tool_execute_shell_ir.dispatch_classified
-              ~before_path_validation:(fun ir ->
-                let repo_sync_policy =
-                  if write_enabled
-                  then
-                    Keeper_sandbox_repo_lifecycle.Allow_repo_sync
-                  else
-                    Keeper_sandbox_repo_lifecycle.Reject_repo_sync
-                in
-                match
-                  Keeper_sandbox_repo_lifecycle.validate_cwd_ready
-                    ~config
-                    ~meta
-                    ~cwd
-                    ~repo_sync_policy
-                    ~allow_stale_preserved_repo_context
-                with
-                | Error _ as err -> err
-                | Ok () ->
-                  Keeper_sandbox_repo_lifecycle.validate_path_args_ready
-                    ~config
-                    ~meta
-                    ~cwd
-                    ir)
               ~allowed_commands
               ~keeper_id:meta.name
               ~base_path:root

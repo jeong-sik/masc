@@ -723,7 +723,8 @@ let runtime_diagnostics_json () =
 ;;
 
 type dashboard_runtime_provider_probe =
-  { json : Yojson.Safe.t
+  { runtime_id : string
+  ; json : Yojson.Safe.t
   ; status : string
   ; reachable : bool option
   ; skipped : bool
@@ -793,9 +794,10 @@ let dashboard_runtime_header_is_auth name =
 ;;
 
 let dashboard_runtime_non_auth_headers (provider : Runtime_schema.provider) =
-  provider.headers
-  |> Option.value ~default:[]
-  |> List.filter (fun (name, _) -> not (dashboard_runtime_header_is_auth name))
+  match provider.headers with
+  | None -> []
+  | Some headers ->
+    List.filter (fun (name, _) -> not (dashboard_runtime_header_is_auth name)) headers
 ;;
 
 let dashboard_runtime_credential_value = function
@@ -947,6 +949,7 @@ let dashboard_runtime_provider_probe_json
              ~status
              ~reachable
              ())
+    ; runtime_id = rt.id
     ; status
     ; reachable
     ; skipped
@@ -1046,15 +1049,7 @@ let dashboard_runtime_probe_payload_json_of_runtimes ?default_id runtimes =
     |> List.filter_map (fun probe ->
       match probe.reachable with
       | Some false ->
-        (match probe.json with
-         | `Assoc fields ->
-           let runtime_id =
-             match List.assoc_opt "runtime_id" fields with
-             | Some (`String value) -> value
-             | _ -> "(unknown runtime)"
-           in
-           Some (Printf.sprintf "%s: %s" runtime_id probe.status)
-         | _ -> Some probe.status)
+        Some (Printf.sprintf "%s: %s" probe.runtime_id probe.status)
       | _ -> None)
   in
   `Assoc

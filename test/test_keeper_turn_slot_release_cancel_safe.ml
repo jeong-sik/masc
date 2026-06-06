@@ -93,7 +93,7 @@ let () =
     ; "record_autonomous_completion wrap",
       {|safe_bookkeeping ~op:"record_autonomous_completion"|}
     ; "drop_holder metric op",
-      {|~op:("drop_holder " ^ label)|}
+      {|~op:("drop_holder " ^ label_str)|}
     ; "drop_holder cancellation catch",
       {|release_keeper_turn_slot: drop_holder %s skipped (Cancelled)|}
     ]
@@ -111,23 +111,23 @@ let () =
   assert_contains
     ~label:"safe_bookkeeping metrics cancelled"
     src
-    {|observe_bookkeeping_failure ~op ~kind:"cancelled"|};
+    {|observe_bookkeeping_failure ~op ~kind:Keeper_bookkeeping_failure_kind.Cancelled|};
   assert_contains
     ~label:"safe_bookkeeping metrics exception"
     src
-    {|observe_bookkeeping_failure ~op ~kind:"exception"|};
+    {|observe_bookkeeping_failure ~op ~kind:Keeper_bookkeeping_failure_kind.Exception|};
   assert_contains
     ~label:"safe_bookkeeping metric name"
     src
-    "metric_keeper_turn_slot_bookkeeping_failures";
+    "Keeper_metrics.(to_string TurnSlotBookkeepingFailures)";
   assert_contains
     ~label:"drop_holder metrics cancelled"
     src
-    {|~op:("drop_holder " ^ label) ~kind:"cancelled"|};
+    {|~op:("drop_holder " ^ label_str) ~kind:Keeper_bookkeeping_failure_kind.Cancelled|};
   assert_contains
     ~label:"drop_holder metrics exception"
     src
-    {|~op:("drop_holder " ^ label) ~kind:"exception"|};
+    {|~op:("drop_holder " ^ label_str) ~kind:Keeper_bookkeeping_failure_kind.Exception|};
   assert_contains
     ~label:"force-release finalizer marker is debug"
     src

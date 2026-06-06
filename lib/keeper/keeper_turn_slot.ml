@@ -378,23 +378,27 @@ let slot_holders_summary ?(limit = 5) ~now () =
 type autonomous_waiter =
   { ticket : int
   ; keeper_name : string
+  ; runtime_id : string
   }
 
 (* Eio.Mutex: queue operations are pure/non-yielding. Stdlib.Mutex is PTHREAD_MUTEX_ERRORCHECK on OCaml 5 and raises "Resource deadlock avoided" whenever two Eio fibers on the same OS thread contend, ... *)
-let autonomous_wait_queue_mutex = Eio.Mutex.create ()
+type autonomous_lane =
+  { queue : autonomous_waiter Queue.t
+  ; active_count : int ref
+  }
 
-(* FIFO waiters use an append-only queue plus an active-ticket table. Removing a middle waiter only tombstones its ticket; the physical queue is pruned lazily from the head. This keeps enqueue/drop O(... *)
-let autonomous_wait_queue : autonomous_waiter Queue.t = Queue.create ()
-let autonomous_wait_queue_active_tickets : (int, unit) Hashtbl.t = Hashtbl.create 32
-let autonomous_wait_queue_active_count = ref 0
-let autonomous_wait_queue_next_ticket = ref 0
+let autonomous_lanes_mutex = Eio.Mutex.create ()
+let autonomous_lanes : (string, autonomous_lane) Hashtbl.t = Hashtbl.create 8
+let autonomous_tickets : (int, unit) Hashtbl.t = Hashtbl.create 32
+let autonomous_ticket_lane : (int, string) Hashtbl.t = Hashtbl.create 32
+let autonomous_next_ticket = ref 0
 
 (* Routed through Env_config_keeper so operators can tune cadence without a rebuild (same fragmentation class as the watchdog thresholds extracted in #10740). The value is read once at module load — r... *)
 let autonomous_queue_poll_sec =
   Env_config_keeper.KeeperPollIntervals.autonomous_queue_poll_sec
 ;;
-let with_autonomous_wait_queue f =
-  Eio.Mutex.use_rw ~protect:true autonomous_wait_queue_mutex f
+let with_autonomous_lanes f =
+  Eio.Mutex.use_rw ~protect:true autonomous_lanes_mutex f
 ;;
 let autonomous_queue_depth_labels = [ "channel", "autonomous_queue" ]
 let record_autonomous_queue_depth depth =
@@ -403,94 +407,146 @@ let record_autonomous_queue_depth depth =
     ~labels:autonomous_queue_depth_labels
     (float_of_int depth)
 ;;
-let autonomous_queue_peek_opt () =
-  try Some (Queue.peek autonomous_wait_queue) with
+
+let get_or_create_lane runtime_id =
+  match Hashtbl.find_opt autonomous_lanes runtime_id with
+  | Some lane -> lane
+  | None ->
+    let lane = { queue = Queue.create (); active_count = ref 0 } in
+    Hashtbl.replace autonomous_lanes runtime_id lane;
+    lane
+;;
+
+let lane_peek_opt lane =
+  try Some (Queue.peek lane.queue) with
   | Queue.Empty -> None
 ;;
-let prune_autonomous_wait_queue_locked () =
+
+let prune_lane_locked lane =
   let rec loop () =
-    match autonomous_queue_peek_opt () with
+    match lane_peek_opt lane with
     | None -> ()
     | Some waiter ->
-      if Hashtbl.mem autonomous_wait_queue_active_tickets waiter.ticket
+      if Hashtbl.mem autonomous_tickets waiter.ticket
       then ()
       else (
-        (* fire-and-forget: drain queue element *)
-        ignore (Queue.take autonomous_wait_queue);
+        (* fire-and-forget: drain tombstoned queue element *)
+        ignore (Queue.take lane.queue);
         loop ())
   in
   loop ()
 ;;
+
+let prune_all_lanes_locked () =
+  Hashtbl.iter (fun _ lane -> prune_lane_locked lane) autonomous_lanes
+;;
+
 let active_autonomous_waiters_locked () =
-  prune_autonomous_wait_queue_locked ();
+  prune_all_lanes_locked ();
   let active = ref [] in
-  Queue.iter
-    (fun waiter ->
-       if Hashtbl.mem autonomous_wait_queue_active_tickets waiter.ticket
-       then active := waiter :: !active)
-    autonomous_wait_queue;
+  Hashtbl.iter
+    (fun _ lane ->
+       Queue.iter
+         (fun waiter ->
+            if Hashtbl.mem autonomous_tickets waiter.ticket
+            then active := waiter :: !active)
+         lane.queue)
+    autonomous_lanes;
   List.rev !active
 ;;
 let autonomous_wait_queue_depth () =
-  with_autonomous_wait_queue (fun () ->
-    prune_autonomous_wait_queue_locked ();
-    !autonomous_wait_queue_active_count)
+  with_autonomous_lanes (fun () ->
+    prune_all_lanes_locked ();
+    Hashtbl.fold
+      (fun _ lane total -> total + !(lane.active_count))
+      autonomous_lanes
+      0)
 ;;
 let reset_autonomous_turn_queue_for_test () =
-  with_autonomous_wait_queue (fun () ->
-    Queue.clear autonomous_wait_queue;
-    Hashtbl.reset autonomous_wait_queue_active_tickets;
-    autonomous_wait_queue_active_count := 0;
-    autonomous_wait_queue_next_ticket := 0;
+  with_autonomous_lanes (fun () ->
+    Hashtbl.reset autonomous_lanes;
+    Hashtbl.reset autonomous_tickets;
+    Hashtbl.reset autonomous_ticket_lane;
+    autonomous_next_ticket := 0;
     record_autonomous_queue_depth 0)
 ;;
-let enqueue_autonomous_waiter ~(keeper_name : string) : int =
-  with_autonomous_wait_queue (fun () ->
-    let ticket = !autonomous_wait_queue_next_ticket in
-    incr autonomous_wait_queue_next_ticket;
-    Queue.add { ticket; keeper_name } autonomous_wait_queue;
-    Hashtbl.replace autonomous_wait_queue_active_tickets ticket ();
-    incr autonomous_wait_queue_active_count;
-    record_autonomous_queue_depth !autonomous_wait_queue_active_count;
+let enqueue_autonomous_waiter ~(keeper_name : string) ~(runtime_id : string) : int =
+  with_autonomous_lanes (fun () ->
+    let lane = get_or_create_lane runtime_id in
+    let ticket = !autonomous_next_ticket in
+    incr autonomous_next_ticket;
+    Queue.add { ticket; keeper_name; runtime_id } lane.queue;
+    Hashtbl.replace autonomous_tickets ticket ();
+    Hashtbl.replace autonomous_ticket_lane ticket runtime_id;
+    incr lane.active_count;
+    record_autonomous_queue_depth
+      (Hashtbl.fold
+         (fun _ lane total -> total + !(lane.active_count))
+         autonomous_lanes
+         0);
     ticket)
 ;;
 let drop_autonomous_waiter ~(ticket : int) : unit =
-  with_autonomous_wait_queue (fun () ->
-    if Hashtbl.mem autonomous_wait_queue_active_tickets ticket
+  with_autonomous_lanes (fun () ->
+    if Hashtbl.mem autonomous_tickets ticket
     then (
-      Hashtbl.remove autonomous_wait_queue_active_tickets ticket;
-      decr autonomous_wait_queue_active_count);
-    prune_autonomous_wait_queue_locked ();
-    record_autonomous_queue_depth !autonomous_wait_queue_active_count)
+      Hashtbl.remove autonomous_tickets ticket;
+      (match Hashtbl.find_opt autonomous_ticket_lane ticket with
+       | None -> ()
+       | Some runtime_id ->
+         (match Hashtbl.find_opt autonomous_lanes runtime_id with
+          | None -> ()
+          | Some lane -> decr lane.active_count);
+         Hashtbl.remove autonomous_ticket_lane ticket);
+      prune_all_lanes_locked ();
+      record_autonomous_queue_depth
+        (Hashtbl.fold
+           (fun _ lane total -> total + !(lane.active_count))
+           autonomous_lanes
+           0)))
 ;;
 let autonomous_waiter_snapshot_for_test () : string list =
-  with_autonomous_wait_queue (fun () ->
+  with_autonomous_lanes (fun () ->
     List.map (fun waiter -> waiter.keeper_name) (active_autonomous_waiters_locked ()))
 ;;
-let enqueue_autonomous_waiter_for_test keeper_name =
-  enqueue_autonomous_waiter ~keeper_name
+let enqueue_autonomous_waiter_for_test ?(runtime_id = "test") keeper_name =
+  enqueue_autonomous_waiter ~keeper_name ~runtime_id
 ;;
 let drop_autonomous_waiter_for_test ticket = drop_autonomous_waiter ~ticket
-let autonomous_waiter_head_ticket () : int option =
-  with_autonomous_wait_queue (fun () ->
-    prune_autonomous_wait_queue_locked ();
-    match autonomous_queue_peek_opt () with
-    | Some head -> Some head.ticket
-    | None -> None)
+let autonomous_waiter_head_ticket ~(runtime_id : string) : int option =
+  with_autonomous_lanes (fun () ->
+    match Hashtbl.find_opt autonomous_lanes runtime_id with
+    | None -> None
+    | Some lane ->
+      prune_lane_locked lane;
+      (match lane_peek_opt lane with
+       | Some head -> Some head.ticket
+       | None -> None))
 ;;
 let autonomous_waiter_position ~(ticket : int) : int option =
-  with_autonomous_wait_queue (fun () ->
-    prune_autonomous_wait_queue_locked ();
-    let position = ref None in
-    let idx = ref 0 in
-    Queue.iter
-      (fun waiter ->
-         if
-           Option.is_none !position
-           && Hashtbl.mem autonomous_wait_queue_active_tickets waiter.ticket
-         then if waiter.ticket = ticket then position := Some !idx else incr idx)
-      autonomous_wait_queue;
-    !position)
+  with_autonomous_lanes (fun () ->
+    match Hashtbl.find_opt autonomous_ticket_lane ticket with
+    | None -> None
+    | Some runtime_id ->
+      (match Hashtbl.find_opt autonomous_lanes runtime_id with
+       | None -> None
+       | Some lane ->
+         prune_lane_locked lane;
+         let position = ref None in
+         let idx = ref 0 in
+         Queue.iter
+           (fun waiter ->
+              if Option.is_none !position && Hashtbl.mem autonomous_tickets waiter.ticket
+              then if waiter.ticket = ticket then position := Some !idx else incr idx)
+           lane.queue;
+         !position))
+;;
+
+let others_waiting_in_queue ~(keeper_name : string) : bool =
+  with_autonomous_lanes (fun () ->
+    List.exists
+      (fun waiter -> not (String.equal waiter.keeper_name keeper_name))
+      (active_autonomous_waiters_locked ()))
 ;;
 
 (** Wall-clock cap on [Eio.Semaphore.acquire] when waiting for a keeper turn slot. Without this, a keeper whose peers hold all slots while their LLM calls stall for the entire 1200s turn budget would b... *)
@@ -886,20 +942,8 @@ let autonomous_fairness_cooldown_sec =
     ~max_v:60.0
 ;;
 
-let others_waiting_in_queue ~(keeper_name : string) : bool =
-  with_autonomous_wait_queue (fun () ->
-    prune_autonomous_wait_queue_locked ();
-    let found = ref false in
-    Queue.iter
-      (fun w ->
-         if
-           (not !found)
-           && Hashtbl.mem autonomous_wait_queue_active_tickets w.ticket
-           && w.keeper_name <> keeper_name
-         then found := true)
-      autonomous_wait_queue;
-    !found)
-;;
+(* [others_waiting_in_queue] checks across all per-runtime lanes for any active
+   waiter other than the named keeper. *)
 
 (** Pure computation: how many seconds [keeper_name] should yield before
     re-entering the queue at time [now].  Returns [0.0] when no yield is
@@ -945,10 +989,11 @@ let maybe_yield_for_fairness ~(keeper_name : string) : unit =
 let rec wait_for_autonomous_queue_head
           ~(keeper_name : string)
           ~(ticket : int)
+          ~(runtime_id : string)
           ~(started_at : float)
   : (unit, [> `Semaphore_wait_timeout of semaphore_wait_timeout ]) result
   =
-  if Option.equal Int.equal (autonomous_waiter_head_ticket ()) (Some ticket)
+  if Option.equal Int.equal (autonomous_waiter_head_ticket ~runtime_id) (Some ticket)
   then Ok ()
   else (
     let waited_sec = Time_compat.now () -. started_at in
@@ -992,7 +1037,7 @@ let rec wait_for_autonomous_queue_head
               Yield cooperatively instead of using a blocking Unix sleep so
               the Eio convention guard remains satisfied. *)
          Eio.Fiber.yield ());
-      wait_for_autonomous_queue_head ~keeper_name ~ticket ~started_at))
+      wait_for_autonomous_queue_head ~keeper_name ~ticket ~runtime_id ~started_at))
 ;;
 
 let semaphore_wait_seconds_buckets =
@@ -1139,7 +1184,7 @@ let with_keeper_turn_slot_control ?(runtime_profile = "unknown") ~keeper_name ~c
              queue to give peers a chance to reach head-of-queue first.
              See [maybe_yield_for_fairness] and #6810. *)
         maybe_yield_for_fairness ~keeper_name;
-        let ticket = enqueue_autonomous_waiter ~keeper_name in
+        let ticket = enqueue_autonomous_waiter ~keeper_name ~runtime_id:runtime_profile in
         slot_state.autonomous_ticket := Some ticket;
         (* Reset the queue-head timeout clock to the moment we bound the
              queue, NOT [t0] (slot-entry). Otherwise [maybe_yield_for_fairness]
@@ -1150,7 +1195,8 @@ let with_keeper_turn_slot_control ?(runtime_profile = "unknown") ~keeper_name ~c
              free but we ran out of budget while sleeping in fairness yield. *)
         let queue_entered_at = Time_compat.now () in
         match
-          wait_for_autonomous_queue_head ~keeper_name ~ticket ~started_at:queue_entered_at
+          wait_for_autonomous_queue_head
+            ~keeper_name ~ticket ~runtime_id:runtime_profile ~started_at:queue_entered_at
         with
         | Error _ as e -> e
         | Ok () ->
@@ -1296,6 +1342,18 @@ let with_keeper_turn_slot_for_test ?runtime_profile ~keeper_name ~channel f =
   with_keeper_turn_slot ?runtime_profile ~keeper_name ~channel f
 ;;
 
-let wait_for_autonomous_queue_head_for_test ~keeper_name ~ticket ~started_at =
-  wait_for_autonomous_queue_head ~keeper_name ~ticket ~started_at
+let wait_for_autonomous_queue_head_for_test
+      ?(runtime_id = "test") ~keeper_name ~ticket ~started_at ()
+  =
+  wait_for_autonomous_queue_head ~keeper_name ~ticket ~runtime_id ~started_at
+;;
+
+(** Test-only: expose per-lane head ticket check. *)
+let autonomous_waiter_head_ticket_for_test ~runtime_id =
+  autonomous_waiter_head_ticket ~runtime_id
+;;
+
+(** Test-only: expose aggregate queue depth. *)
+let autonomous_wait_queue_depth_for_test () =
+  autonomous_wait_queue_depth ()
 ;;

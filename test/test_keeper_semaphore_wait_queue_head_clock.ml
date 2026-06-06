@@ -51,6 +51,7 @@ let test_stale_started_at_times_out_immediately () =
           ~keeper_name:"ours"
           ~ticket:ours
           ~started_at:stale_started_at
+          ()
       with
       | Error (`Semaphore_wait_timeout timeout) ->
         Alcotest.(check (float 0.001))
@@ -85,6 +86,7 @@ let test_fresh_started_at_at_head_returns_ok () =
           ~keeper_name:"ours"
           ~ticket:ours
           ~started_at:fresh
+          ()
       with
       | Ok () ->
         Alcotest.(check pass)

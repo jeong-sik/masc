@@ -121,6 +121,25 @@ let cases : case list =
         "NUL in argv token cannot survive process-boundary \
          serialization; typed schema rejects via shell_metachar_in_token"
     }
+  ; { name = "argv_with_newlines"
+    ; sample_cmd = "gh pr create --body '<multiline markdown>'"
+    ; typed =
+        mk_exec
+          "gh"
+          [ "pr"
+          ; "create"
+          ; "--body"
+          ; "Replace self-shadowing `match sandbox_root with | Some _ -> \
+             sandbox_root | ...` with `Option.first_some sandbox_root \
+             ctx.sandbox_root`.\n\
+             \n\
+             No behavioral change. Single commit."
+          ]
+    ; expect_typed = true
+    ; rationale =
+        "execve-style argv: markdown backticks, pipe characters, and newlines \
+         inside a gh body are literal argument data"
+    }
   ]
 ;;
 
@@ -823,6 +842,41 @@ let test_pipe_character_in_exec_argv_is_literal () =
     Alcotest.fail "literal pipe argv token must not create Shell_ir.Pipeline"
 ;;
 
+let test_gh_multiline_body_lowers_to_literal_argv () =
+  let body =
+    "Replace self-shadowing `match sandbox_root with | Some _ -> sandbox_root \
+     | ...` with `Option.first_some sandbox_root ctx.sandbox_root`.\n\
+     \n\
+     No behavioral change. Single commit."
+  in
+  let input =
+    Execute_input.Exec
+      { executable = "gh"
+      ; argv = [ "pr"; "create"; "--body"; body ]
+      ; cwd = None
+      ; env = []
+      ; stdin = Execute_input.Inherit
+      ; stdout = Execute_input.Inherit
+      ; stderr = Execute_input.Inherit
+      }
+  in
+  match to_shell_ir_exn input with
+  | Masc_exec.Shell_ir.Simple simple ->
+    let argv =
+      List.filter_map
+        (function
+          | Masc_exec.Shell_ir.Lit (value, _) -> Some value
+          | Masc_exec.Shell_ir.Concat _ | Masc_exec.Shell_ir.Var _ -> None)
+        simple.args
+    in
+    Alcotest.(check (list string))
+      "gh argv preserved"
+      [ "pr"; "create"; "--body"; body ]
+      argv
+  | Masc_exec.Shell_ir.Pipeline _ ->
+    Alcotest.fail "multiline gh body must not create Shell_ir.Pipeline"
+;;
+
 let test_cwd_not_absolute () =
   let input =
     Execute_input.Exec
@@ -946,6 +1000,8 @@ let test_legitimate_metachar_still_allowed () =
     ; "find-name with literal '&' inside payload", [ "."; "-name"; "a&b" ]
     ; "find-name with '>foo' (no leading fd, but path payload-looking)", [ "."; "-name"; "X>foo" ]
     ; "ampersand by itself is execve-literal", [ "."; "-name"; "&" ]
+    ; "newline is execve-literal payload", [ "."; "-name"; "foo\nbar" ]
+    ; "carriage return is execve-literal payload", [ "."; "-name"; "foo\rbar" ]
     ]
 ;;
 
@@ -1011,7 +1067,7 @@ let test_validation_error_alternatives () =
     ~name:"Argv_contains_shell_metachar alternatives"
     (Execute_input.Argv_contains_shell_metachar
        { executable = "find"; index = 3; token = "foo\nbar" })
-    [ "Pipeline" ];
+    [];
   check_alts
     ~name:"Executable_not_allowlisted rm has no alternatives"
     (Execute_input.Executable_not_allowlisted { name = "rm"; mode = Execute_input.Dev_full })
@@ -1318,6 +1374,10 @@ let suite =
           "pipe_character_in_exec_argv_is_literal"
           `Quick
           test_pipe_character_in_exec_argv_is_literal
+      ; Alcotest.test_case
+          "gh_multiline_body_lowers_to_literal_argv"
+          `Quick
+          test_gh_multiline_body_lowers_to_literal_argv
       ; Alcotest.test_case "cwd_not_absolute" `Quick test_cwd_not_absolute
       ; Alcotest.test_case "env_key_invalid" `Quick test_env_key_invalid
       ; Alcotest.test_case

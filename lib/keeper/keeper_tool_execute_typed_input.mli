@@ -14,17 +14,17 @@
       verbatim to the child process; the implementation invokes the
       executable directly (no [/bin/sh -c "..."] wrapping).  Therefore
       shell metacharacters like [*], [?], [|], [&], [;], [>], [<],
-      [`], [$] inside an argv token are *literal characters*, not
-      shell operators.  For example, the typed schema accepts
-      [find . -name *.ml] because [*.ml] is a [find]-internal pattern,
-      not a shell glob.
+      [`], [$], [\n], and [\r] inside an argv token are *literal
+      characters*, not shell operators.  For example, the typed schema accepts
+      [find . -name *.ml] because [*.ml] is a [find]-internal pattern, not a
+      shell glob; it also accepts multiline `gh --body` text because the
+      argument is passed directly to [gh].
     - **Pipelines are explicit**.  [Pipeline.stages] enumerates each
       [exec_stage] separately; [|]-delimited strings are never parsed.
-    - **Forbidden in argv tokens**: only control characters that
-      cannot survive process boundary serialization
-      ([NUL], [\n], [\r]).  The validator rejects them via
-      {!Argv_contains_shell_metachar} (name kept for log continuity;
-      semantics narrowed in PR-1 follow-up commit).
+    - **Forbidden in argv tokens**: only [NUL], which cannot be represented in
+      an execve argv string.  The validator rejects it via
+      {!Argv_contains_shell_metachar}; the variant name is kept for log
+      continuity, but the semantics are NUL-only.
     - **Cwd is a string for now**.  Path SSOT does not yet expose a
       [Path.t] type (RFC-0091 §2.3 mis-cited [Host_config.cwd_for_keeper]
       which does not exist).  Absolute-path enforcement happens in

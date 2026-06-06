@@ -5,7 +5,10 @@
     Span attributes use OpenTelemetry GenAI + MCP semantic-convention keys
     ([gen_ai.tool.name], [gen_ai.operation.name], [mcp.method.name]) so vendors
     that auto-categorise on [gen_ai.*] classify these spans as AI/LLM activity
-    while still seeing the underlying MCP [tools/call] method.
+    while still seeing the underlying MCP [tools/call] method. MCP
+    CallToolResult payload failures use [error.type=tool_error]; the MASC
+    failure taxonomy is preserved separately under
+    [masc.mcp.tool.failure_class].
 
     @since 2.103.0 *)
 
@@ -76,25 +79,25 @@ let tool_call_span_name ~tool_name =
   Otel_genai.Mcp_value.tools_call_method ^ " " ^ tool_name
 ;;
 
-let tool_error_type (result : Tool_result.result) =
+let tool_failure_class_attrs (result : Tool_result.result) =
   match Tool_result.failure_class result with
-  | None -> None
-  | Some class_ -> Some (Tool_result.tool_failure_class_to_string class_)
+  | None -> []
+  | Some class_ ->
+    [ ( Otel_genai.Mcp_attr_key.masc_mcp_tool_failure_class
+      , `String (Tool_result.tool_failure_class_to_string class_) )
+    ]
 ;;
 
 let tool_span_attrs (result : Tool_result.result) =
   let status_attrs =
     if Tool_result.is_success result
     then [ "otel.status_code", `String "OK" ]
-    else (
-      let error_type =
-        match tool_error_type result with
-        | Some value -> value
-        | None -> "unknown"
-      in
+    else
       [ "otel.status_code", `String "ERROR"
-      ; Otel_genai.Mcp_attr_key.error_type, `String error_type
-      ])
+      ; ( Otel_genai.Mcp_attr_key.error_type
+        , `String Otel_genai.Mcp_value.tool_error_type )
+      ]
+      @ tool_failure_class_attrs result
   in
   (* OpenTelemetry GenAI semantic conventions
      (https://opentelemetry.io/docs/specs/semconv/gen-ai/). Tool execution
@@ -115,9 +118,9 @@ let on_tool_result (result : Tool_result.result) : unit =
   if enabled ()
   then (
     let status =
-      match tool_error_type result with
-      | None -> None
-      | Some _ ->
+      if Tool_result.is_success result
+      then None
+      else
         Some
           (OT.Span_status.make
              ~message:(Tool_result.message result)

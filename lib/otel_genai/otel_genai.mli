@@ -51,10 +51,12 @@ end
 module Mcp_attr_key : sig
   val mcp_method_name : string
   val error_type : string
+  val masc_mcp_tool_failure_class : string
 end
 
 module Mcp_value : sig
   val tools_call_method : string
+  val tool_error_type : string
 end
 
 module Metric_name : sig

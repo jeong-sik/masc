@@ -114,10 +114,12 @@ end
 module Mcp_attr_key = struct
   let mcp_method_name = "mcp.method.name"
   let error_type = "error.type"
+  let masc_mcp_tool_failure_class = "masc.mcp.tool.failure_class"
 end
 
 module Mcp_value = struct
   let tools_call_method = "tools/call"
+  let tool_error_type = "tool_error"
 end
 
 module Event_name = struct

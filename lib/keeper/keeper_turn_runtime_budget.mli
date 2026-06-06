@@ -164,6 +164,18 @@ val attempt_watchdog_timeout_sec :
     rotation can still run, instead of falling through to terminal
     [turn_timeout]. *)
 
+val attempt_watchdog_timeout_sec_opt :
+  liveness_mode:Keeper_attempt_liveness_config.mode ->
+  remaining_turn_budget_s:float ->
+  provider_timeout_budget ->
+  float option
+(** Runtime-attempt wall-clock watchdog selected for the active streaming
+    liveness mode.
+
+    [Observe] and [Enforce] return [None] so OAS [run_stream] progress,
+    [stream_idle_timeout_s], and the attempt-liveness observer own stream
+    liveness. [Off] preserves the legacy per-attempt watchdog. *)
+
 type degraded_retry_budget_decision =
   | No_degraded_retry
   | Degraded_retry_slot_phase_exhausted of EC.degraded_retry

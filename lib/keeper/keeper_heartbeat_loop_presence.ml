@@ -21,12 +21,22 @@ let effective_keepalive_meta
       ~(disk_meta_opt : keeper_meta option)
   : keeper_meta
   =
-  match disk_meta_opt with
+  let selected =
+    match disk_meta_opt with
   | Some latest -> latest
   | None ->
     (match Keeper_registry.get ~base_path fallback.name with
      | Some entry -> entry.meta
      | None -> fallback)
+  in
+  match Keeper_meta_contract.effective_meta_result selected with
+  | Ok effective -> effective
+  | Error msg ->
+    Log.Keeper.warn
+      "effective_keepalive_meta: failed to overlay TOML profile for %s: %s"
+      selected.name
+      msg;
+    selected
 ;;
 
 let repair_identity_drift_for_keepalive ~(ctx : _ context) (meta : keeper_meta)

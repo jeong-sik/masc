@@ -384,7 +384,7 @@ let sweep_and_recover (ctx : _ context) =
          Keeper_metrics.(to_string RestartAttempts)
          ~labels:[ "keeper", old_entry.name ]
          ();
-       match read_meta ctx.config old_entry.name with
+       match read_effective_meta ctx.config old_entry.name with
        | Ok (Some meta) ->
          (* RFC-0002: dispatch restart attempt event *)
          Keeper_registry.dispatch_event_unit

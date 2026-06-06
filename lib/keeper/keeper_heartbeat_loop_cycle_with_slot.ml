@@ -92,11 +92,11 @@ let run_keeper_cycle_with_slot
         "%s: provider_timeout observed; preserving original turn \
          failure without Provider_timeout_loop latch"
         keeper_name);
-    (match read_meta ctx.config meta_after_cursor_persist.name with
+    (match read_effective_meta ctx.config meta_after_cursor_persist.name with
      | Ok (Some latest) -> latest
      | Ok None ->
        Log.Keeper.error
-         "keeper:%s read_meta returned None after turn failure, using stale meta"
+         "keeper:%s read_effective_meta returned None after turn failure, using stale meta"
          meta_after_cursor_persist.name;
        Otel_metric_store.inc_counter
          Keeper_metrics.(to_string MetaReadFailures)
@@ -106,7 +106,7 @@ let run_keeper_cycle_with_slot
        meta_after_cursor_persist
      | Error e ->
        Log.Keeper.error
-         "keeper:%s read_meta failed after turn failure (%s), using stale meta"
+         "keeper:%s read_effective_meta failed after turn failure (%s), using stale meta"
          meta_after_cursor_persist.name
          e;
        Otel_metric_store.inc_counter

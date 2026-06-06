@@ -12,6 +12,7 @@ import { SectionCard } from './common/card'
 import { copyToClipboard } from './common/copyable-code'
 import { ErrorState, LoadingState } from './common/feedback-state'
 import { ringFocusClasses } from './common/ring'
+import { RuntimeEnvironmentEditor } from './runtime-environment-editor'
 
 type LoadState = 'idle' | 'loading' | 'loaded'
 
@@ -280,8 +281,21 @@ export function RuntimeTomlEditor() {
         ${loadState === 'loading'
           ? html`<${LoadingState}>runtime.toml 불러오는 중...<//>`
           : html`
+            <${RuntimeEnvironmentEditor}
+              sourceText=${draft}
+              dirty=${dirty}
+              disabled=${loadState !== 'loaded'}
+              saving=${saving}
+              onDraftChange=${(nextSourceText: string) => {
+                setDraft(nextSourceText)
+                setNotice(null)
+              }}
+              onSave=${(nextSourceText?: string) => {
+                void handleSave(nextSourceText)
+              }}
+            />
             <div
-              class="grid min-h-[32rem] max-h-[72vh] grid-cols-[3.5rem_minmax(0,1fr)] overflow-hidden rounded-[var(--r-1)] border border-[var(--input-border)] bg-[var(--input-bg)]"
+              class="mt-4 grid min-h-[32rem] max-h-[72vh] grid-cols-[3.5rem_minmax(0,1fr)] overflow-hidden rounded-[var(--r-1)] border border-[var(--input-border)] bg-[var(--input-bg)]"
               data-testid="runtime-toml-code-frame"
             >
               <pre

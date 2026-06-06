@@ -64,8 +64,8 @@ function invariantDetail(
 function nextExpectedStep(snapshot: KeeperCompositeSnapshot): string {
   if (!snapshot.is_live) {
     return snapshot.last_outcome
-      ? '다음 live turn 이 idle placeholder 로부터 KTC/KDP/KCL 을 repopulate 해야 함.'
-      : '아직 완료된 턴 없음 — first live turn 이 observer 를 채워야 함.'
+      ? '다음 live turn 이 시작되면 KTC/KDP/KCL 이 실제 turn 값으로 갱신되어야 함.'
+      : '아직 완료된 turn 없음 — 첫 live turn 이 시작되면 관측값이 채워져야 함.'
   }
   // `collapsed_from` carries the raw KSM phase when the composite has folded
   // it under a parent projection. When present it is the operator-actionable
@@ -209,10 +209,10 @@ export function deriveOperationalInsight(
       : 'no completed turn yet'
     return {
       tone: 'ok',
-      headline: 'Idle 스냅샷 정상',
+      headline: '대기 상태 정상',
       detail: snapshot.last_outcome
-        ? `sub-FSM 들이 idle placeholder 로 fallback 됨; 마지막 완료 turn 은 ${idleSince} 전 종료.`
-        : 'observer 가 idle — has not captured a completed turn yet.',
+        ? `현재 live turn 없음. KTC/KDP/KCL 은 대기값이며, 마지막 완료 turn 은 ${idleSince} 전 종료.`
+        : '현재 live turn 없음. 아직 완료된 turn 을 관측하지 못함.',
       nextStep: nextExpectedStep(snapshot),
       evidence: [
         `KSM ${snapshot.phase}`,

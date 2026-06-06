@@ -172,6 +172,7 @@ function runtimeProviderAttemptClass(trace: KeeperRuntimeTraceResponse): string 
 
 function runtimeProviderAttemptLabel(trace: KeeperRuntimeTraceResponse): string {
   const provider = trace.provider_attempts
+  if (provider.started_count === 0 && provider.finished_count === 0) return 'prov none'
   const status = shortText(provider.terminal_status, 18) || 'unknown'
   return ['prov', status].filter(Boolean).join(' ')
 }
@@ -253,7 +254,7 @@ function RuntimeEvidenceSummary({
   const title = runtimeTraceTitle(trace)
   return html`
     <span class=${`${commonClass} ${runtimeTraceClass(trace)}`} title=${title}>
-      증거 ${trace.health || 'unknown'}
+      trace ${trace.health || 'unknown'}
     </span>
 	    <span class=${`${commonClass} border-[var(--color-border-default)] text-[var(--color-fg-primary)]`} title=${title}>
 	      ${runtimeTraceTurnLabel(trace)}

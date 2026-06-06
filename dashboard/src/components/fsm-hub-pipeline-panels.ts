@@ -96,7 +96,7 @@ export function OperationalMeaningPanel({
     >
       <div class="flex items-start justify-between gap-3 flex-wrap">
         <div class="min-w-0">
-          <div class="text-3xs font-semibold uppercase tracking-2 text-[var(--color-fg-muted)]">오퍼레이터 의미</div>
+          <div class="text-3xs font-semibold uppercase tracking-2 text-[var(--color-fg-muted)]">상태 해석</div>
           <div class="mt-1 text-xl font-semibold text-[var(--color-fg-secondary)]">${insight.headline}</div>
           <div class="mt-1 text-2xs text-[var(--color-fg-disabled)] leading-relaxed">${insight.detail}</div>
         </div>
@@ -106,7 +106,7 @@ export function OperationalMeaningPanel({
       </div>
 
       <div class="mt-2 text-3xs text-[var(--color-fg-primary)]">
-        <span class="font-semibold text-[var(--color-fg-muted)]">Next:</span> ${insight.nextStep}
+        <span class="font-semibold text-[var(--color-fg-muted)]">다음 관측:</span> ${insight.nextStep}
       </div>
 
       <div class="mt-2 flex flex-wrap gap-1.5">
@@ -147,7 +147,7 @@ export function OperationalMeaningPanel({
                 <div class="mt-0.5 text-3xs text-[var(--color-fg-disabled)]">${lane.label}</div>
                 <div class="mt-1.5 text-3xs leading-relaxed text-[var(--color-fg-primary)]">${lane.meaning}</div>
                 <div class="mt-1 text-3xs font-mono text-[var(--color-fg-disabled)]">
-                  ${lane.transitionCount} observed edge${lane.transitionCount === 1 ? '' : 's'}
+                  ${lane.transitionCount} 화면 내 상태 변화
                 </div>
               </div>
             `)}

@@ -189,3 +189,8 @@ val hook_introspection_json :
   ?max_cost_usd:float -> ?destructive_check:bool -> unit -> Yojson.Safe.t
 (** JSON snapshot describing which hooks are active for the dashboard
     diagnostics surface. *)
+
+module For_testing : sig
+  val tool_input_shape_for_log : Yojson.Safe.t -> string
+  val tool_input_keys_for_log : Yojson.Safe.t -> string
+end

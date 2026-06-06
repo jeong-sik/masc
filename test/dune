@@ -101,6 +101,7 @@
   test_reward_advice_artifact
   test_masc_oas_bridge_timeout_guard
   test_keeper_llm_bridge
+  test_keeper_hooks_oas_log_shape
   test_keeper_tool_use_failure_counter
   test_keeper_compaction_outcome_counter
   test_keeper_usage_trust_counter
@@ -350,6 +351,7 @@
   test_reward_advice_artifact
   test_masc_oas_bridge_timeout_guard
   test_keeper_llm_bridge
+  test_keeper_hooks_oas_log_shape
   test_keeper_tool_use_failure_counter
   test_keeper_compaction_outcome_counter
   test_keeper_usage_trust_counter

@@ -3,6 +3,7 @@ module Store = Masc.Keeper_meta_store
 module Profile = Masc.Keeper_types_profile
 module Status_detail = Masc.Keeper_status_detail
 module Turn_setup = Masc.Keeper_turn_setup
+module Turn = Masc.Keeper_turn
 module Keeper_tool_surface = Masc.Keeper_tool_surface
 module Keeper_tool_surface_ops = Masc.Keeper_tool_surface_ops
 
@@ -237,6 +238,38 @@ goal = "missing sandbox profile"
         true
         (contains_substring ~needle:"sandbox_profile is required" err)
 
+let test_keeper_up_rejects_profile_source_without_sandbox_profile () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
+  let name = "nosandboxup" in
+  write_file
+    (Filename.concat keepers_dir (name ^ ".toml"))
+    {|[keeper]
+goal = "missing sandbox profile"
+|};
+  let config = Workspace.default_config base in
+  ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let ctx : _ Profile.context =
+    {
+      config;
+      agent_name = "test-agent";
+      sw;
+      clock = Eio.Stdenv.clock env;
+      proc_mgr = None;
+      net = None;
+    }
+  in
+  let result = Turn.handle_keeper_up ctx (`Assoc [ ("name", `String name) ]) in
+  if Profile.tool_result_success result then
+    Alcotest.fail "keeper_up should reject TOML profile without sandbox_profile";
+  Alcotest.(check bool)
+    "keeper_up error names missing sandbox_profile"
+    true
+    (contains_substring
+       ~needle:"sandbox_profile is required"
+       (Profile.tool_result_body result))
+
 let test_missing_profile_source_fails_loud () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir:_ ->
   let name = "nosource" in
@@ -390,6 +423,9 @@ let () =
           Alcotest.test_case
             "profile source without sandbox_profile fails loudly"
             `Quick test_missing_sandbox_profile_fails_loud_for_profile_source;
+          Alcotest.test_case
+            "keeper_up rejects profile source without sandbox_profile"
+            `Quick test_keeper_up_rejects_profile_source_without_sandbox_profile;
           Alcotest.test_case
             "missing profile source fails loudly"
             `Quick test_missing_profile_source_fails_loud;

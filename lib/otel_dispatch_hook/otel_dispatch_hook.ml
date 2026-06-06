@@ -2,10 +2,10 @@
 
     Creates an OTel span for each tool call using data from [Tool_result.result].
 
-    Span attributes use OpenTelemetry GenAI semantic-convention keys
-    ([gen_ai.tool.name], [gen_ai.operation.name]) so vendors that
-    auto-categorise on [gen_ai.*] classify these spans as AI/LLM activity
-    instead of generic tool calls. See #7461 Step 1.
+    Span attributes use OpenTelemetry GenAI + MCP semantic-convention keys
+    ([gen_ai.tool.name], [gen_ai.operation.name], [mcp.method.name]) so vendors
+    that auto-categorise on [gen_ai.*] classify these spans as AI/LLM activity
+    while still seeing the underlying MCP [tools/call] method.
 
     @since 2.103.0 *)
 
@@ -13,7 +13,15 @@ module OT = Opentelemetry
 
 let enabled_override : bool option ref = ref None
 
-let span_emitter_override : (name:string -> attrs:OT.key_value list -> unit) option ref =
+let span_emitter_override
+      : (name:string ->
+         attrs:OT.key_value list ->
+         kind:OT.Span_kind.t ->
+         status:OT.Span_status.t option ->
+         unit)
+          option
+          ref
+  =
   ref None
 ;;
 
@@ -23,10 +31,19 @@ let enabled () =
   | None -> Otel_config.enabled
 ;;
 
-let emit_span ~name ~attrs =
+let tool_call_span_kind = OT.Span_kind.Span_kind_client
+
+let emit_span ~name ~attrs ?status () =
   match !span_emitter_override with
-  | Some emit -> emit ~name ~attrs
-  | None -> ignore (OT.Trace.with_ name ~attrs (fun _scope -> ()))
+  | Some emit -> emit ~name ~attrs ~kind:tool_call_span_kind ~status
+  | None ->
+    ignore
+      (OT.Trace.with_
+         ~kind:tool_call_span_kind
+         name
+         ~attrs
+         (fun scope ->
+            Option.iter (OT.Scope.set_status scope) status))
 ;;
 
 let with_test_span_emitter ~enabled:enabled_value ~emit_span:emit f =
@@ -55,11 +72,29 @@ let cold_warm_phase () =
   if Unix.gettimeofday () -. startup_time < cold_phase_seconds then "cold" else "warm"
 ;;
 
+let tool_call_span_name ~tool_name =
+  Otel_genai.Mcp_value.tools_call_method ^ " " ^ tool_name
+;;
+
+let tool_error_type (result : Tool_result.result) =
+  match Tool_result.failure_class result with
+  | None -> None
+  | Some class_ -> Some (Tool_result.tool_failure_class_to_string class_)
+;;
+
 let tool_span_attrs (result : Tool_result.result) =
   let status_attrs =
     if Tool_result.is_success result
     then [ "otel.status_code", `String "OK" ]
-    else [ "otel.status_code", `String "ERROR" ]
+    else (
+      let error_type =
+        match tool_error_type result with
+        | Some value -> value
+        | None -> "unknown"
+      in
+      [ "otel.status_code", `String "ERROR"
+      ; Otel_genai.Mcp_attr_key.error_type, `String error_type
+      ])
   in
   (* OpenTelemetry GenAI semantic conventions
      (https://opentelemetry.io/docs/specs/semconv/gen-ai/). Tool execution
@@ -78,7 +113,21 @@ let tool_span_attrs (result : Tool_result.result) =
 let on_tool_result (result : Tool_result.result) : unit =
   (* OTel span: only when enabled *)
   if enabled ()
-  then emit_span ~name:("tool/" ^ Tool_result.tool_name result) ~attrs:(tool_span_attrs result)
+  then (
+    let status =
+      match tool_error_type result with
+      | None -> None
+      | Some _ ->
+        Some
+          (OT.Span_status.make
+             ~message:(Tool_result.message result)
+             ~code:OT.Span_status.Status_code_error)
+    in
+    emit_span
+      ~name:(tool_call_span_name ~tool_name:(Tool_result.tool_name result))
+      ~attrs:(tool_span_attrs result)
+      ?status
+      ())
 ;;
 
 (* Histogram + span emission fires only for handled results. Non-handled

@@ -46,6 +46,15 @@ module Attr_key : sig
   val is_masc_extension : string -> bool
 end
 
+module Mcp_attr_key : sig
+  val mcp_method_name : string
+  val error_type : string
+end
+
+module Mcp_value : sig
+  val tools_call_method : string
+end
+
 module Metric_name : sig
   val client_token_usage : string
   val client_operation_duration : string

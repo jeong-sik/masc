@@ -106,6 +106,15 @@ module Metric_name = struct
   ;;
 end
 
+module Mcp_attr_key = struct
+  let mcp_method_name = "mcp.method.name"
+  let error_type = "error.type"
+end
+
+module Mcp_value = struct
+  let tools_call_method = "tools/call"
+end
+
 module Event_name = struct
   let client_inference_operation_details =
     "gen_ai.client.inference.operation.details"
@@ -158,6 +167,7 @@ let keeper_turn_attrs
 let tool_execution_attrs ~tool_name =
   [ Attr_key.gen_ai_operation_name, `String "execute_tool"
   ; Attr_key.gen_ai_tool_name, `String tool_name
+  ; Mcp_attr_key.mcp_method_name, `String Mcp_value.tools_call_method
   ]
 ;;
 

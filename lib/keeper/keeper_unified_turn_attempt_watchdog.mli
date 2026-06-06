@@ -1,11 +1,13 @@
-(** RFC-0136 PR-4-c: wrap [Eio.Time.with_timeout_exn] + the
+(** RFC-0136 PR-4-c: optionally wrap [Eio.Time.with_timeout_exn] + the
     [Eio.Cancel.Cancelled] / [Eio.Time.Timeout] handling for a single
-    keeper turn runtime attempt.  Extracted from
+    keeper turn runtime attempt. Extracted from
     [keeper_unified_turn.ml] do_run closure (L490-L577).
 
     Three outcomes:
 
-    - normal completion: pass-through of [run]'s [result]
+    - no attempt watchdog ([attempt_watchdog_s = None]): pass-through of [run]'s
+      [result]
+    - normal completion under a watchdog: pass-through of [run]'s [result]
     - [Eio.Cancel.Cancelled]: invoke [on_cancelled] for the terminal
       receipt + FSM transition, then re-raise so the outer cleanup
       handler observes the cancellation
@@ -21,7 +23,7 @@
     timeline.  Cycle 1b-iv. *)
 val dispatch
   :  clock:_ Eio.Time.clock
-  -> attempt_watchdog_s:float
+  -> attempt_watchdog_s:float option
   -> oas_timeout_s:float
   -> on_cancelled:(unit -> unit)
   -> run:(unit -> ('a, Agent_sdk.Error.sdk_error) result)

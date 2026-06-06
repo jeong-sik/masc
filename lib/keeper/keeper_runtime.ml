@@ -299,23 +299,19 @@ let ensure_keeper_meta config name =
        fields.  They must be overlaid into the returned meta for the
        live registry, but comparing those omitted fields against TOML
        would classify every reconcile tick as a write-worthy drift.
-       Only fields serialized by [meta_to_json] should drive a disk
-       write here. *)
-    let active_goal_ids_changed =
-      meta.active_goal_ids <> target_active_goal_ids
-    in
+       [active_goal_ids] can also be runtime-owned when set explicitly via
+       keeper_up, but when supplied by TOML it remains an overlay-only
+       declarative scope rather than being copied into runtime JSON. *)
     let oas_env_changed = meta.oas_env <> target_oas_env in
-    let persistent_changed = active_goal_ids_changed || oas_env_changed in
+    let persistent_changed = oas_env_changed in
     let overlay_without_persistent_changes =
       { overlayed with
-        active_goal_ids = meta.active_goal_ids;
         oas_env = meta.oas_env;
       }
     in
 
     if persistent_changed then begin
       let cats = List.filter_map Fun.id [
-        (if active_goal_ids_changed then Some "active_goal_ids" else None);
         (if oas_env_changed then Some "oas_env" else None);
       ] in
       Log.Keeper.info

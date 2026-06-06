@@ -210,12 +210,10 @@ check_http "cost latency 200" "$BASE/api/v1/dashboard/cost-latency?window=60" "2
 check_json "cost latency exposes cost and latency" "$BASE/api/v1/dashboard/cost-latency?window=60" "'total_cost_usd' in d and 'latencyBuckets' in d" '^True$'
 check_http "keeper decisions 200" "$BASE/api/v1/dashboard/keeper-decisions?limit=1" "200"
 check_json "keeper decisions exposes provenance" "$BASE/api/v1/dashboard/keeper-decisions?limit=1" "'events' in d and d.get('dashboard_surface') == '/api/v1/dashboard/keeper-decisions' and d.get('source') == 'keeper_decision_log' and 'retention' in d" '^True$'
-check_http "dashboard stress 200" "$BASE/api/v1/dashboard/stress?limit=1" "200"
-check_json "dashboard stress exposes provenance" "$BASE/api/v1/dashboard/stress?limit=1" "'agent_stress' in d and d.get('dashboard_surface') == '/api/v1/dashboard/stress' and d.get('source') == 'agent_stress' and 'retention' in d" '^True$'
 
 echo "[4/7] Operations + Workspace"
 check_http "operator digest 200" "$BASE/api/v1/operator/digest" "200"
-check_json "operator digest exposes provenance" "$BASE/api/v1/operator/digest" "'health' in d and d.get('dashboard_surface') == '/api/v1/operator/digest' and d.get('source') == 'operator_digest_read_model' and d.get('retention', {}).get('scope') == 'operator_digest' and d.get('query', {}).get('effective_target_type') == 'root' and d.get('cache', {}).get('cache_state') in ('fresh', 'stale', 'initializing', 'request_swr_or_inline_compute')" '^True$'
+check_json "operator digest exposes provenance" "$BASE/api/v1/operator/digest" "'health' in d and d.get('dashboard_surface') == '/api/v1/operator/digest' and d.get('source') == 'operator_digest_read_model' and d.get('retention', {}).get('scope') == 'operator_digest' and d.get('query', {}).get('effective_target_type') == 'workspace' and d.get('cache', {}).get('cache_state') in ('fresh', 'stale', 'initializing', 'request_swr_or_inline_compute')" '^True$'
 check_http "operator snapshot 200" "$BASE/api/v1/operator" "200"
 check_json "operator snapshot exposes provenance" "$BASE/api/v1/operator" "'available_actions' in d and 'keepers' in d and d.get('dashboard_surface') == '/api/v1/operator' and d.get('source') == 'operator_snapshot_read_model' and d.get('retention', {}).get('scope') == 'operator_snapshot' and d.get('query', {}).get('default_summary_request') is True and d.get('cache', {}).get('cache_state') in ('fresh', 'stale', 'initializing', 'request_swr_or_inline_compute')" '^True$'
 check_http "board 200" "$BASE/api/v1/dashboard/board" "200"
@@ -234,8 +232,6 @@ check_http "planning 200" "$BASE/api/v1/dashboard/planning" "200"
 check_json "planning exposes rollup" "$BASE/api/v1/dashboard/planning" "'rollup' in d" '^True$'
 check_http "goals tree 200" "$BASE/api/v1/dashboard/goals" "200"
 check_json "goals tree exposes summary" "$BASE/api/v1/dashboard/goals" "'summary' in d and 'tree' in d" '^True$'
-check_http "git graph 200" "$BASE/api/v1/git/graph?n=20" "200"
-check_json "git graph exposes stats and nodes" "$BASE/api/v1/git/graph?n=20" "'stats' in d and 'nodes' in d" '^True$'
 check_http "git diff 200" "$BASE/api/v1/git/diff?path=README.md" "200"
 check_json "git diff exposes unified diff state" "$BASE/api/v1/git/diff?path=README.md" "'has_changes' in d and 'unified' in d" '^True$'
 check_http "repositories 200" "$BASE/api/v1/repositories" "200"

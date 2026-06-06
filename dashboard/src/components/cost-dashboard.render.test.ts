@@ -6,7 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const apiMocks = vi.hoisted(() => ({
   fetchRuntimeModelMetrics: vi.fn(),
   fetchKeeperCostMetrics: vi.fn(),
-  fetchStress: vi.fn(),
   fetchAuditLedger: vi.fn(),
   fetchKeeperDecisions: vi.fn(),
 }))
@@ -71,7 +70,6 @@ describe('CostDashboard route-backed focus behavior', () => {
     vi.resetModules()
     apiMocks.fetchRuntimeModelMetrics.mockReset().mockResolvedValue(modelMetrics())
     apiMocks.fetchKeeperCostMetrics.mockReset().mockResolvedValue(keeperMetrics())
-    apiMocks.fetchStress.mockReset().mockResolvedValue({ events: [], agent_stress: [], limit: 0, source: 'agent_stress' })
     apiMocks.fetchAuditLedger.mockReset().mockResolvedValue({ entries: [], limit: 0 })
     apiMocks.fetchKeeperDecisions.mockReset().mockResolvedValue({ events: [], limit: 0 })
     window.history.replaceState(null, '', '#overview')

@@ -35,9 +35,6 @@ export interface FsmGraphSpec {
 // pass literal hex/rgb values into the stylesheet.
 // Fallback values mirror the Cockpit Design System defaults from
 // `styles/tokens.generated.ts` so SSR / missing-CSS degrades gracefully.
-// A parallel `TOKEN_FALLBACKS` table lives in `components/git-graph-view.ts`
-// for the git-graph cytoscape view; keep entries that appear in both
-// tables in sync with the design-system source.
 const TOKEN_FALLBACKS: Record<string, string> = {
   '--color-bg-0': '#0c0b08',
   '--color-bg-1': '#141210',

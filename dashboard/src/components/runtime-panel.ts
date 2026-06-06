@@ -1,7 +1,7 @@
 // RuntimePanel — Monitor "Runtime" lane.
 // Renders OasHealthChip / RuntimeMonitor / VerificationSpecsPanel inline,
 // and delegates telemetry views to
-// TelemetryPanel (cost / audit / stress).
+// TelemetryPanel (cost / audit).
 //
 // Progressive-disclosure default view (density reduction, 2026-04):
 //   Signal layer     — RuntimeHealthSnapshot first, OasHealthChip below
@@ -11,7 +11,7 @@
 //
 // Explicit drill-down via FilterChips, split into two strips (PR #17014):
 //   Primary strip   — default · providers · runtime.toml
-//   Advanced strip  — cost · audit · stress · verification
+//   Advanced strip  — cost · audit · verification
 //                     (the first three are spread from TELEMETRY_VIEW_CHIPS,
 //                      owned by telemetry-panel.ts; PR #17044 / #17052)
 //
@@ -19,7 +19,7 @@
 //   default      — Signal strip + collapsed diagnostic/raw accordions
 //   providers    — OAS health chip + runtime monitor only
 //   config       — raw runtime.toml editor
-//   cost / audit / stress — TelemetryPanel → CostDashboard
+//   cost / audit — TelemetryPanel → CostDashboard
 //   verification — formal specs only
 // Pattern: mirrors fleet-health-panel.ts (unidirectional flow via URL).
 
@@ -42,7 +42,6 @@ type RuntimeView =
   | 'config'
   | 'cost'
   | 'audit'
-  | 'stress'
   | 'verification'
 
 const RUNTIME_VIEWS: RuntimeView[] = [
@@ -51,7 +50,6 @@ const RUNTIME_VIEWS: RuntimeView[] = [
   'config',
   'cost',
   'audit',
-  'stress',
   'verification',
 ]
 
@@ -75,7 +73,7 @@ const PRIMARY_VIEW_CHIPS: Array<{ key: RuntimeView; label: string }> = [
 ]
 
 // Advanced chips are infra/billing telemetry plus the raw / formal layers.
-// The first three chips (cost / audit / stress) are owned by
+// The telemetry chips (cost / audit) are owned by
 // telemetry-panel.ts — both their labels and their dispatch live there.
 // Verification stays inline because runtime-panel still renders it directly.
 const ADVANCED_VIEW_CHIPS: Array<{ key: RuntimeView; label: string }> = [

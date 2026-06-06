@@ -59,7 +59,7 @@ describe('navigate', () => {
     navigate('monitoring', { section: 'git-graph' })
     expect(route.value.tab).toBe('workspace')
     expect(route.value.params.section).toBe('repositories')
-    expect(route.value.params.view).toBe('graph')
+    expect(route.value.params.view).toBeUndefined()
   })
 
   it('redirects retired goal-loop links into planning goal-loop view', () => {

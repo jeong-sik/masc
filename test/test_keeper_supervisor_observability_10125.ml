@@ -38,17 +38,17 @@ let () =
 ;;
 
 module R = Masc.Keeper_runtime
-module Prom = Masc.Otel_metric_store
+module Metrics = Masc.Otel_metric_store
 
 let starts_for ~base_path =
-  Prom.metric_value_or_zero
+  Metrics.metric_value_or_zero
     Keeper_metrics.(to_string SupervisorSweepStarts)
     ~labels:[ "base_path", base_path ]
     ()
 ;;
 
 let last_sweep_for ~base_path =
-  Prom.get_metric_value
+  Metrics.get_metric_value
     Keeper_metrics.(to_string SupervisorLastSweepUnixtime)
     ~labels:[ "base_path", base_path ]
     ()
@@ -65,10 +65,10 @@ let last_sweep_for ~base_path =
    "not registered" and "registered but no observations yet". *)
 let test_metrics_registered () =
   let starts =
-    Prom.get_metric_value Keeper_metrics.(to_string SupervisorSweepStarts) ()
+    Metrics.get_metric_value Keeper_metrics.(to_string SupervisorSweepStarts) ()
   in
   let last_sweep =
-    Prom.get_metric_value
+    Metrics.get_metric_value
       Keeper_metrics.(to_string SupervisorLastSweepUnixtime)
       ()
   in
@@ -99,7 +99,7 @@ let test_age_helper_returns_none_before_first_sweep () =
    liveness. *)
 let test_age_helper_advances_after_gauge_set () =
   let base_path = "/tmp/test-supervisor-obs-advances-10125" in
-  Prom.set_gauge
+  Metrics.set_gauge
     Keeper_metrics.(to_string SupervisorLastSweepUnixtime)
     ~labels:[ "base_path", base_path ]
     (Unix.gettimeofday ());
@@ -119,7 +119,7 @@ let test_age_helper_advances_after_gauge_set () =
 let test_age_helper_reports_stale_when_gauge_old () =
   let base_path = "/tmp/test-supervisor-obs-stale-10125" in
   let stale_ts = Unix.gettimeofday () -. 3600.0 in
-  Prom.set_gauge
+  Metrics.set_gauge
     Keeper_metrics.(to_string SupervisorLastSweepUnixtime)
     ~labels:[ "base_path", base_path ]
     stale_ts;
@@ -135,11 +135,11 @@ let test_counter_per_base_path_isolation () =
   let a = "/tmp/test-supervisor-obs-iso-A-10125" in
   let b = "/tmp/test-supervisor-obs-iso-B-10125" in
   let before_b = starts_for ~base_path:b in
-  Prom.inc_counter
+  Metrics.inc_counter
     Keeper_metrics.(to_string SupervisorSweepStarts)
     ~labels:[ "base_path", a ]
     ();
-  Prom.inc_counter
+  Metrics.inc_counter
     Keeper_metrics.(to_string SupervisorSweepStarts)
     ~labels:[ "base_path", a ]
     ();
@@ -159,17 +159,17 @@ let test_registry_snapshot_includes_metrics () =
   let base_path = "/tmp/test-supervisor-obs-export-10125" in
   let starts = Keeper_metrics.(to_string SupervisorSweepStarts) in
   let last_sweep = Keeper_metrics.(to_string SupervisorLastSweepUnixtime) in
-  Prom.inc_counter
+  Metrics.inc_counter
     starts
     ~labels:[ "base_path", base_path ]
     ();
-  Prom.set_gauge
+  Metrics.set_gauge
     last_sweep
     ~labels:[ "base_path", base_path ]
     (Unix.gettimeofday ());
   let has_metric name metric_type =
-    Prom.snapshot ()
-    |> List.exists (fun (m : Prom.metric) ->
+    Metrics.snapshot ()
+    |> List.exists (fun (m : Metrics.metric) ->
       String.equal m.name name
       && m.metric_type = metric_type
       && List.mem ("base_path", base_path) m.labels)
@@ -177,11 +177,11 @@ let test_registry_snapshot_includes_metrics () =
   Alcotest.(check bool)
     "counter name appears in registry"
     true
-    (has_metric starts Prom.Counter);
+    (has_metric starts Metrics.Counter);
   Alcotest.(check bool)
     "gauge name appears in registry"
     true
-    (has_metric last_sweep Prom.Gauge)
+    (has_metric last_sweep Metrics.Gauge)
 ;;
 
 let () =

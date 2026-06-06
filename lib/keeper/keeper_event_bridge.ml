@@ -409,8 +409,8 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
          signal that an OAS variant has shipped without a masc
          consumer migration; the
          [masc_oas_bridge_unmigrated_payload_kind_total{kind}] counter
-         gives them the per-process *rate*, surfaced on the Otel_metric_store
-         scrape so dashboards can alert without log scraping. *)
+         gives them the per-process *rate*, surfaced by Otel_metric_store
+         export so dashboards can alert without log scraping. *)
     let kind = Agent_sdk.Event_bus.payload_kind other in
     Otel_metric_store.inc_counter
       Otel_metric_store.metric_oas_bridge_unmigrated_payload_kind

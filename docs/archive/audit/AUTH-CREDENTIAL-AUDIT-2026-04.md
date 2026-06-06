@@ -32,7 +32,7 @@
 **Role (1 pair)**:
 - `lib/tool_access_role.{ml,mli}`
 
-**Telemetry baseline**: ~8 `metric_auth_*` Prometheus families found (pending Phase 2 enumeration).
+**Telemetry baseline**: ~8 `metric_auth_*` retired scrape backend families found (pending Phase 2 enumeration).
 
 **Test coverage baseline**: 28 test files matching `auth|credential|identity|allowlist|token` (pending Phase 2 structural breakdown).
 
@@ -64,13 +64,13 @@ Conservative candidates flagged for Phase 2 verification:
 Three families, all monotonic-direction:
 
 ```
-auth_modules_with_prometheus_guards (INC, floor TBD)
+auth_modules_with_retired-scrape-backend_guards (INC, floor TBD)
   Purpose: ensure auth telemetry coverage stays ≥ baseline.
   Phase 2 will count actual emitters and pin floor.
 
 auth_identity_modules_with_telemetry (INC, floor 0)
   Purpose: drive identity-module telemetry from 0 → ≥3.
-  Goal: one Prometheus counter per identity module
+  Goal: one retired scrape backend counter per identity module
         (agent_identity, keeper_identity, workspace_identity).
 
 credential_paths_without_redaction_audit (DEC, floor TBD)

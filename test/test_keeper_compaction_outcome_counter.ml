@@ -12,10 +12,10 @@
                     escalate). *)
 
 module EC = Masc.Keeper_context_runtime
-module Prom = Masc.Otel_metric_store
+module Metrics = Masc.Otel_metric_store
 
 let counter_for ~keeper ~outcome =
-  Prom.metric_value_or_zero
+  Metrics.metric_value_or_zero
     EC.compaction_outcome_metric
     ~labels:[ ("keeper", keeper); ("outcome", outcome) ]
     ()

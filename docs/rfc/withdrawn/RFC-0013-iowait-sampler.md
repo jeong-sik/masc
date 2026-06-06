@@ -16,8 +16,7 @@ withdrawn_reason: "Self-declared deferred in original draft (PR-0.2.E). Parent p
   `knowledge/research/2026-04-masc-ide-strategy/IMPLEMENTATION-PLAN.md` PR-0.2
 - Related code:
   `lib/core/masc_runtime_events.ml`,
-  `lib/core/masc_runtime_events.mli`,
-  `scripts/perf-baseline.sh`
+  `lib/core/masc_runtime_events.mli`
 - Related OCaml docs:
   `https://ocaml.org/manual/5.4/api/Runtime_events.html`,
   `https://ocaml.org/p/eio/latest`
@@ -97,8 +96,8 @@ session does not re-derive the trade-off.
 - No new legacy metrics backend dependency.
 - No change to existing `Runtime_events` registrations
   (`lib/core/masc_runtime_events.ml`).
-- No change to `scripts/perf-baseline.sh` until path A or B is
-  approved as a follow-up.
+- No runtime baseline harness changes until path A or B is approved as a
+  follow-up.
 
 ## Open questions
 

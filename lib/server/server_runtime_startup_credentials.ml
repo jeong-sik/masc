@@ -212,7 +212,7 @@ let sync_bootable_keeper_credentials (state : Mcp_server.server_state) =
      for ping-pong regression. *)
   (* [Auth.bare_alias_audit] mirrors the result into the
      [masc_auth_bare_alias{state=...}] gauges so the boot signal
-     stays surfaced on every Otel_metric_store scrape. The INFO line below
+     stays surfaced on every Otel_metric_store export. The INFO line below
      is the one-shot boot log mirror; the WARN that follows is the
      regression canary. *)
   let audit =

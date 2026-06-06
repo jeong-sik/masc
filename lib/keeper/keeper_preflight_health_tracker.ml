@@ -38,8 +38,8 @@ let reason_slug = function
 ;;
 
 (* Owned metric names. Following the runtime_metrics.ml RFC-0043 pattern
-   (module owns its constants; [Otel_metric_store.ml]'s register_all() may mirror
-   for /metrics endpoint registration later). *)
+   (module owns its constants; [Otel_metric_store.ml]'s register_all() mirrors
+   them into the active telemetry exporter). *)
 let metric_preflight_unhealthy_skip =
   "masc_runtime_preflight_unhealthy_skip_total"
 ;;

@@ -33,21 +33,8 @@ else
   exit 1
 fi
 
-read_sse_external_subscriber_count() {
-  local token
-  local -a auth_args=()
-  token="$(transport_auth_token)"
-  if [[ -n "$token" ]]; then
-    auth_args=(-H "Authorization: Bearer ${token}")
-  fi
-  curl -fsS "${auth_args[@]}" "${MASC_HTTP_BASE_URL}/metrics" 2>/dev/null \
-    | awk '$1=="masc_sse_external_subscribers_total" { print int($2); found=1; exit } END { if (!found) print -1 }' \
-    2>/dev/null || echo "-1"
-}
-
 ws_output="$(mktemp "${TMPDIR:-/tmp}/masc-transport-ws.XXXXXX")"
 ws_handshake="$(mktemp "${TMPDIR:-/tmp}/masc-transport-ws-handshake.XXXXXX")"
-ws_subscribers_before="$(read_sse_external_subscriber_count)"
 ws_auth_token="$(transport_auth_token)"
 MASC_WS_HOST="127.0.0.1" MASC_WS_PORT="$ws_port" WS_OUTPUT="$ws_output" \
 WS_EXPECT="ws-e2e-test-event" WS_HANDSHAKE="$ws_handshake" \
@@ -205,45 +192,20 @@ else
   exit 1
 fi
 
-# Poll /metrics for the SSE external-subscriber count instead of a
-# fixed sleep. The Python client above needs time for:
-#   1. socket connect
-#   2. upgrade request/response (101 Switching Protocols)
-#   3. server-side [create_websocket] callback to run and call
-#      [Sse.subscribe_external] registering this session as an
-#      external broadcast recipient
-# Step 3 happens asynchronously inside the httpun-ws [Wsd.t] setup and
-# is NOT guaranteed to complete before [respond_with_upgrade] returns.
-# The previous fixed [sleep 1] raced this registration: on a loaded CI
-# runner, the subscription could be placed AFTER the mcp_broadcast
-# call, so the broadcast event had no subscriber to deliver to and the
-# Python client's 6-second recv timeout elapsed with zero frames.
-#
-# Polling against [masc_sse_external_subscribers_total] provides the
-# deterministic barrier we actually need. The previous
-# [websocket.session_count] guard was still racy because
-# [server_mcp_transport_ws.ml] inserts the session before it calls
-# [Sse.subscribe_external], so /health could report the new WS session
-# even while the SSE fanout registry was still missing the subscriber.
-#
-# Falls back to the old 1-second wait if metric text is unavailable.
-ws_target_subscribers=1
-if [[ "$ws_subscribers_before" =~ ^[0-9]+$ ]]; then
-  ws_target_subscribers=$(( ws_subscribers_before + 1 ))
-fi
-
-ws_ready_deadline=$(( $(date +%s) + 10 ))
-while [[ "$(date +%s)" -lt "$ws_ready_deadline" ]]; do
-  ws_subscribers="$(read_sse_external_subscriber_count)"
-  if [[ "$ws_subscribers" =~ ^[0-9]+$ ]] && [[ "$ws_subscribers" -ge "$ws_target_subscribers" ]]; then
-    break
-  fi
-  sleep 0.2
-done
-
 session_id="$(mcp_initialize_session)"
 mcp_join_agent "$session_id" "transport-harness" >/dev/null
-mcp_broadcast "$session_id" "transport-harness" "ws-e2e-test-event" >/dev/null
+
+# The server-side WS callback registers the session as an external broadcast
+# recipient asynchronously after the 101 handshake. Use a bounded broadcast
+# retry loop as the readiness barrier.
+ws_broadcast_deadline=$(( $(date +%s) + 10 ))
+while [[ "$(date +%s)" -lt "$ws_broadcast_deadline" ]]; do
+  if ! kill -0 "$ws_client_pid" >/dev/null 2>&1; then
+    break
+  fi
+  mcp_broadcast "$session_id" "transport-harness" "ws-e2e-test-event" >/dev/null || true
+  sleep 0.5
+done
 
 if wait "$ws_client_pid"; then
   if grep -q "ws-e2e-test-event" "$ws_output"; then

@@ -372,7 +372,7 @@ let make_hooks
              ~delta:(Float.of_int rt)
              ()
          | _ -> ());
-        (* Inference latency histogram for /metrics endpoint.
+        (* Inference latency histogram for telemetry export.
            Missing telemetry stays a separate counter; zero/negative latency
            increments the zero-latency counter and observes a 1ms floor so the
            histogram still proves the hook ran. *)

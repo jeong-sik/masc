@@ -96,7 +96,7 @@ let emergency_compact_ratio_threshold : float =
          default_value
        | Some parsed -> parsed)
   in
-  (* Surface the effective value for operators via /metrics. Registered
+  (* Surface the effective value for operators via telemetry export. Registered
      here so the gauge exists from module init regardless of whether any
      compaction has fired yet. *)
   Otel_metric_store.register_gauge
@@ -377,7 +377,7 @@ let compact_if_needed_typed
       ~delta:(float_of_int saved_tokens)
       ();
     (* C1 (CRIT) from oas-internal-audit.html §6: surface pair-repair
-       fabrication counts via /metrics so operators can alert on rising
+       fabrication counts via telemetry export so operators can alert on rising
        fabrication rate without grepping the JSONL [tool_pair_repair]
        structured log block emitted below. Increment by *count*, not by 1,
        so the counter reflects fabrication volume rather than call

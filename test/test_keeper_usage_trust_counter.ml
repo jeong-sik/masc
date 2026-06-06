@@ -11,16 +11,16 @@
 
 module UM = Masc.Keeper_unified_metrics
 module UT = Keeper_usage_trust
-module Prom = Masc.Otel_metric_store
+module Metrics = Masc.Otel_metric_store
 
 let outcome_for ~keeper ~outcome =
-  Prom.metric_value_or_zero
+  Metrics.metric_value_or_zero
     UM.usage_trust_outcome_metric
     ~labels:[ ("keeper", keeper); ("outcome", outcome) ]
     ()
 
 let reason_for ~keeper ~reason =
-  Prom.metric_value_or_zero
+  Metrics.metric_value_or_zero
     UM.usage_anomaly_reason_metric
     ~labels:[ ("keeper", keeper); ("reason", reason) ]
     ()

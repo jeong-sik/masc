@@ -1677,7 +1677,7 @@
 
 ; RFC-0107 Phase D.4 — Pool_metrics Otel_metric_store exporter regression test.
 ; Pins the 5 metric name constants, register () idempotency, and the
-; /metrics text contains the metric families with correct TYPE lines.
+; OTel metric families retain their expected type metadata.
 
 (test
  (name test_pool_metrics)

@@ -56,7 +56,7 @@ Three categories of cost were identified:
 | Byte-copy amplification | Same shape as parse amplification, but at the `Bytes.of_string sse_event` layer for the raw-forward path. | GC pressure scales with `sessions × events/s × event_size`. |
 | Unbounded client buffer growth | The server had no way to know when a client was falling behind.  A slow tab accumulated deltas in `WebSocket.bufferedAmount` without any backpressure. | Browser OOM / connection drops under chronic slowness. |
 | Duplicate delivery | Parallel SSE + WS means the same data lands on the client twice. | Wasted bandwidth, double store hydration. |
-| Opaque operational state | Every optimisation and backpressure signal was invisible except via `/metrics`. | Operators could not tell the optimisations from a fresh idle server. |
+| Opaque operational state | Every optimisation and backpressure signal was invisible except via external telemetry. | Operators could not tell the optimisations from a fresh idle server. |
 
 ## 3. The seven PRs
 

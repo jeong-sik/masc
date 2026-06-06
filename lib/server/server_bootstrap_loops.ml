@@ -141,7 +141,7 @@ let start_keeper_loops
   (* Shared Agent_sdk Event_bus used as the runtime transport between subsystems.
      Configuration is sourced from [Masc_event_bus_policy.oas_runtime] so the
      buffer-size/policy choice is auditable in source rather than implicit in
-     OAS defaults, and the chosen capacity is published to /metrics. *)
+     OAS defaults, and the chosen capacity is published through OTel. *)
   let event_bus =
     Masc_event_bus_policy.create_bus Masc_event_bus_policy.oas_runtime
   in
@@ -305,7 +305,7 @@ let start_keeper_loops
   Eio.Switch.on_release sw (fun () ->
     Agent_sdk_metrics_bridge.unsubscribe masc_event_bus keeper_lifecycle_sub);
   (* Spawn the OAS bus depth sampler so warnings surface on stdout
-     even when /metrics is not scraped.
+     even when no external telemetry backend is attached.
 
      [MASC_OAS_BUS_WARN_DEPTH] lets operators raise the threshold without
      a rebuild — fleet-wide keeper load legitimately pushes depth past

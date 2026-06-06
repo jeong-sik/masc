@@ -15,7 +15,7 @@ open Alcotest
 
 module RL = Masc.Rate_limit
 module CB = Circuit_breaker
-module Prom = Masc.Otel_metric_store
+module Metrics = Masc.Otel_metric_store
 module SH = Masc.Streamable_http
 
 (** {1 Rate Limit Concurrency} *)
@@ -88,23 +88,23 @@ let test_circuit_breaker_multi_agent () =
 let test_otel_metric_store_concurrent () =
   Eio.Fiber.all (List.init 10 (fun i -> fun () ->
     for _ = 1 to 100 do
-      Prom.inc_counter "test_concurrent_metric"
+      Metrics.inc_counter "test_concurrent_metric"
         ~labels:[("fiber", string_of_int i)] ()
     done
   ));
   check (float 0.0001) "counter total" 1000.0
-    (Prom.metric_total "test_concurrent_metric")
+    (Metrics.metric_total "test_concurrent_metric")
 
 let test_otel_metric_store_gauge_concurrent () =
   Eio.Fiber.all (List.init 5 (fun i -> fun () ->
     for j = 1 to 50 do
-      Prom.set_gauge "test_concurrent_gauge"
+      Metrics.set_gauge "test_concurrent_gauge"
         ~labels:[("fiber", string_of_int i)]
         (float_of_int j)
     done
   ));
   check (float 0.0001) "gauge total" 250.0
-    (Prom.metric_total "test_concurrent_gauge")
+    (Metrics.metric_total "test_concurrent_gauge")
 
 (** {1 Streamable HTTP Session Concurrency} *)
 

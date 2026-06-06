@@ -204,7 +204,7 @@
 ### Added
 - Added the RFC-0109 `Bounded_proc` helper and tests for time-bounded subprocess execution.
 - Added the RFC-0107 `Masc_http_client.Pool` interface skeleton for the next connection-pool implementation lane.
-- Exposed FD accountant metrics through Prometheus, including coverage for the new metric names.
+- Exposed FD accountant metrics through retired scrape backend, including coverage for the new metric names.
 - Documented RFC-0108's PR/worktree operation safety gates and in-process atomic JSONL append direction.
 
 ### Changed
@@ -216,7 +216,7 @@
 - Serialized `system_log` JSONL writes and trajectory appends with per-path mutex/fresh-fd handling, then removed the unsafe append-fd cache path.
 - Removed remaining inline atomic helpers from `dated_jsonl` and `trajectory` so those paths use the shared `Fs_compat` surface.
 - Restored the `home_dir` test reference left behind by the config-surface rename.
-- Counted `tool_keeper` `cache_ttl_seconds` environment parse fallbacks through Prometheus.
+- Counted `tool_keeper` `cache_ttl_seconds` environment parse fallbacks through retired scrape backend.
 - Replaced the CDAL runtime health inline error envelope with the shared `Tool_args` helper.
 - Routed CDAL proof-store health path checks through the `Proof_store` owner API.
 - Removed the backend mutex metrics log suffix that tripped the OCaml comment terminator lint.
@@ -509,7 +509,7 @@
 ## [0.19.5] - 2026-05-03
 
 ### Added
-- Alive-but-stuck detector — Prometheus signal only.
+- Alive-but-stuck detector — retired scrape backend signal only.
 - Keeper cadence gauges (consecutive_idle, last_productive_ts).
 - Unit tests for keeper_alerting_path pure helpers.
 
@@ -525,7 +525,7 @@
 
 ### Added
 - Passive loop action injection — nudge keeper to act when stuck in read-only loop.
-- Prometheus counters for tool setup and task load failures.
+- retired scrape backend counters for tool setup and task load failures.
 - Issue dependency graph: liveness recovery, runtime rotation, lifecycle timeline.
 
 ### Fixed
@@ -578,7 +578,7 @@ Post-v0.19.0 release-truth follow-up for the keeper Event Layer consumer path, d
 
 - `Keeper_registry.dequeue_event` now provides the consumer-side registry API for FIFO stimulus consumption, snapshot depth updates, empty/missing-keeper `None`, and base-path isolation (#12413).
 - Turn entry now consumes one queued stimulus per tick, completing the producer-to-consumer Event Layer path after the `wakeup_keeper` and heartbeat-gate changes (#12420).
-- RFC-0020 Rule 2 now has a Prometheus override counter and decision-table regression coverage for the queue-non-empty heartbeat override (#12417, #12419).
+- RFC-0020 Rule 2 now has a retired scrape backend override counter and decision-table regression coverage for the queue-non-empty heartbeat override (#12417, #12419).
 - Dashboard design-system primitives now cover focus, interaction, portal/z-index, IDE-grade components, agent-experience patterns, ARIA widgets, a11y helpers, token validation, and paired component tests (#12406, #12421).
 
 ### Changed
@@ -786,7 +786,7 @@ Post-v0.18.17 merge train through the release boundary. No breaking API changes.
 
 ### Added
 
-- New positive-signal Prometheus counter `masc_keeper_skip_idle_wake_resumed_total{keeper}` increments every time `cycle_continues_after_wake` promotes a `Skip_idle` to a turn dispatch (#12282). Pairs with the existing `masc_keeper_stale_termination_by_class_total{class=idle_turn}` so operators can read the fix as a positive/negative balance: a healthy fleet shows non-zero rate of resumes proportional to inbound signals while idle-class kills trend toward zero.
+- New positive-signal retired scrape backend counter `masc_keeper_skip_idle_wake_resumed_total{keeper}` increments every time `cycle_continues_after_wake` promotes a `Skip_idle` to a turn dispatch (#12282). Pairs with the existing `masc_keeper_stale_termination_by_class_total{class=idle_turn}` so operators can read the fix as a positive/negative balance: a healthy fleet shows non-zero rate of resumes proportional to inbound signals while idle-class kills trend toward zero.
 - New pure helper `resolveKeeperForDetail` in `dashboard/src/lib/keeper-detail-resolution.ts` (#12290), unit-tested without a React render or signal harness so the dashboard regression guard stays cheap.
 
 ### Changed
@@ -1037,7 +1037,7 @@ Continuation of the design-system unification wave — converts 10 dashboard sur
 - `#11053` accent token sweep across 6 files
 - `#11048` accent token in 3 remaining files
 - `#11042` color tokens in feature-health & transport-beacon
-- `#11035` color tokens in prometheus-metrics
+- `#11035` color tokens in retired-scrape-backend-metrics
 - `#11033` color tokens in keeper-detail-shell
 - `#11031` color tokens in autoresearch
 - `#11028` color tokens in keeper-config-panel
@@ -1121,7 +1121,7 @@ Follow-up to v0.18.2 stability hardening. This release closes two long-standing 
 
 ### Added (keeper observability)
 - `keeper`: surface deliberate-skip reasons on stale watchdog kill (#10962).
-- `workspace/task`: Prometheus counter + warn log for `task_claim_next` implicit auto-release (#10421, #10977).
+- `workspace/task`: retired scrape backend counter + warn log for `task_claim_next` implicit auto-release (#10421, #10977).
 - `masc_oas_bridge`: cancel reason bucket + inner exception (#10954) — surfaces OAS cancellation provenance.
 
 ### Added (dev tooling / SSOT)
@@ -1243,7 +1243,7 @@ The v0.18.0 tag exists but its GitHub release workflow failed: the OAS pin bump 
 - OAS pin: bump SHA to `97b8a603` (OAS #1201 TurnReady event, #10704, #10709).
 
 ### Diagnostics
-- Prometheus: capture EDEADLK backtrace on `metrics_mutex` (#10682, #10707).
+- retired scrape backend: capture EDEADLK backtrace on `metrics_mutex` (#10682, #10707).
 - Keeper-tools-oas: capture backtrace on EDEADLK to identify mutex site (#10682, #10696).
 
 ## [0.18.0] - 2026-04-26
@@ -1350,9 +1350,9 @@ Aggregate of 206 commits since v0.15.0 (95 fix / 38 perf / 21 feat / 13 chore / 
 Aggregate of 185 commits since v0.14.0 (26 feat / 93 fix / 30 perf-refactor-obs-docs / 10 chore / 26 misc). No breaking API changes.
 
 ### Added (feat)
-- Keeper observability counters: per-keeper turn-latency buckets (#10124), livelock observer (#10123), context_max drift (#10122), require_tool_use violations (#10099), proactive skip-reason (#10060), compaction outcome (#10011), usage-trust Prometheus (#10021), Hebbian per-outcome edge (#10048), metric-emit drops (#10053).
+- Keeper observability counters: per-keeper turn-latency buckets (#10124), livelock observer (#10123), context_max drift (#10122), require_tool_use violations (#10099), proactive skip-reason (#10060), compaction outcome (#10011), usage-trust retired scrape backend (#10021), Hebbian per-outcome edge (#10048), metric-emit drops (#10053).
 - Keeper runtime: affordance-tool intersection at `Require_tool_use` gate (#10141), Ollama `keep_alive`/`num_ctx` forwarding from keeper_runtime.toml (#9985), wire `Gh_exit_class` into docker sandbox (#9974), persona authoring wizard (#9940).
-- Workspace/FSM: per-agent FSM drift counter (#10152), Prometheus task FSM drift (#10082).
+- Workspace/FSM: per-agent FSM drift counter (#10152), retired scrape backend task FSM drift (#10082).
 - Dashboard: gRPC `events_dropped` strip (#10114), WS delivery counters (#10106, #10107), WS-only cutover flag (#10102), websocket route slice expansion (#9963), a11y high-contrast + forced-colors support (#10080).
 - OAS/runtime: per-kind `masc_oas_error` counter (#10039), resolved_model_id metric label (#9962), context_overflow_imminent action signal (#9954).
 - Keeper CLI: auto-construct Claude Code / Kimi CLI MCP config behind flag (#10059).
@@ -1361,7 +1361,7 @@ Aggregate of 185 commits since v0.14.0 (26 feat / 93 fix / 30 perf-refactor-obs-
 - Keeper: backlog gating on claimable tasks (#10159), supervisor sweep startup (#10161), max_restart loud alert (#10147), Ollama saturation skip (#10150), runtime MCP trajectory record (#10154), failed-turn episode persist (#10144), Hebbian first consolidation on fork (#10137), per-model telemetry empty-response defense (#10090), `keeper_msg` merged-CAS retry (#10135), Anthropic cache silent-disable flag (#10128), smart-heartbeat starvation (#10078), per_turn multiplier removed in favor of wall-clock cap (#10074), unified turn write_meta CAS retry (#10145).
 - OAS: API fingerprint metadata drift detection (#10156), oas-bridge timeout SSOT (#10108), oas-bridge typed contract (#10153), `codex_cli` MCP omission WARN dedup (#10100), suppress repeated omission warnings (#10109).
 - Runtime: declarative `fallback_runtime` for single-provider profiles (life-support escalation) (#10157).
-- Telemetry: dedupe websocket delivery schema (#10151), legacy degenerate row scrub at init (#10095), heuristic-theatre Prometheus migration follow-up (#10044).
+- Telemetry: dedupe websocket delivery schema (#10151), legacy degenerate row scrub at init (#10095), heuristic-theatre retired scrape backend migration follow-up (#10044).
 - Governance: auto-approve `masc_transition` + `keeper_board_post` for autonomous flow (#10148), default judge timeout raised to 180s (#10132), anti-rationalization gate-2 demoted to LLM advisory (#10116).
 - Filesystem: `save_file_atomic` orphan boot sweep (#10131), test-executable HOME guard (#10085).
 - Board/workspace: keeper actor identity unified (#10133), original vote timestamp persisted across flush (#10093), fixture-vote quarantine (#10079).
@@ -2562,7 +2562,7 @@ had the full Phase 2 release to migrate.
     clears non-system messages (system prompt preserved by default), saves
     a new checkpoint, dispatches `Operator_clear_requested`. Requires an
     operator-provided `reason` for audit trail.
-- Prometheus counters for the new operator tools:
+- retired scrape backend counters for the new operator tools:
   `masc_keeper_operator_compact_total{keeper,result}` (result ∈
   `ok|no_checkpoint|precondition`) and
   `masc_keeper_operator_clear_total{keeper,preserve_system}`.
@@ -2583,10 +2583,10 @@ had the full Phase 2 release to migrate.
 ## [0.7.0] - 2026-04-14
 
 ### Added
-- Prometheus metrics dashboard surface under monitoring tab (#6974). Fetches
-  `/metrics`, parses Prometheus text format, renders 8 categorized tables
+- retired scrape backend metrics dashboard surface under monitoring tab (#6974). Fetches
+  `/metrics`, parses retired scrape backend text format, renders 8 categorized tables
   (Server, Agent, Keeper, Transport, Inference, Tool, Delta, Provider).
-- Clickable links from Prometheus labels: `keeper=` labels navigate to
+- Clickable links from retired scrape backend labels: `keeper=` labels navigate to
   keeper detail, `tool_name=` labels navigate to tool-quality with
   highlight-and-scroll of the matching row (#7017).
 - Agent + Transport metric categories — recategorize `masc_agent_*`,
@@ -2599,9 +2599,9 @@ had the full Phase 2 release to migrate.
   and `oas_sse_bridge` now scrub invalid UTF-8 before persisting or
   broadcasting, eliminating ~12% JSONL row drop when tool output contains
   truncated multi-byte sequences (#6929).
-- Prometheus histogram export format. `to_prometheus_text()` now emits
+- retired scrape backend histogram export format. `to_retired-scrape-backend_text()` now emits
   histograms as `summary` type with `_sum`/`_count` pair rather than the
-  invalid `histogram` bare type, so Prometheus servers parse the metrics
+  invalid `histogram` bare type, so retired scrape backend servers parse the metrics
   correctly (#6936).
 - `tool_usage_log` syntax error at line 105 (`let counts = fold_left ...`
   missing `in`) that broke Build/Test, Health, and Lint CI (#6975).
@@ -2648,7 +2648,7 @@ had the full Phase 2 release to migrate.
 - Keeper runtime provider allowlist env knob (#6478)
 - Cross-model enforcement rate on dashboard (#6565)
 - Keeper FSM dashboard exposure + TLA+ bug model (#6556)
-- Prometheus llm_provider_http_status metrics (#6514)
+- retired scrape backend llm_provider_http_status metrics (#6514)
 
 ### Fixed
 - OAS pin v0.124.2: GLM auth passthrough (static_token) + intra-turn truncation (#6781, #6790)
@@ -2800,7 +2800,7 @@ had the full Phase 2 release to migrate.
 ## [0.5.3] - 2026-04-11
 
 ### Added
-- Expose llm_provider_http_status via Prometheus counter (#6514)
+- Expose llm_provider_http_status via retired scrape backend counter (#6514)
 
 ### Changed
 - Extract shared tool permission map from auth (#6501)

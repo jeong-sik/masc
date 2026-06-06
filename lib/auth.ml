@@ -230,7 +230,7 @@ let bare_alias_audit ~base_path ~canonical_names =
       canonical_names
   in
   (* Observability sink: gauges idempotently mirror the current
-     classifier state so every Otel_metric_store scrape (post-call) reports
+     classifier state so every Otel_metric_store export (post-call) reports
      the same value, not just the boot-time INFO line. *)
   Otel_metric_store.set_gauge
     Otel_metric_store.metric_auth_bare_alias

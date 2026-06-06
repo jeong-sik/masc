@@ -16,20 +16,20 @@
    6. Grace window env var honored *)
 
 module T = Masc.Context_overflow_action_tracker
-module Prom = Masc.Otel_metric_store
+module Metrics = Masc.Otel_metric_store
 
 let imminent_count k =
-  Prom.metric_value_or_zero
+  Metrics.metric_value_or_zero
     "masc_context_overflow_imminent_total"
     ~labels:[ ("keeper", k) ] ()
 
 let action_count k =
-  Prom.metric_value_or_zero
+  Metrics.metric_value_or_zero
     "masc_context_overflow_action_taken_total"
     ~labels:[ ("keeper", k) ] ()
 
 let no_action_count k =
-  Prom.metric_value_or_zero
+  Metrics.metric_value_or_zero
     "masc_context_overflow_no_action_total"
     ~labels:[ ("keeper", k) ] ()
 

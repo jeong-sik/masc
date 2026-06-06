@@ -29,9 +29,9 @@ Implication: the C1 ratchet stays. Recommend Phase 3 implements a single shared 
 
 ### 2.2 C2 — Telemetry (14 silent, 2 emit)
 
-Per-domain-module Prometheus search:
+Per-domain-module retired scrape backend search:
 
-| Module | Prometheus calls | Status |
+| Module | retired scrape backend calls | Status |
 |---|---|---|
 | `channel_gate` | 2 | C5 anchor |
 | `frontend` | 1 | C5 anchor |
@@ -74,7 +74,7 @@ C4 collapses to **0 unprotected routes**. Phase 1 estimated 3–5 candidates —
 
 ### 2.5 C5 — Anchors (2 confirmed)
 
-Only `channel_gate` and `frontend` have telemetry **and** auth. Phase 1 estimate of 4–6 anchors was based on filename-keyword inference. Phase 2 narrows to 2 via Prometheus-call grep. These two modules become Phase 3's reference patterns for the 14 silent modules.
+Only `channel_gate` and `frontend` have telemetry **and** auth. Phase 1 estimate of 4–6 anchors was based on filename-keyword inference. Phase 2 narrows to 2 via retired scrape backend-call grep. These two modules become Phase 3's reference patterns for the 14 silent modules.
 
 ## 3. Refined ratchet floors
 

@@ -30,7 +30,7 @@ open Alcotest
 open Masc
 
 module Acct = Keeper_accountability
-module Prom = Otel_metric_store
+module Metrics = Otel_metric_store
 
 (* --- helpers ------------------------------------------------------ *)
 
@@ -59,7 +59,7 @@ let with_temp_config f =
       f config)
 
 let counter_for ~kind ~reason =
-  Prom.metric_value_or_zero
+  Metrics.metric_value_or_zero
     Acct.accountability_emit_skip_metric
     ~labels:[ ("kind", kind); ("reason", reason) ]
     ()

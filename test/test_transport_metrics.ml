@@ -432,7 +432,7 @@ let test_transport_health_json () =
      |> U.to_int);
   (* The [delivery] sub-object surfaces WS cache/ack/throttle counters
      inline so the dashboard can render operational state without
-     scraping /metrics directly.  Producing metrics may not be registered
+     querying external telemetry directly.  Producing metrics may not be registered
      yet in this standalone PR, so presence (not value) is the contract
      this test enforces. *)
   let delivery_json = ws_json |> U.member "delivery" in

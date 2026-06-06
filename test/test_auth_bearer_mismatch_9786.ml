@@ -27,11 +27,11 @@ module Types = Masc_domain
 *)
 
 open Masc
-module Prom = Otel_metric_store
+module Metrics = Otel_metric_store
 
 let mismatch_total ~expected ~actual =
-  Prom.metric_value_or_zero
-    Prom.metric_auth_bearer_token_mismatch
+  Metrics.metric_value_or_zero
+    Metrics.metric_auth_bearer_token_mismatch
     ~labels:[
       ("expected_agent", expected);
       ("actual_agent", actual);

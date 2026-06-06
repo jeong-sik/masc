@@ -851,7 +851,7 @@ let test_no_ping_pong_across_repeated_boots () =
       check int "audit no_bares=0" 0 audit.no_bares)
 
 (* Surface assertion: [bare_alias_audit] mirrors counts into the
-   Otel_metric_store gauges so every scrape (not only the boot INFO line)
+   Otel_metric_store gauges so every export (not only the boot INFO line)
    exposes the current alive/dead/no_bare split. A regression that
    stops emitting the gauges fails this test even if the in-process
    return value is still correct. *)

@@ -11,6 +11,7 @@ val make_tool_bundle
   -> ?search_fn:(query:string -> max_results:int -> Yojson.Safe.t)
   -> ?on_tool_called:(string -> unit)
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> ?turn_slot_control:Keeper_turn_slot.keeper_turn_slot_control
   -> unit
   -> Keeper_tools_oas.tool_bundle
 
@@ -22,5 +23,6 @@ val make_tools
   -> ?search_fn:(query:string -> max_results:int -> Yojson.Safe.t)
   -> ?on_tool_called:(string -> unit)
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> ?turn_slot_control:Keeper_turn_slot.keeper_turn_slot_control
   -> unit
   -> Agent_sdk.Tool.t list

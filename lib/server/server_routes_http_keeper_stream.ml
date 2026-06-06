@@ -531,11 +531,24 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
     let current_thread_id = ref Ag_ui.default_thread_id in
     let current_run_id = ref None in
     let current_message_id = ref None in
-    let run_id_or_unknown () = Option.value ~default:"unknown" !current_run_id in
     let ag_role (role : Keeper_chat_events.role) =
       match role with
       | Keeper_chat_events.User -> Ag_ui.User
       | Keeper_chat_events.Assistant -> Ag_ui.Assistant
+    in
+    let send_error message =
+      match !current_run_id with
+      | Some run_id ->
+          send_keeper_error writer mutex closed ~thread_id:!current_thread_id
+            ~run_id message
+      | None ->
+          ignore
+            (keeper_stream_send_event writer mutex closed
+               Ag_ui.(
+                 make_event ~thread_id:!current_thread_id
+                   ~custom_name:(Some "KEEPER_CHAT_ERROR")
+                   ~custom_value:(Some (`Assoc [ ("message", `String message) ]))
+                   Run_error))
     in
     let rec loop () =
       if not !closed then
@@ -578,9 +591,7 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
                   make_event ~thread_id:!current_thread_id ~run_id:!current_run_id
                     ~custom_name:(Some name) ~custom_value:(Some value) Custom)
             then loop ()
-        | Error { message } ->
-            send_keeper_error writer mutex closed ~thread_id:!current_thread_id
-              ~run_id:(run_id_or_unknown ()) message
+        | Error { message } -> send_error message
         | Run_finished { run_id } ->
             current_run_id := Some run_id;
             ignore

@@ -4,7 +4,8 @@
     Provider-attempt liveness is progress-based:
       - [stream_idle_timeout_s] catches inter-line stalls
       - [Keeper_attempt_liveness] catches no-first-token / inter-chunk gaps
-      - The keeper turn watchdog is the outer runaway guard
+      - tool-level timeouts and OAS max-turn limits bound tool work and
+        finite turn loops
 
     Two outcomes:
 

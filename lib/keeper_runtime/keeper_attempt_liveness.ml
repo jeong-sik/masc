@@ -148,8 +148,7 @@ let step ?(recorder = null_recorder) (b : budget) (s : state) (e : event)
 
   (* Streaming × Tick: once the provider has emitted chunks, liveness is
      progress-based. A stream that keeps producing chunks must not be killed
-     only because cumulative wall-clock elapsed; the keeper turn watchdog is
-     the outer runaway guard. *)
+     only because cumulative wall-clock elapsed. *)
   | Streaming { started_at; last_chunk_at }, Tick now ->
       let gap = now -. last_chunk_at in
       if gap >= b.inter_chunk_max then begin

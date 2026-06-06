@@ -165,8 +165,8 @@ let max_execution_time_for_attempt ?per_provider_timeout_s () =
      run_stream call; it cancels healthy active streams even while chunks are
      arriving. Provider-attempt liveness is progress-based instead:
      [stream_idle_timeout_s] catches inter-line stalls, the liveness observer
-     catches no-first-token / inter-chunk gaps, and the keeper turn watchdog is
-     the outer runaway guard. *)
+     catches no-first-token / inter-chunk gaps, and tool/max-turn limits bound
+     finite work. *)
   (match per_provider_timeout_s with
    | Some (_ : float) -> ()
    | None -> ());
@@ -191,7 +191,8 @@ let body_timeout_for_attempt ?per_provider_timeout_s () =
 
     @param ctx Explicit closure context (captures from [run_named]).
     @param resume_checkpoint Checkpoint from a previous failed provider.
-    @param per_provider_timeout_s Per-provider wall-clock timeout.
+    @param per_provider_timeout_s Legacy per-provider budget; not forwarded as
+    a cumulative OAS execution timeout on the keeper path.
     @param candidate The opaque runtime candidate to attempt.
     @return [(result, checkpoint_after, liveness_success_sample)] tuple. The
     sample is not recorded here; the caller records it only after the runtime

@@ -112,6 +112,43 @@ let test_task_create_multi_active_goals_without_goal_id_is_unscoped () =
        | tasks ->
            failf "expected exactly one persisted task, got %d" (List.length tasks))
 
+let test_keeper_report_state_persists_state_block () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let meta = meta_with_active_goals [] in
+       let payload =
+         Task.handle_keeper_task_tool
+           ~config
+           ~meta
+           ~name:"keeper_report_state"
+           ~args:
+             (`Assoc
+               [ "goal", `String "Keep runtime visible"
+               ; "next_items", `List [ `String "Check main CI" ]
+               ; "constraints", `List [ `String "Use worktrees" ]
+               ])
+       in
+       let json = Yojson.Safe.from_string payload in
+       check bool "state report succeeds" true (json |> U.member "ok" |> U.to_bool);
+       check bool "state report persists non-empty state" true
+         (json |> U.member "persisted" |> U.to_bool);
+       check string "state report summary includes goal"
+         "Goal: Keep runtime visible\nNext: Check main CI\nConstraints: Use worktrees"
+         (json |> U.member "continuity_summary" |> U.to_string);
+       let messages = Masc.Workspace.get_messages_raw config ~since_seq:0 ~limit:20 in
+       check bool "workspace history includes state block" true
+         (List.exists
+            (fun (message : Masc_domain.message) ->
+               String.equal message.from_agent "keeper-task-create-test"
+               && String.contains message.content '['
+               && String.contains message.content ']'
+               && String.starts_with ~prefix:"[STATE]" message.content)
+            messages))
+
 let () =
   run "keeper validation breaker exemption"
     [ ( "validation_failure_class"
@@ -125,5 +162,7 @@ let () =
             "keeper_task_create treats ambiguous active_goal_ids as advisory"
             `Quick
             test_task_create_multi_active_goals_without_goal_id_is_unscoped
+        ; test_case "keeper_report_state persists state block" `Quick
+            test_keeper_report_state_persists_state_block
         ] )
     ]

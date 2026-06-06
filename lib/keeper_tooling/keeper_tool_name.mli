@@ -45,6 +45,7 @@ type t =
   | Time_now
   | Tool_search
   | Tools_list
+  | State_report
   | Voice_agent
   | Voice_listen
   | Voice_session_end

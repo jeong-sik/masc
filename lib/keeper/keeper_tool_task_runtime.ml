@@ -714,6 +714,38 @@ let handle_keeper_task_tool
          match accountability_warning with
          | Some warning -> [ ("routing_warning", `String warning) ]
          | None -> []))
+    | State_report ->
+    let snapshot_opt = Keeper_memory_policy.keeper_state_snapshot_of_json args in
+    let snapshot, persisted =
+      match snapshot_opt with
+      | None -> Keeper_memory_policy.empty_keeper_state_snapshot, false
+      | Some snapshot ->
+        let snapshot = Keeper_memory_policy.cap_snapshot snapshot in
+        let _ =
+          Workspace.broadcast
+            config
+            ~from_agent:(keeper_agent_sender ~meta)
+            ~content:(Keeper_memory_policy.render_state_block snapshot)
+        in
+        snapshot, true
+    in
+    let continuity_summary =
+      if persisted
+      then Keeper_memory_policy.keeper_state_snapshot_to_summary_text snapshot
+      else "No continuity snapshot available."
+    in
+    Yojson.Safe.to_string
+      (`Assoc
+         [ "ok", `Bool true
+         ; ( "result"
+           , `String
+               (if persisted
+                then "keeper state report accepted"
+                else "keeper state report accepted without non-empty state") )
+         ; "persisted", `Bool persisted
+         ; "state_snapshot", Keeper_memory_policy.keeper_state_snapshot_to_json snapshot
+         ; "continuity_summary", `String continuity_summary
+         ])
     | Task_done ->
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
     let result_text = Safe_ops.json_string ~default:"" "result" args |> String.trim in

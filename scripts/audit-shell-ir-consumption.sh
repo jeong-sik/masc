@@ -10,10 +10,11 @@
 #   G2  is_write_operation / is_destructive_bash_operation signature
 #       (string vs Shell_ir.t) — heuristic via grep
 #   G3  Shell IR centralized dispatcher adoption (counts keeper files
-#       referencing Agent_tool_execute_shell_ir, excluding the dispatcher)
+#       consuming Keeper_tool_execute_shell_ir.dispatch*)
 #   G4  Risk-stamped IR (existence of Shell_ir.simple.risk or
 #       'decided phantom envelope)
-#   G5  validate_shell_ir_paths caller count (target: 4 keeper ops)
+#   G5  Shell IR path-validation coverage through validate_shell_ir_paths or
+#       the Keeper_tool_execute_shell_ir dispatch facade
 #   G6  specs/shell-ir-first-class/ShellIRFirstClass.tla existence
 #   G7  shell_word_values + Bash_words.stages parallel-parser callers
 #   G8  Typed coverage guard: GADT constructors vs risk_of_typed arms
@@ -152,11 +153,13 @@ g2_string_sig=$(rg -c '^let is_(write_operation|destructive_bash_operation) [a-z
 g2_ir_sig=$(rg -c '^let is_(write_operation|destructive_bash_operation) \(.*: Shell_ir' lib/exec_policy/exec_policy_mutation_classifier.ml 2>/dev/null || echo 0)
 
 # ---- G3: Shell IR centralized dispatcher adoption ----
-# Architecture: all typed Execute commands route through Agent_tool_execute_shell_ir
-# which calls gate_typed once. Count keeper files that reference the dispatcher
-# (excluding the dispatcher itself) to measure keeper-op adoption.
-g3_gate_typed=$(rg -l 'Agent_tool_execute_shell_ir' lib/keeper/ 2>/dev/null \
-  | rg -v 'keeper_tool_execute_shell_ir\.ml$' \
+# Architecture: typed Execute/SearchFiles Shell IR consumers route through the
+# Keeper_tool_execute_shell_ir facade, which calls gate_typed and dispatches
+# decided IR. Count keeper consumer files rather than direct gate_typed refs so
+# the metric survives facade extraction and module renames.
+g3_min_facade_consumers=3
+g3_gate_typed=$(list_code_files 'Keeper_tool_execute_shell_ir\.(dispatch|dispatch_classified)' \
+  | rg '^lib/keeper/' \
   | wc -l | tr -d ' ')
 
 # ---- G4: risk stamp existence ----
@@ -170,9 +173,13 @@ g4_dispatch_decided=$(rg -l 'dispatch_decided' lib/ 2>/dev/null \
   | rg -v '/test/' \
   | wc -l | tr -d ' ')
 
-# ---- G5: validate_shell_ir_paths callers ----
-g5_callers=$(rg -l 'validate_shell_ir_paths' lib/ 2>/dev/null \
-  | rg -v '/test/' \
+# ---- G5: Shell IR path-validation coverage ----
+# Direct validate_shell_ir_paths call count became a stale proxy once the
+# Keeper_tool_execute_shell_ir facade centralized path validation inside
+# dispatch_classified. Count direct validation plus facade dispatch/validation
+# consumers; every facade dispatch reaches validate_paths before Exec_dispatch.
+g5_min_path_validation_surfaces=4
+g5_callers=$(list_code_files 'Exec_policy\.validate_shell_ir_paths|Keeper_tool_execute_shell_ir\.(dispatch|dispatch_classified|validate_paths)' \
   | rg -v 'exec_policy/exec_policy\.ml$|exec_policy/exec_policy\.mli$' \
   | wc -l | tr -d ' ')
 
@@ -261,16 +268,16 @@ Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)
         string sig: ${g2_string_sig}, IR sig: ${g2_ir_sig}
                                                        (target: string=0, IR≥2)
 
-  G3  Agent_tool_execute_shell_ir dispatcher adoption
-        ${g3_gate_typed} keeper files                    (target: ≥ 4 keeper ops covered)
+  G3  Keeper_tool_execute_shell_ir dispatcher adoption
+        ${g3_gate_typed} keeper files                    (target: ≥ ${g3_min_facade_consumers} facade consumers)
 
   G4  Risk-stamped IR (phantom envelope in shell_ir_risk.ml/mli)
         risk in simple: ${g4_risk_in_simple}, phantom: ${g4_phantom}
         dispatch_decided consumers: ${g4_dispatch_decided} files
                                                        (target: phantom≥10, consumers≥3)
 
-  G5  validate_shell_ir_paths caller files (non-test, non-defining)
-        ${g5_callers} files                            (target: ≥ 4)
+  G5  path-validation covered files (direct or facade, non-test)
+        ${g5_callers} files                            (target: ≥ ${g5_min_path_validation_surfaces})
 
   G6  TLA+ spec specs/shell-ir-first-class/ShellIRFirstClass.tla
         exists: ${g6_spec}                             (target: 1)
@@ -325,6 +332,16 @@ diff_against_baseline() {
     echo "REGRESS G4 (phantom envelope): ${b_g4} → ${c_g4}"
     regressions=$((regressions + 1))
   fi
+  # G3/G5 use current architecture floors instead of historical baseline
+  # comparison because facade extraction intentionally changes raw file counts.
+  if [[ "$g3_gate_typed" -lt "$g3_min_facade_consumers" ]]; then
+    echo "REGRESS G3 (dispatcher facade consumers): ${g3_gate_typed} < ${g3_min_facade_consumers}"
+    regressions=$((regressions + 1))
+  fi
+  if [[ "$g5_callers" -lt "$g5_min_path_validation_surfaces" ]]; then
+    echo "REGRESS G5 (path-validation covered files): ${g5_callers} < ${g5_min_path_validation_surfaces}"
+    regressions=$((regressions + 1))
+  fi
   # G8: risk_of_typed arms must keep pace with GADT constructors
   local b_g8a c_g8a b_g8g c_g8g
   b_g8a=$(jq -r '.g8_risk_of_typed_arms // 0' "$baseline_file")
@@ -354,7 +371,7 @@ diff_against_baseline() {
     echo "RFC-0160 baseline regressed in ${regressions} metric(s)" >&2
     exit 1
   fi
-  echo "OK (RFC-0160 ratchet: no G1/G7/G8 regression, no unclassified sites)"
+  echo "OK (RFC-0160 ratchet: no G1/G3/G5/G7/G8 regression, no unclassified sites)"
 }
 
 case "$mode" in

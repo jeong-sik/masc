@@ -39,10 +39,11 @@ type config =
           Default [None] preserves the historical behaviour
           (block indefinitely on stream-parser hang). *)
   ; body_timeout_s : float option
-    (** Total HTTP streaming body-consumption ceiling. This is forwarded to
-        OAS's [with_body_timeout] and complements [stream_idle_timeout_s]:
-        idle timeout catches inter-line silence, while body timeout bounds
-        the whole response body callback. Non-HTTP transports ignore it. *)
+    (** Total HTTP body-consumption ceiling for non-streaming OAS completion
+        paths. Streaming paths deliberately ignore this knob so active long
+        streams are not killed by total duration; streaming liveness is
+        owned by [stream_idle_timeout_s] plus attempt observation. Non-HTTP
+        transports ignore it. *)
   ; max_tokens : int
   ; max_input_tokens : int option
   ; max_cost_usd : float option

@@ -131,12 +131,11 @@ module KeeperKeepalive : sig
   val stream_idle_timeout_sec : float
 
   val body_timeout_sec_override : float option
-  (** Total HTTP body-consumption deadline for one OAS streaming call.
-      [None] (env unset) leaves the runtime builder wire untouched.
-      [Some s] forwards to [Builder.with_body_timeout]; on expiry
-      [Retry.Timeout] surfaces at the attempt boundary so runtime falls
-      forward to the next provider. Complements {!stream_idle_timeout_sec}
-      (inter-line silence cap) and [max_execution_time_s] (turn-total cap).
+  (** Total HTTP body-consumption deadline for non-streaming OAS completion
+      calls. [None] (env unset) leaves the runtime builder wire untouched.
+      [Some s] forwards to [Builder.with_body_timeout] for sync completion
+      paths. Streaming paths ignore it and rely on {!stream_idle_timeout_sec}
+      plus attempt liveness observation.
 
       Env: [MASC_KEEPER_BODY_TIMEOUT_SEC]. Clamp range: [10, 600] s. *)
 

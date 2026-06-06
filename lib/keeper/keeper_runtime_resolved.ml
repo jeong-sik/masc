@@ -120,8 +120,9 @@ let oas_timeout_override_sec_live ~turn_timeout_sec =
 (* SSOT: Env_config_keeper.KeeperKeepalive.body_timeout_sec_override
    (same env var, same clamp [10, 600]). Mirrors the
    [oas_timeout_override_sec_live] / [stream_idle_timeout_sec_live]
-   idiom: read raw env, clamp, return option. Opt-in: unset → None
-   → runtime falls back to the per-attempt max_execution_time. *)
+   idiom: read raw env, clamp, return option. Opt-in: unset → None.
+   OAS applies this only to non-streaming sync body reads; streaming
+   liveness is progress-based. *)
 let body_timeout_override_sec_live () =
   match Env_config_core.raw_value_opt "MASC_KEEPER_BODY_TIMEOUT_SEC" with
   | Some raw ->

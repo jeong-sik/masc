@@ -45,11 +45,12 @@ type config = {
           [Retry.Timeout] after [s] seconds. Default [None] preserves
           historical block-on-hang behaviour. *)
   body_timeout_s : float option;
-      (** Total HTTP streaming body-consumption ceiling forwarded to
-          OAS [Builder.with_body_timeout]. Complements
-          [stream_idle_timeout_s]: idle timeout catches inter-line
-          silence, body timeout bounds the whole body callback.
-          Non-HTTP transports ignore it. *)
+      (** Total HTTP body-consumption ceiling forwarded to OAS
+          [Builder.with_body_timeout] for non-streaming completion paths.
+          Streaming paths deliberately ignore this knob so active long
+          streams are not killed by total duration; streaming liveness is
+          owned by [stream_idle_timeout_s] and the attempt liveness
+          observer. Non-HTTP transports ignore it. *)
   max_tokens : int;
   max_input_tokens : int option;
   max_cost_usd : float option;

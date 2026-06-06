@@ -258,10 +258,11 @@ let run_try_provider
               max_execution_time_for_attempt ?per_provider_timeout_s ()
           ; body_timeout_s =
               (* SSOT: Keeper_runtime_resolved.body_timeout_override_sec
-                 (driven by MASC_KEEPER_BODY_TIMEOUT_SEC). When unset, do not
-                 inherit [per_provider_timeout_s]: a cumulative body deadline
-                 is another mid-stream killer for healthy reasoning bursts.
-                 Stall detection is handled by [stream_idle_timeout_s]. *)
+                 (driven by MASC_KEEPER_BODY_TIMEOUT_SEC). OAS applies this
+                 only to non-streaming sync body reads; streaming attempts
+                 deliberately rely on [stream_idle_timeout_s] plus liveness
+                 observation so healthy reasoning bursts are not killed by
+                 total duration. *)
               body_timeout_for_attempt ?per_provider_timeout_s ()
           ; temperature = ctx.temperature
           ; max_idle_turns = ctx.max_idle_turns

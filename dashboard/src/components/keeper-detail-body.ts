@@ -101,10 +101,7 @@ export function KeeperDetailBody({
   onSocialSweep,
 }: KeeperDetailBodyProps) {
   return html`
-    <div class="flex flex-col gap-4">
-        <${KeeperRuntimeAlertStrip} keeper=${keeper} />
-        <${KeeperDetailSectionRail} />
-
+    <div class="mx-auto flex w-full max-w-[1180px] flex-col gap-5">
         <${KeeperDetailSection}
           id="keeper-comms"
           eyebrow="대화 & 세션"
@@ -117,6 +114,9 @@ export function KeeperDetailBody({
             <${SessionTraceView} agentName=${keeper.name} isKeeper=${true} keeperStatus=${keeper.status} keeperGeneration=${keeper.generation} />
           <//>
         <//>
+
+        <${KeeperRuntimeAlertStrip} keeper=${keeper} />
+        <${KeeperDetailSectionRail} />
 
         <${KeeperDetailSection}
           id="keeper-summary"

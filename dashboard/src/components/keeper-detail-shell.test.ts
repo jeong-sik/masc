@@ -64,7 +64,8 @@ describe('KeeperDetailSection', () => {
 
     const section = container.querySelector('section')
     expect(section?.classList.contains('scroll-mt-24')).toBe(true)
-    expect(section?.classList.contains('rounded-[var(--r-3)]')).toBe(true)
+    expect(section?.classList.contains('rounded-[var(--r-2)]')).toBe(true)
+    expect(section?.classList.contains('shadow-none')).toBe(true)
   })
 
   it('keeps locked-open primary sections visible without a collapse button', () => {
@@ -84,7 +85,8 @@ describe('KeeperDetailSection', () => {
 
     expect(container.querySelector('[data-testid="chat-child"]')).not.toBeNull()
     expect(container.querySelector('button[aria-expanded]')).toBeNull()
-    expect(container.textContent).toContain('기본')
+    expect(container.textContent).not.toContain('기본')
+    expect(container.querySelector('section')?.classList.contains('bg-transparent')).toBe(true)
   })
 })
 

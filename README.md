@@ -3,13 +3,13 @@
 [![OCaml](https://img.shields.io/badge/OCaml-5.4+-orange.svg)](https://ocaml.org/)
 [![OAS](https://img.shields.io/badge/agent__sdk-%E2%89%A50.203.0-blue.svg)](https://github.com/jeong-sik/oas)
 
-> **개인 프로젝트입니다. 저자(jeong-sik / yousleepwhen) 한 사람이 자기 노트북에서 자기 워크플로우를 위해 만든 도구입니다.** 프로덕션 SLA, 외부 지원, 호환성 보증, 응답 시간 약속이 *전혀* 없습니다. 외부에서 production 으로 쓰지 마세요. 스키마, 도구 surface, 대시보드, CLI flag 는 매우 빠르게 바뀝니다 — 이 README 가 본 1000 PR 윈도우 (#14012 → #15155) 는 2026-05-07 부터 2026-05-14 까지 7일 만에 머지된 분량입니다.
+> **개인 프로젝트입니다. 저자(jeong-sik / yousleepwhen) 한 사람이 자기 노트북에서 자기 워크플로우를 위해 만든 도구입니다.** 프로덕션 SLA, 외부 지원, 호환성 보증, 응답 시간 약속이 *전혀* 없습니다. 외부에서 production 으로 쓰지 마세요. 스키마, 도구 surface, 대시보드, CLI flag 는 매우 빠르게 바뀝니다 — 이 README 가 본 PR 윈도우 (#15156 → #20319) 는 2026-05-07 부터 2026-06-06 까지 약 한 달 동안 머지된 분량입니다.
 >
-> Personal project. One author, one laptop, one workflow. No SLA, no support, no compatibility guarantees. The 1000-PR window cited below (#14012 → #15155) merged in 7 days (2026-05-07 → 2026-05-14).
+> Personal project. One author, one laptop, one workflow. No SLA, no support, no compatibility guarantees. The PR window cited below (#15156 → #20319) merged in about a month (2026-05-07 → 2026-06-06).
 
 OCaml 5.4 + Eio 위에서 도는 MCP 서버. 같은 저장소를 동시에 만지는 코딩 에이전트들(로컬 모델)이 turn / lock / heartbeat / 작업 owner 를 공유하기 위한 상태 저장소입니다. 단일 머신 / 신뢰 네트워크 / 저자 한 사람이 운영하는 환경을 가정합니다.
 
-이 문서는 위 7일 윈도우 동안 실제로 손댄 영역만 적습니다.
+이 문서는 위 기간 동안 실제로 손댄 영역만 적습니다.
 
 ## 무엇을 위해 만들었나
 

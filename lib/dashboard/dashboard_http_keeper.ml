@@ -43,6 +43,185 @@ let keeper_names (config : Workspace.config) =
 let keeper_count (config : Workspace.config) : int =
   List.length (keeper_names config)
 
+type keeper_activity_source =
+  | Keeper_meta
+  | Tool_call of Yojson.Safe.t
+  | Approval_pending of Yojson.Safe.t
+
+let nonempty_json_string_opt key json =
+  match Safe_ops.json_string_opt key json with
+  | Some value ->
+      let value = String.trim value in
+      if value = "" then None else Some value
+  | None -> None
+
+let positive_json_float_opt key json =
+  match Safe_ops.json_float_opt key json with
+  | Some value ->
+      (match classify_float value with
+       | FP_normal | FP_subnormal | FP_zero when value > 0.0 -> Some value
+       | FP_normal | FP_subnormal | FP_zero | FP_infinite | FP_nan -> None)
+  | None -> None
+
+let activity_source_to_string = function
+  | Keeper_meta -> "keeper_meta"
+  | Tool_call _ -> "tool_call"
+  | Approval_pending _ -> "approval_pending"
+
+let activity_source_ts meta_ts = function
+  | Keeper_meta -> meta_ts
+  | Tool_call json
+  | Approval_pending json ->
+      positive_json_float_opt "ts" json |> Option.value ~default:0.0
+
+let activity_source_tool_opt = function
+  | Keeper_meta -> None
+  | Tool_call json ->
+      (match nonempty_json_string_opt "tool" json with
+       | Some tool -> Some tool
+       | None -> nonempty_json_string_opt "tool_name" json)
+  | Approval_pending json ->
+      (match nonempty_json_string_opt "tool" json with
+       | Some tool -> Some tool
+       | None -> nonempty_json_string_opt "tool_name" json)
+
+let latest_keeper_tool_activity keeper_name =
+  try
+    match Keeper_tool_call_log.read_latest ~keeper_name () with
+    | Some json ->
+        (match positive_json_float_opt "ts" json with
+         | Some _ -> Some json
+         | None -> None)
+    | None -> None
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+      Log.Dashboard.warn
+        "keeper dashboard tool_call activity read failed for %s: %s"
+        keeper_name (Printexc.to_string exn);
+      None
+
+let approval_row_newer left right =
+  let left_ts = positive_json_float_opt "ts" left |> Option.value ~default:0.0 in
+  let right_ts = positive_json_float_opt "ts" right |> Option.value ~default:0.0 in
+  left_ts > right_ts
+
+let latest_rows_by_approval_id rows =
+  let table = Hashtbl.create 16 in
+  List.iter
+    (fun row ->
+      match nonempty_json_string_opt "id" row with
+      | None -> ()
+      | Some id ->
+          let should_replace =
+            match Hashtbl.find_opt table id with
+            | None -> true
+            | Some existing -> approval_row_newer row existing
+          in
+          if should_replace then Hashtbl.replace table id row)
+    rows;
+  Hashtbl.fold (fun _ row acc -> row :: acc) table []
+
+let unresolved_pending_approval row =
+  match nonempty_json_string_opt "event" row with
+  | Some "pending" ->
+      (match nonempty_json_string_opt "decision" row with
+       | None -> true
+       | Some _ -> false)
+  | _ -> false
+
+let latest_pending_approval ~base_path ~keeper_name =
+  let rows =
+    try
+      Keeper_approval_queue.read_recent_audit
+        ~base_path ~keeper_name ~n:128 ()
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn ->
+        Log.Dashboard.warn
+          "keeper dashboard approval activity read failed for %s: %s"
+          keeper_name (Printexc.to_string exn);
+        []
+  in
+  latest_rows_by_approval_id rows
+  |> List.filter unresolved_pending_approval
+  |> List.fold_left
+       (fun acc row ->
+         match acc with
+         | None -> Some row
+         | Some existing when approval_row_newer row existing -> Some row
+         | Some _ -> acc)
+       None
+
+let freshest_activity_source ~meta_ts ~latest_tool ~pending_approval =
+  let candidates =
+    (if meta_ts > 0.0 then [ Keeper_meta ] else [])
+    @ (match latest_tool with Some json -> [ Tool_call json ] | None -> [])
+    @ (match pending_approval with Some json -> [ Approval_pending json ] | None -> [])
+  in
+  List.fold_left
+    (fun acc source ->
+      match acc with
+      | None -> Some source
+      | Some best ->
+          if activity_source_ts meta_ts source > activity_source_ts meta_ts best
+          then Some source
+          else acc)
+    None
+    candidates
+
+let activity_age_json ~now_ts ts =
+  if ts <= 0.0 then `Null else `Float (max 0.0 (now_ts -. ts))
+
+let activity_at_json ts =
+  if ts <= 0.0 then `Null
+  else `String (Masc_domain.iso8601_of_unix_seconds ts)
+
+let activity_turn_opt source =
+  match source with
+  | Keeper_meta -> None
+  | Tool_call json -> Safe_ops.json_int_opt "turn" json
+  | Approval_pending json -> Safe_ops.json_int_opt "turn" json
+
+let activity_keeper_turn_id_opt source =
+  match source with
+  | Keeper_meta -> None
+  | Tool_call json -> Safe_ops.json_int_opt "keeper_turn_id" json
+  | Approval_pending json -> Safe_ops.json_int_opt "keeper_turn_id" json
+
+let live_activity_json ~now_ts ~meta_ts source =
+  let ts = activity_source_ts meta_ts source in
+  `Assoc [
+    ("source", `String (activity_source_to_string source));
+    ("at", activity_at_json ts);
+    ("age_s", activity_age_json ~now_ts ts);
+    ("tool", Json_util.string_opt_to_json (activity_source_tool_opt source));
+    ("turn", Json_util.int_opt_to_json (activity_turn_opt source));
+    ("keeper_turn_id", Json_util.int_opt_to_json (activity_keeper_turn_id_opt source));
+  ]
+
+let pending_approval_gate_json ~now_ts row =
+  let ts = positive_json_float_opt "ts" row |> Option.value ~default:0.0 in
+  `Assoc [
+    ("kind", `String "approval_required");
+    ("source", `String "audit_approvals");
+    ("id", Json_util.string_opt_to_json (nonempty_json_string_opt "id" row));
+    ("tool", Json_util.string_opt_to_json (activity_source_tool_opt (Approval_pending row)));
+    ("risk", Json_util.string_opt_to_json (nonempty_json_string_opt "risk" row));
+    ("turn_id", Json_util.int_opt_to_json (Safe_ops.json_int_opt "turn_id" row));
+    ("at", activity_at_json ts);
+    ("age_s", activity_age_json ~now_ts ts);
+    ("disposition", Json_util.string_opt_to_json (nonempty_json_string_opt "disposition" row));
+    ("disposition_reason",
+      Json_util.string_opt_to_json (nonempty_json_string_opt "disposition_reason" row));
+  ]
+
+let pending_approval_summary row =
+  let tool = activity_source_tool_opt (Approval_pending row) |> Option.value ~default:"tool" in
+  match nonempty_json_string_opt "risk" row with
+  | Some risk -> Printf.sprintf "승인 대기 · %s (%s)" tool risk
+  | None -> Printf.sprintf "승인 대기 · %s" tool
+
 let running_keeper_count (config : Workspace.config) : int =
   keeper_names config
   |> List.fold_left
@@ -118,13 +297,55 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
           in
           (* C-3 fix: compute last_activity from the most recent activity timestamp
              to avoid showing misleading staleness when agent is actually active *)
-          let last_activity_ts =
+          let meta_activity_ts =
             List.fold_left max 0.0
               [ m.runtime.usage.last_turn_ts; m.runtime.proactive_rt.last_ts; m.runtime.last_handoff_ts;
                 m.runtime.compaction_rt.last_ts; created_ts ]
           in
+          let latest_tool_activity = latest_keeper_tool_activity m.name in
+          let pending_approval =
+            latest_pending_approval ~base_path:config.base_path ~keeper_name:m.name
+          in
+          let activity_source =
+            freshest_activity_source
+              ~meta_ts:meta_activity_ts
+              ~latest_tool:latest_tool_activity
+              ~pending_approval
+          in
+          let last_activity_ts =
+            match activity_source with
+            | Some source -> activity_source_ts meta_activity_ts source
+            | None -> 0.0
+          in
           let last_activity_ago_s =
             if last_activity_ts <= 0.0 then 0.0 else now_ts -. last_activity_ts
+          in
+          let live_activity_fields =
+            let source_json =
+              match activity_source with
+              | Some source -> `String (activity_source_to_string source)
+              | None -> `Null
+            in
+            let activity_json =
+              match activity_source with
+              | Some source -> live_activity_json ~now_ts ~meta_ts:meta_activity_ts source
+              | None -> `Null
+            in
+            let gate_json =
+              match pending_approval with
+              | Some row -> pending_approval_gate_json ~now_ts row
+              | None -> `Null
+            in
+            [
+              ("last_activity_source", source_json);
+              ("last_activity_at", activity_at_json last_activity_ts);
+              ("live_activity", activity_json);
+              ("current_gate", gate_json);
+            ]
+            @
+            (match pending_approval with
+             | Some row -> [ ("runtime_blocker_summary", `String (pending_approval_summary row)) ]
+             | None -> [])
           in
           let trace_history_count = List.length m.runtime.trace_history in
           (* RFC-0149 §3.3 — removed [_effective_runtime_id] zombie
@@ -706,6 +927,7 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
 	                else `String m.runtime.proactive_rt.last_preview);
             ]
             @ Keeper_status_bridge.social_runtime_fields_json m
+            @ live_activity_fields
             @ [
 	              ("skill_primary", Json_util.string_opt_to_json last_skill_primary);
 	              ("skill_secondary",

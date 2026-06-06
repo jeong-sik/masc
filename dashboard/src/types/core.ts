@@ -454,6 +454,34 @@ export const KEEPER_RUNTIME_BLOCKER_CLASSES = [
 ] as const
 
 export type KeeperRuntimeBlockerClass = (typeof KEEPER_RUNTIME_BLOCKER_CLASSES)[number]
+
+export type KeeperLiveActivitySource =
+  | 'keeper_meta'
+  | 'tool_call'
+  | 'approval_pending'
+
+export interface KeeperLiveActivity {
+  source?: KeeperLiveActivitySource | null
+  at?: string | null
+  age_s?: number | null
+  tool?: string | null
+  turn?: number | null
+  keeper_turn_id?: number | null
+}
+
+export interface KeeperCurrentGate {
+  kind?: 'approval_required' | string | null
+  source?: string | null
+  id?: string | null
+  tool?: string | null
+  risk?: string | null
+  turn_id?: number | null
+  at?: string | null
+  age_s?: number | null
+  disposition?: string | null
+  disposition_reason?: string | null
+}
+
 // Wire emit: `lib/keeper/keeper_status_bridge.ml:720` —
 //   `pause_state = if meta.paused then "paused" else "active"`.
 // Closed 2-arm; the previous `| string` catch-all hid the fact that
@@ -997,6 +1025,10 @@ export interface Keeper {
   total_tokens?: number
   last_latency_ms?: number
   last_activity_ago_s?: number
+  last_activity_at?: string | null
+  last_activity_source?: KeeperLiveActivitySource | null
+  live_activity?: KeeperLiveActivity | null
+  current_gate?: KeeperCurrentGate | null
   context_ratio?: number
   context_tokens?: number
   context_max?: number

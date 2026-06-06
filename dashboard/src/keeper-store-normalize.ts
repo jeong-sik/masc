@@ -32,6 +32,48 @@ function normalizeRuntimeRef(raw: unknown): RuntimeRef | null {
   return { group, item }
 }
 
+function normalizeKeeperLiveActivitySource(raw: unknown): Keeper['last_activity_source'] {
+  const source = asString(raw)?.trim()
+  switch (source) {
+    case 'keeper_meta':
+    case 'tool_call':
+    case 'approval_pending':
+      return source
+    default:
+      return null
+  }
+}
+
+function normalizeKeeperLiveActivity(raw: unknown): Keeper['live_activity'] {
+  if (!isRecord(raw)) return null
+  return {
+    source: normalizeKeeperLiveActivitySource(raw.source),
+    at: toIsoTimestamp(raw.at) ?? asString(raw.at) ?? null,
+    age_s: asNumber(raw.age_s) ?? null,
+    tool: asString(raw.tool) ?? null,
+    turn: asNumber(raw.turn) ?? null,
+    keeper_turn_id: asNumber(raw.keeper_turn_id) ?? null,
+  }
+}
+
+function normalizeKeeperCurrentGate(raw: unknown): Keeper['current_gate'] {
+  if (!isRecord(raw)) return null
+  const kind = asString(raw.kind) ?? null
+  if (!kind) return null
+  return {
+    kind,
+    source: asString(raw.source) ?? null,
+    id: asString(raw.id) ?? null,
+    tool: asString(raw.tool) ?? null,
+    risk: asString(raw.risk) ?? null,
+    turn_id: asNumber(raw.turn_id) ?? null,
+    at: toIsoTimestamp(raw.at) ?? asString(raw.at) ?? null,
+    age_s: asNumber(raw.age_s) ?? null,
+    disposition: asString(raw.disposition) ?? null,
+    disposition_reason: asString(raw.disposition_reason) ?? null,
+  }
+}
+
 function normalizeKeeperTrustSeverity(raw: unknown): KeeperTrustLatestEvent['severity'] | null {
   const severity = asString(raw)?.trim().toLowerCase()
   switch (severity) {
@@ -735,6 +777,10 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         last_proactive_ago_s: asNumber(row.last_proactive_ago_s),
         last_proactive_reason: asString(row.last_proactive_reason) ?? null,
         last_activity_ago_s: asNumber(row.last_activity_ago_s),
+        last_activity_at: toIsoTimestamp(row.last_activity_at) ?? asString(row.last_activity_at) ?? null,
+        last_activity_source: normalizeKeeperLiveActivitySource(row.last_activity_source),
+        live_activity: normalizeKeeperLiveActivity(row.live_activity),
+        current_gate: normalizeKeeperCurrentGate(row.current_gate),
         last_proactive_preview: asString(row.last_proactive_preview) ?? null,
         social_model: null,
         configured_social_model: null,

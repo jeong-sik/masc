@@ -29,7 +29,7 @@
    keeper_tool_registered_runtime
    keeper_tool_ide_runtime
    keeper_sandbox_docker
-   keeper_tool_execute_runtime_paths keeper_tool_execute_path keeper_tool_execute_repo_readiness
+   keeper_tool_execute_runtime_paths keeper_tool_execute_path keeper_sandbox_repo_lifecycle
    keeper_tool_execute_readonly_policy keeper_workspace_read_ops
    keeper_tool_execute_input
    keeper_tool_execute_runtime

@@ -81,15 +81,15 @@ describe('rosterStateNote — RFC-0135 §1.1 typed-state conditioning', () => {
     }
   }
 
-  it('returns "현재 차단" when blocker is set and no composite is available', () => {
+  it('returns "상태 추정" for synthetic_stall when no composite is available', () => {
     const note = rosterStateNote(
-      k({ runtime_blocker_class: 'synthetic_stall', runtime_blocker_summary: '실제 막힘' }),
+      k({ runtime_blocker_class: 'synthetic_stall', runtime_blocker_summary: '합성 상태 정체' }),
       null,
       null,
     )
     expect(note).toEqual({
-      label: '현재 차단',
-      text: '실제 막힘',
+      label: '상태 추정',
+      text: '합성 상태 정체',
       kind: 'synthetic_stall',
     })
   })

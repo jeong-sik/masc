@@ -27,11 +27,14 @@
 //   paused   ⇐ keeper.paused | phase==='Paused' | pause_state==='paused'
 //   offline  ⇐ phase ∈ Offline/Stopped/Dead/Crashed/Zombie  OR
 //              status ∈ offline/inactive/unbooted
-//   stuck    ⇐ (runtime_blocker_class set AND NOT explicitlyStale)
+//   stuck    ⇐ (runtime_blocker_class set AND NOT explicitlyStale
+//                 AND class is execution-blocking)
 //              OR composite reports fiber_alive === false
 //   running  ⇐ otherwise. When the blocker_class is set but the receipt
 //              is explicitly stale, the blocker is recorded as
 //              `staleBlocker` for display but does NOT drive the headline.
+//              Diagnostic-only classes such as `synthetic_stall` remain
+//              running unless runtime_attention.blocked attests a live block.
 //
 // catch-all `default:` is forbidden — see RFC-0135 §9 (PR-9 CI guard).
 
@@ -120,6 +123,16 @@ function canonicalRuntimeBlockerClass(
   return blockerClass
 }
 
+function runtimeBlockerDrivesStuck(
+  blockerClass: KeeperRuntimeBlockerClass,
+  attention: KeeperCompositeSnapshot['runtime_attention'] | null,
+): boolean {
+  if (blockerClass === 'synthetic_stall') {
+    return attention?.blocked === true
+  }
+  return true
+}
+
 export function deriveKeeperOperationalState(
   { keeper, composite }: DeriveInputs,
 ): KeeperOperationalState {
@@ -143,7 +156,11 @@ export function deriveKeeperOperationalState(
     attention?.execution_current === false
     || attention?.stale_execution_receipt === true
 
-  if (blockerClass !== null && !explicitlyStale) {
+  if (
+    blockerClass !== null
+    && !explicitlyStale
+    && runtimeBlockerDrivesStuck(blockerClass, attention)
+  ) {
     return { kind: 'stuck', ...axes, reason: blockerClass }
   }
 

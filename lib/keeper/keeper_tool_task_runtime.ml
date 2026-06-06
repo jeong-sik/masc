@@ -326,17 +326,39 @@ type task_op =
   | Task_done
   | State_report
 
-let task_op_of_name = function
-  | "keeper_tasks_list" -> Some Tasks_list
-  | "keeper_tasks_audit" -> Some Tasks_audit
-  | "keeper_task_force_release" -> Some Task_force_release
-  | "keeper_task_force_done" -> Some Task_force_done
-  | "keeper_broadcast" -> Some Broadcast
-  | "keeper_task_create" -> Some Task_create
-  | "keeper_task_claim" -> Some Task_claim
-  | "keeper_task_done" -> Some Task_done
-  | "keeper_report_state" -> Some State_report
+let task_op_of_keeper_tool = function
+  | Keeper_tool_name.Tasks_list -> Some Tasks_list
+  | Keeper_tool_name.Tasks_audit -> Some Tasks_audit
+  | Keeper_tool_name.Task_force_release -> Some Task_force_release
+  | Keeper_tool_name.Task_force_done -> Some Task_force_done
+  | Keeper_tool_name.Broadcast -> Some Broadcast
+  | Keeper_tool_name.Task_create -> Some Task_create
+  | Keeper_tool_name.Task_claim -> Some Task_claim
+  | Keeper_tool_name.Task_done -> Some Task_done
+  | Keeper_tool_name.State_report -> Some State_report
   | _ -> None
+;;
+
+let task_op_of_name name =
+  match Keeper_tool_name.of_string name with
+  | Some tool -> task_op_of_keeper_tool tool
+  | None -> None
+;;
+
+let state_report_result_json args =
+  let snapshot =
+    match Keeper_memory_policy.keeper_state_snapshot_of_json args with
+    | Some snapshot -> snapshot
+    | None -> Keeper_memory_policy.empty_keeper_state_snapshot
+  in
+  Yojson.Safe.to_string
+    (`Assoc
+       [ "ok", `Bool true
+       ; ( "state_snapshot"
+         , Keeper_memory_policy.keeper_state_snapshot_to_json snapshot )
+       ; "state_block", `String (Keeper_memory_policy.render_state_block snapshot)
+       ; "typed_outcome", Keeper_tool_outcome.to_json Keeper_tool_outcome.Progress
+       ])
 ;;
 
 let handle_keeper_task_tool
@@ -772,4 +794,5 @@ let handle_keeper_task_tool
         ~ok:(Tool_result.is_success transition_result)
         ~message:(Tool_result.message transition_result)
         ())
+    | State_report -> state_report_result_json args
 ;;

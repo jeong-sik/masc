@@ -18,6 +18,9 @@ async function loadRuntimePanel() {
   vi.doMock('./runtime-monitor', () => ({
     RuntimeMonitor: () => html`<div data-testid="runtime-monitor">RuntimeMonitor</div>`,
   }))
+  vi.doMock('./runtime-health-snapshot', () => ({
+    RuntimeHealthSnapshot: () => html`<div data-testid="runtime-health-snapshot">RuntimeHealthSnapshot</div>`,
+  }))
   vi.doMock('./runtime-toml-editor', () => ({
     RuntimeTomlEditor: () => html`<div data-testid="runtime-toml-editor">RuntimeTomlEditor</div>`,
   }))
@@ -62,6 +65,7 @@ describe('RuntimePanel', () => {
     vi.doUnmock('../router')
     vi.doUnmock('./oas-health-chip')
     vi.doUnmock('./runtime-monitor')
+    vi.doUnmock('./runtime-health-snapshot')
     vi.doUnmock('./runtime-toml-editor')
     vi.doUnmock('./verification-specs-panel')
     vi.doUnmock('./cost-dashboard')
@@ -69,13 +73,17 @@ describe('RuntimePanel', () => {
     vi.doUnmock('./common/route-link')
   })
 
-  it('renders runtime panels and diagnostics links by default', async () => {
+  it('renders first-screen runtime snapshot and diagnostics links by default', async () => {
     route.value.params = {}
     const { RuntimePanel } = await loadRuntimePanel()
     render(html`<${RuntimePanel} />`, container)
     await flushUi()
 
     expect(container.textContent).toContain('OasHealthChip')
+    expect(container.textContent).toContain('RuntimeHealthSnapshot')
+    expect(container.textContent?.indexOf('RuntimeHealthSnapshot')).toBeLessThan(
+      container.textContent?.indexOf('OasHealthChip') ?? Number.POSITIVE_INFINITY,
+    )
     const routeLinks = Array.from(container.querySelectorAll('[data-testid="route-link"]'))
       .map(link => link.getAttribute('data-section'))
     expect(routeLinks).toEqual([
@@ -85,7 +93,7 @@ describe('RuntimePanel', () => {
     expect(container.textContent).toContain('Diagnostics')
     expect(container.textContent).toContain('Transport diagnostics')
     expect(container.textContent).toContain('Feature cleanup')
-    expect(container.textContent).toContain('RuntimeMonitor')
+    expect(container.textContent).not.toContain('RuntimeMonitor')
     expect(container.textContent).toContain('VerificationSpecsPanel')
   })
 
@@ -109,6 +117,8 @@ describe('RuntimePanel', () => {
       expect(el?.tagName.toLowerCase()).toBe('details')
       expect((el as HTMLDetailsElement).open).toBe(false)
     }
+    expect(container.textContent).toContain('RuntimeHealthSnapshot')
+    expect(container.textContent).not.toContain('RuntimeMonitor')
   })
 
   it('explicit drill-down views bypass progressive disclosure', async () => {
@@ -122,12 +132,13 @@ describe('RuntimePanel', () => {
     expect(specs?.closest('details')).toBeNull()
   })
 
-  it('renders only OasHealthChip and RuntimeMonitor for providers view', async () => {
+  it('renders snapshot, OasHealthChip, and RuntimeMonitor for providers view', async () => {
     route.value.params = { view: 'providers' }
     const { RuntimePanel } = await loadRuntimePanel()
     render(html`<${RuntimePanel} />`, container)
     await flushUi()
 
+    expect(container.textContent).toContain('RuntimeHealthSnapshot')
     expect(container.textContent).toContain('OasHealthChip')
     expect(container.textContent).toContain('RuntimeMonitor')
   })
@@ -139,6 +150,7 @@ describe('RuntimePanel', () => {
     await flushUi()
 
     expect(container.textContent).toContain('RuntimeTomlEditor')
+    expect(container.textContent).not.toContain('RuntimeHealthSnapshot')
     expect(container.textContent).not.toContain('OasHealthChip')
     expect(container.textContent).not.toContain('RuntimeMonitor')
   })
@@ -183,7 +195,8 @@ describe('RuntimePanel', () => {
     await flushUi()
 
     expect(container.textContent).toContain('OasHealthChip')
-    expect(container.textContent).toContain('RuntimeMonitor')
+    expect(container.textContent).toContain('RuntimeHealthSnapshot')
+    expect(container.textContent).not.toContain('RuntimeMonitor')
   })
 
   it('passes current view value to FilterChips', async () => {

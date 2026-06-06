@@ -4,7 +4,7 @@
 // TelemetryPanel (cost / audit / stress).
 //
 // Progressive-disclosure default view (density reduction, 2026-04):
-//   Signal layer     — OasHealthChip always expanded (summary StatCells)
+//   Signal layer     — RuntimeHealthSnapshot first, OasHealthChip below
 //   Diagnostic layer — Runtime lanes via CollapsibleSection (closed)
 //   Raw layer        — Formal specs via CollapsibleSection (closed)
 // NN/g progressive disclosure: respect working-memory limits, defer detail.
@@ -29,6 +29,7 @@ import { replaceRoute, route } from '../router'
 import { FilterChips } from './common/filter-chips'
 import { CollapsibleSection } from './common/collapsible'
 import { OasHealthChip } from './oas-health-chip'
+import { RuntimeHealthSnapshot } from './runtime-health-snapshot'
 import { RuntimeMonitor } from './runtime-monitor'
 import { RuntimeTomlEditor } from './runtime-toml-editor'
 import { VerificationSpecsPanel } from './verification-specs-panel'
@@ -160,6 +161,7 @@ export function RuntimePanel() {
       <div class="grid gap-4">
         ${view === 'providers'
           ? html`
+            <${RuntimeHealthSnapshot} />
             <${OasHealthChip} />
             <${RuntimeMonitor} />
           `
@@ -170,9 +172,14 @@ export function RuntimePanel() {
         : view === 'verification'
           ? html`<${VerificationSpecsPanel} />`
         : html`
+            <${RuntimeHealthSnapshot} />
             <${OasHealthChip} />
             <${HiddenDiagnosticsLinks} />
-            <${CollapsibleSection} id="runtime-details-providers" title="런타임">
+            <${CollapsibleSection}
+              id="runtime-details-providers"
+              title="런타임 상세"
+              mountWhenOpen=${true}
+            >
               <${RuntimeMonitor} />
             <//>
             <${CollapsibleSection} id="runtime-details-verification" title="형식검증">

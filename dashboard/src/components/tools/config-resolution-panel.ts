@@ -320,6 +320,33 @@ function probeSignalLabel(signal: string | null | undefined): string {
   }
 }
 
+function providerProbeTone(status: string | null | undefined, reachable: boolean | null | undefined): string {
+  if (reachable === true) return 'ok'
+  if (status === 'skipped_cli') return 'neutral'
+  if (reachable === false) return 'bad'
+  return 'neutral'
+}
+
+function providerProbeLabel(status: string | null | undefined, reachable: boolean | null | undefined): string {
+  if (reachable === true) return 'reachable'
+  switch (status) {
+    case 'missing_auth':
+      return 'missing auth'
+    case 'auth_failed':
+      return 'auth failed'
+    case 'network_error':
+      return 'network error'
+    case 'server_error':
+      return 'server error'
+    case 'endpoint_not_found':
+      return 'not found'
+    case 'skipped_cli':
+      return 'cli skipped'
+    default:
+      return status ?? 'unknown'
+  }
+}
+
 const KEEPER_RUNTIME_ROWS: Array<{
   key: keyof KeeperRuntimeResolved
   label: string
@@ -453,12 +480,19 @@ function RuntimeProbePanel() {
   const firstRun = probe?.runs?.[0] ?? null
   const assessment = probe?.kv_cache_assessment ?? null
   const signal = assessment?.signal ?? null
+  const providerProbes = probe?.providers ?? []
+  const providerSummary = probe?.summary ?? null
+  const isProviderProbe = providerProbes.length > 0
 
   return html`
     <${ConfigCard} class="mt-4 px-4 py-4">
       <div class="mb-3 flex flex-wrap items-center gap-2">
-        <div class="text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">ollama warm / kv probe</div>
-        <${StatusChip} tone=${probeTone(signal, probe?.probe_ok)}>${probeSignalLabel(signal)}<//>
+        <div class="text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
+          ${isProviderProbe ? 'provider reachability' : 'ollama warm / kv probe'}
+        </div>
+        <${StatusChip} tone=${isProviderProbe ? (probe?.probe_ok === false ? 'bad' : 'ok') : probeTone(signal, probe?.probe_ok)}>
+          ${isProviderProbe ? (probe?.status ?? 'provider probe') : probeSignalLabel(signal)}
+        <//>
         ${state.value.data?.cache_hit !== undefined
           ? html`
               <${StatusChip} tone="neutral" uppercase=${false}>${state.value.data.cache_hit ? 'cached' : 'fresh'} · age ${formatNumber(state.value.data.cache_age_sec, 1)}s<//>
@@ -491,33 +525,65 @@ function RuntimeProbePanel() {
 
       ${probe
         ? html`
-            <div class="grid gap-3 md:grid-cols-2">
-              <${RuntimeMetaRow} label="effective model" value=${probe.effective_model ?? MISSING_DATA_DASH} />
-              <${RuntimeMetaRow} label="server" value=${probe.server_url ?? MISSING_DATA_DASH} />
-              <${RuntimeMetaRow} label="loaded before/after" value=${`${fmtBoolean(probe.model_loaded_before_probe)} / ${fmtBoolean(probe.model_loaded_after_probe)}`} />
-              <${RuntimeMetaRow}
-                label="first run load"
-                value=${`${formatNumber(firstRun?.load_duration_ms, 1)} ms`}
-              />
-              <${RuntimeMetaRow}
-                label="prompt tok/s"
-                value=${`${formatNumber(firstRun?.prompt_tokens_per_second, 1)} tok/s`}
-              />
-              <${RuntimeMetaRow}
-                label="generation tok/s"
-                value=${`${formatNumber(firstRun?.generation_tokens_per_second, 1)} tok/s`}
-              />
-              <${RuntimeMetaRow}
-                label="prompt eval delta"
-                value=${assessment?.prompt_eval_duration_reduction_ratio != null
-                  ? `${formatNumber(assessment.prompt_eval_duration_reduction_ratio * 100, 1)}%`
-                  : MISSING_DATA_DASH}
-              />
-              <${RuntimeMetaRow}
-                label="loaded models"
-                value=${String(probe.loaded_models_after?.length ?? probe.loaded_models_before?.length ?? 0)}
-              />
-            </div>
+            ${isProviderProbe
+              ? html`
+                  <div class="grid gap-3 md:grid-cols-2">
+                    <${RuntimeMetaRow} label="status" value=${probe.status ?? MISSING_DATA_DASH} />
+                    <${RuntimeMetaRow} label="checked at" value=${probe.checked_at ?? MISSING_DATA_DASH} />
+                    <${RuntimeMetaRow} label="reachable" value=${String(providerSummary?.reachable ?? 0)} />
+                    <${RuntimeMetaRow} label="failed" value=${String(providerSummary?.failed ?? 0)} />
+                    <${RuntimeMetaRow} label="skipped" value=${String(providerSummary?.skipped ?? 0)} />
+                    <${RuntimeMetaRow} label="default runtime" value=${providerSummary?.default_runtime_id ?? MISSING_DATA_DASH} />
+                  </div>
+                  <div class="mt-3 flex flex-col gap-2">
+                    ${providerProbes.map(item => html`
+                      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-hover)] px-3 py-2">
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                          <div class="min-w-0">
+                            <div class="truncate text-xs font-medium text-[var(--color-fg-primary)]">${item.runtime_id ?? item.provider_id ?? '(unknown runtime)'}</div>
+                            <div class="truncate text-2xs text-[var(--color-fg-muted)]">${item.probe_url ?? item.endpoint_url ?? MISSING_DATA_DASH}</div>
+                          </div>
+                          <div class="flex items-center gap-2">
+                            <${StatusChip} tone=${providerProbeTone(item.status, item.reachable)} uppercase=${false}>${providerProbeLabel(item.status, item.reachable)}<//>
+                            <span class="font-mono text-2xs text-[var(--color-fg-muted)]">${item.http_status ?? MISSING_DATA_DASH} · ${item.latency_ms == null ? MISSING_DATA_DASH : `${formatNumber(item.latency_ms, 1)}ms`}</span>
+                          </div>
+                        </div>
+                        ${item.error
+                          ? html`<div class="mt-2 text-2xs text-[var(--rose-fg)]">${item.error}</div>`
+                          : null}
+                      </div>
+                    `)}
+                  </div>
+                `
+              : html`
+                  <div class="grid gap-3 md:grid-cols-2">
+                    <${RuntimeMetaRow} label="effective model" value=${probe.effective_model ?? MISSING_DATA_DASH} />
+                    <${RuntimeMetaRow} label="server" value=${probe.server_url ?? MISSING_DATA_DASH} />
+                    <${RuntimeMetaRow} label="loaded before/after" value=${`${fmtBoolean(probe.model_loaded_before_probe)} / ${fmtBoolean(probe.model_loaded_after_probe)}`} />
+                    <${RuntimeMetaRow}
+                      label="first run load"
+                      value=${`${formatNumber(firstRun?.load_duration_ms, 1)} ms`}
+                    />
+                    <${RuntimeMetaRow}
+                      label="prompt tok/s"
+                      value=${`${formatNumber(firstRun?.prompt_tokens_per_second, 1)} tok/s`}
+                    />
+                    <${RuntimeMetaRow}
+                      label="generation tok/s"
+                      value=${`${formatNumber(firstRun?.generation_tokens_per_second, 1)} tok/s`}
+                    />
+                    <${RuntimeMetaRow}
+                      label="prompt eval delta"
+                      value=${assessment?.prompt_eval_duration_reduction_ratio != null
+                        ? `${formatNumber(assessment.prompt_eval_duration_reduction_ratio * 100, 1)}%`
+                        : MISSING_DATA_DASH}
+                    />
+                    <${RuntimeMetaRow}
+                      label="loaded models"
+                      value=${String(probe.loaded_models_after?.length ?? probe.loaded_models_before?.length ?? 0)}
+                    />
+                  </div>
+                `}
 
             ${assessment?.note
               ? html`

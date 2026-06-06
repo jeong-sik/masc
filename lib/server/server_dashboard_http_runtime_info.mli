@@ -13,15 +13,20 @@
     a [module Runtime = ...] alias inside
     [test/test_dashboard_cache].
 
-    External surface (15 entries + one test record type):
+    External surface:
     - {b runtime resolution + HTTP routes}
       ({!runtime_resolution_json},
+      {!light_runtime_resolution_json},
       {!dashboard_runtime_probe_http_json},
+      {!runtime_inventory_json},
       {!dashboard_perf_http_json},
       {!dashboard_tools_http_json}).
     - {b runtime probe test seams}
       ({!set_dashboard_runtime_probe_runner_for_tests},
       {!clear_dashboard_runtime_probe_runner_for_tests},
+      {!dashboard_runtime_probe_payload_json_for_tests},
+      {!set_dashboard_runtime_provider_http_get_for_tests},
+      {!clear_dashboard_runtime_provider_http_get_for_tests},
       {!clear_dashboard_runtime_probe_cache_for_tests}).
     - {b git rev-parse short test seams}
       ({!git_rev_parse_short},
@@ -70,6 +75,12 @@ val dashboard_runtime_probe_http_json :
     includes a [cache_hit] flag so dashboards can show
     the freshness state. *)
 
+val dashboard_runtime_probe_payload_json_for_tests :
+  ?default_id:string -> Runtime.t list -> Yojson.Safe.t
+(** Test-only pure projection for the production runtime reachability payload.
+    HTTP execution is supplied through
+    {!set_dashboard_runtime_provider_http_get_for_tests}. *)
+
 val runtime_inventory_json : unit -> Yojson.Safe.t
 (** Returns the materialized runtime.toml inventory loaded by
     {!Runtime.init_default}. This is the dashboard-compatible projection for
@@ -105,6 +116,21 @@ val clear_dashboard_runtime_probe_runner_for_tests :
   unit -> unit
 (** Removes the test runner installed by
     {!set_dashboard_runtime_probe_runner_for_tests}. *)
+
+val set_dashboard_runtime_provider_http_get_for_tests :
+  (url:string ->
+   headers:(string * string) list ->
+   timeout_sec:float ->
+   (int * (string * string) list * string, string) result) ->
+  unit
+(** Installs a deterministic HTTP GET hook used by the provider reachability
+    probe.  The hook receives the final probe URL and in-memory headers; callers
+    must not persist header values in assertion failure messages. *)
+
+val clear_dashboard_runtime_provider_http_get_for_tests :
+  unit -> unit
+(** Removes the provider HTTP GET hook installed by
+    {!set_dashboard_runtime_provider_http_get_for_tests}. *)
 
 val clear_dashboard_runtime_probe_cache_for_tests :
   unit -> unit

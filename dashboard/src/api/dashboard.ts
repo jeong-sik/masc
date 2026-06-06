@@ -1815,8 +1815,46 @@ interface DashboardRuntimeProbeAssessment {
   limitation?: string | null
 }
 
-interface DashboardRuntimeProbePayload {
+export interface DashboardRuntimeProviderProbe {
+  runtime_id?: string | null
+  provider_id?: string | null
+  provider_display_name?: string | null
+  model_id?: string | null
+  model_api_name?: string | null
+  protocol?: string | null
+  runtime_kind?: string | null
+  transport?: string | null
+  auth_kind?: string | null
+  credential_required?: boolean | null
+  auth_present?: boolean | null
+  status?: string | null
+  reachable?: boolean | null
+  http_status?: number | null
+  latency_ms?: number | null
+  model_count?: number | null
+  content_type?: string | null
+  downloaded_bytes?: number | null
+  endpoint_url?: string | null
+  probe_url?: string | null
+  error?: string | null
+  checked_at?: string | null
+}
+
+export interface DashboardRuntimeProviderProbeSummary {
+  runtimes?: number
+  probed?: number
+  reachable?: number
+  failed?: number
+  skipped?: number
+  default_runtime_id?: string | null
+}
+
+export interface DashboardRuntimeProbePayload {
   source?: string
+  status?: string | null
+  checked_at?: string | null
+  summary?: DashboardRuntimeProviderProbeSummary | null
+  providers?: DashboardRuntimeProviderProbe[]
   server_url?: string
   ps_endpoint?: string
   generate_endpoint?: string

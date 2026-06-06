@@ -38,6 +38,7 @@ let prepare_agent_setup
       ~(tool_overlay : Agent_sdk.Tool_op.t ref option)
       ?runtime_manifest_context
       ?runtime_manifest_append
+      ?turn_slot_control
       ()
   : (Keeper_run_tools_hooks.agent_setup, Agent_sdk.Error.sdk_error) result
   =
@@ -127,6 +128,7 @@ let prepare_agent_setup
       ~search_fn:(fun ~query ~max_results -> !local_search_fn_ref ~query ~max_results)
       ~on_tool_called:(fun name ->
         Keeper_discovered_tools.mark_used acc.discovered ~turn:acc.current_turn ~name)
+      ?turn_slot_control
       ()
   in
   let extend_turns_tool = Keeper_extend_turns.make ~agent_ref ~max_turns () in

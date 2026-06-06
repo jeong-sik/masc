@@ -732,10 +732,9 @@ let handle_keeper_task_tool
             | None -> [])
          @ claimed_task_fields
          @ wip_admission_result_fields wip_rejections
-         @
-         match accountability_warning with
-         | Some warning -> [ ("routing_warning", `String warning) ]
-         | None -> []))
+         @ (match accountability_warning with
+            | Some warning -> [ ("routing_warning", `String warning) ]
+            | None -> [])))
     | State_report -> state_report_result_json args
     | Task_done ->
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
@@ -795,5 +794,4 @@ let handle_keeper_task_tool
         ~ok:(Tool_result.is_success transition_result)
         ~message:(Tool_result.message transition_result)
         ())
-    | State_report -> state_report_result_json args
 ;;

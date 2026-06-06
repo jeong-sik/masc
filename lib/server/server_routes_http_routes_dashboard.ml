@@ -9,6 +9,8 @@ open Server_dashboard_http
 open Server_routes_http_common
 open Server_routes_http_keeper_stream
 
+module Runtime_config_file = Runtime
+
 include Server_routes_http_routes_dashboard_setup
 
 let config_cache_ttl_s = Server_dashboard_http_core_cache.config_cache_ttl_s
@@ -35,6 +37,32 @@ let respond_dashboard_ok ?request reqd =
   Http.Response.json_value ?request ~compress:true
     (`Assoc [ ("ok", `Bool true) ])
     reqd
+
+let runtime_config_raw_json ~path ~source_text ~reloaded =
+  `Assoc
+    [ ("ok", `Bool true)
+    ; ("path", `String path)
+    ; ("file_name", `String "runtime.toml")
+    ; ("source_text", `String source_text)
+    ; ("reloaded", `Bool reloaded)
+    ]
+
+let parse_runtime_config_raw_body body_str =
+  try
+    match Yojson.Safe.from_string body_str with
+    | `Assoc _ as json ->
+      (match Json_util.assoc_member_opt "source_text" json with
+       | Some (`String source_text) -> Ok source_text
+       | Some _ -> Error "source_text must be a string"
+       | None -> Error "source_text required")
+    | _ -> Error "JSON object body required"
+  with
+  | Yojson.Json_error err -> Error ("invalid json: " ^ err)
+
+let runtime_config_path_error_status message =
+  if String.equal message "runtime config path not found"
+  then `Not_found
+  else `Internal_server_error
 
 let add_routes ~sw ~clock router =
   router
@@ -154,6 +182,44 @@ let add_routes ~sw ~clock router =
          Http.Response.json_value ~compress:true ~request:req json reqd
        in
        with_tool_auth ~tool_name:"masc_runtime_ollama_probe" handle request reqd)
+  |> Http.Router.get "/api/v1/runtime/config/raw" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun _state _agent_name req reqd ->
+           match Runtime_config_file.load_config_text () with
+           | Ok (path, source_text) ->
+             Http.Response.json_value ~compress:true ~request:req
+               (runtime_config_raw_json ~path ~source_text ~reloaded:false)
+               reqd
+           | Error msg ->
+             respond_dashboard_error
+               ~status:(runtime_config_path_error_status msg)
+               ~request:req reqd msg)
+         request reqd)
+  |> Http.Router.post "/api/v1/runtime/config/raw" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun _state _agent_name req reqd ->
+           Http.Request.read_body_async reqd (fun body_str ->
+             match parse_runtime_config_raw_body body_str with
+             | Error msg ->
+               respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+             | Ok source_text ->
+               (match Runtime_config_file.save_config_text source_text with
+                | Error msg ->
+                  respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+                | Ok () ->
+                  (match Runtime_config_file.load_config_text () with
+                   | Ok (path, saved_text) ->
+                     Http.Response.json_value ~compress:true ~request:req
+                       (runtime_config_raw_json
+                          ~path
+                          ~source_text:saved_text
+                          ~reloaded:true)
+                       reqd
+                   | Error msg ->
+                     respond_dashboard_error
+                       ~status:(runtime_config_path_error_status msg)
+                       ~request:req reqd msg)))
+         ) request reqd)
   (* Phase 1 Action 2 — live Dashboard_cache state surface.  Renders
      hit_ratio, in-flight compute count, per-entry ttl_remaining, and
      timeout-circuit-open counts so operators can correlate slow endpoints

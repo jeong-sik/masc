@@ -187,6 +187,29 @@ let config_path () : string option =
   | Invalid_env | Missing -> None
 ;;
 
+let runtime_config_path_result ?runtime_config_path () =
+  match runtime_config_path with
+  | Some path -> Ok path
+  | None ->
+    (match config_path () with
+     | Some path -> Ok path
+     | None -> Error "runtime config path not found")
+;;
+
+let load_config_text ?runtime_config_path () =
+  match runtime_config_path_result ?runtime_config_path () with
+  | Error _ as e -> e
+  | Ok path ->
+    (try Ok (path, Fs_compat.load_file path) with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Error
+         (Printf.sprintf
+            "failed to read runtime config %s: %s"
+            path
+            (Printexc.to_string exn)))
+;;
+
 let contains_newline s =
   String.exists (function
     | '\n' | '\r' -> true
@@ -400,6 +423,21 @@ let validate_runtime_config_text ~config_path content =
      | Error _ as e -> e)
 ;;
 
+let save_config_text ?runtime_config_path content =
+  match runtime_config_path_result ?runtime_config_path () with
+  | Error _ as e -> e
+  | Ok path ->
+    (match validate_runtime_config_text ~config_path:path content with
+     | Error _ as e -> e
+     | Ok () ->
+       (match Fs_compat.save_file_atomic path content with
+        | Error _ as e -> e
+        | Ok () ->
+          (match init_default ~config_path:path with
+           | Ok () -> Ok ()
+           | Error msg -> Error ("runtime config saved but reload failed: " ^ msg))))
+;;
+
 let set_runtime_id_for_keeper ?runtime_config_path ~keeper_name ~runtime_id () =
   let keeper_name = String.trim keeper_name in
   let runtime_id = String.trim runtime_id in
@@ -412,19 +450,12 @@ let set_runtime_id_for_keeper ?runtime_config_path ~keeper_name ~runtime_id () =
   else if contains_newline runtime_id
   then Error "runtime_id must not contain newlines"
   else
-    let path_result =
-      match runtime_config_path with
-      | Some path -> Ok path
-      | None ->
-        (match config_path () with
-         | Some path -> Ok path
-         | None -> Error "runtime config path not found")
-    in
-    match path_result with
+    match runtime_config_path_result ?runtime_config_path () with
     | Error _ as e -> e
     | Ok path ->
       let content_result =
         try Ok (Fs_compat.load_file path) with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn ->
           Error
             (Printf.sprintf

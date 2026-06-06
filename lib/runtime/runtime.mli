@@ -70,6 +70,15 @@ val config_path : unit -> string option
     deleted [Runtime.config_path] (delegates to
     [Config_dir_resolver]). *)
 
+val load_config_text :
+  ?runtime_config_path:string -> unit -> ((string * string), string) result
+(** Load the raw runtime.toml source text. Returns [(path, source_text)]. *)
+
+val save_config_text :
+  ?runtime_config_path:string -> string -> (unit, string) result
+(** Validate and atomically persist raw runtime.toml source text, then refresh
+    the in-process runtime cache. *)
+
 val set_runtime_id_for_keeper :
   ?runtime_config_path:string ->
   keeper_name:string ->

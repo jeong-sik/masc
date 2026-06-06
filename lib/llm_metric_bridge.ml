@@ -40,7 +40,10 @@ let genai_operation_name = "chat"
 
 let genai_provider_for_model ~model_id =
   if String.equal model_id "" then "unknown"
-  else provider_seen_for_model ~model_id |> Option.value ~default:"unknown"
+  else
+    match provider_seen_for_model ~model_id with
+    | Some provider -> provider
+    | None -> "unknown"
 ;;
 
 let genai_base_labels ~provider ~model_id =

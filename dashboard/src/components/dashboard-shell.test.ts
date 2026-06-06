@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { h, render } from 'preact'
 import { waitFor } from '@testing-library/preact'
-import { DashboardMain, dashboardHealthChips } from './dashboard-shell'
+import { DashboardMain, dashboardHealthChips, isKeeperDetailDashboardRoute } from './dashboard-shell'
 import { route } from '../router'
 import { connected } from '../sse'
 import { dashboardLoading } from '../store'
@@ -43,6 +43,24 @@ describe('DashboardMain solo mode', () => {
     await waitFor(() => expect(document.title).toBe('MASC · Runtime'))
     expect(container.querySelector('[data-testid="dashboard-widget-solo-bar"]')).not.toBeNull()
     expect(container.querySelector('[aria-label="Active observability filters"]')).not.toBeNull()
+  })
+})
+
+describe('isKeeperDetailDashboardRoute', () => {
+  it('detects monitor keeper detail drilldowns', () => {
+    expect(isKeeperDetailDashboardRoute({
+      tab: 'monitoring',
+      params: { section: 'agents', keeper: 'sangsu' },
+      postId: null,
+    })).toBe(true)
+  })
+
+  it('does not treat the fleet list as keeper detail', () => {
+    expect(isKeeperDetailDashboardRoute({
+      tab: 'monitoring',
+      params: { section: 'agents' },
+      postId: null,
+    })).toBe(false)
   })
 })
 

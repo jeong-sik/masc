@@ -148,6 +148,38 @@ describe('KeeperConversationPanel', () => {
     expect(hydrateKeeperStatus).not.toHaveBeenCalled()
   })
 
+  it('renders the primary conversation layout as an airy canvas', async () => {
+    keeperThreads.value = {
+      sangsu: [
+        {
+          id: 'direct-user',
+          role: 'user',
+          source: 'direct_user',
+          label: '사용자',
+          text: '넓게 보여줘',
+          rawText: '넓게 보여줘',
+          timestamp: '2026-03-24T00:01:00.000Z',
+          delivery: 'history',
+          streamState: null,
+          details: null,
+          error: null,
+        },
+      ],
+    }
+
+    render(
+      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." layout="primary" />`,
+      container,
+    )
+    await Promise.resolve()
+
+    expect(container.querySelector('[data-keeper-chat-layout="primary"]')).not.toBeNull()
+    expect(container.querySelector('.chat-transcript-airy')).not.toBeNull()
+    expect(container.querySelector('.min-h-30')).not.toBeNull()
+    expect(container.textContent).toContain('@sangsu')
+    expect(container.textContent).not.toContain('Enter로 전송')
+  })
+
   it('renders probe and recover buttons in RuntimeActions', async () => {
     const keeper = { name: 'sangsu', status: 'running' } as any
 

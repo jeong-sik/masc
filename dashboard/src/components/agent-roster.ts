@@ -78,6 +78,15 @@ type StatusFilter = 'all' | RuntimeBand
 type RosterStateNote = { label: string; text: string; kind?: string }
 type RosterPresenceDisplay = { status: string | null; detail: string | null }
 
+function rosterBandActionHint(band: RuntimeBand, isKeeper: boolean): string {
+  switch (band) {
+    case 'active': return '감시 중'
+    case 'attention': return '확인 필요'
+    case 'paused': return '재개 대기'
+    case 'offline': return isKeeper ? '기동 필요' : '연결 없음'
+  }
+}
+
 // PipelineStage SSOT: branches aligned to `types/core.ts#PipelineStage`.
 // Legacy `tool_use` / `scheduled_autonomous` / `thinking` removed — the
 // backend never emits them as pipeline_stage.
@@ -120,10 +129,11 @@ function rosterContextMeta(
  *  - stuck             → `현재 차단`  (text: backend summary or typed reason)
  *  - running + staleBlocker → `이전 차단` (informational; not a headline)
  *  - running           → fallback to diagnostic error / monitoring hint
- *  - paused / offline  → null — these states are signaled by the row's
- *                         phase badge and dedicated chips elsewhere; the
- *                         state-note slot stays available for extra
- *                         operational context only.
+ *  - paused           → pause cause when available, because it explains the
+ *                       resume gate.
+ *  - offline          → interrupted work / diagnostics / monitoring hint when
+ *                       available; otherwise the row action axis carries the
+ *                       "start required" state.
  */
 export function rosterStateNote(
   keeper: Keeper | null | undefined,
@@ -934,6 +944,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
       keeperRuntime,
       band,
       isKeeper,
+      bandActionHint: rosterBandActionHint(band.key, isKeeper),
       displayName,
       currentWork,
       summaryText,
@@ -1096,8 +1107,12 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                     </span>
                   </span>
 
-                  <span class="inline-flex w-fit items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-3xs font-medium text-[var(--color-fg-primary)] lg:w-auto">
-                    ${row.band.label}
+                  <span
+                    class="inline-flex w-fit min-w-[4.5rem] flex-col items-start rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-1 text-3xs font-medium leading-tight text-[var(--color-fg-primary)] lg:w-auto"
+                    title=${row.band.description}
+                  >
+                    <span>${row.band.label}</span>
+                    <span class="mt-0.5 text-[10px] font-normal text-[var(--color-fg-muted)]">${row.bandActionHint}</span>
                   </span>
 
                   <span class="min-w-0 text-xs leading-snug text-[var(--color-fg-primary)]">
@@ -1162,6 +1177,10 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                     ${selectedRow.fsmStageText}
                   </span>
                 ` : null}
+                <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]" title=${selectedRow.band.description}>
+                  상태 액션
+                  <span class="ml-1 text-[var(--color-fg-primary)]">${selectedRow.bandActionHint}</span>
+                </span>
                 <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]">
                   ${selectedRow.lastActivityLabel}
                   <span class="ml-1 text-[var(--color-fg-primary)]">

@@ -427,6 +427,21 @@ let handle_tool_execute_typed
               then result.stdout
               else result.stdout ^ result.stderr
             in
+            (try
+               !Keeper_keepalive_signal.record_execute_output_callback
+                 ~keeper_name:meta.name
+                 ~task_id:
+                   (Option.map Keeper_id.Task_id.to_string meta.current_task_id)
+                 ~stdout:result.stdout
+                 ~stderr:result.stderr
+                 ~status:(Keeper_alerting_path.process_status_to_json result.status)
+             with
+             | Eio.Cancel.Cancelled _ as e -> raise e
+             | exn ->
+               Log.Dashboard.warn
+                 "execute output callback failed keeper=%s: %s"
+                 meta.name
+                 (Printexc.to_string exn));
             let failure_error_fields =
               match result.status, String.trim result.stderr with
               | Unix.WEXITED 0, _ | _, "" -> []

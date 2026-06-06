@@ -50,6 +50,24 @@ val register_record_tool_skipped :
   (keeper_name:string -> tool_name:string -> reason_code:string -> unit) ->
   unit
 
+val record_execute_output_callback :
+  (keeper_name:string ->
+   task_id:string option ->
+   stdout:string ->
+   stderr:string ->
+   status:Yojson.Safe.t ->
+   unit)
+    ref
+
+val register_record_execute_output :
+  (keeper_name:string ->
+   task_id:string option ->
+   stdout:string ->
+   stderr:string ->
+   status:Yojson.Safe.t ->
+   unit) ->
+  unit
+
 
 
 

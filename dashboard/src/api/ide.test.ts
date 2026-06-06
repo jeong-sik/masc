@@ -3,6 +3,8 @@ import {
   createIdeAnnotation,
   deleteIdeAnnotation,
   fetchIdeAnnotations,
+  fetchIdeCursors,
+  fetchIdeEvents,
   fetchIdeRegions,
 } from './ide'
 
@@ -103,5 +105,90 @@ describe('ide API', () => {
     expect(url).toContain('/api/v1/ide/annotations/ann-1?')
     expect(url).toContain('keeper_id=sangsu')
     expect(url).toContain('repo_id=masc')
+  })
+
+  it('fetchIdeEvents appends event filters and parses bridge events', async () => {
+    stubFetch({
+      ok: true,
+      data: {
+        events: [{
+          type: 'tool',
+          tool_name: 'execute',
+          keeper_id: 'sangsu',
+          turn_id: 'turn-1',
+          outcome: 'success',
+          typed_outcome: 'progress',
+          latency_ms: 50,
+          summary: 'ran command',
+          file_path: 'lib/a.ml',
+          command_descriptor: null,
+          timestamp_ms: '1717400000000',
+        }],
+      },
+    })
+
+    const events = await fetchIdeEvents({
+      kind: 'tool',
+      keeperId: 'sangsu',
+      repoId: 'masc',
+      limit: 25,
+    })
+
+    const url = String(mockFetch.mock.calls[0]![0])
+    expect(url).toContain('/api/v1/ide/events?')
+    expect(url).toContain('kind=tool')
+    expect(url).toContain('keeper_id=sangsu')
+    expect(url).toContain('repo_id=masc')
+    expect(url).toContain('limit=25')
+    expect(events).toEqual([expect.objectContaining({
+      type: 'tool',
+      tool_name: 'execute',
+      keeper_id: 'sangsu',
+      turn_id: 'turn-1',
+      timestamp_ms: 1717400000000,
+    })])
+  })
+
+  it('fetchIdeCursors appends cursor filters and parses valid cursor rows', async () => {
+    stubFetch({
+      ok: true,
+      data: {
+        runtime_id: 'masc-runtime',
+        branch: 'main',
+        connected: true,
+        cursors: [{
+          keeper_id: 'sangsu',
+          file_path: 'lib/a.ml',
+          line: 12,
+          column: 3,
+          selection_end: { line: 14, column: 3 },
+          focus_mode: 'editing',
+          last_update: '1717400000000',
+          tool_name: 'keeper_ide_annotate',
+          turn: 7,
+        }],
+      },
+    })
+
+    const snapshot = await fetchIdeCursors({
+      keeperId: 'sangsu',
+      filePath: 'lib/a.ml',
+      repoId: 'masc',
+      limit: 10,
+    })
+
+    const url = String(mockFetch.mock.calls[0]![0])
+    expect(url).toContain('/api/v1/ide/cursors?')
+    expect(url).toContain('keeper_id=sangsu')
+    expect(url).toContain('file_path=lib%2Fa.ml')
+    expect(url).toContain('repo_id=masc')
+    expect(url).toContain('limit=10')
+    expect(snapshot?.cursors).toEqual([expect.objectContaining({
+      keeper_id: 'sangsu',
+      file_path: 'lib/a.ml',
+      line: 12,
+      focus_mode: 'editing',
+      turn: 7,
+    })])
   })
 })

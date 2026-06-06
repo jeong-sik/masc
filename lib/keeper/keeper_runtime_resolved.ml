@@ -299,7 +299,8 @@ let body_timeout_override_sec () =
   (current ()).body_timeout_override_sec.value
 
 (* RFC-0156/RFC-020x: OAS total timeout removed — turn_timeout_sec is the
-   retry/admission budget, not a cumulative hard kill for active streams.
+   default provider-attempt timeout and first-attempt admission input, not a
+   cumulative hard kill for active streams or retry admission.
    stream_idle_timeout is the per-stream idle cap. Kept in lockstep with
    [Env_config.KeeperKeepalive.oas_call_timeout_sec]. Historic names
    ([oas_timeout_for_estimated_input_tokens] /

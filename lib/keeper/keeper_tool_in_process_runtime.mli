@@ -57,7 +57,8 @@ val handle_ide_annotate
 (** [handle_voice] dispatches to [Keeper_tool_voice_runtime.handle_voice_tool]
     by [name]. Caller must pass a name in the voice cluster. *)
 val handle_voice
-  :  meta:keeper_meta
+  :  config:Workspace.config
+  -> meta:keeper_meta
   -> name:string
   -> args:Yojson.Safe.t
   -> string

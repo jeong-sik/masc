@@ -173,6 +173,16 @@ val parse_state_snapshot_from_reply : string -> keeper_state_snapshot option
 (** Convenience: locate the [STATE] block in a full assistant reply
     and parse it. *)
 
+val structured_state_snapshot_schema :
+  keeper_state_snapshot Agent_sdk.Structured.schema
+(** Provider-native structured-output schema for keeper state snapshots. *)
+
+val parse_structured_state_snapshot_from_reply :
+  string -> keeper_state_snapshot option
+(** Parse a full assistant reply that is itself structured JSON.  Accepts
+    raw snapshot JSON, the versioned [state_snapshot] envelope, or replay
+    metadata. *)
+
 val state_snapshot_of_summary_text : string -> keeper_state_snapshot option
 (** Re-parse the rendered summary text back into a snapshot.  Inverse
     of [keeper_state_snapshot_to_summary_text]. *)

@@ -28,7 +28,6 @@ let run_keeper_cycle
       ~(generation : int)
       ?(channel : Keeper_world_observation.keeper_cycle_channel = Scheduled_autonomous)
       ?(semaphore_wait_ms = 0)
-      ?turn_slot_control
       ?shared_context
       ()
   : (keeper_meta, Agent_sdk.Error.sdk_error) result
@@ -484,7 +483,6 @@ let run_keeper_cycle
                           ; trajectory_acc
                           ; turn_affordances
                           ; turn_id = keeper_turn_id
-                          ; turn_slot_control
                           }
                           ~initial_execution
                           ~timeout_sec

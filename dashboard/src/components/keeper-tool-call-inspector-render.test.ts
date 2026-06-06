@@ -208,6 +208,68 @@ describe('KeeperToolCallInspector render', () => {
     expect(window.location.hash).toBe('#monitoring?section=fleet-health&view=event-log&session_id=sess-nested&operation_id=op-nested&worker_run_id=wr-nested&q=turn-8')
   })
 
+  it('renders an activity dossier for recent tool-call evidence', async () => {
+    const fetchKeeperToolCalls = vi.fn().mockResolvedValue({
+      keeper: 'analyst',
+      count: 3,
+      source: 'tool_call_io',
+      health: 'coverage_gap',
+      entry_count: 3,
+      entries: [
+        {
+          ts: 1_777_099_990,
+          keeper: 'analyst',
+          tool: 'masc_status',
+          input: {},
+          output: 'ok',
+          success: true,
+          duration_ms: 24,
+        },
+        {
+          ts: 1_777_100_000,
+          keeper: 'analyst',
+          tool: 'keeper_fs_read',
+          input: { file_path: 'lib/runtime.ml', line: 12 },
+          output: 'file contents',
+          success: true,
+          duration_ms: 42,
+        },
+        {
+          ts: 1_777_100_010,
+          keeper: 'analyst',
+          tool: 'Execute',
+          input: { cmd: 'false', context: { task_id: 'task-runtime' } },
+          output: 'exit 1',
+          success: false,
+          duration_ms: 2_600,
+          trace_id: 'trace-runtime',
+          turn: 9,
+          lane: 'autonomous',
+        },
+      ],
+    })
+
+    const { KeeperToolCallInspector } = await loadInspector(fetchKeeperToolCalls)
+    await act(async () => {
+      render(html`<${KeeperToolCallInspector} keeperName="analyst" />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    const dossier = container.querySelector('[data-testid="keeper-tool-call-dossier"]')
+    expect(dossier).not.toBeNull()
+    const text = dossier?.textContent ?? ''
+    expect(text).toContain('Activity Dossier')
+    expect(text).toContain('1 failed / 3')
+    expect(text).toContain('latest')
+    expect(text).toContain('Execute')
+    expect(text).toContain('slow call')
+    expect(text).toContain('source health')
+    expect(text).toContain('Evidence links')
+    expect(text).toContain('Code')
+    expect(text).toContain('Task')
+  })
+
   it('does not render Code links for unsafe absolute tool-call file inputs', async () => {
     const fetchKeeperToolCalls = vi.fn().mockResolvedValue({
       keeper: 'analyst',

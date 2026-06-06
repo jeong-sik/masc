@@ -44,6 +44,11 @@ type validation_error =
       index : int;
       token : string;
     }
+  | Argv_contains_shell_pipeline_operator of {
+      executable : string;
+      index : int;
+      token : string;
+    }
   | Argv_contains_shell_redirection of {
       executable : string;
       index : int;
@@ -286,16 +291,27 @@ let of_json (json : Yojson.Safe.t) =
   | false, None -> Error "$.executable or $.pipeline is required"
 ;;
 
-(* Execve-style: argv tokens pass verbatim to the child process, so
-   shell metacharacters ([;|&><`$*?]) and line breaks are literal data, not
-   operators.  NUL is the only byte that cannot be represented inside an argv
-   string.  See .mli "Design constraints" for the rationale. *)
+(* Execve-style: argv tokens pass verbatim to the child process, so shell
+   metacharacters ([;|&><`$*?]) and line breaks inside a payload token are
+   literal data, not operators.  NUL is the only byte that cannot be
+   represented inside an argv string.  See .mli "Design constraints" for the
+   rationale. *)
 let shell_metachar_in_token token =
   String.exists
     (function
       | '\000' -> true
       | _ -> false)
     token
+;;
+
+(* A standalone pipe token is almost always a caller attempting shell syntax
+   inside direct Exec.argv.  Unlike payload tokens such as [foo|bar], ["|"]
+   cannot create a pipe in execve argv and commonly becomes a bogus filename
+   ([tail: |: No such file or directory]).  Keep this narrow: [;] is a valid
+   argv sentinel for find -exec, and [&] can be payload data. *)
+let looks_like_shell_pipeline_operator = function
+  | "|" | "|&" -> true
+  | _ -> false
 ;;
 
 (* RFC-0198 Phase A.  Detects argv tokens whose entire shape matches a
@@ -354,6 +370,9 @@ let check_argv ~executable argv =
     | [] -> Ok ()
     | token :: _ when shell_metachar_in_token token ->
       Error (Argv_contains_shell_metachar { executable; index = i; token })
+    | token :: _ when looks_like_shell_pipeline_operator token ->
+      Error
+        (Argv_contains_shell_pipeline_operator { executable; index = i; token })
     | token :: _ when looks_like_shell_redirection token ->
       Error (Argv_contains_shell_redirection { executable; index = i; token })
     | _ :: rest -> loop (i + 1) rest
@@ -660,6 +679,15 @@ let pp_validation_error ppf = function
       executable
       index
       token
+  | Argv_contains_shell_pipeline_operator { executable; index; token } ->
+    Format.fprintf
+      ppf
+      "executable %S argv[%d]=%S is a shell pipeline operator; argv tokens \
+       are passed verbatim to execve and never create pipelines. Split the \
+       command into typed Pipeline.stages instead."
+      executable
+      index
+      token
   | Argv_contains_shell_redirection { executable; index; token } ->
     Format.fprintf
       ppf
@@ -697,6 +725,7 @@ let validation_error_alternatives : validation_error -> string list = function
   | Executable_not_allowlisted { name; mode } ->
     executable_not_allowlisted_alternatives ~name ~mode
   | Argv_contains_shell_metachar _ -> []
+  | Argv_contains_shell_pipeline_operator _ -> [ "Pipeline" ]
   | Argv_contains_shell_redirection _ ->
     [ "discard_stderr"; "discard_stdout"; "Pipeline" ]
   | _ -> []

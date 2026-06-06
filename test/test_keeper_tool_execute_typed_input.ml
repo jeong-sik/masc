@@ -842,6 +842,51 @@ let test_pipe_character_in_exec_argv_is_literal () =
     Alcotest.fail "literal pipe argv token must not create Shell_ir.Pipeline"
 ;;
 
+let test_standalone_pipe_operator_in_exec_argv_rejected () =
+  let check_case ~name ~token ~index argv =
+    let input =
+      Execute_input.Exec
+        { executable = "tail"
+        ; argv
+        ; cwd = None
+        ; env = []
+        ; stdin = Execute_input.Inherit
+        ; stdout = Execute_input.Inherit
+        ; stderr = Execute_input.Inherit
+        }
+    in
+    match Execute_input.validate ~mode:Execute_input.Readonly input with
+    | Error
+        (Execute_input.Argv_contains_shell_pipeline_operator
+          { executable; index = actual_index; token = actual_token } as err) ->
+      Alcotest.(check string) (name ^ " executable") "tail" executable;
+      Alcotest.(check int) (name ^ " index") index actual_index;
+      Alcotest.(check string) (name ^ " token") token actual_token;
+      let msg = Format.asprintf "%a" Execute_input.pp_validation_error err in
+      Alcotest.(check bool)
+        (name ^ " message points to Pipeline.stages")
+        true
+        (String_util.contains_substring_ci msg "Pipeline.stages")
+    | Error other ->
+      Alcotest.failf
+        "%s: expected Argv_contains_shell_pipeline_operator, got %a"
+        name
+        Execute_input.pp_validation_error
+        other
+    | Ok () -> Alcotest.failf "%s: expected standalone %S to be rejected" name token
+  in
+  check_case
+    ~name:"tail_pipe_head_log_shape"
+    ~token:"|"
+    ~index:3
+    [ "-n"; "200"; "/tmp/keeper.log"; "|"; "head"; "-80" ];
+  check_case
+    ~name:"stderr_pipe_operator"
+    ~token:"|&"
+    ~index:2
+    [ "-f"; "/tmp/keeper.log"; "|&"; "head"; "-80" ]
+;;
+
 let test_gh_multiline_body_lowers_to_literal_argv () =
   let body =
     "Replace self-shadowing `match sandbox_root with | Some _ -> sandbox_root \
@@ -1068,6 +1113,11 @@ let test_validation_error_alternatives () =
     (Execute_input.Argv_contains_shell_metachar
        { executable = "find"; index = 3; token = "foo\nbar" })
     [];
+  check_alts
+    ~name:"Argv_contains_shell_pipeline_operator alternatives"
+    (Execute_input.Argv_contains_shell_pipeline_operator
+       { executable = "tail"; index = 3; token = "|" })
+    [ "Pipeline" ];
   check_alts
     ~name:"Executable_not_allowlisted rm has no alternatives"
     (Execute_input.Executable_not_allowlisted { name = "rm"; mode = Execute_input.Dev_full })
@@ -1374,6 +1424,10 @@ let suite =
           "pipe_character_in_exec_argv_is_literal"
           `Quick
           test_pipe_character_in_exec_argv_is_literal
+      ; Alcotest.test_case
+          "standalone_pipe_operator_in_exec_argv_rejected"
+          `Quick
+          test_standalone_pipe_operator_in_exec_argv_rejected
       ; Alcotest.test_case
           "gh_multiline_body_lowers_to_literal_argv"
           `Quick

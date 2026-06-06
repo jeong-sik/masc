@@ -48,6 +48,37 @@ val forget_mcp_session : string -> unit
 (** Removes both the protocol-version and tool-profile entries
     for [session_id]. *)
 
+(** {1 Grace period}
+
+    Sessions whose SSE connection drops are kept for a configurable
+    grace period before reaping.  This prevents "Unknown Mcp-Session-Id"
+    errors when clients briefly disconnect and reconnect. *)
+
+val grace_period_seconds : float
+(** Seconds to keep a session after SSE disconnect.  Default 300 (5 min).
+    Configurable via [MASC_SESSION_SSE_GRACE_PERIOD_SEC] env var. *)
+
+(** {1 File persistence}
+
+    Session state (protocol version, profile, last-active timestamp)
+    is persisted to [\<base_path\>/.masc/mcp_transport_sessions.json].
+    On restart, [load_sessions_from_file] restores the state so the
+    grace period applies to recently-active sessions. *)
+
+val sessions_file_path : unit -> string
+(** Returns the path to the persistence file.  Exposed for testing. *)
+
+val save_sessions_to_file : unit -> unit
+(** Serialize current session state and write atomically to disk.
+    Called automatically by [reap_stale_sessions] after each cleanup.
+    Safe to call at any time — uses write-then-rename. *)
+
+val load_sessions_from_file : unit -> unit
+(** Load session state from disk into the in-memory registries.
+    Call once during server startup, before the MCP handler accepts
+    requests.  Errors (missing file, corrupt JSON) are silently
+    ignored — the server starts clean. *)
+
 val profile_label : Server_mcp_transport_http_types.tool_profile -> string
 (** Stable label for the MCP HTTP surface a session belongs to.
     Used in profile-mismatch errors and termination logs. *)

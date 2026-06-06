@@ -36,6 +36,11 @@ module Session = struct
   (** Rate limit window (seconds) *)
   let rate_limit_window_seconds =
     get_float ~default:60.0 "MASC_SESSION_RATE_LIMIT_WINDOW_SEC"
+
+  (** Grace period after SSE disconnect before reaping transport session (seconds).
+      Prevents "Unknown Mcp-Session-Id" errors on brief SSE interruptions. *)
+  let sse_grace_period_seconds =
+    get_float ~default:300.0 "MASC_SESSION_SSE_GRACE_PERIOD_SEC"
 end
 
 (** {1 Tempo (Polling Interval) Configuration} *)

@@ -155,6 +155,13 @@ let narrative_summary line =
   String_util.utf8_safe ~max_bytes:220 ~suffix:"..." line |> String_util.to_string
 ;;
 
+let snapshot_text_indicates_synthetic_stall text =
+  Keeper_synthetic_marker.contains_marker text
+  && has_any_ci
+       text
+       [ "no visible output"; "belief_summary"; "social_model"; "실제 막힘" ]
+;;
+
 let runtime_blocker_surface_of_progress_snapshot
       (snapshot : Keeper_memory_policy.keeper_state_snapshot)
   =
@@ -214,16 +221,7 @@ let runtime_blocker_surface_of_progress_snapshot
                    ; "manual"
                    ] -> surface "awaiting_operator" line
           | _ ->
-            if
-              Keeper_synthetic_marker.contains_marker text
-              && has_any_ci
-                   text
-                   [ "no visible output"
-                   ; "last output"
-                   ; "belief_summary"
-                   ; "social_model"
-                   ; "실제 막힘"
-                   ]
+            if snapshot_text_indicates_synthetic_stall text
             then
               (* The outer [if lines = [] then None] guard (line 168)
                  already returns early on an empty narrative; the

@@ -527,6 +527,71 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
   let now_id () = int_of_float (Time_compat.now () *. 1000.0) in
   let thread_id = "keeper:" ^ payload.name in
 
+  let sse_adapter_loop ~events ~writer ~mutex ~closed =
+    let current_thread_id = ref Ag_ui.default_thread_id in
+    let current_run_id = ref None in
+    let current_message_id = ref None in
+    let run_id_or_unknown () = Option.value ~default:"unknown" !current_run_id in
+    let ag_role (role : Keeper_chat_events.role) =
+      match role with
+      | Keeper_chat_events.User -> Ag_ui.User
+      | Keeper_chat_events.Assistant -> Ag_ui.Assistant
+    in
+    let rec loop () =
+      if not !closed then
+        match Keeper_chat_events.subscribe events with
+        | Run_started { run_id; thread_id } ->
+            current_thread_id := thread_id;
+            current_run_id := Some run_id;
+            if
+              keeper_stream_send_event writer mutex closed
+                Ag_ui.(make_event ~thread_id ~run_id:(Some run_id) Run_started)
+            then loop ()
+        | Text_message_start { message_id; role } ->
+            current_message_id := Some message_id;
+            if
+              keeper_stream_send_event writer mutex closed
+                Ag_ui.(
+                  make_event ~thread_id:!current_thread_id ~run_id:!current_run_id
+                    ~message_id:(Some message_id) ~role:(Some (ag_role role))
+                    Text_message_start)
+            then loop ()
+        | Text_delta text ->
+            if
+              keeper_stream_send_event writer mutex closed
+                Ag_ui.(
+                  make_event ~thread_id:!current_thread_id ~run_id:!current_run_id
+                    ~message_id:!current_message_id ~delta:(Some text)
+                    Text_message_content)
+            then loop ()
+        | Text_message_end ->
+            if
+              keeper_stream_send_event writer mutex closed
+                Ag_ui.(
+                  make_event ~thread_id:!current_thread_id ~run_id:!current_run_id
+                    ~message_id:!current_message_id Text_message_end)
+            then loop ()
+        | Custom { name; value } ->
+            if
+              keeper_stream_send_event writer mutex closed
+                Ag_ui.(
+                  make_event ~thread_id:!current_thread_id ~run_id:!current_run_id
+                    ~custom_name:(Some name) ~custom_value:(Some value) Custom)
+            then loop ()
+        | Error { message } ->
+            send_keeper_error writer mutex closed ~thread_id:!current_thread_id
+              ~run_id:(run_id_or_unknown ()) message
+        | Run_finished { run_id } ->
+            current_run_id := Some run_id;
+            ignore
+              (keeper_stream_send_event writer mutex closed
+                 Ag_ui.(
+                   make_event ~thread_id:!current_thread_id ~run_id:(Some run_id)
+                     Run_finished))
+    in
+    loop ()
+  in
+
   let process_single_turn ~payload ~run_id ~message_id ~agent_name
       ~(events : Keeper_chat_events.keeper_chat_event Eio.Stream.t) =
     Keeper_chat_events.publish events

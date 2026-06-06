@@ -20,6 +20,11 @@ let contains ~needle haystack =
 let assert_contains label ~needle source =
   check bool label true (contains ~needle source)
 
+let assert_order label ~before ~after source =
+  let before_idx = Str.search_forward (Str.regexp_string before) source 0 in
+  let after_idx = Str.search_forward (Str.regexp_string after) source 0 in
+  check bool label true (before_idx < after_idx)
+
 let request ?(headers = []) ?(meth = `POST) target =
   Httpun.Request.create ~headers:(Httpun.Headers.of_list headers) meth target
 
@@ -359,6 +364,14 @@ let test_h1_h2_post_route_wiring_parity () =
       ( "records initialize protocol only after success",
         "remember_protocol_version_if_initialize_succeeded" );
     ];
+  assert_order "H1 refreshes MCP profile after auth gate"
+    ~before:"match auth_result with"
+    ~after:"remember_mcp_profile ~otel_transport_context session_id profile"
+    h1;
+  assert_order "H2 refreshes MCP profile after auth gate"
+    ~before:"match auth_result with"
+    ~after:"remember_mcp_profile"
+    h2;
   assert_contains "H1 unknown supplied session returns not found"
     ~needle:"Httpun.Response.create ~headers `Not_found" h1;
   assert_contains "H2 unknown supplied session returns not found"

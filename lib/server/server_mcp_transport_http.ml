@@ -265,10 +265,6 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
           safe_respond_with_string reqd response body;
           Error ()
     in
-    let otel_transport_context =
-      Otel_dispatch_hook.http_transport_context ~protocol_version:"1.1"
-    in
-    remember_mcp_profile ~otel_transport_context session_id profile;
     let* () =
       match auth_result with
       | Ok () -> Ok ()
@@ -277,6 +273,10 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
             ~protocol_version msg;
           Error ()
     in
+    let otel_transport_context =
+      Otel_dispatch_hook.http_transport_context ~protocol_version:"1.1"
+    in
+    remember_mcp_profile ~otel_transport_context session_id profile;
     Ok (Http.Request.read_body_async reqd (fun body_str ->
       ignore (
       let* post_context =

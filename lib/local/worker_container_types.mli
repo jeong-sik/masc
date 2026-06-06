@@ -230,6 +230,7 @@ module For_testing : sig
     started_at:float ->
     ?error_type:string ->
     ?rpc_response_status_code:string ->
+    ?tool_result_is_error:bool ->
     unit ->
     unit
 

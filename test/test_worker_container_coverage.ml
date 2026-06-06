@@ -132,6 +132,23 @@ let test_records_mcp_client_operation_duration_metric () =
     (before_count +. 1.0)
     (Otel_metric_store.metric_value_or_zero (metric_name ^ "_count") ~labels ())
 
+let test_tools_call_is_error_records_failed_client_operation_duration () =
+  let metric_name = Otel_genai.Mcp_metric_name.client_operation_duration in
+  let labels = client_operation_labels ~error_type:Otel_genai.Mcp_value.tool_error_type () in
+  let before_count =
+    Otel_metric_store.metric_value_or_zero (metric_name ^ "_count") ~labels ()
+  in
+  Worker_container_types.For_testing.record_mcp_client_operation_duration
+    ~url:"http://127.0.0.1:8935/mcp"
+    ~method_name:Otel_genai.Mcp_value.tools_call_method
+    ~params:client_operation_params
+    ~started_at:(Unix.gettimeofday () -. 0.25)
+    ~tool_result_is_error:true
+    ();
+  check (float 0.0001) "client tool-error count increments"
+    (before_count +. 1.0)
+    (Otel_metric_store.metric_value_or_zero (metric_name ^ "_count") ~labels ())
+
 let client_session_labels ?error_type () =
   Worker_container_types.For_testing.mcp_client_session_duration_labels
     ~url:"http://127.0.0.1:8935/mcp"
@@ -190,6 +207,9 @@ let () =
             test_mcp_client_operation_duration_labels_follow_semconv;
           test_case "records MCP client operation duration metric" `Quick
             test_records_mcp_client_operation_duration_metric;
+          test_case "tools/call isError records failed client operation duration"
+            `Quick
+            test_tools_call_is_error_records_failed_client_operation_duration;
           test_case "MCP client session duration labels follow semconv" `Quick
             test_mcp_client_session_duration_labels_follow_semconv;
           test_case "records MCP client session duration metric" `Quick

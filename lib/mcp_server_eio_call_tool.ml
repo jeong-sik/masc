@@ -146,8 +146,8 @@ let mcp_server_operation_duration_labels ~tool_name ~success context =
   in
   [ Otel_genai.Mcp_attr_key.mcp_method_name, Otel_genai.Mcp_value.tools_call_method
   ; Otel_genai.Attr_key.gen_ai_operation_name, "execute_tool"
-  ; Otel_genai.Attr_key.gen_ai_tool_name, tool_name
   ]
+  @ option_label Otel_genai.Attr_key.gen_ai_tool_name (Some tool_name)
   @ option_label
       Otel_genai.Mcp_attr_key.mcp_protocol_version
       context.mcp_protocol_version

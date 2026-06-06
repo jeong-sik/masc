@@ -1000,6 +1000,58 @@ let test_handle_request_tools_call_managed_profile_rejects_hidden_claim_alias ()
      -. before_count);
   cleanup_dir base_path
 
+let test_handle_request_tools_call_missing_params_records_duration () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Mcp_eio.set_net (Eio.Stdenv.net env);
+  Mcp_eio.set_clock (Eio.Stdenv.clock env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let sid = "mcp-missing-params-duration" in
+  let request =
+    Yojson.Safe.to_string
+      (`Assoc
+        [ "jsonrpc", `String "2.0"
+        ; "id", `Int 114
+        ; "method", `String "tools/call"
+        ])
+  in
+  let metric_name = Otel_genai.Mcp_metric_name.server_operation_duration in
+  let labels =
+    [ Otel_genai.Mcp_attr_key.mcp_method_name, Otel_genai.Mcp_value.tools_call_method
+    ; Otel_genai.Attr_key.gen_ai_operation_name, "execute_tool"
+    ; Otel_genai.Mcp_attr_key.mcp_protocol_version, "2025-06-18"
+    ; Otel_genai.Mcp_attr_key.network_protocol_name, "http"
+    ; Otel_genai.Mcp_attr_key.network_protocol_version, "2"
+    ; Otel_genai.Mcp_attr_key.network_transport, "tcp"
+    ; Otel_genai.Mcp_attr_key.error_type, Otel_genai.Mcp_value.tool_error_type
+    ]
+  in
+  let before_count =
+    Masc.Otel_metric_store.metric_value_or_zero (metric_name ^ "_count") ~labels ()
+  in
+  let response =
+    Mcp_eio.handle_request
+      ~clock
+      ~sw
+      ~profile:Mcp_eio.Managed_agent
+      ~mcp_session_id:sid
+      ~otel_mcp_protocol_version:"2025-06-18"
+      ~otel_transport_context:(Otel_dispatch_hook.http_transport_context ~protocol_version:"2")
+      state
+      request
+  in
+  let response_text = Yojson.Safe.to_string response in
+  Alcotest.(check bool) "missing params rejected" true
+    (contains_substring response_text "Missing params");
+  Alcotest.(check (float 0.0001)) "missing params records duration count"
+    1.0
+    (Masc.Otel_metric_store.metric_value_or_zero (metric_name ^ "_count") ~labels ()
+     -. before_count);
+  cleanup_dir base_path
+
 let test_handle_request_tools_call_transition_claim_guidance () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -2835,6 +2887,8 @@ let eio_tests = [
   test_handle_request_tools_call_operator_profile_rejects_non_operator;
   "handle tools/call managed profile rejects hidden claim alias", `Quick,
     test_handle_request_tools_call_managed_profile_rejects_hidden_claim_alias;
+  "handle tools/call missing params records duration", `Quick,
+    test_handle_request_tools_call_missing_params_records_duration;
   "handle tools/call transition claim guidance", `Quick,
     test_handle_request_tools_call_transition_claim_guidance;
   "handle tools/call transition done guidance", `Quick,

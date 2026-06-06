@@ -227,9 +227,24 @@ let mcp_client_session_duration_labels ~url ?error_type () =
   @ server_labels_of_url url
   @ option_label Otel_genai.Mcp_attr_key.error_type error_type
 
+let tools_call_result_is_error ~method_name json =
+  String.equal method_name Otel_genai.Mcp_value.tools_call_method
+  &&
+  match Json_util.assoc_member_opt "result" json with
+  | Some result -> (
+    match Json_util.assoc_member_opt "isError" result with
+    | Some (`Bool true) -> true
+    | _ -> false)
+  | None -> false
+
 let record_mcp_client_operation_duration ~url ~method_name ~params ~started_at result =
   let error =
     match result with
+    | Ok json when tools_call_result_is_error ~method_name json ->
+      Some
+        (client_operation_error
+           ~error_type:Otel_genai.Mcp_value.tool_error_type
+           "MCP tools/call result isError=true")
     | Ok _ -> None
     | Error error -> Some error
   in
@@ -238,14 +253,14 @@ let record_mcp_client_operation_duration ~url ~method_name ~params ~started_at r
     ~labels:(mcp_client_operation_duration_labels ~url ~method_name ~params ?error ())
     (* NDT-OK: client operation duration is telemetry only; admission and
        result semantics use [result], not this wall-clock sample. *)
-    (max 0.0 (Unix.gettimeofday () -. started_at))
+    (max 0.0 (Unix.gettimeofday () -. started_at) (* NDT-OK: telemetry sample. *))
 
 let record_mcp_client_session_duration ~url ~started_at ?error_type () =
   Otel_metric_store.observe_histogram
     Otel_genai.Mcp_metric_name.client_session_duration
     ~labels:(mcp_client_session_duration_labels ~url ?error_type ())
     (* NDT-OK: client session duration is a runtime telemetry observation. *)
-    (max 0.0 (Unix.gettimeofday () -. started_at))
+    (max 0.0 (Unix.gettimeofday () -. started_at) (* NDT-OK: telemetry sample. *))
 
 module For_testing = struct
   let client_operation_error_opt ?rpc_response_status_code = function
@@ -265,10 +280,15 @@ module For_testing = struct
   ;;
 
   let record_mcp_client_operation_duration ~url ~method_name ~params ~started_at
-      ?error_type ?rpc_response_status_code () =
+      ?error_type ?rpc_response_status_code ?(tool_result_is_error = false) () =
     let result =
       match client_operation_error_opt ?rpc_response_status_code error_type with
-      | None -> Ok `Null
+      | None ->
+        Ok
+          (`Assoc
+            [ ( "result"
+              , `Assoc [ "isError", `Bool tool_result_is_error ] )
+            ])
       | Some error -> Error error
     in
     record_mcp_client_operation_duration ~url ~method_name ~params ~started_at result
@@ -399,7 +419,7 @@ let call_jsonrpc ~sw ~(auth_token : string option) ~session_id ~(method_name : s
                    ("invalid JSON-RPC response: " ^ msg))
   in
   (* NDT-OK: request-boundary timestamp feeds only the OTel duration histogram. *)
-  let started_at = Unix.gettimeofday () in
+  let started_at = Unix.gettimeofday () (* NDT-OK: telemetry sample. *) in
   let result = decode 1 in
   record_mcp_client_operation_duration ~url ~method_name ~params ~started_at result;
   Result.map_error (fun error -> error.message) result

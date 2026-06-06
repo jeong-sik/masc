@@ -751,10 +751,30 @@ let handle_request
                      state
                      id)
               | "tools/call" ->
+                let operation_start_time = Eio.Time.now clock in
+                let otel_context =
+                  otel_tool_request_context
+                    ~id
+                    ?mcp_session_id
+                    ?mcp_protocol_version:otel_mcp_protocol_version
+                    ?otel_transport_context
+                    json
+                in
+                let failed_tool_call_error ?(tool_name = "") code message =
+                  Otel_dispatch_hook.with_request_context
+                    otel_context
+                    (fun () ->
+                       Mcp_server_eio_call_tool
+                       .record_mcp_server_operation_duration_sample
+                         ~tool_name
+                         ~success:false
+                         ~duration_seconds:
+                           (max 0.0 (Eio.Time.now clock -. operation_start_time));
+                       make_error_typed ~id code message)
+                in
                 (match req.params with
                  | Some params ->
                    (try
-                      let operation_start_time = Eio.Time.now clock in
                       let name =
                         Json_util.get_string params "name" |> Option.value ~default:""
                       in
@@ -769,14 +789,6 @@ let handle_request
                         | Operator_remote | Managed_agent -> profile
                         | Full -> Full
                       in
-                      let otel_context =
-                        otel_tool_request_context
-                          ~id
-                          ?mcp_session_id
-                          ?mcp_protocol_version:otel_mcp_protocol_version
-                          ?otel_transport_context
-                          json
-                      in
                       if
                         not
                           (TP.tool_allowed_in_profile
@@ -785,20 +797,10 @@ let handle_request
                              call_profile
                              name)
                       then
-                        Otel_dispatch_hook.with_request_context
-                          otel_context
-                          (fun () ->
-                             Mcp_server_eio_call_tool
-                             .record_mcp_server_operation_duration_sample
-                               ~tool_name:name
-                               ~success:false
-                               ~duration_seconds:
-                                 (max 0.0
-                                    (Eio.Time.now clock -. operation_start_time));
-                             make_error_typed
-                               ~id
-                               Mcp_error_code.Method_not_found
-                               (unavailable_tool_message name))
+                        failed_tool_call_error
+                          ~tool_name:name
+                          Mcp_error_code.Method_not_found
+                          (unavailable_tool_message name)
                       else (
                         Log.Mcp.emit
                           Log.Info
@@ -852,8 +854,11 @@ let handle_request
                         result)
                     with
                     | Yojson.Safe.Util.Type_error (_, _) ->
-                      make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params: name must be a string")
-                 | None -> make_error_typed ~id Mcp_error_code.Invalid_params "Missing params")
+                      failed_tool_call_error
+                        Mcp_error_code.Invalid_params
+                        "Invalid params: name must be a string")
+                 | None ->
+                   failed_tool_call_error Mcp_error_code.Invalid_params "Missing params")
               | method_ when Mcp_sdk_adapter_masc.handles_method method_ ->
                 Mcp_sdk_adapter_masc.dispatch_request
                   ~handle_call_tool_eio

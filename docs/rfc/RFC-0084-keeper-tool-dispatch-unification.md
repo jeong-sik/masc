@@ -483,8 +483,8 @@ let () = QCheck.Test.check_exn @@ QCheck.Test.make
 ### 9.5 메모리
 
 - `reference_runtime_lens_boundary_carve_out` — 외부 placeholder vs 내부 real lens
-- `feedback_user_rejects_cron_pr_loop` — Draft + human-approved-ready label
-- `feedback_masc_draft_guard_blocks_agent_ready` — agent ready 자동 차단
+- `feedback_user_rejects_cron_pr_loop` — Draft-only PR flow
+- `feedback_masc_auto_ready_gate_removed` — 자동 ready 차단 거부
 - `feedback_keeper_tool_alias_3_tier_is_overengineered` — 공용 도구 이름 1st-class
 - `feedback_lint_string_classifier_is_workaround_not_fundamental` — string classifier 자체 거부
 - `feedback_rfc_number_reservation_needed` — RFC 번호 race 사고
@@ -499,7 +499,7 @@ let () = QCheck.Test.check_exn @@ QCheck.Test.make
 
 본 RFC 완료 (모든 13 PR 머지 + exit criteria 만족) 시점에 plan file §13 1-10 모두 만족:
 
-1. 13 PR 모두 머지 (Draft → `human-approved-ready` → squash merge)
+1. 13 PR 모두 머지 (Draft → CI green → squash merge)
 2. `test_telemetry_completeness` property test green (4-tuple emission 100%)
 3. `ci/lint-no-direct-dispatch.sh` green
 4. Production 24h window `is not registered` warn 0

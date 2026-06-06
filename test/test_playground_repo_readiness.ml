@@ -164,6 +164,29 @@ let git_output ~cwd args =
          (String.concat " " args)
          result.output)
 
+let path_exists path =
+  try Sys.file_exists path with
+  | Sys_error _ -> false
+
+let assert_worktree_top ~worktree_path =
+  let worktree_top =
+    git_output ~cwd:worktree_path [ "rev-parse"; "--show-toplevel" ]
+  in
+  check string "worktree top" (normalize_path worktree_path)
+    (normalize_path worktree_top)
+
+let has_quarantined_sibling worktree_path =
+  let parent = Filename.dirname worktree_path in
+  let base = Filename.basename worktree_path in
+  Sys.readdir parent
+  |> Array.exists (fun name -> String.starts_with ~prefix:(base ^ ".broken") name)
+
+let write_stale_worktree_gitdir ~worktree_path ~task_name =
+  mkdir_p worktree_path;
+  write_file
+    (Filename.concat worktree_path ".git")
+    ("gitdir: ../../.git/worktrees/" ^ task_name ^ "\n")
+
 let test_deleted_tracked_files_restore_hint () =
   let clone_path = temp_dir "masc-repo-readiness-status-hint" in
   git_ok ~cwd:clone_path [ "init"; "-q"; "--initial-branch=main" ];
@@ -596,6 +619,45 @@ let test_ensure_worktree_ready_rejects_nested_plain_directory () =
   check string "nested dir toplevel is parent clone" (normalize_path clone_path)
     (normalize_path probe.output)
 
+let test_ensure_worktree_ready_replaces_broken_gitdir_slot () =
+  let base_path = temp_dir "masc-worktree-ready-broken-slot" in
+  let remote = Filename.concat base_path ".remote-masc.git" in
+  git_ok ~cwd:base_path [ "init"; "--bare"; "-q"; "--initial-branch=main"; remote ];
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "keeper-one" in
+  let clone_path =
+    Masc.Playground_repo_readiness.clone_path ~config ~meta ~repo_name:"masc"
+  in
+  mkdir_p (Filename.dirname clone_path);
+  git_ok ~cwd:base_path [ "clone"; "-q"; remote; clone_path ];
+  git_ok ~cwd:clone_path [ "config"; "user.email"; "test@example.com" ];
+  git_ok ~cwd:clone_path [ "config"; "user.name"; "Test" ];
+  let readme = Filename.concat clone_path "README.md" in
+  write_file readme "# test\n";
+  git_ok ~cwd:clone_path [ "add"; "README.md" ];
+  git_ok ~cwd:clone_path [ "commit"; "-q"; "-m"; "init" ];
+  git_ok ~cwd:clone_path [ "push"; "-q"; "origin"; "main" ];
+  let task_name = "task-broken-gitdir-slot" in
+  let worktree_path = Filename.concat clone_path (".worktrees/" ^ task_name) in
+  write_stale_worktree_gitdir ~worktree_path ~task_name;
+  let broken_probe =
+    Masc.Playground_repo_readiness.run_git
+      ~timeout_sec:Masc.Playground_repo_readiness.read_only_probe_timeout_sec
+      ~clone_path:worktree_path
+      [ "rev-parse"; "--show-toplevel" ]
+  in
+  check bool "fixture starts broken" false broken_probe.ok;
+  let result =
+    Masc.Playground_repo_readiness.ensure_worktree_ready
+      ~config ~meta ~repo_name:"masc" ~task_name ~worktree_path ()
+  in
+  (match result with
+   | Ok () -> ()
+   | Error msg -> fail ("ensure_worktree_ready failed: " ^ msg));
+  check bool "broken slot quarantined" true
+    (has_quarantined_sibling worktree_path);
+  assert_worktree_top ~worktree_path
+
 let test_provision_worktrees_creates_worktrees () =
   (* Set up a docker playground with a repo *)
   let base_path = temp_dir "masc-provision" in
@@ -636,6 +698,62 @@ let test_provision_worktrees_creates_worktrees () =
       [ "rev-parse"; "--show-toplevel" ]
   in
   check bool "worktree is valid git checkout" true probe.ok
+
+let test_provision_worktrees_replaces_broken_gitdir_slot () =
+  let base_path = temp_dir "masc-provision-broken-slot" in
+  let remote = Filename.concat base_path ".remote-masc.git" in
+  git_ok ~cwd:base_path [ "init"; "--bare"; "-q"; "--initial-branch=main"; remote ];
+  let config = Masc.Workspace.default_config base_path in
+  let agent_name = "keeper-provision-broken-slot" in
+  let safe_name = Playground_paths.sanitize_keeper_name agent_name in
+  let repo_dir =
+    Filename.concat base_path
+      (Printf.sprintf ".masc/playground/docker/%s/repos/test-repo" safe_name)
+  in
+  mkdir_p (Filename.dirname repo_dir);
+  git_ok ~cwd:base_path [ "clone"; "-q"; remote; repo_dir ];
+  git_ok ~cwd:repo_dir [ "config"; "user.email"; "test@example.com" ];
+  git_ok ~cwd:repo_dir [ "config"; "user.name"; "Test" ];
+  let readme = Filename.concat repo_dir "README.md" in
+  write_file readme "# test\n";
+  git_ok ~cwd:repo_dir [ "add"; "README.md" ];
+  git_ok ~cwd:repo_dir [ "commit"; "-q"; "-m"; "init" ];
+  git_ok ~cwd:repo_dir [ "push"; "-q"; "origin"; "main" ];
+  let task_id = "task-broken-provision" in
+  let worktree_path =
+    Filename.concat repo_dir (Printf.sprintf ".worktrees/%s" task_id)
+  in
+  write_stale_worktree_gitdir ~worktree_path ~task_name:task_id;
+  Masc.Playground_repo_readiness.provision_worktrees_for_task
+    ~config ~agent_name ~task_id ();
+  check bool "broken provision slot quarantined" true
+    (has_quarantined_sibling worktree_path);
+  assert_worktree_top ~worktree_path
+
+let test_provision_worktrees_rejects_dot_task_id () =
+  let base_path = temp_dir "masc-provision-dot-task" in
+  let remote = Filename.concat base_path ".remote-masc.git" in
+  git_ok ~cwd:base_path [ "init"; "--bare"; "-q"; "--initial-branch=main"; remote ];
+  let config = Masc.Workspace.default_config base_path in
+  let agent_name = "keeper-provision-dot-task" in
+  let safe_name = Playground_paths.sanitize_keeper_name agent_name in
+  let repo_dir =
+    Filename.concat base_path
+      (Printf.sprintf ".masc/playground/docker/%s/repos/test-repo" safe_name)
+  in
+  mkdir_p (Filename.dirname repo_dir);
+  git_ok ~cwd:base_path [ "clone"; "-q"; remote; repo_dir ];
+  git_ok ~cwd:repo_dir [ "config"; "user.email"; "test@example.com" ];
+  git_ok ~cwd:repo_dir [ "config"; "user.name"; "Test" ];
+  let readme = Filename.concat repo_dir "README.md" in
+  write_file readme "# test\n";
+  git_ok ~cwd:repo_dir [ "add"; "README.md" ];
+  git_ok ~cwd:repo_dir [ "commit"; "-q"; "-m"; "init" ];
+  git_ok ~cwd:repo_dir [ "push"; "-q"; "origin"; "main" ];
+  Masc.Playground_repo_readiness.provision_worktrees_for_task
+    ~config ~agent_name ~task_id:".git" ();
+  check bool "reserved dot task did not create hidden worktree" false
+    (path_exists (Filename.concat repo_dir ".worktrees/.git"))
 
 let test_provision_worktrees_uses_origin_base_with_dirty_parent () =
   let base_path = temp_dir "masc-provision-dirty-parent" in
@@ -781,6 +899,8 @@ let () =
           test_ensure_worktree_ready_normalizes_gitdir_pointer;
         test_case "rejects nested plain directory" `Quick
           test_ensure_worktree_ready_rejects_nested_plain_directory;
+        test_case "replaces broken gitdir slot" `Quick
+          test_ensure_worktree_ready_replaces_broken_gitdir_slot;
         test_case "creates worktree from dirty parent clone" `Quick
           test_ensure_worktree_ready_allows_dirty_parent_clone;
       ];
@@ -788,6 +908,10 @@ let () =
       [
         test_case "creates worktrees at claim time" `Quick
           test_provision_worktrees_creates_worktrees;
+        test_case "replaces broken gitdir slot at claim time" `Quick
+          test_provision_worktrees_replaces_broken_gitdir_slot;
+        test_case "rejects reserved dot task id" `Quick
+          test_provision_worktrees_rejects_dot_task_id;
         test_case "creates worktree from origin with dirty parent" `Quick
           test_provision_worktrees_uses_origin_base_with_dirty_parent;
       ];

@@ -375,11 +375,10 @@ let run (ctx : ctx)
         meta.name;
       Ok result
     | Error err ->
-      let err =
-        reclassify_provider_timeout_for_attempt
-          ~provider_timeout_budget:!attempt_provider_timeout_budget
-          err
-      in
+      (* RFC-XXXX: reclassify_provider_timeout_for_attempt removed.
+         The per-attempt wall-clock watchdog no longer fires, so the
+         structural OAS timeout path is dead. Provider errors pass
+         through unchanged for the downstream typed error classifier. *)
       let _ = drain_turn_event_bus ~site:"reconcile_pre_check" () in
       let err =
         match event_bus_integrity_error_snapshot () with

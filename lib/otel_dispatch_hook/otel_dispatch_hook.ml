@@ -14,6 +14,16 @@
 
 module OT = Opentelemetry
 
+type request_context =
+  { jsonrpc_request_id : string option
+  ; mcp_session_id : string option
+  ; mcp_protocol_version : string option
+  }
+
+let request_context_key : request_context Eio.Fiber.key =
+  Eio.Fiber.create_key ()
+;;
+
 let enabled_override : bool option ref = ref None
 
 let span_emitter_override
@@ -34,15 +44,41 @@ let enabled () =
   | None -> Otel_config.enabled
 ;;
 
-let tool_call_span_kind = OT.Span_kind.Span_kind_client
+let current_request_context () =
+  try Eio.Fiber.get request_context_key with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | _ -> None
+;;
+
+let in_eio_fiber_context () =
+  try
+    ignore (Eio.Fiber.get request_context_key);
+    true
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | _ -> false
+;;
+
+let with_request_context context f =
+  if in_eio_fiber_context ()
+  then Eio.Fiber.with_binding request_context_key context f
+  else f ()
+;;
+
+let tool_call_span_kind () =
+  match current_request_context () with
+  | Some _ -> OT.Span_kind.Span_kind_server
+  | None -> OT.Span_kind.Span_kind_client
+;;
 
 let emit_span ~name ~attrs ?status () =
+  let kind = tool_call_span_kind () in
   match !span_emitter_override with
-  | Some emit -> emit ~name ~attrs ~kind:tool_call_span_kind ~status
+  | Some emit -> emit ~name ~attrs ~kind ~status
   | None ->
     ignore
       (OT.Trace.with_
-         ~kind:tool_call_span_kind
+         ~kind
          name
          ~attrs
          (fun scope ->
@@ -88,6 +124,24 @@ let tool_failure_class_attrs (result : Tool_result.result) =
     ]
 ;;
 
+let string_attr key = function
+  | Some value when String.trim value <> "" -> [ key, `String value ]
+  | Some _ | None -> []
+;;
+
+let request_context_attrs () =
+  match current_request_context () with
+  | None -> []
+  | Some context ->
+    string_attr
+      Otel_genai.Mcp_attr_key.jsonrpc_request_id
+      context.jsonrpc_request_id
+    @ string_attr Otel_genai.Mcp_attr_key.mcp_session_id context.mcp_session_id
+    @ string_attr
+        Otel_genai.Mcp_attr_key.mcp_protocol_version
+        context.mcp_protocol_version
+;;
+
 let tool_span_attrs (result : Tool_result.result) =
   let status_attrs =
     if Tool_result.is_success result
@@ -108,7 +162,7 @@ let tool_span_attrs (result : Tool_result.result) =
     Otel_genai.tool_execution_attrs ~tool_name:(Tool_result.tool_name result)
     |> List.map (fun (key, value) -> key, (value :> OT.value))
   in
-  gen_ai_attrs @ status_attrs
+  gen_ai_attrs @ request_context_attrs () @ status_attrs
 ;;
 
 (** Record a tool call as an OTel span. *)

@@ -39,6 +39,10 @@ Implementation status as of 2026-06-06:
   and use OTel/MCP `error.type=tool_error` for `CallToolResult.isError=true`.
   The typed `Tool_result.tool_failure_class` string remains available under the
   MASC-owned `masc.mcp.tool.failure_class` attribute.
+  When a JSON-RPC `tools/call` request context is available, spans also carry
+  `jsonrpc.request.id`, `mcp.session.id`, `mcp.protocol.version`, and SERVER
+  kind. Internal dispatch spans without MCP request context keep CLIENT kind and
+  omit request/session attrs.
 
 ### 2.1 Legacy Metric Names
 
@@ -155,12 +159,12 @@ Why OTel-backed migration:
 | File | Change |
 |------|--------|
 | `lib/otel_genai/otel_genai.ml` | Centralized GenAI metric, event, and attribute names including usage detail attributes. |
-| `lib/otel_dispatch_hook/otel_dispatch_hook.ml` | Emits MCP tool-call spans with `tools/call <tool-name>` names, `mcp.method.name=tools/call`, `gen_ai.tool.name`, CLIENT span kind, OTel/MCP `error.type=tool_error`, MASC `masc.mcp.tool.failure_class`, and ERROR status for failed tool results. |
+| `lib/otel_dispatch_hook/otel_dispatch_hook.ml` | Emits MCP tool-call spans with `tools/call <tool-name>` names, `mcp.method.name=tools/call`, `gen_ai.tool.name`, context-aware CLIENT/SERVER span kind, request/session/protocol attrs when a JSON-RPC `tools/call` request context is present, OTel/MCP `error.type=tool_error`, MASC `masc.mcp.tool.failure_class`, and ERROR status for failed tool results. |
 | `lib/otel_spans/otel_spans.ml` | Added testable span attribute/status hooks and GenAI exception recording. |
 | `lib/llm_metric_bridge.ml` | Emits standard GenAI client metrics, operation-details events, usage attributes, streaming timings, and bounded error status. |
 | `lib/keeper/keeper_hooks_oas.ml` | Projects trusted cache/reasoning token details into GenAI usage attributes without inventing extra `gen_ai.token.type` values. |
 | `test/test_llm_metric_bridge.ml` | Covers standard metric names, event names, span attrs/status, and the cache/reasoning token-type guardrail. |
-| `test/test_otel_dispatch_hook.ml` | Covers MCP tool-call span name, `gen_ai.tool.name`, `mcp.method.name`, CLIENT kind, OTel/MCP `tool_error`, and MASC typed failure-class preservation. |
+| `test/test_otel_dispatch_hook.ml` | Covers MCP tool-call span name, `gen_ai.tool.name`, `mcp.method.name`, internal CLIENT kind, request-context SERVER kind, `jsonrpc.request.id`, `mcp.session.id`, `mcp.protocol.version`, OTel/MCP `tool_error`, and MASC typed failure-class preservation. |
 
 ## 5. Remaining Migration Work
 

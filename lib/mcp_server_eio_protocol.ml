@@ -579,6 +579,36 @@ let jsonrpc_id_label = function
   | _ -> "?"
 ;;
 
+let jsonrpc_request_id_attr = function
+  | `String s ->
+    let s = String.trim s in
+    if s = "" then None else Some s
+  | `Int i -> Some (string_of_int i)
+  | `Intlit s ->
+    let s = String.trim s in
+    if s = "" then None else Some s
+  | `Float f -> Some (Printf.sprintf "%0.0f" f)
+  | `Null -> None
+  | _ -> None
+;;
+
+let nonempty_opt = function
+  | Some value ->
+    let trimmed = String.trim value in
+    if trimmed = "" then None else Some trimmed
+  | None -> None
+;;
+
+let otel_tool_request_context ~id ?mcp_session_id request_json =
+  let mcp_protocol_version =
+    Mcp_transport_protocol.protocol_version_from_request_meta_json request_json
+  in
+  { Otel_dispatch_hook.jsonrpc_request_id = jsonrpc_request_id_attr id
+  ; mcp_session_id = nonempty_opt mcp_session_id
+  ; mcp_protocol_version
+  }
+;;
+
 let tool_profile_label = function
   | Full -> "full"
   | Managed_agent -> "managed_agent"
@@ -752,16 +782,22 @@ let handle_request
                               | Some s -> s
                               | None -> "none"));
                         let result =
-                          handle_call_tool_eio
-                            ~sw
-                            ~clock
-                            ~profile
-                            ?mcp_session_id
-                            ?auth_token
-                            ~internal_keeper_runtime
-                            state
-                            id
-                            params
+                          let otel_context =
+                            otel_tool_request_context ~id ?mcp_session_id json
+                          in
+                          Otel_dispatch_hook.with_request_context
+                            otel_context
+                            (fun () ->
+                               handle_call_tool_eio
+                                 ~sw
+                                 ~clock
+                                 ~profile
+                                 ?mcp_session_id
+                                 ?auth_token
+                                 ~internal_keeper_runtime
+                                 state
+                                 id
+                                 params)
                         in
                         let outcome = tool_call_outcome result in
                         let outcome_s = Tool_result.string_of_tool_call_outcome outcome in

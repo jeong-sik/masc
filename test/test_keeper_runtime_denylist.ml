@@ -140,7 +140,7 @@ tool_denylist = ["toml-tool-x", "toml-tool-y"]
           check int "no TOML-only write bump" (initial_meta.meta_version + 1)
             persisted.Keeper_meta_contract.meta_version))
 
-let test_ensure_keeper_meta_persists_active_goal_ids () =
+let test_ensure_keeper_meta_overlays_active_goal_ids_without_persisting () =
   with_runtime_default @@ fun () ->
   with_temp_dir "keeper-runtime-active-goal-workspace" @@ fun workspace_dir ->
   with_config_dir @@ fun config_dir ->
@@ -188,11 +188,11 @@ active_goal_ids = ["goal-runtime"]
       | Ok (Some persisted) ->
           check
             (list string)
-            "persisted meta keeps active_goal_ids"
-            [ "goal-runtime" ]
+            "persisted meta does not duplicate TOML active_goal_ids"
+            []
             persisted.Keeper_meta_contract.active_goal_ids;
-          check int "persisted write bumps meta_version"
-            (initial_meta.meta_version + 2)
+          check int "TOML-only active_goal_ids does not write runtime meta"
+            (initial_meta.meta_version + 1)
             persisted.Keeper_meta_contract.meta_version))
 
 let () =
@@ -205,8 +205,8 @@ let () =
             `Quick
             test_ensure_keeper_meta_overlays_denylist_from_toml;
           test_case
-            "persists active_goal_ids from TOML on bootstrap"
+            "overlays active_goal_ids from TOML without persisting"
             `Quick
-            test_ensure_keeper_meta_persists_active_goal_ids;
+            test_ensure_keeper_meta_overlays_active_goal_ids_without_persisting;
         ] );
     ]

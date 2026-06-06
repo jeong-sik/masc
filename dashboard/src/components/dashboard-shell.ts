@@ -1160,6 +1160,13 @@ function useSurfaceDocumentTitle(): void {
   }, [currentView?.label, currentSection?.label])
 }
 
+export function isKeeperDetailDashboardRoute(routeState: RouteState): boolean {
+  return routeState.tab === 'monitoring'
+    && routeState.params.section === 'agents'
+    && typeof routeState.params.keeper === 'string'
+    && routeState.params.keeper.trim() !== ''
+}
+
 function SurfaceLead() {
   const currentTab = route.value.tab
   const currentView = DASHBOARD_NAV_ITEMS.find(item => item.id === currentTab)
@@ -1225,6 +1232,7 @@ export function DashboardMain() {
   const routeLabel = dashboardRouteBoundaryKey(route.value)
   const soloMode = isWidgetSoloRoute(route.value)
   const immersiveSurface = route.value.tab === 'code'
+  const keeperDetailRoute = isKeeperDetailDashboardRoute(route.value)
   const warmingBanner = namespaceTruthInitializing.value ? html`
     <div class=${immersiveSurface
       ? 'shrink-0 border-b border-solid border-[var(--warn-20)] bg-[var(--warn-10)] px-4 py-1.5 text-center text-xs text-[var(--color-status-warn)]'
@@ -1269,8 +1277,8 @@ export function DashboardMain() {
 
   return html`
     ${warmingBanner}
-    <${SurfaceLead} />
-    <${ObservatoryFilterBar} />
+    ${keeperDetailRoute ? null : html`<${SurfaceLead} />`}
+    ${keeperDetailRoute ? null : html`<${ObservatoryFilterBar} />`}
     <${ErrorBoundary} key=${routeLabel} label=${routeLabel || 'dashboard'}>
       <div class="animate-in fade-in slide-in-from-bottom-2 duration-[var(--t-slow)] fill-mode-both">
         <${TabContent} />

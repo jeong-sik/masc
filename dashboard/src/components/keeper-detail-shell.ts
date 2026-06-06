@@ -74,20 +74,19 @@ export function KeeperDetailHeaderInfo({
   onClose: () => void
 }) {
   return html`
-    <div class="flex min-w-0 flex-wrap items-start gap-4">
+    <div class="flex min-w-0 flex-wrap items-center gap-3">
       <button
         type="button"
         onClick=${onClose}
-        class="inline-flex shrink-0 items-center gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-1.5 text-xs font-semibold text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--color-bg-hover)]"
+        class="inline-flex shrink-0 items-center gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-1.5 text-xs font-semibold text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--color-bg-hover)]"
       >
         <span aria-hidden="true">←</span>
         목록
       </button>
-      <div class="size-10 shrink-0 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] flex items-center justify-center text-xl">${keeper.emoji}</div>
+      <div class="size-9 shrink-0 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] border border-[var(--color-border-default)] flex items-center justify-center text-lg">${keeper.emoji}</div>
       <div class="flex min-w-[12rem] flex-1 flex-col gap-0.5">
-        <${SectionLabel}>모니터링 / 에이전트 / 키퍼 상세</${SectionLabel}>
-        <div class="mt-1 flex flex-wrap items-center gap-2.5">
-          <h2 id=${titleId} class="m-0 text-lg font-semibold text-[var(--color-fg-primary)]">${keeper.name}</h2>
+        <div class="flex flex-wrap items-center gap-2.5">
+          <h2 id=${titleId} class="m-0 text-xl font-semibold text-[var(--color-fg-primary)]">${keeper.name}</h2>
           <${KeeperPhaseAndStage}
             phase=${keeper.lifecycle_phase ?? keeper.phase}
             pipelineStage=${keeper.pipeline_stage}
@@ -153,15 +152,14 @@ function scrollToKeeperDetailSection(sectionId: KeeperDetailSectionId): void {
 export function KeeperDetailSectionRail() {
   return html`
     <nav
-      class="sticky top-[76px] z-10 overflow-x-auto rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-1 shadow-[var(--shadow-panel)]"
+      class="sticky top-[64px] z-10 overflow-x-auto border-b border-[var(--color-border-default)] bg-[var(--color-bg-page)] py-1.5"
       aria-label="키퍼 상세 섹션"
     >
-      <div class="flex min-w-max items-center gap-1">
-        <span class="shrink-0 px-2 text-3xs font-semibold uppercase tracking-[var(--track-label)] text-[var(--color-fg-disabled)]">섹션</span>
+      <div class="flex min-w-max items-center gap-1.5 px-1">
         ${KEEPER_DETAIL_SECTIONS.map((section) => html`
           <button
             type="button"
-            class="h-8 shrink-0 rounded-[var(--r-1)] border border-transparent px-3 text-2xs font-semibold text-[var(--color-fg-muted)] transition-colors hover:border-[var(--color-border-default)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)]"
+            class="h-8 shrink-0 rounded-[var(--r-1)] border border-transparent px-3 text-2xs font-semibold text-[var(--color-fg-muted)] transition-colors hover:border-[var(--color-border-default)] hover:bg-[var(--color-bg-surface)] hover:text-[var(--color-fg-primary)]"
             onClick=${() => scrollToKeeperDetailSection(section.id)}
           >
             ${section.label}
@@ -200,18 +198,20 @@ export function KeeperDetailSection({
   const isCollapsed = lockedOpen ? false : collapsed
   const bodyId = `${id}-body`
   const sectionClass = variant === 'primary'
-    ? 'scroll-mt-24 rounded-[var(--r-3)] border border-[var(--accent-20)] bg-[var(--color-bg-surface)] shadow-[var(--shadow-raised)]'
-    : 'scroll-mt-24 rounded-[var(--r-3)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] shadow-[var(--shadow-raised)]'
+    ? 'scroll-mt-24 rounded-[var(--r-2)] bg-transparent shadow-none'
+    : 'scroll-mt-24 rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] shadow-none'
   const headerClass = variant === 'primary'
-    ? 'flex w-full items-center justify-between gap-3 border-b border-[var(--accent-20)] px-5 py-4 text-left sm:px-6'
-    : 'flex w-full items-center justify-between gap-3 border-b border-[var(--color-border-default)] px-5 py-4 text-left transition-colors hover:bg-[var(--color-bg-hover)] sm:px-6'
+    ? 'flex w-full items-center justify-between gap-3 px-0 pb-2 pt-1 text-left'
+    : 'flex w-full items-center justify-between gap-3 border-b border-[var(--color-border-default)] px-4 py-3 text-left transition-colors hover:bg-[var(--color-bg-hover)] sm:px-5'
   const headerContent = html`
     <div class="min-w-0">
       <div class="text-3xs font-semibold uppercase tracking-[var(--track-brand)] text-[var(--color-fg-muted)]">${eyebrow}</div>
       <h3 class="m-0 mt-1 text-lg font-semibold text-[var(--color-fg-primary)]">${title}</h3>
     </div>
-    ${lockedOpen
+    ${lockedOpen && variant !== 'primary'
       ? html`<span class="shrink-0 rounded-[var(--r-0)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-2 py-1 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-accent-fg)]">기본</span>`
+      : lockedOpen
+        ? null
       : html`
         <span
           aria-hidden="true"
@@ -239,7 +239,7 @@ export function KeeperDetailSection({
           </button>
         `}
       ${isCollapsed ? null : html`
-        <div id=${bodyId} class="flex flex-col gap-4 px-5 py-5 sm:px-6">
+        <div id=${bodyId} class=${variant === 'primary' ? 'flex flex-col gap-4 px-0 py-0' : 'flex flex-col gap-4 px-4 py-4 sm:px-5'}>
           ${children}
         </div>
       `}

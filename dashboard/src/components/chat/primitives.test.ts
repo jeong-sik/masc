@@ -115,6 +115,9 @@ describe('ChatTranscript', () => {
     const transcript = container.querySelector('[data-chat-variant="messenger"]')
     expect(transcript?.classList.contains('min-h-[18rem]')).toBe(true)
     expect(transcript?.classList.contains('max-h-[42vh]')).toBe(true)
+    expect(transcript?.classList.contains('sm:min-h-[28rem]')).toBe(true)
+    expect(transcript?.classList.contains('sm:max-h-[54vh]')).toBe(true)
+    expect(transcript?.classList.contains('chat-transcript-airy')).toBe(true)
   })
 
   it('renders attachments even when metadata is hidden', () => {

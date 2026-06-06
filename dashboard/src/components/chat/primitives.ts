@@ -429,14 +429,17 @@ export function ChatTranscript({
     el.scrollTop = el.scrollHeight
   }, [lastSignature])
 
-  const heightClass = size === 'primary'
-    ? 'min-h-[18rem] max-h-[42vh] xl:max-h-[46vh]'
+  const isPrimary = size === 'primary'
+  const heightClass = isPrimary
+    ? 'min-h-[18rem] max-h-[42vh] sm:min-h-[28rem] sm:max-h-[54vh] xl:max-h-[58vh]'
     : 'min-h-75 max-h-130'
 
   return html`
     <div
-      class=${`chat-transcript flex ${heightClass} flex-col overflow-y-auto border border-[var(--color-border-default)] shadow-[inset_0_1px_0_var(--color-border-default)] ${
-        variant === 'messenger'
+      class=${`chat-transcript ${isPrimary ? 'chat-transcript-airy' : ''} flex ${heightClass} flex-col overflow-y-auto ${
+        isPrimary
+          ? 'gap-5 rounded-[var(--r-2)] border border-transparent px-0 py-2 shadow-none'
+          : variant === 'messenger'
           ? 'gap-4 rounded-[var(--radius-xl)] px-4 py-5 sm:px-5'
           : 'gap-3 rounded-[var(--radius-xl)] px-3 py-4'
       }`}
@@ -464,6 +467,7 @@ export function ChatComposer({
   onDraftChange,
   onSend,
   onAbort,
+  layout = 'default',
 }: {
   draft: string
   placeholder: string
@@ -473,6 +477,7 @@ export function ChatComposer({
   onDraftChange: (value: string) => void
   onSend: () => void
   onAbort?: () => void
+  layout?: 'default' | 'primary'
 }) {
   const [elapsed, setElapsed] = useState(0)
 
@@ -492,14 +497,20 @@ export function ChatComposer({
     : '보내기'
   const isStreamWarning = streaming && elapsed > 60
 
+  const isPrimary = layout === 'primary'
+
   return html`
     <div class="chat-composer flex flex-col gap-3">
-      <div class="flex flex-wrap items-center justify-between gap-2">
-        <div class="text-2xs font-semibold uppercase tracking-4 text-[var(--color-fg-muted)]">메시지</div>
-        <div class="text-2xs text-[var(--color-fg-muted)]">Enter로 전송, Shift+Enter로 줄바꿈</div>
-      </div>
+      ${isPrimary ? null : html`
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div class="text-2xs font-semibold uppercase tracking-4 text-[var(--color-fg-muted)]">메시지</div>
+          <div class="text-2xs text-[var(--color-fg-muted)]">Enter로 전송, Shift+Enter로 줄바꿈</div>
+        </div>
+      `}
       <textarea
-        class="control-textarea min-h-24 rounded-card border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] px-3 py-3 text-base leading-loose"
+        class=${isPrimary
+          ? 'control-textarea min-h-30 rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-4 py-4 text-base leading-loose'
+          : 'control-textarea min-h-24 rounded-card border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] px-3 py-3 text-base leading-loose'}
         placeholder=${placeholder}
         aria-label="메시지 입력"
         value=${draft}

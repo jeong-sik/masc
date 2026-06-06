@@ -316,6 +316,87 @@ export function KeeperConversationPanel({
     }
   }
 
+  if (layout === 'primary') {
+    return html`
+      <div class="flex flex-col gap-4" data-keeper-chat-layout="primary">
+        <div class="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-border-default)] pb-3">
+          <div class="min-w-0">
+            <div class="text-2xs font-semibold uppercase tracking-5 text-[var(--color-fg-muted)]">직접 대화</div>
+            <div class="mt-1.5 flex flex-wrap items-center gap-2">
+              <div class="text-lg font-semibold text-[var(--color-fg-primary)]">@${keeperName}</div>
+              <span class=${`inline-flex items-center rounded-[var(--r-0)] border px-2.5 py-1 text-3xs font-medium uppercase tracking-2 ${conversationStateClass(sending, hydrating)}`}>
+                ${conversationStateLabel(sending, hydrating)}
+              </span>
+            </div>
+          </div>
+          <div class="flex flex-wrap items-center justify-end gap-2">
+            <${GhostButton} onClick=${toggleMetadata} ariaExpanded=${showMetadata}>
+              ${showMetadata ? '메타데이터 숨김' : '메타데이터 표시'}
+            <//>
+            <${GhostButton}
+              onClick=${toggleInternal}
+              ariaExpanded=${showInternal}
+              class=${showInternal ? 'border-[var(--info-border)] text-[var(--info-fg)]' : ''}
+            >
+              ${showInternal ? '내부 메시지 숨김' : '내부 메시지 표시'}
+            </${GhostButton}>
+            ${!historyExpanded
+              ? html`
+                  <${GhostButton} disabled=${hydrating} onClick=${() => { void expandHistory() }}>
+                    ${hydrating
+                      ? '불러오는 중...'
+                      : rawThread.length === 0
+                        ? '이력 불러오기'
+                        : `전체 이력 (${thread.length})`}
+                  </button>
+                `
+              : null}
+          </div>
+        </div>
+
+        ${chatAccess.message
+          ? html`
+              <div class="rounded-[var(--r-2)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2.5 text-xs leading-loose text-[var(--warn-bright)]">
+                ${chatAccess.message}
+              </div>
+            `
+          : null}
+
+        <${ChatTranscript}
+          entries=${thread}
+          emptyText="아직 표시할 대화가 없습니다. 내부 메시지와 도구 호출은 토글로 전환할 수 있습니다."
+          showMetadata=${showMetadata}
+          variant="messenger"
+          size="primary"
+        />
+
+        ${!showInternal && hiddenCount > 0
+          ? html`
+              <div class="rounded-[var(--r-2)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs leading-paragraph text-[var(--warn-bright)]">
+                ${hiddenCount}개의 내부 메시지가 숨겨져 있습니다. "내부 메시지 표시"로 볼 수 있습니다.
+              </div>
+            `
+          : null}
+
+        <div class="rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-4 py-4 shadow-none">
+          <${ChatComposer}
+            draft=${draft}
+            placeholder=${chatAccess.blocked ? '현재 actor는 direct keeper chat 권한이 없습니다' : placeholder}
+            disabled=${composerDisabled}
+            streaming=${sending}
+            streamStartedAt=${keeperStreamStartedAt.value[keeperName] ?? null}
+            onDraftChange=${setDraft}
+            onSend=${() => { void submit() }}
+            onAbort=${() => { abortKeeperThreadMessage(keeperName) }}
+            layout="primary"
+          />
+        </div>
+
+        ${error ? html`<div class="text-xs text-[var(--bad-light)] leading-relaxed">${error}</div>` : null}
+      </div>
+    `
+  }
+
   return html`
     <div class="flex flex-col gap-3">
       <div class="overflow-hidden rounded-[var(--radius-xl)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] shadow-[var(--shadow-raised)]">
@@ -367,7 +448,7 @@ export function KeeperConversationPanel({
             emptyText="아직 표시할 대화가 없습니다. 내부 메시지와 도구 호출은 토글로 전환할 수 있습니다."
             showMetadata=${showMetadata}
             variant="messenger"
-            size=${layout === 'primary' ? 'primary' : 'default'}
+            size="default"
           />
         </div>
 

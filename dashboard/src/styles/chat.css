@@ -8,6 +8,10 @@
     var(--color-bg-page);
 }
 
+@utility chat-transcript-airy {
+  background: transparent;
+}
+
 @utility chat-bubble {
   box-shadow: var(--elev-4-shadow);
   &.user {

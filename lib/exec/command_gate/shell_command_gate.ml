@@ -379,20 +379,10 @@ type stage_block =
 let first_blocked_stage ~allowed_commands (stages : SI.simple list)
   : stage_block option
   =
-  let rec scan idx = function
-    | [] -> None
-    | s :: rest ->
-      (match effective_bin_of_stage s with
-       | Unreducible detail ->
-         Some
-           (Stage_unreducible
-              { stage = idx; wrapper = BIN.to_string s.SI.bin; detail })
-       | Bin bin ->
-         if bin_allowed ~allowed_commands bin
-         then scan (idx + 1) rest
-         else Some (Stage_not_allowed { stage = idx; bin }))
-  in
-  scan 1 stages
+  (* RFC-0219: allowlist check removed. Safety is provided by Shell IR
+     risk classification (destructive/R0/R1/R2) and the destructive +
+     write operation gates in keeper_tool_execute_runtime.ml. *)
+  None
 ;;
 
 let stage_has_redirect (simple : SI.simple) : bool =

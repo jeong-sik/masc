@@ -202,6 +202,9 @@ export interface KeeperChatStreamEvent {
   name?: string
   value?: unknown
   timestamp?: number
+  // AG-UI tool call fields (TOOL_CALL_START / TOOL_CALL_ARGS / TOOL_CALL_END)
+  toolCallId?: string
+  toolCallName?: string
 }
 
 // --- Direct and operator-mediated messaging ---

@@ -295,10 +295,13 @@ let deterministic_baseline_action (obs : world_observation) : deliberation_actio
 let daily_budget_usd () : float =
   Env_config.KeeperRuntime.deliberation_daily_budget_usd ()
 
-(** Check whether the keeper has remaining budget for another deliberation call.
-    Returns [true] if [cost_today_usd < daily_budget_usd]. *)
+(** Advisory cost telemetry for deliberation.
+
+    Deliberation must not be blocked by a daily cost threshold. *)
 let deliberation_budget_check ~daily_budget_usd ~cost_today_usd : bool =
-  cost_today_usd < daily_budget_usd
+  ignore daily_budget_usd;
+  ignore cost_today_usd;
+  true
 
 (* ---------- Prompt builder ---------- *)
 

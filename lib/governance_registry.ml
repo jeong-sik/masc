@@ -234,10 +234,10 @@ let dashboard_agent_stuck_threshold_sec =
 
 (* ── cost_policy surface ──────────────────────────────────────── *)
 
-(** Per-session cost ceiling in USD.
+(** Per-session advisory cost threshold in USD.
     Default 0.50: based on observed keeper sessions averaging $0.02-0.15
     (local llama + GLM fallback). 0.50 is ~3x worst-case observed session cost.
-    Governs Eval_gate.max_cost_usd pre-execution gating. *)
+    Used for reporting/warnings only; it must not gate execution. *)
 let _cost_max_session_usd =
   register_float
     ~key:"cost.max_session_usd"

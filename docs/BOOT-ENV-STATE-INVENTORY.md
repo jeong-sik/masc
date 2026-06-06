@@ -166,7 +166,8 @@ stale_sec = 600
 grace_sec = 900
 ```
 
-`tool_cost_max_usd = 0` means unlimited and disables the keeper cost gate.
+`tool_cost_max_usd = 0` leaves the advisory cost threshold unset. Cost
+thresholds are telemetry only and never gate keeper tool execution.
 
 **Implementation**: `lib/keeper/keeper_runtime_config.ml` maintains a
 `key_to_env` table mapping TOML dotted keys to env var names. Values

@@ -4,9 +4,10 @@
     safety gates) to OAS hook events.
 
     Safety checks in [pre_tool_use]:
-    - Cost budget: reject tool calls when accumulated cost exceeds limit
     - Destructive patterns: reject bash/edit tools with dangerous commands
       (rm -rf, drop table, force push, etc.)
+
+    Cost is telemetry-only and must not reject tool calls.
 
     These checks were previously in [Eval_gate.guarded_execute] and are
     now natively integrated into the Agent.run() hook lifecycle.
@@ -194,13 +195,13 @@ include Keeper_hooks_oas_cost_events
 
     All keepers receive the full tool set unconditionally.
     Safety is enforced through eval_gate deny lists and these hooks:
-    1. Cost budget — reject when accumulated cost exceeds limit
-    2. Destructive pattern detection — reject dangerous bash/edit commands
-    3. Cost event emission — auto-emit per-turn cost to .masc/costs.jsonl
+    1. Destructive pattern detection — reject dangerous bash/edit commands
+    2. Cost event emission — auto-emit per-turn cost to .masc/costs.jsonl
+    3. Advisory cost threshold reporting — never rejects tool calls
 
     @param meta_ref Mutable ref to keeper metadata
     @param generation Current generation counter
-    @param max_cost_usd Optional cost budget (rejects tool calls above limit)
+    @param max_cost_usd Optional advisory cost threshold; never rejects tool calls
     @param destructive_check Enable destructive pattern detection (default true)
     @param pre_tool_use_guard Optional callback that can short-circuit a tool
            before execution by returning an inline override response.

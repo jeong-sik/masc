@@ -182,7 +182,7 @@ val make_hooks :
   ?trajectory_acc:Trajectory.accumulator ->
   unit -> Agent_sdk.Hooks.hooks
 (** Build the [Agent_sdk.Hooks.hooks] record used by the keeper turn loop:
-    pre-tool gate, post-tool accounting, idle-detection, cost guard,
+    pre-tool gate, post-tool accounting, idle-detection, cost telemetry,
     and trajectory hooks all wired together. *)
 
 val hook_introspection_json :

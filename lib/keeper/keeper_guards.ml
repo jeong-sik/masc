@@ -228,7 +228,7 @@ let planner_alternative_for_gate ~stage ~tool_name =
   | "keeper_deny" ->
     "planner_alternative=\"choose an allowed replacement tool, change plan, or request operator approval\""
   | "cost_gate" ->
-    "planner_alternative=\"stop tool use, summarize progress, or request a budget increase before retrying\""
+    "planner_alternative=\"cost telemetry is advisory; inspect the real gate before changing plan\""
   | "destructive_guard" ->
     "planner_alternative=\"use a safe read-only command, narrow the path, or request operator approval\""
   | _ ->
@@ -609,52 +609,18 @@ let deny_guard
       else Agent_sdk.Hooks.Continue
     | _ -> Agent_sdk.Hooks.Continue)
 
-(** Cost budget gate: reject when the running cost meets or exceeds
-    [limit]. No-op when [max_cost_usd] is [None]. *)
+(** Cost telemetry passthrough.
+
+    [max_cost_usd] is advisory only and must never reject tool execution. *)
 let cost_guard
     ~(meta_ref : Keeper_meta_contract.keeper_meta ref)
     ~on_gate_decision
     ~(max_cost_usd : float option)
   : Agent_sdk.Hooks.hooks =
-  hooks_of_pre_tool_use (fun event ->
-    match event with
-    | Agent_sdk.Hooks.PreToolUse
-        { tool_name; input; accumulated_cost_usd; turn; _ } ->
-      let t0 = Time_compat.now () in
-      let keeper_name = (!meta_ref).name in
-      (match max_cost_usd with
-       | Some limit when accumulated_cost_usd >= limit ->
-         let reason_text =
-           Printf.sprintf
-             "accumulated_cost_usd=%.4f exceeded limit=%.4f"
-             accumulated_cost_usd limit
-         in
-         let latency_ms = (Time_compat.now () -. t0) *. 1000.0 in
-         Otel_metric_store.inc_counter
-           Keeper_metrics.(to_string GuardsFailures)
-           ~labels:[("keeper", keeper_name); ("site", "cost_gate")]
-           ();
-         log_gate_rejection
-           ~keeper_name ~stage:"cost_gate" ~tool_name
-           ~reason_code:"cost_gate"
-           "keeper:%s cost gate: $%.4f >= $%.4f limit, skipping %s"
-           keeper_name accumulated_cost_usd limit tool_name;
-         broadcast_tool_skipped
-           ~keeper_name ~tool_name ~reason_code:"cost_gate";
-         let source_path = keeper_guards_source_path in
-         let source_line = __LINE__ in
-         report_gate_decision on_gate_decision
-           ~source_path:(Some source_path) ~source_line:(Some source_line)
-           ~stage:"cost_gate" ~decision:Gate_override
-           ~reason_code:"cost_gate" ~reason_text
-           ~tool_name ~keeper_name ~input ~turn ~accumulated_cost_usd
-           ~stage_latency_ms:latency_ms;
-         Agent_sdk.Hooks.Override
-           (render_inline_skip_reason_with_source
-              ~source_path ~source_line
-              ~tool_name ~reason_code:"cost_gate" ~reason_text)
-       | _ -> Agent_sdk.Hooks.Continue)
-    | _ -> Agent_sdk.Hooks.Continue)
+  ignore meta_ref;
+  ignore on_gate_decision;
+  ignore max_cost_usd;
+  hooks_of_pre_tool_use (fun _event -> Agent_sdk.Hooks.Continue)
 
 (** Destructive pattern detection for bash/edit style tools.
     Only applies when [enabled] is [true] and descriptor/catalog capability
@@ -761,7 +727,7 @@ let governance_approval_guard
     Order matters: the first guard to return a non-[Continue]
     decision wins (short-circuit via [Hooks.compose]). Preserves the
     ordering of the previous monolithic implementation:
-      timing -> custom -> streak -> deny -> cost -> destructive ->
+      timing -> custom -> streak -> deny -> cost telemetry passthrough -> destructive ->
       governance_approval *)
 let build_chain
     ~(meta_ref : Keeper_meta_contract.keeper_meta ref)

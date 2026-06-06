@@ -138,8 +138,9 @@ val deterministic_baseline_action : world_observation -> deliberation_action
     ([MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD], default: 0.10). *)
 val daily_budget_usd : unit -> float
 
-(** Check whether the keeper has remaining budget for deliberation.
-    Returns [true] when [cost_today_usd < daily_budget_usd]. *)
+(** Advisory cost telemetry for deliberation.
+
+    Always returns [true]; daily cost thresholds must not gate deliberation. *)
 val deliberation_budget_check :
   daily_budget_usd:float -> cost_today_usd:float -> bool
 

@@ -4,6 +4,7 @@ import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const apiMocks = vi.hoisted(() => ({
+  fetchDashboardRuntimeProbe: vi.fn(),
   fetchRuntimeProviders: vi.fn(),
   fetchRuntimeModelMetrics: vi.fn(),
 }))
@@ -75,6 +76,43 @@ describe('RuntimeMonitor', () => {
       latency_buckets: [],
       models: [],
     })
+    apiMocks.fetchDashboardRuntimeProbe.mockReset().mockResolvedValue({
+      generated_at: '2026-06-06T02:47:31Z',
+      refreshed_at_unix: 1780714051,
+      cache_ttl_sec: 30,
+      cache_age_sec: 0,
+      cache_hit: false,
+      probe: {
+        source: 'runtime.toml',
+        status: 'reachable',
+        checked_at: '2026-06-06T02:47:31Z',
+        probe_ok: true,
+        summary: {
+          runtimes: 1,
+          probed: 1,
+          reachable: 1,
+          failed: 0,
+          skipped: 0,
+          default_runtime_id: 'runpod_mtp.qwen',
+        },
+        providers: [
+          {
+            runtime_id: 'runpod_mtp.qwen',
+            provider_id: 'runpod_mtp',
+            model_api_name: 'Qwen/Qwen3-32B',
+            status: 'reachable',
+            reachable: true,
+            http_status: 200,
+            latency_ms: 42.5,
+            model_count: 1,
+            credential_required: true,
+            auth_present: true,
+            probe_url: 'https://example.invalid/v1/models',
+          },
+        ],
+        errors: [],
+      },
+    })
     container = document.createElement('div')
     document.body.appendChild(container)
   })
@@ -96,5 +134,22 @@ describe('RuntimeMonitor', () => {
     expect(container.textContent).toContain('runpod_mtp.qwen')
     expect(container.textContent).toContain('runpod_mtp')
     expect(container.textContent).toContain('Qwen/Qwen3-32B')
+  })
+
+  it('separates configured inventory from live provider reachability', async () => {
+    const { RuntimeMonitor } = await import('./runtime-monitor')
+
+    render(h(RuntimeMonitor, {}), container)
+    await waitFor(
+      () => container.textContent?.includes('runpod_mtp.qwen') ?? false,
+      'live reachability summary',
+    )
+
+    expect(container.textContent).toContain('available')
+    expect(container.textContent).toContain('live reachable')
+    expect(container.textContent).toContain('http · 200')
+    expect(container.textContent).toContain('latency · 42.5 ms')
+    expect(container.textContent).toContain('models · 1')
+    expect(container.textContent).toContain('auth · present')
   })
 })

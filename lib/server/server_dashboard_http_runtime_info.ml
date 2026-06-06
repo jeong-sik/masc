@@ -22,12 +22,31 @@ let dashboard_runtime_probe_runner_hook : (unit -> Yojson.Safe.t) option Atomic.
   Atomic.make None
 ;;
 
+let dashboard_runtime_provider_http_get_hook :
+  (url:string ->
+   headers:(string * string) list ->
+   timeout_sec:float ->
+   (int * (string * string) list * string, string) result)
+    option
+    Atomic.t
+  =
+  Atomic.make None
+;;
+
 let set_dashboard_runtime_probe_runner_for_tests hook =
   Atomic.set dashboard_runtime_probe_runner_hook (Some hook)
 ;;
 
 let clear_dashboard_runtime_probe_runner_for_tests () =
   Atomic.set dashboard_runtime_probe_runner_hook None
+;;
+
+let set_dashboard_runtime_provider_http_get_for_tests hook =
+  Atomic.set dashboard_runtime_provider_http_get_hook (Some hook)
+;;
+
+let clear_dashboard_runtime_provider_http_get_for_tests () =
+  Atomic.set dashboard_runtime_provider_http_get_hook None
 ;;
 
 let clear_dashboard_runtime_probe_cache_for_tests () =
@@ -703,16 +722,386 @@ let runtime_diagnostics_json () =
   `List diagnostics, count "external_signal", count "state_repair", count "agent_state"
 ;;
 
+type dashboard_runtime_provider_probe =
+  { json : Yojson.Safe.t
+  ; status : string
+  ; reachable : bool option
+  ; skipped : bool
+  }
+
+let runtime_inventory_source = "runtime.toml"
+
+let dashboard_runtime_probe_timeout_sec_float =
+  Float.of_int dashboard_runtime_probe_timeout_sec
+;;
+
+let dashboard_runtime_trim_trailing_slashes raw =
+  let raw = String.trim raw in
+  let rec loop idx =
+    if idx < 0
+    then ""
+    else if Char.equal raw.[idx] '/'
+    then loop (idx - 1)
+    else String.sub raw 0 (idx + 1)
+  in
+  loop (String.length raw - 1)
+;;
+
+let dashboard_runtime_append_probe_path base ~suffix =
+  let base = dashboard_runtime_trim_trailing_slashes base in
+  if String.equal base "" || String.ends_with ~suffix base
+  then base
+  else base ^ suffix
+;;
+
+let dashboard_runtime_probe_url ~(api_format : Runtime_schema.api_format) base_url =
+  match api_format with
+  | Runtime_schema.Ollama_api ->
+    let base = dashboard_runtime_trim_trailing_slashes base_url in
+    if String.ends_with ~suffix:"/api/tags" base
+    then base
+    else if String.ends_with ~suffix:"/api" base
+    then base ^ "/tags"
+    else base ^ "/api/tags"
+  | Runtime_schema.Messages_api | Runtime_schema.Chat_completions_api ->
+      dashboard_runtime_append_probe_path base_url ~suffix:"/models"
+;;
+
+let dashboard_runtime_url_for_json raw =
+  let uri = Uri.of_string raw in
+  Uri.with_uri ~userinfo:None ~query:None ~fragment:None uri |> Uri.to_string
+;;
+
+let dashboard_runtime_http_url_valid url =
+  let uri = Uri.of_string url in
+  match Option.map String.lowercase_ascii (Uri.scheme uri), Uri.host uri with
+  | Some ("http" | "https"), Some host when String.trim host <> "" -> true
+  | _ -> false
+;;
+
+let dashboard_runtime_provider_auth_kind = function
+  | None -> "none"
+  | Some (Runtime_schema.Env key) -> "env:" ^ key
+  | Some (Runtime_schema.File path) -> "file:" ^ path
+  | Some (Runtime_schema.Inline _) -> "inline"
+;;
+
+let dashboard_runtime_header_is_auth name =
+  match String.lowercase_ascii (String.trim name) with
+  | "authorization" | "x-api-key" | "api-key" | "x-auth-token" -> true
+  | _ -> false
+;;
+
+let dashboard_runtime_non_auth_headers (provider : Runtime_schema.provider) =
+  provider.headers
+  |> Option.value ~default:[]
+  |> List.filter (fun (name, _) -> not (dashboard_runtime_header_is_auth name))
+;;
+
+let dashboard_runtime_credential_value = function
+  | Runtime_schema.Env key ->
+    (match Option.bind (Sys.getenv_opt key) String_util.trim_to_option with
+     | Some value -> Ok value
+     | None -> Error (Printf.sprintf "env credential %s is empty or unset" key))
+  | Runtime_schema.File path ->
+    (try
+       match Fs_compat.load_file path |> String_util.trim_to_option with
+       | Some value -> Ok value
+       | None -> Error (Printf.sprintf "credential file %s is empty" path)
+     with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | exn -> Error (Printf.sprintf "credential file %s: %s" path (Printexc.to_string exn)))
+  | Runtime_schema.Inline value ->
+    (match String_util.trim_to_option value with
+     | Some value -> Ok value
+     | None -> Error "inline credential is empty")
+;;
+
+let dashboard_runtime_probe_headers (provider : Runtime_schema.provider) =
+  let base_headers =
+    [ "Accept", "application/json" ] @ dashboard_runtime_non_auth_headers provider
+  in
+  match provider.credentials with
+  | None -> Ok (false, base_headers)
+  | Some credential ->
+    (match dashboard_runtime_credential_value credential with
+     | Ok value -> Ok (true, ("Authorization", "Bearer " ^ value) :: base_headers)
+     | Error _ as error -> error)
+;;
+
+let dashboard_runtime_probe_transport_kind = function
+  | Runtime_schema.Cli _ -> "cli"
+  | Runtime_schema.Http url
+    when Uri.of_string url |> Uri.host |> Masc_network_defaults.is_loopback_host_opt ->
+    "local"
+  | Runtime_schema.Http _ -> "http"
+;;
+
+let dashboard_runtime_probe_http_get ~url ~headers ~timeout_sec =
+  match Atomic.get dashboard_runtime_provider_http_get_hook with
+  | Some hook -> hook ~url ~headers ~timeout_sec
+  | None ->
+    let clock = Eio_context.get_clock_opt () in
+    (match Masc_http_client.get_response_sync ?clock ~timeout_sec ~url ~headers () with
+     | Ok response -> Ok (response.status, response.headers, response.body)
+     | Error _ as error -> error)
+;;
+
+let dashboard_runtime_header_value name headers =
+  let name = String.lowercase_ascii name in
+  headers
+  |> List.find_map (fun (k, v) ->
+    if String.equal name (String.lowercase_ascii k) then Some v else None)
+;;
+
+let dashboard_runtime_list_member_len key json =
+  match Json_util.assoc_member_opt key json with
+  | Some (`List items) -> Some (List.length items)
+  | _ -> None
+;;
+
+let dashboard_runtime_model_count_of_body ~(api_format : Runtime_schema.api_format) body =
+  try
+    let json = Yojson.Safe.from_string body in
+    match api_format with
+    | Runtime_schema.Ollama_api -> dashboard_runtime_list_member_len "models" json
+    | Runtime_schema.Messages_api | Runtime_schema.Chat_completions_api ->
+      (match dashboard_runtime_list_member_len "data" json with
+       | Some _ as value -> value
+       | None -> dashboard_runtime_list_member_len "models" json)
+  with
+  | Yojson.Json_error _ -> None
+;;
+
+let dashboard_runtime_status_of_http_status = function
+  | Some code when code >= 200 && code < 300 -> "reachable"
+  | Some 401 | Some 403 -> "auth_failed"
+  | Some 404 -> "endpoint_not_found"
+  | Some code when code >= 500 -> "server_error"
+  | Some _ -> "http_error"
+  | None -> "unknown_http_status"
+;;
+
+let dashboard_runtime_provider_probe_json
+    ?(http_get = dashboard_runtime_probe_http_get)
+    (rt : Runtime.t)
+  =
+  let runtime_kind = dashboard_runtime_probe_transport_kind rt.provider.transport in
+  let auth_kind = dashboard_runtime_provider_auth_kind rt.provider.credentials in
+  let credential_required = Option.is_some rt.provider.credentials in
+  let endpoint_url =
+    match rt.provider.transport with
+    | Runtime_schema.Http url -> Some (dashboard_runtime_url_for_json url)
+    | Runtime_schema.Cli _ -> None
+  in
+  let base_fields
+        ?probe_url
+        ?http_status
+        ?latency_ms
+        ?model_count
+        ?content_type
+        ?downloaded_bytes
+        ?error
+        ~auth_present
+        ~status
+        ~reachable
+        ()
+    =
+    [ "runtime_id", `String rt.id
+    ; "provider_id", `String rt.provider.id
+    ; "provider_display_name", `String rt.provider.display_name
+    ; "model_id", `String rt.model.id
+    ; "model_api_name", `String rt.model.api_name
+    ; "protocol", `String rt.provider.protocol
+    ; "runtime_kind", `String runtime_kind
+    ; "transport", `String (match rt.provider.transport with Runtime_schema.Http _ -> "http" | Runtime_schema.Cli _ -> "cli")
+    ; "auth_kind", `String auth_kind
+    ; "credential_required", `Bool credential_required
+    ; "auth_present", `Bool auth_present
+    ; "status", `String status
+    ; "reachable", (match reachable with Some value -> `Bool value | None -> `Null)
+    ; "http_status", Json_util.int_opt_to_json http_status
+    ; "latency_ms", Json_util.float_opt_to_json latency_ms
+    ; "model_count", Json_util.int_opt_to_json model_count
+    ; "content_type", Json_util.string_opt_to_json content_type
+    ; "downloaded_bytes", Json_util.int_opt_to_json downloaded_bytes
+    ; "endpoint_url", Json_util.string_opt_to_json endpoint_url
+    ; "probe_url", Json_util.string_opt_to_json probe_url
+    ; "error", Json_util.string_opt_to_json error
+    ; "checked_at", `String (Masc_domain.now_iso ())
+    ]
+  in
+  let make ?probe_url ?http_status ?latency_ms ?model_count ?content_type
+      ?downloaded_bytes ?error ~auth_present ~status ~reachable ~skipped () =
+    { json =
+        `Assoc
+          (base_fields
+             ?probe_url
+             ?http_status
+             ?latency_ms
+             ?model_count
+             ?content_type
+             ?downloaded_bytes
+             ?error
+             ~auth_present
+             ~status
+             ~reachable
+             ())
+    ; status
+    ; reachable
+    ; skipped
+    }
+  in
+  match rt.provider.transport with
+  | Runtime_schema.Cli _ ->
+    make
+      ~auth_present:false
+      ~status:"skipped_cli"
+      ~reachable:None
+      ~skipped:true
+      ~error:"CLI runtimes do not expose an HTTP reachability endpoint"
+      ()
+  | Runtime_schema.Http endpoint_url ->
+    let probe_url = dashboard_runtime_probe_url ~api_format:rt.provider.api_format endpoint_url in
+    let probe_url_json = dashboard_runtime_url_for_json probe_url in
+    if not (dashboard_runtime_http_url_valid probe_url)
+    then
+      make
+        ~probe_url:probe_url_json
+        ~auth_present:false
+        ~status:"invalid_endpoint"
+        ~reachable:(Some false)
+        ~skipped:false
+        ~error:"runtime endpoint is not an absolute http(s) URL"
+        ()
+    else (
+      match dashboard_runtime_probe_headers rt.provider with
+      | Error error ->
+        make
+          ~probe_url:probe_url_json
+          ~auth_present:false
+          ~status:"missing_auth"
+          ~reachable:(Some false)
+          ~skipped:false
+          ~error
+          ()
+      | Ok (auth_present, headers) ->
+        let started_at = Time_compat.now () in
+        (match
+           http_get ~url:probe_url ~headers
+             ~timeout_sec:dashboard_runtime_probe_timeout_sec_float
+         with
+         | Ok (http_status, response_headers, body) ->
+           let latency_ms = (Time_compat.now () -. started_at) *. 1000.0 in
+           let status = dashboard_runtime_status_of_http_status (Some http_status) in
+           let reachable = http_status >= 200 && http_status < 300 in
+           let model_count =
+             if reachable
+             then dashboard_runtime_model_count_of_body ~api_format:rt.provider.api_format body
+             else None
+           in
+           make
+             ~probe_url:probe_url_json
+             ~http_status
+             ~latency_ms
+             ?model_count
+             ?content_type:(dashboard_runtime_header_value "content-type" response_headers)
+             ?downloaded_bytes:(Some (String.length body))
+             ~auth_present
+             ~status
+             ~reachable:(Some reachable)
+             ~skipped:false
+             ()
+         | Error error ->
+           let latency_ms = (Time_compat.now () -. started_at) *. 1000.0 in
+           make
+             ~probe_url:probe_url_json
+             ~latency_ms
+             ~auth_present
+             ~status:"network_error"
+             ~reachable:(Some false)
+             ~skipped:false
+             ~error
+             ()))
+;;
+
+let dashboard_runtime_probe_payload_json_of_runtimes ?default_id runtimes =
+  let probes = List.map dashboard_runtime_provider_probe_json runtimes in
+  let count pred = probes |> List.filter pred |> List.length in
+  let skipped = count (fun p -> p.skipped) in
+  let reachable = count (fun p -> Option.equal Bool.equal p.reachable (Some true)) in
+  let failed = count (fun p -> Option.equal Bool.equal p.reachable (Some false)) in
+  let probed = List.length probes - skipped in
+  let status =
+    if failed = 0 && probed > 0
+    then "reachable"
+    else if failed = 0
+    then "no_http_runtimes"
+    else if reachable > 0
+    then "degraded"
+    else "unreachable"
+  in
+  let errors =
+    probes
+    |> List.filter_map (fun probe ->
+      match probe.reachable with
+      | Some false ->
+        (match probe.json with
+         | `Assoc fields ->
+           let runtime_id =
+             match List.assoc_opt "runtime_id" fields with
+             | Some (`String value) -> value
+             | _ -> "(unknown runtime)"
+           in
+           Some (Printf.sprintf "%s: %s" runtime_id probe.status)
+         | _ -> Some probe.status)
+      | _ -> None)
+  in
+  `Assoc
+    [ "source", `String runtime_inventory_source
+    ; "status", `String status
+    ; "probe_ok", `Bool (failed = 0)
+    ; "checked_at", `String (Masc_domain.now_iso ())
+    ; ( "summary"
+      , `Assoc
+          [ "runtimes", `Int (List.length runtimes)
+          ; "probed", `Int probed
+          ; "reachable", `Int reachable
+          ; "failed", `Int failed
+          ; "skipped", `Int skipped
+          ; "default_runtime_id", Json_util.string_opt_to_json default_id
+          ] )
+    ; "providers", `List (List.map (fun p -> p.json) probes)
+    ; "errors", Json_util.json_string_list errors
+    ; ( "observations"
+      , Json_util.json_string_list
+          [ Printf.sprintf
+              "runtime.toml provider reachability: %d reachable, %d failed, %d skipped"
+              reachable
+              failed
+              skipped
+          ] )
+    ; "limitations"
+      , Json_util.json_string_list
+          [ "Probe checks provider metadata endpoints only; it does not send a completion request."
+          ; "CLI runtimes are listed but not executed by the dashboard probe."
+          ]
+    ]
+;;
+
+let dashboard_runtime_probe_payload_json_for_tests ?default_id runtimes =
+  dashboard_runtime_probe_payload_json_of_runtimes ?default_id runtimes
+;;
+
 let run_dashboard_runtime_probe () =
   match Atomic.get dashboard_runtime_probe_runner_hook with
   | Some hook -> hook ()
   | None ->
-    `Assoc
-      [ "source", `String "runtime"
-      ; "probe_ok", `Null
-      ; "status", `String "oas_owned"
-      ; "detail", `String "Concrete provider probes are owned by OAS."
-      ]
+    let runtimes = Runtime.get_runtimes () in
+    let default_id =
+      Runtime.get_default_runtime () |> Option.map (fun (rt : Runtime.t) -> rt.id)
+    in
+    dashboard_runtime_probe_payload_json_of_runtimes ?default_id runtimes
 ;;
 
 let dashboard_runtime_probe_cached_value () =
@@ -791,8 +1180,6 @@ let dashboard_runtime_probe_http_json ?(force = false) () =
     ; "probe", probe
     ]
 ;;
-
-let runtime_inventory_source = "runtime.toml"
 
 let runtime_endpoint_url_of_transport = function
   | Runtime_schema.Http url -> Some url

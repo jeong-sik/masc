@@ -78,6 +78,27 @@ export function applyKeeperStreamEvent(
         }))
         return null
       }
+      if (event.name === 'KEEPER_REQUEST_TERMINAL') {
+        const terminal = isRecord(event.value) ? event.value : null
+        const status = asString(terminal?.status, '').trim()
+        const ok = terminal?.ok === true
+        const failed =
+          !ok && ['error', 'lost', 'cancelled'].includes(status)
+        if (failed) {
+          const message =
+            asString(terminal?.message, '').trim() || 'Keeper request failed'
+          updateThreadEntry(keeperName, assistantEntryId, entry => ({
+            ...entry,
+            text: entry.text || `Keeper request failed: ${message}`,
+            rawText: entry.rawText || message,
+            delivery: status === 'cancelled' ? 'timeout' : 'error',
+            streamState: null,
+            error: message,
+          }))
+          return message
+        }
+        return null
+      }
       if (event.name === 'KEEPER_REPLY_DETAILS') {
         const details = normalizeKeeperConversationDetails(event.value)
         if (details) {

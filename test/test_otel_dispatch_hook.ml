@@ -16,6 +16,13 @@ let assoc_string key attrs =
   | None -> Alcotest.failf "missing attr %s" key
 ;;
 
+let check_no_attr key attrs =
+  Alcotest.(check bool)
+    (key ^ " absent")
+    true
+    (List.assoc_opt key attrs |> Option.is_none)
+;;
+
 let capture f =
   let captured = ref None in
   let emit_span ~name ~attrs ~kind ~status =
@@ -63,10 +70,7 @@ let test_success_span_uses_mcp_tool_call_semconv () =
     "mcp.method.name"
     "tools/call"
     (assoc_string Genai.Mcp_attr_key.mcp_method_name span.attrs);
-  Alcotest.(check string)
-    "otel.status_code"
-    "OK"
-    (assoc_string "otel.status_code" span.attrs)
+  check_no_attr "otel.status_code" span.attrs
 ;;
 
 let test_failure_span_records_typed_error_status () =
@@ -93,10 +97,7 @@ let test_failure_span_records_typed_error_status () =
     "masc.mcp.tool.failure_class"
     "policy_rejection"
     (assoc_string Genai.Mcp_attr_key.masc_mcp_tool_failure_class span.attrs);
-  Alcotest.(check string)
-    "otel.status_code"
-    "ERROR"
-    (assoc_string "otel.status_code" span.attrs);
+  check_no_attr "otel.status_code" span.attrs;
   match span.status with
   | None -> Alcotest.fail "failed tool call should set ERROR span status"
   | Some status ->

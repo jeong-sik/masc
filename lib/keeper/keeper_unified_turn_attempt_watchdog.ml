@@ -5,6 +5,9 @@ let dispatch
       ~on_cancelled
       ~run
   =
+  match attempt_watchdog_s with
+  | None -> run ()
+  | Some attempt_watchdog_s ->
   try Eio.Time.with_timeout_exn clock attempt_watchdog_s run with
   | Eio.Cancel.Cancelled _ as e ->
     on_cancelled ();

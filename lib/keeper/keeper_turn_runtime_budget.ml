@@ -239,6 +239,25 @@ let attempt_watchdog_timeout_sec
   in
   Float.max floor (Float.min desired cap_before_outer_timeout)
 
+let attempt_watchdog_timeout_sec_opt
+    ~(liveness_mode : Keeper_attempt_liveness_config.mode)
+    ~(remaining_turn_budget_s : float)
+    (provider_timeout_budget : provider_timeout_budget) : float option =
+  let legacy_watchdog_s =
+    attempt_watchdog_timeout_sec ~remaining_turn_budget_s provider_timeout_budget
+  in
+  let observer_attached =
+    match liveness_mode with
+    | Keeper_attempt_liveness_config.Off -> false
+    | Keeper_attempt_liveness_config.Observe
+    | Keeper_attempt_liveness_config.Enforce -> true
+  in
+  Keeper_attempt_liveness_config.outer_wall_for_attempt
+    ~mode:liveness_mode
+    ~observer_attached
+    ~per_provider_timeout_s:(Some legacy_watchdog_s)
+    ~candidate_key:Keeper_attempt_liveness_config.runtime_candidate_key
+
 type degraded_retry_budget_decision =
   | No_degraded_retry
   | Degraded_retry_slot_phase_exhausted of EC.degraded_retry

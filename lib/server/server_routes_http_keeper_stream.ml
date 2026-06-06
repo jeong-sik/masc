@@ -453,18 +453,6 @@ let send_keeper_error writer mutex closed ~thread_id ~run_id err =
            ~custom_value:(Some (`Assoc [ ("message", `String err) ]))
            Run_error))
 
-(** Send Text_message_end + Run_finished sequence to complete the stream. *)
-let send_keeper_stream_finish writer mutex closed ~thread_id ~run_id
-    ~message_id =
-  ignore
-    (keeper_stream_send_event writer mutex closed
-       Ag_ui.(
-         make_event ~thread_id ~run_id:(Some run_id)
-           ~message_id:(Some message_id) Text_message_end));
-  ignore
-    (keeper_stream_send_event writer mutex closed
-       Ag_ui.(make_event ~thread_id ~run_id:(Some run_id) Run_finished))
-
 (** Extract visible reply from the keeper pipeline result body.
     Parses JSON if possible and strips internal markers. *)
 let extract_visible_reply body =
@@ -519,7 +507,7 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
       (* Catch all exceptions including Cancelled — this function is called
          from Switch.on_release where re-raising would mask the original exn. *)
       (try Httpun.Body.Writer.close writer
-       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+       with exn ->
          Log.Misc.warn "keeper_stream writer close: %s"
            (Printexc.to_string exn))
     end

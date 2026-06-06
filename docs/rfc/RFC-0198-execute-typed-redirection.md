@@ -52,7 +52,7 @@ Issue #18892 (sandbox playground missing-file ENOENT, 15 ERROR/day) 와 같은 *
 
 **Principle**: RFC-0194 §1 (typed SSOT 가 *control-flow gate* 에 위치).
 
-`shell_metachar_in_token` (`lib/keeper/agent_tool_execute_typed_input.ml:223-228`) 의 현재 형태는 *NUL/CR/LF* 만 거부. 본 Phase 는 *redirection-shape pattern* 을 추가 거부:
+`shell_metachar_in_token` (`lib/keeper/keeper_tool_execute_typed_input.ml`) 의 현재 형태는 *NUL* 만 거부. LF/CR 과 shell metacharacter 는 execve argv literal data 이다. 본 Phase 는 *redirection-shape pattern* 을 추가 거부:
 
 | 거부 token shape | 예시 |
 |---|---|

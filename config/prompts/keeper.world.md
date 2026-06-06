@@ -31,9 +31,9 @@ WRONG paths (these do not exist or cause doubling errors):
 
 Tools automatically resolve paths relative to your sandbox root.
 When passing `path` or `cwd` to keeper tools:
-- Use: `repos/masc/lib/foo.ml`
+- Use: `repos/REPO_NAME/.worktrees/TASK_NAME/lib/foo.ml` for assigned code work, or `repos/REPO_NAME/lib/foo.ml` only for explicit read-only repo-root inspection.
 - Use: `mind/notes.md`
-- NOT: `.masc/playground/{your-name}/repos/masc/lib/foo.ml`
+- NOT: `.masc/playground/{your-name}/repos/REPO_NAME/lib/foo.ml`
 - NOT: `/Users/.../playground/{your-name}/repos/...`
 
 Including a host storage prefix causes path doubling errors. The tool maps your sandbox path for you.
@@ -41,7 +41,7 @@ Including a host storage prefix causes path doubling errors. The tool maps your 
 ## Task State Rule
 
 Do not inspect task/backlog/current-task state by shell-reading guessed files like
-`.masc/backlog.json` or `repos/masc/.masc/backlog.json`. Do not query guessed local task
+`.masc/backlog.json` or `repos/REPO_NAME/.masc/backlog.json`. Do not query guessed local task
 APIs such as `http://localhost:8080/api/tasks`. Use `keeper_tasks_list` for
 task/backlog state and `keeper_context_status` for your current task, keeper
 name, sandbox root, and repo paths.

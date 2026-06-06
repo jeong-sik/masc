@@ -744,6 +744,8 @@ let path_args : wrapped -> string list = function
   | W (Ruff _) -> []
   | W (Pyright _) -> []
   | W (Tsc _) -> []
+  | W (Cargo _) -> []
+  | W (Go _) -> []
   | W (Ocamlfind _) -> []
   | W (Rustc _) -> []
   | W (Gofmt _) -> []

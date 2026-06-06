@@ -285,7 +285,7 @@ let glob_literal_failure_fields ~input ~status ~stderr =
    failure. Pipeline path validation is deferred. *)
 let pre_dispatch_path_missing ~cwd ir =
   match ir with
-  | Shell_ir.Simple s ->
+  | Masc_exec.Shell_ir.Simple s ->
     let typed = Masc_exec.Shell_ir_typed.of_simple s in
     (match Masc_exec.Shell_ir_typed.risk typed with
      | `Safe ->
@@ -297,7 +297,7 @@ let pre_dispatch_path_missing ~cwd ir =
          try not (Sys.file_exists resolved) with _ -> true
        ) args
      | `Audited | `Privileged -> None)
-  | Shell_ir.Pipeline _ -> None
+  | Masc_exec.Shell_ir.Pipeline _ -> None
 ;;
 
 let sandbox_extra_uses_docker sandbox_extra_fields =

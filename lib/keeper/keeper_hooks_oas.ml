@@ -96,12 +96,18 @@ let json_value_shape_for_log = function
   | `Null -> "null"
 
 let tool_input_shape_for_log = function
+  | `Assoc [] -> "object:0"
   | `Assoc fields ->
     fields
     |> List.sort (fun (left, _) (right, _) -> String.compare left right)
     |> List.map (fun (key, value) -> key ^ "=" ^ json_value_shape_for_log value)
     |> String.concat ","
   | other -> json_value_shape_for_log other
+
+let tool_input_keys_for_log = function
+  | `Assoc [] -> "-"
+  | `Assoc pairs -> String.concat "," (List.map fst pairs)
+  | _ -> "-"
 
 let one_line_preview_for_log text =
   text
@@ -503,10 +509,7 @@ let make_hooks
              | exception _ -> (content, None))
           | Error { Agent_sdk.Types.message; _ } -> (message, None)
         in
-        let input_keys = match input with
-          | `Assoc pairs -> String.concat "," (List.map fst pairs)
-          | _ -> "-"
-        in
+        let input_keys = tool_input_keys_for_log input in
         let outcome, out_len = match output with
           | Ok { Agent_sdk.Types.content; _ } -> Tool_result.Ok, String.length content
           | Error { Agent_sdk.Types.message; _ } -> Tool_result.Error, String.length message
@@ -840,3 +843,8 @@ let hook_introspection_json
     ?max_cost_usd
     ~destructive_check
     ()
+
+module For_testing = struct
+  let tool_input_shape_for_log = tool_input_shape_for_log
+  let tool_input_keys_for_log = tool_input_keys_for_log
+end

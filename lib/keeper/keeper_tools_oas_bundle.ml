@@ -143,36 +143,41 @@ let make_tool_bundle
          if not (List.mem internal universe_names)
          then []
          else (
-           match
-             List.find_opt
-               (fun (td : Masc_domain.tool_schema) -> String.equal td.name internal)
-               tool_defs
-           with
-           | None -> []
-           | Some internal_def ->
-             let h =
-               Keeper_tools_oas_handler.make_keeper_tool_handler
-                 ~name:internal
-                 ~input_schema:internal_def.input_schema
-                 ~config
-                   ~meta
-                   ~ctx_snapshot
-                   ?turn_sandbox_factory
-                   ~exec_cache
-                 ?search_fn
-                 ?on_tool_called
-                 ?clock
-                 ~translate_input:descriptor.translate
-                 ~failure_counts
-                 ()
-             in
-             Keeper_tool_descriptor.public_names_of_descriptor descriptor
-             |> List.map (fun public_name ->
-               Tool_bridge.oas_tool_of_masc
-                 ~name:public_name
-                 ~description:descriptor.description
-                 ~input_schema:descriptor.input_schema
-                 (fun input -> h input))))
+           (* Descriptor-backed aliases own their public schema.  Some aliases
+              (notably WebSearch/WebFetch) can be present in the descriptor
+              universe before the injected masc_* schema snapshot is populated. *)
+           let handler_input_schema =
+             match
+               List.find_opt
+                 (fun (td : Masc_domain.tool_schema) -> String.equal td.name internal)
+                 tool_defs
+             with
+             | Some internal_def -> internal_def.input_schema
+             | None -> descriptor.input_schema
+           in
+           let h =
+             Keeper_tools_oas_handler.make_keeper_tool_handler
+               ~name:internal
+               ~input_schema:handler_input_schema
+               ~config
+                 ~meta
+                 ~ctx_snapshot
+                 ?turn_sandbox_factory
+                 ~exec_cache
+               ?search_fn
+               ?on_tool_called
+               ?clock
+               ~translate_input:descriptor.translate
+               ~failure_counts
+               ()
+           in
+           Keeper_tool_descriptor.public_names_of_descriptor descriptor
+           |> List.map (fun public_name ->
+             Tool_bridge.oas_tool_of_masc
+               ~name:public_name
+               ~description:descriptor.description
+               ~input_schema:descriptor.input_schema
+               (fun input -> h input))))
       Keeper_tool_descriptor.public_descriptors
   in
   let bundle =

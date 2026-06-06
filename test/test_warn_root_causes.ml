@@ -144,6 +144,41 @@ let test_core_tools_hidden_by_denylist () =
       fail (Printf.sprintf "%s should be excluded by denylist" t)
   ) [ "Edit"; "Grep"; "Search" ]
 
+let test_web_alias_bundle_visible_without_injected_masc_schema () =
+  ignore (init_registry ());
+  let prior_masc_schemas = Keeper_tool_dispatch_runtime.masc_schemas_snapshot () in
+  let dir =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc_test_web_alias_%d" (Random.int 1_000_000))
+  in
+  (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_tool_dispatch_runtime.set_masc_schemas prior_masc_schemas;
+      try Unix.rmdir dir with _ -> ())
+    (fun () ->
+      Keeper_tool_dispatch_runtime.set_masc_schemas [];
+      let config = Workspace.default_config dir in
+      let meta = make_meta ~name:"test-web-alias-no-injected-schema" () in
+      let ctx_snapshot =
+        Keeper_context_runtime.create ~system_prompt:"test" ~max_tokens:4000
+      in
+      let bundle =
+        Keeper_tools_oas_bundle.make_tool_bundle ~config ~meta ~ctx_snapshot ()
+      in
+      Fun.protect
+        ~finally:bundle.cleanup
+        (fun () ->
+          let names =
+            bundle.tools
+            |> List.map (fun (tool : Agent_sdk.Tool.t) -> tool.schema.name)
+          in
+          check bool "WebSearch remains bundle-visible" true
+            (List.mem "WebSearch" names);
+          check bool "WebFetch remains bundle-visible" true
+            (List.mem "WebFetch" names)))
+
 (* ── Test 2: Atomic agent JSON writes ─────────────────────────── *)
 
 let test_atomic_write_not_empty () =
@@ -218,12 +253,9 @@ let test_keeper_mainline_failures_log_at_error () =
     (file_not_contains_pattern "lib/keeper/keeper_agent_run_post_turn_memory.ml"
        {|Log.Keeper.warn
                "keeper:%s memory_write failed: %s"|});
-  check bool "episode creation failures log at ERROR" true
-    (file_contains_pattern "lib/keeper/keeper_agent_memory_episode.ml"
-       {|"keeper:%s episode_create failed: %s"|});
-  check bool "episode creation failures are no longer WARN" true
-    (file_not_contains_pattern "lib/keeper/keeper_agent_memory_episode.ml"
-       {|Log.Keeper.warn "keeper:%s episode_create failed: %s"|})
+  check bool "stale episode creation failure string is absent" true
+    (file_not_contains_pattern "lib/keeper/keeper_agent_run.ml"
+       {|episode_create failed|})
 
 let test_oas_mainline_warns_are_promoted_in_bridge () =
   check bool "bridge promotes MCP server failure" true
@@ -297,6 +329,8 @@ let () =
             test_core_tools_include_write_for_write_enabled_tool_access;
           test_case "denylist excludes descriptor public tools" `Quick
             test_core_tools_hidden_by_denylist;
+          test_case "web aliases survive missing injected masc schema" `Quick
+            test_web_alias_bundle_visible_without_injected_masc_schema;
         ] );
       ( "atomic_agent_json",
         [

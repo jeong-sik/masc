@@ -1,7 +1,7 @@
 (** IDE Event Types — unified event model for Keeper activity visualization. *)
 
 (** Structured descriptor for what a shell command did.
-    Computed from Shell IR GADT by the Execute handler.
+    Computed from Shell IR GADT by [Ide_command_descriptor].
     Consumed by the bridge for deterministic event generation. *)
 type command_descriptor =
   | Gh_pr_create of { title : string; base : string; draft : bool }

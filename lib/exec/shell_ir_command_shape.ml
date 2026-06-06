@@ -98,6 +98,24 @@ let rec effective_stage stage =
 let effective_stages ir =
   parsed_stages ir |> List.filter_map effective_stage
 
+let command_name_of_simple simple = Exec_program.to_string simple.Shell_ir.bin
+
+let rec first_command_name = function
+  | Shell_ir.Simple simple -> Some (command_name_of_simple simple)
+  | Shell_ir.Pipeline (first :: _) -> first_command_name first
+  | Shell_ir.Pipeline [] -> None
+
+let rec last_command_name = function
+  | Shell_ir.Simple simple -> Some (command_name_of_simple simple)
+  | Shell_ir.Pipeline stages ->
+    (match List.rev stages with
+     | last :: _ -> last_command_name last
+     | [] -> None)
+
+let top_level_stage_count = function
+  | Shell_ir.Simple _ -> 1
+  | Shell_ir.Pipeline stages -> List.length stages
+
 let git_subcommand_with_args args =
   let rec scan = function
     | [] -> None

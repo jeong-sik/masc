@@ -173,6 +173,25 @@ let keeper_config_json (config : Workspace.config) (name : string)
                | None -> None)
           m.active_goal_ids
       in
+      let default_prompt_string default live =
+        match default with
+        | Some value when String.trim live = "" -> value
+        | _ -> live
+      in
+      let prompt_goal = default_prompt_string defaults.goal m.goal in
+      let prompt_short_goal =
+        default_prompt_string defaults.short_goal m.short_goal
+      in
+      let prompt_mid_goal = default_prompt_string defaults.mid_goal m.mid_goal in
+      let prompt_long_goal =
+        default_prompt_string defaults.long_goal m.long_goal
+      in
+      let prompt_will = default_prompt_string defaults.will m.will in
+      let prompt_needs = default_prompt_string defaults.needs m.needs in
+      let prompt_desires = default_prompt_string defaults.desires m.desires in
+      let prompt_instructions =
+        default_prompt_string defaults.instructions m.instructions
+      in
       let active_goal_ids_json =
         `List (List.map (fun goal_id -> `String goal_id) m.active_goal_ids)
       in
@@ -217,23 +236,28 @@ let keeper_config_json (config : Workspace.config) (name : string)
       in
       let effective_system_prompt =
         Keeper_prompt.build_keeper_system_prompt
-          ~goal:m.goal ~short_goal:m.short_goal ~mid_goal:m.mid_goal
-          ~long_goal:m.long_goal ~will:m.will
-          ~needs:m.needs ~desires:m.desires ~instructions:m.instructions
+          ~goal:prompt_goal
+          ~short_goal:prompt_short_goal
+          ~mid_goal:prompt_mid_goal
+          ~long_goal:prompt_long_goal
+          ~will:prompt_will
+          ~needs:prompt_needs
+          ~desires:prompt_desires
+          ~instructions:prompt_instructions
           ~persona_extended ~keeper_name:m.name
           ~active_goals
           ()
       in
       let prompt =
         `Assoc [
-          ("goal", `String m.goal);
-          ("short_goal", `String m.short_goal);
-          ("mid_goal", `String m.mid_goal);
-          ("long_goal", `String m.long_goal);
-          ("will", `String m.will);
-          ("needs", `String m.needs);
-          ("desires", `String m.desires);
-          ("instructions", `String m.instructions);
+          ("goal", `String prompt_goal);
+          ("short_goal", `String prompt_short_goal);
+          ("mid_goal", `String prompt_mid_goal);
+          ("long_goal", `String prompt_long_goal);
+          ("will", `String prompt_will);
+          ("needs", `String prompt_needs);
+          ("desires", `String prompt_desires);
+          ("instructions", `String prompt_instructions);
           ( "system_prompt_blocks",
             `Assoc
               [

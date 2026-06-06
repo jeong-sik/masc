@@ -141,10 +141,10 @@ let prepare_run_context
   in
   let base_system_prompt =
     Keeper_prompt.build_keeper_system_prompt
-      ~goal:meta.goal
-      ~short_goal:meta.short_goal
-      ~mid_goal:meta.mid_goal
-      ~long_goal:meta.long_goal
+      ~goal:(Option.value profile_defaults.goal ~default:meta.goal)
+      ~short_goal:(Option.value profile_defaults.short_goal ~default:meta.short_goal)
+      ~mid_goal:(Option.value profile_defaults.mid_goal ~default:meta.mid_goal)
+      ~long_goal:(Option.value profile_defaults.long_goal ~default:meta.long_goal)
       ~will:(Option.value profile_defaults.will ~default:meta.will)
       ~needs:(Option.value profile_defaults.needs ~default:meta.needs)
       ~desires:(Option.value profile_defaults.desires ~default:meta.desires)

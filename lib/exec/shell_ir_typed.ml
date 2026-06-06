@@ -746,6 +746,7 @@ let path_args : wrapped -> string list = function
   | W (Tsc _) -> []
   | W (Ocamlfind _) -> []
   | W (Rustc _) -> []
+  | W (Go _) -> []
   | W (Gofmt _) -> []
   | W (Gradle _) -> []
   | W (Ninja _) -> []

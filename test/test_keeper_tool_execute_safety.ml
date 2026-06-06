@@ -1229,6 +1229,7 @@ let test_git_exit_128_emits_typed_deterministic_retry_marker () =
   let fields =
     Keeper_tool_command_runtime.For_testing.deterministic_retry_fields_for_process_result
       ~classification:(classification Exec_core.Git_read)
+      ~stderr:""
       ~status:(Unix.WEXITED 128)
   in
   let json = `Assoc fields in
@@ -1246,9 +1247,111 @@ let test_non_git_exit_128_has_no_deterministic_retry_marker () =
   let fields =
     Keeper_tool_command_runtime.For_testing.deterministic_retry_fields_for_process_result
       ~classification:(classification Exec_core.Build)
+      ~stderr:""
       ~status:(Unix.WEXITED 128)
   in
   Alcotest.(check int) "no fields" 0 (List.length fields)
+
+let test_git_worktree_branch_conflict_guides_existing_cwd () =
+  let branch = "nick0cave/profile-independent-cwd" in
+  let worktree_path =
+    "/Users/dancer/me/.masc/playground/nick0cave/repos/masc/.worktrees/profile-independent-cwd"
+  in
+  let stderr =
+    Printf.sprintf
+      "Preparing worktree (checking out '%s')\nfatal: '%s' is already used by worktree at '%s'\n"
+      branch
+      branch
+      worktree_path
+  in
+  let fields =
+    Keeper_tool_command_runtime.For_testing.deterministic_retry_fields_for_process_result
+      ~classification:(classification Exec_core.Git_write)
+      ~stderr
+      ~status:(Unix.WEXITED 128)
+  in
+  let json = `Assoc fields in
+  Alcotest.(check bool) "branch conflict marker" true
+    (json |> Json.member "git_worktree_branch_already_used" |> Json.to_bool);
+  Alcotest.(check string) "branch" branch
+    (json |> Json.member "branch" |> Json.to_string);
+  Alcotest.(check string) "existing worktree" worktree_path
+    (json |> Json.member "existing_worktree_path" |> Json.to_string);
+  Alcotest.(check bool) "hint says same command cannot work" true
+    (json
+     |> Json.member "recovery_hint"
+     |> Json.to_string
+     |> fun hint -> String_util.contains_substring hint "cannot succeed");
+  let marker = json |> Json.member "deterministic_retry" in
+  Alcotest.(check string)
+    "reason"
+    "git_precondition_failed"
+    (marker |> Json.member "reason" |> Json.to_string)
+
+let test_tool_execute_git_worktree_branch_conflict_guides_existing_cwd () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta =
+    { (make_local_meta "worktree-branch-conflict") with
+      tool_access = [ "tool_execute" ]
+    }
+  in
+  let playground = Filename.concat base_path (playground_path_of meta.name) in
+  let repo_dir = Filename.concat playground "repos/masc" in
+  ensure_dir repo_dir;
+  git_ok ~cwd:repo_dir [ "init"; "-q"; "--initial-branch=main" ];
+  git_ok ~cwd:repo_dir [ "config"; "user.email"; "test@example.com" ];
+  git_ok ~cwd:repo_dir [ "config"; "user.name"; "Test" ];
+  write_file (Filename.concat repo_dir "README.md") "initial\n";
+  git_ok ~cwd:repo_dir [ "add"; "README.md" ];
+  git_ok ~cwd:repo_dir [ "commit"; "-q"; "-m"; "init" ];
+  let branch = "nick0cave/profile-independent-cwd" in
+  git_ok ~cwd:repo_dir
+    [ "worktree"; "add"; "-q"; "-b"; branch; ".worktrees/profile-independent-cwd"; "HEAD" ];
+  let raw =
+    Keeper_tool_command_runtime.handle_tool_execute
+      ~turn_sandbox_factory:None
+      ~exec_cache:None
+      ~config
+      ~meta
+      ~args:
+        (`Assoc
+           [ "executable", `String "git"
+           ; ( "argv"
+             , `List
+                 [ `String "worktree"
+                 ; `String "add"
+                 ; `String ".worktrees/profile-independent-cwd-2"
+                 ; `String branch
+                 ] )
+           ; "cwd", `String "repos/masc"
+           ])
+      ()
+  in
+  let json = Yojson.Safe.from_string raw in
+  Alcotest.(check bool) "git worktree add failed" false
+    (json |> Json.member "ok" |> Json.to_bool);
+  Alcotest.(check bool) "branch conflict marker" true
+    (json |> Json.member "git_worktree_branch_already_used" |> Json.to_bool);
+  Alcotest.(check string) "branch" branch
+    (json |> Json.member "branch" |> Json.to_string);
+  Alcotest.(check bool) "existing path points to prior worktree" true
+    (json
+     |> Json.member "existing_worktree_path"
+     |> Json.to_string
+     |> fun path -> String_util.contains_substring path ".worktrees/profile-independent-cwd");
+  Alcotest.(check bool) "recovery hint points at cwd" true
+    (json
+     |> Json.member "recovery_hint"
+     |> Json.to_string
+     |> fun hint -> String_util.contains_substring hint "Use cwd=");
+  let marker = json |> Json.member "deterministic_retry" in
+  Alcotest.(check string)
+    "reason"
+    "git_precondition_failed"
+    (marker |> Json.member "reason" |> Json.to_string)
 
 let test_tool_search_files_ir_timeout_floor_is_not_sub_io_latency () =
   let args = `Assoc [ "timeout_sec", `Float 1.0 ] in
@@ -2367,6 +2470,14 @@ let () =
             "git exit 128 emits typed deterministic retry marker"
             `Quick
             test_git_exit_128_emits_typed_deterministic_retry_marker
+        ; Alcotest.test_case
+            "git worktree branch conflict guides existing cwd"
+            `Quick
+            test_git_worktree_branch_conflict_guides_existing_cwd
+        ; Alcotest.test_case
+            "tool_execute git worktree branch conflict guides existing cwd"
+            `Quick
+            test_tool_execute_git_worktree_branch_conflict_guides_existing_cwd
         ; Alcotest.test_case
             "non-git exit 128 has no deterministic retry marker"
             `Quick

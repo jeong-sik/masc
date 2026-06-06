@@ -196,7 +196,88 @@ let elapsed_duration_ms ~start_time ~end_time =
   | _ when elapsed_ms < 1. -> 1
   | _ -> int_of_float elapsed_ms
 
+type git_worktree_branch_conflict =
+  { branch : string
+  ; worktree_path : string
+  }
+
+let substring_index_from haystack needle start =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  if needle_len = 0
+  then Some start
+  else if start < 0 || start > haystack_len
+  then None
+  else
+    let rec loop index =
+      if index + needle_len > haystack_len
+      then None
+      else if String.equal (String.sub haystack index needle_len) needle
+      then Some index
+      else loop (index + 1)
+    in
+    loop start
+;;
+
+let git_worktree_branch_conflict_of_line line =
+  let prefix = "fatal: '" in
+  let marker = "' is already used by worktree at '" in
+  match substring_index_from line prefix 0 with
+  | None -> None
+  | Some prefix_index ->
+    let branch_start = prefix_index + String.length prefix in
+    (match substring_index_from line marker branch_start with
+     | None -> None
+     | Some marker_index ->
+       let path_start = marker_index + String.length marker in
+       (match String.index_from_opt line path_start '\'' with
+        | None -> None
+        | Some path_end ->
+          let branch =
+            String.sub line branch_start (marker_index - branch_start)
+            |> String.trim
+          in
+          let worktree_path =
+            String.sub line path_start (path_end - path_start) |> String.trim
+          in
+          if String.equal branch "" || String.equal worktree_path ""
+          then None
+          else Some { branch; worktree_path }))
+;;
+
+let git_worktree_branch_conflict stderr =
+  stderr
+  |> String.split_on_char '\n'
+  |> List.find_map git_worktree_branch_conflict_of_line
+;;
+
+let git_worktree_branch_conflict_fields ~stderr =
+  match git_worktree_branch_conflict stderr with
+  | None -> []
+  | Some { branch; worktree_path } ->
+    let recovery_hint =
+      Printf.sprintf
+        "Branch %S is already checked out by an existing worktree. Use \
+         cwd=%S for follow-up Execute calls, or choose a unique \
+         branch/worktree name; retrying the same git worktree add command \
+         cannot succeed."
+        branch
+        worktree_path
+    in
+    [ "git_worktree_branch_already_used", `Bool true
+    ; "branch", `String branch
+    ; "existing_worktree_path", `String worktree_path
+    ; "recovery_hint", `String recovery_hint
+    ; ( "alternatives"
+      , `List
+          [ `String (Printf.sprintf "Set cwd to %s and continue there." worktree_path)
+          ; `String "Create a uniquely named branch/worktree for a separate task lane."
+          ] )
+    ]
+;;
+
 let deterministic_retry_fields_for_process_result
+      ~stderr
       ~(classification : Exec_core.classification)
       ~status
   =
@@ -204,6 +285,7 @@ let deterministic_retry_fields_for_process_result
   | Unix.WEXITED 128, (Exec_core.Git_read | Exec_core.Git_write) ->
     Keeper_tool_deterministic_error.deterministic_retry_fields
       Keeper_tool_deterministic_error.Git_precondition_failed
+    @ git_worktree_branch_conflict_fields ~stderr
   | _ -> []
 ;;
 
@@ -691,6 +773,7 @@ let handle_tool_execute_typed
             let deterministic_retry_fields =
               deterministic_retry_fields_for_process_result
                 ~classification
+                ~stderr:result.stderr
                 ~status:result.status
             in
             (* Only include command_descriptor on success — errors already carry

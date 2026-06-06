@@ -232,6 +232,21 @@ val set_budget_exhaustion_for_test : keeper_name:string -> strikes:int -> unit
 
 type keeper_turn_slot_state
 
+type keeper_turn_slot_control = {
+  is_held : unit -> bool;
+  release_for_blocking_io : unit -> unit;
+  reacquire_after_blocking_io :
+    unit ->
+    (int, [ `Semaphore_wait_timeout of semaphore_wait_timeout ]) result;
+}
+
+val with_keeper_turn_slot_control :
+  ?runtime_profile:string ->
+  keeper_name:string ->
+  channel:Keeper_world_observation.keeper_cycle_channel ->
+  (semaphore_wait_ms:int -> slot_control:keeper_turn_slot_control -> 'a) ->
+  ('a, [> `Semaphore_wait_timeout of semaphore_wait_timeout ]) result
+
 val with_keeper_turn_slot :
   ?runtime_profile:string ->
   keeper_name:string ->

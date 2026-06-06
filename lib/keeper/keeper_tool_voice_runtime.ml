@@ -153,22 +153,42 @@ let handle_speak
            (keeper_text_fallback_json ~agent_id:meta.name ~message)
            memory_status))
 
-let handle_listen ~(meta : keeper_meta) ~(args : Yojson.Safe.t) () =
+let handle_listen ~(meta : keeper_meta) ~(args : Yojson.Safe.t) ?turn_slot_control () =
   let timeout_sec = Safe_ops.json_float ~default:60.0 "timeout_seconds" args in
   let language_code = Safe_ops.json_string_opt "language_code" args in
-  match
-    Voice_bridge.record_and_transcribe
-      ~agent_id:meta.name
-      ~timeout_sec
-      ?language_code
-      ()
-  with
-  | Ok json -> Yojson.Safe.to_string json
-  | Error err ->
-    Tool_args.error_response_with
-      [ "error", `String err
-      ; "agent_id", `String meta.name
-      ]
+  let record () =
+    match
+      Voice_bridge.record_and_transcribe
+        ~agent_id:meta.name
+        ~timeout_sec
+        ?language_code
+        ()
+    with
+    | Ok json -> Yojson.Safe.to_string json
+    | Error err ->
+      Tool_args.error_response_with
+        [ "error", `String err
+        ; "agent_id", `String meta.name
+        ]
+  in
+  let reacquire ctrl =
+    match ctrl.Keeper_turn_slot.reacquire_after_blocking_io () with
+    | Ok wait_ms ->
+      Log.Keeper.info
+        "%s: reacquired keeper turn slot after voice listen (wait_ms=%d)"
+        meta.name
+        wait_ms
+    | Error (`Semaphore_wait_timeout timeout) ->
+      Log.Keeper.warn
+        "%s: semaphore reacquire timeout after voice listen (waited %.0fs)"
+        meta.name
+        timeout.timeout_wait_sec
+  in
+  match turn_slot_control with
+  | Some ctrl when ctrl.Keeper_turn_slot.is_held () ->
+    ctrl.Keeper_turn_slot.release_for_blocking_io ();
+    Eio_guard.protect ~finally:(fun () -> reacquire ctrl) record
+  | _ -> record ()
 
 let handle_agent ~(meta : keeper_meta) =
   match Voice_bridge.get_agent_voice ~agent_id:meta.name with
@@ -218,11 +238,12 @@ let handle
       ~(meta : keeper_meta)
       ~(command : voice_command)
       ~(args : Yojson.Safe.t)
+      ?turn_slot_control
       ()
   =
   match command with
   | Speak -> handle_speak ~config ~meta ~args
-  | Listen -> handle_listen ~meta ~args ()
+  | Listen -> handle_listen ~meta ~args ?turn_slot_control ()
   | Agent -> handle_agent ~meta
   | Sessions -> handle_sessions ()
   | Session_start -> handle_session_start ~meta ~args
@@ -233,8 +254,9 @@ let handle_voice_tool
       ~(meta : keeper_meta)
       ~(name : string)
       ~(args : Yojson.Safe.t)
+      ?turn_slot_control
       ()
   =
   match command_of_string name with
-  | Some command -> handle ~config ~meta ~command ~args ()
+  | Some command -> handle ~config ~meta ~command ~args ?turn_slot_control ()
   | None -> error_json ~fields:[ "tool", `String name ] "unknown_voice_tool"

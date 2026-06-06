@@ -593,6 +593,13 @@ type keeper_turn_slot_state =
   ; autonomous_ticket : int option ref
   }
 
+type keeper_turn_slot_control =
+  { is_held : unit -> bool
+  ; release_for_blocking_io : unit -> unit
+  ; reacquire_after_blocking_io :
+      unit -> (int, [ `Semaphore_wait_timeout of semaphore_wait_timeout ]) result
+  }
+
 let make_keeper_turn_slot_state () =
   { acquired_autonomous = ref false
   ; acquired_reactive = ref false
@@ -727,6 +734,10 @@ let release_keeper_turn_slot_impl ~keeper_name ~(stamp_autonomous_completion : b
 
 let release_keeper_turn_slot ~keeper_name state =
   release_keeper_turn_slot_impl ~keeper_name ~stamp_autonomous_completion:true state
+;;
+
+let release_keeper_turn_slot_for_blocking_io ~keeper_name state =
+  release_keeper_turn_slot_impl ~keeper_name ~stamp_autonomous_completion:false state
 ;;
 
 (** Force-release every slot recorded for [keeper_name] in [holder_table].
@@ -1049,7 +1060,7 @@ let observe_semaphore_wait_seconds ~keeper_name ~runtime_profile ~channel second
   inc_bucket "+Inf"
 ;;
 
-let with_keeper_turn_slot ?(runtime_profile = "unknown") ~keeper_name ~channel f =
+let with_keeper_turn_slot_control ?(runtime_profile = "unknown") ~keeper_name ~channel f =
   let is_autonomous =
     match channel with
     | Keeper_world_observation.Scheduled_autonomous -> true
@@ -1281,12 +1292,46 @@ let with_keeper_turn_slot ?(runtime_profile = "unknown") ~keeper_name ~channel f
             in
             Ok semaphore_wait_ms))
   in
+  let slot_control =
+    { is_held = (fun () -> keeper_turn_slot_is_held slot_state)
+    ; release_for_blocking_io =
+        (fun () ->
+          if keeper_turn_slot_is_held slot_state
+          then (
+            Log.Keeper.info
+              "%s: releasing keeper turn slot before blocking I/O"
+              keeper_name;
+            release_keeper_turn_slot_for_blocking_io ~keeper_name slot_state))
+    ; reacquire_after_blocking_io =
+        (fun () ->
+          if keeper_turn_slot_is_held slot_state
+          then (
+            Log.Keeper.warn
+              "%s: blocking I/O slot reacquire requested while a slot is still held; \
+               releasing first"
+              keeper_name;
+            release_keeper_turn_slot_for_blocking_io ~keeper_name slot_state);
+          acquire_all ())
+    }
+  in
   Eio_guard.protect
     ~finally:(fun () -> release_keeper_turn_slot ~keeper_name slot_state)
     (fun () ->
        match acquire_all () with
        | Error _ as e -> e
-       | Ok semaphore_wait_ms -> Ok (f ~semaphore_wait_ms))
+       | Ok semaphore_wait_ms -> Ok (f ~semaphore_wait_ms ~slot_control))
+;;
+
+let with_keeper_turn_slot ?runtime_profile ~keeper_name ~channel f =
+  with_keeper_turn_slot_control
+    ?runtime_profile
+    ~keeper_name
+    ~channel
+    (fun ~semaphore_wait_ms ~slot_control:_ -> f ~semaphore_wait_ms)
+;;
+
+let with_keeper_turn_slot_control_for_test ?runtime_profile ~keeper_name ~channel f =
+  with_keeper_turn_slot_control ?runtime_profile ~keeper_name ~channel f
 ;;
 
 let with_keeper_turn_slot_for_test ?runtime_profile ~keeper_name ~channel f =

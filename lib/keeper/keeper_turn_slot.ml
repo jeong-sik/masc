@@ -593,6 +593,17 @@ type keeper_turn_slot_state =
   ; autonomous_ticket : int option ref
   }
 
+type keeper_turn_slot_control =
+  { is_held : unit -> bool
+  ; release_for_retry : unit -> unit
+  ; reacquire_after_retry :
+      unit -> (int, [ `Semaphore_wait_timeout of semaphore_wait_timeout ]) result
+  }
+
+let keeper_turn_slot_is_held state =
+  !(state.acquired_autonomous) || !(state.acquired_reactive) || !(state.acquired_turn)
+;;
+
 let make_keeper_turn_slot_state () =
   { acquired_autonomous = ref false
   ; acquired_reactive = ref false
@@ -1281,16 +1292,36 @@ let with_keeper_turn_slot ?(runtime_profile = "unknown") ~keeper_name ~channel f
             in
             Ok semaphore_wait_ms))
   in
+  let slot_control =
+    { is_held = (fun () -> keeper_turn_slot_is_held slot_state)
+    ; release_for_retry =
+        (fun () ->
+           release_keeper_turn_slot_impl
+             ~keeper_name
+             ~stamp_autonomous_completion:false
+             slot_state)
+    ; reacquire_after_retry =
+        (fun () ->
+           if keeper_turn_slot_is_held slot_state then Ok 0 else acquire_all ())
+    }
+  in
   Eio_guard.protect
     ~finally:(fun () -> release_keeper_turn_slot ~keeper_name slot_state)
     (fun () ->
        match acquire_all () with
        | Error _ as e -> e
-       | Ok semaphore_wait_ms -> Ok (f ~semaphore_wait_ms))
+       | Ok semaphore_wait_ms -> Ok (f ~semaphore_wait_ms ~slot_control))
+;;
+
+let with_keeper_turn_slot_control = with_keeper_turn_slot
+
+let with_keeper_turn_slot_control_for_test ?runtime_profile ~keeper_name ~channel f =
+  with_keeper_turn_slot_control ?runtime_profile ~keeper_name ~channel f
 ;;
 
 let with_keeper_turn_slot_for_test ?runtime_profile ~keeper_name ~channel f =
-  with_keeper_turn_slot ?runtime_profile ~keeper_name ~channel f
+  with_keeper_turn_slot ?runtime_profile ~keeper_name ~channel
+    (fun ~semaphore_wait_ms ~slot_control:_ -> f ~semaphore_wait_ms)
 ;;
 
 let wait_for_autonomous_queue_head_for_test

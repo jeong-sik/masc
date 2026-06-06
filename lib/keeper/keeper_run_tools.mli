@@ -101,6 +101,7 @@ val prepare_agent_setup
   -> approval_mode_effective:string option
   -> approval_mode_derived:bool
   -> ?max_cost_usd:float
+  -> ?turn_slot_control:Keeper_turn_slot.keeper_turn_slot_control
   -> trajectory_acc:Trajectory.accumulator option
   -> tool_overlay:Agent_sdk.Tool_op.t ref option
   -> ?runtime_manifest_context:Keeper_runtime_manifest.turn_context

@@ -103,6 +103,7 @@ let run_turn
       ?(runtime_rotation_attempts = [])
       ?(is_retry = false)
       ?shared_context
+      ?turn_slot_control
       ?event_bus
       ()
   : (run_result, Agent_sdk.Error.sdk_error) result
@@ -361,6 +362,7 @@ let run_turn
       ~approval_mode_effective
       ~approval_mode_derived
       ?max_cost_usd
+      ?turn_slot_control
       ~trajectory_acc
       ~tool_overlay
       ~runtime_manifest_context

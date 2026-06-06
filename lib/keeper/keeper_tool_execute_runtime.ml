@@ -11,6 +11,139 @@ let elapsed_duration_ms ~start_time ~end_time =
   | _ when elapsed_ms < 1. -> 1
   | _ -> int_of_float elapsed_ms
 
+type git_worktree_branch_conflict =
+  { branch : string
+  ; worktree_path : string
+  }
+
+let substring_index_from haystack needle start =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  if needle_len = 0
+  then Some start
+  else if start < 0 || start > haystack_len
+  then None
+  else
+    let rec loop index =
+      if index + needle_len > haystack_len
+      then None
+      else if String.equal (String.sub haystack index needle_len) needle
+      then Some index
+      else loop (index + 1)
+    in
+    loop start
+;;
+
+let git_worktree_branch_conflict_of_line line =
+  let prefix = "fatal: '" in
+  let marker = "' is already used by worktree at '" in
+  match substring_index_from line prefix 0 with
+  | None -> None
+  | Some prefix_index ->
+    let branch_start = prefix_index + String.length prefix in
+    (match substring_index_from line marker branch_start with
+     | None -> None
+     | Some marker_index ->
+       let path_start = marker_index + String.length marker in
+       (match String.index_from_opt line path_start '\'' with
+        | None -> None
+        | Some path_end ->
+          let branch =
+            String.sub line branch_start (marker_index - branch_start)
+            |> String.trim
+          in
+          let worktree_path =
+            String.sub line path_start (path_end - path_start) |> String.trim
+          in
+          if String.equal branch "" || String.equal worktree_path ""
+          then None
+          else Some { branch; worktree_path }))
+;;
+
+let git_worktree_branch_conflict stderr =
+  stderr
+  |> String.split_on_char '\n'
+  |> List.find_map git_worktree_branch_conflict_of_line
+;;
+
+let git_global_option_takes_value = function
+  | "-C"
+  | "-c"
+  | "--exec-path"
+  | "--git-dir"
+  | "--work-tree"
+  | "--namespace"
+  | "--super-prefix"
+  | "--config-env" -> true
+  | _ -> false
+
+let git_global_option_has_inline_value token =
+  String.starts_with ~prefix:"-C" token && String.length token > 2
+  || String.starts_with ~prefix:"--exec-path=" token
+  || String.starts_with ~prefix:"--git-dir=" token
+  || String.starts_with ~prefix:"--work-tree=" token
+  || String.starts_with ~prefix:"--namespace=" token
+  || String.starts_with ~prefix:"--super-prefix=" token
+  || String.starts_with ~prefix:"--config-env=" token
+
+let rec git_subcommand_args = function
+  | [] -> []
+  | token :: rest when git_global_option_takes_value token ->
+    (match rest with
+     | _value :: tail -> git_subcommand_args tail
+     | [] -> [])
+  | token :: rest when git_global_option_has_inline_value token ->
+    git_subcommand_args rest
+  | token :: rest when String.starts_with ~prefix:"-" token ->
+    git_subcommand_args rest
+  | rest -> rest
+
+let ir_is_git_worktree_add ir =
+  match Masc_exec.Shell_ir_command_shape.effective_stages ir with
+  | [ stage ]
+    when String.equal
+           (Masc_exec.Shell_ir_command_shape.normalize_command_name stage.bin)
+           "git" ->
+    (match git_subcommand_args stage.args with
+     | "worktree" :: "add" :: _ -> true
+     | _ -> false)
+  | _ -> false
+
+let idempotent_worktree_add_reuse ir status stderr =
+  match status, git_worktree_branch_conflict stderr with
+  | Unix.WEXITED 128, Some conflict when ir_is_git_worktree_add ir ->
+    Some conflict
+  | _ -> None
+
+let git_worktree_reuse_fields { branch; worktree_path } =
+  let recovery_hint =
+    Printf.sprintf
+      "Branch %S is already checked out by an existing worktree. The worktree \
+       add request was treated as idempotent; continue with cwd=%S."
+      branch
+      worktree_path
+  in
+  [ "git_worktree_branch_already_used", `Bool true
+  ; "worktree_reused", `Bool true
+  ; "branch", `String branch
+  ; "existing_worktree_path", `String worktree_path
+  ; "reuse_cwd", `String worktree_path
+  ; "recovery_hint", `String recovery_hint
+  ; ( "alternatives"
+    , `List
+        [ `String (Printf.sprintf "Set cwd to %s and continue there." worktree_path)
+        ; `String "Choose a unique branch/worktree name only when a separate lane is required."
+        ] )
+  ]
+
+let git_worktree_reuse_output { branch; worktree_path } =
+  Printf.sprintf
+    "Worktree already exists: %s\nBranch already checked out: %s\nUse cwd=%S \
+     for follow-up Execute calls.\n"
+    worktree_path
+    branch
+    worktree_path
+
 (* Pre-dispatch path existence validation for typed commands.
    Uses Shell_ir_typed GADT path annotations (exhaustive, no
    string heuristics). Only validates Safe (read-only) Simple
@@ -439,14 +572,33 @@ let handle_tool_execute_typed
                 ~stderr:result.stderr
             in
             let classification = Exec_core.classify_command_of_ir ir in
+            let worktree_reuse = idempotent_worktree_add_reuse ir result.status result.stderr in
             (* Only include command_descriptor on success — errors already carry
                sufficient diagnostic info (exit code, stderr, classification). *)
             let descriptor_fields =
-              match result.status with
-              | Unix.WEXITED 0 ->
+              match result.status, worktree_reuse with
+              | Unix.WEXITED 0, _ | _, Some _ ->
                 let descriptor = Ide_command_descriptor.compute ir in
                 [ "command_descriptor", Ide_event_types.command_descriptor_to_json descriptor ]
-              | _ -> []
+              | _, None -> []
+            in
+            let status, output, worktree_reuse_fields =
+              match worktree_reuse with
+              | None -> result.status, output, []
+              | Some conflict ->
+                Log.Keeper.info
+                  "shell_ir worktree_reuse keeper=%s branch=%s existing_worktree=%s"
+                  meta.name
+                  conflict.branch
+                  conflict.worktree_path;
+                ( Unix.WEXITED 0
+                , git_worktree_reuse_output conflict
+                , git_worktree_reuse_fields conflict )
+            in
+            let failure_error_fields =
+              match worktree_reuse with
+              | Some _ -> []
+              | None -> failure_error_fields
             in
             Yojson.Safe.to_string
               (Exec_core.process_result_json
@@ -455,7 +607,8 @@ let handle_tool_execute_typed
                  ~keeper_name:meta.name
                  ~cmd
                  ~extra:
-                   (failure_error_fields
+                   (worktree_reuse_fields
+                    @ failure_error_fields
                     @ glob_literal_failure_fields
                     @ sandbox_extra_fields
                     @ [ "typed", `Bool true
@@ -465,7 +618,7 @@ let handle_tool_execute_typed
                     @ response_cwd_field
                     @ descriptor_fields
                     @ execution_location_fields cwd)
-                 ~status:result.status
+                 ~status
                  ~output
                  ~env_snapshot:env_snap
                  ()))

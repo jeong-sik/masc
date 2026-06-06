@@ -61,6 +61,7 @@ val handle_voice
   -> meta:keeper_meta
   -> name:string
   -> args:Yojson.Safe.t
+  -> ?turn_slot_control:Keeper_turn_slot.keeper_turn_slot_control
   -> unit
   -> string
 

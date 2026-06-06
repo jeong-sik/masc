@@ -62,6 +62,7 @@ type ctx =
       -> unit
   ; shared_context : Agent_sdk.Context.t option
   ; trajectory_acc : Trajectory.accumulator
+  ; turn_slot_control : Keeper_turn_slot.keeper_turn_slot_control option
   ; turn_affordances : string list
   ; turn_id : int
   }
@@ -90,6 +91,7 @@ let run (ctx : ctx)
       ; keeper_turn_id
       ; turn_id
       ; channel
+      ; turn_slot_control
       ; shared_context
       ; base_dir
       ; build_turn_prompt
@@ -203,6 +205,7 @@ let run (ctx : ctx)
                ~trajectory_acc
                ~is_retry
                ?shared_context
+               ?turn_slot_control
                ?event_bus:(Keeper_event_bus.get ())
                ()))
   in

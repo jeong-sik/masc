@@ -34,6 +34,7 @@ let prepare_agent_setup
       ~(approval_mode_effective : string option)
       ~(approval_mode_derived : bool)
       ?max_cost_usd
+      ?turn_slot_control
       ~(trajectory_acc : Trajectory.accumulator option)
       ~(tool_overlay : Agent_sdk.Tool_op.t ref option)
       ?runtime_manifest_context
@@ -127,6 +128,7 @@ let prepare_agent_setup
       ~search_fn:(fun ~query ~max_results -> !local_search_fn_ref ~query ~max_results)
       ~on_tool_called:(fun name ->
         Keeper_discovered_tools.mark_used acc.discovered ~turn:acc.current_turn ~name)
+      ?turn_slot_control
       ()
   in
   let extend_turns_tool = Keeper_extend_turns.make ~agent_ref ~max_turns () in

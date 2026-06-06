@@ -108,6 +108,7 @@ val run_turn
   -> ?runtime_rotation_attempts:Keeper_execution_receipt.runtime_rotation_attempt list
   -> ?is_retry:bool
   -> ?shared_context:Agent_sdk.Context.t
+  -> ?turn_slot_control:Keeper_turn_slot.keeper_turn_slot_control
   -> ?event_bus:Agent_sdk.Event_bus.t
   -> unit
   -> (run_result, Agent_sdk.Error.sdk_error) result

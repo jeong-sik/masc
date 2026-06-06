@@ -294,6 +294,7 @@ let execute_keeper_tool_call_with_outcome
       ?proc_mgr
       ?net
       ?mcp_session_id
+      ?turn_slot_control
       ~(name : string)
       ~(input : Yojson.Safe.t)
       ()
@@ -410,6 +411,7 @@ let execute_keeper_tool_call_with_outcome
            ; proc_mgr
            ; net
            ; mcp_session_id
+           ; turn_slot_control
            }
        in
        let descriptor_output =

@@ -20,6 +20,12 @@
   /`board.commented` activity-polling auto-push (previously done by
   the sidecar) is dropped — re-add as a follow-up if needed.
 
+### Fixed
+- `tool_execute` now turns git's "branch is already used by worktree"
+  failure from `git worktree add` into an idempotent success that
+  reuses the existing worktree path, instead of gating keeper progress
+  behind the same failing command.
+
 ### Removed
 - RFC-0151 withdrawn: the code-smell monotone ratchet is removed
   (`scripts/code-smell/measure.sh`, `scripts/lint/godfile-size-regression.sh`,

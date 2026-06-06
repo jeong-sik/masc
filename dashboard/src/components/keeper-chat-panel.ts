@@ -301,6 +301,23 @@ export function KeeperChatPanel({ name }: { name: string }) {
 
     // Track pending tool call args during streaming (keyed by toolCallId)
     const pendingToolArgs = new Map<string, { name: string; args: string }>()
+    // Insertion-order key list for fallback lookup when toolCallId is absent
+    const pendingOrder: string[] = []
+
+    function resolvePending(toolCallId?: string): { id: string; entry: { name: string; args: string } } | null {
+      if (toolCallId) {
+        const entry = pendingToolArgs.get(toolCallId)
+        return entry ? { id: toolCallId, entry } : null
+      }
+      // Fallback: most recently inserted pending tool call
+      while (pendingOrder.length > 0) {
+        const lastId = pendingOrder[pendingOrder.length - 1]
+        const entry = pendingToolArgs.get(lastId)
+        if (entry) return { id: lastId, entry }
+        pendingOrder.pop()
+      }
+      return null
+    }
 
     try {
       await streamKeeperMessage(keeperName, text, {
@@ -313,27 +330,26 @@ export function KeeperChatPanel({ name }: { name: string }) {
             const tcId = event.toolCallId ?? `tc-${Date.now()}`
             const tcName = event.toolCallName ?? event.name ?? 'unknown'
             pendingToolArgs.set(tcId, { name: tcName, args: '' })
+            pendingOrder.push(tcId)
           } else if (event.type === 'TOOL_CALL_ARGS') {
-            const tcId = event.toolCallId ?? ''
-            const entry = tcId ? pendingToolArgs.get(tcId) : undefined
-            if (entry && typeof event.delta === 'string') {
-              entry.args += event.delta
+            const resolved = resolvePending(event.toolCallId)
+            if (resolved && typeof event.delta === 'string') {
+              resolved.entry.args += event.delta
             }
           } else if (event.type === 'TOOL_CALL_END') {
-            const tcId = event.toolCallId ?? ''
-            const entry = tcId ? pendingToolArgs.get(tcId) : undefined
-            if (entry) {
+            const resolved = resolvePending(event.toolCallId)
+            if (resolved) {
               const toolMsg: ChatMessage = {
                 role: 'tool',
-                content: entry.args || '(no args)',
+                content: resolved.entry.args || '(no args)',
                 timestamp: Date.now(),
                 source: 'dashboard',
-                toolCallId: tcId,
-                toolCallName: entry.name,
+                toolCallId: resolved.id,
+                toolCallName: resolved.entry.name,
               }
               appendChatMessage(keeperName, toolMsg)
               chatMessages.value = getChatMessageBuffer(keeperName)
-              pendingToolArgs.delete(tcId)
+              pendingToolArgs.delete(resolved.id)
             }
           } else if (event.type === 'RUN_FINISHED') {
             const finalText = streamBuffer.value.trim() || '(no response)'

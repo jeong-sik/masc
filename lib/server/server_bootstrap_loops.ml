@@ -857,7 +857,21 @@ let start_keeper_loops
       | exn ->
         Log.Keeper.error
           "autoboot: supervisor sweep failed to start: %s"
-          (Printexc.to_string exn))));
+          (Printexc.to_string exn)));
+      (* Start queue consumer fiber for async queue drain.
+         handle_turn is a no-op until Phase 3b wires process_single_turn. *)
+      (try
+         Keeper_chat_consumer.start ~sw ~clock
+           ~handle_turn:(fun ~keeper_name ~queued_message:_ ->
+             Log.Keeper.info
+               "keeper_chat_consumer: would drain queued message for keeper=%s"
+               keeper_name)
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+           Log.Keeper.warn
+             "keeper_chat_consumer: failed to start: %s"
+             (Printexc.to_string exn)));
   (* Phase 5: unified startup subsystem summary *)
   Log.Startup.info "subsystems: keeper loops started"
 ;;

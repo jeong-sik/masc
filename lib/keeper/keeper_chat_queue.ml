@@ -69,3 +69,7 @@ let clear ~keeper_name =
       | Some entry ->
           Eio.Mutex.use_rw ~protect:true entry.mutex (fun () ->
               Queue.clear entry.q))
+
+let all_keeper_names () =
+  Eio.Mutex.use_rw ~protect:true registry_mutex (fun () ->
+      Hashtbl.fold (fun name _ acc -> name :: acc) registry [])

@@ -293,15 +293,12 @@ function findKeeperRuntimeForAgent(
 type KeeperFilterMode = 'all' | 'agent-only' | 'keeper-only'
 type RosterAgent = Agent & { rosterSource?: 'agent_registry' | 'keeper_runtime' }
 
-function isRuntimeBackedKeeper(keeper: Keeper): boolean {
+function keeperHasRuntimeDetailRow(keeper: Keeper): boolean {
+  // Paused keepers are not live capacity, but execution still sends them as
+  // operator-visible detail rows. Keep them in the roster so "설정 N" does not
+  // degrade into count-only inventory with missing paused rows.
+  if (isKeeperPaused(keeper)) return true
   if (keeper.registered === false && keeper.keepalive_running === false) return false
-  // RFC-0135 PR-13: use canonical paused predicate. SSOT also covers
-  // `phase === 'Paused'` / `status === 'paused'` / `pipeline_stage ===
-  // 'paused'`. Effect: an FSM-paused but-not-flag-paused keeper that
-  // also lost registration + keepalive is now filtered out, matching
-  // the "no real backing runtime" intent the original `paused === true`
-  // check captured only partially.
-  if (isKeeperPaused(keeper) && keeper.registered !== true && keeper.keepalive_running !== true) return false
   return true
 }
 
@@ -333,13 +330,13 @@ function liveAgentIdentityKeys(agentList: readonly Agent[]): Set<string> {
   return keys
 }
 
-function runtimeBackedKeepers(
+function rosterDetailKeepers(
   keeperList: Keeper[],
   agentList: readonly Agent[] = [],
 ): Keeper[] {
   const liveAgentKeys = liveAgentIdentityKeys(agentList)
   return keeperList.filter(keeper =>
-    isRuntimeBackedKeeper(keeper) || keeperHasLiveAgentPresence(keeper, liveAgentKeys))
+    keeperHasRuntimeDetailRow(keeper) || keeperHasLiveAgentPresence(keeper, liveAgentKeys))
 }
 
 function expectedCountForKeeperFilter(
@@ -570,7 +567,7 @@ export function countRuntimeKinds(
   keeperRows: number
   totalRuntimes: number
 } {
-  const runtimeKeepers = runtimeBackedKeepers(keeperList, agentList)
+  const runtimeKeepers = rosterDetailKeepers(keeperList, agentList)
   const rosterAgents = buildAgentRoster(agentList, runtimeKeepers)
   const keeperLookup = buildKeeperRuntimeLookup(runtimeKeepers)
   const allKeepers = scopeAgentsByKeeperFilter(rosterAgents, runtimeKeepers, 'keeper-only', keeperLookup)
@@ -609,7 +606,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
   const agentList = agents.value
   const keeperList = keepers.value
   const runtimeKeeperList = useMemo(
-    () => runtimeBackedKeepers(keeperList, agentList),
+    () => rosterDetailKeepers(keeperList, agentList),
     [keeperList, agentList],
   )
 

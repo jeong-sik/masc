@@ -278,7 +278,7 @@ describe('rosterBlockerDisplay', () => {
 })
 
 describe('countRuntimeKinds', () => {
-  it('excludes configured-only paused keepers from live runtime counts', () => {
+  it('keeps configured paused keepers as detail rows without counting them as running', () => {
     const result = countRuntimeKinds(
       [],
       [
@@ -301,10 +301,10 @@ describe('countRuntimeKinds', () => {
     expect(result).toEqual({
       agents: 0,
       keepers: 1,
-      pausedKeepers: 0,
+      pausedKeepers: 1,
       offlineKeepers: 0,
-      keeperRows: 1,
-      totalRuntimes: 1,
+      keeperRows: 2,
+      totalRuntimes: 2,
     })
   })
 
@@ -591,6 +591,43 @@ describe('AgentRoster live-only cards', () => {
     expect(text).not.toContain('Source mismatch')
     expect(text).not.toContain('agent registry 0')
     expect(text).not.toContain('파생')
+  })
+
+  it('renders paused configured keepers even without live agent presence', async () => {
+    agents.value = []
+    keepers.value = [
+      {
+        name: 'albini',
+        agent_name: 'keeper-albini-agent',
+        status: 'paused',
+        phase: 'Paused',
+        pipeline_stage: 'paused',
+        paused: true,
+        registered: false,
+        keepalive_running: false,
+      } as Keeper,
+      {
+        name: 'rondo',
+        agent_name: 'keeper-rondo-agent',
+        status: 'idle',
+        phase: 'Running',
+        pipeline_stage: 'idle',
+        keepalive_running: true,
+      } as Keeper,
+    ]
+
+    await act(async () => {
+      render(html`<${AgentRoster} keeperFilter="keeper-only" />`, container)
+    })
+    await flushUi()
+
+    const rows = container.querySelectorAll('[data-testid="keeper-operations-row"]')
+    const text = container.textContent ?? ''
+    expect(rows.length).toBe(2)
+    expect(text).toContain('albini')
+    expect(text).toContain('rondo')
+    expect(text).toContain('일시정지')
+    expect(text).not.toContain('상세 상태 부분 동기화')
   })
 
   it('does not report source mismatch on default keeper ops when keeper projection has rows', async () => {

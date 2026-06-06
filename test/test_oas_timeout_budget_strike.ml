@@ -131,6 +131,19 @@ let test_attempt_watchdog_timeout_reclassifies_as_provider_timeout () =
     true
     (EC.should_warn_keeper_cycle_failed reclassified)
 
+let test_provider_timeout_is_not_ambiguous_side_effect () =
+  Alcotest.(check bool)
+    "provider timeout is not ambiguous without committed tools"
+    false
+    (EC.is_ambiguous_side_effect_error
+       (provider_timeout_error ~phase:"runtime_attempt_watchdog"))
+
+let test_turn_timeout_is_not_ambiguous_side_effect () =
+  Alcotest.(check bool)
+    "turn timeout is not ambiguous without committed tools"
+    false
+    (EC.is_ambiguous_side_effect_error (turn_timeout_error ()))
+
 let test_strike_limit_routes_through_policy_without_keeper_death () =
   let err = provider_timeout_error ~phase:"stream_idle:streaming_thinking" in
   match
@@ -214,6 +227,14 @@ let () =
           "attempt watchdog timeout reclassifies as provider timeout"
           `Quick
           test_attempt_watchdog_timeout_reclassifies_as_provider_timeout;
+        Alcotest.test_case
+          "provider timeout is not ambiguous partial commit"
+          `Quick
+          test_provider_timeout_is_not_ambiguous_side_effect;
+        Alcotest.test_case
+          "turn timeout is not ambiguous partial commit"
+          `Quick
+          test_turn_timeout_is_not_ambiguous_side_effect;
         Alcotest.test_case "strike limit uses policy, not keeper death" `Quick
           test_strike_limit_routes_through_policy_without_keeper_death;
         Alcotest.test_case "capacity phase routes to provider tuning" `Quick

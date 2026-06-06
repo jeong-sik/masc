@@ -3,12 +3,11 @@
     Verifies that
     [Keeper_turn_runtime_budget.decide_retry_admission_for_turn]
     returns:
-      - [Ok ()] when remaining turn budget is well above the
-        per-attempt floor ([provider_timeout_guard_sec +
-        min_provider_timeout_budget_sec] = 30s) for a retry without
-        wall-clock fallback.
-      - [Error (Retry_budget_below_min _)] when the projected
-        wall-clock budget falls below the min floor (15s).
+      - [Ok ()] for retries even when the outer keeper-turn wall clock
+        is exhausted. Provider liveness, stream idle, and max-turn
+        limits own retry termination.
+      - [Error (First_attempt_budget_below_min _)] when a first
+        attempt does not have enough startup budget.
 
     The min floor is a typed boundary: the gate's reason field is a
     closed-sum reason record, not a substring or counter — see
@@ -42,34 +41,32 @@ let decision_testable =
       Error (KCB.First_attempt_budget_below_min _) -> true
     | _ -> false)
 
-let test_retry_with_sufficient_wall_clock_budget_admits () =
-  (* remaining_turn_budget_s = 120s; wall-clock fallback enabled.
-     wall_clock = 120 - 15 = 105 >= 15 → Ok. *)
+let test_retry_ignores_expired_outer_turn_budget () =
+  (* Retry admission intentionally ignores the cumulative outer turn
+     wall-clock cap. A no-first-token liveness guard can spend the old
+     cap before the retry branch; denying here would turn the real
+     provider failure into synthetic [retry_budget_below_min]. *)
   let result =
     KCB.decide_retry_admission_for_turn
-      ~remaining_turn_budget_s:120.0
+      ~remaining_turn_budget_s:0.0
       ~attempt_kind:KCB.Retry_attempt
-      ~allow_wall_clock_retry_budget:true
+      ~allow_wall_clock_retry_budget:false
       ~estimated_input_tokens:1000
       ~max_turns:6
   in
   Alcotest.check decision_testable
-    "retry with 120s remaining + wall-clock should admit"
+    "retry with 0s remaining should admit"
     (Ok ()) result
 
-let test_retry_below_min_denies_with_typed_reason () =
-  (* remaining_turn_budget_s = 20s; wall-clock fallback off
-     (i.e. usable_retry_budget alone must clear 15s).
-     adaptive_timeout default = min(turn_timeout, 300). Since the
-     freeze gives us a known turn_timeout_sec, and
-     time_spent_in_turn = turn_timeout - 20, usable_retry_budget
-     can be small / negative. We avoid asserting the exact
-     [projected_usable_budget_s] value; we only assert the
-     constructor + min_required_s + that the gate said NO. *)
+let test_first_attempt_below_min_denies_with_typed_reason () =
+  (* First attempts still need enough startup room for the provider
+     guard plus minimum attempt budget. This keeps genuinely stale
+     turn-start attempts from starting, without blocking retries after
+     a provider/liveness failure. *)
   let result =
     KCB.decide_retry_admission_for_turn
       ~remaining_turn_budget_s:20.0
-      ~attempt_kind:KCB.Retry_attempt
+      ~attempt_kind:KCB.First_attempt
       ~allow_wall_clock_retry_budget:false
       ~estimated_input_tokens:1000
       ~max_turns:6
@@ -77,21 +74,16 @@ let test_retry_below_min_denies_with_typed_reason () =
   match result with
   | Ok () ->
     Alcotest.failf
-      "expected admission denial with 20s remaining and no \
-       wall-clock fallback, got Ok"
-  | Error (KCB.First_attempt_budget_below_min _) ->
+      "expected first-attempt admission denial with 20s remaining, got Ok"
+  | Error (KCB.Retry_budget_below_min _) ->
     Alcotest.failf
-      "expected Retry_budget_below_min, got \
-       First_attempt_budget_below_min"
-  | Error (KCB.Retry_budget_below_min r) ->
+      "expected First_attempt_budget_below_min, got Retry_budget_below_min"
+  | Error (KCB.First_attempt_budget_below_min r) ->
     Alcotest.(check (float 0.001))
       "min_required_s is 15.0" 15.0 r.min_required_s;
     Alcotest.(check (float 0.001))
       "remaining_turn_budget_s echoed back" 20.0
-      r.remaining_turn_budget_s;
-    Alcotest.(check bool)
-      "wall-clock flag echoed back" false
-      r.allow_wall_clock_retry_budget
+      r.remaining_turn_budget_s
 
 let () =
   Alcotest.run "d7_retry_admission_gate"
@@ -99,12 +91,12 @@ let () =
       ( "decide_retry_admission_for_turn",
         [
           Alcotest.test_case
-            "retry with sufficient wall-clock budget admits"
+            "retry ignores expired outer turn budget"
             `Quick
-            test_retry_with_sufficient_wall_clock_budget_admits;
+            test_retry_ignores_expired_outer_turn_budget;
           Alcotest.test_case
-            "retry below min denies with typed Retry_budget_below_min"
+            "first attempt below min denies with typed First_attempt_budget_below_min"
             `Quick
-            test_retry_below_min_denies_with_typed_reason;
+            test_first_attempt_below_min_denies_with_typed_reason;
         ] );
     ]

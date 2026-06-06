@@ -30,15 +30,15 @@ val next_fail_open_runtime_for_turn :
 val sdk_error_kind : Agent_sdk.Error.sdk_error -> string
 
 val provider_timeout_guard_sec : float
-(** Retry guard floor (seconds). *)
+(** First-attempt provider startup guard floor (seconds). *)
 
 val min_provider_timeout_budget_sec : float
 (** Minimum provider timeout budget (seconds). *)
 
 val first_attempt_degraded_retry_reserve_sec : float
-(** Wall-clock reserve kept from non-retry attempts so one degraded
-    retry can still satisfy [provider_timeout_guard_sec] +
-    [min_provider_timeout_budget_sec]. *)
+(** Conservative wall-clock reserve kept from non-retry attempts before
+    provider dispatch. Retry attempts do not consume this outer
+    wall-clock reserve as admission budget. *)
 
 val sdk_error_kind : Agent_sdk.Error.sdk_error -> string
 
@@ -64,8 +64,9 @@ val resolve_bounded_provider_timeout_budget_with_turn_budget :
   provider_timeout_budget option
 (** Resolves the per-provider timeout inside the outer keeper turn
     budget. Non-retry attempts keep a small degraded-retry reserve when
-    the remaining wall-clock budget is large enough; retry attempts use
-    the remaining per-attempt or one-shot degraded wall-clock budget. *)
+    the remaining wall-clock budget is large enough. Retry attempts use
+    the resolved adaptive provider timeout directly; provider liveness,
+    stream idle, and max-turn limits own retry termination. *)
 
 val allow_wall_clock_retry_budget_for_attempt :
   is_retry:bool ->

@@ -166,7 +166,7 @@ interface DashboardHealthChip {
   tone: DashboardHealthChipTone
   // Optional drill-down route. When set, DashboardHealthStrip renders this
   // chip as a RouteLink so operators can jump from "Source mismatch" /
-  // "Paused keepers N" / "Reaction ledger pending N" straight to the page
+  // "일시정지 keeper N" / "Reaction ledger pending N" straight to the page
   // that explains the signal. Chips without a route render as static spans
   // (e.g. transport-offline — no view helps).
   route?: DashboardHealthChipRoute
@@ -488,7 +488,7 @@ export function dashboardHealthChips(input: DashboardHealthInput): DashboardHeal
         offlineKeepers: runtimeCounts.live.offlineKeepers,
         configuredKeepers: configured,
       }),
-      detail: `런타임 가동=${runningCountSource}, paused=상세 행 lifecycle, offline=상세 행 status, 설정=${configuredCountSourceLabel(runtimeCounts.configured.source)} keeper inventory.`,
+      detail: `런타임 가동=${runningCountSource}; 일시정지=재개 대기 lifecycle row; 오프라인=프로세스/하트비트 없음으로 기동 필요 row; 설정=${configuredCountSourceLabel(runtimeCounts.configured.source)} keeper 설정.`,
       tone: 'muted',
     })
   }
@@ -496,8 +496,8 @@ export function dashboardHealthChips(input: DashboardHealthInput): DashboardHeal
   if (pausedKeepers > 0) {
     chips.push({
       key: 'paused-keepers',
-      label: `Paused keepers ${pausedKeepers}`,
-      detail: 'One or more keeper rows are paused; board/tool activity may look quiet.',
+      label: `일시정지 keeper ${pausedKeepers}`,
+      detail: '재개 대기 상태의 keeper가 있습니다. board/tool 활동은 조용해 보일 수 있습니다.',
       tone: 'warn',
     })
   }

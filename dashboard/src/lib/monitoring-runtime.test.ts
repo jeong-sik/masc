@@ -38,12 +38,15 @@ describe('runtimeBandMeta', () => {
     const meta = runtimeBandMeta('paused')
     expect(meta.key).toBe('paused')
     expect(meta.label).toContain('일시정지')
+    expect(meta.description).toContain('재개')
+    expect(meta.description).not.toContain('운영자')
   })
 
   it('returns offline meta', () => {
     const meta = runtimeBandMeta('offline')
     expect(meta.key).toBe('offline')
     expect(meta.label).toContain('오프라인')
+    expect(meta.description).toContain('기동')
   })
 })
 
@@ -111,6 +114,20 @@ describe('summarizeMonitoringEvidence', () => {
 })
 
 describe('summarizeKeeperMonitoring', () => {
+  it('describes paused keepers as resume-waiting instead of operator-only', () => {
+    const summary = summarizeKeeperMonitoring({
+      name: 'keeper-paused',
+      status: 'paused',
+      phase: 'Paused',
+      pipeline_stage: 'paused',
+      paused: true,
+    } as Keeper)
+
+    expect(summary.band.key).toBe('paused')
+    expect(summary.hint).toContain('재개 대기')
+    expect(summary.hint).not.toContain('운영자')
+  })
+
   it('ignores stale last_blocker text when no live runtime blocker is present', () => {
     const summary = summarizeKeeperMonitoring({
       name: 'keeper-a',

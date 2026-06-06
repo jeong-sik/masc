@@ -343,7 +343,7 @@ PR will implement Phase 2.A:
 3. `dune build @check` + `dune runtest` green locally.
 4. Single commit per logical group (e.g., "rename: `*_failure_site` → `keeper_*_failure_site` (15 files)").
 5. Self-review against RFC-0056 G1–G5 gates.
-6. Draft PR → CI green → `human-approved-ready` → Ready.
+6. Draft PR → CI green → Ready.
 
 Phase 2.B (this RFC's main deliverable) follows after Phase 2.A merges
 and main is verified green.

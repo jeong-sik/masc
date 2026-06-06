@@ -114,9 +114,8 @@ godfile 이 ratchet 도입 *이전* 부터 존재하던 dead surface 를 RFC 분
 RATCHET-WAIVED: <metric_id> <reason>
 ```
 
-CI 는 `RATCHET-WAIVED` 라인을 *count* 하고 `do-not-merge` 라벨을
-자동 부착하지 *않는다* (이 RFC 는 강제 차단이 아니라 *명시 트래킹*
-이 목적). 단, `RATCHET-WAIVED` 가 한 PR 에 2+ metric 동시 사용 시
+CI 는 `RATCHET-WAIVED` 라인을 *count* 만 한다 (이 RFC 는 강제 차단이
+아니라 *명시 트래킹* 이 목적). 단, `RATCHET-WAIVED` 가 한 PR 에 2+ metric 동시 사용 시
 adversarial-reviewer agent invoke 를 트리거 (impl PR 에서 wiring).
 
 ## 6. Override 3-요건 (AGENT-LLM-A.md §"Override 조건" 정합)

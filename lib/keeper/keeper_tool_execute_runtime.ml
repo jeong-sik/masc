@@ -291,10 +291,13 @@ let pre_dispatch_path_missing ~cwd ir =
      | `Safe ->
        let args = Masc_exec.Shell_ir_typed.path_args typed in
        List.find_opt (fun p ->
-         let resolved =
-           if Filename.is_relative p then Filename.concat cwd p else p
-         in
-         try not (Sys.file_exists resolved) with _ -> true
+         if token_looks_like_shell_glob p then
+           false
+         else
+           let resolved =
+             if Filename.is_relative p then Filename.concat cwd p else p
+           in
+           try not (Sys.file_exists resolved) with _ -> true
        ) args
      | `Audited | `Privileged -> None)
   | Masc_exec.Shell_ir.Pipeline _ -> None

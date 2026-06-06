@@ -460,6 +460,22 @@ let assert_no_repo_patrol_error raw =
   assert_not_contains "no sandbox_repo_sync_disabled patrol error" raw "sandbox_repo_sync_disabled";
   assert_not_contains "no sandbox_repo_stale patrol error" raw "sandbox_repo_stale"
 
+let assert_path_not_found_pre_dispatch label raw missing_path =
+  let json = Yojson.Safe.from_string raw in
+  Alcotest.(check bool)
+    (label ^ " is not ok")
+    false
+    (json |> Json.member "ok" |> Json.to_bool);
+  let err = json |> Json.member "error" |> Json.to_string in
+  assert_contains (label ^ " reports path_not_found") err "path_not_found";
+  assert_contains (label ^ " reports missing path") raw missing_path;
+  let retry = json |> Json.member "deterministic_retry" in
+  Alcotest.(check bool) (label ^ " has deterministic retry") true (retry <> `Null);
+  Alcotest.(check string)
+    (label ^ " retry reason")
+    "path_not_found"
+    (retry |> Json.member "reason" |> Json.to_string)
+
 let assert_success_or_error_json raw =
   let json = Yojson.Safe.from_string raw in
   match json |> Json.member "ok" |> Json.to_bool_option, parse_error_field raw with
@@ -536,10 +552,10 @@ let test_tool_execute_allows_parent_git_repo_path_arg_to_fail_naturally () =
       ()
   in
   assert_no_repo_patrol_error raw;
-  match parse_error_field raw with
-  | Some err ->
-    assert_contains "cat reached runtime missing-file error" err "No such file or directory"
-  | None -> Alcotest.fail ("expected error json, got: " ^ raw)
+  assert_path_not_found_pre_dispatch
+    "repo path arg"
+    raw
+    "./repos/masc/.missing.ml"
 
 let test_tool_execute_allows_wrapped_git_repo_path_arg_to_run_naturally () =
   with_eio_fs @@ fun () ->
@@ -660,10 +676,10 @@ let test_tool_execute_allows_stale_worktree_path_arg_to_fail_naturally () =
       ()
   in
   assert_no_repo_patrol_error raw;
-  match parse_error_field raw with
-  | Some err ->
-    assert_contains "cat reached runtime missing-file error" err "No such file or directory"
-  | None -> Alcotest.fail ("expected error json, got: " ^ raw)
+  assert_path_not_found_pre_dispatch
+    "stale worktree path arg"
+    raw
+    "./repos/masc/.worktrees/task/.missing.ml"
 
 let test_tool_execute_allows_broken_worktree_gitfile_to_fail_naturally () =
   with_eio_fs @@ fun () ->
@@ -694,10 +710,7 @@ let test_tool_execute_allows_broken_worktree_gitfile_to_fail_naturally () =
       ()
   in
   assert_no_repo_patrol_error raw;
-  match parse_error_field raw with
-  | Some err ->
-    assert_contains "cat reached runtime missing-file error" err "No such file or directory"
-  | None -> Alcotest.fail ("expected broken worktree error json, got: " ^ raw)
+  assert_path_not_found_pre_dispatch "broken worktree path arg" raw "README.md"
 
 let test_tool_execute_readonly_missing_worktree_path_arg_does_not_materialize () =
   with_eio_fs @@ fun () ->
@@ -727,13 +740,13 @@ let test_tool_execute_readonly_missing_worktree_path_arg_does_not_materialize ()
       ()
   in
   assert_no_repo_patrol_error raw;
-  match parse_error_field raw with
-  | Some err ->
-    assert_contains "cat reached runtime missing-file error" err "No such file or directory";
-    Alcotest.(check bool) "missing worktree path arg was not materialized"
-      false
-      (Sys.file_exists missing_worktree)
-  | None -> Alcotest.fail ("expected error json, got: " ^ raw)
+  assert_path_not_found_pre_dispatch
+    "readonly missing worktree path arg"
+    raw
+    "./repos/masc/.worktrees/task-missing/.missing.ml";
+  Alcotest.(check bool) "missing worktree path arg was not materialized"
+    false
+    (Sys.file_exists missing_worktree)
 
 let test_tool_execute_missing_worktree_cwd_does_not_create_directory () =
   with_eio_fs @@ fun () ->
@@ -2252,7 +2265,7 @@ let () =
             `Quick
             test_tool_execute_resolves_parent_git_repo_cwd_without_repo_patrol
         ; Alcotest.test_case
-            "repo path arg naturally fails without repo patrol"
+            "repo path arg pre-dispatch path_not_found without repo patrol"
             `Quick
             test_tool_execute_allows_parent_git_repo_path_arg_to_fail_naturally
         ; Alcotest.test_case
@@ -2268,11 +2281,11 @@ let () =
             `Quick
             test_tool_execute_allows_inline_git_work_tree_path_arg_to_fail_naturally
         ; Alcotest.test_case
-            "stale worktree path arg naturally fails without repo patrol"
+            "stale worktree path arg pre-dispatch path_not_found without repo patrol"
             `Quick
             test_tool_execute_allows_stale_worktree_path_arg_to_fail_naturally
         ; Alcotest.test_case
-            "broken worktree gitfile naturally fails without repo patrol"
+            "broken worktree gitfile pre-dispatch path_not_found without repo patrol"
             `Quick
             test_tool_execute_allows_broken_worktree_gitfile_to_fail_naturally
         ; Alcotest.test_case

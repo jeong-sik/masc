@@ -203,6 +203,13 @@ let make_tools
       ()
   : Agent_sdk.Tool.t list
   =
-  (make_tool_bundle ~config ~meta ~ctx_snapshot ?search_fn ?on_tool_called ?clock ())
+  (make_tool_bundle
+     ~config
+     ~meta
+     ~ctx_snapshot
+     ?search_fn
+     ?on_tool_called
+     ?clock
+     ())
     .tools
 ;;

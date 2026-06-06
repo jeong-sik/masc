@@ -120,19 +120,21 @@ rg -n '^\((test|tests|executable)\b|^\s+\((name|names|modules)\b' test/dune test
 Keeper tool call의 사전/사후 실행 게이트. Swiss Cheese Model (다중 방어층).
 
 ```
-Tool call -> Cost budget check
-          -> Destructive pattern detection
+Tool call -> Destructive pattern detection
           -> Tool allowlist check
           -> Entropy check (동일 도구 N회 연속 호출)
           -> [모두 Pass] -> 실행 허용
           -> [하나라도 Reject] -> 실행 차단
 ```
 
+Current-source overlay: `max_cost_usd` is advisory telemetry only and is not a
+pre-execution gate.
+
 **gate_config 기본값**:
 
 | 파라미터 | 기본값 | 설명 |
 |---------|--------|------|
-| `max_cost_usd` | 0 | 세션 비용 한도 (`0`이면 비활성) |
+| `max_cost_usd` | 0 | Advisory cost threshold. Cost never gates execution. |
 | `max_tool_calls_per_turn` | 10 | 턴당 도구 호출 상한 |
 | `entropy_threshold` | 3 | 동일 도구 연속 호출 임계값 |
 | `destructive_check_enabled` | true | 파괴적 명령 탐지 |
@@ -305,7 +307,7 @@ bisect-ppx-report html --coverage-path _coverage
 - **INV-T4**: `trajectory.tool_call_entry`의 `gate_decision`이 `Reject`이면 `result`는 반드시 `None`이다.
 - **INV-T5**: `anti_fake` penalty 패턴에 매칭되는 테스트 파일은 `quality_tier`에서 경고 또는 위험으로 분류된다.
 - **INV-T6**: Contract harness는 외부 서버에 의존하지 않는다. Hermetic bootstrap 경로만 사용한다.
-- **INV-T7**: `eval_harness` 시나리오의 `max_cost_usd`를 초과하면 `trajectory_outcome`은 `CostExceeded`이다.
+- **INV-T7**: `eval_harness` 시나리오의 `max_cost_usd` 초과는 telemetry/warning only이다. Cost만으로 `trajectory_outcome`을 `CostExceeded`, `Gated`, `Failed`, 또는 `Timeout`으로 바꾸면 안 된다.
 
 ---
 

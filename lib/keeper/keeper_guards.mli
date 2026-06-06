@@ -175,8 +175,9 @@ val deny_guard :
   denied:string list ->
   Agent_sdk.Hooks.hooks
 
-(** Reject when the running cost meets or exceeds [max_cost_usd].
-    No-op when [None]. *)
+(** Cost telemetry passthrough.
+
+    [max_cost_usd] is advisory only and must never reject tool execution. *)
 val cost_guard :
   meta_ref:Keeper_meta_contract.keeper_meta ref ->
   on_gate_decision:(gate_decision_event -> unit) ->

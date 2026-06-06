@@ -108,7 +108,7 @@ surfaces.
 
 | Gate | Description | Config |
 |------|-------------|--------|
-| Cost budget | Per-session limit | `max_cost_usd` (default: $0.50) |
+| Cost telemetry | Advisory threshold only; never gates tool execution | `max_cost_usd` (default: $0.50) |
 | Turn limit | Max tool calls per turn | `max_tool_calls_per_turn` (default: 10) |
 | Entropy | Consecutive same-tool detection | `entropy_threshold` (default: 3) |
 | Destructive | Pattern-match on bash/edit commands | 19 patterns, substring match |

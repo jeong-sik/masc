@@ -1,6 +1,6 @@
-(** Trajectory — Tool call recording and cost/entropy gates for keeper sessions.
+(** Trajectory — Tool call recording, cost telemetry, and entropy gates for keeper sessions.
 
-    Tracks tool calls per turn, accumulated cost, and detects stuck loops
+    Tracks tool calls per turn, accumulated cost telemetry, and detects stuck loops
     via entropy checking. Persists trajectory data as JSONL for post-hoc analysis. *)
 
 (** {1 Types} *)

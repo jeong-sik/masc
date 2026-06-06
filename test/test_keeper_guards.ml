@@ -301,7 +301,7 @@ let test_deny_guard_continues () =
   let d = invoke hook (pre_tool_use_event ~tool_name:"allowed_tool" ()) in
   check string "allowed tool -> Continue" "Continue" (decision_kind d)
 
-let test_cost_guard_blocks () =
+let test_cost_guard_over_limit_continues () =
   let meta_ref = make_meta_ref "test_keeper" in
   let hook =
     KG.cost_guard ~meta_ref ~on_gate_decision:no_gate_observer
@@ -310,7 +310,7 @@ let test_cost_guard_blocks () =
   let d = invoke hook
     (pre_tool_use_event ~tool_name:"expensive" ~accumulated_cost_usd:0.15 ())
   in
-  check string "over limit -> Override" "Override" (decision_kind d)
+  check string "over advisory threshold -> Continue" "Continue" (decision_kind d)
 
 let test_cost_guard_under_limit () =
   let meta_ref = make_meta_ref "test_keeper" in
@@ -489,7 +489,7 @@ let test_compose_all_short_circuits_at_first_override () =
   in
   check string "first Override wins" "Override" (decision_kind d);
   let text = override_text d in
-  (* The reason should be from deny_guard, not cost_gate *)
+  (* The reason should be from deny_guard. Cost telemetry never overrides. *)
   check bool "short-circuit preserves first reason" true
     (contains_substring text "code=keeper_deny")
 
@@ -554,7 +554,8 @@ let () = run "Keeper_guards" [
     test_case "continues for allowed tool" `Quick test_deny_guard_continues;
   ];
   "cost_guard", [
-    test_case "blocks over limit" `Quick test_cost_guard_blocks;
+    test_case "continues over advisory threshold" `Quick
+      test_cost_guard_over_limit_continues;
     test_case "continues under limit" `Quick test_cost_guard_under_limit;
     test_case "no budget -> continue" `Quick test_cost_guard_disabled;
   ];

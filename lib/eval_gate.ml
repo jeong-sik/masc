@@ -1,10 +1,11 @@
 (** Eval_gate — Pre/Post execution gates for Keeper tool calls.
 
     Multi-layer defense (Swiss Cheese Model):
-    1. Cost budget check — reject if accumulated cost exceeds limit
-    2. Destructive operation detection — reject bash commands with rm/drop/etc.
-    3. Tool allowlist — reject tools not in keeper's permitted set
-    4. Entropy check — reject if same tool called N+ times consecutively
+    1. Destructive operation detection — reject bash commands with rm/drop/etc.
+    2. Tool allowlist — reject tools not in keeper's permitted set
+    3. Entropy check — reject if same tool called N+ times consecutively
+
+    Cost thresholds are advisory telemetry only and must not reject execution.
 
     Each gate check is independent: any single rejection blocks execution.
     This prevents a failure in one layer from being masked by another.
@@ -20,11 +21,11 @@ let eval_cost_warn_ratio = 0.8
 
 type gate_config = {
   max_cost_usd : float;
-  (** Per-session cost limit.
+  (** Per-session advisory cost threshold.
       Default 0.50 USD. Based on observed MASC keeper sessions averaging
       $0.02-0.15 per session (local llama + GLM fallback). 0.50 is ~3x the
-      worst-case observed session cost, providing headroom without allowing
-      runaway spending. Adjust upward if using expensive cloud models directly. *)
+      worst-case observed session cost. This value may drive warnings and
+      reporting, but never gates tool execution. *)
 
   max_tool_calls_per_turn : int;
   (** Max tool calls in a single LLM turn (before yielding control).
@@ -230,10 +231,11 @@ let detect_destructive (command : string) : (string * string) option =
     The checks run in order of cheapest-to-evaluate first:
     1. Deny list (O(n) string compare)
     2. Allowlist (O(n) string compare)
-    3. Cost budget (float compare)
-    4. Turn call limit (int compare)
-    5. Entropy (list scan)
-    6. Destructive pattern (string scan, only for bash tools)
+    3. Turn call limit (int compare)
+    4. Entropy (list scan)
+    5. Destructive pattern (string scan, only for bash tools)
+
+    Cost is telemetry-only and is intentionally not checked here.
 
     First rejection wins — remaining checks are skipped. *)
 
@@ -254,7 +256,8 @@ let pre_check
     ~(trajectory_acc : Trajectory.accumulator option)
     ~(tool_name : string)
     ~(args_json : string)
-    : Trajectory.gate_decision =
+  : Trajectory.gate_decision =
+  ignore accumulated_cost;
 
   let tool_policy = tool_policy_of_config config in
   let deny_hit =
@@ -270,12 +273,7 @@ let pre_check
   else if not allow_hit then
     Trajectory.Reject (Printf.sprintf "tool '%s' not in allowlist" tool_name)
 
-  (* 3. Cost budget *)
-  else if accumulated_cost >= config.max_cost_usd then
-    Trajectory.Reject (Printf.sprintf "cost budget exceeded: $%.4f >= $%.4f limit"
-      accumulated_cost config.max_cost_usd)
-
-  (* 4. Turn call limit *)
+  (* 2. Turn call limit *)
   else begin
     match trajectory_acc with
     | Some acc ->
@@ -394,17 +392,19 @@ let post_eval
     else None
   in
 
-  (* Warn if approaching cost limit.
+  (* Warn if approaching advisory cost threshold.
      80%% threshold: standard practice from capacity planning (e.g., disk usage
      alerts at 80%%). Gives ~20%% remaining budget for the agent to wrap up
-     gracefully rather than hitting a hard wall mid-operation. *)
+     gracefully. This is not a hard wall. *)
   let new_cost = accumulated_cost +. cost in
   let cost_warn_ratio = eval_cost_warn_ratio in
-  let approaching_limit = new_cost >= config.max_cost_usd *. cost_warn_ratio in
+  let approaching_limit =
+    config.max_cost_usd > 0.0 && new_cost >= config.max_cost_usd *. cost_warn_ratio
+  in
   let should_warn = approaching_limit in
   let warning =
     if approaching_limit then
-      Some (Printf.sprintf "approaching cost limit: $%.4f / $%.4f (%.0f%%)"
+      Some (Printf.sprintf "approaching advisory cost threshold: $%.4f / $%.4f (%.0f%%)"
         new_cost config.max_cost_usd (new_cost /. config.max_cost_usd *. 100.0))
     else None
   in

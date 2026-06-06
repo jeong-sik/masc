@@ -297,7 +297,7 @@ let read_only_predicate (schema : Agent_sdk.Types.tool_schema) : bool =
     - Both enabled -> AllowList (stricter; deny is redundant)
     - Neither -> AllowAll
 
-    Dynamic runtime checks (cost budget, entropy, destructive patterns)
+    Dynamic runtime checks (cost telemetry, entropy, destructive patterns)
     remain in Eval_gate. OAS Guardrails handles static pre-filtering;
     Eval_gate handles stateful per-call checks. Together they form
     defense-in-depth.

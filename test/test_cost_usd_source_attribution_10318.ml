@@ -25,7 +25,7 @@
 
     Precedence is fixed (top-down) so a missing-usage call on a
     pricing-known model still labels [missing_usage], not
-    [oas_cost_unreported] — the upstream gate is the more
+    [oas_cost_unreported] — the upstream signal is the more
     actionable failure mode. *)
 
 open Alcotest

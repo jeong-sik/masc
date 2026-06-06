@@ -65,13 +65,13 @@ let test_missing_file_returns_zero () =
   | Ok n -> failf "expected 0 overrides, got %d" n
   | Error msg -> failf "unexpected error: %s" msg
 
-let test_missing_file_keeps_cost_gate_disabled_by_default () =
+let test_missing_file_keeps_cost_threshold_unset_by_default () =
   with_clean_boot_overrides @@ fun () ->
   with_base_path @@ fun base_path ->
   match Keeper_runtime_config.load_and_apply ~base_path with
   | Error msg -> failf "unexpected error: %s" msg
   | Ok _ ->
-    check (option (float 0.0001)) "cost gate disabled by default"
+    check (option (float 0.0001)) "cost threshold unset by default"
       None
       (Keeper_config.keeper_tool_cost_max_usd ())
 
@@ -372,7 +372,7 @@ let test_load_and_apply_records_disabled_turn_cost_override () =
     check (option string) "boot override stored"
       (Some "0")
       (Config_boot_overrides.get_opt "MASC_KEEPER_TOOL_COST_MAX_USD");
-    check (option (float 0.0001)) "cost gate disabled"
+    check (option (float 0.0001)) "cost threshold unset"
       None
       (Keeper_config.keeper_tool_cost_max_usd ())
 
@@ -587,7 +587,8 @@ let () =
   run "runtime_toml_overrides"
     [ ( "resolve_overrides"
       , [ test_case "missing file returns 0 overrides" `Quick test_missing_file_returns_zero
-        ; test_case "missing file keeps cost gate disabled by default" `Quick test_missing_file_keeps_cost_gate_disabled_by_default
+        ; test_case "missing file keeps cost threshold unset by default" `Quick
+            test_missing_file_keeps_cost_threshold_unset_by_default
         ; test_case "applies autonomous max_turns_per_call" `Quick test_applies_autonomous_max_turns
         ; test_case "applies multiple overrides" `Quick test_applies_multiple_overrides
         ; test_case "applies sleep/throttle overrides" `Quick test_applies_sleep_and_throttle_overrides

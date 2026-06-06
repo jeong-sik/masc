@@ -24,16 +24,16 @@ let test_render_inline_skip_reason_deny () =
   check bool "reason encoded" true (str_contains result "reason=tool%20is%20on")
 ;;
 
-let test_render_inline_skip_reason_cost () =
+let test_render_inline_skip_reason_policy () =
   let result =
     KG.render_inline_skip_reason
       ~tool_name:"tool_execute"
-      ~reason_code:"cost_gate"
-      ~reason_text:"accumulated_cost_usd=0.5100 exceeded limit=0.5000"
+      ~reason_code:"policy_gate"
+      ~reason_text:"policy gate sample"
   in
   check bool "prefix" true (String.starts_with ~prefix:"[tool_skipped]" result);
-  check bool "code" true (str_contains result "code=cost_gate");
-  check bool "reason encoded equals" true (str_contains result "0.5100%20exceeded")
+  check bool "code" true (str_contains result "code=policy_gate");
+  check bool "reason encoded equals" true (str_contains result "policy%20gate")
 ;;
 
 let test_render_inline_skip_reason_destructive () =
@@ -80,9 +80,9 @@ let () =
             `Quick
             test_render_inline_skip_reason_deny
         ; test_case
-            "render inline skip cost"
+            "render inline skip policy"
             `Quick
-            test_render_inline_skip_reason_cost
+            test_render_inline_skip_reason_policy
         ; test_case
             "render inline skip destructive"
             `Quick

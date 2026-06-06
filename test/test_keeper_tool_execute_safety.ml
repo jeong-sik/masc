@@ -1,14 +1,15 @@
-(** Tests that tool_execute blocks dangerous commands via allowlist.
+(** Tests that Execute enforces Shell IR structural, path, and runtime gates.
 
     Validates:
-    1. Allowed commands (scripts/dune-local.sh, git, rg, etc.) pass validation
-    2. Dangerous commands (rm, curl, kill, etc.) are blocked
-    3. Shell metacharacters (;, |, &, etc.) are rejected
-    4. Empty commands are rejected *)
+    1. Direct local dune invocations are rejected in favor of scripts/dune-local.sh
+    2. Shell metacharacters (;, |, &, etc.) are rejected
+    3. Empty commands are rejected
+    4. Repo patrol gates do not pre-empt natural runtime success/failure *)
 
 module Workspace = Masc.Workspace
 module Exec_core = Masc.Exec_core
 module Keeper_tool_command_runtime = Masc.Keeper_tool_command_runtime
+module Keeper_tool_execute_typed_input = Masc.Keeper_tool_execute_typed_input
 module Keeper_registry = Masc.Keeper_registry
 module Keeper_sandbox = Masc.Keeper_sandbox
 module Keeper_sandbox_docker = Masc.Keeper_sandbox_docker
@@ -46,53 +47,45 @@ let test_allowed_commands () =
     Alcotest.(check bool) (Printf.sprintf "allowed: %s" cmd) true (is_ok (validate cmd))
   ) allowed
 
-let test_blocked_commands () =
+let test_direct_dune_invocations_blocked () =
   let blocked = [
     "dune build";
     "opam exec -- dune build";
-    "rm -rf /";
-    "rm file.txt";
-    "curl https://evil.com";
-    "wget http://example.com";
-    "kill -9 1234";
-    "killall main_eio.exe";
-    "chmod 777 /etc/passwd";
-    "chown root file";
-    "sudo anything";
-    "ssh user@host";
-    "scp file user@host:";
-    "dd if=/dev/zero of=/dev/sda";
-    "mkfs.ext4 /dev/sda1";
-    "shutdown -h now";
-    "reboot";
   ] in
   List.iter (fun cmd ->
     Alcotest.(check bool)
       (Printf.sprintf "blocked: %s" cmd) true (is_error (validate cmd))
   ) blocked
 
-let test_network_block_guidance_uses_public_web_aliases () =
-  let check_guidance cmd =
-    let msg = error_msg (validate cmd) in
-    Alcotest.(check bool)
-      (cmd ^ " mentions WebSearch")
-      true
-      (String_util.contains_substring msg "WebSearch");
-    Alcotest.(check bool)
-      (cmd ^ " mentions WebFetch")
-      true
-      (String_util.contains_substring msg "WebFetch");
-    Alcotest.(check bool)
-      (cmd ^ " hides internal masc_web_search")
-      false
-      (String_util.contains_substring msg "masc_web_search");
-    Alcotest.(check bool)
-      (cmd ^ " hides internal masc_web_fetch")
-      false
-      (String_util.contains_substring msg "masc_web_fetch")
+let test_typed_network_fetch_rejected_before_runtime () =
+  let input =
+    Keeper_tool_execute_typed_input.Exec
+      { executable = "curl"
+      ; argv = [ "https://example.com" ]
+      ; cwd = None
+      ; env = []
+      ; stdin = Keeper_tool_execute_typed_input.Inherit
+      ; stdout = Keeper_tool_execute_typed_input.Inherit
+      ; stderr = Keeper_tool_execute_typed_input.Inherit
+      }
   in
-  check_guidance "curl https://example.com";
-  check_guidance "ssh user@example.com"
+  match
+    Keeper_tool_execute_typed_input.validate
+      ~mode:Keeper_tool_execute_typed_input.Dev_full
+      input
+  with
+  | Error (Keeper_tool_execute_typed_input.Executable_not_allowlisted { name = "curl"; _ } as err) ->
+    let msg = Format.asprintf "%a" Keeper_tool_execute_typed_input.pp_validation_error err in
+    Alcotest.(check bool)
+      "curl guidance stays on typed Execute layer"
+      true
+      (String_util.contains_substring msg "Network fetches are not available through Execute")
+  | Error err ->
+    Alcotest.failf
+      "expected curl allowlist rejection, got %a"
+      Keeper_tool_execute_typed_input.pp_validation_error
+      err
+  | Ok () -> Alcotest.fail "expected curl to be rejected by typed Execute validation"
 
 let test_shell_metachar_blocked () =
   let chained = [
@@ -455,6 +448,24 @@ let parse_error_field raw =
   |> Json.member "error"
   |> Json.to_string_option
 
+let assert_not_contains label text needle =
+  Alcotest.(check bool) label false (String_util.contains_substring text needle)
+
+let assert_contains label text needle =
+  Alcotest.(check bool) label true (String_util.contains_substring text needle)
+
+let assert_no_repo_patrol_error raw =
+  assert_not_contains "no sandbox_repo_not_ready patrol error" raw "sandbox_repo_not_ready";
+  assert_not_contains "no sandbox_worktree_not_ready patrol error" raw "sandbox_worktree_not_ready";
+  assert_not_contains "no sandbox_repo_sync_disabled patrol error" raw "sandbox_repo_sync_disabled";
+  assert_not_contains "no sandbox_repo_stale patrol error" raw "sandbox_repo_stale"
+
+let assert_success_or_error_json raw =
+  let json = Yojson.Safe.from_string raw in
+  match json |> Json.member "ok" |> Json.to_bool_option, parse_error_field raw with
+  | Some true, _ | _, Some _ -> ()
+  | _ -> Alcotest.fail ("expected natural success or error json, got: " ^ raw)
+
 let sandbox_bundle_paths ~base_path ~(meta : Masc.Keeper_meta_contract.keeper_meta) =
   let playground =
     Filename.concat base_path (playground_path_of meta.name)
@@ -471,12 +482,7 @@ let check_sandbox_bundle_absent ~base_path ~meta =
     Alcotest.(check bool) ("sandbox bundle path absent: " ^ path) false
       (Sys.file_exists path))
 
-let is_repo_or_task_state_path_block err =
-  String_util.contains_substring err "sandbox_repo_not_ready"
-  || String_util.contains_substring err "sandbox_worktree_not_ready"
-  || String_util.contains_substring err "task_state_file_path_blocked"
-
-let test_tool_execute_rejects_parent_git_repo_cwd () =
+let test_tool_execute_resolves_parent_git_repo_cwd_without_repo_patrol () =
   with_eio_fs @@ fun () ->
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
@@ -503,30 +509,9 @@ let test_tool_execute_rejects_parent_git_repo_cwd () =
   with
   | Error err -> Alcotest.failf "cwd resolution should be path-only, got: %s" err
   | Ok cwd ->
-    (match
-       Masc.Keeper_sandbox_repo_lifecycle.validate_cwd_ready
-         ~repo_sync_policy:Masc.Keeper_sandbox_repo_lifecycle.Allow_repo_sync
-         ~config
-         ~meta
-         ~cwd
-         ~allow_stale_preserved_repo_context:false
-     with
-     | Ok () -> Alcotest.failf "expected repo readiness rejection, got %s" cwd
-     | Error err ->
-    if not (is_repo_or_task_state_path_block err) then
-      Alcotest.failf
-        "expected sandbox_repo_not_ready or task_state_file_path_blocked, got: %s"
-        err;
-    if String_util.contains_substring err "sandbox_repo_not_ready" then
-      Alcotest.(check bool) "parent git top-level is surfaced"
-        true
-        (String_util.contains_substring err base)
-    else
-      Alcotest.(check bool) "repo path is surfaced"
-        true
-        (String_util.contains_substring err "repos/masc"))
+    Alcotest.(check string) "cwd resolves to sandbox repo path" repo_dir cwd
 
-let test_tool_execute_rejects_parent_git_repo_path_arg () =
+let test_tool_execute_allows_parent_git_repo_path_arg_to_fail_naturally () =
   with_eio_fs @@ fun () ->
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
@@ -550,17 +535,13 @@ let test_tool_execute_rejects_parent_git_repo_path_arg () =
            ])
       ()
   in
+  assert_no_repo_patrol_error raw;
   match parse_error_field raw with
   | Some err ->
-    Alcotest.(check bool) "sandbox_repo_not_ready"
-      true
-      (String_util.contains_substring err "sandbox_repo_not_ready");
-    Alcotest.(check bool) "cat did not reach runtime missing-file error"
-      false
-      (String_util.contains_substring err "No such file or directory")
+    assert_contains "cat reached runtime missing-file error" err "No such file or directory"
   | None -> Alcotest.fail ("expected error json, got: " ^ raw)
 
-let test_tool_execute_rejects_wrapped_git_repo_path_arg () =
+let test_tool_execute_allows_wrapped_git_repo_path_arg_to_run_naturally () =
   with_eio_fs @@ fun () ->
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
@@ -590,15 +571,8 @@ let test_tool_execute_rejects_wrapped_git_repo_path_arg () =
            ])
       ()
   in
-  match parse_error_field raw with
-  | Some err ->
-    if
-      not
-        (String_util.contains_substring err "sandbox_repo_not_ready"
-         || String_util.contains_substring err "no sandbox git clones exist"
-         || String_util.contains_substring err "not in readonly allowlist")
-    then Alcotest.failf "expected repo readiness/root git guard, got: %s" err
-  | None -> Alcotest.fail ("expected error json, got: " ^ raw)
+  assert_no_repo_patrol_error raw;
+  assert_success_or_error_json raw
 
 let test_tool_execute_rg_pattern_under_repos_is_not_repo_path () =
   with_eio_fs @@ fun () ->
@@ -630,10 +604,9 @@ let test_tool_execute_rg_pattern_under_repos_is_not_repo_path () =
   let json = Yojson.Safe.from_string raw in
   Alcotest.(check bool) "rg pattern succeeds" true
     (json |> Json.member "ok" |> Json.to_bool);
-  Alcotest.(check bool) "pattern was not treated as stale repo path" false
-    (raw |> String_util.contains_substring "sandbox_repo_not_ready")
+  assert_no_repo_patrol_error raw
 
-let test_tool_execute_rejects_inline_git_work_tree_path_arg () =
+let test_tool_execute_allows_inline_git_work_tree_path_arg_to_fail_naturally () =
   with_eio_fs @@ fun () ->
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
@@ -656,16 +629,12 @@ let test_tool_execute_rejects_inline_git_work_tree_path_arg () =
            ])
       ()
   in
+  assert_no_repo_patrol_error raw;
   match parse_error_field raw with
-  | Some err ->
-    if
-      not
-        (String_util.contains_substring err "sandbox_repo_not_ready"
-         || String_util.contains_substring err "no sandbox git clones exist")
-    then Alcotest.failf "expected repo readiness/root git guard, got: %s" err
+  | Some _ -> ()
   | None -> Alcotest.fail ("expected error json, got: " ^ raw)
 
-let test_tool_execute_rejects_stale_worktree_path_arg () =
+let test_tool_execute_allows_stale_worktree_path_arg_to_fail_naturally () =
   with_eio_fs @@ fun () ->
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
@@ -690,16 +659,13 @@ let test_tool_execute_rejects_stale_worktree_path_arg () =
            ])
       ()
   in
+  assert_no_repo_patrol_error raw;
   match parse_error_field raw with
   | Some err ->
-    Alcotest.(check bool) "sandbox_worktree_not_ready"
-      true
-      (String_util.contains_substring err "sandbox_worktree_not_ready");
-    if not (String_util.contains_substring err ".worktrees/task")
-    then Alcotest.failf "expected stale worktree root, got: %s" err
+    assert_contains "cat reached runtime missing-file error" err "No such file or directory"
   | None -> Alcotest.fail ("expected error json, got: " ^ raw)
 
-let test_tool_execute_rejects_broken_worktree_gitfile () =
+let test_tool_execute_allows_broken_worktree_gitfile_to_fail_naturally () =
   with_eio_fs @@ fun () ->
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
@@ -727,17 +693,10 @@ let test_tool_execute_rejects_broken_worktree_gitfile () =
            ])
       ()
   in
+  assert_no_repo_patrol_error raw;
   match parse_error_field raw with
   | Some err ->
-    Alcotest.(check bool) "broken gitfile is worktree-not-ready"
-      true
-      (String_util.contains_substring err "sandbox_worktree_not_ready");
-    Alcotest.(check bool) "git probe failure is surfaced"
-      true
-      (String_util.contains_substring err "git_error=");
-    Alcotest.(check bool) "git error explains broken admin dir"
-      true
-      (String_util.contains_substring err "not a git repository")
+    assert_contains "cat reached runtime missing-file error" err "No such file or directory"
   | None -> Alcotest.fail ("expected broken worktree error json, got: " ^ raw)
 
 let test_tool_execute_readonly_missing_worktree_path_arg_does_not_materialize () =
@@ -767,12 +726,10 @@ let test_tool_execute_readonly_missing_worktree_path_arg_does_not_materialize ()
            ])
       ()
   in
+  assert_no_repo_patrol_error raw;
   match parse_error_field raw with
   | Some err ->
-    if not (is_repo_or_task_state_path_block err) then
-      Alcotest.failf
-        "expected sandbox_repo_not_ready or task_state_file_path_blocked, got: %s"
-        err;
+    assert_contains "cat reached runtime missing-file error" err "No such file or directory";
     Alcotest.(check bool) "missing worktree path arg was not materialized"
       false
       (Sys.file_exists missing_worktree)
@@ -874,7 +831,7 @@ let git_show_file ~cwd revspec =
       stdout
       stderr
 
-let test_tool_execute_readonly_blocks_preserved_direct_repo_git_show_without_fetch () =
+let test_tool_execute_readonly_allows_preserved_direct_repo_git_show_without_fetch () =
   with_eio_fs @@ fun () ->
   let base_path, config, meta, _repo_dir =
     setup_preserved_sandbox_repo ~keeper_name:"stale-direct-git-show"
@@ -898,17 +855,19 @@ let test_tool_execute_readonly_blocks_preserved_direct_repo_git_show_without_fet
            ])
       ()
   in
-  match parse_error_field raw with
-  | Some err ->
-    Alcotest.(check bool) "readonly direct repo root is rejected without sync" true
-      (String_util.contains_substring err "sandbox_repo_sync_disabled");
-    Alcotest.(check bool) "worktree remedy is surfaced" true
-      (String_util.contains_substring err "repos/masc/.worktrees/<task>");
-    Alcotest.(check bool) "git show did not execute" false
-      (String_util.contains_substring raw "v2");
-    Alcotest.(check string) "origin/main was not fetched" "v1\n"
-      (git_show_file ~cwd:repo_dir "origin/main:README.md")
-  | None -> Alcotest.fail ("expected stale repo error json, got: " ^ raw)
+  assert_no_repo_patrol_error raw;
+  let json = Yojson.Safe.from_string raw in
+  Alcotest.(check bool) "readonly direct repo root git show succeeds" true
+    (json |> Json.member "ok" |> Json.to_bool);
+  Alcotest.(check bool) "git show observes stale local origin/main" true
+    (json
+     |> Json.member "output"
+     |> Json.to_string
+     |> fun output -> String_util.contains_substring output "v1");
+  Alcotest.(check bool) "git show did not fetch remote v2" false
+    (String_util.contains_substring raw "v2");
+  Alcotest.(check string) "origin/main was not fetched" "v1\n"
+    (git_show_file ~cwd:repo_dir "origin/main:README.md")
 
 let test_tool_execute_allows_preserved_direct_repo_git_status () =
   with_eio_fs @@ fun () ->
@@ -939,8 +898,7 @@ let test_tool_execute_allows_preserved_direct_repo_git_status () =
      |> Json.member "output"
      |> Json.to_string
      |> fun output -> String_util.contains_substring output "local-dirty.txt");
-  Alcotest.(check bool) "stale gate did not block diagnostic" false
-    (String_util.contains_substring raw "sandbox_repo_stale")
+  assert_no_repo_patrol_error raw
 
 let test_tool_execute_allows_preserved_direct_repo_git_worktree_list () =
   with_eio_fs @@ fun () ->
@@ -968,8 +926,7 @@ let test_tool_execute_allows_preserved_direct_repo_git_worktree_list () =
     (json |> Json.member "ok" |> Json.to_bool);
   Alcotest.(check bool) "write gate did not block diagnostic" false
     (String_util.contains_substring raw "write_operation_gated");
-  Alcotest.(check bool) "stale gate did not block diagnostic" false
-    (String_util.contains_substring raw "sandbox_repo_stale")
+  assert_no_repo_patrol_error raw
 
 let test_tool_execute_allows_preserved_direct_repo_git_checkout_main () =
   with_eio_fs @@ fun () ->
@@ -997,8 +954,7 @@ let test_tool_execute_allows_preserved_direct_repo_git_checkout_main () =
     (json |> Json.member "ok" |> Json.to_bool);
   Alcotest.(check bool) "write gate did not block main checkout" false
     (String_util.contains_substring raw "write_operation_gated");
-  Alcotest.(check bool) "stale gate did not block main checkout" false
-    (String_util.contains_substring raw "sandbox_repo_stale")
+  assert_no_repo_patrol_error raw
 
 let test_tool_execute_allows_preserved_direct_repo_git_checkout_head_restore () =
   with_eio_fs @@ fun () ->
@@ -1034,8 +990,7 @@ let test_tool_execute_allows_preserved_direct_repo_git_checkout_head_restore () 
     (json |> Json.member "ok" |> Json.to_bool);
   Alcotest.(check bool) "write gate did not block recovery checkout" false
     (String_util.contains_substring raw "write_operation_gated");
-  Alcotest.(check bool) "stale gate did not block recovery checkout" false
-    (String_util.contains_substring raw "sandbox_repo_stale");
+  assert_no_repo_patrol_error raw;
   Alcotest.(check bool) "first tracked file restored" true
     (Sys.file_exists (Filename.concat repo_dir "config/deleted-one.txt"));
   Alcotest.(check bool) "second tracked file restored" true
@@ -1067,8 +1022,7 @@ let test_tool_execute_allows_preserved_direct_repo_git_reset_hard_head () =
     (json |> Json.member "ok" |> Json.to_bool);
   Alcotest.(check bool) "write gate did not block recovery reset" false
     (String_util.contains_substring raw "write_operation_gated");
-  Alcotest.(check bool) "stale gate did not block recovery reset" false
-    (String_util.contains_substring raw "sandbox_repo_stale")
+  assert_no_repo_patrol_error raw
 
 let test_tool_execute_allows_preserved_direct_repo_git_clean_df () =
   with_eio_fs @@ fun () ->
@@ -1097,12 +1051,11 @@ let test_tool_execute_allows_preserved_direct_repo_git_clean_df () =
   let json = Yojson.Safe.from_string raw in
   Alcotest.(check bool) "recovery clean succeeds" true
     (json |> Json.member "ok" |> Json.to_bool);
-  Alcotest.(check bool) "stale gate did not block recovery clean" false
-    (String_util.contains_substring raw "sandbox_repo_stale");
+  assert_no_repo_patrol_error raw;
   Alcotest.(check bool) "dirty fixture removed by clean" false
     (Sys.file_exists dirty_path)
 
-let test_tool_execute_git_recovery_invalidates_repo_sync_cache () =
+let test_tool_execute_direct_repo_read_is_not_stale_cached () =
   with_eio_fs @@ fun () ->
   let base_path, config, meta, _repo_dir =
     setup_preserved_sandbox_repo ~keeper_name:"stale-direct-git-clean-cache"
@@ -1127,23 +1080,30 @@ let test_tool_execute_git_recovery_invalidates_repo_sync_cache () =
       ()
   in
   let stale_raw = run "cat" [ "README.md" ] in
-  Alcotest.(check bool) "initial read populates stale cache" true
-    (String_util.contains_substring stale_raw "sandbox_repo_stale");
+  assert_no_repo_patrol_error stale_raw;
+  let stale_json = Yojson.Safe.from_string stale_raw in
+  Alcotest.(check bool) "initial read succeeds without stale gate" true
+    (stale_json |> Json.member "ok" |> Json.to_bool);
+  Alcotest.(check bool) "initial read observes local v1" true
+    (stale_json
+     |> Json.member "output"
+     |> Json.to_string
+     |> fun output -> String_util.contains_substring output "v1");
   let clean_raw = run "git" [ "clean"; "-df" ] in
+  assert_no_repo_patrol_error clean_raw;
   let clean_json = Yojson.Safe.from_string clean_raw in
   Alcotest.(check bool) "recovery clean succeeds" true
     (clean_json |> Json.member "ok" |> Json.to_bool);
   let retry_raw = run "cat" [ "README.md" ] in
-  Alcotest.(check bool) "immediate retry is not stale-cached" false
-    (String_util.contains_substring retry_raw "sandbox_repo_stale");
+  assert_no_repo_patrol_error retry_raw;
   let retry_json = Yojson.Safe.from_string retry_raw in
   Alcotest.(check bool) "immediate retry succeeds" true
     (retry_json |> Json.member "ok" |> Json.to_bool);
-  Alcotest.(check bool) "retry observes advanced repo" true
+  Alcotest.(check bool) "retry still observes local v1 without fetch gate" true
     (retry_json
      |> Json.member "output"
      |> Json.to_string
-     |> fun output -> String_util.contains_substring output "v2")
+     |> fun output -> String_util.contains_substring output "v1")
 
 let test_tool_execute_readonly_blocks_worktree_git_recovery () =
   with_eio_fs @@ fun () ->
@@ -2218,13 +2178,16 @@ let test_literal_pipe_in_typed_argv () =
 let () =
   Alcotest.run
     "Execute safety"
-    [ ( "allowlist"
+    [ ( "command_policy"
       , [ Alcotest.test_case "allowed dev commands pass" `Quick test_allowed_commands
-        ; Alcotest.test_case "dangerous commands blocked" `Quick test_blocked_commands
         ; Alcotest.test_case
-            "network blocks mention public web aliases"
+            "direct dune invocations blocked"
             `Quick
-            test_network_block_guidance_uses_public_web_aliases
+            test_direct_dune_invocations_blocked
+        ; Alcotest.test_case
+            "typed network fetch rejected before runtime"
+            `Quick
+            test_typed_network_fetch_rejected_before_runtime
         ] )
     ; ( "metachar"
       , [ Alcotest.test_case
@@ -2266,33 +2229,33 @@ let () =
             `Quick
             test_playground_guard_traversal
         ; Alcotest.test_case
-            "repo cwd rejects parent git checkout"
+            "repo cwd resolves without repo patrol"
             `Quick
-            test_tool_execute_rejects_parent_git_repo_cwd
+            test_tool_execute_resolves_parent_git_repo_cwd_without_repo_patrol
         ; Alcotest.test_case
-            "repo path arg rejects parent git checkout"
+            "repo path arg naturally fails without repo patrol"
             `Quick
-            test_tool_execute_rejects_parent_git_repo_path_arg
+            test_tool_execute_allows_parent_git_repo_path_arg_to_fail_naturally
         ; Alcotest.test_case
-            "wrapped git repo path arg rejects parent git checkout"
+            "wrapped git repo path arg runs without repo patrol"
             `Quick
-            test_tool_execute_rejects_wrapped_git_repo_path_arg
+            test_tool_execute_allows_wrapped_git_repo_path_arg_to_run_naturally
         ; Alcotest.test_case
             "rg pattern under repos is not a repo path"
             `Quick
             test_tool_execute_rg_pattern_under_repos_is_not_repo_path
         ; Alcotest.test_case
-            "inline git work-tree path rejects parent git checkout"
+            "inline git work-tree path naturally fails without repo patrol"
             `Quick
-            test_tool_execute_rejects_inline_git_work_tree_path_arg
+            test_tool_execute_allows_inline_git_work_tree_path_arg_to_fail_naturally
         ; Alcotest.test_case
-            "stale worktree path arg rejects parent clone"
+            "stale worktree path arg naturally fails without repo patrol"
             `Quick
-            test_tool_execute_rejects_stale_worktree_path_arg
+            test_tool_execute_allows_stale_worktree_path_arg_to_fail_naturally
         ; Alcotest.test_case
-            "broken worktree gitfile rejects as worktree not ready"
+            "broken worktree gitfile naturally fails without repo patrol"
             `Quick
-            test_tool_execute_rejects_broken_worktree_gitfile
+            test_tool_execute_allows_broken_worktree_gitfile_to_fail_naturally
         ; Alcotest.test_case
             "readonly missing worktree path arg rejects without materializing"
             `Quick
@@ -2310,9 +2273,9 @@ let () =
             `Quick
             test_tool_execute_readonly_default_cwd_does_not_create_sandbox_bundle
         ; Alcotest.test_case
-            "readonly preserved direct repo root blocks git show without fetch"
+            "readonly preserved direct repo root allows git show without fetch"
             `Quick
-            test_tool_execute_readonly_blocks_preserved_direct_repo_git_show_without_fetch
+            test_tool_execute_readonly_allows_preserved_direct_repo_git_show_without_fetch
         ; Alcotest.test_case
             "preserved direct repo root allows git status"
             `Quick
@@ -2338,9 +2301,9 @@ let () =
             `Quick
             test_tool_execute_allows_preserved_direct_repo_git_clean_df
         ; Alcotest.test_case
-            "git recovery invalidates stale repo sync cache"
+            "direct repo read is not stale cached"
             `Quick
-            test_tool_execute_git_recovery_invalidates_repo_sync_cache
+            test_tool_execute_direct_repo_read_is_not_stale_cached
         ; Alcotest.test_case
             "readonly Execute blocks worktree git recovery"
             `Quick

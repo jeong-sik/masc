@@ -101,7 +101,6 @@ let tool_execute_command_context ?(allow_pipes = true) ~allowed_commands command
    Shell IR dispatch telemetry with keeper, sandbox, status, elapsed_ms. *)
 let dispatch_classified
       ?timeout_sec
-      ?before_path_validation
       ?(allow_pipes = true)
       ?(redirect_allowed = true)
       ~allowed_commands
@@ -126,22 +125,14 @@ let dispatch_classified
     ~f_cannot_parse:(Error Cannot_parse)
     ~f_too_complex:(Error Too_complex)
     ~f_allow:(fun _context ->
-      match
-        match before_path_validation with
-        | None -> Ok ()
-        | Some validate -> validate ir
-      with
+      match validate_paths ?keeper_id ?base_path ~workdir ir with
       | Error e -> Error (Path_reject e)
-      | Ok () ->
-        (match validate_paths ?keeper_id ?base_path ~workdir ir with
-         | Error e -> Error (Path_reject e)
-         | Ok () -> Ok (Masc_exec.Exec_dispatch.dispatch_decided ?timeout_sec envelope)))
+      | Ok () -> Ok (Masc_exec.Exec_dispatch.dispatch_decided ?timeout_sec envelope))
 ;;
 
 (* TEL-OK: wrapper only classifies before delegating to dispatch_classified. *)
 let dispatch
       ?timeout_sec
-      ?before_path_validation
       ?allow_pipes
       ?redirect_allowed
       ~allowed_commands
@@ -153,7 +144,6 @@ let dispatch
   =
   dispatch_classified
     ?timeout_sec
-    ?before_path_validation
     ?allow_pipes
     ?redirect_allowed
     ~allowed_commands

@@ -279,6 +279,235 @@ stylesheet
     text-align: center;
   }
 
+  .detail_block {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .scope_strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .scope_chip {
+    min-width: 0;
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
+    padding: 5px 7px;
+    border: 1px solid color-mix(in oklab, var(--color-border-default) 78%, transparent);
+    background: color-mix(in oklab, var(--color-bg-page) 44%, transparent);
+    font-family: var(--font-mono, 'JetBrains Mono', monospace);
+    font-size: 10px;
+    line-height: 1.2;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .scope_k {
+    color: var(--color-fg-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+
+  .scope_v,
+  .evidence_title,
+  .timeline_title,
+  .outcome_title,
+  .frame_v {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .scope_v,
+  .frame_v {
+    color: var(--text-bright);
+  }
+
+  .evidence_list {
+    display: flex;
+    flex-direction: column;
+    border-top: 1px solid color-mix(in oklab, var(--color-border-default) 72%, transparent);
+  }
+
+  .evidence_row {
+    display: grid;
+    grid-template-columns: 24px minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: center;
+    padding: 9px 0;
+    border-bottom: 1px dashed color-mix(in oklab, var(--color-border-default) 70%, transparent);
+  }
+
+  .evidence_icon {
+    width: 18px;
+    height: 20px;
+    border: 1px solid var(--color-border-default);
+    background:
+      linear-gradient(135deg, color-mix(in oklab, var(--color-accent-fg) 14%, transparent) 0 28%, transparent 28%),
+      color-mix(in oklab, var(--color-bg-surface) 82%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--text-bright) 4%, transparent);
+  }
+
+  .evidence_main {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .evidence_title,
+  .timeline_title {
+    font-family: var(--font-ui, 'Noto Sans KR', sans-serif);
+    font-size: 12px;
+    color: var(--color-fg-primary);
+  }
+
+  .evidence_meta,
+  .evidence_tail,
+  .timeline_meta {
+    font-family: var(--font-mono, 'JetBrains Mono', monospace);
+    font-size: 10px;
+    line-height: 1.3;
+    color: var(--color-fg-muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .evidence_tail {
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  .outcome {
+    border: 1px solid color-mix(in oklab, var(--color-border-default) 80%, transparent);
+    background: color-mix(in oklab, var(--color-bg-page) 42%, transparent);
+    padding: 11px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .outcome_head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .outcome_title {
+    font-family: var(--font-display, 'Cinzel', serif);
+    font-size: 12px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--text-bright);
+  }
+
+  .outcome_copy {
+    font-family: var(--font-ui, 'Noto Sans KR', sans-serif);
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--color-fg-primary);
+  }
+
+  .timeline {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .timeline_item {
+    border: 1px solid color-mix(in oklab, var(--color-border-default) 78%, transparent);
+    background: color-mix(in oklab, var(--color-bg-page) 38%, transparent);
+  }
+
+  .timeline_item[open] {
+    border-color: color-mix(in oklab, var(--color-accent-fg) 34%, var(--color-border-default));
+    background: color-mix(in oklab, var(--color-accent-fg) 4%, var(--color-bg-page));
+  }
+
+  .timeline_summary {
+    display: grid;
+    grid-template-columns: 12px minmax(0, 1fr) auto;
+    gap: 9px;
+    align-items: center;
+    min-height: 36px;
+    padding: 0 10px;
+    cursor: pointer;
+    list-style: none;
+  }
+
+  .timeline_summary::-webkit-details-marker { display: none; }
+
+  .timeline_toggle {
+    width: 8px;
+    height: 8px;
+    border-right: 1px solid var(--color-fg-muted);
+    border-bottom: 1px solid var(--color-fg-muted);
+    transform: rotate(-45deg);
+    transition: transform 120ms ease;
+  }
+
+  .timeline_item[open] .timeline_toggle {
+    transform: rotate(45deg);
+    border-color: var(--color-accent-fg);
+  }
+
+  .timeline_body {
+    padding: 0 10px 10px 31px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .frame_track {
+    display: flex;
+    height: 7px;
+    border: 1px solid var(--color-border-default);
+    background: var(--color-bg-page);
+    overflow: hidden;
+  }
+
+  .frame_lead,
+  .frame_fill {
+    height: 100%;
+    flex-shrink: 0;
+  }
+
+  .frame_fill {
+    min-width: 2px;
+    background: var(--t-think);
+    box-shadow: 0 0 6px color-mix(in oklab, var(--t-think) 36%, transparent);
+  }
+
+  .frame_tool { background: var(--t-tool); box-shadow: 0 0 6px color-mix(in oklab, var(--t-tool) 38%, transparent); }
+  .frame_wait { background: var(--t-wait); box-shadow: none; }
+  .frame_err { background: var(--t-err); box-shadow: 0 0 6px color-mix(in oklab, var(--t-err) 42%, transparent); }
+  .frame_llm { background: var(--t-llm); box-shadow: 0 0 6px color-mix(in oklab, var(--t-llm) 34%, transparent); }
+
+  .frame_grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .frame_k {
+    font-family: var(--font-ui, 'Noto Sans KR', sans-serif);
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--color-fg-muted);
+  }
+
+  .frame_v {
+    margin-top: 2px;
+    font-family: var(--font-mono, 'JetBrains Mono', monospace);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+  }
+
   @media (max-width: 1180px) {
     .head,
     .row {
@@ -300,12 +529,30 @@ stylesheet
     .k { color: var(--text-bright); }
     .metric_v_bad { color: var(--accent-blood); font-weight: 700; }
     .filter_input { border-width: 2px; border-color: var(--text-bright); }
+    .scope_chip,
+    .evidence_row,
+    .outcome,
+    .timeline_item,
+    .frame_track {
+      border-width: 2px;
+      border-color: var(--text-bright);
+    }
   }
 
   @media (forced-colors: active) {
     .metric_v_bad { color: MarkText; }
     .metric_v_warn { color: Mark; }
     .row_selected { background: Highlight; color: HighlightText; }
+    .timeline_item[open] { border-color: Highlight; }
+    .timeline_toggle { border-color: ButtonText; }
+    .frame_fill,
+    .frame_tool,
+    .frame_wait,
+    .frame_err,
+    .frame_llm {
+      background: Highlight;
+      box-shadow: none;
+    }
   }
 |}]
 
@@ -666,6 +913,262 @@ let focus_card row =
     ]
 ;;
 
+let clamp_pct value = Int.max 0 (Int.min 100 value)
+;;
+
+let scope_chip ~k ~v =
+  Node.span
+    ~attrs:[ Style.scope_chip ]
+    [ Node.span ~attrs:[ Style.scope_k ] [ Node.text k ]
+    ; Node.span ~attrs:[ Style.scope_v ] [ Node.text v ]
+    ]
+;;
+
+let view_scope_strip row =
+  let ctx =
+    match row.context_pct with
+    | Some pct -> Printf.sprintf "%d%%" pct
+    | None -> "—"
+  in
+  Node.div
+    [ Shell_view.aside_title ~right:"scope" "Snapshot"
+    ; Node.div
+        ~attrs:[ Style.scope_strip; Attr.create "aria-label" "Selected keeper scope" ]
+        [ scope_chip ~k:"state" ~v:row.status_label
+        ; scope_chip ~k:"phase" ~v:(Option.value row.phase_label ~default:"—")
+        ; scope_chip
+            ~k:"turn"
+            ~v:(Printf.sprintf "%d/%d" row.keeper.turn row.keeper.turn_cap)
+        ; scope_chip ~k:"ctx" ~v:ctx
+        ; scope_chip ~k:"lat" ~v:(Printf.sprintf "%dms" row.keeper.latency_ms)
+        ]
+    ]
+;;
+
+type evidence_item =
+  { title : string
+  ; meta : string
+  ; tail : string
+  }
+
+let evidence_items row =
+  let tool_item =
+    match row.keeper.last_tool with
+    | Some tool ->
+      { title = tool
+      ; meta = "last tool observed from keeper summary"
+      ; tail = "tool"
+      }
+    | None ->
+      { title = "tool surface quiet"
+      ; meta = "no last_tool in current snapshot"
+      ; tail = "quiet"
+      }
+  in
+  let turn_item =
+    { title = "turn budget"
+    ; meta = Printf.sprintf "%d of %d turns consumed" row.keeper.turn row.keeper.turn_cap
+    ; tail = "turn"
+    }
+  in
+  let frame_count = List.length row.keeper.lane_frames in
+  let frame_item =
+    { title = "activity frames"
+    ; meta =
+        if frame_count = 0
+        then "no lane frame emitted in this summary"
+        else Printf.sprintf "%d lane frames in current window" frame_count
+    ; tail = "lane"
+    }
+  in
+  let ctx_count = List.length row.keeper.ctx_history in
+  let ctx_item =
+    { title = "context pressure"
+    ; meta =
+        (match row.context_pct, row.context_detail with
+         | Some pct, Some detail -> Printf.sprintf "%d%% · %s memory" pct detail
+         | Some pct, None -> Printf.sprintf "%d%% current context" pct
+         | None, Some detail -> Printf.sprintf "%s memory" detail
+         | None, None -> "no context pressure sample")
+    ; tail = if ctx_count = 0 then "ctx" else Printf.sprintf "%d pts" ctx_count
+    }
+  in
+  [ tool_item; turn_item; frame_item; ctx_item ]
+;;
+
+let evidence_row item =
+  Node.div
+    ~attrs:[ Style.evidence_row; Attr.role "listitem" ]
+    [ Node.span ~attrs:[ Style.evidence_icon; Attr.create "aria-hidden" "true" ] []
+    ; Node.span
+        ~attrs:[ Style.evidence_main ]
+        [ Node.span ~attrs:[ Style.evidence_title ] [ Node.text item.title ]
+        ; Node.span ~attrs:[ Style.evidence_meta ] [ Node.text item.meta ]
+        ]
+    ; Node.span ~attrs:[ Style.evidence_tail ] [ Node.text item.tail ]
+    ]
+;;
+
+let view_evidence row =
+  Node.div
+    ~attrs:[ Style.detail_block ]
+    [ Shell_view.aside_title ~right:"from summary" "Evidence"
+    ; Node.div
+        ~attrs:[ Style.evidence_list; Attr.role "list"; Attr.create "aria-label" "Keeper evidence rail" ]
+        (List.map (evidence_items row) ~f:evidence_row)
+    ]
+;;
+
+let outcome_copy row =
+  match row.band with
+  | `Active ->
+    "현재 턴/컨텍스트/도구 신호가 살아 있습니다. 다음 판단은 activity frame과 last tool에서 이어집니다."
+  | `Attention ->
+    "주의 상태입니다. 최근 도구, latency, context pressure를 먼저 확인하고 필요하면 Keeper 로그로 내려가야 합니다."
+  | `Paused ->
+    "일시정지 상태입니다. 운영자 의도에 따른 pause인지, 재개 가능한 상태인지 확인해야 합니다."
+  | `Offline ->
+    "오프라인 상태입니다. keepalive, runtime receipt, supervisor 복구 흔적을 우선 확인해야 합니다."
+;;
+
+let view_outcome row =
+  Node.div
+    ~attrs:[ Style.detail_block ]
+    [ Shell_view.aside_title ~right:"next read" "Outcome"
+    ; Node.div
+        ~attrs:[ Style.outcome; Attr.role "note"; Attr.create "aria-label" "Keeper outcome summary" ]
+        [ Node.div
+            ~attrs:[ Style.outcome_head ]
+            [ Pill.view ~size:`Sm ~color:row.status_color ~label:row.status_label ()
+            ; Node.div ~attrs:[ Style.outcome_title ] [ Node.text row.name ]
+            ]
+        ; Node.div
+            ~attrs:[ Style.outcome_copy; Attr.create "lang" "ko" ]
+            [ Node.text (outcome_copy row) ]
+        ]
+    ]
+;;
+
+let frame_kind_label kind =
+  match String.lowercase (String.strip kind) with
+  | "llm" -> "llm"
+  | "tool" -> "tool"
+  | "think" -> "thinking"
+  | "wait" -> "waiting"
+  | "err" | "error" -> "error"
+  | "" -> "frame"
+  | other -> other
+;;
+
+let frame_fill_class kind =
+  match String.lowercase (String.strip kind) with
+  | "llm" -> Style.frame_llm
+  | "tool" -> Style.frame_tool
+  | "wait" -> Style.frame_wait
+  | "err" | "error" -> Style.frame_err
+  | _ -> Style.frame_fill
+;;
+
+let frame_stat ~k ~v =
+  Node.div
+    [ Node.div ~attrs:[ Style.frame_k ] [ Node.text k ]
+    ; Node.div ~attrs:[ Style.frame_v ] [ Node.text v ]
+    ]
+;;
+
+let view_frame ~(index : int) (frame : Keepers_types.lane_frame) =
+  let left = clamp_pct frame.left in
+  let width = clamp_pct frame.width in
+  let title =
+    if String.is_empty (String.strip frame.label)
+    then frame_kind_label frame.kind
+    else frame.label
+  in
+  let lead_attrs =
+    [ Style.frame_lead
+    ; Attr.style (Css_gen.create ~field:"width" ~value:(Printf.sprintf "%d%%" left))
+    ]
+  in
+  let fill_attrs =
+    [ Style.frame_fill
+    ; frame_fill_class frame.kind
+    ; Attr.style (Css_gen.create ~field:"width" ~value:(Printf.sprintf "%d%%" width))
+    ]
+  in
+  let details_attrs =
+    [ Style.timeline_item
+    ; Attr.create "aria-label" (Printf.sprintf "Activity frame %d" (index + 1))
+    ]
+    @ if index = 0 then [ Attr.create "open" "" ] else []
+  in
+  Node.create
+    "details"
+    ~attrs:details_attrs
+    [ Node.create
+        "summary"
+        ~attrs:[ Style.timeline_summary ]
+        [ Node.span ~attrs:[ Style.timeline_toggle; Attr.create "aria-hidden" "true" ] []
+        ; Node.span ~attrs:[ Style.timeline_title ] [ Node.text title ]
+        ; Node.span
+            ~attrs:[ Style.timeline_meta ]
+            [ Node.text (Printf.sprintf "%s · %d%%" (frame_kind_label frame.kind) width) ]
+        ]
+    ; Node.div
+        ~attrs:[ Style.timeline_body ]
+        [ Node.div
+            ~attrs:[ Style.frame_track ]
+            [ Node.div ~attrs:lead_attrs []; Node.div ~attrs:fill_attrs [] ]
+        ; Node.div
+            ~attrs:[ Style.frame_grid ]
+            [ frame_stat ~k:"start" ~v:(Printf.sprintf "%d%%" left)
+            ; frame_stat ~k:"width" ~v:(Printf.sprintf "%d%%" width)
+            ; frame_stat ~k:"kind" ~v:(frame_kind_label frame.kind)
+            ]
+        ]
+    ]
+;;
+
+let synthetic_frame row : Keepers_types.lane_frame =
+  { kind =
+      (match row.keeper.last_tool with
+       | Some _ -> "tool"
+       | None -> "wait")
+  ; left = 0
+  ; width =
+      (match row.context_pct with
+       | Some pct -> Int.max 8 (Int.min 100 pct)
+       | None -> 12)
+  ; label =
+      (match row.keeper.last_tool with
+       | Some tool -> "last tool · " ^ tool
+       | None -> Option.value row.phase_label ~default:row.keeper.stat)
+  }
+;;
+
+let view_activity row =
+  let frame_count = List.length row.keeper.lane_frames in
+  let frames =
+    match row.keeper.lane_frames with
+    | [] -> [ synthetic_frame row ]
+    | frames ->
+      List.sort frames ~compare:(fun a b ->
+        Int.compare a.Keepers_types.left b.Keepers_types.left)
+  in
+  let right =
+    if frame_count = 0
+    then "summary fallback"
+    else Printf.sprintf "%d frames" frame_count
+  in
+  Node.div
+    ~attrs:[ Style.detail_block ]
+    [ Shell_view.aside_title ~right "Activity"
+    ; Node.div
+        ~attrs:[ Style.timeline; Attr.role "list"; Attr.create "aria-label" "Keeper activity timeline" ]
+        (List.mapi frames ~f:(fun index frame ->
+           Node.div ~attrs:[ Attr.role "listitem" ] [ view_frame ~index frame ]))
+    ]
+;;
+
 let aside
       ~(rows : row list)
       ~(selected_name : string option)
@@ -683,5 +1186,10 @@ let aside
   | Some row ->
     Node.div
       ~attrs:[ Shell_view.Style.aside; Attr.role "complementary"; Attr.create "aria-label" "Keeper details" ]
-      [ focus_card row ]
+      [ focus_card row
+      ; view_scope_strip row
+      ; view_evidence row
+      ; view_activity row
+      ; view_outcome row
+      ]
 ;;

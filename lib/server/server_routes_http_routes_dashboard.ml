@@ -223,8 +223,8 @@ let add_routes ~sw ~clock router =
   (* Phase 1 Action 2 — live Dashboard_cache state surface.  Renders
      hit_ratio, in-flight compute count, per-entry ttl_remaining, and
      timeout-circuit-open counts so operators can correlate slow endpoints
-     (Server-Timing header) with cache contention without scraping
-     /metrics.  Read-only; no env tuning side-effect. *)
+     (Server-Timing header) with cache contention without external telemetry.
+     Read-only; no env tuning side-effect. *)
   |> Http.Router.get "/api/v1/dashboard/cache-stats" (fun request reqd ->
        with_public_read (fun _state req reqd ->
          let json = Dashboard_cache.stats () in

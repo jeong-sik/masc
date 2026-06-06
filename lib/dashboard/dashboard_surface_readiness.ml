@@ -2,7 +2,6 @@ type verification_refs = {
   fixture_harness : string option;
   live_spotcheck : string option;
   logs_ref : string option;
-  metrics_ref : string option;
   proof_ref : string option;
   tool_name : string option;
 }
@@ -46,7 +45,6 @@ let refs_json (refs : verification_refs) =
           value)
       refs.live_spotcheck;
     Option.map (ref_json ~kind:"route" ~label:"logs") refs.logs_ref;
-    Option.map (ref_json ~kind:"route" ~label:"metrics") refs.metrics_ref;
     Option.map (ref_json ~kind:"route" ~label:"proof") refs.proof_ref;
     Option.map (ref_json ~kind:"tool" ~label:"tool_name") refs.tool_name;
   ]
@@ -65,7 +63,6 @@ let verification_ref_bar_for_refs (refs : verification_refs) =
     |> verification_ref_label "fixture" refs.fixture_harness
     |> verification_ref_label "live_spotcheck" refs.live_spotcheck
     |> verification_ref_label "logs" refs.logs_ref
-    |> verification_ref_label "metrics" refs.metrics_ref
     |> verification_ref_label "proof" refs.proof_ref
     |> verification_ref_label "tool" refs.tool_name
     |> List.rev
@@ -92,12 +89,11 @@ let refs
       ?fixture_harness
       ?live_spotcheck
       ?(logs_ref = Some "/api/v1/dashboard/logs")
-      ?(metrics_ref = Some "/metrics")
       ?proof_ref
       ?tool_name
       ()
   =
-  { fixture_harness; live_spotcheck; logs_ref; metrics_ref; proof_ref; tool_name }
+  { fixture_harness; live_spotcheck; logs_ref; proof_ref; tool_name }
 
 let entry
       ~id
@@ -110,7 +106,6 @@ let entry
       ?fixture_harness
       ?live_spotcheck
       ?logs_ref
-      ?metrics_ref
       ?proof_ref
       ?tool_name
       ()
@@ -127,7 +122,6 @@ let entry
         ?fixture_harness
         ?live_spotcheck
         ?logs_ref
-        ?metrics_ref
         ?proof_ref
         ?tool_name
         ()
@@ -159,7 +153,7 @@ let all_entries =
       ()
   ; entry
       ~id:"monitoring.agents"
-      ~label:"Keeper Operations"
+      ~label:"Keeper Fleet"
       ~exposure_status:"main"
       ~hidden_from_nav:false
       ~meets_main_gate:true
@@ -193,7 +187,7 @@ let all_entries =
       ()
   ; entry
       ~id:"monitoring.observatory"
-      ~label:"Evidence Timeline"
+      ~label:"Observatory"
       ~exposure_status:"main"
       ~hidden_from_nav:false
       ~meets_main_gate:true
@@ -394,10 +388,7 @@ let verification_ref_bar_for_entries entries =
     let logs =
       verification_ref_coverage_count (fun refs -> nonempty refs.logs_ref) entries
     in
-    let metrics =
-      verification_ref_coverage_count (fun refs -> nonempty refs.metrics_ref) entries
-    in
-    Printf.sprintf "live:%d/%d logs:%d/%d metrics:%d/%d" live total logs total metrics total
+    Printf.sprintf "live:%d/%d logs:%d/%d" live total logs total
 
 let json ?surface_id () =
   let surfaces =

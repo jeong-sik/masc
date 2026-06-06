@@ -249,11 +249,11 @@ let test_outcome_error_labels_for_every_err_kind () =
 (* ----- Side-effect: otel_metric_store counter increments -------------------- *)
 
 let test_outcome_none_increments_counter () =
-  let module Prom = Masc.Otel_metric_store in
+  let module Metrics = Masc.Otel_metric_store in
   let labels = [ ("outcome", "none") ] in
   let before =
-    Prom.metric_value_or_zero
-      Prom.metric_silent_dashboard_actor_fallback ~labels ()
+    Metrics.metric_value_or_zero
+      Metrics.metric_silent_dashboard_actor_fallback ~labels ()
   in
   (* Drive the helper directly via the same internal entry point as
      server_auth.ml — exercise [Auth_error_kind] then increment via the
@@ -264,8 +264,8 @@ let test_outcome_none_increments_counter () =
   in
   Server_auth.record_dashboard_actor_fallback fb;
   let after =
-    Prom.metric_value_or_zero
-      Prom.metric_silent_dashboard_actor_fallback ~labels ()
+    Metrics.metric_value_or_zero
+      Metrics.metric_silent_dashboard_actor_fallback ~labels ()
   in
   Alcotest.(check (float 0.0))
     "counter +1.0 for outcome=none"
@@ -273,13 +273,13 @@ let test_outcome_none_increments_counter () =
     after
 
 let test_outcome_error_increments_counter_with_err_kind () =
-  let module Prom = Masc.Otel_metric_store in
+  let module Metrics = Masc.Otel_metric_store in
   let labels =
     [ ("outcome", "error"); ("err_kind", "unauthorized") ]
   in
   let before =
-    Prom.metric_value_or_zero
-      Prom.metric_silent_dashboard_actor_fallback ~labels ()
+    Metrics.metric_value_or_zero
+      Metrics.metric_silent_dashboard_actor_fallback ~labels ()
   in
   let fb : Aek.dashboard_actor_fallback =
     { outcome =
@@ -293,8 +293,8 @@ let test_outcome_error_increments_counter_with_err_kind () =
   in
   Server_auth.record_dashboard_actor_fallback fb;
   let after =
-    Prom.metric_value_or_zero
-      Prom.metric_silent_dashboard_actor_fallback ~labels ()
+    Metrics.metric_value_or_zero
+      Metrics.metric_silent_dashboard_actor_fallback ~labels ()
   in
   Alcotest.(check (float 0.0))
     "counter +1.0 for outcome=error+err_kind=unauthorized"

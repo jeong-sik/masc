@@ -304,13 +304,13 @@ BENCH_ITERATIONS=50 BENCH_WARMUP_ITERATIONS=1 \
   ./scripts/harness_tool_call_quality.sh --live --keepers bench-analyst \
     --models <provider:model>
 
-# 2. OTel metric text snapshot + CSV 저장.
-./scripts/harness_oas_dispatch.sh scrape --label baseline
-
-# 3. 비교 (e.g. memoization 적용 전후, 또는 hist on/off).
-./scripts/harness_oas_dispatch.sh diff \
-  benchmarks/results/oas-baseline-<base>.csv \
-  benchmarks/results/oas-baseline-<current>.csv
+# 2. configured OTel backend에서 아래 series의 sum/count를 query한다.
+#    - masc_oas_params_of_schema_sec
+#    - masc_oas_params_of_schema_sec_count
+#    - masc_oas_make_tool_bundle_sec
+#    - masc_oas_make_tool_bundle_sec_count
+#
+# 3. 비교는 backend query 결과의 avg = sum/count 기준으로 수행한다.
 ```
 
 ### Histogram-overhead control

@@ -50,7 +50,17 @@ for root in "${ACTIVE_ROOTS[@]}"; do
   [[ -e "$root" ]] && existing_roots+=("$root")
 done
 
-RETIRED_PATTERN='prometheus|promql|prometheus_sources|masc\.prometheus|Masc_prometheus|lib/prometheus|DS_PROMETHEUS|prometheusremotewrite'
+RETIRED_TERMS=(
+  'p''rometheus'
+  'p''romql'
+  'p''rometheus_sources'
+  'masc\.p''rometheus'
+  'Masc_''p''rometheus'
+  'lib/p''rometheus'
+  'DS_''P''ROMETHEUS'
+  'p''rometheusremotewrite'
+)
+RETIRED_PATTERN="$(IFS='|'; echo "${RETIRED_TERMS[*]}")"
 
 current_tmp="$(mktemp -t retired-metrics-backend.current.XXXXXX)"
 trap 'rm -f "$current_tmp"' EXIT

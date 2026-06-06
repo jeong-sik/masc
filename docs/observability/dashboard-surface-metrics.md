@@ -19,11 +19,11 @@ Aggregate-only. **No PII.** No operator label, session ID, or IP.
 | Client → server | `POST /api/v1/dashboard/nav-event` | One JSON body per transition: `{ surface, section, redirected_from }`. Best-effort, no retry. |
 | Server | `lib/dashboard/dashboard_nav_event.ml` | Validates against the surface + section allowlist, then calls `Otel_metric_store.inc_counter`. The body is discarded after the increment. |
 
-Counters are registered at module load (`let () = Otel_metric_store.register_counter …`) so they exist in `/metrics` immediately on server start, even before the first request.
+Counters are registered at module load (`let () = Otel_metric_store.register_counter …`) so they are available to the configured OTel export path immediately on server start, even before the first request.
 
 ## Consumers
 
-- **CLI report**: `scripts/dashboard-ia-usage.sh` — point-in-time Markdown report scraped from `/metrics`. Drives RFC-0048 PR-C deletion threshold decisions.
+- **OTel query/report**: query the configured OTel backend for `dashboard_surface_open_total` and `dashboard_section_open_total`. Drives RFC-0048 PR-C deletion threshold decisions.
 
 ## Key derived metric: "direct opens"
 
@@ -49,7 +49,7 @@ redirect sources, neither of which is in flight.
 
 | Symptom | Cause | What to do |
 |---|---|---|
-| `/metrics` shows zero `dashboard_surface_open_total` | Server has not seen any dashboard navigation since start, or PR-1 (#14245) not yet deployed | Open the dashboard and click around; if still zero, check `dashboard/src/main.ts` calls `startNavTelemetry()` |
+| OTel backend shows zero `dashboard_surface_open_total` | Server has not seen any dashboard navigation since start, OTel export is not configured, or PR-1 (#14245) not yet deployed | Open the dashboard and click around; if still zero, check `dashboard/src/main.ts` calls `startNavTelemetry()` and the OTel exporter pipeline |
 | `redirected_from` distribution off | URL leak — internal param escaped to URL, distorting counters from operator bookmarks | Run `dashboard/src/router.test.ts` regression cases (URL leak guards). Fix and ratchet down to clean counter |
 | Timeseries flat after a deploy | Either `route` signal listener detached, or `effect()` dispose triggered prematurely | Check `nav-telemetry.test.ts` "disposer stops further emissions" inversion. Verify HMR didn't double-mount the observer |
 | One specific section never registers | Section ID missing from `lib/dashboard/dashboard_nav_event.ml`'s `valid_sections` allowlist | Add to allowlist; the server returns 400 for unknown `(surface, section)` pairs and the client drops the event |
@@ -66,4 +66,4 @@ redirect sources, neither of which is in flight.
 - RFC-0048 — `docs/rfc/RFC-0048-dashboard-ia-phase-2.md` (primary consumer)
 - PR-1 #14245 — telemetry foundation
 - PR-1.1 #14251 — ocamlformat follow-up
-- PR-2 #14256 — `scripts/dashboard-ia-usage.sh`
+- RFC-0217 — single OTel backend; local scrape reports removed

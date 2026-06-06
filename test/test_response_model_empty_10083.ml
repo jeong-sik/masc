@@ -17,20 +17,20 @@
    returned keeper-facing model string or metric alias label. *)
 
 module Hooks = Masc.Keeper_hooks_oas
-module Prom = Masc.Otel_metric_store
+module Metrics = Masc.Otel_metric_store
 
 let runtime_lane = "runtime"
-let metric_name = Prom.metric_after_turn_response_model_empty
-let alias_metric_name = Prom.metric_after_turn_response_model_alias
+let metric_name = Metrics.metric_after_turn_response_model_empty
+let alias_metric_name = Metrics.metric_after_turn_response_model_alias
 
 let counter_for ~keeper ~source =
-  Prom.metric_value_or_zero metric_name
+  Metrics.metric_value_or_zero metric_name
     ~labels:[ "keeper", keeper; "source", source ]
     ()
 ;;
 
 let alias_counter_for ~keeper ~alias ~source =
-  Prom.metric_value_or_zero alias_metric_name
+  Metrics.metric_value_or_zero alias_metric_name
     ~labels:[ "keeper", keeper; "alias", alias; "source", source ]
     ()
 ;;

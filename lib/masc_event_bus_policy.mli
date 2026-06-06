@@ -12,7 +12,7 @@
     This module makes each policy choice explicit and named so the
     bootstrap call sites read as audited contracts and so the
     [masc_oas_bus_capacity] gauge can publish the chosen capacity per
-    bus to [/metrics].
+    bus through OTel.
 
     Adding a new bus MUST extend this module — the surrounding code
     accepts [t] values only, not bare ints. *)
@@ -56,7 +56,7 @@ val masc_domain : t
 val create_bus : t -> Agent_sdk.Event_bus.t
 (** Materialise the chosen configuration and publish the
     [masc_oas_bus_capacity] gauge sample with [bus] and [policy]
-    labels so the capacity ceiling is visible in [/metrics]. *)
+    labels so the capacity ceiling is visible in telemetry export. *)
 
 val to_policy_label : backpressure_policy -> string
 (** [Block | Drop_oldest | Drop_newest] → kebab-case label. *)

@@ -1,7 +1,7 @@
 type kind = Docker_spawn | Provider_http | Provider_cli | Sandbox_exec | Log_writer
 
 (* TEL-OK: this low-level gate stays Otel_metric_store-free; [fd_snapshot] is the
-   runtime telemetry surface exported by /metrics and dashboard health. *)
+   runtime telemetry surface exported by dashboard health and OTel paths. *)
 let all_kinds = [ Docker_spawn; Provider_http; Provider_cli; Sandbox_exec; Log_writer ]
 
 let kind_to_string = function

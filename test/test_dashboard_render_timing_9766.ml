@@ -6,7 +6,7 @@
 
 open Alcotest
 module DE = Dashboard_execution
-module Prom = Masc.Otel_metric_store
+module Metrics = Masc.Otel_metric_store
 
 let sample_timings () : DE.render_phase_timings_ms = {
   total_ms = 59800.0;
@@ -53,26 +53,26 @@ let test_format_with_zero_keepers () =
     (Astring.String.is_infix ~affix:"per_keeper=0ms" s)
 
 let phase_sum phase =
-  Prom.metric_value_or_zero
-    Prom.metric_dashboard_execution_render_phase_sec
+  Metrics.metric_value_or_zero
+    Metrics.metric_dashboard_execution_render_phase_sec
     ~labels:[("phase", phase)]
     ()
 
 let phase_count phase =
-  Prom.metric_value_or_zero
-    (Prom.metric_dashboard_execution_render_phase_sec ^ "_count")
+  Metrics.metric_value_or_zero
+    (Metrics.metric_dashboard_execution_render_phase_sec ^ "_count")
     ~labels:[("phase", phase)]
     ()
 
 let snapshot_latency_bucket le =
-  Prom.metric_value_or_zero
-    Prom.metric_dashboard_snapshot_latency_seconds_bucket
+  Metrics.metric_value_or_zero
+    Metrics.metric_dashboard_snapshot_latency_seconds_bucket
     ~labels:[("le", le)]
     ()
 
 let dashboard_all_zero_value () =
-  Prom.metric_value_or_zero
-    Prom.metric_dashboard_metric_all_zeros
+  Metrics.metric_value_or_zero
+    Metrics.metric_dashboard_metric_all_zeros
     ~labels:[("keeper_name", "__dashboard__")]
     ()
 

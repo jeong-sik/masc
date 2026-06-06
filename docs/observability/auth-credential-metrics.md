@@ -17,7 +17,8 @@ code_refs:
 
 # Auth Credential Surface Metrics
 
-How to read the boot-time and runtime credential state exposed by `/metrics`.
+How to read the boot-time and runtime credential state exported through the
+configured OTel metrics backend.
 The surface was introduced by PR #15112 to close the bare-form keeper
 credential ping-pong between PR-#10440 (`Auth.ensure_credential_alias` writes a
 short-form alias at every boot) and PR-3b2 #11155
@@ -39,7 +40,12 @@ The credential subsystem exposes its state on **seven surfaces** (six original +
 | 6. OTel counter (flow)  | `masc_auth_bare_alias_outcome_total{outcome=...}`         | per-call dispatch events    | Transient regression catch |
 | 7. External alert query | backend-specific config                                   | derived alarm               | Operator page |
 
-Surfaces 3 and 4 carry the *same data* — by design — but for different consumers (log grep vs metrics scrape). Surfaces 4 and 6 are complementary: the gauge gives end-state visible per scrape, the counter gives per-call events visible via `rate(...)`. The audit pass (2026-05-14) confirmed no genuine duplication; the only addition needed was flow + heartbeat surfaces to catch what the snapshot gauges cannot show.
+Surfaces 3 and 4 carry the *same data* — by design — but for different
+consumers (log grep vs time-series backend). Surfaces 4 and 6 are
+complementary: the gauge gives end-state snapshots, the counter gives per-call
+events that can be queried as a rate in the active backend. The audit pass
+(2026-05-14) confirmed no genuine duplication; the only addition needed was
+flow + heartbeat surfaces to catch what the snapshot gauges cannot show.
 
 ## γ Classifier (lib/auth.ml)
 
@@ -142,7 +148,7 @@ operator cadence stays consistent across surfaces.
 1. Check `masc_auth_archive_pruned_total` rate -- if it is also climbing, the ping-pong is actively producing archive events.
 2. `cat <base_path>/.masc/auth/.archive/` -- recent epoch dirs (sort by mtime) name the regression cycle.
 3. Inspect a representative bare file: `cat <base_path>/.masc/auth/agents/<bare>.json`. A `{"redirect_to": "...json"}` stub whose target differs from the canonical's redirect target is the `Bare_dead` shape.
-4. Confirm the running binary actually has commit `5d9ac2a7` (metric definitions) and `2be6f22f` (periodic fiber) -- if `masc_auth_bare_alias` is absent from the scrape, the binary is older than PR #15112.
+4. Confirm the running binary actually has commit `5d9ac2a7` (metric definitions) and `2be6f22f` (periodic fiber) -- if `masc_auth_bare_alias` is absent from telemetry export, the binary is older than PR #15112 or the exporter is disabled.
 
 ### Alert: `AuthArchiveEpochsExcessive`
 
@@ -168,69 +174,36 @@ done
 # = 250 internal archive_bare_for_canonical invocations).
 ```
 
-## Operator view (without Grafana)
+## Operator view
 
-Operators who don't want to spin up Grafana can read the same surface
-directly off the `/metrics` endpoint. The four credential-domain metrics
-filter down to a self-contained block in the scrape output.
+Query the configured OTel backend for the `masc_auth_(bare_alias|archive)`
+metric family. Expected steady-state values after PR #15112 + #15143:
 
-### One-shot
-
-```bash
-TOKEN="$MASC_TOKEN"   # bearer token; see ~/.zshenv / keychain
-PORT="${MASC_PORT:-8935}"
-curl -fsS -H "Authorization: Bearer $TOKEN" \
-  "http://127.0.0.1:$PORT/metrics" \
-  | grep -E '^masc_auth_(bare_alias|archive)'
-```
-
-Expected steady-state output (post-PR #15112 + #15143):
-
-```
-masc_auth_bare_alias{state="alive"} 18
-masc_auth_bare_alias{state="dead"} 0
-masc_auth_bare_alias{state="no_bare"} 0
-masc_auth_archive_epochs 21
-masc_auth_archive_pruned_total 310
-masc_auth_bare_alias_outcome_total{outcome="alive_skip"} 18
-masc_auth_bare_alias_outcome_total{outcome="dead_archive"} 0
-masc_auth_bare_alias_outcome_total{outcome="absent"} 0
-masc_auth_bare_alias_audit_ticks_total 123
-```
+| Metric | Expected |
+|--------|----------|
+| `masc_auth_bare_alias{state="alive"}` | fleet keeper count |
+| `masc_auth_bare_alias{state="dead"}` | `0` |
+| `masc_auth_bare_alias{state="no_bare"}` | `0` |
+| `masc_auth_archive_epochs` | bounded by archive retention |
+| `masc_auth_archive_pruned_total` | cumulative, non-decreasing |
+| `masc_auth_bare_alias_outcome_total{outcome="alive_skip"}` | cumulative, non-decreasing |
+| `masc_auth_bare_alias_outcome_total{outcome="dead_archive"}` | steady after initial drain |
+| `masc_auth_bare_alias_outcome_total{outcome="absent"}` | cumulative, non-decreasing |
+| `masc_auth_bare_alias_audit_ticks_total` | advances roughly once per minute |
 
 Regression signature — any of:
 
 - `bare_alias{state="dead"} > 0`
-- `bare_alias_outcome_total{outcome="dead_archive"}` climbing between scrapes
-- `bare_alias_audit_ticks_total` flat between scrapes
-
-### Repeated polling (terminal dashboard)
-
-`watch` formats the surface as a single refreshing pane — the simplest
-"dashboard" without any UI layer:
-
-```bash
-watch -n 5 'curl -fsS -H "Authorization: Bearer $MASC_TOKEN" \
-  "http://127.0.0.1:${MASC_PORT:-8935}/metrics" \
-  | grep -E "^masc_auth_(bare_alias|archive)" \
-  | column -t'
-```
-
-Steady state: `dead=0`, `dead_archive=0`, `audit_ticks_total` climbs by
-about `+1` per minute (the fiber default cadence is `1 tick / 60s`). On
-the `watch -n 5` loop above, most refreshes will show no change and the
-counter will tick up once roughly every 12th refresh — that is normal
-heartbeat, not a fiber stall.
+- `bare_alias_outcome_total{outcome="dead_archive"}` climbing between backend samples
+- `bare_alias_audit_ticks_total` flat between backend samples
 
 ### Why not the in-app dashboard
 
-`dashboard/src/` does not consume `/metrics`. Runtime, keeper turn FSM,
-and all other metrics domains share the same gap — none surface in
-the in-app dashboard. Adding only auth-credential there would be an
-N-of-M patch (AGENT-LLM-A.md software-development §workaround #3). The
-correct unblock is a separate RFC for in-app metric viz across all
-domains; this section gives operators the same data via the terminal
-in the meantime.
+Runtime, keeper turn FSM, and several other metrics domains still need a
+first-class in-app visualization path. Adding only auth-credential there would
+be an N-of-M patch (AGENT-LLM-A.md software-development §workaround #3). The
+correct unblock is a separate RFC for in-app metric viz across all domains;
+this section keeps auth credential operations backend-neutral in the meantime.
 
 ## History
 

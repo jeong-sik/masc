@@ -47,8 +47,8 @@ Each `lib/dashboard/*.ml` file mapped to exactly one class:
 | C4 | `dashboard_mission_assembly.ml` | Keeper briefs + operation context assembly |
 | C4 | `dashboard_mission_briefing.ml` | Mission briefing cache + delivery + public JSON |
 | C4 | `dashboard_mission.ml` | Mission projection (32 render_/project_ patterns) |
-| C5 | `dashboard_cache.ml` | Prometheus counters (cache_hits_total, cache_misses_total) |
-| C5 | `dashboard_governance_judge.ml` | Prometheus counters + judge logic |
+| C5 | `dashboard_cache.ml` | retired scrape backend counters (cache_hits_total, cache_misses_total) |
+| C5 | `dashboard_governance_judge.ml` | retired scrape backend counters + judge logic |
 | OTHER | `judge_diagnostics.ml` | Diagnostic helper — no clean class fit |
 | OTHER | `judge_json_recovery.ml` | JSON recovery helper — no clean class fit |
 

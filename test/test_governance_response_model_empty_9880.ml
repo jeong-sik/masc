@@ -19,13 +19,13 @@ let () =
   Unix.putenv "MASC_BASE_PATH" dir
 ;;
 
-module Prom = Masc.Otel_metric_store
+module Metrics = Masc.Otel_metric_store
 module Judge = Dashboard_governance_judge
 
 let metric_name = "masc_governance_response_model_empty_total"
 
 let count_for ~source =
-  Prom.metric_value_or_zero metric_name ~labels:[ "source", source ] ()
+  Metrics.metric_value_or_zero metric_name ~labels:[ "source", source ] ()
 ;;
 
 (* Metric is registered at module load via [Otel_metric_store.register_counter
@@ -36,7 +36,7 @@ let count_for ~source =
    [metric_total] cannot distinguish "not registered" from "registered
    but no observations yet" — both return [0.0]. *)
 let test_metric_registered () =
-  let registered = Prom.get_metric_value metric_name () in
+  let registered = Metrics.get_metric_value metric_name () in
   Alcotest.(check bool) "metric registered" true (Option.is_some registered)
 ;;
 
@@ -45,7 +45,7 @@ let test_metric_registered () =
    empty and telemetry's [canonical_model_id] resolves it. *)
 let test_telemetry_resolved_branch () =
   let before = count_for ~source:"telemetry_resolved" in
-  Prom.inc_counter metric_name ~labels:[ "source", "telemetry_resolved" ] ();
+  Metrics.inc_counter metric_name ~labels:[ "source", "telemetry_resolved" ] ();
   Alcotest.(check (float 0.0001))
     "telemetry_resolved row +1"
     (before +. 1.0)
@@ -59,7 +59,7 @@ let test_telemetry_resolved_branch () =
    exposing concrete provider/model identity. *)
 let test_unknown_source_branch () =
   let before = count_for ~source:"unknown_source" in
-  Prom.inc_counter metric_name ~labels:[ "source", "unknown_source" ] ();
+  Metrics.inc_counter metric_name ~labels:[ "source", "unknown_source" ] ();
   Alcotest.(check (float 0.0001))
     "unknown_source row +1"
     (before +. 1.0)
@@ -73,8 +73,8 @@ let test_unknown_source_branch () =
 let test_distinct_sources_separate_rows () =
   let before_t = count_for ~source:"telemetry_resolved" in
   let before_u = count_for ~source:"unknown_source" in
-  Prom.inc_counter metric_name ~labels:[ "source", "telemetry_resolved" ] ();
-  Prom.inc_counter metric_name ~labels:[ "source", "unknown_source" ] ();
+  Metrics.inc_counter metric_name ~labels:[ "source", "telemetry_resolved" ] ();
+  Metrics.inc_counter metric_name ~labels:[ "source", "unknown_source" ] ();
   Alcotest.(check (float 0.0001))
     "telemetry_resolved +1"
     (before_t +. 1.0)
@@ -135,12 +135,12 @@ let test_empty_canonical_id_uses_unknown_source () =
 (* The registry must include the metric name and [source] label key;
    the OTel exporter reads this snapshot. *)
 let test_registry_snapshot () =
-  Prom.inc_counter metric_name ~labels:[ "source", "telemetry_resolved" ] ();
+  Metrics.inc_counter metric_name ~labels:[ "source", "telemetry_resolved" ] ();
   let has_metric =
-    Prom.snapshot ()
-    |> List.exists (fun (m : Prom.metric) ->
+    Metrics.snapshot ()
+    |> List.exists (fun (m : Metrics.metric) ->
       String.equal m.name metric_name
-      && m.metric_type = Prom.Counter
+      && m.metric_type = Metrics.Counter
       && List.mem ("source", "telemetry_resolved") m.labels)
   in
   Alcotest.(check bool) "metric source label in registry" true has_metric

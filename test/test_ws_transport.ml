@@ -320,14 +320,14 @@ let test_bytes_cache_counters () =
    the dispatcher calls with the extracted value. *)
 
 module Metrics = Masc.Transport_metrics
-module Prom = Masc.Otel_metric_store
+module MetricStore = Masc.Otel_metric_store
 
-let read_counter name = Prom.metric_value_or_zero name ()
+let read_counter name = MetricStore.metric_value_or_zero name ()
 
 let test_observe_ws_client_buffered_bytes_accumulates () =
-  let sum_name = Prom.metric_ws_client_buffered_bytes in
+  let sum_name = MetricStore.metric_ws_client_buffered_bytes in
   let count_name = sum_name ^ "_count" in
-  let ack_name = Prom.metric_ws_client_acks in
+  let ack_name = MetricStore.metric_ws_client_acks in
   let sum0 = read_counter sum_name in
   let cnt0 = read_counter count_name in
   let ack0 = read_counter ack_name in
@@ -341,7 +341,7 @@ let test_observe_ws_client_buffered_bytes_accumulates () =
     2.0 (read_counter ack_name -. ack0)
 
 let test_observe_ws_client_buffered_bytes_clamps_negative () =
-  let sum_name = Prom.metric_ws_client_buffered_bytes in
+  let sum_name = MetricStore.metric_ws_client_buffered_bytes in
   let sum0 = read_counter sum_name in
   (* A misbehaving client cannot drive the gauge below zero.  The helper
      should floor to 0 rather than leak negative observations into
@@ -400,7 +400,7 @@ let test_backpressure_gate_default_is_one_mib () =
     1048576 limit
 
 let test_backpressure_gate_throttle_counter_increments () =
-  let name = Prom.metric_ws_throttled_deliveries in
+  let name = MetricStore.metric_ws_throttled_deliveries in
   let before = read_counter name in
   Metrics.inc_ws_throttled_delivery ();
   Metrics.inc_ws_throttled_delivery ();

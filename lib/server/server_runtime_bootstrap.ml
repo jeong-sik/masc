@@ -194,7 +194,7 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
      Metric registration itself runs at [Otel_metric_store] module load; this
      call is the explicit dependency-order anchor and warms the snapshot
      accessor so a misconfigured pool surfaces here rather than at first
-     [/metrics] scrape. *)
+     telemetry export. *)
   Pool_metrics.register ();
   state
 
@@ -379,8 +379,8 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
      and removes stale entries according to MASC_RATE_LIMIT_ENTRY_MAX_AGE_SEC. *)
   Rate_limit.start_global_cleanup_loop ~sw ~clock;
   (* PR-0.2.D: OCaml runtime GC sampler.  Polls Gc.quick_stat every
-     30s and writes six masc_gc_* gauges so /metrics can answer GC
-     pressure questions without a separate dump endpoint.
+     30s and writes six masc_gc_* gauges so the telemetry backend can
+     answer GC pressure questions without a separate dump endpoint.
      quick_stat does not walk the heap, so the call cost stays
      bounded next to the request path. *)
   Gc_sampler.run ~sw ~clock ~interval:30.0;

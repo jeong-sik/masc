@@ -187,7 +187,7 @@ let test_cognition_readiness_uses_cognition_read_model () =
              "/api/v1/dashboard/memory-subsystems"
              (ref_json |> member "value" |> to_string);
            check string "surface verification ref labels"
-             "live_spotcheck+logs+metrics"
+             "live_spotcheck+logs"
              (surface |> member "verification_ref_bar" |> to_string))
 
 let test_runtime_readiness_uses_provider_read_model () =
@@ -209,7 +209,7 @@ let test_runtime_readiness_uses_provider_read_model () =
            check string "live_spotcheck value" "/api/v1/providers"
              (ref_json |> member "value" |> to_string);
            check string "surface verification ref labels"
-             "live_spotcheck+logs+metrics+tool"
+             "live_spotcheck+logs+tool"
              (surface |> member "verification_ref_bar" |> to_string))
 
 let test_code_ide_readiness_uses_ide_presence_read_model () =
@@ -232,19 +232,19 @@ let test_code_ide_readiness_uses_ide_presence_read_model () =
              "/api/v1/ide/presence"
              (ref_json |> member "value" |> to_string);
            check string "surface verification ref labels"
-             "live_spotcheck+logs+metrics"
+             "live_spotcheck+logs"
              (surface |> member "verification_ref_bar" |> to_string))
 
 let test_verification_ref_bar_reflects_declared_refs () =
   let overview_json = Dashboard_surface_readiness.json ~surface_id:"overview" () in
   let open Yojson.Safe.Util in
   check string "single-surface ref coverage"
-    "live:1/1 logs:1/1 metrics:1/1"
+    "live:1/1 logs:1/1"
     (overview_json |> member "verification_ref_bar" |> to_string);
   (match overview_json |> member "surfaces" |> to_list with
    | [ surface ] ->
        check string "surface verification ref labels"
-         "fixture+live_spotcheck+logs+metrics+tool"
+         "fixture+live_spotcheck+logs+tool"
          (surface |> member "verification_ref_bar" |> to_string)
    | _ -> fail "overview surface missing");
   let all_json = Dashboard_surface_readiness.json () in

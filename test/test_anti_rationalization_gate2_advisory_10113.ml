@@ -38,12 +38,12 @@ let () =
   Unix.putenv "MASC_BASE_PATH" dir
 
 module AR = Masc.Task.Anti_rationalization
-module Prom = Masc.Otel_metric_store
+module Metrics = Masc.Otel_metric_store
 
-let metric = Prom.metric_anti_rationalization_excuse_pattern
+let metric = Metrics.metric_anti_rationalization_excuse_pattern
 
 let counter_for ~pattern ~decision =
-  Prom.metric_value_or_zero metric
+  Metrics.metric_value_or_zero metric
     ~labels:[ ("pattern", pattern); ("decision", decision) ]
     ()
 
@@ -140,11 +140,11 @@ let test_counter_label_vocabulary () =
   let before_advisory = counter_for ~pattern ~decision:"advisory_to_llm" in
   let before_terminal = counter_for ~pattern ~decision:"terminal_reject" in
   let before_safety = counter_for ~pattern ~decision:"advisory_safety_net_reject" in
-  Prom.inc_counter metric
+  Metrics.inc_counter metric
     ~labels:[ ("pattern", pattern); ("decision", "advisory_to_llm") ] ();
-  Prom.inc_counter metric
+  Metrics.inc_counter metric
     ~labels:[ ("pattern", pattern); ("decision", "terminal_reject") ] ();
-  Prom.inc_counter metric
+  Metrics.inc_counter metric
     ~labels:[ ("pattern", pattern); ("decision", "advisory_safety_net_reject") ] ();
   Alcotest.(check (float 0.0001))
     "advisory_to_llm bucket +1"
@@ -167,7 +167,7 @@ let test_pattern_label_isolation () =
   let before_other =
     counter_for ~pattern:"out of scope" ~decision:"advisory_to_llm"
   in
-  Prom.inc_counter metric
+  Metrics.inc_counter metric
     ~labels:[
       ("pattern", "follow-up");
       ("decision", "advisory_to_llm");

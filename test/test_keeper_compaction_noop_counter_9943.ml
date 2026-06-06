@@ -26,10 +26,10 @@ let () =
   Unix.putenv "MASC_BASE_PATH" dir
 ;;
 
-module Prom = Masc.Otel_metric_store
+module Metrics = Masc.Otel_metric_store
 
 let noop_for ~keeper ~trigger =
-  Prom.metric_value_or_zero
+  Metrics.metric_value_or_zero
     Keeper_metrics.(to_string CompactionNoop)
     ~labels:[ "keeper", keeper; "trigger", trigger ]
     ()
@@ -46,7 +46,7 @@ let noop_for ~keeper ~trigger =
    "registered but no observations yet". *)
 let test_metric_registered () =
   let registered =
-    Prom.get_metric_value Keeper_metrics.(to_string CompactionNoop) ()
+    Metrics.get_metric_value Keeper_metrics.(to_string CompactionNoop) ()
   in
   Alcotest.(check bool) "metric registered at init" true (Option.is_some registered)
 ;;
@@ -58,7 +58,7 @@ let test_counter_advances_for_noop_pattern () =
   let keeper = "test-keeper-compaction-noop-9943" in
   let trigger = "context_overflow_imminent" in
   let before = noop_for ~keeper ~trigger in
-  Prom.inc_counter
+  Metrics.inc_counter
     Keeper_metrics.(to_string CompactionNoop)
     ~labels:[ "keeper", keeper; "trigger", trigger ]
     ();
@@ -75,11 +75,11 @@ let test_distinct_triggers_separate_rows () =
   let keeper = "test-keeper-compaction-noop-9943-trigger" in
   let before_overflow = noop_for ~keeper ~trigger:"context_overflow_imminent" in
   let before_proactive = noop_for ~keeper ~trigger:"proactive_warmup" in
-  Prom.inc_counter
+  Metrics.inc_counter
     Keeper_metrics.(to_string CompactionNoop)
     ~labels:[ "keeper", keeper; "trigger", "context_overflow_imminent" ]
     ();
-  Prom.inc_counter
+  Metrics.inc_counter
     Keeper_metrics.(to_string CompactionNoop)
     ~labels:[ "keeper", keeper; "trigger", "proactive_warmup" ]
     ();
@@ -102,11 +102,11 @@ let test_per_keeper_isolation () =
   let b = "test-keeper-compaction-noop-9943-iso-B" in
   let trigger = "context_overflow_imminent" in
   let before_b = noop_for ~keeper:b ~trigger in
-  Prom.inc_counter
+  Metrics.inc_counter
     Keeper_metrics.(to_string CompactionNoop)
     ~labels:[ "keeper", a; "trigger", trigger ]
     ();
-  Prom.inc_counter
+  Metrics.inc_counter
     Keeper_metrics.(to_string CompactionNoop)
     ~labels:[ "keeper", a; "trigger", trigger ]
     ();
@@ -122,13 +122,13 @@ let test_registry_snapshot_includes_label_shape () =
   let keeper = "test-keeper-compaction-noop-9943-export" in
   let trigger = "context_overflow_imminent" in
   let metric = Keeper_metrics.(to_string CompactionNoop) in
-  Prom.inc_counter
+  Metrics.inc_counter
     metric
     ~labels:[ "keeper", keeper; "trigger", trigger ]
     ();
   let has_metric =
-    Prom.snapshot ()
-    |> List.exists (fun (m : Prom.metric) ->
+    Metrics.snapshot ()
+    |> List.exists (fun (m : Metrics.metric) ->
       String.equal m.name metric
       && List.mem ("keeper", keeper) m.labels
       && List.mem ("trigger", trigger) m.labels)

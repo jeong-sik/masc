@@ -54,28 +54,64 @@ let maybe_string_option_override =
 let live_override_details (meta : keeper_meta) (defaults : keeper_profile_defaults)
   : override_field_detail list
   =
+  let default_string default live =
+    match default with
+    | Some value when String.trim live = "" -> value
+    | _ -> live
+  in
+  let default_string_list default live =
+    match default, live with
+    | Some values, [] -> values
+    | _, values -> values
+  in
+  let default_nonempty_string_list default live =
+    match default, live with
+    | values, [] when values <> [] -> values
+    | _, values -> values
+  in
   let effective_runtime_id = effective_declarative_runtime_id defaults meta in
   []
   |> maybe_string_override
        "prompt.goal"
        ~normalize:normalize_goal_horizon_text
        defaults.goal
-       meta.goal
-  |> maybe_string_override "prompt.short_goal" defaults.short_goal meta.short_goal
-  |> maybe_string_override "prompt.mid_goal" defaults.mid_goal meta.mid_goal
-  |> maybe_string_override "prompt.long_goal" defaults.long_goal meta.long_goal
-  |> maybe_string_override "prompt.will" defaults.will meta.will
-  |> maybe_string_override "prompt.needs" defaults.needs meta.needs
-  |> maybe_string_override "prompt.desires" defaults.desires meta.desires
-  |> maybe_string_override "prompt.instructions" defaults.instructions meta.instructions
+       (default_string defaults.goal meta.goal)
+  |> maybe_string_override
+       "prompt.short_goal"
+       defaults.short_goal
+       (default_string defaults.short_goal meta.short_goal)
+  |> maybe_string_override
+       "prompt.mid_goal"
+       defaults.mid_goal
+       (default_string defaults.mid_goal meta.mid_goal)
+  |> maybe_string_override
+       "prompt.long_goal"
+       defaults.long_goal
+       (default_string defaults.long_goal meta.long_goal)
+  |> maybe_string_override
+       "prompt.will"
+       defaults.will
+       (default_string defaults.will meta.will)
+  |> maybe_string_override
+       "prompt.needs"
+       defaults.needs
+       (default_string defaults.needs meta.needs)
+  |> maybe_string_override
+       "prompt.desires"
+       defaults.desires
+       (default_string defaults.desires meta.desires)
+  |> maybe_string_override
+       "prompt.instructions"
+       defaults.instructions
+       (default_string defaults.instructions meta.instructions)
   |> nonempty_string_list_override
        "workspace.mention_targets"
        defaults.mention_targets
-       meta.mention_targets
+       (default_nonempty_string_list defaults.mention_targets meta.mention_targets)
   |> maybe_string_list_override
        "tools.tool_denylist"
        defaults.tool_denylist
-       meta.tool_denylist
+       (default_string_list defaults.tool_denylist meta.tool_denylist)
   |> (fun acc ->
   let runtime_id = runtime_id_of_meta meta in
   if effective_runtime_id <> runtime_id

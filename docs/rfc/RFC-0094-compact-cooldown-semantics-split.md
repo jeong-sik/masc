@@ -59,7 +59,7 @@ can re-trigger compact every cycle. PR #15682's fix:
 
 ```ocaml
 | None ->
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string StateSnapshotSkippedNoState)
       ~labels:[("keeper", meta.name)] ();
     { meta with runtime = { meta.runtime with
@@ -243,7 +243,7 @@ cadence pattern).
 |---|---|
 | Adding a field to [keeper_meta] forces a meta-json schema bump and risks parse failures on old persisted blobs | Backfill rule + existing [Safe_ops.json_float ~default:0.0] pattern handles missing field gracefully. Round-trip test covers both directions. |
 | Two-field representation invites future writers to update only one and silently regress | Add a typed helper [advance_post_turn_anchors : runtime -> snapshot:bool -> float -> runtime] that is the only call site; ban direct field writes via dune lint or comment + grep test. |
-| Dashboard panels that read [last_continuity_update_ts] as cooldown anchor will visibly shift | Audit dashboard queries in [features/masc-cockpit-solidjs-poc] and any Prometheus rule that derives cooldown state from the field name. Update those to consume the new field. |
+| Dashboard panels that read [last_continuity_update_ts] as cooldown anchor will visibly shift | Audit dashboard queries in [features/masc-cockpit-solidjs-poc] and any legacy metrics backend rule that derives cooldown state from the field name. Update those to consume the new field. |
 | TLA+ spec [KeeperOASAdvanced.tla] models the field abstractly; if the spec asserts properties that rely on cooldown advance being observable, the spec must be updated | Add a Phase 2 task to re-run TLC against the spec with the renamed cooldown variable. |
 
 ## 8. Alternatives considered

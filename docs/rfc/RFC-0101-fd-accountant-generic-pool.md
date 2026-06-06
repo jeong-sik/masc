@@ -121,9 +121,9 @@ This is a small additive change — one wrap per backend file. PR-3 of the migra
 
 Long-term: combine with [[RFC-0100]]'s keep-alive pool (one TLS connection per provider, reused across calls). Until that lands, per-call wrapping bounds concurrent count even without keep-alive.
 
-### 3.4 `/metrics` Prometheus exposure
+### 3.4 `/metrics` legacy metrics backend exposure
 
-`Fd_accountant.fd_snapshot ()` is wired into the existing Prometheus export. New metric series:
+`Fd_accountant.fd_snapshot ()` is wired into the existing legacy metrics backend export. New metric series:
 
 ```
 masc_fd_open                                          gauge
@@ -167,7 +167,7 @@ This couples FD pressure → session shedding. The 5-second debounce avoids flap
 | PR-1 (this) | RFC body | review + merge |
 | PR-2 | `lib/server/fd_accountant.ml(i)` + multi-kind Eio.Pool + `Docker_spawn_throttle` delegation. Inert: docker behavior unchanged. | `test_fd_accountant.ml` 256-connection round-trip; existing docker spawn tests unchanged |
 | PR-3 | Provider HTTP wrap in `oas/lib/llm_provider/backend_*.ml` (small cross-repo PR pair) | benchmark: pressure-during-runtime-storm holds `Provider_http` count ≤ 16 |
-| PR-4 | Sandbox exec wrap (agent Execute runtime / sandbox runner) + log writer wrap (largest writers only). | `Sandbox_exec` and `Log_writer` series visible in Prometheus dashboard |
+| PR-4 | Sandbox exec wrap (agent Execute runtime / sandbox runner) + log writer wrap (largest writers only). | `Sandbox_exec` and `Log_writer` series visible in legacy metrics backend dashboard |
 | PR-5 | `/metrics` exposure + dashboard panel + startup nofile log | operator can see snapshot via `curl /metrics \| grep masc_fd_` |
 | PR-6 | RFC-0099 Backpressure evict signal compose | pressure → evict observable in `Session_lifecycle_event` stream |
 
@@ -187,7 +187,7 @@ PR-2 is **wire-inert** (docker behavior preserved via delegation). PR-3 onward o
 |-----|---------|
 | Generic accountant covers all spawn classes — `kern.maxfiles` exhaustion has one chokepoint, not four. | Migration touches 4 areas (docker / provider HTTP / sandbox exec / log writers). 5-PR sequence. |
 | Preserves `Docker_spawn_throttle` public API — delegation pattern matches RFC-0098 PR-2 precedent. | Adds one layer of indirection for docker callers; negligible overhead, but worth noting. |
-| `/metrics` exposure ends the "observable resource without observability" gap. | Adds 7 new metric series — Prometheus card-cost grows; well within budget. |
+| `/metrics` exposure ends the "observable resource without observability" gap. | Adds 7 new metric series — legacy metrics backend card-cost grows; well within budget. |
 | Compose cleanly with [[RFC-0099]] (Backpressure evict) and [[RFC-0100]] (HTTP keep-alive reduces per-call cost). | Hard dependency: RFC-0099 PR-3 must be present for §3.6 evict-on-pressure. If RFC-0099 stalls, PR-6 of this RFC stalls. |
 | Per-kind cap tuning is env-controlled — operators can lower if their environment has tighter FD limits. | Operators must understand 4 separate caps + their interaction. Default mix (120 sum) is the recommended pre-tuning state. |
 
@@ -204,7 +204,7 @@ PR-2 is **wire-inert** (docker behavior preserved via delegation). PR-3 onward o
 - [x] **PR-2** (#15816): `lib/server/fd_accountant.ml(i)` multi-kind generic pool (`Docker_spawn` / `Provider_http` / `Provider_cli` / `Sandbox_exec` / `Log_writer`) + `Docker_spawn_throttle.with_slot` delegation (public API preserved, wire-inert) — tests include cap-bounds fan-in and provider transport wrapping.
 - [x] **PR-3** (oas #1618): provider HTTP wrap via dependency-injection hook (`Fd_throttle_hook` in oas + `Provider_throttle.with_permit_priority` composes), since oas cannot depend on masc directly. RFC §3.3 originally specified direct `Fd_accountant` call from `backend_*.ml`; DI pattern replaces that. Embedder (masc) wires `Fd_throttle_hook.set_handler (fun thunk -> Fd_accountant.with_slot ~kind:Provider_http thunk)` at bootstrap (follow-up commit, not in PR-3 itself).
 - [ ] **PR-4**: sandbox exec wrap (agent Execute runtime / sandbox runner) + log writer wrap (largest writers only).
-- [ ] **PR-5**: `Fd_accountant.fd_snapshot` → Prometheus `/metrics` + dashboard `System Health` panel + startup nofile-limit log.
+- [ ] **PR-5**: `Fd_accountant.fd_snapshot` → legacy metrics backend `/metrics` + dashboard `System Health` panel + startup nofile-limit log.
 - [ ] **PR-6**: compose with [[RFC-0099]] `Backpressure` evict signal — `pressure_active = true > 5 s` → `Session_lifecycle_event.Evict { reason = Backpressure }` publish.
 - [x] **Status promoted to `Active`** at PR-2 merge (this closeout commit). `Implemented` promotion deferred until PR-5 (operator-visibility surface) at minimum. The wire-up commit on the masc side that calls `Fd_throttle_hook.set_handler` is intentionally separated from this closeout and tracked as a follow-up.
 

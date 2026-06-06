@@ -22,7 +22,7 @@ PR audit (2026-05-20) classified two recently-merged PRs as Cluster E (cap / ded
 - **No replacement RFC linked at merge time.**
 - **No `removal target: <date or RFC>` in PR body.**
 
-Both PRs are typed dedup layers over real, persistent error streams. They suppress symptom emission rate (ERROR → DEBUG demote, Prometheus counter substitute) but do not address the underlying failure rate. Without sunset tracking, the dedup arms accumulate as permanent infrastructure and AI agents subsequently treat them as a reasonable precedent (AGENT-LLM-A.md "누적 메커니즘").
+Both PRs are typed dedup layers over real, persistent error streams. They suppress symptom emission rate (ERROR → DEBUG demote, legacy metrics backend counter substitute) but do not address the underlying failure rate. Without sunset tracking, the dedup arms accumulate as permanent infrastructure and AI agents subsequently treat them as a reasonable precedent (AGENT-LLM-A.md "누적 메커니즘").
 
 This RFC declares both layers as *carryover* workarounds with explicit per-`error_kind` removal dependencies and a measurable sunset criterion.
 
@@ -84,7 +84,7 @@ When all three conditions hold, the `error_kind` arm is removed in a single PR t
 
 - Drops the variant from the `error_kind` sum.
 - Removes the classifier branch.
-- Drops the matching Prometheus label.
+- Drops the matching legacy metrics backend label.
 - Leaves the dedup layer intact for remaining arms.
 
 When the **last** arm is removed, the entire `keeper_recording_error_state` sub-library is deleted in the same PR that removes it.

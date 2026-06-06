@@ -25,7 +25,7 @@ Three OCaml modules touch the OAS surface:
 | Module | LOC | Role |
 |--------|-----|------|
 | `lib/oas_compat/oas_compat.ml` | (small) | Compatibility shim over OAS protocol |
-| `lib/keeper/oas_execution_error_phase.ml` | (~30) | Closed sum of 7 phases used as Prometheus label on `metric_keeper_oas_execution_errors` |
+| `lib/keeper/oas_execution_error_phase.ml` | (~30) | Closed sum of 7 phases used as Otel_metric_store label on `metric_keeper_oas_execution_errors` |
 | `lib/keeper/keeper_oas_checkpoint.ml` | (small) | OAS checkpoint snapshot handling |
 
 None of them model the spec's `external_side_effect_committed` / `continue_gate_required` distinction — the spec's most operationally important contribution (it differentiates clean Eio cancellation rollback from cases where an outside-world mutation has already committed and needs an explicit operator decision).

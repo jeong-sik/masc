@@ -44,7 +44,7 @@ moment of `Disp_pause_human` resolution.
 
 Acceptance (Phase 4 + 24h sustained): plain `Reason_internal_error`
 occurrence = 0. All 205/24h routed to one of the four sub-variants. New
-prometheus label `reason_kind="internal_*"` makes the breakdown directly
+legacy metrics backend label `reason_kind="internal_*"` makes the breakdown directly
 inspectable.
 
 ## §1 Motivation
@@ -158,7 +158,7 @@ distinct byte form:
 ```
 
 Existing string "internal_error" is retired in phase 3. Downstream JSON /
-prometheus readers must accept the four new forms before phase 3 ships.
+legacy metrics backend readers must accept the four new forms before phase 3 ships.
 
 ### 3.4 No catch-all replacement
 
@@ -172,7 +172,7 @@ re-collapse.
 
 ## §4 Observability
 
-- **Prometheus**: new label `reason_kind` on the existing
+- **legacy metrics backend**: new label `reason_kind` on the existing
   `keeper_disposition_total` counter, taking values
   `internal_exception | internal_classifier_unmapped | internal_timeout
   | internal_invariant_violation` (and the existing non-internal values).
@@ -186,7 +186,7 @@ re-collapse.
 
 ## §5 Workaround self-check (software-development.md 3 signatures)
 
-1. **Telemetry-as-fix**: this RFC does add a prometheus label, but only
+1. **Telemetry-as-fix**: this RFC does add a legacy metrics backend label, but only
    *because* the typed split is the substrate. Without §3, the label
    would just be a string. With §3, the label is a projection of a
    closed-sum, which is the established fix pattern (cf. RFC-0155
@@ -205,7 +205,7 @@ re-collapse.
 | 1. **Typed substrate** | Add `internal_error_reason` record + 4 sub-variants alongside the existing `Reason_internal_error`. `to_string` for sub-variants emits new byte forms. | `dune build`; unit test enumerates 4 byte forms. |
 | 2. **Classify-then-emit** | At each known producer (`keeper_turn`, `keeper_registry` invariant sites, `runtime.classify_*`, budget-exceed paths) replace `terminal_reason := "internal_error"` with direct sub-variant construction. | Per-keeper unit test that synthetic input triggers the expected sub-variant. |
 | 3. **Swap consumer arm** | Delete lines 615-621 (`String.equal ... "internal_error"` arm). Add explicit match on the four sub-variants. Retire `Reason_internal_error` (with breaking-change note). | `dune build` red on first uncovered call site; green once §2 phase covers all. |
-| 4. **24h soak** | Observe prometheus `reason_kind` distribution. Confirm plain `internal_error` byte form count = 0. | Grafana panel + `rg "internal_error" log/` returns 0 for new emissions. |
+| 4. **24h soak** | Observe legacy metrics backend `reason_kind` distribution. Confirm plain `internal_error` byte form count = 0. | Grafana panel + `rg "internal_error" log/` returns 0 for new emissions. |
 
 Each phase is a separate PR. Phase 2 may need 2–3 PRs if producer sites
 exceed one reviewer chunk; phase 3 must be one PR (single source of

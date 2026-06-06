@@ -79,7 +79,7 @@ with `xargs rg -oI '\bKeeper_[a-z_]+'`):
 | Count | Module | Notes |
 |------:|---|---|
 | 292 | `Keeper_types` | facade |
-| 290 | `Keeper_metrics` | Prometheus metric names |
+| 290 | `Keeper_metrics` | legacy metrics backend metric names |
 | 110 | `Keeper_runtime_profile` | runtime runtime name type |
 | 105 | `Keeper_registry` | godfile, 3034 LoC |
 | 98 | `Keeper_runtime_manifest` | per-keeper config |
@@ -91,7 +91,7 @@ with `xargs rg -oI '\bKeeper_[a-z_]+'`):
 
 Heavy code-vs-OCamldoc breakdown was not done at file granularity for
 this RFC — sampling showed mixed usage (admission_queue: real code refs;
-prometheus.ml: comment-only refs). For Option B feasibility the
+legacy metrics backend module: comment-only refs). For Option B feasibility the
 distinction does not matter (see §3.B).
 
 ### 2.3 Filename prefix audit (collision risk for `(wrapped false)`)

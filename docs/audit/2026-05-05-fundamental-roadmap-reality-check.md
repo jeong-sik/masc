@@ -14,7 +14,7 @@ This document exists so the next agent (or human) does not re-execute a 26-week 
 | File | Roadmap claim | Actual (HEAD `5806519c0b`) | Status |
 |---|---|---|---|
 | `lib/config/env_config_keeper.ml` | 2,278 lines, "117 env var, 6 domains, CRITICAL" | **949 lines** | ❌ **STALE** — 58% reduction already landed |
-| `lib/keeper/keeper_unified_turn.ml` | "20+ gate runtime, all silent skip" | 2,289 lines, **gates record FSM transitions + Prometheus metrics** (see §2) | ❌ **OUTDATED PREMISE** |
+| `lib/keeper/keeper_unified_turn.ml` | "20+ gate runtime, all silent skip" | 2,289 lines, **gates record FSM transitions + Otel_metric_store metrics** (see §2) | ❌ **OUTDATED PREMISE** |
 | `lib/keeper/keeper_turn.ml` | "500+ 줄, Godfile" | 615 lines | ✅ confirmed in-range |
 | `lib/keeper/keeper_prompt.ml` | "수백 줄, 5+ templates" | 244 lines | ⚠️ smaller than implied; ROI of externalization is low |
 | `lib/runtime/runtime_catalog_runtime.ml` | 34KB, hardcoded tiers/models/providers | 972 lines (~38KB) | ✅ size-confirmed; content claim §3 needs separate check |
@@ -41,7 +41,7 @@ Direct read of `lib/keeper/keeper_unified_turn.ml` (2,289 lines on HEAD `5806519
 |---|---|
 | Pre-dispatch terminal observation is recorded (8 sites) | `lib/keeper/keeper_unified_turn.ml:60,159,188,324,419,468,...` |
 | Phase gating transitions FSM to `Done` | `lib/keeper/keeper_unified_turn.ml:203,2279` |
-| Ollama saturation increments Prometheus counter | `lib/keeper/keeper_unified_turn.ml:344` (`Prometheus.metric_keeper_ollama_saturation_skip`) |
+| Ollama saturation increments Otel_metric_store counter | `lib/keeper/keeper_unified_turn.ml:344` (`Otel_metric_store.metric_keeper_ollama_saturation_skip`) |
 
 **Conclusion**: the "silent skip → returns `Ok meta` with no logic" pattern the roadmap targets does not match the current file. Each of the gates the roadmap names already records observations and transitions FSMs. Whether the *logic* inside each gate is correct is a separate question — but the framing "silent" is wrong.
 

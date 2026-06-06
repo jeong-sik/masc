@@ -118,7 +118,7 @@ in
       [metric_runtime_model_attribution_fallback_hits]. *)
    ```
 
-2. Prometheus counter 추가 (`lib/model_inference_metrics.ml` 또는 `keeper_metrics.ml`):
+2. legacy metrics backend counter 추가 (`lib/model_inference_metrics.ml` 또는 `keeper_metrics.ml`):
 
    ```
    metric_runtime_model_attribution_fallback_hits{runtime_id=...}
@@ -171,7 +171,7 @@ grep -c "missing_success_model" "$MASC_BASE_PATH/.masc/logs/system_log_$(date +%
 ```
 
 ```bash
-# fallback hit counter (Prometheus)
+# fallback hit counter (legacy metrics backend)
 curl -s http://localhost:<port>/metrics | grep runtime_model_attribution_fallback_hits
 # PR-2 머지 + 7 일 후: 0
 ```

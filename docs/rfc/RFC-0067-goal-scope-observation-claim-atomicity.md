@@ -138,4 +138,4 @@ Assign a UUID to each observation and validate server-side. More general but ove
 
 1. Should `read_state` be cached per-turn to avoid double-read? Current `read_state` is a file read — cheap but not free.
 2. Should the version check be advisory (warn + proceed) or hard (reject)? Proposing hard reject for correctness.
-3. Should we add a `goal_store_version` metric to Prometheus for observability? Optional, can be deferred.
+3. Should we add a `goal_store_version` metric to legacy metrics backend for observability? Optional, can be deferred.

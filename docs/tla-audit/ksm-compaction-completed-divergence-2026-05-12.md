@@ -123,7 +123,7 @@ OCaml line 560-573 주석이 #9988/#9935 production incident를 명시하지만 
 
 ### F-7.3 (LOW risk operational): `Log.Keeper.warn`의 string formatting
 
-OCaml line 583-587의 warn 메시지가 `Printf.sprintf`-style — `before_tokens` / `after_tokens`만 변수. 일관성 측면 OK. 단 prometheus counter (e.g., `keeper_compaction_noop_total`) 부재 → 운영자가 *시간당 발화 빈도*를 grafana로 못 봄. iter 5 PR #14713의 telemetry-as-fix 거부 기준에 닿음 — 이건 *기존 warn 보강*이지 *fix 자체*는 아니므로 OK. counter 추가는 별도 PR.
+OCaml line 583-587의 warn 메시지가 `Printf.sprintf`-style — `before_tokens` / `after_tokens`만 변수. 일관성 측면 OK. 단 Otel_metric_store counter (e.g., `keeper_compaction_noop_total`) 부재 → 운영자가 *시간당 발화 빈도*를 grafana로 못 봄. iter 5 PR #14713의 telemetry-as-fix 거부 기준에 닿음 — 이건 *기존 warn 보강*이지 *fix 자체*는 아니므로 OK. counter 추가는 별도 PR.
 
 ## Verification
 

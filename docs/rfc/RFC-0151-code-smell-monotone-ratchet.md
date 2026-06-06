@@ -54,8 +54,8 @@ elimination 작업이 자연스럽게 baseline 을 끌어내린다.
 이 접근은 AGENT-LLM-A.md §"워크어라운드 거부 기준" 시그니처 3종 중 #2
 (string/substring 분류기) + #3 (N-of-M 패치) 의 누적을 사후가 아니라
 *PR 게이트 단계에서* 감지하는 것을 목적으로 한다. 기존 godfile cap 식
-(`prometheus.ml` 등의 LoC 상한) 은 cap 자체가 PR-evasion 을 유도했기에
-(memory feedback `feedback_prometheus_extract_too_evasive.md` 참조),
+(`legacy metrics backend module` 등의 LoC 상한) 은 cap 자체가 PR-evasion 을 유도했기에
+(legacy metrics backend extraction feedback 참조),
 *상한* 이 아닌 *증가 금지* 로 전환한다.
 
 ## 2. Non-goals
@@ -155,8 +155,8 @@ adversarial-reviewer agent invoke 를 트리거 (impl PR 에서 wiring).
 
 - 사전 attempt: PR #16833 (CLOSED, "DIRTY + CI/RFC policy surfaces").
 - AGENT-LLM-A.md §"워크어라운드 거부 기준" 시그니처 3종 + 체크리스트 7항.
-- `memory/feedback_prometheus_extract_too_evasive.md` (godfile cap 의
-  evasion 패턴 → ratchet 으로 전환 근거).
+- Legacy metrics backend extraction feedback (godfile cap 의 evasion 패턴 →
+  ratchet 으로 전환 근거).
 - RFC-0085 keeper godfile decomp track.
 - RFC-0088 telemetry-as-fix umbrella.
 - RFC-0126 lint stack sprint.

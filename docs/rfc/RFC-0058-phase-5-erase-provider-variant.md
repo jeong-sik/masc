@@ -22,7 +22,7 @@ on `feat/rfc-0058-phase4`:
 | `lib/runtime/runtime_catalog_validator.ml:162-168` | Warn message and detection logic enumerate provider names |
 | `lib/runtime/runtime_config.mli:152-154` | `auto` expansion logic referencing `"cli-tool-b:auto"` etc. |
 | `lib/runtime/runtime_error_classify.mli:147-168` | `cli-tool-a_prompt_preflight` type and helpers — preflight is provider-specific by design |
-| `lib/prometheus.ml:530` | Metric name `masc_cli-tool-a_mcp_tool_omission_total` baked into code |
+| `legacy metrics backend module:530` | Metric name `masc_cli-tool-a_mcp_tool_omission_total` baked into code |
 | `lib/dashboard_runtime.mli` | Documentation literals (`cli:cli-tool-d`, `cli-tool-c`, …) — driven by runtime data but the contract surface still spells them out |
 
 The provider name leaks into call sites in three forms:
@@ -101,7 +101,7 @@ resolved budget used for the attempt.
   `aliases = [...]` field on each provider.
 - Removes the giant per-provider record list at the bottom of the file.
 
-### Phase 5.4 — Generalize Prometheus metric names
+### Phase 5.4 — Generalize legacy metrics backend metric names
 
 - `metric_cli-tool-a_mcp_tool_omission` becomes a labelled metric:
   `masc_provider_mcp_tool_omission_total{provider="<id>"}`. Dashboards

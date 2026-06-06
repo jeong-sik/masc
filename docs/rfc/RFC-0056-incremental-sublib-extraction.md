@@ -12,7 +12,7 @@ Status: Active · Phase 0 PoC included (frontmatter SSOT)
 Author: jeong-sik (with Agent-LLM-A Opus 4.7)
 Date: 2026-05-09
 Supersedes: —
-Related: existing `lib/cdal_runtime/dune` (template), prior PR #14166 (prometheus split, closed by user as cosmetic)
+Related: existing `lib/cdal_runtime/dune` (template), prior PR #14166 (legacy metrics backend split, closed by user as cosmetic)
 
 ## 1. Problem
 
@@ -52,7 +52,7 @@ This is not a per-domain problem. It is a partition problem.
 
 ## 2. Non-goals
 
-- **Not a godfile-split RFC.** PR #14166 (prometheus.ml 2,756 LoC split into N files via `include` re-export, closed by user) demonstrated that LoC redistribution inside the same library namespace changes nothing the compiler enforces. This RFC is the opposite axis: **add boundary between libraries**, not move text within a library.
+- **Not a godfile-split RFC.** PR #14166 (legacy metrics backend module 2,756 LoC split into N files via `include` re-export, closed by user) demonstrated that LoC redistribution inside the same library namespace changes nothing the compiler enforces. This RFC is the opposite axis: **add boundary between libraries**, not move text within a library.
 - **Not a multi-sprint plan.** Memory-recorded analysis "keeper sub-library extraction" (2026-05-01) showed `lib/keeper/` has 189 ↔ 118 bidirectional references with the rest of `lib/`, requiring a multi-PR campaign. This RFC defines the **gate** that any future extraction must pass — it is not the keeper extraction itself.
 
 ## 3. Proposal
@@ -199,4 +199,4 @@ Domain adapters (`tool_board*` — `Board_dispatch` type alias; `tool_workspace`
 
 ### 7.5 Follow-up
 
-PR-6.2a–d: telemetry (Prometheus/Otel → metric/span callback), server/session (Mcp_server/Session → port), config/auth, and local-runtime inversions zero each blocked module's mega-outbound, then move it. The blocker histogram in the ledger (§27) drives the batching.
+PR-6.2a–d: telemetry (legacy metrics backend/Otel → metric/span callback), server/session (Mcp_server/Session → port), config/auth, and local-runtime inversions zero each blocked module's mega-outbound, then move it. The blocker histogram in the ledger (§27) drives the batching.

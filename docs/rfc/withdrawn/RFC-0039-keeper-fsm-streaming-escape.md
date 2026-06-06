@@ -189,7 +189,7 @@ let stale = idle_stale || in_turn_stale || failure_loop in
 |------|------|-----------|
 | A | `paused` 를 derived field 로 — `disposition = pause_human` 일 때 derive | 단일 source. 그러나 derive 의 lazy evaluation 이 race 유발 가능 |
 | B | Atomic update primitive — disposition 변경 시 paused 함께 update (transaction-like) | 명시적, 검증 가능. 그러나 모든 update site 변경 필요 |
-| C | Invariant assertion + warn — 두 값의 desync 발견 시 운영 로그 + Prometheus counter | 점진적, 기존 코드 보존. 그러나 fix 가 아닌 detection only |
+| C | Invariant assertion + warn — 두 값의 desync 발견 시 운영 로그 + legacy metrics backend counter | 점진적, 기존 코드 보존. 그러나 fix 가 아닌 detection only |
 
 권장: **B + C** 조합. B 는 새 코드, C 는 기존 코드의 transition 점검.
 
@@ -209,7 +209,7 @@ let stale = idle_stale || in_turn_stale || failure_loop in
 | **PR-B** | G1 (spec) | `specs/keeper-turn-fsm/KeeperTurnFSM.tla` — `StreamProviderHang` action 추가 + Fairness `WF_vars(StreamProviderHang)` + state variable `stream_hang_timeout_elapsed` | RFC-0039 §4.1 |
 | **PR-C** | G3 (impl) | OCaml 측 `MASC_STREAM_HANG_TIMEOUT_S` 도입, stream activity tracking, hang detection trigger | RFC-0039 §4.3 + PR-B |
 | **PR-D** | G6 (cross-axis trace) | runtime observation turn_id 의 turn FSM log propagation | RFC-0039 §4.6 + RFC-0038 §4.3 |
-| **PR-E** | G5 (disposition sync) | atomic update primitive + invariant assertion + Prometheus counter | RFC-0039 §4.5 |
+| **PR-E** | G5 (disposition sync) | atomic update primitive + invariant assertion + legacy metrics backend counter | RFC-0039 §4.5 |
 
 PR-A 는 가장 작고 안전 — 즉시 진행 가능. PR-B 는 spec change, TLC 검증 필요. PR-C 는 PR-B 의존. PR-D 는 RFC-0038 PR-A 의존 (runtime observation schema). PR-E 는 architectural change, 별도 deep review.
 

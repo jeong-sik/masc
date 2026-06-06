@@ -431,7 +431,7 @@ export function ChatTranscript({
 
   const isPrimary = size === 'primary'
   const heightClass = isPrimary
-    ? 'min-h-[18rem] max-h-[42vh] sm:min-h-[28rem] sm:max-h-[54vh] xl:max-h-[58vh]'
+    ? 'min-h-0 flex-1'
     : 'min-h-75 max-h-130'
 
   return html`
@@ -444,6 +444,7 @@ export function ChatTranscript({
           : 'gap-3 rounded-[var(--radius-xl)] px-3 py-4'
       }`}
       data-chat-variant=${variant}
+      data-chat-size=${size}
       ref=${scrollerRef}
     >
       ${entries.length === 0

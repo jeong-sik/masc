@@ -43,7 +43,7 @@ PR에서 줄여나간다.
 
 | Pattern | Files | Count | Rationale |
 |---|---|---|---|
-| Round-trip serialization (`*_to_string` + `*_of_string` in same file) | audit_log, board_votes, board_core_classify, keeper_execution_receipt, transport, tool_misc_web_search, keeper_unified_metrics, keeper_meta_tool_access, keeper_context_core, activity_graph_types | ~19 | typed variant already exists; string is wire format |
+| Round-trip serialization (`*_to_string` + `*_of_string` in same file) | audit_log, board_votes, board_core_classify, keeper_execution_receipt, transport, tool_misc_web_search, keeper_unified_metrics, keeper_context_core, activity_graph_types | ~17 | typed variant already exists; string is wire format |
 | LLM / exec stdout parser | output_parse | 15 | producer is external (compiler/cargo/dune output); string is the protocol |
 | CLI argv tokenizer | keeper remote command_command_parse, sandbox Execute runner | 15 | producer is gh/docker CLI; flag prefix `-`/`--` is shell convention |
 | URL scheme + HTTP path classifier | server_auth, server_dashboard_http_link_preview, graphql_endpoint, repo_manager/keeper_repo_mapping | 25 | producer is HTTP request; scheme/path is protocol literal |

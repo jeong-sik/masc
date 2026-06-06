@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   type ChatMessage,
   getChatMessageBuffer,
@@ -18,7 +18,29 @@ import {
 
 describe('keeper-chat-store', () => {
   beforeEach(() => {
+    const storage = new Map<string, string>()
+    vi.stubGlobal('sessionStorage', {
+      get length() {
+        return storage.size
+      },
+      key: vi.fn((index: number) => Array.from(storage.keys())[index] ?? null),
+      getItem: vi.fn((key: string) => storage.get(key) ?? null),
+      setItem: vi.fn((key: string, value: string) => {
+        storage.set(key, value)
+      }),
+      removeItem: vi.fn((key: string) => {
+        storage.delete(key)
+      }),
+      clear: vi.fn(() => {
+        storage.clear()
+      }),
+    })
     _resetChatStoreForTests()
+  })
+
+  afterEach(() => {
+    _resetChatStoreForTests()
+    vi.unstubAllGlobals()
   })
 
   describe('getChatMessageBuffer', () => {
@@ -44,10 +66,10 @@ describe('keeper-chat-store', () => {
       expect(buf[0]).toEqual(msg)
 
       // sessionStorage round-trip: clear in-memory buffer only, preserve storage
-      _resetChatStoreForTests(false)
+      _resetChatStoreForTests({ clearStorage: false })
       const restored = getChatMessageBuffer('keeper-a')
       expect(restored).toHaveLength(1)
-      expect(restored[0]).toEqual(msg)
+      expect(restored[0]!).toEqual(msg)
     })
 
     it('appends multiple messages in order', () => {
@@ -239,7 +261,7 @@ describe('keeper-chat-store', () => {
         }],
       }
       appendChatMessage('keeper-att2', msg)
-      _resetChatStoreForTests(false)
+      _resetChatStoreForTests({ clearStorage: false })
       const restored = getChatMessageBuffer('keeper-att2')
       expect(restored[0]!.attachments![0]!.name).toBe('log.txt')
     })

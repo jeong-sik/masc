@@ -6,77 +6,22 @@ val resolve_tool_read_cwd :
   args:Yojson.Safe.t ->
   (string, string) result
 
-val resolve_tool_write_cwd :
+type execute_cwd_policy =
+  | Readonly_execute_cwd
+  | Write_enabled_execute_cwd
+
+val resolve_tool_execute_cwd :
+  policy:execute_cwd_policy ->
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   args:Yojson.Safe.t ->
   (string, string) result
-
-val validate_repo_path_args_ready :
-  config:Workspace.config ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  cwd:string ->
-  Masc_exec.Shell_ir.t ->
-  (unit, string) result
-(** Reject typed Execute path arguments that point into a sandbox [repos/<repo>]
-    directory unless that repo is an independent git checkout. This catches
-    commands run from the playground root with arguments like
-    [./repos/masc/lib/foo.ml]. *)
-
-val validate_repo_cwd_currency_ready :
-  config:Workspace.config ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  cwd:string ->
-  allow_stale_preserved_repo_context:bool ->
-  (unit, string) result
-(** Reject typed Execute commands from a preserved sandbox [repos/<repo>] root
-    or subpath when the repo could not be advanced to [origin/main]. Dirty,
-    detached, task-branch, diverged, or unregistered roots are preserved by the
-    repo currency layer; this guard prevents normal work from continuing against
-    that stale root. Repo worktree cwd values are not gated here. Command-shape
-    policy is decided by the caller through [allow_stale_preserved_repo_context]. *)
-
-type repo_cwd_context =
-  { repo_name : string
-  ; repo_root : string
-  ; path_root : string
-  ; is_direct_root : bool
-  }
-(** Path-only facts for a cwd inside a keeper sandbox repo. [path_root] is the
-    selected git toplevel expected for the cwd: either [repo_root] or a worktree
-    root. *)
-
-val repo_cwd_context :
-  config:Workspace.config ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  cwd:string ->
-  repo_cwd_context option
-(** Classify [cwd] as a keeper sandbox repo cwd. This reports path facts only;
-    callers own command-shape and write-gate policy. *)
-
-val invalidate_repo_currency_cache :
-  config:Workspace.config ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  repo_name:string ->
-  unit
-(** Clear the cached currency probe for [repo_name]. Callers decide when a
-    command is allowed to mutate repo currency. *)
-
-val execution_location_json :
-  config:Workspace.config ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  args:Yojson.Safe.t ->
-  cwd:string ->
-  Yojson.Safe.t
-(** Structured cwd contract for Execute responses.  The JSON tells the agent
-    whether the effective cwd is inside the keeper playground
-    ([playground_root], [playground_subpath], [repo_root], [repo_subpath],
-    [repo_worktree_root], [repo_worktree_subpath]) or outside it
-    ([outside_playground]).  [relative_cwd] is relative to [playground_root]
-    for playground scopes and [null] when the cwd is outside the playground.
-    Relative argv paths resolve against the effective cwd.  Worktree scopes also
-    carry [worktree_selected] and [selected_worktree] so the keeper can observe
-    the selected repo/worktree assignment without reparsing [cwd]. *)
+(** Resolve typed Execute cwd under the caller-selected capability policy.
+    [Readonly_execute_cwd] preserves explicit cwd path semantics but uses the
+    existing keeper playground root for omitted cwd without creating the sandbox
+    bundle. [Write_enabled_execute_cwd] uses the keeper write boundary default
+    for omitted cwd. Explicit cwd resolution never creates directories or
+    changes repo/worktree state. *)
 
 val auto_correct_path :
   meta:Keeper_meta_contract.keeper_meta -> string -> string option

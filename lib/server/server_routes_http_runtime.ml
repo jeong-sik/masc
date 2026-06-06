@@ -568,7 +568,19 @@ let full_health_placeholder_fields ?error ?(component_timed_out = false)
   ]
 
 let cached_full_health_fields = function
-  | `Assoc fields -> List.filter (fun (name, _) -> full_health_field_is_cached name) fields
+  | `Assoc fields ->
+      let cached =
+        List.filter (fun (name, _) -> full_health_field_is_cached name) fields
+      in
+      let has_cached name =
+        List.exists (fun (cached_name, _) -> String.equal cached_name name) cached
+      in
+      let missing_placeholders =
+        full_health_placeholder_fields ~status:"unavailable" ()
+        |> List.filter (fun (name, _) ->
+            full_health_field_is_cached name && not (has_cached name))
+      in
+      cached @ missing_placeholders
   | json ->
       [
         ( "full_health_payload",

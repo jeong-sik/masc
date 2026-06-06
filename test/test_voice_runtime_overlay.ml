@@ -185,7 +185,7 @@ let make_keeper_meta name =
           ; "agent_name", `String name
           ; "trace_id", `String "voice-queue-test"
           ; ( "tool_access"
-            , Masc.Keeper_meta_tool_access.tool_access_to_json
+            , Json_util.json_string_list
                 [ "keeper_voice_speak" ] )
           ])
   with

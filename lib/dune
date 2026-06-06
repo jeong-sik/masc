@@ -16,7 +16,7 @@
  keeper_tool_call_log_context
  board_metric_hooks_adapter workspace_metric_hooks
  keeper_types_profile_persona keeper_types_profile_persona_defaults keeper_types_profile_oas_env
- keeper_types_profile_defaults keeper_types_profile keeper_meta_tool_access keeper_meta_contract
+ keeper_types_profile_defaults keeper_types_profile keeper_meta_contract
  keeper_personality_io keeper_meta_json_parse keeper_meta_json keeper_types_support keeper_meta_store
  mcp_server_eio_tool_timeout
   keeper_tool_descriptor keeper_tool_descriptor_resolution keeper_tool_runtime keeper_tool_registry
@@ -29,7 +29,7 @@
    keeper_tool_registered_runtime
    keeper_tool_ide_runtime
    keeper_sandbox_docker
-   keeper_tool_execute_runtime_paths keeper_tool_execute_path
+   keeper_tool_execute_runtime_paths keeper_tool_execute_path keeper_tool_execute_repo_readiness
    keeper_tool_execute_readonly_policy keeper_workspace_read_ops
    keeper_tool_execute_input
    keeper_tool_execute_runtime

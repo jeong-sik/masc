@@ -102,6 +102,8 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_sandbox_read_backend.mli` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_read_runner.ml` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_read_runner.mli` - sandbox-runtime
+- `lib/keeper/keeper_sandbox_repo_path.ml` - sandbox-runtime
+- `lib/keeper/keeper_sandbox_repo_path.mli` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_runner.ml` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_runner.mli` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_runtime_classify.ml` - sandbox-runtime
@@ -126,6 +128,8 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper_tool_execute_shell_ir/keeper_tool_execute_shell_ir.mli` - shell-surface
 - `lib/keeper/keeper_tool_execute_path.ml` - shell-surface
 - `lib/keeper/keeper_tool_execute_path.mli` - shell-surface
+- `lib/keeper/keeper_tool_execute_repo_readiness.ml` - shell-surface
+- `lib/keeper/keeper_tool_execute_repo_readiness.mli` - shell-surface
 - `lib/keeper/keeper_tool_execute_readonly_policy.ml` - shell-surface
 - `lib/keeper/keeper_tool_execute_readonly_policy.mli` - shell-surface
 - `lib/keeper/keeper_tool_execute_runtime_paths.ml` - shell-surface

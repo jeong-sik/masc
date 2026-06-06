@@ -514,6 +514,16 @@ let keeper_fleet_safety_health_json
     else if paused_autoboot_count > 0 then Some "durable_paused_autoboot_enabled"
     else None
   in
+  let turn_admission_snapshot =
+    let limit = Keeper_keepalive.effective_turn_throttle_limit in
+    match current_server_state_opt () with
+    | Some state ->
+      Keeper_turn_admission.snapshot
+        ~base_path:state.Mcp_server.workspace_config.base_path
+        ~limit
+        ()
+    | None -> Keeper_turn_admission.snapshot ~limit ()
+  in
   `Assoc
     [ "status", `String status
     ; ("blocker", Json_util.string_opt_to_json blocker)
@@ -562,4 +572,12 @@ let keeper_fleet_safety_health_json
     , `Int Keeper_keepalive.effective_turn_throttle_limit
     ; ( "autoboot_throttle_source"
       , `String (Config_boot_overrides.source "MASC_KEEPER_AUTOBOOT_MAX") )
+    ; ( "turn_admission_state"
+      , `String
+          (Keeper_turn_admission.fleet_state_to_string
+             turn_admission_snapshot.fleet_state) )
+    ; "turn_admission_inflight", `Int turn_admission_snapshot.global_inflight
+    ; "turn_admission_limit", `Int turn_admission_snapshot.global_limit
+    ; "turn_admission_available", `Int turn_admission_snapshot.available
+    ; "turn_admission_queue_depth", `Int turn_admission_snapshot.queue_depth
     ]

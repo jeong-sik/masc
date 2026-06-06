@@ -561,6 +561,11 @@ let test_stop_keepalive_force_releases_held_slots () =
   | Ok () -> ()
   | Error (`Semaphore_wait_timeout _) ->
     fail "unexpected semaphore timeout while testing manual stop force-release"
+  | Error (`Turn_admission_rejected rejection) ->
+    fail
+      (Printf.sprintf
+         "unexpected turn admission rejection while testing manual stop force-release: %s"
+         (Masc.Keeper_turn_admission.rejection_to_string rejection))
 
 let test_stop_keepalive_preserves_existing_crash_outcome () =
   R.clear ();

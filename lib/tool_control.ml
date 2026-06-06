@@ -45,11 +45,18 @@ let text_ok ~tool_name ~start_time body : Tool_result.result =
 let handle_pause ~tool_name ~start_time ctx args : Tool_result.result =
   let reason = get_string args "reason" "Manual pause" in
   Workspace.pause ctx.config ~by:ctx.agent_name ~reason;
+  (Atomic.get Workspace_hooks.fleet_admission_pause_fn)
+    ~base_path:ctx.config.base_path
+    ~reason
+    ~updated_by:ctx.agent_name;
   text_ok ~tool_name ~start_time
     (Printf.sprintf "Paused by %s: %s" ctx.agent_name reason)
 ;;
 
 let handle_resume ~tool_name ~start_time ctx _args : Tool_result.result =
+  (Atomic.get Workspace_hooks.fleet_admission_resume_fn)
+    ~base_path:ctx.config.base_path
+    ~updated_by:ctx.agent_name;
   match Workspace.resume ctx.config ~by:ctx.agent_name with
   | `Resumed ->
     text_ok ~tool_name ~start_time
@@ -81,6 +88,11 @@ let handle_pause_status ~tool_name ~start_time ctx _args : Tool_result.result =
       | _ -> false)
     | _ -> false
   in
+  let fleet_admission =
+    (Atomic.get Workspace_hooks.fleet_admission_snapshot_json_fn)
+      ~base_path:ctx.config.base_path
+      ()
+  in
   let pause_state =
     if not (Workspace.is_initialized ctx.config) then `Initializing
     else
@@ -104,6 +116,7 @@ let handle_pause_status ~tool_name ~start_time ctx _args : Tool_result.result =
             ("paused_at", Json_util.string_opt_to_json at);
             ("pause_scope", `String "workspace");
             ("any_pause_active", `Bool true);
+            ("fleet_admission", fleet_admission);
             ("keeper_pause", keeper_pause);
             ("message", `String "Server is paused");
           ]
@@ -119,6 +132,7 @@ let handle_pause_status ~tool_name ~start_time ctx _args : Tool_result.result =
             ("paused_at", `Null);
             ("pause_scope", `String "workspace");
             ("any_pause_active", `Bool keeper_paused);
+            ("fleet_admission", fleet_admission);
             ("keeper_pause", keeper_pause);
             ( "message",
               `String
@@ -138,6 +152,7 @@ let handle_pause_status ~tool_name ~start_time ctx _args : Tool_result.result =
             ("paused_at", `Null);
             ("pause_scope", `String "workspace");
             ("any_pause_active", `Null);
+            ("fleet_admission", fleet_admission);
             ("keeper_pause", keeper_pause);
             ( "message",
               `String

@@ -14,8 +14,9 @@ module KTS = Masc.Keeper_turn_slot
 exception After_flag_injected
 
 let with_fresh_state body () =
-  Eio_main.run @@ fun _env ->
-    KK.set_after_acquire_flag_hook_for_test None;
+	  Eio_main.run @@ fun _env ->
+	    Masc.Keeper_turn_admission.reset_for_test ();
+	    KK.set_after_acquire_flag_hook_for_test None;
     KK.clear_force_released_markers_for_test ();
     KK.reset_autonomous_completion_for_test ();
     KK.reset_autonomous_turn_queue_for_test ();
@@ -28,6 +29,12 @@ let assert_eq ~msg ~expected ~actual =
 let assert_string_eq ~msg ~expected ~actual =
   if expected <> actual then
     failwith (Printf.sprintf "%s: expected=%S actual=%S" msg expected actual)
+
+let fail_unexpected_admission rejection =
+  failwith
+    (Printf.sprintf
+       "unexpected turn admission rejection in test: %s"
+       (Masc.Keeper_turn_admission.rejection_to_string rejection))
 
 let with_env name value f =
   let previous = Sys.getenv_opt name in
@@ -100,6 +107,7 @@ let test_autonomous_slot_holders_records_during_acquire () =
   | Ok () -> ()
   | Error (`Semaphore_wait_timeout _) ->
       failwith "unexpected semaphore wait timeout in test"
+  | Error (`Turn_admission_rejected rejection) -> fail_unexpected_admission rejection
 
 let test_holders_released_after_slot_returned () =
   (* After the [with_keeper_turn_slot_for_test] block exits, the slot must
@@ -111,9 +119,10 @@ let test_holders_released_after_slot_returned () =
       (fun ~semaphore_wait_ms:_ -> ())
   in
   (match result with
-   | Ok () -> ()
-   | Error (`Semaphore_wait_timeout _) ->
-       failwith "unexpected semaphore wait timeout in test setup");
+	   | Ok () -> ()
+	   | Error (`Semaphore_wait_timeout _) ->
+	       failwith "unexpected semaphore wait timeout in test setup"
+	   | Error (`Turn_admission_rejected rejection) -> fail_unexpected_admission rejection);
   let now = Time_compat.now () in
   let names = List.map fst (KK.reactive_slot_holders ~now) in
   if List.mem "diag-release" names then
@@ -151,6 +160,7 @@ let test_slot_holders_summary_reflects_active_holder () =
   | Ok () -> ()
   | Error (`Semaphore_wait_timeout _) ->
       failwith "unexpected semaphore wait timeout in test"
+  | Error (`Turn_admission_rejected rejection) -> fail_unexpected_admission rejection
 
 let test_reactive_slot_released_when_hook_raises_after_flag () =
   let keeper_name = "diag-after-flag" in
@@ -221,9 +231,11 @@ let test_force_release_stale_holder_restores_slots_once () =
                 failwith "second force release did not report reactive slot")
         in
         (match nested with
-         | Ok () -> ()
-         | Error (`Semaphore_wait_timeout _) ->
-             failwith "unexpected nested semaphore wait timeout");
+	         | Ok () -> ()
+	         | Error (`Semaphore_wait_timeout _) ->
+	             failwith "unexpected nested semaphore wait timeout"
+	         | Error (`Turn_admission_rejected rejection) ->
+	           fail_unexpected_admission rejection);
         assert_eq ~msg:"nested force release preserved turn count"
           ~expected:turn_before
           ~actual:(KK.turn_semaphore_value_for_test ());
@@ -232,9 +244,10 @@ let test_force_release_stale_holder_restores_slots_once () =
           ~actual:(KK.reactive_turn_semaphore_value_for_test ()))
   in
   (match result with
-   | Ok () -> ()
-   | Error (`Semaphore_wait_timeout _) ->
-       failwith "unexpected semaphore wait timeout in test");
+	   | Ok () -> ()
+	   | Error (`Semaphore_wait_timeout _) ->
+	       failwith "unexpected semaphore wait timeout in test"
+	   | Error (`Turn_admission_rejected rejection) -> fail_unexpected_admission rejection);
   assert_eq ~msg:"turn not double-released by finalizer" ~expected:turn_before
     ~actual:(KK.turn_semaphore_value_for_test ());
   assert_eq ~msg:"reactive not double-released by finalizer"
@@ -267,9 +280,11 @@ let test_force_release_marker_is_acquisition_scoped () =
             (fun ~semaphore_wait_ms:_ -> ())
         in
         (match nested with
-         | Ok () -> ()
-         | Error (`Semaphore_wait_timeout _) ->
-             failwith "unexpected nested semaphore wait timeout");
+	         | Ok () -> ()
+	         | Error (`Semaphore_wait_timeout _) ->
+	             failwith "unexpected nested semaphore wait timeout"
+	         | Error (`Turn_admission_rejected rejection) ->
+	           fail_unexpected_admission rejection);
         assert_eq
           ~msg:"nested normal finalizer did not consume stale turn marker"
           ~expected:turn_before
@@ -280,9 +295,10 @@ let test_force_release_marker_is_acquisition_scoped () =
           ~actual:(KK.reactive_turn_semaphore_value_for_test ()))
   in
   (match result with
-   | Ok () -> ()
-   | Error (`Semaphore_wait_timeout _) ->
-       failwith "unexpected semaphore wait timeout in test");
+	   | Ok () -> ()
+	   | Error (`Semaphore_wait_timeout _) ->
+	       failwith "unexpected semaphore wait timeout in test"
+	   | Error (`Turn_admission_rejected rejection) -> fail_unexpected_admission rejection);
   assert_eq ~msg:"old turn marker consumed by old finalizer"
     ~expected:turn_before
     ~actual:(KK.turn_semaphore_value_for_test ());
@@ -336,10 +352,11 @@ let test_force_release_marker_does_not_leak_to_replacement () =
       (fun ~semaphore_wait_ms:_ -> ())
   in
   (match result with
-   | Ok () -> ()
-   | Error (`Semaphore_wait_timeout _) ->
-       failwith "replacement acquire timed out — leftover force-release \
-                 marker may have skipped the previous release");
+	   | Ok () -> ()
+	   | Error (`Semaphore_wait_timeout _) ->
+	       failwith "replacement acquire timed out — leftover force-release \
+	                 marker may have skipped the previous release"
+	   | Error (`Turn_admission_rejected rejection) -> fail_unexpected_admission rejection);
   assert_eq
     ~msg:"turn semaphore baseline preserved after replacement keeper run"
     ~expected:turn_before
@@ -370,9 +387,10 @@ let test_force_released_autonomous_holder_does_not_stamp_completion () =
            ~actual:(KK.autonomous_turn_semaphore_value_for_test ()))
   in
   (match result with
-   | Ok () -> ()
-   | Error (`Semaphore_wait_timeout _) ->
-       failwith "unexpected semaphore wait timeout in test");
+	   | Ok () -> ()
+	   | Error (`Semaphore_wait_timeout _) ->
+	       failwith "unexpected semaphore wait timeout in test"
+	   | Error (`Turn_admission_rejected rejection) -> fail_unexpected_admission rejection);
   assert_eq ~msg:"turn not double-released by autonomous finalizer"
     ~expected:turn_before
     ~actual:(KK.turn_semaphore_value_for_test ());
@@ -392,48 +410,50 @@ let test_force_released_autonomous_holder_does_not_stamp_completion () =
          "force-released autonomous holder stamped normal completion: delay=%.3f"
          delay)
 
-let test_no_clock_exhausted_turn_slot_fails_closed () =
-  match Eio_context.get_clock_opt () with
-  | Some _ ->
-      (* This executable normally runs without a global Eio_context clock.
-         If a wider test runner has installed one, the no-clock branch is
-         not reachable in this process. *)
-      ()
-  | None ->
-      let rec acquire_all acquired =
-        if Eio.Semaphore.get_value KTS.turn_semaphore <= 0 then acquired
-        else begin
-          Eio.Semaphore.acquire KTS.turn_semaphore;
-          acquire_all (acquired + 1)
-        end
+let test_distinct_keepers_share_global_admission_budget () =
+  let baseline = KK.turn_semaphore_value_for_test () in
+  let limit = KTS.global_turn_limit_for_test () in
+  if baseline <> limit then
+    failwith
+      (Printf.sprintf
+         "test requires a fresh global admission budget: baseline=%d limit=%d"
+         baseline
+         limit);
+  let rec acquire_distinct_keepers idx =
+    if idx = limit then
+      assert_eq
+        ~msg:"global admission budget exhausted by distinct keepers"
+        ~expected:0
+        ~actual:(KK.turn_semaphore_value_for_test ())
+    else (
+      let keeper_name = Printf.sprintf "runtime-budget-%02d" idx in
+      let result =
+        KK.with_keeper_turn_slot_for_test
+          ~keeper_name
+          ~channel:Masc.Keeper_world_observation.Scheduled_autonomous
+          (fun ~semaphore_wait_ms:_ ->
+             assert_eq
+               ~msg:"distinct keeper consumed one global admission token"
+               ~expected:(baseline - idx - 1)
+               ~actual:(KK.turn_semaphore_value_for_test ());
+             acquire_distinct_keepers (idx + 1))
       in
-      let rec release_n = function
-        | n when n <= 0 -> ()
-        | n ->
-            Eio.Semaphore.release KTS.turn_semaphore;
-            release_n (n - 1)
-      in
-      let acquired = acquire_all 0 in
-      Fun.protect
-        ~finally:(fun () -> release_n acquired)
-        (fun () ->
-          let result =
-            KK.with_keeper_turn_slot_for_test
-              ~keeper_name:"diag-no-clock-exhausted"
-              ~channel:Masc.Keeper_world_observation.Reactive
-              (fun ~semaphore_wait_ms:_ ->
-                failwith "exhausted turn slot should fail before body runs")
-          in
-          match result with
-          | Error (`Semaphore_wait_timeout snapshot) ->
-              if snapshot.timeout_phase <> KK.Turn_slot then
-                failwith
-                  (Printf.sprintf
-                     "expected Turn_slot timeout, got %s"
-                     (KK.semaphore_wait_phase_to_string
-                        snapshot.timeout_phase))
-          | Ok _ ->
-              failwith "exhausted no-clock acquire should fail closed")
+      match result with
+      | Ok () -> ()
+	      | Error (`Semaphore_wait_timeout snapshot) ->
+	        failwith
+	          (Printf.sprintf
+	             "unexpected semaphore wait timeout: wait=%.0fs turn_avail=%d"
+	             snapshot.timeout_wait_sec
+	             snapshot.timeout_turn_available)
+	      | Error (`Turn_admission_rejected rejection) ->
+	        fail_unexpected_admission rejection)
+  in
+  acquire_distinct_keepers 0;
+  assert_eq
+    ~msg:"global admission budget restored after distinct keepers exit"
+    ~expected:baseline
+    ~actual:(KK.turn_semaphore_value_for_test ())
 
 let test_force_release_marker_ttl_bounds_unfinalized_fibers () =
   KK.clear_force_released_markers_for_test ();
@@ -477,8 +497,8 @@ let () =
         test_force_release_marker_does_not_leak_to_replacement;
       "force released autonomous holder skips completion stamp",
         test_force_released_autonomous_holder_does_not_stamp_completion;
-      "no-clock exhausted turn slot fails closed",
-        test_no_clock_exhausted_turn_slot_fails_closed;
+      "distinct keepers share global admission budget",
+        test_distinct_keepers_share_global_admission_budget;
       "force release marker ttl bounds unfinalized fibers",
         test_force_release_marker_ttl_bounds_unfinalized_fibers;
     ]

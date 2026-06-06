@@ -13,8 +13,15 @@
 
 module KK = Masc.Keeper_keepalive
 
+let fail_unexpected_admission rejection =
+  failwith
+    (Printf.sprintf
+       "unexpected turn admission rejection in test: %s"
+       (Masc.Keeper_turn_admission.rejection_to_string rejection))
+
 let with_fresh_state body () =
   Eio_main.run @@ fun _env ->
+    Masc.Keeper_turn_admission.reset_for_test ();
     KK.set_after_acquire_flag_hook_for_test None;
     KK.reset_autonomous_completion_for_test ();
     KK.reset_autonomous_turn_queue_for_test ();
@@ -89,6 +96,7 @@ let test_force_release_drops_reactive_holder () =
           snapshot.timeout_turn_available
       in
       failwith ("unexpected semaphore wait timeout in test: " ^ dump)
+  | Error (`Turn_admission_rejected rejection) -> fail_unexpected_admission rejection
 
 (* Idempotency: calling force_release a second time must return []
    because the first call already removed the entry. *)
@@ -112,6 +120,7 @@ let test_force_release_is_idempotent () =
   | Ok () -> ()
   | Error (`Semaphore_wait_timeout _) ->
       failwith "unexpected semaphore wait timeout in test"
+  | Error (`Turn_admission_rejected rejection) -> fail_unexpected_admission rejection
 
 (* Age field non-negative and small (just acquired). The supervisor
    uses this to format the operator-facing log line. *)
@@ -135,6 +144,7 @@ let test_force_release_reports_nonnegative_age () =
               ~needle:"" ~haystack:""
   | Error (`Semaphore_wait_timeout _) ->
       failwith "unexpected semaphore wait timeout in test"
+  | Error (`Turn_admission_rejected rejection) -> fail_unexpected_admission rejection
 
 let () =
   Alcotest.run "keeper_turn_slot_force_release"

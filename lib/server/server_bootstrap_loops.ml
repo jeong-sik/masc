@@ -203,6 +203,22 @@ let start_keeper_loops
   Progress.set_sse_callback Sse.broadcast;
   (* Wire stop_keeper hook so zombie GC can terminate keeper fibers *)
   Atomic.set Workspace_hooks.stop_keeper_fn Keeper_keepalive.stop_keepalive;
+  Atomic.set Workspace_hooks.fleet_admission_pause_fn
+    (fun ~base_path ~reason ~updated_by ->
+       ignore
+         (Keeper_turn_admission.pause_fleet ~base_path ~reason ~updated_by ()
+          : Keeper_turn_admission.fleet_policy));
+  Atomic.set Workspace_hooks.fleet_admission_resume_fn
+    (fun ~base_path ~updated_by ->
+       ignore
+         (Keeper_turn_admission.resume_fleet ~base_path ~updated_by ()
+          : Keeper_turn_admission.fleet_policy));
+  Atomic.set Workspace_hooks.fleet_admission_snapshot_json_fn
+    (fun ~base_path () ->
+       Keeper_turn_admission.snapshot_json
+         ~base_path
+         ~limit:Keeper_turn_slot.effective_turn_throttle_limit
+         ());
   (* Wire claim_post_provision hook: create worktrees at task claim time
      so docker-backed keepers find them when the LLM picks a worktree cwd.
      Only Docker keepers benefit; local keepers operate on the project root. *)

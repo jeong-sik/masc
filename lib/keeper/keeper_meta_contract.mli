@@ -378,6 +378,13 @@ val effective_meta_of_profile_defaults :
   keeper_meta ->
   (keeper_meta, string) result
 
+val missing_required_sandbox_profile_error :
+  keeper_name:string ->
+  Keeper_types_profile.keeper_profile_defaults ->
+  string
+(** Error text shared by effective-meta reconcile and keeper-up parsing when a
+    declarative keeper profile omits the required [sandbox_profile]. *)
+
 val runtime_id_of_meta : keeper_meta -> string
 (** Runtime id selected for keeper dispatch. Uses the keeper profile [model]
     when present; otherwise falls back to the configured default runtime id. *)

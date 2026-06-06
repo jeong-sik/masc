@@ -200,6 +200,16 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
     let handoff_cooldown_sec_opt = Safe_ops.json_int_opt "handoff_cooldown_sec" args in
     let instructions_arg = get_string_opt args "instructions" in
     let profile_defaults = load_keeper_profile_defaults name in
+    let sandbox_profile_error =
+      match profile_defaults.sandbox_profile, profile_defaults.manifest_path with
+      | None, Some _ ->
+        Some
+          (missing_required_sandbox_profile_error
+             ~keeper_name:name
+             profile_defaults)
+      | Some _, _
+      | None, None -> None
+    in
     (* The previous implementation read [<base>/memory/souls/<name>/SOUL.md]
        on every keeper turn-up and wrapped the resulting (or "not found")
        text into a "[SYSTEM: SOUL INFUSION]" block prepended to the
@@ -217,9 +227,10 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
     let will_opt = parse_self_model_opt args "will" in
     let needs_opt = parse_self_model_opt args "needs" in
     let desires_opt = parse_self_model_opt args "desires" in
-    match tool_denylist_opt_res with
-    | Error msg -> Error (tool_result_error msg)
-    | Ok tool_denylist_opt ->
+    match sandbox_profile_error, tool_denylist_opt_res with
+    | Some msg, _ -> Error (tool_result_error msg)
+    | None, Error msg -> Error (tool_result_error msg)
+    | None, Ok tool_denylist_opt ->
     Ok {
       name;
       compaction_profile_opt;

@@ -64,6 +64,7 @@ let record_mcp_server_session_duration ?error_type session_id =
   match SMap.find_opt session_id (Atomic.get session_started_at) with
   | None -> ()
   | Some started_at ->
+    (* NDT-OK: session duration is emitted as OTel telemetry only. *)
     let duration_s = max 0.0 (Unix.gettimeofday () -. started_at) in
     let labels =
       option_label
@@ -262,9 +263,15 @@ let load_sessions_from_file () =
                  (match pv with
                   | Some (`String v) ->
                       if is_valid_protocol_version v then begin
-                        let t = float_field ts |> Option.value ~default:0.0 in
+                        let t =
+                          match float_field ts with
+                          | Some value -> value
+                          | None -> 0.0
+                        in
                         let started_at =
-                          float_field started |> Option.value ~default:t
+                          match float_field started with
+                          | Some value -> value
+                          | None -> t
                         in
                         atomic_update protocol_version_by_session
                           (fun map -> SMap.add sid v map);

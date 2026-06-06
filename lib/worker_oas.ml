@@ -456,6 +456,29 @@ let resume_model_id_of_checkpoint
   if checkpoint.model <> "" then checkpoint.model else meta.effective_model
 ;;
 
+let record_worker_mcp_client_session_duration
+      ~(auth_token : string option)
+      ~(meta : Worker_container_types.worker_container_meta)
+      ?error_type
+      ()
+  =
+  match meta.mcp_client_session_started_at with
+  | None -> ()
+  | Some started_at ->
+    Worker_container_types.record_mcp_client_session_duration
+      ~url:(Worker_container_types.mcp_endpoint_url ~auth_token)
+      ~started_at
+      ?error_type
+      ()
+;;
+
+let begin_worker_mcp_client_session
+      (meta : Worker_container_types.worker_container_meta)
+  =
+  (* NDT-OK: this stamps a client-session telemetry interval, not control flow. *)
+  { meta with mcp_client_session_started_at = Some (Unix.gettimeofday ()) }
+;;
+
 (* ================================================================ *)
 (* Run Worker via OAS                                                *)
 (* ================================================================ *)
@@ -511,6 +534,7 @@ let rec run_worker_via_oas
       ~context:shared_context
       ()
   in
+  let meta = begin_worker_mcp_client_session meta in
   let* () = Worker_container.save_worker_meta ~base_path ~worker_name meta in
   let workspace_path =
     if String.trim meta.workspace_path <> "" then meta.workspace_path else base_path
@@ -518,6 +542,7 @@ let rec run_worker_via_oas
   run_existing_worker_agent
     ~sw
     ~base_path
+    ~auth_token
     ~meta
     ~prompt
     ~workspace_path
@@ -605,12 +630,14 @@ and resume_worker_via_oas
       ~context:shared_context
       ()
   in
+  let meta = begin_worker_mcp_client_session meta in
   let workspace_path =
     if String.trim meta.workspace_path <> "" then meta.workspace_path else base_path
   in
   run_existing_worker_agent
     ~sw
     ~base_path
+    ~auth_token
     ~meta
     ~prompt
     ~workspace_path
@@ -622,6 +649,7 @@ and resume_worker_via_oas
 and run_existing_worker_agent
       ~(sw : Eio.Switch.t)
       ~(base_path : string)
+      ~(auth_token : string option)
       ~(meta : Worker_container_types.worker_container_meta)
       ~(prompt : string)
       ~(workspace_path : string)
@@ -651,19 +679,33 @@ and run_existing_worker_agent
               (fun (run_ref : Agent_sdk.Raw_trace.run_ref) -> run_ref.worker_run_id)
               raw_trace_run)
        in
-       let checkpoint = Agent_sdk.Agent.checkpoint ~session_id agent in
-       let tool_names =
-         List.rev !tool_names_ref |> Json_util.dedupe_keep_order
-       in
-       let* () =
-         Worker_container.save_worker_checkpoint ~base_path ~worker_name checkpoint
-       in
-       let* () =
-         Worker_container.save_worker_meta
-           ~base_path
-           ~worker_name
-           { meta with last_run_at = Some (Time_compat.now ()) }
-       in
+      let checkpoint = Agent_sdk.Agent.checkpoint ~session_id agent in
+      let tool_names =
+        List.rev !tool_names_ref |> Json_util.dedupe_keep_order
+      in
+      let session_error_type =
+        match result with
+        | Ok _ -> None
+        | Error _ -> Some "agent_error"
+      in
+      record_worker_mcp_client_session_duration
+        ~auth_token
+        ~meta
+        ?error_type:session_error_type
+        ();
+      let* () =
+        Worker_container.save_worker_checkpoint ~base_path ~worker_name checkpoint
+      in
+      let* () =
+        Worker_container.save_worker_meta
+          ~base_path
+          ~worker_name
+          {
+            meta with
+            mcp_client_session_started_at = None;
+            last_run_at = Some (Time_compat.now ());
+          }
+      in
        Worker_container.materialize_direct_evidence
          ~base_path
          ~worker_name

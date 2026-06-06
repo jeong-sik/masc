@@ -72,6 +72,7 @@ end
 module Mcp_metric_name : sig
   val client_operation_duration : string
   val server_operation_duration : string
+  val client_session_duration : string
   val server_session_duration : string
 end
 

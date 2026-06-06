@@ -36,6 +36,7 @@ type worker_container_meta = {
   effective_model : string;
   checkpoint_path : string;
   turn_log_path : string;
+  mcp_client_session_started_at : float option;
   last_run_at : float option;
 }
 
@@ -164,7 +165,9 @@ let extract_jsonrpc_error_detail json =
       in
       let rpc_response_status_code = jsonrpc_error_code_string err_fields in
       let error_type =
-        Option.value rpc_response_status_code ~default:"jsonrpc_error"
+        match rpc_response_status_code with
+        | Some code -> code
+        | None -> "jsonrpc_error"
       in
       Some (client_operation_error ?rpc_response_status_code ~error_type message)
     | _ -> None)
@@ -214,6 +217,16 @@ let mcp_client_operation_duration_labels ~url ~method_name ~params ?error () =
         Otel_genai.Mcp_attr_key.rpc_response_status_code
         error.rpc_response_status_code
 
+let mcp_client_session_duration_labels ~url ?error_type () =
+  [ ( Otel_genai.Mcp_attr_key.mcp_protocol_version
+    , Mcp_transport_protocol.default_protocol_version )
+  ; Otel_genai.Mcp_attr_key.network_protocol_name, "http"
+  ; Otel_genai.Mcp_attr_key.network_protocol_version, "1.1"
+  ; Otel_genai.Mcp_attr_key.network_transport, "tcp"
+  ]
+  @ server_labels_of_url url
+  @ option_label Otel_genai.Mcp_attr_key.error_type error_type
+
 let record_mcp_client_operation_duration ~url ~method_name ~params ~started_at result =
   let error =
     match result with
@@ -223,6 +236,15 @@ let record_mcp_client_operation_duration ~url ~method_name ~params ~started_at r
   Otel_metric_store.observe_histogram
     Otel_genai.Mcp_metric_name.client_operation_duration
     ~labels:(mcp_client_operation_duration_labels ~url ~method_name ~params ?error ())
+    (* NDT-OK: client operation duration is telemetry only; admission and
+       result semantics use [result], not this wall-clock sample. *)
+    (max 0.0 (Unix.gettimeofday () -. started_at))
+
+let record_mcp_client_session_duration ~url ~started_at ?error_type () =
+  Otel_metric_store.observe_histogram
+    Otel_genai.Mcp_metric_name.client_session_duration
+    ~labels:(mcp_client_session_duration_labels ~url ?error_type ())
+    (* NDT-OK: client session duration is a runtime telemetry observation. *)
     (max 0.0 (Unix.gettimeofday () -. started_at))
 
 module For_testing = struct
@@ -250,6 +272,14 @@ module For_testing = struct
       | Some error -> Error error
     in
     record_mcp_client_operation_duration ~url ~method_name ~params ~started_at result
+  ;;
+
+  let mcp_client_session_duration_labels ~url ?error_type () =
+    mcp_client_session_duration_labels ~url ?error_type ()
+  ;;
+
+  let record_mcp_client_session_duration ~url ~started_at ?error_type () =
+    record_mcp_client_session_duration ~url ~started_at ?error_type ()
   ;;
 end
 
@@ -368,6 +398,7 @@ let call_jsonrpc ~sw ~(auth_token : string option) ~session_id ~(method_name : s
                 (client_operation_error ~error_type:"json_parse_error"
                    ("invalid JSON-RPC response: " ^ msg))
   in
+  (* NDT-OK: request-boundary timestamp feeds only the OTel duration histogram. *)
   let started_at = Unix.gettimeofday () in
   let result = decode 1 in
   record_mcp_client_operation_duration ~url ~method_name ~params ~started_at result;

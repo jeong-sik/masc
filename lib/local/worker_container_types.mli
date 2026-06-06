@@ -89,6 +89,7 @@ type worker_container_meta = {
   effective_model : string;
   checkpoint_path : string;
   turn_log_path : string;
+  mcp_client_session_started_at : float option;
   last_run_at : float option;
 }
 (** Per-worker metadata persisted alongside the checkpoint
@@ -231,7 +232,30 @@ module For_testing : sig
     ?rpc_response_status_code:string ->
     unit ->
     unit
+
+  val mcp_client_session_duration_labels :
+    url:string ->
+    ?error_type:string ->
+    unit ->
+    (string * string) list
+
+  val record_mcp_client_session_duration :
+    url:string ->
+    started_at:float ->
+    ?error_type:string ->
+    unit ->
+    unit
 end
+
+val record_mcp_client_session_duration :
+  url:string ->
+  started_at:float ->
+  ?error_type:string ->
+  unit ->
+  unit
+(** Records [mcp.client.session.duration] for a bounded local-worker
+    MCP client session.  Labels follow the MCP semantic convention's
+    client session metric and intentionally omit [mcp.session.id]. *)
 
 val parse_text_tool_calls :
   string -> Agent_sdk.Types.content_block list

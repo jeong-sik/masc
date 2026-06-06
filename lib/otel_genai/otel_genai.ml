@@ -135,6 +135,7 @@ end
 module Mcp_metric_name = struct
   let client_operation_duration = "mcp.client.operation.duration"
   let server_operation_duration = "mcp.server.operation.duration"
+  let client_session_duration = "mcp.client.session.duration"
   let server_session_duration = "mcp.server.session.duration"
 end
 

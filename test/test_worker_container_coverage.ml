@@ -132,6 +132,45 @@ let test_records_mcp_client_operation_duration_metric () =
     (before_count +. 1.0)
     (Otel_metric_store.metric_value_or_zero (metric_name ^ "_count") ~labels ())
 
+let client_session_labels ?error_type () =
+  Worker_container_types.For_testing.mcp_client_session_duration_labels
+    ~url:"http://127.0.0.1:8935/mcp"
+    ?error_type
+    ()
+
+let test_mcp_client_session_duration_labels_follow_semconv () =
+  let labels = client_session_labels ~error_type:"agent_error" () in
+  check (list (pair string string)) "client session labels"
+    [
+      ( Otel_genai.Mcp_attr_key.mcp_protocol_version,
+        Mcp_transport_protocol.default_protocol_version );
+      (Otel_genai.Mcp_attr_key.network_protocol_name, "http");
+      (Otel_genai.Mcp_attr_key.network_protocol_version, "1.1");
+      (Otel_genai.Mcp_attr_key.network_transport, "tcp");
+      (Otel_genai.Mcp_attr_key.server_address, "127.0.0.1");
+      (Otel_genai.Mcp_attr_key.server_port, "8935");
+      (Otel_genai.Mcp_attr_key.error_type, "agent_error");
+    ]
+    labels;
+  check bool "client session metric omits session id" false
+    (List.exists
+       (fun (key, _) -> String.equal key Otel_genai.Mcp_attr_key.mcp_session_id)
+       labels)
+
+let test_records_mcp_client_session_duration_metric () =
+  let metric_name = Otel_genai.Mcp_metric_name.client_session_duration in
+  let labels = client_session_labels () in
+  let before_count =
+    Otel_metric_store.metric_value_or_zero (metric_name ^ "_count") ~labels ()
+  in
+  Worker_container_types.For_testing.record_mcp_client_session_duration
+    ~url:"http://127.0.0.1:8935/mcp"
+    ~started_at:(Unix.gettimeofday () -. 0.5)
+    ();
+  check (float 0.0001) "client session count increments"
+    (before_count +. 1.0)
+    (Otel_metric_store.metric_value_or_zero (metric_name ^ "_count") ~labels ())
+
 let () =
   run "Worker_runtime"
     [
@@ -151,5 +190,9 @@ let () =
             test_mcp_client_operation_duration_labels_follow_semconv;
           test_case "records MCP client operation duration metric" `Quick
             test_records_mcp_client_operation_duration_metric;
+          test_case "MCP client session duration labels follow semconv" `Quick
+            test_mcp_client_session_duration_labels_follow_semconv;
+          test_case "records MCP client session duration metric" `Quick
+            test_records_mcp_client_session_duration_metric;
         ] );
     ]

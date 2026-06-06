@@ -12,6 +12,8 @@ type deterministic_reason =
   | Completion_contract_violation
   | Structured_tool_payload
   | Workflow_rejection_blocked
+  | Git_precondition_failed
+  | Path_not_found
 
 type classification_source =
   | Deterministic_retry_marker
@@ -44,6 +46,8 @@ let to_telemetry_key = function
     "deterministic_error_completion_contract_violation"
   | Structured_tool_payload -> "deterministic_error_structured_tool_payload"
   | Workflow_rejection_blocked -> "deterministic_error_workflow_rejection_blocked"
+  | Git_precondition_failed -> "deterministic_error_git_precondition_failed"
+  | Path_not_found -> "deterministic_error_path_not_found"
 ;;
 
 let to_string = function
@@ -66,6 +70,10 @@ let to_string = function
     "raw shell rejected; caller must use the visible structured tool from the recovery plan"
   | Workflow_rejection_blocked ->
     "workflow rejection explicitly marked deterministic and unrecoverable"
+  | Git_precondition_failed ->
+    "git command failed a process precondition; inspect repository/ref state or change the command"
+  | Path_not_found ->
+    "a typed Execute path argument does not exist; probe the parent directory before retrying"
 ;;
 
 (* ── JSON helpers ─────────────────────────────────────────────── *)
@@ -103,6 +111,8 @@ let reason_to_wire = function
   | Completion_contract_violation -> "completion_contract_violation"
   | Structured_tool_payload -> "structured_tool_payload"
   | Workflow_rejection_blocked -> "workflow_rejection_blocked"
+  | Git_precondition_failed -> "git_precondition_failed"
+  | Path_not_found -> "path_not_found"
 ;;
 
 let reason_of_wire = function
@@ -117,6 +127,8 @@ let reason_of_wire = function
   | "completion_contract_violation" -> Some Completion_contract_violation
   | "structured_tool_payload" -> Some Structured_tool_payload
   | "workflow_rejection_blocked" -> Some Workflow_rejection_blocked
+  | "git_precondition_failed" -> Some Git_precondition_failed
+  | "path_not_found" -> Some Path_not_found
   | _ -> None
 ;;
 

@@ -17,7 +17,7 @@ let dev = [ "env"; "cat"; "ls"; "npm" ]
 let readonly = [ "env"; "cat"; "ls" ]
 
 let policy allowed =
-  { Gate.redirect_allowed = true; allowed_commands = allowed; allow_pipes = true }
+  { Gate.redirect_allowed = true;  allow_pipes = true }
 ;;
 
 let sandbox = { Gate.target = Sandbox_target.host () }

@@ -106,9 +106,7 @@ type verdict =
     syntax, including fd-to-fd redirects such as [2>&1]. *)
 type allowlist_policy = {
   redirect_allowed : bool;
-  allowed_commands : string list;
   allow_pipes : bool;
-  
 }
 
 (** Path policy applied to literal path arguments and file redirect

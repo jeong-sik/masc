@@ -10,7 +10,7 @@
 // - useEffect: not used for data init.  External system sync only.
 // - Component unmount: messages are preserved, not cleared.
 
-export type ChatMessageRole = 'user' | 'assistant'
+export type ChatMessageRole = 'user' | 'assistant' | 'tool'
 export type ChatMessageSource = 'dashboard' | 'discord' | 'slack' | 'api'
 
 export interface Attachment {
@@ -28,6 +28,9 @@ export interface ChatMessage {
   timestamp: number
   source?: ChatMessageSource
   attachments?: Attachment[]
+  // Tool call fields (role === 'tool')
+  toolCallId?: string
+  toolCallName?: string
 }
 
 interface StoredSession {

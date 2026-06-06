@@ -51,6 +51,7 @@ function bubbleTone(entry: KeeperConversationEntry): string {
   if (entry.delivery === 'error' || entry.delivery === 'timeout') return 'error'
   if (entry.role === 'user') return 'user'
   if (entry.role === 'assistant') return 'assistant'
+  if (entry.role === 'tool') return 'tool'
   return 'system'
 }
 
@@ -435,6 +436,57 @@ function ChatMessageBubble({
   `
 }
 
+// Compact collapsible card for tool call entries in the chat transcript.
+function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
+  const [expanded, setExpanded] = useState(false)
+  const timestamp = timeLabel(entry.timestamp)
+  const toolName = entry.label || 'tool'
+  const argsText = entry.text || ''
+  const isJson = argsText.trimStart().startsWith('{') || argsText.trimStart().startsWith('[')
+  let displayText = argsText
+  if (isJson) {
+    try {
+      displayText = JSON.stringify(JSON.parse(argsText), null, 2)
+    } catch {
+      // keep original
+    }
+  }
+  const preview = displayText.length > 120 ? displayText.slice(0, 120) + '...' : displayText
+
+  return html`
+    <article
+      class="chat-bubble tool flex w-full flex-col rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]"
+      data-chat-variant="tool-call"
+    >
+      <button
+        type="button"
+        class="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-[var(--color-bg-hover)] transition-colors"
+        onClick=${() => { setExpanded(!expanded) }}
+        aria-expanded=${expanded}
+      >
+        <span class="inline-flex size-5 shrink-0 items-center justify-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] text-3xs font-mono font-bold text-[var(--color-fg-muted)]">T</span>
+        <span class="font-mono text-xs font-medium text-[var(--color-accent-fg)] truncate">${toolName}</span>
+        ${timestamp
+          ? html`<span class="ml-auto text-2xs tabular-nums text-[var(--color-fg-muted)]">${timestamp}</span>`
+          : null}
+        <span class="ml-1 text-xs text-[var(--color-fg-muted)]">${expanded ? '▾' : '▸'}</span>
+      </button>
+      ${expanded
+        ? html`
+            <div class="border-t border-[var(--color-border-default)] px-3 py-2">
+              <pre class="text-2xs font-mono whitespace-pre-wrap break-all text-[var(--color-fg-secondary)] max-h-64 overflow-y-auto">${displayText}</pre>
+            </div>
+          `
+        : html`
+            <div class="px-3 pb-2">
+              <div class="truncate text-2xs font-mono text-[var(--color-fg-muted)]">${preview}</div>
+            </div>
+          `
+      }
+    </article>
+  `
+}
+
 export function ChatTranscript({
   entries,
   emptyText,
@@ -485,7 +537,10 @@ export function ChatTranscript({
               <div class="mt-3 max-w-[34rem] text-sm leading-airy text-[var(--color-fg-secondary)]">${emptyText}</div>
             </div>
           `
-        : entries.map(entry => html`<${ChatMessageBubble} key=${entry.id} entry=${entry} showMetadata=${showMetadata !== false} variant=${variant} />`)}
+        : entries.map(entry => entry.role === 'tool'
+            ? html`<${ToolCallBubble} key=${entry.id} entry=${entry} />`
+            : html`<${ChatMessageBubble} key=${entry.id} entry=${entry} showMetadata=${showMetadata !== false} variant=${variant} />`
+        )}
     </div>
   `
 }

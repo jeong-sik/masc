@@ -142,7 +142,7 @@ canonical process env var is already set.
 ```toml
 [autonomous]
 max_turns_per_call = 7           # default: 2
-semaphore_wait_timeout_sec = 150 # default: 60
+semaphore_wait_timeout_sec = 150 # default: 180
 
 [reactive]
 max_turns_per_call = 15

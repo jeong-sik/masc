@@ -95,6 +95,36 @@ let test_fresh_started_at_at_head_returns_ok () =
         Alcotest.fail
           "expected Ok when this is the only waiter and clock is fresh")
 
+let test_autonomous_ticket_dropped_before_semaphore_acquire_hook () =
+  Eio_main.run @@ fun _env ->
+  Keeper_turn_slot.reset_autonomous_turn_queue_for_test ();
+  let observed_queue = ref None in
+  Keeper_turn_slot.set_after_acquire_flag_hook_for_test
+    (Some
+       (fun ~label ~keeper_name ->
+          if String.equal label "autonomous" && String.equal keeper_name "ours"
+          then
+            observed_queue
+            := Some (Keeper_turn_slot.autonomous_waiter_snapshot_for_test ())));
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_turn_slot.set_after_acquire_flag_hook_for_test None;
+      Keeper_turn_slot.reset_autonomous_turn_queue_for_test ())
+    (fun () ->
+       (match
+          Keeper_turn_slot.with_keeper_turn_slot_control_for_test
+            ~keeper_name:"ours"
+            ~channel:Keeper_world_observation.Scheduled_autonomous
+            (fun ~semaphore_wait_ms:_ ~slot_control:_ -> ())
+        with
+        | Ok () -> ()
+        | Error (`Semaphore_wait_timeout _) ->
+          Alcotest.fail "unexpected semaphore wait timeout");
+       Alcotest.(check (option (list string)))
+         "ticket is no longer in FIFO by autonomous acquire hook"
+         (Some [])
+         !observed_queue)
+
 let () =
   Alcotest.run
     "keeper_semaphore_wait_queue_head_clock"
@@ -107,6 +137,10 @@ let () =
             "fresh started_at at head returns Ok"
             `Quick
             test_fresh_started_at_at_head_returns_ok
+        ; Alcotest.test_case
+            "autonomous FIFO only gates entry into semaphore wait"
+            `Quick
+            test_autonomous_ticket_dropped_before_semaphore_acquire_hook
         ] )
     ]
 ;;

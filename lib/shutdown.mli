@@ -46,6 +46,12 @@ type hook = {
 
 val register : name:string -> ?priority:int -> (unit -> unit) -> unit
 val sorted_hooks : unit -> hook list
+val run_registered_hooks : unit -> unit
+(** Run every hook registered with {!register}, in priority order.
+
+    This is the cleanup core used by {!initiate}'s cleanup phase and by the
+    inline server shutdown path in {!Shutdown_hooks}. Hook exceptions are logged
+    and swallowed except for [Eio.Cancel.Cancelled], which is re-raised. *)
 
 (** {1 Global Shutdown Flag} *)
 

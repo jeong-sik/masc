@@ -87,6 +87,14 @@ let () = test "shutdown ignores duplicate initiate" (fun () ->
   assert (!count = 1)
 )
 
+let () = test "inline shutdown hooks run registered cleanup hooks" (fun () ->
+  Eio_main.run @@ fun _env ->
+  let called = ref false in
+  Shutdown.register ~name:"inline-run-all-test" ~priority:99 (fun () ->
+    called := true);
+  Shutdown_hooks.run_all ();
+  assert !called)
+
 (* ══════════════════════════════════════════════════════════════
    Supervisor tests
    ══════════════════════════════════════════════════════════════ *)

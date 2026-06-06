@@ -326,13 +326,12 @@ Expected state:
 - parallel parser refs remain zero
 - dispatch consumers use decided IR
 - no raw GitHub simple-command dispatch path returns
-- `G3` is either restored as a meaningful coverage metric or replaced with a
-  facade-aware metric. A lower direct `gate_typed` grep count is acceptable only
-  if all `Shell_ir` executor paths still route through
-  `Agent_tool_execute_shell_ir.dispatch` or `dispatch_classified`.
+- `G3` is facade-aware: a lower direct `gate_typed` grep count is acceptable
+  only if all `Shell_ir` executor paths still route through
+  `Keeper_tool_execute_shell_ir.dispatch` or `dispatch_classified`.
 
-Current status, 2026-06-01: verified on `origin/main` at `1096d319ba`.
-`scripts/audit-shell-ir-consumption.sh --json` reports G3=5 and G7=0, and
+Current status, 2026-06-06: verified on `origin/main` at `d498dd810a`.
+`scripts/audit-shell-ir-consumption.sh --json` reports G3=3, G5=5, and G7=0, and
 `scripts/audit-shell-ir-consumption.sh --baseline
 scripts/shell-ir-consumption-baseline.json` returns OK. PR-E is no longer an
 open measurement gap; it is a closeout evidence point. The remaining Shell IR

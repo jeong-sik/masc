@@ -22,7 +22,7 @@ failure just because a keeper uses the Docker backend.
 | `Agent_tool_execute_timeout` | Execute timeout constants, user timeout clamping, typed Shell IR timeout floors | Tool dispatch, command parsing, path resolution |
 | `Agent_tool_execute_runtime_paths` | Runtime path rewrites between container-visible and host-visible paths | Cwd/path validation, command execution, Docker lifecycle |
 | `Agent_tool_execute_readonly_policy` | Readonly Execute rejection categories, Good/Bad hints, and structured recovery diagnoses | Shell IR dispatch, cwd/path resolution, Docker runtime ownership |
-| `Agent_tool_execute_shell_ir` | Shell IR construction, gate/path validation, and classified dispatch facade for Execute/SearchFiles surfaces | Tool request parsing, remote workflow semantics |
+| `Keeper_tool_execute_shell_ir` | Shell IR construction, gate/path validation, and classified dispatch facade for Execute/SearchFiles surfaces | Tool request parsing, remote workflow semantics |
 | `Agent_tool_execute_path` | `tool_search_files` cwd/path resolution, path autocorrect, and PATH executable probes | Shell IR dispatch, process execution, Docker runtime ownership |
 | `Agent_tool_execute_command_parse` | Raw shell command parsing into Shell IR | Command-shape policy, Docker process execution |
 | `Agent_tool_execute_command_words` | Dependency-light command word extraction for guard tokens, action keys, and history/logging command prefixes | Sandbox cwd policy, Docker process execution |
@@ -112,7 +112,7 @@ The boundary test intentionally fails if:
 - Docker shell code re-exports generic command classification or parses
   raw shell commands directly;
 - typed Execute or SearchFiles ops construct Shell IR outside
-  `Agent_tool_execute_shell_ir`;
+  `Keeper_tool_execute_shell_ir`;
 - `shared shell compatibility facade` source files return;
 - SearchFiles ops or GitHub `Execute` routes cwd/path resolution outside
   `Agent_tool_execute_path`;

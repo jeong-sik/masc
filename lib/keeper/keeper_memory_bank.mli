@@ -354,6 +354,20 @@ val append_memory_notes_from_tool_results :
   results:Yojson.Safe.t list ->
   int
 
+val append_voice_output :
+  Workspace.config ->
+  Keeper_meta_contract.keeper_meta ->
+  ?provider:string ->
+  execution:string ->
+  voice_priority:int ->
+  turn:int ->
+  message:string ->
+  unit ->
+  (int, string) result
+(** Persist a keeper voice output event as a short-term progress memory row.
+    Returns [Ok 1] when a row is written, [Ok 0] when the message is empty or
+    filtered as non-meaningful, and [Error _] on persistence failure. *)
+
 (** {1 Summary} *)
 
 val summarize_memory_bank_lines :

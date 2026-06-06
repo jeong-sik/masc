@@ -854,6 +854,54 @@ let append_memory_notes_from_tool_results
       results);
   !written
 
+let append_voice_output
+    (config : Workspace.config)
+    (meta : keeper_meta)
+    ?provider
+    ~(execution : string)
+    ~(voice_priority : int)
+    ~(turn : int)
+    ~(message : string)
+    () : (int, string) result =
+  let text = String.trim message in
+  if text = "" || not (is_meaningful_memory_text text)
+  then Ok 0
+  else (
+    let kind = "progress" in
+    let now_ts = Time_compat.now () in
+    let path = Keeper_types_support.keeper_memory_bank_path config meta.name in
+    let optional_provider =
+      match provider |> Option.map String.trim with
+      | Some value when value <> "" -> [ "provider", `String value ]
+      | _ -> []
+    in
+    let fields =
+      [ "ts", `String (now_iso ())
+      ; "ts_unix", `Float now_ts
+      ; "name", `String meta.name
+      ; "trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+      ; "generation", `Int meta.runtime.generation
+      ; "turn", `Int turn
+      ; "kind", `String kind
+      ; "horizon", `String short_term_horizon
+      ; "source", `String "voice_output"
+      ; "schema_version", `Int keeper_memory_schema_version
+      ; "priority", `Int (tuned_priority_for_candidate ~kind ~text)
+      ; "text", `String text
+      ; "tool", `String "keeper_voice_speak"
+      ; "execution", `String execution
+      ; "voice_priority", `Int (max 1 voice_priority)
+      ]
+      @ optional_provider
+    in
+    try
+      with_memory_bank_lock path (fun () ->
+        Keeper_types_support.append_jsonl_line path (`Assoc fields));
+      Ok 1
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> Error (Printexc.to_string exn))
+
 let summarize_memory_bank_lines
     (lines : string list)
     ~(recent_limit : int) : keeper_memory_summary =

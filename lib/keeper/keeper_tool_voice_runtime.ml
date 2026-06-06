@@ -42,7 +42,57 @@ let command_to_string = function
 let command_of_string (s : string) : voice_command option =
   List.find_opt (fun c -> String.equal (command_to_string c) s) all_commands
 
-let handle_speak ~(meta : keeper_meta) ~(args : Yojson.Safe.t) =
+type voice_memory_status =
+  { recorded : bool
+  ; rows_written : int
+  ; error : string option
+  }
+
+let record_voice_output
+      ~(config : Workspace.config)
+      ~(meta : keeper_meta)
+      ~(provider : string option)
+      ~priority
+      ~execution
+      ~message
+  =
+  match
+    Keeper_memory_bank.append_voice_output
+      config
+      meta
+      ?provider
+      ~execution
+      ~voice_priority:priority
+      ~turn:meta.runtime.usage.total_turns
+      ~message
+      ()
+  with
+  | Ok rows_written ->
+    { recorded = rows_written > 0; rows_written; error = None }
+  | Error err ->
+    Log.Keeper.warn
+      ~keeper_name:meta.name
+      "keeper_voice_speak memory write failed: %s"
+      err;
+    { recorded = false; rows_written = 0; error = Some err }
+
+let memory_status_fields status =
+  [ "memory_recorded", `Bool status.recorded
+  ; "memory_rows_written", `Int status.rows_written
+  ; "memory_source", `String "voice_output"
+  ; "memory_error", Json_util.string_opt_to_json status.error
+  ]
+
+let attach_memory_status json status =
+  match json with
+  | `Assoc fields -> `Assoc (fields @ memory_status_fields status)
+  | other -> `Assoc (("result", other) :: memory_status_fields status)
+
+let handle_speak
+      ~(config : Workspace.config)
+      ~(meta : keeper_meta)
+      ~(args : Yojson.Safe.t)
+  =
   let message = Safe_ops.json_string ~default:"" "message" args |> String.trim in
   let provider =
     Safe_ops.json_string_opt "provider" args
@@ -72,14 +122,36 @@ let handle_speak ~(meta : keeper_meta) ~(args : Yojson.Safe.t) =
            ~priority
            ()
        with
-       | Ok json -> Yojson.Safe.to_string json
+       | Ok json ->
+         let memory_status =
+             record_voice_output
+               ~config
+               ~meta
+               ~provider
+               ~priority
+               ~execution:"background_voice_queue"
+               ~message
+         in
+         Yojson.Safe.to_string (attach_memory_status json memory_status)
        | Error err ->
          Tool_args.error_response_with
            [ "agent_id", `String meta.name
            ; "message", `String err
            ])
     | _ ->
-      Yojson.Safe.to_string (keeper_text_fallback_json ~agent_id:meta.name ~message))
+      let memory_status =
+        record_voice_output
+          ~config
+          ~meta
+          ~provider
+          ~priority
+          ~execution:"text_fallback"
+          ~message
+      in
+      Yojson.Safe.to_string
+        (attach_memory_status
+           (keeper_text_fallback_json ~agent_id:meta.name ~message)
+           memory_status))
 
 let handle_listen ~(meta : keeper_meta) ~(args : Yojson.Safe.t) =
   let timeout_sec = Safe_ops.json_float ~default:15.0 "timeout_seconds" args in
@@ -141,9 +213,14 @@ let handle_session_end ~(meta : keeper_meta) =
         ; "discarded_voice_queue_jobs", `Int discarded_voice_queue_jobs
         ])
 
-let handle ~(meta : keeper_meta) ~(command : voice_command) ~(args : Yojson.Safe.t) =
+let handle
+      ~(config : Workspace.config)
+      ~(meta : keeper_meta)
+      ~(command : voice_command)
+      ~(args : Yojson.Safe.t)
+  =
   match command with
-  | Speak -> handle_speak ~meta ~args
+  | Speak -> handle_speak ~config ~meta ~args
   | Listen -> handle_listen ~meta ~args
   | Agent -> handle_agent ~meta
   | Sessions -> handle_sessions ()
@@ -151,10 +228,11 @@ let handle ~(meta : keeper_meta) ~(command : voice_command) ~(args : Yojson.Safe
   | Session_end -> handle_session_end ~meta
 
 let handle_voice_tool
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(name : string)
       ~(args : Yojson.Safe.t)
   =
   match command_of_string name with
-  | Some command -> handle ~meta ~command ~args
+  | Some command -> handle ~config ~meta ~command ~args
   | None -> error_json ~fields:[ "tool", `String name ] "unknown_voice_tool"

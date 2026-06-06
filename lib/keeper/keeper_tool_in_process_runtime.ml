@@ -92,8 +92,8 @@ let handle_ide_annotate ~config ~(meta : keeper_meta) ~args =
     ~args
 ;;
 
-let handle_voice ~(meta : keeper_meta) ~name ~args =
-  Keeper_tool_voice_runtime.handle_voice_tool ~meta ~name ~args
+let handle_voice ~config ~(meta : keeper_meta) ~name ~args =
+  Keeper_tool_voice_runtime.handle_voice_tool ~config ~meta ~name ~args
 ;;
 
 let handle_task ~config ~(meta : keeper_meta) ~name ~args =

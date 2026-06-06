@@ -36,6 +36,26 @@ let () =
   at_exit (fun () -> rm_rf voice_session_test_base)
 ;;
 
+let test_config () = Masc.Workspace.default_config voice_session_test_base
+
+let read_lines path =
+  if not (Sys.file_exists path)
+  then []
+  else (
+    let ic = open_in path in
+    let rec loop acc =
+      match input_line ic with
+      | line -> loop (line :: acc)
+      | exception End_of_file ->
+        close_in ic;
+        List.rev acc
+      | exception exn ->
+        close_in_noerr ic;
+        raise exn
+    in
+    loop [])
+;;
+
 let test_resolve_voice_aliases () =
   let elevenlabs = Option.get (Voice.resolve_adapter "elevenlabs") in
   check string "elevenlabs alias" "elevenlabs-direct" elevenlabs.canonical_name;
@@ -202,9 +222,11 @@ let test_keeper_voice_speak_returns_queued_with_root_switch () =
   let clock = Eio.Stdenv.clock env in
   let mono_clock = Eio.Stdenv.mono_clock env in
   Eio_context.with_test_env ~net ~clock ~mono_clock ~sw (fun () ->
+    let config = test_config () in
     let meta = make_keeper_meta "voice-queue-keeper" in
     let raw =
       Masc.Keeper_tool_voice_runtime.handle_voice_tool
+        ~config
         ~meta
         ~name:"keeper_voice_speak"
         ~args:(`Assoc [ "message", `String "hello from queued voice test" ])
@@ -214,7 +236,91 @@ let test_keeper_voice_speak_returns_queued_with_root_switch () =
       Yojson.Safe.Util.(member "status" json |> to_string);
     check string "background execution" "background_voice_queue"
       Yojson.Safe.Util.(member "execution" json |> to_string);
+    check bool "memory recorded" true
+      Yojson.Safe.Util.(member "memory_recorded" json |> to_bool);
     ignore (Masc.Voice_bridge.discard_queued_agent_speak ~agent_id:meta.name))
+;;
+
+let test_keeper_voice_speak_records_memory_bank_row () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let clock = Eio.Stdenv.clock env in
+  let mono_clock = Eio.Stdenv.mono_clock env in
+  Eio_context.with_test_env ~net ~clock ~mono_clock ~sw (fun () ->
+    let config = test_config () in
+    let meta = make_keeper_meta "voice-memory-keeper" in
+    let message = "spoken memory should be durable" in
+    let raw =
+      Masc.Keeper_tool_voice_runtime.handle_voice_tool
+        ~config
+        ~meta
+        ~name:"keeper_voice_speak"
+        ~args:(`Assoc [ "message", `String message; "priority", `Int 3 ])
+    in
+    let json = Yojson.Safe.from_string raw in
+    check bool "memory recorded" true
+      Yojson.Safe.Util.(member "memory_recorded" json |> to_bool);
+    check int "memory rows written" 1
+      Yojson.Safe.Util.(member "memory_rows_written" json |> to_int);
+    let memory_path = Masc.Keeper_types_support.keeper_memory_bank_path config meta.name in
+    let rows =
+      read_lines memory_path
+      |> List.filter_map Masc.Keeper_memory_bank.parse_memory_bank_row
+    in
+    let row =
+      rows
+      |> List.find_opt (fun row ->
+        String.equal row.Masc.Keeper_memory_bank.source "voice_output"
+        && String.equal row.kind "progress"
+        && String.equal row.text message)
+    in
+    (match row with
+     | Some row ->
+       check string "voice memory horizon" "short_term" row.horizon;
+       check string "voice memory execution" "background_voice_queue"
+         Yojson.Safe.Util.(member "execution" row.json |> to_string);
+       check int "voice priority metadata" 3
+         Yojson.Safe.Util.(member "voice_priority" row.json |> to_int)
+     | None -> fail "expected voice_output progress memory row");
+    ignore (Masc.Voice_bridge.discard_queued_agent_speak ~agent_id:meta.name))
+;;
+
+let test_keeper_voice_speak_text_fallback_records_memory_bank_row () =
+  let config = test_config () in
+  let meta = make_keeper_meta "voice-fallback-memory-keeper" in
+  let message = "fallback speech should be durable" in
+  let raw =
+    Masc.Keeper_tool_voice_runtime.handle_voice_tool
+      ~config
+      ~meta
+      ~name:"keeper_voice_speak"
+      ~args:(`Assoc [ "message", `String message ])
+  in
+  let json = Yojson.Safe.from_string raw in
+  check string "text fallback status" "text_fallback"
+    Yojson.Safe.Util.(member "status" json |> to_string);
+  check bool "fallback memory recorded" true
+    Yojson.Safe.Util.(member "memory_recorded" json |> to_bool);
+  let memory_path = Masc.Keeper_types_support.keeper_memory_bank_path config meta.name in
+  let rows =
+    read_lines memory_path
+    |> List.filter_map Masc.Keeper_memory_bank.parse_memory_bank_row
+  in
+  let row =
+    rows
+    |> List.find_opt (fun row ->
+      String.equal row.Masc.Keeper_memory_bank.source "voice_output"
+      && String.equal row.kind "progress"
+      && String.equal row.text message)
+  in
+  match row with
+  | Some row ->
+    check string "fallback memory execution" "text_fallback"
+      Yojson.Safe.Util.(member "execution" row.json |> to_string)
+  | None -> fail "expected fallback voice_output progress memory row"
 ;;
 
 let test_keeper_voice_session_start_does_not_store_session_name_as_voice () =
@@ -226,10 +332,12 @@ let test_keeper_voice_session_start_does_not_store_session_name_as_voice () =
   let clock = Eio.Stdenv.clock env in
   let mono_clock = Eio.Stdenv.mono_clock env in
   Eio_context.with_test_env ~net ~clock ~mono_clock ~sw (fun () ->
+    let config = test_config () in
     let meta = make_keeper_meta "voice-session-name-regression" in
     let session_name = "shutup-shutup-shutup" in
     let raw =
       Masc.Keeper_tool_voice_runtime.handle_voice_tool
+        ~config
         ~meta
         ~name:"keeper_voice_session_start"
         ~args:(`Assoc [ "session_name", `String session_name ])
@@ -240,6 +348,7 @@ let test_keeper_voice_session_start_does_not_store_session_name_as_voice () =
       (not (String.equal session_name voice));
     ignore
       (Masc.Keeper_tool_voice_runtime.handle_voice_tool
+         ~config
          ~meta
          ~name:"keeper_voice_session_end"
          ~args:(`Assoc [])))
@@ -254,9 +363,11 @@ let test_keeper_voice_session_end_discards_queued_speech () =
   let clock = Eio.Stdenv.clock env in
   let mono_clock = Eio.Stdenv.mono_clock env in
   Eio_context.with_test_env ~net ~clock ~mono_clock ~sw (fun () ->
+    let config = test_config () in
     let meta = make_keeper_meta "voice-session-drain-keeper" in
     ignore
       (Masc.Keeper_tool_voice_runtime.handle_voice_tool
+         ~config
          ~meta
          ~name:"keeper_voice_session_start"
          ~args:(`Assoc [ "session_name", `String "drain regression" ]));
@@ -277,6 +388,7 @@ let test_keeper_voice_session_end_discards_queued_speech () =
      | Error err -> fail ("expected queued speech, got error: " ^ err));
     let end_raw =
       Masc.Keeper_tool_voice_runtime.handle_voice_tool
+        ~config
         ~meta
         ~name:"keeper_voice_session_end"
         ~args:(`Assoc [])
@@ -316,6 +428,14 @@ let () =
             "keeper_voice_speak queues on root switch"
             `Quick
             test_keeper_voice_speak_returns_queued_with_root_switch
+        ; test_case
+            "keeper_voice_speak records memory"
+            `Quick
+            test_keeper_voice_speak_records_memory_bank_row
+        ; test_case
+            "keeper_voice_speak fallback records memory"
+            `Quick
+            test_keeper_voice_speak_text_fallback_records_memory_bank_row
         ; test_case
             "session_start does not store session_name as voice"
             `Quick

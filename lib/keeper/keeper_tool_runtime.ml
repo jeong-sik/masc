@@ -173,7 +173,11 @@ let handle_in_process ctx descriptor args =
          ~args)
   | Tool_voice_dispatch ->
     Some
-      (Keeper_tool_in_process_runtime.handle_voice ~meta:ctx.meta ~name ~args)
+      (Keeper_tool_in_process_runtime.handle_voice
+         ~config:ctx.config
+         ~meta:ctx.meta
+         ~name
+         ~args)
   | Tool_task_dispatch ->
     Some
       (Keeper_tool_in_process_runtime.handle_task

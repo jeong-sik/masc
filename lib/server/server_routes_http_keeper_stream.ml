@@ -465,6 +465,77 @@ let send_keeper_stream_finish writer mutex closed ~thread_id ~run_id
     (keeper_stream_send_event writer mutex closed
        Ag_ui.(make_event ~thread_id ~run_id:(Some run_id) Run_finished))
 
+let ag_ui_role_of_keeper_chat_role = function
+  | Keeper_chat_events.User -> Ag_ui.User
+  | Keeper_chat_events.Assistant -> Ag_ui.Assistant
+
+let sse_adapter_loop ~events ~writer ~mutex ~closed =
+  let current_thread_id = ref "keeper" in
+  let current_run_id = ref None in
+  let current_message_id = ref None in
+  let send event = keeper_stream_send_event writer mutex closed event in
+  let rec loop () =
+    if !closed then ()
+    else
+      match Keeper_chat_events.subscribe events with
+      | Keeper_chat_events.Run_started { run_id; thread_id } ->
+          current_thread_id := thread_id;
+          current_run_id := Some run_id;
+          if send Ag_ui.(make_event ~thread_id ~run_id:(Some run_id) Run_started)
+          then loop ()
+      | Keeper_chat_events.Text_message_start { message_id; role } ->
+          current_message_id := Some message_id;
+          if
+            send
+              Ag_ui.(
+                make_event ~thread_id:!current_thread_id
+                  ~run_id:!current_run_id ~message_id:(Some message_id)
+                  ~role:(Some (ag_ui_role_of_keeper_chat_role role))
+                  Text_message_start)
+          then loop ()
+      | Keeper_chat_events.Text_delta delta ->
+          if String.length delta = 0 then loop ()
+          else if
+            send
+              Ag_ui.(
+                make_event ~thread_id:!current_thread_id
+                  ~run_id:!current_run_id ~message_id:!current_message_id
+                  ~delta:(Some delta) Text_message_content)
+          then loop ()
+      | Keeper_chat_events.Text_message_end ->
+          if
+            send
+              Ag_ui.(
+                make_event ~thread_id:!current_thread_id
+                  ~run_id:!current_run_id ~message_id:!current_message_id
+                  Text_message_end)
+          then loop ()
+      | Keeper_chat_events.Run_finished { run_id } ->
+          ignore
+            (send
+               Ag_ui.(
+                 make_event ~thread_id:!current_thread_id
+                   ~run_id:(Some run_id) Run_finished))
+      | Keeper_chat_events.Error { message } ->
+          ignore
+            (send
+               Ag_ui.(
+                 make_event ~thread_id:!current_thread_id
+                   ~run_id:!current_run_id
+                   ~custom_name:(Some "KEEPER_CHAT_ERROR")
+                   ~custom_value:(Some (`Assoc [ ("message", `String message) ]))
+                   Run_error))
+      | Keeper_chat_events.Custom { name; value } ->
+          if
+            send
+              Ag_ui.(
+                make_event ~thread_id:!current_thread_id
+                  ~run_id:!current_run_id ~custom_name:(Some name)
+                  ~custom_value:(Some value) Custom)
+          then loop ()
+  in
+  loop ()
+
 (** Extract visible reply from the keeper pipeline result body.
     Parses JSON if possible and strips internal markers. *)
 let extract_visible_reply body =

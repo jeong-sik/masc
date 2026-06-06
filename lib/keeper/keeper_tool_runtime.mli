@@ -16,6 +16,7 @@ type context =
   ; turn_sandbox_factory : Keeper_sandbox_factory.t option
   ; exec_cache : Masc_exec.Exec_cache.t option
   ; search_fn : query:string -> max_results:int -> Yojson.Safe.t
+  ; turn_slot_control : Keeper_turn_slot.keeper_turn_slot_control option
   ; sw : Eio.Switch.t option
   ; clock : float Eio.Time.clock_ty Eio.Resource.t option
   ; proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option

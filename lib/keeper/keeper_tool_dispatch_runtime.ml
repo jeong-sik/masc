@@ -287,6 +287,7 @@ let execute_keeper_tool_call_with_outcome
       ?turn_sandbox_factory
       ~(exec_cache : Masc_exec.Exec_cache.t option)
       ?search_fn
+      ?turn_slot_control
       (* RFC-0182 Phase 5 PR-A.2: optional Eio resources threaded to
          Keeper_tool_runtime.context for Eio-bound descriptor handlers. *)
       ?sw
@@ -400,8 +401,9 @@ let execute_keeper_tool_call_with_outcome
                        ; meta
                        ; ctx_work
                        ; turn_sandbox_factory
-                       ; exec_cache
+           ; exec_cache
            ; search_fn = effective_search_fn
+           ; turn_slot_control
            ; (* RFC-0182 Phase 5 PR-A.2: Eio resources threaded from
                 caller via labeled ? params.  Callers without Eio
                 context (OAS handler, tests) leave them unset. *)

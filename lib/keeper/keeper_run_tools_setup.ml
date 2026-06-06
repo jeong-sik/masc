@@ -28,6 +28,7 @@ let prepare_agent_setup
       ~(runtime_id : string)
       ~(is_retry : bool)
       ~(turn_affordances : string list)
+      ?turn_slot_control
       ~(config_root : string)
       ~(runtime_config_path : string option)
       ~(gemini_mcp_disabled : bool)
@@ -127,6 +128,7 @@ let prepare_agent_setup
       ~search_fn:(fun ~query ~max_results -> !local_search_fn_ref ~query ~max_results)
       ~on_tool_called:(fun name ->
         Keeper_discovered_tools.mark_used acc.discovered ~turn:acc.current_turn ~name)
+      ?turn_slot_control
       ()
   in
   let extend_turns_tool = Keeper_extend_turns.make ~agent_ref ~max_turns () in

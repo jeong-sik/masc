@@ -32,6 +32,7 @@ let make_tool_bundle
       ?search_fn
       ?on_tool_called
       ?clock
+      ?turn_slot_control
       ()
   : tool_bundle
   =
@@ -113,6 +114,7 @@ let make_tool_bundle
                ?search_fn
                ?on_tool_called
                ?clock
+               ?turn_slot_control
                ~failure_counts
                ()
            in
@@ -164,11 +166,12 @@ let make_tool_bundle
                  ~ctx_snapshot
                  ?turn_sandbox_factory
                  ~exec_cache
-               ?search_fn
-               ?on_tool_called
-               ?clock
-               ~translate_input:descriptor.translate
-               ~failure_counts
+              ?search_fn
+              ?on_tool_called
+              ?clock
+              ?turn_slot_control
+              ~translate_input:descriptor.translate
+              ~failure_counts
                ()
            in
            Keeper_tool_descriptor.public_names_of_descriptor descriptor
@@ -203,6 +206,13 @@ let make_tools
       ()
   : Agent_sdk.Tool.t list
   =
-  (make_tool_bundle ~config ~meta ~ctx_snapshot ?search_fn ?on_tool_called ?clock ())
+  (make_tool_bundle
+     ~config
+     ~meta
+     ~ctx_snapshot
+     ?search_fn
+     ?on_tool_called
+     ?clock
+     ())
     .tools
 ;;

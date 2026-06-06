@@ -151,6 +151,7 @@ val execute_keeper_tool_call_with_outcome
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
   -> exec_cache:Masc_exec.Exec_cache.t option
   -> ?search_fn:(query:string -> max_results:int -> Yojson.Safe.t)
+  -> ?turn_slot_control:Keeper_turn_slot.keeper_turn_slot_control
   -> ?sw:Eio.Switch.t
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t

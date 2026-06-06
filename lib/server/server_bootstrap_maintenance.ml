@@ -81,6 +81,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
      Without this call [guarded_dispatch] runs with the identity wrapper (no
      span / no [tool_dispatch_total] metric). *)
   Tool_dispatch.set_span_wrapper Tool_telemetry.with_span;
+  Otel_metric_store.register_otel_source_once ();
   Otel_spans.setup_exporter ~sw env;
   Shutdown.register ~name:"otel_exporter" ~priority:20 Otel_spans.shutdown;
   (* Board_listener removed: filesystem-first principle.

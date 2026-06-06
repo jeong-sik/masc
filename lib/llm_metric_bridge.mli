@@ -1,8 +1,8 @@
-(** Retired Otel_metric_store bridge for OAS [Llm_provider.Metrics.t].
+(** Otel_metric_store-backed bridge for OAS [Llm_provider.Metrics.t].
 
-    The process-wide sink remains installable so callers keep their
-    initialization order, but callbacks are intentionally no-op until the OTel
-    replacement owns this boundary. *)
+    The process-wide sink is installed early during server bootstrap so OAS
+    provider callbacks update the in-process metric store. The store is then
+    exported through the OTel metrics bridge. *)
 
 val http_status_metric : string
 val fallback_triggered_metric : string

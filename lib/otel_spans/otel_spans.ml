@@ -39,12 +39,19 @@ let init () =
     metrics, and logs to the configured OTLP collector via HTTP/protobuf.
     Internally forks a 500ms tick fiber under [sw] for periodic batch flush.
     No-op when OTel is explicitly disabled. *)
-let is_exporter_active () = Atomic.get exporter_active
+let is_exporter_degraded () = Opentelemetry_client_cohttp_eio.tick_degraded ()
+let last_degradation_error () = Opentelemetry_client_cohttp_eio.last_tick_poisoned_error ()
+
+let is_exporter_active () =
+  Atomic.get exporter_active && not (is_exporter_degraded ())
+;;
+
 let last_successful_export () = Atomic.get _last_successful_export
 let consecutive_failures () = Atomic.get _consecutive_failures
 
 let setup_exporter_with ?(enabled = Otel_config.enabled) ~endpoint ~setup () =
   if enabled then begin
+    Opentelemetry_client_cohttp_eio.reset_tick_health ();
     init ();
     try
       setup ();
@@ -83,6 +90,7 @@ let probe_endpoint ~(env : Eio_unix.Stdenv.base) endpoint =
 let setup_exporter ~sw (env : Eio_unix.Stdenv.base) =
   let endpoint = Otel_config.endpoint in
   let clock = Eio.Stdenv.clock env in
+  Opentelemetry_client_cohttp_eio.reset_tick_health ();
   let rec try_setup attempt =
     if not (enabled ()) then ()
     else begin
@@ -155,6 +163,7 @@ let shutdown ?(enabled = Otel_config.enabled) () =
     Opentelemetry_client_cohttp_eio.remove_backend ();
     Log.Otel.info "OTLP exporter stopped"
   end;
+  Opentelemetry_client_cohttp_eio.reset_tick_health ();
   Atomic.set exporter_active false;
   Atomic.set initialized false;
   Atomic.set _last_successful_export None;

@@ -66,6 +66,8 @@ let () =
   let src = source () in
   let helper = "let stop_tick_after_poisoned_mutex ~stop cause =" in
   let stop_flag = "Atomic.set stop true" in
+  let degraded_state = "Atomic.set tick_degraded_state true" in
+  let degradation_error = "Atomic.set last_tick_poisoned_error_state" in
   let degraded_log_prefix = "OTEL metrics \\" in
   let degraded_log_suffix = "export degraded until backend restart" in
   let poison_catch =
@@ -75,6 +77,8 @@ let () =
   let global_pool_post = "Masc_http_client.post_sync" in
   assert_contains ~label:"poison helper" src helper;
   assert_contains ~label:"poison helper stops tick loop" src stop_flag;
+  assert_contains ~label:"poison helper records degraded state" src degraded_state;
+  assert_contains ~label:"poison helper records degradation cause" src degradation_error;
   assert_contains ~label:"poison log explains degradation prefix" src degraded_log_prefix;
   assert_contains ~label:"poison log explains degradation suffix" src degraded_log_suffix;
   assert_contains ~label:"tick catch delegates to poison helper" src poison_catch;

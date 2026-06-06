@@ -101,6 +101,22 @@ describe('ChatTranscript', () => {
     expect(latestBody).toBe('')
   })
 
+  it('uses a viewport-bounded transcript height in primary mode', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({ id: 'u1', text: 'ping' })]}
+        emptyText="empty"
+        variant="messenger"
+        size="primary"
+      />`,
+      container,
+    )
+
+    const transcript = container.querySelector('[data-chat-variant="messenger"]')
+    expect(transcript?.classList.contains('min-h-[18rem]')).toBe(true)
+    expect(transcript?.classList.contains('max-h-[42vh]')).toBe(true)
+  })
+
   it('renders attachments even when metadata is hidden', () => {
     render(
       html`<${ChatTranscript}

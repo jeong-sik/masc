@@ -78,12 +78,12 @@ export function KeeperDetailHeaderInfo({
       <button
         type="button"
         onClick=${onClose}
-        class="inline-flex shrink-0 items-center gap-2 rounded-full border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3.5 py-2 text-sm font-medium text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--color-bg-hover)]"
+        class="inline-flex shrink-0 items-center gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-1.5 text-xs font-semibold text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--color-bg-hover)]"
       >
         <span aria-hidden="true">←</span>
         목록
       </button>
-      <div class="size-12 shrink-0 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] flex items-center justify-center text-2xl">${keeper.emoji}</div>
+      <div class="size-10 shrink-0 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] flex items-center justify-center text-xl">${keeper.emoji}</div>
       <div class="flex min-w-[12rem] flex-1 flex-col gap-0.5">
         <${SectionLabel}>모니터링 / 에이전트 / 키퍼 상세</${SectionLabel}>
         <div class="mt-1 flex flex-wrap items-center gap-2.5">
@@ -119,37 +119,30 @@ type KeeperDetailSectionId =
 const KEEPER_DETAIL_SECTIONS: Array<{
   id: KeeperDetailSectionId
   label: string
-  summary: string
 }> = [
   {
-    id: 'keeper-summary',
-    label: '상태 개요',
-    summary: '상태 기계, KPI, 메모리/추론 지표를 먼저 봅니다.',
+    id: 'keeper-comms',
+    label: '대화',
   },
   {
-    id: 'keeper-comms',
-    label: '대화 / 세션',
-    summary: '실시간 대화와 세션 이벤트를 함께 봅니다.',
+    id: 'keeper-summary',
+    label: '상태',
   },
   {
     id: 'keeper-runtime',
-    label: '진단 / 운영',
-    summary: 'runtime action, eval, supervisor, 품질 시그널을 모았습니다.',
+    label: '진단',
   },
   {
     id: 'keeper-identity',
-    label: '정체성 / 세대',
-    summary: '프로필, 관계, generation lineage, checkpoint를 함께 봅니다.',
+    label: '정체성',
   },
   {
     id: 'keeper-config',
-    label: '설정 / 작업 방식',
-    summary: '허용 도구, repos, config를 한 곳에서 조정합니다.',
+    label: '설정',
   },
   {
     id: 'keeper-debug',
     label: '디버그',
-    summary: '저널과 원시 데이터를 마지막에 몰아 둡니다.',
   },
 ]
 
@@ -157,33 +150,25 @@ function scrollToKeeperDetailSection(sectionId: KeeperDetailSectionId): void {
   document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
-// `KeeperDetailOverviewSidebar` previously rendered a 4-cell QuickFact
-// grid (상태 / 컨텍스트 / 런타임 / 최근 활동) above the navigation. Each
-// cell duplicated information shown elsewhere on the page (page header
-// status chip, KpiGrid context ratio, hardcoded placeholder
-// '런타임 runtime', page header activity subtitle). The grid was removed
-// 2026-05-19 as part of the SSOT reconciliation plan (Phase 5). What
-// remains is the sticky scroll navigation — the only piece that was
-// providing unique value.
-export function KeeperDetailOverviewSidebar() {
+export function KeeperDetailSectionRail() {
   return html`
-    <aside class="order-2 xl:order-1 xl:sticky xl:top-[104px] xl:self-start" aria-label="키퍼 프로필 요약">
-      <div class="rounded-[var(--r-5)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-3.5 shadow-[var(--shadow-panel)]">
-        <${SectionLabel}>빠른 이동</${SectionLabel}>
-        <div class="mt-3 flex flex-col gap-2">
-          ${KEEPER_DETAIL_SECTIONS.map((section) => html`
-            <button
-              type="button"
-              class="rounded-[var(--r-5)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 text-left transition-colors hover:bg-[var(--color-bg-hover)]"
-              onClick=${() => scrollToKeeperDetailSection(section.id)}
-            >
-              <div class="text-sm font-medium text-[var(--color-fg-primary)]">${section.label}</div>
-              <div class="mt-1 text-2xs leading-relaxed text-[var(--color-fg-muted)]">${section.summary}</div>
-            </button>
-          `)}
-        </div>
+    <nav
+      class="sticky top-[76px] z-10 overflow-x-auto rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-1 shadow-[var(--shadow-panel)]"
+      aria-label="키퍼 상세 섹션"
+    >
+      <div class="flex min-w-max items-center gap-1">
+        <span class="shrink-0 px-2 text-3xs font-semibold uppercase tracking-[var(--track-label)] text-[var(--color-fg-disabled)]">섹션</span>
+        ${KEEPER_DETAIL_SECTIONS.map((section) => html`
+          <button
+            type="button"
+            class="h-8 shrink-0 rounded-[var(--r-1)] border border-transparent px-3 text-2xs font-semibold text-[var(--color-fg-muted)] transition-colors hover:border-[var(--color-border-default)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)]"
+            onClick=${() => scrollToKeeperDetailSection(section.id)}
+          >
+            ${section.label}
+          </button>
+        `)}
       </div>
-    </aside>
+    </nav>
   `
 }
 
@@ -192,6 +177,8 @@ export function KeeperDetailSection({
   eyebrow,
   title,
   defaultCollapsed = false,
+  lockedOpen = false,
+  variant = 'default',
   children,
 }: {
   id: KeeperDetailSectionId
@@ -203,33 +190,55 @@ export function KeeperDetailSection({
    *  that do not opt in. Quick-jump links via [scrollToKeeperDetailSection]
    *  still resolve to the header anchor regardless of the body state. */
   defaultCollapsed?: boolean
+  /** Primary sections, such as the chat lane, stay open and do not expose
+   *  collapse controls. */
+  lockedOpen?: boolean
+  variant?: 'default' | 'primary'
   children: ComponentChildren
 }) {
-  const [collapsed, setCollapsed] = useState(defaultCollapsed)
+  const [collapsed, setCollapsed] = useState(lockedOpen ? false : defaultCollapsed)
+  const isCollapsed = lockedOpen ? false : collapsed
   const bodyId = `${id}-body`
+  const sectionClass = variant === 'primary'
+    ? 'scroll-mt-24 rounded-[var(--r-3)] border border-[var(--accent-20)] bg-[var(--color-bg-surface)] shadow-[var(--shadow-raised)]'
+    : 'scroll-mt-24 rounded-[var(--r-3)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] shadow-[var(--shadow-raised)]'
+  const headerClass = variant === 'primary'
+    ? 'flex w-full items-center justify-between gap-3 border-b border-[var(--accent-20)] px-5 py-4 text-left sm:px-6'
+    : 'flex w-full items-center justify-between gap-3 border-b border-[var(--color-border-default)] px-5 py-4 text-left transition-colors hover:bg-[var(--color-bg-hover)] sm:px-6'
+  const headerContent = html`
+    <div class="min-w-0">
+      <div class="text-3xs font-semibold uppercase tracking-[var(--track-brand)] text-[var(--color-fg-muted)]">${eyebrow}</div>
+      <h3 class="m-0 mt-1 text-lg font-semibold text-[var(--color-fg-primary)]">${title}</h3>
+    </div>
+    ${lockedOpen
+      ? html`<span class="shrink-0 rounded-[var(--r-0)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-2 py-1 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-accent-fg)]">기본</span>`
+      : html`
+        <span
+          aria-hidden="true"
+          class=${`shrink-0 text-[var(--color-fg-muted)] transition-transform duration-[var(--t-med)] ${isCollapsed ? '' : 'rotate-180'}`}
+        >▾</span>
+      `}
+  `
   return html`
     <section
       id=${id}
-      class="scroll-mt-24 rounded-[var(--r-6)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] shadow-[var(--shadow-raised)]"
+      class=${sectionClass}
       aria-label=${title}
     >
-      <button
-        type="button"
-        class="flex w-full items-center justify-between gap-3 border-b border-[var(--color-border-default)] px-5 py-4 text-left transition-colors hover:bg-[var(--color-bg-hover)] sm:px-6"
-        aria-expanded=${!collapsed}
-        aria-controls=${bodyId}
-        onClick=${() => setCollapsed((c: boolean) => !c)}
-      >
-        <div class="min-w-0">
-          <div class="text-3xs font-semibold uppercase tracking-[var(--track-brand)] text-[var(--color-fg-muted)]">${eyebrow}</div>
-          <h3 class="m-0 mt-1 text-lg font-semibold text-[var(--color-fg-primary)]">${title}</h3>
-        </div>
-        <span
-          aria-hidden="true"
-          class=${`shrink-0 text-[var(--color-fg-muted)] transition-transform duration-[var(--t-med)] ${collapsed ? '' : 'rotate-180'}`}
-        >▾</span>
-      </button>
-      ${collapsed ? null : html`
+      ${lockedOpen
+        ? html`<div class=${headerClass}>${headerContent}</div>`
+        : html`
+          <button
+            type="button"
+            class=${headerClass}
+            aria-expanded=${!isCollapsed}
+            aria-controls=${bodyId}
+            onClick=${() => setCollapsed((c: boolean) => !c)}
+          >
+            ${headerContent}
+          </button>
+        `}
+      ${isCollapsed ? null : html`
         <div id=${bodyId} class="flex flex-col gap-4 px-5 py-5 sm:px-6">
           ${children}
         </div>

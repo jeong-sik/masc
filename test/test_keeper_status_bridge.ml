@@ -57,21 +57,21 @@ let init_runtime_default_for_tests () =
   | Error e -> Alcotest.failf "Runtime.init_default failed: %s" e
 ;;
 
-let test_synthetic_idle_last_output_is_not_blocker () =
+let test_progress_narrative_is_not_runtime_blocker_source () =
   let summary =
-    "Decisions: [SYNTHETIC] Last output: No awaiting_verification tasks. \
-     Board posts are 21-31 days old with no new signals. Pure idle turn."
+    "Progress: waiting on sandbox egress for github.com push\n\
+     Next: ask operator to approve the manual 4-gate unblock"
   in
   Alcotest.(check (option string))
-    "idle synthetic last output is not a blocker"
+    "progress text never creates runtime blocker class"
     None
     (Option.map (fun b -> b.Keeper_status_bridge.blocker_class) (blocker_of_summary summary))
 ;;
 
-let test_synthetic_no_visible_output_is_not_blocker () =
+let test_synthetic_narrative_is_not_runtime_blocker_source () =
   let summary = "Decisions: [SYNTHETIC] No visible output this generation" in
   Alcotest.(check (option string))
-    "synthetic fallback output is not a blocker"
+    "synthetic text never creates runtime blocker class"
     None
     (Option.map (fun b -> b.Keeper_status_bridge.blocker_class) (blocker_of_summary summary))
 ;;
@@ -132,16 +132,16 @@ let () =
   Alcotest.run
     "keeper_status_bridge"
     [
-      ( "synthetic progress blockers",
+      ( "progress narrative provenance",
         [
           Alcotest.test_case
-            "idle synthetic last output is not blocker"
+            "progress narrative is not blocker source"
             `Quick
-            test_synthetic_idle_last_output_is_not_blocker;
+            test_progress_narrative_is_not_runtime_blocker_source;
           Alcotest.test_case
-            "no visible synthetic output is not blocker"
+            "synthetic narrative is not blocker source"
             `Quick
-            test_synthetic_no_visible_output_is_not_blocker;
+            test_synthetic_narrative_is_not_runtime_blocker_source;
         ] );
       ( "profile default override provenance",
         [

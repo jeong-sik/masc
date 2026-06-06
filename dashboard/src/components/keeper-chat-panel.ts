@@ -312,6 +312,10 @@ export function KeeperChatPanel({ name }: { name: string }) {
       // Fallback: most recently inserted pending tool call
       while (pendingOrder.length > 0) {
         const lastId = pendingOrder[pendingOrder.length - 1]
+        if (lastId == null) {
+          pendingOrder.pop()
+          continue
+        }
         const entry = pendingToolArgs.get(lastId)
         if (entry) return { id: lastId, entry }
         pendingOrder.pop()

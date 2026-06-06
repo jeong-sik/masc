@@ -599,13 +599,24 @@ let nonempty_opt = function
   | None -> None
 ;;
 
-let otel_tool_request_context ~id ?mcp_session_id request_json =
+let otel_tool_request_context
+      ~id
+      ?mcp_session_id
+      ?mcp_protocol_version
+      ?otel_transport_context
+      request_json
+  =
   let mcp_protocol_version =
-    Mcp_transport_protocol.protocol_version_from_request_meta_json request_json
+    match
+      Mcp_transport_protocol.protocol_version_from_request_meta_json request_json
+    with
+    | Some value -> Some value
+    | None -> nonempty_opt mcp_protocol_version
   in
   { Otel_dispatch_hook.jsonrpc_request_id = jsonrpc_request_id_attr id
   ; mcp_session_id = nonempty_opt mcp_session_id
   ; mcp_protocol_version
+  ; transport = otel_transport_context
   }
 ;;
 
@@ -638,6 +649,8 @@ let handle_request
       ~sw
       ?(profile = Full)
       ?mcp_session_id
+      ?otel_mcp_protocol_version
+      ?otel_transport_context
       ?auth_token
       ?(internal_keeper_runtime = false)
       state
@@ -783,7 +796,9 @@ let handle_request
                               | None -> "none"));
                         let result =
                           let otel_context =
-                            otel_tool_request_context ~id ?mcp_session_id json
+                            otel_tool_request_context ~id ?mcp_session_id
+                              ?mcp_protocol_version:otel_mcp_protocol_version
+                              ?otel_transport_context json
                           in
                           Otel_dispatch_hook.with_request_context
                             otel_context

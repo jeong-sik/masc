@@ -51,15 +51,28 @@ end
 module Mcp_attr_key : sig
   val mcp_method_name : string
   val jsonrpc_request_id : string
+  val jsonrpc_protocol_version : string
   val mcp_protocol_version : string
   val mcp_session_id : string
+  val network_protocol_name : string
+  val network_protocol_version : string
+  val network_transport : string
   val error_type : string
+  val rpc_response_status_code : string
+  val server_address : string
+  val server_port : string
   val masc_mcp_tool_failure_class : string
 end
 
 module Mcp_value : sig
   val tools_call_method : string
   val tool_error_type : string
+end
+
+module Mcp_metric_name : sig
+  val client_operation_duration : string
+  val server_operation_duration : string
+  val server_session_duration : string
 end
 
 module Metric_name : sig

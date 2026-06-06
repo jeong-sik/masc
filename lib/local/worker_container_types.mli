@@ -21,7 +21,7 @@
     [has_agent_name_field], [inject_default_agent_name],
     [extract_prompt_block], [masc_http_base_url],
     [request_id_matches], [normalize_mcp_body],
-    [extract_tool_text], [extract_jsonrpc_error],
+    [extract_tool_text], [extract_jsonrpc_error_detail],
     [post_json_via_eio], [call_jsonrpc],
     [tool_schema_of_name], [tool_defs_of_schemas],
     [followup_prompt], [split_top_level],
@@ -211,6 +211,27 @@ val safe_text_for_followup : string -> string
     inclusion in a follow-up prompt.  Keeps the first 1200
     bytes after [String.trim] and appends ["...[truncated]"]
     when the input is longer.  Never raises. *)
+
+module For_testing : sig
+  val mcp_client_operation_duration_labels :
+    url:string ->
+    method_name:string ->
+    params:Yojson.Safe.t ->
+    ?error_type:string ->
+    ?rpc_response_status_code:string ->
+    unit ->
+    (string * string) list
+
+  val record_mcp_client_operation_duration :
+    url:string ->
+    method_name:string ->
+    params:Yojson.Safe.t ->
+    started_at:float ->
+    ?error_type:string ->
+    ?rpc_response_status_code:string ->
+    unit ->
+    unit
+end
 
 val parse_text_tool_calls :
   string -> Agent_sdk.Types.content_block list

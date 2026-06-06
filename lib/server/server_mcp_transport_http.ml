@@ -12,6 +12,8 @@ type runtime = Server_mcp_transport_http_types.runtime = {
   handle_request :
     ?profile:tool_profile ->
     ?mcp_session_id:string ->
+    ?otel_mcp_protocol_version:string ->
+    ?otel_transport_context:Otel_dispatch_hook.transport_context ->
     ?auth_token:string ->
     ?internal_keeper_runtime:bool ->
     string ->
@@ -263,7 +265,10 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
           safe_respond_with_string reqd response body;
           Error ()
     in
-    remember_mcp_profile session_id profile;
+    let otel_transport_context =
+      Otel_dispatch_hook.http_transport_context ~protocol_version:"1.1"
+    in
+    remember_mcp_profile ~otel_transport_context session_id profile;
     let* () =
       match auth_result with
       | Ok () -> Ok ()
@@ -368,10 +373,17 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
       let sw = runtime.sw in
       let clock = runtime.clock in
       Ok (Eio.Fiber.fork ~sw (fun () ->
+                            let otel_transport_context =
+                              Otel_dispatch_hook.http_transport_context
+                                ~protocol_version:"1.1"
+                            in
                             let response_protocol_version =
                               match protocol_version_from_body body_str with
                               | Some v ->
-                                  remember_protocol_version session_id v;
+                                  remember_protocol_version
+                                    ~otel_transport_context
+                                    session_id
+                                    v;
                                   v
                               | None ->
                                   get_protocol_version_for_session ~session_id request
@@ -402,6 +414,8 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                               let response_json =
                                 runtime.handle_request ?auth_token ~profile
                                   ~mcp_session_id:session_id
+                                  ~otel_mcp_protocol_version:protocol_version
+                                  ~otel_transport_context
                                   ~internal_keeper_runtime body_with_agent
                               in
                               let protocol_version =
@@ -579,7 +593,10 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
           respond_mcp_error ~code:Mcp_error_code.Auth_error ~deps request reqd ~session_id
             ~protocol_version msg
       | Ok () ->
-      remember_mcp_profile session_id profile;
+      let otel_transport_context =
+        Otel_dispatch_hook.http_transport_context ~protocol_version:"1.1"
+      in
+      remember_mcp_profile ~otel_transport_context session_id profile;
       (match check_sse_connect_guard session_id with
       | Error (reason, retry_after_s) ->
           respond_sse_rate_limited ~deps ~origin ~session_id ~protocol_version

@@ -136,16 +136,122 @@ let extract_tool_text json =
       | _ -> Yojson.Safe.to_string json)
   | _ -> Yojson.Safe.to_string json
 
-let extract_jsonrpc_error json =
+type client_operation_error =
+  { message : string
+  ; error_type : string
+  ; rpc_response_status_code : string option
+  }
+
+let client_operation_error ?rpc_response_status_code ~error_type message =
+  { message; error_type; rpc_response_status_code }
+
+let jsonrpc_error_code_string fields =
+  match List.assoc_opt "code" fields with
+  | Some (`Int code) -> Some (string_of_int code)
+  | Some (`Intlit code) when String.trim code <> "" -> Some code
+  | Some (`String code) when String.trim code <> "" -> Some code
+  | _ -> None
+
+let extract_jsonrpc_error_detail json =
   match json with
   | `Assoc fields -> (
-      match List.assoc_opt "error" fields with
-      | Some (`Assoc err_fields) -> (
-          match List.assoc_opt "message" err_fields with
-          | Some (`String s) when String.trim s <> "" -> Some s
-          | _ -> None)
-      | _ -> None)
+    match List.assoc_opt "error" fields with
+    | Some (`Assoc err_fields) ->
+      let message =
+        match List.assoc_opt "message" err_fields with
+        | Some (`String s) when String.trim s <> "" -> s
+        | _ -> Yojson.Safe.to_string json
+      in
+      let rpc_response_status_code = jsonrpc_error_code_string err_fields in
+      let error_type =
+        Option.value rpc_response_status_code ~default:"jsonrpc_error"
+      in
+      Some (client_operation_error ?rpc_response_status_code ~error_type message)
+    | _ -> None)
   | _ -> None
+
+let option_label key = function
+  | Some value when String.trim value <> "" -> [ key, value ]
+  | _ -> []
+
+let tool_name_from_params = function
+  | `Assoc fields -> (
+    match List.assoc_opt "name" fields with
+    | Some (`String name) when String.trim name <> "" -> Some name
+    | _ -> None)
+  | _ -> None
+
+let server_labels_of_url url =
+  try
+    let uri = Uri.of_string url in
+    option_label Otel_genai.Mcp_attr_key.server_address (Uri.host uri)
+    @ option_label
+        Otel_genai.Mcp_attr_key.server_port
+        (Option.map string_of_int (Uri.port uri))
+  with _ -> []
+
+let mcp_client_operation_duration_labels ~url ~method_name ~params ?error () =
+  [ Otel_genai.Mcp_attr_key.mcp_method_name, method_name
+  ; ( Otel_genai.Mcp_attr_key.mcp_protocol_version
+    , Mcp_transport_protocol.default_protocol_version )
+  ; Otel_genai.Mcp_attr_key.network_protocol_name, "http"
+  ; Otel_genai.Mcp_attr_key.network_protocol_version, "1.1"
+  ; Otel_genai.Mcp_attr_key.network_transport, "tcp"
+  ]
+  @
+  (if String.equal method_name Otel_genai.Mcp_value.tools_call_method
+   then
+     [ Otel_genai.Attr_key.gen_ai_operation_name, "execute_tool" ]
+     @ option_label Otel_genai.Attr_key.gen_ai_tool_name (tool_name_from_params params)
+   else [])
+  @ server_labels_of_url url
+  @
+  match error with
+  | None -> []
+  | Some error ->
+    [ Otel_genai.Mcp_attr_key.error_type, error.error_type ]
+    @ option_label
+        Otel_genai.Mcp_attr_key.rpc_response_status_code
+        error.rpc_response_status_code
+
+let record_mcp_client_operation_duration ~url ~method_name ~params ~started_at result =
+  let error =
+    match result with
+    | Ok _ -> None
+    | Error error -> Some error
+  in
+  Otel_metric_store.observe_histogram
+    Otel_genai.Mcp_metric_name.client_operation_duration
+    ~labels:(mcp_client_operation_duration_labels ~url ~method_name ~params ?error ())
+    (max 0.0 (Unix.gettimeofday () -. started_at))
+
+module For_testing = struct
+  let client_operation_error_opt ?rpc_response_status_code = function
+    | None -> None
+    | Some error_type ->
+      Some
+        (client_operation_error
+           ?rpc_response_status_code
+           ~error_type
+           "test error")
+  ;;
+
+  let mcp_client_operation_duration_labels ~url ~method_name ~params ?error_type
+      ?rpc_response_status_code () =
+    let error = client_operation_error_opt ?rpc_response_status_code error_type in
+    mcp_client_operation_duration_labels ~url ~method_name ~params ?error ()
+  ;;
+
+  let record_mcp_client_operation_duration ~url ~method_name ~params ~started_at
+      ?error_type ?rpc_response_status_code () =
+    let result =
+      match client_operation_error_opt ?rpc_response_status_code error_type with
+      | None -> Ok `Null
+      | Some error -> Error error
+    in
+    record_mcp_client_operation_duration ~url ~method_name ~params ~started_at result
+  ;;
+end
 
 let post_json_via_eio ~sw:_ ~(auth_token : string option) ~session_id
     ~(request_body : string) : (string, string) result =
@@ -177,6 +283,7 @@ let post_json_via_eio ~sw:_ ~(auth_token : string option) ~session_id
 let call_jsonrpc ~sw ~(auth_token : string option) ~session_id ~(method_name : string)
     ~(params : Yojson.Safe.t) : (Yojson.Safe.t, string) result =
   let request_id = next_jsonrpc_id () in
+  let url = mcp_endpoint_url ~auth_token in
   let request_body =
     `Assoc
       [
@@ -197,7 +304,7 @@ let call_jsonrpc ~sw ~(auth_token : string option) ~session_id ~(method_name : s
         "15";
         "-X";
         "POST";
-        (mcp_endpoint_url ~auth_token);
+        url;
         "-H";
         "content-type: application/json";
         "-H";
@@ -242,7 +349,8 @@ let call_jsonrpc ~sw ~(auth_token : string option) ~session_id ~(method_name : s
   in
   let rec decode attempts_left =
     match perform_request () with
-    | Error e -> Error e
+    | Error e ->
+        Error (client_operation_error ~error_type:"transport_error" e)
     | Ok raw_body ->
         let normalized = normalize_mcp_body ~request_id raw_body in
         if String.trim normalized = "" && attempts_left > 0 then
@@ -250,14 +358,20 @@ let call_jsonrpc ~sw ~(auth_token : string option) ~session_id ~(method_name : s
         else
           try
             let json = Yojson.Safe.from_string normalized in
-            match extract_jsonrpc_error json with
-            | Some msg -> Error msg
+            match extract_jsonrpc_error_detail json with
+            | Some error -> Error error
             | None -> Ok json
           with Yojson.Json_error msg ->
             if attempts_left > 0 then decode (attempts_left - 1)
-            else Error ("invalid JSON-RPC response: " ^ msg)
+            else
+              Error
+                (client_operation_error ~error_type:"json_parse_error"
+                   ("invalid JSON-RPC response: " ^ msg))
   in
-  decode 1
+  let started_at = Unix.gettimeofday () in
+  let result = decode 1 in
+  record_mcp_client_operation_duration ~url ~method_name ~params ~started_at result;
+  Result.map_error (fun error -> error.message) result
 
 let call_masc_tool ~sw ~(auth_token : string option) ~session_id ~tool_name
     ~(args : Yojson.Safe.t) :

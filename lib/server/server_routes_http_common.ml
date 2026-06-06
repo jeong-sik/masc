@@ -182,13 +182,16 @@ let mcp_transport_http_deps () : Server_mcp_transport_http.deps =
                     handle_request =
                       (fun ?(profile = Server_mcp_transport_http.Full)
                            ?mcp_session_id
+                           ?otel_mcp_protocol_version
+                           ?otel_transport_context
                            ?auth_token ?internal_keeper_runtime body_str ->
                         let profile =
                           mcp_eio_profile_of_transport_profile profile
                         in
                         Mcp_server_eio.handle_request ~clock ~sw ~profile
-                          ?mcp_session_id ?auth_token ?internal_keeper_runtime
-                          state body_str);
+                          ?mcp_session_id ?otel_mcp_protocol_version
+                          ?otel_transport_context ?auth_token
+                          ?internal_keeper_runtime state body_str);
                     clear_resource_subscriptions_for_session =
                       Mcp_server_eio.clear_resource_subscriptions_for_session;
                   }

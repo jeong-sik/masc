@@ -16,6 +16,12 @@ let protocol_version_by_session : string SMap.t Atomic.t = Atomic.make SMap.empt
 
 let mcp_profile_by_session : Server_mcp_transport_http_types.tool_profile SMap.t Atomic.t = Atomic.make SMap.empty
 
+let session_started_at : float SMap.t Atomic.t = Atomic.make SMap.empty
+
+let session_transport_context :
+  Otel_dispatch_hook.transport_context SMap.t Atomic.t =
+  Atomic.make SMap.empty
+
 (** Grace period: seconds to keep a session after SSE disconnect before reaping.
     Prevents immediate reap on brief SSE interruptions or server restart.
     Configurable via [MASC_SESSION_SSE_GRACE_PERIOD_SEC] env var (default 300 = 5 min). *)
@@ -37,11 +43,56 @@ let default_base_path () =
 let is_valid_protocol_version version =
   List.mem version mcp_protocol_versions
 
-let remember_protocol_version session_id version =
+let option_label key = function
+  | Some value when String.trim value <> "" -> [ key, value ]
+  | _ -> []
+
+let transport_context_labels = function
+  | None -> []
+  | Some transport ->
+      option_label
+        Otel_genai.Mcp_attr_key.network_protocol_name
+        transport.Otel_dispatch_hook.network_protocol_name
+      @ option_label
+          Otel_genai.Mcp_attr_key.network_protocol_version
+          transport.Otel_dispatch_hook.network_protocol_version
+      @ option_label
+          Otel_genai.Mcp_attr_key.network_transport
+          transport.Otel_dispatch_hook.network_transport
+
+let record_mcp_server_session_duration ?error_type session_id =
+  match SMap.find_opt session_id (Atomic.get session_started_at) with
+  | None -> ()
+  | Some started_at ->
+    let duration_s = max 0.0 (Unix.gettimeofday () -. started_at) in
+    let labels =
+      option_label
+        Otel_genai.Mcp_attr_key.mcp_protocol_version
+        (SMap.find_opt session_id (Atomic.get protocol_version_by_session))
+      @ transport_context_labels
+          (SMap.find_opt session_id (Atomic.get session_transport_context))
+      @ option_label Otel_genai.Mcp_attr_key.error_type error_type
+    in
+    Otel_metric_store.observe_histogram
+      Otel_genai.Mcp_metric_name.server_session_duration
+      ~labels
+      duration_s
+
+let remember_session_activity ?otel_transport_context session_id =
+  let now = Unix.gettimeofday () in
+  atomic_update session_started_at (fun map ->
+    if SMap.mem session_id map then map else SMap.add session_id now map);
+  atomic_update session_last_active_sse (fun map -> SMap.add session_id now map);
+  match otel_transport_context with
+  | None -> ()
+  | Some transport ->
+    atomic_update session_transport_context (fun map ->
+      SMap.add session_id transport map)
+
+let remember_protocol_version ?otel_transport_context session_id version =
   if is_valid_protocol_version version then begin
     atomic_update protocol_version_by_session (fun map -> SMap.add session_id version map);
-    let now = Unix.gettimeofday () in
-    atomic_update session_last_active_sse (fun map -> SMap.add session_id now map)
+    remember_session_activity ?otel_transport_context session_id
   end
 
 (** RFC-0100 PR-3 — Q3 default: known-session predicate.
@@ -60,15 +111,17 @@ let remember_protocol_version session_id version =
 let is_known_session session_id =
   SMap.mem session_id (Atomic.get protocol_version_by_session)
 
-let remember_mcp_profile session_id profile =
+let remember_mcp_profile ?otel_transport_context session_id profile =
   atomic_update mcp_profile_by_session (fun map -> SMap.add session_id profile map);
-  let now = Unix.gettimeofday () in
-  atomic_update session_last_active_sse (fun map -> SMap.add session_id now map)
+  remember_session_activity ?otel_transport_context session_id
 
 let forget_mcp_session session_id =
+  record_mcp_server_session_duration session_id;
   atomic_update protocol_version_by_session (fun map -> SMap.remove session_id map);
   atomic_update mcp_profile_by_session (fun map -> SMap.remove session_id map);
-  atomic_update session_last_active_sse (fun map -> SMap.remove session_id map)
+  atomic_update session_last_active_sse (fun map -> SMap.remove session_id map);
+  atomic_update session_started_at (fun map -> SMap.remove session_id map);
+  atomic_update session_transport_context (fun map -> SMap.remove session_id map)
 
 (* ===== File persistence ===== *)
 
@@ -97,7 +150,13 @@ let save_sessions_to_file () =
   let versions = Atomic.get protocol_version_by_session in
   let profiles = Atomic.get mcp_profile_by_session in
   let timestamps = Atomic.get session_last_active_sse in
+  let started_at = Atomic.get session_started_at in
+  let transports = Atomic.get session_transport_context in
   let all_ids = SMap.fold (fun sid _ acc -> sid :: acc) versions [] in
+  let string_field key = function
+    | Some value when String.trim value <> "" -> [ key, `String value ]
+    | _ -> []
+  in
   let json_entries =
     List.filter_map (fun sid ->
       match SMap.find_opt sid versions with
@@ -113,11 +172,34 @@ let save_sessions_to_file () =
             | Some t -> t
             | None -> 0.0
           in
-          Some (sid, `Assoc
-            [ "protocol_version", `String pv
-            ; "profile", `String profile_str
-            ; "last_active_sse", `Float ts
-            ])
+          let started =
+            match SMap.find_opt sid started_at with
+            | Some t -> t
+            | None -> ts
+          in
+          let transport_fields =
+            match SMap.find_opt sid transports with
+            | None -> []
+            | Some transport ->
+                string_field
+                  "network_protocol_name"
+                  transport.Otel_dispatch_hook.network_protocol_name
+                @ string_field
+                    "network_protocol_version"
+                    transport.Otel_dispatch_hook.network_protocol_version
+                @ string_field
+                    "network_transport"
+                    transport.Otel_dispatch_hook.network_transport
+          in
+          Some
+            ( sid
+            , `Assoc
+                ([ "protocol_version", `String pv
+                 ; "profile", `String profile_str
+                 ; "last_active_sse", `Float ts
+                 ; "started_at", `Float started
+                 ]
+                 @ transport_fields) )
     ) all_ids
   in
   let json = `Assoc [ "sessions", `Assoc json_entries ] in
@@ -140,6 +222,33 @@ let load_sessions_from_file () =
   if not (Stdlib.Sys.file_exists path) then ()
   else begin
     try
+      let float_field = function
+        | Some (`Float value) -> Some value
+        | Some (`Int value) -> Some (float_of_int value)
+        | _ -> None
+      in
+      let string_field key fields =
+        match List.assoc_opt key fields with
+        | Some (`String value) when String.trim value <> "" -> Some value
+        | _ -> None
+      in
+      let transport_context fields =
+        let network_protocol_name = string_field "network_protocol_name" fields in
+        let network_protocol_version =
+          string_field "network_protocol_version" fields
+        in
+        let network_transport = string_field "network_transport" fields in
+        match
+          network_protocol_name, network_protocol_version, network_transport
+        with
+        | None, None, None -> None
+        | _ ->
+          Some
+            { Otel_dispatch_hook.network_protocol_name
+            ; network_protocol_version
+            ; network_transport
+            }
+      in
       let json = Yojson.Basic.from_file path in
       (match json with
        | `Assoc [("sessions", `Assoc entries)] ->
@@ -149,18 +258,35 @@ let load_sessions_from_file () =
                  let pv = List.assoc_opt "protocol_version" fields in
                  let profile_str = List.assoc_opt "profile" fields in
                  let ts = List.assoc_opt "last_active_sse" fields in
-                 (match pv, profile_str, ts with
-                  | Some (`String v), Some (`String p), Some (`Float t) ->
+                 let started = List.assoc_opt "started_at" fields in
+                 (match pv with
+                  | Some (`String v) ->
                       if is_valid_protocol_version v then begin
+                        let t = float_field ts |> Option.value ~default:0.0 in
+                        let started_at =
+                          float_field started |> Option.value ~default:t
+                        in
                         atomic_update protocol_version_by_session
                           (fun map -> SMap.add sid v map);
-                        (match profile_of_string p with
+                        let profile =
+                          match profile_str with
+                          | Some (`String p) -> profile_of_string p
+                          | _ -> None
+                        in
+                        (match profile with
                          | Some profile ->
                              atomic_update mcp_profile_by_session
                                (fun map -> SMap.add sid profile map)
                          | None -> ());
                         atomic_update session_last_active_sse
-                          (fun map -> SMap.add sid t map)
+                          (fun map -> SMap.add sid t map);
+                        atomic_update session_started_at
+                          (fun map -> SMap.add sid started_at map);
+                        (match transport_context fields with
+                         | Some transport ->
+                             atomic_update session_transport_context
+                               (fun map -> SMap.add sid transport map)
+                         | None -> ())
                       end
                   | _ -> ())
              | _ -> ()
@@ -202,6 +328,7 @@ let reap_stale_sessions ~is_active_session =
     ) (Atomic.get protocol_version_by_session) ([], 0)
   in
   if stale <> [] then begin
+    List.iter record_mcp_server_session_duration stale;
     atomic_update protocol_version_by_session (fun map ->
       List.fold_left (fun m sid -> SMap.remove sid m) map stale
     );
@@ -209,6 +336,12 @@ let reap_stale_sessions ~is_active_session =
       List.fold_left (fun m sid -> SMap.remove sid m) map stale
     );
     atomic_update session_last_active_sse (fun map ->
+      List.fold_left (fun m sid -> SMap.remove sid m) map stale
+    );
+    atomic_update session_started_at (fun map ->
+      List.fold_left (fun m sid -> SMap.remove sid m) map stale
+    );
+    atomic_update session_transport_context (fun map ->
       List.fold_left (fun m sid -> SMap.remove sid m) map stale
     )
   end;

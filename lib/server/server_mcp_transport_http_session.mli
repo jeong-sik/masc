@@ -27,7 +27,9 @@ val is_valid_protocol_version : string -> bool
     per-session protocol version and tool profile.  All
     accessors below are thread-safe via internal CAS loops. *)
 
-val remember_protocol_version : string -> string -> unit
+val remember_protocol_version :
+  ?otel_transport_context:Otel_dispatch_hook.transport_context ->
+  string -> string -> unit
 (** [remember_protocol_version session_id version] records the
     version when [is_valid_protocol_version version] is [true];
     silently no-ops on unknown versions (the upstream caller is
@@ -42,6 +44,7 @@ val is_known_session : string -> bool
     completion. *)
 
 val remember_mcp_profile :
+  ?otel_transport_context:Otel_dispatch_hook.transport_context ->
   string -> Server_mcp_transport_http_types.tool_profile -> unit
 
 val forget_mcp_session : string -> unit

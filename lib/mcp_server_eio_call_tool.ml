@@ -124,8 +124,54 @@ let activity_tool_called_payload ~tool_name ~success ~duration_ms ~source
      @ List.filter_map activity_int_field [ "pr_number"; "issue_number" ])
   |> Safe_ops.sanitize_json_utf8
 
+let option_label key = function
+  | Some value when String.trim value <> "" -> [ key, value ]
+  | Some _ | None -> []
+;;
+
+let mcp_server_operation_duration_labels (result : Tool_result.result) context =
+  let transport =
+    match context.Otel_dispatch_hook.transport with
+    | None -> []
+    | Some transport ->
+      option_label
+        Otel_genai.Mcp_attr_key.network_protocol_name
+        transport.network_protocol_name
+      @ option_label
+          Otel_genai.Mcp_attr_key.network_protocol_version
+          transport.network_protocol_version
+      @ option_label
+          Otel_genai.Mcp_attr_key.network_transport
+          transport.network_transport
+  in
+  [ Otel_genai.Mcp_attr_key.mcp_method_name, Otel_genai.Mcp_value.tools_call_method
+  ; Otel_genai.Attr_key.gen_ai_operation_name, "execute_tool"
+  ; Otel_genai.Attr_key.gen_ai_tool_name, Tool_result.tool_name result
+  ]
+  @ option_label
+      Otel_genai.Mcp_attr_key.mcp_protocol_version
+      context.mcp_protocol_version
+  @ transport
+  @
+  if Tool_result.is_success result
+  then []
+  else
+    [ Otel_genai.Mcp_attr_key.error_type, Otel_genai.Mcp_value.tool_error_type ]
+;;
+
+let record_mcp_server_operation_duration result =
+  match Otel_dispatch_hook.current_request_context () with
+  | None -> ()
+  | Some context ->
+    Otel_metric_store.observe_histogram
+      Otel_genai.Mcp_metric_name.server_operation_duration
+      ~labels:(mcp_server_operation_duration_labels result context)
+      (Tool_result.duration_ms result /. 1000.0)
+;;
+
 module For_testing = struct
   let activity_tool_called_payload = activity_tool_called_payload
+  let record_mcp_server_operation_duration = record_mcp_server_operation_duration
 end
 
 let nonempty_string_opt = function
@@ -718,6 +764,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
   (* Otel_metric_store: record errors for failed tool calls *)
   if not success then
     Otel_metric_store.record_error ~error_type:name ();
+  record_mcp_server_operation_duration result;
 
   (* Track in-memory call counter for all declared tool names (including hidden). *)
   (* Tool assignment telemetry: Called → Completed causal chain.

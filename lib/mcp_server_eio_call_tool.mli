@@ -72,6 +72,8 @@ module For_testing : sig
     ?tool_args_preview:string ->
     Yojson.Safe.t ->
     Yojson.Safe.t
+
+  val record_mcp_server_operation_duration : Tool_result.result -> unit
 end
 
 (** {1 Per-tool timeout} *)

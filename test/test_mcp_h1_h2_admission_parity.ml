@@ -75,6 +75,10 @@ let assert_accept_mode label expected actual =
   in
   check bool label true same
 
+let metric_value name labels =
+  Masc.Otel_metric_store.get_metric_value name ~labels ()
+  |> Option.value ~default:0.0
+
 let context ?(session_id = "ctx-session") ?(session_was_provided = true) () =
   Request_context.make
     ~session_id_opt:(if session_was_provided then Some session_id else None)
@@ -253,6 +257,36 @@ let test_shared_protocol_and_delete_matrix () =
   check (option string) "DELETE without session has no admission id" None
     (Transport.get_session_id_any (request ~meth:`DELETE "/mcp"))
 
+let test_records_mcp_server_session_duration_metric () =
+  let session_id = "h1-h2-parity-session-duration" in
+  let transport_context =
+    Otel_dispatch_hook.http_transport_context ~protocol_version:"1.1"
+  in
+  let labels =
+    [
+      (Otel_genai.Mcp_attr_key.mcp_protocol_version, "2025-11-25");
+      (Otel_genai.Mcp_attr_key.network_protocol_name, "http");
+      (Otel_genai.Mcp_attr_key.network_protocol_version, "1.1");
+      (Otel_genai.Mcp_attr_key.network_transport, "tcp");
+    ]
+  in
+  let count_metric =
+    Otel_genai.Mcp_metric_name.server_session_duration ^ "_count"
+  in
+  let before_count = metric_value count_metric labels in
+  Fun.protect
+    ~finally:(fun () -> Transport.forget_mcp_session session_id)
+    (fun () ->
+      Transport.remember_protocol_version
+        ~otel_transport_context:transport_context
+        session_id
+        "2025-11-25";
+      Transport.forget_mcp_session session_id);
+  let after_count = metric_value count_metric labels in
+  check (float 0.0001) "server session duration count increments"
+    (before_count +. 1.0)
+    after_count
+
 let test_h1_h2_post_route_wiring_parity () =
   let h1 = source_file "lib/server/server_mcp_transport_http.ml" in
   let h2 = source_file "lib/server/server_h2_gateway.ml" in
@@ -309,6 +343,8 @@ let () =
             test_shared_post_admission_matrix;
           test_case "protocol and DELETE predicate matrix" `Quick
             test_shared_protocol_and_delete_matrix;
+          test_case "server session duration metric" `Quick
+            test_records_mcp_server_session_duration_metric;
         ] );
       ( "route-wiring",
         [

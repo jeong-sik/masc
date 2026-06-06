@@ -79,6 +79,59 @@ let test_mcp_endpoint_url_does_not_leak_token () =
     in
     check string "mcp url stays clean" "http://127.0.0.1:8935/mcp" url)
 
+let client_operation_params =
+  `Assoc [ ("name", `String "masc_status"); ("arguments", `Assoc []) ]
+
+let client_operation_labels ?error_type ?rpc_response_status_code () =
+  Worker_container_types.For_testing.mcp_client_operation_duration_labels
+    ~url:"http://127.0.0.1:8935/mcp"
+    ~method_name:Otel_genai.Mcp_value.tools_call_method
+    ~params:client_operation_params
+    ?error_type
+    ?rpc_response_status_code
+    ()
+
+let test_mcp_client_operation_duration_labels_follow_semconv () =
+  let labels =
+    client_operation_labels ~error_type:"-32602" ~rpc_response_status_code:"-32602" ()
+  in
+  check (list (pair string string)) "client operation labels"
+    [
+      (Otel_genai.Mcp_attr_key.mcp_method_name, Otel_genai.Mcp_value.tools_call_method);
+      ( Otel_genai.Mcp_attr_key.mcp_protocol_version,
+        Mcp_transport_protocol.default_protocol_version );
+      (Otel_genai.Mcp_attr_key.network_protocol_name, "http");
+      (Otel_genai.Mcp_attr_key.network_protocol_version, "1.1");
+      (Otel_genai.Mcp_attr_key.network_transport, "tcp");
+      (Otel_genai.Attr_key.gen_ai_operation_name, "execute_tool");
+      (Otel_genai.Attr_key.gen_ai_tool_name, "masc_status");
+      (Otel_genai.Mcp_attr_key.server_address, "127.0.0.1");
+      (Otel_genai.Mcp_attr_key.server_port, "8935");
+      (Otel_genai.Mcp_attr_key.error_type, "-32602");
+      (Otel_genai.Mcp_attr_key.rpc_response_status_code, "-32602");
+    ]
+    labels;
+  check bool "client operation metric omits session id" false
+    (List.exists
+       (fun (key, _) -> String.equal key Otel_genai.Mcp_attr_key.mcp_session_id)
+       labels)
+
+let test_records_mcp_client_operation_duration_metric () =
+  let metric_name = Otel_genai.Mcp_metric_name.client_operation_duration in
+  let labels = client_operation_labels () in
+  let before_count =
+    Otel_metric_store.metric_value_or_zero (metric_name ^ "_count") ~labels ()
+  in
+  Worker_container_types.For_testing.record_mcp_client_operation_duration
+    ~url:"http://127.0.0.1:8935/mcp"
+    ~method_name:Otel_genai.Mcp_value.tools_call_method
+    ~params:client_operation_params
+    ~started_at:(Unix.gettimeofday () -. 0.25)
+    ();
+  check (float 0.0001) "client operation count increments"
+    (before_count +. 1.0)
+    (Otel_metric_store.metric_value_or_zero (metric_name ^ "_count") ~labels ())
+
 let () =
   run "Worker_runtime"
     [
@@ -94,5 +147,9 @@ let () =
             test_merge_usage_sums_costs_when_both_present;
           test_case "mcp endpoint url does not leak token" `Quick
             test_mcp_endpoint_url_does_not_leak_token;
+          test_case "MCP client operation duration labels follow semconv" `Quick
+            test_mcp_client_operation_duration_labels_follow_semconv;
+          test_case "records MCP client operation duration metric" `Quick
+            test_records_mcp_client_operation_duration_metric;
         ] );
     ]

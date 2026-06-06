@@ -159,9 +159,10 @@
   masc.resilience
   masc.multimodal
   masc.repo_manager
-  masc.parse_outcome
-  masc.otel_dispatch_hook
-  masc.otel_spans
+	  masc.parse_outcome
+	  masc.otel_genai
+	  masc.otel_dispatch_hook
+	  masc.otel_spans
   masc.pool_metrics)
  (preprocess
   (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq ppx_let ppx_tla))

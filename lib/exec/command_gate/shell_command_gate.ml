@@ -46,6 +46,7 @@ type verdict =
 
 type allowlist_policy = {
   redirect_allowed : bool;
+  allowed_commands : string list;
   allow_pipes : bool;
 }
 
@@ -374,13 +375,23 @@ type stage_block =
   | Stage_not_allowed of { stage : int; bin : string }
   | Stage_unreducible of { stage : int; wrapper : string; detail : string }
 
-let first_blocked_stage (stages : SI.simple list)
+let first_blocked_stage ~allowed_commands (stages : SI.simple list)
   : stage_block option
   =
-  (* RFC-0219: allowlist check removed. Safety is provided by Shell IR
-     risk classification (destructive/R0/R1/R2) and the destructive +
-     write operation gates in keeper_tool_execute_runtime.ml. *)
-  None
+  let rec scan idx = function
+    | [] -> None
+    | s :: rest ->
+      (match effective_bin_of_stage s with
+       | Unreducible detail ->
+         Some
+           (Stage_unreducible
+              { stage = idx; wrapper = BIN.to_string s.SI.bin; detail })
+       | Bin bin ->
+         if bin_allowed ~allowed_commands bin
+         then scan (idx + 1) rest
+         else Some (Stage_not_allowed { stage = idx; bin }))
+  in
+  scan 1 stages
 ;;
 
 let stage_has_redirect (simple : SI.simple) : bool =
@@ -466,7 +477,35 @@ let apply_policy ~(allowlist : allowlist_policy) ~(path_policy : path_policy)
         ; diagnostic
         }
     else
-    match first_path_failure ~path_policy stages with
+      (match
+         first_blocked_stage ~allowed_commands:allowlist.allowed_commands stages
+       with
+       | Some (Stage_not_allowed { stage = stage_idx; bin }) ->
+         let reason, diagnostic =
+           if stage_n = 1 then
+             ( Command_not_in_allowlist { bin }
+             , Printf.sprintf "%s not in shell command allowlist" bin )
+           else
+             ( Pipeline_segment_disallowed { stage = stage_idx; bin }
+             , Printf.sprintf
+                 "pipeline stage %d command %s not in shell command allowlist"
+                 stage_idx
+                 bin )
+         in
+         Reject { context; reason; diagnostic }
+       | Some (Stage_unreducible { stage = stage_idx; wrapper; detail }) ->
+         Reject
+           { context
+           ; reason = Wrapper_unreducible { stage = stage_idx; wrapper; detail }
+           ; diagnostic =
+               Printf.sprintf
+                 "stage %d: %s wrapper cannot be statically authorized (%s)"
+                 stage_idx
+                 wrapper
+                 detail
+           }
+       | None ->
+         (match first_path_failure ~path_policy stages with
           | Some (stage_idx, raw_path, diagnostic) ->
             Reject
               { context
@@ -484,7 +523,7 @@ let apply_policy ~(allowlist : allowlist_policy) ~(path_policy : path_policy)
                      Printf.sprintf "pipeline stage %d carries a redirect" stage
                  }
              | None -> Allow context
-             | Some _ -> Allow context)
+             | Some _ -> Allow context)))
 ;;
 
 let parse_only_to_stages (parsed : SI.t PD.t) :

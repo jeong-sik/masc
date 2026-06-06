@@ -601,6 +601,27 @@ let handle_tool_execute_typed
               ]
             ()
         else
+          let repo_sync_policy =
+            if write_enabled
+            then Keeper_sandbox_repo_lifecycle.Allow_repo_sync
+            else Keeper_sandbox_repo_lifecycle.Reject_repo_sync
+          in
+          let allow_stale_preserved_repo_context =
+            is_git_diagnostic_command || is_direct_repo_git_recovery
+          in
+          match
+            Keeper_sandbox_repo_lifecycle.validate_cwd_ready
+              ~repo_sync_policy
+              ~config
+              ~meta
+              ~cwd
+              ~allow_stale_preserved_repo_context
+          with
+          | Error e ->
+            error_json
+              ~fields:(("blocked_cmd", `String cmd_for_log) :: typed_error_fields)
+              e
+          | Ok () ->
           let allowed_commands =
             match mode with
             | Keeper_tool_execute_typed_input.Dev_full -> Exec_policy.dev_allowed_commands
@@ -617,6 +638,11 @@ let handle_tool_execute_typed
           let t0 = Unix.gettimeofday () in
           let dispatch_result =
             Keeper_tool_execute_shell_ir.dispatch_classified
+              ~before_path_validation:
+                (Keeper_sandbox_repo_lifecycle.validate_path_args_ready
+                   ~config
+                   ~meta
+                   ~cwd)
               ~allowed_commands
               ~keeper_id:meta.name
               ~base_path:root

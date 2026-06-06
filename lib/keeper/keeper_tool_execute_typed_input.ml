@@ -287,14 +287,13 @@ let of_json (json : Yojson.Safe.t) =
 ;;
 
 (* Execve-style: argv tokens pass verbatim to the child process, so
-   shell metacharacters ([;|&><`$*?]) are literal data, not operators.
-   Only control characters that cannot survive process-boundary
-   serialization are rejected.  See .mli "Design constraints" for the
-   rationale. *)
+   shell metacharacters ([;|&><`$*?]) and line breaks are literal data, not
+   operators.  NUL is the only byte that cannot be represented inside an argv
+   string.  See .mli "Design constraints" for the rationale. *)
 let shell_metachar_in_token token =
   String.exists
     (function
-      | '\000' | '\n' | '\r' -> true
+      | '\000' -> true
       | _ -> false)
     token
 ;;
@@ -656,8 +655,8 @@ let pp_validation_error ppf = function
   | Argv_contains_shell_metachar { executable; index; token } ->
     Format.fprintf
       ppf
-      "executable %S argv[%d]=%S contains shell metacharacter; \
-       split into Pipeline stages instead"
+      "executable %S argv[%d]=%S contains NUL; typed Execute argv strings \
+       cannot contain NUL bytes"
       executable
       index
       token
@@ -697,7 +696,7 @@ let pp_validation_error ppf = function
 let validation_error_alternatives : validation_error -> string list = function
   | Executable_not_allowlisted { name; mode } ->
     executable_not_allowlisted_alternatives ~name ~mode
-  | Argv_contains_shell_metachar _ -> [ "Pipeline" ]
+  | Argv_contains_shell_metachar _ -> []
   | Argv_contains_shell_redirection _ ->
     [ "discard_stderr"; "discard_stdout"; "Pipeline" ]
   | _ -> []

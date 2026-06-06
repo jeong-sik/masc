@@ -21,6 +21,7 @@ val command_to_string : voice_command -> string
 val command_of_string : string -> voice_command option
 
 val handle_voice_tool :
+  config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   name:string ->
   args:Yojson.Safe.t ->

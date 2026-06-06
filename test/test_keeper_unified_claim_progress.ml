@@ -127,6 +127,25 @@ let test_contract_progress_filters_no_progress_tool_results () =
          ])
 ;;
 
+let test_material_progress_does_not_special_case_worktree_reuse_text () =
+  check
+    bool
+    "empty output has no material progress"
+    false
+    (KTP.tool_result_has_material_progress
+       ~tool_name:"tool_execute"
+       ~output_text:"");
+  check
+    bool
+    "worktree reuse text is just tool output"
+    true
+    (KTP.tool_result_has_material_progress
+       ~tool_name:"tool_execute"
+       ~output_text:
+         "Worktree already exists: /tmp/repo/.worktrees/task\n\
+          Branch already checked out: feature/task\n")
+;;
+
 let () =
   run
     "keeper_unified_claim_progress"
@@ -151,6 +170,10 @@ let () =
             "contract progress filters no-progress tool results"
             `Quick
             test_contract_progress_filters_no_progress_tool_results
+        ; test_case
+            "material progress does not special-case worktree reuse text"
+            `Quick
+            test_material_progress_does_not_special_case_worktree_reuse_text
         ] )
     ]
 ;;

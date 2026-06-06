@@ -197,14 +197,7 @@ let result_text_for_progress_check output_text =
   | Tool_output.Inline value -> value
 ;;
 
-let tool_result_has_material_progress ~(tool_name : string) ~(output_text : string)
-  : bool
-  =
-  let tool_name = Keeper_tool_resolution.canonical_tool_name tool_name in
+let tool_result_has_material_progress ~tool_name:_ ~(output_text : string) : bool =
   let output_text = result_text_for_progress_check output_text |> String.trim in
-  let idempotent_worktree_noop =
-    String.equal tool_name "tool_execute"
-    && String.starts_with ~prefix:"Worktree already exists:" output_text
-  in
-  (not (String.equal output_text "")) && not idempotent_worktree_noop
+  not (String.equal output_text "")
 ;;

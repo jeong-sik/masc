@@ -614,6 +614,14 @@ describe('AgentRoster live-only cards', () => {
         pipeline_stage: 'idle',
         keepalive_running: true,
       } as Keeper,
+      {
+        name: 'qa-king',
+        agent_name: 'keeper-qa-king-agent',
+        status: 'offline',
+        phase: 'Offline',
+        pipeline_stage: 'offline',
+        keepalive_running: false,
+      } as Keeper,
     ]
 
     await act(async () => {
@@ -623,10 +631,14 @@ describe('AgentRoster live-only cards', () => {
 
     const rows = container.querySelectorAll('[data-testid="keeper-operations-row"]')
     const text = container.textContent ?? ''
-    expect(rows.length).toBe(2)
+    expect(rows.length).toBe(3)
     expect(text).toContain('albini')
     expect(text).toContain('rondo')
+    expect(text).toContain('qa-king')
     expect(text).toContain('일시정지')
+    expect(text).toContain('재개 대기')
+    expect(text).toContain('오프라인')
+    expect(text).toContain('기동 필요')
     expect(text).not.toContain('상세 상태 부분 동기화')
   })
 

@@ -75,7 +75,11 @@ describe('dashboardHealthChips', () => {
     expect(chips.find(chip => chip.key === 'keeper-count-basis')?.label)
       .toBe('키퍼 런타임 가동 1 / 일시정지 1 / 설정 2')
     expect(chips.find(chip => chip.key === 'keeper-count-basis')?.detail)
-      .toBe('런타임 가동=shell, paused=상세 행 lifecycle, offline=상세 행 status, 설정=shell keeper inventory.')
+      .toBe('런타임 가동=shell; 일시정지=재개 대기 lifecycle row; 오프라인=프로세스/하트비트 없음으로 기동 필요 row; 설정=shell keeper 설정.')
+    expect(chips.find(chip => chip.key === 'paused-keepers')?.label)
+      .toBe('일시정지 keeper 1')
+    expect(chips.find(chip => chip.key === 'paused-keepers')?.detail)
+      .toBe('재개 대기 상태의 keeper가 있습니다. board/tool 활동은 조용해 보일 수 있습니다.')
   })
 
   it('does not label an intentional server/base split as data source mismatch', () => {
@@ -117,7 +121,7 @@ describe('dashboardHealthChips', () => {
     expect(chips.find(chip => chip.key === 'keeper-count-basis')?.label)
       .toBe('키퍼 런타임 가동 2 / 설정 16')
     expect(chips.find(chip => chip.key === 'keeper-count-basis')?.detail)
-      .toBe('런타임 가동=shell, paused=상세 행 lifecycle, offline=상세 행 status, 설정=project snapshot keeper inventory.')
+      .toBe('런타임 가동=shell; 일시정지=재개 대기 lifecycle row; 오프라인=프로세스/하트비트 없음으로 기동 필요 row; 설정=project snapshot keeper 설정.')
   })
 
   it('returns a healthy chip when no runtime risk is visible', () => {

@@ -106,3 +106,24 @@ val handle_keeper_chat_stream :
     on switch release; surfaces handler exceptions
     through the SSE stream rather than the HTTP envelope
     once the headers have flushed. *)
+
+(** {1 Turn execution (shared between HTTP handler and queue consumer)} *)
+
+val process_single_turn :
+  state:Mcp_server.server_state ->
+  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  sw:Eio.Switch.t ->
+  auth_token:string option ->
+  thread_id:string ->
+  closed:bool ref ->
+  payload:keeper_chat_stream_request ->
+  run_id:string ->
+  message_id:string ->
+  agent_name:string ->
+  events:Keeper_chat_events.keeper_chat_event Eio.Stream.t ->
+  unit
+(** Execute a single keeper turn, publishing events to the provided
+    event stream.  [closed] is a mutable flag that suppresses worker
+    event pushes when set to [true] (used by the SSE adapter when the
+    HTTP stream is closed).  [auth_token] is [None] for queue-consumer
+    turns where no HTTP request is available. *)

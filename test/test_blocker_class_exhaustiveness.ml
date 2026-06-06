@@ -134,6 +134,7 @@ let test_variant_count () =
 module SdkE = Agent_sdk.Error
 module SdkRetry = Agent_sdk.Retry
 module KSB = Masc.Keeper_status_bridge_blocker
+module KTD = Masc.Keeper_turn_driver
 module Reg = Masc.Keeper_registry
 
 (** Every [Agent_sdk.Error.Agent _] sub-variant must map to a [Some blocker_class]
@@ -238,6 +239,27 @@ let test_structural_timeout_maps_to_oas_timeout () =
   | None -> fail "structural timeout should map to Some blocker_class"
 ;;
 
+let test_provider_timeout_is_not_runtime_blocker () =
+  let provider_timeout =
+    KTD.sdk_error_of_masc_internal_error
+      (KTD.Provider_timeout
+         { budget_sec = 555.0
+         ; keeper_turn_timeout_sec = 600.0
+         ; estimated_input_tokens = 4302
+         ; source = "first_attempt_limited_by_turn_budget"
+         ; remaining_turn_budget_sec = Some 45.0
+         ; min_required_sec = 15.0
+         ; phase = "runtime_attempt_watchdog"
+         })
+  in
+  match KSB.blocker_class_of_sdk_error provider_timeout with
+  | None -> ()
+  | Some klass ->
+    failf
+      "provider timeout should remain a provider liveness signal, got blocker_class %S"
+      (blocker_class_to_string klass)
+;;
+
 (* ── Provider runtime record classification ────────────────────── *)
 
 let provider_runtime_surface_exn
@@ -330,6 +352,8 @@ let () =
         ; test_case "Agent variant count pin" `Quick test_agent_variant_count_pin
         ; test_case "structural timeout → oas_agent_execution_timeout" `Quick
             test_structural_timeout_maps_to_oas_timeout
+        ; test_case "provider timeout is not a runtime blocker" `Quick
+            test_provider_timeout_is_not_runtime_blocker
         ] )
     ; ( "provider_runtime_record"
       , [ test_case "typed reason falls through" `Quick

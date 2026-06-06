@@ -345,17 +345,44 @@ let task_op_of_name name =
   | None -> None
 ;;
 
-let state_report_result_json args =
-  let snapshot =
+let state_report_result_json ~(config : Workspace.config) ~(meta : keeper_meta) args =
+  let snapshot, has_state =
     match Keeper_memory_policy.structured_state_snapshot_schema.parse args with
-    | Ok snapshot -> snapshot
-    | Error _ -> Keeper_memory_policy.empty_keeper_state_snapshot
+    | Ok snapshot -> Keeper_memory_policy.cap_snapshot snapshot, true
+    | Error _ -> Keeper_memory_policy.empty_keeper_state_snapshot, false
+  in
+  let progress_snapshot = Keeper_memory_policy.forward_looking_snapshot snapshot in
+  let progress_snapshot_saved =
+    if not has_state
+    then false
+    else (
+      let progress_path = Keeper_types_support.keeper_progress_path config meta.name in
+      match
+        Keeper_memory_policy.write_progress_snapshot_path
+          ~path:progress_path
+          ~generation:meta.runtime.generation
+          ~updated_at:(now_iso ())
+          progress_snapshot
+      with
+      | Ok () -> true
+      | Error err ->
+        Log.Keeper.warn
+          "keeper:%s report_state progress snapshot write failed: %s"
+          meta.name err;
+        Otel_metric_store.inc_counter
+          Keeper_metrics.(to_string SnapshotWriteFailures)
+          ~labels:[("keeper", meta.name)]
+          ();
+        false)
   in
   Yojson.Safe.to_string
     (`Assoc
        [ "ok", `Bool true
        ; ( "state_snapshot"
          , Keeper_memory_policy.keeper_state_snapshot_to_json snapshot )
+       ; ( "progress_snapshot"
+         , Keeper_memory_policy.keeper_state_snapshot_to_json progress_snapshot )
+       ; "progress_snapshot_saved", `Bool progress_snapshot_saved
        ; "state_block", `String (Keeper_memory_policy.render_state_block snapshot)
        ; "typed_outcome", Keeper_tool_outcome.to_json Keeper_tool_outcome.Progress
        ])
@@ -736,7 +763,7 @@ let handle_keeper_task_tool
          match accountability_warning with
          | Some warning -> [ ("routing_warning", `String warning) ]
          | None -> []))
-    | State_report -> state_report_result_json args
+    | State_report -> state_report_result_json ~config ~meta args
     | Task_done ->
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
     let result_text = Safe_ops.json_string ~default:"" "result" args |> String.trim in

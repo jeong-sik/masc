@@ -22,6 +22,7 @@
 module D = Masc.Keeper_turn_disposition
 module Code = Masc.Keeper_turn_terminal_code
 module Legacy = Masc.Keeper_turn_terminal
+module KTD = Masc.Keeper_turn_driver
 module Registry = Masc.Keeper_registry
 module Unified_types = Masc.Keeper_unified_turn_types
 
@@ -242,6 +243,34 @@ let test_projection () =
     runtime_codes_to_projection
 ;;
 
+let test_provider_timeout_terminal_is_provider_error () =
+  let err =
+    KTD.sdk_error_of_masc_internal_error
+      (KTD.Provider_timeout
+         { budget_sec = 555.0
+         ; keeper_turn_timeout_sec = 600.0
+         ; estimated_input_tokens = 4302
+         ; source = "first_attempt_limited_by_turn_budget"
+         ; remaining_turn_budget_sec = Some 45.0
+         ; min_required_sec = 15.0
+         ; phase = "runtime_attempt_watchdog"
+         })
+  in
+  let terminal =
+    Legacy.of_failure
+      ~raw_error:(Agent_sdk.Error.to_string err)
+      err
+  in
+  Alcotest.(check string)
+    "provider timeout terminal code"
+    "provider_timeout"
+    (Legacy.code terminal);
+  Alcotest.(check string)
+    "provider timeout disposition"
+    "provider_timeout"
+    (D.to_wire terminal.disposition)
+;;
+
 let check_runtime_failure_reason raw_error expected_code =
   let terminal = Legacy.of_code raw_error in
   match Unified_types.registry_failure_reason_of_terminal_reason terminal ~raw_error with
@@ -317,6 +346,10 @@ let () =
             "every runtime variant projects deterministically"
             `Quick
             test_projection
+        ; Alcotest.test_case
+            "provider timeout is provider error, not turn wall-clock"
+            `Quick
+            test_provider_timeout_terminal_is_provider_error
         ] )
     ; ( "registry failure reason"
       , [ Alcotest.test_case

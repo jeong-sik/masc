@@ -76,3 +76,13 @@ val resume_model_id_of_checkpoint :
   Worker_container_types.worker_container_meta ->
   Agent_sdk.Checkpoint.t ->
   string
+
+module For_testing : sig
+  val begin_worker_mcp_client_session :
+    Worker_container_types.worker_container_meta ->
+    Worker_container_types.worker_container_meta
+
+  val finish_worker_mcp_client_session :
+    Worker_container_types.worker_container_meta ->
+    Worker_container_types.worker_container_meta
+end

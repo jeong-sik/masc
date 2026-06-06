@@ -475,9 +475,26 @@ let record_worker_mcp_client_session_duration
 let begin_worker_mcp_client_session
       (meta : Worker_container_types.worker_container_meta)
   =
-  (* NDT-OK: this stamps a client-session telemetry interval, not control flow. *)
-  { meta with mcp_client_session_started_at = Some (Unix.gettimeofday ()) }
+  match meta.mcp_client_session_started_at with
+  | Some _ -> meta
+  | None ->
+    (* NDT-OK: this stamps a client-session telemetry interval, not control flow. *)
+    { meta with mcp_client_session_started_at = Some (Unix.gettimeofday ()) }
 ;;
+
+let finish_worker_mcp_client_session
+      (meta : Worker_container_types.worker_container_meta)
+  =
+  { meta with
+    mcp_client_session_started_at = None
+  ; last_run_at = Some (Time_compat.now ())
+  }
+;;
+
+module For_testing = struct
+  let begin_worker_mcp_client_session = begin_worker_mcp_client_session
+  let finish_worker_mcp_client_session = finish_worker_mcp_client_session
+end
 
 (* ================================================================ *)
 (* Run Worker via OAS                                                *)
@@ -688,29 +705,26 @@ and run_existing_worker_agent
         | Ok _ -> None
         | Error _ -> Some "agent_error"
       in
+      let* () =
+        Worker_container.save_worker_checkpoint ~base_path ~worker_name checkpoint
+      in
+      let completed_meta = finish_worker_mcp_client_session meta in
+      let* () =
+        Worker_container.save_worker_meta
+          ~base_path
+          ~worker_name
+          completed_meta
+      in
       record_worker_mcp_client_session_duration
         ~auth_token
         ~meta
         ?error_type:session_error_type
         ();
-      let* () =
-        Worker_container.save_worker_checkpoint ~base_path ~worker_name checkpoint
-      in
-      let* () =
-        Worker_container.save_worker_meta
-          ~base_path
-          ~worker_name
-          {
-            meta with
-            mcp_client_session_started_at = None;
-            last_run_at = Some (Time_compat.now ());
-          }
-      in
        Worker_container.materialize_direct_evidence
          ~base_path
          ~worker_name
          ~worker_run_id
-         ~meta
+         ~meta:completed_meta
          ~prompt
          ~workspace_path
          ~agent

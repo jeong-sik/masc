@@ -188,6 +188,49 @@ let test_records_mcp_client_session_duration_metric () =
     (before_count +. 1.0)
     (Otel_metric_store.metric_value_or_zero (metric_name ^ "_count") ~labels ())
 
+let worker_meta ?mcp_client_session_started_at () =
+  {
+    Worker_container_types.version =
+      Worker_container_types.worker_container_version;
+    worker_name = "coverage-worker";
+    mcp_session_id = "coverage-session";
+    workspace_path = "/tmp/coverage-workspace";
+    role = None;
+    selection_note = None;
+    runtime_backend = Worker_execution_backend.Local_playground;
+    thinking_enabled = None;
+    timeout_seconds = None;
+    effective_model = "test-model";
+    checkpoint_path = "/tmp/coverage-checkpoint.json";
+    turn_log_path = "/tmp/coverage-turns.jsonl";
+    mcp_client_session_started_at;
+    last_run_at = None;
+  }
+
+let test_worker_mcp_client_session_preserves_persisted_start () =
+  let started_at = 42.0 in
+  let begun =
+    Worker_oas.For_testing.begin_worker_mcp_client_session
+      (worker_meta ~mcp_client_session_started_at:started_at ())
+  in
+  check (option (float 0.0001)) "persisted start is preserved"
+    (Some started_at)
+    begun.mcp_client_session_started_at;
+  let fresh =
+    Worker_oas.For_testing.begin_worker_mcp_client_session (worker_meta ())
+  in
+  check bool "fresh session receives a start timestamp" true
+    (Option.is_some fresh.mcp_client_session_started_at)
+
+let test_worker_mcp_client_session_finish_clears_started_at () =
+  let completed =
+    Worker_oas.For_testing.finish_worker_mcp_client_session
+      (worker_meta ~mcp_client_session_started_at:42.0 ())
+  in
+  check (option (float 0.0001)) "active session timestamp cleared" None
+    completed.mcp_client_session_started_at;
+  check bool "last_run_at recorded" true (Option.is_some completed.last_run_at)
+
 let () =
   run "Worker_runtime"
     [
@@ -214,5 +257,11 @@ let () =
             test_mcp_client_session_duration_labels_follow_semconv;
           test_case "records MCP client session duration metric" `Quick
             test_records_mcp_client_session_duration_metric;
+          test_case "worker MCP client session preserves persisted start"
+            `Quick
+            test_worker_mcp_client_session_preserves_persisted_start;
+          test_case "worker MCP client session finish clears active start"
+            `Quick
+            test_worker_mcp_client_session_finish_clears_started_at;
         ] );
     ]

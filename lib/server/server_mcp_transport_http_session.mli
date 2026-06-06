@@ -35,6 +35,17 @@ val remember_protocol_version :
     silently no-ops on unknown versions (the upstream caller is
     expected to have validated first). *)
 
+val remember_protocol_version_if_initialize_succeeded :
+  ?otel_transport_context:Otel_dispatch_hook.transport_context ->
+  string ->
+  request_body:string ->
+  response_json:Yojson.Safe.t ->
+  unit
+(** [remember_protocol_version_if_initialize_succeeded session_id
+    ~request_body ~response_json] records initialize protocol/session
+    activity only when [response_json] is a successful JSON-RPC response.
+    Rejected initialize requests must not start session-duration state. *)
+
 val is_known_session : string -> bool
 (** RFC-0100 PR-3 — Q3 default. [true] iff the server has previously
     recorded a protocol version for [session_id] (i.e., an

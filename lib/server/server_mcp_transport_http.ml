@@ -379,12 +379,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                             in
                             let response_protocol_version =
                               match protocol_version_from_body body_str with
-                              | Some v ->
-                                  remember_protocol_version
-                                    ~otel_transport_context
-                                    session_id
-                                    v;
-                                  v
+                              | Some v -> v
                               | None ->
                                   get_protocol_version_for_session ~session_id request
                             in
@@ -418,6 +413,11 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                   ~otel_transport_context
                                   ~internal_keeper_runtime body_with_agent
                               in
+                              remember_protocol_version_if_initialize_succeeded
+                                ~otel_transport_context
+                                session_id
+                                ~request_body:body_str
+                                ~response_json;
                               let protocol_version =
                                 get_protocol_version_for_session ~session_id request
                               in

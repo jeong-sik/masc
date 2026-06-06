@@ -48,6 +48,9 @@ let is_valid_protocol_version =
 let remember_protocol_version =
   Server_mcp_transport_http.remember_protocol_version
 
+let remember_protocol_version_if_initialize_succeeded =
+  Server_mcp_transport_http.remember_protocol_version_if_initialize_succeeded
+
 let remember_mcp_profile = Server_mcp_transport_http.remember_mcp_profile
 
 let forget_mcp_session = Server_mcp_transport_http.forget_mcp_session

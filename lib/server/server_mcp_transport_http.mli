@@ -43,6 +43,13 @@ val remember_protocol_version :
   string ->
   unit
 
+val remember_protocol_version_if_initialize_succeeded :
+  ?otel_transport_context:Otel_dispatch_hook.transport_context ->
+  string ->
+  request_body:string ->
+  response_json:Yojson.Safe.t ->
+  unit
+
 val remember_mcp_profile :
   ?otel_transport_context:Otel_dispatch_hook.transport_context ->
   string ->

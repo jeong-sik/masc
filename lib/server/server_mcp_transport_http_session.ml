@@ -96,6 +96,28 @@ let remember_protocol_version ?otel_transport_context session_id version =
     remember_session_activity ?otel_transport_context session_id
   end
 
+let jsonrpc_response_succeeded = function
+  | `Assoc fields ->
+    (match List.assoc_opt "jsonrpc" fields with
+     | Some (`String "2.0") ->
+       List.mem_assoc "id" fields
+       && List.mem_assoc "result" fields
+       && not (List.mem_assoc "error" fields)
+     | _ -> false)
+  | _ -> false
+
+let remember_protocol_version_if_initialize_succeeded
+      ?otel_transport_context
+      session_id
+      ~request_body
+      ~response_json
+  =
+  if jsonrpc_response_succeeded response_json then
+    match Mcp_transport_protocol.protocol_version_from_body request_body with
+    | Some version ->
+      remember_protocol_version ?otel_transport_context session_id version
+    | None -> ()
+
 (** RFC-0100 PR-3 — Q3 default: known-session predicate.
 
     A session is "known" once an [initialize] body has registered a

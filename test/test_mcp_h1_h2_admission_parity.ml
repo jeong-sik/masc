@@ -310,6 +310,41 @@ let test_uninitialized_profile_does_not_start_session_duration_metric () =
     before_count
     after_count
 
+let test_failed_initialize_does_not_start_session_duration_metric () =
+  let session_id = "h1-h2-parity-failed-initialize-session" in
+  let transport_context =
+    Otel_dispatch_hook.http_transport_context ~protocol_version:"1.1"
+  in
+  let request_body =
+    {|{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{}}}|}
+  in
+  let response_json =
+    Mcp_transport_protocol.make_error
+      ~id:(`Int 1)
+      (Masc.Mcp_error_code.to_wire_code Masc.Mcp_error_code.Invalid_params)
+      "Missing clientInfo"
+  in
+  let count_metric =
+    Otel_genai.Mcp_metric_name.server_session_duration ^ "_count"
+  in
+  let before_count = metric_value count_metric [] in
+  Fun.protect
+    ~finally:(fun () -> Transport.forget_mcp_session session_id)
+    (fun () ->
+      Transport.remember_protocol_version_if_initialize_succeeded
+        ~otel_transport_context:transport_context
+        session_id
+        ~request_body
+        ~response_json;
+      check bool "failed initialize leaves session unknown" false
+        (Transport.is_known_session session_id);
+      Transport.forget_mcp_session session_id);
+  let after_count = metric_value count_metric [] in
+  check (float 0.0001)
+    "failed initialize does not record session duration"
+    before_count
+    after_count
+
 let test_h1_h2_post_route_wiring_parity () =
   let h1 = source_file "lib/server/server_mcp_transport_http.ml" in
   let h2 = source_file "lib/server/server_h2_gateway.ml" in
@@ -321,6 +356,8 @@ let test_h1_h2_post_route_wiring_parity () =
       ("uses shared POST request context", "Server_mcp_request_context.decide_post_body");
       ("injects canonical HTTP actor", "body_with_canonical_http_actor");
       ("forwards internal keeper runtime", "is_verified_internal_keeper_request");
+      ( "records initialize protocol only after success",
+        "remember_protocol_version_if_initialize_succeeded" );
     ];
   assert_contains "H1 unknown supplied session returns not found"
     ~needle:"Httpun.Response.create ~headers `Not_found" h1;
@@ -370,6 +407,8 @@ let () =
             test_records_mcp_server_session_duration_metric;
           test_case "profile-only session does not start duration metric" `Quick
             test_uninitialized_profile_does_not_start_session_duration_metric;
+          test_case "failed initialize does not start duration metric" `Quick
+            test_failed_initialize_does_not_start_session_duration_metric;
         ] );
       ( "route-wiring",
         [

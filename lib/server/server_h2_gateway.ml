@@ -431,20 +431,15 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                                        ~internal_keeper_runtime state
                                        body_with_agent
                                    in
-                                   (match
-                                      protocol_version_from_body
-                                        post_context.body_str
-                                    with
-                                   | Some v ->
-                                     let otel_transport_context =
-                                       Otel_dispatch_hook.http_transport_context
-                                         ~protocol_version:"2"
-                                     in
-                                     remember_protocol_version
-                                       ~otel_transport_context
-                                       session_id
-                                       v
-                                   | None -> ());
+                                   let otel_transport_context =
+                                     Otel_dispatch_hook.http_transport_context
+                                       ~protocol_version:"2"
+                                   in
+                                   remember_protocol_version_if_initialize_succeeded
+                                     ~otel_transport_context
+                                     session_id
+                                     ~request_body:post_context.body_str
+                                     ~response_json;
                                    let protocol_version =
                                      get_protocol_version_for_session ~session_id
                                        httpun_request

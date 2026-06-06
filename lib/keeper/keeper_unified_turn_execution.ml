@@ -90,7 +90,6 @@ let run (ctx : ctx)
       ; keeper_turn_id
       ; turn_id
       ; channel
-      ; turn_slot_control
       ; shared_context
       ; base_dir
       ; build_turn_prompt

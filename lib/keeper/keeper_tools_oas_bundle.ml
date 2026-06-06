@@ -200,18 +200,9 @@ let make_tools
       ?search_fn
       ?on_tool_called
       ?clock
-      ?turn_slot_control
       ()
   : Agent_sdk.Tool.t list
   =
-  (make_tool_bundle
-     ~config
-     ~meta
-     ~ctx_snapshot
-     ?search_fn
-     ?on_tool_called
-     ?clock
-     ?turn_slot_control
-     ())
+  (make_tool_bundle ~config ~meta ~ctx_snapshot ?search_fn ?on_tool_called ?clock ())
     .tools
 ;;

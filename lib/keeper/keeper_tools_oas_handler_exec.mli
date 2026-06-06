@@ -16,7 +16,6 @@ val execute_with_observers
   -> exec_cache:Masc_exec.Exec_cache.t option
   -> ?search_fn:(query:string -> max_results:int -> Yojson.Safe.t)
   -> ?on_tool_called:(string -> unit)
-  -> ?turn_slot_control:Keeper_turn_slot.keeper_turn_slot_control
   -> failure_counts:Keeper_tools_oas.failure_counts
   -> key:string
   -> input:Yojson.Safe.t

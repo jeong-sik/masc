@@ -1685,6 +1685,58 @@ let test_tool_execute_typed_literal_glob_failure_guides_retry () =
      |> fun normalized_hint ->
      String_util.contains_substring normalized_hint "not shell-expanded")
 
+let test_tool_execute_typed_missing_path_blocked_pre_dispatch () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_readonly_meta "typed-path-not-found" in
+  let playground = Filename.concat base_path (playground_path_of meta.name) in
+  let lib_dir = Filename.concat playground "repos/masc-mcp/lib" in
+  ensure_dir lib_dir;
+  write_file (Filename.concat lib_dir "agent_sdk_response.ml") "let marker = ()\n";
+  write_file
+    (Filename.concat lib_dir "agent_sdk_metrics_bridge.ml")
+    "let marker = ()\n";
+  write_file (Filename.concat lib_dir "keeper_turn_driver.ml") "let marker = ()\n";
+  (* LLM infers a directory from a module name — agent_sdk/ does not exist,
+     only agent_sdk_response.ml does. Pre-dispatch validation should block
+     before execution. *)
+  let missing_path = "repos/masc-mcp/lib/agent_sdk/" in
+  let raw =
+    Keeper_tool_command_runtime.handle_tool_execute
+      ~turn_sandbox_factory:None
+      ~exec_cache:None
+      ~config
+      ~meta
+      ~args:
+        (`Assoc
+           [ "executable", `String "ls"
+           ; "argv", `List [ `String missing_path ]
+           ; "cwd", `String playground
+           ])
+      ()
+  in
+  let json = Yojson.Safe.from_string raw in
+  Alcotest.(check bool) "missing path blocked" false
+    (json |> Json.member "ok" |> Json.to_bool);
+  (* Deterministic retry marker — same args will fail the same way *)
+  let retry = json |> Json.member "deterministic_retry" in
+  Alcotest.(check bool) "deterministic retry present" true
+    (retry <> `Null);
+  Alcotest.(check bool) "retry_same_args is false" false
+    (retry |> Json.member "retry_same_args" |> Json.to_bool);
+  Alcotest.(check string)
+    "reason is path_not_found"
+    "path_not_found"
+    (retry |> Json.member "reason" |> Json.to_string);
+  (* Structured error with actionable hint *)
+  let err = json |> Json.member "error" |> Json.to_string in
+  Alcotest.(check bool)
+    "error mentions path_not_found"
+    true
+    (String_util.contains_substring err "path_not_found")
+
 let test_tool_execute_typed_pipeline_runs_via_shell_ir () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
@@ -2335,6 +2387,10 @@ let () =
             "typed literal glob failure guides retry"
             `Quick
             test_tool_execute_typed_literal_glob_failure_guides_retry
+        ; Alcotest.test_case
+            "typed missing path blocked pre-dispatch via GADT"
+            `Quick
+            test_tool_execute_typed_missing_path_blocked_pre_dispatch
         ; Alcotest.test_case
             "typed pipeline runs via Shell IR"
             `Quick

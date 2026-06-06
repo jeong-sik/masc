@@ -278,6 +278,28 @@ let glob_literal_failure_fields ~input ~status ~stderr =
        ])
 ;;
 
+(* Pre-dispatch path existence validation for typed commands.
+   Uses Shell_ir_typed GADT path annotations (exhaustive, no
+   string heuristics). Only validates Safe (read-only) Simple
+   commands where path non-existence is a predictable pre-condition
+   failure. Pipeline path validation is deferred. *)
+let pre_dispatch_path_missing ~cwd ir =
+  match ir with
+  | Shell_ir.Simple s ->
+    let typed = Masc_exec.Shell_ir_typed.of_simple s in
+    (match Masc_exec.Shell_ir_typed.risk typed with
+     | `Safe ->
+       let args = Masc_exec.Shell_ir_typed.path_args typed in
+       List.find_opt (fun p ->
+         let resolved =
+           if Filename.is_relative p then Filename.concat cwd p else p
+         in
+         try not (Sys.file_exists resolved) with _ -> true
+       ) args
+     | `Audited | `Privileged -> None)
+  | Shell_ir.Pipeline _ -> None
+;;
+
 let sandbox_extra_uses_docker sandbox_extra_fields =
   List.exists
     (function
@@ -586,6 +608,23 @@ let handle_tool_execute_typed
               [ "Use read-only commands such as rg, cat, ls, git status, or git log."
               ; "Ask the operator for a write-capable Execute candidate profile and matching runtime policy."
               ]
+            ()
+        else
+        let path_missing = pre_dispatch_path_missing ~cwd ir in
+        if Option.is_some path_missing
+        then
+          let missing_path = Option.get path_missing in
+          let parent = Filename.dirname missing_path in
+          blocked_result
+            ~deterministic_reason:Keeper_tool_deterministic_error.Path_not_found
+            ~error:"path_not_found"
+            ~reason:(Printf.sprintf
+              "The path argument %S does not exist. Probe the parent \
+               directory before retrying; do not infer package or module \
+               names as directory paths."
+              missing_path)
+            ~alternatives:
+              [ Printf.sprintf "Use executable=\"ls\" argv=[%S]." parent ]
             ()
         else
           let allowed_commands =

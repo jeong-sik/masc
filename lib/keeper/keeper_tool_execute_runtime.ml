@@ -538,12 +538,12 @@ let handle_tool_execute_typed
                 let repo_sync_policy =
                   if write_enabled
                   then
-                    Keeper_tool_execute_repo_readiness.Allow_repo_sync
+                    Keeper_sandbox_repo_lifecycle.Allow_repo_sync
                   else
-                    Keeper_tool_execute_repo_readiness.Reject_repo_sync
+                    Keeper_sandbox_repo_lifecycle.Reject_repo_sync
                 in
                 match
-                  Keeper_tool_execute_repo_readiness.validate_cwd_ready
+                  Keeper_sandbox_repo_lifecycle.validate_cwd_ready
                     ~config
                     ~meta
                     ~cwd
@@ -552,7 +552,7 @@ let handle_tool_execute_typed
                 with
                 | Error _ as err -> err
                 | Ok () ->
-                  Keeper_tool_execute_repo_readiness.validate_path_args_ready
+                  Keeper_sandbox_repo_lifecycle.validate_path_args_ready
                     ~config
                     ~meta
                     ~cwd
@@ -588,7 +588,7 @@ let handle_tool_execute_typed
           | Ok result ->
             (match result.status, repo_cwd_context with
              | Unix.WEXITED 0, Some { repo_name; _ } when is_direct_repo_git_recovery ->
-               Keeper_tool_execute_repo_readiness.invalidate_repo_sync_cache
+               Keeper_sandbox_repo_lifecycle.invalidate_repo_sync_cache
                  ~config
                  ~meta
                  ~repo_name

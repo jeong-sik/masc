@@ -648,6 +648,7 @@ and resume_worker_via_oas
       ()
   in
   let meta = begin_worker_mcp_client_session meta in
+  let* () = Worker_container.save_worker_meta ~base_path ~worker_name meta in
   let workspace_path =
     if String.trim meta.workspace_path <> "" then meta.workspace_path else base_path
   in

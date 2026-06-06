@@ -2,7 +2,7 @@
 
 open Alcotest
 
-module Desc = Masc.Keeper_tool_execute_runtime.For_testing
+module Desc = Ide_command_descriptor
 
 let with_temp_dir f =
   let dir = Filename.temp_file "cmd_desc_test" "" in
@@ -25,7 +25,7 @@ let parse_ir cmd =
 
 let test_gh_pr_create () =
   let ir = parse_ir "gh pr create --title 'feat: add tests' --base main" in
-  match Desc.compute_command_descriptor ir with
+  match Desc.compute ir with
   | Ide_event_types.Gh_pr_create { title; base; draft } ->
     check string "title" "feat: add tests" title;
     check string "base" "main" base;
@@ -35,7 +35,7 @@ let test_gh_pr_create () =
 
 let test_gh_pr_create_draft () =
   let ir = parse_ir "gh pr create --title wip --draft" in
-  match Desc.compute_command_descriptor ir with
+  match Desc.compute ir with
   | Ide_event_types.Gh_pr_create { draft; _ } ->
     check bool "draft" true draft
   | other -> failf "expected Gh_pr_create, got %s" (Yojson.Safe.to_string (Ide_event_types.command_descriptor_to_json other))
@@ -45,7 +45,7 @@ let test_gh_pr_create_base_eq () =
   (* --base is consumed by the GADT parser and discarded (not in rest).
      So base defaults to "main". This is a known limitation. *)
   let ir = parse_ir "gh pr create --title feat --base=develop" in
-  match Desc.compute_command_descriptor ir with
+  match Desc.compute ir with
   | Ide_event_types.Gh_pr_create { base; _ } ->
     check string "base defaults to main" "main" base
   | other -> failf "expected Gh_pr_create, got %s" (Yojson.Safe.to_string (Ide_event_types.command_descriptor_to_json other))
@@ -55,7 +55,7 @@ let test_gh_pr_create_base_short () =
   (* -B is consumed by the GADT parser and discarded (not in rest).
      So base defaults to "main". This is a known limitation. *)
   let ir = parse_ir "gh pr create --title feat -B develop" in
-  match Desc.compute_command_descriptor ir with
+  match Desc.compute ir with
   | Ide_event_types.Gh_pr_create { base; _ } ->
     check string "base defaults to main" "main" base
   | other -> failf "expected Gh_pr_create, got %s" (Yojson.Safe.to_string (Ide_event_types.command_descriptor_to_json other))
@@ -63,7 +63,7 @@ let test_gh_pr_create_base_short () =
 
 let test_gh_pr_merge () =
   let ir = parse_ir "gh pr merge 123 --squash" in
-  match Desc.compute_command_descriptor ir with
+  match Desc.compute ir with
   | Ide_event_types.Gh_pr_merge { pr_number; squash } ->
     check int "pr_number" 123 pr_number;
     check bool "squash" true squash
@@ -72,7 +72,7 @@ let test_gh_pr_merge () =
 
 let test_gh_pr_comment () =
   let ir = parse_ir "gh pr comment 456 --body LGTM" in
-  match Desc.compute_command_descriptor ir with
+  match Desc.compute ir with
   | Ide_event_types.Gh_pr_comment { pr_number; body } ->
     check int "pr_number" 456 pr_number;
     check string "body" "LGTM" body
@@ -81,7 +81,7 @@ let test_gh_pr_comment () =
 
 let test_gh_pr_close () =
   let ir = parse_ir "gh pr close 789" in
-  match Desc.compute_command_descriptor ir with
+  match Desc.compute ir with
   | Ide_event_types.Gh_pr_close { pr_number } ->
     check int "pr_number" 789 pr_number
   | other -> failf "expected Gh_pr_close, got %s" (Yojson.Safe.to_string (Ide_event_types.command_descriptor_to_json other))
@@ -89,7 +89,7 @@ let test_gh_pr_close () =
 
 let test_gh_pr_review () =
   let ir = parse_ir "gh pr review 321" in
-  match Desc.compute_command_descriptor ir with
+  match Desc.compute ir with
   | Ide_event_types.Gh_pr_review { pr_number } ->
     check int "pr_number" 321 pr_number
   | other -> failf "expected Gh_pr_review, got %s" (Yojson.Safe.to_string (Ide_event_types.command_descriptor_to_json other))
@@ -99,7 +99,7 @@ let test_gh_pr_review () =
 
 let test_gh_issue_create () =
   let ir = parse_ir "gh issue create --title 'bug: crash' --body details" in
-  match Desc.compute_command_descriptor ir with
+  match Desc.compute ir with
   | Ide_event_types.Gh_issue_create { title; body } ->
     check string "title" "bug: crash" title;
     check string "body" "details" body
@@ -108,7 +108,7 @@ let test_gh_issue_create () =
 
 let test_gh_issue_close () =
   let ir = parse_ir "gh issue close 100" in
-  match Desc.compute_command_descriptor ir with
+  match Desc.compute ir with
   | Ide_event_types.Gh_issue_close { issue_number } ->
     check int "issue_number" 100 issue_number
   | other -> failf "expected Gh_issue_close, got %s" (Yojson.Safe.to_string (Ide_event_types.command_descriptor_to_json other))
@@ -118,7 +118,7 @@ let test_gh_issue_close () =
 
 let test_git_push () =
   let ir = parse_ir "git push origin main --force" in
-  match Desc.compute_command_descriptor ir with
+  match Desc.compute ir with
   | Ide_event_types.Git_push { remote; branch; force } ->
     check string "remote" "origin" remote;
     check string "branch" "main" branch;
@@ -128,7 +128,7 @@ let test_git_push () =
 
 let test_git_push_force_with_lease () =
   let ir = parse_ir "git push origin main --force-with-lease" in
-  match Desc.compute_command_descriptor ir with
+  match Desc.compute ir with
   | Ide_event_types.Git_push { force; _ } ->
     check bool "force" true force
   | other -> failf "expected Git_push, got %s" (Yojson.Safe.to_string (Ide_event_types.command_descriptor_to_json other))
@@ -136,7 +136,7 @@ let test_git_push_force_with_lease () =
 
 let test_git_commit () =
   let ir = parse_ir "git commit -m 'fix: bug'" in
-  match Desc.compute_command_descriptor ir with
+  match Desc.compute ir with
   | Ide_event_types.Git_commit { message } ->
     check string "message" "fix: bug" message
   | other -> failf "expected Git_commit, got %s" (Yojson.Safe.to_string (Ide_event_types.command_descriptor_to_json other))
@@ -144,7 +144,7 @@ let test_git_commit () =
 
 let test_git_commit_amend () =
   let ir = parse_ir "git commit --amend -m 'fix: updated'" in
-  match Desc.compute_command_descriptor ir with
+  match Desc.compute ir with
   | Ide_event_types.Git_commit { message } ->
     check bool "contains amend" true (String.contains message '(')
   | other -> failf "expected Git_commit, got %s" (Yojson.Safe.to_string (Ide_event_types.command_descriptor_to_json other))
@@ -154,14 +154,14 @@ let test_git_commit_amend () =
 
 let test_generic_unknown () =
   let ir = parse_ir "ls -la" in
-  match Desc.compute_command_descriptor ir with
+  match Desc.compute ir with
   | Ide_event_types.Generic -> ()
   | other -> failf "expected Generic, got %s" (Yojson.Safe.to_string (Ide_event_types.command_descriptor_to_json other))
 ;;
 
 let test_generic_pipeline () =
   let ir = parse_ir "cat file.txt | grep pattern" in
-  match Desc.compute_command_descriptor ir with
+  match Desc.compute ir with
   | Ide_event_types.Pipe_chain { first_cmd; last_cmd; length } ->
     check string "first_cmd" "cat" first_cmd;
     check string "last_cmd" "grep" last_cmd;
@@ -173,7 +173,7 @@ let test_generic_pipeline () =
 
 let test_pipe_chain_rg_grep_head () =
   let ir = parse_ir "rg foo | grep bar | head" in
-  match Desc.compute_command_descriptor ir with
+  match Desc.compute ir with
   | Ide_event_types.Pipe_chain { first_cmd; last_cmd; length } ->
     check string "first_cmd" "rg" first_cmd;
     check string "last_cmd" "head" last_cmd;
@@ -184,7 +184,7 @@ let test_pipe_chain_rg_grep_head () =
 let test_pipe_chain_gh_in_last () =
   (* When the last command is gh, the pipeline should resolve to the gh descriptor *)
   let ir = parse_ir "cat file.txt | gh pr create --title test" in
-  match Desc.compute_command_descriptor ir with
+  match Desc.compute ir with
   | Ide_event_types.Gh_pr_create { title; _ } ->
     check string "title" "test" title
   | other -> failf "expected Gh_pr_create, got %s" (Yojson.Safe.to_string (Ide_event_types.command_descriptor_to_json other))
@@ -193,7 +193,7 @@ let test_pipe_chain_gh_in_last () =
 let test_pipe_chain_git_push () =
   (* When the last command is git push, use that directly *)
   let ir = parse_ir "echo pushing | git push origin main" in
-  match Desc.compute_command_descriptor ir with
+  match Desc.compute ir with
   | Ide_event_types.Git_push { remote; branch; _ } ->
     check string "remote" "origin" remote;
     check string "branch" "main" branch

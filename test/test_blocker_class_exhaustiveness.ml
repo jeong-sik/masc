@@ -185,7 +185,7 @@ let all_sdk_agent_variants : (string * SdkE.sdk_error) list =
   ]
 ;;
 
-let agent_variants_with_no_runtime_blocker = []
+let agent_variants_with_no_runtime_blocker = [ "ToolRetryExhausted" ]
 
 let test_all_agent_variants_classified_intentionally () =
   List.iter
@@ -257,6 +257,25 @@ let test_provider_timeout_is_not_runtime_blocker () =
   | Some klass ->
     failf
       "provider timeout should remain a provider liveness signal, got blocker_class %S"
+      (blocker_class_to_string klass)
+;;
+
+let test_tool_retry_exhausted_is_not_runtime_blocker () =
+  let err =
+    SdkE.Agent
+      (SdkE.ToolRetryExhausted
+         { attempts = 2
+         ; limit = 2
+         ; detail =
+             "Tool retry budget exhausted after 2/2 retries: Grep {} Errors: \
+              pattern missing"
+         })
+  in
+  match KSB.blocker_class_of_sdk_error err with
+  | None -> ()
+  | Some klass ->
+    failf
+      "ToolRetryExhausted should not mark the keeper runtime blocked, got %S"
       (blocker_class_to_string klass)
 ;;
 
@@ -354,6 +373,8 @@ let () =
             test_structural_timeout_maps_to_oas_timeout
         ; test_case "provider timeout is not a runtime blocker" `Quick
             test_provider_timeout_is_not_runtime_blocker
+        ; test_case "tool retry exhausted is not a runtime blocker" `Quick
+            test_tool_retry_exhausted_is_not_runtime_blocker
         ] )
     ; ( "provider_runtime_record"
       , [ test_case "typed reason falls through" `Quick

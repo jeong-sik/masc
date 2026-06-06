@@ -971,6 +971,35 @@ let test_tool_execute_allows_preserved_direct_repo_git_worktree_list () =
   Alcotest.(check bool) "stale gate did not block diagnostic" false
     (String_util.contains_substring raw "sandbox_repo_stale")
 
+let test_tool_execute_allows_preserved_direct_repo_git_checkout_main () =
+  with_eio_fs @@ fun () ->
+  let base_path, config, meta, _repo_dir =
+    setup_preserved_sandbox_repo ~keeper_name:"stale-direct-git-checkout-main"
+  in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let raw =
+    Keeper_tool_command_runtime.handle_tool_execute
+      ~turn_sandbox_factory:None
+      ~exec_cache:None
+      ~config
+      ~meta
+      ~args:
+        (`Assoc
+           [ "executable", `String "git"
+           ; "argv", `List [ `String "checkout"; `String "main" ]
+           ; "cwd", `String "repos/masc"
+           ])
+      ()
+  in
+  let json = Yojson.Safe.from_string raw in
+  Alcotest.(check bool) "main checkout recovery succeeds" true
+    (json |> Json.member "ok" |> Json.to_bool);
+  Alcotest.(check bool) "write gate did not block main checkout" false
+    (String_util.contains_substring raw "write_operation_gated");
+  Alcotest.(check bool) "stale gate did not block main checkout" false
+    (String_util.contains_substring raw "sandbox_repo_stale")
+
 let test_tool_execute_allows_preserved_direct_repo_git_checkout_head_restore () =
   with_eio_fs @@ fun () ->
   let base_path, config, meta, repo_dir =
@@ -2292,6 +2321,10 @@ let () =
             "preserved direct repo root allows git worktree list"
             `Quick
             test_tool_execute_allows_preserved_direct_repo_git_worktree_list
+        ; Alcotest.test_case
+            "preserved direct repo root allows git checkout main"
+            `Quick
+            test_tool_execute_allows_preserved_direct_repo_git_checkout_main
         ; Alcotest.test_case
             "preserved direct repo root allows git checkout HEAD restore"
             `Quick

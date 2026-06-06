@@ -206,9 +206,12 @@ export function dashboardSlicesForRoute(routeState: DashboardRouteState): string
     slices.add('execution')
     slices.add('goals')
   }
-  if (routeState.tab === 'workspace' && routeState.params.section === 'board') {
-    slices.add('board')
-  }
+  // Board rows are actor/filter scoped (`voter`, blind-vote policy, author and
+  // hearth filters) and are loaded through refreshBoard's HTTP query. The WS
+  // snapshot provider is route-scoped only, so subscribing the board slice here
+  // can hydrate the list with a different query immediately after the route HTTP
+  // refresh. Raw board SSE events still reach the client and schedule/increment
+  // board refreshes through sse-store.
   if (routeState.tab === 'monitoring') {
     const section = routeState.params.section
     if (section === 'observatory' || section === 'journey' || section === 'agents' || section === 'cognition') {

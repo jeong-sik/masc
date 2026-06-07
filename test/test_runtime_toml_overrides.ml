@@ -91,22 +91,18 @@ let test_applies_multiple_overrides () =
   let doc = parse_or_fail
     "[autonomous]\n\
      max_turns_per_call = 7\n\
-     semaphore_wait_timeout_sec = 150\n\
      [reactive]\n\
      max_turns_per_call = 20\n"
   in
   let count, overrides =
     Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
   in
-  check int "applied 3" 3 count;
+  check int "applied 2" 2 count;
   check (option string) "autonomous max_turns"
     (Some "7")
     (List.assoc_opt
        "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS"
        overrides);
-  check (option string) "semaphore timeout"
-    (Some "150")
-    (List.assoc_opt "MASC_KEEPER_SEMAPHORE_WAIT_TIMEOUT_SEC" overrides);
   check (option string) "reactive max_turns"
     (Some "20")
     (List.assoc_opt "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL" overrides)
@@ -406,14 +402,14 @@ let test_explicit_config_dir_wins_over_base_path () =
 
 let test_float_value_round_trip () =
   let doc = parse_or_fail
-    "[autonomous]\nsemaphore_wait_timeout_sec = 120.5\n"
+    "[turn]\nstream_idle_timeout_sec = 120.5\n"
   in
   let _, overrides =
     Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
   in
   check (option string) "float preserved"
     (Some "120.5")
-    (List.assoc_opt "MASC_KEEPER_SEMAPHORE_WAIT_TIMEOUT_SEC" overrides)
+    (List.assoc_opt "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC" overrides)
 
 let test_resolved_runtime_freezes_toml_values_after_init () =
   with_clean_boot_overrides @@ fun () ->

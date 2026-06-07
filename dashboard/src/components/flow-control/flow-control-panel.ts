@@ -17,15 +17,13 @@ function stateLabel(s: string): string {
     ? 'Running'
     : s === 'paused'
       ? 'Paused'
-      : s === 'stopped'
-        ? 'Stopped'
-        : s === 'initializing'
-          ? 'Initializing'
-          : 'Unknown'
+      : s === 'initializing'
+        ? 'Initializing'
+        : 'Unknown'
 }
 
 function stateTone(s: string): string {
-  return s === 'running' ? 'ok' : s === 'paused' || s === 'stopped' ? 'warn' : 'default'
+  return s === 'running' ? 'ok' : s === 'paused' ? 'warn' : 'default'
 }
 
 export function FlowControlPanel() {
@@ -34,7 +32,6 @@ export function FlowControlPanel() {
   const state = flowState.value
   const isPaused = state === 'paused'
   const isRunning = state === 'running'
-  const isStopped = state === 'stopped'
   const isInitializing = state === 'initializing'
   const mutationAccess = dashboardAuthAccess(shellAuthSummary.value, 'worker')
   const admission = operatorSnapshot.value?.admission_queue ?? null
@@ -61,7 +58,7 @@ export function FlowControlPanel() {
         </p>
       `}
       <div class="flex flex-wrap gap-2">
-        <${ActionButton} variant="ghost" size="md" disabled=${loading || isPaused || isStopped || isInitializing || !mutationAccess.allowed} onClick=${() => void pauseWorkspace()}>
+        <${ActionButton} variant="ghost" size="md" disabled=${loading || isPaused || isInitializing || !mutationAccess.allowed} onClick=${() => void pauseWorkspace()}>
           ${loading && !isPaused ? '...' : 'Pause'}<//>
         <${ActionButton} variant="primary" size="md" disabled=${loading || isRunning || isInitializing || !mutationAccess.allowed} onClick=${() => void resumeWorkspace()}>
           ${loading && isPaused ? '...' : 'Resume'}<//>

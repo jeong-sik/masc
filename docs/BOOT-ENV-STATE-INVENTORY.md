@@ -119,12 +119,12 @@ Legacy compatibility names are not TOML preemption keys. For example,
 only the canonical `MASC_KEEPER_AUTOBOOT_MAX` boot override unless that exact
 canonical process env var is already set.
 
-**Sections** (80 knobs total):
+**Sections** (79 knobs total):
 
 | Section | Count | Key examples |
 | --- | --- | --- |
 | `[bootstrap]` | 5 | `enabled`, `max_active_keepers`, `autoboot_max` |
-| `[autonomous]` | 6 | `max_turns_per_call`, `semaphore_wait_timeout_sec`, `concurrency` |
+| `[autonomous]` | 5 | `max_turns_per_call`, `concurrency`, `slot_wait_timeout_sec` |
 | `[reactive]` | 3 | `max_turns_per_call`, `concurrency`, `max_idle_turns` |
 | `[heartbeat]` | 10 | `interval_sec`, `max_silence_sec`, `smart_heartbeat`, `board_generic_wakeup_limit` |
 | `[turn]` | 18 | `timeout_sec`, `stream_idle_timeout_sec`, `tool_cost_max_usd`, `temperature` |
@@ -142,7 +142,6 @@ canonical process env var is already set.
 ```toml
 [autonomous]
 max_turns_per_call = 7           # default: 2
-semaphore_wait_timeout_sec = 150 # default: 180
 
 [reactive]
 max_turns_per_call = 15

@@ -108,10 +108,8 @@ let metric_board_persist_lock_held_sec = "masc_board_persist_lock_held_sec"
 let metric_backend_mutex_acquire_sec = "masc_backend_mutex_acquire_sec"
 let metric_backend_mutex_held_sec = "masc_backend_mutex_held_sec"
 
-(* P-DASH-02: turn queue depth gauge.  Semaphore waiters are
-   observable via [autonomous_waiter_snapshot_for_test] but were
-   only emitted as a debug log line.  Surfacing as a gauge lets
-   operators alert on queue pressure without log parsing.
+(* P-DASH-02: turn queue depth gauge.  The live emission path surfaces queue
+   pressure directly so operators do not need to parse debug logs.
    Labels: keeper, channel. *)
 
 (* #10125: keeper supervisor sweep observability.

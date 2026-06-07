@@ -31,7 +31,7 @@ const {
   resumeWorkspace: vi.fn().mockResolvedValue(undefined),
   runGarbageCollection: vi.fn().mockResolvedValue(undefined),
   cleanupZombies: vi.fn().mockResolvedValue(undefined),
-  flowState: { value: 'running' as 'running' | 'paused' | 'initializing' | 'stopped' | 'unknown' },
+  flowState: { value: 'running' as 'running' | 'paused' | 'initializing' | 'unknown' },
   flowLoading: { value: false },
   maintenanceResult: { value: null as string | null },
   maintenanceLoading: { value: false },
@@ -127,17 +127,4 @@ describe('FlowControlPanel', () => {
     expect(status!.textContent).toContain('1/3')
   })
 
-  it('shows stopped fleet admission as a dedicated flow state', async () => {
-    flowState.value = 'stopped'
-
-    render(html`<${FlowControlPanel} />`, container)
-    await flushUi()
-
-    expect(container.textContent).toContain('Stopped')
-    const buttons = Array.from(container.querySelectorAll('button'))
-    const pause = buttons.find(button => button.textContent?.includes('Pause'))
-    const resume = buttons.find(button => button.textContent?.includes('Resume'))
-    expect(pause).toHaveProperty('disabled', true)
-    expect(resume).toHaveProperty('disabled', false)
-  })
 })

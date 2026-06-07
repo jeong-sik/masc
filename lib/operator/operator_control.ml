@@ -99,17 +99,10 @@ let execute_workspace_action (ctx : 'a context) (request : action_request) =
         get_string request.payload "reason" "Paused by operator control plane"
       in
       Workspace.pause ctx.config ~by:request.actor ~reason;
-      (Atomic.get Workspace_hooks.fleet_admission_pause_fn)
-        ~base_path:ctx.config.base_path
-        ~reason
-        ~updated_by:request.actor;
       workspace_action_result request
         (`Assoc [ ("paused", `Bool true); ("reason", `String reason) ])
   | "namespace_resume" ->
       let* () = validate_target_type "workspace" request in
-      (Atomic.get Workspace_hooks.fleet_admission_resume_fn)
-        ~base_path:ctx.config.base_path
-        ~updated_by:request.actor;
       let status =
         match Workspace.resume ctx.config ~by:request.actor with
         | `Resumed -> "resumed"

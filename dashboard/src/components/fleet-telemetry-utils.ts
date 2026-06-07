@@ -733,8 +733,7 @@ export function summaryCounts(rows: FleetRow[]): FleetSummaryCounts {
   // provider_tool_capability_missing, completion_contract_violation, …).
   // These are alive-but-blocked keepers that
   // the live/stale gauges miss — fiber is up, but the next turn cannot
-  // start.  Pairs with the `Semaphore_wait_timeout` typing fix
-  // (#12855) and the runtime fallback-cycle detector (#12866) so
+  // start.  Pairs with runtime fallback-cycle detection so
   // operators have a single panel that surfaces "alive but stuck".
   const blocked = rows.filter(row =>
     row.keepalive_running

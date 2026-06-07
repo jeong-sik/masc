@@ -1,5 +1,4 @@
-(* Asynchronous health probe for condition-based auto-resume.
-   See [.mli] for TLA+ modeling notes.
+(* Keeper health helpers.
 
    RFC-0041 Phase B2: migrated from per-runtime (string) cache keys to
    per-keeper, per-item (string * string) keys. *)
@@ -156,25 +155,6 @@ let record_item_result ~keeper_name ~item_id ~success =
   set_item_health ~keeper_name ~item_id status
 ;;
 
-let set_runtime_status ~runtime_id status =
-  Eio.Mutex.use_rw ~protect:true health_cache_mu (fun () ->
-    Hashtbl.replace health_cache (runtime_id, "") (status, Time_compat.now ()))
-;;
-
-(** [get_runtime_status ~runtime_id] reads the runtime-level entry
-    written by [run_once].  Three-valued:
-      - [Healthy]    : last probe saw the runtime at < threshold ratio.
-      - [Unhealthy r]: last probe saw the runtime at >= threshold ratio.
-      - [Unknown]    : probe never wrote this runtime (e.g. boot before
-                       first sweep, or no running keepers in the runtime
-                       at the time of the last scan). *)
-let get_runtime_status ~runtime_id =
-  Eio.Mutex.use_ro health_cache_mu (fun () ->
-    match Hashtbl.find_opt health_cache (runtime_id, "") with
-    | Some (status, _) -> status
-    | None -> Unknown)
-;;
-
 (* ------------------------------------------------------------------ *)
 (* Runtime health check                                               *)
 (* ------------------------------------------------------------------ *)
@@ -211,46 +191,10 @@ let max_failed_allowed_for_runtime ~total =
 type runtime_scan_acc =
   { total : int
   ; failed : int
-  ; failure_reasons : Keeper_registry.failure_reason option list
   }
 
 let empty_runtime_scan_acc =
-  { total = 0; failed = 0; failure_reasons = [] }
-;;
-
-let dominant_runtime_pressure_class failure_reasons =
-  let counts = Hashtbl.create 8 in
-  List.iter
-    (fun reason ->
-       match runtime_pressure_class_of_failure_reason reason with
-       | None -> ()
-       | Some cls ->
-         let label = runtime_pressure_class_to_string cls in
-         let n =
-           match Hashtbl.find_opt counts label with
-           | Some n -> n
-           | None -> 0
-         in
-         Hashtbl.replace counts label (n + 1))
-    failure_reasons;
-  let ranked =
-    counts
-    |> Hashtbl.to_seq
-    |> List.of_seq
-    |> List.sort (fun (label_a, count_a) (label_b, count_b) ->
-      match compare count_b count_a with
-      | 0 -> String.compare label_a label_b
-      | n -> n)
-  in
-  match ranked with
-  | (label, _) :: _ -> Some label
-  | [] -> None
-;;
-
-let runtime_failure_reason acc =
-  match dominant_runtime_pressure_class acc.failure_reasons with
-  | Some label -> "failure_ratio:" ^ label
-  | None -> "failure_ratio"
+  { total = 0; failed = 0 }
 ;;
 
 let scan_runtime_health ~base_path =
@@ -268,10 +212,6 @@ let scan_runtime_health ~base_path =
        let acc' =
          { total = acc.total + 1
          ; failed = acc.failed + if failed then 1 else 0
-         ; failure_reasons =
-             (if failed
-              then entry.last_failure_reason :: acc.failure_reasons
-              else acc.failure_reasons)
          }
        in
        Hashtbl.replace by_runtime runtime_id acc')
@@ -302,36 +242,4 @@ let scan_runtime_health ~base_path =
 let check_runtime_health ~base_path =
   scan_runtime_health ~base_path
   |> List.map (fun (runtime_id, healthy, _acc) -> runtime_id, healthy)
-;;
-
-(* ------------------------------------------------------------------ *)
-(* Background probe fiber                                             *)
-(* ------------------------------------------------------------------ *)
-
-let run_once ~base_path =
-  let results = scan_runtime_health ~base_path in
-  List.iter
-    (fun (runtime_id, healthy, acc) ->
-       let status =
-         if healthy then Healthy else Unhealthy (runtime_failure_reason acc)
-       in
-       set_runtime_status ~runtime_id status)
-    results
-;;
-
-let rec probe_loop ~base_path ~interval_sec ~clock () =
-  (* Cancel-aware: Safe_ops.protect re-raises Eio.Cancel.Cancelled and swallows
-     other exceptions so a transient registry I/O failure cannot kill the fiber
-     and leave runtime status stale forever. *)
-  Safe_ops.protect ~default:() (fun () -> run_once ~base_path);
-  Eio.Time.sleep clock interval_sec;
-  probe_loop ~base_path ~interval_sec ~clock ()
-;;
-
-let start_probe ~sw ~base_path ~interval_sec ~clock =
-  if interval_sec <= 0.0
-  then ()
-  else
-    Eio.Fiber.fork ~sw (fun () ->
-      Eio.Switch.run (fun _sw -> probe_loop ~base_path ~interval_sec ~clock ()))
 ;;

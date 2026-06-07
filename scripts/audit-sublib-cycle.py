@@ -101,7 +101,6 @@ DEFAULT_LEAVES: tuple[str, ...] = (
     "masc.keeper_registry_types_decision",
     "masc.keeper_registry_types_compaction",
     "masc.keeper_hooks_oas_types",
-    "masc.keeper_turn_admission_types",
     "masc.keeper_binding_health_config",
     "masc.keeper_transition_audit_types",
     "masc.keeper_path_rejection",

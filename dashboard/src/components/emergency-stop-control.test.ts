@@ -15,7 +15,7 @@ const {
   fetchPauseStatus: vi.fn().mockResolvedValue(undefined),
   pauseWorkspace: vi.fn().mockResolvedValue(undefined),
   resumeWorkspace: vi.fn().mockResolvedValue(undefined),
-  flowState: { value: 'running' as 'running' | 'paused' | 'initializing' | 'stopped' | 'unknown' },
+  flowState: { value: 'running' as 'running' | 'paused' | 'initializing' | 'unknown' },
   flowLoading: { value: false },
   shellAuthSummary: { value: null },
   requestConfirm: vi.fn().mockResolvedValue(true),

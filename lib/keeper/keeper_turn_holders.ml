@@ -1,53 +1,22 @@
-(* keeper_turn_holders — admitted-turn holder diagnostics and compatibility helpers.
+(* keeper_turn_holders — in-turn holder diagnostics.
 
-   Fleet-wide Runtime Concurrent capacity and fleet stop policy live in
-   [Keeper_turn_admission]. This module records holder rows only after
-   admission grants a token. *)
+   Keeper turn execution no longer enters a keeper-owned runtime gate. This
+   module only records holder rows while a keeper turn body is
+   executing. *)
 
 open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 
-type holder_pool = Keeper_turn_admission_types.holder_pool =
+type holder_pool =
   | Turn_holder
   | Autonomous_holder
   | Reactive_holder
 
-let holder_pool_to_string = Keeper_turn_admission_types.holder_pool_to_string
-
-exception Semaphore_wait_timeout = Keeper_turn_admission_types.Semaphore_wait_timeout
-
-type admission_wait_phase = Keeper_turn_admission_types.admission_wait_phase =
-  | Autonomous_queue_head
-  | Autonomous_admission
-  | Reactive_admission
-  | Global_admission
-
-let admission_wait_phase_to_string =
-  Keeper_turn_admission_types.admission_wait_phase_to_string
-
-type semaphore_wait_timeout = Keeper_turn_admission_types.semaphore_wait_timeout =
-  { timeout_wait_sec : float
-  ; timeout_phase : admission_wait_phase
-  ; timeout_autonomous_available : int
-  ; timeout_reactive_available : int
-  ; timeout_turn_available : int
-  ; timeout_queue_depth : int
-  ; timeout_queue_ahead : int option
-  ; timeout_holders : (string * float) list
-  }
-
-let int_of_env_default = Keeper_turn_admission_types.int_of_env_default
-
-type throttle_source = Keeper_turn_admission.throttle_source =
-  | Env_override
-  | Toml
-  | Default
-
-let keeper_turn_throttle_limit = Keeper_turn_admission.keeper_turn_throttle_limit
-let keeper_turn_throttle_source = Keeper_turn_admission.keeper_turn_throttle_source
-let throttle_source_to_string = Keeper_turn_admission.throttle_source_to_string
-let effective_turn_throttle_limit = Keeper_turn_admission.effective_turn_throttle_limit
+let holder_pool_to_string = function
+  | Turn_holder -> "turn"
+  | Autonomous_holder -> "autonomous"
+  | Reactive_holder -> "reactive"
 
 (* Holder tracking — preserved for diagnostics. *)
 type holder_key =
@@ -185,13 +154,7 @@ let reactive_holders ~now = snapshot_holders ~label:Reactive_holder ~now
 let complete_force_release ~keeper_name released =
   match released with
   | [] -> []
-  | _ :: _ ->
-    (* See Keeper_turn_admission.force_release_keeper: holder labels are the
-       caller-visible result; the bool only says whether a token was active. *)
-    let (_token_was_active : bool) =
-      Keeper_turn_admission.force_release_keeper ~keeper_name
-    in
-    released
+  | _ :: _ -> released
 ;;
 
 let force_release_stale_holder ~keeper_name =
@@ -248,40 +211,11 @@ let holders_summary ?(limit = 5) ~now () =
     (format_holders ~limit reactive)
 ;;
 
-(* Semaphore wait timeout — preserved for backward compat. *)
-let semaphore_wait_timeout_sec = Keeper_turn_admission.semaphore_wait_timeout_sec
-
-let semaphore_wait_timeout_snapshot ~phase ?queue_ahead ?(holders = []) () =
-  let global_available =
-    Keeper_turn_admission.available_turns ~limit:effective_turn_throttle_limit
-  in
-  let autonomous_available =
-    Keeper_turn_admission.available_turns_for_channel
-      ~limit:effective_turn_throttle_limit
-      ~channel:"scheduled_autonomous"
-  in
-  let reactive_available =
-    Keeper_turn_admission.available_turns_for_channel
-      ~limit:effective_turn_throttle_limit
-      ~channel:"reactive"
-  in
-  { timeout_wait_sec = semaphore_wait_timeout_sec
-  ; timeout_phase = phase
-  ; timeout_autonomous_available = autonomous_available
-  ; timeout_reactive_available = reactive_available
-  ; timeout_turn_available = global_available
-  ; timeout_queue_depth = 0
-  ; timeout_queue_ahead = queue_ahead
-  ; timeout_holders = holders
-  }
-;;
-
 type turn_holder_state =
   { acquired_turn : bool ref
   ; turn_acquisition_id : int option ref
   ; channel_holder_label : holder_pool option
   ; channel_acquisition_id : int option ref
-  ; admission_token : Keeper_turn_admission.token option ref
   }
 
 type turn_holder_control =
@@ -293,7 +227,6 @@ let make_turn_holder_state ~channel_holder_label =
   ; turn_acquisition_id = ref None
   ; channel_holder_label
   ; channel_acquisition_id = ref None
-  ; admission_token = ref None
   }
 
 let turn_holder_is_held state =
@@ -380,12 +313,7 @@ let release_turn_holder_impl ~keeper_name state =
         ~label
         ~acquisition_id:!(state.channel_acquisition_id)
   in
-  if not (turn_was_force_released || channel_was_force_released) then (
-    match !(state.admission_token) with
-    | None -> ()
-    | Some token ->
-      Keeper_turn_admission.release_turn token;
-      state.admission_token := None)
+  ignore (turn_was_force_released || channel_was_force_released : bool)
 ;;
 
 let release_turn_holder ~keeper_name state =
@@ -400,27 +328,6 @@ let release_turn_holder_for_retry ~keeper_name state =
 
 let force_release_holder_for ~keeper_name =
   complete_force_release ~keeper_name (force_release_holder_records ~keeper_name)
-;;
-
-let autonomous_completion_for_test_mutex = Eio.Mutex.create ()
-let autonomous_completion_for_test : (string, float) Hashtbl.t = Hashtbl.create 16
-
-let reset_autonomous_completion_for_test () =
-  Eio.Mutex.use_rw ~protect:true autonomous_completion_for_test_mutex (fun () ->
-    Hashtbl.reset autonomous_completion_for_test)
-;;
-
-let record_autonomous_completion_at_for_test ~keeper_name ~ts =
-  Eio.Mutex.use_rw ~protect:true autonomous_completion_for_test_mutex (fun () ->
-    Hashtbl.replace autonomous_completion_for_test keeper_name ts)
-;;
-
-let autonomous_queue_for_test_mutex = Eio.Mutex.create ()
-let autonomous_queue_for_test : (int * string) list ref = ref []
-let autonomous_queue_next_ticket_for_test = ref 0
-
-let with_autonomous_queue_for_test f =
-  Eio.Mutex.use_rw ~protect:true autonomous_queue_for_test_mutex f
 ;;
 
 (* Provider timeout strikes — preserved. *)
@@ -505,22 +412,11 @@ let channel_holder_label = function
   | Keeper_world_observation.Scheduled_autonomous -> Some Autonomous_holder
 ;;
 
-let remaining_global_capacity () =
-  Keeper_turn_admission.available_turns ~limit:effective_turn_throttle_limit
-;;
-
-let remaining_channel_capacity channel =
-  Keeper_turn_admission.available_turns_for_channel
-    ~limit:effective_turn_throttle_limit
-    ~channel
-;;
-
-let run_with_admission_token
+let run_with_recorded_holder
       ~runtime_profile
       ~keeper_name
       ~channel
       ~channel_label
-      ~admission_token
       ~started_at
       f
   =
@@ -528,7 +424,6 @@ let run_with_admission_token
     make_turn_holder_state ~channel_holder_label:(channel_holder_label channel)
   in
   holder_state.acquired_turn := true;
-  holder_state.admission_token := Some admission_token;
   let cleanup () = release_turn_holder ~keeper_name holder_state in
   let body () =
     run_after_acquire_flag_hook_for_test
@@ -566,18 +461,11 @@ let run_with_admission_token
   then
     Eio.Switch.run (fun turn_sw ->
       Eio.Switch.on_release turn_sw cleanup;
-      Eio.Fiber.fork_daemon ~sw:turn_sw (fun () ->
-        Eio.Promise.await (Keeper_turn_admission.token_cancel_p admission_token);
-        Eio.Switch.fail turn_sw Keeper_turn_admission.Fleet_stopped_by_operator;
-        `Stop_daemon);
       body ())
   else Fun.protect ~finally:cleanup body
 ;;
 
-(* Main entry point: admission owns fleet capacity; this facade records holder
-   diagnostics after admission grants a token. *)
-let with_recorded_turn_admission_control
-      ?base_path
+let with_recorded_turn_holder_control
       ?(runtime_profile = "unknown")
       ~keeper_name
       ~channel
@@ -585,151 +473,19 @@ let with_recorded_turn_admission_control
   =
   let channel_label = Keeper_world_observation.channel_to_string channel in
   let t0 = Time_compat.now () in
-  match
-    Keeper_turn_admission.acquire_turn
-      ?base_path
-      ~limit:effective_turn_throttle_limit
-      ~timeout_s:semaphore_wait_timeout_sec
-      ~keeper_name
-      ~runtime_profile
-      ~channel:channel_label
-      ()
-  with
-  | Ok (admission_token, _admission_wait_ms) ->
-    Ok
-      (run_with_admission_token
-         ~runtime_profile
-         ~keeper_name
-         ~channel
-         ~channel_label
-         ~admission_token
-         ~started_at:t0
-         f)
-  | Error Keeper_turn_admission.Global_inflight_exceeded ->
-    let holders = snapshot_holders ~label:Turn_holder ~now:t0 in
-    Error
-      (`Semaphore_wait_timeout
-         (semaphore_wait_timeout_snapshot
-            ~phase:Global_admission
-            ~holders
-            ()))
-  | Error (Keeper_turn_admission.Fleet_paused | Keeper_turn_admission.Fleet_stopped as rejection) ->
-    Error (`Turn_admission_rejected rejection)
+  run_with_recorded_holder
+    ~runtime_profile
+    ~keeper_name
+    ~channel
+    ~channel_label
+    ~started_at:t0
+    f
 ;;
 
-let with_recorded_turn_admission ?base_path ?runtime_profile ~keeper_name ~channel f =
-  with_recorded_turn_admission_control
-    ?base_path
+let with_recorded_turn_holder ?runtime_profile ~keeper_name ~channel f =
+  with_recorded_turn_holder_control
     ?runtime_profile
     ~keeper_name
     ~channel
     (fun ~semaphore_wait_ms ~holder_control:_ -> f ~semaphore_wait_ms)
-;;
-
-let with_recorded_turn_admission_control_for_test ?runtime_profile ~keeper_name ~channel f =
-  with_recorded_turn_admission_control ?runtime_profile ~keeper_name ~channel f
-;;
-
-let with_recorded_turn_admission_for_test ?runtime_profile ~keeper_name ~channel f =
-  with_recorded_turn_admission ?runtime_profile ~keeper_name ~channel f
-;;
-
-(* Test-only: expose global admission state. *)
-let global_inflight_for_test () = Keeper_turn_admission.global_inflight ()
-let global_turn_limit_for_test () = effective_turn_throttle_limit
-
-(* Legacy pool-specific helpers now expose the shared global admission budget. *)
-let turn_semaphore_value_for_test () = remaining_global_capacity ()
-let autonomous_turn_semaphore_value_for_test () =
-  remaining_channel_capacity "scheduled_autonomous"
-;;
-
-let reactive_turn_semaphore_value_for_test () = remaining_channel_capacity "reactive"
-let turn_concurrency_int_of_env_default_for_test name ~default ~min_v ~max_v =
-  Keeper_turn_admission.turn_concurrency_int_of_env_default_for_test
-    name
-    ~default
-    ~min_v
-    ~max_v
-;;
-
-let reset_autonomous_turn_queue_for_test () =
-  with_autonomous_queue_for_test (fun () ->
-    autonomous_queue_for_test := [];
-    autonomous_queue_next_ticket_for_test := 0)
-;;
-
-let autonomous_waiter_snapshot_for_test () =
-  with_autonomous_queue_for_test (fun () ->
-    List.map snd !autonomous_queue_for_test)
-;;
-
-let enqueue_autonomous_waiter_for_test ?runtime_id:_ keeper_name =
-  with_autonomous_queue_for_test (fun () ->
-    let ticket = !autonomous_queue_next_ticket_for_test in
-    incr autonomous_queue_next_ticket_for_test;
-    autonomous_queue_for_test := !autonomous_queue_for_test @ [ ticket, keeper_name ];
-    ticket)
-;;
-
-let drop_autonomous_waiter_for_test ticket =
-  with_autonomous_queue_for_test (fun () ->
-    autonomous_queue_for_test
-    := List.filter (fun (candidate, _) -> candidate <> ticket) !autonomous_queue_for_test)
-;;
-
-let autonomous_waiter_head_ticket_for_test ~runtime_id:_ =
-  with_autonomous_queue_for_test (fun () ->
-    match !autonomous_queue_for_test with
-    | [] -> None
-    | (ticket, _) :: _ -> Some ticket)
-;;
-
-let autonomous_wait_queue_depth_for_test () = 0
-let wait_for_autonomous_queue_head_for_test
-      ?runtime_id:_ ~keeper_name:_ ~ticket ~started_at ()
-  =
-  let queue_ahead =
-    with_autonomous_queue_for_test (fun () ->
-      let rec loop idx = function
-        | [] -> None
-        | (candidate, _) :: _ when candidate = ticket -> Some idx
-        | _ :: rest -> loop (idx + 1) rest
-      in
-      loop 0 !autonomous_queue_for_test)
-  in
-  if Time_compat.now () -. started_at >= semaphore_wait_timeout_sec then
-    Error
-      (`Semaphore_wait_timeout
-          (semaphore_wait_timeout_snapshot
-             ~phase:Autonomous_queue_head
-             ?queue_ahead
-             ()))
-  else
-    match autonomous_waiter_head_ticket_for_test ~runtime_id:"test" with
-    | Some head when head <> ticket -> Ok ()
-    | _ -> Ok ()
-;;
-
-let autonomous_fairness_cooldown_sec_for_test = 5.0
-
-let fairness_delay_sec_at ~now ~keeper_name =
-  let last_completion =
-    Eio.Mutex.use_rw ~protect:true autonomous_completion_for_test_mutex (fun () ->
-      Hashtbl.find_opt autonomous_completion_for_test keeper_name)
-  in
-  match last_completion with
-  | None -> 0.0
-  | Some completed_at ->
-    let others_waiting =
-      with_autonomous_queue_for_test (fun () ->
-        List.exists
-          (fun (_, waiting_keeper) -> not (String.equal waiting_keeper keeper_name))
-          !autonomous_queue_for_test)
-    in
-    if not others_waiting then 0.0
-    else (
-      let elapsed = now -. completed_at in
-      let remaining = autonomous_fairness_cooldown_sec_for_test -. elapsed in
-      if remaining <= 0.0 then 0.0 else remaining)
 ;;

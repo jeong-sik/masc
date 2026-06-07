@@ -45,51 +45,17 @@ let text_ok ~tool_name ~start_time body : Tool_result.result =
 let handle_pause ~tool_name ~start_time ctx args : Tool_result.result =
   let reason = get_string args "reason" "Manual pause" in
   Workspace.pause ctx.config ~by:ctx.agent_name ~reason;
-  (Atomic.get Workspace_hooks.fleet_admission_pause_fn)
-    ~base_path:ctx.config.base_path
-    ~reason
-    ~updated_by:ctx.agent_name;
   text_ok ~tool_name ~start_time
     (Printf.sprintf "Paused by %s: %s" ctx.agent_name reason)
 ;;
 
 let handle_resume ~tool_name ~start_time ctx _args : Tool_result.result =
-  (Atomic.get Workspace_hooks.fleet_admission_resume_fn)
-    ~base_path:ctx.config.base_path
-    ~updated_by:ctx.agent_name;
   match Workspace.resume ctx.config ~by:ctx.agent_name with
   | `Resumed ->
     text_ok ~tool_name ~start_time
       (Printf.sprintf "Resumed by %s" ctx.agent_name)
   | `Already_running ->
     text_ok ~tool_name ~start_time "Default project scope is not paused"
-;;
-
-let fleet_admission_state = function
-  | `Assoc fields -> (
-    match List.assoc_opt "fleet_state" fields with
-    | Some (`String state) -> Some state
-    | None -> (
-      match List.assoc_opt "state" fields with
-      | Some (`String state) -> Some state
-      | _ -> None)
-    | _ -> None)
-  | _ -> None
-;;
-
-let fleet_admission_string_field fleet_admission key =
-  match fleet_admission with
-  | `Assoc fields -> (
-    match List.assoc_opt key fields with
-    | Some (`String value) -> Some value
-    | _ -> None)
-  | _ -> None
-;;
-
-let fleet_admission_pause_active fleet_admission =
-  match fleet_admission_state fleet_admission with
-  | Some "paused" | Some "stopped" -> true
-  | _ -> false
 ;;
 
 let handle_pause_status ~tool_name ~start_time ctx _args : Tool_result.result =
@@ -115,23 +81,13 @@ let handle_pause_status ~tool_name ~start_time ctx _args : Tool_result.result =
       | _ -> false)
     | _ -> false
   in
-  let fleet_admission =
-    (Atomic.get Workspace_hooks.fleet_admission_snapshot_json_fn)
-      ~base_path:ctx.config.base_path
-      ()
-  in
-  let fleet_paused = fleet_admission_pause_active fleet_admission in
   let pause_state =
     if not (Workspace.is_initialized ctx.config) then `Initializing
     else
       let state = Workspace.read_state ctx.config in
       if state.paused then
         `Paused (state.paused_by, state.pause_reason, state.paused_at)
-      else
-        match fleet_admission_state fleet_admission with
-        | Some "paused" -> `Fleet_paused
-        | Some "stopped" -> `Fleet_stopped
-        | _ -> `Running
+      else `Running
   in
   let payload =
     match pause_state with
@@ -147,53 +103,8 @@ let handle_pause_status ~tool_name ~start_time ctx _args : Tool_result.result =
             ("paused_at", Json_util.string_opt_to_json at);
             ("pause_scope", `String "workspace");
             ("any_pause_active", `Bool true);
-            ("fleet_admission", fleet_admission);
             ("keeper_pause", keeper_pause);
             ("message", `String "Server is paused");
-          ]
-    | `Fleet_paused ->
-        `Assoc
-          [
-            ("ok", `Bool true);
-            ("initializing", `Bool false);
-            ("status", `String "paused");
-            ("paused", `Bool false);
-            ( "paused_by",
-              Json_util.string_opt_to_json
-                (fleet_admission_string_field fleet_admission "updated_by") );
-            ( "pause_reason",
-              Json_util.string_opt_to_json
-                (fleet_admission_string_field fleet_admission "reason") );
-            ( "paused_at",
-              Json_util.string_opt_to_json
-                (fleet_admission_string_field fleet_admission "updated_at") );
-            ("pause_scope", `String "fleet_admission");
-            ("any_pause_active", `Bool true);
-            ("fleet_admission", fleet_admission);
-            ("keeper_pause", keeper_pause);
-            ("message", `String "Fleet admission is paused");
-          ]
-    | `Fleet_stopped ->
-        `Assoc
-          [
-            ("ok", `Bool true);
-            ("initializing", `Bool false);
-            ("status", `String "stopped");
-            ("paused", `Bool false);
-            ( "paused_by",
-              Json_util.string_opt_to_json
-                (fleet_admission_string_field fleet_admission "updated_by") );
-            ( "pause_reason",
-              Json_util.string_opt_to_json
-                (fleet_admission_string_field fleet_admission "reason") );
-            ( "paused_at",
-              Json_util.string_opt_to_json
-                (fleet_admission_string_field fleet_admission "updated_at") );
-            ("pause_scope", `String "fleet_admission");
-            ("any_pause_active", `Bool true);
-            ("fleet_admission", fleet_admission);
-            ("keeper_pause", keeper_pause);
-            ("message", `String "Fleet admission is stopped; new keeper turns are blocked");
           ]
     | `Running ->
         `Assoc
@@ -206,19 +117,13 @@ let handle_pause_status ~tool_name ~start_time ctx _args : Tool_result.result =
             ("pause_reason", `Null);
             ("paused_at", `Null);
             ("pause_scope", `String "workspace");
-            ("any_pause_active", `Bool (keeper_paused || fleet_paused));
-            ("fleet_admission", fleet_admission);
+            ("any_pause_active", `Bool keeper_paused);
             ("keeper_pause", keeper_pause);
             ( "message",
               `String
-                (match fleet_admission_state fleet_admission with
-                 | Some "stopped" ->
-                   "Server is running, but fleet admission is stopped"
-                 | Some "paused" ->
-                   "Server is running, but fleet admission is paused"
-                 | _ when keeper_paused ->
-                   "Server is running, but one or more keepers are paused"
-                 | _ -> "Server is running (not paused)") );
+                (if keeper_paused
+                 then "Server is running, but one or more keepers are paused"
+                 else "Server is running (not paused)") );
           ]
     | `Initializing ->
         `Assoc
@@ -232,7 +137,6 @@ let handle_pause_status ~tool_name ~start_time ctx _args : Tool_result.result =
             ("paused_at", `Null);
             ("pause_scope", `String "workspace");
             ("any_pause_active", `Null);
-            ("fleet_admission", fleet_admission);
             ("keeper_pause", keeper_pause);
             ( "message",
               `String

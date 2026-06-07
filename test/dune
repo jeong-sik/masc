@@ -1421,8 +1421,6 @@
 
 (include stanzas/test_keeper_meta_unknown_keys_warn.inc)
 
-(include stanzas/test_keeper_semaphore_wait_queue_head_clock.inc)
-
 (include stanzas/test_keeper_mutex_coverage.inc)
 
 
@@ -1441,8 +1439,6 @@
 (include stanzas/test_keeper_receipt_authoritative_matrix.inc)
 
 (include stanzas/test_keeper_receipt_outcome_tla_parity.inc)
-
-(include stanzas/test_keeper_semaphore_fairness.inc)
 
 (include stanzas/test_keeper_sandbox_docker_cwd_response.inc)
 
@@ -1478,14 +1474,6 @@
 
 (include stanzas/test_keeper_turn_helpers_side_effect_metric.inc)
 
-(include stanzas/test_keeper_turn_holders_force_release.inc)
-
-(include stanzas/test_keeper_turn_admission.inc)
-
-(include stanzas/test_keeper_turn_holders_holders.inc)
-
-(include stanzas/test_keeper_turn_holders_types.inc)
-
 (include stanzas/test_keeper_transition_audit_types.inc)
 
 (include stanzas/test_keeper_path_rejection.inc)
@@ -1499,8 +1487,6 @@
 (include stanzas/test_keeper_toml_loader.inc)
 
 (include stanzas/test_keeper_runtime_config_leaf.inc)
-
-(include stanzas/test_keeper_turn_holders_release_cancel_safe.inc)
 
 
 (include stanzas/test_local_review_script.inc)
@@ -1542,8 +1528,6 @@
 
 
 (include stanzas/test_operator_mcp_e2e.inc)
-
-(include stanzas/test_operator_namespace_fleet_admission.inc)
 
 (include stanzas/test_otel_tick_poison_source.inc)
 

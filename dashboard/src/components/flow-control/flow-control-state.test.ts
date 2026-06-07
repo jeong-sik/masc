@@ -31,7 +31,6 @@ vi.mock('../../store', () => ({
 import {
   fetchPauseStatus,
   flowState,
-  syncFlowStateFromDashboardSignals,
 } from './flow-control-state'
 
 describe('flow-control-state', () => {
@@ -95,48 +94,6 @@ describe('flow-control-state', () => {
     await fetchPauseStatus()
 
     expect(flowState.value).toBe('paused')
-  })
-
-  it('marks stopped fleet admission as stopped', async () => {
-    callMcpTool.mockResolvedValueOnce(
-      JSON.stringify({ status: 'stopped', paused: false, pause_scope: 'fleet_admission' }),
-    )
-
-    await fetchPauseStatus()
-
-    expect(flowState.value).toBe('stopped')
-  })
-
-  it('does not let snapshot running hide stopped fleet admission', async () => {
-    namespaceTruth.value = {
-      root: {
-        status: {
-          paused: false,
-        },
-      },
-    }
-    callMcpTool.mockResolvedValueOnce(
-      JSON.stringify({ status: 'stopped', paused: false, pause_scope: 'fleet_admission' }),
-    )
-
-    await fetchPauseStatus()
-
-    expect(callMcpTool).toHaveBeenCalledWith('masc_pause_status', {})
-    expect(flowState.value).toBe('stopped')
-  })
-
-  it('preserves stopped fleet admission during snapshot refreshes', () => {
-    flowState.value = 'stopped'
-    namespaceTruth.value = {
-      root: {
-        status: {
-          paused: false,
-        },
-      },
-    }
-
-    expect(syncFlowStateFromDashboardSignals()).toBe(true)
-    expect(flowState.value).toBe('stopped')
   })
 
   it('trims status strings before matching pause state', async () => {

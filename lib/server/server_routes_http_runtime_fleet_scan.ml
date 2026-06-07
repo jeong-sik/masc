@@ -492,58 +492,24 @@ let keeper_fleet_safety_health_json
        | _ -> 0)
     | _ -> 0
   in
-  let turn_admission_snapshot =
-    let limit = Keeper_keepalive.effective_turn_throttle_limit in
-    match current_server_state_opt () with
-    | Some state ->
-      Keeper_turn_admission.snapshot
-        ~base_path:state.Mcp_server.workspace_config.base_path
-        ~limit
-        ()
-    | None -> Keeper_turn_admission.snapshot ~limit ()
-  in
-  let turn_admission_blocker =
-    match turn_admission_snapshot.fleet_state with
-    | Keeper_turn_admission.Running -> None
-    | Keeper_turn_admission.Paused -> Some "turn_admission_paused"
-    | Keeper_turn_admission.Stopped -> Some "turn_admission_stopped"
-  in
-  let turn_admission_stopped =
-    match turn_admission_snapshot.fleet_state with
-    | Keeper_turn_admission.Stopped -> true
-    | Keeper_turn_admission.Running | Keeper_turn_admission.Paused -> false
-  in
-  let turn_admission_paused =
-    match turn_admission_snapshot.fleet_state with
-    | Keeper_turn_admission.Paused -> true
-    | Keeper_turn_admission.Running | Keeper_turn_admission.Stopped -> false
-  in
-  let turn_admission_not_running = Option.is_some turn_admission_blocker in
   let status =
-    if no_executable_keeper_fibers || turn_admission_stopped then "blocked"
+    if no_executable_keeper_fibers then "blocked"
     else if no_running_fibers then "degraded"
     else if low_running_fiber_margin then "degraded"
     else if reaction_capacity_below_target then "degraded"
-    else if turn_admission_paused then "degraded"
     else "ok"
   in
   let blocked_count =
-    let capacity_blocked_count =
-      if no_executable_keeper_fibers then executable_reaction_capacity_shortfall_count
-      else if no_running_fibers || low_running_fiber_margin || reaction_capacity_below_target
-      then reaction_capacity_shortfall_count
-      else 0
-    in
-    let admission_blocked_count = if turn_admission_not_running then target_count else 0 in
-    max capacity_blocked_count admission_blocked_count
+    if no_executable_keeper_fibers then executable_reaction_capacity_shortfall_count
+    else if no_running_fibers || low_running_fiber_margin || reaction_capacity_below_target
+    then reaction_capacity_shortfall_count
+    else 0
   in
   let blocker =
     if no_executable_keeper_fibers then Some "no_executable_keeper_fibers"
-    else if turn_admission_stopped then Some "turn_admission_stopped"
     else if no_running_fibers then Some "no_healthy_running_keeper_fibers"
     else if low_running_fiber_margin then Some "low_running_fiber_margin"
     else if reaction_capacity_below_target then Some "reaction_capacity_below_target"
-    else if turn_admission_paused then Some "turn_admission_paused"
     else if paused_autoboot_count > 0 then Some "durable_paused_autoboot_enabled"
     else None
   in
@@ -590,18 +556,5 @@ let keeper_fleet_safety_health_json
           (no_executable_keeper_fibers
            || no_running_fibers
            || low_running_fiber_margin
-           || reaction_capacity_below_target
-           || turn_admission_not_running) )
-    ; "autoboot_throttle_limit"
-    , `Int Keeper_keepalive.effective_turn_throttle_limit
-    ; ( "autoboot_throttle_source"
-      , `String (Config_boot_overrides.source "MASC_KEEPER_AUTOBOOT_MAX") )
-    ; ( "turn_admission_state"
-      , `String
-          (Keeper_turn_admission.fleet_state_to_string
-             turn_admission_snapshot.fleet_state) )
-    ; "turn_admission_inflight", `Int turn_admission_snapshot.global_inflight
-    ; "turn_admission_limit", `Int turn_admission_snapshot.global_limit
-    ; "turn_admission_available", `Int turn_admission_snapshot.available
-    ; "turn_admission_queue_depth", `Int turn_admission_snapshot.queue_depth
+           || reaction_capacity_below_target) )
     ]

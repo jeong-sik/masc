@@ -181,8 +181,7 @@ let home_dir_opt () =
 
    The deprecation_warned Hashtbl + warn_deprecated + deprecated_opt +
    resolve_deprecated + get_{float,int,bool}_deprecated cluster had a
-   single caller (Keeper_turn_admission_types.int_of_env_default_with_deprecated
-   for the MASC_KEEPER_AUTOBOT_MAX typo legacy).  Per
+   single caller for the MASC_KEEPER_AUTOBOT_MAX typo legacy is gone. Per
    memory/feedback_hardcoding_and_legacy_zero_tolerance.md, legacy env
    support is deleted at the same time as the mechanism that hosts it;
    the typo env is no longer recognised and operators using it must

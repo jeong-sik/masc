@@ -51,33 +51,6 @@ val with_in_turn_liveness_pulse :
   stop:bool Atomic.t ->
   (unit -> 'b) -> 'b
 
-type semaphore_wait_observation_kind =
-  | Semaphore_wait_pending
-  | Semaphore_wait_timeout
-
-val semaphore_wait_observation_reasons :
-  ?phase_label:string ->
-  kind:semaphore_wait_observation_kind ->
-  channel:Keeper_world_observation.keeper_cycle_channel ->
-  unit ->
-  string list
-
-val record_semaphore_wait_observation :
-  ?phase_label:string ->
-  base_path:string ->
-  keeper_name:string ->
-  channel:Keeper_world_observation.keeper_cycle_channel ->
-  kind:semaphore_wait_observation_kind ->
-  unit ->
-  unit
-
-type runtime_backpressure_decision =
-  | Runtime_admitted
-  | Runtime_backpressured of {
-      runtime_id : string;
-      reason : string;
-    }
-
 type heartbeat_event_intake = {
   pending_board_events : Keeper_world_observation.pending_board_event list;
   consumed_stimulus_count : int;
@@ -92,39 +65,17 @@ val heartbeat_event_intake :
 type keepalive_scheduling_decision = {
   turn_decision : Keeper_world_observation.keeper_cycle_decision;
   requested_should_run_turn : bool;
-  runtime_backpressure : runtime_backpressure_decision;
   should_run_turn : bool;
   verdict_reasons : string list;
-  admission_reasons : string list;
+  skip_reasons : string list;
   channel : string;
 }
 
 val decide_keepalive_scheduling :
-  ?runtime_resilience_of_name:(string -> string option) ->
-  ?runtime_status_of_name:
-    (runtime_id:string -> Keeper_health_probe.health_status) ->
   stop:bool Atomic.t ->
   meta:keeper_meta ->
   Keeper_world_observation.world_observation ->
   keepalive_scheduling_decision
-
-val runtime_backpressure_decision :
-  runtime_resilience:string option ->
-  should_run_turn:bool ->
-  runtime_id:string ->
-  runtime_status:Keeper_health_probe.health_status ->
-  runtime_backpressure_decision
-
-val runtime_backpressure_observation_reasons : reason:string -> string list
-
-val record_runtime_backpressure_observation :
-  base_path:string -> keeper_name:string -> reason:string -> unit
-
-val semaphore_wait_timeout_blocker_class :
-  Keeper_turn_holders.semaphore_wait_timeout -> blocker_class
-
-val semaphore_wait_timeout_diagnostics :
-  runtime_id:string -> Keeper_turn_holders.semaphore_wait_timeout -> string * string
 
 val provider_timeout_observation_reasons : string list
 

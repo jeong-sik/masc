@@ -533,39 +533,28 @@ let test_stop_keepalive_force_releases_held_slots () =
   R.clear ();
   let keeper_name = "manual-stop-held-slot" in
   let _reg = R.register ~base_path:bp keeper_name (make_meta keeper_name) in
-  let result =
-    Masc.Keeper_keepalive.with_recorded_turn_admission_for_test
-      ~keeper_name
-      ~channel:Masc.Keeper_world_observation.Reactive
-      (fun ~semaphore_wait_ms:_ ->
-         let now = Time_compat.now () in
-         check bool "precondition holder present" true
-           (List.mem keeper_name
-              (List.map fst (Masc.Keeper_keepalive.turn_holders ~now)));
-         Masc.Keeper_keepalive.stop_keepalive ~base_path:bp keeper_name;
-         let now_after = Time_compat.now () in
-         check bool "turn holder force released on manual stop" false
-           (List.mem keeper_name
-              (List.map fst
-                 (Masc.Keeper_keepalive.turn_holders ~now:now_after)));
-         check bool "reactive holder force released on manual stop" false
-           (List.mem keeper_name
-              (List.map fst
-                 (Masc.Keeper_keepalive.reactive_holders ~now:now_after)));
-         match R.get ~base_path:bp keeper_name with
-         | Some entry ->
-           check string "state stopped" "stopped" (KSM.phase_to_string entry.phase)
-         | None -> fail "expected keeper entry after manual stop")
-  in
-  match result with
-  | Ok () -> ()
-  | Error (`Semaphore_wait_timeout _) ->
-    fail "unexpected semaphore timeout while testing manual stop force-release"
-  | Error (`Turn_admission_rejected rejection) ->
-    fail
-      (Printf.sprintf
-         "unexpected turn admission rejection while testing manual stop force-release: %s"
-         (Masc.Keeper_turn_admission.rejection_to_string rejection))
+  Masc.Keeper_keepalive.with_recorded_turn_holder
+    ~keeper_name
+    ~channel:Masc.Keeper_world_observation.Reactive
+    (fun ~semaphore_wait_ms:_ ->
+       let now = Time_compat.now () in
+       check bool "precondition holder present" true
+         (List.mem keeper_name
+            (List.map fst (Masc.Keeper_keepalive.turn_holders ~now)));
+       Masc.Keeper_keepalive.stop_keepalive ~base_path:bp keeper_name;
+       let now_after = Time_compat.now () in
+       check bool "turn holder force released on manual stop" false
+         (List.mem keeper_name
+            (List.map fst
+               (Masc.Keeper_keepalive.turn_holders ~now:now_after)));
+       check bool "reactive holder force released on manual stop" false
+         (List.mem keeper_name
+            (List.map fst
+               (Masc.Keeper_keepalive.reactive_holders ~now:now_after)));
+       match R.get ~base_path:bp keeper_name with
+       | Some entry ->
+         check string "state stopped" "stopped" (KSM.phase_to_string entry.phase)
+       | None -> fail "expected keeper entry after manual stop")
 
 let test_stop_keepalive_preserves_existing_crash_outcome () =
   R.clear ();

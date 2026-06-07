@@ -14,7 +14,6 @@ let key_to_env =
     "bootstrap.autoboot_max",           "MASC_KEEPER_AUTOBOOT_MAX";
     (* [autonomous] *)
     "autonomous.max_turns_per_call",    "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS";
-    "autonomous.semaphore_wait_timeout_sec", "MASC_KEEPER_SEMAPHORE_WAIT_TIMEOUT_SEC";
     "autonomous.concurrency",           "MASC_KEEPER_AUTONOMOUS_CONCURRENCY";
     "autonomous.slot_wait_timeout_sec", "MASC_KEEPER_AUTONOMOUS_SLOT_WAIT_TIMEOUT_SEC";
     "autonomous.fairness_cooldown_sec", "MASC_KEEPER_AUTONOMOUS_FAIRNESS_COOLDOWN_SEC";

@@ -5,15 +5,13 @@
     body, board-reactive wakeup filtering, and optional gRPC heartbeat
     fiber.
 
-    [MASC_KEEPER_*] env vars read here (slot wait timeout,
-    compatibility counters, autoboot max) can also be set in
+    [MASC_KEEPER_*] env vars read here (compatibility counters) can also be set in
     [<resolved config root>/runtime.toml].
     See {!Keeper_runtime_config} and [docs/BOOT-ENV-STATE-INVENTORY.md]
     section 1.3.
 
     Structure (facade decomposition):
-    - [Keeper_turn_holders]      — admitted-turn holder diagnostics and
-                                 compatibility-only test facade
+    - [Keeper_turn_holders]      — in-turn holder diagnostics
     - [Keeper_keepalive_signal] — gRPC client refs, FSM guard identity
                                    helpers, interruptible sleep, wakeup
                                    dispatch, board-reactive wakeup,
@@ -629,20 +627,16 @@ let stop_keepalive ?base_path name =
        match entry.phase with
        | Keeper_state_machine.Crashed | Keeper_state_machine.Dead -> ()
        | _ ->
-         let released_admission_token =
-           Keeper_turn_admission.force_release_keeper ~keeper_name:entry.name
-         in
          let released_slots =
            if eio_context_available ()
            then force_release_holder_for ~keeper_name:entry.name
            else []
          in
-         if released_admission_token || released_slots <> [] then
+         if released_slots <> [] then
            Log.Keeper.warn
-             "%s: manual stop force-released admission before marking stopped \
-              token=%b holder_slot(s)=[%s]"
+             "%s: manual stop force-released holder row(s) before marking stopped \
+              holder_slot(s)=[%s]"
              entry.name
-             released_admission_token
              (String.concat "," (List.map fst released_slots));
          if
            record_keeper_stopped

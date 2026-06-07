@@ -1151,16 +1151,6 @@ let test_health_json_surfaces_durable_paused_keepers () =
             (fleet_safety |> member "reaction_capacity_shortfall_count" |> to_int);
           Alcotest.(check bool) "health fleet asks for operator action" true
             (fleet_safety |> member "operator_action_required" |> to_bool);
-          Alcotest.(check int) "health exposes autoboot throttle limit" 32
-            (fleet_safety |> member "autoboot_throttle_limit" |> to_int);
-          let expected_autoboot_throttle_source =
-            match Sys.getenv_opt "MASC_KEEPER_AUTOBOOT_MAX" with
-            | Some _ -> "env"
-            | None -> "default"
-          in
-          Alcotest.(check string) "health exposes autoboot throttle source"
-            expected_autoboot_throttle_source
-            (fleet_safety |> member "autoboot_throttle_source" |> to_string);
           Alcotest.(check string) "health reaction ledger degraded"
             "degraded"
             (reaction_ledger |> member "status" |> to_string);
@@ -1289,46 +1279,6 @@ let test_health_json_degrades_when_reaction_capacity_below_target () =
 	          Alcotest.(check bool) "health fleet asks for operator action" true
 	            (fleet_safety |> member "operator_action_required" |> to_bool);
 	          ())))
-
-let test_health_json_blocks_when_turn_admission_stopped () =
-  with_temp_dir "health-turn-admission-stopped" (fun dir ->
-      let config_root = make_config_root dir in
-      with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
-      let previous_state = !Server_auth.server_state in
-      Config_dir_resolver.reset ();
-      Fun.protect
-        ~finally:(fun () ->
-          Server_auth.server_state := previous_state;
-          Config_dir_resolver.reset ();
-          Keeper_turn_admission.reset_for_test ())
-        (fun () ->
-          let state = Mcp_server.create_state ~base_path:dir in
-          Server_auth.server_state := Some state;
-          let config = state.Mcp_server.workspace_config in
-          let active =
-            make_keeper_meta ~name:"admission-stopped-active"
-              ~trace_id:"trace-admission-stopped-active" ()
-          in
-          write_keeper_meta_exn config active;
-          with_running_keeper_metas config [ active ] (fun () ->
-              ignore
-                (Keeper_turn_admission.stop_fleet ~base_path:dir
-                   ~reason:"test_stopped_admission" ~updated_by:"test" ()
-                  : Keeper_turn_admission.fleet_policy);
-              let request = Httpun.Request.create `GET "/health" in
-              let json = Server_routes_http_runtime.make_health_json request in
-              let open Yojson.Safe.Util in
-              let fleet_safety = json |> member "keeper_fleet_safety" in
-              Alcotest.(check string) "admission stop blocks fleet safety"
-                "blocked"
-                (fleet_safety |> member "status" |> to_string);
-              Alcotest.(check string) "admission stop becomes fleet blocker"
-                "turn_admission_stopped"
-                (fleet_safety |> member "blocker" |> to_string);
-              Alcotest.(check bool) "admission stop asks operator action" true
-                (fleet_safety |> member "operator_action_required" |> to_bool);
-              Alcotest.(check string) "admission state exposed" "stopped"
-                (fleet_safety |> member "turn_admission_state" |> to_string))))
 
 let test_health_json_distinguishes_failing_executable_keepers () =
   with_temp_dir "health-failing-executable-keepers" (fun dir ->
@@ -1462,51 +1412,6 @@ let test_health_json_surfaces_log_ring_summary () =
   Alcotest.(check bool) "latest excludes details payload" true
     (latest |> member "details" = `Null);
   ignore (logs |> member "file_sink" |> member "enabled" |> to_bool)
-
-let test_keeper_fleet_safety_marks_stopped_admission_blocked () =
-  let module Scan = Server_routes_http_runtime_fleet_scan in
-  Keeper_turn_admission.reset_for_test ();
-  Fun.protect
-    ~finally:Keeper_turn_admission.reset_for_test
-    (fun () ->
-      ignore
-        (Keeper_turn_admission.stop_fleet
-           ~reason:"test"
-           ~updated_by:"test"
-           ()
-         : Keeper_turn_admission.fleet_policy);
-      let phase_counts : Scan.keeper_phase_counts =
-        { running = 1; failing = 0; recovering = 0; executable = 1 }
-      in
-      let autoboot_scan : Scan.autoboot_keeper_scan =
-        { autoboot_names = [ "ready-keeper" ]; read_errors = [] }
-      in
-      let json =
-        Scan.keeper_fleet_safety_health_json
-          ~bootable_names:[ "ready-keeper" ]
-          ~autoboot_scan
-          ~phase_counts
-          ~paused_keepers_json:
-            (`Assoc [ "count", `Int 0; "autoboot_enabled_count", `Int 0 ])
-          ()
-      in
-      let open Yojson.Safe.Util in
-      Alcotest.(check string)
-        "stopped admission blocks fleet safety"
-        "blocked"
-        (json |> member "status" |> to_string);
-      Alcotest.(check string)
-        "stopped admission blocker"
-        "turn_admission_stopped"
-        (json |> member "blocker" |> to_string);
-      Alcotest.(check bool)
-        "stopped admission asks for operator action"
-        true
-        (json |> member "operator_action_required" |> to_bool);
-      Alcotest.(check string)
-        "stopped admission state surfaced"
-        "stopped"
-        (json |> member "turn_admission_state" |> to_string))
 
 let test_health_json_surfaces_internal_mcp_auth_diagnostics () =
   with_temp_dir "health-internal-mcp-auth" @@ fun dir ->
@@ -2960,17 +2865,11 @@ let () =
             "health json degrades when reaction capacity is below target"
             `Quick test_health_json_degrades_when_reaction_capacity_below_target;
           Alcotest.test_case
-            "health json blocks when turn admission is stopped"
-            `Quick test_health_json_blocks_when_turn_admission_stopped;
-          Alcotest.test_case
             "health json distinguishes failing executable keepers"
             `Quick test_health_json_distinguishes_failing_executable_keepers;
           Alcotest.test_case
             "health json reaction ledger cursor sweep clears pending"
             `Quick test_health_json_reaction_ledger_cursor_sweep_clears_pending;
-          Alcotest.test_case
-            "keeper fleet safety marks stopped admission blocked"
-            `Quick test_keeper_fleet_safety_marks_stopped_admission_blocked;
           Alcotest.test_case "health json surfaces log ring summary" `Quick
             test_health_json_surfaces_log_ring_summary;
           Alcotest.test_case

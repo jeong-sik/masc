@@ -1,27 +1,15 @@
 (** Keepalive scheduling decision for the keeper heartbeat loop. *)
 
-type runtime_backpressure_decision =
-  Keeper_heartbeat_loop_observations.runtime_backpressure_decision =
-  | Runtime_admitted
-  | Runtime_backpressured of {
-      runtime_id : string;
-      reason : string;
-    }
-
 type keepalive_scheduling_decision = {
   turn_decision : Keeper_world_observation.keeper_cycle_decision;
   requested_should_run_turn : bool;
-  runtime_backpressure : runtime_backpressure_decision;
   should_run_turn : bool;
   verdict_reasons : string list;
-  admission_reasons : string list;
+  skip_reasons : string list;
   channel : string;
 }
 
 val decide_keepalive_scheduling :
-  ?runtime_resilience_of_name:(string -> string option) ->
-  ?runtime_status_of_name:
-    (runtime_id:string -> Keeper_health_probe.health_status) ->
   stop:bool Atomic.t ->
   meta:Keeper_meta_contract.keeper_meta ->
   Keeper_world_observation.world_observation ->

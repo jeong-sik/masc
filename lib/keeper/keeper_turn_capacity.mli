@@ -1,8 +1,13 @@
 (** Global + per-keeper keeper-turn capacity gate.
 
-    This is intentionally separate from {!Keeper_turn_holders}: holders are
-    diagnostics for turns that are already running, while this module admits or
-    rejects new turn bodies. *)
+    Two-tier admission:
+    - Global limit ([keeper.turn.capacity_limit], default 32): machine-level
+      concurrent turn cap shared across all keepers.
+    - Per-keeper limit ([keeper.turn.per_keeper_capacity_limit], default 2):
+      prevents a single keeper from monopolising provider capacity.
+
+    Both limits must be satisfied for admission. Rejection records which
+    limit was hit so the caller can log the specific bottleneck. *)
 
 type rejection =
   { limit : int
@@ -16,7 +21,7 @@ val with_turn_capacity :
   ?timeout_s:float ->
   keeper_name:string ->
   channel:Keeper_world_observation.keeper_cycle_channel ->
-  (capacity_wait_ms:int -> 'a) ->
+  (unit -> 'a) ->
   ('a, rejection) result
 
 val inflight_for_test : unit -> int

@@ -356,20 +356,15 @@ let run_keepalive_unified_turn
           Keeper_turn_capacity.with_turn_capacity
             ~keeper_name:meta_after_triage.name
             ~channel:turn_decision.channel
-            (fun ~capacity_wait_ms ->
-              Keeper_turn_holders.with_recorded_turn_holder
-                ~keeper_name:meta_after_triage.name
-                ~channel:turn_decision.channel
-                (fun ~holder_wait_ms ->
-                  run_keeper_cycle
-                    ~ctx
-                    ~meta_after_cursor_persist
-                    ~stop
-                    ~obs
-                    ~turn_decision
-                    ~shared_context
-                    ~holder_wait_ms:(capacity_wait_ms + holder_wait_ms)
-                    ()))
+            (fun () ->
+               run_keeper_cycle
+                 ~ctx
+                 ~meta_after_cursor_persist
+                 ~stop
+                 ~obs
+                 ~turn_decision
+                 ~shared_context
+                 ())
         with
         | Ok meta -> meta
         | Error { Keeper_turn_capacity.limit; inflight; waited_ms; per_keeper_limit; per_keeper_inflight } ->

@@ -551,40 +551,6 @@ let test_stop_keepalive_resolves_running_entry_immediately () =
        fail ("expected stopped promise, got crashed: " ^ reason)
      | None -> fail "expected manual stop to resolve done_p")
 
-let test_stop_keepalive_does_not_force_release_held_holders () =
-  R.clear ();
-  let keeper_name = "manual-stop-held-holder" in
-  let _reg = R.register ~base_path:bp keeper_name (make_meta keeper_name) in
-  Masc.Keeper_keepalive.with_recorded_turn_holder
-    ~keeper_name
-    ~channel:Masc.Keeper_world_observation.Reactive
-    (fun ~holder_wait_ms:_ ->
-       let now = Time_compat.now () in
-       check bool "precondition holder present" true
-         (List.mem keeper_name
-            (List.map fst (Masc.Keeper_keepalive.turn_holders ~now)));
-       Masc.Keeper_keepalive.stop_keepalive ~base_path:bp keeper_name;
-       let now_after = Time_compat.now () in
-       check bool "turn holder remains until turn finalizer" true
-         (List.mem keeper_name
-            (List.map fst
-               (Masc.Keeper_keepalive.turn_holders ~now:now_after)));
-       check bool "reactive holder remains until turn finalizer" true
-         (List.mem keeper_name
-            (List.map fst
-               (Masc.Keeper_keepalive.reactive_holders ~now:now_after)));
-       match R.get ~base_path:bp keeper_name with
-       | Some entry ->
-         check string "state stopped" "stopped" (KSM.phase_to_string entry.phase)
-       | None -> fail "expected keeper entry after manual stop");
-  let now_final = Time_compat.now () in
-  check bool "turn holder released by turn finalizer" false
-    (List.mem keeper_name
-       (List.map fst (Masc.Keeper_keepalive.turn_holders ~now:now_final)));
-  check bool "reactive holder released by turn finalizer" false
-    (List.mem keeper_name
-       (List.map fst (Masc.Keeper_keepalive.reactive_holders ~now:now_final)))
-
 let test_stop_keepalive_preserves_existing_crash_outcome () =
   R.clear ();
   let keeper_name = "crashed-before-stop" in
@@ -788,8 +754,6 @@ let () =
         test_direct_start_keepalive_resolves_done_on_stop;
       test_case "manual stop resolves running entry immediately" `Quick
         test_stop_keepalive_resolves_running_entry_immediately;
-      eio_test "manual stop preserves held turn holders until finalizer"
-        test_stop_keepalive_does_not_force_release_held_holders;
       test_case "manual stop preserves crashed outcome" `Quick
         test_stop_keepalive_preserves_existing_crash_outcome;
       test_case "resolve_done reports prior outcome" `Quick

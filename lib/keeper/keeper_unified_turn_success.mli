@@ -8,7 +8,6 @@ val handle
   -> previous_social_state:Keeper_social_model.social_state option
   -> final_execution:Keeper_turn_runtime_budget.runtime_execution
   -> latency_ms:int
-  -> holder_wait_ms:int
   -> degraded_retry_applied:bool
   -> degraded_retry_runtime:string option
   -> fallback_reason:Keeper_error_classify.degraded_retry_reason option

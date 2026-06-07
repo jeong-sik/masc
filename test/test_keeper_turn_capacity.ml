@@ -49,13 +49,13 @@ let test_global_capacity_blocks_nested_turn () =
           ~timeout_s:0.001
           ~keeper_name:"keeper-a"
           ~channel:Masc.Keeper_world_observation.Scheduled_autonomous
-          (fun ~capacity_wait_ms:_ ->
+          (fun () ->
              let inner =
                Masc.Keeper_turn_capacity.with_turn_capacity
                  ~timeout_s:0.001
                  ~keeper_name:"keeper-b"
                  ~channel:Masc.Keeper_world_observation.Scheduled_autonomous
-                 (fun ~capacity_wait_ms:_ -> ())
+                 (fun () -> ())
              in
              match inner with
              | Error { Masc.Keeper_turn_capacity.limit; inflight; _ } ->
@@ -81,13 +81,13 @@ let test_disabled_capacity_allows_nested_turn () =
           ~timeout_s:0.001
           ~keeper_name:"keeper-a"
           ~channel:Masc.Keeper_world_observation.Scheduled_autonomous
-          (fun ~capacity_wait_ms:_ ->
+          (fun () ->
              let inner =
                Masc.Keeper_turn_capacity.with_turn_capacity
                  ~timeout_s:0.001
                  ~keeper_name:"keeper-b"
                  ~channel:Masc.Keeper_world_observation.Scheduled_autonomous
-                 (fun ~capacity_wait_ms:_ -> ())
+                 (fun () -> ())
              in
              match inner with
              | Ok () -> ()
@@ -117,13 +117,13 @@ let test_per_keeper_blocks_second_concurrent_turn () =
           ~timeout_s:0.001
           ~keeper_name:"keeper-a"
           ~channel:Masc.Keeper_world_observation.Scheduled_autonomous
-          (fun ~capacity_wait_ms:_ ->
+          (fun () ->
              let inner =
                Masc.Keeper_turn_capacity.with_turn_capacity
                  ~timeout_s:0.001
                  ~keeper_name:"keeper-a"
                  ~channel:Masc.Keeper_world_observation.Scheduled_autonomous
-                 (fun ~capacity_wait_ms:_ -> ())
+                 (fun () -> ())
              in
              match inner with
              | Error { per_keeper_limit; per_keeper_inflight; _ } ->
@@ -152,13 +152,13 @@ let test_per_keeper_allows_different_keepers () =
           ~timeout_s:0.001
           ~keeper_name:"keeper-a"
           ~channel:Masc.Keeper_world_observation.Scheduled_autonomous
-          (fun ~capacity_wait_ms:_ ->
+          (fun () ->
              let inner =
                Masc.Keeper_turn_capacity.with_turn_capacity
                  ~timeout_s:0.001
                  ~keeper_name:"keeper-b"
                  ~channel:Masc.Keeper_world_observation.Scheduled_autonomous
-                 (fun ~capacity_wait_ms:_ -> ())
+                 (fun () -> ())
              in
              match inner with
              | Ok () -> ()
@@ -187,13 +187,13 @@ let test_per_keeper_disabled_allows_multiple () =
           ~timeout_s:0.001
           ~keeper_name:"keeper-a"
           ~channel:Masc.Keeper_world_observation.Scheduled_autonomous
-          (fun ~capacity_wait_ms:_ ->
+          (fun () ->
              let inner =
                Masc.Keeper_turn_capacity.with_turn_capacity
                  ~timeout_s:0.001
                  ~keeper_name:"keeper-a"
                  ~channel:Masc.Keeper_world_observation.Scheduled_autonomous
-                 (fun ~capacity_wait_ms:_ -> ())
+                 (fun () -> ())
              in
              match inner with
              | Ok () -> ()

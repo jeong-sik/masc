@@ -33,26 +33,6 @@ val wakeup_keeper :
     or system-wide events. *)
 val wakeup_all_keepers : ?base_path:string -> unit -> unit
 
-(** Diagnostic: keepers currently recorded in each holder pool, paired
-    with how long (in seconds, relative to [now]) they have held it.
-    Sorted by descending hold time.
-
-    [~now] MUST come from {!Time_compat.now} to match the clock used
-    by {!Keeper_turn_holders} when recording [acquired_at]. Passing
-    [Unix.gettimeofday ()] or any other clock can produce nonsense
-    hold-time values. *)
-val turn_holders : now:float -> (string * float) list
-val autonomous_holders : now:float -> (string * float) list
-val reactive_holders : now:float -> (string * float) list
-
-(** Render a compact holder list such as [[keeper-a/181s, +2 more]].
-    The input is expected to be sorted longest-first, as returned by the
-    holder accessors above. *)
-val format_holders : ?limit:int -> (string * float) list -> string
-
-(** Operator-facing one-line summary of all holder pools. *)
-val holders_summary : ?limit:int -> now:float -> unit -> string
-
 (** Pure: whether a [Keeper_heartbeat_smart] decision should allow the
     keepalive cycle (presence/snapshot/board/turn/recurring) to run.
 
@@ -84,50 +64,6 @@ val status_tick_usage_json : unit -> Yojson.Safe.t
 (** Usage payload for heartbeat/status metrics rows.  Status ticks are not
     LLM calls, so all per-turn token counters are explicit zeroes while
     preserving the same cache-token field shape as turn snapshots. *)
-
-(** PR-M (Leak 9): consecutive [provider_timeout] cycle FAILED strikes
-    per keeper. The heartbeat loop routes the count through
-    [Keeper_failure_policy] instead of treating the limit as keeper death.
-    Reset on any successful turn.
-    The in-process CAS map survives within a server lifetime. After
-    restart, callers may hydrate the first bump from persisted
-    [Provider_timeout_loop] state so multi-process loops still reach
-    the policy gate. *)
-val provider_timeout_strike_limit : int
-
-type provider_timeout_strike_outcome =
-  | Provider_timeout_warn
-  | Provider_timeout_soft_backoff
-
-val classify_provider_timeout_strike :
-  strikes:int -> provider_timeout_strike_outcome
-
-val bump_budget_exhaustion_seeded :
-  keeper_name:string -> prior_strikes:int -> int
-(** Increment the strike count for [keeper_name] and return the new
-    count. If no in-memory count exists, [prior_strikes] is used as
-    the non-negative starting point. Thread-safe under [Stdlib.Mutex]. *)
-
-val bump_budget_exhaustion : keeper_name:string -> int
-(** Increment the strike count for [keeper_name] and return the new
-    count from the in-memory counter only. Thread-safe under [Stdlib.Mutex]. *)
-
-val reset_budget_exhaustion : keeper_name:string -> unit
-(** Drop any strike count for [keeper_name].  Idempotent. *)
-
-val peek_budget_exhaustion_for_test : keeper_name:string -> int
-(** Test-only: read current strike count without mutating. *)
-
-val set_budget_exhaustion_for_test :
-  keeper_name:string -> strikes:int -> unit
-(** Test-only: pre-load strike count.  [strikes <= 0] is equivalent
-    to [reset_budget_exhaustion]. *)
-
-val with_recorded_turn_holder :
-  keeper_name:string ->
-  channel:Keeper_world_observation.keeper_cycle_channel ->
-  (holder_wait_ms:int -> 'a) ->
-  'a
 
 (** Test-only wrapper for the in-turn liveness pulse lifecycle. *)
 val with_in_turn_liveness_pulse_for_test :

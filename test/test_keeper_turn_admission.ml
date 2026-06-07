@@ -129,6 +129,24 @@ let test_stop_does_not_cancel_inflight_tokens () =
   A.release_turn token;
   A.reset_for_test ()
 
+let test_force_release_resolves_token_cancel_p () =
+  A.reset_for_test ();
+  let token = acquire_token ~limit:1 ~keeper_name:"force-cancel" () in
+  Alcotest.(check bool)
+    "cancel promise initially unresolved"
+    true
+    (Option.is_none (Eio.Promise.peek (A.token_cancel_p token)));
+  Alcotest.(check bool)
+    "force release finds token"
+    true
+    (A.force_release_keeper ~keeper_name:"force-cancel");
+  Alcotest.(check bool)
+    "force release resolves cancel promise"
+    true
+    (Option.is_some (Eio.Promise.peek (A.token_cancel_p token)));
+  Alcotest.(check int) "force release drops token" 0 (A.global_inflight ());
+  A.reset_for_test ()
+
 let test_capacity_rejection_does_not_queue_waiters () =
   A.reset_for_test ();
   let held = acquire_token ~limit:1 ~keeper_name:"held" () in
@@ -278,27 +296,53 @@ let test_fake_llm_turn_holds_admission_until_callback_finishes () =
   wait_until_released 20;
   A.reset_for_test ()
 
-let test_force_release_releases_with_turn_admission_token () =
+let test_force_release_cancels_with_turn_admission_token () =
   A.reset_for_test ();
-  (match
-     A.with_turn_admission
-       ~keeper_name:"wrapper-force"
-       ~runtime_profile:"test"
-       ~channel:Masc.Keeper_world_observation.Reactive
-       (fun ~semaphore_wait_ms:_ ->
-          Alcotest.(check int) "wrapper token registered" 1 (A.global_inflight ());
-          Alcotest.(check bool)
-            "force release finds wrapper token"
-            true
-            (A.force_release_keeper ~keeper_name:"wrapper-force");
-          Alcotest.(check int) "force release drops token" 0 (A.global_inflight ()))
-   with
-   | Ok () -> ()
-   | Error (`Semaphore_wait_timeout _) -> Alcotest.fail "unexpected wait timeout"
-   | Error (`Turn_admission_rejected rejection) ->
-     Alcotest.failf
-       "unexpected admission rejection: %s"
-       (A.rejection_to_string rejection));
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let started_p, started_u = Eio.Promise.create () in
+  let result = ref None in
+  Eio.Fiber.fork ~sw (fun () ->
+    let observed =
+      try
+        match
+          A.with_turn_admission
+            ~keeper_name:"wrapper-force"
+            ~runtime_profile:"test"
+            ~channel:Masc.Keeper_world_observation.Reactive
+            (fun ~semaphore_wait_ms:_ ->
+               Eio.Promise.resolve started_u ();
+               Eio.Time.sleep clock 60.0)
+        with
+        | Ok () -> "completed"
+        | Error (`Semaphore_wait_timeout _) -> "wait_timeout"
+        | Error (`Turn_admission_rejected rejection) ->
+          "rejected:" ^ A.rejection_to_string rejection
+      with
+      | A.Fleet_stopped_by_operator -> "fleet_stopped"
+    in
+    result := Some observed);
+  Eio.Promise.await started_p;
+  Alcotest.(check int) "wrapper token registered" 1 (A.global_inflight ());
+  Alcotest.(check bool)
+    "force release finds wrapper token"
+    true
+    (A.force_release_keeper ~keeper_name:"wrapper-force");
+  let rec wait_for_result attempts =
+    match !result with
+    | Some observed -> observed
+    | None when attempts <= 0 -> Alcotest.fail "force release did not cancel wrapper turn"
+    | None ->
+      Eio.Fiber.yield ();
+      Eio.Time.sleep clock 0.01;
+      wait_for_result (attempts - 1)
+  in
+  Alcotest.(check string)
+    "force release interrupts wrapper turn"
+    "fleet_stopped"
+    (wait_for_result 100);
+  Alcotest.(check int) "force release drops token" 0 (A.global_inflight ());
   A.reset_for_test ()
 
 let () =
@@ -326,6 +370,10 @@ let () =
             `Quick
             test_stop_does_not_cancel_inflight_tokens
         ; Alcotest.test_case
+            "force release resolves token cancel promise"
+            `Quick
+            test_force_release_resolves_token_cancel_p
+        ; Alcotest.test_case
             "capacity rejection does not queue waiters"
             `Quick
             test_capacity_rejection_does_not_queue_waiters
@@ -342,8 +390,8 @@ let () =
             `Quick
             test_fake_llm_turn_holds_admission_until_callback_finishes
         ; Alcotest.test_case
-            "force release drops with_turn_admission token"
+            "force release cancels with_turn_admission token"
             `Quick
-            test_force_release_releases_with_turn_admission_token
+            test_force_release_cancels_with_turn_admission_token
         ] )
     ]

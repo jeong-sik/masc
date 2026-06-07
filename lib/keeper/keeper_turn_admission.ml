@@ -507,6 +507,15 @@ let release_turn token =
     { state with active_leases = Lease_map.remove token.token_id state.active_leases }, ())
 ;;
 
+let request_cancel_lease (metadata : lease_metadata) =
+  match Eio.Promise.peek metadata.lease_cancel_p with
+  | Some () -> ()
+  | None -> (
+    try Eio.Promise.resolve metadata.lease_cancel_resolver () with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | _ -> ())
+;;
+
 let eio_scheduler_available () =
   Eio_guard.is_ready ()
   ||
@@ -565,18 +574,16 @@ let with_turn_admission
 ;;
 
 let force_release_keeper ~keeper_name =
-  let released, cancel_resolvers =
+  let released =
     transition (fun state ->
-      let matching =
-        Lease_map.filter
-          (fun _ metadata ->
-             String.equal metadata.lease_keeper_name keeper_name)
-          state.active_leases
-      in
-      let resolvers =
+      let released =
         Lease_map.fold
-          (fun _ metadata acc -> metadata.lease_cancel_resolver :: acc)
-          matching []
+          (fun _ metadata acc ->
+             if String.equal metadata.lease_keeper_name keeper_name
+             then metadata :: acc
+             else acc)
+          state.active_leases
+          []
       in
       let active_leases =
         Lease_map.filter
@@ -584,11 +591,10 @@ let force_release_keeper ~keeper_name =
              not (String.equal metadata.lease_keeper_name keeper_name))
           state.active_leases
       in
-      let released = Lease_map.cardinal active_leases <> Lease_map.cardinal state.active_leases in
-      { state with active_leases }, (released, resolvers))
+      { state with active_leases }, released)
   in
-  List.iter (fun r -> Eio.Promise.resolve r ()) cancel_resolvers;
-  released
+  List.iter request_cancel_lease released;
+  released <> []
 ;;
 
 let token_cancel_p token = token.cancel_p

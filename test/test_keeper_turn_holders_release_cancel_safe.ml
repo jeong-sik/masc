@@ -106,6 +106,10 @@ let () =
       {|Lease_map.filter|}
     ; "force release matches keeper"
     , {|not (String.equal metadata.lease_keeper_name keeper_name)|}
+    ; "force release resolves token cancellation"
+    , {|List.iter request_cancel_lease released|}
+    ; "lease stores cancellation resolver"
+    , {|lease_cancel_resolver : unit Eio.Promise.u|}
     ]
   in
   List.iter

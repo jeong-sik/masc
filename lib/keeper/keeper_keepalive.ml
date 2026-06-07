@@ -11,7 +11,6 @@
     section 1.3.
 
     Structure (facade decomposition):
-    - [Keeper_turn_holders]      — in-turn holder diagnostics
     - [Keeper_keepalive_signal] — gRPC client refs, FSM guard identity
                                    helpers, interruptible sleep, wakeup
                                    dispatch, board-reactive wakeup,
@@ -20,7 +19,7 @@
                                      dispatch, stage timing metrics
     - [Keeper_heartbeat_loop]  — [run_keepalive_unified_turn], smart
                                    heartbeat, [run_heartbeat_loop]
-    This facade [include]s all four and adds: event bus delegation,
+    This facade [include]s all three and adds: event bus delegation,
     identity repair, gRPC heartbeat stream, directive processing, and
     keeper lifecycle start/stop. *)
 
@@ -30,7 +29,6 @@ open Keeper_meta_store
 open Keeper_types_profile
 open Keeper_memory
 open Keeper_execution
-include Keeper_turn_holders
 include Keeper_keepalive_signal
 include Keeper_heartbeat_snapshot
 include Keeper_heartbeat_loop

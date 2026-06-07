@@ -152,7 +152,7 @@ let with_turn_capacity ?timeout_s ~keeper_name ~channel:_ f =
   | Ok acquired ->
     Fun.protect
       ~finally:acquired.release
-      (fun () -> Ok (f ~capacity_wait_ms:acquired.wait_ms))
+      (fun () -> Ok (f ()))
 ;;
 
 let inflight_for_test () = Atomic.get inflight

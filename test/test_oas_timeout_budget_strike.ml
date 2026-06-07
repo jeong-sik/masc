@@ -2,7 +2,7 @@ open Masc
 
 module KH = Keeper_heartbeat_loop
 module KFP = Keeper_failure_policy
-module KK = Keeper_keepalive
+module KK = Keeper_turn_holders
 module KCB = Keeper_turn_runtime_budget
 module KAL = Keeper_attempt_liveness_config
 module KTD = Keeper_turn_driver

@@ -57,9 +57,10 @@ val resolve_bounded_provider_timeout_budget_with_turn_budget :
   max_turns:int ->
   remaining_turn_budget_s:float ->
   provider_timeout_budget
-(** Resolves the per-provider timeout plan. The outer keeper turn budget is
-    telemetry here, not an admission gate; provider liveness, stream idle, and
-    max-turn limits own attempt termination. *)
+(** Resolves the per-provider timeout plan. The outer keeper turn budget is not
+    a keeper pause/stop/admission gate, but it caps the nested provider
+    attempt's OAS timeout. Provider liveness, stream idle, and max-turn limits
+    own active-stream health. *)
 
 val allow_wall_clock_retry_budget_for_attempt :
   is_retry:bool ->

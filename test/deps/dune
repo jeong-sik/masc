@@ -114,6 +114,8 @@
   (re_export masc.config)
   (re_export masc.fs_compat)
   (re_export masc.gate)
+  (re_export masc.command_descriptor)
+  (re_export masc.agent_observation)
   (re_export masc.ide)
   (re_export masc.masc_backend)
   (re_export masc.masc_compression)

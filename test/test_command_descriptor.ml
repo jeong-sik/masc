@@ -2,7 +2,7 @@
 
 open Alcotest
 
-module Desc = Ide_command_descriptor
+module Desc = Command_descriptor
 
 let with_temp_dir f =
   let dir = Filename.temp_file "cmd_desc_test" "" in

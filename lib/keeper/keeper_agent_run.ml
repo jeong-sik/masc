@@ -110,17 +110,20 @@ let run_turn
   (* Section 1: Setup — sanitize input, build context, compose prompt. *)
   let user_message = Keeper_run_prompt.sanitize_user_message user_message in
   Masc_runtime_events.emit_turn_start ();
-  (* IDE Bridge: emit turn started event *)
-  Ide_bridge.ingest_turn_event
-    ~base_path:config.base_path
-    ~turn_id:(match meta.current_task_id with Some t -> Keeper_id.Task_id.to_string t | None -> "turn-" ^ meta.name)
-    ~keeper_id:meta.name
-    ~phase:"started"
-    ~model_used:None
-    ~tools_used:[]
-    ~stop_reason:None
-    ~duration_ms:None
-    ~timestamp_ms:(Int64.of_float (Unix.gettimeofday () *. 1000.0));
+  Agent_observation.emit_turn_event
+    { base_path = config.base_path
+    ; turn_id =
+        (match meta.current_task_id with
+         | Some t -> Keeper_id.Task_id.to_string t
+         | None -> "turn-" ^ meta.name)
+    ; keeper_id = meta.name
+    ; phase = "started"
+    ; model_used = None
+    ; tools_used = []
+    ; stop_reason = None
+    ; duration_ms = None
+    ; timestamp_ms = Int64.of_float (Unix.gettimeofday () *. 1000.0)
+    };
   (* Cancel-safe cleanup (#9747): stdlib [Fun.protect] wraps finally
      exceptions in [Fun.Finally_raised], masking the outer
      [Eio.Cancel.Cancelled] raised by the turn body during fleet-wide
@@ -130,23 +133,23 @@ let run_turn
      [keeper_unified_turn.ml] (#9747 iter 1). *)
   let turn_start_time = Unix.gettimeofday () in
   let safe_emit_turn_end =
-    (* IDE Bridge: emit turn completed event on turn end *)
-    let emit_ide_bridge_turn_end () =
+    let emit_observation_turn_end () =
       let duration_ms = int_of_float ((Unix.gettimeofday () -. turn_start_time) *. 1000.0) in
       let turn_id = match meta.current_task_id with Some t -> Keeper_id.Task_id.to_string t | None -> "turn-" ^ meta.name in
-      Ide_bridge.ingest_turn_event
-        ~base_path:config.base_path
-        ~turn_id
-        ~keeper_id:meta.name
-        ~phase:"completed"
-        ~model_used:None
-        ~tools_used:[]
-        ~stop_reason:None
-        ~duration_ms:(Some duration_ms)
-        ~timestamp_ms:(Int64.of_float (Unix.gettimeofday () *. 1000.0))
+      Agent_observation.emit_turn_event
+        { base_path = config.base_path
+        ; turn_id
+        ; keeper_id = meta.name
+        ; phase = "completed"
+        ; model_used = None
+        ; tools_used = []
+        ; stop_reason = None
+        ; duration_ms = Some duration_ms
+        ; timestamp_ms = Int64.of_float (Unix.gettimeofday () *. 1000.0)
+        }
     in
     fun () ->
-      (try emit_ide_bridge_turn_end () with _ -> ());
+      (try emit_observation_turn_end () with _ -> ());
       Turn_helpers.emit_turn_end_safely ~keeper_name:meta.name ()
   in
   Eio_guard.protect ~finally:safe_emit_turn_end

@@ -405,6 +405,18 @@ let compact
   Log.Compact.info "[compact] strategies=[%s] %s"
     (String.concat "," strategy_names)
     (observation_summary observation);
+  (* Deterministic guard: separate System messages from the compaction
+     pipeline. System messages carry identity anchors, goals, and policy
+     that must never be dropped or lossily summarized. This is a hard
+     mechanical guarantee — not a score-based heuristic. The OAS reducer
+     operates only on non-System messages; System messages are prepended
+     back verbatim after reduction. *)
+  let system_msgs, other_msgs = List.partition
+      (fun (m : Agent_sdk.Types.message) ->
+         match m.role with Agent_sdk.Types.System -> true | _ -> false)
+      messages
+  in
   let oas_strategies = List.map oas_strategy_of resolved in
   let reducer = Agent_sdk.Context_reducer.compose oas_strategies in
-  Agent_sdk.Context_reducer.reduce reducer messages
+  let reduced = Agent_sdk.Context_reducer.reduce reducer other_msgs in
+  system_msgs @ reduced

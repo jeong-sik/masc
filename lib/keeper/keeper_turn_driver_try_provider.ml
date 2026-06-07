@@ -298,105 +298,70 @@ let run_try_provider
   match config_result with
   | Error err -> Error err, None, None
   | Ok config ->
-    (* Liveness observer removed. Stream stall detection is handled by OAS's
-       stream_idle_timeout_s (default 120s per inter-line gap). The former
-       liveness FSM was a dual-kill system that independently terminated streams
-       via tick-fiber + Enforce-mode Switch.fail, causing no_first_token errors
-       on legitimately slow providers. Standard agent SDKs (OpenAI, Anthropic,
-       LangChain, Vercel AI) use HTTP-level timeouts only. *)
-    (* Per-lane concurrency gate: limits inflight requests per runtime lane
-       using the max-concurrent value from runtime.toml binding config. *)
-    let lane_key = Runtime_candidate.provider_label candidate in
-    let lane_max_concurrent =
-      match Runtime.get_runtime_by_id ctx.runtime_id with
-      | Some rt ->
-        let b = rt.Runtime.binding in
-        b.max_concurrent
-      | None -> 0  (* runtime resolved earlier; 0 disables the gate as fallback *)
+    (* Stream stall detection is handled by OAS's stream_idle_timeout_s.
+       No separate liveness FSM — provider stall is an OAS-level concern.
+       No per-lane capacity gate — provider load is managed by operator
+       adjusting keeper count. *)
+    let result =
+      Eio.Switch.run (fun attempt_sw ->
+        let effective_checkpoint =
+          match resume_checkpoint with
+          | Some _ -> resume_checkpoint
+          | None -> ctx.oas_checkpoint
+        in
+        let run_fn () =
+          Eio_guard.check_if_ready ();
+          Runtime_agent.run
+            ~sw:attempt_sw
+            ~net:ctx.net
+            ~config
+            ?oas_checkpoint:effective_checkpoint
+            ?on_event:ctx.on_event
+            ?on_yield:ctx.on_yield
+            ?on_resume:ctx.on_resume
+            ~agent_ref:local_agent_ref
+            ctx.goal
+        in
+        match per_provider_timeout_s with
+        | None -> run_fn ()
+        | Some t ->
+          let clock_opt =
+            match Masc_eio_env.get_opt () with
+            | Some env ->
+              (match env.clock with
+               | Some _ as clock_opt -> clock_opt
+               | None -> Eio_context.get_clock_opt ())
+            | None -> Eio_context.get_clock_opt ()
+          in
+          (match clock_opt with
+           | Some clock ->
+             (try Eio.Time.with_timeout_exn clock t run_fn with
+              | Eio.Time.Timeout ->
+                Log.Misc.info
+                  "[runtime-fallback] runtime %s: per-provider timeout after %.1fs"
+                  ctx.runtime_id
+                  t;
+                Error
+                  (Agent_sdk.Error.Api
+                     (Timeout
+                        { message =
+                            Printf.sprintf "Per-provider timeout after %.1fs" t
+                        })))
+           | None -> run_fn ()))
     in
-    (match
-       Runtime_lane_capacity.with_lane_capacity
-         ~lane_key
-         ~max_concurrent:lane_max_concurrent
-         (fun ~capacity_wait_ms ->
-            let _ = capacity_wait_ms in
-            let result =
-              Eio.Switch.run (fun attempt_sw ->
-                let effective_checkpoint =
-                  match resume_checkpoint with
-                  | Some _ -> resume_checkpoint
-                  | None -> ctx.oas_checkpoint
-                in
-                let run_fn () =
-                  Eio_guard.check_if_ready ();
-                  Runtime_agent.run
-                    ~sw:attempt_sw
-                    ~net:ctx.net
-                    ~config
-                    ?oas_checkpoint:effective_checkpoint
-                    ?on_event:ctx.on_event
-                    ?on_yield:ctx.on_yield
-                    ?on_resume:ctx.on_resume
-                    ~agent_ref:local_agent_ref
-                    ctx.goal
-                in
-                match per_provider_timeout_s with
-                | None -> run_fn ()
-                | Some t ->
-                  let clock_opt =
-                    match Masc_eio_env.get_opt () with
-                    | Some env ->
-                      (match env.clock with
-                       | Some _ as clock_opt -> clock_opt
-                       | None -> Eio_context.get_clock_opt ())
-                    | None -> Eio_context.get_clock_opt ()
-                  in
-                  (match clock_opt with
-                   | Some clock ->
-                     (try Eio.Time.with_timeout_exn clock t run_fn with
-                      | Eio.Time.Timeout ->
-                        Log.Misc.info
-                          "[runtime-fallback] runtime %s: runtime lane per-provider \
-                           timeout after %.1fs, falling back"
-                          ctx.runtime_id
-                          t;
-                        Error
-                          (Agent_sdk.Error.Api
-                             (Timeout
-                                { message =
-                                    Printf.sprintf "Per-provider timeout after %.1fs" t
-                                })))
-                   | None -> run_fn ()))
-            in
-            result)
-     with
-     | Error rejection ->
-       Error
-         (Agent_sdk.Error.Api
-            (Timeout
-               { message =
-                   Printf.sprintf
-                     "Runtime lane %s capacity full: %d/%d slots, waited %dms"
-                     rejection.lane_key
-                     rejection.inflight
-                     rejection.limit
-                     rejection.waited_ms
-               })),
-       None, None
-     | Ok result ->
-       let result =
-         Result.map_error
-           (Runtime_candidate.enrich_sdk_error
-              ~runtime_id:ctx.error_runtime_id
-              candidate)
-           result
-       in
-       let checkpoint_after =
-         Keeper_turn_driver_helpers.checkpoint_after_attempt
-           ?agent_ref:ctx.agent_ref
-           !local_agent_ref
-       in
-       result, checkpoint_after, None)
+    let result =
+      Result.map_error
+        (Runtime_candidate.enrich_sdk_error
+           ~runtime_id:ctx.error_runtime_id
+           candidate)
+        result
+    in
+    let checkpoint_after =
+      Keeper_turn_driver_helpers.checkpoint_after_attempt
+        ?agent_ref:ctx.agent_ref
+        !local_agent_ref
+    in
+    result, checkpoint_after, None
 ;;
 
 module For_testing = struct

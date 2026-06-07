@@ -550,9 +550,10 @@ let run_with_acquired_slot
   then
     Eio.Switch.run (fun turn_sw ->
       Eio.Switch.on_release turn_sw cleanup;
-      Eio.Fiber.fork ~sw:turn_sw (fun () ->
+      Eio.Fiber.fork_daemon ~sw:turn_sw (fun () ->
         Eio.Promise.await (Keeper_turn_admission.token_cancel_p admission_token);
-        Eio.Switch.fail turn_sw Keeper_turn_admission.Fleet_stopped_by_operator);
+        Eio.Switch.fail turn_sw Keeper_turn_admission.Fleet_stopped_by_operator;
+        `Stop_daemon);
       body ())
   else Fun.protect ~finally:cleanup body
 ;;

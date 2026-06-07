@@ -5,4 +5,7 @@
 (test
  (name test_keeper_turn_slot_release_cancel_safe)
  (modules test_keeper_turn_slot_release_cancel_safe)
- (deps ../lib/keeper/keeper_turn_slot.ml))
+ (deps
+  ../lib/keeper/keeper_turn_admission.ml
+  ../lib/keeper/keeper_heartbeat_loop.ml
+  ../lib/keeper/keeper_supervisor.ml))

@@ -42,9 +42,9 @@ val effective_turn_throttle_limit : int
     exceeds 2x the TOML baseline, this value is capped to prevent fleet
     overload (issue #17192). Otherwise equal to {!keeper_turn_throttle_limit}. *)
 
-val keeper_turn_throttle_source : Keeper_turn_slot.throttle_source
+val keeper_turn_throttle_source : Keeper_turn_admission.throttle_source
 (** Source of {!keeper_turn_throttle_limit}. Re-exported from
-    {!Keeper_turn_slot} so operator surfaces have a single import point.
+    {!Keeper_turn_admission} so operator surfaces have a single import point.
     @since issue #17192 *)
 
 val proactive_skip_reason_metric : string
@@ -250,7 +250,8 @@ val set_budget_exhaustion_for_test :
 (** Test-only: pre-load strike count.  [strikes <= 0] is equivalent
     to [reset_budget_exhaustion]. *)
 
-(** Test-only wrapper around the keeper turn slot acquisition path. *)
+(** Test-only compatibility wrapper around the legacy holder-diagnostic path.
+    Production turn admission goes through {!Keeper_turn_admission.with_turn_admission}. *)
 val with_keeper_turn_slot_for_test :
   ?runtime_profile:string ->
   keeper_name:string ->

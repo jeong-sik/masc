@@ -47,17 +47,24 @@ let assert_contains ~label haystack needle =
     failwith
       (Printf.sprintf
          "[%s] expected source to contain %S — fix \
-          regression: release_keeper_turn_slot must wrap \
-          bookkeeping in safe_bookkeeping, see 2026-05-05 \
+          regression: central admission must own token release, see 2026-05-05 \
           fleet-stuck cycle"
          label needle)
+
+let assert_not_contains ~label haystack needle =
+  let n = String.length needle in
+  let h = String.length haystack in
+  let rec scan i =
+    i + n <= h && (String.sub haystack i n = needle || scan (i + 1))
+  in
+  if n = 0 || scan 0 then
+    failwith (Printf.sprintf "[%s] source must not contain %S" label needle)
 
 let () =
   (* Resolve the source via the test exe location.  dune places
      the binary at:
        <project>/_build/default/test/<name>.exe
-     so [parent x4] = the build/default subdir of the project,
-     and the source is at [.../lib/keeper/keeper_turn_slot.ml].
+     so [parent x4] = the build/default subdir of the project.
      This is robust regardless of CWD or sandbox layout. *)
   (* exe is at <root>/_build/default/test/<name>.exe — climb 4
      levels to reach <root>, then descend into the source tree. *)
@@ -81,52 +88,52 @@ let () =
             (cwd=%s, exe=%s): %s"
            (Sys.getcwd ()) exe (String.concat ", " candidates))
   in
-  let src = read_source "lib/keeper/keeper_turn_slot.ml" in
-  (* The cancel-safe release path has two cleanup shapes:
-     recorded-holder release catches [consume_force_release] failures, while
-     token release is wired through the switch finalizer and force-release
-     path. Ordering is not asserted; the source contract only pins each
-     ownership path. *)
+  let admission_src = read_source "lib/keeper/keeper_turn_admission.ml" in
+  (* Central admission owns normal release, forced release, and fleet-stop
+     cancellation. Holder diagnostics are intentionally not required for
+     token release. *)
   let must_contain =
-    [ "token field",
-      {|admission_token : Keeper_turn_admission.token option ref|}
-    ; "normal token release",
-      {|Keeper_turn_admission.release_turn token|}
-    ; "force release token",
-      {|Keeper_turn_admission.force_release_keeper ~keeper_name|}
+    [ "normal token release",
+      {|let cleanup () = release_turn token|}
     ; "switch finalizer cleanup",
       {|Eio.Switch.on_release turn_sw cleanup|}
+    ; "stop watcher is daemon",
+      {|Eio.Fiber.fork_daemon ~sw:turn_sw|}
     ; "fleet stop cancellation promise",
-      {|Keeper_turn_admission.token_cancel_p admission_token|}
+      {|Eio.Promise.await token.cancel_p|}
     ; "fleet stop switch failure",
-      {|Eio.Switch.fail turn_sw Keeper_turn_admission.Fleet_stopped_by_operator|}
-    ; "drop_holder cancellation catch",
-      {|release_keeper_turn_slot: drop_holder skipped (Cancelled)|}
+      {|Eio.Switch.fail turn_sw Fleet_stopped_by_operator|}
+    ; "force release entry",
+      {|let force_release_keeper ~keeper_name =|}
+    ; "force release releases capacity",
+      {|release_global_capacity ()|}
+    ; "force release cancels token",
+      {|request_cancel_token token|}
+    ; "idempotent release guard",
+      {|Atomic.compare_and_set token.released false true|}
     ]
   in
   List.iter
-    (fun (label, needle) -> assert_contains ~label src needle)
+    (fun (label, needle) -> assert_contains ~label admission_src needle)
     must_contain;
-  (* The cleanup helpers must catch Cancelled — assert the catch arm exists
-     so a future refactor can't silently widen cleanup to swallow only generic
-     [exn]. *)
+  let supervisor_src = read_source "lib/keeper/keeper_supervisor.ml" in
   assert_contains
-    ~label:"cleanup catches Cancelled"
-    src
-    "Eio.Cancel.Cancelled _ ->";
-  assert_contains
-    ~label:"drop_holder metrics cancelled"
-    src
-    {|observe_bookkeeping_failure ~op:"drop_holder" ~kind:Keeper_bookkeeping_failure_kind.Cancelled|};
-  assert_contains
-    ~label:"drop_holder metrics exception"
-    src
-    {|observe_bookkeeping_failure ~op:"drop_holder" ~kind:Keeper_bookkeeping_failure_kind.Exception|};
-  assert_contains
-    ~label:"bookkeeping metric name"
-    src
-    "Keeper_metrics.(to_string TurnSlotBookkeepingFailures)";
+    ~label:"supervisor force releases central admission"
+    supervisor_src
+    {|Keeper_turn_admission.force_release_keeper ~keeper_name:entry.name|};
   let heartbeat_src = read_source "lib/keeper/keeper_heartbeat_loop.ml" in
+  assert_contains
+    ~label:"heartbeat uses central admission"
+    heartbeat_src
+    "Keeper_turn_admission.with_turn_admission";
+  assert_not_contains
+    ~label:"central admission stop watcher must not depend only on Eio_guard"
+    admission_src
+    "if Eio_guard.is_ready ()";
+  assert_not_contains
+    ~label:"heartbeat no longer uses slot admission"
+    heartbeat_src
+    "Keeper_turn_slot.with_keeper_turn_slot";
   assert_contains
     ~label:"fleet stop expected heartbeat path"
     heartbeat_src

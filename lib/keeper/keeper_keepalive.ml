@@ -13,7 +13,7 @@
 
     Structure (facade decomposition):
     - [Keeper_turn_slot]      — admitted-turn holder diagnostics and
-                                 [with_keeper_turn_slot] facade
+                                 compatibility-only test facade
     - [Keeper_keepalive_signal] — gRPC client refs, FSM guard identity
                                    helpers, interruptible sleep, wakeup
                                    dispatch, board-reactive wakeup,
@@ -629,15 +629,20 @@ let stop_keepalive ?base_path name =
        match entry.phase with
        | Keeper_state_machine.Crashed | Keeper_state_machine.Dead -> ()
        | _ ->
+         let released_admission_token =
+           Keeper_turn_admission.force_release_keeper ~keeper_name:entry.name
+         in
          let released_slots =
            if eio_context_available ()
            then force_release_holder_for ~keeper_name:entry.name
            else []
          in
-         if released_slots <> [] then
+         if released_admission_token || released_slots <> [] then
            Log.Keeper.warn
-             "%s: manual stop force-released holder slot(s) [%s] before marking stopped"
+             "%s: manual stop force-released admission before marking stopped \
+              token=%b holder_slot(s)=[%s]"
              entry.name
+             released_admission_token
              (String.concat "," (List.map fst released_slots));
          if
            record_keeper_stopped

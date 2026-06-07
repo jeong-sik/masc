@@ -607,8 +607,9 @@ let snapshot ?base_path ?(limit = state.last_limit) () =
 ;;
 
 let semaphore_wait_timeout_snapshot ?(holders = []) () =
+  let limit = max 1 effective_turn_throttle_limit in
   let global_inflight = Atomic.get global_inflight_atomic in
-  let available = max 0 (effective_turn_throttle_limit - global_inflight) in
+  let available = max 0 (limit - global_inflight) in
   let queue_depth = with_lock (fun () -> List.length state.waiters) in
   { Keeper_turn_slot_types.timeout_wait_sec = semaphore_wait_timeout_sec
   ; timeout_phase = Keeper_turn_slot_types.Turn_slot
@@ -619,6 +620,31 @@ let semaphore_wait_timeout_snapshot ?(holders = []) () =
   ; timeout_queue_ahead = None
   ; timeout_holders = holders
   }
+;;
+
+let semaphore_wait_seconds_buckets =
+  [ 0.001; 0.005; 0.01; 0.025; 0.05; 0.1; 0.25; 0.5; 1.0; 2.5; 5.0; 10.0; 30.0; 60.0 ]
+;;
+
+let observe_admission_wait_seconds ~keeper_name ~runtime_profile ~channel seconds =
+  let seconds = if seconds < 0.0 then 0.0 else seconds in
+  let labels =
+    [ "keeper_name", keeper_name; "runtime_profile", runtime_profile; "channel", channel ]
+  in
+  Otel_metric_store.observe_histogram
+    Keeper_metrics.(to_string SemaphoreWaitSeconds)
+    ~labels
+    seconds;
+  let inc_bucket le =
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string SemaphoreWaitSecondsBucket)
+      ~labels:(labels @ [ "le", le ])
+      ()
+  in
+  List.iter
+    (fun upper -> if seconds <= upper then inc_bucket (Printf.sprintf "%g" upper))
+    semaphore_wait_seconds_buckets;
+  inc_bucket "+Inf"
 ;;
 
 let acquire_turn
@@ -657,16 +683,28 @@ let acquire_turn
     | Error rejection -> Error rejection)
 ;;
 
+let eio_scheduler_available () =
+  Eio_guard.is_ready ()
+  ||
+  try
+    Eio.Fiber.yield ();
+    true
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | _ -> false
+;;
+
 let run_with_token ~token ~semaphore_wait_ms f =
   let cleanup () = release_turn token in
   let body () = Ok (f ~semaphore_wait_ms) in
-  if Eio_guard.is_ready ()
+  if eio_scheduler_available ()
   then
     Eio.Switch.run (fun turn_sw ->
       Eio.Switch.on_release turn_sw cleanup;
-      Eio.Fiber.fork ~sw:turn_sw (fun () ->
+      Eio.Fiber.fork_daemon ~sw:turn_sw (fun () ->
         Eio.Promise.await token.cancel_p;
-        Eio.Switch.fail turn_sw Fleet_stopped_by_operator);
+        Eio.Switch.fail turn_sw Fleet_stopped_by_operator;
+        `Stop_daemon);
       body ())
   else Fun.protect ~finally:cleanup body
 ;;
@@ -689,7 +727,13 @@ let with_turn_admission
       ~channel:channel_label
       ()
   with
-  | Ok (token, semaphore_wait_ms) -> run_with_token ~token ~semaphore_wait_ms f
+  | Ok (token, semaphore_wait_ms) ->
+    observe_admission_wait_seconds
+      ~keeper_name
+      ~runtime_profile
+      ~channel:channel_label
+      (float_of_int semaphore_wait_ms /. 1000.0);
+    run_with_token ~token ~semaphore_wait_ms f
   | Error Global_inflight_exceeded ->
     Error (`Semaphore_wait_timeout (semaphore_wait_timeout_snapshot ()))
   | Error (Fleet_paused | Fleet_stopped as rejection) ->

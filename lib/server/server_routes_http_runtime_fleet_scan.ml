@@ -476,13 +476,6 @@ let keeper_fleet_safety_health_json
   let executable_reaction_capacity_below_target =
     target_count > 0 && executable_reaction_capacity_shortfall_count > 0
   in
-  let status =
-    if no_executable_keeper_fibers then "blocked"
-    else if no_running_fibers then "degraded"
-    else if low_running_fiber_margin then "degraded"
-    else if reaction_capacity_below_target then "degraded"
-    else "ok"
-  in
   let paused_total_count =
     match paused_keepers_json with
     | `Assoc fields ->
@@ -495,9 +488,33 @@ let keeper_fleet_safety_health_json
     match paused_keepers_json with
     | `Assoc fields ->
         (match List.assoc_opt "autoboot_enabled_count" fields with
-         | Some (`Int count) -> count
-         | _ -> 0)
+       | Some (`Int count) -> count
+       | _ -> 0)
     | _ -> 0
+  in
+  let turn_admission_snapshot =
+    let limit = Keeper_keepalive.effective_turn_throttle_limit in
+    match current_server_state_opt () with
+    | Some state ->
+      Keeper_turn_admission.snapshot
+        ~base_path:state.Mcp_server.workspace_config.base_path
+        ~limit
+        ()
+    | None -> Keeper_turn_admission.snapshot ~limit ()
+  in
+  let turn_admission_blocker =
+    match turn_admission_snapshot.fleet_state with
+    | Keeper_turn_admission.Running -> None
+    | Keeper_turn_admission.Paused -> Some "turn_admission_paused"
+    | Keeper_turn_admission.Stopped -> Some "turn_admission_stopped"
+  in
+  let status =
+    if no_executable_keeper_fibers then "blocked"
+    else if Option.is_some turn_admission_blocker then "blocked"
+    else if no_running_fibers then "degraded"
+    else if low_running_fiber_margin then "degraded"
+    else if reaction_capacity_below_target then "degraded"
+    else "ok"
   in
   let blocked_count =
     if no_executable_keeper_fibers then executable_reaction_capacity_shortfall_count
@@ -511,18 +528,9 @@ let keeper_fleet_safety_health_json
     else if no_running_fibers then Some "no_healthy_running_keeper_fibers"
     else if low_running_fiber_margin then Some "low_running_fiber_margin"
     else if reaction_capacity_below_target then Some "reaction_capacity_below_target"
+    else if Option.is_some turn_admission_blocker then turn_admission_blocker
     else if paused_autoboot_count > 0 then Some "durable_paused_autoboot_enabled"
     else None
-  in
-  let turn_admission_snapshot =
-    let limit = Keeper_keepalive.effective_turn_throttle_limit in
-    match current_server_state_opt () with
-    | Some state ->
-      Keeper_turn_admission.snapshot
-        ~base_path:state.Mcp_server.workspace_config.base_path
-        ~limit
-        ()
-    | None -> Keeper_turn_admission.snapshot ~limit ()
   in
   `Assoc
     [ "status", `String status
@@ -567,7 +575,8 @@ let keeper_fleet_safety_health_json
           (no_executable_keeper_fibers
            || no_running_fibers
            || low_running_fiber_margin
-           || reaction_capacity_below_target) )
+           || reaction_capacity_below_target
+           || Option.is_some turn_admission_blocker) )
     ; "autoboot_throttle_limit"
     , `Int Keeper_keepalive.effective_turn_throttle_limit
     ; ( "autoboot_throttle_source"

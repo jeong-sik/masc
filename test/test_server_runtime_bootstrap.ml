@@ -1423,6 +1423,51 @@ let test_health_json_surfaces_log_ring_summary () =
     (latest |> member "details" = `Null);
   ignore (logs |> member "file_sink" |> member "enabled" |> to_bool)
 
+let test_keeper_fleet_safety_marks_stopped_admission_blocked () =
+  let module Scan = Server_routes_http_runtime_fleet_scan in
+  Keeper_turn_admission.reset_for_test ();
+  Fun.protect
+    ~finally:Keeper_turn_admission.reset_for_test
+    (fun () ->
+      ignore
+        (Keeper_turn_admission.stop_fleet
+           ~reason:"test"
+           ~updated_by:"test"
+           ()
+         : Keeper_turn_admission.fleet_policy);
+      let phase_counts : Scan.keeper_phase_counts =
+        { running = 1; failing = 0; recovering = 0; executable = 1 }
+      in
+      let autoboot_scan : Scan.autoboot_keeper_scan =
+        { autoboot_names = [ "ready-keeper" ]; read_errors = [] }
+      in
+      let json =
+        Scan.keeper_fleet_safety_health_json
+          ~bootable_names:[ "ready-keeper" ]
+          ~autoboot_scan
+          ~phase_counts
+          ~paused_keepers_json:
+            (`Assoc [ "count", `Int 0; "autoboot_enabled_count", `Int 0 ])
+          ()
+      in
+      let open Yojson.Safe.Util in
+      Alcotest.(check string)
+        "stopped admission blocks fleet safety"
+        "blocked"
+        (json |> member "status" |> to_string);
+      Alcotest.(check string)
+        "stopped admission blocker"
+        "turn_admission_stopped"
+        (json |> member "blocker" |> to_string);
+      Alcotest.(check bool)
+        "stopped admission asks for operator action"
+        true
+        (json |> member "operator_action_required" |> to_bool);
+      Alcotest.(check string)
+        "stopped admission state surfaced"
+        "stopped"
+        (json |> member "turn_admission_state" |> to_string))
+
 let test_health_json_surfaces_internal_mcp_auth_diagnostics () =
   with_temp_dir "health-internal-mcp-auth" @@ fun dir ->
   with_env Auth.internal_keeper_token_env_key None @@ fun () ->
@@ -2880,6 +2925,9 @@ let () =
           Alcotest.test_case
             "health json reaction ledger cursor sweep clears pending"
             `Quick test_health_json_reaction_ledger_cursor_sweep_clears_pending;
+          Alcotest.test_case
+            "keeper fleet safety marks stopped admission blocked"
+            `Quick test_keeper_fleet_safety_marks_stopped_admission_blocked;
           Alcotest.test_case "health json surfaces log ring summary" `Quick
             test_health_json_surfaces_log_ring_summary;
           Alcotest.test_case

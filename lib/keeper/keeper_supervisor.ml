@@ -15,6 +15,16 @@ open Keeper_execution
 
 include Keeper_supervisor_launch
 
+let runtime_healthy_for_auto_resume ~base_path meta =
+  let runtime_id = Keeper_meta_contract.runtime_id_of_meta meta in
+  match
+    Keeper_health_probe.check_runtime_health ~base_path
+    |> List.assoc_opt runtime_id
+  with
+  | None -> true
+  | Some healthy -> healthy
+;;
+
 let sweep_and_recover (ctx : _ context) =
   let now = Time_compat.now () in
   let max_restarts =
@@ -511,6 +521,7 @@ let sweep_and_recover (ctx : _ context) =
       | Ok (Some meta)
         when Keeper_supervisor_types.paused_meta_auto_resume_due ~now meta
              && not (Keeper_approval_queue.has_pending_for_keeper ~keeper_name:meta.name)
+             && runtime_healthy_for_auto_resume ~base_path:ctx.config.base_path meta
         ->
         (match
            ( Keeper_supervisor_types.paused_meta_effective_auto_resume_after_sec meta

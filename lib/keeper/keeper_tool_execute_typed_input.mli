@@ -5,10 +5,10 @@
 
     {2 Design constraints}
 
-    - **No shell-string parsing**.  Validation is structural only:
-      argv/cwd/env/redirect shape is checked here, while executable
-      admission is left to Shell IR risk classification and the runtime
-      write/destructive gates.
+    - **No shell-string parsing**.  Validation is structural:
+      argv/cwd/env/redirect shape is checked here, while shell interpreters
+      and network primitives are rejected before Shell IR risk classification
+      can treat them as read-only.
     - **Execve-style argv semantics**.  Each token in [argv] is passed
       verbatim to the child process; the implementation invokes the
       executable directly (no [/bin/sh -c "..."] wrapping).  Therefore
@@ -80,6 +80,7 @@ type validation_error =
       executable : string;
       argv : string list;
     }
+  | Executable_not_allowed of string
   | Argv_contains_shell_metachar of {
       executable : string;
       index : int;

@@ -736,6 +736,44 @@ let tool_execute_exec_stage args =
 
 let tool_execute_exec_argv args = snd (tool_execute_exec_stage args)
 
+let validate_typed_tool_execute args =
+  match Keeper_tool_execute_typed_input.of_json args with
+  | Ok input -> Keeper_tool_execute_typed_input.validate input
+  | Error msg ->
+    Alcotest.failf "expected typed tool_execute parse to pass, got %s" msg
+
+let test_tool_execute_validate_rejects_network_executable () =
+  match
+    validate_typed_tool_execute
+      (`Assoc
+        [ "executable", `String "curl"
+        ; "argv", `List [ `String "https://example.com" ]
+        ])
+  with
+  | Error (Keeper_tool_execute_typed_input.Executable_not_allowed "curl") -> ()
+  | Error err ->
+    Alcotest.failf
+      "expected curl executable to be rejected, got %a"
+      Keeper_tool_execute_typed_input.pp_validation_error
+      err
+  | Ok () -> Alcotest.fail "expected curl executable to be rejected"
+
+let test_tool_execute_validate_rejects_shell_interpreter () =
+  match
+    validate_typed_tool_execute
+      (`Assoc
+        [ "executable", `String "/bin/sh"
+        ; "argv", `List [ `String "-c"; `String "echo x > file" ]
+        ])
+  with
+  | Error (Keeper_tool_execute_typed_input.Executable_not_allowed "sh") -> ()
+  | Error err ->
+    Alcotest.failf
+      "expected sh executable to be rejected, got %a"
+      Keeper_tool_execute_typed_input.pp_validation_error
+      err
+  | Ok () -> Alcotest.fail "expected sh executable to be rejected"
+
 let test_tool_execute_find_expression_not_rewritten () =
   let argv =
     tool_execute_exec_argv
@@ -1584,6 +1622,10 @@ let () =
         test_validate_args_tool_execute_accepts_typed_exec;
       Alcotest.test_case "tool_execute accepts typed pipeline" `Quick
         test_validate_args_tool_execute_accepts_typed_pipeline;
+      Alcotest.test_case "tool_execute rejects network executable" `Quick
+        test_tool_execute_validate_rejects_network_executable;
+      Alcotest.test_case "tool_execute rejects shell interpreter" `Quick
+        test_tool_execute_validate_rejects_shell_interpreter;
       Alcotest.test_case "tool_execute find expression not rewritten" `Quick
         test_tool_execute_find_expression_not_rewritten;
       Alcotest.test_case "tool_execute find global option not rewritten" `Quick

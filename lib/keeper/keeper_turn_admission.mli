@@ -1,7 +1,8 @@
-(** Keeper turn admission.
+(** Keeper runtime admission.
 
-    Owns fleet policy, global turn capacity, per-keeper isolation, and waiter
-    ordering. Holder diagnostics stay in {!Keeper_turn_holders}. *)
+    Owns fleet policy and global runtime capacity. Keeper identity,
+    autonomous/reactive provenance, waiter ordering, and holder diagnostics are
+    not admission keys. Holder diagnostics stay in {!Keeper_turn_holders}. *)
 
 type fleet_state =
   | Running

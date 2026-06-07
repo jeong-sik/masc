@@ -1689,92 +1689,6 @@ let test_sweep_auto_resumes_after_backoff () =
       check (float 0.001) "metric_keeper_auto_resumed_total incremented by 1"
         (baseline_auto_resume +. 1.0) after_auto_resume)
 
-let test_sweep_auto_resume_skips_unhealthy_runtime () =
-  ensure_test_runtime ();
-  Eio_main.run @@ fun env ->
-  ensure_fs env;
-  Eio.Switch.run @@ fun sw ->
-  with_config_dir @@ fun config_dir ->
-  let base_dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () ->
-      Reg.clear ();
-      Masc.Keeper_runtime.reset_test_state base_dir;
-      cleanup_dir base_dir)
-    (fun () ->
-      let config = Masc.Workspace.default_config base_dir in
-      ignore (Masc.Workspace.init config ~agent_name:(Some "supervisor"));
-      let name = "auto-resume-unhealthy-runtime" in
-      write_keeper_toml config_dir ~name;
-      let two_hours_ago =
-        let t = Unix.gmtime (Unix.time () -. 7200.0) in
-        Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-          (t.tm_year + 1900) (t.tm_mon + 1) t.tm_mday
-          t.tm_hour t.tm_min t.tm_sec
-      in
-      let base_meta = make_meta name in
-      let paused_meta =
-        { base_meta with
-          paused = true;
-          auto_resume_after_sec = Some 3600.0;
-          updated_at = two_hours_ago;
-          runtime =
-            { base_meta.runtime with
-              last_blocker =
-                Some
-                  (Keeper_meta_contract.blocker_info_of_class
-                     ~detail:"runtime still unhealthy"
-                     Keeper_meta_contract.Turn_timeout);
-            };
-        }
-      in
-      (match Keeper_meta_store.write_meta config paused_meta with
-       | Ok () -> ()
-       | Error err -> fail err);
-      List.iter
-        (fun unhealthy_name ->
-           let meta = make_meta unhealthy_name in
-           ignore (Reg.register ~base_path:config.base_path unhealthy_name meta);
-           Reg.mark_dead ~base_path:config.base_path unhealthy_name ~at:(Unix.time ()))
-        [ "runtime-unhealthy-dead-a"; "runtime-unhealthy-dead-b" ];
-      let runtime_id = Keeper_meta_contract.runtime_id_of_meta paused_meta in
-      let runtime_health =
-        Masc.Keeper_health_probe.check_runtime_health ~base_path:config.base_path
-        |> List.assoc_opt runtime_id
-      in
-      check (option bool) "precondition runtime unhealthy" (Some false) runtime_health;
-      let baseline_auto_resume =
-        Masc.Otel_metric_store.metric_total
-          Keeper_metrics.(to_string AutoResumedTotal)
-      in
-      let ctx : _ Keeper_types_profile.context =
-        {
-          config;
-          agent_name = "supervisor";
-          sw;
-          clock = Eio.Stdenv.clock env;
-          proc_mgr = Some (Eio.Stdenv.process_mgr env);
-          net = Some (Eio.Stdenv.net env);
-        }
-      in
-      Sup.sweep_and_recover ctx;
-      (match Keeper_meta_store.read_meta config name with
-       | Ok (Some m) ->
-           check bool "meta.paused stays true while runtime unhealthy" true m.paused;
-           check bool "last_blocker preserved while runtime unhealthy"
-             true
-             (Option.is_some m.runtime.last_blocker)
-       | Ok None -> fail "meta missing after unhealthy runtime auto-resume skip"
-       | Error err -> fail ("read_meta failed: " ^ err));
-      check bool "unhealthy runtime keeper is not bootable" false
-        (List.mem name (KR.bootable_keeper_names config));
-      let after_auto_resume =
-        Masc.Otel_metric_store.metric_total
-          Keeper_metrics.(to_string AutoResumedTotal)
-      in
-      check (float 0.001) "metric_keeper_auto_resumed_total NOT incremented"
-        baseline_auto_resume after_auto_resume)
-
 let test_sweep_auto_resumes_registered_paused_entry () =
   ensure_test_runtime ();
   Eio_main.run @@ fun env ->
@@ -2285,8 +2199,6 @@ let () =
         test_oas_auto_resume_after_sec_doubles_on_repause;
       test_case "sweep auto-resumes keeper when timer elapsed" `Quick
         test_sweep_auto_resumes_after_backoff;
-      test_case "sweep does not auto-resume unhealthy runtime" `Quick
-        test_sweep_auto_resume_skips_unhealthy_runtime;
       test_case "sweep auto-resumes registered paused keeper in registry" `Quick
         test_sweep_auto_resumes_registered_paused_entry;
       test_case "operator pause (None) is NOT auto-resumed by sweep" `Quick

@@ -217,7 +217,7 @@ let start_keeper_loops
     (fun ~base_path () ->
        Keeper_turn_admission.snapshot_json
          ~base_path
-         ~limit:Keeper_turn_slot.effective_turn_throttle_limit
+         ~limit:Keeper_turn_admission.effective_turn_throttle_limit
          ());
   (* Wire claim_post_provision hook: create worktrees at task claim time
      so docker-backed keepers find them when the LLM picks a worktree cwd.
@@ -785,9 +785,9 @@ let start_keeper_loops
       Log.Keeper.info
         "autoboot: %d keeper(s) to boot; concurrent keeper turns throttled to %d (source=%s)"
         (List.length names)
-        Keeper_keepalive.effective_turn_throttle_limit
-        (Keeper_turn_slot.throttle_source_to_string
-           Keeper_keepalive.keeper_turn_throttle_source);
+        Keeper_turn_admission.effective_turn_throttle_limit
+        (Keeper_turn_admission.throttle_source_to_string
+           Keeper_turn_admission.keeper_turn_throttle_source);
       Log.Keeper.info "autoboot: keeper set [%s]" (String.concat ", " names);
       if exclusions <> []
       then (

@@ -201,6 +201,8 @@ type lease_metadata =
   ; lease_runtime_profile : string
   ; lease_channel : string
   ; lease_acquired_at : float
+  ; lease_cancel_p : unit Eio.Promise.t
+  ; lease_cancel_resolver : unit Eio.Promise.resolver
   }
 
 type runtime_state =
@@ -330,18 +332,13 @@ let persist_policy ?base_path (policy : fleet_policy) =
 
 let now_string () = Printf.sprintf "%.3f" (Time_compat.now ())
 
-let never_cancel_p =
-  let promise, _resolver = Eio.Promise.create () in
-  promise
-;;
-
 let token_of_lease token_id (metadata : lease_metadata) =
   { token_id
   ; keeper_name = metadata.lease_keeper_name
   ; runtime_profile = metadata.lease_runtime_profile
   ; channel = metadata.lease_channel
   ; acquired_at = metadata.lease_acquired_at
-  ; cancel_p = never_cancel_p
+  ; cancel_p = metadata.lease_cancel_p
   }
 ;;
 
@@ -488,11 +485,14 @@ let acquire_turn
       then state, Error Global_inflight_exceeded
       else
         let token_id = state.next_lease_id + 1 in
+        let cancel_p, cancel_resolver = Eio.Promise.create () in
         let metadata =
           { lease_keeper_name = keeper_name
           ; lease_runtime_profile = runtime_profile
           ; lease_channel = channel
           ; lease_acquired_at = Time_compat.now ()
+          ; lease_cancel_p = cancel_p
+          ; lease_cancel_resolver = cancel_resolver
           }
         in
         ( { state with
@@ -565,15 +565,30 @@ let with_turn_admission
 ;;
 
 let force_release_keeper ~keeper_name =
-  transition (fun state ->
-    let active_leases =
-      Lease_map.filter
-        (fun _ metadata ->
-           not (String.equal metadata.lease_keeper_name keeper_name))
-        state.active_leases
-    in
-    let released = Lease_map.cardinal active_leases <> Lease_map.cardinal state.active_leases in
-    { state with active_leases }, released)
+  let released, cancel_resolvers =
+    transition (fun state ->
+      let matching =
+        Lease_map.filter
+          (fun _ metadata ->
+             String.equal metadata.lease_keeper_name keeper_name)
+          state.active_leases
+      in
+      let resolvers =
+        Lease_map.fold
+          (fun _ metadata acc -> metadata.lease_cancel_resolver :: acc)
+          matching []
+      in
+      let active_leases =
+        Lease_map.filter
+          (fun _ metadata ->
+             not (String.equal metadata.lease_keeper_name keeper_name))
+          state.active_leases
+      in
+      let released = Lease_map.cardinal active_leases <> Lease_map.cardinal state.active_leases in
+      { state with active_leases }, (released, resolvers))
+  in
+  List.iter (fun r -> Eio.Promise.resolve r ()) cancel_resolvers;
+  released
 ;;
 
 let token_cancel_p token = token.cancel_p

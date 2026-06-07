@@ -20,9 +20,6 @@ val resolve_bounded_provider_timeout_budget_with_turn_budget :
   max_turns:int ->
   remaining_turn_budget_s:float ->
   provider_timeout_budget
-(** Resolve the provider attempt timeout plan. The remaining turn budget is not
-    a keeper pause/stop/admission gate, but it caps the nested provider attempt
-    timeout. *)
 
 val bounded_provider_timeout_for_turn_budget_with_turn_budget :
   estimated_input_tokens:int ->

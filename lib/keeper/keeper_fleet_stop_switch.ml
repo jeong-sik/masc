@@ -8,6 +8,8 @@ type admission_error = Keeper_turn_admission.rejection =
   | Fleet_stopped
   | Global_inflight_exceeded
 
+type token = Keeper_turn_admission.token
+
 type snapshot =
   { fleet_state : fleet_state
   ; global_inflight : int
@@ -27,10 +29,10 @@ let stop_fleet () = ignore (Keeper_turn_admission.stop_fleet () : Keeper_turn_ad
 
 let acquire_turn ~limit =
   match Keeper_turn_admission.acquire_global_slot ~limit ~timeout_s:0.0 () with
-  | Ok _ -> Ok ()
+  | Ok (token, _) -> Ok token
   | Error rejection -> Error rejection
 ;;
 
-let release_turn = Keeper_turn_admission.release_global_slot
+let release_turn token = Keeper_turn_admission.release_global_slot token
 let available_turns = Keeper_turn_admission.available_turns
 let reset_for_test = Keeper_turn_admission.reset_for_test

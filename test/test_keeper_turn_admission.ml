@@ -23,6 +23,12 @@ let check_acquire_ok label result =
     Alcotest.failf "%s: unexpected rejection %s" label (A.rejection_to_string rejection)
 ;;
 
+let token_testable =
+  Alcotest.testable
+    (fun fmt token -> Format.fprintf fmt "<token %d>" (A.token_id token))
+    (fun a b -> A.token_id a = A.token_id b)
+;;
+
 let acquire_token ~limit ~keeper_name =
   match
     A.acquire_turn
@@ -43,24 +49,31 @@ let acquire_token ~limit ~keeper_name =
 
 let test_acquire_times_out_at_limit () =
   A.reset_for_test ();
-  check_acquire_ok "first acquire" (A.acquire_global_slot ~limit:1 ~timeout_s:0.0 ());
-  Alcotest.(check (result int rejection))
+  let token =
+    match A.acquire_global_slot ~limit:1 ~timeout_s:0.0 () with
+    | Ok (token, _) -> token
+    | Error rejection ->
+      Alcotest.failf
+        "first acquire: unexpected rejection %s"
+        (A.rejection_to_string rejection)
+  in
+  Alcotest.(check (result (pair token_testable int) rejection))
     "second acquire rejected at cap"
     (Error A.Global_inflight_exceeded)
     (A.acquire_global_slot ~limit:1 ~timeout_s:0.0 ());
-  A.release_global_slot ();
+  A.release_global_slot token;
   check_snapshot ~limit:1 ~state:"running" ~inflight:0
 
 let test_pause_and_stop_reject_without_incrementing () =
   A.reset_for_test ();
   ignore (A.pause_fleet () : A.fleet_policy);
-  Alcotest.(check (result int rejection))
+  Alcotest.(check (result (pair token_testable int) rejection))
     "paused rejected"
     (Error A.Fleet_paused)
     (A.acquire_global_slot ~limit:1 ~timeout_s:0.0 ());
   check_snapshot ~limit:1 ~state:"paused" ~inflight:0;
   ignore (A.stop_fleet () : A.fleet_policy);
-  Alcotest.(check (result int rejection))
+  Alcotest.(check (result (pair token_testable int) rejection))
     "stopped rejected"
     (Error A.Fleet_stopped)
     (A.acquire_global_slot ~limit:1 ~timeout_s:0.0 ());

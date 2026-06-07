@@ -15,28 +15,36 @@ let check_state ~state ~inflight =
   Alcotest.(check int) "global inflight" inflight snapshot.global_inflight
 ;;
 
+let token_testable : F.token Alcotest.testable =
+  Alcotest.testable (fun _ _ -> ()) (fun _ _ -> true)
+;;
+
 let check_rejection label expected = function
   | Error actual ->
     Alcotest.(check string)
       label
       (F.admission_error_to_string expected)
       (F.admission_error_to_string actual)
-  | Ok () -> Alcotest.failf "%s: expected rejection" label
+  | Ok _ -> Alcotest.failf "%s: expected rejection" label
 ;;
 
 let test_pause_preserves_inflight_and_blocks_new_turns () =
   F.reset_for_test ();
-  Alcotest.(check (result unit reject))
-    "first acquire"
-    (Ok ())
-    (F.acquire_turn ~limit:2);
+  let token =
+    match F.acquire_turn ~limit:2 with
+    | Ok token -> token
+    | Error rejection ->
+      Alcotest.failf
+        "first acquire: unexpected rejection %s"
+        (F.admission_error_to_string rejection)
+  in
   F.pause_fleet ();
   check_state ~state:F.Paused ~inflight:1;
   check_rejection
     "paused acquire rejected"
     F.Fleet_paused
     (F.acquire_turn ~limit:2);
-  F.release_turn ();
+  F.release_turn token;
   check_state ~state:F.Paused ~inflight:0;
   F.resume_fleet ();
   check_state ~state:F.Running ~inflight:0
@@ -54,12 +62,19 @@ let test_stop_rejects_until_reset () =
 
 let test_global_limit_is_enforced () =
   F.reset_for_test ();
-  Alcotest.(check (result unit reject)) "acquire 1" (Ok ()) (F.acquire_turn ~limit:1);
+  let token =
+    match F.acquire_turn ~limit:1 with
+    | Ok token -> token
+    | Error rejection ->
+      Alcotest.failf
+        "acquire 1: unexpected rejection %s"
+        (F.admission_error_to_string rejection)
+  in
   check_rejection
     "second acquire rejected"
     F.Global_inflight_exceeded
     (F.acquire_turn ~limit:1);
-  F.release_turn ();
+  F.release_turn token;
   check_state ~state:F.Running ~inflight:0
 
 let () =

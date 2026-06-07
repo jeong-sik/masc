@@ -78,7 +78,8 @@ val token_keeper_name : token -> string
 val token_acquired_at : token -> float
 val token_id : token -> int
 
-(** Compatibility hooks for older tests/callers. New code should use tokens. *)
-val acquire_global_slot : limit:int -> timeout_s:float -> unit -> (int, rejection) result
-val release_global_slot : unit -> unit
+(** Compatibility hooks for older tests/callers. New code should use [acquire_turn]
+    and [release_turn] with explicit tokens. *)
+val acquire_global_slot : limit:int -> timeout_s:float -> unit -> (token * int, rejection) result
+val release_global_slot : token -> unit
 val reset_for_test : unit -> unit

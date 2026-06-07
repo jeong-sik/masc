@@ -596,41 +596,21 @@ let available_turns ~limit =
   max 0 (limit - Atomic.get global_inflight_atomic)
 ;;
 
-let legacy_token_counter = Atomic.make 0
-let legacy_tokens_mutex = Stdlib.Mutex.create ()
-let legacy_tokens : token list ref = ref []
-
 let acquire_global_slot ~limit ~timeout_s () =
-  let n = Atomic.fetch_and_add legacy_token_counter 1 in
   match
     acquire_turn
       ~limit
       ~timeout_s
-      ~keeper_name:(Printf.sprintf "__legacy_global_slot_%d" n)
+      ~keeper_name:"__legacy_global_slot"
       ~runtime_profile:"legacy"
       ~channel:"legacy"
       ()
   with
   | Error rejection -> Error rejection
-  | Ok (token, wait_ms) ->
-    with_mutex legacy_tokens_mutex (fun () ->
-      legacy_tokens := token :: !legacy_tokens);
-    Ok wait_ms
+  | Ok (token, wait_ms) -> Ok (token, wait_ms)
 ;;
 
-let release_global_slot () =
-  let token =
-    with_mutex legacy_tokens_mutex (fun () ->
-      match !legacy_tokens with
-      | [] -> None
-      | token :: rest ->
-        legacy_tokens := rest;
-        Some token)
-  in
-  match token with
-  | Some token -> release_turn token
-  | None -> Log.Keeper.warn "keeper_turn_admission: legacy release without token"
-;;
+let release_global_slot token = release_turn token
 
 let reset_for_test () =
   with_lock (fun () ->
@@ -641,8 +621,5 @@ let reset_for_test () =
     Hashtbl.reset state.inflight;
     Hashtbl.reset state.active_keepers;
     state.waiters <- []);
-  Atomic.set global_inflight_atomic 0;
-  with_mutex legacy_tokens_mutex (fun () ->
-    legacy_tokens := []);
-  Atomic.set legacy_token_counter 0
+  Atomic.set global_inflight_atomic 0
 ;;

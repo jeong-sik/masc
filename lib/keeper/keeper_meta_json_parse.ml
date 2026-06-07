@@ -507,12 +507,20 @@ let parse_keeper_state
 let reject_removed_keeper_meta_shapes (json : Yojson.Safe.t) =
   match json with
   | `Assoc fields ->
-    (match List.assoc_opt "last_blocker" fields with
-     | Some (`String _) ->
-       Error
-         "removed keeper meta field shape is no longer supported: \
-          last_blocker:string. Use structured last_blocker object."
-     | Some _ | None -> Ok ())
+    (match
+       List.find_opt
+         (fun (k, _) -> List.mem k [ "initiative_enabled"; "persona_profile_path" ])
+         fields
+     with
+     | Some (k, _) ->
+       Error ("removed keeper meta field is no longer supported: " ^ k)
+     | None ->
+       (match List.assoc_opt "last_blocker" fields with
+        | Some (`String _) ->
+          Error
+            "removed keeper meta field shape is no longer supported: \
+             last_blocker:string. Use structured last_blocker object."
+        | Some _ | None -> Ok ()))
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> Ok ()
 ;;
 

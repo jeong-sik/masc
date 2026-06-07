@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { get } from '../../api/core'
+import { fetchIdeEvents, type IdeBridgeEvent } from '../../api/ide'
 import { asRecord, isPositiveSafeInteger } from '../common/normalize'
 import { keeperHueIndex } from '../../../design-system/headless-core/keeper-line-ownership'
 import type { IdeAnnotation } from '../../api/schemas/ide-annotations'
@@ -196,6 +197,15 @@ function mapApiEvent(event: ApiActivityEvent, workspaceId: string): RunActivityE
 }
 
 async function fetchActivityEvents(): Promise<ActivityFetchResult> {
+  const graph = await fetchActivityGraphEvents()
+  const bridgeEvents = await fetchIdeBridgeRunActivityEvents(graph.workspaceId)
+  return {
+    ...graph,
+    events: mergeRunActivityEvents(graph.events, bridgeEvents),
+  }
+}
+
+async function fetchActivityGraphEvents(): Promise<ActivityFetchResult> {
   try {
     const data = await get<ApiActivityResponse>('/api/v1/activity/events?limit=50')
     const rawEvents = data.events
@@ -208,6 +218,88 @@ async function fetchActivityEvents(): Promise<ActivityFetchResult> {
   } catch {
     return { events: EMPTY_ACTIVITY, workspaceId: DEFAULT_WORKSPACE_ID, ok: false }
   }
+}
+
+async function fetchIdeBridgeRunActivityEvents(
+  workspaceId: string,
+): Promise<ReadonlyArray<RunActivityEvent>> {
+  try {
+    const events = await fetchIdeEvents({ limit: 50 })
+    return events.map((event, index) => mapIdeBridgeEvent(event, workspaceId, index))
+  } catch {
+    return EMPTY_ACTIVITY
+  }
+}
+
+function mergeRunActivityEvents(
+  graphEvents: ReadonlyArray<RunActivityEvent>,
+  bridgeEvents: ReadonlyArray<RunActivityEvent>,
+): ReadonlyArray<RunActivityEvent> {
+  if (bridgeEvents.length === 0) return graphEvents
+  if (graphEvents.length === 0) return bridgeEvents
+  return [...graphEvents, ...bridgeEvents].sort(compareRunActivityEvents)
+}
+
+function mapIdeBridgeEvent(
+  event: IdeBridgeEvent,
+  workspaceId: string,
+  index: number,
+): RunActivityEvent {
+  return {
+    id: `ide-${event.type}-${event.turn_id}-${event.timestamp_ms}-${index}`,
+    run_id: workspaceId,
+    timestamp_ms: event.timestamp_ms,
+    keeper_id: event.keeper_id,
+    verb: 'noted',
+    target: bridgeEventTarget(event),
+    detail: bridgeEventDetail(event),
+    kind: `ide.bridge.${event.type}`,
+    tags: [`ide:${event.type}`, `turn:${event.turn_id}`],
+    context: bridgeEventContext(event),
+  }
+}
+
+function bridgeEventTarget(event: IdeBridgeEvent): string {
+  if (event.type === 'tool') return `tool:${event.tool_name}`
+  if (event.type === 'turn') return `turn:${event.phase}`
+  return `pr:${event.pr_number}`
+}
+
+function bridgeEventDetail(event: IdeBridgeEvent): string {
+  if (event.type === 'tool') {
+    const outcome = event.typed_outcome || event.outcome
+    return `${outcome}: ${event.summary}`
+  }
+  if (event.type === 'turn') {
+    return [event.phase, event.model_used, event.stop_reason]
+      .filter((item): item is string => typeof item === 'string' && item.trim() !== '')
+      .join(' · ') || event.phase
+  }
+  return event.pr_title || event.pull_request_url || event.pr_state || `PR ${event.pr_number}`
+}
+
+function bridgeEventContext(event: IdeBridgeEvent): RunActivityContext | undefined {
+  const context: MutableRunActivityContext = {}
+  if (event.turn_id) context.log_id = event.turn_id
+  if (event.type === 'tool') {
+    const filePath = event.file_path ? normalizeIdeContextFilePath(event.file_path) : null
+    if (filePath) context.file_path = filePath
+    mergeCommandDescriptorContext(context, event.command_descriptor)
+  } else if (event.type === 'pr') {
+    if (event.pr_number > 0) context.pr_id = String(event.pr_number)
+  }
+  return Object.keys(context).length === 0 ? undefined : context
+}
+
+function mergeCommandDescriptorContext(
+  context: MutableRunActivityContext,
+  descriptor: unknown,
+): void {
+  if (!isRecord(descriptor)) return
+  const prNumber = positiveInteger(descriptor.pr_number)
+  if (prNumber !== undefined) context.pr_id = String(prNumber)
+  const branch = stringValue(descriptor.branch)
+  if (branch) context.git_ref = branch
 }
 
 function contextFromPayloadAndTags(
@@ -769,6 +861,11 @@ function latestRunActivityEvent(events: ReadonlyArray<RunActivityEvent>): RunAct
 function isLaterRunActivityEvent(candidate: RunActivityEvent, current: RunActivityEvent): boolean {
   return candidate.timestamp_ms > current.timestamp_ms
     || (candidate.timestamp_ms === current.timestamp_ms && candidate.id > current.id)
+}
+
+function compareRunActivityEvents(left: RunActivityEvent, right: RunActivityEvent): number {
+  if (left.timestamp_ms !== right.timestamp_ms) return right.timestamp_ms - left.timestamp_ms
+  return left.id.localeCompare(right.id)
 }
 
 function activityRouteLinks(item: RunActivityEvent): ReadonlyArray<IdeContextRouteLink> {

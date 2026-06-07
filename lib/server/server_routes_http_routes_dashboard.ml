@@ -38,6 +38,118 @@ let respond_dashboard_ok ?request reqd =
     (`Assoc [ ("ok", `Bool true) ])
     reqd
 
+let execute_output_heartbeat_s = 15.0
+
+let handle_execute_output_stream ~sw ~clock request reqd =
+  with_public_read
+    (fun _state req inner_reqd ->
+       let path = Http.Request.path req in
+       let keeper =
+         match
+           Server_utils.extract_path_param
+             ~prefix:"/api/dashboard/execute-output/"
+             path
+         with
+         | Some value -> Some value
+         | None ->
+           Server_utils.extract_path_param
+             ~prefix:"/api/v1/dashboard/execute-output/"
+             path
+       in
+       match keeper with
+       | None ->
+         respond_dashboard_error
+           ~status:`Bad_request
+           ~request:req
+           inner_reqd
+           "keeper path parameter is required"
+       | Some keeper ->
+         let keeper_name = Uri.pct_decode keeper |> String.trim in
+         let origin = get_origin req in
+         let headers =
+           Httpun.Headers.of_list
+             ([ "content-type", "text/event-stream"
+              ; "cache-control", "no-cache"
+              ; "connection", "keep-alive"
+              ; "x-accel-buffering", "no"
+              ]
+              @ cors_headers origin)
+         in
+         let response = Httpun.Response.create ~headers `OK in
+         let writer = Httpun.Reqd.respond_with_streaming inner_reqd response in
+         let closed = ref false in
+         let close_stream () =
+           if not !closed
+           then (
+             closed := true;
+             try Httpun.Body.Writer.close writer with
+             | exn ->
+               Log.Dashboard.warn
+                 "execute output stream close failed: %s"
+                 (Printexc.to_string exn))
+         in
+         let write_string data =
+           if !closed
+           then false
+           else (
+             try
+               Httpun.Body.Writer.write_string writer data;
+               true
+             with
+             | Eio.Cancel.Cancelled _ as e -> raise e
+             | exn ->
+               Log.Dashboard.warn
+                 "execute output stream write failed: %s"
+                 (Printexc.to_string exn);
+               close_stream ();
+               false)
+         in
+         let write_json json =
+           write_string (Dashboard_execute_output.sse_frame json)
+         in
+         match Dashboard_execute_output.subscribe ~keeper_name with
+         | None ->
+           (* fire-and-forget: best-effort terminal event before closing stream. *)
+           ignore (write_json (Dashboard_execute_output.event_json ~keeper_name));
+           close_stream ()
+         | Some subscriber ->
+           let wrote_initial =
+             write_string "retry: 1500\n\n"
+             && write_json (Dashboard_execute_output.event_json ~keeper_name)
+           in
+           if not wrote_initial
+           then Dashboard_execute_output.unsubscribe subscriber
+           else
+             Eio.Fiber.fork ~sw (fun () ->
+               Eio.Switch.run (fun stream_sw ->
+                 Eio.Switch.on_release stream_sw (fun () ->
+                   Dashboard_execute_output.unsubscribe subscriber;
+                   close_stream ());
+                 let rec loop () =
+                   if not !closed
+                   then (
+                     match
+                       Eio.Time.with_timeout clock execute_output_heartbeat_s (fun () ->
+                         Ok (Dashboard_execute_output.take_event subscriber))
+                     with
+                     | Ok event ->
+                       if
+                         write_json
+                           (Dashboard_execute_output.stream_event_json event)
+                       then loop ()
+                     | Error `Timeout ->
+                       if write_string ": heartbeat\n\n" then loop ())
+                 in
+                 try loop () with
+                 | Eio.Cancel.Cancelled _ as e -> raise e
+                 | exn ->
+                   Log.Dashboard.warn
+                     "execute output stream loop failed: %s"
+                     (Printexc.to_string exn);
+                   close_stream ())))
+    request
+    reqd
+
 let runtime_config_raw_json ~path ~source_text ~reloaded =
   `Assoc
     [ ("ok", `Bool true)
@@ -82,6 +194,12 @@ let add_routes ~sw ~clock router =
            handle_broadcast state agent_name reqd body_str
          )
        ) request reqd)
+  |> Http.Router.prefix_get
+       "/api/dashboard/execute-output/"
+       (handle_execute_output_stream ~sw ~clock)
+  |> Http.Router.prefix_get
+       "/api/v1/dashboard/execute-output/"
+       (handle_execute_output_stream ~sw ~clock)
 
   (* Batch dashboard endpoint: single request replaces 4 separate API calls *)
   |> Http.Router.get "/api/v1/dashboard" (fun request reqd ->

@@ -132,6 +132,168 @@ let test_ingest_multiple_events () =
     check int "two events" 2 !count)
 ;;
 
+let json_string key json =
+  Yojson.Safe.Util.member key json |> Yojson.Safe.Util.to_string
+;;
+
+let json_intlit key json =
+  match Yojson.Safe.Util.member key json with
+  | `Int i -> Int64.of_int i
+  | `Intlit s -> Int64.of_string s
+  | _ -> failwith ("expected int field " ^ key)
+;;
+
+let json_int key json =
+  Yojson.Safe.Util.member key json |> Yojson.Safe.Util.to_int
+;;
+
+let test_list_events_filters_keeper_and_pages () =
+  with_temp_dir (fun base_dir ->
+    Ide_bridge.ingest_tool_event
+      ~base_path:base_dir
+      ~tool_name:"execute"
+      ~keeper_id:"k1"
+      ~turn_id:"t-old"
+      ~outcome:"success"
+      ~typed_outcome:"progress"
+      ~latency_ms:100
+      ~summary:"old"
+      ~file_path:None
+      ~timestamp_ms:1000L
+      ();
+    Ide_bridge.ingest_tool_event
+      ~base_path:base_dir
+      ~tool_name:"read_file"
+      ~keeper_id:"k2"
+      ~turn_id:"t-other"
+      ~outcome:"success"
+      ~typed_outcome:"progress"
+      ~latency_ms:100
+      ~summary:"other"
+      ~file_path:None
+      ~timestamp_ms:3000L
+      ();
+    Ide_bridge.ingest_tool_event
+      ~base_path:base_dir
+      ~tool_name:"write_file"
+      ~keeper_id:"k1"
+      ~turn_id:"t-new"
+      ~outcome:"success"
+      ~typed_outcome:"progress"
+      ~latency_ms:100
+      ~summary:"new"
+      ~file_path:None
+      ~timestamp_ms:2000L
+      ();
+    let events =
+      Ide_bridge.list_events
+        ~base_path:base_dir
+        ~kind:Ide_bridge.Tool
+        ~keeper_id:"k1"
+        ~limit:1
+        ()
+    in
+    match events with
+    | [ event ] ->
+      check string "keeper filter" "k1" (json_string "keeper_id" event);
+      check string "newest event" "t-new" (json_string "turn_id" event)
+    | _ -> fail "expected one paged event")
+;;
+
+let test_list_events_merges_kinds_newest_first () =
+  with_temp_dir (fun base_dir ->
+    Ide_bridge.ingest_tool_event
+      ~base_path:base_dir
+      ~tool_name:"execute"
+      ~keeper_id:"k1"
+      ~turn_id:"t-tool"
+      ~outcome:"success"
+      ~typed_outcome:"progress"
+      ~latency_ms:100
+      ~summary:"tool"
+      ~file_path:None
+      ~timestamp_ms:1000L
+      ();
+    Ide_bridge.ingest_pr_event
+      ~base_path:base_dir
+      ~pr_number:42
+      ~pull_request_url:"https://github.com/owner/repo/pull/42"
+      ~pr_title:"feat"
+      ~pr_state:"open"
+      ~repo:"owner/repo"
+      ~keeper_id:"k1"
+      ~turn_id:"t-pr"
+      ~comment_count:0
+      ~review_status:None
+      ~timestamp_ms:2000L;
+    Ide_bridge.ingest_turn_event
+      ~base_path:base_dir
+      ~turn_id:"t-turn"
+      ~keeper_id:"k1"
+      ~phase:"completed"
+      ~model_used:None
+      ~tools_used:[]
+      ~stop_reason:None
+      ~duration_ms:None
+      ~timestamp_ms:3000L;
+    let events = Ide_bridge.list_events ~base_path:base_dir ~limit:3 () in
+    check (list string) "newest-first types" [ "turn"; "pr"; "tool" ]
+      (List.map (json_string "type") events);
+    check (list int64) "newest-first timestamps" [ 3000L; 2000L; 1000L ]
+      (List.map (json_intlit "timestamp_ms") events))
+;;
+
+let test_cursor_from_hook_uses_real_file_and_line () =
+  with_temp_dir (fun base_dir ->
+    let input =
+      `Assoc
+        [ "file_path", `String "lib/test.ml"
+        ; "line_start", `Int 12
+        ; "line_end", `Int 14
+        ; "column", `Int 3
+        ]
+    in
+    Ide_bridge.ingest_tool_event_from_hook
+      ~base_path:base_dir
+      ~tool_name:"keeper_ide_annotate"
+      ~keeper_id:"k1"
+      ~turn_id:"turn-7"
+      ~outcome:"ok"
+      ~typed_outcome_str:"progress"
+      ~duration_ms:10.0
+      ~output_text:"annotated"
+      ~input;
+    match Ide_bridge.list_cursors ~base_path:base_dir () with
+    | [ cursor ] ->
+      check string "keeper_id" "k1" (json_string "keeper_id" cursor);
+      check string "file_path" "lib/test.ml" (json_string "file_path" cursor);
+      check int "line" 12 (json_int "line" cursor);
+      check int "column" 3 (json_int "column" cursor);
+      check string "focus_mode" "editing" (json_string "focus_mode" cursor);
+      check string "tool_name" "keeper_ide_annotate" (json_string "tool_name" cursor);
+      check int "turn" 7 (json_int "turn" cursor);
+      let selection_end = Yojson.Safe.Util.member "selection_end" cursor in
+      check int "selection end line" 14 (json_int "line" selection_end)
+    | _ -> fail "expected one cursor")
+;;
+
+let test_cursor_from_hook_skips_missing_line () =
+  with_temp_dir (fun base_dir ->
+    let input = `Assoc [ "file_path", `String "lib/test.ml" ] in
+    Ide_bridge.ingest_tool_event_from_hook
+      ~base_path:base_dir
+      ~tool_name:"keeper_ide_annotate"
+      ~keeper_id:"k1"
+      ~turn_id:"turn-7"
+      ~outcome:"ok"
+      ~typed_outcome_str:"progress"
+      ~duration_ms:10.0
+      ~output_text:"annotated"
+      ~input;
+    check int "no cursor without line" 0
+      (List.length (Ide_bridge.list_cursors ~base_path:base_dir ())))
+;;
+
 let test_hook_extracts_file_path_from_path_key () =
   with_temp_dir (fun base_dir ->
     let input = `Assoc [ "path", `String "lib/test.ml"; "content", `String "hello" ] in
@@ -408,6 +570,14 @@ let () =
       , [ test_case "tool event" `Quick test_ingest_tool_event
         ; test_case "turn event" `Quick test_ingest_turn_event
         ; test_case "multiple events" `Quick test_ingest_multiple_events
+        ] )
+    ; ( "read"
+      , [ test_case "filters keeper and pages" `Quick test_list_events_filters_keeper_and_pages
+        ; test_case "merges kinds newest first" `Quick test_list_events_merges_kinds_newest_first
+        ] )
+    ; ( "cursor"
+      , [ test_case "from hook uses real file and line" `Quick test_cursor_from_hook_uses_real_file_and_line
+        ; test_case "from hook skips missing line" `Quick test_cursor_from_hook_skips_missing_line
         ] )
     ; ( "hook_extract"
       , [ test_case "file_path from path key" `Quick test_hook_extracts_file_path_from_path_key

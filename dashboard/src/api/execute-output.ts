@@ -1,10 +1,21 @@
 import { authHeaders } from './core'
 
+export interface ExecuteOutputLine {
+  ts_ms?: number
+  stream: 'stdout' | 'stderr' | 'cmd' | 'system' | string
+  text: string
+  ansi?: boolean
+}
+
 export interface ExecuteOutputStreamEvent {
   type: 'snapshot' | 'no_task' | 'error' | string
+  kind?: string
   keeper: string
+  keeper_id?: string
   task_id?: string | null
   task_count?: number
+  lines?: ExecuteOutputLine[]
+  line?: ExecuteOutputLine
   since_stdout?: number
   since_stderr?: number
   stdout_since?: string

@@ -401,7 +401,6 @@ let test_docker_container_cwd_maps_to_host_worktree () =
   | Error e -> Alcotest.fail ("read cwd should map container path: " ^ e));
   match
     Keeper_tool_execute_path.resolve_tool_execute_cwd
-      ~policy:Keeper_tool_execute_path.Write_enabled_execute_cwd
       ~config
       ~meta
       ~args

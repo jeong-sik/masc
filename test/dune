@@ -199,8 +199,6 @@
   test_exec_core
   test_exec_dispatch
   test_shell_ir_risk
-  test_keeper_tool_execute_safety
-  test_keeper_tool_execute_typed_input
   test_hitl_approval
   test_keeper_discovered_tools
   test_keeper_tool_affinity
@@ -452,8 +450,6 @@
   test_exec_core
   test_exec_dispatch
   test_shell_ir_risk
-  test_keeper_tool_execute_safety
-  test_keeper_tool_execute_typed_input
   test_hitl_approval
   test_keeper_discovered_tools
   test_keeper_tool_affinity
@@ -1544,8 +1540,6 @@
 (include stanzas/test_shutdown_flag.inc)
 
 (include stanzas/test_log_file_sink_self_heal.inc)
-
-(include stanzas/test_executable_not_allowlisted_hint.inc)
 
 (include stanzas/test_claim_outcome_typed.inc)
 

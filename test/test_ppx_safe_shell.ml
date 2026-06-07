@@ -20,31 +20,28 @@ let parse_or_fail cmd =
       (Exec_policy.block_reason_to_string br)
 ;;
 
-let promote cmd =
+let verify_static_safe cmd =
   cmd
   |> parse_or_fail
-  |> Exec_policy.promote_to_safe
-       ~allowed_commands:Exec_policy.readonly_allowed_commands
+  |> Exec_policy.verify_static_safe_ir
 ;;
 
-let test_promote_accepts_git_push () =
-  match promote "git push --force origin main" with
-  | Ok verified ->
-    let ir = Typed_capabilities.shell_ir verified in
-    let rendered = Format.asprintf "%a" Masc_exec.Shell_ir.pp ir in
-    Alcotest.(check string) "preserves checked IR" "git:push --force origin main" rendered
+let test_static_safe_rejects_git_push () =
+  match verify_static_safe "git push --force origin main" with
+  | Error (Exec_policy.Command_not_allowed "git") -> ()
   | Error reason ->
     Alcotest.failf
-      "expected git push to be allowed, got %s"
+      "expected git push to fail static R0 verification, got %s"
       (Exec_policy.block_reason_tag reason)
+  | Ok _ -> Alcotest.fail "expected git push to be rejected"
 ;;
 
-let test_promote_rejects_dev_mutation () =
-  match promote "npm install" with
+let test_static_safe_rejects_dev_mutation () =
+  match verify_static_safe "npm install" with
   | Error (Exec_policy.Command_not_allowed "npm") -> ()
   | Error reason ->
     Alcotest.failf
-      "expected npm to miss readonly allowlist, got %s"
+      "expected npm install to fail static R0 verification, got %s"
       (Exec_policy.block_reason_tag reason)
   | Ok _ -> Alcotest.fail "expected npm install to be rejected"
 ;;
@@ -54,8 +51,8 @@ let () =
     "valid", [
       test_case "safe_sh ls" `Quick test_valid_safe_sh;
     ];
-    "promotion", [
-      test_case "accepts git push" `Quick test_promote_accepts_git_push;
-      test_case "rejects dev mutation" `Quick test_promote_rejects_dev_mutation;
+    "static_safe", [
+      test_case "rejects git push" `Quick test_static_safe_rejects_git_push;
+      test_case "rejects dev mutation" `Quick test_static_safe_rejects_dev_mutation;
     ];
   ]

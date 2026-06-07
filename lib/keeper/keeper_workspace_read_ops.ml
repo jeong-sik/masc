@@ -53,20 +53,12 @@ let try_handle
   in
   (* TEL-OK: read-op adapter delegates to Keeper_tool_execute_shell_ir/Exec_dispatch or the
      sandbox read runner; execution telemetry stays with those runtime paths. *)
-  let dispatch_host_shell_ir
-        ?(allowed_commands = Exec_policy.readonly_allowed_commands)
-
-        ?timeout_sec
-        ~workdir
-        ir
-    =
-    Keeper_tool_execute_shell_ir.dispatch ~allowed_commands ~keeper_id:meta.name
+  let dispatch_host_shell_ir ?timeout_sec ~workdir ir =
+    Keeper_tool_execute_shell_ir.dispatch ~keeper_id:meta.name
       ~base_path:root ~workdir ~sandbox:(Masc_exec.Sandbox_target.host ())
       ?timeout_sec ir
   in
   let run_host_shell_ir
-        ?(allowed_commands = Exec_policy.readonly_allowed_commands)
-
         ?timeout_sec
         ?path
         ~workdir
@@ -78,10 +70,10 @@ let try_handle
       [ "typed", `Bool true; "cmd", `String cmd ]
       @
       match path with
-      | None -> []
-      | Some path -> [ "path", `String path ]
+        | None -> []
+        | Some path -> [ "path", `String path ]
     in
-    match dispatch_host_shell_ir ~allowed_commands ?timeout_sec ~workdir ir with
+    match dispatch_host_shell_ir ?timeout_sec ~workdir ir with
     | Error (Gate_reject diagnostic) -> error_json ~fields diagnostic
     | Error Cannot_parse -> error_json ~fields "Cannot parse command"
     | Error Too_complex -> error_json ~fields "Command too complex"
@@ -123,9 +115,7 @@ let try_handle
     loop max_eintr_retries
   in
   let run_in_turn_runtime ?(ok_exit_codes = [ 0 ]) ~cwd ~cmd ~command_argv
-      ?host_ir ?(host_allowed_commands = Exec_policy.readonly_allowed_commands)
-
-      ~max_bytes ~timeout_sec ?(map_output = fun out -> out) ?(extra = []) () =
+      ?host_ir ~max_bytes ~timeout_sec ?(map_output = fun out -> out) ?(extra = []) () =
     match Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd with
     | Some runtime ->
       (match
@@ -145,8 +135,7 @@ let try_handle
            ~fields:[ "op", `String op; "cwd", `String cwd ]
            "missing host Shell IR fallback"
        | Some ir ->
-         run_host_shell_ir ~allowed_commands:host_allowed_commands ~timeout_sec
-           ~workdir:cwd ~cmd ~path:cwd ir
+         run_host_shell_ir ~timeout_sec ~workdir:cwd ~cmd ~path:cwd ir
            ~on_ok:(fun result ->
              render_completed_process_result ~root ~keeper_name:meta.name ~op
                ~cwd ~cmd ~extra result.status
@@ -228,7 +217,6 @@ let try_handle
                [ "--no-optional-locks"; "status"; "--short"; "--branch" ]
            in
            run_host_shell_ir
-             ~allowed_commands:Exec_policy.dev_allowed_commands
              ~workdir:cwd
              ~cmd:"git status"
              ~path:cwd
@@ -530,8 +518,6 @@ let try_handle
                 Keeper_tool_execute_shell_ir.simple ~cwd_raw:cwd ~cwd_base:root Masc_exec.Exec_program.Git args
               in
               run_host_shell_ir
-                ~allowed_commands:Exec_policy.dev_allowed_commands
-
                 ~workdir:cwd
                 ~cmd:"git log"
                 ~path:cwd

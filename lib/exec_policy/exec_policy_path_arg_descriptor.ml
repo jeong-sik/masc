@@ -2,7 +2,7 @@
 
     Extracted from [Exec_policy] under the Shell IR Adjacent Surfaces
     Plan §P11. The descriptors here encode *typed* knowledge of which
-    argv tokens of an allowed command are paths — the
+    argv tokens of a recognized command shape are paths — the
     descriptor is consulted *before* the [looks_like_path_token]
     heuristic, so path validation routes through structural metadata
     first and only falls back to look-alike inference when no

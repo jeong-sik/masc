@@ -16,9 +16,6 @@ type block_reason =
 
 val block_reason_to_string : block_reason -> string
 
-val block_reason_to_string_with_allowlist :
-  allowed_commands:string list -> block_reason -> string
-
 type parse_mode = Strict | Tool_execute
 
 (** Classification of path-like token prefixes. *)
@@ -35,42 +32,21 @@ val classify_path_prefix : string -> path_prefix
 val parse_string_to_ir :
   mode:parse_mode -> string -> (Masc_exec.Shell_ir.t, block_reason) result
 
-val dev_allowed_commands : string list
-val readonly_allowed_commands : string list
-(** Read-only executable entrypoints. Includes [git] and [gh] so read-only
-    status/log/view commands can run through the readonly Execute surface.
-    Mutating subcommands are still classified and blocked later by the Shell IR
-    risk gate when write-enabled tool access is absent. *)
-
-val is_dev_allowed : string -> bool
-val is_readonly_allowed : string -> bool
-
-
-val command_context_with_allowlist :
-  allowed_commands:string list ->
+val command_context :
   Masc_exec.Shell_ir.t ->
   (Masc_exec_command_gate.Shell_command_gate.parsed_context, block_reason) result
-
-val validate_command_with_allowlist :
-  allowed_commands:string list ->
-  Masc_exec.Shell_ir.t ->
-  (unit, block_reason) result
 
 val validate_command : Masc_exec.Shell_ir.t -> (unit, block_reason) result
 
-val command_context_tool_execute_with_allowlist :
+val command_context_tool_execute :
   ?allow_pipes:bool ->
-  allowed_commands:string list ->
   Masc_exec.Shell_ir.t ->
   (Masc_exec_command_gate.Shell_command_gate.parsed_context, block_reason) result
 
-val validate_command_tool_execute_with_allowlist :
+val validate_command_tool_execute :
   ?allow_pipes:bool ->
-  allowed_commands:string list ->
   Masc_exec.Shell_ir.t ->
   (unit, block_reason) result
-
-val validate_command_tool_execute : Masc_exec.Shell_ir.t -> (unit, block_reason) result
 
 val simple_literal_args : Masc_exec.Shell_ir.simple -> string list option
 
@@ -107,13 +83,12 @@ val block_reason_tag : block_reason -> string
 val attribution_of_validation :
   cmd:string -> (unit, block_reason) result -> Attribution.t
 
-(** RFC-0215 GADT Safety promotion types *)
+(** RFC-0215 GADT safety verification types. *)
 
 type safe = Typed_capabilities.safe
 type unsafe = Typed_capabilities.unsafe
 type 'a verified_ir = 'a Typed_capabilities.verified_ir
 
-val promote_to_safe :
-  allowed_commands:string list ->
+val verify_static_safe_ir :
   Masc_exec.Shell_ir.t ->
   (safe verified_ir, block_reason) result

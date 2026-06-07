@@ -37,14 +37,6 @@
 
 (** Parsed-but-rejected reasons. *)
 type reject_reason =
-  | Command_not_in_allowlist of { bin : string }
-  | Pipeline_segment_disallowed of { stage : int; bin : string }
-  | Wrapper_unreducible of { stage : int; wrapper : string; detail : string }
-      (** A wrapper command (e.g. [env]) whose effective inner command the
-          gate cannot statically authorize — the [-S]/[--split-string]
-          mode, an unmodeled flag, or a non-literal command token. Denied
-          by secure default so the wrapper cannot smuggle a non-allowlisted
-          command past the gate. *)
   | Pipes_not_allowed of { stages : int }
   | Redirect_disallowed_in_caller of { stage : int }
   | Path_outside_policy of { stage : int; raw_path : string; diagnostic : string }
@@ -100,11 +92,11 @@ type verdict =
   | Cannot_parse of { reason : parse_reason }
   | Too_complex of { reason : too_complex_reason }
 
-(** Allowlist policy. [allow_pipes = true] keeps the existing legacy
+(** Syntax policy. [allow_pipes = true] keeps the existing legacy
     behavior; [false] yields {!Pipes_not_allowed} for any pipeline with
-    two or more stages. Redirects are always rejected, including fd-to-fd redirects such as
-    syntax, including fd-to-fd redirects such as [2>&1]. *)
-type allowlist_policy = {
+    two or more stages. Redirects are controlled by [redirect_allowed],
+    including fd-to-fd redirects such as [2>&1]. *)
+type syntax_policy = {
   redirect_allowed : bool;
   allow_pipes : bool;
 }
@@ -129,7 +121,7 @@ type sandbox_context = {
 val allow_all_paths : path_policy
 (** A path policy that approves every literal — useful when the
     caller has its own validator and only wants the Shell IR parse +
-    allowlist check. *)
+    syntax check. *)
 
 val forbid_masc_internal_state_paths : path_policy
 (** Path policy that rejects probes against [.masc/] internal state
@@ -143,19 +135,19 @@ val host_sandbox : sandbox_context
 
 val gate_typed
   :  ir:Masc_exec.Shell_ir.t
-  -> allowlist:allowlist_policy
+  -> syntax_policy:syntax_policy
   -> path_policy:path_policy
   -> sandbox:sandbox_context
   -> unit
   -> verdict
 (** Policy-aware typed entrypoint for callers that already have a
     {!Masc_exec.Shell_ir.t}. This bypasses raw Bash parsing but shares
-    the same allowlist, redirect, path-policy, sandbox, and nested
+    the same syntax, path-policy, sandbox, and nested
     pipeline handling as the legacy [gate] entrypoint. *)
 
 val gate_raw
   :  text:string
-  -> allowlist:allowlist_policy
+  -> syntax_policy:syntax_policy
   -> path_policy:path_policy
   -> sandbox:sandbox_context
   -> unit

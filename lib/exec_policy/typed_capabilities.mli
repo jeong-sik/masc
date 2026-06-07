@@ -1,7 +1,7 @@
 (** GADT Capability and Verified Shell IR definitions.
 
     Risk classification is the single source of truth for shell safety.
-    [Safe_IR] wrapping happens after allowlist validation; no redundant
+    [Safe_IR] wrapping happens after static R0 verification; no redundant
     capability or mutation checks are performed here. *)
 
 type yes = Yes

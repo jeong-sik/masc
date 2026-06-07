@@ -549,12 +549,11 @@ let is_destructive_bash_operation (words : string list) =
   | _ -> false
 ;;
 
-(* --- Action-flag danger (allowlisted read tools, dangerous flags) ---
+(* --- Action-flag danger (read-shaped tools, dangerous flags) ---
 
-   find/sed/sort are legitimate read tools (on the readonly + dev
-   allowlists), but a single flag turns them destructive or write-capable
-   while the command identity stays "allowlisted read". The command-level
-   allowlist and [is_write_operation]/[classify_write_detail] (head-token
+   find/sed/sort are legitimate read-shaped tools, but a single flag turns
+   them destructive or write-capable while the command identity stays read-like.
+   [is_write_operation]/[classify_write_detail] (head-token
    keyed) therefore never see the danger. The Find/Sort typed GADT does
    not model these flags either — like [gh], the risk is string-borne — so
    [classify_words] owns it as the floor. ([Sed.in_place] IS modeled, so
@@ -562,12 +561,12 @@ let is_destructive_bash_operation (words : string list) =
    redundant there.)
 
    Mapping rationale: [-exec]/[-execdir]/[-ok]/[-okdir] run an arbitrary
-   command (rm/sh are on no keeper allowlist) and [-delete] removes files —
+   command and [-delete] removes files —
    the intent is "nobody destroys", so [Destructive_protected] blocks all
    keepers (dev included). The file-writing primaries ([-fprintf]/[-fls]/
    [-fprint]/[-fprint0], [sed -i], [sort -o]) are ordinary writes: [R1]
-   (readonly keeper blocked, dev keeper allowed — the split a flat
-   allowlist denylist could not express). *)
+   (readonly keeper blocked, dev keeper allowed — a split that belongs to
+   risk classification rather than executable-name admission). *)
 
 let find_destructive_primaries = [ "-delete"; "-exec"; "-execdir"; "-ok"; "-okdir" ]
 let find_write_primaries = [ "-fprintf"; "-fls"; "-fprint"; "-fprint0" ]

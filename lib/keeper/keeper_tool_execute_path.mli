@@ -6,20 +6,12 @@ val resolve_tool_read_cwd :
   args:Yojson.Safe.t ->
   (string, string) result
 
-type execute_cwd_policy =
-  | Readonly_execute_cwd
-  | Write_enabled_execute_cwd
-
 val resolve_tool_execute_cwd :
-  policy:execute_cwd_policy ->
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   args:Yojson.Safe.t ->
   (string, string) result
-(** Resolve typed Execute cwd under the caller-selected capability policy.
-    [Readonly_execute_cwd] preserves explicit cwd path semantics but uses the
-    existing keeper playground root for omitted cwd without creating the sandbox
-    bundle. [Write_enabled_execute_cwd] uses the keeper write boundary default
+(** Resolve typed Execute cwd. Uses the keeper write boundary default
     for omitted cwd. Explicit cwd resolution never creates directories or
     changes repo/worktree state. *)
 

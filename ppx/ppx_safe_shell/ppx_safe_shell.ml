@@ -1,11 +1,7 @@
 open Ppxlib
 
-let validate_promotable_ir ir =
-  match
-    Exec_policy.promote_to_safe
-      ~allowed_commands:Exec_policy.readonly_allowed_commands
-      ir
-  with
+let validate_static_safe_ir ir =
+  match Exec_policy.verify_static_safe_ir ir with
   | Ok _ -> Ok ()
   | Error br -> Error (Exec_policy.block_reason_to_string br)
 ;;
@@ -99,13 +95,11 @@ let expand ~loc ~path:_ (expr : expression) =
       let trimmed = String.trim cmd_str in
       (match Exec_policy.parse_string_to_ir ~mode:Exec_policy.Strict trimmed with
        | Ok ir ->
-           (match validate_promotable_ir ir with
+           (match validate_static_safe_ir ir with
             | Ok () ->
               let ir_expr = expr_of_ir ~loc ir in
               [%expr
-                Exec_policy.promote_to_safe
-                  ~allowed_commands:Exec_policy.readonly_allowed_commands
-                  [%e ir_expr]]
+                Exec_policy.verify_static_safe_ir [%e ir_expr]]
             | Error reason ->
                 Location.raise_errorf ~loc "Compile-time guardrail violation: %s" reason)
        | Error br ->

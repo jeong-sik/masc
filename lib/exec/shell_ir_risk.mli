@@ -66,10 +66,10 @@ val classify_words : string list -> risk_class
     risk-bearing tokens the typed model does not yet capture (gh
     -X METHOD / graphql body).
 
-    Also owns the action-flag danger of allowlisted read tools whose
+    Also owns the action-flag danger of read-shaped tools whose
     typed GADT does not model the dangerous flag: [find -delete/-exec]
     (Destructive_protected), [find -fprintf/-fls], [sed -i], [sort -o]
-    (R1). The command identity stays allowlisted; the flag carries the
+    (R1). The command identity stays read-shaped; the flag carries the
     risk, so it is string-borne like gh. *)
 
 val is_write_operation : string list -> bool

@@ -620,6 +620,15 @@ let stop_keepalive ?base_path name =
        match entry.phase with
        | Keeper_state_machine.Crashed | Keeper_state_machine.Dead -> ()
        | _ ->
+         let released_capacity =
+           Keeper_turn_capacity.force_release_for_keeper ~keeper_name:entry.name
+         in
+         if released_capacity > 0 then
+           Log.Keeper.warn
+             "%s: manual stop force-released turn capacity before marking stopped \
+              capacity=%d"
+             entry.name
+             released_capacity;
          if
            record_keeper_stopped
              entry

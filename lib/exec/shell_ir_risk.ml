@@ -96,11 +96,29 @@ let is_env_assignment arg =
 ;;
 
 let rec strip_env_prefix words =
+  let split_env_s_words text =
+    text
+    |> String.split_on_char ' '
+    |> List.concat_map (String.split_on_char '\t')
+    |> List.filter (fun token -> token <> "")
+  in
   let rec strip_env_args = function
     | [] -> []
     | "--" :: rest -> rest
     | ("-i" | "--ignore-environment" | "--null" | "-0") :: rest ->
       strip_env_args rest
+    | ("-S" | "--split-string") :: arg :: rest ->
+      (match strip_env_args (split_env_s_words arg) with
+       | [] -> strip_env_args rest
+       | command -> command)
+    | arg :: rest when String.starts_with ~prefix:"--split-string=" arg ->
+      let prefix = "--split-string=" in
+      let value =
+        String.sub arg (String.length prefix) (String.length arg - String.length prefix)
+      in
+      (match strip_env_args (split_env_s_words value) with
+       | [] -> strip_env_args rest
+       | command -> command)
     | ("-u" | "--unset") :: _ :: rest -> strip_env_args rest
     | arg :: rest
       when String.starts_with ~prefix:"--unset=" arg
@@ -112,6 +130,32 @@ let rec strip_env_prefix words =
   match words with
   | "env" :: rest -> strip_env_prefix (strip_env_args rest)
   | _ -> words
+;;
+
+let rec strip_opam_exec_prefix = function
+  | "opam" :: rest -> (
+    match rest with
+    | "exec" :: rest ->
+      let rec find_command = function
+        | [] -> []
+        | "--" :: rest -> rest
+        | token :: rest when is_env_assignment token -> find_command rest
+        | ("--switch" | "--color" | "--root" | "--cli") :: _ :: rest ->
+          find_command rest
+        | token :: rest
+          when String.starts_with ~prefix:"--switch=" token
+               || String.starts_with ~prefix:"--color=" token
+               || String.starts_with ~prefix:"--root=" token
+               || String.starts_with ~prefix:"--cli=" token
+               || String.starts_with ~prefix:"-" token ->
+          find_command rest
+        | command -> command
+      in
+      (match find_command rest with
+       | [] -> [ "opam"; "exec" ]
+       | command -> strip_opam_exec_prefix command)
+    | _ -> "opam" :: rest)
+  | words -> words
 ;;
 
 let rec skip_git_global_options = function
@@ -157,7 +201,7 @@ let rec skip_gh_global_options = function
 ;;
 
 let normalize_command_words words =
-  match strip_env_prefix words with
+  match words |> strip_env_prefix |> strip_opam_exec_prefix |> strip_env_prefix with
   | "git" :: rest -> "git" :: skip_git_global_options rest
   | "gh" :: rest -> "gh" :: skip_gh_global_options rest
   | words -> words

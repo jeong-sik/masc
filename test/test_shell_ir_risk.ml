@@ -126,7 +126,10 @@ let test_destructive_commands () =
   check "node -e 'require(\"fs\").writeFileSync(\"x\", \"1\")'"
     Shell_ir_risk.Destructive_protected;
   check "pip install pkg" Shell_ir_risk.Destructive_protected;
-  check "npx some-tool" Shell_ir_risk.Destructive_protected
+  check "npx some-tool" Shell_ir_risk.Destructive_protected;
+  check "env -S \"sh -c 'touch x'\"" Shell_ir_risk.Destructive_protected;
+  check "env --split-string=\"sh -c 'touch x'\"" Shell_ir_risk.Destructive_protected;
+  check "opam exec -- sh -c 'touch x'" Shell_ir_risk.Destructive_protected
 ;;
 
 let test_typed_execute_shell_capable_executable_is_destructive () =

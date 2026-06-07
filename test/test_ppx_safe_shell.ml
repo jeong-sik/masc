@@ -76,6 +76,30 @@ let test_static_safe_rejects_shell_capable_executable () =
   | Ok _ -> Alcotest.fail "expected python3 to be rejected"
 ;;
 
+let expect_static_safe_rejects_shell_wrapper ~label cmd =
+  match verify_static_safe cmd with
+  | Error (Exec_policy.Command_not_allowed _) -> ()
+  | Error reason ->
+    Alcotest.failf
+      "expected %s to fail static safe capability verification, got %s"
+      label
+      (Exec_policy.block_reason_tag reason)
+  | Ok _ ->
+    Alcotest.failf "expected %s to be rejected" label
+;;
+
+let test_static_safe_rejects_env_split_shell () =
+  expect_static_safe_rejects_shell_wrapper
+    ~label:"env -S shell wrapper"
+    "env -S \"sh -c 'touch x'\""
+;;
+
+let test_static_safe_rejects_opam_exec_shell () =
+  expect_static_safe_rejects_shell_wrapper
+    ~label:"opam exec shell wrapper"
+    "opam exec -- sh -c 'touch x'"
+;;
+
 let () =
   run "ppx_safe_shell" [
     "valid", [
@@ -88,5 +112,9 @@ let () =
       test_case "rejects shell interpreter" `Quick test_static_safe_rejects_shell_interpreter;
       test_case "rejects shell-capable executable" `Quick
         test_static_safe_rejects_shell_capable_executable;
+      test_case "rejects env -S shell wrapper" `Quick
+        test_static_safe_rejects_env_split_shell;
+      test_case "rejects opam exec shell wrapper" `Quick
+        test_static_safe_rejects_opam_exec_shell;
     ];
   ]

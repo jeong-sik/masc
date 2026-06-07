@@ -725,6 +725,54 @@ let test_validate_args_tool_execute_accepts_typed_pipeline () =
       "expected typed tool_execute pipeline to pass validation, got %s"
       (Yojson.Safe.to_string (Tool_result.data result))
 
+let validate_typed_tool_execute_or_fail args =
+  match Keeper_tool_execute_typed_input.of_json args with
+  | Error msg -> Alcotest.failf "typed tool_execute parse failed: %s" msg
+  | Ok input -> Keeper_tool_execute_typed_input.validate input
+
+let test_tool_execute_rejects_env_split_shell_wrapper () =
+  let args =
+    `Assoc
+      [ "executable", `String "env"
+      ; "argv", `List [ `String "-S"; `String "sh -c 'touch x'" ]
+      ]
+  in
+  match validate_typed_tool_execute_or_fail args with
+  | Error
+      (Keeper_tool_execute_typed_input.Wrapper_target_unsafe
+        { wrapper = "env"; target = "sh" }) -> ()
+  | Error err ->
+    Alcotest.failf
+      "expected env wrapper target rejection, got %a"
+      Keeper_tool_execute_typed_input.pp_validation_error
+      err
+  | Ok () -> Alcotest.fail "expected env -S shell wrapper to be rejected"
+
+let test_tool_execute_rejects_opam_exec_shell_wrapper () =
+  let args =
+    `Assoc
+      [ "executable", `String "opam"
+      ; "argv"
+        , `List
+            [ `String "exec"
+            ; `String "--"
+            ; `String "sh"
+            ; `String "-c"
+            ; `String "touch x"
+            ]
+      ]
+  in
+  match validate_typed_tool_execute_or_fail args with
+  | Error
+      (Keeper_tool_execute_typed_input.Wrapper_target_unsafe
+        { wrapper = "opam exec"; target = "sh" }) -> ()
+  | Error err ->
+    Alcotest.failf
+      "expected opam exec wrapper target rejection, got %a"
+      Keeper_tool_execute_typed_input.pp_validation_error
+      err
+  | Ok () -> Alcotest.fail "expected opam exec shell wrapper to be rejected"
+
 let tool_execute_exec_stage args =
   match Keeper_tool_execute_typed_input.of_json args with
   | Ok (Keeper_tool_execute_typed_input.Exec { executable; argv; _ }) ->
@@ -1584,6 +1632,10 @@ let () =
         test_validate_args_tool_execute_accepts_typed_exec;
       Alcotest.test_case "tool_execute accepts typed pipeline" `Quick
         test_validate_args_tool_execute_accepts_typed_pipeline;
+      Alcotest.test_case "tool_execute rejects env -S shell wrapper" `Quick
+        test_tool_execute_rejects_env_split_shell_wrapper;
+      Alcotest.test_case "tool_execute rejects opam exec shell wrapper" `Quick
+        test_tool_execute_rejects_opam_exec_shell_wrapper;
       Alcotest.test_case "tool_execute find expression not rewritten" `Quick
         test_tool_execute_find_expression_not_rewritten;
       Alcotest.test_case "tool_execute find global option not rewritten" `Quick

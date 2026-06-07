@@ -2,7 +2,8 @@
 
     Per-keeper turn isolation, global capacity, and fleet stop admission live
     in {!Keeper_turn_admission}. This module records holder diagnostics after
-    admission grants a token.
+    admission grants a token. Production turn execution does not acquire
+    admission through this module.
 
     The autonomous FIFO queue and reactive/autonomous semaphores have been
     removed from production admission. Reactive/autonomous holder accessors
@@ -21,8 +22,10 @@ val keeper_turn_throttle_limit : int
 (** Effective throttle limit after applying the 2x TOML cap (issue #17192). *)
 val effective_turn_throttle_limit : int
 
-(** Which configuration layer supplied the effective throttle limit. *)
-type throttle_source =
+(** Which configuration layer supplied the effective throttle limit.
+    Re-exported for compatibility; the SSOT lives in
+    {!Keeper_turn_admission}. *)
+type throttle_source = Keeper_turn_admission.throttle_source =
   | Env_override
   | Toml
   | Default
@@ -144,7 +147,8 @@ type keeper_turn_slot_control =
   { is_held : unit -> bool
   }
 
-(** Main entry point. Consumes turn admission before running [f]. *)
+(** Compatibility-only entry point. Production keepalive calls
+    {!Keeper_turn_admission.with_turn_admission}. *)
 val with_keeper_turn_slot :
   ?runtime_profile:string ->
   keeper_name:string ->

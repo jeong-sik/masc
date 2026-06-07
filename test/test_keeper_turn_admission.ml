@@ -141,6 +141,49 @@ let test_stop_cancels_inflight_tokens () =
   A.release_turn token;
   A.reset_for_test ()
 
+let test_with_turn_admission_releases_on_success () =
+  A.reset_for_test ();
+  Eio_main.run @@ fun _env ->
+  (match
+     A.with_turn_admission
+       ~keeper_name:"wrapper-success"
+       ~runtime_profile:"test"
+       ~channel:Masc.Keeper_world_observation.Reactive
+       (fun ~semaphore_wait_ms ->
+          Alcotest.(check bool) "wait ms non-negative" true (semaphore_wait_ms >= 0))
+   with
+   | Ok () -> ()
+   | Error (`Semaphore_wait_timeout _) -> Alcotest.fail "unexpected wait timeout"
+   | Error (`Turn_admission_rejected rejection) ->
+     Alcotest.failf
+       "unexpected admission rejection: %s"
+       (A.rejection_to_string rejection));
+  Alcotest.(check int) "wrapper released token" 0 (A.global_inflight ());
+  A.reset_for_test ()
+
+let test_force_release_releases_with_turn_admission_token () =
+  A.reset_for_test ();
+  (match
+     A.with_turn_admission
+       ~keeper_name:"wrapper-force"
+       ~runtime_profile:"test"
+       ~channel:Masc.Keeper_world_observation.Reactive
+       (fun ~semaphore_wait_ms:_ ->
+          Alcotest.(check int) "wrapper token registered" 1 (A.global_inflight ());
+          Alcotest.(check bool)
+            "force release finds wrapper token"
+            true
+            (A.force_release_keeper ~keeper_name:"wrapper-force");
+          Alcotest.(check int) "force release drops token" 0 (A.global_inflight ()))
+   with
+   | Ok () -> ()
+   | Error (`Semaphore_wait_timeout _) -> Alcotest.fail "unexpected wait timeout"
+   | Error (`Turn_admission_rejected rejection) ->
+     Alcotest.failf
+       "unexpected admission rejection: %s"
+       (A.rejection_to_string rejection));
+  A.reset_for_test ()
+
 let () =
   Alcotest.run
     "keeper_turn_admission"
@@ -161,5 +204,13 @@ let () =
             "stop cancels inflight tokens"
             `Quick
             test_stop_cancels_inflight_tokens
+        ; Alcotest.test_case
+            "with_turn_admission releases on success"
+            `Quick
+            test_with_turn_admission_releases_on_success
+        ; Alcotest.test_case
+            "force release drops with_turn_admission token"
+            `Quick
+            test_force_release_releases_with_turn_admission_token
         ] )
     ]

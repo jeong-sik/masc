@@ -36,9 +36,29 @@ val record_completed :
   stdout:string ->
   stderr:string ->
   status:Yojson.Safe.t ->
+  ?streamed:bool ->
+  unit ->
   unit
-(** Record a completed Execute invocation. Non-cancellation failures are logged
-    and swallowed by the implementation because this path is observational. *)
+(** Record a completed Execute invocation.  When [~streamed:true] the line and
+    task_closed events have already been emitted via
+    {!append_stream_chunk}/{!record_stream_end}, so this call only updates the
+    retained snapshot.  Non-cancellation failures are logged and swallowed by
+    the implementation because this path is observational. *)
+
+val record_stream_start :
+  keeper_name:string -> task_id:string option -> unit
+(** Emit a [task_opened] event to current subscribers and bind subsequent
+    chunks to [task_id] until [record_stream_end] is called. *)
+
+val append_stream_chunk :
+  keeper_name:string -> stream:[ `Stdout | `Stderr ] -> string -> unit
+(** Append a live output chunk, split it into lines, and broadcast [line]
+    events to current subscribers. Empty chunks are ignored. *)
+
+val record_stream_end :
+  keeper_name:string -> task_id:string option -> status:Yojson.Safe.t -> unit
+(** Emit a [task_closed] event to current subscribers and release the open
+    stream binding. *)
 
 val snapshot : keeper_name:string -> snapshot option
 (** Latest retained Execute output for [keeper_name], if any. *)

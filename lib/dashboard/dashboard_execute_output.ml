@@ -32,6 +32,11 @@ type snapshot = {
 }
 
 type stream_event =
+  | Task_opened_event of {
+      keeper : string;
+      task_id : string option;
+      generated_at : float;
+    }
   | Line_event of {
       keeper : string;
       task_id : string option;
@@ -64,6 +69,11 @@ let table : (string, entry Queue.t) Hashtbl.t = Hashtbl.create 16
 let line_table : (string, output_line Queue.t) Hashtbl.t = Hashtbl.create 16
 let subscribers : (string, subscriber list) Hashtbl.t = Hashtbl.create 16
 let next_subscriber_id = ref 0
+
+(* Open stream tracking so that live chunks carry the same task_id as the
+   execution that produced them. *)
+type open_stream_state = { task_id : string option }
+let open_streams : (string, open_stream_state) Hashtbl.t = Hashtbl.create 16
 
 let normalize_keeper keeper_name =
   keeper_name |> String.trim |> String.lowercase_ascii
@@ -167,7 +177,7 @@ let broadcast_events subscribers events =
          subscribers)
     events
 
-let append_completed ~keeper_name (entry : entry) =
+let append_completed ?(emit_events = true) ~keeper_name (entry : entry) =
   let keeper = normalize_keeper keeper_name in
   if keeper = ""
   then ()
@@ -176,33 +186,101 @@ let append_completed ~keeper_name (entry : entry) =
     let current_subscribers =
       with_lock (fun () -> append_completed_locked ~keeper entry lines)
     in
-    let events =
-      List.map
-        (fun line ->
-           Line_event { keeper; task_id = entry.task_id; line; generated_at = entry.generated_at })
-        lines
-      @ [ Task_closed_event
-            { keeper
-            ; task_id = entry.task_id
-            ; status = entry.status
-            ; generated_at = entry.generated_at
-            }
-        ]
-    in
-    broadcast_events current_subscribers events)
+    if emit_events
+    then (
+      let events =
+        List.map
+          (fun line ->
+             Line_event { keeper; task_id = entry.task_id; line; generated_at = entry.generated_at })
+          lines
+        @ [ Task_closed_event
+              { keeper
+              ; task_id = entry.task_id
+              ; status = entry.status
+              ; generated_at = entry.generated_at
+              }
+          ]
+      in
+      broadcast_events current_subscribers events)
+  )
 
 let record_failure exn =
   Log.Dashboard.warn
     "dashboard execute output collector failed: %s"
     (Printexc.to_string exn)
 
-let record_completed ~keeper_name ~task_id ~stdout ~stderr ~status =
+let record_completed ~keeper_name ~task_id ~stdout ~stderr ~status ?(streamed = false) () =
   let entry =
     { task_id; stdout; stderr; status; generated_at = now_unix () }
   in
-  try append_completed ~keeper_name entry with
+  try append_completed ~emit_events:(not streamed) ~keeper_name entry with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn -> record_failure exn
+
+let record_stream_start ~keeper_name ~task_id =
+  let keeper = normalize_keeper keeper_name in
+  if keeper = ""
+  then ()
+  else (
+    let generated_at = now_unix () in
+    let current_subscribers =
+      with_lock (fun () ->
+        Hashtbl.replace open_streams keeper { task_id };
+        Hashtbl.find_opt subscribers keeper |> Option.value ~default:[])
+    in
+    broadcast_events current_subscribers [ Task_opened_event { keeper; task_id; generated_at } ])
+
+let append_stream_chunk ~keeper_name ~stream chunk =
+  let keeper = normalize_keeper keeper_name in
+  if keeper = "" || String.equal chunk ""
+  then ()
+  else (
+    let generated_at = now_unix () in
+    let ts_ms = ts_ms_of_unix generated_at in
+    let stream_label =
+      match stream with
+      | `Stdout -> "stdout"
+      | `Stderr -> "stderr"
+    in
+    let lines = output_lines_for_chunk ~ts_ms ~stream:stream_label chunk in
+    let task_id, current_subscribers =
+      with_lock (fun () ->
+        let task_id =
+          match Hashtbl.find_opt open_streams keeper with
+          | Some state -> state.task_id
+          | None -> None
+        in
+        let line_q =
+          match Hashtbl.find_opt line_table keeper with
+          | Some q -> q
+          | None ->
+            let q = Queue.create () in
+            Hashtbl.add line_table keeper q;
+            q
+        in
+        List.iter (append_bounded line_q line_ring_cap) lines;
+        task_id, Hashtbl.find_opt subscribers keeper |> Option.value ~default:[])
+    in
+    let events =
+      List.map
+        (fun line -> Line_event { keeper; task_id; line; generated_at })
+        lines
+    in
+    broadcast_events current_subscribers events)
+
+let record_stream_end ~keeper_name ~task_id ~status =
+  let keeper = normalize_keeper keeper_name in
+  if keeper = ""
+  then ()
+  else (
+    let generated_at = now_unix () in
+    let current_subscribers =
+      with_lock (fun () ->
+        Hashtbl.remove open_streams keeper;
+        Hashtbl.find_opt subscribers keeper |> Option.value ~default:[])
+    in
+    broadcast_events current_subscribers
+      [ Task_closed_event { keeper; task_id; status; generated_at } ])
 
 let snapshot_state keeper_name =
   let keeper = normalize_keeper keeper_name in
@@ -310,6 +388,16 @@ let event_json ~keeper_name =
   | None -> no_task_json keeper_name
 
 let stream_event_json = function
+  | Task_opened_event { keeper; task_id; generated_at } ->
+    `Assoc
+      [ "type", `String "task_opened"
+      ; "kind", `String "task_opened"
+      ; "keeper", `String keeper
+      ; "keeper_id", `String keeper
+      ; "task_id", option_json (fun value -> `String value) task_id
+      ; "closed", `Bool false
+      ; "generated_at", `Float generated_at
+      ]
   | Line_event { keeper; task_id; line; generated_at } ->
     `Assoc
       [ "type", `String "line"
@@ -372,6 +460,7 @@ let reset_for_testing () =
     Hashtbl.clear table;
     Hashtbl.clear line_table;
     Hashtbl.clear subscribers;
+    Hashtbl.clear open_streams;
     next_subscriber_id := 0)
 
 let output_lines_for_testing ~keeper_name =
@@ -397,6 +486,22 @@ let inject_for_testing
 
 let () =
   Keeper_keepalive_signal.register_record_execute_output
-    (fun ~keeper_name ~task_id ~stdout ~stderr ~status ->
-       record_completed ~keeper_name ~task_id ~stdout ~stderr ~status)
+    (fun ~keeper_name ~task_id ~stdout ~stderr ~status ~streamed ->
+       record_completed ~streamed ~keeper_name ~task_id ~stdout ~stderr ~status ())
+;;
+
+let () =
+  Keeper_keepalive_signal.register_record_execute_stream_chunk
+    (fun ~keeper_name ~stream chunk ->
+       append_stream_chunk ~keeper_name ~stream chunk)
+;;
+
+let () =
+  Keeper_keepalive_signal.register_record_execute_stream_start
+    (fun ~keeper_name ~task_id -> record_stream_start ~keeper_name ~task_id)
+;;
+
+let () =
+  Keeper_keepalive_signal.register_record_execute_stream_end
+    (fun ~keeper_name ~task_id ~status -> record_stream_end ~keeper_name ~task_id ~status)
 ;;

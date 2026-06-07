@@ -45,14 +45,50 @@ let record_execute_output_callback
      stdout:string ->
      stderr:string ->
      status:Yojson.Safe.t ->
+     streamed:bool ->
      unit)
       ref
   =
   ref
-    (fun ~keeper_name:_ ~task_id:_ ~stdout:_ ~stderr:_ ~status:_ -> ())
+    (fun ~keeper_name:_ ~task_id:_ ~stdout:_ ~stderr:_ ~status:_ ~streamed:_ -> ())
 
 let register_record_execute_output f =
   record_execute_output_callback := f
+;;
+
+let record_execute_stream_chunk_callback
+  : (keeper_name:string ->
+     stream:[ `Stdout | `Stderr ] ->
+     string ->
+     unit)
+      ref
+  =
+  ref (fun ~keeper_name:_ ~stream:_ _chunk -> ())
+
+let register_record_execute_stream_chunk f =
+  record_execute_stream_chunk_callback := f
+;;
+
+let record_execute_stream_start_callback
+  : (keeper_name:string -> task_id:string option -> unit) ref
+  =
+  ref (fun ~keeper_name:_ ~task_id:_ -> ())
+
+let register_record_execute_stream_start f =
+  record_execute_stream_start_callback := f
+;;
+
+let record_execute_stream_end_callback
+  : (keeper_name:string ->
+     task_id:string option ->
+     status:Yojson.Safe.t ->
+     unit)
+      ref
+  =
+  ref (fun ~keeper_name:_ ~task_id:_ ~status:_ -> ())
+
+let register_record_execute_stream_end f =
+  record_execute_stream_end_callback := f
 ;;
 
 (* Skip log throttle removed with manual_reconcile blocker — no more

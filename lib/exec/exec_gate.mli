@@ -41,6 +41,19 @@ val run_argv_with_status_split :
   (Unix.process_status * string * string)
 (** Delegates to [Process_eio.run_argv_with_status_split]. *)
 
+val run_argv_with_status_split_streaming :
+  actor:Agent_id.t ->
+  raw_source:string ->
+  summary:string ->
+  ?timeout_sec:float ->
+  ?env:string array ->
+  ?cwd:string ->
+  on_stdout_chunk:(string -> unit) ->
+  on_stderr_chunk:(string -> unit) ->
+  string list ->
+  (Unix.process_status * string * string)
+(** Delegates to [Process_eio.run_argv_with_status_split_streaming]. *)
+
 val run_argv_with_stdin_and_status :
   actor:Agent_id.t ->
   raw_source:string ->

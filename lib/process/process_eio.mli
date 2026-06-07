@@ -137,6 +137,19 @@ val run_argv_with_status_split :
 (** Like [run_argv_with_status], but returns
     [(status, stdout, stderr)] without combining stderr into stdout. *)
 
+val run_argv_with_status_split_streaming :
+  ?timeout_sec:float ->
+  ?env:string array ->
+  ?cwd:string ->
+  on_stdout_chunk:(string -> unit) ->
+  on_stderr_chunk:(string -> unit) ->
+  string list ->
+  (Unix.process_status * string * string)
+(** Like [run_argv_with_status_split], but invokes [on_stdout_chunk] and
+    [on_stderr_chunk] for every chunk read from the child pipes while the
+    process is still running. The returned strings still contain the full
+    captured output. *)
+
 type pipeline_stage = {
   argv : string list;
   env : string array option;

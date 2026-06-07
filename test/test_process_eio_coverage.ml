@@ -236,6 +236,51 @@ let test_run_argv_with_status_includes_stderr_on_failure () =
   check bool "stderr surfaced in output" true
     (contains output "stderr-only")
 
+let test_run_argv_with_status_split_streaming_invokes_callbacks () =
+  Eio_main.run @@ fun env ->
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let cwd_default = Eio.Stdenv.fs env in
+  Process_eio.init ~cwd_default ~proc_mgr ~clock;
+  let stdout_chunks = ref [] in
+  let stderr_chunks = ref [] in
+  let status, stdout, stderr =
+    Process_eio.run_argv_with_status_split_streaming
+      ~on_stdout_chunk:(fun s -> stdout_chunks := s :: !stdout_chunks)
+      ~on_stderr_chunk:(fun s -> stderr_chunks := s :: !stderr_chunks)
+      [ "/bin/sh"
+      ; "-c"
+      ; "printf 'stdout-chunk\\n'; printf 'stderr-chunk\\n' >&2"
+      ]
+  in
+  let code = match status with Unix.WEXITED c -> c | _ -> 1 in
+  check int "streaming exit code" 0 code;
+  check string "streaming stdout captured" "stdout-chunk\n" stdout;
+  check string "streaming stderr captured" "stderr-chunk\n" stderr;
+  check bool "streaming stdout callback invoked" true (List.length !stdout_chunks > 0);
+  check bool "streaming stderr callback invoked" true (List.length !stderr_chunks > 0)
+
+let test_run_argv_with_status_split_streaming_multiple_chunks () =
+  Eio_main.run @@ fun env ->
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let cwd_default = Eio.Stdenv.fs env in
+  Process_eio.init ~cwd_default ~proc_mgr ~clock;
+  let chunk_count = Atomic.make 0 in
+  let status, stdout, _stderr =
+    Process_eio.run_argv_with_status_split_streaming
+      ~on_stdout_chunk:(fun _ -> Atomic.incr chunk_count)
+      ~on_stderr_chunk:(fun _ -> ())
+      [ "/bin/sh"
+      ; "-c"
+      ; "i=0; while [ $i -lt 500 ]; do printf '%s' 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'; i=$((i+1)); done; printf '\\n'"
+      ]
+  in
+  let code = match status with Unix.WEXITED c -> c | _ -> 1 in
+  check int "multi-chunk exit code" 0 code;
+  check int "multi-chunk stdout length" 25001 (String.length stdout);
+  check bool "multi-chunk received more than one chunk" true (Atomic.get chunk_count > 1)
+
 let test_reset_for_testing_clears_runtime () =
   Eio_main.run @@ fun env ->
   let proc_mgr = Eio.Stdenv.process_mgr env in
@@ -291,6 +336,10 @@ let () =
              test_run_argv_with_status_cwd_override;
            test_case "run_argv_with_status-includes-stderr-on-failure" `Quick
              test_run_argv_with_status_includes_stderr_on_failure;
+           test_case "run_argv_with_status_split_streaming-invokes-callbacks" `Quick
+             test_run_argv_with_status_split_streaming_invokes_callbacks;
+           test_case "run_argv_with_status_split_streaming-multiple-chunks" `Quick
+             test_run_argv_with_status_split_streaming_multiple_chunks;
            test_case "reset_for_testing-clears-runtime" `Quick
              test_reset_for_testing_clears_runtime;
          ] );

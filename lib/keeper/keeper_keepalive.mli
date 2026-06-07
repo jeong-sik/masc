@@ -233,11 +233,11 @@ val bump_budget_exhaustion_seeded :
   keeper_name:string -> prior_strikes:int -> int
 (** Increment the strike count for [keeper_name] and return the new
     count. If no in-memory count exists, [prior_strikes] is used as
-    the non-negative starting point. Thread-safe under [Eio.Mutex]. *)
+    the non-negative starting point. Thread-safe under [Stdlib.Mutex]. *)
 
 val bump_budget_exhaustion : keeper_name:string -> int
 (** Increment the strike count for [keeper_name] and return the new
-    count from the in-memory counter only. Thread-safe under [Eio.Mutex]. *)
+    count from the in-memory counter only. Thread-safe under [Stdlib.Mutex]. *)
 
 val reset_budget_exhaustion : keeper_name:string -> unit
 (** Drop any strike count for [keeper_name].  Idempotent. *)

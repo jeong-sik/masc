@@ -21,8 +21,6 @@ include
     with type provider_rejection = Keeper_internal_error.provider_rejection
      and type capacity_backpressure_source =
       Keeper_internal_error.capacity_backpressure_source
-     and type retry_admission_denial =
-      Keeper_internal_error.retry_admission_denial
      and type capacity_retry_after = Keeper_internal_error.capacity_retry_after
      and type runtime_exhaustion_reason =
       Keeper_internal_error.runtime_exhaustion_reason

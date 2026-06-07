@@ -270,91 +270,29 @@ let run (ctx : ctx)
           ~attempt
           ~attempted_runtimes
       in
-      match
+      let provider_timeout_budget =
         resolve_bounded_provider_timeout_budget_with_turn_budget
           ~allow_wall_clock_retry_budget
           ~is_retry
           ~max_turns
           ~estimated_input_tokens:prompt_timeout_estimate_tokens
           ~remaining_turn_budget_s:(remaining_turn_budget_s ())
-      with
-      | None ->
-        let remaining_turn_budget_sec =
-          remaining_turn_budget_s ()
-        in
-        let attempt_kind =
-          if is_retry
-          then Keeper_turn_runtime_budget.Retry_attempt
-          else Keeper_turn_runtime_budget.First_attempt
-        in
-        (match
-           Keeper_turn_runtime_budget.decide_retry_admission_for_turn
-             ~remaining_turn_budget_s:remaining_turn_budget_sec
-             ~attempt_kind
-             ~allow_wall_clock_retry_budget
-             ~estimated_input_tokens:prompt_timeout_estimate_tokens
-             ~max_turns
-         with
-        | Error (denial : Keeper_internal_error.retry_admission_denial) ->
-          let denial_reason : Keeper_turn_driver.retry_admission_denial =
-            match denial with
-            | Keeper_internal_error.Retry_budget_below_min
-                { projected_usable_budget_s
-                ; min_required_s
-                ; remaining_turn_budget_s
-                ; adaptive_timeout_s
-                ; allow_wall_clock_retry_budget
-                } ->
-              Keeper_turn_driver.Retry_budget_below_min
-                { projected_usable_budget_s
-                ; min_required_s
-                ; remaining_turn_budget_s
-                ; adaptive_timeout_s
-                ; allow_wall_clock_retry_budget
-                }
-            | Keeper_internal_error.First_attempt_budget_below_min
-                { projected_usable_budget_s
-                ; min_required_s
-                ; remaining_turn_budget_s
-                } ->
-              Keeper_turn_driver.First_attempt_budget_below_min
-                { projected_usable_budget_s
-                ; min_required_s
-                ; remaining_turn_budget_s
-                }
-          in
-          Error
-            (Keeper_turn_driver.sdk_error_of_masc_internal_error
-               (Keeper_turn_driver.Retry_admission_denied
-                  {
-                    denial_reason;
-                    is_retry;
-                  }))
-        | Ok () ->
-          Error
-            (Keeper_turn_driver.sdk_error_of_masc_internal_error
-               (Keeper_turn_driver.Turn_timeout
-                  {
-                    elapsed_sec =
-                      Float.max 0.0
-                        (timeout_sec -. remaining_turn_budget_sec);
-                  })))
-      | Some provider_timeout_budget ->
-        attempt_provider_timeout_budget := Some provider_timeout_budget;
-        last_provider_timeout_budget := Some provider_timeout_budget;
-        let attempt_watchdog_s =
-          attempt_watchdog_timeout_sec_opt
-            ~liveness_mode:(Keeper_attempt_liveness_config.current_mode ())
-            ~remaining_turn_budget_s:(remaining_turn_budget_s ())
-            provider_timeout_budget
-        in
-        do_run
-          ~execution
-          ~run_meta
-          ~run_generation
-          ~is_retry
-          ~oas_timeout_s:provider_timeout_budget.effective_timeout_sec
-          ~attempt_watchdog_s
+      in
+      attempt_provider_timeout_budget := Some provider_timeout_budget;
+      last_provider_timeout_budget := Some provider_timeout_budget;
+      let attempt_watchdog_s =
+        attempt_watchdog_timeout_sec_opt
+          ~liveness_mode:(Keeper_attempt_liveness_config.current_mode ())
+          ~remaining_turn_budget_s:(remaining_turn_budget_s ())
+          provider_timeout_budget
+      in
+      do_run
+        ~execution
+        ~run_meta
+        ~run_generation
+        ~is_retry
+        ~oas_timeout_s:provider_timeout_budget.effective_timeout_sec
+        ~attempt_watchdog_s
     in
     match attempt_result with
     | Ok result ->
@@ -566,31 +504,6 @@ let run (ctx : ctx)
                ; attempted_runtimes =
                    next_execution_runtime_id :: attempted_runtimes
                })
-        | Degraded_retry_budget_exhausted degraded_retry ->
-          let productive_phase_elapsed_ms, retry_phase_elapsed_ms =
-            current_turn_phase_elapsed_ms ()
-          in
-          record_runtime_rotation_attempt
-            ~productive_phase_elapsed_ms
-            ?retry_phase_elapsed_ms
-            ~from_runtime:execution.runtime_id
-            ~retry:degraded_retry
-            ~outcome:
-              Keeper_execution_receipt.Rotation_budget_exhausted
-            err;
-          Log.Keeper.warn
-            "%s: recoverable runtime failure in %s suggested \
-             degraded retry to %s (reason=%s), but retry provider \
-             timeout admission was unavailable; \
-             ending this cycle: %s"
-            meta.name
-            execution_runtime_id
-            degraded_retry.next_runtime
-            (EC.degraded_retry_reason_to_string
-               degraded_retry.fallback_reason)
-            (short_preview (Agent_sdk.Error.to_string err));
-          mark_terminal_error err;
-          Error err
         | Degraded_retry_slot_phase_exhausted degraded_retry ->
           let productive_phase_elapsed_ms, retry_phase_elapsed_ms =
             current_turn_phase_elapsed_ms ()

@@ -65,7 +65,6 @@
   test_pool
   test_keeper_turn_disposition
   test_keeper_turn_terminal_disposition_field
-  test_d7_retry_admission_gate
   test_keeper_reconcile_state
   test_attempt_state
   test_actor_mailbox
@@ -319,7 +318,6 @@
   test_pool
   test_keeper_turn_disposition
   test_keeper_turn_terminal_disposition_field
-  test_d7_retry_admission_gate
   test_keeper_reconcile_state
   test_attempt_state
   test_actor_mailbox

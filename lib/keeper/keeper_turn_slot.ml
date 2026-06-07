@@ -517,11 +517,14 @@ let classify_provider_timeout_strike ~strikes =
   else Provider_timeout_warn
 ;;
 
-let budget_exhaustions_mutex = Eio.Mutex.create ()
+let budget_exhaustions_mutex = Stdlib.Mutex.create ()
 let budget_exhaustions : (string, int) Hashtbl.t = Hashtbl.create 16
 
 let update_budget_exhaustions f =
-  Eio.Mutex.use_rw ~protect:true budget_exhaustions_mutex f
+  Stdlib.Mutex.lock budget_exhaustions_mutex;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock budget_exhaustions_mutex)
+    f
 ;;
 
 let bump_budget_exhaustion_seeded ~keeper_name ~prior_strikes =
@@ -543,8 +546,9 @@ let reset_budget_exhaustion ~keeper_name =
 ;;
 
 let peek_budget_exhaustion_for_test ~keeper_name =
-  (* DET-OK: budget_exhaustions is advisory; absence = 0 strikes (no exhaustion recorded) *)
-  Option.value ~default:0 (Hashtbl.find_opt budget_exhaustions keeper_name)
+  update_budget_exhaustions (fun () ->
+    (* DET-OK: budget_exhaustions is advisory; absence = 0 strikes (no exhaustion recorded) *)
+    Option.value ~default:0 (Hashtbl.find_opt budget_exhaustions keeper_name))
 ;;
 
 let set_budget_exhaustion_for_test ~keeper_name ~strikes =

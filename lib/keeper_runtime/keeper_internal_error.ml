@@ -40,44 +40,6 @@ let capacity_backpressure_source_of_string = function
   | "runtime_slot" -> Some Runtime_slot
   | _ -> None
 
-(* RFC-0158: typed denial reason carried by {!Retry_admission_denied}. *)
-type retry_admission_denial =
-  | Retry_budget_below_min of {
-      projected_usable_budget_s : float;
-      min_required_s : float;
-      remaining_turn_budget_s : float;
-      adaptive_timeout_s : float;
-      allow_wall_clock_retry_budget : bool;
-    }
-  | First_attempt_budget_below_min of {
-      projected_usable_budget_s : float;
-      min_required_s : float;
-      remaining_turn_budget_s : float;
-    }
-
-let retry_admission_denial_to_yojson = function
-  | Retry_budget_below_min
-      { projected_usable_budget_s; min_required_s; remaining_turn_budget_s;
-        adaptive_timeout_s; allow_wall_clock_retry_budget } ->
-    `Assoc
-      [
-        ("kind", `String "retry_budget_below_min");
-        ("projected_usable_budget_s", `Float projected_usable_budget_s);
-        ("min_required_s", `Float min_required_s);
-        ("remaining_turn_budget_s", `Float remaining_turn_budget_s);
-        ("adaptive_timeout_s", `Float adaptive_timeout_s);
-        ("allow_wall_clock_retry_budget", `Bool allow_wall_clock_retry_budget);
-      ]
-  | First_attempt_budget_below_min
-      { projected_usable_budget_s; min_required_s; remaining_turn_budget_s } ->
-    `Assoc
-      [
-        ("kind", `String "first_attempt_budget_below_min");
-        ("projected_usable_budget_s", `Float projected_usable_budget_s);
-        ("min_required_s", `Float min_required_s);
-        ("remaining_turn_budget_s", `Float remaining_turn_budget_s);
-      ]
-
 (** Provenance-preserving retry-after hint for capacity backpressure.
     [Synthetic_default] is kept distinct from [Explicit] at the type level so a
     fabricated default can never be laundered into the explicit path (audit
@@ -191,10 +153,6 @@ type masc_internal_error =
       is_timeout : bool;
       tools : string list;
       original_error : string;
-    }
-  | Retry_admission_denied of {
-      denial_reason : retry_admission_denial;
-      is_retry : bool;
     }
   | Internal_unhandled_exception of {
       site : string;
@@ -357,13 +315,6 @@ let masc_internal_error_to_json = function
         ("tools", Json_util.json_string_list tools);
         ("original_error", `String original_error);
       ]
-  | Retry_admission_denied { denial_reason; is_retry } ->
-    `Assoc
-      [
-        ("kind", `String "retry_admission_denied");
-        ("denial_reason", retry_admission_denial_to_yojson denial_reason);
-        ("is_retry", `Bool is_retry);
-      ]
   | Internal_unhandled_exception { site; exn_repr } ->
     `Assoc
       [
@@ -435,13 +386,6 @@ let summary_of_masc_internal_error = function
          requested_max_tokens
          provider_ceiling
          reason)
-  | Retry_admission_denied { denial_reason; is_retry } ->
-      Some
-        (Printf.sprintf
-           "Pre-dispatch admission denied; is_retry=%b; reason=%s"
-           is_retry
-           (retry_admission_denial_to_yojson denial_reason
-            |> Yojson.Safe.to_string))
   | Runtime_exhausted _
   | Resumable_cli_session _
   | Accept_rejected _
@@ -464,7 +408,6 @@ let kind_of_masc_internal_error = function
   | Provider_timeout _ -> "provider_timeout"
   | Max_tokens_ceiling_violation _ -> "max_tokens_ceiling_violation"
   | Ambiguous_post_commit _ -> "ambiguous_post_commit"
-  | Retry_admission_denied _ -> "retry_admission_denied"
   | Internal_unhandled_exception _ -> "internal_unhandled_exception"
   | Internal_bridge_exception _ -> "internal_bridge_exception"
   | Internal_contract_rejected _ -> "internal_contract_rejected"
@@ -482,7 +425,6 @@ let runtime_id_of_masc_internal_error = function
   | Admission_queue_rejected _
   | Turn_timeout _
   | Provider_timeout _
-  | Retry_admission_denied _
   | Ambiguous_post_commit _
   | Internal_unhandled_exception _
   | Internal_bridge_exception _

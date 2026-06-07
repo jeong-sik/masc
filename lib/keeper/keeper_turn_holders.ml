@@ -279,14 +279,10 @@ let release_recorded_holder ~keeper_name ~label ~acquisition_id =
   match acquisition_id with
   | None -> false
   | Some id ->
-    let key = { holder_label = label; holder_keeper_name = keeper_name; holder_acquisition_id = id } in
     let was_force_released = ref false in
     (try
        let wfr = consume_force_release ~label ~keeper_name ~acquisition_id:id in
-       was_force_released := wfr;
-       if not wfr then
-         Atomic.set holder_table_atomic
-           (Holder_map.remove key (Atomic.get holder_table_atomic))
+       was_force_released := wfr
      with
      | Eio.Cancel.Cancelled _ ->
        observe_bookkeeping_failure ~op:"drop_holder" ~kind:Keeper_bookkeeping_failure_kind.Cancelled;

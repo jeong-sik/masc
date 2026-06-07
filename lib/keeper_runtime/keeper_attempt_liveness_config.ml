@@ -187,7 +187,7 @@ let budget_of_samples samples =
   | Some ttft_ms, Some inter_ms, Some wall_ms ->
     let ttft_max =
       tuned_seconds
-        ~floor:30.0
+        ~floor:60.0
         ~ceiling:900.0
         ~multiplier:1.5
         ~add:5.0

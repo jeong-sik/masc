@@ -18,7 +18,7 @@ type budget = {
    are tuned from successful TTFT/inter-chunk/wall samples in
    [Keeper_attempt_liveness_config]. *)
 let bootstrap : budget =
-  { ttft_max = 600.0; inter_chunk_max = 120.0; attempt_wall_max = 1800.0 }
+  { ttft_max = 1200.0; inter_chunk_max = 120.0; attempt_wall_max = 1800.0 }
 
 module Stream_chunk = struct
   type kind =

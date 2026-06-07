@@ -299,11 +299,13 @@ let run_try_provider
   | Error err -> Error err, None, None
   | Ok config ->
     let liveness_mode = Keeper_attempt_liveness_config.current_mode () in
-    (* MASC stores one neutral runtime-lane budget; concrete provider/model
-       identities remain on the OAS side.  Otel_metric_store receives only the public,
-       bounded provider bucket for TTFT/inter-chunk grouping. *)
-    let candidate_key = Keeper_attempt_liveness_config.runtime_candidate_key in
+    (* Per-provider candidate key for liveness budget isolation. Each provider
+       (ollama_cloud, openai_compat, anthropic, etc.) maintains its own success
+       history and tuned budget. Previously all providers shared one key
+       "runtime", causing cross-provider budget contamination — see
+       keeper_attempt_liveness_config.ml normalize_candidate_key comment. *)
     let provider_label = Runtime_candidate.provider_label candidate in
+    let candidate_key = provider_label in
     let liveness_observer_opt =
       match liveness_mode with
       | Keeper_attempt_liveness_config.Off ->

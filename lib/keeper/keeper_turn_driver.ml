@@ -124,7 +124,9 @@ let run_named
             runtime_id))
   | Some runtime ->
   let candidate =
-    Runtime_candidate.of_provider_config runtime.Runtime.provider_config
+    Runtime_candidate.of_provider_config
+      ~max_concurrent:runtime.Runtime.binding.max_concurrent
+      runtime.Runtime.provider_config
   in
   let name = Printf.sprintf "oas-%s" runtime_id in
   let transport_resolved =

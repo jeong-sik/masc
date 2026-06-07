@@ -10,31 +10,40 @@
     to {!Runtime_agent} / {!Runtime_provider_binding}; error decoration is
     collapsed to identity. *)
 
-type t = Llm_provider.Provider_config.t
+type t =
+  { config : Llm_provider.Provider_config.t
+  ; max_concurrent : int
+  }
 
 module Runtime_binding = Agent_sdk.Provider_runtime_binding
 
-let of_provider_config (cfg : Llm_provider.Provider_config.t) : t = cfg
-let of_provider_configs (cfgs : Llm_provider.Provider_config.t list) : t list = cfgs
-let provider_cfg (t : t) : Llm_provider.Provider_config.t = t
+let of_provider_config ~(max_concurrent : int) (cfg : Llm_provider.Provider_config.t) : t =
+  { config = cfg; max_concurrent }
 
-let provider_label (t : t) = Runtime_provider_binding.provider_label_of_config t
+let of_provider_configs (cfgs : (Llm_provider.Provider_config.t * int) list) : t list =
+  List.map (fun (cfg, max_concurrent) -> { config = cfg; max_concurrent }) cfgs
+
+let provider_cfg (t : t) : Llm_provider.Provider_config.t = t.config
+let max_concurrent (t : t) : int = t.max_concurrent
+
+let provider_label (t : t) =
+  Runtime_provider_binding.provider_label_of_config t.config
 
 (* Provider-scoped health key retained for provider_attempt's single-provider
    health recording. No multi-candidate selection consumes these. *)
-let health_key (t : t) = Runtime_provider_binding.provider_health_key_of_config t
-let model_health_key (t : t) = Runtime_provider_binding.provider_health_key_of_config t
-let health_keys (t : t) = [ Runtime_provider_binding.provider_health_key_of_config t ]
+let health_key (t : t) = Runtime_provider_binding.provider_health_key_of_config t.config
+let model_health_key (t : t) = Runtime_provider_binding.provider_health_key_of_config t.config
+let health_keys (t : t) = [ Runtime_provider_binding.provider_health_key_of_config t.config ]
 
 let resolve_tool_lane_for_oas_tools ?agent_name ~tools (t : t) =
-  Runtime_agent.resolve_tool_lane_for_oas_tools ?agent_name ~provider_cfg:t ~tools ()
+  Runtime_agent.resolve_tool_lane_for_oas_tools ?agent_name ~provider_cfg:t.config ~tools ()
 
 let runtime_mcp_policy_for_agent ~agent_name (t : t) runtime_mcp_policy =
-  Runtime_agent.runtime_mcp_policy_for_provider ~provider_cfg:t ~agent_name
+  Runtime_agent.runtime_mcp_policy_for_provider ~provider_cfg:t.config ~agent_name
     runtime_mcp_policy
 
 let default_config ~name ~system_prompt ~tools (t : t) =
-  Runtime_agent.default_config ~name ~provider_cfg:t ~system_prompt ~tools
+  Runtime_agent.default_config ~name ~provider_cfg:t.config ~system_prompt ~tools
 
 (* Error decoration collapsed to identity: the deleted version added provider
    auth-env / not-found hints via the annihilated runtime attempt-fsm helpers. *)
@@ -207,7 +216,7 @@ let register_declared_client_capacity (_ : t) = ()
 
 let runtime_urls candidates =
   candidates
-  |> List.filter_map (fun (cfg : t) -> nonempty_string_opt cfg.base_url)
+  |> List.filter_map (fun (t : t) -> nonempty_string_opt t.config.base_url)
   |> List.sort_uniq String.compare
 
 let local_runtime_urls candidates = runtime_urls candidates

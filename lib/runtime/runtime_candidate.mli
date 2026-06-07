@@ -10,8 +10,11 @@ type attempt_timeout_resolution =
   ; source : string
   }
 
-val of_provider_config : Llm_provider.Provider_config.t -> t
-val of_provider_configs : Llm_provider.Provider_config.t list -> t list
+val of_provider_config : max_concurrent:int -> Llm_provider.Provider_config.t -> t
+val of_provider_configs : (Llm_provider.Provider_config.t * int) list -> t list
+
+val max_concurrent : t -> int
+val provider_cfg : t -> Llm_provider.Provider_config.t
 
 val runtime_url_of_label : string -> string option
 val label_matches_runtime_id : label:string -> runtime_id:string -> bool

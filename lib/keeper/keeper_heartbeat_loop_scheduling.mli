@@ -6,8 +6,6 @@ type keepalive_scheduling_decision = {
   runtime_backpressure : Keeper_heartbeat_loop_observations.runtime_backpressure_decision;
   should_run_turn : bool;
   verdict_reasons : string list;
-  admission_reasons : string list;
-  skip_reasons : string list;
   channel : string;
 }
 

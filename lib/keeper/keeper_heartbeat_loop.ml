@@ -74,8 +74,6 @@ type keepalive_scheduling_decision = Keeper_heartbeat_loop_scheduling.keepalive_
   runtime_backpressure : runtime_backpressure_decision;
   should_run_turn : bool;
   verdict_reasons : string list;
-  admission_reasons : string list;
-  skip_reasons : string list;
   channel : string;
 }
 
@@ -182,7 +180,6 @@ let run_keepalive_unified_turn
         | None -> "-"
       in
       let verdict_strs = scheduling.verdict_reasons in
-      let admission_reason_strs = scheduling.admission_reasons in
       let channel_str = scheduling.channel in
       if not should_run_turn
       then (
@@ -201,7 +198,7 @@ let run_keepalive_unified_turn
              Otel_metric_store.inc_counter proactive_skip_reason_metric
                ~labels:[ "keeper", meta_after_triage.name; "reason", reason_str ]
                ())
-          admission_reason_strs;
+          verdict_strs;
         (* #10940 follow-up — Otel_metric_store counters aggregate skip reasons
            across time, but operators need recent skip verdict context
            when diagnosing idle/quiet keepers. Stamping the registry on
@@ -211,7 +208,7 @@ let run_keepalive_unified_turn
            Keeper_registry.record_skip_reasons
              ~base_path:ctx.config.base_path
              meta_after_triage.name
-             ~reasons:admission_reason_strs
+             ~reasons:verdict_strs
          | Runtime_backpressured { runtime_id; reason } ->
            record_runtime_backpressure_observation
              ~base_path:ctx.config.base_path

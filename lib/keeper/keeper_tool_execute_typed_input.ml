@@ -49,10 +49,6 @@ type validation_error =
       fd : int;
       path : string;
     }
-  | Wrapper_target_unsafe of {
-      wrapper : string;
-      target : string;
-    }
   | Cwd_not_absolute of string
   | Pipeline_empty
   | Pipeline_too_short
@@ -391,32 +387,6 @@ let check_env env =
   loop env
 ;;
 
-let shell_capable_wrapper_target target =
-  List.mem
-    (target |> Filename.basename |> String.lowercase_ascii)
-    [ "bash"; "sh"; "zsh"; "fish"; "python"; "python3"; "node"; "pip"; "npx" ]
-;;
-
-let check_wrapper_target ~wrapper ~target =
-  if shell_capable_wrapper_target target
-  then Error (Wrapper_target_unsafe { wrapper; target })
-  else Ok ()
-;;
-
-let check_transparent_wrapper_targets ~executable ~argv =
-  let trimmed = executable |> String.trim |> Filename.basename |> String.lowercase_ascii in
-  match trimmed with
-  | "env" -> (
-    match Exec_policy_command_syntax.command_after_env_prefix argv with
-    | Some target -> check_wrapper_target ~wrapper:"env" ~target
-    | None -> Ok ())
-  | "opam" -> (
-    match Exec_policy_command_syntax.opam_exec_command_name argv with
-    | Some "opam" | None -> Ok ()
-    | Some target -> check_wrapper_target ~wrapper:"opam exec" ~target)
-  | _ -> Ok ()
-;;
-
 let check_exec ~executable ~argv ~cwd ~env =
   let ( let* ) = Result.bind in
   let trimmed = String.trim executable in
@@ -430,7 +400,6 @@ let check_exec ~executable ~argv ~cwd ~env =
     let* () =
       if argv = [] then Ok () else check_argv ~executable argv
     in
-    let* () = check_transparent_wrapper_targets ~executable:trimmed ~argv in
     let* () = check_cwd cwd in
     let* () = check_env env in
     Ok ())
@@ -620,14 +589,6 @@ let pp_validation_error ppf = function
        paths must be absolute (e.g. \"/tmp/out.log\")"
       label
       path
-  | Wrapper_target_unsafe { wrapper; target } ->
-    Format.fprintf
-      ppf
-      "transparent wrapper %S targets shell-capable executable %S; typed \
-       Execute must call a concrete safe executable directly instead of \
-       smuggling it through env/opam"
-      wrapper
-      target
   | Cwd_not_absolute path ->
     Format.fprintf ppf "cwd %S is not absolute" path
   | Pipeline_empty -> Format.pp_print_string ppf "Pipeline.stages is empty"
@@ -642,6 +603,5 @@ let validation_error_alternatives : validation_error -> string list = function
   | Argv_contains_shell_pipeline_operator _ -> [ "Pipeline" ]
   | Argv_contains_shell_redirection _ ->
     [ "discard_stderr"; "discard_stdout"; "Pipeline" ]
-  | Wrapper_target_unsafe _ -> [ "Use a direct typed executable/argv form" ]
   | _ -> []
 ;;

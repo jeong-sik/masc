@@ -17,7 +17,4 @@ val with_turn_capacity :
   (capacity_wait_ms:int -> 'a) ->
   ('a, rejection) result
 
-val force_release_for_keeper : keeper_name:string -> int
-
 val inflight_for_test : unit -> int
-val reset_for_test : unit -> unit

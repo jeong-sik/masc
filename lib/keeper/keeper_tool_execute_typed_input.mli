@@ -115,13 +115,6 @@ type validation_error =
       (** RFC-0198 Phase B.  A {!File} redirect target must be an
           absolute filesystem path; relative paths are rejected to
           mirror {!Cwd_not_absolute} semantics. *)
-  | Wrapper_target_unsafe of {
-      wrapper : string;
-      target : string;
-    }
-      (** A transparent wrapper such as [env -S] or [opam exec --] targets a
-          shell-capable executable.  The wrapper itself may look read-shaped,
-          but the target owns the actual execution semantics. *)
   | Cwd_not_absolute of string
   | Pipeline_empty
   | Pipeline_too_short

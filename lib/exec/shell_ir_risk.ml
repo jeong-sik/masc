@@ -96,66 +96,28 @@ let is_env_assignment arg =
 ;;
 
 let rec strip_env_prefix words =
-  let split_env_s_words text =
-    text
-    |> String.split_on_char ' '
-    |> List.concat_map (String.split_on_char '\t')
-    |> List.filter (fun token -> token <> "")
-  in
   let rec strip_env_args = function
     | [] -> []
     | "--" :: rest -> rest
     | ("-i" | "--ignore-environment" | "--null" | "-0") :: rest ->
       strip_env_args rest
-    | ("-S" | "--split-string") :: arg :: rest ->
-      (match strip_env_args (split_env_s_words arg) with
-       | [] -> strip_env_args rest
-       | command -> command)
-    | arg :: rest when String.starts_with ~prefix:"--split-string=" arg ->
-      let prefix = "--split-string=" in
-      let value =
-        String.sub arg (String.length prefix) (String.length arg - String.length prefix)
-      in
-      (match strip_env_args (split_env_s_words value) with
-       | [] -> strip_env_args rest
-       | command -> command)
     | ("-u" | "--unset") :: _ :: rest -> strip_env_args rest
     | arg :: rest
       when String.starts_with ~prefix:"--unset=" arg
            || String.starts_with ~prefix:"-u" arg
            || is_env_assignment arg ->
       strip_env_args rest
+    (* env -S/--split-string splits a string into arguments and executes
+       the resulting command — arbitrary command execution. Cannot safely
+       extract and classify the embedded command string at the word level.
+       Return a sentinel that triggers Destructive_protected escalation
+       via shell_interpreter_names. *)
+    | ("-S" | "--split-string") :: _ -> ["bash"]
     | rest -> rest
   in
   match words with
   | "env" :: rest -> strip_env_prefix (strip_env_args rest)
   | _ -> words
-;;
-
-let rec strip_opam_exec_prefix = function
-  | "opam" :: rest -> (
-    match rest with
-    | "exec" :: rest ->
-      let rec find_command = function
-        | [] -> []
-        | "--" :: rest -> rest
-        | token :: rest when is_env_assignment token -> find_command rest
-        | ("--switch" | "--color" | "--root" | "--cli") :: _ :: rest ->
-          find_command rest
-        | token :: rest
-          when String.starts_with ~prefix:"--switch=" token
-               || String.starts_with ~prefix:"--color=" token
-               || String.starts_with ~prefix:"--root=" token
-               || String.starts_with ~prefix:"--cli=" token
-               || String.starts_with ~prefix:"-" token ->
-          find_command rest
-        | command -> command
-      in
-      (match find_command rest with
-       | [] -> [ "opam"; "exec" ]
-       | command -> strip_opam_exec_prefix command)
-    | _ -> "opam" :: rest)
-  | words -> words
 ;;
 
 let rec skip_git_global_options = function
@@ -201,7 +163,7 @@ let rec skip_gh_global_options = function
 ;;
 
 let normalize_command_words words =
-  match words |> strip_env_prefix |> strip_opam_exec_prefix |> strip_env_prefix with
+  match strip_env_prefix words with
   | "git" :: rest -> "git" :: skip_git_global_options rest
   | "gh" :: rest -> "gh" :: skip_gh_global_options rest
   | words -> words
@@ -826,7 +788,9 @@ let risk_of_typed (w : Shell_ir_typed.wrapped) : risk_class =
   | W (Patch _) -> R0_Read
   | W (Cargo _) -> R0_Read
   | W (Go _) -> R0_Read
-  | W (Opam _) -> R0_Read
+  | W (Opam { subcommand; _ }) ->
+    if String.equal subcommand "exec" then Destructive_protected
+    else R0_Read
   | W (Uv _) -> R0_Read
   | W (Glab _) -> R0_Read
   | W (Pytest _) -> R0_Read

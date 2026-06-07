@@ -201,14 +201,6 @@ let sweep_and_recover (ctx : _ context) =
         ; ("site", Keeper_supervisor_cleanup_failure_site.(to_label Force_watchdog_crash))
         ]
       ();
-    let released_capacity =
-      Keeper_turn_capacity.force_release_for_keeper ~keeper_name:entry.name
-    in
-    if released_capacity > 0 then
-      Log.Keeper.error
-        "%s: force-released stale turn capacity after watchdog crash: capacity=%d"
-        entry.name
-        released_capacity;
     (match
        Keeper_registry.resolve_done
          entry

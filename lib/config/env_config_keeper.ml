@@ -364,7 +364,7 @@ module KeeperKeepalive = struct
 
   (** Global concurrent keeper turn capacity. This is a machine-level admission
       cap, not a per-keeper slot. Default 32 preserves the old
-      [Keeper_turn_slot] semaphore throttle (MASC_KEEPER_AUTOBOT_MAX default).
+      [Keeper_turn_slot] semaphore throttle (MASC_KEEPER_AUTOBOOT_MAX default).
       @category Concurrency
       @ops_class operator
 

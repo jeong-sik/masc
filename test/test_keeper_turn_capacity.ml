@@ -20,6 +20,12 @@ let with_capacity_limit value f =
 
 let run_eio f = Eio_main.run (fun _env -> f ())
 
+let test_default_capacity_preserves_fleet_gate () =
+  Masc.Keeper_config.ensure_runtime_params_init ();
+  clear_capacity_limit ();
+  check int "default capacity limit" 32 (Masc.Keeper_config.keeper_turn_capacity_limit ())
+;;
+
 let test_global_capacity_blocks_nested_turn () =
   run_eio (fun () ->
     with_capacity_limit 1 (fun () ->
@@ -80,7 +86,8 @@ let () =
   run
     "keeper_turn_capacity"
     [ ( "global gate"
-      , [ test_case "blocks nested turn at cap" `Quick test_global_capacity_blocks_nested_turn
+      , [ test_case "default capacity is enabled" `Quick test_default_capacity_preserves_fleet_gate
+        ; test_case "blocks nested turn at cap" `Quick test_global_capacity_blocks_nested_turn
         ; test_case "disabled gate allows nested turn" `Quick test_disabled_capacity_allows_nested_turn
         ] )
     ]

@@ -583,13 +583,15 @@ let wait_ms_since started_at =
 ;;
 
 let semaphore_wait_timeout_snapshot ?(holders = []) () =
-  let snapshot = snapshot ~limit:effective_turn_throttle_limit () in
+  let global_inflight = Atomic.get global_inflight_atomic in
+  let available = max 0 (effective_turn_throttle_limit - global_inflight) in
+  let queue_depth = with_lock (fun () -> List.length state.waiters) in
   { Keeper_turn_slot_types.timeout_wait_sec = semaphore_wait_timeout_sec
   ; timeout_phase = Keeper_turn_slot_types.Turn_slot
-  ; timeout_autonomous_available = snapshot.available
-  ; timeout_reactive_available = snapshot.available
-  ; timeout_turn_available = snapshot.available
-  ; timeout_queue_depth = snapshot.queue_depth
+  ; timeout_autonomous_available = available
+  ; timeout_reactive_available = available
+  ; timeout_turn_available = available
+  ; timeout_queue_depth = queue_depth
   ; timeout_queue_ahead = None
   ; timeout_holders = holders
   }

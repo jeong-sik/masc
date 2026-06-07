@@ -792,17 +792,6 @@ type 'a verified_ir = 'a Typed_capabilities.verified_ir
 let verify_static_safe_ir ir =
   let ( let* ) = Result.bind in
   let* () = validate_command ir in
-  let* () =
-    let rec loop = function
-      | [] -> Ok ()
-      | command :: rest ->
-        (match Masc_exec.Exec_program.of_string command with
-         | Ok bin when Masc_exec.Exec_program.risk_class bin = `Safe -> loop rest
-         | Ok bin -> Error (Command_not_allowed (Masc_exec.Exec_program.to_string bin))
-         | Error (`Unknown name) -> Error (Command_not_allowed name))
-    in
-    loop (flat_stage_words ir)
-  in
   let envelope = Masc_exec.Shell_ir_risk.(classify (undecided ir)) in
   if Masc_exec.Shell_ir_risk.is_r0 envelope
   then Ok (Typed_capabilities.Safe_IR ir)

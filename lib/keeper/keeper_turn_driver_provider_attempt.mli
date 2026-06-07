@@ -43,8 +43,6 @@ type provider_attempt_started_record =
   ; started_per_provider_timeout_s : float option
   ; started_attempt_timeout_source : string
   ; started_attempt_watchdog_source : string
-  ; started_liveness_mode : string
-  ; started_liveness_budget_source : string option
   }
 
 type provider_attempt_finished_record =

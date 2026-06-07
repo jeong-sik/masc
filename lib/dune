@@ -276,8 +276,6 @@
    ;; Model_inference_metrics facade + decomposition siblings extracted to
    ;; lib/model_inference_metrics/. Parent still references the bare facade.
    masc.model_inference_metrics
-   ;; Keeper_attempt_liveness extracted to lib/keeper_attempt_liveness/.
-   ;; Per-attempt streaming liveness FSM + config + observer glue.
    ;; RFC-0132 PR-1 — Boundary_redaction SSOT for external-surface
    ;; provider/model label redaction. Codemod in PR-2 routes "runtime"
    ;; literals in lib/runtime and lib/keeper through this leaf.

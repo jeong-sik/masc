@@ -17,6 +17,12 @@ let progress_keeper_tool_names_for_contract =
   Contract_helpers.progress_keeper_tool_names_for_contract
 ;;
 
+let observation_timestamp_ms () =
+  (* NDT-OK: wall-clock timestamp for IDE observation telemetry only; keeper
+     control flow does not branch on this value. *)
+  Int64.of_float (Unix.gettimeofday () *. 1000.0)
+;;
+
 let completion_contract_result_for_progress_evidence =
   Turn_helpers.completion_contract_result_for_progress_evidence
 
@@ -122,7 +128,7 @@ let run_turn
     ; tools_used = []
     ; stop_reason = None
     ; duration_ms = None
-    ; timestamp_ms = Int64.of_float (Unix.gettimeofday () *. 1000.0)
+    ; timestamp_ms = observation_timestamp_ms ()
     };
   (* Cancel-safe cleanup (#9747): stdlib [Fun.protect] wraps finally
      exceptions in [Fun.Finally_raised], masking the outer
@@ -145,7 +151,7 @@ let run_turn
         ; tools_used = []
         ; stop_reason = None
         ; duration_ms = Some duration_ms
-        ; timestamp_ms = Int64.of_float (Unix.gettimeofday () *. 1000.0)
+        ; timestamp_ms = observation_timestamp_ms ()
         }
     in
     fun () ->

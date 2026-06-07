@@ -99,7 +99,10 @@ val make_worker_meta :
   worker_container_meta
 (** Builds a fresh {!worker_container_meta} with derived
     [checkpoint_path] / [turn_log_path], [version =
-    {!worker_container_version}], and [last_run_at = None]. *)
+    {!worker_container_version}], no active
+    [mcp_client_session_started_at], and [last_run_at =
+    None].  The bounded client session opens immediately before
+    [Agent.run]. *)
 
 (** {1 Checkpoint persistence} *)
 

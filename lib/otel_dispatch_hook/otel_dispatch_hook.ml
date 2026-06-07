@@ -14,10 +14,17 @@
 
 module OT = Opentelemetry
 
+type transport_context =
+  { network_protocol_name : string option
+  ; network_protocol_version : string option
+  ; network_transport : string option
+  }
+
 type request_context =
   { jsonrpc_request_id : string option
   ; mcp_session_id : string option
   ; mcp_protocol_version : string option
+  ; transport : transport_context option
   }
 
 let request_context_key : request_context Eio.Fiber.key =
@@ -129,6 +136,27 @@ let string_attr key = function
   | Some _ | None -> []
 ;;
 
+let transport_context_attrs = function
+  | None -> []
+  | Some context ->
+    string_attr
+      Otel_genai.Mcp_attr_key.network_protocol_name
+      context.network_protocol_name
+    @ string_attr
+        Otel_genai.Mcp_attr_key.network_protocol_version
+        context.network_protocol_version
+    @ string_attr
+        Otel_genai.Mcp_attr_key.network_transport
+        context.network_transport
+;;
+
+let http_transport_context ~protocol_version =
+  { network_protocol_name = Some "http"
+  ; network_protocol_version = Some protocol_version
+  ; network_transport = Some "tcp"
+  }
+;;
+
 let request_context_attrs () =
   match current_request_context () with
   | None -> []
@@ -140,6 +168,7 @@ let request_context_attrs () =
     @ string_attr
         Otel_genai.Mcp_attr_key.mcp_protocol_version
         context.mcp_protocol_version
+    @ transport_context_attrs context.transport
 ;;
 
 let tool_span_attrs (result : Tool_result.result) =

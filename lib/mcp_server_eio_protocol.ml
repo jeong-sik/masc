@@ -599,13 +599,24 @@ let nonempty_opt = function
   | None -> None
 ;;
 
-let otel_tool_request_context ~id ?mcp_session_id request_json =
+let otel_tool_request_context
+      ~id
+      ?mcp_session_id
+      ?mcp_protocol_version
+      ?otel_transport_context
+      request_json
+  =
   let mcp_protocol_version =
-    Mcp_transport_protocol.protocol_version_from_request_meta_json request_json
+    match
+      Mcp_transport_protocol.protocol_version_from_request_meta_json request_json
+    with
+    | Some value -> Some value
+    | None -> nonempty_opt mcp_protocol_version
   in
   { Otel_dispatch_hook.jsonrpc_request_id = jsonrpc_request_id_attr id
   ; mcp_session_id = nonempty_opt mcp_session_id
   ; mcp_protocol_version
+  ; transport = otel_transport_context
   }
 ;;
 
@@ -638,6 +649,8 @@ let handle_request
       ~sw
       ?(profile = Full)
       ?mcp_session_id
+      ?otel_mcp_protocol_version
+      ?otel_transport_context
       ?auth_token
       ?(internal_keeper_runtime = false)
       state
@@ -738,15 +751,39 @@ let handle_request
                      state
                      id)
               | "tools/call" ->
-                (match req.params with
-                 | Some params ->
-                   (try
-                      let name =
-                        Json_util.get_string params "name" |> Option.value ~default:""
-                      in
-                      (* Issue #8699: exhaustive match on tool_profile.
-                               Catch-all `_ -> Full` would silently elevate any
-                               future restricted profile to full tool access
+                let operation_start_time = Eio.Time.now clock in
+                let otel_context =
+                  otel_tool_request_context
+                    ~id
+                    ?mcp_session_id
+                    ?mcp_protocol_version:otel_mcp_protocol_version
+                    ?otel_transport_context
+                    json
+                in
+                let failed_tool_call_error ?(tool_name = "") code message =
+                  Otel_dispatch_hook.with_request_context
+                    otel_context
+                    (fun () ->
+                       Mcp_server_eio_call_tool
+                       .record_mcp_server_operation_duration_sample
+                         ~tool_name
+                         ~success:false
+                         ~duration_seconds:
+                           (max 0.0 (Eio.Time.now clock -. operation_start_time));
+                       make_error_typed ~id code message)
+	                in
+	                (match req.params with
+	                 | Some params ->
+	                   let params_tool_name () =
+	                     match Json_util.get_string params "name" with
+	                     | Some name -> name
+	                     | None -> ""
+	                   in
+	                   (try
+	                      let name = params_tool_name () in
+	                      (* Issue #8699: exhaustive match on tool_profile.
+	                               Catch-all `_ -> Full` would silently elevate any
+	                               future restricted profile to full tool access
                                (fail-OPEN). Listing every constructor turns a
                                new profile into a compile error so the access
                                decision is reviewed at the boundary. *)
@@ -762,7 +799,11 @@ let handle_request
                              state
                              call_profile
                              name)
-                      then make_error_typed ~id Mcp_error_code.Method_not_found (unavailable_tool_message name)
+                      then
+                        failed_tool_call_error
+                          ~tool_name:name
+                          Mcp_error_code.Method_not_found
+                          (unavailable_tool_message name)
                       else (
                         Log.Mcp.emit
                           Log.Info
@@ -782,9 +823,6 @@ let handle_request
                               | Some s -> s
                               | None -> "none"));
                         let result =
-                          let otel_context =
-                            otel_tool_request_context ~id ?mcp_session_id json
-                          in
                           Otel_dispatch_hook.with_request_context
                             otel_context
                             (fun () ->
@@ -817,10 +855,25 @@ let handle_request
                              name
                              outcome_s);
                         result)
-                    with
-                    | Yojson.Safe.Util.Type_error (_, _) ->
-                      make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params: name must be a string")
-                 | None -> make_error_typed ~id Mcp_error_code.Invalid_params "Missing params")
+	                    with
+	                    | Yojson.Safe.Util.Type_error (_, _) ->
+	                      failed_tool_call_error
+	                        Mcp_error_code.Invalid_params
+	                        "Invalid params: name must be a string"
+	                    | Invalid_argument msg
+		                      when String.starts_with
+		                             ~prefix:"managed agent tool translation failed:"
+		                             msg ->
+		                      let name =
+		                        try params_tool_name () with
+		                        | Yojson.Safe.Util.Type_error (_, _) -> ""
+		                      in
+		                      failed_tool_call_error
+		                        ~tool_name:name
+		                        Mcp_error_code.Invalid_params
+	                        msg)
+	                 | None ->
+	                   failed_tool_call_error Mcp_error_code.Invalid_params "Missing params")
               | method_ when Mcp_sdk_adapter_masc.handles_method method_ ->
                 Mcp_sdk_adapter_masc.dispatch_request
                   ~handle_call_tool_eio

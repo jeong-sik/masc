@@ -131,6 +131,8 @@ let handle_request
       ~sw
       ?(profile = Full)
       ?mcp_session_id
+      ?otel_mcp_protocol_version
+      ?otel_transport_context
       ?auth_token
       ?(internal_keeper_runtime = false)
       state
@@ -167,6 +169,8 @@ let handle_request
     ~sw
     ~profile:(profile : tool_profile :> Mcp_server_eio_types.tool_profile)
     ?mcp_session_id
+    ?otel_mcp_protocol_version
+    ?otel_transport_context
     ?auth_token
     ~internal_keeper_runtime
     state

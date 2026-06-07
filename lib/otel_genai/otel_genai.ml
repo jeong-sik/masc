@@ -114,15 +114,29 @@ end
 module Mcp_attr_key = struct
   let mcp_method_name = "mcp.method.name"
   let jsonrpc_request_id = "jsonrpc.request.id"
+  let jsonrpc_protocol_version = "jsonrpc.protocol.version"
   let mcp_protocol_version = "mcp.protocol.version"
   let mcp_session_id = "mcp.session.id"
+  let network_protocol_name = "network.protocol.name"
+  let network_protocol_version = "network.protocol.version"
+  let network_transport = "network.transport"
   let error_type = "error.type"
+  let rpc_response_status_code = "rpc.response.status_code"
+  let server_address = "server.address"
+  let server_port = "server.port"
   let masc_mcp_tool_failure_class = "masc.mcp.tool.failure_class"
 end
 
 module Mcp_value = struct
   let tools_call_method = "tools/call"
   let tool_error_type = "tool_error"
+end
+
+module Mcp_metric_name = struct
+  let client_operation_duration = "mcp.client.operation.duration"
+  let server_operation_duration = "mcp.server.operation.duration"
+  let client_session_duration = "mcp.client.session.duration"
+  let server_session_duration = "mcp.server.session.duration"
 end
 
 module Event_name = struct

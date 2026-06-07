@@ -27,11 +27,24 @@ val is_valid_protocol_version : string -> bool
     per-session protocol version and tool profile.  All
     accessors below are thread-safe via internal CAS loops. *)
 
-val remember_protocol_version : string -> string -> unit
+val remember_protocol_version :
+  ?otel_transport_context:Otel_dispatch_hook.transport_context ->
+  string -> string -> unit
 (** [remember_protocol_version session_id version] records the
     version when [is_valid_protocol_version version] is [true];
     silently no-ops on unknown versions (the upstream caller is
     expected to have validated first). *)
+
+val remember_protocol_version_if_initialize_succeeded :
+  ?otel_transport_context:Otel_dispatch_hook.transport_context ->
+  string ->
+  request_body:string ->
+  response_json:Yojson.Safe.t ->
+  unit
+(** [remember_protocol_version_if_initialize_succeeded session_id
+    ~request_body ~response_json] records initialize protocol/session
+    activity only when [response_json] is a successful JSON-RPC response.
+    Rejected initialize requests must not start session-duration state. *)
 
 val is_known_session : string -> bool
 (** RFC-0100 PR-3 — Q3 default. [true] iff the server has previously
@@ -42,7 +55,12 @@ val is_known_session : string -> bool
     completion. *)
 
 val remember_mcp_profile :
+  ?otel_transport_context:Otel_dispatch_hook.transport_context ->
   string -> Server_mcp_transport_http_types.tool_profile -> unit
+(** [remember_mcp_profile session_id profile] records the transport
+    profile.  For sessions that have completed initialize, it also
+    refreshes activity/transport telemetry; uninitialized profile-only
+    ids do not start session-duration state. *)
 
 val forget_mcp_session : string -> unit
 (** Removes both the protocol-version and tool-profile entries

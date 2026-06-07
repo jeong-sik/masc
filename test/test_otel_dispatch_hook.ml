@@ -73,6 +73,9 @@ let test_success_span_uses_mcp_tool_call_semconv () =
   check_no_attr Genai.Mcp_attr_key.jsonrpc_request_id span.attrs;
   check_no_attr Genai.Mcp_attr_key.mcp_session_id span.attrs;
   check_no_attr Genai.Mcp_attr_key.mcp_protocol_version span.attrs;
+  check_no_attr Genai.Mcp_attr_key.network_protocol_name span.attrs;
+  check_no_attr Genai.Mcp_attr_key.network_protocol_version span.attrs;
+  check_no_attr Genai.Mcp_attr_key.network_transport span.attrs;
   check_no_attr "otel.status_code" span.attrs
 ;;
 
@@ -88,6 +91,7 @@ let test_request_context_span_records_mcp_server_attrs () =
     { jsonrpc_request_id = Some "42"
     ; mcp_session_id = Some "session-otel"
     ; mcp_protocol_version = Some "2026-07-28"
+    ; transport = Some (Hook.http_transport_context ~protocol_version:"1.1")
     }
   in
   let span =
@@ -111,7 +115,19 @@ let test_request_context_span_records_mcp_server_attrs () =
   Alcotest.(check string)
     "mcp.protocol.version"
     "2026-07-28"
-    (assoc_string Genai.Mcp_attr_key.mcp_protocol_version span.attrs)
+    (assoc_string Genai.Mcp_attr_key.mcp_protocol_version span.attrs);
+  Alcotest.(check string)
+    "network.protocol.name"
+    "http"
+    (assoc_string Genai.Mcp_attr_key.network_protocol_name span.attrs);
+  Alcotest.(check string)
+    "network.protocol.version"
+    "1.1"
+    (assoc_string Genai.Mcp_attr_key.network_protocol_version span.attrs);
+  Alcotest.(check string)
+    "network.transport"
+    "tcp"
+    (assoc_string Genai.Mcp_attr_key.network_transport span.attrs)
 ;;
 
 let test_failure_span_records_typed_error_status () =

@@ -164,6 +164,53 @@ let test_activity_payload_sanitizes_invalid_utf8 () =
   check int "numeric field preserved" 15310
     (payload |> U.member "pr_number" |> U.to_int)
 
+let test_records_mcp_server_operation_duration_metric () =
+  let context =
+    { Otel_dispatch_hook.jsonrpc_request_id = Some "metric-request-otel"
+    ; mcp_session_id = Some "metric-session-otel"
+    ; mcp_protocol_version = Some "2025-06-18"
+    ; transport =
+        Some
+          (Otel_dispatch_hook.http_transport_context ~protocol_version:"2")
+    }
+  in
+  let result : Tool_result.result =
+    Ok
+      { Tool_result.data = `String "ok"
+      ; tool_name = "get-weather"
+      ; duration_ms = 123.0
+      }
+  in
+  let labels =
+    [ Otel_genai.Mcp_attr_key.mcp_method_name
+    , Otel_genai.Mcp_value.tools_call_method
+    ; Otel_genai.Attr_key.gen_ai_operation_name, "execute_tool"
+    ; Otel_genai.Attr_key.gen_ai_tool_name, "get-weather"
+    ; Otel_genai.Mcp_attr_key.mcp_protocol_version, "2025-06-18"
+    ; Otel_genai.Mcp_attr_key.network_protocol_name, "http"
+    ; Otel_genai.Mcp_attr_key.network_protocol_version, "2"
+    ; Otel_genai.Mcp_attr_key.network_transport, "tcp"
+    ]
+  in
+  let metric_name = Otel_genai.Mcp_metric_name.server_operation_duration in
+  let before_value =
+    Masc.Otel_metric_store.metric_value_or_zero metric_name ~labels ()
+  in
+  let before_count =
+    Masc.Otel_metric_store.metric_value_or_zero (metric_name ^ "_count") ~labels ()
+  in
+  Eio_main.run (fun _env ->
+    Otel_dispatch_hook.with_request_context context (fun () ->
+      Masc.Mcp_server_eio_call_tool.For_testing.record_mcp_server_operation_duration
+        result
+        ~duration_ms:250));
+  check (float 0.0001) "duration seconds delta" 0.250
+    (Masc.Otel_metric_store.metric_value_or_zero metric_name ~labels ()
+     -. before_value);
+  check (float 0.0001) "duration count delta" 1.0
+    (Masc.Otel_metric_store.metric_value_or_zero (metric_name ^ "_count") ~labels ()
+     -. before_count)
+
 let test_contains_casefold_keeps_semantics () =
   let contains = Masc.Mcp_server_eio_call_tool.contains_casefold in
   check bool "empty needle" true (contains "anything" "");
@@ -511,6 +558,8 @@ let () =
           test_case "success has no issues" `Quick test_success_quality_has_no_issues;
           test_case "activity payload sanitizes invalid UTF-8" `Quick
             test_activity_payload_sanitizes_invalid_utf8;
+          test_case "records MCP server operation duration metric" `Quick
+            test_records_mcp_server_operation_duration_metric;
           test_case "contains casefold keeps semantics" `Quick
             test_contains_casefold_keeps_semantics;
           test_case "transition has no fixed timeout" `Quick test_transition_has_no_fixed_timeout;

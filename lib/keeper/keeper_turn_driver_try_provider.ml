@@ -305,8 +305,15 @@ let run_try_provider
        on legitimately slow providers. Standard agent SDKs (OpenAI, Anthropic,
        LangChain, Vercel AI) use HTTP-level timeouts only. *)
     (* Per-lane concurrency gate: limits inflight requests per runtime lane
-       using the max-concurrent value from runtime.toml binding config. *)
-    let lane_key = Runtime_candidate.provider_label candidate in
+       using the max-concurrent value from runtime.toml binding config.
+
+       lane_key MUST be binding-specific (ctx.runtime_id, e.g.
+       "ollama_cloud.deepseek-v4-flash") — NOT provider kind / provider_label.
+       Runtime_candidate.provider_label returns the provider kind
+       ("openai_compat") which causes ALL OpenAI-compatible providers to share
+       a single counter, ignoring per-binding max-concurrent in runtime.toml.
+       See: provider lane key collapse bug, 2026-06-08. *)
+    let lane_key = ctx.runtime_id in
     let lane_max_concurrent =
       match Runtime.get_runtime_by_id ctx.runtime_id with
       | Some rt ->

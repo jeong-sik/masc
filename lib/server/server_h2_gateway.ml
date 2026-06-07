@@ -349,12 +349,19 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                     h2_respond_json h2_reqd body ~status:`Bad_request
                       ~extra_headers:(cors @ mcp_headers session_id protocol_version)
                 | Ok () ->
-                    remember_mcp_profile session_id profile;
                     (match auth_result with
                      | Error msg ->
                          let body = json_rpc_error Mcp_error_code.Auth_error msg in
                          h2_respond_json h2_reqd body ~status:`Unauthorized ~extra_headers:(("www-authenticate", "Bearer") :: cors)
                      | Ok _cred_opt ->
+                         let otel_transport_context =
+                           Otel_dispatch_hook.http_transport_context
+                             ~protocol_version:"2"
+                         in
+                         remember_mcp_profile
+                           ~otel_transport_context
+                           session_id
+                           profile;
                          h2_read_body h2_reqd (fun body_str ->
                              match
                                Server_mcp_request_context.decide_post_body
@@ -416,17 +423,26 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                                        ~base_path httpun_request
                                    in
                                    let response_json =
+                                     let otel_transport_context =
+                                       Otel_dispatch_hook.http_transport_context
+                                         ~protocol_version:"2"
+                                     in
                                      Mcp_eio.handle_request ~clock ~sw ~profile
                                        ~mcp_session_id:session_id ?auth_token
+                                       ~otel_mcp_protocol_version:protocol_version
+                                       ~otel_transport_context
                                        ~internal_keeper_runtime state
                                        body_with_agent
                                    in
-                                   (match
-                                      protocol_version_from_body
-                                        post_context.body_str
-                                    with
-                                   | Some v -> remember_protocol_version session_id v
-                                   | None -> ());
+                                   let otel_transport_context =
+                                     Otel_dispatch_hook.http_transport_context
+                                       ~protocol_version:"2"
+                                   in
+                                   remember_protocol_version_if_initialize_succeeded
+                                     ~otel_transport_context
+                                     session_id
+                                     ~request_body:post_context.body_str
+                                     ~response_json;
                                    let protocol_version =
                                      get_protocol_version_for_session ~session_id
                                        httpun_request

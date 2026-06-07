@@ -118,6 +118,8 @@ val handle_request :
   sw:'sw ->
   ?profile:tool_profile ->
   ?mcp_session_id:string ->
+  ?otel_mcp_protocol_version:string ->
+  ?otel_transport_context:Otel_dispatch_hook.transport_context ->
   ?auth_token:string ->
   ?internal_keeper_runtime:bool ->
   Mcp_server.server_state ->
@@ -125,7 +127,8 @@ val handle_request :
   Yojson.Safe.t
 (** [handle_request ~handle_call_tool_eio
     ~handle_read_resource_eio ~clock ~sw ?profile
-    ?mcp_session_id ?auth_token ?internal_keeper_runtime
+    ?mcp_session_id ?otel_mcp_protocol_version ?otel_transport_context
+    ?auth_token ?internal_keeper_runtime
     state request_str] parses [request_str] as JSON-RPC,
     routes the [method] to the matching internal handler
     (server/discover / initialize / tools/list / tools/call
@@ -197,5 +200,4 @@ val register_dashboard_ack :
    unit ->
    (Yojson.Safe.t, string) result) ->
   unit
-
 

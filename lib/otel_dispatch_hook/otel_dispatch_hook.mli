@@ -15,19 +15,38 @@
 
     @since 2.103.0 *)
 
+type transport_context =
+  { network_protocol_name : string option
+  ; network_protocol_version : string option
+  ; network_transport : string option
+  }
+(** Request-local MCP transport metadata for the OTel MCP semantic convention
+    [network.*] attributes. *)
+
 type request_context =
   { jsonrpc_request_id : string option
   ; mcp_session_id : string option
   ; mcp_protocol_version : string option
+  ; transport : transport_context option
   }
 (** Request-local MCP context available while handling a JSON-RPC
-    [tools/call] request. Fields are optional because internal dispatches and
-    notifications do not always have a request id/session/protocol version. *)
+    [tools/call] request. Fields are optional because internal dispatches,
+    notifications, and non-network transports do not always have a request
+    id/session/protocol version or transport metadata. *)
+
+val http_transport_context : protocol_version:string -> transport_context
+(** Standard MCP-over-HTTP transport context for HTTP/1.1 or HTTP/2. The
+    protocol version is the network protocol version, e.g. ["1.1"] or ["2"]. *)
 
 val with_request_context : request_context -> (unit -> 'a) -> 'a
 (** Bind MCP request context for spans emitted by dispatch observers inside
     [f]. Outside an Eio fiber this degrades to [f ()], so non-Eio unit tests
     and pre-bootstrap callers do not crash. *)
+
+val current_request_context : unit -> request_context option
+(** Return the request-local MCP context currently bound to this Eio fiber, if
+    any. Used by non-span telemetry surfaces that need to share the same MCP
+    semantic-convention attributes as the dispatch hook. *)
 
 val with_test_span_emitter :
   enabled:bool ->

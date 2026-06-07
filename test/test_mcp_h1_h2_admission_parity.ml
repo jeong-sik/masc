@@ -20,6 +20,11 @@ let contains ~needle haystack =
 let assert_contains label ~needle source =
   check bool label true (contains ~needle source)
 
+let assert_order label ~before ~after source =
+  let before_idx = Str.search_forward (Str.regexp_string before) source 0 in
+  let after_idx = Str.search_forward (Str.regexp_string after) source 0 in
+  check bool label true (before_idx < after_idx)
+
 let request ?(headers = []) ?(meth = `POST) target =
   Httpun.Request.create ~headers:(Httpun.Headers.of_list headers) meth target
 
@@ -74,6 +79,10 @@ let assert_accept_mode label expected actual =
     | _ -> false
   in
   check bool label true same
+
+let metric_value name labels =
+  Masc.Otel_metric_store.get_metric_value name ~labels ()
+  |> Option.value ~default:0.0
 
 let context ?(session_id = "ctx-session") ?(session_was_provided = true) () =
   Request_context.make
@@ -253,6 +262,94 @@ let test_shared_protocol_and_delete_matrix () =
   check (option string) "DELETE without session has no admission id" None
     (Transport.get_session_id_any (request ~meth:`DELETE "/mcp"))
 
+let test_records_mcp_server_session_duration_metric () =
+  let session_id = "h1-h2-parity-session-duration" in
+  let transport_context =
+    Otel_dispatch_hook.http_transport_context ~protocol_version:"1.1"
+  in
+  let labels =
+    [
+      (Otel_genai.Mcp_attr_key.mcp_protocol_version, "2025-11-25");
+      (Otel_genai.Mcp_attr_key.network_protocol_name, "http");
+      (Otel_genai.Mcp_attr_key.network_protocol_version, "1.1");
+      (Otel_genai.Mcp_attr_key.network_transport, "tcp");
+    ]
+  in
+  let count_metric =
+    Otel_genai.Mcp_metric_name.server_session_duration ^ "_count"
+  in
+  let before_count = metric_value count_metric labels in
+  Fun.protect
+    ~finally:(fun () -> Transport.forget_mcp_session session_id)
+    (fun () ->
+      Transport.remember_protocol_version
+        ~otel_transport_context:transport_context
+        session_id
+        "2025-11-25";
+      Transport.forget_mcp_session session_id);
+  let after_count = metric_value count_metric labels in
+  check (float 0.0001) "server session duration count increments"
+    (before_count +. 1.0)
+    after_count
+
+let test_uninitialized_profile_does_not_start_session_duration_metric () =
+  let session_id = "h1-h2-parity-profile-only-session" in
+  let transport_context =
+    Otel_dispatch_hook.http_transport_context ~protocol_version:"1.1"
+  in
+  let count_metric =
+    Otel_genai.Mcp_metric_name.server_session_duration ^ "_count"
+  in
+  let before_count = metric_value count_metric [] in
+  Fun.protect
+    ~finally:(fun () -> Transport.forget_mcp_session session_id)
+    (fun () ->
+      Transport.remember_mcp_profile
+        ~otel_transport_context:transport_context
+        session_id
+        Transport.Full;
+      Transport.forget_mcp_session session_id);
+  let after_count = metric_value count_metric [] in
+  check (float 0.0001)
+    "profile-only uninitialized session does not record duration"
+    before_count
+    after_count
+
+let test_failed_initialize_does_not_start_session_duration_metric () =
+  let session_id = "h1-h2-parity-failed-initialize-session" in
+  let transport_context =
+    Otel_dispatch_hook.http_transport_context ~protocol_version:"1.1"
+  in
+  let request_body =
+    {|{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{}}}|}
+  in
+  let response_json =
+    Mcp_transport_protocol.make_error
+      ~id:(`Int 1)
+      (Masc.Mcp_error_code.to_wire_code Masc.Mcp_error_code.Invalid_params)
+      "Missing clientInfo"
+  in
+  let count_metric =
+    Otel_genai.Mcp_metric_name.server_session_duration ^ "_count"
+  in
+  let before_count = metric_value count_metric [] in
+  Fun.protect
+    ~finally:(fun () -> Transport.forget_mcp_session session_id)
+    (fun () ->
+      Transport.remember_protocol_version_if_initialize_succeeded
+        ~otel_transport_context:transport_context
+        session_id
+        ~request_body
+        ~response_json;
+      check bool "failed initialize leaves session unknown" false
+        (Transport.is_known_session session_id);
+      Transport.forget_mcp_session session_id);
+  let after_count = metric_value count_metric [] in
+  check (float 0.0001)
+    "failed initialize does not record session duration"
+    before_count
+    after_count
+
 let test_h1_h2_post_route_wiring_parity () =
   let h1 = source_file "lib/server/server_mcp_transport_http.ml" in
   let h2 = source_file "lib/server/server_h2_gateway.ml" in
@@ -264,7 +361,17 @@ let test_h1_h2_post_route_wiring_parity () =
       ("uses shared POST request context", "Server_mcp_request_context.decide_post_body");
       ("injects canonical HTTP actor", "body_with_canonical_http_actor");
       ("forwards internal keeper runtime", "is_verified_internal_keeper_request");
+      ( "records initialize protocol only after success",
+        "remember_protocol_version_if_initialize_succeeded" );
     ];
+  assert_order "H1 refreshes MCP profile after auth gate"
+    ~before:"match auth_result with"
+    ~after:"remember_mcp_profile ~otel_transport_context session_id profile"
+    h1;
+  assert_order "H2 refreshes MCP profile after auth gate"
+    ~before:"match auth_result with"
+    ~after:"remember_mcp_profile"
+    h2;
   assert_contains "H1 unknown supplied session returns not found"
     ~needle:"Httpun.Response.create ~headers `Not_found" h1;
   assert_contains "H2 unknown supplied session returns not found"
@@ -309,6 +416,12 @@ let () =
             test_shared_post_admission_matrix;
           test_case "protocol and DELETE predicate matrix" `Quick
             test_shared_protocol_and_delete_matrix;
+          test_case "server session duration metric" `Quick
+            test_records_mcp_server_session_duration_metric;
+          test_case "profile-only session does not start duration metric" `Quick
+            test_uninitialized_profile_does_not_start_session_duration_metric;
+          test_case "failed initialize does not start duration metric" `Quick
+            test_failed_initialize_does_not_start_session_duration_metric;
         ] );
       ( "route-wiring",
         [

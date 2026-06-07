@@ -88,6 +88,7 @@ let worker_meta_allowed_fields =
     "effective_model";
     "checkpoint_path";
     "turn_log_path";
+    "mcp_client_session_started_at";
     "last_run_at";
   ]
 
@@ -128,6 +129,9 @@ let worker_meta_to_yojson (meta : worker_container_meta) =
       ("effective_model", `String meta.effective_model);
       ("checkpoint_path", `String meta.checkpoint_path);
       ("turn_log_path", `String meta.turn_log_path);
+      ( "mcp_client_session_started_at",
+        Option.fold ~none:`Null ~some:(fun ts -> `Float ts)
+          meta.mcp_client_session_started_at );
       ( "last_run_at",
         Option.fold ~none:`Null ~some:(fun ts -> `Float ts) meta.last_run_at );
     ]
@@ -173,6 +177,8 @@ let worker_meta_of_yojson json =
                       turn_log_path =
                         Json_util.get_string json "turn_log_path"
                         |> Option.value ~default:"";
+                      mcp_client_session_started_at =
+                        Json_util.get_float json "mcp_client_session_started_at";
                       last_run_at = Json_util.get_float json "last_run_at";
                     })))
   | _ -> Error "worker meta must be a JSON object"
@@ -369,6 +375,7 @@ let make_worker_meta ~base_path ~workspace_path ~worker_name
       worker_checkpoint_path ~base_path ~worker_name;
     turn_log_path =
       worker_turn_log_path ~base_path ~worker_name;
+    mcp_client_session_started_at = None;
     last_run_at = None;
   }
 

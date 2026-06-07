@@ -221,6 +221,33 @@ let () =
           | None -> failwith "dispatch returned None"))
 
 let () =
+  test "dispatch_pause_status_surfaces_fleet_admission_stop_when_workspace_running" (fun () ->
+      with_ctx @@ fun ctx ->
+      with_fleet_admission_snapshot
+        (`Assoc
+          [
+            ("fleet_state", `String "stopped");
+            ("global_inflight", `Int 0);
+            ("global_limit", `Int 2);
+            ("available", `Int 2);
+            ("queue_depth", `Int 0);
+          ])
+        (fun () ->
+          match Tool_control.dispatch ctx ~name:"masc_pause_status" ~args:(`Assoc []) with
+          | Some result ->
+              assert (Tool_result.is_success result);
+              let json = parse_json (Tool_result.message result) in
+              let open Yojson.Safe.Util in
+              assert (json |> member "status" = `String "stopped");
+              assert (json |> member "paused" = `Bool false);
+              assert (json |> member "pause_scope" = `String "fleet_admission");
+              assert (json |> member "any_pause_active" = `Bool true);
+              assert
+                (json |> member "message" |> to_string
+                 = "Fleet admission is stopped; new keeper turns are blocked")
+          | None -> failwith "dispatch returned None"))
+
+let () =
   test "dispatch_pause_status_ignores_legacy_namespace_hint" (fun () ->
       with_ctx @@ fun ctx ->
       match

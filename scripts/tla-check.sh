@@ -142,8 +142,8 @@ ensure_trace_data() {
 # Run all keeper state machine specs
 run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperStateMachine.tla"
 run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperTurnCycle.tla"
-run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperTurnSlot.tla"
-run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperTurnSlot.tla"
+run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperTurnAdmission.tla"
+run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperTurnAdmission.tla"
 run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperOASAdvanced.tla"
 run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperContextLifecycle.tla"
 run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperContextLifecycle.tla"

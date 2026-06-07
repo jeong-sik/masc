@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# keeper-turn-slot-evidence.sh - persisted evidence summary for #12888.
+# keeper-turn-admission-evidence.sh - persisted evidence summary for #12888.
 #
 # This is an audit harness, not a chaos harness. It does not force a 174s
 # degraded retry. It reads the active MASC keeper decision logs and reports
@@ -7,7 +7,7 @@
 # #12888 proof gap.
 #
 # Usage:
-#   scripts/keeper-turn-slot-evidence.sh [--base-path PATH] [--keeper NAME]
+#   scripts/keeper-turn-admission-evidence.sh [--base-path PATH] [--keeper NAME]
 #       [--window-min N] [--min-normal-samples N]
 #
 # Exit codes: 0 report emitted, 2 base path missing, 3 jq missing, 4 no files.
@@ -69,7 +69,7 @@ if [[ ${#files[@]} -eq 0 ]]; then
   exit 4
 fi
 
-echo "Keeper turn-slot evidence window"
+echo "Keeper turn-admission evidence window"
 echo "  base_path: $BASE_PATH"
 echo "  keepers_dir: $KEEPERS_DIR"
 echo "  window_min: $WINDOW_MIN"
@@ -200,7 +200,7 @@ echo "  NORMAL_*     successful tool-use rows with positive latency_ms."
 echo
 echo "Closure signal:"
 echo "  EVIDENCE_AVAILABLE means the selected window contains retry_scheduled"
-echo "  slot-release receipt evidence and enough normal successful turns with"
+echo "  admission-release receipt evidence and enough normal successful turns with"
 echo "  latency samples."
 echo "  INSUFFICIENT means #12888 still needs a live forced-retry run or newer"
 echo "  persisted rows before it can be closed from runtime evidence."

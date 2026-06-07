@@ -1,10 +1,11 @@
----- MODULE KeeperTurnSlot ----
-\* KeeperTurnSlot -- #12888 productive-slot lifecycle contract.
+---- MODULE KeeperTurnAdmission ----
+\* KeeperTurnAdmission -- #12888 productive admission lifecycle contract.
 \*
-\* This is the formal target for the 174s <-> 600s slot leak class:
-\* once degraded retry routing begins, the outer turn slot must already be
-\* released. A retry may later reacquire a fresh productive slot, but it must
-\* not keep the same acquisition across the retry phase.
+\* This is the formal target for the 174s <-> 600s admission-holder leak
+\* class: once degraded retry routing begins, the outer turn admission holder
+\* must already be released. A retry may later reacquire a fresh productive
+\* admission holder, but it must not keep the same acquisition across the retry
+\* phase.
 \*
 \* OCaml <-> TLA+ mapping (cited by symbol name, not line number -- iter 64
 \* N-2.a convention):
@@ -22,18 +23,18 @@
 \*   release_at_phase           | runtime_rotation_attempt.slot_release_at_phase
 \*                              | (keeper_execution_receipt.ml)
 \*
-\* Alphabet projection (spec scope).  The runtime's slot-release alphabet is
+\* Alphabet projection (spec scope).  The persisted release alphabet is
 \* [type slot_release_phase] in keeper_execution_receipt.ml -- four non-None
 \* constructors: Retry_setup_failed, Retry_scheduled, Retry_budget_exhausted,
 \* Productive_phase_exhausted (plus the [option] None when no rotation
 \* occurred).  ReleasePhaseSet below models a PROJECTION sufficient for the
 \* #12888 leak class: it keeps "retry_scheduled" and "productive_phase_exhausted"
-\* (the two slot-release outcomes the leak invariant cares about), drops
+\* (the two release outcomes the leak invariant cares about), drops
 \* "retry_setup_failed" / "retry_budget_exhausted" (other terminal rotation
 \* outcomes -- they also release the slot, but are not on the leak path this
 \* spec pins), and adds two spec-internal markers: "none" (<-> the [option]
 \* None / no rotation) and "finish" (a clean productive-phase finish releases
-\* the slot; the runtime records no [slot_release_phase] for that case, since
+\* the holder; the runtime records no [slot_release_phase] for that case, since
 \* [slot_release_at_phase] lives on [runtime_rotation_attempt], which only
 \* exists for degraded retries).  So ReleasePhaseSet is not a 1:1 image of
 \* [slot_release_phase]; it is the leak-relevant projection plus the
@@ -41,8 +42,8 @@
 \*
 \* The current runtime mitigation (#13120) rejects late rotation once the
 \* productive phase is exhausted; #13272 exposes the release/phase telemetry.
-\* This spec pins the stricter #12888 target invariant so future two-tier
-\* admission work has a model-level acceptance check.
+\* This spec pins the stricter #12888 target invariant so turn admission work
+\* has a model-level acceptance check.
 
 EXTENDS Naturals
 
@@ -112,8 +113,8 @@ ProductiveTick ==
     /\ step' = step + 1
     /\ UNCHANGED <<phase, slot_held, retry_elapsed, release_at_phase>>
 
-\* First degraded retry decision. The slot is released before the model enters
-\* retry phase; a later retry attempt must acquire a fresh productive slot.
+\* First degraded retry decision. The holder is released before the model enters
+\* retry phase; a later retry attempt must acquire a fresh productive holder.
 RetryScheduled ==
     /\ step < MaxSteps
     /\ phase = "productive"
@@ -127,7 +128,7 @@ RetryScheduled ==
     /\ UNCHANGED <<slot_held_elapsed, productive_elapsed>>
 
 \* Stop-gap behavior from #13120: if the productive phase is already exhausted,
-\* end the cycle so the outer slot is released instead of rotating in place.
+\* end the cycle so the outer holder is released instead of rotating in place.
 ProductivePhaseExhausted ==
     /\ step < MaxSteps
     /\ phase = "productive"
@@ -216,7 +217,7 @@ Safety ==
     /\ ProductiveExhaustionReleasesSlot
 
 \* Bug model: degraded retry changes the logical phase but forgets to release
-\* the slot. TLC must violate RetryPhaseRequiresReleased.
+\* the holder. TLC must violate RetryPhaseRequiresReleased.
 RetryScheduledWithoutRelease ==
     /\ step < MaxSteps
     /\ phase = "productive"

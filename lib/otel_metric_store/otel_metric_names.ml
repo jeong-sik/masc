@@ -181,22 +181,20 @@ let metric_file_lock_table_cas_retries =
 let metric_tool_keeper_cache_ttl_parse_failures =
   "masc_tool_keeper_cache_ttl_parse_failures_total"
 
-(* #9771: keeper turn-slot semaphore wait timeout counter.
+(* #9771: keeper turn-admission semaphore wait timeout counter.
 
    Production observed multiple keepers ([sangsu], [janitor],
    [ramarama], [qa-king], [taskmaster]) repeatedly skipping turns
    with [semaphore wait > 60s, peers holding slot] — peers holding
-   the slot for a long-running OAS call (276s-963s observed) ran
+   the holder for a long-running OAS call (276s-963s observed) ran
    past the 60s wait budget, every waiting keeper timed out, and
    the WARN log was the only signal.
 
-   Three observable channels at which the timeout fires:
-     - [autonomous_queue_head]: fairness-FIFO head wait exceeded
-     - [autonomous]: autonomous-track semaphore acquire timed out
-     - [turn]: shared turn semaphore acquire timed out
-
-   Labels: [keeper, channel].  Cardinality = ~10 keepers × 3
-   channels = ~30 series, well within Otel_metric_store best practice. *)
+   Timeout diagnostics distinguish autonomous queue-head, per-keeper
+   holder admission, and global admission phases. The counter itself is
+   intentionally coarser: labels are [keeper, channel], where [channel]
+   is the keeper turn decision channel. Cardinality remains bounded by
+   active keepers x turn channels. *)
 
 (* Goal-loop Observe contract: the Grafana p99 query consumes
    [masc_keeper_semaphore_wait_seconds_bucket] grouped by keeper and runtime.

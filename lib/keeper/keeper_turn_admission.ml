@@ -202,7 +202,7 @@ type lease_metadata =
   ; lease_channel : string
   ; lease_acquired_at : float
   ; lease_cancel_p : unit Eio.Promise.t
-  ; lease_cancel_resolver : unit Eio.Promise.resolver
+  ; lease_cancel_resolver : unit Eio.Promise.u
   }
 
 type runtime_state =

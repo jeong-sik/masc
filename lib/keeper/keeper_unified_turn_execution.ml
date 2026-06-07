@@ -282,7 +282,6 @@ let run (ctx : ctx)
       last_provider_timeout_budget := Some provider_timeout_budget;
       let attempt_watchdog_s =
         attempt_watchdog_timeout_sec_opt
-          ~liveness_mode:(Keeper_attempt_liveness_config.current_mode ())
           ~remaining_turn_budget_s:(remaining_turn_budget_s ())
           provider_timeout_budget
       in

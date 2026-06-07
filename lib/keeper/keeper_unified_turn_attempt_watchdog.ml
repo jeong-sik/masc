@@ -8,7 +8,6 @@ let dispatch
   (* RFC-XXXX: The per-attempt wall-clock watchdog is removed.
      Provider-attempt liveness is progress-based:
        - [stream_idle_timeout_s] catches inter-line stalls
-       - [Keeper_attempt_liveness] catches no-first-token / inter-chunk gaps
        - tool-level timeouts and OAS max-turn limits bound tool work and
          finite turn loops
      The former watchdog killed healthy active streams that were making

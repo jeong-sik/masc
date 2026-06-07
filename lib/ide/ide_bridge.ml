@@ -790,3 +790,41 @@ let ingest_pr_event_from_hook
         ~review_status:None
         ~timestamp_ms:(now_ms ())
     | None -> ()
+
+let install_agent_observation_sinks () =
+  Agent_observation.register_tool_event_sink
+    (fun (event : Agent_observation.tool_event) ->
+      ingest_tool_event_from_hook
+        ~base_path:event.base_path
+        ~tool_name:event.tool_name
+        ~keeper_id:event.keeper_id
+        ~turn_id:event.turn_id
+        ~outcome:event.outcome
+        ~typed_outcome_str:event.typed_outcome
+        ~duration_ms:event.duration_ms
+        ~output_text:event.output_text
+        ~input:event.input);
+  Agent_observation.register_pr_event_sink
+    (fun (event : Agent_observation.pr_event) ->
+      ingest_pr_event_from_descriptor
+        ~base_path:event.base_path
+        ~keeper_id:event.keeper_id
+        ~turn_id:event.turn_id
+        ~output_text:event.output_text
+        ~tool_name:event.tool_name
+        ~success:event.success);
+  Agent_observation.register_turn_event_sink
+    (fun (event : Agent_observation.turn_event) ->
+      ingest_turn_event
+        ~base_path:event.base_path
+        ~turn_id:event.turn_id
+        ~keeper_id:event.keeper_id
+        ~phase:event.phase
+        ~model_used:event.model_used
+        ~tools_used:event.tools_used
+        ~stop_reason:event.stop_reason
+        ~duration_ms:event.duration_ms
+        ~timestamp_ms:event.timestamp_ms)
+;;
+
+let () = install_agent_observation_sinks ()

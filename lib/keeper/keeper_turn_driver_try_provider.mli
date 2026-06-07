@@ -60,7 +60,7 @@ val run_try_provider :
   Runtime_candidate.t ->
   (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
   * Agent_sdk.Checkpoint.t option
-  * (string * Keeper_attempt_liveness_config.success_sample) option
+  * (string * Obj.t) option
 
 module For_testing : sig
   val max_execution_time_for_attempt :

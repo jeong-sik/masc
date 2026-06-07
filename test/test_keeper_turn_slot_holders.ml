@@ -410,7 +410,7 @@ let test_force_released_autonomous_holder_does_not_stamp_completion () =
          "force-released autonomous holder stamped normal completion: delay=%.3f"
          delay)
 
-let test_distinct_keepers_share_global_admission_budget () =
+let test_distinct_keepers_share_global_admission_budget_across_channels () =
   let baseline = KK.turn_semaphore_value_for_test () in
   let limit = KTS.global_turn_limit_for_test () in
   if baseline <> limit then
@@ -427,10 +427,15 @@ let test_distinct_keepers_share_global_admission_budget () =
         ~actual:(KK.turn_semaphore_value_for_test ())
     else (
       let keeper_name = Printf.sprintf "runtime-budget-%02d" idx in
+      let channel =
+        if idx mod 2 = 0
+        then Masc.Keeper_world_observation.Scheduled_autonomous
+        else Masc.Keeper_world_observation.Reactive
+      in
       let result =
         KK.with_keeper_turn_slot_for_test
           ~keeper_name
-          ~channel:Masc.Keeper_world_observation.Scheduled_autonomous
+          ~channel
           (fun ~semaphore_wait_ms:_ ->
              assert_eq
                ~msg:"distinct keeper consumed one global admission token"
@@ -497,8 +502,8 @@ let () =
         test_force_release_marker_does_not_leak_to_replacement;
       "force released autonomous holder skips completion stamp",
         test_force_released_autonomous_holder_does_not_stamp_completion;
-      "distinct keepers share global admission budget",
-        test_distinct_keepers_share_global_admission_budget;
+      "distinct keepers share global admission budget across channels",
+        test_distinct_keepers_share_global_admission_budget_across_channels;
       "force release marker ttl bounds unfinalized fibers",
         test_force_release_marker_ttl_bounds_unfinalized_fibers;
     ]

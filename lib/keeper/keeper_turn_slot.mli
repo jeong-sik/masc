@@ -5,9 +5,9 @@
     admission grants a token. Production turn execution does not acquire
     admission through this module.
 
-    The autonomous FIFO queue and reactive/autonomous semaphores have been
-    removed from production admission. Reactive/autonomous holder accessors
-    are preserved as diagnostic channel labels for the admitted turn. *)
+    The autonomous FIFO queue has been removed from production admission.
+    Reactive/autonomous channel capacity and holder diagnostics are preserved
+    after the central admission gate grants a token. *)
 
 (** {1 SSOT Types} *)
 include module type of struct
@@ -42,9 +42,9 @@ val turn_concurrency_int_of_env_default_for_test :
     Derived from [MASC_KEEPER_SEMAPHORE_WAIT_TIMEOUT_SEC]. *)
 val semaphore_wait_timeout_sec : float
 
-(** Test-only global-admission capacity snapshots. Reactive/autonomous
-    helpers report the same shared budget because those legacy pool-specific
-    gates no longer exist. *)
+(** Test-only admission capacity snapshots. [turn_*] reports the shared global
+    budget; reactive/autonomous helpers report their channel-specific budget
+    after applying the shared global cap. *)
 val turn_semaphore_value_for_test : unit -> int
 val autonomous_turn_semaphore_value_for_test : unit -> int
 val reactive_turn_semaphore_value_for_test : unit -> int
@@ -147,9 +147,21 @@ type keeper_turn_slot_control =
   { is_held : unit -> bool
   }
 
-(** Compatibility-only entry point. Production keepalive calls
-    {!Keeper_turn_admission.with_turn_admission}. *)
+val run_with_acquired_slot :
+  runtime_profile:string ->
+  keeper_name:string ->
+  channel:Keeper_world_observation.keeper_cycle_channel ->
+  channel_label:string ->
+  admission_token:Keeper_turn_admission.token ->
+  started_at:float ->
+  (semaphore_wait_ms:int -> slot_control:keeper_turn_slot_control -> 'a) ->
+  'a
+
+(** Holder-diagnostic facade backed by {!Keeper_turn_admission.acquire_turn}.
+    This records holder rows after central admission grants a token; it does not
+    own a separate production semaphore. *)
 val with_keeper_turn_slot :
+  ?base_path:string ->
   ?runtime_profile:string ->
   keeper_name:string ->
   channel:Keeper_world_observation.keeper_cycle_channel ->
@@ -162,6 +174,7 @@ val with_keeper_turn_slot :
 
 (** Like [with_keeper_turn_slot] but exposes [slot_control] to the callback. *)
 val with_keeper_turn_slot_control :
+  ?base_path:string ->
   ?runtime_profile:string ->
   keeper_name:string ->
   channel:Keeper_world_observation.keeper_cycle_channel ->

@@ -29,14 +29,14 @@ let token_testable =
     (fun a b -> A.token_id a = A.token_id b)
 ;;
 
-let acquire_token ~limit ~keeper_name =
+let acquire_token ?(channel = "test") ~limit ~keeper_name () =
   match
     A.acquire_turn
       ~limit
       ~timeout_s:0.0
       ~keeper_name
       ~runtime_profile:"test"
-      ~channel:"test"
+      ~channel
       ()
   with
   | Ok (token, _) -> token
@@ -47,20 +47,20 @@ let acquire_token ~limit ~keeper_name =
       (A.rejection_to_string rejection)
 ;;
 
-let acquire_result ~limit ~keeper_name =
+let acquire_result ?(channel = "test") ~limit ~keeper_name () =
   A.acquire_turn
     ~limit
     ~timeout_s:0.0
     ~keeper_name
     ~runtime_profile:"test"
-    ~channel:"test"
+    ~channel
     ()
 ;;
 
 let test_acquire_times_out_at_limit () =
   A.reset_for_test ();
   let token =
-    match acquire_result ~limit:1 ~keeper_name:"limit-a" with
+    match acquire_result ~limit:1 ~keeper_name:"limit-a" () with
     | Ok (token, _) -> token
     | Error rejection ->
       Alcotest.failf
@@ -70,7 +70,7 @@ let test_acquire_times_out_at_limit () =
   Alcotest.(check (result (pair token_testable int) rejection))
     "second acquire rejected at cap"
     (Error A.Global_inflight_exceeded)
-    (acquire_result ~limit:1 ~keeper_name:"limit-b");
+    (acquire_result ~limit:1 ~keeper_name:"limit-b" ());
   A.release_turn token;
   check_snapshot ~limit:1 ~state:"running" ~inflight:0
 
@@ -80,13 +80,13 @@ let test_pause_and_stop_reject_without_incrementing () =
   Alcotest.(check (result (pair token_testable int) rejection))
     "paused rejected"
     (Error A.Fleet_paused)
-    (acquire_result ~limit:1 ~keeper_name:"paused");
+    (acquire_result ~limit:1 ~keeper_name:"paused" ());
   check_snapshot ~limit:1 ~state:"paused" ~inflight:0;
   ignore (A.stop_fleet () : A.fleet_policy);
   Alcotest.(check (result (pair token_testable int) rejection))
     "stopped rejected"
     (Error A.Fleet_stopped)
-    (acquire_result ~limit:1 ~keeper_name:"stopped");
+    (acquire_result ~limit:1 ~keeper_name:"stopped" ());
   check_snapshot ~limit:1 ~state:"stopped" ~inflight:0;
   A.reset_for_test ()
 
@@ -94,7 +94,7 @@ let test_per_keeper_isolation_does_not_block_other_keeper () =
   A.reset_for_test ();
   Eio_main.run @@ fun env ->
   let clock = Eio.Stdenv.clock env in
-  let first_a = acquire_token ~limit:2 ~keeper_name:"keeper-a" in
+  let first_a = acquire_token ~limit:2 ~keeper_name:"keeper-a" () in
   let waiter_done_p, waiter_done_u = Eio.Promise.create () in
   Eio.Switch.run @@ fun sw ->
   Eio.Fiber.fork ~sw (fun () ->
@@ -111,7 +111,7 @@ let test_per_keeper_isolation_does_not_block_other_keeper () =
   Eio.Time.sleep clock 0.01;
   let snapshot = A.snapshot ~limit:2 () in
   Alcotest.(check int) "same-keeper waiter queued" 1 snapshot.queue_depth;
-  let keeper_b = acquire_token ~limit:2 ~keeper_name:"keeper-b" in
+  let keeper_b = acquire_token ~limit:2 ~keeper_name:"keeper-b" () in
   Alcotest.(check int) "different keeper admitted" 2 (A.global_inflight ());
   A.release_turn first_a;
   let second_a =
@@ -128,7 +128,7 @@ let test_per_keeper_isolation_does_not_block_other_keeper () =
 
 let test_stop_cancels_inflight_tokens () =
   A.reset_for_test ();
-  let token = acquire_token ~limit:1 ~keeper_name:"keeper-stop" in
+  let token = acquire_token ~limit:1 ~keeper_name:"keeper-stop" () in
   Alcotest.(check bool)
     "cancel promise initially unresolved"
     true
@@ -140,6 +140,94 @@ let test_stop_cancels_inflight_tokens () =
     (Option.is_some (Eio.Promise.peek (A.token_cancel_p token)));
   A.release_turn token;
   A.reset_for_test ()
+
+let test_cancelled_waiter_is_removed_from_queue () =
+  A.reset_for_test ();
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let held = acquire_token ~limit:1 ~keeper_name:"held" () in
+  let waiter_switch_p, waiter_switch_u = Eio.Promise.create () in
+  let waiter_done_p, waiter_done_u = Eio.Promise.create () in
+  Eio.Switch.run @@ fun sw ->
+  Eio.Fiber.fork ~sw (fun () ->
+    let resolve_once outcome =
+      match Eio.Promise.peek waiter_done_p with
+      | None -> Eio.Promise.resolve waiter_done_u outcome
+      | Some _ -> ()
+    in
+    try
+      Eio.Switch.run (fun waiter_sw ->
+        Eio.Promise.resolve waiter_switch_u waiter_sw;
+        ignore
+          (A.acquire_turn
+             ~limit:1
+             ~timeout_s:60.0
+             ~keeper_name:"queued"
+             ~runtime_profile:"test"
+             ~channel:"test"
+             ());
+        resolve_once `Returned)
+    with
+    | Eio.Cancel.Cancelled _ -> resolve_once `Cancelled
+    | exn -> resolve_once (`Raised (Printexc.to_string exn)));
+  let waiter_sw = Eio.Promise.await waiter_switch_p in
+  Eio.Time.sleep clock 0.01;
+  Alcotest.(check int)
+    "waiter queued before cancellation"
+    1
+    (A.snapshot ~limit:1 ()).queue_depth;
+  Eio.Switch.fail waiter_sw Exit;
+  (match Eio.Promise.await waiter_done_p with
+   | `Cancelled -> ()
+   | `Raised _ -> ()
+   | `Returned -> Alcotest.fail "cancelled waiter unexpectedly returned");
+  Alcotest.(check int)
+    "cancelled waiter removed"
+    0
+    (A.snapshot ~limit:1 ()).queue_depth;
+  A.release_turn held;
+  Alcotest.(check int) "cancel cleanup did not leak token" 0 (A.global_inflight ());
+  A.reset_for_test ()
+
+let test_reactive_admitted_when_autonomous_channel_is_full () =
+  A.reset_for_test ();
+  let limit = 17 in
+  let rec acquire_autonomous idx tokens =
+    if idx = 16
+    then tokens
+    else
+      acquire_autonomous
+        (idx + 1)
+        (acquire_token
+           ~limit
+           ~keeper_name:(Printf.sprintf "auto-%02d" idx)
+           ~channel:"scheduled_autonomous"
+           ()
+         :: tokens)
+  in
+  let tokens = acquire_autonomous 0 [] in
+  Alcotest.(check int) "global spare remains" 16 (A.global_inflight ());
+  Alcotest.(check (result (pair token_testable int) rejection))
+    "autonomous channel cap rejects one more autonomous turn"
+    (Error A.Global_inflight_exceeded)
+    (acquire_result
+       ~limit
+       ~keeper_name:"auto-extra"
+       ~channel:"scheduled_autonomous"
+       ());
+  let reactive =
+    match
+      acquire_result ~limit ~keeper_name:"reactive-spare" ~channel:"reactive" ()
+    with
+    | Ok (token, _) -> token
+    | Error rejection ->
+      Alcotest.failf
+        "reactive turn should use global spare capacity: %s"
+        (A.rejection_to_string rejection)
+  in
+  A.release_turn reactive;
+  List.iter A.release_turn tokens;
+  check_snapshot ~limit ~state:"running" ~inflight:0
 
 let test_with_turn_admission_releases_on_success () =
   A.reset_for_test ();
@@ -204,6 +292,14 @@ let () =
             "stop cancels inflight tokens"
             `Quick
             test_stop_cancels_inflight_tokens
+        ; Alcotest.test_case
+            "cancelled waiter is removed from queue"
+            `Quick
+            test_cancelled_waiter_is_removed_from_queue
+        ; Alcotest.test_case
+            "reactive admitted when autonomous channel is full"
+            `Quick
+            test_reactive_admitted_when_autonomous_channel_is_full
         ; Alcotest.test_case
             "with_turn_admission releases on success"
             `Quick

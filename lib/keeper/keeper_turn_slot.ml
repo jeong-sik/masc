@@ -255,10 +255,20 @@ let semaphore_wait_timeout_snapshot ~phase ?queue_ahead ?(holders = []) () =
   let global_available =
     Keeper_turn_admission.available_turns ~limit:effective_turn_throttle_limit
   in
+  let autonomous_available =
+    Keeper_turn_admission.available_turns_for_channel
+      ~limit:effective_turn_throttle_limit
+      ~channel:"scheduled_autonomous"
+  in
+  let reactive_available =
+    Keeper_turn_admission.available_turns_for_channel
+      ~limit:effective_turn_throttle_limit
+      ~channel:"reactive"
+  in
   { timeout_wait_sec = semaphore_wait_timeout_sec
   ; timeout_phase = phase
-  ; timeout_autonomous_available = global_available
-  ; timeout_reactive_available = global_available
+  ; timeout_autonomous_available = autonomous_available
+  ; timeout_reactive_available = reactive_available
   ; timeout_turn_available = global_available
   ; timeout_queue_depth = 0
   ; timeout_queue_ahead = queue_ahead
@@ -499,6 +509,12 @@ let remaining_global_capacity () =
   Keeper_turn_admission.available_turns ~limit:effective_turn_throttle_limit
 ;;
 
+let remaining_channel_capacity channel =
+  Keeper_turn_admission.available_turns_for_channel
+    ~limit:effective_turn_throttle_limit
+    ~channel
+;;
+
 let run_with_acquired_slot
       ~runtime_profile
       ~keeper_name
@@ -544,7 +560,7 @@ let run_with_acquired_slot
     let slot_control =
       { is_held = (fun () -> keeper_turn_slot_is_held slot_state) }
     in
-    Ok (f ~semaphore_wait_ms ~slot_control)
+    f ~semaphore_wait_ms ~slot_control
   in
   if Eio_guard.is_ready ()
   then
@@ -559,11 +575,18 @@ let run_with_acquired_slot
 ;;
 
 (* Main entry point: admission grants both fleet capacity and keeper isolation. *)
-let with_keeper_turn_slot_control ?(runtime_profile = "unknown") ~keeper_name ~channel f =
+let with_keeper_turn_slot_control
+      ?base_path
+      ?(runtime_profile = "unknown")
+      ~keeper_name
+      ~channel
+      f
+  =
   let channel_label = Keeper_world_observation.channel_to_string channel in
   let t0 = Time_compat.now () in
   match
     Keeper_turn_admission.acquire_turn
+      ?base_path
       ~limit:effective_turn_throttle_limit
       ~timeout_s:semaphore_wait_timeout_sec
       ~keeper_name
@@ -572,14 +595,15 @@ let with_keeper_turn_slot_control ?(runtime_profile = "unknown") ~keeper_name ~c
       ()
   with
   | Ok (admission_token, _admission_wait_ms) ->
-    run_with_acquired_slot
-      ~runtime_profile
-      ~keeper_name
-      ~channel
-      ~channel_label
-      ~admission_token
-      ~started_at:t0
-      f
+    Ok
+      (run_with_acquired_slot
+         ~runtime_profile
+         ~keeper_name
+         ~channel
+         ~channel_label
+         ~admission_token
+         ~started_at:t0
+         f)
   | Error Keeper_turn_admission.Global_inflight_exceeded ->
     let holders = snapshot_holders ~label:Turn_pool ~now:t0 in
     Error
@@ -592,8 +616,9 @@ let with_keeper_turn_slot_control ?(runtime_profile = "unknown") ~keeper_name ~c
     Error (`Turn_admission_rejected rejection)
 ;;
 
-let with_keeper_turn_slot ?runtime_profile ~keeper_name ~channel f =
+let with_keeper_turn_slot ?base_path ?runtime_profile ~keeper_name ~channel f =
   with_keeper_turn_slot_control
+    ?base_path
     ?runtime_profile
     ~keeper_name
     ~channel
@@ -614,8 +639,11 @@ let global_turn_limit_for_test () = effective_turn_throttle_limit
 
 (* Legacy pool-specific helpers now expose the shared global admission budget. *)
 let turn_semaphore_value_for_test () = remaining_global_capacity ()
-let autonomous_turn_semaphore_value_for_test () = remaining_global_capacity ()
-let reactive_turn_semaphore_value_for_test () = remaining_global_capacity ()
+let autonomous_turn_semaphore_value_for_test () =
+  remaining_channel_capacity "scheduled_autonomous"
+;;
+
+let reactive_turn_semaphore_value_for_test () = remaining_channel_capacity "reactive"
 let turn_concurrency_int_of_env_default_for_test name ~default ~min_v ~max_v =
   Keeper_turn_admission.turn_concurrency_int_of_env_default_for_test
     name

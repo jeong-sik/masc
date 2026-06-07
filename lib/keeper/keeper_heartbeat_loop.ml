@@ -379,7 +379,7 @@ let run_keepalive_unified_turn
           ~kind:Semaphore_wait_pending
           ();
         match
-          Keeper_turn_admission.with_turn_admission
+          Keeper_turn_slot.with_keeper_turn_slot
             ~base_path:ctx.config.base_path
             ~runtime_profile:(runtime_id_of_meta meta_after_triage)
             ~keeper_name:meta_after_triage.name

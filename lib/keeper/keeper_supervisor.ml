@@ -233,26 +233,27 @@ let sweep_and_recover (ctx : _ context) =
         entry.name
         released_admission_token
         holder_summary);
-	    (match
-         Keeper_registry.resolve_done
-           entry
-           ~source:"supervisor_force_watchdog_crash"
-           (`Crashed msg)
-       with
-       | Keeper_registry.Done_already_resolved _ -> ()
-       | Keeper_registry.Done_resolved _ ->
-	      let outcome = msg in
-	      ignore
-	        (Keeper_registry.dispatch_event_and_log
-	           ~base_path
-	           entry.name
-	           (Keeper_state_machine.Fiber_terminated { outcome; provider_id = None; http_status = None }));
-      let ts = Time_compat.now () in
-      Keeper_registry.record_crash ~base_path entry.name ts msg;
-      Keeper_registry_error_recording.record ~base_path entry.name msg;
-      match Keeper_registry.get ~base_path entry.name with
-      | Some updated -> queue_crashed_entry updated msg
-      | None -> ())
+    (match
+       Keeper_registry.resolve_done
+         entry
+         ~source:"supervisor_force_watchdog_crash"
+         (`Crashed msg)
+     with
+     | Keeper_registry.Done_already_resolved _ -> ()
+     | Keeper_registry.Done_resolved _ ->
+       let outcome = msg in
+       ignore
+         (Keeper_registry.dispatch_event_and_log
+            ~base_path
+            entry.name
+            (Keeper_state_machine.Fiber_terminated
+               { outcome; provider_id = None; http_status = None })));
+    let ts = Time_compat.now () in
+    Keeper_registry.record_crash ~base_path entry.name ts msg;
+    Keeper_registry_error_recording.record ~base_path entry.name msg;
+    match Keeper_registry.get ~base_path entry.name with
+    | Some updated -> queue_crashed_entry updated msg
+    | None -> ()
   in
   (* 2-level supervision slice: process the flat registry through stable
      8-keeper cohorts.  Each cohort re-reads its entries by name before

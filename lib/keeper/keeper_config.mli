@@ -221,6 +221,10 @@ val keeper_board_debounce_window_sec : unit -> float
 val keeper_tool_cost_max_usd : unit -> float option
 val keeper_board_event_limit : unit -> int
 val keeper_turn_capacity_limit : unit -> int
+val keeper_per_keeper_turn_capacity_limit : unit -> int
+(** Per-keeper concurrent turn capacity limit.
+    Runtime param [keeper.turn.per_keeper_capacity_limit], default 2, range [0, 64].
+    0 disables the per-keeper gate. *)
 val keeper_llm_rerank_enabled : unit -> bool
 val keeper_llm_rerank_runtime : unit -> string
 (** Reranker runtime profile. Defaults through [routes.llm_rerank]; env

@@ -46,7 +46,6 @@ let run_keeper_cycle
       ~obs
       ~(turn_decision : Keeper_world_observation.keeper_cycle_decision)
       ~shared_context
-      ~holder_wait_ms
       ()
   =
   match
@@ -57,7 +56,6 @@ let run_keeper_cycle
         ~observation:obs
         ~generation:meta_after_cursor_persist.runtime.generation
         ~channel:turn_decision.channel
-        ~holder_wait_ms
         ~shared_context
         ())
   with

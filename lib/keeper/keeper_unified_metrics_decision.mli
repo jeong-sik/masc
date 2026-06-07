@@ -5,7 +5,6 @@ val append_decision_record :
   meta:Keeper_meta_contract.keeper_meta ->
   observation:Keeper_world_observation.world_observation ->
   latency_ms:int ->
-  ?holder_wait_ms:int ->
   outcome:string ->
   ?degraded_retry_applied:bool ->
   ?degraded_retry_runtime:string ->

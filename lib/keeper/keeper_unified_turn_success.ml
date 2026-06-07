@@ -80,7 +80,6 @@ let append_metrics_snapshot
       ~observation
       ~result
       ~latency_ms
-      ~holder_wait_ms:_
       ~turn_cost
       ~(lifecycle : KEC.post_turn_lifecycle)
       ~last_provider_timeout_budget
@@ -428,7 +427,6 @@ let handle
       ~previous_social_state
       ~final_execution
       ~latency_ms
-      ~holder_wait_ms
       ~degraded_retry_applied
       ~degraded_retry_runtime
       ~fallback_reason
@@ -470,7 +468,6 @@ let handle
     ~observation
     ~result
     ~latency_ms
-    ~holder_wait_ms
     ~turn_cost
     ~lifecycle
     ~last_provider_timeout_budget;
@@ -509,7 +506,6 @@ let handle
     ~meta:updated_meta
     ~observation
     ~latency_ms
-    ~holder_wait_ms
     ~outcome:"success"
     ~degraded_retry_applied
     ?degraded_retry_runtime

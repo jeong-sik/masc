@@ -129,7 +129,6 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tool_execute_path.ml` - shell-surface
 - `lib/keeper/keeper_tool_execute_path.mli` - shell-surface
 - `lib/keeper/keeper_tool_execute_readonly_policy.ml` - shell-surface
-- `lib/keeper/keeper_tool_execute_readonly_policy.mli` - shell-surface
 - `lib/keeper/keeper_tool_execute_runtime_paths.ml` - shell-surface
 - `lib/keeper/keeper_tool_execute_runtime_paths.mli` - shell-surface
 - `lib/keeper_tool_execute_timeout/keeper_tool_execute_timeout.ml` - shell-surface

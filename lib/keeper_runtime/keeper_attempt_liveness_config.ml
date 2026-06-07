@@ -219,22 +219,22 @@ let budget_of_samples samples =
   | _ -> Keeper_attempt_liveness.bootstrap
 
 let budget_for_candidate ~candidate_key =
-  let key = normalize_candidate_key candidate_key in
-  let samples =
-    match key with
-    | None -> []
-    | Some key ->
-      with_success_history_lock (fun () ->
-          match Hashtbl.find_opt success_history key with
-          | Some samples -> samples
-          | None -> [])
-  in
-  match samples with
-  | [] -> { budget = Keeper_attempt_liveness.bootstrap; source = Bootstrap }
-  | samples ->
-    { budget = budget_of_samples samples
-    ; source = Observed_success { samples = List.length samples }
-    }
+  (* Always use bootstrap budget. Tuned budgets were removed because they
+     caused no_first_token kills on legitimately slow providers.
+
+     The tuning mechanism (budget_of_samples) tightened the TTFT budget
+     based on fast-provider success samples (e.g. Claude TTFT ~2s → floor
+     30s). When the tuned ttft_max dropped below OAS's stream_idle_timeout_s
+     (120s), the liveness guard would fire no_first_token before OAS's own
+     idle timeout could detect the stall. With bootstrap (ttft_max=600s),
+     OAS always fires first at 120s as a wire_error, so no_first_token
+     never fires — which is the correct behavior since OAS is better
+     positioned to detect genuine stalls.
+
+     The success history and tuning functions are retained for test
+     compatibility but budget_for_candidate no longer consumes them. *)
+  ignore candidate_key;
+  { budget = Keeper_attempt_liveness.bootstrap; source = Bootstrap }
 
 (* RFC-0022 §1 — see .mli for contract. *)
 let outer_wall_for_attempt

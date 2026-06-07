@@ -9,11 +9,13 @@ val resolve_tool_read_cwd :
 val resolve_tool_execute_cwd :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
+  write_enabled:bool ->
   args:Yojson.Safe.t ->
   (string, string) result
 (** Resolve typed Execute cwd. Uses the keeper write boundary default
-    for omitted cwd. Explicit cwd resolution never creates directories or
-    changes repo/worktree state. *)
+    for omitted cwd only when write execution is enabled; read-only
+    Execute uses the no-create playground root. Explicit cwd resolution
+    never creates directories or changes repo/worktree state. *)
 
 val auto_correct_path :
   meta:Keeper_meta_contract.keeper_meta -> string -> string option

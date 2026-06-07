@@ -95,7 +95,11 @@ let test_classify_destructive () =
     [ simple_ir "git" [ "push"; "--force"; "origin"; "main" ];
       simple_ir "git" [ "push"; "--force-with-lease"; "origin"; "main" ];
       simple_ir "bash" [ "-c"; "echo x > /tmp/x" ];
-      simple_ir "sh" [ "-c"; "echo x > /tmp/x" ] ]
+      simple_ir "sh" [ "-c"; "echo x > /tmp/x" ];
+      simple_ir "python3" [ "-c"; "open('x','w').write('1')" ];
+      simple_ir "node" [ "-e"; "require('fs').writeFileSync('x','1')" ];
+      simple_ir "pip" [ "install"; "pkg" ];
+      simple_ir "npx" [ "some-tool" ] ]
   in
   List.iter
     (fun ir ->

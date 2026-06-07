@@ -66,6 +66,16 @@ let test_static_safe_rejects_shell_interpreter () =
   | Ok _ -> Alcotest.fail "expected bash to be rejected"
 ;;
 
+let test_static_safe_rejects_shell_capable_executable () =
+  match verify_static_safe "python3 -c 'open(\"x\", \"w\").write(\"1\")'" with
+  | Error (Exec_policy.Command_not_allowed "python3") -> ()
+  | Error reason ->
+    Alcotest.failf
+      "expected python3 to fail static safe capability verification, got %s"
+      (Exec_policy.block_reason_tag reason)
+  | Ok _ -> Alcotest.fail "expected python3 to be rejected"
+;;
+
 let () =
   run "ppx_safe_shell" [
     "valid", [
@@ -76,5 +86,7 @@ let () =
       test_case "rejects dev mutation" `Quick test_static_safe_rejects_dev_mutation;
       test_case "rejects network command" `Quick test_static_safe_rejects_network_command;
       test_case "rejects shell interpreter" `Quick test_static_safe_rejects_shell_interpreter;
+      test_case "rejects shell-capable executable" `Quick
+        test_static_safe_rejects_shell_capable_executable;
     ];
   ]

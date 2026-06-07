@@ -25,11 +25,15 @@ let resolve_tool_read_cwd
     else
       Error (Printf.sprintf "cwd_not_directory: %s (path_is_file_not_directory)" cwd)
 
-let resolve_tool_execute_cwd ~config ~meta ~args =
+let resolve_tool_execute_cwd ~config ~meta ~write_enabled ~args =
   let raw_cwd = Safe_ops.json_string ~default:"" "cwd" args |> String.trim in
   let resolved =
     if raw_cwd = ""
-    then Ok (keeper_default_write_root ~config ~meta)
+    then
+      Ok
+        (if write_enabled
+         then keeper_default_write_root ~config ~meta
+         else Keeper_sandbox_repo_path.playground_root_no_create ~config ~meta)
     else resolve_keeper_path ~config ~meta ~raw_path:raw_cwd
   in
   match resolved with

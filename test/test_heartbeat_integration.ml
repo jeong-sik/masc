@@ -20,6 +20,10 @@ module Sup = Masc.Keeper_supervisor
 module KT = Keeper_types
 module KSM = Keeper_state_machine
 module Cfg = Env_config
+module Health = Masc.Keeper_health_probe
+module KHL = Masc.Keeper_heartbeat_loop
+module Obs = Masc.Keeper_heartbeat_loop_observations
+module WO = Masc.Keeper_world_observation
 
 let bp = "/tmp/test-heartbeat-integ"
 
@@ -64,6 +68,24 @@ let resolve_done_for_test reg value =
 let eio_test name fn =
   test_case name `Quick (fun () -> Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env); fn ())
+
+let base_observation : WO.world_observation =
+  { pending_mentions = []
+  ; pending_board_events = []
+  ; pending_scope_messages = []
+  ; message_cursor_updates = []
+  ; idle_seconds = 0
+  ; active_goals = []
+  ; continuity_summary = ""
+  ; context_ratio = 0.0
+  ; unclaimed_task_count = 0
+  ; claimable_task_count = 0
+  ; provider_capacity_blocked_task_count = 0
+  ; failed_task_count = 0
+  ; pending_verification_count = 0
+  ; backlog_updated_since_last_scheduled_autonomous = false
+  ; active_agent_count = 0
+  }
 
 (* ══════════════════════════════════════════════════════════
    1. Structured crash flow — supervisor catch simulation
@@ -697,6 +719,32 @@ let test_pipeline_stage_sensitivity () =
       "offline" stage
   ) offline_phases
 
+let test_runtime_backpressure_blocks_requested_turn () =
+  let meta = make_meta "runtime-backpressure" in
+  let obs =
+    { base_observation with
+      pending_mentions = [ "operator", "please run" ]
+    }
+  in
+  let decision =
+    KHL.decide_keepalive_scheduling
+      ~runtime_id_of_meta:(fun _ -> "runtime-test")
+      ~runtime_status_of_name:(fun ~runtime_id:_ ->
+        Health.Unhealthy "provider_capacity")
+      ~stop:(Atomic.make false)
+      ~meta
+      obs
+  in
+  check bool "world observation requested a turn" true
+    decision.requested_should_run_turn;
+  check bool "runtime backpressure blocks admission" false decision.should_run_turn;
+  (match decision.runtime_backpressure with
+   | Obs.Runtime_backpressured { reason; _ } ->
+     check string "backpressure reason" "provider_capacity" reason
+   | Obs.Runtime_admitted -> fail "runtime backpressure should reject turn");
+  check bool "skip reasons include runtime backpressure" true
+    (List.mem "runtime_backpressure" decision.skip_reasons)
+
 (* ── Test runner ──────────────────────────────────────────── *)
 
 let () =
@@ -740,14 +788,18 @@ let () =
       test_case "resolve_done reports prior outcome" `Quick
         test_resolve_done_reports_prior_outcome;
     ];
-	    "pipeline_stage_phase", [
-	      test_case "exhaustive 11-phase mapping" `Quick
-	        test_pipeline_stage_of_phase_exhaustive;
+    "pipeline_stage_phase", [
+      test_case "exhaustive 11-phase mapping" `Quick
+        test_pipeline_stage_of_phase_exhaustive;
 	      test_case "offline projection details remain distinct" `Quick
 	        test_pipeline_stage_detail_distinguishes_offline_projection;
 	      test_case "unregistered keeper → offline" `Quick
 	        test_pipeline_stage_unregistered_is_offline;
       test_case "sensitivity: active phases ≠ offline" `Quick
         test_pipeline_stage_sensitivity;
+    ];
+    "scheduling", [
+      test_case "runtime backpressure blocks requested turn" `Quick
+        test_runtime_backpressure_blocks_requested_turn;
     ];
   ]

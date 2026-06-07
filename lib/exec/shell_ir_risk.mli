@@ -70,9 +70,10 @@ val classify_words : string list -> risk_class
     typed GADT does not model the dangerous flag: [find -delete/-exec]
     (Destructive_protected), [find -fprintf/-fls], [sed -i], [sort -o]
     (R1). The command identity stays read-shaped; the flag carries the
-    risk, so it is string-borne like gh. Shell interpreters are classified
-    as [Destructive_protected], and network primitives as [R1], here rather
-    than in product-level executable-name gates. *)
+    risk, so it is string-borne like gh. Shell interpreters and shell-capable
+    executable surfaces ([python], [python3], [node], [pip], [npx]) are
+    classified as [Destructive_protected], and network primitives as [R1],
+    here rather than in product-level executable-name gates. *)
 
 val is_write_operation : string list -> bool
 (** [true] when the flattened word list indicates a write-level operation:

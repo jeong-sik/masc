@@ -120,7 +120,13 @@ let test_destructive_commands () =
   check "env git push --force origin main" Shell_ir_risk.Destructive_protected;
   check "cat ref | git push --force origin main" Shell_ir_risk.Destructive_protected;
   check "bash -c 'echo x > /tmp/x'" Shell_ir_risk.Destructive_protected;
-  check "sh -c 'echo x > /tmp/x'" Shell_ir_risk.Destructive_protected
+  check "sh -c 'echo x > /tmp/x'" Shell_ir_risk.Destructive_protected;
+  check "python -c 'open(\"x\", \"w\").write(\"1\")'" Shell_ir_risk.Destructive_protected;
+  check "python3 -c 'open(\"x\", \"w\").write(\"1\")'" Shell_ir_risk.Destructive_protected;
+  check "node -e 'require(\"fs\").writeFileSync(\"x\", \"1\")'"
+    Shell_ir_risk.Destructive_protected;
+  check "pip install pkg" Shell_ir_risk.Destructive_protected;
+  check "npx some-tool" Shell_ir_risk.Destructive_protected
 ;;
 
 let test_gh_r0_read () =

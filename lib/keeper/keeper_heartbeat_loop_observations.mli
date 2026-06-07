@@ -12,6 +12,28 @@ val clear_provider_timeout_failure_reason
   -> keeper_name:string
   -> unit
 
+type runtime_backpressure_decision =
+  | Runtime_admitted
+  | Runtime_backpressured of {
+      runtime_id : string;
+      reason : string;
+    }
+
+val runtime_backpressure_observation_reasons : reason:string -> string list
+
+val runtime_backpressure_decision
+  :  runtime_resilience:string option
+  -> should_run_turn:bool
+  -> runtime_id:string
+  -> runtime_status:Keeper_health_probe.health_status
+  -> runtime_backpressure_decision
+
+val record_runtime_backpressure_observation
+  :  base_path:string
+  -> keeper_name:string
+  -> reason:string
+  -> unit
+
 val prior_provider_timeout_strikes
   :  base_path:string
   -> keeper_name:string

@@ -183,6 +183,10 @@ let network_primitive_names =
   [ "curl"; "wget"; "ssh"; "scp"; "rsync"; "ftp"; "sftp"; "nc" ]
 ;;
 
+let shell_capable_executable_names =
+  [ "node"; "npx"; "pip"; "python"; "python3" ]
+;;
+
 (* STR-OK: Shell argv boundary parser; git option strings are normalized here
    before risk is converted into the typed [risk_class] envelope. *)
 let git_config_arg_is_read_flag = function
@@ -632,6 +636,8 @@ let action_flag_risk (words : string list) : risk_class =
 let classify_words (words : string list) : risk_class =
   let words = normalize_command_words words in
   if head_name_in shell_interpreter_names words then Destructive_protected
+  else if head_name_in shell_capable_executable_names words
+  then Destructive_protected
   else if head_name_in network_primitive_names words then R1_Reversible_mutation
   else if is_destructive_bash_operation words then Destructive_protected
   else
@@ -765,16 +771,18 @@ let risk_of_typed (w : Shell_ir_typed.wrapped) : risk_class =
   | W (Sed { in_place; _ }) ->
     if in_place then R1_Reversible_mutation else R0_Read
   | W (Rsync _) -> R1_Reversible_mutation
-  (* interpreters / build tools the word-list leaves at R0 *)
-  | W (Node _) -> R0_Read
-  | W (Python _) -> R0_Read
-  | W (Python3 _) -> R0_Read
-  | W (Pip _) -> R0_Read
+  (* Shell-capable interpreters/package entrypoints can run arbitrary
+     filesystem and process mutations even when their argv looks read-shaped. *)
+  | W (Node _) -> Destructive_protected
+  | W (Python _) -> Destructive_protected
+  | W (Python3 _) -> Destructive_protected
+  | W (Pip _) -> Destructive_protected
+  | W (Npx _) -> Destructive_protected
+  (* build and analysis tools the word-list leaves at R0 *)
   | W (Patch _) -> R0_Read
   | W (Cargo _) -> R0_Read
   | W (Go _) -> R0_Read
   | W (Opam _) -> R0_Read
-  | W (Npx _) -> R0_Read
   | W (Uv _) -> R0_Read
   | W (Glab _) -> R0_Read
   | W (Pytest _) -> R0_Read

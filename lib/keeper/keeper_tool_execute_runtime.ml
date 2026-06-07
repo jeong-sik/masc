@@ -123,6 +123,7 @@ let handle_tool_execute_typed
     Keeper_tool_execute_path.resolve_tool_execute_cwd
       ~config
       ~meta
+      ~write_enabled
       ~args
   with
     | Error e -> error_json e

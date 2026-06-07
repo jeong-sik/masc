@@ -403,6 +403,7 @@ let test_docker_container_cwd_maps_to_host_worktree () =
     Keeper_tool_execute_path.resolve_tool_execute_cwd
       ~config
       ~meta
+      ~write_enabled:true
       ~args
   with
   | Ok cwd ->
@@ -447,6 +448,29 @@ let test_docker_other_container_root_stays_blocked () =
   | Error e ->
     Alcotest.(check bool) "outside project root" true
       (String_util.contains_substring e "path_outside_project_root")
+
+let test_readonly_execute_omitted_cwd_does_not_create_write_root () =
+  setup ~keeper_name:"readonly-exec" ~sandbox:Keeper_types_profile_sandbox.Local
+  @@ fun ~base:_ ~config ~meta ~playground ->
+  cleanup_dir playground;
+  let args = `Assoc [] in
+  match
+    Keeper_tool_execute_path.resolve_tool_execute_cwd
+      ~config
+      ~meta
+      ~write_enabled:false
+      ~args
+  with
+  | Ok cwd -> Alcotest.fail ("read-only execute should not create cwd: " ^ cwd)
+  | Error e ->
+    Alcotest.(check bool)
+      "missing cwd reported"
+      true
+      (String_util.contains_substring e "cwd_not_directory");
+    Alcotest.(check bool)
+      "read-only execute did not create write root"
+      false
+      (Sys.file_exists playground)
 
 let test_docker_second_keeper_contained () =
   setup ~keeper_name:"poe" ~sandbox:Keeper_types_profile_sandbox.Docker
@@ -498,6 +522,10 @@ let () =
             `Quick test_docker_container_file_path_maps_to_host_worktree;
           Alcotest.test_case "docker other container root stays blocked"
             `Quick test_docker_other_container_root_stays_blocked;
+          Alcotest.test_case
+            "read-only Execute omitted cwd does not create write root"
+            `Quick
+            test_readonly_execute_omitted_cwd_does_not_create_write_root;
           Alcotest.test_case "docker second keeper also contained" `Quick
             test_docker_second_keeper_contained;
         ] );

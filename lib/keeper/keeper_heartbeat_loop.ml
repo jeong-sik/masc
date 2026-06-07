@@ -61,16 +61,34 @@ let heartbeat_event_intake = Stimulus_intake.heartbeat_event_intake
 
 (* Keepalive scheduling decision (record + decide function) extracted to
    [Keeper_heartbeat_loop_scheduling] (godfile decomp). *)
+type runtime_backpressure_decision = Observations.runtime_backpressure_decision =
+  | Runtime_admitted
+  | Runtime_backpressured of {
+      runtime_id : string;
+      reason : string;
+    }
+
 type keepalive_scheduling_decision = Keeper_heartbeat_loop_scheduling.keepalive_scheduling_decision = {
   turn_decision : Keeper_world_observation.keeper_cycle_decision;
   requested_should_run_turn : bool;
+  runtime_backpressure : runtime_backpressure_decision;
   should_run_turn : bool;
   verdict_reasons : string list;
+  admission_reasons : string list;
   skip_reasons : string list;
   channel : string;
 }
 
 let decide_keepalive_scheduling = Keeper_heartbeat_loop_scheduling.decide_keepalive_scheduling
+
+let runtime_status_of_health_snapshot ~base_path =
+  let snapshot = Keeper_health_probe.check_runtime_health ~base_path in
+  fun ~runtime_id ->
+    match List.assoc_opt runtime_id snapshot with
+    | Some true -> Keeper_health_probe.Healthy
+    | Some false -> Keeper_health_probe.Unhealthy "runtime_failure"
+    | None -> Keeper_health_probe.Unknown
+;;
 
 let provider_timeout_observation_reasons =
   Observations.provider_timeout_observation_reasons
@@ -78,6 +96,10 @@ let provider_timeout_observation_reasons =
 
 let record_provider_timeout_observation =
   Observations.record_provider_timeout_observation
+;;
+
+let record_runtime_backpressure_observation =
+  Observations.record_runtime_backpressure_observation
 ;;
 
 (* #10008 fm3: canonical metric name for proactive-scheduler skip
@@ -135,13 +157,19 @@ let run_keepalive_unified_turn
           ~meta:meta_after_triage
       in
       let scheduling =
-        decide_keepalive_scheduling ~stop ~meta:meta_after_triage obs
+        decide_keepalive_scheduling
+          ~runtime_status_of_name:
+            (runtime_status_of_health_snapshot ~base_path:ctx.config.base_path)
+          ~stop
+          ~meta:meta_after_triage
+          obs
       in
       let turn_decision = scheduling.turn_decision in
       (* Manual reconcile blocker check removed — keepers no longer get
          stuck behind sticky blockers. Failed turns record evidence via
          Keeper_registry; recovery is autonomous (next turn's observation)
          or operator-driven (board/keeper_chat), not blocker-driven. *)
+      let runtime_backpressure = scheduling.runtime_backpressure in
       let should_run_turn = scheduling.should_run_turn in
       let meta_after_cursor_persist =
         persist_message_cursor_updates
@@ -154,7 +182,7 @@ let run_keepalive_unified_turn
         | None -> "-"
       in
       let verdict_strs = scheduling.verdict_reasons in
-      let skip_reason_strs = scheduling.skip_reasons in
+      let admission_reason_strs = scheduling.admission_reasons in
       let channel_str = scheduling.channel in
       if not should_run_turn
       then (
@@ -173,15 +201,28 @@ let run_keepalive_unified_turn
              Otel_metric_store.inc_counter proactive_skip_reason_metric
                ~labels:[ "keeper", meta_after_triage.name; "reason", reason_str ]
                ())
-          skip_reason_strs;
+          admission_reason_strs;
         (* #10940 follow-up — Otel_metric_store counters aggregate skip reasons
            across time, but operators need recent skip verdict context
            when diagnosing idle/quiet keepers. Stamping the registry on
            every skip preserves that local context. *)
-        Keeper_registry.record_skip_reasons
-          ~base_path:ctx.config.base_path
-          meta_after_triage.name
-          ~reasons:skip_reason_strs;
+        (match runtime_backpressure with
+         | Runtime_admitted ->
+           Keeper_registry.record_skip_reasons
+             ~base_path:ctx.config.base_path
+             meta_after_triage.name
+             ~reasons:admission_reason_strs
+         | Runtime_backpressured { runtime_id; reason } ->
+           record_runtime_backpressure_observation
+             ~base_path:ctx.config.base_path
+             ~keeper_name:meta_after_triage.name
+             ~reason;
+           Log.Keeper.info
+             "keepalive turn backpressured for %s: runtime=%s reason=%s requested=[%s]"
+             meta_after_triage.name
+             runtime_id
+             reason
+             (String.concat "," verdict_strs));
         let paused_info =
           if meta_after_triage.paused
           then (
@@ -205,8 +246,8 @@ let run_keepalive_unified_turn
           else ""
         in
         let log_not_scheduled =
-          match turn_decision.verdict with
-          | Keeper_world_observation.Skip _ -> Log.Keeper.debug
+          match runtime_backpressure, turn_decision.verdict with
+          | Runtime_admitted, Keeper_world_observation.Skip _ -> Log.Keeper.debug
           | _ -> Log.Keeper.info
         in
         log_not_scheduled
@@ -215,7 +256,7 @@ let run_keepalive_unified_turn
           meta_after_triage.name
           turn_decision.should_run
           channel_str
-          (String.concat "," skip_reason_strs)
+          (String.concat "," admission_reason_strs)
           obs.idle_seconds
           (Keeper_keepalive_signal.format_since_last_scheduled_autonomous
              turn_decision.since_last_scheduled_autonomous)
@@ -314,19 +355,34 @@ let run_keepalive_unified_turn
         meta_after_cursor_persist)
       else if should_run_turn
       then (
-        Keeper_turn_holders.with_recorded_turn_holder
-          ~keeper_name:meta_after_triage.name
-          ~channel:turn_decision.channel
-          (fun ~holder_wait_ms ->
-             run_keeper_cycle
-               ~ctx
-               ~meta_after_cursor_persist
-               ~stop
-               ~obs
-               ~turn_decision
-               ~shared_context
-               ~holder_wait_ms
-               ()))
+        match
+          Keeper_turn_capacity.with_turn_capacity
+            ~keeper_name:meta_after_triage.name
+            ~channel:turn_decision.channel
+            (fun ~capacity_wait_ms ->
+              Keeper_turn_holders.with_recorded_turn_holder
+                ~keeper_name:meta_after_triage.name
+                ~channel:turn_decision.channel
+                (fun ~holder_wait_ms ->
+                  run_keeper_cycle
+                    ~ctx
+                    ~meta_after_cursor_persist
+                    ~stop
+                    ~obs
+                    ~turn_decision
+                    ~shared_context
+                    ~holder_wait_ms:(capacity_wait_ms + holder_wait_ms)
+                    ()))
+        with
+        | Ok meta -> meta
+        | Error { Keeper_turn_capacity.limit; inflight; waited_ms } ->
+          Log.Keeper.info
+            "%s: skipping turn because global turn capacity is full inflight=%d limit=%d waited_ms=%d"
+            meta_after_triage.name
+            inflight
+            limit
+            waited_ms;
+          meta_after_cursor_persist)
       else if obs.message_cursor_updates <> []
       then meta_after_cursor_persist
       else meta_after_triage

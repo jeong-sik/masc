@@ -65,13 +65,19 @@ val heartbeat_event_intake :
 type keepalive_scheduling_decision = {
   turn_decision : Keeper_world_observation.keeper_cycle_decision;
   requested_should_run_turn : bool;
+  runtime_backpressure : Keeper_heartbeat_loop_observations.runtime_backpressure_decision;
   should_run_turn : bool;
   verdict_reasons : string list;
+  admission_reasons : string list;
   skip_reasons : string list;
   channel : string;
 }
 
 val decide_keepalive_scheduling :
+  ?runtime_id_of_meta:(keeper_meta -> string) ->
+  ?runtime_resilience_of_name:(string -> string option) ->
+  ?runtime_status_of_name:
+    (runtime_id:string -> Keeper_health_probe.health_status) ->
   stop:bool Atomic.t ->
   meta:keeper_meta ->
   Keeper_world_observation.world_observation ->

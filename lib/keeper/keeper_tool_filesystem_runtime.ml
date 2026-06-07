@@ -2,7 +2,6 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_tool_shared_runtime
-open Ide_region_tracker
 
 (* Issue #8490: Variant SSOT for filesystem write mode. Adding a constructor
    forces compilation in [fs_write_mode_to_string] and
@@ -361,7 +360,7 @@ let raise_fs_edit_error ?fields message =
    a partition + repo-relative path. Three outcomes:
 
    1. [Repo_store.find_repo_by_path_prefix] hits AND the repo's [url]
-      normalises via [Ide_paths.canonical_url_of_remote] → [By_url slug]
+      normalises via [Agent_observation.canonical_url_of_remote] → [By_url slug]
       bucket + the repo-relative [rel_path].
    2. [Repo_store.find_repo_by_path_prefix] hits but the URL is blank or
       unparseable → [Orphan] + original path. Counter labelled
@@ -389,14 +388,14 @@ let resolve_partition_for_write ~base_dir ~kind ~file_path =
     let url = String.trim repo_url in
     if url = "" then begin
       bump_orphan ~reason:(snd orphan_reasons);
-      (Ide_paths.Orphan, file_path)
+      (Agent_observation.Orphan, file_path)
     end
     else
-      match Ide_paths.canonical_url_of_remote url with
+      match Agent_observation.canonical_url_of_remote url with
       | None ->
         bump_orphan ~reason:(fst orphan_reasons);
-        (Ide_paths.Orphan, file_path)
-      | Some slug -> (Ide_paths.By_url slug, rel)
+        (Agent_observation.Orphan, file_path)
+      | Some slug -> (Agent_observation.By_url slug, rel)
   in
   (* RFC-0128 §4.5 PR-6: keeper writes inside the sandbox playground
      never appear under a registered repo's [local_path] (the playground
@@ -417,12 +416,12 @@ let resolve_partition_for_write ~base_dir ~kind ~file_path =
          ~orphan_reasons:("sandbox_url_unparseable", "sandbox_blank_url")
      | None ->
        bump_orphan ~reason:"sandbox_unregistered_repo";
-       (Ide_paths.Orphan, file_path))
+       (Agent_observation.Orphan, file_path))
   | None ->
     (match Repo_store.find_repo_by_path_prefix ~base_path:base_dir abs with
      | None ->
        bump_orphan ~reason:"unregistered_repo";
-       (Ide_paths.Orphan, file_path)
+       (Agent_observation.Orphan, file_path)
      | Some (repo, rel) ->
        resolve_by_url
          ~rel
@@ -432,8 +431,8 @@ let resolve_partition_for_write ~base_dir ~kind ~file_path =
 
 (** After a successful file write, record the code region in [.masc-ide/].
     Fire-and-forget: errors are logged but never block the write path.
-    Uses [Ide_region_tracker.ingest_tool_call] which silently ignores
-    non-file-write tools.
+    Emits a neutral [Agent_observation.write_region_event]; the IDE adapter
+    registers the concrete region-tracker sink.
 
     RFC-0128 §4.5: the partition is resolved per-write from the
     [file_path] so sandbox-clone keeper writes and working-tree IDE
@@ -461,14 +460,13 @@ let track_write_region
     | Some Patch -> "edit_file"
     | _ -> "write_file"
   in
-  (* RFC-0128 PR-1e: the Ide_meta_sync invocation that used to live here
+  (* RFC-0128 PR-1e: the legacy meta-sync invocation that used to live here
      wrote to the Legacy partition (server base_path) while
-     Ide_region_tracker.ingest_tool_call below now writes to the
+     region observation below now writes to the
      resolved partition (PR-1c). That produced a double-write of the
      same region into two different bucket layouts. The full-file
      region fallback meta_sync was carrying for edit_file/apply_patch
-     is now served directly by ingest_tool_call (see the [extract_full_file]
-     fallback in Ide_region_tracker), so we drop this path entirely. *)
+     is now served directly by the IDE sink, so we drop this path entirely. *)
   let arguments =
     let fields = [ "path", `String rel_file_path; "content", `String content ] in
     match fs_write_mode_of_string_opt mode_raw with
@@ -479,12 +477,13 @@ let track_write_region
   in
   let tool_call_json = `Assoc [ "name", `String tool_name; "arguments", arguments ] in
   try
-    Ide_region_tracker.ingest_tool_call
-      ~base_dir
-      ~partition
-      ~keeper_id:keeper_name
-      ~turn
-      tool_call_json
+    Agent_observation.emit_write_region_event
+      { base_path = base_dir
+      ; partition
+      ; keeper_id = keeper_name
+      ; turn
+      ; tool_call_json
+      }
   with
   | exn ->
     Log.Keeper.warn

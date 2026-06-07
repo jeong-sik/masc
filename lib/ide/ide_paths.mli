@@ -32,6 +32,7 @@ val orphan_path : base_dir:string -> string
     loss is impossible. *)
 
 type partition =
+  Agent_observation.codebase_partition =
   | By_url of string
   | Orphan
 (** RFC-0128 §4.2 store partition selector.

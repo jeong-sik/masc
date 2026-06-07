@@ -35,6 +35,7 @@ let dev_programs =
     ; Javac
     ; Ls
     ; Make
+    ; Mkdir
     ; Mvn
     ; Node
     ; Npm

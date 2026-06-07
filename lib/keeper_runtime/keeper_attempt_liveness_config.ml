@@ -95,13 +95,23 @@ let valid_sample (s : success_sample) =
   && finite_non_negative s.max_inter_chunk_ms
   && finite_non_negative s.wall_ms
 
-(* RFC-0132 PR-2: liveness candidate key = external boundary; redact via SSOT. *)
+(* Legacy constant kept for test compatibility. Production code passes
+   the actual provider label via [candidate_key] so budgets are isolated
+   per provider instead of shared across all providers under one key.
+
+   Before this fix, all providers shared the key "runtime". Fast-provider
+   success samples (e.g. Claude TTFT ~2s) tuned the shared TTFT budget
+   down to the floor (30s). Slow providers (e.g. deepseek-v4-flash via
+   Cloudflare, TTFT 30-60s+) were then killed with no_first_token despite
+   making legitimate progress. The error message blamed the specific slow
+   provider, but the killing budget was set by a completely different
+   provider. *)
 let runtime_candidate_key =
   Boundary_redaction.to_string Boundary_redaction.runtime_model_label
 
 let normalize_candidate_key raw =
   let key = String.trim raw in
-  if key = "" then None else Some runtime_candidate_key
+  if key = "" then None else Some key
 
 let take = List.take
 

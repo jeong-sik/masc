@@ -35,7 +35,8 @@ val list_cursors :
     file path and a positive line number. *)
 
 val install_agent_observation_sinks : unit -> unit
-(** Register IDE storage as the sink for neutral [Agent_observation] events. *)
+(** Register IDE storage as the sink for neutral [Agent_observation] events,
+    including write-region observations. *)
 
 val ingest_tool_event :
   base_path:string ->

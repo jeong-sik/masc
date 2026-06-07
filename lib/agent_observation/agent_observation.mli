@@ -37,17 +37,37 @@ type turn_event =
   ; timestamp_ms : int64
   }
 
+type codebase_partition =
+  | By_url of string
+  | Orphan
+
+val canonical_url_of_remote : string -> string option
+(** [canonical_url_of_remote remote] normalises a git remote string into a
+    deterministic host_path slug. Returns [None] for blank, malformed, or
+    traversal-looking inputs. *)
+
+type write_region_event =
+  { base_path : string
+  ; partition : codebase_partition
+  ; keeper_id : string
+  ; turn : int
+  ; tool_call_json : Yojson.Safe.t
+  }
+
 type tool_event_sink = tool_event -> unit
 type pr_event_sink = pr_event -> unit
 type turn_event_sink = turn_event -> unit
+type write_region_sink = write_region_event -> unit
 
 val register_tool_event_sink : tool_event_sink -> unit
 val register_pr_event_sink : pr_event_sink -> unit
 val register_turn_event_sink : turn_event_sink -> unit
+val register_write_region_sink : write_region_sink -> unit
 
 val emit_tool_event : tool_event -> unit
 val emit_pr_event : pr_event -> unit
 val emit_turn_event : turn_event -> unit
+val emit_write_region_event : write_region_event -> unit
 
 val reset_for_testing : unit -> unit
 (** Reset sinks to no-op. Intended for isolated tests only. *)

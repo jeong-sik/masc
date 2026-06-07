@@ -725,6 +725,90 @@ let test_validate_args_tool_execute_accepts_typed_pipeline () =
       "expected typed tool_execute pipeline to pass validation, got %s"
       (Yojson.Safe.to_string (Tool_result.data result))
 
+let readonly_exec_input executable argv =
+  match
+    Keeper_tool_execute_typed_input.of_json
+      (`Assoc
+        [ "executable", `String executable
+        ; "argv", `List (List.map (fun arg -> `String arg) argv)
+        ; "cwd", `String "/tmp"
+        ])
+  with
+  | Ok input -> input
+  | Error msg ->
+    Alcotest.failf "expected typed Execute parse to pass, got %s" msg
+
+let readonly_pipeline_input stages =
+  match
+    Keeper_tool_execute_typed_input.of_json
+      (`Assoc
+        [ ( "pipeline"
+          , `List
+              (List.map
+                 (fun (executable, argv) ->
+                    `Assoc
+                      [ "executable", `String executable
+                      ; "argv", `List (List.map (fun arg -> `String arg) argv)
+                      ])
+                 stages) )
+        ; "cwd", `String "/tmp"
+        ])
+  with
+  | Ok input -> input
+  | Error msg ->
+    Alcotest.failf "expected typed Execute pipeline parse to pass, got %s" msg
+
+let expect_readonly_allowed label input =
+  match Keeper_tool_execute_typed_input.validate_readonly input with
+  | Ok () -> ()
+  | Error e ->
+    Alcotest.failf
+      "%s should pass read-only admission: %s"
+      label
+      (Keeper_tool_execute_input.typed_validation_error_text e)
+
+let expect_readonly_executable_rejected label input =
+  match Keeper_tool_execute_typed_input.validate_readonly input with
+  | Error (Keeper_tool_execute_typed_input.Executable_not_allowed _) -> ()
+  | Error e ->
+    Alcotest.failf
+      "%s should fail executable admission, got %s"
+      label
+      (Keeper_tool_execute_input.typed_validation_error_text e)
+  | Ok () -> Alcotest.failf "%s should fail executable admission" label
+
+let test_tool_execute_readonly_admission_allows_diagnostic_exec () =
+  expect_readonly_allowed
+    "rg"
+    (readonly_exec_input "rg" [ "--files"; "lib" ]);
+  expect_readonly_allowed "git" (readonly_exec_input "git" [ "status"; "--short" ])
+
+let test_tool_execute_readonly_admission_rejects_risky_exec () =
+  expect_readonly_executable_rejected
+    "python3"
+    (readonly_exec_input "python3" [ "-c"; "print(1)" ]);
+  expect_readonly_executable_rejected
+    "curl"
+    (readonly_exec_input "curl" [ "https://example.com" ]);
+  expect_readonly_executable_rejected "unknown" (readonly_exec_input "definitely-not-a-tool" [])
+
+let test_tool_execute_readonly_admission_rejects_pipeline_stage () =
+  expect_readonly_executable_rejected
+    "pipeline"
+    (readonly_pipeline_input
+       [ "rg", [ "--files"; "lib" ]; "python3", [ "-c"; "print(1)" ] ])
+
+let test_tool_execute_write_validation_stays_structural () =
+  match
+    Keeper_tool_execute_typed_input.validate
+      (readonly_exec_input "python3" [ "-c"; "print(1)" ])
+  with
+  | Ok () -> ()
+  | Error e ->
+    Alcotest.failf
+      "write-capable structural validation should not reject executable: %s"
+      (Keeper_tool_execute_input.typed_validation_error_text e)
+
 let tool_execute_exec_stage args =
   match Keeper_tool_execute_typed_input.of_json args with
   | Ok (Keeper_tool_execute_typed_input.Exec { executable; argv; _ }) ->
@@ -1584,6 +1668,14 @@ let () =
         test_validate_args_tool_execute_accepts_typed_exec;
       Alcotest.test_case "tool_execute accepts typed pipeline" `Quick
         test_validate_args_tool_execute_accepts_typed_pipeline;
+      Alcotest.test_case "tool_execute read-only allows diagnostics" `Quick
+        test_tool_execute_readonly_admission_allows_diagnostic_exec;
+      Alcotest.test_case "tool_execute read-only rejects risky exec" `Quick
+        test_tool_execute_readonly_admission_rejects_risky_exec;
+      Alcotest.test_case "tool_execute read-only rejects risky pipeline" `Quick
+        test_tool_execute_readonly_admission_rejects_pipeline_stage;
+      Alcotest.test_case "tool_execute write validation stays structural" `Quick
+        test_tool_execute_write_validation_stays_structural;
       Alcotest.test_case "tool_execute find expression not rewritten" `Quick
         test_tool_execute_find_expression_not_rewritten;
       Alcotest.test_case "tool_execute find global option not rewritten" `Quick

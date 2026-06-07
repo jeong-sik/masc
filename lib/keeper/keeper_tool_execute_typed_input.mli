@@ -80,6 +80,12 @@ type validation_error =
       executable : string;
       argv : string list;
     }
+  | Executable_not_allowed of {
+      executable : string;
+      reason : string;
+    }
+      (** Read-only Execute executable admission rejected an interpreter,
+          network primitive, spawn-capable binary, or unknown executable. *)
   | Argv_contains_shell_metachar of {
       executable : string;
       index : int;
@@ -135,6 +141,12 @@ val validate : execute_input -> (unit, validation_error) result
 (** Run all structural checks against [input].  Returns [Ok ()] on
     success, or the first {!validation_error} encountered.  No side
     effects, no exceptions. *)
+
+val validate_readonly : execute_input -> (unit, validation_error) result
+(** Run {!validate}, then enforce read-only Execute executable admission.
+    Interpreters, network primitives, spawn-capable binaries, and unknown
+    executables are rejected before dispatch because argv-only execution
+    cannot prove their filesystem effects are read-only. *)
 
 val to_shell_ir_unvalidated :
   ?sandbox:Masc_exec.Sandbox_target.t ->

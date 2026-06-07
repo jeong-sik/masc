@@ -30,6 +30,10 @@ type validation_error =
       executable : string;
       argv : string list;
     }
+  | Executable_not_allowed of {
+      executable : string;
+      reason : string;
+    }
   | Argv_contains_shell_metachar of {
       executable : string;
       index : int;
@@ -405,6 +409,37 @@ let check_exec ~executable ~argv ~cwd ~env =
     Ok ())
 ;;
 
+let readonly_executable_error executable reason =
+  Error (Executable_not_allowed { executable; reason })
+;;
+
+let check_readonly_executable executable =
+  let trimmed = String.trim executable in
+  match Masc_exec.Exec_program.of_string trimmed with
+  | Error (`Unknown _) ->
+    readonly_executable_error trimmed "empty executable"
+  | Ok bin ->
+    (match Masc_exec.Exec_program.known bin with
+     | Some (Git | Gh | Glab) -> Ok ()
+     | Some (Curl | Wget | Ssh | Scp | Rsync) ->
+       readonly_executable_error trimmed "network primitive"
+     | Some known ->
+       let flags = Typed_capabilities.classify_flags known in
+       if flags.spawn
+       then readonly_executable_error trimmed "spawn-capable executable"
+       else if flags.network
+       then readonly_executable_error trimmed "network-capable executable"
+       else Ok ()
+     | None ->
+       readonly_executable_error trimmed "unknown executable")
+;;
+
+let validate_readonly_stage { executable; argv; _ } =
+  let ( let* ) = Result.bind in
+  let* () = check_exec ~executable ~argv ~cwd:None ~env:[] in
+  check_readonly_executable executable
+;;
+
 let check_redirect_target ~fd = function
   | Inherit | Discard -> Ok ()
   | File path when String.length path > 0 && path.[0] = '/' -> Ok ()
@@ -433,6 +468,21 @@ let validate = function
       | [] -> Ok ()
       | { executable; argv } :: rest ->
         let* () = check_exec ~executable ~argv ~cwd:None ~env:[] in
+        each rest
+    in
+    each stages
+;;
+
+let validate_readonly input =
+  let ( let* ) = Result.bind in
+  let* () = validate input in
+  match input with
+  | Exec { executable; _ } -> check_readonly_executable executable
+  | Pipeline { stages; _ } ->
+    let rec each = function
+      | [] -> Ok ()
+      | stage :: rest ->
+        let* () = validate_readonly_stage stage in
         each rest
     in
     each stages
@@ -548,6 +598,14 @@ let pp_validation_error ppf = function
       ppf
       "executable %S was reported as duplicated in argv[0], but argv is empty"
       executable
+  | Executable_not_allowed { executable; reason } ->
+    Format.fprintf
+      ppf
+      "executable %S is not allowed for read-only typed Execute (%s); use a \
+       structured read/search tool, WebFetch/WebSearch for network access, or \
+       request write-enabled Execute when mutation is intentional"
+      executable
+      reason
   | Argv_contains_shell_metachar { executable; index; token } ->
     Format.fprintf
       ppf
@@ -603,5 +661,6 @@ let validation_error_alternatives : validation_error -> string list = function
   | Argv_contains_shell_pipeline_operator _ -> [ "Pipeline" ]
   | Argv_contains_shell_redirection _ ->
     [ "discard_stderr"; "discard_stdout"; "Pipeline" ]
+  | Executable_not_allowed _ -> [ "Read"; "Search"; "WebFetch"; "WebSearch" ]
   | _ -> []
 ;;

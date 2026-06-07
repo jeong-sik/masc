@@ -142,6 +142,25 @@ let handle_tool_execute_typed
              @ execution_location_fields cwd)
           e
       | Ok input ->
+        (match
+           if write_enabled
+           then Ok ()
+           else Keeper_tool_execute_typed_input.validate_readonly input
+         with
+         | Error e ->
+           let alts =
+             Keeper_tool_execute_typed_input.validation_error_alternatives e
+           in
+           let fields =
+             [ "typed", `Bool true; "cwd", `String cwd ]
+             @ execution_location_fields cwd
+             @
+             (match alts with
+              | [] -> []
+              | _ -> [ "alternatives", `List (List.map (fun s -> `String s) alts) ])
+           in
+           error_json ~fields (typed_validation_error_text e)
+         | Ok () ->
         let cmd = typed_input_command_text input in
         let input_ir = typed_input_shell_ir_unvalidated input in
         let cwd, root_git_cwd_error =
@@ -524,7 +543,7 @@ let handle_tool_execute_typed
                  ~status:result.status
                  ~output
                  ~env_snapshot:env_snap
-                 ()))
+                 ())))
 
 let handle_tool_execute
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)

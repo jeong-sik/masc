@@ -35,8 +35,6 @@ val provider_timeout_guard_sec : float
 val min_provider_timeout_budget_sec : float
 (** Minimum provider timeout budget (seconds). *)
 
-val sdk_error_kind : Agent_sdk.Error.sdk_error -> string
-
 type provider_timeout_budget = {
   effective_timeout_sec : float;
   adaptive_timeout_sec : float;

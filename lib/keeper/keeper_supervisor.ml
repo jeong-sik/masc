@@ -465,7 +465,14 @@ let sweep_and_recover (ctx : _ context) =
              ();
            Log.Keeper.info "%s: stale paused meta pruned" name
          with
-         | Eio.Cancel.Cancelled _ as e -> raise e
+         | Eio.Cancel.Cancelled _ ->
+           (* supervisor finally cleanup cancelled: cleanup arms must not
+              re-raise cancellation, because [Fun.protect] wraps exceptions
+              raised from cleanup as [Fun.Finally_raised] and can re-arm the
+              2026-05-05 cycle9 incident. *)
+           Log.Keeper.debug
+             "%s: supervisor finally cleanup cancelled during paused meta prune"
+             name
          | exn ->
            Log.Keeper.warn
              "%s: paused meta prune failed: %s"

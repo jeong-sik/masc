@@ -112,11 +112,8 @@ let test_applies_sleep_and_throttle_overrides () =
     "[bootstrap]\n\
      autoboot_max = 6\n\
      [autonomous]\n\
-     concurrency = 2\n\
      slot_wait_timeout_sec = 45\n\
      fairness_cooldown_sec = 3\n\
-     [reactive]\n\
-     concurrency = 4\n\
      [heartbeat]\n\
      sleep_chunk_sec = 1.5\n\
      board_debounce_sec = 30\n\
@@ -130,22 +127,16 @@ let test_applies_sleep_and_throttle_overrides () =
   let count, overrides =
     Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
   in
-  check int "applied sleep/throttle overrides" 12 count;
+  check int "applied sleep/throttle overrides" 10 count;
   check (option string) "autoboot max canonical env"
     (Some "6")
     (List.assoc_opt "MASC_KEEPER_AUTOBOOT_MAX" overrides);
-  check (option string) "autonomous concurrency"
-    (Some "2")
-    (List.assoc_opt "MASC_KEEPER_AUTONOMOUS_CONCURRENCY" overrides);
   check (option string) "autonomous slot wait"
     (Some "45")
     (List.assoc_opt "MASC_KEEPER_AUTONOMOUS_SLOT_WAIT_TIMEOUT_SEC" overrides);
   check (option string) "autonomous fairness cooldown"
     (Some "3")
     (List.assoc_opt "MASC_KEEPER_AUTONOMOUS_FAIRNESS_COOLDOWN_SEC" overrides);
-  check (option string) "reactive concurrency"
-    (Some "4")
-    (List.assoc_opt "MASC_KEEPER_REACTIVE_CONCURRENCY" overrides);
   check (option string) "sleep chunk"
     (Some "1.5")
     (List.assoc_opt "MASC_KEEPER_SLEEP_CHUNK_SEC" overrides);

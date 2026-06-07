@@ -485,8 +485,6 @@ let keeper_keepalive_entries =
   [
     entry ~default:"180.0" "MASC_KEEPER_ADMISSION_WAIT_TIMEOUT_SEC"
       "Max wait in admission queue before abandoning OAS attempt (clamped 5-1200)";
-    entry ~default:"(none)" "MASC_KEEPER_AUTONOMOUS_CONCURRENCY"
-      "Max concurrent autonomous keeper turns (clamped 1-8)";
     entry ~default:"30.0" "MASC_KEEPER_AUTONOMOUS_SLOT_WAIT_TIMEOUT_SEC"
       "Max wait for local keeper turn gate for autonomous cycles (clamped 5-300)";
     entry ~default:"60.0" "MASC_KEEPER_BOARD_DEBOUNCE_SEC"

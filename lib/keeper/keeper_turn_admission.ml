@@ -582,6 +582,30 @@ let wait_ms_since started_at =
   int_of_float ((if waited_sec < 0.0 then 0.0 else waited_sec) *. 1000.0)
 ;;
 
+let active_keepers_locked () =
+  Hashtbl.fold (fun keeper_name _ acc -> keeper_name :: acc) state.active_keepers []
+  |> List.sort String.compare
+;;
+
+let snapshot ?base_path ?(limit = state.last_limit) () =
+  let limit = max 1 limit in
+  refresh_policy ?base_path ~limit ();
+  with_lock (fun () ->
+    let global_inflight = Atomic.get global_inflight_atomic in
+    { fleet_state = state.policy.fleet_state
+    ; global_inflight
+    ; global_limit = limit
+    ; available = max 0 (limit - global_inflight)
+    ; queue_depth = List.length state.waiters
+    ; active_keepers = active_keepers_locked ()
+    ; waiters = List.map (fun pending -> pending.info) state.waiters
+    ; generation = state.policy.generation
+    ; reason = state.policy.reason
+    ; updated_by = state.policy.updated_by
+    ; updated_at = state.policy.updated_at
+    })
+;;
+
 let semaphore_wait_timeout_snapshot ?(holders = []) () =
   let global_inflight = Atomic.get global_inflight_atomic in
   let available = max 0 (effective_turn_throttle_limit - global_inflight) in
@@ -700,30 +724,6 @@ let token_cancel_p token = token.cancel_p
 let token_keeper_name token = token.keeper_name
 let token_acquired_at token = token.acquired_at
 let token_id token = token.token_id
-
-let active_keepers_locked () =
-  Hashtbl.fold (fun keeper_name _ acc -> keeper_name :: acc) state.active_keepers []
-  |> List.sort String.compare
-;;
-
-let snapshot ?base_path ?(limit = state.last_limit) () =
-  let limit = max 1 limit in
-  refresh_policy ?base_path ~limit ();
-  with_lock (fun () ->
-    let global_inflight = Atomic.get global_inflight_atomic in
-    { fleet_state = state.policy.fleet_state
-    ; global_inflight
-    ; global_limit = limit
-    ; available = max 0 (limit - global_inflight)
-    ; queue_depth = List.length state.waiters
-    ; active_keepers = active_keepers_locked ()
-    ; waiters = List.map (fun pending -> pending.info) state.waiters
-    ; generation = state.policy.generation
-    ; reason = state.policy.reason
-    ; updated_by = state.policy.updated_by
-    ; updated_at = state.policy.updated_at
-    })
-;;
 
 let waiter_json waiter =
   `Assoc

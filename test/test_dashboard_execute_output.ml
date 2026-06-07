@@ -119,6 +119,165 @@ let test_live_tail_subscriber_receives_line_and_close () =
              (closed_json |> member "type" |> to_string);
            check bool "closed" true (closed_json |> member "closed" |> to_bool)))
 
+let test_stream_start_emits_task_opened () =
+  Eio_main.run (fun env ->
+    match EO.subscribe ~keeper_name:"sangsu" with
+    | None -> fail "expected subscriber"
+    | Some subscriber ->
+      Fun.protect
+        ~finally:(fun () -> EO.unsubscribe subscriber)
+        (fun () ->
+           EO.record_stream_start ~keeper_name:"sangsu" ~task_id:(Some "task-stream");
+           let json =
+             Eio.Time.with_timeout_exn
+               (Eio.Stdenv.clock env)
+               1.0
+               (fun () -> EO.take_event subscriber |> EO.stream_event_json)
+           in
+           let open Yojson.Safe.Util in
+           check string "type" "task_opened" (json |> member "type" |> to_string);
+           check string "task" "task-stream" (json |> member "task_id" |> to_string);
+           check bool "closed" false (json |> member "closed" |> to_bool)))
+
+let test_stream_chunk_emits_line () =
+  Eio_main.run (fun env ->
+    match EO.subscribe ~keeper_name:"sangsu" with
+    | None -> fail "expected subscriber"
+    | Some subscriber ->
+      Fun.protect
+        ~finally:(fun () -> EO.unsubscribe subscriber)
+        (fun () ->
+           EO.record_stream_start ~keeper_name:"sangsu" ~task_id:(Some "task-stream");
+           (* drain task_opened *)
+           let _ =
+             Eio.Time.with_timeout_exn
+               (Eio.Stdenv.clock env)
+               1.0
+               (fun () -> EO.take_event subscriber |> EO.stream_event_json)
+           in
+           EO.append_stream_chunk ~keeper_name:"sangsu" ~stream:`Stdout "hello\nworld";
+           let line1 =
+             Eio.Time.with_timeout_exn
+               (Eio.Stdenv.clock env)
+               1.0
+               (fun () -> EO.take_event subscriber |> EO.stream_event_json)
+           in
+           let line2 =
+             Eio.Time.with_timeout_exn
+               (Eio.Stdenv.clock env)
+               1.0
+               (fun () -> EO.take_event subscriber |> EO.stream_event_json)
+           in
+           let open Yojson.Safe.Util in
+           check string "first type" "line" (line1 |> member "type" |> to_string);
+           check
+             string
+             "first text"
+             "hello"
+             (line1 |> member "line" |> member "text" |> to_string);
+           check string "first stream" "stdout" (line1 |> member "line" |> member "stream" |> to_string);
+           check string "second type" "line" (line2 |> member "type" |> to_string);
+           check
+             string
+             "second text"
+             "world"
+             (line2 |> member "line" |> member "text" |> to_string)))
+
+let test_stream_end_emits_task_closed () =
+  Eio_main.run (fun env ->
+    match EO.subscribe ~keeper_name:"sangsu" with
+    | None -> fail "expected subscriber"
+    | Some subscriber ->
+      Fun.protect
+        ~finally:(fun () -> EO.unsubscribe subscriber)
+        (fun () ->
+           EO.record_stream_start ~keeper_name:"sangsu" ~task_id:(Some "task-stream");
+           let _ =
+             Eio.Time.with_timeout_exn
+               (Eio.Stdenv.clock env)
+               1.0
+               (fun () -> EO.take_event subscriber |> EO.stream_event_json)
+           in
+           EO.record_stream_end
+             ~keeper_name:"sangsu"
+             ~task_id:(Some "task-stream")
+             ~status:status_ok;
+           let closed_json =
+             Eio.Time.with_timeout_exn
+               (Eio.Stdenv.clock env)
+               1.0
+               (fun () -> EO.take_event subscriber |> EO.stream_event_json)
+           in
+           let open Yojson.Safe.Util in
+           check
+             string
+             "type"
+             "task_closed"
+             (closed_json |> member "type" |> to_string);
+           check bool "closed" true (closed_json |> member "closed" |> to_bool);
+           check int "status code" 0 (closed_json |> member "status" |> member "code" |> to_int)))
+
+let test_stream_completed_does_not_duplicate_events () =
+  Eio_main.run (fun env ->
+    match EO.subscribe ~keeper_name:"sangsu" with
+    | None -> fail "expected subscriber"
+    | Some subscriber ->
+      Fun.protect
+        ~finally:(fun () -> EO.unsubscribe subscriber)
+        (fun () ->
+           EO.record_stream_start ~keeper_name:"sangsu" ~task_id:(Some "task-stream");
+           (* task_opened *)
+           let _ =
+             Eio.Time.with_timeout_exn
+               (Eio.Stdenv.clock env)
+               1.0
+               (fun () -> EO.take_event subscriber)
+           in
+           EO.append_stream_chunk ~keeper_name:"sangsu" ~stream:`Stdout " streamed line\n";
+           (* line event from chunk *)
+           let _ =
+             Eio.Time.with_timeout_exn
+               (Eio.Stdenv.clock env)
+               1.0
+               (fun () -> EO.take_event subscriber)
+           in
+           EO.record_stream_end
+             ~keeper_name:"sangsu"
+             ~task_id:(Some "task-stream")
+             ~status:status_ok;
+           EO.record_completed
+             ~keeper_name:"sangsu"
+             ~task_id:(Some "task-stream")
+             ~stdout:" streamed line\n"
+             ~stderr:""
+             ~status:status_ok
+             ~streamed:true
+             ();
+           (* record_stream_end emitted task_closed; record_completed with
+              [~streamed:true] must not emit additional line or closed events. *)
+           let closed_json =
+             Eio.Time.with_timeout_exn
+               (Eio.Stdenv.clock env)
+               1.0
+               (fun () -> EO.take_event subscriber |> EO.stream_event_json)
+           in
+           let open Yojson.Safe.Util in
+           check
+             string
+             "type"
+             "task_closed"
+             (closed_json |> member "type" |> to_string);
+           (* Subscriber queue should now be empty because record_completed
+              with [~streamed:true] does not emit line events. *)
+           try
+             Eio.Time.with_timeout_exn
+               (Eio.Stdenv.clock env)
+               0.1
+               (fun () -> EO.take_event subscriber |> ignore);
+             fail "unexpected extra event after streamed completion"
+           with
+           | Eio.Time.Timeout -> ()))
+
 let test_sse_frame () =
   let frame = EO.sse_frame (`Assoc [ "type", `String "snapshot" ]) in
   check bool "event header" true (String.starts_with ~prefix:"event: output\n" frame);
@@ -165,6 +324,12 @@ let () =
             "live tail subscriber receives line and close"
             `Quick
             (with_fresh test_live_tail_subscriber_receives_line_and_close)
+        ; test_case "stream start emits task_opened" `Quick (with_fresh test_stream_start_emits_task_opened)
+        ; test_case "stream chunk emits line" `Quick (with_fresh test_stream_chunk_emits_line)
+        ; test_case "stream end emits task_closed" `Quick (with_fresh test_stream_end_emits_task_closed)
+        ; test_case "stream completed does not duplicate events"
+            `Quick
+            (with_fresh test_stream_completed_does_not_duplicate_events)
         ; test_case "sse frame" `Quick test_sse_frame
         ; test_case "routes match keeper path" `Quick test_dashboard_routes_match_keeper_path
         ] )

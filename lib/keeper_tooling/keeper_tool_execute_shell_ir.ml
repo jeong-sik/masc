@@ -108,6 +108,7 @@ let dispatch_classified
       ?base_path
       ~workdir
       ~sandbox
+      ?on_output_chunk
       envelope
   =
   let ir = envelope.Masc_exec.Shell_ir_risk.ir in
@@ -127,7 +128,7 @@ let dispatch_classified
     ~f_allow:(fun _context ->
       match validate_paths ?keeper_id ?base_path ~workdir ir with
       | Error e -> Error (Path_reject e)
-      | Ok () -> Ok (Masc_exec.Exec_dispatch.dispatch_decided ?timeout_sec envelope))
+      | Ok () -> Ok (Masc_exec.Exec_dispatch.dispatch_decided ?timeout_sec ?on_output_chunk envelope))
 ;;
 
 (* TEL-OK: wrapper only classifies before delegating to dispatch_classified. *)
@@ -140,6 +141,7 @@ let dispatch
       ?base_path
       ~workdir
       ~sandbox
+      ?on_output_chunk
       ir
   =
   dispatch_classified
@@ -151,5 +153,6 @@ let dispatch
     ?base_path
     ~workdir
     ~sandbox
+    ?on_output_chunk
     (classify ir)
 ;;

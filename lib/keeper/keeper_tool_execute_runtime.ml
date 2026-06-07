@@ -373,6 +373,46 @@ let handle_tool_execute_typed
           (* NDT-OK: wall clock is used only for elapsed telemetry, never for
              dispatch branching or policy decisions. *)
           let t0 = Unix.gettimeofday () in
+          let task_id =
+            Option.map Keeper_id.Task_id.to_string meta.current_task_id
+          in
+          let stream_dispatch =
+            Sys.getenv_opt "MASC_STREAM_EXECUTE_OUTPUT" <> Some "false"
+          in
+          if stream_dispatch
+          then (
+            try
+              !Keeper_keepalive_signal.record_execute_stream_start_callback
+                ~keeper_name:meta.name
+                ~task_id
+            with
+            | Eio.Cancel.Cancelled _ as e -> raise e
+            | exn ->
+              Log.Dashboard.warn
+                "execute stream start callback failed keeper=%s: %s"
+                meta.name
+                (Printexc.to_string exn));
+          let on_output_chunk chunk =
+            if stream_dispatch
+            then (
+              let stream, data =
+                match chunk with
+                | `Stdout s -> `Stdout, s
+                | `Stderr s -> `Stderr, s
+              in
+              try
+                !Keeper_keepalive_signal.record_execute_stream_chunk_callback
+                  ~keeper_name:meta.name
+                  ~stream
+                  data
+              with
+              | Eio.Cancel.Cancelled _ as e -> raise e
+              | exn ->
+                Log.Dashboard.warn
+                  "execute stream chunk callback failed keeper=%s: %s"
+                  meta.name
+                  (Printexc.to_string exn))
+          in
           let dispatch_result =
             Keeper_tool_execute_shell_ir.dispatch_classified
               ~allowed_commands
@@ -380,6 +420,7 @@ let handle_tool_execute_typed
               ~base_path:root
               ~workdir:cwd
               ~sandbox:dispatch_sandbox
+              ~on_output_chunk
               envelope
           in
           match dispatch_result with
@@ -427,14 +468,31 @@ let handle_tool_execute_typed
               then result.stdout
               else result.stdout ^ result.stderr
             in
+            let status_json =
+              Keeper_alerting_path.process_status_to_json result.status
+            in
+            if stream_dispatch
+            then (
+              try
+                !Keeper_keepalive_signal.record_execute_stream_end_callback
+                  ~keeper_name:meta.name
+                  ~task_id
+                  ~status:status_json
+              with
+              | Eio.Cancel.Cancelled _ as e -> raise e
+              | exn ->
+                Log.Dashboard.warn
+                  "execute stream end callback failed keeper=%s: %s"
+                  meta.name
+                  (Printexc.to_string exn));
             (try
                !Keeper_keepalive_signal.record_execute_output_callback
                  ~keeper_name:meta.name
-                 ~task_id:
-                   (Option.map Keeper_id.Task_id.to_string meta.current_task_id)
+                 ~task_id
                  ~stdout:result.stdout
                  ~stderr:result.stderr
-                 ~status:(Keeper_alerting_path.process_status_to_json result.status)
+                 ~status:status_json
+                 ~streamed:stream_dispatch
              with
              | Eio.Cancel.Cancelled _ as e -> raise e
              | exn ->

@@ -158,7 +158,7 @@ let process_spec_of_simple (s : Shell_ir.simple) =
   in
   (argv, env, cwd)
 
-let dispatch_simple ?timeout_sec ?stdin_content (s : Shell_ir.simple) =
+let dispatch_simple ?timeout_sec ?stdin_content ?on_output_chunk (s : Shell_ir.simple) =
   let argv, env, cwd = process_spec_of_simple s in
   let timeout_sec = dispatch_timeout_sec timeout_sec in
   match redirect_plan_of_redirects s.redirects with
@@ -171,24 +171,58 @@ let dispatch_simple ?timeout_sec ?stdin_content (s : Shell_ir.simple) =
       let run () =
         match stdin_content with
         | None ->
-          Exec_gate.run_argv_with_status_split
-            ~actor:`Tool_local_runtime
-            ~raw_source
-            ~summary:"exec dispatch simple"
-            ~timeout_sec
-            ?env:host_env
-            ?cwd
-            argv
+          (match on_output_chunk with
+           | None ->
+             Exec_gate.run_argv_with_status_split
+               ~actor:`Tool_local_runtime
+               ~raw_source
+               ~summary:"exec dispatch simple"
+               ~timeout_sec
+               ?env:host_env
+               ?cwd
+               argv
+           | Some on_chunk ->
+             Exec_gate.run_argv_with_status_split_streaming
+               ~actor:`Tool_local_runtime
+               ~raw_source
+               ~summary:"exec dispatch simple streaming"
+               ~timeout_sec
+               ?env:host_env
+               ?cwd
+               ~on_stdout_chunk:(fun chunk -> on_chunk (`Stdout chunk))
+               ~on_stderr_chunk:(fun chunk -> on_chunk (`Stderr chunk))
+               argv)
         | Some stdin_content ->
-          Exec_gate.run_argv_with_stdin_and_status_split
-            ~actor:`Tool_local_runtime
-            ~raw_source
-            ~summary:"exec dispatch simple stdin"
-            ~timeout_sec
-            ?env:host_env
-            ?cwd
-            ~stdin_content
-            argv
+          (match on_output_chunk with
+           | None ->
+             Exec_gate.run_argv_with_stdin_and_status_split
+               ~actor:`Tool_local_runtime
+               ~raw_source
+               ~summary:"exec dispatch simple stdin"
+               ~timeout_sec
+               ?env:host_env
+               ?cwd
+               ~stdin_content
+               argv
+           | Some on_chunk ->
+             (* WORKAROUND: streaming stdin path is not yet wired; callback
+                receives the full stdout/stderr after completion. 근본 해결:
+                extend Process_eio.run_argv_with_stdin_and_status_split with
+                chunk callbacks and route here. *)
+             let status, stdout, stderr =
+               Exec_gate.run_argv_with_stdin_and_status_split
+                 ~actor:`Tool_local_runtime
+                 ~raw_source
+                 ~summary:"exec dispatch simple stdin streaming"
+                 ~timeout_sec
+                 ?env:host_env
+                 ?cwd
+                 ~stdin_content
+                 argv
+             in
+             on_chunk (`Stdout stdout);
+             on_chunk (`Stderr stderr);
+             status, stdout, stderr)
       in
       (match run () with
        | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
@@ -197,11 +231,20 @@ let dispatch_simple ?timeout_sec ?stdin_content (s : Shell_ir.simple) =
        | status, stdout, stderr ->
          apply_redirect_plan redirect_plan { status; stdout; stderr })
     | Docker { runner; _ } ->
+    (* WORKAROUND: Docker sandbox runner does not expose chunk callbacks yet;
+       the callback, if provided, receives the full captured output after
+       completion.  근본 해결: extend the Docker runner contract with
+       ~on_stdout_chunk/~on_stderr_chunk. *)
     (match runner ~stdin_content ~argv ~env ~cwd ~timeout_sec with
      | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
      | exception exn ->
        { status = Unix.WEXITED 1; stdout = ""; stderr = Printexc.to_string exn }
      | status, stdout, stderr ->
+       (match on_output_chunk with
+        | None -> ()
+        | Some on_chunk ->
+          on_chunk (`Stdout stdout);
+          on_chunk (`Stderr stderr));
        apply_redirect_plan redirect_plan { status; stdout; stderr }))
 
 (* --- pipeline + entry point (mutually recursive) --- *)
@@ -357,11 +400,14 @@ let rec dispatch_pipeline ?timeout_sec stages =
                       invalid_pipeline
                         "nested pipeline not supported in native dispatch" ))))
 
-and dispatch ?timeout_sec (ir : Shell_ir.t) =
+and dispatch ?timeout_sec ?on_output_chunk (ir : Shell_ir.t) =
   match ir with
-  | Shell_ir.Simple s -> dispatch_simple ?timeout_sec s
-  | Pipeline stages -> dispatch_pipeline ?timeout_sec stages
+  | Shell_ir.Simple s -> dispatch_simple ?timeout_sec ?on_output_chunk s
+  | Pipeline stages ->
+    (* Pipelines do not yet expose per-stage chunk callbacks; an
+       [on_output_chunk] provided here is ignored. *)
+    dispatch_pipeline ?timeout_sec stages
 
-let dispatch_decided ?timeout_sec (envelope : Shell_ir_risk.decided Shell_ir_risk.decided_ir) :
+let dispatch_decided ?timeout_sec ?on_output_chunk (envelope : Shell_ir_risk.decided Shell_ir_risk.decided_ir) :
     dispatch_result =
-  dispatch ?timeout_sec envelope.Shell_ir_risk.ir
+  dispatch ?timeout_sec ?on_output_chunk envelope.Shell_ir_risk.ir

@@ -513,6 +513,50 @@ let spawn_and_drain_both ?phase_ref ~sw pm ~cwd ?env ?stdin_source argv stdout_b
   | `Exited n -> Unix.WEXITED n
   | `Signaled n -> Unix.WSIGNALED n
 
+let spawn_and_drain_both_streaming ?phase_ref ~sw pm ~cwd ?env ?stdin_source argv
+    ~on_stdout_chunk ~on_stderr_chunk stdout_buf stderr_buf =
+  let stdout_r, stdout_w = Eio.Process.pipe ~sw pm in
+  let stderr_r, stderr_w = Eio.Process.pipe ~sw pm in
+  let proc =
+    Eio.Process.spawn ~sw pm ~cwd ?env
+      ?stdin:stdin_source
+      ~stdout:stdout_w
+      ~stderr:stderr_w
+      argv
+  in
+  Option.iter (fun r -> r := Timeout_origin.Command) phase_ref;
+  Eio.Flow.close stdout_w;
+  Eio.Flow.close stderr_w;
+  let chunk_size = 4096 in
+  let rec drain r buf ~on_chunk chunk =
+    match
+      try Eio.Flow.single_read r chunk with
+      | End_of_file -> 0
+    with
+    | 0 -> Eio.Flow.close r
+    | n ->
+      let s = Cstruct.to_string (Cstruct.sub chunk 0 n) in
+      on_chunk s;
+      Buffer.add_string buf s;
+      drain r buf ~on_chunk chunk
+  in
+  (try
+     Eio.Fiber.both
+       (fun () ->
+         let chunk = Cstruct.create chunk_size in
+         drain stdout_r stdout_buf ~on_chunk:on_stdout_chunk chunk)
+       (fun () ->
+         let chunk = Cstruct.create chunk_size in
+         drain stderr_r stderr_buf ~on_chunk:on_stderr_chunk chunk)
+   with Eio.Cancel.Cancelled _ as e ->
+     (try Eio.Flow.close stdout_r with Eio.Cancel.Cancelled _ as ce -> raise ce | exn -> Log.Misc.warn "spawn_and_drain_both_streaming: stdout flow close failed: %s" (Printexc.to_string exn));
+     (try Eio.Flow.close stderr_r with Eio.Cancel.Cancelled _ as ce -> raise ce | exn -> Log.Misc.warn "spawn_and_drain_both_streaming: stderr flow close failed: %s" (Printexc.to_string exn));
+     raise e);
+  let status = Eio.Process.await proc in
+  match status with
+  | `Exited n -> Unix.WEXITED n
+  | `Signaled n -> Unix.WSIGNALED n
+
 type pipeline_stage = {
   argv : string list;
   env : string array option;
@@ -812,6 +856,88 @@ let run_argv_with_status_split ?(timeout_sec = default_timeout_sec) ?env ?cwd
                     "",
                     process_error_output ~label
                       ~reason:(reason_of_exn_for_output exn) () )))
+
+let run_argv_with_status_split_streaming
+    ?(timeout_sec = default_timeout_sec)
+    ?env
+    ?cwd
+    ~on_stdout_chunk
+    ~on_stderr_chunk
+    (argv : string list)
+    : Unix.process_status * string * string
+  =
+  Exec_tap.record ~kind:Exec_tap.Process_eio_run_argv_with_status ~argv ?env ?cwd ();
+  with_spawn_guard (fun () ->
+      if not (is_initialized ())
+      then run_unix_argv_with_status_split_fallback ~timeout_sec ?env ?cwd argv
+      else (
+        match get_proc_mgr (), get_clock (), get_cwd_default () with
+        | Error _, _, _ | _, Error _, _ | _, _, Error _ ->
+          run_unix_argv_with_status_split_fallback ~timeout_sec ?env ?cwd argv
+        | Ok pm, Ok clk, Ok default_cwd ->
+          let effective_cwd =
+            match cwd with
+            | None -> default_cwd
+            | Some dir -> Eio.Path.(default_cwd / dir)
+          in
+          let stdout_buf = Buffer.create default_buffer_size in
+          let stderr_buf = Buffer.create 256 in
+          let label = String.concat " " (List.map Filename.quote argv) in
+          let phase_ref = ref Timeout_origin.Spawn in
+          try
+            Eio.Time.with_timeout_exn clk timeout_sec (fun () ->
+                let unix_status =
+                  Eio.Switch.run (fun sw ->
+                      spawn_and_drain_both_streaming
+                        ~phase_ref
+                        ~sw
+                        pm
+                        ~cwd:effective_cwd
+                        ?env
+                        ~on_stdout_chunk
+                        ~on_stderr_chunk
+                        argv
+                        stdout_buf
+                        stderr_buf)
+                in
+                unix_status, Buffer.contents stdout_buf, Buffer.contents stderr_buf)
+          with
+          | Eio.Time.Timeout ->
+            Log.Misc.warn "[Process_eio] Timeout after %.0fs (%s): %s"
+              timeout_sec (Timeout_origin.to_label !phase_ref) label;
+            observe_process_timeout argv ~timeout_sec ~origin:!phase_ref;
+            let timeout_status = Unix.WEXITED 124 in
+            let stdout = Buffer.contents stdout_buf in
+            let stderr = Buffer.contents stderr_buf in
+            let stderr =
+              if String.trim stdout = "" && String.trim stderr = ""
+              then process_error_output ~label
+                     ~reason:(Printf.sprintf "timeout after %.0fs" timeout_sec) ()
+              else stderr
+            in
+            timeout_status, stdout, stderr
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn ->
+            if should_retry_unix_fallback exn
+            then (
+              Log.Misc.warn
+                "[Process_eio] argv bind error, retrying via Unix fallback: %s — %s"
+                label (Printexc.to_string exn);
+              run_unix_argv_with_status_split_fallback ~timeout_sec ?env ?cwd argv)
+            else if is_downstream_pipe_closed exn
+            then (
+              Log.Misc.debug
+                "[Process_eio] argv pipe closed by reader: %s — %s"
+                label (Printexc.to_string exn);
+              ( Unix.WEXITED 127,
+                "",
+                process_error_output ~label ~reason:"pipe closed by reader" () ))
+            else (
+              Log.Misc.error "[Process_eio] argv error: %s — %s" label
+                (Printexc.to_string exn);
+              ( Unix.WEXITED 127,
+                "",
+                process_error_output ~label ~reason:(reason_of_exn_for_output exn) () ))))
 
 let run_argv_pipeline_with_status_split ?(timeout_sec = default_timeout_sec)
     (stages : pipeline_stage list) : Unix.process_status * string * string =

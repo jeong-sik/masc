@@ -423,10 +423,27 @@ let run_try_provider
         finalize_liveness ();
         Printexc.raise_with_backtrace exn bt
     in
+    (* Per-lane concurrency gate: limits inflight requests per runtime lane
+       using the max-concurrent value from runtime.toml binding config.
+       Placed outside with_liveness_attempt because:
+       - Lane gate = admission control (prevents dispatch)
+       - Liveness = observation/kill (monitors running stream) *)
+    let lane_key = Runtime_candidate.provider_label candidate in
+    let lane_max_concurrent =
+      match Runtime.get_runtime_by_id ctx.runtime_id with
+      | Some rt ->
+        let b = rt.Runtime.binding in
+        b.max_concurrent
+      | None -> 0  (* runtime resolved earlier; 0 disables the gate as fallback *)
+    in
     (match
-       (* RFC-0206: the runtime CLI-preflight wrapper is gone; run the single
-          provider attempt directly. *)
-       (fun () ->
+       Runtime_lane_capacity.with_lane_capacity
+         ~lane_key
+         ~max_concurrent:lane_max_concurrent
+         (fun ~capacity_wait_ms ->
+            let _ = capacity_wait_ms in
+            (* RFC-0206: the runtime CLI-preflight wrapper is gone; run the single
+               provider attempt directly. *)
             let result =
               with_liveness_attempt (fun ~attempt_sw ~liveness_on_event ->
                 let effective_checkpoint =
@@ -484,11 +501,22 @@ let run_try_provider
                                 })))
                    | None -> run_fn ()))
             in
-            Ok result) ()
+            result)
      with
-     | Error err ->
+     | Error rejection ->
        finalize_liveness ();
-       Error err, None, None
+       Error
+         (Agent_sdk.Error.Api
+            (Timeout
+               { message =
+                   Printf.sprintf
+                     "Runtime lane %s capacity full: %d/%d slots, waited %dms"
+                     rejection.lane_key
+                     rejection.inflight
+                     rejection.limit
+                     rejection.waited_ms
+               })),
+       None, None
      | Ok result ->
        finalize_liveness ();
        let liveness_success_sample = liveness_success_sample () in

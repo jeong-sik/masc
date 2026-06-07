@@ -64,14 +64,14 @@ let () =
   let parent p = Filename.dirname p in
   let exe = Sys.executable_name in
   let project_root = parent (parent (parent (parent exe))) in
-  let candidates =
-    [ Filename.concat project_root "lib/keeper/keeper_turn_slot.ml"
-    ; "lib/keeper/keeper_turn_slot.ml"
-    ; "../lib/keeper/keeper_turn_slot.ml"
-    ; "../../lib/keeper/keeper_turn_slot.ml"
-    ]
-  in
-  let src =
+  let read_source rel_path =
+    let candidates =
+      [ Filename.concat project_root rel_path
+      ; rel_path
+      ; Filename.concat ".." rel_path
+      ; Filename.concat "../.." rel_path
+      ]
+    in
     match List.find_opt Sys.file_exists candidates with
     | Some p -> read_file p
     | None ->
@@ -81,6 +81,7 @@ let () =
             (cwd=%s, exe=%s): %s"
            (Sys.getcwd ()) exe (String.concat ", " candidates))
   in
+  let src = read_source "lib/keeper/keeper_turn_slot.ml" in
   (* The cancel-safe release path has two cleanup shapes:
      recorded-holder release catches [consume_force_release] failures, while
      token release is wired through the switch finalizer and force-release
@@ -125,4 +126,13 @@ let () =
     ~label:"bookkeeping metric name"
     src
     "Keeper_metrics.(to_string TurnSlotBookkeepingFailures)";
+  let heartbeat_src = read_source "lib/keeper/keeper_heartbeat_loop.ml" in
+  assert_contains
+    ~label:"fleet stop expected heartbeat path"
+    heartbeat_src
+    "| Keeper_turn_admission.Fleet_stopped_by_operator ->";
+  assert_contains
+    ~label:"fleet stop heartbeat log"
+    heartbeat_src
+    "keeper cycle cancelled because fleet admission was stopped";
   print_endline "test_keeper_turn_slot_release_cancel_safe: OK"

@@ -96,6 +96,16 @@ describe('flow-control-state', () => {
     expect(flowState.value).toBe('paused')
   })
 
+  it('marks stopped fleet admission as stopped', async () => {
+    callMcpTool.mockResolvedValueOnce(
+      JSON.stringify({ status: 'stopped', paused: false, pause_scope: 'fleet_admission' }),
+    )
+
+    await fetchPauseStatus()
+
+    expect(flowState.value).toBe('stopped')
+  })
+
   it('trims status strings before matching pause state', async () => {
     callMcpTool.mockResolvedValueOnce(
       JSON.stringify({ status: ' paused ', paused: null }),

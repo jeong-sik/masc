@@ -419,6 +419,11 @@ let run_keepalive_unified_turn
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | Keeper_registry.Keeper_fiber_crash as e -> raise e
+    | Keeper_turn_admission.Fleet_stopped_by_operator ->
+      Log.Keeper.info
+        "%s: keeper cycle cancelled because fleet admission was stopped"
+        meta_after_triage.name;
+      meta_after_triage
     | exn ->
       Otel_metric_store.inc_counter
         Keeper_metrics.(to_string CycleExceptions)

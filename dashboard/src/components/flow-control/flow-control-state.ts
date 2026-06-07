@@ -6,7 +6,7 @@ import { showToast } from '../common/toast'
 import { dashboardAuthAccess } from '../../lib/dashboard-auth-access'
 import { errorToString } from '../../lib/format-string'
 
-type FlowState = 'unknown' | 'initializing' | 'running' | 'paused'
+type FlowState = 'unknown' | 'initializing' | 'running' | 'paused' | 'stopped'
 export const flowState = signal<FlowState>('unknown')
 export const flowLoading = signal(false)
 
@@ -48,6 +48,10 @@ export async function fetchPauseStatus(): Promise<void> {
     const status = normalizedFlowStatus(parsed.status)
     if (parsed.paused === true || status === 'paused') {
       flowState.value = 'paused'
+      return
+    }
+    if (status === 'stopped') {
+      flowState.value = 'stopped'
       return
     }
     if (parsed.initializing === true || status === 'initializing') {

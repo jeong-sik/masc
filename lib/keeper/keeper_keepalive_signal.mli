@@ -56,6 +56,7 @@ val record_execute_output_callback :
    stdout:string ->
    stderr:string ->
    status:Yojson.Safe.t ->
+   streamed:bool ->
    unit)
     ref
 
@@ -65,12 +66,44 @@ val register_record_execute_output :
    stdout:string ->
    stderr:string ->
    status:Yojson.Safe.t ->
+   streamed:bool ->
    unit) ->
   unit
 
+val record_execute_stream_chunk_callback :
+  (keeper_name:string ->
+   stream:[ `Stdout | `Stderr ] ->
+   string ->
+   unit)
+    ref
 
+val register_record_execute_stream_chunk :
+  (keeper_name:string ->
+   stream:[ `Stdout | `Stderr ] ->
+   string ->
+   unit) ->
+  unit
 
+val record_execute_stream_start_callback :
+  (keeper_name:string -> task_id:string option -> unit) ref
 
+val register_record_execute_stream_start :
+  (keeper_name:string -> task_id:string option -> unit) ->
+  unit
+
+val record_execute_stream_end_callback :
+  (keeper_name:string ->
+   task_id:string option ->
+   status:Yojson.Safe.t ->
+   unit)
+    ref
+
+val register_record_execute_stream_end :
+  (keeper_name:string ->
+   task_id:string option ->
+   status:Yojson.Safe.t ->
+   unit) ->
+  unit
 
 (** FSM guard identity helpers (Cycle 43).
     Wrapped by [Keeper_fsm_guard_runtime.wrap_unit] at call sites. *)

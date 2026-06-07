@@ -23,5 +23,6 @@
   masc_cancel_safe
   eio
   eio.unix
+  cstruct
   unix
   threads))

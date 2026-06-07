@@ -1,8 +1,8 @@
-(** Keeper cycle execution under slot control with error-class
+(** Keeper cycle execution with error-class
     handling, extracted from [keeper_heartbeat_loop.ml] (godfile
     decomp).
 
-    [run_keeper_cycle_with_slot] wraps a single keeper-cycle execution
+    [run_keeper_cycle] wraps a single keeper-cycle execution
     in an [in_turn_liveness_pulse] heartbeat fiber, then triages the
     result. The function is the canonical error-classification layer
     for the keepalive loop:
@@ -39,14 +39,14 @@ open Keeper_types_profile
 module In_turn_pulse = Keeper_heartbeat_loop_in_turn_pulse
 module Observations = Keeper_heartbeat_loop_observations
 
-let run_keeper_cycle_with_slot
+let run_keeper_cycle
       ~ctx
       ~meta_after_cursor_persist
       ~stop
       ~obs
       ~(turn_decision : Keeper_world_observation.keeper_cycle_decision)
       ~shared_context
-      ~semaphore_wait_ms
+      ~holder_wait_ms
       ()
   =
   match
@@ -57,7 +57,7 @@ let run_keeper_cycle_with_slot
         ~observation:obs
         ~generation:meta_after_cursor_persist.runtime.generation
         ~channel:turn_decision.channel
-        ~semaphore_wait_ms
+        ~holder_wait_ms
         ~shared_context
         ())
   with

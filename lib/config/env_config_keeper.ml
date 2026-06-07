@@ -160,17 +160,6 @@ module KeeperPollIntervals = struct
   let crash_persistence_drain_sec =
     Float.max 0.1 (get_float ~default:2.0 "MASC_KEEPER_CRASH_PERSIST_DRAIN_INTERVAL_SEC")
   ;;
-
-  (** Autonomous-turn semaphore queue poll interval in seconds.
-
-      Polled inside the autonomous-turn admission loop in
-      {!Keeper_keepalive}. Lower values reduce ticket-grant latency
-      under contention; higher values lower idle CPU.
-      Must be >= 0.001 (1ms floor — anything tighter is busy-loop).
-      Default: 0.05. *)
-  let autonomous_queue_poll_sec =
-    Float.max 0.001 (get_float ~default:0.05 "MASC_KEEPER_AUTONOMOUS_QUEUE_POLL_SEC")
-  ;;
 end
 
 (** {1 Keeper Runtime Configuration} *)
@@ -371,19 +360,6 @@ module KeeperKeepalive = struct
       (Float.min
          1200.0
          (get_float ~default:180.0 "MASC_KEEPER_ADMISSION_WAIT_TIMEOUT_SEC"))
-  ;;
-
-  (** Maximum time a scheduled autonomous keeper will wait for the local
-      keeper turn gate before skipping the cycle. Reactive turns still wait
-      indefinitely because they correspond to explicit external triggers.
-      Env: [MASC_KEEPER_AUTONOMOUS_SLOT_WAIT_TIMEOUT_SEC]. Default: 30.0.
-      Range: [5, 300]. *)
-  let autonomous_slot_wait_timeout_sec =
-    Float.max
-      5.0
-      (Float.min
-         300.0
-         (get_float ~default:30.0 "MASC_KEEPER_AUTONOMOUS_SLOT_WAIT_TIMEOUT_SEC"))
   ;;
 
   (** Per-call OAS timeout override in seconds.

@@ -121,7 +121,6 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
                     [
                         '{"status":"skipped","error":"runtime provider health is advisory; bootstrap skips live probe"}',
                         "[WARN] [Auth] archived credential sangsu.json (reason: bare-form keeper credential is dead after PR-3b1 starvation)",
-                        "[WARN] keeper skipping turn after semaphore wait p99=240s",
                         "pricing_catalog_miss model=provider-k-4.7",
                         "[WARN] [Governance] Governance judge returned unparseable response (Lenient_json fallback hit; 3809 chars)",
                         "[WARN] [Keeper] keeper TOML jobsian_purist.toml has unknown keys: keeper.base",
@@ -137,8 +136,7 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
 
             report = observe_goal_loop_logs.scan_logs([str(path)], max_samples=2)
 
-        self.assertEqual(report.total_lines, 10)
-        self.assertEqual(report.patterns["keeper_skipping_turn"].count, 1)
+        self.assertEqual(report.total_lines, 9)
         self.assertEqual(report.patterns["pricing_catalog_miss"].count, 1)
         self.assertEqual(report.patterns["provider_health_skipped"].count, 1)
         self.assertEqual(report.patterns["credential_archived_starvation"].count, 1)
@@ -230,8 +228,8 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         assert report.audit_catalog is not None
         self.assertEqual(report.audit_catalog["status"], "INCOMPLETE")
         self.assertEqual(report.audit_catalog["expected_findings_total"], 206)
-        self.assertEqual(report.audit_catalog["itemized_findings_total"], 18)
-        self.assertEqual(report.audit_catalog["missing_itemized_findings"], 188)
+        self.assertEqual(report.audit_catalog["itemized_findings_total"], 17)
+        self.assertEqual(report.audit_catalog["missing_itemized_findings"], 189)
         self.assertEqual(report.audit_catalog["source_documents_expected"], 12)
         self.assertEqual(report.audit_catalog["source_documents_covered"], 12)
         self.assertEqual(report.audit_catalog["source_documents_status"], "COMPLETE")
@@ -245,7 +243,7 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
             report.audit_catalog["consistency_findings"][0]["finding_id"],
             "CONSISTENCY-1",
         )
-        self.assertEqual(report.summary["findings_total"], 18)
+        self.assertEqual(report.summary["findings_total"], 17)
         self.assertEqual(report.summary["not_evaluated"], 9)
         self.assertEqual(by_id["NF-2"].status, "EVIDENCE_PRESENT")
         self.assertEqual(by_id["CD-8"].status, "NOT_EVALUATED")
@@ -287,8 +285,8 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         self.assertEqual(source_artifacts["source_artifacts_missing"], 12)
         self.assertEqual(source_artifacts["source_itemized_id_status"], "INCOMPLETE")
         self.assertEqual(source_artifacts["source_itemized_finding_ids_total"], 0)
-        self.assertEqual(source_artifacts["catalog_itemized_finding_ids_total"], 18)
-        self.assertEqual(source_artifacts["catalog_ids_missing_from_source"], 18)
+        self.assertEqual(source_artifacts["catalog_itemized_finding_ids_total"], 17)
+        self.assertEqual(source_artifacts["catalog_ids_missing_from_source"], 17)
         self.assertEqual(source_artifacts["source_structured_item_ids_total"], 0)
         self.assertEqual(source_artifacts["source_structured_item_ids_uncataloged"], 0)
         self.assertEqual(
@@ -427,15 +425,15 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         self.assertEqual(source_artifacts["source_artifacts_missing"], 0)
         self.assertEqual(source_artifacts["line_ref_errors"], 0)
         self.assertEqual(source_artifacts["source_itemized_id_status"], "COMPLETE")
-        self.assertEqual(source_artifacts["source_itemized_finding_ids_total"], 18)
-        self.assertEqual(source_artifacts["catalog_itemized_finding_ids_total"], 18)
+        self.assertEqual(source_artifacts["source_itemized_finding_ids_total"], 17)
+        self.assertEqual(source_artifacts["catalog_itemized_finding_ids_total"], 17)
         self.assertEqual(source_artifacts["source_ids_missing_from_catalog"], 0)
         self.assertEqual(source_artifacts["catalog_ids_missing_from_source"], 0)
-        self.assertEqual(source_artifacts["source_structured_item_ids_total"], 18)
+        self.assertEqual(source_artifacts["source_structured_item_ids_total"], 17)
         self.assertEqual(source_artifacts["source_structured_item_ids_uncataloged"], 0)
         families = structured_family_map(source_artifacts)
         self.assertEqual(families["CC"]["total"], 1)
-        self.assertEqual(families["R-FATAL"]["total"], 2)
+        self.assertEqual(families["R-FATAL"]["total"], 1)
         self.assertEqual(families["NF"]["total"], 7)
         self.assertEqual(source_artifacts["source_aggregate_claim_status"], "COMPLETE")
         self.assertEqual(source_artifacts["source_aggregate_claim_sources_total"], 6)
@@ -451,7 +449,7 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         self.assertEqual(source_artifacts["source_identity_status"], "NOT_APPLICABLE")
 
     def test_orient_catalog_validates_source_identity_hash_and_line_count(self) -> None:
-        content = "206건 감사 결과\nR-FATAL-1\n"
+        content = "206건 감사 결과\nCF-1\n"
         catalog = {
             "external_sources": [
                 {
@@ -470,7 +468,7 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
                     ],
                 }
             ],
-            "findings": [{"finding_id": "R-FATAL-1"}],
+            "findings": [{"finding_id": "CF-1"}],
         }
 
         with tempfile.TemporaryDirectory() as raw_dir:
@@ -495,7 +493,7 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         self.assertEqual(orient_goal_loop_logs.source_text_line_count("a\nb\n"), 2)
 
     def test_source_artifact_decode_error_is_reported_without_crashing(self) -> None:
-        content_bytes = b"R-FATAL-1\n\xff\n"
+        content_bytes = b"CF-1\n\xff\n"
         catalog = {
             "external_sources": [
                 {
@@ -505,7 +503,7 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
                     "line_refs": [1, 2],
                 }
             ],
-            "findings": [{"finding_id": "R-FATAL-1"}],
+            "findings": [{"finding_id": "CF-1"}],
         }
 
         with tempfile.TemporaryDirectory() as raw_dir:
@@ -537,12 +535,12 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
                     "line_refs": [1],
                 }
             ],
-            "findings": [{"finding_id": "R-FATAL-1"}],
+            "findings": [{"finding_id": "CF-1"}],
         }
 
         with tempfile.TemporaryDirectory() as raw_dir:
             source_path = Path(raw_dir) / "GOAL_LOOP_INTEGRATION.md"
-            source_path.write_text("R-FATAL-1\n", encoding="utf-8")
+            source_path.write_text("CF-1\n", encoding="utf-8")
             with mock.patch.object(
                 Path,
                 "read_bytes",
@@ -731,7 +729,7 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         source_artifacts = report.audit_catalog["source_artifacts"]
         self.assertEqual(source_artifacts["status"], "INCOMPLETE")
         self.assertEqual(source_artifacts["source_itemized_id_status"], "COMPLETE")
-        self.assertEqual(source_artifacts["source_structured_item_ids_total"], 18)
+        self.assertEqual(source_artifacts["source_structured_item_ids_total"], 17)
         self.assertEqual(source_artifacts["source_structured_item_ids_uncataloged"], 0)
         self.assertEqual(
             source_artifacts["source_aggregate_claim_status"], "INCOMPLETE"
@@ -919,8 +917,8 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('"source_artifacts_resolved": 12', result.stdout)
-        self.assertIn('"source_itemized_finding_ids_total": 18', result.stdout)
-        self.assertIn('"source_structured_item_ids_total": 18', result.stdout)
+        self.assertIn('"source_itemized_finding_ids_total": 17', result.stdout)
+        self.assertIn('"source_structured_item_ids_total": 17', result.stdout)
         self.assertIn(
             '"source_structured_item_ids_uncataloged_occurrences": 0',
             result.stdout,

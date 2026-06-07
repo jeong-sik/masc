@@ -787,7 +787,6 @@ Keeper가 응답하지 않을 때, `diagnostic.quiet_reason`을 확인:
 
 - **turn 루프 내부** — `Eio.Time.sleep`, gRPC, 파일 I/O 등 자연적인 Eio 스케줄러 양보점이 이미 존재.
 - **heartbeat cycle** — 헤드에서 `Eio.Time.sleep`이 호출되므로 루프 전체가 이미 양보함.
-- **turn admission 공정성 대기** — 전용 `Eio.Condition.await`가 사용됨.
 - **단일 keeper 단일 작업** — 루프가 없으므로 계장 불필요.
 
 ### 관련 환경 변수

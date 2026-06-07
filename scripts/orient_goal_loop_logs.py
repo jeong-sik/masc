@@ -115,12 +115,6 @@ class OrientReport:
 
 FINDINGS: tuple[FindingSpec, ...] = (
     FindingSpec(
-        "R-FATAL-1",
-        "keeper_semaphore_wait_no_fallback",
-        "critical",
-        ("keeper_skipping_turn",),
-    ),
-    FindingSpec(
         "CF-1",
         "pricing_catalog_miss",
         "critical",

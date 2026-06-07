@@ -496,19 +496,8 @@ let handle_keeper_get_subroutes state req request reqd =
         | Ok (Some m) ->
           let models = [ "candidate" ] in
           let provider_health = [] in
-          (* Slot occupancy from the local runtime pool. The runtime FSM
-             shares these slots across all keepers, so rendering the
-             fleet-global (used, capacity) is the honest value — a
-             per-runtime split would claim an isolation the runtime does
-             not actually provide. *)
-          let slot_state =
-            let used = Local_runtime_pool.allocated_slots () in
-            let max = Local_runtime_pool.configured_capacity () in
-            if max > 0 then Some (used, max) else None
-          in
           Keeper_decision_audit.runtime_fsm_to_mermaid
             ~provider_health
-            ?slot_state
             ~effective_runtime_reason:"runtime"
             ~models ~last_provider_result:None ()
         | _ ->

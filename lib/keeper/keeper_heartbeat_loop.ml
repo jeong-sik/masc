@@ -105,7 +105,7 @@ let provider_timeout_metric_outcome =
 let persist_message_cursor_updates = Keeper_heartbeat_loop_persist_cursor.persist_message_cursor_updates
 
 (** Run keeper cycle with holder diagnostics. *)
-let run_keeper_cycle_with_slot = Keeper_heartbeat_loop_cycle_with_slot.run_keeper_cycle_with_slot
+let run_keeper_cycle = Keeper_heartbeat_loop_cycle.run_keeper_cycle
 
 let run_keepalive_unified_turn
       ~(ctx : _ context)
@@ -312,18 +312,17 @@ let run_keepalive_unified_turn
       else if should_run_turn
       then (
         Keeper_turn_holders.with_recorded_turn_holder
-          ~runtime_profile:(runtime_id_of_meta meta_after_triage)
           ~keeper_name:meta_after_triage.name
           ~channel:turn_decision.channel
-          (fun ~semaphore_wait_ms ->
-             run_keeper_cycle_with_slot
+          (fun ~holder_wait_ms ->
+             run_keeper_cycle
                ~ctx
                ~meta_after_cursor_persist
                ~stop
                ~obs
                ~turn_decision
                ~shared_context
-               ~semaphore_wait_ms
+               ~holder_wait_ms
                ()))
       else if obs.message_cursor_updates <> []
       then meta_after_cursor_persist

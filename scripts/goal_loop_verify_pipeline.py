@@ -25,7 +25,6 @@ PROMPT_TLA_SPECS = ("TierRouting.tla", "Validation.tla", "Liveness.tla")
 REQUIRED_VERIFY_GATE_IDS = (
     "unit_tests",
     "keeper_turn_success_rate_healthy",
-    "no_semaphore_skip",
     "no_pricing_miss",
     "no_utf8_repair",
     "recovery_executed",
@@ -40,7 +39,6 @@ REQUIRED_VERIFY_GATE_IDS = (
 )
 METRIC_SERIES_SOURCES = {
     "keeper_turn_success_rate": ["masc_keeper_turns_total"],
-    "keeper_skipping_turn_rate_5m": ["masc_keeper_semaphore_wait_timeout_total"],
     "pricing_catalog_miss_total": ["masc_pricing_catalog_miss_total"],
     "persistence_utf8_repair_total": ["masc_persistence_utf8_repair_total"],
     "dashboard_snapshot_latency_p99": [
@@ -56,7 +54,6 @@ DEFAULT_MUST_CONTAIN = (
     "fallback_ladder_activated",
 )
 DEFAULT_MUST_NOT_CONTAIN = (
-    "skipping turn.*semaphore wait",
     "pricing_catalog_miss",
     "persistence UTF-8 repaired",
     "Lenient_json fallback hit",
@@ -270,14 +267,6 @@ def build_metric_gates(metrics_json: dict[str, Any] | None) -> list[VerifyGate]:
             category="metric_verification",
             predicate="> 0.95",
             command=metric_snapshot_command("keeper_turn_success_rate"),
-        ),
-        metric_gate(
-            metrics,
-            gate_id="no_semaphore_skip",
-            metric_name="keeper_skipping_turn_rate_5m",
-            category="regression_metric",
-            predicate="== 0",
-            command=metric_snapshot_command("keeper_skipping_turn_rate_5m"),
         ),
         metric_gate(
             metrics,

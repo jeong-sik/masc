@@ -82,27 +82,23 @@ type turn_holder_control =
   }
 
 val run_with_recorded_holder :
-  runtime_profile:string ->
   keeper_name:string ->
   channel:Keeper_world_observation.keeper_cycle_channel ->
-  channel_label:string ->
   started_at:float ->
-  (semaphore_wait_ms:int -> holder_control:turn_holder_control -> 'a) ->
+  (holder_wait_ms:int -> holder_control:turn_holder_control -> 'a) ->
   'a
 
 (** Holder-diagnostic wrapper. This records holder rows around the callback; it
     does not acquire runtime capacity or a semaphore. *)
 val with_recorded_turn_holder :
-  ?runtime_profile:string ->
   keeper_name:string ->
   channel:Keeper_world_observation.keeper_cycle_channel ->
-  (semaphore_wait_ms:int -> 'a) ->
+  (holder_wait_ms:int -> 'a) ->
   'a
 
 (** Like [with_recorded_turn_holder] but exposes [holder_control] to the callback. *)
 val with_recorded_turn_holder_control :
-  ?runtime_profile:string ->
   keeper_name:string ->
   channel:Keeper_world_observation.keeper_cycle_channel ->
-  (semaphore_wait_ms:int -> holder_control:turn_holder_control -> 'a) ->
+  (holder_wait_ms:int -> holder_control:turn_holder_control -> 'a) ->
   'a

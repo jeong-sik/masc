@@ -70,7 +70,6 @@ end
 
 module KeeperPollIntervals : sig
   val crash_persistence_drain_sec : float
-  val autonomous_queue_poll_sec : float
 end
 
 (** {1 Keeper runtime} *)
@@ -120,7 +119,6 @@ module KeeperKeepalive : sig
   val max_idle_turns_reactive : int
   val turn_timeout_sec : float
   val admission_wait_timeout_sec : float
-  val autonomous_slot_wait_timeout_sec : float
   val oas_timeout_sec_override : float option
   val oas_max_turns_per_call : int
   val oas_max_turns_per_call_scheduled_autonomous : int

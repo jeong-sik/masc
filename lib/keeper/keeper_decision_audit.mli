@@ -99,11 +99,8 @@ type provider_health =
     served the most recent successful response.
 
     Optional parameters bind runtime state from RuntimeLiveness.tla
-    ([phealth], slot occupancy) and Keeper_runtime_routing (the reason
-    the routing layer picked this runtime profile, e.g. phase-derived
-    vs explicit override). When omitted, the output falls back to the
-    previous non-live rendering — callers can adopt parameters
-    incrementally without breaking existing consumers.
+    ([phealth]) and Keeper_runtime_routing (the reason the routing layer
+    picked this runtime profile, e.g. phase-derived vs explicit override).
 
     The emitted edge labels are phrased in terms of
     RuntimeLiveness.tla actions (AdmitKeeper/TryNonLast/TryLast/
@@ -112,7 +109,6 @@ type provider_health =
     when the underlying provider protocol changes. *)
 val runtime_fsm_to_mermaid :
   ?provider_health:(string * provider_health) list ->
-  ?slot_state:(int * int) ->
   ?effective_runtime_reason:string ->
   models:string list ->
   last_provider_result:string option ->

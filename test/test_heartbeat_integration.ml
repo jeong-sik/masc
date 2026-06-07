@@ -536,7 +536,7 @@ let test_stop_keepalive_force_releases_held_slots () =
   Masc.Keeper_keepalive.with_recorded_turn_holder
     ~keeper_name
     ~channel:Masc.Keeper_world_observation.Reactive
-    (fun ~semaphore_wait_ms:_ ->
+    (fun ~holder_wait_ms:_ ->
        let now = Time_compat.now () in
        check bool "precondition holder present" true
          (List.mem keeper_name

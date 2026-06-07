@@ -162,10 +162,9 @@ val set_budget_exhaustion_for_test :
     to [reset_budget_exhaustion]. *)
 
 val with_recorded_turn_holder :
-  ?runtime_profile:string ->
   keeper_name:string ->
   channel:Keeper_world_observation.keeper_cycle_channel ->
-  (semaphore_wait_ms:int -> 'a) ->
+  (holder_wait_ms:int -> 'a) ->
   'a
 
 (** Test-only wrapper for the in-turn liveness pulse lifecycle. *)

@@ -139,19 +139,9 @@ val metric_file_lock_table_cas_retries : string
     [env_var, reason] with reason in [invalid_float | negative_or_nan]. *)
 val metric_tool_keeper_cache_ttl_parse_failures : string
 
-(** #9771: counter for keeper turn-admission semaphore wait timeouts.
-    Labels: [keeper, channel], where [channel] is the keeper turn decision
-    channel. The detailed admission phase is recorded in timeout diagnostics. *)
-
 (** Counter for cancellation-safe keeper turn-holder release bookkeeping
     callbacks that could not complete. Labels: [op, kind] with
     kind in [cancelled | exception]. *)
-
-(** Cumulative keeper turn-admission semaphore wait seconds. Labels:
-    [keeper_name, runtime_profile, channel]. *)
-
-(** Cumulative bucket counter for keeper turn-admission semaphore wait seconds.
-    Labels: [keeper_name, runtime_profile, channel, le]. *)
 
 (** P-DASH-02: gauge for keeper turn wait queue depth.
     Labels: [channel] with [autonomous_queue] for the explicit autonomous

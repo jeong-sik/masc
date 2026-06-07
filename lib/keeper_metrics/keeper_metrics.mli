@@ -29,10 +29,7 @@ type t =
   | SupervisorSweepStarts
   | SupervisorLastSweepUnixtime
   | DomainPoolFork
-  | SemaphoreWaitTimeout
   | TurnHolderBookkeepingFailures
-  | SemaphoreWaitSeconds
-  | SemaphoreWaitSecondsBucket
   | SlotYieldTotal
   | Compactions
   | CompactionRatioChange

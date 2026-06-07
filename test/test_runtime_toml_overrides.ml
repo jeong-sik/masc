@@ -112,7 +112,6 @@ let test_applies_sleep_and_throttle_overrides () =
     "[bootstrap]\n\
      autoboot_max = 6\n\
      [autonomous]\n\
-     slot_wait_timeout_sec = 45\n\
      fairness_cooldown_sec = 3\n\
      [heartbeat]\n\
      sleep_chunk_sec = 1.5\n\
@@ -127,13 +126,10 @@ let test_applies_sleep_and_throttle_overrides () =
   let count, overrides =
     Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
   in
-  check int "applied sleep/throttle overrides" 10 count;
+  check int "applied sleep/throttle overrides" 9 count;
   check (option string) "autoboot max canonical env"
     (Some "6")
     (List.assoc_opt "MASC_KEEPER_AUTOBOOT_MAX" overrides);
-  check (option string) "autonomous slot wait"
-    (Some "45")
-    (List.assoc_opt "MASC_KEEPER_AUTONOMOUS_SLOT_WAIT_TIMEOUT_SEC" overrides);
   check (option string) "autonomous fairness cooldown"
     (Some "3")
     (List.assoc_opt "MASC_KEEPER_AUTONOMOUS_FAIRNESS_COOLDOWN_SEC" overrides);

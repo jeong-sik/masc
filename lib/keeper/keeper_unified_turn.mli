@@ -217,7 +217,7 @@ val run_keeper_cycle
   -> observation:Keeper_world_observation.world_observation
   -> generation:int
   -> ?channel:Keeper_world_observation.keeper_cycle_channel
-  -> ?semaphore_wait_ms:int
+  -> ?holder_wait_ms:int
   -> ?shared_context:Agent_sdk.Context.t
   -> unit
   -> (Keeper_meta_contract.keeper_meta, Agent_sdk.Error.sdk_error) result

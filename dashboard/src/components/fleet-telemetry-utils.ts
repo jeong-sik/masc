@@ -650,17 +650,9 @@ export function buildRuntimeWarnings(rows: FleetRow[]): string[] {
     )
   }
 
-  const slotBlocked = rows.filter(row => row.runtime_blocker_class === 'autonomous_slot_wait_timeout')
-  if (slotBlocked.length > 0) {
-    warnings.push(
-      `${slotBlocked.length} keepers skipped their autonomous cycle while waiting for a local keeper slot.`,
-    )
-  }
-
   const otherBlocked = rows.filter(row =>
     row.runtime_blocker_class != null
-    && row.runtime_blocker_class !== 'admission_queue_wait_timeout'
-    && row.runtime_blocker_class !== 'autonomous_slot_wait_timeout',
+    && row.runtime_blocker_class !== 'admission_queue_wait_timeout',
   )
   if (otherBlocked.length > 0) {
     warnings.push(

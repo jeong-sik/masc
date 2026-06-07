@@ -412,7 +412,6 @@ export interface ProviderHealth {
 export const KEEPER_RUNTIME_BLOCKER_CLASSES = [
   'ambiguous_post_commit_timeout',
   'ambiguous_post_commit_failure',
-  'autonomous_slot_wait_timeout',
   'admission_queue_wait_timeout',
   'turn_timeout_after_queue_wait',
   'turn_timeout',

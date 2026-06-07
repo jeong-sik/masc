@@ -40,9 +40,9 @@ let transient_backoff_sec (attempt : int) : float =
   Float.min cap (base *. Float.of_int (1 lsl (attempt - 1)))
 ;;
 
-(** Productive admission-phase budget (seconds).  PR #13120: when a
+(** Productive retry-phase budget (seconds).  PR #13120: when a
     runtime returns a recoverable error after the keeper has
-    already burned this many seconds inside the outer turn admission,
+    already burned this many seconds inside the current holder,
     degraded retry rotation is rejected (the rotation evidence is
     still recorded in [runtime_rotation_attempts] for audit).  The
     keeper releases the outer holder instead of holding it for a

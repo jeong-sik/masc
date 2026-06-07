@@ -382,42 +382,14 @@ let set_budget_exhaustion_for_test ~keeper_name ~strikes =
     Hashtbl.replace budget_exhaustions keeper_name strikes)
 ;;
 
-(* Semaphore wait metrics — preserved. *)
-let semaphore_wait_seconds_buckets =
-  [ 0.001; 0.005; 0.01; 0.025; 0.05; 0.1; 0.25; 0.5; 1.0; 2.5; 5.0; 10.0; 30.0; 60.0 ]
-;;
-
-let observe_semaphore_wait_seconds ~keeper_name ~runtime_profile ~channel seconds =
-  let seconds = if seconds < 0.0 then 0.0 else seconds in
-  let labels =
-    [ "keeper_name", keeper_name; "runtime_profile", runtime_profile; "channel", channel ]
-  in
-  Otel_metric_store.observe_histogram
-    Keeper_metrics.(to_string SemaphoreWaitSeconds)
-    ~labels
-    seconds;
-  let inc_bucket le =
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string SemaphoreWaitSecondsBucket)
-      ~labels:(labels @ [ "le", le ])
-      ()
-  in
-  List.iter
-    (fun upper -> if seconds <= upper then inc_bucket (Printf.sprintf "%g" upper))
-    semaphore_wait_seconds_buckets;
-  inc_bucket "+Inf"
-;;
-
 let channel_holder_label = function
   | Keeper_world_observation.Reactive -> Some Reactive_holder
   | Keeper_world_observation.Scheduled_autonomous -> Some Autonomous_holder
 ;;
 
 let run_with_recorded_holder
-      ~runtime_profile
       ~keeper_name
       ~channel
-      ~channel_label
       ~started_at
       f
   =
@@ -443,20 +415,15 @@ let run_with_recorded_holder
          ~keeper_name;
        let acquisition_id = record_holder ~label ~keeper_name ~acquired_at in
        holder_state.channel_acquisition_id := Some acquisition_id);
-    let semaphore_wait_sec = Time_compat.now () -. started_at in
-    observe_semaphore_wait_seconds
-      ~keeper_name
-      ~runtime_profile
-      ~channel:channel_label
-      semaphore_wait_sec;
-    let semaphore_wait_ms =
+    let holder_wait_sec = Time_compat.now () -. started_at in
+    let holder_wait_ms =
       int_of_float
-        ((if semaphore_wait_sec < 0.0 then 0.0 else semaphore_wait_sec) *. 1000.0)
+        ((if holder_wait_sec < 0.0 then 0.0 else holder_wait_sec) *. 1000.0)
     in
     let holder_control =
       { is_held = (fun () -> turn_holder_is_held holder_state) }
     in
-    f ~semaphore_wait_ms ~holder_control
+    f ~holder_wait_ms ~holder_control
   in
   if Eio_guard.is_ready ()
   then
@@ -466,27 +433,18 @@ let run_with_recorded_holder
   else Fun.protect ~finally:cleanup body
 ;;
 
-let with_recorded_turn_holder_control
-      ?(runtime_profile = "unknown")
-      ~keeper_name
-      ~channel
-      f
-  =
-  let channel_label = Keeper_world_observation.channel_to_string channel in
+let with_recorded_turn_holder_control ~keeper_name ~channel f =
   let t0 = Time_compat.now () in
   run_with_recorded_holder
-    ~runtime_profile
     ~keeper_name
     ~channel
-    ~channel_label
     ~started_at:t0
     f
 ;;
 
-let with_recorded_turn_holder ?runtime_profile ~keeper_name ~channel f =
+let with_recorded_turn_holder ~keeper_name ~channel f =
   with_recorded_turn_holder_control
-    ?runtime_profile
     ~keeper_name
     ~channel
-    (fun ~semaphore_wait_ms ~holder_control:_ -> f ~semaphore_wait_ms)
+    (fun ~holder_wait_ms ~holder_control:_ -> f ~holder_wait_ms)
 ;;

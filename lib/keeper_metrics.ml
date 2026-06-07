@@ -38,10 +38,7 @@ type t =
   | SupervisorSweepStarts
   | SupervisorLastSweepUnixtime
   | DomainPoolFork
-  | SemaphoreWaitTimeout
   | TurnHolderBookkeepingFailures
-  | SemaphoreWaitSeconds
-  | SemaphoreWaitSecondsBucket
   | SlotYieldTotal
   | Compactions
   | CompactionRatioChange
@@ -253,10 +250,7 @@ let to_string = function
   | SupervisorSweepStarts -> "masc_keeper_supervisor_sweep_starts_total"
   | SupervisorLastSweepUnixtime -> "masc_keeper_supervisor_last_sweep_unixtime"
   | DomainPoolFork -> "masc_keeper_domain_pool_fork_total"
-  | SemaphoreWaitTimeout -> "masc_keeper_semaphore_wait_timeout_total"
   | TurnHolderBookkeepingFailures -> "masc_keeper_turn_holders_bookkeeping_failures_total"
-  | SemaphoreWaitSeconds -> "masc_keeper_semaphore_wait_seconds"
-  | SemaphoreWaitSecondsBucket -> "masc_keeper_semaphore_wait_seconds_bucket"
   | SlotYieldTotal -> "masc_keeper_slot_yield_total"
   | Compactions -> "masc_keeper_compactions_total"
   | CompactionRatioChange -> "masc_keeper_compaction_ratio_change"

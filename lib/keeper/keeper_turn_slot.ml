@@ -39,101 +39,15 @@ type semaphore_wait_timeout = Keeper_turn_slot_types.semaphore_wait_timeout =
 
 let int_of_env_default = Keeper_turn_slot_types.int_of_env_default
 
-(* Throttle limit — reused as the global inflight cap. *)
-type throttle_source =
+type throttle_source = Keeper_turn_admission.throttle_source =
   | Env_override
   | Toml
   | Default
 
-let keeper_turn_throttle_limit, keeper_turn_throttle_source =
-  let env_name = "MASC_KEEPER_AUTOBOOT_MAX" in
-  let default = 32 in
-  let min_v = 1 in
-  let max_v = max_int in
-  let parse raw =
-    let v = Option.value ~default (int_of_string_opt (String.trim raw)) in
-    Keeper_config.clamp_int v ~min_v ~max_v
-  in
-  if Env_config_core.running_under_test_executable () then
-    (default, Default)
-  else
-    match Sys.getenv_opt env_name with
-    | Some raw when String.trim raw <> "" -> parse raw, Env_override
-    | _ -> (
-      match Env_config_core.raw_value_opt env_name with
-      | Some raw when String.trim raw <> "" -> parse raw, Toml
-      | _ -> default, Default)
-;;
-
-let throttle_source_to_string = function
-  | Env_override -> "env_override"
-  | Toml -> "toml"
-  | Default -> "default"
-;;
-
-let effective_turn_throttle_limit =
-  match keeper_turn_throttle_source with
-  | Env_override -> (
-    match Keeper_runtime_config.toml_value_opt "MASC_KEEPER_AUTOBOOT_MAX" with
-    | Some toml_raw -> (
-      match int_of_string_opt (String.trim toml_raw) with
-      | Some toml_val when toml_val > 0 ->
-        let hard_cap = toml_val * 2 in
-        if keeper_turn_throttle_limit > hard_cap
-        then hard_cap
-        else keeper_turn_throttle_limit
-      | _ -> keeper_turn_throttle_limit)
-    | None -> keeper_turn_throttle_limit)
-  | Toml | Default -> keeper_turn_throttle_limit
-
-let check_throttle_divergence () =
-  if Env_config_core.running_under_test_executable () then
-    ()
-  else
-    match keeper_turn_throttle_source with
-    | Env_override -> (
-      match Keeper_runtime_config.toml_value_opt "MASC_KEEPER_AUTOBOOT_MAX" with
-      | None ->
-        Log.Keeper.info
-          "autoboot: env MASC_KEEPER_AUTOBOOT_MAX=%d (no TOML override, effective=%d)"
-          keeper_turn_throttle_limit
-          effective_turn_throttle_limit
-      | Some toml_raw -> (
-        match int_of_string_opt (String.trim toml_raw) with
-        | None -> ()
-        | Some toml_val when toml_val <= 0 -> ()
-        | Some toml_val ->
-          let env_val = keeper_turn_throttle_limit in
-          let factor = float_of_int env_val /. float_of_int toml_val in
-          if effective_turn_throttle_limit < env_val
-          then
-            Log.Keeper.warn
-              "autoboot divergence: env MASC_KEEPER_AUTOBOOT_MAX=%d capped to %d (2x \
-               TOML baseline %d, factor %.1fx); fleet overload prevented."
-              env_val
-              effective_turn_throttle_limit
-              toml_val
-              factor
-          else if factor >= 2.0
-          then
-            Log.Keeper.warn
-              "autoboot divergence: env MASC_KEEPER_AUTOBOOT_MAX=%d is %.1fx the TOML \
-               value (%d); fleet may be overloaded. Either unset the env var to honour \
-               TOML, or update TOML to match the intended cap."
-              env_val
-              factor
-              toml_val
-          else if env_val > toml_val
-          then
-            Log.Keeper.info
-              "autoboot divergence: env MASC_KEEPER_AUTOBOOT_MAX=%d exceeds TOML (%d) \
-               by a smaller margin (factor %.1fx); monitor fleet capacity."
-              env_val
-              toml_val
-              factor))
-    | Toml | Default -> ()
-;;
-let () = check_throttle_divergence ()
+let keeper_turn_throttle_limit = Keeper_turn_admission.keeper_turn_throttle_limit
+let keeper_turn_throttle_source = Keeper_turn_admission.keeper_turn_throttle_source
+let throttle_source_to_string = Keeper_turn_admission.throttle_source_to_string
+let effective_turn_throttle_limit = Keeper_turn_admission.effective_turn_throttle_limit
 
 (* Holder tracking — preserved for diagnostics. *)
 type holder_key =
@@ -335,13 +249,7 @@ let slot_holders_summary ?(limit = 5) ~now () =
 ;;
 
 (* Semaphore wait timeout — preserved for backward compat. *)
-let semaphore_wait_timeout_sec =
-  Keeper_config.float_of_env_default
-    "MASC_KEEPER_SEMAPHORE_WAIT_TIMEOUT_SEC"
-    ~default:180.0
-    ~min_v:5.0
-    ~max_v:Float.max_float
-;;
+let semaphore_wait_timeout_sec = Keeper_turn_admission.semaphore_wait_timeout_sec
 
 let semaphore_wait_timeout_snapshot ~phase ?queue_ahead ?(holders = []) () =
   let global_available =
@@ -708,9 +616,11 @@ let turn_semaphore_value_for_test () = remaining_global_capacity ()
 let autonomous_turn_semaphore_value_for_test () = remaining_global_capacity ()
 let reactive_turn_semaphore_value_for_test () = remaining_global_capacity ()
 let turn_concurrency_int_of_env_default_for_test name ~default ~min_v ~max_v =
-  if Env_config_core.running_under_test_executable ()
-  then default
-  else int_of_env_default ~primary:name ~default ~min_v ~max_v
+  Keeper_turn_admission.turn_concurrency_int_of_env_default_for_test
+    name
+    ~default
+    ~min_v
+    ~max_v
 ;;
 
 let reset_autonomous_turn_queue_for_test () =

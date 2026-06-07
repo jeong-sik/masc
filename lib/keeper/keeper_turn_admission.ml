@@ -51,30 +51,7 @@ type token =
   ; runtime_profile : string
   ; channel : string
   ; acquired_at : float
-  ; released : bool Atomic.t
-  ; cancel_requested : bool Atomic.t
   ; cancel_p : unit Eio.Promise.t
-  ; cancel_u : unit Eio.Promise.u
-  }
-
-type decision = (token, rejection) result
-
-type pending =
-  { info : waiter_info
-  ; decision_p : decision Eio.Promise.t
-  ; decision_u : decision Eio.Promise.u
-  ; mutable cancelled : bool
-  }
-
-type scheduler_state =
-  { mutex : Stdlib.Mutex.t
-  ; mutable policy : fleet_policy
-  ; mutable next_ticket : int
-  ; mutable next_token : int
-  ; mutable last_limit : int
-  ; inflight : (int, token) Hashtbl.t
-  ; active_keepers : (string, int) Hashtbl.t
-  ; mutable waiters : pending list
   }
 
 let fleet_state_to_string = function
@@ -211,94 +188,57 @@ let turn_concurrency_int_of_env_default_for_test name ~default ~min_v ~max_v =
   else Keeper_turn_admission_types.int_of_env_default ~primary:name ~default ~min_v ~max_v
 ;;
 
-let autonomous_turn_limit =
-  turn_concurrency_int_of_env_default_for_test
-    "MASC_KEEPER_AUTONOMOUS_CONCURRENCY"
-    ~default:16
-    ~min_v:1
-    ~max_v:max_int
-;;
+module Lease_id = struct
+  type t = int
 
-let reactive_turn_limit =
-  turn_concurrency_int_of_env_default_for_test
-    "MASC_KEEPER_REACTIVE_CONCURRENCY"
-    ~default:16
-    ~min_v:1
-    ~max_v:max_int
-;;
+  let compare = Int.compare
+end
 
-let channel_limit ~global_limit channel =
-  let global_limit = max 1 global_limit in
-  match String.lowercase_ascii (String.trim channel) with
-  | "reactive" -> min global_limit reactive_turn_limit
-  | "scheduled_autonomous" | "proactive" -> min global_limit autonomous_turn_limit
-  | _ -> global_limit
-;;
+module Lease_map = Map.Make (Lease_id)
 
-let state =
-  { mutex = Stdlib.Mutex.create ()
-  ; policy = default_policy
-  ; next_ticket = 0
-  ; next_token = 0
-  ; last_limit = 1
-  ; inflight = Hashtbl.create 32
-  ; active_keepers = Hashtbl.create 32
-  ; waiters = []
+type lease_metadata =
+  { lease_keeper_name : string
+  ; lease_runtime_profile : string
+  ; lease_channel : string
+  ; lease_acquired_at : float
+  }
+
+type runtime_state =
+  { policy : fleet_policy
+  ; runtime_limit : int
+  ; active_leases : lease_metadata Lease_map.t
+  ; next_lease_id : int
+  }
+
+let default_runtime_state =
+  { policy = default_policy
+  ; runtime_limit = 1
+  ; active_leases = Lease_map.empty
+  ; next_lease_id = 0
   }
 ;;
 
-let with_mutex mutex f =
-  Stdlib.Mutex.lock mutex;
-  match f () with
-  | value ->
-    Stdlib.Mutex.unlock mutex;
-    value
-  | exception exn ->
-    Stdlib.Mutex.unlock mutex;
-    raise exn
+let current = Atomic.make default_runtime_state
+
+let rec transition f =
+  let before = Atomic.get current in
+  let after, result = f before in
+  if Atomic.compare_and_set current before after then result else transition f
 ;;
 
-let with_lock f = with_mutex state.mutex f
+let runtime_inflight state = Lease_map.cardinal state.active_leases
 
-let global_inflight_atomic = Atomic.make 0
+let current_inflight () =
+  runtime_inflight (Atomic.get current)
+;;
 
-let rec try_acquire_global_capacity ~limit =
+let available_turns_in_state ~limit state =
   let limit = max 1 limit in
-  let current = Atomic.get global_inflight_atomic in
-  if current >= limit
-  then false
-  else if Atomic.compare_and_set global_inflight_atomic current (current + 1)
-  then true
-  else try_acquire_global_capacity ~limit
+  max 0 (limit - runtime_inflight state)
 ;;
 
-let rec release_global_capacity () =
-  let current = Atomic.get global_inflight_atomic in
-  if current <= 0
-  then ()
-  else if not (Atomic.compare_and_set global_inflight_atomic current (current - 1))
-  then release_global_capacity ()
-;;
-
-let channel_inflight_locked channel =
-  Hashtbl.fold
-    (fun _ token count ->
-       if String.equal token.channel channel then count + 1 else count)
-    state.inflight
-    0
-;;
-
-let channel_has_capacity_locked ~limit channel =
-  channel_inflight_locked channel < channel_limit ~global_limit:limit channel
-;;
-
-let available_turns_for_channel_locked ~limit ~channel =
-  let limit = max 1 limit in
-  let global_available = max 0 (limit - Atomic.get global_inflight_atomic) in
-  let channel_available =
-    max 0 (channel_limit ~global_limit:limit channel - channel_inflight_locked channel)
-  in
-  min global_available channel_available
+let available_turns_for_channel_in_state ~limit ~channel:_ state =
+  available_turns_in_state ~limit state
 ;;
 
 let base_path_opt ?base_path () =
@@ -390,142 +330,53 @@ let persist_policy ?base_path (policy : fleet_policy) =
 
 let now_string () = Printf.sprintf "%.3f" (Time_compat.now ())
 
-let resolve_decision pending decision =
-  if not pending.cancelled
-  then
-    match Eio.Promise.peek pending.decision_p with
-    | None -> Eio.Promise.resolve pending.decision_u decision
-    | Some _ -> ()
+let never_cancel_p =
+  let promise, _resolver = Eio.Promise.create () in
+  promise
 ;;
 
-let request_cancel_token token =
-  if Atomic.compare_and_set token.cancel_requested false true
-  then (
-    match Eio.Promise.peek token.cancel_p with
-    | None -> Eio.Promise.resolve token.cancel_u ()
-    | Some _ -> ())
-;;
-
-let reject_waiters_locked rejection =
-  let waiters = state.waiters in
-  state.waiters <- [];
-  List.iter
-    (fun pending ->
-       resolve_decision pending (Error rejection);
-       pending.cancelled <- true)
-    waiters
-;;
-
-let grant_locked pending =
-  state.next_token <- state.next_token + 1;
-  let token_id = state.next_token in
-  let cancel_p, cancel_u = Eio.Promise.create () in
-  let token =
-    { token_id
-    ; keeper_name = pending.info.keeper_name
-    ; runtime_profile = pending.info.runtime_profile
-    ; channel = pending.info.channel
-    ; acquired_at = Time_compat.now ()
-    ; released = Atomic.make false
-    ; cancel_requested = Atomic.make false
-    ; cancel_p
-    ; cancel_u
-    }
-  in
-  Hashtbl.replace state.inflight token_id token;
-  Hashtbl.replace state.active_keepers token.keeper_name token_id;
-  resolve_decision pending (Ok token)
-;;
-
-let select_eligible_waiter_locked ~limit =
-  let rec loop skipped = function
-    | [] ->
-      state.waiters <- List.rev skipped;
-      None
-    | pending :: rest when pending.cancelled -> loop skipped rest
-    | pending :: rest
-      when Hashtbl.mem state.active_keepers pending.info.keeper_name ->
-      loop (pending :: skipped) rest
-    | pending :: rest when not (channel_has_capacity_locked ~limit pending.info.channel)
-      -> loop (pending :: skipped) rest
-    | pending :: rest ->
-      state.waiters <- List.rev_append skipped rest;
-      Some pending
-  in
-  loop [] state.waiters
-;;
-
-let rec schedule_locked ~limit =
-  let limit = max 1 limit in
-  state.last_limit <- limit;
-  match state.policy.fleet_state with
-  | Paused | Stopped -> ()
-  | Running ->
-    if try_acquire_global_capacity ~limit
-    then (
-      match select_eligible_waiter_locked ~limit with
-      | None -> release_global_capacity ()
-      | Some pending ->
-        grant_locked pending;
-        schedule_locked ~limit)
-    else ()
-;;
-
-let remove_token_locked token =
-  Hashtbl.remove state.inflight token.token_id;
-  match Hashtbl.find_opt state.active_keepers token.keeper_name with
-  | Some active_token_id when active_token_id = token.token_id ->
-    Hashtbl.remove state.active_keepers token.keeper_name
-  | _ -> ()
-;;
-
-let release_turn token =
-  if Atomic.compare_and_set token.released false true
-  then
-    with_lock (fun () ->
-      release_global_capacity ();
-      remove_token_locked token;
-      schedule_locked ~limit:state.last_limit)
-;;
-
-let cancel_all_inflight_locked () =
-  Hashtbl.iter (fun _ token -> request_cancel_token token) state.inflight
-;;
-
-let apply_policy_locked ~limit policy =
-  state.policy <- policy;
-  match policy.fleet_state with
-  | Running -> schedule_locked ~limit
-  | Paused -> reject_waiters_locked Fleet_paused
-  | Stopped ->
-    reject_waiters_locked Fleet_stopped;
-    cancel_all_inflight_locked ()
+let token_of_lease token_id (metadata : lease_metadata) =
+  { token_id
+  ; keeper_name = metadata.lease_keeper_name
+  ; runtime_profile = metadata.lease_runtime_profile
+  ; channel = metadata.lease_channel
+  ; acquired_at = metadata.lease_acquired_at
+  ; cancel_p = never_cancel_p
+  }
 ;;
 
 let refresh_policy ?base_path ~limit () =
-  match read_policy_file ?base_path () with
-  | None -> ()
-  | Some file_policy ->
-    with_lock (fun () ->
-      if file_policy.generation > state.policy.generation
-      then apply_policy_locked ~limit file_policy)
+  let limit = max 1 limit in
+  let file_policy = read_policy_file ?base_path () in
+  transition (fun state ->
+    let policy =
+      match file_policy with
+      | Some policy when policy.generation > state.policy.generation -> policy
+      | _ -> state.policy
+    in
+    { state with policy; runtime_limit = limit }, ())
 ;;
 
 let read_policy ?base_path () =
-  refresh_policy ?base_path ~limit:state.last_limit ();
-  with_lock (fun () -> state.policy)
+  let limit = (Atomic.get current).runtime_limit in
+  refresh_policy ?base_path ~limit ();
+  (Atomic.get current).policy
 ;;
 
 let update_policy ?base_path ?reason ?updated_by fleet_state =
-  refresh_policy ?base_path ~limit:state.last_limit ();
+  let limit = (Atomic.get current).runtime_limit in
+  refresh_policy ?base_path ~limit ();
   let policy =
-    with_lock (fun () ->
-      { fleet_state
-      ; generation = state.policy.generation + 1
-      ; reason
-      ; updated_by
-      ; updated_at = Some (now_string ())
-      })
+    transition (fun state ->
+      let policy =
+        { fleet_state
+        ; generation = state.policy.generation + 1
+        ; reason
+        ; updated_by
+        ; updated_at = Some (now_string ())
+        }
+      in
+      { state with policy }, policy)
   in
   (match persist_policy ?base_path policy with
    | Ok () -> ()
@@ -534,9 +385,7 @@ let update_policy ?base_path ?reason ?updated_by fleet_state =
        "keeper_turn_admission: failed to persist fleet policy state=%s error=%s"
        (fleet_state_to_string fleet_state)
        error);
-  with_lock (fun () ->
-    apply_policy_locked ~limit:state.last_limit policy;
-    state.policy)
+  policy
 ;;
 
 let pause_fleet ?base_path ?reason ?updated_by () =
@@ -551,147 +400,42 @@ let stop_fleet ?base_path ?reason ?updated_by () =
   update_policy ?base_path ?reason ?updated_by Stopped
 ;;
 
-let remove_pending_locked pending =
-  pending.cancelled <- true;
-  state.waiters
-  <- List.filter
-       (fun candidate -> candidate.info.ticket <> pending.info.ticket)
-       state.waiters
-;;
-
-let timeout_pending pending =
-  let decision =
-    with_lock (fun () ->
-      remove_pending_locked pending;
-      let decision = Eio.Promise.peek pending.decision_p in
-      (match decision with
-       | None -> schedule_locked ~limit:state.last_limit
-       | Some _ -> ());
-      decision)
-  in
-  match decision with
-  | Some (Ok token) ->
-    release_turn token;
-    Error Global_inflight_exceeded
-  | Some (Error rejection) -> Error rejection
-  | None -> Error Global_inflight_exceeded
-;;
-
-let cleanup_pending_wait_abort pending =
-  let decision =
-    with_lock (fun () ->
-      remove_pending_locked pending;
-      let decision = Eio.Promise.peek pending.decision_p in
-      (match decision with
-       | None -> schedule_locked ~limit:state.last_limit
-       | Some _ -> ());
-      decision)
-  in
-  match decision with
-  | Some (Ok token) -> release_turn token
-  | Some (Error _) | None -> ()
-;;
-
-let await_decision ~timeout_s pending =
-  match Eio.Promise.peek pending.decision_p with
-  | Some decision -> decision
-  | None -> (
-    match Eio_context.get_clock_opt () with
-    | Some clock -> (
-      try
-        Eio.Time.with_timeout_exn clock timeout_s (fun () ->
-          Eio.Promise.await pending.decision_p)
-      with
-      | Eio.Time.Timeout -> timeout_pending pending
-      | exn ->
-        cleanup_pending_wait_abort pending;
-        raise exn)
-    | None ->
-      if timeout_s <= 0.0
-      then timeout_pending pending
-      else (
-        let deadline = Time_compat.now () +. timeout_s in
-        let rec loop () =
-          match Eio.Promise.peek pending.decision_p with
-          | Some decision -> decision
-          | None when Time_compat.now () >= deadline -> timeout_pending pending
-          | None ->
-            Eio.Fiber.yield ();
-            loop ()
-        in
-        try loop () with
-        | exn ->
-          cleanup_pending_wait_abort pending;
-          raise exn))
-;;
-
-let enqueue_turn_locked ~keeper_name ~runtime_profile ~channel ~started_at =
-  state.next_ticket <- state.next_ticket + 1;
-  let decision_p, decision_u = Eio.Promise.create () in
-  let pending =
-    { info =
-        { ticket = state.next_ticket
-        ; keeper_name
-        ; runtime_profile
-        ; channel
-        ; enqueued_at = started_at
-        }
-    ; decision_p
-    ; decision_u
-    ; cancelled = false
-    }
-  in
-  state.waiters <- state.waiters @ [ pending ];
-  pending
-;;
-
 let wait_ms_since started_at =
   let waited_sec = Time_compat.now () -. started_at in
   int_of_float ((if waited_sec < 0.0 then 0.0 else waited_sec) *. 1000.0)
 ;;
 
-let active_keepers_locked () =
-  Hashtbl.fold (fun keeper_name _ acc -> keeper_name :: acc) state.active_keepers []
-  |> List.sort String.compare
-;;
-
-let snapshot ?base_path ?(limit = state.last_limit) () =
+let snapshot ?base_path ?(limit = (Atomic.get current).runtime_limit) () =
   let limit = max 1 limit in
   refresh_policy ?base_path ~limit ();
-  with_lock (fun () ->
-    let global_inflight = Atomic.get global_inflight_atomic in
-    { fleet_state = state.policy.fleet_state
-    ; global_inflight
-    ; global_limit = limit
-    ; available = max 0 (limit - global_inflight)
-    ; queue_depth = List.length state.waiters
-    ; active_keepers = active_keepers_locked ()
-    ; waiters = List.map (fun pending -> pending.info) state.waiters
-    ; generation = state.policy.generation
-    ; reason = state.policy.reason
-    ; updated_by = state.policy.updated_by
-    ; updated_at = state.policy.updated_at
-    })
+  let state = Atomic.get current in
+  let global_inflight = runtime_inflight state in
+  { fleet_state = state.policy.fleet_state
+  ; global_inflight
+  ; global_limit = limit
+  ; available = available_turns_in_state ~limit state
+  ; queue_depth = 0
+  ; active_keepers = []
+  ; waiters = []
+  ; generation = state.policy.generation
+  ; reason = state.policy.reason
+  ; updated_by = state.policy.updated_by
+  ; updated_at = state.policy.updated_at
+  }
 ;;
 
 let semaphore_wait_timeout_snapshot ?(holders = []) () =
   let limit = max 1 effective_turn_throttle_limit in
-  let global_inflight = Atomic.get global_inflight_atomic in
-  let available = max 0 (limit - global_inflight) in
-  let autonomous_available =
-    with_lock (fun () ->
-      available_turns_for_channel_locked ~limit ~channel:"scheduled_autonomous")
-  in
-  let reactive_available =
-    with_lock (fun () -> available_turns_for_channel_locked ~limit ~channel:"reactive")
-  in
-  let queue_depth = with_lock (fun () -> List.length state.waiters) in
+  let state = Atomic.get current in
+  let available = available_turns_in_state ~limit state in
   { Keeper_turn_admission_types.timeout_wait_sec = semaphore_wait_timeout_sec
   ; timeout_phase = Keeper_turn_admission_types.Global_admission
-  ; timeout_autonomous_available = autonomous_available
-  ; timeout_reactive_available = reactive_available
+  ; timeout_autonomous_available =
+      available_turns_for_channel_in_state ~limit ~channel:"scheduled_autonomous" state
+  ; timeout_reactive_available =
+      available_turns_for_channel_in_state ~limit ~channel:"reactive" state
   ; timeout_turn_available = available
-  ; timeout_queue_depth = queue_depth
+  ; timeout_queue_depth = 0
   ; timeout_queue_ahead = None
   ; timeout_holders = holders
   }
@@ -725,7 +469,7 @@ let observe_admission_wait_seconds ~keeper_name ~runtime_profile ~channel second
 let acquire_turn
       ?base_path
       ~limit
-      ~timeout_s
+      ~timeout_s:_
       ~keeper_name
       ~runtime_profile
       ~channel
@@ -734,28 +478,33 @@ let acquire_turn
   let limit = max 1 limit in
   refresh_policy ?base_path ~limit ();
   let started_at = Time_compat.now () in
-  let admission =
-    with_lock (fun () ->
-      state.last_limit <- limit;
-      match state.policy.fleet_state with
-      | Paused -> `Decision (Error Fleet_paused)
-      | Stopped -> `Decision (Error Fleet_stopped)
-      | Running ->
-        let pending =
-          enqueue_turn_locked ~keeper_name ~runtime_profile ~channel ~started_at
+  transition (fun state ->
+    let state = { state with runtime_limit = limit } in
+    match state.policy.fleet_state with
+    | Paused -> state, Error Fleet_paused
+    | Stopped -> state, Error Fleet_stopped
+    | Running ->
+      if runtime_inflight state >= limit
+      then state, Error Global_inflight_exceeded
+      else
+        let token_id = state.next_lease_id + 1 in
+        let metadata =
+          { lease_keeper_name = keeper_name
+          ; lease_runtime_profile = runtime_profile
+          ; lease_channel = channel
+          ; lease_acquired_at = Time_compat.now ()
+          }
         in
-        schedule_locked ~limit;
-        (match Eio.Promise.peek pending.decision_p with
-         | Some decision -> `Decision decision
-         | None -> `Pending pending))
-  in
-  match admission with
-  | `Decision (Ok token) -> Ok (token, wait_ms_since started_at)
-  | `Decision (Error rejection) -> Error rejection
-  | `Pending pending -> (
-    match await_decision ~timeout_s pending with
-    | Ok token -> Ok (token, wait_ms_since started_at)
-    | Error rejection -> Error rejection)
+        ( { state with
+            active_leases = Lease_map.add token_id metadata state.active_leases
+          ; next_lease_id = token_id
+          }
+        , Ok (token_of_lease token_id metadata, wait_ms_since started_at) ))
+;;
+
+let release_turn token =
+  transition (fun state ->
+    { state with active_leases = Lease_map.remove token.token_id state.active_leases }, ())
 ;;
 
 let eio_scheduler_available () =
@@ -816,43 +565,21 @@ let with_turn_admission
 ;;
 
 let force_release_keeper ~keeper_name =
-  let released =
-    with_lock (fun () ->
-      let matches =
-        Hashtbl.fold
-          (fun _ token acc ->
-             if String.equal token.keeper_name keeper_name then token :: acc else acc)
-          state.inflight
-          []
-      in
-      List.iter
-        (fun token ->
-           if Atomic.compare_and_set token.released false true
-           then (
-             release_global_capacity ();
-             remove_token_locked token;
-             request_cancel_token token))
-        matches;
-      schedule_locked ~limit:state.last_limit;
-      matches)
-  in
-  released <> []
+  transition (fun state ->
+    let active_leases =
+      Lease_map.filter
+        (fun _ metadata ->
+           not (String.equal metadata.lease_keeper_name keeper_name))
+        state.active_leases
+    in
+    let released = Lease_map.cardinal active_leases <> Lease_map.cardinal state.active_leases in
+    { state with active_leases }, released)
 ;;
 
 let token_cancel_p token = token.cancel_p
 let token_keeper_name token = token.keeper_name
 let token_acquired_at token = token.acquired_at
 let token_id token = token.token_id
-
-let waiter_json waiter =
-  `Assoc
-    [ "ticket", `Int waiter.ticket
-    ; "keeper_name", `String waiter.keeper_name
-    ; "runtime_profile", `String waiter.runtime_profile
-    ; "channel", `String waiter.channel
-    ; "enqueued_at", `Float waiter.enqueued_at
-    ]
-;;
 
 let snapshot_json ?base_path ?limit () =
   let snapshot = snapshot ?base_path ?limit () in
@@ -863,7 +590,7 @@ let snapshot_json ?base_path ?limit () =
     ; "available", `Int snapshot.available
     ; "queue_depth", `Int snapshot.queue_depth
     ; "active_keepers", `List (List.map (fun name -> `String name) snapshot.active_keepers)
-    ; "waiters", `List (List.map waiter_json snapshot.waiters)
+    ; "waiters", `List []
     ; "generation", `Int snapshot.generation
     ; "reason", option_string_json snapshot.reason
     ; "updated_by", option_string_json snapshot.updated_by
@@ -872,26 +599,18 @@ let snapshot_json ?base_path ?limit () =
 ;;
 
 let global_inflight () =
-  Atomic.get global_inflight_atomic
+  current_inflight ()
 ;;
 
 let available_turns ~limit =
   let limit = max 1 limit in
-  max 0 (limit - Atomic.get global_inflight_atomic)
+  available_turns_in_state ~limit (Atomic.get current)
 ;;
 
 let available_turns_for_channel ~limit ~channel =
-  with_lock (fun () -> available_turns_for_channel_locked ~limit ~channel)
+  available_turns_for_channel_in_state ~limit ~channel (Atomic.get current)
 ;;
 
 let reset_for_test () =
-  with_lock (fun () ->
-    state.policy <- default_policy;
-    state.next_ticket <- 0;
-    state.next_token <- 0;
-    state.last_limit <- 1;
-    Hashtbl.reset state.inflight;
-    Hashtbl.reset state.active_keepers;
-    state.waiters <- []);
-  Atomic.set global_inflight_atomic 0
+  Atomic.set current default_runtime_state
 ;;

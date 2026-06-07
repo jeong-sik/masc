@@ -30,10 +30,6 @@ type validation_error =
       executable : string;
       argv : string list;
     }
-  | Executable_not_allowed of {
-      executable : string;
-      reason : string;
-    }
   | Argv_contains_shell_metachar of {
       executable : string;
       index : int;
@@ -409,113 +405,6 @@ let check_exec ~executable ~argv ~cwd ~env =
     Ok ())
 ;;
 
-let readonly_executable_error executable reason =
-  Error (Executable_not_allowed { executable; reason })
-;;
-
-let check_readonly_executable executable =
-  let trimmed = String.trim executable in
-  match Masc_exec.Exec_program.of_string trimmed with
-  | Error (`Unknown _) ->
-    readonly_executable_error trimmed "empty executable"
-  | Ok bin ->
-    (match Masc_exec.Exec_program.known bin with
-     | Some (Git | Gh) -> Ok ()
-     | Some Glab ->
-       readonly_executable_error trimmed "write-capable executable"
-     | Some (Curl | Wget | Ssh | Scp | Rsync) ->
-       readonly_executable_error trimmed "network primitive"
-     | Some known ->
-       let flags = Typed_capabilities.classify_flags known in
-       if flags.spawn
-       then readonly_executable_error trimmed "spawn-capable executable"
-       else if flags.network
-       then readonly_executable_error trimmed "network-capable executable"
-       else if flags.write_fs
-       then readonly_executable_error trimmed "write-capable executable"
-       else Ok ()
-     | None ->
-       readonly_executable_error trimmed "unknown executable")
-;;
-
-let dev_full_allowed_programs =
-  Masc_exec.Exec_program.
-    [ Cat
-    ; Cargo
-    ; Cmake
-    ; Cut
-    ; Dune_local_sh
-    ; Echo
-    ; Env
-    ; File
-    ; Find
-    ; Gh
-    ; Git
-    ; Go
-    ; Gofmt
-    ; Gradle
-    ; Head
-    ; Java
-    ; Javac
-    ; Ls
-    ; Make
-    ; Mvn
-    ; Node
-    ; Npm
-    ; Ninja
-    ; Npx
-    ; Opam
-    ; Pip
-    ; Pnpm
-    ; Printf
-    ; Pwd
-    ; Pyright
-    ; Pytest
-    ; Python
-    ; Python3
-    ; Rg
-    ; Grep
-    ; Ruff
-    ; Rustc
-    ; Sed
-    ; Sort
-    ; Stat
-    ; Tail
-    ; Tr
-    ; Uniq
-    ; Uv
-    ; Wc
-    ; Which
-    ; Yarn
-    ]
-;;
-
-let dev_allowed_commands =
-  List.map Masc_exec.Exec_program.name_of_known dev_full_allowed_programs
-;;
-
-let check_dev_executable executable =
-  let trimmed = String.trim executable in
-  match Masc_exec.Exec_program.of_string trimmed with
-  | Error (`Unknown _) ->
-    Error (Executable_not_allowed { executable = trimmed; reason = "unknown executable" })
-  | Ok bin ->
-    (match Masc_exec.Exec_program.known bin with
-     | Some known ->
-       let name = Masc_exec.Exec_program.name_of_known known in
-       if List.mem name dev_allowed_commands
-       then Ok ()
-       else Error (Executable_not_allowed { executable = trimmed; reason = "command not in dev allowlist" })
-     | None ->
-       Error (Executable_not_allowed { executable = trimmed; reason = "unknown executable" }))
-;;
-
-let validate_readonly_stage { executable; argv; _ } =
-  let ( let* ) = Result.bind in
-  let* () = check_exec ~executable ~argv ~cwd:None ~env:[] in
-  check_readonly_executable executable
-;;
-
 let check_redirect_target ~fd = function
   | Inherit | Discard -> Ok ()
   | File path when String.length path > 0 && path.[0] = '/' -> Ok ()
@@ -544,21 +433,6 @@ let validate = function
       | [] -> Ok ()
       | { executable; argv } :: rest ->
         let* () = check_exec ~executable ~argv ~cwd:None ~env:[] in
-        each rest
-    in
-    each stages
-;;
-
-let validate_readonly_structural input =
-  let ( let* ) = Result.bind in
-  let* () = validate input in
-  match input with
-  | Exec { executable; _ } -> check_readonly_executable executable
-  | Pipeline { stages; _ } ->
-    let rec each = function
-      | [] -> Ok ()
-      | stage :: rest ->
-        let* () = validate_readonly_stage stage in
         each rest
     in
     each stages
@@ -645,42 +519,7 @@ let to_shell_ir_unvalidated ?(sandbox = Masc_exec.Sandbox_target.host ()) input 
 let to_shell_ir ?sandbox input =
   let ( let* ) = Result.bind in
   let* () = validate input in
-  let* () =
-    match input with
-    | Exec { executable; _ } -> check_dev_executable executable
-    | Pipeline { stages; _ } ->
-      let rec each = function
-        | [] -> Ok ()
-        | { executable; _ } :: rest ->
-          let* () = check_dev_executable executable in
-          each rest
-      in
-      each stages
-  in
   to_shell_ir_unvalidated ?sandbox input
-;;
-
-let readonly_input_executable = function
-  | Exec { executable; _ } -> executable
-  | Pipeline _ -> "pipeline"
-;;
-
-let validate_readonly input =
-  let ( let* ) = Result.bind in
-  let* () = validate_readonly_structural input in
-  let* ir = to_shell_ir_unvalidated input in
-  let envelope =
-    Masc_exec.Shell_ir_risk.classify (Masc_exec.Shell_ir_risk.undecided ir)
-  in
-  if Masc_exec.Shell_ir_risk.is_r0 envelope
-  then Ok ()
-  else
-    readonly_executable_error
-      (readonly_input_executable input)
-      (Printf.sprintf
-         "risk=%s"
-         (Masc_exec.Shell_ir_risk.string_of_risk_class
-            (Masc_exec.Shell_ir_risk.risk_class envelope)))
 ;;
 
 let pp_validation_error ppf = function
@@ -709,14 +548,6 @@ let pp_validation_error ppf = function
       ppf
       "executable %S was reported as duplicated in argv[0], but argv is empty"
       executable
-  | Executable_not_allowed { executable; reason } ->
-    Format.fprintf
-      ppf
-      "executable %S is not allowed for read-only typed Execute (%s); use a \
-       structured read/search tool, WebFetch/WebSearch for network access, or \
-       request write-enabled Execute when mutation is intentional"
-      executable
-      reason
   | Argv_contains_shell_metachar { executable; index; token } ->
     Format.fprintf
       ppf
@@ -772,6 +603,5 @@ let validation_error_alternatives : validation_error -> string list = function
   | Argv_contains_shell_pipeline_operator _ -> [ "Pipeline" ]
   | Argv_contains_shell_redirection _ ->
     [ "discard_stderr"; "discard_stdout"; "Pipeline" ]
-  | Executable_not_allowed _ -> [ "Read"; "Search"; "WebFetch"; "WebSearch" ]
   | _ -> []
 ;;

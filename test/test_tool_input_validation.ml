@@ -758,56 +758,6 @@ let readonly_pipeline_input stages =
   | Error msg ->
     Alcotest.failf "expected typed Execute pipeline parse to pass, got %s" msg
 
-let expect_readonly_allowed label input =
-  match Keeper_tool_execute_typed_input.validate_readonly input with
-  | Ok () -> ()
-  | Error e ->
-    Alcotest.failf
-      "%s should pass read-only admission: %s"
-      label
-      (Keeper_tool_execute_input.typed_validation_error_text e)
-
-let expect_readonly_executable_rejected label input =
-  match Keeper_tool_execute_typed_input.validate_readonly input with
-  | Error (Keeper_tool_execute_typed_input.Executable_not_allowed _) -> ()
-  | Error e ->
-    Alcotest.failf
-      "%s should fail executable admission, got %s"
-      label
-      (Keeper_tool_execute_input.typed_validation_error_text e)
-  | Ok () -> Alcotest.failf "%s should fail executable admission" label
-
-let test_tool_execute_readonly_admission_allows_diagnostic_exec () =
-  expect_readonly_allowed
-    "rg"
-    (readonly_exec_input "rg" [ "--files"; "lib" ]);
-  expect_readonly_allowed "git" (readonly_exec_input "git" [ "status"; "--short" ]);
-  expect_readonly_allowed "gh" (readonly_exec_input "gh" [ "pr"; "view"; "20402" ])
-
-let test_tool_execute_readonly_admission_rejects_risky_exec () =
-  expect_readonly_executable_rejected
-    "python3"
-    (readonly_exec_input "python3" [ "-c"; "print(1)" ]);
-  expect_readonly_executable_rejected
-    "curl"
-    (readonly_exec_input "curl" [ "https://example.com" ]);
-  expect_readonly_executable_rejected
-    "git push"
-    (readonly_exec_input "git" [ "push"; "origin"; "main" ]);
-  expect_readonly_executable_rejected
-    "gh write"
-    (readonly_exec_input "gh" [ "pr"; "close"; "20402" ]);
-  expect_readonly_executable_rejected
-    "glab"
-    (readonly_exec_input "glab" [ "issue"; "list" ]);
-  expect_readonly_executable_rejected "unknown" (readonly_exec_input "definitely-not-a-tool" [])
-
-let test_tool_execute_readonly_admission_rejects_pipeline_stage () =
-  expect_readonly_executable_rejected
-    "pipeline"
-    (readonly_pipeline_input
-       [ "rg", [ "--files"; "lib" ]; "python3", [ "-c"; "print(1)" ] ])
-
 let test_tool_execute_write_validation_stays_structural () =
   match
     Keeper_tool_execute_typed_input.validate
@@ -1678,12 +1628,6 @@ let () =
         test_validate_args_tool_execute_accepts_typed_exec;
       Alcotest.test_case "tool_execute accepts typed pipeline" `Quick
         test_validate_args_tool_execute_accepts_typed_pipeline;
-      Alcotest.test_case "tool_execute read-only allows diagnostics" `Quick
-        test_tool_execute_readonly_admission_allows_diagnostic_exec;
-      Alcotest.test_case "tool_execute read-only rejects risky exec" `Quick
-        test_tool_execute_readonly_admission_rejects_risky_exec;
-      Alcotest.test_case "tool_execute read-only rejects risky pipeline" `Quick
-        test_tool_execute_readonly_admission_rejects_pipeline_stage;
       Alcotest.test_case "tool_execute write validation stays structural" `Quick
         test_tool_execute_write_validation_stays_structural;
       Alcotest.test_case "tool_execute find expression not rewritten" `Quick

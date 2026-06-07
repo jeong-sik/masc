@@ -142,11 +142,7 @@ let handle_tool_execute_typed
              @ execution_location_fields cwd)
           e
       | Ok input ->
-        (match
-           if write_enabled
-           then Ok ()
-           else Keeper_tool_execute_typed_input.validate_readonly input
-         with
+        (match Keeper_tool_execute_typed_input.validate input with
          | Error e ->
            let alts =
              Keeper_tool_execute_typed_input.validation_error_alternatives e

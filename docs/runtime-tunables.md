@@ -14,7 +14,7 @@ the categorization roadmap. Newly-added typed getters in
 `lib/config/env_config_*.ml` must carry nearby `@category` and
 `@ops_class` tags; existing knobs remain in the backfill lane.
 
-**Total**: 353 unique knobs across 10 modules.
+**Total**: 352 unique knobs across 10 modules.
 
 **Typed getter classification**: 19/210 tagged (`operator`: 19, `algorithm`: 0, `unclassified`: 191).
 
@@ -22,34 +22,34 @@ the categorization roadmap. Newly-added typed getters in
 
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
-| `MASC_ADMIN_TOKEN` | string_literal | n/a | n/a | 450 | SSOT for auth env-var names (issue 8352). |
-| `MASC_BASE_PATH` | string_literal | n/a | n/a | 282 | Env var names exposed as SSOT constants so out-of-process callers that read/write the variable by name (docker worker... |
-| `MASC_BASE_PATH_INPUT` | string_literal | n/a | n/a | 283 | Env var names exposed as SSOT constants so out-of-process callers that read/write the variable by name (docker worker... |
-| `MASC_BUILD_GIT_COMMIT` | string_literal | n/a | n/a | 502 | Git commit hash override for build identity. |
-| `MASC_CLUSTER_NAME` | string_literal | n/a | n/a | 228 |  |
-| `MASC_CONFIG_DIR` | string_literal | n/a | n/a | 422 | SSOT for MASC_CONFIG_DIR / MASC_PERSONAS_DIR env-var names (issue 8352). Shared by snapshot catalog and docker worker... |
-| `MASC_DATA_DIR` | string_literal | n/a | n/a | 435 | SSOT for the MASC_DATA_DIR env-var name (issue 8352). Overrides [<base_path>/data] as the root for CDAL verdicts and ... |
-| `MASC_GIT_FETCH_TIMEOUT_SEC` | string_literal | n/a | n/a | 465 | [git fetch origin] is network-bound and can stall behind a slow Docker bridge or a large remote. Default 120s gives e... |
-| `MASC_GOVERNANCE_LEVEL` | string_literal | n/a | n/a | 478 | SSOT for logging / observability env-var names (issue 8352). |
-| `MASC_HOST` | string_literal | n/a | n/a | 199 | SSOT for MASC_HOST / MASC_HTTP_PORT env-var names (issue 8352). Defined here so in-process readers and out-of-process... |
-| `MASC_HTTP_BASE_URL` | string_literal | n/a | n/a | 241 | SSOT for the MASC_HTTP_BASE_URL env-var name (issue 8352). Defined here (above [masc_http_base_url]) so the constant ... |
-| `MASC_HTTP_PORT` | string_literal | n/a | n/a | 200 | SSOT for MASC_HOST / MASC_HTTP_PORT env-var names (issue 8352). Defined here so in-process readers and out-of-process... |
-| `MASC_KEEPER_DEFAULT_SANDBOX_PROFILE` | typed:string | unclassified | unclassified | 529 | Default sandbox profile for keepers. Default: "local". Set to "docker" to default all keepers to containerized execut... |
-| `MASC_KEEPER_DESIRES` | typed:string | unclassified | unclassified | 524 | Default keeper desires (drive statement). Default: "". |
-| `MASC_KEEPER_NEEDS` | typed:string | unclassified | unclassified | 520 | Default keeper needs (operational requirements). Default: "". |
-| `MASC_KEEPER_SOCIAL_MODEL` | typed:string | unclassified | unclassified | 512 | Default social model for keepers. Default: "bdi_speech_v1". |
-| `MASC_KEEPER_WILL` | typed:string | unclassified | unclassified | 516 | Default keeper will (long-term intent). Default: "". |
-| `MASC_LOG_LEVEL` | string_literal | n/a | n/a | 474 | SSOT for logging / observability env-var names (issue 8352). |
-| `MASC_LOG_ROUTINE_LEVEL` | string_literal | n/a | n/a | 475 | SSOT for logging / observability env-var names (issue 8352). |
-| `MASC_ORCHESTRATOR_ENABLED` | string_literal | n/a | n/a | 407 | SSOT for the MASC_ORCHESTRATOR_ENABLED env-var name (issue 8352). Referenced by feature_flag_registry catalog, env_co... |
-| `MASC_PARSE_WARN` | string_literal | n/a | n/a | 477 | SSOT for logging / observability env-var names (issue 8352). |
-| `MASC_PERSONAS_DIR` | string_literal | n/a | n/a | 423 | SSOT for MASC_CONFIG_DIR / MASC_PERSONAS_DIR env-var names (issue 8352). Shared by snapshot catalog and docker worker... |
-| `MASC_PUBSUB_MAX_MESSAGES` | typed:int | unclassified | unclassified | 506 | PubSub max messages per read. Default: 1000. |
-| `MASC_RELAY_CALIBRATION_ENABLED` | typed:bool | unclassified | unclassified | 445 | Whether relay token calibration is enabled. Default: true. |
-| `MASC_STORAGE_TYPE` | string_literal | n/a | n/a | 402 | SSOT for the MASC_STORAGE_TYPE env-var name (issue 8352). |
-| `MASC_TELEMETRY_ENABLED` | string_literal | n/a | n/a | 476 | SSOT for logging / observability env-var names (issue 8352). |
+| `MASC_ADMIN_TOKEN` | string_literal | n/a | n/a | 449 | SSOT for auth env-var names (issue 8352). |
+| `MASC_BASE_PATH` | string_literal | n/a | n/a | 281 | Env var names exposed as SSOT constants so out-of-process callers that read/write the variable by name (docker worker... |
+| `MASC_BASE_PATH_INPUT` | string_literal | n/a | n/a | 282 | Env var names exposed as SSOT constants so out-of-process callers that read/write the variable by name (docker worker... |
+| `MASC_BUILD_GIT_COMMIT` | string_literal | n/a | n/a | 501 | Git commit hash override for build identity. |
+| `MASC_CLUSTER_NAME` | string_literal | n/a | n/a | 227 |  |
+| `MASC_CONFIG_DIR` | string_literal | n/a | n/a | 421 | SSOT for MASC_CONFIG_DIR / MASC_PERSONAS_DIR env-var names (issue 8352). Shared by snapshot catalog and docker worker... |
+| `MASC_DATA_DIR` | string_literal | n/a | n/a | 434 | SSOT for the MASC_DATA_DIR env-var name (issue 8352). Overrides [<base_path>/data] as the root for CDAL verdicts and ... |
+| `MASC_GIT_FETCH_TIMEOUT_SEC` | string_literal | n/a | n/a | 464 | [git fetch origin] is network-bound and can stall behind a slow Docker bridge or a large remote. Default 120s gives e... |
+| `MASC_GOVERNANCE_LEVEL` | string_literal | n/a | n/a | 477 | SSOT for logging / observability env-var names (issue 8352). |
+| `MASC_HOST` | string_literal | n/a | n/a | 198 | SSOT for MASC_HOST / MASC_HTTP_PORT env-var names (issue 8352). Defined here so in-process readers and out-of-process... |
+| `MASC_HTTP_BASE_URL` | string_literal | n/a | n/a | 240 | SSOT for the MASC_HTTP_BASE_URL env-var name (issue 8352). Defined here (above [masc_http_base_url]) so the constant ... |
+| `MASC_HTTP_PORT` | string_literal | n/a | n/a | 199 | SSOT for MASC_HOST / MASC_HTTP_PORT env-var names (issue 8352). Defined here so in-process readers and out-of-process... |
+| `MASC_KEEPER_DEFAULT_SANDBOX_PROFILE` | typed:string | unclassified | unclassified | 528 | Default sandbox profile for keepers. Default: "local". Set to "docker" to default all keepers to containerized execut... |
+| `MASC_KEEPER_DESIRES` | typed:string | unclassified | unclassified | 523 | Default keeper desires (drive statement). Default: "". |
+| `MASC_KEEPER_NEEDS` | typed:string | unclassified | unclassified | 519 | Default keeper needs (operational requirements). Default: "". |
+| `MASC_KEEPER_SOCIAL_MODEL` | typed:string | unclassified | unclassified | 511 | Default social model for keepers. Default: "bdi_speech_v1". |
+| `MASC_KEEPER_WILL` | typed:string | unclassified | unclassified | 515 | Default keeper will (long-term intent). Default: "". |
+| `MASC_LOG_LEVEL` | string_literal | n/a | n/a | 473 | SSOT for logging / observability env-var names (issue 8352). |
+| `MASC_LOG_ROUTINE_LEVEL` | string_literal | n/a | n/a | 474 | SSOT for logging / observability env-var names (issue 8352). |
+| `MASC_ORCHESTRATOR_ENABLED` | string_literal | n/a | n/a | 406 | SSOT for the MASC_ORCHESTRATOR_ENABLED env-var name (issue 8352). Referenced by feature_flag_registry catalog, env_co... |
+| `MASC_PARSE_WARN` | string_literal | n/a | n/a | 476 | SSOT for logging / observability env-var names (issue 8352). |
+| `MASC_PERSONAS_DIR` | string_literal | n/a | n/a | 422 | SSOT for MASC_CONFIG_DIR / MASC_PERSONAS_DIR env-var names (issue 8352). Shared by snapshot catalog and docker worker... |
+| `MASC_PUBSUB_MAX_MESSAGES` | typed:int | unclassified | unclassified | 505 | PubSub max messages per read. Default: 1000. |
+| `MASC_RELAY_CALIBRATION_ENABLED` | typed:bool | unclassified | unclassified | 444 | Whether relay token calibration is enabled. Default: true. |
+| `MASC_STORAGE_TYPE` | string_literal | n/a | n/a | 401 | SSOT for the MASC_STORAGE_TYPE env-var name (issue 8352). |
+| `MASC_TELEMETRY_ENABLED` | string_literal | n/a | n/a | 475 | SSOT for logging / observability env-var names (issue 8352). |
 | `MASC_TEST_ALLOW_HOME_BASE_PATH` | string_literal | n/a | n/a | 340 | #9903: production base-path safeguard for test executables. Without this, a test whose [MASC_BASE_PATH] override fail... |
-| `MASC_URL` | string_literal | n/a | n/a | 242 | SSOT for the MASC_HTTP_BASE_URL env-var name (issue 8352). Defined here (above [masc_http_base_url]) so the constant ... |
+| `MASC_URL` | string_literal | n/a | n/a | 241 | SSOT for the MASC_HTTP_BASE_URL env-var name (issue 8352). Defined here (above [masc_http_base_url]) so the constant ... |
 
 ## Env_config_exec_timeout (1 knobs; typed classification 0/0)
 
@@ -175,7 +175,7 @@ the categorization roadmap. Newly-added typed getters in
 
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
-| `MASC_KEEPER_DEGRADED_RETRY_SLOT_PHASE_BUDGET_SEC` | typed:float | Timeouts | operator | 71 | Productive admission-phase budget (seconds).  PR #13120: when a runtime returns a recoverable error after the keeper has a... |
+| `MASC_KEEPER_DEGRADED_RETRY_SLOT_PHASE_BUDGET_SEC` | typed:float | Timeouts | operator | 71 | Productive admission-phase budget (seconds).  PR #13120: when a runtime returns a recoverable error after the keeper ... |
 | `MASC_KEEPER_MAX_TRANSIENT_RETRIES` | typed:int | unclassified | unclassified | 19 | Maximum outer-loop retries after the initial attempt. Total attempts = 1 initial + max_transient_retries. Env: [MASC_... |
 | `MASC_KEEPER_TRANSIENT_BACKOFF_BASE_SEC` | typed:float | unclassified | unclassified | 25 | Base delay (seconds) for exponential backoff. Delay at attempt [n] is [base * 2^(n-1)]. Env: [MASC_KEEPER_TRANSIENT_B... |
 | `MASC_KEEPER_TRANSIENT_BACKOFF_CAP_SEC` | typed:float | unclassified | unclassified | 31 | Hard cap on backoff delay (seconds). Env: [MASC_KEEPER_TRANSIENT_BACKOFF_CAP_SEC].  Default: 4.0. |
@@ -342,14 +342,14 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_KEEPER_SANDBOX_TMPFS_SIZE` | typed:string | unclassified | unclassified | 30 |  |
 | `MASC_KEEPER_SHELL_TIMEOUT_DEFAULT_SEC` | string_literal | n/a | n/a | 190 |  |
 
-## Env_config_snapshot (74 knobs; typed classification 0/0)
+## Env_config_snapshot (73 knobs; typed classification 0/0)
 
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
 | `MASC_ALLOW_ANONYMOUS_MUTATIONS` | string_literal | n/a | n/a | 29 |  |
-| `MASC_ASSETS_DIR` | string_literal | n/a | n/a | 644 |  |
-| `MASC_BASE_PATH_RESOLUTION_SOURCE` | string_literal | n/a | n/a | 648 |  |
-| `MASC_BASE_PATH_STRICT` | string_literal | n/a | n/a | 650 |  |
+| `MASC_ASSETS_DIR` | string_literal | n/a | n/a | 642 |  |
+| `MASC_BASE_PATH_RESOLUTION_SOURCE` | string_literal | n/a | n/a | 646 |  |
+| `MASC_BASE_PATH_STRICT` | string_literal | n/a | n/a | 648 |  |
 | `MASC_BENCHMARK_RESULTS_DIR` | string_literal | n/a | n/a | 218 |  |
 | `MASC_CHANNEL_GATE_DEDUP_TTL_SEC` | string_literal | n/a | n/a | 308 |  |
 | `MASC_CHANNEL_GATE_MAX_CONTENT_LENGTH` | string_literal | n/a | n/a | 310 |  |
@@ -382,7 +382,7 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_KEEPER_COMPACT_MAX_MESSAGES` | string_literal | n/a | n/a | 158 |  |
 | `MASC_KEEPER_COMPACT_MAX_TOKENS` | string_literal | n/a | n/a | 160 |  |
 | `MASC_KEEPER_COMPACT_RATIO` | string_literal | n/a | n/a | 156 |  |
-| `MASC_KEEPER_LLM_RERANK_RUNTIME` | string_literal | n/a | n/a | 554 |  |
+| `MASC_KEEPER_LLM_RERANK_RUNTIME` | string_literal | n/a | n/a | 552 |  |
 | `MASC_KEEPER_RULE_GUARDRAIL_CONTEXT_MIN` | string_literal | n/a | n/a | 185 |  |
 | `MASC_KEEPER_RULE_GUARDRAIL_GOAL_ALIGNMENT_MAX` | string_literal | n/a | n/a | 181 |  |
 | `MASC_KEEPER_RULE_GUARDRAIL_REPETITION` | string_literal | n/a | n/a | 179 |  |
@@ -390,32 +390,32 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_KEEPER_RULE_PLAN_GOAL_ALIGNMENT_MAX` | string_literal | n/a | n/a | 175 |  |
 | `MASC_KEEPER_RULE_PLAN_RESPONSE_ALIGNMENT_MAX` | string_literal | n/a | n/a | 177 |  |
 | `MASC_KEEPER_RULE_REFLECT_REPETITION` | string_literal | n/a | n/a | 173 |  |
-| `MASC_KEEPER_TOOL_AFFINITY_K` | string_literal | n/a | n/a | 558 |  |
-| `MASC_KEEPER_TOOL_AFFINITY_LOOKBACK_DAYS` | string_literal | n/a | n/a | 560 |  |
+| `MASC_KEEPER_TOOL_AFFINITY_K` | string_literal | n/a | n/a | 556 |  |
+| `MASC_KEEPER_TOOL_AFFINITY_LOOKBACK_DAYS` | string_literal | n/a | n/a | 558 |  |
 | `MASC_KEEPER_TOOL_COST_MAX_USD` | string_literal | n/a | n/a | 162 |  |
-| `MASC_KEEPER_TOOL_DECAY_TURNS` | string_literal | n/a | n/a | 562 |  |
-| `MASC_KEEPER_TURN_LIVELOCK_MAX_ATTEMPTS` | string_literal | n/a | n/a | 514 |  |
-| `MASC_KEEPER_TURN_LIVELOCK_STUCK_AFTER_SEC` | string_literal | n/a | n/a | 516 |  |
+| `MASC_KEEPER_TOOL_DECAY_TURNS` | string_literal | n/a | n/a | 560 |  |
+| `MASC_KEEPER_TURN_LIVELOCK_MAX_ATTEMPTS` | string_literal | n/a | n/a | 512 |  |
+| `MASC_KEEPER_TURN_LIVELOCK_STUCK_AFTER_SEC` | string_literal | n/a | n/a | 514 |  |
 | `MASC_KEEPER_UNIFIED_MAX_TOKENS` | string_literal | n/a | n/a | 165 |  |
 | `MASC_KEEPER_UNIFIED_TEMP` | string_literal | n/a | n/a | 164 |  |
 | `MASC_LOCK_WARN_MS` | string_literal | n/a | n/a | 212 |  |
-| `MASC_OTEL_ENABLED` | string_literal | n/a | n/a | 744 |  |
-| `MASC_PLACEHOLDER_TOOLS_ENABLED` | string_literal | n/a | n/a | 780 |  |
+| `MASC_OTEL_ENABLED` | string_literal | n/a | n/a | 742 |  |
+| `MASC_PLACEHOLDER_TOOLS_ENABLED` | string_literal | n/a | n/a | 778 |  |
 | `MASC_RUNTIME_ATTEMPT_LIVENESS` | string_literal | n/a | n/a | 471 |  |
-| `MASC_SEARXNG_URL` | string_literal | n/a | n/a | 792 |  |
-| `MASC_SHUTDOWN_CLEANUP_TIMEOUT` | string_literal | n/a | n/a | 692 |  |
-| `MASC_SHUTDOWN_DRAIN_TIMEOUT` | string_literal | n/a | n/a | 694 |  |
-| `MASC_SHUTDOWN_FORCE_TIMEOUT` | string_literal | n/a | n/a | 696 |  |
-| `MASC_SHUTDOWN_NOTIFY_DELAY` | string_literal | n/a | n/a | 698 |  |
-| `MASC_SSE_STREAM_CAPACITY` | string_literal | n/a | n/a | 724 |  |
+| `MASC_SEARXNG_URL` | string_literal | n/a | n/a | 790 |  |
+| `MASC_SHUTDOWN_CLEANUP_TIMEOUT` | string_literal | n/a | n/a | 690 |  |
+| `MASC_SHUTDOWN_DRAIN_TIMEOUT` | string_literal | n/a | n/a | 692 |  |
+| `MASC_SHUTDOWN_FORCE_TIMEOUT` | string_literal | n/a | n/a | 694 |  |
+| `MASC_SHUTDOWN_NOTIFY_DELAY` | string_literal | n/a | n/a | 696 |  |
+| `MASC_SSE_STREAM_CAPACITY` | string_literal | n/a | n/a | 722 |  |
 | `MASC_STRUCTURED_STATE` | string_literal | n/a | n/a | 148 |  |
 | `MASC_TELEMETRY_MAX_BYTES` | string_literal | n/a | n/a | 55 |  |
 | `MASC_TELEMETRY_RETENTION_DAYS` | string_literal | n/a | n/a | 52 |  |
-| `MASC_TEST_ALLOW_BASE_PATH_OVERRIDE` | string_literal | n/a | n/a | 760 |  |
-| `MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE` | string_literal | n/a | n/a | 762 |  |
+| `MASC_TEST_ALLOW_BASE_PATH_OVERRIDE` | string_literal | n/a | n/a | 758 |  |
+| `MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE` | string_literal | n/a | n/a | 760 |  |
 | `MASC_TLA_TRACE` | string_literal | n/a | n/a | 150 |  |
-| `MASC_WORKER_RUNTIME_BACKEND` | string_literal | n/a | n/a | 824 |  |
-| `MASC_WORKER_RUNTIME_DOCKER_IMAGE` | string_literal | n/a | n/a | 826 |  |
-| `MASC_WORKER_RUNTIME_HOST_MCP_BASE_URL` | string_literal | n/a | n/a | 828 |  |
+| `MASC_WORKER_RUNTIME_BACKEND` | string_literal | n/a | n/a | 822 |  |
+| `MASC_WORKER_RUNTIME_DOCKER_IMAGE` | string_literal | n/a | n/a | 824 |  |
+| `MASC_WORKER_RUNTIME_HOST_MCP_BASE_URL` | string_literal | n/a | n/a | 826 |  |
 | `MASC_WS_CLIENT_BUFFER_LIMIT_BYTES` | string_literal | n/a | n/a | 92 |  |
 | `MASC_WS_SLICE_INDEX_ENABLED` | string_literal | n/a | n/a | 95 |  |

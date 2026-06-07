@@ -473,6 +473,10 @@
    masc_thompson
    ;; Environment configuration (extracted sub-library)
    masc.config
+   ;; Neutral shell command descriptor projection.
+   masc.command_descriptor
+   ;; Neutral agent observation bus. Keeper emits here; IDE registers sinks.
+   masc.agent_observation
    masc.ide
    ;; Dashboard utilities (extracted sub-library)
    masc.dashboard_utils

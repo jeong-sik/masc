@@ -205,6 +205,7 @@ let build_cursor_snapshot state uri =
 ;;
 
 let add_routes router =
+  Ide_bridge.install_agent_observation_sinks ();
   router
   |> Http.Router.get "/api/v1/ide/annotations" (fun request reqd ->
     with_public_read

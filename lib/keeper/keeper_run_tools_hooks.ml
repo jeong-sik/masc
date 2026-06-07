@@ -151,7 +151,7 @@ let assemble_hooks
              ; route_evidence
              }
              :: acc.tool_calls;
-          (* IDE Bridge: emit tool event for IDE visualization *)
+          (* Emit neutral agent observation events; UI adapters subscribe separately. *)
           (let typed_outcome_str =
              match typed_outcome with
              | Some Keeper_tool_outcome.Progress -> "progress"
@@ -164,24 +164,25 @@ let assemble_hooks
              | Some t -> Keeper_id.Task_id.to_string t
              | None -> "turn-" ^ string_of_int (List.length acc.tool_calls)
            in
-           Ide_bridge.ingest_tool_event_from_hook
-             ~base_path:config.base_path
-             ~tool_name
-             ~keeper_id:acc.meta.name
-             ~turn_id
-             ~outcome
-             ~typed_outcome_str
-             ~duration_ms
-             ~output_text
-             ~input;
-           (* IDE Bridge: detect PR creation from command_descriptor *)
-           Ide_bridge.ingest_pr_event_from_descriptor
-             ~base_path:config.base_path
-             ~keeper_id:acc.meta.name
-             ~turn_id
-             ~output_text
-             ~tool_name
-             ~success))
+           Agent_observation.emit_tool_event
+             { base_path = config.base_path
+             ; tool_name
+             ; keeper_id = acc.meta.name
+             ; turn_id
+             ; outcome
+             ; typed_outcome = typed_outcome_str
+             ; duration_ms
+             ; output_text
+             ; input
+             };
+           Agent_observation.emit_pr_event
+             { base_path = config.base_path
+             ; keeper_id = acc.meta.name
+             ; turn_id
+             ; output_text
+             ; tool_name
+             ; success
+             }))
         ~pre_tool_use_guard:public_alias_pre_tool_use_guard
         ()
     in

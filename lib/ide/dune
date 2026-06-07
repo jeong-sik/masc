@@ -15,4 +15,13 @@
   ide_event_types
   ide_paths
   ide_region_tracker)
- (libraries unix mtime mtime.clock.os yojson uuidm fs_compat masc.masc_exec))
+ (libraries
+  unix
+  mtime
+  mtime.clock.os
+  yojson
+  uuidm
+  fs_compat
+  masc.command_descriptor
+  masc.agent_observation
+  masc.masc_exec))

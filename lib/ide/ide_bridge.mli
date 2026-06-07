@@ -34,6 +34,9 @@ val list_cursors :
     produced from tool hooks only when the hook input contains a non-empty
     file path and a positive line number. *)
 
+val install_agent_observation_sinks : unit -> unit
+(** Register IDE storage as the sink for neutral [Agent_observation] events. *)
+
 val ingest_tool_event :
   base_path:string ->
   tool_name:string ->

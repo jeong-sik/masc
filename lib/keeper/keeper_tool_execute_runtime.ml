@@ -459,8 +459,8 @@ let handle_tool_execute_typed
             let descriptor_fields =
               match result.status with
               | Unix.WEXITED 0 ->
-                let descriptor = Ide_command_descriptor.compute ir in
-                [ "command_descriptor", Ide_event_types.command_descriptor_to_json descriptor ]
+                let descriptor = Command_descriptor.compute ir in
+                [ "command_descriptor", Command_descriptor.to_json descriptor ]
               | _ -> []
             in
             Yojson.Safe.to_string

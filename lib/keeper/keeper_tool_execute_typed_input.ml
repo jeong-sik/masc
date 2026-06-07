@@ -30,10 +30,6 @@ type validation_error =
       executable : string;
       argv : string list;
     }
-  | Executable_not_allowed of {
-      executable : string;
-      reason : string;
-    }
   | Argv_contains_shell_metachar of {
       executable : string;
       index : int;
@@ -57,100 +53,6 @@ type validation_error =
   | Pipeline_empty
   | Pipeline_too_short
   | Env_key_invalid of string
-
-type admission_mode =
-  | Write_enabled
-  | Readonly
-
-let write_enabled_programs =
-  Masc_exec.Exec_program.
-    [ Cat
-    ; Cargo
-    ; Cmake
-    ; Cut
-    ; Dune_local_sh
-    ; Echo
-    ; Env
-    ; File
-    ; Find
-    ; Gh
-    ; Git
-    ; Go
-    ; Gofmt
-    ; Gradle
-    ; Head
-    ; Java
-    ; Javac
-    ; Ls
-    ; Make
-    ; Mkdir
-    ; Mvn
-    ; Node
-    ; Npm
-    ; Ninja
-    ; Npx
-    ; Opam
-    ; Pip
-    ; Pnpm
-    ; Printf
-    ; Pwd
-    ; Pyright
-    ; Pytest
-    ; Python
-    ; Python3
-    ; Rg
-    ; Grep
-    ; Ruff
-    ; Rustc
-    ; Sed
-    ; Sort
-    ; Stat
-    ; Tail
-    ; Tr
-    ; Uniq
-    ; Uv
-    ; Wc
-    ; Which
-    ; Yarn
-    ]
-;;
-
-let readonly_programs =
-  Masc_exec.Exec_program.
-    [ Cat
-    ; Cut
-    ; Echo
-    ; Env
-    ; File
-    ; Find
-    ; Gh
-    ; Git
-    ; Head
-    ; Ls
-    ; Printf
-    ; Pwd
-    ; Rg
-    ; Grep
-    ; Sed
-    ; Sort
-    ; Stat
-    ; Tail
-    ; Tr
-    ; Uniq
-    ; Wc
-    ; Which
-    ]
-;;
-
-let allowed_commands = function
-  | Write_enabled -> List.map Masc_exec.Exec_program.name_of_known write_enabled_programs
-  | Readonly -> List.map Masc_exec.Exec_program.name_of_known readonly_programs
-;;
-
-let admission_mode_to_string = function
-  | Write_enabled -> "write-enabled"
-  | Readonly -> "read-only"
-;;
 
 let json_type_name (json : Yojson.Safe.t) =
   match json with
@@ -503,71 +405,6 @@ let check_exec ~executable ~argv ~cwd ~env =
     Ok ())
 ;;
 
-let executable_admission_error executable reason =
-  Error (Executable_not_allowed { executable; reason })
-;;
-
-let check_allowlisted_executable ~mode executable =
-  let trimmed = String.trim executable in
-  let commands = allowed_commands mode in
-  match Masc_exec.Exec_program.of_string trimmed with
-  | Error (`Unknown _) ->
-    executable_admission_error trimmed "unknown executable"
-  | Ok bin ->
-    (match Masc_exec.Exec_program.known bin with
-     | Some known ->
-       let name = Masc_exec.Exec_program.name_of_known known in
-       if List.mem name commands
-       then Ok ()
-       else
-         executable_admission_error
-           trimmed
-           (Printf.sprintf "not in %s allowlist" (admission_mode_to_string mode))
-     | None ->
-       executable_admission_error trimmed "unknown executable")
-;;
-
-let check_wrapper_exec_target ~mode { executable; argv } =
-  let trimmed = String.trim executable in
-  match Masc_exec.Exec_program.of_string trimmed with
-  | Ok bin ->
-    (match Masc_exec.Exec_program.known bin with
-     | Some ((Env | Opam) as wrapper) ->
-       let is_wrapper_subcommand =
-         match wrapper with
-         | Opam -> String.equal "exec"
-         | Env -> fun _ -> false
-         | _ -> fun _ -> false
-       in
-       let rec find_target = function
-         | [] ->
-           executable_admission_error trimmed "wrapper target missing"
-         | arg :: rest ->
-           if String.equal arg "--"
-           then
-             (match rest with
-              | [] ->
-                executable_admission_error
-                  trimmed
-                  "wrapper target missing after --"
-              | target :: _ -> check_allowlisted_executable ~mode target)
-           else if String.starts_with ~prefix:"-" arg
-                   || String.contains arg '='
-                   || is_wrapper_subcommand arg
-           then find_target rest
-           else check_allowlisted_executable ~mode arg
-       in
-       find_target argv
-     | _ -> check_allowlisted_executable ~mode trimmed)
-  | Error (`Unknown _) -> check_allowlisted_executable ~mode trimmed
-;;
-
-let validate_admission_stage ~mode { executable; argv; _ } =
-  let ( let* ) = Result.bind in
-  let* () = check_exec ~executable ~argv ~cwd:None ~env:[] in
-  check_wrapper_exec_target ~mode { executable; argv }
-;;
-
 let check_redirect_target ~fd = function
   | Inherit | Discard -> Ok ()
   | File path when String.length path > 0 && path.[0] = '/' -> Ok ()
@@ -596,22 +433,6 @@ let validate = function
       | [] -> Ok ()
       | { executable; argv } :: rest ->
         let* () = check_exec ~executable ~argv ~cwd:None ~env:[] in
-        each rest
-    in
-    each stages
-;;
-
-let validate_admission ~mode input =
-  let ( let* ) = Result.bind in
-  let* () = validate input in
-  match input with
-  | Exec { executable; argv; _ } ->
-    check_wrapper_exec_target ~mode { executable; argv }
-  | Pipeline { stages; _ } ->
-    let rec each = function
-      | [] -> Ok ()
-      | stage :: rest ->
-        let* () = validate_admission_stage ~mode stage in
         each rest
     in
     each stages
@@ -698,12 +519,8 @@ let to_shell_ir_unvalidated ?(sandbox = Masc_exec.Sandbox_target.host ()) input 
 let to_shell_ir ?sandbox input =
   let ( let* ) = Result.bind in
   let* () = validate input in
-  let* () = validate_admission ~mode:Write_enabled input in
   to_shell_ir_unvalidated ?sandbox input
 ;;
-
-let validate_readonly input = validate_admission ~mode:Readonly input
-let validate_write input = validate_admission ~mode:Write_enabled input
 
 let pp_validation_error ppf = function
   | Empty_executable { argv = first :: rest } ->
@@ -731,14 +548,6 @@ let pp_validation_error ppf = function
       ppf
       "executable %S was reported as duplicated in argv[0], but argv is empty"
       executable
-  | Executable_not_allowed { executable; reason } ->
-    Format.fprintf
-      ppf
-      "executable %S is not allowed for read-only typed Execute (%s); use a \
-       structured read/search tool, WebFetch/WebSearch for network access, or \
-       request write-enabled Execute when mutation is intentional"
-      executable
-      reason
   | Argv_contains_shell_metachar { executable; index; token } ->
     Format.fprintf
       ppf
@@ -794,6 +603,5 @@ let validation_error_alternatives : validation_error -> string list = function
   | Argv_contains_shell_pipeline_operator _ -> [ "Pipeline" ]
   | Argv_contains_shell_redirection _ ->
     [ "discard_stderr"; "discard_stdout"; "Pipeline" ]
-  | Executable_not_allowed _ -> [ "Read"; "Search"; "WebFetch"; "WebSearch" ]
   | _ -> []
 ;;

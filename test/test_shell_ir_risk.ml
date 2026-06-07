@@ -86,7 +86,13 @@ let test_r1_reversible_commands () =
   check "npm install pkg" Shell_ir_risk.R1_Reversible_mutation;
   check "truncate -s 0 file" Shell_ir_risk.R1_Reversible_mutation;
   check "mktemp" Shell_ir_risk.R1_Reversible_mutation;
-  check "tee file.txt" Shell_ir_risk.R1_Reversible_mutation
+  check "tee file.txt" Shell_ir_risk.R1_Reversible_mutation;
+  check "curl https://example.com" Shell_ir_risk.R1_Reversible_mutation;
+  check "wget https://example.com/file" Shell_ir_risk.R1_Reversible_mutation;
+  check "ssh host uptime" Shell_ir_risk.R1_Reversible_mutation;
+  check "scp file host:/tmp/file" Shell_ir_risk.R1_Reversible_mutation;
+  check "rsync -av src/ host:/tmp/src/" Shell_ir_risk.R1_Reversible_mutation;
+  check "env FOO=bar curl https://example.com" Shell_ir_risk.R1_Reversible_mutation
 ;;
 
 let test_r2_irreversible_commands () =
@@ -112,7 +118,9 @@ let test_destructive_commands () =
   check "git push -f origin main" Shell_ir_risk.Destructive_protected;
   check "git -C /repo push --force origin main" Shell_ir_risk.Destructive_protected;
   check "env git push --force origin main" Shell_ir_risk.Destructive_protected;
-  check "cat ref | git push --force origin main" Shell_ir_risk.Destructive_protected
+  check "cat ref | git push --force origin main" Shell_ir_risk.Destructive_protected;
+  check "bash -c 'echo x > /tmp/x'" Shell_ir_risk.Destructive_protected;
+  check "sh -c 'echo x > /tmp/x'" Shell_ir_risk.Destructive_protected
 ;;
 
 let test_gh_r0_read () =

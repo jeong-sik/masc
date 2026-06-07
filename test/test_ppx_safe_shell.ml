@@ -46,6 +46,26 @@ let test_static_safe_rejects_dev_mutation () =
   | Ok _ -> Alcotest.fail "expected npm install to be rejected"
 ;;
 
+let test_static_safe_rejects_network_command () =
+  match verify_static_safe "curl https://example.com" with
+  | Error (Exec_policy.Command_not_allowed "curl") -> ()
+  | Error reason ->
+    Alcotest.failf
+      "expected curl to fail static safe capability verification, got %s"
+      (Exec_policy.block_reason_tag reason)
+  | Ok _ -> Alcotest.fail "expected curl to be rejected"
+;;
+
+let test_static_safe_rejects_shell_interpreter () =
+  match verify_static_safe "bash -c 'echo x > /tmp/x'" with
+  | Error (Exec_policy.Command_not_allowed "bash") -> ()
+  | Error reason ->
+    Alcotest.failf
+      "expected bash to fail static safe capability verification, got %s"
+      (Exec_policy.block_reason_tag reason)
+  | Ok _ -> Alcotest.fail "expected bash to be rejected"
+;;
+
 let () =
   run "ppx_safe_shell" [
     "valid", [
@@ -54,5 +74,7 @@ let () =
     "static_safe", [
       test_case "rejects git push" `Quick test_static_safe_rejects_git_push;
       test_case "rejects dev mutation" `Quick test_static_safe_rejects_dev_mutation;
+      test_case "rejects network command" `Quick test_static_safe_rejects_network_command;
+      test_case "rejects shell interpreter" `Quick test_static_safe_rejects_shell_interpreter;
     ];
   ]

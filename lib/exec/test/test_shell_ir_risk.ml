@@ -71,7 +71,12 @@ let test_classify_write_r1 () =
       simple_ir "git" [ "branch"; "-m"; "old"; "new" ];
       simple_ir "npm" [ "install" ];
       simple_ir "mkdir" [ "dir" ];
-      simple_ir "touch" [ "file" ] ]
+      simple_ir "touch" [ "file" ];
+      simple_ir "curl" [ "https://example.com" ];
+      simple_ir "wget" [ "https://example.com/file" ];
+      simple_ir "ssh" [ "host"; "uptime" ];
+      simple_ir "scp" [ "file"; "host:/tmp/file" ];
+      simple_ir "rsync" [ "-av"; "src/"; "host:/tmp/src/" ] ]
   in
   List.iter
     (fun ir ->
@@ -88,7 +93,9 @@ let test_classify_destructive () =
   (* Destructive requires BOTH force flag AND protected branch target. *)
   let cmds =
     [ simple_ir "git" [ "push"; "--force"; "origin"; "main" ];
-      simple_ir "git" [ "push"; "--force-with-lease"; "origin"; "main" ] ]
+      simple_ir "git" [ "push"; "--force-with-lease"; "origin"; "main" ];
+      simple_ir "bash" [ "-c"; "echo x > /tmp/x" ];
+      simple_ir "sh" [ "-c"; "echo x > /tmp/x" ] ]
   in
   List.iter
     (fun ir ->
@@ -277,6 +284,8 @@ let stamp_invariant_cases =
   ; simple_ir "gh" [ "pr"; "create"; "--title"; "t" ]
   ; simple_ir "gh" [ "issue"; "close"; "123" ]
   ; simple_ir "gh" [ "api"; "-X"; "POST"; "/repos/o/r/issues" ]
+  ; simple_ir "curl" [ "https://example.com" ]
+  ; simple_ir "rsync" [ "-av"; "src/"; "host:/tmp/src/" ]
   (* R2_Irreversible *)
   ; simple_ir "git" [ "reset"; "HEAD~1" ]
   ; simple_ir "git" [ "reset"; "--hard"; "HEAD~1" ]
@@ -287,6 +296,7 @@ let stamp_invariant_cases =
   (* Destructive_protected *)
   ; simple_ir "git" [ "push"; "--force"; "origin"; "main" ]
   ; simple_ir "git" [ "push"; "--force-with-lease"; "origin"; "main" ]
+  ; simple_ir "bash" [ "-c"; "echo x > /tmp/x" ]
   (* Pipeline *)
   ; pipeline_ir [ ("git", [ "push"; "--force"; "origin"; "main" ]); ("cat", []) ]
   ; pipeline_ir [ ("ls", []); ("grep", [ "pattern" ]) ]

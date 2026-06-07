@@ -313,6 +313,7 @@ let release_turn_holder_impl ~keeper_name state =
         ~label
         ~acquisition_id:!(state.channel_acquisition_id)
   in
+  (* See release_recorded_holder: force-release state is logged and only needs cleanup here. *)
   ignore (turn_was_force_released || channel_was_force_released : bool)
 ;;
 

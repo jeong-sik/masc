@@ -518,6 +518,8 @@ let sweep_and_recover (ctx : _ context) =
             (Keeper_supervisor_types.paused_meta_effective_auto_resume_after_sec meta)
         in
         let paused_ts =
+          (* NDT-OK: malformed persisted timestamps must fail closed by
+             suppressing auto-resume. *)
           Workspace_resilience.Time.parse_iso8601_opt meta.updated_at
           |> Option.value ~default:0.0
         in

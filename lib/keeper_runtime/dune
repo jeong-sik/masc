@@ -16,9 +16,6 @@
   keeper_disk_pressure
   keeper_fd_pressure
   keeper_livelock_state
-  keeper_attempt_liveness
-  keeper_attempt_liveness_config
-  keeper_attempt_liveness_observer
   keeper_binding_health_config
   keeper_recording_error_state
   keeper_internal_error

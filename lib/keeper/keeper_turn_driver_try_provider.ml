@@ -298,137 +298,16 @@ let run_try_provider
   match config_result with
   | Error err -> Error err, None, None
   | Ok config ->
-    let liveness_mode = Keeper_attempt_liveness_config.current_mode () in
-    (* Per-provider candidate key for liveness budget isolation. Each provider
-       (ollama_cloud, openai_compat, anthropic, etc.) maintains its own success
-       history and tuned budget. Previously all providers shared one key
-       "runtime", causing cross-provider budget contamination — see
-       keeper_attempt_liveness_config.ml normalize_candidate_key comment. *)
-    let provider_label = Runtime_candidate.provider_label candidate in
-    let candidate_key = provider_label in
-    let liveness_observer_opt =
-      match liveness_mode with
-      | Keeper_attempt_liveness_config.Off ->
-        (* RFC-0095 Phase 0 diagnostic trace — capture Off-mode turns. Combined with
-           the existing Observe/Enforce-branch log below, this gives full visibility
-           into whether the streaming master switch is the gating factor for
-           openai_compat candidates. Removed at Phase 0 closeout. *)
-        Log.Misc.debug
-          "rfc0095-trace: liveness_mode=Off observer disabled runtime=%s provider=%s \
-           candidate=%s"
-          ctx.runtime_id
-          provider_label
-          candidate_key;
-        None
-      | Keeper_attempt_liveness_config.Observe | Keeper_attempt_liveness_config.Enforce
-        ->
-        let resolved_budget =
-          Keeper_attempt_liveness_config.budget_for_candidate ~candidate_key
-        in
-        Log.Misc.debug
-          "runtime_attempt_liveness: candidate=%s provider=%s budget_source=%s ttft=%.1fs \
-           inter_chunk=%.1fs wall=%.1fs"
-          candidate_key
-          provider_label
-          (Keeper_attempt_liveness_config.budget_source_label
-             resolved_budget.source)
-          resolved_budget.budget.Keeper_attempt_liveness.ttft_max
-          resolved_budget.budget.Keeper_attempt_liveness.inter_chunk_max
-          resolved_budget.budget.Keeper_attempt_liveness.attempt_wall_max;
-        let obs =
-          Keeper_attempt_liveness_observer.create
-            ~mode:liveness_mode
-            ~budget:resolved_budget.budget
-            ~runtime_id:ctx.runtime_id
-            ~provider_label
-            ~external_wait:(fun () ->
-              Keeper_approval_queue.has_pending_for_keeper
-                ~keeper_name:ctx.keeper_name)
-            ~candidate_key
-            ~started_at:(Time_compat.now ())
-            ()
-        in
-        Some obs
-    in
-    let finalize_liveness () =
-      match liveness_observer_opt with
-      | None -> ()
-      | Some obs -> Keeper_attempt_liveness_observer.finalize obs
-    in
-    let liveness_success_sample () =
-      match liveness_observer_opt with
-      | None -> None
-      | Some obs ->
-        Keeper_attempt_liveness_observer.success_sample_for_candidate obs
-    in
-    let liveness_timeout_error failure =
-      let kind = Keeper_attempt_liveness.failure_kind_label failure in
-      Agent_sdk.Error.Api
-        (Timeout
-           { message =
-               Printf.sprintf
-                 "Runtime attempt liveness guard killed runtime lane %s: %s"
-                 ctx.runtime_id
-                 kind
-           })
-    in
-    let with_liveness_attempt f =
-      let stop_liveness_tick () =
-        match liveness_observer_opt with
-        | None -> ()
-        | Some obs -> Keeper_attempt_liveness_observer.stop_tick_fiber obs
-      in
-      let run_attempt () =
-        try
-          Eio.Switch.run (fun attempt_sw ->
-            (match liveness_observer_opt with
-             | Some obs ->
-               Keeper_attempt_liveness_observer.register_attempt_switch
-                 obs
-                 ~sw:attempt_sw
-             | None -> ());
-            (match liveness_observer_opt, Eio_context.get_clock_opt () with
-             | Some obs, Some clock ->
-               Keeper_attempt_liveness_observer.start_tick_fiber
-                 obs
-                 ~sw:attempt_sw
-                 ~clock
-             | Some _, None -> ()
-             | None, _ -> ());
-            let liveness_on_event =
-              match liveness_observer_opt with
-              | None -> ctx.on_event
-              | Some obs ->
-                Keeper_attempt_liveness_observer.wrap_on_event obs ctx.on_event
-            in
-            match f ~attempt_sw ~liveness_on_event with
-            | result ->
-              stop_liveness_tick ();
-              result
-            | exception exn ->
-              let bt = Printexc.get_raw_backtrace () in
-              stop_liveness_tick ();
-              Printexc.raise_with_backtrace exn bt)
-        with
-        | Keeper_attempt_liveness_observer.Liveness_kill failure ->
-          Error (liveness_timeout_error failure)
-        | Eio.Cancel.Cancelled _ as e -> raise e
-      in
-      match run_attempt () with
-      | result ->
-        finalize_liveness ();
-        result
-      | exception exn ->
-        let bt = Printexc.get_raw_backtrace () in
-        finalize_liveness ();
-        Printexc.raise_with_backtrace exn bt
-    in
+    (* Liveness observer removed. Stream stall detection is handled by OAS's
+       stream_idle_timeout_s (default 120s per inter-line gap). The former
+       liveness FSM was a dual-kill system that independently terminated streams
+       via tick-fiber + Enforce-mode Switch.fail, causing no_first_token errors
+       on legitimately slow providers. Standard agent SDKs (OpenAI, Anthropic,
+       LangChain, Vercel AI) use HTTP-level timeouts only. *)
     (match
-       (* RFC-0206: the runtime CLI-preflight wrapper is gone; run the single
-          provider attempt directly. *)
        (fun () ->
             let result =
-              with_liveness_attempt (fun ~attempt_sw ~liveness_on_event ->
+              Eio.Switch.run (fun attempt_sw ->
                 let effective_checkpoint =
                   match resume_checkpoint with
                   | Some _ -> resume_checkpoint
@@ -441,22 +320,13 @@ let run_try_provider
                     ~net:ctx.net
                     ~config
                     ?oas_checkpoint:effective_checkpoint
-                    ?on_event:liveness_on_event
+                    ?on_event:ctx.on_event
                     ?on_yield:ctx.on_yield
                     ?on_resume:ctx.on_resume
                     ~agent_ref:local_agent_ref
                     ctx.goal
                 in
-                let outer_wall_for_provider =
-                  Keeper_attempt_liveness_config.outer_wall_for_attempt
-                    ~mode:liveness_mode
-                    ~observer_attached:
-                      (Option.is_some liveness_observer_opt
-                       || Option.is_some ctx.on_event)
-                    ~per_provider_timeout_s
-                    ~candidate_key
-                in
-                match outer_wall_for_provider with
+                match per_provider_timeout_s with
                 | None -> run_fn ()
                 | Some t ->
                   let clock_opt =
@@ -486,12 +356,8 @@ let run_try_provider
             in
             Ok result) ()
      with
-     | Error err ->
-       finalize_liveness ();
-       Error err, None, None
+     | Error err -> Error err, None, None
      | Ok result ->
-       finalize_liveness ();
-       let liveness_success_sample = liveness_success_sample () in
        let result =
          Result.map_error
            (Runtime_candidate.enrich_sdk_error
@@ -504,7 +370,7 @@ let run_try_provider
            ?agent_ref:ctx.agent_ref
            !local_agent_ref
        in
-       result, checkpoint_after, liveness_success_sample)
+       result, checkpoint_after, None)
 ;;
 
 module For_testing = struct

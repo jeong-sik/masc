@@ -80,8 +80,6 @@ let emit_attempt_started ctx candidate ~is_last ~per_provider_timeout_s =
          ; started_per_provider_timeout_s = timeout.timeout_s
          ; started_attempt_timeout_source = timeout.source
          ; started_attempt_watchdog_source = "runtime_provider_attempt"
-         ; started_liveness_mode = "runtime"
-         ; started_liveness_budget_source = None
          })
     Keeper_runtime_manifest.Provider_attempt_started
 
@@ -157,7 +155,7 @@ let run
       maybe_mark_provider_attempt_started ctx;
       emit_attempt_started ctx candidate ~is_last ~per_provider_timeout_s;
       let started_at = Mtime_clock.now () in
-      let result, checkpoint_after, _liveness_success_sample =
+      let result, checkpoint_after, _success_sample =
         Keeper_turn_driver_try_provider.run_try_provider
           ctx.try_provider_ctx
           ?resume_checkpoint

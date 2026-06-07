@@ -375,12 +375,21 @@ let run_keepalive_unified_turn
                     ()))
         with
         | Ok meta -> meta
-        | Error { Keeper_turn_capacity.limit; inflight; waited_ms } ->
+        | Error { Keeper_turn_capacity.limit; inflight; waited_ms; per_keeper_limit; per_keeper_inflight } ->
+          let reason =
+            if per_keeper_limit > 0 && per_keeper_inflight >= per_keeper_limit
+            then "per-keeper"
+            else "global"
+          in
           Log.Keeper.info
-            "%s: skipping turn because global turn capacity is full inflight=%d limit=%d waited_ms=%d"
+            "%s: skipping turn because %s turn capacity is full \
+             global=(inflight=%d limit=%d) per_keeper=(inflight=%d limit=%d) waited_ms=%d"
             meta_after_triage.name
+            reason
             inflight
             limit
+            per_keeper_inflight
+            per_keeper_limit
             waited_ms;
           meta_after_cursor_persist)
       else if obs.message_cursor_updates <> []

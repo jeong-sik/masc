@@ -1,4 +1,4 @@
-(** Global keeper-turn capacity gate.
+(** Global + per-keeper keeper-turn capacity gate.
 
     This is intentionally separate from {!Keeper_turn_holders}: holders are
     diagnostics for turns that are already running, while this module admits or
@@ -8,6 +8,8 @@ type rejection =
   { limit : int
   ; inflight : int
   ; waited_ms : int
+  ; per_keeper_limit : int
+  ; per_keeper_inflight : int
   }
 
 val with_turn_capacity :
@@ -18,3 +20,4 @@ val with_turn_capacity :
   ('a, rejection) result
 
 val inflight_for_test : unit -> int
+val per_keeper_inflight_for_test : string -> int

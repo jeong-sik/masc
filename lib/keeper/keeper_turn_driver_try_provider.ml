@@ -316,8 +316,7 @@ let run_try_provider
        Runtime_lane_capacity.with_lane_capacity
          ~lane_key
          ~max_concurrent:lane_max_concurrent
-         (fun ~capacity_wait_ms ->
-            let _ = capacity_wait_ms in
+         (fun () ->
             let result =
               Eio.Switch.run (fun attempt_sw ->
                 let effective_checkpoint =
@@ -374,11 +373,10 @@ let run_try_provider
             (Timeout
                { message =
                    Printf.sprintf
-                     "Runtime lane %s capacity full: %d/%d slots, waited %dms"
+                     "Runtime lane %s capacity full: %d/%d slots"
                      rejection.lane_key
                      rejection.inflight
                      rejection.limit
-                     rejection.waited_ms
                })),
        None, None
      | Ok result ->

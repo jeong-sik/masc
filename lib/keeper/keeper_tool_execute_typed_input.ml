@@ -58,6 +58,100 @@ type validation_error =
   | Pipeline_too_short
   | Env_key_invalid of string
 
+type admission_mode =
+  | Write_enabled
+  | Readonly
+
+let write_enabled_programs =
+  Masc_exec.Exec_program.
+    [ Cat
+    ; Cargo
+    ; Cmake
+    ; Cut
+    ; Dune_local_sh
+    ; Echo
+    ; Env
+    ; File
+    ; Find
+    ; Gh
+    ; Git
+    ; Go
+    ; Gofmt
+    ; Gradle
+    ; Head
+    ; Java
+    ; Javac
+    ; Ls
+    ; Make
+    ; Mkdir
+    ; Mvn
+    ; Node
+    ; Npm
+    ; Ninja
+    ; Npx
+    ; Opam
+    ; Pip
+    ; Pnpm
+    ; Printf
+    ; Pwd
+    ; Pyright
+    ; Pytest
+    ; Python
+    ; Python3
+    ; Rg
+    ; Grep
+    ; Ruff
+    ; Rustc
+    ; Sed
+    ; Sort
+    ; Stat
+    ; Tail
+    ; Tr
+    ; Uniq
+    ; Uv
+    ; Wc
+    ; Which
+    ; Yarn
+    ]
+;;
+
+let readonly_programs =
+  Masc_exec.Exec_program.
+    [ Cat
+    ; Cut
+    ; Echo
+    ; Env
+    ; File
+    ; Find
+    ; Gh
+    ; Git
+    ; Head
+    ; Ls
+    ; Printf
+    ; Pwd
+    ; Rg
+    ; Grep
+    ; Sed
+    ; Sort
+    ; Stat
+    ; Tail
+    ; Tr
+    ; Uniq
+    ; Wc
+    ; Which
+    ]
+;;
+
+let allowed_commands = function
+  | Write_enabled -> List.map Masc_exec.Exec_program.name_of_known write_enabled_programs
+  | Readonly -> List.map Masc_exec.Exec_program.name_of_known readonly_programs
+;;
+
+let admission_mode_to_string = function
+  | Write_enabled -> "write-enabled"
+  | Readonly -> "read-only"
+;;
+
 let json_type_name (json : Yojson.Safe.t) =
   match json with
   | `Assoc _ -> "object"
@@ -409,111 +503,69 @@ let check_exec ~executable ~argv ~cwd ~env =
     Ok ())
 ;;
 
-let readonly_executable_error executable reason =
+let executable_admission_error executable reason =
   Error (Executable_not_allowed { executable; reason })
 ;;
 
-let check_readonly_executable executable =
+let check_allowlisted_executable ~mode executable =
   let trimmed = String.trim executable in
+  let commands = allowed_commands mode in
   match Masc_exec.Exec_program.of_string trimmed with
   | Error (`Unknown _) ->
-    readonly_executable_error trimmed "empty executable"
-  | Ok bin ->
-    (match Masc_exec.Exec_program.known bin with
-     | Some (Git | Gh) -> Ok ()
-     | Some Glab ->
-       readonly_executable_error trimmed "write-capable executable"
-     | Some (Curl | Wget | Ssh | Scp | Rsync) ->
-       readonly_executable_error trimmed "network primitive"
-     | Some known ->
-       let flags = Typed_capabilities.classify_flags known in
-       if flags.spawn
-       then readonly_executable_error trimmed "spawn-capable executable"
-       else if flags.network
-       then readonly_executable_error trimmed "network-capable executable"
-       else if flags.write_fs
-       then readonly_executable_error trimmed "write-capable executable"
-       else Ok ()
-     | None ->
-       readonly_executable_error trimmed "unknown executable")
-;;
-
-let dev_full_allowed_programs =
-  Masc_exec.Exec_program.
-    [ Cat
-    ; Cargo
-    ; Cmake
-    ; Cut
-    ; Dune_local_sh
-    ; Echo
-    ; Env
-    ; File
-    ; Find
-    ; Gh
-    ; Git
-    ; Go
-    ; Gofmt
-    ; Gradle
-    ; Head
-    ; Java
-    ; Javac
-    ; Ls
-    ; Make
-    ; Mvn
-    ; Node
-    ; Npm
-    ; Ninja
-    ; Npx
-    ; Opam
-    ; Pip
-    ; Pnpm
-    ; Printf
-    ; Pwd
-    ; Pyright
-    ; Pytest
-    ; Python
-    ; Python3
-    ; Rg
-    ; Grep
-    ; Ruff
-    ; Rustc
-    ; Sed
-    ; Sort
-    ; Stat
-    ; Tail
-    ; Tr
-    ; Uniq
-    ; Uv
-    ; Wc
-    ; Which
-    ; Yarn
-    ]
-;;
-
-let dev_allowed_commands =
-  List.map Masc_exec.Exec_program.name_of_known dev_full_allowed_programs
-;;
-
-let check_dev_executable executable =
-  let trimmed = String.trim executable in
-  match Masc_exec.Exec_program.of_string trimmed with
-  | Error (`Unknown _) ->
-    Error (Executable_not_allowed { executable = trimmed; reason = "unknown executable" })
+    executable_admission_error trimmed "unknown executable"
   | Ok bin ->
     (match Masc_exec.Exec_program.known bin with
      | Some known ->
        let name = Masc_exec.Exec_program.name_of_known known in
-       if List.mem name dev_allowed_commands
+       if List.mem name commands
        then Ok ()
-       else Error (Executable_not_allowed { executable = trimmed; reason = "command not in dev allowlist" })
+       else
+         executable_admission_error
+           trimmed
+           (Printf.sprintf "not in %s allowlist" (admission_mode_to_string mode))
      | None ->
-       Error (Executable_not_allowed { executable = trimmed; reason = "unknown executable" }))
+       executable_admission_error trimmed "unknown executable")
 ;;
 
-let validate_readonly_stage { executable; argv; _ } =
+let check_wrapper_exec_target ~mode { executable; argv } =
+  let trimmed = String.trim executable in
+  match Masc_exec.Exec_program.of_string trimmed with
+  | Ok bin ->
+    (match Masc_exec.Exec_program.known bin with
+     | Some ((Env | Opam) as wrapper) ->
+       let is_wrapper_subcommand =
+         match wrapper with
+         | Opam -> String.equal "exec"
+         | Env -> fun _ -> false
+         | _ -> fun _ -> false
+       in
+       let rec find_target = function
+         | [] ->
+           executable_admission_error trimmed "wrapper target missing"
+         | arg :: rest ->
+           if String.equal arg "--"
+           then
+             (match rest with
+              | [] ->
+                executable_admission_error
+                  trimmed
+                  "wrapper target missing after --"
+              | target :: _ -> check_allowlisted_executable ~mode target)
+           else if String.starts_with ~prefix:"-" arg
+                   || String.contains arg '='
+                   || is_wrapper_subcommand arg
+           then find_target rest
+           else check_allowlisted_executable ~mode arg
+       in
+       find_target argv
+     | _ -> check_allowlisted_executable ~mode trimmed)
+  | Error (`Unknown _) -> check_allowlisted_executable ~mode trimmed
+;;
+
+let validate_admission_stage ~mode { executable; argv; _ } =
   let ( let* ) = Result.bind in
   let* () = check_exec ~executable ~argv ~cwd:None ~env:[] in
-  check_readonly_executable executable
+  check_wrapper_exec_target ~mode { executable; argv }
 ;;
 
 let check_redirect_target ~fd = function
@@ -549,16 +601,17 @@ let validate = function
     each stages
 ;;
 
-let validate_readonly_structural input =
+let validate_admission ~mode input =
   let ( let* ) = Result.bind in
   let* () = validate input in
   match input with
-  | Exec { executable; _ } -> check_readonly_executable executable
+  | Exec { executable; argv; _ } ->
+    check_wrapper_exec_target ~mode { executable; argv }
   | Pipeline { stages; _ } ->
     let rec each = function
       | [] -> Ok ()
       | stage :: rest ->
-        let* () = validate_readonly_stage stage in
+        let* () = validate_admission_stage ~mode stage in
         each rest
     in
     each stages
@@ -645,43 +698,12 @@ let to_shell_ir_unvalidated ?(sandbox = Masc_exec.Sandbox_target.host ()) input 
 let to_shell_ir ?sandbox input =
   let ( let* ) = Result.bind in
   let* () = validate input in
-  let* () =
-    match input with
-    | Exec { executable; _ } -> check_dev_executable executable
-    | Pipeline { stages; _ } ->
-      let rec each = function
-        | [] -> Ok ()
-        | { executable; _ } :: rest ->
-          let* () = check_dev_executable executable in
-          each rest
-      in
-      each stages
-  in
+  let* () = validate_admission ~mode:Write_enabled input in
   to_shell_ir_unvalidated ?sandbox input
 ;;
 
-let readonly_input_executable = function
-  | Exec { executable; _ } -> executable
-  | Pipeline _ -> "pipeline"
-;;
-
-let validate_readonly input =
-  let ( let* ) = Result.bind in
-  let* () = validate_readonly_structural input in
-  let* ir = to_shell_ir_unvalidated input in
-  let envelope =
-    Masc_exec.Shell_ir_risk.classify (Masc_exec.Shell_ir_risk.undecided ir)
-  in
-  if Masc_exec.Shell_ir_risk.is_r0 envelope
-  then Ok ()
-  else
-    readonly_executable_error
-      (readonly_input_executable input)
-      (Printf.sprintf
-         "risk=%s"
-         (Masc_exec.Shell_ir_risk.string_of_risk_class
-            (Masc_exec.Shell_ir_risk.risk_class envelope)))
-;;
+let validate_readonly input = validate_admission ~mode:Readonly input
+let validate_write input = validate_admission ~mode:Write_enabled input
 
 let pp_validation_error ppf = function
   | Empty_executable { argv = first :: rest } ->

@@ -144,9 +144,18 @@ val validate : execute_input -> (unit, validation_error) result
 
 val validate_readonly : execute_input -> (unit, validation_error) result
 (** Run {!validate}, then enforce read-only Execute executable admission.
-    Interpreters, network primitives, spawn-capable binaries, and unknown
-    executables are rejected before dispatch because argv-only execution
-    cannot prove their filesystem effects are read-only. *)
+    This uses a narrower explicit allowlist than the write-enabled gate and
+    rejects arbitrary binaries, interpreters, and network primitives before
+    dispatch. Wrapper targets such as [env OPAMSWITCH=... <cmd>] and
+    [opam exec -- <cmd>] are resolved and checked against the allowlist. *)
+
+val validate_write : execute_input -> (unit, validation_error) result
+(** Run {!validate}, then enforce write-enabled Execute executable admission.
+    This preserves the curated dev-full command set before dispatch; arbitrary
+    non-allowlisted binaries such as [rm], [tar], and [patch] are rejected even
+    when the caller has write-capable Execute. Wrapper targets such as
+    [env OPAMSWITCH=... <cmd>] and [opam exec -- <cmd>] are resolved and
+    checked against the allowlist. *)
 
 val to_shell_ir_unvalidated :
   ?sandbox:Masc_exec.Sandbox_target.t ->

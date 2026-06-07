@@ -72,22 +72,34 @@ let readonly_programs =
     ; Cut
     ; Echo
     ; Env
+    ; Basename
+    ; Date
     ; File
+    ; Dirname
     ; Find
     ; Gh
     ; Git
     ; Head
+    ; Df
+    ; Du
+    ; Hostname
     ; Ls
     ; Printf
+    ; Printenv
     ; Pwd
+    ; Ps
     ; Rg
     ; Grep
+    ; Test
     ; Sed
     ; Sort
     ; Stat
     ; Tail
+    ; Tty
     ; Tr
     ; Uniq
+    ; Uname
+    ; Whoami
     ; Wc
     ; Which
     ]

@@ -431,6 +431,18 @@ let test_readonly_allowlist_accepts_repo_read_entrypoints () =
     true
     (typed_ok_readonly (mk_exec "gh" [ "pr"; "view"; "123" ]));
   Alcotest.(check bool)
+    "readonly allows read-only system info commands"
+    true
+    (typed_ok_readonly (mk_exec "whoami" []));
+  Alcotest.(check bool)
+    "readonly allows read-only filesystem metadata command"
+    true
+    (typed_ok_readonly (mk_exec "stat" [ "README.md" ]));
+  Alcotest.(check bool)
+    "readonly allows directory-inspection aliases"
+    true
+    (typed_ok_readonly (mk_exec "du" [ "." ]));
+  Alcotest.(check bool)
     "readonly still rejects destructive entrypoint"
     false
     (typed_ok_readonly (mk_exec "rm" [ "file.txt" ]))

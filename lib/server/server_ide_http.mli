@@ -6,8 +6,11 @@
     - POST /api/v1/ide/annotations
     - DELETE /api/v1/ide/annotations/:id
     - GET  /api/v1/ide/regions
+    - GET  /api/v1/ide/events
     - GET  /api/v1/ide/presence
     - GET  /api/v1/ide/presence/stream
+    - GET  /api/v1/ide/cursors
+    - GET  /api/v1/ide/cursors/stream
 
     All routes use the workspace base resolution from
     {!Server_routes_http_routes_workspace} so the IDE reads/writes

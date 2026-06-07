@@ -71,7 +71,52 @@ let resolve_partition_for_query ~state ~uri =
 let json_error message = `Assoc [ "ok", `Bool false; "error", `String message ]
 let json_ok data = `Assoc [ "ok", `Bool true; "data", data ]
 
-let build_presence_snapshot state =
+let parse_positive_int_query ?(default = 50) ?(max_value = 200) uri name =
+  match Uri.get_query_param uri name with
+  | Some s ->
+    (match int_of_string_opt s with
+     | Some n when n > 0 -> min n max_value
+     | _ -> default)
+  | None -> default
+;;
+
+let parse_non_negative_int_query ?(default = 0) uri name =
+  match Uri.get_query_param uri name with
+  | Some s ->
+    (match int_of_string_opt s with
+     | Some n when n > 0 -> n
+     | _ -> default)
+  | None -> default
+;;
+
+let event_kind_param uri =
+  match Uri.get_query_param uri "kind" with
+  | None -> Ok None
+  | Some raw ->
+    (match String.trim raw with
+     | "" | "all" -> Ok None
+     | kind ->
+       (match Ide_bridge.event_kind_of_string kind with
+        | Some parsed -> Ok (Some parsed)
+        | None -> Error "kind must be one of tool, turn, pr, all"))
+;;
+
+let keeper_id_param uri =
+  match Uri.get_query_param uri "keeper_id" with
+  | Some k when String.trim k <> "" -> Some (String.trim k)
+  | _ ->
+    (match Uri.get_query_param uri "keeper" with
+     | Some k when String.trim k <> "" -> Some (String.trim k)
+     | _ -> None)
+;;
+
+let file_path_param uri =
+  match Uri.get_query_param uri "file_path" with
+  | Some p when String.trim p <> "" -> Some (String.trim p)
+  | _ -> None
+;;
+
+let runtime_id_and_branch state =
   let base = base_path_of_state state in
   let runtime_id =
     let base_name = Filename.basename base in
@@ -99,6 +144,12 @@ let build_presence_snapshot state =
         else ref_line)
     else "main"
   in
+  runtime_id, branch
+;;
+
+let build_presence_snapshot state =
+  let base = base_path_of_state state in
+  let runtime_id, branch = runtime_id_and_branch state in
   let entries =
     let agents = Client_registry_eio.list_active ~within_seconds:300.0 () in
     List.map
@@ -121,6 +172,35 @@ let build_presence_snapshot state =
     ; "supervisor", `String "local"
     ; "connected", `Bool true
     ; "entries", `List entries
+    ]
+;;
+
+let build_cursor_snapshot state uri =
+  let base = base_path_of_state state in
+  let runtime_id, branch = runtime_id_and_branch state in
+  let partition = resolve_partition_for_query ~state ~uri in
+  let keeper_id = keeper_id_param uri in
+  let file_path = file_path_param uri in
+  let limit = parse_positive_int_query ~default:50 ~max_value:200 uri "limit" in
+  let offset = parse_non_negative_int_query ~default:0 uri "offset" in
+  let cursors =
+    Ide_bridge.list_cursors
+      ~base_path:base
+      ~partition
+      ?keeper_id
+      ?file_path
+      ~limit
+      ~offset
+      ()
+  in
+  `Assoc
+    [ "runtime_id", `String runtime_id
+    ; "branch", `String branch
+    ; "connected", `Bool true
+    ; "cursors", `List cursors
+    ; "count", `Int (List.length cursors)
+    ; "limit", `Int limit
+    ; "offset", `Int offset
     ]
 ;;
 
@@ -357,12 +437,72 @@ let add_routes router =
            reqd)
       request
       reqd)
+  |> Http.Router.get "/api/v1/ide/events" (fun request reqd ->
+    with_public_read
+      (fun state _req reqd ->
+         let uri = Uri.of_string request.target in
+         match event_kind_param uri with
+         | Error msg ->
+           Http.Response.json_value
+             ~status:`Bad_request
+             ~request
+             (json_error msg)
+             reqd
+         | Ok kind ->
+           let base = base_path_of_state state in
+           let partition = resolve_partition_for_query ~state ~uri in
+           let keeper_id = keeper_id_param uri in
+           let limit = parse_positive_int_query ~default:50 ~max_value:200 uri "limit" in
+           let offset = parse_non_negative_int_query ~default:0 uri "offset" in
+           let events =
+             Ide_bridge.list_events
+               ~base_path:base
+               ~partition
+               ?kind
+               ?keeper_id
+               ~limit
+               ~offset
+               ()
+           in
+           let kind_json =
+             match kind with
+             | Some k -> `String (Ide_bridge.event_kind_to_string k)
+             | None -> `String "all"
+           in
+           let result =
+             `Assoc
+               [ "events", `List events
+               ; "count", `Int (List.length events)
+               ; "kind", kind_json
+               ; "limit", `Int limit
+               ; "offset", `Int offset
+               ]
+           in
+           Http.Response.json_value
+             ~compress:true
+             ~request
+             (json_ok result)
+             reqd)
+      request
+      reqd)
   (* [build_presence_snapshot] extracted in main — conflict resolved by taking
      main's helper call instead of our inline construction. *)
   |> Http.Router.get "/api/v1/ide/presence" (fun request reqd ->
     with_public_read
       (fun state _req reqd ->
          let snapshot = build_presence_snapshot state in
+         Http.Response.json_value
+           ~compress:true
+           ~request
+           (json_ok snapshot)
+           reqd)
+      request
+      reqd)
+  |> Http.Router.get "/api/v1/ide/cursors" (fun request reqd ->
+    with_public_read
+      (fun state _req reqd ->
+         let uri = Uri.of_string request.target in
+         let snapshot = build_cursor_snapshot state uri in
          Http.Response.json_value
            ~compress:true
            ~request
@@ -412,6 +552,56 @@ let add_routes router =
              | exn ->
                Log.Server.error
                  "IDE presence SSE loop exited: %s"
+                 (Printexc.to_string exn);
+               Httpun.Body.Writer.close writer)
+         | _ -> Httpun.Body.Writer.close writer)
+      request
+      reqd)
+  |> Http.Router.get "/api/v1/ide/cursors/stream" (fun request reqd ->
+    with_public_read
+      (fun state _req inner_reqd ->
+         let uri = Uri.of_string request.target in
+         let origin = get_origin request in
+         let headers =
+           Httpun.Headers.of_list
+             ([ "content-type", "text/event-stream"
+              ; "cache-control", "no-cache"
+              ; "connection", "keep-alive"
+              ; "x-accel-buffering", "no"
+              ]
+              @ cors_headers origin)
+         in
+         let response = Httpun.Response.create ~headers `OK in
+         let writer = Httpun.Reqd.respond_with_streaming inner_reqd response in
+         let write_snapshot () =
+           let snapshot_json =
+             Yojson.Safe.to_string (build_cursor_snapshot state uri)
+           in
+           let event = Printf.sprintf "data: %s\n\n" snapshot_json in
+           Httpun.Body.Writer.write_string writer event
+         in
+         write_snapshot ();
+         match state.Mcp_server.sw, state.Mcp_server.clock with
+         | Some sw, Some clock ->
+           Eio.Fiber.fork ~sw (fun () ->
+             let rec loop () =
+               (try
+                  Eio.Time.sleep clock 30.0;
+                  write_snapshot ();
+                  loop ()
+                with
+                | Eio.Cancel.Cancelled _ as e -> raise e
+                | exn ->
+                  Log.Server.debug
+                    "IDE cursor SSE ping loop error: %s"
+                    (Printexc.to_string exn));
+               Httpun.Body.Writer.close writer
+             in
+             try loop () with
+             | Eio.Cancel.Cancelled _ as e -> raise e
+             | exn ->
+               Log.Server.error
+                 "IDE cursor SSE loop exited: %s"
                  (Printexc.to_string exn);
                Httpun.Body.Writer.close writer)
          | _ -> Httpun.Body.Writer.close writer)

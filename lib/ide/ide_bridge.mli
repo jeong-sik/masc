@@ -3,6 +3,37 @@
 
 open Ide_event_types
 
+type event_kind =
+  | Tool
+  | Turn
+  | Pr
+
+val event_kind_of_string : string -> event_kind option
+val event_kind_to_string : event_kind -> string
+
+val list_events :
+  base_path:string ->
+  ?partition:Ide_paths.partition ->
+  ?kind:event_kind ->
+  ?keeper_id:string ->
+  ?limit:int ->
+  ?offset:int ->
+  unit ->
+  Yojson.Safe.t list
+
+val list_cursors :
+  base_path:string ->
+  ?partition:Ide_paths.partition ->
+  ?keeper_id:string ->
+  ?file_path:string ->
+  ?limit:int ->
+  ?offset:int ->
+  unit ->
+  Yojson.Safe.t list
+(** Return latest valid cursor records, newest first. Cursor records are
+    produced from tool hooks only when the hook input contains a non-empty
+    file path and a positive line number. *)
+
 val ingest_tool_event :
   base_path:string ->
   tool_name:string ->

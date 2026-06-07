@@ -39,6 +39,22 @@ let register_record_tool_skipped (f : (keeper_name:string -> tool_name:string ->
   record_tool_skipped_callback := f
 ;;
 
+let record_execute_output_callback
+  : (keeper_name:string ->
+     task_id:string option ->
+     stdout:string ->
+     stderr:string ->
+     status:Yojson.Safe.t ->
+     unit)
+      ref
+  =
+  ref
+    (fun ~keeper_name:_ ~task_id:_ ~stdout:_ ~stderr:_ ~status:_ -> ())
+
+let register_record_execute_output f =
+  record_execute_output_callback := f
+;;
+
 (* Skip log throttle removed with manual_reconcile blocker — no more
    sticky reconcile state means no flood of "reconcile pending" skip logs. *)
 

@@ -1,6 +1,14 @@
 // @vitest-environment happy-dom
-import { describe, expect, it } from 'vitest'
-import { getKeeperColor } from './keeper-cursor-overlay'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import {
+  connectKeeperCursorStream,
+  getKeeperColor,
+  normalizeKeeperCursorSnapshot,
+} from './keeper-cursor-overlay'
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
 
 describe('getKeeperColor', () => {
   it('maps explicit indexes to design-system keeper token slots', () => {
@@ -22,5 +30,70 @@ describe('getKeeperColor', () => {
     expect(color.cursor).toMatch(/^var\(--color-keeper-\d+\)$/)
     expect(color.selection).toMatch(/^rgb\(var\(--color-keeper-\d+-glow\) \/ 0\.22\)$/)
     expect(`${color.cursor} ${color.selection} ${color.shadow}`).not.toMatch(/#[0-9a-fA-F]{3,8}|rgba\(/)
+  })
+
+  it('ignores presence-only snapshots without cursor fields', () => {
+    const overlay = normalizeKeeperCursorSnapshot({
+      runtime_id: 'masc-runtime',
+      entries: [{
+        keeper_id: 'sangsu',
+        workspace_label: 'masc-mcp',
+        branch: 'main',
+        role: 'keeper',
+        status: 'active',
+        last_seen_ms: Date.now(),
+      }],
+    })
+
+    expect(overlay.cursors.size).toBe(0)
+    expect(overlay.active_file).toBeNull()
+  })
+
+  it('normalizes cursor snapshots with positive line positions', () => {
+    const overlay = normalizeKeeperCursorSnapshot({
+      runtime_id: 'masc-runtime',
+      cursors: [{
+        keeper_id: 'sangsu',
+        file_path: 'lib/a.ml',
+        line: 24,
+        column: 2,
+        focus_mode: 'editing',
+        last_update: Date.now(),
+        tool_name: 'keeper_ide_annotate',
+        turn: 7,
+      }],
+    })
+
+    expect(overlay.active_file).toBe('lib/a.ml')
+    expect(overlay.cursors.get('sangsu')).toMatchObject({
+      file_path: 'lib/a.ml',
+      line: 24,
+      focus_mode: 'editing',
+      tool_name: 'keeper_ide_annotate',
+      turn: 7,
+    })
+  })
+
+  it('connects to the dedicated cursor stream endpoint', () => {
+    const instances: Array<{ readonly url: string; close: () => void }> = []
+    class MockEventSource {
+      onmessage: ((event: MessageEvent) => void) | null = null
+      onerror: ((event: Event) => void) | null = null
+      readonly url: string
+
+      constructor(url: string) {
+        this.url = url
+        instances.push(this)
+      }
+
+      close = vi.fn()
+    }
+    vi.stubGlobal('EventSource', MockEventSource)
+
+    const cleanup = connectKeeperCursorStream('http://localhost:8935', () => {})
+
+    expect(instances[0]?.url).toBe('http://localhost:8935/api/v1/ide/cursors/stream')
+    cleanup()
+    expect(instances[0]?.close).toHaveBeenCalled()
   })
 })

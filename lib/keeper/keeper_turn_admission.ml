@@ -8,6 +8,11 @@ type rejection =
   | Fleet_stopped
   | Global_inflight_exceeded
 
+type throttle_source =
+  | Env_override
+  | Toml
+  | Default
+
 type fleet_policy =
   { fleet_state : fleet_state
   ; generation : int
@@ -84,6 +89,12 @@ let rejection_to_string = function
   | Global_inflight_exceeded -> "global_inflight_exceeded"
 ;;
 
+let throttle_source_to_string = function
+  | Env_override -> "env_override"
+  | Toml -> "toml"
+  | Default -> "default"
+;;
+
 let fleet_state_of_string = function
   | "running" -> Some Running
   | "paused" -> Some Paused
@@ -98,6 +109,106 @@ let default_policy =
   ; updated_by = None
   ; updated_at = None
   }
+;;
+
+let keeper_turn_throttle_limit, keeper_turn_throttle_source =
+  let env_name = "MASC_KEEPER_AUTOBOOT_MAX" in
+  let default = 32 in
+  let min_v = 1 in
+  let max_v = max_int in
+  let parse raw =
+    let v = Option.value ~default (int_of_string_opt (String.trim raw)) in
+    Keeper_config.clamp_int v ~min_v ~max_v
+  in
+  if Env_config_core.running_under_test_executable () then
+    default, Default
+  else
+    match Sys.getenv_opt env_name with
+    | Some raw when String.trim raw <> "" -> parse raw, Env_override
+    | _ -> (
+      match Env_config_core.raw_value_opt env_name with
+      | Some raw when String.trim raw <> "" -> parse raw, Toml
+      | _ -> default, Default)
+;;
+
+let effective_turn_throttle_limit =
+  match keeper_turn_throttle_source with
+  | Env_override -> (
+    match Keeper_runtime_config.toml_value_opt "MASC_KEEPER_AUTOBOOT_MAX" with
+    | Some toml_raw -> (
+      match int_of_string_opt (String.trim toml_raw) with
+      | Some toml_val when toml_val > 0 ->
+        let hard_cap = toml_val * 2 in
+        if keeper_turn_throttle_limit > hard_cap
+        then hard_cap
+        else keeper_turn_throttle_limit
+      | _ -> keeper_turn_throttle_limit)
+    | None -> keeper_turn_throttle_limit)
+  | Toml | Default -> keeper_turn_throttle_limit
+;;
+
+let check_throttle_divergence () =
+  if Env_config_core.running_under_test_executable () then
+    ()
+  else
+    match keeper_turn_throttle_source with
+    | Env_override -> (
+      match Keeper_runtime_config.toml_value_opt "MASC_KEEPER_AUTOBOOT_MAX" with
+      | None ->
+        Log.Keeper.info
+          "autoboot: env MASC_KEEPER_AUTOBOOT_MAX=%d (no TOML override, effective=%d)"
+          keeper_turn_throttle_limit
+          effective_turn_throttle_limit
+      | Some toml_raw -> (
+        match int_of_string_opt (String.trim toml_raw) with
+        | None -> ()
+        | Some toml_val when toml_val <= 0 -> ()
+        | Some toml_val ->
+          let env_val = keeper_turn_throttle_limit in
+          let factor = float_of_int env_val /. float_of_int toml_val in
+          if effective_turn_throttle_limit < env_val
+          then
+            Log.Keeper.warn
+              "autoboot divergence: env MASC_KEEPER_AUTOBOOT_MAX=%d capped to %d (2x \
+               TOML baseline %d, factor %.1fx); fleet overload prevented."
+              env_val
+              effective_turn_throttle_limit
+              toml_val
+              factor
+          else if factor >= 2.0
+          then
+            Log.Keeper.warn
+              "autoboot divergence: env MASC_KEEPER_AUTOBOOT_MAX=%d is %.1fx the TOML \
+               value (%d); fleet may be overloaded. Either unset the env var to honour \
+               TOML, or update TOML to match the intended cap."
+              env_val
+              factor
+              toml_val
+          else if env_val > toml_val
+          then
+            Log.Keeper.info
+              "autoboot divergence: env MASC_KEEPER_AUTOBOOT_MAX=%d exceeds TOML (%d) \
+               by a smaller margin (factor %.1fx); monitor fleet capacity."
+              env_val
+              toml_val
+              factor))
+    | Toml | Default -> ()
+;;
+
+let () = check_throttle_divergence ()
+
+let semaphore_wait_timeout_sec =
+  Keeper_config.float_of_env_default
+    "MASC_KEEPER_SEMAPHORE_WAIT_TIMEOUT_SEC"
+    ~default:180.0
+    ~min_v:5.0
+    ~max_v:Float.max_float
+;;
+
+let turn_concurrency_int_of_env_default_for_test name ~default ~min_v ~max_v =
+  if Env_config_core.running_under_test_executable ()
+  then default
+  else Keeper_turn_slot_types.int_of_env_default ~primary:name ~default ~min_v ~max_v
 ;;
 
 let state =
@@ -471,6 +582,19 @@ let wait_ms_since started_at =
   int_of_float ((if waited_sec < 0.0 then 0.0 else waited_sec) *. 1000.0)
 ;;
 
+let semaphore_wait_timeout_snapshot ?(holders = []) () =
+  let snapshot = snapshot ~limit:effective_turn_throttle_limit () in
+  { Keeper_turn_slot_types.timeout_wait_sec = semaphore_wait_timeout_sec
+  ; timeout_phase = Keeper_turn_slot_types.Turn_slot
+  ; timeout_autonomous_available = snapshot.available
+  ; timeout_reactive_available = snapshot.available
+  ; timeout_turn_available = snapshot.available
+  ; timeout_queue_depth = snapshot.queue_depth
+  ; timeout_queue_ahead = None
+  ; timeout_holders = holders
+  }
+;;
+
 let acquire_turn
       ?base_path
       ~limit
@@ -505,6 +629,45 @@ let acquire_turn
     match await_decision ~timeout_s pending with
     | Ok token -> Ok (token, wait_ms_since started_at)
     | Error rejection -> Error rejection)
+;;
+
+let run_with_token ~token ~semaphore_wait_ms f =
+  let cleanup () = release_turn token in
+  let body () = Ok (f ~semaphore_wait_ms) in
+  if Eio_guard.is_ready ()
+  then
+    Eio.Switch.run (fun turn_sw ->
+      Eio.Switch.on_release turn_sw cleanup;
+      Eio.Fiber.fork ~sw:turn_sw (fun () ->
+        Eio.Promise.await token.cancel_p;
+        Eio.Switch.fail turn_sw Fleet_stopped_by_operator);
+      body ())
+  else Fun.protect ~finally:cleanup body
+;;
+
+let with_turn_admission
+      ?base_path
+      ?(runtime_profile = "unknown")
+      ~keeper_name
+      ~channel
+      f
+  =
+  let channel_label = Keeper_world_observation.channel_to_string channel in
+  match
+    acquire_turn
+      ?base_path
+      ~limit:effective_turn_throttle_limit
+      ~timeout_s:semaphore_wait_timeout_sec
+      ~keeper_name
+      ~runtime_profile
+      ~channel:channel_label
+      ()
+  with
+  | Ok (token, semaphore_wait_ms) -> run_with_token ~token ~semaphore_wait_ms f
+  | Error Global_inflight_exceeded ->
+    Error (`Semaphore_wait_timeout (semaphore_wait_timeout_snapshot ()))
+  | Error (Fleet_paused | Fleet_stopped as rejection) ->
+    Error (`Turn_admission_rejected rejection)
 ;;
 
 let force_release_keeper ~keeper_name =

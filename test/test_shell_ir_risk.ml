@@ -129,6 +129,30 @@ let test_destructive_commands () =
   check "npx some-tool" Shell_ir_risk.Destructive_protected
 ;;
 
+let test_typed_execute_shell_capable_executable_is_destructive () =
+  let input =
+    `Assoc
+      [ "executable", `String "python3"
+      ; "argv", `List [ `String "-c"; `String "open('x', 'w').write('1')" ]
+      ]
+  in
+  match Masc.Keeper_tool_execute_typed_input.of_json input with
+  | Error msg -> Alcotest.failf "typed Execute parse failed: %s" msg
+  | Ok typed_input ->
+    (match Masc.Keeper_tool_execute_typed_input.to_shell_ir typed_input with
+     | Error err ->
+       Alcotest.failf
+         "typed Execute validation failed: %a"
+         Masc.Keeper_tool_execute_typed_input.pp_validation_error
+         err
+     | Ok ir ->
+       let envelope = Shell_ir_risk.classify (Shell_ir_risk.undecided ir) in
+       Alcotest.(check bool)
+         "typed Execute python3 is blocked before dispatch"
+         true
+         (Shell_ir_risk.is_destructive envelope))
+;;
+
 let test_gh_r0_read () =
   check "gh pr view 123" Shell_ir_risk.R0_Read;
   check "gh issue list" Shell_ir_risk.R0_Read;
@@ -198,7 +222,12 @@ let () =
     ; ( "R2 irreversible"
       , [ Alcotest.test_case "bare commands" `Quick test_r2_irreversible_commands ] )
     ; ( "Destructive protected"
-      , [ Alcotest.test_case "destructive commands" `Quick test_destructive_commands ] )
+      , [ Alcotest.test_case "destructive commands" `Quick test_destructive_commands
+        ; Alcotest.test_case
+            "typed Execute shell-capable executable"
+            `Quick
+            test_typed_execute_shell_capable_executable_is_destructive
+        ] )
     ; ( "gh R0 read"
       , [ Alcotest.test_case "gh read commands" `Quick test_gh_r0_read ] )
     ; ( "gh R1 reversible"

@@ -592,7 +592,7 @@ let executable_not_allowlisted_hint ~name ~mode =
       Some
         "Shell interpreters are intentionally unavailable. Use typed \
          executable/argv, or explicit pipeline stages, without shell syntax."
-    | _, "mkdir" ->
+    | Readonly, "mkdir" ->
       Some
         "Directory materialization is handled by structured file/write or \
          worktree workflows, not by Execute. Use Write/Edit when visible for \

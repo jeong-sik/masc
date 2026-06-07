@@ -363,13 +363,14 @@ module KeeperKeepalive = struct
   ;;
 
   (** Global concurrent keeper turn capacity. This is a machine-level admission
-      cap, not a per-keeper slot. Default 0 disables the central gate.
+      cap, not a per-keeper slot. Default 32 preserves the old
+      [Keeper_turn_slot] semaphore throttle (MASC_KEEPER_AUTOBOT_MAX default).
       @category Concurrency
       @ops_class operator
 
-      Env: [MASC_KEEPER_TURN_CAPACITY_LIMIT]. Default: 0. Range: [0, 1024]. *)
+      Env: [MASC_KEEPER_TURN_CAPACITY_LIMIT]. Default: 32. Range: [0, 1024]. *)
   let turn_capacity_limit =
-    min 1024 (get_int_nonneg ~default:0 "MASC_KEEPER_TURN_CAPACITY_LIMIT")
+    min 1024 (get_int_nonneg ~default:32 "MASC_KEEPER_TURN_CAPACITY_LIMIT")
   ;;
 
   (** Per-call OAS timeout override in seconds.

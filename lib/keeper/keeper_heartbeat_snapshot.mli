@@ -1,7 +1,3 @@
-(** Canonical metric name for proactive-scheduler skip reasons.
-    Labels: [("keeper", <name>); ("reason", <skip_reason>)]. *)
-val proactive_skip_reason_metric : string
-
 val keepalive_interval_sec : unit -> int
 
 (** Heartbeat history fallback read limits. *)

@@ -12,15 +12,6 @@ open Keeper_types_profile
 open Keeper_memory
 open Keeper_execution
 
-(* #10008 fm3: canonical metric name for proactive-scheduler skip
-   reasons.  Labels: [("keeper", <name>); ("reason", <skip_reason>)].
-   [reason] is derived from
-   [Keeper_world_observation.verdict_reasons_to_strings], which
-   produces one of {keeper_paused, approval_pending,
-   scheduled_autonomous_disabled, provider_cooldown_pending,
-   idle_gate_pending, cooldown_pending, no_signal}. *)
-let proactive_skip_reason_metric = Keeper_metrics.(to_string ProactiveSkip)
-
 let keepalive_interval_sec () =
   Runtime_params.get Governance_registry.keeper_keepalive_interval_sec
 ;;

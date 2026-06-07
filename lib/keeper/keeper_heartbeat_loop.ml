@@ -80,6 +80,10 @@ let record_provider_timeout_observation =
   Observations.record_provider_timeout_observation
 ;;
 
+(* #10008 fm3: canonical metric name for proactive-scheduler skip
+   reasons. Labels: [("keeper", <name>); ("reason", <skip_reason>)]. *)
+let proactive_skip_reason_metric = Keeper_metrics.(to_string ProactiveSkip)
+
 let clear_provider_timeout_failure_reason =
   Observations.clear_provider_timeout_failure_reason
 ;;
@@ -166,10 +170,9 @@ let run_keepalive_unified_turn
            is visible fleet-wide. *)
         List.iter
           (fun reason_str ->
-             Otel_metric_store.inc_counter
-	               Keeper_heartbeat_snapshot.proactive_skip_reason_metric
-	               ~labels:[ "keeper", meta_after_triage.name; "reason", reason_str ]
-	               ())
+             Otel_metric_store.inc_counter proactive_skip_reason_metric
+               ~labels:[ "keeper", meta_after_triage.name; "reason", reason_str ]
+               ())
           skip_reason_strs;
         (* #10940 follow-up — Otel_metric_store counters aggregate skip reasons
            across time, but operators need recent skip verdict context
@@ -471,7 +474,7 @@ let run_smart_heartbeat_gate
       (match gated with
        | Keeper_heartbeat_smart.Skip_idle _ ->
          Otel_metric_store.inc_counter
-           Keeper_heartbeat_snapshot.proactive_skip_reason_metric
+           proactive_skip_reason_metric
            ~labels:[ "keeper", meta_current.name; "reason", "no_visible_consumers" ]
            ();
          Log.Keeper.debug

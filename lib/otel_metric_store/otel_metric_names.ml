@@ -201,7 +201,7 @@ let metric_tool_keeper_cache_ttl_parse_failures =
 (* Goal-loop Observe contract: the Grafana p99 query consumes
    [masc_keeper_semaphore_wait_seconds_bucket] grouped by keeper and runtime.
    The generic [register_histogram] exporter currently exposes summaries, so
-   keeper_turn_slot emits the cumulative bucket companion explicitly. *)
+   keeper_turn_holders emits the cumulative bucket companion explicitly. *)
 
 let metric_timeout_policy_overshoot = "masc_timeout_policy_overshoot_total"
 

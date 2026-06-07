@@ -35,9 +35,9 @@ let semaphore_wait_observation_reasons ?phase_label ~kind ~channel () =
       let class_label =
         match Option.map skip_reason_component phase_label with
         | Some "autonomous_queue_head" -> "admission_queue_wait_timeout"
-        | Some "autonomous_slot" -> "autonomous_slot_wait_timeout"
-        | Some ("reactive_slot" | "turn_slot") -> "turn_slot_wait_timeout"
-        | Some _ | None -> "slot_wait_timeout"
+        | Some "autonomous_admission" -> "autonomous_admission_wait_timeout"
+        | Some ("reactive_admission" | "global_admission") -> "turn_admission_wait_timeout"
+        | Some _ | None -> "turn_admission_wait_timeout"
       in
       Some ("class_" ^ class_label)
   in

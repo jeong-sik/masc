@@ -62,22 +62,22 @@ val semaphore_wait_timeout_sec : float
     [MASC_KEEPER_SEMAPHORE_WAIT_TIMEOUT_SEC]. *)
 
 exception Semaphore_wait_timeout of float
-(** Legacy exception form. The [with_keeper_turn_slot*] result path below
+(** Legacy exception form. The [with_recorded_turn_admission*] result path below
     carries {!semaphore_wait_timeout}, which includes the phase and runtime
     snapshot. Callers should treat this as "skip this turn, retry on next
     heartbeat" rather than a keeper failure. *)
 
-type semaphore_wait_phase =
+type admission_wait_phase =
   | Autonomous_queue_head
-  | Autonomous_slot
-  | Reactive_slot
-  | Turn_slot
+  | Autonomous_admission
+  | Reactive_admission
+  | Global_admission
 
-val semaphore_wait_phase_to_string : semaphore_wait_phase -> string
+val admission_wait_phase_to_string : admission_wait_phase -> string
 
 type semaphore_wait_timeout = {
   timeout_wait_sec : float;
-  timeout_phase : semaphore_wait_phase;
+  timeout_phase : admission_wait_phase;
   timeout_autonomous_available : int;
   timeout_reactive_available : int;
   timeout_turn_available : int;
@@ -104,12 +104,12 @@ val reactive_turn_semaphore_value_for_test : unit -> int
     Sorted by descending hold time.
 
     [~now] MUST come from {!Time_compat.now} to match the clock used
-    by {!Keeper_turn_slot} when recording [acquired_at]. Passing
+    by {!Keeper_turn_holders} when recording [acquired_at]. Passing
     [Unix.gettimeofday ()] or any other clock can produce nonsense
     hold-time values. *)
-val turn_slot_holders : now:float -> (string * float) list
-val autonomous_slot_holders : now:float -> (string * float) list
-val reactive_slot_holders : now:float -> (string * float) list
+val turn_holders : now:float -> (string * float) list
+val autonomous_holders : now:float -> (string * float) list
+val reactive_holders : now:float -> (string * float) list
 
 (** Force-release [keeper_name]'s admitted turn after watchdog stale
     classification. Returns released diagnostic labels. *)
@@ -127,7 +127,7 @@ val force_released_marker_count_for_test : unit -> int
     marker-retention behavior can be exercised without creating a
     double-release path. *)
 val add_force_released_marker_for_test :
-  label:Keeper_turn_slot.slot_pool ->
+  label:Keeper_turn_holders.holder_pool ->
   keeper_name:string ->
   acquisition_id:int ->
   marked_at:float ->
@@ -142,12 +142,12 @@ val clear_force_released_markers_for_test : unit -> unit
 (** Render a compact holder list such as [[keeper-a/181s, +2 more]].
     The input is expected to be sorted longest-first, as returned by the
     holder accessors above. *)
-val format_slot_holders : ?limit:int -> (string * float) list -> string
+val format_holders : ?limit:int -> (string * float) list -> string
 
 (** Operator-facing one-line summary of all holder pools. *)
-val slot_holders_summary : ?limit:int -> now:float -> unit -> string
+val holders_summary : ?limit:int -> now:float -> unit -> string
 
-(** Re-export of {!Keeper_turn_slot.force_release_holder_for} so the
+(** Re-export of {!Keeper_turn_holders.force_release_holder_for} so the
     supervisor and tests have a single import point alongside the holder
     snapshot accessors. *)
 val force_release_holder_for : keeper_name:string -> (string * float) list
@@ -252,7 +252,7 @@ val set_budget_exhaustion_for_test :
 
 (** Test-only wrapper around the holder-diagnostic facade backed by central
     turn admission. *)
-val with_keeper_turn_slot_for_test :
+val with_recorded_turn_admission_for_test :
   ?runtime_profile:string ->
   keeper_name:string ->
   channel:Keeper_world_observation.keeper_cycle_channel ->

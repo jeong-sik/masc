@@ -1,44 +1,43 @@
-(** Slot/pool/phase variants + wait-timeout payload for the keeper
-    turn slot machinery.
+(** Holder pool and wait-timeout payload for keeper turn admission.
 
     Pure types + small [_to_string] helpers + the [Semaphore_wait_timeout]
-    exception. Verbatim extract from the head of [Keeper_turn_slot].
+    exception.
 
     The exception is defined here so it has a single identity across
     the module boundary; the parent re-exports it via
-    [exception Semaphore_wait_timeout = Keeper_turn_slot_types.Semaphore_wait_timeout]
+    [exception Semaphore_wait_timeout = Keeper_turn_admission_types.Semaphore_wait_timeout]
     so existing [try ... with Semaphore_wait_timeout _ -> ...]
     patterns continue to match. *)
 
-type slot_pool =
-  | Turn_pool
-  | Autonomous_pool
-  | Reactive_pool
+type holder_pool =
+  | Turn_holder
+  | Autonomous_holder
+  | Reactive_holder
 
-let slot_pool_to_string = function
-  | Turn_pool -> "turn"
-  | Autonomous_pool -> "autonomous"
-  | Reactive_pool -> "reactive"
+let holder_pool_to_string = function
+  | Turn_holder -> "turn"
+  | Autonomous_holder -> "autonomous"
+  | Reactive_holder -> "reactive"
 ;;
 
 exception Semaphore_wait_timeout of float
 
-type semaphore_wait_phase =
+type admission_wait_phase =
   | Autonomous_queue_head
-  | Autonomous_slot
-  | Reactive_slot
-  | Turn_slot
+  | Autonomous_admission
+  | Reactive_admission
+  | Global_admission
 
-let semaphore_wait_phase_to_string = function
+let admission_wait_phase_to_string = function
   | Autonomous_queue_head -> "autonomous_queue_head"
-  | Autonomous_slot -> "autonomous_slot"
-  | Reactive_slot -> "reactive_slot"
-  | Turn_slot -> "turn_slot"
+  | Autonomous_admission -> "autonomous_admission"
+  | Reactive_admission -> "reactive_admission"
+  | Global_admission -> "global_admission"
 ;;
 
 type semaphore_wait_timeout =
   { timeout_wait_sec : float
-  ; timeout_phase : semaphore_wait_phase
+  ; timeout_phase : admission_wait_phase
   ; timeout_autonomous_available : int
   ; timeout_reactive_available : int
   ; timeout_turn_available : int

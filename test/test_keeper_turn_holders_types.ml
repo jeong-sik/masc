@@ -7,7 +7,7 @@ let unique_env suffix =
 let test_int_of_env_default_uses_default_when_absent () =
   let name = unique_env "ABSENT" in
   check int "default" 7
-    (Keeper_turn_slot_types.int_of_env_default
+    (Keeper_turn_admission_types.int_of_env_default
        ~primary:name
        ~default:7
        ~min_v:1
@@ -20,13 +20,13 @@ let test_int_of_env_default_clamps_bounds () =
   Unix.putenv low "-10";
   Unix.putenv high "99";
   check int "min clamp" 1
-    (Keeper_turn_slot_types.int_of_env_default
+    (Keeper_turn_admission_types.int_of_env_default
        ~primary:low
        ~default:7
        ~min_v:1
        ~max_v:10);
   check int "max clamp" 10
-    (Keeper_turn_slot_types.int_of_env_default
+    (Keeper_turn_admission_types.int_of_env_default
        ~primary:high
        ~default:7
        ~min_v:1
@@ -39,13 +39,13 @@ let test_int_of_env_default_uses_default_for_blank_or_invalid () =
   Unix.putenv blank "  ";
   Unix.putenv invalid "not-an-int";
   check int "blank default" 7
-    (Keeper_turn_slot_types.int_of_env_default
+    (Keeper_turn_admission_types.int_of_env_default
        ~primary:blank
        ~default:7
        ~min_v:1
        ~max_v:10);
   check int "invalid default" 7
-    (Keeper_turn_slot_types.int_of_env_default
+    (Keeper_turn_admission_types.int_of_env_default
        ~primary:invalid
        ~default:7
        ~min_v:1
@@ -54,7 +54,7 @@ let test_int_of_env_default_uses_default_for_blank_or_invalid () =
 
 let () =
   run
-    "Keeper_turn_slot_types"
+    "Keeper_turn_admission_types"
     [ ( "env"
       , [ test_case
             "absent env uses default"

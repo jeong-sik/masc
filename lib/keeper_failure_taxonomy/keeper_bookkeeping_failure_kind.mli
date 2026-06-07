@@ -1,11 +1,11 @@
 (** Keeper_bookkeeping_failure_kind — closed sum for the [kind] label on
-    [metric_keeper_turn_slot_bookkeeping_failures].
+    [metric_keeper_turn_holders_bookkeeping_failures].
 
     The metric registration in [otel_metric_store.ml] already documented the
     closed set verbatim:
 
-        "Total keeper turn-slot release bookkeeping callbacks that
-         could not complete while preserving semaphore release
+        "Total keeper turn-holder release bookkeeping callbacks that
+         could not complete while preserving admission-token release
          (labels: op, kind=cancelled|exception)"
 
     Closes the [kind] label.  The [op] label intentionally stays

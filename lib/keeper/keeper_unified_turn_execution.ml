@@ -520,7 +520,7 @@ let run (ctx : ctx)
             "%s: recoverable runtime failure in %s suggested \
              degraded retry to %s (reason=%s), but productive slot \
              phase budget %.1fs is exhausted after %.1fs; ending \
-             this cycle to release the outer turn slot: %s"
+             this cycle to release the outer turn holder: %s"
             meta.name
             execution_runtime_id
             degraded_retry.next_runtime
@@ -560,7 +560,7 @@ let run (ctx : ctx)
               ; "phase", Keeper_oas_execution_error_phase.(to_label Recoverable_runtime_transient)
               ]
             ();
-          (* Retry backoff remains inside the same keeper turn slot.  The
+          (* Retry backoff remains inside the same keeper turn holder.  The
              delay is an observation, not an admission state that can produce
              a second semaphore timeout while the original turn is still
              logically active. *)

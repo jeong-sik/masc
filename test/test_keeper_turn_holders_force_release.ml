@@ -1,4 +1,4 @@
-(** Force-release path for [Keeper_turn_slot.force_release_holder_for].
+(** Force-release path for [Keeper_turn_holders.force_release_holder_for].
 
     Goal: prove the supervisor escape hatch correctly drops the holder
     row and increments the matching semaphore when a keeper fiber has
@@ -49,7 +49,7 @@ let test_force_release_empty_when_no_holder_recorded () =
   assert_int_eq ~msg:"empty release list"
     ~expected:0 ~actual:(List.length released)
 
-(* Acquire a real reactive slot via the test harness, force-release
+(* Acquire a real reactive holder via the test harness, force-release
    from outside that fiber's natural release path, and confirm the
    holder snapshot drops the entry. The natural [Fun.protect] release
    on block exit will run a second [Eio.Semaphore.release]; that
@@ -57,13 +57,13 @@ let test_force_release_empty_when_no_holder_recorded () =
    genuinely zombie fiber. *)
 let test_force_release_drops_reactive_holder () =
   let result =
-    KK.with_keeper_turn_slot_for_test
+    KK.with_recorded_turn_admission_for_test
       ~keeper_name:"zombie-reactive"
       ~channel:Masc.Keeper_world_observation.Reactive
       (fun ~semaphore_wait_ms:_ ->
         (* Pre-condition: the holder table records us. *)
         let now = Time_compat.now () in
-        let pre = List.map fst (KK.reactive_slot_holders ~now) in
+        let pre = List.map fst (KK.reactive_holders ~now) in
         if not (List.mem "zombie-reactive" pre) then
           failwith
             (Printf.sprintf "setup: expected zombie-reactive in pre, got [%s]"
@@ -79,7 +79,7 @@ let test_force_release_drops_reactive_holder () =
 
         (* Post-condition: holder table no longer mentions us. *)
         let now2 = Time_compat.now () in
-        let post = List.map fst (KK.reactive_slot_holders ~now:now2) in
+        let post = List.map fst (KK.reactive_holders ~now:now2) in
         if List.mem "zombie-reactive" post then
           failwith
             (Printf.sprintf "force-release left holder behind: [%s]"
@@ -102,7 +102,7 @@ let test_force_release_drops_reactive_holder () =
    because the first call already removed the entry. *)
 let test_force_release_is_idempotent () =
   let result =
-    KK.with_keeper_turn_slot_for_test
+    KK.with_recorded_turn_admission_for_test
       ~keeper_name:"twice-release"
       ~channel:Masc.Keeper_world_observation.Reactive
       (fun ~semaphore_wait_ms:_ ->
@@ -126,7 +126,7 @@ let test_force_release_is_idempotent () =
    uses this to format the operator-facing log line. *)
 let test_force_release_reports_nonnegative_age () =
   let result =
-    KK.with_keeper_turn_slot_for_test
+    KK.with_recorded_turn_admission_for_test
       ~keeper_name:"age-check"
       ~channel:Masc.Keeper_world_observation.Reactive
       (fun ~semaphore_wait_ms:_ ->
@@ -147,7 +147,7 @@ let test_force_release_reports_nonnegative_age () =
   | Error (`Turn_admission_rejected rejection) -> fail_unexpected_admission rejection
 
 let () =
-  Alcotest.run "keeper_turn_slot_force_release"
+  Alcotest.run "keeper_turn_holders_force_release"
     [
       ( "force_release",
         [

@@ -1,7 +1,7 @@
 (** Keeper turn admission.
 
     Owns fleet policy, global turn capacity, per-keeper isolation, and waiter
-    ordering. Holder diagnostics stay in {!Keeper_turn_slot}. *)
+    ordering. Holder diagnostics stay in {!Keeper_turn_holders}. *)
 
 type fleet_state =
   | Running
@@ -92,7 +92,7 @@ val with_turn_admission :
   channel:Keeper_world_observation.keeper_cycle_channel ->
   (semaphore_wait_ms:int -> 'a) ->
   ( 'a
-  , [> `Semaphore_wait_timeout of Keeper_turn_slot_types.semaphore_wait_timeout
+  , [> `Semaphore_wait_timeout of Keeper_turn_admission_types.semaphore_wait_timeout
     | `Turn_admission_rejected of rejection
     ] )
   result

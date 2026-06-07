@@ -15,17 +15,17 @@ val record_semaphore_wait_observation
   -> unit
 
 val semaphore_wait_timeout_blocker_class
-  :  Keeper_turn_slot.semaphore_wait_timeout
+  :  Keeper_turn_holders.semaphore_wait_timeout
   -> Keeper_meta_contract.blocker_class
 
 val semaphore_wait_timeout_diagnostics
   :  runtime_id:string
-  -> Keeper_turn_slot.semaphore_wait_timeout
+  -> Keeper_turn_holders.semaphore_wait_timeout
   -> string * string
 
 val handle_semaphore_wait_timeout
   :  ctx:'a Keeper_types_profile.context
   -> meta_after_triage:Keeper_meta_contract.keeper_meta
   -> turn_decision:Keeper_world_observation.keeper_cycle_decision
-  -> Keeper_turn_slot.semaphore_wait_timeout
+  -> Keeper_turn_holders.semaphore_wait_timeout
   -> Keeper_meta_contract.keeper_meta

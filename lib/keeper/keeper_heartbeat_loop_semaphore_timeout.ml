@@ -17,27 +17,27 @@ type semaphore_wait_observation_kind = Observations.semaphore_wait_observation_k
 let record_semaphore_wait_observation = Observations.record_semaphore_wait_observation
 
 let semaphore_wait_timeout_blocker_class
-      (timeout : Keeper_turn_slot.semaphore_wait_timeout)
+      (timeout : Keeper_turn_holders.semaphore_wait_timeout)
   =
   match timeout.timeout_phase with
-  | Keeper_turn_slot.Autonomous_queue_head -> Keeper_meta_contract.Admission_queue_wait_timeout
-  | Keeper_turn_slot.Autonomous_slot -> Keeper_meta_contract.Autonomous_slot_wait_timeout
-  | Keeper_turn_slot.Reactive_slot | Keeper_turn_slot.Turn_slot ->
+  | Keeper_turn_holders.Autonomous_queue_head -> Keeper_meta_contract.Admission_queue_wait_timeout
+  | Keeper_turn_holders.Autonomous_admission -> Keeper_meta_contract.Autonomous_slot_wait_timeout
+  | Keeper_turn_holders.Reactive_admission | Keeper_turn_holders.Global_admission ->
     Keeper_meta_contract.Turn_timeout_after_queue_wait
 ;;
 
 let semaphore_wait_timeout_diagnostics
       ~runtime_id
-      (timeout : Keeper_turn_slot.semaphore_wait_timeout)
+      (timeout : Keeper_turn_holders.semaphore_wait_timeout)
   =
   let phase_label =
-    Keeper_turn_slot.semaphore_wait_phase_to_string timeout.timeout_phase
+    Keeper_turn_holders.admission_wait_phase_to_string timeout.timeout_phase
   in
   let queue_ahead_text =
     match timeout.timeout_phase, timeout.timeout_queue_ahead with
-    | Keeper_turn_slot.Autonomous_queue_head, Some ahead ->
+    | Keeper_turn_holders.Autonomous_queue_head, Some ahead ->
       Printf.sprintf " queue_blocker=autonomous_fifo queue_ahead=%d" ahead
-    | Keeper_turn_slot.Autonomous_queue_head, None ->
+    | Keeper_turn_holders.Autonomous_queue_head, None ->
       " queue_blocker=autonomous_fifo queue_ahead=unknown"
     | _, Some ahead -> Printf.sprintf " queue_ahead=%d" ahead
     | _, None -> ""
@@ -57,7 +57,7 @@ let semaphore_wait_timeout_diagnostics
   in
   let log_diagnostic =
     match timeout.timeout_phase with
-    | Keeper_turn_slot.Autonomous_queue_head ->
+    | Keeper_turn_holders.Autonomous_queue_head ->
       let ahead_text =
         match timeout.timeout_queue_ahead with
         | Some ahead -> string_of_int ahead
@@ -68,9 +68,9 @@ let semaphore_wait_timeout_diagnostics
         persisted_blocker
         ahead_text
         timeout.timeout_queue_depth
-    | Keeper_turn_slot.Autonomous_slot
-    | Keeper_turn_slot.Reactive_slot
-    | Keeper_turn_slot.Turn_slot ->
+    | Keeper_turn_holders.Autonomous_admission
+    | Keeper_turn_holders.Reactive_admission
+    | Keeper_turn_holders.Global_admission ->
       let holder_text =
         match timeout.timeout_holders with
         | [] -> "none"
@@ -89,10 +89,10 @@ let handle_semaphore_wait_timeout
       ~ctx
       ~meta_after_triage
       ~(turn_decision : Keeper_world_observation.keeper_cycle_decision)
-      (timeout : Keeper_turn_slot.semaphore_wait_timeout)
+      (timeout : Keeper_turn_holders.semaphore_wait_timeout)
   =
   let phase_label =
-    Keeper_turn_slot.semaphore_wait_phase_to_string timeout.timeout_phase
+    Keeper_turn_holders.admission_wait_phase_to_string timeout.timeout_phase
   in
   record_semaphore_wait_observation
     ~base_path:ctx.config.base_path

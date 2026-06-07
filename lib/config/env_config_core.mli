@@ -90,7 +90,7 @@ val existing_file : string -> bool
 (* RFC-0085 PR-11 — Env var deprecation mechanism removed (7 entries:
    deprecation_warned, warn_deprecated, deprecated_opt,
    resolve_deprecated, get_float_deprecated, get_int_deprecated,
-   get_bool_deprecated).  Sole caller (keeper_turn_slot's
+   get_bool_deprecated).  Sole caller (Keeper_turn_admission_types'
    MASC_KEEPER_AUTOBOT_MAX typo fallback) is gone.  Future env
    migrations should pick a single name and stick with it; soft
    fallbacks accumulate via the workaround pattern from RFC-0084. *)

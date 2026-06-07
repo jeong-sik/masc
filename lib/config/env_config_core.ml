@@ -181,7 +181,7 @@ let home_dir_opt () =
 
    The deprecation_warned Hashtbl + warn_deprecated + deprecated_opt +
    resolve_deprecated + get_{float,int,bool}_deprecated cluster had a
-   single caller (keeper_turn_slot.int_of_env_default_with_deprecated
+   single caller (Keeper_turn_admission_types.int_of_env_default_with_deprecated
    for the MASC_KEEPER_AUTOBOT_MAX typo legacy).  Per
    memory/feedback_hardcoding_and_legacy_zero_tolerance.md, legacy env
    support is deleted at the same time as the mechanism that hosts it;

@@ -208,7 +208,7 @@ let semaphore_wait_timeout_sec =
 let turn_concurrency_int_of_env_default_for_test name ~default ~min_v ~max_v =
   if Env_config_core.running_under_test_executable ()
   then default
-  else Keeper_turn_slot_types.int_of_env_default ~primary:name ~default ~min_v ~max_v
+  else Keeper_turn_admission_types.int_of_env_default ~primary:name ~default ~min_v ~max_v
 ;;
 
 let autonomous_turn_limit =
@@ -686,8 +686,8 @@ let semaphore_wait_timeout_snapshot ?(holders = []) () =
     with_lock (fun () -> available_turns_for_channel_locked ~limit ~channel:"reactive")
   in
   let queue_depth = with_lock (fun () -> List.length state.waiters) in
-  { Keeper_turn_slot_types.timeout_wait_sec = semaphore_wait_timeout_sec
-  ; timeout_phase = Keeper_turn_slot_types.Turn_slot
+  { Keeper_turn_admission_types.timeout_wait_sec = semaphore_wait_timeout_sec
+  ; timeout_phase = Keeper_turn_admission_types.Global_admission
   ; timeout_autonomous_available = autonomous_available
   ; timeout_reactive_available = reactive_available
   ; timeout_turn_available = available

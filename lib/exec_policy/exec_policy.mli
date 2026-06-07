@@ -38,6 +38,9 @@ val command_context :
 
 val validate_command : Masc_exec.Shell_ir.t -> (unit, block_reason) result
 
+val is_dev_allowed : string -> bool
+val is_readonly_allowed : string -> bool
+
 val command_context_tool_execute :
   ?allow_pipes:bool ->
   Masc_exec.Shell_ir.t ->

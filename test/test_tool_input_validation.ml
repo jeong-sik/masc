@@ -761,6 +761,7 @@ let readonly_pipeline_input stages =
 let test_tool_execute_write_validation_stays_structural () =
   match
     Keeper_tool_execute_typed_input.validate
+      ~mode:Dev_full
       (readonly_exec_input "python3" [ "-c"; "print(1)" ])
   with
   | Ok () -> ()

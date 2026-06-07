@@ -596,22 +596,6 @@ let available_turns ~limit =
   max 0 (limit - Atomic.get global_inflight_atomic)
 ;;
 
-let acquire_global_slot ~limit ~timeout_s () =
-  match
-    acquire_turn
-      ~limit
-      ~timeout_s
-      ~keeper_name:"__legacy_global_slot"
-      ~runtime_profile:"legacy"
-      ~channel:"legacy"
-      ()
-  with
-  | Error rejection -> Error rejection
-  | Ok (token, wait_ms) -> Ok (token, wait_ms)
-;;
-
-let release_global_slot token = release_turn token
-
 let reset_for_test () =
   with_lock (fun () ->
     state.policy <- default_policy;

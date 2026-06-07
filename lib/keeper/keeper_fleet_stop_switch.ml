@@ -28,11 +28,19 @@ let resume_fleet () = ignore (Keeper_turn_admission.resume_fleet () : Keeper_tur
 let stop_fleet () = ignore (Keeper_turn_admission.stop_fleet () : Keeper_turn_admission.fleet_policy)
 
 let acquire_turn ~limit =
-  match Keeper_turn_admission.acquire_global_slot ~limit ~timeout_s:0.0 () with
+  match
+    Keeper_turn_admission.acquire_turn
+      ~limit
+      ~timeout_s:0.0
+      ~keeper_name:"fleet-stop-switch"
+      ~runtime_profile:"fleet-stop-switch"
+      ~channel:"fleet-stop-switch"
+      ()
+  with
   | Ok (token, _) -> Ok token
   | Error rejection -> Error rejection
 ;;
 
-let release_turn token = Keeper_turn_admission.release_global_slot token
+let release_turn token = Keeper_turn_admission.release_turn token
 let available_turns = Keeper_turn_admission.available_turns
 let reset_for_test = Keeper_turn_admission.reset_for_test

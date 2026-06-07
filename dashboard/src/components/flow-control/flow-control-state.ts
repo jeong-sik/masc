@@ -14,7 +14,7 @@ export const flowLoading = signal(false)
 export const maintenanceResult = signal<string | null>(null)
 export const maintenanceLoading = signal(false)
 
-function syncFlowStateFromDashboardSignals(options: { trustRunning: boolean } = { trustRunning: true }): boolean {
+export function syncFlowStateFromDashboardSignals(options: { trustRunning: boolean } = { trustRunning: true }): boolean {
   if (namespaceTruthInitializing.value) {
     flowState.value = 'initializing'
     return true
@@ -27,6 +27,7 @@ function syncFlowStateFromDashboardSignals(options: { trustRunning: boolean } = 
   }
   if (paused === false) {
     if (options.trustRunning) {
+      if (flowState.value === 'stopped') return true
       flowState.value = 'running'
       return true
     }

@@ -1,6 +1,6 @@
 (* keeper_turn_holders — admitted-turn holder diagnostics and compatibility helpers.
 
-   Per-keeper isolation, fleet-wide capacity, and fleet stop policy live in
+   Fleet-wide Runtime Concurrent capacity and fleet stop policy live in
    [Keeper_turn_admission]. This module records holder rows only after
    admission grants a token. *)
 
@@ -574,7 +574,8 @@ let run_with_admission_token
   else Fun.protect ~finally:cleanup body
 ;;
 
-(* Main entry point: admission grants both fleet capacity and keeper isolation. *)
+(* Main entry point: admission owns fleet capacity; this facade records holder
+   diagnostics after admission grants a token. *)
 let with_recorded_turn_admission_control
       ?base_path
       ?(runtime_profile = "unknown")

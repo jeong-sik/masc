@@ -10,13 +10,13 @@
    the slot leaked permanently — turn_available pinned at 0 while
    the entire 14-keeper fleet skipped turns with "wait > 180s".
 
-   The current fix makes [Keeper_turn_admission.token] the single ownership
-   object: normal finalization releases that token, force-release releases the
-   same token by keeper name, and fleet stop resolves the token cancellation
-   promise so the surrounding switch fails instead of waiting for a natural
-   return. This test asserts the structural pattern by anchored substring
-   search, so a future refactor that removes the guard fails CI before it
-   deadlocks production.
+   The current fix makes [Keeper_turn_admission] the single owner of Runtime
+   Concurrent capacity: normal finalization removes the token's lease, and
+   force-release removes every active lease matching the keeper name. Holder
+   diagnostics are allowed to fail independently; they must not own capacity
+   release. This test asserts the structural pattern by anchored substring
+   search, so a future refactor that moves capacity ownership back into holder
+   bookkeeping fails CI before it deadlocks production.
 
    Why structural rather than behavioural: deterministically
    raising Cancelled inside a sub-mutex during fiber teardown
@@ -89,28 +89,23 @@ let () =
            (Sys.getcwd ()) exe (String.concat ", " candidates))
   in
   let admission_src = read_source "lib/keeper/keeper_turn_admission.ml" in
-  (* Central admission owns normal release, forced release, and fleet-stop
-     cancellation. Holder diagnostics are intentionally not required for
-     token release. *)
+  (* Central admission owns normal release and forced release. Holder
+     diagnostics are intentionally not required for token release. *)
   let must_contain =
     [ "normal token release",
       {|let cleanup () = release_turn token|}
     ; "switch finalizer cleanup",
       {|Eio.Switch.on_release turn_sw cleanup|}
-    ; "stop watcher is daemon",
-      {|Eio.Fiber.fork_daemon ~sw:turn_sw|}
-    ; "fleet stop cancellation promise",
-      {|Eio.Promise.await token.cancel_p|}
-    ; "fleet stop switch failure",
-      {|Eio.Switch.fail turn_sw Fleet_stopped_by_operator|}
+    ; "runtime state owns leases",
+      {|active_leases : lease_metadata Lease_map.t|}
+    ; "normal release removes lease",
+      {|active_leases = Lease_map.remove token.token_id state.active_leases|}
     ; "force release entry",
       {|let force_release_keeper ~keeper_name =|}
-    ; "force release releases capacity",
-      {|release_global_capacity ()|}
-    ; "force release cancels token",
-      {|request_cancel_token token|}
-    ; "idempotent release guard",
-      {|Atomic.compare_and_set token.released false true|}
+    ; "force release filters leases",
+      {|Lease_map.filter|}
+    ; "force release matches keeper"
+    , {|not (String.equal metadata.lease_keeper_name keeper_name)|}
     ]
   in
   List.iter
@@ -130,6 +125,14 @@ let () =
     ~label:"central admission stop watcher must not depend only on Eio_guard"
     admission_src
     "if Eio_guard.is_ready ()";
+  assert_not_contains
+    ~label:"capacity release must not use retired global helper"
+    admission_src
+    "release_global_capacity";
+  assert_not_contains
+    ~label:"capacity release must not depend on mutable token guard"
+    admission_src
+    "token.released";
   assert_contains
     ~label:"fleet stop expected heartbeat path"
     heartbeat_src

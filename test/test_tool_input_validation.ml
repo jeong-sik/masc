@@ -781,7 +781,8 @@ let test_tool_execute_readonly_admission_allows_diagnostic_exec () =
   expect_readonly_allowed
     "rg"
     (readonly_exec_input "rg" [ "--files"; "lib" ]);
-  expect_readonly_allowed "git" (readonly_exec_input "git" [ "status"; "--short" ])
+  expect_readonly_allowed "git" (readonly_exec_input "git" [ "status"; "--short" ]);
+  expect_readonly_allowed "gh" (readonly_exec_input "gh" [ "pr"; "view"; "20402" ])
 
 let test_tool_execute_readonly_admission_rejects_risky_exec () =
   expect_readonly_executable_rejected
@@ -790,6 +791,15 @@ let test_tool_execute_readonly_admission_rejects_risky_exec () =
   expect_readonly_executable_rejected
     "curl"
     (readonly_exec_input "curl" [ "https://example.com" ]);
+  expect_readonly_executable_rejected
+    "git push"
+    (readonly_exec_input "git" [ "push"; "origin"; "main" ]);
+  expect_readonly_executable_rejected
+    "gh write"
+    (readonly_exec_input "gh" [ "pr"; "close"; "20402" ]);
+  expect_readonly_executable_rejected
+    "glab"
+    (readonly_exec_input "glab" [ "issue"; "list" ]);
   expect_readonly_executable_rejected "unknown" (readonly_exec_input "definitely-not-a-tool" [])
 
 let test_tool_execute_readonly_admission_rejects_pipeline_stage () =

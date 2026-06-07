@@ -420,7 +420,9 @@ let check_readonly_executable executable =
     readonly_executable_error trimmed "empty executable"
   | Ok bin ->
     (match Masc_exec.Exec_program.known bin with
-     | Some (Git | Gh | Glab) -> Ok ()
+     | Some (Git | Gh) -> Ok ()
+     | Some Glab ->
+       readonly_executable_error trimmed "write-capable executable"
      | Some (Curl | Wget | Ssh | Scp | Rsync) ->
        readonly_executable_error trimmed "network primitive"
      | Some known ->
@@ -473,7 +475,7 @@ let validate = function
     each stages
 ;;
 
-let validate_readonly input =
+let validate_readonly_structural input =
   let ( let* ) = Result.bind in
   let* () = validate input in
   match input with
@@ -570,6 +572,29 @@ let to_shell_ir ?sandbox input =
   let ( let* ) = Result.bind in
   let* () = validate input in
   to_shell_ir_unvalidated ?sandbox input
+;;
+
+let readonly_input_executable = function
+  | Exec { executable; _ } -> executable
+  | Pipeline _ -> "pipeline"
+;;
+
+let validate_readonly input =
+  let ( let* ) = Result.bind in
+  let* () = validate_readonly_structural input in
+  let* ir = to_shell_ir_unvalidated input in
+  let envelope =
+    Masc_exec.Shell_ir_risk.classify (Masc_exec.Shell_ir_risk.undecided ir)
+  in
+  if Masc_exec.Shell_ir_risk.is_r0 envelope
+  then Ok ()
+  else
+    readonly_executable_error
+      (readonly_input_executable input)
+      (Printf.sprintf
+         "risk=%s"
+         (Masc_exec.Shell_ir_risk.string_of_risk_class
+            (Masc_exec.Shell_ir_risk.risk_class envelope)))
 ;;
 
 let pp_validation_error ppf = function

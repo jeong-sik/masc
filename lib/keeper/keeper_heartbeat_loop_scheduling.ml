@@ -21,8 +21,6 @@ type keepalive_scheduling_decision = {
   runtime_backpressure : runtime_backpressure_decision;
   should_run_turn : bool;
   verdict_reasons : string list;
-  admission_reasons : string list;
-  skip_reasons : string list;
   channel : string;
 }
 
@@ -54,20 +52,12 @@ let decide_keepalive_scheduling
   let verdict_reasons =
     Keeper_world_observation.verdict_reasons_to_strings turn_decision.verdict
   in
-  let admission_reasons =
-    match runtime_backpressure with
-    | Runtime_admitted -> verdict_reasons
-    | Runtime_backpressured { reason; _ } ->
-      Observations.runtime_backpressure_observation_reasons ~reason
-  in
   let channel = Keeper_world_observation.channel_to_string turn_decision.channel in
   { turn_decision
   ; requested_should_run_turn
   ; runtime_backpressure
   ; should_run_turn
   ; verdict_reasons
-  ; admission_reasons
-  ; skip_reasons = admission_reasons
   ; channel
   }
 ;;

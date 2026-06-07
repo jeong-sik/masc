@@ -742,31 +742,33 @@ let release_keeper_turn_slot_impl ~keeper_name ~(stamp_autonomous_completion : b
     state.turn_acquisition_id := None);
   if !(state.acquired_autonomous)
   then (
-    ignore
-      (release_recorded_holder
-         ~keeper_name
-         ~label:Autonomous_pool
-         ~acquisition_id:!(state.autonomous_acquisition_id)
-         ~before_release:(fun () ->
-           (* Stamp completion time only for normal completion, before releasing
-              the semaphore so that [maybe_yield_for_fairness] can measure the
-              correct interval when this keeper's heartbeat loops back
-              immediately. *)
-           if stamp_autonomous_completion
-           then
-             safe_bookkeeping ~op:"record_autonomous_completion" (fun () ->
-               record_autonomous_completion ~keeper_name))
-         autonomous_turn_semaphore);
+    let (_ : bool) =
+      release_recorded_holder
+        ~keeper_name
+        ~label:Autonomous_pool
+        ~acquisition_id:!(state.autonomous_acquisition_id)
+        ~before_release:(fun () ->
+          (* Stamp completion time only for normal completion, before releasing
+             the semaphore so that [maybe_yield_for_fairness] can measure the
+             correct interval when this keeper's heartbeat loops back
+             immediately. *)
+          if stamp_autonomous_completion
+          then
+            safe_bookkeeping ~op:"record_autonomous_completion" (fun () ->
+              record_autonomous_completion ~keeper_name))
+        autonomous_turn_semaphore
+    in
     state.acquired_autonomous := false;
     state.autonomous_acquisition_id := None);
   if !(state.acquired_reactive)
   then (
-    ignore
-      (release_recorded_holder
-         ~keeper_name
-         ~label:Reactive_pool
-         ~acquisition_id:!(state.reactive_acquisition_id)
-         reactive_turn_semaphore);
+    let (_ : bool) =
+      release_recorded_holder
+        ~keeper_name
+        ~label:Reactive_pool
+        ~acquisition_id:!(state.reactive_acquisition_id)
+        reactive_turn_semaphore
+    in
     state.acquired_reactive := false;
     state.reactive_acquisition_id := None)
 ;;

@@ -824,7 +824,15 @@ let install_agent_observation_sinks () =
         ~tools_used:event.tools_used
         ~stop_reason:event.stop_reason
         ~duration_ms:event.duration_ms
-        ~timestamp_ms:event.timestamp_ms)
+        ~timestamp_ms:event.timestamp_ms);
+  Agent_observation.register_write_region_sink
+    (fun (event : Agent_observation.write_region_event) ->
+      Ide_region_tracker.ingest_tool_call
+        ~base_dir:event.base_path
+        ~partition:event.partition
+        ~keeper_id:event.keeper_id
+        ~turn:event.turn
+        event.tool_call_json)
 ;;
 
 let () = install_agent_observation_sinks ()

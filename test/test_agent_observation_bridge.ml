@@ -91,6 +91,44 @@ let test_pr_observation_reaches_ide_storage () =
     | _ -> fail "expected one pr event")
 ;;
 
+let test_write_region_observation_reaches_ide_storage () =
+  with_temp_dir (fun base_dir ->
+    install_fresh_ide_sink ();
+    let partition = Agent_observation.By_url "github.com_owner_repo" in
+    Agent_observation.emit_write_region_event
+      { base_path = base_dir
+      ; partition
+      ; keeper_id = "keeper-delta"
+      ; turn = 12
+      ; tool_call_json =
+          `Assoc
+            [ "name", `String "write_file"
+            ; ( "arguments"
+              , `Assoc
+                  [ "path", `String "lib/region.ml"
+                  ; "content", `String "let a = 1\nlet b = 2\n"
+                  ] )
+            ]
+      };
+    match
+      Ide_region_tracker.read_regions
+        ~base_dir
+        ~partition:(Ide_paths.By_url "github.com_owner_repo")
+        ()
+    with
+    | [ region ] ->
+      check string "region file" "lib/region.ml" region.file_path;
+      check int "line start" 1 region.line_start;
+      check int "line end" 2 region.line_end;
+      check string "keeper id" "keeper-delta" region.keeper_id;
+      (match region.source with
+       | Ide_annotation_types.Tool_call { tool_name; turn } ->
+         check string "tool name" "write_file" tool_name;
+         check int "turn" 12 turn
+       | Ide_annotation_types.Manual _ -> fail "expected tool-call region source")
+    | _ -> fail "expected one region")
+;;
+
 let () =
   run
     "agent_observation_bridge"
@@ -101,6 +139,10 @@ let () =
             test_tool_observation_reaches_ide_storage_and_cursor
         ; test_case "turn observation reaches IDE storage" `Quick test_turn_observation_reaches_ide_storage
         ; test_case "pr observation reaches IDE storage" `Quick test_pr_observation_reaches_ide_storage
+        ; test_case
+            "write-region observation reaches IDE storage"
+            `Quick
+            test_write_region_observation_reaches_ide_storage
         ] )
     ]
 ;;

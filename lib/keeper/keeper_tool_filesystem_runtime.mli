@@ -4,9 +4,9 @@ val resolve_partition_for_write
   :  base_dir:string
   -> kind:string
   -> file_path:string
-  -> Ide_paths.partition * string
+  -> Agent_observation.codebase_partition * string
 (** RFC-0128 §4.5. Reverse-lookup helper used by [track_write_region]
-    to decide which {!Ide_paths.partition} bucket a keeper write
+    to decide which neutral observation partition a keeper write
     belongs to and what its repo-relative file path is. Exposed for
     testing so the sandbox/working-tree join invariant can be
     verified directly.
@@ -14,7 +14,7 @@ val resolve_partition_for_write
     Returns:
     - [(By_url slug, rel_path)] when the file lives under a registered
       repository whose [url] normalises via
-      {!Ide_paths.canonical_url_of_remote}. [rel_path] is the path
+      {!Agent_observation.canonical_url_of_remote}. [rel_path] is the path
       relative to that repository's [local_path].
     - [(Orphan, original_path)] otherwise. Increments
       [masc_ide_orphan_writes_total] with the failure reason label

@@ -23,7 +23,9 @@ val snapshot : unit -> snapshot
 val pause_fleet : unit -> unit
 val resume_fleet : unit -> unit
 val stop_fleet : unit -> unit
-val acquire_turn : limit:int -> (unit, admission_error) result
-val release_turn : unit -> unit
+type token = Keeper_turn_admission.token
+
+val acquire_turn : limit:int -> (token, admission_error) result
+val release_turn : token -> unit
 val available_turns : limit:int -> int
 val reset_for_test : unit -> unit

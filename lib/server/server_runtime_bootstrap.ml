@@ -793,6 +793,10 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
             Some
               (Server_dashboard_http.dashboard_goals_snapshot_json
                  ~config:state.Mcp_server.workspace_config)
+        | "ide" ->
+            Some
+              (Server_dashboard_http.dashboard_ide_snapshot_json
+                 ~config:state.Mcp_server.workspace_config)
         | _ ->
             None);
       (* Standalone WebSocket transport (enabled by default, opt-out via MASC_WS_ENABLED=0) *)

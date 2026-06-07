@@ -511,6 +511,62 @@ let add_routes router =
            reqd)
       request
       reqd)
+  |> Http.Router.post "/api/v1/ide/cursors" (fun request reqd ->
+    with_public_read
+      (fun state req reqd ->
+         let base = base_path_of_state state in
+         Http.Request.read_body_async reqd (fun body_str ->
+           let json =
+             try Yojson.Safe.from_string body_str with
+             | _ -> `Assoc []
+           in
+           let find_string key =
+             match json with
+             | `Assoc fields ->
+               (match List.assoc_opt key fields with
+                | Some (`String s) when s <> "" -> Some s
+                | _ -> None)
+             | _ -> None
+           in
+           let find_int key =
+             match json with
+             | `Assoc fields ->
+               (match List.assoc_opt key fields with
+                | Some (`Int i) -> Some i
+                | Some (`Intlit s) -> int_of_string_opt s
+                | _ -> None)
+             | _ -> None
+           in
+           match
+             ( find_string "file_path"
+             , find_int "line"
+             , find_string "keeper_id" )
+           with
+           | Some file_path, Some line, Some keeper_id
+             when line >= 1 ->
+             let column = find_int "column" in
+             let source = Option.value (find_string "source") ~default:"editor" in
+             Ide_bridge.ingest_cursor_event
+               ~base_path:base
+               ~keeper_id
+               ~file_path
+               ~line
+               ?column
+               ~source
+               ();
+             Http.Response.json_value
+               ~status:`Created
+               ~request
+               (json_ok (`Assoc [ "ok", `Bool true ]))
+               reqd
+           | _ ->
+             Http.Response.json_value
+               ~status:`Bad_request
+               ~request
+               (json_error "Missing required fields: file_path, line (>=1), keeper_id")
+               reqd))
+      request
+      reqd)
   |> Http.Router.get "/api/v1/ide/presence/stream" (fun request reqd ->
     with_public_read
       (fun state _req inner_reqd ->

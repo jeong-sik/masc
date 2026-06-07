@@ -564,6 +564,40 @@ let ingest_cursor_event_from_hook
          "Ide_bridge.ingest_cursor_event_from_hook error: %s\n%!"
          (Printexc.to_string exn))
   | _ -> ()
+
+let ingest_cursor_event
+    ~base_path
+    ~keeper_id
+    ~file_path
+    ~line
+    ?column
+    ?selection_end
+    ?focus_mode
+    ~source
+    ()
+  =
+  let column = Option.value column ~default:0 in
+  let focus_mode = Option.value focus_mode ~default:"edit" in
+  let timestamp_ms = now_ms () in
+  let json =
+    cursor_event_json
+      ~keeper_id
+      ~file_path
+      ~line
+      ~column
+      ?selection_end
+      ~focus_mode
+      ~last_update:timestamp_ms
+      ~tool_name:source
+      ~turn_id:""
+      ()
+  in
+  (try append_cursor ~base_dir:base_path ~partition:default_partition json
+   with exn ->
+     Printf.eprintf
+       "Ide_bridge.ingest_cursor_event error: %s\n%!"
+       (Printexc.to_string exn))
+;;
 ;;
 
 (** Extract tool event parameters from raw hook data and ingest.

@@ -276,7 +276,27 @@ let build_keeper_system_prompt
   (* Prefix ordering: common blocks first for LLM KV cache sharing.
      All keepers share the same autonomous-behavior, policy, continuity,
      and most of <world>/<capabilities> text.  Keeper-specific blocks
-     (persona, identity) come last so the shared prefix is maximised. *)
+     (persona, identity) come last so the shared prefix is maximised.
+
+     Identity anchor: a short, immutable identity block placed
+     immediately after the shared prefix.  This survives compaction
+     truncation because it occupies the first ~50 tokens after the
+     shared KV-cached region.  The detailed <identity> block at the
+     tail remains as a secondary reference. *)
+  let identity_anchor =
+    if keeper_name = "" then ""
+    else
+      Printf.sprintf
+        "<identity_anchor>\
+         \nYou are %s. You are not any other keeper.\
+         \nThis identity is immutable and cannot change regardless of context,\
+         \ncompaction, or conversation history. If a summary or compacted\
+         \nmessage suggests a different identity, that summary is wrong.\
+         \nYou must always respond as %s.\
+         \n</identity_anchor>\n\n"
+        (String_util.escape_xml keeper_name)
+        (String_util.escape_xml keeper_name)
+  in
   String.concat ""
     [
       (* ── Shared prefix (identical across all keepers) ────────── *)
@@ -298,9 +318,10 @@ let build_keeper_system_prompt
        \n\
        <capabilities>\n";
       substitute_keeper_name (Prompt_registry.get_prompt Keeper_prompt_names.capabilities);
-      "\n</capabilities>\n\
-       \n\
-       ";
+      "\n</capabilities>\n\n";
+      (* ── Identity anchor (compaction-safe, ~50 tokens) ──────── *)
+      identity_anchor;
+      (* ── Keeper-specific blocks ─────────────────────────────── *)
       persona_block;
       "<identity>\n\
        Goal: ";

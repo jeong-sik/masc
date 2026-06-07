@@ -54,6 +54,11 @@ let memory_summary_prefix = "[MEMORY_SUMMARY]"
 
 let goal_prefix = "[GOAL]"
 
+(** Identity anchor tag injected by [Keeper_prompt.build_keeper_system_prompt].
+    Messages containing this tag are never dropped or summarized — they anchor
+    the keeper's self-identity and survive compaction intact. *)
+let identity_anchor_tag = "<identity_anchor>"
+
 let first_sentence (s : string) =
   let s = String.trim s in
   let max_len = 120 in
@@ -172,6 +177,20 @@ let score_message ~index ~total (m : Agent_sdk.Types.message) : float =
   let score =
     if String.starts_with ~prefix:memory_summary_prefix msg_text
        || String.starts_with ~prefix:goal_prefix msg_text then
+      Float.max score anchor_boost
+    else score
+  in
+  (* Identity anchor and System messages are never dropped.
+     - Identity anchor: explicit <identity_anchor> tag in system prompt.
+     - System role: the system prompt carries identity, goals, and policy
+       that cannot be reconstructed from conversation context.
+     Without this floor, System messages at index 0 score ~0.425 due to
+     zero recency, which can fall below the drop threshold. *)
+  let score =
+    if String.contains msg_text '<'
+       && String_util.contains_substring msg_text identity_anchor_tag then
+      Float.max score anchor_boost
+    else if match m.role with Agent_sdk.Types.System -> true | _ -> false then
       Float.max score anchor_boost
     else score
   in

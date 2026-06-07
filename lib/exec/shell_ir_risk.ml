@@ -113,6 +113,10 @@ let rec strip_env_prefix words =
        Return a sentinel that triggers Destructive_protected escalation
        via shell_interpreter_names. *)
     | ("-S" | "--split-string") :: _ -> ["bash"]
+    | arg :: _
+      when String.starts_with ~prefix:"--split-string=" arg
+           || (String.length arg > 2 && String.starts_with ~prefix:"-S" arg) ->
+      ["bash"]
     | rest -> rest
   in
   match words with

@@ -431,9 +431,83 @@ let check_readonly_executable executable =
        then readonly_executable_error trimmed "spawn-capable executable"
        else if flags.network
        then readonly_executable_error trimmed "network-capable executable"
+       else if flags.write_fs
+       then readonly_executable_error trimmed "write-capable executable"
        else Ok ()
      | None ->
        readonly_executable_error trimmed "unknown executable")
+;;
+
+let dev_full_allowed_programs =
+  Masc_exec.Exec_program.
+    [ Cat
+    ; Cargo
+    ; Cmake
+    ; Cut
+    ; Dune_local_sh
+    ; Echo
+    ; Env
+    ; File
+    ; Find
+    ; Gh
+    ; Git
+    ; Go
+    ; Gofmt
+    ; Gradle
+    ; Head
+    ; Java
+    ; Javac
+    ; Ls
+    ; Make
+    ; Mvn
+    ; Node
+    ; Npm
+    ; Ninja
+    ; Npx
+    ; Opam
+    ; Pip
+    ; Pnpm
+    ; Printf
+    ; Pwd
+    ; Pyright
+    ; Pytest
+    ; Python
+    ; Python3
+    ; Rg
+    ; Grep
+    ; Ruff
+    ; Rustc
+    ; Sed
+    ; Sort
+    ; Stat
+    ; Tail
+    ; Tr
+    ; Uniq
+    ; Uv
+    ; Wc
+    ; Which
+    ; Yarn
+    ]
+;;
+
+let dev_allowed_commands =
+  List.map Masc_exec.Exec_program.name_of_known dev_full_allowed_programs
+;;
+
+let check_dev_executable executable =
+  let trimmed = String.trim executable in
+  match Masc_exec.Exec_program.of_string trimmed with
+  | Error (`Unknown _) ->
+    Error (Executable_not_allowed { executable = trimmed; reason = "unknown executable" })
+  | Ok bin ->
+    (match Masc_exec.Exec_program.known bin with
+     | Some known ->
+       let name = Masc_exec.Exec_program.name_of_known known in
+       if List.mem name dev_allowed_commands
+       then Ok ()
+       else Error (Executable_not_allowed { executable = trimmed; reason = "command not in dev allowlist" })
+     | None ->
+       Error (Executable_not_allowed { executable = trimmed; reason = "unknown executable" }))
 ;;
 
 let validate_readonly_stage { executable; argv; _ } =
@@ -571,6 +645,18 @@ let to_shell_ir_unvalidated ?(sandbox = Masc_exec.Sandbox_target.host ()) input 
 let to_shell_ir ?sandbox input =
   let ( let* ) = Result.bind in
   let* () = validate input in
+  let* () =
+    match input with
+    | Exec { executable; _ } -> check_dev_executable executable
+    | Pipeline { stages; _ } ->
+      let rec each = function
+        | [] -> Ok ()
+        | { executable; _ } :: rest ->
+          let* () = check_dev_executable executable in
+          each rest
+      in
+      each stages
+  in
   to_shell_ir_unvalidated ?sandbox input
 ;;
 

@@ -47,10 +47,20 @@ let acquire_token ~limit ~keeper_name =
       (A.rejection_to_string rejection)
 ;;
 
+let acquire_result ~limit ~keeper_name =
+  A.acquire_turn
+    ~limit
+    ~timeout_s:0.0
+    ~keeper_name
+    ~runtime_profile:"test"
+    ~channel:"test"
+    ()
+;;
+
 let test_acquire_times_out_at_limit () =
   A.reset_for_test ();
   let token =
-    match A.acquire_global_slot ~limit:1 ~timeout_s:0.0 () with
+    match acquire_result ~limit:1 ~keeper_name:"limit-a" with
     | Ok (token, _) -> token
     | Error rejection ->
       Alcotest.failf
@@ -60,8 +70,8 @@ let test_acquire_times_out_at_limit () =
   Alcotest.(check (result (pair token_testable int) rejection))
     "second acquire rejected at cap"
     (Error A.Global_inflight_exceeded)
-    (A.acquire_global_slot ~limit:1 ~timeout_s:0.0 ());
-  A.release_global_slot token;
+    (acquire_result ~limit:1 ~keeper_name:"limit-b");
+  A.release_turn token;
   check_snapshot ~limit:1 ~state:"running" ~inflight:0
 
 let test_pause_and_stop_reject_without_incrementing () =
@@ -70,13 +80,13 @@ let test_pause_and_stop_reject_without_incrementing () =
   Alcotest.(check (result (pair token_testable int) rejection))
     "paused rejected"
     (Error A.Fleet_paused)
-    (A.acquire_global_slot ~limit:1 ~timeout_s:0.0 ());
+    (acquire_result ~limit:1 ~keeper_name:"paused");
   check_snapshot ~limit:1 ~state:"paused" ~inflight:0;
   ignore (A.stop_fleet () : A.fleet_policy);
   Alcotest.(check (result (pair token_testable int) rejection))
     "stopped rejected"
     (Error A.Fleet_stopped)
-    (A.acquire_global_slot ~limit:1 ~timeout_s:0.0 ());
+    (acquire_result ~limit:1 ~keeper_name:"stopped");
   check_snapshot ~limit:1 ~state:"stopped" ~inflight:0;
   A.reset_for_test ()
 

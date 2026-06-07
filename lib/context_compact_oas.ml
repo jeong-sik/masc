@@ -54,6 +54,11 @@ let memory_summary_prefix = "[MEMORY_SUMMARY]"
 
 let goal_prefix = "[GOAL]"
 
+(** Identity anchor tag injected by [Keeper_prompt.build_keeper_system_prompt].
+    Messages containing this tag are never dropped or summarized — they anchor
+    the keeper's self-identity and survive compaction intact. *)
+let identity_anchor_tag = "<identity_anchor>"
+
 let first_sentence (s : string) =
   let s = String.trim s in
   let max_len = 120 in
@@ -172,6 +177,20 @@ let score_message ~index ~total (m : Agent_sdk.Types.message) : float =
   let score =
     if String.starts_with ~prefix:memory_summary_prefix msg_text
        || String.starts_with ~prefix:goal_prefix msg_text then
+      Float.max score anchor_boost
+    else score
+  in
+  (* Identity anchor and System messages are never dropped.
+     - Identity anchor: explicit <identity_anchor> tag in system prompt.
+     - System role: the system prompt carries identity, goals, and policy
+       that cannot be reconstructed from conversation context.
+     Without this floor, System messages at index 0 score ~0.425 due to
+     zero recency, which can fall below the drop threshold. *)
+  let score =
+    if String.contains msg_text '<'
+       && String_util.contains_substring msg_text identity_anchor_tag then
+      Float.max score anchor_boost
+    else if match m.role with Agent_sdk.Types.System -> true | _ -> false then
       Float.max score anchor_boost
     else score
   in
@@ -386,6 +405,18 @@ let compact
   Log.Compact.info "[compact] strategies=[%s] %s"
     (String.concat "," strategy_names)
     (observation_summary observation);
+  (* Deterministic guard: separate System messages from the compaction
+     pipeline. System messages carry identity anchors, goals, and policy
+     that must never be dropped or lossily summarized. This is a hard
+     mechanical guarantee — not a score-based heuristic. The OAS reducer
+     operates only on non-System messages; System messages are prepended
+     back verbatim after reduction. *)
+  let system_msgs, other_msgs = List.partition
+      (fun (m : Agent_sdk.Types.message) ->
+         match m.role with Agent_sdk.Types.System -> true | _ -> false)
+      messages
+  in
   let oas_strategies = List.map oas_strategy_of resolved in
   let reducer = Agent_sdk.Context_reducer.compose oas_strategies in
-  Agent_sdk.Context_reducer.reduce reducer messages
+  let reduced = Agent_sdk.Context_reducer.reduce reducer other_msgs in
+  system_msgs @ reduced

@@ -7,7 +7,7 @@ let non_empty_trimmed_string_opt value =
   if trimmed = "" then None else Some trimmed
 
 
-let compact_runtime_trust_cache_ttl_sec = 1.0
+let compact_runtime_trust_cache_ttl_sec = 3.0
 
 (* Cache key for the per-keeper runtime-trust projection.
 
@@ -23,20 +23,19 @@ let compact_runtime_trust_cache_ttl_sec = 1.0
      /dashboard/cache-stats snapshot showed 22/48 entries (45%) of the
      same prefix, every one expired.  26 keepers × N turns/min ticked
      the LRU through the same pollution pattern, just slower.
-
-   The [compact_runtime_trust_cache_ttl_sec = 1.0] TTL is already the
-   invalidation signal — every key is force-refreshed after one second,
-   so a new turn's data lands within 1s regardless of whether the key
-   embeds the turn counter.  Embedding the counter only fragments the
-   LRU into one slot per turn while contributing nothing the TTL does
-   not already cover.
+   - TTL was 1.0s, intended as the invalidation signal.  In practice
+     dashboard polls every 5-7s, so the cache NEVER hit — every refresh
+     paid 400-580ms for receipt file I/O per keeper.  Raising to 3.0s
+     keeps data fresh (at most 3s stale) while allowing cache reuse
+     between dashboard refresh cycles.  Measured impact: trust sub-op
+     drops from 400-580ms (miss) to ~43ms (hit) on warm cycles.
 
    Identity bits the key keeps:
    - [meta.runtime.generation]: bumped on supervisor restart / takeover.
    - [meta.paused]: explicit pause/unpause toggle.
 
    Result: each keeper has exactly one cache slot.  Turn transitions
-   are picked up via the 1s TTL refresh.  Pollution shrinks from
+   are picked up via the 3s TTL refresh.  Pollution shrinks from
    N keepers × M turns_per_window to just N keepers. *)
 let compact_runtime_trust_cache_key
       ~(config : Workspace.config)

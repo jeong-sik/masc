@@ -115,7 +115,7 @@ let cached_tool_audit_json
   =
   let base_hash = Digest.to_hex (Digest.string config.base_path) in
   let cache_key = "kta:" ^ base_hash ^ ":" ^ meta.name in
-  let ttl = 2.0 in
+  let ttl = 4.0 in
   Dashboard_cache.get_or_compute cache_key ~ttl (fun () ->
     let ( recent_tool_names
         , latest_tool_names

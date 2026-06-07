@@ -10,7 +10,6 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_tool_shared_runtime
-open Ide_annotation_types
 
 let handle_ide_annotate
       ~(config : Workspace.config)
@@ -44,30 +43,30 @@ let handle_ide_annotate
   then error_json "content is required for ide_annotate"
   else (
     let kind =
-      match Ide_annotations.annotation_kind_of_string kind_str with
+      match Agent_observation.annotation_kind_of_string kind_str with
       | Some k -> k
-      | None -> Comment
+      | None -> Agent_observation.Comment
     in
     match
-      Ide_annotations.create
-        ~base_dir
-        ~keeper_id:keeper_name
-        ~file_path
-        ~line_start
-        ~line_end
-        ~kind
-        ~content
-        ?goal_id
-        ?task_id
-        ?board_post_id
-        ?comment_id
-        ?pr_id
-        ?git_ref
-        ?log_id
-        ?session_id
-        ?operation_id
-        ?worker_run_id
-        ()
+      Agent_observation.emit_annotation_request
+        { base_path = base_dir
+        ; keeper_id = keeper_name
+        ; file_path
+        ; line_start
+        ; line_end
+        ; kind
+        ; content
+        ; goal_id
+        ; task_id
+        ; board_post_id
+        ; comment_id
+        ; pr_id
+        ; git_ref
+        ; log_id
+        ; session_id
+        ; operation_id
+        ; worker_run_id
+        }
     with
     | Ok annotation ->
       Yojson.Safe.to_string

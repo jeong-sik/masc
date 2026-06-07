@@ -187,6 +187,13 @@ let now_ms () =
   Int64.of_float (Unix.gettimeofday () *. 1000.0)
 ;;
 
+let annotation_kind_to_ide = function
+  | Agent_observation.Comment -> Ide_annotation_types.Comment
+  | Agent_observation.Decision -> Ide_annotation_types.Decision
+  | Agent_observation.Question -> Ide_annotation_types.Question
+  | Agent_observation.Bookmark -> Ide_annotation_types.Bookmark
+;;
+
 let list_kind_events ~base_path ~partition ~kind ?keeper_id () =
   let dir = Ide_paths.partition_store_dir ~base_dir:base_path partition in
   let path = Filename.concat dir (event_file_name kind) in
@@ -832,7 +839,56 @@ let install_agent_observation_sinks () =
         ~partition:event.partition
         ~keeper_id:event.keeper_id
         ~turn:event.turn
-        event.tool_call_json)
+        event.tool_call_json);
+  Agent_observation.register_annotation_sink
+    (fun ({ base_path
+           ; keeper_id
+           ; file_path
+           ; line_start
+           ; line_end
+           ; kind
+           ; content
+           ; goal_id
+           ; task_id
+           ; board_post_id
+           ; comment_id
+           ; pr_id
+           ; git_ref
+           ; log_id
+           ; session_id
+           ; operation_id
+           ; worker_run_id
+           }
+          : Agent_observation.annotation_request) ->
+      match
+        Ide_annotations.create
+          ~base_dir:base_path
+          ~keeper_id
+          ~file_path
+          ~line_start
+          ~line_end
+          ~kind:(annotation_kind_to_ide kind)
+          ~content
+          ?goal_id
+          ?task_id
+          ?board_post_id
+          ?comment_id
+          ?pr_id
+          ?git_ref
+          ?log_id
+          ?session_id
+          ?operation_id
+          ?worker_run_id
+          ()
+      with
+      | Error msg -> Error msg
+      | Ok annotation ->
+        Ok
+          { Agent_observation.id = annotation.id
+          ; file_path = annotation.file_path
+          ; line_start = annotation.line_start
+          ; line_end = annotation.line_end
+          })
 ;;
 
 let () = install_agent_observation_sinks ()

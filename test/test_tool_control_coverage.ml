@@ -47,6 +47,15 @@ let with_isolated_runtime_env f =
     with_env "MASC_BASE_PATH_INPUT" None (fun () ->
       with_env "MASC_STORAGE_TYPE" None f))
 
+let with_fleet_admission_snapshot json f =
+  let original = Atomic.get Workspace_hooks.fleet_admission_snapshot_json_fn in
+  Atomic.set Workspace_hooks.fleet_admission_snapshot_json_fn
+    (fun ~base_path:_ () -> json);
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set Workspace_hooks.fleet_admission_snapshot_json_fn original)
+    f
+
 (* Test registry — each [test] call appends; final [let ()] dispatches
    via Alcotest.run. *)
 let test_cases : (string * (unit -> unit)) list ref = ref []
@@ -58,8 +67,11 @@ let test_counter = ref 0
 
 let with_ctx ?(initialize = true) f =
   Fun.protect
-    ~finally:Fs_compat.clear_fs
+    ~finally:(fun () ->
+      Workspace.invalidate_initialized_cache ();
+      Fs_compat.clear_fs ())
     (fun () ->
+      Workspace.invalidate_initialized_cache ();
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       incr test_counter;
@@ -150,6 +162,31 @@ let () =
              |> List.map to_string
              = [ "paused-keeper" ])
       | None -> failwith "dispatch returned None")
+
+let () =
+  test "dispatch_pause_status_surfaces_fleet_admission_pause_when_workspace_running" (fun () ->
+      with_ctx @@ fun ctx ->
+      with_fleet_admission_snapshot
+        (`Assoc
+          [
+            ("fleet_state", `String "paused");
+            ("global_inflight", `Int 0);
+            ("global_limit", `Int 2);
+            ("available", `Int 2);
+            ("queue_depth", `Int 0);
+          ])
+        (fun () ->
+          match Tool_control.dispatch ctx ~name:"masc_pause_status" ~args:(`Assoc []) with
+          | Some result ->
+              assert (Tool_result.is_success result);
+              let json = parse_json (Tool_result.message result) in
+              let open Yojson.Safe.Util in
+              assert (json |> member "status" = `String "running");
+              assert (json |> member "paused" = `Bool false);
+              assert (json |> member "any_pause_active" = `Bool true);
+              assert (json |> member "message" |> to_string
+                      = "Server is running, but fleet admission is paused")
+          | None -> failwith "dispatch returned None"))
 
 let () =
   test "dispatch_pause_status_ignores_legacy_namespace_hint" (fun () ->

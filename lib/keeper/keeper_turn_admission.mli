@@ -13,6 +13,11 @@ type rejection =
   | Fleet_stopped
   | Global_inflight_exceeded
 
+type throttle_source =
+  | Env_override
+  | Toml
+  | Default
+
 type fleet_policy =
   { fleet_state : fleet_state
   ; generation : int
@@ -49,6 +54,15 @@ exception Fleet_stopped_by_operator
 
 val fleet_state_to_string : fleet_state -> string
 val rejection_to_string : rejection -> string
+val throttle_source_to_string : throttle_source -> string
+
+val keeper_turn_throttle_limit : int
+val effective_turn_throttle_limit : int
+val keeper_turn_throttle_source : throttle_source
+val semaphore_wait_timeout_sec : float
+
+val turn_concurrency_int_of_env_default_for_test :
+  string -> default:int -> min_v:int -> max_v:int -> int
 
 val read_policy : ?base_path:string -> unit -> fleet_policy
 val pause_fleet : ?base_path:string -> ?reason:string -> ?updated_by:string -> unit -> fleet_policy
@@ -69,6 +83,18 @@ val acquire_turn :
   channel:string ->
   unit ->
   ((token * int), rejection) result
+
+val with_turn_admission :
+  ?base_path:string ->
+  ?runtime_profile:string ->
+  keeper_name:string ->
+  channel:Keeper_world_observation.keeper_cycle_channel ->
+  (semaphore_wait_ms:int -> 'a) ->
+  ( 'a
+  , [> `Semaphore_wait_timeout of Keeper_turn_slot_types.semaphore_wait_timeout
+    | `Turn_admission_rejected of rejection
+    ] )
+  result
 
 val release_turn : token -> unit
 val force_release_keeper : keeper_name:string -> bool

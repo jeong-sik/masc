@@ -72,6 +72,7 @@ let fleet_admission_snapshot_json_fn
       (fun ~base_path:_ () ->
          `Assoc
            [ "state", `String "unknown"
+           ; "fleet_state", `String "unknown"
            ; "global_inflight", `Null
            ; "global_limit", `Null
            ; "available", `Null
@@ -454,5 +455,4 @@ let cdal_evidence_gate_decide_fn
         unit ->
         evidence_gate_verdict)
        Atomic.t)
-
 

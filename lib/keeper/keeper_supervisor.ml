@@ -209,39 +209,30 @@ let sweep_and_recover (ctx : _ context) =
         ; ("site", Keeper_supervisor_cleanup_failure_site.(to_label Force_watchdog_crash))
         ]
       ();
-    (* 2026-05-05 fleet-stuck cycle: when a keeper fiber is stuck inside
-       an LLM subprocess that does not honour [Eio.Cancel.Cancelled],
-       the natural [Fun.protect] release in [with_keeper_turn_slot]
-       never runs and its [reactive_turn_semaphore] permit is leaked.
-       Production observation: 16 keepers held [reactive_slot] for
-       18-25 minutes each, [reactive_available=0], every other keeper
-       skipped its turn after the 180s [acquire_bounded] timeout, and
-       the idle-turn watchdog killed them. Force-releasing here is the
-       only path that drains the semaphore short of a process restart.
-       Bounded over-release is documented in
-       [Keeper_turn_slot.force_release_holder_for].
-
-       WORKAROUND (RFC-0125 P5 removal target): this rescue path only
-       releases the semaphore permit; the underlying stuck subprocess
-       lives until process restart. The structural fix is RFC-0125 P4
-       [keeper-level max-turn watchdog] (PR #15964) which cancels the
-       keepalive fiber at a typed wall-clock boundary BEFORE the slot
-       leaks. Removal target: 30-day soak on
-       stale-watchdog timeout termination metric reaching
-       zero with [MASC_KEEPER_MAX_TURN_WATCHDOG_TIMEOUT_SEC] enabled
-       fleet-wide. Do not add new callers. *)
-    (match Keeper_turn_slot.force_release_holder_for ~keeper_name:entry.name with
-     | [] -> ()
-     | released ->
-       let summary =
-         released
-         |> List.map (fun (label, age) -> Printf.sprintf "%s/%.0fs" label age)
-         |> String.concat ","
-       in
-       Log.Keeper.error
-         "%s: force-released stale slots after watchdog crash: %s"
-         entry.name
-         summary);
+    (* 2026-05-05 fleet-stuck cycle: stale watchdog cleanup must release
+       the central admission token even when the old holder-diagnostic row
+       was never recorded. Holder rows, when present, are now diagnostics. *)
+    let released_admission_token =
+      Keeper_turn_admission.force_release_keeper ~keeper_name:entry.name
+    in
+    let released_holders =
+      Keeper_turn_slot.force_release_holder_for ~keeper_name:entry.name
+    in
+    if released_admission_token || released_holders <> [] then (
+      let holder_summary =
+        match released_holders with
+        | [] -> "holders=[]"
+        | released ->
+          released
+          |> List.map (fun (label, age) -> Printf.sprintf "%s/%.0fs" label age)
+          |> String.concat ","
+          |> Printf.sprintf "holders=[%s]"
+      in
+      Log.Keeper.error
+        "%s: force-released stale admission after watchdog crash: token=%b %s"
+        entry.name
+        released_admission_token
+        holder_summary);
 	    (match
          Keeper_registry.resolve_done
            entry

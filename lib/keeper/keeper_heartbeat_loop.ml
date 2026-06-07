@@ -379,7 +379,8 @@ let run_keepalive_unified_turn
           ~kind:Semaphore_wait_pending
           ();
         match
-          Keeper_turn_slot.with_keeper_turn_slot
+          Keeper_turn_admission.with_turn_admission
+            ~base_path:ctx.config.base_path
             ~runtime_profile:(runtime_id_of_meta meta_after_triage)
             ~keeper_name:meta_after_triage.name
             ~channel:turn_decision.channel
@@ -411,7 +412,7 @@ let run_keepalive_unified_turn
              Log.Keeper.routine
                "%s: skipping turn because global turn admission is at cap=%d"
                meta_after_triage.name
-               Keeper_turn_slot.effective_turn_throttle_limit);
+               Keeper_turn_admission.effective_turn_throttle_limit);
           meta_after_cursor_persist)
       else if obs.message_cursor_updates <> []
       then meta_after_cursor_persist

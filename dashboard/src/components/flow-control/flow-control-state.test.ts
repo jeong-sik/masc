@@ -106,6 +106,24 @@ describe('flow-control-state', () => {
     expect(flowState.value).toBe('stopped')
   })
 
+  it('does not let snapshot running hide stopped fleet admission', async () => {
+    namespaceTruth.value = {
+      root: {
+        status: {
+          paused: false,
+        },
+      },
+    }
+    callMcpTool.mockResolvedValueOnce(
+      JSON.stringify({ status: 'stopped', paused: false, pause_scope: 'fleet_admission' }),
+    )
+
+    await fetchPauseStatus()
+
+    expect(callMcpTool).toHaveBeenCalledWith('masc_pause_status', {})
+    expect(flowState.value).toBe('stopped')
+  })
+
   it('trims status strings before matching pause state', async () => {
     callMcpTool.mockResolvedValueOnce(
       JSON.stringify({ status: ' paused ', paused: null }),
@@ -139,6 +157,7 @@ describe('flow-control-state', () => {
         },
       },
     }
+    callMcpTool.mockResolvedValueOnce(JSON.stringify({ status: 'running', paused: false }))
     await fetchPauseStatus()
     expect(flowState.value).toBe('running')
   })

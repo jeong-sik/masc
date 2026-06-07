@@ -92,9 +92,9 @@ val reset_autonomous_turn_queue_for_test : unit -> unit
 (** Test-only snapshot of keeper names currently queued for an autonomous turn. *)
 val autonomous_waiter_snapshot_for_test : unit -> string list
 
-(** Test-only global-admission capacity snapshots. Reactive/autonomous
-    helpers report the same shared budget because those legacy pool-specific
-    gates no longer exist. *)
+(** Test-only admission capacity snapshots. [turn_*] reports shared global
+    capacity; reactive/autonomous helpers report channel capacity after applying
+    the same global cap. *)
 val turn_semaphore_value_for_test : unit -> int
 val autonomous_turn_semaphore_value_for_test : unit -> int
 val reactive_turn_semaphore_value_for_test : unit -> int
@@ -250,8 +250,8 @@ val set_budget_exhaustion_for_test :
 (** Test-only: pre-load strike count.  [strikes <= 0] is equivalent
     to [reset_budget_exhaustion]. *)
 
-(** Test-only compatibility wrapper around the legacy holder-diagnostic path.
-    Production turn admission goes through {!Keeper_turn_admission.with_turn_admission}. *)
+(** Test-only wrapper around the holder-diagnostic facade backed by central
+    turn admission. *)
 val with_keeper_turn_slot_for_test :
   ?runtime_profile:string ->
   keeper_name:string ->

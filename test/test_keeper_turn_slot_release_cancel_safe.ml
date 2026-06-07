@@ -123,17 +123,13 @@ let () =
     {|Keeper_turn_admission.force_release_keeper ~keeper_name:entry.name|};
   let heartbeat_src = read_source "lib/keeper/keeper_heartbeat_loop.ml" in
   assert_contains
-    ~label:"heartbeat uses central admission"
+    ~label:"heartbeat records holder diagnostics through facade"
     heartbeat_src
-    "Keeper_turn_admission.with_turn_admission";
+    "Keeper_turn_slot.with_keeper_turn_slot";
   assert_not_contains
     ~label:"central admission stop watcher must not depend only on Eio_guard"
     admission_src
     "if Eio_guard.is_ready ()";
-  assert_not_contains
-    ~label:"heartbeat no longer uses slot admission"
-    heartbeat_src
-    "Keeper_turn_slot.with_keeper_turn_slot";
   assert_contains
     ~label:"fleet stop expected heartbeat path"
     heartbeat_src

@@ -211,6 +211,30 @@ let turn_concurrency_int_of_env_default_for_test name ~default ~min_v ~max_v =
   else Keeper_turn_slot_types.int_of_env_default ~primary:name ~default ~min_v ~max_v
 ;;
 
+let autonomous_turn_limit =
+  turn_concurrency_int_of_env_default_for_test
+    "MASC_KEEPER_AUTONOMOUS_CONCURRENCY"
+    ~default:16
+    ~min_v:1
+    ~max_v:max_int
+;;
+
+let reactive_turn_limit =
+  turn_concurrency_int_of_env_default_for_test
+    "MASC_KEEPER_REACTIVE_CONCURRENCY"
+    ~default:16
+    ~min_v:1
+    ~max_v:max_int
+;;
+
+let channel_limit ~global_limit channel =
+  let global_limit = max 1 global_limit in
+  match String.lowercase_ascii (String.trim channel) with
+  | "reactive" -> min global_limit reactive_turn_limit
+  | "scheduled_autonomous" | "proactive" -> min global_limit autonomous_turn_limit
+  | _ -> global_limit
+;;
+
 let state =
   { mutex = Stdlib.Mutex.create ()
   ; policy = default_policy
@@ -254,6 +278,27 @@ let rec release_global_capacity () =
   then ()
   else if not (Atomic.compare_and_set global_inflight_atomic current (current - 1))
   then release_global_capacity ()
+;;
+
+let channel_inflight_locked channel =
+  Hashtbl.fold
+    (fun _ token count ->
+       if String.equal token.channel channel then count + 1 else count)
+    state.inflight
+    0
+;;
+
+let channel_has_capacity_locked ~limit channel =
+  channel_inflight_locked channel < channel_limit ~global_limit:limit channel
+;;
+
+let available_turns_for_channel_locked ~limit ~channel =
+  let limit = max 1 limit in
+  let global_available = max 0 (limit - Atomic.get global_inflight_atomic) in
+  let channel_available =
+    max 0 (channel_limit ~global_limit:limit channel - channel_inflight_locked channel)
+  in
+  min global_available channel_available
 ;;
 
 let base_path_opt ?base_path () =
@@ -392,7 +437,7 @@ let grant_locked pending =
   resolve_decision pending (Ok token)
 ;;
 
-let select_eligible_waiter_locked () =
+let select_eligible_waiter_locked ~limit =
   let rec loop skipped = function
     | [] ->
       state.waiters <- List.rev skipped;
@@ -401,6 +446,8 @@ let select_eligible_waiter_locked () =
     | pending :: rest
       when Hashtbl.mem state.active_keepers pending.info.keeper_name ->
       loop (pending :: skipped) rest
+    | pending :: rest when not (channel_has_capacity_locked ~limit pending.info.channel)
+      -> loop (pending :: skipped) rest
     | pending :: rest ->
       state.waiters <- List.rev_append skipped rest;
       Some pending
@@ -416,7 +463,7 @@ let rec schedule_locked ~limit =
   | Running ->
     if try_acquire_global_capacity ~limit
     then (
-      match select_eligible_waiter_locked () with
+      match select_eligible_waiter_locked ~limit with
       | None -> release_global_capacity ()
       | Some pending ->
         grant_locked pending;
@@ -530,6 +577,21 @@ let timeout_pending pending =
   | None -> Error Global_inflight_exceeded
 ;;
 
+let cleanup_pending_wait_abort pending =
+  let decision =
+    with_lock (fun () ->
+      remove_pending_locked pending;
+      let decision = Eio.Promise.peek pending.decision_p in
+      (match decision with
+       | None -> schedule_locked ~limit:state.last_limit
+       | Some _ -> ());
+      decision)
+  in
+  match decision with
+  | Some (Ok token) -> release_turn token
+  | Some (Error _) | None -> ()
+;;
+
 let await_decision ~timeout_s pending =
   match Eio.Promise.peek pending.decision_p with
   | Some decision -> decision
@@ -540,7 +602,10 @@ let await_decision ~timeout_s pending =
         Eio.Time.with_timeout_exn clock timeout_s (fun () ->
           Eio.Promise.await pending.decision_p)
       with
-      | Eio.Time.Timeout -> timeout_pending pending)
+      | Eio.Time.Timeout -> timeout_pending pending
+      | exn ->
+        cleanup_pending_wait_abort pending;
+        raise exn)
     | None ->
       if timeout_s <= 0.0
       then timeout_pending pending
@@ -554,7 +619,10 @@ let await_decision ~timeout_s pending =
             Eio.Fiber.yield ();
             loop ()
         in
-        loop ()))
+        try loop () with
+        | exn ->
+          cleanup_pending_wait_abort pending;
+          raise exn))
 ;;
 
 let enqueue_turn_locked ~keeper_name ~runtime_profile ~channel ~started_at =
@@ -610,11 +678,18 @@ let semaphore_wait_timeout_snapshot ?(holders = []) () =
   let limit = max 1 effective_turn_throttle_limit in
   let global_inflight = Atomic.get global_inflight_atomic in
   let available = max 0 (limit - global_inflight) in
+  let autonomous_available =
+    with_lock (fun () ->
+      available_turns_for_channel_locked ~limit ~channel:"scheduled_autonomous")
+  in
+  let reactive_available =
+    with_lock (fun () -> available_turns_for_channel_locked ~limit ~channel:"reactive")
+  in
   let queue_depth = with_lock (fun () -> List.length state.waiters) in
   { Keeper_turn_slot_types.timeout_wait_sec = semaphore_wait_timeout_sec
   ; timeout_phase = Keeper_turn_slot_types.Turn_slot
-  ; timeout_autonomous_available = available
-  ; timeout_reactive_available = available
+  ; timeout_autonomous_available = autonomous_available
+  ; timeout_reactive_available = reactive_available
   ; timeout_turn_available = available
   ; timeout_queue_depth = queue_depth
   ; timeout_queue_ahead = None
@@ -803,6 +878,10 @@ let global_inflight () =
 let available_turns ~limit =
   let limit = max 1 limit in
   max 0 (limit - Atomic.get global_inflight_atomic)
+;;
+
+let available_turns_for_channel ~limit ~channel =
+  with_lock (fun () -> available_turns_for_channel_locked ~limit ~channel)
 ;;
 
 let reset_for_test () =

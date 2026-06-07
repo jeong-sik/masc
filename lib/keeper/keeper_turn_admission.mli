@@ -73,6 +73,7 @@ val snapshot : ?base_path:string -> ?limit:int -> unit -> snapshot
 val snapshot_json : ?base_path:string -> ?limit:int -> unit -> Yojson.Safe.t
 val global_inflight : unit -> int
 val available_turns : limit:int -> int
+val available_turns_for_channel : limit:int -> channel:string -> int
 
 val acquire_turn :
   ?base_path:string ->

@@ -14,7 +14,7 @@ export const flowLoading = signal(false)
 export const maintenanceResult = signal<string | null>(null)
 export const maintenanceLoading = signal(false)
 
-function syncFlowStateFromDashboardSignals(): boolean {
+function syncFlowStateFromDashboardSignals(options: { trustRunning: boolean } = { trustRunning: true }): boolean {
   if (namespaceTruthInitializing.value) {
     flowState.value = 'initializing'
     return true
@@ -26,8 +26,11 @@ function syncFlowStateFromDashboardSignals(): boolean {
     return true
   }
   if (paused === false) {
-    flowState.value = 'running'
-    return true
+    if (options.trustRunning) {
+      flowState.value = 'running'
+      return true
+    }
+    return false
   }
   return false
 }
@@ -41,7 +44,7 @@ function normalizedFlowStatus(value: unknown): string {
 }
 
 export async function fetchPauseStatus(): Promise<void> {
-  if (syncFlowStateFromDashboardSignals()) return
+  if (syncFlowStateFromDashboardSignals({ trustRunning: false })) return
   try {
     const raw = await callMcpTool('masc_pause_status', {})
     const parsed = JSON.parse(raw) as { paused?: boolean | null; status?: string; initializing?: boolean }

@@ -1,8 +1,8 @@
-(** Keeper cycle execution under slot control with error-class
+(** Keeper cycle execution with error-class
     handling, extracted from [keeper_heartbeat_loop.ml] (godfile
     decomp).
 
-    [run_keeper_cycle_with_slot] wraps a single keeper-cycle execution
+    [run_keeper_cycle] wraps a single keeper-cycle execution
     in an [in_turn_liveness_pulse] heartbeat fiber, then triages the
     result. The function is the canonical error-classification layer
     for the keepalive loop:
@@ -28,7 +28,7 @@
 
     Pure helper move — no callback injection, all references reach
     external modules (Keeper_unified_turn, Agent_sdk, Log, Otel_metric_store,
-    Keeper_metrics, Keeper_registry, Keeper_turn_slot,
+    Keeper_metrics, Keeper_registry, Keeper_turn_holders,
     Keeper_failure_policy) or other siblings
     ([Keeper_heartbeat_loop_in_turn_pulse], [Observations]). *)
 
@@ -39,14 +39,14 @@ open Keeper_types_profile
 module In_turn_pulse = Keeper_heartbeat_loop_in_turn_pulse
 module Observations = Keeper_heartbeat_loop_observations
 
-let run_keeper_cycle_with_slot
+let run_keeper_cycle
       ~ctx
       ~meta_after_cursor_persist
       ~stop
       ~obs
       ~(turn_decision : Keeper_world_observation.keeper_cycle_decision)
       ~shared_context
-      ~semaphore_wait_ms
+      ~holder_wait_ms
       ()
   =
   match
@@ -57,7 +57,7 @@ let run_keeper_cycle_with_slot
         ~observation:obs
         ~generation:meta_after_cursor_persist.runtime.generation
         ~channel:turn_decision.channel
-        ~semaphore_wait_ms
+        ~holder_wait_ms
         ~shared_context
         ())
   with
@@ -85,7 +85,7 @@ let run_keeper_cycle_with_slot
     if Observations.is_provider_timeout_error err
     then (
       let keeper_name = meta_after_cursor_persist.name in
-      Keeper_turn_slot.reset_budget_exhaustion ~keeper_name;
+      Keeper_turn_holders.reset_budget_exhaustion ~keeper_name;
       Log.Keeper.warn
         "%s: provider_timeout observed; preserving original turn \
          failure without Provider_timeout_loop latch"
@@ -114,7 +114,7 @@ let run_keeper_cycle_with_slot
          ();
        meta_after_cursor_persist)
   | Ok updated ->
-    Keeper_turn_slot.reset_budget_exhaustion ~keeper_name:meta_after_cursor_persist.name;
+    Keeper_turn_holders.reset_budget_exhaustion ~keeper_name:meta_after_cursor_persist.name;
     Observations.clear_provider_timeout_failure_reason
       ~base_path:ctx.config.base_path
       ~keeper_name:meta_after_cursor_persist.name;

@@ -335,7 +335,6 @@ let unhealthy_reason_label = function
 
 let runtime_fsm_to_mermaid
     ?(provider_health : (string * provider_health) list option)
-    ?(slot_state : (int * int) option)
     ?(effective_runtime_reason : string option)
     ~(models : string list)
     ~(last_provider_result : string option)
@@ -405,9 +404,6 @@ let runtime_fsm_to_mermaid
   p "    note right of SelectProvider\n";
   p "      Models: %d\n" n;
   p "      Order: %s\n" (String.concat " > " models);
-  (match slot_state with
-   | Some (used, max) -> p "      Slots: %d / %d\n" used max
-   | None -> ());
   (match effective_runtime_reason with
    | Some r when String.length r > 0 -> p "      Reason: %s\n" r
    | _ -> ());

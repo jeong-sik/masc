@@ -8,20 +8,12 @@ open Keeper_meta_contract
 open Keeper_types_profile
 module Observations = Keeper_heartbeat_loop_observations
 
-(* Re-export runtime_backpressure_decision so the record field below
-   matches the parent's view byte-identically. *)
 type runtime_backpressure_decision = Observations.runtime_backpressure_decision =
   | Runtime_admitted
   | Runtime_backpressured of {
       runtime_id : string;
       reason : string;
     }
-
-let runtime_backpressure_observation_reasons =
-  Observations.runtime_backpressure_observation_reasons
-;;
-
-let runtime_backpressure_decision = Observations.runtime_backpressure_decision
 
 type keepalive_scheduling_decision = {
   turn_decision : Keeper_world_observation.keeper_cycle_decision;
@@ -30,13 +22,14 @@ type keepalive_scheduling_decision = {
   should_run_turn : bool;
   verdict_reasons : string list;
   admission_reasons : string list;
+  skip_reasons : string list;
   channel : string;
 }
 
 let decide_keepalive_scheduling
+      ?(runtime_id_of_meta = Keeper_meta_contract.runtime_id_of_meta)
       ?(runtime_resilience_of_name = fun _ -> None)
-      ?(runtime_status_of_name =
-        fun ~runtime_id -> Keeper_health_probe.get_runtime_status ~runtime_id)
+      ?(runtime_status_of_name = fun ~runtime_id:_ -> Keeper_health_probe.Unknown)
       ~stop
       ~meta
       obs
@@ -46,10 +39,9 @@ let decide_keepalive_scheduling
     (not (Atomic.get stop)) && turn_decision.should_run
   in
   let runtime_id = runtime_id_of_meta meta in
-  let runtime_resilience = runtime_resilience_of_name runtime_id in
   let runtime_backpressure =
-    runtime_backpressure_decision
-      ~runtime_resilience
+    Observations.runtime_backpressure_decision
+      ~runtime_resilience:(runtime_resilience_of_name runtime_id)
       ~should_run_turn:requested_should_run_turn
       ~runtime_id
       ~runtime_status:(runtime_status_of_name ~runtime_id)
@@ -66,7 +58,7 @@ let decide_keepalive_scheduling
     match runtime_backpressure with
     | Runtime_admitted -> verdict_reasons
     | Runtime_backpressured { reason; _ } ->
-      runtime_backpressure_observation_reasons ~reason
+      Observations.runtime_backpressure_observation_reasons ~reason
   in
   let channel = Keeper_world_observation.channel_to_string turn_decision.channel in
   { turn_decision
@@ -75,6 +67,7 @@ let decide_keepalive_scheduling
   ; should_run_turn
   ; verdict_reasons
   ; admission_reasons
+  ; skip_reasons = admission_reasons
   ; channel
   }
 ;;

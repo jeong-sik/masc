@@ -107,6 +107,16 @@ let rec strip_env_prefix words =
            || String.starts_with ~prefix:"-u" arg
            || is_env_assignment arg ->
       strip_env_args rest
+    (* env -S/--split-string splits a string into arguments and executes
+       the resulting command — arbitrary command execution. Cannot safely
+       extract and classify the embedded command string at the word level.
+       Return a sentinel that triggers Destructive_protected escalation
+       via shell_interpreter_names. *)
+    | ("-S" | "--split-string") :: _ -> ["bash"]
+    | arg :: _
+      when String.starts_with ~prefix:"--split-string=" arg
+           || (String.length arg > 2 && String.starts_with ~prefix:"-S" arg) ->
+      ["bash"]
     | rest -> rest
   in
   match words with
@@ -161,6 +171,30 @@ let normalize_command_words words =
   | "git" :: rest -> "git" :: skip_git_global_options rest
   | "gh" :: rest -> "gh" :: skip_gh_global_options rest
   | words -> words
+;;
+
+let normalized_head_name = function
+  | [] -> None
+  | raw :: _ ->
+    Some (raw |> Filename.basename |> String.lowercase_ascii)
+;;
+
+let head_name_in names words =
+  match normalized_head_name words with
+  | Some name -> List.mem name names
+  | None -> false
+;;
+
+let shell_interpreter_names =
+  [ "sh"; "bash"; "zsh"; "fish"; "ksh"; "dash"; "csh"; "tcsh"; "ash" ]
+;;
+
+let network_primitive_names =
+  [ "curl"; "wget"; "ssh"; "scp"; "rsync"; "ftp"; "sftp"; "nc" ]
+;;
+
+let shell_capable_executable_names =
+  [ "node"; "npx"; "pip"; "python"; "python3" ]
 ;;
 
 (* STR-OK: Shell argv boundary parser; git option strings are normalized here
@@ -549,12 +583,11 @@ let is_destructive_bash_operation (words : string list) =
   | _ -> false
 ;;
 
-(* --- Action-flag danger (allowlisted read tools, dangerous flags) ---
+(* --- Action-flag danger (read-shaped tools, dangerous flags) ---
 
-   find/sed/sort are legitimate read tools (on the readonly + dev
-   allowlists), but a single flag turns them destructive or write-capable
-   while the command identity stays "allowlisted read". The command-level
-   allowlist and [is_write_operation]/[classify_write_detail] (head-token
+   find/sed/sort are legitimate read-shaped tools, but a single flag turns
+   them destructive or write-capable while the command identity stays read-like.
+   [is_write_operation]/[classify_write_detail] (head-token
    keyed) therefore never see the danger. The Find/Sort typed GADT does
    not model these flags either — like [gh], the risk is string-borne — so
    [classify_words] owns it as the floor. ([Sed.in_place] IS modeled, so
@@ -562,12 +595,12 @@ let is_destructive_bash_operation (words : string list) =
    redundant there.)
 
    Mapping rationale: [-exec]/[-execdir]/[-ok]/[-okdir] run an arbitrary
-   command (rm/sh are on no keeper allowlist) and [-delete] removes files —
+   command and [-delete] removes files —
    the intent is "nobody destroys", so [Destructive_protected] blocks all
    keepers (dev included). The file-writing primaries ([-fprintf]/[-fls]/
    [-fprint]/[-fprint0], [sed -i], [sort -o]) are ordinary writes: [R1]
-   (readonly keeper blocked, dev keeper allowed — the split a flat
-   allowlist denylist could not express). *)
+   (readonly keeper blocked, dev keeper allowed — a split that belongs to
+   risk classification rather than executable-name admission). *)
 
 let find_destructive_primaries = [ "-delete"; "-exec"; "-execdir"; "-ok"; "-okdir" ]
 let find_write_primaries = [ "-fprintf"; "-fls"; "-fprint"; "-fprint0" ]
@@ -612,7 +645,11 @@ let action_flag_risk (words : string list) : risk_class =
 
 let classify_words (words : string list) : risk_class =
   let words = normalize_command_words words in
-  if is_destructive_bash_operation words then Destructive_protected
+  if head_name_in shell_interpreter_names words then Destructive_protected
+  else if head_name_in shell_capable_executable_names words
+  then Destructive_protected
+  else if head_name_in network_primitive_names words then R1_Reversible_mutation
+  else if is_destructive_bash_operation words then Destructive_protected
   else
     (* find/sed/sort action-flags are checked before the write/gh/R0
        fall-through; these heads do not overlap [is_write_operation] or
@@ -643,13 +680,15 @@ let classify_words (words : string list) : risk_class =
    new typed command cannot reach dispatch without a risk decision.
    CLAUDE.md §"FSM Sparse Match" — every constructor named, no wildcard.
 
-   Policy (2026-05-29, option B — monotone-safe, escalate dangerous
+   Policy (2026-06-07, Shell IR SSOT — monotone-safe, escalate dangerous
    gaps only): the type closes word-list holes it makes visible —
    [Sudo] (privilege escalation; the word-list head token was "sudo" so
    its "rm"/"git push" arms never fired -> silent R0), [Su] and [Mkfs]
-   (R0 -> R2). Commands the word-list already classifies keep their risk
-   (curl/sed/git pull stay R0; git push/commit stay R1; rm -rf protected
-   stays Destructive). [Gh] and [Generic] return R0 here because the
+   (R0 -> R2), plus network primitives ([Curl]/[Wget]/[Ssh]/[Scp]/[Rsync])
+   that are not local reads and must not promote to Safe_IR. Commands the
+   word-list already classifies keep their risk (sed/git pull stay R0;
+   git push/commit stay R1; rm -rf protected stays Destructive). [Gh] and
+   [Generic] return R0 here because the
    type cannot see their risk-bearing tokens (gh -X METHOD / graphql
    body / -f fields live in argv strings, not the typed shape); the
    word-list floor in [classify] supplies it. For gh this is by design
@@ -728,28 +767,34 @@ let risk_of_typed (w : Shell_ir_typed.wrapped) : risk_class =
   | W (Git_reset _) -> R2_Irreversible
   | W (Git_blame _) -> R0_Read
   | W (Git_add _) -> R0_Read
-  (* network commands the word-list leaves at R0 (option B: unchanged) *)
-  | W (Curl _) -> R0_Read
-  | W (Wget _) -> R0_Read
-  | W (Ssh _) -> R0_Read
-  | W (Scp _) -> R0_Read
+  (* Network primitives are not local reads. Keep this in Shell IR risk so
+     Execute/safe_sh consume one classification substrate instead of each
+     keeping executable-name gates. *)
+  | W (Curl _) -> R1_Reversible_mutation
+  | W (Wget _) -> R1_Reversible_mutation
+  | W (Ssh _) -> R1_Reversible_mutation
+  | W (Scp _) -> R1_Reversible_mutation
   | W (Tar _) -> R0_Read
   (* sed -i / --in-place edits files in place (R1). The GADT models
      [in_place], so the typed path escalates it; classify_words owns the
      word-list floor for parity. Non-in-place sed is a read filter (R0). *)
   | W (Sed { in_place; _ }) ->
     if in_place then R1_Reversible_mutation else R0_Read
-  | W (Rsync _) -> R0_Read
-  (* interpreters / build tools the word-list leaves at R0 *)
-  | W (Node _) -> R0_Read
-  | W (Python _) -> R0_Read
-  | W (Python3 _) -> R0_Read
-  | W (Pip _) -> R0_Read
+  | W (Rsync _) -> R1_Reversible_mutation
+  (* Shell-capable interpreters/package entrypoints can run arbitrary
+     filesystem and process mutations even when their argv looks read-shaped. *)
+  | W (Node _) -> Destructive_protected
+  | W (Python _) -> Destructive_protected
+  | W (Python3 _) -> Destructive_protected
+  | W (Pip _) -> Destructive_protected
+  | W (Npx _) -> Destructive_protected
+  (* build and analysis tools the word-list leaves at R0 *)
   | W (Patch _) -> R0_Read
   | W (Cargo _) -> R0_Read
   | W (Go _) -> R0_Read
-  | W (Opam _) -> R0_Read
-  | W (Npx _) -> R0_Read
+  | W (Opam { subcommand; _ }) ->
+    if String.equal subcommand "exec" then Destructive_protected
+    else R0_Read
   | W (Uv _) -> R0_Read
   | W (Glab _) -> R0_Read
   | W (Pytest _) -> R0_Read

@@ -91,22 +91,18 @@ let test_applies_multiple_overrides () =
   let doc = parse_or_fail
     "[autonomous]\n\
      max_turns_per_call = 7\n\
-     semaphore_wait_timeout_sec = 150\n\
      [reactive]\n\
      max_turns_per_call = 20\n"
   in
   let count, overrides =
     Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
   in
-  check int "applied 3" 3 count;
+  check int "applied 2" 2 count;
   check (option string) "autonomous max_turns"
     (Some "7")
     (List.assoc_opt
        "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS"
        overrides);
-  check (option string) "semaphore timeout"
-    (Some "150")
-    (List.assoc_opt "MASC_KEEPER_SEMAPHORE_WAIT_TIMEOUT_SEC" overrides);
   check (option string) "reactive max_turns"
     (Some "20")
     (List.assoc_opt "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL" overrides)
@@ -116,11 +112,7 @@ let test_applies_sleep_and_throttle_overrides () =
     "[bootstrap]\n\
      autoboot_max = 6\n\
      [autonomous]\n\
-     concurrency = 2\n\
-     slot_wait_timeout_sec = 45\n\
      fairness_cooldown_sec = 3\n\
-     [reactive]\n\
-     concurrency = 4\n\
      [heartbeat]\n\
      sleep_chunk_sec = 1.5\n\
      board_debounce_sec = 30\n\
@@ -128,28 +120,20 @@ let test_applies_sleep_and_throttle_overrides () =
      board_wakeup_max = 6\n\
      [turn]\n\
      admission_wait_timeout_sec = 20\n\
+     capacity_limit = 3\n\
      batch_limit = 9\n\
      board_event_limit = 7\n"
   in
   let count, overrides =
     Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
   in
-  check int "applied sleep/throttle overrides" 12 count;
+  check int "applied sleep/throttle overrides" 10 count;
   check (option string) "autoboot max canonical env"
     (Some "6")
     (List.assoc_opt "MASC_KEEPER_AUTOBOOT_MAX" overrides);
-  check (option string) "autonomous concurrency"
-    (Some "2")
-    (List.assoc_opt "MASC_KEEPER_AUTONOMOUS_CONCURRENCY" overrides);
-  check (option string) "autonomous slot wait"
-    (Some "45")
-    (List.assoc_opt "MASC_KEEPER_AUTONOMOUS_SLOT_WAIT_TIMEOUT_SEC" overrides);
   check (option string) "autonomous fairness cooldown"
     (Some "3")
     (List.assoc_opt "MASC_KEEPER_AUTONOMOUS_FAIRNESS_COOLDOWN_SEC" overrides);
-  check (option string) "reactive concurrency"
-    (Some "4")
-    (List.assoc_opt "MASC_KEEPER_REACTIVE_CONCURRENCY" overrides);
   check (option string) "sleep chunk"
     (Some "1.5")
     (List.assoc_opt "MASC_KEEPER_SLEEP_CHUNK_SEC" overrides);
@@ -165,6 +149,9 @@ let test_applies_sleep_and_throttle_overrides () =
   check (option string) "admission wait"
     (Some "20")
     (List.assoc_opt "MASC_KEEPER_ADMISSION_WAIT_TIMEOUT_SEC" overrides);
+  check (option string) "capacity limit"
+    (Some "3")
+    (List.assoc_opt "MASC_KEEPER_TURN_CAPACITY_LIMIT" overrides);
   check (option string) "batch limit"
     (Some "9")
     (List.assoc_opt "MASC_KEEPER_BATCH_LIMIT" overrides);
@@ -406,14 +393,14 @@ let test_explicit_config_dir_wins_over_base_path () =
 
 let test_float_value_round_trip () =
   let doc = parse_or_fail
-    "[autonomous]\nsemaphore_wait_timeout_sec = 120.5\n"
+    "[turn]\nstream_idle_timeout_sec = 120.5\n"
   in
   let _, overrides =
     Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
   in
   check (option string) "float preserved"
     (Some "120.5")
-    (List.assoc_opt "MASC_KEEPER_SEMAPHORE_WAIT_TIMEOUT_SEC" overrides)
+    (List.assoc_opt "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC" overrides)
 
 let test_resolved_runtime_freezes_toml_values_after_init () =
   with_clean_boot_overrides @@ fun () ->

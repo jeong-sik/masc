@@ -1,8 +1,33 @@
 (** Observation reason helpers for the keeper heartbeat loop. *)
 
-type semaphore_wait_observation_kind =
-  | Semaphore_wait_pending
-  | Semaphore_wait_timeout
+let provider_timeout_observation_reasons =
+  [ "provider_runtime_error"; "provider_timeout"; "keeper_turn_retry_backoff" ]
+;;
+
+let record_provider_timeout_observation ~base_path ~keeper_name =
+  Keeper_registry.record_skip_reasons
+    ~base_path
+    keeper_name
+    ~reasons:provider_timeout_observation_reasons;
+  Keeper_registry.touch_last_turn_ts ~base_path keeper_name
+;;
+
+let clear_provider_timeout_failure_reason ~base_path ~keeper_name =
+  match Keeper_registry.get ~base_path keeper_name with
+  | Some
+      { Keeper_registry.last_failure_reason =
+          Some (Keeper_registry.Provider_timeout_loop _)
+      ; _
+      } -> Keeper_registry.set_failure_reason ~base_path keeper_name None
+  | _ -> ()
+;;
+
+type runtime_backpressure_decision =
+  | Runtime_admitted
+  | Runtime_backpressured of {
+      runtime_id : string;
+      reason : string;
+    }
 
 let skip_reason_component raw =
   let normalized = String.lowercase_ascii (String.trim raw) in
@@ -16,62 +41,6 @@ let skip_reason_component raw =
   in
   if String.equal mapped "" then "unknown" else mapped
 ;;
-
-let semaphore_wait_observation_reasons ?phase_label ~kind ~channel () =
-  let kind_reason =
-    match kind with
-    | Semaphore_wait_pending -> "semaphore_wait_pending"
-    | Semaphore_wait_timeout -> "semaphore_wait_timeout"
-  in
-  let wait_reason =
-    match phase_label with
-    | Some phase -> "phase_" ^ phase
-    | None -> "peers_holding_slot"
-  in
-  let class_reason =
-    match kind with
-    | Semaphore_wait_pending -> None
-    | Semaphore_wait_timeout ->
-      let class_label =
-        match Option.map skip_reason_component phase_label with
-        | Some "autonomous_queue_head" -> "admission_queue_wait_timeout"
-        | Some "autonomous_slot" -> "autonomous_slot_wait_timeout"
-        | Some ("reactive_slot" | "turn_slot") -> "turn_slot_wait_timeout"
-        | Some _ | None -> "slot_wait_timeout"
-      in
-      Some ("class_" ^ class_label)
-  in
-  let base =
-    [ kind_reason
-    ; wait_reason
-    ; "channel_" ^ Keeper_world_observation.channel_to_string channel
-    ]
-  in
-  match class_reason with
-  | Some reason -> base @ [ reason ]
-  | None -> base
-;;
-
-let record_semaphore_wait_observation
-      ?phase_label
-      ~base_path
-      ~keeper_name
-      ~channel
-      ~kind
-      ()
-  =
-  Keeper_registry.record_skip_reasons
-    ~base_path
-    keeper_name
-    ~reasons:(semaphore_wait_observation_reasons ?phase_label ~kind ~channel ())
-;;
-
-type runtime_backpressure_decision =
-  | Runtime_admitted
-  | Runtime_backpressured of {
-      runtime_id : string;
-      reason : string;
-    }
 
 let strip_prefix ~prefix value =
   if String.starts_with ~prefix value
@@ -140,28 +109,6 @@ let record_runtime_backpressure_observation ~base_path ~keeper_name ~reason =
   Keeper_registry.touch_last_turn_ts ~base_path keeper_name
 ;;
 
-let provider_timeout_observation_reasons =
-  [ "provider_runtime_error"; "provider_timeout"; "keeper_turn_retry_backoff" ]
-;;
-
-let record_provider_timeout_observation ~base_path ~keeper_name =
-  Keeper_registry.record_skip_reasons
-    ~base_path
-    keeper_name
-    ~reasons:provider_timeout_observation_reasons;
-  Keeper_registry.touch_last_turn_ts ~base_path keeper_name
-;;
-
-let clear_provider_timeout_failure_reason ~base_path ~keeper_name =
-  match Keeper_registry.get ~base_path keeper_name with
-  | Some
-      { Keeper_registry.last_failure_reason =
-          Some (Keeper_registry.Provider_timeout_loop _)
-      ; _
-      } -> Keeper_registry.set_failure_reason ~base_path keeper_name None
-  | _ -> ()
-;;
-
 let prior_provider_timeout_strikes ~base_path ~keeper_name =
   match Keeper_registry.get ~base_path keeper_name with
   | Some
@@ -192,8 +139,6 @@ let is_provider_timeout_error (err : Agent_sdk.Error.sdk_error) =
       | Keeper_turn_driver.Turn_timeout _
       | Keeper_turn_driver.Max_tokens_ceiling_violation _
       | Keeper_turn_driver.Ambiguous_post_commit _
-      (* RFC-0158: admission denial is not an OAS-budget timeout. *)
-      | Keeper_turn_driver.Retry_admission_denied _
       (* RFC-0159 Phase A: Internal_* variants are not OAS-budget timeouts. *)
       | Keeper_turn_driver.Internal_unhandled_exception _
       | Keeper_turn_driver.Internal_bridge_exception _
@@ -237,8 +182,6 @@ let provider_timeout_policy_decision
       | Keeper_turn_driver.Turn_timeout _
       | Keeper_turn_driver.Max_tokens_ceiling_violation _
       | Keeper_turn_driver.Ambiguous_post_commit _
-      (* RFC-0158: admission denial has no provider-timeout policy decision. *)
-      | Keeper_turn_driver.Retry_admission_denied _
       (* RFC-0159 Phase A: Internal_* variants are not OAS-budget timeouts. *)
       | Keeper_turn_driver.Internal_unhandled_exception _
       | Keeper_turn_driver.Internal_bridge_exception _

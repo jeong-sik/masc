@@ -25,7 +25,6 @@
   test_shell_ir_typed_e2e
   test_shell_ir_differential
   test_shell_ir_oracle
-  test_exec_gate_env_wrapper
   test_shell_ir_risk_action_flags)
  (libraries
   masc_exec

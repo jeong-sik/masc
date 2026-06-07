@@ -259,8 +259,8 @@
       "language": "ocaml",
       "symbols": [
         {
-          "id": "sym:keeper_heartbeat_loop:run_keeper_cycle_with_slot",
-          "name": "run_keeper_cycle_with_slot",
+          "id": "sym:keeper_heartbeat_loop:run_keeper_cycle",
+          "name": "run_keeper_cycle",
           "kind": "function",
           "display_range": {"start_line": 583, "end_line": 607},
           "wbs": {"issue": 16079, "task": "task-371"},
@@ -653,7 +653,7 @@
     },
     {
       "kind": "calls",
-      "from": "sym:keeper_heartbeat_loop:run_keeper_cycle_with_slot",
+      "from": "sym:keeper_heartbeat_loop:run_keeper_cycle",
       "to": "sym:keeper_unified_turn:run_keeper_cycle"
     },
     {

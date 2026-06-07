@@ -108,10 +108,8 @@ let metric_board_persist_lock_held_sec = "masc_board_persist_lock_held_sec"
 let metric_backend_mutex_acquire_sec = "masc_backend_mutex_acquire_sec"
 let metric_backend_mutex_held_sec = "masc_backend_mutex_held_sec"
 
-(* P-DASH-02: turn queue depth gauge.  Semaphore waiters are
-   observable via [autonomous_waiter_snapshot_for_test] but were
-   only emitted as a debug log line.  Surfacing as a gauge lets
-   operators alert on queue pressure without log parsing.
+(* P-DASH-02: turn queue depth gauge.  The live emission path surfaces queue
+   pressure directly so operators do not need to parse debug logs.
    Labels: keeper, channel. *)
 
 (* #10125: keeper supervisor sweep observability.
@@ -180,28 +178,6 @@ let metric_file_lock_table_cas_retries =
      reason:  invalid_float | negative_or_nan *)
 let metric_tool_keeper_cache_ttl_parse_failures =
   "masc_tool_keeper_cache_ttl_parse_failures_total"
-
-(* #9771: keeper turn-slot semaphore wait timeout counter.
-
-   Production observed multiple keepers ([sangsu], [janitor],
-   [ramarama], [qa-king], [taskmaster]) repeatedly skipping turns
-   with [semaphore wait > 60s, peers holding slot] — peers holding
-   the slot for a long-running OAS call (276s-963s observed) ran
-   past the 60s wait budget, every waiting keeper timed out, and
-   the WARN log was the only signal.
-
-   Three observable channels at which the timeout fires:
-     - [autonomous_queue_head]: fairness-FIFO head wait exceeded
-     - [autonomous]: autonomous-track semaphore acquire timed out
-     - [turn]: shared turn semaphore acquire timed out
-
-   Labels: [keeper, channel].  Cardinality = ~10 keepers × 3
-   channels = ~30 series, well within Otel_metric_store best practice. *)
-
-(* Goal-loop Observe contract: the Grafana p99 query consumes
-   [masc_keeper_semaphore_wait_seconds_bucket] grouped by keeper and runtime.
-   The generic [register_histogram] exporter currently exposes summaries, so
-   keeper_turn_slot emits the cumulative bucket companion explicitly. *)
 
 let metric_timeout_policy_overshoot = "masc_timeout_policy_overshoot_total"
 

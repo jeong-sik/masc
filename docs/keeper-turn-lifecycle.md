@@ -69,9 +69,9 @@ flowchart TD
     J --> K[world observation + scheduling decision]
     K --> L{should_run_turn?}
     L -- no --> M[record skip reasons / backpressure / cursor updates]
-    L -- yes --> N[FD/disk/admission gates]
+    L -- yes --> N[FD/disk gates]
     N -- blocked --> M
-    N -- admitted --> O[with_keeper_turn_slot]
+    N -- admitted --> O[record holder diagnostics]
     O --> P[Keeper_unified_turn.run_keeper_cycle]
     P --> Q[OAS-backed keeper turn path]
     Q --> R[refresh work-as-heartbeat; recurring dispatch; stage timing]

@@ -86,7 +86,6 @@ type tool_surface =
 type runtime_rotation_outcome =
   | Rotation_setup_failed
   | Rotation_retry_scheduled
-  | Rotation_budget_exhausted
   | Rotation_slot_phase_exhausted
 
 val runtime_rotation_outcome_to_string : runtime_rotation_outcome -> string

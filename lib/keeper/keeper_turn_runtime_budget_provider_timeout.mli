@@ -1,6 +1,5 @@
 val provider_timeout_guard_sec : float
 val min_provider_timeout_budget_sec : float
-val first_attempt_degraded_retry_reserve_sec : float
 
 type provider_timeout_budget = {
   effective_timeout_sec : float;
@@ -20,7 +19,7 @@ val resolve_bounded_provider_timeout_budget_with_turn_budget :
   estimated_input_tokens:int ->
   max_turns:int ->
   remaining_turn_budget_s:float ->
-  provider_timeout_budget option
+  provider_timeout_budget
 
 val bounded_provider_timeout_for_turn_budget_with_turn_budget :
   estimated_input_tokens:int ->
@@ -39,11 +38,3 @@ val bounded_provider_timeout_for_turn_budget :
   estimated_input_tokens:int ->
   remaining_turn_budget_s:float ->
   float option
-
-val provider_retry_budget_available_for_turn :
-  allow_wall_clock_retry_budget:bool ->
-  is_retry:bool ->
-  estimated_input_tokens:int ->
-  max_turns:int ->
-  remaining_turn_budget_s:float ->
-  bool

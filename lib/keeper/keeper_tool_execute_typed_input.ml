@@ -24,20 +24,15 @@ type execute_input =
       env : (string * string) list;
     }
 
-type allowlist_mode =
-  | Dev_full
-  | Readonly
-
 type validation_error =
-  | Executable_not_allowlisted of {
-      name : string;
-      mode : allowlist_mode;
-    }
   | Empty_executable of { argv : string list }
-  | Empty_argv of { executable : string }
   | Executable_repeated_in_argv0 of {
       executable : string;
       argv : string list;
+    }
+  | Executable_not_allowed of {
+      executable : string;
+      reason : string;
     }
   | Argv_contains_shell_metachar of {
       executable : string;
@@ -62,13 +57,6 @@ type validation_error =
   | Pipeline_empty
   | Pipeline_too_short
   | Env_key_invalid of string
-
-let is_allowed ~mode name =
-  match mode with
-  | Dev_full -> Exec_policy.is_dev_allowed name
-  | Readonly -> Exec_policy.is_readonly_allowed name
-
-;;
 
 let json_type_name (json : Yojson.Safe.t) =
   match json with
@@ -403,45 +391,129 @@ let check_env env =
   loop env
 ;;
 
-let check_wrapper_target ~mode ~wrapper_name = function
-  | None -> Error (Empty_argv { executable = wrapper_name })
-  | Some target when is_allowed ~mode target -> Ok ()
-  | Some target -> Error (Executable_not_allowlisted { name = target; mode })
-;;
-
-let check_wrapper_exec_target ~mode ~executable ~argv =
-  match executable with
-  | "env" ->
-    check_wrapper_target
-      ~mode
-      ~wrapper_name:"env"
-      (Exec_policy_command_syntax.command_after_env_prefix argv)
-  | "opam" -> (
-    match Exec_policy_command_syntax.opam_exec_command_name argv with
-    | Some "opam" -> Ok ()
-    | target -> check_wrapper_target ~mode ~wrapper_name:"opam" target)
-  | _ -> Ok ()
-;;
-
-let check_exec ~mode ~executable ~argv ~cwd ~env =
+let check_exec ~executable ~argv ~cwd ~env =
   let ( let* ) = Result.bind in
   let trimmed = String.trim executable in
   if String.length trimmed = 0 then Error (Empty_executable { argv })
-  else if not (is_allowed ~mode trimmed)
-  then Error (Executable_not_allowlisted { name = trimmed; mode })
   else if
     match argv with
     | first :: _ -> String.equal first trimmed
     | [] -> false
   then Error (Executable_repeated_in_argv0 { executable = trimmed; argv })
-  else
+  else (
     let* () =
       if argv = [] then Ok () else check_argv ~executable argv
     in
-    let* () = check_wrapper_exec_target ~mode ~executable:trimmed ~argv in
     let* () = check_cwd cwd in
     let* () = check_env env in
-    Ok ()
+    Ok ())
+;;
+
+let readonly_executable_error executable reason =
+  Error (Executable_not_allowed { executable; reason })
+;;
+
+let check_readonly_executable executable =
+  let trimmed = String.trim executable in
+  match Masc_exec.Exec_program.of_string trimmed with
+  | Error (`Unknown _) ->
+    readonly_executable_error trimmed "empty executable"
+  | Ok bin ->
+    (match Masc_exec.Exec_program.known bin with
+     | Some (Git | Gh) -> Ok ()
+     | Some Glab ->
+       readonly_executable_error trimmed "write-capable executable"
+     | Some (Curl | Wget | Ssh | Scp | Rsync) ->
+       readonly_executable_error trimmed "network primitive"
+     | Some known ->
+       let flags = Typed_capabilities.classify_flags known in
+       if flags.spawn
+       then readonly_executable_error trimmed "spawn-capable executable"
+       else if flags.network
+       then readonly_executable_error trimmed "network-capable executable"
+       else if flags.write_fs
+       then readonly_executable_error trimmed "write-capable executable"
+       else Ok ()
+     | None ->
+       readonly_executable_error trimmed "unknown executable")
+;;
+
+let dev_full_allowed_programs =
+  Masc_exec.Exec_program.
+    [ Cat
+    ; Cargo
+    ; Cmake
+    ; Cut
+    ; Dune_local_sh
+    ; Echo
+    ; Env
+    ; File
+    ; Find
+    ; Gh
+    ; Git
+    ; Go
+    ; Gofmt
+    ; Gradle
+    ; Head
+    ; Java
+    ; Javac
+    ; Ls
+    ; Make
+    ; Mvn
+    ; Node
+    ; Npm
+    ; Ninja
+    ; Npx
+    ; Opam
+    ; Pip
+    ; Pnpm
+    ; Printf
+    ; Pwd
+    ; Pyright
+    ; Pytest
+    ; Python
+    ; Python3
+    ; Rg
+    ; Grep
+    ; Ruff
+    ; Rustc
+    ; Sed
+    ; Sort
+    ; Stat
+    ; Tail
+    ; Tr
+    ; Uniq
+    ; Uv
+    ; Wc
+    ; Which
+    ; Yarn
+    ]
+;;
+
+let dev_allowed_commands =
+  List.map Masc_exec.Exec_program.name_of_known dev_full_allowed_programs
+;;
+
+let check_dev_executable executable =
+  let trimmed = String.trim executable in
+  match Masc_exec.Exec_program.of_string trimmed with
+  | Error (`Unknown _) ->
+    Error (Executable_not_allowed { executable = trimmed; reason = "unknown executable" })
+  | Ok bin ->
+    (match Masc_exec.Exec_program.known bin with
+     | Some known ->
+       let name = Masc_exec.Exec_program.name_of_known known in
+       if List.mem name dev_allowed_commands
+       then Ok ()
+       else Error (Executable_not_allowed { executable = trimmed; reason = "command not in dev allowlist" })
+     | None ->
+       Error (Executable_not_allowed { executable = trimmed; reason = "unknown executable" }))
+;;
+
+let validate_readonly_stage { executable; argv; _ } =
+  let ( let* ) = Result.bind in
+  let* () = check_exec ~executable ~argv ~cwd:None ~env:[] in
+  check_readonly_executable executable
 ;;
 
 let check_redirect_target ~fd = function
@@ -457,10 +529,10 @@ let check_redirects ~stdin ~stdout ~stderr =
   check_redirect_target ~fd:2 stderr
 ;;
 
-let validate ~mode = function
+let validate = function
   | Exec { executable; argv; cwd; env; stdin; stdout; stderr } ->
     let ( let* ) = Result.bind in
-    let* () = check_exec ~mode ~executable ~argv ~cwd ~env in
+    let* () = check_exec ~executable ~argv ~cwd ~env in
     check_redirects ~stdin ~stdout ~stderr
   | Pipeline { stages = []; _ } -> Error Pipeline_empty
   | Pipeline { stages = [ _ ]; _ } -> Error Pipeline_too_short
@@ -471,24 +543,37 @@ let validate ~mode = function
     let rec each = function
       | [] -> Ok ()
       | { executable; argv } :: rest ->
-        let* () = check_exec ~mode ~executable ~argv ~cwd:None ~env:[] in
+        let* () = check_exec ~executable ~argv ~cwd:None ~env:[] in
         each rest
     in
     each stages
 ;;
 
-let shell_bin ~mode ~argv executable =
+let validate_readonly_structural input =
+  let ( let* ) = Result.bind in
+  let* () = validate input in
+  match input with
+  | Exec { executable; _ } -> check_readonly_executable executable
+  | Pipeline { stages; _ } ->
+    let rec each = function
+      | [] -> Ok ()
+      | stage :: rest ->
+        let* () = validate_readonly_stage stage in
+        each rest
+    in
+    each stages
+;;
+
+let shell_bin ~argv executable =
   let trimmed = String.trim executable in
   if String.length trimmed = 0 then Error (Empty_executable { argv })
   else
     match Masc_exec.Exec_program.of_string trimmed with
     | Ok bin -> Ok bin
-    | Error (`Unknown name) ->
-      Error (Executable_not_allowlisted { name = trimmed; mode })
+    | Error (`Unknown _) -> Error (Empty_executable { argv })
 ;;
 
 let shell_simple
-      ~mode
       ?(sandbox = Masc_exec.Sandbox_target.host ())
       ?cwd
       ?(env = [])
@@ -496,7 +581,7 @@ let shell_simple
       { executable; argv }
   =
   let ( let* ) = Result.bind in
-  let* bin = shell_bin ~mode ~argv executable in
+  let* bin = shell_bin ~argv executable in
   Ok
     (Keeper_tool_execute_shell_ir.simple_bin
        ?cwd_raw:cwd
@@ -537,19 +622,19 @@ let redirects_of ~cwd ~stdin ~stdout ~stderr =
     ]
 ;;
 
-let to_shell_ir_unvalidated ?(sandbox = Masc_exec.Sandbox_target.host ()) ~mode input =
+let to_shell_ir_unvalidated ?(sandbox = Masc_exec.Sandbox_target.host ()) input =
   let ( let* ) = Result.bind in
   match input with
   | Exec { executable; argv; cwd; env; stdin; stdout; stderr } ->
     let stage = { executable; argv } in
     let redirects = redirects_of ~cwd ~stdin ~stdout ~stderr in
-    shell_simple ~mode ~sandbox ?cwd ~env ~redirects stage
+    shell_simple ~sandbox ?cwd ~env ~redirects stage
   | Pipeline { stages; cwd; env } ->
     let* simples =
       let rec loop acc = function
         | [] -> Ok (List.rev acc)
         | stage :: rest ->
-          let* simple = shell_simple ~mode ~sandbox ?cwd ~env stage in
+          let* simple = shell_simple ~sandbox ?cwd ~env stage in
           loop (simple :: acc) rest
       in
       loop [] stages
@@ -557,93 +642,48 @@ let to_shell_ir_unvalidated ?(sandbox = Masc_exec.Sandbox_target.host ()) ~mode 
     Ok (Keeper_tool_execute_shell_ir.pipeline simples)
 ;;
 
-let to_shell_ir ?sandbox ~mode input =
+let to_shell_ir ?sandbox input =
   let ( let* ) = Result.bind in
-  let* () = validate ~mode input in
-  to_shell_ir_unvalidated ?sandbox ~mode input
-;;
-
-let pp_mode ppf = function
-  | Dev_full -> Format.pp_print_string ppf "dev_full"
-  | Readonly -> Format.pp_print_string ppf "readonly"
-;;
-
-let executable_not_allowlisted_hint ~name ~mode =
-  (* A routed structured tool name is not a shell executable. Keep this check
-     descriptor/registry-backed so Keeper does not own the concrete tool-name
-     universe. *)
-  let is_masc_structured_tool =
-    Option.is_some (Keeper_tool_descriptor_resolution.descriptor_for_tool_name name)
-    || Keeper_tool_alias.is_known_internal name
-    || Option.is_some (Keeper_tool_descriptor.find_public name)
+  let* () = validate input in
+  let* () =
+    match input with
+    | Exec { executable; _ } -> check_dev_executable executable
+    | Pipeline { stages; _ } ->
+      let rec each = function
+        | [] -> Ok ()
+        | { executable; _ } :: rest ->
+          let* () = check_dev_executable executable in
+          each rest
+      in
+      each stages
   in
-  if is_masc_structured_tool
-  then
-    Some
-      "MASC tool names are not shell programs; call the visible JSON tool with \
-       arguments instead of running it through Execute."
-  else
-    match mode, name with
-    | Readonly, "gh" | Readonly, "git" ->
-      Some
-        "The active Execute surface is read-only. Use Read/Grep when visible; \
-         otherwise ask for a write/execute-capable runtime surface before using git/gh."
-    | _, "bash" | _, "sh" | _, "zsh" ->
-      Some
-        "Shell interpreters are intentionally unavailable. Use typed \
-         executable/argv, or explicit pipeline stages, without shell syntax."
-    | _, "mkdir" ->
-      Some
-        "Directory materialization is handled by structured file/write or \
-         worktree workflows, not by Execute. Use Write/Edit when visible for \
-         file changes, or a git/worktree workflow when a repo checkout is needed."
-    | _, "touch" ->
-      Some
-        "Empty placeholder creation is not an Execute capability. Use \
-         Write with the intended content, or skip the placeholder when no \
-         content is needed."
-    | _, "test" ->
-      Some
-        "Shell conditionals are not standalone Execute programs. Use stat, ls, \
-         git status, or the visible structured task/file tools for existence \
-         checks."
-    | _, "rm" | _, "chmod" | _, "chown" | _, "sudo" ->
-      Some
-        "This executable is privileged/destructive. Use a dedicated structured \
-         workflow, a non-destructive inspection command, or ask the operator."
-    | _, "jq" ->
-      Some
-        "jq is not part of Execute. Use typed task/board tools for MASC \
-         state, or inspect files with Read/Grep and parse only the \
-         needed fields."
-    | _, "curl" ->
-      Some
-        "Network fetches are not available through Execute. Use a dedicated \
-         structured integration/tool if one is visible."
-    | _ -> None
+  to_shell_ir_unvalidated ?sandbox input
 ;;
 
-let executable_not_allowlisted_alternatives ~name ~mode:_ =
-  match name with
-  | "mkdir" -> [ "tool_write_file"; "tool_edit_file"; "git" ]
-  | "touch" -> [ "tool_write_file"; "tool_edit_file" ]
-  | "test" ->
-    [ "stat"; "ls"; "tool_search_files"; "tool_read_file"; "keeper_tasks_list" ]
-  | _ -> []
+let readonly_input_executable = function
+  | Exec { executable; _ } -> executable
+  | Pipeline _ -> "pipeline"
+;;
+
+let validate_readonly input =
+  let ( let* ) = Result.bind in
+  let* () = validate_readonly_structural input in
+  let* ir = to_shell_ir_unvalidated input in
+  let envelope =
+    Masc_exec.Shell_ir_risk.classify (Masc_exec.Shell_ir_risk.undecided ir)
+  in
+  if Masc_exec.Shell_ir_risk.is_r0 envelope
+  then Ok ()
+  else
+    readonly_executable_error
+      (readonly_input_executable input)
+      (Printf.sprintf
+         "risk=%s"
+         (Masc_exec.Shell_ir_risk.string_of_risk_class
+            (Masc_exec.Shell_ir_risk.risk_class envelope)))
 ;;
 
 let pp_validation_error ppf = function
-  | Executable_not_allowlisted { name; mode } ->
-    (match executable_not_allowlisted_hint ~name ~mode with
-     | None -> Format.fprintf ppf "executable %S not in %a allowlist" name pp_mode mode
-     | Some hint ->
-       Format.fprintf
-         ppf
-         "executable %S not in %a allowlist. %s"
-         name
-         pp_mode
-         mode
-         hint)
   | Empty_executable { argv = first :: rest } ->
     Format.fprintf
       ppf
@@ -654,10 +694,8 @@ let pp_validation_error ppf = function
       (Yojson.Safe.to_string (`List (List.map (fun arg -> `String arg) rest)))
   | Empty_executable { argv = [] } ->
     Format.pp_print_string ppf
-      "executable is empty — provide a non-empty allowlisted command name, \
+      "executable is empty — provide a non-empty executable name, \
        e.g. executable=\"cat\" argv=[\"file.txt\"]"
-  | Empty_argv { executable } ->
-    Format.fprintf ppf "executable %S invoked with empty argv" executable
   | Executable_repeated_in_argv0 { executable; argv = _ :: rest } ->
     Format.fprintf
       ppf
@@ -671,6 +709,14 @@ let pp_validation_error ppf = function
       ppf
       "executable %S was reported as duplicated in argv[0], but argv is empty"
       executable
+  | Executable_not_allowed { executable; reason } ->
+    Format.fprintf
+      ppf
+      "executable %S is not allowed for read-only typed Execute (%s); use a \
+       structured read/search tool, WebFetch/WebSearch for network access, or \
+       request write-enabled Execute when mutation is intentional"
+      executable
+      reason
   | Argv_contains_shell_metachar { executable; index; token } ->
     Format.fprintf
       ppf
@@ -722,11 +768,10 @@ let pp_validation_error ppf = function
 ;;
 
 let validation_error_alternatives : validation_error -> string list = function
-  | Executable_not_allowlisted { name; mode } ->
-    executable_not_allowlisted_alternatives ~name ~mode
   | Argv_contains_shell_metachar _ -> []
   | Argv_contains_shell_pipeline_operator _ -> [ "Pipeline" ]
   | Argv_contains_shell_redirection _ ->
     [ "discard_stderr"; "discard_stdout"; "Pipeline" ]
+  | Executable_not_allowed _ -> [ "Read"; "Search"; "WebFetch"; "WebSearch" ]
   | _ -> []
 ;;

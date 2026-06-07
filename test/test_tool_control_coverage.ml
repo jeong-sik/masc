@@ -6,7 +6,8 @@ let () = Random.self_init ()
 
 let parse_json s =
   try Yojson.Safe.from_string s
-  with Yojson.Json_error err -> failwith ("invalid json: " ^ err)
+  with Yojson.Json_error err ->
+    failwith ("invalid json: " ^ err ^ "; raw=" ^ s)
 
 let seed_keeper_meta (ctx : Tool_control.context) name ~paused =
   let meta =
@@ -58,8 +59,11 @@ let test_counter = ref 0
 
 let with_ctx ?(initialize = true) f =
   Fun.protect
-    ~finally:Fs_compat.clear_fs
+    ~finally:(fun () ->
+      Workspace.invalidate_initialized_cache ();
+      Fs_compat.clear_fs ())
     (fun () ->
+      Workspace.invalidate_initialized_cache ();
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       incr test_counter;

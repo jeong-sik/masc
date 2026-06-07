@@ -34,7 +34,6 @@ type try_provider_ctx =
   ; checkpoint_dir : string option
   ; context_injector : Agent_sdk.Hooks.context_injector option
   ; context : Agent_sdk.Context.t option
-  ; slot_id : int option
   ; enable_thinking : bool option
   ; approval : Agent_sdk.Hooks.approval_callback option
   ; exit_condition : (int -> bool) option

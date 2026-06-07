@@ -38,18 +38,6 @@ let emit_in_turn_liveness_pulse =
 let with_in_turn_liveness_pulse =
   Keeper_heartbeat_loop_in_turn_pulse.with_in_turn_liveness_pulse
 
-type semaphore_wait_observation_kind = Observations.semaphore_wait_observation_kind =
-  | Semaphore_wait_pending
-  | Semaphore_wait_timeout
-
-let semaphore_wait_observation_reasons =
-  Observations.semaphore_wait_observation_reasons
-;;
-
-let record_semaphore_wait_observation =
-  Observations.record_semaphore_wait_observation
-;;
-
 (* Event-Layer stimulus intake extracted to [Keeper_heartbeat_stimulus_intake]
    (godfile decomp). Type + entry point are re-exported as transparent
    aliases so callers (incl. .mli consumers) stay byte-identical. *)
@@ -71,6 +59,8 @@ let consume_single_heartbeat_stimulus = Stimulus_intake.consume_single_heartbeat
 let consume_board_stimulus_batch = Stimulus_intake.consume_board_stimulus_batch
 let heartbeat_event_intake = Stimulus_intake.heartbeat_event_intake
 
+(* Keepalive scheduling decision (record + decide function) extracted to
+   [Keeper_heartbeat_loop_scheduling] (godfile decomp). *)
 type runtime_backpressure_decision = Observations.runtime_backpressure_decision =
   | Runtime_admitted
   | Runtime_backpressured of {
@@ -78,17 +68,6 @@ type runtime_backpressure_decision = Observations.runtime_backpressure_decision 
       reason : string;
     }
 
-let runtime_backpressure_observation_reasons =
-  Observations.runtime_backpressure_observation_reasons
-;;
-
-let runtime_backpressure_decision =
-  Observations.runtime_backpressure_decision
-;;
-
-(* Keepalive scheduling decision (record + decide function) extracted to
-   [Keeper_heartbeat_loop_scheduling] (godfile decomp). The record type is
-   re-exported transparently so the .mli signature stays byte-identical. *)
 type keepalive_scheduling_decision = Keeper_heartbeat_loop_scheduling.keepalive_scheduling_decision = {
   turn_decision : Keeper_world_observation.keeper_cycle_decision;
   requested_should_run_turn : bool;
@@ -96,13 +75,19 @@ type keepalive_scheduling_decision = Keeper_heartbeat_loop_scheduling.keepalive_
   should_run_turn : bool;
   verdict_reasons : string list;
   admission_reasons : string list;
+  skip_reasons : string list;
   channel : string;
 }
 
 let decide_keepalive_scheduling = Keeper_heartbeat_loop_scheduling.decide_keepalive_scheduling
 
-let record_runtime_backpressure_observation =
-  Observations.record_runtime_backpressure_observation
+let runtime_status_of_health_snapshot ~base_path =
+  let snapshot = Keeper_health_probe.check_runtime_health ~base_path in
+  fun ~runtime_id ->
+    match List.assoc_opt runtime_id snapshot with
+    | Some true -> Keeper_health_probe.Healthy
+    | Some false -> Keeper_health_probe.Unhealthy "runtime_failure"
+    | None -> Keeper_health_probe.Unknown
 ;;
 
 let provider_timeout_observation_reasons =
@@ -112,6 +97,14 @@ let provider_timeout_observation_reasons =
 let record_provider_timeout_observation =
   Observations.record_provider_timeout_observation
 ;;
+
+let record_runtime_backpressure_observation =
+  Observations.record_runtime_backpressure_observation
+;;
+
+(* #10008 fm3: canonical metric name for proactive-scheduler skip
+   reasons. Labels: [("keeper", <name>); ("reason", <skip_reason>)]. *)
+let proactive_skip_reason_metric = Keeper_metrics.(to_string ProactiveSkip)
 
 let clear_provider_timeout_failure_reason =
   Observations.clear_provider_timeout_failure_reason
@@ -137,20 +130,9 @@ let provider_timeout_metric_outcome =
 
 let persist_message_cursor_updates = Keeper_heartbeat_loop_persist_cursor.persist_message_cursor_updates
 
-(** Run keeper cycle with semaphore slot control. *)
-let run_keeper_cycle_with_slot = Keeper_heartbeat_loop_cycle_with_slot.run_keeper_cycle_with_slot
+(** Run keeper cycle with holder diagnostics. *)
+let run_keeper_cycle = Keeper_heartbeat_loop_cycle.run_keeper_cycle
 
-let semaphore_wait_timeout_blocker_class =
-  Keeper_heartbeat_loop_semaphore_timeout.semaphore_wait_timeout_blocker_class
-;;
-
-let semaphore_wait_timeout_diagnostics =
-  Keeper_heartbeat_loop_semaphore_timeout.semaphore_wait_timeout_diagnostics
-;;
-
-let handle_semaphore_wait_timeout =
-  Keeper_heartbeat_loop_semaphore_timeout.handle_semaphore_wait_timeout
-;;
 let run_keepalive_unified_turn
       ~(ctx : _ context)
       ~(meta_after_triage : keeper_meta)
@@ -175,7 +157,12 @@ let run_keepalive_unified_turn
           ~meta:meta_after_triage
       in
       let scheduling =
-        decide_keepalive_scheduling ~stop ~meta:meta_after_triage obs
+        decide_keepalive_scheduling
+          ~runtime_status_of_name:
+            (runtime_status_of_health_snapshot ~base_path:ctx.config.base_path)
+          ~stop
+          ~meta:meta_after_triage
+          obs
       in
       let turn_decision = scheduling.turn_decision in
       (* Manual reconcile blocker check removed — keepers no longer get
@@ -211,8 +198,7 @@ let run_keepalive_unified_turn
            is visible fleet-wide. *)
         List.iter
           (fun reason_str ->
-             Otel_metric_store.inc_counter
-               Keeper_heartbeat_snapshot.proactive_skip_reason_metric
+             Otel_metric_store.inc_counter proactive_skip_reason_metric
                ~labels:[ "keeper", meta_after_triage.name; "reason", reason_str ]
                ())
           admission_reason_strs;
@@ -369,34 +355,34 @@ let run_keepalive_unified_turn
         meta_after_cursor_persist)
       else if should_run_turn
       then (
-        (* Admission wait happens before [mark_turn_started], so the stale
-           watchdog would otherwise see an idle keeper while the fiber is
-           legitimately blocked behind turn-capacity backpressure. *)
-        record_semaphore_wait_observation
-          ~base_path:ctx.config.base_path
-          ~keeper_name:meta_after_triage.name
-          ~channel:turn_decision.channel
-          ~kind:Semaphore_wait_pending
-          ();
         match
-          Keeper_turn_slot.with_keeper_turn_slot
-            ~runtime_profile:(runtime_id_of_meta meta_after_triage)
+          Keeper_turn_capacity.with_turn_capacity
             ~keeper_name:meta_after_triage.name
             ~channel:turn_decision.channel
-            (fun ~semaphore_wait_ms ->
-               run_keeper_cycle_with_slot
-                 ~ctx
-                 ~meta_after_cursor_persist
-                 ~stop
-                 ~obs
-                 ~turn_decision
-                 ~shared_context
-                 ~semaphore_wait_ms
-                 ())
+            (fun ~capacity_wait_ms ->
+              Keeper_turn_holders.with_recorded_turn_holder
+                ~keeper_name:meta_after_triage.name
+                ~channel:turn_decision.channel
+                (fun ~holder_wait_ms ->
+                  run_keeper_cycle
+                    ~ctx
+                    ~meta_after_cursor_persist
+                    ~stop
+                    ~obs
+                    ~turn_decision
+                    ~shared_context
+                    ~holder_wait_ms:(capacity_wait_ms + holder_wait_ms)
+                    ()))
         with
         | Ok meta -> meta
-        | Error (`Semaphore_wait_timeout timeout) ->
-          handle_semaphore_wait_timeout ~ctx ~meta_after_triage ~turn_decision timeout)
+        | Error { Keeper_turn_capacity.limit; inflight; waited_ms } ->
+          Log.Keeper.info
+            "%s: skipping turn because global turn capacity is full inflight=%d limit=%d waited_ms=%d"
+            meta_after_triage.name
+            inflight
+            limit
+            waited_ms;
+          meta_after_cursor_persist)
       else if obs.message_cursor_updates <> []
       then meta_after_cursor_persist
       else meta_after_triage
@@ -544,7 +530,7 @@ let run_smart_heartbeat_gate
       (match gated with
        | Keeper_heartbeat_smart.Skip_idle _ ->
          Otel_metric_store.inc_counter
-           Keeper_heartbeat_snapshot.proactive_skip_reason_metric
+           proactive_skip_reason_metric
            ~labels:[ "keeper", meta_current.name; "reason", "no_visible_consumers" ]
            ();
          Log.Keeper.debug

@@ -11,6 +11,7 @@ module Keeper_tool_command_runtime = Masc.Keeper_tool_command_runtime
 module Keeper_registry = Masc.Keeper_registry
 module Keeper_sandbox = Masc.Keeper_sandbox
 module Keeper_sandbox_factory = Masc.Keeper_sandbox_factory
+module Keeper_sandbox_repo_path = Masc.Keeper_sandbox_repo_path
 module Keeper_tool_execute_path = Masc.Keeper_tool_execute_path
 module Keeper_types = Keeper_types
 module Keeper_alerting_path = Masc.Keeper_alerting_path
@@ -401,15 +402,40 @@ let test_docker_container_cwd_maps_to_host_worktree () =
   | Error e -> Alcotest.fail ("read cwd should map container path: " ^ e));
   match
     Keeper_tool_execute_path.resolve_tool_execute_cwd
-      ~policy:Keeper_tool_execute_path.Write_enabled_execute_cwd
       ~config
       ~meta
+      ~write_enabled:true
       ~args
   with
   | Ok cwd ->
     Alcotest.(check string) "write cwd maps to host" expect
       (normalize_realpath cwd)
   | Error e -> Alcotest.fail ("write cwd should map container path: " ^ e)
+
+let test_readonly_execute_omitted_cwd_does_not_create_playground () =
+  with_eio_fs @@ fun () ->
+  let base, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_meta ~name:"readonly-executor" ~sandbox:Keeper_types_profile_sandbox.Docker in
+  let playground = Keeper_sandbox_repo_path.playground_root_no_create ~config ~meta in
+  Alcotest.(check bool) "playground starts absent" false (Sys.file_exists playground);
+  let args = `Assoc [] in
+  (match
+     Keeper_tool_execute_path.resolve_tool_execute_cwd
+       ~write_enabled:false
+       ~config
+       ~meta
+       ~args
+   with
+   | Ok cwd ->
+     Alcotest.failf "read-only omitted cwd should not create playground: %s" cwd
+   | Error e ->
+     Alcotest.(check bool)
+       "read-only omitted cwd reports missing directory"
+       true
+       (String_util.contains_substring e "cwd_not_directory"));
+  Alcotest.(check bool) "playground remains absent" false (Sys.file_exists playground)
 
 let test_docker_container_file_path_maps_to_host_worktree () =
   setup ~keeper_name:"executor" ~sandbox:Keeper_types_profile_sandbox.Docker
@@ -448,6 +474,29 @@ let test_docker_other_container_root_stays_blocked () =
   | Error e ->
     Alcotest.(check bool) "outside project root" true
       (String_util.contains_substring e "path_outside_project_root")
+
+let test_readonly_execute_omitted_cwd_does_not_create_write_root () =
+  setup ~keeper_name:"readonly-exec" ~sandbox:Keeper_types_profile_sandbox.Local
+  @@ fun ~base:_ ~config ~meta ~playground ->
+  cleanup_dir playground;
+  let args = `Assoc [] in
+  match
+    Keeper_tool_execute_path.resolve_tool_execute_cwd
+      ~config
+      ~meta
+      ~write_enabled:false
+      ~args
+  with
+  | Ok cwd -> Alcotest.fail ("read-only execute should not create cwd: " ^ cwd)
+  | Error e ->
+    Alcotest.(check bool)
+      "missing cwd reported"
+      true
+      (String_util.contains_substring e "cwd_not_directory");
+    Alcotest.(check bool)
+      "read-only execute did not create write root"
+      false
+      (Sys.file_exists playground)
 
 let test_docker_second_keeper_contained () =
   setup ~keeper_name:"poe" ~sandbox:Keeper_types_profile_sandbox.Docker
@@ -495,10 +544,17 @@ let () =
             `Quick test_docker_relative_repos_cwd_resolves_inside_playground;
           Alcotest.test_case "docker container cwd maps to host worktree"
             `Quick test_docker_container_cwd_maps_to_host_worktree;
+          Alcotest.test_case
+            "read-only omitted cwd does not create playground"
+            `Quick test_readonly_execute_omitted_cwd_does_not_create_playground;
           Alcotest.test_case "docker container file path maps to host worktree"
             `Quick test_docker_container_file_path_maps_to_host_worktree;
           Alcotest.test_case "docker other container root stays blocked"
             `Quick test_docker_other_container_root_stays_blocked;
+          Alcotest.test_case
+            "read-only Execute omitted cwd does not create write root"
+            `Quick
+            test_readonly_execute_omitted_cwd_does_not_create_write_root;
           Alcotest.test_case "docker second keeper also contained" `Quick
             test_docker_second_keeper_contained;
         ] );

@@ -1,5 +1,5 @@
 (* Keeper_turn_runtime_budget — runtime execution types, fail-open rotation,
-   provider timeout budget resolution, context overflow observation, keeper pause/resume
+   provider timeout resolution, context overflow observation, keeper pause/resume
    sync, partial-commit continue gate, and context budget resolution.
 
    Public sub-module included by [Keeper_unified_turn]. *)
@@ -30,17 +30,10 @@ val next_fail_open_runtime_for_turn :
 val sdk_error_kind : Agent_sdk.Error.sdk_error -> string
 
 val provider_timeout_guard_sec : float
-(** First-attempt provider startup guard floor (seconds). *)
+(** Provider startup guard floor (seconds). *)
 
 val min_provider_timeout_budget_sec : float
 (** Minimum provider timeout budget (seconds). *)
-
-val first_attempt_degraded_retry_reserve_sec : float
-(** Conservative wall-clock reserve kept from non-retry attempts before
-    provider dispatch. Retry attempts do not consume this outer
-    wall-clock reserve as admission budget. *)
-
-val sdk_error_kind : Agent_sdk.Error.sdk_error -> string
 
 type provider_timeout_budget = {
   effective_timeout_sec : float;
@@ -61,12 +54,10 @@ val resolve_bounded_provider_timeout_budget_with_turn_budget :
   estimated_input_tokens:int ->
   max_turns:int ->
   remaining_turn_budget_s:float ->
-  provider_timeout_budget option
-(** Resolves the per-provider timeout inside the outer keeper turn
-    budget. Non-retry attempts keep a small degraded-retry reserve when
-    the remaining wall-clock budget is large enough. Retry attempts use
-    the resolved adaptive provider timeout directly; provider liveness,
-    stream idle, and max-turn limits own retry termination. *)
+  provider_timeout_budget
+(** Resolves the per-provider timeout plan. The outer keeper turn budget is
+    telemetry here, not an admission gate; provider liveness, stream idle, and
+    max-turn limits own attempt termination. *)
 
 val allow_wall_clock_retry_budget_for_attempt :
   is_retry:bool ->
@@ -85,53 +76,6 @@ val bounded_provider_timeout_for_turn_budget :
   estimated_input_tokens:int ->
   remaining_turn_budget_s:float ->
   float option
-
-val provider_retry_budget_available_for_turn :
-  allow_wall_clock_retry_budget:bool ->
-  is_retry:bool ->
-  estimated_input_tokens:int ->
-  max_turns:int ->
-  remaining_turn_budget_s:float ->
-  bool
-
-(** RFC-OAS-XXX (Team JJ §6) — typed retry admission decision.
-
-    Distinguishes "admission denied before any provider attempt"
-    from "provider attempt ran and OAS server timed out". The
-    existing call surface in [Keeper_unified_turn] emits
-    [Turn_timeout] instead of minting an [Provider_timeout] root cause
-    for the former case, which collapses both semantics into one
-    metric. This function exposes the typed decision so callers can
-    branch on the closed-sum reason. The matching error variant
-    ([Retry_admission_denied]) is RFC-deferred. *)
-
-type retry_admission_denial =
-  Keeper_internal_error.retry_admission_denial =
-  | Retry_budget_below_min of {
-      projected_usable_budget_s : float;
-      min_required_s : float;
-      remaining_turn_budget_s : float;
-      adaptive_timeout_s : float;
-      allow_wall_clock_retry_budget : bool;
-    }
-  | First_attempt_budget_below_min of {
-      projected_usable_budget_s : float;
-      min_required_s : float;
-      remaining_turn_budget_s : float;
-    }
-
-type attempt_kind = First_attempt | Retry_attempt
-
-val retry_admission_denial_to_yojson :
-  retry_admission_denial -> Yojson.Safe.t
-
-val decide_retry_admission_for_turn :
-  remaining_turn_budget_s:float ->
-  attempt_kind:attempt_kind ->
-  allow_wall_clock_retry_budget:bool ->
-  estimated_input_tokens:int ->
-  max_turns:int ->
-  (unit, retry_admission_denial) result
 
 val degraded_retry_slot_phase_budget_sec : float
 (** Maximum outer-slot hold time before degraded runtime rotation is
@@ -178,7 +122,6 @@ val attempt_watchdog_timeout_sec_opt :
 type degraded_retry_budget_decision =
   | No_degraded_retry
   | Degraded_retry_slot_phase_exhausted of EC.degraded_retry
-  | Degraded_retry_budget_exhausted of EC.degraded_retry
   | Degraded_retry_allowed of EC.degraded_retry
 
 val next_fail_open_runtime_for_turn_with_budget :

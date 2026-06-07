@@ -51,12 +51,6 @@ class ScanReport:
 
 PATTERNS: tuple[PatternSpec, ...] = (
     PatternSpec(
-        "keeper_skipping_turn",
-        r"skipping turn.*semaphore wait",
-        "critical",
-        "Keeper turn skipped after semaphore wait.",
-    ),
-    PatternSpec(
         "keeper_keepalive_only",
         r"keepalive turn scheduled",
         "warning",

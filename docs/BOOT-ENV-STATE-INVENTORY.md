@@ -119,21 +119,21 @@ Legacy compatibility names are not TOML preemption keys. For example,
 only the canonical `MASC_KEEPER_AUTOBOOT_MAX` boot override unless that exact
 canonical process env var is already set.
 
-**Sections** (80 knobs total):
+**Sections** (74 knobs total):
 
 | Section | Count | Key examples |
 | --- | --- | --- |
 | `[bootstrap]` | 5 | `enabled`, `max_active_keepers`, `autoboot_max` |
-| `[autonomous]` | 6 | `max_turns_per_call`, `semaphore_wait_timeout_sec`, `concurrency` |
-| `[reactive]` | 3 | `max_turns_per_call`, `concurrency`, `max_idle_turns` |
+| `[autonomous]` | 3 | `max_turns_per_call`, `fairness_cooldown_sec`, `max_idle_turns` |
+| `[reactive]` | 2 | `max_turns_per_call`, `max_idle_turns` |
 | `[heartbeat]` | 10 | `interval_sec`, `max_silence_sec`, `smart_heartbeat`, `board_generic_wakeup_limit` |
 | `[turn]` | 18 | `timeout_sec`, `stream_idle_timeout_sec`, `tool_cost_max_usd`, `temperature` |
-| `[watchdog]` | 4 | `stale_sec`, `grace_sec`, `noop_threshold` |
+| `[proactive]` | 1 | `min_interval_sec` |
 | `[supervisor]` | 4 | `max_restarts`, `backoff_base_sec`, `backoff_max_sec` |
 | `[lifecycle]` | 4 | `self_preservation_ratio`, `dead_ttl_sec` |
 | `[budget]` | 1 | `daily_usd` |
 | `[metrics]` | 2 | `max_bytes`, `max_rotated` |
-| `[memory]` | 5 | `max_notes`, `compact_trigger_bytes`, `consensus_pattern` |
+| `[memory]` | 6 | `max_notes`, `compact_trigger_bytes`, `consensus_pattern` |
 | `[alert]` | 17 | `slack_enabled`, `slack_dm_user_id`, `github_enabled`, `github_min_score` |
 | `[debug]` | 1 | `enabled` |
 
@@ -142,11 +142,9 @@ canonical process env var is already set.
 ```toml
 [autonomous]
 max_turns_per_call = 7           # default: 2
-semaphore_wait_timeout_sec = 150 # default: 180
 
 [reactive]
 max_turns_per_call = 15
-concurrency = 4
 
 [heartbeat]
 board_generic_wakeup_limit = 3 # caps non-explicit board_activity fanout; explicit mentions bypass this cap

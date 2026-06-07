@@ -154,15 +154,6 @@
   ],
   "findings": [
     {
-      "finding_id": "R-FATAL-1",
-      "title": "acquire_sem_bounded_timeout_no_fallback",
-      "severity": "critical",
-      "patterns": ["keeper_skipping_turn"],
-      "actionability": "actionable",
-      "decision_id": "D-P1-1",
-      "source": {"path": "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md", "line_refs": [295, 340, 390]}
-    },
-    {
       "finding_id": "R-FATAL-5",
       "title": "pre_dispatch_gates_silent_skip",
       "severity": "critical",

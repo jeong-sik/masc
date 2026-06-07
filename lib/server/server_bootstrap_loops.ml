@@ -766,12 +766,7 @@ let start_keeper_loops
         ; net = state.net
         }
       in
-      Log.Keeper.info
-        "autoboot: %d keeper(s) to boot; concurrent keeper turns throttled to %d (source=%s)"
-        (List.length names)
-        Keeper_keepalive.effective_turn_throttle_limit
-        (Keeper_turn_slot.throttle_source_to_string
-           Keeper_keepalive.keeper_turn_throttle_source);
+      Log.Keeper.info "autoboot: %d keeper(s) to boot" (List.length names);
       Log.Keeper.info "autoboot: keeper set [%s]" (String.concat ", " names);
       if exclusions <> []
       then (

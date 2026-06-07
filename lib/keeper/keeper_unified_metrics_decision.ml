@@ -18,7 +18,7 @@ let append_decision_record
     ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
     ~(latency_ms : int)
-    ?(semaphore_wait_ms : int = 0)
+    ?(holder_wait_ms : int = 0)
     ~(outcome : string)
     ?(degraded_retry_applied = false)
     ?degraded_retry_runtime
@@ -164,7 +164,7 @@ let append_decision_record
         ("turn_mode", Json_util.string_opt_to_json turn_mode_label);
         ("latency_ms", `Int latency_ms);
         ("duration_ms", `Int latency_ms);
-        ("semaphore_wait_ms", `Int semaphore_wait_ms);
+        ("holder_wait_ms", `Int holder_wait_ms);
         ("trigger_signals", `List (List.map (fun s -> `String s) trigger_signals));
         ("observed_affordances", `List (List.map (fun s -> `String s) affordances));
         ( "observation",

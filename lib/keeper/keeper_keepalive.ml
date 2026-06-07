@@ -5,15 +5,13 @@
     body, board-reactive wakeup filtering, and optional gRPC heartbeat
     fiber.
 
-    [MASC_KEEPER_*] env vars read here (semaphore timeout, concurrency,
-    fairness cooldown, autoboot max) can also be set in
+    [MASC_KEEPER_*] env vars read here (compatibility counters) can also be set in
     [<resolved config root>/runtime.toml].
     See {!Keeper_runtime_config} and [docs/BOOT-ENV-STATE-INVENTORY.md]
     section 1.3.
 
     Structure (facade decomposition):
-    - [Keeper_turn_slot]      — semaphores, autonomous wait queue,
-                                 fairness cooldown, [with_keeper_turn_slot]
+    - [Keeper_turn_holders]      — in-turn holder diagnostics
     - [Keeper_keepalive_signal] — gRPC client refs, FSM guard identity
                                    helpers, interruptible sleep, wakeup
                                    dispatch, board-reactive wakeup,
@@ -32,7 +30,7 @@ open Keeper_meta_store
 open Keeper_types_profile
 open Keeper_memory
 open Keeper_execution
-include Keeper_turn_slot
+include Keeper_turn_holders
 include Keeper_keepalive_signal
 include Keeper_heartbeat_snapshot
 include Keeper_heartbeat_loop
@@ -595,13 +593,6 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
 ;;
 
 let stop_keepalive ?base_path name =
-  let eio_context_available () =
-    try
-      Eio.Fiber.yield ();
-      true
-    with
-    | Effect.Unhandled _ -> false
-  in
   let entries =
     Keeper_registry.all ?base_path ()
     |> List.filter (fun (e : Keeper_registry.registry_entry) -> String.equal e.name name)
@@ -629,16 +620,6 @@ let stop_keepalive ?base_path name =
        match entry.phase with
        | Keeper_state_machine.Crashed | Keeper_state_machine.Dead -> ()
        | _ ->
-         let released_slots =
-           if eio_context_available ()
-           then force_release_holder_for ~keeper_name:entry.name
-           else []
-         in
-         if released_slots <> [] then
-           Log.Keeper.warn
-             "%s: manual stop force-released holder slot(s) [%s] before marking stopped"
-             entry.name
-             (String.concat "," (List.map fst released_slots));
          if
            record_keeper_stopped
              entry

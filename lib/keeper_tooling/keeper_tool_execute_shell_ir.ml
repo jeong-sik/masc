@@ -74,27 +74,17 @@ let validate_paths ?keeper_id ?base_path ~workdir ir =
   Exec_policy.validate_shell_ir_paths ?keeper_id ?base_path ~workdir ir
 ;;
 
-let tool_execute_command_context ?(allow_pipes = true) ~allowed_commands command
-  =
+let tool_execute_command_context ?(allow_pipes = true) command =
   match Exec_policy.parse_string_to_ir ~mode:Tool_execute command with
-  | Error reason ->
-    Error
-      (Exec_policy.block_reason_to_string_with_allowlist
-         ~allowed_commands
-         reason)
+  | Error reason -> Error (Exec_policy.block_reason_to_string reason)
   | Ok ir -> (
     match
-      Exec_policy.command_context_tool_execute_with_allowlist
+      Exec_policy.command_context_tool_execute
         ~allow_pipes
-        ~allowed_commands
         ir
     with
     | Ok ctx -> Ok ctx
-    | Error reason ->
-      Error
-        (Exec_policy.block_reason_to_string_with_allowlist
-           ~allowed_commands
-           reason))
+    | Error reason -> Error (Exec_policy.block_reason_to_string reason))
 ;;
 
 (* TEL-OK: facade is pure gate/path/dispatch routing; the Execute handler emits
@@ -103,7 +93,6 @@ let dispatch_classified
       ?timeout_sec
       ?(allow_pipes = true)
       ?(redirect_allowed = true)
-      ~allowed_commands
       ?keeper_id
       ?base_path
       ~workdir
@@ -115,7 +104,7 @@ let dispatch_classified
   let gate_verdict =
     Shell_gate.gate_typed
       ~ir
-      ~allowlist:{ allow_pipes; redirect_allowed }
+      ~syntax_policy:{ allow_pipes; redirect_allowed }
       ~path_policy:Shell_gate.forbid_masc_internal_state_paths
       ~sandbox:{ target = sandbox }
       ()
@@ -136,7 +125,6 @@ let dispatch
       ?timeout_sec
       ?allow_pipes
       ?redirect_allowed
-      ~allowed_commands
       ?keeper_id
       ?base_path
       ~workdir
@@ -148,7 +136,6 @@ let dispatch
     ?timeout_sec
     ?allow_pipes
     ?redirect_allowed
-    ~allowed_commands
     ?keeper_id
     ?base_path
     ~workdir

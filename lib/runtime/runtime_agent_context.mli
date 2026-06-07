@@ -75,7 +75,6 @@ type config = {
   oas_auto_context_overflow_retry : bool;
   context_injector : Agent_sdk.Hooks.context_injector option;
   context : Agent_sdk.Context.t option;
-  slot_id : int option;
   approval : Agent_sdk.Hooks.approval_callback option;
   exit_condition : (int -> bool) option;
   exit_condition_result : (int -> stop_reason * string option) option;

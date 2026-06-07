@@ -1,29 +1,11 @@
-(* Tests for keeper_health_probe.  Pure synchronous tests for the
-   cache and runtime ratio logic; the supervisor wiring (run_once
-   call site, get_runtime_status branch) is covered by integration
-   tests in test_keeper_supervisor.ml. *)
+(* Tests for keeper_health_probe.  Pure synchronous tests for per-item cache
+   helpers, runtime health ratio logic, and failure-pressure classification. *)
 
 module H = Masc.Keeper_health_probe
 module R = Masc.Keeper_registry
 module KSM = Keeper_state_machine
 
 let pressure_label_t = Alcotest.(option string)
-
-let pp_status fmt = function
-  | H.Unknown -> Format.fprintf fmt "Unknown"
-  | H.Healthy -> Format.fprintf fmt "Healthy"
-  | H.Unhealthy r -> Format.fprintf fmt "Unhealthy(%s)" r
-;;
-
-let status_eq a b =
-  match a, b with
-  | H.Unknown, H.Unknown -> true
-  | H.Healthy, H.Healthy -> true
-  | H.Unhealthy x, H.Unhealthy y -> String.equal x y
-  | _ -> false
-;;
-
-let status_t = Alcotest.testable pp_status status_eq
 
 let make_meta ?runtime_id name =
   let fields =
@@ -47,14 +29,6 @@ let pressure_label_of_failure_reason reason =
   Option.map
     H.runtime_pressure_class_to_string
     (H.runtime_pressure_class_of_failure_reason (Some reason))
-;;
-
-let test_get_runtime_status_default_unknown () =
-  Alcotest.check
-    status_t
-    "cold runtime cache = Unknown"
-    H.Unknown
-    (H.get_runtime_status ~runtime_id:"never-written-runtime-xyz")
 ;;
 
 let test_check_runtime_health_all_healthy () =
@@ -81,7 +55,7 @@ let test_runtime_pressure_classifier () =
   Alcotest.check
     pressure_label_t
     "runtime admission"
-    (Some "tier_admission_full")
+    (Some "admission_full")
     (pressure_label_of_failure_reason
        (R.Provider_runtime_error
           { code = "capacity_backpressure"
@@ -160,57 +134,6 @@ let test_runtime_pressure_classifier () =
     (pressure_label_of_failure_reason R.Turn_livelock_pause)
 ;;
 
-let test_run_once_records_specific_failure_ratio_reason () =
-  R.clear ();
-  let base_dir = Filename.temp_file "probe-pressure-" "" in
-  Sys.remove base_dir;
-  let runtime_id =
-    Printf.sprintf "probe-provider-dns-%d" (Unix.getpid ())
-  in
-  let register_crashed name reason =
-    let meta = make_meta ~runtime_id name in
-    (* See: fixture setup only needs the registry side effect. *)
-    ignore (R.register ~base_path:base_dir name meta);
-    R.set_failure_reason ~base_path:base_dir name (Some reason);
-    (* See: fixture setup only needs the terminal-event side effect. *)
-    ignore
-      (R.dispatch_event
-         ~base_path:base_dir
-         name
-         (KSM.Fiber_terminated
-            { outcome = "test"; provider_id = None; http_status = None }))
-  in
-  Fun.protect
-    ~finally:R.clear
-    (fun () ->
-       register_crashed
-         "provider-dns-a"
-         (R.Provider_runtime_error
-            { code = "provider_error"
-            ; detail = "getaddrinfo ENOTFOUND api.z.ai"
-            ; provider_id = Some "zai"
-            ; http_status = None
-            ; runtime_id = None
-            ; reason = None
-            });
-       register_crashed
-         "provider-dns-b"
-         (R.Provider_runtime_error
-            { code = "provider_error"
-            ; detail = "getaddrinfo ENOTFOUND api.z.ai"
-            ; provider_id = Some "zai"
-            ; http_status = None
-            ; runtime_id = None
-            ; reason = None
-            });
-       H.run_once ~base_path:base_dir;
-       Alcotest.check
-         status_t
-         "unhealthy reason carries dominant runtime pressure"
-         (H.Unhealthy "failure_ratio:provider_dns_failure")
-         (H.get_runtime_status ~runtime_id))
-;;
-
 (* ------------------------------------------------------------------ *)
 (* Phase-based health predicate (core regression guard)               *)
 (* ------------------------------------------------------------------ *)
@@ -255,7 +178,7 @@ let test_running_is_healthy () =
 ;;
 
 (* ------------------------------------------------------------------ *)
-(* Size-aware admission threshold                                     *)
+(* Size-aware health threshold                                        *)
 (* ------------------------------------------------------------------ *)
 
 let check_max_failed name ~total ~expected =
@@ -287,7 +210,7 @@ let test_max_failed_scales_at_ten_percent () =
 let test_max_failed_monotone_nondecreasing () =
   (* As N grows, the allowed-failed count must never shrink.
      Guards against future floor changes that would silently tighten
-     admission for some N. *)
+     health thresholds for some N. *)
   let rec loop prev n =
     if n > 50 then ()
     else
@@ -304,13 +227,7 @@ let test_max_failed_monotone_nondecreasing () =
 let () =
   Alcotest.run
     "keeper_health_probe"
-    [ ( "cache"
-      , [ Alcotest.test_case
-            "default_status_is_unknown"
-            `Quick
-            test_get_runtime_status_default_unknown
-        ] )
-    ; ( "runtime"
+     [ ( "runtime"
       , [ Alcotest.test_case
             "empty_registry_all_healthy"
             `Quick
@@ -319,10 +236,6 @@ let () =
             "runtime_pressure_classifier"
             `Quick
             test_runtime_pressure_classifier
-        ; Alcotest.test_case
-            "run_once_records_specific_failure_ratio_reason"
-            `Quick
-            test_run_once_records_specific_failure_ratio_reason
         ] )
     ; ( "phase_predicate"
       , [ Alcotest.test_case

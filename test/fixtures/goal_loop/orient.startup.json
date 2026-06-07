@@ -2,17 +2,6 @@
   "findings": [
     {
       "count": 0,
-      "finding_id": "R-FATAL-1",
-      "patterns": [
-        "keeper_skipping_turn"
-      ],
-      "samples": [],
-      "severity": "critical",
-      "status": "EVIDENCE_ABSENT",
-      "title": "keeper_semaphore_wait_no_fallback"
-    },
-    {
-      "count": 0,
       "finding_id": "CF-1",
       "patterns": [
         "pricing_catalog_miss"

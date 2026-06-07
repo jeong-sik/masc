@@ -5,11 +5,10 @@
 
     {2 Design constraints}
 
-    - **No shell-string parsing**.  Validation is membership against
-      {!Exec_policy} command allowlists plus structural checks on argv/cwd.
-      Allowlisted wrapper executables ([env], [opam exec]) are resolved
-      over explicit argv tokens and their effective target executable is
-      checked against the same allowlist.
+    - **No shell-string parsing**.  Validation is structural only:
+      argv/cwd/env/redirect shape is checked here, while executable
+      admission is left to Shell IR risk classification and the runtime
+      write/destructive gates.
     - **Execve-style argv semantics**.  Each token in [argv] is passed
       verbatim to the child process; the implementation invokes the
       executable directly (no [/bin/sh -c "..."] wrapping).  Therefore
@@ -75,21 +74,18 @@ type execute_input =
           construction owns the inter-stage fd plumbing.  Out-of-stage
           redirects on the pipeline's endpoints are a deferred extension. *)
 
-type allowlist_mode =
-  | Dev_full
-  | Readonly
-
 type validation_error =
-  | Executable_not_allowlisted of {
-      name : string;
-      mode : allowlist_mode;
-    }
   | Empty_executable of { argv : string list }
-  | Empty_argv of { executable : string }
   | Executable_repeated_in_argv0 of {
       executable : string;
       argv : string list;
     }
+  | Executable_not_allowed of {
+      executable : string;
+      reason : string;
+    }
+      (** Read-only Execute executable admission rejected an interpreter,
+          network primitive, spawn-capable binary, or unknown executable. *)
   | Argv_contains_shell_metachar of {
       executable : string;
       index : int;
@@ -141,24 +137,27 @@ val of_json : Yojson.Safe.t -> (execute_input, string) result
     [executable] fields, and duplicated executable tokens in [argv] remain
     caller errors. *)
 
-val validate : mode:allowlist_mode -> execute_input -> (unit, validation_error) result
+val validate : execute_input -> (unit, validation_error) result
 (** Run all structural checks against [input].  Returns [Ok ()] on
     success, or the first {!validation_error} encountered.  No side
     effects, no exceptions. *)
 
+val validate_readonly : execute_input -> (unit, validation_error) result
+(** Run {!validate}, then enforce read-only Execute executable admission.
+    Interpreters, network primitives, spawn-capable binaries, and unknown
+    executables are rejected before dispatch because argv-only execution
+    cannot prove their filesystem effects are read-only. *)
+
 val to_shell_ir_unvalidated :
   ?sandbox:Masc_exec.Sandbox_target.t ->
-  mode:allowlist_mode ->
   execute_input ->
   (Masc_exec.Shell_ir.t, validation_error) result
-(** Lower [input] into {!Masc_exec.Shell_ir.t} without allowlist validation.
+(** Lower [input] into {!Masc_exec.Shell_ir.t} without structural validation.
     Callers that use the Shell IR facade ([Shell_command_gate.gate_typed])
-    should use this entrypoint so validation runs through the facade rather
-    than duplicating the allowlist check. *)
+    may use this entrypoint when the boundary has already been checked. *)
 
 val to_shell_ir :
   ?sandbox:Masc_exec.Sandbox_target.t ->
-  mode:allowlist_mode ->
   execute_input ->
   (Masc_exec.Shell_ir.t, validation_error) result
 (** Validate and lower [input] into {!Masc_exec.Shell_ir.t}.  [Pipeline]
@@ -179,8 +178,7 @@ val pp_validation_error : Format.formatter -> validation_error -> unit
 
 val validation_error_alternatives : validation_error -> string list
 (** Structured alternatives for machine consumers (JSON responses).
-    Returns tool names, field names, or allowlisted executable names the LLM
-    should use instead of the rejected pattern.  Empty list when no typed
-    alternative exists.
+    Returns field names the LLM should use instead of the rejected pattern.
+    Empty list when no typed alternative exists.
     SSOT: each variant maps to exactly one alternatives list here;
     callers must not add ad-hoc alternatives at the JSON layer. *)

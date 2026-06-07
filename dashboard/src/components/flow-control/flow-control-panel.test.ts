@@ -126,4 +126,5 @@ describe('FlowControlPanel', () => {
     expect(status!.textContent).toContain('OAS runtime')
     expect(status!.textContent).toContain('1/3')
   })
+
 })

@@ -68,7 +68,6 @@ type config =
   ; oas_auto_context_overflow_retry : bool
   ; context_injector : Agent_sdk.Hooks.context_injector option
   ; context : Agent_sdk.Context.t option
-  ; slot_id : int option
   ; approval : Agent_sdk.Hooks.approval_callback option
   ; exit_condition : (int -> bool) option
   ; exit_condition_result : (int -> stop_reason * string option) option
@@ -127,7 +126,6 @@ let default_config
   ; oas_auto_context_overflow_retry = true
   ; context_injector = None
   ; context = None
-  ; slot_id = None
   ; approval = None
   ; exit_condition = None
   ; exit_condition_result = None
@@ -281,11 +279,6 @@ let builder_without_approval
     | None -> builder
   in
   let builder =
-    match config.slot_id with
-    | Some id -> Agent_sdk.Builder.with_slot_id id builder
-    | None -> builder
-  in
-  let builder =
     match config.exit_condition with
     | Some cond -> Agent_sdk.Builder.with_exit_condition cond builder
     | None -> builder
@@ -363,7 +356,6 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
     ; approval = config.approval
     ; missing_approval_callback_policy =
         Agent_sdk.Hooks.Reject_without_callback
-    ; slot_id = config.slot_id
     ; runtime_mcp_policy = config.runtime_mcp_policy
     ; summarizer = config.summarizer
     ; priority = config.priority

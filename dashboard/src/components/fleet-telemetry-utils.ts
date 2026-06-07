@@ -650,17 +650,9 @@ export function buildRuntimeWarnings(rows: FleetRow[]): string[] {
     )
   }
 
-  const slotBlocked = rows.filter(row => row.runtime_blocker_class === 'autonomous_slot_wait_timeout')
-  if (slotBlocked.length > 0) {
-    warnings.push(
-      `${slotBlocked.length} keepers skipped their autonomous cycle while waiting for a local keeper slot.`,
-    )
-  }
-
   const otherBlocked = rows.filter(row =>
     row.runtime_blocker_class != null
-    && row.runtime_blocker_class !== 'admission_queue_wait_timeout'
-    && row.runtime_blocker_class !== 'autonomous_slot_wait_timeout',
+    && row.runtime_blocker_class !== 'admission_queue_wait_timeout',
   )
   if (otherBlocked.length > 0) {
     warnings.push(
@@ -733,8 +725,7 @@ export function summaryCounts(rows: FleetRow[]): FleetSummaryCounts {
   // provider_tool_capability_missing, completion_contract_violation, …).
   // These are alive-but-blocked keepers that
   // the live/stale gauges miss — fiber is up, but the next turn cannot
-  // start.  Pairs with the `Semaphore_wait_timeout` typing fix
-  // (#12855) and the runtime fallback-cycle detector (#12866) so
+  // start.  Pairs with runtime fallback-cycle detection so
   // operators have a single panel that surfaces "alive but stuck".
   const blocked = rows.filter(row =>
     row.keepalive_running

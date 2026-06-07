@@ -476,13 +476,6 @@ let keeper_fleet_safety_health_json
   let executable_reaction_capacity_below_target =
     target_count > 0 && executable_reaction_capacity_shortfall_count > 0
   in
-  let status =
-    if no_executable_keeper_fibers then "blocked"
-    else if no_running_fibers then "degraded"
-    else if low_running_fiber_margin then "degraded"
-    else if reaction_capacity_below_target then "degraded"
-    else "ok"
-  in
   let paused_total_count =
     match paused_keepers_json with
     | `Assoc fields ->
@@ -495,15 +488,21 @@ let keeper_fleet_safety_health_json
     match paused_keepers_json with
     | `Assoc fields ->
         (match List.assoc_opt "autoboot_enabled_count" fields with
-         | Some (`Int count) -> count
-         | _ -> 0)
+       | Some (`Int count) -> count
+       | _ -> 0)
     | _ -> 0
+  in
+  let status =
+    if no_executable_keeper_fibers then "blocked"
+    else if no_running_fibers then "degraded"
+    else if low_running_fiber_margin then "degraded"
+    else if reaction_capacity_below_target then "degraded"
+    else "ok"
   in
   let blocked_count =
     if no_executable_keeper_fibers then executable_reaction_capacity_shortfall_count
     else if no_running_fibers || low_running_fiber_margin || reaction_capacity_below_target
-    then
-      reaction_capacity_shortfall_count
+    then reaction_capacity_shortfall_count
     else 0
   in
   let blocker =
@@ -558,8 +557,4 @@ let keeper_fleet_safety_health_json
            || no_running_fibers
            || low_running_fiber_margin
            || reaction_capacity_below_target) )
-    ; "autoboot_throttle_limit"
-    , `Int Keeper_keepalive.effective_turn_throttle_limit
-    ; ( "autoboot_throttle_source"
-      , `String (Config_boot_overrides.source "MASC_KEEPER_AUTOBOOT_MAX") )
     ]

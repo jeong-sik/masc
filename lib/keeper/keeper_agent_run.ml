@@ -535,7 +535,6 @@ let run_turn
                     ~checkpoint_dir:session_dir
                     ~context_injector
                     ~context:shared_context
-                    ?slot_id:(Keeper_config.keeper_slot_id meta.name)
                     ~approval:
                       (Governance_pipeline.to_oas_approval_callback
                          ~config

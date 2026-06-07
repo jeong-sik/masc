@@ -8,7 +8,7 @@
     1. [Masc_exec_command_gate.Shell_command_gate.gate_raw] verdict shape
        matches what {!test/fixtures/shell_gate/baseline.jsonl}
        records for each corpus row (Phase 0 - baseline pin).
-    2. [Masc.Exec_policy.validate_command_tool_execute_with_allowlist]
+    2. [Masc.Exec_policy.validate_command_tool_execute]
        policy verdict also matches the recorded baseline so any future
        behavior change (Phase 2+) is visible as a corpus diff, not as
        a silent flip.
@@ -20,11 +20,9 @@
 module Gate = Masc_exec_command_gate.Shell_command_gate
 module Policy = Exec_policy
 
-let allowed = [ "rg"; "sort"; "head"; "wc"; "cat"; "git"; "ls" ]
-
-let gate_from_raw ~raw ~allowlist ~path_policy ~sandbox () =
-  Gate.gate_raw ~text:raw ~allowlist ~path_policy ~sandbox ()
-let allowlist : Gate.allowlist_policy =
+let gate_from_raw ~raw ~syntax_policy ~path_policy ~sandbox () =
+  Gate.gate_raw ~text:raw ~syntax_policy ~path_policy ~sandbox ()
+let syntax_policy : Gate.syntax_policy =
   { redirect_allowed = false; allow_pipes = true }
 ;;
 
@@ -113,10 +111,9 @@ let policy_tag (result : (unit, Policy.block_reason) result) : string =
   | Error (Policy.Command_not_allowed _) -> "command_not_allowed"
 ;;
 
-let validate_policy_execute_raw ~allowed_commands raw =
+let validate_policy_execute_raw raw =
   match Policy.parse_string_to_ir ~mode:Tool_execute raw with
-  | Ok ir ->
-    Policy.validate_command_tool_execute_with_allowlist ~allowed_commands ir
+  | Ok ir -> Policy.validate_command_tool_execute ir
   | Error reason -> Error reason
 ;;
 
@@ -136,9 +133,7 @@ let run_corpus_row fixture =
          String.sub fixture.raw_cmd 0 60 ^ "..."
        else fixture.raw_cmd)
   in
-  let policy =
-    validate_policy_execute_raw ~allowed_commands:allowed fixture.raw_cmd
-  in
+  let policy = validate_policy_execute_raw fixture.raw_cmd in
   Alcotest.(check string)
     (label ^ " policy verdict")
     fixture.expected_policy_verdict
@@ -146,7 +141,7 @@ let run_corpus_row fixture =
   let ir =
     gate_from_raw
       ~raw:fixture.raw_cmd
-      ~allowlist
+      ~syntax_policy
       ~path_policy:Gate.allow_all_paths
       ~sandbox:Gate.host_sandbox
       ()
@@ -207,7 +202,7 @@ let test_quoted_pipe_single_stage_shape () =
   match
     gate_from_raw
       ~raw:"rg 'foo|bar' lib"
-      ~allowlist
+      ~syntax_policy
       ~path_policy:Gate.allow_all_paths
       ~sandbox:Gate.host_sandbox
       ()
@@ -231,7 +226,7 @@ let test_real_three_stage_pipeline_ordering () =
   match
     gate_from_raw
       ~raw:"rg foo lib | sort | head -20"
-      ~allowlist
+      ~syntax_policy
       ~path_policy:Gate.allow_all_paths
       ~sandbox:Gate.host_sandbox
       ()
@@ -264,30 +259,34 @@ let test_real_three_stage_pipeline_ordering () =
       (Gate.verdict_tag other)
 ;;
 
-let test_pipeline_segment_rejection_carries_stage_index () =
+let test_pipeline_preserves_all_stage_bins () =
   match
     gate_from_raw
       ~raw:"rg foo | sed s/a/b/ | head -20"
-      ~allowlist
+      ~syntax_policy
       ~path_policy:Gate.allow_all_paths
       ~sandbox:Gate.host_sandbox
       ()
   with
-  | Gate.Reject { reason = Gate.Pipeline_segment_disallowed { stage = 2; bin = "sed" }; _ } -> ()
+  | Gate.Allow context ->
+    Alcotest.(check (list string))
+      "stage bins"
+      [ "rg"; "sed"; "head" ]
+      context.Gate.stage_bins
   | other ->
     Alcotest.failf
-      "expected stage 2 sed rejection, got %s"
+      "expected all pipeline stages to be allowed, got %s"
       (Gate.verdict_tag other)
 ;;
 
 let test_pipes_disabled () =
-  let policy : Gate.allowlist_policy =
+  let policy : Gate.syntax_policy =
     { redirect_allowed = false; allow_pipes = false }
   in
   match
     gate_from_raw
       ~raw:"rg foo | head -20"
-      ~allowlist:policy
+      ~syntax_policy:policy
       ~path_policy:Gate.allow_all_paths
       ~sandbox:Gate.host_sandbox
       ()
@@ -358,7 +357,7 @@ let test_lower_typed_three_stage_matches_raw () =
   let raw =
     gate_from_raw
       ~raw:"rg foo lib | sort | head -20"
-      ~allowlist
+      ~syntax_policy
       ~path_policy:Gate.allow_all_paths
       ~sandbox:Gate.host_sandbox
       ()
@@ -401,7 +400,7 @@ let test_path_policy_rejects () =
   match
     gate_from_raw
       ~raw:"cat /etc/shadow"
-      ~allowlist
+      ~syntax_policy
       ~path_policy:policy
       ~sandbox:Gate.host_sandbox
       ()
@@ -425,7 +424,7 @@ let test_path_policy_rejects_redirect_target () =
   match
     gate_from_raw
       ~raw:"ls > /tmp/out"
-      ~allowlist
+      ~syntax_policy
       ~path_policy:policy
       ~sandbox:Gate.host_sandbox
       ()
@@ -446,7 +445,7 @@ let test_masc_internal_state_policy_blocks_backlog () =
   match
     gate_from_raw
       ~raw:"cat .masc/backlog.json"
-      ~allowlist
+      ~syntax_policy
       ~path_policy:Gate.forbid_masc_internal_state_paths
       ~sandbox:Gate.host_sandbox
       ()
@@ -495,7 +494,7 @@ let test_masc_internal_state_policy_allows_normal_commands () =
   match
     gate_from_raw
       ~raw:"cat README.md"
-      ~allowlist
+      ~syntax_policy
       ~path_policy:Gate.forbid_masc_internal_state_paths
       ~sandbox:Gate.host_sandbox
       ()
@@ -515,7 +514,7 @@ let test_sandbox_target_propagates_to_every_stage () =
   match
     gate_from_raw
       ~raw:"rg foo lib | sort | head -20"
-      ~allowlist
+      ~syntax_policy
       ~path_policy:Gate.allow_all_paths
       ~sandbox
       ()
@@ -567,7 +566,7 @@ let test_backslash_pipe_in_double_quotes_allows () =
   match
     gate_from_raw
       ~raw:"rg \"a\\|b\""
-      ~allowlist
+      ~syntax_policy
       ~path_policy:Gate.allow_all_paths
       ~sandbox:Gate.host_sandbox
       ()
@@ -589,7 +588,7 @@ let test_brace_expansion_is_too_complex_glob_brace () =
   match
     gate_from_raw
       ~raw:"ls {a,b}.txt"
-      ~allowlist
+      ~syntax_policy
       ~path_policy:Gate.allow_all_paths
       ~sandbox:Gate.host_sandbox
       ()
@@ -613,7 +612,7 @@ let test_absolute_path_traversal_phase1_allows () =
   match
     gate_from_raw
       ~raw:"cat /etc/passwd"
-      ~allowlist
+      ~syntax_policy
       ~path_policy:Gate.allow_all_paths
       ~sandbox:Gate.host_sandbox
       ()
@@ -651,9 +650,9 @@ let () =
             `Quick
             test_real_three_stage_pipeline_ordering
         ; Alcotest.test_case
-            "pipeline rejection carries 1-indexed stage"
+            "pipeline stages stay admitted"
             `Quick
-            test_pipeline_segment_rejection_carries_stage_index
+            test_pipeline_preserves_all_stage_bins
         ; Alcotest.test_case
             "allow_pipes=false yields Pipes_not_allowed"
             `Quick

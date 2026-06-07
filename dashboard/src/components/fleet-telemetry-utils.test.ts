@@ -636,13 +636,6 @@ describe('buildRuntimeWarnings', () => {
     expect(warnings[0]).toContain('keeper admission FIFO')
   })
 
-  it('warns about slot blockage', () => {
-    const rows = [makeRow({ runtime_blocker_class: 'autonomous_slot_wait_timeout' })]
-    const warnings = buildRuntimeWarnings(rows)
-    expect(warnings.length).toBe(1)
-    expect(warnings[0]).toContain('autonomous cycle')
-  })
-
   it('warns about other blockers', () => {
     const rows = [makeRow({ runtime_blocker_class: 'turn_timeout_after_queue_wait' })]
     const warnings = buildRuntimeWarnings(rows)

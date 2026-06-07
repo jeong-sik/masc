@@ -387,7 +387,6 @@ function continueGateHint(keeper: Keeper): string {
 const runtimeBlockerLabels = {
   ambiguous_post_commit_timeout: '커밋 후 응답 없음',
   ambiguous_post_commit_failure: '커밋 후 실패',
-  autonomous_slot_wait_timeout: '자율 슬롯 대기 만료',
   admission_queue_wait_timeout: '대기열 진입 만료',
   turn_timeout_after_queue_wait: '대기 후 턴 만료',
   turn_timeout: '턴 응답 만료',
@@ -440,9 +439,6 @@ export function keeperRuntimeBlockerHint(keeper: Keeper | null | undefined): str
   }
   if (blockerClass === 'ambiguous_post_commit_failure') {
     return '최근 변경 이후 실패가 있어 상태 확인이 필요합니다.'
-  }
-  if (blockerClass === 'autonomous_slot_wait_timeout') {
-    return '자율 턴이 실행 슬롯을 기다리다 타임아웃되었습니다.'
   }
   if (blockerClass === 'admission_queue_wait_timeout') {
     return 'Keeper admission FIFO 대기 시간이 초과되었습니다.'

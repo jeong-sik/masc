@@ -77,7 +77,6 @@ let run_named
     ?checkpoint_dir
     ?context_injector
     ?context
-    ?slot_id
     ?enable_thinking
     ?approval
     ?exit_condition
@@ -169,7 +168,6 @@ let run_named
     checkpoint_dir;
     context_injector;
     context;
-    slot_id;
     enable_thinking;
     approval;
     exit_condition;

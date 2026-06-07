@@ -48,19 +48,17 @@ val validate_paths :
 
 val tool_execute_command_context :
   ?allow_pipes:bool ->
-  allowed_commands:string list ->
   string ->
   (Masc_exec_command_gate.Shell_command_gate.parsed_context, string) result
 (** Parse and validate a legacy raw Execute command through the shared Shell IR
     policy path. This preserves execution-surface checks such as direct-dune,
-    glob, wrapped-stage, allowlist, pipe, and redirect policy before callers
-    dispatch through {!dispatch_classified}. *)
+    glob, pipe, and redirect policy before callers dispatch through
+    {!dispatch_classified}. *)
 
 val dispatch_classified :
   ?timeout_sec:float ->
   ?allow_pipes:bool ->
   ?redirect_allowed:bool ->
-  allowed_commands:string list ->
   ?keeper_id:string ->
   ?base_path:string ->
   workdir:string ->
@@ -78,7 +76,6 @@ val dispatch :
   ?timeout_sec:float ->
   ?allow_pipes:bool ->
   ?redirect_allowed:bool ->
-  allowed_commands:string list ->
   ?keeper_id:string ->
   ?base_path:string ->
   workdir:string ->

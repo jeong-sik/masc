@@ -509,7 +509,6 @@ def summarize_verify(verify: dict[str, Any] | None) -> PhaseStatus:
 def system_health_signals(observe: dict[str, Any] | None) -> dict[str, Any]:
     signals = {
         "keeper_failure_patterns": {
-            "keeper_skipping_turn": pattern_count(observe, "keeper_skipping_turn"),
             "credential_archived_starvation": pattern_count(
                 observe, "credential_archived_starvation"
             ),

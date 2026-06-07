@@ -388,6 +388,8 @@ type autonomous_waiter =
 type autonomous_lane =
   { queue : autonomous_waiter Queue.t
   ; active_count : int ref
+  ; semaphore : Eio.Semaphore.t
+  ; concurrency : int
   }
 
 (* Eio.Mutex: queue operations are pure/non-yielding. Stdlib.Mutex is PTHREAD_MUTEX_ERRORCHECK on OCaml 5 and raises "Resource deadlock avoided" whenever two Eio fibers on the same OS thread contend, ... *)
@@ -424,13 +426,45 @@ let record_autonomous_queue_depth depth =
     (float_of_int depth)
 ;;
 
-(** Get or create a lane for the given [runtime_id]. *)
+(** Per-runtime concurrency: look up a runtime-specific concurrency
+    limit from TOML config. Falls back to [autonomous_turn_limit] when
+    no runtime-specific override exists. The TOML key is
+    [MASC_KEEPER_AUTONOMOUS_CONCURRENCY_<RUNTIME_ID>] where runtime_id
+    dots and hyphens are replaced by underscores and uppercased.
+    E.g. runtime_id [ollama_cloud.deepseek-v4-flash] becomes
+    [MASC_KEEPER_AUTONOMOUS_CONCURRENCY_OLLAMA_CLOUD_DEEPSEEK_V4_FLASH]. *)
+let runtime_concurrency runtime_id =
+  let key =
+    "MASC_KEEPER_AUTONOMOUS_CONCURRENCY_"
+    ^ (runtime_id
+       |> String.map (fun c -> if c = '.' || c = '-' then '_' else Char.uppercase_ascii c))
+  in
+  turn_concurrency_int_of_env_default
+    key
+    ~default:autonomous_turn_limit
+    ~min_v:1
+    ~max_v:max_int
+;;
+
+(** Get or create a lane for the given [runtime_id], including a
+    per-runtime semaphore sized to that runtime's concurrency limit. *)
 let get_or_create_lane runtime_id =
   match Hashtbl.find_opt autonomous_lanes runtime_id with
   | Some lane -> lane
   | None ->
-    let lane = { queue = Queue.create (); active_count = ref 0 } in
+    let concurrency = runtime_concurrency runtime_id in
+    let lane =
+      { queue = Queue.create ()
+      ; active_count = ref 0
+      ; semaphore = Eio.Semaphore.make concurrency
+      ; concurrency
+      }
+    in
     Hashtbl.replace autonomous_lanes runtime_id lane;
+    Log.Keeper.info
+      "autonomous_lane: created lane for runtime=%s concurrency=%d"
+      runtime_id
+      concurrency;
     lane
 ;;
 
@@ -629,38 +663,6 @@ let with_completion_table f =
 let record_autonomous_completion ~(keeper_name : string) : unit =
   with_completion_table (fun () ->
     Hashtbl.replace last_autonomous_completion keeper_name (Time_compat.now ()))
-;;
-type keeper_turn_slot_state =
-  { acquired_autonomous : bool ref
-  ; acquired_reactive : bool ref
-  ; acquired_turn : bool ref
-  ; autonomous_acquisition_id : int option ref
-  ; reactive_acquisition_id : int option ref
-  ; turn_acquisition_id : int option ref
-  ; autonomous_ticket : int option ref
-  }
-
-type keeper_turn_slot_control =
-  { release_for_retry : unit -> unit
-  ; reacquire_after_retry :
-      unit -> (int, [ `Semaphore_wait_timeout of semaphore_wait_timeout ]) result
-  }
-
-let make_keeper_turn_slot_state () =
-  { acquired_autonomous = ref false
-  ; acquired_reactive = ref false
-  ; acquired_turn = ref false
-  ; autonomous_acquisition_id = ref None
-  ; reactive_acquisition_id = ref None
-  ; turn_acquisition_id = ref None
-  ; autonomous_ticket = ref None
-  }
-;;
-let keeper_turn_slot_is_held state =
-  !(state.acquired_autonomous)
-  || !(state.acquired_reactive)
-  || !(state.acquired_turn)
-  || Option.is_some !(state.autonomous_ticket)
 ;;
 let after_acquire_flag_hook_for_test
   : (label:string -> keeper_name:string -> unit) option ref

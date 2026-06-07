@@ -24,13 +24,12 @@ val resolve_bounded_provider_timeout_budget_with_turn_budget
   -> estimated_input_tokens:int
   -> max_turns:int
   -> remaining_turn_budget_s:float
-  -> provider_timeout_budget option
-(** See [Keeper_turn_runtime_budget] for first-attempt retry reserve and
-    retry-attempt budget semantics. *)
+  -> provider_timeout_budget
+(** See [Keeper_turn_runtime_budget] for provider timeout planning semantics. *)
 
 (** Legacy per-attempt watchdog budget. Progress-based liveness modes return no
     watchdog so healthy active streams are not killed by cumulative wall time;
-    the budget remains for retry/admission compatibility and off-mode tests. *)
+    the budget remains for off-mode tests. *)
 val attempt_watchdog_timeout_sec
   :  remaining_turn_budget_s:float
   -> provider_timeout_budget
@@ -41,14 +40,6 @@ val allow_wall_clock_retry_budget_for_attempt
   -> degraded_rotation_first_attempt:bool
   -> attempt:int
   -> attempted_runtimes:string list
-  -> bool
-
-val provider_retry_budget_available_for_turn
-  :  allow_wall_clock_retry_budget:bool
-  -> is_retry:bool
-  -> estimated_input_tokens:int
-  -> max_turns:int
-  -> remaining_turn_budget_s:float
   -> bool
 
 val degraded_retry_slot_phase_budget_sec : float
@@ -66,7 +57,6 @@ val reclassify_provider_timeout_for_attempt
 type degraded_retry_budget_decision =
   | No_degraded_retry
   | Degraded_retry_slot_phase_exhausted of Keeper_error_classify.degraded_retry
-  | Degraded_retry_budget_exhausted of Keeper_error_classify.degraded_retry
   | Degraded_retry_allowed of Keeper_error_classify.degraded_retry
 
 val next_fail_open_runtime_for_turn_with_budget

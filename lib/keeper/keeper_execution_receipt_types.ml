@@ -63,13 +63,11 @@ type tool_surface =
 type runtime_rotation_outcome =
   | Rotation_setup_failed
   | Rotation_retry_scheduled
-  | Rotation_budget_exhausted
   | Rotation_slot_phase_exhausted
 
 let runtime_rotation_outcome_to_string = function
   | Rotation_setup_failed -> "setup_failed"
   | Rotation_retry_scheduled -> "retry_scheduled"
-  | Rotation_budget_exhausted -> "budget_exhausted"
   | Rotation_slot_phase_exhausted -> "slot_phase_exhausted"
 ;;
 

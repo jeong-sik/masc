@@ -76,3 +76,31 @@ val max_failed_allowed_for_runtime : total:int -> int
     [failed <= max_failed_allowed_for_runtime ~total].  This function
     reads registry state and performs no runtime/provider calls. *)
 val check_runtime_health : base_path:string -> (string * bool) list
+
+(** [get_runtime_status ~runtime_id] returns the cached runtime-level
+    [health_status] written by [run_once].  This preserves the [Unknown]
+    case so the supervisor's auto-resume guard can distinguish
+    "no probe data yet" from
+    "probe observed restart pressure" and treat the former
+    permissively.
+
+    Background: prior to wiring this distinction, the supervisor's
+    Phase 3.5 guard collapsed [Unknown] and [Unhealthy] to the same
+    boolean result — turning the boot-time cold-cache window into a
+    permanent auto-resume lockout for every runtime. *)
+val get_runtime_status : runtime_id:string -> health_status
+
+(** [run_once ~base_path] runs [check_runtime_health] and writes the
+    results into the runtime cache.  Idempotent and bounded (registry
+    scan, no I/O).  Safe to call from the supervisor sweep on every
+    beat — [Keeper_supervisor.sweep_and_recover] does so to keep the
+    cache live without depending on the background fiber. *)
+val run_once : base_path:string -> unit
+
+(** {1 Background probe fiber} *)
+
+(** [start_probe ~sw ~base_path ~interval_sec ~clock] spawns a background Eio
+    fiber that runs [check_runtime_health] every [interval_sec] seconds
+    and writes the results into the runtime cache. *)
+val start_probe :
+  sw:Eio.Switch.t -> base_path:string -> interval_sec:float -> clock:float Eio.Time.clock_ty Eio.Resource.t -> unit

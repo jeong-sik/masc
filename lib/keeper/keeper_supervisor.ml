@@ -22,6 +22,14 @@ let sweep_and_recover (ctx : _ context) =
   in
   let dead_ttl_sec = Runtime_params.get Governance_registry.keeper_dead_ttl_sec in
   let base_path = ctx.config.base_path in
+  (* Refresh the runtime health cache before Phase 3.5 reads it.  Without this
+     call the cache stayed cold (PR #14146 introduced the cache and
+     [Phase 3.5] guard but never wired a writer), so every runtime looked
+     unhealthy and auto-resume was silently disabled across the fleet.
+     [run_once] is a registry scan — bounded, no I/O — so running it
+     inline on every 30 s sweep is cheap.  [Safe_ops.protect] keeps a
+     transient registry exception from killing the sweep. *)
+  Safe_ops.protect ~default:() (fun () -> Keeper_health_probe.run_once ~base_path);
   (* Phase 2: sweep order — restart/unregister FIRST, reconcile LAST.
      This prevents reconcile from re-launching keepers that sweep is about
      to process (defense-in-depth alongside is_registered check). *)

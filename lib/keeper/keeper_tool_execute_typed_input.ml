@@ -30,7 +30,6 @@ type validation_error =
       executable : string;
       argv : string list;
     }
-  | Executable_not_allowed of string
   | Argv_contains_shell_metachar of {
       executable : string;
       index : int;
@@ -397,16 +396,13 @@ let check_exec ~executable ~argv ~cwd ~env =
     | first :: _ -> String.equal first trimmed
     | [] -> false
   then Error (Executable_repeated_in_argv0 { executable = trimmed; argv })
-  else
-    match Exec_policy.command_name_blocked_for_readonly_execute trimmed with
-    | Some command -> Error (Executable_not_allowed command)
-    | None ->
-      let* () =
-        if argv = [] then Ok () else check_argv ~executable argv
-      in
-      let* () = check_cwd cwd in
-      let* () = check_env env in
-      Ok ()
+  else (
+    let* () =
+      if argv = [] then Ok () else check_argv ~executable argv
+    in
+    let* () = check_cwd cwd in
+    let* () = check_env env in
+    Ok ())
 ;;
 
 let check_redirect_target ~fd = function
@@ -551,12 +547,6 @@ let pp_validation_error ppf = function
     Format.fprintf
       ppf
       "executable %S was reported as duplicated in argv[0], but argv is empty"
-      executable
-  | Executable_not_allowed executable ->
-    Format.fprintf
-      ppf
-      "executable %S is not allowed through typed Execute; use a structured \
-       tool for shell interpreter or network operations"
       executable
   | Argv_contains_shell_metachar { executable; index; token } ->
     Format.fprintf

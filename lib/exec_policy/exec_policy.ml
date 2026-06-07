@@ -88,29 +88,6 @@ type block_reason =
   | Direct_dune_invocation
   | Command_not_allowed of string
 
-let normalized_command_name raw =
-  raw |> String.trim |> Filename.basename |> String.lowercase_ascii
-;;
-
-let is_shell_interpreter_command_name name =
-  List.exists
-    (String.equal name)
-    [ "sh"; "bash"; "zsh"; "dash"; "ksh"; "fish"; "csh"; "tcsh"; "ash" ]
-;;
-
-let is_network_primitive_command_name name =
-  List.exists
-    (String.equal name)
-    [ "curl"; "wget"; "ssh"; "scp"; "rsync"; "ftp"; "sftp"; "nc" ]
-;;
-
-let command_name_blocked_for_readonly_execute raw =
-  let name = normalized_command_name raw in
-  if is_shell_interpreter_command_name name || is_network_primitive_command_name name
-  then Some name
-  else None
-;;
-
 let block_reason_to_string = function
   | Empty_command -> "command must not be empty"
   | Chain_or_redirect ->
@@ -757,33 +734,6 @@ let is_git_branch_switch = Mutation_classifier.is_git_branch_switch
 let is_destructive_bash_operation = Mutation_classifier.is_destructive_bash_operation
 let flat_stage_words = Mutation_classifier.flat_stage_words
 
-let rec command_names_of_shell_ir = function
-  | Masc_exec.Shell_ir.Simple simple ->
-    [ Masc_exec.Exec_program.to_string simple.Masc_exec.Shell_ir.bin ]
-  | Masc_exec.Shell_ir.Pipeline stages ->
-    List.concat_map command_names_of_shell_ir stages
-;;
-
-let validate_static_safe_command_name raw =
-  let name = normalized_command_name raw in
-  match Masc_exec.Exec_program.of_string name with
-  | Ok program when Masc_exec.Exec_program.risk_class program = `Safe -> Ok ()
-  | Ok program ->
-    Error (Command_not_allowed (Masc_exec.Exec_program.to_string program))
-  | Error (`Unknown unknown) -> Error (Command_not_allowed unknown)
-;;
-
-let validate_static_safe_ir_commands ir =
-  let rec loop = function
-    | [] -> Ok ()
-    | command :: rest ->
-      (match validate_static_safe_command_name command with
-       | Ok () -> loop rest
-       | Error _ as err -> err)
-  in
-  loop (command_names_of_shell_ir ir)
-;;
-
 let sanitize_command_for_log cmd =
   let trimmed = String.trim cmd in
   if trimmed = ""
@@ -842,7 +792,6 @@ type 'a verified_ir = 'a Typed_capabilities.verified_ir
 let verify_static_safe_ir ir =
   let ( let* ) = Result.bind in
   let* () = validate_command ir in
-  let* () = validate_static_safe_ir_commands ir in
   let envelope = Masc_exec.Shell_ir_risk.(classify (undecided ir)) in
   if Masc_exec.Shell_ir_risk.is_r0 envelope
   then Ok (Typed_capabilities.Safe_IR ir)

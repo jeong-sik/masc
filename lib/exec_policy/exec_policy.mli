@@ -48,11 +48,6 @@ val validate_command_tool_execute :
   Masc_exec.Shell_ir.t ->
   (unit, block_reason) result
 
-val command_name_blocked_for_readonly_execute : string -> string option
-(** [Some command_name] when a typed Execute executable must not pass through
-    the read-only host dispatch path. Blocks shell interpreters and network
-    primitives that should route through structured tools instead. *)
-
 val simple_literal_args : Masc_exec.Shell_ir.simple -> string list option
 
 val path_argument_values : string -> string list -> string list

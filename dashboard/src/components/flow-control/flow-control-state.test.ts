@@ -31,6 +31,7 @@ vi.mock('../../store', () => ({
 import {
   fetchPauseStatus,
   flowState,
+  syncFlowStateFromDashboardSignals,
 } from './flow-control-state'
 
 describe('flow-control-state', () => {
@@ -121,6 +122,20 @@ describe('flow-control-state', () => {
     await fetchPauseStatus()
 
     expect(callMcpTool).toHaveBeenCalledWith('masc_pause_status', {})
+    expect(flowState.value).toBe('stopped')
+  })
+
+  it('preserves stopped fleet admission during snapshot refreshes', () => {
+    flowState.value = 'stopped'
+    namespaceTruth.value = {
+      root: {
+        status: {
+          paused: false,
+        },
+      },
+    }
+
+    expect(syncFlowStateFromDashboardSignals()).toBe(true)
     expect(flowState.value).toBe('stopped')
   })
 

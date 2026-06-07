@@ -1151,16 +1151,6 @@ let test_health_json_surfaces_durable_paused_keepers () =
             (fleet_safety |> member "reaction_capacity_shortfall_count" |> to_int);
           Alcotest.(check bool) "health fleet asks for operator action" true
             (fleet_safety |> member "operator_action_required" |> to_bool);
-          Alcotest.(check int) "health exposes autoboot throttle limit" 32
-            (fleet_safety |> member "autoboot_throttle_limit" |> to_int);
-          let expected_autoboot_throttle_source =
-            match Sys.getenv_opt "MASC_KEEPER_AUTOBOOT_MAX" with
-            | Some _ -> "env"
-            | None -> "default"
-          in
-          Alcotest.(check string) "health exposes autoboot throttle source"
-            expected_autoboot_throttle_source
-            (fleet_safety |> member "autoboot_throttle_source" |> to_string);
           Alcotest.(check string) "health reaction ledger degraded"
             "degraded"
             (reaction_ledger |> member "status" |> to_string);
@@ -1286,9 +1276,9 @@ let test_health_json_degrades_when_reaction_capacity_below_target () =
           Alcotest.(check string) "health marks target-capacity blocker"
             "reaction_capacity_below_target"
             (fleet_safety |> member "blocker" |> to_string);
-          Alcotest.(check bool) "health fleet asks for operator action" true
-            (fleet_safety |> member "operator_action_required" |> to_bool);
-          ())))
+	          Alcotest.(check bool) "health fleet asks for operator action" true
+	            (fleet_safety |> member "operator_action_required" |> to_bool);
+	          ())))
 
 let test_health_json_distinguishes_failing_executable_keepers () =
   with_temp_dir "health-failing-executable-keepers" (fun dir ->

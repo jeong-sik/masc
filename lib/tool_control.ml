@@ -87,8 +87,7 @@ let handle_pause_status ~tool_name ~start_time ctx _args : Tool_result.result =
       let state = Workspace.read_state ctx.config in
       if state.paused then
         `Paused (state.paused_by, state.pause_reason, state.paused_at)
-      else
-        `Running
+      else `Running
   in
   let payload =
     match pause_state with

@@ -20,6 +20,10 @@ module Sup = Masc.Keeper_supervisor
 module KT = Keeper_types
 module KSM = Keeper_state_machine
 module Cfg = Env_config
+module Health = Masc.Keeper_health_probe
+module KHL = Masc.Keeper_heartbeat_loop
+module Obs = Masc.Keeper_heartbeat_loop_observations
+module WO = Masc.Keeper_world_observation
 
 let bp = "/tmp/test-heartbeat-integ"
 
@@ -64,6 +68,24 @@ let resolve_done_for_test reg value =
 let eio_test name fn =
   test_case name `Quick (fun () -> Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env); fn ())
+
+let base_observation : WO.world_observation =
+  { pending_mentions = []
+  ; pending_board_events = []
+  ; pending_scope_messages = []
+  ; message_cursor_updates = []
+  ; idle_seconds = 0
+  ; active_goals = []
+  ; continuity_summary = ""
+  ; context_ratio = 0.0
+  ; unclaimed_task_count = 0
+  ; claimable_task_count = 0
+  ; provider_capacity_blocked_task_count = 0
+  ; failed_task_count = 0
+  ; pending_verification_count = 0
+  ; backlog_updated_since_last_scheduled_autonomous = false
+  ; active_agent_count = 0
+  }
 
 (* ══════════════════════════════════════════════════════════
    1. Structured crash flow — supervisor catch simulation
@@ -529,38 +551,39 @@ let test_stop_keepalive_resolves_running_entry_immediately () =
        fail ("expected stopped promise, got crashed: " ^ reason)
      | None -> fail "expected manual stop to resolve done_p")
 
-let test_stop_keepalive_force_releases_held_slots () =
+let test_stop_keepalive_does_not_force_release_held_holders () =
   R.clear ();
-  let keeper_name = "manual-stop-held-slot" in
+  let keeper_name = "manual-stop-held-holder" in
   let _reg = R.register ~base_path:bp keeper_name (make_meta keeper_name) in
-  let result =
-    Masc.Keeper_keepalive.with_keeper_turn_slot_for_test
-      ~keeper_name
-      ~channel:Masc.Keeper_world_observation.Reactive
-      (fun ~semaphore_wait_ms:_ ->
-         let now = Time_compat.now () in
-         check bool "precondition holder present" true
-           (List.mem keeper_name
-              (List.map fst (Masc.Keeper_keepalive.turn_slot_holders ~now)));
-         Masc.Keeper_keepalive.stop_keepalive ~base_path:bp keeper_name;
-         let now_after = Time_compat.now () in
-         check bool "turn holder force released on manual stop" false
-           (List.mem keeper_name
-              (List.map fst
-                 (Masc.Keeper_keepalive.turn_slot_holders ~now:now_after)));
-         check bool "reactive holder force released on manual stop" false
-           (List.mem keeper_name
-              (List.map fst
-                 (Masc.Keeper_keepalive.reactive_slot_holders ~now:now_after)));
-         match R.get ~base_path:bp keeper_name with
-         | Some entry ->
-           check string "state stopped" "stopped" (KSM.phase_to_string entry.phase)
-         | None -> fail "expected keeper entry after manual stop")
-  in
-  match result with
-  | Ok () -> ()
-  | Error (`Semaphore_wait_timeout _) ->
-    fail "unexpected semaphore timeout while testing manual stop force-release"
+  Masc.Keeper_keepalive.with_recorded_turn_holder
+    ~keeper_name
+    ~channel:Masc.Keeper_world_observation.Reactive
+    (fun ~holder_wait_ms:_ ->
+       let now = Time_compat.now () in
+       check bool "precondition holder present" true
+         (List.mem keeper_name
+            (List.map fst (Masc.Keeper_keepalive.turn_holders ~now)));
+       Masc.Keeper_keepalive.stop_keepalive ~base_path:bp keeper_name;
+       let now_after = Time_compat.now () in
+       check bool "turn holder remains until turn finalizer" true
+         (List.mem keeper_name
+            (List.map fst
+               (Masc.Keeper_keepalive.turn_holders ~now:now_after)));
+       check bool "reactive holder remains until turn finalizer" true
+         (List.mem keeper_name
+            (List.map fst
+               (Masc.Keeper_keepalive.reactive_holders ~now:now_after)));
+       match R.get ~base_path:bp keeper_name with
+       | Some entry ->
+         check string "state stopped" "stopped" (KSM.phase_to_string entry.phase)
+       | None -> fail "expected keeper entry after manual stop");
+  let now_final = Time_compat.now () in
+  check bool "turn holder released by turn finalizer" false
+    (List.mem keeper_name
+       (List.map fst (Masc.Keeper_keepalive.turn_holders ~now:now_final)));
+  check bool "reactive holder released by turn finalizer" false
+    (List.mem keeper_name
+       (List.map fst (Masc.Keeper_keepalive.reactive_holders ~now:now_final)))
 
 let test_stop_keepalive_preserves_existing_crash_outcome () =
   R.clear ();
@@ -703,6 +726,32 @@ let test_pipeline_stage_sensitivity () =
       "offline" stage
   ) offline_phases
 
+let test_runtime_backpressure_blocks_requested_turn () =
+  let meta = make_meta "runtime-backpressure" in
+  let obs =
+    { base_observation with
+      pending_mentions = [ "operator", "please run" ]
+    }
+  in
+  let decision =
+    KHL.decide_keepalive_scheduling
+      ~runtime_id_of_meta:(fun _ -> "runtime-test")
+      ~runtime_status_of_name:(fun ~runtime_id:_ ->
+        Health.Unhealthy "provider_capacity")
+      ~stop:(Atomic.make false)
+      ~meta
+      obs
+  in
+  check bool "world observation requested a turn" true
+    decision.requested_should_run_turn;
+  check bool "runtime backpressure blocks admission" false decision.should_run_turn;
+  (match decision.runtime_backpressure with
+   | Obs.Runtime_backpressured { reason; _ } ->
+     check string "backpressure reason" "provider_capacity" reason
+   | Obs.Runtime_admitted -> fail "runtime backpressure should reject turn");
+  check bool "skip reasons include runtime backpressure" true
+    (List.mem "runtime_backpressure" decision.skip_reasons)
+
 (* ── Test runner ──────────────────────────────────────────── *)
 
 let () =
@@ -739,21 +788,25 @@ let () =
         test_direct_start_keepalive_resolves_done_on_stop;
       test_case "manual stop resolves running entry immediately" `Quick
         test_stop_keepalive_resolves_running_entry_immediately;
-      eio_test "manual stop force-releases held turn slots"
-        test_stop_keepalive_force_releases_held_slots;
+      eio_test "manual stop preserves held turn holders until finalizer"
+        test_stop_keepalive_does_not_force_release_held_holders;
       test_case "manual stop preserves crashed outcome" `Quick
         test_stop_keepalive_preserves_existing_crash_outcome;
       test_case "resolve_done reports prior outcome" `Quick
         test_resolve_done_reports_prior_outcome;
     ];
-	    "pipeline_stage_phase", [
-	      test_case "exhaustive 11-phase mapping" `Quick
-	        test_pipeline_stage_of_phase_exhaustive;
+    "pipeline_stage_phase", [
+      test_case "exhaustive 11-phase mapping" `Quick
+        test_pipeline_stage_of_phase_exhaustive;
 	      test_case "offline projection details remain distinct" `Quick
 	        test_pipeline_stage_detail_distinguishes_offline_projection;
 	      test_case "unregistered keeper → offline" `Quick
 	        test_pipeline_stage_unregistered_is_offline;
       test_case "sensitivity: active phases ≠ offline" `Quick
         test_pipeline_stage_sensitivity;
+    ];
+    "scheduling", [
+      test_case "runtime backpressure blocks requested turn" `Quick
+        test_runtime_backpressure_blocks_requested_turn;
     ];
   ]

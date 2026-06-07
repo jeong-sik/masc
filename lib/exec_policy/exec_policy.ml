@@ -5,112 +5,14 @@
 
 module Paths = Exec_policy_paths
 module Log_sanitize = Exec_policy_log_sanitize
-module Command_syntax = Exec_policy_command_syntax
 module Mutation_classifier = Exec_policy_mutation_classifier
 module Exec_shell_gate = Masc_exec_command_gate.Shell_command_gate
-
-open Command_syntax
 
 let resolve_path = Paths.resolve_path
 let validate_path = Paths.validate_path
 
-let dev_programs =
-  Masc_exec.Exec_program.
-    [ Cat
-    ; Cargo
-    ; Cmake
-    ; Cut
-    ; Dune_local_sh
-    ; Echo
-    ; Env
-    ; File
-    ; Find
-    ; Gh
-    ; Git
-    ; Go
-    ; Gofmt
-    ; Gradle
-    ; Head
-    ; Java
-    ; Javac
-    ; Ls
-    ; Make
-    ; Mvn
-    ; Node
-    ; Npm
-    ; Ninja
-    ; Npx
-    ; Opam
-    ; Pip
-    ; Pnpm
-    ; Printf
-    ; Pwd
-    ; Pyright
-    ; Pytest
-    ; Python
-    ; Python3
-    ; Rg
-    ; Grep
-    ; Ruff
-    ; Rustc
-    ; Sed
-    ; Sort
-    ; Stat
-    ; Tail
-    ; Tr
-    ; Uniq
-    ; Uv
-    ; Wc
-    ; Which
-    ; Yarn
-    ]
-;;
 
-let readonly_programs =
-  Masc_exec.Exec_program.
-    [ Cat
-    ; Cut
-    ; Echo
-    ; Env
-    ; File
-    ; Find
-    ; Gh
-    ; Git
-    ; Head
-    ; Ls
-    ; Printf
-    ; Pwd
-    ; Rg
-    ; Grep
-    ; Sed
-    ; Sort
-    ; Stat
-    ; Tail
-    ; Tr
-    ; Uniq
-    ; Wc
-    ; Which
-    ]
-;;
-
-let dev_allowed_commands = List.map Masc_exec.Exec_program.name_of_known dev_programs
-let readonly_allowed_commands = List.map Masc_exec.Exec_program.name_of_known readonly_programs
-
-let is_dev_allowed name = List.mem name dev_allowed_commands
-let is_readonly_allowed name = List.mem name readonly_allowed_commands
-
-
-let default_common_allowed_commands_hint =
-  "scripts/dune-local.sh, git, rg, ls, cat, head, tail, find, make, node, npm, \
-   python3, pytest, cargo, go"
-;;
-
-let allowed_commands_hint = function
-  | [] -> "(none)"
-  | commands -> String.concat ", " commands
-;;
-
-let command_blocked_hint ?allowed_commands name =
+let command_blocked_hint name =
   let looks_like_source_code s =
     (match String.index_opt s '.' with
      | Some i -> i > 0 && i < String.length s - 1
@@ -168,18 +70,11 @@ let command_blocked_hint ?allowed_commands name =
        Read instead."
     | _ -> ""
   in
-  let list_label, commands =
-    match allowed_commands with
-    | None -> "Common allowed commands", default_common_allowed_commands_hint
-    | Some commands -> "Allowed commands for this tool", allowed_commands_hint commands
-  in
   Printf.sprintf
-    "Command blocked: '%s' is not allowed. %s: %s.%s See \
+    "Command blocked: '%s' is not allowed. See \
      keeper_tools_list for the exhaustive tool surface, and Read / Edit / \
-     Write for file operations."
+     Write for file operations.%s"
     name
-    list_label
-    commands
     alt
 ;;
 
@@ -220,24 +115,13 @@ let block_reason_to_string = function
   | Command_not_allowed name -> command_blocked_hint name
 ;;
 
-let block_reason_to_string_with_allowlist ~allowed_commands = function
-  | Direct_dune_invocation -> block_reason_to_string Direct_dune_invocation
-  | Command_not_allowed name -> command_blocked_hint ~allowed_commands name
-  | reason -> block_reason_to_string reason
-;;
 
-let validate_command_name_with_allowlist ~allowed_commands = function
-  | None -> Error Empty_command
-  | Some name when List.mem name allowed_commands -> Ok ()
-  | Some name -> Error (Command_not_allowed name)
-;;
-
-let strict_allowlist_policy : Exec_shell_gate.allowlist_policy =
+let strict_syntax_policy : Exec_shell_gate.syntax_policy =
   { allow_pipes = false; redirect_allowed = false }
 ;;
 
-let tool_execute_allowlist_policy ?(allow_pipes = true) ()
-  : Exec_shell_gate.allowlist_policy =
+let tool_execute_syntax_policy ?(allow_pipes = true) ()
+  : Exec_shell_gate.syntax_policy =
   { allow_pipes; redirect_allowed = false }
 ;;
 
@@ -296,71 +180,8 @@ let validate_no_unquoted_glob ast =
   if shell_ir_has_unquoted_glob ast then Error Injection else Ok ()
 ;;
 
-let validate_wrapper_target ~allowed_commands ~wrapper_name = function
-  | None -> Error (Command_not_allowed wrapper_name)
-  | Some "dune" -> Error Direct_dune_invocation
-  | Some name -> validate_command_name_with_allowlist ~allowed_commands (Some name)
-;;
-
-let validate_env_wrapped_stage ~allowed_commands
-      (simple : Masc_exec.Shell_ir.simple)
-  =
-  let bin = Masc_exec.Exec_program.to_string simple.Masc_exec.Shell_ir.bin in
-  if not (String.equal bin "env")
-  then Ok ()
-  else
-    match simple_literal_args simple with
-    | None -> Error Injection
-    | Some args ->
-      validate_wrapper_target
-        ~allowed_commands
-        ~wrapper_name:"env"
-        (command_after_env_prefix args)
-;;
-
-let validate_opam_exec_wrapped_stage ~allowed_commands
-      (simple : Masc_exec.Shell_ir.simple)
-  =
-  let bin = Masc_exec.Exec_program.to_string simple.Masc_exec.Shell_ir.bin in
-  if not (String.equal bin "opam")
-  then Ok ()
-  else
-    match simple_literal_args simple with
-    | None -> Error Injection
-    | Some args ->
-      (match opam_exec_command_name args with
-       | Some "opam" -> Ok ()
-       | command ->
-         validate_wrapper_target
-           ~allowed_commands
-           ~wrapper_name:"opam"
-           command)
-;;
-
-let validate_wrapped_stages ~allowed_commands ast =
-  let rec loop = function
-    | Masc_exec.Shell_ir.Simple simple -> (
-      match validate_env_wrapped_stage ~allowed_commands simple with
-      | Ok () -> validate_opam_exec_wrapped_stage ~allowed_commands simple
-      | Error _ as error -> error)
-    | Masc_exec.Shell_ir.Pipeline stages ->
-      let rec loop_stages = function
-        | [] -> Ok ()
-        | stage :: rest ->
-          (match loop stage with
-           | Ok () -> loop_stages rest
-           | Error _ as error -> error)
-      in
-      loop_stages stages
-  in
-  loop ast
-;;
-
 let block_reason_of_exec_reject : Exec_shell_gate.reject_reason -> block_reason =
   function
-  | Command_not_in_allowlist { bin } -> Command_not_allowed bin
-  | Pipeline_segment_disallowed { bin; _ } -> Command_not_allowed bin
-  | Wrapper_unreducible _ -> Injection
   | Pipes_not_allowed _ -> Pipes_not_allowed
   | Redirect_disallowed_in_caller _
   | Path_outside_policy _ -> Unsafe_redirect
@@ -400,11 +221,11 @@ let parse_string_to_ir ~mode cmd =
     | Masc_exec.Parsed.Parsed ir -> Ok ir)
 ;;
 
-let command_context_with_allowlist ~allowed_commands ir =
+let command_context ir =
   let verdict =
     Exec_shell_gate.gate_typed
       ~ir
-      ~allowlist:strict_allowlist_policy
+      ~syntax_policy:strict_syntax_policy
       ~path_policy:Exec_shell_gate.allow_all_paths
       ~sandbox:Exec_shell_gate.host_sandbox
       ()
@@ -416,12 +237,7 @@ let command_context_with_allowlist ~allowed_commands ir =
     else (
       match validate_no_unquoted_glob context.Exec_shell_gate.ast with
       | Error _ as err -> err
-      | Ok () ->
-        (match
-           validate_wrapped_stages ~allowed_commands context.Exec_shell_gate.ast
-         with
-         | Ok () -> Ok context
-         | Error _ as err -> err))
+      | Ok () -> Ok context)
   | Reject { context; reason; _ } ->
     if context.Exec_shell_gate.direct_dune_seen
     then Error Direct_dune_invocation
@@ -430,23 +246,18 @@ let command_context_with_allowlist ~allowed_commands ir =
   | Too_complex { reason } -> Error (block_reason_of_exec_too_complex reason)
 ;;
 
-let validate_command_with_allowlist ~allowed_commands ir =
-  command_context_with_allowlist ~allowed_commands ir |> Result.map (fun _ -> ())
-;;
-
 let validate_command ir =
-  validate_command_with_allowlist ~allowed_commands:dev_allowed_commands ir
+  command_context ir |> Result.map (fun _ -> ())
 ;;
 
-let command_context_tool_execute_with_allowlist
+let command_context_tool_execute
       ?(allow_pipes = true)
-      ~(allowed_commands : string list)
       ir
   =
   let verdict =
     Exec_shell_gate.gate_typed
       ~ir
-      ~allowlist:(tool_execute_allowlist_policy ~allow_pipes ())
+      ~syntax_policy:(tool_execute_syntax_policy ~allow_pipes ())
       ~path_policy:Exec_shell_gate.allow_all_paths
       ~sandbox:Exec_shell_gate.host_sandbox
       ()
@@ -458,12 +269,7 @@ let command_context_tool_execute_with_allowlist
     else (
       match validate_no_unquoted_glob context.Exec_shell_gate.ast with
       | Error _ as err -> err
-      | Ok () ->
-        (match
-           validate_wrapped_stages ~allowed_commands context.Exec_shell_gate.ast
-         with
-         | Ok () -> Ok context
-         | Error _ as err -> err))
+      | Ok () -> Ok context)
   | Reject { context; reason; _ } ->
     (match reason with
      | Pipes_not_allowed _ -> Error Pipes_not_allowed
@@ -474,19 +280,11 @@ let command_context_tool_execute_with_allowlist
   | Too_complex { reason } -> Error (block_reason_of_exec_too_complex reason)
 ;;
 
-let validate_command_tool_execute_with_allowlist ?allow_pipes ~allowed_commands ir =
-  command_context_tool_execute_with_allowlist
+let validate_command_tool_execute ?allow_pipes ir =
+  command_context_tool_execute
     ?allow_pipes
-    ~allowed_commands
     ir
   |> Result.map (fun _ -> ())
-;;
-
-let validate_command_tool_execute ir =
-  validate_command_tool_execute_with_allowlist
-    ~allow_pipes:true
-    ~allowed_commands:dev_allowed_commands
-    ir
 ;;
 
 let looks_like_url token =
@@ -991,8 +789,14 @@ type safe = Typed_capabilities.safe
 type unsafe = Typed_capabilities.unsafe
 type 'a verified_ir = 'a Typed_capabilities.verified_ir
 
-let promote_to_safe ~allowed_commands ir =
-  match validate_command_with_allowlist ~allowed_commands ir with
-  | Ok () -> Ok (Typed_capabilities.Safe_IR ir)
-  | Error br -> Error br
+let verify_static_safe_ir ir =
+  let ( let* ) = Result.bind in
+  let* () = validate_command ir in
+  let envelope = Masc_exec.Shell_ir_risk.(classify (undecided ir)) in
+  if Masc_exec.Shell_ir_risk.is_r0 envelope
+  then Ok (Typed_capabilities.Safe_IR ir)
+  else (
+    match flat_stage_words ir with
+    | command :: _ -> Error (Command_not_allowed command)
+    | [] -> Error Empty_command)
 ;;

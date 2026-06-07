@@ -129,6 +129,7 @@ describe('flow-control-state', () => {
         },
       },
     }
+    callMcpTool.mockResolvedValueOnce(JSON.stringify({ status: 'running', paused: false }))
     await fetchPauseStatus()
     expect(flowState.value).toBe('running')
   })

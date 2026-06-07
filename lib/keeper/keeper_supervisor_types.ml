@@ -133,7 +133,6 @@ let paused_meta_legacy_auto_resume_after_sec (meta : keeper_meta) =
           | Capacity_backpressure
           | Ambiguous_post_commit_timeout
           | Ambiguous_post_commit_failure
-          | Autonomous_slot_wait_timeout
           | Admission_queue_wait_timeout
           | Turn_timeout_after_queue_wait
           | Turn_livelock_blocked

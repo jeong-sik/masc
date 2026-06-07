@@ -94,8 +94,8 @@ let input_with_cwd cwd = function
   | Keeper_tool_execute_typed_input.Pipeline { stages; cwd = _; env } ->
     Keeper_tool_execute_typed_input.Pipeline { stages; cwd = Some cwd; env }
 
-let typed_input_shell_ir_unvalidated ~mode input =
-  match Keeper_tool_execute_typed_input.to_shell_ir_unvalidated ~mode input with
+let typed_input_shell_ir_unvalidated input =
+  match Keeper_tool_execute_typed_input.to_shell_ir_unvalidated input with
   | Error _ -> None
   | Ok ir -> Some ir
 
@@ -119,16 +119,11 @@ let handle_tool_execute_typed
       ()
   =
   let root = Keeper_alerting_path.project_root_of_config config in
-  let execute_cwd_policy =
-    if write_enabled
-    then Keeper_tool_execute_path.Write_enabled_execute_cwd
-    else Keeper_tool_execute_path.Readonly_execute_cwd
-  in
   match
     Keeper_tool_execute_path.resolve_tool_execute_cwd
-      ~policy:execute_cwd_policy
       ~config
       ~meta
+      ~write_enabled
       ~args
   with
     | Error e -> error_json e
@@ -147,13 +142,27 @@ let handle_tool_execute_typed
              @ execution_location_fields cwd)
           e
       | Ok input ->
+        (match
+           if write_enabled
+           then Ok ()
+           else Keeper_tool_execute_typed_input.validate_readonly input
+         with
+         | Error e ->
+           let alts =
+             Keeper_tool_execute_typed_input.validation_error_alternatives e
+           in
+           let fields =
+             [ "typed", `Bool true; "cwd", `String cwd ]
+             @ execution_location_fields cwd
+             @
+             (match alts with
+              | [] -> []
+              | _ -> [ "alternatives", `List (List.map (fun s -> `String s) alts) ])
+           in
+           error_json ~fields (typed_validation_error_text e)
+         | Ok () ->
         let cmd = typed_input_command_text input in
-        let mode =
-          if write_enabled
-          then Keeper_tool_execute_typed_input.Dev_full
-          else Keeper_tool_execute_typed_input.Readonly
-        in
-        let input_ir = typed_input_shell_ir_unvalidated ~mode input in
+        let input_ir = typed_input_shell_ir_unvalidated input in
         let cwd, root_git_cwd_error =
           resolve_typed_git_cwd
             ~config
@@ -224,7 +233,7 @@ let handle_tool_execute_typed
            This removes the previous double-parse (mutation classifier
            re-tokenized cmd:string via the legacy string tokenizer before IR
            was even built). *)
-        match Keeper_tool_execute_typed_input.to_shell_ir ~mode ~sandbox:dispatch_sandbox input with
+        match Keeper_tool_execute_typed_input.to_shell_ir ~sandbox:dispatch_sandbox input with
         | Error e ->
           let alts = Keeper_tool_execute_typed_input.validation_error_alternatives e in
           let fields =
@@ -359,12 +368,6 @@ let handle_tool_execute_typed
               [ Printf.sprintf "Use executable=\"ls\" argv=[%S]." parent ]
             ()
         else
-          let allowed_commands =
-            match mode with
-            | Keeper_tool_execute_typed_input.Dev_full -> Exec_policy.dev_allowed_commands
-            | Keeper_tool_execute_typed_input.Readonly -> Exec_policy.readonly_allowed_commands
-
-          in
           let env_snap =
             Cancel_safe.protect
               ~on_exn:(fun _ -> None)
@@ -415,7 +418,6 @@ let handle_tool_execute_typed
           in
           let dispatch_result =
             Keeper_tool_execute_shell_ir.dispatch_classified
-              ~allowed_commands
               ~keeper_id:meta.name
               ~base_path:root
               ~workdir:cwd
@@ -541,7 +543,7 @@ let handle_tool_execute_typed
                  ~status:result.status
                  ~output
                  ~env_snapshot:env_snap
-                 ()))
+                 ())))
 
 let handle_tool_execute
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)

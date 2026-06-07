@@ -27,7 +27,7 @@ let run_keeper_cycle
       ~(observation : Keeper_world_observation.world_observation)
       ~(generation : int)
       ?(channel : Keeper_world_observation.keeper_cycle_channel = Scheduled_autonomous)
-      ?(semaphore_wait_ms = 0)
+      ?(holder_wait_ms = 0)
       ?shared_context
       ()
   : (keeper_meta, Agent_sdk.Error.sdk_error) result
@@ -800,7 +800,7 @@ let run_keeper_cycle
                     ~meta:updated_meta
                     ~observation
                     ~latency_ms
-                    ~semaphore_wait_ms
+                    ~holder_wait_ms
                     ~outcome:(if is_ambiguous_partial then "partial" else "error")
                     ~degraded_retry_applied
                     ?degraded_retry_runtime
@@ -904,7 +904,7 @@ dominant source of the observed CAS race exhaustion after
                       ~previous_social_state
                       ~final_execution
                       ~latency_ms
-                      ~semaphore_wait_ms
+                      ~holder_wait_ms
                       ~degraded_retry_applied
                       ~degraded_retry_runtime
                       ~fallback_reason

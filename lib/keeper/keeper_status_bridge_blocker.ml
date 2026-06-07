@@ -48,10 +48,6 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
   | Some (Keeper_turn_driver.Ambiguous_post_commit { is_timeout; _ }) ->
     Some
       (if is_timeout then Ambiguous_post_commit_timeout else Ambiguous_post_commit_failure)
-  (* RFC-0158: admission denial — budget too low for any provider attempt.
-     Not a runtime-exhaustion or provider-failure blocker; the turn budget
-     was simply insufficient. *)
-  | Some (Keeper_turn_driver.Retry_admission_denied _) -> None
   (* RFC-0159 Phase A: typed [Internal_*] variants carry an opaque exception
      repr.  They are not yet mapped to a dedicated [blocker_class]; returning
      [None] keeps Phase A scope to typed substrate only.  A follow-up RFC may
@@ -70,7 +66,7 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
        Some Oas_agent_execution_timeout
      | Agent_sdk.Error.Agent (MaxTurnsExceeded _) -> Some Sdk_max_turns_exceeded
      | Agent_sdk.Error.Agent (TokenBudgetExceeded _) -> Some Sdk_token_budget_exceeded
-     | Agent_sdk.Error.Agent (CostBudgetExceeded _) -> Some Sdk_cost_budget_exceeded
+     | Agent_sdk.Error.Agent (CostBudgetExceeded _)
      | Agent_sdk.Error.Agent (CostBudgetUnenforceable _) -> Some Sdk_cost_budget_exceeded
      | Agent_sdk.Error.Agent (UnrecognizedStopReason _) ->
        Some Sdk_unrecognized_stop_reason
@@ -166,7 +162,6 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
        transformation — fall back to the live summary or the typed name. *)
     | Ambiguous_post_commit_timeout
     | Ambiguous_post_commit_failure
-    | Autonomous_slot_wait_timeout
     | Admission_queue_wait_timeout
     | Turn_timeout_after_queue_wait
     | Turn_timeout

@@ -29,11 +29,7 @@ type t =
   | SupervisorSweepStarts
   | SupervisorLastSweepUnixtime
   | DomainPoolFork
-  | SemaphoreWaitTimeout
-  | TurnSlotBookkeepingFailures
-  | SemaphoreWaitSeconds
-  | SemaphoreWaitSecondsBucket
-  | SlotYieldTotal
+  | TurnHolderBookkeepingFailures
   | Compactions
   | CompactionRatioChange
   | CompactionSavedTokens
@@ -164,7 +160,6 @@ type t =
   | CompactionCallbackRecoveries
   | EventBusDrain
   | SupervisorCleanupFailures
-  | SlotForceReleased
   | SpawnSlotDenied
   | RegistryUpdateDropped
   | RegistryOrphanThresholdBreached

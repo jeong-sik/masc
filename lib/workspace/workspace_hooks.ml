@@ -431,6 +431,3 @@ let cdal_evidence_gate_decide_fn
         unit ->
         evidence_gate_verdict)
        Atomic.t)
-
-
-

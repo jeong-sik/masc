@@ -43,7 +43,6 @@ let non_overflow_classes_are_not_matched () =
     Keeper_meta_contract.Ambiguous_post_commit_timeout;
     Keeper_meta_contract.Ambiguous_post_commit_failure;
     Keeper_meta_contract.Oas_agent_execution_timeout;
-    Keeper_meta_contract.Autonomous_slot_wait_timeout;
     Keeper_meta_contract.Admission_queue_wait_timeout;
     Keeper_meta_contract.Turn_timeout_after_queue_wait;
     Keeper_meta_contract.Turn_timeout;

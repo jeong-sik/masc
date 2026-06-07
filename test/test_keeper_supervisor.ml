@@ -82,6 +82,7 @@ let write_keeper_toml config_dir ~name =
 [keeper]
 name = "%s"
 goal = "test keeper"
+sandbox_profile = "local"
 |}
        name)
 
@@ -926,6 +927,7 @@ let test_restart_path_emits_attempt_and_started_outcome_metrics () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->
+  with_config_dir @@ fun config_dir ->
   let base_dir = temp_dir () in
   let name = "restart-metric-keeper" in
   Fun.protect
@@ -937,6 +939,7 @@ let test_restart_path_emits_attempt_and_started_outcome_metrics () =
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
       ignore (Masc.Workspace.init config ~agent_name:(Some "supervisor"));
+      write_keeper_toml config_dir ~name;
       let meta = make_meta name in
       (match Keeper_meta_store.write_meta config meta with
        | Ok () -> ()

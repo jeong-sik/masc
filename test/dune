@@ -65,7 +65,6 @@
   test_pool
   test_keeper_turn_disposition
   test_keeper_turn_terminal_disposition_field
-  test_d7_retry_admission_gate
   test_keeper_reconcile_state
   test_attempt_state
   test_actor_mailbox
@@ -200,8 +199,6 @@
   test_exec_core
   test_exec_dispatch
   test_shell_ir_risk
-  test_keeper_tool_execute_safety
-  test_keeper_tool_execute_typed_input
   test_hitl_approval
   test_keeper_discovered_tools
   test_keeper_tool_affinity
@@ -319,7 +316,6 @@
   test_pool
   test_keeper_turn_disposition
   test_keeper_turn_terminal_disposition_field
-  test_d7_retry_admission_gate
   test_keeper_reconcile_state
   test_attempt_state
   test_actor_mailbox
@@ -454,8 +450,6 @@
   test_exec_core
   test_exec_dispatch
   test_shell_ir_risk
-  test_keeper_tool_execute_safety
-  test_keeper_tool_execute_typed_input
   test_hitl_approval
   test_keeper_discovered_tools
   test_keeper_tool_affinity
@@ -1351,6 +1345,8 @@
 
 (include stanzas/test_heartbeat_integration.inc)
 
+(include stanzas/test_keeper_turn_capacity.inc)
+
 (include stanzas/test_http_pages_asset_read.inc)
 
 (include stanzas/test_bounded_proc.inc)
@@ -1423,8 +1419,6 @@
 
 (include stanzas/test_keeper_meta_unknown_keys_warn.inc)
 
-(include stanzas/test_keeper_semaphore_wait_queue_head_clock.inc)
-
 (include stanzas/test_keeper_mutex_coverage.inc)
 
 
@@ -1443,10 +1437,6 @@
 (include stanzas/test_keeper_receipt_authoritative_matrix.inc)
 
 (include stanzas/test_keeper_receipt_outcome_tla_parity.inc)
-
-(include stanzas/test_keeper_semaphore_fairness.inc)
-
-(include stanzas/test_keeper_turn_slot_lane_isolation.inc)
 
 (include stanzas/test_keeper_sandbox_docker_cwd_response.inc)
 
@@ -1482,12 +1472,6 @@
 
 (include stanzas/test_keeper_turn_helpers_side_effect_metric.inc)
 
-(include stanzas/test_keeper_turn_slot_force_release.inc)
-
-(include stanzas/test_keeper_turn_slot_holders.inc)
-
-(include stanzas/test_keeper_turn_slot_types.inc)
-
 (include stanzas/test_keeper_transition_audit_types.inc)
 
 (include stanzas/test_keeper_path_rejection.inc)
@@ -1501,8 +1485,6 @@
 (include stanzas/test_keeper_toml_loader.inc)
 
 (include stanzas/test_keeper_runtime_config_leaf.inc)
-
-(include stanzas/test_keeper_turn_slot_release_cancel_safe.inc)
 
 
 (include stanzas/test_local_review_script.inc)
@@ -1545,7 +1527,6 @@
 
 (include stanzas/test_operator_mcp_e2e.inc)
 
-
 (include stanzas/test_otel_tick_poison_source.inc)
 
 (include stanzas/test_otel_trace_context.inc)
@@ -1561,8 +1542,6 @@
 (include stanzas/test_shutdown_flag.inc)
 
 (include stanzas/test_log_file_sink_self_heal.inc)
-
-(include stanzas/test_executable_not_allowlisted_hint.inc)
 
 (include stanzas/test_claim_outcome_typed.inc)
 

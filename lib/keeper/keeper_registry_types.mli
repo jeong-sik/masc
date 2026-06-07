@@ -490,10 +490,9 @@ type registry_entry = {
   last_skip_observation : (float * string list) option;
       (** Most recent [keeper_cycle_decision] skip outcome captured by
           the keepalive loop (#10940 follow-up).  The [Otel_metric_store]
-          [proactive_skip_reason_metric] aggregates skip reasons over
-          time, but operators need recent skip verdict context when
-          diagnosing idle/quiet keepers. [Some (ts, reasons)] = wall
-          clock + verdict
+          proactive skip counter aggregates skip reasons over time, but
+          operators need recent skip verdict context when diagnosing
+          idle/quiet keepers. [Some (ts, reasons)] = wall clock + verdict
           reason strings ([cooldown_pending], [no_signal],
           [scheduled_autonomous_disabled], etc.) from the last skip;
           [None] until the first skip is observed. *)

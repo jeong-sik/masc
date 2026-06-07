@@ -17,23 +17,6 @@ val capacity_backpressure_source_to_string :
 val capacity_backpressure_source_of_string :
   string -> capacity_backpressure_source option
 
-type retry_admission_denial =
-  | Retry_budget_below_min of {
-      projected_usable_budget_s : float;
-      min_required_s : float;
-      remaining_turn_budget_s : float;
-      adaptive_timeout_s : float;
-      allow_wall_clock_retry_budget : bool;
-    }
-  | First_attempt_budget_below_min of {
-      projected_usable_budget_s : float;
-      min_required_s : float;
-      remaining_turn_budget_s : float;
-    }
-
-val retry_admission_denial_to_yojson :
-  retry_admission_denial -> Yojson.Safe.t
-
 type capacity_retry_after =
   | Explicit of float
   | Synthetic_default of float
@@ -104,10 +87,6 @@ type masc_internal_error =
       is_timeout : bool;
       tools : string list;
       original_error : string;
-    }
-  | Retry_admission_denied of {
-      denial_reason : retry_admission_denial;
-      is_retry : bool;
     }
   | Internal_unhandled_exception of {
       site : string;

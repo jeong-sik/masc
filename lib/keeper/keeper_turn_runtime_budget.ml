@@ -1,5 +1,5 @@
 (* Keeper_turn_runtime_budget — runtime execution types, fail-open rotation,
-   provider timeout budget resolution, context overflow observation, keeper pause/resume
+   provider timeout resolution, context overflow observation, keeper pause/resume
    sync, partial-commit continue gate, and context budget resolution.
 
    Extracted from keeper_unified_turn.ml (L501-1079) during the god-file split. *)
@@ -24,86 +24,6 @@ let next_fail_open_runtime_for_turn =
 
 let sdk_error_kind = Keeper_turn_runtime_budget_routing.sdk_error_kind
 include Keeper_turn_runtime_budget_provider_timeout
-
-(* RFC-OAS-XXX (Team JJ §6) POC, 2026-05-21
-   ------------------------------------------------------------------
-   Typed admission decision for an upcoming runtime attempt.
-
-   Background: 1077/24h [provider_timeout] events, ~74% from retry
-   paths ([adaptive_*_retry] / [turn_budget_*_retry]). The current caller in
-   [Keeper_unified_turn.ml:589-615] calls
-   [resolve_bounded_provider_timeout_budget_with_turn_budget] and, when it
-   returns [None] for a retry, emits a turn-owned timeout instead of
-   minting an [Provider_timeout] root cause. That keeps two
-   different failure semantics into one wire code:
-     (a) the runtime attempt never started because admission budget
-         was insufficient, and
-     (b) an actual provider attempt ran and the server timed out.
-   Mixing them inflates the [provider_timeout] signature and hides
-   the retry-admission rate.
-
-   This function returns a typed admission decision. It does NOT
-   change emission semantics on its own — that requires a new
-   [masc_internal_error] variant ([Retry_admission_denied]) which is
-   surface-breaking and deferred to RFC. The gate is exposed so
-   callers can branch before invoking the attempt loop, and so that
-   a subsequent PR can swap the emission path without touching the
-   gate logic.
-
-   Anti-pattern self-check (software-development.md §workaround):
-   - Not telemetry-as-fix (§1): does not add a counter; returns a
-     typed Result that the caller must consume.
-   - Not string classifier (§2): closed-sum reason, no substring.
-   - Not N-of-M (§3): single SSOT function; the followup variant
-     change is the natural typed boundary expansion. *)
-
-type retry_admission_denial =
-  Keeper_internal_error.retry_admission_denial =
-  | Retry_budget_below_min of {
-      projected_usable_budget_s : float;
-      min_required_s : float;
-      remaining_turn_budget_s : float;
-      adaptive_timeout_s : float;
-      allow_wall_clock_retry_budget : bool;
-    }
-  | First_attempt_budget_below_min of {
-      projected_usable_budget_s : float;
-      min_required_s : float;
-      remaining_turn_budget_s : float;
-    }
-
-type attempt_kind = Keeper_turn_runtime_budget_admission.attempt_kind =
-  | First_attempt
-  | Retry_attempt
-
-let attempt_kind_is_retry =
-  Keeper_turn_runtime_budget_admission.attempt_kind_is_retry
-let retry_admission_denial_to_yojson =
-  Keeper_internal_error.retry_admission_denial_to_yojson
-
-let decide_retry_admission_for_turn
-    ~(remaining_turn_budget_s : float)
-    ~(attempt_kind : attempt_kind)
-    ~(allow_wall_clock_retry_budget : bool)
-    ~(estimated_input_tokens : int)
-    ~(max_turns : int) : (unit, retry_admission_denial) result =
-  let is_retry = attempt_kind_is_retry attempt_kind in
-  if is_retry then
-    Ok ()
-  else
-    let _ = allow_wall_clock_retry_budget in
-    let _ = estimated_input_tokens in
-    let _ = max_turns in
-    let usable_budget = remaining_turn_budget_s -. provider_timeout_guard_sec in
-    if usable_budget >= min_provider_timeout_budget_sec then Ok ()
-    else
-      Error
-        (First_attempt_budget_below_min
-           {
-             projected_usable_budget_s = usable_budget;
-             min_required_s = min_provider_timeout_budget_sec;
-             remaining_turn_budget_s;
-           })
 
 (* PR #13120 review: declared in [Env_config_keeper.KeeperRetryBackoff]
    so the env knob catalog generator at [bin/env_knob_catalog.ml]
@@ -156,8 +76,6 @@ let degraded_retry_bypasses_slot_phase_guard
       | Keeper_turn_driver.Turn_timeout _
       | Keeper_turn_driver.Max_tokens_ceiling_violation _
       | Keeper_turn_driver.Ambiguous_post_commit _
-      (* RFC-0158: admission denial is not an OAS-budget timeout bypass. *)
-      | Keeper_turn_driver.Retry_admission_denied _
       (* RFC-0159 Phase A: Internal_* variants are not OAS-budget timeouts. *)
       | Keeper_turn_driver.Internal_unhandled_exception _
       | Keeper_turn_driver.Internal_bridge_exception _
@@ -225,7 +143,6 @@ let attempt_watchdog_timeout_sec_opt
 type degraded_retry_budget_decision =
   | No_degraded_retry
   | Degraded_retry_slot_phase_exhausted of EC.degraded_retry
-  | Degraded_retry_budget_exhausted of EC.degraded_retry
   | Degraded_retry_allowed of EC.degraded_retry
 
 let next_fail_open_runtime_for_turn_with_budget
@@ -244,8 +161,6 @@ let next_fail_open_runtime_for_turn_with_budget
   with
   | None -> No_degraded_retry
   | Some retry ->
-      (* The candidate is always a retry, so use per-attempt budget semantics
-         regardless of whether the current attempt was itself a retry. *)
       let first_contract_rotation = false in
       if
         match time_spent_in_turn_s with
@@ -255,13 +170,11 @@ let next_fail_open_runtime_for_turn_with_budget
             && not first_contract_rotation
         | None -> false
       then Degraded_retry_slot_phase_exhausted retry
-      else if
-        provider_retry_budget_available_for_turn
-          ~allow_wall_clock_retry_budget:true
-          ~is_retry:true ~estimated_input_tokens ~max_turns
-          ~remaining_turn_budget_s
-      then Degraded_retry_allowed retry
-      else Degraded_retry_budget_exhausted retry
+      else (
+        let _ = estimated_input_tokens in
+        let _ = max_turns in
+        let _ = remaining_turn_budget_s in
+        Degraded_retry_allowed retry)
 
 type turn_event_bus_overflow =
   Keeper_turn_runtime_budget_event_bus.turn_event_bus_overflow = {

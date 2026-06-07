@@ -1,23 +1,15 @@
 (** Observation reason helpers for the keeper heartbeat loop. *)
 
-type semaphore_wait_observation_kind =
-  | Semaphore_wait_pending
-  | Semaphore_wait_timeout
+val provider_timeout_observation_reasons : string list
 
-val semaphore_wait_observation_reasons
-  :  ?phase_label:string
-  -> kind:semaphore_wait_observation_kind
-  -> channel:Keeper_world_observation.keeper_cycle_channel
-  -> unit
-  -> string list
-
-val record_semaphore_wait_observation
-  :  ?phase_label:string
-  -> base_path:string
+val record_provider_timeout_observation
+  :  base_path:string
   -> keeper_name:string
-  -> channel:Keeper_world_observation.keeper_cycle_channel
-  -> kind:semaphore_wait_observation_kind
   -> unit
+
+val clear_provider_timeout_failure_reason
+  :  base_path:string
+  -> keeper_name:string
   -> unit
 
 type runtime_backpressure_decision =
@@ -40,18 +32,6 @@ val record_runtime_backpressure_observation
   :  base_path:string
   -> keeper_name:string
   -> reason:string
-  -> unit
-
-val provider_timeout_observation_reasons : string list
-
-val record_provider_timeout_observation
-  :  base_path:string
-  -> keeper_name:string
-  -> unit
-
-val clear_provider_timeout_failure_reason
-  :  base_path:string
-  -> keeper_name:string
   -> unit
 
 val prior_provider_timeout_strikes

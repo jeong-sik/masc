@@ -52,7 +52,6 @@ let is_transient_internal_runner_error (err : Agent_sdk.Error.sdk_error) : bool 
       | Keeper_turn_driver.Turn_timeout _
       | Keeper_turn_driver.Max_tokens_ceiling_violation _
       | Keeper_turn_driver.Ambiguous_post_commit _
-      | Keeper_turn_driver.Retry_admission_denied _
       | Keeper_turn_driver.Internal_bridge_exception _
       | Keeper_turn_driver.Internal_contract_rejected _ )
   | None -> false
@@ -240,9 +239,6 @@ let is_auto_recoverable_runtime_exhausted_error (err : Agent_sdk.Error.sdk_error
   | Some (Keeper_turn_driver.Provider_timeout _)
   | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
   | Some (Keeper_turn_driver.Ambiguous_post_commit _)
-  (* RFC-0158: pre-dispatch admission denial — budget too low to attempt.
-     Not auto-recoverable because rotation does not increase the turn budget. *)
-  | Some (Keeper_turn_driver.Retry_admission_denied _)
   (* RFC-0159 Phase A: opaque internal failures. *)
   | Some (Keeper_turn_driver.Internal_unhandled_exception _)
   | Some (Keeper_turn_driver.Internal_bridge_exception _)
@@ -262,8 +258,6 @@ let is_resumable_cli_session_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Some (Keeper_turn_driver.Provider_timeout _)
   | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
   | Some (Keeper_turn_driver.Ambiguous_post_commit _)
-  (* RFC-0158: admission denial is not a CLI session error. *)
-  | Some (Keeper_turn_driver.Retry_admission_denied _)
   (* RFC-0159 Phase A: opaque internal failures. *)
   | Some (Keeper_turn_driver.Internal_unhandled_exception _)
   | Some (Keeper_turn_driver.Internal_bridge_exception _)
@@ -395,9 +389,6 @@ let degraded_retry_after_recoverable_error
     | Some (Keeper_turn_driver.Admission_queue_rejected _)
     | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
     | Some (Keeper_turn_driver.Ambiguous_post_commit _)
-    (* RFC-0158: admission denial has no local-recovery retry — budget
-       exhaustion is not resolved by runtime rotation. *)
-    | Some (Keeper_turn_driver.Retry_admission_denied _)
     (* RFC-0159 Phase A: opaque internal failures have no
        local-recovery retry mapping. *)
     | Some (Keeper_turn_driver.Internal_unhandled_exception _)
@@ -448,8 +439,6 @@ let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
     | Some (Keeper_turn_driver.Admission_queue_rejected _)
     | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
     | Some (Keeper_turn_driver.Ambiguous_post_commit _)
-    (* RFC-0158: admission denial is not a runtime-rotation reason. *)
-    | Some (Keeper_turn_driver.Retry_admission_denied _)
     (* RFC-0159 Phase A: typed [Internal_*] variants are not runtime-rotation
        reasons; they expose previously-opaque raw exception payloads.  *)
     | Some (Keeper_turn_driver.Internal_unhandled_exception _)
@@ -690,9 +679,6 @@ let should_warn_keeper_cycle_failed (err : Agent_sdk.Error.sdk_error) : bool =
   | Some (Keeper_turn_driver.Turn_timeout _)
   | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
   | Some (Keeper_turn_driver.Ambiguous_post_commit _)
-  (* RFC-0158: admission denial should not trigger keeper-cycle-failed WARN;
-     the turn budget was simply insufficient. *)
-  | Some (Keeper_turn_driver.Retry_admission_denied _)
   (* RFC-0159 Phase A: opaque internal failures should not trigger the
      keeper-cycle-failed WARN by themselves; the surrounding handler
      already logs the exception detail. *)
@@ -809,8 +795,6 @@ let is_runtime_exhausted_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Some (Keeper_turn_driver.Turn_timeout _)
   | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
   | Some (Keeper_turn_driver.Ambiguous_post_commit _)
-  (* RFC-0158: admission denial is not runtime exhaustion. *)
-  | Some (Keeper_turn_driver.Retry_admission_denied _)
   (* RFC-0159 Phase A: opaque internal failures are not runtime exhaustion. *)
   | Some (Keeper_turn_driver.Internal_unhandled_exception _)
   | Some (Keeper_turn_driver.Internal_bridge_exception _)

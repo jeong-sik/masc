@@ -53,7 +53,6 @@ type try_provider_ctx =
   ; checkpoint_dir : string option
   ; context_injector : Agent_sdk.Hooks.context_injector option
   ; context : Agent_sdk.Context.t option
-  ; slot_id : int option
   ; enable_thinking : bool option
   ; approval : Agent_sdk.Hooks.approval_callback option
   ; exit_condition : (int -> bool) option
@@ -283,7 +282,6 @@ let run_try_provider
           ; checkpoint_dir = ctx.checkpoint_dir
           ; context_injector = ctx.context_injector
           ; context = ctx.context
-          ; slot_id = ctx.slot_id
           ; enable_thinking = ctx.enable_thinking
           ; event_bus = ctx.event_bus
           ; approval = ctx.approval

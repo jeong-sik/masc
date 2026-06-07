@@ -30,7 +30,7 @@
    keeper_tool_ide_runtime
    keeper_sandbox_docker
    keeper_tool_execute_runtime_paths keeper_tool_execute_path
-   keeper_tool_execute_readonly_policy keeper_workspace_read_ops
+   keeper_workspace_read_ops
    keeper_tool_execute_input
    keeper_tool_execute_runtime
    keeper_workspace_ops
@@ -242,7 +242,7 @@
    ;; Pure Attribution + phantom-tagged helpers, deps: stdlib + Yojson only.
    masc.attribution
    ;; RFC-0056 Phase 1M — Execution policy extracted to lib/exec_policy/.
-   ;; Owns Shell IR command/path policy, allowlists, and typed path-check errors.
+   ;; Owns Shell IR command/path policy and typed path-check errors.
    masc.exec_policy
    ;; RFC-0056 Phase 1N — Keeper_state_* deterministic FSM cluster extracted to
    ;; lib/keeper_state/. Parent still references bare Keeper_state_* modules.

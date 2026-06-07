@@ -16,14 +16,14 @@
       string label the counter consumes.  Adding a new reason
       without updating dashboards becomes a test failure. *)
 
-module KK = Masc.Keeper_keepalive
+module KM = Masc.Keeper_metrics
 module KW = Masc.Keeper_world_observation
 
 let test_metric_name_stable () =
   Alcotest.(check string)
     "proactive skip counter canonical name"
     "masc_keeper_proactive_skip_total"
-    KK.proactive_skip_reason_metric
+    KM.(to_string ProactiveSkip)
 
 (* [verdict_reasons_to_strings] is the actual producer of the
    [reason] label at the emit site.  Pin each concrete variant's

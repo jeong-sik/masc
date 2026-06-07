@@ -44,7 +44,6 @@ let all_variants : blocker_class list =
   ; Capacity_backpressure
   ; Ambiguous_post_commit_timeout
   ; Ambiguous_post_commit_failure
-  ; Autonomous_slot_wait_timeout
   ; Admission_queue_wait_timeout
   ; Turn_timeout_after_queue_wait
   ; Turn_timeout
@@ -122,7 +121,7 @@ let test_unknown_string () =
 (** Pin the variant count so additions are visible in diffs.  When adding a
     new [blocker_class] variant, bump this number and add the variant to
     [all_variants]. *)
-let expected_variant_count = 33
+let expected_variant_count = 32
 
 let test_variant_count () =
   let count = List.length all_variants in
@@ -246,7 +245,7 @@ let test_provider_timeout_is_not_runtime_blocker () =
          { budget_sec = 555.0
          ; keeper_turn_timeout_sec = 600.0
          ; estimated_input_tokens = 4302
-         ; source = "first_attempt_limited_by_turn_budget"
+         ; source = "first_attempt_adaptive_timeout"
          ; remaining_turn_budget_sec = Some 45.0
          ; min_required_sec = 15.0
          ; phase = "runtime_attempt_watchdog"

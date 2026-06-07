@@ -227,30 +227,48 @@ let test_stream_liveness_disables_outer_attempt_watchdog () =
     (Option.is_none (select KAL.Enforce))
 
 let test_retry_timeout_budget_ignores_expired_outer_turn_budget () =
-  match
+  let budget =
     KCB.resolve_bounded_provider_timeout_budget_with_turn_budget
       ~allow_wall_clock_retry_budget:false
       ~is_retry:true
       ~estimated_input_tokens:10_000
       ~max_turns:6
       ~remaining_turn_budget_s:0.0
-  with
-  | None ->
-    Alcotest.fail
-      "retry attempts should not be denied by exhausted outer turn wall clock"
-  | Some budget ->
-    Alcotest.(check string)
-      "retry source"
-      "retry_adaptive_timeout"
-      budget.source;
-    Alcotest.(check bool)
-      "retry keeps an actionable provider timeout"
-      true
-      (budget.effective_timeout_sec >= KCB.min_provider_timeout_budget_sec);
-    Alcotest.(check (float 0.001))
-      "remaining turn budget is telemetry only"
-      0.0
-      budget.remaining_turn_budget_sec
+  in
+  Alcotest.(check string)
+    "retry source"
+    "retry_adaptive_timeout"
+    budget.source;
+  Alcotest.(check bool)
+    "retry keeps an actionable provider timeout"
+    true
+    (budget.effective_timeout_sec >= KCB.min_provider_timeout_budget_sec);
+  Alcotest.(check (float 0.001))
+    "remaining turn budget is telemetry only"
+    0.0
+    budget.remaining_turn_budget_sec
+
+let test_first_attempt_timeout_ignores_expired_outer_turn_budget () =
+  let budget =
+    KCB.resolve_bounded_provider_timeout_budget_with_turn_budget
+      ~allow_wall_clock_retry_budget:false
+      ~is_retry:false
+      ~estimated_input_tokens:10_000
+      ~max_turns:6
+      ~remaining_turn_budget_s:0.0
+  in
+  Alcotest.(check string)
+    "first attempt source"
+    "first_attempt_adaptive_timeout"
+    budget.source;
+  Alcotest.(check bool)
+    "first attempt keeps an actionable provider timeout"
+    true
+    (budget.effective_timeout_sec >= KCB.min_provider_timeout_budget_sec);
+  Alcotest.(check (float 0.001))
+    "remaining turn budget is telemetry only"
+    0.0
+    budget.remaining_turn_budget_sec
 
 let test_provider_timeout_is_not_ambiguous_side_effect () =
   Alcotest.(check bool)
@@ -409,6 +427,10 @@ let () =
           "retry timeout budget ignores expired outer turn budget"
           `Quick
           test_retry_timeout_budget_ignores_expired_outer_turn_budget;
+        Alcotest.test_case
+          "first attempt timeout ignores expired outer turn budget"
+          `Quick
+          test_first_attempt_timeout_ignores_expired_outer_turn_budget;
         Alcotest.test_case
           "provider timeout is not ambiguous partial commit"
           `Quick

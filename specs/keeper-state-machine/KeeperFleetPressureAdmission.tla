@@ -3,7 +3,7 @@
 \*
 \* This is the formal target for the 2026-05-15 Keeper 24 failure class:
 \* do not wait until EMFILE/ENFILE has already poisoned append/read/spawn
-\* paths.  A keeper spawn or turn admission must be blocked before the
+\* paths.  A keeper spawn or turn start must be blocked before the
 \* projected FD budget crosses the inherited process nofile limit.
 \*
 \* OCaml <-> TLA+ mapping (symbol anchors, not line numbers):

@@ -106,56 +106,6 @@ let test_scheduled_autonomous_max_turns_range () =
   check bool "scheduled autonomous max_turns <= global" true
     (v <= Cfg.KeeperKeepalive.oas_max_turns_per_call)
 
-(* ── Semaphore wait timeout (defense against peer slot hoarding) ── *)
-
-let test_semaphore_wait_timeout_default () =
-  (* Default 180s. The previous 60s default starved 14-keeper fleets
-     whenever a long LLM turn at the head of the queue exceeded the
-     budget (memory: feedback_keeper_starvation_capacity_vs_turn_duration_mismatch). *)
-  check (float 0.1) "default semaphore wait timeout 180s" 180.0
-    KK.semaphore_wait_timeout_sec
-
-let test_semaphore_wait_timeout_range () =
-  let v = KK.semaphore_wait_timeout_sec in
-  (* Floor preserved (5s) — 0 would deadlock; ceiling removed because
-     it was a typo-defence boilerplate, not an architectural cap. *)
-  check bool "wait timeout >= 5s" true (v >= 5.0)
-
-let test_semaphore_wait_timeout_exception_shape () =
-  (* The exception carries the wait cap in seconds so the caller can
-     render it in a log line without re-reading the env var. *)
-  let carried =
-    try
-      raise (KK.Semaphore_wait_timeout 42.5)
-    with KK.Semaphore_wait_timeout v -> v
-  in
-  check (float 0.001) "exception carries wait sec" 42.5 carried
-
-let test_autonomous_queue_fifo_prevents_reentry_cutting () =
-  (* Keeper_keepalive.autonomous_wait_queue_mutex switched to Eio.Mutex —
-     queue helpers now require an Eio fiber context. *)
-  Eio_main.run @@ fun _env ->
-  KK.reset_autonomous_turn_queue_for_test ();
-  let cheolsu_1 = KK.enqueue_autonomous_waiter_for_test "cheolsu" in
-  let sangsu = KK.enqueue_autonomous_waiter_for_test "sangsu" in
-  let janitor = KK.enqueue_autonomous_waiter_for_test "janitor" in
-  check (list string) "initial FIFO order"
-    [ "cheolsu"; "sangsu"; "janitor" ]
-    (KK.autonomous_waiter_snapshot_for_test ());
-  KK.drop_autonomous_waiter_for_test cheolsu_1;
-  let cheolsu_2 = KK.enqueue_autonomous_waiter_for_test "cheolsu" in
-  check (list string) "reentry goes to queue tail"
-    [ "sangsu"; "janitor"; "cheolsu" ]
-    (KK.autonomous_waiter_snapshot_for_test ());
-  KK.drop_autonomous_waiter_for_test sangsu;
-  KK.drop_autonomous_waiter_for_test janitor;
-  check (list string) "older waiters stay ahead of reentry"
-    [ "cheolsu" ]
-    (KK.autonomous_waiter_snapshot_for_test ());
-  KK.drop_autonomous_waiter_for_test cheolsu_2;
-  check (list string) "queue drained" []
-    (KK.autonomous_waiter_snapshot_for_test ())
-
 (* ── KeeperGrpc config defaults ────────────────────────── *)
 
 let test_grpc_max_reconnect_default () =
@@ -326,13 +276,6 @@ let () =
       test_case "max_turns range" `Quick test_max_turns_range;
       test_case "scheduled autonomous max_turns range" `Quick
         test_scheduled_autonomous_max_turns_range;
-    ];
-    "semaphore_wait_timeout", [
-      test_case "default 60s" `Quick test_semaphore_wait_timeout_default;
-      test_case "range [5, 600]" `Quick test_semaphore_wait_timeout_range;
-      test_case "exception carries wait sec" `Quick test_semaphore_wait_timeout_exception_shape;
-      test_case "autonomous queue FIFO prevents reentry cutting" `Quick
-        test_autonomous_queue_fifo_prevents_reentry_cutting;
     ];
     "grpc_config", [
       test_case "max_reconnect default" `Quick test_grpc_max_reconnect_default;

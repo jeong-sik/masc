@@ -33,139 +33,25 @@ val wakeup_keeper :
     or system-wide events. *)
 val wakeup_all_keepers : ?base_path:string -> unit -> unit
 
-val keeper_turn_throttle_limit : int
-(** Runtime keeper turn concurrency limit derived from
-    [MASC_KEEPER_AUTOBOOT_MAX]. *)
-
-val effective_turn_throttle_limit : int
-(** Effective (possibly capped) throttle limit. When the env override
-    exceeds 2x the TOML baseline, this value is capped to prevent fleet
-    overload (issue #17192). Otherwise equal to {!keeper_turn_throttle_limit}. *)
-
-val keeper_turn_throttle_source : Keeper_turn_slot.throttle_source
-(** Source of {!keeper_turn_throttle_limit}. Re-exported from
-    {!Keeper_turn_slot} so operator surfaces have a single import point.
-    @since issue #17192 *)
-
-val proactive_skip_reason_metric : string
-(** Canonical Otel_metric_store metric name for the proactive-scheduler
-    skip-reason counter.  Labels: [("keeper", <name>); ("reason",
-    <skip_reason_label>)].  [reason] is produced by
-    [Keeper_world_observation.verdict_reasons_to_strings] and is
-    one of [keeper_paused | approval_pending |
-    scheduled_autonomous_disabled | provider_cooldown_pending |
-    idle_gate_pending | cooldown_pending | no_signal].
-    #10008 failure mode 3. *)
-
-val semaphore_wait_timeout_sec : float
-(** Wall-clock cap on [Eio.Semaphore.acquire] when waiting for a keeper
-    turn slot. Derived from [MASC_KEEPER_SEMAPHORE_WAIT_TIMEOUT_SEC]
-    (default 60.0, range [5, 600]). Keepers whose peers hold slots past
-    this cap are skipped for the current cycle and retry on the next
-    heartbeat. *)
-
-exception Semaphore_wait_timeout of float
-(** Legacy exception form. The [with_keeper_turn_slot*] result path below
-    carries {!semaphore_wait_timeout}, which includes the phase and runtime
-    snapshot. Callers should treat this as "skip this turn, retry on next
-    heartbeat" rather than a keeper failure. *)
-
-type semaphore_wait_phase =
-  | Autonomous_queue_head
-  | Autonomous_slot
-  | Reactive_slot
-  | Turn_slot
-
-val semaphore_wait_phase_to_string : semaphore_wait_phase -> string
-
-type semaphore_wait_timeout = {
-  timeout_wait_sec : float;
-  timeout_phase : semaphore_wait_phase;
-  timeout_autonomous_available : int;
-  timeout_reactive_available : int;
-  timeout_turn_available : int;
-  timeout_queue_depth : int;
-  timeout_queue_ahead : int option;
-  timeout_holders : (string * float) list;
-}
-
-(** Test-only reset for the autonomous FIFO wait queue. *)
-val reset_autonomous_turn_queue_for_test : unit -> unit
-
-(** Test-only snapshot of keeper names currently queued for an autonomous turn. *)
-val autonomous_waiter_snapshot_for_test : unit -> string list
-
-(** Test-only snapshots of the current semaphore availability. *)
-val turn_semaphore_value_for_test : unit -> int
-val autonomous_turn_semaphore_value_for_test : unit -> int
-val reactive_turn_semaphore_value_for_test : unit -> int
-
-(** Diagnostic: keepers currently holding a slot in each pool, paired
+(** Diagnostic: keepers currently recorded in each holder pool, paired
     with how long (in seconds, relative to [now]) they have held it.
     Sorted by descending hold time.
 
     [~now] MUST come from {!Time_compat.now} to match the clock used
-    by {!Keeper_turn_slot} when recording [acquired_at]. Passing
+    by {!Keeper_turn_holders} when recording [acquired_at]. Passing
     [Unix.gettimeofday ()] or any other clock can produce nonsense
     hold-time values. *)
-val turn_slot_holders : now:float -> (string * float) list
-val autonomous_slot_holders : now:float -> (string * float) list
-val reactive_slot_holders : now:float -> (string * float) list
-
-(** Force-release semaphore permits held by [keeper_name] after watchdog stale
-    classification. Returns released pool labels. *)
-val force_release_stale_holder : keeper_name:string -> string list
-
-(** Test-only: TTL used to bound orphaned force-release markers left behind
-    when a cancelled stale fiber never reaches its finalizer. *)
-val force_released_marker_ttl_sec_for_test : float
-
-(** Test-only: count force-release markers still awaiting finalizer
-    consumption or expiry pruning. *)
-val force_released_marker_count_for_test : unit -> int
-
-(** Test-only: inject a marker without touching semaphores, so marker-retention
-    behavior can be exercised without creating a double-release path. *)
-val add_force_released_marker_for_test :
-  label:Keeper_turn_slot.slot_pool ->
-  keeper_name:string ->
-  acquisition_id:int ->
-  marked_at:float ->
-  unit
-
-(** Test-only: prune expired force-release markers using an injected clock. *)
-val purge_force_released_markers_for_test : now:float -> unit
-
-(** Test-only: clear force-release markers between tests. *)
-val clear_force_released_markers_for_test : unit -> unit
+val turn_holders : now:float -> (string * float) list
+val autonomous_holders : now:float -> (string * float) list
+val reactive_holders : now:float -> (string * float) list
 
 (** Render a compact holder list such as [[keeper-a/181s, +2 more]].
     The input is expected to be sorted longest-first, as returned by the
     holder accessors above. *)
-val format_slot_holders : ?limit:int -> (string * float) list -> string
+val format_holders : ?limit:int -> (string * float) list -> string
 
 (** Operator-facing one-line summary of all holder pools. *)
-val slot_holders_summary : ?limit:int -> now:float -> unit -> string
-
-(** Re-export of {!Keeper_turn_slot.force_release_holder_for} so the
-    supervisor and tests have a single import point alongside the holder
-    snapshot accessors. *)
-val force_release_holder_for : keeper_name:string -> (string * float) list
-
-(** Test-only FIFO queue primitives for autonomous fairness regression tests.
-    [enqueue_autonomous_waiter_for_test] defaults [runtime_id] to ["test"]. *)
-val enqueue_autonomous_waiter_for_test : ?runtime_id:string -> string -> int
-val drop_autonomous_waiter_for_test : int -> unit
-
-(** Test-only: head ticket of a specific runtime lane. *)
-val autonomous_waiter_head_ticket_for_test : runtime_id:string -> int option
-
-(** Test-only: aggregate queue depth across all runtime lanes. *)
-val autonomous_wait_queue_depth_for_test : unit -> int
-
-(** Pure computation: seconds keeper should yield before re-entering queue
-    at time [now].  0.0 = no yield needed.  Exposed for unit testing. *)
-val fairness_delay_sec_at : now:float -> keeper_name:string -> float
+val holders_summary : ?limit:int -> now:float -> unit -> string
 
 (** Pure: whether a [Keeper_heartbeat_smart] decision should allow the
     keepalive cycle (presence/snapshot/board/turn/recurring) to run.
@@ -199,18 +85,6 @@ val status_tick_usage_json : unit -> Yojson.Safe.t
     LLM calls, so all per-turn token counters are explicit zeroes while
     preserving the same cache-token field shape as turn snapshots. *)
 
-(** Test-only: stamp a completion time directly (bypasses [Time_compat.now]).
-    Use to set up deterministic fairness-cooldown scenarios. *)
-val record_autonomous_completion_at_for_test : keeper_name:string -> ts:float -> unit
-
-(** Test-only: clear all per-keeper completion timestamps. *)
-val reset_autonomous_completion_for_test : unit -> unit
-
-(** Test-only: inject a callback immediately after an acquire flag is set
-    and before the diagnostic holder row is recorded. *)
-val set_after_acquire_flag_hook_for_test :
-  (label:string -> keeper_name:string -> unit) option -> unit
-
 (** PR-M (Leak 9): consecutive [provider_timeout] cycle FAILED strikes
     per keeper. The heartbeat loop routes the count through
     [Keeper_failure_policy] instead of treating the limit as keeper death.
@@ -232,11 +106,11 @@ val bump_budget_exhaustion_seeded :
   keeper_name:string -> prior_strikes:int -> int
 (** Increment the strike count for [keeper_name] and return the new
     count. If no in-memory count exists, [prior_strikes] is used as
-    the non-negative starting point. Thread-safe under [Eio.Mutex]. *)
+    the non-negative starting point. Thread-safe under [Stdlib.Mutex]. *)
 
 val bump_budget_exhaustion : keeper_name:string -> int
 (** Increment the strike count for [keeper_name] and return the new
-    count from the in-memory counter only. Thread-safe under [Eio.Mutex]. *)
+    count from the in-memory counter only. Thread-safe under [Stdlib.Mutex]. *)
 
 val reset_budget_exhaustion : keeper_name:string -> unit
 (** Drop any strike count for [keeper_name].  Idempotent. *)
@@ -249,13 +123,11 @@ val set_budget_exhaustion_for_test :
 (** Test-only: pre-load strike count.  [strikes <= 0] is equivalent
     to [reset_budget_exhaustion]. *)
 
-(** Test-only wrapper around the keeper turn slot acquisition path. *)
-val with_keeper_turn_slot_for_test :
-  ?runtime_profile:string ->
+val with_recorded_turn_holder :
   keeper_name:string ->
   channel:Keeper_world_observation.keeper_cycle_channel ->
-  (semaphore_wait_ms:int -> 'a) ->
-  ('a, [> `Semaphore_wait_timeout of semaphore_wait_timeout ]) result
+  (holder_wait_ms:int -> 'a) ->
+  'a
 
 (** Test-only wrapper for the in-turn liveness pulse lifecycle. *)
 val with_in_turn_liveness_pulse_for_test :

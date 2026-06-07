@@ -14,14 +14,10 @@ let key_to_env =
     "bootstrap.autoboot_max",           "MASC_KEEPER_AUTOBOOT_MAX";
     (* [autonomous] *)
     "autonomous.max_turns_per_call",    "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS";
-    "autonomous.semaphore_wait_timeout_sec", "MASC_KEEPER_SEMAPHORE_WAIT_TIMEOUT_SEC";
-    "autonomous.concurrency",           "MASC_KEEPER_AUTONOMOUS_CONCURRENCY";
-    "autonomous.slot_wait_timeout_sec", "MASC_KEEPER_AUTONOMOUS_SLOT_WAIT_TIMEOUT_SEC";
     "autonomous.fairness_cooldown_sec", "MASC_KEEPER_AUTONOMOUS_FAIRNESS_COOLDOWN_SEC";
     "autonomous.max_idle_turns",        "MASC_KEEPER_MAX_IDLE_TURNS_AUTONOMOUS";
     (* [reactive] *)
     "reactive.max_turns_per_call",      "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL";
-    "reactive.concurrency",             "MASC_KEEPER_REACTIVE_CONCURRENCY";
     "reactive.max_idle_turns",          "MASC_KEEPER_MAX_IDLE_TURNS_REACTIVE";
     (* [heartbeat] *)
     "heartbeat.interval_sec",           "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC";
@@ -42,6 +38,7 @@ let key_to_env =
     "turn.stream_idle_timeout_sec",     "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC";
     "turn.cli_subprocess_idle_sec",     "MASC_KEEPER_CLI_SUBPROCESS_IDLE_SEC";
     "turn.admission_wait_timeout_sec",  "MASC_KEEPER_ADMISSION_WAIT_TIMEOUT_SEC";
+    "turn.capacity_limit",              "MASC_KEEPER_TURN_CAPACITY_LIMIT";
     "turn.max_consecutive_hb_failures", "MASC_KEEPER_MAX_CONSECUTIVE_HB_FAILURES";
     "turn.max_consecutive_turn_failures", "MASC_KEEPER_MAX_CONSECUTIVE_TURN_FAILURES";
     "turn.batch_limit",                 "MASC_KEEPER_BATCH_LIMIT";
@@ -51,7 +48,6 @@ let key_to_env =
     "turn.llm_rerank_runtime",          "MASC_KEEPER_LLM_RERANK_RUNTIME";
     "turn.temperature",                 "MASC_KEEPER_UNIFIED_TEMP";
     "turn.max_output_tokens",           "MASC_KEEPER_UNIFIED_MAX_TOKENS";
-    "turn.slot_pool_size",              "MASC_KEEPER_SLOT_POOL_SIZE";
     "turn.enable_thinking",             "MASC_KEEPER_ENABLE_THINKING";
     "turn.adaptive_thinking",           "MASC_KEEPER_ADAPTIVE_THINKING";
     "turn.degraded_retry_slot_phase_budget_sec",

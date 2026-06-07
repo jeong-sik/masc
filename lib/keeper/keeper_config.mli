@@ -220,6 +220,7 @@ val keeper_board_debounce_window_sec : unit -> float
     Env: [MASC_KEEPER_BOARD_DEBOUNCE_SEC], default [2.0], range [0.0..30.0]. *)
 val keeper_tool_cost_max_usd : unit -> float option
 val keeper_board_event_limit : unit -> int
+val keeper_turn_capacity_limit : unit -> int
 val keeper_llm_rerank_enabled : unit -> bool
 val keeper_llm_rerank_runtime : unit -> string
 (** Reranker runtime profile. Defaults through [routes.llm_rerank]; env
@@ -238,12 +239,6 @@ val keeper_unified_max_tokens : unit -> int
 val keeper_tool_search_top_k : unit -> int
 
 val keeper_status_fast_default : unit -> bool
-
-val keeper_slot_pool_size : unit -> int
-
-(** Compute a deterministic slot_id for a keeper name.
-    Returns [None] when slot pinning is disabled. *)
-val keeper_slot_id : string -> int option
 
 val keeper_enable_thinking : unit -> bool
 val keeper_adaptive_thinking_enabled : unit -> bool

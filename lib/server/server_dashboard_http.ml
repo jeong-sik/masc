@@ -531,6 +531,77 @@ let dashboard_goals_snapshot_json ~(config : Workspace.config) : Yojson.Safe.t =
     [ "planning", dashboard_planning_http_json ~config
     ; "tree", dashboard_goals_tree_http_json ~config
     ]
+
+let dashboard_ide_snapshot_json ~(config : Workspace.config) : Yojson.Safe.t =
+  let base_path = config.base_path in
+  let partition = Ide_paths.Orphan in
+  let limit = 10 in
+  let events =
+    Ide_bridge.list_events
+      ~base_path
+      ~partition
+      ~limit
+      ~offset:0
+      ()
+  in
+  let cursors =
+    Ide_bridge.list_cursors
+      ~base_path
+      ~partition
+      ~limit
+      ~offset:0
+      ()
+  in
+  let annotations =
+    Ide_annotations.list
+      ~base_dir:base_path
+      ~partition
+      ~filter:{ file_path = None; keeper_id = None; goal_id = None; task_id = None }
+      ()
+  in
+  let regions =
+    Ide_region_tracker.read_regions
+      ~base_dir:base_path
+      ~partition
+      ()
+  in
+  let active_keepers =
+    try
+      List.map
+        (fun (a : Client_identity.t) ->
+           `Assoc
+             [ "keeper_id", `String a.Client_identity.agent_name
+             ; "last_seen_ms", `Intlit (Printf.sprintf "%.0f" (a.Client_identity.registered_at *. 1000.0))
+             ])
+        (Client_registry_eio.list_active ~within_seconds:300.0 ())
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | _exn -> []
+  in
+  `Assoc
+    [ "events", `Assoc
+        [ "count", `Int (List.length events)
+        ; "recent", `List events
+        ]
+    ; "cursors", `Assoc
+        [ "count", `Int (List.length cursors)
+        ; "recent", `List cursors
+        ]
+    ; "annotations", `Assoc
+        [ "count", `Int (List.length annotations)
+        ]
+    ; "regions", `Assoc
+        [ "count", `Int (List.length regions)
+        ]
+    ; "presence", `Assoc
+        [ "active_keepers", `List active_keepers
+        ; "count", `Int (List.length active_keepers)
+        ]
+    ; "freshness", `Assoc
+        [ "snapshot_at", `String (Masc_domain.now_iso ())
+        ]
+    ]
+;;
 ;;
 
 

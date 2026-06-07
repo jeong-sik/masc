@@ -109,6 +109,9 @@ val dashboard_goals_tree_http_json :
 val dashboard_goals_snapshot_json :
   config:Workspace.config -> Yojson.Safe.t
 
+val dashboard_ide_snapshot_json :
+  config:Workspace.config -> Yojson.Safe.t
+
 val dashboard_goal_detail_http_json :
   config:Workspace.config -> goal_id:string -> Yojson.Safe.t
 

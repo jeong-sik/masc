@@ -30,6 +30,21 @@ val list_cursors :
   ?offset:int ->
   unit ->
   Yojson.Safe.t list
+
+(** Ingest a cursor event from an external source (e.g. editor or LSP).
+    Unlike [ingest_cursor_event_from_hook], this does not require a tool hook
+    context and uses the provided [source] label as the tool_name field. *)
+val ingest_cursor_event :
+  base_path:string ->
+  keeper_id:string ->
+  file_path:string ->
+  line:int ->
+  ?column:int ->
+  ?selection_end:(int * int) ->
+  ?focus_mode:string ->
+  source:string ->
+  unit ->
+  unit
 (** Return latest valid cursor records, newest first. Cursor records are
     produced from tool hooks only when the hook input contains a non-empty
     file path and a positive line number. *)

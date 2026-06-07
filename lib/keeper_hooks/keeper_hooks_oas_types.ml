@@ -112,8 +112,8 @@ type cost_status =
 let cost_label_reported = "reported"
 let cost_label_known_free = "known_free"
 let cost_label_no_tokens = "no_tokens"
-let cost_label_usage_missing = "usage_missing"
-let cost_label_usage_untrusted = "usage_untrusted"
+let cost_label_usage_missing = "missing_usage"
+let cost_label_usage_untrusted = "untrusted_usage"
 let cost_label_runtime_unknown = "runtime_unknown"
 let cost_label_oas_cost_unreported = "oas_cost_unreported"
 

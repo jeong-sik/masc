@@ -39,7 +39,6 @@ type t =
   | SupervisorLastSweepUnixtime
   | DomainPoolFork
   | TurnHolderBookkeepingFailures
-  | SlotYieldTotal
   | Compactions
   | CompactionRatioChange
   | CompactionSavedTokens
@@ -170,7 +169,6 @@ type t =
   | CompactionCallbackRecoveries
   | EventBusDrain
   | SupervisorCleanupFailures
-  | SlotForceReleased
   | SpawnSlotDenied
   | RegistryUpdateDropped
   | RegistryOrphanThresholdBreached
@@ -251,7 +249,6 @@ let to_string = function
   | SupervisorLastSweepUnixtime -> "masc_keeper_supervisor_last_sweep_unixtime"
   | DomainPoolFork -> "masc_keeper_domain_pool_fork_total"
   | TurnHolderBookkeepingFailures -> "masc_keeper_turn_holders_bookkeeping_failures_total"
-  | SlotYieldTotal -> "masc_keeper_slot_yield_total"
   | Compactions -> "masc_keeper_compactions_total"
   | CompactionRatioChange -> "masc_keeper_compaction_ratio_change"
   | CompactionSavedTokens -> "masc_keeper_compaction_saved_tokens_total"
@@ -392,7 +389,6 @@ let to_string = function
     "masc_keeper_compaction_callback_recoveries_total"
   | EventBusDrain -> "masc_keeper_event_bus_drain_total"
   | SupervisorCleanupFailures -> "masc_keeper_supervisor_cleanup_failures_total"
-  | SlotForceReleased -> "masc_keeper_slot_force_released_total"
   | SpawnSlotDenied -> "masc_keeper_spawn_slot_denied_total"
   | RegistryUpdateDropped -> "masc_keeper_registry_update_dropped_total"
   | RegistryOrphanThresholdBreached ->

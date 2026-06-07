@@ -439,6 +439,20 @@ let keeper_board_event_limit_rp =
 let keeper_board_event_limit () : int =
   Runtime_params.get keeper_board_event_limit_rp
 
+let keeper_turn_capacity_limit_rp =
+  _rp_int
+    ~key:"keeper.turn.capacity_limit"
+    ~default:(fun () -> Env_config_keeper.KeeperKeepalive.turn_capacity_limit)
+    ~min_v:0
+    ~max_v:1024
+    ~description:"Global concurrent keeper turn capacity limit (0 disables the gate)"
+    ()
+;;
+
+let keeper_turn_capacity_limit () : int =
+  Runtime_params.get keeper_turn_capacity_limit_rp
+;;
+
 let keeper_llm_rerank_enabled_rp =
   _rp_bool ~key:"keeper.turn.llm_rerank"
     ~default:(fun () -> bool_of_env_default "MASC_KEEPER_LLM_RERANK" ~default:false)
@@ -500,25 +514,9 @@ let keeper_tool_search_top_k () : int =
 (** Force module initialization to guarantee all runtime params are registered
     before [Runtime_params.restore]. Call from server bootstrap. *)
 let ensure_runtime_params_init () =
-  ignore (Runtime_params.get keeper_unified_temperature_rp)
-
-let keeper_slot_pool_size_rp =
-  _rp_int ~key:"keeper.turn.slot_pool_size"
-    ~default:(fun () -> int_of_env_default "MASC_KEEPER_SLOT_POOL_SIZE"
-                          ~default:4 ~min_v:0 ~max_v:32)
-    ~min_v:0 ~max_v:32
-    ~description:"slot pool size for keeper deterministic pinning (0=disabled)" ()
-let keeper_slot_pool_size () : int =
-  Runtime_params.get keeper_slot_pool_size_rp
-
-(** Compute a deterministic slot_id for a keeper name.
-    Returns [None] when slot pinning is disabled (num_slots = 0). *)
-let keeper_slot_id (name : string) : int option =
-  let num_slots = keeper_slot_pool_size () in
-  if num_slots <= 0 then None
-  else
-    let h = Hashtbl.hash name in
-    Some (h mod num_slots)
+  let (_ : float) = Runtime_params.get keeper_unified_temperature_rp in
+  let (_ : int) = Runtime_params.get keeper_turn_capacity_limit_rp in
+  ()
 
 let keeper_enable_thinking_rp =
   _rp_bool ~key:"keeper.turn.enable_thinking"

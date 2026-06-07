@@ -201,23 +201,6 @@ let sweep_and_recover (ctx : _ context) =
         ; ("site", Keeper_supervisor_cleanup_failure_site.(to_label Force_watchdog_crash))
         ]
       ();
-    let released_holders =
-      Keeper_turn_holders.force_release_holder_for ~keeper_name:entry.name
-    in
-    if released_holders <> [] then (
-      let holder_summary =
-        match released_holders with
-        | [] -> "holders=[]"
-        | released ->
-          released
-          |> List.map (fun (label, age) -> Printf.sprintf "%s/%.0fs" label age)
-          |> String.concat ","
-          |> Printf.sprintf "holders=[%s]"
-      in
-      Log.Keeper.error
-        "%s: force-released stale holder rows after watchdog crash: %s"
-        entry.name
-        holder_summary);
     (match
        Keeper_registry.resolve_done
          entry

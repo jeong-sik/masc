@@ -38,6 +38,7 @@ let key_to_env =
     "turn.stream_idle_timeout_sec",     "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC";
     "turn.cli_subprocess_idle_sec",     "MASC_KEEPER_CLI_SUBPROCESS_IDLE_SEC";
     "turn.admission_wait_timeout_sec",  "MASC_KEEPER_ADMISSION_WAIT_TIMEOUT_SEC";
+    "turn.capacity_limit",              "MASC_KEEPER_TURN_CAPACITY_LIMIT";
     "turn.max_consecutive_hb_failures", "MASC_KEEPER_MAX_CONSECUTIVE_HB_FAILURES";
     "turn.max_consecutive_turn_failures", "MASC_KEEPER_MAX_CONSECUTIVE_TURN_FAILURES";
     "turn.batch_limit",                 "MASC_KEEPER_BATCH_LIMIT";
@@ -47,7 +48,6 @@ let key_to_env =
     "turn.llm_rerank_runtime",          "MASC_KEEPER_LLM_RERANK_RUNTIME";
     "turn.temperature",                 "MASC_KEEPER_UNIFIED_TEMP";
     "turn.max_output_tokens",           "MASC_KEEPER_UNIFIED_MAX_TOKENS";
-    "turn.slot_pool_size",              "MASC_KEEPER_SLOT_POOL_SIZE";
     "turn.enable_thinking",             "MASC_KEEPER_ENABLE_THINKING";
     "turn.adaptive_thinking",           "MASC_KEEPER_ADAPTIVE_THINKING";
     "turn.degraded_retry_slot_phase_budget_sec",

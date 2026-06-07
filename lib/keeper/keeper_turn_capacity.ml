@@ -16,7 +16,7 @@ let waited_ms ~started_at =
   int_of_float ((if waited_s < 0.0 then 0.0 else waited_s) *. 1000.0)
 ;;
 
-let release_global_slot () =
+let release_global_capacity () =
   let rec loop () =
     let current = Atomic.get inflight in
     if current <= 0
@@ -27,10 +27,10 @@ let release_global_slot () =
   loop ()
 ;;
 
-let acquire_global_slot ~timeout_s =
+let acquire_global_capacity ~timeout_s =
   let started_at = Time_compat.now () in
   let rec loop () =
-    let limit = Keeper_config.keeper_slot_pool_size () in
+    let limit = Keeper_config.keeper_turn_capacity_limit () in
     if limit <= 0
     then Ok { release = (fun () -> ()); wait_ms = waited_ms ~started_at }
     else (
@@ -44,7 +44,7 @@ let acquire_global_slot ~timeout_s =
             { release =
                 (fun () ->
                    if Atomic.compare_and_set released false true
-                   then release_global_slot ())
+                   then release_global_capacity ())
             ; wait_ms = waited_ms ~started_at
             })
         else (
@@ -65,7 +65,7 @@ let with_turn_capacity ?timeout_s ~keeper_name:_ ~channel:_ f =
     | Some value -> value
     | None -> Keeper_runtime_resolved.admission_wait_timeout_sec ()
   in
-  match acquire_global_slot ~timeout_s with
+  match acquire_global_capacity ~timeout_s with
   | Error rejection -> Error rejection
   | Ok acquired ->
     Fun.protect

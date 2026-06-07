@@ -33,7 +33,7 @@ val wakeup_keeper :
     or system-wide events. *)
 val wakeup_all_keepers : ?base_path:string -> unit -> unit
 
-(** Diagnostic: keepers currently holding a slot in each pool, paired
+(** Diagnostic: keepers currently recorded in each holder pool, paired
     with how long (in seconds, relative to [now]) they have held it.
     Sorted by descending hold time.
 
@@ -45,34 +45,6 @@ val turn_holders : now:float -> (string * float) list
 val autonomous_holders : now:float -> (string * float) list
 val reactive_holders : now:float -> (string * float) list
 
-(** Force-release [keeper_name]'s holder rows after watchdog stale
-    classification. Returns released diagnostic labels. *)
-val force_release_stale_holder : keeper_name:string -> string list
-
-(** Test-only: TTL used to bound orphaned force-release markers left behind
-    when a cancelled stale fiber never reaches its finalizer. *)
-val force_released_marker_ttl_sec_for_test : float
-
-(** Test-only: count force-release markers still awaiting finalizer
-    consumption or expiry pruning. *)
-val force_released_marker_count_for_test : unit -> int
-
-(** Test-only: inject a marker without touching live holder rows, so
-    marker-retention behavior can be exercised without creating a
-    double-release path. *)
-val add_force_released_marker_for_test :
-  label:Keeper_turn_holders.holder_pool ->
-  keeper_name:string ->
-  acquisition_id:int ->
-  marked_at:float ->
-  unit
-
-(** Test-only: prune expired force-release markers using an injected clock. *)
-val purge_force_released_markers_for_test : now:float -> unit
-
-(** Test-only: clear force-release markers between tests. *)
-val clear_force_released_markers_for_test : unit -> unit
-
 (** Render a compact holder list such as [[keeper-a/181s, +2 more]].
     The input is expected to be sorted longest-first, as returned by the
     holder accessors above. *)
@@ -80,11 +52,6 @@ val format_holders : ?limit:int -> (string * float) list -> string
 
 (** Operator-facing one-line summary of all holder pools. *)
 val holders_summary : ?limit:int -> now:float -> unit -> string
-
-(** Re-export of {!Keeper_turn_holders.force_release_holder_for} so the
-    supervisor and tests have a single import point alongside the holder
-    snapshot accessors. *)
-val force_release_holder_for : keeper_name:string -> (string * float) list
 
 (** Pure: whether a [Keeper_heartbeat_smart] decision should allow the
     keepalive cycle (presence/snapshot/board/turn/recurring) to run.
@@ -117,11 +84,6 @@ val status_tick_usage_json : unit -> Yojson.Safe.t
 (** Usage payload for heartbeat/status metrics rows.  Status ticks are not
     LLM calls, so all per-turn token counters are explicit zeroes while
     preserving the same cache-token field shape as turn snapshots. *)
-
-(** Test-only: inject a callback immediately after an acquire flag is set
-    and before the diagnostic holder row is recorded. *)
-val set_after_acquire_flag_hook_for_test :
-  (label:string -> keeper_name:string -> unit) option -> unit
 
 (** PR-M (Leak 9): consecutive [provider_timeout] cycle FAILED strikes
     per keeper. The heartbeat loop routes the count through

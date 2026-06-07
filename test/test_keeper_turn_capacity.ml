@@ -1,27 +1,28 @@
 open Alcotest
 
-let set_slot_pool_size value =
-  match Masc.Runtime_params.set_by_key "keeper.turn.slot_pool_size" (`Int value) with
+let set_capacity_limit value =
+  Masc.Keeper_config.ensure_runtime_params_init ();
+  match Masc.Runtime_params.set_by_key "keeper.turn.capacity_limit" (`Int value) with
   | Ok () -> ()
-  | Error msg -> fail ("set slot pool size failed: " ^ msg)
+  | Error msg -> fail ("set capacity limit failed: " ^ msg)
 ;;
 
-let clear_slot_pool_size () =
-  match Masc.Runtime_params.clear_by_key "keeper.turn.slot_pool_size" with
+let clear_capacity_limit () =
+  match Masc.Runtime_params.clear_by_key "keeper.turn.capacity_limit" with
   | Ok () -> ()
-  | Error msg -> fail ("clear slot pool size failed: " ^ msg)
+  | Error msg -> fail ("clear capacity limit failed: " ^ msg)
 ;;
 
-let with_slot_pool_size value f =
-  set_slot_pool_size value;
-  Fun.protect ~finally:clear_slot_pool_size f
+let with_capacity_limit value f =
+  set_capacity_limit value;
+  Fun.protect ~finally:clear_capacity_limit f
 ;;
 
 let run_eio f = Eio_main.run (fun _env -> f ())
 
 let test_global_capacity_blocks_nested_turn () =
   run_eio (fun () ->
-    with_slot_pool_size 1 (fun () ->
+    with_capacity_limit 1 (fun () ->
       match
         Masc.Keeper_turn_capacity.with_turn_capacity
           ~timeout_s:0.001
@@ -48,7 +49,7 @@ let test_global_capacity_blocks_nested_turn () =
 
 let test_disabled_capacity_allows_nested_turn () =
   run_eio (fun () ->
-    with_slot_pool_size 0 (fun () ->
+    with_capacity_limit 0 (fun () ->
       match
         Masc.Keeper_turn_capacity.with_turn_capacity
           ~timeout_s:0.001

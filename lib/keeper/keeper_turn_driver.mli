@@ -129,7 +129,6 @@ val run_named :
   ?checkpoint_dir:string ->
   ?context_injector:Agent_sdk.Hooks.context_injector ->
   ?context:Agent_sdk.Context.t ->
-  ?slot_id:int ->
   ?enable_thinking:bool ->
   ?approval:Agent_sdk.Hooks.approval_callback ->
   ?exit_condition:(int -> bool) ->

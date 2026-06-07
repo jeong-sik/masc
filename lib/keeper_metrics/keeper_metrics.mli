@@ -30,7 +30,6 @@ type t =
   | SupervisorLastSweepUnixtime
   | DomainPoolFork
   | TurnHolderBookkeepingFailures
-  | SlotYieldTotal
   | Compactions
   | CompactionRatioChange
   | CompactionSavedTokens
@@ -161,7 +160,6 @@ type t =
   | CompactionCallbackRecoveries
   | EventBusDrain
   | SupervisorCleanupFailures
-  | SlotForceReleased
   | SpawnSlotDenied
   | RegistryUpdateDropped
   | RegistryOrphanThresholdBreached

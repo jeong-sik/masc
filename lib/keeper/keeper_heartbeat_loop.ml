@@ -253,7 +253,7 @@ let run_keepalive_unified_turn
           meta_after_triage.name
           turn_decision.should_run
           channel_str
-          (String.concat "," admission_reason_strs)
+          (String.concat "," verdict_strs)
           obs.idle_seconds
           (Keeper_keepalive_signal.format_since_last_scheduled_autonomous
              turn_decision.since_last_scheduled_autonomous)

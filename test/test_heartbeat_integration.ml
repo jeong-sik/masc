@@ -749,8 +749,8 @@ let test_runtime_backpressure_blocks_requested_turn () =
    | Obs.Runtime_backpressured { reason; _ } ->
      check string "backpressure reason" "provider_capacity" reason
    | Obs.Runtime_admitted -> fail "runtime backpressure should reject turn");
-  check bool "skip reasons include runtime backpressure" true
-    (List.mem "runtime_backpressure" decision.skip_reasons)
+  check bool "verdict reasons include runtime backpressure" true
+    (List.mem "runtime_backpressure" decision.verdict_reasons)
 
 (* ── Test runner ──────────────────────────────────────────── *)
 

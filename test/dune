@@ -1543,6 +1543,8 @@
 
 (include stanzas/test_operator_mcp_e2e.inc)
 
+(include stanzas/test_operator_namespace_fleet_admission.inc)
+
 
 (include stanzas/test_otel_tick_poison_source.inc)
 

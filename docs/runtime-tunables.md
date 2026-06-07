@@ -48,7 +48,7 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_RELAY_CALIBRATION_ENABLED` | typed:bool | unclassified | unclassified | 445 | Whether relay token calibration is enabled. Default: true. |
 | `MASC_STORAGE_TYPE` | string_literal | n/a | n/a | 402 | SSOT for the MASC_STORAGE_TYPE env-var name (issue 8352). |
 | `MASC_TELEMETRY_ENABLED` | string_literal | n/a | n/a | 476 | SSOT for logging / observability env-var names (issue 8352). |
-| `MASC_TEST_ALLOW_HOME_BASE_PATH` | string_literal | n/a | n/a | 341 | #9903: production base-path safeguard for test executables. Without this, a test whose [MASC_BASE_PATH] override fail... |
+| `MASC_TEST_ALLOW_HOME_BASE_PATH` | string_literal | n/a | n/a | 340 | #9903: production base-path safeguard for test executables. Without this, a test whose [MASC_BASE_PATH] override fail... |
 | `MASC_URL` | string_literal | n/a | n/a | 242 | SSOT for the MASC_HTTP_BASE_URL env-var name (issue 8352). Defined here (above [masc_http_base_url]) so the constant ... |
 
 ## Env_config_exec_timeout (1 knobs; typed classification 0/0)
@@ -175,7 +175,7 @@ the categorization roadmap. Newly-added typed getters in
 
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
-| `MASC_KEEPER_DEGRADED_RETRY_SLOT_PHASE_BUDGET_SEC` | typed:float | Timeouts | operator | 71 | Productive slot-phase budget (seconds).  PR #13120: when a runtime returns a recoverable error after the keeper has a... |
+| `MASC_KEEPER_DEGRADED_RETRY_SLOT_PHASE_BUDGET_SEC` | typed:float | Timeouts | operator | 71 | Productive admission-phase budget (seconds).  PR #13120: when a runtime returns a recoverable error after the keeper has a... |
 | `MASC_KEEPER_MAX_TRANSIENT_RETRIES` | typed:int | unclassified | unclassified | 19 | Maximum outer-loop retries after the initial attempt. Total attempts = 1 initial + max_transient_retries. Env: [MASC_... |
 | `MASC_KEEPER_TRANSIENT_BACKOFF_BASE_SEC` | typed:float | unclassified | unclassified | 25 | Base delay (seconds) for exponential backoff. Delay at attempt [n] is [base * 2^(n-1)]. Env: [MASC_KEEPER_TRANSIENT_B... |
 | `MASC_KEEPER_TRANSIENT_BACKOFF_CAP_SEC` | typed:float | unclassified | unclassified | 31 | Hard cap on backoff delay (seconds). Env: [MASC_KEEPER_TRANSIENT_BACKOFF_CAP_SEC].  Default: 4.0. |

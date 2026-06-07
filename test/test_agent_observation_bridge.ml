@@ -129,6 +129,54 @@ let test_write_region_observation_reaches_ide_storage () =
     | _ -> fail "expected one region")
 ;;
 
+let test_annotation_request_reaches_ide_storage () =
+  with_temp_dir (fun base_dir ->
+    install_fresh_ide_sink ();
+    let result =
+      Agent_observation.emit_annotation_request
+        { base_path = base_dir
+        ; keeper_id = "keeper-epsilon"
+        ; file_path = "lib/annotated.ml"
+        ; line_start = 7
+        ; line_end = 9
+        ; kind = Agent_observation.Decision
+        ; content = "route through neutral observation bus"
+        ; goal_id = Some "goal-17"
+        ; task_id = None
+        ; board_post_id = Some "post-3"
+        ; comment_id = None
+        ; pr_id = None
+        ; git_ref = None
+        ; log_id = None
+        ; session_id = None
+        ; operation_id = None
+        ; worker_run_id = None
+        }
+    in
+    match result with
+    | Error msg -> failf "annotation request failed: %s" msg
+    | Ok created ->
+      check string "result file" "lib/annotated.ml" created.file_path;
+      check int "result line start" 7 created.line_start;
+      check int "result line end" 9 created.line_end;
+      let filter : Ide_annotation_types.annotation_filter =
+        { file_path = Some "lib/annotated.ml"
+        ; keeper_id = Some "keeper-epsilon"
+        ; goal_id = Some "goal-17"
+        ; task_id = None
+        }
+      in
+      (match Ide_annotations.list ~base_dir ~filter () with
+       | [ annotation ] ->
+         check string "id" created.id annotation.id;
+         check string "content" "route through neutral observation bus" annotation.content;
+         check (option string) "board post" (Some "post-3") annotation.board_post_id;
+         (match annotation.kind with
+          | Ide_annotation_types.Decision -> ()
+          | _ -> fail "expected Decision annotation kind")
+       | rows -> failf "expected one annotation, got %d" (List.length rows)))
+;;
+
 let () =
   run
     "agent_observation_bridge"
@@ -143,6 +191,10 @@ let () =
             "write-region observation reaches IDE storage"
             `Quick
             test_write_region_observation_reaches_ide_storage
+        ; test_case
+            "annotation request reaches IDE storage"
+            `Quick
+            test_annotation_request_reaches_ide_storage
         ] )
     ]
 ;;

@@ -379,7 +379,7 @@ let run_keepalive_unified_turn
           ~kind:Semaphore_wait_pending
           ();
         match
-          Keeper_turn_slot.with_keeper_turn_slot
+          Keeper_turn_slot.with_keeper_turn_slot_admission
             ~runtime_profile:(runtime_id_of_meta meta_after_triage)
             ~keeper_name:meta_after_triage.name
             ~channel:turn_decision.channel
@@ -396,6 +396,23 @@ let run_keepalive_unified_turn
         with
         | Ok meta -> meta
         | Error (`Semaphore_wait_timeout timeout) ->
+          handle_semaphore_wait_timeout ~ctx ~meta_after_triage ~turn_decision timeout
+        | Error `Fleet_paused ->
+          Log.Keeper.info
+            "%s: skipping turn because fleet runtime admission is paused"
+            meta_after_triage.name;
+          meta_after_cursor_persist
+        | Error `Fleet_stopped ->
+          Log.Keeper.warn
+            "%s: rejecting turn because fleet runtime admission is stopped"
+            meta_after_triage.name;
+          meta_after_cursor_persist
+        | Error (`Runtime_capacity_exceeded _ as err) ->
+          let timeout =
+            Keeper_turn_slot.timeout_of_runtime_admission_error
+              ~keeper_name:meta_after_triage.name
+              err
+          in
           handle_semaphore_wait_timeout ~ctx ~meta_after_triage ~turn_decision timeout)
       else if obs.message_cursor_updates <> []
       then meta_after_cursor_persist

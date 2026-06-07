@@ -1480,6 +1480,8 @@
 
 (include stanzas/test_keeper_turn_slot_force_release.inc)
 
+(include stanzas/test_keeper_turn_admission.inc)
+
 (include stanzas/test_keeper_turn_slot_holders.inc)
 
 (include stanzas/test_keeper_turn_slot_types.inc)

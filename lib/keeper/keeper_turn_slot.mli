@@ -1,7 +1,8 @@
-(** Keeper Turn Slot — concurrency control for keeper turn execution.
+(** Keeper Turn Slot — keeper-local sequencing for turn execution.
 
-    Manages semaphores, fairness queuing, and slot diagnostics for
-    keeper turn concurrency.
+    Manages per-keeper turn lanes, autonomous/reactive fairness queuing, and
+    slot diagnostics. Fleet-wide runtime capacity is leased through
+    {!Keeper_turn_admission}.
 
     All type definitions ([slot_pool], [semaphore_wait_phase],
     [semaphore_wait_timeout]) and their pure converters live in
@@ -45,7 +46,6 @@ val throttle_source_to_string : throttle_source -> string
 (** Canonical string representation for logs and JSON surfaces:
     ["env_override" | "toml" | "default"]. *)
 
-val turn_semaphore : Eio.Semaphore.t
 val autonomous_turn_semaphore : Eio.Semaphore.t
 val reactive_turn_semaphore : Eio.Semaphore.t
 
@@ -231,6 +231,27 @@ val peek_budget_exhaustion_for_test : keeper_name:string -> int
 val set_budget_exhaustion_for_test : keeper_name:string -> strikes:int -> unit
 
 type keeper_turn_slot_state
+
+val with_keeper_turn_slot_admission :
+  ?runtime_profile:string ->
+  keeper_name:string ->
+  channel:Keeper_world_observation.keeper_cycle_channel ->
+  (semaphore_wait_ms:int -> 'a) ->
+  ( 'a
+  , [> `Semaphore_wait_timeout of semaphore_wait_timeout
+    | `Fleet_paused
+    | `Fleet_stopped
+    | `Runtime_capacity_exceeded of Keeper_turn_admission.runtime_capacity_snapshot
+    ] )
+  result
+
+val timeout_of_runtime_admission_error :
+  keeper_name:string ->
+  [< `Fleet_paused
+   | `Fleet_stopped
+   | `Runtime_capacity_exceeded of Keeper_turn_admission.runtime_capacity_snapshot
+  ] ->
+  semaphore_wait_timeout
 
 val with_keeper_turn_slot :
   ?runtime_profile:string ->

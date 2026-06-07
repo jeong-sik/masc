@@ -1,5 +1,5 @@
-(* keeper_turn_slot — semaphores, autonomous wait queue, budget-exhaustion strikes,
-   and the main [with_keeper_turn_slot] gate. *)
+(* keeper_turn_slot — per-keeper turn lanes, autonomous wait queue,
+   budget-exhaustion strikes, and the main [with_keeper_turn_slot] gate. *)
 
 open Keeper_types
 open Keeper_meta_contract
@@ -135,7 +135,22 @@ let check_throttle_divergence () =
     | Toml | Default -> ()
 ;;
 let () = check_throttle_divergence ()
-let turn_semaphore = Eio.Semaphore.make effective_turn_throttle_limit
+let () =
+  Keeper_turn_admission.configure_runtime_turn_limit effective_turn_throttle_limit
+;;
+
+let keeper_turn_slots : (string, Eio.Semaphore.t) Hashtbl.t = Hashtbl.create 32
+let keeper_turn_slots_mutex = Eio.Mutex.create ()
+
+let get_or_create_keeper_turn_slot keeper_name =
+  Eio.Mutex.use_rw ~protect:true keeper_turn_slots_mutex (fun () ->
+    match Hashtbl.find_opt keeper_turn_slots keeper_name with
+    | Some sem -> sem
+    | None ->
+      let sem = Eio.Semaphore.make 1 in
+      Hashtbl.replace keeper_turn_slots keeper_name sem;
+      sem)
+;;
 
 (* 2026-05-05 fleet-stuck diagnosis: when a peer holds the semaphore for 60+ seconds the wait timeout WARN says "peers holding slot" but never names *which* peer.  Operators are then blind to which ke... *)
 type holder_key =
@@ -303,7 +318,11 @@ let () =
        (turn_concurrency_env_opt "MASC_KEEPER_REACTIVE_CONCURRENCY"))
 ;;
 let reactive_turn_semaphore = Eio.Semaphore.make reactive_turn_limit
-let turn_semaphore_value_for_test () = Eio.Semaphore.get_value turn_semaphore
+let turn_semaphore_value_for_test () =
+  Keeper_turn_admission.runtime_turn_limit ()
+  - Keeper_turn_admission.runtime_turn_inflight ()
+;;
+
 let autonomous_turn_semaphore_value_for_test () =
   Eio.Semaphore.get_value autonomous_turn_semaphore
 ;;
@@ -315,16 +334,24 @@ let autonomous_slot_holders ~now = snapshot_holders ~label:Autonomous_pool ~now
 let reactive_slot_holders ~now = snapshot_holders ~label:Reactive_pool ~now
 let force_release_stale_holder ~keeper_name =
   let released = ref [] in
-  let release_if_held ~label sem =
+  let release_if_held ~label ~release_one =
     let release_count = mark_holder_force_released ~label ~keeper_name in
     for _ = 1 to release_count do
-      Eio.Semaphore.release sem;
+      release_one ();
       released := slot_pool_to_string label :: !released
     done
   in
-  release_if_held ~label:Turn_pool turn_semaphore;
-  release_if_held ~label:Autonomous_pool autonomous_turn_semaphore;
-  release_if_held ~label:Reactive_pool reactive_turn_semaphore;
+  release_if_held
+    ~label:Turn_pool
+    ~release_one:(fun () ->
+      Eio.Semaphore.release (get_or_create_keeper_turn_slot keeper_name);
+      Keeper_turn_admission.release_runtime_turn_lease ());
+  release_if_held
+    ~label:Autonomous_pool
+    ~release_one:(fun () -> Eio.Semaphore.release autonomous_turn_semaphore);
+  release_if_held
+    ~label:Reactive_pool
+    ~release_one:(fun () -> Eio.Semaphore.release reactive_turn_semaphore);
   List.rev !released
 ;;
 let format_slot_holders ?(limit = 5) holders =
@@ -564,7 +591,7 @@ let semaphore_wait_timeout_snapshot ~phase ?queue_ahead ?(holders = []) ()
   ; timeout_phase = phase
   ; timeout_autonomous_available = Eio.Semaphore.get_value autonomous_turn_semaphore
   ; timeout_reactive_available = Eio.Semaphore.get_value reactive_turn_semaphore
-  ; timeout_turn_available = Eio.Semaphore.get_value turn_semaphore
+  ; timeout_turn_available = turn_semaphore_value_for_test ()
   ; timeout_queue_depth = autonomous_wait_queue_depth ()
   ; timeout_queue_ahead = queue_ahead
   ; timeout_holders = holders
@@ -587,6 +614,7 @@ type keeper_turn_slot_state =
   { acquired_autonomous : bool ref
   ; acquired_reactive : bool ref
   ; acquired_turn : bool ref
+  ; acquired_runtime_turn : bool ref
   ; autonomous_acquisition_id : int option ref
   ; reactive_acquisition_id : int option ref
   ; turn_acquisition_id : int option ref
@@ -597,6 +625,7 @@ let make_keeper_turn_slot_state () =
   { acquired_autonomous = ref false
   ; acquired_reactive = ref false
   ; acquired_turn = ref false
+  ; acquired_runtime_turn = ref false
   ; autonomous_acquisition_id = ref None
   ; reactive_acquisition_id = ref None
   ; turn_acquisition_id = ref None
@@ -650,7 +679,8 @@ let release_recorded_holder
       label_str
       keeper_name;
     before_release ();
-    Eio.Semaphore.release sem
+    Eio.Semaphore.release sem;
+    false
   | Some acquisition_id ->
     let force_released =
       try consume_force_release ~label ~keeper_name ~acquisition_id with
@@ -676,7 +706,8 @@ let release_recorded_holder
         keeper_name
     else (
       before_release ();
-      Eio.Semaphore.release sem)
+      Eio.Semaphore.release sem);
+    force_released
 ;;
 
 let release_keeper_turn_slot_impl ~keeper_name ~(stamp_autonomous_completion : bool) state
@@ -689,38 +720,53 @@ let release_keeper_turn_slot_impl ~keeper_name ~(stamp_autonomous_completion : b
      permit ownership. *)
   if !(state.acquired_turn)
   then (
-    release_recorded_holder
-      ~keeper_name
-      ~label:Turn_pool
-      ~acquisition_id:!(state.turn_acquisition_id)
-      turn_semaphore;
+    let keeper_turn_sem = get_or_create_keeper_turn_slot keeper_name in
+    let turn_was_force_released =
+      match !(state.turn_acquisition_id) with
+      | None ->
+        Eio.Semaphore.release keeper_turn_sem;
+        false
+      | Some _ ->
+        release_recorded_holder
+          ~keeper_name
+          ~label:Turn_pool
+          ~acquisition_id:!(state.turn_acquisition_id)
+          keeper_turn_sem
+    in
+    if !(state.acquired_runtime_turn)
+    then (
+      if not turn_was_force_released
+      then Keeper_turn_admission.release_runtime_turn_lease ();
+      state.acquired_runtime_turn := false);
     state.acquired_turn := false;
     state.turn_acquisition_id := None);
   if !(state.acquired_autonomous)
   then (
-    release_recorded_holder
-      ~keeper_name
-      ~label:Autonomous_pool
-      ~acquisition_id:!(state.autonomous_acquisition_id)
-      ~before_release:(fun () ->
-        (* Stamp completion time only for normal completion, before releasing
-           the semaphore so that [maybe_yield_for_fairness] can measure the
-           correct interval when this keeper's heartbeat loops back
-           immediately. *)
-        if stamp_autonomous_completion
-        then
-          safe_bookkeeping ~op:"record_autonomous_completion" (fun () ->
-            record_autonomous_completion ~keeper_name))
-      autonomous_turn_semaphore;
+    ignore
+      (release_recorded_holder
+         ~keeper_name
+         ~label:Autonomous_pool
+         ~acquisition_id:!(state.autonomous_acquisition_id)
+         ~before_release:(fun () ->
+           (* Stamp completion time only for normal completion, before releasing
+              the semaphore so that [maybe_yield_for_fairness] can measure the
+              correct interval when this keeper's heartbeat loops back
+              immediately. *)
+           if stamp_autonomous_completion
+           then
+             safe_bookkeeping ~op:"record_autonomous_completion" (fun () ->
+               record_autonomous_completion ~keeper_name))
+         autonomous_turn_semaphore);
     state.acquired_autonomous := false;
     state.autonomous_acquisition_id := None);
   if !(state.acquired_reactive)
   then (
-    release_recorded_holder
-      ~keeper_name
-      ~label:Reactive_pool
-      ~acquisition_id:!(state.reactive_acquisition_id)
-      reactive_turn_semaphore;
+    ignore
+      (release_recorded_holder
+         ~keeper_name
+         ~label:Reactive_pool
+         ~acquisition_id:!(state.reactive_acquisition_id)
+         reactive_turn_semaphore);
     state.acquired_reactive := false;
     state.reactive_acquisition_id := None)
 ;;
@@ -761,7 +807,7 @@ let release_keeper_turn_slot ~keeper_name state =
 let force_release_holder_for ~keeper_name : (string * float) list =
   let now = Time_compat.now () in
   let released_with_age = ref [] in
-  let try_release ~label ~sem =
+  let try_release ~label ~release_one =
     let snapshots =
       with_holder_lock (fun () ->
         purge_expired_force_released_holders_locked ~now;
@@ -793,7 +839,7 @@ let force_release_holder_for ~keeper_name : (string * float) list =
     List.iter
       (fun (_key, acquired_at) ->
          let age = now -. acquired_at in
-         Eio.Semaphore.release sem;
+         release_one ();
          released_with_age := (label_str, age) :: !released_with_age;
          Otel_metric_store.inc_counter
            Keeper_metrics.(to_string SlotForceReleased)
@@ -807,9 +853,17 @@ let force_release_holder_for ~keeper_name : (string * float) list =
            age)
       snapshots
   in
-  try_release ~label:Reactive_pool ~sem:reactive_turn_semaphore;
-  try_release ~label:Autonomous_pool ~sem:autonomous_turn_semaphore;
-  try_release ~label:Turn_pool ~sem:turn_semaphore;
+  try_release
+    ~label:Reactive_pool
+    ~release_one:(fun () -> Eio.Semaphore.release reactive_turn_semaphore);
+  try_release
+    ~label:Autonomous_pool
+    ~release_one:(fun () -> Eio.Semaphore.release autonomous_turn_semaphore);
+  try_release
+    ~label:Turn_pool
+    ~release_one:(fun () ->
+      Eio.Semaphore.release (get_or_create_keeper_turn_slot keeper_name);
+      Keeper_turn_admission.release_runtime_turn_lease ());
   !released_with_age
 ;;
 
@@ -1049,7 +1103,21 @@ let observe_semaphore_wait_seconds ~keeper_name ~runtime_profile ~channel second
   inc_bucket "+Inf"
 ;;
 
-let with_keeper_turn_slot ?(runtime_profile = "unknown") ~keeper_name ~channel f =
+let admission_error_to_result = function
+  | Keeper_turn_admission.Fleet_paused -> `Fleet_paused
+  | Keeper_turn_admission.Fleet_stopped -> `Fleet_stopped
+  | Keeper_turn_admission.Runtime_capacity_exceeded snapshot ->
+    `Runtime_capacity_exceeded snapshot
+;;
+
+let current_fleet_admission_result () =
+  match Keeper_turn_admission.fleet_admission_state () with
+  | Keeper_turn_admission.Running -> Ok ()
+  | Keeper_turn_admission.Paused -> Error `Fleet_paused
+  | Keeper_turn_admission.Stopped -> Error `Fleet_stopped
+;;
+
+let with_keeper_turn_slot_admission ?(runtime_profile = "unknown") ~keeper_name ~channel f =
   let is_autonomous =
     match channel with
     | Keeper_world_observation.Scheduled_autonomous -> true
@@ -1064,6 +1132,7 @@ let with_keeper_turn_slot ?(runtime_profile = "unknown") ~keeper_name ~channel f
      log lines from every other surface that uses the SSOT helper —
      operators grepping for one form silently missed the other. *)
   let channel_label = Keeper_world_observation.channel_to_string channel in
+  let keeper_turn_sem = get_or_create_keeper_turn_slot keeper_name in
   (* Track acquisitions in mutable flags so the outer Fun.protect can
      release exactly the slots we hold — regardless of which result or
      exception path fires (Eio.Cancel.Cancelled or any other). This
@@ -1150,7 +1219,7 @@ let with_keeper_turn_slot ?(runtime_profile = "unknown") ~keeper_name ~channel f
       keeper_name
       channel_label
       (Eio.Semaphore.get_value autonomous_turn_semaphore)
-      (Eio.Semaphore.get_value turn_semaphore)
+      (turn_semaphore_value_for_test ())
       queue_depth;
     Otel_metric_store.set_gauge
       Keeper_metrics.(to_string TurnQueueDepth)
@@ -1159,48 +1228,61 @@ let with_keeper_turn_slot ?(runtime_profile = "unknown") ~keeper_name ~channel f
   in
   let acquire_all () =
     let t0 = Time_compat.now () in
-    log_acquire_attempt ();
-    let autonomous_result =
-      if is_autonomous
-      then (
-        (* Fairness cooldown: if this keeper recently completed a turn and
+    match current_fleet_admission_result () with
+    | Error _ as e -> e
+    | Ok () ->
+      log_acquire_attempt ();
+      let turn_slot_result =
+        acquire_bounded ~label:Turn_pool ~phase:Turn_slot keeper_turn_sem
+      in
+      (match turn_slot_result with
+       | Error _ as e -> e
+       | Ok () ->
+         slot_state.acquired_turn := true;
+         run_after_acquire_flag_hook_for_test
+           ~label:(slot_pool_to_string Turn_pool)
+           ~keeper_name;
+         let autonomous_result =
+           if is_autonomous
+           then (
+             (* Fairness cooldown: if this keeper recently completed a turn and
              other keepers are waiting, yield before re-entering the FIFO
              queue to give peers a chance to reach head-of-queue first.
              See [maybe_yield_for_fairness] and #6810. *)
-        maybe_yield_for_fairness ~keeper_name;
-        let ticket = enqueue_autonomous_waiter ~keeper_name ~runtime_id:runtime_profile in
-        slot_state.autonomous_ticket := Some ticket;
-        (* Reset the queue-head timeout clock to the moment we bound the
+             maybe_yield_for_fairness ~keeper_name;
+             let ticket = enqueue_autonomous_waiter ~keeper_name ~runtime_id:runtime_profile in
+             slot_state.autonomous_ticket := Some ticket;
+             (* Reset the queue-head timeout clock to the moment we bound the
              queue, NOT [t0] (slot-entry). Otherwise [maybe_yield_for_fairness]
              above silently consumes the [semaphore_wait_timeout_sec] budget
              before we even appear in the FIFO, producing the symptom
              "skipping turn (semaphore wait > 60s, peers holding slot,
              autonomous_available=N)" with N>0 because the slot is genuinely
              free but we ran out of budget while sleeping in fairness yield. *)
-        let queue_entered_at = Time_compat.now () in
-        match
-          wait_for_autonomous_queue_head
-            ~keeper_name ~ticket ~runtime_id:runtime_profile ~started_at:queue_entered_at
-        with
-        | Error _ as e -> e
-        | Ok () ->
-          (* The FIFO should order admission into the semaphore wait queue,
+             let queue_entered_at = Time_compat.now () in
+             match
+               wait_for_autonomous_queue_head
+                 ~keeper_name ~ticket ~runtime_id:runtime_profile ~started_at:queue_entered_at
+             with
+             | Error _ as e -> e
+             | Ok () ->
+               (* The FIFO should order admission into the semaphore wait queue,
              not hold the queue head hostage while this fiber waits for an
              autonomous permit. Once we are at the head, drop the ticket
              before [acquire_bounded] so tail keepers can also enter the
              semaphore wait queue instead of burning their whole
              queue-head timeout behind one slow head waiter. *)
-          drop_autonomous_waiter ~ticket;
-          slot_state.autonomous_ticket := None;
-          (match
-             acquire_bounded
-               ~label:Autonomous_pool
-               ~phase:Autonomous_slot
-               autonomous_turn_semaphore
-           with
-           | Error _ as e -> e
-           | Ok () ->
-             (* Cancel-race fix (see acquire_bounded comment): set the
+               drop_autonomous_waiter ~ticket;
+               slot_state.autonomous_ticket := None;
+               (match
+                  acquire_bounded
+                    ~label:Autonomous_pool
+                    ~phase:Autonomous_slot
+                    autonomous_turn_semaphore
+                with
+                | Error _ as e -> e
+                | Ok () ->
+                  (* Cancel-race fix (see acquire_bounded comment): set the
                  [acquired_*] flag BEFORE [record_holder]. The flag is a
                  plain ref assignment (no cancel point); record_holder
                  acquires a [~protect:true] mutex (cancel-safe within
@@ -1208,78 +1290,80 @@ let with_keeper_turn_slot ?(runtime_profile = "unknown") ~keeper_name ~channel f
                  here the semaphore is reported as not-held and never
                  leaks; if it arrives after the flag set, release path
                  calls drop_holder (no-op when no entry exists). *)
-             slot_state.acquired_autonomous := true;
-             run_after_acquire_flag_hook_for_test
-               ~label:(slot_pool_to_string Autonomous_pool)
-               ~keeper_name;
-             let acquisition_id =
-               record_holder
-                 ~label:Autonomous_pool
-                 ~keeper_name
-                 ~acquired_at:(Time_compat.now ())
-             in
-             slot_state.autonomous_acquisition_id := Some acquisition_id;
-             Ok ()))
-      else Ok ()
-    in
-    match autonomous_result with
-    | Error _ as e -> e
-    | Ok () ->
-      let reactive_result =
-        if is_autonomous
-        then Ok ()
-        else (
-          match
-            acquire_bounded
-              ~label:Reactive_pool
-              ~phase:Reactive_slot
-              reactive_turn_semaphore
-          with
+                  slot_state.acquired_autonomous := true;
+                  run_after_acquire_flag_hook_for_test
+                    ~label:(slot_pool_to_string Autonomous_pool)
+                    ~keeper_name;
+                  let acquisition_id =
+                    record_holder
+                      ~label:Autonomous_pool
+                      ~keeper_name
+                      ~acquired_at:(Time_compat.now ())
+                  in
+                  slot_state.autonomous_acquisition_id := Some acquisition_id;
+                  Ok ()))
+           else Ok ()
+         in
+         (match autonomous_result with
           | Error _ as e -> e
           | Ok () ->
-            (* Cancel-race fix: flag THEN record_holder. *)
-            slot_state.acquired_reactive := true;
-            run_after_acquire_flag_hook_for_test
-              ~label:(slot_pool_to_string Reactive_pool)
-              ~keeper_name;
-            let acquisition_id =
-              record_holder
-                ~label:Reactive_pool
-                ~keeper_name
-                ~acquired_at:(Time_compat.now ())
+            let reactive_result =
+              if is_autonomous
+              then Ok ()
+              else (
+                match
+                  acquire_bounded
+                    ~label:Reactive_pool
+                    ~phase:Reactive_slot
+                    reactive_turn_semaphore
+                with
+                | Error _ as e -> e
+                | Ok () ->
+                  (* Cancel-race fix: flag THEN record_holder. *)
+                  slot_state.acquired_reactive := true;
+                  run_after_acquire_flag_hook_for_test
+                    ~label:(slot_pool_to_string Reactive_pool)
+                    ~keeper_name;
+                  let acquisition_id =
+                    record_holder
+                      ~label:Reactive_pool
+                      ~keeper_name
+                      ~acquired_at:(Time_compat.now ())
+                  in
+                  slot_state.reactive_acquisition_id := Some acquisition_id;
+                  Ok ())
             in
-            slot_state.reactive_acquisition_id := Some acquisition_id;
-            Ok ())
-      in
-      (match reactive_result with
-       | Error _ as e -> e
-       | Ok () ->
-         (match acquire_bounded ~label:Turn_pool ~phase:Turn_slot turn_semaphore with
-          | Error _ as e -> e
-          | Ok () ->
-            (* Cancel-race fix: flag THEN record_holder. *)
-            slot_state.acquired_turn := true;
-            run_after_acquire_flag_hook_for_test
-              ~label:(slot_pool_to_string Turn_pool)
-              ~keeper_name;
-            let acquisition_id =
-              record_holder
-                ~label:Turn_pool
-                ~keeper_name
-                ~acquired_at:(Time_compat.now ())
-            in
-            slot_state.turn_acquisition_id := Some acquisition_id;
-            let semaphore_wait_sec = Time_compat.now () -. t0 in
-            observe_semaphore_wait_seconds
-              ~keeper_name
-              ~runtime_profile
-              ~channel:channel_label
-              semaphore_wait_sec;
-            let semaphore_wait_ms =
-              int_of_float
-                ((if semaphore_wait_sec < 0.0 then 0.0 else semaphore_wait_sec) *. 1000.0)
-            in
-            Ok semaphore_wait_ms))
+            (match reactive_result with
+             | Error _ as e -> e
+             | Ok () ->
+               (match
+                  Keeper_turn_admission.acquire_runtime_turn_lease
+                    ~keeper_name
+                    ~channel
+                    ()
+                with
+                | Error err -> Error (admission_error_to_result err)
+                | Ok () ->
+                  slot_state.acquired_runtime_turn := true;
+                  let acquisition_id =
+                    record_holder
+                      ~label:Turn_pool
+                      ~keeper_name
+                      ~acquired_at:(Time_compat.now ())
+                  in
+                  slot_state.turn_acquisition_id := Some acquisition_id;
+                  let semaphore_wait_sec = Time_compat.now () -. t0 in
+                  observe_semaphore_wait_seconds
+                    ~keeper_name
+                    ~runtime_profile
+                    ~channel:channel_label
+                    semaphore_wait_sec;
+                  let semaphore_wait_ms =
+                    int_of_float
+                      ((if semaphore_wait_sec < 0.0 then 0.0 else semaphore_wait_sec)
+                       *. 1000.0)
+                  in
+                  Ok semaphore_wait_ms))))
   in
   Eio_guard.protect
     ~finally:(fun () -> release_keeper_turn_slot ~keeper_name slot_state)
@@ -1287,6 +1371,30 @@ let with_keeper_turn_slot ?(runtime_profile = "unknown") ~keeper_name ~channel f
        match acquire_all () with
        | Error _ as e -> e
        | Ok semaphore_wait_ms -> Ok (f ~semaphore_wait_ms))
+;;
+
+let timeout_of_runtime_admission_error ~keeper_name error =
+  let holders = snapshot_holders ~label:Turn_pool ~now:(Time_compat.now ()) in
+  (match error with
+   | `Fleet_paused ->
+     Log.Keeper.info "runtime_admission: fleet paused, skipping keeper=%s" keeper_name
+   | `Fleet_stopped ->
+     Log.Keeper.warn "runtime_admission: fleet stopped, rejecting keeper=%s" keeper_name
+   | `Runtime_capacity_exceeded snapshot ->
+     Log.Keeper.routine
+       "runtime_admission: capacity exceeded keeper=%s inflight=%d limit=%d"
+       keeper_name
+       snapshot.Keeper_turn_admission.runtime_inflight
+       snapshot.runtime_limit);
+  semaphore_wait_timeout_snapshot ~phase:Turn_slot ~holders ()
+;;
+
+let with_keeper_turn_slot ?runtime_profile ~keeper_name ~channel f =
+  match with_keeper_turn_slot_admission ?runtime_profile ~keeper_name ~channel f with
+  | Ok _ as ok -> ok
+  | Error (`Semaphore_wait_timeout _ as e) -> Error e
+  | Error ((`Fleet_paused | `Fleet_stopped | `Runtime_capacity_exceeded _) as e) ->
+    Error (`Semaphore_wait_timeout (timeout_of_runtime_admission_error ~keeper_name e))
 ;;
 
 let with_keeper_turn_slot_for_test ?runtime_profile ~keeper_name ~channel f =

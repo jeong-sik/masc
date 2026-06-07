@@ -9,17 +9,20 @@
     requires an Eio fiber context (Eio.Mutex on holder_table). *)
 
 module KK = Masc.Keeper_keepalive
+module KTA = Masc.Keeper_turn_admission
 module KTS = Masc.Keeper_turn_slot
 
 exception After_flag_injected
 
 let with_fresh_state body () =
-  Eio_main.run @@ fun _env ->
-    KK.set_after_acquire_flag_hook_for_test None;
-    KK.clear_force_released_markers_for_test ();
-    KK.reset_autonomous_completion_for_test ();
-    KK.reset_autonomous_turn_queue_for_test ();
-    body ()
+  Eio_main.run @@ fun env ->
+  Masc_test_deps.init_eio_clock env;
+  KK.set_after_acquire_flag_hook_for_test None;
+  KK.clear_force_released_markers_for_test ();
+  KK.reset_autonomous_completion_for_test ();
+  KK.reset_autonomous_turn_queue_for_test ();
+  KTA.reset_for_test ();
+  body ()
 
 let assert_eq ~msg ~expected ~actual =
   if expected <> actual then
@@ -392,40 +395,38 @@ let test_force_released_autonomous_holder_does_not_stamp_completion () =
          "force-released autonomous holder stamped normal completion: delay=%.3f"
          delay)
 
-let test_no_clock_exhausted_turn_slot_fails_closed () =
-  match Eio_context.get_clock_opt () with
-  | Some _ ->
-      (* This executable normally runs without a global Eio_context clock.
-         If a wider test runner has installed one, the no-clock branch is
-         not reachable in this process. *)
+let test_runtime_admission_exhausted_turn_slot_fails_closed () =
+  KTA.reset_for_test ~runtime_turn_limit:1 ();
+  match
+    KTA.acquire_runtime_turn_lease
+      ~keeper_name:"diag-runtime-holder"
+      ~channel:Masc.Keeper_world_observation.Reactive
       ()
-  | None ->
-      let rec acquire_all acquired =
-        if Eio.Semaphore.get_value KTS.turn_semaphore <= 0 then acquired
-        else begin
-          Eio.Semaphore.acquire KTS.turn_semaphore;
-          acquire_all (acquired + 1)
-        end
-      in
-      let rec release_n = function
-        | n when n <= 0 -> ()
-        | n ->
-            Eio.Semaphore.release KTS.turn_semaphore;
-            release_n (n - 1)
-      in
-      let acquired = acquire_all 0 in
+  with
+  | Error err ->
+      failwith
+        (Printf.sprintf
+           "failed to acquire setup runtime lease: %s"
+           (KTA.admission_error_to_string err))
+  | Ok () ->
       Fun.protect
-        ~finally:(fun () -> release_n acquired)
+        ~finally:(fun () ->
+          KTA.release_runtime_turn_lease ();
+          KTA.reset_for_test ())
         (fun () ->
           let result =
             KK.with_keeper_turn_slot_for_test
-              ~keeper_name:"diag-no-clock-exhausted"
+              ~keeper_name:"diag-runtime-exhausted"
               ~channel:Masc.Keeper_world_observation.Reactive
               (fun ~semaphore_wait_ms:_ ->
-                failwith "exhausted turn slot should fail before body runs")
+                failwith "exhausted runtime admission should fail before body runs")
           in
           match result with
           | Error (`Semaphore_wait_timeout snapshot) ->
+              assert_eq
+                ~msg:"runtime admission failure maps to turn-slot timeout"
+                ~expected:0
+                ~actual: snapshot.timeout_turn_available;
               if snapshot.timeout_phase <> KK.Turn_slot then
                 failwith
                   (Printf.sprintf
@@ -433,7 +434,7 @@ let test_no_clock_exhausted_turn_slot_fails_closed () =
                      (KK.semaphore_wait_phase_to_string
                         snapshot.timeout_phase))
           | Ok _ ->
-              failwith "exhausted no-clock acquire should fail closed")
+              failwith "exhausted runtime admission should fail closed")
 
 let test_force_release_marker_ttl_bounds_unfinalized_fibers () =
   KK.clear_force_released_markers_for_test ();
@@ -477,8 +478,8 @@ let () =
         test_force_release_marker_does_not_leak_to_replacement;
       "force released autonomous holder skips completion stamp",
         test_force_released_autonomous_holder_does_not_stamp_completion;
-      "no-clock exhausted turn slot fails closed",
-        test_no_clock_exhausted_turn_slot_fails_closed;
+      "runtime admission exhausted turn slot fails closed",
+        test_runtime_admission_exhausted_turn_slot_fails_closed;
       "force release marker ttl bounds unfinalized fibers",
         test_force_release_marker_ttl_bounds_unfinalized_fibers;
     ]

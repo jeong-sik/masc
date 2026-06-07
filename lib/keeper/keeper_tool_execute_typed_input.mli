@@ -75,14 +75,10 @@ type execute_input =
           construction owns the inter-stage fd plumbing.  Out-of-stage
           redirects on the pipeline's endpoints are a deferred extension. *)
 
-type allowlist_mode =
-  | Dev_full
-  | Readonly
-
 type validation_error =
   | Executable_not_allowlisted of {
       name : string;
-      mode : allowlist_mode;
+      readonly : bool;
     }
   | Empty_executable of { argv : string list }
   | Empty_argv of { executable : string }
@@ -141,14 +137,14 @@ val of_json : Yojson.Safe.t -> (execute_input, string) result
     [executable] fields, and duplicated executable tokens in [argv] remain
     caller errors. *)
 
-val validate : mode:allowlist_mode -> execute_input -> (unit, validation_error) result
+val validate : readonly:bool -> execute_input -> (unit, validation_error) result
 (** Run all structural checks against [input].  Returns [Ok ()] on
     success, or the first {!validation_error} encountered.  No side
     effects, no exceptions. *)
 
 val to_shell_ir_unvalidated :
   ?sandbox:Masc_exec.Sandbox_target.t ->
-  mode:allowlist_mode ->
+  readonly:bool ->
   execute_input ->
   (Masc_exec.Shell_ir.t, validation_error) result
 (** Lower [input] into {!Masc_exec.Shell_ir.t} without allowlist validation.
@@ -158,7 +154,7 @@ val to_shell_ir_unvalidated :
 
 val to_shell_ir :
   ?sandbox:Masc_exec.Sandbox_target.t ->
-  mode:allowlist_mode ->
+  readonly:bool ->
   execute_input ->
   (Masc_exec.Shell_ir.t, validation_error) result
 (** Validate and lower [input] into {!Masc_exec.Shell_ir.t}.  [Pipeline]

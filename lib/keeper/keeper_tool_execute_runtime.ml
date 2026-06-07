@@ -94,8 +94,8 @@ let input_with_cwd cwd = function
   | Keeper_tool_execute_typed_input.Pipeline { stages; cwd = _; env } ->
     Keeper_tool_execute_typed_input.Pipeline { stages; cwd = Some cwd; env }
 
-let typed_input_shell_ir_unvalidated ~mode input =
-  match Keeper_tool_execute_typed_input.to_shell_ir_unvalidated ~mode input with
+let typed_input_shell_ir_unvalidated ~readonly input =
+  match Keeper_tool_execute_typed_input.to_shell_ir_unvalidated ~readonly input with
   | Error _ -> None
   | Ok ir -> Some ir
 
@@ -134,11 +134,7 @@ let handle_tool_execute_typed
           ]
       in
       let typed_args = assoc_upsert "cwd" (`String cwd) args in
-      let mode =
-        if write_enabled
-        then Keeper_tool_execute_typed_input.Dev_full
-        else Keeper_tool_execute_typed_input.Readonly
-      in
+      let readonly = not write_enabled in
       match Keeper_tool_execute_typed_input.of_json typed_args with
       | Error e ->
         error_json
@@ -147,7 +143,7 @@ let handle_tool_execute_typed
              @ execution_location_fields cwd)
           e
       | Ok input ->
-        (match Keeper_tool_execute_typed_input.validate ~mode input with
+        (match Keeper_tool_execute_typed_input.validate ~readonly input with
          | Error e ->
            let alts =
              Keeper_tool_execute_typed_input.validation_error_alternatives e
@@ -163,7 +159,7 @@ let handle_tool_execute_typed
            error_json ~fields (typed_validation_error_text e)
          | Ok () ->
         let cmd = typed_input_command_text input in
-        let input_ir = typed_input_shell_ir_unvalidated ~mode input in
+        let input_ir = typed_input_shell_ir_unvalidated ~readonly input in
         let cwd, root_git_cwd_error =
           resolve_typed_git_cwd
             ~config
@@ -234,7 +230,7 @@ let handle_tool_execute_typed
            This removes the previous double-parse (mutation classifier
            re-tokenized cmd:string via the legacy string tokenizer before IR
            was even built). *)
-        match Keeper_tool_execute_typed_input.to_shell_ir ~sandbox:dispatch_sandbox ~mode input with
+        match Keeper_tool_execute_typed_input.to_shell_ir ~sandbox:dispatch_sandbox ~readonly input with
         | Error e ->
           let alts = Keeper_tool_execute_typed_input.validation_error_alternatives e in
           let fields =

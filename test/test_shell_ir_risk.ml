@@ -139,7 +139,7 @@ let test_typed_execute_shell_capable_executable_is_destructive () =
   match Masc.Keeper_tool_execute_typed_input.of_json input with
   | Error msg -> Alcotest.failf "typed Execute parse failed: %s" msg
   | Ok typed_input ->
-    (match Masc.Keeper_tool_execute_typed_input.to_shell_ir ~mode:Dev_full typed_input with
+    (match Masc.Keeper_tool_execute_typed_input.to_shell_ir ~readonly:false typed_input with
      | Error err ->
        Alcotest.failf
          "typed Execute validation failed: %a"

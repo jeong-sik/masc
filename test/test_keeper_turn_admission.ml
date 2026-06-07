@@ -249,6 +249,77 @@ let test_with_turn_admission_releases_on_success () =
   Alcotest.(check int) "wrapper released token" 0 (A.global_inflight ());
   A.reset_for_test ()
 
+let test_fake_llm_turn_holds_admission_until_callback_finishes () =
+  A.reset_for_test ();
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let started_p, started_u = Eio.Promise.create () in
+  let release_p, release_u = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    match
+      A.with_turn_admission
+        ~keeper_name:"fake-llm-a"
+        ~runtime_profile:"fake-llm"
+        ~channel:Masc.Keeper_world_observation.Reactive
+        (fun ~semaphore_wait_ms:_ ->
+           Eio.Promise.resolve started_u ();
+           Eio.Promise.await release_p)
+    with
+    | Ok () -> ()
+    | Error (`Semaphore_wait_timeout _) ->
+      Alcotest.fail "fake llm turn hit unexpected wait timeout"
+    | Error (`Turn_admission_rejected rejection) ->
+      Alcotest.failf
+        "fake llm turn hit unexpected rejection: %s"
+        (A.rejection_to_string rejection));
+  Eio.Promise.await started_p;
+  Alcotest.(check int) "fake llm callback holds one token" 1 (A.global_inflight ());
+  Alcotest.(check (result (pair token_testable int) rejection))
+    "same keeper rejected while fake llm is still running"
+    (Error A.Global_inflight_exceeded)
+    (A.acquire_turn
+       ~limit:2
+       ~timeout_s:0.0
+       ~keeper_name:"fake-llm-a"
+       ~runtime_profile:"fake-llm"
+       ~channel:"test"
+       ());
+  let other_keeper =
+    match
+      A.acquire_turn
+        ~limit:2
+        ~timeout_s:0.0
+        ~keeper_name:"fake-llm-b"
+        ~runtime_profile:"fake-llm"
+        ~channel:"test"
+        ()
+    with
+    | Ok (token, _) -> token
+    | Error rejection ->
+      Alcotest.failf
+        "different keeper should be admitted while fake llm is running: %s"
+        (A.rejection_to_string rejection)
+  in
+  Alcotest.(check int) "different keeper admitted concurrently" 2 (A.global_inflight ());
+  A.release_turn other_keeper;
+  Eio.Promise.resolve release_u ();
+  let rec wait_until_released attempts =
+    if A.global_inflight () = 0
+    then ()
+    else if attempts = 0
+    then
+      Alcotest.failf
+        "fake llm callback did not release token; inflight=%d"
+        (A.global_inflight ())
+    else (
+      Eio.Fiber.yield ();
+      Eio.Time.sleep clock 0.01;
+      wait_until_released (attempts - 1))
+  in
+  wait_until_released 20;
+  A.reset_for_test ()
+
 let test_force_release_releases_with_turn_admission_token () =
   A.reset_for_test ();
   (match
@@ -304,6 +375,10 @@ let () =
             "with_turn_admission releases on success"
             `Quick
             test_with_turn_admission_releases_on_success
+        ; Alcotest.test_case
+            "fake llm turn holds admission until callback finishes"
+            `Quick
+            test_fake_llm_turn_holds_admission_until_callback_finishes
         ; Alcotest.test_case
             "force release drops with_turn_admission token"
             `Quick

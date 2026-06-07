@@ -1286,9 +1286,49 @@ let test_health_json_degrades_when_reaction_capacity_below_target () =
           Alcotest.(check string) "health marks target-capacity blocker"
             "reaction_capacity_below_target"
             (fleet_safety |> member "blocker" |> to_string);
-          Alcotest.(check bool) "health fleet asks for operator action" true
-            (fleet_safety |> member "operator_action_required" |> to_bool);
-          ())))
+	          Alcotest.(check bool) "health fleet asks for operator action" true
+	            (fleet_safety |> member "operator_action_required" |> to_bool);
+	          ())))
+
+let test_health_json_blocks_when_turn_admission_stopped () =
+  with_temp_dir "health-turn-admission-stopped" (fun dir ->
+      let config_root = make_config_root dir in
+      with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
+      let previous_state = !Server_auth.server_state in
+      Config_dir_resolver.reset ();
+      Fun.protect
+        ~finally:(fun () ->
+          Server_auth.server_state := previous_state;
+          Config_dir_resolver.reset ();
+          Keeper_turn_admission.reset_for_test ())
+        (fun () ->
+          let state = Mcp_server.create_state ~base_path:dir in
+          Server_auth.server_state := Some state;
+          let config = state.Mcp_server.workspace_config in
+          let active =
+            make_keeper_meta ~name:"admission-stopped-active"
+              ~trace_id:"trace-admission-stopped-active" ()
+          in
+          write_keeper_meta_exn config active;
+          with_running_keeper_metas config [ active ] (fun () ->
+              ignore
+                (Keeper_turn_admission.stop_fleet ~base_path:dir
+                   ~reason:"test_stopped_admission" ~updated_by:"test" ()
+                  : Keeper_turn_admission.fleet_policy);
+              let request = Httpun.Request.create `GET "/health" in
+              let json = Server_routes_http_runtime.make_health_json request in
+              let open Yojson.Safe.Util in
+              let fleet_safety = json |> member "keeper_fleet_safety" in
+              Alcotest.(check string) "admission stop blocks fleet safety"
+                "blocked"
+                (fleet_safety |> member "status" |> to_string);
+              Alcotest.(check string) "admission stop becomes fleet blocker"
+                "turn_admission_stopped"
+                (fleet_safety |> member "blocker" |> to_string);
+              Alcotest.(check bool) "admission stop asks operator action" true
+                (fleet_safety |> member "operator_action_required" |> to_bool);
+              Alcotest.(check string) "admission state exposed" "stopped"
+                (fleet_safety |> member "turn_admission_state" |> to_string))))
 
 let test_health_json_distinguishes_failing_executable_keepers () =
   with_temp_dir "health-failing-executable-keepers" (fun dir ->
@@ -2919,6 +2959,9 @@ let () =
           Alcotest.test_case
             "health json degrades when reaction capacity is below target"
             `Quick test_health_json_degrades_when_reaction_capacity_below_target;
+          Alcotest.test_case
+            "health json blocks when turn admission is stopped"
+            `Quick test_health_json_blocks_when_turn_admission_stopped;
           Alcotest.test_case
             "health json distinguishes failing executable keepers"
             `Quick test_health_json_distinguishes_failing_executable_keepers;

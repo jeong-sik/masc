@@ -1,4 +1,4 @@
-(* keeper_turn_slot — admitted-turn holder diagnostics and compatibility helpers.
+(* keeper_turn_holders — admitted-turn holder diagnostics and compatibility helpers.
 
    Per-keeper isolation, fleet-wide capacity, and fleet stop policy live in
    [Keeper_turn_admission]. This module records holder rows only after
@@ -8,27 +8,27 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 
-type slot_pool = Keeper_turn_slot_types.slot_pool =
-  | Turn_pool
-  | Autonomous_pool
-  | Reactive_pool
+type holder_pool = Keeper_turn_admission_types.holder_pool =
+  | Turn_holder
+  | Autonomous_holder
+  | Reactive_holder
 
-let slot_pool_to_string = Keeper_turn_slot_types.slot_pool_to_string
+let holder_pool_to_string = Keeper_turn_admission_types.holder_pool_to_string
 
-exception Semaphore_wait_timeout = Keeper_turn_slot_types.Semaphore_wait_timeout
+exception Semaphore_wait_timeout = Keeper_turn_admission_types.Semaphore_wait_timeout
 
-type semaphore_wait_phase = Keeper_turn_slot_types.semaphore_wait_phase =
+type admission_wait_phase = Keeper_turn_admission_types.admission_wait_phase =
   | Autonomous_queue_head
-  | Autonomous_slot
-  | Reactive_slot
-  | Turn_slot
+  | Autonomous_admission
+  | Reactive_admission
+  | Global_admission
 
-let semaphore_wait_phase_to_string =
-  Keeper_turn_slot_types.semaphore_wait_phase_to_string
+let admission_wait_phase_to_string =
+  Keeper_turn_admission_types.admission_wait_phase_to_string
 
-type semaphore_wait_timeout = Keeper_turn_slot_types.semaphore_wait_timeout =
+type semaphore_wait_timeout = Keeper_turn_admission_types.semaphore_wait_timeout =
   { timeout_wait_sec : float
-  ; timeout_phase : semaphore_wait_phase
+  ; timeout_phase : admission_wait_phase
   ; timeout_autonomous_available : int
   ; timeout_reactive_available : int
   ; timeout_turn_available : int
@@ -37,7 +37,7 @@ type semaphore_wait_timeout = Keeper_turn_slot_types.semaphore_wait_timeout =
   ; timeout_holders : (string * float) list
   }
 
-let int_of_env_default = Keeper_turn_slot_types.int_of_env_default
+let int_of_env_default = Keeper_turn_admission_types.int_of_env_default
 
 type throttle_source = Keeper_turn_admission.throttle_source =
   | Env_override
@@ -51,7 +51,7 @@ let effective_turn_throttle_limit = Keeper_turn_admission.effective_turn_throttl
 
 (* Holder tracking — preserved for diagnostics. *)
 type holder_key =
-  { holder_label : slot_pool
+  { holder_label : holder_pool
   ; holder_keeper_name : string
   ; holder_acquisition_id : int
   }
@@ -144,7 +144,7 @@ let force_release_holder_records ~keeper_name =
       (fun (key, _) -> Hashtbl.replace force_released_holders key now)
       matches;
     matches
-    |> List.map (fun (key, age) -> slot_pool_to_string key.holder_label, age)
+    |> List.map (fun (key, age) -> holder_pool_to_string key.holder_label, age)
     |> List.sort (fun (a, _) (b, _) -> String.compare a b))
 ;;
 
@@ -178,9 +178,9 @@ let snapshot_holders ~label ~now =
   |> List.sort (fun (_, a) (_, b) -> compare b a)
 ;;
 
-let turn_slot_holders ~now = snapshot_holders ~label:Turn_pool ~now
-let autonomous_slot_holders ~now = snapshot_holders ~label:Autonomous_pool ~now
-let reactive_slot_holders ~now = snapshot_holders ~label:Reactive_pool ~now
+let turn_holders ~now = snapshot_holders ~label:Turn_holder ~now
+let autonomous_holders ~now = snapshot_holders ~label:Autonomous_holder ~now
+let reactive_holders ~now = snapshot_holders ~label:Reactive_holder ~now
 
 let complete_force_release ~keeper_name released =
   match released with
@@ -199,7 +199,7 @@ let force_release_stale_holder ~keeper_name =
   |> List.map fst
 ;;
 
-let format_slot_holders ?(limit = 5) holders =
+let format_holders ?(limit = 5) holders =
   let limit = max 1 limit in
   let rec take n = function
     | [] -> []
@@ -229,9 +229,9 @@ let snapshot_all_holders ~now =
     (fun key ts (turn, auto, reactive) ->
        let held = now -. ts in
        match key.holder_label with
-       | Turn_pool -> (key.holder_keeper_name, held) :: turn, auto, reactive
-       | Autonomous_pool -> turn, (key.holder_keeper_name, held) :: auto, reactive
-       | Reactive_pool -> turn, auto, (key.holder_keeper_name, held) :: reactive)
+       | Turn_holder -> (key.holder_keeper_name, held) :: turn, auto, reactive
+       | Autonomous_holder -> turn, (key.holder_keeper_name, held) :: auto, reactive
+       | Reactive_holder -> turn, auto, (key.holder_keeper_name, held) :: reactive)
     table
     ([], [], [])
   |> fun (t, a, r) ->
@@ -239,13 +239,13 @@ let snapshot_all_holders ~now =
   by_held t, by_held a, by_held r
 ;;
 
-let slot_holders_summary ?(limit = 5) ~now () =
+let holders_summary ?(limit = 5) ~now () =
   let turn, autonomous, reactive = snapshot_all_holders ~now in
   Printf.sprintf
     "turn_holders=%s autonomous_holders=%s reactive_holders=%s"
-    (format_slot_holders ~limit turn)
-    (format_slot_holders ~limit autonomous)
-    (format_slot_holders ~limit reactive)
+    (format_holders ~limit turn)
+    (format_holders ~limit autonomous)
+    (format_holders ~limit reactive)
 ;;
 
 (* Semaphore wait timeout — preserved for backward compat. *)
@@ -276,19 +276,19 @@ let semaphore_wait_timeout_snapshot ~phase ?queue_ahead ?(holders = []) () =
   }
 ;;
 
-type keeper_turn_slot_state =
+type turn_holder_state =
   { acquired_turn : bool ref
   ; turn_acquisition_id : int option ref
-  ; channel_holder_label : slot_pool option
+  ; channel_holder_label : holder_pool option
   ; channel_acquisition_id : int option ref
   ; admission_token : Keeper_turn_admission.token option ref
   }
 
-type keeper_turn_slot_control =
+type turn_holder_control =
   { is_held : unit -> bool
   }
 
-let make_keeper_turn_slot_state ~channel_holder_label =
+let make_turn_holder_state ~channel_holder_label =
   { acquired_turn = ref false
   ; turn_acquisition_id = ref None
   ; channel_holder_label
@@ -296,12 +296,12 @@ let make_keeper_turn_slot_state ~channel_holder_label =
   ; admission_token = ref None
   }
 
-let keeper_turn_slot_is_held state =
+let turn_holder_is_held state =
   match !(state.turn_acquisition_id) with
   | None -> !(state.acquired_turn)
   | Some acquisition_id ->
     let key =
-      { holder_label = Turn_pool
+      { holder_label = Turn_holder
       ; holder_keeper_name = ""
       ; holder_acquisition_id = acquisition_id
       }
@@ -327,7 +327,7 @@ let run_after_acquire_flag_hook_for_test ~label ~keeper_name =
 
 let observe_bookkeeping_failure ~op ~(kind : Keeper_bookkeeping_failure_kind.t) =
   Otel_metric_store.inc_counter
-    Keeper_metrics.(to_string TurnSlotBookkeepingFailures)
+    Keeper_metrics.(to_string TurnHolderBookkeepingFailures)
     ~labels:[ "op", op; "kind", Keeper_bookkeeping_failure_kind.to_label kind ]
     ()
 ;;
@@ -336,10 +336,10 @@ let safe_bookkeeping ~op f =
   try f () with
   | Eio.Cancel.Cancelled _ ->
     observe_bookkeeping_failure ~op ~kind:Keeper_bookkeeping_failure_kind.Cancelled;
-    Log.Keeper.warn "release_keeper_turn_slot: %s skipped (Cancelled)" op
+    Log.Keeper.warn "release_turn_holder: %s skipped (Cancelled)" op
   | exn ->
     observe_bookkeeping_failure ~op ~kind:Keeper_bookkeeping_failure_kind.Exception;
-    Log.Keeper.warn "release_keeper_turn_slot: %s exception: %s" op (Printexc.to_string exn)
+    Log.Keeper.warn "release_turn_holder: %s exception: %s" op (Printexc.to_string exn)
 ;;
 
 let release_recorded_holder ~keeper_name ~label ~acquisition_id =
@@ -357,18 +357,18 @@ let release_recorded_holder ~keeper_name ~label ~acquisition_id =
      with
      | Eio.Cancel.Cancelled _ ->
        observe_bookkeeping_failure ~op:"drop_holder" ~kind:Keeper_bookkeeping_failure_kind.Cancelled;
-       Log.Keeper.warn "release_keeper_turn_slot: drop_holder skipped (Cancelled)"
+       Log.Keeper.warn "release_turn_holder: drop_holder skipped (Cancelled)"
      | exn ->
        observe_bookkeeping_failure ~op:"drop_holder" ~kind:Keeper_bookkeeping_failure_kind.Exception;
-       Log.Keeper.warn "release_keeper_turn_slot: drop_holder exception: %s" (Printexc.to_string exn));
+       Log.Keeper.warn "release_turn_holder: drop_holder exception: %s" (Printexc.to_string exn));
     !was_force_released
 ;;
 
-let release_keeper_turn_slot_impl ~keeper_name state =
+let release_turn_holder_impl ~keeper_name state =
   let turn_was_force_released =
     release_recorded_holder
       ~keeper_name
-      ~label:Turn_pool
+      ~label:Turn_holder
       ~acquisition_id:!(state.turn_acquisition_id)
   in
   let channel_was_force_released =
@@ -388,14 +388,14 @@ let release_keeper_turn_slot_impl ~keeper_name state =
       state.admission_token := None)
 ;;
 
-let release_keeper_turn_slot ~keeper_name state =
+let release_turn_holder ~keeper_name state =
   if !(state.acquired_turn) then (
     state.acquired_turn := false;
-    release_keeper_turn_slot_impl ~keeper_name state)
+    release_turn_holder_impl ~keeper_name state)
 ;;
 
-let release_keeper_turn_slot_for_retry ~keeper_name state =
-  release_keeper_turn_slot ~keeper_name state
+let release_turn_holder_for_retry ~keeper_name state =
+  release_turn_holder ~keeper_name state
 ;;
 
 let force_release_holder_for ~keeper_name =
@@ -501,8 +501,8 @@ let observe_semaphore_wait_seconds ~keeper_name ~runtime_profile ~channel second
 ;;
 
 let channel_holder_label = function
-  | Keeper_world_observation.Reactive -> Some Reactive_pool
-  | Keeper_world_observation.Scheduled_autonomous -> Some Autonomous_pool
+  | Keeper_world_observation.Reactive -> Some Reactive_holder
+  | Keeper_world_observation.Scheduled_autonomous -> Some Autonomous_holder
 ;;
 
 let remaining_global_capacity () =
@@ -515,7 +515,7 @@ let remaining_channel_capacity channel =
     ~channel
 ;;
 
-let run_with_acquired_slot
+let run_with_admission_token
       ~runtime_profile
       ~keeper_name
       ~channel
@@ -524,29 +524,29 @@ let run_with_acquired_slot
       ~started_at
       f
   =
-  let slot_state =
-    make_keeper_turn_slot_state ~channel_holder_label:(channel_holder_label channel)
+  let holder_state =
+    make_turn_holder_state ~channel_holder_label:(channel_holder_label channel)
   in
-  slot_state.acquired_turn := true;
-  slot_state.admission_token := Some admission_token;
-  let cleanup () = release_keeper_turn_slot ~keeper_name slot_state in
+  holder_state.acquired_turn := true;
+  holder_state.admission_token := Some admission_token;
+  let cleanup () = release_turn_holder ~keeper_name holder_state in
   let body () =
     run_after_acquire_flag_hook_for_test
-      ~label:(slot_pool_to_string Turn_pool)
+      ~label:(holder_pool_to_string Turn_holder)
       ~keeper_name;
     let acquired_at = Time_compat.now () in
     let turn_acquisition_id =
-      record_holder ~label:Turn_pool ~keeper_name ~acquired_at
+      record_holder ~label:Turn_holder ~keeper_name ~acquired_at
     in
-    slot_state.turn_acquisition_id := Some turn_acquisition_id;
-    (match slot_state.channel_holder_label with
+    holder_state.turn_acquisition_id := Some turn_acquisition_id;
+    (match holder_state.channel_holder_label with
      | None -> ()
      | Some label ->
        run_after_acquire_flag_hook_for_test
-         ~label:(slot_pool_to_string label)
+         ~label:(holder_pool_to_string label)
          ~keeper_name;
        let acquisition_id = record_holder ~label ~keeper_name ~acquired_at in
-       slot_state.channel_acquisition_id := Some acquisition_id);
+       holder_state.channel_acquisition_id := Some acquisition_id);
     let semaphore_wait_sec = Time_compat.now () -. started_at in
     observe_semaphore_wait_seconds
       ~keeper_name
@@ -557,10 +557,10 @@ let run_with_acquired_slot
       int_of_float
         ((if semaphore_wait_sec < 0.0 then 0.0 else semaphore_wait_sec) *. 1000.0)
     in
-    let slot_control =
-      { is_held = (fun () -> keeper_turn_slot_is_held slot_state) }
+    let holder_control =
+      { is_held = (fun () -> turn_holder_is_held holder_state) }
     in
-    f ~semaphore_wait_ms ~slot_control
+    f ~semaphore_wait_ms ~holder_control
   in
   if Eio_guard.is_ready ()
   then
@@ -575,7 +575,7 @@ let run_with_acquired_slot
 ;;
 
 (* Main entry point: admission grants both fleet capacity and keeper isolation. *)
-let with_keeper_turn_slot_control
+let with_recorded_turn_admission_control
       ?base_path
       ?(runtime_profile = "unknown")
       ~keeper_name
@@ -596,7 +596,7 @@ let with_keeper_turn_slot_control
   with
   | Ok (admission_token, _admission_wait_ms) ->
     Ok
-      (run_with_acquired_slot
+      (run_with_admission_token
          ~runtime_profile
          ~keeper_name
          ~channel
@@ -605,32 +605,32 @@ let with_keeper_turn_slot_control
          ~started_at:t0
          f)
   | Error Keeper_turn_admission.Global_inflight_exceeded ->
-    let holders = snapshot_holders ~label:Turn_pool ~now:t0 in
+    let holders = snapshot_holders ~label:Turn_holder ~now:t0 in
     Error
       (`Semaphore_wait_timeout
          (semaphore_wait_timeout_snapshot
-            ~phase:Turn_slot
+            ~phase:Global_admission
             ~holders
             ()))
   | Error (Keeper_turn_admission.Fleet_paused | Keeper_turn_admission.Fleet_stopped as rejection) ->
     Error (`Turn_admission_rejected rejection)
 ;;
 
-let with_keeper_turn_slot ?base_path ?runtime_profile ~keeper_name ~channel f =
-  with_keeper_turn_slot_control
+let with_recorded_turn_admission ?base_path ?runtime_profile ~keeper_name ~channel f =
+  with_recorded_turn_admission_control
     ?base_path
     ?runtime_profile
     ~keeper_name
     ~channel
-    (fun ~semaphore_wait_ms ~slot_control:_ -> f ~semaphore_wait_ms)
+    (fun ~semaphore_wait_ms ~holder_control:_ -> f ~semaphore_wait_ms)
 ;;
 
-let with_keeper_turn_slot_control_for_test ?runtime_profile ~keeper_name ~channel f =
-  with_keeper_turn_slot_control ?runtime_profile ~keeper_name ~channel f
+let with_recorded_turn_admission_control_for_test ?runtime_profile ~keeper_name ~channel f =
+  with_recorded_turn_admission_control ?runtime_profile ~keeper_name ~channel f
 ;;
 
-let with_keeper_turn_slot_for_test ?runtime_profile ~keeper_name ~channel f =
-  with_keeper_turn_slot ?runtime_profile ~keeper_name ~channel f
+let with_recorded_turn_admission_for_test ?runtime_profile ~keeper_name ~channel f =
+  with_recorded_turn_admission ?runtime_profile ~keeper_name ~channel f
 ;;
 
 (* Test-only: expose global admission state. *)

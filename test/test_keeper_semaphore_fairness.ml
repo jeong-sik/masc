@@ -129,7 +129,7 @@ let test_reactive_slot_released_when_body_raises () =
   let completed =
     try
       Some
-        (KK.with_keeper_turn_slot_for_test ~keeper_name:"reactive-test"
+        (KK.with_recorded_turn_admission_for_test ~keeper_name:"reactive-test"
            ~channel:Masc.Keeper_world_observation.Reactive
            (fun ~semaphore_wait_ms:_ -> raise Exit))
     with Exit -> None
@@ -147,7 +147,7 @@ let test_autonomous_slot_released_when_body_raises () =
   let completed =
     try
       Some
-        (KK.with_keeper_turn_slot_for_test ~keeper_name:"autonomous-test"
+        (KK.with_recorded_turn_admission_for_test ~keeper_name:"autonomous-test"
            ~channel:Masc.Keeper_world_observation.Scheduled_autonomous
            (fun ~semaphore_wait_ms:_ -> raise Exit))
     with Exit -> None
@@ -198,7 +198,7 @@ let contains_substring haystack needle =
   needle_len = 0 || loop 0
 
 let test_autonomous_queue_source_avoids_list_append_under_lock () =
-  let source = read_file "lib/keeper/keeper_turn_slot.ml" in
+  let source = read_file "lib/keeper/keeper_turn_holders.ml" in
   Alcotest.(check bool) "enqueue does not list-append waiter"
     false
     (contains_substring source "@ [{ ticket; keeper_name }]")

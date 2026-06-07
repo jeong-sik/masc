@@ -30,7 +30,7 @@ type t =
   | SupervisorLastSweepUnixtime
   | DomainPoolFork
   | SemaphoreWaitTimeout
-  | TurnSlotBookkeepingFailures
+  | TurnHolderBookkeepingFailures
   | SemaphoreWaitSeconds
   | SemaphoreWaitSecondsBucket
   | SlotYieldTotal

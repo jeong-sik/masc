@@ -28,7 +28,7 @@
 
     Pure helper move — no callback injection, all references reach
     external modules (Keeper_unified_turn, Agent_sdk, Log, Otel_metric_store,
-    Keeper_metrics, Keeper_registry, Keeper_turn_slot,
+    Keeper_metrics, Keeper_registry, Keeper_turn_holders,
     Keeper_failure_policy) or other siblings
     ([Keeper_heartbeat_loop_in_turn_pulse], [Observations]). *)
 
@@ -85,7 +85,7 @@ let run_keeper_cycle_with_slot
     if Observations.is_provider_timeout_error err
     then (
       let keeper_name = meta_after_cursor_persist.name in
-      Keeper_turn_slot.reset_budget_exhaustion ~keeper_name;
+      Keeper_turn_holders.reset_budget_exhaustion ~keeper_name;
       Log.Keeper.warn
         "%s: provider_timeout observed; preserving original turn \
          failure without Provider_timeout_loop latch"
@@ -114,7 +114,7 @@ let run_keeper_cycle_with_slot
          ();
        meta_after_cursor_persist)
   | Ok updated ->
-    Keeper_turn_slot.reset_budget_exhaustion ~keeper_name:meta_after_cursor_persist.name;
+    Keeper_turn_holders.reset_budget_exhaustion ~keeper_name:meta_after_cursor_persist.name;
     Observations.clear_provider_timeout_failure_reason
       ~base_path:ctx.config.base_path
       ~keeper_name:meta_after_cursor_persist.name;

@@ -1,7 +1,7 @@
-(* test/test_keeper_turn_slot_release_cancel_safe.ml
+(* test/test_keeper_turn_holders_release_cancel_safe.ml
 
    Regression guard for the 2026-05-05 fleet-stuck cycle:
-   [release_keeper_turn_slot] called bookkeeping functions
+   [release_turn_holder] called bookkeeping functions
    (drop_autonomous_waiter / drop_holder / record_autonomous_completion)
    directly. These functions use [Eio.Mutex.use_rw ~protect:true],
    which can raise [Eio.Cancel.Cancelled] when the fiber is being
@@ -125,7 +125,7 @@ let () =
   assert_contains
     ~label:"heartbeat records holder diagnostics through facade"
     heartbeat_src
-    "Keeper_turn_slot.with_keeper_turn_slot";
+    "Keeper_turn_holders.with_recorded_turn_admission";
   assert_not_contains
     ~label:"central admission stop watcher must not depend only on Eio_guard"
     admission_src
@@ -138,4 +138,4 @@ let () =
     ~label:"fleet stop heartbeat log"
     heartbeat_src
     "keeper cycle cancelled because fleet admission was stopped";
-  print_endline "test_keeper_turn_slot_release_cancel_safe: OK"
+  print_endline "test_keeper_turn_holders_release_cancel_safe: OK"

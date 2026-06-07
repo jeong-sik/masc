@@ -216,7 +216,7 @@ let sweep_and_recover (ctx : _ context) =
       Keeper_turn_admission.force_release_keeper ~keeper_name:entry.name
     in
     let released_holders =
-      Keeper_turn_slot.force_release_holder_for ~keeper_name:entry.name
+      Keeper_turn_holders.force_release_holder_for ~keeper_name:entry.name
     in
     if released_admission_token || released_holders <> [] then (
       let holder_summary =

@@ -11,7 +11,7 @@
     [autonomous_turn_semaphore] reported 6 free slots — i.e. capacity was
     available, but every waiter timed out before reaching head-of-queue.
 
-    Root cause: [with_keeper_turn_slot] captured [t0] BEFORE
+    Root cause: [with_recorded_turn_admission] captured [t0] BEFORE
     [maybe_yield_for_fairness], then passed that same [t0] to
     [wait_for_autonomous_queue_head] as [~started_at]. Any time spent in
     the fairness cooldown was silently subtracted from the
@@ -20,7 +20,7 @@
     slow LLM turns at the head of the queue then trip the timeout for
     the entire tail.
 
-    Fix: [with_keeper_turn_slot] now captures a fresh [queue_entered_at]
+    Fix: [with_recorded_turn_admission] now captures a fresh [queue_entered_at]
     after [enqueue_autonomous_waiter] and passes that to
     [wait_for_autonomous_queue_head].
 
@@ -28,26 +28,26 @@
     [wait_for_autonomous_queue_head_for_test]: they prove the function's
     timeout decision is anchored on [~started_at], so passing a stale
     timestamp causes immediate [Semaphore_wait_timeout]. The fix at
-    [with_keeper_turn_slot] removes the only path that produced a stale
+    [with_recorded_turn_admission] removes the only path that produced a stale
     [~started_at] in production. *)
 
 open Masc
 
-let timeout_sec = Keeper_turn_slot.semaphore_wait_timeout_sec
+let timeout_sec = Keeper_turn_holders.semaphore_wait_timeout_sec
 
 let test_stale_started_at_times_out_immediately () =
   Eio_main.run @@ fun _env ->
-  Keeper_turn_slot.reset_autonomous_turn_queue_for_test ();
-  let blocker = Keeper_turn_slot.enqueue_autonomous_waiter_for_test "blocker" in
-  let ours = Keeper_turn_slot.enqueue_autonomous_waiter_for_test "ours" in
+  Keeper_turn_holders.reset_autonomous_turn_queue_for_test ();
+  let blocker = Keeper_turn_holders.enqueue_autonomous_waiter_for_test "blocker" in
+  let ours = Keeper_turn_holders.enqueue_autonomous_waiter_for_test "ours" in
   Fun.protect
     ~finally:(fun () ->
-      Keeper_turn_slot.drop_autonomous_waiter_for_test ours;
-      Keeper_turn_slot.drop_autonomous_waiter_for_test blocker)
+      Keeper_turn_holders.drop_autonomous_waiter_for_test ours;
+      Keeper_turn_holders.drop_autonomous_waiter_for_test blocker)
     (fun () ->
       let stale_started_at = Unix.gettimeofday () -. (timeout_sec +. 5.0) in
       match
-        Keeper_turn_slot.wait_for_autonomous_queue_head_for_test
+        Keeper_turn_holders.wait_for_autonomous_queue_head_for_test
           ~keeper_name:"ours"
           ~ticket:ours
           ~started_at:stale_started_at
@@ -61,7 +61,7 @@ let test_stale_started_at_times_out_immediately () =
         Alcotest.(check string)
           "timeout phase is queue-head wait"
           "autonomous_queue_head"
-          (Keeper_turn_slot.semaphore_wait_phase_to_string
+          (Keeper_turn_holders.admission_wait_phase_to_string
              timeout.timeout_phase);
         Alcotest.(check (option int))
           "timeout records waiters ahead"
@@ -75,14 +75,14 @@ let test_stale_started_at_times_out_immediately () =
 
 let test_fresh_started_at_at_head_returns_ok () =
   Eio_main.run @@ fun _env ->
-  Keeper_turn_slot.reset_autonomous_turn_queue_for_test ();
-  let ours = Keeper_turn_slot.enqueue_autonomous_waiter_for_test "ours" in
+  Keeper_turn_holders.reset_autonomous_turn_queue_for_test ();
+  let ours = Keeper_turn_holders.enqueue_autonomous_waiter_for_test "ours" in
   Fun.protect
-    ~finally:(fun () -> Keeper_turn_slot.drop_autonomous_waiter_for_test ours)
+    ~finally:(fun () -> Keeper_turn_holders.drop_autonomous_waiter_for_test ours)
     (fun () ->
       let fresh = Unix.gettimeofday () in
       match
-        Keeper_turn_slot.wait_for_autonomous_queue_head_for_test
+        Keeper_turn_holders.wait_for_autonomous_queue_head_for_test
           ~keeper_name:"ours"
           ~ticket:ours
           ~started_at:fresh
@@ -99,22 +99,22 @@ let test_fresh_started_at_at_head_returns_ok () =
 
 let test_autonomous_ticket_dropped_before_semaphore_acquire_hook () =
   Eio_main.run @@ fun _env ->
-  Keeper_turn_slot.reset_autonomous_turn_queue_for_test ();
+  Keeper_turn_holders.reset_autonomous_turn_queue_for_test ();
   let observed_queue = ref None in
-  Keeper_turn_slot.set_after_acquire_flag_hook_for_test
+  Keeper_turn_holders.set_after_acquire_flag_hook_for_test
     (Some
        (fun ~label ~keeper_name ->
           if String.equal label "autonomous" && String.equal keeper_name "ours"
           then
             observed_queue
-            := Some (Keeper_turn_slot.autonomous_waiter_snapshot_for_test ())));
+            := Some (Keeper_turn_holders.autonomous_waiter_snapshot_for_test ())));
   Fun.protect
     ~finally:(fun () ->
-      Keeper_turn_slot.set_after_acquire_flag_hook_for_test None;
-      Keeper_turn_slot.reset_autonomous_turn_queue_for_test ())
+      Keeper_turn_holders.set_after_acquire_flag_hook_for_test None;
+      Keeper_turn_holders.reset_autonomous_turn_queue_for_test ())
     (fun () ->
        (match
-          Keeper_turn_slot.with_keeper_turn_slot_for_test
+          Keeper_turn_holders.with_recorded_turn_admission_for_test
             ~keeper_name:"ours"
             ~channel:Keeper_world_observation.Scheduled_autonomous
             (fun ~semaphore_wait_ms:_ -> ())

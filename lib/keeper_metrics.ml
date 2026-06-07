@@ -39,7 +39,7 @@ type t =
   | SupervisorLastSweepUnixtime
   | DomainPoolFork
   | SemaphoreWaitTimeout
-  | TurnSlotBookkeepingFailures
+  | TurnHolderBookkeepingFailures
   | SemaphoreWaitSeconds
   | SemaphoreWaitSecondsBucket
   | SlotYieldTotal
@@ -254,7 +254,7 @@ let to_string = function
   | SupervisorLastSweepUnixtime -> "masc_keeper_supervisor_last_sweep_unixtime"
   | DomainPoolFork -> "masc_keeper_domain_pool_fork_total"
   | SemaphoreWaitTimeout -> "masc_keeper_semaphore_wait_timeout_total"
-  | TurnSlotBookkeepingFailures -> "masc_keeper_turn_slot_bookkeeping_failures_total"
+  | TurnHolderBookkeepingFailures -> "masc_keeper_turn_holders_bookkeeping_failures_total"
   | SemaphoreWaitSeconds -> "masc_keeper_semaphore_wait_seconds"
   | SemaphoreWaitSecondsBucket -> "masc_keeper_semaphore_wait_seconds_bucket"
   | SlotYieldTotal -> "masc_keeper_slot_yield_total"

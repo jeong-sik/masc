@@ -11,7 +11,7 @@
 
 (** {1 SSOT Types} *)
 include module type of struct
-  include Keeper_turn_slot_types
+  include Keeper_turn_admission_types
 end
 
 (** {1 Own-module types and vals} *)
@@ -53,9 +53,9 @@ val reactive_turn_semaphore_value_for_test : unit -> int
     with how long (in seconds, relative to [now]) they have held it.
     Sorted by descending hold time so the longest-holding peer is first.
     Pure read; no mutation. *)
-val turn_slot_holders : now:float -> (string * float) list
-val autonomous_slot_holders : now:float -> (string * float) list
-val reactive_slot_holders : now:float -> (string * float) list
+val turn_holders : now:float -> (string * float) list
+val autonomous_holders : now:float -> (string * float) list
+val reactive_holders : now:float -> (string * float) list
 
 (** Force-release stale admitted-turn holders for [keeper_name].
     Returns the labels released. *)
@@ -69,7 +69,7 @@ val force_released_marker_count_for_test : unit -> int
 
 (** Test-only: inject a marker without touching the admission token. *)
 val add_force_released_marker_for_test :
-  label:slot_pool ->
+  label:holder_pool ->
   keeper_name:string ->
   acquisition_id:int ->
   marked_at:float ->
@@ -82,10 +82,10 @@ val purge_force_released_markers_for_test : now:float -> unit
 val clear_force_released_markers_for_test : unit -> unit
 
 (** Render a compact holder list such as [[keeper-a/181s, +2 more]]. *)
-val format_slot_holders : ?limit:int -> (string * float) list -> string
+val format_holders : ?limit:int -> (string * float) list -> string
 
 (** Operator-facing one-line summary of all holder pools. *)
-val slot_holders_summary : ?limit:int -> now:float -> unit -> string
+val holders_summary : ?limit:int -> now:float -> unit -> string
 
 (** Force-release the admitted turn recorded for [keeper_name] in the holder
     table. Returns the [(label, age_sec)] pairs that were released.
@@ -141,26 +141,26 @@ val fairness_delay_sec_at : now:float -> keeper_name:string -> float
 val record_autonomous_completion_at_for_test : keeper_name:string -> ts:float -> unit
 val reset_autonomous_completion_for_test : unit -> unit
 
-type keeper_turn_slot_state
+type turn_holder_state
 
-type keeper_turn_slot_control =
+type turn_holder_control =
   { is_held : unit -> bool
   }
 
-val run_with_acquired_slot :
+val run_with_admission_token :
   runtime_profile:string ->
   keeper_name:string ->
   channel:Keeper_world_observation.keeper_cycle_channel ->
   channel_label:string ->
   admission_token:Keeper_turn_admission.token ->
   started_at:float ->
-  (semaphore_wait_ms:int -> slot_control:keeper_turn_slot_control -> 'a) ->
+  (semaphore_wait_ms:int -> holder_control:turn_holder_control -> 'a) ->
   'a
 
 (** Holder-diagnostic facade backed by {!Keeper_turn_admission.acquire_turn}.
     This records holder rows after central admission grants a token; it does not
     own a separate production semaphore. *)
-val with_keeper_turn_slot :
+val with_recorded_turn_admission :
   ?base_path:string ->
   ?runtime_profile:string ->
   keeper_name:string ->
@@ -172,13 +172,13 @@ val with_keeper_turn_slot :
     ] )
   result
 
-(** Like [with_keeper_turn_slot] but exposes [slot_control] to the callback. *)
-val with_keeper_turn_slot_control :
+(** Like [with_recorded_turn_admission] but exposes [holder_control] to the callback. *)
+val with_recorded_turn_admission_control :
   ?base_path:string ->
   ?runtime_profile:string ->
   keeper_name:string ->
   channel:Keeper_world_observation.keeper_cycle_channel ->
-  (semaphore_wait_ms:int -> slot_control:keeper_turn_slot_control -> 'a) ->
+  (semaphore_wait_ms:int -> holder_control:turn_holder_control -> 'a) ->
   ( 'a
   , [> `Semaphore_wait_timeout of semaphore_wait_timeout
     | `Turn_admission_rejected of Keeper_turn_admission.rejection
@@ -186,7 +186,7 @@ val with_keeper_turn_slot_control :
   result
 
 (** Test-only wrappers. *)
-val with_keeper_turn_slot_for_test :
+val with_recorded_turn_admission_for_test :
   ?runtime_profile:string ->
   keeper_name:string ->
   channel:Keeper_world_observation.keeper_cycle_channel ->
@@ -197,11 +197,11 @@ val with_keeper_turn_slot_for_test :
     ] )
   result
 
-val with_keeper_turn_slot_control_for_test :
+val with_recorded_turn_admission_control_for_test :
   ?runtime_profile:string ->
   keeper_name:string ->
   channel:Keeper_world_observation.keeper_cycle_channel ->
-  (semaphore_wait_ms:int -> slot_control:keeper_turn_slot_control -> 'a) ->
+  (semaphore_wait_ms:int -> holder_control:turn_holder_control -> 'a) ->
   ( 'a
   , [> `Semaphore_wait_timeout of semaphore_wait_timeout
     | `Turn_admission_rejected of Keeper_turn_admission.rejection

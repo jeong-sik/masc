@@ -508,27 +508,42 @@ let keeper_fleet_safety_health_json
     | Keeper_turn_admission.Paused -> Some "turn_admission_paused"
     | Keeper_turn_admission.Stopped -> Some "turn_admission_stopped"
   in
+  let turn_admission_stopped =
+    match turn_admission_snapshot.fleet_state with
+    | Keeper_turn_admission.Stopped -> true
+    | Keeper_turn_admission.Running | Keeper_turn_admission.Paused -> false
+  in
+  let turn_admission_paused =
+    match turn_admission_snapshot.fleet_state with
+    | Keeper_turn_admission.Paused -> true
+    | Keeper_turn_admission.Running | Keeper_turn_admission.Stopped -> false
+  in
+  let turn_admission_not_running = Option.is_some turn_admission_blocker in
   let status =
-    if no_executable_keeper_fibers then "blocked"
-    else if Option.is_some turn_admission_blocker then "blocked"
+    if no_executable_keeper_fibers || turn_admission_stopped then "blocked"
     else if no_running_fibers then "degraded"
     else if low_running_fiber_margin then "degraded"
     else if reaction_capacity_below_target then "degraded"
+    else if turn_admission_paused then "degraded"
     else "ok"
   in
   let blocked_count =
-    if no_executable_keeper_fibers then executable_reaction_capacity_shortfall_count
-    else if no_running_fibers || low_running_fiber_margin || reaction_capacity_below_target
-    then
-      reaction_capacity_shortfall_count
-    else 0
+    let capacity_blocked_count =
+      if no_executable_keeper_fibers then executable_reaction_capacity_shortfall_count
+      else if no_running_fibers || low_running_fiber_margin || reaction_capacity_below_target
+      then reaction_capacity_shortfall_count
+      else 0
+    in
+    let admission_blocked_count = if turn_admission_not_running then target_count else 0 in
+    max capacity_blocked_count admission_blocked_count
   in
   let blocker =
     if no_executable_keeper_fibers then Some "no_executable_keeper_fibers"
+    else if turn_admission_stopped then Some "turn_admission_stopped"
     else if no_running_fibers then Some "no_healthy_running_keeper_fibers"
     else if low_running_fiber_margin then Some "low_running_fiber_margin"
     else if reaction_capacity_below_target then Some "reaction_capacity_below_target"
-    else if Option.is_some turn_admission_blocker then turn_admission_blocker
+    else if turn_admission_paused then Some "turn_admission_paused"
     else if paused_autoboot_count > 0 then Some "durable_paused_autoboot_enabled"
     else None
   in
@@ -576,7 +591,7 @@ let keeper_fleet_safety_health_json
            || no_running_fibers
            || low_running_fiber_margin
            || reaction_capacity_below_target
-           || Option.is_some turn_admission_blocker) )
+           || turn_admission_not_running) )
     ; "autoboot_throttle_limit"
     , `Int Keeper_keepalive.effective_turn_throttle_limit
     ; ( "autoboot_throttle_source"

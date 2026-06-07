@@ -12,7 +12,7 @@
     section 1.3.
 
     Structure (facade decomposition):
-    - [Keeper_turn_slot]      — admitted-turn holder diagnostics and
+    - [Keeper_turn_holders]      — admitted-turn holder diagnostics and
                                  compatibility-only test facade
     - [Keeper_keepalive_signal] — gRPC client refs, FSM guard identity
                                    helpers, interruptible sleep, wakeup
@@ -32,7 +32,7 @@ open Keeper_meta_store
 open Keeper_types_profile
 open Keeper_memory
 open Keeper_execution
-include Keeper_turn_slot
+include Keeper_turn_holders
 include Keeper_keepalive_signal
 include Keeper_heartbeat_snapshot
 include Keeper_heartbeat_loop

@@ -121,10 +121,10 @@ val record_runtime_backpressure_observation :
   base_path:string -> keeper_name:string -> reason:string -> unit
 
 val semaphore_wait_timeout_blocker_class :
-  Keeper_turn_slot.semaphore_wait_timeout -> blocker_class
+  Keeper_turn_holders.semaphore_wait_timeout -> blocker_class
 
 val semaphore_wait_timeout_diagnostics :
-  runtime_id:string -> Keeper_turn_slot.semaphore_wait_timeout -> string * string
+  runtime_id:string -> Keeper_turn_holders.semaphore_wait_timeout -> string * string
 
 val provider_timeout_observation_reasons : string list
 

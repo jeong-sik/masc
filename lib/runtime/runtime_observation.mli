@@ -75,8 +75,6 @@ type runtime_observation = {
   attempt_details_source : string;
   oas_internal_runtime_allowed : bool;
   streaming_ttfrc_ms : float option;
-  streaming_inter_chunk_count : int;
-  streaming_inter_chunk_avg_ms : float option;
 }
 (** Per-turn runtime execution snapshot.  [attempts] is
     in chronological order (the internal capture stores

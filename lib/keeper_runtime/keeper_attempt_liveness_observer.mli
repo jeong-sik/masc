@@ -7,7 +7,7 @@
     - Translation from [Agent_sdk.Types.sse_event] to
       {!Keeper_attempt_liveness.Stream_chunk.kind}.
     - Tick fiber forked under the caller's [Eio.Switch.t] that polls
-      the FSM at [min(ttft_max, inter_chunk_max) / 4] cadence and can be
+      the FSM at [ttft_max / 4] cadence and can be
       stopped explicitly when the provider attempt has already returned.
     - Otel_metric_store counter emission per outcome.
 
@@ -107,7 +107,7 @@ val start_tick_fiber :
   clock:_ Eio.Time.clock ->
   unit
 (** Fork a sibling fiber under [~sw] that calls [Keeper_attempt_liveness.step]
-    with [Tick now] every [min(ttft_max, inter_chunk_max) / 4] seconds
+    with [Tick now] every [ttft_max / 4] seconds
     until the FSM reaches a terminal state or [~sw] dies.
 
     No-op when the observer mode is {!Off} or when [Off] short-circuit

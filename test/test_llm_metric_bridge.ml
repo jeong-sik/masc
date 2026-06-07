@@ -68,11 +68,7 @@ let test_metric_names_stable () =
   Alcotest.(check string)
     "streaming first chunk metric"
     "masc_llm_provider_streaming_first_chunk_seconds"
-    Metrics.metric_llm_provider_streaming_first_chunk;
-  Alcotest.(check string)
-    "streaming inter chunk metric"
-    "masc_llm_provider_streaming_inter_chunk_seconds"
-    Metrics.metric_llm_provider_streaming_inter_chunk
+    Metrics.metric_llm_provider_streaming_first_chunk
 
 let test_metric_store_exports_otel_samples () =
   let model_id = Printf.sprintf "bridge-otel-sample-%d" (Unix.getpid ()) in
@@ -149,11 +145,6 @@ let test_sink_records_oas_callbacks () =
       (Metrics.metric_llm_provider_streaming_first_chunk ^ "_count")
       ~labels:provider_model_labels
   in
-  let before_stream_inter =
-    metric
-      (Metrics.metric_llm_provider_streaming_inter_chunk ^ "_count")
-      ~labels:provider_model_labels
-  in
   sink.on_cache_hit ~model_id;
   sink.on_cache_miss ~model_id;
   sink.on_request_start ~model_id;
@@ -165,7 +156,6 @@ let test_sink_records_oas_callbacks () =
     ~provider ~model_id ~input_tokens:17 ~output_tokens:23;
   sink.on_tool_calls ~provider ~model_id ~count:3;
   sink.on_streaming_first_chunk ~provider ~model_id ~ttfrc_ms:25.0;
-  sink.on_streaming_chunk ~provider ~model_id ~chunk_index:1 ~inter_chunk_ms:7.5;
   check_metric_delta "cache hit +1"
     Metrics.metric_llm_provider_cache_hits
     ~labels:model_labels ~before:before_hit ~delta:1.0;
@@ -198,10 +188,7 @@ let test_sink_records_oas_callbacks () =
     ~labels:circuit_labels ~before:before_circuit_state ~delta:1.0;
   check_metric_delta "streaming first chunk count +1"
     (Metrics.metric_llm_provider_streaming_first_chunk ^ "_count")
-    ~labels:provider_model_labels ~before:before_stream_first ~delta:1.0;
-  check_metric_delta "streaming inter chunk count +1"
-    (Metrics.metric_llm_provider_streaming_inter_chunk ^ "_count")
-    ~labels:provider_model_labels ~before:before_stream_inter ~delta:1.0
+    ~labels:provider_model_labels ~before:before_stream_first ~delta:1.0
 
 let test_streaming_metrics_ignore_invalid_ms () =
   let model_id =
@@ -212,18 +199,10 @@ let test_streaming_metrics_ignore_invalid_ms () =
   let first_before =
     metric (Metrics.metric_llm_provider_streaming_first_chunk ^ "_count") ~labels
   in
-  let inter_before =
-    metric (Metrics.metric_llm_provider_streaming_inter_chunk ^ "_count") ~labels
-  in
   Bridge.emit_streaming_first_chunk ~provider ~model_id ~ttfrc_ms:0.0;
-  Bridge.emit_streaming_chunk
-    ~provider ~model_id ~chunk_index:1 ~inter_chunk_ms:(0.0 /. 0.0);
   check_metric_delta "invalid first chunk ignored"
     (Metrics.metric_llm_provider_streaming_first_chunk ^ "_count")
-    ~labels ~before:first_before ~delta:0.0;
-  check_metric_delta "invalid inter chunk ignored"
-    (Metrics.metric_llm_provider_streaming_inter_chunk ^ "_count")
-    ~labels ~before:inter_before ~delta:0.0
+    ~labels ~before:first_before ~delta:0.0
 
 let test_streaming_invalid_ms_increments_typed_counter () =
   let model_id =
@@ -233,26 +212,14 @@ let test_streaming_invalid_ms_increments_typed_counter () =
   let first_non_positive =
     [ ("provider", provider); ("model", model_id); ("reason", "non_positive") ]
   in
-  let inter_not_finite =
-    [ ("provider", provider); ("model", model_id); ("reason", "not_finite") ]
-  in
   let before_first =
     metric Metrics.metric_llm_provider_streaming_first_chunk_invalid
       ~labels:first_non_positive
   in
-  let before_inter =
-    metric Metrics.metric_llm_provider_streaming_inter_chunk_invalid
-      ~labels:inter_not_finite
-  in
   Bridge.emit_streaming_first_chunk ~provider ~model_id ~ttfrc_ms:0.0;
-  Bridge.emit_streaming_chunk
-    ~provider ~model_id ~chunk_index:1 ~inter_chunk_ms:(0.0 /. 0.0);
   check_metric_delta "streaming first chunk non_positive +1"
     Metrics.metric_llm_provider_streaming_first_chunk_invalid
-    ~labels:first_non_positive ~before:before_first ~delta:1.0;
-  check_metric_delta "streaming inter chunk not_finite +1"
-    Metrics.metric_llm_provider_streaming_inter_chunk_invalid
-    ~labels:inter_not_finite ~before:before_inter ~delta:1.0
+    ~labels:first_non_positive ~before:before_first ~delta:1.0
 
 let test_streaming_invalid_ms_distinguishes_not_finite_from_non_positive () =
   let model_id =
@@ -547,16 +514,8 @@ let test_latency_and_streaming_emit_genai_metrics () =
   let before_ttf =
     metric Otel_genai.Metric_name.client_operation_time_to_first_chunk ~labels
   in
-  let before_chunk =
-    metric Otel_genai.Metric_name.client_operation_time_per_output_chunk ~labels
-  in
   Bridge.emit_request_latency ~provider ~model_id ~latency_ms:125 ();
   Bridge.emit_streaming_first_chunk ~provider ~model_id ~ttfrc_ms:25.0;
-  Bridge.emit_streaming_chunk
-    ~provider
-    ~model_id
-    ~chunk_index:3
-    ~inter_chunk_ms:7.5;
   check_metric_delta "genai operation duration +0.125s"
     Otel_genai.Metric_name.client_operation_duration
     ~labels
@@ -566,12 +525,7 @@ let test_latency_and_streaming_emit_genai_metrics () =
     Otel_genai.Metric_name.client_operation_time_to_first_chunk
     ~labels
     ~before:before_ttf
-    ~delta:0.025;
-  check_metric_delta "genai time per output chunk +0.0075s"
-    Otel_genai.Metric_name.client_operation_time_per_output_chunk
-    ~labels
-    ~before:before_chunk
-    ~delta:0.0075
+    ~delta:0.025
 
 let test_error_records_genai_exception_span_signal () =
   let events = ref [] in
@@ -625,13 +579,10 @@ let test_streaming_callbacks_emit_otel_events () =
   Otel_spans.with_test_event_emitter ~enabled:true
     ~emit_event:(fun ~name ~attrs -> events := (name, attrs) :: !events)
     (fun () ->
-       Bridge.emit_streaming_first_chunk ~provider ~model_id ~ttfrc_ms:25.0;
-       Bridge.emit_streaming_chunk
-         ~provider ~model_id ~chunk_index:3 ~inter_chunk_ms:7.5);
+       Bridge.emit_streaming_first_chunk ~provider ~model_id ~ttfrc_ms:25.0);
   match List.rev !events with
-  | [ first_name, first_attrs; chunk_name, chunk_attrs ] ->
+  | [ first_name, first_attrs ] ->
     Alcotest.(check string) "first chunk event" "ttfrc.received" first_name;
-    Alcotest.(check string) "chunk event" "streaming.chunk" chunk_name;
     Alcotest.(check string)
       "first provider"
       provider
@@ -647,29 +598,9 @@ let test_streaming_callbacks_emit_otel_events () =
     Alcotest.(check (float 0.0001))
       "ttfrc ms"
       25.0
-      (assoc_float "masc.gen_ai.streaming.ttfrc_ms" first_attrs);
-    Alcotest.(check int)
-      "chunk index"
-      3
-      (assoc_int "masc.gen_ai.streaming.chunk_index" chunk_attrs);
-    Alcotest.(check string)
-      "chunk provider"
-      provider
-      (assoc_string "gen_ai.provider.name" chunk_attrs);
-    Alcotest.(check string)
-      "chunk model"
-      model_id
-      (assoc_string "gen_ai.request.model" chunk_attrs);
-    Alcotest.(check bool)
-      "chunk stream attr"
-      true
-      (assoc_bool Otel_genai.Attr_key.gen_ai_request_stream chunk_attrs);
-    Alcotest.(check (float 0.0001))
-      "inter chunk ms"
-      7.5
-      (assoc_float "masc.gen_ai.streaming.inter_chunk_ms" chunk_attrs)
+      (assoc_float "masc.gen_ai.streaming.ttfrc_ms" first_attrs)
   | other ->
-    Alcotest.failf "expected two OTel streaming events, got %d"
+    Alcotest.failf "expected one OTel streaming event, got %d"
       (List.length other)
 
 let test_request_latency_clamps_zero_ms () =

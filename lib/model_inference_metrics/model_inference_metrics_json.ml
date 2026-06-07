@@ -119,8 +119,6 @@ let model_stats_to_json ?(model_label = public_runtime_label) (s : model_stats)
                   ; "coverage_reason", Json_util.string_opt_to_json r.re_coverage_reason
                   ; "coverage_stage", Json_util.string_opt_to_json r.re_coverage_stage
                   ; "streaming_ttfrc_ms", Json_util.float_opt_to_json r.re_streaming_ttfrc_ms
-                  ; "streaming_inter_chunk_count", Json_util.int_opt_to_json r.re_streaming_inter_chunk_count
-                  ; "streaming_inter_chunk_avg_ms", Json_util.float_opt_to_json r.re_streaming_inter_chunk_avg_ms
                   ])
              s.recent_entries) )
     ; "buckets", `List (List.map bucket_metric_to_json s.buckets)

@@ -325,13 +325,12 @@ let run_try_provider
         in
         Log.Misc.debug
           "runtime_attempt_liveness: candidate=%s provider=%s budget_source=%s ttft=%.1fs \
-           inter_chunk=%.1fs wall=%.1fs"
+           wall=%.1fs"
           candidate_key
           provider_label
           (Keeper_attempt_liveness_config.budget_source_label
              resolved_budget.source)
           resolved_budget.budget.Keeper_attempt_liveness.ttft_max
-          resolved_budget.budget.Keeper_attempt_liveness.inter_chunk_max
           resolved_budget.budget.Keeper_attempt_liveness.attempt_wall_max;
         let obs =
           Keeper_attempt_liveness_observer.create

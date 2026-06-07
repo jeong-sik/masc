@@ -9,16 +9,15 @@
 
 type budget = {
   ttft_max : float;
-  inter_chunk_max : float;
   attempt_wall_max : float;
 }
 
 (* Conservative first-attempt budget used before the runtime has observed a
    successful sample for the concrete provider/model candidate. Later attempts
-   are tuned from successful TTFT/inter-chunk/wall samples in
+   are tuned from successful TTFT/wall samples in
    [Keeper_attempt_liveness_config]. *)
 let bootstrap : budget =
-  { ttft_max = 600.0; inter_chunk_max = 120.0; attempt_wall_max = 1800.0 }
+  { ttft_max = 600.0; attempt_wall_max = 1800.0 }
 
 module Stream_chunk = struct
   type kind =
@@ -34,13 +33,11 @@ end
 
 type failure =
   | No_first_token
-  | Inter_chunk_idle
   | Wall_exceeded
   | Provider_error of string
 
 let failure_kind_label = function
   | No_first_token -> "no_first_token"
-  | Inter_chunk_idle -> "inter_chunk_idle"
   | Wall_exceeded -> "wall_exceeded"
   | Provider_error _ -> "provider_error"
 
@@ -67,17 +64,15 @@ type output =
   | Completed
 
 (** Metric recorder — caller (e.g. runtime_attempt_liveness_observer)
-    supplies callbacks for TTFT seconds, TBT seconds, and liveness outcome.
+    supplies callbacks for TTFT seconds and liveness outcome.
     Pure FSM stays IO-free; side effects live in the recorder. *)
 type recorder = {
   record_ttft : float -> unit;
-  record_inter_chunk : float -> unit;
   record_liveness_outcome : failure option -> unit;
 }
 
 let null_recorder = {
   record_ttft = (fun _ -> ());
-  record_inter_chunk = (fun _ -> ());
   record_liveness_outcome = (fun _ -> ());
 }
 
@@ -87,9 +82,9 @@ let null_recorder = {
    - S1: every chunk except Done advances last_chunk_at.
    - S2: Done in Streaming → Success terminal; no further state moves.
    - T1: Heartbeat / Thinking_delta both count as motion.
-   - L2: TTFT and inter-chunk are the specific stream-liveness kill classes.
+   - L2: TTFT is the specific stream-liveness kill class.
          A cumulative wall can only apply before the stream has produced a
-         first chunk; active streaming is judged by inter-chunk progress. *)
+         first chunk. *)
 
 let step ?(recorder = null_recorder) (b : budget) (s : state) (e : event)
   : state * output =
@@ -141,21 +136,14 @@ let step ?(recorder = null_recorder) (b : budget) (s : state) (e : event)
 
   (* Streaming × chunk(any non-Done): advance last_chunk_at. *)
   | Streaming { started_at; last_chunk_at = prev_last }, Chunk (_, received_at) ->
-      let tbt_seconds = received_at -. prev_last in
-      recorder.record_inter_chunk tbt_seconds;
       ( Streaming { started_at; last_chunk_at = received_at }
       , Continue )
 
   (* Streaming × Tick: once the provider has emitted chunks, liveness is
      progress-based. A stream that keeps producing chunks must not be killed
      only because cumulative wall-clock elapsed. *)
-  | Streaming { started_at; last_chunk_at }, Tick now ->
-      let gap = now -. last_chunk_at in
-      if gap >= b.inter_chunk_max then begin
-        recorder.record_liveness_outcome (Some Inter_chunk_idle);
-        (Failed Inter_chunk_idle, Outcome Inter_chunk_idle)
-      end else
-        (s, Continue)
+  | Streaming _, Tick _ ->
+      (s, Continue)
 
   | Streaming _, Provider_wire_error msg ->
       recorder.record_liveness_outcome (Some (Provider_error msg));

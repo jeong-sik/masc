@@ -28,8 +28,6 @@ type runtime_observation = {
   attempt_details_source : string;
   oas_internal_runtime_allowed : bool;
   streaming_ttfrc_ms : float option;
-  streaming_inter_chunk_count : int;
-  streaming_inter_chunk_avg_ms : float option;
 }
 
 and runtime_attempt = {
@@ -162,8 +160,6 @@ let runtime_observation_of_candidates ~runtime_id ?strategy ~configured_labels
     ?(attempt_details_source = "opaque_named_runtime")
     ?(oas_internal_runtime_allowed = false)
     ?(streaming_ttfrc_ms = None)
-    ?(streaming_inter_chunk_count = 0)
-    ?(streaming_inter_chunk_avg_ms = None)
     () : runtime_observation =
   let candidate_models =
     List.init (max 0 candidate_count) (fun _ -> public_runtime_model_label)
@@ -203,8 +199,6 @@ let runtime_observation_of_candidates ~runtime_id ?strategy ~configured_labels
     attempt_details_source;
     oas_internal_runtime_allowed;
     streaming_ttfrc_ms;
-    streaming_inter_chunk_count;
-    streaming_inter_chunk_avg_ms;
   }
 
 (* ================================================================ *)
@@ -215,10 +209,6 @@ type streaming_metrics_capture = {
   mutable ttfrc_ms : float option;
       (** Time To First Response Chunk in milliseconds. [None] until
           the first [on_streaming_first_chunk] callback fires. *)
-  mutable inter_chunk_count : int;
-      (** Number of inter-chunk intervals observed. *)
-  mutable inter_chunk_total_ms : float;
-      (** Cumulative inter-chunk latency in milliseconds. *)
 }
 
 type runtime_metrics_capture = {
@@ -362,15 +352,10 @@ let record_fallback_event (capture : runtime_metrics_capture)
     :: capture.fallback_events_rev
 
 let empty_streaming_capture () : streaming_metrics_capture =
-  { ttfrc_ms = None; inter_chunk_count = 0; inter_chunk_total_ms = 0.0 }
+  { ttfrc_ms = None }
 
 let streaming_metrics_of_capture (s : streaming_metrics_capture) =
-  let avg =
-    if s.inter_chunk_count > 0
-    then Some (s.inter_chunk_total_ms /. Float.of_int s.inter_chunk_count)
-    else None
-  in
-  (s.ttfrc_ms, s.inter_chunk_count, avg)
+  s.ttfrc_ms
 
 let runtime_metrics_for_candidates ~candidate_count:(_ : int) () =
   let capture =
@@ -401,11 +386,8 @@ let runtime_metrics_for_candidates ~candidate_count:(_ : int) () =
       on_tool_calls = (fun ~provider:_ ~model_id:_ ~count:_ -> ());
       on_streaming_first_chunk = (fun ~provider:_ ~model_id:_ ~ttfrc_ms ->
         capture.streaming.ttfrc_ms <- Some ttfrc_ms);
-      on_streaming_chunk = (fun ~provider:_ ~model_id:_ ~chunk_index:_ ~inter_chunk_ms ->
-        capture.streaming.inter_chunk_count <-
-          capture.streaming.inter_chunk_count + 1;
-        capture.streaming.inter_chunk_total_ms <-
-          capture.streaming.inter_chunk_total_ms +. inter_chunk_ms);
+      on_streaming_chunk = (fun ~provider:_ ~model_id:_ ~chunk_index:_ ~inter_chunk_ms:_ ->
+        ());
     }
   in
   (capture, metrics)
@@ -416,7 +398,7 @@ let runtime_observation_with_metrics ~runtime_id ?strategy ~configured_labels
     ?(attempt_details_source = "oas_metrics_callbacks")
     ?(oas_internal_runtime_allowed = false)
     () =
-  let ttfrc, chunk_count, chunk_avg =
+  let ttfrc =
     streaming_metrics_of_capture capture.streaming
   in
   runtime_observation_of_candidates ~runtime_id ?strategy ~configured_labels
@@ -427,8 +409,6 @@ let runtime_observation_with_metrics ~runtime_id ?strategy ~configured_labels
     ~attempt_details_source
     ~oas_internal_runtime_allowed
     ~streaming_ttfrc_ms:ttfrc
-    ~streaming_inter_chunk_count:chunk_count
-    ~streaming_inter_chunk_avg_ms:chunk_avg
     ()
 
 (* ================================================================ *)
@@ -462,8 +442,6 @@ let runtime_observation_to_json (obs : runtime_observation) : Yojson.Safe.t =
       ("attempt_details_source", `String obs.attempt_details_source);
       ("oas_internal_runtime_allowed", `Bool obs.oas_internal_runtime_allowed);
       ("streaming_ttfrc_ms", Json_util.float_opt_to_json obs.streaming_ttfrc_ms);
-      ("streaming_inter_chunk_count", `Int obs.streaming_inter_chunk_count);
-      ("streaming_inter_chunk_avg_ms", Json_util.float_opt_to_json obs.streaming_inter_chunk_avg_ms);
     ]
 
 let get_runtime_audit_store store_opt =

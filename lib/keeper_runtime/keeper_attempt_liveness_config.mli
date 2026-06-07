@@ -35,7 +35,6 @@ val mode_label : mode -> string
 
 type success_sample =
   { ttft_ms : float
-  ; max_inter_chunk_ms : float
   ; wall_ms : float
   }
 (** Successful attempt timing sample for the neutral runtime candidate lane.

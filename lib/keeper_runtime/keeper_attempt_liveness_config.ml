@@ -47,7 +47,6 @@ let reset_cache_for_test () = mode_cache := None
 
 type success_sample =
   { ttft_ms : float
-  ; max_inter_chunk_ms : float
   ; wall_ms : float
   }
 
@@ -92,7 +91,6 @@ let finite_non_negative v = Float.is_finite v && Float.compare v 0.0 >= 0
 
 let valid_sample (s : success_sample) =
   finite_non_negative s.ttft_ms
-  && finite_non_negative s.max_inter_chunk_ms
   && finite_non_negative s.wall_ms
 
 (* RFC-0132 PR-2: liveness candidate key = external boundary; redact via SSOT. *)
@@ -172,9 +170,8 @@ let tuned_seconds ~floor ~ceiling ~multiplier ~add seconds =
 
 let budget_of_samples samples =
   let p95 field = percentile 0.95 (List.map field samples) in
-  match p95 (fun s -> s.ttft_ms), p95 (fun s -> s.max_inter_chunk_ms),
-        p95 (fun s -> s.wall_ms) with
-  | Some ttft_ms, Some inter_ms, Some wall_ms ->
+  match p95 (fun s -> s.ttft_ms), p95 (fun s -> s.wall_ms) with
+  | Some ttft_ms, Some wall_ms ->
     let ttft_max =
       tuned_seconds
         ~floor:30.0
@@ -182,14 +179,6 @@ let budget_of_samples samples =
         ~multiplier:1.5
         ~add:5.0
         (seconds_of_ms ttft_ms)
-    in
-    let inter_chunk_max =
-      tuned_seconds
-        ~floor:20.0
-        ~ceiling:240.0
-        ~multiplier:2.0
-        ~add:5.0
-        (seconds_of_ms inter_ms)
     in
     let observed_wall =
       tuned_seconds
@@ -200,10 +189,9 @@ let budget_of_samples samples =
         (seconds_of_ms wall_ms)
     in
     let attempt_wall_max =
-      Float.max observed_wall (ttft_max +. inter_chunk_max)
+      Float.max observed_wall ttft_max
     in
     { Keeper_attempt_liveness.ttft_max = ttft_max
-    ; inter_chunk_max
     ; attempt_wall_max
     }
   | _ -> Keeper_attempt_liveness.bootstrap

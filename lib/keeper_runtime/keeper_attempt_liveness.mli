@@ -1,11 +1,10 @@
 (** Runtime attempt-level streaming liveness gate (RFC-0022 PR-1/4).
 
     Pure FSM that fails the *current runtime attempt* — not the turn —
-    when a provider stops emitting evidence of forward motion. Three
+    when a provider stops emitting evidence of forward motion. Two
     independent kill classes:
 
     - {!No_first_token}     — provider produces no chunk within [ttft_max]
-    - {!Inter_chunk_idle}   — gap between consecutive chunks exceeds [inter_chunk_max]
     - {!Wall_exceeded}      — pre-stream total attempt wall-clock exceeds
                               [attempt_wall_max]
 
@@ -40,12 +39,8 @@ type budget = {
   ttft_max : float;
   (** Time to first chunk. Awaiting-state deadline. *)
 
-  inter_chunk_max : float;
-  (** Maximum gap between consecutive chunks once streaming starts. *)
-
   attempt_wall_max : float;
-  (** Pre-stream wall-clock backstop. Once streaming starts, chunk progress is
-      governed by [inter_chunk_max] rather than a cumulative wall cap. *)
+  (** Pre-stream wall-clock backstop. *)
 }
 
 val bootstrap : budget
@@ -97,13 +92,12 @@ end
 
 type failure =
   | No_first_token
-  | Inter_chunk_idle
   | Wall_exceeded
   | Provider_error of string
 
 val failure_kind_label : failure -> string
 (** Stable label for telemetry / Otel_metric_store counter. One of
-    [no_first_token | inter_chunk_idle | wall_exceeded | provider_error]. *)
+    [no_first_token | wall_exceeded | provider_error]. *)
 
 (** {1 FSM state} *)
 
@@ -112,7 +106,7 @@ type state =
       (** No chunks received yet. Subject to [ttft_max]. *)
 
   | Streaming of { started_at : float; last_chunk_at : float }
-      (** At least one chunk received. Subject to [inter_chunk_max]. *)
+      (** At least one chunk received. *)
 
   | Failed of failure
       (** Terminal failure. *)
@@ -153,8 +147,8 @@ type event =
           [received_at]; see Timestamp contract above. *)
 
   | Tick of float
-      (** Clock tick at monotonic time. Triggers TTFT, inter-chunk and
-          wall checks; see Timestamp contract above. *)
+      (** Clock tick at monotonic time. Triggers TTFT and wall checks;
+          see Timestamp contract above. *)
 
   | Provider_wire_error of string
       (** Provider returned an error (HTTP, network, parse). The string
@@ -176,13 +170,12 @@ type output =
   | Completed
       (** Attempt succeeded. *)
 
-(** Metric recorder — caller supplies callbacks for TTFT seconds, TBT
-    seconds, and liveness outcome observation.  [null_recorder] is the
+(** Metric recorder — caller supplies callbacks for TTFT seconds
+    and liveness outcome observation.  [null_recorder] is the
     default so the pure FSM stays IO-free unless a caller explicitly
     wires metrics. *)
 type recorder = {
   record_ttft : float -> unit;
-  record_inter_chunk : float -> unit;
   record_liveness_outcome : failure option -> unit;
 }
 
@@ -200,8 +193,7 @@ val null_recorder : recorder
     Invariant S1). To bound the late-chunk window the {b caller} MUST:
 
     {ol
-    {- emit [Tick] at a cadence ≤ [min budget.ttft_max
-       budget.inter_chunk_max] for the active state, and}
+    {- emit [Tick] at a cadence ≤ [budget.ttft_max] for the active state, and}
     {- when both an overdue [Tick] and a late [Chunk] are observable
        at the wiring layer, deliver the overdue [Tick] {b first} so
        the FSM can transition to [Failed] before the chunk reopens

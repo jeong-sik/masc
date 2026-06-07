@@ -252,8 +252,6 @@ let append_decision_record
                     let streaming_fields =
                       [
                         ("streaming_ttfrc_ms", Json_util.float_opt_to_json co.streaming_ttfrc_ms);
-                        ("streaming_inter_chunk_count", `Int co.streaming_inter_chunk_count);
-                        ("streaming_inter_chunk_avg_ms", Json_util.float_opt_to_json co.streaming_inter_chunk_avg_ms);
                       ]
                     in
                     [

@@ -19,7 +19,6 @@ type t = {
   started_at : float;
   first_chunk_at : float option ref;
   last_chunk_at : float option ref;
-  max_inter_chunk_s : float ref;
   success_sample : (string * Cfg.success_sample) option ref;
   state : L.state ref;
   sw_ref : Eio.Switch.t option ref;
@@ -88,7 +87,6 @@ let create
     started_at;
     first_chunk_at = ref None;
     last_chunk_at = ref None;
-    max_inter_chunk_s = ref 0.0;
     success_sample = ref None;
     state = ref (L.initial ~started_at);
     sw_ref = ref None;
@@ -198,19 +196,12 @@ let observe_chunk_clock (t : t) ~(at : float) : unit =
   (match !(t.first_chunk_at) with
    | None -> t.first_chunk_at := Some at
    | Some _ -> ());
-  (match !(t.last_chunk_at) with
-   | None -> ()
-   | Some prev ->
-     let gap = at -. prev in
-     if Float.is_finite gap && gap > !(t.max_inter_chunk_s)
-     then t.max_inter_chunk_s := gap);
   t.last_chunk_at := Some at
 
 let otel_metric_store_recorder (t : t) : L.recorder =
   let _labels = [ ("runtime_id", t.runtime_id); ("provider", t.provider_label) ] in
   {
     L.record_ttft = (fun _seconds -> ());
-    record_inter_chunk = (fun _seconds -> ());
     record_liveness_outcome = (fun _ -> ());
   }
 
@@ -294,8 +285,7 @@ let wrap_on_event (t : t)
 (* -- Tick fiber --------------------------------------------------- *)
 
 let tick_interval_seconds (b : L.budget) : float =
-  let smaller = Float.min b.ttft_max b.inter_chunk_max in
-  Float.max 0.5 (smaller /. 4.0)
+  Float.max 0.5 (b.ttft_max /. 4.0)
 
 let register_attempt_switch (t : t) ~(sw : Eio.Switch.t) : unit =
   match t.mode with
@@ -369,7 +359,7 @@ let start_tick_fiber (t : t) ~(sw : Eio.Switch.t)
 
 let outcome_of_state = function
   | L.Success -> "success"
-  | L.Failed (L.No_first_token | L.Inter_chunk_idle | L.Wall_exceeded) ->
+  | L.Failed (L.No_first_token | L.Wall_exceeded) ->
       "kill"
   | L.Failed (L.Provider_error _) -> "wire_error"
   | L.Awaiting _ | L.Streaming _ -> "wire_error"
@@ -388,7 +378,6 @@ let finalize (t : t) : unit =
              Some
                ( candidate_key
                , { Cfg.ttft_ms = (first_chunk_at -. t.started_at) *. 1000.0
-                 ; max_inter_chunk_ms = !(t.max_inter_chunk_s) *. 1000.0
                  ; wall_ms = (last_chunk_at -. t.started_at) *. 1000.0
                  } )
          | _ -> ());

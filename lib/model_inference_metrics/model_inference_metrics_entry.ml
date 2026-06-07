@@ -39,8 +39,6 @@ type recent_entry =
   ; re_coverage_reason : string option
   ; re_coverage_stage : string option
   ; re_streaming_ttfrc_ms : float option
-  ; re_streaming_inter_chunk_count : int option
-  ; re_streaming_inter_chunk_avg_ms : float option
   }
 
 type coverage_reason_count =
@@ -182,8 +180,6 @@ type raw_entry =
   ; coverage_stage : string option
   ; is_error : bool
   ; streaming_ttfrc_ms : float option
-  ; streaming_inter_chunk_count : int option
-  ; streaming_inter_chunk_avg_ms : float option
   }
 
 (* ── Parse-level failure variants ─────────────────────────────────────────────

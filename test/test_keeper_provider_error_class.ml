@@ -120,7 +120,6 @@ let test_response_timeout_kind_tags () =
   check string "Connection_timeout" "connection_timeout" (kt P.Connection_timeout);
   check string "First_token_timeout" "first_token_timeout"
     (kt P.First_token_timeout);
-  check string "Inter_chunk_idle" "inter_chunk_idle" (kt P.Inter_chunk_idle);
   check string "Wall_clock_timeout" "wall_clock_timeout"
     (kt P.Wall_clock_timeout)
 ;;

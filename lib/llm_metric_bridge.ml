@@ -365,33 +365,8 @@ let emit_streaming_first_chunk ~provider ~model_id ~ttfrc_ms =
       ()
 ;;
 
-let emit_streaming_chunk ~provider ~model_id ~chunk_index ~inter_chunk_ms =
-  note_provider ~model_id ~provider;
-  match invalid_ms_reason inter_chunk_ms with
-  | Some reason ->
-    inc_counter
-      Otel_metric_store.metric_llm_provider_streaming_inter_chunk_invalid
-      ~labels:[ ("provider", provider); ("model", model_id); ("reason", reason) ]
-  | None ->
-    observe_seconds
-      Otel_metric_store.metric_llm_provider_streaming_inter_chunk
-      ~labels:(provider_model_labels ~provider ~model_id)
-      (inter_chunk_ms /. 1000.0);
-    observe_genai_seconds
-      Otel_genai.Metric_name.client_operation_time_per_output_chunk
-      ~provider
-      ~model_id
-      (inter_chunk_ms /. 1000.0);
-    Otel_spans.add_event
-      ~name:"streaming.chunk"
-      ~attrs:
-        (streaming_attrs
-           ~provider
-           ~model_id
-           [ "masc.gen_ai.streaming.chunk_index", `Int chunk_index
-           ; "masc.gen_ai.streaming.inter_chunk_ms", `Float inter_chunk_ms
-           ])
-      ()
+let emit_streaming_chunk ~provider:_ ~model_id:_ ~chunk_index:_ ~inter_chunk_ms:_ =
+  ()
 ;;
 
 let emit_fallback_triggered ~kind ~detail =

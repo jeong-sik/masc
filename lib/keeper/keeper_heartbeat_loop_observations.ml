@@ -53,52 +53,25 @@ let strip_prefix ~prefix value =
   else None
 ;;
 
-let runtime_backpressure_class_reason ~reason =
-  let component = skip_reason_component reason in
-  let label =
-    match strip_prefix ~prefix:"failure_ratio_" component with
-    | Some suffix -> suffix
-    | None -> component
-  in
-  match Keeper_health_probe.runtime_pressure_class_of_label label with
-  | Some cls ->
-    Some ("class_" ^ Keeper_health_probe.runtime_pressure_class_to_string cls)
-  | None -> None
-;;
-
 let runtime_backpressure_observation_reasons ~reason =
   let category =
     if String.starts_with ~prefix:"runtime_resilience_" reason
     then "runtime_resilience"
     else "runtime_unhealthy"
   in
-  let base = [ "runtime_backpressure"; category ] in
-  let class_reasons =
-    match runtime_backpressure_class_reason ~reason with
-    | Some class_reason -> [ class_reason ]
-    | None -> []
-  in
-  base @ class_reasons @ [ "reason_" ^ skip_reason_component reason ]
+  [ "runtime_backpressure"; category; "reason_" ^ skip_reason_component reason ]
 ;;
 
 let runtime_backpressure_decision
       ~runtime_resilience
       ~should_run_turn
       ~runtime_id
-      ~runtime_status
   =
-  let resilience_reason =
-    match runtime_resilience with
-    | None -> None
-    | Some blocker -> Some ("runtime_resilience_" ^ blocker)
-  in
-  match should_run_turn, runtime_status, resilience_reason with
-  | true, Keeper_health_probe.Unhealthy reason, _ ->
-    Runtime_backpressured { runtime_id; reason }
-  | true, _, Some reason -> Runtime_backpressured { runtime_id; reason }
-  | false, _, _
-  | true, Keeper_health_probe.Unknown, None
-  | true, Keeper_health_probe.Healthy, None -> Runtime_admitted
+  match should_run_turn, runtime_resilience with
+  | true, Some blocker ->
+    Runtime_backpressured
+      { runtime_id; reason = "runtime_resilience_" ^ blocker }
+  | false, _ | true, None -> Runtime_admitted
 ;;
 
 let record_runtime_backpressure_observation ~base_path ~keeper_name ~reason =

@@ -44,9 +44,8 @@ let test_unknown_returns_tried_list () =
       fail "__nonexistent_tool_xyz should be Unknown"
 
 let test_descriptor_registry_admits_masc_keeper_cluster () =
-  (* Boot regression guard: #19797 purged masc_keeper_* from surface lists but
-     config/tool_policy.toml still lists them -> keeper_tool_policy_config gate
-     returned Unknown -> server exit 1. The flat Descriptor_registry source
+  (* Boot regression guard: #19797 purged masc_keeper_* from surface lists.
+     Descriptor_registry source (over internal_descriptors public names)
      (over internal_descriptors public names) restores admission without
      touching dispatch. @check does NOT exercise this path, hence this test. *)
   List.iter
@@ -148,7 +147,7 @@ let test_retired_public_names_miss () =
     [ "Bash"; "SearchFiles"; "ReadFile"; "EditFile"; "WriteFile";
       "keeper_task_submit_for_verification" ]
 
-(* ── Policy matrix: active tool_policy.toml names resolve ── *)
+(* ── Core tool names that must resolve ── *)
 
 let policy_tool_names =
   List.sort_uniq String.compare

@@ -180,7 +180,6 @@
   test_keeper_toml
   test_runtime_toml_overrides
   test_runtime_provider_auth_headers
-  test_keeper_tool_policy_config
   test_keeper_tool_policy_masc_surface
   test_keeper_tool_visibility_projection
   test_keeper_tool_capability_axis
@@ -219,7 +218,6 @@
   test_keeper_fs_edit_patch
   test_keeper_sandbox_read_backend
   test_keeper_path_ssot
-  test_keeper_egress_audit
   test_tool_input_validation
   test_cdal_evidence_gate
   test_ocaml_north_star_task_lifecycle
@@ -434,7 +432,6 @@
   test_keeper_toml
   test_runtime_toml_overrides
   test_runtime_provider_auth_headers
-  test_keeper_tool_policy_config
   test_keeper_tool_policy_masc_surface
   test_keeper_tool_visibility_projection
   test_keeper_tool_capability_axis
@@ -473,7 +470,6 @@
   test_keeper_fs_edit_patch
   test_keeper_sandbox_read_backend
   test_keeper_path_ssot
-  test_keeper_egress_audit
   test_tool_input_validation
   ; test_contract_risk removed (team session cleanup)
   ; test_contract_composer removed (team session cleanup)
@@ -736,7 +732,6 @@
   test_tool_result
   test_tool_hooks
   test_governance_pipeline
-  test_keeper_routine_allowlist
   test_keeper_agent_isolation
   test_sse_external_sub
   test_ws_transport
@@ -916,7 +911,6 @@
   test_tool_result
   test_tool_hooks
   test_governance_pipeline
-  test_keeper_routine_allowlist
   test_keeper_agent_isolation
   test_sse_external_sub
   test_ws_transport

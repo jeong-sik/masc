@@ -332,9 +332,7 @@ let test_canonical_keeper_name_preserves_plain_hyphenated_name () =
    ============================================================ *)
 
 let () =
-  let base_path = Masc_test_deps.find_project_root () in
   Keeper_tool_dispatch_runtime.inject_masc_schemas Config.raw_all_tool_schemas;
-  ignore (Result.get_ok (Keeper_tool_dispatch_runtime.init_policy_config ~base_path));
   Alcotest.run "Keeper_agent_isolation" [
     ("non_research_prefix", [
       Alcotest.test_case "heuristic non-keeper tools are known" `Quick

@@ -25,12 +25,7 @@ type execute_input =
     }
 
 type validation_error =
-  | Executable_not_allowlisted of {
-      name : string;
-      readonly : bool;
-    }
   | Empty_executable of { argv : string list }
-  | Empty_argv of { executable : string }
   | Executable_repeated_in_argv0 of {
       executable : string;
       argv : string list;
@@ -58,12 +53,6 @@ type validation_error =
   | Pipeline_empty
   | Pipeline_too_short
   | Env_key_invalid of string
-
-let is_allowed ~readonly name =
-  if readonly
-  then Exec_policy.is_readonly_allowed name
-  else Exec_policy.is_dev_allowed name
-;;
 
 let json_type_name (json : Yojson.Safe.t) =
   match json with
@@ -398,6 +387,24 @@ let check_env env =
   loop env
 ;;
 
+let check_exec ~executable ~argv ~cwd ~env =
+  let ( let* ) = Result.bind in
+  let trimmed = String.trim executable in
+  if String.length trimmed = 0 then Error (Empty_executable { argv })
+  else if
+    match argv with
+    | first :: _ -> String.equal first trimmed
+    | [] -> false
+  then Error (Executable_repeated_in_argv0 { executable = trimmed; argv })
+  else (
+    let* () =
+      if argv = [] then Ok () else check_argv ~executable argv
+    in
+    let* () = check_cwd cwd in
+    let* () = check_env env in
+    Ok ())
+;;
+
 let check_redirect_target ~fd = function
   | Inherit | Discard -> Ok ()
   | File path when String.length path > 0 && path.[0] = '/' -> Ok ()
@@ -411,18 +418,36 @@ let check_redirects ~stdin ~stdout ~stderr =
   check_redirect_target ~fd:2 stderr
 ;;
 
-let shell_bin ~readonly ~argv executable =
+let validate = function
+  | Exec { executable; argv; cwd; env; stdin; stdout; stderr } ->
+    let ( let* ) = Result.bind in
+    let* () = check_exec ~executable ~argv ~cwd ~env in
+    check_redirects ~stdin ~stdout ~stderr
+  | Pipeline { stages = []; _ } -> Error Pipeline_empty
+  | Pipeline { stages = [ _ ]; _ } -> Error Pipeline_too_short
+  | Pipeline { stages; cwd; env } ->
+    let ( let* ) = Result.bind in
+    let* () = check_cwd cwd in
+    let* () = check_env env in
+    let rec each = function
+      | [] -> Ok ()
+      | { executable; argv } :: rest ->
+        let* () = check_exec ~executable ~argv ~cwd:None ~env:[] in
+        each rest
+    in
+    each stages
+;;
+
+let shell_bin ~argv executable =
   let trimmed = String.trim executable in
   if String.length trimmed = 0 then Error (Empty_executable { argv })
   else
     match Masc_exec.Exec_program.of_string trimmed with
     | Ok bin -> Ok bin
-    | Error (`Unknown name) ->
-      Error (Executable_not_allowlisted { name = trimmed; readonly })
+    | Error (`Unknown _) -> Error (Empty_executable { argv })
 ;;
 
 let shell_simple
-      ~readonly
       ?(sandbox = Masc_exec.Sandbox_target.host ())
       ?cwd
       ?(env = [])
@@ -430,7 +455,7 @@ let shell_simple
       { executable; argv }
   =
   let ( let* ) = Result.bind in
-  let* bin = shell_bin ~readonly ~argv executable in
+  let* bin = shell_bin ~argv executable in
   Ok
     (Keeper_tool_execute_shell_ir.simple_bin
        ?cwd_raw:cwd
@@ -471,204 +496,33 @@ let redirects_of ~cwd ~stdin ~stdout ~stderr =
     ]
 ;;
 
-let to_shell_ir_unvalidated ?(sandbox = Masc_exec.Sandbox_target.host ()) ~readonly input =
+let to_shell_ir_unvalidated ?(sandbox = Masc_exec.Sandbox_target.host ()) input =
   let ( let* ) = Result.bind in
   match input with
   | Exec { executable; argv; cwd; env; stdin; stdout; stderr } ->
     let stage = { executable; argv } in
     let redirects = redirects_of ~cwd ~stdin ~stdout ~stderr in
-    shell_simple ~readonly ~sandbox ?cwd ~env ~redirects stage
+    shell_simple ~sandbox ?cwd ~env ~redirects stage
   | Pipeline { stages; cwd; env } ->
     let* simples =
       let rec loop acc = function
         | [] -> Ok (List.rev acc)
         | stage :: rest ->
-          let* simple = shell_simple ~readonly ~sandbox ?cwd ~env stage in
+          let* simple = shell_simple ~sandbox ?cwd ~env stage in
           loop (simple :: acc) rest
       in
       loop [] stages
     in
-  Ok (Keeper_tool_execute_shell_ir.pipeline simples)
+    Ok (Keeper_tool_execute_shell_ir.pipeline simples)
 ;;
 
-let check_readonly_executable ~executable ~argv =
+let to_shell_ir ?sandbox input =
   let ( let* ) = Result.bind in
-  let executable = String.trim executable in
-  let* ir =
-    to_shell_ir_unvalidated
-      ~readonly:true
-      (Exec
-         { executable
-         ; argv
-         ; cwd = None
-         ; env = []
-         ; stdin = Inherit
-         ; stdout = Inherit
-         ; stderr = Inherit })
-  in
-  let stages = Masc_exec.Shell_ir_command_shape.effective_stages ir in
-  let rec loop = function
-    | [] -> Ok ()
-    | { Masc_exec.Shell_ir_command_shape.bin; args } :: rest ->
-      let executable = String.trim bin in
-      if not (is_allowed ~readonly:true executable)
-      then Error (Executable_not_allowlisted { name = executable; readonly = true })
-      else (
-        let risk = Masc_exec.Shell_ir_risk.classify_words (executable :: args) in
-        match risk with
-        | Masc_exec.Shell_ir_risk.R0_Read -> loop rest
-        | _ -> Error (Executable_not_allowlisted { name = executable; readonly = true }))
-  in
-  loop stages
-;;
-
-let check_wrapper_target ~readonly ~wrapper_name = function
-  | None -> Error (Empty_argv { executable = wrapper_name })
-  | Some target when is_allowed ~readonly target ->
-    if readonly
-    then check_readonly_executable ~executable:target ~argv:[]
-    else Ok ()
-  | Some target -> Error (Executable_not_allowlisted { name = target; readonly })
-;;
-
-let check_wrapper_exec_target ~readonly ~executable ~argv =
-  match executable with
-  | "env" ->
-    check_wrapper_target
-      ~readonly
-      ~wrapper_name:"env"
-      (Exec_policy_command_syntax.command_after_env_prefix argv)
-  | "opam" -> (
-    match Exec_policy_command_syntax.opam_exec_command_name argv with
-    | Some "opam" -> Ok ()
-    | target -> check_wrapper_target ~readonly ~wrapper_name:"opam" target)
-  | _ -> Ok ()
-;;
-
-let check_exec ~readonly ~executable ~argv ~cwd ~env =
-  let ( let* ) = Result.bind in
-  let trimmed = String.trim executable in
-  if String.length trimmed = 0 then Error (Empty_executable { argv })
-  else if not (is_allowed ~readonly trimmed)
-  then Error (Executable_not_allowlisted { name = trimmed; readonly })
-  else if
-    match argv with
-    | first :: _ -> String.equal first trimmed
-    | [] -> false
-  then Error (Executable_repeated_in_argv0 { executable = trimmed; argv })
-  else
-    let* () =
-      if argv = [] then Ok () else check_argv ~executable argv
-    in
-    if readonly
-    then check_readonly_executable ~executable:trimmed ~argv
-    else
-      let* () = check_wrapper_exec_target ~readonly ~executable:trimmed ~argv in
-      let* () = check_cwd cwd in
-      let* () = check_env env in
-      Ok ()
-;;
-
-let validate ~readonly = function
-  | Exec { executable; argv; cwd; env; stdin; stdout; stderr } ->
-    let ( let* ) = Result.bind in
-    let* () = check_exec ~readonly ~executable ~argv ~cwd ~env in
-    check_redirects ~stdin ~stdout ~stderr
-  | Pipeline { stages = []; _ } -> Error Pipeline_empty
-  | Pipeline { stages = [ _ ]; _ } -> Error Pipeline_too_short
-  | Pipeline { stages; cwd; env } ->
-    let ( let* ) = Result.bind in
-    let* () = check_cwd cwd in
-    let* () = check_env env in
-    let rec each = function
-      | [] -> Ok ()
-      | { executable; argv } :: rest ->
-        let* () = check_exec ~readonly ~executable ~argv ~cwd:None ~env:[] in
-        each rest
-    in
-    each stages
-;;
-
-let to_shell_ir ?sandbox ~readonly input =
-  let ( let* ) = Result.bind in
-  let* () = validate ~readonly input in
-  to_shell_ir_unvalidated ?sandbox ~readonly input
-;;
-
-let executable_not_allowlisted_hint ~name ~readonly =
-  (* A routed structured tool name is not a shell executable. Keep this check
-     descriptor/registry-backed so Keeper does not own the concrete tool-name
-     universe. *)
-  let is_masc_structured_tool =
-    Option.is_some (Keeper_tool_descriptor_resolution.descriptor_for_tool_name name)
-    || Keeper_tool_alias.is_known_internal name
-    || Option.is_some (Keeper_tool_descriptor.find_public name)
-  in
-  if is_masc_structured_tool
-  then
-    Some
-      "MASC tool names are not shell programs; call the visible JSON tool with \
-       arguments instead of running it through Execute."
-  else
-    match readonly, name with
-    | true, "gh" | true, "git" ->
-      Some
-        "The active Execute surface is read-only. Use Read/Grep when visible; \
-         otherwise ask for a write/execute-capable runtime surface before using git/gh."
-    | _, "bash" | _, "sh" | _, "zsh" ->
-      Some
-        "Shell interpreters are intentionally unavailable. Use typed \
-         executable/argv, or explicit pipeline stages, without shell syntax."
-    | _, "mkdir" ->
-      Some
-        "Directory materialization is handled by structured file/write or \
-         worktree workflows, not by Execute. Use Write/Edit when visible for \
-         file changes, or a git/worktree workflow when a repo checkout is needed."
-    | _, "touch" ->
-      Some
-        "Empty placeholder creation is not an Execute capability. Use \
-         Write with the intended content, or skip the placeholder when no \
-         content is needed."
-    | _, "test" ->
-      Some
-        "Shell conditionals are not standalone Execute programs. Use stat, ls, \
-         git status, or the visible structured task/file tools for existence \
-         checks."
-    | _, "rm" | _, "chmod" | _, "chown" | _, "sudo" ->
-      Some
-        "This executable is privileged/destructive. Use a dedicated structured \
-         workflow, a non-destructive inspection command, or ask the operator."
-    | _, "jq" ->
-      Some
-        "jq is not part of Execute. Use typed task/board tools for MASC \
-         state, or inspect files with Read/Grep and parse only the \
-         needed fields."
-    | _, "curl" ->
-      Some
-        "Network fetches are not available through Execute. Use a dedicated \
-         structured integration/tool if one is visible."
-    | _ -> None
-;;
-
-let executable_not_allowlisted_alternatives ~name ~readonly:_ =
-  match name with
-  | "mkdir" -> [ "tool_write_file"; "tool_edit_file"; "git" ]
-  | "touch" -> [ "tool_write_file"; "tool_edit_file" ]
-  | "test" ->
-    [ "stat"; "ls"; "tool_search_files"; "tool_read_file"; "keeper_tasks_list" ]
-  | _ -> []
+  let* () = validate input in
+  to_shell_ir_unvalidated ?sandbox input
 ;;
 
 let pp_validation_error ppf = function
-  | Executable_not_allowlisted { name; readonly } ->
-    (match executable_not_allowlisted_hint ~name ~readonly with
-     | None -> Format.fprintf ppf "executable %S not in allowlist" name
-     | Some hint ->
-       Format.fprintf
-         ppf
-         "executable %S not in allowlist. %s"
-         name
-         hint)
   | Empty_executable { argv = first :: rest } ->
     Format.fprintf
       ppf
@@ -679,10 +533,8 @@ let pp_validation_error ppf = function
       (Yojson.Safe.to_string (`List (List.map (fun arg -> `String arg) rest)))
   | Empty_executable { argv = [] } ->
     Format.pp_print_string ppf
-      "executable is empty — provide a non-empty allowlisted command name, \
+      "executable is empty — provide a non-empty executable name, \
        e.g. executable=\"cat\" argv=[\"file.txt\"]"
-  | Empty_argv { executable } ->
-    Format.fprintf ppf "executable %S invoked with empty argv" executable
   | Executable_repeated_in_argv0 { executable; argv = _ :: rest } ->
     Format.fprintf
       ppf
@@ -747,8 +599,6 @@ let pp_validation_error ppf = function
 ;;
 
 let validation_error_alternatives : validation_error -> string list = function
-  | Executable_not_allowlisted { name; readonly } ->
-    executable_not_allowlisted_alternatives ~name ~readonly
   | Argv_contains_shell_metachar _ -> []
   | Argv_contains_shell_pipeline_operator _ -> [ "Pipeline" ]
   | Argv_contains_shell_redirection _ ->

@@ -7,13 +7,7 @@ open Masc
 module Execute_input = Keeper_tool_execute_typed_input
 
 let typed_ok input =
-  match Execute_input.validate ~readonly:false input with
-  | Ok () -> true
-  | Error _ -> false
-;;
-
-let typed_ok_readonly input =
-  match Execute_input.validate ~readonly:true input with
+  match Execute_input.validate input with
   | Ok () -> true
   | Error _ -> false
 ;;
@@ -90,8 +84,10 @@ let cases : case list =
   ; { name = "unknown_executable"
     ; sample_cmd = "unknown_cmd foo"
     ; typed = mk_exec "unknown_cmd" [ "foo" ]
-    ; expect_typed = false
-    ; rationale = "executable not in dev allowlist"
+    ; expect_typed = true
+    ; rationale =
+        "structural validation allows any executable string; admission is \
+         enforced by Shell IR risk classification at runtime"
     }
   ; { name = "find_glob_pattern"
     ; sample_cmd = "find . -name *.ml"
@@ -193,84 +189,13 @@ let test_pipeline_stage_executable_check () =
       }
   in
   Alcotest.(check bool)
-    "pipeline: non-allowlisted stage executable is rejected"
-    false
+    "pipeline: structural validation does not reject unknown executables"
+    true
     (typed_ok input)
 ;;
 
-let expect_not_allowlisted ~target input =
-  match Execute_input.validate ~readonly:false input with
-  | Error (Execute_input.Executable_not_allowlisted { name; _ }) ->
-    Alcotest.(check string) "blocked target" target name
-  | Error error ->
-    Alcotest.failf
-      "expected Executable_not_allowlisted %S, got %a"
-      target
-      Execute_input.pp_validation_error
-      error
-  | Ok () -> Alcotest.failf "expected %S to be blocked" target
-;;
-
-let test_wrapper_exec_target_allowlist () =
-  List.iter
-    (fun input -> expect_not_allowlisted ~target:"rm" input)
-    [ mk_exec "env" [ "rm"; "-rf"; "/" ]
-    ; mk_exec "opam" [ "exec"; "--"; "rm"; "-rf"; "/" ]
-    ; mk_exec "env" [ "opam"; "exec"; "--"; "rm"; "-rf"; "/" ]
-    ; mk_exec "opam" [ "exec"; "--"; "env"; "rm"; "-rf"; "/" ]
-    ; Execute_input.Pipeline
-        { stages =
-            [ { executable = "rg"; argv = [ "pattern" ] }
-            ; { executable = "env"; argv = [ "rm"; "-rf"; "/" ] }
-            ]
-        ; cwd = None
-        ; env = []
-        }
-    ];
-  expect_not_allowlisted ~target:"'git'" (mk_exec "env" [ "'git'"; "status" ]);
-  List.iter
-    (fun input ->
-      match Execute_input.validate ~readonly:false input with
-      | Ok () -> ()
-      | Error error ->
-        Alcotest.failf
-          "expected wrapper target to be allowed, got %a"
-          Execute_input.pp_validation_error
-          error)
-    [ mk_exec "env" [ "git"; "status" ]
-    ; mk_exec "opam" [ "exec"; "--"; "git"; "status" ]
-    ; mk_exec "env" [ "opam"; "exec"; "--"; "git"; "status" ]
-    ; mk_exec "opam" [ "exec"; "--"; "env"; "FOO=bar"; "git"; "status" ]
-    ]
-;;
-
-let test_wrapper_exec_target_rejects_whitespace_padded_executable () =
-  (* Regression: trimming applied to allowlist membership must also apply
-     when dispatching wrapper-target validation. Otherwise a padded
-     [executable=" env "] passes the allowlist (trimmed to "env") but
-     [check_wrapper_exec_target] sees the raw " env " and falls through
-     to [_ -> Ok ()], skipping the env-argv guard. *)
-  List.iter
-    (fun input -> expect_not_allowlisted ~target:"rm" input)
-    [ mk_exec " env " [ "rm"; "-rf"; "/" ]
-    ; mk_exec "env\t" [ "rm"; "-rf"; "/" ]
-    ; mk_exec " opam " [ "exec"; "--"; "rm"; "-rf"; "/" ]
-    ]
-;;
-
-let test_standalone_env_rejected () =
-  match Execute_input.validate ~readonly:false (mk_exec "env" []) with
-  | Error (Execute_input.Empty_argv { executable = "env" }) -> ()
-  | Error error ->
-    Alcotest.failf
-      "expected standalone env to be rejected as empty wrapper, got %a"
-      Execute_input.pp_validation_error
-      error
-  | Ok () -> Alcotest.fail "standalone env should not be accepted"
-;;
-
 let test_empty_executable_with_argv_hints_rewrite () =
-  match Execute_input.validate ~readonly:false (mk_exec "" [ "ls"; "-la" ]) with
+  match Execute_input.validate  (mk_exec "" [ "ls"; "-la" ]) with
   | Error (Execute_input.Empty_executable { argv }) ->
     Alcotest.(check (list string)) "argv preserved" [ "ls"; "-la" ] argv;
     let msg = Format.asprintf "%a" Execute_input.pp_validation_error (Execute_input.Empty_executable { argv }) in
@@ -297,8 +222,7 @@ let test_empty_executable_with_argv_hints_rewrite () =
 let test_duplicate_executable_argv0_rejected () =
   match
     Execute_input.validate
-      ~readonly:false
-      (mk_exec "cat" [ "cat"; "-n"; "keeper_sandbox.mli" ])
+            (mk_exec "cat" [ "cat"; "-n"; "keeper_sandbox.mli" ])
   with
   | Error (Execute_input.Executable_repeated_in_argv0 { executable; argv }) ->
     Alcotest.(check string) "executable" "cat" executable;
@@ -341,7 +265,7 @@ let test_duplicate_executable_argv0_rejected () =
    message in 2026-05-26 logs. *)
 let test_unvalidated_path_preserves_argv_in_error () =
   let input = mk_exec "" [ "gh"; "pr"; "list"; "--state"; "open" ] in
-  match Execute_input.to_shell_ir_unvalidated ~readonly:false input with
+  match Execute_input.to_shell_ir_unvalidated  input with
   | Error (Execute_input.Empty_executable { argv }) ->
     Alcotest.(check (list string))
       "argv preserved through shell_simple/shell_bin"
@@ -368,112 +292,6 @@ let test_unvalidated_path_preserves_argv_in_error () =
 
 let validation_error_text error = Format.asprintf "%a" Execute_input.pp_validation_error error
 
-let check_not_allowlisted_hint ~name ~readonly ~needle () =
-  let msg =
-    validation_error_text (Execute_input.Executable_not_allowlisted { name; readonly })
-  in
-  Alcotest.(check bool)
-    (Printf.sprintf "%s hint" name)
-    true
-    (String_util.contains_substring_ci msg needle)
-;;
-
-let test_not_allowlisted_hints_self_correction () =
-  check_not_allowlisted_hint
-    ~name:"keeper_tasks_list"
-    ~readonly:false
-    ~needle:"not shell programs"
-    ();
-  check_not_allowlisted_hint
-    ~name:"gh"
-    ~readonly:true
-    ~needle:"write/execute-capable"
-    ();
-  check_not_allowlisted_hint
-    ~name:"sh"
-    ~readonly:false
-    ~needle:"Shell interpreters"
-    ();
-  check_not_allowlisted_hint
-    ~name:"mkdir"
-    ~readonly:false
-    ~needle:"structured file/write"
-    ();
-  check_not_allowlisted_hint
-    ~name:"touch"
-    ~readonly:false
-    ~needle:"Write"
-    ();
-  check_not_allowlisted_hint
-    ~name:"test"
-    ~readonly:false
-    ~needle:"Shell conditionals"
-    ();
-  check_not_allowlisted_hint
-    ~name:"chmod"
-    ~readonly:false
-    ~needle:"privileged/destructive"
-    ();
-  check_not_allowlisted_hint
-    ~name:"jq"
-    ~readonly:false
-    ~needle:"typed task/board tools"
-    ()
-;;
-
-let test_readonly_allowlist_accepts_repo_read_entrypoints () =
-  Alcotest.(check bool)
-    "readonly allows git entrypoint"
-    true
-    (typed_ok_readonly (mk_exec "git" [ "log"; "--oneline"; "-10" ]));
-  Alcotest.(check bool)
-    "readonly allows gh entrypoint"
-    true
-    (typed_ok_readonly (mk_exec "gh" [ "pr"; "view"; "123" ]));
-  Alcotest.(check bool)
-    "readonly still rejects destructive entrypoint"
-    false
-    (typed_ok_readonly (mk_exec "rm" [ "file.txt" ]))
-;;
-
-let test_readonly_still_blocks_readwrite_shell_helpers () =
-  Alcotest.(check bool)
-    "readonly blocks write-capable allowlisted helpers"
-    false
-    (typed_ok_readonly (mk_exec "sed" [ "-i"; "s/x/y/"; "demo.txt" ]))
-;;
-
-let test_readonly_allows_read_only_sed_commands () =
-  Alcotest.(check bool)
-    "readonly allows read-only sed usage"
-    true
-    (typed_ok_readonly (mk_exec "sed" [ "s/x/y/"; "demo.txt" ]))
-;;
-
-let test_readonly_blocks_readwrite_within_env () =
-  Alcotest.(check bool)
-    "readonly blocks env wrapper write command"
-    false
-    (typed_ok_readonly (mk_exec "env" [ "git"; "push"; "origin"; "main" ]));
-  Alcotest.(check bool)
-    "readonly allows env wrapper read command"
-    true
-    (typed_ok_readonly (mk_exec "env" [ "git"; "status" ]))
-;;
-
-let test_readonly_blocks_glab () =
-  Alcotest.(check bool)
-    "readonly blocks glab"
-    false
-    (typed_ok_readonly (mk_exec "glab" [ "issue"; "close" ]))
-;;
-
-let test_readonly_blocks_non_allowlisted_write_like () =
-  Alcotest.(check bool)
-    "readonly blocks tar extract style command"
-    false
-    (typed_ok_readonly (mk_exec "tar" [ "-xf"; "archive.tar" ]))
-;;
 
 let test_of_json_exec () =
   let input =
@@ -743,7 +561,7 @@ let shell_simple_tuple (simple : Masc_exec.Shell_ir.simple) =
 ;;
 
 let to_shell_ir_exn input =
-  match Execute_input.to_shell_ir ~readonly:false input with
+  match Execute_input.to_shell_ir  input with
   | Ok ir -> ir
   | Error error ->
     Alcotest.failf
@@ -798,7 +616,7 @@ let test_exec_lowering_rejects_duplicate_executable_argv () =
       ; stderr = Execute_input.Inherit
       }
   in
-  match Execute_input.to_shell_ir ~readonly:false input with
+  match Execute_input.to_shell_ir  input with
   | Error
       (Execute_input.Executable_repeated_in_argv0
         { executable = "git"; argv = [ "git"; "status" ] }) -> ()
@@ -841,8 +659,7 @@ let test_pipeline_lowers_with_injected_docker_sandbox () =
   in
   match
     Execute_input.to_shell_ir
-      ~readonly:false
-      ~sandbox:(docker_test_sandbox ())
+            ~sandbox:(docker_test_sandbox ())
       input
   with
   | Ok
@@ -894,7 +711,7 @@ let test_standalone_pipe_operator_in_exec_argv_rejected () =
         ; stderr = Execute_input.Inherit
         }
     in
-    match Execute_input.validate ~readonly:true input with
+    match Execute_input.validate input with
     | Error
         (Execute_input.Argv_contains_shell_pipeline_operator
           { executable; index = actual_index; token = actual_token } as err) ->
@@ -1003,7 +820,7 @@ let test_env_key_invalid () =
    runtime "unknown primary" failure observed in fleet (2026-05-27
    18:56 KST find: 2>/dev/null primary error). *)
 let expect_redirection_rejected ~token input =
-  match Execute_input.validate ~readonly:false input with
+  match Execute_input.validate  input with
   | Error (Execute_input.Argv_contains_shell_redirection { token = t; _ }) ->
     Alcotest.(check string) "rejected token text" token t
   | Error other ->
@@ -1066,7 +883,7 @@ let test_legitimate_metachar_still_allowed () =
           ; stderr = Execute_input.Inherit
           }
       in
-      match Execute_input.validate ~readonly:false input with
+      match Execute_input.validate  input with
       | Ok () -> ()
       | Error err ->
         Alcotest.failf
@@ -1123,7 +940,7 @@ let test_redirection_rejected_emits_typed_alternative () =
       ; stderr = Execute_input.Inherit
       }
   in
-  match Execute_input.validate ~readonly:false input with
+  match Execute_input.validate  input with
   | Error (Execute_input.Argv_contains_shell_redirection _ as err) ->
     let msg = Format.asprintf "%a" Execute_input.pp_validation_error err in
     Alcotest.(check bool)
@@ -1157,25 +974,6 @@ let test_validation_error_alternatives () =
     (Execute_input.Argv_contains_shell_pipeline_operator
        { executable = "tail"; index = 3; token = "|" })
     [ "Pipeline" ];
-  check_alts
-    ~name:"Executable_not_allowlisted rm has no alternatives"
-    (Execute_input.Executable_not_allowlisted { name = "rm"; readonly = false })
-    [];
-  check_alts
-    ~name:"Executable_not_allowlisted mkdir alternatives"
-    (Execute_input.Executable_not_allowlisted
-       { name = "mkdir"; readonly = false })
-    [ "tool_write_file"; "tool_edit_file"; "git" ];
-  check_alts
-    ~name:"Executable_not_allowlisted touch alternatives"
-    (Execute_input.Executable_not_allowlisted
-       { name = "touch"; readonly = false })
-    [ "tool_write_file"; "tool_edit_file" ];
-  check_alts
-    ~name:"Executable_not_allowlisted test alternatives"
-    (Execute_input.Executable_not_allowlisted
-       { name = "test"; readonly = false })
-    [ "stat"; "ls"; "tool_search_files"; "tool_read_file"; "keeper_tasks_list" ];
   check_alts
     ~name:"Empty_executable has no alternatives"
     (Execute_input.Empty_executable { argv = [ "ls" ] })
@@ -1223,8 +1021,7 @@ let redirect_at ir n =
 let test_redirect_defaults_inherit_emits_no_ir_entries () =
   match
     Execute_input.to_shell_ir
-      ~readonly:false
-      (mk_exec_with_redirects ())
+            (mk_exec_with_redirects ())
   with
   | Ok ir ->
     Alcotest.(check int)
@@ -1250,7 +1047,7 @@ let test_redirect_discard_combinations () =
   List.iter
     (fun (name, stdin, stdout, stderr, expected_count) ->
       let input = mk_exec_with_redirects ~stdin ~stdout ~stderr () in
-      match Execute_input.to_shell_ir ~readonly:false input with
+      match Execute_input.to_shell_ir  input with
       | Ok ir ->
         Alcotest.(check int)
           (Printf.sprintf "%s emits %d redirect IR entries" name expected_count)
@@ -1271,7 +1068,7 @@ let test_redirect_file_absolute_path_emits_ir () =
       ~stdout:(Execute_input.File "/tmp/out.log")
       ()
   in
-  match Execute_input.to_shell_ir ~readonly:false input with
+  match Execute_input.to_shell_ir  input with
   | Ok ir ->
     Alcotest.(check int) "file redirect emits 1 entry" 1 (count_redirects ir);
     (match redirect_at ir 0 with
@@ -1291,7 +1088,7 @@ let test_redirect_file_relative_path_rejected () =
       ~stderr:(Execute_input.File "relative/path.log")
       ()
   in
-  match Execute_input.validate ~readonly:false input with
+  match Execute_input.validate  input with
   | Error (Execute_input.Redirect_path_not_absolute { fd = 2; path }) ->
     Alcotest.(check string) "rejected relative path" "relative/path.log" path
   | Error other ->
@@ -1307,7 +1104,7 @@ let test_redirect_stderr_discard_equivalent_to_dev_null_redirect () =
      both must produce a single redirect targeting /dev/null on fd=2
      with Write mode. *)
   let input = mk_exec_with_redirects ~stderr:Execute_input.Discard () in
-  match Execute_input.to_shell_ir ~readonly:false input with
+  match Execute_input.to_shell_ir  input with
   | Ok ir ->
     (match redirect_at ir 0 with
      | Masc_exec.Redirect_scope.File { fd = 2; target; mode = Masc_exec.Redirect_scope.Write } ->
@@ -1366,18 +1163,6 @@ let suite =
           `Quick
           test_pipeline_stage_executable_check
       ; Alcotest.test_case
-          "wrapper_exec_target_allowlist"
-          `Quick
-          test_wrapper_exec_target_allowlist
-      ; Alcotest.test_case
-          "wrapper_exec_target_rejects_whitespace_padded_executable"
-          `Quick
-          test_wrapper_exec_target_rejects_whitespace_padded_executable
-      ; Alcotest.test_case
-          "standalone_env_rejected"
-          `Quick
-          test_standalone_env_rejected
-      ; Alcotest.test_case
           "empty_executable_with_argv_hints_rewrite"
           `Quick
           test_empty_executable_with_argv_hints_rewrite
@@ -1389,34 +1174,6 @@ let suite =
           "unvalidated_path_preserves_argv_in_error"
           `Quick
           test_unvalidated_path_preserves_argv_in_error
-      ; Alcotest.test_case
-          "not_allowlisted_hints_self_correction"
-          `Quick
-          test_not_allowlisted_hints_self_correction
-      ; Alcotest.test_case
-          "readonly_allowlist_accepts_repo_read_entrypoints"
-          `Quick
-          test_readonly_allowlist_accepts_repo_read_entrypoints
-      ; Alcotest.test_case
-          "readonly_still_blocks_readwrite_shell_helpers"
-          `Quick
-          test_readonly_still_blocks_readwrite_shell_helpers
-      ; Alcotest.test_case
-          "readonly_allows_read_only_sed_commands"
-          `Quick
-          test_readonly_allows_read_only_sed_commands
-      ; Alcotest.test_case
-          "readonly_blocks_readwrite_within_env"
-          `Quick
-          test_readonly_blocks_readwrite_within_env
-      ; Alcotest.test_case
-          "readonly_blocks_non_allowlisted_write_like"
-          `Quick
-          test_readonly_blocks_non_allowlisted_write_like
-      ; Alcotest.test_case
-          "readonly_blocks_glab"
-          `Quick
-          test_readonly_blocks_glab
       ; Alcotest.test_case "of_json_exec" `Quick test_of_json_exec
       ; Alcotest.test_case
           "of_json_rejects_argv_without_executable"

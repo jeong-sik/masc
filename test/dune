@@ -135,6 +135,7 @@
   test_ide_bridge
   test_command_descriptor
   test_server_ide_lsp_proxy
+  test_server_activity_http
   test_ide_paths
   test_ide_canonical_url_join
   test_keeper_runtime_contract
@@ -387,6 +388,7 @@
   test_ide_bridge
   test_command_descriptor
   test_server_ide_lsp_proxy
+  test_server_activity_http
   test_ide_paths
   test_ide_canonical_url_join
   test_keeper_runtime_contract

@@ -172,14 +172,8 @@ export function RuntimePanel() {
         : html`
             <${RuntimeHealthSnapshot} />
             <${OasHealthChip} />
+            <${RuntimeMonitor} />
             <${HiddenDiagnosticsLinks} />
-            <${CollapsibleSection}
-              id="runtime-details-providers"
-              title="런타임 상세"
-              mountWhenOpen=${true}
-            >
-              <${RuntimeMonitor} />
-            <//>
             <${CollapsibleSection} id="runtime-details-verification" title="형식검증">
               <${VerificationSpecsPanel} />
             <//>

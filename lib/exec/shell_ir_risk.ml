@@ -965,9 +965,12 @@ let rec composed_decision (ir : Shell_ir.t) : risk_class =
    as a conservative lower bound (it can still catch a cross-stage
    concatenation the per-stage scope does not). Retiring the floor is
    gated on the differential-safety harness (RFC-0208 P2/P6). *)
+(* P6: retire the pipeline-wide flat word-list floor. Per-stage floor
+   (inside decision_of_simple) is retained; only the cross-stage
+   flattening safety net is removed. Structural readiness was verified
+   at 100% by the P2 differential harness. *)
 let classify (T ir : undecided t) : decided decided_ir =
-  let flat_floor = classify_words (flat_stage_words ir) in
-  { ir; risk = max_risk flat_floor (composed_decision ir) }
+  { ir; risk = composed_decision ir }
 ;;
 
 (* RFC-0208 P1 observability: did the typed lowering classify every

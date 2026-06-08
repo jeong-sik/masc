@@ -50,7 +50,7 @@ let run_docker_argv_with_status ~summary ~timeout_sec argv =
       ~actor:`System_sandbox
       ~raw_source:(String.concat " " argv)
       ~summary
-      ~env:(Unix.environment ())
+      ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
       ~cwd:(Sys.getcwd ())
       ~timeout_sec
       argv)

@@ -350,6 +350,24 @@ fi\n\
 printf 'unexpected docker invocation\\n' >&2\n\
 exit 2\n"
 
+let fake_docker_env_dump_script =
+  "#!/bin/sh\n\
+if [ \"$1\" = \"info\" ]; then\n\
+  printf '[]\\n'\n\
+  exit 0\n\
+fi\n\
+if [ \"$1\" = \"image\" ] && [ \"$2\" = \"inspect\" ] && [ \"$3\" = \"alpine:test\" ]; then\n\
+  printf '[]\\n'\n\
+  exit 0\n\
+fi\n\
+if [ \"$1\" = \"run\" ]; then\n\
+  env > \"${KEEPER_DOCKER_LOG}.env\"\n\
+  printf 'ok\\n'\n\
+  exit 0\n\
+fi\n\
+printf 'unexpected docker invocation\\n' >&2\n\
+exit 2\n"
+
 let fake_docker_turn_runtime_script =
   "#!/bin/sh\n\
 log_file=${KEEPER_DOCKER_LOG:-}\n\
@@ -1110,6 +1128,29 @@ let test_run_command_fallback_uses_docker_spawn_slot ~clock () =
        Alcotest.(check string) "slow docker stdout" "slow ok\n" out);
    Alcotest.(check int) "Docker_spawn slot released" 0
      (docker_spawn_in_flight ())
+
+let test_run_command_scrubs_sensitive_env () =
+  with_fake_docker fake_docker_env_dump_script @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_env "GH_TOKEN" "ghp_secret" @@ fun () ->
+  with_env "ANTHROPIC_API_KEY" "sk-ant-secret" @@ fun () ->
+  let base, config, meta = setup_config "minjae" in
+  let log_path = Filename.concat base "docker.log" in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  match
+    Keeper_sandbox_read_backend.run_command_with_status ~config ~meta
+      ~command_argv:[ "echo"; "hello" ]
+      ~max_bytes:4096 ~timeout_sec:5.0 ()
+  with
+  | Error msg -> Alcotest.failf "expected success, got %s" msg
+  | Ok (_st, _out) ->
+      let env_dump_path = log_path ^ ".env" in
+      let env_dump = read_file env_dump_path in
+      Alcotest.(check bool) "GH_TOKEN scrubbed" false
+        (contains_substring env_dump "GH_TOKEN=");
+      Alcotest.(check bool) "ANTHROPIC_API_KEY scrubbed" false
+        (contains_substring env_dump "ANTHROPIC_API_KEY=")
 
 let test_turn_runtime_reuses_single_container () =
   with_fake_docker fake_docker_turn_runtime_script @@ fun () ->

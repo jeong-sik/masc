@@ -199,6 +199,7 @@
   test_exec_core
   test_exec_dispatch
   test_shell_ir_risk
+  test_keeper_tool_execute_typed_input
   test_hitl_approval
   test_keeper_discovered_tools
   test_keeper_tool_affinity
@@ -450,6 +451,7 @@
   test_exec_core
   test_exec_dispatch
   test_shell_ir_risk
+  test_keeper_tool_execute_typed_input
   test_hitl_approval
   test_keeper_discovered_tools
   test_keeper_tool_affinity

@@ -626,8 +626,8 @@ let run_heartbeat_loop
   (* Phase 1: work-as-heartbeat freshness tracking.
      Updated ONLY on Workspace.heartbeat success after turn. *)
   let last_successful_heartbeat_ts = ref (Time_compat.now ()) in
-  let work_as_hb () = Runtime_params.get Governance_registry.keeper_work_as_hb_enabled in
-  let max_silence () =
+  let _work_as_hb () = Runtime_params.get Governance_registry.keeper_work_as_hb_enabled in
+  let _max_silence () =
     Runtime_params.get Governance_registry.keeper_work_as_hb_max_silence_sec
   in
   (* Phase 2: smart heartbeat — adaptive scheduling via Keeper_heartbeat_smart *)
@@ -703,16 +703,13 @@ let run_heartbeat_loop
           ~last_successful_heartbeat_ts
           ~last_heartbeat_cycle_ts
       then (
-        (* Phase 1: skip presence sync when recent workspace heartbeat proves freshness *)
+        (* Phase 1: sync presence and emit heartbeat metric *)
         let meta_current =
           sync_keeper_presence
             ~ctx
             ~meta_current
-            ~t_presence_start
             ~consecutive_failures
             ~last_successful_heartbeat_ts
-            ~work_as_hb
-            ~max_silence
         in
         (* RFC-0002: fiber crash on heartbeat threshold breach *)
         if

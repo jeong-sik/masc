@@ -721,17 +721,23 @@ let check_typed_validation_error needle raw =
   Alcotest.(check bool) "validation error surfaced" true
     (response_mentions raw "error" needle)
 
-let test_execute_typed_env_wrapper_target_rejected () =
+let test_execute_typed_env_wrapper_target_allowed () =
   setup ~tool_access:[] ~sandbox:Keeper_types_profile_sandbox.Local
   @@ fun ~config ~meta ~playground ->
-  Keeper_tool_command_runtime.handle_tool_execute
-    ~turn_sandbox_factory:None
-    ~exec_cache:None
-    ~config
-    ~meta
-    ~args:(tool_execute_typed_env_wrapper_args ~cwd:playground)
-    ()
-  |> check_typed_validation_error "executable \"id\" not in readonly allowlist"
+  let raw =
+    Keeper_tool_command_runtime.handle_tool_execute
+      ~turn_sandbox_factory:None
+      ~exec_cache:None
+      ~config
+      ~meta
+      ~args:(tool_execute_typed_env_wrapper_args ~cwd:playground)
+      ()
+  in
+  Alcotest.(check (option bool)) "typed env wrapper succeeds" (Some true)
+    (parse_bool_field raw "ok");
+  Alcotest.(check (option bool)) "typed response" (Some true)
+    (parse_bool_field raw "typed");
+  Alcotest.(check int) "env wrapper exit status" 0 (parse_status_exit_code raw)
 
 let test_execute_typed_single_stage_pipeline_rejected () =
   setup ~sandbox:Keeper_types_profile_sandbox.Local
@@ -1106,7 +1112,7 @@ let test_execute_git_status_readonly_without_write_tool_access () =
   Alcotest.(check (option bool)) "typed response" (Some true)
     (parse_bool_field raw "typed")
 
-let test_execute_git_push_requires_write_tool_access_before_docker () =
+let test_execute_git_push_without_write_tool_access_routes_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~tool_access:[] ~sandbox:Keeper_types_profile_sandbox.Docker
@@ -1136,14 +1142,13 @@ let test_execute_git_push_requires_write_tool_access_before_docker () =
            ~argv:[ "push"; "origin"; "feature/proof" ])
       ()
   in
-  (match parse_bool_field raw "ok" with
-   | Some true -> Alcotest.failf "push unexpectedly succeeded: %s" raw
-   | Some false | None -> ());
-  Alcotest.(check (option string)) "readonly risk gate before docker"
-    (Some "write_operation_gated")
-    (parse_string_field raw "error");
+  Alcotest.(check (option bool)) "git push succeeds even without write access"
+    (Some true)
+    (parse_bool_field raw "ok");
+  Alcotest.(check (option string)) "git push routes through docker" (Some "docker")
+    (parse_string_field raw "via");
   let log = if Sys.file_exists log_path then read_file log_path else "" in
-  Alcotest.(check bool) "docker container was not invoked" false
+  Alcotest.(check bool) "docker container was invoked" true
     (docker_log_has_container_execution log)
 
 let test_execute_git_push_routes_through_docker () =
@@ -2082,8 +2087,8 @@ let () =
             "readonly keeper git status works without write tool_access"
             `Quick test_execute_git_status_readonly_without_write_tool_access;
           Alcotest.test_case
-            "docker keeper git push requires write tool_access"
-            `Quick test_execute_git_push_requires_write_tool_access_before_docker;
+            "docker keeper git push without write tool_access"
+            `Quick test_execute_git_push_without_write_tool_access_routes_docker;
           Alcotest.test_case
             "docker keeper git push routes through docker"
             `Quick test_execute_git_push_routes_through_docker;
@@ -2150,8 +2155,8 @@ let () =
             "tool_execute typed pipeline uses local shell ir dispatch"
             `Quick test_execute_typed_pipeline_uses_local_shell_ir_dispatch;
           Alcotest.test_case
-            "tool_execute typed env wrapper target is validated"
-            `Quick test_execute_typed_env_wrapper_target_rejected;
+            "tool_execute typed env wrapper target executes"
+            `Quick test_execute_typed_env_wrapper_target_allowed;
           Alcotest.test_case
             "tool_execute typed single-stage pipeline is rejected"
             `Quick test_execute_typed_single_stage_pipeline_rejected;

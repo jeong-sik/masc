@@ -1553,6 +1553,54 @@ let test_keeper_schema_tool_access_rejects_string_value () =
   | Error _ -> ()
 ;;
 
+let get_schema_property_description schema name =
+  match schema with
+  | `Assoc fields ->
+    (match List.assoc_opt "properties" fields with
+     | Some (`Assoc props) ->
+       (match List.assoc_opt name props with
+        | Some (`Assoc prop_fields) ->
+          (match List.assoc_opt "description" prop_fields with
+           | Some (`String desc) -> Some desc
+           | _ -> None)
+        | _ -> None)
+     | _ -> None)
+  | _ -> None
+;;
+
+let test_keeper_schema_tool_access_description_no_allowlist () =
+  let schemas = Keeper_schema.keeper_schemas in
+  let check_schema tool_name =
+    match List.find_opt (fun s -> s.Masc_domain.name = tool_name) schemas with
+    | None -> Alcotest.failf "%s schema not found" tool_name
+    | Some schema ->
+      (match get_schema_property_description schema.Masc_domain.input_schema "tool_access" with
+       | None -> Alcotest.failf "%s: tool_access description missing" tool_name
+       | Some desc ->
+         if String_util.contains_substring desc "allowlist"
+         then Alcotest.failf "%s: tool_access description contains 'allowlist': %s" tool_name desc;
+         if not (String_util.contains_substring desc "candidate profiles for discovery")
+         then Alcotest.failf "%s: tool_access description missing expected text: %s" tool_name desc)
+  in
+  check_schema "masc_keeper_create_from_persona";
+  check_schema "masc_keeper_up"
+;;
+
+let test_keeper_schema_tool_denylist_description () =
+  let schemas = Keeper_schema.keeper_schemas in
+  let check_schema tool_name =
+    match List.find_opt (fun s -> s.Masc_domain.name = tool_name) schemas with
+    | None -> Alcotest.failf "%s schema not found" tool_name
+    | Some schema ->
+      (match get_schema_property_description schema.Masc_domain.input_schema "tool_denylist" with
+       | None -> Alcotest.failf "%s: tool_denylist description missing" tool_name
+       | Some desc ->
+         if not (String_util.contains_substring desc "Execution removal layer")
+         then Alcotest.failf "%s: tool_denylist description missing expected text: %s" tool_name desc)
+  in
+  check_schema "masc_keeper_up"
+;;
+
 (* ================================================================ *)
 (* Runner                                                            *)
 (* ================================================================ *)
@@ -1688,5 +1736,9 @@ let () =
         test_keeper_schema_tool_access_rejects_object;
       Alcotest.test_case "string value rejected" `Quick
         test_keeper_schema_tool_access_rejects_string_value;
+      Alcotest.test_case "description does not contain allowlist" `Quick
+        test_keeper_schema_tool_access_description_no_allowlist;
+      Alcotest.test_case "denylist description is execution removal layer" `Quick
+        test_keeper_schema_tool_denylist_description;
     ]);
   ]

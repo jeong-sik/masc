@@ -77,38 +77,49 @@ let docker_target ~turn_sandbox_factory ~meta ~cwd =
      with
      | Error failure -> Error (image_preflight_target_error failure)
      | Ok () ->
-       let runner ~stdin_content ~argv ~env:_ ~cwd:stage_cwd =
-         let cwd = stage_cwd_or_default stage_cwd in
-         match
-           Keeper_turn_sandbox_runtime.run_exec_with_status
-             ?stdin_content
-             runtime
-             ~timeout_sec
-             ~cwd
-             ~command_argv:argv
-         with
-         | Ok (status, output) -> status, output, ""
-         | Error err -> Unix.WEXITED 1, "", err
+       let runner ~stdin_content ~argv ~env ~cwd:stage_cwd =
+         if Array.length env > 0 then
+           (Unix.WEXITED 1, "", "typed Shell IR Docker dispatch does not support env yet")
+         else
+           let cwd = stage_cwd_or_default stage_cwd in
+           match
+             Keeper_turn_sandbox_runtime.run_exec_with_status
+               ?stdin_content
+               runtime
+               ~timeout_sec
+               ~cwd
+               ~command_argv:argv
+           with
+           | Ok (status, output) -> status, output, ""
+           | Error err -> Unix.WEXITED 1, "", err
        in
        let pipeline_runner ~stages =
-         let stages =
-           List.map
-             (fun stage ->
-                { Keeper_turn_sandbox_runtime.command_argv =
-                    stage.Masc_exec.Sandbox_target.argv
-                ; cwd = stage.cwd
-                })
-             stages
-         in
          match
-           Keeper_turn_sandbox_runtime.run_exec_pipeline_with_status
-             runtime
-             ~timeout_sec
-             ~cwd
-             ~stages
+           List.find_opt
+             (fun stage -> Array.length stage.Masc_exec.Sandbox_target.env > 0)
+             stages
          with
-         | Ok result -> result
-         | Error err -> Unix.WEXITED 1, "", err
+         | Some _ ->
+           (Unix.WEXITED 1, "", "typed Shell IR Docker dispatch does not support env yet")
+         | None ->
+           let stages =
+             List.map
+               (fun stage ->
+                  { Keeper_turn_sandbox_runtime.command_argv =
+                      stage.Masc_exec.Sandbox_target.argv
+                  ; cwd = stage.cwd
+                  })
+               stages
+           in
+           match
+             Keeper_turn_sandbox_runtime.run_exec_pipeline_with_status
+               runtime
+               ~timeout_sec
+               ~cwd
+               ~stages
+           with
+           | Ok result -> result
+           | Error err -> Unix.WEXITED 1, "", err
        in
        Ok (Masc_exec.Sandbox_target.docker ~image ~runner ~pipeline_runner ()))
 ;;

@@ -51,58 +51,9 @@ let runtime_pressure_class_of_label label =
   | _ -> None
 ;;
 
-let provider_runtime_pressure_class ~code ~detail ~http_status ~runtime_id =
-  let contains needle =
-    String_util.contains_substring_ci code needle
-    || String_util.contains_substring_ci detail needle
-  in
-  let http_is_any statuses =
-    match http_status with
-    | Some status -> List.mem status statuses
-    | None -> false
-  in
-  if
-    contains "client_capacity"
-    || contains "client capacity"
-    || contains "client_capacity_full"
-  then Client_capacity_full
-  else if
-    contains "admission_capacity"
-    || contains "inflight_capacity_full"
-    || Option.is_some runtime_id
-    || contains "admission="
-  then Runtime_admission_full
-  else if
-    contains "capacity_backpressure"
-    || contains "capacity exhausted"
-    || contains "capacity backpressure"
-    || contains "rate limit"
-    || contains "rate_limited"
-    || contains "overloaded"
-    || http_is_any [ 429; 529 ]
-  then Provider_capacity
-  else if
-    contains "getaddrinfo"
-    || contains "dns"
-    || contains "enotfound"
-    || contains "nxdomain"
-    || contains "nodename nor servname"
-  then Provider_dns_failure
-  else if
-    contains "timeout"
-    || contains "timed out"
-    || contains "no_first_token"
-    || contains "max_execution_time"
-    || contains "wall-clock timeout"
-    || http_is_any [ 408; 504; 524 ]
-  then Provider_timeout
-  else Provider_error
-;;
-
 let runtime_pressure_class_of_failure_reason = function
   | Some (Keeper_registry.Provider_timeout_loop _) -> Some Provider_timeout
-  | Some (Keeper_registry.Provider_runtime_error { code; detail; http_status; runtime_id }) ->
-    Some (provider_runtime_pressure_class ~code ~detail ~http_status ~runtime_id)
+  | Some (Keeper_registry.Provider_runtime_error _) -> Some Provider_error
   | Some (Keeper_registry.Stale_turn_timeout _) -> Some Turn_stale_timeout
   | Some
       ( Keeper_registry.Heartbeat_consecutive_failures _

@@ -49,8 +49,22 @@ val known_callers : unit -> caller list
     fallback without hardcoding the literal. *)
 val global_default_sec : float
 
-(** Default timeout for advisory dashboard judge callers
-    ({!Governance_judge} / {!Operator_judge}). Kept below the default
-    judge refresh interval so a slow CLI-backed judge degrades instead
-    of pinning the dashboard for minutes. *)
+(** Legacy default for advisory dashboard judge callers
+    ({!Governance_judge} / {!Operator_judge}). Retained as a
+    named pin so test fixtures that previously asserted on
+    [45.0] keep a stable reference, but no longer the active
+    default — the {b governance_judge_no_timeout} value below
+    replaces the [Governance_judge | Operator_judge] arms in
+    the per-caller default table. *)
 val dashboard_judge_default_sec : float
+
+(** Active default for [{!Governance_judge}] and [{!Operator_judge}]:
+    [Float.infinity], meaning the bridge applies no wrapper timeout
+    to those callers.  See the [known_default_sec] comment in
+    [.ml] for the 2026-06-08 root cause (45s wrapper firing before
+    the OAS provider's first response and propagating fleet-wide
+    idle).  Per-caller env overrides
+    [MASC_OAS_BRIDGE_TIMEOUT_GOVERNANCE_JUDGE_SEC] /
+    [MASC_OAS_BRIDGE_TIMEOUT_OPERATOR_JUDGE_SEC] still win for
+    operators who want a finite budget. *)
+val governance_judge_no_timeout : float

@@ -178,27 +178,6 @@ let degraded_reason_of_error message =
   else
     "error"
 
-let timeout_sec_of_error message =
-  let marker = "timed out after " in
-  let lower = String.lowercase_ascii message in
-  match String_util.find_substring lower marker with
-  | None -> None
-  | Some marker_idx ->
-      let start = marker_idx + String.length marker in
-      let len = String.length lower in
-      let rec find_stop idx =
-        if idx >= len then idx
-        else
-          match lower.[idx] with
-          | '0' .. '9' | '.' -> find_stop (idx + 1)
-          | _ -> idx
-      in
-      let stop = find_stop start in
-      if stop <= start then None
-      else
-        String.sub lower start (stop - start)
-        |> float_of_string_opt
-
 let cached_judgments_still_fresh ~now_ts (st : state) =
   match st.expires_at_unix with
   | Some expires_at -> expires_at > now_ts
@@ -746,7 +725,19 @@ let should_backoff ~sw:_ ~net:_ =
   && Local_runtime_pool.healthy_runtime_count () > 0
   && Local_runtime_pool.allocated_slots () >= configured
 
-let mark_compute_start (st : state) =
+(* Fix #1 (typed invariant, CLAUDE.md §워크어라운드 거부 기준):
+   [mark_compute_start] registers an [Eio.Switch.on_release] callback so
+   the in-flight counter is decremented exactly once on every exit path
+   — clean, cancelled, or panic — without the [max 0 (... - 1)] symptom
+   suppressor that mark_compute_finish used to carry.  The supplier of
+   the switch owns its lifecycle; here it is the [Eio.Switch.run] scope
+   inside [refresh_once] that wraps [compute_judgments], so any
+   escape — including the [Eio__core__Fiber.Not_first] re-raise path
+   that previously bypassed the user-site [Cancelled] handler — still
+   fires the release callback.  The [mark_compute_finish] companion
+   keeps its role as a pure telemetry emitter (counter, histogram, log)
+   and never mutates [compute_in_flight]. *)
+let mark_compute_start ~sw (st : state) =
   (* Publish the gauge inside the lock so concurrent refresh_once runs
      can't interleave the read/write and end with a stale value
      overwriting the freshest count. *)
@@ -754,6 +745,21 @@ let mark_compute_start (st : state) =
       st.compute_in_flight <- st.compute_in_flight + 1;
       Otel_metric_store.set_gauge governance_compute_in_flight_metric
         (float_of_int st.compute_in_flight);
+      Eio.Switch.on_release sw (fun () ->
+        with_lock st (fun () ->
+            (* The [max 0] floor is retained as a *defensive* invariant
+               only: under the new flow it should never fire, because
+               on_release runs exactly once per [mark_compute_start]
+               registration and no other site decrements
+               [compute_in_flight].  If a future regression introduces
+               a second decrement path, this clamp prevents the gauge
+               from going negative — and the resulting stuck-at-zero
+               value will surface as a fleet anomaly rather than
+               underflowing silently. *)
+            st.compute_in_flight <- max 0 (st.compute_in_flight - 1);
+            Otel_metric_store.set_gauge governance_compute_in_flight_metric
+              (float_of_int st.compute_in_flight));
+        ignore (st : state));
       st.compute_in_flight)
 
 (* docs/spec/18-log-severity-taxonomy.md § 3.6 (outcome-carrying line at a
@@ -769,8 +775,22 @@ let level_of_compute_outcome ~outcome ~reason : Log.level =
   | "error" when reason <> "cancelled" -> Log.Warn
   | _ -> Log.Info
 
-let mark_compute_finish (st : state) ~started_at ~outcome ~reason
-    ~timeout_sec =
+(* Pure telemetry emitter.  The [compute_in_flight] decrement is owned
+   by the [Eio.Switch.on_release] callback registered inside
+   [mark_compute_start]; that callback runs on every exit path of the
+   [Eio.Switch.run] scope that wraps [compute_judgments] in
+   [refresh_once].  Keeping the decrement out of this function means
+   a [Cancelled] re-raise that bypasses the user-site handler (the
+   [Eio__core__Fiber.Not_first] pattern observed in
+   [~/me/.masc/logs/masc-mcp-8935-restart-20260606.log:11757]) still
+   drops the in-flight count to its pre-start value, instead of
+   leaving a stuck positive.  [timeout_sec] was previously the
+   per-caller budget resolved from [Env_config_oas_bridge]; the
+   no-timeout change (governance/operator judge callers resolve to
+   [Float.infinity]) means there is no per-cycle budget to surface
+   any more, so the field and the [compute_timeout=%s] log token are
+   dropped. *)
+let mark_compute_finish (st : state) ~started_at ~outcome ~reason =
   (* Clamp the elapsed time to >= 0 so a backwards system clock
      adjustment (NTP step, manual change) cannot inject a negative
      duration into the histogram or the [last_compute_duration_sec]
@@ -779,28 +799,23 @@ let mark_compute_finish (st : state) ~started_at ~outcome ~reason
   let labels = [ ("outcome", outcome); ("reason", reason) ] in
   let in_flight =
     with_lock st (fun () ->
-        st.compute_in_flight <- max 0 (st.compute_in_flight - 1);
         st.last_compute_duration_sec <- Some duration_sec;
-        st.last_compute_timeout_sec <- timeout_sec;
         st.last_compute_outcome <- Some outcome;
         st.last_compute_reason <- Some reason;
-        Otel_metric_store.set_gauge governance_compute_in_flight_metric
-          (float_of_int st.compute_in_flight);
         st.compute_in_flight)
   in
   Otel_metric_store.inc_counter governance_compute_total_metric ~labels ();
   Otel_metric_store.observe_histogram governance_compute_duration_metric
     ~labels duration_sec;
-  (* Single emission at the outcome-derived level (never two lines). *)
+  (* Single emission at the outcome-derived level (never two lines).
+     [compute_timeout] is no longer reported because the governance
+     judge no longer carries a per-cycle budget; the OAS bridge
+     applies its own (or no-timeout) inside the wrapped computation. *)
   Log.Governance.emit
     (level_of_compute_outcome ~outcome ~reason)
     (Printf.sprintf
-       "refresh_once: compute_judgments telemetry outcome=%s reason=%s duration=%.3fs compute_timeout=%s in_flight_after=%d"
-       outcome reason duration_sec
-       (match timeout_sec with
-        | Some value -> Printf.sprintf "%.1fs" value
-        | None -> "unknown")
-       in_flight);
+       "refresh_once: compute_judgments telemetry outcome=%s reason=%s duration=%.3fs in_flight_after=%d"
+       outcome reason duration_sec in_flight);
   (duration_sec, in_flight)
 
 let refresh_once ~sw ~net
@@ -860,29 +875,38 @@ let refresh_once ~sw ~net
         st.runtime_status <- status_refreshing;
         st.degraded_reason <- None);
     let started_at = Unix.gettimeofday () in
-    let compute_timeout_sec =
-      Some
-        (Env_config_oas_bridge.timeout_sec
-           ~caller:Env_config_oas_bridge.Governance_judge ())
-    in
-    ignore (mark_compute_start st);
+    (* Wrap [compute_judgments] in [Eio.Switch.run] so the
+       [mark_compute_start] in-flight invariant fires exactly once
+       on every exit path (clean, cancelled, panic).  The
+       no-timeout policy for the governance/operator judge callers
+       means the bridge no longer contributes a cycle wrapper; the
+       OAS provider keeps its own per-call timeout, and any
+       path that doesn't deliver a response simply runs to the
+       provider's natural budget. *)
     let compute_result =
-      try compute_judgments ~masc_tools ~dispatch ~build_facts with
-      | Eio.Cancel.Cancelled _ as exn ->
-          ignore
-            (mark_compute_finish st ~started_at ~outcome:"error"
-               ~reason:"cancelled" ~timeout_sec:compute_timeout_sec);
-          raise exn
-      | exn ->
-          Error
-            (Printf.sprintf "compute_judgments raised: %s"
-               (Printexc.to_string exn))
+      Eio.Switch.run ~name:"governance_judge.compute" (fun sw ->
+          ignore (mark_compute_start ~sw st);
+          try
+            Ok
+              (compute_judgments ~masc_tools ~dispatch ~build_facts)
+          with
+          | Eio.Cancel.Cancelled _ as exn ->
+              ignore
+                (mark_compute_finish st ~started_at ~outcome:"error"
+                   ~reason:"cancelled");
+              raise exn
+          | exn ->
+              ignore
+                (mark_compute_finish st ~started_at ~outcome:"error"
+                   ~reason:"exception");
+              Error
+                (Printf.sprintf "compute_judgments raised: %s"
+                   (Printexc.to_string exn)))
     in
     match compute_result with
-    | Ok (model_used, generated_at, expires_at, judgments) ->
+    | Ok (Ok (model_used, generated_at, expires_at, judgments)) ->
         ignore
-          (mark_compute_finish st ~started_at ~outcome:"ok" ~reason:"ok"
-             ~timeout_sec:compute_timeout_sec);
+          (mark_compute_finish st ~started_at ~outcome:"ok" ~reason:"ok");
         if judgments = [] then
           Log.Governance.routine
             "refresh_once: ok runtime=redacted judgments=%d"
@@ -908,24 +932,14 @@ let refresh_once ~sw ~net
             List.iter
               (fun json -> Hashtbl.replace st.judgments (judgment_key json) json)
               judgments)
-    | Error message ->
+    | Ok (Error message) | Error message ->
         let reason = degraded_reason_of_error message in
-        let timeout_sec =
-          match timeout_sec_of_error message with
-          | Some value -> Some value
-          | None -> compute_timeout_sec
-        in
         let duration_sec, in_flight =
           mark_compute_finish st ~started_at ~outcome:"error" ~reason
-            ~timeout_sec
         in
         Log.Governance.warn
-          "refresh_once: compute_judgments failed: %s (duration=%.3fs compute_timeout=%s in_flight=%d)"
-          message duration_sec
-          (match timeout_sec with
-           | Some value -> Printf.sprintf "%.1fs" value
-           | None -> "unknown")
-          in_flight;
+          "refresh_once: compute_judgments failed: %s (duration=%.3fs in_flight=%d)"
+          message duration_sec in_flight;
         with_lock st (fun () ->
             mark_refresh_failure ~now_ts:(Unix.gettimeofday ()) st ~message)
       end)

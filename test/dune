@@ -98,6 +98,7 @@
   test_sse_qw
   test_sse_stream
   test_health
+  test_supervisor_isolation
   test_post_verifier
   test_reward_advice_artifact
   test_masc_oas_bridge_timeout_guard
@@ -349,6 +350,7 @@
   test_sse_qw
   test_sse_stream
   test_health
+  test_supervisor_isolation
   test_post_verifier
   test_reward_advice_artifact
   test_masc_oas_bridge_timeout_guard

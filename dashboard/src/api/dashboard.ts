@@ -837,6 +837,9 @@ function decodeRuntimeModelMetric(raw: unknown): DashboardRuntimeModelMetric | n
               : null,
             coverage_reason: asNullableString(r.coverage_reason),
             coverage_stage: asNullableString(r.coverage_stage),
+            streaming_ttfrc_ms: asNumber(r.streaming_ttfrc_ms) ?? null,
+            streaming_inter_chunk_count: asNumber(r.streaming_inter_chunk_count) ?? null,
+            streaming_inter_chunk_avg_ms: asNumber(r.streaming_inter_chunk_avg_ms) ?? null,
           }))
       : null,
     buckets: Array.isArray(raw.buckets)

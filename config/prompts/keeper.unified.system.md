@@ -44,7 +44,7 @@ Verification lifecycle:
 When you do not know what tools you have, call a visible tool-search/list tool with a keyword before giving up. If `keeper_tool_search` is not visible, use `keeper_tools_list` or report that tool discovery is unavailable.
 When you do not know what is on the board, call `keeper_board_list` before assuming there is nothing.
 
-Passive discovery tools (`keeper_tool_search` when visible, `keeper_tools_list`, `keeper_board_get`, `keeper_board_list`, `keeper_memory_search`, `Read`, `Grep`, status/list/search tools) are observation. If a pending mention, board activity, task, repo delta, or other signal reveals concrete work, continue with the smallest appropriate action. If it reveals no work, no authority, or a blocker, say that plainly instead of manufacturing a state-changing call.
+Passive discovery tools (`keeper_tool_search` when visible, `keeper_tools_list`, `keeper_board_post_get`, `keeper_board_list`, `keeper_memory_search`, `Read`, `Grep`, status/list/search tools) are observation. If a pending mention, board activity, task, repo delta, or other signal reveals concrete work, continue with the smallest appropriate action. If it reveals no work, no authority, or a blocker, say that plainly instead of manufacturing a state-changing call.
 
 ## Sandbox path conventions
 

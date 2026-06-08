@@ -63,7 +63,6 @@ let assemble_cost_event_payload
     ?(usage_missing : bool = false)
     ?usage_trust
     ?(telemetry : Agent_sdk.Types.inference_telemetry option)
-    ?(model : string option)
     () : assembled_cost_event_payload =
   let int_field name = function
     | Some n -> [ (name, `Int n) ]
@@ -206,7 +205,6 @@ let cost_event_payload
     ?(usage_missing : bool = false)
     ?usage_trust
     ?(telemetry : Agent_sdk.Types.inference_telemetry option)
-    ?(model : string option)
     () : Yojson.Safe.t =
   (assemble_cost_event_payload
      ~agent_name
@@ -217,7 +215,6 @@ let cost_event_payload
      ~usage_missing
      ?usage_trust
      ?telemetry
-     ?model
      ()).payload
 
 (** Date-split cost ledger root inside [masc_root].  See
@@ -234,7 +231,6 @@ let emit_cost_event
     ?(usage_missing : bool = false)
     ?usage_trust
     ?(telemetry : Agent_sdk.Types.inference_telemetry option)
-    ?(model : string option)
     () : unit =
   (* Tier-A perf change: previously appended to a single unbounded
      [masc_root/costs.jsonl] (14k lines, 7.5MB observed in [<base-path>/.masc]),
@@ -259,7 +255,6 @@ let emit_cost_event
       ~usage_missing
       ?usage_trust
       ?telemetry
-      ?model
       ()
   in
   Otel_metric_store.inc_counter

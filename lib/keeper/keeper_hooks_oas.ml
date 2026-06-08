@@ -449,8 +449,7 @@ let make_hooks
              ~input_tokens:raw_input_tok ~output_tokens:raw_output_tok
              ~cost_usd:cost_usd_for_event ~usage_missing
              ~usage_trust
-             ?telemetry:response.telemetry
-             ~model:response.model ()
+             ?telemetry:response.telemetry ()
          | None -> ());
         let text = Agent_sdk.Types.text_of_content response.content in
         let has_state_block =

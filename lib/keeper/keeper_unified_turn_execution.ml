@@ -152,6 +152,7 @@ let run (ctx : ctx)
            Keeper_turn_fsm.Streaming;
          Keeper_unified_turn_attempt_watchdog.dispatch
            ~clock
+           ~attempt_watchdog_s:None
            ~oas_timeout_s
            ~on_cancelled:(fun () ->
              record_streaming_cancelled_observation

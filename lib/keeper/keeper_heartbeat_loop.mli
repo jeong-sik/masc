@@ -19,11 +19,8 @@ val repair_identity_drift_for_keepalive :
 val sync_keeper_presence :
   ctx:'a context ->
   meta_current:keeper_meta ->
-  t_presence_start:float ->
   consecutive_failures:int ref ->
   last_successful_heartbeat_ts:float ref ->
-  work_as_hb:(unit -> bool) ->
-  max_silence:(unit -> float) ->
   keeper_meta
 
 val collect_keepalive_board_events :

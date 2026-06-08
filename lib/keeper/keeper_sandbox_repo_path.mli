@@ -13,12 +13,10 @@ type path_context =
   { path_repo_name : string
   ; path_repo_root : string
   ; path_root : string
-  ; path_is_worktree : bool
   ; accepted_toplevels : string list
   }
 (** Path-only facts for any path inside a keeper sandbox repo. [path_root] is
-    the expected git toplevel for the path: either the in-place clone root or a
-    selected worktree root. *)
+    the repo root for the path. *)
 
 val classify_path :
   config:Workspace.config ->
@@ -35,8 +33,7 @@ type cwd_context =
   ; is_direct_root : bool
   }
 (** Path-only facts for a cwd inside a keeper sandbox repo. [path_root] is the
-    selected git toplevel expected for the cwd: either [repo_root] or a worktree
-    root. *)
+    repo root expected for the cwd. *)
 
 val classify_cwd :
   config:Workspace.config ->
@@ -54,10 +51,7 @@ val execution_location_json :
   Yojson.Safe.t
 (** Structured cwd contract for Execute responses. The JSON tells the agent
     whether the effective cwd is inside the keeper playground
-    ([playground_root], [playground_subpath], [repo_root], [repo_subpath],
-    [repo_worktree_root], [repo_worktree_subpath]) or outside it
-    ([outside_playground]). [relative_cwd] is relative to [playground_root]
-    for playground scopes and [null] when the cwd is outside the playground.
-    Relative argv paths resolve against the effective cwd. Worktree scopes also
-    carry [worktree_selected] and [selected_worktree] so the keeper can observe
-    the selected repo/worktree assignment without reparsing [cwd]. *)
+    ([playground_root], [playground_subpath], [repo_root], [repo_subpath])
+    or outside it ([outside_playground]). [relative_cwd] is relative to
+    [playground_root] for playground scopes and [null] when the cwd is outside
+    the playground. Relative argv paths resolve against the effective cwd. *)

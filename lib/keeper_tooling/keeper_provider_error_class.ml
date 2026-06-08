@@ -8,7 +8,6 @@
 type response_timeout_kind =
   | Connection_timeout
   | First_token_timeout
-  | Inter_chunk_idle
   | Wall_clock_timeout
 
 type t =
@@ -50,7 +49,6 @@ let timeout_http_statuses =
 let response_timeout_kind_to_string = function
   | Connection_timeout -> "connection_timeout"
   | First_token_timeout -> "first_token_timeout"
-  | Inter_chunk_idle -> "inter_chunk_idle"
   | Wall_clock_timeout -> "wall_clock_timeout"
 ;;
 

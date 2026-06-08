@@ -5,8 +5,4 @@
  (public_name masc.keeper_failure_circuit_breaker_types)
  (wrapped false)
  (modules keeper_failure_circuit_breaker_types)
- (libraries
-  masc.exec_policy
-  masc.keeper_contract
-  masc.masc_core
-  yojson))
+ (libraries masc.exec_policy masc.keeper_contract masc.masc_core yojson))

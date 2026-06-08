@@ -5,9 +5,4 @@
  (public_name masc.telemetry_coverage_gap)
  (wrapped false)
  (modules telemetry_coverage_gap)
- (libraries
-  dated_jsonl
-  masc_core
-  masc_types
-  time_compat
-  yojson))
+ (libraries dated_jsonl masc_core masc_types time_compat yojson))

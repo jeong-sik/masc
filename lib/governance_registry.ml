@@ -611,7 +611,6 @@ let surfaces =
       description = "Keeper rule engine thresholds (reflect, plan, guardrail)";
       risk = "low";
       param_keys = [
-        "keeper.rule.reflect_repetition";
         "keeper.rule.plan_goal_alignment_max";
         "keeper.rule.plan_response_alignment_max";
         "keeper.rule.guardrail_repetition";

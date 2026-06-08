@@ -221,7 +221,6 @@ val keeper_llm_rerank_runtime : unit -> string
 (** Reranker runtime profile. Defaults through [routes.llm_rerank]; env
     overrides may be either a concrete profile name or a logical route key. *)
 
-val keeper_rule_reflect_repetition_threshold : unit -> float
 val keeper_rule_plan_goal_alignment_threshold : unit -> float
 val keeper_rule_plan_response_alignment_threshold : unit -> float
 val keeper_rule_guardrail_repetition_threshold : unit -> float

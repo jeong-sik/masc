@@ -87,7 +87,6 @@ val keeper_batch_limit : unit -> int
 val keeper_tool_cost_max_usd : unit -> float option
 val keeper_llm_rerank_enabled : unit -> bool
 val keeper_llm_rerank_runtime : unit -> string
-val keeper_rule_reflect_repetition_threshold : unit -> float
 val keeper_rule_plan_goal_alignment_threshold : unit -> float
 val keeper_rule_plan_response_alignment_threshold : unit -> float
 val keeper_rule_guardrail_repetition_threshold : unit -> float

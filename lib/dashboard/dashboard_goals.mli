@@ -106,6 +106,13 @@ val dashboard_goals_tree_json :
     by the [/api/dashboard/goals/tree] route and the
     regression test. *)
 
+val emit_all_goal_attainment_metrics :
+  config:Workspace.config -> unit
+(** Recomputes the goal forest and emits OTLP gauge metrics
+    ([masc_goal_attainment_pct] + [masc_goal_attainment_measured])
+    for every goal.  Safe to call from the background snapshot
+    refresh loop. *)
+
 (** {1 Per-goal detail} *)
 
 val goal_detail_json :

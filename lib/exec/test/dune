@@ -25,7 +25,8 @@
   test_shell_ir_typed_e2e
   test_shell_ir_differential
   test_shell_ir_oracle
-  test_shell_ir_risk_action_flags)
+  test_shell_ir_risk_action_flags
+  test_shell_ir_effect_projection)
  (libraries
   masc_exec
   masc_exec_bash_parser

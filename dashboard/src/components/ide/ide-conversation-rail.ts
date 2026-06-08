@@ -93,23 +93,22 @@ function parseIsoToMs(iso: string): number {
   return new Date(iso).getTime()
 }
 
-function boardKindFromPost(post: BoardPost): ThreadKind {
-  if (post.hearth) {
-    switch (post.hearth.toLowerCase()) {
-      case 'approve': return 'approve'
-      case 'flag': return 'flag'
-      case 'question': return 'question'
-      case 'suggest': return 'suggest'
-      case 'note': return 'note'
-    }
+function parseThreadKind(hearth: string): ThreadKind | null {
+  switch (hearth.toLowerCase()) {
+    case 'approve': return 'approve'
+    case 'flag': return 'flag'
+    case 'question': return 'question'
+    case 'suggest': return 'suggest'
+    case 'note': return 'note'
+    default: return null
   }
-  const body = (post.body ?? '').toLowerCase()
-  const title = (post.title ?? '').toLowerCase()
-  const text = `${title} ${body}`
-  if (text.includes('approve') || text.includes('ship it') || text.includes('looks good')) return 'approve'
-  if (text.includes('flag') || text.includes('blocker') || text.includes('race condition')) return 'flag'
-  if (text.includes('suggest') || text.includes('could you') || text.includes('recommend')) return 'suggest'
-  if (text.includes('?') || text.includes('question') || text.includes('should')) return 'question'
+}
+
+export function boardKindFromPost(post: BoardPost): ThreadKind {
+  if (post.hearth) {
+    const kind = parseThreadKind(post.hearth)
+    if (kind !== null) return kind
+  }
   return 'note'
 }
 

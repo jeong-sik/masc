@@ -77,7 +77,6 @@ val resolve_overrides :
 
       [turn]
       stream_idle_timeout_sec   = 120
-      tool_cost_max_usd           = 1.25
       llm_rerank                  = true
     ]}
 

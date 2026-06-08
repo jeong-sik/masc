@@ -215,7 +215,6 @@ val keeper_proactive_task_cooldown_divisor : unit -> int
 val keeper_proactive_task_min_cooldown_sec : unit -> int
 
 val keeper_batch_limit : unit -> int
-val keeper_tool_cost_max_usd : unit -> float option
 val keeper_llm_rerank_enabled : unit -> bool
 val keeper_llm_rerank_runtime : unit -> string
 (** Reranker runtime profile. Defaults through [routes.llm_rerank]; env

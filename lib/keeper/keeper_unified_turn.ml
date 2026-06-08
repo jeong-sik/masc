@@ -265,7 +265,7 @@ let run_keeper_cycle
                    ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
                    ~generation:meta.runtime.generation ()
                in
-               let max_cost_usd = Keeper_config.keeper_tool_cost_max_usd () in
+               let max_cost_usd = None in
                (* 4. Build turn prompt callback: use our unified system prompt *)
                let build_turn_prompt ~base_system_prompt:_ ~messages:_
                  : Keeper_agent_run.turn_prompt

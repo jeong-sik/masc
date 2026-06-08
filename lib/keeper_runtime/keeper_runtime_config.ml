@@ -39,7 +39,6 @@ let key_to_env =
     "turn.max_consecutive_hb_failures", "MASC_KEEPER_MAX_CONSECUTIVE_HB_FAILURES";
     "turn.max_consecutive_turn_failures", "MASC_KEEPER_MAX_CONSECUTIVE_TURN_FAILURES";
     "turn.batch_limit",                 "MASC_KEEPER_BATCH_LIMIT";
-    "turn.tool_cost_max_usd",           "MASC_KEEPER_TOOL_COST_MAX_USD";
     "turn.llm_rerank",                  "MASC_KEEPER_LLM_RERANK";
     "turn.llm_rerank_runtime",          "MASC_KEEPER_LLM_RERANK_RUNTIME";
     "turn.temperature",                 "MASC_KEEPER_UNIFIED_TEMP";

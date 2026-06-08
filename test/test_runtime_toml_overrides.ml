@@ -65,15 +65,6 @@ let test_missing_file_returns_zero () =
   | Ok n -> failf "expected 0 overrides, got %d" n
   | Error msg -> failf "unexpected error: %s" msg
 
-let test_missing_file_keeps_cost_threshold_unset_by_default () =
-  with_clean_boot_overrides @@ fun () ->
-  with_base_path @@ fun base_path ->
-  match Keeper_runtime_config.load_and_apply ~base_path with
-  | Error msg -> failf "unexpected error: %s" msg
-  | Ok _ ->
-    check (option (float 0.0001)) "cost threshold unset by default"
-      None
-      (Keeper_config.keeper_tool_cost_max_usd ())
 
 let test_applies_autonomous_max_turns () =
   let doc = parse_or_fail "[autonomous]\nmax_turns_per_call = 7\n" in
@@ -154,7 +145,6 @@ let test_applies_sleep_and_throttle_overrides () =
 let test_applies_turn_execution_overrides () =
   let doc = parse_or_fail
     "[turn]\n\
-     tool_cost_max_usd = 1.25\n\
      llm_rerank = true\n\
      llm_rerank_runtime = \"tool_rerank_fast\"\n\
      temperature = 0.65\n\
@@ -164,10 +154,7 @@ let test_applies_turn_execution_overrides () =
   let count, overrides =
     Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
   in
-  check int "applied 6" 6 count;
-  check (option string) "tool cost ceiling"
-    (Some "1.25")
-    (List.assoc_opt "MASC_KEEPER_TOOL_COST_MAX_USD" overrides);
+  check int "applied 6" 5 count;
   check (option string) "llm rerank"
     (Some "true")
     (List.assoc_opt "MASC_KEEPER_LLM_RERANK" overrides);
@@ -207,7 +194,7 @@ let test_applies_memory_overrides () =
   let count, overrides =
     Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
   in
-  check int "applied 6" 6 count;
+  check int "applied 6" 5 count;
   check (option string) "memory max notes"
     (Some "321")
     (List.assoc_opt "MASC_KEEPER_MEMORY_MAX_NOTES" overrides);
@@ -328,32 +315,7 @@ let test_load_and_apply_records_boot_override () =
         0.42
         (Env_config_keeper.KeeperRuntime.deliberation_daily_budget_usd ())
 
-let test_load_and_apply_records_turn_cost_override () =
-  with_clean_boot_overrides @@ fun () ->
-  with_base_path @@ fun base_path ->
-  write_toml base_path "[turn]\ntool_cost_max_usd = 1.25\n";
-  match Keeper_runtime_config.load_and_apply ~base_path with
-  | Error msg -> failf "unexpected error: %s" msg
-  | Ok n ->
-    check int "applied count" 1 n;
-    check (option string) "boot override stored"
-      (Some "1.25")
-      (Config_boot_overrides.get_opt "MASC_KEEPER_TOOL_COST_MAX_USD")
 
-let test_load_and_apply_records_disabled_turn_cost_override () =
-  with_clean_boot_overrides @@ fun () ->
-  with_base_path @@ fun base_path ->
-  write_toml base_path "[turn]\ntool_cost_max_usd = 0\n";
-  match Keeper_runtime_config.load_and_apply ~base_path with
-  | Error msg -> failf "unexpected error: %s" msg
-  | Ok n ->
-    check int "applied count" 1 n;
-    check (option string) "boot override stored"
-      (Some "0")
-      (Config_boot_overrides.get_opt "MASC_KEEPER_TOOL_COST_MAX_USD");
-    check (option (float 0.0001)) "cost threshold unset"
-      None
-      (Keeper_config.keeper_tool_cost_max_usd ())
 
 let with_env name value f =
   let prev = Sys.getenv_opt name in
@@ -566,8 +528,6 @@ let () =
   run "runtime_toml_overrides"
     [ ( "resolve_overrides"
       , [ test_case "missing file returns 0 overrides" `Quick test_missing_file_returns_zero
-        ; test_case "missing file keeps cost threshold unset by default" `Quick
-            test_missing_file_keeps_cost_threshold_unset_by_default
         ; test_case "applies autonomous max_turns_per_call" `Quick test_applies_autonomous_max_turns
         ; test_case "applies multiple overrides" `Quick test_applies_multiple_overrides
         ; test_case "applies sleep/throttle overrides" `Quick test_applies_sleep_and_throttle_overrides
@@ -583,8 +543,6 @@ let () =
         ; test_case "unknown keys ignored" `Quick test_unknown_keys_ignored
         ; test_case "parse error returns Error" `Quick test_parse_error_returns_error
         ; test_case "load_and_apply records boot override" `Quick test_load_and_apply_records_boot_override
-        ; test_case "load_and_apply records turn cost override" `Quick test_load_and_apply_records_turn_cost_override
-        ; test_case "load_and_apply records disabled turn cost override" `Quick test_load_and_apply_records_disabled_turn_cost_override
         ; test_case "explicit MASC_CONFIG_DIR wins over base path" `Quick test_explicit_config_dir_wins_over_base_path
         ; test_case "float value round trip" `Quick test_float_value_round_trip
         ; test_case "resolved runtime freezes toml values after init" `Quick test_resolved_runtime_freezes_toml_values_after_init

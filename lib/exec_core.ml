@@ -336,7 +336,7 @@ let classify_command_of_ir ir =
     Masc_exec.Shell_ir_risk.classify (Masc_exec.Shell_ir_risk.undecided ir)
   in
   let risk_class = envelope.Masc_exec.Shell_ir_risk.risk in
-  let is_destructive = Exec_policy.is_destructive_bash_operation ir in
+  let is_destructive = Masc_exec.Shell_ir_risk.is_destructive envelope in
   let family =
     match first_effective_stage ir with
     | Some stage -> family_of_stage ~risk_class stage

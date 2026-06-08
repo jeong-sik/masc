@@ -44,6 +44,10 @@ let publish_lifecycle = Keeper_supervisor_publish_lifecycle.publish_lifecycle
 let publish_phase_lifecycle = Keeper_supervisor_publish_lifecycle.publish_phase_lifecycle
 (* ── Supervised fiber launch ─────────────────────────────── *)
 
+let global_switch : Eio.Switch.t option ref = ref None
+let set_global_switch sw = global_switch := Some sw
+let get_global_switch () = !global_switch
+
 let set_restart_launch_noop_for_test = Keeper_supervisor_restart_noop.set
 let restart_launch_noop_enabled_for_test = Keeper_supervisor_restart_noop.enabled
 let with_restart_launch_noop_for_test = Keeper_supervisor_restart_noop.with_noop
@@ -117,7 +121,8 @@ let launch_supervised_fiber
           "keeper supervise domain pool ignored: keepalive body requires the owning \
            Eio domain (first_keeper=%s)"
           meta.name;
-      Eio.Fiber.fork ~sw:ctx.sw body
+      let sw = Option.value !global_switch ~default:ctx.sw in
+      Eio.Fiber.fork ~sw body
     in
     fork_body (fun () ->
       let resolved = ref false in
@@ -302,9 +307,10 @@ let launch_supervised_fiber
                    "normal exit"
                    ())
            with
-           | Eio.Cancel.Cancelled _ as e ->
+           | Eio.Cancel.Cancelled _ ->
              cancelled_by_parent := true;
-             raise e
+             (* Do NOT re-raise Cancelled in a forked fiber, as it cancels the parent switch. *)
+             ()
            | exn ->
              (* RFC-0002: unified crash handler.
                 Keeper_fiber_crash carries no payload — failure_reason is

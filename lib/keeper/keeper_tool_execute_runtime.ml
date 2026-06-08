@@ -114,7 +114,6 @@ let handle_tool_execute_typed
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
-      ~timeout_sec
       ()
   =
   let root = Keeper_alerting_path.project_root_of_config config in
@@ -189,10 +188,10 @@ let handle_tool_execute_typed
                 (Keeper_sandbox_shell_ir_target.target_error
                    "typed Shell IR Docker dispatch does not support env yet")
             else (
-              match docker_local_fallback_target ~meta ~timeout_sec with
+              match docker_local_fallback_target ~meta with
               | Some fallback when in_playground -> Ok fallback
               | Some _ | None ->
-                docker_sandbox_target ~turn_sandbox_factory ~meta ~cwd ~timeout_sec
+                docker_sandbox_target ~turn_sandbox_factory ~meta ~cwd
                 |> Result.map (fun target ->
                   ( target
                   , [ "requested_sandbox", `String "docker"
@@ -494,7 +493,6 @@ let handle_tool_execute_typed
                     @ sandbox_extra_fields
                     @ [ "typed", `Bool true
                       ; "execution_time_ms", `Int elapsed_ms
-                      ; "timeout_sec", `Float timeout_sec
                       ]
                     @ response_cwd_field
                     @ descriptor_fields
@@ -512,12 +510,6 @@ let handle_tool_execute
       ~(args : Yojson.Safe.t)
       ()
   =
-  let timeout_sec =
-    Keeper_tool_execute_timeout.clamp_shell_timeout
-      ~min_sec:(Keeper_tool_execute_timeout.keeper_tool_execute_shell_ir_min_timeout_sec_for_args args)
-      ~default:Keeper_tool_execute_timeout.io_timeout_sec
-      args
-  in
   if has_typed_execute_input_key args
   then
     handle_tool_execute_typed
@@ -525,7 +517,6 @@ let handle_tool_execute
       ~config
       ~meta
       ~args
-      ~timeout_sec
       ()
   else
     error_json

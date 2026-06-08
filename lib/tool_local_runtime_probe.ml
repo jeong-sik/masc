@@ -108,9 +108,6 @@ let collapse_preview text =
 let truncate_text ?(max_len = 160) text =
   String_util.to_string (String_util.utf8_safe ~max_bytes:max_len ~suffix:"...[truncated]" text)
 
-let default_probe_timeout_sec = 6
-let default_ps_timeout_sec = 2
-
 let ollama_probe_think_mode_to_string = function
   | Think_auto -> "auto"
   | Think_disabled -> "disabled"
@@ -499,9 +496,7 @@ let run_single_probe ~think_enabled ~keep_alive ~server_url ~model_id ~prompt
 
 let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
     ?keep_alive ?(max_tokens = 16) ?(think_mode = Think_auto)
-    ?(timeout_sec = default_probe_timeout_sec)
-    ?(ps_timeout_sec = default_ps_timeout_sec)
-    ?(generate_when_unloaded = true)
+    ?(timeout_sec = 6) ?(ps_timeout_sec = 2) ?(generate_when_unloaded = true)
     ?(run_generate = true) () =
   let server_url =
     Option.bind server_url String_util.trim_to_option

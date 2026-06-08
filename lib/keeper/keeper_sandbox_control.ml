@@ -113,9 +113,7 @@ let start_managed_container
     let network_args, network_label =
       Keeper_sandbox_runtime.docker_network_args network_mode
     in
-    let probe_timeout =
-      Env_config_exec_timeout.timeout_sec ~caller:Sandbox ()
-    in
+    let probe_timeout = timeout_sec in
     match live_containers ~config ~meta ~timeout_sec:probe_timeout with
     | Ok containers -> (
         match running_managed_container ~network_label containers with
@@ -147,7 +145,7 @@ let start_managed_container
               let _cleanup =
                 Keeper_sandbox_runtime.maybe_cleanup_stale_containers
                   ~base_path:config.base_path
-                  ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Sandbox ())
+
                   ()
               in
               match

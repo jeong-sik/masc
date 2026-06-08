@@ -9,21 +9,19 @@ val resolve_arg : Shell_ir.arg -> string
 
 
 val dispatch_simple :
-  ?timeout_sec:float ->
   ?stdin_content:string ->
   ?on_output_chunk:([ `Stdout of string | `Stderr of string ] -> unit) ->
   Shell_ir.simple ->
   dispatch_result
 (** Execute a simple command via argv-based spawn.  [stdin_content] is
     used by pipeline dispatch when a previous stage's stdout must be
-    forwarded without dropping the stage's sandbox target.  [?timeout_sec]
-    overrides the dispatch default.  [?on_output_chunk] is invoked for
-    every chunk read from stdout/stderr while the process is running on
-    the host sandbox path; Docker and pipeline paths currently emit the
-    full captured output after completion. *)
+    forwarded without dropping the stage's sandbox target.
+    [?on_output_chunk] is invoked for every chunk read from
+    stdout/stderr while the process is running on the host sandbox
+    path; Docker and pipeline paths currently emit the full captured
+    output after completion. *)
 
 val dispatch :
-  ?timeout_sec:float ->
   ?on_output_chunk:([ `Stdout of string | `Stderr of string ] -> unit) ->
   Shell_ir.t ->
   dispatch_result
@@ -33,7 +31,6 @@ val dispatch :
     Exposed for tests and legacy call sites. *)
 
 val dispatch_decided :
-  ?timeout_sec:float ->
   ?on_output_chunk:([ `Stdout of string | `Stderr of string ] -> unit) ->
   Shell_ir_risk.decided Shell_ir_risk.decided_ir ->
   dispatch_result
@@ -41,7 +38,7 @@ val dispatch_decided :
     ensures the IR has passed through [Shell_ir_risk.classify]. *)
 
 val dispatch_pipeline :
-  ?timeout_sec:float -> Shell_ir.t list -> dispatch_result
+  ?stdin_content:string -> Shell_ir.t list -> dispatch_result
 (** Execute a pipeline of commands, streaming stdout between stages.
     Handles [Simple] stages natively; nested [Pipeline] stages are
     rejected with an error. *)

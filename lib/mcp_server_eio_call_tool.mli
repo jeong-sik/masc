@@ -28,7 +28,6 @@
     [record_runtime_mcp_keeper_trajectory],
     [read_only_retry_limit], [read_only_retry_wait],
     [call_tool_with_readonly_retry],
-    timeout policy delegated to [Mcp_server_eio_tool_timeout],
     [resolve_managed_agent_call]).
 
     [tool_profile] is referenced by {!handle_call_tool_eio}
@@ -86,24 +85,6 @@ module For_testing : sig
   val record_mcp_server_operation_duration_sample :
     tool_name:string -> success:bool -> duration_seconds:float -> unit
 end
-
-(** {1 Per-tool timeout} *)
-
-val tool_timeout_sec_opt :
-  tool_name:string ->
-  _arguments:Yojson.Safe.t ->
-  float option
-(** Returns the timeout (seconds) the dispatcher should
-    apply to the call, [None] for tools that opt out
-    (e.g. [masc_keeper_msg], which gates on its own
-    [max_turns] / [max_cost_usd]). Board write tools use
-    [MASC_TOOL_TIMEOUT_BOARD_SEC] (default 90s, clamped
-    5s..300s). This includes keeper/masc board post/comment/vote,
-    comment_vote, delete, cleanup, curation_submit, and
-    [masc_board_reaction]. Other bounded tools use
-    [MASC_TOOL_TIMEOUT_DEFAULT_SEC] (default 60s, same
-    clamp). [_arguments] is accepted for parity with future
-    per-arg overrides but currently unused. *)
 
 (** {1 Runtime-MCP keeper trace context} *)
 
@@ -196,11 +177,10 @@ val handle_call_tool_eio :
     when the call is known to alter the tool catalogue
     (long-running mutations, etc).
 
-    The dispatcher applies the per-tool timeout from
-    {!tool_timeout_sec_opt}, retries read-only failures
-    (subject to [Env_config.Tools.readonly_retry_limit]),
-    times the execution for telemetry, and on the
-    keeper-runtime path threads
+    The dispatcher retries read-only failures (subject to
+    [Env_config.Tools.readonly_retry_limit]), times the
+    execution for telemetry, and on the keeper-runtime
+    path threads
     {!record_runtime_mcp_keeper_tool_trace} into the
     success / failure branches.
 

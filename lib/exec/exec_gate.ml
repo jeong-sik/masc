@@ -20,11 +20,9 @@
    no longer consumed.  See RFC-0005 (typed capability substrate) for
    the original shadow-rollout intent. *)
 
-(* Default subprocess timeout.  Callers should prefer passing
-   [~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:... ())]
-   so that operators can override via per-caller env vars.  See
-   {!Env_config_exec_timeout}; live keeper sandbox callers pass
-   caller-scoped values through this gate. *)
+(* Default subprocess timeout.  Hang protection is the tool's responsibility
+   (git --no-optional-locks, OAS provider internal timeouts); callers no
+   longer specify a per-caller timeout budget. *)
 let default_exec_timeout_sec = 60.0
 
 let run_argv ~actor:_ ~raw_source:_ ~summary:_

@@ -35,7 +35,6 @@ type runner =
   argv:string list ->
   env:string array ->
   cwd:string option ->
-  timeout_sec:float ->
   Unix.process_status * string * string
 
 type pipeline_stage = {
@@ -46,7 +45,6 @@ type pipeline_stage = {
 
 type pipeline_runner =
   stages:pipeline_stage list ->
-  timeout_sec:float ->
   Unix.process_status * string * string
 
 type t =

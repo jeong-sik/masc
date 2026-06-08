@@ -120,7 +120,7 @@ let discover_processes () =
       ~actor:(Masc_exec.Agent_id.of_string "tool/local_runtime")
       ~raw_source:(String.concat " " (List.map Filename.quote argv))
       ~summary:"tool local runtime process discovery"
-      ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:(Unknown "misc") ())
+
       argv
   in
   match status with
@@ -182,7 +182,7 @@ let fetch_models_at base_url =
       ~actor:(Masc_exec.Agent_id.of_string "tool/local_runtime")
       ~raw_source:(String.concat " " (List.map Filename.quote argv))
       ~summary:"tool local runtime fetch models"
-      ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:(Unknown "misc") ())
+
       argv
   in
   match status with

@@ -129,7 +129,7 @@ let run_command_with_status ?turn_sandbox_factory
     match runtime_opt with
     | Some runtime ->
       Keeper_turn_sandbox_runtime.run_command_with_status
-        ~ok_exit_codes runtime ~cwd ~command_argv ~max_bytes ~timeout_sec ()
+        ~ok_exit_codes runtime ~timeout_sec ~cwd ~command_argv ~max_bytes ()
     | None ->
       match Keeper_sandbox_runtime.ensure_keeper_sandbox_image_present ~image ~timeout_sec with
       | Error err ->

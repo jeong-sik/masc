@@ -56,7 +56,6 @@ val tool_execute_command_context :
     {!dispatch_classified}. *)
 
 val dispatch_classified :
-  ?timeout_sec:float ->
   ?allow_pipes:bool ->
   ?redirect_allowed:bool ->
   ?keeper_id:string ->
@@ -73,7 +72,6 @@ val dispatch_classified :
     dispatch path for live output streaming. *)
 
 val dispatch :
-  ?timeout_sec:float ->
   ?allow_pipes:bool ->
   ?redirect_allowed:bool ->
   ?keeper_id:string ->

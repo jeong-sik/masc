@@ -23,7 +23,7 @@ let get_tty () =
                 ~actor:(Masc_exec.Agent_id.of_string "workspace/identity")
                 ~raw_source:"tty"
                 ~summary:"workspace tty probe"
-                ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Workspace_identity ())
+
                 [ "tty" ]
             in
             let trimmed = String.trim output in

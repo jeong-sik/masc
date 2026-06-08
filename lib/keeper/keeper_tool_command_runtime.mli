@@ -30,17 +30,6 @@ val diagnosis_of_block_reason :
     entry point used by tests and callers; implementation lives in
     [Keeper_tool_execute_readonly_policy]. *)
 
-val tool_dispatch_min_timeout_sec : float
-(** Minimum timeout_sec floor applied to load-bearing tool dispatch. Exposed so
-    regression tests can lock the floor against drift back to
-    sub-I/O-latency values. *)
-
-val keeper_tool_execute_shell_ir_native_min_timeout_sec : float
-(** Minimum timeout_sec floor applied to Shell IR on the *native*
-    executor path. Exposed so regression tests can lock the floor
-    against drift back to sub-I/O-latency values.  Container-backed
-    dispatch paths re-clamp independently inside their backend. *)
-
 val rewrite_turn_runtime_paths_to_host :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->

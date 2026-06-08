@@ -52,7 +52,7 @@ let dashboard_retention_json =
 let json ~agent_name () : Yojson.Safe.t =
   let collaborators =
     let variables = `Assoc [("name", `String agent_name)] in
-    match Graphql_client.query ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Graphql ()) ~query:collaborators_query ~variables () with
+    match Graphql_client.query ~query:collaborators_query ~variables () with
     | Ok data ->
       (match Json_util.assoc_member_opt "agentCollaborationNetworkByName" data with
        | Some (`List items) -> items
@@ -68,7 +68,7 @@ let json ~agent_name () : Yojson.Safe.t =
   in
   let agent_data =
     let variables = `Assoc [("name", `String agent_name)] in
-    match Graphql_client.query ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Graphql ()) ~query:trusts_query ~variables () with
+    match Graphql_client.query ~query:trusts_query ~variables () with
     | Ok data ->
       (match Json_util.assoc_member_opt "agent" data with
        | Some `Null | None -> None

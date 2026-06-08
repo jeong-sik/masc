@@ -22,10 +22,10 @@ let is_routine_fast_cancel ~bucket ~inner_str =
   && String_util.contains_substring inner_str routine_cancel_inner_substring
 
 let run_safe ~caller ~timeout_s fn =
-  if not (Float.is_finite timeout_s) || Float.compare timeout_s min_timeout_s <= 0 then
+  if Float.classify_float timeout_s = FP_nan || Float.compare timeout_s 0.0 <= 0 then
     invalid_arg
       (Printf.sprintf
-         "Masc_oas_bridge.run_safe: timeout_s must be positive and finite \
+         "Masc_oas_bridge.run_safe: timeout_s must be positive or infinite \
           (got %.6g)"
          timeout_s);
   let clock_opt =

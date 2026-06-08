@@ -224,7 +224,7 @@ let wakeup_all_keepers ?base_path () =
 
 (* ── Board-reactive policy constants ── *)
 
-let board_reactive_debounce_sec = Env_config.KeeperKeepalive.board_debounce_sec
+let board_reactive_debounce_sec = 60.0
 
 let board_reactive_generic_wakeup_limit =
   Keeper_config.int_of_env_default

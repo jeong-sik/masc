@@ -259,8 +259,7 @@ let collect_board_events_with_cursor_policy
                 targets)
            recent)
     in
-    let event_limit = Keeper_config.keeper_board_event_limit () in
-    let rec consume_posts remaining last_cursor acc = function
+    let rec consume_posts last_cursor acc = function
       | [] -> List.rev acc, last_cursor
       | (p : Board.post) :: rest ->
         let post_id = Board.Post_id.to_string p.id in
@@ -271,7 +270,7 @@ let collect_board_events_with_cursor_policy
            Log.Keeper.debug
              "board dedup: skipping post_id=%s (no new external since my comment)"
              post_id;
-           consume_posts remaining (Some next_cursor) acc rest
+           consume_posts (Some next_cursor) acc rest
          | `Never ->
            let signal : Board_dispatch.board_signal =
              { kind = Board_dispatch.Board_post_created
@@ -290,12 +289,10 @@ let collect_board_events_with_cursor_policy
                "board dedup: skipping post_id=%s (no explicit mention and no prior \
                 keeper participation)"
                post_id;
-             consume_posts remaining (Some next_cursor) acc rest)
-           else if remaining <= 0
-           then List.rev acc, last_cursor
+             consume_posts (Some next_cursor) acc rest)
            else
              consume_posts
-               (remaining - 1)
+               
                (Some next_cursor)
                ({ post_id
                 ; author = Board.Agent_id.to_string p.author
@@ -314,9 +311,7 @@ let collect_board_events_with_cursor_policy
                 :: acc)
                rest
          | `New_external (count, ext_author, ext_preview) ->
-           if remaining <= 0
-           then List.rev acc, last_cursor
-           else (
+           (
              let signal : Board_dispatch.board_signal =
                { kind = Board_dispatch.Board_post_created
                ; post_id
@@ -329,7 +324,7 @@ let collect_board_events_with_cursor_policy
              in
              let matched = board_signal_match ~continuity_summary ~meta ~signal in
              consume_posts
-               (remaining - 1)
+               
                (Some next_cursor)
                ({ post_id
                 ; author = Board.Agent_id.to_string p.author
@@ -348,7 +343,7 @@ let collect_board_events_with_cursor_policy
                 :: acc)
                rest))
     in
-    let final_events, last_cursor = consume_posts event_limit None [] recent in
+    let final_events, last_cursor = consume_posts None [] recent in
     if advance_cursor
     then (
       match last_cursor with

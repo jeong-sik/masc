@@ -538,7 +538,7 @@ let evaluate_keeper_auto_rules
         ; handoff_cooldown_sec = meta.handoff_cooldown_sec
         ; auto_handoff_enabled = meta.auto_handoff
         ; reflect_repetition_threshold =
-            keeper_rule_reflect_repetition_threshold ()
+            0.86
         ; plan_goal_alignment_threshold =
             keeper_rule_plan_goal_alignment_threshold ()
         ; plan_response_alignment_threshold =

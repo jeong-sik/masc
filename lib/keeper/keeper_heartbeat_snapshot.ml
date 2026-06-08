@@ -271,7 +271,7 @@ let write_heartbeat_snapshot
       ; handoff_cooldown_sec = meta_current.handoff_cooldown_sec
       ; auto_handoff_enabled = meta_current.auto_handoff
       ; reflect_repetition_threshold =
-          Keeper_config.keeper_rule_reflect_repetition_threshold ()
+          0.86
       ; plan_goal_alignment_threshold =
           Keeper_config.keeper_rule_plan_goal_alignment_threshold ()
       ; plan_response_alignment_threshold =

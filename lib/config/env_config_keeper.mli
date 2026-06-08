@@ -112,13 +112,11 @@ module KeeperKeepalive : sig
   val interval_sec : int
   val max_consecutive_failures : int
   val max_consecutive_turn_failures : int
-  val board_debounce_sec : float
   val sleep_chunk_sec : float
   val jitter_factor : float
   val max_idle_turns_autonomous : int
   val max_idle_turns_reactive : int
   val turn_timeout_sec : float
-  val admission_wait_timeout_sec : float
   val oas_timeout_sec_override : float option
 
 

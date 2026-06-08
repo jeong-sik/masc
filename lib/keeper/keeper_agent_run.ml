@@ -419,7 +419,7 @@ let run_turn
       if
         Llm_provider.Request_priority.resolve priority
         = Llm_provider.Request_priority.Proactive
-      then Some (Keeper_runtime_resolved.admission_wait_timeout_sec ())
+      then Some 180.0
       else None
     in
     ignore (Keeper_alerting_path.ensure_sandbox_bundle ~config ~meta);

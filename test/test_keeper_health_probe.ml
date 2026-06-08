@@ -98,7 +98,7 @@ let test_runtime_pressure_classifier () =
     (pressure_label_of_failure_reason
        (R.Provider_runtime_error
           { code = "provider_error"
-          ; detail = "inter_chunk_idle timeout"
+          ; detail = "connection timeout"
           ; provider_id = None
           ; http_status = Some 504
           ; runtime_id = None

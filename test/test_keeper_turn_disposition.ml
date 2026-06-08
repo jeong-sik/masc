@@ -298,16 +298,6 @@ let test_registry_failure_reason_preserves_no_provider_runtime_reason () =
     "runtime_exhausted_no_providers_available"
 ;;
 
-let test_registry_failure_reason_buckets_runtime_liveness_reason () =
-  let raw_error =
-    "Internal error: [masc_oas_error] \
-     {\"kind\":\"runtime_exhausted\",\"runtime_id\":\"runtime.ollama_cloud_stable\",\
-     \"reason\":{\"tag\":\"other_detail\",\"message\":\"Runtime attempt liveness guard \
-     killed runtime lane runtime.ollama_cloud_stable: inter_chunk_idle\"}}"
-  in
-  check_runtime_failure_reason raw_error "runtime_exhausted_inter_chunk_idle"
-;;
-
 let () =
   Alcotest.run
     "keeper_turn_disposition"
@@ -356,10 +346,6 @@ let () =
             "structured runtime no-provider reason is preserved"
             `Quick
             test_registry_failure_reason_preserves_no_provider_runtime_reason
-        ; Alcotest.test_case
-            "structured runtime liveness reason is bucketed"
-            `Quick
-            test_registry_failure_reason_buckets_runtime_liveness_reason
         ] )
     ]
 ;;

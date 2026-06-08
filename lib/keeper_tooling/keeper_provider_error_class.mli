@@ -31,10 +31,7 @@ type response_timeout_kind =
           evidence is available. *)
   | First_token_timeout
       (** Streaming connection opened but no first token arrived
-          before the agreed deadline.  Distinct from
-          [Inter_chunk_idle] because retry strategy differs. *)
-  | Inter_chunk_idle
-      (** Streaming response stalled mid-flight between tokens. *)
+          before the agreed deadline. *)
   | Wall_clock_timeout
       (** Whole-turn wall-clock budget exceeded
           ([max_execution_time], orchestrator-side deadline). *)
@@ -130,8 +127,7 @@ val to_short_tag : t -> string
     [unspecified]. *)
 
 val response_timeout_kind_to_string : response_timeout_kind -> string
-(** [connection_timeout] / [first_token_timeout] / [inter_chunk_idle] /
-    [wall_clock_timeout]. *)
+(** [connection_timeout] / [first_token_timeout] / [wall_clock_timeout]. *)
 
 val raw_payload : t -> (string * string) option
 (** [Some (raw_code, raw_detail)] for [Unspecified], [None]

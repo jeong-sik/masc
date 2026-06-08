@@ -49,8 +49,6 @@ let runtime_exhaustion_detail_code detail =
   let contains needle = String_util.contains_substring_ci detail needle in
   if contains "no_first_token"
   then "runtime_exhausted_no_first_token"
-  else if contains "inter_chunk_idle"
-  then "runtime_exhausted_inter_chunk_idle"
   else if contains "http 429" || contains "usage limit" || contains "rate limit"
   then "runtime_exhausted_rate_limited"
   else if contains "max_execution_time"

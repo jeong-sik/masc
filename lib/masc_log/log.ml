@@ -807,8 +807,14 @@ module Make (M : sig val name : string end) = struct
   let emit level ?(details = `Null) ?keeper_name ?turn_id message =
     if should_log_module level then begin
       let level_str = level_to_string level in
-      let prefix = Printf.sprintf "[%s] [%s] [%s]"
-        (timestamp ()) level_str M.name in
+      let prefix = match keeper_name with
+        | Some kn ->
+            Printf.sprintf "[%s] [%s] [%s/%s]"
+              (timestamp ()) level_str M.name kn
+        | None ->
+            Printf.sprintf "[%s] [%s] [%s]"
+              (timestamp ()) level_str M.name
+      in
       Printf.eprintf "%s %s\n%!" prefix message;
       Ring.push ?keeper_name ?turn_id
         ~level ~module_name:M.name ~message ~details ()

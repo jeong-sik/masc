@@ -349,9 +349,17 @@ let mk_emitter ~stop ~clock ~net (config : Config.t) : (module EMITTER) =
     let tick () =
       if Config.Env.get_debug ()
       then Log.Telemetry.debug "opentelemetry: tick (from domain %d)" (Domain.self () :> int);
-      run_tick_callbacks ();
-      sample_gc_metrics_if_needed ();
-      emit_all ~force:false
+      (try run_tick_callbacks () with
+       | exn ->
+         Log.Telemetry.warn "opentelemetry: run_tick_callbacks failed: %s" (Printexc.to_string exn));
+      (try sample_gc_metrics_if_needed () with
+       | exn ->
+         Log.Telemetry.warn
+           "opentelemetry: sample_gc_metrics_if_needed failed: %s"
+           (Printexc.to_string exn));
+      try emit_all ~force:false with
+      | exn ->
+        Log.Telemetry.warn "opentelemetry: emit_all failed: %s" (Printexc.to_string exn)
     ;;
 
     let cleanup ~on_done () =
@@ -489,22 +497,33 @@ let create_backend ~sw ?(stop = Atomic.make false) ?(config = Config.make ()) en
   let module E = (val mk_emitter ~stop ~clock:env#clock ~net:env#net config) in
   let module B = Backend (E) in
   Eio.Fiber.fork ~sw (fun () ->
+    let consecutive_errors = Atomic.make 0 in
     while not @@ Atomic.get stop do
       Eio.Time.sleep env#clock 0.5;
       if not (Atomic.get stop)
       then
-        try B.tick () with
+        try
+          B.tick ();
+          Atomic.set consecutive_errors 0
+        with
         | Eio.Cancel.Cancelled _ as e -> raise e
         | Eio.Mutex.Poisoned cause -> stop_tick_after_poisoned_mutex ~stop cause
         | exn ->
-          (* Any exception from tick() is unexpected: HTTP errors are handled
-             internally, and Batch uses Stdlib.Mutex. Stop the fiber to prevent
-             log spam; the backend must be restarted to resume export. *)
-          Atomic.set stop true;
+          (* Keep the fiber alive so export can resume once the underlying
+             condition clears. HTTP errors are handled inside [send_http]; an
+             exception here means something unexpected bubbled up from a
+             callback, GC metrics sampling, or [Switch.run]. Back off to
+             prevent log spam. *)
+          let n = Atomic.fetch_and_add consecutive_errors 1 + 1 in
           Atomic.set tick_degraded_state true;
           Log.Telemetry.error
-            "otel tick failed, stopping fiber: %s"
-            (Printexc.to_string exn)
+            "otel tick failed (%d consecutive): %s"
+            n
+            (Printexc.to_string exn);
+          let backoff =
+            Float.min (0.5 *. Float.of_int (1 lsl min n 6)) 30.0
+          in
+          Eio.Time.sleep env#clock backoff
     done);
   (module B)
 ;;

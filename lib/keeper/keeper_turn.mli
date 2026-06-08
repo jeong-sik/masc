@@ -32,6 +32,7 @@ val keeper_msg_timeout_override : Yojson.Safe.t -> (float option, string) result
 
 val handle_keeper_msg :
   ?on_text_delta:(string -> unit) ->
+  ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
   _ Keeper_types_profile.context -> Yojson.Safe.t -> tool_result
 
 (** Stop a running keeper agent. *)

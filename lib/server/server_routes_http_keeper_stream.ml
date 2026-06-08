@@ -370,7 +370,7 @@ let keeper_stream_send_event writer mutex closed event =
     Projects the typed keeper result into the local HTTP stream response pair.
     No external timeout — keeper internal limits control duration
     (aligned with MCP path, see mcp_server_eio_call_tool.ml:139-143). *)
-let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ state
+let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ ?on_event state
     ~agent_name ~arguments ~on_text_delta =
   let start_time = Eio.Time.now clock in
   let success, body =
@@ -386,7 +386,7 @@ let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ state
         }
       in
       match
-        Keeper_tool_surface.dispatch_stream ~on_text_delta keeper_ctx
+        Keeper_tool_surface.dispatch_stream ~on_text_delta ?on_event keeper_ctx
           ~name:"masc_keeper_msg" ~args:arguments
       with
       | Some result -> Tool_result.is_success result, Tool_result.message result
@@ -506,7 +506,7 @@ let keeper_request_terminal_payload ~request_id ~keeper_name ~status ~ok
   `Assoc fields
 
 type keeper_stream_worker_event =
-  | Stream_delta of string
+  | Stream_event of Agent_sdk.Types.sse_event
   | Stream_terminal of bool * string
 
 let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
@@ -522,11 +522,11 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
   let message =
     if has_connector_context then
       Gate_keeper_backend.contextualize_message
-        ~channel:payload.channel
-        ~channel_user_id:payload.channel_user_id
-        ~channel_user_name:payload.channel_user_name
-        ~channel_workspace_id:payload.channel_workspace_id
-        ~content:payload.message
+         ~channel:payload.channel
+         ~channel_user_id:payload.channel_user_id
+         ~channel_user_name:payload.channel_user_name
+         ~channel_workspace_id:payload.channel_workspace_id
+         ~content:payload.message
     else
       payload.message
   in
@@ -569,9 +569,8 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
             "keeper_stream: worker event push failed: %s"
             (Printexc.to_string exn)
   in
-  let on_text_delta text =
-    if String.length text > 0 then
-      push_worker_event (Stream_delta text)
+  let on_event evt =
+    push_worker_event (Stream_event evt)
   in
   let persist_failure_reply err =
     Keeper_chat_store.append_pair
@@ -593,7 +592,7 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
             Ok
               (execute_keeper_stream_tool_streaming ~sw ~clock
                  ?auth_token
-                 state ~agent_name ~arguments:args ~on_text_delta)
+                 state ~agent_name ~arguments:args ~on_event ~on_text_delta:(fun _ -> ()))
           with
           | Eio.Cancel.Cancelled _ as e -> raise e
           | exn ->
@@ -670,14 +669,33 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
       Log.Keeper.warn
         "keeper_stream: request terminal keeper=%s request_id=%s status=%s message=%s"
         payload.name request_id status message;
-    Keeper_chat_events.publish events
-      (Custom { name = "KEEPER_REQUEST_TERMINAL"; value = payload_json })
+      Keeper_chat_events.publish events
+        (Custom { name = "KEEPER_REQUEST_TERMINAL"; value = payload_json })
   in
+  let index_to_tool_id = Hashtbl.create 4 in
   let rec consume_worker_events () =
     match Eio.Stream.take worker_events with
-    | Stream_delta text ->
-        deltas_sent := true;
-        Keeper_chat_events.publish events (Text_delta text);
+    | Stream_event evt ->
+        (match evt with
+         | Agent_sdk.Types.Connected ->
+             Keeper_chat_events.publish events (Custom { name = "KEEPER_CONNECTED"; value = `Null })
+         | Agent_sdk.Types.Timeout reason ->
+             Keeper_chat_events.publish events (Event_error { message = "Timeout: " ^ reason })
+         | Agent_sdk.Types.ContentBlockDelta { delta = TextDelta text; _ } ->
+             deltas_sent := true;
+             Keeper_chat_events.publish events (Text_delta text)
+         | Agent_sdk.Types.ContentBlockDelta { delta = ThinkingDelta text; _ } ->
+             Keeper_chat_events.publish events (Custom { name = "KEEPER_THINKING_DELTA"; value = `Assoc [ ("delta", `String text) ] })
+         | Agent_sdk.Types.ContentBlockStart { index; tool_id = Some tid; tool_name = Some tname; _ } ->
+             Hashtbl.replace index_to_tool_id index tid;
+             Keeper_chat_events.publish events (Tool_call_start { tool_call_id = tid; tool_call_name = tname })
+         | Agent_sdk.Types.ContentBlockDelta { index; delta = InputJsonDelta args } ->
+             let tid = Hashtbl.find_opt index_to_tool_id index |> Option.value ~default:"" in
+             Keeper_chat_events.publish events (Tool_call_args { tool_call_id = tid; delta = args })
+         | Agent_sdk.Types.ContentBlockStop { index } ->
+             let tid = Hashtbl.find_opt index_to_tool_id index |> Option.value ~default:"" in
+             Keeper_chat_events.publish events (Tool_call_end { tool_call_id = tid })
+         | _ -> ());
         consume_worker_events ()
     | Stream_terminal (false, err) ->
         publish_terminal ~status:"error" ~ok:false ~message:err ();
@@ -813,6 +831,30 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
                 Ag_ui.(
                   make_event ~thread_id:!current_thread_id ~run_id:!current_run_id
                     ~custom_name:(Some name) ~custom_value:(Some value) Custom)
+            then loop ()
+        | Tool_call_start { tool_call_id; tool_call_name } ->
+            if
+              keeper_stream_send_event writer mutex closed
+                Ag_ui.(
+                  make_event ~thread_id:!current_thread_id ~run_id:!current_run_id
+                    ~tool_call_id:(Some tool_call_id) ~tool_call_name:(Some tool_call_name)
+                    Tool_call_start)
+            then loop ()
+        | Tool_call_args { tool_call_id; delta } ->
+            if
+              keeper_stream_send_event writer mutex closed
+                Ag_ui.(
+                  make_event ~thread_id:!current_thread_id ~run_id:!current_run_id
+                    ~tool_call_id:(Some tool_call_id) ~delta:(Some delta)
+                    Tool_call_args)
+            then loop ()
+        | Tool_call_end { tool_call_id } ->
+            if
+              keeper_stream_send_event writer mutex closed
+                Ag_ui.(
+                  make_event ~thread_id:!current_thread_id ~run_id:!current_run_id
+                    ~tool_call_id:(Some tool_call_id)
+                    Tool_call_end)
             then loop ()
         | Event_error { message } -> send_error message
         | Run_finished { run_id } ->

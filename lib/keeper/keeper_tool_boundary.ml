@@ -25,6 +25,6 @@ let to_tool_keeper_context (ctx : _ context) : _ Keeper_tool_surface.context =
 let dispatch ctx ~name ~args =
   Keeper_tool_surface.dispatch (to_tool_keeper_context ctx) ~name ~args
 
-let dispatch_stream ~on_text_delta ctx ~name ~args =
-  Keeper_tool_surface.dispatch_stream ~on_text_delta (to_tool_keeper_context ctx) ~name
+let dispatch_stream ?on_text_delta ?on_event ctx ~name ~args =
+  Keeper_tool_surface.dispatch_stream ?on_text_delta ?on_event (to_tool_keeper_context ctx) ~name
     ~args

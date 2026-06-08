@@ -82,5 +82,7 @@ let adapter_loop ~token ~channel ~events =
         Log.Keeper.debug
           "keeper_chat_slack: custom event %s" name;
         loop ~acc_text ~run_id_opt
+    | Tool_call_start _ | Tool_call_args _ | Tool_call_end _ ->
+        loop ~acc_text ~run_id_opt
   in
   loop ~acc_text:"" ~run_id_opt:None

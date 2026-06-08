@@ -149,13 +149,17 @@ let preflight_keeper_msg ctx args : (unit, string) result =
 
 (* -- handle_keeper_msg: orchestrator ---------------------------------------- *)
 
-let handle_keeper_msg ?on_text_delta ctx args : tool_result =
-  let on_event = match on_text_delta with
-    | None -> None
-    | Some cb -> Some (fun (evt : Agent_sdk.Types.sse_event) ->
-        match evt with
-        | Agent_sdk.Types.ContentBlockDelta { delta = TextDelta text; _ } -> cb text
-        | _ -> ())
+let handle_keeper_msg ?on_text_delta ?on_event ctx args : tool_result =
+  let on_event =
+    match on_event with
+    | Some cb -> Some cb
+    | None ->
+        (match on_text_delta with
+         | None -> None
+         | Some cb -> Some (fun (evt : Agent_sdk.Types.sse_event) ->
+             match evt with
+             | Agent_sdk.Types.ContentBlockDelta { delta = TextDelta text; _ } -> cb text
+             | _ -> ()))
   in
   let name = get_string args "name" "" in
   let message = get_string args "message" "" in

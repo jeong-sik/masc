@@ -8,6 +8,9 @@ type keeper_chat_event =
   | Run_finished of { run_id : string }
   | Event_error of { message : string }
   | Custom of { name : string; value : Yojson.Safe.t }
+  | Tool_call_start of { tool_call_id : string; tool_call_name : string }
+  | Tool_call_args of { tool_call_id : string; delta : string }
+  | Tool_call_end of { tool_call_id : string }
 
 let create () = Eio.Stream.create 512
 

@@ -135,7 +135,7 @@
       "consumer": ["dashboard SSE bridge", "OAS event subscribers"],
       "wire_or_artifact": "OAS Custom events relayed into MASC surfaces",
       "schema_source": [
-        "lib/runtime/runtime_event_bridge.mli",
+        "lib/keeper/keeper_event_bridge.mli",
         "docs/SYSTEM-EVENT-AND-SNAPSHOT-INVENTORY.md"
       ],
       "validator": "OAS integration bridge tests",

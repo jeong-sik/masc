@@ -144,7 +144,7 @@ let handle_tool_execute_typed
       | Ok input ->
         (match
            if write_enabled
-           then Ok ()
+           then Keeper_tool_execute_typed_input.validate_write input
            else Keeper_tool_execute_typed_input.validate_readonly input
          with
          | Error e ->

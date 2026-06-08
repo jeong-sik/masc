@@ -215,13 +215,13 @@ let sweep_and_recover (ctx : _ context) =
             ~base_path
             entry.name
             (Keeper_state_machine.Fiber_terminated
-               { outcome; provider_id = None; http_status = None })));
-    let ts = Time_compat.now () in
-    Keeper_registry.record_crash ~base_path entry.name ts msg;
-    Keeper_registry_error_recording.record ~base_path entry.name msg;
-    match Keeper_registry.get ~base_path entry.name with
-    | Some updated -> queue_crashed_entry updated msg
-    | None -> ()
+               { outcome; provider_id = None; http_status = None }));
+       let ts = Time_compat.now () in
+       Keeper_registry.record_crash ~base_path entry.name ts msg;
+       Keeper_registry_error_recording.record ~base_path entry.name msg;
+       (match Keeper_registry.get ~base_path entry.name with
+        | Some updated -> queue_crashed_entry updated msg
+        | None -> ()))
   in
   (* 2-level supervision slice: process the flat registry through stable
      8-keeper cohorts.  Each cohort re-reads its entries by name before

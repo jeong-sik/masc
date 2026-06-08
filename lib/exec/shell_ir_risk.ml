@@ -543,29 +543,14 @@ let is_write_operation (words : string list) =
   | [] -> false
 ;;
 
-let is_protected_branch_target arg =
-  let target = String.lowercase_ascii arg in
-  List.mem
-    target
-    [ "main"; "master"; "origin/main"; "origin/master";
-      "refs/heads/main"; "refs/heads/master" ]
-  || List.exists
-       (fun suffix -> String.ends_with ~suffix target)
-       [ ":main"; ":master"; ":origin/main"; ":origin/master";
-         ":refs/heads/main"; ":refs/heads/master" ]
-;;
-
 let is_destructive_bash_operation (words : string list) =
   match words with
   | "git" :: "push" :: rest ->
-    let has_force =
-      List.exists
-        (fun arg ->
-           arg = "--force" || arg = "-f"
-           || String.starts_with ~prefix:"--force-with-lease" arg)
-        rest
-    in
-    has_force && List.exists is_protected_branch_target rest
+    List.exists
+      (fun arg ->
+         arg = "--force" || arg = "-f"
+         || String.starts_with ~prefix:"--force-with-lease" arg)
+      rest
   | "rm" :: rest ->
     let option_args =
       List.filter (fun arg -> String.length arg > 0 && arg.[0] = '-') rest
@@ -835,17 +820,10 @@ let risk_of_typed (w : Shell_ir_typed.wrapped) : risk_class =
   | W (Pnpm { subcommand; _ }) ->
     if List.mem subcommand npm_write_subcommands then R1_Reversible_mutation
     else R0_Read
-  (* git push: force / force-with-lease to a protected branch is
-     Destructive_protected (word-list parity via [is_protected_branch_target]
-     on the typed [branch] field); any other push is R1 *)
-  | W (Git_push { force; force_with_lease; branch; _ }) ->
-    let forced = force || force_with_lease in
-    let protected_target =
-      match branch with
-      | Some b -> is_protected_branch_target b
-      | None -> false
-    in
-    if forced && protected_target then Destructive_protected
+  (* git push: force / force-with-lease is Destructive_protected;
+     protected-branch escalation lives in policy hooks (RFC-0208). *)
+  | W (Git_push { force; force_with_lease; _ }) ->
+    if force || force_with_lease then Destructive_protected
     else R1_Reversible_mutation
   (* --- irreversible: R2 --------------------------------------------- *)
   (* Su / Dd / Mkfs: word-list head-token match missed Su/Mkfs (-> R0);

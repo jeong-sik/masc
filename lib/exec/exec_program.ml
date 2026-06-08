@@ -4,6 +4,13 @@ type risk_class =
   | `Privileged
   ]
 
+let risk_class_max a b =
+  match a, b with
+  | `Privileged, _ | _, `Privileged -> `Privileged
+  | `Audited, _ | _, `Audited -> `Audited
+  | `Safe, `Safe -> `Safe
+;;
+
 type kind =
   [ `Git
   | `Docker

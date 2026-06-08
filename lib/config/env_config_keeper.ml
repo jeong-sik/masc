@@ -443,6 +443,24 @@ module KeeperKeepalive = struct
     | None -> turn_timeout_sec
   ;;
 
+  (** Per-attempt wall-clock safety cap for the streaming watchdog.
+
+      Prevents a single provider attempt from locking a keeper in
+      [Streaming] state forever (network hang, silent provider crash).
+      The cap is intentionally generous — any attempt making zero
+      progress for this duration is definitively stuck.
+
+      Env: [MASC_KEEPER_ATTEMPT_WATCHDOG_SAFETY_CAP_SEC].
+      Default: 1800 (30 min). Range: [300, 7200]. *)
+  let attempt_watchdog_safety_cap_sec =
+    Float.max
+      300.0
+      (Float.min
+         7200.0
+         (get_float ~default:1800.0
+            "MASC_KEEPER_ATTEMPT_WATCHDOG_SAFETY_CAP_SEC"))
+  ;;
+
   (** Idle-gap timeout for streaming OAS provider responses.
       This bounds time between streamed lines, not total turn duration.
       Env: [MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC]. Default: 120. Range: [5, 600]. *)

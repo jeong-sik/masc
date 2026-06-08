@@ -186,7 +186,8 @@ val next_fail_open_runtime_for_turn
     Exposed so tests can pin the supervisor [fiber_stop] branch without forcing
     a live provider cancellation. *)
 val record_streaming_cancelled_observation
-  :  config:Workspace.config
+  :  ?cancel_reason:string
+  -> config:Workspace.config
   -> run_meta:Keeper_meta_contract.keeper_meta
   -> run_generation:int
   -> runtime_id:string

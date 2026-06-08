@@ -136,6 +136,17 @@ val validate : execute_input -> (unit, validation_error) result
     success, or the first {!validation_error} encountered.  No side
     effects, no exceptions. *)
 
+val validate_write : execute_input -> (unit, validation_error) result
+(** Run {!validate}, then enforce write-enabled Execute executable admission.
+    This preserves the curated dev-full command set before dispatch; arbitrary
+    non-allowlisted binaries such as [rm], [tar], and [patch] are rejected even
+    when the caller has write-capable Execute. *)
+
+val validate_readonly : execute_input -> (unit, validation_error) result
+(** Run {!validate}, then enforce read-only Execute executable admission.  The
+    read-only set is intentionally narrower than the full Shell IR catalog and
+    rejects write-capable binaries plus transparent-wrapper targets before
+    dispatch. *)
 val to_shell_ir_unvalidated :
   ?sandbox:Masc_exec.Sandbox_target.t ->
   execute_input ->

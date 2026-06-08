@@ -54,6 +54,100 @@ type validation_error =
   | Pipeline_too_short
   | Env_key_invalid of string
 
+type admission_mode =
+  | Write_enabled
+  | Readonly
+
+let write_enabled_programs =
+  Masc_exec.Exec_program.
+    [ Cat
+    ; Cargo
+    ; Cmake
+    ; Cut
+    ; Dune_local_sh
+    ; Echo
+    ; Env
+    ; File
+    ; Find
+    ; Gh
+    ; Git
+    ; Go
+    ; Gofmt
+    ; Gradle
+    ; Head
+    ; Java
+    ; Javac
+    ; Ls
+    ; Make
+    ; Mkdir
+    ; Mvn
+    ; Node
+    ; Npm
+    ; Ninja
+    ; Npx
+    ; Opam
+    ; Pip
+    ; Pnpm
+    ; Printf
+    ; Pwd
+    ; Pyright
+    ; Pytest
+    ; Python
+    ; Python3
+    ; Rg
+    ; Grep
+    ; Ruff
+    ; Rustc
+    ; Sed
+    ; Sort
+    ; Stat
+    ; Tail
+    ; Tr
+    ; Uniq
+    ; Uv
+    ; Wc
+    ; Which
+    ; Yarn
+    ]
+;;
+
+let readonly_programs =
+  Masc_exec.Exec_program.
+    [ Cat
+    ; Cut
+    ; Echo
+    ; Env
+    ; File
+    ; Find
+    ; Gh
+    ; Git
+    ; Head
+    ; Ls
+    ; Printf
+    ; Pwd
+    ; Rg
+    ; Grep
+    ; Sed
+    ; Sort
+    ; Stat
+    ; Tail
+    ; Tr
+    ; Uniq
+    ; Wc
+    ; Which
+    ]
+;;
+
+let allowed_commands = function
+  | Write_enabled -> List.map Masc_exec.Exec_program.name_of_known write_enabled_programs
+  | Readonly -> List.map Masc_exec.Exec_program.name_of_known readonly_programs
+;;
+
+let admission_mode_to_string = function
+  | Write_enabled -> "write-enabled"
+  | Readonly -> "read-only"
+;;
+
 let json_type_name (json : Yojson.Safe.t) =
   match json with
   | `Assoc _ -> "object"
@@ -405,6 +499,57 @@ let check_exec ~executable ~argv ~cwd ~env =
     Ok ())
 ;;
 
+let executable_admission_error executable reason =
+  Error (Executable_not_allowed { executable; reason })
+;;
+
+let check_allowlisted_executable ~mode executable =
+  let trimmed = String.trim executable in
+  match Masc_exec.Exec_program.of_string trimmed with
+  | Error (`Unknown _) ->
+    executable_admission_error trimmed "empty executable"
+  | Ok bin ->
+    let name = Masc_exec.Exec_program.to_string bin in
+    if List.mem name (allowed_commands mode)
+    then Ok ()
+    else
+      executable_admission_error
+        name
+        (Printf.sprintf
+           "not in %s Execute allowlist"
+           (admission_mode_to_string mode))
+;;
+
+let check_wrapper_target ~mode ~wrapper_name = function
+  | None ->
+    executable_admission_error
+      wrapper_name
+      (Printf.sprintf
+         "missing %s wrapper target"
+         (admission_mode_to_string mode))
+  | Some target -> check_allowlisted_executable ~mode target
+;;
+
+let check_wrapper_exec_target ~mode ~executable ~argv =
+  match Filename.basename executable with
+  | "env" ->
+    check_wrapper_target
+      ~mode
+      ~wrapper_name:"env"
+      (Exec_policy_command_syntax.command_after_env_prefix argv)
+  | "opam" -> (
+    match Exec_policy_command_syntax.opam_exec_command_name argv with
+    | Some "opam" -> Ok ()
+    | target -> check_wrapper_target ~mode ~wrapper_name:"opam" target)
+  | _ -> Ok ()
+;;
+
+let validate_admission_stage ~mode { executable; argv; _ } =
+  let ( let* ) = Result.bind in
+  let* () = check_exec ~executable ~argv ~cwd:None ~env:[] in
+  let* () = check_allowlisted_executable ~mode executable in
+  check_wrapper_exec_target ~mode ~executable:(String.trim executable) ~argv
+;;
 let check_redirect_target ~fd = function
   | Inherit | Discard -> Ok ()
   | File path when String.length path > 0 && path.[0] = '/' -> Ok ()
@@ -438,6 +583,25 @@ let validate = function
     each stages
 ;;
 
+let validate_admission ~mode input =
+  let ( let* ) = Result.bind in
+  let* () = validate input in
+  match input with
+  | Exec { executable; argv; _ } ->
+    let* () = check_allowlisted_executable ~mode executable in
+    check_wrapper_exec_target ~mode ~executable:(String.trim executable) ~argv
+  | Pipeline { stages; _ } ->
+    let rec each = function
+      | [] -> Ok ()
+      | stage :: rest ->
+        let* () = validate_admission_stage ~mode stage in
+        each rest
+    in
+    each stages
+;;
+
+let validate_write input = validate_admission ~mode:Write_enabled input
+let validate_readonly input = validate_admission ~mode:Readonly input
 let shell_bin ~argv executable =
   let trimmed = String.trim executable in
   if String.length trimmed = 0 then Error (Empty_executable { argv })
@@ -548,6 +712,14 @@ let pp_validation_error ppf = function
       ppf
       "executable %S was reported as duplicated in argv[0], but argv is empty"
       executable
+  | Executable_not_allowed { executable; reason } ->
+    Format.fprintf
+      ppf
+      "executable %S is not allowed for typed Execute (%s); use a structured \
+       read/search tool, WebFetch/WebSearch for network access, or request an \
+       appropriate Execute surface when mutation is intentional"
+      executable
+      reason
   | Argv_contains_shell_metachar { executable; index; token } ->
     Format.fprintf
       ppf

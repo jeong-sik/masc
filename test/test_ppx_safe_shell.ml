@@ -58,7 +58,7 @@ let test_static_safe_allows_network_command () =
 ;;
 
 let test_static_safe_allows_shell_interpreter () =
-  match verify_static_safe "bash -c 'echo x > /tmp/x'" with
+  match verify_static_safe "bash -c \"echo x > /tmp/x\"" with
   | Ok _ -> ()
   | Error reason ->
     Alcotest.failf
@@ -88,13 +88,13 @@ let expect_static_safe_allows ~label cmd =
 let test_static_safe_allows_env_split_shell () =
   expect_static_safe_allows
     ~label:"env -S shell wrapper"
-    "env -S \"sh -c 'touch x'\""
+    {bash|env -S "sh -c 'touch x'"|bash}
 ;;
 
 let test_static_safe_allows_opam_exec_shell () =
   expect_static_safe_allows
     ~label:"opam exec shell wrapper"
-    "opam exec -- sh -c 'touch x'"
+    "opam exec -- sh -c \"touch x\""
 ;;
 
 let () =
@@ -106,7 +106,8 @@ let () =
       test_case "allows git push" `Quick test_static_safe_allows_git_push;
       test_case "allows dev mutation" `Quick test_static_safe_allows_dev_mutation;
       test_case "allows network command" `Quick test_static_safe_allows_network_command;
-      test_case "allows shell interpreter" `Quick test_static_safe_allows_shell_interpreter;
+      test_case "allows shell interpreter" `Quick
+        test_static_safe_allows_shell_interpreter;
       test_case "allows shell-capable executable" `Quick
         test_static_safe_allows_shell_capable_executable;
       test_case "allows env -S shell wrapper" `Quick

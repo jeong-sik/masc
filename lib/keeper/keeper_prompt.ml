@@ -203,7 +203,7 @@ let log_missing_personality_fields missing_fields =
 let build_keeper_system_prompt
     ~goal ~short_goal ~mid_goal ~long_goal ~will ~needs ~desires
     ~instructions ?(persona_extended = "") ?(keeper_name = "")
-    ?(active_goals = []) () =
+    ?(active_goals = []) ?(home_ground = "") () =
   let goal = normalize_goal_horizon_text goal in
   let short_goal, mid_goal, long_goal =
     resolve_goal_horizons ~goal ~short_goal_opt:(Some short_goal)
@@ -273,6 +273,19 @@ let build_keeper_system_prompt
         Printf.sprintf "\n<available_goals>\n%s\n</available_goals>\n"
           (String.concat "\n" lines)
   in
+  let home_ground_block =
+    if home_ground = "" then ""
+    else
+      Printf.sprintf
+        "\n\
+         <home_ground>\n\
+         - Repository root: %s\n\
+         - All relative paths resolve from this directory.\n\
+         - The working directory persists between tool calls, but shell state does not.\n\
+         - Prefer absolute paths over `cd` to avoid directory confusion.\n\
+         </home_ground>\n"
+        (String_util.escape_xml home_ground)
+  in
   (* Prefix ordering: common blocks first for LLM KV cache sharing.
      All keepers share the same autonomous-behavior, policy, continuity,
      and most of <world>/<capabilities> text.  Keeper-specific blocks
@@ -321,6 +334,8 @@ let build_keeper_system_prompt
       "\n</capabilities>\n\n";
       (* ── Identity anchor (compaction-safe, ~50 tokens) ──────── *)
       identity_anchor;
+      (* ── Home ground (CWD anchor) ───────────────────────────── *)
+      home_ground_block;
       (* ── Keeper-specific blocks ─────────────────────────────── *)
       persona_block;
       "<identity>\n\

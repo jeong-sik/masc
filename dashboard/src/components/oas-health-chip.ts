@@ -67,22 +67,15 @@ function topKeepers(
 }
 
 function describeTotalEventsDetail(summary: Pick<OasHealthSummary,
-  'replayLoadedEvents' | 'replayTotalMatchingEvents' | 'replayTruncated' | 'totalEvents'
+  'replayLoadedEvents' | 'replayTotalMatchingEvents' | 'replayTruncated'
 >): string {
   if (summary.replayTruncated) {
-    return `replay ${summary.replayLoadedEvents}/${summary.replayTotalMatchingEvents} + live`
+    return `최근 ${summary.replayLoadedEvents}개 표시 중 (전체 ${summary.replayTotalMatchingEvents})`
   }
-  if (summary.replayLoadedEvents === 0 && summary.totalEvents > 0) {
+  if (summary.replayLoadedEvents === 0 && summary.replayTotalMatchingEvents > 0) {
     return 'live only'
   }
   return 'durable replay + live'
-}
-
-function describeSampleWindow(summary: Pick<OasHealthSummary,
-  'replayLoadedEvents' | 'replayTotalMatchingEvents' | 'replayTruncated'
->): string | null {
-  if (!summary.replayTruncated) return null
-  return `sample ${summary.replayLoadedEvents}/${summary.replayTotalMatchingEvents}`
 }
 
 function describeEvidenceDetail(summary: Pick<OasHealthSummary,
@@ -113,7 +106,7 @@ export function OasHealthChip() {
     return tick == null || Date.now() - tick > STALE_MS
   })
 
-  if (summary.value.totalEvents === 0) {
+  if (summary.value.replayTotalMatchingEvents === 0) {
     return html`
       <${SectionCard} label="OAS 런타임">
         <${EmptyState} message="아직 OAS 이벤트가 수신되지 않았습니다." />
@@ -121,7 +114,6 @@ export function OasHealthChip() {
     `
   }
 
-  const sampleWindow = describeSampleWindow(summary.value)
   const llmDetail =
     summary.value.lastLlmCallTs != null
       ? `최근 ${formatLastTick(summary.value.lastLlmCallTs)}`
@@ -140,25 +132,25 @@ export function OasHealthChip() {
       <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
         <${StatTile}
           label="총 이벤트"
-          value=${String(summary.value.totalEvents)}
+          value=${String(summary.value.replayTotalMatchingEvents)}
           delta=${{ direction: 'flat', text: describeTotalEventsDetail(summary.value) }}
         />
         <${StatTile}
           label="LLM 호출"
           value=${String(summary.value.totalLlmCalls)}
-          delta=${{ direction: 'up', text: sampleWindow ? `${llmDetail} · ${sampleWindow}` : llmDetail }}
+          delta=${{ direction: 'up', text: llmDetail }}
         />
         <${StatTile}
           label="에러"
           value=${String(summary.value.totalErrors)}
           status=${summary.value.totalErrors > 0 ? 'crit' : undefined}
-          delta=${{ direction: summary.value.totalErrors > 0 ? 'down' as const : 'flat' as const, text: sampleWindow ? `${errorDetail} · ${sampleWindow}` : errorDetail }}
+          delta=${{ direction: summary.value.totalErrors > 0 ? 'down' as const : 'flat' as const, text: errorDetail }}
         />
         <${StatTile}
           label="증거 참조"
           value=${String(summary.value.evidenceRefsCount)}
           status=${summary.value.evidenceRefsCount > 0 ? 'ok' : 'warn'}
-          delta=${{ direction: summary.value.evidenceRefsCount > 0 ? 'up' as const : 'flat' as const, text: sampleWindow ? `${evidenceDetail} · ${sampleWindow}` : evidenceDetail }}
+          delta=${{ direction: summary.value.evidenceRefsCount > 0 ? 'up' as const : 'flat' as const, text: evidenceDetail }}
         />
         <${StatTile}
           label="에이전트 이벤트"

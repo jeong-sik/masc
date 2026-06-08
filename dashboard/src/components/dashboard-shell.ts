@@ -11,7 +11,7 @@ import { connected, reconnectCount, lastDisconnectedAt } from '../sse'
 import { dashboardWsOnlyEnabled } from '../dashboard-ws-cutover'
 import { dashboardWsConnected, dashboardWsSseFallbackActive } from '../dashboard-ws-state'
 import { isKeeperPaused } from '../lib/keeper-predicates'
-import { dashboardLoading, executionError, keepers, serverStatus, shellCounts, shellRuntimeResolution } from '../store'
+import { dashboardLoading, executionError, keepers, serverStatus, shellCounts, shellRuntimeResolution, tasksByStatus } from '../store'
 import { missionSnapshot, missionLoading } from '../mission-signals'
 import { namespaceTruth, namespaceTruthInitializing } from '../namespace-truth-store'
 import {
@@ -198,6 +198,7 @@ interface DashboardHealthInput {
   runtimeProviderProbeError?: string | null
   executionError: string | null
   loading: boolean
+  pendingVerificationCount?: number
 }
 
 // RFC-0135 PR-3: the local `keeperLooksPaused` was one of four
@@ -606,6 +607,19 @@ export function dashboardHealthChips(input: DashboardHealthInput): DashboardHeal
     })
   }
 
+  const vrfCount = input.pendingVerificationCount ?? 0
+  if (vrfCount > 0) {
+    chips.push({
+      key: 'verification-backlog',
+      label: `Verification ${vrfCount}`,
+      detail:
+        vrfCount >= 5
+          ? `${vrfCount} tasks are awaiting verification. This is a high backlog that may delay task completion.`
+          : `${vrfCount} task${vrfCount === 1 ? '' : 's'} awaiting verification.`,
+      tone: vrfCount >= 5 ? 'bad' : 'warn',
+    })
+  }
+
   if (chips.length === 0) {
     chips.push({
       key: input.loading ? 'hydrating' : 'runtime-ok',
@@ -686,6 +700,7 @@ export function DashboardHealthStrip() {
     runtimeProviderProbeError: shellRuntimeProviderProbeError.value,
     executionError: executionError.value,
     loading: dashboardLoading.value || namespaceTruthInitializing.value,
+    pendingVerificationCount: tasksByStatus.value.awaitingVerification.length,
   })
 
   return html`

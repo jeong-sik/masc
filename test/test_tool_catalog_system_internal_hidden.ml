@@ -77,15 +77,6 @@ let test_all_hidden_tools_metadata_hidden () =
         fail (name ^ " metadata visibility must be Hidden"))
     system_internal_hidden
 
-let test_tool_policy_all_includes_metadata_only_hidden_tool () =
-  (* [Tool_access_policy.All] is a tool-universe fallback, not a public-surface
-     projection.  Metadata-only hidden tools such as [masc_set_param] are
-     callable through internal/admin paths and must not disappear just because
-     they are absent from actor-facing surface lists. *)
-  let names = Tool_access_policy.resolve Tool_access_policy.allow_all in
-  check bool "masc_set_param included in All fallback" true
-    (List.mem "masc_set_param" names)
-
 let () =
   run "tool_catalog_system_internal_hidden"
     [ ( "hidden-list"
@@ -100,7 +91,5 @@ let () =
             test_dual_status_metadata_visibility_hidden
         ; test_case "dual-status is_visible false" `Quick test_dual_status_is_visible_false
         ; test_case "all 13 metadata Hidden" `Quick test_all_hidden_tools_metadata_hidden
-        ; test_case "All fallback includes metadata-only hidden tool" `Quick
-            test_tool_policy_all_includes_metadata_only_hidden_tool
         ] )
     ]

@@ -255,13 +255,6 @@ let resolve_policy_group ~(fallback : string list) (group_name : string) : strin
           group_name (List.length fallback);
         fallback)
 
-let tool_policy_of_meta (meta : keeper_meta) =
-  let allow = Tool_access_policy.Names meta.tool_access in
-  {
-    Tool_access_policy.allow;
-    deny = Tool_access_policy.Names meta.tool_denylist;
-  }
-
 module StringSet = Set_util.StringSet
 
 (* ── Access lookup (O(1) per tool) ────────────────────────────── *)
@@ -298,18 +291,21 @@ let tool_access_lookup_of_meta (meta : keeper_meta) =
   let base = keeper_base_candidate_tool_names () in
   let candidate_names = dedupe_tool_names base in
   let candidate_set = tool_name_set candidate_names in
+  let deny_set = expanded_tool_name_set meta.tool_denylist in
   let allow_names =
-    Tool_access_policy.resolve
-      ~candidates:candidate_names
-      (tool_policy_of_meta meta)
-    |> List.filter (fun name -> StringSet.mem name candidate_set)
-    |> dedupe_tool_names
+    if meta.tool_access = [] then
+      candidate_names
+    else
+      meta.tool_access
+      |> List.filter (fun name -> StringSet.mem name candidate_set)
+      |> List.filter (fun name -> not (StringSet.mem name deny_set))
+      |> dedupe_tool_names
   in
   {
     candidate_names;
     candidate_set;
     allow_set = tool_name_set allow_names;
-    deny_set = expanded_tool_name_set meta.tool_denylist;
+    deny_set;
   }
 
 (** Candidate reachability: a tool is reachable iff it is a registered

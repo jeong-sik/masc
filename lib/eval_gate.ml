@@ -57,16 +57,17 @@ let default_config : gate_config = {
   denied_tools = [];
 }
 
+type tool_policy = {
+  allowed : string list;
+  denied : string list;
+  allowlist_enabled : bool;
+}
+
 let tool_policy_of_config (config : gate_config) =
-  let allow =
-    if config.allowlist_enabled && config.allowed_tools <> [] then
-      Tool_access_policy.Names config.allowed_tools
-    else
-      Tool_access_policy.All
-  in
   {
-    Tool_access_policy.allow;
-    deny = Tool_access_policy.Names config.denied_tools;
+    allowed = config.allowed_tools;
+    denied = config.denied_tools;
+    allowlist_enabled = config.allowlist_enabled;
   }
 
 (* ================================================================ *)
@@ -260,11 +261,11 @@ let pre_check
   ignore accumulated_cost;
 
   let tool_policy = tool_policy_of_config config in
-  let deny_hit =
-    Tool_access_policy.selector_matches_name tool_policy.deny tool_name
-  in
+  let deny_hit = List.mem tool_name tool_policy.denied in
   let allow_hit =
-    Tool_access_policy.selector_matches_name tool_policy.allow tool_name
+    not tool_policy.allowlist_enabled
+    || tool_policy.allowed = []
+    || List.mem tool_name tool_policy.allowed
   in
 
   (* 1. Shared allow/deny policy *)

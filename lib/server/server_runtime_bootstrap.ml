@@ -228,7 +228,6 @@ let bootstrap_server_state_blocking (state : Mcp_server.server_state) =
      stale process-global config resolution in place. *)
   Config_dir_resolver.reset ();
   let (_init_msg : string) = Workspace.init state.workspace_config ~agent_name:None in
-  audit_keeper_egress_policies state;
   Mcp_server.set_sse_callback state Sse.broadcast
 
 

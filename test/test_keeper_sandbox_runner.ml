@@ -49,9 +49,6 @@ module Fake_backend = struct
   let record call =
     calls := call :: !calls
 
-  let egress_policy_path ~config:_ ~meta:_ =
-    "/fake/egress.json"
-
   let effective_sandbox_profile ~meta:_ =
     Keeper_types_profile_sandbox.Docker, Keeper_types_profile_sandbox.Network_none
 

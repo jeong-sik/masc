@@ -475,6 +475,6 @@ let to_oas_approval_callback ?config ~governance_level ~keeper_name ?meta ?clock
                ~disposition_reason:"waiting_approval"
                ~risk_level
                ?clock
-               ())))
+               ()))
     else Agent_sdk.Hooks.Approve
 ;;

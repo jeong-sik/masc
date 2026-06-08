@@ -219,7 +219,6 @@
   test_keeper_fs_edit_patch
   test_keeper_sandbox_read_backend
   test_keeper_path_ssot
-  test_keeper_egress_audit
   test_tool_input_validation
   test_cdal_evidence_gate
   test_ocaml_north_star_task_lifecycle
@@ -473,7 +472,6 @@
   test_keeper_fs_edit_patch
   test_keeper_sandbox_read_backend
   test_keeper_path_ssot
-  test_keeper_egress_audit
   test_tool_input_validation
   ; test_contract_risk removed (team session cleanup)
   ; test_contract_composer removed (team session cleanup)

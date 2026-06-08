@@ -32,8 +32,8 @@ let test_includes_essential_masc () =
       (Printf.sprintf "%s in essential masc" tool) true (List.mem tool names)
   in
   assert_includes "masc_status";
-  assert_includes "masc_web_search";
-  assert_includes "masc_web_fetch"
+  assert_includes "WebSearch";
+  assert_includes "WebFetch"
 
 let test_no_duplicates () =
   let names = Masc.Keeper_tool_policy.failing_minimum_tool_names () in
@@ -50,8 +50,8 @@ let test_essential_masc_ssot_matches_hardcoded () =
   (* Mirrors [Masc.Keeper_tool_policy.essential_masc_minimum_names]. *)
   let expected = [
     "masc_status";
-    "masc_web_search";
-    "masc_web_fetch";
+    "WebSearch";
+    "WebFetch";
   ] in
   Alcotest.(check (list string))
     "essential_masc_minimum_names matches hardcoded list"

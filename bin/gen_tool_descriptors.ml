@@ -85,30 +85,6 @@ let masc_tool_help_spec : tool_spec =
 
 let dashboard_scope_enum_strings = [ "all"; "current" ]
 
-let masc_dashboard_spec : tool_spec =
-  { name = "masc_dashboard"
-  ; description =
-      "Render the MASC dashboard summarizing agent streams, agents, and tasks. Set \
-       scope='current' for this workspace only."
-  ; parameters =
-      [ { p_name = "compact"
-        ; p_type = T_bool { default = None }
-        ; p_description =
-            "If true, show compact single-line summary instead of full dashboard"
-        ; p_required = false
-        }
-      ; { p_name = "scope"
-        ; p_type =
-            T_string { enum = Some dashboard_scope_enum_strings; default = Some "all" }
-        ; p_description = "Dashboard scope (default: all)"
-        ; p_required = false
-        }
-      ]
-  ; additional_properties = false
-  ; behavior_contract = []
-  }
-;;
-
 let masc_gc_spec : tool_spec =
   { name = "masc_gc"
   ; description =
@@ -147,35 +123,6 @@ let masc_cleanup_zombies_spec : tool_spec =
   { name = "masc_cleanup_zombies"
   ; description =
       "Remove zombie agents (no heartbeat for 5+ min) and release their file locks."
-  ; parameters = []
-  ; additional_properties = false
-  ; behavior_contract = []
-  }
-;;
-
-let masc_pause_spec : tool_spec =
-  { name = "masc_pause"
-  ; description =
-      "Pause the server. Stops orchestrator from spawning new agents. Broadcasts \
-       notification to all agents. Use when you need to stop automated work temporarily."
-  ; parameters =
-      [ { p_name = "reason"
-        ; p_type = T_string { enum = None; default = Some "Manual pause" }
-        ; p_description =
-            "Reason for pausing (e.g., 'Need to review', 'Taking a break')"
-        ; p_required = false
-        }
-      ]
-  ; additional_properties = false
-  ; behavior_contract = []
-  }
-;;
-
-let masc_resume_spec : tool_spec =
-  { name = "masc_resume"
-  ; description =
-      "Resume the server after pause. Allows orchestrator to spawn agents again. \
-       Broadcasts notification to all agents."
   ; parameters = []
   ; additional_properties = false
   ; behavior_contract = []
@@ -414,13 +361,9 @@ let masc_messages_spec : tool_spec =
 let phase6_specs : tool_spec list =
   [ masc_config_spec
   ; masc_tool_help_spec
-  ; masc_dashboard_spec
   ; masc_gc_spec
   ; masc_tool_stats_spec
   ; masc_cleanup_zombies_spec
-    (* PR-1 (paving stone): control group *)
-  ; masc_pause_spec
-  ; masc_resume_spec
     (* PR-2: plan group *)
   ; masc_plan_init_spec
   ; masc_plan_update_spec

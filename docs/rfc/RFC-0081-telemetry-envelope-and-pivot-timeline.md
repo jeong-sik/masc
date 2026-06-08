@@ -23,17 +23,17 @@ implementation_prs: [15137]
 
 Two operator-facing defects in masc's telemetry view of OAS streams are addressed here. Per-chunk noise — the third defect originally bundled in the closed RFC-0073 — is the upstream `agent_sdk` repo's emission surface and is now scoped under **RFC-OAS-019** in `~/me/workspace/yousleepwhen/oas`.
 
-1. **Envelope context null** — every `oas:telemetry_event` record written to `.masc/oas-events/YYYY-MM/DD.jsonl` (the durable OAS-event store; see `lib/telemetry_unified.ml:105` and `lib/runtime/runtime_event_bridge.ml:1086`) has `agent_name`, `task_id`, `turn` as `null`. Operators cannot answer "which keeper, which turn, which goal produced this record?" from the raw jsonl alone.
+1. **Envelope context null** — every `oas:telemetry_event` record written to `.masc/oas-events/YYYY-MM/DD.jsonl` (the durable OAS-event store; see `lib/telemetry_unified.ml:105` and `lib/keeper/keeper_event_bridge.ml:710`) has `agent_name`, `task_id`, `turn` as `null`. Operators cannot answer "which keeper, which turn, which goal produced this record?" from the raw jsonl alone.
 
 2. **Pivot impossibility** — there is no `(keeper_name | goal_id) → ordered events` query path. `tool_agent_timeline` (6-source merger) is keyed on `agent_name` only; `telemetry_unified` exposes no keeper/goal filter; the dashboard `keeper-detail-state.ts` mounts a trajectory slot but the backend it talks to has no turn-grouped event endpoint. Goal detail has no timeline tab.
 
-This RFC fixes both at the **read boundary**, not the write boundary. The relay code in `runtime_event_bridge.ml` is unchanged. Three rounds of design (fiber-local binding → shared Hashtbl → read-time join) plus three rounds of grep verification settled on read-time as the structural fit: agent_sdk's `event_envelope` does not carry a turn-level identifier (per-event `fresh_id ()` defaults at `oas/lib/event_envelope.ml:55-57`), so any write-time stamping mechanism would race or fail. The fix instead extends `keeper_runtime_manifest` with three timestamp/id fields and lets `telemetry_unified` perform a time-overlap join at API read time. The user-visible artifacts (pivot UI, pivot API) deliver the same stamped events; only the inside of the system is simpler.
+This RFC fixes both at the **read boundary**, not the write boundary. The relay code in `keeper_event_bridge.ml` is unchanged. Three rounds of design (fiber-local binding → shared Hashtbl → read-time join) plus three rounds of grep verification settled on read-time as the structural fit: agent_sdk's `event_envelope` does not carry a turn-level identifier (per-event `fresh_id ()` defaults at `oas/lib/event_envelope.ml:55-57`), so any write-time stamping mechanism would race or fail. The fix instead extends `keeper_runtime_manifest` with three timestamp/id fields and lets `telemetry_unified` perform a time-overlap join at API read time. The user-visible artifacts (pivot UI, pivot API) deliver the same stamped events; only the inside of the system is simpler.
 
 The emission-side change (per-chunk noise) is RFC-OAS-019's responsibility.
 
 ## 1. Cross-repo boundary (why this RFC exists separately)
 
-`agent_sdk` is consumed via opam pin `git+https://github.com/jeong-sik/oas.git#<sha>` (`dune-project` line 44: `(agent_sdk (>= 0.193.10))`). The `Streaming_chunk_n` payload variant lives in `lib/llm_provider/telemetry_event.ml:20-24` of the `oas` repo, not in masc. masc receives `Event_bus.Custom("telemetry_event", json)` payloads via the upstream SDK, filters them in `keeper_telemetry_consumer.ml` (counter-only, no deserialization), and relays them to a dated JSONL store at `lib/runtime/runtime_event_bridge.ml:1086` under `.masc/oas-events/<YYYY-MM>/<DD>.jsonl`. (Earlier drafts of this RFC referenced `lib/telemetry_eio.ml:114` for this surface; that path is the *agent_event* surface, `.masc/telemetry/`, with a different typed event set — corrected here after grep verification.)
+`agent_sdk` is consumed via opam pin `git+https://github.com/jeong-sik/oas.git#<sha>` (`dune-project` line 44: `(agent_sdk (>= 0.193.10))`). The `Streaming_chunk_n` payload variant lives in `lib/llm_provider/telemetry_event.ml:20-24` of the `oas` repo, not in masc. masc receives `Event_bus.Custom("telemetry_event", json)` payloads via the upstream SDK, filters them in `keeper_telemetry_consumer.ml` (counter-only, no deserialization), and relays them to a dated JSONL store at `lib/keeper/keeper_event_bridge.ml:710` under `.masc/oas-events/<YYYY-MM>/<DD>.jsonl`. (Earlier drafts of this RFC referenced `lib/telemetry_eio.ml:114` for this surface; that path is the *agent_event* surface, `.masc/telemetry/`, with a different typed event set — corrected here after grep verification.)
 
 | Concern | Owner repo | RFC |
 |---|---|---|
@@ -53,7 +53,7 @@ Mixing the two would break the SDK Independence Gate that `oas` enforces on Read
 
 ## 3. Non-goals
 
-- Modify `runtime_event_bridge.ml` or anything else on the write side. The relay path remains unchanged.
+- Modify `keeper_event_bridge.ml` or anything else on the write side. The relay path remains unchanged.
 - Re-emit, throttle, or deduplicate any upstream `oas:telemetry_event` payload. The bus contents are RFC-OAS-019's responsibility. masc consumes whatever the SDK publishes.
 - Stamp envelope fields directly into `.masc/oas-events/` jsonl. Three rounds of grep verification showed write-time stamping does not fit OAS event-envelope semantics; the read-time join is the structural fix.
 - Rewrite the dashboard timeline framework. `vis-timeline` is already loaded by `fsm-hub-timeline-panels.ts` — reuse, don't replace.
@@ -67,11 +67,11 @@ After three rounds of grep verification this RFC settled on a *read-time join* r
 
 | Round | Mechanism | Blocked because |
 |---|---|---|
-| 1 | `Eio.Fiber.with_binding` lookup in `wrap_event` | relay runs in a *background fiber* (`runtime_event_bridge.ml:1082` `start_impl`), so keeper-turn-local bindings do not propagate to it |
+| 1 | `Eio.Fiber.with_binding` lookup in `wrap_event` | relay runs in a *background fiber* (`keeper_event_bridge.ml:772` `start_impl`), so keeper-turn-local bindings do not propagate to it |
 | 2 | Shared `Keeper_context` Hashtbl keyed on `oas_run_id`, registered at keeper turn start | OAS `event_envelope.ml:55-57` defaults `correlation_id` and `run_id` to `fresh_id ()` *per event*; agent_sdk does not guarantee a turn-level identifier in published envelopes. A keeper-side `register oas_run_id` has no stable id to register under |
 | 3 (chosen) | Read-time join — no write-side change | works without assuming a propagated id; relies only on data that already exists in `keeper_runtime_manifest` and the OAS-event `ts_unix` |
 
-`lib/runtime/runtime_event_bridge.ml` is **unchanged**. `.masc/oas-events/<YYYY-MM>/<DD>.jsonl` continues to be written with `agent_name`/`task_id`/`turn` null when the OAS publisher did not supply them. Stamping happens at read time, not write time.
+`lib/keeper/keeper_event_bridge.ml` is **unchanged**. `.masc/oas-events/<YYYY-MM>/<DD>.jsonl` continues to be written with `agent_name`/`task_id`/`turn` null when the OAS publisher did not supply them. Stamping happens at read time, not write time.
 
 At read time, `lib/telemetry_unified.ml` and `lib/tool_agent_timeline.ml` join each `.masc/oas-events/` row to the turn that owns it. The join is in two stages:
 
@@ -103,7 +103,7 @@ type stamped_event =
 |---|---|---|
 | `turn_started_at` (float, unix s) | `Time_compat.now ()` at turn entry | lower bound of the window |
 | `turn_ended_at` (float, unix s) | `Time_compat.now ()` at turn finalize | upper bound; written on success, abort, or timeout |
-| `correlation_id_first` (string option) | first OAS envelope `correlation_id` observed during the turn (recorded via `runtime_event_bridge` log hook or `Agent_sdk.Event_bus` callback) | disambiguator when multiple keepers overlap |
+| `correlation_id_first` (string option) | first OAS envelope `correlation_id` observed during the turn (recorded via `keeper_event_bridge` log hook or `Agent_sdk.Event_bus` callback) | disambiguator when multiple keepers overlap |
 | `task_id` / `goal_id` / `agent_name` | already on the manifest row | join's output payload |
 
 No new file family is created — the manifest is the lookup table. This is a deliberate retraction from the second draft, which proposed a parallel `.masc/run-index/` file. The manifest already carries `keeper_name`, `keeper_turn_id`, and `task_id` (per `keeper_runtime_manifest.ml:204` `runtime_manifest_context`); adding two timestamps and one optional id is `~3 LoC` of struct extension plus a write-time `Time_compat.now ()` at the finalize site.
@@ -225,7 +225,7 @@ Three additional fields per row: `turn_started_at: float`, `turn_ended_at: float
 
 ### 8.4 Alternative — fiber-local binding (rejected after grep)
 
-Tried first. The oas-events relay is a *background fiber* (`runtime_event_bridge.ml:1082` `Eio.Fiber.fork ~sw` inside `start_impl`) subscribed to the OAS bus. `Eio.Fiber.with_binding` propagates only down the same fiber stack, so the relay never sees a binding installed in a keeper turn fiber.
+Tried first. The oas-events relay is a *background fiber* (`keeper_event_bridge.ml:783` `Eio.Fiber.fork ~sw` inside `start_impl`) subscribed to the OAS bus. `Eio.Fiber.with_binding` propagates only down the same fiber stack, so the relay never sees a binding installed in a keeper turn fiber.
 
 ### 8.5 Alternative — explicit shared map keyed on `oas_run_id` (rejected after grep)
 
@@ -247,5 +247,5 @@ Deferred. The OAS publishers do not currently surface an external `client_correl
 
 - Sync with RFC-0046 author on `keeper-detail-state.ts` slot layout (timeline above/below FsmHub) before Phase 2b.
 - Decide whether `Timeline` tab in `goal-tree.ts` is the only mount or if a "fleet timeline" view is wanted later (defer).
-- Confirm the wiring point where `runtime_event_bridge` (or `keeper_telemetry_consumer`) can observe the first OAS envelope `correlation_id` per keeper turn so it can be persisted into `keeper_runtime_manifest` at finalize. If neither path can attribute "first correlation_id seen during turn X" without a back-channel from the relay to the keeper, the `correlation_id_first` field is dropped and §4.1 step 2 (id-prefix disambiguation) is dropped with it — time-overlap remains the sole join.
+- Confirm the wiring point where `keeper_event_bridge` (or `keeper_telemetry_consumer`) can observe the first OAS envelope `correlation_id` per keeper turn so it can be persisted into `keeper_runtime_manifest` at finalize. If neither path can attribute "first correlation_id seen during turn X" without a back-channel from the relay to the keeper, the `correlation_id_first` field is dropped and §4.1 step 2 (id-prefix disambiguation) is dropped with it — time-overlap remains the sole join.
 - If `"unscoped"` bucket size becomes a real operator pain (visible from the pivot API's `unscoped_count`), evaluate §8.8 (agent_sdk envelope extension) as the upgrade path.

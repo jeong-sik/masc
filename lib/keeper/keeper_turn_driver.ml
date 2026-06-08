@@ -49,7 +49,6 @@ let run_named
     ?(system_prompt = "")
     ?(tools = [])
     ?(initial_messages = [])
-    ?(max_turns = 20)
     ?(max_idle_turns = 3)
     ?stream_idle_timeout_s
     ?body_timeout_s
@@ -148,7 +147,6 @@ let run_named
     system_prompt;
     tools;
     initial_messages;
-    max_turns;
     max_idle_turns;
     stream_idle_timeout_s;
     body_timeout_s;

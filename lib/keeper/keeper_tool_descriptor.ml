@@ -468,7 +468,13 @@ let public_descriptors =
          executable plus argv arguments after the executable, or pipeline. Do not \
          repeat executable as argv[0]. Examples: executable='git' argv=['status', \
          '--short']; executable='grep' argv=['-rn', 'pattern', 'lib']. Use cwd for \
-         repo-scoped git/gh commands."
+         repo-scoped git/gh commands. \
+         \
+         IMPORTANT: The working directory persists between commands, but shell \
+         state does not. Maintain your current working directory throughout the \
+         session by using absolute paths and avoiding usage of `cd`. You may use \
+         `cd` if explicitly needed, but prefer absolute paths to prevent directory \
+         confusion."
       ~input_schema:execute_schema
       ~policy:
         (policy

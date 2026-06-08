@@ -56,7 +56,11 @@ let decide
     , (Masc_domain.Claimed { assignee; _ } | Masc_domain.InProgress { assignee; _ }) ) ->
     if same_agent assignee then ok task_status else Error Invalid_transition
   | Masc_domain.Claim, Masc_domain.Done _ -> ok task_status
-  | Masc_domain.Claim, (Masc_domain.AwaitingVerification _ | Masc_domain.Cancelled _) ->
+  | Masc_domain.Claim, Masc_domain.AwaitingVerification { assignee; _ } ->
+    (* Cross-agent verification dispatch: verifier claims the task without
+       changing status. Self-verification is blocked. Issue #19314. *)
+    if same_agent assignee then Error Invalid_transition else ok task_status
+  | Masc_domain.Claim, Masc_domain.Cancelled _ ->
     Error Invalid_transition
   (* ── Start ────────────────────────────────────── *)
   | Masc_domain.Start, Masc_domain.Claimed { assignee; _ } ->

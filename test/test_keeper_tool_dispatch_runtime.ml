@@ -1,4 +1,5 @@
 open Alcotest
+open Tool_result
 
 module KET = Masc.Keeper_tool_dispatch_runtime
 module KES = Masc.Keeper_tool_shared_runtime
@@ -722,20 +723,33 @@ let test_workflow_rejection_payload_skips_circuit_breaker () =
       ~fields:[ "failure_class", `String "runtime_failure" ]
       "No such file or directory"
   in
+  let workflow_class =
+    KET.failure_class_of_tool_result_payload workflow_payload
+  in
+  let egress_class =
+    KET.failure_class_of_tool_result_payload egress_payload
+  in
+  let legacy_class =
+    KET.failure_class_of_tool_result_payload legacy_egress_payload
+  in
+  let runtime_class =
+    KET.failure_class_of_tool_result_payload runtime_payload
+  in
+  let string_of_class = Option.map tool_failure_class_to_string in
   check (option string) "extracts workflow class" (Some "workflow_rejection")
-    (KET.failure_class_of_tool_result_payload workflow_payload);
+    (string_of_class workflow_class);
   check bool "workflow rejection does not trip circuit breaker" false
-    (KET.should_apply_circuit_breaker_to_failure_payload workflow_payload);
+    (KET.should_apply_circuit_breaker_to_failure_payload workflow_class);
   check (option string) "extracts egress policy class" (Some "policy_rejection")
-    (KET.failure_class_of_tool_result_payload egress_payload);
+    (string_of_class egress_class);
   check bool "egress policy rejection does not trip circuit breaker" false
-    (KET.should_apply_circuit_breaker_to_failure_payload egress_payload);
+    (KET.should_apply_circuit_breaker_to_failure_payload egress_class);
   check (option string) "legacy egress has no inferred class" None
-    (KET.failure_class_of_tool_result_payload legacy_egress_payload);
+    (string_of_class legacy_class);
   check bool "legacy egress still trips circuit breaker" true
-    (KET.should_apply_circuit_breaker_to_failure_payload legacy_egress_payload);
+    (KET.should_apply_circuit_breaker_to_failure_payload legacy_class);
   check bool "runtime failure still trips circuit breaker" true
-    (KET.should_apply_circuit_breaker_to_failure_payload runtime_payload)
+    (KET.should_apply_circuit_breaker_to_failure_payload runtime_class)
 
 let test_tool_execute_raw_cmd_requires_typed_shell_ir () =
   with_exec_fixture "tool_execute_raw_cmd_requires_typed_shell_ir"

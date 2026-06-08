@@ -89,30 +89,6 @@ val degraded_retry_slot_phase_budget_sec : float
 val degraded_retry_slot_phase_available :
   time_spent_in_turn_s:float -> bool
 
-val reclassify_provider_timeout_for_attempt :
-  provider_timeout_budget:provider_timeout_budget option ->
-  Agent_sdk.Error.sdk_error ->
-  Agent_sdk.Error.sdk_error
-(** Rewrap structural attempt watchdog timeouts as [Provider_timeout] when
-    the current attempt had an admitted provider-timeout budget. *)
-
-val attempt_watchdog_timeout_sec :
-  remaining_turn_budget_s:float ->
-  provider_timeout_budget ->
-  float
-(** Legacy wall-clock watchdog budget for a single runtime attempt.
-
-    Off-mode uses this after the OAS per-attempt budget plus the normal
-    finalization guard. Progress-based liveness modes return [None] from
-    [attempt_watchdog_timeout_sec_opt] so healthy active streams are not killed
-    by cumulative wall-clock elapsed. *)
-
-val attempt_watchdog_timeout_sec_opt :
-  remaining_turn_budget_s:float ->
-  provider_timeout_budget ->
-  float option
-(** Runtime-attempt wall-clock watchdog. Always returns [Some] with the
-    legacy per-attempt watchdog budget. *)
 
 type degraded_retry_budget_decision =
   | No_degraded_retry

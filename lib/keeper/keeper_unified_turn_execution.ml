@@ -123,7 +123,6 @@ let run (ctx : ctx)
         ~run_generation
         ~is_retry
         ~oas_timeout_s
-        ~attempt_watchdog_s
     =
     last_execution := execution;
     Otel_genai.with_keeper_turn_span
@@ -153,7 +152,6 @@ let run (ctx : ctx)
            Keeper_turn_fsm.Streaming;
          Keeper_unified_turn_attempt_watchdog.dispatch
            ~clock
-           ~attempt_watchdog_s
            ~oas_timeout_s
            ~on_cancelled:(fun () ->
              record_streaming_cancelled_observation
@@ -280,18 +278,12 @@ let run (ctx : ctx)
       in
       attempt_provider_timeout_budget := Some provider_timeout_budget;
       last_provider_timeout_budget := Some provider_timeout_budget;
-      let attempt_watchdog_s =
-        attempt_watchdog_timeout_sec_opt
-          ~remaining_turn_budget_s:(remaining_turn_budget_s ())
-          provider_timeout_budget
-      in
       do_run
         ~execution
         ~run_meta
         ~run_generation
         ~is_retry
         ~oas_timeout_s:provider_timeout_budget.effective_timeout_sec
-        ~attempt_watchdog_s
     in
     match attempt_result with
     | Ok result ->

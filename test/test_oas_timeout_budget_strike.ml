@@ -149,68 +149,6 @@ let test_tls_handshake_internal_error_is_transient () =
     true
     (EC.is_auto_recoverable_turn_error err)
 
-let test_attempt_watchdog_timeout_reclassifies_as_provider_timeout () =
-  let budget : KCB.provider_timeout_budget =
-    { effective_timeout_sec = 555.0
-    ; adaptive_timeout_sec = 600.0
-    ; keeper_turn_timeout_sec = 600.0
-    ; remaining_turn_budget_sec = 571.0
-    ; estimated_input_tokens = 10_000
-    ; max_turns = 6
-    ; source = "turn_budget_capped"
-    }
-  in
-  let err =
-    Agent_sdk.Error.Api
-      (Timeout
-         { message =
-             "Turn wall-clock budget exhausted during runtime attempt \
-              (budget=555.0s, watchdog=570.0s)"
-         })
-  in
-  let reclassified =
-    KCB.reclassify_provider_timeout_for_attempt
-      ~provider_timeout_budget:(Some budget)
-      err
-  in
-  (match KTD.classify_masc_internal_error reclassified with
-   | Some (KTD.Provider_timeout timeout) ->
-     Alcotest.(check string)
-       "phase"
-       "runtime_attempt_watchdog"
-       timeout.phase;
-     Alcotest.(check (float 0.001))
-       "budget"
-       555.0
-       timeout.budget_sec
-   | Some other ->
-     Alcotest.failf
-       "expected Provider_timeout, got %s"
-       (Option.value
-          ~default:"<no summary>"
-          (KTD.summary_of_masc_internal_error other))
-   | None -> Alcotest.fail "expected structured Provider_timeout");
-  Alcotest.(check bool)
-    "provider timeout cycle failure is warn"
-    true
-    (EC.should_warn_keeper_cycle_failed reclassified)
-
-let test_attempt_watchdog_always_returns_some () =
-  let budget : KCB.provider_timeout_budget =
-    { effective_timeout_sec = 555.0
-    ; adaptive_timeout_sec = 600.0
-    ; keeper_turn_timeout_sec = 600.0
-    ; remaining_turn_budget_sec = 571.0
-    ; estimated_input_tokens = 10_000
-    ; max_turns = 6
-    ; source = "turn_budget_capped"
-    }
-  in
-  (match KCB.attempt_watchdog_timeout_sec_opt ~remaining_turn_budget_s:571.0 budget with
-   | Some actual ->
-     Alcotest.(check (float 0.001)) "watchdog is always present" 570.0 actual
-   | None -> Alcotest.fail "attempt watchdog should always return Some")
-
 let test_retry_timeout_budget_ignores_expired_outer_turn_budget () =
   let budget =
     KCB.resolve_bounded_provider_timeout_budget_with_turn_budget
@@ -400,14 +338,6 @@ let () =
           test_tool_retry_exhausted_preserves_keeper_liveness;
         Alcotest.test_case "TLS handshake internal error is transient" `Quick
           test_tls_handshake_internal_error_is_transient;
-        Alcotest.test_case
-          "attempt watchdog timeout reclassifies as provider timeout"
-          `Quick
-          test_attempt_watchdog_timeout_reclassifies_as_provider_timeout;
-        Alcotest.test_case
-          "attempt watchdog always returns Some after liveness removal"
-          `Quick
-          test_attempt_watchdog_always_returns_some;
         Alcotest.test_case
           "retry timeout budget ignores expired outer turn budget"
           `Quick

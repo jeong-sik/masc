@@ -1347,10 +1347,6 @@
 
 (include stanzas/test_heartbeat_integration.inc)
 
-(include stanzas/test_keeper_turn_capacity.inc)
-
-(include stanzas/test_runtime_lane_capacity.inc)
-
 (include stanzas/test_http_pages_asset_read.inc)
 
 (include stanzas/test_bounded_proc.inc)

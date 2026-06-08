@@ -430,14 +430,6 @@ let keeper_tool_cost_max_usd () : float option =
   | v when Float.compare v 0.0 <= 0 -> None
   | v -> Some v
 
-let keeper_board_event_limit_rp =
-  _rp_int ~key:"keeper.turn.board_event_limit"
-    ~default:(fun () -> int_of_env_default "MASC_KEEPER_BOARD_EVENT_LIMIT"
-                          ~default:10 ~min_v:1 ~max_v:50)
-    ~min_v:1 ~max_v:50
-    ~description:"Max board events injected per turn" ()
-let keeper_board_event_limit () : int =
-  Runtime_params.get keeper_board_event_limit_rp
 
 
 let keeper_llm_rerank_enabled_rp =

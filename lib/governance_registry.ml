@@ -575,7 +575,6 @@ let surfaces =
       param_keys = [
         "keeper.turn.temperature";
         "keeper.turn.max_output_tokens";
-        "keeper.turn.board_event_limit";
         "keeper.turn.tool_cost_max_usd";
         "keeper.turn.llm_rerank";
         "keeper.turn.llama_slots";

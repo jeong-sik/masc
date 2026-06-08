@@ -752,8 +752,6 @@ let test_attr_gate_invariants () =
     [ KA.Pending; KA.Supported; KA.Unsupported; KA.Expired; KA.Partial ]
 
 let () =
-  let base_path = Masc_test_deps.find_project_root () in
-  ignore (Result.get_ok (Keeper_tool_dispatch_runtime.init_policy_config ~base_path));
   Alcotest.run "Keeper_accountability"
     [
       ( "accountability",

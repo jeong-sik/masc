@@ -12,22 +12,6 @@ open Keeper_types_profile
 
 module StringSet : Set.S with type elt = string
 
-(** {1 Policy Initialization} *)
-
-(** Load tool policy configuration from [config/tool_policy.toml].
-    Must be called once at server startup before legacy/recovery surface
-    resolution. *)
-val init_policy_config :
-  base_path:string -> (unit, string) result
-
-(** Return the loaded policy config, if any.  Used for validation. *)
-val policy_config_for_validation :
-  unit -> Keeper_tool_policy_config.t option
-
-(** Reset the loaded policy config and one-shot unloaded-accessor warning
-    state. Intended for isolated regression tests only. *)
-val reset_policy_config_for_test : unit -> unit
-
 (** {1 MASC Schema Injection} *)
 
 val is_keeper_safe_inline_tool : string -> bool

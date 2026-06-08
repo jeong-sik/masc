@@ -1,8 +1,8 @@
 (** Keeper_tool_policy — keeper tool surface and denylist resolution.
 
     Group definitions are loaded from [config/tool_policy.toml] at startup
-    via {!Keeper_tool_policy_config} for legacy/recovery surfaces. They do not
-    form the runtime execution allowlist for descriptor-backed keeper tools.
+    Policy group classification has been removed. Tool access is now
+    descriptor/registry driven with denylist filtering only.
 
     Consumes [Keeper_tool_registry] for candidate aggregation and core tools.
     Produces the access-policy types and functions used by the dispatch layer. *)
@@ -49,68 +49,10 @@ let is_masc_write_allowed path =
     String.starts_with path ~prefix
   ) keeper_writable_prefixes
 
-(* -- Config-driven policy group resolution ------------------------- *)
-
-(* Loaded by init_policy_config at server startup.
-   None = config not yet loaded (init_policy_config not yet called). *)
-let policy_config : Keeper_tool_policy_config.t option ref = ref None
-let policy_config_unloaded_warned : (string, unit) Hashtbl.t = Hashtbl.create 16
-let policy_config_unloaded_mutex = Stdlib.Mutex.create ()
-
-let policy_config_for_validation () = !policy_config
-
-let warn_unloaded_policy_config_once ~accessor ~outcome =
-  let should_warn =
-    Stdlib.Mutex.lock policy_config_unloaded_mutex;
-    Fun.protect
-      ~finally:(fun () -> Stdlib.Mutex.unlock policy_config_unloaded_mutex)
-      (fun () ->
-        if Hashtbl.mem policy_config_unloaded_warned accessor then
-          false
-        else (
-          Hashtbl.replace policy_config_unloaded_warned accessor ();
-          true))
-  in
-  if should_warn then
-    Log.Keeper.warn
-      "tool_policy.%s called before init_policy_config loaded config/tool_policy.toml; %s"
-      accessor outcome
-
-(* PR #13129 review: the warn message originally hard-coded
-   "returning fallback", which is misleading on the strict
-   accessor path that raises [Invalid_argument] instead.  Take
-   [outcome] from the caller so the log line accurately describes
-   what the call site did. *)
-let observe_unloaded_policy_config ~accessor ~outcome =
-  Otel_metric_store.inc_counter Otel_metric_store.metric_tool_policy_unloaded_query
-    ~labels:[("accessor", accessor)]
-    ();
-  warn_unloaded_policy_config_once ~accessor ~outcome
-
-let with_policy_config_or ?(on_none = fun () -> ()) ~accessor ~default f =
-  match !policy_config with
-  | None ->
-    observe_unloaded_policy_config ~accessor ~outcome:"returning fallback";
-    on_none ();
-    default
-  | Some cfg -> f cfg
-
-let reset_policy_config_for_test () =
-  policy_config := None;
-  Stdlib.Mutex.lock policy_config_unloaded_mutex;
-  Fun.protect
-    ~finally:(fun () -> Stdlib.Mutex.unlock policy_config_unloaded_mutex)
-    (fun () -> Hashtbl.clear policy_config_unloaded_warned)
-
-let init_policy_config ~base_path =
-  match Keeper_tool_policy_config.load ~base_path with
-  | Ok cfg ->
-    policy_config := Some cfg;
-    Log.Keeper.info "tool policy config loaded: %d groups"
-      (List.length (Keeper_tool_policy_config.group_names cfg));
-    Ok ()
-  | Error msg ->
-    Error msg
+(* -- Policy group resolution removed ----------------------------- *)
+(* Config-driven policy groups (tool_policy.toml) have been deleted.
+   Tool access is now descriptor/registry driven with denylist filtering.
+   See keeper_tool_policy_config removal PR. *)
 
 let dedupe_tool_schemas (schemas : Masc_domain.tool_schema list) =
   let seen = Hashtbl.create (max 16 (List.length schemas)) in
@@ -240,20 +182,6 @@ let keeper_base_candidate_tool_names () =
     @ keeper_internal_candidate_tool_names
     @ injected_masc_tool_names () )
   |> List.filter (fun name -> not (is_keeper_maintenance_only_tool name))
-
-(** Resolve a named group from tool_policy.toml.  Returns the hardcoded
-    fallback when config is not loaded. *)
-let resolve_policy_group ~(fallback : string list) (group_name : string) : string list =
-  with_policy_config_or
-    ~accessor:("resolve_policy_group." ^ group_name)
-    ~default:fallback
-    (fun cfg ->
-      match Keeper_tool_policy_config.resolve_group cfg group_name with
-      | Some tools -> dedupe_tool_names tools
-      | None ->
-        Log.Keeper.warn "tool_policy group %S not found, using fallback (%d tools)"
-          group_name (List.length fallback);
-        fallback)
 
 module StringSet = Set_util.StringSet
 

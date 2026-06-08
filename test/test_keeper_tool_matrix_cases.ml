@@ -100,9 +100,6 @@ let init_keeper_bridge =
          direct shortcut and falls into the exe-relative walk that picks up
          the partial _build/default/config/runtime.json. *)
       let base_path = Masc_test_deps.find_project_root () in
-      (match KET.init_policy_config ~base_path with
-       | Ok () -> ()
-       | Error err -> Printf.eprintf "[WARN] init_policy_config failed: %s\n" err);
       let runtime_config_path = Filename.concat base_path "config/runtime.toml" in
       let config_path =
         if Sys.file_exists runtime_config_path then

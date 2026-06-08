@@ -1,9 +1,6 @@
 (** Dashboard namespace-truth read-model regression tests. *)
 
 let () = Masc.Server_startup_state.mark_state_ready ~backend_mode:"test"
-let () =
-  let base_path = Masc_test_deps.find_project_root () in
-  ignore (Result.get_ok (Masc.Keeper_tool_dispatch_runtime.init_policy_config ~base_path))
 
 module Lib = Masc
 

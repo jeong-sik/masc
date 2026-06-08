@@ -576,9 +576,16 @@ let task_claim_decision (task : task) =
        Claim_available (task_claim_readiness task)
      | Reclaim_gate_blocked_by_policy reason ->
        Claim_unavailable (Claim_block_reclaim_policy reason))
+  | AwaitingVerification { verification_id; _ } ->
+    (* Verification tasks with a valid verification_id can be claimed by
+       other agents for cross-agent verification dispatch. The actual
+       cross-agent check (self-verification block) happens in claim_task_r.
+       Issue #19314. *)
+    (match verification_id with
+     | Some _ -> Claim_available (task_claim_readiness task)
+     | None -> Claim_unavailable (Claim_block_not_todo task.task_status))
   | Claimed _
   | InProgress _
-  | AwaitingVerification _
   | Done _
   | Cancelled _ ->
     Claim_unavailable (Claim_block_not_todo task.task_status)

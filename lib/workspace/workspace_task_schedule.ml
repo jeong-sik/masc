@@ -303,7 +303,8 @@ let claim_next_r
             (fun (task : Masc_domain.task) ->
                match task.task_status with
                | Claimed _ | InProgress _ -> true
-               | Todo | AwaitingVerification _ | Done _ | Cancelled _ -> false)
+               | AwaitingVerification { assignee; _ } -> assignee <> agent_name
+               | Todo | Done _ | Cancelled _ -> false)
             working_tasks
         in
         (* Starvation prevention: Calculate effective priority

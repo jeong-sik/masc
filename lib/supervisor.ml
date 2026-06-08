@@ -77,7 +77,10 @@ let rec start_child ~sw ~clock cs =
         cs.spec.start ();
         cs.running <- false;
         Log.Server.info ~keeper_name:name "[Supervisor] child %s exited normally" name
-      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+      with Eio.Cancel.Cancelled _ ->
+        cs.running <- false;
+        Log.Server.info ~keeper_name:name "[Supervisor] child %s cancelled" name
+      | exn ->
         cs.running <- false;
         let msg = Printexc.to_string exn in
         Log.Server.warn ~keeper_name:name "[Supervisor] child %s crashed: %s" name msg;

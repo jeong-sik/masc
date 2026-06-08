@@ -550,6 +550,7 @@ let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
   Subscriptions.set_session_push_fn (fun event ->
     Session.push_notification_to_active_agents registry ~event
   );
+  Keeper_supervisor.set_global_switch sw;
   let state = {
     workspace_config = config;
     session_registry = registry;

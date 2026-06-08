@@ -32,9 +32,11 @@ let board_tools : Masc_domain.tool_schema list =
     }
   ; { name = "keeper_board_post"
     ; description =
-        "Create a new board post with content. Use hearth to target a topic channel \
-         (e.g. 'code-review', 'research', 'ops'). Use for sharing findings, asking \
-         questions, or starting discussions that other keepers should see."
+        "Create a new board post. Author is auto-filled from keeper identity. Use \
+         hearth to target a topic channel (e.g. 'code-review', 'research', 'ops'); \
+         when a SubBoard with that slug exists the post is bound to it. Use for \
+         sharing findings, asking questions, or starting discussions that other \
+         keepers should see."
     ; input_schema =
         `Assoc
           [ "type", `String "object"
@@ -43,13 +45,17 @@ let board_tools : Masc_domain.tool_schema list =
                 [ ( "content"
                   , `Assoc
                       [ "type", `String "string"
-                      ; "description", `String "Post content (max 4000 chars)"
+                      ; "maxLength", `Int 4000
+                      ; "description", `String "Post body text (max 4000 chars)"
                       ] )
                 ; ( "hearth"
                   , `Assoc
                       [ "type", `String "string"
                       ; ( "description"
-                        , `String "Topic channel name (e.g. code-review, research, ops)" )
+                        , `String
+                            "SubBoard slug or topic channel (e.g. code-review, research, \
+                             ops). When a SubBoard with this slug exists, the post is bound \
+                             to that SubBoard and its access policy." )
                       ] )
                 ; ( "thread_id"
                   , `Assoc
@@ -129,7 +135,9 @@ let board_tools : Masc_domain.tool_schema list =
                   , `Assoc
                       [ "type", `String "string"
                       ; ( "description"
-                        , `String "Filter by topic channel (e.g. code-review, research)" )
+                        , `String
+                            "Filter by SubBoard slug or topic channel (e.g. \
+                             code-review, research)" )
                       ] )
                 ; ( "limit"
                   , `Assoc
@@ -140,6 +148,9 @@ let board_tools : Masc_domain.tool_schema list =
                            [correction_pipeline] coerce. *)
                         ( "type"
                         , `List [ `String "integer"; `String "string" ] )
+                      ; "default", `Int 20
+                      ; "minimum", `Int 1
+                      ; "maximum", `Int 50
                       ; ( "description"
                         , `String
                             "Max posts to return (default: 20, max: 50). \
@@ -182,7 +193,8 @@ let board_tools : Masc_domain.tool_schema list =
                 ; ( "content"
                   , `Assoc
                       [ "type", `String "string"
-                      ; "description", `String "Comment content"
+                      ; "maxLength", `Int 4000
+                      ; "description", `String "Comment content (max 4000 chars)"
                       ] )
                 ] )
           ; "required", `List [ `String "post_id"; `String "content" ]
@@ -242,7 +254,8 @@ let board_tools : Masc_domain.tool_schema list =
                 [ ( "query"
                   , `Assoc
                       [ "type", `String "string"
-                      ; "description", `String "Search keyword"
+                      ; "maxLength", `Int 200
+                      ; "description", `String "Search keyword (max 200 chars)"
                       ] )
                 ; ( "limit"
                   , `Assoc
@@ -253,10 +266,13 @@ let board_tools : Masc_domain.tool_schema list =
                            same defect; fix all at once. *)
                         ( "type"
                         , `List [ `String "integer"; `String "string" ] )
+                      ; "default", `Int 20
+                      ; "minimum", `Int 1
+                      ; "maximum", `Int 100
                       ; ( "description"
                         , `String
-                            "Max results (default: 20). Numeric strings are \
-                             accepted; prefer the bare integer form." )
+                            "Max results (default: 20, max: 100). Numeric \
+                             strings are accepted; prefer the bare integer form." )
                       ] )
                 ] )
           ; "required", `List [ `String "query" ]

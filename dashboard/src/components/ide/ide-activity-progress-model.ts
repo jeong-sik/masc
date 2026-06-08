@@ -10,7 +10,7 @@ import {
   routeLinksForContext,
   type IdeContextRouteContext,
   type IdeContextRouteLink,
-} from './ide-context-lens'
+} from './ide-context-route-links'
 import {
   normalizeIdeContextFilePath,
   normalizeIdeContextLine,

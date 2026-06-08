@@ -86,7 +86,6 @@ type block_reason =
   | Unsafe_redirect
   | Pipes_not_allowed
   | Direct_dune_invocation
-  | Command_not_allowed of string
 
 let block_reason_to_string = function
   | Empty_command -> "command must not be empty"
@@ -112,7 +111,6 @@ let block_reason_to_string = function
      scripts/dune-local.sh's machine-wide build lock and can trigger \
      host-wide ENFILE/EMFILE pressure. Use `scripts/dune-local.sh build ...` \
      from the repo root instead."
-  | Command_not_allowed name -> command_blocked_hint name
 ;;
 
 
@@ -755,7 +753,6 @@ let block_reason_tag = function
   | Unsafe_redirect -> "unsafe_redirect"
   | Pipes_not_allowed -> "pipes_not_allowed"
   | Direct_dune_invocation -> "direct_dune_invocation"
-  | Command_not_allowed _ -> "command_not_allowed"
 ;;
 
 let attribution_of_validation ~cmd (result : (unit, block_reason) result) : Attribution.t =
@@ -766,7 +763,6 @@ let attribution_of_validation ~cmd (result : (unit, block_reason) result) : Attr
   | Error br ->
     let command_name =
       match br with
-      | Command_not_allowed name -> Some name
       | Direct_dune_invocation -> Some "dune"
       | _ -> None
     in
@@ -792,11 +788,5 @@ type 'a verified_ir = 'a Typed_capabilities.verified_ir
 let verify_static_safe_ir ir =
   let ( let* ) = Result.bind in
   let* () = validate_command ir in
-  let envelope = Masc_exec.Shell_ir_risk.(classify (undecided ir)) in
-  if Masc_exec.Shell_ir_risk.is_r0 envelope
-  then Ok (Typed_capabilities.Safe_IR ir)
-  else (
-    match flat_stage_words ir with
-    | command :: _ -> Error (Command_not_allowed command)
-    | [] -> Error Empty_command)
+  Ok (Typed_capabilities.Safe_IR ir)
 ;;

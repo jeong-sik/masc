@@ -62,10 +62,10 @@ let test_block_reason_diagnoses_use_public_tool_suggestions () =
     (tool_suggestion_of_diagnosis
        (Shell.diagnosis_of_block_reason Policy.Unsafe_redirect));
   Alcotest.(check (option string))
-    "unknown command does not suggest internal shell"
+    "empty command does not suggest internal shell"
     None
     (tool_suggestion_of_diagnosis
-       (Shell.diagnosis_of_block_reason (Policy.Command_not_allowed "foo")))
+       (Shell.diagnosis_of_block_reason Policy.Empty_command))
 
 let () =
   Alcotest.run "keeper_readonly_hints" [

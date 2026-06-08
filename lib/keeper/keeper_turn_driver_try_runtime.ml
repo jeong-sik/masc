@@ -12,7 +12,6 @@ type try_runtime_ctx =
   ; name : string
   ; candidate_count : int
   ; configured_labels : string list
-  ; error_selected_model_raw : string option
   ; capture : Runtime_observation.runtime_metrics_capture
   ; runtime_strategy_name_ref : string option ref
   ; try_provider_ctx : Keeper_turn_driver_try_provider.try_provider_ctx
@@ -131,7 +130,6 @@ let run
     ( pre_dispatch_required_tool_rejections_rev
     , ctx.candidate_count
     , ctx.configured_labels
-    , ctx.error_selected_model_raw
     , ctx.capture
     , ctx.runtime_mcp_policy
     , ctx.tools

@@ -32,42 +32,6 @@ let config_bootstrap_mode = Config_root_bootstrap.config_bootstrap_mode
 let bootstrap_base_path_config_root = Config_root_bootstrap.bootstrap_base_path_config_root
 let startup_config_resolution = Config_root_bootstrap.startup_config_resolution
 
-(* Block startup if the filesystem free space is below an absolute floor.
-   This is a stricter server-wide guard than keeper admission checks, and is
-   intended to prevent running in a terminal disk-starvation state.
-
-   Default is 128GiB. This can be tuned by operator via
-   MASC_BOOTSTRAP_MIN_FREE_BYTES (bytes).
-*)
-let startup_min_free_bytes_default = 128 * 1024 * 1024 * 1024
-
-let startup_min_free_bytes () =
-  Env_config_core.get_int
-    ~default:startup_min_free_bytes_default
-    "MASC_BOOTSTRAP_MIN_FREE_BYTES"
-  |> max (16 * 1024 * 1024)
-
-let startup_disk_guard ~base_path =
-  let base_path = Env_config_core.normalize_masc_base_path_input base_path in
-  let masc_root = Common.masc_dir_from_base_path ~base_path in
-  let min_free_bytes = startup_min_free_bytes () in
-  match Keeper_disk_pressure.probe_path masc_root with
-  | Keeper_disk_pressure.Probe_error detail ->
-    Log.Server.error
-      "startup disk guard failed: unable to probe %s (%s)"
-      masc_root
-      detail;
-    exit 1
-  | Keeper_disk_pressure.Snapshot snapshot when snapshot.available_bytes < min_free_bytes ->
-    Log.Server.error
-      "startup disk guard blocked: available %.2f GiB < %.2f GiB threshold at %s (need %d B free)"
-      (float_of_int snapshot.available_bytes /. (1024.0 *. 1024.0 *. 1024.0))
-      (float_of_int min_free_bytes /. (1024.0 *. 1024.0 *. 1024.0))
-      snapshot.path
-      min_free_bytes;
-    exit 1
-  | _ -> ()
-
 (* GC tuning for long-running server with bursty allocation.
 
    Dashboard refresh loops create 2GB+ transient allocations per cycle.
@@ -402,7 +366,6 @@ let restore_tool_metrics_from_disk (state : Mcp_server.server_state) =
 
 let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
     ~make_h2_request_handler ~make_h2_error_handler =
-  startup_disk_guard ~base_path;
   let clock, mono_clock, net, domain_mgr, proc_mgr, fs =
     init_runtime_context env
   in

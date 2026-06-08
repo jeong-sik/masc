@@ -191,7 +191,7 @@
     },
     {
       "finding_id": "CD-5",
-      "title": "admission_queue_passthrough",
+      "title": "admission_queue_backpressure",
       "severity": "critical",
       "patterns": [],
       "actionability": "actionable",

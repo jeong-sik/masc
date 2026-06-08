@@ -719,7 +719,7 @@ let test_snapshot_has_expected_sections () =
       let admission = Yojson.Safe.Util.member "admission_queue" json in
       Alcotest.(check bool) "admission queue present" true
         (admission <> `Null);
-      Alcotest.(check bool) "admission mode field removed" true
+      Alcotest.(check bool) "admission throttle is not reported as mode field" true
         (match Yojson.Safe.Util.member "mode" admission with
          | `Null -> true
          | _ -> false);

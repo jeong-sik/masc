@@ -63,8 +63,14 @@ val record_turn_tool_events :
 (** Record the observation for a streaming turn cancelled externally.
     Reads the fiber_stop flag from [Keeper_registry], emits FSM
     transitions, and writes a terminal observation via
-    [Keeper_turn_helpers.record_pre_dispatch_terminal_observation]. *)
+    [Keeper_turn_helpers.record_pre_dispatch_terminal_observation].
+
+    [cancel_reason] overrides the inferred reason when provided:
+      - ["attempt_watchdog_safety_deadline"] — wall-clock watchdog timeout
+      - ["supervisor_stop"] — supervisor requested stop
+      - ["external_cancel"] — external fiber cancellation (default) *)
 val record_streaming_cancelled_observation :
+  ?cancel_reason:string ->
   config:Workspace.config ->
   run_meta:Keeper_meta_contract.keeper_meta ->
   run_generation:int ->

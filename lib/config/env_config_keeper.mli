@@ -119,13 +119,17 @@ module KeeperKeepalive : sig
   val max_idle_turns_reactive : int
   val turn_timeout_sec : float
   val admission_wait_timeout_sec : float
-  val turn_capacity_limit : int
   val oas_timeout_sec_override : float option
 
 
   val oas_call_timeout_sec : float
   (** Resolved OAS-call timeout: [oas_timeout_sec_override] when set, otherwise
       [turn_timeout_sec]. RFC-0156: no token- or turn-budget dependence. *)
+  val attempt_watchdog_safety_cap_sec : float
+  (** Per-attempt wall-clock safety cap for stuck Streaming fibers.
+      Prevents a provider attempt from locking a keeper in [Streaming] state
+      forever. Env: [MASC_KEEPER_ATTEMPT_WATCHDOG_SAFETY_CAP_SEC].
+      Default: 1800 (30 min). Clamp range: [300, 7200] s. *)
   val stream_idle_timeout_sec : float
 
   val body_timeout_sec_override : float option

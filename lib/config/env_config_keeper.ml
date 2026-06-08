@@ -362,16 +362,6 @@ module KeeperKeepalive = struct
          (get_float ~default:180.0 "MASC_KEEPER_ADMISSION_WAIT_TIMEOUT_SEC"))
   ;;
 
-  (** Global concurrent keeper turn capacity. This is a machine-level admission
-      cap, not a per-keeper slot.
-      @category Concurrency
-      @ops_class operator
-
-      Env: [MASC_KEEPER_TURN_CAPACITY_LIMIT]. Default: 32. Range: [0, 1024]. *)
-  let turn_capacity_limit =
-    min 1024 (get_int_nonneg ~default:32 "MASC_KEEPER_TURN_CAPACITY_LIMIT")
-  ;;
-
   (** Per-call OAS timeout override in seconds.
 
       Legacy/env override value is clamped to the active keepalive
@@ -404,6 +394,24 @@ module KeeperKeepalive = struct
     match oas_timeout_sec_override with
     | Some v -> v
     | None -> turn_timeout_sec
+  ;;
+
+  (** Per-attempt wall-clock safety cap for the streaming watchdog.
+
+      Prevents a single provider attempt from locking a keeper in
+      [Streaming] state forever (network hang, silent provider crash).
+      The cap is intentionally generous — any attempt making zero
+      progress for this duration is definitively stuck.
+
+      Env: [MASC_KEEPER_ATTEMPT_WATCHDOG_SAFETY_CAP_SEC].
+      Default: 1800 (30 min). Range: [300, 7200]. *)
+  let attempt_watchdog_safety_cap_sec =
+    Float.max
+      300.0
+      (Float.min
+         7200.0
+         (get_float ~default:1800.0
+            "MASC_KEEPER_ATTEMPT_WATCHDOG_SAFETY_CAP_SEC"))
   ;;
 
   (** Idle-gap timeout for streaming OAS provider responses.

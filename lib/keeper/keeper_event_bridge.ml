@@ -419,7 +419,7 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
     Log.Misc.warn
       "oas_event_bridge: SSE-degraded to kind-only payload for unmigrated OAS \
        variant kind=%s correlation_id=%s run_id=%s ts=%f fix: add explicit arm in \
-       lib/runtime/runtime_event_bridge.ml::native_event_to_json for this kind"
+       lib/keeper/keeper_event_bridge.ml::native_event_to_json for this kind"
       kind
       correlation_id
       run_id
@@ -430,9 +430,9 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
         ; ( "note"
           , `String
               "kind-only fallback; explicit arm not yet wired in \
-               runtime_event_bridge.native_event_to_json" )
+               keeper_event_bridge.native_event_to_json" )
         ; ( "migration_target"
-          , `String "lib/runtime/runtime_event_bridge.ml::native_event_to_json" )
+          , `String "lib/keeper/keeper_event_bridge.ml::native_event_to_json" )
         ]
     in
     Some (wrap ~event_type:kind ~payload ())

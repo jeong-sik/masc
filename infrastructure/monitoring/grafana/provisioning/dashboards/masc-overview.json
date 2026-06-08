@@ -31,7 +31,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "P4169E866C3094E38"
       },
       "description": "Keeper heartbeat success rate.",
       "targets": [
@@ -74,7 +74,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "P4169E866C3094E38"
       },
       "description": "99th percentile dashboard snapshot latency.",
       "targets": [
@@ -118,7 +118,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "P4169E866C3094E38"
       },
       "description": "Keeper execution receipt failure rate.",
       "targets": [
@@ -169,7 +169,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "P4169E866C3094E38"
       },
       "description": "Keeper lifecycle transition rate by destination state.",
       "targets": [
@@ -250,7 +250,7 @@
     },
     {
       "type": "barchart",
-      "title": "Surface Opens — 7d",
+      "title": "Surface Opens \u2014 7d",
       "gridPos": {
         "x": 12,
         "y": 8,
@@ -259,7 +259,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "P4169E866C3094E38"
       },
       "description": "Top-level dashboard surface openings in the last 7 days.",
       "targets": [
@@ -298,7 +298,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "P4169E866C3094E38"
       },
       "description": "GenAI client calls per minute.",
       "targets": [
@@ -342,7 +342,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "P4169E866C3094E38"
       },
       "description": "Token usage rate by type (input / output).",
       "targets": [
@@ -381,14 +381,16 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "P4169E866C3094E38"
       },
       "description": "Average goal attainment percentage.",
       "targets": [
         {
-          "expr": "avg(masc_goal_attainment_pct)",
+          "expr": "last_over_time(avg(masc_goal_attainment_pct)[1h])",
           "legendFormat": "attainment",
-          "refId": "A"
+          "refId": "A",
+          "instant": false,
+          "range": true
         }
       ],
       "fieldConfig": {
@@ -415,7 +417,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "P4169E866C3094E38"
       },
       "description": "Number of distinct keepers emitting heartbeats.",
       "targets": [
@@ -449,7 +451,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "P4169E866C3094E38"
       },
       "description": "Keeper context compaction rate.",
       "targets": [
@@ -492,14 +494,16 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "P4169E866C3094E38"
       },
       "description": "Average measured goal attainment count.",
       "targets": [
         {
-          "expr": "avg(masc_goal_attainment_measured)",
+          "expr": "last_over_time(avg(masc_goal_attainment_measured)[1h])",
           "legendFormat": "measured",
-          "refId": "A"
+          "refId": "A",
+          "instant": false,
+          "range": true
         }
       ],
       "fieldConfig": {
@@ -526,7 +530,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "P4169E866C3094E38"
       },
       "description": "Keeper input token consumption rate.",
       "targets": [
@@ -569,7 +573,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "P4169E866C3094E38"
       },
       "description": "Keeper board signal wakeup rate (capped).",
       "targets": [
@@ -612,7 +616,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "P4169E866C3094E38"
       },
       "description": "OCaml heap size in megabytes.",
       "targets": [
@@ -655,7 +659,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "P4169E866C3094E38"
       },
       "description": "OCaml major heap allocation rate.",
       "targets": [

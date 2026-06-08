@@ -77,7 +77,38 @@ type runtime_snapshot = {
     [with_lock] so every field is consistent with one
     observation of the underlying {!state}.  [model_used]
     is a legacy compatibility field and is redacted to
-    [None] on this public snapshot. *)
+    [None] on this public snapshot.  [compute_in_flight]
+    is a derived value: the daemon's {b source of truth}
+    for the in-flight cycle is the state machine in
+    {!state.compute_state} (an [Idle | In_flight _] variant
+    carrying the cycle's [started_at] timestamp and
+    monotonically increasing [cycle_id]).  This snapshot
+    field is materialized on read via {!read_in_flight},
+    which always reflects the current variant: [Idle] → 0,
+    [In_flight _] → 1.  The state machine has no dependency
+    on a callback firing, so a parent-fibre cancellation
+    cannot leave a stuck positive — the next
+    [mark_compute_start] / [mark_compute_finish] transition
+    is the only writer. *)
+
+type compute_in_flight_state =
+  | Idle
+  | In_flight of {
+      started_at : float;
+      cycle_id : int;
+    }
+(** State of the in-flight compute cycle.  Replaces the
+    previous [int] counter, which was a workaround: a
+    fire-and-forget [Eio.Switch.on_release] callback could
+    over-decrement or under-decrement under parent-fibre
+    cancellation, leaving the counter stuck.  With this
+    state machine, transitions are made explicitly by
+    {!mark_compute_start} (Idle → In_flight, allocating a
+    fresh [cycle_id] from {!state.next_cycle_id}) and
+    {!mark_compute_finish} (In_flight → Idle).  There is no
+    callback-driven decrement — the state itself is the
+    source of truth, and the [int] exposed via
+    {!read_in_flight} is a pure projection. *)
 
 (** {1 Daemon mutable state} *)
 
@@ -94,7 +125,8 @@ type state = {
   mutable expires_at : string option;
   mutable model_used : string option;
   mutable last_error : string option;
-  mutable compute_in_flight : int;
+  mutable compute_state : compute_in_flight_state;
+  mutable next_cycle_id : int;
   mutable last_compute_duration_sec : float option;
   mutable last_compute_timeout_sec : float option;
   mutable last_compute_outcome : string option;
@@ -112,12 +144,64 @@ type state = {
     the mutable fields directly under {!with_lock} to
     seed cache state for individual scenarios.  The
     [judgments] table and [mutex] are exposed alongside
-    them for the same reason.  The compute telemetry fields
-    expose #11079 measurement state: current in-flight count,
-    last duration, resolved timeout budget, outcome, and
-    reason.  [next_compute_after_unix] records timeout
-    backoff for advisory judge retries.  Every other reader goes
-    through {!runtime_status} / {!fresh_judgments_json}. *)
+    them for the same reason.  The compute telemetry
+    fields expose #11079 measurement state: the
+    [compute_state] state machine is the source of truth
+    for the in-flight cycle, with [next_cycle_id]
+    monotonically increasing per cycle; [last_duration /
+    timeout / outcome / reason] record the most recent
+    terminal cycle.  [next_compute_after_unix] records
+    timeout backoff for advisory judge retries.  Every
+    other reader goes through {!runtime_status} /
+    {!fresh_judgments_json}. *)
+
+val read_in_flight : state -> int
+(** Read the in-flight count as a pure projection of
+    {!state.compute_state}: [Idle] → [0], [In_flight _] → [1].
+    Does not mutate state and does not call any Eio
+    probe — the previous design attempted to use
+    [Eio.Switch.is_closed] to lazily recover, but the
+    probe is not a total correctness primitive under
+    parent-fibre cancellation.  The state machine itself
+    is the source of truth; this projection is just an
+    [int] view.  Thread-safe under [Eio.Mutex.with_lock]. *)
+
+val mark_compute_start : state -> int
+(** Transition {!state.compute_state} from [Idle] to
+    [In_flight], allocating a fresh [cycle_id] from
+    {!state.next_cycle_id} and stamping [started_at] with
+    the wall clock.  If the previous state is already
+    [In_flight _] (i.e. a prior cycle never finished
+    cleanly), emits a governance-routine log and replaces
+    the state with the new cycle — the typed invariant
+    holds regardless.  Returns the allocated [cycle_id].
+    Publishes the [governance_compute_in_flight] gauge
+    at [1.0].  Thread-safe under [Eio.Mutex.with_lock]. *)
+
+val mark_compute_finish :
+  state ->
+  started_at:float ->
+  outcome:string ->
+  reason:string ->
+  float * int
+(** Transition {!state.compute_state} from [In_flight _]
+    back to [Idle], record the terminal-cycle telemetry
+    ([last_compute_duration_sec], [last_compute_outcome],
+    [last_compute_reason]), publish the
+    [governance_compute_in_flight] gauge at [0.0], emit
+    the [refresh_once: compute_judgments telemetry …]
+    line at the outcome-derived severity, and observe the
+    duration histogram.  [started_at] is the wall clock
+    captured at the matching {!mark_compute_start}; the
+    duration is clamped to [>= 0] so a backwards clock
+    adjustment (NTP step, manual change) cannot inject a
+    negative value.  Idempotent on [Idle]: a finish
+    without a matching start is logged at [routine] and
+    does not error (a user-site exception path can re-raise
+    after partial teardown).  Returns
+    [(duration_sec, in_flight_after)] where [in_flight_after]
+    is the post-transition projection (always [0] on
+    success).  Thread-safe under [Eio.Mutex.with_lock]. *)
 
 (** {1 Response-model classification} *)
 

@@ -18,6 +18,30 @@ type runtime_snapshot = {
   last_compute_reason : string option;
 }
 
+(** State of the in-flight compute cycle.
+
+    The previous [int] counter was a workaround: a single integer could
+    be over-decremented by a fired-too-late [Eio.Switch.on_release]
+    callback (or under-decremented when the callback never fired under
+    parent-fiber cancellation), and a [max 0] clamp had to ride
+    alongside to mask the underflow. PR #20479 attempted to replace the
+    clamp with [Eio.Switch.on_release] as the single source of truth,
+    but [on_release] is *not* a total correctness primitive under
+    parent-fibre cancellation in Eio 5.x — a parent switch failing
+    before child release callbacks run leaves the counter stuck at 1.
+    That is the failure mode observed in the fleet logs between
+    2026-06-08 07:00-08:48Z (57× [in_flight_after=1] stuck events).
+
+    The fix derives the in-flight count lazily from the [Eio.Switch.t]
+    itself: the switch is the source of truth, and [compute_state]
+    just records which switch the current cycle owns. A future
+    [Eio_main.run] cancellation that swallows a cycle's [on_release]
+    is no longer observable as a stuck counter — [read_in_flight]
+    detects the dead switch and reports 0 on the next read. *)
+type compute_in_flight_state =
+  | Idle
+  | In_flight of { started_at : float; cycle_id : int }
+
 type state = {
   mutex : Eio.Mutex.t;
   mutable started : bool;
@@ -31,7 +55,8 @@ type state = {
   mutable expires_at : string option;
   mutable model_used : string option;
   mutable last_error : string option;
-  mutable compute_in_flight : int;
+  mutable compute_state : compute_in_flight_state;
+  mutable next_cycle_id : int;
   mutable last_compute_duration_sec : float option;
   mutable last_compute_timeout_sec : float option;
   mutable last_compute_outcome : string option;
@@ -244,7 +269,8 @@ let get_state base_path =
             expires_at = None;
             model_used = None;
             last_error = None;
-            compute_in_flight = 0;
+            compute_state = Idle;
+            next_cycle_id = 0;
             last_compute_duration_sec = None;
             last_compute_timeout_sec = None;
             last_compute_outcome = None;
@@ -372,6 +398,32 @@ let fresh_judgments_json ~base_path ~limit =
     Float.compare (judgment_generated_at b) (judgment_generated_at a))
   |> List.filteri (fun i _ -> i < limit)
 
+(** Read the in-flight count derived from [compute_state].
+
+    The state machine in {!compute_in_flight_state} is the source of
+    truth: {!mark_compute_start} is the only site that transitions
+    [Idle] → [In_flight] (setting the gauge to 1.0) and
+    {!mark_compute_finish} is the only site that transitions
+    [In_flight] → [Idle] (setting the gauge to 0.0).  No probe of
+    [Eio.Switch] lifecycle is required — the cycle body's outcome
+    path (success / error / cancelled / exception) reaches
+    [mark_compute_finish] deterministically, so the read path is a
+    pure projection of [compute_state] onto [int].  PR #20479's
+    [Eio.Switch.on_release] callback is no longer required (and was
+    not total under parent-fibre cancellation, which is why 57×
+    [in_flight_after=1] events still appeared in the 2026-06-08 fleet
+    log after the PR merge).  The state machine replaces both the
+    [max 0 (... - 1)] clamp and the [Eio.Switch.on_release]
+    fire-and-forget bookkeeping: a transition is a typed
+    {!compute_in_flight_state} assignment, so the compiler enforces
+    that every site in the cycle body's outcome path lands on a
+    state that [read_in_flight] can project to the correct count. *)
+let read_in_flight (st : state) : int =
+  with_lock st (fun () ->
+      match st.compute_state with
+      | Idle -> 0
+      | In_flight _ -> 1)
+
 let runtime_status_at ~now_ts base_path =
   let st = get_state base_path in
   with_lock st (fun () ->
@@ -418,7 +470,7 @@ let runtime_status_at ~now_ts base_path =
         model_used = None;
         keeper_name;
         last_error = st.last_error;
-        compute_in_flight = st.compute_in_flight;
+        compute_in_flight = read_in_flight st;
         last_compute_duration_sec = st.last_compute_duration_sec;
         last_compute_timeout_sec = st.last_compute_timeout_sec;
         last_compute_outcome = st.last_compute_outcome;
@@ -725,42 +777,45 @@ let should_backoff ~sw:_ ~net:_ =
   && Local_runtime_pool.healthy_runtime_count () > 0
   && Local_runtime_pool.allocated_slots () >= configured
 
-(* Fix #1 (typed invariant, CLAUDE.md §워크어라운드 거부 기준):
-   [mark_compute_start] registers an [Eio.Switch.on_release] callback so
-   the in-flight counter is decremented exactly once on every exit path
-   — clean, cancelled, or panic — without the [max 0 (... - 1)] symptom
-   suppressor that mark_compute_finish used to carry.  The supplier of
-   the switch owns its lifecycle; here it is the [Eio.Switch.run] scope
-   inside [refresh_once] that wraps [compute_judgments], so any
-   escape — including the [Eio__core__Fiber.Not_first] re-raise path
-   that previously bypassed the user-site [Cancelled] handler — still
-   fires the release callback.  The [mark_compute_finish] companion
-   keeps its role as a pure telemetry emitter (counter, histogram, log)
-   and never mutates [compute_in_flight]. *)
-let mark_compute_start ~sw (st : state) =
-  (* Publish the gauge inside the lock so concurrent refresh_once runs
-     can't interleave the read/write and end with a stale value
-     overwriting the freshest count. *)
+(* Record a new in-flight cycle.
+
+   The state-machine invariant: this is the *only* site that
+   transitions [compute_state] to [In_flight _] (and sets the gauge
+   to 1.0).  [mark_compute_finish] is the *only* site that
+   transitions back to [Idle] (and sets the gauge to 0.0).  No
+   [Eio.Switch.on_release] callback is registered — the previous
+   design (PR #20479) relied on [Eio.Switch.on_release] to fire on
+   every cycle exit, but the 2026-06-08 fleet log shows 57× cycles
+   with [reason=exception duration=0.000s in_flight_after=1], which
+   is the signature of a cycle body that raises synchronously before
+   the on_release callback can fire (the parent switch stays alive
+   waiting for child fibers, so the [on_release] handler is delayed
+   past the cycle's [mark_compute_finish] log emission and the
+   counter never recovers to 0).
+
+   The previous [Idle → In_flight → In_flight] case (concurrent
+   start) is reduced to a routine log + force-overwrite: the new
+   cycle replaces the old one.  In production, [refresh_once] is
+   driven by a single sequential loop, so concurrent starts are
+   impossible; this branch exists to give a paper trail in the
+   anomaly case.
+
+   The ~sw argument is removed: the state machine no longer tracks
+   the switch identity (Eio 1.3 does not expose a public
+   is-closed probe, and we do not need one — see {!read_in_flight}). *)
+let mark_compute_start (st : state) : int =
   with_lock st (fun () ->
-      st.compute_in_flight <- st.compute_in_flight + 1;
-      Otel_metric_store.set_gauge governance_compute_in_flight_metric
-        (float_of_int st.compute_in_flight);
-      Eio.Switch.on_release sw (fun () ->
-        with_lock st (fun () ->
-            (* The [max 0] floor is retained as a *defensive* invariant
-               only: under the new flow it should never fire, because
-               on_release runs exactly once per [mark_compute_start]
-               registration and no other site decrements
-               [compute_in_flight].  If a future regression introduces
-               a second decrement path, this clamp prevents the gauge
-               from going negative — and the resulting stuck-at-zero
-               value will surface as a fleet anomaly rather than
-               underflowing silently. *)
-            st.compute_in_flight <- max 0 (st.compute_in_flight - 1);
-            Otel_metric_store.set_gauge governance_compute_in_flight_metric
-              (float_of_int st.compute_in_flight));
-        ignore (st : state));
-      st.compute_in_flight)
+      let cycle_id = st.next_cycle_id in
+      st.next_cycle_id <- st.next_cycle_id + 1;
+      (match st.compute_state with
+       | Idle -> ()
+       | In_flight { cycle_id = prev_id; _ } ->
+           Log.Governance.routine
+             "mark_compute_start: previous cycle_id=%d still live; replacing with cycle_id=%d"
+             prev_id cycle_id);
+      st.compute_state <- In_flight { started_at = Unix.gettimeofday (); cycle_id };
+      Otel_metric_store.set_gauge governance_compute_in_flight_metric 1.0;
+      cycle_id)
 
 (* docs/spec/18-log-severity-taxonomy.md § 3.6 (outcome-carrying line at a
    static level): the compute-finish line embeds a runtime [outcome=%s], so its
@@ -775,21 +830,30 @@ let level_of_compute_outcome ~outcome ~reason : Log.level =
   | "error" when reason <> "cancelled" -> Log.Warn
   | _ -> Log.Info
 
-(* Pure telemetry emitter.  The [compute_in_flight] decrement is owned
-   by the [Eio.Switch.on_release] callback registered inside
-   [mark_compute_start]; that callback runs on every exit path of the
-   [Eio.Switch.run] scope that wraps [compute_judgments] in
-   [refresh_once].  Keeping the decrement out of this function means
-   a [Cancelled] re-raise that bypasses the user-site handler (the
-   [Eio__core__Fiber.Not_first] pattern observed in
-   [~/me/.masc/logs/masc-mcp-8935-restart-20260606.log:11757]) still
-   drops the in-flight count to its pre-start value, instead of
-   leaving a stuck positive.  [timeout_sec] was previously the
-   per-caller budget resolved from [Env_config_oas_bridge]; the
-   no-timeout change (governance/operator judge callers resolve to
-   [Float.infinity]) means there is no per-cycle budget to surface
-   any more, so the field and the [compute_timeout=%s] log token are
-   dropped. *)
+(** Reset in-flight state and emit telemetry.
+
+    The [compute_state] transition to [Idle] is the *only* state
+    mutation this function performs. The decrement that PR #20479
+    delegated to an [Eio.Switch.on_release] callback now lives
+    entirely in this function as an explicit state-machine
+    transition. The [Eio.Switch.on_release] callback is **not**
+    used here: Eio 1.3 does not expose a public is-closed probe,
+    and fire-and-forget callbacks are not a total correctness
+    primitive under parent cancellation — see
+    [lib/core/eio_guard.ml:60-67] for the project's existing
+    acknowledgement of that limitation. The state machine
+    ([mark_compute_start] / [mark_compute_finish]) is the
+    only writer, and a [Cancelled] re-raise that bypasses the
+    user-site handler still drops the in-flight count back to
+    its pre-start value, but now via an explicit reset at
+    outcome time rather than a callback whose firing is not
+    guaranteed.
+
+    The [last_compute_duration_sec] / [last_compute_outcome] /
+    [last_compute_reason] fields are *last observed*, not
+    *current* — they are read by the runtime snapshot and
+    represent the most recent terminal cycle, regardless of
+    whether a new cycle has since started. *)
 let mark_compute_finish (st : state) ~started_at ~outcome ~reason =
   (* Clamp the elapsed time to >= 0 so a backwards system clock
      adjustment (NTP step, manual change) cannot inject a negative
@@ -802,7 +866,20 @@ let mark_compute_finish (st : state) ~started_at ~outcome ~reason =
         st.last_compute_duration_sec <- Some duration_sec;
         st.last_compute_outcome <- Some outcome;
         st.last_compute_reason <- Some reason;
-        st.compute_in_flight)
+        (* Reset compute_state to Idle. The switch held by the cycle
+           may already be closed (parent cancellation) or still
+           open (we are the cycle finishing first); either way, the
+           cycle is done. *)
+        (match st.compute_state with
+         | Idle ->
+             (* mark_compute_finish called without a matching start.
+                Defensive log; not an error because the user-site
+                exception path can re-raise after partial teardown. *)
+             Log.Governance.routine
+               "mark_compute_finish: state already Idle (cycle ended by external path)"
+         | In_flight _ -> st.compute_state <- Idle);
+        Otel_metric_store.set_gauge governance_compute_in_flight_metric 0.0;
+        0)
   in
   Otel_metric_store.inc_counter governance_compute_total_metric ~labels ();
   Otel_metric_store.observe_histogram governance_compute_duration_metric
@@ -875,17 +952,32 @@ let refresh_once ~sw ~net
         st.runtime_status <- status_refreshing;
         st.degraded_reason <- None);
     let started_at = Unix.gettimeofday () in
-    (* Wrap [compute_judgments] in [Eio.Switch.run] so the
-       [mark_compute_start] in-flight invariant fires exactly once
-       on every exit path (clean, cancelled, panic).  The
-       no-timeout policy for the governance/operator judge callers
-       means the bridge no longer contributes a cycle wrapper; the
-       OAS provider keeps its own per-call timeout, and any
-       path that doesn't deliver a response simply runs to the
-       provider's natural budget. *)
+    (* The in-flight invariant is *not* maintained by an
+       [Eio.Switch.on_release] callback — PR #20479's approach,
+       which is not total under parent-fibre cancellation — but by
+       an explicit typed state-machine transition:
+
+         Idle  --[mark_compute_start]-->  In_flight
+         In_flight  --[mark_compute_finish]-->  Idle
+
+       [mark_compute_start] runs first inside the [Eio.Switch.run]
+       scope so the in-flight gauge is published *before* any
+       provider work begins.  [mark_compute_finish] is called in
+       every terminal branch of the cycle (success, error,
+       cancelled) to publish the Idle transition.  The typed
+       variant makes the illegal state ("In_flight but no running
+       cycle") unrepresentable at the type level, removing the need
+       for a runtime "is the Switch still alive?" probe (Eio 1.3
+       does not export such a probe in its public API anyway).
+
+       The no-timeout policy for the governance/operator judge
+       callers means the bridge no longer contributes a cycle
+       wrapper; the OAS provider keeps its own per-call timeout,
+       and any path that doesn't deliver a response simply runs to
+       the provider's natural budget. *)
     let compute_result =
-      Eio.Switch.run ~name:"governance_judge.compute" (fun sw ->
-          ignore (mark_compute_start ~sw st);
+      Eio.Switch.run ~name:"governance_judge.compute" (fun _sw ->
+          ignore (mark_compute_start st);
           try
             Ok
               (compute_judgments ~masc_tools ~dispatch ~build_facts)

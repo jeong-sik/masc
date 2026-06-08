@@ -79,15 +79,6 @@ type keepalive_scheduling_decision = Keeper_heartbeat_loop_scheduling.keepalive_
 
 let decide_keepalive_scheduling = Keeper_heartbeat_loop_scheduling.decide_keepalive_scheduling
 
-let runtime_status_of_health_snapshot ~base_path =
-  let snapshot = Keeper_health_probe.check_runtime_health ~base_path in
-  fun ~runtime_id ->
-    match List.assoc_opt runtime_id snapshot with
-    | Some true -> Keeper_health_probe.Healthy
-    | Some false -> Keeper_health_probe.Unhealthy "runtime_failure"
-    | None -> Keeper_health_probe.Unknown
-;;
-
 let provider_timeout_observation_reasons =
   Observations.provider_timeout_observation_reasons
 ;;
@@ -156,8 +147,6 @@ let run_keepalive_unified_turn
       in
       let scheduling =
         decide_keepalive_scheduling
-          ~runtime_status_of_name:
-            (runtime_status_of_health_snapshot ~base_path:ctx.config.base_path)
           ~stop
           ~meta:meta_after_triage
           obs

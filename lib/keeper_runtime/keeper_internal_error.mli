@@ -47,6 +47,10 @@ type masc_internal_error =
       source : capacity_backpressure_source;
       detail : string;
       retry_after : capacity_retry_after;
+      causation_id : string option;
+      keeper_name : string option;
+      cascade_name : string option;
+      model_id : string option;
     }
   | Resumable_cli_session of {
       runtime_id : string;

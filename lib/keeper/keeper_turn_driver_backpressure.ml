@@ -29,7 +29,9 @@ let capacity_backpressure_source_of_http_error = function
   | Llm_provider.Http_client.ProviderFailure _ ->
     None
 
-let capacity_backpressure_of_http_error ?source ~runtime_id last_err =
+let capacity_backpressure_of_http_error ?source ?causation_id ?keeper_name
+    ?cascade_name ?model_id ~runtime_id last_err
+  =
   match last_err with
   | Some
       (Llm_provider.Http_client.ProviderFailure
@@ -50,6 +52,10 @@ let capacity_backpressure_of_http_error ?source ~runtime_id last_err =
              (match retry_after with
               | Some s -> Explicit s
               | None -> Synthetic_default synthetic_retry_after_sec);
+           causation_id;
+           keeper_name;
+           cascade_name;
+           model_id;
          })
   | Some
       (Llm_provider.Http_client.NetworkError
@@ -75,7 +81,8 @@ let capacity_backpressure_of_http_error ?source ~runtime_id last_err =
   | None ->
     None
 
-let capacity_backpressure_of_pending ~runtime_id = function
+let capacity_backpressure_of_pending ?causation_id ?keeper_name ?cascade_name
+    ?model_id ~runtime_id = function
   | Some (source, detail, retry_after) ->
     Some
       (Capacity_backpressure
@@ -84,10 +91,15 @@ let capacity_backpressure_of_pending ~runtime_id = function
            source;
            detail;
            retry_after;
+           causation_id;
+           keeper_name;
+           cascade_name;
+           model_id;
          })
   | None -> None
 
 let capacity_backpressure_of_sdk_error
+    ?causation_id ?keeper_name ?cascade_name ?model_id
     ~runtime_id
     ~message_looks_like_capacity_backpressure
     ~sdk_error_of_masc_internal_error
@@ -106,6 +118,10 @@ let capacity_backpressure_of_sdk_error
                 (match retry_after with
                  | Some s -> Explicit s
                  | None -> Synthetic_default synthetic_retry_after_sec);
+              causation_id;
+              keeper_name;
+              cascade_name;
+              model_id;
             }))
   | Agent_sdk.Error.Internal msg
     when message_looks_like_capacity_backpressure msg ->

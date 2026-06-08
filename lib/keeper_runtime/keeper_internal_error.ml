@@ -111,6 +111,10 @@ type masc_internal_error =
       source : capacity_backpressure_source;
       detail : string;
       retry_after : capacity_retry_after;
+      causation_id : string option;
+      keeper_name : string option;
+      cascade_name : string option;
+      model_id : string option;
     }
   | Resumable_cli_session of {
       runtime_id : string;
@@ -217,7 +221,10 @@ let masc_internal_error_to_json = function
         ("runtime_id", `String runtime_id);
         ("reason", runtime_exhaustion_reason_to_json reason);
       ]
-  | Capacity_backpressure { runtime_id; source; detail; retry_after } ->
+  | Capacity_backpressure
+      { runtime_id; source; detail; retry_after; causation_id; keeper_name
+      ; cascade_name; model_id
+      } ->
     let runtime_id = runtime_id_to_string runtime_id in
     let retry_after_fields =
       match retry_after with
@@ -227,6 +234,15 @@ let masc_internal_error_to_json = function
         [ ("retry_after_sec", `Float s); ("retry_after_synthetic", `Bool true) ]
       | No_retry_hint -> [ ("retry_after_sec", `Null) ]
     in
+    let context_fields =
+      List.filter_map
+        (fun (k, v) -> Option.map (fun s -> (k, `String s)) v)
+        [ ("causation_id", causation_id)
+        ; ("keeper_name", keeper_name)
+        ; ("cascade_name", cascade_name)
+        ; ("model_id", model_id)
+        ]
+    in
     `Assoc
       ([
          ("kind", `String "capacity_backpressure");
@@ -234,7 +250,8 @@ let masc_internal_error_to_json = function
          ("source", `String (capacity_backpressure_source_to_string source));
          ("detail", `String detail);
        ]
-      @ retry_after_fields)
+      @ retry_after_fields
+      @ context_fields)
   | Resumable_cli_session { runtime_id; detail; exit_code } ->
     let runtime_id = runtime_id_to_string runtime_id in
     `Assoc
@@ -499,9 +516,15 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
                  | Some s when retry_after_synthetic -> Synthetic_default s
                  | Some s -> Explicit s
                in
+               let causation_id = string_opt_of_assoc "causation_id" json in
+               let keeper_name = string_opt_of_assoc "keeper_name" json in
+               let cascade_name = string_opt_of_assoc "cascade_name" json in
+               let model_id = string_opt_of_assoc "model_id" json in
                Some
                  (Capacity_backpressure
-                    { runtime_id; source; detail; retry_after })
+                    { runtime_id; source; detail; retry_after; causation_id
+                    ; keeper_name; cascade_name; model_id
+                    })
              | None -> None)
           | _ -> None)
       | Some (`String "resumable_cli_session") -> (

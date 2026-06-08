@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useState } from 'preact/hooks'
+import { useSubscribedSnapshot, useSubscribedValue } from './use-signal-value'
 import {
   activeIdeFile,
   focusIdeContextAnchor,
@@ -730,46 +731,5 @@ export function IdeShell() {
       <${IdeInterject} keeperName=${terminalKeeper} />
     </section>
   `
-}
-
-function useSubscribedSnapshot<T>(
-  read: () => ReadonlyArray<T>,
-  subscribe: (listener: () => void) => () => void,
-): ReadonlyArray<T> {
-  const [value, setValue] = useState<ReadonlyArray<T>>(() => read())
-
-  useEffect(() => {
-    let current = read()
-    setValue(previous => previous === current ? previous : current)
-
-    let sawInitialSnapshot = false
-    return subscribe(() => {
-      const next = read()
-      if (!sawInitialSnapshot) {
-        sawInitialSnapshot = true
-        if (next === current) return
-      }
-      current = next
-      setValue(previous => previous === next ? previous : next)
-    })
-  }, [read, subscribe])
-
-  return value
-}
-
-function useSubscribedValue<T>(
-  read: () => T,
-  subscribe: (listener: () => void) => () => void,
-): T {
-  const [value, setValue] = useState<T>(() => read())
-
-  useEffect(() => {
-    setValue(read())
-    return subscribe(() => {
-      setValue(read())
-    })
-  }, [read, subscribe])
-
-  return value
 }
 

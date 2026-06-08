@@ -75,6 +75,10 @@ type execute_input =
           redirects on the pipeline's endpoints are a deferred extension. *)
 
 type validation_error =
+  | Executable_not_allowed of {
+      executable : string;
+      reason : string;
+    }
   | Empty_executable of { argv : string list }
   | Executable_repeated_in_argv0 of {
       executable : string;

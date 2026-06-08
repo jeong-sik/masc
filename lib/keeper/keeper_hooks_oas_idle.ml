@@ -122,11 +122,11 @@ let keeper_idle_decision ~meta_ref ~consecutive_idle_turns ~tool_names =
     | [] -> "<none>" | names -> String.concat ", " names in
   (match decision with
    | Agent_sdk.Hooks.Skip ->
-     Log.Keeper.warn "keeper:%s idle_turns=%d repeated_tools=[%s] — requesting stop"
-       (!meta_ref).name consecutive_idle_turns tools_str
+     Log.Keeper.warn ~keeper_name:(!meta_ref).name "idle_turns=%d repeated_tools=[%s] — requesting stop"
+       consecutive_idle_turns tools_str
    | Agent_sdk.Hooks.Nudge _ ->
-     Log.Keeper.info "keeper:%s idle_turns=%d tools=[%s] — nudging LLM via Nudge"
-       (!meta_ref).name consecutive_idle_turns tools_str
+     Log.Keeper.info ~keeper_name:(!meta_ref).name "idle_turns=%d tools=[%s] — nudging LLM via Nudge"
+       consecutive_idle_turns tools_str
    | _ -> ());
   decision
 

@@ -536,8 +536,8 @@ let make_post_turn_resilience_executor
           | None -> ());
     on_event =
       (fun event ->
-        Log.Keeper.warn "keeper:%s post-turn resilience event: %s"
-          meta.name (resilience_execution_event_to_string event));
+        Log.Keeper.warn ~keeper_name:meta.name "post-turn resilience event: %s"
+          (resilience_execution_event_to_string event));
     apply_fallback =
       (fun ~value ~confidence_delta ->
         let detail =

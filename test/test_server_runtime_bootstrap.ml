@@ -626,7 +626,7 @@ let test_bootstrap_base_path_config_root_copies_shared_seed_but_not_keepers () =
       Alcotest.(check bool) "config root created" true (Sys.is_directory config_root);
       Alcotest.(check string) "runtime copied" repo_runtime_toml
         (read_file (Filename.concat config_root "runtime.toml"));
-      Alcotest.(check bool) "tool policy copied" true
+      Alcotest.(check bool) "tool policy not copied (deleted module)" false
         (Sys.file_exists (Filename.concat config_root "tool_policy.toml"));
       Alcotest.(check bool) "prompt copied" true
         (Sys.file_exists
@@ -2094,7 +2094,7 @@ let test_main_eio_fresh_bootstrap_and_mcp_handshake () =
       with_cwd (project_root ()) @@ fun () ->
       Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path:dir;
       let expected_config = Filename.concat dir ".masc/config" in
-      Alcotest.(check bool) "tool policy bootstrapped" true
+      Alcotest.(check bool) "tool policy not bootstrapped (deleted module)" false
         (Sys.file_exists (Filename.concat expected_config "tool_policy.toml"));
       let env =
         merge_env_overrides

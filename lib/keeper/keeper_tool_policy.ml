@@ -1,8 +1,7 @@
 (** Keeper_tool_policy — keeper tool surface and denylist resolution.
 
-    Group definitions are loaded from [config/tool_policy.toml] at startup
-    Policy group classification has been removed. Tool access is now
-    descriptor/registry driven with denylist filtering only.
+    Tool access is descriptor/registry driven with denylist filtering only.
+    Policy group classification and config-driven groups have been removed.
 
     Consumes [Keeper_tool_registry] for candidate aggregation and core tools.
     Produces the access-policy types and functions used by the dispatch layer. *)
@@ -172,9 +171,8 @@ let descriptor_candidate_tool_names () =
   |> dedupe_tool_names
 
 let keeper_base_candidate_tool_names () =
-  (* Candidate existence is registry/descriptor driven. [tool_access] and
-     tool_policy.toml groups must not be a second execution allowlist for
-     keeper-owned tools. *)
+  (* Candidate existence is registry/descriptor driven.
+     Denylist filtering only; no secondary allowlist layer. *)
   dedupe_tool_names
     ( effective_core_tools ()
     @ tool_schema_names Tool_shard.all_keeper_tool_schemas
@@ -287,8 +285,8 @@ let keeper_universe_masc_tool_schemas (meta : keeper_meta) : Masc_domain.tool_sc
     determined solely by shard removability (structural, not policy). *)
 (** Essential MASC tools always available in Failing recovery,
     on top of [removable=false] shard floor. Mirrors [masc.essential]
-    in tool_policy.toml. Sync regression: any drift here vs the toml
-    group is caught by [test_failing_minimum_essential.ml].
+    hardcoded in this module. Sync regression: any drift is caught by
+    [test_failing_minimum_essential.ml].
 
     Rationale (board P1, 9 keepers × 0 claimable masc_web_search):
     a Failing keeper still needs to check workspace state, look up

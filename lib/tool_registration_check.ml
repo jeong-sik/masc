@@ -17,9 +17,8 @@ module Float = Stdlib.Float
 
 (** Tool_registration_check — Startup validation of keeper tool policy coverage.
 
-    Detects drift between the runtime keeper tool universe and
-    config/tool_policy.toml group definitions.
-    Called once after init_policy_config succeeds. *)
+    Startup validation placeholder. Policy-driven validation removed
+    with keeper_tool_policy_config deletion. *)
 
 type validation_result = {
   orphan_toml : string list;

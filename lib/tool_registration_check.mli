@@ -3,7 +3,7 @@
 
 type validation_result = {
   orphan_toml : string list;
-  (** Configured in tool_policy.toml but missing from the runtime keeper tool universe. *)
+  (** Always empty; policy-driven orphan detection removed. *)
   uncovered : string list;
   (** Reserved for reverse-coverage diagnostics; currently non-fatal and may be empty. *)
 }

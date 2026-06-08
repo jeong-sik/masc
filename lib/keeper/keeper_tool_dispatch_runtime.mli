@@ -126,13 +126,14 @@ type executed_tool_result =
 val classify_tool_result_payload : string -> tool_result_payload
 
 (** Extract the optional [failure_class] field from a structured keeper
-    tool payload. Returns [None] for plain text or malformed JSON. *)
-val failure_class_of_tool_result_payload : string -> string option
+    tool payload. Returns [None] on success, [Some Runtime_failure] on
+    plain text or malformed JSON. *)
+val failure_class_of_tool_result_payload : string -> Tool_result.tool_failure_class option
 
 (** [false] when a failed tool payload is a business-rule workflow
     rejection that should be shown to the keeper without opening the
     repeated-failure circuit breaker. *)
-val should_apply_circuit_breaker_to_failure_payload : string -> bool
+val should_apply_circuit_breaker_to_failure_payload : Tool_result.tool_failure_class option -> bool
 
 (** Tag-based dispatch callback for masc_* tools without handler registry entries.
     Set at server init to [Keeper_tag_dispatch.dispatch]. Default: returns None.

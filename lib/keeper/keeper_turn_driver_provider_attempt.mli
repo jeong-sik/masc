@@ -66,7 +66,6 @@ val client_capacity_full_decision :
 val success_selected_model_raw :
   Runtime_candidate.t -> string option
 
-val error_selected_model_raw : string option
 val health_error_kind : string -> Keeper_binding_health.error_kind
 
 val record_candidate_health_success :

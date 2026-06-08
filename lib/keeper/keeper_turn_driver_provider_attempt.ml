@@ -130,11 +130,6 @@ let client_capacity_full_decision ~capacity_key =
 let success_selected_model_raw candidate =
   Some (Runtime_candidate.model_health_key candidate)
 
-(* Error/rejected/exhausted observations intentionally leave the concrete
-   selected model absent. Downstream attribution uses candidate_models or the
-   runtime route for those outcomes. *)
-let error_selected_model_raw = None
-
 let health_error_kind label =
   Keeper_binding_health.error_kind_of_string label
 

@@ -23,3 +23,4 @@ val metric_workspace_bind_normalize_outcome : string
 val metric_config_unknown_keys_ignored : string
 val metric_governance_judge_unparseable : string
 val metric_governance_lenient_json_fallback_hit : string
+val metric_startup_internal_keeper_token_sync : string

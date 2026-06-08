@@ -279,7 +279,6 @@ let action_radius_json ~tool_name ~input ~success ~duration_ms ?error
         "path";
         "file_path";
         "repo_path";
-        "worktree_path";
         "cwd";
       ]
       input

@@ -510,8 +510,8 @@ let check_invariant_sandbox_isolation
   | Some factory ->
     let cwd = Filename.dirname target in
     (match Keeper_sandbox_factory.resolve_opt (Some factory) ~cwd with
-     | None -> Ok ()
-     | Some runtime ->
+     | No_factory | Local_profile -> Ok ()
+     | Runtime runtime ->
        let host_root = Keeper_turn_sandbox_runtime.host_root runtime in
        Keeper_invariant.sandbox_isolation
          ~sandbox_roots:[ host_root ]
@@ -601,7 +601,7 @@ let handle_file_write
                                 turn_sandbox_factory
                                 ~cwd:target
                             with
-                            | Some runtime ->
+                            | Runtime runtime ->
                               Keeper_turn_sandbox_runtime.overwrite_file
                                 runtime
                                 ~host_path:target
@@ -611,7 +611,8 @@ let handle_file_write
                                      ~bucket:Io
                                      ())
                                 ()
-                            | None -> Keeper_fs.save_atomic target updated
+                            | No_factory | Local_profile ->
+                              Keeper_fs.save_atomic target updated
                           in
                           (match write_result with
                            | Error msg ->
@@ -685,7 +686,7 @@ let handle_file_write
                             turn_sandbox_factory
                             ~cwd:target
                         with
-                        | Some runtime ->
+                        | Runtime runtime ->
                           (match mode with
                            | Append ->
                              Keeper_turn_sandbox_runtime.append_file
@@ -708,7 +709,7 @@ let handle_file_write
                                     ())
                                ()
                            | Patch -> Ok ())
-                        | None ->
+                        | No_factory | Local_profile ->
                           (match mode with
                            | Append ->
                              let parent = Filename.dirname target in

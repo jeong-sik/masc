@@ -11,7 +11,7 @@ type t =
   | Board_comment_vote
   | Board_curation_read
   | Board_curation_submit
-  | Board_get
+  | Board_post_get
   | Board_list
   | Board_post
   | Board_search

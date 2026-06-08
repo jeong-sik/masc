@@ -25,7 +25,7 @@ let handle_tool name args : Tool_result.result =
     result
   | "masc_board_list" ->
     Board_tool_post.handle_post_list ~tool_name:name ~start_time args
-  | "masc_board_get" ->
+  | "masc_board_post_get" ->
     Board_tool_post.handle_post_get ~tool_name:name ~start_time args
   | "masc_board_comment" ->
     let result =
@@ -107,7 +107,7 @@ let tool_spec_read_only =
   [ "masc_board_list"
   ; "masc_board_sub_board_list"
   ; "masc_board_sub_board_get"
-  ; "masc_board_get"
+  ; "masc_board_post_get"
   ; "masc_board_stats"
   ; "masc_board_search"
   ; "masc_board_profile"

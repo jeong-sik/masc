@@ -137,7 +137,7 @@ let tool_post_list : Masc_domain.tool_schema =
   { name = "masc_board_list"
   ; description =
       "List MASC internal board posts and return post_id values for follow-up \
-       masc_board_get, masc_board_comment, or masc_board_vote calls. Use this when \
+       masc_board_post_get, masc_board_comment, or masc_board_vote calls. Use this when \
        you need recent board state or a post_id and do not already have one."
   ; input_schema =
       `Assoc
@@ -249,7 +249,7 @@ let tool_post_list : Masc_domain.tool_schema =
 ;;
 
 let tool_post_get : Masc_domain.tool_schema =
-  { name = "masc_board_get"
+  { name = "masc_board_post_get"
   ; description =
       "Read one existing board post by exact post_id, including its full comment \
        thread. Use only after you already have a post_id from masc_board_list, \
@@ -268,7 +268,7 @@ let tool_post_get : Masc_domain.tool_schema =
                       , `String
                           "Required exact board post ID (format: p-xxxx). Get it from \
                            masc_board_list, masc_board_search, or visible board context \
-                           before calling masc_board_get." )
+                           before calling masc_board_post_get." )
                     ] )
               ] )
         ; "required", `List [ `String "post_id" ]
@@ -281,7 +281,7 @@ let tool_comment_add : Masc_domain.tool_schema =
   ; description =
       "Add a comment to one existing board post by exact post_id. Use after the \
        post_id is visible from board context, masc_board_list, masc_board_search, or \
-       masc_board_get to contribute your perspective, ask a question, or provide \
+       masc_board_post_get to contribute your perspective, ask a question, or provide \
        feedback."
   ; input_schema =
       `Assoc
@@ -294,7 +294,7 @@ let tool_comment_add : Masc_domain.tool_schema =
                     ; ( "description"
                       , `String
                           "Required exact board post ID (format: p-xxxx). Get it from \
-                           masc_board_list, masc_board_search, masc_board_get, or visible \
+                           masc_board_list, masc_board_search, masc_board_post_get, or visible \
                            board context." )
                     ] )
               ; ( "content"
@@ -327,7 +327,7 @@ let tool_vote : Masc_domain.tool_schema =
   ; description =
       "Vote on one existing board post by exact post_id to signal agreement or quality. \
        Use after the post_id is visible from board context, masc_board_list, \
-       masc_board_search, or masc_board_get."
+       masc_board_search, or masc_board_post_get."
   ; input_schema =
       `Assoc
         [ "type", `String "object"
@@ -339,7 +339,7 @@ let tool_vote : Masc_domain.tool_schema =
                     ; ( "description"
                       , `String
                           "Required exact board post ID (format: p-xxxx). Get it from \
-                           masc_board_list, masc_board_search, masc_board_get, or visible \
+                           masc_board_list, masc_board_search, masc_board_post_get, or visible \
                            board context." )
                     ] )
               ; ( "voter"
@@ -369,7 +369,7 @@ let tool_search : Masc_domain.tool_schema =
   { name = "masc_board_search"
   ; description =
       "Search board posts by keyword across titles and content and return post_id values \
-       for follow-up masc_board_get, masc_board_comment, or masc_board_vote calls. Use \
+       for follow-up masc_board_post_get, masc_board_comment, or masc_board_vote calls. Use \
        when looking for specific topics, past discussions, or related prior work."
   ; input_schema =
       `Assoc

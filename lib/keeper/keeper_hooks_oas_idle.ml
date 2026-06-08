@@ -25,7 +25,7 @@ let suggest_alternatives ~(allowed_tools : string list)
 let includes_tool name tools = List.exists (String.equal name) tools
 
 let board_get_recovery_hint ~allowed_tools ~tool_names =
-  if not (includes_tool "keeper_board_get" tool_names) then
+  if not (includes_tool "keeper_board_post_get" tool_names) then
     None
   else
     let discovery_tools =
@@ -40,8 +40,8 @@ let board_get_recovery_hint ~allowed_tools ~tool_names =
     in
     Some
       (Printf.sprintf
-         "keeper_board_get requires post_id; if no post_id is visible, use %s first. \
-          Do not call keeper_board_get with {}."
+         "keeper_board_post_get requires post_id; if no post_id is visible, use %s first. \
+          Do not call keeper_board_post_get with {}."
          discovery)
 
 (** Pure decision logic for the on_idle hook.  Testable without Workspace.config.

@@ -109,7 +109,7 @@ let synonyms : (string * string list) list =
       ; "shell command"
       ; "bash command"
       ] )
-  ; ( "keeper_board_get"
+  ; ( "keeper_board_post_get"
     , [ "read post"
       ; "view post"
       ; "get post"

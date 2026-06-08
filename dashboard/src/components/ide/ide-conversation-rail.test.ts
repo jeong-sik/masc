@@ -374,6 +374,7 @@ describe('IdeConversationRail', () => {
           body: 'question fn:run about this line',
           content: 'question fn:run about this line',
           tags: [],
+          hearth: 'question',
           author_identity: { kind: 'keeper', id: 'scholar', key: 'scholar', display_name: 'scholar', raw: 'scholar' },
           votes: 0,
           comment_count: 2,

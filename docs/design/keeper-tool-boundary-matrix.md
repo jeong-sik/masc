@@ -167,8 +167,6 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tool_path_validation.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_persona_audit.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_persona_audit.mli` - tool-surface-policy
-- `lib/keeper/keeper_tool_policy_config.ml` - tool-surface-policy
-- `lib/keeper/keeper_tool_policy_config.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_policy.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_policy.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_progress.ml` - tool-surface-policy

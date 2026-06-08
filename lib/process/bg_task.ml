@@ -216,7 +216,9 @@ let start_exit_watcher st =
        | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait ()
        | exception Unix.Unix_error (Unix.ECHILD, _, _) ->
            with_reg (fun () -> release_lifetime_guard st)
-       | exception exn -> observe_sidecar_failure ~site:"waitpid" exn
+       | exception exn ->
+           observe_sidecar_failure ~site:"waitpid" exn;
+           with_reg (fun () -> release_lifetime_guard st)
      in
      wait)
 

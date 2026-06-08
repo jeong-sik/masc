@@ -30,7 +30,6 @@ type config =
   tools : Agent_sdk.Tool.t list;
   runtime_mcp_policy :
     Llm_provider.Llm_transport.runtime_mcp_policy option;
-  max_turns : int;
   max_idle_turns : int;
   stream_idle_timeout_s : float option;
   max_execution_time_s : float option;
@@ -168,9 +167,6 @@ let runtime_mcp_policy_of_tool_names =
 
 let provider_label =
   Runtime_transport.provider_label
-
-let provider_effective_max_turns =
-  Runtime_transport.provider_effective_max_turns
 
 let resolve_tool_lane_for_oas_tools =
   Runtime_transport.resolve_tool_lane_for_oas_tools
@@ -325,7 +321,7 @@ let provider_lifecycle_attrs (config : config) =
     ("model_id", `String config.model_id);
     ("provider_model_id", `String provider_cfg.model_id);
     ("max_tokens", `Int config.max_tokens);
-    ("max_turns", `Int config.max_turns);
+
   ]
   @ nonempty_string "base_url" provider_cfg.base_url
   @ nonempty_string "request_path" provider_cfg.request_path
@@ -427,11 +423,10 @@ let close_agent_for_cleanup ?(propagate_cancel = true) ~config agent =
 
     The checkpoint provides: messages, turn_count, usage_stats.
     The MASC config provides: provider, model_id, system_prompt,
-    max_turns, temperature, tools, hooks, guardrails, etc.
+    temperature, tools, hooks, guardrails, etc.
 
-    [max_turns] and [max_cost_usd] are adjusted to account for
-    cumulative values in the checkpoint — the keeper's per-call budget
-    is added on top of the checkpoint's accumulated state.
+    [max_cost_usd] is adjusted to account for cumulative values in
+    the checkpoint.
 
     @boundary-contract
     - MASC owns: per-turn config selection (model, temperature, tools,
@@ -457,9 +452,8 @@ let resume_from_checkpoint
         Runtime_agent_context.prepare_resume ~config ~checkpoint
       in
       Log.Misc.info
-        "oas_worker %s: resume checkpoint_turn_count=%d per_call_turn_budget=%d effective_max_turns=%d"
-        config.name checkpoint.turn_count config.max_turns
-        prepared_resume.agent_config.max_turns;
+        "oas_worker %s: resume checkpoint_turn_count=%d turn_limit=unlimited"
+        config.name checkpoint.turn_count;
       let options = { prepared_resume.options with transport } in
       Ok
         (Agent_sdk.Agent.resume ~net ~checkpoint:prepared_resume.patched_checkpoint
@@ -679,11 +673,10 @@ let run
           ~session_id
           ~text:
             (Printf.sprintf
-               "[agent execution timeout: elapsed=%.1fs timeout=%.1fs turns=%d/%d]"
+               "[agent execution timeout: elapsed=%.1fs timeout=%.1fs turns=%d]"
                r.elapsed_sec
                r.timeout_sec
-               r.turn_count
-               r.max_turns)
+               r.turn_count)
       in
       record_dashboard_oas_response
         ~config
@@ -705,11 +698,10 @@ let run
           ~session_id
           ~text:
             (Printf.sprintf
-               "[agent idle timeout: idle=%.1fs timeout=%.1fs turns=%d/%d]"
+               "[agent idle timeout: idle=%.1fs timeout=%.1fs turns=%d]"
                r.idle_sec
                r.idle_timeout_sec
-               r.turn_count
-               r.max_turns)
+               r.turn_count)
       in
       record_dashboard_oas_response
         ~config

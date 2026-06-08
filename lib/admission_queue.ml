@@ -226,8 +226,7 @@ let snapshot_json () =
   let s = snapshot () in
   let now = now_ts () in
   `Assoc
-    [ "mode", `String "passthrough"
-    ; "throttle_owner", `String "oas_runtime"
+    [ "throttle_owner", `String "oas_runtime"
     ; "local_tool_resource_gates", Tool_resource_gate.snapshot_json ()
     ; "max_concurrent", `Int s.max_concurrent
     ; "active", `Int s.active

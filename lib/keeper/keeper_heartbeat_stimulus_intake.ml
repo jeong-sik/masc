@@ -140,12 +140,10 @@ let consume_board_stimulus_batch ~meta_after_triage batch =
 
 let heartbeat_event_intake ~ctx ~meta_after_triage ~pending_board_events =
   (* RFC-0020 §3 Rule 4 — drain at most one Event Layer stimulus
-     per turn. Board signals are coalesced by a debounce window before
-     falling back to a single non-board queue dequeue. *)
-  let window = Keeper_config.keeper_board_debounce_window_sec () in
+     per turn. Board signals are coalesced by the default debounce
+     window in {!Keeper_event_queue.drain_board_window} (2 s). *)
   let board_batch =
     Keeper_registry_event_queue.drain_board
-      ~window_sec:window
       ~base_path:ctx.config.base_path
       meta_after_triage.name
   in

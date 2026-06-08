@@ -269,11 +269,6 @@ module KeeperKeepalive = struct
   (** Board-reactive wakeup debounce in seconds. Prevents rapid repeated
       wakeups from the same board post. Default: 60.0.
       Range: [5, 300]. *)
-  let board_debounce_sec =
-    Float.max
-      5.0
-      (Float.min 300.0 (get_float ~default:60.0 "MASC_KEEPER_BOARD_DEBOUNCE_SEC"))
-  ;;
 
   (** Interruptible sleep chunk size in seconds. Smaller = faster wakeup
       response but more CPU polling. Default: 2.0.

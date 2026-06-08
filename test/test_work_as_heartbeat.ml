@@ -50,9 +50,6 @@ let test_keepalive_max_failures_range () =
   check bool "failures >= 2" true (v >= 2);
   check bool "failures <= 50" true (v <= 50)
 
-let test_keepalive_board_debounce_default () =
-  check (float 0.1) "default debounce 60s" 60.0
-    Cfg.KeeperKeepalive.board_debounce_sec
 
 let test_keepalive_sleep_chunk_default () =
   check (float 0.01) "default sleep chunk 2.0s" 2.0
@@ -140,10 +137,6 @@ let test_config_invariant_sweep_independent () =
   check bool "backoff_max >= backoff_base" true
     (Cfg.KeeperSupervisor.backoff_max_s >= backoff_base)
 
-let test_config_invariant_debounce_ge_interval () =
-  let debounce = Cfg.KeeperKeepalive.board_debounce_sec in
-  let interval = Float.of_int Cfg.KeeperKeepalive.interval_sec in
-  check bool "board debounce >= interval" true (debounce >= interval)
 
 (* ── Freshness decision pure logic ──────────────────────── *)
 
@@ -240,7 +233,6 @@ let () =
       test_case "interval range" `Quick test_keepalive_interval_range;
       test_case "max_failures default" `Quick test_keepalive_max_failures_default;
       test_case "max_failures range" `Quick test_keepalive_max_failures_range;
-      test_case "board_debounce default" `Quick test_keepalive_board_debounce_default;
       test_case "sleep_chunk default" `Quick test_keepalive_sleep_chunk_default;
       test_case "jitter default" `Quick test_keepalive_jitter_default;
       test_case "jitter range" `Quick test_keepalive_jitter_range;
@@ -272,7 +264,6 @@ let () =
     "config_invariants", [
       test_case "max_silence >= interval" `Quick test_config_invariant_silence_ge_interval;
       test_case "sweep/backoff coherence" `Quick test_config_invariant_sweep_independent;
-      test_case "debounce >= interval" `Quick test_config_invariant_debounce_ge_interval;
     ];
     "percentile", [
       test_case "empty array" `Quick test_percentile_empty;

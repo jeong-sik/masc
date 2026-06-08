@@ -69,7 +69,6 @@ val resolve_overrides :
 
       [heartbeat]
       sleep_chunk_sec             = 1.5
-      board_debounce_sec          = 30
       board_generic_wakeup_limit  = 3
       board_wakeup_max            = 4
 

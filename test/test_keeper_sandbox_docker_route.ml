@@ -293,12 +293,13 @@ let test_turn_sandbox_factory_uses_refreshed_registry_meta () =
   @@ fun () ->
   let docker_playground = Keeper_sandbox.host_root_abs_of_meta ~config docker_meta in
   match Keeper_sandbox_factory.resolve factory ~cwd:docker_playground with
-  | None -> Alcotest.fail "expected refreshed registry Docker meta to resolve a turn runtime"
-  | Some runtime ->
+  | Runtime runtime ->
     Alcotest.(check string)
       "runtime host root follows refreshed Docker meta"
       (Keeper_alerting_path.normalize_path_for_check_stripped docker_playground)
       (Keeper_turn_sandbox_runtime.host_root runtime)
+  | No_factory | Local_profile ->
+    Alcotest.fail "expected refreshed registry Docker meta to resolve a turn runtime"
 
 let with_fake_docker script f =
   let dir = temp_dir () in

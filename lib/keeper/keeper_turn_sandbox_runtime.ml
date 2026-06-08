@@ -200,7 +200,7 @@ let run_argv_with_status_retry_eintr ?timeout_sec argv =
           ~actor:`System_sandbox
           ~raw_source:(String.concat " " argv)
           ~summary:"keeper turn sandbox command"
-          ~env:(Unix.environment ())
+          ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
           ~cwd:(Sys.getcwd ())
           argv
       in
@@ -231,7 +231,7 @@ let run_argv_with_status_split_retry_eintr ?timeout_sec argv =
           ~actor:`System_sandbox
           ~raw_source:(String.concat " " argv)
           ~summary:"keeper turn sandbox command"
-          ~env:(Unix.environment ())
+          ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
           ~cwd:(Sys.getcwd ())
           argv
       in
@@ -256,7 +256,7 @@ let run_argv_with_stdin_and_status_retry_eintr ?timeout_sec ~stdin_content argv 
           ~actor:`System_sandbox
           ~raw_source:(String.concat " " argv)
           ~summary:"keeper turn sandbox stdin command"
-          ~env:(Unix.environment ())
+          ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
           ~cwd:(Sys.getcwd ())
           ~stdin_content
           argv
@@ -281,7 +281,7 @@ let run_argv_with_stdin_and_status_split_retry_eintr ?timeout_sec ~stdin_content
           ~actor:`System_sandbox
           ~raw_source:(String.concat " " argv)
           ~summary:"keeper turn sandbox stdin command"
-          ~env:(Unix.environment ())
+          ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
           ~cwd:(Sys.getcwd ())
           ~stdin_content
           argv
@@ -589,7 +589,7 @@ let run_exec_pipeline_with_status_once
           let cwd = Option.value stage_cwd ~default:cwd in
           let container_cwd = container_cwd_of_host t ~host_cwd:cwd in
           let argv = docker_exec_pipeline_argv t ~container_name ~container_cwd command_argv in
-          { Process_eio.argv; env = Some (Unix.environment ()); cwd = Some (Sys.getcwd ()) })
+          { Process_eio.argv; env = Some (Env_keeper_scrub.filter_environment (Unix.environment ())); cwd = Some (Sys.getcwd ()) })
         stages
     in
     Ok (run_argv_pipeline_with_status_split_retry_eintr process_stages)

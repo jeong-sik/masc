@@ -197,7 +197,7 @@ let cleanup_oneshot_container ~container_name =
         ~actor:`System_sandbox
         ~raw_source:(String.concat " " argv)
         ~summary:"keeper docker oneshot cleanup"
-        ~env:(Unix.environment ())
+        ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
         ~cwd:(Sys.getcwd ())
         ~timeout_sec:(docker_cleanup_rm_timeout_sec ())
         argv)
@@ -571,7 +571,7 @@ let run_docker_shell_command_with_status_internal
                                 ~actor:`System_sandbox
                                 ~raw_source:(String.concat " " argv)
                                 ~summary:"keeper docker command"
-                                ~env:(Unix.environment ())
+                                ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
                                 ~cwd:(Sys.getcwd ())
                                 ~timeout_sec
                                 ~stdin_content:cmd

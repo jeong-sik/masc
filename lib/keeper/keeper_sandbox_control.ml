@@ -225,7 +225,7 @@ let start_managed_container
                         ~actor:`System_sandbox
                         ~raw_source:(String.concat " " argv)
                         ~summary:"keeper sandbox control exec"
-                        ~env:(Unix.environment ())
+                        ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
                         ~cwd:(Sys.getcwd ())
                         ~timeout_sec
                         argv)

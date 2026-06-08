@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { useRef, useEffect, useMemo, useState } from 'preact/hooks'
+import { useSignalValue } from './use-signal-value'
 import { EditorState } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
 import type {
@@ -126,44 +127,15 @@ export function IdeEditor({
   onKeeperLineSelect,
   annotations = [],
 }: IdeEditorProps) {
-  const [, forceRender] = useState(0)
-
-  useEffect(() => {
-    const unsub = documentStore.subscribe(() => forceRender(tick => tick + 1))
-    return () => unsub()
-  }, [documentStore])
-  useEffect(() => {
-    const unsub = ownershipStore.subscribe(() => forceRender(tick => tick + 1))
-    return () => unsub()
-  }, [ownershipStore])
-  useEffect(() => {
-    const unsub = cursorOverlaySignal.subscribe(() => forceRender(tick => tick + 1))
-    return () => unsub()
-  }, [])
-  useEffect(() => {
-    const unsub = globalPresenceSnapshot.subscribe(() => forceRender(tick => tick + 1))
-    return () => unsub()
-  }, [])
-  useEffect(() => {
-    const unsub = ideContextFocus.subscribe(() => forceRender(tick => tick + 1))
-    return () => unsub()
-  }, [])
-  useEffect(() => {
-    const unsub = ideConversationThreadSnapshot.subscribe(() => forceRender(tick => tick + 1))
-    return () => unsub()
-  }, [])
-  useEffect(() => {
-    const unsub = lspDiagnosticSnapshot.subscribe(() => forceRender(tick => tick + 1))
-    return () => unsub()
-  }, [])
-  useEffect(() => {
-    const unsub = keeperTraceState.subscribe(() => forceRender(tick => tick + 1))
-    return () => unsub()
-  }, [])
-  useEffect(() => {
-    const unsub = ideReplayUntilMs.subscribe(() => forceRender(tick => tick + 1))
-    return () => unsub()
-  }, [])
+  useSignalValue(documentStore)
+  useSignalValue(ownershipStore)
+  useSignalValue(cursorOverlaySignal)
+  useSignalValue(globalPresenceSnapshot)
+  useSignalValue(ideContextFocus)
+  useSignalValue(ideConversationThreadSnapshot)
+  useSignalValue(lspDiagnosticSnapshot)
+  useSignalValue(keeperTraceState)
+  useSignalValue(ideReplayUntilMs)
 
   const document = documentStore.document()
   if (document.file_path === null) {
@@ -1012,21 +984,9 @@ function CodeMirrorEditor({
     ready,
   ])
 
-  // Subscribe to store changes for re-render
-  const [, forceRender] = useState(0)
-  useEffect(() => {
-    const unsub = documentStore.subscribe(() => forceRender(n => n + 1))
-    return () => unsub()
-  }, [documentStore])
-  useEffect(() => {
-    const unsub = ownershipStore.subscribe(() => forceRender(n => n + 1))
-    return () => unsub()
-  }, [ownershipStore])
-  useEffect(() => {
-    if (!traceActive) return
-    const unsub = keeperTraceState.subscribe(() => forceRender(n => n + 1))
-    return () => unsub()
-  }, [traceActive])
+  useSignalValue(documentStore)
+  useSignalValue(ownershipStore)
+  useSignalValue(keeperTraceState)
 
   return html`
     <div class="ide-codemirror-shell" data-view=${showBlame ? 'blame' : 'source'}>

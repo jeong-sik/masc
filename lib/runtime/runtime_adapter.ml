@@ -335,13 +335,5 @@ let binding_to_provider_config (cfg : Runtime_schema.config) (binding : Runtime_
                "%s.%s: binding resolution failed (provider transport/kind unmapped)"
                binding.provider_id
                binding.model_id)
-        | Some config ->
-          if binding.max_concurrent > 0
-          then
-            Ok
-              { config with
-                Llm_provider.Provider_config.internal_model_rotation_count =
-                  Some binding.max_concurrent
-              }
-          else Ok config))
+        | Some config -> Ok config))
 ;;

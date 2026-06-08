@@ -314,13 +314,7 @@ let run_try_provider
        a single counter, ignoring per-binding max-concurrent in runtime.toml.
        See: provider lane key collapse bug, 2026-06-08. *)
     let lane_key = ctx.runtime_id in
-    let lane_max_concurrent =
-      match Runtime.get_runtime_by_id ctx.runtime_id with
-      | Some rt ->
-        let b = rt.Runtime.binding in
-        b.max_concurrent
-      | None -> 0  (* runtime resolved earlier; 0 disables the gate as fallback *)
-    in
+    let lane_max_concurrent = Runtime_candidate.max_concurrent candidate in
     (match
        Runtime_lane_capacity.with_lane_capacity
          ~lane_key

@@ -466,7 +466,7 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
     if Keeper_registry.is_registered ~base_path:ctx.config.base_path m.name
     then Log.Keeper.info "start_keepalive: skipped %s (already registered)" m.name
     else
-      match Keeper_registry.spawn_slots_decision ~base_path:ctx.config.base_path () with
+      match Keeper_registry.spawn_slots_decision () with
       | Error reason ->
         Keeper_registry.record_spawn_slot_denied ~keeper_name:m.name ~surface:"keepalive" reason;
         publish_keeper_lifecycle

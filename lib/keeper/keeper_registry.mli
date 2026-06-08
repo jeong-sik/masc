@@ -258,20 +258,17 @@ val count_running : ?base_path:string -> unit -> int
 (** Closed reason for a keeper launch/admission denial. *)
 type spawn_slot_denial_reason =
   | Fd_pressure_active
-  | Disk_pressure_active
   | Fd_admission_blocked
-  | Disk_admission_blocked
   | Max_active_keepers of { running_count : int; max_keepers : int }
 
 val spawn_slot_denial_reason_to_label : spawn_slot_denial_reason -> string
 val spawn_slot_denial_reason_to_detail : spawn_slot_denial_reason -> string
 
-(** Check if there are available spawn slots and return the denial reason when blocked.
-    [base_path] enables disk admission probing for the target runtime root. *)
-val spawn_slots_decision : ?base_path:string -> unit -> (unit, spawn_slot_denial_reason) result
+(** Check if there are available spawn slots and return the denial reason when blocked. *)
+val spawn_slots_decision : unit -> (unit, spawn_slot_denial_reason) result
 
 (** Compatibility bool wrapper over [spawn_slots_decision]. *)
-val spawn_slots_available : ?base_path:string -> unit -> bool
+val spawn_slots_available : unit -> bool
 
 (** Emit the durable signal for a denied keeper launch/admission. *)
 val record_spawn_slot_denied :
@@ -280,13 +277,11 @@ val record_spawn_slot_denied :
 module For_testing : sig
   val spawn_slots_decision :
     ?fd_admitted:bool ->
-    ?disk_admitted:bool ->
     unit ->
     (unit, spawn_slot_denial_reason) result
 
   val spawn_slots_available :
     ?fd_admitted:bool ->
-    ?disk_admitted:bool ->
     unit ->
     bool
 end

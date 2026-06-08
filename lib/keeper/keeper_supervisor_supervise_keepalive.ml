@@ -50,7 +50,7 @@ let supervise_keepalive
   if Keeper_registry.is_registered ~base_path:ctx.config.base_path meta.name
   then ()
   else
-    match Keeper_registry.spawn_slots_decision ~base_path:ctx.config.base_path () with
+    match Keeper_registry.spawn_slots_decision () with
     | Error reason ->
       Keeper_registry.record_spawn_slot_denied ~keeper_name:meta.name ~surface:"supervisor" reason;
       publish_lifecycle

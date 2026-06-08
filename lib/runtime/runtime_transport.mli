@@ -4,10 +4,6 @@
     CLI transport construction separate from the build/run orchestration in
     {!Runtime_agent}. *)
 
-(** Clamp provider-internal max_turns to provider hard constraints. *)
-val provider_effective_max_turns :
-  Llm_provider.Provider_config.provider_kind -> int -> int
-
 (* RFC-0167: the client-named omission-dedup helpers
    ([cli_tool_a_omission_fingerprint], [cli_tool_a_omission_fingerprint_seen],
    [record_cli_tool_a_omission], [record_cli_tool_a_omission_for_agent],

@@ -31,5 +31,6 @@ end
 
     @since 2.110.0 *)
 val dispatch_stream :
-  on_text_delta:(string -> unit) ->
+  ?on_text_delta:(string -> unit) ->
+  ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
   _ context -> name:string -> args:Yojson.Safe.t -> tool_result option

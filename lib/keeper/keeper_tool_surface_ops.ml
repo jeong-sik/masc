@@ -706,12 +706,12 @@ let keeper_msg_queue_body ~(config : Workspace.config) args : tool_result =
 let handle_keeper_msg_queue ctx args : tool_result =
   keeper_msg_queue_body ~config:ctx.config args
 
-let handle_keeper_msg_stream ~on_text_delta ctx args : tool_result =
+let handle_keeper_msg_stream ?on_text_delta ?on_event ctx args : tool_result =
   match resolve_keeper_name ctx args with
   | Error err -> tool_result_error err
   | Ok name ->
       let resolved_args = with_keeper_name args name in
-      let result = Turn.handle_keeper_msg ~on_text_delta ctx resolved_args in
+      let result = Turn.handle_keeper_msg ?on_text_delta ?on_event ctx resolved_args in
       if not (tool_result_success result) then result
       else begin
         let body = tool_result_body result in

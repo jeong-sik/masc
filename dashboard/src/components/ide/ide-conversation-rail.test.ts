@@ -369,6 +369,7 @@ describe('IdeConversationRail', () => {
       if (url.startsWith('/api/v1/board')) {
         return new Response(JSON.stringify({ posts: [{
           id: 'thread-line',
+          hearth: 'question',
           author: 'scholar',
           title: 'Review lib/runtime.ml:42',
           body: 'question fn:run about this line',

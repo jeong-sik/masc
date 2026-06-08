@@ -65,7 +65,7 @@ let shard_board : shard =
   { name = "board"
   ; tools = board_tools
   ; read_only_tools =
-      [ "keeper_board_get"
+      [ "keeper_board_post_get"
       ; "keeper_board_list"
       ; "keeper_board_stats"
       ; "keeper_board_search"

@@ -203,7 +203,7 @@ let explicit_metadata : (string * metadata) list =
     ("masc_agent_card", read_state_tool);
     ("masc_dashboard", read_state_tool);
     ("masc_board_list", read_state_tool);
-    ("masc_board_get", read_state_tool);
+    ("masc_board_post_get", read_state_tool);
     ("masc_board_curation_read", read_state_tool);
     ( "masc_board_curation_submit",
       actor_broadcast_tool );

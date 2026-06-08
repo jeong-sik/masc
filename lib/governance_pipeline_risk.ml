@@ -137,7 +137,7 @@ let risk_of_keeper (k : Keeper_tool_name.t) : risk_level =
   match k with
   | Execute -> Critical
   | Board_comment | Board_comment_vote | Board_curation_read | Board_curation_submit
-  | Board_get | Board_list | Board_post | Board_search | Board_stats
+  | Board_post_get | Board_list | Board_post | Board_search | Board_stats
   | Board_sub_board_get | Board_sub_board_list | Board_vote | Broadcast
   | Context_status | Handoff | Library_read | Library_search | Memory_search
   | Memory_write | Search_files | Stay_silent | Tasks_audit | Tasks_list | Time_now

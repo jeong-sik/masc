@@ -179,7 +179,7 @@ let handle_keeper_board_tool
       (String_util.utf8_safe ~max_bytes:203 ~suffix:"..." msg |> String_util.to_string);
     tool_result_or_error result)
   | "keeper_board_list" -> dispatch_board Tool_name.Board_name.Board_list args
-  | "keeper_board_get" -> dispatch_board Tool_name.Board_name.Board_get args
+  | "keeper_board_post_get" -> dispatch_board Tool_name.Board_name.Board_post_get args
   | "keeper_board_comment" ->
     dispatch_board
       Tool_name.Board_name.Board_comment

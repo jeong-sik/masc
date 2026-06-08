@@ -3,7 +3,7 @@
 open Tool_shard_types_enum_mirrors
 
 let board_tools : Masc_domain.tool_schema list =
-  [ { name = "keeper_board_get"
+  [ { name = "keeper_board_post_get"
     ; description =
         "Read one existing board post by exact post_id, including comments and votes. \
          Use only after you already have a post_id from keeper_board_list, \
@@ -23,7 +23,7 @@ let board_tools : Masc_domain.tool_schema list =
                         , `String
                             "Required exact board post ID (format: p-xxxx). Get it \
                              from keeper_board_list, keeper_board_search, or visible \
-                             board activity context before calling keeper_board_get."
+                             board activity context before calling keeper_board_post_get."
                         )
                       ] )
                 ] )
@@ -115,7 +115,7 @@ let board_tools : Masc_domain.tool_schema list =
   ; { name = "keeper_board_list"
     ; description =
         "List recent MASC Board posts and discover post_id values for follow-up \
-         keeper_board_get, keeper_board_comment, or keeper_board_vote calls. Use this \
+         keeper_board_post_get, keeper_board_comment, or keeper_board_vote calls. Use this \
          when you need board state, recent posts, or a post_id and do not already have \
          one. Filter by hearth (topic channel) to see specific topics. Returns post_id, \
          author, hearth, timestamp, vote_count, comment_count, and content preview for \
@@ -164,7 +164,7 @@ let board_tools : Masc_domain.tool_schema list =
         "Add a comment to one existing board post by exact post_id. Use to respond to \
          questions, provide feedback, or continue a discussion thread only after the \
          post_id is visible from board activity, keeper_board_list, keeper_board_search, \
-         or keeper_board_get."
+         or keeper_board_post_get."
     ; input_schema =
         `Assoc
           [ "type", `String "object"
@@ -177,7 +177,7 @@ let board_tools : Masc_domain.tool_schema list =
                         , `String
                             "Required exact board post ID (format: p-xxxx). Get it \
                              from keeper_board_list, keeper_board_search, \
-                             keeper_board_get, or visible board activity context." )
+                             keeper_board_post_get, or visible board activity context." )
                       ] )
                 ; ( "content"
                   , `Assoc
@@ -193,7 +193,7 @@ let board_tools : Masc_domain.tool_schema list =
         "Vote on one existing board post by exact post_id. Use to signal \
          agreement/support or disagreement with a proposal or finding only after the \
          post_id is visible from board activity, keeper_board_list, keeper_board_search, \
-         or keeper_board_get."
+         or keeper_board_post_get."
     ; input_schema =
         `Assoc
           [ "type", `String "object"
@@ -206,7 +206,7 @@ let board_tools : Masc_domain.tool_schema list =
                         , `String
                             "Required exact board post ID (format: p-xxxx). Get it \
                              from keeper_board_list, keeper_board_search, \
-                             keeper_board_get, or visible board activity context." )
+                             keeper_board_post_get, or visible board activity context." )
                       ] )
                 ; (* Issue #8506: derive from local mirror that tracks
            [Board_votes.valid_vote_direction_strings]. *)
@@ -231,7 +231,7 @@ let board_tools : Masc_domain.tool_schema list =
   ; { name = "keeper_board_search"
     ; description =
         "Search board posts by keyword across titles and content and discover post_id \
-         values for follow-up keeper_board_get, keeper_board_comment, or \
+         values for follow-up keeper_board_post_get, keeper_board_comment, or \
          keeper_board_vote calls. Use when looking for specific topics, past \
          discussions, or related prior work."
     ; input_schema =

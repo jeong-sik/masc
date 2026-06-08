@@ -306,38 +306,34 @@ let set_started_at_for_test ~base_path name started_at =
 
 type spawn_slot_denial_reason = Spawn_slots.denial_reason =
   | Fd_pressure_active
-  | Disk_pressure_active
   | Fd_admission_blocked
-  | Disk_admission_blocked
   | Max_active_keepers of { running_count : int; max_keepers : int }
 
 let spawn_slot_denial_reason_to_label = Spawn_slots.to_label
 let spawn_slot_denial_reason_to_detail = Spawn_slots.to_detail
 
-let spawn_slots_decision_internal ?base_path ?fd_admitted ?disk_admitted () =
+let spawn_slots_decision_internal ?fd_admitted () =
   Spawn_slots.decision
-    ?base_path
     ?fd_admitted
-    ?disk_admitted
     ~running_count:(Atomic.get running_count_atomic)
     ()
 ;;
 
-let spawn_slots_decision ?base_path () = spawn_slots_decision_internal ?base_path ()
+let spawn_slots_decision () = spawn_slots_decision_internal ()
 
-let spawn_slots_available ?base_path () =
-  match spawn_slots_decision ?base_path () with
+let spawn_slots_available () =
+  match spawn_slots_decision () with
   | Ok () -> true
   | Error _ -> false
 ;;
 
 module For_testing = struct
-  let spawn_slots_decision ?fd_admitted ?disk_admitted () =
-    spawn_slots_decision_internal ?fd_admitted ?disk_admitted ()
+  let spawn_slots_decision ?fd_admitted () =
+    spawn_slots_decision_internal ?fd_admitted ()
   ;;
 
-  let spawn_slots_available ?fd_admitted ?disk_admitted () =
-    match spawn_slots_decision ?fd_admitted ?disk_admitted () with
+  let spawn_slots_available ?fd_admitted () =
+    match spawn_slots_decision ?fd_admitted () with
     | Ok () -> true
     | Error _ -> false
   ;;

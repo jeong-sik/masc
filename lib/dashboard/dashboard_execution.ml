@@ -39,7 +39,7 @@ let agents_safe config =
 
 let messages_safe config =
   if Workspace.is_initialized config
-  then Workspace.get_messages_raw config ~since_seq:0 ~limit:50
+  then Workspace.get_messages_raw config ~since_seq:0 ~limit:20
   else []
 ;;
 

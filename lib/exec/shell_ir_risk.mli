@@ -89,3 +89,8 @@ val classify_repo_hosting_cli : string list -> risk_class
 (** Direct repo-hosting CLI word-list classification without IR construction.
     The current command literal is ["gh"], but the API is named for the
     Shell-IR capability boundary rather than a product-level GH helper family. *)
+
+val literal_words_of_simple : Shell_ir.simple -> string list option
+(** Extract literal words from a single [Shell_ir.simple] stage:
+    [[bin; arg0; arg1; ...]]. Non-literal args ([Concat], [Var])
+    abort the extraction by returning [None]. *)

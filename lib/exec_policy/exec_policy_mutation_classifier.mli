@@ -8,8 +8,8 @@
 
     These three classifiers cover *structural* mutation intent:
     git write subcommands, package-manager state changes, filesystem
-    mutators ([mv]/[cp]/[mkdir]/[rm -rf]), and protected-branch
-    pushes. They do not catch raw-string evasion patterns
+    mutators ([mv]/[cp]/[mkdir]/[rm -rf]), and force-pushes.
+    They do not catch raw-string evasion patterns
     ([{!Eval_gate.detect_destructive}] handles that -- see RFC-0160
     S0 "Producer A").
 
@@ -17,10 +17,6 @@
     words; non-literal arguments ([Concat], [Var]) are skipped (the
     parser preserves them but they cannot be matched against the
     closed sub-command set). *)
-
-val literal_words_of_simple : Masc_exec.Shell_ir.simple -> string list option
-(** Extract literal words from a single [Shell_ir.simple] stage.
-    [None] for non-literal args ([Concat], [Var]). *)
 
 val flat_stage_words : Masc_exec.Shell_ir.t -> string list
 (** Flatten all literal stage words across pipeline segments.
@@ -41,7 +37,10 @@ val is_write_operation : Masc_exec.Shell_ir.t -> bool
 
 val is_destructive_bash_operation : Masc_exec.Shell_ir.t -> bool
 (** [true] for *structural* destructive patterns: [git push --force],
-    [git push <protected_branch>], [git reset --hard], [rm -rf].
+    [git reset --hard], [rm -rf].
+
+    Protected-branch escalation is a product-level policy concern and
+    lives in approval hooks, not this structural classifier.
 
     Does {b not} include raw-string evasion detection -- for that, run
     {!Eval_gate.detect_destructive} on the raw command string {i before}

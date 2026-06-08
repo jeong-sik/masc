@@ -12,7 +12,6 @@ type block_reason =
   | Unsafe_redirect
   | Pipes_not_allowed
   | Direct_dune_invocation
-  | Command_not_allowed of string
 
 val block_reason_to_string : block_reason -> string
 

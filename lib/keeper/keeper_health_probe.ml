@@ -92,7 +92,6 @@ let provider_runtime_pressure_class ~code ~detail ~http_status ~runtime_id =
     contains "timeout"
     || contains "timed out"
     || contains "no_first_token"
-    || contains "inter_chunk_idle"
     || contains "max_execution_time"
     || contains "wall-clock timeout"
     || http_is_any [ 408; 504; 524 ]

@@ -214,8 +214,9 @@ let test_non_literal_arg_falls_through_to_generic () =
     true (is_generic result)
 
 let test_unhandled_safe_bin_falls_through_to_generic () =
-  (* `awk` is not in Exec_program.known — must fall through to Generic. *)
-  let simple = make_simple "awk" [ "{print $1}" ] in
+  (* `awk` was added to Exec_program.known in this branch; use a bin that is
+     deliberately absent from known to keep the Generic fallback invariant. *)
+  let simple = make_simple "frobnicate" [ "--help" ] in
   let result = Shell_ir_typed.of_simple simple in
   check bool
     "unknown-bin without dedicated parser must fall through to Generic"

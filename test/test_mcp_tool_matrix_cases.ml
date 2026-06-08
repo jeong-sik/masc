@@ -109,6 +109,10 @@ let generic_matrix_excluded_names =
   [
     "masc_keeper_msg";
     "masc_operator_snapshot";
+    (* Excluded: masc_keeper_msg / masc_operator_snapshot require a live
+       keeper context to pass tag_registry validation in the standalone runner.
+       TODO: wire into the matrix runner with a minimal keeper stub,
+       or split into a keeper-matrix suite. *)
   ]
 
 let string_starts_with ~prefix s =

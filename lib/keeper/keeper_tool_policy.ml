@@ -283,21 +283,25 @@ let keeper_universe_masc_tool_schemas (meta : keeper_meta) : Masc_domain.tool_sc
     In Failing phase the keeper must retain a guaranteed floor of tools
     regardless of custom allowlist, deny-list, or policy config.  The floor is
     determined solely by shard removability (structural, not policy). *)
-(** Essential MASC tools always available in Failing recovery,
+(** Essential tools always available in Failing recovery,
     on top of [removable=false] shard floor. Mirrors [masc.essential]
     hardcoded in this module. Sync regression: any drift is caught by
     [test_failing_minimum_essential.ml].
 
-    Rationale (board P1, 9 keepers × 0 claimable masc_web_search):
+    Rationale (board P1, 9 keepers × 0 claimable web search):
     a Failing keeper still needs to check workspace state, look up
     information for recovery, and defer to operator approval. Removing
     these from the recovery floor caused task contracts that require
-    [masc_web_search] to become unclaimable when any keeper entered
-    decision_layer >= 2. *)
+    web search to become unclaimable when any keeper entered
+    decision_layer >= 2.
+
+    Note: WebSearch / WebFetch are the public_names used by the keeper
+    agent; masc_web_search / masc_web_fetch are keeper-internal and
+    are not exposed as operator MCP tool calls. *)
 let essential_masc_minimum_names : string list = [
   "masc_status";
-  "masc_web_search";
-  "masc_web_fetch";
+  "WebSearch";
+  "WebFetch";
 ]
 
 let failing_minimum_tool_names () : string list =

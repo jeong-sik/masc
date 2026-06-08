@@ -13,10 +13,20 @@ let dedupe_schemas (schemas : Masc_domain.tool_schema list) =
   in
   List.rev unique
 
+
+(* Tools that are keeper-only (called via public_name by the keeper agent)
+   and must NOT be exposed as operator MCP tool calls.
+   masc_web_search / masc_web_fetch are reached via WebSearch / WebFetch
+   public_names from keeper context; operator never calls them directly. *)
+let keeper_only_masc_names =
+  [ "masc_web_search"; "masc_web_fetch" ]
+
 let descriptor_owned_internal_tool_schemas : Masc_domain.tool_schema list =
   Keeper_tool_descriptor.public_descriptors
   |> List.filter_map (fun (descriptor : Keeper_tool_descriptor.t) ->
-    if String.starts_with ~prefix:"masc_" descriptor.internal_name then
+    if String.starts_with ~prefix:"masc_" descriptor.internal_name
+       && not (List.mem descriptor.internal_name keeper_only_masc_names)
+    then
       Some
         { Masc_domain.name = descriptor.internal_name
         ; description = descriptor.description

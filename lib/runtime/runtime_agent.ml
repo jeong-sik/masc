@@ -218,9 +218,21 @@ let provider_http_slot_transport transport =
 let provider_config_preserving_http_transport
     ~sw
     ~net
+    ?clock
+    ?stream_idle_timeout_s
+    ?body_timeout_s
     ~(provider_cfg : Llm_provider.Provider_config.t)
+    ()
   : Llm_provider.Llm_transport.t =
-  let http_transport = Llm_provider.Complete.make_http_transport ~sw ~net () in
+  let http_transport =
+    Llm_provider.Complete.make_http_transport
+      ?clock
+      ?stream_idle_timeout_s
+      ?body_timeout_s
+      ~sw
+      ~net
+      ()
+  in
   let patch_request (req : Llm_provider.Llm_transport.completion_request) =
     { req with
       config =
@@ -245,12 +257,12 @@ let provider_config_preserving_http_transport
           (patch_request req));
     }
 
-let transport_for_provider ~sw ~net ~provider_cfg () =
+let transport_for_provider ~sw ~net ?clock ?stream_idle_timeout_s ?body_timeout_s ~provider_cfg () =
   (* CLI subprocess transport removed (2026-05-31); every provider dispatches
      over HTTP. Runtime MCP policy is applied via the tool-lane resolver and
      per-request patching, not at transport construction, so it is no longer
      threaded here. *)
-  Ok (Some (provider_config_preserving_http_transport ~sw ~net ~provider_cfg))
+  Ok (Some (provider_config_preserving_http_transport ~sw ~net ?clock ?stream_idle_timeout_s ?body_timeout_s ~provider_cfg ()))
 
 let runtime_id_of_config (config : config) =
   let runtime_prefix = "runtime:" in
@@ -349,8 +361,20 @@ let build
     ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
     ~(config : config)
   : (Agent_sdk.Agent.t, Agent_sdk.Error.sdk_error) result =
+  let clock =
+    match Process_eio.get_clock () with
+    | Ok c -> Some c
+    | Error _ -> Eio_context.get_clock_opt ()
+  in
   match
-    transport_for_provider ~sw ~net ~provider_cfg:config.provider_cfg ()
+    transport_for_provider
+      ~sw
+      ~net
+      ?clock
+      ?stream_idle_timeout_s:config.stream_idle_timeout_s
+      ?body_timeout_s:config.body_timeout_s
+      ~provider_cfg:config.provider_cfg
+      ()
   with
   | Error _ as e -> e
   | Ok transport ->
@@ -443,8 +467,20 @@ let resume_from_checkpoint
     ~(config : config)
     ~(checkpoint : Agent_sdk.Checkpoint.t)
   : (Agent_sdk.Agent.t, Agent_sdk.Error.sdk_error) result =
+  let clock =
+    match Process_eio.get_clock () with
+    | Ok c -> Some c
+    | Error _ -> Eio_context.get_clock_opt ()
+  in
   match
-    transport_for_provider ~sw ~net ~provider_cfg:config.provider_cfg ()
+    transport_for_provider
+      ~sw
+      ~net
+      ?clock
+      ?stream_idle_timeout_s:config.stream_idle_timeout_s
+      ?body_timeout_s:config.body_timeout_s
+      ~provider_cfg:config.provider_cfg
+      ()
   with
   | Error _ as e -> e
   | Ok transport ->
@@ -531,7 +567,7 @@ let run
       let clock =
         match Process_eio.get_clock () with
         | Ok c -> Some c
-        | Error _ -> None
+        | Error _ -> Eio_context.get_clock_opt ()
       in
       match on_event with
       | Some cb -> Agent_sdk.Agent.run_stream ~sw ?clock ?on_yield ?on_resume ~on_event:cb agent goal

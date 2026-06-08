@@ -85,6 +85,13 @@ let handle_telemetry request reqd =
         |> max 0
       | None -> if has_time_window then 0 else 100
     in
+    let offset =
+      match Server_utils.query_param req "offset" with
+      | Some raw ->
+        Option.value ~default:0 (int_of_string_opt raw)
+        |> max 0 |> min 5000
+      | None -> 0
+    in
     let sources =
       match Server_utils.query_param req "source" with
       | None -> Telemetry_unified.all_sources
@@ -107,6 +114,7 @@ let handle_telemetry request reqd =
                    `String (Telemetry_unified.source_to_string source))
                  sources) );
           ("n", `Int n);
+          ("offset", `Int offset);
           ( "keeper",
             Option.fold ~none:`Null
               ~some:(fun value -> `String value)
@@ -144,8 +152,8 @@ let handle_telemetry request reqd =
     let opt_ts = function None -> "" | Some f -> Printf.sprintf "%.3f" f in
     let cache_key =
       Printf.sprintf
-        "telemetry:%s:%s:src=%s:n=%d:k=%s:s=%s:o=%s:w=%s:since=%s:until=%s"
-        base_path masc_root sources_key n
+        "telemetry:%s:%s:src=%s:n=%d:off=%d:k=%s:s=%s:o=%s:w=%s:since=%s:until=%s"
+        base_path masc_root sources_key n offset
         (opt_str keeper_name) (opt_str session_id)
         (opt_str operation_id) (opt_str worker_run_id)
         (opt_ts since_ts) (opt_ts until_ts)
@@ -156,7 +164,7 @@ let handle_telemetry request reqd =
         Server_timing.measure timing Telemetry_query (fun () ->
           Telemetry_unified.read_unified_result ~base_path ~masc_root
             ~sources ?keeper_name ?session_id ?operation_id
-            ?worker_run_id ?since_ts ?until_ts ~n ())
+            ?worker_run_id ?since_ts ?until_ts ~n ~offset ())
       in
       let generated_at = Masc_domain.now_iso () in
       Server_timing.measure timing Json_serialize (fun () ->
@@ -171,6 +179,8 @@ let handle_telemetry request reqd =
           ("query", query_json);
           ("count", `Int (List.length result.entries));
           ("total_matching_entries", `Int result.total_matching_entries);
+          ("offset", `Int offset);
+          ("has_more", `Bool (offset + List.length result.entries < result.total_matching_entries));
           ("truncated", `Bool result.truncated);
           ("entries", `List result.entries);
         ])

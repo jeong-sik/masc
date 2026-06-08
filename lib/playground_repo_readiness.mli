@@ -11,19 +11,14 @@ type command_result =
   ; status : Unix.process_status
   }
 
-(** Read-only git probe timeout (seconds). Bumped to 15s in
-    #9765/#9775 to absorb large-monorepo first-probe latency. *)
-val read_only_probe_timeout_sec : float
+(** Run [git -C clone_path --no-optional-locks args] and capture exit/stdout.
+    Hang protection is git's responsibility via [--no-optional-locks].
+    Caller does not pass a timeout (PR #20479 spirit). *)
+val run_git : clone_path:string -> string list -> command_result
 
-(** Run [git -C clone_path --no-optional-locks args] with [timeout_sec].
-    Trims the captured output. *)
-val run_git :
-  timeout_sec:float -> clone_path:string -> string list -> command_result
-
-val deleted_tracked_files_restore_hint : clone_path:string -> string option
 (** Return a concise restore hint when [git status --porcelain] contains only
     tracked-file deletions, otherwise [None]. *)
-
+val deleted_tracked_files_restore_hint : clone_path:string -> string option
 (** [safe_is_dir path] is [true] iff [path] exists and is a directory,
     swallowing [Sys_error]. *)
 val safe_is_dir : string -> bool

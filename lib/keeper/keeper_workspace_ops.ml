@@ -64,13 +64,12 @@ let handle_tool_search_files
     in
     (* TEL-OK: adapter delegates to Keeper_tool_execute_shell_ir/Exec_dispatch; execution
        telemetry stays with the delegated runtime path. *)
-    let dispatch_host_shell_ir ?timeout_sec ~workdir ir =
+    let dispatch_host_shell_ir ~workdir ir =
       Keeper_tool_execute_shell_ir.dispatch ~keeper_id:meta.name
         ~base_path:root ~workdir ~sandbox:(Masc_exec.Sandbox_target.host ())
-        ?timeout_sec ir
+        ir
     in
     let run_host_shell_ir
-          ?timeout_sec
           ?path
           ~workdir
           ~cmd
@@ -84,7 +83,7 @@ let handle_tool_search_files
         | None -> []
         | Some path -> [ "path", `String path ]
       in
-      match dispatch_host_shell_ir ?timeout_sec ~workdir ir with
+      match dispatch_host_shell_ir ~workdir ir with
       | Error (Gate_reject diagnostic) -> error_json ~fields diagnostic
       | Error Cannot_parse -> error_json ~fields "Cannot parse command"
       | Error Too_complex -> error_json ~fields "Command too complex"
@@ -95,12 +94,19 @@ let handle_tool_search_files
       if String.equal result.stderr "" then result.stdout else result.stdout ^ result.stderr
     in
     let run_in_turn_runtime ?(ok_exit_codes = [ 0 ]) ~cwd ~cmd ~command_argv
-        ?host_ir ~max_bytes ~timeout_sec ?(map_output = fun out -> out) ?(extra = []) () =
+        ?host_ir ~max_bytes ?(map_output = fun out -> out) ?(extra = []) () =
       match Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd with
       | Some runtime ->
         (match
            Keeper_turn_sandbox_runtime.run_command_with_status
-             ~ok_exit_codes runtime ~cwd ~command_argv ~max_bytes ~timeout_sec ()
+             ~ok_exit_codes
+             runtime
+             ~cwd
+             ~command_argv
+             ~max_bytes
+             ~timeout_sec:
+               (Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Io ())
+             ()
          with
          | Error msg ->
            error_json
@@ -115,7 +121,7 @@ let handle_tool_search_files
              ~fields:[ "op", `String op; "cwd", `String cwd ]
              "missing host Shell IR fallback"
          | Some ir ->
-           run_host_shell_ir ~timeout_sec ~workdir:cwd ~cmd ~path:cwd ir
+           run_host_shell_ir ~workdir:cwd ~cmd ~path:cwd ir
              ~on_ok:(fun result ->
                render_completed_process_result ~root ~keeper_name:meta.name ~op
                  ~cwd ~cmd ~extra result.status
@@ -135,7 +141,7 @@ let handle_tool_search_files
             ~command_argv:[ "git"; "--no-optional-locks"; "diff"; "--stat" ]
             ~host_ir
             ~max_bytes:1_000_000
-            ~timeout_sec:Keeper_tool_execute_timeout.read_timeout_sec ())
+            ())
      | _ ->
        Yojson.Safe.to_string
          (`Assoc

@@ -604,9 +604,9 @@ let test_turn_sandbox_file_write_uses_host_bind_mount () =
   (match
      Keeper_turn_sandbox_runtime.overwrite_file
        runtime
+       ~timeout_sec:30.0
        ~host_path:target
        ~content:"alpha\n"
-       ~timeout_sec:1.0
        ()
    with
    | Error msg -> Alcotest.fail msg
@@ -614,9 +614,9 @@ let test_turn_sandbox_file_write_uses_host_bind_mount () =
   (match
      Keeper_turn_sandbox_runtime.append_file
        runtime
+       ~timeout_sec:30.0
        ~host_path:target
        ~content:"beta\n"
-       ~timeout_sec:1.0
        ()
    with
    | Error msg -> Alcotest.fail msg

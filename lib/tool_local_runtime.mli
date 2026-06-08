@@ -59,9 +59,10 @@ val runtime_ollama_probe_json :
 (** Re-export of {!Tool_local_runtime_probe.runtime_ollama_probe_json}.
     All parameters are optional with defaults: [probe_runs = 2],
     [max_tokens = 16], [think_mode = Think_auto],
-    [timeout_sec = default_probe_timeout_sec],
-    [ps_timeout_sec = default_ps_timeout_sec],
-    [generate_when_unloaded = true], [run_generate = true]. *)
+    [timeout_sec = 6], [ps_timeout_sec = 2],
+    [generate_when_unloaded = true], [run_generate = true].  Per
+    PR #20479 spirit: the tool itself (ollama [OLLAMA_LOAD_TIMEOUT])
+    owns hang protection; callers do not observe these timeouts. *)
 
 val run_bench :
   ?model_id:string ->

@@ -705,7 +705,9 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
          let sandbox_live =
            Keeper_sandbox_control.live_status_json
              ~include_preflight:false
-             ~config:config ~meta:m ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Status_detail ()) ~verbose:false ()
+             ~config:config ~meta:m
+             ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Io ())
+             ~verbose:false ()
          in
          let runtime_blocker_fields =
           runtime_blocker_fields_json config m

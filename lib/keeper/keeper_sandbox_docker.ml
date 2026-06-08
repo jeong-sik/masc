@@ -165,20 +165,12 @@ let docker_result_pair = function
 ;;
 
 (* docker run --rm wall-clock covers slot_wait + spawn + container
-   cold start + actual cmd + drain. A 5s floor was insufficient under
-   typical conditions — trivial commands such as [git -C ... status]
-   were timing out at 5s because the cold-start path alone (image pull
-   + container creation + shell init) can take 10-60s on a cold host.
-
-   Load-bearing tool dispatch uses a 15s floor for the same class of
-   failure (sub-I/O-latency timeouts cascading into retries); the docker
-   path was left at 5s — an N-of-M between sibling timeout floors. This
-   restores parity (15s dispatch + 5s headroom for container creation) and
-   exposes an env override so operators can tune for slow-pull fleets without
-   rebuilding.
-
-   This minimum applies only to the [docker run] path, not to
-   [docker exec] against a warm container. *)
+   cold start + actual cmd + drain. The floor is hardcoded at 20s because
+   the hang modes (docker daemon stall, container start stall, command
+   stall) are the same domain — the sandbox's own.  Caller does not
+   observe this: tool dispatch path owns its hang protection via
+   git --no-optional-locks / ollama OLLAMA_LOAD_TIMEOUT, not via a
+   caller-side timeout knob. *)
 
 let resolve_sandbox_image (meta : keeper_meta) =
   match meta.sandbox_image with
@@ -187,13 +179,13 @@ let resolve_sandbox_image (meta : keeper_meta) =
 ;;
 
 let docker_run_min_timeout_sec =
-  let floor = Timeout_floor.Docker_run in
-  let default = Timeout_floor.default_sec floor in
+  let floor = 20.0 in
   let raw =
-    try float_of_string (Sys.getenv "MASC_KEEPER_DOCKER_RUN_MIN_TIMEOUT_SEC")
-    with Not_found | Failure _ -> default
+    match Sys.getenv_opt "MASC_KEEPER_DOCKER_RUN_MIN_TIMEOUT_SEC" with
+    | Some s -> (match float_of_string_opt s with Some f -> f | None -> floor)
+    | None -> floor
   in
-  Timeout_floor.clamp floor raw
+  max floor raw
 ;;
 
 let docker_cleanup_rm_timeout_sec () =
@@ -546,8 +538,7 @@ let run_docker_shell_command_with_status_internal
                 let _cleanup =
                   Keeper_sandbox_runtime.maybe_cleanup_stale_containers
                     ~base_path:config.base_path
-                    ~timeout_sec:
-                      (Env_config_exec_timeout.timeout_sec ~caller:Sandbox ())
+                    ~timeout_sec
                     ()
                 in
                 match ensure_keeper_sandbox_runtime ~timeout_sec with
@@ -743,9 +734,9 @@ let run_docker_bash
          (match
             Keeper_turn_sandbox_runtime.run_bash_with_status
               runtime
+              ~timeout_sec
               ~cwd
               ~cmd
-              ~timeout_sec
               ()
           with
           | Error message -> sandbox_error_json message

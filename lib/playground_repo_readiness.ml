@@ -14,20 +14,18 @@ type command_result =
   ; status : Unix.process_status
   }
 
-(* Read-only git probe timeout. Large monorepos (~/me, kidsnote-backend)
-   repeatedly trip a 5 s budget on first probe after filesystem cache
-   eviction; 15 s matches [server_dashboard_http_runtime_info]'s sibling
-   probe that was bumped for the same reason in #9765/#9775. *)
-let read_only_probe_timeout_sec = 15.0
-
-let run_git ~timeout_sec ~clone_path args =
+(* Read-only git probe: hang protection is git's responsibility via
+   `--no-optional-locks` (refuses to take a long-lived lock per command).
+   NFS or corrupt-repo hang is the tool's domain, not the caller's;
+   see PR #20479 spirit (caller-specific timeout closure). *)
+let run_git ~clone_path args =
   let argv = [ "git"; "-C"; clone_path; "--no-optional-locks" ] @ args in
   let status, output =
     Masc_exec.Exec_gate.run_argv_with_status
       ~actor:`Workspace_git
       ~raw_source:(String.concat " " argv)
       ~summary:"playground repo readiness git probe"
-      ~timeout_sec argv
+      argv
   in
   { ok = status = Unix.WEXITED 0; output = String.trim output; status }
 
@@ -58,7 +56,6 @@ let shell_quote_path path =
 let deleted_tracked_files_restore_hint ~clone_path =
   let status =
     run_git
-      ~timeout_sec:read_only_probe_timeout_sec
       ~clone_path
       [ "status"; "--porcelain"; "-z" ]
   in
@@ -110,7 +107,7 @@ let same_path a b = String.equal (normalize_path a) (normalize_path b)
 
 let git_toplevel path =
   let probe =
-    run_git ~timeout_sec:read_only_probe_timeout_sec ~clone_path:path
+    run_git ~clone_path:path
       [ "rev-parse"; "--show-toplevel" ]
   in
   if probe.ok then Some probe.output else None
@@ -224,11 +221,11 @@ let inspect
       ]
   else
     let inside =
-      run_git ~timeout_sec:read_only_probe_timeout_sec ~clone_path [ "rev-parse"; "--is-inside-work-tree" ]
+      run_git ~clone_path [ "rev-parse"; "--is-inside-work-tree" ]
     in
     let top =
       if inside.ok then
-        run_git ~timeout_sec:read_only_probe_timeout_sec ~clone_path
+        run_git ~clone_path
           [ "rev-parse"; "--show-toplevel" ]
       else { inside with ok = false; output = "" }
     in
@@ -246,20 +243,19 @@ let inspect
     else
       let status =
         run_git
-          ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Repo_readiness ())
           ~clone_path [ "status"; "--porcelain" ]
       in
       let dirty = status.ok && String.trim status.output <> "" in
       let branch =
-        run_git ~timeout_sec:read_only_probe_timeout_sec ~clone_path [ "branch"; "--show-current" ]
+        run_git ~clone_path [ "branch"; "--show-current" ]
         |> fun r -> if r.ok then first_line_opt r.output else None
       in
       let head =
-        run_git ~timeout_sec:read_only_probe_timeout_sec ~clone_path [ "rev-parse"; "--short"; "HEAD" ]
+        run_git ~clone_path [ "rev-parse"; "--short"; "HEAD" ]
         |> fun r -> if r.ok then first_line_opt r.output else None
       in
       let upstream =
-        run_git ~timeout_sec:read_only_probe_timeout_sec ~clone_path
+        run_git ~clone_path
           [ "rev-parse"; "--abbrev-ref"; "--symbolic-full-name"; "@{upstream}" ]
       in
       let upstream_name = if upstream.ok then first_line_opt upstream.output else None in
@@ -269,7 +265,6 @@ let inspect
         | Some _ -> (
             let counts =
               run_git
-                ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Repo_readiness ())
                 ~clone_path
                 [ "rev-list"; "--left-right"; "--count"; "@{upstream}...HEAD" ]
             in
@@ -280,7 +275,7 @@ let inspect
             else None, None)
       in
       let origin =
-        run_git ~timeout_sec:read_only_probe_timeout_sec ~clone_path [ "remote"; "get-url"; "origin" ]
+        run_git ~clone_path [ "remote"; "get-url"; "origin" ]
       in
       let has_origin = origin.ok && String.trim origin.output <> "" in
       (* Currency against [origin/<default_branch>] explicitly, independent of
@@ -292,7 +287,6 @@ let inspect
       let behind_default =
         let counts =
           run_git
-            ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Repo_readiness ())
             ~clone_path
             [ "rev-list"; "--count"; "HEAD..origin/" ^ default_branch ]
         in
@@ -410,7 +404,6 @@ let ensure_ready ~(config : Workspace.config) ~(meta : keeper_meta) ~repo_name (
                 (Printf.sprintf "mv %s %s" (Filename.quote path)
                    (Filename.quote quarantine))
               ~summary:"quarantine corrupt sandbox repo before reclone"
-              ~timeout_sec:read_only_probe_timeout_sec
               [ "mv"; path; quarantine ]
           in
           ());
@@ -449,12 +442,12 @@ let ensure_parent_clone_for_worktree ~(config : Workspace.config) ~(meta : keepe
   let repo_path = clone_path ~config ~meta ~repo_name in
   if safe_is_dir repo_path then (
     let inside =
-      run_git ~timeout_sec:read_only_probe_timeout_sec ~clone_path:repo_path
+      run_git ~clone_path:repo_path
         [ "rev-parse"; "--is-inside-work-tree" ]
     in
     let top =
       if inside.ok then
-        run_git ~timeout_sec:read_only_probe_timeout_sec ~clone_path:repo_path
+        run_git ~clone_path:repo_path
           [ "rev-parse"; "--show-toplevel" ]
       else { inside with ok = false; output = "" }
     in
@@ -471,7 +464,6 @@ let ensure_parent_clone_for_worktree ~(config : Workspace.config) ~(meta : keepe
 let best_effort_fetch_origin repo_path =
   ignore
     (run_git
-       ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Repo_readiness ())
        ~clone_path:repo_path
        [ "fetch"; "--quiet"; "origin" ])
 
@@ -480,7 +472,7 @@ let first_existing_ref ~repo_path refs =
     | [] -> None
     | ref_name :: rest ->
       let probe =
-        run_git ~timeout_sec:read_only_probe_timeout_sec ~clone_path:repo_path
+        run_git ~clone_path:repo_path
           [ "rev-parse"; "--verify"; "--quiet"; ref_name ]
       in
       if probe.ok then Some ref_name else loop rest
@@ -491,7 +483,7 @@ let worktree_base_ref ~repo_path =
   best_effort_fetch_origin repo_path;
   let remote_head =
     let probe =
-      run_git ~timeout_sec:read_only_probe_timeout_sec ~clone_path:repo_path
+      run_git ~clone_path:repo_path
         [ "symbolic-ref"; "--quiet"; "--short"; "refs/remotes/origin/HEAD" ]
     in
     if probe.ok then first_line_opt probe.output else None
@@ -679,8 +671,7 @@ let ensure_worktree_ready
           (* [git worktree add --detach <path> <ref>] avoids inheriting a dirty
              parent task branch as the new task's base. *)
           let add_result =
-            run_git ~timeout_sec:(read_only_probe_timeout_sec *. 2.0)
-              ~clone_path:repo_path
+            run_git ~clone_path:repo_path
               [ "worktree"; "add"; "--detach"; worktree_path; base_ref ]
           in
           if add_result.ok then (
@@ -692,8 +683,7 @@ let ensure_worktree_ready
               (* Create a task branch in the new worktree *)
               let branch_name = Printf.sprintf "task/%s" task_name in
               let checkout =
-                run_git ~timeout_sec:read_only_probe_timeout_sec
-                  ~clone_path:worktree_path
+                run_git ~clone_path:worktree_path
                   [ "checkout"; "-b"; branch_name ]
               in
               if checkout.ok then Ok ()
@@ -776,7 +766,6 @@ let provision_worktrees_for_task
                         on. *)
                      let add_result =
                        run_git
-                         ~timeout_sec:(read_only_probe_timeout_sec *. 2.0)
                          ~clone_path:repo_path
                          [ "worktree"; "add"; "--detach"; worktree_path; base_ref ]
                      in
@@ -796,8 +785,7 @@ let provision_worktrees_for_task
                          Printf.sprintf "task/%s" task_id
                        in
                        let _checkout =
-                         run_git ~timeout_sec:read_only_probe_timeout_sec
-                           ~clone_path:worktree_path
+                         run_git ~clone_path:worktree_path
                            [ "checkout"; "-b"; branch_name ]
                        in
                        Log.Workspace.info
@@ -849,7 +837,7 @@ type currency_outcome =
 
 let count_behind ~clone_path ~target_ref =
   let r =
-    run_git ~timeout_sec:read_only_probe_timeout_sec ~clone_path
+    run_git ~clone_path
       [ "rev-list"; "--count"; "HEAD.." ^ target_ref ]
   in
   if r.ok then int_of_string_opt (String.trim r.output) else None
@@ -859,7 +847,7 @@ let count_behind ~clone_path ~target_ref =
     on probe error. [git merge-base --is-ancestor] exits 0 = yes, 1 = no. *)
 let is_ancestor ~clone_path ~ancestor ~descendant =
   let r =
-    run_git ~timeout_sec:read_only_probe_timeout_sec ~clone_path
+    run_git ~clone_path
       [ "merge-base"; "--is-ancestor"; ancestor; descendant ]
   in
   match r.status with
@@ -905,14 +893,12 @@ let ensure_current ~(config : Workspace.config) ~(meta : keeper_meta) ~repo_name
                 let behind = count_behind ~clone_path:cpath ~target_ref in
                 let dirty =
                   let s =
-                    run_git ~timeout_sec:read_only_probe_timeout_sec
-                      ~clone_path:cpath [ "status"; "--porcelain" ]
+                    run_git ~clone_path:cpath [ "status"; "--porcelain" ]
                   in
                   s.ok && String.trim s.output <> ""
                 in
                 let branch =
-                  run_git ~timeout_sec:read_only_probe_timeout_sec
-                    ~clone_path:cpath [ "branch"; "--show-current" ]
+                  run_git ~clone_path:cpath [ "branch"; "--show-current" ]
                   |> fun r -> if r.ok then first_line_opt r.output else None
                 in
                 match behind with

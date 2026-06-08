@@ -1,9 +1,10 @@
 (** Mcp_server_eio_call_tool — Tool call handler and result envelope
 
     Extracted from mcp_server_eio.ml.
-    Handles tools/call JSON-RPC method: timeout, retry, result envelope,
-    telemetry, and audit logging.
-*)
+    Handles tools/call JSON-RPC method: read-only retry, result
+    envelope, telemetry, and audit logging. Per-tool timeout was
+    removed (2026-06-08 fleet-wide cleanup); the tool itself is
+    responsible for any hang protection. *)
 
 type tool_profile = Mcp_server_eio_types.tool_profile =
   | Full
@@ -506,14 +507,6 @@ let call_tool_with_readonly_retry
   in
   loop 1
 
-type resolved_tool_timeout = Mcp_server_eio_tool_timeout.resolved_tool_timeout =
-  { timeout_sec : float
-  ; source_env : string option
-  }
-
-let tool_timeout = Mcp_server_eio_tool_timeout.tool_timeout
-let tool_timeout_sec_opt = Mcp_server_eio_tool_timeout.tool_timeout_sec_opt
-
 (** Resolve managed agent tool call to canonical operation *)
 let resolve_managed_agent_call ?mcp_session_id params =
   let requested_name = Json_util.get_string params "name" |> Option.value ~default:"" in
@@ -548,96 +541,60 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
 
   (* Measure execution time for telemetry *)
   let start_time = Eio.Time.now clock in
-  let timeout_hit = ref false in
-  let execute_with_timeout () =
-    let local_timeout_hit = ref false in
-    let execute_core () =
-      try
-        match tool_timeout ~tool_name:name ~_arguments:arguments with
-        | None ->
-            execute_tool_eio ~sw ~clock ?profile:(Some profile) ?mcp_session_id ?auth_token
-              ?internal_keeper_runtime:(Some internal_keeper_runtime)
-              state ~name ~arguments
-        | Some { timeout_sec; source_env } ->
-            (try
-               Eio.Time.with_timeout_exn
-                 clock
-                 timeout_sec
-                 (fun () ->
-                   execute_tool_eio
-                     ~sw
-                     ~clock
-                     ?profile:(Some profile)
-                     ?mcp_session_id
-                     ?auth_token
-                     ?internal_keeper_runtime:(Some internal_keeper_runtime)
-                     state
-                     ~name
-                     ~arguments)
-             with Eio.Time.Timeout ->
-               local_timeout_hit := true;
-               Log.Mcp.error "tools/call timeout: %s after %.0fs" name timeout_sec;
-               let source =
-                 match source_env with
-                 | Some source -> Printf.sprintf " (timeout source: %s)" source
-                 | None -> ""
-               in
-               (* RFC-0189: timeout = retry-friendly transient
-                  failure.  Caller can retry with a longer
-                  [timeout_sec] or wait for the slow upstream to
-                  finish. *)
-               Tool_result.error
-                 ~failure_class:(Some Tool_result.Transient_error)
-                 ~tool_name:name ~start_time
-                 (Printf.sprintf "Tool timed out after %.0fs: %s%s"
-                    timeout_sec name source))
-     with
-     | Eio.Cancel.Cancelled _ as e -> raise e
-     | Workspace.Not_initialized ->
-       (* RFC-0189: server bootstrap incomplete — Masc_domain
-          System NotInitialized.  [Runtime_failure] (caller
-          cannot fix; the operator must initialise MASC). *)
-       Tool_result.error
-         ~failure_class:(Some Tool_result.Runtime_failure)
-         ~tool_name:name ~start_time
-         (Masc_domain.masc_error_to_string (Masc_domain.System Masc_domain.System_error.NotInitialized))
-     | exn ->
-       (* Never let a tool exception crash the MCP server. *)
-       let err = Printexc.to_string exn in
-       let trace = Printexc.get_backtrace () in
-       let err_detail = if String.length trace > 0 then err ^ "\n" ^ trace else err in
-       (Log.Mcp.error "tools/call crashed: %s" err_detail;
-          (* RFC-0189: catch-all for unexpected exceptions —
-             [Runtime_failure].  Could become more specific via
-             [of_exn] once the exception variants are typed; for
-             now blanket Runtime preserves operator-visible
-             severity (the existing log line stays ERROR). *)
-          Tool_result.error
-            ~failure_class:(Some Tool_result.Runtime_failure)
-            ~tool_name:name ~start_time
-            (Printf.sprintf "Internal error: %s" err_detail))
-    in
-    let result =
+  let execute () =
+    try
       Tool_resource_gate.with_permit
         ~clock
         ~tool_name:name
         ~arguments
         ~is_read_only
         ~start_time
-        execute_core
-    in
-    if !local_timeout_hit then timeout_hit := true;
-    result
+        (fun () ->
+          execute_tool_eio
+            ~sw
+            ~clock
+            ?profile:(Some profile)
+            ?mcp_session_id
+            ?auth_token
+            ?internal_keeper_runtime:(Some internal_keeper_runtime)
+            state
+            ~name
+            ~arguments)
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | Workspace.Not_initialized ->
+      (* RFC-0189: server bootstrap incomplete — Masc_domain
+         System NotInitialized.  [Runtime_failure] (caller
+         cannot fix; the operator must initialise MASC). *)
+      Tool_result.error
+        ~failure_class:(Some Tool_result.Runtime_failure)
+        ~tool_name:name ~start_time
+        (Masc_domain.masc_error_to_string (Masc_domain.System Masc_domain.System_error.NotInitialized))
+    | exn ->
+      (* Never let a tool exception crash the MCP server. *)
+      let err = Printexc.to_string exn in
+      let trace = Printexc.get_backtrace () in
+      let err_detail = if String.length trace > 0 then err ^ "\n" ^ trace else err in
+      (Log.Mcp.error "tools/call crashed: %s" err_detail;
+         (* RFC-0189: catch-all for unexpected exceptions —
+            [Runtime_failure].  Could become more specific via
+            [of_exn] once the exception variants are typed; for
+            now blanket Runtime preserves operator-visible
+            severity (the existing log line stays ERROR). *)
+         Tool_result.error
+           ~failure_class:(Some Tool_result.Runtime_failure)
+           ~tool_name:name ~start_time
+           (Printf.sprintf "Internal error: %s" err_detail))
   in
   let (result, attempts) =
     if is_read_only then
       call_tool_with_readonly_retry
         ~clock
-        ~run_tool:execute_with_timeout
+        ~run_tool:execute
         ~is_read_only
         ()
     else
-      (execute_with_timeout (), 1)
+      (execute (), 1)
   in
   let success = Tool_result.is_success result
   and message = Tool_result.message result
@@ -682,8 +639,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
         let error_preview_max = 200 in
         String_util.utf8_safe ~max_bytes:(error_preview_max + 3) ~suffix:"..." message |> String_util.to_string
       in
-      Some (Printf.sprintf "timeout=%d|duration_ms=%d|detail=%s"
-              (if !timeout_hit then 1 else 0) duration_ms truncated)
+      Some (Printf.sprintf "duration_ms=%d|detail=%s" duration_ms truncated)
   in
   let otel_trace_id = Otel_spans.current_trace_id () in
   Audit_log.log_tool_call state.Mcp_server.workspace_config
@@ -709,7 +665,6 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
             ("outcome", `String "error");
             ("agent_name", `String agent_name);
             ("duration_ms", `Int duration_ms);
-            ("timeout_hit", `Bool !timeout_hit);
             ("attempts", `Int attempts);
             ("error_detail", `String (Option.value ~default:"" error_detail));
           ])
@@ -743,9 +698,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
      [Error_occurred] event for the previously-dead ADT variant. *)
   let telemetry_error_kind =
     if not success then
-      Some
-        (Telemetry_eio.error_kind_of_string
-           (if !timeout_hit then "timeout" else "tool_failure"))
+      Some (Telemetry_eio.error_kind_of_string "tool_failure")
     else None
   in
   let telemetry_failure_class =
@@ -800,8 +753,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
    | Some aid ->
        let error_kind =
          if not success then
-           let kind = if !timeout_hit then "timeout" else "tool_failure" in
-           Some (Tool_assignment_telemetry.error_kind_of_string kind)
+           Some (Tool_assignment_telemetry.error_kind_of_string "tool_failure")
          else None
        in
        Tool_assignment_telemetry.emit_completed
@@ -904,7 +856,6 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
       ("attempts", `Int attempts);
       ("timestamp", `String (Masc_domain.now_iso ()));
     ]
-    @ (if !timeout_hit then [ ("timeout_hit", `Bool true) ] else [])
   in
   let result_fields =
     [
@@ -942,7 +893,6 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
           ("success", `Bool success);
           ("duration_ms", `Int duration_ms);
           ("attempts", `Int attempts);
-          ("timeout_hit", `Bool !timeout_hit);
         ])
     (Printf.sprintf "%s -> %s" name preview);
 

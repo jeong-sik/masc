@@ -153,7 +153,6 @@ let git_ok ~cwd args =
 let git_output ~cwd args =
   let result =
     Masc.Playground_repo_readiness.run_git
-      ~timeout_sec:Masc.Playground_repo_readiness.read_only_probe_timeout_sec
       ~clone_path:cwd
       args
   in
@@ -479,7 +478,6 @@ let test_ensure_worktree_ready_creates_worktree () =
   check bool "worktree is directory" true (Sys.is_directory worktree_path);
   let probe =
     Masc.Playground_repo_readiness.run_git
-      ~timeout_sec:Masc.Playground_repo_readiness.read_only_probe_timeout_sec
       ~clone_path:worktree_path
       [ "rev-parse"; "--show-toplevel" ]
   in
@@ -571,7 +569,6 @@ let test_ensure_worktree_ready_normalizes_gitdir_pointer () =
     (read_file_trim git_file);
   let status =
     Masc.Playground_repo_readiness.run_git
-      ~timeout_sec:Masc.Playground_repo_readiness.read_only_probe_timeout_sec
       ~clone_path:worktree_path
       [ "status"; "--short" ]
   in
@@ -611,7 +608,6 @@ let test_ensure_worktree_ready_rejects_nested_plain_directory () =
    | Error _ -> ());
   let probe =
     Masc.Playground_repo_readiness.run_git
-      ~timeout_sec:Masc.Playground_repo_readiness.read_only_probe_timeout_sec
       ~clone_path:worktree_path
       [ "rev-parse"; "--show-toplevel" ]
   in
@@ -642,7 +638,6 @@ let test_ensure_worktree_ready_replaces_broken_gitdir_slot () =
   write_stale_worktree_gitdir ~worktree_path ~task_name;
   let broken_probe =
     Masc.Playground_repo_readiness.run_git
-      ~timeout_sec:Masc.Playground_repo_readiness.read_only_probe_timeout_sec
       ~clone_path:worktree_path
       [ "rev-parse"; "--show-toplevel" ]
   in
@@ -693,7 +688,6 @@ let test_provision_worktrees_creates_worktrees () =
   check bool "worktree is directory" true (Sys.is_directory worktree_path);
   let probe =
     Masc.Playground_repo_readiness.run_git
-      ~timeout_sec:Masc.Playground_repo_readiness.read_only_probe_timeout_sec
       ~clone_path:worktree_path
       [ "rev-parse"; "--show-toplevel" ]
   in

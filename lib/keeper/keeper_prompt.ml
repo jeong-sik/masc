@@ -203,7 +203,7 @@ let log_missing_personality_fields missing_fields =
 let build_keeper_system_prompt
     ~goal ~short_goal ~mid_goal ~long_goal ~will ~needs ~desires
     ~instructions ?(persona_extended = "") ?(keeper_name = "")
-    ?(active_goals = []) ?(home_ground = "") () =
+    ?(home_ground = "") ?(active_goals = []) () =
   let goal = normalize_goal_horizon_text goal in
   let short_goal, mid_goal, long_goal =
     resolve_goal_horizons ~goal ~short_goal_opt:(Some short_goal)

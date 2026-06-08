@@ -635,7 +635,7 @@ let test_exec_lowering_rejects_duplicate_executable_argv () =
 let docker_test_sandbox () =
   Masc_exec.Sandbox_target.docker
     ~image:"typed-docker"
-    ~runner:(fun ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ ~timeout_sec:_ ->
+    ~runner:(fun ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ ->
       Unix.WEXITED 0, "", "")
     ()
 ;;

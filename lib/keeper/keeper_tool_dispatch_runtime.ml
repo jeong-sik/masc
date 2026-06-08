@@ -231,20 +231,21 @@ let failure_class_of_tool_result_payload payload =
   with
   | Ok json ->
     if Safe_ops.json_bool ~default:false "ok" json
-    then Some "success"
+    then None
     else (
       match Safe_ops.json_string_opt "failure_class" json with
-      | Some _ as failure_class -> failure_class
-      | None -> None)
-  | Error _ -> None
+      | Some class_str ->
+        (match Tool_result.tool_failure_class_of_string class_str with
+         | Some _ as fc -> fc
+         | None -> Some Tool_result.Runtime_failure)
+      | None -> Some Tool_result.Runtime_failure)
+  | Error _ -> Some Tool_result.Runtime_failure
 ;;
 
-let should_apply_circuit_breaker_to_failure_payload payload =
-  match failure_class_of_tool_result_payload payload with
-  | Some "success" -> false
-  | Some ("policy_rejection" | "workflow_rejection") -> false
-  | Some _
-  | None -> true
+let should_apply_circuit_breaker_to_failure_payload failure_class_opt =
+  match failure_class_opt with
+  | Some Tool_result.Policy_rejection | Some Tool_result.Workflow_rejection -> false
+  | Some Tool_result.Transient_error | Some Tool_result.Runtime_failure | None -> true
 ;;
 
 let is_policy_gate_error raw_output =
@@ -332,7 +333,8 @@ let execute_keeper_tool_call_with_outcome
       }
     | `Failure, Structured_error | `Failure, Structured_success | `Failure, Plain_text ->
       let raw_output =
-        if should_apply_circuit_breaker_to_failure_payload result.raw_output
+        let failure_class = failure_class_of_tool_result_payload result.raw_output in
+        if should_apply_circuit_breaker_to_failure_payload failure_class
         then
           Keeper_failure_circuit_breaker.maybe_enrich_error
             ~keeper_name:meta.name

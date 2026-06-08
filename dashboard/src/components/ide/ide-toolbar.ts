@@ -49,6 +49,9 @@ export const IDE_LAYERS: ReadonlyArray<OverlayLayer> = [
   { kind: 'explode', label: 'EXPLODE', description: 'per-keeper ghost copies', mutuallyExclusive: true },
 ]
 
+export const IDE_LAYER_LABELS = new Map(IDE_LAYERS.map(layer => [layer.kind, layer.label]))
+export const REVIEW_FOCUS_LAYERS = ['keeper-trace', 'approve', 'notes'] as const
+
 interface IdeToolbarProps {
   readonly activeView: ViewTab
   readonly activeLayers: ReadonlySet<string>

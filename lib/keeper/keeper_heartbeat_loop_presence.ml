@@ -151,6 +151,10 @@ let sync_keeper_presence
       ~base_path:ctx.config.base_path
       meta_current.name
       Keeper_state_machine.Heartbeat_ok;
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string HeartbeatSuccesses)
+      ~labels:[ "keeper", meta_current.name ]
+      ();
     note_turn_failures_preserved_after_heartbeat ~ctx ~meta:meta_current;
     meta_current)
   else (

@@ -220,7 +220,7 @@ let provider_config_preserving_http_transport
     ~net
     ~(provider_cfg : Llm_provider.Provider_config.t)
   : Llm_provider.Llm_transport.t =
-  let http_transport = Llm_provider.Complete.make_http_transport ~sw ~net in
+  let http_transport = Llm_provider.Complete.make_http_transport ~sw ~net () in
   let patch_request (req : Llm_provider.Llm_transport.completion_request) =
     { req with
       config =

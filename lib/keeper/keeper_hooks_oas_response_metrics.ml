@@ -51,9 +51,9 @@ let resolve_after_turn_model ~keeper_name
     in
     Otel_metric_store.inc_counter empty_response_model_metric
       ~labels:[ (label_keeper, keeper_name); (label_source, source) ] ();
-    Log.Keeper.warn
-      "keeper:%s after_turn response.model empty -> runtime_lane source=%s"
-      keeper_name source;
+    Log.Keeper.warn ~keeper_name:keeper_name
+      "after_turn response.model empty -> runtime_lane source=%s"
+      source;
     runtime_lane_label
   end else begin
     if is_runtime_selector_alias raw_model then (
@@ -66,9 +66,9 @@ let resolve_after_turn_model ~keeper_name
             (label_source, source_telemetry_canonical);
           ]
         ();
-      Log.Keeper.warn
-        "keeper:%s after_turn response.model selector -> runtime_lane source=%s"
-        keeper_name "telemetry_canonical");
+      Log.Keeper.warn ~keeper_name:keeper_name
+        "after_turn response.model selector -> runtime_lane source=%s"
+        "telemetry_canonical");
     runtime_lane_label
   end
 

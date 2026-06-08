@@ -366,16 +366,16 @@ let emit_gate_event
         ("reason", reason_code);
         ("decision", decision_label);
       ] ();
-    Log.Keeper.info
-      "keeper:%s tool:%s decision=%s reason_code=%s runtime=none \
+    Log.Keeper.info ~keeper_name:agent_name
+      "tool:%s decision=%s reason_code=%s runtime=none \
        (gate rejected before runtime attempt)"
-      agent_name tool_name decision_label reason_code
+      tool_name decision_label reason_code
   end
   else if decision = Gate_approval_required then
-    Log.Keeper.info
-      "keeper:%s tool:%s decision=%s reason_code=%s runtime=none \
+    Log.Keeper.info ~keeper_name:agent_name
+      "tool:%s decision=%s reason_code=%s runtime=none \
        (approval pending before runtime attempt)"
-      agent_name tool_name decision_label reason_code;
+      tool_name decision_label reason_code;
   match Masc_event_bus.get () with
   | None -> ()
   | Some bus ->
@@ -489,9 +489,9 @@ let custom_guard
       (match guard ~tool_name ~input with
        | Some reason ->
          let latency_ms = (Time_compat.now () -. t0) *. 1000.0 in
-         Log.Keeper.info
-           "keeper:%s pre_tool_use guard blocked %s"
-           keeper_name tool_name;
+         Log.Keeper.info ~keeper_name:keeper_name
+           "pre_tool_use guard blocked %s"
+           tool_name;
          broadcast_tool_skipped
            ~keeper_name ~tool_name ~reason_code:"pre_tool_use_guard";
          let source_path = keeper_guards_source_path in

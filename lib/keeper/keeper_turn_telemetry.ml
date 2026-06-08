@@ -12,16 +12,14 @@ let log_keeper_memory_write
   =
   if notes_written >= 10
   then
-    Log.Keeper.info
-      "keeper:%s memory_write: %d notes, kinds=[%s]"
-      keeper_name
+    Log.Keeper.info ~keeper_name:keeper_name
+      "memory_write: %d notes, kinds=[%s]"
       notes_written
       (String.concat "," kinds_written)
   else if Keeper_types_profile.keeper_debug
   then
-    Log.Keeper.debug
-      "keeper:%s memory_write: %d notes, kinds=[%s]"
-      keeper_name
+    Log.Keeper.debug ~keeper_name:keeper_name
+      "memory_write: %d notes, kinds=[%s]"
       notes_written
       (String.concat "," kinds_written)
 ;;

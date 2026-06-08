@@ -385,63 +385,20 @@ let to_oas_approval_callback ?config ~governance_level ~keeper_name ?meta ?clock
       let base_path =
         Option.map (fun (config : Workspace.config) -> config.base_path) config
       in
-      (* PR-E (Plan v3 Leak 1+3): evaluate the routine allowlist BEFORE
-         the soft-forbidden check.  Most routine matches are only
-         pre-blessed exceptions to the substring-based
-         [destructive_tool_or_op] filter.  Audited orphan force-release is
-         narrower but stronger: it can override the Critical risk wall only
-         when the current task audit proves that exact task is orphaned.
-         Runtime blockers remain hard walls for every routine. *)
-      let orphan_force_release_label =
-        match config with
-        | Some config ->
-          Keeper_routine_allowlist.orphan_force_release_rule_label
-            ~config
-            ~tool_name
-            ~input
-            ~risk_level
-        | None -> None
-      in
-      let routine_label =
-        match orphan_force_release_label with
-        | Some _ as label -> label
-        | None ->
-          (match config, meta with
-           | Some config, Some meta ->
-             (match
-                Keeper_routine_allowlist.sandboxed_code_write_rule_label
-                  ~config
-                  ~meta
-                  ~tool_name
-                  ~input
-                  ~risk_level
-              with
-              | Some _ as label -> label
-              | None ->
-                Keeper_routine_allowlist.rule_label ~tool_name ~input ~risk_level)
-           | _ -> Keeper_routine_allowlist.rule_label ~tool_name ~input ~risk_level)
-      in
       let hard_forbidden =
         runtime_auto_approval_blocked meta
-        || (risk = Critical && Option.is_none orphan_force_release_label)
+        || risk = Critical
       in
       let soft_forbidden =
-        if Option.is_some routine_label
-        then false
-        else auto_approval_soft_forbidden ~tool_name ~input
+        auto_approval_soft_forbidden ~tool_name ~input
       in
       let forbidden = hard_forbidden || soft_forbidden in
-      (* If the hard wall fires we still want the routine_label
-         downstream-suppressed so the audit log shows
-         "auto_approved_keeper_routine" only when the routine path
-         actually wins.  Recompute after-the-fact. *)
-      let routine_label = if hard_forbidden then None else routine_label in
       let always_approve =
         Option.bind meta (fun (m : Keeper_meta_contract.keeper_meta) -> m.always_approve)
         |> Option.value ~default:false
       in
       let rule_match =
-        if forbidden || Option.is_some routine_label
+        if forbidden
         then None
         else
           Keeper_approval_queue.find_matching_rule
@@ -477,35 +434,7 @@ let to_oas_approval_callback ?config ~governance_level ~keeper_name ?meta ?clock
           ();
         Agent_sdk.Hooks.Approve)
       else (
-        match routine_label with
-        | Some label ->
-          Keeper_approval_queue.audit_approval_event
-            ?base_path
-            ~event_type:"auto_approved_keeper_routine"
-            ~id:(Printf.sprintf "auto_routine_%s_%s" keeper_name tool_name)
-            ~keeper_name
-            ~tool_name
-            ~risk_level
-            ?turn_id
-            ?task_id
-            ?goal_id
-            ~goal_ids:(Option.value ~default:[] goal_ids)
-            ?sandbox_target
-            ?runtime_contract
-            ?selected_model
-            ~disposition:"Pass"
-            ~disposition_reason:label
-            ~auto_approved:true
-            ();
-          Log.Governance.debug
-            "[%s] keeper-routine auto-approve tool=%s risk=%s label=%s"
-            keeper_name
-            tool_name
-            (risk_level_to_string risk)
-            label;
-          Agent_sdk.Hooks.Approve
-        | None ->
-          (match rule_match with
+        match rule_match with
            | Some matched ->
              Keeper_approval_queue.audit_approval_event
                ?base_path

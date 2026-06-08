@@ -142,6 +142,11 @@ const SURFACE_ORDER: ReadonlyArray<IdeContextSurfaceId> = [
   'runtime',
   'telemetry',
 ]
+
+function isIdeContextSurfaceId(value: string): value is IdeContextSurfaceId {
+  return (SURFACE_ORDER as readonly string[]).includes(value)
+}
+
 const MAX_CONTEXT_ANCHORS = 6
 const MAX_CONTEXT_ROUTE_LINKS = 10
 const CONTEXT_ANCHOR_BUCKET_ORDER = [
@@ -302,39 +307,26 @@ function contextAnchorBuckets(anchor: IdeContextAnchor): ReadonlySet<ContextAnch
     // 2026-05-17 console). 근본 해결: RFC-0004 Phase A0.4 (Zod payload nested 검증)
     // 도입 시 null 자체가 표면에 못 들어옴 → 본 guard 제거.
     const label = (link.label ?? '').trim().toLowerCase()
-    if (label === 'goal') buckets.add('goal')
-    else if (label === 'task') buckets.add('task')
-    else if (label === 'board') buckets.add('board')
-    else if (label === 'comment') buckets.add('comment')
-    else if (label === 'pr') buckets.add('pr')
-    else if (label === 'git') buckets.add('git')
-    else if (label === 'log') buckets.add('log')
-    else if (label === 'telemetry') {
-      buckets.add('telemetry')
+    if (isIdeContextSurfaceId(label)) {
+      buckets.add(label)
       if (
-        link.params.session_id !== undefined
-        || link.params.operation_id !== undefined
-        || link.params.worker_run_id !== undefined
+        label === 'telemetry'
+        && (
+          link.params.session_id !== undefined
+          || link.params.operation_id !== undefined
+          || link.params.worker_run_id !== undefined
+        )
       ) {
         buckets.add('runtime')
       }
     }
-    else if (label === 'keeper') buckets.add('keeper')
   }
 
   // WORKAROUND: 같은 사유 (link.label null guard 위 참조). RFC-0004 Phase A0.4 도입 시 제거.
   const surface = (anchor.surface ?? '').trim().toLowerCase()
-  if (surface === 'lsp') buckets.add('lsp')
-  else if (surface === 'line') buckets.add('line')
-  else if (surface === 'goal') buckets.add('goal')
-  else if (surface === 'task') buckets.add('task')
-  else if (surface === 'board') buckets.add('board')
-  else if (surface === 'git') buckets.add('git')
-  else if (surface === 'pr') buckets.add('pr')
-  else if (surface === 'log') buckets.add('log')
-  else if (surface === 'runtime') buckets.add('runtime')
-  else if (surface === 'telemetry') buckets.add('telemetry')
-  else if (surface === 'comment' || surface === 'question' || surface === 'note' || surface === 'suggest') {
+  if (isIdeContextSurfaceId(surface)) {
+    buckets.add(surface)
+  } else if (surface === 'question' || surface === 'note' || surface === 'suggest') {
     buckets.add('comment')
   }
 

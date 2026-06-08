@@ -44,7 +44,6 @@ type system_fd_cache_entry =
   }
 
 let system_fd_cache : system_fd_cache_entry option Atomic.t = Atomic.make None
-let system_fd_mutex = Stdlib.Mutex.create ()
 
 type admission_block =
   | Fd_pressure_cooldown of float
@@ -382,6 +381,18 @@ let system_fd_probe_ttl_sec () =
   |> Float.min 30.0
 ;;
 
+(* The detect spawns a [sysctl] subprocess on darwin and does a blocking
+   [input_line] drain. Run it via [Eio_guard.run_in_systhread] so the blocking
+   read does not freeze the owning Eio domain's event-loop thread; the guard
+   falls back to a direct call before [Eio_guard.enable ()] (unit tests / init).
+
+   No mutex around the detect: [system_fd_cache] is an [Atomic], and the probe is
+   an idempotent read-only [sysctl] read, so concurrent duplicate detects are
+   harmless (last-write-wins). A [Stdlib.Mutex] held across the systhread offload
+   would be held across a yield (the installed [With_process] guard acquires an
+   [Eio.Semaphore]; see fd_accountant.ml install_with_process_sandbox_exec_guard),
+   which is a defect on OCaml 5.x. Contrast [process_nofile_soft_limit]: its detect
+   is a non-yielding native [getrlimit] stub, so its Stdlib.Mutex stays. *)
 let system_fd_snapshot ?now () =
   let now = Option.value ~default:(Time_compat.now ()) now in
   let fresh = function
@@ -392,16 +403,11 @@ let system_fd_snapshot ?now () =
   match fresh (Atomic.get system_fd_cache) with
   | Some snapshot -> snapshot
   | None ->
-    Stdlib.Mutex.lock system_fd_mutex;
-    Fun.protect
-      ~finally:(fun () -> Stdlib.Mutex.unlock system_fd_mutex)
-      (fun () ->
-        match fresh (Atomic.get system_fd_cache) with
-        | Some snapshot -> snapshot
-        | None ->
-          let snapshot = detect_system_fd_snapshot_now () in
-          Atomic.set system_fd_cache (Some { sampled_at = now; snapshot });
-          snapshot)
+    let snapshot =
+      Eio_guard.run_in_systhread (fun () -> detect_system_fd_snapshot_now ())
+    in
+    Atomic.set system_fd_cache (Some { sampled_at = now; snapshot });
+    snapshot
 ;;
 
 (* Fleet baseline. Default targets 64 active keepers:

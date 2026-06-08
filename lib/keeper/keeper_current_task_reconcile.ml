@@ -30,9 +30,9 @@ let task_id_of_owned_active_task ~(keeper_name : string) (task : Masc_domain.tas
       Keeper_metrics.(to_string ReconcileFailures)
       ~labels:[("keeper", keeper_name); ("phase", "task_id_parse")]
       ();
-    Log.Keeper.warn
-      "keeper:%s owned task %s could not be parsed: %s"
-      keeper_name task.id msg;
+    Log.Keeper.warn ~keeper_name:keeper_name
+      "owned task %s could not be parsed: %s"
+      task.id msg;
     None
 
 type owned_active_task =
@@ -66,9 +66,9 @@ let owned_active_tasks_for_meta ~(config : Workspace.config)
       Keeper_metrics.(to_string ReconcileFailures)
       ~labels:[("keeper", meta.name); ("phase", "owned_tasks_query")]
       ();
-    Log.Keeper.warn
-      "keeper:%s owned task reconciliation failed: %s"
-      meta.name (Printexc.to_string exn);
+    Log.Keeper.warn ~keeper_name:meta.name
+      "owned task reconciliation failed: %s"
+      (Printexc.to_string exn);
     []
 
 let active_status_rank = function
@@ -148,9 +148,8 @@ let sync_current_task_id_from_backlog ~(config : Workspace.config)
          Keeper_metrics.(to_string WriteMetaFailures)
          ~labels:[("keeper", meta.name); ("phase", "reconcile_task_id")]
          ();
-       Log.Keeper.warn
-         "keeper:%s failed to persist reconciled current_task_id=%s: %s"
-         meta.name
+       Log.Keeper.warn ~keeper_name:meta.name
+         "failed to persist reconciled current_task_id=%s: %s"
          (match desired with
           | Some task_id -> Keeper_id.Task_id.to_string task_id
           | None -> "(cleared)")
@@ -165,9 +164,8 @@ let sync_current_task_id_from_backlog ~(config : Workspace.config)
        no longer drowns the INFO stream; raise back to INFO only if a
        per-keeper thrash investigation needs structured timing without
        a debug-level subscription. *)
-    Log.Keeper.debug
-      "keeper:%s reconciled current_task_id=%s from backlog ownership"
-      meta.name
+    Log.Keeper.debug ~keeper_name:meta.name
+      "reconciled current_task_id=%s from backlog ownership"
       (match desired with
        | Some task_id -> Keeper_id.Task_id.to_string task_id
        | None -> "(cleared)");

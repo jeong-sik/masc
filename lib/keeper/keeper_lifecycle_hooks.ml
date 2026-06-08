@@ -50,9 +50,9 @@ let record_coverage_gap ?base_dir ?meta ~callback ~error () =
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | gap_exn ->
-        Log.Keeper.warn
-          "keeper:%s lifecycle hook coverage-gap record failed: %s"
-          meta.name (Printexc.to_string gap_exn))
+        Log.Keeper.warn ~keeper_name:meta.name
+          "lifecycle hook coverage-gap record failed: %s"
+          (Printexc.to_string gap_exn))
   | _ -> ()
 
 let run ?base_dir ?meta ~keeper_id (ev : event) : unit =

@@ -271,9 +271,8 @@ let refresh_progress_updated_line config name =
       Keeper_metrics.(to_string ProgressUpdatedLineFailures)
       ~labels:[("keeper", name)]
       ();
-    Log.Keeper.warn
-      "keeper:%s progress Updated line refresh failed for %s: %s"
-      name
+    Log.Keeper.warn ~keeper_name:name
+      "progress Updated line refresh failed for %s: %s"
       progress_path
       (Printexc.to_string exn)
 ;;

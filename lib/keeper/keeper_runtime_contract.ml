@@ -19,9 +19,8 @@ let validate_active_goal_ids ~(config : Workspace.config) ~(meta : keeper_meta) 
       meta.active_goal_ids
   in
   if invalid_goal_ids <> [] then
-    Log.Keeper.warn
-      "keeper:%s pruned %d invalid goal_ids from active_goal_ids: %s"
-      meta.name
+    Log.Keeper.warn ~keeper_name:meta.name
+      "pruned %d invalid goal_ids from active_goal_ids: %s"
       (List.length invalid_goal_ids)
       (String.concat ", " invalid_goal_ids);
   valid_goal_ids

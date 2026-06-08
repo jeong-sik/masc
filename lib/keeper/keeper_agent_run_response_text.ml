@@ -39,9 +39,8 @@ let state_snapshot ~reported_state_snapshot ~keeper_name ~goal ~actual_keeper_to
               ~stop_reason:stop_reason_str
               ~response_text:raw_response_text
           in
-          Log.Keeper.info
-            "keeper:%s state metadata missing, synthesized from %d tools (stop=%s)"
-            keeper_name
+          Log.Keeper.info ~keeper_name:keeper_name
+            "state metadata missing, synthesized from %d tools (stop=%s)"
             (List.length actual_keeper_tool_names)
             stop_reason_str;
           (synth, "synthesized")))

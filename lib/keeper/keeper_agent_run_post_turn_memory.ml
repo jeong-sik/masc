@@ -61,9 +61,8 @@ let run
          ~kinds_written
    with
    | exn ->
-     Log.Keeper.error
-       "keeper:%s memory_write failed: %s"
-       meta.name
+     Log.Keeper.error ~keeper_name:meta.name
+       "memory_write failed: %s"
        (Printexc.to_string exn);
      Otel_metric_store.inc_counter
        Keeper_metrics.(to_string MemoryWriteFailures)
@@ -87,9 +86,8 @@ let run
      in
      if compaction.performed
      then
-       Log.Keeper.info
-         "keeper:%s memory_compacted before=%d after=%d dropped=%d"
-         meta.name
+       Log.Keeper.info ~keeper_name:meta.name
+         "memory_compacted before=%d after=%d dropped=%d"
          compaction.before_notes
          compaction.after_notes
          compaction.dropped_notes
@@ -100,9 +98,8 @@ let run
        Keeper_metrics.(to_string DispatchEventFailures)
        ~labels:[ "keeper", meta.name; "site", "memory_bank_compaction" ]
        ();
-     Log.Keeper.warn
-       "keeper:%s runtime=%s compaction failed: %s"
-       meta.name
+     Log.Keeper.warn ~keeper_name:meta.name
+       "runtime=%s compaction failed: %s"
        (Keeper_meta_contract.runtime_id_of_meta meta)
        (Printexc.to_string exn));
 
@@ -145,9 +142,8 @@ let run
                ~labels:
                  [ "keeper", meta.name; "site", "memory_recall" ]
                ();
-             Log.Keeper.warn
-               "keeper:%s memory recall history load failed: <error class=%s>"
-               meta.name
+             Log.Keeper.warn ~keeper_name:meta.name
+               "memory recall history load failed: <error class=%s>"
                exn_label;
              []
          in
@@ -200,8 +196,7 @@ let run
        Keeper_metrics.(to_string DispatchEventFailures)
        ~labels:[ "keeper", meta.name; "site", "post_turn_eval" ]
        ();
-     Log.Keeper.warn
-       "keeper:%s post_turn_eval jsonl append failed: %s"
-       meta.name
+     Log.Keeper.warn ~keeper_name:meta.name
+       "post_turn_eval jsonl append failed: %s"
        (Printexc.to_string exn))
 ;;

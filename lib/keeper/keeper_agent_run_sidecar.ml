@@ -39,31 +39,31 @@ let read_persisted_working_state ~keeper_name ~latest_path =
   else
     match Fs_compat.load_file latest_path with
     | exception exn ->
-      Log.Keeper.warn
-        "keeper:%s working state readback read failed (%s): %s"
-        keeper_name latest_path (Printexc.to_string exn);
+      Log.Keeper.warn ~keeper_name:keeper_name
+        "working state readback read failed (%s): %s"
+        latest_path (Printexc.to_string exn);
       None
     | contents -> (
       match Yojson.Safe.from_string contents with
       | exception exn ->
-        Log.Keeper.warn
-          "keeper:%s working state readback parse failed (%s): %s"
-          keeper_name latest_path (Printexc.to_string exn);
+        Log.Keeper.warn ~keeper_name:keeper_name
+          "working state readback parse failed (%s): %s"
+          latest_path (Printexc.to_string exn);
         None
       | json -> (
         match Yojson.Safe.Util.member "working_state" json with
         | `Null ->
-          Log.Keeper.warn
-            "keeper:%s working state readback missing working_state field (%s)"
-            keeper_name latest_path;
+          Log.Keeper.warn ~keeper_name:keeper_name
+            "working state readback missing working_state field (%s)"
+            latest_path;
           None
         | working_state_json -> (
           match Keeper_working_state.of_json working_state_json with
           | Ok state -> Some state
           | Error error ->
-            Log.Keeper.warn
-              "keeper:%s working state readback decode failed (%s): %s"
-              keeper_name latest_path error;
+            Log.Keeper.warn ~keeper_name:keeper_name
+              "working state readback decode failed (%s): %s"
+              latest_path error;
             None)))
 
 let save_sidecars
@@ -128,9 +128,9 @@ let save_sidecars
           - Keeper_working_state.active_open_loop_count projected_working_state
         in
         let restored = if restored < 0 then 0 else restored in
-        Log.Keeper.info
-          "keeper:%s working state resume merge: restored %d active loop(s) from %s (snapshot active=%d, merged active=%d)"
-          keeper_name restored latest_working_state_sidecar_path
+        Log.Keeper.info ~keeper_name:keeper_name
+          "working state resume merge: restored %d active loop(s) from %s (snapshot active=%d, merged active=%d)"
+          restored latest_working_state_sidecar_path
           (Keeper_working_state.active_open_loop_count projected_working_state)
           (Keeper_working_state.active_open_loop_count merged);
         (merged, restored)
@@ -175,9 +175,8 @@ let save_sidecars
     let sidecar_dir = Filename.dirname state_snapshot_sidecar_path in
     (try Fs_compat.mkdir_p sidecar_dir with
      | exn ->
-       Log.Keeper.warn
-         "keeper:%s state snapshot sidecar dir create failed: %s"
-         keeper_name
+       Log.Keeper.warn ~keeper_name:keeper_name
+         "state snapshot sidecar dir create failed: %s"
          (Printexc.to_string exn));
     match
       Fs_compat.save_file_atomic state_snapshot_sidecar_path
@@ -190,14 +189,14 @@ let save_sidecars
       with
       | Ok () -> true
       | Error e ->
-        Log.Keeper.warn
-          "keeper:%s latest state snapshot sidecar save failed: %s"
-          keeper_name e;
+        Log.Keeper.warn ~keeper_name:keeper_name
+          "latest state snapshot sidecar save failed: %s"
+          e;
         false)
     | Error e ->
-      Log.Keeper.warn
-        "keeper:%s state snapshot sidecar save failed: %s"
-        keeper_name e;
+      Log.Keeper.warn ~keeper_name:keeper_name
+        "state snapshot sidecar save failed: %s"
+        e;
       Otel_metric_store.inc_counter
         Keeper_metrics.(to_string CheckpointFailures)
         ~labels:[ "keeper", keeper_name; "site", "state_snapshot_sidecar" ]
@@ -208,9 +207,8 @@ let save_sidecars
     let sidecar_dir = Filename.dirname working_state_sidecar_path in
     (try Fs_compat.mkdir_p sidecar_dir with
      | exn ->
-       Log.Keeper.warn
-         "keeper:%s working state sidecar dir create failed: %s"
-         keeper_name
+       Log.Keeper.warn ~keeper_name:keeper_name
+         "working state sidecar dir create failed: %s"
          (Printexc.to_string exn));
     match
       Fs_compat.save_file_atomic working_state_sidecar_path
@@ -223,14 +221,14 @@ let save_sidecars
       with
       | Ok () -> true
       | Error e ->
-        Log.Keeper.warn
-          "keeper:%s latest working state sidecar save failed: %s"
-          keeper_name e;
+        Log.Keeper.warn ~keeper_name:keeper_name
+          "latest working state sidecar save failed: %s"
+          e;
         false)
     | Error e ->
-      Log.Keeper.warn
-        "keeper:%s working state sidecar save failed: %s"
-        keeper_name e;
+      Log.Keeper.warn ~keeper_name:keeper_name
+        "working state sidecar save failed: %s"
+        e;
       Otel_metric_store.inc_counter
         Keeper_metrics.(to_string CheckpointFailures)
         ~labels:[ "keeper", keeper_name; "site", "working_state_sidecar" ]

@@ -8,9 +8,8 @@ let append_entry ~keeper_name ~failure_label (acc : Trajectory.accumulator) entr
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-    Log.Keeper.error
-      "keeper:%s %s persist failed: %s"
-      keeper_name
+    Log.Keeper.error ~keeper_name:keeper_name
+      "%s persist failed: %s"
       failure_label
       (Printexc.to_string exn);
     Otel_metric_store.inc_counter

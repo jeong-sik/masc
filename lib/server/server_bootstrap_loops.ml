@@ -963,9 +963,23 @@ let start_keeper_loops
                     keeper_name;
                   (match discord_bot_token_opt () with
                    | Some token ->
-                       Eio.Fiber.fork ~sw (fun () ->
-                         Keeper_chat_discord.adapter_loop ~token
-                           ~channel_id ~events)
+                       (* fork_logged_fiber, not bare Eio.Fiber.fork: the
+                          adapter body runs after this synchronous frame
+                          returns, so the enclosing try/with cannot catch an
+                          exception it raises later. A bare fork would fail
+                          the shared [sw] and cancel every sibling fiber under
+                          it. [on_error] contains non-Cancelled exceptions;
+                          [fork_logged_fiber] re-raises Cancelled to preserve
+                          structured teardown. *)
+                       fork_logged_fiber ~sw
+                         ~on_error:(fun exn ->
+                           Log.Keeper.error
+                             "keeper_chat_consumer: Discord adapter fiber \
+                              crashed for keeper=%s: %s"
+                             keeper_name (Printexc.to_string exn))
+                         (fun () ->
+                           Keeper_chat_discord.adapter_loop ~token
+                             ~channel_id ~events)
                    | None ->
                        Log.Keeper.warn
                          "keeper_chat_consumer: \
@@ -979,9 +993,18 @@ let start_keeper_loops
                     keeper_name;
                   (match Sys.getenv_opt "MASC_SLACK_BOT_TOKEN" with
                    | Some token ->
-                       Eio.Fiber.fork ~sw (fun () ->
-                         Keeper_chat_slack.adapter_loop ~token
-                           ~channel ~events)
+                       (* Isolate from the shared [sw] like the Discord arm
+                          above; a bare fork would cancel sibling fibers if
+                          the adapter raises a non-Cancelled exception. *)
+                       fork_logged_fiber ~sw
+                         ~on_error:(fun exn ->
+                           Log.Keeper.error
+                             "keeper_chat_consumer: Slack adapter fiber \
+                              crashed for keeper=%s: %s"
+                             keeper_name (Printexc.to_string exn))
+                         (fun () ->
+                           Keeper_chat_slack.adapter_loop ~token
+                             ~channel ~events)
                    | None ->
                        Log.Keeper.warn
                          "keeper_chat_consumer: \

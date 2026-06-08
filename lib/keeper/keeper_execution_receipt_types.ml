@@ -95,8 +95,8 @@ let runtime_outcome_to_string = function
 (* Receipt-level result of the completion-contract evaluation for the turn.
    Closed union of three producer paths:
      1. Initial-state marker from [keeper_run_tools]: [Contract_unknown].
-     2. Boundary-state overrides: [Contract_violated] (agent_run
-        CompletionContractViolation), [Contract_not_dispatched]
+     2. Boundary-state overrides: [Contract_violated] (text-only turn
+        with no keeper tool names), [Contract_not_dispatched]
         (turn_helpers pre-dispatch), [Contract_no_capable_provider]
         (run_tools no-provider escape).
      3. Six outcomes mirrored from

@@ -169,6 +169,7 @@ let prepare_run_context
       ~persona_extended
       ~keeper_name:meta.name
       ~active_goals
+      ~home_ground:config.base_path
       ()
   in
   (* 4. Create or restore working context, re-apply current prompt *)

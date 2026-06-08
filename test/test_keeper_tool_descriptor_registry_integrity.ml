@@ -683,6 +683,56 @@ let test_rfc_0190_allowlist_has_no_descriptor () =
       (String.concat ", " stale)
 ;;
 
+(* ── effective_core_tools universe-aware behaviour ─────────────── *)
+
+let test_effective_core_tools_is_subset_of_discovery () =
+  let effective = Registry.effective_core_tools () in
+  let discovery = Registry.core_discovery_tools in
+  List.iter
+    (fun name ->
+       if not (List.mem name discovery)
+       then
+         Alcotest.failf
+           "effective_core_tools contains %S not in core_discovery_tools"
+           name)
+    effective
+;;
+
+let test_effective_core_tools_without_universe_has_no_descriptor_publics () =
+  (* Before set_masc_schemas, injected_masc_tool_names () returns [].
+     Descriptor public names should NOT appear in effective_core_tools
+     when their internal_name is absent from the universe. *)
+  let effective = Registry.effective_core_tools () in
+  let descriptor_publics = Descriptor.public_names () in
+  List.iter
+    (fun name ->
+       if List.mem name effective
+       then
+         Alcotest.failf
+           "effective_core_tools contains descriptor public %S when universe is empty"
+           name)
+    descriptor_publics
+;;
+
+let test_effective_core_tools_with_full_universe_matches_discovery () =
+  let all_schemas =
+    List.map
+      (fun d ->
+         { Masc_domain.name = d.Descriptor.internal_name
+         ; description = d.Descriptor.description
+         ; input_schema = d.Descriptor.input_schema
+         })
+      (all_descriptors ())
+  in
+  Registry.set_masc_schemas all_schemas;
+  let effective = Registry.effective_core_tools () in
+  let discovery = Registry.core_discovery_tools in
+  Alcotest.(check (list string))
+    "effective_core_tools with full universe matches core_discovery_tools"
+    (List.sort String.compare discovery)
+    (List.sort String.compare effective)
+;;
+
 let () =
   Alcotest.run
     "keeper_tool_descriptor_registry_integrity"
@@ -768,5 +818,19 @@ let () =
             "mutation boundary delegates to descriptor policy"
             `Quick
             test_mutation_boundary_delegates_to_descriptor_policy
+        ] )
+    ; ( "universe-aware-effective-core"
+      , [ test_case
+            "effective_core_tools is subset of core_discovery_tools"
+            `Quick
+            test_effective_core_tools_is_subset_of_discovery
+        ; test_case
+            "effective_core_tools without universe has no descriptor publics"
+            `Quick
+            test_effective_core_tools_without_universe_has_no_descriptor_publics
+        ; test_case
+            "effective_core_tools with full universe matches discovery"
+            `Quick
+            test_effective_core_tools_with_full_universe_matches_discovery
         ] )
     ]

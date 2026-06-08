@@ -67,7 +67,7 @@ let core_always_tools =
     corresponding action tool (fs_read → fs_edit, board_list → board_post,
     shell → github).  This prevents the "read-only polling loop" where
     the model repeatedly observes but cannot find tools to act. *)
-let core_discovery_tools =
+let base_core_tools =
   core_always_tools
   @ List.map
       Keeper_tool_name.to_string
@@ -90,12 +90,17 @@ let core_discovery_tools =
         ; (* Discovery fallback for meta/admin tools *)
           Tools_list
         ]
+;;
+
+let core_discovery_tools =
+  base_core_tools
   (* RFC-0064/RFC-016x: public capability names replace internal names
      in the LLM-facing discovery surface. *)
   @ Keeper_tool_descriptor.public_names ()
 ;;
 
 let effective_core_tools () = core_discovery_tools
+;;
 
 let core_always_set : (string, unit) Hashtbl.t =
   let tbl = Hashtbl.create (List.length core_always_tools) in
@@ -279,6 +284,23 @@ let masc_schemas_snapshot () =
 let injected_masc_tool_names () =
   masc_schemas_snapshot ()
   |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
+;;
+
+(* ── Universe-aware effective core tools ─────────────────────── *)
+
+let effective_core_tools () =
+  let universe_set =
+    injected_masc_tool_names ()
+    |> List.fold_left
+         (fun acc name -> Set_util.StringSet.add name acc)
+         Set_util.StringSet.empty
+  in
+  let descriptor_publics =
+    Keeper_tool_descriptor.public_descriptors
+    |> List.filter (fun d -> Set_util.StringSet.mem d.Keeper_tool_descriptor.internal_name universe_set)
+    |> List.concat_map Keeper_tool_descriptor.public_names_of_descriptor
+  in
+  base_core_tools @ descriptor_publics
 ;;
 
 (* ── keeper_tool_search schema ───────────────────────────────── *)

@@ -2,6 +2,17 @@ val classify :
   Masc_exec.Shell_ir.t ->
   Masc_exec.Shell_ir_risk.decided Masc_exec.Shell_ir_risk.decided_ir
 
+val is_destructive :
+  Masc_exec.Shell_ir_risk.decided Masc_exec.Shell_ir_risk.decided_ir -> bool
+
+val risk_class :
+  Masc_exec.Shell_ir_risk.decided Masc_exec.Shell_ir_risk.decided_ir ->
+  Masc_exec.Shell_ir_risk.risk_class
+
+val typed_hit_of_ir : Masc_exec.Shell_ir.t -> bool
+
+val string_of_risk_class : Masc_exec.Shell_ir_risk.risk_class -> string
+
 val with_cwd : raw:string -> cwd:string -> Masc_exec.Shell_ir.t -> Masc_exec.Shell_ir.t
 
 val simple :

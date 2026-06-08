@@ -4,6 +4,11 @@ let classify ir =
   Masc_exec.Shell_ir_risk.classify (Masc_exec.Shell_ir_risk.undecided ir)
 ;;
 
+let is_destructive = Masc_exec.Shell_ir_risk.is_destructive
+let risk_class = Masc_exec.Shell_ir_risk.risk_class
+let typed_hit_of_ir = Masc_exec.Shell_ir_risk.typed_hit_of_ir
+let string_of_risk_class = Masc_exec.Shell_ir_risk.string_of_risk_class
+
 let lit text = Masc_exec.Shell_ir.Lit (text, Masc_exec.Shell_ir.default_meta)
 
 let env_bindings bindings = List.map (fun (key, value) -> key, lit value) bindings

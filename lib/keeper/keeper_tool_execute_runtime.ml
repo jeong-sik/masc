@@ -271,7 +271,7 @@ let handle_tool_execute_typed
             meta.name
             error
             (message_for_log reason)
-            (Masc_exec.Shell_ir_risk.typed_hit_of_ir ir)
+            (Keeper_tool_execute_shell_ir.typed_hit_of_ir ir)
             cmd_for_log;
           let deterministic_retry_fields =
             match deterministic_reason with
@@ -300,7 +300,7 @@ let handle_tool_execute_typed
         in
         let envelope = Keeper_tool_execute_shell_ir.classify ir in
         let typed_error_json msg = error_json ~fields:typed_error_fields msg in
-        if Masc_exec.Shell_ir_risk.is_destructive envelope
+        if Keeper_tool_execute_shell_ir.is_destructive envelope
         then
           blocked_result
             ~deterministic_reason:
@@ -421,9 +421,9 @@ let handle_tool_execute_typed
               (Keeper_types_profile_sandbox.sandbox_profile_to_string sandbox_profile)
               (Keeper_sandbox_exec_failure.status_label result.status)
               elapsed_ms
-              (Masc_exec.Shell_ir_risk.string_of_risk_class
-                 (Masc_exec.Shell_ir_risk.risk_class envelope))
-              (Masc_exec.Shell_ir_risk.typed_hit_of_ir ir);
+              (Keeper_tool_execute_shell_ir.string_of_risk_class
+                 (Keeper_tool_execute_shell_ir.risk_class envelope))
+              (Keeper_tool_execute_shell_ir.typed_hit_of_ir ir);
             let output =
               if String.equal result.stderr ""
               then result.stdout

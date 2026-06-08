@@ -109,6 +109,9 @@ module Metric_name = struct
   let client_operation_time_per_output_chunk =
     "gen_ai.client.operation.time_per_output_chunk"
   ;;
+
+  let client_errors_total = "gen_ai.client.errors_total"
+  let client_retries_total = "gen_ai.client.retries_total"
 end
 
 module Mcp_attr_key = struct

@@ -255,6 +255,9 @@ let emit_error ~model_id ~error =
     Otel_metric_store.metric_llm_provider_errors
     ~labels:(model_labels ~model_id);
   inc_counter
+    Otel_genai.Metric_name.client_errors_total
+    ~labels:(genai_base_labels ~provider ~model_id);
+  inc_counter
     Otel_metric_store.metric_llm_provider_errors_by_reason
     ~labels:[ ("model", model_id); ("error_reason", reason) ];
   Otel_spans.record_error
@@ -276,7 +279,10 @@ let emit_retry ~provider ~model_id ~attempt =
       [ ("provider", provider)
       ; ("model", model_id)
       ; ("attempt", string_of_int attempt)
-      ]
+      ];
+  inc_counter
+    Otel_genai.Metric_name.client_retries_total
+    ~labels:(genai_base_labels ~provider ~model_id)
 ;;
 
 let emit_circuit_state ~provider ~model_id ~provider_key ~state =

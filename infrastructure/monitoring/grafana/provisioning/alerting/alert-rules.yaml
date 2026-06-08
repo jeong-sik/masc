@@ -1,0 +1,60 @@
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: masc-alerts
+    folder: MASC
+    interval: 60s
+    rules:
+      - uid: alert-high-error-rate
+        title: High LLM Error Rate
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              expr: rate(gen_ai_client_errors_total[5m]) > 0.1
+              refId: A
+        noDataState: NoData
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: "High LLM error rate detected"
+
+      - uid: alert-high-retry-rate
+        title: High LLM Retry Rate
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              expr: rate(gen_ai_client_retries_total[5m]) > 0.5
+              refId: A
+        noDataState: NoData
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: "High LLM retry rate detected"
+
+      - uid: alert-tool-failure
+        title: Tool Call Failure Rate
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              expr: rate(masc_mcp_tool_calls_total{status="failure"}[5m]) > 0.1
+              refId: A
+        noDataState: NoData
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: "High tool call failure rate detected"

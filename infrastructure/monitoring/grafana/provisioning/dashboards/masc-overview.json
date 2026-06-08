@@ -1,0 +1,63 @@
+{
+  "dashboard": {
+    "id": null,
+    "uid": "masc-overview",
+    "title": "MASC Overview",
+    "tags": ["masc", "otel"],
+    "timezone": "browser",
+    "schemaVersion": 36,
+    "time": { "from": "now-1h", "to": "now" },
+    "panels": [
+      {
+        "id": 1,
+        "title": "Token Usage",
+        "type": "timeseries",
+        "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+        "targets": [
+          { "expr": "gen_ai_client_token_usage", "legendFormat": "{{gen_ai_token_type}}" }
+        ],
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 }
+      },
+      {
+        "id": 2,
+        "title": "LLM Duration",
+        "type": "timeseries",
+        "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+        "targets": [
+          { "expr": "gen_ai_client_operation_duration", "legendFormat": "{{gen_ai_request_model}}" }
+        ],
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 }
+      },
+      {
+        "id": 3,
+        "title": "Tool Calls",
+        "type": "timeseries",
+        "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+        "targets": [
+          { "expr": "masc_mcp_tool_calls_total", "legendFormat": "{{tool_name}} — {{status}}" }
+        ],
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 }
+      },
+      {
+        "id": 4,
+        "title": "Errors",
+        "type": "timeseries",
+        "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+        "targets": [
+          { "expr": "gen_ai_client_errors_total", "legendFormat": "errors" }
+        ],
+        "gridPos": { "h": 8, "w": 6, "x": 12, "y": 8 }
+      },
+      {
+        "id": 5,
+        "title": "Retries",
+        "type": "timeseries",
+        "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+        "targets": [
+          { "expr": "gen_ai_client_retries_total", "legendFormat": "retries" }
+        ],
+        "gridPos": { "h": 8, "w": 6, "x": 18, "y": 8 }
+      }
+    ]
+  }
+}

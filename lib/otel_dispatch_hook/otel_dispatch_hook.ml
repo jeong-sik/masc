@@ -194,11 +194,17 @@ let tool_span_attrs (result : Tool_result.result) =
   gen_ai_attrs @ request_context_attrs () @ status_attrs
 ;;
 
-(** Record a tool call as an OTel span. *)
+(** Record a tool call as an OTel span + metric. *)
 let on_tool_result (result : Tool_result.result) : unit =
   (* OTel span: only when enabled *)
   if enabled ()
   then (
+    let tool_name = Tool_result.tool_name result in
+    let status_str = if Tool_result.is_success result then "success" else "failure" in
+    Otel_metric_store.inc_counter
+      "masc.mcp.tool.calls_total"
+      ~labels:[ "tool_name", tool_name; "status", status_str ]
+      ();
     let status =
       if Tool_result.is_success result
       then None
@@ -209,7 +215,7 @@ let on_tool_result (result : Tool_result.result) : unit =
              ~code:OT.Span_status.Status_code_error)
     in
     emit_span
-      ~name:(tool_call_span_name ~tool_name:(Tool_result.tool_name result))
+      ~name:(tool_call_span_name ~tool_name)
       ~attrs:(tool_span_attrs result)
       ?status
       ())

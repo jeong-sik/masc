@@ -81,6 +81,8 @@ module Metric_name : sig
   val client_operation_duration : string
   val client_operation_time_to_first_chunk : string
   val client_operation_time_per_output_chunk : string
+  val client_errors_total : string
+  val client_retries_total : string
 end
 
 module Event_name : sig

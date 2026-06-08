@@ -713,11 +713,11 @@ let make_hooks
                 Keeper_metrics.(to_string LifecycleCallbackFailures)
                 ~labels:[(label_keeper, (!meta_ref).name); (label_callback, callback_label_on_tool_executed)]
                 ();
-              Log.Keeper.error "keeper:%s on_tool_executed callback failed for %s: %s"
-                (!meta_ref).name tool_name (Printexc.to_string exn));
+              Log.Keeper.error ~keeper_name:(!meta_ref).name "on_tool_executed callback failed for %s: %s"
+                tool_name (Printexc.to_string exn));
         if is_keeper_board_write_tool_name tool_name then
-          Log.Keeper.debug "keeper:%s social_event tool=%s"
-            (!meta_ref).name tool_name;
+          Log.Keeper.debug ~keeper_name:(!meta_ref).name "social_event tool=%s"
+            tool_name;
         Agent_sdk.Hooks.Continue
       | _event -> Agent_sdk.Hooks.Continue);
 
@@ -769,8 +769,8 @@ let make_hooks
           Keeper_metrics.(to_string LifecycleCallbackFailures)
           ~labels:[(label_keeper, (!meta_ref).name); (label_callback, callback_label_on_error)]
           ();
-        Log.Keeper.error "keeper:%s on_error: %s (context: %s)"
-          (!meta_ref).name detail err_ctx;
+        Log.Keeper.error ~keeper_name:(!meta_ref).name "on_error: %s (context: %s)"
+          detail err_ctx;
         Agent_sdk.Hooks.Continue
       | _event -> Agent_sdk.Hooks.Continue);
 
@@ -779,8 +779,8 @@ let make_hooks
         let keeper_name = (!meta_ref).name in
         (match self_correcting_tool_failure_class ~base_path:config.base_path error with
          | Some failure_class ->
-           Log.Keeper.warn "keeper:%s tool_%s: %s — %s"
-             keeper_name failure_class tool_name error
+           Log.Keeper.warn ~keeper_name "tool_%s: %s — %s"
+             failure_class tool_name error
          | None ->
            (* Always increment the durable Otel_metric_store signal for real
               tool/runtime failures: noise dedupe is a log-surface concern
@@ -811,8 +811,8 @@ let make_hooks
                 ()
             with
             | `First ->
-              Log.Keeper.error "keeper:%s tool_error: %s — %s"
-                keeper_name tool_name error
+              Log.Keeper.error ~keeper_name "tool_error: %s — %s"
+                tool_name error
             | `Repeated n ->
               Log.Keeper.debug
                 "keeper:%s tool_error repeated (total=%d, dedup): %s — %s"
@@ -840,8 +840,8 @@ let make_hooks
            hook runs. Emitting a second ERROR here with the same error
            content produces paired duplicate lines per tool failure —
            keep a debug trace for hook-chain readers only. *)
-        Log.Keeper.debug "keeper:%s tool_use_failure: %s — %s"
-          meta.name tool_name error;
+        Log.Keeper.debug ~keeper_name:meta.name "tool_use_failure: %s — %s"
+          tool_name error;
         (* #9919: this path is a count event, not a heuristic decision. *)
         record_tool_use_failure ~keeper_name:meta.name ~tool_name;
         Agent_sdk.Hooks.Continue

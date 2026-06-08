@@ -479,6 +479,6 @@ let write_heartbeat_snapshot
          Keeper_metrics.(to_string HeartbeatFailures)
          ~labels:[("keeper", meta_current.name); ("site", "flush_tool_usage")]
          ();
-       Log.Keeper.warn "keeper:%s flush_tool_usage failed: %s"
-         meta_current.name (Printexc.to_string exn))
+       Log.Keeper.warn ~keeper_name:meta_current.name "flush_tool_usage failed: %s"
+         (Printexc.to_string exn))
 ;;

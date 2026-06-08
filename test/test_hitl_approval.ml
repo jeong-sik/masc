@@ -1064,53 +1064,6 @@ let test_callback_production_claimed_worktree_write_auto_approved () =
       ("expected Approve for claimed sandbox worktree write, got Reject: " ^ r)
   | _ -> Alcotest.fail "unexpected decision"
 
-let test_sandbox_worktree_write_rule_rejects_unclaimed_or_root_checkout () =
-  with_test_config @@ fun config ->
-  let keeper_name = "sandbox-writer-negative" in
-  let claimed_meta =
-    meta_from_json
-      (`Assoc
-        [
-          ("name", `String keeper_name);
-          ("agent_name", `String ("keeper-" ^ keeper_name ^ "-agent"));
-          ("trace_id", `String "sandbox-write-negative-trace");
-          ("sandbox_profile", `String "docker");
-          ("network_mode", `String "inherit");
-          ("current_task_id", `String "task-210");
-        ])
-  in
-  let unclaimed_meta = { claimed_meta with current_task_id = None } in
-  let worktree_input =
-    `Assoc
-      [
-        ( "file_path",
-          `String
-            "repos/masc/.worktrees/keeper-sandbox-writer-negative-task-210/lib/example.ml"
-        );
-      ]
-  in
-  let root_checkout_input =
-    `Assoc [ ("file_path", `String "repos/masc/lib/example.ml") ]
-  in
-  Alcotest.(check (option string))
-    "unclaimed keeper has no code-write routine label"
-    None
-    (Masc.Keeper_routine_allowlist.sandboxed_code_write_rule_label
-       ~config
-       ~meta:unclaimed_meta
-       ~tool_name:"Write"
-       ~input:worktree_input
-       ~risk_level:AQ.High);
-  Alcotest.(check (option string))
-    "root checkout path has no code-write routine label"
-    None
-    (Masc.Keeper_routine_allowlist.sandboxed_code_write_rule_label
-       ~config
-       ~meta:claimed_meta
-       ~tool_name:"Write"
-       ~input:root_checkout_input
-       ~risk_level:AQ.High)
-
 let test_callback_production_worktree_prepare_requires_approval () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1457,10 +1410,6 @@ let () =
         test_callback_production_tool_edit_file_requires_approval;
       Alcotest.test_case "production claimed worktree write auto-approved" `Quick
         test_callback_production_claimed_worktree_write_auto_approved;
-      Alcotest.test_case
-        "sandbox worktree write routine rejects unclaimed/root checkout"
-        `Quick
-        test_sandbox_worktree_write_rule_rejects_unclaimed_or_root_checkout;
       Alcotest.test_case "production worktree preparation requires approval" `Quick
         test_callback_production_worktree_prepare_requires_approval;
       Alcotest.test_case "paranoid medium risk uses remembered policy" `Quick

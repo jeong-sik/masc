@@ -881,9 +881,6 @@ let test_exec_cache_stats_json () =
 
 let () =
   Masc_test_deps.init_keeper_tool_registry ();
-  ignore
-    (Result.get_ok
-       (KET.init_policy_config ~base_path:(Masc_test_deps.find_project_root ())));
   run "Keeper_tool_dispatch_runtime" [
     ("classify_tool_result_payload", [
       test_case "plain text" `Quick test_plain_text_is_success_shape;

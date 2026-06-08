@@ -17,9 +17,8 @@ module Float = Stdlib.Float
 
 (** Tool_registration_check — Startup validation of keeper tool policy coverage.
 
-    Detects drift between the runtime keeper tool universe and
-    config/tool_policy.toml group definitions.
-    Called once after init_policy_config succeeds. *)
+    Startup validation placeholder. Policy-driven validation removed
+    with keeper_tool_policy_config deletion. *)
 
 type validation_result = {
   orphan_toml : string list;
@@ -40,27 +39,8 @@ let registered_tool_name_set () =
   Hashtbl.create 512
   |> add_names (registered_tool_names ())
 
-let validate ?policy_config () : validation_result =
-  match policy_config with
-  | None -> { orphan_toml = []; uncovered = [] }
-  | Some cfg ->
-    let registered_tools = registered_tool_name_set () in
-    let configured =
-      let tbl = Hashtbl.create 256 in
-      List.iter (fun n -> Hashtbl.replace tbl n ()) cfg.configured_tools;
-      tbl
-    in
-    let orphan_toml =
-      Hashtbl.fold (fun name () acc ->
-        if not (Hashtbl.mem registered_tools name) then name :: acc else acc
-      ) configured []
-      |> List.sort String.compare
-    in
-    (* tool_policy.toml describes the keeper-facing subset, not the full MCP
-       registry, so reverse "coverage" against all registered tools is noisy
-       and not actionable as a startup warning. *)
-    let uncovered = [] in
-    { orphan_toml; uncovered }
+let validate () : validation_result =
+  { orphan_toml = []; uncovered = [] }
 
 let log_validation_result (r : validation_result) =
   (match r.orphan_toml with

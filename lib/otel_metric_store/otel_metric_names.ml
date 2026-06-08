@@ -251,11 +251,6 @@ let metric_write_meta_cas_retry_total = "masc_write_meta_cas_retry_total"
    health ratio in Grafana. *)
 (* PR-B: keeper turn skipped due to ollama saturation pre-check.
    Labelled by [keeper] and [runtime]. *)
-(* Tool-setup and task-load failures during keeper tool surface assembly.
-   task_load: Workspace.get_tasks_raw exception while loading current task contract.
-   tool_selection: TopK_llm or tool discovery exception during per-turn tool set assembly. *)
-let metric_tool_policy_unloaded_query = "masc_tool_policy_unloaded_query_total"
-let metric_tool_policy_init_failed = "masc_tool_policy_init_failed_total"
 let metric_cache_desync_cleared = "masc_cache_desync_cleared_total"
 let metric_egress_audit_missing = "masc_egress_audit_missing_total"
 let metric_egress_audit_stale_orphan = "masc_egress_audit_stale_orphan_total"

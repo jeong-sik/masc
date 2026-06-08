@@ -327,20 +327,7 @@ let with_fake_docker script f =
   with_env "MASC_KEEPER_SYSTEM_FD_HEADROOM" "0" @@ fun () ->
   with_env "MASC_KEEPER_HOST_FD_HOTSPOT_HEADROOM" "0" f
 
-let with_tool_policy_config f =
-  let project_root = Masc_test_deps.find_project_root () in
-  let config_dir = Filename.concat project_root "config" in
-  let reset () =
-    Config_dir_resolver.reset ();
-    Masc.Keeper_tool_policy.reset_policy_config_for_test ()
-  in
-  reset ();
-  with_env "MASC_CONFIG_DIR" config_dir @@ fun () ->
-  reset ();
-  Fun.protect ~finally:reset @@ fun () ->
-  match Masc.Keeper_tool_policy.init_policy_config ~base_path:project_root with
-  | Ok () -> f ()
-  | Error msg -> Alcotest.failf "init_policy_config failed: %s" msg
+let with_tool_policy_config f = f ()
 
 let parse_field raw field =
   Yojson.Safe.from_string raw |> Json.member field

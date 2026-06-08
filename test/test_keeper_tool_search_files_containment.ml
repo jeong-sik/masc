@@ -19,12 +19,6 @@ module Keeper_tool_policy = Masc.Keeper_tool_policy
 module Fs_compat = Fs_compat
 module Json = Yojson.Safe.Util
 
-(* Load tool_policy.toml before exercising the shared search-file policy
-   paths so this test observes the same registry state as runtime. *)
-let () =
-  let base_path = Masc_test_deps.find_project_root () in
-  ignore (Result.get_ok (Keeper_tool_policy.init_policy_config ~base_path))
-
 (* ── Helpers ─────────────────────────────────────────────────────── *)
 
 let with_env key value f =

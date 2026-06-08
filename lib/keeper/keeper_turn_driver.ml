@@ -52,6 +52,7 @@ let run_named
     ?(max_turns = 20)
     ?(max_idle_turns = 3)
     ?stream_idle_timeout_s
+    ?body_timeout_s
     ?(temperature = Runtime_provider_defaults.agent_default_temperature)
     ?(max_tokens = Runtime_provider_defaults.agent_default_max_tokens)
     ?max_input_tokens
@@ -150,6 +151,7 @@ let run_named
     max_turns;
     max_idle_turns;
     stream_idle_timeout_s;
+    body_timeout_s;
     temperature;
     max_tokens;
     max_input_tokens;

@@ -46,13 +46,6 @@ type validator_stage =
   | Probe_search
   | Allowed
 
-let validator_stage_to_string = function
-  | Probe_task_state -> "probe_task_state"
-  | Probe_http -> "probe_http"
-  | Probe_search -> "probe_search"
-  | Allowed -> "allowed"
-;;
-
 type artifact_policy =
   | Inline_only
   | Persist_if_large

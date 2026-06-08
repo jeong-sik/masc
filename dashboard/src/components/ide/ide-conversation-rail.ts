@@ -120,6 +120,7 @@ export function IdeConversationRail() {
   const [replayUntilMs, setReplayUntilMs] = useState<number | null>(ideReplayUntilMs.value)
   const [activeFile, setActiveFile] = useState(activeIdeFile.value)
   const [keeperName, setKeeperName] = useState(activeKeeperName.value)
+  const [, bumpThreads] = useState(0)
   useSignalValue(globalPresenceSnapshot)
   useSignalValue(cursorOverlaySignal)
   useEffect(() => {
@@ -150,7 +151,7 @@ export function IdeConversationRail() {
   useEffect(() => {
     const publish = () => {
       publishIdeConversationThreads(threadStore.filePath(), threadStore.visibleThreads())
-      forceRender((t: number) => t + 1)
+      bumpThreads((t: number) => t + 1)
     }
     const unsub = threadStore.subscribe(publish)
     publish()

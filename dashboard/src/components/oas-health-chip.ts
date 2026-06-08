@@ -2,8 +2,9 @@
 // Consumes oasHealthSummary computed signal (previously dead).
 
 import { html } from 'htm/preact'
-import { useComputed } from '@preact/signals'
+import { useComputed, useSignal } from '@preact/signals'
 import { oasHealthSummary, oasAgentEvents, oasKeeperSnapshots } from '../store'
+import { loadMoreOasEvents } from '../oas-runtime-store'
 import { SectionCard } from './common/card'
 import { StatTile } from './common/stat-tile'
 import { EmptyState } from './common/feedback-state'
@@ -105,6 +106,17 @@ export function OasHealthChip() {
     const tick = summary.value.lastKeeperTick
     return tick == null || Date.now() - tick > STALE_MS
   })
+  const isLoadingMore = useSignal(false)
+
+  async function handleLoadMore() {
+    if (isLoadingMore.value) return
+    isLoadingMore.value = true
+    try {
+      await loadMoreOasEvents()
+    } finally {
+      isLoadingMore.value = false
+    }
+  }
 
   if (summary.value.replayTotalMatchingEvents === 0) {
     return html`
@@ -191,6 +203,15 @@ export function OasHealthChip() {
                   </li>
                 `)}
               </ul>
+              ${summary.value.hasMore ? html`
+                <button
+                  class="mt-2 text-2xs text-[var(--color-fg-muted)] hover:text-[var(--color-fg-primary)] underline disabled:opacity-50"
+                  onClick=${handleLoadMore}
+                  disabled=${isLoadingMore.value}
+                >
+                  ${isLoadingMore.value ? '불러오는 중...' : '더 보기'}
+                </button>
+              ` : null}
             </div>
           ` : null}
           ${recentKeepers.value.length > 0 ? html`
@@ -215,6 +236,16 @@ export function OasHealthChip() {
           ` : null}
         </div>
       ` : null}
+      <div class="mt-2 text-right">
+        <a
+          href="http://127.0.0.1:16686"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-3xs text-[var(--color-fg-muted)] hover:text-[var(--color-fg-primary)] underline"
+        >
+          OpenTelemetry에서 보기 →
+        </a>
+      </div>
     <//>
   `
 }

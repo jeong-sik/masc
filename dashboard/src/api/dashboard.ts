@@ -2646,6 +2646,8 @@ export type TelemetryResponse = {
   query?: Record<string, unknown>
   count: number
   total_matching_entries?: number
+  offset?: number
+  has_more?: boolean
   truncated?: boolean
   entries: TelemetryEntry[]
 }
@@ -2735,6 +2737,8 @@ function decodeTelemetryResponse(raw: unknown): TelemetryResponse | null {
     query: isRecord(raw.query) ? raw.query : undefined,
     count: asNumber(raw.count, 0),
     total_matching_entries: asNumber(raw.total_matching_entries, asNumber(raw.count, 0)),
+    offset: asNumber(raw.offset, 0),
+    has_more: asBoolean(raw.has_more, false),
     truncated: asBoolean(raw.truncated, false),
     entries: asRecordArray(raw.entries)
       .map(decodeTelemetryEntry)
@@ -2823,6 +2827,7 @@ export function fetchTelemetry(opts?: {
   since_ms?: number
   until_ms?: number
   n?: number
+  offset?: number
   signal?: AbortSignal
 }): Promise<TelemetryResponse> {
   const params = new URLSearchParams()
@@ -2834,6 +2839,7 @@ export function fetchTelemetry(opts?: {
   if (typeof opts?.since_ms === 'number') params.set('since_ms', String(opts.since_ms))
   if (typeof opts?.until_ms === 'number') params.set('until_ms', String(opts.until_ms))
   if (typeof opts?.n === 'number') params.set('n', String(opts.n))
+  if (typeof opts?.offset === 'number') params.set('offset', String(opts.offset))
   const qs = params.toString()
   return get<Record<string, unknown>>(`/api/v1/dashboard/telemetry${qs ? '?' + qs : ''}`, { signal: opts?.signal })
     .then((raw) => {

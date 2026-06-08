@@ -52,6 +52,7 @@ val read_unified :
   ?since_ts:float ->
   ?until_ts:float ->
   ?n:int ->
+  ?offset:int ->
   unit ->
   Yojson.Safe.t list
 (** [read_unified ~base_path ~masc_root ?sources ?keeper_name ?session_id
@@ -78,6 +79,7 @@ val read_unified_result :
   ?since_ts:float ->
   ?until_ts:float ->
   ?n:int ->
+  ?offset:int ->
   unit ->
   read_result
 (** Like {!read_unified}, but also returns the total number of matching

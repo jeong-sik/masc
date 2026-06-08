@@ -109,14 +109,13 @@ let test_applies_sleep_and_throttle_overrides () =
      board_generic_wakeup_limit = 5\n\
      board_wakeup_max = 6\n\
      [turn]\n\
-     admission_wait_timeout_sec = 20\n\
      capacity_limit = 3\n\
      batch_limit = 9\n"
   in
   let count, overrides =
     Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
   in
-  check int "applied sleep/throttle overrides" 8 count;
+  check int "applied sleep/throttle overrides" 7 count;
   check (option string) "autoboot max canonical env"
     (Some "6")
     (List.assoc_opt "MASC_KEEPER_AUTOBOOT_MAX" overrides);
@@ -132,9 +131,6 @@ let test_applies_sleep_and_throttle_overrides () =
   check (option string) "board wakeup max"
     (Some "6")
     (List.assoc_opt "MASC_KEEPER_BOARD_WAKEUP_MAX" overrides);
-  check (option string) "admission wait"
-    (Some "20")
-    (List.assoc_opt "MASC_KEEPER_ADMISSION_WAIT_TIMEOUT_SEC" overrides);
   check (option string) "capacity limit"
     (Some "3")
     (List.assoc_opt "MASC_KEEPER_TURN_CAPACITY_LIMIT" overrides);

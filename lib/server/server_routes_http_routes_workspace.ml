@@ -349,7 +349,7 @@ let git_run ~cwd args =
         ~actor:(Masc_exec.Agent_id.of_string "system/workspace_api")
         ~raw_source
         ~summary:"workspace api git command"
-        ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Http_routes ())
+
         argv
     in
     match status with

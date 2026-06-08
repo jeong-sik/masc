@@ -90,7 +90,6 @@ let tool_execute_command_context ?(allow_pipes = true) command =
 (* TEL-OK: facade is pure gate/path/dispatch routing; the Execute handler emits
    Shell IR dispatch telemetry with keeper, sandbox, status, elapsed_ms. *)
 let dispatch_classified
-      ?timeout_sec
       ?(allow_pipes = true)
       ?(redirect_allowed = true)
       ?keeper_id
@@ -117,12 +116,11 @@ let dispatch_classified
     ~f_allow:(fun _context ->
       match validate_paths ?keeper_id ?base_path ~workdir ir with
       | Error e -> Error (Path_reject e)
-      | Ok () -> Ok (Masc_exec.Exec_dispatch.dispatch_decided ?timeout_sec ?on_output_chunk envelope))
+      | Ok () -> Ok (Masc_exec.Exec_dispatch.dispatch_decided ?on_output_chunk envelope))
 ;;
 
 (* TEL-OK: wrapper only classifies before delegating to dispatch_classified. *)
 let dispatch
-      ?timeout_sec
       ?allow_pipes
       ?redirect_allowed
       ?keeper_id
@@ -133,7 +131,6 @@ let dispatch
       ir
   =
   dispatch_classified
-    ?timeout_sec
     ?allow_pipes
     ?redirect_allowed
     ?keeper_id

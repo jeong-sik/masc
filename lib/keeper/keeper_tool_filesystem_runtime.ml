@@ -245,7 +245,9 @@ let handle_read_file
        check above remains as defense-in-depth. *)
              if Keeper_sandbox_read_runner.should_route_read ~meta
              then (
-               let timeout_sec = Env_config_exec_timeout.timeout_sec ~caller:Fs () in
+               let timeout_sec =
+                 Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ()
+               in
                match
                  Keeper_sandbox_read_runner.read_file
                    ?turn_sandbox_factory
@@ -605,7 +607,9 @@ let handle_file_write
                                 ~host_path:target
                                 ~content:updated
                                 ~timeout_sec:
-                                  (Env_config_exec_timeout.timeout_sec ~caller:Fs ())
+                                  (Env_config_sandbox.Shell_timeout.timeout_sec
+                                     ~bucket:Io
+                                     ())
                                 ()
                             | None -> Keeper_fs.save_atomic target updated
                           in
@@ -689,7 +693,9 @@ let handle_file_write
                                ~host_path:target
                                ~content
                                ~timeout_sec:
-                                 (Env_config_exec_timeout.timeout_sec ~caller:Fs ())
+                                 (Env_config_sandbox.Shell_timeout.timeout_sec
+                                    ~bucket:Io
+                                    ())
                                ()
                            | Overwrite ->
                              Keeper_turn_sandbox_runtime.overwrite_file
@@ -697,7 +703,9 @@ let handle_file_write
                                ~host_path:target
                                ~content
                                ~timeout_sec:
-                                 (Env_config_exec_timeout.timeout_sec ~caller:Fs ())
+                                 (Env_config_sandbox.Shell_timeout.timeout_sec
+                                    ~bucket:Io
+                                    ())
                                ()
                            | Patch -> Ok ())
                         | None ->

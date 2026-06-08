@@ -145,7 +145,6 @@ let git_ok ~cwd args =
 let git_output ~cwd args =
   let result =
     Masc.Playground_repo_readiness.run_git
-      ~timeout_sec:Masc.Playground_repo_readiness.read_only_probe_timeout_sec
       ~clone_path:cwd
       args
   in

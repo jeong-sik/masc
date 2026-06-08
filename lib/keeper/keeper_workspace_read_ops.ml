@@ -53,13 +53,12 @@ let try_handle
   in
   (* TEL-OK: read-op adapter delegates to Keeper_tool_execute_shell_ir/Exec_dispatch or the
      sandbox read runner; execution telemetry stays with those runtime paths. *)
-  let dispatch_host_shell_ir ?timeout_sec ~workdir ir =
+  let dispatch_host_shell_ir ~workdir ir =
     Keeper_tool_execute_shell_ir.dispatch ~keeper_id:meta.name
       ~base_path:root ~workdir ~sandbox:(Masc_exec.Sandbox_target.host ())
-      ?timeout_sec ir
+      ir
   in
   let run_host_shell_ir
-        ?timeout_sec
         ?path
         ~workdir
         ~cmd
@@ -73,7 +72,7 @@ let try_handle
         | None -> []
         | Some path -> [ "path", `String path ]
     in
-    match dispatch_host_shell_ir ?timeout_sec ~workdir ir with
+    match dispatch_host_shell_ir ~workdir ir with
     | Error (Gate_reject diagnostic) -> error_json ~fields diagnostic
     | Error Cannot_parse -> error_json ~fields "Cannot parse command"
     | Error Too_complex -> error_json ~fields "Command too complex"
@@ -115,12 +114,19 @@ let try_handle
     loop max_eintr_retries
   in
   let run_in_turn_runtime ?(ok_exit_codes = [ 0 ]) ~cwd ~cmd ~command_argv
-      ?host_ir ~max_bytes ~timeout_sec ?(map_output = fun out -> out) ?(extra = []) () =
+      ?host_ir ~max_bytes ?(map_output = fun out -> out) ?(extra = []) () =
     match Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd with
     | Some runtime ->
       (match
          Keeper_turn_sandbox_runtime.run_command_with_status
-           ~ok_exit_codes runtime ~cwd ~command_argv ~max_bytes ~timeout_sec ()
+           ~ok_exit_codes
+           runtime
+           ~cwd
+           ~command_argv
+           ~max_bytes
+           ~timeout_sec:
+             (Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Io ())
+           ()
        with
        | Error msg ->
          error_json
@@ -135,7 +141,7 @@ let try_handle
            ~fields:[ "op", `String op; "cwd", `String cwd ]
            "missing host Shell IR fallback"
        | Some ir ->
-         run_host_shell_ir ~timeout_sec ~workdir:cwd ~cmd ~path:cwd ir
+         run_host_shell_ir ~workdir:cwd ~cmd ~path:cwd ir
            ~on_ok:(fun result ->
              render_completed_process_result ~root ~keeper_name:meta.name ~op
                ~cwd ~cmd ~extra result.status
@@ -190,14 +196,14 @@ let try_handle
        | Ok cwd ->
          if Keeper_sandbox_read_runner.should_route_read ~meta then
            render_sandbox_process_result ~cwd ~cmd:"pwd" ~backend_cmd:"pwd"
-             ~timeout_sec:Keeper_tool_execute_timeout.io_timeout_sec
+             ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Io ())
          else
            let host_ir =
              Keeper_tool_execute_shell_ir.simple ~cwd_raw:cwd ~cwd_base:root Masc_exec.Exec_program.Pwd []
            in
            run_in_turn_runtime ~cwd ~cmd:"pwd" ~command_argv:[ coreutils.pwd ]
              ~host_ir ~map_output:hostify_turn_runtime_output ~max_bytes:4096
-             ~timeout_sec:Keeper_tool_execute_timeout.io_timeout_sec ())
+             ())
   | "git_status" ->
     Some
       (match cwd_target () with
@@ -207,7 +213,7 @@ let try_handle
            render_sandbox_process_result ~cwd
              ~cmd:"git -C <cwd> --no-optional-locks status --short --branch"
              ~backend_cmd:"git --no-optional-locks status --short --branch"
-             ~timeout_sec:Keeper_tool_execute_timeout.read_timeout_sec
+             ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ())
          else
            let ir =
              Keeper_tool_execute_shell_ir.simple
@@ -248,7 +254,7 @@ let try_handle
                    ?turn_sandbox_factory ~config ~meta
                    ~command_argv:[ "ls"; "-la"; cpath ]
                    ~max_bytes:1_000_000
-                   ~timeout_sec:Keeper_tool_execute_timeout.io_timeout_sec
+                   ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Io ())
                    ()
                with
                | Error msg ->
@@ -292,7 +298,7 @@ let try_handle
               Keeper_sandbox_read_runner.read_file
                 ?turn_sandbox_factory ~config ~meta
                 ~host_path:target ~max_bytes
-                ~timeout_sec:Keeper_tool_execute_timeout.read_timeout_sec
+                ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ())
                 ()
             with
             | Error msg ->
@@ -355,7 +361,7 @@ let try_handle
                     base_argv @ type_argv @ glob_argv @ [ pattern; cpath ])
                   ~ok_exit_codes:[ 0; 1 ]
                   ~max_bytes:1_000_000
-                  ~timeout_sec:Keeper_tool_execute_timeout.read_timeout_sec
+                  ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ())
                   ()
               with
               | Error response -> response
@@ -437,7 +443,7 @@ let try_handle
               in
               render_sandbox_process_result ~cwd
                 ~cmd:"git -C <cwd> --no-optional-locks log --format=<fmt> -<n>"
-                ~backend_cmd ~timeout_sec:Keeper_tool_execute_timeout.read_timeout_sec)
+                ~backend_cmd ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ()))
          else
            (match Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd with
             | Some runtime ->
@@ -471,10 +477,12 @@ let try_handle
               in
               (match
                  Keeper_turn_sandbox_runtime.run_command_with_status runtime
+                   ~timeout_sec:
+                     (Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Io ())
                    ~cwd ~command_argv:argv
                    ~ok_exit_codes:[ 0 ]
                    ~max_bytes:1_000_000
-                   ~timeout_sec:Keeper_tool_execute_timeout.read_timeout_sec ()
+                   ()
                with
                | Error msg ->
                  error_json
@@ -553,7 +561,7 @@ let try_handle
                       "-not"; "-path"; "*/_build/*";
                       "-not"; "-path"; "*/.masc/*" ])
                   ~max_bytes:1_000_000
-                  ~timeout_sec:Keeper_tool_execute_timeout.read_timeout_sec
+                  ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ())
                   ()
               with
               | Error response -> response
@@ -617,7 +625,7 @@ let try_handle
                 ~command_argv:(fun cpath ->
                   [ "head"; "-n"; string_of_int n; cpath ])
                 ~max_bytes:1_000_000
-                ~timeout_sec:Keeper_tool_execute_timeout.read_timeout_sec
+                ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ())
                 ()
             with
             | Error response -> response
@@ -667,7 +675,7 @@ let try_handle
                 ~command_argv:(fun cpath ->
                   [ "tail"; "-n"; string_of_int n; cpath ])
                 ~max_bytes:1_000_000
-                ~timeout_sec:Keeper_tool_execute_timeout.read_timeout_sec
+                ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ())
                 ()
             with
             | Error response -> response
@@ -715,7 +723,7 @@ let try_handle
               run_readonly_in_sandbox ~target
                 ~command_argv:(fun cpath -> [ "wc"; "-l"; cpath ])
                 ~max_bytes:4096
-                ~timeout_sec:Keeper_tool_execute_timeout.read_timeout_sec
+                ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ())
                 ()
             with
             | Error response -> response
@@ -763,7 +771,7 @@ let try_handle
                     "-not"; "-path"; "*/.git/*";
                     "-not"; "-path"; "*/_build/*" ])
                 ~max_bytes:1_000_000
-                ~timeout_sec:Keeper_tool_execute_timeout.read_timeout_sec
+                ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ())
                 ()
             with
             | Error response -> response

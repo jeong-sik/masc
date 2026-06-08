@@ -226,8 +226,6 @@ let run_local_playback ~sw:_ ~agent_id ?message ~audio_file () =
                       ~actor:(Masc_exec.Agent_id.of_string "voice/bridge_core")
                       ~raw_source
                       ~summary:"voice local playback"
-                      ~timeout_sec:
-                        (Env_config_exec_timeout.timeout_sec ~caller:Voice ())
                       argv
                   with
                   | Unix.WEXITED 0, _ ->

@@ -327,7 +327,7 @@ let post_keeper_alert_slack
         ~actor:`System_notify
         ~raw_source:(String.concat " " argv)
         ~summary:"keeper alert slack webhook"
-        ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Alerting ())
+
         ~stdin_content:payload
         argv
     in
@@ -377,7 +377,7 @@ let slack_api_post_json
       ~actor:`System_notify
       ~raw_source:(String.concat " " argv)
       ~summary:"keeper alert slack api post"
-      ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Alerting ())
+
       ~stdin_content:body
       argv
   in
@@ -471,7 +471,7 @@ let post_keeper_alert_github
         ~actor:`Workspace_git
         ~raw_source:(String.concat " " args)
         ~summary:"keeper alert gh issue create"
-        ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Alerting ())
+
         args
     in
     match status with

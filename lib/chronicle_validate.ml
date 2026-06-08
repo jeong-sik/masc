@@ -39,7 +39,11 @@ let run_git ~timeout_sec ~workdir args =
          ~timeout_sec argv)
 
 let run_git_output ~workdir args =
-  match run_git ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Git_meta ()) ~workdir args with
+  match
+    run_git
+      ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Io ())
+      ~workdir args
+  with
   | Some (Unix.WEXITED 0, output) -> Some output
   | _ -> None
 

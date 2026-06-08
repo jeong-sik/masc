@@ -518,7 +518,7 @@ let keeper_context_status_json
       ~include_preflight:true
       ~config
       ~meta
-      ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Memory_audit ())
+      ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Io ())
       ~verbose:false
       ()
   in

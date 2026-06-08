@@ -31,18 +31,18 @@ val host_cwd_of_container :
 
 val run_command_with_status :
   ?ok_exit_codes:int list ->
+  timeout_sec:float ->
   t ->
   cwd:string ->
   command_argv:string list ->
   max_bytes:int ->
-  timeout_sec:float ->
   unit ->
   (Unix.process_status * string, string) result
 
 val run_exec_with_status :
   ?stdin_content:string ->
-  t ->
   timeout_sec:float ->
+  t ->
   cwd:string ->
   command_argv:string list ->
   (Unix.process_status * string, string) result
@@ -56,8 +56,8 @@ type exec_pipeline_stage = {
 }
 
 val run_exec_pipeline_with_status :
-  t ->
   timeout_sec:float ->
+  t ->
   cwd:string ->
   stages:exec_pipeline_stage list ->
   (Unix.process_status * string * string, string) result
@@ -67,34 +67,34 @@ val run_exec_pipeline_with_status :
 
 val run_command :
   ?ok_exit_codes:int list ->
+  timeout_sec:float ->
   t ->
   cwd:string ->
   command_argv:string list ->
   max_bytes:int ->
-  timeout_sec:float ->
   unit ->
   (string, string) result
 
 val run_bash_with_status :
+  timeout_sec:float ->
   t ->
   cwd:string ->
   cmd:string ->
-  timeout_sec:float ->
   unit ->
   (Unix.process_status * string, string) result
 
 val overwrite_file :
+  timeout_sec:float ->
   t ->
   host_path:string ->
   content:string ->
-  timeout_sec:float ->
   unit ->
   (unit, string) result
 
 val append_file :
+  timeout_sec:float ->
   t ->
   host_path:string ->
   content:string ->
-  timeout_sec:float ->
   unit ->
   (unit, string) result

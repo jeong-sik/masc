@@ -44,12 +44,21 @@ let image_preflight_target_error (failure : Keeper_sandbox_runtime.classified_er
        failure)
 ;;
 
-let docker_target ~turn_sandbox_factory ~meta ~cwd ~timeout_sec =
+(* Per PR cleanup spirit (caller does not observe the tool's hang
+   protection): the docker target hardcodes its own internal timeout.
+   The image-presence check, [docker exec] of a single command, and the
+   pipeline dispatch all share the same internal budget because the
+   hang modes (docker daemon stall, container start stall, command
+   stall) are the same domain — the sandbox's own. *)
+let internal_sandbox_timeout_sec = 30.0
+
+let docker_target ~turn_sandbox_factory ~meta ~cwd =
   let default_cwd = cwd in
   let stage_cwd_or_default = function
     | Some stage_cwd -> stage_cwd
     | None -> default_cwd
   in
+  let timeout_sec = internal_sandbox_timeout_sec in
   match Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd with
   | None ->
     Error (target_error "typed Shell IR Docker dispatch requires a turn sandbox factory")
@@ -62,7 +71,7 @@ let docker_target ~turn_sandbox_factory ~meta ~cwd ~timeout_sec =
      with
      | Error failure -> Error (image_preflight_target_error failure)
      | Ok () ->
-       let runner ~stdin_content ~argv ~env:_ ~cwd:stage_cwd ~timeout_sec =
+       let runner ~stdin_content ~argv ~env:_ ~cwd:stage_cwd =
          let cwd = stage_cwd_or_default stage_cwd in
          match
            Keeper_turn_sandbox_runtime.run_exec_with_status
@@ -75,7 +84,7 @@ let docker_target ~turn_sandbox_factory ~meta ~cwd ~timeout_sec =
          | Ok (status, output) -> status, output, ""
          | Error err -> Unix.WEXITED 1, "", err
        in
-       let pipeline_runner ~stages ~timeout_sec =
+       let pipeline_runner ~stages =
          let stages =
            List.map
              (fun stage ->
@@ -98,9 +107,13 @@ let docker_target ~turn_sandbox_factory ~meta ~cwd ~timeout_sec =
        Ok (Masc_exec.Sandbox_target.docker ~image ~runner ~pipeline_runner ()))
 ;;
 
-let docker_local_fallback_target ~meta ~timeout_sec =
+let docker_local_fallback_target ~meta =
   let image = docker_image meta in
-  match Keeper_sandbox_runtime.docker_image_present ~image ~timeout_sec with
+  match
+    Keeper_sandbox_runtime.docker_image_present
+      ~image
+      ~timeout_sec:internal_sandbox_timeout_sec
+  with
   | Ok () -> None
   | Error message ->
     Some

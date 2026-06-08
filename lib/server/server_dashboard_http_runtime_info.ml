@@ -1143,6 +1143,45 @@ let dashboard_runtime_probe_http_json ?(force = false) () =
           Atomic.set dashboard_runtime_probe_cache (Some { probe = fresh; refreshed_at });
           Atomic.set dashboard_runtime_probe_refresh_in_flight false;
           fresh, false, refreshed_at
+        | exception Eio.Mutex.Poisoned cause ->
+          Atomic.set dashboard_runtime_probe_refresh_in_flight false;
+          Log.Dashboard.warn
+            "runtime probe skipped: HTTP pool mutex poisoned (%s); \
+             returning degraded envelope"
+            (Printexc.to_string cause);
+          let degraded =
+            `Assoc
+              [ "source", `String runtime_inventory_source
+              ; "status", `String "unreachable"
+              ; "probe_ok", `Bool false
+              ; "checked_at", `String (Masc_domain.now_iso ())
+              ; ( "summary"
+                , `Assoc
+                    [ "runtimes", `Int 0
+                    ; "probed", `Int 0
+                    ; "reachable", `Int 0
+                    ; "failed", `Int 0
+                    ; "skipped", `Int 0
+                    ; "default_runtime_id", `Null
+                    ] )
+              ; "providers", `List []
+              ; "errors", `List [ `String "pool mutex poisoned; restart to recover" ]
+              ; ( "observations"
+                , `List
+                    [ `String
+                        (Printf.sprintf
+                           "Runtime probe failed: HTTP pool mutex poisoned (%s). \
+                            The pool recovers on next successful request; if this \
+                            persists, restart the server."
+                           (Printexc.to_string cause))
+                    ] )
+              ; "limitations"
+              , `List
+                  [ `String "Probe skipped due to poisoned pool mutex."
+                  ]
+              ]
+          in
+          degraded, false, 0.0
         | exception exn ->
           let bt = Printexc.get_raw_backtrace () in
           Atomic.set dashboard_runtime_probe_refresh_in_flight false;

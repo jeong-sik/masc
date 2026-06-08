@@ -351,6 +351,22 @@ let record_streaming_cancelled_observation
   let cancelled_variant =
     match terminal_reason_code with
     | "attempt_watchdog_safety_deadline" ->
+      (* The attempt watchdog firing is an environmental terminal (the
+         provider stalled mid-stream), not a same-turn re-dispatch storm.
+         [Keeper_turn_livelock.classify_and_decide] keys [Stuck_age_exceeded]
+         off [first_started_at], i.e. the FIRST dispatch of this turn_id; a
+         retry after the watchdog cancel inherits that ~watchdog-budget-old
+         timestamp and trips the stuck-age gate on the very next dispatch,
+         routing the keeper to operator_pause (human-gated resume). That
+         pause on a transport stall contradicts the invariant that a keeper
+         keeps acting autonomously. Reset the livelock entry so the retry is
+         classified Fresh. Rapid re-dispatch storm detection is unaffected:
+         only the watchdog/provider_timeout terminal clears the counter, and
+         only for the keeper whose turn just timed out. The underlying
+         mid-stream stall (dropped OAS stream-idle deadline) is addressed
+         separately; this prevents the symptom from escalating to a
+         fleet-wide pause. *)
+      Keeper_turn_livelock.reset_keeper_livelock ~keeper:run_meta.name;
       Keeper_turn_fsm.Cancelled Keeper_turn_fsm.Cancelled_provider_timeout
     | _ ->
       (* supervisor_stop, external_cancel, or any future reason *)

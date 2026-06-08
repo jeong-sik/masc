@@ -27,14 +27,6 @@ val resolve_bounded_provider_timeout_budget_with_turn_budget
   -> provider_timeout_budget
 (** See [Keeper_turn_runtime_budget] for provider timeout planning semantics. *)
 
-(** Legacy per-attempt watchdog budget. Progress-based liveness modes return no
-    watchdog so healthy active streams are not killed by cumulative wall time;
-    the budget remains for off-mode tests. *)
-val attempt_watchdog_timeout_sec
-  :  remaining_turn_budget_s:float
-  -> provider_timeout_budget
-  -> float
-
 val allow_wall_clock_retry_budget_for_attempt
   :  is_retry:bool
   -> degraded_rotation_first_attempt:bool

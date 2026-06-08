@@ -123,7 +123,6 @@ let run (ctx : ctx)
         ~run_generation
         ~is_retry
         ~oas_timeout_s
-        ~attempt_watchdog_s
     =
     last_execution := execution;
     Otel_genai.with_keeper_turn_span
@@ -151,20 +150,8 @@ let run (ctx : ctx)
            ~turn_id:keeper_turn_id
            ~prev:Keeper_turn_fsm.Awaiting_provider
            Keeper_turn_fsm.Streaming;
-         Keeper_unified_turn_attempt_watchdog.dispatch
-           ~clock
-           ~attempt_watchdog_s
-           ~oas_timeout_s
-           ~on_cancelled:(fun () ->
-             record_streaming_cancelled_observation
-               ~config
-               ~run_meta
-               ~run_generation
-               ~runtime_id:execution.runtime_id
-               ~keeper_turn_id
-               ())
-           ~run:(fun () ->
-             Keeper_agent_run.run_turn
+         try
+            Keeper_agent_run.run_turn
                ~config
                ~meta:run_meta
                ~base_dir
@@ -204,7 +191,16 @@ let run (ctx : ctx)
                ~is_retry
                ?shared_context
                ?event_bus:(Keeper_event_bus.get ())
-               ()))
+               ()
+         with Eio.Cancel.Cancelled _ as e ->
+           record_streaming_cancelled_observation
+             ~config
+             ~run_meta
+             ~run_generation
+             ~runtime_id:execution.runtime_id
+             ~keeper_turn_id
+             ();
+           raise e)
   in
   let rec retry_loop (input : retry_loop_input) =
     let { run_meta
@@ -280,19 +276,12 @@ let run (ctx : ctx)
       in
       attempt_provider_timeout_budget := Some provider_timeout_budget;
       last_provider_timeout_budget := Some provider_timeout_budget;
-      let attempt_watchdog_s =
-        attempt_watchdog_timeout_sec_opt
-          ~liveness_mode:(Keeper_attempt_liveness_config.current_mode ())
-          ~remaining_turn_budget_s:(remaining_turn_budget_s ())
-          provider_timeout_budget
-      in
       do_run
         ~execution
         ~run_meta
         ~run_generation
         ~is_retry
         ~oas_timeout_s:provider_timeout_budget.effective_timeout_sec
-        ~attempt_watchdog_s
     in
     match attempt_result with
     | Ok result ->

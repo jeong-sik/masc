@@ -186,7 +186,7 @@ let run_named
     turn_start;
     seq_ref;
   } in
-  let result, _checkpoint, _success_sample =
+  let result, _checkpoint =
     Keeper_turn_driver_try_provider.run_try_provider
       try_provider_ctx ?per_provider_timeout_s candidate
   in

@@ -4,7 +4,7 @@ module KH = Keeper_heartbeat_loop
 module KFP = Keeper_failure_policy
 module KK = Keeper_keepalive
 module KCB = Keeper_turn_runtime_budget
-module KAL = Keeper_attempt_liveness_config
+
 module KTD = Keeper_turn_driver
 module EC = Keeper_error_classify
 
@@ -196,35 +196,6 @@ let test_attempt_watchdog_timeout_reclassifies_as_provider_timeout () =
     true
     (EC.should_warn_keeper_cycle_failed reclassified)
 
-let test_stream_liveness_disables_outer_attempt_watchdog () =
-  let budget : KCB.provider_timeout_budget =
-    { effective_timeout_sec = 555.0
-    ; adaptive_timeout_sec = 600.0
-    ; keeper_turn_timeout_sec = 600.0
-    ; remaining_turn_budget_sec = 571.0
-    ; estimated_input_tokens = 10_000
-    ; max_turns = 6
-    ; source = "turn_budget_capped"
-    }
-  in
-  let select mode =
-    KCB.attempt_watchdog_timeout_sec_opt
-      ~liveness_mode:mode
-      ~remaining_turn_budget_s:571.0
-      budget
-  in
-  (match select KAL.Off with
-   | Some actual ->
-     Alcotest.(check (float 0.001)) "legacy off-mode watchdog" 570.0 actual
-   | None -> Alcotest.fail "off mode should preserve the legacy watchdog");
-  Alcotest.(check bool)
-    "observe mode lets stream liveness own the attempt"
-    true
-    (Option.is_none (select KAL.Observe));
-  Alcotest.(check bool)
-    "enforce mode lets stream liveness own the attempt"
-    true
-    (Option.is_none (select KAL.Enforce))
 
 let test_retry_timeout_budget_ignores_expired_outer_turn_budget () =
   let budget =
@@ -419,10 +390,7 @@ let () =
           "attempt watchdog timeout reclassifies as provider timeout"
           `Quick
           test_attempt_watchdog_timeout_reclassifies_as_provider_timeout;
-        Alcotest.test_case
-          "stream liveness disables outer attempt watchdog"
-          `Quick
-          test_stream_liveness_disables_outer_attempt_watchdog;
+
         Alcotest.test_case
           "retry timeout budget ignores expired outer turn budget"
           `Quick

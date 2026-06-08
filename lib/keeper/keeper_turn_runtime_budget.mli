@@ -96,28 +96,7 @@ val reclassify_provider_timeout_for_attempt :
 (** Rewrap structural attempt watchdog timeouts as [Provider_timeout] when
     the current attempt had an admitted provider-timeout budget. *)
 
-val attempt_watchdog_timeout_sec :
-  remaining_turn_budget_s:float ->
-  provider_timeout_budget ->
-  float
-(** Legacy wall-clock watchdog budget for a single runtime attempt.
 
-    Off-mode uses this after the OAS per-attempt budget plus the normal
-    finalization guard. Progress-based liveness modes return [None] from
-    [attempt_watchdog_timeout_sec_opt] so healthy active streams are not killed
-    by cumulative wall-clock elapsed. *)
-
-val attempt_watchdog_timeout_sec_opt :
-  liveness_mode:Keeper_attempt_liveness_config.mode ->
-  remaining_turn_budget_s:float ->
-  provider_timeout_budget ->
-  float option
-(** Runtime-attempt wall-clock watchdog selected for the active streaming
-    liveness mode.
-
-    [Observe] and [Enforce] return [None] so OAS [run_stream] progress,
-    [stream_idle_timeout_s], and the attempt-liveness observer own stream
-    liveness. [Off] preserves the legacy per-attempt watchdog. *)
 
 type degraded_retry_budget_decision =
   | No_degraded_retry

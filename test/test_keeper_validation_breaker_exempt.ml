@@ -58,17 +58,20 @@ let payload =
 let test_producer_tags_policy_rejection () =
   check (option string) "validation payload carries policy_rejection class"
     (Some "policy_rejection")
-    (Dispatch.failure_class_of_tool_result_payload payload)
+    (Option.map TR.tool_failure_class_to_string
+       (Dispatch.failure_class_of_tool_result_payload payload))
 
 (* B — Gate #1 (health breaker): validation is exempt, but an UNCLASSIFIED
    error still counts (conservative: unknown -> fail, never permissive-default
    per CLAUDE.md anti-pattern #2). *)
 let test_gate1_exempts_validation_but_counts_unclassified () =
   check bool "Gate#1 exempts policy_rejection validation" false
-    (Dispatch.should_apply_circuit_breaker_to_failure_payload payload);
+    (Dispatch.should_apply_circuit_breaker_to_failure_payload
+       (Dispatch.failure_class_of_tool_result_payload payload));
   check bool "Gate#1 still counts an unclassified (class-less) error" true
     (Dispatch.should_apply_circuit_breaker_to_failure_payload
-       {|{"error":"contract must be an object when provided"}|})
+       (Dispatch.failure_class_of_tool_result_payload
+          {|{"error":"contract must be an object when provided"}|}))
 
 (* C — Gate #2 (per-(tool,args) breaker): validation is NOT a workflow
    rejection, so identical bad args remain counted (retry-block intact). This

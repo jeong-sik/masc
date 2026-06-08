@@ -446,9 +446,8 @@ let keeper_memory_search_json
        Keeper_metrics.(to_string DecisionAuditFlushFailures)
        ~labels:[ "keeper", meta.name ]
        ();
-     Log.Keeper.warn
-       "keeper:%s memory_search decision-log append failed: %s"
-       meta.name
+     Log.Keeper.warn ~keeper_name:meta.name
+       "memory_search decision-log append failed: %s"
        (Printexc.to_string exn));
   Yojson.Safe.to_string result
 ;;

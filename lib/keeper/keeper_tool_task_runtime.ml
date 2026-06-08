@@ -288,9 +288,9 @@ let sync_keeper_meta_current_task
   =
   match Keeper_id.Task_id.of_string task_id with
   | Error msg ->
-    Log.Keeper.warn
-      "keeper:%s could not sync claimed task %s into current_task_id: %s"
-      meta.name task_id msg
+    Log.Keeper.warn ~keeper_name:meta.name
+      "could not sync claimed task %s into current_task_id: %s"
+      task_id msg
   | Ok current_task_id ->
     let updated_meta =
       { meta with current_task_id = Some current_task_id; updated_at = now_iso () }
@@ -305,9 +305,9 @@ let sync_keeper_meta_current_task
          Keeper_metrics.(to_string WriteMetaFailures)
          ~labels:[("keeper", meta.name); ("phase", "claim_task_id")]
          ();
-       Log.Keeper.warn
-         "keeper:%s failed to persist claimed current_task_id=%s: %s"
-         meta.name task_id msg)
+       Log.Keeper.warn ~keeper_name:meta.name
+         "failed to persist claimed current_task_id=%s: %s"
+         task_id msg)
 ;;
 
 (* Cluster sub-dispatch via closed sum type — string [name] is converted
@@ -366,9 +366,9 @@ let state_report_result_json ~(config : Workspace.config) ~(meta : keeper_meta) 
       with
       | Ok () -> true
       | Error err ->
-        Log.Keeper.warn
-          "keeper:%s report_state progress snapshot write failed: %s"
-          meta.name err;
+        Log.Keeper.warn ~keeper_name:meta.name
+          "report_state progress snapshot write failed: %s"
+          err;
         Otel_metric_store.inc_counter
           Keeper_metrics.(to_string SnapshotWriteFailures)
           ~labels:[("keeper", meta.name)]

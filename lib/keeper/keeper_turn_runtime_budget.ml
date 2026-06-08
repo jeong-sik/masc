@@ -603,9 +603,9 @@ let post_turn_resilience_handles
         Otel_metric_store.inc_counter Keeper_metrics.(to_string OasExecutionErrors)
           ~labels:[("keeper", meta.name); ("phase", Keeper_oas_execution_error_phase.(to_label Resilience_audit_store))]
           ();
-        Log.Keeper.error
-          "keeper:%s resilience audit store unavailable; execution disabled: %s"
-          meta.name detail;
+        Log.Keeper.error ~keeper_name:meta.name
+          "resilience audit store unavailable; execution disabled: %s"
+          detail;
         {
           resilience_audit_store = None;
           resilience_strategy_executor = None;

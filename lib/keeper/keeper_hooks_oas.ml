@@ -317,16 +317,16 @@ let make_hooks
             | reasons -> reasons
           in
           if Keeper_usage_trust.warns_operator usage_trust then
-            Log.Keeper.warn
-              "keeper:%s after_turn usage telemetry untrusted runtime_lane=%s reasons=%s input=%d output=%d context_max=%d"
-              meta.name runtime_lane_label
+            Log.Keeper.warn ~keeper_name:meta.name
+              "after_turn usage telemetry untrusted runtime_lane=%s reasons=%s input=%d output=%d context_max=%d"
+              runtime_lane_label
               (String.concat "," reasons)
               raw_input_tok raw_output_tok
               (context_max_of_telemetry response.telemetry)
           else
-            Log.Keeper.info
-              "keeper:%s after_turn usage telemetry unavailable runtime_lane=%s reasons=%s input=%d output=%d context_max=%d"
-              meta.name runtime_lane_label
+            Log.Keeper.info ~keeper_name:meta.name
+              "after_turn usage telemetry unavailable runtime_lane=%s reasons=%s input=%d output=%d context_max=%d"
+              runtime_lane_label
               (String.concat "," reasons)
               raw_input_tok raw_output_tok
               (context_max_of_telemetry response.telemetry));
@@ -431,9 +431,9 @@ let make_hooks
         let prompt_tok_s = fmt_tok_s prompt_tok_s_opt in
         let decode_tok_s = fmt_tok_s decode_tok_s_opt in
         let thinking = summarize_thinking_blocks response.content in
-        Log.Keeper.info
-          "keeper:%s turn=%d total_turns=%d runtime_lane=%s tokens=%d wall_tok_s=%s prompt_tok_s=%s decode_tok_s=%s latency_ms=%d thinking_present=%b thinking_blocks=%d thinking_chars=%d redacted_thinking_blocks=%d thinking_kind=%s"
-          meta.name turn meta.runtime.usage.total_turns model total_tok
+        Log.Keeper.info ~keeper_name:meta.name
+          "turn=%d total_turns=%d runtime_lane=%s tokens=%d wall_tok_s=%s prompt_tok_s=%s decode_tok_s=%s latency_ms=%d thinking_present=%b thinking_blocks=%d thinking_chars=%d redacted_thinking_blocks=%d thinking_kind=%s"
+          turn meta.runtime.usage.total_turns model total_tok
           wall_tok_s prompt_tok_s decode_tok_s latency_ms
           thinking.thinking_present
           thinking.thinking_blocks
@@ -456,9 +456,9 @@ let make_hooks
           Option.is_some (Keeper_memory_policy.find_state_block text)
         in
         if not has_state_block && turn > 0 then
-          Log.Keeper.debug
-            "keeper:%s turn=%d state_block=absent (awaiting post-run synthesis)"
-            meta.name turn;
+          Log.Keeper.debug ~keeper_name:meta.name
+            "turn=%d state_block=absent (awaiting post-run synthesis)"
+            turn;
         (try
            Sse.broadcast
              (`Assoc
@@ -492,9 +492,9 @@ let make_hooks
                Keeper_metrics.(to_string LifecycleCallbackFailures)
                ~labels:[(label_keeper, meta.name); (label_callback, callback_label_after_turn_sse_broadcast)]
                ();
-             Log.Keeper.warn
-               "keeper:%s turn=%d sse_turn_complete broadcast failed: %s"
-               meta.name turn (Printexc.to_string exn));
+             Log.Keeper.warn ~keeper_name:meta.name
+               "turn=%d sse_turn_complete broadcast failed: %s"
+               turn (Printexc.to_string exn));
         (* Reset same-name streak at turn boundary so it doesn't
            carry across turns (e.g., 4 calls in turn N + 1 in turn N+1
            should not hit threshold 5). *)
@@ -632,9 +632,9 @@ let make_hooks
                Keeper_metrics.(to_string LifecycleCallbackFailures)
                ~labels:[(label_keeper, (!meta_ref).name); (label_callback, callback_label_post_tool_log_write)]
                ();
-             Log.Keeper.warn
-               "keeper:%s tool=%s log_call write failed: %s"
-               (!meta_ref).name tool_name (Printexc.to_string exn));
+             Log.Keeper.warn ~keeper_name:(!meta_ref).name
+               "tool=%s log_call write failed: %s"
+               tool_name (Printexc.to_string exn));
         (match trajectory_acc with
          | None -> ()
          | Some acc ->
@@ -814,13 +814,13 @@ let make_hooks
               Log.Keeper.error ~keeper_name "tool_error: %s — %s"
                 tool_name error
             | `Repeated n ->
-              Log.Keeper.debug
-                "keeper:%s tool_error repeated (total=%d, dedup): %s — %s"
-                keeper_name n tool_name error
+              Log.Keeper.debug ~keeper_name:keeper_name
+                "tool_error repeated (total=%d, dedup): %s — %s"
+                n tool_name error
             | `Threshold_silence n ->
-              Log.Keeper.error
-                "keeper:%s tool_error threshold-silence after %d identical: %s — %s"
-                keeper_name n tool_name error;
+              Log.Keeper.error ~keeper_name:keeper_name
+                "tool_error threshold-silence after %d identical: %s — %s"
+                n tool_name error;
               Otel_metric_store.inc_counter
                 Keeper_metrics.(to_string LifecycleCallbackFailures)
                 ~labels:

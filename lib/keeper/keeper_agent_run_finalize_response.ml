@@ -169,9 +169,8 @@ let finalize
            Keeper_runtime_manifest.Checkpoint_saved;
          Ok (Some patched)
        | Error e ->
-         Log.Keeper.error
-           "keeper:%s runtime=%s OAS checkpoint save failed: %s"
-           meta.name
+         Log.Keeper.error ~keeper_name:meta.name
+           "runtime=%s OAS checkpoint save failed: %s"
            (Keeper_meta_contract.runtime_id_of_meta meta)
            e;
          Otel_metric_store.inc_counter
@@ -183,9 +182,8 @@ let finalize
               ~keeper_name:meta.name
               ~detail:("OAS checkpoint save failed: " ^ e)))
     | None ->
-      Log.Keeper.error
-        "keeper:%s runtime=%s missing OAS checkpoint after run"
-        meta.name
+      Log.Keeper.error ~keeper_name:meta.name
+        "runtime=%s missing OAS checkpoint after run"
         (Keeper_meta_contract.runtime_id_of_meta meta);
       Otel_metric_store.inc_counter
         Keeper_metrics.(to_string CheckpointFailures)

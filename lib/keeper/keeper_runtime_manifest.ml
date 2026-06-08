@@ -672,10 +672,10 @@ let append_best_effort ?(site = "runtime_manifest") config manifest =
         Keeper_fd_pressure.active () || Keeper_fd_pressure.is_fd_exhaustion_text msg
       in
       (if fd_pressure then
-         Log.Keeper.warn
-           "keeper:%s runtime_manifest coverage-gap append skipped during FD pressure \
+         Log.Keeper.warn ~keeper_name:manifest.keeper_name
+           "runtime_manifest coverage-gap append skipped during FD pressure \
             site=%s trace_id=%s event=%s: %s"
-           manifest.keeper_name site manifest.trace_id
+           site manifest.trace_id
            (event_kind_to_string manifest.event)
            msg
        else
@@ -695,15 +695,15 @@ let append_best_effort ?(site = "runtime_manifest") config manifest =
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
-         Log.Keeper.warn
-           "keeper:%s runtime_manifest coverage-gap append failed site=%s \
+         Log.Keeper.warn ~keeper_name:manifest.keeper_name
+           "runtime_manifest coverage-gap append failed site=%s \
             trace_id=%s event=%s: %s"
-           manifest.keeper_name site manifest.trace_id
+           site manifest.trace_id
            (event_kind_to_string manifest.event)
            (Printexc.to_string exn));
-      Log.Keeper.warn
-        "keeper:%s runtime_manifest append failed site=%s trace_id=%s event=%s: %s"
-        manifest.keeper_name site manifest.trace_id
+      Log.Keeper.warn ~keeper_name:manifest.keeper_name
+        "runtime_manifest append failed site=%s trace_id=%s event=%s: %s"
+        site manifest.trace_id
         (event_kind_to_string manifest.event)
         msg
 
@@ -763,9 +763,9 @@ let append_unfinished_provider_attempt_finished_best_effort
   =
   match last_unfinished_provider_attempt config ctx with
   | Error msg ->
-    Log.Keeper.warn
-      "keeper:%s runtime_manifest unfinished provider scan failed site=%s trace_id=%s: %s"
-      ctx.manifest_keeper_name site ctx.manifest_trace_id msg
+    Log.Keeper.warn ~keeper_name:ctx.manifest_keeper_name
+      "runtime_manifest unfinished provider scan failed site=%s trace_id=%s: %s"
+      site ctx.manifest_trace_id msg
   | Ok None -> ()
   | Ok (Some started) ->
     let inherited_fields =

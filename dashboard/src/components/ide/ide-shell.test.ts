@@ -23,7 +23,8 @@ vi.mock('./ide-conversation-rail', () => ({
   IdeConversationRail: () => null,
 }))
 
-import { deriveIdeStatusbarModel, IdeShell } from './ide-shell'
+import { IdeShell } from './ide-shell'
+import { deriveIdeStatusbarModel } from './ide-statusbar-model'
 import { navigate, route } from '../../router'
 import { clearTraces, pushTrace } from './keeper-trace-store'
 import { activeIdeFile, ideContextFocus } from './ide-state'

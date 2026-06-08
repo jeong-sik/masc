@@ -5,11 +5,8 @@ import {
   activeIdeFile,
   focusIdeContextAnchor,
   ideContextFocus,
-  type IdeContextFocus,
-  type IdeContextFocusRouteLink,
 } from './ide-state'
 import { createIdeDataWorkspaceStore } from './ide-data-workspace-store'
-import { parsePositiveLineString } from '../common/normalize'
 import { IdeExplorer } from './ide-explorer'
 import { IdeEditor, type IdeEditorView } from './ide-editor'
 import { IdeConversationRail } from './ide-conversation-rail'
@@ -20,7 +17,6 @@ import { ExecuteOutputDrawer } from './execute-output-drawer'
 import { IdePresenceStrip } from './ide-presence-strip'
 import {
   IDE_LAYERS,
-  IDE_LAYER_LABELS,
   REVIEW_FOCUS_LAYERS,
   IdeToolbar,
 } from './ide-toolbar'
@@ -35,381 +31,32 @@ import { routeLinksForContext } from './ide-context-lens'
 import { navigate, route } from '../../router'
 import { activeKeeperName } from '../../keeper-state'
 import { keepers } from '../../store'
-import { connected } from '../../sse'
-import { dashboardWsOnlyEnabled } from '../../dashboard-ws-cutover'
-import { dashboardWsConnected, dashboardWsSseFallbackActive } from '../../dashboard-ws-state'
 import type { Repository } from '../../api/repositories'
 import type { WorkspaceSource } from '../../api/workspace-source'
 import {
-  parseActive,
-  serializeActive,
-} from '../../../design-system/headless-core/layered-overlay'
+  viewFromRoute,
+  focusFromRoute,
+  layersFromRoute,
+  keeperFromRoute,
+  routeFocusFile,
+  routeFocusLine,
+  routeFocusLabel,
+  routeFocusSourceId,
+  routeParam,
+  paramsWithLayers,
+  paramsWithRails,
+  EMPTY_LAYER_PARAM,
+} from './ide-route-helpers'
+import {
+  deriveIdeStatusbarModel,
+  dashboardRuntimeConnected,
+  type IdeStatusbarModel,
+  type IdeStatusbarChip,
+} from './ide-statusbar-model'
 
 type ViewTab = IdeEditorView
-type IdeFocus = 'review'
-type IdeStatusbarChipTone = 'brass' | 'ghost' | 'info' | 'ok'
-type IdeConnectionTone = 'ok' | 'warn'
 
-export interface IdeStatusbarChip {
-  readonly id: string
-  readonly label: string
-  readonly tone: IdeStatusbarChipTone
-  readonly title: string
-}
-
-export interface IdeStatusbarModel {
-  readonly workspaceLabel: string
-  readonly chips: ReadonlyArray<IdeStatusbarChip>
-  readonly connectionLabel: string
-  readonly connectionTone: IdeConnectionTone
-}
-
-const IDE_LAYER_KINDS = new Set(IDE_LAYERS.map(layer => layer.kind))
 const IDE_ACTIVITY_POLL_MS = 10_000
-const REVIEW_FOCUS_LAYER_PARAM = REVIEW_FOCUS_LAYERS.join(',')
-const EMPTY_LAYER_PARAM = 'none'
-const STATUSBAR_LAYER_PRIORITY: ReadonlyArray<string> = [
-  'keeper-trace',
-  'approve',
-  'notes',
-  'runtime',
-  'time',
-  'parallel',
-  'tools',
-  'explode',
-]
-const STATUSBAR_VIEW_LABELS: Readonly<Record<ViewTab, string>> = {
-  source: 'SOURCE',
-  unified: 'UNIFIED',
-  'split-diff': 'SPLIT DIFF',
-  blame: 'BLAME',
-}
-
-interface IdeStatusbarInput {
-  readonly activeView: ViewTab
-  readonly activeLayers: ReadonlySet<string>
-  readonly activeFilePath: string | null
-  readonly contextFocus?: IdeContextFocus | null
-  readonly findOpen: boolean
-  readonly terminalOpen: boolean
-  readonly railsCollapsed: boolean
-  readonly reviewFocusActive: boolean
-  readonly routeParams: Record<string, string>
-  readonly repositories?: ReadonlyArray<Repository>
-  readonly activeRepositoryId?: string | null
-  readonly workspaceSource?: WorkspaceSource
-  readonly dashboardConnected?: boolean
-}
-
-function viewFromRoute(raw: string | null | undefined): ViewTab {
-  const normalized = raw
-    ?.trim()
-    .toLowerCase()
-    .replace(/[_\s]+/g, '-')
-  if (normalized === 'split' || normalized === 'split-diff' || normalized === 'merge') return 'split-diff'
-  if (normalized === 'unified') return 'unified'
-  if (normalized === 'blame') return 'blame'
-  return 'source'
-}
-
-function focusFromRoute(raw: string | null | undefined): IdeFocus | null {
-  return raw?.trim().toLowerCase() === 'review' ? 'review' : null
-}
-
-function layersFromRoute(raw: string | null | undefined, focus: IdeFocus | null): ReadonlySet<string> {
-  if (raw?.trim().toLowerCase() === EMPTY_LAYER_PARAM) return new Set()
-  if (focus === 'review' && !raw?.trim()) {
-    return parseActive(REVIEW_FOCUS_LAYER_PARAM, IDE_LAYER_KINDS)
-  }
-  return parseActive(raw ?? '', IDE_LAYER_KINDS)
-}
-
-function keeperFromRoute(): string {
-  const routeKeeper = route.value.params.keeper?.trim()
-  if (routeKeeper) return routeKeeper
-  const active = activeKeeperName.value.trim()
-  if (active) return active
-  return keepers.value[0]?.name?.trim() ?? ''
-}
-
-function routeFocusFile(params: Record<string, string>): string | undefined {
-  return params.file?.trim() || params.file_path?.trim() || params.path?.trim() || undefined
-}
-
-function routeFocusLine(params: Record<string, string>): number | undefined {
-  const raw = params.line?.trim() || params.lineno?.trim()
-  if (!raw) return undefined
-  return parsePositiveLineString(raw)
-}
-
-function routeFocusLabel(params: Record<string, string>, filePath: string): string {
-  const label = params.label?.trim()
-  if (label) return label
-  return filePath.split('/').pop() || filePath
-}
-
-function routeFocusSourceId(params: Record<string, string>, filePath: string, line?: number): string {
-  const sourceId = params.source_id?.trim() || params.source?.trim()
-  if (sourceId) return sourceId
-  return line !== undefined ? `route:${filePath}:${line}` : `route:${filePath}`
-}
-
-function routeParam(params: Record<string, string>, ...keys: ReadonlyArray<string>): string | undefined {
-  for (const key of keys) {
-    const value = params[key]?.trim()
-    if (value) return value
-  }
-  return undefined
-}
-
-function shortStatusbarPath(path: string): string {
-  const trimmed = path.trim()
-  if (!trimmed) return 'no file'
-  const parts = trimmed.split('/').filter(Boolean)
-  if (parts.length <= 2) return trimmed
-  return `${parts.at(-2)}/${parts.at(-1)}`
-}
-
-function compactStatusbarPath(path: string): string | undefined {
-  const normalized = path.trim().replace(/\\/g, '/')
-  if (!normalized) return undefined
-  const parts = normalized.split('/').filter(Boolean)
-  if (parts.length === 0) return undefined
-  if (parts.length === 1) return parts[0]
-  return `${parts.at(-2)}/${parts.at(-1)}`
-}
-
-function statusbarRepositoryLabel(repository: Repository | undefined): string | undefined {
-  const name = repository?.name?.trim()
-  if (name) return name
-  return compactStatusbarPath(repository?.local_path ?? '') ?? repository?.id?.trim()
-}
-
-function activeStatusbarRepository(
-  repositories: ReadonlyArray<Repository> | undefined,
-  activeRepositoryId: string | null | undefined,
-): Repository | undefined {
-  if (!repositories || repositories.length === 0) return undefined
-  return repositories.find(repository => activeRepositoryId && repository.id === activeRepositoryId)
-    ?? repositories[0]
-}
-
-function statusbarWorkspaceLabel(
-  repositories: ReadonlyArray<Repository> | undefined,
-  activeRepositoryId: string | null | undefined,
-  workspaceSource: WorkspaceSource | undefined,
-): string {
-  const repositoryForId = (repoId: string): string =>
-    statusbarRepositoryLabel(repositories?.find(repository => repository.id === repoId))
-    ?? repoId
-
-  switch (workspaceSource?.kind) {
-    case 'repository':
-      return repositoryForId(workspaceSource.repoId)
-    case 'repository_missing':
-      return `${repositoryForId(workspaceSource.repoId)} fallback`
-    case 'repository_unknown':
-      return `${workspaceSource.repoId} unknown`
-    case 'playground':
-      return `@${workspaceSource.keeper}`
-    case 'playground_missing':
-      return `@${workspaceSource.keeper} fallback`
-    case 'keeper_unknown':
-      return `@${workspaceSource.keeper} unknown`
-    case 'project':
-    case undefined:
-      return statusbarRepositoryLabel(activeStatusbarRepository(repositories, activeRepositoryId)) ?? '(no workspace)'
-  }
-}
-
-function dashboardRuntimeConnected(): boolean {
-  if (dashboardWsOnlyEnabled()) {
-    return dashboardWsConnected.value || dashboardWsSseFallbackActive.value
-  }
-  return connected.value
-}
-
-function statusbarLayerLabel(activeLayers: ReadonlySet<string>): string | null {
-  if (activeLayers.size === 0) return null
-  const labels = STATUSBAR_LAYER_PRIORITY
-    .filter(layer => activeLayers.has(layer))
-    .map(layer => IDE_LAYER_LABELS.get(layer) ?? layer)
-  if (labels.length === 0) return `${activeLayers.size} layers`
-  return labels.length === 1 ? labels[0]! : `${labels[0]} +${labels.length - 1}`
-}
-
-function normalizePrLabel(value: string): string {
-  const normalized = value.trim().replace(/^#/, '')
-  return normalized ? `#${normalized}` : value.trim()
-}
-
-function statusbarTelemetryLabel(params: Record<string, string>): string | undefined {
-  const session = routeParam(params, 'session_id')
-  const operation = routeParam(params, 'operation_id', 'op')
-  const worker = routeParam(params, 'worker_run_id', 'worker')
-  const query = routeParam(params, 'telemetry_q', 'q') ?? routeParam(params, 'log_id', 'log')
-  const first = session ?? operation ?? worker ?? query
-  return first ? `Telemetry ${first}` : undefined
-}
-
-function focusRouteLinkByLabel(
-  focus: IdeContextFocus | null | undefined,
-  ...labels: ReadonlyArray<string>
-): IdeContextFocusRouteLink | undefined {
-  const accepted = new Set(labels.map(label => label.toLowerCase()))
-  return focus?.route_links?.find(link => accepted.has(link.label.trim().toLowerCase()))
-}
-
-function focusRouteParam(
-  focus: IdeContextFocus | null | undefined,
-  labels: ReadonlyArray<string>,
-  ...keys: ReadonlyArray<string>
-): string | undefined {
-  const link = focusRouteLinkByLabel(focus, ...labels)
-  if (!link) return undefined
-  return routeParam(link.params, ...keys)
-}
-
-function statusbarTelemetryLabelFromFocus(focus: IdeContextFocus | null | undefined): string | undefined {
-  const telemetry = focusRouteLinkByLabel(focus, 'Telemetry')
-  if (!telemetry) return undefined
-  const session = routeParam(telemetry.params, 'session_id')
-  const operation = routeParam(telemetry.params, 'operation_id', 'op')
-  const worker = routeParam(telemetry.params, 'worker_run_id', 'worker')
-  const query = routeParam(telemetry.params, 'telemetry_q', 'q') ?? routeParam(telemetry.params, 'log_id', 'log')
-  const first = session ?? operation ?? worker ?? query
-  return first ? `Telemetry ${first}` : undefined
-}
-
-function addStatusbarChip(
-  chips: IdeStatusbarChip[],
-  id: string,
-  label: string | undefined,
-  tone: IdeStatusbarChipTone,
-  title: string,
-) {
-  const trimmed = label?.trim()
-  if (!trimmed) return
-  chips.push({ id, label: trimmed, tone, title })
-}
-
-export function deriveIdeStatusbarModel({
-  activeView,
-  activeLayers,
-  activeFilePath,
-  contextFocus = null,
-  findOpen,
-  terminalOpen,
-  railsCollapsed,
-  reviewFocusActive,
-  routeParams,
-  repositories,
-  activeRepositoryId,
-  workspaceSource,
-  dashboardConnected = false,
-}: IdeStatusbarInput): IdeStatusbarModel {
-  const chips: IdeStatusbarChip[] = []
-  const viewLabel = STATUSBAR_VIEW_LABELS[activeView]
-  addStatusbarChip(chips, 'view', viewLabel, reviewFocusActive ? 'brass' : 'ghost', `View: ${viewLabel}`)
-  addStatusbarChip(
-    chips,
-    'file',
-    activeFilePath === null ? 'no file' : shortStatusbarPath(activeFilePath),
-    'ghost',
-    `Active file: ${activeFilePath === null ? 'no file' : activeFilePath}`,
-  )
-
-  const layerLabel = statusbarLayerLabel(activeLayers)
-  addStatusbarChip(chips, 'layers', layerLabel ?? undefined, 'info', layerLabel ? `Active layers: ${layerLabel}` : '')
-  if (terminalOpen) addStatusbarChip(chips, 'terminal', 'terminal', 'info', 'Execute output drawer open')
-  if (findOpen) addStatusbarChip(chips, 'find', 'find', 'ghost', 'Current-file find panel open')
-  if (railsCollapsed) addStatusbarChip(chips, 'rails', 'rails hidden', 'ghost', 'IDE side rails hidden')
-
-  const routeLine = routeFocusLine(routeParams)
-  const contextLine = contextFocus?.line ?? routeLine
-  const routeSurface = contextFocus?.surface?.trim() || routeParams.surface?.trim()
-  const routeLabel = contextFocus?.label?.trim() || routeParams.label?.trim()
-  const routeFocusParts = [
-    routeSurface,
-    contextLine ? `L${contextLine}` : undefined,
-    routeLabel,
-  ].filter((part): part is string => Boolean(part?.trim()))
-  addStatusbarChip(
-    chips,
-    'focus',
-    routeFocusParts.length > 0 ? routeFocusParts.join(' ') : undefined,
-    'brass',
-    'Route-focused IDE context',
-  )
-
-  const goal = routeParam(routeParams, 'goal_id', 'goal')
-    ?? focusRouteParam(contextFocus, ['Goal'], 'goal')
-  const task = routeParam(routeParams, 'task_id', 'task')
-    ?? focusRouteParam(contextFocus, ['Task'], 'task')
-  const board = routeParam(routeParams, 'board_post_id', 'post')
-    ?? focusRouteParam(contextFocus, ['Board'], 'post')
-  const comment = routeParam(routeParams, 'comment_id', 'comment')
-    ?? focusRouteParam(contextFocus, ['Comment'], 'comment')
-  const pr = routeParam(routeParams, 'pr_id', 'pr')
-    ?? focusRouteParam(contextFocus, ['PR'], 'pr')
-  const git = routeParam(routeParams, 'git_ref', 'ref')
-    ?? focusRouteParam(contextFocus, ['Git'], 'ref')
-  const log = routeParam(routeParams, 'log_id', 'log')
-    ?? focusRouteParam(contextFocus, ['Log'], 'log_id')
-  const telemetry = statusbarTelemetryLabel(routeParams)
-    ?? statusbarTelemetryLabelFromFocus(contextFocus)
-  const keeper = routeParam(routeParams, 'keeper')
-    ?? focusRouteParam(contextFocus, ['Keeper'], 'keeper')
-    ?? contextFocus?.keeper_id
-
-  addStatusbarChip(chips, 'goal', goal ? `Goal ${goal}` : undefined, 'brass', 'Focused goal')
-  addStatusbarChip(chips, 'task', task ? `Task ${task}` : undefined, 'brass', 'Focused task')
-  addStatusbarChip(chips, 'board', board ? `Board ${board}` : undefined, 'info', 'Focused board post')
-  addStatusbarChip(chips, 'comment', comment ? `Comment ${comment}` : undefined, 'info', 'Focused comment')
-  addStatusbarChip(chips, 'pr', pr ? `PR ${normalizePrLabel(pr)}` : undefined, 'info', 'Focused pull request')
-  addStatusbarChip(chips, 'git', git ? `Git ${git}` : undefined, 'ghost', 'Focused git reference')
-  addStatusbarChip(chips, 'log', log ? `Log ${log}` : undefined, 'info', 'Focused runtime log')
-  addStatusbarChip(chips, 'telemetry', telemetry, 'info', 'Focused fleet telemetry')
-  addStatusbarChip(chips, 'keeper', keeper ? `Keeper ${keeper}` : undefined, 'ok', 'Focused keeper')
-
-  return {
-    workspaceLabel: statusbarWorkspaceLabel(repositories, activeRepositoryId, workspaceSource),
-    chips,
-    connectionLabel: dashboardConnected ? 'runtime · live' : 'runtime · reconnecting',
-    connectionTone: dashboardConnected ? 'ok' : 'warn',
-  }
-}
-
-function paramsWithLayers(
-  params: Record<string, string>,
-  view: ViewTab,
-  activeLayers: ReadonlySet<string>,
-): Record<string, string> {
-  const next: Record<string, string> = { ...params, section: 'ide-shell', view }
-  const serialized = serializeActive(activeLayers)
-  if (serialized) {
-    next.layers = serialized
-  } else if (focusFromRoute(params.focus) === 'review' && view === 'unified') {
-    next.layers = EMPTY_LAYER_PARAM
-  } else {
-    delete next.layers
-  }
-  return next
-}
-
-function paramsWithRails(
-  params: Record<string, string>,
-  view: ViewTab,
-  collapsed: boolean,
-): Record<string, string> {
-  const next: Record<string, string> = { ...params, section: 'ide-shell', view }
-  if (collapsed) {
-    next.rails = 'hidden'
-  } else {
-    delete next.rails
-  }
-  return next
-}
 
 export function IdeShell() {
   const workspaceStore = useMemo(() => createIdeDataWorkspaceStore(), [])

@@ -14,6 +14,7 @@ type try_provider_ctx =
   ; max_turns : int
   ; max_idle_turns : int
   ; stream_idle_timeout_s : float option
+  ; body_timeout_s : float option
   ; temperature : float
   ; max_tokens : int
   ; max_input_tokens : int option

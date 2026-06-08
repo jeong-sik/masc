@@ -96,7 +96,7 @@ let handle_tool_search_files
     let run_in_turn_runtime ?(ok_exit_codes = [ 0 ]) ~cwd ~cmd ~command_argv
         ?host_ir ~max_bytes ?(map_output = fun out -> out) ?(extra = []) () =
       match Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd with
-      | Some runtime ->
+      | Runtime runtime ->
         (match
            Keeper_turn_sandbox_runtime.run_command_with_status
              ~ok_exit_codes
@@ -114,7 +114,7 @@ let handle_tool_search_files
          | Ok (st, out) ->
            render_completed_process_result ~root ~keeper_name:meta.name ~op ~cwd
              ~cmd ~extra st (map_output out))
-      | None ->
+      | No_factory | Local_profile ->
         (match host_ir with
          | None ->
            error_json

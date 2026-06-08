@@ -609,19 +609,31 @@ let sort_entries_by_requested_at entries =
 
 let default_noncritical_approval_timeout_s = 600.0
 
+(** Critical approvals also timeout, but with a much longer window.
+    An operator who is away for over an hour should not leave keepers
+    blocked indefinitely.  The timeout rejects the approval, which lets
+    the keeper cycle terminate and re-attempt on the next tick — far
+    preferable to an infinite fiber suspension (#20348 regression:
+    wall-clock removal exposed that Critical HITL awaits never resolve). *)
+let critical_approval_timeout_s = 3600.0
+
 (** Submit a tool call for approval and suspend the calling fiber.
     Returns the operator's decision when the promise is resolved.
     Called from the OAS approval_callback (inside agent fiber).
 
     [timeout_s] defaults to {!default_noncritical_approval_timeout_s}
-    for non-[Critical] approvals. This is intentionally longer than the
+    for non-[Critical] approvals and {!critical_approval_timeout_s}
+    for [Critical] approvals.  Both are intentionally longer than the
     30s wrapper used by A2 for generic [Eio.Promise.await] sites: a HITL
     approval is bounded by an operator's response time, not by an SLA on
     autonomous progress.
-    [Critical] approvals are exempt, matching [expire_stale]'s
-    operator-must-decide policy. Drop the default only after measuring
-    the operator-response distribution — premature shortening turns
-    every distracted operator into an [Approval_expired] event. *)
+    [Critical] approvals previously never timed out, matching
+    [expire_stale]'s operator-must-decide policy.  This caused infinite
+    fiber suspension when the operator was unreachable (dashboard closed,
+    no notification channel).  Now Critical approvals timeout after
+    {!critical_approval_timeout_s} seconds.  Drop the default only after
+    measuring the operator-response distribution — premature shortening
+    turns every distracted operator into an [Approval_expired] event. *)
 let submit_and_await
       ~keeper_name
       ~tool_name
@@ -715,7 +727,49 @@ let submit_and_await
          (* Mirror expire_stale's teardown, but preserve any concurrent
             operator decision that wins the promise resolution race. *)
          timeout_decision reason)
-    | Some _, Critical | None, _ -> Eio.Promise.await promise
+    | Some clock, Critical ->
+      (* Critical approvals timeout after critical_approval_timeout_s.
+         This prevents indefinite fiber suspension when the operator is
+         unreachable.  The keeper cycle will terminate and re-attempt
+         on the next tick.  See #20348 regression analysis. *)
+      (match
+         Eio.Fiber.first
+           (fun () -> `Decision (Eio.Promise.await promise))
+           (fun () ->
+              Eio.Time.sleep clock critical_approval_timeout_s;
+              `Timeout)
+       with
+       | `Decision d -> d
+       | `Timeout ->
+         let reason =
+           Printf.sprintf
+             "critical approval timeout after %.0fs (operator unreachable)"
+             critical_approval_timeout_s
+         in
+         Log.Keeper.warn
+           "HITL_APPROVAL_TIMEOUT: id=%s keeper=%s tool=%s risk=%s — \
+            critical approval expired, operator was unreachable for %.0fs"
+           id keeper_name tool_name
+           (risk_level_to_string risk_level)
+           critical_approval_timeout_s;
+         audit_approval_event
+           ?base_path:entry.audit_base_path
+           ~event_type:"approval_timeout"
+           ~id
+           ~keeper_name
+           ~tool_name
+           ~risk_level
+           ?turn_id
+           ?task_id
+           ?goal_id
+           ~goal_ids
+           ~sandbox_target:entry.sandbox_target
+           ?runtime_contract
+           ?selected_model
+           ~decision:(Approval_expired reason)
+           ();
+         timeout_decision reason)
+    | None, _ -> Eio.Promise.await promise
   in
   Eio_guard.protect await_with_timeout ~finally:(fun () ->
     Safe_ops.protect ~default:() (fun () ->

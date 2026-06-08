@@ -48,7 +48,10 @@ let decide_keepalive_scheduling
     | Runtime_backpressured _ -> false
   in
   let verdict_reasons =
-    Keeper_world_observation.verdict_reasons_to_strings turn_decision.verdict
+    let base = Keeper_world_observation.verdict_reasons_to_strings turn_decision.verdict in
+    match runtime_backpressure with
+    | Runtime_backpressured _ -> "runtime_backpressure" :: base
+    | Runtime_admitted -> base
   in
   let channel = Keeper_world_observation.channel_to_string turn_decision.channel in
   { turn_decision

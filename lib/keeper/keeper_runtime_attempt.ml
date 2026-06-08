@@ -392,6 +392,12 @@ let sdk_error_capacity_backpressure_retry_hint err =
   | Some
       (Keeper_internal_error.Capacity_backpressure
          { retry_after = Synthetic_default s; _ }) -> Some (Cbr_synthetic_default s)
+  | Some
+      (Keeper_internal_error.Capacity_backpressure
+         { retry_after = No_retry_hint; _ }) ->
+    Some
+      (Cbr_synthetic_default
+         Keeper_binding_health_config.default_capacity_backpressure_backoff_sec)
   | _ -> None
 
 let sdk_error_capacity_backpressure_retry_after_s = function

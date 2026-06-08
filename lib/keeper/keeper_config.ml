@@ -439,35 +439,6 @@ let keeper_board_event_limit_rp =
 let keeper_board_event_limit () : int =
   Runtime_params.get keeper_board_event_limit_rp
 
-let keeper_turn_capacity_limit_rp =
-  _rp_int
-    ~key:"keeper.turn.capacity_limit"
-    ~default:(fun () -> Env_config_keeper.KeeperKeepalive.turn_capacity_limit)
-    ~min_v:0
-    ~max_v:1024
-    ~description:"Global concurrent keeper turn capacity limit (0 disables the gate)"
-    ()
-;;
-
-let keeper_turn_capacity_limit () : int =
-  Runtime_params.get keeper_turn_capacity_limit_rp
-;;
-
-let keeper_per_keeper_turn_capacity_limit_rp =
-  _rp_int
-    ~key:"keeper.turn.per_keeper_capacity_limit"
-    ~default:(fun () -> 2)
-    ~min_v:0
-    ~max_v:64
-    ~description:
-      "Per-keeper concurrent turn capacity limit (0 disables per-keeper gate). \
-       Default 2: with ~15 keepers, max concurrent = 30 < global limit 32."
-    ()
-;;
-
-let keeper_per_keeper_turn_capacity_limit () : int =
-  Runtime_params.get keeper_per_keeper_turn_capacity_limit_rp
-;;
 
 let keeper_llm_rerank_enabled_rp =
   _rp_bool ~key:"keeper.turn.llm_rerank"
@@ -531,8 +502,6 @@ let keeper_tool_search_top_k () : int =
     before [Runtime_params.restore]. Call from server bootstrap. *)
 let ensure_runtime_params_init () =
   let (_ : float) = Runtime_params.get keeper_unified_temperature_rp in
-  let (_ : int) = Runtime_params.get keeper_turn_capacity_limit_rp in
-  let (_ : int) = Runtime_params.get keeper_per_keeper_turn_capacity_limit_rp in
   ()
 
 let keeper_enable_thinking_rp =

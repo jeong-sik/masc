@@ -362,16 +362,6 @@ module KeeperKeepalive = struct
          (get_float ~default:180.0 "MASC_KEEPER_ADMISSION_WAIT_TIMEOUT_SEC"))
   ;;
 
-  (** Global concurrent keeper turn capacity. This is a machine-level admission
-      cap, not a per-keeper slot.
-      @category Concurrency
-      @ops_class operator
-
-      Env: [MASC_KEEPER_TURN_CAPACITY_LIMIT]. Default: 32. Range: [0, 1024]. *)
-  let turn_capacity_limit =
-    min 1024 (get_int_nonneg ~default:32 "MASC_KEEPER_TURN_CAPACITY_LIMIT")
-  ;;
-
   (** Per-call OAS timeout override in seconds.
 
       Legacy/env override value is clamped to the active keepalive

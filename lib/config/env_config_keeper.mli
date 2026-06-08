@@ -119,7 +119,6 @@ module KeeperKeepalive : sig
   val max_idle_turns_reactive : int
   val turn_timeout_sec : float
   val admission_wait_timeout_sec : float
-  val turn_capacity_limit : int
   val oas_timeout_sec_override : float option
   val oas_max_turns_per_call : int
   val oas_max_turns_per_call_scheduled_autonomous : int

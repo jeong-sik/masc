@@ -234,7 +234,7 @@ let compute_judgments
     Masc_oas_bridge.run_with_caller
       ~caller:Env_config_oas_bridge.Operator_judge (fun () ->
       Keeper_turn_driver_wrappers.run_named_with_masc_tools ~runtime_id
-        ~goal:prompt ~masc_tools ~dispatch ~max_turns:3
+        ~goal:prompt ~masc_tools ~dispatch 
         ~accept:Keeper_tool_response.response_has_text_or_tool_progress
         ~approval:Approval_callbacks.auto_approve
         ()

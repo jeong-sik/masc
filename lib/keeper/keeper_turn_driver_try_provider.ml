@@ -28,7 +28,6 @@ type try_provider_ctx =
   ; system_prompt : string
   ; tools : Agent_sdk.Tool.t list
   ; initial_messages : Agent_sdk.Types.message list
-  ; max_turns : int
   ; max_idle_turns : int
   ; stream_idle_timeout_s : float option
   ; body_timeout_s : float option
@@ -249,7 +248,6 @@ let run_try_provider
              candidate)
             with
             priority = ctx.priority
-          ; max_turns = ctx.max_turns
           ; max_tokens = ctx.max_tokens
           ; max_input_tokens = ctx.max_input_tokens
           ; max_cost_usd = ctx.max_cost_usd

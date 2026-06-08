@@ -58,8 +58,8 @@ let consecutive_failures () = Atomic.get _consecutive_failures
 let setup_exporter_with ?(enabled = Otel_config.enabled) ~endpoint ~setup () =
   if enabled then begin
     Opentelemetry_client_cohttp_eio.reset_tick_health ();
-    init ();
     try
+      init ();
       setup ();
       Atomic.set exporter_active true;
       Atomic.set _last_successful_export (Some (Unix.gettimeofday ()));
@@ -97,68 +97,86 @@ let setup_exporter ~sw (env : Eio_unix.Stdenv.base) =
   let endpoint = Otel_config.endpoint in
   let clock = Eio.Stdenv.clock env in
   Opentelemetry_client_cohttp_eio.reset_tick_health ();
+  (* Shared setup: init library, register OTLP backend, fork health-check fiber.
+     Called only after probe confirms collector is reachable. *)
+  let start_exporter () =
+    (* Initialize the OTel library only when we have a reachable collector.
+       Calling [init] before probe would start the internal tick loop even
+       when no collector exists, producing WARN spam on every export cycle. *)
+    init ();
+    let config =
+      Opentelemetry_client_cohttp_eio.Config.make ~url:endpoint ()
+    in
+    Opentelemetry_client_cohttp_eio.setup ~sw ~config env;
+    Atomic.set exporter_active true;
+    Atomic.set _last_successful_export (Some (Unix.gettimeofday ()));
+    Atomic.set _consecutive_failures 0;
+    Log.Otel.info "OTLP exporter started -> %s" endpoint;
+    let rec health_loop () =
+      Eio.Time.sleep clock 30.0;
+      if probe_endpoint ~env endpoint then begin
+        Atomic.set _consecutive_failures 0;
+        health_loop ()
+      end else begin
+        let failures = Atomic.get _consecutive_failures + 1 in
+        Atomic.set _consecutive_failures failures;
+        Log.Otel.warn "OTLP health check failed (%d consecutive) -> %s"
+          failures endpoint;
+        if Atomic.get exporter_active && failures >= 3 then begin
+          Log.Otel.error "OTLP exporter marked inactive after %d consecutive failures -> %s"
+            failures endpoint;
+          Atomic.set exporter_active false
+        end;
+        health_loop ()
+      end
+    in
+    Eio.Fiber.fork ~sw health_loop
+  in
   let rec try_setup attempt =
     if not (enabled ()) then ()
-    else begin
-      init ();
-      let setup () =
-        let config =
-          Opentelemetry_client_cohttp_eio.Config.make ~url:endpoint ()
+    else if not (probe_endpoint ~env endpoint) then
+      if attempt < 5 then begin
+        let delay = Float.of_int (1 lsl attempt) in
+        Log.Otel.warn "OTLP collector unreachable (%s), retry %d/5 in %.1fs"
+          endpoint (attempt + 1) delay;
+        Eio.Time.sleep clock delay;
+        try_setup (attempt + 1)
+      end else begin
+        Log.Otel.warn
+          "OTLP collector unreachable after 5 retries (%s), recovery probe every 30s"
+          endpoint;
+        Atomic.set exporter_active false;
+        (* Recovery fiber: masc typically starts before Docker containers.
+           Probe every 30s and call [start_exporter] when collector becomes
+           available.  No WARN spam — [init] is deferred until success. *)
+        let rec recovery_loop () =
+          Eio.Time.sleep clock 30.0;
+          if not (enabled ()) then ()
+          else if probe_endpoint ~env endpoint then
+            (try start_exporter () with
+             | Eio.Cancel.Cancelled _ as e -> raise e
+             | exn ->
+               Atomic.set exporter_active false;
+               Log.Otel.warn "OTLP recovery setup failed (%s): %s, retrying in 30s"
+                 endpoint (Printexc.to_string exn);
+               recovery_loop ())
+          else recovery_loop ()
         in
-        Opentelemetry_client_cohttp_eio.setup ~sw ~config env
-      in
-      if not (probe_endpoint ~env endpoint) then
-        if attempt < 5 then begin
-          let delay = Float.of_int (1 lsl attempt) in
-          Log.Otel.warn "OTLP collector unreachable (%s), retry %d/5 in %.1fs"
-            endpoint (attempt + 1) delay;
-          Eio.Time.sleep clock delay;
-          try_setup (attempt + 1)
-        end else begin
-          Log.Otel.warn "OTLP collector unreachable after 5 retries (%s), continuing without export"
-            endpoint;
-          Atomic.set exporter_active false
-        end
-      else
-        try
-          setup ();
-          Atomic.set exporter_active true;
-          Atomic.set _last_successful_export (Some (Unix.gettimeofday ()));
-          Atomic.set _consecutive_failures 0;
-          Log.Otel.info "OTLP exporter started -> %s" endpoint;
-          (* Health check fiber: probe collector every 30s *)
-          let rec health_loop () =
-            Eio.Time.sleep clock 30.0;
-            if probe_endpoint ~env endpoint then begin
-              Atomic.set _consecutive_failures 0;
-              health_loop ()
-            end else begin
-              let failures = Atomic.get _consecutive_failures + 1 in
-              Atomic.set _consecutive_failures failures;
-              Log.Otel.warn "OTLP health check failed (%d consecutive) -> %s"
-                failures endpoint;
-              if Atomic.get exporter_active && failures >= 3 then begin
-                Log.Otel.error "OTLP exporter marked inactive after %d consecutive failures -> %s"
-                  failures endpoint;
-                Atomic.set exporter_active false
-              end;
-              health_loop ()
-            end
-          in
-          Eio.Fiber.fork ~sw health_loop
-        with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | exn when attempt < 5 ->
-          let delay = Float.of_int (1 lsl attempt) in
-          Log.Otel.warn "OTLP exporter attempt %d/6 failed, retry in %.1fs: %s"
-            (attempt + 1) delay (Printexc.to_string exn);
-          Eio.Time.sleep clock delay;
-          try_setup (attempt + 1)
-        | exn ->
-          Atomic.set exporter_active false;
-          Log.Otel.warn "OTLP exporter unavailable after 6 attempts (%s): %s"
-            endpoint (Printexc.to_string exn)
-    end
+        Eio.Fiber.fork ~sw recovery_loop
+      end
+    else
+      try start_exporter () with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn when attempt < 5 ->
+        let delay = Float.of_int (1 lsl attempt) in
+        Log.Otel.warn "OTLP exporter attempt %d/6 failed, retry in %.1fs: %s"
+          (attempt + 1) delay (Printexc.to_string exn);
+        Eio.Time.sleep clock delay;
+        try_setup (attempt + 1)
+      | exn ->
+        Atomic.set exporter_active false;
+        Log.Otel.warn "OTLP exporter unavailable after 6 attempts (%s): %s"
+          endpoint (Printexc.to_string exn)
   in
   try_setup 0
 

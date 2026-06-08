@@ -25,7 +25,7 @@ type execute_input =
     }
 
 type validation_error =
-  | Executable_not_allowed of {
+  | Executable_not_allowlisted of {
       executable : string;
       reason : string;
     }
@@ -504,7 +504,7 @@ let check_exec ~executable ~argv ~cwd ~env =
 ;;
 
 let executable_admission_error executable reason =
-  Error (Executable_not_allowed { executable; reason })
+  Error (Executable_not_allowlisted { executable; reason })
 ;;
 
 let check_allowlisted_executable ~mode executable =
@@ -716,7 +716,7 @@ let pp_validation_error ppf = function
       ppf
       "executable %S was reported as duplicated in argv[0], but argv is empty"
       executable
-  | Executable_not_allowed { executable; reason } ->
+  | Executable_not_allowlisted { executable; reason } ->
     Format.fprintf
       ppf
       "executable %S is not allowed for typed Execute (%s); use a structured \

@@ -769,7 +769,7 @@ let expect_readonly_allowed label input =
 
 let expect_readonly_executable_rejected label input =
   match Keeper_tool_execute_typed_input.validate_readonly input with
-  | Error (Keeper_tool_execute_typed_input.Executable_not_allowed _) -> ()
+  | Error (Keeper_tool_execute_typed_input.Executable_not_allowlisted _) -> ()
   | Error e ->
     Alcotest.failf
       "%s should fail executable admission, got %s"
@@ -788,7 +788,7 @@ let expect_write_allowed label input =
 
 let expect_write_executable_rejected label input =
   match Keeper_tool_execute_typed_input.validate_write input with
-  | Error (Keeper_tool_execute_typed_input.Executable_not_allowed _) -> ()
+  | Error (Keeper_tool_execute_typed_input.Executable_not_allowlisted _) -> ()
   | Error e ->
     Alcotest.failf
       "%s should fail write executable admission, got %s"

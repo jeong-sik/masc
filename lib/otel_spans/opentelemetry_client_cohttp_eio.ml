@@ -496,7 +496,15 @@ let create_backend ~sw ?(stop = Atomic.make false) ?(config = Config.make ()) en
         try B.tick () with
         | Eio.Cancel.Cancelled _ as e -> raise e
         | Eio.Mutex.Poisoned cause -> stop_tick_after_poisoned_mutex ~stop cause
-        | exn -> Log.Telemetry.warn "otel tick failed: %s" (Printexc.to_string exn)
+        | exn ->
+          (* Any exception from tick() is unexpected: HTTP errors are handled
+             internally, and Batch uses Stdlib.Mutex. Stop the fiber to prevent
+             log spam; the backend must be restarted to resume export. *)
+          Atomic.set stop true;
+          Atomic.set tick_degraded_state true;
+          Log.Telemetry.error
+            "otel tick failed, stopping fiber: %s"
+            (Printexc.to_string exn)
     done);
   (module B)
 ;;

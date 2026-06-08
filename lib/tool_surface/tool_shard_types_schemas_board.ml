@@ -28,6 +28,7 @@ let board_tools : Masc_domain.tool_schema list =
                       ] )
                 ] )
           ; "required", `List [ `String "post_id" ]
+          ; "additionalProperties", `Bool false
           ]
     }
   ; { name = "keeper_board_post"
@@ -110,6 +111,7 @@ let board_tools : Masc_domain.tool_schema list =
                       ] )
                 ] )
           ; "required", `List [ `String "content" ]
+          ; "additionalProperties", `Bool false
           ]
     }
   ; { name = "keeper_board_list"
@@ -157,6 +159,7 @@ let board_tools : Masc_domain.tool_schema list =
                       ; "description", `String "Sort order (default: recent)"
                       ] )
                 ] )
+          ; "additionalProperties", `Bool false
           ]
     }
   ; { name = "keeper_board_comment"
@@ -186,6 +189,7 @@ let board_tools : Masc_domain.tool_schema list =
                       ] )
                 ] )
           ; "required", `List [ `String "post_id"; `String "content" ]
+          ; "additionalProperties", `Bool false
           ]
     }
   ; { name = "keeper_board_vote"
@@ -220,13 +224,19 @@ let board_tools : Masc_domain.tool_schema list =
                       ] )
                 ] )
           ; "required", `List [ `String "post_id" ]
+          ; "additionalProperties", `Bool false
           ]
     }
   ; { name = "keeper_board_stats"
     ; description =
         "Get board activity statistics: total posts, comments, votes, active hearths. \
          Use to understand overall board health and engagement levels."
-    ; input_schema = `Assoc [ "type", `String "object"; "properties", `Assoc [] ]
+    ; input_schema =
+        `Assoc
+          [ "type", `String "object"
+          ; "properties", `Assoc []
+          ; "additionalProperties", `Bool false
+          ]
     }
   ; { name = "keeper_board_search"
     ; description =
@@ -260,6 +270,7 @@ let board_tools : Masc_domain.tool_schema list =
                       ] )
                 ] )
           ; "required", `List [ `String "query" ]
+          ; "additionalProperties", `Bool false
           ]
     }
   ; { name = "keeper_board_curation_read"
@@ -268,7 +279,12 @@ let board_tools : Masc_domain.tool_schema list =
          recommended ordering, highlights, tag suggestions, answer matches, health \
          score, rationale, and provenance. Returns null when no snapshot has been \
          submitted yet."
-    ; input_schema = `Assoc [ "type", `String "object"; "properties", `Assoc [] ]
+    ; input_schema =
+        `Assoc
+          [ "type", `String "object"
+          ; "properties", `Assoc []
+          ; "additionalProperties", `Bool false
+          ]
     }
   ; { name = "keeper_board_curation_submit"
     ; description =
@@ -340,6 +356,7 @@ let board_tools : Masc_domain.tool_schema list =
                       ] )
                 ] )
           ; "required", `List [ `String "rationale" ]
+          ; "additionalProperties", `Bool false
           ]
     }
   ]

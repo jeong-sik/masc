@@ -8,5 +8,6 @@
  (libraries
   eio
   masc.config
+  masc.otel_metric_store
   masc_log
   yojson))

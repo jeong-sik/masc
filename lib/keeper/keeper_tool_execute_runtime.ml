@@ -115,7 +115,6 @@ let handle_tool_execute_typed
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
       ~timeout_sec
-      ~write_enabled
       ()
   =
   let root = Keeper_alerting_path.project_root_of_config config in
@@ -123,7 +122,9 @@ let handle_tool_execute_typed
     Keeper_tool_execute_path.resolve_tool_execute_cwd
       ~config
       ~meta
-      ~write_enabled
+      (* Keep all keepers on the shared execute-worktree root; command-level
+         permission remains the Shell IR gate, not per-keeper tool_access. *)
+      ~write_enabled:true
       ~args
   with
     | Error e -> error_json e
@@ -307,44 +308,6 @@ let handle_tool_execute_typed
             ~error:"destructive_operation_blocked"
             ~reason:"This typed command is destructive and is blocked for every keeper execution surface."
             ~alternatives:[ "Use a non-destructive command or a dedicated structured tool." ]
-            ()
-        else
-        let repo_cwd_context =
-          Keeper_sandbox_repo_path.classify_cwd ~config ~meta ~cwd
-        in
-        let is_direct_sandbox_repo_root =
-          match repo_cwd_context with
-          | Some { Keeper_sandbox_repo_path.is_direct_root = true; _ } -> true
-          | Some _ | None -> false
-        in
-        let is_git_diagnostic_command =
-          Masc_exec.Shell_ir_command_shape.is_git_diagnostic_command ir
-        in
-        let is_git_recovery_command =
-          Masc_exec.Shell_ir_command_shape.is_git_recovery_command ir
-        in
-        let is_direct_repo_git_recovery =
-          is_direct_sandbox_repo_root && is_git_recovery_command
-        in
-        let readonly_write_like =
-          is_git_recovery_command
-          || Masc_exec.Shell_ir_risk.is_r1 envelope
-          || Masc_exec.Shell_ir_risk.is_r2 envelope
-        in
-        if
-          (not write_enabled)
-          && readonly_write_like
-          && not is_git_diagnostic_command
-          && not is_direct_repo_git_recovery
-        then
-          blocked_result
-            ~deterministic_reason:Keeper_tool_deterministic_error.Write_operation_gated
-            ~error:"write_operation_gated"
-            ~reason:"This typed command modifies state. A write-capable Execute surface is required."
-            ~alternatives:
-              [ "Use read-only commands such as rg, cat, ls, git status, or git log."
-              ; "Ask the operator for a write-capable Execute candidate profile and matching runtime policy."
-              ]
             ()
         else
         let path_missing = pre_dispatch_path_missing ~cwd ir in
@@ -549,22 +512,12 @@ let handle_tool_execute
       ~(args : Yojson.Safe.t)
       ()
   =
-  let execute_write_surface_enabled names =
-    let is_write_enabled_candidate = function
-      | "tool_edit_file" | "tool_write_file" | "tool_execute" -> true
-      | _ -> false
-    in
-    names
-    |> Keeper_meta_contract.normalize_tool_names
-    |> List.exists is_write_enabled_candidate
-  in
   let timeout_sec =
     Keeper_tool_execute_timeout.clamp_shell_timeout
       ~min_sec:(Keeper_tool_execute_timeout.keeper_tool_execute_shell_ir_min_timeout_sec_for_args args)
       ~default:Keeper_tool_execute_timeout.io_timeout_sec
       args
   in
-  let write_enabled = execute_write_surface_enabled meta.tool_access in
   if has_typed_execute_input_key args
   then
     handle_tool_execute_typed
@@ -573,7 +526,6 @@ let handle_tool_execute
       ~meta
       ~args
       ~timeout_sec
-      ~write_enabled
       ()
   else
     error_json

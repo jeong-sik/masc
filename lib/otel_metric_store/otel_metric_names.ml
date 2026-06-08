@@ -257,3 +257,10 @@ let metric_egress_audit_stale_orphan = "masc_egress_audit_stale_orphan_total"
 let metric_persistence_read_drops = "masc_persistence_read_drops_total"
 let metric_persistence_utf8_repair = "masc_persistence_utf8_repair_total"
 let metric_discovery_history_failures = "masc_discovery_history_failures_total"
+
+(* #18855: per-tool correction_pipeline fix counter.
+   Incremented when the OAS agent_tools module reports that
+   correction_pipeline fixed input fields for a tool.
+   Labels: [tool_name]. *)
+let metric_oas_correction_pipeline_fixes_total =
+  "masc_oas_correction_pipeline_fixes_total"

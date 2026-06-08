@@ -284,6 +284,14 @@ let telemetry_has_canonical_model_id
   | Some { canonical_model_id = Some id; _ } -> String.trim id <> ""
   | Some _ | None -> false
 
+let canonical_model_id_of_telemetry
+    (telemetry : Agent_sdk.Types.inference_telemetry option) =
+  match telemetry with
+  | Some { canonical_model_id = Some id; _ } ->
+      let trimmed = String.trim id in
+      if trimmed <> "" then Some trimmed else None
+  | Some _ | None -> None
+
 let is_runtime_selector_alias model =
   let trimmed = String.trim model |> String.lowercase_ascii in
   let leaf =

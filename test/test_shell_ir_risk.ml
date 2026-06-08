@@ -132,7 +132,13 @@ let test_destructive_commands () =
   check "opam exec -- sh -c 'touch x'" Shell_ir_risk.Destructive_protected
 ;;
 
-let check_typed_execute_is_destructive ~label input =
+let test_typed_execute_shell_capable_executable_is_destructive () =
+  let input =
+    `Assoc
+      [ "executable", `String "python3"
+      ; "argv", `List [ `String "-c"; `String "open('x', 'w').write('1')" ]
+      ]
+  in
   match Masc.Keeper_tool_execute_typed_input.of_json input with
   | Error msg -> Alcotest.failf "typed Execute parse failed: %s" msg
   | Ok typed_input ->
@@ -144,19 +150,10 @@ let check_typed_execute_is_destructive ~label input =
          err
      | Ok ir ->
        let envelope = Shell_ir_risk.classify (Shell_ir_risk.undecided ir) in
-       Alcotest.(check bool) label true (Shell_ir_risk.is_destructive envelope))
-;;
-
-let test_typed_execute_shell_capable_executable_is_destructive () =
-  let input =
-    `Assoc
-      [ "executable", `String "python3"
-      ; "argv", `List [ `String "-c"; `String "open('x', 'w').write('1')" ]
-      ]
-  in
-  check_typed_execute_is_destructive
-    ~label:"typed Execute python3 is blocked before dispatch"
-    input
+       Alcotest.(check bool)
+         "typed Execute python3 is blocked before dispatch"
+         true
+         (Shell_ir_risk.is_destructive envelope))
 ;;
 
 let test_typed_execute_env_split_shell_wrapper_is_destructive () =
@@ -166,9 +163,21 @@ let test_typed_execute_env_split_shell_wrapper_is_destructive () =
       ; "argv", `List [ `String "-S"; `String "sh -c 'touch x'" ]
       ]
   in
-  check_typed_execute_is_destructive
-    ~label:"typed Execute env -S shell wrapper is blocked before dispatch"
-    input
+  match Masc.Keeper_tool_execute_typed_input.of_json input with
+  | Error msg -> Alcotest.failf "typed Execute parse failed: %s" msg
+  | Ok typed_input ->
+    (match Masc.Keeper_tool_execute_typed_input.to_shell_ir typed_input with
+     | Error err ->
+       Alcotest.failf
+         "typed Execute validation failed: %a"
+         Masc.Keeper_tool_execute_typed_input.pp_validation_error
+         err
+     | Ok ir ->
+       let envelope = Shell_ir_risk.classify (Shell_ir_risk.undecided ir) in
+       Alcotest.(check bool)
+         "typed Execute env -S shell wrapper is blocked before dispatch"
+         true
+         (Shell_ir_risk.is_destructive envelope))
 ;;
 
 let test_typed_execute_opam_exec_shell_wrapper_is_destructive () =
@@ -185,9 +194,21 @@ let test_typed_execute_opam_exec_shell_wrapper_is_destructive () =
             ]
       ]
   in
-  check_typed_execute_is_destructive
-    ~label:"typed Execute opam exec shell wrapper is blocked before dispatch"
-    input
+  match Masc.Keeper_tool_execute_typed_input.of_json input with
+  | Error msg -> Alcotest.failf "typed Execute parse failed: %s" msg
+  | Ok typed_input ->
+    (match Masc.Keeper_tool_execute_typed_input.to_shell_ir typed_input with
+     | Error err ->
+       Alcotest.failf
+         "typed Execute validation failed: %a"
+         Masc.Keeper_tool_execute_typed_input.pp_validation_error
+         err
+     | Ok ir ->
+       let envelope = Shell_ir_risk.classify (Shell_ir_risk.undecided ir) in
+       Alcotest.(check bool)
+         "typed Execute opam exec shell wrapper is blocked before dispatch"
+         true
+         (Shell_ir_risk.is_destructive envelope))
 ;;
 
 let test_gh_r0_read () =

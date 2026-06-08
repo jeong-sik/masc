@@ -1,6 +1,5 @@
 let dispatch
       ~clock:_clock
-      ~attempt_watchdog_s:_attempt_watchdog_s
       ~oas_timeout_s:_oas_timeout_s
       ~on_cancelled
       ~run

@@ -13,10 +13,6 @@
       receipt + FSM transition, then re-raise so the outer cleanup
       handler observes the cancellation
 
-    [attempt_watchdog_s] and [oas_timeout_s] are retained in the call shape for
-    compatibility with the runtime-budget plumbing, but this module no longer
-    starts an [Eio.Time.with_timeout_exn] attempt watchdog.
-
     The Cancelled re-raise path is the outer catch for cancellations
     that escape the in-band receipt builder in
     [Keeper_agent_run.run_turn]: the inner Cancel handlers all
@@ -25,7 +21,6 @@
     timeline. *)
 val dispatch
   :  clock:_ Eio.Time.clock
-  -> attempt_watchdog_s:float option
   -> oas_timeout_s:float
   -> on_cancelled:(unit -> unit)
   -> run:(unit -> ('a, Agent_sdk.Error.sdk_error) result)

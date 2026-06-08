@@ -27,14 +27,6 @@ val resolve_bounded_provider_timeout_budget_with_turn_budget
   -> provider_timeout_budget
 (** See [Keeper_turn_runtime_budget] for provider timeout planning semantics. *)
 
-(** Legacy per-attempt watchdog budget. Progress-based liveness modes return no
-    watchdog so healthy active streams are not killed by cumulative wall time;
-    the budget remains for off-mode tests. *)
-val attempt_watchdog_timeout_sec
-  :  remaining_turn_budget_s:float
-  -> provider_timeout_budget
-  -> float
-
 val allow_wall_clock_retry_budget_for_attempt
   :  is_retry:bool
   -> degraded_rotation_first_attempt:bool
@@ -44,15 +36,6 @@ val allow_wall_clock_retry_budget_for_attempt
 
 val degraded_retry_slot_phase_budget_sec : float
 val degraded_retry_slot_phase_available : time_spent_in_turn_s:float -> bool
-
-(** Reclassify a structural OAS timeout as [Provider_timeout] only when the
-    current attempt actually dispatched with a provider timeout budget. This
-    prevents a pre-retry turn-budget exhaustion from borrowing a stale
-    previous attempt budget and incorrectly rotating runtimes. *)
-val reclassify_provider_timeout_for_attempt
-  :  provider_timeout_budget:provider_timeout_budget option
-  -> Agent_sdk.Error.sdk_error
-  -> Agent_sdk.Error.sdk_error
 
 type degraded_retry_budget_decision =
   | No_degraded_retry

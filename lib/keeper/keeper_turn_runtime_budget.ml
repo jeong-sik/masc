@@ -83,49 +83,6 @@ let degraded_retry_bypasses_slot_phase_guard
   | None ->
     false
 
-let reclassify_provider_timeout_for_attempt
-    ~(provider_timeout_budget : provider_timeout_budget option)
-    (err : Agent_sdk.Error.sdk_error) : Agent_sdk.Error.sdk_error =
-  match err, provider_timeout_budget with
-  | Agent_sdk.Error.Api (Timeout { message }), Some budget
-    when EC.is_structural_oas_timeout_message message ->
-      let estimated_remaining_after_timeout =
-        Float.max 0.0 (budget.remaining_turn_budget_sec -. budget.effective_timeout_sec)
-      in
-      Keeper_turn_driver.sdk_error_of_masc_internal_error
-        (Keeper_turn_driver.Provider_timeout
-           { budget_sec = budget.effective_timeout_sec
-           ; keeper_turn_timeout_sec = budget.keeper_turn_timeout_sec
-           ; estimated_input_tokens = budget.estimated_input_tokens
-           ; source = budget.source
-           ; remaining_turn_budget_sec = Some estimated_remaining_after_timeout
-           ; min_required_sec = min_provider_timeout_budget_sec
-           ; phase = "runtime_attempt_watchdog"
-           })
-  | _ -> err
-
-let attempt_watchdog_outer_turn_reserve_sec = 1.0
-
-let attempt_watchdog_timeout_sec
-    ~(remaining_turn_budget_s : float)
-    (provider_timeout_budget : provider_timeout_budget) : float =
-  let desired =
-    provider_timeout_budget.effective_timeout_sec +. provider_timeout_guard_sec
-  in
-  let cap_before_outer_timeout =
-    Float.max 0.001
-      (remaining_turn_budget_s -. attempt_watchdog_outer_turn_reserve_sec)
-  in
-  let floor =
-    Float.min min_provider_timeout_budget_sec cap_before_outer_timeout
-  in
-  Float.max floor (Float.min desired cap_before_outer_timeout)
-
-let attempt_watchdog_timeout_sec_opt
-    ~(remaining_turn_budget_s : float)
-    (provider_timeout_budget : provider_timeout_budget) : float option =
-  Some (attempt_watchdog_timeout_sec ~remaining_turn_budget_s provider_timeout_budget)
-
 type degraded_retry_budget_decision =
   | No_degraded_retry
   | Degraded_retry_slot_phase_exhausted of EC.degraded_retry

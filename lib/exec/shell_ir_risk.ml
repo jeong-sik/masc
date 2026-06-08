@@ -935,17 +935,14 @@ let rec composed_decision (ir : Shell_ir.t) : risk_class =
       stages
 ;;
 
-(* The decision is the stricter of the per-stage composed verdict and the
-   flattened word-list floor, so it is monotone-safe by construction:
-   never lower than the legacy flat verdict and never lower than the
-   typed verdict. [composed_decision] dominates the flat floor for every
-   input the floor is head-anchored over, but the flat floor is retained
-   as a conservative lower bound (it can still catch a cross-stage
-   concatenation the per-stage scope does not). Retiring the floor is
-   gated on the differential-safety harness (RFC-0208 P2/P6). *)
+(* RFC-0208 P6: [classify] returns [composed_decision] directly.
+   The legacy flat word-list floor was removed: per-stage [max_risk]
+   composition (P0) already covers every cross-stage scenario the flat
+   floor caught, and P2 harness data showed 84% redundancy / 0%
+   structural load-bearing. Any remaining string-borne gaps are owned by
+   Hook/Policy pre-flight checks, not core classification. *)
 let classify (T ir : undecided t) : decided decided_ir =
-  let flat_floor = classify_words (flat_stage_words ir) in
-  { ir; risk = max_risk flat_floor (composed_decision ir) }
+  { ir; risk = composed_decision ir }
 ;;
 
 (* RFC-0208 P1 observability: did the typed lowering classify every

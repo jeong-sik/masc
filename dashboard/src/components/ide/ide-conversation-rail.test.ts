@@ -3,6 +3,7 @@ import { h } from 'preact'
 import { render } from 'preact'
 import { fireEvent, waitFor } from '@testing-library/preact'
 import {
+  boardKindFromPost,
   conversationContextSummary,
   IdeConversationRail,
   postsToAnchoredThreads,
@@ -498,5 +499,42 @@ describe('IdeConversationRail', () => {
     })
 
     expect(conversationContextSummary([])).toBeNull()
+  })
+})
+
+describe('boardKindFromPost', () => {
+  function stubPost(hearth: string | null): BoardPost {
+    return {
+      id: 'p-1',
+      author: 'keeper',
+      title: 'title',
+      body: 'body',
+      content: 'content',
+      tags: [],
+      votes: 0,
+      comment_count: 0,
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+      hearth,
+    } as BoardPost
+  }
+
+  it('maps known hearth values to ThreadKind', () => {
+    expect(boardKindFromPost(stubPost('approve'))).toBe('approve')
+    expect(boardKindFromPost(stubPost('flag'))).toBe('flag')
+    expect(boardKindFromPost(stubPost('question'))).toBe('question')
+    expect(boardKindFromPost(stubPost('suggest'))).toBe('suggest')
+    expect(boardKindFromPost(stubPost('note'))).toBe('note')
+  })
+
+  it('is case-insensitive for hearth', () => {
+    expect(boardKindFromPost(stubPost('APPROVE'))).toBe('approve')
+    expect(boardKindFromPost(stubPost('Flag'))).toBe('flag')
+  })
+
+  it('defaults to note for unknown or missing hearth', () => {
+    expect(boardKindFromPost(stubPost(null))).toBe('note')
+    expect(boardKindFromPost(stubPost(''))).toBe('note')
+    expect(boardKindFromPost(stubPost('unknown'))).toBe('note')
   })
 })

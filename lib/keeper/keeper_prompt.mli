@@ -40,8 +40,8 @@ val build_keeper_system_prompt :
   instructions:string ->
   ?persona_extended:string ->
   ?keeper_name:string ->
-  ?active_goals:(string * string * string) list ->
   ?home_ground:string ->
+  ?active_goals:(string * string * string) list ->
   unit ->
   string
 

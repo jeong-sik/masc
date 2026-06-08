@@ -6,7 +6,6 @@ type try_provider_ctx =
   ; keeper_name : string
   ; name : string
   ; goal : string
-  ; priority : Llm_provider.Request_priority.t option
   ; session_id : string option
   ; system_prompt : string
   ; tools : Agent_sdk.Tool.t list

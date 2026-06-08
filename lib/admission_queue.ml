@@ -24,7 +24,6 @@ type waiter_info =
   { keeper_name : string
   ; runtime_id : string
   ; enqueue_ts : float
-  ; priority : Llm_provider.Request_priority.t
   }
 
 type snapshot =
@@ -187,7 +186,7 @@ let check_host_resources ~surface ~keeper_name =
   check_host_resources_with ~surface ~keeper_name ~fd_count ~threshold
 ;;
 
-let with_permit ?wait_timeout_sec:_ ~priority:_ ~keeper_name ~runtime_id f =
+let with_permit ?wait_timeout_sec:_ ~keeper_name ~runtime_id f =
   match
     check_host_resources ~surface:Admission_queue_metrics.With_permit ~keeper_name
   with
@@ -204,7 +203,7 @@ let with_permit ?wait_timeout_sec:_ ~priority:_ ~keeper_name ~runtime_id f =
     Ok (with_inflight_observation ~keeper_name ~runtime_id f)
 ;;
 
-let try_with_permit ~priority:_ ~keeper_name ~runtime_id f =
+let try_with_permit ~keeper_name ~runtime_id f =
   match
     check_host_resources ~surface:Admission_queue_metrics.Try_with_permit ~keeper_name
   with
@@ -241,8 +240,6 @@ let snapshot_json () =
                   ; ( "runtime_id"
                     , `String
                         (w.runtime_id) )
-                  ; ( "priority"
-                    , `String (Llm_provider.Request_priority.to_string w.priority) )
                   ; "wait_seconds", `Float (now -. w.enqueue_ts)
                   ])
              s.waiters) )

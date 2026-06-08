@@ -94,7 +94,6 @@ val run_named :
   ?keeper_name:string ->
   goal:string ->
   ?provider_filter:string list ->
-  ?priority:Llm_provider.Request_priority.t ->
   ?session_id:string ->
   ?system_prompt:string ->
   ?tools:Agent_sdk.Tool.t list ->

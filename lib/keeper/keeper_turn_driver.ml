@@ -44,7 +44,6 @@ let run_named
     ?(keeper_name = "")
     ~goal
     ?provider_filter
-    ?priority
     ?session_id
     ?(system_prompt = "")
     ?(tools = [])
@@ -142,7 +141,6 @@ let run_named
     keeper_name;
     name;
     goal;
-    priority;
     session_id;
     system_prompt;
     tools;

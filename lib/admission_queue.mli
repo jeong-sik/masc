@@ -16,7 +16,6 @@ type waiter_info = {
   keeper_name : string;
   runtime_id : string;
   enqueue_ts : float;
-  priority : Llm_provider.Request_priority.t;
 }
 
 (** Queue-level snapshot for observability. *)
@@ -37,7 +36,6 @@ val initial_max_concurrent_of_env : (string -> string option) -> int
 
 val with_permit :
   ?wait_timeout_sec:float ->
-  priority:Llm_provider.Request_priority.t ->
   keeper_name:string ->
   runtime_id:string ->
   (unit -> 'a) ->
@@ -50,7 +48,6 @@ val with_permit :
     capacity, retry, and timeout behavior. *)
 
 val try_with_permit :
-  priority:Llm_provider.Request_priority.t ->
   keeper_name:string ->
   runtime_id:string ->
   (unit -> 'a) ->

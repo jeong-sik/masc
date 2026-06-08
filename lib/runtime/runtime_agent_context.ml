@@ -21,7 +21,6 @@ type config =
   ; provider_cfg : Llm_provider.Provider_config.t
   ; provider : Agent_sdk.Provider.config
   ; model_id : string
-  ; priority : Llm_provider.Request_priority.t option
   ; system_prompt : string
   ; tools : Agent_sdk.Tool.t list
   ; runtime_mcp_policy : Llm_provider.Llm_transport.runtime_mcp_policy option
@@ -93,7 +92,6 @@ let default_config
   ; provider_cfg
   ; provider
   ; model_id = provider_cfg.model_id
-  ; priority = None
   ; system_prompt
   ; tools
   ; runtime_mcp_policy = None
@@ -219,11 +217,6 @@ let builder_without_approval
     | None -> builder
   in
   let builder =
-    match config.priority with
-    | Some priority -> Agent_sdk.Builder.with_priority priority builder
-    | None -> builder
-  in
-  let builder =
     match config.max_cost_usd with
     | Some usd -> Agent_sdk.Builder.with_max_cost_usd usd builder
     | None -> builder
@@ -333,7 +326,6 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
     ; max_cost_usd = effective_max_cost_usd
     ; yield_on_tool = config.yield_on_tool
     ; context_compact_ratio = config.compact_ratio
-    ; priority = config.priority
     ; exit_condition = config.exit_condition
     }
   in
@@ -358,7 +350,6 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
         Agent_sdk.Hooks.Reject_without_callback
     ; runtime_mcp_policy = config.runtime_mcp_policy
     ; summarizer = config.summarizer
-    ; priority = config.priority
     }
   in
   { patched_checkpoint; agent_config; options }

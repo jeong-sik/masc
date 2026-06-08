@@ -23,7 +23,6 @@ type try_provider_ctx =
   ; name : string
   ; (* Agent config — fields passed through the runtime candidate boundary. *)
     goal : string
-  ; priority : Llm_provider.Request_priority.t option
   ; session_id : string option
   ; system_prompt : string
   ; tools : Agent_sdk.Tool.t list
@@ -247,8 +246,7 @@ let run_try_provider
              ~tools:effective_tools
              candidate)
             with
-            priority = ctx.priority
-          ; max_turns = ctx.max_turns
+            max_turns = ctx.max_turns
           ; max_tokens = ctx.max_tokens
           ; max_input_tokens = ctx.max_input_tokens
           ; max_cost_usd = ctx.max_cost_usd

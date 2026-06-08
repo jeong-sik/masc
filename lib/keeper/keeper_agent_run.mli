@@ -71,7 +71,6 @@ val per_provider_timeout_for_turn
     @param on_event Optional event callback
     @param trajectory_acc Optional trajectory accumulator for recording
     @param tool_overlay Optional mutable tool overlay for dynamic tools
-    @param priority Optional priority for scheduling
     @param is_retry When [true], replays current user message without persisting
     @param shared_context Optional shared OAS context for cross-turn state
     @param event_bus Optional MASC event bus *)
@@ -101,7 +100,6 @@ val run_turn
   -> ?on_event:(Agent_sdk.Types.sse_event -> unit)
   -> ?trajectory_acc:Trajectory.accumulator
   -> ?tool_overlay:Agent_sdk.Tool_op.t ref
-  -> ?priority:Llm_provider.Request_priority.t
   -> ?degraded_retry_applied:bool
   -> ?degraded_retry_runtime:string
   -> ?fallback_reason:Keeper_error_classify.degraded_retry_reason

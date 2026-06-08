@@ -102,7 +102,6 @@ let run_turn
       ?on_event
       ?(trajectory_acc : Trajectory.accumulator option)
       ?(tool_overlay : Agent_sdk.Tool_op.t ref option)
-      ?priority
       ?(degraded_retry_applied = false)
       ?degraded_retry_runtime
       ?fallback_reason
@@ -412,16 +411,7 @@ let run_turn
         ~downstream:on_event
         ~turn_id:manifest_keeper_turn_id
     in
-    let priority =
-      Option.value priority ~default:Llm_provider.Request_priority.Proactive
-    in
-    let admission_wait_timeout_sec =
-      if
-        Llm_provider.Request_priority.resolve priority
-        = Llm_provider.Request_priority.Proactive
-      then Some (Keeper_runtime_resolved.admission_wait_timeout_sec ())
-      else None
-    in
+    let admission_wait_timeout_sec = None in
     ignore (Keeper_alerting_path.ensure_sandbox_bundle ~config ~meta);
     let _keeper_sandbox_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
     let keeper_visible_sandbox_root =
@@ -485,7 +475,6 @@ let run_turn
                     ~keeper_name:meta.name
                     ?provider_filter
                     ~goal:user_message
-                    ~priority
                     ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
                     ~system_prompt:turn_system_prompt
                     ~tools

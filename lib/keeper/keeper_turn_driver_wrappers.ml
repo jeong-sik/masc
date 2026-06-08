@@ -120,7 +120,6 @@ let run_model_by_label
           model_label
         in
         Admission_queue.with_permit ?wait_timeout_sec
-          ~priority:Llm_provider.Request_priority.Proactive
           ~keeper_name:"oas-label-model"
           ~runtime_id:admission_runtime_id
           (fun () ->
@@ -160,7 +159,6 @@ let run_model_by_label
 let run_named_with_masc_tools
     ~runtime_id
     ~goal
-    ?priority
     ?(system_prompt = "")
     ~(masc_tools : Masc_domain.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result)
@@ -193,7 +191,7 @@ let run_named_with_masc_tools
       ~input_schema:td.input_schema
       (fun input -> dispatch ~name:td.name ~args:input)
   ) masc_tools in
-  Keeper_turn_driver.run_named ~runtime_id ~goal ?priority ~system_prompt ~tools:oas_tools
+  Keeper_turn_driver.run_named ~runtime_id ~goal ~system_prompt ~tools:oas_tools
     ~max_turns ~temperature ~max_tokens ?max_input_tokens ?max_cost_usd
     ?stream_idle_timeout_s ?wait_timeout_sec ?guardrails ?hooks
     ?tool_retry_policy
@@ -250,7 +248,6 @@ let run_model_with_masc_tools
           model_label
         in
         Admission_queue.with_permit ?wait_timeout_sec
-          ~priority:Llm_provider.Request_priority.Proactive
           ~keeper_name:"oas-explicit-model"
           ~runtime_id:admission_runtime_id
           (fun () ->

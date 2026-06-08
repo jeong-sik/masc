@@ -80,7 +80,7 @@ let base_core_tools =
         ; Task_create
         ; Memory_search
         ; (* Board: core interaction *)
-          Board_get
+          Board_post_get
         ; Board_post
         ; Board_comment
         ; Board_vote

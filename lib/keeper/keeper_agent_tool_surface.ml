@@ -177,7 +177,7 @@ let keeper_selection_bm25_prefilter_n = 30
    Execute/Grep rows. *)
 let tool_search_alias_entries =
   [ "keeper_board_post", "게시판 글 작성 올리기 포스트"
-  ; "keeper_board_get", "게시판 글 상세 단건 본문 댓글 post_id 읽기 보기"
+  ; "keeper_board_post_get", "게시판 글 상세 단건 본문 댓글 post_id 읽기 보기"
   ; "keeper_board_list", "게시판 목록 최근글 post_id 찾기 조회 나열"
   ; "keeper_board_comment", "게시판 댓글 답글 코멘트"
   ; "keeper_board_vote", "게시판 투표 추천 반대"

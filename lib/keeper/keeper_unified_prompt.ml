@@ -329,12 +329,12 @@ let fallback_externalized_bullet key =
     Some
       "- See board activity? Use the listed post_id. If no post_id is \
        listed, call keeper_board_list or keeper_board_search to discover one \
-       before any keeper_board_get, comment, or vote. Never call \
-       keeper_board_get with {} or without post_id. If the preview is enough, \
+       before any keeper_board_post_get, comment, or vote. Never call \
+       keeper_board_post_get with {} or without post_id. If the preview is enough, \
        comment directly with keeper_board_comment. If you need the full post, \
-       call keeper_board_get with that post_id; pair it with \
+       call keeper_board_post_get with that post_id; pair it with \
        keeper_board_comment in the same response only when the full post gives \
-       you a concrete reply. keeper_board_get alone is passive and fails \
+       you a concrete reply. keeper_board_post_get alone is passive and fails \
        actionable turns."
   else if String.equal key Keeper_prompt_names.turn_intent_board_post_guidance then
     Some
@@ -525,7 +525,7 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
      key set and fallback_externalized_bullet above for in-binary fallbacks. *)
   let board_activity_guidance =
     load_externalized_bullet
-      ~enabled:(tool_allowed "keeper_board_get"
+      ~enabled:(tool_allowed "keeper_board_post_get"
                 && tool_allowed "keeper_board_comment")
       Keeper_prompt_names.turn_intent_board_activity_guidance
   in

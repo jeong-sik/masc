@@ -220,7 +220,7 @@ let classify_catalog_tool ~tool_name =
   | "masc_cleanup_zombies"
   | "masc_gc" -> Some Generic_write
   | "masc_board_curation_read"
-  | "masc_board_get"
+  | "masc_board_post_get"
   | "masc_board_hearths"
   | "masc_board_list"
   | "masc_board_profile"

@@ -473,11 +473,8 @@ let test_fresh_presence_preserves_turn_failures () =
         (Masc.Keeper_heartbeat_loop.sync_keeper_presence
            ~ctx
            ~meta_current:meta
-           ~t_presence_start:100.0
            ~consecutive_failures:(ref 0)
-           ~last_successful_heartbeat_ts:(ref 99.0)
-           ~work_as_hb:(fun () -> true)
-           ~max_silence:(fun () -> 60.0));
+           ~last_successful_heartbeat_ts:(ref 99.0));
       check int
         "turn failures preserved"
         1

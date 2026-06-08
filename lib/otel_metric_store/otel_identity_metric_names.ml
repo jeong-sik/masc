@@ -61,3 +61,7 @@ let metric_governance_judge_unparseable = "masc_governance_judge_unparseable_tot
 let metric_governance_lenient_json_fallback_hit =
   "masc_governance_lenient_json_fallback_hit_total"
 ;;
+
+let metric_startup_internal_keeper_token_sync =
+  "masc_startup_internal_keeper_token_sync_total"
+;;

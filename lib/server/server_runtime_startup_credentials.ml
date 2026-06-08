@@ -54,10 +54,31 @@ let sync_admin_token_env (state : Mcp_server.server_state) =
 
 let sync_internal_keeper_token_env (state : Mcp_server.server_state) =
   let base_path = state.Mcp_server.workspace_config.base_path in
+  let pre_existing =
+    match Sys.getenv_opt "MASC_INTERNAL_MCP_TOKEN" with
+    | Some raw when String.trim raw <> "" -> true
+    | _ -> false
+  in
   let raw_token = Auth.ensure_internal_keeper_token base_path in
   Unix.putenv "MASC_INTERNAL_MCP_TOKEN" raw_token;
-  Log.Server.info
-    "startup internal keeper MCP token synced via MASC_INTERNAL_MCP_TOKEN"
+  let post_existing =
+    match Sys.getenv_opt "MASC_INTERNAL_MCP_TOKEN" with
+    | Some raw when String.trim raw <> "" -> true
+    | _ -> false
+  in
+  let source = if pre_existing then "inherited" else "generated" in
+  if post_existing then
+    Log.Server.info
+      "startup internal keeper MCP token synced via MASC_INTERNAL_MCP_TOKEN (source=%s)"
+      source
+  else
+    Log.Server.error
+      "startup internal keeper MCP token sync failed: MASC_INTERNAL_MCP_TOKEN not set after putenv";
+  Otel_metric_store.inc_counter
+    Otel_metric_store.metric_startup_internal_keeper_token_sync
+    ~labels:[("source", source)]
+    ~delta:1.0
+    ()
 
 let sync_bootable_keeper_credentials (state : Mcp_server.server_state) =
   let base_path = state.Mcp_server.workspace_config.base_path in

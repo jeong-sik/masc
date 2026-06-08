@@ -999,7 +999,8 @@ let test_execute_git_without_github_bundle_succeeds () =
   Alcotest.(check bool) "typed git uses docker exec" true
     (contains_substring log "\nexec ");
   Alcotest.(check bool) "typed git avoids credential blocker" false
-    (Keeper_tool_dispatch_runtime.should_apply_circuit_breaker_to_failure_payload raw)
+    (Keeper_tool_dispatch_runtime.should_apply_circuit_breaker_to_failure_payload
+       (Keeper_tool_dispatch_runtime.failure_class_of_tool_result_payload raw))
 
 let test_execute_git_c_option_missing_dir_blocks_before_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->

@@ -108,6 +108,8 @@ type masc_internal_error =
     }
   | Capacity_backpressure of {
       runtime_id : string;
+      keeper_name : string option;
+      model_id : string option;
       source : capacity_backpressure_source;
       detail : string;
       retry_after : capacity_retry_after;
@@ -217,7 +219,7 @@ let masc_internal_error_to_json = function
         ("runtime_id", `String runtime_id);
         ("reason", runtime_exhaustion_reason_to_json reason);
       ]
-  | Capacity_backpressure { runtime_id; source; detail; retry_after } ->
+  | Capacity_backpressure { runtime_id; keeper_name; model_id; source; detail; retry_after } ->
     let runtime_id = runtime_id_to_string runtime_id in
     let retry_after_fields =
       match retry_after with
@@ -227,6 +229,11 @@ let masc_internal_error_to_json = function
         [ ("retry_after_sec", `Float s); ("retry_after_synthetic", `Bool true) ]
       | No_retry_hint -> [ ("retry_after_sec", `Null) ]
     in
+    let optional_fields =
+      List.filter_map
+        (fun (k, v) -> Option.map (fun s -> (k, `String s)) v)
+        [ ("keeper_name", keeper_name); ("model_id", model_id) ]
+    in
     `Assoc
       ([
          ("kind", `String "capacity_backpressure");
@@ -234,6 +241,7 @@ let masc_internal_error_to_json = function
          ("source", `String (capacity_backpressure_source_to_string source));
          ("detail", `String detail);
        ]
+      @ optional_fields
       @ retry_after_fields)
   | Resumable_cli_session { runtime_id; detail; exit_code } ->
     let runtime_id = runtime_id_to_string runtime_id in
@@ -342,7 +350,7 @@ let summarize_list ?(empty = "none") values =
   | _ -> String.concat ", " values
 
 let summary_of_masc_internal_error = function
-  | Capacity_backpressure { runtime_id; source; detail; retry_after } ->
+  | Capacity_backpressure { runtime_id; keeper_name; model_id; source; detail; retry_after } ->
       let retry_after_suffix =
         match retry_after with
         | Explicit value -> Printf.sprintf "; retry_after=%.1fs" value
@@ -350,13 +358,21 @@ let summary_of_masc_internal_error = function
           Printf.sprintf "; retry_after=%.1fs (synthetic)" value
         | No_retry_hint -> ""
       in
+      let ctx_suffix =
+        match keeper_name, model_id with
+        | Some k, Some m -> Printf.sprintf "; keeper=%s; model=%s" k m
+        | Some k, None -> Printf.sprintf "; keeper=%s" k
+        | None, Some m -> Printf.sprintf "; model=%s" m
+        | None, None -> ""
+      in
       Some
         (Printf.sprintf
-           "Capacity backpressure blocked runtime %s; source=%s; detail=%s%s"
+           "Capacity backpressure blocked runtime %s; source=%s; detail=%s%s%s"
            (runtime_id_to_string runtime_id)
            (capacity_backpressure_source_to_string source)
            detail
-           retry_after_suffix)
+           retry_after_suffix
+           ctx_suffix)
   | Provider_timeout
       {
         budget_sec;
@@ -499,9 +515,11 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
                  | Some s when retry_after_synthetic -> Synthetic_default s
                  | Some s -> Explicit s
                in
+               let keeper_name = string_opt_of_assoc "keeper_name" json in
+               let model_id = string_opt_of_assoc "model_id" json in
                Some
                  (Capacity_backpressure
-                    { runtime_id; source; detail; retry_after })
+                    { runtime_id; keeper_name; model_id; source; detail; retry_after })
              | None -> None)
           | _ -> None)
       | Some (`String "resumable_cli_session") -> (

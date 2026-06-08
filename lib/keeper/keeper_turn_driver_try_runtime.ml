@@ -53,8 +53,42 @@ let http_status_of_http_error = function
   | Some (Llm_provider.Http_client.HttpError { code; _ }) -> Some code
   | _ -> None
 
-let sdk_error_of_exhausted last_err =
-  Agent_sdk.Error.Internal (Runtime_attempt_fsm.to_user_message last_err)
+let capacity_backpressure_of_http_error ~ctx ~source detail retry_after =
+  Keeper_internal_error.sdk_error_of_masc_internal_error
+    (Keeper_internal_error.Capacity_backpressure
+       { runtime_id = ctx.error_runtime_id
+       ; keeper_name =
+           (let name = String.trim ctx.keeper_name in
+            if String.equal name "" then None else Some name)
+       ; model_id = ctx.error_selected_model_raw
+       ; source
+       ; detail
+       ; retry_after
+       })
+
+let sdk_error_of_exhausted ~ctx last_err =
+  match last_err with
+  | Some
+      (Llm_provider.Http_client.ProviderFailure
+         { kind =
+             Llm_provider.Http_client.Capacity_exhausted { retry_after; _ }
+         ; message
+         }) ->
+    capacity_backpressure_of_http_error ~ctx ~source:Provider_capacity message
+      (match retry_after with
+       | Some s -> Keeper_internal_error.Explicit s
+       | None ->
+         Keeper_internal_error.Synthetic_default
+           Keeper_binding_health_config.default_capacity_backpressure_backoff_sec)
+  | Some
+      (Llm_provider.Http_client.NetworkError
+         { kind = Llm_provider.Http_client.Local_resource_exhaustion; message
+         }) ->
+    capacity_backpressure_of_http_error ~ctx ~source:Client_capacity message
+      (Keeper_internal_error.Synthetic_default
+         Keeper_binding_health_config.default_capacity_backpressure_backoff_sec)
+  | _ ->
+    Agent_sdk.Error.Internal (Runtime_attempt_fsm.to_user_message last_err)
 
 let maybe_mark_provider_attempt_started ctx =
   match ctx.base_path, String.trim ctx.keeper_name with
@@ -147,7 +181,7 @@ let run
     , ctx.turn_deadline )
   in
   let rec loop resume_checkpoint last_err = function
-    | [] -> Error (sdk_error_of_exhausted last_err)
+    | [] -> Error (sdk_error_of_exhausted ~ctx last_err)
     | candidate :: rest ->
       let is_last = rest = [] in
       maybe_mark_provider_attempt_started ctx;
@@ -180,7 +214,7 @@ let run
            Some (Llm_provider.Http_client.AcceptRejected { reason })
          in
          if is_last
-         then Error (sdk_error_of_exhausted last_err)
+         then Error (sdk_error_of_exhausted ~ctx last_err)
          else loop checkpoint_after last_err rest
        | Error err ->
          Keeper_turn_driver_provider_attempt.record_candidate_health_error
@@ -196,8 +230,8 @@ let run
            loop checkpoint_after (Some err) rest
          | Some err ->
            if is_last
-           then Error (sdk_error_of_exhausted (Some err))
-           else Error (sdk_error_of_exhausted (Some err))
+           then Error (sdk_error_of_exhausted ~ctx (Some err))
+           else Error (sdk_error_of_exhausted ~ctx (Some err))
          | None ->
            if is_last then Error err else loop checkpoint_after last_err rest)
   in

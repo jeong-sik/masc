@@ -20,7 +20,6 @@
  keeper_personality_io keeper_meta_json_parse keeper_meta_json keeper_types_support keeper_meta_store
   keeper_tool_descriptor keeper_tool_descriptor_resolution keeper_tool_runtime keeper_tool_registry
   keeper_tool_resolution
-  keeper_tool_policy_config
   keeper_tool_affinity
   keeper_tool_shared_runtime
    keeper_tool_board_runtime

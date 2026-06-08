@@ -333,8 +333,8 @@ let prepare_agent_setup
      counterparts are implementation details.
 
      Order matters: compute [descriptor_public_names] against the UNFILTERED
-     internal allowlist, because tool_policy.toml / tool_access still expresses
-     allowlists in descriptor/internal names (tool_execute, tool_read_file, ...).
+     internal candidate set. Descriptor/internal names (tool_execute,
+     tool_read_file, ...) drive the visible surface.
      Stripping internals before the descriptor expansion check would leave
      [descriptor_public_names] empty and drop "Execute"/"Read"/... from the
      visible surface. See PR #14596 review. *)

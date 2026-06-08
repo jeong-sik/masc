@@ -28,13 +28,16 @@ let board_tools : Masc_domain.tool_schema list =
                       ] )
                 ] )
           ; "required", `List [ `String "post_id" ]
+          ; "additionalProperties", `Bool false
           ]
     }
   ; { name = "keeper_board_post"
     ; description =
-        "Create a new board post with content. Use hearth to target a topic channel \
-         (e.g. 'code-review', 'research', 'ops'). Use for sharing findings, asking \
-         questions, or starting discussions that other keepers should see."
+        "Create a new board post. Author is auto-filled from keeper identity. Use \
+         hearth to target a topic channel (e.g. 'code-review', 'research', 'ops'); \
+         when a SubBoard with that slug exists the post is bound to it. Use for \
+         sharing findings, asking questions, or starting discussions that other \
+         keepers should see."
     ; input_schema =
         `Assoc
           [ "type", `String "object"
@@ -43,13 +46,17 @@ let board_tools : Masc_domain.tool_schema list =
                 [ ( "content"
                   , `Assoc
                       [ "type", `String "string"
-                      ; "description", `String "Post content (max 4000 chars)"
+                      ; "maxLength", `Int 4000
+                      ; "description", `String "Post body text (max 4000 chars)"
                       ] )
                 ; ( "hearth"
                   , `Assoc
                       [ "type", `String "string"
                       ; ( "description"
-                        , `String "Topic channel name (e.g. code-review, research, ops)" )
+                        , `String
+                            "SubBoard slug or topic channel (e.g. code-review, research, \
+                             ops). When a SubBoard with this slug exists, the post is bound \
+                             to that SubBoard and its access policy." )
                       ] )
                 ; ( "thread_id"
                   , `Assoc
@@ -110,6 +117,7 @@ let board_tools : Masc_domain.tool_schema list =
                       ] )
                 ] )
           ; "required", `List [ `String "content" ]
+          ; "additionalProperties", `Bool false
           ]
     }
   ; { name = "keeper_board_list"
@@ -129,7 +137,9 @@ let board_tools : Masc_domain.tool_schema list =
                   , `Assoc
                       [ "type", `String "string"
                       ; ( "description"
-                        , `String "Filter by topic channel (e.g. code-review, research)" )
+                        , `String
+                            "Filter by SubBoard slug or topic channel (e.g. \
+                             code-review, research)" )
                       ] )
                 ; ( "limit"
                   , `Assoc
@@ -140,6 +150,9 @@ let board_tools : Masc_domain.tool_schema list =
                            [correction_pipeline] coerce. *)
                         ( "type"
                         , `List [ `String "integer"; `String "string" ] )
+                      ; "default", `Int 20
+                      ; "minimum", `Int 1
+                      ; "maximum", `Int 50
                       ; ( "description"
                         , `String
                             "Max posts to return (default: 20, max: 50). \
@@ -157,6 +170,7 @@ let board_tools : Masc_domain.tool_schema list =
                       ; "description", `String "Sort order (default: recent)"
                       ] )
                 ] )
+          ; "additionalProperties", `Bool false
           ]
     }
   ; { name = "keeper_board_comment"
@@ -182,10 +196,12 @@ let board_tools : Masc_domain.tool_schema list =
                 ; ( "content"
                   , `Assoc
                       [ "type", `String "string"
-                      ; "description", `String "Comment content"
+                      ; "maxLength", `Int 4000
+                      ; "description", `String "Comment content (max 4000 chars)"
                       ] )
                 ] )
           ; "required", `List [ `String "post_id"; `String "content" ]
+          ; "additionalProperties", `Bool false
           ]
     }
   ; { name = "keeper_board_vote"
@@ -220,13 +236,19 @@ let board_tools : Masc_domain.tool_schema list =
                       ] )
                 ] )
           ; "required", `List [ `String "post_id" ]
+          ; "additionalProperties", `Bool false
           ]
     }
   ; { name = "keeper_board_stats"
     ; description =
         "Get board activity statistics: total posts, comments, votes, active hearths. \
          Use to understand overall board health and engagement levels."
-    ; input_schema = `Assoc [ "type", `String "object"; "properties", `Assoc [] ]
+    ; input_schema =
+        `Assoc
+          [ "type", `String "object"
+          ; "properties", `Assoc []
+          ; "additionalProperties", `Bool false
+          ]
     }
   ; { name = "keeper_board_search"
     ; description =
@@ -242,7 +264,8 @@ let board_tools : Masc_domain.tool_schema list =
                 [ ( "query"
                   , `Assoc
                       [ "type", `String "string"
-                      ; "description", `String "Search keyword"
+                      ; "maxLength", `Int 200
+                      ; "description", `String "Search keyword (max 200 chars)"
                       ] )
                 ; ( "limit"
                   , `Assoc
@@ -253,13 +276,17 @@ let board_tools : Masc_domain.tool_schema list =
                            same defect; fix all at once. *)
                         ( "type"
                         , `List [ `String "integer"; `String "string" ] )
+                      ; "default", `Int 20
+                      ; "minimum", `Int 1
+                      ; "maximum", `Int 100
                       ; ( "description"
                         , `String
-                            "Max results (default: 20). Numeric strings are \
-                             accepted; prefer the bare integer form." )
+                            "Max results (default: 20, max: 100). Numeric \
+                             strings are accepted; prefer the bare integer form." )
                       ] )
                 ] )
           ; "required", `List [ `String "query" ]
+          ; "additionalProperties", `Bool false
           ]
     }
   ; { name = "keeper_board_curation_read"
@@ -268,7 +295,12 @@ let board_tools : Masc_domain.tool_schema list =
          recommended ordering, highlights, tag suggestions, answer matches, health \
          score, rationale, and provenance. Returns null when no snapshot has been \
          submitted yet."
-    ; input_schema = `Assoc [ "type", `String "object"; "properties", `Assoc [] ]
+    ; input_schema =
+        `Assoc
+          [ "type", `String "object"
+          ; "properties", `Assoc []
+          ; "additionalProperties", `Bool false
+          ]
     }
   ; { name = "keeper_board_curation_submit"
     ; description =
@@ -340,6 +372,7 @@ let board_tools : Masc_domain.tool_schema list =
                       ] )
                 ] )
           ; "required", `List [ `String "rationale" ]
+          ; "additionalProperties", `Bool false
           ]
     }
   ]

@@ -85,27 +85,6 @@ let test_turn_timeout_default () =
   check (float 0.1) "default turn timeout 600s" 600.0
     Cfg.KeeperKeepalive.turn_timeout_sec
 
-let test_max_turns_default () =
-  check int "default max_turns_per_call 30" 30
-    Cfg.KeeperKeepalive.oas_max_turns_per_call
-
-let test_scheduled_autonomous_max_turns_default () =
-  (* Raised to 10 after Docker oas_env propagation restored; see
-     [env_config_keeper.ml] docstring. *)
-  check int "default scheduled autonomous max_turns_per_call 10" 10
-    Cfg.KeeperKeepalive.oas_max_turns_per_call_scheduled_autonomous
-
-let test_max_turns_range () =
-  let v = Cfg.KeeperKeepalive.oas_max_turns_per_call in
-  check bool "max_turns >= 1" true (v >= 1);
-  check bool "max_turns <= 50" true (v <= 50)
-
-let test_scheduled_autonomous_max_turns_range () =
-  let v = Cfg.KeeperKeepalive.oas_max_turns_per_call_scheduled_autonomous in
-  check bool "scheduled autonomous max_turns >= 1" true (v >= 1);
-  check bool "scheduled autonomous max_turns <= global" true
-    (v <= Cfg.KeeperKeepalive.oas_max_turns_per_call)
-
 (* ── KeeperGrpc config defaults ────────────────────────── *)
 
 let test_grpc_max_reconnect_default () =
@@ -270,12 +249,6 @@ let () =
       test_case "no override equals turn_timeout_sec (RFC-0156)" `Quick
         test_oas_call_timeout_no_override_equals_turn_timeout;
       test_case "turn timeout default is 600" `Quick test_turn_timeout_default;
-      test_case "max_turns default is 30" `Quick test_max_turns_default;
-      test_case "scheduled autonomous max_turns default is 10" `Quick
-        test_scheduled_autonomous_max_turns_default;
-      test_case "max_turns range" `Quick test_max_turns_range;
-      test_case "scheduled autonomous max_turns range" `Quick
-        test_scheduled_autonomous_max_turns_range;
     ];
     "grpc_config", [
       test_case "max_reconnect default" `Quick test_grpc_max_reconnect_default;

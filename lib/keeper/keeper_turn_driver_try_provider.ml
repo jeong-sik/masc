@@ -28,9 +28,9 @@ type try_provider_ctx =
   ; system_prompt : string
   ; tools : Agent_sdk.Tool.t list
   ; initial_messages : Agent_sdk.Types.message list
-  ; max_turns : int
   ; max_idle_turns : int
   ; stream_idle_timeout_s : float option
+  ; body_timeout_s : float option
   ; temperature : float
   ; max_tokens : int
   ; max_input_tokens : int option
@@ -248,7 +248,6 @@ let run_try_provider
              candidate)
             with
             priority = ctx.priority
-          ; max_turns = ctx.max_turns
           ; max_tokens = ctx.max_tokens
           ; max_input_tokens = ctx.max_input_tokens
           ; max_cost_usd = ctx.max_cost_usd
@@ -256,14 +255,7 @@ let run_try_provider
               stream_idle_timeout_for_attempt ~configured:ctx.stream_idle_timeout_s
           ; max_execution_time_s =
               max_execution_time_for_attempt ?per_provider_timeout_s ()
-          ; body_timeout_s =
-              (* SSOT: Keeper_runtime_resolved.body_timeout_override_sec
-                 (driven by MASC_KEEPER_BODY_TIMEOUT_SEC). OAS applies this
-                 only to non-streaming sync body reads; streaming attempts
-                 deliberately rely on [stream_idle_timeout_s] plus liveness
-                 observation so healthy reasoning bursts are not killed by
-                 total duration. *)
-              body_timeout_for_attempt ?per_provider_timeout_s ()
+          ; body_timeout_s = ctx.body_timeout_s
           ; temperature = ctx.temperature
           ; max_idle_turns = ctx.max_idle_turns
           ; guardrails = ctx.guardrails

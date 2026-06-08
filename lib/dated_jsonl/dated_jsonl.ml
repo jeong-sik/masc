@@ -325,9 +325,10 @@ let append t json =
 
 let set_append_guard guard = Atomic.set append_guard guard
 
-let read_recent t n =
+let read_recent ?(offset=0) t n =
   if n <= 0 then []
   else begin
+    let skip = ref offset in
     let collected = ref [] in
     let count = ref 0 in
     let months = list_month_dirs t.base_dir in
@@ -339,17 +340,20 @@ let read_recent t n =
          List.iter (fun d ->
            if !count >= n then raise_notrace Done;
            let path = Filename.concat month_path d in
-           let remaining = n - !count in
-           let lines = load_tail_lines path ~max_lines:remaining in
+           let need = n - !count + !skip in
+           let lines = load_tail_lines path ~max_lines:need in
            let rev_lines = List.rev lines in
            List.iter (fun line ->
-             if !count < n then begin
-               (try
-                  let json = Yojson.Safe.from_string line in
+             if !count >= n then raise_notrace Done;
+             (try
+                let json = Yojson.Safe.from_string line in
+                if !skip > 0 then
+                  decr skip
+                else begin
                   collected := json :: !collected;
                   incr count
-                with Yojson.Json_error _ -> ())
-             end
+                end
+              with Yojson.Json_error _ -> ())
            ) rev_lines
          ) days
        ) months
@@ -357,9 +361,10 @@ let read_recent t n =
     !collected
   end
 
-let read_recent_lines t n =
+let read_recent_lines ?(offset=0) t n =
   if n <= 0 then []
   else begin
+    let skip = ref offset in
     let collected = ref [] in
     let count = ref 0 in
     let months = list_month_dirs t.base_dir in
@@ -371,11 +376,14 @@ let read_recent_lines t n =
          List.iter (fun d ->
            if !count >= n then raise_notrace Done;
            let path = Filename.concat month_path d in
-           let remaining = n - !count in
-           let lines = load_tail_lines path ~max_lines:remaining in
+           let need = n - !count + !skip in
+           let lines = load_tail_lines path ~max_lines:need in
            let rev_lines = List.rev lines in
            List.iter (fun line ->
-             if !count < n then begin
+             if !count >= n then raise_notrace Done;
+             if !skip > 0 then
+               decr skip
+             else begin
                collected := line :: !collected;
                incr count
              end

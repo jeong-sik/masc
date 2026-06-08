@@ -51,20 +51,6 @@ let docker_mount_preflight_details
     ]
 ;;
 
-let egress_policy_path ~(config : Workspace.config) ~(meta : keeper_meta) =
-  let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
-  Filename.concat playground "egress.json"
-;;
-
-let check_egress ~(config : Workspace.config) ~(meta : keeper_meta) ~cmd =
-  let path = egress_policy_path ~config ~meta in
-  let policy = Masc_exec.Egress_policy.of_file path in
-  match Masc_exec.Egress_policy.check_command policy cmd with
-  | Masc_exec.Egress_policy.Allowed -> None
-  | Masc_exec.Egress_policy.Blocked _ as blocked ->
-    Some (Masc_exec.Egress_policy.blocked_to_json ~expected_policy_path:path blocked)
-;;
-
 (* ── Container naming ──────────────────────────────────── *)
 
 let keeper_sandbox_container_name =
@@ -689,7 +675,7 @@ let docker_result_to_bash_response ~config ~meta result =
     ~semantic_status:result.semantic_status
 ;;
 
-(** Shared container-backed bash execution: egress check →
+(** Shared container-backed bash execution:
     [run_docker_shell_command_with_status] → response JSON.
     Used by [run_docker_bash]. *)
 let run_docker_bash_via_container
@@ -700,16 +686,13 @@ let run_docker_bash_via_container
       ~(cmd : string)
       ~(network_mode : network_mode)
   =
-  match check_egress ~config ~meta ~cmd with
-  | Some blocked_json -> blocked_json
-  | None ->
-    (match
-	 run_docker_shell_command_with_status
-	         ~config ~meta ~cwd ~timeout_sec ~cmd ~network_mode
-     with
-     | Error message -> error_json message
-     | Ok result ->
-       docker_result_to_bash_response ~config ~meta result)
+  match
+    run_docker_shell_command_with_status
+      ~config ~meta ~cwd ~timeout_sec ~cmd ~network_mode
+  with
+  | Error message -> error_json message
+  | Ok result ->
+    docker_result_to_bash_response ~config ~meta result
 ;;
 
 let run_docker_bash

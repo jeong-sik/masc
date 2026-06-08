@@ -324,11 +324,7 @@ let make_tool_tracking_hooks ?gate_config ?context () =
                | None -> Agent_sdk.Hooks.Continue
                | Some (gate : Eval_gate.gate_config) ->
                  (* Gate 0: Deny list *)
-                 if
-                   Tool_access_policy.selector_matches_name
-                     (Tool_access_policy.Names gate.denied_tools)
-                     tool_name
-                 then (
+                 if List.mem tool_name gate.denied_tools then (
                    Log.LocalWorker.warn "worker deny list: blocked %s" tool_name;
                    Agent_sdk.Hooks.Override
                      (render_worker_skip_reason

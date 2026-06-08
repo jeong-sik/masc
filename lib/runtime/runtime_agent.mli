@@ -35,7 +35,7 @@ type stop_reason = Runtime_agent_context.stop_reason =
     }
 (** Why this single OAS call yielded control. [Completed] is the
     model's success path; [TurnBudgetExhausted] means the per-call
-    [max_turns] checkpoint was reached and the keeper should continue
+    turn budget checkpoint was reached and the keeper should continue
     from the persisted checkpoint on the next cycle; [MutationBoundaryReached]
     fires when the keeper hit a mutation tool while in read-only mode
     (the [tool_name] surfaces which tool triggered the gate). *)
@@ -52,7 +52,6 @@ type config = Runtime_agent_context.config = {
   tools : Agent_sdk.Tool.t list;
   runtime_mcp_policy :
     Llm_provider.Llm_transport.runtime_mcp_policy option;
-  max_turns : int;
   max_idle_turns : int;
   stream_idle_timeout_s : float option;
   max_execution_time_s : float option;
@@ -140,9 +139,6 @@ val provider_caps_of_config :
   Llm_provider.Provider_config.t ->
   Llm_provider.Capabilities.capabilities
 val provider_label : Llm_provider.Provider_config.t -> string
-val provider_effective_max_turns :
-  Llm_provider.Provider_config.provider_kind -> int -> int
-
 (** {1 Runtime-MCP policy} *)
 
 val runtime_mcp_tool_requires_bound_actor : string -> bool
@@ -229,8 +225,7 @@ val resume_from_checkpoint :
   (Agent_sdk.Agent.t, Agent_sdk.Error.sdk_error) result
 (** Resumes from a persisted checkpoint.  Uses
     [Runtime_agent_context.prepare_resume] to reconcile
-    [checkpoint.turn_count] with the current
-    [config.max_turns]. *)
+    [checkpoint.turn_count] with the current config. *)
 
 val run :
   sw:Eio.Switch.t ->

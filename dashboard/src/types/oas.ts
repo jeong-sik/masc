@@ -92,6 +92,7 @@ export interface OasHealthSummary {
   replayLoadedEvents: number
   replayTotalMatchingEvents: number
   replayTruncated: boolean
+  hasMore: boolean
   totalLlmCalls: number
   totalErrors: number
   lastLlmCallTs: number | null

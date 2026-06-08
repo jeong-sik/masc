@@ -629,7 +629,7 @@ let read_goal_events ~masc_root ?since_ts ?until_ts ~n () : Yojson.Safe.t list =
 
 let read_unified_result ~base_path ~masc_root ?(sources = all_sources)
     ?keeper_name ?session_id ?operation_id ?worker_run_id ?since_ts ?until_ts
-    ?(n = 100) () : read_result =
+    ?(n = 100) ?(offset = 0) () : read_result =
   let limited = n > 0 in
   let has_filter =
     Option.is_some keeper_name || Option.is_some session_id
@@ -638,8 +638,8 @@ let read_unified_result ~base_path ~masc_root ?(sources = all_sources)
   in
   let per_source =
     if not limited then 0
-    else if has_filter then max n (n * 2)
-    else n + 1
+    else if has_filter then max (n + offset) ((n + offset) * 2)
+    else n + offset + 1
   in
   let all_entries =
     List.concat_map (fun source ->
@@ -694,16 +694,16 @@ let read_unified_result ~base_path ~masc_root ?(sources = all_sources)
   let sorted = sort_newest_first filtered in
   let total_matching_entries = List.length sorted in
   let entries =
-    if not limited || total_matching_entries <= n then sorted
-    else take_first n sorted
+    if not limited || total_matching_entries <= offset + n then sorted
+    else sorted |> List.drop offset |> take_first n
   in
-  { entries; total_matching_entries; truncated = limited && total_matching_entries > n }
+  { entries; total_matching_entries; truncated = limited && total_matching_entries > offset + n }
 
 let read_unified ~base_path ~masc_root ?sources ?keeper_name ?session_id
-    ?operation_id ?worker_run_id ?since_ts ?until_ts ?n () :
+    ?operation_id ?worker_run_id ?since_ts ?until_ts ?n ?offset () :
     Yojson.Safe.t list =
   (read_unified_result ~base_path ~masc_root ?sources ?keeper_name ?session_id
-     ?operation_id ?worker_run_id ?since_ts ?until_ts ?n ()).entries
+     ?operation_id ?worker_run_id ?since_ts ?until_ts ?n ?offset ()).entries
 
 (* ── Summary ────────────────────────────────────────── *)
 

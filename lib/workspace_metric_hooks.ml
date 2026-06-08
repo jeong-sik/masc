@@ -494,7 +494,7 @@ let install () =
              ~goal:prompt
              ~masc_tools:[ report_tool_schema ]
              ~dispatch
-             ~max_turns:1
+             
              ~temperature:Runtime_provider_defaults.deterministic_temperature
              ~max_tokens:200
              ~approval:Approval_callbacks.auto_approve

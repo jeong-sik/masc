@@ -221,10 +221,6 @@ let is_auto_recoverable_runtime_exhausted_error (err : Agent_sdk.Error.sdk_error
       true
   | Some
       (Keeper_turn_driver.Runtime_exhausted
-         { reason = Keeper_turn_driver.Max_turns_exceeded; _ }) ->
-      true
-  | Some
-      (Keeper_turn_driver.Runtime_exhausted
          { reason = Keeper_turn_driver.Capacity_exhausted; _ }) ->
       true
   | Some (Keeper_turn_driver.Capacity_backpressure _) ->
@@ -268,7 +264,6 @@ let is_resumable_cli_session_error (err : Agent_sdk.Error.sdk_error) : bool =
 let is_auto_recoverable_runtime_fail_open_error
     (err : Agent_sdk.Error.sdk_error) : bool =
   Keeper_turn_driver.sdk_error_is_hard_quota err
-  || Keeper_turn_driver.sdk_error_is_max_turns_exceeded err
   || is_resumable_cli_session_error err
   || is_auto_recoverable_runtime_exhausted_error err
 
@@ -279,7 +274,6 @@ let is_auto_recoverable_runtime_fail_open_error
    [degraded_retry_reason_to_string]. *)
 type degraded_retry_reason =
   | Hard_quota
-  | Max_turns
   | Resumable_cli_session
   | Admission_queue_timeout
   | Provider_timeout
@@ -293,7 +287,6 @@ type degraded_retry_reason =
 
 let degraded_retry_reason_to_string = function
   | Hard_quota -> "hard_quota"
-  | Max_turns -> "max_turns"
   | Resumable_cli_session -> "resumable_cli_session"
   | Admission_queue_timeout -> "admission_queue_timeout"
   | Provider_timeout -> "provider_timeout"
@@ -358,8 +351,6 @@ let degraded_retry_after_recoverable_error
   then None
   else if Keeper_turn_driver.sdk_error_is_hard_quota err then
     phase_recovery_retry Hard_quota
-  else if Keeper_turn_driver.sdk_error_is_max_turns_exceeded err then
-    phase_recovery_retry Max_turns
   else
     match Keeper_turn_driver.classify_masc_internal_error err with
     | Some (Keeper_turn_driver.Resumable_cli_session _) ->
@@ -381,10 +372,7 @@ let degraded_retry_after_recoverable_error
            { reason = Keeper_turn_driver.Candidates_filtered_after_cycles; _ }) ->
         phase_recovery_retry Runtime_candidates_filtered
     | Some
-        (Keeper_turn_driver.Runtime_exhausted
-           { reason = Keeper_turn_driver.Max_turns_exceeded; _ }) ->
-        phase_recovery_retry Max_turns
-    | Some (Keeper_turn_driver.Runtime_exhausted _)
+        (Keeper_turn_driver.Runtime_exhausted _)
     | Some (Keeper_turn_driver.Accept_rejected _)
     | Some (Keeper_turn_driver.Admission_queue_rejected _)
     | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
@@ -400,8 +388,6 @@ let degraded_retry_after_recoverable_error
 let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
   if Keeper_turn_driver.sdk_error_is_hard_quota err then
     Some Hard_quota
-  else if Keeper_turn_driver.sdk_error_is_max_turns_exceeded err then
-    Some Max_turns
   else
     match Keeper_turn_driver.classify_masc_internal_error err with
     | Some (Keeper_turn_driver.Resumable_cli_session _) ->
@@ -423,10 +409,7 @@ let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
            { reason = Keeper_turn_driver.Candidates_filtered_after_cycles; _ }) ->
         Some Runtime_candidates_filtered
     | Some
-        (Keeper_turn_driver.Runtime_exhausted
-           { reason = Keeper_turn_driver.Max_turns_exceeded; _ }) ->
-        Some Max_turns
-    | Some (Keeper_turn_driver.Runtime_exhausted _) ->
+        (Keeper_turn_driver.Runtime_exhausted _) ->
         (* Generic runtime exhaustion: all candidates failed without a more
            specific reason. Treat as recoverable so declarative
            [fallback_runtime] hints declared in runtime.toml actually
@@ -660,8 +643,6 @@ let is_auto_recoverable_turn_error (err : Agent_sdk.Error.sdk_error) : bool =
   is_transient_network_error err
   || is_server_rejected_parse_error err
   || is_tool_retry_exhausted_error err
-  || Keeper_turn_driver.sdk_error_is_max_turns_exceeded err
-  || is_resumable_cli_session_error err
   || is_auto_recoverable_runtime_exhausted_error err
 
 let should_warn_keeper_cycle_failed (err : Agent_sdk.Error.sdk_error) : bool =

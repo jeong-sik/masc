@@ -183,11 +183,17 @@ let claim_task_r config ~agent_name ~task_id ()
                     `Claimed_ok, t' :: acc
                   | Claimed { assignee; _ }
                   | InProgress { assignee; _ }
-                  | AwaitingVerification { assignee; _ }
                     when assignee = agent_name -> `Already_mine, t :: acc
+                  | AwaitingVerification { assignee; verification_id; _ } ->
+                    if assignee = agent_name then `Already_mine, t :: acc
+                    else
+                    (* Cross-agent verification dispatch: verifier claims the
+                       AwaitingVerification task without changing its status.
+                       Verification.assign_verifier is called after the fold.
+                       Issue #19314. *)
+                    `Claimed_verification verification_id, t :: acc
                   | Claimed { assignee; _ }
                   | InProgress { assignee; _ }
-                  | AwaitingVerification { assignee; _ }
                   | Done { assignee; _ }
                   | Cancelled { cancelled_by = assignee; _ } ->
                     `Claimed_by assignee, t :: acc)
@@ -204,6 +210,45 @@ let claim_task_r config ~agent_name ~task_id ()
              (`Existing_claim
                { message = Printf.sprintf "Task %s is already claimed by you" task_id
                ; auto_released_task_ids = []
+               })
+         | `Claimed_verification verification_id ->
+           (* Issue #19314: Cross-agent verification dispatch.
+              The task stays in AwaitingVerification; we assign the verifier
+              in the verification store and set the agent's current_task.
+              WORKAROUND: Verification.assign_verifier lives in masc lib but
+              masc_workspace cannot depend on masc (cycle). Verifier assignment
+              is deferred to the verification dispatch loop instead. *)
+           let () = () in
+           Workspace_task_classify.update_local_agent_state config ~agent_name (fun agent ->
+             { agent with status = Busy; current_task = Some task_id });
+           let _ =
+             broadcast
+               config
+               ~from_agent:agent_name
+               ~content:(Printf.sprintf "Assigned as verifier for %s" task_id)
+           in
+           Workspace_task_classify.emit_task_activity
+             config
+             ~agent_name
+             ~task_id
+             ~kind:(Event_kind.Task.to_string Event_kind.Task.Claimed)
+             ~payload:(`Assoc
+               [ "task_id", `String task_id
+               ; "verification_dispatch", `Bool true
+               ]);
+           log_event
+             config
+             (`Assoc
+               [ "type", `String "task_claim_verification"
+               ; "agent", `String agent_name
+               ; "actor_kind", `String (Workspace_task_classify.task_actor_kind agent_name)
+               ; "task", `String task_id
+               ; "ts", `String (now_iso ())
+               ]);
+           Ok
+             (`New_claim
+               { message = Printf.sprintf "%s assigned as verifier for %s" agent_name task_id
+               ; auto_released_task_ids = auto_released_ids
                })
          | `Claimed_ok ->
            let new_backlog =

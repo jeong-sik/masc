@@ -22,7 +22,6 @@ let config_for_label
     ~(model_label : string)
     ~(system_prompt : string)
     ~(tools : Agent_sdk.Tool.t list)
-    ~(max_turns : int)
     ~(max_tokens : int)
     ?(max_input_tokens : int option)
     ?(max_cost_usd : float option)
@@ -47,7 +46,6 @@ let config_for_label
       (Runtime_agent.default_config ~name ~provider_cfg:provider
          ~system_prompt ~tools)
       with
-      max_turns;
       max_tokens;
       max_input_tokens;
       max_cost_usd;
@@ -75,7 +73,6 @@ let run_model_by_label
     ~goal
     ?(system_prompt = "")
     ?(tools = [])
-    ?(max_turns = 20)
     ?(max_idle_turns = 3)
     ?stream_idle_timeout_s
     ?(temperature = Runtime_provider_defaults.agent_default_temperature)
@@ -99,7 +96,7 @@ let run_model_by_label
   let stream_idle_timeout_s = apply_stream_idle_timeout_default stream_idle_timeout_s in
   let* config =
     config_for_label ~name:"oas-label-model" ~model_label ~system_prompt
-      ~tools ~max_turns ~max_tokens ?max_input_tokens ?max_cost_usd ~temperature
+      ~tools ~max_tokens ?max_input_tokens ?max_cost_usd ~temperature
       ~max_idle_turns ?stream_idle_timeout_s ?guardrails ?hooks ?context_reducer
       ?tool_retry_policy
       ?enable_thinking
@@ -164,7 +161,6 @@ let run_named_with_masc_tools
     ?(system_prompt = "")
     ~(masc_tools : Masc_domain.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result)
-    ?(max_turns = 20)
     ?stream_idle_timeout_s
     ?(temperature = Runtime_provider_defaults.agent_default_temperature)
     ?(max_tokens = Runtime_provider_defaults.agent_default_max_tokens)
@@ -194,7 +190,7 @@ let run_named_with_masc_tools
       (fun input -> dispatch ~name:td.name ~args:input)
   ) masc_tools in
   Keeper_turn_driver.run_named ~runtime_id ~goal ?priority ~system_prompt ~tools:oas_tools
-    ~max_turns ~temperature ~max_tokens ?max_input_tokens ?max_cost_usd
+    ~temperature ~max_tokens ?max_input_tokens ?max_cost_usd
     ?stream_idle_timeout_s ?wait_timeout_sec ?guardrails ?hooks
     ?tool_retry_policy
     ~accept
@@ -209,7 +205,6 @@ let run_model_with_masc_tools
     ?(system_prompt = "")
     ~(masc_tools : Masc_domain.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result)
-    ?(max_turns = 20)
     ?stream_idle_timeout_s
     ?(temperature = Runtime_provider_defaults.agent_default_temperature)
     ?(max_tokens = Runtime_provider_defaults.agent_default_max_tokens)
@@ -231,7 +226,7 @@ let run_model_with_masc_tools
   let stream_idle_timeout_s = apply_stream_idle_timeout_default stream_idle_timeout_s in
   let* config =
     config_for_label ~name:"oas-explicit-model" ~model_label ~system_prompt
-      ~tools:[] ~max_turns ~max_tokens ?max_input_tokens ?max_cost_usd ~temperature
+      ~tools:[] ~max_tokens ?max_input_tokens ?max_cost_usd ~temperature
       ?stream_idle_timeout_s ?guardrails ?hooks ?tool_retry_policy ?enable_thinking
       ?compact_ratio
       ~description:(Some (Printf.sprintf "model_label:%s" model_label))

@@ -436,9 +436,9 @@ function PopoverContent({
           <div class="font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Keepers</div>
           <div class="mt-0.5 text-sm font-semibold tabular-nums">${summary.counts.keeperAttention}</div>
         </div>
-        <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1.5">
-          <div class="font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Verify</div>
-          <div class="mt-0.5 text-sm font-semibold tabular-nums">${summary.counts.pendingVerificationTasks}</div>
+        <div class="rounded-[var(--r-1)] border ${summary.counts.pendingVerificationTasks >= 3 ? 'border-[var(--warn-20)] bg-[var(--warn-10)]' : 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]'} px-2 py-1.5">
+          <div class="font-mono text-3xs uppercase tracking-[var(--track-caps)] ${summary.counts.pendingVerificationTasks >= 3 ? 'text-[var(--warn-bright)]' : 'text-[var(--color-fg-muted)]'}">Verify</div>
+          <div class="mt-0.5 text-sm font-semibold tabular-nums ${summary.counts.pendingVerificationTasks >= 3 ? 'text-[var(--warn-bright)]' : ''}">${summary.counts.pendingVerificationTasks}</div>
         </div>
       </div>
       ${summary.counts.unacknowledgedErrors > 0 ? html`

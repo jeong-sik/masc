@@ -35,11 +35,12 @@ val set_append_guard : ((unit -> unit) -> unit) -> unit
     runtimes can install resource accounting/backpressure without making this
     low-level storage library depend on those policy modules. *)
 
-val read_recent : t -> int -> Yojson.Safe.t list
-(** [read_recent t n] returns the newest [n] entries in chronological order
-    (oldest first).  Scans day-files from newest to oldest, stops early. *)
+val read_recent : ?offset:int -> t -> int -> Yojson.Safe.t list
+(** [read_recent ?offset t n] returns the newest [n] entries in chronological
+    order (oldest first), skipping the first [offset] newest entries.
+    Scans day-files from newest to oldest, stops early. *)
 
-val read_recent_lines : t -> int -> string list
+val read_recent_lines : ?offset:int -> t -> int -> string list
 (** Like {!read_recent} but returns raw JSONL strings (no parse).
     Useful for tail-readers that do their own parsing. *)
 

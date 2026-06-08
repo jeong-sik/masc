@@ -9,21 +9,6 @@
     in [Keeper_sandbox_exec_failure]. Call those qualified rather than
     relying on a re-export here. *)
 
-(** Path of the per-keeper egress policy file
-    [<sandbox_root>/egress.json]. *)
-val egress_policy_path :
-  config:Workspace.config ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  string
-
-(** Check [cmd] against [Masc_exec.Egress_policy] for the keeper.
-    Returns [Some blocked_json] when blocked, [None] when allowed. *)
-val check_egress :
-  config:Workspace.config ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  cmd:string ->
-  string option
-
 (** Per-invocation container name [masc-keeper-<safe>-<pid>-<ms>]. *)
 val keeper_sandbox_container_name :
   Keeper_meta_contract.keeper_meta -> string

@@ -67,6 +67,7 @@ val build_keeper_system_prompt :
   ?keeper_name:string ->
   ?home_ground:string ->
   ?active_goals:(string * string * string) list ->
+  ?home_ground:string ->
   unit ->
   string
 

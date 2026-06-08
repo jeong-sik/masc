@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { useSignalValue } from './use-signal-value'
 import { fetchBoard } from '../../api/board'
 import type { BoardPost } from '../../types/core'
 import { bridgePostsToTrace } from './anchored-thread-trace-bridge'
@@ -120,16 +121,8 @@ export function IdeConversationRail() {
   const [replayUntilMs, setReplayUntilMs] = useState<number | null>(ideReplayUntilMs.value)
   const [activeFile, setActiveFile] = useState(activeIdeFile.value)
   const [keeperName, setKeeperName] = useState(activeKeeperName.value)
-  const [, forceRender] = useState(0)
-
-  useEffect(() => {
-    const unsub = globalPresenceSnapshot.subscribe(() => forceRender((t: number) => t + 1))
-    return () => unsub()
-  }, [])
-  useEffect(() => {
-    const unsub = cursorOverlaySignal.subscribe(() => forceRender((t: number) => t + 1))
-    return () => unsub()
-  }, [])
+  useSignalValue(globalPresenceSnapshot)
+  useSignalValue(cursorOverlaySignal)
   useEffect(() => {
     const unsub = ideReplayUntilMs.subscribe(value => setReplayUntilMs(value))
     return () => unsub()

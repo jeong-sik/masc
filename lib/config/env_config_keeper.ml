@@ -393,43 +393,6 @@ module KeeperKeepalive = struct
     | None -> None
   ;;
 
-  (** Maximum turns per single OAS Agent.run call.
-      Keeper resumes via checkpoint in the next keepalive cycle when
-      {!Runtime_agent.TurnBudgetExhausted} is returned.
-      Previous default of 200 caused "ambiguous partial commit" errors:
-      the 300s timeout would fire mid-turn after tools had already executed,
-      leaving the keeper in an ambiguous state. With 30 turns per call and
-      adaptive timeout, each turn gets a realistic time budget. Budget=5
-      was too low: mutation boundary blocks tools after the first write,
-      leaving only 1 productive action per cycle.
-      Env: [MASC_KEEPER_OAS_MAX_TURNS_PER_CALL]. Default: 30. Range: [1, 100]. *)
-  let oas_max_turns_per_call =
-    max 1 (min 100 (get_int ~default:30 "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL"))
-  ;;
-
-  (** Smaller turn budget for scheduled autonomous cycles so one keeper does
-      not monopolize the autonomous semaphore for minutes at a time.
-      Reactive turns keep the general budget because they correspond to
-      explicit external stimuli.
-
-      Default raised to 10 after Docker oas_env propagation was restored so
-      autonomous keepers can complete deeper handoff tasks without relying on
-      per-profile overrides.
-      Reactive turns retain the larger budget.
-
-      Env: [MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS].
-      Default: min(global, 10). Range: [1, global]. *)
-  let oas_max_turns_per_call_scheduled_autonomous =
-    let default = min oas_max_turns_per_call 10 in
-    max
-      1
-      (min
-         oas_max_turns_per_call
-         (min
-            100
-            (get_int ~default "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS")))
-  ;;
-
   (* RFC-0156/RFC-020x: OAS total timeout removed. Resolved OAS-call budget =
      override when set, else turn_timeout_sec. stream_idle_timeout handles
      per-stream idle; runtime rotation triggers on stream_idle + HTTP error +

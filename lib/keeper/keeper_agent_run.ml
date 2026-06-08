@@ -360,7 +360,6 @@ let run_turn
       ~context_injector
       ~start_turn_count
       ~generation
-      ~max_turns
       ~runtime_id
       ~is_retry
       ~turn_affordances
@@ -373,6 +372,7 @@ let run_turn
       ~trajectory_acc
       ~tool_overlay
       ~runtime_manifest_context
+      ~max_turns
       ()
   in
   (* Section 2: prepare runtime tools and hooks. *)
@@ -515,9 +515,9 @@ let run_turn
                       ; feedback_style =
                           Agent_sdk.Tool_retry_policy.Structured_tool_result
                       }
-                    ~max_turns
                     ~max_idle_turns
                     ?stream_idle_timeout_s
+                    ~body_timeout_s:timeout_s
                     ~temperature
                     ~max_tokens
                     ?max_cost_usd

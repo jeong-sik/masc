@@ -41,11 +41,6 @@ type route =
   | Sandbox_backend
 
 module type Backend = sig
-  val egress_policy_path :
-    config:Workspace.config ->
-    meta:Keeper_meta_contract.keeper_meta ->
-    string
-
   val effective_sandbox_profile :
     meta:Keeper_meta_contract.keeper_meta ->
     Keeper_types_profile_sandbox.sandbox_profile * Keeper_types_profile_sandbox.network_mode
@@ -91,7 +86,6 @@ module type Backend = sig
 end
 
 module Make (Backend : Backend) = struct
-  let egress_policy_path = Backend.egress_policy_path
   let effective_sandbox_profile = Backend.effective_sandbox_profile
   let ensure_runtime = Backend.ensure_runtime
   let command_uses_nested_runtime = Backend.command_uses_nested_runtime
@@ -115,7 +109,6 @@ let of_docker_result
   }
 
 module Docker_backend = struct
-  let egress_policy_path = Keeper_sandbox_docker.egress_policy_path
   let effective_sandbox_profile = Keeper_sandbox_docker.effective_sandbox_profile
   let ensure_runtime = Keeper_sandbox_docker.ensure_keeper_sandbox_runtime
   let command_uses_nested_runtime =

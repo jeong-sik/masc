@@ -1386,8 +1386,6 @@ let () = test "handle_claim_next_ignores_keeper_tool_access_for_open_claims" (fu
   let agent_name = "keeper-social-sync-agent" in
   let keeper_name = "social-sync" in
   let ctx = make_test_ctx_with_agent agent_name in
-  let base_path = Masc_test_deps.find_project_root () in
-  ignore (Result.get_ok (Keeper_tool_policy.init_policy_config ~base_path));
   let initial_meta =
     match
       Masc_test_deps.meta_of_json_fixture

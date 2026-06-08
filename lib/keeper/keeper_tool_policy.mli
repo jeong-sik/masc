@@ -1,8 +1,7 @@
 (** Keeper_tool_policy — keeper tool surface and denylist resolution.
 
-    Group definitions are loaded from [config/tool_policy.toml] at startup
-    via {!Keeper_tool_policy_config} for legacy/recovery surfaces. Runtime
-    execution is descriptor/registry driven and filtered by denylist.
+    Tool access is descriptor/registry driven with denylist filtering only.
+    Policy group classification and config-driven groups have been removed.
 
     @since v2.200.0 *)
 
@@ -11,22 +10,6 @@ open Keeper_meta_contract
 open Keeper_types_profile
 
 module StringSet : Set.S with type elt = string
-
-(** {1 Policy Initialization} *)
-
-(** Load tool policy configuration from [config/tool_policy.toml].
-    Must be called once at server startup before legacy/recovery surface
-    resolution. *)
-val init_policy_config :
-  base_path:string -> (unit, string) result
-
-(** Return the loaded policy config, if any.  Used for validation. *)
-val policy_config_for_validation :
-  unit -> Keeper_tool_policy_config.t option
-
-(** Reset the loaded policy config and one-shot unloaded-accessor warning
-    state. Intended for isolated regression tests only. *)
-val reset_policy_config_for_test : unit -> unit
 
 (** {1 MASC Schema Injection} *)
 
@@ -98,14 +81,12 @@ val is_masc_write_allowed : string -> bool
     - Shard floor: [removable=false] shards (currently [base] = local core).
     - Essential MASC: workspace + web lookup so a Failing keeper can
       check workspace state, look up information for recovery, and
-      defer to operator approval. Mirrors [masc.essential] in
-      [config/tool_policy.toml]. Sync regression in
-      [test_failing_minimum_essential]. *)
+      defer to operator approval. Hardcoded in this module.
+      Sync regression in [test_failing_minimum_essential]. *)
 val failing_minimum_tool_names : unit -> string list
 
 (** Essential MASC tool names included in Failing recovery floor.
-    SSOT: [config/tool_policy.toml] [masc.essential]. Exposed for
-    sync regression test. *)
+    Hardcoded. Exposed for sync regression test. *)
 val essential_masc_minimum_names : string list
 
 (** Active descriptor/registry tool names minus denied tools.

@@ -60,9 +60,15 @@ let docker_target ~turn_sandbox_factory ~meta ~cwd =
   in
   let timeout_sec = internal_sandbox_timeout_sec in
   match Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd with
-  | None ->
-    Error (target_error "typed Shell IR Docker dispatch requires a turn sandbox factory")
-  | Some runtime ->
+  | No_factory ->
+    Error
+      (target_error
+         "typed Shell IR Docker dispatch requires a turn sandbox factory (no factory provided)")
+  | Local_profile ->
+    Error
+      (target_error
+         "typed Shell IR Docker dispatch requires a turn sandbox factory (sandbox profile is Local)")
+  | Runtime runtime ->
     let image = docker_image meta in
     (match
        Keeper_sandbox_runtime.ensure_keeper_sandbox_image_present_with_class

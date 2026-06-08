@@ -110,7 +110,7 @@ let run_command_with_status ?turn_sandbox_factory
     ~(command_argv : string list) ~(max_bytes : int)
     ~(timeout_sec : float) () : (Unix.process_status * string, string) result =
   let cwd = host_playground_root ~config ~meta in
-  let runtime_opt =
+  let resolve_result =
     Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd
   in
   let image =
@@ -118,7 +118,12 @@ let run_command_with_status ?turn_sandbox_factory
     | Some img when String.trim img <> "" -> img
     | _ -> Env_config_sandbox.Runtime.docker_image ()
   in
-  if Option.is_none runtime_opt && String.trim image = "" then
+  let no_runtime =
+    match resolve_result with
+    | Runtime _ -> false
+    | No_factory | Local_profile -> true
+  in
+  if no_runtime && String.trim image = "" then
     Error "keeper sandbox docker image is not configured"
   else if command_argv = [] then
     Error "run_command_with_status: command_argv is empty"
@@ -126,11 +131,11 @@ let run_command_with_status ?turn_sandbox_factory
     let head_program =
       match command_argv with prog :: _ -> prog | [] -> "?"
     in
-    match runtime_opt with
-    | Some runtime ->
+    match resolve_result with
+    | Runtime runtime ->
       Keeper_turn_sandbox_runtime.run_command_with_status
         ~ok_exit_codes runtime ~timeout_sec ~cwd ~command_argv ~max_bytes ()
-    | None ->
+    | No_factory | Local_profile ->
       match Keeper_sandbox_runtime.ensure_keeper_sandbox_image_present ~image ~timeout_sec with
       | Error err ->
         let typed = Keeper_sandbox_error.Image_not_found { image } in

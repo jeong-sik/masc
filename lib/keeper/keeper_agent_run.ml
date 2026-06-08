@@ -518,6 +518,7 @@ let run_turn
                     ~max_turns
                     ~max_idle_turns
                     ?stream_idle_timeout_s
+                    ~body_timeout_s:timeout_s
                     ~temperature
                     ~max_tokens
                     ?max_cost_usd

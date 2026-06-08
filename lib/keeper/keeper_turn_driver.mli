@@ -102,6 +102,7 @@ val run_named :
   ?max_turns:int ->
   ?max_idle_turns:int ->
   ?stream_idle_timeout_s:float ->
+  ?body_timeout_s:float ->
   ?temperature:float ->
   ?max_tokens:int ->
   ?max_input_tokens:int ->

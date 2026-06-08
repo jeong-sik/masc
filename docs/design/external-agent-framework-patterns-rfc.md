@@ -119,7 +119,7 @@ Implementation anchors:
 - `lib/verification.ml`
 - `lib/tool_verification.ml`
 - `lib/cdal_loader.ml`
-- `lib/cdal/proof_artifact_reader.ml`
+- `lib/cdal_runtime/` — runtime evidence and replay adapters
 
 Expected output:
 

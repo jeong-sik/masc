@@ -133,7 +133,8 @@ val emit_cost_event :
   cost_usd:float ->
   ?usage_missing:bool ->
   ?usage_trust:Keeper_usage_trust.t ->
-  ?telemetry:Agent_sdk.Types.inference_telemetry -> unit -> unit
+  ?telemetry:Agent_sdk.Types.inference_telemetry ->
+  ?model:string -> unit -> unit
 (** Append a structured cost-ledger event to [costs.jsonl]. *)
 
 (** {1 Idle-loop policy} *)

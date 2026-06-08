@@ -28,6 +28,7 @@ val assemble_cost_event_payload
   -> ?usage_missing:bool
   -> ?usage_trust:Keeper_usage_trust.t
   -> ?telemetry:Agent_sdk.Types.inference_telemetry
+  -> ?model:string
   -> unit
   -> assembled_cost_event_payload
 
@@ -40,6 +41,7 @@ val cost_event_payload
   -> ?usage_missing:bool
   -> ?usage_trust:Keeper_usage_trust.t
   -> ?telemetry:Agent_sdk.Types.inference_telemetry
+  -> ?model:string
   -> unit
   -> Yojson.Safe.t
 
@@ -55,5 +57,6 @@ val emit_cost_event
   -> ?usage_missing:bool
   -> ?usage_trust:Keeper_usage_trust.t
   -> ?telemetry:Agent_sdk.Types.inference_telemetry
+  -> ?model:string
   -> unit
   -> unit

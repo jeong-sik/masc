@@ -20,7 +20,6 @@ module Sup = Masc.Keeper_supervisor
 module KT = Keeper_types
 module KSM = Keeper_state_machine
 module Cfg = Env_config
-module Health = Masc.Keeper_health_probe
 module KHL = Masc.Keeper_heartbeat_loop
 module Obs = Masc.Keeper_heartbeat_loop_observations
 module WO = Masc.Keeper_world_observation
@@ -702,8 +701,7 @@ let test_runtime_backpressure_blocks_requested_turn () =
   let decision =
     KHL.decide_keepalive_scheduling
       ~runtime_id_of_meta:(fun _ -> "runtime-test")
-      ~runtime_status_of_name:(fun ~runtime_id:_ ->
-        Health.Unhealthy "provider_capacity")
+      ~runtime_resilience_of_name:(fun _ -> Some "provider_capacity")
       ~stop:(Atomic.make false)
       ~meta
       obs
@@ -713,7 +711,7 @@ let test_runtime_backpressure_blocks_requested_turn () =
   check bool "runtime backpressure blocks admission" false decision.should_run_turn;
   (match decision.runtime_backpressure with
    | Obs.Runtime_backpressured { reason; _ } ->
-     check string "backpressure reason" "provider_capacity" reason
+     check string "backpressure reason" "runtime_resilience_provider_capacity" reason
    | Obs.Runtime_admitted -> fail "runtime backpressure should reject turn");
   check bool "verdict reasons include runtime backpressure" true
     (List.mem "runtime_backpressure" decision.verdict_reasons)

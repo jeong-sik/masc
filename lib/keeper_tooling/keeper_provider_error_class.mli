@@ -6,9 +6,8 @@
 
     This module is the *boundary* typed variant.  PR-B onward wires it
     into [Keeper_registry_types.Provider_runtime_error.classified_as],
-    and PR-C replaces the substring-and-magic-HTTP dispatch inside
-    [Keeper_health_probe.provider_runtime_pressure_class] with a pure
-    [match] on this type.
+    and PR-C replaces the substring-and-magic-HTTP dispatch in the
+    provider error classification path with a pure [match] on this type.
 
     PR-A scope (this PR): the type, named HTTP status constants, and
     wire tags.  Zero callers, zero behavioural change.  A
@@ -80,11 +79,10 @@ type t =
 
 (** {1 Named HTTP status constants}
 
-    These are the magic literals previously inlined in
-    [Keeper_health_probe.provider_runtime_pressure_class].  Holding
-    them in one named module lets adapters reference the same numbers
-    by name, and lets PR-C delete the inline integer literals from the
-    consumer. *)
+    These are the magic literals previously inlined in provider
+    adapter code.  Holding them in one named module lets adapters
+    reference the same numbers by name, and lets PR-C delete the
+    inline integer literals from the consumer. *)
 
 module Http_status : sig
   val too_many_requests : int
@@ -117,8 +115,7 @@ val timeout_http_statuses : int list
 
 (** {1 Wire tags}
 
-    Stable string identifiers for telemetry, dashboards, and
-    [Keeper_health_probe.runtime_pressure_class_of_label] migration. *)
+    Stable string identifiers for telemetry and dashboards. *)
 
 val to_short_tag : t -> string
 (** Returns the stable short tag.  One of:

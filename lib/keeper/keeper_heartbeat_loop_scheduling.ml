@@ -27,7 +27,6 @@ type keepalive_scheduling_decision = {
 let decide_keepalive_scheduling
       ?(runtime_id_of_meta = Keeper_meta_contract.runtime_id_of_meta)
       ?(runtime_resilience_of_name = fun _ -> None)
-      ?(runtime_status_of_name = fun ~runtime_id:_ -> Keeper_health_probe.Unknown)
       ~stop
       ~meta
       obs
@@ -42,7 +41,6 @@ let decide_keepalive_scheduling
       ~runtime_resilience:(runtime_resilience_of_name runtime_id)
       ~should_run_turn:requested_should_run_turn
       ~runtime_id
-      ~runtime_status:(runtime_status_of_name ~runtime_id)
   in
   let should_run_turn =
     match runtime_backpressure with

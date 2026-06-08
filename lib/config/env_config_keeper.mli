@@ -121,8 +121,7 @@ module KeeperKeepalive : sig
   val admission_wait_timeout_sec : float
   val turn_capacity_limit : int
   val oas_timeout_sec_override : float option
-  val oas_max_turns_per_call : int
-  val oas_max_turns_per_call_scheduled_autonomous : int
+
 
   val oas_call_timeout_sec : float
   (** Resolved OAS-call timeout: [oas_timeout_sec_override] when set, otherwise

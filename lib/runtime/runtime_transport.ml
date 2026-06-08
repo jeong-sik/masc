@@ -4,7 +4,6 @@
     CLI transport construction separate from the build/run orchestration in
     {!Runtime_agent}. *)
 
-let provider_effective_max_turns _kind requested = requested
 
 (* RFC-0167: the client-named omission-dedup module (#10097) was removed
    in the big-bang sweep. The structural omission of keeper-bound runtime

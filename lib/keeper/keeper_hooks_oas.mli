@@ -121,7 +121,8 @@ val cost_event_payload :
   cost_usd:float ->
   ?usage_missing:bool ->
   ?usage_trust:Keeper_usage_trust.t ->
-  ?telemetry:Agent_sdk.Types.inference_telemetry -> unit -> Yojson.Safe.t
+  ?telemetry:Agent_sdk.Types.inference_telemetry ->
+  ?model:string -> unit -> Yojson.Safe.t
 (** Assemble the structured cost-ledger event without writing it. *)
 
 val emit_cost_event :

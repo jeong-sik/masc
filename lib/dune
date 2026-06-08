@@ -223,6 +223,7 @@
    masc.lockfree_atomic
    masc.json_field
    masc.pool_metrics
+   masc.otel_metric_store
    masc.otel_spans
    masc.otel_genai
    masc.otel_trace_context

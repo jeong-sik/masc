@@ -580,10 +580,8 @@ let task_claim_decision (task : task) =
     (* Verification tasks with a valid verification_id can be claimed by
        other agents for cross-agent verification dispatch. The actual
        cross-agent check (self-verification block) happens in claim_task_r.
-       Issue #19314. *)
-    (match verification_id with
-     | Some _ -> Claim_available (task_claim_readiness task)
-     | None -> Claim_unavailable (Claim_block_not_todo task.task_status))
+       Issue #19314. verification_id is a non-empty string — always claimable. *)
+    Claim_available (task_claim_readiness task)
   | Claimed _
   | InProgress _
   | Done _

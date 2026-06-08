@@ -40,7 +40,6 @@ val sdk_error_is_hard_quota : Agent_sdk.Error.sdk_error -> bool
 val sdk_error_soft_rate_limited :
   Agent_sdk.Error.sdk_error -> float option option
 
-val sdk_error_is_max_turns_exceeded : Agent_sdk.Error.sdk_error -> bool
 
 val sdk_error_runtime_fallback_class :
   Agent_sdk.Error.sdk_error -> string option
@@ -99,7 +98,6 @@ val run_named :
   ?system_prompt:string ->
   ?tools:Agent_sdk.Tool.t list ->
   ?initial_messages:Agent_sdk.Types.message list ->
-  ?max_turns:int ->
   ?max_idle_turns:int ->
   ?stream_idle_timeout_s:float ->
   ?temperature:float ->

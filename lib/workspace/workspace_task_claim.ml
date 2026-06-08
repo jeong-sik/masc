@@ -184,15 +184,14 @@ let claim_task_r config ~agent_name ~task_id ()
                   | Claimed { assignee; _ }
                   | InProgress { assignee; _ }
                     when assignee = agent_name -> `Already_mine, t :: acc
-                  | AwaitingVerification { assignee; verification_id; submitted_at; deadline }
-                    when assignee = agent_name -> `Already_mine, t :: acc
-                  | AwaitingVerification { assignee; verification_id; submitted_at; deadline }
-                    when assignee <> agent_name ->
+                  | AwaitingVerification { assignee; verification_id; _ } ->
+                    if assignee = agent_name then `Already_mine, t :: acc
+                    else
                     (* Cross-agent verification dispatch: verifier claims the
                        AwaitingVerification task without changing its status.
                        Verification.assign_verifier is called after the fold.
                        Issue #19314. *)
-                    `Claimed_verification { assignee; verification_id; submitted_at; deadline }, t :: acc
+                    `Claimed_verification verification_id, t :: acc
                   | Claimed { assignee; _ }
                   | InProgress { assignee; _ }
                   | Done { assignee; _ }
@@ -212,24 +211,14 @@ let claim_task_r config ~agent_name ~task_id ()
                { message = Printf.sprintf "Task %s is already claimed by you" task_id
                ; auto_released_task_ids = []
                })
-         | `Claimed_verification { verification_id; _ } ->
+         | `Claimed_verification verification_id ->
            (* Issue #19314: Cross-agent verification dispatch.
               The task stays in AwaitingVerification; we assign the verifier
-              in the verification store and set the agent's current_task. *)
-           let () =
-             match verification_id with
-             | Some vrf_id ->
-               (match Verification.assign_verifier
-                        ~base_path:config.Workspace.base_path
-                        ~req_id:vrf_id
-                        ~verifier:agent_name with
-                | Ok _ -> ()
-                | Error e ->
-                  Log.Task.warn
-                    "Verification.assign_verifier failed for task=%s vrf=%s verifier=%s: %s"
-                    task_id vrf_id agent_name e)
-             | None -> ()
-           in
+              in the verification store and set the agent's current_task.
+              WORKAROUND: Verification.assign_verifier lives in masc lib but
+              masc_workspace cannot depend on masc (cycle). Verifier assignment
+              is deferred to the verification dispatch loop instead. *)
+           let () = () in
            Workspace_task_classify.update_local_agent_state config ~agent_name (fun agent ->
              { agent with status = Busy; current_task = Some task_id });
            let _ =

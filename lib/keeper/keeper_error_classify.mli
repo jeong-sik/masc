@@ -98,7 +98,6 @@ val is_runtime_exhausted_error : Agent_sdk.Error.sdk_error -> bool
     lowercase string via [degraded_retry_reason_to_string]. *)
 type degraded_retry_reason =
   | Hard_quota
-  | Max_turns
   | Resumable_cli_session
   | Admission_queue_timeout
   | Provider_timeout

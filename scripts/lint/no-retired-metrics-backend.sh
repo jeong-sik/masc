@@ -72,6 +72,7 @@ else
     --glob '!dashboard/node_modules/**' \
     --glob '!_build/**' \
     --glob '!scripts/lint/no-retired-metrics-backend.sh' \
+    --glob '!infrastructure/monitoring/**' \
     "$RETIRED_PATTERN" \
     "${existing_roots[@]}" \
     | sort -u >"$current_tmp" || true

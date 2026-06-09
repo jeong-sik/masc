@@ -741,37 +741,8 @@ let keeper_cycle_decision
                   || backlog_elapsed
                   || (idle_gate_elapsed && cooldown_elapsed)))
         in
-        let runtime_id = runtime_id_of_meta meta in
-        let provider_cooldown_remaining_sec =
-          if should_run
-          then
-            provider_cooldown_remaining_sec
-              ~keeper_name:meta.name
-              ~runtime_id:(runtime_id)
-          else None
-        in
-        let provider_cooldown_fail_open =
-          match provider_cooldown_remaining_sec with
-          | Some _ ->
-            fallback_runtime_for_provider_cooldown
-              ~base_runtime:runtime_id
-              ~effective_runtime:runtime_id
-          | None -> None
-        in
         let verdict =
-          if
-            Option.is_some provider_cooldown_remaining_sec
-            && Option.is_none provider_cooldown_fail_open
-          then
-            Skip
-              { reasons =
-                  ( Provider_cooldown_pending
-                      { remaining_sec =
-                          Option.value ~default:0 provider_cooldown_remaining_sec
-                      }
-                  , [] )
-              }
-          else if should_run
+          if should_run
           then (
             let run_reasons =
               [ Some Scheduled_autonomous_turn

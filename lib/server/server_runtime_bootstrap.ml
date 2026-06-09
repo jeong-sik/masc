@@ -72,6 +72,22 @@ let init_runtime_context env =
   let domain_mgr = Eio.Stdenv.domain_mgr env in
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let fs = Eio.Stdenv.fs env in
+  (* MASC_MODEL_CATALOG as convenience alias for OAS_MODEL_CATALOG.
+     OAS auto-discovers from ~/.masc/config/models.toml, cwd parents,
+     and $OAS_MODEL_CATALOG. Setting MASC_MODEL_CATALOG forwards it
+     so masc operators don't need to know OAS internals. *)
+  (match Sys.getenv_opt "MASC_MODEL_CATALOG" with
+   | Some path when Sys.getenv_opt "OAS_MODEL_CATALOG" = None ->
+     Unix.putenv "OAS_MODEL_CATALOG" path
+   | _ -> ());
+  let catalog = Agent_sdk.Model_catalog.global () in
+  (match catalog with
+   | Some entries ->
+     Log.Misc.info "model_catalog: %d entries loaded" (List.length entries)
+   | None ->
+     Log.Misc.info
+       "model_catalog: no catalog found (set MASC_MODEL_CATALOG or \
+        place models.toml in ~/.masc/config/)");
   (clock, mono_clock, net, domain_mgr, proc_mgr, fs)
 
 let metric_keeper_runtime_config_load_failures =

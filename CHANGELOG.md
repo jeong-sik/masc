@@ -2,23 +2,29 @@
 
 ## [Unreleased]
 
-### Changed
-- Bumped the OAS agent SDK pin to `v0.204.0` at
-  `cd556806d6ef1131e4bafadce6c762a1ebee1295` and raised the
-  dependency floor to `agent_sdk >= 0.204.0`.
+## [0.19.40] - 2026-06-09
 
-### Added
-- RFC-0203 Phase 3: in-process Discord gateway
-  (`Server_discord_in_process_gateway`) replaces the deleted Python
-  sidecar at `sidecars/discord-bot/`. `DISCORD_BOT_TOKEN` env var now
-  activates the in-process WSS gateway at server boot; inbound
-  messages are routed to keepers via the existing
-  `Channel_gate.handle_inbound` entry point and replies are pushed
-  back through the new `Channel_gate_discord_state.send_message`.
-  `MASC_DISCORD_TRIGGER_POLICY` controls the inbound filter
-  (`mention_only` default, `user_only:<id>`, `all`). The `board.posted`
-  /`board.commented` activity-polling auto-push (previously done by
-  the sidecar) is dropped — re-add as a follow-up if needed.
+### Changed
+- Bumped the OAS agent SDK pin to `v0.204.3` and raised the package
+  metadata to `0.19.40`.
+
+### Fixed
+- `workspace`: capped `cycle_count` at 100 to prevent unbounded growth
+  from claim-release hot-potato patterns (#18853).
+- `workspace`: removed implicit auto-release on `task_claim_next`
+  when an agent already holds a Claimed task (#18839).
+- `keeper`: resolved `Git_unknown_revision` over-classification from
+  bare branch names in `exec_semantic.ml` (#19977).
+- `keeper`: corrected Shell IR risk classification for `find`/`sed`
+  action flags (#19802).
+- `keeper`: fixed task-state probe gate to allow git/mv/cp/rm/sed
+  file-manipulation even when token matches forbidden task-state path
+  (#19210).
+- `dashboard`: restored WebSearch/WebFetch to keeper allow-list after
+  descriptor-backed filter mismatch (#20060).
+- `dashboard`: fixed stale build issue where vite failures were
+  silently swallowed (#19551).
+- `ci`: reinstated missing `ripgrep` in lint environment (#3404).
 
 ### Removed
 - RFC-0151 withdrawn: the code-smell monotone ratchet is removed
@@ -36,6 +42,26 @@
   (slack/telegram/imessage/cli) stay routeable. The Channel Gate HTTP
   routes (`/api/v1/gate/message` etc.) remain unchanged and continue
   to serve the other external connectors.
+- Portal and A2A dead surfaces removed from masc-mcp (27 files,
+  #20016): `tool_catalog` registrations, `CanOpenPortal`/`CanSendPortal`
+  capabilities, `Masc_domain.Portal` error variants, and related
+  dashboard components.
+
+### Added
+- RFC-0203 Phase 3: in-process Discord gateway
+  (`Server_discord_in_process_gateway`) replaces the deleted Python
+  sidecar at `sidecars/discord-bot/`. `DISCORD_BOT_TOKEN` env var now
+  activates the in-process WSS gateway at server boot; inbound
+  messages are routed to keepers via the existing
+  `Channel_gate.handle_inbound` entry point and replies are pushed
+  back through the new `Channel_gate_discord_state.send_message`.
+  `MASC_DISCORD_TRIGGER_POLICY` controls the inbound filter
+  (`mention_only` default, `user_only:<id>`, `all`). The `board.posted`
+  /`board.commented` activity-polling auto-push (previously done by
+  the sidecar) is dropped — re-add as a follow-up if needed.
+- `keeper`: Shell IR effect proof foundation (`exec_effect.ml`) with
+  typed `effect_kind` and `project_risk` classification.
+- `telemetry`: OpenTelemetry exporter integration (S1+S2, #20082).
 
 ## [0.19.37] - 2026-06-05
 

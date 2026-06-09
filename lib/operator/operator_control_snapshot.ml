@@ -63,6 +63,57 @@ let _keeper_snapshot_max_concurrency =
 
 let _keeper_sem = Eio.Semaphore.make _keeper_snapshot_max_concurrency
 
+(* PR-C2: encapsulate [Eio.Semaphore.acquire]/[release] inside a single
+   [Fun.protect] scope so the slot is released even when the body raises
+   non-Cancelled exceptions (which the previous on_release callback could
+   not guarantee -- a [Log.Dashboard.info] failure inside the callback
+   would skip the release and leak the slot).
+
+   - [wait_ms] measures contention on the acquire call.
+   - [work_ms] measures the body's wall time.
+   - The 500ms threshold log fires only on the *normal-exit* path:
+     Cancelled propagation skips the log to avoid double-reporting;
+     the exception itself carries the unwind trace.
+
+   No typed state machine is introduced -- the slot itself is
+   encapsulated by the helper, so there is no counter/state to
+   desynchronise.  Mirrors PR-B/PR-C1 in spirit (no separate counter
+   for the per-fiber slot) but expressed as a scope rather than a
+   state transition. *)
+let with_keeper_slot ~sem ~name f =
+  let t_wait_start = Time_compat.now () in
+  Eio.Semaphore.acquire sem;
+  let t_work_start = Time_compat.now () in
+  let wait_ms = (t_work_start -. t_wait_start) *. 1000.0 in
+  Fun.protect
+    ~finally:(fun () -> Eio.Semaphore.release sem)
+    (fun () ->
+       try
+         let v = f () in
+         let work_ms = (Time_compat.now () -. t_work_start) *. 1000.0 in
+         if work_ms > 500.0 || wait_ms > 500.0
+         then
+           Log.Dashboard.info
+             "[keepers_json:%s] wait=%.0fms work=%.0fms"
+             name
+             wait_ms
+             work_ms;
+         v
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+         let work_ms = (Time_compat.now () -. t_work_start) *. 1000.0 in
+         if work_ms > 500.0 || wait_ms > 500.0
+         then
+           Log.Dashboard.info
+             "[keepers_json:%s] wait=%.0fms work=%.0fms (exn: %s)"
+             name
+             wait_ms
+             work_ms
+             (Printexc.to_string exn);
+         raise exn)
+;;
+
 let compact_keeper_runtime_trust_json = Operator_control_snapshot_trust.compact_keeper_runtime_trust_json
 let degraded_keeper_snapshot_row = Operator_control_snapshot_trust.degraded_keeper_snapshot_row
 let keepers_json
@@ -88,36 +139,35 @@ let keepers_json
     (List.mapi
        (fun idx name () ->
           Eio.Switch.run
-          @@ fun keeper_sw ->
-          (* Two-phase timing so we can distinguish semaphore contention
-            from per-keeper I/O cost when dashboard snapshots stall.
-            Emits [keepers_json:NAME wait=… work=…] only when either
-            half exceeds the same 500ms threshold used by the outer
-            [timed] helper, keeping the log quiet on healthy snapshots. *)
-          let t_wait_start = Time_compat.now () in
-          Eio.Semaphore.acquire keeper_sem;
-          let t_work_start = Time_compat.now () in
-          let wait_ms = (t_work_start -. t_wait_start) *. 1000.0 in
-          Eio.Switch.on_release keeper_sw (fun () ->
-            Eio.Semaphore.release keeper_sem;
-            let work_ms = (Time_compat.now () -. t_work_start) *. 1000.0 in
-            if work_ms > 500.0 || wait_ms > 500.0
-            then
-              Log.Dashboard.info
-                "[keepers_json:%s] wait=%.0fms work=%.0fms"
-                name
-                wait_ms
-                work_ms);
-          (* Per-sub-op timing for #8822: attribute ~3100ms snapshot cost.
-            Threshold 300ms — lower than outer 500ms for more data. *)
-          let dt_meta = ref 0.0 in
-          let dt_agent = ref 0.0 in
-          let dt_ka = ref 0.0 in
-          let dt_audit = ref 0.0 in
-          let dt_profile = ref 0.0 in
-          let dt_phase = ref 0.0 in
-          let dt_trust = ref 0.0 in
-          let dt_activity = ref 0.0 in
+          @@ fun _keeper_sw ->
+          (* PR-C2: pair acquire/release inside a single [with_keeper_slot]
+            scope instead of the previous
+            [Eio.Switch.on_release (fun () -> Eio.Semaphore.release ...)]
+            pattern.  The on_release callback is *cancel-safe* (it fires on
+            both normal exit and Cancel.Cancelled unwind) but its [release]
+            was *not exception-safe* -- a [Log.Dashboard.info] failure inside
+            the callback would skip the release and leak the slot.  Fun.protect
+            is exception-safe, never double-releases, and matches PR-B's
+            typed-state pattern (no separate counter, lifecycle absorbed by
+            the helper).
+
+            Two-phase timing: [wait_ms] measures semaphore contention
+            (acquire delay), [work_ms] measures per-keeper I/O cost.
+            We log only when either half exceeds 500ms so healthy
+            snapshots stay quiet.  The log is part of the *success path*
+            inside [with_keeper_slot]; Cancelled propagation skips it. *)
+          with_keeper_slot ~sem:keeper_sem ~name (fun () ->
+            let t_work_start = Time_compat.now () in
+            (* Per-sub-op timing for #8822: attribute ~3100ms snapshot cost.
+              Threshold 300ms — lower than outer 500ms for more data. *)
+            let dt_meta = ref 0.0 in
+            let dt_agent = ref 0.0 in
+            let dt_ka = ref 0.0 in
+            let dt_audit = ref 0.0 in
+            let dt_profile = ref 0.0 in
+            let dt_phase = ref 0.0 in
+            let dt_trust = ref 0.0 in
+            let dt_activity = ref 0.0 in
           let emit_timing_log total_work =
             if total_work > 0.3
             then
@@ -517,7 +567,7 @@ let keepers_json
                   "keepers_json fiber error (%s): %s"
                   name
                   (Printexc.to_string exn);
-                None))
+                None)))
        names);
   let rows = Array.to_list results |> List.filter_map Fun.id in
   `Assoc [ "count", `Int (List.length rows); "items", `List rows ]

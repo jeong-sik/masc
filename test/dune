@@ -50,6 +50,7 @@
   test_session_lifecycle_event
   test_fd_accountant
   test_fd_accountant_state
+  test_operator_control_snapshot_state
   test_auth_login
   test_audit_log
   test_system_log_category
@@ -302,6 +303,7 @@
   test_session_lifecycle_event
   test_fd_accountant
   test_fd_accountant_state
+  test_operator_control_snapshot_state
   test_auth_login
   test_audit_log
   test_system_log_category

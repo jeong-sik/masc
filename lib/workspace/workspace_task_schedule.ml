@@ -347,8 +347,29 @@ let claim_next_r
                 ; "blocked", `Int (List.length verification_blocked_todo)
                 ; "ts", `String (now_iso ())
                 ]);
+        (* RFC-0220 §3.5: eligibility and the claim outcome are one decision
+           ([Workspace_task_lifecycle.resolve_claim]). A submitter's own
+           [AwaitingVerification] resolves to [Self_owned] and is excluded here,
+           so a worker never auto-claims (self-verifies) its own obligation; a
+           cross-agent obligation resolves to [Verifier_claim] and stays
+           eligible so the satisfier is always reachable.
+           [task_claim_next_action_is_claimable] still owns the Todo reclaim
+           gate. *)
+        let same_actor a = Workspace_task_classify.same_task_actor config a agent_name in
+        let resolves_claimable (t : Masc_domain.task) =
+          match
+            Workspace_task_lifecycle.resolve_claim
+              ~same_actor ~agent_name ~now:(now_iso ()) t.task_status
+          with
+          | Workspace_task_lifecycle.Worker_claim _
+          | Workspace_task_lifecycle.Verifier_claim _ -> true
+          | Workspace_task_lifecycle.Self_owned
+          | Workspace_task_lifecycle.Held_by_other _ -> false
+        in
         let unclaimed =
-          List.filter Masc_domain.task_claim_next_action_is_claimable sorted
+          sorted
+          |> List.filter Masc_domain.task_claim_next_action_is_claimable
+          |> List.filter resolves_claimable
         in
         (* Also exclude the just-released task: the agent is moving on,
          re-claiming the same task would be a no-op loop. *)
@@ -448,17 +469,32 @@ let claim_next_r
               }
           , None )
          | _ :: _, task :: _ ->
-           (* Claim this task *)
+           (* Claim this task. [resolve_claim] yields the post-claim status:
+              [Claimed] for a Todo worker claim, or a verifier-bound
+              [AwaitingVerification] for a cross-agent verification claim
+              (RFC-0220 §3.5 — preserve the obligation as the satisfier, do not
+              clobber it to [Claimed]). The [Self_owned]/[Held_by_other] arms
+              are unreachable here: [unclaimed] admits only tasks that resolve
+              to a claim (same [resolve_claim]); the defensive fallback keeps
+              the worker-claim behavior rather than raising on the claim path. *)
+           let claimed_status =
+             match
+               Workspace_task_lifecycle.resolve_claim
+                 ~same_actor ~agent_name ~now:(now_iso ()) task.task_status
+             with
+             | Workspace_task_lifecycle.Worker_claim s
+             | Workspace_task_lifecycle.Verifier_claim s -> s
+             | Workspace_task_lifecycle.Self_owned
+             | Workspace_task_lifecycle.Held_by_other _ ->
+               Masc_domain.Claimed { assignee = agent_name; claimed_at = now_iso () }
+           in
            let new_tasks =
              List.map
                (fun (t : task) ->
                   if t.id = task.id
                   then (
                     let t = Workspace_task.clear_reclaim_decision t in
-                    { t with
-                      task_status =
-                        Claimed { assignee = agent_name; claimed_at = now_iso () }
-                    })
+                    { t with task_status = claimed_status })
                   else t)
                working_tasks
            in
@@ -513,10 +549,8 @@ let claim_next_r
              ~transition:Masc_domain.Claim
              ~details:
                (Workspace_task.task_transition_details
-                  ~from_status:Masc_domain.Todo
-                  ~to_status:
-                    (Masc_domain.Claimed
-                       { assignee = agent_name; claimed_at = now_iso () })
+                  ~from_status:task.task_status
+                  ~to_status:claimed_status
                   ());
           let message =
             match released_task_id with

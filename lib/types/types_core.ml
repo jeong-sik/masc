@@ -291,6 +291,19 @@ type task_status =
   | Cancelled of { cancelled_by: string; cancelled_at: string; reason: string option }
 [@@deriving show]
 
+(** RFC-0220 §3.5: the [task_status] of an [AwaitingVerification] obligation
+    once [verifier] has claimed it as its satisfier. The obligation is preserved
+    (it stays in the verifier pool, and any non-submitter can still
+    approve/reject it — [decide]'s approval arms match the phase with [_]) and
+    the verifier is recorded in [phase]. Single construction site shared by the
+    FSM decider and both claim writers ([claim_task_r], [claim_next_r]) so the
+    bound-verifier shape never drifts across surfaces. The binding is advisory:
+    it records who is verifying, not who is permitted to — an abandoned
+    [Verifier_assigned] task is re-claimable by another verifier. *)
+let bind_verifier ~verifier ~assignee ~submitted_at ~verification_id =
+  AwaitingVerification
+    { assignee; submitted_at; verification_id; phase = Verifier_assigned { verifier } }
+
 (* Simple string representation for dashboard *)
 let task_status_to_string = function
   | Todo -> "todo"

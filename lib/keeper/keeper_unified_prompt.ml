@@ -211,6 +211,8 @@ let sanitize_retired_tool_names text =
   |> remove_tool_tokens_with_prefix ~prefix:(retired_prefix "keeper" "github")
   |> remove_tool_tokens_with_prefix ~prefix:(retired_prefix "github" "cli")
   |> replace_all ~needle:"``" ~replacement:""
+  |> replace_all ~needle:", , " ~replacement:", "
+  |> replace_all ~needle:", ," ~replacement:","
 
 let state_block_instruction_text = Keeper_state_block_prompt.instruction_text
 

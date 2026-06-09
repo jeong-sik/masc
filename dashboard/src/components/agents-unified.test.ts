@@ -33,9 +33,6 @@ vi.mock('./fsm-hub', () => ({
 vi.mock('./fleet-fsm-matrix', () => ({
   FleetFsmMatrix: () => h('div', { 'data-testid': 'fleet-fsm-matrix' }, 'FleetFsmMatrix'),
 }))
-vi.mock('./handoff-timeline', () => ({
-  HandoffTimeline: ({ selectedKeeper }: { selectedKeeper?: string }) => h('div', { 'data-testid': 'handoff-timeline', 'data-selected': selectedKeeper }, 'HandoffTimeline'),
-}))
 vi.mock('./composite-fsm-flowchart', () => ({
   CompositeFsmFlowchart: () => h('div', { 'data-testid': 'composite-fsm-flowchart' }, 'CompositeFsmFlowchart'),
 }))
@@ -155,7 +152,6 @@ describe('AgentsUnified', () => {
     mockRoute.value = { tab: 'monitoring', params: { view: 'fsm' }, postId: null }
     render(h(AgentsUnified, null), container)
     expect(container.querySelector('[data-testid="fleet-fsm-matrix"]')).not.toBeNull()
-    expect(container.querySelector('[data-testid="handoff-timeline"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="composite-fsm-flowchart"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="fsm-hub"]')).not.toBeNull()
   })

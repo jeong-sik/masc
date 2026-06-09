@@ -14,8 +14,8 @@
 //                          border-[var(--warn-20)] —
 //                          SPEC surf-warn reconstructed from token
 //                          subset.
-//   handoff-timeline / excuse-patterns / harness-health / keeper-tool-
-//   telemetry  text-only `text-[var(--bad-light)]` — *no surface*.
+//   excuse-patterns / harness-health / keeper-tool-telemetry
+//   text-only `text-[var(--bad-light)]` — *no surface*.
 //
 // Surf consolidates these into a single SSOT atom. The SPEC calls for
 // kind-specific tokens (--{kind}-soft / --{kind}-border / --{kind}-fg)

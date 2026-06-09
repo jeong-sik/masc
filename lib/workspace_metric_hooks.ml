@@ -556,6 +556,10 @@ let install () =
          ~verification_id
          ~evidence_refs);
 
+  Atomic.set Workspace_hooks.verification_delete_request_fn
+    (fun config ~verification_id ->
+       Verification_protocol.delete_verification_request ~config ~verification_id);
+
   Atomic.set Workspace_hooks.verification_record_verdict_fn
     (fun config ~task_id ~verifier ~verification_id ~decision ->
        match decision with

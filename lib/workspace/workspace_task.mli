@@ -31,6 +31,7 @@ val transition_task_r :
      verification_id:string ->
      evidence_refs:string list ->
      (unit, string) result) ->
+  ?compensate_verification_request:(verification_id:string -> unit) ->
   ?prepare_verification_verdict:
     (task:Masc_domain.task ->
      verifier:string ->

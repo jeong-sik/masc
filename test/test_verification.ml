@@ -171,6 +171,31 @@ let test_create_and_load () =
             Alcotest.(check string) "task_id" "task-1" loaded.task_id;
             Alcotest.(check string) "worker" "agent_llm_a" loaded.worker)
 
+(* RFC-0221 §3.1: [delete_request] removes the record (compensation) and is
+   idempotent — deleting a missing record is success, so a caller can compensate
+   without first checking existence. *)
+let test_delete_request () =
+  with_temp_dir (fun base_path ->
+    match V.create_request ~base_path ~task_id:"task-1"
+        ~output:(`String "result") ~criteria:[V.Contains "result"]
+        ~worker:"agent_llm_a" () with
+    | Error e -> Alcotest.fail e
+    | Ok req ->
+        let path =
+          Filename.concat (active_verifications_dir base_path) (req.id ^ ".json")
+        in
+        Alcotest.(check bool) "record present before delete" true (Sys.file_exists path);
+        (match V.delete_request base_path req.id with
+         | Error e -> Alcotest.fail e
+         | Ok () -> ());
+        Alcotest.(check bool) "record gone after delete" false (Sys.file_exists path);
+        (match V.delete_request base_path req.id with
+         | Error e -> Alcotest.fail ("second delete must be idempotent Ok: " ^ e)
+         | Ok () -> ());
+        match V.load_request base_path req.id with
+        | Ok _ -> Alcotest.fail "load after delete should report not-found"
+        | Error _ -> ())
+
 let test_list_requests () =
   with_temp_dir (fun base_path ->
     let _ = V.create_request ~base_path ~task_id:"t1"
@@ -472,6 +497,7 @@ let () =
     ];
     "storage", [
       Alcotest.test_case "create and load" `Quick test_create_and_load;
+      Alcotest.test_case "delete request (idempotent)" `Quick test_delete_request;
       Alcotest.test_case "list requests" `Quick test_list_requests;
       Alcotest.test_case "list requests missing dir stays quiet" `Quick
         test_list_requests_missing_dir_stays_quiet;

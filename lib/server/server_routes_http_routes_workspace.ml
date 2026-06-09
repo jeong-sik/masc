@@ -302,7 +302,7 @@ let rec scan_dir_bounded ?diff_by_path ~base ~depth ~max_depth ~remaining acc di
     in
     (* Sort alphabetically, then partition directories-first so that
        the node limit (default 750) is consumed by directory trees
-       (lib/, src/) before leaf files (*.py, *.md).  Without this,
+       (lib/, src/) before leaf files ( *.py, *.md).  Without this,
        a flat directory like ~/me with hundreds of root-level files
        exhausts the limit before important subdirectories appear. *)
     let entries =

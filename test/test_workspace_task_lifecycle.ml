@@ -21,7 +21,7 @@ let mk_in_progress assignee =
 
 let mk_awaiting assignee =
   D.AwaitingVerification
-    { assignee; submitted_at = now; verification_id = "v1"; deadline = None }
+    { assignee; submitted_at = now; verification_id = "v1"; phase = Awaiting_verifier }
 ;;
 
 let mk_done assignee =
@@ -201,8 +201,11 @@ let test_awaiting_verification_by_other () =
     L.valid_next_actions
       ~verification_enabled:true ~same_agent:false ~force:false ~task_status
   in
-  (* Approver path: same_agent=false (not the submitter) → Approve / Reject ok. *)
-  let expected = [ D.Approve_verification; D.Reject_verification ] in
+  (* same_agent=false (not the submitter): a verifier may Approve / Reject, and
+     may also Claim the task to verify it (cross-agent verification dispatch,
+     Issue #19314 / RFC-0220 §3.5). The prior expectation predated #19314's
+     cross-agent Claim arm in [decide]; align it with the actual behavior. *)
+  let expected = [ D.Claim; D.Approve_verification; D.Reject_verification ] in
   assert_actions ~ctx:"awaiting-by-other" ~expected ~actual;
   assert_consistent_with_decide
     ~ctx:"awaiting-by-other/consistency" ~verification_enabled:true

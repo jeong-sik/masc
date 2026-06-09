@@ -859,7 +859,7 @@ let () =
     let h =
       next_hint
         (Masc_domain.AwaitingVerification
-           { assignee = "a"; submitted_at = "t"; verification_id = "v"; deadline = None })
+           { assignee = "a"; submitted_at = "t"; verification_id = "v"; phase = Masc_domain.Awaiting_verifier })
     in
     assert (str_contains h "approve");
     assert (str_contains h "reject"))

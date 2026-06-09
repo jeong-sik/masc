@@ -33,7 +33,7 @@ let status_awaiting =
     { assignee = "k1"
     ; submitted_at = now
     ; verification_id = "req-1"
-    ; deadline = None
+    ; phase = Awaiting_verifier
     }
 
 let test_is_terminal_done () =

@@ -263,6 +263,16 @@ let all_task_actions =
     Submit_for_verification; Approve_verification; Reject_verification ]
 let valid_task_action_strings = List.map task_action_to_string all_task_actions
 
+(* RFC-0220: the verification sub-state (previously a separate request_status
+   store: `Pending / `Assigned) is folded into [task_status] so the illegal
+   "task Todo + request Pending" pair is unrepresentable. *)
+type verification_phase =
+  | Awaiting_verifier
+      (** No verifier assigned yet (was verification request [`Pending]). *)
+  | Verifier_assigned of { verifier: string }
+      (** A verifier keeper is assigned (was [`Assigned verifier]). *)
+[@@deriving show]
+
 type task_status =
   | Todo
   | Claimed of { assignee: string; claimed_at: string }
@@ -271,7 +281,11 @@ type task_status =
       assignee: string;
       submitted_at: string;
       verification_id: string;
-      deadline: string option;
+      phase: verification_phase;
+        (** RFC-0220: replaces [deadline : string option]. The deadline is
+            dropped per I2 (no per-obligation wall-clock deadline); the
+            verification sub-state lives here so it cannot drift from a
+            separate store. *)
     }
   | Done of { assignee: string; completed_at: string; notes: string option }
   | Cancelled of { cancelled_by: string; cancelled_at: string; reason: string option }
@@ -364,7 +378,7 @@ let task_status_schema_witnesses : task_status list =
       { assignee = placeholder
       ; submitted_at = placeholder
       ; verification_id = placeholder
-      ; deadline = None
+      ; phase = Awaiting_verifier
       }
   ; Done { assignee = placeholder; completed_at = placeholder; notes = None }
   ; Cancelled
@@ -398,15 +412,20 @@ let task_status_to_yojson = function
         ("completed_at", `String completed_at);
         ("notes", Json_util.string_opt_to_json notes);
       ]
-  | AwaitingVerification { assignee; submitted_at; verification_id;
-                           deadline; _ } ->
-      `Assoc [
+  | AwaitingVerification { assignee; submitted_at; verification_id; phase } ->
+      let phase_fields =
+        match phase with
+        | Awaiting_verifier -> [ ("phase", `String "awaiting_verifier") ]
+        | Verifier_assigned { verifier } ->
+            [ ("phase", `String "verifier_assigned");
+              ("verifier", `String verifier) ]
+      in
+      `Assoc ([
         ("status", `String "awaiting_verification");
         ("assignee", `String assignee);
         ("submitted_at", `String submitted_at);
         ("verification_id", `String verification_id);
-        ("deadline", Json_util.string_opt_to_json deadline);
-      ]
+      ] @ phase_fields)
   | Cancelled { cancelled_by; cancelled_at; reason } ->
       `Assoc [
         ("status", `String "cancelled");
@@ -428,11 +447,20 @@ let task_status_of_yojson json =
     | "done" ->
         Ok (Done { assignee = req "assignee"; completed_at = req "completed_at"; notes = opt "notes" })
     | "awaiting_verification" ->
+        (* RFC-0220 migration tolerance: legacy backlogs carry [deadline]
+           (now dropped) and no [phase]; a missing/legacy phase defaults to
+           [Awaiting_verifier]. *)
+        let phase =
+          match opt "phase" with
+          | Some "verifier_assigned" ->
+              Verifier_assigned { verifier = req "verifier" }
+          | Some "awaiting_verifier" | None | Some _ -> Awaiting_verifier
+        in
         Ok (AwaitingVerification
               { assignee = req "assignee"
               ; submitted_at = req "submitted_at"
               ; verification_id = req "verification_id"
-              ; deadline = opt "deadline"
+              ; phase
               })
     | "cancelled" ->
         Ok (Cancelled

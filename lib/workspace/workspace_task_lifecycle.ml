@@ -124,8 +124,9 @@ let decide
            { assignee
            ; submitted_at = now
            ; verification_id = new_verification_id ()
-           ; deadline =
-               verification_deadline ~now ~timeout_seconds:verification_timeout_seconds
+           (* RFC-0220: a fresh submission has no verifier yet. [deadline]
+              dropped per I2 (no per-obligation wall-clock deadline). *)
+           ; phase = Masc_domain.Awaiting_verifier
            })
     else Error Invalid_transition
   | ( Masc_domain.Submit_for_verification

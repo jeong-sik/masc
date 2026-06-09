@@ -5,30 +5,11 @@ open Masc_domain
 include module type of Workspace_utils
 include module type of Workspace_state
 
-(** Lifecycle state of a verification request, used by the claim
-    gate to decide whether a task can be reclaimed. *)
-type verification_claim_state =
-  [ `Pending
-  | `Assigned
-  | `Passed
-  | `Rejected
-  ]
-
 val task_status_label : Masc_domain.task_status -> string
 val task_is_claim_pool_candidate : Masc_domain.task -> bool
 
-val verification_claim_state_of_status
-  :  Workspace_verification_store.request_status
-  -> verification_claim_state
-
-val latest_verification_status_by_task
-  :  config
-  -> (string, float * verification_claim_state) Hashtbl.t
-
-val verification_blocks_claim
-  :  (string, 'a * verification_claim_state) Hashtbl.t
-  -> Masc_domain.task
-  -> bool
+(* RFC-0220 §3.2: claim-pool verification gate functions removed
+   (verification no longer gates the claim pool). *)
 
 val underscore_name : string -> string
 val hyphen_name : string -> string

@@ -71,6 +71,13 @@ val task_action_to_string : task_action -> string
 val all_task_actions : task_action list
 val valid_task_action_strings : string list
 
+(* RFC-0220: verification sub-state folded into [task_status] (was a separate
+   request_status store) so the illegal Todo+Pending pair is unrepresentable. *)
+type verification_phase =
+  | Awaiting_verifier
+  | Verifier_assigned of { verifier : string }
+[@@deriving show]
+
 type task_status =
   | Todo
   | Claimed of { assignee : string; claimed_at : string }
@@ -79,7 +86,7 @@ type task_status =
       { assignee : string
       ; submitted_at : string
       ; verification_id : string
-      ; deadline : string option
+      ; phase : verification_phase
       }
   | Done of { assignee : string; completed_at : string; notes : string option }
   | Cancelled of { cancelled_by : string; cancelled_at : string; reason : string option }

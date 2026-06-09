@@ -28,38 +28,15 @@ let task_is_claim_pool_candidate (task : Masc_domain.task) =
   Masc_domain.task_claim_next_action_is_claimable task
 ;;
 
-type verification_claim_state =
-  [ `Pending
-  | `Assigned
-  | `Passed
-  | `Rejected
-  ]
-
-let verification_claim_state_of_status (status : Workspace_verification_store.request_status) =
-  match status with
-  | `Pending -> `Pending
-  | `Assigned _ -> `Assigned
-  | `Completed `Pass -> `Passed
-  | `Completed (`Fail _ | `Partial _) -> `Rejected
-;;
-
-let latest_verification_status_by_task config =
-  let latest = Hashtbl.create 16 in
-  Workspace_verification_store.list_request_headers config.base_path
-  |> List.iter (fun (req : Workspace_verification_store.request_header) ->
-    let state = verification_claim_state_of_status req.status in
-    match Hashtbl.find_opt latest req.task_id with
-    | Some (latest_created_at, _) when latest_created_at >= req.created_at -> ()
-    | Some _ | None -> Hashtbl.replace latest req.task_id (req.created_at, state));
-  latest
-;;
-
-let verification_blocks_claim latest_status_by_task (task : Masc_domain.task) =
-  match Hashtbl.find_opt latest_status_by_task task.id with
-  | Some (_, `Pending) | Some (_, `Assigned) -> true
-  | Some (_, `Rejected) -> false
-  | Some (_, `Passed) | None -> false
-;;
+(* RFC-0220 §3.2: verification state no longer gates the worker claim pool.
+   The cross-store join (request_status -> claim eligibility) is removed: an
+   AwaitingVerification obligation stays claimable by a verifier (§3.5), and a
+   drifted Todo task with a dangling Pending evidence record is just a normal
+   claimable Todo (the evidence record is no longer read for scheduling). This
+   removal is the part that makes the §1.1 stranding disappear — there is
+   nothing left to drift against. (The now-always-empty [verification_blocked_*]
+   plumbing + the [verification_blocked_count] field are cosmetic dead code,
+   removed in a follow-up per §11.) *)
 
 let underscore_name = Workspace_task_receipts.underscore_name
 let hyphen_name = Workspace_task_receipts.hyphen_name
@@ -348,10 +325,8 @@ let claim_next_r
                  false)
             all_todo
         in
-        let latest_verification_status = latest_verification_status_by_task config in
-        let verification_blocked_todo =
-          List.filter (verification_blocks_claim latest_verification_status) all_todo
-        in
+        (* RFC-0220 §3.2: no verification-based exclusion from the claim pool. *)
+        let verification_blocked_todo : Masc_domain.task list = [] in
         if blocked_todo <> []
         then
           log_event

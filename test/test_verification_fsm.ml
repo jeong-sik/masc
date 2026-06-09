@@ -224,29 +224,6 @@ let test_submit_for_verification_moves_to_awaiting () =
       Alcotest.(check string) "status" "awaiting_verification"
         (status_string config task_id))
 
-let test_submit_for_verification_sets_timeout_deadline () =
-  with_env "MASC_VERIFICATION_TIMEOUT_DEADLINE_SEC" "86400" @@ fun () ->
-  with_temp_config ~fsm_enabled:true @@ fun config ->
-    let task_id = add_strict_task config in
-    claim_and_start config "worker" task_id;
-    match Workspace.transition_task_r config ~agent_name:"worker"
-            ~task_id ~action:Masc_domain.Submit_for_verification () with
-    | Error e -> Alcotest.fail ("submit failed: " ^ Masc_domain.show_masc_error e)
-    | Ok _ ->
-      match get_task config task_id with
-      | Some { task_status =
-                 Masc_domain.AwaitingVerification { submitted_at; deadline = Some deadline; _ };
-               _ } ->
-        let submitted_ts = Masc_domain.parse_iso8601 submitted_at in
-        let deadline_ts = Masc_domain.parse_iso8601 deadline in
-        Alcotest.(check (float 0.0)) "deadline offset"
-          86400.0
-          (deadline_ts -. submitted_ts)
-      | Some { task_status = Masc_domain.AwaitingVerification { deadline = None; _ }; _ } ->
-        Alcotest.fail "awaiting verification deadline missing"
-      | Some _ -> Alcotest.fail "task is not awaiting verification"
-      | None -> Alcotest.fail "task not found"
-
 let test_submit_for_verification_from_claimed_moves_to_awaiting () =
   with_temp_config ~fsm_enabled:true (fun config ->
     let task_id = add_strict_task config in
@@ -808,25 +785,6 @@ let test_reject_retry_recovers_completed_verdict_orphan () =
            Astring.String.is_infix ~affix:"retry after orphan" reason
          | _ -> false))
 
-let test_claim_next_skips_pending_verification_tasks () =
-  with_temp_config ~fsm_enabled:true (fun config ->
-    let task_1 = add_strict_task config in
-    let task_2 = add_strict_task config in
-    claim_and_start config "worker" task_1;
-    (match Workspace.transition_task_r config ~agent_name:"worker"
-             ~task_id:task_1 ~action:Masc_domain.Submit_for_verification () with
-     | Ok _ -> ()
-     | Error e -> Alcotest.fail ("submit failed: " ^ Masc_domain.show_masc_error e));
-    ignore
-      (create_pending_request config ~task_id:task_1 ~worker:"worker"
-         ~request_id:"vrf-pending-claim-next");
-    Workspace.claim_next_r config ~agent_name:"worker" ()
-    |> expect_claim_next_claimed ~task_id:task_2 ~released_task_id:None;
-    Alcotest.(check string) "pending task remains awaiting_verification"
-      "awaiting_verification" (status_string config task_1);
-    Workspace.claim_next_r config ~agent_name:"other" ()
-    |> expect_claim_next_no_unclaimed)
-
 let test_claim_next_preserves_rejected_verification_owner_task () =
   with_temp_config ~fsm_enabled:true (fun config ->
     let task_1 = add_strict_task config in
@@ -854,28 +812,6 @@ let test_claim_next_preserves_rejected_verification_owner_task () =
     |> expect_claim_next_claimed ~task_id:task_1 ~released_task_id:None;
     Workspace.claim_next_r config ~agent_name:"other" ()
     |> expect_claim_next_claimed ~task_id:task_2 ~released_task_id:None)
-
-let test_claim_next_blocks_pending_requests_stored_only_under_masc_root () =
-  with_temp_config ~fsm_enabled:true (fun config ->
-    let task_id = add_strict_task config in
-    let req =
-      match Verification.create_request ~base_path:config.Workspace.base_path
-              ~task_id ~output:`Null ~criteria:[] ~worker:"worker"
-              ~request_id:"vrf-masc-root-only" () with
-      | Ok req -> req
-      | Error e -> Alcotest.fail ("create_request failed: " ^ e)
-    in
-    let active_path =
-      Filename.concat (Filename.concat (Workspace_utils.masc_dir config) "verifications")
-        (req.id ^ ".json")
-    in
-    Alcotest.(check bool) "request stored under .masc" true
-      (Sys.file_exists active_path);
-    Alcotest.(check bool) "legacy root verifications absent" false
-      (Sys.file_exists
-         (Filename.concat config.Workspace.base_path "verifications"));
-    Workspace.claim_next_r config ~agent_name:"other" ()
-    |> expect_claim_next_no_eligible)
 
 let test_self_approval_blocked () =
   with_temp_config ~fsm_enabled:true (fun config ->
@@ -972,119 +908,6 @@ let test_fsm_disabled_submit_fails () =
       Alcotest.(check bool) "error mentions FSM disabled" true
         (Astring.String.is_infix ~affix:"not enabled" msg))
 
-(* ================================================================ *)
-(* Verification timeout transition (check_timeouts)                  *)
-(* ================================================================ *)
-
-(* Move a task's deadline far into the past so the next check_timeouts
-   cycle sees [now > deadline_ts] without sleeping. *)
-let force_deadline_past config task_id =
-  let backlog = Workspace.read_backlog config in
-  let past_iso =
-    Masc_domain.iso8601_of_unix_seconds (Time_compat.now () -. 3600.0)
-  in
-  let new_tasks =
-    List.map (fun (t : Masc_domain.task) ->
-      if t.id <> task_id then t
-      else match t.task_status with
-        | Masc_domain.AwaitingVerification fields ->
-          { t with task_status =
-              Masc_domain.AwaitingVerification { fields with deadline = Some past_iso } }
-        | _ -> t)
-      backlog.tasks
-  in
-  Workspace.write_backlog config { backlog with tasks = new_tasks }
-
-let force_missing_deadline_submitted_at_past config task_id =
-  let backlog = Workspace.read_backlog config in
-  let timeout = Env_config_runtime.Verification.timeout_deadline_seconds () in
-  let submitted_at =
-    Masc_domain.iso8601_of_unix_seconds
-      (Time_compat.now () -. timeout -. 3600.0)
-  in
-  let new_tasks =
-    List.map
-      (fun (t : Masc_domain.task) ->
-         if t.id <> task_id
-         then t
-         else
-           match t.task_status with
-           | Masc_domain.AwaitingVerification fields ->
-             { t with
-               task_status =
-                 Masc_domain.AwaitingVerification
-                   { fields with submitted_at; deadline = None }
-             }
-           | _ -> t)
-      backlog.tasks
-  in
-  Workspace.write_backlog config { backlog with tasks = new_tasks }
-
-let test_check_timeouts_transitions_awaiting_to_cancelled () =
-  with_temp_config ~fsm_enabled:true (fun config ->
-    let task_id = add_strict_task config in
-    claim_and_start config "worker" task_id;
-    (match Workspace.transition_task_r config ~agent_name:"worker"
-             ~task_id ~action:Masc_domain.Submit_for_verification () with
-     | Error e -> Alcotest.fail ("submit failed: " ^ Masc_domain.show_masc_error e)
-     | Ok _ -> ());
-    Alcotest.(check string) "pre-check status" "awaiting_verification"
-      (status_string config task_id);
-    force_deadline_past config task_id;
-    Verification_protocol.check_timeouts ~config;
-    Alcotest.(check string) "post-check status" "cancelled"
-      (status_string config task_id);
-    match get_task config task_id with
-    | Some { task_status = Masc_domain.Cancelled { cancelled_by; reason; _ }; _ } ->
-      Alcotest.(check string) "cancelled_by system" "system" cancelled_by;
-      let reason_str = Option.value reason ~default:"" in
-      Alcotest.(check bool)
-        "reason mentions verification deadline" true
-        (Astring.String.is_infix ~affix:"verification deadline" reason_str)
-    | _ -> Alcotest.fail "task is not Cancelled after check_timeouts")
-
-let test_check_timeouts_transitions_legacy_missing_deadline () =
-  with_temp_config ~fsm_enabled:true (fun config ->
-    let task_id = add_strict_task config in
-    claim_and_start config "worker" task_id;
-    (match
-       Workspace.transition_task_r
-         config
-         ~agent_name:"worker"
-         ~task_id
-         ~action:Masc_domain.Submit_for_verification
-         ()
-     with
-     | Error e -> Alcotest.fail ("submit failed: " ^ Masc_domain.show_masc_error e)
-     | Ok _ -> ());
-    force_missing_deadline_submitted_at_past config task_id;
-    Verification_protocol.check_timeouts ~config;
-    Alcotest.(check string) "post-check status" "cancelled"
-      (status_string config task_id);
-    match get_task config task_id with
-    | Some { task_status = Masc_domain.Cancelled { reason; _ }; _ } ->
-      let reason_str = Option.value reason ~default:"" in
-      Alcotest.(check bool)
-        "reason records fallback source"
-        true
-        (Astring.String.is_infix ~affix:"source=submitted_at_fallback" reason_str)
-    | _ -> Alcotest.fail "task is not Cancelled after check_timeouts")
-
-let test_check_timeouts_idempotent_after_cancel () =
-  with_temp_config ~fsm_enabled:true (fun config ->
-    let task_id = add_strict_task config in
-    claim_and_start config "worker" task_id;
-    (match Workspace.transition_task_r config ~agent_name:"worker"
-             ~task_id ~action:Masc_domain.Submit_for_verification () with
-     | Error e -> Alcotest.fail ("submit failed: " ^ Masc_domain.show_masc_error e)
-     | Ok _ -> ());
-    force_deadline_past config task_id;
-    Verification_protocol.check_timeouts ~config;
-    let status_after_first = status_string config task_id in
-    Verification_protocol.check_timeouts ~config;
-    let status_after_second = status_string config task_id in
-    Alcotest.(check string) "first check cancels" "cancelled" status_after_first;
-    Alcotest.(check string) "second check is no-op" "cancelled" status_after_second)
 
 (* ================================================================ *)
 (* Test suite                                                        *)
@@ -1095,8 +918,6 @@ let () =
     ("transitions_enabled", [
       Alcotest.test_case "submit moves to awaiting_verification" `Quick
         test_submit_for_verification_moves_to_awaiting;
-      Alcotest.test_case "submit sets timeout deadline" `Quick
-        test_submit_for_verification_sets_timeout_deadline;
       Alcotest.test_case "submit from claimed moves to awaiting_verification"
         `Quick test_submit_for_verification_from_claimed_moves_to_awaiting;
       Alcotest.test_case "submit prepare failure keeps task in_progress"
@@ -1129,12 +950,8 @@ let () =
         "reject retry recovers completed verdict orphan"
         `Quick
         test_reject_retry_recovers_completed_verdict_orphan;
-      Alcotest.test_case "claim_next skips pending verification tasks" `Quick
-        test_claim_next_skips_pending_verification_tasks;
       Alcotest.test_case "claim_next preserves rejected owner task" `Quick
         test_claim_next_preserves_rejected_verification_owner_task;
-      Alcotest.test_case ".masc pending verification blocks claim_next" `Quick
-        test_claim_next_blocks_pending_requests_stored_only_under_masc_root;
       Alcotest.test_case "self-approval blocked" `Quick
         test_self_approval_blocked;
       Alcotest.test_case "self-rejection blocked" `Quick
@@ -1149,15 +966,5 @@ let () =
         test_submit_verdict_pass;
       Alcotest.test_case "submit_verdict Fail preserves reason" `Quick
         test_submit_verdict_fail;
-    ]);
-    ("timeout_check", [
-      Alcotest.test_case "check_timeouts transitions AwaitingVerification to Cancelled"
-        `Quick test_check_timeouts_transitions_awaiting_to_cancelled;
-      Alcotest.test_case
-        "check_timeouts expires legacy AwaitingVerification without deadline"
-        `Quick
-        test_check_timeouts_transitions_legacy_missing_deadline;
-      Alcotest.test_case "check_timeouts is idempotent after cancellation"
-        `Quick test_check_timeouts_idempotent_after_cancel;
     ]);
   ]

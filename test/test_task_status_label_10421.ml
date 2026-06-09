@@ -24,7 +24,7 @@ let awaiting =
     assignee = "k1";
     submitted_at = now_iso;
     verification_id = "req-1";
-    deadline = None;
+    phase = Awaiting_verifier;
   }
 let done_ = T.Done {
   assignee = "k1";

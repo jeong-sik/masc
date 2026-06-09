@@ -185,21 +185,20 @@ let publish_audit_event ~id ~ts ~actor ~kind ?target ~summary ~severity
     counter stayed at zero despite successful turn setups. *)
 let publish_runtime_execution_built
     ~keeper_name
-    ~(execution : Keeper_turn_runtime_budget.runtime_execution)
+    ~runtime_id
+    ~max_tokens
+    ~max_context
+    ~max_context_resolution
+    ~temperature
     ~generation
   =
-  let max_ctx_res_str =
-    match execution.max_context_resolution with
-    | Keeper_context_runtime.Resolved_to n -> string_of_int n
-    | Unresolved -> "unresolved"
-  in
   let payload = `Assoc [
     ("keeper_name", `String keeper_name);
-    ("runtime_id", `String execution.runtime_id);
-    ("max_tokens", `Int execution.max_tokens);
-    ("max_context", `Int execution.max_context);
-    ("max_context_resolution", `String max_ctx_res_str);
-    ("temperature", `Float execution.temperature);
+    ("runtime_id", `String runtime_id);
+    ("max_tokens", `Int max_tokens);
+    ("max_context", `Int max_context);
+    ("max_context_resolution", `Int max_context_resolution);
+    ("temperature", `Float temperature);
     ("generation", `Int generation);
     ("timestamp", `Float (Time_compat.now ()));
   ] in

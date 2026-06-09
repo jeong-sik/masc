@@ -213,7 +213,13 @@ let run_keeper_cycle
               ();
             Keeper_event_publisher.publish_runtime_execution_built
               ~keeper_name:meta.name
-              ~execution:initial_execution
+              ~runtime_id:initial_execution.Keeper_turn_runtime_budget.runtime_id
+              ~max_tokens:initial_execution.Keeper_turn_runtime_budget.max_tokens
+              ~max_context:initial_execution.Keeper_turn_runtime_budget.max_context
+              ~max_context_resolution:
+                initial_execution.Keeper_turn_runtime_budget.max_context_resolution
+                  .Keeper_context_runtime.effective_budget
+              ~temperature:initial_execution.Keeper_turn_runtime_budget.temperature
               ~generation;
             let turn_id = keeper_turn_id in
             (match

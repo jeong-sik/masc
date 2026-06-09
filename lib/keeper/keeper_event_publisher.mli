@@ -109,6 +109,21 @@ val publish_keeper_dead :
     [detail]) so subscribers can filter on a stable topic and
     pull the structured fields directly. *)
 
+(** {1 Runtime Execution Telemetry} *)
+
+val publish_runtime_execution_built :
+  keeper_name:string ->
+  runtime_id:string ->
+  max_tokens:int ->
+  max_context:int ->
+  max_context_resolution:int ->
+  temperature:float ->
+  generation:int ->
+  unit
+(** Emits a [telemetry_event] when [build_runtime_execution] succeeds.
+    Extracts only primitive fields to avoid introducing module dependencies
+    that would create a dependency cycle through the keeper stack. *)
+
 (** {1 Audit Ledger Events} *)
 
 val publish_audit_event :

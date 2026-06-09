@@ -56,6 +56,19 @@ This asymmetry is principled, not incidental: the outcome's *dependency on the
 record* points the commit order. It yields atomicity-of-outcome without a
 cross-file transaction.
 
+A second, mechanical fact forces the same order independently of the
+content-vs-audit argument: **approve has no clean compensation.** Submit
+*creates* the record, so its compensation is `delete_request` — a clean inverse
+(§3.1). Approve/reject *update* the record submit created (`Pending` →
+`Completed`). If approve went record-first, a `write_backlog` failure would need
+to revert `Completed → Pending`; the only inverse available is the `delete_request`
+from §3.1, which would erase the **submission** record entirely — destroying the
+`output` / `criteria` the verifier must read after the task bounces back to
+`AwaitingVerification`. That revert is not a transition the `Verification` state
+machine offers. No clean compensation exists, so approve/reject *cannot* be made
+record-first-with-compensation the way submit is — status-first is the only
+order that keeps the stores consistent on the error path.
+
 ## 3. Design
 
 ### 3.1 Submit: record-first, status-commit, compensate
@@ -81,6 +94,20 @@ best-effort step. `write_backlog` (task → `Done` / `InProgress`) is the commit
 Failure 금지) but does not roll back — the outcome and its verdict already live
 in `task_status`.
 
+**Reject's reason is not lost.** Reject is the one verdict whose outcome
+(`InProgress { assignee; started_at }`) carries no notes field, so the reason
+text (`~reason`) is not in `task_status`. It does not need to be: the worker's
+feedback channel is the **separate** post-commit notify
+(`verification_notify_verdict_fn` → board post `"Rejected task … : <reason>"` +
+SSE), invoked in `tool_task.ml` *after* `transition_task_r` returns `Ok` — a
+different hook from the record write (`verification_record_verdict_fn`), wired
+apart in `workspace_metric_hooks.ml`. The audit record is not the reason's
+delivery path. status-first in fact *improves* reject: under the old record-first
+gate a record-write failure returned `Error`, so the notify (which only fires on
+`Ok`) never ran and the worker was never told it was rejected. Under status-first
+the transition commits, returns `Ok`, and the notify always runs — only the audit
+record is best-effort.
+
 This **reverses a deliberate, tested contract**: `test_approve_prepare_failure_keeps_task_awaiting`
 and `test_reject_prepare_failure_keeps_task_awaiting` assert "if the verdict
 cannot be recorded, do not transition". Under single-authority that contract is
@@ -105,6 +132,36 @@ A non-terminal record whose task is terminal (`Done` / `Cancelled`) or absent is
 inert. Reap lazily (on the next read of that task's verification view) or in a
 documented sweep. Not load-bearing for correctness — purely storage hygiene.
 
+### 3.5 Why the orphan is inert (consumer audit)
+
+status-first turns *every* audit-write I/O failure (not just a rare crash) into
+the pair "record `Pending` + task `Done`/`InProgress`" — the same *shape* as the
+628/629 drift. This is benign **only if** no code acts on a `Pending` record
+without joining `task_status`. Every consumer of the task-verification record was
+enumerated (`rg "load_request|list_requests" lib/`) and classified:
+
+| Consumer | Reads `Pending`? | Class |
+|---|---|---|
+| `dashboard_verification.ml` (summary/requests JSON) | yes | display |
+| `workspace_verification_store.load_request_header` (dir listing) | yes | inventory / telemetry |
+| `keeper_world_observation_inputs.pending_verification` | yes | **behavior — but joined** |
+| `goal_verification.list_requests_for_goal` | no (different type: `goal_verification_request`) | orthogonal |
+| `verification.ml` internal (`save_request`, `submit_verdict`) | yes | mechanics |
+
+The only behavior-driving consumer is the keeper world-observation count that
+gates keeper wake/scheduling. It does **not** count raw actionable records; it
+filters `backlog.tasks` through `task_has_actionable_verification`, which returns
+`true` only when `task.task_status = AwaitingVerification` with a matching id
+(`keeper_world_observation_inputs.ml:35-45,76-82`). A `Done` task with a `Pending`
+orphan hits the `Done -> false` arm and is not counted — the join makes the count
+`task_status`-authoritative. The raw actionable-id list has no other consumer.
+
+So the orphan is **an expected benign state**, not a moved bug: no scheduler,
+timeout, claim-gate, or gauge acts on it. (Were any consumer found to act on a
+`Pending` record unjoined, the fix would be to make *that* consumer
+`task_status`-authoritative — extending single-authority — not to abandon
+status-first.)
+
 ## 4. Why this is not itself a workaround
 
 - It removes the root (the drift-able two-write), it does not instrument or
@@ -114,6 +171,20 @@ documented sweep. Not load-bearing for correctness — purely storage hygiene.
   because the record never gates or overrides the outcome.
 - The migration is a one-time legacy step with a removal point (after it runs),
   not standing machinery.
+
+The §3.4 inert-reaper looks superficially like the §8 every-boot reconciler this
+RFC rejects; it is not, and the distinction holds **only because** the §3.5 audit
+passed:
+
+- The §8 reconciler repairs a *behavior-affecting* pair on every boot — it keeps
+  a live root (the two-write drift) survivable by sanitizing on read. The root
+  still produces new drift; the reconciler hides it.
+- The §3.4 reaper GCs a *benign* stale-audit record **after** write-ordering has
+  already made `task_status` authoritative (the root is fixed, not hidden). It is
+  storage hygiene over a state §3.5 proved no behavior reads. If §3.5 had found a
+  behavior-driving unjoined consumer, the orphan would *not* be benign and the
+  reaper *would* collapse into the §8 pattern — so the two are bound: the reaper
+  is legitimate iff the consumer audit holds.
 
 ## 5. Implementation order
 

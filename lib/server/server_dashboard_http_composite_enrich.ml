@@ -51,7 +51,13 @@ let dashboard_fleet_composite_json ~(config : Workspace.config) () : Yojson.Safe
   let entries = Keeper_registry.all ~base_path:config.base_path () in
   let snapshots = List.map (dashboard_keeper_composite_json ~config) entries in
   `Assoc
-    [ "generated_at", `String (Masc_domain.now_iso ())
+    (* generated_at is a unix-second number (not ISO8601 string) to match the
+       sibling timestamps in this same envelope (snapshots[].started_at /
+       last_progress_at / ended_at are all `Float) and the dashboard's
+       runtime-attention staleness arithmetic (fleet-fsm-matrix.ts:558 computes
+       `generatedAt - latest`, which requires a number). The dashboard valibot
+       schema FleetCompositeSnapshotSchema declares generated_at: number(). *)
+    [ "generated_at", `Float (Unix.gettimeofday ())
     ; "count", `Int (List.length snapshots)
     ; "snapshots", `List snapshots
     ]

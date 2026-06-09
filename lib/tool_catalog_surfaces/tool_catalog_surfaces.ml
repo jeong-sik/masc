@@ -81,8 +81,7 @@ let public_mcp_surface_tools =
   ; "masc_board_curation_submit"
   ; "masc_board_reaction"
   ; (* Agent discovery *)
-    "masc_agents"
-  ; "masc_agent_card"
+    "masc_agent_card"
   ; "masc_dashboard"
   ; (* Utility *)
     "masc_tool_help"
@@ -100,7 +99,6 @@ let spawned_agent_surface_tools =
   ; "masc_transition"
   ; "masc_task_history"
   ; "masc_broadcast"
-  ; "masc_agent_update"
   ; "masc_add_task"
   ; "masc_heartbeat"
   ; "masc_messages"
@@ -140,7 +138,6 @@ let local_worker_surface_tools =
   ; "masc_transition"
   ; "masc_add_task"
   ; "masc_heartbeat"
-  ; "masc_agents"
   ; "masc_agent_card"
   ; "masc_goal_list"
   ; "masc_goal_upsert"

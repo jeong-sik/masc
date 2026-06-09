@@ -8,25 +8,10 @@ open Masc_domain
 include module type of Workspace_utils
 include module type of Workspace_state
 
-(** Render the full agents/workspaces snapshot as a JSON document with
-    [{ count; agents = [...] }] shape. *)
-val get_agents_status : config -> Yojson.Safe.t
-
-(** Register or update an agent's capability list; returns a
-    human-readable status line. *)
-val register_capabilities :
-  config -> agent_name:string -> capabilities:string list -> string
-
-(** Update an agent's [status] and/or [capabilities]. *)
-val update_agent_r :
-  config ->
-  agent_name:string ->
-  ?status:string ->
-  ?capabilities:string list ->
-  unit ->
-  string Masc_domain.masc_result
-
-(** Find every registered agent advertising [capability]; returns
-    [{ count; capability; agents = [...] }] or an error envelope. *)
-val find_agents_by_capability :
-  config -> capability:string -> Yojson.Safe.t
+(* Agent-status surface removed (2026-06-09): the disk-backed `.masc/agents/`
+   registry producer ([Workspace_eio.register_agent]) had zero call sites, so
+   every read here returned empty for ~12 days (governance judge produced 0
+   judgments). Live agent status is served by the in-memory session registry
+   ([Session.get_agent_statuses], exposed via the `who` resource). Removed:
+   get_agents_status / register_capabilities / update_agent_r /
+   find_agents_by_capability. See PR body for the producer-death analysis. *)

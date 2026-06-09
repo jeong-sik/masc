@@ -9,48 +9,10 @@ open Masc_domain
 
 let agent_card_action_enum_strings = [ "get"; "refresh" ]
 
+(* masc_agents / masc_agent_update schemas removed (2026-06-09): the
+   agent-status surface they fronted read/wrote the dead .masc/agents/
+   registry (producer Workspace_eio.register_agent had 0 call sites). *)
 let schemas : tool_schema list = [
-  {
-    name = "masc_agents";
-    description = "Get detailed status of all agents: zombie detection, current tasks, capabilities, last seen time.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("limit", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "Max agents to return (default: 20)");
-          ("minimum", `Int 1);
-          ("maximum", `Int 50);
-          ("default", `Int 20);
-        ]);
-      ]);
-      ("additionalProperties", `Bool false);
-    ];
-  };
-  {
-    name = "masc_agent_update";
-    description = "Update your own agent metadata (status or capabilities) with transition guards.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("status", `Assoc [
-          ("type", `String "string");
-          (* Issue #8372: derived from Masc_domain.agent_status Variant SSOT.
-             Hand-rolled enum risks dropping a constructor on extension. *)
-          ("enum", `List (List.map (fun s -> `String s) Masc_domain.valid_agent_status_strings));
-          ("description", `String
-            (Printf.sprintf "Optional status: %s"
-               (String.concat " | " Masc_domain.valid_agent_status_strings)));
-        ]);
-        ("capabilities", `Assoc [
-          ("type", `String "array");
-          ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Optional capability list (overwrites existing)");
-        ]);
-      ]);
-      ("additionalProperties", `Bool false);
-    ];
-  };
   {
     name = "masc_agent_fitness";
     description = "Get fitness scores for agents based on completion rate, reliability, and speed metrics.";

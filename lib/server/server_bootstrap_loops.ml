@@ -575,7 +575,6 @@ let start_keeper_loops
   let judge_tool_names =
     [ "masc_status"
     ; Tool_name.Task_name.to_string Tool_name.Task_name.Tasks
-    ; "masc_agents"
     ; Tool_name.Board_name.to_string Tool_name.Board_name.Board_list
     ]
   in
@@ -592,7 +591,7 @@ let start_keeper_loops
     let agent_name = actor in
     let ctx_workspace : Tool_workspace.context = { config; agent_name } in
     let ctx_task : Task.Tool.context = { config; agent_name; sw = Some sw } in
-    let ctx_agent : Tool_agent.context = { config; agent_name } in
+    (* ctx_agent removed with the masc_agents judge dispatch case (2026-06-09). *)
     match name with
     | "masc_status" ->
       (match Tool_workspace.dispatch ctx_workspace ~name ~args with
@@ -612,13 +611,6 @@ let start_keeper_loops
          Tool_result.error
            ~failure_class:(Some Tool_result.Runtime_failure)
            ~tool_name:name ~start_time "masc_tasks: dispatch failed")
-    | "masc_agents" ->
-      (match Tool_agent.dispatch ctx_agent ~name ~args with
-       | Some result -> result
-       | None ->
-         Tool_result.error
-           ~failure_class:(Some Tool_result.Runtime_failure)
-           ~tool_name:name ~start_time "masc_agents: dispatch failed")
     | "masc_board_list" ->
       Board_tool.handle_tool name args
     | _ ->
@@ -631,27 +623,13 @@ let start_keeper_loops
         ~start_time
         (Printf.sprintf "judge: tool '%s' not allowed" name)
   in
-  let governance_judge_dispatch = make_judge_dispatch ~actor:"governance-judge" in
+  (* governance_judge subsystem removed (2026-06-09): its only factual input
+     was [Workspace.get_agents_status], which read the disk-backed
+     [.masc/agents/] registry whose producer ([Workspace_eio.register_agent])
+     had zero call sites. items/activity were already hardcoded []. So the
+     judge ran ~100 empty LLM cycles/day producing 0 judgments for ~12 days.
+     Removing the daemon rather than leaving a permanently-empty input. *)
   let operator_judge_dispatch = make_judge_dispatch ~actor:"operator-judge" in
-  fork_subsystem "governance_judge" (fun () ->
-    Dashboard_governance_judge.start
-      ~sw
-      ~clock
-      ~net
-      ~base_path:state.workspace_config.base_path
-      ~masc_tools:judge_masc_tools
-      ~dispatch:governance_judge_dispatch
-      ~build_facts:(fun () ->
-        let base =
-          `Assoc
-            [ "generated_at", `String (Masc_domain.now_iso ())
-            ; "items", `List []
-            ; "activity", `List []
-            ]
-        in
-        let agents = Workspace.get_agents_status state.workspace_config in
-        Operator_control_snapshot.merge_json_objects base (`Assoc [ "agents", agents ]))
-      ());
   fork_subsystem "operator_judge" (fun () ->
     let operator_judge_ctx : _ Operator_control.context =
       { config = state.workspace_config

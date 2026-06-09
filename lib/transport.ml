@@ -198,7 +198,6 @@ module Rest = struct
     | "masc_operator_confirm" -> Some Bearer_required
     | "masc_status"
     | "masc_tasks"
-    | "masc_agents"
     | "masc_messages"
     | "masc_operator_snapshot"
     | "masc_operator_digest"
@@ -222,7 +221,6 @@ module Rest = struct
     [
       ("masc_status", [ (GET, "/api/v1/status") ]);
       ("masc_tasks", [ (GET, "/api/v1/tasks") ]);
-      ("masc_agents", [ (GET, "/api/v1/agents") ]);
       ("masc_messages", [ (GET, "/api/v1/messages") ]);
       ("masc_operator_snapshot", [ (GET, "/api/v1/operator") ]);
       ("masc_operator_digest", [ (GET, "/api/v1/operator/digest") ]);

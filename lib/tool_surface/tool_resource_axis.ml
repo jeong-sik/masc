@@ -214,7 +214,6 @@ let classify_catalog_tool ~tool_name =
   | "masc_tool_revoke"
   | "masc_transition"
   | "masc_update_priority" -> Some Workspace_write
-  | "masc_agent_update"
   | "masc_broadcast"
   | "masc_cleanup_zombies"
   | "masc_gc" -> Some Generic_write

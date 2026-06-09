@@ -1403,12 +1403,8 @@ let () = test "handle_claim_next_ignores_keeper_tool_access_for_open_claims" (fu
   (match Keeper_meta_store.write_meta ~force:true ctx.config initial_meta with
   | Ok () -> ()
   | Error e -> failwith ("write_meta failed: " ^ e));
-  (match
-     Workspace.update_agent_r ctx.config ~agent_name
-       ~capabilities:[ "keeper" ] ()
-   with
-  | Ok _ -> ()
-  | Error e -> failwith (Masc_domain.masc_error_to_string e));
+  (* Workspace.update_agent_r setup removed (2026-06-09): the agent-status
+     registry it wrote was dead; claim eligibility uses keeper_meta above. *)
   let _ =
     Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc [ ("title", `String "Open claim task") ])

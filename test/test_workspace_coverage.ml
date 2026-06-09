@@ -1750,62 +1750,8 @@ let test_task_id_to_int_only_prefix () =
 (* Update Agent Tests                                            *)
 (* ============================================================ *)
 
-let test_update_agent_status () =
-  with_test_env (fun config ->
-    let _ = Workspace.bind_session config ~agent_name:"provider_f" ~capabilities:[ "test" ] () in
-    (* Get the actual agent name (auto-generated nickname) *)
-    let agents = Workspace.get_agents_raw config in
-    let provider_f =
-      List.find_opt
-        (fun (a : Masc_domain.agent) ->
-           String.length a.name >= 6 && String.sub a.name 0 6 = "provider_f")
-        agents
-    in
-    match provider_f with
-    | Some agent ->
-      let result =
-        Workspace.update_agent_r config ~agent_name:agent.name ~status:"listening" ()
-      in
-      (match result with
-       | Ok _ -> ()
-       | Error _ -> Alcotest.fail "Expected Ok")
-    | None -> Alcotest.fail "Provider_f agent not found")
-;;
-
-let test_update_agent_capabilities () =
-  with_test_env (fun config ->
-    let _ = Workspace.bind_session config ~agent_name:"provider_f" ~capabilities:[] () in
-    let agents = Workspace.get_agents_raw config in
-    let provider_f =
-      List.find_opt
-        (fun (a : Masc_domain.agent) ->
-           String.length a.name >= 6 && String.sub a.name 0 6 = "provider_f")
-        agents
-    in
-    match provider_f with
-    | Some agent ->
-      let result =
-        Workspace.update_agent_r
-          config
-          ~agent_name:agent.name
-          ~capabilities:[ "python"; "code-review" ]
-          ()
-      in
-      (match result with
-       | Ok _ -> ()
-       | Error _ -> Alcotest.fail "Expected Ok")
-    | None -> Alcotest.fail "Provider_f agent not found")
-;;
-
-let test_update_agent_not_found () =
-  with_test_env (fun config ->
-    let result =
-      Workspace.update_agent_r config ~agent_name:"nonexistent" ~status:"active" ()
-    in
-    match result with
-    | Error (Masc_domain.Agent (Masc_domain.Agent_error.NotFound _)) -> ()
-    | _ -> Alcotest.fail "Expected AgentNotFound")
-;;
+(* test_update_agent_status / _capabilities / _not_found removed (2026-06-09):
+   Workspace.update_agent_r deleted with the dead agent-status surface. *)
 
 (* ============================================================ *)
 (* Archive Task Tests                                            *)
@@ -2031,12 +1977,6 @@ let () =
         ; Alcotest.test_case "invalid prefix" `Quick test_task_id_to_int_invalid_prefix
         ; Alcotest.test_case "empty" `Quick test_task_id_to_int_empty
         ; Alcotest.test_case "only prefix" `Quick test_task_id_to_int_only_prefix
-        ] )
-    ; (* === Update Agent === *)
-      ( "update_agent"
-      , [ Alcotest.test_case "status" `Quick test_update_agent_status
-        ; Alcotest.test_case "capabilities" `Quick test_update_agent_capabilities
-        ; Alcotest.test_case "not found" `Quick test_update_agent_not_found
         ] )
     ; (* === Archive === *)
       "archive", [ Alcotest.test_case "append tasks" `Quick test_append_archive_tasks ]

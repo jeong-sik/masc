@@ -686,7 +686,13 @@ and run_existing_worker_agent
           worker_name
           (Printexc.to_string exn))
     (fun () ->
-       let result = Agent_sdk.Agent.run ~sw agent prompt in
+       let result =
+         Agent_sdk.Agent.run
+           ~sw
+           ?clock:(Eio_context.get_clock_opt ())
+           agent
+           prompt
+       in
        let raw_trace_run = Agent_sdk.Agent.last_raw_trace_run agent in
        let evidence_session_id =
          Worker_container.evidence_session_id_of_worker_run

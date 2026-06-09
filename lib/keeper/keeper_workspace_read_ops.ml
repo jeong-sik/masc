@@ -403,16 +403,33 @@ let try_handle
                      | Unix.WEXITED 0 | Unix.WEXITED 1 -> true
                      | _ -> false
                    in
+                   (* On non-zero rg exit (exit 2 for an unrecognized
+                      --type/--glob value or a missing path), surface rg's
+                      own stderr so the keeper can self-correct instead of
+                      retrying the same broken argv until the circuit
+                      breaker trips. exit_code.ml's generic exit-2 hint
+                      already promises "Check stderr for details", but the
+                      rg result dropped stderr — this fulfils that broken
+                      contract. It does NOT classify stderr (RFC-0089: no
+                      new string classifier; status.category stays typed,
+                      error_detail is a human-readable diagnostic). *)
+                   let trimmed_stderr = String.trim result.stderr in
+                   let error_detail =
+                     if is_ok || String.equal trimmed_stderr ""
+                     then []
+                     else [ "error_detail", `String trimmed_stderr ]
+                   in
                    Yojson.Safe.to_string
                      (`Assoc
-                         [ "ok", `Bool is_ok
-                         ; "op", `String op
-                         ; "path", `String target
-                         ; "pattern", `String pattern
-                         ; "via", `String "host"
-                         ; "status", Keeper_alerting_path.process_status_to_json result.status
-                         ; "matches", lines_to_json ~limit result.stdout
-                         ]))))
+                         ([ "ok", `Bool is_ok
+                          ; "op", `String op
+                          ; "path", `String target
+                          ; "pattern", `String pattern
+                          ; "via", `String "host"
+                          ; "status", Keeper_alerting_path.process_status_to_json result.status
+                          ; "matches", lines_to_json ~limit result.stdout
+                          ]
+                         @ error_detail)))))
   | "git_log" ->
     Some
       (match cwd_target () with

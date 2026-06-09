@@ -461,6 +461,19 @@ let keeper_board_search_schema =
 let tool_execute_schema =
   find_schema_exn "tool_execute" Config.raw_all_tool_schemas
 
+let keeper_search_files_schema =
+  find_schema_exn "tool_search_files" Config.raw_all_tool_schemas
+
+(* Every op the runtime dispatch in keeper_workspace_read_ops.ml handles.
+   The search_files schema constrains op to a closed enum derived from
+   Keeper_workspace_op.valid_strings (the SAME SSOT the runtime uses), so a
+   schema enum narrower than this set would reject ops that actually work —
+   the failure mode if someone hand-lists only the directory-listing ops.
+   This list mirrors the runtime match arms. *)
+let runtime_search_ops =
+  [ "pwd"; "ls"; "cat"; "rg"; "git_status"; "find"
+  ; "head"; "tail"; "wc"; "tree"; "git_log"; "git_diff" ]
+
 let assoc_string key json =
   match Yojson.Safe.Util.member key json with
   | `String value -> value
@@ -604,6 +617,50 @@ let test_validate_args_keeper_board_list_rejects_unknown_field () =
       "expected unknown field to be rejected, but it passed: %s"
       (Yojson.Safe.to_string forwarded)
   | Error _ -> ()
+
+(* The op enum (derived from Keeper_workspace_op.valid_strings) must accept
+   EVERY op the runtime dispatch handles. Guards the regression where the
+   enum is hand-listed with only the directory-listing ops, silently
+   breaking cat/pwd/find/head/tail/wc/git_log/git_diff. *)
+let test_search_op_enum_accepts_all_runtime_ops () =
+  List.iter
+    (fun op ->
+      match
+        Tool_input_validation.validate_args
+          ~schema:keeper_search_files_schema
+          ~name:"tool_search_files"
+          ~args:(`Assoc [ "op", `String op; "pattern", `String "x" ])
+          ()
+      with
+      | Ok _ -> ()
+      | Error result ->
+        Alcotest.failf
+          "runtime op %S rejected by search_files schema enum: %s"
+          op
+          (Yojson.Safe.to_string (Tool_result.data result)))
+    runtime_search_ops
+
+(* Documents where enforcement actually lives. The schema enum on `op` is
+   ADVISORY: it tells the model the exact valid set (discoverability), but
+   Tool_input_validation does NOT enforce JSON-Schema enum, so an unknown op
+   passes validation here. The real rejection happens downstream in the
+   runtime dispatch (keeper_workspace_ops.ml: unknown op -> "unsupported_op"
+   with supported_ops = Keeper_workspace_op.valid_strings). If a future
+   validator starts enforcing enum, this test flips to Error and should be
+   updated together with the enum's role. *)
+let test_search_op_enum_is_advisory_not_validator_enforced () =
+  match
+    Tool_input_validation.validate_args
+      ~schema:keeper_search_files_schema
+      ~name:"tool_search_files"
+      ~args:(`Assoc [ "op", `String "definitely_not_an_op"; "pattern", `String "x" ])
+      ()
+  with
+  | Ok _ -> () (* expected today: enum is advisory, not validator-enforced *)
+  | Error _ ->
+    Alcotest.fail
+      "validator now enforces the op enum — update this test and the \
+       enum's documented role (advisory -> enforced)"
 
 let param_by_name name params =
   List.find_opt
@@ -1724,6 +1781,10 @@ let () =
         test_validate_args_keeper_board_search_accepts_compact;
       Alcotest.test_case "keeper_board_list still rejects unknown field" `Quick
         test_validate_args_keeper_board_list_rejects_unknown_field;
+      Alcotest.test_case "search op enum accepts all runtime ops" `Quick
+        test_search_op_enum_accepts_all_runtime_ops;
+      Alcotest.test_case "search op enum is advisory (not validator-enforced)" `Quick
+        test_search_op_enum_is_advisory_not_validator_enforced;
       Alcotest.test_case "tool_execute exposes typed boundary" `Quick
         test_tool_execute_schema_exposes_typed_boundary;
       Alcotest.test_case "tool_execute rejects empty args with class" `Quick

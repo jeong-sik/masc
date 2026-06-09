@@ -31,7 +31,8 @@ type trace_id = string
     label. PR-10 will replace the [string] outcome with a typed
     [Dispatch_outcome.t]. *)
 val with_span
-  :  tool_name:string
+  :  ?force_new_trace_id:bool
+  -> tool_name:string
   -> ((unit -> trace_id option) -> 'a * string)
   -> 'a * string
 

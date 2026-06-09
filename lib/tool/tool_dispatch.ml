@@ -137,12 +137,13 @@ let apply_result_transformer (r : Tool_result.result) : Tool_result.result =
 type trace_id = string
 
 type span_wrapper =
-  tool_name:string
+  ?force_new_trace_id:bool
+  -> tool_name:string
   -> ((unit -> trace_id option) -> Tool_result.result option * string)
   -> Tool_result.result option * string
 
 let identity_span_wrapper : span_wrapper =
-  fun ~tool_name:_ body -> body (fun () -> None)
+  fun ?force_new_trace_id:_ ~tool_name:_ body -> body (fun () -> None)
 ;;
 
 let span_wrapper_ref : span_wrapper ref = ref identity_span_wrapper

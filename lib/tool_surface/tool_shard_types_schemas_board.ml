@@ -169,6 +169,22 @@ let board_tools : Masc_domain.tool_schema list =
                         , `List (List.map (fun s -> `String s) sort_order_enum_strings) )
                       ; "description", `String "Sort order (default: recent)"
                       ] )
+                ; (* Mirror masc_board_list: the board_list backend
+                     (board_tool_post.ml handle_post_list_uncached) already
+                     reads [compact] (default true), but the keeper surface
+                     omitted it, so a keeper could never request full output
+                     and qa-king's [compact] arg was rejected as an
+                     unsupported field. additionalProperties stays false —
+                     unknown fields remain fail-closed. *)
+                  ( "compact"
+                  , `Assoc
+                      [ "type", `String "boolean"
+                      ; "default", `Bool true
+                      ; ( "description"
+                        , `String
+                            "Compact one-line per post. Set false for full \
+                             body/TTL/visibility" )
+                      ] )
                 ] )
           ; "additionalProperties", `Bool false
           ]
@@ -283,6 +299,19 @@ let board_tools : Masc_domain.tool_schema list =
                         , `String
                             "Max results (default: 20, max: 100). Numeric \
                              strings are accepted; prefer the bare integer form." )
+                      ] )
+                ; (* Mirror masc_board_search: the search backend
+                     (board_tool_handlers.ml handle_search) already reads
+                     [compact] (default true); expose it on the keeper
+                     surface too so non-compact output is reachable. *)
+                  ( "compact"
+                  , `Assoc
+                      [ "type", `String "boolean"
+                      ; "default", `Bool true
+                      ; ( "description"
+                        , `String
+                            "Compact one-line per post. Set false for full \
+                             body/TTL/visibility" )
                       ] )
                 ] )
           ; "required", `List [ `String "query" ]

@@ -94,15 +94,6 @@ let tls_handshake_internal_error () =
        ; exn_repr = "TLS alert from peer: handshake failure"
        })
 
-let tool_retry_exhausted_error () =
-  Agent_sdk.Error.Agent
-    (Agent_sdk.Error.ToolRetryExhausted
-       { attempts = 2
-       ; limit = 2
-       ; detail =
-           "Tool retry budget exhausted after 2/2 retries: Grep {} Errors: \
-            pattern missing"
-       })
 
 let test_cycle_failed_log_level_is_policy_aware () =
   Alcotest.(check bool)
@@ -115,24 +106,6 @@ let test_cycle_failed_log_level_is_policy_aware () =
     false
     (EC.should_warn_keeper_cycle_failed (turn_timeout_error ()))
 
-let test_tool_retry_exhausted_preserves_keeper_liveness () =
-  let err = tool_retry_exhausted_error () in
-  Alcotest.(check bool)
-    "tool retry exhaustion is detected"
-    true
-    (EC.is_tool_retry_exhausted_error err);
-  Alcotest.(check bool)
-    "tool retry exhaustion is auto-recoverable at keeper turn level"
-    true
-    (EC.is_auto_recoverable_turn_error err);
-  Alcotest.(check bool)
-    "tool retry exhaustion is not runtime exhaustion"
-    false
-    (EC.is_runtime_exhausted_error err);
-  Alcotest.(check bool)
-    "tool retry exhaustion logs as warn, not fatal error"
-    true
-    (EC.should_warn_keeper_cycle_failed err)
 
 let test_tls_handshake_internal_error_is_transient () =
   let err = tls_handshake_internal_error () in
@@ -332,10 +305,6 @@ let () =
           test_strike_limit_is_soft_backoff;
         Alcotest.test_case "cycle failure log level is policy-aware" `Quick
           test_cycle_failed_log_level_is_policy_aware;
-        Alcotest.test_case
-          "tool retry exhaustion preserves keeper liveness"
-          `Quick
-          test_tool_retry_exhausted_preserves_keeper_liveness;
         Alcotest.test_case "TLS handshake internal error is transient" `Quick
           test_tls_handshake_internal_error_is_transient;
         Alcotest.test_case

@@ -17,8 +17,4 @@
   otel_policy_metric_names
   otel_runtime_metric_names
   otel_transport_metric_names)
- (libraries
-  eio
-  mtime
-  mtime.clock
-  masc_log))
+ (libraries eio mtime mtime.clock masc_log))

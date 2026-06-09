@@ -21,8 +21,4 @@
   keeper_oas_execution_error_phase
   keeper_operator_compact_result
   keeper_tool_outcome)
- (libraries
-  masc_core
-  time_compat
-  unix
-  yojson))
+ (libraries masc_core time_compat unix yojson))

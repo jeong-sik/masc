@@ -116,12 +116,6 @@ let sdk_agent_error_fields = function
     [ "variant", `String "idle_detected"
     ; "consecutive_idle_turns", `Int consecutive_idle_turns
     ]
-  | Agent_sdk.Error.ToolRetryExhausted { attempts; limit; detail } ->
-    [ "variant", `String "tool_retry_exhausted"
-    ; "attempts", `Int attempts
-    ; "limit", `Int limit
-    ; "detail", `String detail
-    ]
   | Agent_sdk.Error.GuardrailViolation { validator; reason } ->
     [ "variant", `String "guardrail_violation"
     ; "validator", `String validator

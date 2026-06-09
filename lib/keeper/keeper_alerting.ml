@@ -162,9 +162,7 @@ let is_alert_deduplicated ~(keeper_name : string) ~(reasons : string list) : boo
     The score is the sum of matched weights, capped at 1.0.
 
     Signal bonuses are additive modifiers for structural indicators
-    (guardrail stops, context pressure, alignment drops, tool usage).
-
-    TODO(RFC-0001 Phase 3): Register in Runtime_params for runtime tuning. *)
+    (guardrail stops, context pressure, alignment drops, tool usage). *)
 
 let alert_keyword_weights : (string * float) list = [
   ("장애",     0.35);  (* Korean: outage/failure *)

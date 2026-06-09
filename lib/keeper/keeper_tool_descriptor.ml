@@ -628,6 +628,13 @@ let passthrough_object_schema =
     [ "type", `String "object"; "additionalProperties", `Bool true ]
 ;;
 
+let find_taskboard_schema_opt name =
+  List.find_opt (fun (s : Masc_domain.tool_schema) -> String.equal s.name name)
+    Tool_shard_types.taskboard_tools
+  |> Option.map (fun (s : Masc_domain.tool_schema) -> s.input_schema)
+;;
+
+
 let tool_search_schema =
   object_schema
     ~required:[ "query" ]
@@ -715,11 +722,16 @@ let cluster_descriptor ~id ~name ~description ~handler ~readonly
     then read_only_in_process_policy ~inline_safe ~maintenance_only ()
     else write_in_process_policy ~inline_safe ~maintenance_only ()
   in
+  let input_schema =
+    match find_taskboard_schema_opt name with
+    | Some schema -> schema
+    | None -> passthrough_object_schema
+  in
   in_process_descriptor
     ~id
     ~name
     ~description
-    ~input_schema:passthrough_object_schema
+    ~input_schema
     ~policy
     ~handler
 ;;

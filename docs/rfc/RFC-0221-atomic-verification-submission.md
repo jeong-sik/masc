@@ -1,7 +1,7 @@
 ---
 rfc: "0221"
 title: "Atomic verification submission — task_status as the sole outcome authority"
-status: Draft
+status: Implemented (steps 1-3 merged #20613/#20617; steps 4-5 measured then dropped, §3.3/§3.4)
 supersedes: "RFC-0220 §8 (the every-boot reconciler)"
 relates: "RFC-0220 (verification/scheduling decouple)"
 date: 2026-06-09
@@ -116,21 +116,41 @@ the drift (record `Completed`, task `AwaitingVerification`). The tests are
 updated to the new contract: the outcome commits; the audit write is
 best-effort.
 
-### 3.3 One-time migration (legacy task-628 / task-629)
+### 3.3 Legacy migration — measured, then dropped (won't-do)
 
-Existing drift predates this fix. A documented, one-time migration (a CLI /
-guarded single run, **not** startup machinery) honors each non-terminal record
-whose task is `Todo | Claimed | InProgress` by restoring it to
-`AwaitingVerification { assignee = R.worker; submitted_at = iso8601 R.created_at;
-verification_id = R.id; phase = (R.verifier ? Verifier_assigned : Awaiting_verifier) }`.
-It does **not** adjudicate (no auto-pass). This is the RFC-0220 §8 pseudocode,
-run once as migration rather than every boot.
+The original plan was a one-time migration restoring each non-terminal record
+whose task is `Todo | Claimed | InProgress` to `AwaitingVerification`. Before
+building it, the drift was **measured** rather than assumed (harness-first: take
+the measurement, don't ship a measurement tool). A read-only scan of the live
+workspace joined every non-terminal (`Pending`/`Assigned`) record against
+`task_status`:
 
-### 3.4 Inert-record reaping (optional, follow-up)
+| pair | count | nature |
+|---|---|---|
+| record + absent task | 56 | inert (no task to restore) |
+| record + terminal task (`Done`/`Cancelled`) | 42 | inert (obligation already resolved) |
+| record + live `Todo` task | **2** (task-628, task-629) | the named legacy drift |
+| record + matching `AwaitingVerification` (healthy) | 0 | — |
 
-A non-terminal record whose task is terminal (`Done` / `Cancelled`) or absent is
-inert. Reap lazily (on the next read of that task's verification view) or in a
-documented sweep. Not load-bearing for correctness — purely storage hygiene.
+The migration's *only* candidates are the 2 `Todo` cases — and restoring them is
+**the wrong treatment**: both submissions are 10 days old with `verifier = None`,
+and resurrecting them into a verifier queue from a stale record is exactly the
+"act on a `Pending` record to mutate `task_status`" pattern RFC-0220 removed. A
+`Todo` task is already claimable; if the work still matters it is re-submitted
+through the normal flow, which produces a fresh, real obligation. So migration is
+**dropped** — there is no record for which restore-to-`AwaitingVerification` is
+correct.
+
+### 3.4 Inert-record reaping — one-time cleanup, no standing machinery
+
+All 100 non-terminal records in the scanned workspace were orphans (0 healthy).
+They were reaped as a **one-time operational cleanup** (back up, then delete the
+record files; tasks and the 485 terminal verdict records untouched), restoring
+the store to 0 drift. This is *not* shipped as standing machinery: post-fix the
+only new inert orphans come from a rare approve/reject audit-write I/O failure or
+a submit crash-between, so the trickle is reaped lazily on the next read of that
+task's verification view if at all — not by a boot pass or sweeper. Storage
+hygiene, not correctness.
 
 ### 3.5 Why the orphan is inert (consumer audit)
 
@@ -169,8 +189,9 @@ status-first.)
 - `task_status` becomes the sole outcome authority (parse-don't-validate): the
   harmful state "decided outcome contradicted by a record" is unrepresentable
   because the record never gates or overrides the outcome.
-- The migration is a one-time legacy step with a removal point (after it runs),
-  not standing machinery.
+- No standing repair machinery ships at all: legacy drift was measured and the
+  migration dropped (§3.3); the inert backlog was reaped once operationally
+  (§3.4). Nothing runs on every boot or on a timer.
 
 The §3.4 inert-reaper looks superficially like the §8 every-boot reconciler this
 RFC rejects; it is not, and the distinction holds **only because** the §3.5 audit
@@ -194,9 +215,13 @@ passed:
 3. Approve/reject status-first + best-effort verdict; update the two
    `*_prepare_failure_keeps_task_awaiting` tests to the new contract; add a
    test (verdict-record failure → task still `Done`, logged).
-4. One-time migration command + test (seed 628/629 shape → `AwaitingVerification
-   { Awaiting_verifier }`, record intact, no verdict fabricated, idempotent).
-5. (Follow-up) inert-record reaping.
+4. ~~One-time migration command~~ — **dropped after measurement** (§3.3): the scan
+   found 0 records for which restore-to-`AwaitingVerification` is correct.
+5. Inert-record reaping — done as a **one-time operational cleanup** (§3.4), not
+   shipped machinery; future trickle reaped lazily if at all.
+
+Steps 1–3 (the root fix) shipped in #20613 (steps 1–2) and #20617 (step 3).
+Steps 4–5 resolved to "measure, then don't build" per §3.3/§3.4.
 
 ## 6. Risks / trade-offs
 
@@ -204,8 +229,8 @@ passed:
   steps, each building + green before the next; existing verification FSM suite
   must pass except the two intentionally-reversed contract tests.
 - A submit crash between record-write and status-commit still leaves an orphan
-  record until the migration/reaper. This is inert (not stuck) and strictly
-  better than the current state-loss; full crash-atomicity across two files
-  would need a journal and is out of scope.
+  record. This is inert (not stuck) and strictly better than the current
+  state-loss; it is reaped lazily (§3.4) rather than by standing machinery. Full
+  crash-atomicity across two files would need a journal and is out of scope.
 - Approve best-effort audit means a verdict record can lag the task outcome on
   failure. The authoritative verdict is in `task_status`; the record is audit.

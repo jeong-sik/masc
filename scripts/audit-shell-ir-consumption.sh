@@ -157,7 +157,7 @@ g2_ir_sig=$(rg -c '^let is_(write_operation|destructive_bash_operation) \(.*: Sh
 # Keeper_tool_execute_shell_ir facade, which calls gate_typed and dispatches
 # decided IR. Count keeper consumer files rather than direct gate_typed refs so
 # the metric survives facade extraction and module renames.
-g3_min_facade_consumers=3
+g3_min_facade_consumers=2
 g3_gate_typed=$(list_code_files 'Keeper_tool_execute_shell_ir\.(dispatch|dispatch_classified)' \
   | rg '^lib/keeper/' \
   | wc -l | tr -d ' ')

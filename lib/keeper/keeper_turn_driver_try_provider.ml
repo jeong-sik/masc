@@ -342,10 +342,14 @@ let run_try_provider
            | None -> run_fn ()))
     in
     let result =
+      (* Restore typed provider-context enrichment (auth-env / not-found hints).
+         [Runtime_candidate] lives below [lib/keeper] and cannot reach this
+         keeper-level helper, so the enrichment is applied here at the consumer
+         with the candidate's provider config. *)
       Result.map_error
-        (Runtime_candidate.enrich_sdk_error
+        (Keeper_runtime_attempt.enrich_sdk_error
            ~runtime_id:ctx.error_runtime_id
-           candidate)
+           ~provider_cfg:(Runtime_candidate.provider_cfg candidate))
         result
     in
     let checkpoint_after =

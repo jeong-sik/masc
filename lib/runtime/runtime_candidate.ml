@@ -45,12 +45,6 @@ let runtime_mcp_policy_for_agent ~agent_name (t : t) runtime_mcp_policy =
 let default_config ~name ~system_prompt ~tools (t : t) =
   Runtime_agent.default_config ~name ~provider_cfg:t.config ~system_prompt ~tools
 
-(* Error decoration collapsed to identity: the deleted version added provider
-   auth-env / not-found hints via the annihilated runtime attempt-fsm helpers. *)
-let enrich_sdk_error ~runtime_id:(_ : string) (_ : t)
-    (err : Agent_sdk.Error.sdk_error) =
-  err
-
 (* Runtime-label helpers for dashboard grouping. Delegates to the canonical
    local-runtime detector in Runtime_provider_binding (loopback + no-auth). *)
 let local_runtime_provider_id () =

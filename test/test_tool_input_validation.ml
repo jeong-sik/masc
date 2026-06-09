@@ -452,6 +452,12 @@ let tool_edit_file_schema =
 let keeper_board_post_schema =
   find_schema_exn "keeper_board_post" Config.raw_all_tool_schemas
 
+let keeper_board_list_schema =
+  find_schema_exn "keeper_board_list" Config.raw_all_tool_schemas
+
+let keeper_board_search_schema =
+  find_schema_exn "keeper_board_search" Config.raw_all_tool_schemas
+
 let tool_execute_schema =
   find_schema_exn "tool_execute" Config.raw_all_tool_schemas
 
@@ -548,6 +554,56 @@ let test_registered_hook_keeper_board_post_accepts_sources_array () =
   in
   Alcotest.(check bool) "not blocked" true (Option.is_none blocked);
   check_keeper_board_post_sources_preserved forwarded
+
+(* Regression: the board_list/search backends already read [compact]
+   (board_tool_post.ml handle_post_list_uncached, board_tool_handlers.ml
+   handle_search), but the keeper_board_* schemas omitted it, so
+   qa-king's keeper_board_list compact=true was rejected as an
+   unsupported field. Assert the keeper surface now accepts compact while
+   additionalProperties stays false (unknown fields still rejected). *)
+let test_validate_args_keeper_board_list_accepts_compact () =
+  match
+    Tool_input_validation.validate_args
+      ~schema:keeper_board_list_schema
+      ~name:"keeper_board_list"
+      ~args:(`Assoc [ "limit", `Int 5; "compact", `Bool false ])
+      ()
+  with
+  | Ok _ -> ()
+  | Error result ->
+    Alcotest.failf
+      "expected keeper_board_list compact arg to pass validation, got %s"
+      (Yojson.Safe.to_string (Tool_result.data result))
+
+let test_validate_args_keeper_board_search_accepts_compact () =
+  match
+    Tool_input_validation.validate_args
+      ~schema:keeper_board_search_schema
+      ~name:"keeper_board_search"
+      ~args:(`Assoc [ "query", `String "x"; "compact", `Bool false ])
+      ()
+  with
+  | Ok _ -> ()
+  | Error result ->
+    Alcotest.failf
+      "expected keeper_board_search compact arg to pass validation, got %s"
+      (Yojson.Safe.to_string (Tool_result.data result))
+
+(* Guard the other direction: a genuinely unknown field must still be
+   rejected (additionalProperties:false not loosened). *)
+let test_validate_args_keeper_board_list_rejects_unknown_field () =
+  match
+    Tool_input_validation.validate_args
+      ~schema:keeper_board_list_schema
+      ~name:"keeper_board_list"
+      ~args:(`Assoc [ "limit", `Int 5; "definitely_not_a_field", `Bool true ])
+      ()
+  with
+  | Ok forwarded ->
+    Alcotest.failf
+      "expected unknown field to be rejected, but it passed: %s"
+      (Yojson.Safe.to_string forwarded)
+  | Error _ -> ()
 
 let param_by_name name params =
   List.find_opt
@@ -1662,6 +1718,12 @@ let () =
         test_registered_hook_tool_edit_file_patch_args;
       Alcotest.test_case "keeper_board_post accepts sources array" `Quick
         test_registered_hook_keeper_board_post_accepts_sources_array;
+      Alcotest.test_case "keeper_board_list accepts compact" `Quick
+        test_validate_args_keeper_board_list_accepts_compact;
+      Alcotest.test_case "keeper_board_search accepts compact" `Quick
+        test_validate_args_keeper_board_search_accepts_compact;
+      Alcotest.test_case "keeper_board_list still rejects unknown field" `Quick
+        test_validate_args_keeper_board_list_rejects_unknown_field;
       Alcotest.test_case "tool_execute exposes typed boundary" `Quick
         test_tool_execute_schema_exposes_typed_boundary;
       Alcotest.test_case "tool_execute rejects empty args with class" `Quick

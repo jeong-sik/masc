@@ -690,6 +690,43 @@
           "showLegend": true
         }
       }
+    },
+    {
+      "type": "traces",
+      "title": "Recent Traces",
+      "gridPos": {
+        "x": 0,
+        "y": 96,
+        "w": 24,
+        "h": 16
+      },
+      "datasource": {
+        "type": "jaeger",
+        "uid": "PC9A941E8F2E49454"
+      },
+      "description": "Recent distributed traces from the masc service.",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "jaeger",
+            "uid": "PC9A941E8F2E49454"
+          },
+          "queryType": "search",
+          "service": "masc",
+          "operation": "",
+          "tags": "",
+          "minDuration": "",
+          "maxDuration": "",
+          "limit": 20
+        }
+      ],
+      "options": {
+        "sort": {
+          "sortBy": "startTime",
+          "sortOrder": "desc"
+        }
+      }
     }
   ],
   "refresh": "30s",

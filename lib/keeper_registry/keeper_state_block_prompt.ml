@@ -17,9 +17,9 @@ let instruction_text =
   String.concat "\n"
     [
       Printf.sprintf
-        "For non-direct keeper turns, report continuity using the [STATE] block \
-         at the end of your response. Fields: %s. All fields are optional but \
-         provide as many as you can."
+        "State block template: for non-direct keeper turns, report continuity \
+         using the [STATE] block at the end of your response. Fields: %s. All \
+         fields are optional but provide as many as you can."
         field_summary;
       template_text;
     ]

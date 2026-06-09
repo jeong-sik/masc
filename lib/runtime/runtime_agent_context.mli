@@ -77,8 +77,25 @@ type config = {
   exit_condition : (int -> bool) option;
   exit_condition_result : (int -> stop_reason * string option) option;
   summarizer : (Agent_sdk.Types.message list -> string) option;
+  execution_idle_timeout_s : float option;
+      (** Per-run inactivity deadline forwarded to OAS
+          [Builder.with_execution_idle_timeout]. Resets on each unit of
+          progress (streamed token or completed turn) and fires only on
+          genuine silence, surfacing [Error.AgentExecutionIdleTimeout].
+          Unlike [max_execution_time_s] (total wall-clock), this never
+          cancels a run that is still producing output.
+          @since 0.201.0 OAS *)
+  thinking_budget : int option;
+      (** Token budget for extended thinking, forwarded to OAS
+          [Builder.with_thinking_budget]. Only meaningful when
+          [enable_thinking = Some true]. *)
+  min_p : float option;
+      (** Minimum probability threshold for nucleus sampling, forwarded
+          to OAS [Builder.with_min_p]. [None] leaves the provider default
+          intact; [Some 0.0] is a no-op and some providers (Groq, GLM)
+          reject the field, so leave [None] unless explicitly needed. *)
 }
-(** Per-worker configuration.  47 fields — concrete record because
+(** Per-worker configuration.  50 fields — concrete record because
     callers ({!Runtime_agent}, keeper workers) construct + tweak
     fields field-by-field at the dispatch site. *)
 

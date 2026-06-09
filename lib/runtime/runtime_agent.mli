@@ -83,6 +83,9 @@ type config = Runtime_agent_context.config = {
   exit_condition : (int -> bool) option;
   exit_condition_result : (int -> stop_reason * string option) option;
   summarizer : (Agent_sdk.Types.message list -> string) option;
+  execution_idle_timeout_s : float option;
+  thinking_budget : int option;
+  min_p : float option;
 }
 
 val default_config :

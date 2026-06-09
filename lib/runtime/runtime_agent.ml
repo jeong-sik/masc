@@ -65,6 +65,9 @@ type config =
           Emergency-phase compaction. Defaults to OAS's extractive
           default. Keeper workers inject [Keeper_summarizer.keeper_summarizer]
           to scrub [STATE] blocks before the 100-char truncation. *)
+  execution_idle_timeout_s : float option;
+  thinking_budget : int option;
+  min_p : float option;
 }
 
 let default_config = Runtime_agent_context.default_config

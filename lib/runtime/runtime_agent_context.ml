@@ -80,6 +80,22 @@ type config =
           Emergency-phase compaction. Defaults to OAS's extractive
           default. Keeper workers inject [Keeper_summarizer.keeper_summarizer]
           to scrub [STATE] blocks before the 100-char truncation. *)
+  ; execution_idle_timeout_s : float option
+    (** Per-run inactivity deadline forwarded to OAS
+        [Builder.with_execution_idle_timeout]. Resets on each unit of
+        progress (streamed token or completed turn) and fires only on
+        genuine silence, surfacing [Error.AgentExecutionIdleTimeout].
+        Unlike [max_execution_time_s] (total wall-clock), this never
+        cancels a run that is still producing output.
+        @since 0.201.0 OAS *)
+  ; thinking_budget : int option
+    (** Token budget for extended thinking, forwarded to OAS
+        [Builder.with_thinking_budget]. Only meaningful when
+        [enable_thinking = Some true]. *)
+  ; min_p : float option
+    (** Minimum probability threshold for nucleus sampling, forwarded
+        to OAS [Builder.with_min_p]. [None] leaves the provider default;
+        [Some 0.0] is a no-op and some providers reject the field. *)
   }
 
 let default_config
@@ -132,6 +148,9 @@ let default_config
   ; exit_condition = None
   ; exit_condition_result = None
   ; summarizer = None
+  ; execution_idle_timeout_s = None
+  ; thinking_budget = None
+  ; min_p = None
   }
 ;;
 
@@ -283,6 +302,26 @@ let builder_without_approval
   let builder =
     match config.summarizer with
     | Some s -> Agent_sdk.Builder.with_summarizer s builder
+    | None -> builder
+  in
+  let builder =
+    match config.execution_idle_timeout_s with
+    | Some s -> Agent_sdk.Builder.with_execution_idle_timeout s builder
+    | None -> builder
+  in
+  let builder =
+    match config.thinking_budget with
+    | Some budget -> Agent_sdk.Builder.with_thinking_budget budget builder
+    | None -> builder
+  in
+  let builder =
+    match config.min_p with
+    | Some min_p -> Agent_sdk.Builder.with_min_p min_p builder
+    | None -> builder
+  in
+  let builder =
+    match config.event_bus with
+    | Some bus -> Agent_sdk.Builder.with_event_bus bus builder
     | None -> builder
   in
   match transport with

@@ -241,6 +241,30 @@ let test_read_missing_file_preflight_errors () =
          in
          loop 0)
 
+(* Read on a directory must point the keeper at a tool that actually
+   exists. The old message said "use the currently exposed read/listing
+   tools" without naming one; since #20594 exposed op on the search tool,
+   the message now names Grep op='ls' (and Execute ls). Guards against the
+   message regressing to a phantom-tool reference. *)
+let test_read_directory_names_a_real_listing_tool () =
+  let base, config, meta = setup_config "minjae" in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
+  let dir_path = Filename.concat host_root "mind/somedir" in
+  ensure_dir dir_path;
+  match
+    Keeper_sandbox_read_backend.read_file ~config ~meta ~host_path:dir_path
+      ~max_bytes:4096 ~timeout_sec:5.0 ()
+  with
+  | Ok _ -> Alcotest.fail "expected path_is_directory error for a directory"
+  | Error msg ->
+      Alcotest.(check bool) "error reports path_is_directory" true
+        (contains_substring msg "path_is_directory");
+      Alcotest.(check bool)
+        "error names a real listing tool (op='ls')"
+        true
+        (contains_substring msg "op='ls'")
+
 (* ── run_command error paths
    (exercised without invoking docker) ──────────────────────────── *)
 
@@ -1334,6 +1358,8 @@ let run_tests ~clock () =
             `Quick test_read_outside_playground_returns_mapping_error;
           Alcotest.test_case "missing file preflight errors" `Quick
             test_read_missing_file_preflight_errors;
+          Alcotest.test_case "directory read names a real listing tool" `Quick
+            test_read_directory_names_a_real_listing_tool;
         ] );
       ( "run_command",
         [

@@ -36,6 +36,8 @@ import { navigate, route } from '../../router'
 import { activeKeeperName } from '../../keeper-state'
 import { keepers } from '../../store'
 import { connected } from '../../sse'
+import { dashboardBearerToken } from '../../api/core'
+import { devTokenBootstrapStatus } from '../../api/dev-token'
 import { dashboardWsOnlyEnabled } from '../../dashboard-ws-cutover'
 import { dashboardWsConnected, dashboardWsSseFallbackActive } from '../../dashboard-ws-state'
 import type { Repository } from '../../api/repositories'
@@ -59,6 +61,7 @@ export interface IdeStatusbarChip {
 
 export interface IdeStatusbarModel {
   readonly workspaceLabel: string
+  readonly workspaceBasePath: string | null
   readonly chips: ReadonlyArray<IdeStatusbarChip>
   readonly connectionLabel: string
   readonly connectionTone: IdeConnectionTone
@@ -98,6 +101,7 @@ interface IdeStatusbarInput {
   readonly repositories?: ReadonlyArray<Repository>
   readonly activeRepositoryId?: string | null
   readonly workspaceSource?: WorkspaceSource
+  readonly workspaceBasePath?: string | null
   readonly dashboardConnected?: boolean
 }
 
@@ -229,6 +233,29 @@ function dashboardRuntimeConnected(): boolean {
   return connected.value
 }
 
+/**
+ * Derive a human-readable label for the disconnected state so the statusbar
+ * tells the user *why* rather than just "reconnecting".
+ */
+function disconnectionReasonLabel(): string {
+  const hasToken = !!dashboardBearerToken()
+  const bootstrap = devTokenBootstrapStatus.value
+
+  if (!hasToken && bootstrap === 'no_endpoint') {
+    return 'runtime · auth required'
+  }
+  if (!hasToken && bootstrap === 'network') {
+    return 'runtime · server unreachable'
+  }
+  if (!hasToken && bootstrap === 'fetching') {
+    return 'runtime · bootstrapping...'
+  }
+  if (!hasToken) {
+    return 'runtime · no token'
+  }
+  return 'runtime · reconnecting'
+}
+
 function statusbarLayerLabel(activeLayers: ReadonlySet<string>): string | null {
   if (activeLayers.size === 0) return null
   const labels = STATUSBAR_LAYER_PRIORITY
@@ -306,6 +333,7 @@ export function deriveIdeStatusbarModel({
   repositories,
   activeRepositoryId,
   workspaceSource,
+  workspaceBasePath = null,
   dashboardConnected = false,
 }: IdeStatusbarInput): IdeStatusbarModel {
   const chips: IdeStatusbarChip[] = []
@@ -374,8 +402,11 @@ export function deriveIdeStatusbarModel({
 
   return {
     workspaceLabel: statusbarWorkspaceLabel(repositories, activeRepositoryId, workspaceSource),
+    workspaceBasePath,
     chips,
-    connectionLabel: dashboardConnected ? 'runtime · live' : 'runtime · reconnecting',
+    connectionLabel: dashboardConnected
+      ? 'runtime · live'
+      : disconnectionReasonLabel(),
     connectionTone: dashboardConnected ? 'ok' : 'warn',
   }
 }
@@ -434,6 +465,10 @@ export function IdeShell() {
   const workspaceSource = useSubscribedValue(
     workspaceStore.workspaceSource,
     workspaceStore.subscribeWorkspaceSource,
+  )
+  const workspaceBasePath = useSubscribedValue(
+    workspaceStore.workspaceBasePath,
+    workspaceStore.subscribeWorkspaceBasePath,
   )
   const [activeFilePath, setActiveFilePath] = useState(activeIdeFile.value)
 
@@ -547,6 +582,7 @@ export function IdeShell() {
     repositories,
     activeRepositoryId,
     workspaceSource,
+    workspaceBasePath,
     dashboardConnected: dashboardRuntimeConnected(),
   })
 
@@ -622,6 +658,9 @@ export function IdeShell() {
           class="chip sm is-brass"
           style=${{ flexShrink: 0 }}
           data-testid="ide-statusbar-workspace"
+          title=${statusbar.workspaceBasePath
+            ? `base_path: ${statusbar.workspaceBasePath} (set MASC_BASE_PATH to change)`
+            : undefined}
         >${statusbar.workspaceLabel}</span>
         <div
           class="ide-plane-statusbar-meta"

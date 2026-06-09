@@ -7,6 +7,7 @@ export type { WorkspaceSource } from './workspace-source'
 export interface WorkspaceTreeResult {
   readonly nodes: ReadonlyArray<FileTreeNode>
   readonly source: WorkspaceSource
+  readonly basePath: string | null
 }
 
 // --- Blame ---
@@ -65,6 +66,7 @@ export async function fetchWorkspaceTree(
   return {
     nodes: data,
     source: parseWorkspaceSource(headers.get('X-Workspace-Source')),
+    basePath: headers.get('X-Workspace-Base-Path'),
   }
 }
 

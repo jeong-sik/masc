@@ -121,10 +121,11 @@ let test_dispatch_unknown () =
   Alcotest.(check bool) "unknown returns None" true (result = None);
   )
 
-let test_dispatch_agents () =
+let test_dispatch_agents_removed () =
   with_ctx (fun ctx ->
+  (* masc_agents removed (2026-06-09): dead agent-status surface. *)
   let result = Tool_agent.dispatch ctx ~name:"masc_agents" ~args:(`Assoc []) in
-  Alcotest.(check bool) "agents dispatches" true (result <> None);
+  Alcotest.(check bool) "agents removed" true (result = None);
   )
 
 let test_dispatch_register_capabilities_removed () =
@@ -139,10 +140,11 @@ let test_dispatch_collaboration_graph_removed () =
   Alcotest.(check bool) "collaboration graph removed" true (result = None);
   )
 
-let test_dispatch_agent_update () =
+let test_dispatch_agent_update_removed () =
   with_ctx (fun ctx ->
+  (* masc_agent_update removed (2026-06-09): dead agent-status surface. *)
   let result = Tool_agent.dispatch ctx ~name:"masc_agent_update" ~args:(`Assoc []) in
-  Alcotest.(check bool) "agent_update dispatches" true (result <> None);
+  Alcotest.(check bool) "agent_update removed" true (result = None);
   )
 
 let test_dispatch_agent_card () =
@@ -152,16 +154,8 @@ let test_dispatch_agent_card () =
   )
 
 
-(* ============================================================
-   Handler tests — masc_agents
-   ============================================================ *)
-
-let test_handle_agents () =
-  with_ctx (fun ctx ->
-  let result = Tool_agent.handle_agents ctx (`Assoc []) in
-  Alcotest.(check bool) "agents succeeds" true (Tool_result.is_success result);
-  Alcotest.(check bool) "has response" true (String.length (Tool_result.message result) > 0);
-  )
+(* test_handle_agents removed (2026-06-09): handle_agents deleted with the
+   dead agent-status surface. *)
 
 let test_handle_agent_card () =
   with_ctx (fun ctx ->
@@ -185,23 +179,8 @@ let test_handle_agent_card_rejects_unknown_action () =
     (String.contains (Tool_result.message result) 'b');
   )
 
-(* ============================================================
-   Handler tests — agent_update
-   ============================================================ *)
-
-let test_agent_update_status () =
-  with_ctx (fun ctx ->
-  let args = `Assoc [("status", `String "busy")] in
-  let result = Tool_agent.handle_agent_update ctx args in
-  Alcotest.(check bool) "has response" true (String.length (Tool_result.message result) > 0);
-  )
-
-let test_agent_update_capabilities () =
-  with_ctx (fun ctx ->
-  let args = `Assoc [("capabilities", `List [`String "review"; `String "refactor"])] in
-  let result = Tool_agent.handle_agent_update ctx args in
-  Alcotest.(check bool) "has response" true (String.length (Tool_result.message result) > 0);
-  )
+(* agent_update handler tests removed (2026-06-09): handle_agent_update deleted
+   with the dead agent-status surface. *)
 
 (* ============================================================
    Handler tests — get_metrics
@@ -405,23 +384,20 @@ let () =
   Alcotest.run "Tool_agent" [
     ("dispatch", [
       Alcotest.test_case "unknown returns None" `Quick test_dispatch_unknown;
-      Alcotest.test_case "agents dispatches" `Quick test_dispatch_agents;
+      Alcotest.test_case "agents removed" `Quick test_dispatch_agents_removed;
       Alcotest.test_case "register_capabilities removed" `Quick
         test_dispatch_register_capabilities_removed;
       Alcotest.test_case "collaboration_graph removed" `Quick
         test_dispatch_collaboration_graph_removed;
-      Alcotest.test_case "agent_update dispatches" `Quick test_dispatch_agent_update;
+      Alcotest.test_case "agent_update removed" `Quick test_dispatch_agent_update_removed;
       Alcotest.test_case "agent_card dispatches" `Quick test_dispatch_agent_card;
     ]);
     ("agents", [
-      Alcotest.test_case "handle_agents" `Quick test_handle_agents;
       Alcotest.test_case "handle_agent_card" `Quick test_handle_agent_card;
       Alcotest.test_case "handle_agent_card rejects unknown action" `Quick
         test_handle_agent_card_rejects_unknown_action;
     ]);
     ("agent_update", [
-      Alcotest.test_case "status update" `Quick test_agent_update_status;
-      Alcotest.test_case "capabilities update" `Quick test_agent_update_capabilities;
       Alcotest.test_case "no agents" `Quick test_agent_fitness_no_agents;
       Alcotest.test_case "specific agent" `Quick test_agent_fitness_specific;
     ]);

@@ -571,10 +571,11 @@ let run_turn
                  receipt_model_used_ref := Some model;
                  receipt_stop_reason_ref := Some result.stop_reason;
                  receipt_runtime_observation_ref := result.runtime_observation;
-                 Keeper_agent_run_thinking_trajectory.persist_response_content
-                   ~keeper_name:meta.name
-                   ~trajectory_acc
-                   result.response.content;
+                 (* Thinking is now persisted per-turn inside the after_turn
+                    hook (Keeper_hooks_oas), untruncated, for EVERY turn. The
+                    old post-run single-shot capture here saved only the final
+                    turn's reasoning and would double-write the terminal turn
+                    now, so it was removed. *)
                  let actual_keeper_tool_names =
                    Keeper_agent_result.tool_names_of_calls (List.rev acc.tool_calls)
                  in

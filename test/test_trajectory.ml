@@ -550,6 +550,67 @@ let test_read_entries_since_no_dir () =
 (* Runner                                                            *)
 (* ================================================================ *)
 
+(* ================================================================ *)
+(* Test: thinking trajectory — full untruncated text, per-turn        *)
+(* ================================================================ *)
+
+let read_thinking_jsonl ~masc_root ~keeper_name ~trace_id =
+  let path = Filename.concat masc_root
+    (Printf.sprintf "trajectories/%s/%s.jsonl" keeper_name trace_id) in
+  if not (Sys.file_exists path) then []
+  else begin
+    let ic = open_in path in
+    Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+      let rec loop acc =
+        match input_line ic with
+        | line -> loop (Yojson.Safe.from_string line :: acc)
+        | exception End_of_file -> List.rev acc
+      in
+      loop [])
+  end
+
+(* append_thinking must persist the FULL text, not the legacy 2000-byte cap. *)
+let test_append_thinking_persists_untruncated () =
+  with_tmpdir (fun dir ->
+    let big = String.make 9000 'x' in
+    let entry : Trajectory.thinking_entry = {
+      ts = 1000.0; ts_iso = "2026-06-09T00:00:00Z"; turn = 4;
+      content = big; content_length = String.length big; redacted = false;
+    } in
+    Trajectory.append_thinking ~masc_root:dir ~keeper_name:"k" ~trace_id:"th1" entry;
+    let lines = read_thinking_jsonl ~masc_root:dir ~keeper_name:"k" ~trace_id:"th1" in
+    Alcotest.(check int) "one thinking line" 1 (List.length lines);
+    let open Yojson.Safe.Util in
+    let row = List.hd lines in
+    Alcotest.(check string) "type=thinking" "thinking" (row |> member "type" |> to_string);
+    Alcotest.(check int) "content untruncated (9000B, not 2000 cap)" 9000
+      (row |> member "content" |> to_string |> String.length);
+    Alcotest.(check int) "content_length records true length" 9000
+      (row |> member "content_length" |> to_int))
+
+(* persist_response_content stamps every block with the hook's ~turn (not
+   acc.turn) and writes one line per thinking block, untruncated. *)
+let test_persist_response_content_per_turn_full () =
+  with_tmpdir (fun dir ->
+    let acc = Trajectory.create_accumulator
+      ~masc_root:dir ~keeper_name:"k" ~trace_id:"th2" ~generation:0 () in
+    (* acc.turn stays 0; the hook passes ~turn:11 — assert ~turn wins. *)
+    let big = String.make 5000 'a' in
+    let content = [
+      Agent_sdk.Types.Thinking { thinking_type = "reasoning"; content = big };
+      Agent_sdk.Types.Thinking { thinking_type = "reasoning"; content = "second block" };
+    ] in
+    Keeper_agent_run_thinking_trajectory.persist_response_content
+      ~keeper_name:"k" ~trajectory_acc:(Some acc) ~turn:11 content;
+    let lines = read_thinking_jsonl ~masc_root:dir ~keeper_name:"k" ~trace_id:"th2" in
+    let open Yojson.Safe.Util in
+    Alcotest.(check int) "both thinking blocks persisted" 2 (List.length lines);
+    List.iter (fun row ->
+      Alcotest.(check int) "turn stamped from hook (11), not acc.turn (0)" 11
+        (row |> member "turn" |> to_int)) lines;
+    Alcotest.(check int) "first block untruncated (5000B)" 5000
+      (List.hd lines |> member "content" |> to_string |> String.length))
+
 let () =
   Alcotest.run "Trajectory" [
     ("tool_cost", [
@@ -609,5 +670,11 @@ let () =
       Alcotest.test_case "parses persisted gate summary" `Quick
         test_read_entries_since_result_parses_gate_summary;
       Alcotest.test_case "nonexistent directory" `Quick test_read_entries_since_no_dir;
+    ]);
+    ("thinking_trajectory", [
+      Alcotest.test_case "append_thinking persists full untruncated text" `Quick
+        test_append_thinking_persists_untruncated;
+      Alcotest.test_case "persist_response_content stamps hook turn, all blocks" `Quick
+        test_persist_response_content_per_turn_full;
     ]);
   ]

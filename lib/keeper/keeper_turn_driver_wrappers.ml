@@ -31,7 +31,6 @@ let config_for_label
     ?guardrails
     ?hooks
     ?context_reducer
-    ?tool_retry_policy
     ?enable_thinking
     ?compact_ratio
     ?approval
@@ -55,7 +54,6 @@ let config_for_label
       guardrails;
       hooks;
       context_reducer;
-      tool_retry_policy;
       enable_thinking;
       description;
       compact_ratio;
@@ -84,7 +82,6 @@ let run_model_by_label
     ?guardrails
     ?hooks
     ?context_reducer
-    ?tool_retry_policy
     ?enable_thinking
     ?compact_ratio
     ?on_event
@@ -98,7 +95,6 @@ let run_model_by_label
     config_for_label ~name:"oas-label-model" ~model_label ~system_prompt
       ~tools ~max_tokens ?max_input_tokens ?max_cost_usd ~temperature
       ~max_idle_turns ?stream_idle_timeout_s ?guardrails ?hooks ?context_reducer
-      ?tool_retry_policy
       ?enable_thinking
       ?compact_ratio
       ~description:(Some (Printf.sprintf "model_label:%s" model_label))
@@ -170,7 +166,6 @@ let run_named_with_masc_tools
     ?(accept = fun (_ : Agent_sdk_response.api_response) -> true)
     ?guardrails
     ?hooks
-    ?tool_retry_policy
     ?raw_trace
     ?on_event
     ?on_yield
@@ -192,7 +187,6 @@ let run_named_with_masc_tools
   Keeper_turn_driver.run_named ~runtime_id ~goal ?priority ~system_prompt ~tools:oas_tools
     ~temperature ~max_tokens ?max_input_tokens ?max_cost_usd
     ?stream_idle_timeout_s ?wait_timeout_sec ?guardrails ?hooks
-    ?tool_retry_policy
     ~accept
     ?compact_ratio
     ?approval
@@ -213,7 +207,6 @@ let run_model_with_masc_tools
     ?wait_timeout_sec
     ?guardrails
     ?hooks
-    ?tool_retry_policy
     ?enable_thinking
     ?compact_ratio
     ?raw_trace
@@ -227,7 +220,7 @@ let run_model_with_masc_tools
   let* config =
     config_for_label ~name:"oas-explicit-model" ~model_label ~system_prompt
       ~tools:[] ~max_tokens ?max_input_tokens ?max_cost_usd ~temperature
-      ?stream_idle_timeout_s ?guardrails ?hooks ?tool_retry_policy ?enable_thinking
+      ?stream_idle_timeout_s ?guardrails ?hooks ?enable_thinking
       ?compact_ratio
       ~description:(Some (Printf.sprintf "model_label:%s" model_label))
       ()

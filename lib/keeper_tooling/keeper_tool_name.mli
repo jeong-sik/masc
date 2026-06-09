@@ -56,12 +56,6 @@ val to_string : t -> string
 val of_string : string -> t option
 val pp : Format.formatter -> t -> unit
 
-(** Public MCP-client names still accepted while runtime descriptors project
-    keeper-owned tools onto the public MCP surface. *)
-val legacy_masc_broadcast_name : string
-
-val legacy_masc_deliver_name : string
-
 (** Public MCP names intentionally served outside the keeper descriptor spine.
     Keep this exact allowlist on the keeper side so prefix canonicalisation
     does not depend on the MCP catalog hand-list. *)

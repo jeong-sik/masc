@@ -154,12 +154,10 @@ let of_string = function
 let pp fmt t = Format.pp_print_string fmt (to_string t)
 ;;
 
-let legacy_masc_broadcast_name = "masc_broadcast"
-let legacy_masc_deliver_name = "masc_deliver"
 
 let public_mcp_non_descriptor_names =
   [ "masc_start"
-  ; legacy_masc_broadcast_name
+  ; "masc_broadcast"
   ; "masc_messages"
   ; "masc_keeper_sandbox_status"
   ; "masc_keeper_create_from_persona"
@@ -217,34 +215,10 @@ let is_keeper_board_tool = function
   | Voice_speak -> false
 ;;
 
-let legacy_masc_board_surface_names =
-  [ "masc_board_cleanup"
-  ; "masc_board_comment"
-  ; "masc_board_comment_vote"
-  ; "masc_board_curation_read"
-  ; "masc_board_curation_submit"
-  ; "masc_board_delete"
-  ; "masc_board_post_get"
-  ; "masc_board_hearths"
-  ; "masc_board_list"
-  ; "masc_board_post"
-  ; "masc_board_profile"
-  ; "masc_board_reaction"
-  ; "masc_board_search"
-  ; "masc_board_stats"
-  ; "masc_board_sub_board_create"
-  ; "masc_board_sub_board_delete"
-  ; "masc_board_sub_board_get"
-  ; "masc_board_sub_board_list"
-  ; "masc_board_sub_board_update"
-  ; "masc_board_vote"
-  ]
-;;
-
 let is_board_surface_name name =
   match of_string name with
   | Some tool -> is_keeper_board_tool tool
-  | None -> List.mem name legacy_masc_board_surface_names
+  | None -> String.starts_with ~prefix:"masc_board_" name
 ;;
 
 let strip_mcp_masc_prefix name =

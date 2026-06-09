@@ -11,8 +11,6 @@ type t =
   | Shell_command_input
 
 
-let legacy_masc_broadcast_name = "masc_broadcast"
-let legacy_masc_keeper_msg_name = "masc_keeper_msg"
 
 let canonical_tool_name name =
   let stripped = Keeper_tool_alias.strip_mcp_masc_prefix name in
@@ -34,8 +32,8 @@ let claim_task_tool_names =
 let board_activity_tool_names =
   [ Keeper_tool_name.(to_string Board_post)
   ; Keeper_tool_name.(to_string Board_comment)
-  ; legacy_masc_broadcast_name
-  ; legacy_masc_keeper_msg_name
+  ; "masc_broadcast"
+  ; "masc_keeper_msg"
   ]
 ;;
 

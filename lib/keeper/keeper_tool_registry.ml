@@ -253,7 +253,7 @@ let reconcile_safe_tools =
         ; Board_comment_vote
         ; Board_curation_submit
         ]
-  @ [ Keeper_tool_name.legacy_masc_broadcast_name ]
+  @ [ "masc_broadcast" ]
 ;;
 
 let reconcile_safe_set : (string, unit) Hashtbl.t =

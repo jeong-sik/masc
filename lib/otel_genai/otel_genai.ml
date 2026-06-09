@@ -229,5 +229,14 @@ let with_keeper_turn_span
     Otel_spans.with_span
       ~name:(keeper_turn_span_name ~keeper_name)
       ~attrs
+      (* Force a fresh trace root per keeper turn. Without this the keeper-turn
+         span inherits the ambient trace context, and many turns from different
+         keepers accumulate under one trace. Observed on a production trace:
+         19 invoke_agent spans in a single trace, with mixed structure (some a
+         real root, others referencing a parent span absent from the trace).
+         Mirrors the tool-dispatch boundary fix (one trace root per operation,
+         #20581). Tool dispatches already start their own trace, so this does
+         not lose a parent/child link that previously existed. *)
+      ~force_new_trace_id:true
       (fun _trace_id -> f ()))
 ;;

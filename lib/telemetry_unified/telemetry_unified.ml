@@ -549,7 +549,7 @@ let read_execution_receipts ~masc_root ?keeper_name ?since_ts ?until_ts ~n ()
         [])
     dirs
 
-let read_trajectory_file path ?since_ts ?until_ts () =
+let read_trajectory_file path ~max_lines ?since_ts ?until_ts () =
   if
     not
       (is_jsonl_file Trajectory_tool_call
@@ -560,8 +560,15 @@ let read_trajectory_file path ?since_ts ?until_ts () =
       ~default:[] (fun () ->
       let parse_error_count = ref 0 in
       let entries =
-        Fs_compat.load_file path
-        |> String.split_on_char '\n'
+        (* Tail-bounded read: trajectory trace files grow append-only (one
+           measured at 12MB); [load_file] parsed the whole file on the keeper
+           Eio domain. Measured post-#20659/#20662: the trajectory source was
+           ~6.9s of an 8.3s /telemetry request — the dominant keeper-fleet
+           freeze cost, since [read_trajectory_tool_calls] ignored its [n] and
+           full-parsed every trace. Read only the newest [max_lines] from the
+           tail; trajectories are append-ordered so the tail is the recent
+           window the dashboard polls. *)
+        Dated_jsonl.load_tail_lines path ~max_lines
         |> List.filter_map (fun line ->
              let line = String.trim line in
              if line = "" then None
@@ -592,6 +599,11 @@ let read_trajectory_tool_calls ~masc_root ?keeper_name ?since_ts ?until_ts ~n ()
     | None -> dirs
     | Some name -> List.filter (fun (k, _) -> String.equal k name) dirs
   in
+  (* Bound the per-file tail read. A non-positive [n] ("unlimited") clamps to
+     [unbounded_window_scan_cap] so no trace file is full-parsed. The final
+     [take_first n] still trims the merged set; this only stops the read itself
+     from being unbounded (the freeze cause). *)
+  let max_lines = if n <= 0 then unbounded_window_scan_cap else n in
   let entries =
     List.concat_map
       (fun (_name, dir) ->
@@ -603,7 +615,7 @@ let read_trajectory_tool_calls ~masc_root ?keeper_name ?since_ts ?until_ts ~n ()
           |> List.concat_map (fun name ->
                read_trajectory_file
                  (Filename.concat dir name)
-                 ?since_ts ?until_ts ())))
+                 ~max_lines ?since_ts ?until_ts ())))
       dirs
   in
   let entries = sort_newest_first entries in
@@ -771,7 +783,8 @@ let trajectory_tool_call_summary_stats ~masc_root =
              |> Array.to_list
              |> List.filter (fun name -> Filename.check_suffix name ".jsonl")
              |> List.concat_map (fun name ->
-                  read_trajectory_file (Filename.concat dir name) ()))
+                  read_trajectory_file (Filename.concat dir name)
+                    ~max_lines:unbounded_window_scan_cap ()))
          in
          ( count_acc + List.length entries,
            match latest_ts_of_entries entries with

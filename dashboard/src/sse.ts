@@ -67,6 +67,11 @@ export const journal = signal<JournalEntry[]>([])
 /** Increments each time SSE reconnects after a disconnect. */
 export const reconnectCount = signal(0)
 /** Timestamp of last disconnect (0 = never disconnected). */
+export type SseDisconnectReason = 'no_token' | 'transport_error' | null
+/** Why SSE is disconnected: null when connected or not yet attempted,
+ * 'no_token' when auth is required but no bearer token is available,
+ * 'transport_error' for network/server errors. */
+export const disconnectReason = signal<SseDisconnectReason>(null)
 export const lastDisconnectedAt = signal(0)
 
 // --- Session ID ---
@@ -247,8 +252,11 @@ export function normalizeSSEDispatchType(rawType: string): string {
 export function connectSSE(): void {
   disconnectSSE()
 
+  const hasToken = Boolean(dashboardBearerToken())
+  disconnectReason.value = hasToken ? null : 'no_token'
+
   const sseUrl = buildDashboardSseUrl(getOrCreateSessionId())
-  console.debug('[SSE] connecting', sseUrl)
+  console.debug('[SSE] connecting', sseUrl, hasToken ? '(with token)' : '(no token)')
   transport = createSseTransport(sseUrl, {
     retryBaseMs: RECONNECT_BASE_MS,
     retryMaxMs: RECONNECT_MAX_MS,
@@ -265,6 +273,7 @@ export function connectSSE(): void {
       }
       wasDisconnected = false
       connected.value = true
+      disconnectReason.value = null
     } else if (event.type === 'error' || event.type === 'close') {
       if (connected.value) {
         lastDisconnectedAt.value = Date.now()
@@ -272,6 +281,7 @@ export function connectSSE(): void {
       console.warn('[SSE] connection error, scheduling reconnect')
       wasDisconnected = true
       connected.value = false
+      disconnectReason.value = hasToken ? 'transport_error' : 'no_token'
     } else if (event.type === 'message') {
       const raw = event.data
       if (typeof raw !== 'object') {

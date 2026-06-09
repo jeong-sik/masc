@@ -35,7 +35,7 @@ import { routeLinksForContext } from './ide-context-lens'
 import { navigate, route } from '../../router'
 import { activeKeeperName } from '../../keeper-state'
 import { keepers } from '../../store'
-import { connected } from '../../sse'
+import { connected, disconnectReason, type SseDisconnectReason } from '../../sse'
 import { dashboardWsOnlyEnabled } from '../../dashboard-ws-cutover'
 import { dashboardWsConnected, dashboardWsSseFallbackActive } from '../../dashboard-ws-state'
 import type { Repository } from '../../api/repositories'
@@ -62,6 +62,7 @@ export interface IdeStatusbarModel {
   readonly chips: ReadonlyArray<IdeStatusbarChip>
   readonly connectionLabel: string
   readonly connectionTone: IdeConnectionTone
+  readonly connectionTitle: string
 }
 
 const IDE_LAYER_KINDS = new Set(IDE_LAYERS.map(layer => layer.kind))
@@ -99,6 +100,7 @@ interface IdeStatusbarInput {
   readonly activeRepositoryId?: string | null
   readonly workspaceSource?: WorkspaceSource
   readonly dashboardConnected?: boolean
+  readonly sseDisconnectReason?: SseDisconnectReason | null
 }
 
 function viewFromRoute(raw: string | null | undefined): ViewTab {
@@ -307,6 +309,7 @@ export function deriveIdeStatusbarModel({
   activeRepositoryId,
   workspaceSource,
   dashboardConnected = false,
+  sseDisconnectReason = null,
 }: IdeStatusbarInput): IdeStatusbarModel {
   const chips: IdeStatusbarChip[] = []
   const viewLabel = STATUSBAR_VIEW_LABELS[activeView]
@@ -372,11 +375,19 @@ export function deriveIdeStatusbarModel({
   addStatusbarChip(chips, 'telemetry', telemetry, 'info', 'Focused fleet telemetry')
   addStatusbarChip(chips, 'keeper', keeper ? `Keeper ${keeper}` : undefined, 'ok', 'Focused keeper')
 
+  const { connectionLabel, connectionTone, connectionTitle } =
+    dashboardConnected
+      ? { connectionLabel: 'runtime · live' as const, connectionTone: 'ok' as const, connectionTitle: 'SSE/WebSocket connected' }
+      : sseDisconnectReason === 'no_token'
+        ? { connectionLabel: 'runtime · auth required' as const, connectionTone: 'warn' as const, connectionTitle: 'SSE auth failed: no bearer token in session. Access the dashboard with ?token=... or log in first.' }
+        : { connectionLabel: 'runtime · reconnecting' as const, connectionTone: 'warn' as const, connectionTitle: 'SSE disconnected — reconnecting...' }
+
   return {
     workspaceLabel: statusbarWorkspaceLabel(repositories, activeRepositoryId, workspaceSource),
     chips,
-    connectionLabel: dashboardConnected ? 'runtime · live' : 'runtime · reconnecting',
-    connectionTone: dashboardConnected ? 'ok' : 'warn',
+    connectionLabel,
+    connectionTone,
+    connectionTitle,
   }
 }
 
@@ -548,6 +559,7 @@ export function IdeShell() {
     activeRepositoryId,
     workspaceSource,
     dashboardConnected: dashboardRuntimeConnected(),
+    sseDisconnectReason: disconnectReason.value,
   })
 
   useEffect(() => {
@@ -640,6 +652,7 @@ export function IdeShell() {
         <span
           class="ide-plane-connection"
           data-state=${statusbar.connectionTone}
+          title=${statusbar.connectionTitle}
         >● ${statusbar.connectionLabel}</span>
       </header>
       <${IdeToolbar}

@@ -107,7 +107,7 @@ export function escapeRegExp(value: string): string {
  * `components/runtime-inspector`, `components/runtime-waterfall`,
  * `components/excuse-patterns`,
  * `components/goal-loop-panel`, `components/goals/goal-tree`,
- * `components/handoff-timeline`, `components/ide/execute-output-drawer`,
+ * `components/ide/execute-output-drawer`,
  * `components/ide/interject-store`, `components/journey-panel`,
  * `components/keeper-chat-panel`, `components/keeper-reactivity-monitor`,
  * `components/keeper-spawn/keeper-spawn-state`,

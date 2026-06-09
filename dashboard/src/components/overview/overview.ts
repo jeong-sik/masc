@@ -16,7 +16,6 @@ import { TimeAgo } from '../common/time-ago'
 import { StatusDot } from '../common/status-dot'
 import type { KpiCellKind } from '../kpi-shared'
 import { KpiStripIsland } from '../kpi-strip-island'
-import { LifelineBar } from '../lifeline-bar'
 import { AgentAvatar } from './agent-avatar'
 import { missionSnapshot } from '../../mission-store'
 import { agents, tasks, keepers, messages, boardPosts } from '../../store'
@@ -549,34 +548,25 @@ function KeeperStrip({ keeperList }: { keeperList: readonly Keeper[] }) {
   }
 
   return html`
-    <${SectionCard} label="Fleet Lifeline" data-testid="overview-keepers">
-      <div class="space-y-4">
-        ${activeKeepers.slice(0, 1).map(
-          k => html`
-            <${LifelineBar}
-              label=${k.koreanName && k.koreanName !== '' ? k.koreanName : k.name}
-            />
-          `,
+    <${SectionCard} label="Active Keepers" data-testid="overview-keepers">
+      <ul class="flex flex-wrap gap-x-6 gap-y-2">
+        ${activeKeepers.map(
+          k => {
+            const displayStatus = keeperDisplayStatus(k)
+            return html`
+            <li key=${k.name} class="flex items-center gap-2">
+              <div class="min-w-0">
+                <p class="text-xs font-medium truncate">${k.koreanName && k.koreanName !== '' ? k.koreanName : k.name}</p>
+                ${k.last_heartbeat !== undefined
+                  ? html`<${TimeAgo} timestamp=${k.last_heartbeat} class="text-3xs text-[var(--color-fg-muted)]" />`
+                  : null}
+              </div>
+              <span class="${keeperPillClass(displayStatus)} text-3xs shrink-0">${keeperStatusLabel(displayStatus)}</span>
+            </li>
+            `
+          },
         )}
-        <ul class="flex flex-wrap gap-x-6 gap-y-2 border-t border-[var(--color-border-default)] pt-4">
-          ${activeKeepers.slice(1).map(
-            k => {
-              const displayStatus = keeperDisplayStatus(k)
-              return html`
-              <li key=${k.name} class="flex items-center gap-2">
-                <div class="min-w-0">
-                  <p class="text-xs font-medium truncate">${k.koreanName && k.koreanName !== '' ? k.koreanName : k.name}</p>
-                  ${k.last_heartbeat !== undefined
-                    ? html`<${TimeAgo} timestamp=${k.last_heartbeat} class="text-3xs text-[var(--color-fg-muted)]" />`
-                    : null}
-                </div>
-                <span class="${keeperPillClass(displayStatus)} text-3xs shrink-0">${keeperStatusLabel(displayStatus)}</span>
-              </li>
-              `
-            },
-          )}
-        </ul>
-      </div>
+      </ul>
     <//>
   `
 }

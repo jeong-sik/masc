@@ -115,9 +115,21 @@ let local_model_gate =
   }
 ;;
 
-(* Boundary: MASC selects the internal retry policy, but OAS owns
-   retry classification, feedback synthesis, and loop control. *)
-let default_internal_tool_retry_policy = Agent_sdk.Tool_retry_policy.default_internal
+(* MASC disables OAS tool-level retry. A tool failure (e.g. the model emitting
+   empty {} args for a required-arg tool) is returned to the model as a
+   tool_result so the turn loop self-corrects on the next turn. Previously
+   [default_internal] retried these (OAS classifies Validation_error as
+   Transient), exhausted the 2-retry budget, and the Exhausted branch turned the
+   failure into a turn-fatal Error; that accumulated to keeper crash via 10
+   consecutive turn failures. The turn loop (max_turns) already bounds repeated
+   tool calls, so tool-level retry was redundant. Root OAS fix tracked
+   separately: Tool_retry_policy.classify maps Validation_error to Transient and
+   should map it to Deterministic. *)
+let default_internal_tool_retry_policy =
+  { Agent_sdk.Tool_retry_policy.default_internal with
+    retry_on_validation_error = false
+  ; retry_on_recoverable_tool_error = false
+  }
 let default_gate_config () = { local_model_gate with denied_tools = [] }
 
 (* ================================================================ *)

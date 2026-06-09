@@ -154,11 +154,20 @@ let decide ~task_id ~task_opt ~notes ~handoff_context () =
   match (task_opt : Masc_domain.task option) with
   | Some t when Option.is_some t.contract ->
     if evidence_is_substantive ~notes ~handoff_context t.contract
-    then Pass
+    then begin
+      Log.Task.info "cdal_evidence_gate PASS task=%s notes_len=%d handoff_refs=%d"
+        task_id (String.length (String.trim notes))
+        (match handoff_context with None -> 0 | Some hc -> List.length hc.evidence_refs);
+      Pass
+    end
     else
       let unsatisfied =
         unsatisfied_required_evidence ~notes ~handoff_context t.contract
       in
+      Log.Task.warn "cdal_evidence_gate REJECT task=%s unsatisfied=%d notes_len=%d handoff_refs=%d rule=%s"
+        task_id (List.length unsatisfied) (String.length (String.trim notes))
+        (match handoff_context with None -> 0 | Some hc -> List.length hc.evidence_refs)
+        rule_id_evidence_incomplete;
       Reject
         { reason = reason_evidence_incomplete ~required_evidence:unsatisfied
         ; rule_id = rule_id_evidence_incomplete

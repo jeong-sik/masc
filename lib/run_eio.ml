@@ -38,7 +38,10 @@ let run_record_of_json (json : Yojson.Safe.t) : run_record option =
     Some { task_id; agent_name; plan; created_at; updated_at }
   | _ ->
     Otel_metric_store.inc_counter Otel_metric_store.metric_error_events ~labels:[("type", Error_event_type.(to_label Parsing))] ();
-    Log.Misc.error "run_of_json: missing required fields";
+    Log.Misc.error "run_of_json: missing required fields (task_id=%s created_at=%s updated_at=%s)"
+      (match task_id with Some s -> s | None -> "(absent)")
+      (match created_at with Some s -> s | None -> "(absent)")
+      (match updated_at with Some s -> s | None -> "(absent)");
     None
 
 let runs_dir (config : config) =

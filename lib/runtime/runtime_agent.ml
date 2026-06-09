@@ -296,6 +296,43 @@ let runtime_observation_for_completed_config ~total_duration_ms
     ~attempt_details_source:"runtime_agent_terminal"
     ()
 
+(* RFC-OAS-026 §4.6: [read_sse] arms the stream-idle deadline only when BOTH a
+   clock and the idle timeout are present. masc's clock derivation resolves to
+   [None] when the process runtime is uninitialised; a [None] clock with a
+   configured [stream_idle_timeout_s] would silently disarm the only
+   I2-legitimate streaming timeout and let a mid-stream stall hang to the
+   attempt watchdog (the exact silent no-op the RFC forbids). Fail loudly so a
+   wiring regression is visible. A [None] idle (the legitimate opt-out) with a
+   [None] clock stays [None]. Split into a pure decision over the two clock
+   sources so the failure path is testable without an Eio runtime. *)
+let decide_clock_for_idle
+    ~(stream_idle_timeout_s : float option)
+    ~(process_clock : (float Eio.Time.clock_ty Eio.Resource.t, string) result)
+    ~(ctx_clock : float Eio.Time.clock_ty Eio.Resource.t option)
+  : float Eio.Time.clock_ty Eio.Resource.t option =
+  match process_clock, ctx_clock with
+  | Ok c, _ -> Some c
+  | Error _, (Some _ as c) -> c
+  | Error e, None ->
+    (match stream_idle_timeout_s with
+     | Some idle ->
+       failwith
+         (Printf.sprintf
+            "runtime_agent: stream_idle_timeout_s configured (%.1fs) but no \
+             clock resolvable (%s); refusing to run with a silently disarmed \
+             stream idle timeout"
+            idle
+            e)
+     | None -> None)
+;;
+
+let resolve_clock_for_idle ~(stream_idle_timeout_s : float option) =
+  decide_clock_for_idle
+    ~stream_idle_timeout_s
+    ~process_clock:(Process_eio.get_clock ())
+    ~ctx_clock:(Eio_context.get_clock_opt ())
+;;
+
 module For_testing = struct
   let request_runtime_fields_on_base_config =
     request_runtime_fields_on_base_config
@@ -304,6 +341,7 @@ module For_testing = struct
   let runtime_id_of_config = runtime_id_of_config
   let runtime_observation_for_completed_config =
     runtime_observation_for_completed_config
+  let decide_clock_for_idle = decide_clock_for_idle
 end
 
 (* ================================================================ *)
@@ -362,9 +400,7 @@ let build
     ~(config : config)
   : (Agent_sdk.Agent.t, Agent_sdk.Error.sdk_error) result =
   let clock =
-    match Process_eio.get_clock () with
-    | Ok c -> Some c
-    | Error _ -> Eio_context.get_clock_opt ()
+    resolve_clock_for_idle ~stream_idle_timeout_s:config.stream_idle_timeout_s
   in
   match
     transport_for_provider
@@ -468,9 +504,7 @@ let resume_from_checkpoint
     ~(checkpoint : Agent_sdk.Checkpoint.t)
   : (Agent_sdk.Agent.t, Agent_sdk.Error.sdk_error) result =
   let clock =
-    match Process_eio.get_clock () with
-    | Ok c -> Some c
-    | Error _ -> Eio_context.get_clock_opt ()
+    resolve_clock_for_idle ~stream_idle_timeout_s:config.stream_idle_timeout_s
   in
   match
     transport_for_provider

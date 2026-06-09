@@ -1,22 +1,10 @@
-(** Tool execution handlers — command execution and structured Grep ops.
+(** Tool execution handlers — command execution and ripgrep search.
 
     Handles [Execute] (arbitrary commands with blocklist) and
-    [Grep] / [tool_search_files] (structured ops: ls, cat, find, rg,
-    head, tail, wc, tree, git-log, git-diff, git-status, pwd).
+    [Grep] / [tool_search_files] (ripgrep pattern search).
 
     Both tools default to the keeper playground unless an explicit
     allowed [cwd] is provided. *)
-
-(** Issue #8524: Variant SSOT for Grep op. Mirror in
-    [Tool_shard.tool_search_files_op_enum_strings] (cycle-aware, sync test
-    catches drift). *)
-type shell_op =
-  | Pwd | Ls | Cat | Rg | Git_status | Find | Head | Tail | Wc | Tree
-  | Git_log | Git_diff
-
-val shell_op_to_string : shell_op -> string
-val all_shell_ops : shell_op list
-val valid_shell_op_strings : string list
 
 val readonly_hint_of_category : string -> string
 (** Return the Good:/Bad: rewrite hint shown in

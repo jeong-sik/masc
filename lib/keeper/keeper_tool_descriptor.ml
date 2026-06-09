@@ -166,21 +166,6 @@ let property name typ description =
   name, `Assoc [ "type", `String typ; "description", `String description ]
 ;;
 
-(* String property constrained to a closed set of values. Use when the
-   accepted values are a finite, code-defined set so the schema is a
-   single source of truth with the runtime dispatch (parse, don't
-   validate): the model is told the exact options up front instead of
-   guessing a free-form string. [values] should be derived from the
-   runtime's own enumeration, never hand-listed. *)
-let property_enum name ~values description =
-  ( name
-  , `Assoc
-      [ "type", `String "string"
-      ; "enum", `List (List.map (fun v -> `String v) values)
-      ; "description", `String description
-      ] )
-;;
-
 let object_schema ?(required = []) properties =
   `Assoc
     [ "type", `String "object"
@@ -249,19 +234,12 @@ let write_file_schema =
 
 let search_files_schema =
   object_schema
-    ~required:[]
-    [ property_enum
-        "op"
-        ~values:Keeper_workspace_op.valid_strings
-        "Structured operation to run. Use op='ls' (or 'tree') to list a \
-         directory's contents, op='rg' to search file contents, op='cat' to \
-         read a file, op='git_status'/'git_log'/'git_diff' for git views. \
-         Defaults to 'rg' when a pattern is given."
-    ; property "pattern" "string" "Regular expression to search for (required when op is 'rg')."
+    ~required:[ "pattern" ]
+    [ property "pattern" "string" "Regular expression to search file contents for (ripgrep)."
     ; property
         "path"
         "string"
-        "Directory or file to search/list. Defaults to the keeper sandbox when omitted."
+        "Directory or file to search in. Defaults to the keeper sandbox when omitted."
     ; property "glob" "string" "Glob filter, e.g. '*.ml' or 'lib/**/*.ml'."
     ; property "type" "string" "Ripgrep file-type filter, e.g. 'ml', 'py'."
     ; property "-i" "boolean" "Case-insensitive search."
@@ -366,16 +344,17 @@ let translate_write_file input =
   | _ -> input
 ;;
 
+(* search_files is rg (pattern search) only. Fold -i into the pattern as a
+   (?i) prefix; pass pattern/path/glob/type through. *)
 let translate_search_files input =
   match input with
   | `Assoc fields ->
-    let has_op = List.mem_assoc "op" fields in
-    let out = ref (if has_op then [] else [ "op", `String "rg" ]) in
     let is_case_insensitive =
       match List.assoc_opt "-i" fields with
       | Some (`Bool true) -> true
       | _ -> false
     in
+    let out = ref [] in
     List.iter
       (fun (k, v) ->
          match k with
@@ -389,8 +368,6 @@ let translate_search_files input =
              else v
            in
            out := (k, v') :: !out
-         | "path" | "glob" | "type" -> out := (k, v) :: !out
-         | "op" -> out := (k, v) :: !out
          | "-i" -> ()
          | _ -> out := (k, v) :: !out)
       fields;
@@ -398,21 +375,8 @@ let translate_search_files input =
   | _ -> input
 ;;
 
-let search_files_op (input : Yojson.Safe.t) : string option =
-  match input with
-  | `Assoc fields ->
-    (match List.assoc_opt "op" fields with
-     | Some (`String s) -> Some (String.lowercase_ascii (String.trim s))
-     | _ -> None)
-  | _ -> None
-;;
-
-let search_files_readonly_of_input input =
-  match search_files_op input with
-  | Some op when List.mem op Keeper_workspace_op.valid_strings -> Some true
-  | Some _ -> None
-  | None -> None
-;;
+(* search_files is now rg (pattern search) only — always read-only. *)
+let search_files_readonly_of_input _input = Some true
 
 let descriptor_with_public_aliases
       ~public_aliases
@@ -511,10 +475,10 @@ let public_descriptors =
       ~public_aliases:[ "Search" ]
       ~internal_name:"tool_search_files"
       ~description:
-        "Inspect the project workspace through structured read-only operations. \
-         To list a directory's contents use op='ls' (or op='tree'); to search \
-         file contents use op='rg'; also supports file reads (op='cat') and \
-         scoped git status/log/diff views."
+        "Search file contents with ripgrep: provide a regex `pattern` (and \
+         optionally path/glob/type). To list a directory, read a file, or run \
+         git status/log/diff, use the Execute tool (e.g. executable='ls' \
+         argv=['-la','<path>'])."
       ~input_schema:search_files_schema
       ~policy:
         (policy
@@ -535,8 +499,8 @@ let public_descriptors =
       ~internal_name:"tool_read_file"
       ~description:
         "Read one existing file from the keeper sandbox or an allowed path with no \
-         implicit cwd. Read targets a single FILE; to list a directory's contents \
-         use Grep with op='ls'. Pass cwd explicitly for repo-relative reads. Read \
+         implicit cwd. Read targets a single FILE; to list a directory use the \
+         Execute tool with ls. Pass cwd explicitly for repo-relative reads. Read \
          never inherits Execute cwd."
       ~input_schema:read_file_schema
       ~policy:

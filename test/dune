@@ -63,6 +63,7 @@
   test_mcp_session_id_header
   test_keeper_sdk_error_typed_bridge
   test_keeper_status_bridge
+  test_keeper_diagnostic_stale_last_error
   test_read_drop_reason
   test_log_ring_encoder
   test_eio_context_fiber_local
@@ -318,6 +319,7 @@
   test_mcp_session_id_header
   test_keeper_sdk_error_typed_bridge
   test_keeper_status_bridge
+  test_keeper_diagnostic_stale_last_error
   test_read_drop_reason
   test_log_ring_encoder
   test_eio_context_fiber_local

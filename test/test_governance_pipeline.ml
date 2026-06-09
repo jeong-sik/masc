@@ -905,6 +905,7 @@ let test_tool_capabilities_unknown () =
 (* ── Runner ─────────────────────────────────────────────────── *)
 
 let () =
+  Unix.putenv "MASC_DISABLE_HITL" "false";
   Alcotest.run "Governance_pipeline" [
     "risk_assessment", [
       Alcotest.test_case "critical: delete" `Quick test_risk_critical_delete;

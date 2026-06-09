@@ -1029,6 +1029,7 @@ let test_callback_production_claimed_worktree_write_auto_approved () =
           ("sandbox_profile", `String "docker");
           ("network_mode", `String "inherit");
           ("current_task_id", `String "task-210");
+          ("always_approve", `Bool true);
         ])
   in
   let pending_before = AQ.pending_count () in
@@ -1351,6 +1352,7 @@ let test_runtime_trust_approval_read_model_filters_after_wide_scan () =
 (* ── Test runner ──────────────────────────────────────────── *)
 
 let () =
+  Unix.putenv "MASC_DISABLE_HITL" "false";
   Alcotest.run "HITL Approval" [
     ("risk_classification", [
       Alcotest.test_case "critical tools" `Quick test_risk_classification_critical;

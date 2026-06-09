@@ -75,19 +75,16 @@ let init_runtime_context env =
   (* MASC_MODEL_CATALOG as convenience alias for OAS_MODEL_CATALOG.
      OAS auto-discovers from ~/.masc/config/models.toml, cwd parents,
      and $OAS_MODEL_CATALOG. Setting MASC_MODEL_CATALOG forwards it
-     so masc operators don't need to know OAS internals. *)
+     so masc operators don't need to know OAS internals.
+     OAS lazily loads the catalog on first model capability query. *)
   (match Sys.getenv_opt "MASC_MODEL_CATALOG" with
    | Some path when Sys.getenv_opt "OAS_MODEL_CATALOG" = None ->
-     Unix.putenv "OAS_MODEL_CATALOG" path
-   | _ -> ());
-  let catalog = Agent_sdk.Model_catalog.global () in
-  (match catalog with
-   | Some entries ->
-     Log.Misc.info "model_catalog: %d entries loaded" (List.length entries)
+     Unix.putenv "OAS_MODEL_CATALOG" path;
+     Log.Misc.info "model_catalog: MASC_MODEL_CATALOG=%s forwarded to OAS" path
+   | Some _ ->
+     Log.Misc.info "model_catalog: OAS_MODEL_CATALOG already set, MASC_MODEL_CATALOG ignored"
    | None ->
-     Log.Misc.info
-       "model_catalog: no catalog found (set MASC_MODEL_CATALOG or \
-        place models.toml in ~/.masc/config/)");
+     ());
   (clock, mono_clock, net, domain_mgr, proc_mgr, fs)
 
 let metric_keeper_runtime_config_load_failures =

@@ -404,6 +404,7 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
     ; system_prompt = Some config.system_prompt
     ; temperature = Some config.temperature
     ; enable_thinking = config.enable_thinking
+    ; thinking_budget = config.thinking_budget
     ; cache_system_prompt = config.cache_system_prompt
     ; max_input_tokens = config.max_input_tokens
     ; max_total_tokens = None

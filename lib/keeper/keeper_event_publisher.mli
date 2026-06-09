@@ -129,3 +129,13 @@ val publish_audit_event :
     via SSE without polling.
 
     Shape: [{id, ts, actor, kind, target?, summary, severity, payload?}]. *)
+
+val publish_runtime_execution_built :
+  keeper_name:string ->
+  runtime_id:string ->
+  max_tokens:int ->
+  max_context:int ->
+  effective_budget:int ->
+  temperature:float ->
+  generation:int ->
+  unit

@@ -11,21 +11,6 @@ open Alcotest
 module Kmc = Masc.Keeper_meta_contract
 open Kmc
 
-let string_contains ~needle haystack =
-  let needle_len = String.length needle in
-  let haystack_len = String.length haystack in
-  if needle_len = 0
-  then true
-  else
-    let rec loop i =
-      if i + needle_len > haystack_len
-      then false
-      else
-        String.equal (String.sub haystack i needle_len) needle || loop (i + 1)
-    in
-    loop 0
-;;
-
 (* ── All variants listed exhaustively ──────────────────────────── *)
 
 (** Canonical list of all [blocker_class] variants.  When a new variant is
@@ -59,7 +44,6 @@ let all_variants : blocker_class list =
   ; Sdk_cost_budget_exceeded
   ; Sdk_unrecognized_stop_reason
   ; Sdk_idle_detected
-  ; Sdk_tool_retry_exhausted
   ; Sdk_guardrail_violation
   ; Sdk_tripwire_violation
   ; Sdk_exit_condition_met
@@ -121,7 +105,7 @@ let test_unknown_string () =
 (** Pin the variant count so additions are visible in diffs.  When adding a
     new [blocker_class] variant, bump this number and add the variant to
     [all_variants]. *)
-let expected_variant_count = 32
+let expected_variant_count = 31
 
 let test_variant_count () =
   let count = List.length all_variants in
@@ -150,6 +134,11 @@ let all_sdk_agent_variants : (string * SdkE.sdk_error) list =
     , SdkE.Agent
         (SdkE.AgentExecutionTimeout
            { elapsed_sec = 10.0; timeout_sec = 5.0; turn_count = 3; max_turns = 10 })
+    )
+  ; ( "AgentExecutionIdleTimeout"
+    , SdkE.Agent
+        (SdkE.AgentExecutionIdleTimeout
+           { idle_sec = 10.0; idle_timeout_sec = 5.0; turn_count = 3; max_turns = 10 })
     )
   ; ( "MaxTurnsExceeded"
     , SdkE.Agent (SdkE.MaxTurnsExceeded { turns = 10; limit = 10 }) )
@@ -306,33 +295,6 @@ let test_reason_none_provider_error_falls_through () =
     surface.KSB.blocker_class
 ;;
 
-let test_tool_retry_provider_error_uses_sdk_surface () =
-  let surface =
-    provider_runtime_surface_exn
-      ~reason:None
-      ~code:"agent_error_tool_retry_exhausted:attempts=2,limit=2"
-      ~detail:"Tool retry budget exhausted after 2/2 retries: masc_library_search {}"
-      ()
-  in
-  check string
-    "tool retry code -> sdk_tool_retry_exhausted surface"
-    "sdk_tool_retry_exhausted"
-    surface.KSB.blocker_class;
-  check bool "continue_gate false" false surface.KSB.continue_gate;
-  check bool
-    "summary points at tool args"
-    true
-    (string_contains ~needle:"tool arguments/schema" surface.KSB.summary);
-  check bool
-    "summary keeps retry detail"
-    true
-    (string_contains ~needle:"Tool retry budget exhausted" surface.KSB.summary);
-  check bool
-    "summary avoids provider catch-all wording"
-    false
-    (string_contains ~needle:"Provider runtime catch-all" surface.KSB.summary)
-;;
-
 (* ── Runner ────────────────────────────────────────────────────── *)
 
 let () =
@@ -358,8 +320,6 @@ let () =
             test_typed_provider_reason_falls_through
         ; test_case "reason=None provider error falls through" `Quick
             test_reason_none_provider_error_falls_through
-        ; test_case "tool retry provider record uses sdk surface" `Quick
-            test_tool_retry_provider_error_uses_sdk_surface
         ] )
     ]
 ;;

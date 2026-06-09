@@ -287,7 +287,12 @@ let append_thinking ~(masc_root : string) ~(keeper_name : string) ~(trace_id : s
   let dir = trajectories_dir masc_root keeper_name in
   Fs_compat.mkdir_p dir;
   let path = trajectory_path masc_root keeper_name trace_id in
-  let json = thinking_entry_to_json entry in
+  (* 남김없이: the thinking trajectory is the eval/audit SSOT, so persist the
+     FULL untruncated reasoning text. Truncation is a read/display concern
+     ([content_max_len] query param on the trajectory endpoint), never a
+     write-time one — truncating here destroyed reasoning before it was ever
+     stored. [content_length] still records the true length either way. *)
+  let json = thinking_entry_to_json ~content_max_len:0 entry in
   Fs_compat.append_jsonl path json
 
 (** Write a trajectory summary line (appended after session ends). *)

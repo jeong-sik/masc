@@ -18,7 +18,10 @@ let append_entry ~keeper_name ~failure_label (acc : Trajectory.accumulator) entr
       ()
 ;;
 
-let persist_response_content ~keeper_name ~trajectory_acc content =
+(* [turn] is the per-turn index from the OAS [after_turn] hook
+   ([Hooks.AfterTurn { turn; _ }]), NOT [acc.turn]: this is invoked once per
+   turn so every turn's reasoning is stamped with its own turn number. *)
+let persist_response_content ~keeper_name ~trajectory_acc ~turn content =
   match trajectory_acc with
   | None -> ()
   | Some acc ->
@@ -30,7 +33,7 @@ let persist_response_content ~keeper_name ~trajectory_acc content =
           let entry : Trajectory.thinking_entry =
             { ts = now
             ; ts_iso = now_iso
-            ; turn = acc.Trajectory.turn
+            ; turn
             ; content
             ; content_length = String.length content
             ; redacted = false
@@ -41,7 +44,7 @@ let persist_response_content ~keeper_name ~trajectory_acc content =
           let entry : Trajectory.thinking_entry =
             { ts = now
             ; ts_iso = now_iso
-            ; turn = acc.Trajectory.turn
+            ; turn
             ; content = "[redacted]"
             ; content_length = 0
             ; redacted = true

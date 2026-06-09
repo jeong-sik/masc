@@ -450,7 +450,14 @@ let make_hooks
              ~cost_usd:cost_usd_for_event ~usage_missing
              ~usage_trust
              ?telemetry:response.telemetry
-             ~model:response.model ()
+             ~model:response.model ();
+           (* 남김없이: persist THIS turn's reasoning (full, untruncated) every
+              turn. The prior single post-run capture (Keeper_agent_run) saved
+              only the final turn's thinking; turns 1..N-1 were merely counted
+              by the log line above. *)
+           Keeper_agent_run_thinking_trajectory.persist_response_content
+             ~keeper_name:meta.name ~trajectory_acc:(Some acc) ~turn
+             response.content
          | None -> ());
         let text = Agent_sdk.Types.text_of_content response.content in
         let has_state_block =

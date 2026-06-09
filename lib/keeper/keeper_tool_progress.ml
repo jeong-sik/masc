@@ -65,7 +65,7 @@ let completion_tool_names : string list =
      breaker). Without this, 4+ events/day were rejected as passive_only even
      though the LLM had decided no fit (sangsu/janitor/taskmaster on 2026-04-27
      00:17-00:58 UTC, idle_seconds 28-40h, claimable_count 44-46). *)
-  Keeper_tool_name.legacy_masc_deliver_name
+  "masc_deliver"
   :: List.map
        Keeper_tool_name.to_string
        Keeper_tool_name.

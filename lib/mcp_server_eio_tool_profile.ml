@@ -20,7 +20,7 @@ Do not assume access to any other MASC tool from this endpoint."
 
 let managed_agent_instructions =
   "MASC managed-agent profile exposes the internal agent control surface. \
-Prefer canonical task-control tools such as masc_status, masc_tasks, masc_claim_next, masc_transition, and masc_plan_set_task. \
+Prefer canonical task-control tools such as masc_status, masc_tasks, keeper_task_claim, masc_transition, and masc_plan_set_task. \
 Do not assume that the public /mcp surface and the managed-agent surface have the same inventory."
 
 let managed_agent_passthrough_tool_names =
@@ -221,7 +221,6 @@ let custom_tool_titles : (string * string) list = [
   ("masc_add_task", "Add Task");
   ("masc_batch_add_tasks", "Batch Add Tasks");
   ("masc_transition", "Transition Task State");
-  ("masc_claim_next", "Claim Next Task");
   ("masc_update_priority", "Update Task Priority");
   ("masc_task_history", "Task Event History");
   (* Communication *)
@@ -247,7 +246,6 @@ let custom_tool_titles : (string * string) list = [
   ("masc_operator_action", "Operator Action");
   ("masc_operator_confirm", "Operator Confirm");
   (* SDK projections *)
-  ("masc_claim_next", "Claim Next Task");
   (* Misc *)
   ("masc_cleanup_zombies", "Clean Up Zombie Agents");
 

@@ -53,7 +53,7 @@ let effect_of_progress_class = function
 ;;
 
 let claim_context_tool_names : string list =
-  [ Keeper_tool_name.legacy_masc_claim_next_name; Keeper_tool_name.(to_string Task_claim) ]
+  [ Keeper_tool_name.(to_string Task_claim) ]
 ;;
 
 let completion_tool_names : string list =

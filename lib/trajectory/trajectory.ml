@@ -64,7 +64,7 @@ type trajectory = {
   outcome : trajectory_outcome;
   task_id : string option;
   (** Claimed task ID for cost attribution.
-      Set when keeper claims a task via masc_claim_next or masc_transition;
+      Set when keeper claims a task via keeper_task_claim or masc_transition;
       None if no task claimed.
       Enables per-task cost aggregation from trajectory summaries. *)
 }

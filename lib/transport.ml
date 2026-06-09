@@ -339,7 +339,6 @@ module Rest = struct
           "masc_add_task";
           "masc_batch_add_tasks";
           "masc_transition";
-          "masc_claim_next";
         ] );
       ( "planning",
         [

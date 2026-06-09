@@ -199,7 +199,6 @@ let classify_catalog_tool ~tool_name =
   | "masc_board_vote" -> Some Board_write
   | "masc_add_task"
   | "masc_batch_add_tasks"
-  | "masc_claim_next"
   | "masc_deliver"
   | "masc_goal_transition"
   | "masc_goal_upsert"

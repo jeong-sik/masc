@@ -34,7 +34,6 @@ module Task_name = struct
   type t =
     | Add_task
     | Batch_add_tasks
-    | Claim_next
     | Task_history
     | Tasks
     | Transition
@@ -43,7 +42,6 @@ module Task_name = struct
   let to_string = function
     | Add_task -> "masc_add_task"
     | Batch_add_tasks -> "masc_batch_add_tasks"
-    | Claim_next -> "masc_claim_next"
     | Task_history -> "masc_task_history"
     | Tasks -> "masc_tasks"
     | Transition -> "masc_transition"
@@ -53,7 +51,6 @@ module Task_name = struct
   let of_string = function
     | "masc_add_task" -> Some Add_task
     | "masc_batch_add_tasks" -> Some Batch_add_tasks
-    | "masc_claim_next" -> Some Claim_next
     | "masc_task_history" -> Some Task_history
     | "masc_tasks" -> Some Tasks
     | "masc_transition" -> Some Transition

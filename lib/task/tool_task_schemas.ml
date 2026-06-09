@@ -23,8 +23,6 @@ module Float = Stdlib.Float
 
 let masc_add_task_name =
   Tool_name.Task_name.to_string Tool_name.Task_name.Add_task
-let masc_claim_next_name =
-  Tool_name.Task_name.to_string Tool_name.Task_name.Claim_next
 
 let schemas : Masc_domain.tool_schema list = [
   {
@@ -181,20 +179,7 @@ Tip: Look for status='todo' tasks to claim.";
       ]);
     ];
   };
-  {
-    name = "masc_claim_next";
-    description = "Automatically claim the highest priority unclaimed task. Use this when you want to pick up the most important available work without manually checking the task board. Returns the claimed task details including priority level and a claim_observation fragment for the verified write/readback result.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("agent_name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Your agent name");
-        ]);
-      ]);
-      ("required", `List [`String "agent_name"]);
-    ];
-  };
+
   {
     name = "masc_update_priority";
     description = "Change the priority of a task. Priority 1 is highest (most urgent), 5 is lowest. Use this to reprioritize work based on new information or urgency changes.";
@@ -226,7 +211,7 @@ Use submit_for_verification only for explicit review of a claimed/in_progress ta
 Tasks created through %s complete via action='done' after LLM completion review; \
 they do not route normal completion through the verifier agent."
       masc_add_task_name
-      masc_claim_next_name
+      "keeper_task_claim"
       masc_add_task_name;
     input_schema = `Assoc [
       ("type", `String "object");

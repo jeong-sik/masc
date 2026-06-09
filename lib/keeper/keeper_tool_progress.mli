@@ -45,7 +45,7 @@ val effect_of_progress_class : tool_progress_class -> turn_effect
 val classify_tool_progress_with_outcome
   : string -> Keeper_tool_outcome.t option -> turn_effect
 
-(** Canonical names of claim-context tools (Task_claim, Claim_next). *)
+(** Canonical names of claim-context tools (Task_claim). *)
 val claim_context_tool_names : string list
 
 (** Canonical names of completion tools (Task_done variants, Stay_silent,

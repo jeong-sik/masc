@@ -78,7 +78,7 @@ let tools_for_affordance = function
     [ "keeper_board_post"; "keeper_board_comment"; "masc_broadcast" ]
   | Message_sweep -> [ "masc_messages"; "masc_keeper_msg" ]
   | Task_claim ->
-    [ "keeper_task_claim"; "masc_claim_next" ]
+    [ "keeper_task_claim" ]
   | Task_audit ->
     [ "keeper_tasks_audit"; "keeper_task_force_release"; "keeper_task_force_done";
       "keeper_tasks_list"; "masc_tasks" ]
@@ -116,7 +116,7 @@ let preferred_tool_names_for_turn_affordances turn_affordances =
        | Message_sweep ->
          [ "masc_keeper_msg"; "masc_broadcast" ]
        | Task_claim ->
-         [ "keeper_task_claim"; "masc_claim_next" ]
+         [ "keeper_task_claim" ]
        | Task_audit ->
          [ "keeper_tasks_audit"; "keeper_task_force_release";
            "keeper_task_force_done" ]
@@ -232,7 +232,7 @@ let tool_search_alias_entries =
   ; "masc_agent_fitness", "에이전트 평가 점수 피트니스"
   ; "masc_web_search", "웹 검색 인터넷 온라인 구글"
   ; "masc_web_fetch", "웹 페이지 가져오기 읽기 URL 페치"
-  ; "masc_claim_next", "다음태스크 가져오기 할당"
+
   ]
 
 let tool_search_aliases name =

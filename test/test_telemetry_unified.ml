@@ -206,7 +206,7 @@ let test_keeper_tool_called_scope_promoted_for_filters () =
                 `String "Tool_called";
                 `Assoc
                   [
-                    ("tool_name", `String "masc_claim_next");
+                    ("tool_name", `String "keeper_task_claim");
                     ("success", `Bool true);
                     ("duration_ms", `Int 42);
                     ("agent_id", `String "agent_code-mcp-client");
@@ -228,7 +228,7 @@ let test_keeper_tool_called_scope_promoted_for_filters () =
   match List.hd result.entries with
   | `Assoc fields ->
     let json = `Assoc fields in
-    Alcotest.(check string) "tool promoted" "masc_claim_next"
+    Alcotest.(check string) "tool promoted" "keeper_task_claim"
       (json_string_field "tool_name" json);
     Alcotest.(check string) "session promoted" "mcp-session-1"
       (json_string_field "session_id" json);

@@ -99,7 +99,7 @@ let effective_cluster_name (config : Workspace.config) =
 
 (* Handlers *)
 
-let lifecycle_tools = [ "masc_claim_next"; "masc_transition" ]
+let lifecycle_tools = [ "keeper_task_claim"; "masc_transition" ]
 let is_lifecycle_tool tool = List.exists (String.equal tool) lifecycle_tools
 
 let unique_strings items =
@@ -458,7 +458,7 @@ let status_summary_string (ctx : context) =
         if Stdlib.List.length binding.assigned_task_ids > 0
         then [ "masc_heartbeat"; "masc_transition" ]
         else if fresh_todo_count > 0
-        then [ "masc_claim_next"; "masc_status" ]
+        then [ "keeper_task_claim"; "masc_status" ]
         else [ "masc_status"; "masc_add_task" ]
       in
       let tools =
@@ -471,7 +471,7 @@ let status_summary_string (ctx : context) =
               List.filter (fun tool -> not (String.equal tool "masc_transition")) tools
             in
             let tools =
-              if fresh_todo_count > 0 then "masc_claim_next" :: tools else tools
+              if fresh_todo_count > 0 then "keeper_task_claim" :: tools else tools
             in
             unique_strings tools
           | Some _ | None -> tools)

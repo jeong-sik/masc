@@ -1124,8 +1124,6 @@ let internal_descriptors : t list =
       "Add a task to the workspace plan." ~readonly:false
   ; masc_task_descriptor "batch_add" "masc_batch_add_tasks"
       "Add multiple tasks in a single call." ~readonly:false
-  ; masc_task_descriptor "claim_next" "masc_claim_next"
-      "Claim the next available task." ~readonly:false
   ; masc_task_descriptor "task_history" "masc_task_history"
       "Read history events for a task." ~readonly:true
   ; masc_task_descriptor "tasks" "masc_tasks"

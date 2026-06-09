@@ -41,8 +41,7 @@ let essential_tools = [
     "List tasks in backlog with their status and assignee.";
   make_schema "masc_add_task"
     "Add a new task to the backlog for agents to claim.";
-  make_schema "masc_claim_next"
-    "Claim the highest priority unclaimed task.";
+
   make_schema "masc_plan_init"
     "Initialize a planning context for a task.";
   make_schema "masc_plan_get"
@@ -132,11 +131,6 @@ let test_synonym_dashboard () =
   check bool "synonym: dashboard via 'activity overview'" true
     (has_tool "masc_dashboard" result)
 
-let test_synonym_claim_next () =
-  let result = Tool_prefilter.filter
-    ~tools:essential_tools ~query:"give me work to do" ~k:3 in
-  check bool "synonym: claim_next via 'give me work'" true
-    (has_tool "masc_claim_next" result)
 
 (* ================================================================ *)
 (* Tests: new tool family synonym retrieval                         *)
@@ -257,7 +251,6 @@ let () =
         [
           test_case "broadcast via synonym" `Quick test_synonym_broadcast;
           test_case "dashboard via synonym" `Quick test_synonym_dashboard;
-          test_case "claim_next via synonym" `Quick test_synonym_claim_next;
           test_case "code_search via synonym" `Quick test_synonym_code_search;
           test_case "code_read via synonym" `Quick test_synonym_code_read;
           test_case "worktree preparation via synonym" `Quick test_synonym_worktree_prepare;

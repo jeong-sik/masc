@@ -343,7 +343,7 @@ let () = test "dispatch_transition_claim" (fun () ->
 let () = test "dispatch_claim_next" (fun () ->
   let ctx = make_test_ctx () in
   let args = `Assoc [] in
-  match Task.Tool.dispatch ctx ~name:"masc_claim_next" ~args with
+  match Task.Tool.dispatch ctx ~name:"keeper_task_claim" ~args with
   | Some _ -> ()
   | None -> failwith "dispatch returned None"
 )

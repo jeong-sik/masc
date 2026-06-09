@@ -188,7 +188,7 @@ let policy_tool_names =
       "masc_agents";
       "masc_batch_add_tasks";
       "masc_broadcast";
-      "masc_claim_next";
+
       "masc_dashboard";
       "masc_goal_list";
       "masc_goal_transition";

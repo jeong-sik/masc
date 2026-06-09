@@ -26,7 +26,7 @@ let current_task_id_of_meta (meta : Keeper_meta_contract.keeper_meta) =
 ;;
 
 let task_id_scope_of_claim_output ~tool_name output_text =
-  if not (List.mem tool_name [ "keeper_task_claim"; "masc_claim_next" ])
+  if not (List.mem tool_name [ "keeper_task_claim" ])
   then None
   else (
     let output_text =

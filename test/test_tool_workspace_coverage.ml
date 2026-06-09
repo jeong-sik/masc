@@ -636,7 +636,7 @@ let () =
       assert (
         str_contains result "Lifecycle actions are credential-blocked for test-agent");
       assert (not (str_contains result "Suggested next: masc_status -> masc_transition"));
-      assert (not (str_contains result "Suggested next: masc_claim_next"))
+      assert (not (str_contains result "Suggested next: keeper_task_claim"))
     | None -> failwith "dispatch returned None")
 ;;
 
@@ -688,7 +688,7 @@ let () =
       assert (str_contains result "owned=- | current=task-001");
       assert (str_contains result "drift_reason=no_owned");
       assert (str_contains result "claim_first_suppressed=no");
-      assert_contains result "Suggested next: masc_claim_next -> masc_status";
+      assert_contains result "Suggested next: keeper_task_claim -> masc_status";
       assert_not_contains result "Suggested next: masc_status -> masc_transition"
     | None -> failwith "dispatch returned None")
 ;;

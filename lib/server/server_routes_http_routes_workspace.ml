@@ -152,6 +152,12 @@ let json_response_with_source ~status ~source req reqd json =
   Http.Response.json_value ~status ~extra_headers:(source_header source)
     ~request:req json reqd
 
+let json_response_with_source_and_base ~status ~source ~base_path req reqd json =
+  let headers = ("X-Workspace-Base-Path", sanitize_header_value base_path)
+                :: source_header source in
+  Http.Response.json_value ~status ~extra_headers:headers
+    ~request:req json reqd
+
 (* --- Safe path --- *)
 
 let is_digit c = c >= '0' && c <= '9'
@@ -599,7 +605,8 @@ let add_routes router =
                scan_dir ~diff_by_path ~base ~depth:0 ~max_depth:depth ~max_nodes [] base
            in
            let json = `List (List.rev nodes) in
-           json_response_with_source ~status:`OK ~source request reqd json)
+           json_response_with_source_and_base
+             ~status:`OK ~source ~base_path:base request reqd json)
          request reqd)
 
   |> Http.Router.get "/api/v1/workspace/file" (fun request reqd ->

@@ -14,6 +14,7 @@ let transition_task_r
       ~task_id
       ~action
       ?prepare_verification_request
+      ?compensate_verification_request
       ?prepare_verification_verdict
       ?expected_version
       ?(notes = "")
@@ -441,7 +442,40 @@ let transition_task_r
               ~new_status
               ~handoff_context
           in
-          write_backlog config backlog_update.backlog;
+          (* RFC-0221 §3.1: [write_backlog] is the atomic commit point for the
+             task outcome. Submit writes the verification record before this
+             commit (content the verifier reads); if the commit fails after the
+             record was written, compensate by deleting the record so the record
+             store and [task_status] are never left disagreeing, then surface
+             the failure. Submit is the only action that writes a record before
+             this point, so the match scopes compensation to it. Cancellation is
+             re-raised without compensating — the orphan is inert (its task is
+             not [AwaitingVerification]) and reaped later, and running store I/O
+             inside a cancelled fiber is unsafe. *)
+          (try write_backlog config backlog_update.backlog with
+           | Eio.Cancel.Cancelled _ as e -> raise e
+           | exn ->
+             (match compensate_verification_request with
+              | None -> ()
+              | Some compensate ->
+                (match action with
+                 | Masc_domain.Submit_for_verification ->
+                   (match new_status with
+                    | Masc_domain.AwaitingVerification { verification_id; _ } ->
+                      compensate ~verification_id
+                    | Masc_domain.Todo
+                    | Masc_domain.Claimed _
+                    | Masc_domain.InProgress _
+                    | Masc_domain.Done _
+                    | Masc_domain.Cancelled _ -> ())
+                 | Masc_domain.Claim
+                 | Masc_domain.Start
+                 | Masc_domain.Done_action
+                 | Masc_domain.Cancel
+                 | Masc_domain.Release
+                 | Masc_domain.Approve_verification
+                 | Masc_domain.Reject_verification -> ()));
+             raise exn);
           update_local_agent_state config ~agent_name (fun agent ->
             match set_current with
             | Some _ -> { agent with status = Busy; current_task = Some task_id }

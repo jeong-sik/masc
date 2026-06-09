@@ -135,6 +135,22 @@ let create_submit_request ~(config : Workspace.config)
       task.id verification_id e;
     Error e
 
+(* RFC-0221 §3.1: compensation for atomic submit. Remove the verification record
+   for [verification_id] when the task_status commit it was written for did not
+   land, so the record store and [task_status] are never left disagreeing.
+   Mirrors {!create_submit_request}'s base_path derivation. A missing record is
+   success (idempotent), so compensation is safe to run unconditionally. *)
+let delete_verification_request ~(config : Workspace.config) ~verification_id =
+  let base_path = config.Workspace.base_path in
+  match Verification.delete_request base_path verification_id with
+  | Ok () -> Ok ()
+  | Error e ->
+    Log.Task.error
+      ~keeper_name:verification_id
+      "verification delete_request failed (vrf=%s): %s"
+      verification_id e;
+    Error e
+
 let notify_submit_for_verification ~(config : Workspace.config)
     ~(task : Masc_domain.task) ~assignee ~verification_id ~evidence_refs =
   let spec = submit_request_spec ~config ~task ~assignee ~evidence_refs in

@@ -143,6 +143,14 @@ val verification_record_verdict_fn :
    decision:[ `Approve of string | `Reject of string ] ->
    (unit, string) result) Atomic.t
 
+(** RFC-0221 §3.1: compensation hook — delete a verification record whose
+    task_status commit failed, so the record store and [task_status] never
+    disagree. Default no-op until the runtime fills it at boot. *)
+val verification_delete_request_fn :
+  (Workspace_utils_backend_setup.config ->
+   verification_id:string ->
+   (unit, string) result) Atomic.t
+
 val verification_notify_submit_fn :
   (Workspace_utils_backend_setup.config ->
    task:Masc_domain.task ->

@@ -59,6 +59,12 @@ val validate_cross_agent : worker:string -> verifier:string -> (unit, string) re
 
 val generate_id : unit -> string
 val save_request : string -> verification_request -> (string, string) result
+
+(** [delete_request base_path req_id] removes the verification record for
+    [req_id]. RFC-0221 §3.1 compensation: undo a record write whose status
+    commit did not land. A missing record is success (idempotent). *)
+val delete_request : string -> string -> (unit, string) result
+
 val load_request : string -> string -> (verification_request, string) result
 val list_requests : string -> verification_request list
 

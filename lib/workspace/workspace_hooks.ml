@@ -387,6 +387,15 @@ let verification_record_verdict_fn
       (fun _config ~task_id:_ ~verifier:_ ~verification_id:_ ~decision:_ ->
          Ok ())
 
+(* RFC-0221 §3.1: compensation hook for atomic submit. Filled at boot to delete
+   a verification record whose task_status commit failed. Default is a no-op so
+   the workspace layer never hard-depends on the verification store. *)
+let verification_delete_request_fn
+  : (Workspace_utils_backend_setup.config ->
+     verification_id:string ->
+     (unit, string) result) Atomic.t
+  = Atomic.make (fun _config ~verification_id:_ -> Ok ())
+
 let verification_notify_submit_fn
   : (Workspace_utils_backend_setup.config ->
      task:Masc_domain.task ->

@@ -194,11 +194,14 @@ let shutdown ?(enabled = Otel_config.enabled) () =
   Atomic.set _consecutive_failures 0
 
 (** Wrap a function in an OTel span. No-op when disabled.
-    Returns the result of [f]. *)
-let with_span ~name ?(attrs = []) f =
+    Returns the result of [f].
+    When [force_new_trace_id] is true, starts a fresh trace root instead
+    of nesting under the ambient parent span. Use at operation boundaries
+    (e.g. each tool dispatch) to keep traces small and readable. *)
+let with_span ~name ?(attrs = []) ?(force_new_trace_id = false) f =
   if not Otel_config.enabled then f (fun () -> None)
   else
-    OT.Trace.with_ name ~attrs (fun scope ->
+    OT.Trace.with_ ~force_new_trace_id name ~attrs (fun scope ->
       f (fun () ->
         let ctx = OT.Scope.to_span_ctx scope in
         Some (OT.Trace_id.to_hex (OT.Span_ctx.trace_id ctx))))

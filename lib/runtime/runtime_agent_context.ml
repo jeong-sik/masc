@@ -119,7 +119,15 @@ let default_config
   ; description = None
   ; initial_messages = []
   ; raw_trace = None
-  ; tool_retry_policy = None
+  ; (* Replace the SDK's premature 2/2 validation-retry kill with a high
+       self-correction ceiling. The real per-turn backpressure is the token
+       budget + [max_idle_turns] above; this ceiling is only a runaway
+       tripwire. See [Env_config_runtime.Tool_retry]. *)
+    tool_retry_policy =
+      Some
+        { Agent_sdk.Tool_retry_policy.default_internal with
+          max_retries = Env_config_runtime.Tool_retry.validation_self_correction_ceiling
+        }
   ; enable_thinking = None
   ; transport = Masc_grpc_transport.from_env ()
   ; allowed_paths = []

@@ -920,3 +920,27 @@ module Workspace_git = struct
 end
 
 (** {1 Internal Safety Configuration} *)
+
+(** Per-keeper tool-call self-correction policy.
+
+    The agent SDK terminates a turn with [ToolRetryExhausted] once a tool call
+    fails validation more than [max_retries] times (SDK default 2). A weak model
+    that emits a malformed call — e.g. [keeper_board_post_get {}] omitting the
+    required [post_id], then recovering with the real id on a later re-prompt —
+    is killed at 2/2 before it self-corrects. OSS agent loops (pydantic-ai,
+    openclaw) do not gate tool self-correction on a low retry count: they
+    re-prompt until the model converges (typically 1-3 tries) and bound runaway
+    with token/idle budgets instead of an arbitrary retry count.
+
+    [validation_self_correction_ceiling] removes that premature count cap by
+    raising it far above the convergence point, delegating backpressure to the
+    bounds already enforced per turn — the per-request token budget and
+    [max_idle_turns]. It is a last-ditch runaway tripwire, not a quality gate;
+    lower it to restore a strict cap.
+
+    @category Runtime
+    @ops_class operator *)
+module Tool_retry = struct
+  let validation_self_correction_ceiling =
+    get_int ~default:16 "MASC_TOOL_VALIDATION_SELF_CORRECTION_CEILING"
+end

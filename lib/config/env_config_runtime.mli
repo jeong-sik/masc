@@ -346,3 +346,14 @@ end
 module Workspace_git : sig
   val local_op_timeout_sec : float
 end
+
+(** {1 Per-keeper tool-call self-correction} *)
+
+module Tool_retry : sig
+  (** Max validation-error re-prompts before the SDK terminates a turn with
+      [ToolRetryExhausted]. Raised far above the SDK default (2) so a weak model
+      can self-correct a malformed tool call; the real per-turn backpressure is
+      the token budget + [max_idle_turns], and this count is only a runaway
+      tripwire. Env: [MASC_TOOL_VALIDATION_SELF_CORRECTION_CEILING]. *)
+  val validation_self_correction_ceiling : int
+end

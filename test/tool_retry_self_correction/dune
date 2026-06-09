@@ -1,0 +1,7 @@
+; Standalone alcotest: validation-error self-correction is not killed at the
+; SDK's default 2/2 retry cap. Regression guard for the keeper {}-tool-call
+; livelock (sangsu / keeper_board_post_get omitting required post_id).
+
+(test
+ (name test_tool_retry_self_correction)
+ (libraries alcotest agent_sdk masc.config))

@@ -91,7 +91,10 @@ let entry_of_json (json : Yojson.Safe.t) : cache_entry option =
   | Some key, Some value, Some created_at ->
     Some { key; value; created_at; expires_at; tags }
   | _ ->
-    Log.Misc.error "JSON type error in entry_of_json: missing required fields";
+    Log.Misc.error "JSON type error in entry_of_json: missing required fields (key=%s value=%s created_at=%s)"
+      (match key with Some s -> s | None -> "(absent)")
+      (match value with Some s -> s | None -> "(absent)")
+      (match created_at with Some s -> s | None -> "(absent)");
     None
 ;;
 

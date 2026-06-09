@@ -105,7 +105,9 @@ let state_of kind = List.assoc kind _state_for_kind
    `f ()` so contention is bounded.  [Eio.Mutex.use_rw ~protect:true]
    is cancel-safe (caller's `Eio.Cancel.Cancelled` will release the
    mutex on unwind). *)
-let mark_acquire state =
+(* Internal per-slot state-record form.  Not exported -- callers
+   go through the kind-level entry points below. *)
+let mark_acquire_slot state =
   Eio.Mutex.use_rw ~protect:true state.mutex (fun () ->
       let hold_id = state.next_hold_id in
       state.next_hold_id <- hold_id + 1;
@@ -113,16 +115,25 @@ let mark_acquire state =
       state.holding_state <- In_flight { acquired_at; hold_id };
       hold_id)
 
-let mark_release state ~hold_id =
+let mark_release_slot state ~hold_id =
   Eio.Mutex.use_rw ~protect:true state.mutex (fun () ->
       match state.holding_state with
       | Idle -> ()
       | In_flight _ -> state.holding_state <- Idle)
 
-let read_holding state =
+let read_holding_slot state =
   Eio.Mutex.use_rw ~protect:true state.mutex (fun () ->
       match state.holding_state with
       | Idle -> 0 | In_flight _ -> 1)
+
+(* Public kind-level entry points -- the typed-state transition
+   API the regression suite drives.  PR-C1 (follow-up to PR-B
+   / PR #20583) mirrors [dashboard_governance_judge]':s
+   [read_in_flight] / [mark_compute_start] / [mark_compute_finish]
+   pattern: typed variant, [hold_id] monotonic, no [max 0] clamp. *)
+let read_holding ~kind = read_holding_slot (state_of kind)
+let mark_acquire ~kind = mark_acquire_slot (state_of kind)
+let mark_release ~kind ~hold_id = mark_release_slot (state_of kind) ~hold_id
 
 (* Shared FD-pressure gate — when Keeper_fd_pressure.active () is true,
    all top-level kinds serialize through one global slot. Nested cross-kind
@@ -174,11 +185,11 @@ let with_slot ~kind f =
     Eio.Switch.run @@ fun sw ->
     Eio.Switch.on_release sw release_pressure ;
     Eio.Semaphore.acquire sem ;
-    let hold_id = mark_acquire state in
+    let hold_id = mark_acquire_slot state in
     let held = { kind ; active = Atomic.make true } in
     Fun.protect
       ~finally:(fun () ->
-          mark_release state ~hold_id ;
+          mark_release_slot state ~hold_id ;
           Eio.Semaphore.release sem ;
           Atomic.set held.active false)
       (fun () -> Eio.Fiber.with_binding held_kinds_key (held :: held_kinds ()) f)
@@ -190,11 +201,11 @@ let acquire_lifetime_slot ~kind () =
    | exn ->
      release_pressure ();
      raise exn);
-  let hold_id = mark_acquire state in
+  let hold_id = mark_acquire_slot state in
   let released = Atomic.make false in
   fun () ->
     if Atomic.compare_and_set released false true then (
-      mark_release state ~hold_id ;
+      mark_release_slot state ~hold_id ;
       Eio.Semaphore.release sem;
       release_pressure ())
 

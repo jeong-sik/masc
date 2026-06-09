@@ -55,22 +55,28 @@ let generate_trace_id () =
     requires confirmation for [Critical] risk and warns the operator instead
     of silently allowing every tool through. Mirrors the fail-closed posture
     of [audit_threshold] just below. See #7641 / #8605. *)
-let confirm_threshold = function
-  | "paranoid" -> Some Medium
-  | "enterprise" -> Some High
-  | "production" -> Some Critical
-  | "development" -> None
-  | other ->
-    Log.Governance.warn
-      "confirm_threshold: unknown governance_level %S -> fail-closed (require confirm at \
-       Critical); see #7641"
-      other;
-    Some Critical
+let confirm_threshold governance_level =
+  if Env_config_core.disable_hitl () then None
+  else
+    match governance_level with
+    | "paranoid" -> Some Medium
+    | "enterprise" -> Some High
+    | "production" -> Some Critical
+    | "development" -> None
+    | other ->
+      Log.Governance.warn
+        "confirm_threshold: unknown governance_level %S -> fail-closed (require confirm at \
+         Critical); see #7641"
+        other;
+      Some Critical
 ;;
 
-let keeper_confirm_threshold = function
-  | "production" -> Some High
-  | other -> confirm_threshold other
+let keeper_confirm_threshold governance_level =
+  if Env_config_core.disable_hitl () then None
+  else
+    match governance_level with
+    | "production" -> Some High
+    | other -> confirm_threshold other
 ;;
 
 (** Minimum risk level that triggers audit logging. *)

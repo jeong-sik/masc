@@ -309,7 +309,7 @@ let classify_with_payload ~tool_name ~input =
       else None
 
 let pre_metadata_risk_overrides : (string * risk_level) list =
-  [ "masc_bind", Medium; "masc_unbind", Medium ]
+  [ "masc_bind", Medium; "masc_unbind", Medium; "masc_goal_upsert", Medium; "masc_goal_verify", Medium ]
 
 let baseline_risk ~tool_name ~input =
   match List.assoc_opt tool_name pre_metadata_risk_overrides with

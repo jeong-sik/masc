@@ -24,7 +24,13 @@ let fallback_runtime_for_provider_cooldown
   then None
   else Some (Keeper_config.default_runtime_id ())
 
+let scoped_provider_key ~keeper_name provider_key =
+  let keeper_name = String.trim keeper_name in
+  if String.equal keeper_name "" then provider_key
+  else keeper_name ^ "@" ^ provider_key
+
 let provider_cooldown_remaining_sec_for_runtime
+      ~(keeper_name : string)
       ~(runtime_id : string)
   : int option
   =
@@ -38,6 +44,7 @@ let provider_cooldown_remaining_sec_for_runtime
     let provider_infos =
       List.map
         (fun provider_key ->
+           let provider_key = scoped_provider_key ~keeper_name provider_key in
            Keeper_binding_health.provider_info
              Keeper_binding_health.global
              ~provider_key)
@@ -75,6 +82,7 @@ let provider_capacity_blocked_task_count
     let runtime_id = runtime_id_of_meta meta in
     match
       provider_cooldown_remaining_sec
+        ~keeper_name:meta.name
         ~runtime_id:(runtime_id)
     with
     | Some _

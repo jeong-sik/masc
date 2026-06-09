@@ -166,6 +166,7 @@ let run
       (match result with
        | Ok run_result when ctx.accept run_result.Runtime_agent.response ->
          Keeper_turn_driver_provider_attempt.record_candidate_health_success
+           ~keeper_name:ctx.keeper_name
            candidate
            ~latency_ms;
          ctx.record_provider_health_result candidate ~success:true ~http_status:None;
@@ -174,6 +175,7 @@ let run
        | Ok run_result ->
          let reason = "accept predicate rejected runtime response" in
          Keeper_turn_driver_provider_attempt.record_candidate_health_rejected
+           ~keeper_name:ctx.keeper_name
            candidate
            ~reason;
          let last_err =
@@ -184,6 +186,7 @@ let run
          else loop checkpoint_after last_err rest
        | Error err ->
          Keeper_turn_driver_provider_attempt.record_candidate_health_error
+           ~keeper_name:ctx.keeper_name
            candidate
            err;
          let http_err = sdk_error_to_http_error err in

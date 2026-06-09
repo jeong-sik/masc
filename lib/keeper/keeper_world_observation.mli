@@ -285,12 +285,12 @@ val should_inject_entropic_oscillation :
 
 val keeper_cycle_decision :
   ?provider_cooldown_remaining_sec:
-    (runtime_id:string -> int option) ->
+    (keeper_name:string -> runtime_id:string -> int option) ->
   meta:Keeper_meta_contract.keeper_meta -> world_observation -> keeper_cycle_decision
 
 val unified_turn_decision :
   ?provider_cooldown_remaining_sec:
-    (runtime_id:string -> int option) ->
+    (keeper_name:string -> runtime_id:string -> int option) ->
   meta:Keeper_meta_contract.keeper_meta -> world_observation -> keeper_cycle_decision
 
 val should_run_keeper_cycle :

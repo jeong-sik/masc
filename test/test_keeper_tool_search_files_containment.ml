@@ -306,6 +306,52 @@ let test_local_keeper_rg_file_path_uses_parent_workdir () =
       None
       (parse_field raw "error"))
 
+(* Regression: a keeper that asks rg for an extension that is not a
+   ripgrep type name (e.g. type="mli", a common ask in an OCaml repo)
+   makes rg exit 2. Previously the rg result dropped stderr, so the
+   keeper saw only the generic "usage_error / Wrong arguments" hint and
+   retried the same broken argv until the circuit breaker tripped. The
+   fix surfaces rg's own stderr in error_detail. This is a consumer-level
+   (transport-aware) assertion: handle_tool_search_files is the function
+   keeper_tool_runtime.ml returns verbatim to the keeper, so what we
+   assert here is exactly what the keeper receives — no producer-only gap. *)
+let test_local_keeper_rg_invalid_type_surfaces_stderr () =
+  setup ~keeper_name:"garnet" ~sandbox:Keeper_types_profile_sandbox.Local
+  @@ fun ~base:_ ~config ~meta ~playground ->
+  if not (Keeper_tool_execute_path.shell_command_available "rg") then ()
+  else (
+    let file_path = Filename.concat playground "demo.ml" in
+    ignore (Fs_compat.save_file_atomic file_path "let run_named = true\n");
+    let raw =
+      Keeper_tool_command_runtime.handle_tool_search_files
+        ~turn_sandbox_factory:None
+        ~exec_cache:None
+        ~config
+        ~meta
+        ~args:
+          (`Assoc
+            [
+              ("op", `String "rg");
+              ("pattern", `String "run_named");
+              ("path", `String "demo.ml");
+              ("type", `String "mli");
+            ])
+    in
+    Alcotest.(check (option bool)) "invalid rg type makes the call fail"
+      (Some false)
+      (parse_bool_field raw "ok");
+    match parse_field raw "error_detail" with
+    | None ->
+        Alcotest.failf
+          "error_detail absent: keeper cannot see why rg failed. raw=%s" raw
+    | Some detail ->
+        Alcotest.(check bool)
+          "error_detail surfaces rg's real unrecognized-type stderr"
+          true
+          (String_util.contains_substring
+             (String.lowercase_ascii detail)
+             "unrecognized file type"))
+
 let test_docker_keeper_blocks_find_outside () =
   setup ~keeper_name:"minjae" ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~base ~config ~meta ~playground:_ ->
@@ -528,6 +574,9 @@ let () =
             test_docker_keeper_blocks_rg_outside;
           Alcotest.test_case "local keeper rg file path uses parent workdir"
             `Quick test_local_keeper_rg_file_path_uses_parent_workdir;
+          Alcotest.test_case
+            "local keeper rg invalid type surfaces stderr to keeper"
+            `Quick test_local_keeper_rg_invalid_type_surfaces_stderr;
           Alcotest.test_case "docker keeper blocks find outside" `Quick
             test_docker_keeper_blocks_find_outside;
           Alcotest.test_case "docker keeper allows inside playground"

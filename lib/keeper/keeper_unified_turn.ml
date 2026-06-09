@@ -211,6 +211,10 @@ let run_keeper_cycle
               ~trajectory_outcome:Trajectory.Completed
               ~keeper_turn_id
               ();
+            Keeper_event_publisher.publish_runtime_execution_built
+              ~keeper_name:meta.name
+              ~execution:initial_execution
+              ~generation;
             let turn_id = keeper_turn_id in
             (match
                Keeper_turn_livelock.guard_and_record_turn_start

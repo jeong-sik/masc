@@ -47,7 +47,6 @@ type config =
   description : string option;
   initial_messages : Agent_sdk.Types.message list;
   raw_trace : Agent_sdk.Raw_trace.t option;
-  tool_retry_policy : Agent_sdk.Tool_retry_policy.t option;
   enable_thinking : bool option;
   transport : Masc_grpc_transport.t;
   allowed_paths : string list;

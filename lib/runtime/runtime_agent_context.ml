@@ -62,7 +62,6 @@ type config =
   ; description : string option
   ; initial_messages : Agent_sdk.Types.message list
   ; raw_trace : Agent_sdk.Raw_trace.t option
-  ; tool_retry_policy : Agent_sdk.Tool_retry_policy.t option
   ; enable_thinking : bool option
   ; transport : Masc_grpc_transport.t
   ; allowed_paths : string list
@@ -119,7 +118,6 @@ let default_config
   ; description = None
   ; initial_messages = []
   ; raw_trace = None
-  ; tool_retry_policy = None
   ; enable_thinking = None
   ; transport = Masc_grpc_transport.from_env ()
   ; allowed_paths = []
@@ -210,11 +208,6 @@ let builder_without_approval
   let builder =
     match config.raw_trace with
     | Some raw_trace -> Agent_sdk.Builder.with_raw_trace raw_trace builder
-    | None -> builder
-  in
-  let builder =
-    match config.tool_retry_policy with
-    | Some policy -> Agent_sdk.Builder.with_tool_retry_policy policy builder
     | None -> builder
   in
   let builder =
@@ -354,7 +347,6 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
     ; context_injector = config.context_injector
     ; event_bus = config.event_bus
     ; raw_trace = config.raw_trace
-    ; tool_retry_policy = config.tool_retry_policy
     ; allowed_paths = config.allowed_paths
     ; description = config.description
     ; approval = config.approval

@@ -38,7 +38,6 @@ type try_provider_ctx =
   ; guardrails : Agent_sdk.Guardrails.t option
   ; hooks : Agent_sdk.Hooks.hooks option
   ; context_reducer : Agent_sdk.Context_reducer.t option
-  ; tool_retry_policy : Agent_sdk.Tool_retry_policy.t option
   ; raw_trace : Agent_sdk.Raw_trace.t option
   ; (* Transport *)
     transport_resolved : Masc_grpc_transport.t
@@ -261,7 +260,6 @@ let run_try_provider
           ; guardrails = ctx.guardrails
           ; hooks
           ; context_reducer = ctx.context_reducer
-          ; tool_retry_policy = ctx.tool_retry_policy
           ; description =
               Some (Printf.sprintf "runtime:%s/runtime" ctx.runtime_id)
           ; transport = ctx.transport_resolved

@@ -61,7 +61,6 @@ let run_named
     ?guardrails
     ?hooks
     ?context_reducer
-    ?tool_retry_policy
     ?raw_trace
     ?on_event
     ?on_yield
@@ -157,7 +156,6 @@ let run_named
     guardrails;
     hooks;
     context_reducer;
-    tool_retry_policy;
     raw_trace;
     transport_resolved;
     runtime_mcp_policy;

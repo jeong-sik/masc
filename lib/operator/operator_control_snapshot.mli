@@ -258,3 +258,22 @@ val get_payload : Yojson.Safe.t -> Yojson.Safe.t
     returning [`Null] when the field is missing or not an
     [`Assoc].  Pinned for the same runtime-include
     consumer reason as {!iso_of_unix}. *)
+
+(** {1 Keeper slot helper (PR-C2)} *)
+
+val with_keeper_slot :
+  sem:Eio.Semaphore.t ->
+  name:string ->
+  (unit -> 'a) ->
+  'a
+(** Runs [f] after acquiring [sem], then releases [sem]
+    via a [Fun.protect ~finally] scope so the slot is
+    released on the normal-exit, exception, and
+    [Eio.Cancel.Cancelled] paths (no double-release).
+    Pinned for the white-box test suite
+    [test/test_operator_control_snapshot_state.ml]
+    which exercises the slot accounting invariant
+    independent of [keepers_json].  Mirrors PR-B's
+    typed-state pattern in spirit (no separate counter
+    for the per-fiber slot) but expressed as a scope
+    rather than a state transition. *)

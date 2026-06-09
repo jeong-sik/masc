@@ -92,6 +92,46 @@ let test_distinct_stores_have_independent_caches () =
   check int "store b counts 7 (no cross-key contamination)" 7 (Dated_jsonl.count_entries tb)
 ;;
 
+let write_to_day base ~ym ~day n =
+  let path =
+    Filename.concat (Filename.concat base ym) (Printf.sprintf "%s.jsonl" day)
+  in
+  for i = 1 to n do
+    write_jsonl_line path (Printf.sprintf "{\"seq\":%d}" i)
+  done
+;;
+
+(* The per-file count cache (keyed by path + byte size) must produce the same
+   total as a full uncached scan across many day-files — the realistic store
+   shape it optimises — and must reflect a file that grew (size change
+   invalidates the cached per-file count, so the total never drifts). *)
+let test_per_file_cache_matches_uncached_across_days () =
+  Dated_jsonl.reset_count_cache_for_testing ();
+  let base = tmpdir "count_cache_perfile" in
+  write_to_day base ~ym:"2026-05" ~day:"01" 4;
+  write_to_day base ~ym:"2026-05" ~day:"02" 3;
+  write_to_day base ~ym:"2026-06" ~day:"09" 2;
+  let t = Dated_jsonl.create ~base_dir:base () in
+  (* First cached-miss populates the per-file cache; total must equal the
+     true scan across all three day-files. *)
+  check
+    int
+    "multi-day cached count equals uncached"
+    (Dated_jsonl.count_entries_uncached t)
+    (Dated_jsonl.count_entries t);
+  check int "multi-day total is 9" 9 (Dated_jsonl.count_entries t);
+  (* Grow one day-file, then force a recompute. The size change must
+     invalidate that file's cached count so the new total is observed. *)
+  write_to_day base ~ym:"2026-06" ~day:"09" 6;
+  Dated_jsonl.reset_count_cache_for_testing ();
+  check
+    int
+    "after growth, cached count equals uncached"
+    (Dated_jsonl.count_entries_uncached t)
+    (Dated_jsonl.count_entries t);
+  check int "after growth total is 15" 15 (Dated_jsonl.count_entries t)
+;;
+
 let () =
   Alcotest.run
     "dated_jsonl_count_cache"
@@ -105,6 +145,10 @@ let () =
             "distinct stores have independent caches"
             `Quick
             test_distinct_stores_have_independent_caches
+        ; test_case
+            "per-file cache matches uncached across day-files"
+            `Quick
+            test_per_file_cache_matches_uncached_across_days
         ] )
     ]
 ;;

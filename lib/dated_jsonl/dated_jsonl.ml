@@ -431,7 +431,42 @@ let iter_range t ~since ~until f =
       end)
       months
 
-let count_entries_uncached t =
+(* Per-file non-empty-line count keyed by (path, byte size). Day-files are
+   append-only and split by date: a closed (past-day) file never changes, so
+   its count is a pure function of its size. Caching it means a repeated
+   full-store count re-reads only the current day-file (whose size grows)
+   instead of every historical file. Any size change (append, prune, rewrite)
+   misses the cache and recomputes, so the cached count never drifts. *)
+type file_count_entry =
+  { fc_size : int
+  ; fc_count : int
+  }
+
+let file_count_cache : (string, file_count_entry) Hashtbl.t = Hashtbl.create 64
+let file_count_cache_mu = Stdlib.Mutex.create ()
+
+let count_non_empty_lines_cached path =
+  let size = try (Unix.stat path).Unix.st_size with Unix.Unix_error _ -> -1 in
+  let cached =
+    if size < 0
+    then None
+    else
+      Stdlib.Mutex.protect file_count_cache_mu (fun () ->
+        match Hashtbl.find_opt file_count_cache path with
+        | Some e when e.fc_size = size -> Some e.fc_count
+        | _ -> None)
+  in
+  match cached with
+  | Some n -> n
+  | None ->
+    let n = count_non_empty_lines path in
+    if size >= 0
+    then
+      Stdlib.Mutex.protect file_count_cache_mu (fun () ->
+        Hashtbl.replace file_count_cache path { fc_size = size; fc_count = n });
+    n
+
+let fold_day_file_counts t ~counter =
   let months = list_month_dirs t.base_dir in
   List.fold_left (fun total month ->
     let month_path = Filename.concat t.base_dir month in
@@ -439,9 +474,19 @@ let count_entries_uncached t =
     total
     + List.fold_left (fun month_total day ->
         let path = Filename.concat month_path day in
-        month_total + count_non_empty_lines path
+        month_total + counter path
       ) 0 days
   ) 0 months
+
+(* Truly uncached: every day-file is re-read byte by byte. Audit/test callers
+   that must not observe any caching use this directly. *)
+let count_entries_uncached t = fold_day_file_counts t ~counter:count_non_empty_lines
+
+(* Per-file-cached full count. O(current day-file) in steady state because
+   closed day-files hit [file_count_cache]. Size-keyed, so it carries none of
+   the staleness window of the [count_cache] TTL below. *)
+let count_entries_incremental t =
+  fold_day_file_counts t ~counter:count_non_empty_lines_cached
 
 (* RFC-0162 §3.2: process-local TTL cache around [count_entries].
 
@@ -482,14 +527,17 @@ let count_entries t =
   match cached_opt with
   | Some n -> n
   | None ->
-    let n = count_entries_uncached t in
+    (* Per-file cache keeps this miss O(current day-file) even though the
+       store has many large historical files. *)
+    let n = count_entries_incremental t in
     Stdlib.Mutex.protect count_cache_mu (fun () ->
       Hashtbl.replace count_cache key { entry_count = n; computed_at = now });
     n
 ;;
 
 let reset_count_cache_for_testing () =
-  Stdlib.Mutex.protect count_cache_mu (fun () -> Hashtbl.reset count_cache)
+  Stdlib.Mutex.protect count_cache_mu (fun () -> Hashtbl.reset count_cache);
+  Stdlib.Mutex.protect file_count_cache_mu (fun () -> Hashtbl.reset file_count_cache)
 ;;
 let read_range t ~since ~until =
   let collected = ref [] in

@@ -45,7 +45,7 @@ let assertion_kind_of_string_lenient = function
 ;;
 
 let assertion_fix_hint = function
-  | Task_claimed -> "Claim a task with masc_transition(action=claim) or masc_claim_next"
+  | Task_claimed -> "Claim a task with masc_transition(action=claim) or keeper_task_claim"
   | Current_task_set ->
     "Call masc_plan_set_task to choose or re-sync the active task when current_task is \
      unset, stale, or ambiguous"

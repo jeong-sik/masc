@@ -393,7 +393,7 @@ let handle_claim ~tool_name ~start_time ctx args =
      dispatch path bypasses MCP entry session binding, so this gate produced
      false-negative rejects for every agent turn (fleet evidence:
      <base-path>/.masc/agents/ empty while agents run normally; only
-     masc_claim/masc_claim_next failed).  Workspace.claim_task_r works on
+     masc_claim/keeper_task_claim failed).  Workspace.claim_task_r works on
      agent_name alone; gate added no real authorization. *)
   if Option.is_some (Json_util.assoc_member_opt "agent_role" args) then
     Tool_result.error

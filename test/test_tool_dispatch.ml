@@ -203,7 +203,7 @@ let () =
       ( "did_you_mean_9784",
         [
           test_case "find_similar_names returns close match" `Quick (fun () ->
-              register_full ~tool_name:"__sim_masc_claim_next" ~handler:echo_handler ();
+              register_full ~tool_name:"__sim_keeper_task_claim" ~handler:echo_handler ();
               register_full ~tool_name:"__sim_masc_add_task" ~handler:echo_handler ();
               register_full ~tool_name:"__sim_masc_bind" ~handler:echo_handler ();
               let suggestions =
@@ -213,7 +213,7 @@ let () =
               check bool "non-empty suggestions" true
                 (List.length suggestions >= 1);
               check bool "top suggestion is closest" true
-                (List.hd suggestions = "__sim_masc_claim_next"));
+                (List.hd suggestions = "__sim_keeper_task_claim"));
           test_case "find_similar_names empty when nothing close" `Quick (fun () ->
               let suggestions =
                 Tool_dispatch.find_similar_names

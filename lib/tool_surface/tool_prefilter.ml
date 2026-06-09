@@ -39,14 +39,6 @@ let synonyms : (string * string list) list =
     , [ "happening"; "activity"; "overview"; "summary"; "monitor"; "big picture" ] )
   ; ( "masc_broadcast"
     , [ "notify"; "announce"; "tell"; "inform"; "alert"; "everyone"; "let know" ] )
-  ; ( "masc_claim_next"
-    , [ "claim next task"
-      ; "pick up task"
-      ; "assign me"
-      ; "next task"
-      ; "give me work"
-      ; "take task"
-      ] )
   ; "masc_add_task", [ "create task"; "new task"; "make task"; "register task" ]
   ; "masc_messages", [ "chat"; "conversation"; "history"; "log"; "what was said" ]
   ; "masc_agents", [ "who is working"; "team members"; "workers"; "collaborators" ]

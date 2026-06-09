@@ -52,7 +52,7 @@ val default_instructions : string
 val managed_agent_instructions : string
 (** [Managed_agent] profile instructions.  Names the canonical
     task-control tools ([masc_status], [masc_tasks],
-    [masc_claim_next], [masc_transition], [masc_plan_set_task])
+    [keeper_task_claim], [masc_transition], [masc_plan_set_task])
     and warns that the public /mcp surface and managed-agent
     surface diverge in inventory. *)
 

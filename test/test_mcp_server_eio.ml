@@ -1608,10 +1608,10 @@ let test_execute_tool_explicit_generated_alias_claim_next_not_rewritten_by_token
        ~priority:2 ~description:"");
   let result =
     Mcp_eio.execute_tool_eio ~sw ~clock ~auth_token:raw_token state
-      ~name:"masc_claim_next"
+      ~name:"keeper_task_claim"
       ~arguments:(`Assoc [ ("agent_name", `String "dashboard-eager-manta") ])
   in
-  check_auth_preflight_result ~tool_name:"masc_claim_next"
+  check_auth_preflight_result ~tool_name:"keeper_task_claim"
     (Tool_result.is_success result) ((Tool_result.message result));
   check_task_still_todo state.workspace_config "task-001";
   cleanup_dir base_path
@@ -1676,7 +1676,7 @@ let test_execute_tool_hyphenated_generated_alias_claim_next_reuses_base_token ()
   let result =
     Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:"sid-hyphenated-generated-alias"
       ~auth_token:raw_token state
-      ~name:"masc_claim_next"
+      ~name:"keeper_task_claim"
       ~arguments:(`Assoc [ ("agent_name", `String "qa-king-warm-heron") ])
   in
   if not (Tool_result.is_success result) then
@@ -1709,10 +1709,10 @@ let test_execute_tool_claim_next_requires_auth_before_mutation () =
        ~priority:2 ~description:"");
   let result =
     Mcp_eio.execute_tool_eio ~sw ~clock state
-      ~name:"masc_claim_next"
+      ~name:"keeper_task_claim"
       ~arguments:(`Assoc [ ("agent_name", `String "uncredentialed-agent") ])
   in
-  check_auth_preflight_result ~tool_name:"masc_claim_next"
+  check_auth_preflight_result ~tool_name:"keeper_task_claim"
     (Tool_result.is_success result) ((Tool_result.message result));
   check_task_still_todo state.workspace_config "task-001";
   Alcotest.(check (option string)) "no current task after rejected claim_next" None

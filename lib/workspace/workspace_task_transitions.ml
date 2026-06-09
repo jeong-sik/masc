@@ -170,7 +170,7 @@ let transition_task_r
               | Masc_domain.Claimed _, Masc_domain.Release when not own_assignee ->
                 " Remediation: this task is claimed by another keeper. Use \
                  masc_board_post to ask that agent to release/hand off, or claim a \
-                 different task with masc_claim_next."
+                 different task with keeper_task_claim."
               | Masc_domain.Claimed _, Masc_domain.Done_action when not own_assignee ->
                 " Remediation: only the current assignee can mark a task done. Pick a \
                  different task or align via masc_board_post."
@@ -178,10 +178,10 @@ let transition_task_r
                 when not own_assignee ->
                 " Remediation: cancellation requires owning the task. Use \
                  masc_board_post to ask the current assignee to cancel or release, or \
-                 claim a different task with masc_claim_next."
+                 claim a different task with keeper_task_claim."
               | Masc_domain.InProgress _, Masc_domain.Claim ->
                 " Remediation: task is already in_progress under someone. Use \
-                 masc_claim_next for unclaimed work."
+                 keeper_task_claim for unclaimed work."
               | Masc_domain.InProgress _, Masc_domain.Start ->
                 " Remediation: task is already in_progress. Valid actions from \
                  in_progress: done, submit_for_verification, release, cancel."

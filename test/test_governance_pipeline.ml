@@ -5,7 +5,7 @@ module Workspace = Masc.Workspace
 module Tool_dispatch = Tool_dispatch
 module Tool_result = Tool_result
 
-let explicit_claim_tool = "masc_claim_next"
+let explicit_claim_tool = "keeper_task_claim"
 let generic_transition_tool = "masc_transition"
 let transition_claim_input = `Assoc [("action", `String "claim")]
 let transition_start_input = `Assoc [("action", `String "start")]

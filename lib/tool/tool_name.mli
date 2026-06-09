@@ -11,7 +11,6 @@ module Task_name : sig
   type t =
     | Add_task
     | Batch_add_tasks
-    | Claim_next
     | Task_history
     | Tasks
     | Transition

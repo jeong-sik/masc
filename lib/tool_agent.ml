@@ -379,7 +379,6 @@ let handle_agent_card ?(tool_name = "masc_agent_card") ?(start_time = 0.0) ctx a
                    "masc_status";
                    "masc_agents";
                    "masc_tasks";
-                   "masc_claim_next";
                    "masc_transition";
                    "masc_dashboard";
                    "masc_tool_help";

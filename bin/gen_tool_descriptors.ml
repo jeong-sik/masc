@@ -136,7 +136,7 @@ let masc_plan_init_spec : tool_spec =
   ; description =
       "Initialize a planning context for a task, creating task_plan.md, notes.md, and \
        deliverable.md structure. Use when starting structured work on a claimed task \
-       that needs planning artifacts. After masc_claim_next or masc_add_task; follow up \
+       that needs planning artifacts. After keeper_task_claim; follow up \
        with masc_plan_update to write the plan."
   ; parameters =
       [ { p_name = "task_id"
@@ -197,7 +197,7 @@ let masc_plan_set_task_spec : tool_spec =
   ; description =
       "Set the current task for your session so you can omit task_id in subsequent \
        planning calls. Use when starting work on a task after claiming it. After \
-       masc_claim_next; auto-cleared on session end."
+       keeper_task_claim; auto-cleared on session end."
   ; parameters =
       [ { p_name = "task_id"
         ; p_type = T_string { enum = None; default = None }

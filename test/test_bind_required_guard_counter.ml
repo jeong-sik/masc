@@ -26,7 +26,7 @@ let test_metric_name_stable () =
     Masc.Otel_metric_store.metric_tool_bind_required_guard
 
 let test_increments_workspace_uninitialized () =
-  let tool = "masc_claim_next" in
+  let tool = "keeper_task_claim" in
   let agent_name = "san-test-9770" in
   let reason = "workspace_uninitialized" in
   let before = counter_for ~tool ~agent_name ~reason in
@@ -42,7 +42,7 @@ let test_increments_workspace_uninitialized () =
     (counter_for ~tool ~agent_name ~reason)
 
 let test_increments_agent_not_bound () =
-  let tool = "masc_claim_next" in
+  let tool = "keeper_task_claim" in
   let agent_name = "nic-test-9770" in
   let reason = "agent_not_bound" in
   let before = counter_for ~tool ~agent_name ~reason in
@@ -78,7 +78,7 @@ let test_label_isolation_across_reasons () =
     (counter_for ~tool ~agent_name ~reason:"workspace_uninitialized")
 
 let test_label_isolation_across_agents () =
-  let tool = "masc_claim_next" in
+  let tool = "keeper_task_claim" in
   let reason = "agent_not_bound" in
   let agent_a = "alpha-9770" in
   let agent_b = "beta-9770" in

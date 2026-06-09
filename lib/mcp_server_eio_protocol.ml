@@ -110,7 +110,6 @@ let resource_id_of_uri uri =
 
 let affected_resource_ids_for_tool = function
   | "masc_add_task"
-  | "masc_claim_next"
   | "masc_transition"
   | "masc_update_priority"
   | "masc_plan_set_task"

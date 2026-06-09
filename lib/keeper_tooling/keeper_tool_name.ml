@@ -154,7 +154,6 @@ let of_string = function
 let pp fmt t = Format.pp_print_string fmt (to_string t)
 ;;
 
-let legacy_masc_claim_next_name = "masc_claim_next"
 let legacy_masc_broadcast_name = "masc_broadcast"
 let legacy_masc_deliver_name = "masc_deliver"
 

@@ -8,8 +8,6 @@ let check_support capability name expected =
 
 let test_claim_task_supports_keeper_and_public_projection () =
   check_support Axis.Claim_task "keeper_task_claim" true;
-  check_support Axis.Claim_task "masc_claim_next" true;
-  check_support Axis.Claim_task "mcp__masc__masc_claim_next" true;
   check_support Axis.Claim_task "keeper_tasks_list" false
 ;;
 

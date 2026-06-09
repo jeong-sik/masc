@@ -58,8 +58,6 @@ val pp : Format.formatter -> t -> unit
 
 (** Public MCP-client names still accepted while runtime descriptors project
     keeper-owned tools onto the public MCP surface. *)
-val legacy_masc_claim_next_name : string
-
 val legacy_masc_broadcast_name : string
 
 val legacy_masc_deliver_name : string

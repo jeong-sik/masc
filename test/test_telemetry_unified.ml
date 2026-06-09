@@ -517,6 +517,31 @@ let test_time_window_n_zero_disables_truncation () =
   Alcotest.(check int) "total matching preserved" 3 result.total_matching_entries;
   Alcotest.(check bool) "unbounded result is not truncated" false result.truncated
 
+(* n=0 ("unlimited") with no time window must reach the tail-bounded reader
+   ([read_recent]), not the full-store [read_range] scan (1970->today) that
+   Yojson-parsed the whole store and starved keeper fibers, and not the empty
+   list the #20649 regression produced for fixed sources. With fewer entries
+   than [unbounded_window_scan_cap], all are returned. *)
+let test_n_zero_no_window_returns_bounded () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "telem_n0_no_window" in
+  let telemetry_dir = Filename.concat dir ".masc/telemetry" in
+  Fs_compat.mkdir_p telemetry_dir;
+  let now = Unix.gettimeofday () in
+  write_jsonl telemetry_dir [
+    `Assoc [("timestamp", `Float (now -. 900.0)); ("event", `String "a")];
+    `Assoc [("timestamp", `Float (now -. 600.0)); ("event", `String "b")];
+    `Assoc [("timestamp", `Float (now -. 300.0)); ("event", `String "c")];
+  ];
+  let result =
+    Telemetry_unified.read_unified_result ~base_path:dir
+      ~masc_root:(masc_root dir)
+      ~sources:[ Telemetry_unified.Agent_event ] ~n:0 ()
+  in
+  Alcotest.(check int) "n=0 no-window returns all via bounded reader" 3
+    (List.length result.entries)
+
 (* ── Summary with data ───────────────────────────── *)
 
 let test_summary_with_data () =
@@ -1250,6 +1275,8 @@ let () =
             test_time_window_reads_matching_day_files;
           Alcotest.test_case "time window n=0 disables truncation" `Quick
             test_time_window_n_zero_disables_truncation;
+          Alcotest.test_case "n=0 no-window returns bounded (not full scan)"
+            `Quick test_n_zero_no_window_returns_bounded;
           Alcotest.test_case "trajectory and receipts" `Quick
             test_read_unified_reads_trajectory_and_execution_receipts;
           Alcotest.test_case "runtime contract scope filter" `Quick

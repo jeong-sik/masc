@@ -431,26 +431,42 @@ let matches_scope ?session_id ?operation_id ?worker_run_id (json : Yojson.Safe.t
 
 (* ── Read from a single fixed-path source ───────────── *)
 
+(* A non-positive [n] means "unlimited" at the call sites (dashboard /telemetry
+   sends no [n], so [read_unified_result] derives per_source = 0). Scanning the
+   entire store for that case Yojson-parsed every entry over 1970->today on the
+   keeper's Eio domain, and major-GC starved keeper fibers (measured: a single
+   no-[n] /api/v1/dashboard/telemetry request held one core at 100%+ for ~8s on
+   a 224MB execution-receipts store, blocking turns). Clamp "unlimited" to this
+   cap so every read goes through the tail-bounded readers instead of a
+   full-store [read_range]. The cap is large enough that real dashboard windows
+   never hit it; if a future caller needs more, raise it deliberately rather
+   than reintroducing an unbounded scan. *)
+let unbounded_window_scan_cap = 50_000
+
+(* Shared read path for directory-backed Dated_jsonl stores. Always routes
+   through the tail-bounded readers ([read_recent] / [read_range_recent]) so a
+   wide window or an "unlimited" ([n] <= 0) request cannot parse the whole
+   store. Returns entries filtered to the requested timestamp window, untagged;
+   callers tag with their source. *)
+let bounded_entries_for_window store ~n ?since_ts ?until_ts () =
+  let effective_n = if n <= 0 then unbounded_window_scan_cap else n in
+  let entries =
+    match effective_day_window ?since_ts ?until_ts () with
+    | None -> Dated_jsonl.read_recent store effective_n
+    | Some (since_day, until_day) ->
+      Dated_jsonl.read_range_recent store ~since:since_day ~until:until_day
+        effective_n
+  in
+  List.filter (within_requested_window ?since_ts ?until_ts) entries
+
 let read_fixed_source dir source ~n ?since_ts ?until_ts () : Yojson.Safe.t list =
   match classify_store_dir source ~site:"read_fixed_source_dir" dir with
   | Store_missing | Store_invalid -> []
   | Store_directory ->
     match Dated_jsonl.create ~base_dir:dir () with
     | store ->
-      let entries =
-        match effective_day_window ?since_ts ?until_ts () with
-        | None -> Dated_jsonl.read_recent store n
-        | Some (since_day, until_day) ->
-          (* Honour [n] on the windowed path too: [read_range] parsed every
-             entry in the day range (unbounded over multi-MB stores), then this
-             function dropped all but [n]. Bound the parse to the [n] most
-             recent in-window entries instead. *)
-          Dated_jsonl.read_range_recent store ~since:since_day ~until:until_day n
-      in
-      let entries =
-        List.filter (within_requested_window ?since_ts ?until_ts) entries
-      in
-      List.map (tag_entry source) entries
+      bounded_entries_for_window store ~n ?since_ts ?until_ts ()
+      |> List.map (tag_entry source)
     | exception (Eio.Cancel.Cancelled _ as e) -> raise e
     | exception exn ->
       observe_source_read_failure_exn source ~site:"read_fixed_source" exn;
@@ -502,19 +518,12 @@ let read_keeper_metrics_fast_top ~masc_root ~n () : Yojson.Safe.t list =
   in
   loop [] probes
 
+(* Execution-receipt stores read through the same tail-bounded helper as the
+   fixed sources. Previously an "unlimited" ([n] <= 0) request here scanned
+   1970->today via [read_range] — the measured GC-starvation path for the
+   dashboard /telemetry endpoint. *)
 let dated_jsonl_entries store ~n ?since_ts ?until_ts () =
-  let entries =
-    match effective_day_window ?since_ts ?until_ts () with
-    | Some (since_day, until_day) ->
-        Dated_jsonl.read_range store ~since:since_day ~until:until_day
-    | None when n <= 0 ->
-        let until_ts = Unix.gettimeofday () in
-        let since_day = "1970-01-01" in
-        let until_day = day_string_of_unix_seconds until_ts in
-        Dated_jsonl.read_range store ~since:since_day ~until:until_day
-    | None -> Dated_jsonl.read_recent store n
-  in
-  List.filter (within_requested_window ?since_ts ?until_ts) entries
+  bounded_entries_for_window store ~n ?since_ts ?until_ts ()
 
 let read_execution_receipts ~masc_root ?keeper_name ?since_ts ?until_ts ~n ()
     : Yojson.Safe.t list =

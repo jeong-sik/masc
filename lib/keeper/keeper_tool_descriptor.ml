@@ -166,21 +166,6 @@ let property name typ description =
   name, `Assoc [ "type", `String typ; "description", `String description ]
 ;;
 
-(* String property constrained to a closed set of values. Use when the
-   accepted values are a finite, code-defined set so the schema is a
-   single source of truth with the runtime dispatch (parse, don't
-   validate): the model is told the exact options up front instead of
-   guessing a free-form string. [values] should be derived from the
-   runtime's own enumeration, never hand-listed. *)
-let property_enum name ~values description =
-  ( name
-  , `Assoc
-      [ "type", `String "string"
-      ; "enum", `List (List.map (fun v -> `String v) values)
-      ; "description", `String description
-      ] )
-;;
-
 let object_schema ?(required = []) properties =
   `Assoc
     [ "type", `String "object"
@@ -359,16 +344,17 @@ let translate_write_file input =
   | _ -> input
 ;;
 
+(* search_files is rg (pattern search) only. Fold -i into the pattern as a
+   (?i) prefix; pass pattern/path/glob/type through. *)
 let translate_search_files input =
   match input with
   | `Assoc fields ->
-    let has_op = List.mem_assoc "op" fields in
-    let out = ref (if has_op then [] else [ "op", `String "rg" ]) in
     let is_case_insensitive =
       match List.assoc_opt "-i" fields with
       | Some (`Bool true) -> true
       | _ -> false
     in
+    let out = ref [] in
     List.iter
       (fun (k, v) ->
          match k with
@@ -382,22 +368,11 @@ let translate_search_files input =
              else v
            in
            out := (k, v') :: !out
-         | "path" | "glob" | "type" -> out := (k, v) :: !out
-         | "op" -> out := (k, v) :: !out
          | "-i" -> ()
          | _ -> out := (k, v) :: !out)
       fields;
     `Assoc (List.rev !out)
   | _ -> input
-;;
-
-let search_files_op (input : Yojson.Safe.t) : string option =
-  match input with
-  | `Assoc fields ->
-    (match List.assoc_opt "op" fields with
-     | Some (`String s) -> Some (String.lowercase_ascii (String.trim s))
-     | _ -> None)
-  | _ -> None
 ;;
 
 (* search_files is now rg (pattern search) only — always read-only. *)

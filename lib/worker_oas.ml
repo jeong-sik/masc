@@ -115,9 +115,12 @@ let local_model_gate =
   }
 ;;
 
-(* Boundary: MASC selects the internal retry policy, but OAS owns
-   retry classification, feedback synthesis, and loop control. *)
-let default_internal_tool_retry_policy = Agent_sdk.Tool_retry_policy.default_internal
+(* Boundary: MASC does not impose a tool-retry budget on workers. Retrying a
+   malformed tool call is the keeper's own competence — the SDK delivers the
+   validation error back to the model (pipeline [None] branch) and the agent
+   loop decides whether to re-emit. OAS owns retry classification, feedback
+   synthesis, and loop control; runaway is bounded by token budget + idle
+   turns, not a code-level retry count. *)
 let default_gate_config () = { local_model_gate with denied_tools = [] }
 
 (* ================================================================ *)
@@ -182,7 +185,6 @@ let build_agent
     |> Agent_sdk.Builder.with_tools tools
     |> Agent_sdk.Builder.with_hooks hooks
     |> Agent_sdk.Builder.with_guardrails guardrails
-    |> Agent_sdk.Builder.with_tool_retry_policy default_internal_tool_retry_policy
     |> Agent_sdk.Builder.with_raw_trace raw_trace
     |> Agent_sdk.Builder.with_periodic_callbacks heartbeat_callbacks
     |> Agent_sdk.Builder.with_description (description_of_meta meta)
@@ -623,7 +625,6 @@ and resume_worker_via_oas
       ~raw_trace
       ~periodic_callbacks:heartbeat_cbs
       ~guardrails
-      ~tool_retry_policy:default_internal_tool_retry_policy
       ()
   in
   let options =

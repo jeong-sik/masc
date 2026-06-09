@@ -502,19 +502,12 @@ let run_turn
                           ~site:"runtime_runtime"
                           config
                           manifest)
-                      (* Keepers use turn-level retry for transient errors but benefit
-              from OAS per-call retry for validation errors (malformed tool
-              args). retry_on_validation_error=true lets OAS re-prompt the
-              LLM with structured feedback instead of wasting a full turn.
-              retry_on_recoverable_tool_error remains false — tool-level
-              errors are handled by MASC's consecutive failure guardrail. *)
-                    ~tool_retry_policy:
-                      { Agent_sdk.Tool_retry_policy.max_retries = 2
-                      ; retry_on_validation_error = true
-                      ; retry_on_recoverable_tool_error = false
-                      ; feedback_style =
-                          Agent_sdk.Tool_retry_policy.Structured_tool_result
-                      }
+                      (* No code-level tool-retry budget. Retrying a malformed
+              tool call (e.g. missing required arg) is the keeper's own
+              competence: the SDK delivers the validation error back to the
+              model (pipeline [None] branch) and the agent loop decides whether
+              to re-emit. Runaway is bounded by max_idle_turns + token budget,
+              not a retry count that halts the turn. *)
                     ~max_idle_turns
                     ?stream_idle_timeout_s
                     ~body_timeout_s:timeout_s

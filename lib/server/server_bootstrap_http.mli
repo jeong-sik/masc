@@ -39,6 +39,19 @@ val print_startup_banner :
     Pinned at the contract seam — operator log scrapers parse the
     "MASC MCP Server listening on http://" line. *)
 
+(** {1 Internal helpers} *)
+
+val with_cleanups_on_release :
+  sw:Eio.Switch.t -> (unit -> unit) list -> unit
+(** [with_cleanups_on_release ~sw cleanups] runs each cleanup on
+    [sw] release.  Each cleanup is wrapped in its own [try/with] so
+    a single non-[Cancelled] exception cannot prevent the remaining
+    cleanups (RFC-0194 §3 PR-B spirit: an [Eio.Switch.on_release]
+    callback must be all-or-nothing across its steps).
+    [Eio.Cancel.Cancelled] propagates as usual so structured
+    cancellation honors the enclosing fiber.  Cleanups run in the
+    order supplied. *)
+
 (** {1 Accept loops} *)
 
 val serve :

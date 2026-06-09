@@ -631,27 +631,13 @@ let start_keeper_loops
         ~start_time
         (Printf.sprintf "judge: tool '%s' not allowed" name)
   in
-  let governance_judge_dispatch = make_judge_dispatch ~actor:"governance-judge" in
+  (* governance_judge subsystem removed (2026-06-09): its only factual input
+     was [Workspace.get_agents_status], which read the disk-backed
+     [.masc/agents/] registry whose producer ([Workspace_eio.register_agent])
+     had zero call sites. items/activity were already hardcoded []. So the
+     judge ran ~100 empty LLM cycles/day producing 0 judgments for ~12 days.
+     Removing the daemon rather than leaving a permanently-empty input. *)
   let operator_judge_dispatch = make_judge_dispatch ~actor:"operator-judge" in
-  fork_subsystem "governance_judge" (fun () ->
-    Dashboard_governance_judge.start
-      ~sw
-      ~clock
-      ~net
-      ~base_path:state.workspace_config.base_path
-      ~masc_tools:judge_masc_tools
-      ~dispatch:governance_judge_dispatch
-      ~build_facts:(fun () ->
-        let base =
-          `Assoc
-            [ "generated_at", `String (Masc_domain.now_iso ())
-            ; "items", `List []
-            ; "activity", `List []
-            ]
-        in
-        let agents = Workspace.get_agents_status state.workspace_config in
-        Operator_control_snapshot.merge_json_objects base (`Assoc [ "agents", agents ]))
-      ());
   fork_subsystem "operator_judge" (fun () ->
     let operator_judge_ctx : _ Operator_control.context =
       { config = state.workspace_config

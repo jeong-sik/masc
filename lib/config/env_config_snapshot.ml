@@ -571,8 +571,8 @@ let lock_entries =
   [
     entry ~default:"300.0" "MASC_LOCK_EXPIRY_WARNING_SEC"
       "Lock expiry warning threshold (seconds before expiry)";
-    entry ~default:"1800.0" "MASC_LOCK_TIMEOUT_SEC"
-      "Default lock timeout (seconds, 30 min)";
+    entry ~default:"120.0" "MASC_LOCK_TIMEOUT_SEC"
+      "Default lock timeout (seconds, 2 min)";
   ]
 
 let memory_entries = []
@@ -705,8 +705,6 @@ let smart_heartbeat_entries =
 
 let spawn_entries =
   [
-    entry ~default:"7200.0" "MASC_SPAWN_CODING_TIMEOUT_SEC"
-      "Extended timeout for coding mode (seconds, 2 hours)";
     entry ~default:"60.0" "MASC_SPAWN_GRACE_PERIOD_SEC"
       "Grace period before timeout for SIGTERM checkpoint (seconds)";
     entry ~default:"600.0" "MASC_SPAWN_TIMEOUT_SEC"

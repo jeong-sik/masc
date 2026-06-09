@@ -164,8 +164,6 @@ let local_worker_surface_tools =
   ; "masc_board_curation_submit"
   ; "masc_run_init"
   ; "masc_run_plan"
-  ; "masc_run_log"
-  ; "masc_run_deliverable"
   ; "masc_run_get"
   ; "masc_run_list"
   ]
@@ -253,8 +251,6 @@ let execution_role_tools : string list =
   ; "masc_transition"
   ; "masc_broadcast"
   ; "masc_run_init"
-  ; "masc_run_log"
-  ; "masc_run_deliverable"
   ; "masc_run_get"
   ; "masc_tool_help"
   ]

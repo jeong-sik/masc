@@ -114,7 +114,7 @@ Add 113 entries to `internal_descriptors` in `lib/keeper/agent_tool_descriptor.m
 | `masc_workspace_*` (workspace status/heartbeat/goal) | ~8 | `Tool_masc_workspace_dispatch` |
 | `masc_task_*` | ~7 | `Tool_masc_task_dispatch` |
 | `masc_operator_*` | ~6 | `Tool_masc_operator_dispatch` |
-| `masc_run_*` | ~6 | `Tool_masc_run_dispatch` |
+| `masc_run_*` | ~4 | `Tool_masc_run_dispatch` |
 | `masc_agent_*` | ~5 | `Tool_masc_agent_dispatch` |
 | `masc_library_*` | ~5 | `Tool_masc_library_dispatch` |
 | `masc_control_*` (pause/resume) | ~3 | `Tool_masc_control_dispatch` |
@@ -124,6 +124,13 @@ Add 113 entries to `internal_descriptors` in `lib/keeper/agent_tool_descriptor.m
 | Singletons (`masc_bind`, `masc_broadcast`, `masc_execute`, etc.) | ~32 | individual variants |
 
 Net new `runtime_handler` variants: ~14 cluster + ~25 singletons = **~39**. Net new descriptor entries: **113**. After this RFC: `internal_descriptors` = 39 + 113 = **152**.
+
+> Update (2026-06-09): the `masc_run_*` cluster dropped from 6 to 4
+> tools — `masc_run_log` and `masc_run_deliverable` were removed (0
+> recorded writes in fleet logs; the surviving `init`/`plan`/`get`/`list`
+> cover run tracking). The `~N` per-cluster counts above are live
+> approximations; the net-new totals are the point-in-time projection
+> at RFC authoring and are left as the historical record.
 
 The In_process handler for each cluster routes to the existing typed dispatcher — no logic is moved out of `tool_board_dispatch.ml`, `tool_task.ml`, etc. The descriptor layer is a *projection*, not a relocation.
 

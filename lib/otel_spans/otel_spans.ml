@@ -36,6 +36,14 @@ let init () =
   if Otel_config.enabled && not (Atomic.get initialized) then begin
     Atomic.set initialized true;
     OT.Globals.service_name := Otel_config.service_name;
+    (* Disable the opentelemetry library's internal self-instrumentation
+       ("encode-proto" spans emitted by Self_trace.with_ in client/signal.ml).
+       When the exporter encodes a batch while running on a keeper fiber, the
+       self-span nests into that fiber's active ambient scope and attaches to
+       the live invoke_agent (keeper-turn) trace. Measured on a post-deploy
+       production trace (commit c36e0d1, masc service): 2260 of 2283 spans
+       (99%) were encode-proto noise. These carry no application signal. *)
+    Opentelemetry_client.Self_trace.set_enabled false;
     (* ambient-context-eio storage is set automatically when the library is linked.
        Eio fiber-local context propagation works via Ambient_context_eio.storage. *)
     ignore (Ambient_context_eio.storage : Ambient_context.Storage.t)

@@ -737,4 +737,19 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
     (Keeper_metrics.to_string PromptSegmentBytes)
     ~labels:[("keeper", meta.name); ("segment", "user_message")]
     (Float.of_int (String.length sanitized_user));
+  (* Instruction hash: emit a stable numeric fingerprint of the full prompt
+     composition (system + user) so Grafana can detect when the instruction
+     changes between turns without storing the prompt content itself.
+     Uses first 8 hex chars of SHA-256 as an integer (32-bit). *)
+  let prompt_hash =
+    let combined = sanitized_system ^ sanitized_user in
+    let hex =
+      Digestif.SHA256.(to_hex (digest_string combined))
+    in
+    Int32.to_float (Int32.of_string ("0x" ^ String.sub hex 0 8))
+  in
+  Otel_metric_store.set_gauge
+    (Keeper_metrics.to_string KeeperTurnInstructionHash)
+    ~labels:[("keeper", meta.name)]
+    prompt_hash;
   ( sanitized_system, sanitized_user )

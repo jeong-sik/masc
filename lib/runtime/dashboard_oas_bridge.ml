@@ -29,14 +29,6 @@ type sample = {
   retry_count : int;
 }
 
-type provider_error_count = {
-  provider_id : string;
-  runtime_id : string;
-  kind : string;
-  capacity_scope : string;
-  count : int;
-}
-
 (* Guards [table]. Critical sections are short — queue push, fold, or clear.
    Stdlib.Mutex is chosen over Eio.Mutex because record/read may be called
    from different domains, and the section never yields to Eio. Same
@@ -46,9 +38,6 @@ let mu = Mutex.create ()
 (* Per-provider FIFO. Head = oldest, tail = newest. *)
 let table : (string, (sample * float) Queue.t) Hashtbl.t =
   Hashtbl.create 8
-
-let provider_error_table : (string * string * string * string, int) Hashtbl.t =
-  Hashtbl.create 16
 
 let with_lock f =
   Mutex.lock mu;
@@ -118,16 +107,6 @@ let sample_entry_to_yojson (s, recorded_at) =
     [
       ("sample", sample_to_yojson s);
       ("recorded_at", `Float recorded_at);
-    ]
-
-let provider_error_count_to_yojson (c : provider_error_count) =
-  `Assoc
-    [
-      ("provider_id", `String public_runtime_provider_label);
-      ("runtime_id", `String c.runtime_id);
-      ("kind", `String c.kind);
-      ("capacity_scope", `String c.capacity_scope);
-      ("count", `Int c.count);
     ]
 
 let provider_json = function
@@ -287,68 +266,6 @@ let record_response ~provider_id ~model_id ?total_duration_ms ?serialization_ms
     (sample_of_response ~provider_id ~model_id ?total_duration_ms
        ?serialization_ms ?retry_count ~status response)
 
-let provider_error_capacity_scope_label = function
-  | Provider_error.CapacityBackpressure { scope } ->
-      Provider_error.scope_to_string scope
-  | Provider_error.RateLimit _
-  | Provider_error.AuthError
-  | Provider_error.ServerError _
-  | Provider_error.InvalidRequest _
-  | Provider_error.CliWrappedHardQuota _
-  | Provider_error.CliWrappedMaxTurns _
-  | Provider_error.CliWrappedResumableSession _
-  | Provider_error.PermissionDenied _
-  | Provider_error.ModelNotFound ->
-      "none"
-
-let record_provider_error ~runtime_id ~provider_id:_ error =
-  let kind = Provider_error.to_error_kind error in
-  let capacity_scope = provider_error_capacity_scope_label error in
-  let provider_id = public_runtime_provider_label in
-  let key = (provider_id, runtime_id, kind, capacity_scope) in
-  with_lock (fun () ->
-      let count =
-        match Hashtbl.find_opt provider_error_table key with
-        | Some count -> count
-        | None -> 0
-      in
-      Hashtbl.replace provider_error_table key (count + 1))
-
-let compare_provider_error_count a b =
-  match Int.compare b.count a.count with
-  | 0 -> (
-      match String.compare a.provider_id b.provider_id with
-      | 0 -> (
-          match String.compare a.runtime_id b.runtime_id with
-          | 0 -> (
-              match String.compare a.kind b.kind with
-              | 0 -> String.compare a.capacity_scope b.capacity_scope
-              | c -> c)
-          | c -> c)
-      | c -> c)
-  | c -> c
-
-let provider_error_counts ?provider () =
-  let provider = normalize_provider_filter provider in
-  let counts =
-    with_lock (fun () ->
-        Hashtbl.fold
-          (fun (provider_id, runtime_id, kind, capacity_scope) count acc ->
-            match provider with
-            | Some provider when not (String.equal provider provider_id) -> acc
-            | _ ->
-                {
-                  provider_id;
-                  runtime_id;
-                  kind;
-                  capacity_scope;
-                  count;
-                }
-                :: acc)
-          provider_error_table [])
-  in
-  List.sort compare_provider_error_count counts
-
 let snapshot_provider _provider =
   let provider = public_runtime_provider_label in
   with_lock (fun () ->
@@ -386,10 +303,9 @@ type summary = {
   total_cost_usd : float;
   error_ratio : float;
   cancelled_count : int;
-  provider_error_counts : provider_error_count list;
 }
 
-let zero_summary provider_error_counts =
+let zero_summary () =
   {
     sample_count = 0;
     ttfb_p50_ms = 0.0;
@@ -401,7 +317,6 @@ let zero_summary provider_error_counts =
     total_cost_usd = 0.0;
     error_ratio = 0.0;
     cancelled_count = 0;
-    provider_error_counts;
   }
 
 (* Nearest-rank percentile (no interpolation) keeps the dashboard
@@ -418,9 +333,8 @@ let percentile (sorted : float array) (p : float) =
 
 let summary ?provider ?limit () =
   let xs = recent ?provider ?limit () in
-  let provider_error_counts = provider_error_counts ?provider () in
   match xs with
-  | [] -> zero_summary provider_error_counts
+  | [] -> zero_summary ()
   | _ ->
       let n = List.length xs in
       let ttfbs =
@@ -474,7 +388,6 @@ let summary ?provider ?limit () =
         total_cost_usd = total_cost;
         error_ratio = float_of_int errors /. float_of_int n;
         cancelled_count = cancels;
-        provider_error_counts;
       }
 
 let summary_to_yojson (s : summary) =
@@ -490,9 +403,6 @@ let summary_to_yojson (s : summary) =
       ("total_cost_usd", `Float s.total_cost_usd);
       ("error_ratio", `Float s.error_ratio);
       ("cancelled_count", `Int s.cancelled_count);
-      ( "provider_error_counts",
-        `List (List.map provider_error_count_to_yojson s.provider_error_counts)
-      )
     ]
 
 let recent_json ?provider ?limit () =
@@ -526,16 +436,6 @@ let clear ?provider () =
   with_lock (fun () ->
       match normalize_provider_filter provider with
       | Some p ->
-          Hashtbl.remove table p;
-          let keys =
-            Hashtbl.fold
-              (fun (provider_id, runtime_id, kind, capacity_scope) _ acc ->
-                if String.equal provider_id p then
-                  (provider_id, runtime_id, kind, capacity_scope) :: acc
-                else acc)
-              provider_error_table []
-          in
-          List.iter (Hashtbl.remove provider_error_table) keys
+          Hashtbl.remove table p
       | None ->
-          Hashtbl.reset table;
-          Hashtbl.reset provider_error_table)
+          Hashtbl.reset table)

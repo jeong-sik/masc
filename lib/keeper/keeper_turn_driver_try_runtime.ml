@@ -36,8 +36,6 @@ type try_runtime_ctx =
   ; record_provider_health_result :
       Runtime_candidate.t -> success:bool -> http_status:int option -> unit
   ; filter_provider_health_fail_open : Runtime_candidate.t list -> Runtime_candidate.t list
-  ; record_provider_health_error :
-      Runtime_candidate.t -> Provider_error.t -> unit
   ; wait_timeout_sec : float option
   ; turn_deadline : Runtime_deadline.t option
   }
@@ -142,7 +140,6 @@ let run
     , ctx.session_id
     , ctx.error_runtime_id_for_backpressure
     , ctx.filter_provider_health_fail_open
-    , ctx.record_provider_health_error
     , ctx.wait_timeout_sec
     , ctx.turn_deadline )
   in

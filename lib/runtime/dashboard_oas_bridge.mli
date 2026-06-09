@@ -131,29 +131,6 @@ val record_response :
   unit
 (** Convert an OAS response with {!sample_of_response}, then {!record} it. *)
 
-type provider_error_count = {
-  provider_id : string;
-  runtime_id : string;
-  kind : string;
-  capacity_scope : string;
-  count : int;
-}
-(** Aggregated provider-error variant count emitted by the OAS worker
-    boundary. [kind] follows {!Provider_error.to_error_kind};
-    [capacity_scope] is ["none"] for non-capacity errors. *)
-
-val record_provider_error :
-  runtime_id:string -> provider_id:string -> Provider_error.t -> unit
-(** [record_provider_error ~runtime_id ~provider_id error] increments the
-    dashboard count for a typed provider-error event. [provider_id] is accepted
-    for source compatibility but normalized to the runtime lane before
-    storage. *)
-
-val provider_error_counts : ?provider:string -> unit -> provider_error_count list
-(** Current provider-error counts, sorted by descending [count]. [provider] is
-    accepted as a legacy runtime-lane filter; concrete provider identities are
-    not tracked. *)
-
 val recent :
   ?provider:string -> ?limit:int -> unit -> (sample * float) list
 (** [recent ?provider ?limit ()] returns up to [limit] most recent samples,
@@ -185,7 +162,6 @@ type summary = {
   error_ratio : float;
       (** [(Error \/ Timeout) / sample_count] — Cancelled is excluded. *)
   cancelled_count : int;  (** Explicit cancellation count. *)
-  provider_error_counts : provider_error_count list;
 }
 
 val summary : ?provider:string -> ?limit:int -> unit -> summary

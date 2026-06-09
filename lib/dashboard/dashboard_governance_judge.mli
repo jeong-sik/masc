@@ -6,22 +6,29 @@
 
     External surface:
     - {b types} ({!runtime_snapshot}, {!state},
-      {!governance_model_source}) reached as records or
-      type refs by [dashboard_governance.ml],
+      {!compute_in_flight_state}, {!governance_model_source})
+      reached as records or type refs by [dashboard_governance.ml],
       [dashboard_http_monitoring.ml], the runtime-status
       regression test, and the response-model regression
       test.
     - {b read paths} ({!fresh_judgments_json},
-      {!runtime_status}, {!runtime_status_at}) consumed
-      by the dashboard JSON producer and HTTP monitoring
-      route.
+      {!runtime_status}, {!runtime_status_at}, {!read_in_flight})
+      consumed by the dashboard JSON producer, HTTP monitoring
+      route, and the white-box regression suite.
     - {b state lifecycle} ({!get_state}, {!with_lock},
-      {!mark_refresh_failure}, {!refresh_once}, {!start})
+      {!mark_refresh_failure}, {!mark_compute_start},
+      {!mark_compute_finish}, {!refresh_once}, {!start})
       consumed by the bootstrap loop + the white-box
-      regression suite.
+      regression suite.  The compute lifecycle pair
+      ({!mark_compute_start} / {!mark_compute_finish})
+      replaced the [Eio.Switch.on_release] counter that
+      PR #20479 added; see {!compute_in_flight_state} for
+      the typed invariant.
     - {b classification} ({!resolve_governance_model_used},
-      {!governance_model_source_to_string}) consumed by
-      the per-cycle empty-model regression test.
+      {!governance_model_source_to_string},
+      {!level_of_compute_outcome}) consumed by the
+      per-cycle empty-model regression test and the
+      compute-telemetry severity regression.
     - {b daemon identity} ({!keeper_name}) embedded into
       the dashboard envelope.
 
@@ -145,14 +152,12 @@ type state = {
     seed cache state for individual scenarios.  The
     [judgments] table and [mutex] are exposed alongside
     them for the same reason.  The compute telemetry
-    fields expose #11079 measurement state: the
-    [compute_state] state machine is the source of truth
-    for the in-flight cycle, with [next_cycle_id]
-    monotonically increasing per cycle; [last_duration /
-    timeout / outcome / reason] record the most recent
-    terminal cycle.  [next_compute_after_unix] records
-    timeout backoff for advisory judge retries.  Every
-    other reader goes through {!runtime_status} /
+    ([compute_state] + the last duration / outcome / reason
+    triple) replaces the #11079 [int] counter.  The
+    [next_cycle_id] field drives [mark_compute_start]'s
+    monotonic tag.  [next_compute_after_unix] records
+    timeout backoff for advisory judge retries.  Every other
+    reader goes through {!runtime_status} /
     {!fresh_judgments_json}. *)
 
 val read_in_flight : state -> int
@@ -180,6 +185,7 @@ val mark_compute_start : state -> int
 
 val mark_compute_finish :
   state ->
+  cycle_id:int ->
   started_at:float ->
   outcome:string ->
   reason:string ->
@@ -191,7 +197,11 @@ val mark_compute_finish :
     [governance_compute_in_flight] gauge at [0.0], emit
     the [refresh_once: compute_judgments telemetry …]
     line at the outcome-derived severity, and observe the
-    duration histogram.  [started_at] is the wall clock
+    duration histogram.  [cycle_id] is the value returned
+    by the matching {!mark_compute_start}; a finish whose
+    [cycle_id] does not match the current [In_flight] cycle
+    (because a newer cycle replaced it) is logged at
+    [routine] and discarded.  [started_at] is the wall clock
     captured at the matching {!mark_compute_start}; the
     duration is clamped to [>= 0] so a backwards clock
     adjustment (NTP step, manual change) cannot inject a
@@ -288,6 +298,58 @@ val mark_refresh_failure :
     the cached judgments while their TTL is still valid
     (degrades to stale-but-visible rather than flipping
     offline immediately). *)
+
+val mark_compute_start : state -> int
+(** Transitions the daemon's [compute_state] from [Idle]
+    to [In_flight { … }] and returns the new monotonic
+    [cycle_id].  If a previous [In_flight] cycle is still
+    recorded, it is replaced (with a [Log.Governance.routine]
+    note) — the daemon's loop is sequential, so this
+    represents an anomaly case rather than normal flow.
+
+    Updates the [governance_compute_in_flight] gauge to [1].
+    Exposed because the regression suite
+    ([test/test_dashboard_governance.ml] test 5) drives the
+    state machine directly to assert on cycle-id
+    monotonicity and the Idle→In_flight transition. *)
+
+val mark_compute_finish :
+  state -> cycle_id:int -> started_at:float -> outcome:string -> reason:string -> float * int
+(** Resets the daemon's [compute_state] to [Idle] and emits
+    the terminal telemetry for one cycle: duration observed
+    from [started_at] (clamped to [\>= 0.0]), the
+    [governance_compute_total] counter, and the
+    [governance_compute_duration] histogram.  The
+    [governance_compute_in_flight] gauge is set to [0].
+
+    [cycle_id] is the value returned by the matching
+    {!mark_compute_start}; a finish whose [cycle_id] does
+    not match the current [In_flight] cycle (because a newer
+    cycle replaced it) is logged at [routine] and discarded.
+
+    Returns [(duration_sec, in_flight_after)] where
+    [in_flight_after] is the post-reset [read_in_flight]
+    projection (always [0] in a healthy cycle; the value
+    is surfaced so the embedded [in_flight_after=…] log
+    line and the histogram can both read the same
+    under-lock snapshot).  A stray call (state already
+    [Idle]) is a defensive no-op with a
+    [Log.Governance.routine] note — the user-site
+    exception path can re-raise after partial teardown,
+    so this is the only path that is allowed to drop
+    the cycle tag without panicking. *)
+
+val read_in_flight : state -> int
+(** Projects the [compute_state] field to the [int] view
+    used by the runtime snapshot.  Returns [0] for [Idle]
+    and [1] for [In_flight _].  Exposed because the
+    regression suite drives the state machine directly to
+    assert the [0/1] surface stays in sync with the
+    underlying enum.  All other readers go through
+    {!runtime_status_at}.  Kept as a [val] (not inlined
+    into [runtime_status]) to preserve the
+    "single read of the state under one lock" invariant
+    that test 5 depends on. *)
 
 (** {1 Read paths} *)
 

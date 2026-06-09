@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { useRef, useEffect, useMemo, useState } from 'preact/hooks'
-import { useSignalValue } from './use-signal-value'
+import { useSignalValue, useStoreSubscription } from './use-signal-value'
 import { EditorState } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
 import type { CodeDocumentStore } from './code-document-store'
@@ -94,8 +94,8 @@ export function IdeEditor({
   onKeeperLineSelect,
   annotations = [],
 }: IdeEditorProps) {
-  useSignalValue(documentStore)
-  useSignalValue(ownershipStore)
+  useStoreSubscription(documentStore.subscribe)
+  useStoreSubscription(ownershipStore.subscribe)
   useSignalValue(cursorOverlaySignal)
   useSignalValue(globalPresenceSnapshot)
   useSignalValue(ideContextFocus)
@@ -468,8 +468,8 @@ function CodeMirrorEditor({
     ready,
   ])
 
-  useSignalValue(documentStore)
-  useSignalValue(ownershipStore)
+  useStoreSubscription(documentStore.subscribe)
+  useStoreSubscription(ownershipStore.subscribe)
   useSignalValue(keeperTraceState)
 
   return html`

@@ -49,3 +49,16 @@ export function useSubscribedSnapshot<T>(
 
   return value
 }
+
+// Subscribe to an external store for re-render side effects only. Use this when
+// the component reads store state through accessor methods (in render, effects,
+// or callbacks) rather than a single reactive value. useSignalValue and
+// useSubscribedValue/useSubscribedSnapshot return a value; this returns nothing
+// because the caller already reads via the store's own accessors. The store's
+// listener is called with no argument, so a value-returning hook does not fit.
+export function useStoreSubscription(
+  subscribe: (listener: () => void) => () => void,
+): void {
+  const [, forceRender] = useState(0)
+  useEffect(() => subscribe(() => forceRender(tick => tick + 1)), [subscribe])
+}

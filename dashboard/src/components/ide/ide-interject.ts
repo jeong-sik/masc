@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
-import { useSignalValue } from './use-signal-value'
+import { useStoreSubscription } from './use-signal-value'
 import type { FunctionComponent } from 'preact'
 import { dispatchKeeperInterjectAction } from '../../keeper-actions'
 import { activeKeeperName } from '../../keeper-state'
@@ -44,7 +44,7 @@ export const IdeInterject: FunctionComponent<IdeInterjectProps> = ({ keeperName 
       initialActiveKeeper: resolveActiveKeeper(keeperName),
       dispatch: dispatchInterject,
     }))
-  useSignalValue(interjectStore)
+  useStoreSubscription(interjectStore.subscribe)
 
   useEffect(() => {
     const unsub = activeKeeperName.subscribe(name => {

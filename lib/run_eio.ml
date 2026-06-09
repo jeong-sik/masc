@@ -29,9 +29,10 @@ let run_record_to_json (r : run_record) : Yojson.Safe.t =
   ]
 
 let run_record_of_json (json : Yojson.Safe.t) : run_record option =
-  match Safe_ops.json_string_opt "task_id" json,
-        Safe_ops.json_string_opt "created_at" json,
-        Safe_ops.json_string_opt "updated_at" json with
+  let task_id_opt = Safe_ops.json_string_opt "task_id" json in
+  let created_at_opt = Safe_ops.json_string_opt "created_at" json in
+  let updated_at_opt = Safe_ops.json_string_opt "updated_at" json in
+  match task_id_opt, created_at_opt, updated_at_opt with
   | Some task_id, Some created_at, Some updated_at ->
     let agent_name = Safe_ops.json_string_opt "agent_name" json in
     let plan = Safe_ops.json_string ~default:"" "plan" json in
@@ -39,9 +40,9 @@ let run_record_of_json (json : Yojson.Safe.t) : run_record option =
   | _ ->
     Otel_metric_store.inc_counter Otel_metric_store.metric_error_events ~labels:[("type", Error_event_type.(to_label Parsing))] ();
     Log.Misc.error "run_of_json: missing required fields (task_id=%s created_at=%s updated_at=%s)"
-      (match task_id with Some s -> s | None -> "(absent)")
-      (match created_at with Some s -> s | None -> "(absent)")
-      (match updated_at with Some s -> s | None -> "(absent)");
+      (match task_id_opt with Some s -> s | None -> "(absent)")
+      (match created_at_opt with Some s -> s | None -> "(absent)")
+      (match updated_at_opt with Some s -> s | None -> "(absent)");
     None
 
 let runs_dir (config : config) =

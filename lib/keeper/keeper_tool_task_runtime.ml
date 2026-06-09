@@ -555,6 +555,7 @@ let handle_keeper_task_tool
     in
     let wip_rejections = List.rev !wip_rejections in
     let auto_started_ok = ref false in
+    let harness_completed = ref false in
     (match result with
      | Workspace.Claim_next_claimed { task_id; _ } ->
        sync_keeper_meta_current_task ~config ~meta ~task_id;
@@ -581,7 +582,45 @@ let handle_keeper_task_tool
          in
          auto_started_ok := Tool_result.is_success start_result
        end else
-         auto_started_ok := true
+         auto_started_ok := true;
+       (* RFC-0199 Phase B: deterministic evidence harness. When the claimed
+          task declares typed [evidence_claims] and all are satisfied by a file
+          probe, complete it immediately — no LLM turn. Uses [force_done_task_r]
+          so a deterministic check does not route through the non-deterministic
+          anti-rationalization gate (force_done is the existing keeper-Done
+          path; Done_action is exempt from the CDAL substring gate). Guarded to
+          Claimed/InProgress so it never hits the AwaitingVerification
+          Invalid_transition; idempotent if another agent reached Done first. *)
+       (match
+          Workspace.get_tasks_raw config
+          |> List.find_opt (fun (t : Masc_domain.task) ->
+                 String.equal t.id task_id)
+        with
+        | Some
+            { contract = Some { evidence_claims = _ :: _ as claims; _ }
+            ; task_status = (Masc_domain.Claimed _ | Masc_domain.InProgress _)
+            ; _
+            }
+          when Keeper_deterministic_evidence_probe.all_satisfied ~config ~meta
+                 claims ->
+          let summary =
+            claims
+            |> List.map Evidence_claim.to_human_string
+            |> String.concat "; "
+          in
+          let notes =
+            Printf.sprintf
+              "RFC-0199 deterministic harness: %d evidence claim(s) satisfied \
+               [%s]"
+              (List.length claims) summary
+          in
+          (match
+             Workspace.force_done_task_r config
+               ~agent_name:(keeper_agent_sender ~meta) ~task_id ~notes ()
+           with
+           | Ok _ -> harness_completed := true
+           | Error _ -> ())
+        | _ -> ())
      | Workspace.Claim_next_no_unclaimed
      | Workspace.Claim_next_no_eligible _
      | Workspace.Claim_next_error _ -> ());
@@ -598,7 +637,12 @@ let handle_keeper_task_tool
     let message =
       match result with
       | Workspace.Claim_next_claimed { message; _ } ->
-          if !auto_started_ok then message ^ " Task auto-started — begin work now."
+          if !harness_completed then
+            message
+            ^ " Task completed immediately — all declared evidence claims were \
+               already satisfied (no work needed)."
+          else if !auto_started_ok then
+            message ^ " Task auto-started — begin work now."
           else message
       | Workspace.Claim_next_no_unclaimed -> "No unclaimed tasks. ACTION: Stop task-checking — nothing to claim."
       | Workspace.Claim_next_no_eligible

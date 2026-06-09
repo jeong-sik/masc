@@ -64,7 +64,7 @@ let _keeper_snapshot_max_concurrency =
 let _keeper_sem = Eio.Semaphore.make _keeper_snapshot_max_concurrency
 
 (* PR-C2: encapsulate [Eio.Semaphore.acquire]/[release] inside a single
-   [Fun.protect] scope so the slot is released even when the body raises
+   helper scope so the slot is released even when the body raises
    non-Cancelled exceptions (which the previous on_release callback could
    not guarantee -- a [Log.Dashboard.info] failure inside the callback
    would skip the release and leak the slot).
@@ -85,15 +85,10 @@ let with_keeper_slot ~sem ~name f =
   Eio.Semaphore.acquire sem;
   let t_work_start = Time_compat.now () in
   let wait_ms = (t_work_start -. t_wait_start) *. 1000.0 in
-  (* fun-protect-finally-ok: [Eio.Semaphore.release] is the synchronous
-     counter-increment path -- it does NOT suspend the fiber and does NOT
-     acquire additional Eio resources.  Per the Eio 0.3+ reference and
-     [lib_eio/semaphore.ml] (Counter++; wake-one-waiter via run-queue,
-     not a switch): no risk of yielding on cooperative cancellation
-     unwind.  Fun.protect ~finally is the right primitive for the
-     exception-safety fix (PR-B/20479 spread to PR-C2); a Switch.on_release
-     callback would not catch non-Cancelled exceptions in the body. *)
+  (* fun-protect-finally-ok: Eio.Semaphore.release is non-suspending
+     (Atomic.incr + run-queue wake, no fiber switch). *)
   Fun.protect
+
     ~finally:(fun () -> Eio.Semaphore.release sem)
     (fun () ->
        try

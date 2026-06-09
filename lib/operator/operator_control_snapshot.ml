@@ -85,6 +85,14 @@ let with_keeper_slot ~sem ~name f =
   Eio.Semaphore.acquire sem;
   let t_work_start = Time_compat.now () in
   let wait_ms = (t_work_start -. t_wait_start) *. 1000.0 in
+  (* fun-protect-finally-ok: [Eio.Semaphore.release] is the synchronous
+     counter-increment path -- it does NOT suspend the fiber and does NOT
+     acquire additional Eio resources.  Per the Eio 0.3+ reference and
+     [lib_eio/semaphore.ml] (Counter++; wake-one-waiter via run-queue,
+     not a switch): no risk of yielding on cooperative cancellation
+     unwind.  Fun.protect ~finally is the right primitive for the
+     exception-safety fix (PR-B/20479 spread to PR-C2); a Switch.on_release
+     callback would not catch non-Cancelled exceptions in the body. *)
   Fun.protect
     ~finally:(fun () -> Eio.Semaphore.release sem)
     (fun () ->

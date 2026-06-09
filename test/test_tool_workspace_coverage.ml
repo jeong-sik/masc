@@ -829,9 +829,10 @@ let () =
 let next_hint = Workspace_task.next_actions_hint
 
 let () =
-  test "next_hint_todo lists claim and cancel" (fun () ->
+  test "next_hint_todo lists claim, release, and cancel" (fun () ->
     let h = next_hint Masc_domain.Todo in
     assert (str_contains h "claim");
+    assert (str_contains h "release");
     assert (str_contains h "cancel");
     assert (str_contains h "valid_next_actions="))
 ;;

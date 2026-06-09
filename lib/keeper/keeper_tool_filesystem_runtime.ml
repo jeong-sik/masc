@@ -151,6 +151,21 @@ let resolve_read_file_target
       let resolve_shared candidate =
         match resolve_keeper_read_path ~config ~meta ~raw_path:candidate with
         | Ok _ as ok -> ok
+        (* Mirror resolve_projected below: route a
+           path_not_found_under_allowed_roots rejection to Missing_file so
+           the keeper gets the rich missing_file_error_json (your_playground
+           + live available_repos scan) instead of the bare {error}. The
+           bare message text says "check your_playground for available
+           files" but Read_path_error omits that field, so repo-prefixed
+           paths (incl. masc-mcp->masc rename-drift victims) could not
+           self-correct. This removes an asymmetry between the two sibling
+           resolvers; it adds no new classifier (the prefix check already
+           exists in resolve_projected). *)
+        | Error e
+          when String.starts_with
+                 ~prefix:"path_not_found_under_allowed_roots:"
+                 e ->
+          Error (Missing_file { target = candidate; error = e })
         | Error e -> Error (Read_path_error e)
       in
       let resolve_projected candidate =

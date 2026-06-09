@@ -464,15 +464,13 @@ let tool_execute_schema =
 let keeper_search_files_schema =
   find_schema_exn "tool_search_files" Config.raw_all_tool_schemas
 
-(* Every op the runtime dispatch in keeper_workspace_read_ops.ml handles.
-   The search_files schema constrains op to a closed enum derived from
-   Keeper_workspace_op.valid_strings (the SAME SSOT the runtime uses), so a
-   schema enum narrower than this set would reject ops that actually work —
-   the failure mode if someone hand-lists only the directory-listing ops.
-   This list mirrors the runtime match arms. *)
-let runtime_search_ops =
-  [ "pwd"; "ls"; "cat"; "rg"; "git_status"; "find"
-  ; "head"; "tail"; "wc"; "tree"; "git_log"; "git_diff" ]
+(* Every op the runtime dispatch handles, taken from the SAME SSOT the schema
+   enum and the variant-exhaustive dispatch derive from — not a hand-listed
+   copy. A schema enum narrower than this set would reject ops that actually
+   work (the failure mode if someone hand-lists only the directory-listing
+   ops); reading from valid_strings means this test cannot drift from the
+   runtime. *)
+let runtime_search_ops = Keeper_workspace_op.valid_strings
 
 let assoc_string key json =
   match Yojson.Safe.Util.member key json with

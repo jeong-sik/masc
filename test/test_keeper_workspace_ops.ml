@@ -189,6 +189,38 @@ let test_p10_docker_envelope_shape () =
     false
     (yojson_has_field "status" envelope)
 
+(* ---- of_string parsing boundary ----------------------------------- *)
+
+(* of_string is the inverse of to_string: every variant round-trips, so the
+   dispatch boundary parses any canonical op into its variant. Guards the
+   SSOT: schema enum, valid_strings, and the variant-exhaustive dispatch all
+   derive from these same strings. *)
+let test_of_string_round_trips_every_variant () =
+  List.iter
+    (fun v ->
+      let s = Keeper_workspace_op.to_string v in
+      match Keeper_workspace_op.of_string s with
+      | Some v' when v' = v -> ()
+      | Some _ -> Alcotest.failf "of_string %S parsed to a different variant" s
+      | None -> Alcotest.failf "of_string %S returned None for a valid op" s)
+    Keeper_workspace_op.all
+
+(* of_string covers exactly valid_strings, nothing more. *)
+let test_of_string_rejects_unknown () =
+  Alcotest.(check (option string))
+    "unknown op parses to None"
+    None
+    (Option.map Keeper_workspace_op.to_string
+       (Keeper_workspace_op.of_string "definitely_not_an_op"));
+  (* every valid_strings entry parses to Some *)
+  List.iter
+    (fun s ->
+      Alcotest.(check bool)
+        (Printf.sprintf "valid op %S parses" s)
+        true
+        (Option.is_some (Keeper_workspace_op.of_string s)))
+    Keeper_workspace_op.valid_strings
+
 (* ---- Suite registration ------------------------------------------- *)
 
 let () =
@@ -215,5 +247,11 @@ let () =
             test_p10_host_envelope_shape
         ; Alcotest.test_case "docker envelope fields" `Quick
             test_p10_docker_envelope_shape
+        ] )
+    ; ( "op_of_string"
+      , [ Alcotest.test_case "round-trips every variant" `Quick
+            test_of_string_round_trips_every_variant
+        ; Alcotest.test_case "rejects unknown, accepts all valid" `Quick
+            test_of_string_rejects_unknown
         ] )
     ]

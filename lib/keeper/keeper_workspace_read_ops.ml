@@ -188,8 +188,15 @@ let try_handle
   let host_search_workdir target =
     if safe_is_dir target then target else Filename.dirname target
   in
-  match op with
-  | "pwd" ->
+  (* Parse the raw op string into a variant at this boundary, then match
+     exhaustively. The compiler now forces every Keeper_workspace_op.t to be
+     handled here (or explicitly delegated), so adding a new op cannot
+     silently fall through a string match. Unknown ops parse to None and fall
+     to the ops.ml turn-runtime path, which returns the unsupported_op error
+     (behavior unchanged from the prior [| _ -> None]). *)
+  let module Op = Keeper_workspace_op in
+  match Op.of_string op with
+  | Some Op.Pwd ->
     Some
       (match cwd_target () with
        | Error e -> path_error e
@@ -204,7 +211,7 @@ let try_handle
            run_in_turn_runtime ~cwd ~cmd:"pwd" ~command_argv:[ coreutils.pwd ]
              ~host_ir ~map_output:hostify_turn_runtime_output ~max_bytes:4096
              ())
-  | "git_status" ->
+  | Some Op.Git_status ->
     Some
       (match cwd_target () with
        | Error e -> path_error e
@@ -234,7 +241,7 @@ let try_handle
                  ~extra:[]
                  result.status
                  result.stdout))
-  | "ls" ->
+  | Some Op.Ls ->
     Some
       (match read_target () with
        | Error e -> path_error e
@@ -287,7 +294,7 @@ let try_handle
                  ~extra:[ "path", `String target; "entries", lines_to_json ~limit output ]
                  result.status
                  output))
-  | "cat" ->
+  | Some Op.Cat ->
     Some
       (match read_target () with
        | Error e -> path_error e
@@ -339,7 +346,7 @@ let try_handle
                      ; "truncated", `Bool (String.length out > max_bytes)
                      ; "content", `String body
                      ])))
-  | "rg" ->
+  | Some Op.Rg ->
     Some
       (let pattern = Safe_ops.json_string ~default:"" "pattern" args |> String.trim in
        if pattern = ""
@@ -430,7 +437,7 @@ let try_handle
                           ; "matches", lines_to_json ~limit result.stdout
                           ]
                          @ error_detail)))))
-  | "git_log" ->
+  | Some Op.Git_log ->
     Some
       (match cwd_target () with
        | Error e -> path_error e
@@ -554,7 +561,7 @@ let try_handle
                     ~extra:[ "count", `Int count; "grep", `String grep ]
                     result.status
                     result.stdout)))
-  | "find" ->
+  | Some Op.Find ->
     Some
       (let name_pattern =
          let pattern = Safe_ops.json_string ~default:"" "pattern" args |> String.trim in
@@ -630,7 +637,7 @@ let try_handle
                        ; "status", Keeper_alerting_path.process_status_to_json result.status
                        ; "files", lines_to_json ~limit out
                        ]))))
-  | "head" ->
+  | Some Op.Head ->
     Some
       (match read_target () with
        | Error e -> path_error e
@@ -680,7 +687,7 @@ let try_handle
                      ; "status", Keeper_alerting_path.process_status_to_json result.status
                      ; "content", `String out
                      ])))
-  | "tail" ->
+  | Some Op.Tail ->
     Some
       (match read_target () with
        | Error e -> path_error e
@@ -730,7 +737,7 @@ let try_handle
                      ; "status", Keeper_alerting_path.process_status_to_json result.status
                      ; "content", `String out
                      ])))
-  | "wc" ->
+  | Some Op.Wc ->
     Some
       (match read_target () with
        | Error e -> path_error e
@@ -774,7 +781,7 @@ let try_handle
                  ~cmd:"wc"
                  result.status
                  (dispatch_result_output result)))
-  | "tree" ->
+  | Some Op.Tree ->
     Some
       (match read_target () with
        | Error e -> path_error e
@@ -834,5 +841,12 @@ let try_handle
                      ; "status", Keeper_alerting_path.process_status_to_json result.status
                      ; "entries", lines_to_json ~limit out
                      ])))
-  | _ -> None
+  (* Git_diff is handled by the ops.ml turn-runtime path (it needs the
+     turn runtime, not the read-only backend), so the read dispatch
+     explicitly delegates it rather than catching it in a wildcard. None
+     (unknown op) also falls to ops.ml -> unsupported_op. Listing both
+     arms keeps this match exhaustive: a new Keeper_workspace_op variant
+     forces a compile error here until it is routed. *)
+  | Some Op.Git_diff -> None
+  | None -> None
 ;;

@@ -373,6 +373,38 @@ let test_runtime_agent_max_turns_is_continuation_checkpoint () =
   check string "status" "continuation_checkpoint" lifecycle.status;
   check (option string) "no error" None lifecycle.error
 
+(* RFC-OAS-026 §4.6: a configured stream-idle deadline with no resolvable clock
+   must fail loudly rather than silently disarm the only I2-legitimate
+   streaming timeout. *)
+let test_clock_failfast_raises_when_idle_set_without_clock () =
+  try
+    let _ =
+      Runtime_agent.For_testing.decide_clock_for_idle
+        ~stream_idle_timeout_s:(Some 120.0)
+        ~process_clock:(Error "process runtime not initialised")
+        ~ctx_clock:None
+    in
+    fail "expected failure when idle is configured but no clock resolves"
+  with
+  | Failure msg ->
+    check
+      bool
+      "message identifies the configured idle deadline with no clock"
+      true
+      (String.starts_with
+         ~prefix:"runtime_agent: stream_idle_timeout_s configured"
+         msg)
+
+let test_clock_failfast_opt_out_when_no_idle_no_clock () =
+  (* Legitimate opt-out: no idle deadline + no clock stays None, no raise. *)
+  let clock =
+    Runtime_agent.For_testing.decide_clock_for_idle
+      ~stream_idle_timeout_s:None
+      ~process_clock:(Error "no runtime")
+      ~ctx_clock:None
+  in
+  check bool "no idle + no clock -> None" true (Option.is_none clock)
+
 let () =
   run "runtime_provider_auth_headers"
     [ ( "provider_config"
@@ -408,5 +440,13 @@ let () =
             "dashboard runtime provider reachability contracts"
             `Quick
             test_dashboard_runtime_probe_reachability_contracts
+        ; test_case
+            "clock fail-fast raises when idle set without clock (RFC-OAS-026)"
+            `Quick
+            test_clock_failfast_raises_when_idle_set_without_clock
+        ; test_case
+            "clock fail-fast opt-out when no idle no clock"
+            `Quick
+            test_clock_failfast_opt_out_when_no_idle_no_clock
         ] )
     ]

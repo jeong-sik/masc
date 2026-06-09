@@ -186,6 +186,14 @@ module For_testing : sig
 
   val runtime_id_of_config : config -> string
 
+  (* RFC-OAS-026 §4.6 fail-fast (pure decision; raises [Failure] when an idle
+     deadline is configured but no clock resolves). *)
+  val decide_clock_for_idle :
+    stream_idle_timeout_s:float option ->
+    process_clock:(float Eio.Time.clock_ty Eio.Resource.t, string) result ->
+    ctx_clock:float Eio.Time.clock_ty Eio.Resource.t option ->
+    float Eio.Time.clock_ty Eio.Resource.t option
+
   val runtime_observation_for_completed_config :
     total_duration_ms:float -> config -> Runtime_observation.runtime_observation
 end

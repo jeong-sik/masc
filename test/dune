@@ -29,6 +29,7 @@
 
 (tests
  (names
+  test_keeper_reactive_wake_backlog_gate
   test_board_activity_cache
   test_jsonl_mtime_projection
   test_jsonl_incremental_projection
@@ -283,6 +284,7 @@
   test_workspace_goal_index
   test_log_severity_outcome_level)
  (modules
+  test_keeper_reactive_wake_backlog_gate
   test_board_activity_cache
   test_jsonl_mtime_projection
   test_jsonl_incremental_projection

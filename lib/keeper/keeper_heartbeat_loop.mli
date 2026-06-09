@@ -71,6 +71,7 @@ type keepalive_scheduling_decision = {
 val decide_keepalive_scheduling :
   ?runtime_id_of_meta:(keeper_meta -> string) ->
   ?runtime_resilience_of_name:(string -> string option) ->
+  ?reactive_wake:bool ->
   stop:bool Atomic.t ->
   meta:keeper_meta ->
   Keeper_world_observation.world_observation ->
@@ -99,6 +100,7 @@ val run_keepalive_unified_turn :
   pending_board_events:Keeper_world_observation.pending_board_event list ->
   stop:bool Atomic.t ->
   proactive_warmup_elapsed:bool ->
+  reactive_wake:bool ->
   shared_context:Agent_sdk.Context.t ->
   keeper_meta
 
@@ -164,6 +166,7 @@ val run_smart_heartbeat_gate :
   smart_hb_config:Keeper_heartbeat_smart.config ->
   last_successful_heartbeat_ts:float ref ->
   last_heartbeat_cycle_ts:float ref ->
+  wake_source:Keeper_keepalive_signal.sleep_outcome ref ->
   bool
 
 val maybe_write_heartbeat_snapshot :

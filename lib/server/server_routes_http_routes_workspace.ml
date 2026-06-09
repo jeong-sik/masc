@@ -293,12 +293,30 @@ let file_tree_node ~diff_by_path ~path ~label ~depth ~parent ~has_children =
 let rec scan_dir_bounded ?diff_by_path ~base ~depth ~max_depth ~remaining acc dir =
   if depth > max_depth || remaining <= 0 then (acc, remaining)
   else
-    let entries =
+    let raw_entries =
       workspace_or_default
         ~site:"tree_readdir"
         ~path:dir
         ~default:[]
         (fun () -> Sys.readdir dir |> Array.to_list)
+    in
+    (* Sort alphabetically, then partition directories-first so that
+       the node limit (default 750) is consumed by directory trees
+       (lib/, src/) before leaf files (*.py, *.md).  Without this,
+       a flat directory like ~/me with hundreds of root-level files
+       exhausts the limit before important subdirectories appear. *)
+    let entries =
+      let sorted = List.sort String.compare raw_entries in
+      let dirs, files = List.partition (fun name ->
+        let full = Filename.concat dir name in
+        workspace_or_default
+          ~warn_on_failure:false
+          ~site:"tree_is_directory_partition"
+          ~path:full
+          ~default:false
+          (fun () -> Sys.is_directory full)
+      ) sorted in
+      dirs @ files
     in
     let rec fold acc remaining = function
       | [] -> (acc, remaining)

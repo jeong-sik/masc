@@ -234,12 +234,16 @@ let write_file_schema =
 
 let search_files_schema =
   object_schema
-    ~required:[ "pattern" ]
-    [ property "pattern" "string" "Regular expression to search for."
+    ~required:[]
+    [ property
+        "op"
+        "string"
+        "Structured operation to run (e.g. 'rg', 'ls', 'tree', 'git_status'). Defaults to 'rg' when pattern is provided."
+    ; property "pattern" "string" "Regular expression to search for (required when op is 'rg')."
     ; property
         "path"
         "string"
-        "Directory or file to search in. Defaults to the keeper sandbox when omitted."
+        "Directory or file to search/list. Defaults to the keeper sandbox when omitted."
     ; property "glob" "string" "Glob filter, e.g. '*.ml' or 'lib/**/*.ml'."
     ; property "type" "string" "Ripgrep file-type filter, e.g. 'ml', 'py'."
     ; property "-i" "boolean" "Case-insensitive search."
@@ -347,7 +351,8 @@ let translate_write_file input =
 let translate_search_files input =
   match input with
   | `Assoc fields ->
-    let out = ref [ "op", `String "rg" ] in
+    let has_op = List.mem_assoc "op" fields in
+    let out = ref (if has_op then [] else [ "op", `String "rg" ]) in
     let is_case_insensitive =
       match List.assoc_opt "-i" fields with
       | Some (`Bool true) -> true
@@ -367,7 +372,8 @@ let translate_search_files input =
            in
            out := (k, v') :: !out
          | "path" | "glob" | "type" -> out := (k, v) :: !out
-         | "op" | "-i" -> ()
+         | "op" -> out := (k, v) :: !out
+         | "-i" -> ()
          | _ -> out := (k, v) :: !out)
       fields;
     `Assoc (List.rev !out)

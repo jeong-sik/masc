@@ -435,6 +435,7 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
     ; stream_idle_timeout_s = config.stream_idle_timeout_s
     ; max_execution_time_s = config.max_execution_time_s
     ; body_timeout_s = config.body_timeout_s
+    ; execution_idle_timeout_s = config.execution_idle_timeout_s
     ; guardrails = guardrails_of_config config
     ; context_reducer = config.context_reducer
     ; context_injector = config.context_injector
@@ -448,6 +449,10 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
     ; runtime_mcp_policy = config.runtime_mcp_policy
     ; summarizer = config.summarizer
     ; priority = config.priority
+    ; on_run_complete = config.on_run_complete
+    ; disclosure_level = config.disclosure_level
+    ; disclosure_resolver = config.disclosure_resolver
+    ; tool_selector = config.tool_selector
     }
   in
   { patched_checkpoint; agent_config; options }

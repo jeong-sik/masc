@@ -686,10 +686,18 @@ and run_existing_worker_agent
           worker_name
           (Printexc.to_string exn))
     (fun () ->
+       let clock =
+         match Eio_context.get_clock_opt () with
+         | Some c -> Some c
+         | None ->
+           (match Process_eio.get_clock () with
+            | Ok c -> Some c
+            | Error _ -> None)
+       in
        let result =
          Agent_sdk.Agent.run
            ~sw
-           ?clock:(Eio_context.get_clock_opt ())
+           ?clock
            agent
            prompt
        in

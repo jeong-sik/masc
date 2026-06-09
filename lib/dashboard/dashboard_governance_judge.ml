@@ -32,15 +32,17 @@ type runtime_snapshot = {
     That is the failure mode observed in the fleet logs between
     2026-06-08 07:00-08:48Z (57× [in_flight_after=1] stuck events).
 
-    The fix derives the in-flight count lazily from the [Eio.Switch.t]
-    itself: the switch is the source of truth, and [compute_state]
-    just records which switch the current cycle owns. A future
-    [Eio_main.run] cancellation that swallows a cycle's [on_release]
-    is no longer observable as a stuck counter — [read_in_flight]
-    detects the dead switch and reports 0 on the next read. *)
+    The fix replaces the int counter with a typed state machine
+    ([compute_in_flight_state]) and derives the in-flight read from
+    that state under [with_lock]. [mark_compute_start] advances
+    [cycle_id] monotonically; a second [mark_compute_start] before
+    [mark_compute_finish] is a routine log + replace (not a panic),
+    preserving the typed invariant that the previous int counter could
+    not hold. *)
 type compute_in_flight_state =
   | Idle
   | In_flight of { started_at : float; cycle_id : int }
+
 
 type state = {
   mutex : Eio.Mutex.t;
@@ -470,7 +472,7 @@ let runtime_status_at ~now_ts base_path =
         model_used = None;
         keeper_name;
         last_error = st.last_error;
-        compute_in_flight = read_in_flight st;
+        compute_in_flight = (match st.compute_state with Idle -> 0 | In_flight _ -> 1);
         last_compute_duration_sec = st.last_compute_duration_sec;
         last_compute_timeout_sec = st.last_compute_timeout_sec;
         last_compute_outcome = st.last_compute_outcome;
@@ -854,7 +856,7 @@ let level_of_compute_outcome ~outcome ~reason : Log.level =
     *current* — they are read by the runtime snapshot and
     represent the most recent terminal cycle, regardless of
     whether a new cycle has since started. *)
-let mark_compute_finish (st : state) ~started_at ~outcome ~reason =
+let mark_compute_finish (st : state) ~cycle_id ~started_at ~outcome ~reason =
   (* Clamp the elapsed time to >= 0 so a backwards system clock
      adjustment (NTP step, manual change) cannot inject a negative
      duration into the histogram or the [last_compute_duration_sec]
@@ -877,7 +879,12 @@ let mark_compute_finish (st : state) ~started_at ~outcome ~reason =
                 exception path can re-raise after partial teardown. *)
              Log.Governance.routine
                "mark_compute_finish: state already Idle (cycle ended by external path)"
-         | In_flight _ -> st.compute_state <- Idle);
+         | In_flight { cycle_id = current_cid; _ } ->
+             if current_cid = cycle_id then st.compute_state <- Idle
+             else
+               Log.Governance.routine
+                 "mark_compute_finish: stale finish cycle_id=%d ignored (current=%d)"
+                 cycle_id current_cid);
         Otel_metric_store.set_gauge governance_compute_in_flight_metric 0.0;
         0)
   in
@@ -975,30 +982,40 @@ let refresh_once ~sw ~net
        wrapper; the OAS provider keeps its own per-call timeout,
        and any path that doesn't deliver a response simply runs to
        the provider's natural budget. *)
+    let cycle_id = mark_compute_start st in
     let compute_result =
-      Eio.Switch.run ~name:"governance_judge.compute" (fun _sw ->
-          ignore (mark_compute_start st);
-          try
-            Ok
-              (compute_judgments ~masc_tools ~dispatch ~build_facts)
-          with
-          | Eio.Cancel.Cancelled _ as exn ->
-              ignore
-                (mark_compute_finish st ~started_at ~outcome:"error"
-                   ~reason:"cancelled");
-              raise exn
-          | exn ->
-              ignore
-                (mark_compute_finish st ~started_at ~outcome:"error"
-                   ~reason:"exception");
-              Error
-                (Printf.sprintf "compute_judgments raised: %s"
-                   (Printexc.to_string exn)))
+      try
+        Eio.Switch.run ~name:"governance_judge.compute" (fun _sw ->
+            try
+              Ok
+                (compute_judgments ~masc_tools ~dispatch ~build_facts)
+            with
+            | Eio.Cancel.Cancelled _ as exn ->
+                ignore
+                  (mark_compute_finish st ~cycle_id ~started_at ~outcome:"error"
+                     ~reason:"cancelled");
+                raise exn
+            | exn ->
+                ignore
+                  (mark_compute_finish st ~cycle_id ~started_at ~outcome:"error"
+                     ~reason:"exception");
+                Error
+                  (Printf.sprintf "compute_judgments raised: %s"
+                     (Printexc.to_string exn)))
+      with exn ->
+        (* Switch.run itself raised during cleanup (e.g. child-fibre exception
+           propagated after callback returned, or parent cancellation before
+           callback ran).  mark_compute_finish is idempotent on Idle — safe to
+           call even if the inner handler already cleared the state. *)
+        ignore
+          (mark_compute_finish st ~cycle_id ~started_at ~outcome:"error"
+             ~reason:"exception");
+        raise exn
     in
     match compute_result with
     | Ok (Ok (model_used, generated_at, expires_at, judgments)) ->
         ignore
-          (mark_compute_finish st ~started_at ~outcome:"ok" ~reason:"ok");
+          (mark_compute_finish st ~cycle_id ~started_at ~outcome:"ok" ~reason:"ok");
         if judgments = [] then
           Log.Governance.routine
             "refresh_once: ok runtime=redacted judgments=%d"
@@ -1027,7 +1044,7 @@ let refresh_once ~sw ~net
     | Ok (Error message) | Error message ->
         let reason = degraded_reason_of_error message in
         let duration_sec, in_flight =
-          mark_compute_finish st ~started_at ~outcome:"error" ~reason
+          mark_compute_finish st ~cycle_id ~started_at ~outcome:"error" ~reason
         in
         Log.Governance.warn
           "refresh_once: compute_judgments failed: %s (duration=%.3fs in_flight=%d)"

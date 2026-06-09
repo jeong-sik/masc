@@ -357,24 +357,18 @@ let test_dashboard_surfaces_compute_telemetry () =
       check int "after second start (no finish), in-flight = 1" 1
         (Dashboard_governance_judge.read_in_flight st);
       let started_at = Unix.gettimeofday () in
-      eprintf "[dbg] before finish #1\n%!"; flush stderr;
       ignore
-        (Dashboard_governance_judge.mark_compute_finish st ~started_at
+        (Dashboard_governance_judge.mark_compute_finish st ~cycle_id:second_cycle ~started_at
            ~outcome:"ok" ~reason:"");
-      eprintf "[dbg] after finish #1\n%!"; flush stderr;
       check int "after finish, in-flight = 0" 0
         (Dashboard_governance_judge.read_in_flight st);
-      eprintf "[dbg] after read_in_flight #1\n%!"; flush stderr;
       (* finish is idempotent: a stray finish on Idle is a
          routine log + no-op, still 0. *)
-      eprintf "[dbg] before finish #2 stray\n%!"; flush stderr;
       ignore
-        (Dashboard_governance_judge.mark_compute_finish st ~started_at
+        (Dashboard_governance_judge.mark_compute_finish st ~cycle_id:second_cycle ~started_at
            ~outcome:"ok" ~reason:"");
-      eprintf "[dbg] after finish #2 stray\n%!"; flush stderr;
       check int "stray finish is a no-op (Idle → 0)" 0
         (Dashboard_governance_judge.read_in_flight st);
-      eprintf "[dbg] after read_in_flight #2\n%!"; flush stderr;
       (* Seed terminal-cycle telemetry with the values the
          runtime/JSON assertions check, while leaving the
          state in Idle so the dashboard reads 0 in-flight
@@ -385,16 +379,13 @@ let test_dashboard_surfaces_compute_telemetry () =
          budget) and is seeded directly here to keep the
          surface-render assertion honest. *)
       let started_at = now -. 12.5 in
-      eprintf "[dbg] before finish #3 error/timeout\n%!"; flush stderr;
       ignore
-        (Dashboard_governance_judge.mark_compute_finish st ~started_at
+        (Dashboard_governance_judge.mark_compute_finish st ~cycle_id:second_cycle ~started_at
            ~outcome:"error" ~reason:"timeout");
-      eprintf "[dbg] after finish #3 error/timeout\n%!"; flush stderr;
-      eprintf "[dbg] before with_lock st 384\n%!"; flush stderr; flush stderr;
+
       Dashboard_governance_judge.with_lock st (fun () ->
-        eprintf "[dbg] inside with_lock body\n%!"; flush stderr;
         st.last_compute_timeout_sec <- Some 45.0);
-      eprintf "[dbg] after with_lock st 384\n%!"; flush stderr;
+
       let status =
         Dashboard_governance_judge.runtime_status_at ~now_ts:now dir
       in

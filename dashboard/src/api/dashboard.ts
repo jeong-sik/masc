@@ -2273,10 +2273,13 @@ export function fetchKeeperTrajectory(
   // so omitting the param means "don't include".
   params.set('include_thinking', includeThinking ? 'true' : 'false')
   // Request full output for session trace detail view.
-  // Backend caps at 10000 for results, 50000 for thinking content.
+  // content_max_len=0 → no cap: surface the COMPLETE reasoning text in the
+  // detail view (남김없이). The backend persists thinking untruncated and
+  // treats 0 as "no truncation"; size is intentionally accepted here, this is
+  // the drill-in surface (the timeline list keeps the default preview cap).
   if (fullOutput) {
     params.set('result_max_len', '10000')
-    params.set('content_max_len', '50000')
+    params.set('content_max_len', '0')
   }
   const qs = params.toString()
   return get<TrajectoryResponse>(

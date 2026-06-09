@@ -33,6 +33,16 @@ open Alcotest
 module FA = Fd_accountant
 
 let test_idle_projects_to_zero () =
+  (* Eio.Mutex.use_rw ~protect:true installs a Cancel.protect that
+     performs [Cancel.Get_context].  Eio.Switch.run is the only
+     handler for that effect, so even Idle reads must run inside a
+     switch.  Eio_main.run is needed to provide the underlying
+     event-loop fiber; the inner Eio.Switch.run gives Cancel.protect
+     a cancellation context to read.  This mirrors PR-B's
+     dashboard_governance_judge tests, which use the same wrap
+     pattern. *)
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun _sw ->
   List.iter
     (fun kind ->
       let h = FA.read_holding ~kind in
@@ -41,6 +51,7 @@ let test_idle_projects_to_zero () =
 
 let test_mark_acquire_then_release () =
   Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun _sw ->
   List.iter
     (fun kind ->
       let () =
@@ -54,6 +65,7 @@ let test_mark_acquire_then_release () =
 
 let test_second_mark_acquire_advances_hold_id () =
   Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun _sw ->
   (* PR-B / dashboard_governance_judge surfaced [hold_id] as a
      monotonic cycle identifier.  The same pattern applies here:
      the second [mark_acquire] returns a strictly larger
@@ -77,6 +89,7 @@ let test_second_mark_acquire_advances_hold_id () =
 
 let test_stray_mark_release_is_noop () =
   Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun _sw ->
   let kind = FA.Provider_http in
   let () = check int "idle baseline 0" 0 (FA.read_holding ~kind) in
   (* Stray release on Idle: a user-site exception path that
@@ -88,6 +101,7 @@ let test_stray_mark_release_is_noop () =
 
 let test_kinds_are_independent () =
   Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun _sw ->
   let a = FA.Docker_spawn in
   let b = FA.Sandbox_exec in
   let _ = FA.mark_acquire ~kind:a in
@@ -99,6 +113,7 @@ let test_kinds_are_independent () =
 
 let test_idle_after_release_under_concurrent_reader () =
   Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun _sw ->
   (* Regression: a previous [Eio.Switch.on_release] callback
      could over-decrement and the [max 0 (... - 1)] clamp would
      mask the leak (the projection was 0 even when the

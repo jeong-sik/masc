@@ -64,6 +64,7 @@ let add_strict_task config =
     required_evidence = [];
     inspect_gate_evidence = [];
     verify_gate_evidence = ["output.json"];
+    ; evidence_claims = []
     stale_claim_timeout_sec = 0;
     links = { operation_id = None; session_id = None };
   } in
@@ -89,6 +90,7 @@ let add_required_evidence_only_task config =
     required_evidence = ["artifact://coverage.json"];
     inspect_gate_evidence = [];
     verify_gate_evidence = [];
+    ; evidence_claims = []
     stale_claim_timeout_sec = 0;
     links = { operation_id = None; session_id = None };
   } in
@@ -116,6 +118,7 @@ let add_placeholder_evidence_task config =
     required_evidence = ["completion_notes"];
     inspect_gate_evidence = [];
     verify_gate_evidence = ["reviewable_evidence_ref"];
+    ; evidence_claims = []
     stale_claim_timeout_sec = 0;
     links = { operation_id = None; session_id = None };
   } in

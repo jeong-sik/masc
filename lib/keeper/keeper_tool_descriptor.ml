@@ -166,6 +166,21 @@ let property name typ description =
   name, `Assoc [ "type", `String typ; "description", `String description ]
 ;;
 
+(* String property constrained to a closed set of values. Use when the
+   accepted values are a finite, code-defined set so the schema is a
+   single source of truth with the runtime dispatch (parse, don't
+   validate): the model is told the exact options up front instead of
+   guessing a free-form string. [values] should be derived from the
+   runtime's own enumeration, never hand-listed. *)
+let property_enum name ~values description =
+  ( name
+  , `Assoc
+      [ "type", `String "string"
+      ; "enum", `List (List.map (fun v -> `String v) values)
+      ; "description", `String description
+      ] )
+;;
+
 let object_schema ?(required = []) properties =
   `Assoc
     [ "type", `String "object"
@@ -235,10 +250,13 @@ let write_file_schema =
 let search_files_schema =
   object_schema
     ~required:[]
-    [ property
+    [ property_enum
         "op"
-        "string"
-        "Structured operation to run (e.g. 'rg', 'ls', 'tree', 'git_status'). Defaults to 'rg' when pattern is provided."
+        ~values:Keeper_workspace_op.valid_strings
+        "Structured operation to run. Use op='ls' (or 'tree') to list a \
+         directory's contents, op='rg' to search file contents, op='cat' to \
+         read a file, op='git_status'/'git_log'/'git_diff' for git views. \
+         Defaults to 'rg' when a pattern is given."
     ; property "pattern" "string" "Regular expression to search for (required when op is 'rg')."
     ; property
         "path"
@@ -493,9 +511,10 @@ let public_descriptors =
       ~public_aliases:[ "Search" ]
       ~internal_name:"tool_search_files"
       ~description:
-        "Inspect the project workspace through structured read-only operations \
-         including ripgrep search, file reads, directory listings, and scoped \
-         git status/log/diff views."
+        "Inspect the project workspace through structured read-only operations. \
+         To list a directory's contents use op='ls' (or op='tree'); to search \
+         file contents use op='rg'; also supports file reads (op='cat') and \
+         scoped git status/log/diff views."
       ~input_schema:search_files_schema
       ~policy:
         (policy
@@ -516,8 +535,9 @@ let public_descriptors =
       ~internal_name:"tool_read_file"
       ~description:
         "Read one existing file from the keeper sandbox or an allowed path with no \
-         implicit cwd. Pass cwd explicitly for repo-relative reads. Read never \
-         inherits Execute cwd."
+         implicit cwd. Read targets a single FILE; to list a directory's contents \
+         use Grep with op='ls'. Pass cwd explicitly for repo-relative reads. Read \
+         never inherits Execute cwd."
       ~input_schema:read_file_schema
       ~policy:
         (policy

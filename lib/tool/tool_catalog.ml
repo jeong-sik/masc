@@ -280,8 +280,6 @@ let explicit_metadata : (string * metadata) list =
     ("masc_run_list", read_state_tool);
     ("masc_run_init", broadcast_tool);
     ("masc_run_plan", broadcast_tool);
-    ("masc_run_log", broadcast_tool);
-    ("masc_run_deliverable", broadcast_tool);
     ( "sidecar",
       {
         destructive_tool with

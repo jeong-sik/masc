@@ -1152,7 +1152,7 @@ let internal_descriptors : t list =
       "Append a workspace note." ~readonly:false
   ; masc_plan_descriptor "deliver" "masc_deliver"
       "Record a deliverable against the plan." ~readonly:false
-  (* ── RFC-0182 §3.1 — masc_run_* cluster (6 entries) ──────────── *)
+  (* ── RFC-0182 §3.1 — masc_run_* cluster (4 entries) ──────────── *)
   ; masc_run_descriptor "masc_run_init"
       "Initialise a workspace run." ~readonly:false
   ; masc_run_descriptor "masc_run_list"
@@ -1160,12 +1160,8 @@ let internal_descriptors : t list =
   ; masc_run_descriptor "masc_run_get"
       "Read a single run by id, creating an empty run record when missing."
       ~readonly:false
-  ; masc_run_descriptor "masc_run_log"
-      "Read or append run log events." ~readonly:false
   ; masc_run_descriptor "masc_run_plan"
       "Read the run plan." ~readonly:true
-  ; masc_run_descriptor "masc_run_deliverable"
-      "Read or attach a run deliverable." ~readonly:false
   (* ── RFC-0182 §3.1 — masc_agent_* cluster (5 entries) ────────── *)
   ; masc_agent_descriptor "agents" "masc_agents"
       "List registered agents." ~readonly:true

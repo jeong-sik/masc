@@ -47,7 +47,6 @@ type t =
   | Time_now
   | Tool_search
   | Tools_list
-  | State_report
   | Voice_agent
   | Voice_listen
   | Voice_session_end
@@ -95,7 +94,6 @@ let to_string = function
   | Time_now -> "keeper_time_now"
   | Tool_search -> "keeper_tool_search"
   | Tools_list -> "keeper_tools_list"
-  | State_report -> "keeper_report_state"
   | Voice_agent -> "keeper_voice_agent"
   | Voice_listen -> "keeper_voice_listen"
   | Voice_session_end -> "keeper_voice_session_end"
@@ -144,7 +142,6 @@ let of_string = function
   | "keeper_time_now" -> Some Time_now
   | "keeper_tool_search" -> Some Tool_search
   | "keeper_tools_list" -> Some Tools_list
-  | "keeper_report_state" -> Some State_report
   | "keeper_voice_agent" -> Some Voice_agent
   | "keeper_voice_listen" -> Some Voice_listen
   | "keeper_voice_session_end" -> Some Voice_session_end
@@ -213,7 +210,6 @@ let is_keeper_board_tool = function
   | Time_now
   | Tool_search
   | Tools_list
-  | State_report
   | Voice_agent
   | Voice_listen
   | Voice_session_end

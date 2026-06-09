@@ -44,7 +44,7 @@ let keeper_voice_tool_schemas =
 let core_always_tools =
   List.map
     Keeper_tool_name.to_string
-    Keeper_tool_name.[ Context_status; Stay_silent; Tool_search; State_report ]
+    Keeper_tool_name.[ Context_status; Stay_silent; Tool_search ]
   @ [ "extend_turns" ]
 ;;
 

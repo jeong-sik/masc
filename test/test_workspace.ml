@@ -854,7 +854,7 @@ let test_release_stale_claims_releases_stale_verification () =
                    { assignee = stale_nick
                    ; submitted_at = old_time
                    ; verification_id = "vrf-test"
-                   ; deadline = None
+                   ; phase = Masc_domain.Awaiting_verifier
                    }
              }
            else task)

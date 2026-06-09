@@ -106,7 +106,7 @@ let test_open_count_only_non_terminal () =
     ; make_task ~id:"t3" ~goal_id:(Some "g1") ~status:cancelled_status
     ; make_task ~id:"t4" ~goal_id:(Some "g1") ~status:(Claimed { assignee = "a"; claimed_at = "" })
     ; make_task ~id:"t5" ~goal_id:(Some "g1") ~status:(InProgress { assignee = "a"; started_at = "" })
-    ; make_task ~id:"t6" ~goal_id:(Some "g1") ~status:(AwaitingVerification { assignee = "a"; submitted_at = ""; verification_id = ""; deadline = None })
+    ; make_task ~id:"t6" ~goal_id:(Some "g1") ~status:(AwaitingVerification { assignee = "a"; submitted_at = ""; verification_id = ""; phase = Awaiting_verifier })
     ]
   in
   let index = Workspace_goal_index.build_goal_task_index tasks in

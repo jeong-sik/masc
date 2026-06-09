@@ -347,92 +347,18 @@ let awaiting_verification_deadline
          , deadline_ts )
      | None -> None)
 
+(* RFC-0220 §5: the destructive 24h verification deadline rescue is removed.
+   With the verification sub-state folded into [task_status] (RFC-0220 §3.1),
+   the illegal Todo+Pending drift is unrepresentable, an AwaitingVerification
+   obligation stays claimable by a verifier, and a keeper never idles on an
+   empty pool — so the per-obligation wall-clock deadline this enforced (the
+   I2-forbidden heuristic) is unnecessary, and its destructive force-cancel
+   discarded work rather than rescheduling the obligation. Long-waiting
+   obligations are surfaced from the activity-event stream, not a poll-timer.
+   Neutered here in PR-1 (forced by dropping [deadline] from the type); the
+   [verification_timeout] fork and these knobs are deleted in a follow-up
+   (RFC-0220 §11 PR-3). *)
 let check_timeouts ~(config : Workspace.config) =
-  if not (Env_config_runtime.Verification.fsm_enabled ()) then ()
-  else
-    try
-      let backlog = Workspace.read_backlog config in
-      let now = Time_compat.now () in
-      List.iter (fun (task : Masc_domain.task) ->
-        match task.task_status with
-        | Masc_domain.AwaitingVerification
-            { assignee; verification_id; submitted_at; deadline } ->
-          (match awaiting_verification_deadline ~submitted_at ~deadline with
-           | Some (deadline_source, dl, deadline_ts)
-             when now > deadline_ts ->
-             let deadline_note =
-               match deadline_source with
-               | "deadline" -> dl
-               | _ -> Printf.sprintf "%s (derived from submitted_at)" dl
-             in
-             let () =
-               match Board_dispatch.create_post
-                 ~author:"system"
-                 ~content:(Printf.sprintf
-                   "Verification timeout: task %s (%s) by %s — no verifier responded within deadline %s"
-                   task.id task.title assignee deadline_note)
-                 ~title:(Printf.sprintf "Timeout: %s" task.title)
-                 ~post_kind:Board.System_post
-                 ~meta_json:(`Assoc [
-                   ("type", `String "verification_timeout");
-                   ("task_id", `String task.id);
-                   ("verification_id", `String verification_id);
-                   ("assignee", `String assignee);
-                   ("submitted_at", `String submitted_at);
-                   ("deadline", `String dl);
-                   ("deadline_source", `String deadline_source);
-                 ])
-                 ~visibility:Board.Internal
-                 ~hearth:"verification"
-                 ()
-               with
-               | Ok _ -> ()
-               | Error e ->
-                 Log.Task.error
-                   ~keeper_name:task.id
-                   "board post failed (task=%s vrf=%s): %s"
-                   task.id verification_id (Board_types.show_board_error e)
-             in
-             Subscriptions.push_event_to_sessions (`Assoc [
-               ("type", `String "masc/verification/timeout");
-               ("task_id", `String task.id);
-               ("verification_id", `String verification_id);
-               ("assignee", `String assignee);
-               ("deadline", `String dl);
-               ("deadline_source", `String deadline_source);
-               ("timestamp", `Float now);
-             ]);
-             (* Transition the task out of AwaitingVerification so the next
-                check_timeouts cycle does not re-emit the same Timeout post.
-                Without this, deadline > now stays true forever and every
-                cycle re-creates the same board entry. *)
-             let cancel_reason =
-               Printf.sprintf
-                 "verification deadline exceeded (assignee=%s, vrf=%s, deadline=%s, source=%s)"
-                 assignee verification_id dl deadline_source
-             in
-             (match
-                Workspace.force_cancel_task_r
-                  config
-                  ~agent_name:"system"
-                  ~task_id:task.id
-                  ~reason:cancel_reason
-                  ()
-              with
-              | Ok _ -> ()
-              | Error e ->
-                Log.Task.error
-                  ~keeper_name:task.id
-                  "verification timeout transition failed (task=%s vrf=%s): %s"
-                  task.id verification_id
-                  (Masc_domain.show_masc_error e))
-           | Some _ -> ()
-           | None -> ())
-        | Todo | Claimed _ | InProgress _ | Done _ | Cancelled _ -> ()
-      ) backlog.tasks
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-      Log.Task.error "verification timeout check failed: %s"
-        (Printexc.to_string exn)
+  let _ = config in
+  ()
 ;;

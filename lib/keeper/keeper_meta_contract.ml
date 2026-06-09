@@ -195,7 +195,6 @@ type blocker_class =
   | Sdk_cost_budget_exceeded
   | Sdk_unrecognized_stop_reason
   | Sdk_idle_detected
-  | Sdk_tool_retry_exhausted
   | Sdk_guardrail_violation
   | Sdk_tripwire_violation
   | Sdk_exit_condition_met
@@ -221,7 +220,6 @@ let blocker_class_to_string = function
   | Sdk_cost_budget_exceeded -> "sdk_cost_budget_exceeded"
   | Sdk_unrecognized_stop_reason -> "sdk_unrecognized_stop_reason"
   | Sdk_idle_detected -> "sdk_idle_detected"
-  | Sdk_tool_retry_exhausted -> "sdk_tool_retry_exhausted"
   | Sdk_guardrail_violation -> "sdk_guardrail_violation"
   | Sdk_tripwire_violation -> "sdk_tripwire_violation"
   | Sdk_exit_condition_met -> "sdk_exit_condition_met"
@@ -248,7 +246,6 @@ let blocker_class_of_serialized_string = function
   | "sdk_cost_budget_exceeded" -> Some Sdk_cost_budget_exceeded
   | "sdk_unrecognized_stop_reason" -> Some Sdk_unrecognized_stop_reason
   | "sdk_idle_detected" -> Some Sdk_idle_detected
-  | "sdk_tool_retry_exhausted" -> Some Sdk_tool_retry_exhausted
   | "sdk_guardrail_violation" -> Some Sdk_guardrail_violation
   | "sdk_tripwire_violation" -> Some Sdk_tripwire_violation
   | "sdk_exit_condition_met" -> Some Sdk_exit_condition_met
@@ -296,7 +293,6 @@ let blocker_class_continue_gate = function
   | Sdk_cost_budget_exceeded
   | Sdk_unrecognized_stop_reason
   | Sdk_idle_detected
-  | Sdk_tool_retry_exhausted
   | Sdk_guardrail_violation
   | Sdk_tripwire_violation
   | Sdk_exit_condition_met

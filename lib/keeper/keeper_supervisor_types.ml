@@ -147,7 +147,6 @@ let paused_meta_legacy_auto_resume_after_sec (meta : keeper_meta) =
           | Sdk_cost_budget_exceeded
           | Sdk_unrecognized_stop_reason
           | Sdk_idle_detected
-          | Sdk_tool_retry_exhausted
           | Sdk_guardrail_violation
           | Sdk_tripwire_violation
           | Sdk_exit_condition_met

@@ -88,7 +88,6 @@ let blocker_class_indicates_overflow (klass : blocker_class) : bool =
   | Sdk_cost_budget_exceeded
   | Sdk_unrecognized_stop_reason
   | Sdk_idle_detected
-  | Sdk_tool_retry_exhausted
   | Sdk_guardrail_violation
   | Sdk_tripwire_violation
   | Sdk_exit_condition_met

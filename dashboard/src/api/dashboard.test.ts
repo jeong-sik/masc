@@ -1582,7 +1582,6 @@ describe('fetchKeeperConfig', () => {
       ['sdk_cost_budget_exceeded', 'SDK 비용 예산 초과'],
       ['sdk_unrecognized_stop_reason', 'SDK 미식별 정지 사유'],
       ['sdk_idle_detected', 'SDK Idle 감지'],
-      ['sdk_tool_retry_exhausted', 'SDK 도구 재시도 소진'],
       ['sdk_guardrail_violation', 'SDK 가드레일 위반'],
       ['sdk_tripwire_violation', 'SDK Tripwire 위반'],
       ['sdk_exit_condition_met', 'SDK 종료 조건 충족'],

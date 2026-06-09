@@ -441,7 +441,11 @@ let read_fixed_source dir source ~n ?since_ts ?until_ts () : Yojson.Safe.t list 
         match effective_day_window ?since_ts ?until_ts () with
         | None -> Dated_jsonl.read_recent store n
         | Some (since_day, until_day) ->
-          Dated_jsonl.read_range store ~since:since_day ~until:until_day
+          (* Honour [n] on the windowed path too: [read_range] parsed every
+             entry in the day range (unbounded over multi-MB stores), then this
+             function dropped all but [n]. Bound the parse to the [n] most
+             recent in-window entries instead. *)
+          Dated_jsonl.read_range_recent store ~since:since_day ~until:until_day n
       in
       let entries =
         List.filter (within_requested_window ?since_ts ?until_ts) entries

@@ -92,6 +92,18 @@ type task_status =
   | Cancelled of { cancelled_by : string; cancelled_at : string; reason : string option }
 [@@deriving show]
 
+(** RFC-0220 §3.5: [task_status] of an [AwaitingVerification] obligation once
+    [verifier] has claimed it as its satisfier — status preserved, verifier
+    recorded in [phase]. Single construction authority shared by [decide] and
+    both claim writers. Advisory binding: records who is verifying, not who is
+    permitted to (any non-submitter may still approve/reject). *)
+val bind_verifier
+  :  verifier:string
+  -> assignee:string
+  -> submitted_at:string
+  -> verification_id:string
+  -> task_status
+
 val task_status_to_string : task_status -> string
 val string_of_task_status : task_status -> string
 val task_status_icon : task_status -> string

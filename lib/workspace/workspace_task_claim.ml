@@ -135,32 +135,29 @@ let claim_task_r config ~agent_name ~task_id ()
              (fun (state, acc) (t : task) ->
                 if t.id = task_id
                 then (
-                  match t.task_status with
-                  | Todo ->
+                  (* RFC-0220 §3.5: one claim decision, shared with the
+                     auto-claim path ([claim_next_r]). [resolve_claim] owns the
+                     self-check (normalized via [same_task_actor]) and, for a
+                     cross-agent verification claim, binds the verifier into the
+                     [AwaitingVerification] status — no longer a status-
+                     preserving no-op that deferred verifier identity to a
+                     separate store (#19314). *)
+                  match
+                    Workspace_task_lifecycle.resolve_claim
+                      ~same_actor:(fun a ->
+                        Workspace_task_classify.same_task_actor config a agent_name)
+                      ~agent_name
+                      ~now:(now_iso ())
+                      t.task_status
+                  with
+                  | Workspace_task_lifecycle.Worker_claim status ->
                     let t = clear_reclaim_decision t in
-                    let t' =
-                      { t with
-                        task_status =
-                          Claimed { assignee = agent_name; claimed_at = now_iso () }
-                      }
-                    in
-                    `Claimed_ok, t' :: acc
-                  | Claimed { assignee; _ }
-                  | InProgress { assignee; _ }
-                    when assignee = agent_name -> `Already_mine, t :: acc
-                  | AwaitingVerification { assignee; verification_id; _ } ->
-                    if assignee = agent_name then `Already_mine, t :: acc
-                    else
-                    (* Cross-agent verification dispatch: verifier claims the
-                       AwaitingVerification task without changing its status.
-                       Verification.assign_verifier is called after the fold.
-                       Issue #19314. *)
-                    `Claimed_verification verification_id, t :: acc
-                  | Claimed { assignee; _ }
-                  | InProgress { assignee; _ }
-                  | Done { assignee; _ }
-                  | Cancelled { cancelled_by = assignee; _ } ->
-                    `Claimed_by assignee, t :: acc)
+                    `Claimed_ok, { t with task_status = status } :: acc
+                  | Workspace_task_lifecycle.Verifier_claim status ->
+                    `Claimed_verification, { t with task_status = status } :: acc
+                  | Workspace_task_lifecycle.Self_owned -> `Already_mine, t :: acc
+                  | Workspace_task_lifecycle.Held_by_other holder ->
+                    `Claimed_by holder, t :: acc)
                 else state, t :: acc)
              (`Not_found, [])
              backlog.tasks
@@ -175,14 +172,21 @@ let claim_task_r config ~agent_name ~task_id ()
                { message = Printf.sprintf "Task %s is already claimed by you" task_id
                ; auto_released_task_ids = []
                })
-         | `Claimed_verification verification_id ->
-           (* Issue #19314: Cross-agent verification dispatch.
-              The task stays in AwaitingVerification; we assign the verifier
-              in the verification store and set the agent's current_task.
-              WORKAROUND: Verification.assign_verifier lives in masc lib but
-              masc_workspace cannot depend on masc (cycle). Verifier assignment
-              is deferred to the verification dispatch loop instead. *)
-           let () = () in
+         | `Claimed_verification ->
+           (* Issue #19314 / RFC-0220 §3.5: cross-agent verification dispatch.
+              The task stays [AwaitingVerification]; [resolve_claim] has bound
+              this agent as the verifier in [phase] (Verifier_assigned). Persist
+              that status and point the agent at the task. The verifier binding
+              now lives in the task FSM (single authority via [phase]), so the
+              former defer-to-dispatch-loop workaround is gone — no cross-lib
+              call into [Verification.assign_verifier] is needed. *)
+           let new_backlog =
+             { tasks = new_tasks
+             ; last_updated = now_iso ()
+             ; version = backlog.version + 1
+             }
+           in
+           write_backlog config new_backlog;
            Workspace_task_classify.update_local_agent_state config ~agent_name (fun agent ->
              { agent with status = Busy; current_task = Some task_id });
            let _ =

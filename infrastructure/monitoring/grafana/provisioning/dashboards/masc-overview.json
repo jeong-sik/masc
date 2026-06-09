@@ -727,6 +727,180 @@
           "sortOrder": "desc"
         }
       }
+    },
+    {
+      "type": "row",
+      "title": "Keeper Instruction Monitoring",
+      "gridPos": {
+        "x": 0,
+        "y": 112,
+        "w": 24,
+        "h": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Prompt Segment Bytes",
+      "gridPos": {
+        "x": 0,
+        "y": 113,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "description": "Byte length of system_prompt and user_message segments per keeper after sanitization.",
+      "targets": [
+        {
+          "expr": "masc_keeper_prompt_segment_bytes{segment=\"system_prompt\"}",
+          "legendFormat": "{{keeper}} / system_prompt",
+          "refId": "A"
+        },
+        {
+          "expr": "masc_keeper_prompt_segment_bytes{segment=\"user_message\"}",
+          "legendFormat": "{{keeper}} / user_message",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "pointSize": 0,
+            "showPoints": "never"
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Template Render Outcome",
+      "gridPos": {
+        "x": 12,
+        "y": 113,
+        "w": 6,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "description": "Turn-intent template render outcomes: ok, fallback, empty.",
+      "targets": [
+        {
+          "expr": "sum by (outcome) (rate(masc_keeper_prompt_template_render_outcome_total[5m]))",
+          "legendFormat": "{{outcome}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": {
+            "mode": "palette-classic"
+          }
+        }
+      },
+      "options": {
+        "graphMode": "area",
+        "colorMode": "value"
+      }
+    },
+    {
+      "type": "barchart",
+      "title": "Tool Call Param Completeness",
+      "gridPos": {
+        "x": 18,
+        "y": 113,
+        "w": 6,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "description": "Tool calls by parameter completeness status per tool.",
+      "targets": [
+        {
+          "expr": "sum by (tool, status) (rate(masc_keeper_tool_call_param_completeness_total[5m]))",
+          "legendFormat": "{{tool}} / {{status}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": {
+            "mode": "palette-classic"
+          }
+        }
+      },
+      "options": {
+        "orientation": "horizontal",
+        "legend": {
+          "displayMode": "list",
+          "placement": "right",
+          "showLegend": true
+        },
+        "showValue": "always"
+      }
+    },
+    {
+      "type": "state-timeline",
+      "title": "Turn Instruction Hash",
+      "gridPos": {
+        "x": 0,
+        "y": 121,
+        "w": 24,
+        "h": 6
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "description": "Hash of system+user prompt per keeper for change detection. Value changes indicate prompt reconfiguration.",
+      "targets": [
+        {
+          "expr": "masc_keeper_turn_instruction_hash",
+          "legendFormat": "{{keeper}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      }
     }
   ],
   "refresh": "30s",

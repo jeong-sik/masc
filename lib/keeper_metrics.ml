@@ -211,6 +211,12 @@ type t =
   | MemoryBankLoadHistorySwallowedExceptions
   | MemoryRecallReadErrors
   | RuntimeHttpProbeJsonParseFailures
+  (* Instruction monitoring metrics *)
+  | PromptSegmentBytes
+  | PromptTemplateRenderOutcome
+  | ToolCallParamCompleteness
+  | KeeperTurnInstructionHash
+  | KeeperToolCallRetryLoop
 
 (** String conversion
 
@@ -437,4 +443,9 @@ let to_string = function
       "masc_keeper_memory_recall_read_errors_total"
   | RuntimeHttpProbeJsonParseFailures ->
       "masc_runtime_http_probe_json_parse_failures_total"
+  | PromptSegmentBytes -> "masc_keeper_prompt_segment_bytes"
+  | PromptTemplateRenderOutcome -> "masc_keeper_prompt_template_render_outcome_total"
+  | ToolCallParamCompleteness -> "masc_keeper_tool_call_param_completeness_total"
+  | KeeperTurnInstructionHash -> "masc_keeper_turn_instruction_hash"
+  | KeeperToolCallRetryLoop -> "masc_keeper_tool_call_retry_loop_total"
 ;;

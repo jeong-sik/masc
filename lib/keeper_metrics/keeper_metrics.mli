@@ -202,5 +202,10 @@ type t =
   | MemoryBankLoadHistorySwallowedExceptions
   | MemoryRecallReadErrors
   | RuntimeHttpProbeJsonParseFailures
+  | PromptSegmentBytes
+  | PromptTemplateRenderOutcome
+  | ToolCallParamCompleteness
+  | KeeperTurnInstructionHash
+  | KeeperToolCallRetryLoop
 
 val to_string : t -> string

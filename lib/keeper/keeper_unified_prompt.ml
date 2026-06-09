@@ -277,30 +277,41 @@ let fallback_turn_intent_block reason =
   turn_intent_fallback_block
 
 let resolve_turn_intent_block substitutions =
+  let observe_outcome label =
+    Otel_metric_store.inc_counter
+      (Keeper_metrics.to_string PromptTemplateRenderOutcome)
+      ~labels:[("template", "turn_intent"); ("outcome", label)]
+      ()
+  in
   match
     Prompt_registry.render_prompt_template Keeper_prompt_names.turn_intent
       substitutions
   with
   | Ok value ->
       let rendered = String.trim value in
-      if String.equal rendered "" then
-        fallback_turn_intent_block "rendered prompt was empty"
-      else
-        rendered
+      if String.equal rendered "" then (
+        observe_outcome "empty";
+        fallback_turn_intent_block "rendered prompt was empty")
+      else (
+        observe_outcome "ok";
+        rendered)
   | Error msg ->
       let raw =
         String.trim (Prompt_registry.get_prompt Keeper_prompt_names.turn_intent)
       in
-      if String.equal raw "" then
+      if String.equal raw "" then (
+        observe_outcome "fallback";
         fallback_turn_intent_block
-          (Printf.sprintf "%s; raw prompt was empty after render failure" msg)
-      else if contains_template_placeholder raw then
+          (Printf.sprintf "%s; raw prompt was empty after render failure" msg))
+      else if contains_template_placeholder raw then (
+        observe_outcome "fallback";
         fallback_turn_intent_block
           (Printf.sprintf
              "%s; raw prompt still contained template placeholders after render \
               failure"
-             msg)
+             msg))
       else (
+        observe_outcome "fallback";
         observe_turn_intent_render_failure msg;
         raw)
 
@@ -712,5 +723,33 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
   let user_message =
     Buffer.contents ubuf
   in
-  ( sanitize_retired_tool_names system_prompt,
-    sanitize_retired_tool_names user_message )
+  let sanitized_system = sanitize_retired_tool_names system_prompt in
+  let sanitized_user = sanitize_retired_tool_names user_message in
+  Otel_metric_store.inc_counter
+    (Keeper_metrics.to_string PromptSegmentBytes)
+    ~labels:[("keeper", meta.name); ("segment", "system_prompt")]
+    ();
+  Otel_metric_store.set_gauge
+    (Keeper_metrics.to_string PromptSegmentBytes)
+    ~labels:[("keeper", meta.name); ("segment", "system_prompt")]
+    (Float.of_int (String.length sanitized_system));
+  Otel_metric_store.set_gauge
+    (Keeper_metrics.to_string PromptSegmentBytes)
+    ~labels:[("keeper", meta.name); ("segment", "user_message")]
+    (Float.of_int (String.length sanitized_user));
+  (* Instruction hash: emit a stable numeric fingerprint of the full prompt
+     composition (system + user) so Grafana can detect when the instruction
+     changes between turns without storing the prompt content itself.
+     Uses first 8 hex chars of SHA-256 as an integer (32-bit). *)
+  let prompt_hash =
+    let combined = sanitized_system ^ sanitized_user in
+    let hex =
+      Digestif.SHA256.(to_hex (digest_string combined))
+    in
+    Int32.to_float (Int32.of_string ("0x" ^ String.sub hex 0 8))
+  in
+  Otel_metric_store.set_gauge
+    (Keeper_metrics.to_string KeeperTurnInstructionHash)
+    ~labels:[("keeper", meta.name)]
+    prompt_hash;
+  ( sanitized_system, sanitized_user )

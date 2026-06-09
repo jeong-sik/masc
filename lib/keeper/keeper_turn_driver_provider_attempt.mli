@@ -69,12 +69,12 @@ val success_selected_model_raw :
 val health_error_kind : string -> Keeper_binding_health.error_kind
 
 val record_candidate_health_success :
-  Runtime_candidate.t -> latency_ms:float -> unit
+  keeper_name:string -> Runtime_candidate.t -> latency_ms:float -> unit
 
 val record_candidate_health_rejected :
-  Runtime_candidate.t -> reason:string -> unit
+  keeper_name:string -> Runtime_candidate.t -> reason:string -> unit
 
 val record_candidate_health_error :
-  Runtime_candidate.t -> Agent_sdk.Error.sdk_error -> unit
+  keeper_name:string -> Runtime_candidate.t -> Agent_sdk.Error.sdk_error -> unit
 
 val runtime_candidate_label : string

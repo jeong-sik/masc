@@ -133,19 +133,26 @@ let success_selected_model_raw candidate =
 let health_error_kind label =
   Keeper_binding_health.error_kind_of_string label
 
-let record_candidate_health_success candidate ~latency_ms =
+let scoped_provider_key ~keeper_name provider_key =
+  let keeper_name = String.trim keeper_name in
+  if String.equal keeper_name "" then provider_key
+  else keeper_name ^ "@" ^ provider_key
+
+let record_candidate_health_success ~keeper_name candidate ~latency_ms =
   Runtime_candidate.health_keys candidate
   |> List.iter (fun provider_key ->
+    let provider_key = scoped_provider_key ~keeper_name provider_key in
     Keeper_binding_health.record_success
       Keeper_binding_health.global
       ~provider_key
       ~latency_ms
       ())
 
-let record_candidate_health_rejected candidate ~reason =
+let record_candidate_health_rejected ~keeper_name candidate ~reason =
   let error_kind = health_error_kind "accept_rejected" in
   Runtime_candidate.health_keys candidate
   |> List.iter (fun provider_key ->
+    let provider_key = scoped_provider_key ~keeper_name provider_key in
     Keeper_binding_health.record_rejected
       Keeper_binding_health.global
       ~provider_key
@@ -313,7 +320,7 @@ let sdk_error_runtime_fallback_class (err : Agent_sdk.Error.sdk_error) :
   else if sdk_error_is_max_turns_exceeded err then Some fallback_class_max_turns
   else None
 
-let record_candidate_health_error candidate sdk_err =
+let record_candidate_health_error ~keeper_name candidate sdk_err =
   let error_reason = Agent_sdk.Error.to_string sdk_err in
   let health_keys = Runtime_candidate.health_keys candidate in
   if sdk_error_is_hard_quota sdk_err
@@ -321,6 +328,7 @@ let record_candidate_health_error candidate sdk_err =
     let error_kind = health_error_kind "hard_quota" in
     health_keys
     |> List.iter (fun provider_key ->
+      let provider_key = scoped_provider_key ~keeper_name provider_key in
       Keeper_binding_health.record_hard_quota
         Keeper_binding_health.global
         ~provider_key
@@ -332,6 +340,7 @@ let record_candidate_health_error candidate sdk_err =
     let error_kind = health_error_kind "terminal_provider_runtime_failure" in
     health_keys
     |> List.iter (fun provider_key ->
+      let provider_key = scoped_provider_key ~keeper_name provider_key in
       Keeper_binding_health.record_terminal_failure
         Keeper_binding_health.global
         ~provider_key
@@ -344,6 +353,7 @@ let record_candidate_health_error candidate sdk_err =
       let error_kind = health_error_kind "soft_rate_limited" in
       health_keys
       |> List.iter (fun provider_key ->
+        let provider_key = scoped_provider_key ~keeper_name provider_key in
         Keeper_binding_health.record_soft_rate_limited
           Keeper_binding_health.global
           ~provider_key
@@ -355,6 +365,7 @@ let record_candidate_health_error candidate sdk_err =
       let error_kind = health_error_kind "provider_error" in
       health_keys
       |> List.iter (fun provider_key ->
+        let provider_key = scoped_provider_key ~keeper_name provider_key in
         Keeper_binding_health.record_failure
           Keeper_binding_health.global
           ~provider_key

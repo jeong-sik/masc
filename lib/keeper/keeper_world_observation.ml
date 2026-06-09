@@ -746,6 +746,7 @@ let keeper_cycle_decision
           if should_run
           then
             provider_cooldown_remaining_sec
+              ~keeper_name:meta.name
               ~runtime_id:(runtime_id)
           else None
         in

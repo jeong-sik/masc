@@ -539,7 +539,14 @@ let test_reject_by_other_agent_moves_to_in_progress () =
       Alcotest.(check string) "status" "in_progress"
         (status_string config task_id))
 
-let test_approve_prepare_failure_keeps_task_awaiting () =
+(* RFC-0221 §3.2: the verdict record write is best-effort POST-commit. A
+   record-store failure must NOT block a decided outcome — the approval already
+   lives in [task_status] (Done, with the verdict in notes). This is the
+   deliberate reversal of the old "keeps_task_awaiting" contract (which let an
+   audit-write failure block the outcome and re-admit the drift). The failed
+   write leaves the record Pending: an inert orphan (§3.5), which proves the
+   failure was tolerated, not hidden. *)
+let test_approve_verdict_failure_still_completes () =
   with_temp_config ~fsm_enabled:true (fun config ->
     let task_id = add_strict_task config in
     claim_and_start config "worker" task_id;
@@ -575,23 +582,27 @@ let test_approve_prepare_failure_keeps_task_awaiting () =
         ()
     in
     match result with
-    | Ok _ -> Alcotest.fail "approve should fail when verdict persistence fails"
     | Error e ->
-      Alcotest.(check bool) "prepare called" true !prepare_called;
-      Alcotest.(check string) "status remains awaiting_verification"
-        "awaiting_verification" (status_string config task_id);
-      let msg = Masc_domain.show_masc_error e in
-      Alcotest.(check bool) "error mentions verdict persistence" true
-        (Astring.String.is_infix
-           ~affix:"verification verdict persistence failed"
-           msg);
+      Alcotest.fail
+        ("approve must complete despite verdict-store failure: "
+         ^ Masc_domain.show_masc_error e)
+    | Ok _ ->
+      Alcotest.(check bool) "verdict prepare attempted post-commit" true
+        !prepare_called;
+      Alcotest.(check string) "status moves to done"
+        "done" (status_string config task_id);
       (match Verification.load_request config.Workspace.base_path req.id with
        | Error err -> Alcotest.fail ("load_request failed: " ^ err)
        | Ok updated ->
-         Alcotest.(check bool) "request remains pending" true
+         Alcotest.(check bool) "record left pending (audit write tolerated)" true
            (match updated.status with Pending -> true | _ -> false)))
 
-let test_reject_prepare_failure_keeps_task_awaiting () =
+(* RFC-0221 §3.2 (reject side): same reversal. The outcome (InProgress, task
+   bounced back to the worker) is in [task_status]; the reject reason reaches
+   the worker via the separate post-commit notify, not this record. So an
+   audit-record failure must not block the bounce. The failed write leaves the
+   record Pending — inert (§3.5). *)
+let test_reject_verdict_failure_still_transitions () =
   with_temp_config ~fsm_enabled:true (fun config ->
     let task_id = add_strict_task config in
     claim_and_start config "worker" task_id;
@@ -628,20 +639,19 @@ let test_reject_prepare_failure_keeps_task_awaiting () =
         ()
     in
     match result with
-    | Ok _ -> Alcotest.fail "reject should fail when verdict persistence fails"
     | Error e ->
-      Alcotest.(check bool) "prepare called" true !prepare_called;
-      Alcotest.(check string) "status remains awaiting_verification"
-        "awaiting_verification" (status_string config task_id);
-      let msg = Masc_domain.show_masc_error e in
-      Alcotest.(check bool) "error mentions verdict persistence" true
-        (Astring.String.is_infix
-           ~affix:"verification verdict persistence failed"
-           msg);
+      Alcotest.fail
+        ("reject must transition despite verdict-store failure: "
+         ^ Masc_domain.show_masc_error e)
+    | Ok _ ->
+      Alcotest.(check bool) "verdict prepare attempted post-commit" true
+        !prepare_called;
+      Alcotest.(check string) "status moves back to in_progress"
+        "in_progress" (status_string config task_id);
       (match Verification.load_request config.Workspace.base_path req.id with
        | Error err -> Alcotest.fail ("load_request failed: " ^ err)
        | Ok updated ->
-         Alcotest.(check bool) "request remains pending" true
+         Alcotest.(check bool) "record left pending (audit write tolerated)" true
          (match updated.status with Pending -> true | _ -> false)))
 
 let test_approve_retry_recovers_completed_verdict_orphan () =
@@ -938,10 +948,10 @@ let () =
         test_approve_by_other_agent_moves_to_done;
       Alcotest.test_case "cross-agent reject moves to in_progress" `Quick
         test_reject_by_other_agent_moves_to_in_progress;
-      Alcotest.test_case "approve prepare failure keeps task awaiting" `Quick
-        test_approve_prepare_failure_keeps_task_awaiting;
-      Alcotest.test_case "reject prepare failure keeps task awaiting" `Quick
-        test_reject_prepare_failure_keeps_task_awaiting;
+      Alcotest.test_case "approve completes despite verdict-store failure" `Quick
+        test_approve_verdict_failure_still_completes;
+      Alcotest.test_case "reject transitions despite verdict-store failure" `Quick
+        test_reject_verdict_failure_still_transitions;
       Alcotest.test_case
         "approve retry recovers completed verdict orphan"
         `Quick

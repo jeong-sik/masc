@@ -54,6 +54,34 @@ let handle_dashboard_link_previews = Server_routes_http_dashboard_handlers.handl
 let handle_dashboard_task_history = Server_routes_http_dashboard_handlers.handle_dashboard_task_history
 let handle_dashboard_workspace = Server_routes_http_dashboard_handlers.handle_dashboard_workspace
 
+(* Default page sizes for /api/v1/dashboard/telemetry when the client
+   omits [n]. A windowed request (since_ms/until_ms) previously defaulted
+   to n=0 (unbounded): a single Observatory poll
+   ([observatory.ts] fetchTelemetry with since_ms/until_ms and no n) then
+   Yojson-parsed up to the telemetry read clamp (50k, #20659) entries per
+   source across all sources — enough to peg the single Eio domain on a
+   non-yielding parse and freeze the keeper fleet. Bound the DEFAULT here;
+   an explicit n=0 still honours the all-in-window contract from #20659. *)
+let default_telemetry_limit = 100
+let default_windowed_telemetry_limit = 2000
+
+(* Resolve the effective entry limit for /api/v1/dashboard/telemetry.
+   Absent or unparseable [n_param] falls back to a bounded default
+   (windowed: [default_windowed_telemetry_limit], else
+   [default_telemetry_limit]) so no request defaults to an unbounded read.
+   An explicit n=0 parses to [Some 0] and is preserved (all-in-window,
+   clamped downstream by #20659). Pure + exposed so the freeze guard
+   (no permissive 0 default) is unit-testable. *)
+let resolve_telemetry_n ~has_time_window ~(n_param : string option) =
+  let default_n =
+    if has_time_window
+    then default_windowed_telemetry_limit
+    else default_telemetry_limit
+  in
+  match n_param with
+  | Some raw -> Option.value ~default:default_n (int_of_string_opt raw) |> max 0
+  | None -> default_n
+
 (* Telemetry unified view handler — extracted from add_routes pipeline
    as part of godfile near-threshold split. *)
 let handle_telemetry request reqd =
@@ -78,12 +106,8 @@ let handle_telemetry request reqd =
     in
     let has_time_window = Option.is_some since_ts || Option.is_some until_ts in
     let n =
-      match Server_utils.query_param req "n" with
-      | Some raw ->
-        Option.value ~default:(if has_time_window then 0 else 100)
-          (int_of_string_opt raw)
-        |> max 0
-      | None -> if has_time_window then 0 else 100
+      resolve_telemetry_n ~has_time_window
+        ~n_param:(Server_utils.query_param req "n")
     in
     let offset =
       match Server_utils.query_param req "offset" with

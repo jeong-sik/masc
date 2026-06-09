@@ -1090,6 +1090,31 @@ let test_project_snapshot_wire_returns_snapshot_when_populated () =
      Re.execp re header);
   Dashboard_snapshot.reset_for_test ()
 
+(* Freeze guard: /api/v1/dashboard/telemetry must never default to an
+   unbounded read. Observatory polls with since_ms/until_ms and no [n];
+   before this fix the windowed default was n=0 (unbounded), letting one
+   poll Yojson-parse up to the read clamp (#20659: 50k) per source across
+   all sources and peg the single Eio domain -> keeper-fleet freeze. *)
+let test_telemetry_n_default_is_bounded () =
+  let resolve = Server_routes_http_routes_dashboard_setup.resolve_telemetry_n in
+  Alcotest.(check int)
+    "windowed + no n -> bounded default, never 0"
+    2000 (resolve ~has_time_window:true ~n_param:None);
+  Alcotest.(check int)
+    "no window + no n -> small default"
+    100 (resolve ~has_time_window:false ~n_param:None);
+  Alcotest.(check int)
+    "unparseable n -> bounded default, never 0"
+    2000 (resolve ~has_time_window:true ~n_param:(Some "garbage"));
+  (* #20659 all-in-window contract: explicit n=0 is honoured (clamped
+     downstream), so an operator can still request the full window. *)
+  Alcotest.(check int)
+    "explicit n=0 preserved"
+    0 (resolve ~has_time_window:true ~n_param:(Some "0"));
+  Alcotest.(check int)
+    "explicit positive n honoured"
+    500 (resolve ~has_time_window:true ~n_param:(Some "500"))
+
 let () =
   run "dashboard_http_core"
     [
@@ -1161,5 +1186,7 @@ let () =
             test_telemetry_summary_snapshot_wire_falls_back_when_empty;
           test_case "RFC-0138 project-snapshot wire returns snapshot when populated" `Quick
             test_project_snapshot_wire_returns_snapshot_when_populated;
+          test_case "telemetry n default is bounded (freeze guard)" `Quick
+            test_telemetry_n_default_is_bounded;
         ] );
     ]

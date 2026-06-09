@@ -544,6 +544,70 @@ let read_range t ~since ~until =
   iter_range t ~since ~until (fun json -> collected := json :: !collected);
   List.rev !collected
 
+(* Like [read_range] but bounded to the [n] most recent entries within
+   [since, until] (inclusive day range). Reads newest day-file first and
+   only the tail of each file, parsing at most ~[n] entries instead of the
+   whole window. [read_range] parses every entry in the range, which is
+   unbounded over large stores; callers that already pass a result limit
+   should use this so a wide window cannot scan months of multi-MB files.
+   Returns entries oldest-first within the collected set (same convention
+   as [read_recent]). *)
+let read_range_recent ?(offset = 0) t ~since ~until n =
+  if n <= 0
+  then []
+  else (
+    match parse_date since, parse_date until with
+    | None, _ | _, None -> []
+    | Some (since_month, since_day), Some (until_month, until_day) ->
+      let skip = ref offset in
+      let collected = ref [] in
+      let count = ref 0 in
+      let months = list_month_dirs t.base_dir in
+      let exception Done in
+      (try
+         List.iter
+           (fun m ->
+              if String.compare m since_month >= 0
+                 && String.compare m until_month <= 0
+              then begin
+                let month_path = Filename.concat t.base_dir m in
+                let days = list_day_files month_path in
+                List.iter
+                  (fun d ->
+                     if !count >= n then raise_notrace Done;
+                     let day_num = Filename.remove_extension d in
+                     let dominated =
+                       (m = since_month && String.compare day_num since_day < 0)
+                       || (m = until_month && String.compare day_num until_day > 0)
+                     in
+                     if not dominated
+                     then begin
+                       let path = Filename.concat month_path d in
+                       let need = n - !count + !skip in
+                       let lines = load_tail_lines path ~max_lines:need in
+                       let rev_lines = List.rev lines in
+                       List.iter
+                         (fun line ->
+                            if !count >= n then raise_notrace Done;
+                            try
+                              let json = Yojson.Safe.from_string line in
+                              if !skip > 0
+                              then decr skip
+                              else begin
+                                collected := json :: !collected;
+                                incr count
+                              end
+                            with
+                            | Yojson.Json_error _ -> ())
+                         rev_lines
+                     end)
+                  days
+              end)
+           months
+       with
+       | Done -> ());
+      !collected)
+
 let prune t ~days =
   let mutex = Atomic.get t.mutex in
   Eio.Mutex.use_ro mutex (fun () -> prune_unlocked t ~days)

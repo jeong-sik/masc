@@ -49,6 +49,21 @@ val read_range : t -> since:string -> until:string -> Yojson.Safe.t list
     within [[since, until]] (inclusive, format ["YYYY-MM-DD"]).
     Result is in chronological order. *)
 
+val read_range_recent
+  :  ?offset:int
+  -> t
+  -> since:string
+  -> until:string
+  -> int
+  -> Yojson.Safe.t list
+(** [read_range_recent ?offset t ~since ~until n] returns at most the newest
+    [n] entries whose day-file falls within [[since, until]] (inclusive). Reads
+    newest day-file first and only the tail of each file, so it parses ~[n]
+    entries instead of the whole window — use it instead of {!read_range} when
+    a result bound exists and the window may span large stores. Result is
+    chronological (oldest-first) within the collected set, matching
+    {!read_recent}. *)
+
 val iter_all : t -> (Yojson.Safe.t -> unit) -> unit
 (** [iter_all t f] calls [f] for every parseable JSONL entry in chronological
     order without loading a whole day-file into memory. Malformed rows are

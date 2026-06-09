@@ -59,6 +59,12 @@ val max_context_of_runtime_id : string -> int option
     not configured.  Budgeting callers use this to size a per-keeper routed turn
     against the same runtime that dispatch will use. *)
 
+val thinking_support_of_runtime_id : string -> bool option
+(** [thinking-support] capability of the model bound to runtime [id], or [None]
+    when the id is not configured (e.g. before {!init_default}).  Consumed by
+    {!Runtime_inference.for_runtime} to gate keeper thinking per model from the
+    runtime.toml SSOT. *)
+
 val get_default_runtime_id : unit -> string
 (** @raise Failure if {!init_default} has not run. No silent fallback
     (RFC-0206 §2.1): an unresolved default is a startup-ordering bug, not a

@@ -12,7 +12,16 @@ type seed = {
   thinking_enabled : bool option;
 }
 
+val seed_of_thinking_support : bool option -> seed
+(** Pure: map a model's [thinking-support] capability to the keeper thinking
+    seed.  [Some false] is a force-thinking-off signal (capability gate);
+    [Some true]/[None] defer to [keeper.turn.enable_thinking]. *)
+
 val for_runtime : name:string -> seed
+(** Per-model thinking seed for runtime [name], resolved from the runtime.toml
+    [thinking-support] of the bound model via
+    {!Runtime.thinking_support_of_runtime_id}.  See {!seed_of_thinking_support}
+    for the gate semantics. *)
 
 val validate_max_tokens_within_ceiling :
   runtime_id:string ->

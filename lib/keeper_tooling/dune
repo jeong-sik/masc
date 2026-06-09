@@ -7,7 +7,6 @@
  (modules
   keeper_tool_command_words
   keeper_tool_execute_shell_ir
-  keeper_provider_error_class
   keeper_tool_name
   keeper_tool_response
   keeper_tool_retry_state

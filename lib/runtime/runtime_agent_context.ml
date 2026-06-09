@@ -96,6 +96,30 @@ type config =
     (** Minimum probability threshold for nucleus sampling, forwarded
         to OAS [Builder.with_min_p]. [None] leaves the provider default;
         [Some 0.0] is a no-op and some providers reject the field. *)
+  ; on_run_complete : (bool -> unit) option
+    (** Callback invoked when an OAS run finishes (success or failure).
+        Forwarded to [Builder.with_on_run_complete]. Useful for emitting
+        telemetry, flushing OTel spans, or finalizing receipts. *)
+  ; disclosure_level : Agent_sdk.Tool.disclosure_level option
+    (** Tool schema disclosure level forwarded to
+        [Builder.with_disclosure_level]. Controls whether full schemas
+        or minimal name+description indices are sent to the LLM.
+        [None] preserves the default (Full_schema). *)
+  ; disclosure_resolver
+      : (Agent_sdk.Types.tool_result list -> Agent_sdk.Tool.disclosure_level option) option
+    (** Per-turn resolver that adapts disclosure based on previous tool
+        results. Forwarded to [Builder.with_disclosure_resolver].
+        Overrides [disclosure_level] for the current turn when [Some]
+        is returned. *)
+  ; tool_selector : Agent_sdk.Tool_selector.strategy option
+    (** Tool selection strategy for large tool catalogs, forwarded to
+        [Builder.with_tool_selector]. When tool count exceeds ~15,
+        narrows candidates per turn before sending schemas to the LLM. *)
+  ; checkpoint_sink : Agent_sdk.Agent.checkpoint_sink option
+    (** Caller-owned turn-boundary checkpoint sink, forwarded to
+        [Builder.with_checkpoint_sink]. Allows consumers to persist
+        checkpoints at OAS turn boundaries without the full
+        checkpoint_dir filesystem path. *)
   }
 
 let default_config
@@ -151,6 +175,11 @@ let default_config
   ; execution_idle_timeout_s = None
   ; thinking_budget = None
   ; min_p = None
+  ; on_run_complete = None
+  ; disclosure_level = None
+  ; disclosure_resolver = None
+  ; tool_selector = None
+  ; checkpoint_sink = None
   }
 ;;
 
@@ -322,6 +351,31 @@ let builder_without_approval
   let builder =
     match config.event_bus with
     | Some bus -> Agent_sdk.Builder.with_event_bus bus builder
+    | None -> builder
+  in
+  let builder =
+    match config.on_run_complete with
+    | Some cb -> Agent_sdk.Builder.with_on_run_complete cb builder
+    | None -> builder
+  in
+  let builder =
+    match config.disclosure_level with
+    | Some level -> Agent_sdk.Builder.with_disclosure_level level builder
+    | None -> builder
+  in
+  let builder =
+    match config.disclosure_resolver with
+    | Some resolver -> Agent_sdk.Builder.with_disclosure_resolver resolver builder
+    | None -> builder
+  in
+  let builder =
+    match config.tool_selector with
+    | Some strategy -> Agent_sdk.Builder.with_tool_selector strategy builder
+    | None -> builder
+  in
+  let builder =
+    match config.checkpoint_sink with
+    | Some sink -> Agent_sdk.Builder.with_checkpoint_sink sink builder
     | None -> builder
   in
   match transport with

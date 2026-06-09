@@ -68,6 +68,12 @@ type config =
   execution_idle_timeout_s : float option;
   thinking_budget : int option;
   min_p : float option;
+  on_run_complete : (bool -> unit) option;
+  disclosure_level : Agent_sdk.Tool.disclosure_level option;
+  disclosure_resolver
+      : (Agent_sdk.Types.tool_result list -> Agent_sdk.Tool.disclosure_level option) option;
+  tool_selector : Agent_sdk.Tool_selector.strategy option;
+  checkpoint_sink : Agent_sdk.Agent.checkpoint_sink option;
 }
 
 let default_config = Runtime_agent_context.default_config

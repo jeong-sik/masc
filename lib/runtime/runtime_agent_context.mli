@@ -94,8 +94,14 @@ type config = {
           to OAS [Builder.with_min_p]. [None] leaves the provider default
           intact; [Some 0.0] is a no-op and some providers (Groq, GLM)
           reject the field, so leave [None] unless explicitly needed. *)
+  on_run_complete : (bool -> unit) option;
+  disclosure_level : Agent_sdk.Tool.disclosure_level option;
+  disclosure_resolver
+      : (Agent_sdk.Types.tool_result list -> Agent_sdk.Tool.disclosure_level option) option;
+  tool_selector : Agent_sdk.Tool_selector.strategy option;
+  checkpoint_sink : Agent_sdk.Agent.checkpoint_sink option;
 }
-(** Per-worker configuration.  50 fields — concrete record because
+(** Per-worker configuration.  55 fields — concrete record because
     callers ({!Runtime_agent}, keeper workers) construct + tweak
     fields field-by-field at the dispatch site. *)
 

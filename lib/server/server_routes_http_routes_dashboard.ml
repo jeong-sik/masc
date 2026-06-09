@@ -122,9 +122,11 @@ let handle_execute_output_stream ~sw ~clock request reqd =
            else
              Eio.Fiber.fork ~sw (fun () ->
                Eio.Switch.run (fun stream_sw ->
-                 Eio.Switch.on_release stream_sw (fun () ->
-                   Dashboard_execute_output.unsubscribe subscriber;
-                   close_stream ());
+                 Server_bootstrap_http.with_cleanups_on_release ~sw:stream_sw
+                   [
+                     (fun () -> Dashboard_execute_output.unsubscribe subscriber);
+                     close_stream;
+                   ];
                  let rec loop () =
                    if not !closed
                    then (

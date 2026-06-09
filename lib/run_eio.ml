@@ -29,9 +29,10 @@ let run_record_to_json (r : run_record) : Yojson.Safe.t =
   ]
 
 let run_record_of_json (json : Yojson.Safe.t) : run_record option =
-  match Safe_ops.json_string_opt "task_id" json,
-        Safe_ops.json_string_opt "created_at" json,
-        Safe_ops.json_string_opt "updated_at" json with
+  let task_id = Safe_ops.json_string_opt "task_id" json in
+  let created_at = Safe_ops.json_string_opt "created_at" json in
+  let updated_at = Safe_ops.json_string_opt "updated_at" json in
+  match task_id, created_at, updated_at with
   | Some task_id, Some created_at, Some updated_at ->
     let agent_name = Safe_ops.json_string_opt "agent_name" json in
     let plan = Safe_ops.json_string ~default:"" "plan" json in

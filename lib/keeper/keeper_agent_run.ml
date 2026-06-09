@@ -159,7 +159,7 @@ let run_turn
        with Eio.Cancel.Cancelled _ as ce -> raise ce
        | exn ->
          Log.Keeper.warn "keeper:%s emit_observation_turn_end failed: %s"
-           (!meta_ref).name (Printexc.to_string exn));
+           meta.name (Printexc.to_string exn));
       Turn_helpers.emit_turn_end_safely ~keeper_name:meta.name ()
   in
   Eio_guard.protect ~finally:safe_emit_turn_end

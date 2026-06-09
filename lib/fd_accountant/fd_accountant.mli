@@ -58,14 +58,26 @@ val with_slot : kind:kind -> (unit -> 'a) -> 'a
     high-level wrappers coexist during migration.
 
     Exceptions from [f] propagate; the slot is always released
-    (via [Eio.Switch.on_release]). *)
+    (via [Eio.Semaphore.release] under [Fun.protect ~finally],
+    after a [mark_release] state-machine transition).  PR-C1
+    (follow-up to PR-B / PR #20583) removed the
+    [Eio.Switch.on_release] counter-style callback: a parent-fibre
+    cancellation can no longer leave the holding state stuck
+    because [holding_state] is a typed variant with only two
+    valid transitions, performed under
+    [Eio.Mutex.use_rw ~protect:true]. *)
 
 val acquire_lifetime_slot : kind:kind -> unit -> (unit -> unit)
 (** [acquire_lifetime_slot ~kind ()] acquires a [kind]-typed slot and
     returns an idempotent release callback. This is for resources whose FD
     lifetime intentionally outlives the spawning call, such as background
     shell tasks. The release callback must be invoked exactly when the
-    underlying FDs are closed; double invocation is ignored. *)
+    underlying FDs are closed; double invocation is ignored.  PR-C1
+    removed the [Eio.Switch.on_release] counter-style callback; the
+    holding state is a typed variant transitioned by
+    {!mark_acquire} / {!mark_release} under the per-slot mutex.  The
+    callback's [released] atomic is a separate idempotency guard for
+    *release invocation*, not for the holding state. *)
 
 val effective_concurrency : kind:kind -> int
 (** [effective_concurrency ~kind] returns the current cap.
@@ -137,3 +149,68 @@ val kind_of_string : string -> kind option
 
 val all_kinds : kind list
 (** Enumerable list, used by snapshot iteration and tests. *)
+
+(** {1 Holding state machine}
+
+    PR-C1 (follow-up to PR-B / PR #20583) replaced the
+    per-kind [int Atomic.t] counter with a typed variant.  The
+    counter used to live next to the [Eio.Semaphore] and was
+    decremented by an [Eio.Switch.on_release] callback; under
+    parent-fibre cancellation the callback could fire too late
+    (over-decrement, hidden by a [max 0 (... - 1)] clamp) or
+    never fire (stuck positive).  The typed state machine is
+    the only writer of [holding_state] and admits exactly two
+    transitions, both performed under
+    [Eio.Mutex.use_rw ~protect:true]:
+
+    - [Idle] -> [In_flight { acquired_at ; hold_id }] by
+      {!mark_acquire}  (allocates the next [hold_id])
+    - [In_flight _] -> [Idle] by {!mark_release}
+
+    The semaphore and the holding state are *separate* concerns:
+    the semaphore is the back-pressure primitive, the holding
+    state is the counter-style invariant.  PR-C1 does not touch
+    the semaphore. *)
+
+type fd_holding_state =
+  | Idle
+  | In_flight of {
+      acquired_at : float;
+        (** Wall-clock at the matching {!mark_acquire} call,
+            stamped via [Unix.gettimeofday ()].  Useful for
+            observability — the per-cycle in-flight duration
+            can be derived on the next {!mark_release}. *)
+      hold_id : int;
+        (** Strictly monotonic identifier for the
+            [In_flight] branch.  Allocated from the
+            per-slot [next_hold_id] counter inside
+            {!mark_acquire}; never reused. *)
+    }
+(** Typed state of a single per-kind slot.  PR-C1
+    replacement for the legacy [int] counter. *)
+
+val read_holding : kind:kind -> int
+(** [read_holding ~kind] returns the current holding count
+    as a pure projection of [kind]'s [holding_state]:
+    [Idle] -> [0], [In_flight _] -> [1].  Does not mutate
+    state.  Thread-safe under [Eio.Mutex.use_rw ~protect:true]. *)
+
+val mark_acquire : kind:kind -> int
+(** Transitions [kind]'s [holding_state] from [Idle] to
+    [In_flight { ... }], allocates the next [hold_id], and
+    returns it.  The caller is expected to pair this with a
+    matching {!mark_release} when the slot is released.
+    PR-C1 implementation: the [holding_state] field is the
+    only writer, so the typed invariant holds regardless of
+    caller-site exceptions. *)
+
+val mark_release : kind:kind -> hold_id:int -> unit
+(** Transitions [kind]'s [holding_state] back to [Idle].  The
+    [hold_id] is the value returned by the matching
+    {!mark_acquire}; it is currently accepted for API
+    symmetry / future cycle-tag tracking but does not gate
+    the transition (the [holding_state] is the only source
+    of truth).  Idempotent on [Idle]: a stray release is a
+    no-op rather than an error, so user-site exception paths
+    that re-raise after partial teardown cannot desync the
+    state machine. *)

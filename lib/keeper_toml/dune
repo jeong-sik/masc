@@ -5,7 +5,4 @@
  (public_name masc.keeper_toml)
  (wrapped false)
  (modules keeper_toml_loader keeper_toml_parser)
- (libraries
-  eio
-  fs_compat
-  masc.masc_core))
+ (libraries eio fs_compat masc.masc_core))

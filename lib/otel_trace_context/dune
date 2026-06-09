@@ -5,7 +5,4 @@
  (public_name masc.otel_trace_context)
  (wrapped false)
  (modules otel_trace_context)
- (libraries
-  opentelemetry
-  yojson
-  masc.otel_spans))
+ (libraries opentelemetry yojson masc.otel_spans))

@@ -1162,15 +1162,13 @@ let internal_descriptors : t list =
       ~readonly:false
   ; masc_run_descriptor "masc_run_plan"
       "Read the run plan." ~readonly:true
-  (* ── RFC-0182 §3.1 — masc_agent_* cluster (5 entries) ────────── *)
-  ; masc_agent_descriptor "agents" "masc_agents"
-      "List registered agents." ~readonly:true
+  (* ── RFC-0182 §3.1 — masc_agent_* cluster (3 entries; masc_agents +
+       masc_agent_update removed 2026-06-09 with the dead agent-status
+       surface) ────────── *)
   ; masc_agent_descriptor "card" "masc_agent_card"
       "Read an agent card." ~readonly:true
   ; masc_agent_descriptor "fitness" "masc_agent_fitness"
       "Read agent fitness metrics." ~readonly:true
-  ; masc_agent_descriptor "update" "masc_agent_update"
-      "Update agent registration metadata." ~readonly:false
   ; masc_agent_descriptor "get_metrics" "masc_get_metrics"
       "Read aggregated agent metrics." ~readonly:true
   (* ── RFC-0182 §3.1 — masc_workspace_* cluster (8 entries) ────────── *)

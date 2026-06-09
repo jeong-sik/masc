@@ -235,9 +235,6 @@ let custom_tool_titles : (string * string) list = [
   ("masc_plan_clear_task", "Clear Current Task");
   ("masc_note_add", "Add Note");
   ("masc_deliver", "Deliver Result");
-  (* Agents *)
-  ("masc_agents", "List Agent Details");
-  ("masc_agent_update", "Update Agent Profile");
   (* Heartbeat *)
   ("masc_heartbeat", "Send Heartbeat");
   (* Operations *)

@@ -199,7 +199,6 @@ let explicit_metadata : (string * metadata) list =
     ("masc_status", read_state_tool);
     ("masc_tasks", read_state_tool);
     ("masc_messages", read_state_tool);
-    ("masc_agents", read_state_tool);
     ("masc_agent_card", read_state_tool);
     ("masc_dashboard", read_state_tool);
     ("masc_board_list", read_state_tool);
@@ -248,7 +247,6 @@ let explicit_metadata : (string * metadata) list =
     ("masc_web_fetch", read_state_tool);
     ("masc_agent_fitness", read_state_tool);
     ("masc_agent_timeline", read_state_tool);
-    ("masc_agent_update", broadcast_tool);
     ("masc_get_metrics", read_state_tool);
     ("masc_operator_snapshot", read_state_tool);
     ("masc_operator_digest", read_state_tool);

@@ -219,8 +219,6 @@ let tool_search_alias_entries =
   ; "masc_plan_init", "계획 플랜 초기화 생성"
   ; "masc_plan_set_task", "계획 태스크 설정 할당"
   ; "masc_plan_get_task", "계획 태스크 조회"
-  ; "masc_agents", "에이전트 목록 현황 누구"
-  ; "masc_agent_update", "에이전트 업데이트 상태변경"
   ; "masc_keeper_list", "키퍼 목록 현황"
   ; "masc_keeper_msg", "키퍼 메시지 전달 대화"
   ; "masc_keeper_status", "키퍼 상태 확인"

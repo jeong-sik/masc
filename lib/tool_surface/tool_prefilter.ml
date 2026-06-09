@@ -41,7 +41,6 @@ let synonyms : (string * string list) list =
     , [ "notify"; "announce"; "tell"; "inform"; "alert"; "everyone"; "let know" ] )
   ; "masc_add_task", [ "create task"; "new task"; "make task"; "register task" ]
   ; "masc_messages", [ "chat"; "conversation"; "history"; "log"; "what was said" ]
-  ; "masc_agents", [ "who is working"; "team members"; "workers"; "collaborators" ]
   ; "masc_status", [ "how are things"; "state"; "health"; "situation" ]
   ; ( "tool_read_file"
     , [ "contents"
@@ -341,8 +340,6 @@ let synonyms : (string * string list) list =
     , [ "clear plan task"; "remove plan task"; "unassign plan task" ] )
   ; (* masc_agent_* — agent management *)
     "masc_agent_card", [ "agent card"; "agent profile"; "agent info"; "who is agent" ]
-  ; ( "masc_agent_update"
-    , [ "update agent"; "change agent"; "agent modify"; "agent settings" ] )
   ; ( "masc_agent_fitness"
     , [ "agent fitness"; "agent evaluation"; "agent score"; "rate agent" ] )
   ; (* masc web search + fetch *)

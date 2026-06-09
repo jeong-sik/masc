@@ -575,7 +575,6 @@ let start_keeper_loops
   let judge_tool_names =
     [ "masc_status"
     ; Tool_name.Task_name.to_string Tool_name.Task_name.Tasks
-    ; "masc_agents"
     ; Tool_name.Board_name.to_string Tool_name.Board_name.Board_list
     ]
   in
@@ -592,7 +591,7 @@ let start_keeper_loops
     let agent_name = actor in
     let ctx_workspace : Tool_workspace.context = { config; agent_name } in
     let ctx_task : Task.Tool.context = { config; agent_name; sw = Some sw } in
-    let ctx_agent : Tool_agent.context = { config; agent_name } in
+    (* ctx_agent removed with the masc_agents judge dispatch case (2026-06-09). *)
     match name with
     | "masc_status" ->
       (match Tool_workspace.dispatch ctx_workspace ~name ~args with
@@ -612,13 +611,6 @@ let start_keeper_loops
          Tool_result.error
            ~failure_class:(Some Tool_result.Runtime_failure)
            ~tool_name:name ~start_time "masc_tasks: dispatch failed")
-    | "masc_agents" ->
-      (match Tool_agent.dispatch ctx_agent ~name ~args with
-       | Some result -> result
-       | None ->
-         Tool_result.error
-           ~failure_class:(Some Tool_result.Runtime_failure)
-           ~tool_name:name ~start_time "masc_agents: dispatch failed")
     | "masc_board_list" ->
       Board_tool.handle_tool name args
     | _ ->

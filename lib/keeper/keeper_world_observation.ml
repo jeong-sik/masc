@@ -604,6 +604,7 @@ let should_inject_entropic_oscillation ~since_last_scheduled_autonomous ~draw_pe
 
 let keeper_cycle_decision
       ?(provider_cooldown_remaining_sec = provider_cooldown_remaining_sec_for_runtime)
+      ?(reactive_wake = false)
       ~(meta : keeper_meta)
       (observation : world_observation)
   =
@@ -732,14 +733,26 @@ let keeper_cycle_decision
                ~since_last_scheduled_autonomous
                ~draw_percent:(Random.int 100)
         in
+        (* Reactive-wake gate (thundering-herd fix). When this evaluation runs
+           because an external broadcast woke the keeper early ([reactive_wake]),
+           the GLOBAL task backlog must not, on its own, drive a turn: otherwise
+           a single task release/add broadcasts to every keeper and all of them
+           run a full LLM turn against the shared (claimable-by-anyone) pool — N
+           turns for work at most one keeper can claim. Global backlog is instead
+           picked up on the keeper's own cadence (sleep Timeout) and by the
+           supervisor sweep. Per-keeper signals (mention/board/scope) are handled
+           by the Reactive channel above and are unaffected. Time-based liveness
+           reasons (bootstrap / min_interval / idle_gate+cooldown / oscillation)
+           key on the keeper's own clock, so they stay ungated. *)
+        let backlog_drives_turn =
+          (not reactive_wake) && (backlog_fresh || backlog_elapsed)
+        in
         let should_run =
           is_bootstrap
           || should_oscillate
           || min_interval_elapsed
           || (proactive_work_ready
-              && (backlog_fresh
-                  || backlog_elapsed
-                  || (idle_gate_elapsed && cooldown_elapsed)))
+              && (backlog_drives_turn || (idle_gate_elapsed && cooldown_elapsed)))
         in
         let runtime_id = runtime_id_of_meta meta in
         let provider_cooldown_remaining_sec =

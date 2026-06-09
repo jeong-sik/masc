@@ -286,11 +286,18 @@ val should_inject_entropic_oscillation :
 val keeper_cycle_decision :
   ?provider_cooldown_remaining_sec:
     (keeper_name:string -> runtime_id:string -> int option) ->
+  ?reactive_wake:bool ->
   meta:Keeper_meta_contract.keeper_meta -> world_observation -> keeper_cycle_decision
+(** [reactive_wake] (default [false]) marks evaluations triggered by an external
+    broadcast wakeup rather than the keeper's own cadence timer. When set, a
+    GLOBAL task backlog alone does not drive a turn — this prevents the
+    all-keeper stampede on each task release/add. Per-keeper Reactive triggers
+    and time-based liveness reasons are unaffected. *)
 
 val unified_turn_decision :
   ?provider_cooldown_remaining_sec:
     (keeper_name:string -> runtime_id:string -> int option) ->
+  ?reactive_wake:bool ->
   meta:Keeper_meta_contract.keeper_meta -> world_observation -> keeper_cycle_decision
 
 val should_run_keeper_cycle :

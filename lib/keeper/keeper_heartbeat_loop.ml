@@ -128,6 +128,7 @@ let run_keepalive_unified_turn
       ~pending_board_events
       ~(stop : bool Atomic.t)
       ~(proactive_warmup_elapsed : bool)
+      ~(reactive_wake : bool)
       ~(shared_context : Agent_sdk.Context.t)
   : keeper_meta
   =
@@ -147,6 +148,7 @@ let run_keepalive_unified_turn
       in
       let scheduling =
         decide_keepalive_scheduling
+          ~reactive_wake
           ~stop
           ~meta:meta_after_triage
           obs
@@ -408,6 +410,7 @@ let run_smart_heartbeat_gate
       ~(smart_hb_config : Keeper_heartbeat_smart.config)
       ~(last_successful_heartbeat_ts : float ref)
       ~(last_heartbeat_cycle_ts : float ref)
+      ~(wake_source : Keeper_keepalive_signal.sleep_outcome ref)
   : bool
   =
   let smart_hb_decision =
@@ -545,6 +548,12 @@ let run_smart_heartbeat_gate
            ~labels:[ "keeper", meta_current.name ]
            ()
        | Keeper_keepalive_signal.Stopped | Keeper_keepalive_signal.Timeout -> ());
+      (* Carry the idle-backoff sleep result forward so the turn evaluator can
+         tell a broadcast-driven [Woken] from this keeper's own cadence
+         [Timeout]. Only the real sleep (Skip_idle) writes here; Emit/Skip_busy
+         synthesize [Timeout] without sleeping and must NOT clobber the prior
+         inter-cycle wake source used by active keepers. *)
+      wake_source := outcome;
       outcome
     | Keeper_heartbeat_smart.Emit ->
       last_heartbeat_cycle_ts := Time_compat.now ();
@@ -648,6 +657,12 @@ let run_heartbeat_loop
      no operator has modified it.  Initialized to 0.0 so the first
      cycle always reads. *)
   let last_meta_mtime = ref 0.0 in
+  (* Wake-source carry (thundering-herd fix). Records whether the most recent
+     sleep ended via an external broadcast wakeup ([Woken]) or this keeper's own
+     cadence timer ([Timeout]). Read at turn dispatch so a broadcast-driven early
+     wake does not let the GLOBAL task backlog drive a turn on every keeper at
+     once. Single-fiber owned, like the other loop-local refs above. *)
+  let last_wake_source = ref Keeper_keepalive_signal.Timeout in
   let rec loop () =
     if Atomic.get stop
     then ()
@@ -702,6 +717,7 @@ let run_heartbeat_loop
           ~smart_hb_config
           ~last_successful_heartbeat_ts
           ~last_heartbeat_cycle_ts
+          ~wake_source:last_wake_source
       then (
         (* Phase 1: sync presence and emit heartbeat metric *)
         let meta_current =
@@ -758,6 +774,15 @@ let run_heartbeat_loop
              pre/post guards mirror the spec's [turn_state] transition
              "running" -> "idle". *)
           turn_running := true;
+          (* [Woken] => this cycle was triggered by an external broadcast, not
+             the keeper's own cadence; suppress global-backlog-driven turns to
+             avoid the all-keeper stampede. *)
+          let reactive_wake =
+            match !last_wake_source with
+            | Keeper_keepalive_signal.Woken -> true
+            | Keeper_keepalive_signal.Timeout | Keeper_keepalive_signal.Stopped ->
+              false
+          in
           let r =
             run_keepalive_unified_turn
               ~ctx
@@ -765,6 +790,7 @@ let run_heartbeat_loop
               ~pending_board_events
               ~stop
               ~proactive_warmup_elapsed
+              ~reactive_wake
               ~shared_context
           in
           Keeper_keepalive_signal.pre_turn_complete_heartbeat ~turn_running;
@@ -844,13 +870,16 @@ let run_heartbeat_loop
         let jitter =
           base *. Env_config.KeeperKeepalive.jitter_factor *. Random.float 1.0
         in
-        ignore
-          (Keeper_keepalive_signal.interruptible_sleep
-             ~clock:ctx.clock
-             ~stop
-             ~wakeup
-             (base +. jitter)
-           : Keeper_keepalive_signal.sleep_outcome));
+        (* Carry the inter-cycle sleep result into the next iteration so the
+           turn evaluator can distinguish a broadcast wakeup ([Woken]) from this
+           keeper's own cadence ([Timeout]). For active keepers this is the only
+           sleep, so it is the dominant wake-source signal. *)
+        last_wake_source :=
+          Keeper_keepalive_signal.interruptible_sleep
+            ~clock:ctx.clock
+            ~stop
+            ~wakeup
+            (base +. jitter));
       if Atomic.get stop then () else loop ())
   in
   loop ()

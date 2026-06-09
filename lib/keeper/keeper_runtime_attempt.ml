@@ -308,67 +308,6 @@ let sdk_error_is_hard_quota = function
     message_looks_like_cli_wrapped_hard_quota message
   | _ -> false
 
-let retry_api_error_to_provider_error ~provider:_ ~capacity_backpressure api_err =
-  match api_err with
-  | Llm_provider.Retry.RateLimited { retry_after; _ } ->
-    Some (Provider_error.RateLimit { retry_after })
-  | Overloaded _ when capacity_backpressure ->
-    Some (Provider_error.CapacityBackpressure { scope = `Provider })
-  | AuthError _ -> Some Provider_error.AuthError
-  | NotFound _ -> Some Provider_error.ModelNotFound
-  | InvalidRequest { message } -> Some (Provider_error.InvalidRequest { reason = message })
-  | ServerError { status; _ } ->
-    Some (Provider_error.ServerError { code = status; transient = status >= 500 })
-  | ContextOverflow _
-  | NetworkError _
-  | Timeout _
-  | Overloaded _ -> None
-
-let sdk_error_to_provider_error ~provider = function
-  | Agent_sdk.Error.Api api_err ->
-    retry_api_error_to_provider_error
-      ~provider
-      ~capacity_backpressure:false
-      api_err
-  | Agent_sdk.Error.Provider (Llm_provider.Error.CapacityExhausted _) ->
-    Some (Provider_error.CapacityBackpressure { scope = `Provider })
-  | Agent_sdk.Error.Provider (Llm_provider.Error.RateLimit { retry_after; _ }) ->
-    Some (Provider_error.RateLimit { retry_after })
-  | Agent_sdk.Error.Provider (Llm_provider.Error.AuthError _) ->
-    Some Provider_error.AuthError
-  | Agent_sdk.Error.Provider (Llm_provider.Error.InvalidRequest { reason; _ }) ->
-    Some (Provider_error.InvalidRequest { reason })
-  | Agent_sdk.Error.Provider (Llm_provider.Error.ProviderTerminal { detail; _ }) ->
-    Some (Provider_error.PermissionDenied { resource = Some detail })
-  | Agent_sdk.Error.Provider (Llm_provider.Error.NotFound _) ->
-    Some Provider_error.ModelNotFound
-  | _ -> None
-
-let provider_error_total_metric = "masc_provider_error_total"
-let label_kind = "kind"
-let label_runtime = "runtime_id"
-
-let provider_label label =
-  let label = String.trim label in
-  if label = "" then "unknown_provider" else label
-
-let emit_provider_error_metric ~runtime_id ~provider error =
-  Otel_metric_store.inc_counter
-    provider_error_total_metric
-    ~labels:
-      [ label_kind, Provider_error.to_error_kind error
-      ; label_runtime, runtime_id
-      ; "provider", provider_label provider
-      ]
-    ()
-
-let emit_sdk_provider_error_metric ~runtime_id ~provider err =
-  match sdk_error_to_provider_error ~provider err with
-  | None -> None
-  | Some provider_error ->
-    emit_provider_error_metric ~runtime_id ~provider provider_error;
-    Some provider_error
-
 let sdk_error_soft_rate_limited = function
   | Agent_sdk.Error.Api (Llm_provider.Retry.RateLimited { retry_after; _ } as err) ->
     if Llm_provider.Retry.is_hard_quota err then None else Some retry_after

@@ -20,6 +20,11 @@ val trimmed_query_param : Httpun.Request.t -> string -> string option
 val oas_telemetry_limit_param : Httpun.Request.t -> int
 val oas_telemetry_provider_param : Httpun.Request.t -> string option
 
+(** Effective entry limit for /api/v1/dashboard/telemetry. Absent or
+    unparseable [n_param] -> bounded default (windowed vs not); explicit
+    n=0 preserved. Exposed for the freeze-guard test. *)
+val resolve_telemetry_n : has_time_window:bool -> n_param:string option -> int
+
 val dashboard_dev_token_path : string -> string
 val ensure_dashboard_dev_token : string -> (string, string) result
 

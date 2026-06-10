@@ -50,7 +50,7 @@ import type {
 } from '../types'
 import { AgentRuntimeStrip } from './agent-monitor/runtime-strip'
 import { AgentLiveTimeline } from './agent-monitor/live-timeline'
-import { KeeperChatPanel } from './keeper-chat-panel'
+import { KeeperConversationPanel } from './keeper-shared'
 
 type TaskHistoryRow = { taskId: string; text: string }
 
@@ -479,7 +479,7 @@ export function AgentProfile({ name }: { name: string }) {
       </div>
 
       ${isKeeper ? html`
-        <${KeeperChatPanel} name=${keeperChatName} />
+        <${KeeperConversationPanel} keeperName=${keeperChatName} placeholder="메시지 입력..." />
       ` : html`
         <div class="flex gap-2 items-center px-3.5 py-2.5 bg-[var(--color-bg-elevated)] border border-[var(--ff-gold-15)] rounded-[var(--r-1)]">
           <span class="text-sm font-semibold text-[var(--ff-gold)] whitespace-nowrap">@${name}</span>

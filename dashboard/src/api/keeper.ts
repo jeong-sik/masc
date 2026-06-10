@@ -479,8 +479,9 @@ export async function fetchKeeperChatHistory(
   // P1 silent-failure fix: previously HTTP non-2xx and network/parse
   // errors both mapped to `return []`, leaving the caller unable to
   // distinguish "no chat history yet" from "fetch failed."  Now both
-  // throw, and the caller (keeper-chat-panel.ts) is responsible for
-  // surfacing via chatError.value.  Per-item safeParse drift remains
+  // throw, and the caller (hydrateKeeperChatHistory in
+  // keeper-actions.ts) is responsible for surfacing the failure to
+  // the operator.  Per-item safeParse drift remains
   // tolerant — only network / HTTP / shape errors throw.
   const resp = await fetch(
     `/api/v1/keepers/${encodeURIComponent(name)}/chat/history`,

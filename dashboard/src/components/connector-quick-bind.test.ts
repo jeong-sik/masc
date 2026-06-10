@@ -90,7 +90,9 @@ describe('QuickBindForm', () => {
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
     await flushUi()
 
-    const bindCall = fetchSpy.mock.calls.find(c => String(c[0]).includes('/api/v1/gate/connector/bind'))
+    const bindCall = fetchSpy.mock.calls.find(c =>
+      String(c[0]).includes('/api/v1/gate/connector/bind') && String(c[0]).includes('name=slack'),
+    )
     expect(bindCall).toBeTruthy()
     const body = bindCall?.[1]?.body as string
     expect(body).toContain('"channel_id":"C09TK9L4DV4"')

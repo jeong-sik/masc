@@ -430,4 +430,12 @@ val recent_outcome_count :
 val global : t
 
 val check_circuit_breaker : t -> provider_key:string -> (unit, string) result
+
+(** [least_recently_failed_provider t ~candidates] returns the provider
+    key from [candidates] that has the oldest (least-recent) failure
+    timestamp, or [None] if no candidate has ever failed.
+    Used by the cascade health-filtered-candidate-count=0 fallback:
+    when health filtering excludes all candidates, this picks the one
+    most likely to have recovered (stale failure = best re-probe target). *)
+val least_recently_failed_provider : t -> candidates:string list -> string option
 (** Check whether the provider cooldown gate allows a request. *)

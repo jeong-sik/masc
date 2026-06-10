@@ -9,6 +9,7 @@ import { asString, isRecord } from './components/common/normalize'
 import { invalidateDashboardCache, refreshDashboard } from './store'
 import { isAbortError } from './lib/async-state'
 import type {
+  KeeperConversationAttachment,
   KeeperConversationDelivery,
   KeeperDiagnostic,
   KeeperStatusDetail,
@@ -199,10 +200,16 @@ export async function loadFullKeeperHistory(name: string): Promise<void> {
   }
 }
 
-export async function sendKeeperThreadMessage(name: string, prompt: string): Promise<void> {
+export async function sendKeeperThreadMessage(
+  name: string,
+  prompt: string,
+  options: { attachments?: KeeperConversationAttachment[] } = {},
+): Promise<void> {
   const keeperName = name.trim()
   const message = prompt.trim()
   if (!keeperName || !message) return
+  const attachments =
+    options.attachments && options.attachments.length > 0 ? options.attachments : undefined
   abortKeeperThreadMessage(keeperName)
   const localId = `local-${Date.now()}`
   const assistantId = `reply-${Date.now()}`
@@ -215,6 +222,7 @@ export async function sendKeeperThreadMessage(name: string, prompt: string): Pro
     timestamp: new Date().toISOString(),
     delivery: 'sending',
     streamState: null,
+    attachments,
     details: null,
   })
   appendThreadEntry(keeperName, {
@@ -240,6 +248,7 @@ export async function sendKeeperThreadMessage(name: string, prompt: string): Pro
 
     const outcome = await streamKeeperMessage(keeperName, message, {
       signal: controller.signal,
+      attachments,
       onEvent: event => {
         setRecordValue(keeperStreamLastEventAt, keeperName, Date.now())
         if (event.type === 'CUSTOM' && event.name === 'KEEPER_QUEUE_REQUEST' && isRecord(event.value)) {

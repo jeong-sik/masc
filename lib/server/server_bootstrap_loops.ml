@@ -900,6 +900,7 @@ let start_keeper_loops
          handle_turn wires process_single_turn for actual turn execution. *)
       (try
          Keeper_chat_consumer.start ~sw ~clock
+           ~base_path:state.Mcp_server.workspace_config.base_path
            ~handle_turn:(fun ~sw ~keeper_name ~queued_message ->
              let open Server_routes_http_keeper_stream in
              let now = Time_compat.now () in

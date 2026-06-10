@@ -65,6 +65,17 @@ val run_serialized
     only by the caller's turn budget — do not call this from within an
     admitted turn of the same keeper. *)
 
+val in_flight
+  :  base_path:string
+  -> keeper_name:string
+  -> in_flight_info option
+(** Read-only snapshot of the turn currently holding the keeper's slot,
+    or [None] when the slot is free or the keeper is unknown. Gating
+    callers (e.g. the chat consumer leaving queued messages to coalesce
+    while a turn runs) tolerate the narrow window where a holder has
+    locked the slot but not yet published its info — a turn forked on a
+    stale [None] simply waits at the slot. *)
+
 module For_testing : sig
   val reset : unit -> unit
   (** Drop every slot. Only safe when no turn is in flight. *)

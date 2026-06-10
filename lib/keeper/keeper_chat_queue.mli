@@ -38,6 +38,26 @@ val enqueue : keeper_name:string -> queued_message -> unit
     [None] if the queue is empty or does not exist. *)
 val dequeue : keeper_name:string -> queued_message option
 
+(** [same_source a b] is true when two messages share a reply route:
+    the dashboard surface, the same Discord channel+user, or the same
+    Slack channel+user. Coalescing across different routes would lose
+    reply routing. *)
+val same_source : message_source -> message_source -> bool
+
+(** [dequeue_batch keeper_name] removes and returns the head run of
+    messages sharing the same source ([same_source]), preserving FIFO
+    order. Stops at the first message with a different source so each
+    coalesced turn answers one reply route. Returns [[]] when the queue
+    is empty or absent. *)
+val dequeue_batch : keeper_name:string -> queued_message list
+
+(** [merge_batch batch] coalesces a same-source batch into one message:
+    contents joined in arrival order with a blank line, attachments
+    concatenated, the first message's timestamp (queueing latency stays
+    measurable), the shared source. [None] on [[]]; a singleton is
+    returned unchanged. *)
+val merge_batch : queued_message list -> queued_message option
+
 (** [length keeper_name] returns the number of queued messages. *)
 val length : keeper_name:string -> int
 

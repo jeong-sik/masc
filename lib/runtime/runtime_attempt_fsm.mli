@@ -25,6 +25,7 @@ val should_try_next : Llm_provider.Http_client.http_error -> bool
 val decide :
   accept_on_exhaustion:bool ->
   is_last:bool ->
+  source:string option ->
   provider_outcome ->
   decision
 

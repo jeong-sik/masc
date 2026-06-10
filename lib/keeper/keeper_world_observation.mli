@@ -262,10 +262,15 @@ val apply_message_cursor_updates :
 
 (** Compute effective scheduled autonomous cooldown with idle decay.
     After extended idle (> base cooldown), halve the cooldown each
-    additional period, down to a configurable floor. *)
+    additional period, down to a configurable floor.
+
+    When [board_health_score] is [Some f] (0.0 = worst, 1.0 = best),
+    the effective cooldown is multiplied by a health-derived factor:
+    unhealthy boards (<0.3) get 2x cooldown (less polling), healthy
+    boards (>0.7) get 0.5x cooldown (more polling). *)
 val effective_scheduled_autonomous_cooldown :
   base_cooldown:int -> since_last:int ->
-  ?consecutive_noop_count:int -> unit -> int
+  ?consecutive_noop_count:int -> ?board_health_score:float -> unit -> int
 
 val provider_cooldown_remaining_sec_for_runtime :
   keeper_name:string -> runtime_id:string -> int option

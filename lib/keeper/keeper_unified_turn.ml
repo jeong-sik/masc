@@ -590,7 +590,6 @@ let run_keeper_cycle
                     (Trajectory.Failed (Agent_sdk.Error.to_string err));
                   let e_str = Agent_sdk.Error.to_string err in
                   let is_transient = EC.is_transient_network_error err in
-                  let is_tool_retry_exhausted = EC.is_tool_retry_exhausted_error err in
                   (match Keeper_turn_driver.classify_masc_internal_error err with
                    | Some (Keeper_turn_driver.Provider_timeout _) ->
                      Otel_metric_store.inc_counter
@@ -675,8 +674,6 @@ let run_keeper_cycle
                      then " (ambiguous partial commit)"
                      else if is_server_parse_rejection
                      then " (server parse rejection, auto-recoverable)"
-                     else if is_tool_retry_exhausted
-                     then " (tool retry exhausted, auto-recoverable)"
                      else if is_transient
                      then " (transient, cooldown preserved)"
                      else if EC.should_warn_keeper_cycle_failed err

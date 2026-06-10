@@ -146,14 +146,13 @@ include module type of Otel_policy_metric_names
       fiber with a fresh context budget. Counter reset on any
       successful turn. *)
 
-val metric_oas_bus_subscriber_stream_depth : string
 
 val metric_oas_bus_capacity : string
 (** Gauge: per-subscriber [Eio.Stream] capacity chosen at bus creation.
     Labels: [bus] names the MASC bus ([oas_runtime] | [masc_domain]),
     [policy] names the [Agent_sdk.Event_bus.backpressure_policy].
     Published once per bus at [Masc_event_bus_policy.create_bus] so
-    operators can interpret [metric_oas_bus_subscriber_stream_depth]
+    operators can interpret [masc_event_bus_subscriber_depth]
     as a fraction of capacity. *)
 
 val metric_oas_bridge_unmigrated_payload_kind : string
@@ -219,3 +218,11 @@ val metric_cost_ledger_status : string
     Labels: [outcome] with values
     [skipped|passed|no_target|bypassed]. *)
 val metric_mention_dedup_decisions_total : string
+
+(** #20677: incremental telemetry cache fell back to a full re-parse
+    (file shrank or rotated under the boundary).  Labels: [store]. *)
+val metric_telemetry_cache_rescans : string
+
+(** #20677: bytes folded by incremental telemetry readers.  Labels:
+    [store]. *)
+val metric_telemetry_scanned_bytes : string

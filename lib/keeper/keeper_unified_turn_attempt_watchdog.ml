@@ -31,6 +31,7 @@
 
 let dispatch
     ~clock
+    ~keeper_name
     ~attempt_watchdog_s
     ~on_cancelled
     ~run
@@ -43,6 +44,10 @@ let dispatch
     Eio.Time.with_timeout_exn clock deadline_s run
   with
   | Eio.Time.Timeout ->
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string AttemptWatchdogFired)
+      ~labels:[ ("keeper", keeper_name) ]
+      ();
     on_cancelled "attempt_watchdog_safety_deadline";
     raise (Eio.Cancel.Cancelled (Failure "attempt_watchdog_safety_deadline"))
   | Eio.Cancel.Cancelled _ as e ->

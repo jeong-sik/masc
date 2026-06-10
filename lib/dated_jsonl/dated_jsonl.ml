@@ -465,15 +465,28 @@ let count_non_empty_lines_cached path =
     match cached with
     | Some e when e.fc_boundary = size -> e.fc_count
     | cached ->
+      let store_label = Filename.basename (Filename.dirname path) in
       let from, base =
         match cached with
         | Some e when e.fc_boundary < size -> e.fc_boundary, e.fc_count
-        | _ -> 0, 0
+        | Some _ ->
+          (* boundary past the file size: shrink/rotation — full re-parse *)
+          Otel_metric_store_core.inc_counter
+            Otel_builtin_metric_names.metric_telemetry_cache_rescans
+            ~labels:[ ("store", store_label) ]
+            ();
+          0, 0
+        | None -> 0, 0
       in
       let delta, boundary =
         Fs_compat.fold_appended_lines ~path ~from ~init:0
           ~f:(fun acc _line -> acc + 1)
       in
+      Otel_metric_store_core.inc_counter
+        Otel_builtin_metric_names.metric_telemetry_scanned_bytes
+        ~labels:[ ("store", store_label) ]
+        ~delta:(Float.of_int (max 0 (boundary - from)))
+        ();
       let count = base + delta in
       Stdlib.Mutex.protect file_count_cache_mu (fun () ->
         Hashtbl.replace file_count_cache path

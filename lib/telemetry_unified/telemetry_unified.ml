@@ -836,7 +836,14 @@ let trajectory_file_summary path : trajectory_file_summary option =
          match cached with
          | Some e when e.tfs_boundary < size ->
            e.tfs_boundary, e.tfs_tool_calls, e.tfs_latest_ts
-         | _ -> 0, 0, None
+         | Some _ ->
+           (* boundary past the file size: shrink/rotation — full re-parse *)
+           Otel_metric_store_core.inc_counter
+             Otel_builtin_metric_names.metric_telemetry_cache_rescans
+             ~labels:[ ("store", "trajectories") ]
+             ();
+           0, 0, None
+         | None -> 0, 0, None
        in
        let (count, latest), boundary =
          Fs_compat.fold_appended_lines ~path ~from ~init:(count0, latest0)
@@ -855,6 +862,11 @@ let trajectory_file_summary path : trajectory_file_summary option =
                end
                else count, latest)
        in
+       Otel_metric_store_core.inc_counter
+         Otel_builtin_metric_names.metric_telemetry_scanned_bytes
+         ~labels:[ ("store", "trajectories") ]
+         ~delta:(Float.of_int (max 0 (boundary - from)))
+         ();
        let entry =
          { tfs_boundary = boundary; tfs_tool_calls = count; tfs_latest_ts = latest }
        in

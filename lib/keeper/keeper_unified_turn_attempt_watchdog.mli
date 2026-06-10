@@ -21,6 +21,10 @@
       - ["attempt_watchdog_safety_deadline"] — wall-clock timeout fired
       - ["external_cancel"] — fiber was cancelled externally
 
+    A safety-deadline fire also increments
+    [masc_keeper_attempt_watchdog_fired_total{keeper}] — the alertable
+    "definitively stuck attempt" signal.
+
     The Cancelled re-raise path is the outer catch for cancellations
     that escape the in-band receipt builder in
     [Keeper_agent_run.run_turn]: without [on_cancelled] the FSM emits
@@ -28,6 +32,7 @@
     operator's timeline. *)
 val dispatch
   :  clock:_ Eio.Time.clock
+  -> keeper_name:string
   -> attempt_watchdog_s:float option
   -> on_cancelled:(string -> unit)
   -> run:(unit -> ('a, Agent_sdk.Error.sdk_error) result)

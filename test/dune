@@ -1243,6 +1243,7 @@
 
 (include stanzas/test_continuity_forward_filter.inc)
 
+(include stanzas/test_otel_runtime_observables.inc)
 (include stanzas/test_otel_zero_fill.inc)
 (include stanzas/test_workspace_bootstrap.inc)
 

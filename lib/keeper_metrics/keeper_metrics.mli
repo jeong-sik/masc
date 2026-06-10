@@ -206,6 +206,7 @@ type t =
   | ToolCallParamCompleteness
   | KeeperTurnInstructionHash
   | KeeperToolCallRetryLoop
+  | AttemptWatchdogFired
 
 val to_string : t -> string
 

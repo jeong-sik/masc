@@ -43,32 +43,30 @@ let test_current_snapshot_none_when_pool_uninit () =
    | None -> ()
    | Some _ -> fail "pool snapshot should be None before first HTTP call")
 
-let find_metric name =
-  Otel_metric_store.snapshot ()
-  |> List.find_opt (fun (m : Otel_metric_store.metric) ->
-    String.equal m.name name && m.labels = [])
+(* Export path changed: pool metrics never enter the Otel_metric_store —
+   Otel_runtime_observables computes masc_pool_* samples from
+   [current_snapshot] at each exporter tick (so they only exist while a
+   pool exists, with values that are always fresh).  The registry-based
+   assertions that used to live here tested a registration sweep that was
+   removed with the retired scrape backend (RFC-0217) and had been failing
+   ever since. *)
+let observable_pool_names samples =
+  List.filter
+    (fun (s : Otel_metrics.sample) ->
+      String.starts_with ~prefix:"masc_pool_" s.Otel_metrics.name)
+    samples
 
-let test_registry_contains_metric_families () =
-  List.iter
-    (fun (_, name) ->
-      check bool
-        (Printf.sprintf "registry contains %s" name)
-        true
-        (Option.is_some (find_metric name)))
-    metric_names
-
-let test_metric_types_match_intent () =
-  let has_type name metric_type =
-    match find_metric name with
-    | Some m -> m.metric_type = metric_type
-    | None -> false
+let test_observable_export_absent_without_pool () =
+  (* No HTTP traffic in this binary: snapshot is None, so the observable
+     source must yield no masc_pool_* samples (absent, not zero — a pool
+     that does not exist has no honest occupancy value). *)
+  let samples =
+    Masc.Otel_runtime_observables.For_testing.samples
+      ~masc_root:(Filename.get_temp_dir_name ())
+      ()
   in
-  check bool "inflight_total is gauge" true
-    (has_type "masc_pool_inflight_total" Otel_metric_store.Gauge);
-  check bool "reuse_total is counter" true
-    (has_type "masc_pool_reuse_total" Otel_metric_store.Counter);
-  check bool "create_total is counter" true
-    (has_type "masc_pool_create_total" Otel_metric_store.Counter)
+  check int "no masc_pool_* samples without a pool" 0
+    (List.length (observable_pool_names samples))
 
 let () =
   run "Pool_metrics" [
@@ -82,10 +80,8 @@ let () =
       test_case "current_snapshot None before HTTP traffic" `Quick
         test_current_snapshot_none_when_pool_uninit;
     ];
-    "metric registry", [
-      test_case "registry contains all 5 metric families" `Quick
-        test_registry_contains_metric_families;
-      test_case "metric types match gauge/counter intent" `Quick
-        test_metric_types_match_intent;
+    "observable export", [
+      test_case "absent without a pool" `Quick
+        test_observable_export_absent_without_pool;
     ];
   ]

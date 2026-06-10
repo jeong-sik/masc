@@ -9,6 +9,7 @@
   dated_jsonl
   eio
   fs_compat
+  otel_metric_store
   masc.json_field
   masc.telemetry_coverage_gap
   masc.telemetry_unified_source

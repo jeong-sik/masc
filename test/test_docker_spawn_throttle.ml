@@ -48,7 +48,13 @@ let test_concurrency_capped_under_fanin () =
     (observed <= max_cap)
 
 let test_degraded_mode_serializes () =
-  (* Trip fd_pressure; Docker_spawn effective concurrency must report 1. *)
+  (* Trip fd_pressure; Docker_spawn effective concurrency must report 1.
+     Fd_accountant reads pressure through an injected hook (installed at
+     server bootstrap by Server_runtime_bootstrap); mirror that wiring
+     here — without it the hook default is [fun () -> false]. *)
+  FA.set_pressure_hooks
+    ~active:FD.active
+    ~nofile_soft_limit:FD.process_nofile_soft_limit;
   FD.reset_for_tests ();
   FD.note ~site:"unit-test" ~detail:"too many open files in system" ();
   Alcotest.(check bool) "FD.active is true after note" true (FD.active ());

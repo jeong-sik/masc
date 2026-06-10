@@ -127,7 +127,6 @@ include Otel_policy_metric_names
    [Keeper_supervisor.sweep_and_recover] will respawn the fiber. Without
    the strike→crash promotion these failures repeated silently for
    hours (4h+ zombie keepers observed 2026-04-26). *)
-let metric_oas_bus_subscriber_stream_depth = "masc_oas_bus_subscriber_stream_depth"
 let metric_oas_bus_capacity = "masc_oas_bus_capacity"
 let metric_oas_bridge_unmigrated_payload_kind =
   Otel_metric_store_core.declare_counter "masc_oas_bridge_unmigrated_payload_kind_total"
@@ -174,3 +173,13 @@ let metric_cost_ledger_status = Otel_metric_store_core.declare_counter "masc_cos
    [outcome] in [skipped|passed|no_target|bypassed].  Wired from
    [lib/workspace.ml] via [Workspace_hooks.mention_dedup_decision_fn]. *)
 let metric_mention_dedup_decisions_total = Otel_metric_store_core.declare_counter "masc_mention_dedup_decisions_total"
+
+(* #20677 incremental-cache health: a boundary past the file size means the
+   file shrank/rotated and the reader re-parses from byte 0 (the expensive
+   path the cache exists to avoid).  Scanned bytes is the per-cycle read
+   cost of the telemetry readers -- the direct measure of the load that
+   froze the fleet on 2026-06-09.  Labels: [store] (store directory name). *)
+let metric_telemetry_cache_rescans =
+  Otel_metric_store_core.declare_counter "masc_telemetry_summary_cache_rescans_total"
+let metric_telemetry_scanned_bytes =
+  Otel_metric_store_core.declare_counter "masc_telemetry_snapshot_scanned_bytes_total"

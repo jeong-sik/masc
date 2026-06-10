@@ -695,7 +695,7 @@ let keeper_cycle_decision
             ~base_cooldown:meta.proactive.cooldown_sec
             ~since_last:since_last_scheduled_autonomous
             ~consecutive_noop_count:meta.runtime.proactive_rt.consecutive_noop_count
-            ~board_health_score
+            ?board_health_score
             ()
         in
         let task_cooldown_divisor =

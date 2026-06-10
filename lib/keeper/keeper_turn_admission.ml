@@ -116,6 +116,13 @@ let run_serialized ~base_path ~keeper_name f =
     run_locked slot ~lane:Chat f)
 ;;
 
+let in_flight ~base_path ~keeper_name =
+  let key = Keeper_registry_types.registry_key ~base_path keeper_name in
+  match Stdlib.Mutex.protect slots_mu (fun () -> Hashtbl.find_opt slots key) with
+  | None -> None
+  | Some slot -> peek_info slot
+;;
+
 module For_testing = struct
   let reset () = Stdlib.Mutex.protect slots_mu (fun () -> Hashtbl.reset slots)
 

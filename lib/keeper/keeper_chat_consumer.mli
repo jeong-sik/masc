@@ -9,9 +9,17 @@
 
     @since 2.145.0 *)
 
-(** [start ~sw ~clock ~handle_turn ()] begins a background fiber that
-    polls [Keeper_chat_queue] every [MASC_KEEPER_QUEUE_POLL_SEC] seconds
-    (default 1.0) and calls [handle_turn] for each queued message.
+(** [start ~sw ~clock ~base_path ~handle_turn] begins a background fiber
+    that polls [Keeper_chat_queue] every [MASC_KEEPER_QUEUE_POLL_SEC]
+    seconds (default 1.0).
+
+    Per keeper and per tick: when a turn is in flight
+    ([Keeper_turn_admission.in_flight]), queued messages are left to
+    accumulate; once the slot is free, the head run of same-source
+    messages is drained ([Keeper_chat_queue.dequeue_batch]) and merged
+    into ONE coalesced message ([Keeper_chat_queue.merge_batch]) before
+    [handle_turn] runs — messages sent during a turn answer together in
+    a single follow-up turn instead of one turn each.
 
     The fiber runs until [sw] is released.
 
@@ -21,5 +29,6 @@
 val start :
   sw:Eio.Switch.t ->
   clock:_ Eio.Time.clock ->
+  base_path:string ->
   handle_turn:(sw:Eio.Switch.t -> keeper_name:string -> queued_message:Keeper_chat_queue.queued_message -> unit) ->
   unit

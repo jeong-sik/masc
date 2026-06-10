@@ -99,6 +99,27 @@ val latest_snapshot : unit -> curation_snapshot option
 
 (** (**/**)  Hidden from rendered docs — white-box test helpers only. *)
 
+(** {1 Weighted diversity} *)
+
+val compute_weighted_health_score :
+  curation_health_component list -> float option
+(** [compute_weighted_health_score components] returns the weighted
+    average of all components: Σ(score_i × weight_i) / Σ(weight_i).
+    Returns [None] when the list is empty or all weights sum to zero. *)
+
+(** {1 Curation-locked loop fallback} *)
+
+val should_skip_recuration_since :
+  now:float ->
+  cooldown_sec:float ->
+  curation_snapshot option ->
+  bool
+(** [should_skip_recuration_since ~now ~cooldown_sec snapshot] returns
+    [true] when a recent snapshot exists (within [cooldown_sec] of
+    [now]) whose [health_score] or [health_components] are non-empty.
+    Skips redundant re-curation when agents are polling in a tight
+    loop. *)
+
 val reset_for_test : unit -> unit
 (** Drop the in-memory snapshot.  Safe to call only before concurrent
     fibers exist. *)

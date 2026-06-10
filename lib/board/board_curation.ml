@@ -118,3 +118,28 @@ let latest_snapshot () =
 
 let reset_for_test () =
   Atomic.set current None
+
+(** {1 Weighted diversity} *)
+
+let compute_weighted_health_score components =
+  let sum_weighted = ref 0.0 in
+  let sum_weights = ref 0.0 in
+  List.iter
+    (fun (c : curation_health_component) ->
+       let w = Float.max 0.0 c.weight in
+       sum_weighted := !sum_weighted +. (c.score *. w);
+       sum_weights := !sum_weights +. w)
+    components;
+  if !sum_weights > 0.0 then Some (!sum_weighted /. !sum_weights)
+  else None
+
+(** {1 Curation-locked loop fallback} *)
+
+let should_skip_recuration_since ~now ~cooldown_sec snapshot =
+  match snapshot with
+  | None -> false
+  | Some snap ->
+      (* Skip when a recent snapshot has actual curation content *)
+      let has_content = snap.health_score <> None || snap.health_components <> [] in
+      let is_recent = (now -. snap.generated_at) < cooldown_sec in
+      has_content && is_recent

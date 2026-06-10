@@ -410,6 +410,25 @@ let attempt_tts_endpoint
                    ; "local_playback_reason", `String reason
                    ])
                endpoint)
+        | `Opened handoff_seconds ->
+          Ok
+            (append_provider_metadata
+               (`Assoc
+                   [ "status", `String "spoken"
+                   ; "agent_id", `String agent_id
+                   ; "voice", `String voice
+                   ; "audio_file", `String audio_file
+                   ; "audio_size", `Int file_size
+                   ; ( "message_preview"
+                     , `String
+                         (String.sub message 0 (min 50 (String.length message))) )
+                   ; "local_playback_status", `String "opened"
+                   ; "local_playback_reason"
+                     , `String
+                         "blocking local players failed; handed audio file to macOS open"
+                   ; "open_handoff_seconds", `Float handoff_seconds
+                   ])
+               endpoint)
         | `Played played_seconds ->
           Ok
             (append_provider_metadata

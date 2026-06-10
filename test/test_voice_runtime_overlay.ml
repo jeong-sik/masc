@@ -56,6 +56,17 @@ let read_lines path =
     loop [])
 ;;
 
+let write_file path contents =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc contents)
+;;
+
+let mkdir_if_missing path =
+  if not (Sys.file_exists path) then Unix.mkdir path 0o755
+;;
+
 let test_resolve_voice_aliases () =
   let elevenlabs = Option.get (Voice.resolve_adapter "elevenlabs") in
   check string "elevenlabs alias" "elevenlabs-direct" elevenlabs.canonical_name;
@@ -401,6 +412,85 @@ let test_playback_timeout_parsers_and_budget () =
     (Voice_bridge_core.playback_timeout_sec_for ~duration_sec:None)
 ;;
 
+let write_local_playback_config () =
+  let config_path = Voice_config.config_path () in
+  mkdir_if_missing (Filename.dirname config_path);
+  write_file config_path
+    {|
+{
+  "tts": {
+    "default_model": "test-tts",
+    "default_voice": "test-voice",
+    "default_voice_settings": {
+      "stability": 0.5,
+      "similarity_boost": 0.75,
+      "style": 0.0
+    },
+    "agent_voices": {},
+    "agent_voice_settings": {},
+    "endpoints": [
+      {
+        "id": "test-tts",
+        "kind": "elevenlabs_direct",
+        "api_key_env": "ELEVENLABS_API_KEY",
+        "enabled": true
+      }
+    ]
+  },
+  "stt": {
+    "default_model": "test-stt",
+    "endpoints": [
+      {
+        "id": "test-stt",
+        "kind": "elevenlabs_direct",
+        "api_key_env": "ELEVENLABS_API_KEY",
+        "enabled": true
+      }
+    ]
+  },
+  "session": {
+    "endpoints": []
+  },
+  "local_playback": {
+    "enabled": true,
+    "agents": []
+  }
+}
+|}
+;;
+
+let test_playback_open_fallback_reports_handoff () =
+  Eio_main.run
+  @@ fun _env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  write_local_playback_config ();
+  let bin_dir = Filename.concat voice_session_test_base "fake-playback-bin" in
+  mkdir_if_missing bin_dir;
+  let fake_afplay = Filename.concat bin_dir "afplay" in
+  let fake_open = Filename.concat bin_dir "open" in
+  write_file fake_afplay "#!/bin/sh\nexit 1\n";
+  write_file fake_open "#!/bin/sh\nexit 0\n";
+  Unix.chmod fake_afplay 0o755;
+  Unix.chmod fake_open 0o755;
+  let audio_file = Filename.concat voice_session_test_base "voice-open-fallback.mp3" in
+  write_file audio_file "fake audio bytes";
+  with_env "PATH" (Some bin_dir) (fun () ->
+    match
+      Voice_bridge_core.run_local_playback
+        ~sw
+        ~agent_id:"sangsu"
+        ~message:"open fallback regression"
+        ~audio_file
+        ()
+    with
+    | `Opened _ -> ()
+    | `Dedup_hit -> fail "expected open handoff, got dedup"
+    | `Failed reason -> fail ("expected open handoff, got failed: " ^ reason)
+    | `Played _ -> fail "expected open handoff, got played"
+    | `Skipped reason -> fail ("expected open handoff, got skipped: " ^ reason))
+;;
+
 let () =
   run
     "voice_runtime_overlay"
@@ -451,6 +541,10 @@ let () =
             "duration parsers and timeout budget"
             `Quick
             test_playback_timeout_parsers_and_budget
+        ; test_case
+            "open fallback reports handoff"
+            `Quick
+            test_playback_open_fallback_reports_handoff
         ] )
     ]
 ;;

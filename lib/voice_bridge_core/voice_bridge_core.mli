@@ -121,7 +121,7 @@ val run_local_playback :
   ?message:string ->
   audio_file:string ->
   unit ->
-  [ `Dedup_hit | `Played of float | `Skipped of string | `Failed of string ]
+  [ `Dedup_hit | `Opened of float | `Played of float | `Skipped of string | `Failed of string ]
 (** Mutex-protected local audio playback with a 30s dedup window
     keyed on [(agent_id, hash message)]. Returns:
 
@@ -135,6 +135,9 @@ val run_local_playback :
       kill is terminal: the fallback chain is NOT tried, because partial audio
       has likely played and a fallback player would replay the same file from
       0:00 (the audible-repeat amplifier in the 2026-06-10 voice incident);
+    - [`Opened duration_seconds] — the file was handed to macOS [open(1)] after
+      all blocking players failed. This is a GUI handoff fallback; playback
+      completion is not observable from the runtime;
     - [`Played duration_seconds] — playback succeeded.
 
     When [message] is omitted the dedup re-check is skipped (legacy

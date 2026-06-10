@@ -48,6 +48,7 @@ type ws_session = {
       lands first — gating is a follow-up once thresholds are established
       from production distributions. *)
   mutable dashboard_last_buffered_amount: int;
+  mutable last_active: float;
   mutable inbound_partial_text: Buffer.t option;
 }
 
@@ -159,8 +160,12 @@ let new_session ~id ~wsd =
     dashboard_seq = 0;
     dashboard_last_ack_seq = 0;
     dashboard_last_buffered_amount = 0;
+    last_active = Unix.gettimeofday ();
     inbound_partial_text = None;
   }
+
+let touch_session session =
+  session.last_active <- Unix.gettimeofday ()
 
 (** Send a pre-allocated frame to a WebSocket client.
 
@@ -180,6 +185,7 @@ let send_frame_bytes session bytes ~len =
         ~kind:`Text bytes ~off:0 ~len;
       Transport_metrics.inc_ws_bytes_sent ~bytes:len;
       Transport_metrics.observe_ws_message_bytes_sent len;
+      touch_session session;
       true
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
@@ -808,29 +814,6 @@ let read_payload_string payload ~len ~on_complete =
   in
   if len = 0 then complete () else schedule ()
 
-let handle_inbound_text session ~on_message ~is_fin text =
-  match session.inbound_partial_text, is_fin with
-  | None, true ->
-      if String.length text > 0 then
-        on_message session.id text
-  | None, false ->
-      let buffer = Buffer.create (max 16 (String.length text * 2)) in
-      Buffer.add_string buffer text;
-      session.inbound_partial_text <- Some buffer
-  | Some buffer, _ ->
-      Buffer.add_string buffer text;
-      if is_fin then begin
-        session.inbound_partial_text <- None;
-        let message = Buffer.contents buffer in
-        if String.length message > 0 then
-          on_message session.id message
-      end
-
-let read_inbound_message_frame session ~on_message ~is_fin ~len payload =
-  Transport_metrics.observe_ws_message_bytes_recv len;
-  read_payload_string payload ~len ~on_complete:(fun text ->
-      handle_inbound_text session ~on_message ~is_fin text)
-
 (** Remove a session and unsubscribe from SSE. *)
 let cleanup_session session_id =
   let removed =
@@ -853,6 +836,71 @@ let cleanup_session session_id =
     (* #10875: see server_ws_standalone — per-session lifecycle is DEBUG
        to avoid logging amplification during WS storm (#10701). *)
     Log.Server.debug "WebSocket session %s closed" session_id
+
+let sweep_interval_s = 120.0
+let stale_timeout_s = 300.0
+let last_sweep_time = ref 0.0
+
+let cleanup_session_if_still_stale ~now (session_id, observed_last_active) =
+  let should_cleanup =
+    with_sessions_rw (fun () ->
+        match Hashtbl.find_opt sessions session_id with
+        | Some session
+          when (not session.closed)
+               && not (Httpun_ws.Wsd.is_closed session.wsd)
+               && session.last_active <= observed_last_active
+               && now -. session.last_active > stale_timeout_s ->
+            true
+        | _ -> false)
+  in
+  if should_cleanup then begin
+    Log.Server.warn "WS sweep: closing stale session %s" session_id;
+    cleanup_session session_id
+  end
+
+let maybe_sweep_stale_sessions () =
+  let now = Unix.gettimeofday () in
+  if now -. !last_sweep_time >= sweep_interval_s then begin
+    last_sweep_time := now;
+    let stale_candidates =
+      with_sessions_rw (fun () ->
+          Hashtbl.fold
+            (fun session_id session acc ->
+              if (not session.closed)
+                 && not (Httpun_ws.Wsd.is_closed session.wsd)
+                 && now -. session.last_active > stale_timeout_s
+              then (session_id, session.last_active) :: acc
+              else acc)
+            sessions [])
+    in
+    List.iter (cleanup_session_if_still_stale ~now) stale_candidates
+  end
+
+let handle_inbound_text session ~on_message ~is_fin text =
+  match session.inbound_partial_text, is_fin with
+  | None, true ->
+      if String.length text > 0 then
+        on_message session.id text;
+      maybe_sweep_stale_sessions ()
+  | None, false ->
+      let buffer = Buffer.create (max 16 (String.length text * 2)) in
+      Buffer.add_string buffer text;
+      session.inbound_partial_text <- Some buffer
+  | Some buffer, _ ->
+      Buffer.add_string buffer text;
+      if is_fin then begin
+        session.inbound_partial_text <- None;
+        let message = Buffer.contents buffer in
+        if String.length message > 0 then
+          on_message session.id message;
+        maybe_sweep_stale_sessions ()
+      end
+
+let read_inbound_message_frame session ~on_message ~is_fin ~len payload =
+  Transport_metrics.observe_ws_message_bytes_recv len;
+  read_payload_string payload ~len ~on_complete:(fun text ->
+      touch_session session;
+      handle_inbound_text session ~on_message ~is_fin text)
 
 (** Number of active WebSocket sessions. *)
 let session_count () =
@@ -903,12 +951,14 @@ let upgrade_connection
                 read_inbound_message_frame session ~on_message ~is_fin ~len
                   payload
               | `Ping ->
+                touch_session session;
                 Httpun_ws.Wsd.send_pong wsd;
                 Httpun_ws.Payload.close payload
               | `Connection_close ->
                 cleanup_session session_id;
                 Httpun_ws.Payload.close payload
               | `Pong | `Other _ ->
+                touch_session session;
                 Httpun_ws.Payload.close payload
             );
             eof = (fun ?error:_ () ->
@@ -992,5 +1042,3 @@ let () =
     ~ping:(fun ~session_id () -> dashboard_ping ~session_id ());
   Mcp_server_eio_protocol.register_dashboard_ack dashboard_ack
 ;;
-
-

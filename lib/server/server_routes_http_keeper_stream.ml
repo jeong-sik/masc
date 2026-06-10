@@ -509,7 +509,7 @@ type keeper_stream_worker_event =
   | Stream_event of Agent_sdk.Types.sse_event
   | Stream_terminal of bool * string
 
-let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
+let process_single_turn ~state ~clock ~sw ~request_sw ~auth_token ~thread_id ~closed
     ~payload ~run_id ~message_id ~agent_name
     ~(events : Keeper_chat_events.keeper_chat_event Eio.Stream.t) =
   Keeper_chat_events.publish events
@@ -634,6 +634,23 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
     "keeper_stream: queued request keeper=%s request_id=%s surface=%s"
     payload.name request_id
     (if has_connector_context then payload.channel else "dashboard");
+  let request_terminal = ref false in
+  Eio.Fiber.fork ~sw:request_sw (fun () ->
+      let rec loop () =
+        if !request_terminal then ()
+        else if !closed then begin
+          ignore
+            (Keeper_msg_async.cancel
+               ~base_path:state.Mcp_server.workspace_config.base_path
+               request_id);
+          Eio.Stream.add worker_events
+            (Stream_terminal (false, "keeper chat stream client disconnected"))
+        end else begin
+          Eio.Time.sleep clock 0.25;
+          loop ()
+        end
+      in
+      loop ());
   Keeper_chat_events.publish events
     (Custom
        { name = "KEEPER_QUEUE_REQUEST";
@@ -673,6 +690,8 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
         (Custom { name = "KEEPER_REQUEST_TERMINAL"; value = payload_json })
   in
   let index_to_tool_id = Hashtbl.create 4 in
+  let index_to_tool_name = Hashtbl.create 4 in
+  let index_to_tool_args = Hashtbl.create 4 in
   let rec consume_worker_events () =
     match Eio.Stream.take worker_events with
     | Stream_event evt ->
@@ -686,21 +705,46 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
              Keeper_chat_events.publish events (Text_delta text)
          | Agent_sdk.Types.ContentBlockDelta { delta = ThinkingDelta text; _ } ->
              Keeper_chat_events.publish events (Custom { name = "KEEPER_THINKING_DELTA"; value = `Assoc [ ("delta", `String text) ] })
-         | Agent_sdk.Types.ContentBlockStart { index; tool_id = Some tid; tool_name = Some tname; _ } ->
+         | Agent_sdk.Types.ContentBlockStart { index; tool_id = Some tid; tool_name; _ } ->
+             let tname = Option.value ~default:"unknown" tool_name in
              Hashtbl.replace index_to_tool_id index tid;
+             Hashtbl.replace index_to_tool_name index tname;
+             Hashtbl.replace index_to_tool_args index (Buffer.create 128);
              Keeper_chat_events.publish events (Tool_call_start { tool_call_id = tid; tool_call_name = tname })
          | Agent_sdk.Types.ContentBlockDelta { index; delta = InputJsonDelta args } ->
              let tid = Hashtbl.find_opt index_to_tool_id index |> Option.value ~default:"" in
+             (match Hashtbl.find_opt index_to_tool_args index with
+              | Some buffer -> Buffer.add_string buffer args
+              | None -> ());
              Keeper_chat_events.publish events (Tool_call_args { tool_call_id = tid; delta = args })
          | Agent_sdk.Types.ContentBlockStop { index } ->
              let tid = Hashtbl.find_opt index_to_tool_id index |> Option.value ~default:"" in
+             let tname =
+               Hashtbl.find_opt index_to_tool_name index
+               |> Option.value ~default:"unknown"
+             in
+             let arguments =
+               Hashtbl.find_opt index_to_tool_args index
+               |> Option.map Buffer.contents
+               |> Option.value ~default:""
+             in
+             if tid <> "" then
+               Keeper_chat_store.append_tool_call
+                 ~base_dir:state.Mcp_server.workspace_config.base_path
+                 ~keeper_name:payload.name ~tool_call_id:tid ~name:tname
+                 ~arguments;
+             Hashtbl.remove index_to_tool_id index;
+             Hashtbl.remove index_to_tool_name index;
+             Hashtbl.remove index_to_tool_args index;
              Keeper_chat_events.publish events (Tool_call_end { tool_call_id = tid })
          | _ -> ());
         consume_worker_events ()
     | Stream_terminal (false, err) ->
+        request_terminal := true;
         publish_terminal ~status:"error" ~ok:false ~message:err ();
         Keeper_chat_events.publish events (Event_error { message = err })
     | Stream_terminal (true, body) -> (
+        request_terminal := true;
         try
           let payload_json_opt, visible_reply = extract_visible_reply body in
           let is_checkpoint =
@@ -895,7 +939,7 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
            let events = Keeper_chat_events.create () in
            Eio.Fiber.fork ~sw:stream_sw (fun () ->
              sse_adapter_loop ~events ~writer ~mutex ~closed);
-           process_single_turn ~state ~clock ~sw
+           process_single_turn ~state ~clock ~sw ~request_sw:stream_sw
              ~auth_token:(auth_token_from_request request)
              ~thread_id ~closed
              ~payload ~run_id ~message_id ~agent_name ~events;

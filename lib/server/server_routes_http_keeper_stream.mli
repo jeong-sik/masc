@@ -113,6 +113,7 @@ val process_single_turn :
   state:Mcp_server.server_state ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   sw:Eio.Switch.t ->
+  request_sw:Eio.Switch.t ->
   auth_token:string option ->
   thread_id:string ->
   closed:bool ref ->
@@ -125,5 +126,6 @@ val process_single_turn :
 (** Execute a single keeper turn, publishing events to the provided
     event stream.  [closed] is a mutable flag that suppresses worker
     event pushes when set to [true] (used by the SSE adapter when the
-    HTTP stream is closed).  [auth_token] is [None] for queue-consumer
-    turns where no HTTP request is available. *)
+    HTTP stream is closed).  [request_sw] scopes request-close watchers;
+    queue-consumer turns pass their existing worker switch. [auth_token]
+    is [None] for queue-consumer turns where no HTTP request is available. *)

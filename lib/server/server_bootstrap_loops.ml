@@ -989,7 +989,7 @@ let start_keeper_loops
                           MASC_SLACK_BOT_TOKEN not set, \
                           skipping Slack delivery for keeper=%s"
                          keeper_name));
-             process_single_turn ~state ~clock ~sw ~auth_token:None
+             process_single_turn ~state ~clock ~sw ~request_sw:sw ~auth_token:None
                ~thread_id ~closed ~payload ~run_id ~message_id
                ~agent_name ~events)
        with

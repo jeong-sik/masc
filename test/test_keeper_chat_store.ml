@@ -85,6 +85,36 @@ let test_load_records_malformed_row_drops () =
         1.0
         (drop_value invalid_payload -. before_invalid_payload))
 
+let test_tool_call_round_trip () =
+  let base_dir = temp_base_path "keeper-chat-store-tool-call" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-tool" in
+      K.append_tool_call ~base_dir ~keeper_name ~tool_call_id:"call-1"
+        ~name:"keeper_task_claim" ~arguments:"{\"task_id\":\"T-1\"}";
+      let messages = K.load ~base_dir ~keeper_name in
+      Alcotest.(check int) "one tool call row" 1 (List.length messages);
+      match messages with
+      | [ msg ] ->
+          Alcotest.(check string) "role" "tool_call" msg.K.role;
+          Alcotest.(check string) "empty content accepted" "" msg.K.content;
+          (match msg.K.tool_calls with
+          | Some [ call ] ->
+              Alcotest.(check string) "tool call id" "call-1"
+                call.K.tool_call_id;
+              Alcotest.(check string) "tool name" "keeper_task_claim"
+                call.K.name;
+              Alcotest.(check string) "arguments" "{\"task_id\":\"T-1\"}"
+                call.K.arguments
+          | _ -> Alcotest.fail "expected one structured tool call");
+          (match K.to_json_array messages with
+          | `List [ `Assoc fields ] ->
+              Alcotest.(check bool) "json contains tool_calls" true
+                (List.mem_assoc "tool_calls" fields)
+          | _ -> Alcotest.fail "expected one json row")
+      | _ -> Alcotest.fail "expected one message")
+
 let () =
   Alcotest.run "keeper_chat_store"
     [
@@ -92,5 +122,7 @@ let () =
         [
           Alcotest.test_case "malformed rows increment drop metrics" `Quick
             test_load_records_malformed_row_drops;
+          Alcotest.test_case "tool calls round-trip through jsonl" `Quick
+            test_tool_call_round_trip;
         ] );
     ]

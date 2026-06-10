@@ -80,6 +80,7 @@ type ws_session = {
   mutable dashboard_seq : int;
   mutable dashboard_last_ack_seq : int;
   mutable dashboard_last_buffered_amount : int;
+  mutable last_active : float;
   mutable inbound_partial_text : Buffer.t option;
 }
 (** Per-WS session state.  Concrete record because

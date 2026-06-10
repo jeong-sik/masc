@@ -88,6 +88,25 @@ describe('filterChatMessages', () => {
     expect(result[0]?.timestamp).toBe(5)
   })
 
+  it('matches structured tool-call names and arguments', () => {
+    const toolMessage: ChatMessage = {
+      role: 'tool_call',
+      content: '',
+      timestamp: 6,
+      toolCalls: [
+        {
+          tool_call_id: 'call-1',
+          name: 'keeper_task_claim',
+          arguments: '{"task_id":"T-1"}',
+        },
+      ],
+    }
+    const messages = [...sample, toolMessage]
+
+    expect(filterChatMessages(messages, 'keeper_task_claim')).toEqual([toolMessage])
+    expect(filterChatMessages(messages, 'T-1')).toEqual([toolMessage])
+  })
+
   it('returns an empty array when nothing matches', () => {
     expect(filterChatMessages(sample, 'nonexistent_token')).toEqual([])
   })

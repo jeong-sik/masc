@@ -5,6 +5,8 @@
     [<base_dir>/.masc/keeper_chat/<sanitized-name>.jsonl]. Lines are
     JSON objects of the form
     {v {"role":"user","content":"hello","ts":1774000000.0} v}
+    or
+    {v {"role":"tool_call","content":"","tool_calls":[{"tool_call_id":"call-1","name":"keeper_task_claim","arguments":"{}"}],"ts":1774000000.0} v}
 
     @since 2.145.0 *)
 
@@ -19,11 +21,18 @@ type attachment = {
   data : string;
 }
 
+type tool_call_data = {
+  tool_call_id : string;
+  name : string;
+  arguments : string;
+}
+
 type chat_message = {
   role : string;
   content : string;
   ts : float option;
   attachments : attachment list option;
+  tool_calls : tool_call_data list option;
 }
 
 (** {1 I/O} *)
@@ -40,6 +49,17 @@ val append_pair :
   user_attachments:attachment list ->
   unit
 
+(** [append_tool_call ~base_dir ~keeper_name ~tool_call_id ~name ~arguments]
+    appends a single structured tool-call line. Failures are logged but
+    never raised except for {!Eio.Cancel.Cancelled}. *)
+val append_tool_call :
+  base_dir:string ->
+  keeper_name:string ->
+  tool_call_id:string ->
+  name:string ->
+  arguments:string ->
+  unit
+
 (** [load ~base_dir ~keeper_name] returns the most recent
     [max_history] messages in chronological order. Missing files
     return [[]]. Unparseable lines are skipped. *)
@@ -49,5 +69,5 @@ val load :
 (** {1 Serialisation} *)
 
 (** JSON array of messages. Entries without a timestamp omit the
-    [ts] field. *)
+    [ts] field. Tool-call entries include [tool_calls] as an array. *)
 val to_json_array : chat_message list -> Yojson.Safe.t

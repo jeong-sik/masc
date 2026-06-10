@@ -673,7 +673,7 @@ export interface KeeperDiagnostic {
   continuity_summary?: string | null
 }
 
-export type KeeperConversationRole = 'user' | 'assistant' | 'system' | 'tool' | 'other'
+export type KeeperConversationRole = 'user' | 'assistant' | 'system' | 'tool' | 'tool_call' | 'other'
 
 /** Canonical actor name for system-originated entries (backend convention).
  *  Used when an actor field is null/missing and the entry came from a
@@ -707,7 +707,15 @@ interface KeeperConversationUsage {
   totalTokens?: number | null
 }
 
+export interface KeeperConversationToolCall {
+  tool_call_id: string
+  name: string
+  arguments: string
+}
+
 export interface KeeperConversationDetails {
+  type?: 'tool_call' | string
+  toolCalls?: KeeperConversationToolCall[]
   traceId?: string | null
   generation?: number | null
   modelUsed?: string | null

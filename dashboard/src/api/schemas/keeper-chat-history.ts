@@ -17,17 +17,26 @@
  */
 
 import {
+  array,
   number,
   object,
+  optional,
   safeParse,
   string,
   type InferOutput,
 } from 'valibot'
 
+const KeeperChatHistoryToolCallSchema = object({
+  tool_call_id: string(),
+  name: string(),
+  arguments: string(),
+})
+
 export const KeeperChatHistoryMessageSchema = object({
   role: string(),
   content: string(),
   ts: number(),
+  tool_calls: optional(array(KeeperChatHistoryToolCallSchema)),
 })
 
 export type KeeperChatHistoryMessage = InferOutput<typeof KeeperChatHistoryMessageSchema>

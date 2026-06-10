@@ -28,6 +28,7 @@ import { errorToString } from '../lib/format-string'
 import {
   type ChatMessage,
   type Attachment,
+  type ToolCallData,
   getChatMessageBuffer,
   appendChatMessage,
   mergeServerHistory,
@@ -101,7 +102,19 @@ async function resizeImage(file: File, maxWidth = 1920): Promise<File> {
 export function filterChatMessages(messages: ChatMessage[], query: string): ChatMessage[] {
   const q = query.trim().toLowerCase()
   if (!q) return messages
-  return messages.filter((m) => m.content.toLowerCase().includes(q))
+  return messages.filter((m) => {
+    const toolText = (m.toolCalls ?? [])
+      .map((call) => `${call.tool_call_id} ${call.name} ${call.arguments}`)
+      .join(' ')
+    const legacyToolText = `${m.toolCallId ?? ''} ${m.toolCallName ?? ''}`
+    return `${m.content} ${toolText} ${legacyToolText}`.toLowerCase().includes(q)
+  })
+}
+
+function formatToolCallSummary(toolCalls: ToolCallData[]): string {
+  return toolCalls
+    .map((call) => `${call.name} ${call.arguments || '{}'}`)
+    .join('\n')
 }
 
 function toConversationEntry(
@@ -109,6 +122,24 @@ function toConversationEntry(
   msg: ChatMessage,
   index: number,
 ): KeeperConversationEntry {
+  if (msg.role === 'tool_call') {
+    const toolCalls = msg.toolCalls ?? []
+    const summary = toolCalls.length > 0 ? formatToolCallSummary(toolCalls) : '(no args)'
+    return {
+      id: `${msg.role}-${msg.timestamp}-${index}`,
+      role: 'tool_call',
+      source: 'direct_assistant',
+      label: toolCalls[0]?.name ?? `${keeperName} tool`,
+      text: summary,
+      rawText: summary,
+      timestamp: new Date(msg.timestamp).toISOString(),
+      delivery: 'delivered',
+      streamState: null,
+      details: toolCalls.length > 0
+        ? { type: 'tool_call', toolCalls }
+        : null,
+    }
+  }
   if (msg.role === 'tool') {
     return {
       id: `${msg.role}-${msg.timestamp}-${index}`,
@@ -248,10 +279,15 @@ export function KeeperChatPanel({ name }: { name: string }) {
       const history = await fetchKeeperChatHistory(keeperName)
       if (history.length > 0) {
         const serverMsgs = history.map((m) => ({
-          role: m.role === 'assistant' ? 'assistant' as const : 'user' as const,
+          role: m.role === 'assistant'
+            ? 'assistant' as const
+            : m.role === 'tool_call'
+            ? 'tool_call' as const
+            : 'user' as const,
           content: m.content,
           timestamp: m.ts * 1000,
           source: 'api' as const,
+          toolCalls: m.tool_calls,
         }))
         mergeServerHistory(keeperName, serverMsgs)
         chatMessages.value = [...getChatMessageBuffer(keeperName)]
@@ -350,12 +386,17 @@ export function KeeperChatPanel({ name }: { name: string }) {
             const resolved = resolvePending(event.toolCallId)
             if (resolved) {
               const toolMsg: ChatMessage = {
-                role: 'tool',
-                content: resolved.entry.args || '(no args)',
+                role: 'tool_call',
+                content: '',
                 timestamp: Date.now(),
                 source: 'dashboard',
-                toolCallId: resolved.id,
-                toolCallName: resolved.entry.name,
+                toolCalls: [
+                  {
+                    tool_call_id: resolved.id,
+                    name: resolved.entry.name,
+                    arguments: resolved.entry.args || '{}',
+                  },
+                ],
               }
               appendChatMessage(keeperName, toolMsg)
               chatMessages.value = [...getChatMessageBuffer(keeperName)]

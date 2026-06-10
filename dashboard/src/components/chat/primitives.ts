@@ -53,7 +53,7 @@ function bubbleTone(entry: KeeperConversationEntry): string {
   if (entry.delivery === 'error' || entry.delivery === 'timeout' || entry.delivery === 'interrupted') return 'error'
   if (entry.role === 'user') return 'user'
   if (entry.role === 'assistant') return 'assistant'
-  if (entry.role === 'tool') return 'tool'
+  if (entry.role === 'tool' || entry.role === 'tool_call') return 'tool'
   return 'system'
 }
 
@@ -569,7 +569,7 @@ export function ChatTranscript({
                 <div class="mt-3 max-w-[34rem] text-sm leading-airy text-[var(--color-fg-secondary)]">${emptyText}</div>
               </div>
             `
-          : entries.map(entry => entry.role === 'tool'
+          : entries.map(entry => entry.role === 'tool' || entry.role === 'tool_call'
               ? html`<${ToolCallBubble} key=${entry.id} entry=${entry} />`
               : html`<${ChatMessageBubble} key=${entry.id} entry=${entry} showMetadata=${showMetadata !== false} variant=${variant} />`
           )}

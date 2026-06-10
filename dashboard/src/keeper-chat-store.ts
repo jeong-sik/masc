@@ -9,11 +9,11 @@
 // "the whole conversation vanished" whenever the dashboard was reopened.
 //
 // Design constraints:
-// - Server changes: zero.  All persistence is client-side.
-// - useEffect: not used for data init.  External system sync only.
+// - Server history is the durable cross-connector transcript.
+// - useEffect: not used for local data init.  External system sync only.
 // - Component unmount: messages are preserved, not cleared.
 
-export type ChatMessageRole = 'user' | 'assistant' | 'tool'
+export type ChatMessageRole = 'user' | 'assistant' | 'tool' | 'tool_call'
 export type ChatMessageSource = 'dashboard' | 'discord' | 'slack' | 'api'
 
 export interface Attachment {
@@ -25,15 +25,23 @@ export interface Attachment {
   data: string
 }
 
+export interface ToolCallData {
+  tool_call_id: string
+  name: string
+  arguments: string
+}
+
 export interface ChatMessage {
   role: ChatMessageRole
   content: string
   timestamp: number
   source?: ChatMessageSource
   attachments?: Attachment[]
-  // Tool call fields (role === 'tool')
+  // Legacy tool result fields (role === 'tool')
   toolCallId?: string
   toolCallName?: string
+  // Structured AG-UI tool call fields (role === 'tool_call')
+  toolCalls?: ToolCallData[]
 }
 
 interface StoredSession {
@@ -144,7 +152,8 @@ export function clearChatMessages(keeperName: string): void {
 }
 
 /** Merge server-fetched history with local buffer.
- *  Deduplication uses (role, timestamp, content) equality.
+ *  Deduplication uses stable message fields, including structured
+ *  tool-call payloads whose visible content is intentionally empty.
  *  Result is sorted by timestamp ascending. */
 export function mergeServerHistory(
   keeperName: string,
@@ -155,7 +164,7 @@ export function mergeServerHistory(
   const merged: ChatMessage[] = []
 
   function key(m: ChatMessage): string {
-    return `${m.role}:${m.timestamp}:${m.content}`
+    return `${m.role}:${m.timestamp}:${m.content}:${JSON.stringify(m.toolCalls ?? [])}`
   }
 
   for (const m of local) {

@@ -14,12 +14,42 @@ let make_probe ~(config : Workspace.config)
     | Error _ -> None
     | Ok abs_path -> Fs_compat.file_size abs_path
   in
+  let command_exit cmd =
+    let args = `Assoc [] in
+    match
+      Keeper_tool_execute_path.resolve_tool_execute_cwd
+        ~config
+        ~meta
+        ~write_enabled:true
+        ~args
+    with
+    | Error _ -> None
+    | Ok cwd -> (
+      match Exec_policy.parse_string_to_ir ~mode:Tool_execute cmd with
+      | Error _ -> None
+      | Ok ir -> (
+        let sandbox = Masc_exec.Sandbox_target.host () in
+        match
+          Keeper_tool_execute_shell_ir.dispatch
+            ~keeper_id:meta.name
+            ~base_path:config.base_path
+            ~workdir:cwd
+            ~sandbox
+            ir
+        with
+        | Error _ -> None
+        | Ok res -> (
+          match res.Masc_exec.Exec_dispatch.status with
+          | Unix.WEXITED code -> Some code
+          | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> None)))
+  in
   { Deterministic_evidence_evaluator.file_bytes
-  ; command_exit = (fun _ -> None)
+  ; command_exit
   ; pr_merged = (fun ~repo:_ ~pr:_ -> None)
   ; ci_passed = (fun ~repo:_ ~pr:_ -> None)
   ; custom_check = (fun ~id:_ ~payload:_ -> None)
   }
+
 
 let all_satisfied ~config ~meta claims =
   match

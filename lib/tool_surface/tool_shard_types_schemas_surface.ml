@@ -35,4 +35,38 @@ let surface_tools : Masc_domain.tool_schema list =
           ; "required", `List [ `String "surface" ]
           ]
     }
+  ; { name = "keeper_surface_post"
+    ; description =
+        "Post a message to one connected surface lane: 'dashboard' (appears \
+         in the operator's chat transcript) or 'discord' (sends to the bound \
+         channel). Posting to an unbound surface is an error."
+    ; input_schema =
+        `Assoc
+          [ "type", `String "object"
+          ; ( "properties"
+            , `Assoc
+                [ ( "surface"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; ( "description"
+                        , `String "Lane to post to: 'dashboard' or 'discord'" )
+                      ] )
+                ; ( "content"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; ( "description"
+                        , `String "Message text to deliver on the lane" )
+                      ] )
+                ; ( "channel_id"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; ( "description"
+                        , `String
+                            "Discord channel snowflake; required only when \
+                             more than one channel is bound" )
+                      ] )
+                ] )
+          ; "required", `List [ `String "surface"; `String "content" ]
+          ]
+    }
   ]

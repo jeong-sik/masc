@@ -180,6 +180,26 @@ let append_turn ~base_dir ~keeper_name ~(user_content : string)
     Log.Keeper.warn "keeper_chat_store: append failed for %s: %s"
       (sanitize_name keeper_name) (Printexc.to_string exn)
 
+(* RFC-0223 P4: keeper-initiated message on one lane. A single
+   assistant line — there is no user turn to pair it with. *)
+let append_assistant_message ~base_dir ~keeper_name ~(content : string)
+    ?source () =
+  try
+    ensure_dir_once ~base_dir;
+    let path = chat_path ~base_dir ~keeper_name in
+    let ts = Time_compat.now () in
+    let line = encode_line ~role:"assistant" ~content ~ts ?source () in
+    Fs_compat.append_file path (line ^ "\n")
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string ChatStoreFailures)
+      ~labels:[("operation", Keeper_chat_store_operation.(to_label Append))]
+      ();
+    Log.Keeper.warn "keeper_chat_store: assistant append failed for %s: %s"
+      (sanitize_name keeper_name) (Printexc.to_string exn)
+
 let parse_line ~file_path (line : string) : chat_message option =
   try
     let json = Yojson.Safe.from_string line in

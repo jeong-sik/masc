@@ -22,6 +22,7 @@ type gateway_event = Discord_gateway_state.dispatched_event =
       { channel_id : string
       ; message_id : string
       ; author_id : string
+      ; author_name : string option
       ; content : string
       ; mentions_bot : bool
       }

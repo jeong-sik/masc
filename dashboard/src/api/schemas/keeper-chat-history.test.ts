@@ -51,6 +51,27 @@ describe('safeParseKeeperChatHistoryMessage', () => {
     expect(safeParseKeeperChatHistoryMessage(undefined)).toBeNull()
   })
 
+  it('passes RFC-0223 speaker fields through when present', () => {
+    const out = safeParseKeeperChatHistoryMessage(
+      validMessage({
+        source: 'discord',
+        speaker_id: '98791450001',
+        speaker_name: 'Minsu',
+        speaker_authority: 'external',
+      }),
+    )
+    expect(out?.speaker_id).toBe('98791450001')
+    expect(out?.speaker_name).toBe('Minsu')
+    expect(out?.speaker_authority).toBe('external')
+  })
+
+  it('accepts rows without speaker fields (legacy and non-user lines)', () => {
+    const out = safeParseKeeperChatHistoryMessage(validMessage())
+    expect(out).not.toBeNull()
+    expect(out?.speaker_id).toBeUndefined()
+    expect(out?.speaker_authority).toBeUndefined()
+  })
+
   it('composes in a filter chain — drops garbage entries silently', () => {
     const raw: unknown[] = [
       validMessage(),

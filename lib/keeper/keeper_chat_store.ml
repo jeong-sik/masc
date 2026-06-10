@@ -56,6 +56,25 @@ type tool_call = {
   args : string;
 }
 
+type speaker_authority =
+  | Owner
+  | External
+
+let authority_label = function
+  | Owner -> "owner"
+  | External -> "external"
+
+let authority_of_label = function
+  | "owner" -> Some Owner
+  | "external" -> Some External
+  | _ -> None
+
+type speaker = {
+  speaker_id : string option;
+  speaker_name : string option;
+  speaker_authority : speaker_authority;
+}
+
 type chat_message = {
   role : string;
   content : string;
@@ -64,14 +83,22 @@ type chat_message = {
   tool_call_id : string option;
   tool_call_name : string option;
   source : string option;
+  speaker : speaker option;
 }
 
 let opt_string_field key = function
   | None -> []
   | Some value -> [ (key, `String value) ]
 
+let speaker_fields = function
+  | None -> []
+  | Some sp ->
+      opt_string_field "speaker_id" sp.speaker_id
+      @ opt_string_field "speaker_name" sp.speaker_name
+      @ [ ("speaker_authority", `String (authority_label sp.speaker_authority)) ]
+
 let encode_line ~role ~content ~ts ?attachments ?tool_call_id ?tool_call_name
-    ?source () : string =
+    ?source ?speaker () : string =
   let base_fields = [
     ("role", `String role);
     ("content", `String content);
@@ -99,6 +126,7 @@ let encode_line ~role ~content ~ts ?attachments ?tool_call_id ?tool_call_name
     @ opt_string_field "tool_call_id" tool_call_id
     @ opt_string_field "tool_call_name" tool_call_name
     @ opt_string_field "source" source
+    @ speaker_fields speaker
   in
   Yojson.Safe.to_string (`Assoc all_fields)
 
@@ -112,15 +140,17 @@ let normalize_tool_call_id ~position call_id =
   if String.trim call_id = "" then Printf.sprintf "tc-%d" position else call_id
 
 let append_turn ~base_dir ~keeper_name ~(user_content : string)
-    ~(user_attachments : attachment list) ?(tool_calls = []) ?source
+    ~(user_attachments : attachment list) ?(tool_calls = []) ?source ?speaker
     ~(assistant_content : string) () =
   try
     ensure_dir_once ~base_dir;
     let path = chat_path ~base_dir ~keeper_name in
     let ts = Time_compat.now () in
+    (* Speaker identity belongs to the user line only: tool and
+       assistant lines are the keeper's own output. *)
     let user_line =
       encode_line ~role:"user" ~content:user_content ~ts
-        ~attachments:user_attachments ?source ()
+        ~attachments:user_attachments ?source ?speaker ()
     in
     let tool_lines =
       List.mapi
@@ -166,6 +196,35 @@ let parse_line ~file_path (line : string) : chat_message option =
     let tool_call_id = opt_string "tool_call_id" in
     let tool_call_name = opt_string "tool_call_name" in
     let source = opt_string "source" in
+    let speaker =
+      let speaker_id = opt_string "speaker_id" in
+      let speaker_name = opt_string "speaker_name" in
+      match opt_string "speaker_authority" with
+      | Some label -> (
+          match authority_of_label label with
+          | Some speaker_authority ->
+              Some { speaker_id; speaker_name; speaker_authority }
+          | None ->
+              (* Unknown authority label: surface it instead of guessing
+                 a class; the row itself stays valid. *)
+              report_persistence_read_drop
+                ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                ~path:file_path
+                ~detail:
+                  (Printf.sprintf "unknown speaker_authority %S" label);
+              None)
+      | None ->
+          (match speaker_id, speaker_name with
+           | None, None -> ()
+           | _ ->
+               (* id/name without an authority class never comes from our
+                  writer; report so the producer gets fixed. *)
+               report_persistence_read_drop
+                 ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                 ~path:file_path
+                 ~detail:"speaker_id/speaker_name without speaker_authority");
+          None
+    in
     let attachments =
       match Json_util.assoc_member_opt "attachments" json with
       | Some (`List att_list) ->
@@ -200,7 +259,10 @@ let parse_line ~file_path (line : string) : chat_message option =
         ~path:file_path
         ~detail:"tool chat row missing non-empty tool_call_name";
       None)
-    else Some { role; content; ts; attachments; tool_call_id; tool_call_name; source }
+    else
+      Some
+        { role; content; ts; attachments; tool_call_id; tool_call_name;
+          source; speaker }
   with Yojson.Json_error detail ->
     report_persistence_read_drop
       ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
@@ -287,6 +349,7 @@ let to_json_array (messages : chat_message list) : Yojson.Safe.t =
               @ opt_string_field "tool_call_id" m.tool_call_id
               @ opt_string_field "tool_call_name" m.tool_call_name
               @ opt_string_field "source" m.source
+              @ speaker_fields m.speaker
               @ (match m.attachments with
                  | None | Some [] -> []
                  | Some atts ->

@@ -143,6 +143,96 @@ let test_legacy_lines_parse_without_new_fields () =
       | messages ->
           Alcotest.failf "expected 2 messages, got %d" (List.length messages))
 
+(* RFC-0223 P1 — speaker identity round-trips on the user line only. *)
+
+let speaker_label (msg : K.chat_message) =
+  match msg.speaker with
+  | None -> "absent"
+  | Some sp -> K.authority_label sp.speaker_authority
+
+let test_speaker_external_roundtrip () =
+  let base_dir = temp_base_path "keeper-chat-store-speaker-ext" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-speaker-ext" in
+      K.append_turn ~base_dir ~keeper_name
+        ~user_content:"hello from discord"
+        ~user_attachments:[]
+        ~source:"discord"
+        ~speaker:
+          { K.speaker_id = Some "98791450001";
+            speaker_name = Some "minsu";
+            speaker_authority = K.External }
+        ~assistant_content:"hi minsu"
+        ();
+      match K.load ~base_dir ~keeper_name with
+      | [ user; assistant ] ->
+          (match user.speaker with
+           | Some sp ->
+               Alcotest.(check (option string)) "speaker id persisted"
+                 (Some "98791450001") sp.K.speaker_id;
+               Alcotest.(check (option string)) "speaker name persisted"
+                 (Some "minsu") sp.K.speaker_name;
+               Alcotest.(check string) "authority external"
+                 "external" (K.authority_label sp.K.speaker_authority)
+           | None -> Alcotest.fail "user line lost its speaker");
+          Alcotest.(check string) "assistant line carries no speaker"
+            "absent" (speaker_label assistant)
+      | messages ->
+          Alcotest.failf "expected 2 messages, got %d" (List.length messages))
+
+let test_speaker_owner_roundtrip () =
+  let base_dir = temp_base_path "keeper-chat-store-speaker-own" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-speaker-own" in
+      K.append_turn ~base_dir ~keeper_name
+        ~user_content:"deploy it"
+        ~user_attachments:[]
+        ~source:"dashboard"
+        ~speaker:
+          { K.speaker_id = None;
+            speaker_name = None;
+            speaker_authority = K.Owner }
+        ~assistant_content:"deploying"
+        ();
+      match K.load ~base_dir ~keeper_name with
+      | [ user; _assistant ] -> (
+          match user.speaker with
+          | Some sp ->
+              Alcotest.(check (option string)) "owner has no id"
+                None sp.K.speaker_id;
+              Alcotest.(check string) "authority owner"
+                "owner" (K.authority_label sp.K.speaker_authority)
+          | None -> Alcotest.fail "owner speaker lost")
+      | messages ->
+          Alcotest.failf "expected 2 messages, got %d" (List.length messages))
+
+let test_unknown_speaker_authority_reported_not_guessed () =
+  let base_dir = temp_base_path "keeper-chat-store-speaker-bad" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-speaker-bad" in
+      let path = chat_path ~base_dir ~keeper_name in
+      let invalid_payload = Safe_ops.persistence_read_drop_reason_invalid_payload in
+      let before = drop_value invalid_payload in
+      write_file path
+        ({|{"role":"user","content":"hi","ts":1.0,"speaker_id":"x","speaker_authority":"admin"}|}
+        ^ "\n");
+      (match K.load ~base_dir ~keeper_name with
+       | [ user ] ->
+           Alcotest.(check string)
+             "unknown authority yields no speaker, row kept"
+             "absent" (speaker_label user)
+       | messages ->
+           Alcotest.failf "expected 1 message, got %d" (List.length messages));
+      Alcotest.(check (float 0.001)) "unknown authority counted as drop"
+        1.0
+        (drop_value invalid_payload -. before))
+
 let test_tool_row_missing_name_dropped () =
   let base_dir = temp_base_path "keeper-chat-store-toolname" in
   Fun.protect
@@ -219,6 +309,15 @@ let () =
             test_load_records_malformed_row_drops;
           Alcotest.test_case "tool row without name dropped" `Quick
             test_tool_row_missing_name_dropped;
+        ] );
+      ( "speaker_identity",
+        [
+          Alcotest.test_case "external speaker roundtrip" `Quick
+            test_speaker_external_roundtrip;
+          Alcotest.test_case "owner speaker roundtrip" `Quick
+            test_speaker_owner_roundtrip;
+          Alcotest.test_case "unknown authority reported, not guessed" `Quick
+            test_unknown_speaker_authority_reported_not_guessed;
         ] );
       ( "tool_call_persistence",
         [

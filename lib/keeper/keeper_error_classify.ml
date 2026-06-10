@@ -626,20 +626,12 @@ let degraded_rotation_after_recoverable_error
          (* Contract violation: all candidates exhausted. Cap rotation. *)
          None)
 
-let is_tool_retry_exhausted_error (_err : Agent_sdk.Error.sdk_error) : bool =
-  false
-;;
-
 let is_auto_recoverable_turn_error (err : Agent_sdk.Error.sdk_error) : bool =
   is_transient_network_error err
   || is_server_rejected_parse_error err
-  || is_tool_retry_exhausted_error err
   || is_auto_recoverable_runtime_exhausted_error err
 
 let should_warn_keeper_cycle_failed (err : Agent_sdk.Error.sdk_error) : bool =
-  if is_tool_retry_exhausted_error err
-  then true
-  else
   match Keeper_turn_driver.classify_masc_internal_error err with
   | Some (Keeper_turn_driver.Provider_timeout _) -> true
   | Some (Keeper_turn_driver.Capacity_backpressure _) -> true

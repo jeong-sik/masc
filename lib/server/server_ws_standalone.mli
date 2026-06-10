@@ -52,6 +52,32 @@ module For_testing : sig
 
   val plan_ws_close_payload_chunk :
     offset:int -> declared_len:int -> chunk_len:int -> ws_close_payload_chunk_plan
+
+  val heartbeat_interval_s : float
+  (** [heartbeat_interval_s] is the interval (in seconds) between
+      protocol-level pings on each WS session.  Default: [30.0].
+      Exposed for test code that needs to assert tick timing without
+      hardcoding the default. *)
+
+  val start_heartbeat_fiber :
+    sw:Eio.Switch.t ->
+    clock:Eio.Time.clock ->
+    session_id:string ->
+    session:Server_mcp_transport_ws.session ->
+    wsd:Ws.Wsd.t ->
+    unit
+  (** [start_heartbeat_fiber ~sw ~clock ~session_id ~session ~wsd]
+      spawns a background fiber that sends protocol-level pings every
+      [heartbeat_interval_s] seconds.
+
+      The fiber self-exits once [session.closed] flips or the WSD
+      writer is closed, so it does not outlive the connection beyond
+      one sleep tick.
+
+      Exposed through {!For_testing} so unit tests can activate the
+      heartbeat loop without a real TCP accept socket — useful for
+      verifying ping timing, cancel propagation, and cleanup after
+      write failure. *)
 end
 
 val start :

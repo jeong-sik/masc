@@ -146,6 +146,10 @@ module For_testing = struct
         }
 
   let plan_ws_close_payload_chunk = plan_ws_close_payload_chunk
+
+  let heartbeat_interval_s = heartbeat_interval_s
+
+  let start_heartbeat_fiber = start_heartbeat_fiber
 end
 
 let log_ws_client_close_payload ~session_id ~declared_len payload =
@@ -216,6 +220,45 @@ let standalone_ws_eof_summary = function
   | Some (`Exn exn) -> Printf.sprintf "error=%s" (Printexc.to_string exn)
 ;;
 
+(** [start_heartbeat_fiber ~sw ~clock ~session_id ~session ~wsd] spawns a
+    background fiber that sends protocol-level pings every
+    [heartbeat_interval_s] seconds.
+
+    The fiber self-exits once [session.closed] flips or the WSD writer is
+    closed, so it does not outlive the connection beyond one sleep tick.
+
+    Exposed through {!For_testing} so unit tests can activate the heartbeat
+    loop without a real TCP accept socket. *)
+let start_heartbeat_fiber ~sw ~clock ~session_id ~session ~wsd =
+  Eio.Fiber.fork ~sw (fun () ->
+    let rec loop () =
+      Eio.Time.sleep clock heartbeat_interval_s;
+      if (not session.closed) && not (Ws.Wsd.is_closed session.wsd)
+      then (
+        let send_failed = ref false in
+        (try Ws.Wsd.send_ping wsd with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn ->
+           send_failed := true;
+           (match Http_server_eio.Late_response.classify_write_failure exn with
+            | Some _ ->
+              Log.Server.debug
+                "[ws-standalone] session %s heartbeat skipped (writer closed during \
+                 cancel race)"
+                session_id
+            | None ->
+              Log.Server.warn
+                "[ws-standalone] session %s heartbeat send_ping failed: %s"
+                session_id
+                (Printexc.to_string exn)));
+        if !send_failed
+        then
+          Server_mcp_transport_ws.cleanup_session session_id
+        else loop ())
+    in
+    loop ())
+;;
+
 (** WebSocket handler factory.
 
     For each accepted connection, httpun-ws-eio calls this with the
@@ -251,44 +294,9 @@ let make_websocket_handler ~sw ~clock ~on_message _client_addr (wsd : Ws.Wsd.t)
     ();
   (* Heartbeat fiber: emit a protocol-level ping every
      [heartbeat_interval_s] to keep NAT/proxy mappings warm and surface
-     silent disconnects so the reconnect path on the client can engage
-     instead of hanging on a dead socket.  Exits once [session.closed]
-     flips or the writer is closed, so it does not outlive the
-     connection beyond one sleep tick. *)
-  Eio.Fiber.fork ~sw (fun () ->
-    let rec loop () =
-      Eio.Time.sleep clock heartbeat_interval_s;
-      if (not session.closed) && not (Ws.Wsd.is_closed session.wsd)
-      then (
-        let send_failed = ref false in
-        (try Ws.Wsd.send_ping wsd with
-         | Eio.Cancel.Cancelled _ as e -> raise e
-         | exn ->
-           send_failed := true;
-           (match Http_server_eio.Late_response.classify_write_failure exn with
-            | Some _ ->
-              Log.Server.debug
-                "[ws-standalone] session %s heartbeat skipped (writer closed during \
-                 cancel race)"
-                session_id
-            | None ->
-              Log.Server.warn
-                "[ws-standalone] session %s heartbeat send_ping failed: %s"
-                session_id
-                (Printexc.to_string exn)));
-        if !send_failed
-        then
-          (* If send_ping failed while [session.closed]/[Wsd.is_closed]
-             still read false, the loop would otherwise spin emitting
-             warnings until the WSD finally observed the broken socket.
-             Mark the session closed and run [cleanup_session] now so
-             the rest of the pipeline (sessions table, heartbeat budget,
-             aggregate metrics) drops the half-open session immediately
-             instead of leaking a fiber per failure. *)
-          Server_mcp_transport_ws.cleanup_session session_id
-        else loop ())
-    in
-    loop ());
+     silent disconnects — extracted to [start_heartbeat_fiber] for unit
+     test activation via [For_testing]. *)
+  start_heartbeat_fiber ~sw ~clock ~session_id ~session ~wsd;
   (* #10875: WS storm (#10701) emits ~190k connect/close lines/day at INFO,
      drowning real signal in noise. Per-session lifecycle is DEBUG; aggregate
      state surfaces via Transport_metrics.set_ws_sessions and shutdown_hooks

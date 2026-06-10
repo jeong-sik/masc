@@ -47,3 +47,11 @@ val clear : keeper_name:string -> unit
 (** [all_keeper_names ()] returns a snapshot list of all keeper names
     that currently have a queue in the registry. *)
 val all_keeper_names : unit -> string list
+
+(** [drain_all keeper_name] atomically removes and returns all queued
+    messages for [keeper_name] as a list (FIFO order).  Returns [[]] if
+    the queue does not exist or is empty.
+
+    Use when the caller wants to batch-process messages and merge those
+    from the same source into a single turn. *)
+val drain_all : keeper_name:string -> queued_message list

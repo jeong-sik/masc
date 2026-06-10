@@ -73,3 +73,15 @@ let clear ~keeper_name =
 let all_keeper_names () =
   Eio.Mutex.use_rw ~protect:true registry_mutex (fun () ->
       Hashtbl.fold (fun name _ acc -> name :: acc) registry [])
+
+let drain_all ~keeper_name =
+  Eio.Mutex.use_rw ~protect:true registry_mutex (fun () ->
+      match Hashtbl.find_opt registry keeper_name with
+      | None -> []
+      | Some entry ->
+          Eio.Mutex.use_rw ~protect:true entry.mutex (fun () ->
+              let acc = ref [] in
+              while not (Queue.is_empty entry.q) do
+                acc := Queue.pop entry.q :: !acc
+              done;
+              List.rev !acc))

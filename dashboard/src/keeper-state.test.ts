@@ -152,6 +152,68 @@ describe('thread history merge & persistence', () => {
     expect(entries[1]?.timestamp).toBeTruthy()
   })
 
+  it('maps persisted tool rows to the live tool-entry convention', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      { role: 'user', content: 'run checks', ts: 1_780_000_000 },
+      {
+        role: 'tool',
+        content: '{"path":"x"}',
+        ts: 1_780_000_000,
+        tool_call_id: 'toolu_1',
+        tool_call_name: 'Read',
+        source: 'dashboard',
+      },
+      { role: 'assistant', content: 'all green', ts: 1_780_000_000 },
+    ])
+    expect(entries.map(e => e.role)).toEqual(['user', 'tool', 'assistant'])
+    const tool = entries[1]
+    // Same id/shape as the live TOOL_CALL_* path so replaceThread dedups
+    // a rehydrated row against a still-mounted live entry.
+    expect(tool?.id).toBe('tool-toolu_1')
+    expect(tool?.source).toBe('tool_result')
+    expect(tool?.label).toBe('Read')
+    // Argument JSON must come through verbatim, not reply-formatted.
+    expect(tool?.text).toBe('{"path":"x"}')
+    expect(tool?.delivery).toBe('history')
+  })
+
+  it('drops tool rows that lack id or name and keeps the rest of the turn', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      { role: 'user', content: 'hi', ts: 1_780_000_000 },
+      { role: 'tool', content: '{}', ts: 1_780_000_000, tool_call_id: 'toolu_2' },
+      { role: 'assistant', content: 'done', ts: 1_780_000_000 },
+    ])
+    expect(entries.map(e => e.role)).toEqual(['user', 'assistant'])
+    expect(entries[1]?.label).toBe('echo')
+  })
+
+  it('dedups a rehydrated tool row against the live tool entry', () => {
+    appendThreadEntry('echo', entry({
+      id: 'tool-toolu_3',
+      role: 'tool',
+      source: 'tool_result',
+      text: '{"q":1}',
+      rawText: '{"q":1}',
+      delivery: 'delivered',
+    }))
+
+    mergeServerHistoryEntries('echo', chatHistoryEntriesFromRest('echo', [
+      { role: 'user', content: 'query', ts: 1_780_000_000 },
+      {
+        role: 'tool',
+        content: '{"q":1}',
+        ts: 1_780_000_000,
+        tool_call_id: 'toolu_3',
+        tool_call_name: 'masc_status',
+      },
+      { role: 'assistant', content: 'answer', ts: 1_780_000_000 },
+    ]))
+
+    const thread = keeperThreads.value.echo ?? []
+    expect(thread.filter(e => e.role === 'tool')).toHaveLength(1)
+    expect(thread.map(e => e.role)).toEqual(['user', 'tool', 'assistant'])
+  })
+
   it('inserts before the target entry and appends when the target is missing', () => {
     appendThreadEntry('echo', entry({ id: 'reply-1', role: 'assistant', source: 'direct_assistant' }))
     insertThreadEntryBefore('echo', 'reply-1', entry({ id: 'tool-1', role: 'tool', source: 'tool_result' }))

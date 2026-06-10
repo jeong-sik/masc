@@ -555,14 +555,25 @@ let handle_keeper_task_tool
       Workspace.claim_next_r config ~agent_name:meta.agent_name
         ~task_filter:claim_goal_scope.task_filter
         ~admission_filter:wip_admission_filter
+        ~allow_scope_fallback:true
         ()
     in
     let wip_rejections = List.rev !wip_rejections in
     let auto_started_ok = ref false in
     let harness_completed = ref false in
     (match result with
-     | Workspace.Claim_next_claimed { task_id; _ } ->
+     | Workspace.Claim_next_claimed { task_id; scope_widened; _ } ->
        sync_keeper_meta_current_task ~config ~meta ~task_id;
+       (* Make the scope override visible: this is a claim outside the keeper's
+          active_goal_ids, taken because no in-scope task was admission-eligible
+          (schedule-level fallback). Silent widening would let operators misread
+          the keeper's scope. *)
+       if scope_widened then
+         Log.Keeper.info ~keeper_name:meta.name
+           "goal-scope widened to all_tasks for claim of %s: no in-scope task was \
+            admission-eligible (active_goal_ids=[%s])"
+           task_id
+           (String.concat ", " meta.active_goal_ids);
        (* Guard: claim_next_r returns existing active tasks via Existing_claim
           (task_state_schedule.ml:302). When the task is already InProgress,
           dispatching Start produces an InvalidState transition error every

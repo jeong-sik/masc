@@ -40,8 +40,6 @@ val decide_compaction
   -> message_gate:int
   -> token_gate:int
   -> cooldown_sec:int
-  -> tool_heavy_msg_threshold:int
-  -> tool_heavy_ratio_floor:float
   -> last_continuity_update_ts:float
   -> last_proactive_ts:float
   -> now_ts:float

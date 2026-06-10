@@ -41,6 +41,7 @@ const showToast = vi.fn<(message: string, kind?: string, durationMs?: number) =>
 const replayOasRuntimeTelemetry = vi.fn<() => Promise<void>>(async () => {})
 const hydrateFleetCompositeSnapshot = vi.fn<(payload: unknown) => void>()
 const hydrateGoalTreeSnapshot = vi.fn<(payload: unknown) => boolean>(() => true)
+const noteKeeperChatAppended = vi.fn<(name: string) => void>()
 
 async function flushAsyncWork(): Promise<void> {
   await vi.dynamicImportSettled()
@@ -90,6 +91,9 @@ async function loadSseStore() {
   }))
   vi.doMock('./goal-tree-state', () => ({
     hydrateGoalTreeSnapshot,
+  }))
+  vi.doMock('./keeper-runtime', () => ({
+    noteKeeperChatAppended,
   }))
   vi.doMock('./router', () => ({ route }))
   const sseStore = await import('./sse-store')
@@ -270,6 +274,19 @@ describe('setupSSEReaction reconnect hydration', () => {
     await flushAsyncWork()
 
     expect(refreshBoard).toHaveBeenCalledTimes(1)
+  })
+
+  it('routes keeper_chat_appended pushes to the live chat refresh hook', async () => {
+    const { sseStore } = await loadSseStore()
+
+    sseStore.routeServerPushEvent({
+      type: 'keeper_chat_appended',
+      name: 'echo',
+      connector: 'discord',
+    })
+    await flushAsyncWork()
+
+    expect(noteKeeperChatAppended).toHaveBeenCalledWith('echo')
   })
 
   it('routes board reaction changes through the board refresh budget', async () => {

@@ -725,10 +725,12 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
   in
   let sanitized_system = sanitize_retired_tool_names system_prompt in
   let sanitized_user = sanitize_retired_tool_names user_message in
-  Otel_metric_store.inc_counter
-    (Keeper_metrics.to_string PromptSegmentBytes)
-    ~labels:[("keeper", meta.name); ("segment", "system_prompt")]
-    ();
+  (* set_gauge only: a stray inc_counter here used to create this
+     (name, labels) cell as Counter first, so the system_prompt series
+     kept Counter kind, carried a non-monotonic byte length, and exported
+     as masc_keeper_prompt_segment_bytes_total while user_message exported
+     as the intended gauge. The store keys cells by (name, labels) and
+     never retypes an existing cell. *)
   Otel_metric_store.set_gauge
     (Keeper_metrics.to_string PromptSegmentBytes)
     ~labels:[("keeper", meta.name); ("segment", "system_prompt")]

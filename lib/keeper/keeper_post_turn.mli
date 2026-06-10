@@ -15,7 +15,7 @@
 
 (** Outcome of the compaction step. [applied] iff a compaction
     strategy actually ran; [trigger] is the gate label that fired
-    ([ratio]/[messages]/[tokens]/[tool_heavy]). *)
+    ([ratio]/[messages]/[tokens]). *)
 type compaction_event =
   { attempted : bool
   ; applied : bool

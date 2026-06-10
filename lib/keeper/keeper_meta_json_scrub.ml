@@ -23,6 +23,8 @@ let config_field_names =
   ; "compaction_message_gate"; "compaction_token_gate"
   ; "continuity_compaction_cooldown_sec"
   ; "max_checkpoint_messages"; "keep_recent_tool_results"
+    (* tool_heavy_* fields were removed with the tool_heavy compaction
+       trigger; kept here so legacy persisted JSON sheds the dead keys. *)
   ; "tool_heavy_msg_threshold"; "tool_heavy_ratio_floor"
   ; "auto_handoff"; "handoff_threshold"; "handoff_cooldown_sec"
   ; "per_provider_timeout_s"; "always_approve"

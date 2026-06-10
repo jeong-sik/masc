@@ -315,7 +315,7 @@ let world_observation_to_prompt_section (obs : world_observation) : string =
   Printf.sprintf
     "World state:\n\
     \  - Unclaimed tasks: %d\n\
-    \  - Failed tasks: %d\n\
+    \  - Orphan tasks: %d\n\
     \  - Active agents: %d\n\
     \  - Agent count changed: %b\n\
     \  - Active goals: %d\n\

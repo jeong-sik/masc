@@ -105,6 +105,33 @@ let snapshot_to_yojson (s : curation_snapshot) : Yojson.Safe.t =
     ("provenance", s.provenance);
   ]
 
+(** {1 Reply Diversity Index (RDI)} *)
+
+let compute_reply_diversity_index ~(post_with_comments : (Board_types.comment list * Board_types.post) list) =
+  let post_rdi (comments, _post) =
+    let total = List.length comments in
+    if total = 0 then 0.0
+    else
+      let unique_authors =
+        comments
+        |> List.map (fun (c : Board_types.comment) -> c.author)
+        |> List.sort_uniq compare
+        |> List.length
+      in
+      float_of_int unique_authors /. float_of_int total
+  in
+  let rdis = List.filter_map
+    (fun pc ->
+      let rdi = post_rdi pc in
+      if rdi > 0.0 then Some rdi else None)
+    post_with_comments
+  in
+  match rdis with
+  | [] -> 0.0
+  | _ ->
+    let sum = List.fold_left (+.) 0.0 rdis in
+    sum /. float_of_int (List.length rdis)
+
 (** {1 In-memory store} *)
 
 (* Single-slot in-memory store.  Not thread-safe — see .mli contract. *)

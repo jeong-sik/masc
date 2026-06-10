@@ -87,6 +87,19 @@ val snapshot_to_yojson : curation_snapshot -> Yojson.Safe.t
 
 (** {1 In-memory store} *)
 
+(** {1 Reply Diversity Index (RDI)} *)
+
+val compute_reply_diversity_index : post_with_comments:(Board_types.comment list * Board_types.post) list -> float
+(** [compute_reply_diversity_index ~post_with_comments] calculates the
+    Reply Diversity Index across the given posts.
+
+    RDI per post = unique_comment_authors / total_comments
+    (0.0 if no comments).
+    Overall RDI = average across all posts with comments.
+    Returns 0.0 when the list is empty or no posts have comments.
+
+    @since task-757 *)
+
 val submit_snapshot : curation_snapshot -> unit
 (** Replace the current latest snapshot.  Not thread-safe — callers
     must serialise concurrent writes. *)

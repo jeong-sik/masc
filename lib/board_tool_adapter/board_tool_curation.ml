@@ -96,6 +96,23 @@ let handle_board_curation_submit ~tool_name ~start_time args : Tool_result.resul
     let answer_matches = curation_answer_matches_arg args in
     let health_score = get_float_opt args "health_score" in
     let health_components = curation_health_components_arg args in
+    (* Compute Reply Diversity Index (task-757) and append to health_components *)
+    let posts = Board_dispatch.list_posts ~limit:20 () in
+    let post_with_comments =
+      List.filter_map (fun post ->
+        match Board_dispatch.get_comments ~post_id:post.id with
+        | Ok comments -> Some (comments, post)
+        | Error _ -> None)
+      posts
+    in
+    let rdi = Board_curation.compute_reply_diversity_index ~post_with_comments in
+    let rdi_component = Board_curation.
+      { name = "reply_diversity_index"
+      ; score = rdi
+      ; weight = 0.3
+      ; rationale = Printf.sprintf "RDI=%.2f (automated by task-757)" rdi
+      } in
+    let health_components = rdi_component :: health_components in
     match Board_tool_format.provenance_arg args with
     | Error msg ->
       Tool_result.make_err

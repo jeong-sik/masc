@@ -387,10 +387,12 @@ let get_post ~post_id =
   match backend () with
   | Jsonl store -> Board.get_post store ~post_id
 
-let list_posts ?(visibility_filter = None) ?hearth ?author_filter ?post_kind_filter
+let list_posts ?(visibility_filter = None) ?hearth ?author_filter ?exclude_author_filter
+    ?post_kind_filter
     ?(sort_by = Hot) ?(exclude_system = false) ?(exclude_automation = false)
     ?(limit = 50) () =
   let author_filter = normalize_author_filter author_filter in
+  let exclude_author_filter = normalize_author_filter exclude_author_filter in
   let apply_visibility_and_hearth_filters posts =
     let posts =
       match visibility_filter with
@@ -418,6 +420,7 @@ let list_posts ?(visibility_filter = None) ?hearth ?author_filter ?post_kind_fil
   | Jsonl store ->
       let needs_full_scan =
         Option.is_some author_filter
+        || Option.is_some exclude_author_filter
         ||
         match sort_by with
         | Hot -> false
@@ -451,6 +454,19 @@ let list_posts ?(visibility_filter = None) ?hearth ?author_filter ?post_kind_fil
                 agent_matches_author_filter ~needle post.author
                 || Hashtbl.mem matching_comment_post_ids
                      (Board.Post_id.to_string post.id))
+              filtered
+      in
+      (* Exclude posts by author (post author only, not comment author).
+         Unlike the positive author_filter which matches comment authors too,
+         exclusion is post-author-only: hiding agent X should not remove
+         agent Y's post just because X commented on it. *)
+      let filtered =
+        match exclude_author_filter with
+        | None -> filtered
+        | Some needle ->
+            List.filter
+              (fun (post : Board.post) ->
+                not (agent_matches_author_filter ~needle post.author))
               filtered
       in
       Board.take limit filtered

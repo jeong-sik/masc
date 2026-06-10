@@ -148,6 +148,7 @@ val list_posts :
   ?visibility_filter:Board.visibility option ->
   ?hearth:string ->
   ?author_filter:string ->
+  ?exclude_author_filter:string ->
   ?post_kind_filter:Board.post_kind ->
   ?sort_by:sort_order ->
   ?exclude_system:bool ->

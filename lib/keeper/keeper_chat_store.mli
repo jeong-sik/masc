@@ -89,6 +89,18 @@ val append_turn :
   unit ->
   unit
 
+(** [append_assistant_message ~base_dir ~keeper_name ~content ?source ()]
+    appends one keeper-initiated assistant line with no paired user
+    turn (RFC-0223 P4 [keeper_surface_post]). Same failure policy as
+    {!append_turn}. *)
+val append_assistant_message :
+  base_dir:string ->
+  keeper_name:string ->
+  content:string ->
+  ?source:string ->
+  unit ->
+  unit
+
 (** [load ~base_dir ~keeper_name] returns the most recent messages in
     chronological order: the last 100 user/assistant messages plus the
     tool lines belonging to them (absolute bound 400 lines). Missing

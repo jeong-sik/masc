@@ -45,6 +45,7 @@ type runtime_handler =
   | Tool_library_search
   | Tool_library_read
   | Tool_surface_read
+  | Tool_surface_post
   | Tool_ide_annotate
   | Tool_voice_dispatch
   | Tool_task_dispatch

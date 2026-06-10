@@ -32,6 +32,7 @@ type dashboard_auth_state =
 type ws_session = {
   id: string;
   wsd: Httpun_ws.Wsd.t;
+  mutable last_active: float;  (* Unix time of last send/recv — heartbeat sweep uses this *)
   mutable closed: bool;
   dashboard_auth: dashboard_auth_state Atomic.t;
   mutable dashboard_route: string option;
@@ -148,10 +149,13 @@ let next_id =
 let log_ws_delivery_dropped ~context session_id =
   Log.Transport.warn "WS %s not delivered for session=%s" context session_id
 
+let now = Unix.time
+
 let new_session ~id ~wsd =
   {
     id;
     wsd;
+    last_active = now ();
     closed = false;
     dashboard_auth = Atomic.make Unauthenticated;
     dashboard_route = None;
@@ -178,6 +182,7 @@ let send_frame_bytes session bytes ~len =
     try
       Httpun_ws.Wsd.send_bytes session.wsd
         ~kind:`Text bytes ~off:0 ~len;
+      session.last_active <- now ();
       Transport_metrics.inc_ws_bytes_sent ~bytes:len;
       Transport_metrics.observe_ws_message_bytes_sent len;
       true
@@ -832,6 +837,25 @@ let read_inbound_message_frame session ~on_message ~is_fin ~len payload =
       handle_inbound_text session ~on_message ~is_fin text)
 
 (** Remove a session and unsubscribe from SSE. *)
+(** Remove stale sessions whose [last_active] is older than [idle_timeout]
+    seconds.  Called periodically from the heartbeat loop. *)
+let sweep_stale_sessions ~idle_timeout ~now =
+  let threshold = now -. idle_timeout in
+  let stale_ids =
+    with_sessions_rw (fun () ->
+        Hashtbl.fold (fun id session acc ->
+            if session.last_active < threshold then
+              (Log.Transport.info "WS session %s idle > %.0fs — evicting (last_active=%.0f)" id idle_timeout session.last_active;
+               Hashtbl.remove sessions id;
+               (try Httpun_ws.Wsd.close session.wsd
+                with _ -> ());
+               id :: acc)
+            else acc)
+          sessions []
+    )
+  in
+  List.length stale_ids
+
 let cleanup_session session_id =
   let removed =
     with_sessions_rw (fun () ->
@@ -858,6 +882,19 @@ let cleanup_session session_id =
 let session_count () =
   with_sessions_rw (fun () ->
     Hashtbl.length sessions)
+
+(** Start background heartbeat fiber that sweeps stale WS sessions every 30 s. *)
+let init_heartbeat ~sw ~idle_timeout =
+  Eio.Fiber.fork ~sw (fun () ->
+    let rec loop () =
+      Eio.Time.sleep 30.0;
+      let now = now () in
+      let evicted = sweep_stale_sessions ~idle_timeout ~now in
+      if evicted > 0 then
+        Log.Transport.info "heartbeat: evicted %d stale WS sessions" evicted;
+      loop ()
+    in
+    loop ())
 
 (** Handle an HTTP upgrade request to WebSocket.
 

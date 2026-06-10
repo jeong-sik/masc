@@ -12,6 +12,7 @@ import {
 import { normalizePendingConfirmation } from '../pending-confirm'
 import { normalizeKeeperTrustTerminalReason } from '../keeper-store-normalize'
 import { currentDashboardActor, get, post, withRetries, type AbortableRequestOptions } from './core'
+import { ensureDevToken } from './dev-token'
 import { DEFAULT_WINDOW_MINUTES_24H } from '../config/constants'
 import {
   parseAgentRelationsResponse,
@@ -1800,11 +1801,12 @@ export function fetchToolMetrics(): Promise<ToolMetricsResponse> {
   return get('/api/v1/tool-metrics')
 }
 
-export function fetchDashboardRuntimeProbe(
+export async function fetchDashboardRuntimeProbe(
   force = false,
   opts?: AbortableRequestOptions,
 ): Promise<DashboardRuntimeProbeResponse> {
   const query = force ? '?force=1' : ''
+  await ensureDevToken()
   return get(`/api/v1/dashboard/runtime-probe${query}`, { signal: opts?.signal })
 }
 
@@ -2186,10 +2188,11 @@ export type KeeperConfigUpdatePayload = {
   handoff_cooldown_sec?: number
 }
 
-export function patchKeeperConfig(
+export async function patchKeeperConfig(
   name: string,
   payload: KeeperConfigUpdatePayload,
 ): Promise<KeeperConfig> {
+  await ensureDevToken()
   return post<unknown>(
     `/api/v1/keepers/${encodeURIComponent(name)}/config`,
     payload,
@@ -2217,11 +2220,13 @@ function normalizeRuntimeTomlConfig(raw: unknown): RuntimeTomlConfig {
   }
 }
 
-export function fetchRuntimeTomlConfig(): Promise<RuntimeTomlConfig> {
+export async function fetchRuntimeTomlConfig(): Promise<RuntimeTomlConfig> {
+  await ensureDevToken()
   return get<unknown>('/api/v1/runtime/config/raw').then(normalizeRuntimeTomlConfig)
 }
 
-export function saveRuntimeTomlConfig(sourceText: string): Promise<RuntimeTomlConfig> {
+export async function saveRuntimeTomlConfig(sourceText: string): Promise<RuntimeTomlConfig> {
+  await ensureDevToken()
   return post<unknown>('/api/v1/runtime/config/raw', {
     source_text: sourceText,
   }).then(normalizeRuntimeTomlConfig)

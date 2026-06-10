@@ -553,8 +553,13 @@ let render_keeper_message (state : state) =
             | "assistant" -> k.k_name
             | s -> s
           in
-          let prefix = Printf.sprintf "  %s[%s] %s:%s "
-            role_color m.me_timestamp role_label Ansi.reset in
+          let status_tag = match m.me_status with
+            | Complete -> ""
+            | Streaming -> Printf.sprintf " %s(streaming...)%s " Ansi.yellow Ansi.reset
+            | Error e -> Printf.sprintf " %s(error: %s)%s " Ansi.red e Ansi.reset
+          in
+          let prefix = Printf.sprintf "  %s[%s] %s:%s%s "
+            role_color m.me_timestamp role_label status_tag Ansi.reset in
           (* Word-wrap the message text across multiple lines *)
           let text_width = max 20 (cols - 30) in
           let text = m.me_text in
@@ -575,7 +580,25 @@ let render_keeper_message (state : state) =
               pos := !pos + chunk_len;
               incr displayed
             done
-          end
+          end;
+          (* Render tool_calls below each assistant message *)
+          if m.me_role = "assistant" && m.me_tool_calls <> [] then
+            List.iter (fun tc ->
+              if !displayed < history_height then begin
+                let tc_arg_preview = if String.length tc.tc_arguments > 60 then String.sub tc.tc_arguments 0 60 ^ "…" else tc.tc_arguments in
+                let tc_line = Printf.sprintf "  %s  ⚡ %s(%s)%s"
+                  Ansi.blue tc.tc_name tc_arg_preview Ansi.reset in
+                box_line buf cols tc_line;
+                incr displayed;
+                match tc.tc_result with
+                | Some res when res <> "" && !displayed < history_height ->
+                  let res_trunc = if String.length res > 80 then String.sub res 0 80 ^ "…" else res in
+                  let res_line = Printf.sprintf "  %s  └→ %s%s" Ansi.dim res_trunc Ansi.reset in
+                  box_line buf cols res_line;
+                  incr displayed
+                | _ -> ()
+              end
+            ) m.me_tool_calls
         end
       ) state.msg_history;
       (* Fill remaining space *)
@@ -600,8 +623,10 @@ let render_keeper_message (state : state) =
     box_bottom buf cols;
 
     (* Footer *)
-    Buffer.add_string buf (Printf.sprintf "%s  Enter:send  Esc:back  Ctrl-U:clear line%s\n"
-      Ansi.dim Ansi.reset);
+    let has_scroll = state.msg_scroll > 0 in
+    Buffer.add_string buf (Printf.sprintf "%s  Enter:send  Esc:back  Ctrl-U:clear line%s%s\n"
+      Ansi.dim Ansi.reset
+      (if has_scroll then Printf.sprintf "  %s(PgUp/PgDn:scroll)%s" Ansi.dim Ansi.reset else ""));
 
     print_string (Buffer.contents buf);
     flush stdout

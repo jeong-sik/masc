@@ -7,8 +7,9 @@ open Masc_tui_loader
 (** Local exception for breaking the main TUI loop without using Exit. *)
 exception Break
 
-(** Send a message to a keeper via HTTP POST to /api/v1/keepers/chat/stream *)
-let send_keeper_message (state : state) (keeper_name : string) (message : string) : string =
+(** Send a message to a keeper via HTTP POST to /api/v1/keepers/chat/stream.
+    Reads SSE chunks and updates [state.msg_streaming_text] incrementally. *)
+let send_keeper_message_stream (state : state) (keeper_name : string) (message : string) : string =
   try
     let host = Env_config_core.masc_host () in
     let port = state.port in
@@ -39,15 +40,27 @@ let send_keeper_message (state : state) (keeper_name : string) (message : string
         output_string oc request;
         flush oc;
 
-        (* Read response *)
-        let buf = Buffer.create 4096 in
-        (try while true do
-           let line = input_line ic in
-           Buffer.add_string buf line;
-           Buffer.add_char buf '\n'
-         done with End_of_file -> ());
+        (* Read SSE chunks incrementally, updating streaming text *)
+        let full_buf = Buffer.create 4096 in
+        (try
+           let line_buf = Buffer.create 256 in
+           while true do
+             match input_char ic with
+             | '\n' ->
+               let line = Buffer.contents line_buf in
+               Buffer.clear line_buf;
+               Buffer.add_string full_buf line;
+               Buffer.add_char full_buf '\n';
+               (* Check for SSE data line *)
+               if String.starts_with ~prefix:"data: " line then begin
+                 let payload = String.sub line 6 (String.length line - 6) in
+                 state.msg_streaming_text <- payload
+               end
+             | c -> Buffer.add_char line_buf c
+           done
+         with End_of_file -> ());
 
-        let response = Buffer.contents buf in
+        let response = Buffer.contents full_buf in
         (match Tui_decode.parse_keeper_chat_response response with
          | Ok reply -> reply
          | Error err -> "(response parsing failed: " ^ err ^ ")"))
@@ -138,7 +151,6 @@ let handle_message_key (state : state) (base_path : string) (key : string) : boo
     state.detail_scroll <- 0;
     true
   | "\r" | "\n" ->
-    (* Send the message *)
     let text = Buffer.contents state.msg_input in
     if String.length (String.trim text) > 0 then begin
       let keeper_name =
@@ -154,30 +166,52 @@ let handle_message_key (state : state) (base_path : string) (key : string) : boo
         me_role = "user";
         me_text = text;
         me_timestamp = ts;
+        me_status = Complete;
+        me_tool_calls = [];
       }];
       Buffer.clear state.msg_input;
+      state.msg_input_buffer <- "";
+      state.msg_scroll <- 0;
 
-      (* Render to show "sending..." *)
-      state.msg_sending <- true;
-      render state;
-
-      (* Send and get reply *)
-      let reply = send_keeper_message state keeper_name text in
-
-      (* Add reply to history *)
+      (* Add placeholder assistant entry with Streaming status *)
       let now2 = Unix.localtime (Unix.gettimeofday ()) in
       let ts2 = Printf.sprintf "%02d:%02d:%02d"
         now2.Unix.tm_hour now2.Unix.tm_min now2.Unix.tm_sec in
       state.msg_history <- state.msg_history @ [{
         me_role = "assistant";
-        me_text = reply;
+        me_text = "";
         me_timestamp = ts2;
+        me_status = Streaming;
+        me_tool_calls = [];
       }];
+
+      (* Render to show placeholder *)
+      state.msg_sending <- true;
+      render state;
+
+      (* Send and get reply via streaming *)
+      let reply = send_keeper_message_stream state keeper_name text in
+
+      (* Update the assistant entry with response *)
+      let msg_count = List.length state.msg_history in
+      if msg_count > 0 then
+        let last_idx = msg_count - 1 in
+        let entry = List.nth state.msg_history last_idx in
+        state.msg_history <- List.init msg_count (fun i ->
+          if i = last_idx then { entry with
+            me_text = reply;
+            me_status = Complete;
+          } else List.nth state.msg_history i);
+
       state.msg_sending <- false;
+      state.msg_streaming_text <- "";
       add_event state "message" (Printf.sprintf "Sent to %s" keeper_name);
 
       (* Refresh data after message *)
       load_from_masc_dir state base_path
+    end else begin
+      (* Empty line: scroll to bottom *)
+      state.msg_scroll <- 0
     end;
     true
   | "\127" | "\b" ->

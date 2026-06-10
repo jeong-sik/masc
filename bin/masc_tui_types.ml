@@ -22,11 +22,27 @@ type keeper = Tui_decode.keeper
 (** A single metrics/log entry (from Tui_decode) *)
 type log_entry = Tui_decode.log_entry
 
+(** Status of a single chat message. *)
+type msg_status =
+  | Complete     (** Full text received *)
+  | Streaming    (** SSE deltas still arriving *)
+  | Error of string  (** Transmission or server error *)
+
+(** Annotated tool-call data embedded in a message. *)
+type tool_call_entry = {
+  tc_id: string;
+  tc_name: string;
+  tc_arguments: string;
+  tc_result: string option;
+}
+
 (** Message history entry *)
 type msg_entry = {
   me_role: string;
   me_text: string;
   me_timestamp: string;
+  me_status: msg_status;
+  me_tool_calls: tool_call_entry list;
 }
 
 (** TUI view mode *)
@@ -56,6 +72,10 @@ type state = {
   mutable msg_input: Buffer.t;
   mutable msg_history: msg_entry list;
   mutable msg_sending: bool;
+  mutable msg_send_error: string option;
+  mutable msg_scroll: int;
+  mutable msg_input_buffer: string;
+  mutable msg_streaming_text: string;
   mutable detail_scroll: int;
   workspace: string;
   port: int;
@@ -81,6 +101,10 @@ let create_state ~workspace ~port ~refresh_interval = {
   msg_input = Buffer.create 256;
   msg_history = [];
   msg_sending = false;
+  msg_send_error = None;
+  msg_scroll = 0;
+  msg_input_buffer = "";
+  msg_streaming_text = "";
   detail_scroll = 0;
   workspace;
   port;

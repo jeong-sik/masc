@@ -39,7 +39,11 @@ open Keeper_types_profile
 module In_turn_pulse = Keeper_heartbeat_loop_in_turn_pulse
 module Observations = Keeper_heartbeat_loop_observations
 
-let run_keeper_cycle
+(* Body of [run_keeper_cycle], runnable only while holding the keeper's
+   turn slot ([Keeper_turn_admission]). The post-failure meta re-reads stay
+   inside the slot for the same reason as the chat lane: a concurrent turn
+   must not interleave with this lane's meta writes (RFC-0225 §1). *)
+let run_keeper_cycle_admitted
       ~ctx
       ~meta_after_cursor_persist
       ~stop
@@ -117,4 +121,47 @@ let run_keeper_cycle
       ~base_path:ctx.config.base_path
       ~keeper_name:meta_after_cursor_persist.name;
     updated
+;;
+
+let run_keeper_cycle
+      ~ctx
+      ~meta_after_cursor_persist
+      ~stop
+      ~obs
+      ~(turn_decision : Keeper_world_observation.keeper_cycle_decision)
+      ~shared_context
+      ()
+  =
+  match
+    Keeper_turn_admission.run_if_free
+      ~base_path:ctx.config.base_path
+      ~keeper_name:meta_after_cursor_persist.name
+      (run_keeper_cycle_admitted
+         ~ctx
+         ~meta_after_cursor_persist
+         ~stop
+         ~obs
+         ~turn_decision
+         ~shared_context)
+  with
+  | `Ran updated -> updated
+  | `Busy in_flight ->
+    (* Another lane holds this keeper's turn slot (RFC-0225 §3.1): skip the
+       cycle and return the pre-cycle meta unchanged. The next heartbeat
+       retries naturally — same shape as the pre-existing skip decisions. *)
+    let holder =
+      match in_flight with
+      | Some { Keeper_turn_admission.lane; started_at } ->
+        (* NDT-OK: gettimeofday renders the in-flight turn age for the log line only *)
+        Printf.sprintf
+          "%s turn running for %.0fs"
+          (Keeper_turn_admission.lane_to_string lane)
+          (Unix.gettimeofday () -. started_at)
+      | None -> "holder info not yet published"
+    in
+    Log.Keeper.info
+      "%s: turn slot busy (%s); skipping autonomous cycle until next heartbeat"
+      meta_after_cursor_persist.name
+      holder;
+    meta_after_cursor_persist
 ;;

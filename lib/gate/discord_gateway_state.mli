@@ -77,6 +77,10 @@ type dispatched_event =
       { channel_id : string
       ; message_id : string
       ; author_id : string
+      ; author_name : string option
+        (** Display name: [author.global_name] when set, else
+            [author.username]; [None] only when the payload carries
+            neither (RFC-0223 P1). *)
       ; content : string
       ; mentions_bot : bool
       }

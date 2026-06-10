@@ -9,6 +9,7 @@ import { asString, isRecord } from './components/common/normalize'
 import { invalidateDashboardCache, refreshDashboard } from './store'
 import { isAbortError } from './lib/async-state'
 import type {
+  KeeperConversationAttachment,
   KeeperConversationDelivery,
   KeeperDiagnostic,
   KeeperStatusDetail,
@@ -159,6 +160,29 @@ export async function hydrateKeeperChatHistory(
   }
 }
 
+// Trailing per-keeper debounce for keeper_chat_appended pushes so a
+// burst of turns (queue drain, multi-connector traffic) coalesces into
+// one history refetch instead of one round-trip per message.
+const chatRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>()
+const CHAT_APPENDED_REFRESH_DELAY_MS = 400
+
+/** React to a server `keeper_chat_appended` push: re-merge the
+ *  persisted transcript so messages arriving through other connectors
+ *  (Discord, Slack, agent MCP) appear without a page reload. Keepers
+ *  whose transcript was never hydrated are skipped — the mount
+ *  hydration fetches the full window when the panel first opens. */
+export function noteKeeperChatAppended(name: string): void {
+  const keeperName = name.trim()
+  if (!keeperName) return
+  if (!hydratedChatKeepers.has(keeperName)) return
+  const pending = chatRefreshTimers.get(keeperName)
+  if (pending) clearTimeout(pending)
+  chatRefreshTimers.set(keeperName, setTimeout(() => {
+    chatRefreshTimers.delete(keeperName)
+    void hydrateKeeperChatHistory(keeperName, { force: true })
+  }, CHAT_APPENDED_REFRESH_DELAY_MS))
+}
+
 export async function loadFullKeeperHistory(name: string): Promise<void> {
   const keeperName = name.trim()
   if (!keeperName) return
@@ -199,10 +223,16 @@ export async function loadFullKeeperHistory(name: string): Promise<void> {
   }
 }
 
-export async function sendKeeperThreadMessage(name: string, prompt: string): Promise<void> {
+export async function sendKeeperThreadMessage(
+  name: string,
+  prompt: string,
+  options: { attachments?: KeeperConversationAttachment[] } = {},
+): Promise<void> {
   const keeperName = name.trim()
   const message = prompt.trim()
   if (!keeperName || !message) return
+  const attachments =
+    options.attachments && options.attachments.length > 0 ? options.attachments : undefined
   abortKeeperThreadMessage(keeperName)
   const localId = `local-${Date.now()}`
   const assistantId = `reply-${Date.now()}`
@@ -215,6 +245,7 @@ export async function sendKeeperThreadMessage(name: string, prompt: string): Pro
     timestamp: new Date().toISOString(),
     delivery: 'sending',
     streamState: null,
+    attachments,
     details: null,
   })
   appendThreadEntry(keeperName, {
@@ -240,6 +271,7 @@ export async function sendKeeperThreadMessage(name: string, prompt: string): Pro
 
     const outcome = await streamKeeperMessage(keeperName, message, {
       signal: controller.signal,
+      attachments,
       onEvent: event => {
         setRecordValue(keeperStreamLastEventAt, keeperName, Date.now())
         if (event.type === 'CUSTOM' && event.name === 'KEEPER_QUEUE_REQUEST' && isRecord(event.value)) {

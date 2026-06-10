@@ -100,7 +100,7 @@ check_rule "R5-health-path" 0 \
 
 # SSOT-R6 — no home-anchored MASC runtime root. Runtime state must resolve
 # from an explicit base path and then append .masc.
-check_rule "R6-home-masc-root" 10 \
+check_rule "R6-home-masc-root" 9 \
   "<base-path>/.masc with explicit MASC_BASE_PATH or --base-path" \
   '(\$HOME|\$\{HOME[^}]*\}|~)/[^[:space:]`'\''"]*\.masc([/[:space:]`'\''".,)]|$)' \
   '' \

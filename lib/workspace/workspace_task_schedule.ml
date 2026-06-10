@@ -207,6 +207,7 @@ let claim_next_r
       ?(admission_filter :
          active_tasks:Masc_domain.task list -> Masc_domain.task -> bool =
         fun ~active_tasks:_ _ -> true)
+      ?(allow_scope_fallback = false)
       ()
   =
   let exception Existing_claim of claim_next_result in
@@ -273,6 +274,7 @@ let claim_next_r
                    ; priority = prev.priority
                    ; released_task_id = None
                    ; message
+                   ; scope_widened = false
                    })));
         let released_task_id, working_tasks = None, backlog.tasks in
         let active_admission_tasks =
@@ -408,7 +410,30 @@ let claim_next_r
                (not (List.mem t.id all_excluded)) && effective_task_filter t)
             candidates
         in
-        let eligible = eligible_from unclaimed in
+        let scoped_eligible = eligible_from unclaimed in
+        (* Goal-scope must not starve a keeper: when [allow_scope_fallback] and no
+           scoped task is admission-eligible, widen to all_tasks. [admission_allowed]
+           and [all_excluded] are still enforced — only [task_filter] (the goal
+           scope) is dropped — so a wip-blocked scoped task stays excluded while an
+           unscoped task can be claimed. Schedule-level companion to the RFC-0067 §1
+           resolve-side fallback; this layer additionally covers the
+           scoped-task-exists-but-admission-blocked case that the resolver cannot
+           see. *)
+        let eligible, scope_widened =
+          match scoped_eligible with
+          | _ :: _ -> scoped_eligible, false
+          | [] when allow_scope_fallback ->
+            let widened =
+              List.filter
+                (fun (t : task) ->
+                   (not (List.mem t.id all_excluded)) && admission_allowed t)
+                unclaimed
+            in
+            (match widened with
+             | _ :: _ -> widened, true
+             | [] -> [], false)
+          | [] -> scoped_eligible, false
+        in
         let explicit_excluded_count =
           List.length exclude_task_ids
           +
@@ -576,6 +601,7 @@ let claim_next_r
               ; priority = task.priority
               ; released_task_id
               ; message
+              ; scope_widened
               }
           , Some task.id ))
     with

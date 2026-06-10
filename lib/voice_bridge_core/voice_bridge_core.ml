@@ -141,6 +141,10 @@ let find_executable_in_path ?path_value executable =
   in
   List.find_opt (fun path -> Sys.file_exists path && not (Sys.is_directory path)) candidates
 
+(* `open` is intentionally NOT a candidate: it hands the file to an external
+   app and returns immediately, so it would report `Played ~0.1s` without the
+   audio having been heard — a fake success under the blocking speak
+   contract. Systems without a real player fail explicitly instead. *)
 let local_playback_argvs ?path_value ~audio_file () =
   let commands =
     [
@@ -148,7 +152,6 @@ let local_playback_argvs ?path_value ~audio_file () =
       ("ffplay", [ "-nodisp"; "-autoexit"; "-loglevel"; "error" ]);
       ("mpg123", [ "-q" ]);
       ("play", [ "-q" ]);
-      ("open", []);
     ]
   in
   commands
@@ -156,6 +159,86 @@ let local_playback_argvs ?path_value ~audio_file () =
     match find_executable_in_path ?path_value executable with
     | Some path -> Some (path :: args @ [ audio_file ])
     | None -> None)
+
+(* Playback subprocess timeout. The Exec_gate default (60s) used to kill any
+   player mid-play on audio longer than a minute; Process_eio reports the
+   kill as WEXITED 124 and the candidate loop then replayed the SAME file
+   from 0:00 through the fallback player — the audible-repeat amplifier in
+   the 2026-06-10 voice incident. Derive the budget from the probed audio
+   duration instead. *)
+let playback_timeout_margin_sec = 30.0
+let unknown_duration_playback_timeout_sec = 300.0
+let duration_probe_timeout_sec = 10.0
+
+let parse_afinfo_duration output =
+  (* afinfo prints e.g. "estimated duration: 12.345 sec" among other lines. *)
+  let prefix = "estimated duration:" in
+  String.split_on_char '\n' output
+  |> List.find_map (fun line ->
+    let line = String.trim line in
+    if String.length line > String.length prefix
+       && String.equal
+            (String.lowercase_ascii (String.sub line 0 (String.length prefix)))
+            prefix
+    then (
+      let rest =
+        String.sub line (String.length prefix)
+          (String.length line - String.length prefix)
+        |> String.trim
+      in
+      let number =
+        match String.index_opt rest ' ' with
+        | Some i -> String.sub rest 0 i
+        | None -> rest
+      in
+      float_of_string_opt number)
+    else None)
+
+let parse_ffprobe_duration output = float_of_string_opt (String.trim output)
+
+let playback_timeout_sec_for ~duration_sec =
+  match duration_sec with
+  | Some duration -> duration +. playback_timeout_margin_sec
+  | None -> unknown_duration_playback_timeout_sec
+
+let audio_duration_seconds ~audio_file =
+  let probe argv parse =
+    let raw_source = String.concat " " (List.map Filename.quote argv) in
+    match
+      Masc_exec.Exec_gate.run_argv_with_status
+        ~actor:(Masc_exec.Agent_id.of_string "voice/bridge_core")
+        ~raw_source
+        ~summary:"voice audio duration probe"
+        ~timeout_sec:duration_probe_timeout_sec
+        argv
+    with
+    | Unix.WEXITED 0, output -> parse output
+    | _ -> None
+    | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+    | exception exn ->
+      log_debug
+        (Printf.sprintf "audio duration probe failed: %s" (Printexc.to_string exn));
+      None
+  in
+  let probes =
+    [ ("afinfo", [], parse_afinfo_duration)
+    ; ( "ffprobe"
+      , [ "-v"
+        ; "error"
+        ; "-show_entries"
+        ; "format=duration"
+        ; "-of"
+        ; "default=noprint_wrappers=1:nokey=1"
+        ]
+      , parse_ffprobe_duration )
+    ]
+  in
+  List.find_map
+    (fun (executable, args, parse) ->
+      match find_executable_in_path executable with
+      | None -> None
+      | Some path -> probe ((path :: args) @ [ audio_file ]) parse)
+    probes
 
 (** Runs local playback with mutex-protected dedup check.
     Returns:
@@ -180,12 +263,18 @@ let run_local_playback ~sw:_ ~agent_id ?message ~audio_file () =
       match local_playback_argvs ~audio_file () with
       | [] ->
         let reason =
-          "no afplay/ffplay/mpg123/play/open executable found"
+          "no afplay/ffplay/mpg123/play executable found"
         in
         log_error
           (Printf.sprintf "local voice playback unavailable: %s" reason);
         `Failed reason
       | candidates ->
+        (* Probe BEFORE taking the playback mutex so a slow probe never
+           extends the global playback serialization window. *)
+        let playback_timeout_sec =
+          playback_timeout_sec_for
+            ~duration_sec:(audio_duration_seconds ~audio_file)
+        in
         Eio.Mutex.use_rw ~protect:true playback_mu (fun () ->
           let dedup_hit =
             match message with
@@ -226,6 +315,7 @@ let run_local_playback ~sw:_ ~agent_id ?message ~audio_file () =
                       ~actor:(Masc_exec.Agent_id.of_string "voice/bridge_core")
                       ~raw_source
                       ~summary:"voice local playback"
+                      ~timeout_sec:playback_timeout_sec
                       argv
                   with
                   | Unix.WEXITED 0, _ ->
@@ -236,6 +326,25 @@ let run_local_playback ~sw:_ ~agent_id ?message ~audio_file () =
                           duration=%.1fs"
                          agent_id audio_file executable dur);
                     `Played dur
+                  | Unix.WEXITED 124, _ ->
+                    (* WEXITED 124 is Process_eio's synthesized status for a
+                       timeout kill: the player ran past the probed duration
+                       + margin, so partial audio has almost certainly been
+                       heard. Terminal on purpose — falling through to the
+                       next candidate would replay the SAME file from 0:00. *)
+                    let reason =
+                      Printf.sprintf
+                        "%s killed by playback timeout after %.0fs; partial \
+                         audio may have played, not retrying with fallback \
+                         player"
+                        executable playback_timeout_sec
+                    in
+                    log_error
+                      (Printf.sprintf
+                         "local voice playback timed out (terminal): agent=%s \
+                          file=%s via=%s timeout=%.0fs"
+                         agent_id audio_file executable playback_timeout_sec);
+                    `Failed reason
                   | Unix.WEXITED code, output ->
                     let failure =
                       Printf.sprintf "%s exited %d%s" executable code

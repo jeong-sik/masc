@@ -114,6 +114,10 @@ MASC는 동일한 Keeper에 대해 **단 하나의 Active Turn만 허용**하는
 *   `lib/gate/`: Surface 모듈화 및 외부 어댑터 프로토콜 추상화.
 *   `lib/runtime/`: TOML 스키마 파싱 및 단일 프로바이더 정책 수렴.
 *   `lib/dashboard/` + `dashboard/` (TS): 뷰어 및 웹 모니터링 컨트롤 패널.
+    주요 진입점: Monitoring `dashboard#monitoring?section=journey` ·
+    Ops `dashboard#command?section=operations` ·
+    Connectors `dashboard#connectors?section=connector-status` ·
+    Workspace `dashboard#workspace?section=verification`.
 *   `lib/ide/`: Multi-keeper 커서, region tracker, LSP 프록시 브리지.
 
 ### 5.2 Key Document Map
@@ -122,6 +126,7 @@ MASC는 동일한 Keeper에 대해 **단 하나의 Active Turn만 허용**하는
 *   **[docs/rfc/RFC-0223-*.md](docs/rfc/RFC-0223-typed-connector-surfaces-presence-pull-speaker.md):** 다중 Surface presence 및 Lane Context 풀(pull) 설계서.
 *   **[docs/rfc/RFC-0225-*.md](docs/rfc/RFC-0225-per-keeper-turn-single-flight.md):** Single-flight turn admission 및 직렬 큐잉 사양.
 *   **[docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md](docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md):** 관리 패널 인증 런북.
+*   **[docs/RELEASE-EVIDENCE.md](docs/RELEASE-EVIDENCE.md):** 릴리즈 smoke + proof bundle 증적 절차 (`make release-evidence`).
 
 ---
 

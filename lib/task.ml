@@ -1,3 +1,12 @@
+(** Re-export facade: exposes [Masc_task_handlers] sub-modules as the bare
+    [Task] namespace in the main [masc] library.
+
+    Kept at the [lib/] root so that [include_subdirs unqualified] callers
+    can refer to [Task.Tool.dispatch], [Task.Schemas], etc. without
+    qualifying through [Masc_task_handlers].  Do not add logic here;
+    this file is a pure forwarding shim plus tool registration side-effects
+    that must live in the main library linkage unit. *)
+
 include Masc_task_handlers.Task
 module Tool = Masc_task_handlers.Tool_task
 module Dispatch = Masc_task_handlers.Task_dispatch

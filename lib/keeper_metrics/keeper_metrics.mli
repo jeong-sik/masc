@@ -52,6 +52,7 @@ type t =
   | DispatchEventFailures
   | DirectiveFailures
   | ToolCallDuration
+  | ToolCallDurationBucket
   | WriteMetaFailures
   | MetaReadFailures
   | ApprovalQueueFailures

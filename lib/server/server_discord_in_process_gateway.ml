@@ -57,7 +57,8 @@ let resolved_trigger_policy () =
 
 let handle_message_create ~dispatch
       ~(channel_id : string) ~(message_id : string)
-      ~(author_id : string) ~(content : string) =
+      ~(author_id : string) ~(author_name : string option)
+      ~(content : string) =
   match State.keeper_for_channel ~channel_id with
   | None ->
     (* No binding for this channel — drop quietly. The bot may be in
@@ -67,12 +68,11 @@ let handle_message_create ~dispatch
     let msg : Channel_gate.inbound_message =
       { channel = State.channel
       ; channel_user_id = author_id
-      ; channel_user_name = author_id
-        (* The Gateway MESSAGE_CREATE payload carries author.username
-           and author.global_name but [Discord_gateway_state.decode_message_create]
-           currently extracts only [author_id]. Keeping the user
-           identity stable (id only) is acceptable for keeper
-           context; richer display naming is a follow-up. *)
+      ; channel_user_name = Option.value author_name ~default:author_id
+        (* NDT-OK: display name ([global_name] else [username], RFC-0223
+           P1); the snowflake stands in only for malformed payloads
+           missing both — the gate contract requires a non-empty name,
+           and the id fallback preserves the pre-P1 behavior. *)
       ; channel_workspace_id = channel_id
       ; keeper_name
       ; content
@@ -99,10 +99,13 @@ let on_event ~dispatch (ev : Gw.gateway_event) =
   match ev with
   | Gw.Ready { bot_user_id; _ } ->
     Log.Server.info "Discord gateway READY (bot_user_id=%s)" bot_user_id
-  | Gw.Message_create { channel_id; message_id; author_id; content; mentions_bot = _ } ->
+  | Gw.Message_create
+      { channel_id; message_id; author_id; author_name; content;
+        mentions_bot = _ } ->
     (* mentions_bot is already enforced by the trigger policy at the
        gateway-state layer; nothing extra to check here. *)
-    handle_message_create ~dispatch ~channel_id ~message_id ~author_id ~content
+    handle_message_create ~dispatch ~channel_id ~message_id ~author_id
+      ~author_name ~content
   | Gw.Reaction_add _ ->
     (* The previous Python sidecar used a configurable emoji
        trigger to drain pending messages. That feature is dropped in

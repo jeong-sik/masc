@@ -32,6 +32,27 @@ type tool_call = {
   args : string;
 }
 
+(** Authority class of the human (or agent) whose message opened a
+    turn. Derived structurally from the arrival route, never from
+    message content: the authenticated dashboard route is [Owner];
+    anything carrying connector context is [External]. Persisted as
+    ["owner"] / ["external"] in [speaker_authority] (RFC-0223 §3). *)
+type speaker_authority =
+  | Owner
+  | External
+
+val authority_label : speaker_authority -> string
+val authority_of_label : string -> speaker_authority option
+
+(** Identity of the user-line author. [speaker_id] / [speaker_name] are
+    absent when the route supplies none (the dashboard is a single
+    authenticated operator and carries no per-user identity). *)
+type speaker = {
+  speaker_id : string option;
+  speaker_name : string option;
+  speaker_authority : speaker_authority;
+}
+
 type chat_message = {
   role : string;
   content : string;
@@ -40,15 +61,22 @@ type chat_message = {
   tool_call_id : string option;
   tool_call_name : string option;
   source : string option;
+  speaker : speaker option;
+      (** Present on user lines written since RFC-0223 P1; [None] on
+          older lines, tool/assistant lines, and lines whose persisted
+          [speaker_authority] label fails to parse (reported as a
+          persistence read drop, row otherwise kept). *)
 }
 
 (** {1 I/O} *)
 
 (** [append_turn ~base_dir ~keeper_name ~user_content ~user_attachments
-    ?tool_calls ?source ~assistant_content ()] appends one completed
-    turn as consecutive lines — user, one line per tool call, assistant
-    — sharing a single timestamp, in one write. Failures are logged but
-    never raised except for {!Eio.Cancel.Cancelled}. *)
+    ?tool_calls ?source ?speaker ~assistant_content ()] appends one
+    completed turn as consecutive lines — user, one line per tool call,
+    assistant — sharing a single timestamp, in one write. [speaker]
+    identifies the user-line author and is written on the user line
+    only. Failures are logged but never raised except for
+    {!Eio.Cancel.Cancelled}. *)
 val append_turn :
   base_dir:string ->
   keeper_name:string ->
@@ -56,6 +84,7 @@ val append_turn :
   user_attachments:attachment list ->
   ?tool_calls:tool_call list ->
   ?source:string ->
+  ?speaker:speaker ->
   assistant_content:string ->
   unit ->
   unit
@@ -70,6 +99,7 @@ val load :
 (** {1 Serialisation} *)
 
 (** JSON array of messages. Entries without a timestamp omit the
-    [ts] field; [tool_call_id] / [tool_call_name] / [source] appear
-    only when present. *)
+    [ts] field; [tool_call_id] / [tool_call_name] / [source] /
+    [speaker_id] / [speaker_name] / [speaker_authority] appear only
+    when present. *)
 val to_json_array : chat_message list -> Yojson.Safe.t

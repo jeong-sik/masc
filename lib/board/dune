@@ -17,6 +17,7 @@
   board_core_status_rollup
   board_curation
   board_dispatch
+  board_diversity
   board_effect_hooks
   board_metrics_hooks
   board_moderation

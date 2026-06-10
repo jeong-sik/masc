@@ -439,6 +439,7 @@ let list_posts ?(visibility_filter = None) ?hearth ?author_filter ?exclude_autho
         posts
         |> apply_visibility_and_hearth_filters
         |> sort_posts_in_memory ~sort_by
+        |> Board_diversity.rerank_for_diversity ~sort_by
       in
       let filtered = apply_post_kind_filter sorted in
       let filtered =

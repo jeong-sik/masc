@@ -36,10 +36,10 @@ let class_json = function
 let record ~masc_root ~source ~producer ~durable_store ~dashboard_surface
     ~stale_reason ?keeper_name ?trace_id ?error ?exn () =
   let raw_error, error_class = derive_error_and_class ~error ~exn in
-  (* The OTel counter was severed in #20189 (Prometheus surface purge)
-     without an Otel_metric_store replacement; every coverage-gap record
-     must also bump the counter so dashboards see gaps without reading
-     the JSONL store. *)
+  (* The OTel counter was severed in #20189 (retired scrape-backend
+     purge) without an Otel_metric_store replacement; every coverage-gap
+     record must also bump the counter so dashboards see gaps without
+     reading the JSONL store. *)
   Otel_metric_store_core.inc_counter
     Otel_builtin_metric_names.metric_telemetry_coverage_gap
     ~labels:

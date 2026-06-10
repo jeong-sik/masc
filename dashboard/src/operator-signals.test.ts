@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { afterEach, describe, it, expect } from 'vitest'
 
 import {
   operatorSnapshot,
@@ -14,6 +14,35 @@ import {
 } from './operator-signals'
 
 import type { OperatorActionLogEntry, OperatorDigest, OperatorSnapshot } from './types'
+
+// Minimal values matching the real interfaces in types/dashboard-mission.ts —
+// only required fields, so type drift in those interfaces fails this file at tsc.
+const makeSnapshot = (): OperatorSnapshot => ({
+  root: {},
+  sessions: [],
+  keepers: [],
+  recent_messages: [],
+  pending_confirms: [],
+  available_actions: [],
+})
+
+const makeDigest = (): OperatorDigest => ({
+  target_type: 'root',
+  attention_items: [],
+  recommended_actions: [],
+  recent_reviews: [],
+})
+
+const makeLogEntry = (overrides: Partial<OperatorActionLogEntry> = {}): OperatorActionLogEntry => ({
+  id: 1,
+  at: '2026-06-10T00:00:00Z',
+  actor: 'operator',
+  action_type: 'refresh_snapshot',
+  target_label: 'root',
+  outcome: 'executed',
+  message: 'ok',
+  ...overrides,
+})
 
 // ─── Initial value validation ────────────────────────────────────
 
@@ -77,28 +106,19 @@ describe('operator-signals — mutation', () => {
   })
 
   it('operatorSnapshot accepts and returns an OperatorSnapshot object', () => {
-    const snap: OperatorSnapshot = {
-      name: 'sangsu',
-      status: 'active',
-      uptime_seconds: 3600,
-      memory_turns: 42,
-    }
+    const snap = makeSnapshot()
     operatorSnapshot.value = snap
     expect(operatorSnapshot.value).toEqual(snap)
   })
 
   it('operatorSnapshot can be set back to null', () => {
-    operatorSnapshot.value = { name: 'sangsu', status: 'active', uptime_seconds: 0, memory_turns: 0 } as OperatorSnapshot
+    operatorSnapshot.value = makeSnapshot()
     operatorSnapshot.value = null
     expect(operatorSnapshot.value).toBeNull()
   })
 
   it('operatorWorkspaceDigest accepts an OperatorDigest object', () => {
-    const digest: OperatorDigest = {
-      active_count: 3,
-      idle_count: 5,
-      total_keepers: 8,
-    }
+    const digest = makeDigest()
     operatorWorkspaceDigest.value = digest
     expect(operatorWorkspaceDigest.value).toEqual(digest)
   })
@@ -145,24 +165,20 @@ describe('operator-signals — mutation', () => {
   })
 
   it('operatorActionLog accepts an array of log entries', () => {
-    const entry: OperatorActionLogEntry = {
-      action: 'refresh_snapshot',
-      timestamp: Date.now(),
-      status: 'success',
-    }
+    const entry = makeLogEntry()
     operatorActionLog.value = [entry]
     expect(operatorActionLog.value).toHaveLength(1)
-    expect(operatorActionLog.value![0].action).toBe('refresh_snapshot')
+    expect(operatorActionLog.value[0]?.action_type).toBe('refresh_snapshot')
   })
 
   it('operatorActionLog can be cleared back to []', () => {
-    operatorActionLog.value = [{ action: 'test', timestamp: 0, status: 'pending' }]
+    operatorActionLog.value = [makeLogEntry({ id: 2, outcome: 'preview' })]
     operatorActionLog.value = []
     expect(operatorActionLog.value).toEqual([])
   })
 
   it('multiple signals can be set independently without interference', () => {
-    operatorSnapshot.value = { name: 'test', status: 'active', uptime_seconds: 1, memory_turns: 1 } as OperatorSnapshot
+    operatorSnapshot.value = makeSnapshot()
     operatorLoading.value = true
     operatorError.value = 'test error'
 

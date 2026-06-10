@@ -10,7 +10,6 @@ include module type of Otel_metric_names
     RFC-0058 §2.4 / Phase 5.4: renamed from
     `masc_cli_tool_a_mcp_tool_omission_total` to keep provider identity
     out of the metric name; `provider` is now a label. *)
-val metric_provider_mcp_tool_omission : string
 
 (** #9520: total telemetry coverage gaps recorded. Labels:
     [source, producer, dashboard_surface, stale_reason]. This is the
@@ -75,9 +74,6 @@ include module type of Otel_runtime_metric_names
 (** {1 Core counters / gauges} *)
 
 include module type of Otel_core_metric_names
-
-val metric_open_fds : string
-val metric_fd_warn_threshold : string
 val metric_pool_idle_total : string
 val metric_pool_inflight_total : string
 val metric_pool_reuse_total : string
@@ -151,8 +147,6 @@ include module type of Otel_policy_metric_names
       successful turn. *)
 
 val metric_oas_bus_subscriber_stream_depth : string
-val metric_oas_bus_publish_block_seconds : string
-val metric_oas_bus_publish : string
 
 val metric_oas_bus_capacity : string
 (** Gauge: per-subscriber [Eio.Stream] capacity chosen at bus creation.
@@ -171,7 +165,6 @@ val metric_process_timeout : string
 
 (** Background-task PID sidecar persistence failures. Labels:
     [site] = [write | read | read_parse | readdir | is_dir | unlink]. *)
-val metric_bg_task_sidecar_failures : string
 
 (** iter 30: unexpected (non-EAGAIN / EWOULDBLOCK / EINTR / EOF)
     errors raised by [Unix.read] inside [Bg_task.drain_fd_to_buf].
@@ -182,7 +175,6 @@ val metric_bg_task_sidecar_failures : string
     - [fd_kind] = [stdout | stderr] (call-site tagged).
     - [error_kind] = [unix_error | other] (typed match arm).
     Total cardinality: 4. *)
-val metric_bg_task_drain_unexpected_errors : string
 
 (** Build identity git probe failures. Labels:
     [site] = [commit_ts_git_capture | commit_ts_git_status | commit_ts_parse]. *)
@@ -219,7 +211,6 @@ include module type of Otel_transport_metric_names
 val metric_after_turn_response_model_empty : string
 
 val metric_after_turn_response_model_alias : string
-val metric_pricing_catalog_miss : string
 val metric_cost_emit_zero_source : string
 val metric_cost_ledger_status : string
 (* metric_keeper_meta_read_failures declared earlier in this interface (line 200) *)

@@ -18,29 +18,28 @@ include Otel_metric_names
    `masc_provider_mcp_tool_omission_total{provider="<provider_slug>"}`
    series.  No dual-emit alias — the rename is intentional to keep
    provider identity out of the metric name. *)
-let metric_provider_mcp_tool_omission = "masc_provider_mcp_tool_omission_total"
 
 (* #9520: durable coverage-gap records must also have an alertable
    Otel_metric_store surface.  The labels deliberately avoid raw paths and
    error strings; [source], [producer], [dashboard_surface], and
    [stale_reason] are bounded vocabularies owned by telemetry
    producers. *)
-let metric_telemetry_coverage_gap = "masc_telemetry_coverage_gap_total"
+let metric_telemetry_coverage_gap = Otel_metric_store_core.declare_counter "masc_telemetry_coverage_gap_total"
 
 (* Phase 0 telemetry fan-in: source discovery/read failures must not collapse
    into an indistinguishable empty dashboard. Labels are bounded by the
    Telemetry_unified.source enum and a small site vocabulary. *)
 let metric_telemetry_unified_source_read_failures =
-  "masc_telemetry_unified_source_read_failures_total"
+  Otel_metric_store_core.declare_counter "masc_telemetry_unified_source_read_failures_total"
 ;;
 
 let metric_tool_assignment_telemetry_failures =
-  "masc_tool_assignment_telemetry_failures_total"
+  Otel_metric_store_core.declare_counter "masc_tool_assignment_telemetry_failures_total"
 ;;
 
 (* Phase 0 exception visibility for [Telemetry_observe]: every swallowed
    non-cancel exception logs and increments this bounded-by-callsite counter. *)
-let metric_telemetry_observe_failures = "masc_telemetry_observe_failures_total"
+let metric_telemetry_observe_failures = Otel_metric_store_core.declare_counter "masc_telemetry_observe_failures_total"
 
 (* #10358 (c1): observability for the silent [Effect.Unhandled] catch-all
    in [lib/workspace.ml] [observe_agent_lifecycle] / [observe_task_transition_event] /
@@ -59,10 +58,10 @@ let metric_telemetry_observe_failures = "masc_telemetry_observe_failures_total"
    [done] / [cancel] / [release] / [submit_for_verification] / [approve]
    / [reject]. Both vocabularies are bounded so series cardinality is at
    most 19 (3 + 8 + 8). *)
-let metric_workspace_telemetry_drop = "masc_workspace_telemetry_drop_total"
+let metric_workspace_telemetry_drop = Otel_metric_store_core.declare_counter "masc_workspace_telemetry_drop_total"
 
 let metric_workspace_claim_post_provision_failures =
-  "masc_workspace_claim_post_provision_failures_total"
+  Otel_metric_store_core.declare_counter "masc_workspace_claim_post_provision_failures_total"
 ;;
 
 (* #10094: per-caller counter for [Masc_oas_bridge.run_safe]
@@ -81,17 +80,15 @@ include Otel_runtime_metric_names
 include Otel_transport_metric_names
 
 (* Process-level FD gauges — used in init() and update_fd_gauges. *)
-let metric_open_fds = "masc_process_open_fds"
-let metric_fd_warn_threshold = "masc_process_fd_warn_threshold"
 include Otel_core_metric_names
 
 (* RFC-0107 Phase D.4 — piaf-backed connection pool gauges/counters. *)
 let metric_pool_idle_total = "masc_pool_idle_total"
 let metric_pool_inflight_total = "masc_pool_inflight_total"
-let metric_pool_reuse_total = "masc_pool_reuse_total"
-let metric_pool_evict_total = "masc_pool_evict_total"
-let metric_pool_evict_failure_total = "masc_pool_evict_failure_total"
-let metric_pool_create_total = "masc_pool_create_total"
+let metric_pool_reuse_total = Otel_metric_store_core.declare_counter "masc_pool_reuse_total"
+let metric_pool_evict_total = Otel_metric_store_core.declare_counter "masc_pool_evict_total"
+let metric_pool_evict_failure_total = Otel_metric_store_core.declare_counter "masc_pool_evict_failure_total"
+let metric_pool_create_total = Otel_metric_store_core.declare_counter "masc_pool_create_total"
 
 include Otel_policy_metric_names
 
@@ -131,36 +128,25 @@ include Otel_policy_metric_names
    the strike→crash promotion these failures repeated silently for
    hours (4h+ zombie keepers observed 2026-04-26). *)
 let metric_oas_bus_subscriber_stream_depth = "masc_oas_bus_subscriber_stream_depth"
-let metric_oas_bus_publish_block_seconds = "masc_oas_bus_publish_block_seconds_total"
-let metric_oas_bus_publish = "masc_oas_bus_publish_total"
 let metric_oas_bus_capacity = "masc_oas_bus_capacity"
 let metric_oas_bridge_unmigrated_payload_kind =
-  "masc_oas_bridge_unmigrated_payload_kind_total"
+  Otel_metric_store_core.declare_counter "masc_oas_bridge_unmigrated_payload_kind_total"
 ;;
 
 let metric_keeper_context_tool_result_compacted =
-  "masc_keeper_context_tool_result_compacted_total"
+  Otel_metric_store_core.declare_counter "masc_keeper_context_tool_result_compacted_total"
 ;;
 
-let metric_process_timeout = "masc_process_timeout_total"
-let metric_bg_task_sidecar_failures = "masc_bg_task_sidecar_failures_total"
-(* iter 30: typed split for [Bg_task.drain_fd_to_buf] silent error
-   swallow.  Previously every non-EAGAIN/EWOULDBLOCK/EINTR exception
-   was collapsed into a permissive EOF, hiding real read errors
-   (EBADF, EIO, ENOMEM, …).  Labels are closed-vocabulary:
-   [fd_kind = stdout | stderr] × [error_kind = unix_error | other],
-   cardinality 4. *)
-let metric_bg_task_drain_unexpected_errors =
-  "masc_bg_task_drain_unexpected_errors_total"
-let metric_build_identity_probe_failures = "masc_build_identity_probe_failures_total"
-let metric_distributed_lock_acquire_failed = "masc_distributed_lock_acquire_failed_total"
+let metric_process_timeout = Otel_metric_store_core.declare_counter "masc_process_timeout_total"
+let metric_build_identity_probe_failures = Otel_metric_store_core.declare_counter "masc_build_identity_probe_failures_total"
+let metric_distributed_lock_acquire_failed = Otel_metric_store_core.declare_counter "masc_distributed_lock_acquire_failed_total"
 
 (* #10130: boot-time sweep of [save_file_atomic] orphan temp
    files.  Labels: [size_class = empty | with_data].  The
    [with_data] rate is the interesting operator signal — each
    non-zero orphan represents a silent atomic-save failure
    (SIGKILL / ENFILE mid-write) that dropped the payload. *)
-let metric_fs_atomic_orphans_cleaned = "masc_fs_atomic_orphans_cleaned_total"
+let metric_fs_atomic_orphans_cleaned = Otel_metric_store_core.declare_counter "masc_fs_atomic_orphans_cleaned_total"
 
 include Otel_identity_metric_names
 
@@ -175,11 +161,10 @@ include Otel_identity_metric_names
 (* OAS after-turn response metadata was accepted but omitted its response model
    field. This is provider response-shape telemetry, not keeper policy
    telemetry. *)
-let metric_after_turn_response_model_empty = "masc_after_turn_response_model_empty_total"
-let metric_after_turn_response_model_alias = "masc_after_turn_response_model_alias_total"
-let metric_pricing_catalog_miss = "masc_pricing_catalog_miss_total"
-let metric_cost_emit_zero_source = "masc_cost_emit_zero_source_total"
-let metric_cost_ledger_status = "masc_cost_ledger_status_total"
+let metric_after_turn_response_model_empty = Otel_metric_store_core.declare_counter "masc_after_turn_response_model_empty_total"
+let metric_after_turn_response_model_alias = Otel_metric_store_core.declare_counter "masc_after_turn_response_model_alias_total"
+let metric_cost_emit_zero_source = Otel_metric_store_core.declare_counter "masc_cost_emit_zero_source_total"
+let metric_cost_ledger_status = Otel_metric_store_core.declare_counter "masc_cost_ledger_status_total"
 (* metric_keeper_meta_read_failures defined earlier at line 473 (single
    source of truth). Re-binding here would silently shadow without
    changing behavior because the strings are identical, but it makes
@@ -188,4 +173,4 @@ let metric_cost_ledger_status = "masc_cost_ledger_status_total"
 (* RFC-0040: sender-side mention dedup decision counter.  Labels:
    [outcome] in [skipped|passed|no_target|bypassed].  Wired from
    [lib/workspace.ml] via [Workspace_hooks.mention_dedup_decision_fn]. *)
-let metric_mention_dedup_decisions_total = "masc_mention_dedup_decisions_total"
+let metric_mention_dedup_decisions_total = Otel_metric_store_core.declare_counter "masc_mention_dedup_decisions_total"

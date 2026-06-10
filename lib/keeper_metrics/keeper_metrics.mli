@@ -38,7 +38,6 @@ type t =
   | OperatorCompact
   | OperatorClear
   | CompactionNoop
-  | ContinuityNoState
   | ToolPairRepair
   | ToolEmissionRegistrySize
   | ToolEmissionPushes
@@ -209,3 +208,8 @@ type t =
   | KeeperToolCallRetryLoop
 
 val to_string : t -> string
+
+(** Every constructor of [t] in declaration order.  Keep in sync when
+    adding constructors (the [to_string] exhaustive match in the .ml
+    forces an edit in the same file). *)
+val all : t list

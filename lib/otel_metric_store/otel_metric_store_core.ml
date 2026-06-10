@@ -60,6 +60,17 @@ let register_counter ~name ~help ?(labels = []) () =
         Hashtbl.add metrics key { name; help; metric_type = Counter; value = 0.0; labels }))
 ;;
 
+(* Zero-fill declaration: registers the unlabeled 0-cell at module-init time
+   and hands the name back so `let metric_x = declare_counter "..."` keeps
+   the constant shape.  Counters only: a counter that has not fired IS 0,
+   so exporting the 0-cell removes the absence-vs-zero ambiguity in
+   dashboards (a gauge that was never set has no honest value — gauges and
+   histograms stay lazy). *)
+let declare_counter name =
+  register_counter ~name ~help:name ();
+  name
+;;
+
 let register_gauge ~name ~help ?(labels = []) () =
   best_effort (fun () ->
     let key = metric_key name labels in

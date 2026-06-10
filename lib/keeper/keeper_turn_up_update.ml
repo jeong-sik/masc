@@ -86,8 +86,30 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
   let allowed_paths =
     Option.value ~default:old.allowed_paths p.allowed_paths_opt
   in
-  let sandbox_profile = old.sandbox_profile in
-  let network_mode = old.network_mode in
+  match
+    match p.sandbox_profile_opt with
+    | None -> Ok old.sandbox_profile
+    | Some raw ->
+      match sandbox_profile_of_string raw with
+      | Some sp -> Ok sp
+      | None ->
+        Error
+          (Printf.sprintf "invalid sandbox_profile: %S (expected: local or docker)" raw)
+  with
+  | Error msg -> tool_result_error msg
+  | Ok sandbox_profile ->
+  match
+    match p.network_mode_opt with
+    | None -> Ok old.network_mode
+    | Some raw ->
+      match network_mode_of_string raw with
+      | Some nm -> Ok nm
+      | None ->
+        Error
+          (Printf.sprintf "invalid network_mode: %S (expected: inherit or none)" raw)
+  with
+  | Error msg -> tool_result_error msg
+  | Ok network_mode ->
   let autoboot_enabled =
     match p.autoboot_enabled_opt, p.profile_defaults.autoboot_enabled with
     | Some value, _ -> value

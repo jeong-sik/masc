@@ -8,19 +8,8 @@ val resolved_tool_lane_label :
   runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy option ->
   string
 
-val fail_open_health_filtered_candidates :
-  health_tracker:Keeper_binding_health.t ->
-  tool_filtered_candidates:'a list ->
-  health_filtered_candidates:'a list ->
-  provider_key_of:('a -> string) ->
-  'a list * bool
-(** [fail_open_health_filtered_candidates ~health_tracker ~tool_filtered_candidates
-    ~health_filtered_candidates ~provider_key_of] preserves health-filtered candidates unless
-    the health/cooldown filter would empty an otherwise tool-capable candidate
-    set. In that all-cooldown case it picks the {e least-recently-failed}
-    provider from [tool_filtered_candidates] for re-probe, allowing the runtime
-    to attempt a single recovered provider instead of either stopping at
-    [no_providers_available] or blindly re-opening the full set. *)
+(* RFC-0206: multi-candidate health-filtered fail-open removed — single-runtime
+   dispatch has no multi-provider candidate set to health-filter over. *)
 
 val apply_stream_idle_timeout_default : float option -> float option
 

@@ -73,6 +73,16 @@ val keeper_for_channel : channel_id:string -> string option
     Returns [None] when no binding exists, when the channel id is
     blank, or when the binding store is unreadable. *)
 
+val bound_channels : keeper_name:string -> string list
+(** Channel snowflakes bound to [keeper_name], freshly read from the
+    binding store on each call. Empty on blank name or unreadable
+    store. RFC-0223 P2 presence. *)
+
+val connected : unit -> bool
+(** Whether the in-process gateway's run loop currently reports
+    [Connected]. Reads {!Discord_gateway_client.connection_state};
+    no file indirection. RFC-0223 P2 presence. *)
+
 (** Typed failure modes for {!send_message}. Closed sum — adding
     a new variant forces every consumer to handle it. *)
 type send_error =

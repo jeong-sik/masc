@@ -210,6 +210,27 @@ module Make (Config : Config) = struct
     else if connected then "connected"
     else "disconnected"
 
+  (* RFC-0223 P2: presence surface. Both recomputed per call — no
+     cached presence state. *)
+
+  let bound_channels ~keeper_name =
+    let normalized = String.trim keeper_name in
+    if String.equal normalized "" then []
+    else
+      read_bindings ()
+      |> List.filter_map (fun (b : binding) ->
+             if String.equal b.keeper_name normalized then Some b.channel_id
+             else None)
+
+  let connected () =
+    (* Same liveness reading as [status_json]: the sidecar heartbeats
+       its status file; a missing or stale file means not live. *)
+    match read_json_file_opt (status_path ()) with
+    | None -> false
+    | Some json ->
+        let updated_at = string_member json "updated_at" in
+        bool_member json "connected" && not (stale_of_updated_at updated_at)
+
   let status_json ?(audit_limit = 10) () =
     let status_path = status_path () in
     let live_status = read_json_file_opt status_path in

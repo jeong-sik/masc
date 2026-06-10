@@ -42,6 +42,7 @@ type world_observation =
   ; pending_verification_count : int
   ; backlog_updated_since_last_scheduled_autonomous : bool
   ; active_agent_count : int
+  ; connected_surfaces : Gate_surface.surface_presence list
   }
 
 type keeper_cycle_channel =
@@ -467,6 +468,8 @@ let observe
   ; pending_verification_count
   ; backlog_updated_since_last_scheduled_autonomous
   ; active_agent_count
+  ; connected_surfaces =
+      Gate_surface.connected_surfaces_for_keeper ~keeper_name:meta.name
   }
 ;;
 
@@ -499,6 +502,8 @@ let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
   ; pending_verification_count
   ; backlog_updated_since_last_scheduled_autonomous
   ; active_agent_count = count_active_agents ~config
+  ; connected_surfaces =
+      Gate_surface.connected_surfaces_for_keeper ~keeper_name:meta.name
   }
 ;;
 

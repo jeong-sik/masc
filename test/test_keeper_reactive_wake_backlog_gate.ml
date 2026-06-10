@@ -112,6 +112,7 @@ let global_backlog_obs : WO.world_observation =
   ; pending_verification_count = 0
   ; backlog_updated_since_last_scheduled_autonomous = true
   ; active_agent_count = 1
+  ; connected_surfaces = []
   }
 
 let decide ~reactive_wake =

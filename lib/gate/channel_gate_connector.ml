@@ -21,6 +21,8 @@ module type S = sig
     channel_id:string ->
     actor_name:string ->
     (Yojson.Safe.t, string) result
+  val bound_channels : keeper_name:string -> string list
+  val connected : unit -> bool
 end
 
 let registry : (string, (module S)) Hashtbl.t = Hashtbl.create 4

@@ -33,6 +33,7 @@ val decide_and_record :
   source:string option ->
   accept_on_exhaustion:bool ->
   is_last:bool ->
+  ?log_warn:(string -> unit) ->
   provider_outcome ->
   decision
 

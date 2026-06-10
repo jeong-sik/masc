@@ -3,10 +3,12 @@
 let voice_tools : Masc_domain.tool_schema list =
   [ { name = "keeper_voice_speak"
     ; description =
-        "Speak a short utterance via the voice bridge. Blocks until playback finishes \
-         and returns played_seconds. Do NOT call again until you receive the result — \
-         concurrent calls are serialized by a global lock. Duplicate identical messages \
-         within 30s are silently skipped."
+        "Speak a short utterance via the voice bridge. Blocks until local playback \
+         finishes: status='spoken' with played_seconds means the user has already \
+         heard it — do NOT repeat or rephrase the same content. Duplicate identical \
+         messages within 30s return status='dedup_skipped' without playing. TTS or \
+         playback failures are returned as errors (ok=false), not silent successes. \
+         Concurrent calls are serialized by a global lock."
     ; input_schema =
         `Assoc
           [ "type", `String "object"
@@ -24,7 +26,7 @@ let voice_tools : Masc_domain.tool_schema list =
                 ; ( "priority"
                   , `Assoc
                       [ "type", `String "integer"
-                      ; "description", `String "Optional queue priority"
+                      ; "description", `String "Optional priority hint for the TTS endpoint"
                       ] )
                 ] )
           ; "required", `List [ `String "message" ]

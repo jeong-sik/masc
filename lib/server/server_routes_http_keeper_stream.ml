@@ -706,37 +706,45 @@ let process_single_turn ~state ~clock ~sw ~request_sw ~auth_token ~thread_id ~cl
          | Agent_sdk.Types.ContentBlockDelta { delta = ThinkingDelta text; _ } ->
              Keeper_chat_events.publish events (Custom { name = "KEEPER_THINKING_DELTA"; value = `Assoc [ ("delta", `String text) ] })
          | Agent_sdk.Types.ContentBlockStart { index; tool_id = Some tid; tool_name; _ } ->
-             let tname = Option.value ~default:"unknown" tool_name in
+             let tname =
+               match tool_name with
+               | Some name when String.trim name <> "" -> name
+               | _ -> tid
+             in
              Hashtbl.replace index_to_tool_id index tid;
              Hashtbl.replace index_to_tool_name index tname;
              Hashtbl.replace index_to_tool_args index (Buffer.create 128);
              Keeper_chat_events.publish events (Tool_call_start { tool_call_id = tid; tool_call_name = tname })
          | Agent_sdk.Types.ContentBlockDelta { index; delta = InputJsonDelta args } ->
-             let tid = Hashtbl.find_opt index_to_tool_id index |> Option.value ~default:"" in
-             (match Hashtbl.find_opt index_to_tool_args index with
-              | Some buffer -> Buffer.add_string buffer args
-              | None -> ());
-             Keeper_chat_events.publish events (Tool_call_args { tool_call_id = tid; delta = args })
+             (match Hashtbl.find_opt index_to_tool_id index with
+              | Some tid ->
+                (match Hashtbl.find_opt index_to_tool_args index with
+                 | Some buffer -> Buffer.add_string buffer args
+                 | None -> ());
+                Keeper_chat_events.publish events (Tool_call_args { tool_call_id = tid; delta = args })
+              | None -> ())
          | Agent_sdk.Types.ContentBlockStop { index } ->
-             let tid = Hashtbl.find_opt index_to_tool_id index |> Option.value ~default:"" in
-             let tname =
-               Hashtbl.find_opt index_to_tool_name index
-               |> Option.value ~default:"unknown"
-             in
-             let arguments =
-               Hashtbl.find_opt index_to_tool_args index
-               |> Option.map Buffer.contents
-               |> Option.value ~default:""
-             in
-             if tid <> "" then
+             (match Hashtbl.find_opt index_to_tool_id index with
+              | Some tid ->
+                let tname =
+                  match Hashtbl.find_opt index_to_tool_name index with
+                  | Some name -> name
+                  | None -> tid
+                in
+                let arguments =
+                  match Hashtbl.find_opt index_to_tool_args index with
+                  | Some buffer -> Buffer.contents buffer
+                  | None -> ""
+                in
                Keeper_chat_store.append_tool_call
                  ~base_dir:state.Mcp_server.workspace_config.base_path
                  ~keeper_name:payload.name ~tool_call_id:tid ~name:tname
                  ~arguments;
+                Keeper_chat_events.publish events (Tool_call_end { tool_call_id = tid })
+              | None -> ());
              Hashtbl.remove index_to_tool_id index;
              Hashtbl.remove index_to_tool_name index;
              Hashtbl.remove index_to_tool_args index;
-             Keeper_chat_events.publish events (Tool_call_end { tool_call_id = tid })
          | _ -> ());
         consume_worker_events ()
     | Stream_terminal (false, err) ->

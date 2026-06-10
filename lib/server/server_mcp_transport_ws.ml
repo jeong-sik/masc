@@ -144,6 +144,9 @@ let next_id =
   let counter = Atomic.make 0 in
   fun () ->
     let n = Atomic.fetch_and_add counter 1 in
+    (* NDT-OK: WebSocket session ids are runtime transport correlation ids,
+       not replayed protocol state. Wall-clock entropy prevents collisions
+       across process restarts while [counter] separates same-ms accepts. *)
     Printf.sprintf "ws-%d-%d" (int_of_float (Unix.gettimeofday () *. 1000.0)) n
 
 let log_ws_delivery_dropped ~context session_id =
@@ -160,11 +163,15 @@ let new_session ~id ~wsd =
     dashboard_seq = 0;
     dashboard_last_ack_seq = 0;
     dashboard_last_buffered_amount = 0;
+    (* NDT-OK: last_active is an operator liveness timestamp used only for
+       stale connection cleanup, not deterministic workflow state. *)
     last_active = Unix.gettimeofday ();
     inbound_partial_text = None;
   }
 
 let touch_session session =
+  (* NDT-OK: activity refresh is tied to live WebSocket I/O and only feeds
+     idle-session cleanup. *)
   session.last_active <- Unix.gettimeofday ()
 
 (** Send a pre-allocated frame to a WebSocket client.
@@ -859,6 +866,7 @@ let cleanup_session_if_still_stale ~now (session_id, observed_last_active) =
   end
 
 let maybe_sweep_stale_sessions () =
+  (* NDT-OK: stale-session sweep cadence is live transport housekeeping. *)
   let now = Unix.gettimeofday () in
   if now -. !last_sweep_time >= sweep_interval_s then begin
     last_sweep_time := now;

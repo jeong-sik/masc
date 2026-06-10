@@ -42,19 +42,27 @@ let insert_at idx el lst =
   before @ [el] @ after
 
 (** Detect runs of 3+ consecutive posts by the same author.
-    Returns zone positions (0-based index of the 3rd post in each run). *)
+    Returns zone positions (0-based index of the 3rd post in each run).
+    
+    Uses O(n) sliding-window instead of repeated List.nth calls (O(n²)), and
+    advances by 1 after each match to catch overlapping runs (e.g. 5 same-author
+    posts → zones at indices 2, 3, 4, not just one zone at 2). *)
 let find_dead_zones (posts : Board_types.post list) =
-  let rec scan i acc =
-    if i >= List.length posts - 2 then List.rev acc
-    else
-      match List.nth posts i, List.nth posts (i + 1), List.nth posts (i + 2) with
-      | a, b, c when
-          Board_types.Agent_id.equal a.author b.author
-          && Board_types.Agent_id.equal b.author c.author ->
-        scan (i + 3) ((i + 2) :: acc)
-      | _ -> scan (i + 1) acc
+  let rec scan i prev1 prev2 acc = function
+    | [] -> List.rev acc
+    | p :: rest ->
+      let is_zone =
+        match prev1, prev2 with
+        | Some a, Some b when
+            Board_types.Agent_id.equal p.author a.author
+            && Board_types.Agent_id.equal p.author b.author ->
+          true
+        | _ -> false
+      in
+      let acc' = if is_zone then i :: acc else acc in
+      scan (i + 1) (Some p) prev1 acc' rest
   in
-  scan 0 []
+  scan 0 None None [] posts
 
 (** Diversity deficit for a post: higher = more underrepresented. *)
 let diversity_boost ~total freqs (p : Board_types.post) =

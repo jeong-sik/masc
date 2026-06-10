@@ -43,10 +43,12 @@ val cascade_name_for_use : ?config_path:string -> logical_use -> string
 (** Runtime cascade profile for a logical call site.
 
     Resolution order:
-    1. TOML [routes.<logical_use_key>] from the active cascade config,
+    1. Phonebook: [logical_use] → [task_use] → tier-group → model strings,
+       returning the first model string.
+    2. TOML [routes.<logical_use_key>] from the active cascade config,
        when it points at a live catalog profile.
-    2. The first catalog entry from the live catalog.
-    3. The canonical [route.<key>] name when the catalog itself is empty —
+    3. The first catalog entry from the live catalog.
+    4. The canonical [route.<key>] name when the catalog itself is empty —
        boot-time validation is the upstream gate that prevents this state at
        runtime.
 

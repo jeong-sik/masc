@@ -1547,6 +1547,8 @@
 
 (include stanzas/test_timeout_policy.inc)
 
+(include stanzas/test_masc_event_bus_policy.inc)
+
 (include stanzas/test_timeout_policy_overshoot_counter.inc)
 
 (include stanzas/test_tool_call_replay_harness.inc)

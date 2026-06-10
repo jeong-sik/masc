@@ -153,7 +153,13 @@ let preflight_keeper_msg ctx args : (unit, string) result =
    turn slot ([Keeper_turn_admission]). Covers [Keeper_agent_run.run_turn]
    AND the post-turn meta/lifecycle writes — both must stay inside the slot
    or a concurrent turn can clobber the checkpoint and regress
-   [total_turns] (2026-06-10 RCA, RFC-0225 §1). *)
+   [total_turns] (2026-06-10 RCA, RFC-0225 §1).
+
+   Precondition: the caller holds the keeper's turn slot, OR the call
+   returns before any keeper-state read/write (the invalid-name path in
+   [handle_keeper_msg] calls this directly because the validation guard
+   below exits first). Do not add keeper-state mutation ahead of the
+   validation guards without moving it behind the slot. *)
 let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ctx args : tool_result =
   let on_event =
     match on_event with

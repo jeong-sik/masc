@@ -35,6 +35,7 @@ type t =
   | Memory_write
   | Search_files
   | Stay_silent
+  | Surface_read
   | Task_claim
   | Task_create
   | Task_done

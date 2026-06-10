@@ -15,4 +15,5 @@ include Tool_shard_types_schemas_search_files
 include Tool_shard_types_schemas_execute
 include Tool_shard_types_schemas_voice
 include Tool_shard_types_schemas_library
+include Tool_shard_types_schemas_surface
 include Tool_shard_types_schemas_taskboard

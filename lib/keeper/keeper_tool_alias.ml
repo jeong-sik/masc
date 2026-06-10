@@ -75,6 +75,7 @@ let is_masc_mcp_descriptor (d : Keeper_tool_descriptor.t) =
   | Tool_memory_write
   | Tool_library_search
   | Tool_library_read
+  | Tool_surface_read
   | Tool_ide_annotate
   | Tool_voice_dispatch
   | Tool_task_dispatch

@@ -519,8 +519,16 @@ let fetch_bing_rss ~timeout_sec ~query =
   let search_url =
     "https://www.bing.com/search?format=rss&q=" ^ Uri.pct_encode query
   in
+  let headers =
+    [
+      ( "User-Agent",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
+         (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" );
+    ]
+  in
   match
-    Tool_local_runtime_http.http_get_text_with_status ~timeout_sec search_url
+    Tool_local_runtime_http.http_get_text_with_status_with_headers
+      ~timeout_sec ~headers search_url
   with
   | Error detail ->
       Error (endpoint_error ~fallback:"search endpoint unavailable" detail)

@@ -43,14 +43,19 @@ let decide ~accept_on_exhaustion ~is_last = function
     then Try_next { last_err = Some err; source = None }
     else Exhausted { last_err = Some err }
 
-let decide_and_record ~runtime_id:_ ~accept_on_exhaustion ~is_last outcome =
+let decide_and_record ~runtime_id ~source ~accept_on_exhaustion ~is_last outcome =
   let d = decide ~accept_on_exhaustion ~is_last outcome in
   (match d with
-   | Try_next { source = Some src; last_err; _ } ->
-     Log.Runtime.warn "retry decision for(%s) last_err=%s"
-       src
+   | Try_next { last_err; _ } ->
+     Log.Runtime.warn "try_next decision runtime_id=%s source=%s last_err=%s"
+       runtime_id
+       (match source with None -> "none" | Some s -> s)
        (match last_err with None -> "none" | Some _ -> "set")
-   | _ -> ());
+   | Exhausted { last_err } ->
+     Log.Runtime.warn "exhausted runtime_id=%s last_err=%s"
+       runtime_id
+       (match last_err with None -> "none" | Some _ -> "set")
+   | Accept _ | Accept_on_exhaustion _ -> ());
   d
 
 let to_user_message = function

@@ -149,7 +149,12 @@ let preflight_keeper_msg ctx args : (unit, string) result =
 
 (* -- handle_keeper_msg: orchestrator ---------------------------------------- *)
 
-let handle_keeper_msg ?on_text_delta ?on_event ctx args : tool_result =
+(* Body of [handle_keeper_msg], runnable only while holding the keeper's
+   turn slot ([Keeper_turn_admission]). Covers [Keeper_agent_run.run_turn]
+   AND the post-turn meta/lifecycle writes — both must stay inside the slot
+   or a concurrent turn can clobber the checkpoint and regress
+   [total_turns] (2026-06-10 RCA, RFC-0225 §1). *)
+let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ctx args : tool_result =
   let on_event =
     match on_event with
     | Some cb -> Some cb
@@ -682,3 +687,35 @@ let handle_keeper_msg ?on_text_delta ?on_event ctx args : tool_result =
               tool_result_ok (Yojson.Safe.to_string reply_json)
 
 ))))))
+
+let handle_keeper_msg ?on_text_delta ?on_event ctx args : tool_result =
+  let name = get_string args "name" "" in
+  if not (validate_name name) then
+    (* Invalid input cannot reach run_turn; let the admitted body produce
+       its precise validation error without holding the slot. *)
+    run_keeper_msg_turn_admitted ?on_text_delta ?on_event ctx args
+  else
+    match
+      Keeper_turn_admission.run_serialized
+        ~base_path:ctx.config.base_path
+        ~keeper_name:name
+        (fun () -> run_keeper_msg_turn_admitted ?on_text_delta ?on_event ctx args)
+    with
+    | `Ran result -> result
+    | `Rejected { Keeper_turn_admission.waiting; in_flight } ->
+        let in_flight_text =
+          match in_flight with
+          | None -> ""
+          | Some { Keeper_turn_admission.lane; started_at } ->
+              (* NDT-OK: gettimeofday renders the in-flight turn age for the error text only *)
+              Printf.sprintf
+                "; in-flight %s turn running for %.0fs"
+                (Keeper_turn_admission.lane_to_string lane)
+                (Unix.gettimeofday () -. started_at)
+        in
+        tool_result_error
+          (Printf.sprintf
+             "keeper %s turn queue is full (%d chat requests waiting%s); retry later"
+             name
+             waiting
+             in_flight_text)

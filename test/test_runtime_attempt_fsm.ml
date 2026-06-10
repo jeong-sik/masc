@@ -48,17 +48,17 @@ let test_should_try_accept_rejected () =
 (* --- decide — Call_err paths only --- *)
 
 let test_decide_call_err_retryable_not_last () =
-  match decide ~accept_on_exhaustion:false ~is_last:false (Call_err (mk_http_err ~code:429 ())) with
+  match decide ~accept_on_exhaustion:false ~is_last:false ~source:None (Call_err (mk_http_err ~code:429 ())) with
   | Try_next _ -> Alcotest.(check bool) "retryable+not-last → Try_next" true true
   | _ -> Alcotest.fail "retryable+not-last should yield Try_next"
 
 let test_decide_call_err_retryable_last () =
-  match decide ~accept_on_exhaustion:false ~is_last:true (Call_err (mk_http_err ~code:429 ())) with
+  match decide ~accept_on_exhaustion:false ~is_last:true ~source:None (Call_err (mk_http_err ~code:429 ())) with
   | Exhausted _ -> Alcotest.(check bool) "retryable+last → Exhausted" true true
   | _ -> Alcotest.fail "retryable+last should yield Exhausted"
 
 let test_decide_call_err_not_retryable () =
-  match decide ~accept_on_exhaustion:false ~is_last:false (Call_err (mk_provider_terminal ())) with
+  match decide ~accept_on_exhaustion:false ~is_last:false ~source:None (Call_err (mk_provider_terminal ())) with
   | Exhausted _ -> Alcotest.(check bool) "not-retryable → Exhausted" true true
   | _ -> Alcotest.fail "not-retryable should yield Exhausted"
 

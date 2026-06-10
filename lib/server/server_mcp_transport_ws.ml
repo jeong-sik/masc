@@ -847,6 +847,7 @@ let cleanup_session session_id =
 let sweep_interval_s = 120.0
 let stale_timeout_s = 300.0
 let last_sweep_time = ref 0.0
+let stale_sweep_fiber_started = Atomic.make false
 
 let cleanup_session_if_still_stale ~now (session_id, observed_last_active) =
   let should_cleanup =
@@ -883,6 +884,16 @@ let maybe_sweep_stale_sessions () =
     in
     List.iter (cleanup_session_if_still_stale ~now) stale_candidates
   end
+
+let start_stale_sweep_fiber ~sw ~clock =
+  if Atomic.compare_and_set stale_sweep_fiber_started false true then
+    Eio.Fiber.fork ~sw (fun () ->
+        let rec loop () =
+          Eio.Time.sleep clock sweep_interval_s;
+          maybe_sweep_stale_sessions ();
+          loop ()
+        in
+        loop ())
 
 let handle_inbound_text session ~on_message ~is_fin text =
   match session.inbound_partial_text, is_fin with

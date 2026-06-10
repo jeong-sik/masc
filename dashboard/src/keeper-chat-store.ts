@@ -164,6 +164,9 @@ export function mergeServerHistory(
   const merged: ChatMessage[] = []
 
   function key(m: ChatMessage): string {
+    if (m.role === 'tool_call') {
+      return `${m.role}:${JSON.stringify(m.toolCalls ?? [])}`
+    }
     return `${m.role}:${m.timestamp}:${m.content}:${JSON.stringify(m.toolCalls ?? [])}`
   }
 

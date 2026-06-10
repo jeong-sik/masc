@@ -579,6 +579,7 @@ let process_single_turn ~state ~clock ~sw ~request_sw ~auth_token ~thread_id ~cl
       ~user_content:payload.message
       ~user_attachments:payload.attachments
       ~assistant_content:(persisted_error_reply err)
+      ()
   in
   let timeout_sec = Option.map float_of_int payload.timeout_sec in
   let request_id =
@@ -613,11 +614,14 @@ let process_single_turn ~state ~clock ~sw ~request_sw ~auth_token ~thread_id ~cl
             let _payload_json_opt, visible_reply = extract_visible_reply body in
             if not (is_continuation_checkpoint_reply visible_reply) then
               Keeper_chat_store.append_pair
+                ~user_ts:start_time
+                ~assistant_ts:(Time_compat.now ())
                 ~base_dir:state.Mcp_server.workspace_config.base_path
                 ~keeper_name:payload.name
                 ~user_content:payload.message
                 ~user_attachments:payload.attachments
-                ~assistant_content:visible_reply;
+                ~assistant_content:visible_reply
+                ();
             push_worker_event (Stream_terminal (true, body));
             Tool_result.ok ~tool_name:"masc_keeper_msg" ~start_time body
         | Ok (false, err) ->

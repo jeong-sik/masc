@@ -143,6 +143,36 @@ describe('keeper-chat-store', () => {
       const buf = getChatMessageBuffer('keeper-g')
       expect(buf[0]!.source).toBe('dashboard')
     })
+
+    it('deduplicates tool calls by structured identity without timestamp equality', () => {
+      const toolCalls = [{
+        tool_call_id: 'call-1',
+        name: 'keeper_task_claim',
+        arguments: '{"task_id":"T-1"}',
+      }]
+      appendChatMessage('keeper-tool', {
+        role: 'tool_call',
+        content: '',
+        timestamp: 1_000,
+        source: 'dashboard',
+        toolCalls,
+      })
+
+      mergeServerHistory('keeper-tool', [
+        {
+          role: 'tool_call',
+          content: '',
+          timestamp: 2_000,
+          source: 'api',
+          toolCalls,
+        },
+      ])
+
+      const buf = getChatMessageBuffer('keeper-tool')
+      expect(buf).toHaveLength(1)
+      expect(buf[0]!.source).toBe('dashboard')
+      expect(buf[0]!.toolCalls?.[0]?.tool_call_id).toBe('call-1')
+    })
   })
 
   describe('flushStreamBuffer', () => {

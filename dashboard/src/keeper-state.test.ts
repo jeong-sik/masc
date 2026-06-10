@@ -128,6 +128,55 @@ describe('thread history merge & persistence', () => {
     expect(matches[0]?.delivery).toBe('history')
   })
 
+  it('does not duplicate a local tool call when server history has a different timestamp', () => {
+    appendThreadEntry('echo', entry({
+      id: 'tool-local',
+      role: 'tool_call',
+      source: 'tool_result',
+      label: 'keeper_task_claim',
+      text: 'keeper_task_claim {"task_id":"T-1"}',
+      rawText: 'keeper_task_claim {"task_id":"T-1"}',
+      timestamp: '2026-06-10T00:00:01.000Z',
+      details: {
+        type: 'tool_call',
+        toolCalls: [
+          {
+            tool_call_id: 'call-1',
+            name: 'keeper_task_claim',
+            arguments: '{"task_id":"T-1"}',
+          },
+        ],
+      },
+    }))
+
+    mergeServerHistoryEntries('echo', [
+      entry({
+        id: 'tool-history',
+        role: 'tool_call',
+        source: 'tool_result',
+        label: 'keeper_task_claim',
+        text: 'keeper_task_claim {"task_id":"T-1"}',
+        rawText: 'keeper_task_claim {"task_id":"T-1"}',
+        delivery: 'history',
+        timestamp: '2026-06-10T00:00:05.000Z',
+        details: {
+          type: 'tool_call',
+          toolCalls: [
+            {
+              tool_call_id: 'call-1',
+              name: 'keeper_task_claim',
+              arguments: '{"task_id":"T-1"}',
+            },
+          ],
+        },
+      }),
+    ])
+
+    const matches = (keeperThreads.value.echo ?? []).filter(e => e.role === 'tool_call')
+    expect(matches).toHaveLength(1)
+    expect(matches[0]?.delivery).toBe('history')
+  })
+
   it('keeps local entries the server has not persisted yet', () => {
     appendThreadEntry('echo', entry({ id: 'local-1', text: 'not yet saved' }))
 
@@ -150,6 +199,29 @@ describe('thread history merge & persistence', () => {
     expect(entries[1]?.role).toBe('assistant')
     expect(entries[1]?.label).toBe('echo')
     expect(entries[1]?.timestamp).toBeTruthy()
+  })
+
+  it('converts REST tool_call rows into renderable entries', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        role: 'tool_call',
+        content: '',
+        ts: 1_780_000_001,
+        tool_calls: [
+          {
+            tool_call_id: 'call-1',
+            name: 'keeper_task_claim',
+            arguments: '{"task_id":"T-1"}',
+          },
+        ],
+      },
+    ])
+
+    expect(entries).toHaveLength(1)
+    expect(entries[0]?.role).toBe('tool_call')
+    expect(entries[0]?.label).toBe('keeper_task_claim')
+    expect(entries[0]?.details?.toolCalls?.[0]?.tool_call_id).toBe('call-1')
+    expect(entries[0]?.text).toContain('keeper_task_claim')
   })
 
   it('inserts before the target entry and appends when the target is missing', () => {

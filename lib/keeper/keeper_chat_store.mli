@@ -37,16 +37,22 @@ type chat_message = {
 
 (** {1 I/O} *)
 
-(** [append_pair ~base_dir ~keeper_name ~user_content ~assistant_content]
-    appends two lines (user then assistant) sharing a single
-    timestamp. Failures are logged but never raised except for
+(** [append_pair ?user_ts ?assistant_ts ~base_dir ~keeper_name
+    ~user_content ~assistant_content] appends two lines (user then
+    assistant). When timestamps are omitted both lines share one wall-clock
+    timestamp. Streaming callers can pass turn-start / turn-finish stamps so
+    persisted tool-call rows sort between the triggering user row and the
+    final assistant row. Failures are logged but never raised except for
     {!Eio.Cancel.Cancelled}. *)
 val append_pair :
+  ?user_ts:float ->
+  ?assistant_ts:float ->
   base_dir:string ->
   keeper_name:string ->
   user_content:string ->
   assistant_content:string ->
   user_attachments:attachment list ->
+  unit ->
   unit
 
 (** [append_tool_call ~base_dir ~keeper_name ~tool_call_id ~name ~arguments]

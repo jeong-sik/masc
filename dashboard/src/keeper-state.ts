@@ -7,6 +7,7 @@ import type {
   KeeperConversationSource,
   KeeperConversationStreamState,
   KeeperConversationDelivery,
+  KeeperConversationToolCall,
   KeeperDiagnostic,
   KeeperProbeResult,
   KeeperRecoverResult,
@@ -48,7 +49,13 @@ export function setRecordValue<T>(state: typeof keeperThreads | typeof keeperHyd
 
 function normalizeRole(value: unknown): KeeperConversationRole {
   const role = asString(value)?.toLowerCase()
-  if (role === 'user' || role === 'assistant' || role === 'system' || role === 'tool') return role
+  if (
+    role === 'user'
+    || role === 'assistant'
+    || role === 'system'
+    || role === 'tool'
+    || role === 'tool_call'
+  ) return role
   return 'other'
 }
 
@@ -61,6 +68,7 @@ function roleLabel(role: KeeperConversationRole): string {
     case 'system':
       return 'System'
     case 'tool':
+    case 'tool_call':
       return 'Tool'
     default:
       return 'Event'
@@ -92,7 +100,7 @@ function normalizeConversationSource(
     return source
   }
 
-  if (role === 'tool') return 'tool_result'
+  if (role === 'tool' || role === 'tool_call') return 'tool_result'
   if (role === 'system') return 'system'
   if (role === 'user') {
     return looksLikeWorldStatePrompt(rawText) ? 'world_state_prompt' : 'direct_user'
@@ -101,6 +109,26 @@ function normalizeConversationSource(
     return previousSource === 'world_state_prompt' ? 'internal_assistant' : 'direct_assistant'
   }
   return 'unknown'
+}
+
+function normalizeToolCalls(value: unknown): KeeperConversationToolCall[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((item) => {
+    if (!isRecord(item)) return []
+    const tool_call_id = asString(item.tool_call_id)?.trim()
+    if (!tool_call_id) return []
+    return [{
+      tool_call_id,
+      name: asString(item.name)?.trim() ?? '',
+      arguments: asString(item.arguments) ?? '',
+    }]
+  })
+}
+
+function toolCallSummary(toolCalls: KeeperConversationToolCall[]): string {
+  return toolCalls
+    .map(call => `${call.name || call.tool_call_id} ${call.arguments || '{}'}`)
+    .join('\n')
 }
 
 export function isVisibleDirectConversationEntry(entry: KeeperConversationEntry): boolean {
@@ -223,13 +251,27 @@ function normalizeHistoryEntry(
 ): KeeperConversationEntry | null {
   if (!isRecord(raw)) return null
   const role = normalizeRole(raw.role)
-  const rawText = asString(raw.content) ?? asString(raw.preview)
+  const toolCalls = normalizeToolCalls(raw.tool_calls)
+  const content = asString(raw.content)
+  const preview = asString(raw.preview)
+  const fallbackToolText = toolCalls.length > 0 ? toolCallSummary(toolCalls) : null
+  const rawText =
+    content && content.trim()
+      ? content
+      : preview && preview.trim()
+      ? preview
+      : fallbackToolText
   if (!rawText) return null
   const source = normalizeConversationSource(raw.source, role, rawText, previousSource)
   const text = formatKeeperVisibleReply(rawText)
   if (!text) return null
   const timestamp = toIsoTimestamp(raw.ts_unix) ?? toIsoTimestamp(raw.timestamp)
-  const label = role === 'assistant' && keeperName ? keeperName : roleLabel(role)
+  const label =
+    role === 'assistant' && keeperName
+      ? keeperName
+      : role === 'tool_call' && toolCalls.length > 0
+      ? toolCalls[0]?.name || 'Tool'
+      : roleLabel(role)
   return {
     id: `${role}-${timestamp ?? 'entry'}-${index}`,
     role,
@@ -240,7 +282,7 @@ function normalizeHistoryEntry(
     timestamp,
     delivery: 'history',
     streamState: null,
-    details: null,
+    details: toolCalls.length > 0 ? { type: 'tool_call', toolCalls } : null,
   }
 }
 
@@ -354,6 +396,13 @@ function sameConversationEntry(
   left: KeeperConversationEntry,
   right: KeeperConversationEntry,
 ): boolean {
+  if (left.role === 'tool_call' && right.role === 'tool_call') {
+    const leftCalls = left.details?.toolCalls ?? []
+    const rightCalls = right.details?.toolCalls ?? []
+    if (leftCalls.length > 0 || rightCalls.length > 0) {
+      return JSON.stringify(leftCalls) === JSON.stringify(rightCalls)
+    }
+  }
   return left.role === right.role && left.text === right.text
 }
 
@@ -392,13 +441,23 @@ export function mergeServerHistoryEntries(
  *  status-detail history does. */
 export function chatHistoryEntriesFromRest(
   keeperName: string,
-  messages: Array<{ role: string; content: string; ts: number }>,
+  messages: Array<{
+    role: string
+    content: string
+    ts: number
+    tool_calls?: KeeperConversationToolCall[]
+  }>,
 ): KeeperConversationEntry[] {
   let previousSource: KeeperConversationSource | null = null
   const entries: KeeperConversationEntry[] = []
   messages.forEach((message, index) => {
     const normalized = normalizeHistoryEntry(
-      { role: message.role, content: message.content, ts_unix: message.ts },
+      {
+        role: message.role,
+        content: message.content,
+        ts_unix: message.ts,
+        tool_calls: message.tool_calls,
+      },
       index,
       keeperName,
       previousSource,

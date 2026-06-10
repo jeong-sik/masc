@@ -115,6 +115,24 @@ let test_tool_call_round_trip () =
           | _ -> Alcotest.fail "expected one json row")
       | _ -> Alcotest.fail "expected one message")
 
+let test_append_pair_accepts_ordered_timestamps () =
+  let base_dir = temp_base_path "keeper-chat-store-pair-ts" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-pair-ts" in
+      K.append_pair ~base_dir ~keeper_name ~user_content:"run tool"
+        ~assistant_content:"done" ~user_attachments:[] ~user_ts:10.0
+        ~assistant_ts:30.0 ();
+      let messages = K.load ~base_dir ~keeper_name in
+      match messages with
+      | [ user; assistant ] ->
+          Alcotest.(check string) "user role" "user" user.K.role;
+          Alcotest.(check (option (float 0.001))) "user ts" (Some 10.0) user.K.ts;
+          Alcotest.(check string) "assistant role" "assistant" assistant.K.role;
+          Alcotest.(check (option (float 0.001))) "assistant ts" (Some 30.0) assistant.K.ts
+      | _ -> Alcotest.fail "expected user and assistant rows")
+
 let () =
   Alcotest.run "keeper_chat_store"
     [
@@ -124,5 +142,7 @@ let () =
             test_load_records_malformed_row_drops;
           Alcotest.test_case "tool calls round-trip through jsonl" `Quick
             test_tool_call_round_trip;
+          Alcotest.test_case "append_pair accepts ordered timestamps" `Quick
+            test_append_pair_accepts_ordered_timestamps;
         ] );
     ]

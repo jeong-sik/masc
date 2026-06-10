@@ -161,6 +161,12 @@ val close_all : unit -> int
     sessions that were drained.  Used by the shutdown
     hook (timing telemetry) and the WS regression test. *)
 
+val start_stale_sweep_fiber :
+  sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> unit
+(** Starts the process-wide stale-session sweep loop.  Idempotent.
+    The loop closes abandoned sessions on a timer rather than waiting
+    for a later inbound frame to trigger cleanup. *)
+
 (** {1 Inbound framing} *)
 
 val read_inbound_message_frame :

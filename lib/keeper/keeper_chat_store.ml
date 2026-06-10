@@ -107,14 +107,21 @@ let encode_line ~role ~content ~ts ?attachments ?tool_calls () : string =
   in
   Yojson.Safe.to_string (`Assoc all_fields)
 
-let append_pair ~base_dir ~keeper_name
-    ~(user_content : string) ~(assistant_content : string) ~(user_attachments : attachment list) =
+let append_pair ?user_ts ?assistant_ts ~base_dir ~keeper_name
+    ~(user_content : string) ~(assistant_content : string) ~(user_attachments : attachment list) () =
   try
     ensure_dir_once ~base_dir;
     let path = chat_path ~base_dir ~keeper_name in
-    let ts = Time_compat.now () in
-    let user_line = encode_line ~role:"user" ~content:user_content ~ts ~attachments:user_attachments () in
-    let asst_line = encode_line ~role:"assistant" ~content:assistant_content ~ts () in
+    let now = Time_compat.now () in
+    let user_ts = match user_ts with Some ts -> ts | None -> now in
+    let assistant_ts = match assistant_ts with Some ts -> ts | None -> now in
+    let user_line =
+      encode_line ~role:"user" ~content:user_content ~ts:user_ts
+        ~attachments:user_attachments ()
+    in
+    let asst_line =
+      encode_line ~role:"assistant" ~content:assistant_content ~ts:assistant_ts ()
+    in
     Fs_compat.append_file path (user_line ^ "\n" ^ asst_line ^ "\n")
   with
   | Eio.Cancel.Cancelled _ as e -> raise e

@@ -324,12 +324,32 @@ let serve_dashboard_v2_static name request reqd =
           String.sub hash 0 12
         with _ -> "none"
       in
-      Http.Response.bytes_cached
-        ~content_type
-        ~etag
-        ~request
-        body
-        reqd
+      let etag_value = "\"" ^ etag ^ "\"" in
+      let if_none_match = Httpun.Headers.get request.Httpun.Request.headers "if-none-match" in
+      (match if_none_match with
+       | Some inm when String.equal inm etag_value ->
+           let headers =
+             Httpun.Headers.of_list
+               [ ("cache-control", "no-cache")
+               ; ("etag", etag_value)
+               ]
+           in
+           let response = Httpun.Response.create ~headers `Not_modified in
+           Httpun.Reqd.respond_with_string reqd response ""
+       | _ ->
+           let final_body, encoding_headers =
+             Http_response_payload.compress_body
+               ~compress:(is_compressible_asset name)
+               ~accept_encoding:(Httpun.Headers.get request.Httpun.Request.headers "accept-encoding")
+               body
+           in
+           let headers =
+             [ ("cache-control", "no-cache")
+             ; ("etag", etag_value)
+             ]
+             @ encoding_headers
+           in
+           Http.Response.bytes ~headers ~content_type final_body reqd)
   | Error _ -> Http.Response.not_found reqd
 
 

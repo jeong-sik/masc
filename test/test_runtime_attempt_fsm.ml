@@ -65,7 +65,7 @@ let test_decide_call_err_not_retryable () =
 (* --- decide_and_record — source propagation via Call_err --- *)
 
 let test_decide_and_record_try_next_source_none () =
-  match decide_and_record ~runtime_id:"test" ~accept_on_exhaustion:false ~is_last:false
+  match decide_and_record ~runtime_id:"test" ~source:None ~accept_on_exhaustion:false ~is_last:false
            (Call_err (mk_http_err ~code:429 ())) with
   | Try_next { source; _ } ->
     Alcotest.(check (option string)) "default source = None" None source

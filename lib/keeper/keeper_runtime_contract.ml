@@ -38,6 +38,19 @@ let task_is_linked_to_keeper_goals goal_ids (task : Masc_domain.task) =
        | None -> false)
     goal_ids
 
+(* A task is claimable-by-a-fresh-keeper only in [Todo]. Enumerate every
+   [task_status] variant so a new constructor forces a decision here rather than
+   silently widening "claimable" to e.g. a future [BlockedOnReview]. *)
+let task_is_unclaimed_todo (task : Masc_domain.task) =
+  match task.task_status with
+  | Masc_domain.Todo -> true
+  | Masc_domain.AwaitingVerification _
+  | Masc_domain.Claimed _
+  | Masc_domain.InProgress _
+  | Masc_domain.Done _
+  | Masc_domain.Cancelled _ ->
+    false
+
 type claim_goal_scope = {
   task_filter : Masc_domain.task -> bool;
   mode : string;
@@ -45,8 +58,9 @@ type claim_goal_scope = {
   fallback_reason : string option;
 }
 
-let resolve_claim_goal_scope ~(config : Workspace.config) ~(meta : keeper_meta) () =
-  ignore config;
+(* Pure in-memory scope derived from [meta] alone — no disk read. The
+   [active_goal_ids] hard filter; an empty scope means all_tasks. *)
+let meta_only_claim_goal_scope (meta : keeper_meta) =
   match meta.active_goal_ids with
   | [] ->
       {
@@ -56,16 +70,62 @@ let resolve_claim_goal_scope ~(config : Workspace.config) ~(meta : keeper_meta) 
         fallback_reason = None;
       }
   | goal_ids ->
-    {
-      task_filter = task_is_linked_to_keeper_goals goal_ids;
-      mode = "active_goal_ids";
-      effective_goal_ids = goal_ids;
-      fallback_reason = None;
-    }
+      {
+        task_filter = task_is_linked_to_keeper_goals goal_ids;
+        mode = "active_goal_ids";
+        effective_goal_ids = goal_ids;
+        fallback_reason = None;
+      }
+
+(* Resolve the claim filter for a keeper's [active_goal_ids].
+
+   Goal-scope is a *priority hint*, not a hard gate: a keeper must never sit idle
+   while the backlog holds claimable work. When the keeper's active goals have no
+   claimable (Todo + unclaimed) task linked to them, widen the filter back to
+   all_tasks and record [fallback_reason] so the widening is visible.
+
+   Restores the [allow_empty_goal_scope_fallback] stopgap (RFC-0067 §1, PR
+   #13673) that was dropped when the resolver was simplified to a pure in-memory
+   match. Without it, a keeper whose goal carries no live task — or whose backlog
+   tasks are all goal_id=None — is starved indefinitely (the observed
+   "scope-blocked deadlock"). Note RFC-0067 §3's proposed *atomicity* design
+   (scope-version tokens) is a separate, unimplemented direction; this is the
+   stopgap, reinstated by operator decision, not that design.
+
+   Reads the backlog ([get_tasks_safe], a disk read) to test for a claimable
+   scoped task. Kept on the claim path only — NOT the per-turn observation path
+   ([resolve_observation_claim_goal_scope]), which stays pure-meta to avoid
+   adding a per-keeper, per-cycle backlog read. *)
+let resolve_claim_goal_scope ~(config : Workspace.config) ~(meta : keeper_meta) () =
+  match meta.active_goal_ids with
+  | [] -> meta_only_claim_goal_scope meta
+  | goal_ids ->
+    let scoped_claimable_exists =
+      Workspace.get_tasks_safe config
+      |> List.exists (fun task ->
+             task_is_unclaimed_todo task
+             && task_is_linked_to_keeper_goals goal_ids task)
+    in
+    if scoped_claimable_exists then meta_only_claim_goal_scope meta
+    else
+      {
+        task_filter = (fun (_task : Masc_domain.task) -> true);
+        (* Reuse the established mode label consumed by
+           [Keeper_tool_task_runtime.claim_scope_context_suffix] rather than
+           minting a new string — a second label for the same concept would
+           drift the two sites apart. *)
+        mode = "empty_goal_scope_fallback_all_tasks";
+        effective_goal_ids = goal_ids;
+        fallback_reason = Some "no_scoped_claimable_tasks";
+      }
 
 let resolve_observation_claim_goal_scope ~(config : Workspace.config)
     ~(meta : keeper_meta) () =
-  resolve_claim_goal_scope ~config ~meta ()
+  (* Signal-only: the observation surface just needs the scope hint, not the
+     claimability-aware fallback. Stays pure-meta so the per-turn observation
+     path adds no backlog disk read. *)
+  ignore config;
+  meta_only_claim_goal_scope meta
 
 let task_is_blocked (task : Masc_domain.task) =
   (* Enumerate every [task_status] variant so the compiler flags any new

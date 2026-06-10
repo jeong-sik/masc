@@ -205,7 +205,11 @@ let no_eligible_action_for_claim_scope claim_goal_scope ~excluded_count =
     let scope_hint =
       match claim_goal_scope.Keeper_runtime_contract.mode with
       | "active_goal_ids" ->
-        " Active goal scope is a hard claim gate; create/link a matching task or clear active_goal_ids."
+        (* Scope only stays in [active_goal_ids] mode when a Todo task IS linked
+           to the goal (otherwise the resolver falls back to all_tasks). So a
+           no-eligible here means those scoped tasks exist but are blocked /
+           awaiting verification — not a scope lock to clear. *)
+        " Scoped tasks exist but are blocked or awaiting verification; resolve those blockers."
       | _ -> ""
     in
     Printf.sprintf

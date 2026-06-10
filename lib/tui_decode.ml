@@ -354,7 +354,7 @@ type chat_event =
 let decode_chat_event json =
   let event_type = get_string json "type" in
   match event_type with
-  | Some ("content_delta" | "delta") -> (
+  | Some ("content_delta" | "delta" | "TEXT_MESSAGE_CONTENT" | "TEXT_MESSAGE_DELTA") -> (
       match get_string json "delta" with
       | Some text -> Ok (Delta text)
       | None -> Error "delta event missing string 'delta'")

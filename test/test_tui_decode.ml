@@ -202,6 +202,17 @@ let test_parse_keeper_chat_response_sse_delta () =
   | Ok text -> Alcotest.(check string) "delta text" "hello world" text
   | Error err -> Alcotest.fail err
 
+let test_parse_keeper_chat_response_ag_ui_sse_delta () =
+  let response =
+    "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n\
+     data: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"delta\":\"hello\"}\n\
+     data: {\"type\":\"TEXT_MESSAGE_DELTA\",\"delta\":\" world\"}\n\
+     data: {\"type\":\"TEXT_MESSAGE_END\"}\n"
+  in
+  match Tui_decode.parse_keeper_chat_response response with
+  | Ok text -> Alcotest.(check string) "AG-UI delta text" "hello world" text
+  | Error err -> Alcotest.fail err
+
 let test_parse_keeper_chat_response_json_error () =
   let response =
     "HTTP/1.1 500 Internal Server Error\r\nContent-Type: application/json\r\n\r\n\
@@ -253,6 +264,8 @@ let () =
       [
         Alcotest.test_case "sse delta" `Quick
           test_parse_keeper_chat_response_sse_delta;
+        Alcotest.test_case "AG-UI sse delta" `Quick
+          test_parse_keeper_chat_response_ag_ui_sse_delta;
         Alcotest.test_case "json error" `Quick
           test_parse_keeper_chat_response_json_error;
       ] );

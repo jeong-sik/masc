@@ -306,13 +306,26 @@ let rec drop_leading_tool_messages = function
   | msg :: rest when is_tool_message msg -> drop_leading_tool_messages rest
   | messages -> messages
 
+(* RFC-0226 P2: [load] serves a fixed window ([max_total_lines]) but
+   used to read and JSON-parse the whole file to build it, so its cost
+   scaled with lane size — the same pathology family as the
+   2026-06-09 telemetry-JSONL incident (multi-MB files starving the
+   Eio domain). Read a bounded tail instead: [max_total_lines] lines
+   at ~10 KiB each leaves wide slack over the gate's 4 KB content
+   bound. A tail whose recent lines are larger (attachment payloads)
+   degrades to a shorter window, never to an error or a full scan. *)
+let tail_read_bytes = 4 * 1024 * 1024
+
 let load ~base_dir ~keeper_name : chat_message list =
   let path = chat_path ~base_dir ~keeper_name in
   if not (Sys.file_exists path) then []
   else
   try
-    let content = Fs_compat.load_file path in
-    let lines = String.split_on_char '\n' content in
+    let from =
+      match Fs_compat.file_size path with
+      | Some size when size > tail_read_bytes -> size - tail_read_bytes
+      | Some _ | None -> 0
+    in
     (* Single pass: keep a running window of the last [max_history]
        user/assistant messages plus their tool lines. *)
     let q = Queue.create () in
@@ -321,22 +334,30 @@ let load ~base_dir ~keeper_name : chat_message list =
       let popped = Queue.pop q in
       if not (is_tool_message popped) then decr primary_count
     in
-    List.iter
-      (fun line ->
-        let trimmed = String.trim line in
-        if trimmed <> "" then
-          match parse_line ~file_path:path trimmed with
-          | Some msg ->
-              Queue.push msg q;
-              if not (is_tool_message msg) then incr primary_count;
-              while
-                !primary_count > max_history
-                || Queue.length q > max_total_lines
-              do
-                pop_front ()
-              done
-          | None -> ())
-      lines;
+    (* A mid-line [from] makes the first folded item a line fragment;
+       dropping it unconditionally when [from > 0] also drops one full
+       line when [from] lands exactly on a boundary — irrelevant under
+       the window's slack, and it keeps fragment noise out of the
+       read-drop metrics. *)
+    let skip_partial_first = ref (from > 0) in
+    let (), _boundary =
+      Fs_compat.fold_appended_lines ~path ~from ~init:() ~f:(fun () line ->
+        if !skip_partial_first then skip_partial_first := false
+        else
+          let trimmed = String.trim line in
+          if trimmed <> "" then
+            match parse_line ~file_path:path trimmed with
+            | Some msg ->
+                Queue.push msg q;
+                if not (is_tool_message msg) then incr primary_count;
+                while
+                  !primary_count > max_history
+                  || Queue.length q > max_total_lines
+                do
+                  pop_front ()
+                done
+            | None -> ())
+    in
     Queue.fold (fun acc msg -> msg :: acc) [] q
     |> List.rev
     |> drop_leading_tool_messages

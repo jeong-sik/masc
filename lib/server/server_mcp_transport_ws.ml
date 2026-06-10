@@ -33,6 +33,7 @@ type ws_session = {
   id: string;
   wsd: Httpun_ws.Wsd.t;
   mutable closed: bool;
+  mutable last_pong_ns: float option;
   dashboard_auth: dashboard_auth_state Atomic.t;
   mutable dashboard_route: string option;
   dashboard_slices: (string, unit) Hashtbl.t;

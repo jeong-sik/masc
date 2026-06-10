@@ -258,6 +258,18 @@ let make_websocket_handler ~sw ~clock ~on_message _client_addr (wsd : Ws.Wsd.t)
   Eio.Fiber.fork ~sw (fun () ->
     let rec loop () =
       Eio.Time.sleep clock heartbeat_interval_s;
+      (* Check pong staleness: if the peer has not replied to the last
+         heartbeat within [heartbeat_interval_s], assume the connection
+         is dead and clean up.  The first cycle is skipped (no pong yet)
+         so a fresh session gets one full interval to complete its first
+         ping-pong handshake. *)
+      (match session.Server_mcp_transport_ws.last_pong_ns with
+       | Some ns when Eio.Time.now clock -. ns > heartbeat_interval_s ->
+         Log.Server.info
+           "[ws-standalone] session %s pong timeout (%.1fs); cleaning up"
+           session_id (Eio.Time.now clock -. ns);
+         Server_mcp_transport_ws.cleanup_session session_id
+       | _ -> ());
       if (not session.closed) && not (Ws.Wsd.is_closed session.wsd)
       then (
         let send_failed = ref false in
@@ -332,7 +344,10 @@ let make_websocket_handler ~sw ~clock ~on_message _client_addr (wsd : Ws.Wsd.t)
         | `Connection_close ->
           log_ws_client_close_payload ~session_id ~declared_len:len payload;
           Server_mcp_transport_ws.cleanup_session session_id
-        | `Pong | `Other _ -> Ws.Payload.close payload)
+        | `Pong ->
+          session.Server_mcp_transport_ws.last_pong_ns <- Some (Eio.Time.now clock);
+          Ws.Payload.close payload
+        | `Other _ -> Ws.Payload.close payload)
   ; eof =
       (fun ?error () ->
         Log.Server.debug

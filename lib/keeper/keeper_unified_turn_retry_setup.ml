@@ -29,7 +29,7 @@ let build ~now ~keeper_name ~channel ~turn_affordances =
   let keeper_profile = Keeper_types_profile.load_keeper_profile_defaults keeper_name in
   let max_idle_turns, max_turns =
     match channel with
-    | Keeper_world_observation.Reactive ->
+    | Keeper_world_observation.Reactive _ ->
       ( Keeper_runtime_resolved.reactive_max_idle_turns ()
       , Keeper_types_profile.effective_max_turns_per_call keeper_profile )
     | Keeper_world_observation.Scheduled_autonomous ->

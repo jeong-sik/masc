@@ -14,6 +14,7 @@
  (libraries
   agent_sdk
   eio
+  masc.gate
   masc.keeper_registry
   masc.keeper_metrics
   masc.masc_core

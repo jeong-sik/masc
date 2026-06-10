@@ -24,7 +24,7 @@
     payloads stay valid. *)
 
 type keeper_cycle_channel =
-  | Reactive
+  | Reactive of Gate_surface.t
   | Scheduled_autonomous
 
 type unified_turn_channel = keeper_cycle_channel
@@ -86,7 +86,7 @@ let skip_reason_to_string = function
 ;;
 
 let channel_to_string = function
-  | Reactive -> "reactive"
+  | Reactive surface -> "reactive:" ^ Gate_surface.label surface
   | Scheduled_autonomous -> "scheduled_autonomous"
 ;;
 

@@ -47,7 +47,7 @@ type world_observation =
 
 type keeper_cycle_channel =
   Keeper_world_observation_turn_types.keeper_cycle_channel =
-  | Reactive
+  | Reactive of Gate_surface.t
   | Scheduled_autonomous
 
 type unified_turn_channel = keeper_cycle_channel
@@ -607,6 +607,18 @@ let should_inject_entropic_oscillation ~since_last_scheduled_autonomous ~draw_pe
   && draw_percent < entropic_oscillation_probability_percent
 ;;
 
+let derive_reactive_surface ~(meta : keeper_meta) (observation : world_observation) : Gate_surface.t =
+  let surfaces = Gate_surface.connected_surfaces_for_keeper ~keeper_name:meta.name in
+  let active_surface_presence =
+    List.find_opt (fun (p : Gate_surface.surface_presence) -> p.alive) surfaces
+  in
+  match active_surface_presence with
+  | Some p -> p.surface
+  | None ->
+      (match observation.connected_surfaces with
+       | { surface; _ } :: _ -> surface
+       | [] -> Dashboard)
+
 let keeper_cycle_decision
       ?(provider_cooldown_remaining_sec = provider_cooldown_remaining_sec_for_runtime)
       ?(reactive_wake = false)
@@ -622,9 +634,14 @@ let keeper_cycle_decision
     ]
     |> List.filter_map Fun.id
   in
+  let reactive_surface =
+    if reactive_triggers <> []
+    then derive_reactive_surface ~meta observation
+    else Gate_surface.Dashboard
+  in
   let blocked_channel =
     match reactive_triggers with
-    | _ :: _ -> Reactive
+    | _ :: _ -> Reactive reactive_surface
     | [] -> Scheduled_autonomous
   in
   let blocked reason =
@@ -645,7 +662,7 @@ let keeper_cycle_decision
     match reactive_triggers with
     | first :: rest ->
       { should_run = true
-      ; channel = Reactive
+      ; channel = Reactive reactive_surface
       ; verdict = Run { reasons = first, rest }
       ; since_last_scheduled_autonomous = None
       ; effective_cooldown = None

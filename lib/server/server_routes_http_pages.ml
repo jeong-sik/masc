@@ -278,6 +278,61 @@ let serve_dashboard_static name request reqd =
   | Error _ ->
       Http.Response.not_found reqd
 
+let dashboard_v2_asset_root () =
+  Filename.concat (assets_root ()) "dashboard/v2"
+
+let dashboard_v2_index_path () =
+  Filename.concat (dashboard_v2_asset_root ()) "Keeper Agent v2.html"
+
+let dashboard_v2_etag () =
+  try
+    let st = Unix.stat (dashboard_v2_index_path ()) in
+    let hash =
+      Digest.string (string_of_float st.Unix.st_mtime) |> Digest.to_hex
+    in
+    String.sub hash 0 12
+  with
+  | Unix.Unix_error (err, _, _) ->
+      Log.Pages.warn "dashboard_v2_etag stat failed: %s" (Unix.error_message err);
+      "none"
+  | exn ->
+      Log.Pages.warn "dashboard_v2_etag unexpected: %s" (Printexc.to_string exn);
+      "none"
+
+let serve_dashboard_v2_index request reqd =
+  match read_file (dashboard_v2_index_path ()) with
+  | Ok body ->
+      Http.Response.html_cached
+        ~etag:(dashboard_v2_etag ())
+        ~request body reqd
+  | Error _ ->
+      Http.Response.html
+        "<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><title>Dashboard V2 not found</title><body><p>Dashboard V2 build not found. Copy files to <code>assets/dashboard/v2</code></p></body></html>"
+        reqd
+
+let serve_dashboard_v2_static name request reqd =
+  let path = Filename.concat (dashboard_v2_asset_root ()) name in
+  match read_file path with
+  | Ok body ->
+      let content_type = asset_content_type name in
+      let etag =
+        try
+          let st = Unix.stat path in
+          let hash =
+            Digest.string (string_of_float st.Unix.st_mtime) |> Digest.to_hex
+          in
+          String.sub hash 0 12
+        with _ -> "none"
+      in
+      Http.Response.bytes_cached
+        ~content_type
+        ~etag
+        ~request
+        body
+        reqd
+  | Error _ -> Http.Response.not_found reqd
+
+
 (** Dashboard Bonsai island (Jane Street Bonsai + js_of_ocaml).
     Coexists with the Preact SPA under [/dashboard/b/*] until the migration is
     complete. See planning/agent_llm_a-plans/masc-eventual-parrot.md. *)

@@ -69,7 +69,9 @@ dashboard/package-lock.json
 dashboard/bun.lock
 dashboard/bun.lockb
 dashboard/dist/
-assets/dashboard/
+assets/dashboard/*
+!assets/dashboard/v2/
+!assets/dashboard/v2/**
 viewer/dist-build/
 
 # Dashboard Bonsai island (js_of_ocaml build output)

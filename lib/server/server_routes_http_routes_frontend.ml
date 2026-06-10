@@ -167,6 +167,37 @@ let add_routes ~port ~host router =
              serve_dashboard_index req reqd
            ) request reqd)
          request reqd)
+  (* Dashboard V2: index.html *)
+  |> Http.Router.get "/v2" (fun request reqd ->
+       with_canonical_loopback_host ~port
+         (fun request reqd ->
+           with_public_read (fun _state req reqd ->
+             serve_dashboard_v2_index req reqd
+           ) request reqd)
+         request reqd)
+  |> Http.Router.get "/v2/" (fun request reqd ->
+       with_canonical_loopback_host ~port
+         (fun request reqd ->
+           with_public_read (fun _state req reqd ->
+             serve_dashboard_v2_index req reqd
+           ) request reqd)
+         request reqd)
+  (* Dashboard V2: static assets prefix match *)
+  |> Http.Router.prefix_get "/v2/"
+       (fun request reqd ->
+         with_canonical_loopback_host ~port
+           (fun request reqd ->
+             with_public_read (fun _state req reqd ->
+               let req_path = Http.Request.path req in
+               let prefix_len = String.length "/v2/" in
+               let filename = String.sub req_path prefix_len (String.length req_path - prefix_len) in
+               if Web_dashboard.is_safe_asset_relative_path filename then
+                 serve_dashboard_v2_static filename req reqd
+               else
+                 Http.Response.not_found reqd
+             ) request reqd)
+           request reqd)
+
   |> Http.Router.prefix_get "/dashboard/"
        (fun request reqd ->
          with_canonical_loopback_host ~port

@@ -1,7 +1,7 @@
 (** Keeper cycle channel + turn-verdict variants + bijection helpers. *)
 
 type keeper_cycle_channel =
-  | Reactive
+  | Reactive of Gate_surface.t
   | Scheduled_autonomous
 
 type unified_turn_channel = keeper_cycle_channel

@@ -258,7 +258,7 @@ let run (ctx : ctx)
     let attempt_provider_timeout_budget = ref None in
     let max_turns =
       match channel with
-      | Keeper_world_observation.Reactive ->
+      | Keeper_world_observation.Reactive _ ->
         Keeper_types_profile.effective_max_turns_per_call
           keeper_profile
       | Keeper_world_observation.Scheduled_autonomous ->

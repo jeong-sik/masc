@@ -148,7 +148,7 @@ let test_gate_keeps_scheduled_channel () =
     true
     (match d.channel with
      | WO.Scheduled_autonomous -> true
-     | WO.Reactive -> false)
+     | WO.Reactive _ -> false)
 
 let () = init_runtime_default_for_tests ()
 

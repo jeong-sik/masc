@@ -161,6 +161,15 @@ val serve_dashboard_static :
   string -> Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Serves a legacy-dashboard static asset by name. *)
 
+val serve_dashboard_v2_index :
+  Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** Serves the dashboard v2 [Keeper Agent v2.html]. *)
+
+val serve_dashboard_v2_static :
+  string -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** Serves a dashboard v2 static asset by name. *)
+
+
 (** {1 Server-state helpers} *)
 
 val get_server_state_result :

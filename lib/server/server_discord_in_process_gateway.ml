@@ -69,9 +69,10 @@ let handle_message_create ~dispatch
       { channel = State.channel
       ; channel_user_id = author_id
       ; channel_user_name = Option.value author_name ~default:author_id
-        (* Display name ([global_name] else [username], RFC-0223 P1);
-           the snowflake stands in only for malformed payloads missing
-           both, keeping the gate's required field non-empty. *)
+        (* NDT-OK: display name ([global_name] else [username], RFC-0223
+           P1); the snowflake stands in only for malformed payloads
+           missing both — the gate contract requires a non-empty name,
+           and the id fallback preserves the pre-P1 behavior. *)
       ; channel_workspace_id = channel_id
       ; keeper_name
       ; content

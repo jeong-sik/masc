@@ -540,12 +540,17 @@ let append_direct_chat_pair_if_reply ~(config : Workspace.config) ~name ~args re
     match user_content, direct_reply_visible_text (tool_result_body result) with
     | "", _ | _, None -> ()
     | _, Some assistant_content ->
-        Keeper_chat_store.append_pair
+        (* Agent-initiated [masc_keeper_msg] path: only the final tool
+           result is visible here (no stream events), so no tool lines
+           are persisted for this surface. *)
+        Keeper_chat_store.append_turn
           ~base_dir:config.base_path
           ~keeper_name:name
           ~user_content
+          ~user_attachments:[]
+          ~source:"agent"
           ~assistant_content
-          ~user_attachments:[])
+          ())
 ;;
 
 (* RFC-0182 Phase 5 PR-B: ctx-free body for [masc_keeper_msg] descriptor

@@ -387,16 +387,54 @@ export function mergeServerHistoryEntries(
   replaceThread(name, entries)
 }
 
+interface RestChatHistoryMessage {
+  role: string
+  content: string
+  ts: number
+  tool_call_id?: string
+  tool_call_name?: string
+  source?: string
+}
+
+/** Convert a persisted tool-call row into the same entry shape the live
+ *  TOOL_CALL_* stream path produces (keeper-stream.ts): id `tool-<id>`,
+ *  role 'tool', label = tool name, text = accumulated argument JSON.
+ *  Matching the live convention means a reload re-renders the tool card
+ *  and replaceThread dedups it against a still-mounted live entry. The
+ *  raw content is used as-is — formatKeeperVisibleReply is for keeper
+ *  reply text and would mangle argument JSON. */
+function toolHistoryEntry(message: RestChatHistoryMessage): KeeperConversationEntry | null {
+  if (!message.tool_call_id || !message.tool_call_name) return null
+  return {
+    id: `tool-${message.tool_call_id}`,
+    role: 'tool',
+    source: 'tool_result',
+    label: message.tool_call_name,
+    text: message.content,
+    rawText: message.content,
+    timestamp: toIsoTimestamp(message.ts),
+    delivery: 'history',
+    streamState: null,
+    details: null,
+  }
+}
+
 /** Convert REST chat-history messages ({role, content, ts-seconds}) into
  *  conversation entries, chaining source inference the same way
  *  status-detail history does. */
 export function chatHistoryEntriesFromRest(
   keeperName: string,
-  messages: Array<{ role: string; content: string; ts: number }>,
+  messages: RestChatHistoryMessage[],
 ): KeeperConversationEntry[] {
   let previousSource: KeeperConversationSource | null = null
   const entries: KeeperConversationEntry[] = []
   messages.forEach((message, index) => {
+    if (message.role === 'tool') {
+      // Tool rows do not participate in user/assistant source chaining.
+      const toolEntry = toolHistoryEntry(message)
+      if (toolEntry) entries.push(toolEntry)
+      return
+    }
     const normalized = normalizeHistoryEntry(
       { role: message.role, content: message.content, ts_unix: message.ts },
       index,

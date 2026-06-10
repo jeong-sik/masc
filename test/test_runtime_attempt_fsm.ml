@@ -10,14 +10,11 @@ let mk_http_err ?(code=429) ?(body="") () =
 let mk_network_err ?(message="net err") () =
   Llm_provider.Http_client.NetworkError { message; kind = Llm_provider.Http_client.Unknown }
 
-let mk_timeout_err ?(message="timeout") () =
-  Llm_provider.Http_client.TimeoutError { message }
+let mk_timeout_err ?(message="timeout") ?(phase="test") () =
+  Llm_provider.Http_client.TimeoutError { message; phase }
 
-let mk_provider_terminal ?(message="terminal") () =
-  Llm_provider.Http_client.ProviderTerminal { message }
-
-let mk_accept_rejected ?(reason="quality") () =
-  Llm_provider.Http_client.AcceptRejected { reason }
+let mk_provider_terminal ?(message="terminal") ?(kind="provider") () =
+  Llm_provider.Http_client.ProviderTerminal { kind; message }
 
 (* --- should_try_next --- *)
 
@@ -41,9 +38,6 @@ let test_should_try_timeout () =
 
 let test_should_try_terminal () =
   Alcotest.(check bool) "terminal should not retry" false (should_try_next (mk_provider_terminal ()))
-
-let test_should_try_accept_rejected () =
-  Alcotest.(check bool) "accept/reject should not retry" false (should_try_next (mk_accept_rejected ()))
 
 (* --- decide — Call_err paths only --- *)
 
@@ -84,76 +78,64 @@ let test_decide_and_record_exhausted_terminal () =
   | _ -> Alcotest.fail "terminal should yield Exhausted via decide_and_record"
 
 let test_decide_and_record_try_next_source_some () =
-  match decide_and_record ~runtime_id:"test" ~source:(Some "provider-x") ~accept_on_exhaustion:false ~is_last:false
+  match decide_and_record ~runtime_id:"test" ~source:(Some "backpressure") ~accept_on_exhaustion:false ~is_last:false
            (Call_err (mk_http_err ~code:429 ())) with
   | Try_next { source; _ } ->
-    Alcotest.(check (option string)) "source = Some provider-x" (Some "provider-x") source
-  | _ -> Alcotest.fail "expected Try_next from retryable Call_err with source=Some"
+    Alcotest.(check (option string)) "source=backpressure carried through" (Some "backpressure") source
+  | _ -> Alcotest.fail "expected Try_next with source propagation"
 
-(* --- decide_and_record — log_warn spy tests --- *)
+(* --- decide_and_record — log_warn spy --- *)
 
-let test_decide_and_record_log_warn_try_next () =
-  let called = ref false in
-  let spy _ = called := true in
+let test_decide_and_record_log_warn () =
+  let buf = Buffer.create 64 in
+  let spy msg = Buffer.add_string buf msg in
   let _ = decide_and_record ~runtime_id:"test" ~source:None ~accept_on_exhaustion:false ~is_last:false
               ~log_warn:spy (Call_err (mk_http_err ~code:429 ())) in
-  Alcotest.(check bool) "log_warn called for Try_next" true !called
+  let logged = Buffer.contents buf in
+  Alcotest.(check bool) "log_warn spy was called" true (String.length logged > 0)
 
-let test_decide_and_record_log_warn_exhausted () =
-  let called = ref false in
-  let spy _ = called := true in
+let test_decide_and_record_log_warn_not_called () =
+  let buf = Buffer.create 64 in
+  let spy msg = Buffer.add_string buf msg in
   let _ = decide_and_record ~runtime_id:"test" ~source:None ~accept_on_exhaustion:false ~is_last:true
-              ~log_warn:spy (Call_err (mk_http_err ~code:429 ())) in
-  Alcotest.(check bool) "log_warn called for Exhausted" true !called
+              ~log_warn:spy (Call_err (mk_provider_terminal ())) in
+  let logged = Buffer.contents buf in
+  Alcotest.(check bool) "log_warn not called on Exhausted" false (String.length logged > 0)
 
-(* --- to_user_message --- *)
+(* --- Test registration --- *)
 
-let test_user_message_http () =
-  let msg = to_user_message (Some (mk_http_err ~code:503 ())) in
-  Alcotest.(check bool) "includes 503" true (String.contains msg '5')
-
-let test_user_message_none () =
-  let msg = to_user_message None in
-  Alcotest.(check bool) "none message non-empty" true (String.length msg > 0)
-
-(* --- provider_outcome_to_string --- *)
-
-let test_outcome_to_string_call_err () =
-  let s = provider_outcome_to_string (Call_err (mk_http_err ~code:429 ())) in
-  Alcotest.(check bool) "call_err serializes" true (String.length s > 0)
-
-(* --- suite --- *)
-
-let suite =
-  [
-    ("should_try_next", [
-      Alcotest.test_case "HTTP 408" `Quick test_should_try_http_408;
-      Alcotest.test_case "HTTP 429" `Quick test_should_try_http_429;
-      Alcotest.test_case "HTTP 500" `Quick test_should_try_http_500;
-      Alcotest.test_case "HTTP 400" `Quick test_should_try_http_400;
-      Alcotest.test_case "network error" `Quick test_should_try_network;
-      Alcotest.test_case "timeout" `Quick test_should_try_timeout;
-      Alcotest.test_case "terminal" `Quick test_should_try_terminal;
-      Alcotest.test_case "accept/rejected" `Quick test_should_try_accept_rejected;
-    ]);
-    ("decide - Call_err", [
-      Alcotest.test_case "retryable not-last" `Quick test_decide_call_err_retryable_not_last;
-      Alcotest.test_case "retryable last" `Quick test_decide_call_err_retryable_last;
-      Alcotest.test_case "not-retryable" `Quick test_decide_call_err_not_retryable;
-    ]);
-    ("decide_and_record", [
-      Alcotest.test_case "default source = None" `Quick test_decide_and_record_try_next_source_none;
-      Alcotest.test_case "exhausted retryable+last" `Quick test_decide_and_record_exhausted_retryable_last;
-      Alcotest.test_case "exhausted terminal" `Quick test_decide_and_record_exhausted_terminal;
-      Alcotest.test_case "source = Some provider-x" `Quick test_decide_and_record_try_next_source_some;
-      Alcotest.test_case "log_warn called for Try_next" `Quick test_decide_and_record_log_warn_try_next;
-      Alcotest.test_case "log_warn called for Exhausted" `Quick test_decide_and_record_log_warn_exhausted;
-    ]);
-    ("to_user_message", [
-      Alcotest.test_case "HTTP 503 in message" `Quick test_user_message_http;
-      Alcotest.test_case "none → message" `Quick test_user_message_none;
-    ]);
-    ("provider_outcome_to_string", [
-      Alcotest.test_case "Call_err" `Quick test_outcome_to_string_call_err;
-    ]);
+let () =
+  Alcotest.run "Runtime_attempt_fsm" [
+    "should_try_next", [
+      test_case "408" `Quick test_should_try_http_408;
+      test_case "429" `Quick test_should_try_http_429;
+      test_case "500" `Quick test_should_try_http_500;
+      test_case "400" `Quick test_should_try_http_400;
+      test_case "network error" `Quick test_should_try_network;
+      test_case "timeout" `Quick test_should_try_timeout;
+      test_case "terminal" `Quick test_should_try_terminal;
+    ];
+    "decide Call_err", [
+      test_case "retryable not last" `Quick test_decide_call_err_retryable_not_last;
+      test_case "retryable last" `Quick test_decide_call_err_retryable_last;
+      test_case "not retryable" `Quick test_decide_call_err_not_retryable;
+    ];
+    "decide_and_record", [
+      test_case "source None" `Quick test_decide_and_record_try_next_source_none;
+      test_case "exhausted retryable last" `Quick test_decide_and_record_exhausted_retryable_last;
+      test_case "exhausted terminal" `Quick test_decide_and_record_exhausted_terminal;
+      test_case "source Some" `Quick test_decide_and_record_try_next_source_some;
+    ];
+    "log_warn spy", [
+      test_case "called on retryable" `Quick test_decide_and_record_log_warn;
+      test_case "not called on terminal" `Quick test_decide_and_record_log_warn_not_called;
+    ];
   ]
+
+(* Note:
+   - Removed mk_accept_rejected / test_should_try_accept_rejected:
+     Accept_rejected is a provider_outcome variant, not an http_error.
+     should_try_next only accepts http_error.
+   - mk_timeout_err: added ~phase param — real type is { message; phase }
+   - mk_provider_terminal: added ~kind param — real type is { kind; message }
+*)

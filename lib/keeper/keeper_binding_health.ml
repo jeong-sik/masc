@@ -841,6 +841,23 @@ let all_providers t =
       []
     |> List.sort (fun a b -> String.compare a.provider_key b.provider_key))
 
+let least_recently_failed_provider t ~candidates =
+  with_lock t (fun () ->
+    let now = Unix.gettimeofday () in
+    let best, _ =
+      List.fold_left (fun (best_key, best_age) key ->
+        match Hashtbl.find_opt t.providers key with
+        | None -> best_key, best_age
+        | Some state ->
+          let age = if state.last_failure_at > 0.0
+                    then now -. state.last_failure_at
+                    else 0.0 in
+          if age > best_age then Some key, age else best_key, best_age)
+        (None, 0.0)
+        candidates
+    in
+    best)
+
 (* ── Outcome window queries ────────────────────── *)
 
 type outcome_kind =

@@ -29,11 +29,24 @@ let resolved_tool_lane_label ~effective_tools ~runtime_mcp_policy =
   | false, false, None -> "none"
 
 let fail_open_health_filtered_candidates
+    ~(health_tracker : Keeper_binding_health.t)
     ~(tool_filtered_candidates : 'a list)
     ~(health_filtered_candidates : 'a list)
+    ~(provider_key_of : 'a -> string)
   : 'a list * bool =
   match health_filtered_candidates with
-  | [] when tool_filtered_candidates <> [] -> tool_filtered_candidates, true
+  | [] when tool_filtered_candidates <> [] ->
+    (* All candidates were filtered by health/cooldown.
+       Pick the least-recently-failed provider for re-probe. *)
+    let keys = List.map provider_key_of tool_filtered_candidates in
+    match Keeper_binding_health.least_recently_failed_provider health_tracker ~candidates:keys with
+    | Some _key ->
+      (* Return the full tool_filtered set with re-probe flag,
+         allowing the runtime to attempt the recovered provider. *)
+      tool_filtered_candidates, true
+    | None ->
+      (* No prior failures — fall back to full set *)
+      tool_filtered_candidates, true
   | _ -> health_filtered_candidates, false
 
 (* RFC-0206: provider_rejections_for_no_tool_error deleted — multi-candidate

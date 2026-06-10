@@ -9,16 +9,18 @@ val resolved_tool_lane_label :
   string
 
 val fail_open_health_filtered_candidates :
+  health_tracker:Keeper_binding_health.t ->
   tool_filtered_candidates:'a list ->
   health_filtered_candidates:'a list ->
+  provider_key_of:('a -> string) ->
   'a list * bool
-(** [fail_open_health_filtered_candidates ~tool_filtered_candidates
-    ~health_filtered_candidates] preserves health-filtered candidates unless
+(** [fail_open_health_filtered_candidates ~health_tracker ~tool_filtered_candidates
+    ~health_filtered_candidates ~provider_key_of] preserves health-filtered candidates unless
     the health/cooldown filter would empty an otherwise tool-capable candidate
-    set. In that all-cooldown case it returns the pre-health-filter candidates
-    plus [true], allowing the runtime to attempt at least one provider and
-    surface the real upstream result instead of stopping at
-    [no_providers_available]. *)
+    set. In that all-cooldown case it picks the {e least-recently-failed}
+    provider from [tool_filtered_candidates] for re-probe, allowing the runtime
+    to attempt a single recovered provider instead of either stopping at
+    [no_providers_available] or blindly re-opening the full set. *)
 
 val apply_stream_idle_timeout_default : float option -> float option
 

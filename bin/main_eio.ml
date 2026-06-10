@@ -638,6 +638,11 @@ let run_cmd host port base_path =
   acquire_pid_lock port;
   acquire_base_path_lock normalized_base_path;
   Log.init_from_env ();
+  (* Decouple console mirror writes from the Eio domain before any keeper
+     boots: with fd 2 on a pty, a full pty buffer (scrollback/copy-mode)
+     blocks write(2) outside the scheduler and halts the whole fleet
+     (#20684, 2026-06-10 live stall). *)
+  Console_sink.start ();
   if stripped_base_path <> ""
      && String.equal (Filename.basename stripped_base_path) Common.masc_dirname
   then

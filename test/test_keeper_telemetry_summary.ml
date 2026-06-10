@@ -47,6 +47,20 @@ let test_record_telemetry_payload_feeds_summary () =
     check (float 0.001) "avg_duration_ms" 42.5 counters.Summary.avg_duration_ms
 ;;
 
+let test_record_telemetry_payload_without_keeper_is_ignored () =
+  Summary.reset ();
+  Summary.record_telemetry_payload
+    (`Assoc
+        [ "event_kind", `String "runtime_execution_built"
+        ; "runtime_id", `String "runtime-a"
+        ; "duration_ms", `Float 42.5
+        ; "success", `Bool true
+        ]);
+  let snapshot = Summary.snapshot () in
+  check int "total events" 0 snapshot.Summary.total_events;
+  check int "per-keeper rows" 0 (Hashtbl.length snapshot.Summary.per_keeper)
+;;
+
 let () =
   run
     "keeper_telemetry_summary"
@@ -59,5 +73,9 @@ let () =
             "event-bus telemetry payload feeds the summary"
             `Quick
             test_record_telemetry_payload_feeds_summary
+        ; test_case
+            "event-bus telemetry payload without keeper is ignored"
+            `Quick
+            test_record_telemetry_payload_without_keeper_is_ignored
         ] )
     ]

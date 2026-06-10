@@ -48,9 +48,10 @@ val record_event
   -> unit
 
 (** Decode and record a [Custom("telemetry_event", payload)] event-bus
-    payload. Missing optional fields are treated conservatively: unknown
-    keeper/runtime labels are bounded, and observed telemetry events default
-    to success unless an explicit failure/error status is present. *)
+    payload. Payloads without a keeper identity are ignored instead of
+    inventing an "unknown" keeper label. Missing optional runtime labels
+    remain absent, and observed telemetry events default to success unless
+    an explicit failure/error status is present. *)
 val record_telemetry_payload : Yojson.Safe.t -> unit
 
 (** Return a point-in-time snapshot of all aggregated counters.

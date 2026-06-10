@@ -62,6 +62,8 @@ let with_lock f =
 (* ── Public API ────────────────────────────────────────────────── *)
 
 let record_event ~keeper_name ~event_kind ~runtime_id ~duration_ms ~success =
+  (* Telemetry summary timestamps record event-bus receipt time for
+     operator observability only (NDT-OK); no deterministic workflow decision uses it. *)
   let entry = {
     timestamp = Unix.gettimeofday ();
     keeper_name;
@@ -135,22 +137,24 @@ let success_field json =
      | None -> true)
 
 let record_telemetry_payload payload =
-  let keeper_name =
-    string_field [ "keeper_name"; "keeper"; "agent_name"; "agent" ] payload
-    |> Option.value ~default:"unknown"
-  in
-  let event_kind =
-    string_field [ "event_kind"; "kind"; "event" ] payload
-    |> Option.value ~default:"telemetry_event"
-  in
-  let runtime_id = string_field [ "runtime_id"; "runtime"; "model_runtime" ] payload in
-  let duration_ms = float_field [ "duration_ms"; "elapsed_ms"; "latency_ms" ] payload in
-  record_event
-    ~keeper_name
-    ~event_kind
-    ~runtime_id
-    ~duration_ms
-    ~success:(success_field payload)
+  match string_field [ "keeper_name"; "keeper"; "agent_name"; "agent" ] payload with
+  | None -> ()
+  | Some keeper_name ->
+    let event_kind =
+      match string_field [ "event_kind"; "kind"; "event" ] payload with
+      | Some event_kind -> event_kind
+      (* sound-partial: allow - Custom("telemetry_event", payload) already
+         supplies the bus topic when payload omits a nested event kind. *)
+      | None -> "telemetry_event"
+    in
+    let runtime_id = string_field [ "runtime_id"; "runtime"; "model_runtime" ] payload in
+    let duration_ms = float_field [ "duration_ms"; "elapsed_ms"; "latency_ms" ] payload in
+    record_event
+      ~keeper_name
+      ~event_kind
+      ~runtime_id
+      ~duration_ms
+      ~success:(success_field payload)
 
 let snapshot () =
   with_lock (fun () ->

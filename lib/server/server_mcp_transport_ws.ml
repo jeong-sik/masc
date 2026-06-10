@@ -166,6 +166,9 @@ let new_session ~id ~wsd =
     inbound_partial_text = None;
   }
 
+let touch_session session =
+  session.last_active <- now ()
+
 (** Send a pre-allocated frame to a WebSocket client.
 
     The caller owns the [bytes] buffer; this function only reads it.  In
@@ -182,7 +185,7 @@ let send_frame_bytes session bytes ~len =
     try
       Httpun_ws.Wsd.send_bytes session.wsd
         ~kind:`Text bytes ~off:0 ~len;
-      session.last_active <- now ();
+      touch_session session;
       Transport_metrics.inc_ws_bytes_sent ~bytes:len;
       Transport_metrics.observe_ws_message_bytes_sent len;
       true
@@ -814,7 +817,7 @@ let read_payload_string payload ~len ~on_complete =
   if len = 0 then complete () else schedule ()
 
 let handle_inbound_text session ~on_message ~is_fin text =
-  session.last_active <- now ();
+  touch_session session;
   match session.inbound_partial_text, is_fin with
   | None, true ->
       if String.length text > 0 then
@@ -859,6 +862,35 @@ let cleanup_session session_id =
        to avoid logging amplification during WS storm (#10701). *)
     Log.Server.debug "WebSocket session %s closed" session_id
 
+let cleanup_session_if_still_stale session_id ~threshold ~observed_last_active =
+  let removed =
+    with_sessions_rw (fun () ->
+        match Hashtbl.find_opt sessions session_id with
+        | None -> false
+        | Some session
+          when session.last_active <= observed_last_active
+               && session.last_active < threshold ->
+            session.closed <- true;
+            (try Httpun_ws.Wsd.close session.wsd
+             with Eio.Cancel.Cancelled _ as e -> raise e
+                | exn ->
+                    Log.Server.warn
+                      "WS close failed for %s: %s"
+                      session_id
+                      (Printexc.to_string exn));
+            Hashtbl.remove sessions session_id;
+            slice_index_remove_session_locked session_id;
+            true
+        | Some _ -> false)
+  in
+  if removed then begin
+    Transport_metrics.set_ws_sessions
+      (with_sessions_rw (fun () -> Hashtbl.length sessions));
+    Sse.unsubscribe_external session_id;
+    Log.Server.debug "WebSocket session %s closed" session_id
+  end;
+  removed
+
 (** Remove stale sessions whose [last_active] is older than [idle_timeout]
     seconds.  Called periodically from the heartbeat loop. *)
 let sweep_stale_sessions ~idle_timeout ~now =
@@ -872,16 +904,20 @@ let sweep_stale_sessions ~idle_timeout ~now =
           sessions
           [])
   in
-  List.iter
-    (fun (id, last_active) ->
-      Log.Transport.info
-        "WS session %s idle > %.0fs; evicting (last_active=%.0f)"
-        id
-        idle_timeout
-        last_active;
-      cleanup_session id)
-    stale;
-  List.length stale
+  List.fold_left
+    (fun evicted (id, last_active) ->
+      if cleanup_session_if_still_stale id ~threshold ~observed_last_active:last_active
+      then begin
+        Log.Transport.info
+          "WS session %s idle > %.0fs; evicting (last_active=%.0f)"
+          id
+          idle_timeout
+          last_active;
+        evicted + 1
+      end
+      else evicted)
+    0
+    stale
 
 (** Number of active WebSocket sessions. *)
 let session_count () =
@@ -945,12 +981,14 @@ let upgrade_connection
                 read_inbound_message_frame session ~on_message ~is_fin ~len
                   payload
               | `Ping ->
+                touch_session session;
                 Httpun_ws.Wsd.send_pong wsd;
                 Httpun_ws.Payload.close payload
               | `Connection_close ->
                 cleanup_session session_id;
                 Httpun_ws.Payload.close payload
               | `Pong | `Other _ ->
+                touch_session session;
                 Httpun_ws.Payload.close payload
             );
             eof = (fun ?error:_ () ->
@@ -1034,4 +1072,3 @@ let () =
     ~ping:(fun ~session_id () -> dashboard_ping ~session_id ());
   Mcp_server_eio_protocol.register_dashboard_ack dashboard_ack
 ;;
-

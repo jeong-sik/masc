@@ -8,6 +8,12 @@ type phase_counts =
   ; offline : int
   ; paused : int
   ; overflowed : int
+  ; compacting : int
+  ; handing_off : int
+  ; draining : int
+  ; stopped : int
+  ; crashed : int
+  ; restarting : int
   ; zombie : int
   ; dead : int
   ; total : int
@@ -44,26 +50,53 @@ type telemetry_snapshot =
 
 (* ── Phase classification ───────────────────────────────── *)
 
+let empty_phase_counts =
+  { online = 0
+  ; observe = 0
+  ; offline = 0
+  ; paused = 0
+  ; overflowed = 0
+  ; compacting = 0
+  ; handing_off = 0
+  ; draining = 0
+  ; stopped = 0
+  ; crashed = 0
+  ; restarting = 0
+  ; zombie = 0
+  ; dead = 0
+  ; total = 0
+  }
+
 let classify_phase_counts (entries : registry_entry list) =
-  let fold_fn (on, ob, off, pa, ov, zo, de) (entry : registry_entry) =
+  let fold_fn counts (entry : registry_entry) =
     let open Keeper_state_machine in
+    let counts = { counts with total = counts.total + 1 } in
     match entry.phase with
-    | Running -> (on + 1, ob, off, pa, ov, zo, de)
-    | Failing -> (on, ob + 1, off, pa, ov, zo, de)
-    | Offline -> (on, ob, off + 1, pa, ov, zo, de)
-    | Paused -> (on, ob, off, pa + 1, ov, zo, de)
-    | Overflowed -> (on, ob, off, pa, ov + 1, zo, de)
-    | Zombie -> (on, ob, off, pa, ov, zo + 1, de)
-    | Dead -> (on, ob, off, pa, ov, zo, de + 1)
-    | _ -> (on, ob, off, pa, ov, zo, de)
+    | Running -> { counts with online = counts.online + 1 }
+    | Failing -> { counts with observe = counts.observe + 1 }
+    | Offline -> { counts with offline = counts.offline + 1 }
+    | Paused -> { counts with paused = counts.paused + 1 }
+    | Overflowed -> { counts with overflowed = counts.overflowed + 1 }
+    | Compacting -> { counts with compacting = counts.compacting + 1 }
+    | HandingOff -> { counts with handing_off = counts.handing_off + 1 }
+    | Draining -> { counts with draining = counts.draining + 1 }
+    | Stopped -> { counts with stopped = counts.stopped + 1 }
+    | Crashed -> { counts with crashed = counts.crashed + 1 }
+    | Restarting -> { counts with restarting = counts.restarting + 1 }
+    | Zombie -> { counts with zombie = counts.zombie + 1 }
+    | Dead -> { counts with dead = counts.dead + 1 }
   in
-  List.fold_left fold_fn (0, 0, 0, 0, 0, 0, 0) entries
+  List.fold_left fold_fn empty_phase_counts entries
 
 let alive_phases : Keeper_state_machine.phase list =
   [ Running; Failing ]
 
 let is_alive (entry : registry_entry) =
   List.mem entry.phase alive_phases
+
+let is_terminal_failure_phase = function
+  | Keeper_state_machine.Dead | Keeper_state_machine.Zombie -> true
+  | _ -> false
 
 (* ── Per-keeper health ──────────────────────────────────── *)
 
@@ -98,13 +131,7 @@ let detect_anomalies
   let total = List.length entries in
   let dead_count =
     List.length
-      (List.filter
-         (fun e ->
-           let e : registry_entry = e in
-           match e.phase with
-           | Keeper_state_machine.Dead -> true
-           | _ -> false)
-         entries)
+      (List.filter (fun (e : registry_entry) -> is_terminal_failure_phase e.phase) entries)
   in
   let paused_count =
     List.length
@@ -142,21 +169,14 @@ let summarize
       ~failure_spike_threshold
       (entries : registry_entry list)
   =
-  let (on, ob, off, pa, ov, zo, de) = classify_phase_counts entries in
-  let counts =
-    { online = on; observe = ob; offline = off; paused = pa;
-      overflowed = ov; zombie = zo; dead = de;
-      total = List.length entries }
-  in
+  let counts = classify_phase_counts entries in
   let healths = List.map (keeper_health_of_entry ~now) entries in
   let anomalies = detect_anomalies ~now ~cascade_window_sec
     ~failure_spike_threshold entries healths in
   let dead_keepers =
     List.filter
       (fun h ->
-        match h.phase with
-        | Keeper_state_machine.Dead -> true
-        | _ -> false)
+        is_terminal_failure_phase h.phase)
       healths
   in
   let paused_keepers =

@@ -78,6 +78,7 @@ type dispatched_event =
       { channel_id : string
       ; message_id : string
       ; author_id : string
+      ; author_name : string option
       ; content : string
       ; mentions_bot : bool
       }
@@ -275,6 +276,17 @@ let decode_message_create ~bot_user_id ~payload =
     | Some a -> field_string_opt "id" a
     | None -> None
   in
+  (* RFC-0223 P1: [global_name] is the user-facing display name and is
+     nullable; [username] is the unique handle and always present on
+     real payloads. Prefer the display name. *)
+  let author_name =
+    match author with
+    | None -> None
+    | Some a -> (
+        match field_string_opt "global_name" a with
+        | Some _ as name -> name
+        | None -> field_string_opt "username" a)
+  in
   let mentions_bot =
     match bot_user_id, assoc_opt "mentions" payload with
     | None, _ | _, None -> false
@@ -291,7 +303,8 @@ let decode_message_create ~bot_user_id ~payload =
   | Some channel_id, Some message_id, Some author_id ->
       Ok
         (Message_create
-           { channel_id; message_id; author_id; content; mentions_bot })
+           { channel_id; message_id; author_id; author_name; content;
+             mentions_bot })
   | _ ->
       Error "MESSAGE_CREATE payload: missing channel_id / id / author.id"
 

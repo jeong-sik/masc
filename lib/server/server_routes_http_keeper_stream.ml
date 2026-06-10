@@ -753,24 +753,33 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
            let message_id = Printf.sprintf "keeper-msg-%d" (now_id ()) in
            process_single_turn ~payload ~run_id ~message_id ~agent_name;
            let rec drain_queue () =
-             match Keeper_chat_queue.dequeue ~keeper_name:payload.name with
-             | None -> ()
-             | Some queued ->
-                 (match queued.source with
+             match Keeper_chat_queue.dequeue_coalesced ~keeper_name:payload.name with
+             | [] -> ()
+             | queued_messages ->
+                 let source = (List.hd queued_messages).source in
+                 (match source with
                   | Keeper_chat_queue.Dashboard ->
                       let run_id = Printf.sprintf "keeper-run-%d" (now_id ()) in
                       let message_id = Printf.sprintf "keeper-msg-%d" (now_id ()) in
+                      let combined_content =
+                        queued_messages
+                        |> List.map (fun q -> q.content)
+                        |> String.concat "\n---\n"
+                      in
+                      let combined_attachments =
+                        List.concat_map (fun q -> q.attachments) queued_messages
+                      in
                       let queued_payload =
                         { payload with
-                          message = queued.content;
-                          attachments = queued.attachments }
+                          message = combined_content;
+                          attachments = combined_attachments }
                       in
                       process_single_turn ~payload:queued_payload ~run_id ~message_id
                         ~agent_name
                   | Keeper_chat_queue.Discord _ | Keeper_chat_queue.Slack _ ->
                       Log.Keeper.warn
-                        "keeper_chat_queue: non-Dashboard source dropped for keeper=%s"
-                        payload.name);
+                        "keeper_chat_queue: non-Dashboard source dropped for keeper=%s (coalesced=%d messages)"
+                        payload.name (List.length queued_messages));
                  drain_queue ()
            in
            drain_queue ()))

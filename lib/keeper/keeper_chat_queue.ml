@@ -54,6 +54,26 @@ let dequeue ~keeper_name =
           Eio.Mutex.use_rw ~protect:true entry.mutex (fun () ->
               if Queue.is_empty entry.q then None else Some (Queue.pop entry.q)))
 
+let dequeue_coalesced ~keeper_name =
+  Eio.Mutex.use_rw ~protect:true registry_mutex (fun () ->
+      match Hashtbl.find_opt registry keeper_name with
+      | None -> []
+      | Some entry ->
+          Eio.Mutex.use_rw ~protect:true entry.mutex (fun () ->
+              if Queue.is_empty entry.q then []
+              else
+                let head = Queue.peek entry.q in
+                let source_key = head.source in
+                let rec drain acc =
+                  if Queue.is_empty entry.q then List.rev acc
+                  else
+                    let next = Queue.peek entry.q in
+                    if next.source = source_key then
+                      drain (Queue.pop entry.q :: acc)
+                    else List.rev acc
+                in
+                drain []))
+
 let length ~keeper_name =
   Eio.Mutex.use_rw ~protect:true registry_mutex (fun () ->
       match Hashtbl.find_opt registry keeper_name with

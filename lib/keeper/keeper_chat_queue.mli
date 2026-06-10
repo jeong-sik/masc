@@ -42,6 +42,18 @@ val enqueue : keeper_name:string -> queued_message -> unit
     [None] if the queue is empty or does not exist. *)
 val dequeue : keeper_name:string -> queued_message option
 
+(** [dequeue_coalesced keeper_name] removes and returns all consecutive
+    messages from the same [source] at the head of the queue.  At most
+    one source's messages are returned (the head source).  Returns [[]]
+    when the queue is empty or does not exist.
+
+    Use for coalescing: when the same Discord/Slack/Dashboard channel
+    sends multiple messages while the keeper is busy, they get merged
+    into a single turn instead of N sequential turns.
+
+    @since task-759 *)
+val dequeue_coalesced : keeper_name:string -> queued_message list
+
 (** [length keeper_name] returns the number of queued messages. *)
 val length : keeper_name:string -> int
 

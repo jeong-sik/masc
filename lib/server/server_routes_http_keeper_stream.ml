@@ -599,6 +599,22 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
   let chat_source =
     if has_connector_context then payload.channel else "dashboard"
   in
+  (* RFC-0223 P1: authority derives from the arrival route. Connector
+     context means an arbitrary external person on that channel; its
+     absence means the authenticated dashboard operator (the route is
+     bearer-gated, and the dashboard supplies no per-user identity). *)
+  let chat_speaker : Keeper_chat_store.speaker =
+    if has_connector_context then
+      { speaker_id = Some payload.channel_user_id;
+        speaker_name =
+          (let name = String.trim payload.channel_user_name in
+           if name = "" then None else Some name);
+        speaker_authority = Keeper_chat_store.External }
+    else
+      { speaker_id = None;
+        speaker_name = None;
+        speaker_authority = Keeper_chat_store.Owner }
+  in
   let on_event evt =
     record_tool_event evt;
     push_worker_event (Stream_event evt)
@@ -611,6 +627,7 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
       ~user_attachments:payload.attachments
       ~tool_calls:(collected_tool_calls ())
       ~source:chat_source
+      ~speaker:chat_speaker
       ~assistant_content:(persisted_error_reply err)
       ();
     Keeper_chat_broadcast.chat_appended
@@ -655,6 +672,7 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
                 ~user_attachments:payload.attachments
                 ~tool_calls:(collected_tool_calls ())
                 ~source:chat_source
+                ~speaker:chat_speaker
                 ~assistant_content:visible_reply
                 ();
               Keeper_chat_broadcast.chat_appended

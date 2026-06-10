@@ -37,6 +37,15 @@ export const KeeperChatHistoryMessageSchema = object({
   tool_call_id: optional(string()),
   tool_call_name: optional(string()),
   source: optional(string()),
+  // RFC-0223 P1 speaker identity, present on user rows written since
+  // then. `speaker_authority` is 'owner' (authenticated dashboard
+  // operator) or 'external' (arbitrary person on a connector channel);
+  // left as open string() per the same deploy-window rationale as
+  // `role` above. id/name are absent when the route supplies none
+  // (dashboard rows carry authority only).
+  speaker_id: optional(string()),
+  speaker_name: optional(string()),
+  speaker_authority: optional(string()),
 })
 
 export type KeeperChatHistoryMessage = InferOutput<typeof KeeperChatHistoryMessageSchema>

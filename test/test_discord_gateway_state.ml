@@ -295,17 +295,27 @@ let test_heartbeat_tick_when_connected () =
 (* ---------------------------------------------------------------- *)
 
 let message_create_payload
-    ~id ~channel_id ~author_id ~content ~mention_ids () : Yojson.Safe.t =
+    ~id ~channel_id ~author_id ?username ?global_name ~content ~mention_ids ()
+    : Yojson.Safe.t =
   let mentions =
     `List
       (List.map
          (fun uid -> `Assoc [ ("id", `String uid) ])
          mention_ids)
   in
+  let author_fields =
+    ("id", `String author_id)
+    :: (match username with
+        | Some u -> [ ("username", `String u) ]
+        | None -> [])
+    @ (match global_name with
+       | Some g -> [ ("global_name", `String g) ]
+       | None -> [])
+  in
   `Assoc
     [ ("id", `String id)
     ; ("channel_id", `String channel_id)
-    ; ("author", `Assoc [ ("id", `String author_id) ])
+    ; ("author", `Assoc author_fields)
     ; ("content", `String content)
     ; ("mentions", mentions)
     ]
@@ -346,12 +356,55 @@ let test_decode_message_create_with_mention () =
         { channel_id = "CH1"
         ; message_id = "MSG1"
         ; author_id = "USER1"
+        ; author_name = None
         ; content = "@BOT hi"
         ; mentions_bot = true
         }) ->
       ()
   | Ok _ -> fail "decoded wrong MESSAGE_CREATE fields"
   | Error msg -> fail msg
+
+(* RFC-0223 P1 — author display name extraction. *)
+
+let decode_author_name ~payload =
+  match
+    S.decode_dispatch
+      ~bot_user_id:(Some "BOT")
+      ~event_name:"MESSAGE_CREATE"
+      ~payload
+  with
+  | Ok (S.Message_create { author_name; _ }) -> author_name
+  | Ok _ -> fail "expected MESSAGE_CREATE"
+  | Error msg -> fail msg
+
+let test_decode_author_name_prefers_global_name () =
+  let payload =
+    message_create_payload
+      ~id:"MSG10" ~channel_id:"CH1" ~author_id:"USER1"
+      ~username:"minsu_handle" ~global_name:"Minsu"
+      ~content:"hi" ~mention_ids:[] ()
+  in
+  Alcotest.(check (option string)) "global_name wins"
+    (Some "Minsu") (decode_author_name ~payload)
+
+let test_decode_author_name_falls_back_to_username () =
+  let payload =
+    message_create_payload
+      ~id:"MSG11" ~channel_id:"CH1" ~author_id:"USER1"
+      ~username:"minsu_handle"
+      ~content:"hi" ~mention_ids:[] ()
+  in
+  Alcotest.(check (option string)) "username fallback"
+    (Some "minsu_handle") (decode_author_name ~payload)
+
+let test_decode_author_name_absent_when_payload_has_neither () =
+  let payload =
+    message_create_payload
+      ~id:"MSG12" ~channel_id:"CH1" ~author_id:"USER1"
+      ~content:"hi" ~mention_ids:[] ()
+  in
+  Alcotest.(check (option string)) "no name fields -> None"
+    None (decode_author_name ~payload)
 
 let test_decode_message_create_without_mention () =
   let payload =
@@ -921,6 +974,12 @@ let () =
             `Quick test_decode_message_create_with_mention
         ; test_case "MESSAGE_CREATE without mention sets mentions_bot=false"
             `Quick test_decode_message_create_without_mention
+        ; test_case "author_name prefers global_name" `Quick
+            test_decode_author_name_prefers_global_name
+        ; test_case "author_name falls back to username" `Quick
+            test_decode_author_name_falls_back_to_username
+        ; test_case "author_name absent when payload has neither" `Quick
+            test_decode_author_name_absent_when_payload_has_neither
         ; test_case "MESSAGE_REACTION_ADD unicode emoji" `Quick
             test_decode_reaction_add_unicode
         ; test_case "MESSAGE_REACTION_ADD custom emoji => name:id" `Quick

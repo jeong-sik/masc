@@ -39,7 +39,7 @@ gateway is alive, or that it could be spoken through.
 ### 1.2 No pull: lane history exists on disk but is unreachable from a turn
 
 Every connector's traffic is already persisted into one JSONL per keeper
-(`~/.masc/keeper_chat/<name>.jsonl`) with a `source` label
+(`<base-path>/.masc/keeper_chat/<name>.jsonl`) with a `source` label
 (`keeper_chat_store.mli:35-43` **(verified)**). The only reader is the
 dashboard hydration endpoint `GET /api/v1/keepers/:name/chat/history`
 (`server_dashboard_http_keeper_api.ml:28-39` **(verified)**). The keeper

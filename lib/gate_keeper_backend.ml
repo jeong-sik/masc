@@ -114,6 +114,14 @@ let dispatch ~sw ~clock ~proc_mgr ~net ~config
              ~channel_workspace_id ~content) );
       ("direct_reply", `Bool true);
       ("channel_session_key", `String channel_session_key);
+      (* RFC-0223 P1: raw connector identity, consumed by
+         [Keeper_tool_surface_ops.append_direct_chat_pair_if_reply] so the
+         persisted chat line carries the lane label and speaker instead
+         of the generic "agent" source. Internal-only args, same class
+         as [direct_reply] / [channel_session_key]. *)
+      ("channel", `String channel);
+      ("channel_user_id", `String channel_user_id);
+      ("channel_user_name", `String channel_user_name);
     ]
   in
   let keeper_ctx : _ Keeper_tool_surface.context = {

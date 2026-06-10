@@ -213,7 +213,12 @@ let make_keeper_meta name =
   | Error err -> fail ("make_keeper_meta: " ^ err)
 ;;
 
-let test_keeper_voice_speak_returns_queued_with_root_switch () =
+(* Regression for the 2026-06-10 voice repeat incident: the speak tool is
+   synchronous again. With no TTS endpoint configured in the sandbox, the
+   failure must surface to the caller as status=error — never as a
+   fire-and-forget "queued" pseudo-success the model would mistake for
+   completed playback. *)
+let test_keeper_voice_speak_surfaces_tts_failure () =
   Eio_main.run
   @@ fun env ->
   Eio.Switch.run
@@ -223,26 +228,23 @@ let test_keeper_voice_speak_returns_queued_with_root_switch () =
   let mono_clock = Eio.Stdenv.mono_clock env in
   Eio_context.with_test_env ~net ~clock ~mono_clock ~sw (fun () ->
     let config = test_config () in
-    let meta = make_keeper_meta "voice-queue-keeper" in
+    let meta = make_keeper_meta "voice-sync-keeper" in
     let raw =
       Masc.Keeper_tool_voice_runtime.handle_voice_tool
         ~config
         ~meta
         ~name:"keeper_voice_speak"
-        ~args:(`Assoc [ "message", `String "hello from queued voice test" ])
+        ~args:(`Assoc [ "message", `String "hello from sync voice test" ])
         ()
     in
     let json = Yojson.Safe.from_string raw in
-    check string "queued status" "queued"
+    check string "error status" "error"
       Yojson.Safe.Util.(member "status" json |> to_string);
-    check string "background execution" "background_voice_queue"
-      Yojson.Safe.Util.(member "execution" json |> to_string);
-    check bool "memory recorded" true
-      Yojson.Safe.Util.(member "memory_recorded" json |> to_bool);
-    ignore (Masc.Voice_bridge.discard_queued_agent_speak ~agent_id:meta.name))
+    check string "failure reason surfaced" "no configured TTS endpoint"
+      Yojson.Safe.Util.(member "message" json |> to_string))
 ;;
 
-let test_keeper_voice_speak_records_memory_bank_row () =
+let test_keeper_voice_speak_failure_writes_no_memory_row () =
   Eio_main.run
   @@ fun env ->
   Eio.Switch.run
@@ -253,20 +255,14 @@ let test_keeper_voice_speak_records_memory_bank_row () =
   Eio_context.with_test_env ~net ~clock ~mono_clock ~sw (fun () ->
     let config = test_config () in
     let meta = make_keeper_meta "voice-memory-keeper" in
-    let message = "spoken memory should be durable" in
-    let raw =
-      Masc.Keeper_tool_voice_runtime.handle_voice_tool
-        ~config
-        ~meta
-        ~name:"keeper_voice_speak"
-        ~args:(`Assoc [ "message", `String message; "priority", `Int 3 ])
-        ()
-    in
-    let json = Yojson.Safe.from_string raw in
-    check bool "memory recorded" true
-      Yojson.Safe.Util.(member "memory_recorded" json |> to_bool);
-    check int "memory rows written" 1
-      Yojson.Safe.Util.(member "memory_rows_written" json |> to_int);
+    let message = "unspoken voice must not be recorded" in
+    ignore
+      (Masc.Keeper_tool_voice_runtime.handle_voice_tool
+         ~config
+         ~meta
+         ~name:"keeper_voice_speak"
+         ~args:(`Assoc [ "message", `String message; "priority", `Int 3 ])
+         ());
     let memory_path = Masc.Keeper_types_support.keeper_memory_bank_path config meta.name in
     let rows =
       read_lines memory_path
@@ -276,18 +272,9 @@ let test_keeper_voice_speak_records_memory_bank_row () =
       rows
       |> List.find_opt (fun row ->
         String.equal row.Masc.Keeper_memory_bank.source "voice_output"
-        && String.equal row.kind "progress"
         && String.equal row.text message)
     in
-    (match row with
-     | Some row ->
-       check string "voice memory horizon" "short_term" row.horizon;
-       check string "voice memory execution" "background_voice_queue"
-         Yojson.Safe.Util.(member "execution" row.json |> to_string);
-       check int "voice priority metadata" 3
-         Yojson.Safe.Util.(member "voice_priority" row.json |> to_int)
-     | None -> fail "expected voice_output progress memory row");
-    ignore (Masc.Voice_bridge.discard_queued_agent_speak ~agent_id:meta.name))
+    check bool "no voice_output row for failed speak" true (Option.is_none row))
 ;;
 
 let test_keeper_voice_speak_text_fallback_records_memory_bank_row () =
@@ -359,7 +346,7 @@ let test_keeper_voice_session_start_does_not_store_session_name_as_voice () =
          ()))
 ;;
 
-let test_keeper_voice_session_end_discards_queued_speech () =
+let test_keeper_voice_session_end_reports_ended () =
   Eio_main.run
   @@ fun env ->
   Eio.Switch.run
@@ -369,29 +356,14 @@ let test_keeper_voice_session_end_discards_queued_speech () =
   let mono_clock = Eio.Stdenv.mono_clock env in
   Eio_context.with_test_env ~net ~clock ~mono_clock ~sw (fun () ->
     let config = test_config () in
-    let meta = make_keeper_meta "voice-session-drain-keeper" in
+    let meta = make_keeper_meta "voice-session-end-keeper" in
     ignore
       (Masc.Keeper_tool_voice_runtime.handle_voice_tool
          ~config
          ~meta
          ~name:"keeper_voice_session_start"
-         ~args:(`Assoc [ "session_name", `String "drain regression" ])
+         ~args:(`Assoc [ "session_name", `String "end regression" ])
          ());
-    let queued =
-      Masc.Voice_bridge.enqueue_agent_speak
-        ~sw
-        ~clock
-        ~net
-        ~agent_id:meta.name
-        ~message:"queued voice should be discarded"
-        ~start_worker:false
-        ()
-    in
-    (match queued with
-     | Ok speak_json ->
-       check string "queued status" "queued"
-         Yojson.Safe.Util.(member "status" speak_json |> to_string)
-     | Error err -> fail ("expected queued speech, got error: " ^ err));
     let end_raw =
       Masc.Keeper_tool_voice_runtime.handle_voice_tool
         ~config
@@ -403,8 +375,30 @@ let test_keeper_voice_session_end_discards_queued_speech () =
     let end_json = Yojson.Safe.from_string end_raw in
     check string "session ended" "ended"
       Yojson.Safe.Util.(member "status" end_json |> to_string);
-    check int "discarded queued job" 1
-      Yojson.Safe.Util.(member "discarded_voice_queue_jobs" end_json |> to_int))
+    (* The fire-and-forget speak queue was removed with the synchronous
+       speak contract; session_end no longer reports discarded jobs. *)
+    check bool "no queue discard field" true
+      (Yojson.Safe.Util.member "discarded_voice_queue_jobs" end_json = `Null))
+;;
+
+let test_playback_timeout_parsers_and_budget () =
+  check (option (float 0.001)) "afinfo duration line parses"
+    (Some 236.6)
+    (Voice_bridge_core.parse_afinfo_duration
+       "File: x.mp3\nestimated duration: 236.600 sec\naudio bytes: 1\n");
+  check (option (float 0.001)) "afinfo garbage is None" None
+    (Voice_bridge_core.parse_afinfo_duration "no duration here");
+  check (option (float 0.001)) "ffprobe bare seconds parses"
+    (Some 61.25)
+    (Voice_bridge_core.parse_ffprobe_duration "61.25\n");
+  check (option (float 0.001)) "ffprobe N/A is None" None
+    (Voice_bridge_core.parse_ffprobe_duration "N/A");
+  check (float 0.001) "known duration gets margin"
+    (100.0 +. Voice_bridge_core.playback_timeout_margin_sec)
+    (Voice_bridge_core.playback_timeout_sec_for ~duration_sec:(Some 100.0));
+  check (float 0.001) "unknown duration uses generous default"
+    Voice_bridge_core.unknown_duration_playback_timeout_sec
+    (Voice_bridge_core.playback_timeout_sec_for ~duration_sec:None)
 ;;
 
 let () =
@@ -430,15 +424,15 @@ let () =
         ; test_case "stt request provider_d compat" `Quick test_stt_request_openai_compat
         ; test_case "stt request mcp rejected" `Quick test_stt_request_mcp_rejected
         ] )
-    ; ( "keeper_voice_queue"
+    ; ( "keeper_voice_speak"
       , [ test_case
-            "keeper_voice_speak queues on root switch"
+            "keeper_voice_speak surfaces TTS failure"
             `Quick
-            test_keeper_voice_speak_returns_queued_with_root_switch
+            test_keeper_voice_speak_surfaces_tts_failure
         ; test_case
-            "keeper_voice_speak records memory"
+            "failed speak writes no memory row"
             `Quick
-            test_keeper_voice_speak_records_memory_bank_row
+            test_keeper_voice_speak_failure_writes_no_memory_row
         ; test_case
             "keeper_voice_speak fallback records memory"
             `Quick
@@ -448,9 +442,15 @@ let () =
             `Quick
             test_keeper_voice_session_start_does_not_store_session_name_as_voice
         ; test_case
-            "session_end discards queued speech"
+            "session_end reports ended without queue field"
             `Quick
-            test_keeper_voice_session_end_discards_queued_speech
+            test_keeper_voice_session_end_reports_ended
+        ] )
+    ; ( "playback_timeout"
+      , [ test_case
+            "duration parsers and timeout budget"
+            `Quick
+            test_playback_timeout_parsers_and_budget
         ] )
     ]
 ;;

@@ -590,29 +590,78 @@ let default_evaluator_runtime () =
     Returns unmet contract items. A contract item is "met" if the
     notes contain a case-insensitive substring match.
 
-    Also supports a word-boundary token fallback: a contract item
+    Also supports a narrow word-boundary token fallback: a contract item
     expressed in snake_case (e.g. "record_synthetic_backpressure") is
-    split on underscores and each token checked individually against
-    the notes.  This accommodates natural-language descriptions such
-    as "synthetic backpressure counter rebased" that would fail a
-    literal substring check against the snake_case contract item.
+    split on underscores and checked as a nearby word sequence in the
+    notes.  This accommodates natural-language descriptions that would
+    fail a literal substring check against the snake_case contract item
+    without weakening ordinary space-separated phrase contracts.
 
     This is deliberately simple — the contract is a lightweight
     pre-declaration, not a formal specification language. *)
 let check_contract ~(notes : string) ~(contract : string list) : string list =
   let lower_notes = String.lowercase_ascii notes in
-  let tokens_of item =
-    item
-    |> String.split_on_char '_'
-    |> List.concat_map (String.split_on_char ' ')
-    |> List.filter (fun t -> String.length t > 0)
+  let is_word_char = function
+    | 'a' .. 'z' | '0' .. '9' -> true
+    | _ -> false
+  in
+  let is_word_token token =
+    String.length token > 0 && String.for_all is_word_char token
+  in
+  let words_of text =
+    let len = String.length text in
+    let rec skip i acc =
+      if i >= len then List.rev acc
+      else if is_word_char text.[i] then take i i acc
+      else skip (i + 1) acc
+    and take start i acc =
+      if i < len && is_word_char text.[i] then take start (i + 1) acc
+      else skip i (String.sub text start (i - start) :: acc)
+    in
+    skip 0 []
+  in
+  let words = words_of lower_notes in
+  let snake_tokens_of item =
+    let lower_item = String.lowercase_ascii item in
+    if not (String.contains lower_item '_') then []
+    else
+      lower_item
+      |> String.split_on_char '_'
+      |> List.filter is_word_token
+  in
+  let rec find_next_with_gap words token gap =
+    match words with
+    | [] -> None
+    | word :: rest when String.equal word token -> Some rest
+    | _ :: rest when gap > 0 -> find_next_with_gap rest token (gap - 1)
+    | _ -> None
+  in
+  let rec sequence_matches_from words tokens =
+    match tokens with
+    | [] -> true
+    | token :: rest ->
+      (match find_next_with_gap words token 1 with
+       | Some remaining -> sequence_matches_from remaining rest
+       | None -> false)
+  in
+  let rec contains_token_sequence words tokens =
+    match tokens with
+    | [] -> false
+    | first :: rest ->
+      (match words with
+       | [] -> false
+       | word :: tail ->
+         if String.equal word first && sequence_matches_from tail rest
+         then true
+         else contains_token_sequence tail tokens)
   in
   let item_met item =
     String_util.contains_substring_ci lower_notes item
     ||
-    let tokens = tokens_of item in
+    let tokens = snake_tokens_of item in
     List.length tokens > 1
-    && List.for_all (fun tok -> String_util.contains_substring_ci lower_notes tok) tokens
+    && List.length tokens = List.length (String.split_on_char '_' item)
+    && contains_token_sequence words tokens
   in
   List.filter (fun item -> not (item_met item)) contract
 ;;

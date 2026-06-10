@@ -185,6 +185,16 @@ let board_tools : Masc_domain.tool_schema list =
                             "Compact one-line per post. Set false for full \
                              body/TTL/visibility" )
                       ] )
+                ; ( "exclude_author"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; "maxLength", `Int 100
+                      ; ( "description"
+                        , `String
+                            "Exclude posts by author name (case-insensitive substring \
+                             match). Pass your own keeper name to avoid self-referential \
+                             loops when reading the board." )
+                      ] )
                 ] )
           ; "additionalProperties", `Bool false
           ]

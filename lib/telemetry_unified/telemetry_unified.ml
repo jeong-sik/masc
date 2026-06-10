@@ -591,6 +591,22 @@ let read_trajectory_file path ~max_lines ?since_ts ?until_ts () =
                !parse_error_count);
       entries)
 
+(* A trace file whose last write predates [since_ts] cannot hold entries in the
+   requested window: traces are append-ordered, so the file mtime tracks the
+   newest entry. Skip such files without opening them. Observatory polls a 1h
+   window, but the store keeps ~84 trace files across keepers (most >7d old), so
+   the windowed read tail-read every one (#20665 bounded per-file lines but not
+   the file fan-out — measured 3.2s windowed vs 0.25s no-window). mtime-skip
+   cuts the per-call fan-out from all-files to in-window-files. Conservative on
+   stat failure (keeps the file) and when no window is requested. *)
+let trace_file_within_since ~since_ts path =
+  match since_ts with
+  | None -> true
+  | Some since ->
+    (match Unix.stat path with
+     | st -> st.Unix.st_mtime >= since
+     | exception _ -> true)
+
 let read_trajectory_tool_calls ~masc_root ?keeper_name ?since_ts ?until_ts ~n ()
     : Yojson.Safe.t list =
   let dirs = discover_trajectory_keeper_dirs masc_root in
@@ -611,7 +627,9 @@ let read_trajectory_tool_calls ~masc_root ?keeper_name ?since_ts ?until_ts ~n ()
           ~site:"read_trajectory_tool_calls_readdir" ~default:[] (fun () ->
           Sys.readdir dir
           |> Array.to_list
-          |> List.filter (fun name -> Filename.check_suffix name ".jsonl")
+          |> List.filter (fun name ->
+               Filename.check_suffix name ".jsonl"
+               && trace_file_within_since ~since_ts (Filename.concat dir name))
           |> List.concat_map (fun name ->
                read_trajectory_file
                  (Filename.concat dir name)

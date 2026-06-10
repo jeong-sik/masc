@@ -183,7 +183,7 @@ let append_decision_record
                   (max 0
                      (observation.unclaimed_task_count
                       - observation.claimable_task_count)) );
-              ("failed_task_count", `Int observation.failed_task_count);
+              ("orphan_task_count", `Int observation.orphan_task_count);
               ("pending_verification_count", `Int observation.pending_verification_count);
               ("active_agent_count", `Int observation.active_agent_count);
             ] );

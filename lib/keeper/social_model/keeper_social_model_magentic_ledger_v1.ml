@@ -23,7 +23,7 @@ let reactive_signal_count
   + List.length observation.pending_scope_messages
 
 let backlog_count (observation : Keeper_world_observation.world_observation) =
-  observation.claimable_task_count + observation.failed_task_count
+  observation.claimable_task_count + observation.orphan_task_count
 
 let belief_summary_of_snapshot ~(snapshot : Fsm.snapshot)
     ~(event : Fsm.event)

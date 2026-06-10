@@ -56,7 +56,7 @@ type world_observation = {
   has_question: bool;
   message_content: string;
   unclaimed_task_count: int;
-  failed_task_count: int;
+  orphan_task_count: int;
   active_agent_count: int;
   agent_count_changed: bool;
   active_goal_count: int;

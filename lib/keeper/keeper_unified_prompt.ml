@@ -440,7 +440,7 @@ let autonomous_trigger_lines
           (match decision.task_reactive_cooldown with
            | Some cooldown
              when observation.claimable_task_count > 0
-                  || observation.failed_task_count > 0 ->
+                  || observation.orphan_task_count > 0 ->
                Some
                  (Printf.sprintf
                     "- Backlog acceleration cooldown: %ds for claimable/failed tasks"
@@ -604,7 +604,7 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
     observation.unclaimed_task_count > 0
     || observation.claimable_task_count > 0
     || observation.provider_capacity_blocked_task_count > 0
-    || observation.failed_task_count > 0
+    || observation.orphan_task_count > 0
     || observation.active_agent_count > 0
   then (
     Buffer.add_string ubuf "### Namespace State\n";
@@ -636,9 +636,9 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
         (Printf.sprintf
            "- Provider-capacity blocked claimable tasks: %d\n"
            observation.provider_capacity_blocked_task_count);
-    if observation.failed_task_count > 0 then
+    if observation.orphan_task_count > 0 then
       Buffer.add_string ubuf
-        (Printf.sprintf "- Orphan tasks: %d\n" observation.failed_task_count);
+        (Printf.sprintf "- Orphan tasks: %d\n" observation.orphan_task_count);
     Buffer.add_string ubuf
       (Printf.sprintf "- Active agents: %d\n" observation.active_agent_count);
     Buffer.add_char ubuf '\n');

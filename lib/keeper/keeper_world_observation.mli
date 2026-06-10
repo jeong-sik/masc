@@ -68,7 +68,7 @@ type world_observation = {
   (** Number of otherwise-claimable tasks currently held back by provider
       capacity/cooldown when no fail-open runtime is available. *)
 
-  failed_task_count : int;
+  orphan_task_count : int;
   (** Number of failed/cancelled tasks in the workspace backlog. *)
 
   pending_verification_count : int;

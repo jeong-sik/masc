@@ -91,8 +91,8 @@ let belief_summary_of_observation
            Some
              (Printf.sprintf "claimable_tasks=%d" observation.claimable_task_count)
          else None);
-        (if observation.failed_task_count > 0 then
-           Some (Printf.sprintf "failed_tasks=%d" observation.failed_task_count)
+        (if observation.orphan_task_count > 0 then
+           Some (Printf.sprintf "failed_tasks=%d" observation.orphan_task_count)
          else None);
         (if observation.active_goals <> [] then
            Some

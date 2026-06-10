@@ -38,7 +38,7 @@ type world_observation =
   ; unclaimed_task_count : int
   ; claimable_task_count : int
   ; provider_capacity_blocked_task_count : int
-  ; failed_task_count : int
+  ; orphan_task_count : int
   ; pending_verification_count : int
   ; backlog_updated_since_last_scheduled_autonomous : bool
   ; active_agent_count : int
@@ -430,7 +430,7 @@ let observe
   in
   let ( unclaimed_task_count
       , claimable_task_count
-      , failed_task_count
+      , orphan_task_count
       , pending_verification_count
       , backlog_updated_since_last_scheduled_autonomous )
     =
@@ -463,7 +463,7 @@ let observe
   ; unclaimed_task_count
   ; claimable_task_count
   ; provider_capacity_blocked_task_count
-  ; failed_task_count
+  ; orphan_task_count
   ; pending_verification_count
   ; backlog_updated_since_last_scheduled_autonomous
   ; active_agent_count
@@ -475,7 +475,7 @@ let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
   =
   let ( unclaimed_task_count
       , claimable_task_count
-      , failed_task_count
+      , orphan_task_count
       , pending_verification_count
       , backlog_updated_since_last_scheduled_autonomous )
     =
@@ -495,7 +495,7 @@ let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
   ; unclaimed_task_count
   ; claimable_task_count
   ; provider_capacity_blocked_task_count
-  ; failed_task_count
+  ; orphan_task_count
   ; pending_verification_count
   ; backlog_updated_since_last_scheduled_autonomous
   ; active_agent_count = count_active_agents ~config
@@ -513,7 +513,7 @@ let durable_signal_present
   in
   let ( _unclaimed_task_count
       , claimable_task_count
-      , failed_task_count
+      , orphan_task_count
       , pending_verification_count
       , _backlog_updated_since_last_scheduled_autonomous )
     =
@@ -535,7 +535,7 @@ let durable_signal_present
   || pending_board_events <> []
   || pending_scope_messages <> []
   || claimable_task_count > 0
-  || failed_task_count > 0
+  || orphan_task_count > 0
   || pending_verification_count > 0
 ;;
 
@@ -544,14 +544,14 @@ let actionable_signal_present (observation : world_observation) =
   || observation.pending_board_events <> []
   || observation.pending_scope_messages <> []
   || observation.claimable_task_count > 0
-  || observation.failed_task_count > 0
+  || observation.orphan_task_count > 0
   || observation.pending_verification_count > 0
 ;;
 
 let proactive_work_signal_present ~(meta : keeper_meta) (observation : world_observation) =
   let task_backlog_signal =
     observation.claimable_task_count > 0
-     || observation.failed_task_count > 0
+     || observation.orphan_task_count > 0
      || observation.pending_verification_count > 0
   in
   observation.pending_mentions <> []
@@ -683,7 +683,7 @@ let keeper_cycle_decision
           max task_cooldown_floor (effective_cooldown / max 1 task_cooldown_divisor)
         in
         let has_actionable_tasks =
-          observation.claimable_task_count > 0 || observation.failed_task_count > 0
+          observation.claimable_task_count > 0 || observation.orphan_task_count > 0
         in
         let idle_gate_elapsed = observation.idle_seconds >= idle_gate_sec in
         let cooldown_elapsed = since_last_scheduled_autonomous >= effective_cooldown in
@@ -805,7 +805,7 @@ let keeper_cycle_decision
                    Some
                      (Task_backlog
                         { unclaimed = observation.claimable_task_count
-                        ; failed = observation.failed_task_count
+                        ; failed = observation.orphan_task_count
                         })
                  else None)
               ; (if backlog_fresh || backlog_elapsed

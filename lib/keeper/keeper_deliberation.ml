@@ -128,7 +128,7 @@ type world_observation = {
   has_question: bool;
   message_content: string;
   unclaimed_task_count: int;
-  failed_task_count: int;
+  orphan_task_count: int;
   active_agent_count: int;
   agent_count_changed: bool;
   active_goal_count: int;
@@ -145,7 +145,7 @@ let empty_world_observation ~keeper_name =
     has_question = false;
     message_content = "";
     unclaimed_task_count = 0;
-    failed_task_count = 0;
+    orphan_task_count = 0;
     active_agent_count = 0;
     agent_count_changed = false;
     active_goal_count = 0;
@@ -163,7 +163,7 @@ let world_observation_to_json (obs : world_observation) : Yojson.Safe.t =
       ("has_question", `Bool obs.has_question);
       ("message_content_len", `Int (String.length obs.message_content));
       ("unclaimed_task_count", `Int obs.unclaimed_task_count);
-      ("failed_task_count", `Int obs.failed_task_count);
+      ("orphan_task_count", `Int obs.orphan_task_count);
       ("active_agent_count", `Int obs.active_agent_count);
       ("agent_count_changed", `Bool obs.agent_count_changed);
       ("active_goal_count", `Int obs.active_goal_count);
@@ -202,7 +202,7 @@ let triage (obs : world_observation) : triage_result =
   (* L1 Reactive triggers *)
   if obs.direct_mention then add DirectMention;
   if obs.unclaimed_task_count > 0 then add NewUnclaimedTask;
-  if obs.failed_task_count > 0 then add FailedTask;
+  if obs.orphan_task_count > 0 then add FailedTask;
   if obs.agent_count_changed then add AgentSessionBoundOrLeft;
 
   (* L2 Proactive triggers — goal-directed *)
@@ -325,7 +325,7 @@ let world_observation_to_prompt_section (obs : world_observation) : string =
     \  - Direct mention: %b\n\
     \  - Has question: %b"
     obs.unclaimed_task_count
-    obs.failed_task_count
+    obs.orphan_task_count
     obs.active_agent_count
     obs.agent_count_changed
     obs.active_goal_count
@@ -412,7 +412,7 @@ let has_workspace_signal (obs : world_observation) =
 
 let has_operational_signal (obs : world_observation) =
   has_workspace_signal obs
-  || obs.failed_task_count > 0
+  || obs.orphan_task_count > 0
   || obs.unclaimed_task_count > 0
   || obs.agent_count_changed
   || has_board_signal obs
@@ -444,7 +444,7 @@ let rec legality_error (obs : world_observation) = function
       if has_operational_signal obs then None
       else Some "broadcast requires an operational signal"
   | ProposeSpawn _ ->
-      if obs.failed_task_count > 0 || obs.unclaimed_task_count > 0
+      if obs.orphan_task_count > 0 || obs.unclaimed_task_count > 0
          || obs.active_goal_count > 0 then None
       else Some "propose_spawn requires failed tasks, unclaimed tasks, or active goals"
   | MultiStep actions -> (

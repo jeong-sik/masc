@@ -430,7 +430,7 @@ let observed_triggers_of_observation
   if observation.claimable_task_count > 0 then add "claimable_task";
   if observation.provider_capacity_blocked_task_count > 0 then
     add "provider_capacity_blocked_backlog";
-  if observation.failed_task_count > 0 then add "failed_task";
+  if observation.orphan_task_count > 0 then add "failed_task";
   let _ = meta in
   if observation.pending_verification_count > 0 then
     add "pending_verification";
@@ -454,7 +454,7 @@ let observed_affordances_of_observation
     && observation.provider_capacity_blocked_task_count = 0
   then
     add "task_claim";
-  if observation.failed_task_count > 0 then add "task_audit";
+  if observation.orphan_task_count > 0 then add "task_audit";
   if observation.pending_verification_count > 0 then
     add "task_verify";
   List.rev !affordances

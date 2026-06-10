@@ -3,7 +3,7 @@
     replacing SSE for dashboard / agent connections that
     need full-duplex.
 
-    External surface (17 entries + 3 types):
+    External surface (19 entries + 3 types):
     - {b session record} ({!ws_session}) — concrete because
       [server_ws_standalone] passes session values to
       {!read_inbound_message_frame} /
@@ -18,7 +18,8 @@
       dispatching agent broadcasts.
     - {b session lifecycle}
       ({!new_session}, {!cleanup_session}, {!close_all},
-      {!session_count}, {!sessions}, {!with_sessions_rw},
+      {!session_count}, {!sweep_stale_sessions},
+      {!init_heartbeat}, {!sessions}, {!with_sessions_rw},
       {!next_id}).
     - {b inbound framing}
       ({!read_inbound_message_frame}).
@@ -73,6 +74,7 @@ type dashboard_auth_state =
 type ws_session = {
   id : string;
   wsd : Httpun_ws.Wsd.t;
+  mutable last_active : float;
   mutable closed : bool;
   dashboard_auth : dashboard_auth_state Atomic.t;
   mutable dashboard_route : string option;
@@ -154,6 +156,18 @@ val cleanup_session : string -> unit
 (** Removes the session from {!sessions} (and the
     slice-fanout side index).  Idempotent — calling on
     an unknown id is a silent no-op. *)
+
+val sweep_stale_sessions : idle_timeout:float -> now:float -> int
+(** Evicts sessions idle longer than [idle_timeout] seconds through
+    {!cleanup_session}. Returns the number of sessions evicted. *)
+
+val init_heartbeat :
+  sw:Eio.Switch.t ->
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  idle_timeout:float ->
+  unit
+(** Starts a background fiber that periodically calls
+    {!sweep_stale_sessions}. *)
 
 val close_all : unit -> int
 (** Closes every live WS session.  Returns the number of

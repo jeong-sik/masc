@@ -814,6 +814,7 @@ let read_payload_string payload ~len ~on_complete =
   if len = 0 then complete () else schedule ()
 
 let handle_inbound_text session ~on_message ~is_fin text =
+  session.last_active <- now ();
   match session.inbound_partial_text, is_fin with
   | None, true ->
       if String.length text > 0 then
@@ -835,26 +836,6 @@ let read_inbound_message_frame session ~on_message ~is_fin ~len payload =
   Transport_metrics.observe_ws_message_bytes_recv len;
   read_payload_string payload ~len ~on_complete:(fun text ->
       handle_inbound_text session ~on_message ~is_fin text)
-
-(** Remove a session and unsubscribe from SSE. *)
-(** Remove stale sessions whose [last_active] is older than [idle_timeout]
-    seconds.  Called periodically from the heartbeat loop. *)
-let sweep_stale_sessions ~idle_timeout ~now =
-  let threshold = now -. idle_timeout in
-  let stale_ids =
-    with_sessions_rw (fun () ->
-        Hashtbl.fold (fun id session acc ->
-            if session.last_active < threshold then
-              (Log.Transport.info "WS session %s idle > %.0fs — evicting (last_active=%.0f)" id idle_timeout session.last_active;
-               Hashtbl.remove sessions id;
-               (try Httpun_ws.Wsd.close session.wsd
-                with _ -> ());
-               id :: acc)
-            else acc)
-          sessions []
-    )
-  in
-  List.length stale_ids
 
 let cleanup_session session_id =
   let removed =
@@ -878,16 +859,40 @@ let cleanup_session session_id =
        to avoid logging amplification during WS storm (#10701). *)
     Log.Server.debug "WebSocket session %s closed" session_id
 
+(** Remove stale sessions whose [last_active] is older than [idle_timeout]
+    seconds.  Called periodically from the heartbeat loop. *)
+let sweep_stale_sessions ~idle_timeout ~now =
+  let threshold = now -. idle_timeout in
+  let stale =
+    with_sessions_rw (fun () ->
+        Hashtbl.fold
+          (fun id session acc ->
+            if session.last_active < threshold then (id, session.last_active) :: acc
+            else acc)
+          sessions
+          [])
+  in
+  List.iter
+    (fun (id, last_active) ->
+      Log.Transport.info
+        "WS session %s idle > %.0fs; evicting (last_active=%.0f)"
+        id
+        idle_timeout
+        last_active;
+      cleanup_session id)
+    stale;
+  List.length stale
+
 (** Number of active WebSocket sessions. *)
 let session_count () =
   with_sessions_rw (fun () ->
     Hashtbl.length sessions)
 
 (** Start background heartbeat fiber that sweeps stale WS sessions every 30 s. *)
-let init_heartbeat ~sw ~idle_timeout =
+let init_heartbeat ~sw ~clock ~idle_timeout =
   Eio.Fiber.fork ~sw (fun () ->
     let rec loop () =
-      Eio.Time.sleep 30.0;
+      Eio.Time.sleep clock 30.0;
       let now = now () in
       let evicted = sweep_stale_sessions ~idle_timeout ~now in
       if evicted > 0 then
@@ -1029,5 +1034,4 @@ let () =
     ~ping:(fun ~session_id () -> dashboard_ping ~session_id ());
   Mcp_server_eio_protocol.register_dashboard_ack dashboard_ack
 ;;
-
 

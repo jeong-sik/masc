@@ -4,9 +4,7 @@
     dispatch now keeps the only behavior still needed here: try the resolved
     provider candidates in order until one is accepted or the list is exhausted.
 
-    Track A (task-708): cascade health_filtered_candidate_count=0 fallback with
-    least-recently-failed (LRF) re-probe.  When all candidates are exhausted,
-    [lrf_fallback_candidates] is retried once. *)
+*)
 
 type try_runtime_ctx =
   { runtime_id : string
@@ -41,9 +39,6 @@ type try_runtime_ctx =
   ; filter_provider_health_fail_open : Runtime_candidate.t list -> Runtime_candidate.t list
   ; wait_timeout_sec : float option
   ; turn_deadline : Runtime_deadline.t option
-  ; lrf_fallback_candidates : Runtime_candidate.t list option
-      (** Track A (task-708): least-recently-failed candidates to retry once
-          when the primary candidate list is exhausted. *)
   }
 
 let sdk_error_to_http_error err =
@@ -96,77 +91,63 @@ let emit_attempt_finished ctx candidate ~started_at result checkpoint_after =
   let status =
     Keeper_turn_driver_provider_attempt.provider_attempt_status_of_result result
   in
-  let http_status =
-    let open Keeper_runtime_attempt in
+  let error =
     match result with
-    | Ok _ -> None
-    | Error err ->
-      (match sdk_error_to_http_error err with
-       | Some (Llm_provider.Http_client.HttpError { code; _ }) -> Some code
-       | Some (Llm_provider.Http_client.AcceptRejected _) -> None
-       | Some (Llm_provider.Http_client.Forbidden _) -> Some 403
-       | Some (Llm_provider.Http_client.RateLimited) -> Some 429
-       | Some (Llm_provider.Http_client.Overloaded _) -> Some 429
-       | None -> None)
+    | Ok _ -> `Null
+    | Error err -> `String (Agent_sdk.Error.to_string err)
   in
   ctx.emit_runtime_manifest
     ~status
-    ?http_status
     ~decision:
       (Keeper_turn_driver_provider_attempt.provider_attempt_finished_decision
-         { finished_latency_ms = latency_ms
-         ; finished_fatal = Option.is_none http_status
+         { finished_provenance =
+             Keeper_turn_driver_provider_attempt.base_provider_attempt_provenance
+         ; finished_status = status
+         ; finished_latency_ms = latency_ms
+         ; finished_checkpoint_after_present = Option.is_some checkpoint_after
+         ; finished_error = error
+         ; finished_exception_kind =
+             Keeper_turn_driver_provider_attempt
+             .provider_attempt_exception_kind_of_result
+               result
          })
     Keeper_runtime_manifest.Provider_attempt_finished;
   latency_ms
 
-let on_success ctx =
-  match ctx.base_path, String.trim ctx.keeper_name with
-  | Some base_path, keeper_name when keeper_name <> "" ->
-    Keeper_registry.mark_turn_provider_attempt_stopped ~base_path keeper_name
-  | _ -> ()
-
-let record_health_and_backpressure ctx candidate ?http_status http_err =
-  ctx.record_provider_health_result candidate ~success:false ?http_status;
-  match http_err with
-  | Some err ->
-    Backpressure_constraint_solver.record_unavailable_runtime_provider
-      ~ctx:ctx.error_runtime_id_for_backpressure
-      err
-  | None -> ()
-
-let run ~rvm:(type rvm) ~per_provider_timeout_s (ctx : rvm try_runtime_ctx)
-  : (Runtime_agent.runtime_result * Runtime_agent.checkpoint option,
-     Keeper_internal_error.t) result =
-  let on_success = on_success ctx in
-  let candidates =
-    let candidates =
-      List.filter
-        (Keeper_turn_driver_provider_attempt.accept_when_not_alive)
-        ctx.candidates
-    in
-    Keeper_turn_driver_helpers.fail_open_health_filtered_candidates
-      ~health_tracker:Keeper_preflight_health_tracker.global
-      ~provider_key_of:Runtime_candidate.health_key
-      ~tool_filtered_candidates:candidates
-      ~health_filtered_candidates:
-        (ctx.filter_provider_health_fail_open candidates)
+let run
+      ?(on_success = fun ~provider_key:_ -> ())
+      ?(pre_dispatch_required_tool_rejections_rev = [])
+      ?resume_checkpoint
+      ?per_provider_timeout_s
+      ?last_capacity_source:_
+      ?last_capacity_backpressure:_
+      ctx
+      candidates
+      last_err
+  =
+  let _ =
+    ( pre_dispatch_required_tool_rejections_rev
+    , ctx.candidate_count
+    , ctx.configured_labels
+    , ctx.capture
+    , ctx.runtime_mcp_policy
+    , ctx.tools
+    , ctx.required_lane_provider_rejections
+    , ctx.runtime_manifest_context
+    , ctx.runtime_manifest_append
+    , ctx.turn_start
+    , ctx.seq_ref
+    , ctx.health_cooldown_fail_open
+    , ctx.session_id
+    , ctx.error_runtime_id_for_backpressure
+    , ctx.filter_provider_health_fail_open
+    , ctx.wait_timeout_sec
+    , ctx.turn_deadline )
   in
-  let rec loop resume_checkpoint last_err lrf_attempted = function
-    | [] ->
-      (* Track A: retry once with LRF fallback before giving up *)
-      (match ctx.lrf_fallback_candidates, lrf_attempted with
-       | Some (fallback :: _), false ->
-         loop resume_checkpoint last_err true [fallback]
-       | _ ->
-         Error (sdk_error_of_exhausted last_err))
+  let rec loop resume_checkpoint last_err = function
+    | [] -> Error (sdk_error_of_exhausted last_err)
     | candidate :: rest ->
-      let is_last =
-        match rest, ctx.lrf_fallback_candidates, lrf_attempted with
-        | [], None, _ | [], _, true -> true
-        | [] , Some _, false -> false
-        | _ -> false
-      in
+      let is_last = rest = [] in
       maybe_mark_provider_attempt_started ctx;
       emit_attempt_started ctx candidate ~is_last ~per_provider_timeout_s;
       let started_at = Mtime_clock.now () in
@@ -187,7 +168,7 @@ let run ~rvm:(type rvm) ~per_provider_timeout_s (ctx : rvm try_runtime_ctx)
            candidate
            ~latency_ms;
          ctx.record_provider_health_result candidate ~success:true ~http_status:None;
-         on_success ();
+         on_success ~provider_key:(Runtime_candidate.health_key candidate);
          Ok run_result
        | Ok run_result ->
          let reason = "accept predicate rejected runtime response" in
@@ -199,29 +180,26 @@ let run ~rvm:(type rvm) ~per_provider_timeout_s (ctx : rvm try_runtime_ctx)
            Some (Llm_provider.Http_client.AcceptRejected { reason })
          in
          if is_last
-         then
-           (match ctx.lrf_fallback_candidates, lrf_attempted with
-            | Some (fallback :: _), false ->
-              loop checkpoint_after (Some (sdk_error_of_exhausted (Some last_err))) true [fallback]
-            | _ ->
-              Error (sdk_error_of_exhausted (Some last_err)))
-         else loop checkpoint_after (Some last_err) lrf_attempted rest
+         then Error (sdk_error_of_exhausted last_err)
+         else loop checkpoint_after last_err rest
        | Error err ->
          Keeper_turn_driver_provider_attempt.record_candidate_health_error
            ~keeper_name:ctx.keeper_name
            candidate
            err;
          let http_err = sdk_error_to_http_error err in
-         ctx.record_provider_health_result candidate ~success:false
+         ctx.record_provider_health_result
+           candidate
+           ~success:false
            ~http_status:(http_status_of_http_error http_err);
-         record_health_and_backpressure ctx candidate ?http_status:(http_status_of_http_error http_err) http_err;
-         if is_last
-         then
-           (match ctx.lrf_fallback_candidates, lrf_attempted with
-            | Some (fallback :: _), false ->
-              loop checkpoint_after (Some (Keeper_internal_error.of_sdk_error err)) true [fallback]
-            | _ ->
-              Error (Keeper_internal_error.of_sdk_error err))
-         else loop checkpoint_after (Some (Keeper_internal_error.of_sdk_error err)) lrf_attempted rest)
+         match http_err with
+         | Some err when (not is_last) && Runtime_attempt_fsm.should_try_next err ->
+           loop checkpoint_after (Some err) rest
+         | Some err ->
+           if is_last
+           then Error (sdk_error_of_exhausted (Some err))
+           else Error (sdk_error_of_exhausted (Some err))
+         | None ->
+           if is_last then Error err else loop checkpoint_after last_err rest)
   in
-  loop None None false candidates
+  loop resume_checkpoint last_err candidates

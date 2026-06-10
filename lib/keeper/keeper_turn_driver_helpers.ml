@@ -40,7 +40,7 @@ let fail_open_health_filtered_candidates
       Keeper_preflight_health_tracker.record health_tracker
         ~runtime_id:"fail_open_health_fallback"
         ~provider:(provider_key_of c)
-        ~reason:Transient_unhealthy
+        ~reason:Keeper_preflight_health_tracker.Transient_unhealthy
       |> ignore)
       tool_filtered_candidates;
     tool_filtered_candidates, true

@@ -78,6 +78,7 @@
   keeper_tool_query
   keeper_tool_selection
   keeper_tool_capability_axis
+  keeper_fleet_health_telemetry
   keeper_turn_telemetry
   keeper_agent_prompt_metrics
   keeper_agent_tool_surface

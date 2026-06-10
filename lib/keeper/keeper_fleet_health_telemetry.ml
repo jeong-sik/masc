@@ -44,30 +44,30 @@ type telemetry_snapshot =
 
 (* ── Phase classification ───────────────────────────────── *)
 
-let classify_phase_counts entries =
-  let fold_fn (on, ob, off, pa, ov, zo, de) entry =
+let classify_phase_counts (entries : registry_entry list) =
+  let fold_fn (on, ob, off, pa, ov, zo, de) (entry : registry_entry) =
     let open Keeper_state_machine in
     match entry.phase with
-    | `Online -> (on + 1, ob, off, pa, ov, zo, de)
-    | `Observe -> (on, ob + 1, off, pa, ov, zo, de)
-    | `Offline -> (on, ob, off + 1, pa, ov, zo, de)
-    | `Paused -> (on, ob, off, pa + 1, ov, zo, de)
-    | `Overflowed -> (on, ob, off, pa, ov + 1, zo, de)
-    | `Zombie -> (on, ob, off, pa, ov, zo + 1, de)
-    | `Dead | `Failed -> (on, ob, off, pa, ov, zo, de + 1)
+    | Running -> (on + 1, ob, off, pa, ov, zo, de)
+    | Failing -> (on, ob + 1, off, pa, ov, zo, de)
+    | Offline -> (on, ob, off + 1, pa, ov, zo, de)
+    | Paused -> (on, ob, off, pa + 1, ov, zo, de)
+    | Overflowed -> (on, ob, off, pa, ov + 1, zo, de)
+    | Zombie -> (on, ob, off, pa, ov, zo + 1, de)
+    | Dead -> (on, ob, off, pa, ov, zo, de + 1)
     | _ -> (on, ob, off, pa, ov, zo, de)
   in
   List.fold_left fold_fn (0, 0, 0, 0, 0, 0, 0) entries
 
 let alive_phases : Keeper_state_machine.phase list =
-  [ `Online; `Observe ]
+  [ Running; Failing ]
 
-let is_alive entry =
+let is_alive (entry : registry_entry) =
   List.mem entry.phase alive_phases
 
 (* ── Per-keeper health ──────────────────────────────────── *)
 
-let keeper_health_of_entry ~now entry =
+let keeper_health_of_entry ~now (entry : registry_entry) =
   let last_restart_ago_sec =
     if entry.restart_count > 0 then Some (now -. entry.last_restart_ts)
     else None
@@ -88,14 +88,29 @@ let keeper_health_of_entry ~now entry =
 
 (* ── Anomaly detection ──────────────────────────────────── *)
 
-let detect_anomalies ~now ~cascade_window_sec ~failure_spike_threshold entries healths =
+let detect_anomalies
+      ~now
+      ~cascade_window_sec
+      ~failure_spike_threshold
+      (entries : registry_entry list)
+      (healths : keeper_health list)
+  =
   let total = List.length entries in
   let dead_count =
-    List.length (List.filter (fun e ->
-      match e.phase with `Dead | `Failed -> true | _ -> false) entries)
+    List.length
+      (List.filter
+         (fun e ->
+           let e : registry_entry = e in
+           match e.phase with
+           | Keeper_state_machine.Dead -> true
+           | _ -> false)
+         entries)
   in
   let paused_count =
-    List.length (List.filter (fun e -> e.phase = `Paused) entries)
+    List.length
+      (List.filter
+         (fun (e : registry_entry) -> e.phase = Keeper_state_machine.Paused)
+         entries)
   in
 
   let empty_fleet = total = 0 in
@@ -103,8 +118,9 @@ let detect_anomalies ~now ~cascade_window_sec ~failure_spike_threshold entries h
 
   let cascade_restart =
     let recent_restarts =
-      List.filter (fun e ->
-        e.restart_count > 0 && now -. e.last_restart_ts <= cascade_window_sec)
+      List.filter
+        (fun (e : registry_entry) ->
+          e.restart_count > 0 && now -. e.last_restart_ts <= cascade_window_sec)
         entries
     in
     List.length recent_restarts >= 3
@@ -119,8 +135,13 @@ let detect_anomalies ~now ~cascade_window_sec ~failure_spike_threshold entries h
 
 (* ── Main entry point ───────────────────────────────────── *)
 
-let summarize ~now ~stale_dead_threshold_sec:_ ~cascade_window_sec
-    ~failure_spike_threshold entries =
+let summarize
+      ~now
+      ~stale_dead_threshold_sec:_
+      ~cascade_window_sec
+      ~failure_spike_threshold
+      (entries : registry_entry list)
+  =
   let (on, ob, off, pa, ov, zo, de) = classify_phase_counts entries in
   let counts =
     { online = on; observe = ob; offline = off; paused = pa;
@@ -131,10 +152,15 @@ let summarize ~now ~stale_dead_threshold_sec:_ ~cascade_window_sec
   let anomalies = detect_anomalies ~now ~cascade_window_sec
     ~failure_spike_threshold entries healths in
   let dead_keepers =
-    List.filter (fun h -> match h.phase with `Dead | `Failed -> true | _ -> false) healths
+    List.filter
+      (fun h ->
+        match h.phase with
+        | Keeper_state_machine.Dead -> true
+        | _ -> false)
+      healths
   in
   let paused_keepers =
-    List.filter (fun h -> h.phase = `Paused) healths
+    List.filter (fun h -> h.phase = Keeper_state_machine.Paused) healths
   in
   { sampled_at = now
   ; counts

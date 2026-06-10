@@ -10,13 +10,13 @@ open Keeper_registry_types
 
 (** Raw fleet counts broken down by lifecycle phase. *)
 type phase_counts =
-  { online : int       (** [Online] keepers *)
-  ; observe : int      (** [Observe] keepers *)
+  { online : int       (** [Running] keepers *)
+  ; observe : int      (** [Failing] keepers under observation *)
   ; offline : int      (** [Offline] keepers *)
   ; paused : int       (** [Paused] keepers *)
   ; overflowed : int   (** [Overflowed] keepers *)
   ; zombie : int       (** [Zombie] keepers *)
-  ; dead : int         (** [Dead] + [Failed] keepers *)
+  ; dead : int         (** [Dead] keepers *)
   ; total : int        (** total tracked entries *)
   }
 

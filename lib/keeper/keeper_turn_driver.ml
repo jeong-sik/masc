@@ -912,11 +912,6 @@ let run_named
             (match sdk_error_capacity_backpressure_retry_hint sdk_err with
              | Some (Cbr_explicit s) -> Some (Some s)
              | Some (Cbr_synthetic_default s) ->
-               Log.Misc.warn
-                 "cascade_capacity_backpressure: provider=%s retry_after_sec=null \
-                  injecting synthetic backoff=%.1fs (error_kind=%s)"
-                 provider_key s
-                 (Cascade_health_tracker.error_kind_to_string error_kind);
                Some (Some s)
              | None -> sdk_error_soft_rate_limited sdk_err)
         in

@@ -4,6 +4,10 @@
     Extracted from [cascade_attempt_fsm.ml] during godfile decomposition.
     Pure functions over [Agent_sdk.Error.sdk_error].
 
+    Phase 4: synthetic backoff logging ported into this module so the
+    cascade code owns both classification and observability. The caller
+    (keeper_turn_driver) no longer needs to log after calling us.
+
     @since God file decomposition *)
 
 (* DET-OK: synthetic default backoff when provider omits Retry-After *)
@@ -48,9 +52,15 @@ let sdk_error_capacity_backpressure_retry_hint (err : Agent_sdk.Error.sdk_error)
   match Cascade_error_classify.classify_masc_internal_error err with
   | Some (Cascade_error_classify.Capacity_backpressure { retry_after_sec; _ }) ->
     (match retry_after_sec with
-     | Some s when s > 0.0 -> Some (Cbr_explicit s)
+     | Some s when s > 0.0 ->
+       Log.Misc.info (fun f ->
+         f "capacity retry-hint: explicit %.1fs (from provider Retry-After)" s);
+       Some (Cbr_explicit s)
      | Some _ (* <= 0.0: treat as missing, fall back to synthetic *)
      | None ->
+       Log.Misc.warn (fun f ->
+         f "capacity retry-hint: synthetic backoff %.1fs (provider omitted Retry-After)"
+           default_capacity_backpressure_backoff_sec);
        Some (Cbr_synthetic_default default_capacity_backpressure_backoff_sec))
   | Some (Cascade_error_classify.Cascade_exhausted _)
   | Some (Cascade_error_classify.Resumable_cli_session _)
@@ -78,7 +88,6 @@ let sdk_error_soft_rate_limited (err : Agent_sdk.Error.sdk_error)
     Some retry_after
   (* Hard-quota RateLimited is handled separately and other Api / non-Api
      errors do not represent soft rate limiting. *)
-  | Agent_sdk.Error.Api (Llm_provider.Retry.RateLimited _)
   | Agent_sdk.Error.Api (Llm_provider.Retry.Overloaded _)
   | Agent_sdk.Error.Api (Llm_provider.Retry.ServerError _)
   | Agent_sdk.Error.Api (Llm_provider.Retry.AuthError _)
@@ -87,6 +96,7 @@ let sdk_error_soft_rate_limited (err : Agent_sdk.Error.sdk_error)
   | Agent_sdk.Error.Api (Llm_provider.Retry.ContextOverflow _)
   | Agent_sdk.Error.Api (Llm_provider.Retry.NetworkError _)
   | Agent_sdk.Error.Api (Llm_provider.Retry.Timeout _)
+  | Agent_sdk.Error.Api (Llm_provider.Retry.RateLimited _)
   | Agent_sdk.Error.Provider _
   | Agent_sdk.Error.Agent _
   | Agent_sdk.Error.Mcp _

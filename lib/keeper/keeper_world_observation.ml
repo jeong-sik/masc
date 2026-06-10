@@ -570,10 +570,23 @@ let proactive_work_signal_present ~(meta : keeper_meta) (observation : world_obs
     After extended idle (> base cooldown), halve the cooldown each
     additional period, down to a configurable floor.  This prevents
     permanent silence when no external events arrive. *)
+let health_score_to_cooldown_multiplier (score : float) : float =
+  (* health_score ∈ [0.0, 1.0]
+     healthy board (1.0) → 1.0x base cooldown (normal cadence)
+     unhealthy board (0.0) → 2.0x base cooldown (check less often)
+     The board curation health_score captures overall engagement, diversity,
+     and freshness.  When the board is thriving the keeper monitors at the
+     default rate; when activity is low the keeper backs off to conserve
+     inference budget. *)
+  let clamped = Float.clamp score ~min:0.0 ~max:1.0 in
+  2.0 -. clamped
+;;
+
 let effective_scheduled_autonomous_cooldown
       ~(base_cooldown : int)
       ~(since_last : int)
       ?(consecutive_noop_count = 0)
+      ?(health_score : float option)
       ()
   : int
   =
@@ -584,7 +597,14 @@ let effective_scheduled_autonomous_cooldown
     if consecutive_noop_count <= 0 then 1 else 1 lsl min consecutive_noop_count 3
     (* 1, 2, 4, 8 *)
   in
-  let effective_base = base_cooldown * noop_multiplier in
+  let health_multiplier =
+    match health_score with
+    | None -> 1.0
+    | Some s -> health_score_to_cooldown_multiplier s
+  in
+  let effective_base =
+    int_of_float (Float.round (float_of_int (base_cooldown * noop_multiplier) *. health_multiplier))
+  in
   let min_cooldown = Keeper_config.keeper_proactive_min_cooldown_sec () in
   (* Floor must not exceed the effective base cooldown — otherwise decay would
      paradoxically increase a short cooldown. *)
@@ -671,11 +691,17 @@ let keeper_cycle_decision
         ; idle_gate_sec = Some idle_gate_sec
         }
       else (
+        let board_health =
+          match Board_curation.latest_snapshot () with
+          | Some snap -> snap.health_score
+          | None -> None
+        in
         let effective_cooldown =
           effective_scheduled_autonomous_cooldown
             ~base_cooldown:meta.proactive.cooldown_sec
             ~since_last:since_last_scheduled_autonomous
             ~consecutive_noop_count:meta.runtime.proactive_rt.consecutive_noop_count
+            ~health_score:board_health
             ()
         in
         let task_cooldown_divisor =

@@ -6,6 +6,7 @@
 
 open Keeper_types
 open Keeper_context_runtime
+open Keeper_event_publisher
 
 module KCP = Keeper_cascade_profile
 
@@ -80,10 +81,22 @@ let build_cascade_execution
           Error
             (Cascade_error_classify.sdk_error_of_masc_internal_error err)
         | Ok max_tokens ->
-          Ok
-            { Keeper_turn_cascade_budget.cascade_name
+          let cascade_name_str = Cascade_name.to_string cascade_name in
+          let execution =
+            { Keeper_turn_cascade_budget.cascade_name = cascade_name_str
             ; max_context_resolution
             ; max_context
             ; temperature
             ; max_tokens
-            }))
+            }
+          in
+          publish_telemetry_event
+            ~event_name:"pre_dispatch_execution_ready"
+            ~payload:(`Assoc
+              [ ("cascade_name", `String cascade_name_str)
+              ; ("keeper_name", `String meta.name)
+              ; ("max_tokens", `Int max_tokens)
+              ; ("max_context", `Int max_context)
+              ; ("temperature", `Float temperature)
+              ]);
+          Ok execution))

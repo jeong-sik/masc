@@ -93,7 +93,7 @@ describe('RuntimePanel', () => {
     expect(container.textContent).toContain('Diagnostics')
     expect(container.textContent).toContain('Transport diagnostics')
     expect(container.textContent).toContain('Feature cleanup')
-    expect(container.textContent).not.toContain('RuntimeMonitor')
+    expect(container.textContent).toContain('RuntimeMonitor')
     expect(container.textContent).toContain('VerificationSpecsPanel')
   })
 
@@ -107,8 +107,10 @@ describe('RuntimePanel', () => {
     expect(oas).not.toBeNull()
     expect(oas?.closest('details')).toBeNull()
 
+    // #20492 promoted "providers" from a collapsed details to its own
+    // selectable view and made RuntimeMonitor a visible default lane, so only
+    // verification remains as collapsed progressive-disclosure detail here.
     const detailIds = [
-      'runtime-details-providers',
       'runtime-details-verification',
     ]
     for (const id of detailIds) {
@@ -118,7 +120,7 @@ describe('RuntimePanel', () => {
       expect((el as HTMLDetailsElement).open).toBe(false)
     }
     expect(container.textContent).toContain('RuntimeHealthSnapshot')
-    expect(container.textContent).not.toContain('RuntimeMonitor')
+    expect(container.textContent).toContain('RuntimeMonitor')
   })
 
   it('explicit drill-down views bypass progressive disclosure', async () => {
@@ -195,7 +197,7 @@ describe('RuntimePanel', () => {
 
     expect(container.textContent).toContain('OasHealthChip')
     expect(container.textContent).toContain('RuntimeHealthSnapshot')
-    expect(container.textContent).not.toContain('RuntimeMonitor')
+    expect(container.textContent).toContain('RuntimeMonitor')
   })
 
   it('passes current view value to FilterChips', async () => {

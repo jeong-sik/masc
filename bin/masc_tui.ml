@@ -43,6 +43,19 @@ let send_keeper_message_stream (state : state) (keeper_name : string) (message :
         (* Read SSE chunks incrementally, updating streaming text *)
         let full_buf = Buffer.create 4096 in
         let line_buf = Buffer.create 256 in
+        let update_streaming_message payload =
+          state.msg_streaming_text <- payload;
+          let msg_count = List.length state.msg_history in
+          if msg_count > 0 then begin
+            let last_idx = msg_count - 1 in
+            let entry = List.nth state.msg_history last_idx in
+            state.msg_history <- List.init msg_count (fun i ->
+              if i = last_idx && entry.me_role = "assistant" && entry.me_status = Streaming
+              then { entry with me_text = payload }
+              else List.nth state.msg_history i);
+            render state
+          end
+        in
         let flush_line ~terminated =
           let line = Buffer.contents line_buf in
           Buffer.clear line_buf;
@@ -50,7 +63,7 @@ let send_keeper_message_stream (state : state) (keeper_name : string) (message :
           if terminated then Buffer.add_char full_buf '\n';
           if String.starts_with ~prefix:"data: " line then begin
             let payload = String.sub line 6 (String.length line - 6) in
-            state.msg_streaming_text <- payload
+            update_streaming_message payload
           end
         in
         (try

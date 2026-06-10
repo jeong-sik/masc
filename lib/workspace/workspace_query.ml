@@ -122,6 +122,8 @@ let audit_orphan_tasks config : (Masc_domain.task * string) list =
     let agents_path = agents_dir config in
     let active_names =
       load_agents_from_dir config agents_path ~include_inactive:false
+      |> List.filter (fun (agent : Masc_domain.agent) ->
+          not (Workspace_resilience.Time.is_stale agent.last_seen))
       |> List.map (fun (agent : Masc_domain.agent) -> agent.name)
     in
     let is_active_agent assignee =

@@ -24,6 +24,13 @@ export const keeperProbing = signal<Record<string, boolean>>({})
 export const keeperRecovering = signal<Record<string, boolean>>({})
 export const keeperActionErrors = signal<Record<string, string | null>>({})
 export const keeperStreamStartedAt = signal<Record<string, number | null>>({})
+// Wall-clock ms of the most recent SSE event observed for an in-flight
+// stream. Drives the stall indicator (streaming but no events for N s).
+export const keeperStreamLastEventAt = signal<Record<string, number | null>>({})
+
+// Thread entries kept per keeper. History beyond this window stays
+// available server-side (keeper_chat/<name>.jsonl, GET /chat/history).
+export const THREAD_ENTRY_CAP = 200
 
 // --- Private stream tracking ---
 
@@ -265,7 +272,28 @@ export function appendThreadEntry(name: string, entry: KeeperConversationEntry):
   const existing = keeperThreads.value[name] ?? []
   keeperThreads.value = {
     ...keeperThreads.value,
-    [name]: [...existing, entry].slice(-50),
+    [name]: [...existing, entry].slice(-THREAD_ENTRY_CAP),
+  }
+}
+
+/** Insert [entry] immediately before the entry with id [beforeId].
+ *  Falls back to append when [beforeId] is absent. Used to keep live
+ *  tool-call entries above the streaming assistant bubble so the final
+ *  reply renders last in the transcript. */
+export function insertThreadEntryBefore(
+  name: string,
+  beforeId: string,
+  entry: KeeperConversationEntry,
+): void {
+  const existing = keeperThreads.value[name] ?? []
+  const index = existing.findIndex(e => e.id === beforeId)
+  const next =
+    index === -1
+      ? [...existing, entry]
+      : [...existing.slice(0, index), entry, ...existing.slice(index)]
+  keeperThreads.value = {
+    ...keeperThreads.value,
+    [name]: next.slice(-THREAD_ENTRY_CAP),
   }
 }
 
@@ -315,16 +343,27 @@ export function finalizeAssistantEntry(
   }))
 }
 
+// Dedup key for merging server history with locally-appended entries.
+// Compares role + text only: the server stamps a message pair with its
+// completion time while the local entry carries the send time, so
+// timestamp equality never holds for the same logical message and
+// produced duplicate bubbles on every history merge. Source is also
+// excluded — REST history has no source field, so the derived source
+// can differ from the local one for the same message.
 function sameConversationEntry(
   left: KeeperConversationEntry,
   right: KeeperConversationEntry,
 ): boolean {
-  if (left.role !== right.role || left.source !== right.source || left.text !== right.text) return false
-  if (left.timestamp && right.timestamp) return left.timestamp === right.timestamp
-  return true
+  return left.role === right.role && left.text === right.text
 }
 
 function replaceThread(name: string, entries: KeeperConversationEntry[]): void {
+  // An empty history payload means the caller did not request history
+  // (e.g. hydrateKeeperStatus fast path with tail_messages: 0), not
+  // that the conversation is empty. Wiping previously-hydrated history
+  // entries here is what made the transcript vanish after a status
+  // refresh / probe / recover.
+  if (entries.length === 0) return
   const existing = keeperThreads.value[name] ?? []
   const localEntries = existing.filter(
     entry =>
@@ -333,8 +372,43 @@ function replaceThread(name: string, entries: KeeperConversationEntry[]): void {
   )
   keeperThreads.value = {
     ...keeperThreads.value,
-    [name]: [...entries, ...localEntries].slice(-50),
+    [name]: [...entries, ...localEntries].slice(-THREAD_ENTRY_CAP),
   }
+}
+
+/** Merge server-fetched chat history (REST `GET /chat/history`) into the
+ *  thread. History entries become the canonical prefix; locally-appended
+ *  live entries that are not already covered by the server copy are kept
+ *  after it. */
+export function mergeServerHistoryEntries(
+  name: string,
+  entries: KeeperConversationEntry[],
+): void {
+  replaceThread(name, entries)
+}
+
+/** Convert REST chat-history messages ({role, content, ts-seconds}) into
+ *  conversation entries, chaining source inference the same way
+ *  status-detail history does. */
+export function chatHistoryEntriesFromRest(
+  keeperName: string,
+  messages: Array<{ role: string; content: string; ts: number }>,
+): KeeperConversationEntry[] {
+  let previousSource: KeeperConversationSource | null = null
+  const entries: KeeperConversationEntry[] = []
+  messages.forEach((message, index) => {
+    const normalized = normalizeHistoryEntry(
+      { role: message.role, content: message.content, ts_unix: message.ts },
+      index,
+      keeperName,
+      previousSource,
+    )
+    if (normalized) {
+      previousSource = normalized.source
+      entries.push(normalized)
+    }
+  })
+  return entries
 }
 
 export function setStatusDetail(name: string, detail: KeeperStatusDetail): void {

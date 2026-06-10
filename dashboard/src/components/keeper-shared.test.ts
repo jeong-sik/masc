@@ -17,6 +17,7 @@ vi.mock('../keeper-runtime', async () => {
   return {
     abortKeeperThreadMessage: vi.fn(),
     hydrateKeeperStatus: vi.fn(async () => null),
+    hydrateKeeperChatHistory: vi.fn(async () => undefined),
     loadFullKeeperHistory: vi.fn(async () => null),
     keeperActionErrors: signal({}),
     keeperHydrating: signal({}),
@@ -25,6 +26,7 @@ vi.mock('../keeper-runtime', async () => {
     keeperSending: signal({}),
     keeperStatusDetails: signal({}),
     keeperStreamStartedAt: signal({}),
+    keeperStreamLastEventAt: signal({}),
     keeperThreads: signal({}),
     probeKeeperRuntime: vi.fn(),
     recoverKeeperRuntime: vi.fn(),

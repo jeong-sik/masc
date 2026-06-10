@@ -369,6 +369,14 @@ export interface StreamAttachment {
   data: string
 }
 
+/** Outcome of a keeper chat stream read loop.
+ *  `terminal: false` means the connection closed without a
+ *  RUN_FINISHED / RUN_ERROR event — the response was cut mid-stream
+ *  and callers must not present it as a completed reply. */
+export interface KeeperStreamOutcome {
+  terminal: boolean
+}
+
 export async function streamKeeperMessage(
   name: string,
   message: string,
@@ -381,7 +389,7 @@ export async function streamKeeperMessage(
     onEvent: (event: KeeperChatStreamEvent) => void
     attachments?: StreamAttachment[]
   },
-): Promise<void> {
+): Promise<KeeperStreamOutcome> {
   const body: Record<string, unknown> = {
     name,
     message,
@@ -443,7 +451,7 @@ export async function streamKeeperMessage(
           } catch {
             // Ignore stream cancellation errors after terminal events.
           }
-          return
+          return { terminal: true }
         }
       }
       if (done) break
@@ -451,8 +459,13 @@ export async function streamKeeperMessage(
     const tail = buffer.trim()
     if (tail) {
       const event = parseSseEvent(tail)
-      if (event) onEvent(event)
+      if (event) {
+        onEvent(event)
+        if (isTerminalKeeperStreamEvent(event)) return { terminal: true }
+      }
     }
+    // Connection closed without RUN_FINISHED / RUN_ERROR: mid-stream cut.
+    return { terminal: false }
   } finally {
     reader.releaseLock()
   }

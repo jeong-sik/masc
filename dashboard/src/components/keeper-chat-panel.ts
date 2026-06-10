@@ -1,8 +1,10 @@
 // Keeper Chat Panel — SSE streaming conversation with a keeper agent.
 // Uses streamKeeperMessage() for real-time token-by-token responses.
 //
-// Messages are persisted via keeper-chat-store (sessionStorage) so they
-// survive tab navigation and page refreshes.  The web dashboard is one
+// Messages are persisted via keeper-chat-store (localStorage) so they
+// survive tab navigation and page refreshes, and server history
+// (GET /chat/history) is merged on mount so a fresh browser session
+// still shows the persisted transcript.  The web dashboard is one
 // connector among many (Discord, Slack, etc.).
 
 import { html } from 'htm/preact'
@@ -173,7 +175,9 @@ export function KeeperChatPanel({ name }: { name: string }) {
   const streamStartedAt = useMemo(() => signal<number | null>(null), [])
   const chatError = useMemo(() => signal(''), [])
   const searchQuery = useMemo(() => signal(''), [])
-  const historyLoaded = useMemo(() => signal(false), [])
+  // Keyed by keeper: switching the panel to another keeper must reset
+  // the flag, otherwise the new keeper's history is never hydrated.
+  const historyLoaded = useMemo(() => signal(false), [name])
 
   const activeAbortRef = useRef<AbortController | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -250,9 +254,11 @@ export function KeeperChatPanel({ name }: { name: string }) {
           source: 'api' as const,
         }))
         mergeServerHistory(keeperName, serverMsgs)
-        chatMessages.value = getChatMessageBuffer(keeperName)
+        chatMessages.value = [...getChatMessageBuffer(keeperName)]
       }
     } catch (err: unknown) {
+      // Allow a retry on the next interaction instead of caching failure.
+      historyLoaded.value = false
       const msg = errorToString(err)
       chatError.value = `이전 대화 불러오기 실패: ${msg}`
     }
@@ -283,7 +289,7 @@ export function KeeperChatPanel({ name }: { name: string }) {
       attachments: selectedAttachments.value.length > 0 ? selectedAttachments.value : undefined,
     }
     appendChatMessage(keeperName, userMsg)
-    chatMessages.value = getChatMessageBuffer(keeperName)
+    chatMessages.value = [...getChatMessageBuffer(keeperName)]
     selectedAttachments.value = []
 
     streaming.value = true
@@ -324,7 +330,7 @@ export function KeeperChatPanel({ name }: { name: string }) {
     }
 
     try {
-      await streamKeeperMessage(keeperName, text, {
+      const outcome = await streamKeeperMessage(keeperName, text, {
         signal: activeAbortRef.current.signal,
         attachments: apiAttachments,
         onEvent: (event: KeeperChatStreamEvent) => {
@@ -352,20 +358,36 @@ export function KeeperChatPanel({ name }: { name: string }) {
                 toolCallName: resolved.entry.name,
               }
               appendChatMessage(keeperName, toolMsg)
-              chatMessages.value = getChatMessageBuffer(keeperName)
+              chatMessages.value = [...getChatMessageBuffer(keeperName)]
               pendingToolArgs.delete(resolved.id)
             }
           } else if (event.type === 'RUN_FINISHED') {
             const finalText = streamBuffer.value.trim() || '(no response)'
             const assistantMsg: ChatMessage = { role: 'assistant', content: finalText, timestamp: Date.now(), source: 'dashboard' }
             appendChatMessage(keeperName, assistantMsg)
-            chatMessages.value = getChatMessageBuffer(keeperName)
+            chatMessages.value = [...getChatMessageBuffer(keeperName)]
             streamBuffer.value = ''
           } else if (event.type === 'RUN_ERROR') {
             chatError.value = normalizeKeeperChatErrorValue(event.value)
           }
         },
       })
+      if (!outcome.terminal) {
+        // Connection closed without RUN_FINISHED / RUN_ERROR: keep the
+        // partial text but tell the operator the reply was cut.
+        const partial = streamBuffer.value.trim()
+        if (partial) {
+          appendChatMessage(keeperName, {
+            role: 'assistant',
+            content: partial,
+            timestamp: Date.now(),
+            source: 'dashboard',
+          })
+          chatMessages.value = [...getChatMessageBuffer(keeperName)]
+        }
+        streamBuffer.value = ''
+        chatError.value = '스트림이 종료 신호 없이 끊겼습니다. 응답이 불완전할 수 있습니다.'
+      }
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return
       const msg = err instanceof Error ? err.message : '채팅 실패'
@@ -385,9 +407,14 @@ export function KeeperChatPanel({ name }: { name: string }) {
   }
 
   useEffect(() => {
+    // External-system sync (server → client): merge the persisted
+    // server transcript on mount so a fresh browser session shows the
+    // conversation without requiring a first send. Previously history
+    // was loaded lazily inside sendChat, so reopening the dashboard
+    // presented an empty transcript until the next message.
+    void loadHistory(name)
     // External-system sync: flush an in-progress stream buffer into the
     // store when the component unmounts (tab change, route navigation).
-    // No data init here — history is loaded lazily on first interaction.
     return () => {
       if (streaming.value && streamBuffer.value.trim()) {
         flushStreamBuffer(name, streamBuffer.value)

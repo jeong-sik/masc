@@ -1,9 +1,12 @@
-// Keeper Chat Store — per-keeper message buffer with sessionStorage persistence.
+// Keeper Chat Store — per-keeper message buffer with localStorage persistence.
 //
 // The web dashboard is one connector among many (Discord, Slack, etc.).
 // All connectors share the same server-side history (keeper_chat_store.ml).
 // This module provides the *local connector cache* so messages survive
 // tab navigation and page refreshes without a server round-trip.
+// localStorage (not sessionStorage) so the cache also survives closing
+// the tab — sessionStorage is per-tab and dies with it, which read as
+// "the whole conversation vanished" whenever the dashboard was reopened.
 //
 // Design constraints:
 // - Server changes: zero.  All persistence is client-side.
@@ -45,12 +48,12 @@ const STORAGE_KEY_PREFIX = 'masc.keeper.chat.v1'
 
 const _buffers = new Map<string, ChatMessage[]>()
 
-// --- sessionStorage helpers ---
+// --- localStorage helpers ---
 
 function _storage(): Storage | null {
-  if (typeof sessionStorage === 'undefined') return null
+  if (typeof localStorage === 'undefined') return null
   try {
-    return sessionStorage
+    return localStorage
   } catch {
     return null
   }
@@ -109,7 +112,7 @@ function _sync(keeperName: string): void {
 
 // --- Public API ---
 
-/** Return the message buffer for [keeperName], hydrating from sessionStorage
+/** Return the message buffer for [keeperName], hydrating from localStorage
  *  if the in-memory buffer is empty.  Never returns a fresh array reference
  *  that would break signal reactivity — callers must mutate via store API. */
 export function getChatMessageBuffer(keeperName: string): ChatMessage[] {
@@ -134,7 +137,7 @@ export function setChatMessages(keeperName: string, messages: ChatMessage[]): vo
   _sync(keeperName)
 }
 
-/** Clear both in-memory buffer and sessionStorage. */
+/** Clear both in-memory buffer and localStorage. */
 export function clearChatMessages(keeperName: string): void {
   _buffers.delete(keeperName)
   _removeFromStorage(keeperName)

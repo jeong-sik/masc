@@ -244,6 +244,44 @@ let parse_bing_search_json payload =
       Json_util.assoc_member_opt "value" web |> Option.value ~default:`Null)
     ~title_field:"name" ~snippet_field:"snippet" payload
 
+(** Return true if any hit URL or snippet contains a significant
+    query token (>= 4 chars, non-numeric) as a substring. Used to reject
+    garbage results from free/fallback engines that return HTTP 200 with
+    unrelated pages (e.g. Bing RSS for domain-specific queries). *)
+let hits_relevant_to_query ~query hits =
+  let significant_words =
+    query
+    |> String.lowercase_ascii
+    |> String.split_on_char ' '
+    |> List.filter (fun w ->
+        String.length w >= 4
+        && not (String.for_all (fun c -> c >= '0' && c <= '9') w))
+  in
+  if Stdlib.List.length significant_words = 0 then true
+  else
+    let text =
+      hits
+      |> List.map (fun (_title, url, snippet) ->
+           String.lowercase_ascii (url ^ " " ^ snippet))
+      |> String.concat " "
+    in
+    let rec substring_at str sub pos =
+      let slen = String.length sub in
+      pos + slen <= String.length str
+      && String.sub str pos slen = sub
+    in
+    let contains_substring str sub =
+      let sub_len = String.length sub in
+      let max_start = String.length str - sub_len in
+      let rec search i =
+        if i > max_start then false
+        else if str.[i] = sub.[0] && substring_at str sub i then true
+        else search (i + 1)
+      in
+      search 0
+    in
+    List.exists (fun w -> contains_substring text w) significant_words
+
 let looks_like_rss_payload payload =
   let normalized = String.lowercase_ascii payload in
   String.contains normalized '<'
@@ -707,12 +745,16 @@ let fetch_provider ~query ~limit provider =
       match fetch_bing_rss ~timeout_sec ~query with
       | Error msg -> Error msg
       | Ok (search_url, payload) when looks_like_rss_payload payload ->
+          let raw_hits = parse_bing_rss_items payload in
           let hits =
-            parse_bing_rss_items payload
+            raw_hits
             |> take_results limit
             |> normalize_hits ~source:(provider_to_string Bing_rss)
           in
-          Ok { engine = provider_to_string Bing_rss; search_url; hits }
+          if hits_relevant_to_query ~query raw_hits then
+            Ok { engine = provider_to_string Bing_rss; search_url; hits }
+          else
+            Error "search returned irrelevant results"
       | Ok _ -> Error "provider returned invalid RSS")
 
 let cache_key ~query ~limit =

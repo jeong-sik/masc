@@ -237,7 +237,15 @@ jobs:
             build=true
           fi
 
-          if has_match '^(bin/|lib/|test/|proto/|config/|dune-project$|dune-workspace$|.*\.opam$|scripts/install\.sh$|scripts/check-eio-conventions\.sh$|scripts/check-feature-flag-consistency\.sh$|scripts/check-toml-syntax\.sh$|scripts/validate-prompt-paths\.sh$|scripts/check-boundary-guard\.sh$|scripts/check-boundary-guard-mli-pairs\.sh$|scripts/check-ssot\.sh$|scripts/gen-grpc-descriptors\.sh$|scripts/lint/no-unknown-permissive-default\.sh$|scripts/lint/no-unknown-permissive-default\.allowlist$|scripts/lint/yojson-option-default\.py$|scripts/lint/yojson-option-default\.allowlist$|scripts/lint/no-docstring-escape-quote\.sh$|scripts/lint/no-hardcoded-colors-dashboard\.sh$|scripts/lint/no-hardcoded-colors-dashboard\.allowlist$|scripts/lint/dashboard-ssot-keeper-state\.sh$|scripts/lint/dashboard-ssot-keeper-state\.allowlist$|scripts/lint/dashboard-ssot-agent-status\.sh$|scripts/lint/dashboard-ssot-agent-status\.allowlist$|scripts/ci/|scripts/check-variants\.sh$|dashboard/src/)'; then
+          # The lint trigger set must stay a superset of every path the Lint
+          # job reads. scripts/check-ssot.sh R6 scans bin/ lib/ scripts/ docs/,
+          # so docs/ and scripts/ (whole tree, not just the curated entries)
+          # must trigger Lint — otherwise a docs-only or scripts-only PR can
+          # merge gate-skipped while pushing an R6 count past its baseline,
+          # breaking Lint for every subsequent PR (#20729: RFC docs #20717 /
+          # #20718 landed bare ~/.masc paths and took main's Lint red).
+          # scripts/ subsumes the previously enumerated scripts/* entries.
+          if has_match '^(bin/|lib/|test/|proto/|config/|docs/|scripts/|dune-project$|dune-workspace$|.*\.opam$|dashboard/src/)'; then
             lint=true
           fi
 

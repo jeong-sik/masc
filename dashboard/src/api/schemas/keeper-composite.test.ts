@@ -232,6 +232,34 @@ describe('parseKeeperCompositeSnapshot', () => {
     expect(result.runtime_attention?.fiber_stop_requested).toBe(false)
   })
 
+  it('parses secret projection status without secret values', () => {
+    const result = parseKeeperCompositeSnapshot({
+      ...VALID_SNAPSHOT,
+      secret_projection: {
+        status: 'ready',
+        configured: true,
+        root: '/Users/dancer/me/.masc/secrets/sangsu',
+        source: 'workspace_masc_secrets',
+        env_count: 1,
+        file_count: 1,
+        env_names: ['GH_TOKEN'],
+        file_mounts: [
+          {
+            host_path: '/Users/dancer/me/.masc/secrets/sangsu/files/home/keeper/.ssh/id_ed25519',
+            container_path: '/home/keeper/.ssh/id_ed25519',
+          },
+        ],
+        values_validated: true,
+        error: null,
+        next_action: 'none',
+      },
+    })
+
+    expect(result.secret_projection?.status).toBe('ready')
+    expect(result.secret_projection?.env_names).toEqual(['GH_TOKEN'])
+    expect(JSON.stringify(result.secret_projection)).not.toContain('ghs_')
+  })
+
   it('parses snapshot with measurement auto_rules', () => {
     const result = parseKeeperCompositeSnapshot({
       ...VALID_SNAPSHOT,

@@ -10,6 +10,7 @@ import {
   BudgetSourceBadge,
   RuntimeLensSection,
   RuntimeSignals,
+  KeeperSecretProjectionPanel,
   budgetSourceLabel,
   budgetSourceTone,
   filterSignalGroups,
@@ -848,6 +849,36 @@ describe('RuntimeLensSection', () => {
     expect(summary.runtimeWarnings).toEqual(['Runtime build commit differs from server repo HEAD.'])
     expect(summary.runtimeBuildLabel).toBe('386514c1f9 vs workspace d0add960d7')
     expect(summary.runtimeRepoLabel).toBe('.worktrees/stale-server')
+  })
+
+  it('renders secret projection status without secret values', () => {
+    render(h(KeeperSecretProjectionPanel, {
+      projection: {
+        status: 'ready',
+        configured: true,
+        root: '/Users/dancer/me/.masc/secrets/sangsu',
+        source: 'workspace_masc_secrets',
+        env_count: 1,
+        file_count: 1,
+        env_names: ['GH_TOKEN'],
+        file_mounts: [
+          {
+            host_path: '/Users/dancer/me/.masc/secrets/sangsu/files/home/keeper/.ssh/id_ed25519',
+            container_path: '/home/keeper/.ssh/id_ed25519',
+          },
+        ],
+        values_validated: true,
+        error: null,
+        next_action: 'none',
+      },
+    }))
+
+    expect(screen.getByTestId('keeper-secret-projection')).toBeInTheDocument()
+    expect(screen.getByText('ready')).toBeInTheDocument()
+    expect(screen.getByText('1 env · 1 files')).toBeInTheDocument()
+    expect(screen.getByText('GH_TOKEN')).toBeInTheDocument()
+    expect(screen.getByText('/home/keeper/.ssh/id_ed25519')).toBeInTheDocument()
+    expect(screen.queryByText(/ghs_/)).toBeNull()
   })
 })
 

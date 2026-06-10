@@ -29,40 +29,42 @@ describe('ConfigResolutionPanel', () => {
     document.body.appendChild(container)
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            generated_at: '2026-04-10T00:00:00Z',
-            cache_hit: true,
-            cache_age_sec: 3.2,
-            probe: {
-              source: 'ollama native runtime',
-              effective_model: 'qwen3.5:35b-a3b-coding-nvfp4',
-              server_url: 'http://127.0.0.1:11434',
-              model_loaded_before_probe: true,
-              model_loaded_after_probe: true,
-              loaded_models_after: [{ name: 'qwen3.5:35b-a3b-coding-nvfp4' }],
-              runs: [
-                {
-                  load_duration_ms: 33.6,
-                  prompt_tokens_per_second: 26.1,
-                  generation_tokens_per_second: 65.5,
+      vi.fn().mockImplementation(() =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              generated_at: '2026-04-10T00:00:00Z',
+              cache_hit: true,
+              cache_age_sec: 3.2,
+              probe: {
+                source: 'ollama native runtime',
+                effective_model: 'qwen3.5:35b-a3b-coding-nvfp4',
+                server_url: 'http://127.0.0.1:11434',
+                model_loaded_before_probe: true,
+                model_loaded_after_probe: true,
+                loaded_models_after: [{ name: 'qwen3.5:35b-a3b-coding-nvfp4' }],
+                runs: [
+                  {
+                    load_duration_ms: 33.6,
+                    prompt_tokens_per_second: 26.1,
+                    generation_tokens_per_second: 65.5,
+                  },
+                ],
+                kv_cache_assessment: {
+                  signal: 'likely_reused',
+                  note: 'Prompt evaluation time dropped materially on a repeated prompt.',
+                  prompt_eval_duration_reduction_ratio: 0.42,
                 },
-              ],
-              kv_cache_assessment: {
-                signal: 'likely_reused',
-                note: 'Prompt evaluation time dropped materially on a repeated prompt.',
-                prompt_eval_duration_reduction_ratio: 0.42,
+                observations: ['Repeated prompt_eval_duration_ms dropped enough to suggest repeated-prefix reuse.'],
+                errors: [],
+                probe_ok: true,
               },
-              observations: ['Repeated prompt_eval_duration_ms dropped enough to suggest repeated-prefix reuse.'],
-              errors: [],
-              probe_ok: true,
+            }),
+            {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
             },
-          }),
-          {
-            status: 200,
-            headers: { 'Content-Type': 'application/json' },
-          },
+          ),
         ),
       ),
     )

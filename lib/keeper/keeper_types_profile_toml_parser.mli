@@ -64,8 +64,6 @@ val normalize_compaction_message_gate : int -> int
 val normalize_compaction_token_gate : int -> int
 val normalize_continuity_compaction_cooldown_sec : int -> int
 val default_keep_recent_tool_results : int
-val default_tool_heavy_msg_threshold : int
-val default_tool_heavy_ratio_floor : float
 val keep_recent_tool_results_max : int
 val normalize_keep_recent_tool_results : ?keeper_name:string -> int -> int
 val normalize_proactive_idle_sec : int -> int

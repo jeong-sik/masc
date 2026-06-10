@@ -736,7 +736,7 @@ let run_keeper_cycle
                         meta.name
                         (Some failure_reason);
                       match
-                        sync_keeper_paused_state ~config ~meta:updated_meta ~paused:true
+                        sync_keeper_paused_state_with_resume_policy ~config ~meta:updated_meta ~paused:true ~resume_policy:Keeper_supervisor_pause_policy.Auto_resume_with_backoff
                       with
                       | Ok paused_meta ->
                         let approval_id =

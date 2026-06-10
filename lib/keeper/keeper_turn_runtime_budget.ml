@@ -622,7 +622,7 @@ let enqueue_partial_commit_continue_gate
                ~labels:[("keeper", meta.name); ("site", "resume_sync")]
                ()
       | Agent_sdk.Hooks.Reject reason ->
-        (match sync_keeper_paused_state ~config ~meta:latest_meta ~paused:true with
+        (match sync_keeper_paused_state_with_resume_policy ~config ~meta:latest_meta ~paused:true ~resume_policy:Keeper_supervisor_pause_policy.Auto_resume_with_backoff with
          | Ok paused_meta ->
              Keeper_registry.set_failure_reason
                ~base_path:config.base_path meta.name

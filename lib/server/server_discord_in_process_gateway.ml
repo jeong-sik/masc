@@ -114,6 +114,43 @@ let on_event ~dispatch (ev : Gw.gateway_event) =
   | Gw.Ignored _ ->
     ()
 
+(* RFC-0226 ambient lane recording: a bound-channel message that failed
+   the trigger policy is still conversation the keeper sits in. Persist
+   a single user line — no dispatch, no turn. Unbound channels drop, as
+   on the dispatch path. *)
+let handle_ambient ~base_dir
+      ~(channel_id : string) ~(author_id : string)
+      ~(author_name : string option) ~(content : string) =
+  match State.keeper_for_channel ~channel_id with
+  | None -> ()
+  | Some keeper_name ->
+    let trimmed = String.trim content in
+    if String.equal trimmed "" then ()
+    else if String.length trimmed > Channel_gate.max_content_length () then
+      (* Same inbound bound the turn path enforces
+         ([Channel_gate.handle_inbound] validation): a message this
+         size cannot become a turn either; it is rejected, not
+         truncated. *)
+      ()
+    else begin
+      Keeper_chat_store.append_user_message
+        ~base_dir ~keeper_name ~content:trimmed
+        ~source:State.channel
+        ~speaker:
+          { Keeper_chat_store.speaker_id = Some author_id
+          ; speaker_name = author_name
+          ; speaker_authority = Keeper_chat_store.External
+          }
+        ();
+      Keeper_chat_broadcast.chat_appended ~keeper_name ~source:State.channel
+    end
+
+let on_ambient ~base_dir (ev : Gw.gateway_event) =
+  match ev with
+  | Gw.Message_create { channel_id; author_id; author_name; content; _ } ->
+    handle_ambient ~base_dir ~channel_id ~author_id ~author_name ~content
+  | Gw.Ready _ | Gw.Reaction_add _ | Gw.Ignored _ -> ()
+
 (* ---------------------------------------------------------------- *)
 (* Start                                                            *)
 (* ---------------------------------------------------------------- *)
@@ -149,6 +186,11 @@ let start ~sw ~env ~clock ~state =
           ~intents:default_intents
           ~trigger_policy:policy
           ~on_event:(on_event ~dispatch)
+          ~on_ambient:(fun ev ->
+            (* Read base_path per event: [workspace_config] is mutable
+               (workspace-switch tools swap it). *)
+            on_ambient
+              ~base_dir:state.Mcp_server.workspace_config.base_path ev)
           ()
       with
       | Eio.Cancel.Cancelled _ as e -> raise e

@@ -153,6 +153,11 @@ type gateway_effect =
   | Schedule_heartbeat of { interval_ms : int }
   | Schedule_backoff of { delay_ms : int }
   | Emit_event of dispatched_event   (** Surface to caller's on_event. *)
+  | Emit_ambient of dispatched_event
+      (** Record-only delivery (RFC-0226): a [Message_create] that
+          failed [trigger_policy] but is not the bot's own echo. The
+          I/O layer persists it to the bound keeper's lane history;
+          it must not start a turn. *)
   | Log of { level : [ `Info | `Warn | `Error ]; message : string }
 
 (** {1 Configuration} *)

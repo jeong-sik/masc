@@ -101,6 +101,21 @@ val append_assistant_message :
   unit ->
   unit
 
+(** [append_user_message ~base_dir ~keeper_name ~content ?source
+    ?speaker ()] appends one inbound user line with no paired
+    assistant turn (RFC-0226). Written at delivery time by the inbound
+    recorder — the Discord gateway's ambient arm and the gate dispatch
+    boundary — so the line lands whether or not a turn starts or
+    replies. Same failure policy as {!append_turn}. *)
+val append_user_message :
+  base_dir:string ->
+  keeper_name:string ->
+  content:string ->
+  ?source:string ->
+  ?speaker:speaker ->
+  unit ->
+  unit
+
 (** [load ~base_dir ~keeper_name] returns the most recent messages in
     chronological order: the last 100 user/assistant messages plus the
     tool lines belonging to them (absolute bound 400 lines). Missing

@@ -128,6 +128,7 @@ type gateway_effect =
   | Schedule_heartbeat of { interval_ms : int }
   | Schedule_backoff of { delay_ms : int }
   | Emit_event of dispatched_event
+  | Emit_ambient of dispatched_event
   | Log of { level : [ `Info | `Warn | `Error ]; message : string }
 
 (* ── Config ────────────────────────────────────────────────────── *)
@@ -526,7 +527,18 @@ let handle_dispatch t (frame : frame) =
                ~bot_user_id:t'.config.bot_user_id ~author_id
                ~mentions_bot
            then (t', [ Emit_event ev ])
-           else no_op t'
+           else if is_self ~bot_user_id:t'.config.bot_user_id author_id
+           then
+             (* The bot's own echo: its outbound is persisted at send
+                time (keeper_surface_post / gate reply); recording the
+                gateway echo would double-record by another route. *)
+             no_op t'
+           else
+             (* RFC-0226: policy decides turn start only. A message
+                that fails the trigger policy is still conversation
+                in a channel the bot sits in — deliver it for
+                record-only handling. *)
+             (t', [ Emit_ambient ev ])
        | Ok (Reaction_add { user_id; _ } as ev) ->
            if
              reaction_passes_policy t'.config.trigger_policy

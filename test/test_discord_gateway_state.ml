@@ -502,6 +502,9 @@ let connected_with_policy ~policy ~bot_user_id =
 let has_emit_event effects =
   List.exists (function S.Emit_event _ -> true | _ -> false) effects
 
+let has_emit_ambient effects =
+  List.exists (function S.Emit_ambient _ -> true | _ -> false) effects
+
 let dispatch_frame ~event_name ~payload ~seq : S.frame =
   { op = S.Op_dispatch
   ; s = Some seq
@@ -637,6 +640,70 @@ let test_policy_all_emits_messages_and_reactions () =
   in
   check bool "Emit_event for any reaction under All" true
     (has_emit_event react_effects)
+
+(* ---------------------------------------------------------------- *)
+(* RFC-0226 — ambient lane recording. A message that fails the      *)
+(* trigger policy (and is not the bot's own echo) is delivered as   *)
+(* Emit_ambient: record-only, never a turn. Policy decides exactly  *)
+(* one thing — whether a turn starts.                               *)
+(* ---------------------------------------------------------------- *)
+
+let step_message m ~author_id ?(mention_ids = []) () =
+  let payload =
+    message_create_payload
+      ~id:"AMB" ~channel_id:"C1" ~author_id ~content:"ambient text"
+      ~mention_ids ()
+  in
+  let _, effects =
+    S.step m ~now_mono:3.0
+      (S.Frame_received
+         (dispatch_frame ~event_name:"MESSAGE_CREATE" ~payload ~seq:9))
+  in
+  effects
+
+let test_ambient_mention_only_plain_message () =
+  let m = connected_with_policy ~policy:S.Mention_only ~bot_user_id:"BOT" in
+  let effects = step_message m ~author_id:"U1" () in
+  check bool "no turn for non-mention" false (has_emit_event effects);
+  check bool "ambient delivery for non-mention" true
+    (has_emit_ambient effects)
+
+let test_ambient_absent_when_policy_passes () =
+  let m = connected_with_policy ~policy:S.Mention_only ~bot_user_id:"BOT" in
+  let effects = step_message m ~author_id:"U1" ~mention_ids:[ "BOT" ] () in
+  check bool "turn for mention" true (has_emit_event effects);
+  check bool "no double delivery when policy passes" false
+    (has_emit_ambient effects)
+
+let test_ambient_user_only_other_author () =
+  let m =
+    connected_with_policy ~policy:(S.User_only "VINCENT") ~bot_user_id:"BOT"
+  in
+  let effects = step_message m ~author_id:"STRANGER" () in
+  check bool "no turn for other author" false (has_emit_event effects);
+  check bool "ambient delivery for other author" true
+    (has_emit_ambient effects)
+
+let test_ambient_never_for_self () =
+  let m = connected_with_policy ~policy:S.All ~bot_user_id:"BOT" in
+  let effects = step_message m ~author_id:"BOT" () in
+  check bool "self echo never a turn" false (has_emit_event effects);
+  check bool "self echo never ambient (outbound persisted at send)"
+    false (has_emit_ambient effects)
+
+let test_ambient_not_for_reactions () =
+  let m = connected_with_policy ~policy:S.Mention_only ~bot_user_id:"BOT" in
+  let payload =
+    reaction_add_payload
+      ~channel_id:"C1" ~message_id:"M1" ~user_id:"U1" ~emoji_name:"👍" ()
+  in
+  let _, effects =
+    S.step m ~now_mono:3.0
+      (S.Frame_received
+         (dispatch_frame ~event_name:"MESSAGE_REACTION_ADD" ~payload ~seq:9))
+  in
+  check bool "a reaction is a trigger signal, not conversation" false
+    (has_emit_ambient effects)
 
 (* ---------------------------------------------------------------- *)
 (* RFC-0203 Phase 3 follow-up — self-skip guard. Bot-authored events *)
@@ -1003,6 +1070,18 @@ let () =
             `Quick test_policy_user_only_reaction_matching_reactor_passes
         ; test_case "all + any message + any reaction => both Emit_event"
             `Quick test_policy_all_emits_messages_and_reactions
+        ] )
+    ; ( "ambient lane (RFC-0226)"
+      , [ test_case "mention_only + plain message => Emit_ambient" `Quick
+            test_ambient_mention_only_plain_message
+        ; test_case "policy pass => Emit_event only, no ambient" `Quick
+            test_ambient_absent_when_policy_passes
+        ; test_case "user_only + other author => Emit_ambient" `Quick
+            test_ambient_user_only_other_author
+        ; test_case "self echo => neither event nor ambient" `Quick
+            test_ambient_never_for_self
+        ; test_case "reactions never ambient" `Quick
+            test_ambient_not_for_reactions
         ] )
     ; ( "self-skip guard"
       , [ test_case "self message suppressed under All" `Quick

@@ -629,20 +629,12 @@ let check_contract ~(notes : string) ~(contract : string list) : string list =
       |> String.split_on_char '_'
       |> List.filter is_word_token
   in
-  let rec find_next_with_gap words token gap =
-    match words with
-    | [] -> None
-    | word :: rest when String.equal word token -> Some rest
-    | _ :: rest when gap > 0 -> find_next_with_gap rest token (gap - 1)
-    | _ -> None
-  in
   let rec sequence_matches_from words tokens =
-    match tokens with
-    | [] -> true
-    | token :: rest ->
-      (match find_next_with_gap words token 1 with
-       | Some remaining -> sequence_matches_from remaining rest
-       | None -> false)
+    match words, tokens with
+    | _, [] -> true
+    | word :: rest_words, token :: rest_tokens when String.equal word token ->
+      sequence_matches_from rest_words rest_tokens
+    | _ -> false
   in
   let rec contains_token_sequence words tokens =
     match tokens with

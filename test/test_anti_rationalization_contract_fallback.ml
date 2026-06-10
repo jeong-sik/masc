@@ -37,6 +37,14 @@ let test_snake_case_fallback_requires_proximity () =
        ~notes:"record metrics now; synthetic suite skipped; backpressure remains unhandled"
        ~contract:[ "record_synthetic_backpressure" ])
 
+let test_snake_case_fallback_rejects_intervening_negation () =
+  check_unmet
+    "negated near-phrase stays unmet"
+    [ "record_synthetic_backpressure" ]
+    (unmet
+       ~notes:"we record no synthetic backpressure counters"
+       ~contract:[ "record_synthetic_backpressure" ])
+
 let () =
   Alcotest.run
     "anti_rationalization_contract_fallback"
@@ -57,5 +65,9 @@ let () =
             "snake_case requires proximity"
             `Quick
             test_snake_case_fallback_requires_proximity
+        ; Alcotest.test_case
+            "snake_case rejects intervening negation"
+            `Quick
+            test_snake_case_fallback_rejects_intervening_negation
         ] )
     ]

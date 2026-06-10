@@ -5,7 +5,7 @@ import { lspDiagnosticSnapshot } from './ide-lsp-client'
 import { ideConversationThreadSnapshot } from './ide-context-bridge'
 import { focusIdeContextAnchor, normalizeIdeContextFilePath } from './ide-state'
 import { setIdeReplayUntilMs } from './ide-replay-state'
-import { routeLinksForContext } from './ide-context-route-links'
+import { routeLinksForContext } from './ide-context-lens'
 import type { KeeperTraceEvent } from './keeper-trace-store'
 
 export interface CurrentFileSignal {

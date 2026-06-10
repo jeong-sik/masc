@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
-import { useSignalValue } from './use-signal-value'
+import { useSignalValue, useStoreSubscription } from './use-signal-value'
 import { get } from '../../api/core'
 import { fetchIdeEvents, type IdeBridgeEvent } from '../../api/ide'
 import { asRecord, isPositiveSafeInteger } from '../common/normalize'
@@ -475,7 +475,7 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
     }
   }, [store, refreshMs])
 
-  useSignalValue(store)
+  useStoreSubscription(store.subscribe)
   useSignalValue(globalPresenceSnapshot)
   useSignalValue(cursorOverlaySignal)
   useSignalValue(ideConversationThreadSnapshot)

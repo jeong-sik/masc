@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useState } from 'preact/hooks'
-import { useSignalValue } from './use-signal-value'
+import { useSignalValue, useStoreSubscription } from './use-signal-value'
 import { authHeaders, fetchWithTimeout, get } from '../../api/core'
 import { DEFAULT_GET_TIMEOUT_MS } from '../../config/constants'
 import { KeeperBadge } from '../keeper-badge'
@@ -228,7 +228,7 @@ export function IdePresenceStrip() {
     return unsub
   }, [presenceStore])
 
-  useSignalValue(presenceStore)
+  useStoreSubscription(presenceStore.subscribe)
   useSignalValue(cursorOverlaySignal)
 
   const current = presenceStore.snapshot()

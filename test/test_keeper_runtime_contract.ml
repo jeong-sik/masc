@@ -75,31 +75,65 @@ let test_active_goal_ids_filter_claimable_tasks () =
         failf "expected scoped claim, got error: %s" msg)
 ;;
 
-let test_active_goal_ids_block_out_of_scope_tasks () =
+let test_no_scoped_match_falls_back_to_all_tasks () =
   let config = make_config () in
   Fun.protect
     ~finally:(fun () -> cleanup_config config)
     (fun () ->
+      (* Backlog holds a claimable task linked to goal-b while the keeper is
+         scoped to goal-a. Goal-scope is a priority hint, not a hard gate: with
+         no goal-a task to claim, the keeper falls back to all_tasks instead of
+         starving. Restores RFC-0067 §1 allow_empty_goal_scope_fallback. *)
       add_task ~goal_id:"goal-b" config ~title:"goal b task";
       let meta = make_meta ~active_goal_ids:[ "goal-a" ] () in
       let scope =
         Keeper_runtime_contract.resolve_claim_goal_scope ~config ~meta ()
       in
+      check string "fallback mode" "empty_goal_scope_fallback_all_tasks"
+        scope.mode;
+      check (option string) "fallback reason recorded"
+        (Some "no_scoped_claimable_tasks") scope.fallback_reason;
+      check (list string) "effective goal ids preserved" [ "goal-a" ]
+        scope.effective_goal_ids;
       match
         Workspace.claim_next_r config ~agent_name:"keeper-runtime-contract"
           ~task_filter:scope.task_filter
           ()
       with
-      | Workspace.Claim_next_no_eligible
-          { scope_excluded_count; claim_pool_candidate_count; _ } ->
-        check int "scope excluded out-of-goal task" 1 scope_excluded_count;
-        check int "claim pool still saw task" 1 claim_pool_candidate_count
       | Workspace.Claim_next_claimed { task_id; _ } ->
-        failf "out-of-scope task should not be claimed, got %s" task_id
+        check string "claimed via fallback" "task-001" task_id
+      | Workspace.Claim_next_no_eligible { excluded_count; _ } ->
+        failf "expected fallback claim, got no_eligible excluded=%d"
+          excluded_count
       | Workspace.Claim_next_no_unclaimed ->
-        fail "expected no_eligible, got no_unclaimed"
+        fail "expected fallback claim, got no_unclaimed"
       | Workspace.Claim_next_error msg ->
-        failf "expected no_eligible, got error: %s" msg)
+        failf "expected fallback claim, got error: %s" msg)
+;;
+
+let test_scoped_match_present_keeps_isolation () =
+  let config = make_config () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_config config)
+    (fun () ->
+      (* When the keeper's goal DOES have a claimable task, scope stays a hard
+         filter: out-of-scope work is left for its own keeper. Fallback only
+         triggers on an empty scoped pool. *)
+      add_task ~goal_id:"goal-a" config ~title:"goal a task";
+      add_task ~goal_id:"goal-b" config ~title:"goal b task";
+      let meta = make_meta ~active_goal_ids:[ "goal-a" ] () in
+      let scope =
+        Keeper_runtime_contract.resolve_claim_goal_scope ~config ~meta ()
+      in
+      check string "scoped mode" "active_goal_ids" scope.mode;
+      check (option string) "no fallback reason" None scope.fallback_reason;
+      let tasks = Workspace.get_tasks_raw config in
+      let included =
+        tasks
+        |> List.filter scope.task_filter
+        |> List.map (fun (task : Masc_domain.task) -> task.title)
+      in
+      check (list string) "only linked task in scope" [ "goal a task" ] included)
 ;;
 
 let () =
@@ -108,8 +142,10 @@ let () =
     [ ( "active_goal_claim_scope"
       , [ test_case "filters claimable tasks" `Quick
             test_active_goal_ids_filter_claimable_tasks
-        ; test_case "blocks out-of-scope tasks" `Quick
-            test_active_goal_ids_block_out_of_scope_tasks
+        ; test_case "keeps isolation when scoped match present" `Quick
+            test_scoped_match_present_keeps_isolation
+        ; test_case "falls back to all_tasks when no scoped match" `Quick
+            test_no_scoped_match_falls_back_to_all_tasks
         ] )
     ]
 ;;

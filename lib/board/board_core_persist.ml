@@ -19,6 +19,7 @@ let record_persist_error ~where msg =
   Atomic.incr persist_errors;
   Log.BoardLog.error "persist error (%s): %s" where msg
 ;;
+let reset_for_test () = Atomic.set persist_errors 0
 let create_store () =
   { posts = Hashtbl.create 1024
   ; comments = Hashtbl.create 4096

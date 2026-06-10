@@ -273,7 +273,8 @@ let reset_for_test () =
   Atomic.set backend_state Uninitialized;
   Atomic.set forced_flusher_start_cas_conflicts_for_test 0;
   Atomic.set board_signal_hook None;
-  Atomic.set board_sse_hook None
+  Atomic.set board_sse_hook None;
+  Board_core_persist.reset_for_test ()
 
 let jsonl_forced () =
   match Env_config.Board.backend_opt () with

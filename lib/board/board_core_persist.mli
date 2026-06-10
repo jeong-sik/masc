@@ -17,7 +17,10 @@ end
 
 val flush_interval_sec : float
 val persist_error_count : unit -> int
-val record_persist_error : where:string -> string -> unit
+val record_persist_error : where:string -> string
+
+val reset_for_test : unit -> unit
+(** Reset all mutable Atomic/ref state for test isolation. *) -> unit
 
 val create_store : unit -> store
 val reset_comment_rate_tracker : unit -> unit

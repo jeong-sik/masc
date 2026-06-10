@@ -14,7 +14,10 @@ type decision =
       response : Llm_provider.Types.api_response;
       reason : string;
     }
-  | Try_next of { last_err : Llm_provider.Http_client.http_error option }
+  | Try_next of
+      { last_err : Llm_provider.Http_client.http_error option
+      ; source : string option
+      }
   | Exhausted of { last_err : Llm_provider.Http_client.http_error option }
 
 val should_try_next : Llm_provider.Http_client.http_error -> bool

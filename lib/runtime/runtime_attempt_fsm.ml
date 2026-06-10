@@ -14,7 +14,10 @@ type decision =
       { response : Llm_provider.Types.api_response
       ; reason : string
       }
-  | Try_next of { last_err : Llm_provider.Http_client.http_error option }
+  | Try_next of
+      { last_err : Llm_provider.Http_client.http_error option
+      ; source : string option
+      }
   | Exhausted of { last_err : Llm_provider.Http_client.http_error option }
 
 let should_try_next = function
@@ -34,14 +37,21 @@ let decide ~accept_on_exhaustion ~is_last = function
     then Accept_on_exhaustion { response; reason }
     else if is_last
     then Exhausted { last_err = Some (Llm_provider.Http_client.AcceptRejected { reason }) }
-    else Try_next { last_err = Some (Llm_provider.Http_client.AcceptRejected { reason }) }
+    else Try_next { last_err = Some (Llm_provider.Http_client.AcceptRejected { reason }); source = None }
   | Call_err err ->
     if (not is_last) && should_try_next err
-    then Try_next { last_err = Some err }
+    then Try_next { last_err = Some err; source = None }
     else Exhausted { last_err = Some err }
 
 let decide_and_record ~runtime_id:_ ~accept_on_exhaustion ~is_last outcome =
-  decide ~accept_on_exhaustion ~is_last outcome
+  let d = decide ~accept_on_exhaustion ~is_last outcome in
+  (match d with
+   | Try_next { source = Some src; last_err; _ } ->
+     Log.Runtime.warn "retry decision for(%s) last_err=%s"
+       src
+       (match last_err with None -> "none" | Some _ -> "set")
+   | _ -> ());
+  d
 
 let to_user_message = function
   | Some (Llm_provider.Http_client.HttpError { code; body }) ->

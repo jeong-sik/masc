@@ -448,6 +448,55 @@ let load_jsonl_diagnostics (path : string) : Yojson.Safe.t list * int =
     Malformed lines are logged and dropped. *)
 let load_jsonl (path : string) : Yojson.Safe.t list = fst (load_jsonl_diagnostics path)
 
+(* Fold over newline-terminated lines appended after byte offset [from].
+   Append-only JSONL stores never rewrite earlier bytes, so a (offset,
+   accumulator) pair is a pure function of the file prefix — callers cache
+   it and re-scan only the delta instead of the whole file. Bytes after the
+   last '\n' (a partially flushed line) are excluded from both the fold and
+   the returned boundary, so the next call re-reads them once the writer
+   completes the line. A [from] beyond EOF (file truncated/rotated) falls
+   back to a full scan from byte 0; callers detect shrinkage the same way
+   via the returned boundary. Blank lines advance the boundary but are not
+   folded. *)
+let fold_appended_lines ~path ~from ~init ~f =
+  if not (file_exists path)
+  then init, 0
+  else begin
+    let ic = open_in_bin path in
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr ic)
+      (fun () ->
+         let len = in_channel_length ic in
+         let from = if from < 0 || from > len then 0 else from in
+         seek_in ic from;
+         let chunk = Bytes.create 65536 in
+         let line_buf = Buffer.create 256 in
+         let acc = ref init in
+         let boundary = ref from in
+         let pos = ref from in
+         let rec loop () =
+           let n = input ic chunk 0 (Bytes.length chunk) in
+           if n > 0
+           then begin
+             for i = 0 to n - 1 do
+               match Bytes.get chunk i with
+               | '\n' ->
+                 let line = Buffer.contents line_buf in
+                 Buffer.clear line_buf;
+                 boundary := !pos + i + 1;
+                 if not (String.equal (String.trim line) "")
+                 then acc := f !acc line
+               | c -> Buffer.add_char line_buf c
+             done;
+             pos := !pos + n;
+             loop ()
+           end
+         in
+         loop ();
+         !acc, !boundary)
+  end
+;;
+
 (** Stream JSONL line-by-line, folding [f] over parsed values.
 
     Uses [Eio.Buf_read.lines] over [Eio.Path.with_open_in] when the

@@ -144,6 +144,27 @@ val fold_jsonl_lines
   -> string
   -> 'acc
 
+(** [fold_appended_lines ~path ~from ~init ~f] folds [f] over the raw
+    non-blank, newline-terminated lines whose bytes start at offset
+    [from], returning [(acc, boundary)] where [boundary] is the offset
+    just past the last ['\n'] consumed.
+
+    Contract for incremental readers over append-only JSONL stores:
+    cache [(boundary, acc)] per path and pass the cached [boundary] as
+    [from] on the next call — only the appended delta is re-read.
+    Bytes after the last ['\n'] (a partially flushed line) are neither
+    folded nor included in [boundary], so they are re-read once the
+    writer completes the line. A [from] outside [0, file_size] (file
+    truncated or rotated) restarts the scan from byte 0. Returns
+    [(init, 0)] when [path] does not exist. Lines are raw strings;
+    callers parse (and decide how to surface malformed rows). *)
+val fold_appended_lines
+  :  path:string
+  -> from:int
+  -> init:'acc
+  -> f:('acc -> string -> 'acc)
+  -> 'acc * int
+
 (** Append JSON value as line to JSONL file.
 
     Backed by a process-local per-path fd cache (RFC-0162 §3.4).

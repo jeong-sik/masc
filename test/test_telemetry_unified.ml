@@ -1242,6 +1242,67 @@ let test_cluster_keeper_metrics () =
   in
   Alcotest.(check int) "cluster keeper metric found" 1 (List.length entries)
 
+(* ── Trajectory summary incremental cache ─────────── *)
+
+let trajectory_row ~ts ~tool_name =
+  Yojson.Safe.to_string
+    (`Assoc
+       [ ("ts", `Float ts)
+       ; ("turn", `Int 1)
+       ; ("tool_name", `String tool_name)
+       ; ("args", `Assoc [])
+       ; ("result", `String "ok")
+       ])
+  ^ "\n"
+
+let thinking_row ~ts =
+  Yojson.Safe.to_string
+    (`Assoc
+       [ ("type", `String "thinking")
+       ; ("ts", `Float ts)
+       ; ("content", `String "reasoning text")
+       ])
+  ^ "\n"
+
+(* The (count, latest_ts) summary must (a) count only tool-call rows,
+   (b) pick appended rows up on the next call without any cache reset —
+   the snapshot loop calls this every 2 s and must not re-parse the whole
+   store — and (c) agree with a cold-cache recomputation. *)
+let test_trajectory_summary_incremental () =
+  Telemetry_unified.For_testing.reset_trajectory_summary_cache_for_testing ();
+  let dir = tmpdir "telem_traj_summary_incr" in
+  let root = masc_root dir in
+  let keeper_dir = Filename.concat root "trajectories/alice" in
+  Fs_compat.mkdir_p keeper_dir;
+  let trace = Filename.concat keeper_dir "trace-1.jsonl" in
+  Fs_compat.append_file trace (trajectory_row ~ts:100.0 ~tool_name:"tool_a");
+  Fs_compat.append_file trace (thinking_row ~ts:150.0);
+  Fs_compat.append_file trace (trajectory_row ~ts:200.0 ~tool_name:"tool_b");
+  let count, latest =
+    Telemetry_unified.For_testing.trajectory_tool_call_summary_stats
+      ~masc_root:root
+  in
+  Alcotest.(check int) "thinking rows excluded from count" 2 count;
+  Alcotest.(check (option (float 0.001))) "latest ts from tool rows only"
+    (Some 200.0) latest;
+  (* Append behind the warm cache: the delta must be picked up without a
+     reset (this is the property the 2 s snapshot loop depends on). *)
+  Fs_compat.append_file trace (trajectory_row ~ts:300.0 ~tool_name:"tool_c");
+  let count2, latest2 =
+    Telemetry_unified.For_testing.trajectory_tool_call_summary_stats
+      ~masc_root:root
+  in
+  Alcotest.(check int) "appended tool row visible without reset" 3 count2;
+  Alcotest.(check (option (float 0.001))) "latest ts advanced" (Some 300.0) latest2;
+  (* Cold cache must agree with the warm incremental result. *)
+  Telemetry_unified.For_testing.reset_trajectory_summary_cache_for_testing ();
+  let count3, latest3 =
+    Telemetry_unified.For_testing.trajectory_tool_call_summary_stats
+      ~masc_root:root
+  in
+  Alcotest.(check int) "cold recomputation agrees" count2 count3;
+  Alcotest.(check (option (float 0.001))) "cold latest agrees" latest2 latest3
+
 (* ── Runner ──────────────────────────────────────── *)
 
 let () =
@@ -1314,6 +1375,8 @@ let () =
             test_summary_bad_trajectory_root_observed_once;
           Alcotest.test_case "counts all rows beyond recent cap" `Quick
             test_summary_counts_all_entries_beyond_recent_cap;
+          Alcotest.test_case "trajectory summary cache is incremental" `Quick
+            test_trajectory_summary_incremental;
           Alcotest.test_case "replay retention selected sources" `Quick
             test_replay_retention_lists_selected_sources;
         ] );

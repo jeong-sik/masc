@@ -788,26 +788,105 @@ let execution_receipt_summary_stats ~masc_root =
            (count_acc, latest_acc))
        (0, None)
 
+(* Per-trace-file incremental summary cache for the snapshot loop.
+
+   The 2 s [Dashboard_snapshot.refresh_loop] calls [summary_json] on every
+   cycle; until 2026-06-10 this path tail-re-parsed every trace file in
+   every keeper dir (~480 MB store) through Yojson on each cycle, pegging
+   Executor_pool worker domains from boot — the measured CPU burn behind
+   the 16-keeper fleet freeze (capture:
+   .tmp/masc-freeze-captures/20260610-094442).
+
+   Trace files are append-only whole-line JSONL, so (tool-call count,
+   latest tool-call ts) up to a byte boundary is a pure function of the
+   file prefix: closed trace files hit the cache forever and the live
+   trace file re-parses only the bytes appended since the previous cycle.
+   A boundary past the current size (rotation/manual edit) rescans from
+   byte 0. Entries for deleted files are dropped on the next readdir pass
+   that no longer lists them only via rescan-from-zero semantics; the
+   residual map entry costs one small record per departed path. *)
+type trajectory_file_summary =
+  { tfs_boundary : int
+  ; tfs_tool_calls : int
+  ; tfs_latest_ts : float option
+  }
+
+let trajectory_summary_cache : (string, trajectory_file_summary) Hashtbl.t =
+  Hashtbl.create 64
+
+let trajectory_summary_cache_mu = Stdlib.Mutex.create ()
+
+let reset_trajectory_summary_cache_for_testing () =
+  Stdlib.Mutex.protect trajectory_summary_cache_mu (fun () ->
+    Hashtbl.reset trajectory_summary_cache)
+
+let trajectory_file_summary path : trajectory_file_summary option =
+  match Unix.stat path with
+  | exception (Unix.Unix_error _ | Sys_error _) -> None
+  | st ->
+    let size = st.Unix.st_size in
+    let cached =
+      Stdlib.Mutex.protect trajectory_summary_cache_mu (fun () ->
+        Hashtbl.find_opt trajectory_summary_cache path)
+    in
+    (match cached with
+     | Some e when e.tfs_boundary = size -> Some e
+     | cached ->
+       let from, count0, latest0 =
+         match cached with
+         | Some e when e.tfs_boundary < size ->
+           e.tfs_boundary, e.tfs_tool_calls, e.tfs_latest_ts
+         | _ -> 0, 0, None
+       in
+       let (count, latest), boundary =
+         Fs_compat.fold_appended_lines ~path ~from ~init:(count0, latest0)
+           ~f:(fun (count, latest) line ->
+             match Yojson.Safe.from_string line with
+             | exception Yojson.Json_error _ -> count, latest
+             | json ->
+               if trajectory_tool_call_json json
+               then begin
+                 let latest =
+                   match extract_ts json with
+                   | ts when ts > 0.0 -> max_ts_opt latest ts
+                   | _ -> latest
+                 in
+                 count + 1, latest
+               end
+               else count, latest)
+       in
+       let entry =
+         { tfs_boundary = boundary; tfs_tool_calls = count; tfs_latest_ts = latest }
+       in
+       Stdlib.Mutex.protect trajectory_summary_cache_mu (fun () ->
+         Hashtbl.replace trajectory_summary_cache path entry);
+       Some entry)
+
 let trajectory_tool_call_summary_stats ~masc_root =
   discover_trajectory_keeper_dirs masc_root
   |> List.fold_left
        (fun (count_acc, latest_acc) (_name, dir) ->
-         let entries =
-           protect_source_read Trajectory_tool_call
-             ~site:"trajectory_tool_call_summary_readdir" ~default:[]
-             (fun () ->
-             if not (Sys.file_exists dir) then []
-             else Sys.readdir dir
-             |> Array.to_list
-             |> List.filter (fun name -> Filename.check_suffix name ".jsonl")
-             |> List.concat_map (fun name ->
-                  read_trajectory_file (Filename.concat dir name)
-                    ~max_lines:unbounded_window_scan_cap ()))
-         in
-         ( count_acc + List.length entries,
-           match latest_ts_of_entries entries with
-           | Some ts -> max_ts_opt latest_acc ts
-           | None -> latest_acc ))
+         protect_source_read Trajectory_tool_call
+           ~site:"trajectory_tool_call_summary_readdir"
+           ~default:(count_acc, latest_acc)
+           (fun () ->
+             if not (Sys.file_exists dir) then (count_acc, latest_acc)
+             else
+               Sys.readdir dir
+               |> Array.to_list
+               |> List.filter (fun name -> Filename.check_suffix name ".jsonl")
+               |> List.fold_left
+                    (fun (count_acc, latest_acc) name ->
+                      match
+                        trajectory_file_summary (Filename.concat dir name)
+                      with
+                      | None -> count_acc, latest_acc
+                      | Some s ->
+                        ( count_acc + s.tfs_tool_calls,
+                          match s.tfs_latest_ts with
+                          | Some ts -> max_ts_opt latest_acc ts
+                          | None -> latest_acc ))
+                    (count_acc, latest_acc)))
        (0, None)
 
 let goal_event_summary_stats ~masc_root =
@@ -1050,3 +1129,10 @@ let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
     ("coverage_gaps", `List coverage_gaps);
     ("total_entries", `Int total_entries);
   ]
+
+module For_testing = struct
+  let trajectory_tool_call_summary_stats = trajectory_tool_call_summary_stats
+
+  let reset_trajectory_summary_cache_for_testing =
+    reset_trajectory_summary_cache_for_testing
+end

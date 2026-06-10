@@ -145,11 +145,6 @@ let run (ctx : ctx)
          Keeper_registry.mark_turn_provider_attempt_started
            ~base_path:config.base_path
            meta.name;
-         Keeper_turn_fsm.emit_transition
-           ~keeper_name:meta.name
-           ~turn_id:keeper_turn_id
-           ~prev:Keeper_turn_fsm.Awaiting_provider
-           Keeper_turn_fsm.Streaming;
          Keeper_unified_turn_attempt_watchdog.dispatch
            ~clock
            ~attempt_watchdog_s:None
@@ -163,6 +158,16 @@ let run (ctx : ctx)
                ~keeper_turn_id
                ())
            ~run:(fun () ->
+             (* Emit INSIDE the watchdog window: the 2026-06-10 freeze showed
+                this transition's forensics append can park, and any park
+                before [dispatch] arms its [Eio.Time.with_timeout_exn] is
+                unrescuable by design — the safety cap must cover everything
+                that happens once the keeper claims to be Streaming. *)
+             Keeper_turn_fsm.emit_transition
+               ~keeper_name:meta.name
+               ~turn_id:keeper_turn_id
+               ~prev:Keeper_turn_fsm.Awaiting_provider
+               Keeper_turn_fsm.Streaming;
              Keeper_agent_run.run_turn
                ~config
                ~meta:run_meta

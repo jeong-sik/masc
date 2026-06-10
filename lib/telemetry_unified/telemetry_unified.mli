@@ -103,3 +103,16 @@ val replay_retention_json :
 (** [replay_retention_json ~base_path ~masc_root ~sources] returns the
     provenance block for the dashboard telemetry replay endpoint, including
     the selected source list and durable stores read for each source. *)
+
+module For_testing : sig
+  val trajectory_tool_call_summary_stats :
+    masc_root:string -> int * float option
+  (** Exposes the per-trace-file incremental summary used by
+      [summary_json] for the trajectory source: (tool-call entry count,
+      latest tool-call ts). Production callers go through
+      [summary_json]. *)
+
+  val reset_trajectory_summary_cache_for_testing : unit -> unit
+  (** Clear the per-file (boundary, count, latest_ts) cache so a test
+      observes cold-start behavior. *)
+end

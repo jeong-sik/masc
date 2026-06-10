@@ -431,14 +431,22 @@ let iter_range t ~since ~until f =
       end)
       months
 
-(* Per-file non-empty-line count keyed by (path, byte size). Day-files are
-   append-only and split by date: a closed (past-day) file never changes, so
-   its count is a pure function of its size. Caching it means a repeated
-   full-store count re-reads only the current day-file (whose size grows)
-   instead of every historical file. Any size change (append, prune, rewrite)
-   misses the cache and recomputes, so the cached count never drifts. *)
+(* Per-file non-empty-line count cached as (boundary, count). Day-files are
+   append-only and split by date, so the count of newline-terminated lines
+   before a byte boundary is a pure function of the file prefix: a closed
+   (past-day) file hits the cache forever, and the growing current-day file
+   re-reads only the bytes appended since the last call instead of the whole
+   file. A boundary past the current size (prune/rewrite) falls back to a
+   full rescan, so the cached count never drifts.
+
+   Counting contract: only '\n'-terminated lines are counted. A trailing
+   partially-flushed line is invisible until its newline lands — for the
+   monotonic dashboard counters served by [count_entries] that is the
+   correct staleness direction (undercount by at most the in-flight line).
+   Audit callers that must count an unterminated trailing line use
+   [count_entries_uncached]. *)
 type file_count_entry =
-  { fc_size : int
+  { fc_boundary : int
   ; fc_count : int
   }
 
@@ -447,24 +455,31 @@ let file_count_cache_mu = Stdlib.Mutex.create ()
 
 let count_non_empty_lines_cached path =
   let size = try (Unix.stat path).Unix.st_size with Unix.Unix_error _ -> -1 in
-  let cached =
-    if size < 0
-    then None
-    else
+  if size < 0
+  then count_non_empty_lines path
+  else begin
+    let cached =
       Stdlib.Mutex.protect file_count_cache_mu (fun () ->
-        match Hashtbl.find_opt file_count_cache path with
-        | Some e when e.fc_size = size -> Some e.fc_count
-        | _ -> None)
-  in
-  match cached with
-  | Some n -> n
-  | None ->
-    let n = count_non_empty_lines path in
-    if size >= 0
-    then
+        Hashtbl.find_opt file_count_cache path)
+    in
+    match cached with
+    | Some e when e.fc_boundary = size -> e.fc_count
+    | cached ->
+      let from, base =
+        match cached with
+        | Some e when e.fc_boundary < size -> e.fc_boundary, e.fc_count
+        | _ -> 0, 0
+      in
+      let delta, boundary =
+        Fs_compat.fold_appended_lines ~path ~from ~init:0
+          ~f:(fun acc _line -> acc + 1)
+      in
+      let count = base + delta in
       Stdlib.Mutex.protect file_count_cache_mu (fun () ->
-        Hashtbl.replace file_count_cache path { fc_size = size; fc_count = n });
-    n
+        Hashtbl.replace file_count_cache path
+          { fc_boundary = boundary; fc_count = count });
+      count
+  end
 
 let fold_day_file_counts t ~counter =
   let months = list_month_dirs t.base_dir in
@@ -482,61 +497,20 @@ let fold_day_file_counts t ~counter =
    that must not observe any caching use this directly. *)
 let count_entries_uncached t = fold_day_file_counts t ~counter:count_non_empty_lines
 
-(* Per-file-cached full count. O(current day-file) in steady state because
-   closed day-files hit [file_count_cache]. Size-keyed, so it carries none of
-   the staleness window of the [count_cache] TTL below. *)
+(* Per-file-cached full count. O(appended bytes) in steady state: closed
+   day-files hit [file_count_cache] outright and the growing current-day
+   file re-reads only its delta. *)
 let count_entries_incremental t =
   fold_day_file_counts t ~counter:count_non_empty_lines_cached
 
-(* RFC-0162 §3.2: process-local TTL cache around [count_entries].
-
-   The dashboard refreshes Tool Monitor / Fleet Health / Tool Quality
-   surfaces every 30 s. Each surface calls [count_entries] on the
-   same store (`.masc/tool_calls/`, `.masc/oas-events/`, etc.),
-   opening and closing every day-file to count newlines. With 30
-   day-files × 15 MB on a single store this turns into a hot
-   read-side load that competes for the same OS fd budget as the
-   write-side append it is reporting on.
-
-   The cached count is good for [count_cache_ttl_sec] seconds. A
-   stale count is acceptable for the dashboard surface: appends are
-   monotonic increases, so a slightly stale total under-counts by
-   at most [ttl × append_rate], which is well below the dashboard
-   refresh granularity. Tests and audit callers that need the
-   live count use [count_entries_uncached]. *)
-let count_cache_ttl_sec = 10.0
-
-type count_cache_entry =
-  { entry_count : int
-  ; computed_at : float
-  }
-
-let count_cache : (string, count_cache_entry) Hashtbl.t = Hashtbl.create 8
-let count_cache_mu = Stdlib.Mutex.create ()
-
-let count_entries t =
-  let key = t.base_dir in
-  let now = Unix.gettimeofday () in
-  let cached_opt =
-    Stdlib.Mutex.protect count_cache_mu (fun () ->
-      match Hashtbl.find_opt count_cache key with
-      | Some entry when now -. entry.computed_at < count_cache_ttl_sec ->
-        Some entry.entry_count
-      | _ -> None)
-  in
-  match cached_opt with
-  | Some n -> n
-  | None ->
-    (* Per-file cache keeps this miss O(current day-file) even though the
-       store has many large historical files. *)
-    let n = count_entries_incremental t in
-    Stdlib.Mutex.protect count_cache_mu (fun () ->
-      Hashtbl.replace count_cache key { entry_count = n; computed_at = now });
-    n
-;;
+(* The RFC-0162 §3.2 10s-TTL store-level cache that used to sit here is
+   removed: the boundary-keyed per-file cache above makes a [count_entries]
+   call O(appended bytes), so the TTL layer no longer bought anything and
+   only added a staleness window plus a second cache surface to reason
+   about. *)
+let count_entries = count_entries_incremental
 
 let reset_count_cache_for_testing () =
-  Stdlib.Mutex.protect count_cache_mu (fun () -> Hashtbl.reset count_cache);
   Stdlib.Mutex.protect file_count_cache_mu (fun () -> Hashtbl.reset file_count_cache)
 ;;
 let read_range t ~since ~until =

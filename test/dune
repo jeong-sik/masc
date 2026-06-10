@@ -1382,6 +1382,7 @@
 
 (include stanzas/test_keeper_failure_policy.inc)
 
+(include stanzas/test_keeper_sandbox_factory_failure.inc)
 (include stanzas/test_keeper_tool_command_runtime_cwd_response.inc)
 
 (include stanzas/test_keeper_tool_dispatch_runtime.inc)

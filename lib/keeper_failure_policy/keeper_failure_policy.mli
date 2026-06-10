@@ -106,6 +106,23 @@ type decision =
 val decide : failure -> decision
 val should_kill_keeper : decision -> bool
 
+val make_decision :
+  failure_scope:failure_scope ->
+  lifecycle_effect:lifecycle_effect ->
+  circuit_effect:circuit_effect ->
+  operator_action:operator_action ->
+  keeper_death_allowed:bool ->
+  reason:string ->
+  decision
+
+val liveness_is_lost : liveness_evidence -> bool
+
+val provider_timeout_policy_effect :
+  phase:timeout_phase option ->
+  strikes:int option ->
+  liveness:liveness_evidence ->
+  lifecycle_effect * circuit_effect * operator_action * string
+
 val failure_scope_to_label : failure_scope -> string
 val lifecycle_effect_to_label : lifecycle_effect -> string
 val circuit_effect_to_label : circuit_effect -> string

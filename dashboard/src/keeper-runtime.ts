@@ -21,6 +21,7 @@ export {
   hydrateKeeperStatus,
   hydrateKeeperChatHistory,
   loadFullKeeperHistory,
+  noteKeeperChatAppended,
   sendKeeperThreadMessage,
   probeKeeperRuntime,
   recoverKeeperRuntime,

@@ -550,7 +550,8 @@ let append_direct_chat_pair_if_reply ~(config : Workspace.config) ~name ~args re
           ~user_attachments:[]
           ~source:"agent"
           ~assistant_content
-          ())
+          ();
+        Keeper_chat_broadcast.chat_appended ~keeper_name:name ~source:"agent")
 ;;
 
 (* RFC-0182 Phase 5 PR-B: ctx-free body for [masc_keeper_msg] descriptor

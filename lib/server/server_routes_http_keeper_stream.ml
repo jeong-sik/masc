@@ -569,16 +569,50 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
             "keeper_stream: worker event push failed: %s"
             (Printexc.to_string exn)
   in
+  (* Mirror tool-call SDK events flowing through [on_event] so the
+     completed turn persists tool lines alongside the user/assistant
+     pair (the dashboard re-renders tool cards after a reload). The
+     accumulator runs in the worker fiber and is collected after
+     dispatch returns in that same fiber, so no synchronisation is
+     needed. The non-streaming fallback path emits no events and
+     therefore persists no tool lines. *)
+  let tool_call_cells : (int, Buffer.t) Hashtbl.t = Hashtbl.create 4 in
+  let tool_calls_rev : (string * string * Buffer.t) list ref = ref [] in
+  let record_tool_event = function
+    | Agent_sdk.Types.ContentBlockStart
+        { index; tool_id = Some tool_id; tool_name = Some tool_name; _ } ->
+        let buf = Buffer.create 64 in
+        Hashtbl.replace tool_call_cells index buf;
+        tool_calls_rev := (tool_id, tool_name, buf) :: !tool_calls_rev
+    | Agent_sdk.Types.ContentBlockDelta { index; delta = InputJsonDelta args } ->
+        (match Hashtbl.find_opt tool_call_cells index with
+         | Some buf -> Buffer.add_string buf args
+         | None -> ())
+    | _ -> ()
+  in
+  let collected_tool_calls () =
+    List.rev_map
+      (fun (call_id, call_name, buf) ->
+        { Keeper_chat_store.call_id; call_name; args = Buffer.contents buf })
+      !tool_calls_rev
+  in
+  let chat_source =
+    if has_connector_context then payload.channel else "dashboard"
+  in
   let on_event evt =
+    record_tool_event evt;
     push_worker_event (Stream_event evt)
   in
   let persist_failure_reply err =
-    Keeper_chat_store.append_pair
+    Keeper_chat_store.append_turn
       ~base_dir:state.Mcp_server.workspace_config.base_path
       ~keeper_name:payload.name
       ~user_content:payload.message
       ~user_attachments:payload.attachments
+      ~tool_calls:(collected_tool_calls ())
+      ~source:chat_source
       ~assistant_content:(persisted_error_reply err)
+      ()
   in
   let timeout_sec = Option.map float_of_int payload.timeout_sec in
   let request_id =
@@ -612,12 +646,15 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
         | Ok (true, body) ->
             let _payload_json_opt, visible_reply = extract_visible_reply body in
             if not (is_continuation_checkpoint_reply visible_reply) then
-              Keeper_chat_store.append_pair
+              Keeper_chat_store.append_turn
                 ~base_dir:state.Mcp_server.workspace_config.base_path
                 ~keeper_name:payload.name
                 ~user_content:payload.message
                 ~user_attachments:payload.attachments
-                ~assistant_content:visible_reply;
+                ~tool_calls:(collected_tool_calls ())
+                ~source:chat_source
+                ~assistant_content:visible_reply
+                ();
             push_worker_event (Stream_terminal (true, body));
             Tool_result.ok ~tool_name:"masc_keeper_msg" ~start_time body
         | Ok (false, err) ->

@@ -19,6 +19,7 @@
 import {
   number,
   object,
+  optional,
   safeParse,
   string,
   type InferOutput,
@@ -28,6 +29,14 @@ export const KeeperChatHistoryMessageSchema = object({
   role: string(),
   content: string(),
   ts: number(),
+  // Tool-call rows (role === 'tool') persisted by keeper_chat_store.ml
+  // carry the executed tool's id/name; `content` holds the accumulated
+  // argument JSON. `source` names the originating connector
+  // ('dashboard' | 'discord' | 'slack' | 'agent') on every row of a
+  // turn. All three are absent on legacy rows.
+  tool_call_id: optional(string()),
+  tool_call_name: optional(string()),
+  source: optional(string()),
 })
 
 export type KeeperChatHistoryMessage = InferOutput<typeof KeeperChatHistoryMessageSchema>

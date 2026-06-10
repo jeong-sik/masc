@@ -74,6 +74,10 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     ~cluster_name:state.workspace_config.backend_config.Backend_types.cluster_name
     ();
   Keeper_tool_call_log.start_flush_fiber ~sw ~clock;
+  (* Transition-audit forensics writes leave the keeper hot path: recorders
+     enqueue and this fiber drains (2026-06-10 fleet-freeze fix — the inline
+     append serialized all keepers on one store mutex). *)
+  Keeper_transition_audit.start_flush_fiber ~sw ~clock;
   Otel_dispatch_hook.install ();
   (* PR-S3: register the OTel/Otel_metric_store dispatch span wrapper. [Tool_dispatch]
      (lib/tool/, masc_tool_dispatch) no longer code-depends on [Tool_telemetry]
@@ -212,6 +216,10 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
                + prune_dir (Filename.concat masc "activity-events")
                + prune_dir (Filename.concat masc "voice_sessions")
                + prune_dir (Filename.concat masc "tool_calls")
+               (* transition-audit was absent from this list since its
+                  introduction (RFC-0002) — 82 MB across 3 month-dirs by
+                  2026-06-10, scanned by every store-fallback read. *)
+               + prune_dir (Filename.concat masc "transition-audit")
              in
              if total > 0
              then

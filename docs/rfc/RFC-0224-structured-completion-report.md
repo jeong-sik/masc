@@ -1,5 +1,5 @@
 ---
-rfc: "0223"
+rfc: "0224"
 title: "Structured completion report for free-text contract items"
 status: Draft
 created: 2026-06-10
@@ -11,7 +11,7 @@ related: ["0220", "0221", "0222"]
 implementation_prs: []
 ---
 
-# RFC-0223: Structured completion report for free-text contract items
+# RFC-0224: Structured completion report for free-text contract items
 
 Status: Draft · Subjective-lane companion to RFC-0222 · Parse-don't-validate on "did you address each obligation"
 Drafted by: Claude Fable 5 (operator-supervised keeper-PR disposition session 2026-06-10), pending owner review.
@@ -42,9 +42,9 @@ The structural defect, independent of which layer fires: **the producer's claim 
 | Verification-state atomicity | RFC-0221 |
 | Scheduling / liveness / guaranteed verifier satisfier | RFC-0220 |
 | **Checkable** tasks: machine-measurable acceptance predicates, harness-as-satisfier | RFC-0222 |
-| **Subjective** tasks: how the producer's contract-satisfaction *claim* is carried and gated | **This RFC (0223)** |
+| **Subjective** tasks: how the producer's contract-satisfaction *claim* is carried and gated | **This RFC (0224)** |
 
-RFC-0222 §6.1 states it "does **not** solve subjective non-convergence" and leaves `Manual_review` tasks on the existing prose path. 0223 is that lane's producer-protocol fix. The two compose per task: a checkable predicate (`acceptance`, 0222) and a free-text checklist (`completion_contract`, 0223) can coexist; 0222's `Manual_review` population is exactly 0223's beneficiary set. Truth-judgment stays with Gate 3 LLM + RFC-0220 §3.5 verifier — 0223 does not move it.
+RFC-0222 §6.1 states it "does **not** solve subjective non-convergence" and leaves `Manual_review` tasks on the existing prose path. 0224 is that lane's producer-protocol fix. The two compose per task: a checkable predicate (`acceptance`, 0222) and a free-text checklist (`completion_contract`, 0224) can coexist; 0222's `Manual_review` population is exactly 0224's beneficiary set. Truth-judgment stays with Gate 3 LLM + RFC-0220 §3.5 verifier — 0224 does not move it.
 
 ## §3 Design — declare per-item, gate completeness, judge semantics
 
@@ -81,7 +81,7 @@ Gate 3's prompt receives the structured triples (item, claimed status, evidence)
 
 ### 3.4 Why this kills the rationalization-by-silence pattern
 
-Today an obligation can be skipped by simply not mentioning it; the omission is only as visible as the judge's attention. Under 0223, silence is a *gate* failure (missing index — deterministic), and evasion requires an explicit false `Met` claim with fabricated evidence — a discrete, attributable lie that the LLM judge, the verifier, and any later audit can target. The design converts an inference problem into a declaration protocol: parse, don't validate.
+Today an obligation can be skipped by simply not mentioning it; the omission is only as visible as the judge's attention. Under 0224, silence is a *gate* failure (missing index — deterministic), and evasion requires an explicit false `Met` claim with fabricated evidence — a discrete, attributable lie that the LLM judge, the verifier, and any later audit can target. The design converts an inference problem into a declaration protocol: parse, don't validate.
 
 ## §4 Workaround-gate self-check (CLAUDE.md signatures)
 
@@ -96,9 +96,9 @@ Today an obligation can be skipped by simply not mentioning it; the omission is 
 
 ## §5 Honest limits
 
-1. **Truth is still not proven.** A false `Met` with plausible evidence passes the gate; semantic judgment remains with Gate 3/verifier by design. 0223 narrows the lie's shape; it does not eliminate lying. For provable obligations, declare an RFC-0222 predicate instead.
+1. **Truth is still not proven.** A false `Met` with plausible evidence passes the gate; semantic judgment remains with Gate 3/verifier by design. 0224 narrows the lie's shape; it does not eliminate lying. For provable obligations, declare an RFC-0222 predicate instead.
 2. **Producer schema change.** Keepers must learn to emit the field. Structured tool arguments are empirically more reliable for LLMs than incidental prose phrasing, and the rejection message enumerates what is missing — but until prompts/tool docs are updated, a hard requirement would churn. Hence the flag (§7).
-3. **Contract quality is upstream.** Vague contract items ("improve quality") produce vague evidence; 0223 cannot fix authoring. RFC-0222 §6.2's adoption argument applies symmetrically.
+3. **Contract quality is upstream.** Vague contract items ("improve quality") produce vague evidence; 0224 cannot fix authoring. RFC-0222 §6.2's adoption argument applies symmetrically.
 
 ## §6 Open questions (owner decisions)
 

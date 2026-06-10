@@ -68,6 +68,7 @@
   test_keeper_reconcile_state
   test_attempt_state
   test_runtime_attempt_fsm
+  test_keeper_turn_driver_backpressure
   test_actor_mailbox
   test_domain_pool
   test_sse
@@ -317,6 +318,7 @@
   test_keeper_reconcile_state
   test_attempt_state
   test_runtime_attempt_fsm
+  test_keeper_turn_driver_backpressure
   test_actor_mailbox
   test_domain_pool
   test_sse

@@ -498,6 +498,29 @@ let keeper_for_channel ~channel_id =
         else None)
       candidates
 
+(* RFC-0223 P2: presence surface. Both recomputed per call — no cached
+   presence state. *)
+
+let bound_channels ~keeper_name =
+  let normalized = String.trim keeper_name in
+  if String.equal normalized "" then []
+  else
+    read_bindings ()
+    |> List.filter_map (fun (b : binding) ->
+           if String.equal b.keeper_name normalized then Some b.channel_id
+           else None)
+
+let connected () =
+  (* The in-process gateway (RFC-0203) is the only Discord transport;
+     its run loop publishes the typed connection state. The legacy
+     sidecar status file is not consulted: nothing writes it since the
+     Python sidecar was deleted. *)
+  match Discord_gateway_client.connection_state () with
+  | Discord_gateway_state.Connected _ -> true
+  | Disconnected | Awaiting_hello | Identifying | Resuming
+  | Reconnect_pending _ | Failed _ ->
+      false
+
 type send_error =
   | Missing_token
   | Rest_error of Discord_rest_client.error

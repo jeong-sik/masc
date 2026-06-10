@@ -180,6 +180,7 @@
   test_keeper_unified_idle_cooldown
   test_keeper_unified_inline_skip
   test_keeper_unified_metacognition
+  test_keeper_surface_presence_prompt
   test_keeper_unified_verification_surface
   test_keeper_fsm_guard_actions
   test_keeper_callback_hardening
@@ -440,6 +441,7 @@
   test_keeper_unified_idle_cooldown
   test_keeper_unified_inline_skip
   test_keeper_unified_metacognition
+  test_keeper_surface_presence_prompt
   test_keeper_unified_verification_surface
   test_keeper_fsm_guard_actions
   test_keeper_callback_hardening
@@ -1238,6 +1240,7 @@
 (include stanzas/test_channel_gate_metrics.inc)
 
 (include stanzas/test_channel_gate_discord_state_in_process.inc)
+(include stanzas/test_gate_surface.inc)
 
 (include stanzas/test_discord_gateway_state.inc)
 

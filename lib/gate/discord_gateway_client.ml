@@ -83,6 +83,17 @@ let log_effect level message =
   | `Warn -> Log.Discord.warn "%s" message
   | `Error -> Log.Discord.error "%s" message
 
+(* RFC-0223 P2: the run loop's connection state, published so presence
+   derivation (Channel_gate_discord_state.connected) can read it without
+   file indirection. One gateway per process (single bot token), so a
+   module-level register is unambiguous. Written only by [run]'s
+   state-machine step; everyone else reads. *)
+let published_connection_state : Discord_gateway_state.connection_state Atomic.t
+  =
+  Atomic.make Discord_gateway_state.Disconnected
+
+let connection_state () = Atomic.get published_connection_state
+
 let run ~sw ~env ~token ~intents ~trigger_policy ~on_event () =
   let config : Discord_gateway_state.config = {
     token; intents; bot_user_id = None; trigger_policy;
@@ -179,6 +190,7 @@ let run ~sw ~env ~token ~intents ~trigger_policy ~on_event () =
     let now = now_mono env in
     let (s', effects) = Discord_gateway_state.step !state ~now_mono:now input in
     state := s';
+    Atomic.set published_connection_state (Discord_gateway_state.state s');
     List.iter run_effect effects
   in
 

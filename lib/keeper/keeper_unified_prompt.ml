@@ -40,6 +40,24 @@ let format_goals (goal_ids : string list) : string =
   String.concat "\n"
     (List.map (fun gid -> Printf.sprintf "- %s" gid) goal_ids)
 
+(** Format one connected-surface presence line (RFC-0223 P2).
+    Presence only: lane label + liveness, no content, no counts. *)
+let format_surface_presence (p : Gate_surface.surface_presence) : string =
+  let lane =
+    match p.surface with
+    | Gate_surface.Dashboard -> "dashboard"
+    | Gate_surface.Discord { channel_id = Some channel; _ } ->
+        Printf.sprintf "discord #%s" channel
+    | Gate_surface.Discord { channel_id = None; _ } -> "discord"
+    | Gate_surface.Slack { channel_id = Some channel; _ } ->
+        Printf.sprintf "slack #%s" channel
+    | Gate_surface.Slack { channel_id = None; _ } -> "slack"
+    | Gate_surface.Gate { channel; channel_id = Some channel_id } ->
+        Printf.sprintf "%s #%s" channel channel_id
+    | Gate_surface.Gate { channel; channel_id = None } -> channel
+  in
+  Printf.sprintf "%s (%s)" lane (if p.alive then "alive" else "offline")
+
 let format_scope_messages
     (messages : (string * string) list) : string =
   let shown_messages, omitted =
@@ -599,7 +617,29 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
          (List.length observation.active_goals));
     Buffer.add_string ubuf (format_goals observation.active_goals);
     Buffer.add_string ubuf "\n\n");
-  (* 2. Namespace state — usually lower churn than inbox/board detail *)
+  (* 2. Connected surfaces — connector presence, changes only on
+     bind/unbind or transport flaps (RFC-0223 P2). Omitted when only
+     the implicit dashboard is attached: every keeper has the
+     dashboard, so dashboard-only presence carries no signal. *)
+  let connector_presence =
+    List.filter
+      (fun (p : Gate_surface.surface_presence) ->
+        match p.surface with
+        | Gate_surface.Dashboard -> false
+        | Gate_surface.Discord _ | Gate_surface.Slack _ | Gate_surface.Gate _
+          ->
+            true)
+      observation.connected_surfaces
+  in
+  if connector_presence <> [] then (
+    Buffer.add_string ubuf "### Connected Surfaces\n";
+    List.iter
+      (fun p ->
+        Buffer.add_string ubuf
+          (Printf.sprintf "- %s\n" (format_surface_presence p)))
+      observation.connected_surfaces;
+    Buffer.add_char ubuf '\n');
+  (* 3. Namespace state — usually lower churn than inbox/board detail *)
   if
     observation.unclaimed_task_count > 0
     || observation.claimable_task_count > 0
@@ -642,12 +682,12 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
     Buffer.add_string ubuf
       (Printf.sprintf "- Active agents: %d\n" observation.active_agent_count);
     Buffer.add_char ubuf '\n');
-  (* 3. Context health — stable resource framing *)
+  (* 4. Context health — stable resource framing *)
   Buffer.add_string ubuf
     (Printf.sprintf "### Context\n- Utilization: %.0f%%\n- Idle: %ds\n"
        (observation.context_ratio *. 100.0)
        observation.idle_seconds);
-  (* 4. Autonomous trigger — lower churn than reactive inboxes *)
+  (* 5. Autonomous trigger — lower churn than reactive inboxes *)
   let turn_decision =
     Keeper_world_observation.keeper_cycle_decision ~meta observation
   in
@@ -658,7 +698,7 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
     Buffer.add_string ubuf "\n### Autonomous Trigger\n";
     Buffer.add_string ubuf (String.concat "\n" autonomous_trigger);
     Buffer.add_char ubuf '\n');
-  (* 5. Continuity — usually large and moderately stable, so keep it
+  (* 6. Continuity — usually large and moderately stable, so keep it
      before highly volatile reactive sections for better prefix reuse.
      Inject only forward-looking fields (Goal, Next plan, Next, OpenQuestions,
      Constraints). Backward-looking fields (Done, Progress, Decisions) are
@@ -680,14 +720,14 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
       "- If this turn was still scheduled or backlog/repo signals remain, investigate that mismatch instead of echoing the prior idle conclusion.\n";
     Buffer.add_string ubuf continuity_for_prompt;
     Buffer.add_char ubuf '\n');
-  (* 6. Pending mentions — reactive trigger *)
+  (* 7. Pending mentions — reactive trigger *)
   if observation.pending_mentions <> [] then (
     Buffer.add_string ubuf
       (Printf.sprintf "### Pending Mentions (%d)\n"
          (List.length observation.pending_mentions));
     Buffer.add_string ubuf (format_mentions observation.pending_mentions);
     Buffer.add_string ubuf "\n\n");
-  (* 7. Scope messages — reactive trigger *)
+  (* 8. Scope messages — reactive trigger *)
   if observation.pending_scope_messages <> [] then (
     Buffer.add_string ubuf
       (Printf.sprintf "### Scope Messages (%d recent)\n"
@@ -695,7 +735,7 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
     Buffer.add_string ubuf
       (format_scope_messages observation.pending_scope_messages);
     Buffer.add_string ubuf "\n\n");
-  (* 8. Claimable work — advisory operational guidance.
+  (* 9. Claimable work — advisory operational guidance.
      Body lives at config/prompts/keeper.immediate_task_move.md. The OCaml
      side only owns the section header and the trailing blank line; the
      bullet prose stays in the markdown file alongside the other keeper
@@ -707,7 +747,7 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
          ~enabled:true
          Keeper_prompt_names.immediate_task_move);
     Buffer.add_char ubuf '\n');
-  (* 9. Board activity — reactive trigger *)
+  (* 10. Board activity — reactive trigger *)
   if observation.pending_board_events <> [] then (
     Buffer.add_string ubuf
       (Printf.sprintf "### Board Activity (%d new)\n"

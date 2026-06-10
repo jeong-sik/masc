@@ -75,3 +75,11 @@ val run :
     4. On [Close_wss] effect: tear down, reschedule per backoff.
 
     @raise Failure until Phase 1.2 ships the implementation. *)
+
+(** {1 Connection state (RFC-0223 P2)} *)
+
+val connection_state : unit -> Discord_gateway_state.connection_state
+(** Last connection state published by the {!run} loop's state machine.
+    [Disconnected] until [run] has started. One gateway per process
+    (single bot token); written only by [run], safe to read from any
+    fiber. Feeds connector presence ([Channel_gate_discord_state]). *)

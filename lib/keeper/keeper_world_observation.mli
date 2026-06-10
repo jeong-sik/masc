@@ -81,6 +81,12 @@ type world_observation = {
 
   active_agent_count : int;
   (** Number of agents currently active in the workspace. *)
+
+  connected_surfaces : Gate_surface.surface_presence list;
+  (** Connector surfaces attached to this keeper (RFC-0223 P2).
+      Recomputed from binding stores + connector liveness on every
+      observation; the dashboard entry is always present. Presence
+      only — no conversation content, no counts. *)
 }
 
 type keeper_cycle_channel =

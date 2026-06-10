@@ -133,6 +133,7 @@ let init_default ~config_path =
 let get_default_runtime () = !default_runtime_ref
 let get_runtimes () = !runtimes_ref
 let get_runtime_ids () = runtime_ids !runtimes_ref
+let all_ids = get_runtime_ids
 
 (* RFC persona⊥{model,runtime}: keeper→runtime assignment is sourced from
    [[runtime.assignments]] (runtime.toml SSOT), NOT from persona JSON or keeper

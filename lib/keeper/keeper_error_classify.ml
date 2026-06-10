@@ -517,7 +517,7 @@ let normalized_runtime_id ~catalog_names name =
   else String.trim trimmed
 
 let runtime_catalog_names () =
-  match Runtime.get_runtime_ids () with
+  match Runtime.all_ids () with
   | [] -> [ Keeper_config.default_runtime_id () ]
   | names -> names
 ;;

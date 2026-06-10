@@ -38,6 +38,7 @@ val init_default : config_path:string -> (unit, string) result
 val get_default_runtime : unit -> t option
 val get_runtimes : unit -> t list
 val get_runtime_ids : unit -> string list
+val all_ids : unit -> string list
 
 val runtime_id_for_keeper : string -> string option
 (** [runtime_id_for_keeper keeper_name] is the runtime id assigned to

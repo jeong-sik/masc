@@ -152,13 +152,13 @@ let handle_stale_storm_pause
     ~metric_name:Keeper_metrics.(to_string StaleStormPaused)
     ~lifecycle_detail:(Printf.sprintf "stale_termination_storm count=%d" count)
     ~blocker_class:(Some Turn_timeout)
-    ~resume_policy:Manual_resume_required
+    ~resume_policy:Auto_resume_with_backoff
     ~log_message:
       (Printf.sprintf
-         "STALE STORM AUTO-PAUSED (count=%d in 6h window). Auto-resume is disabled \
-          until the root cause clears; operator must resume manually via masc_keeper_up \
-          or API after investigating the underlying runtime/tool/runtime loop. See \
-          issue #10765."
+         "STALE STORM AUTO-PAUSED (count=%d in 6h window). Supervisor will attempt \
+          self-healing auto-resume with exponential back-off (see \
+          MASC_KEEPER_AUTO_RESUME_INITIAL_SEC). If the storm persists, keepers will \
+          stay paused longer; after it clears, fleet capacity recovers automatically."
          count)
 ;;
 

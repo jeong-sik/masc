@@ -9,6 +9,8 @@ val resolved_tool_lane_label :
   string
 
 val fail_open_health_filtered_candidates :
+  health_tracker:Keeper_preflight_health_tracker.t ->
+  provider_key_of:('a -> string) ->
   tool_filtered_candidates:'a list ->
   health_filtered_candidates:'a list ->
   'a list * bool

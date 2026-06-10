@@ -29,11 +29,21 @@ let resolved_tool_lane_label ~effective_tools ~runtime_mcp_policy =
   | false, false, None -> "none"
 
 let fail_open_health_filtered_candidates
+    ~(health_tracker : Keeper_preflight_health_tracker.t)
+    ~(provider_key_of : 'a -> string)
     ~(tool_filtered_candidates : 'a list)
     ~(health_filtered_candidates : 'a list)
   : 'a list * bool =
   match health_filtered_candidates with
-  | [] when tool_filtered_candidates <> [] -> tool_filtered_candidates, true
+  | [] when tool_filtered_candidates <> [] ->
+    List.iter (fun c ->
+      Keeper_preflight_health_tracker.record health_tracker
+        ~runtime_id:"fail_open_health_fallback"
+        ~provider:(provider_key_of c)
+        ~reason:Transient_unhealthy
+      |> ignore)
+      tool_filtered_candidates;
+    tool_filtered_candidates, true
   | _ -> health_filtered_candidates, false
 
 (* RFC-0206: provider_rejections_for_no_tool_error deleted — multi-candidate

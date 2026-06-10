@@ -30,21 +30,21 @@ let should_try_next = function
   | Llm_provider.Http_client.ProviderTerminal _ ->
     false
 
-let decide ~accept_on_exhaustion ~is_last = function
+let decide ~accept_on_exhaustion ~is_last ~source = function
   | Call_ok response -> Accept response
   | Accept_rejected { response; reason } ->
     if is_last && accept_on_exhaustion
     then Accept_on_exhaustion { response; reason }
     else if is_last
     then Exhausted { last_err = Some (Llm_provider.Http_client.AcceptRejected { reason }) }
-    else Try_next { last_err = Some (Llm_provider.Http_client.AcceptRejected { reason }); source = None }
+    else Try_next { last_err = Some (Llm_provider.Http_client.AcceptRejected { reason }); source }
   | Call_err err ->
     if (not is_last) && should_try_next err
-    then Try_next { last_err = Some err; source = None }
+    then Try_next { last_err = Some err; source }
     else Exhausted { last_err = Some err }
 
 let decide_and_record ~runtime_id ~source ~accept_on_exhaustion ~is_last ?(log_warn = Log.Runtime.warn) outcome =
-  let d = decide ~accept_on_exhaustion ~is_last outcome in
+  let d = decide ~accept_on_exhaustion ~is_last ~source outcome in
   (match d with
    | Try_next { last_err; _ } ->
      log_warn "try_next decision runtime_id=%s source=%s last_err=%s"

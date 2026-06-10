@@ -513,8 +513,8 @@
       },
       "targets": [
         {
-          "expr": "sum by (edge) (rate(masc_keeper_turn_fsm_transitions_total{keeper=~\"$keeper\"}[$__rate_interval])) * 60",
-          "legendFormat": "{{edge}}",
+          "expr": "sum by (from, to) (rate(masc_keeper_turn_fsm_transitions_total{keeper=~\"$keeper\"}[$__rate_interval])) * 60",
+          "legendFormat": "{{from}} -> {{to}}",
           "refId": "A"
         }
       ],
@@ -554,8 +554,8 @@
       },
       "targets": [
         {
-          "expr": "sum by (transition) (rate(masc_keeper_lifecycle_transitions_total{keeper=~\"$keeper\"}[$__rate_interval]))",
-          "legendFormat": "{{transition}}",
+          "expr": "sum by (from_phase, to_phase) (rate(masc_keeper_lifecycle_transitions_total{keeper=~\"$keeper\"}[$__rate_interval]))",
+          "legendFormat": "{{from_phase}} -> {{to_phase}}",
           "refId": "A"
         }
       ],
@@ -2587,8 +2587,9 @@
           "type": "prometheus",
           "uid": "${datasource}"
         },
-        "definition": "label_values(masc_keeper_turns_total, keeper)",
+        "definition": "label_values(masc_keeper_heartbeat_successes_total, keeper)",
         "hide": 0,
+        "allValue": ".*",
         "includeAll": true,
         "label": "Keeper",
         "multi": true,
@@ -2596,7 +2597,7 @@
         "options": [],
         "query": {
           "label": "Keeper",
-          "qry": "label_values(masc_keeper_turns_total, keeper)"
+          "qry": "label_values(masc_keeper_heartbeat_successes_total, keeper)"
         },
         "refresh": 2,
         "regex": "",

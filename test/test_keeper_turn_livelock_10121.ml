@@ -49,7 +49,7 @@ let starts_for ~keeper =
 
 let scheduled_for ~keeper =
   Metrics.metric_value_or_zero Keeper_metrics.(to_string TurnScheduled)
-    ~labels:[ ("keeper_name", keeper) ] ()
+    ~labels:[ ("keeper", keeper) ] ()
 
 let reattempts_for ~keeper =
   Metrics.metric_value_or_zero Keeper_metrics.(to_string TurnReattempts)

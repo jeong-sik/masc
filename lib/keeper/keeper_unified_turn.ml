@@ -576,7 +576,7 @@ let run_keeper_cycle
                     (Trajectory.Gated "input_required");
                   Otel_metric_store.inc_counter
                     Keeper_metrics.(to_string Turns)
-                    ~labels:[ "keeper_name", meta.name; "outcome", "input_required" ]
+                    ~labels:[ "keeper", meta.name; "outcome", "input_required" ]
                     ();
                   cycle_completed := true;
                   post_turn_complete_task ~cycle_completed;
@@ -627,7 +627,7 @@ let run_keeper_cycle
                   let is_ambiguous_partial = ambiguous_commit_tools <> [] in
                   Otel_metric_store.inc_counter
                     Keeper_metrics.(to_string Turns)
-                    ~labels:[ "keeper_name", meta.name; "outcome", "failure" ]
+                    ~labels:[ "keeper", meta.name; "outcome", "failure" ]
                     ();
                   (if EC.is_provider_timeout_error err
                    then

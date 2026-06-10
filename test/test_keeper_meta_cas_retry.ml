@@ -111,7 +111,7 @@ let test_retry_succeeds_after_concurrent_bump () =
     let before_retry_metric =
       Otel_metric_store.metric_value_or_zero
         Otel_metric_store.metric_write_meta_cas_retry_total
-        ~labels:[("keeper_name", "beta")]
+        ~labels:[("keeper", "beta")]
         ()
     in
     (match
@@ -123,7 +123,7 @@ let test_retry_succeeds_after_concurrent_bump () =
     let after_retry_metric =
       Otel_metric_store.metric_value_or_zero
         Otel_metric_store.metric_write_meta_cas_retry_total
-        ~labels:[("keeper_name", "beta")]
+        ~labels:[("keeper", "beta")]
         ()
     in
     let final = match Keeper_meta_store.read_meta config "beta" with

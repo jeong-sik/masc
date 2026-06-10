@@ -640,7 +640,7 @@ let record_test_credential_archive () =
   in
   Lib.Otel_metric_store.inc_counter
     Lib.Otel_metric_store.metric_config_credential_archived_starvation
-    ~labels:[("keeper_name", keeper_name)]
+    ~labels:[("keeper", keeper_name)]
     ()
 
 let test_credential_monitoring_json_surfaces_archive_counter () =

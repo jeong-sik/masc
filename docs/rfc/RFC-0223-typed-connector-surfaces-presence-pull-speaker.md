@@ -111,6 +111,14 @@ old push-scoped message feed.
    the post tool is an action and goes through tool policy.
 5. **OAS untouched.** Surfaces are a MASC concept. OAS continues to receive a
    host-assembled message list; nothing here crosses the boundary.
+6. **No standing machinery (owner constraint).** Presence is recomputed from
+   bindings + registry on every observation — no cached presence state. The
+   roster is a fold over existing JSONL lines — no roster store. The only
+   persistent addition in this RFC is optional data fields on lines that are
+   already written. No budgets, no cursors, no caps, no cooldowns: the
+   deleted tool-retry budget (#20624) and the removed tool_heavy compaction
+   trigger (#20694) are the cautionary precedents for what accumulating
+   small state machines produces.
 
 ## §3 Typed model
 

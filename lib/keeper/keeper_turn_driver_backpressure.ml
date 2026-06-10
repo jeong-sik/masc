@@ -15,12 +15,14 @@ let synthetic_retry_after_sec =
   Keeper_binding_health_config.default_capacity_backpressure_backoff_sec
 
 (* Emit a structured log line whenever a synthetic (default) backoff is used
-   instead of an explicit retry_after hint.  Replaces Prometheus metric per
-   task-714. *)
+   instead of an explicit retry_after hint.  Replaces the retired metric
+   path per task-714. *)
 let log_synthetic_backoff ~synthetic_sec ~source ~detail =
-  Log.Server.info (fun f ->
-      f "Synthetic backoff applied (source=%s, backoff_sec=%d, detail=%s)"
-        synthetic_sec source detail)
+  Log.Server.info
+    "Synthetic backoff applied (source=%s, backoff_sec=%.0f, detail=%s)"
+    source
+    synthetic_sec
+    detail
 
 let capacity_backpressure_source_of_http_error = function
   | Llm_provider.Http_client.NetworkError

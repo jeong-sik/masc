@@ -51,7 +51,7 @@ let find_dead_zones (posts : Board_types.post list) =
       | a, b, c when
           Board_types.Agent_id.equal a.author b.author
           && Board_types.Agent_id.equal b.author c.author ->
-        scan (i + 3) ((i + 2) :: acc)
+        scan (i + 1) ((i + 2) :: acc)
       | _ -> scan (i + 1) acc
   in
   scan 0 []

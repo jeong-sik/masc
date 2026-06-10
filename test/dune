@@ -1577,6 +1577,7 @@
 (include stanzas/test_tool_call_replay_harness.inc)
 
 (include stanzas/test_tool_diversity.inc)
+(include stanzas/test_board_diversity.inc)
 
 (include stanzas/test_tool_help_registry_shard_coverage_10101.inc)
 

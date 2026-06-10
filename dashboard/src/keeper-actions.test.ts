@@ -21,14 +21,30 @@ vi.mock('./api/keeper', () => ({
 }))
 vi.mock('./store', () => ({ invalidateDashboardCache, refreshDashboard }))
 
-import { keeperThreads, keeperActionErrors } from './keeper-state'
+import {
+  activeKeeperName,
+  keeperActionErrors,
+  keeperHydrating,
+  keeperProbing,
+  keeperRecovering,
+  keeperStatusDetails,
+  keeperThreads,
+} from './keeper-state'
 import {
   _resetChatHydrationForTests,
+  dispatchKeeperInterjectAction,
   hydrateKeeperChatHistory,
+  hydrateKeeperStatus,
+  loadFullKeeperHistory,
   noteKeeperChatAppended,
+  probeKeeperRuntime,
+  recoverKeeperRuntime,
+  selectKeeper,
   sendKeeperThreadMessage,
 } from './keeper-actions'
+import { KEEPER_HISTORY_TAIL_MESSAGES } from './config/constants'
 import type { KeeperChatStreamEvent } from './api'
+import type { KeeperStatusDetail } from './types'
 
 describe('noteKeeperChatAppended', () => {
   beforeEach(() => {
@@ -167,5 +183,280 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     // whole dashboard after every chat send (user-visible "refresh").
     expect(refreshDashboard).not.toHaveBeenCalled()
     expect(invalidateDashboardCache).not.toHaveBeenCalled()
+  })
+})
+
+// ─── Status / runtime actions (exports untested before this block) ──
+
+// Raw diagnostic that survives normalizeKeeperDiagnostic — all three
+// required fields must be valid union members or the whole diagnostic
+// is rejected (keeper-state.ts:169-178).
+const VALID_DIAGNOSTIC_RAW = {
+  health_state: 'healthy',
+  next_action_path: 'probe',
+  last_reply_status: 'fresh',
+}
+
+const cachedDetail = (name: string): KeeperStatusDetail => ({
+  name,
+  diagnostic: null,
+  history: [],
+  rawText: 'cached',
+  loadedAt: '2026-06-10T00:00:00Z',
+})
+
+describe('selectKeeper', () => {
+  it('sets activeKeeperName with the trimmed value', () => {
+    selectKeeper('  echo  ')
+    expect(activeKeeperName.value).toBe('echo')
+  })
+
+  it('sets the empty string when the name is all whitespace', () => {
+    selectKeeper('   \t\n   ')
+    expect(activeKeeperName.value).toBe('')
+  })
+})
+
+describe('dispatchKeeperInterjectAction', () => {
+  beforeEach(() => {
+    keeperThreads.value = {}
+    keeperActionErrors.value = {}
+    streamKeeperMessage.mockReset()
+  })
+
+  it('rejects when keeperName is empty after trim', async () => {
+    await expect(
+      dispatchKeeperInterjectAction({ kind: 'send', keeperName: '  ', message: 'hello' }),
+    ).rejects.toThrow('INTERJECT requires an active keeper.')
+  })
+
+  it('rejects when kind is send and the message is empty after trim', async () => {
+    await expect(
+      dispatchKeeperInterjectAction({ kind: 'send', keeperName: 'echo', message: '  ' }),
+    ).rejects.toThrow('INTERJECT send requires a message.')
+  })
+
+  it('dispatches kind=send through the thread-message path with trimmed values', async () => {
+    streamKeeperMessage.mockResolvedValue({ terminal: true })
+
+    await dispatchKeeperInterjectAction({ kind: 'send', keeperName: '  echo  ', message: '  hi  ' })
+
+    expect(streamKeeperMessage).toHaveBeenCalledWith('echo', 'hi', expect.objectContaining({
+      onEvent: expect.any(Function),
+    }))
+  })
+
+  it('rejects kinds that still need a backend operator action', async () => {
+    await expect(
+      dispatchKeeperInterjectAction({ kind: 'approve', keeperName: 'echo' }),
+    ).rejects.toThrow(/requires a keeper-scoped backend operator action/)
+  })
+})
+
+describe('hydrateKeeperStatus', () => {
+  beforeEach(() => {
+    keeperStatusDetails.value = {}
+    keeperActionErrors.value = {}
+    keeperHydrating.value = {}
+    callMcpTool.mockReset()
+  })
+
+  it('returns null for an empty name without calling MCP', async () => {
+    expect(await hydrateKeeperStatus('  ')).toBeNull()
+    expect(callMcpTool).not.toHaveBeenCalled()
+  })
+
+  it('returns the cached detail without an MCP call when force is false', async () => {
+    const existing = cachedDetail('echo')
+    keeperStatusDetails.value = { echo: existing }
+
+    expect(await hydrateKeeperStatus('echo')).toBe(existing)
+    expect(callMcpTool).not.toHaveBeenCalled()
+  })
+
+  it('re-fetches when force is true despite a cached detail', async () => {
+    keeperStatusDetails.value = { echo: cachedDetail('echo') }
+    callMcpTool.mockResolvedValue('{"name":"echo"}')
+
+    await hydrateKeeperStatus('echo', true)
+
+    expect(callMcpTool).toHaveBeenCalledTimes(1)
+  })
+
+  it('calls masc_keeper_status with the fast/no-history options', async () => {
+    callMcpTool.mockResolvedValue('{"name":"echo"}')
+
+    const detail = await hydrateKeeperStatus('  echo  ')
+
+    expect(callMcpTool).toHaveBeenCalledWith('masc_keeper_status', {
+      name: 'echo',
+      fast: true,
+      include_context: false,
+      include_metrics_overview: false,
+      include_memory_bank: false,
+      include_history_tail: false,
+      include_compaction_history: false,
+      tail_turns: 0,
+      tail_messages: 0,
+    })
+    expect(detail).not.toBeNull()
+    expect(keeperStatusDetails.value.echo).toBeDefined()
+  })
+
+  it('records the error, returns null, and clears the hydrating flag on failure', async () => {
+    callMcpTool.mockRejectedValue(new Error('MCP timeout'))
+
+    expect(await hydrateKeeperStatus('echo')).toBeNull()
+    expect(keeperActionErrors.value.echo).toBe('MCP timeout')
+    expect(keeperHydrating.value.echo).toBe(false)
+  })
+})
+
+describe('loadFullKeeperHistory', () => {
+  beforeEach(() => {
+    keeperStatusDetails.value = {}
+    keeperHydrating.value = {}
+    callMcpTool.mockReset()
+  })
+
+  it('returns early for an empty name', async () => {
+    await loadFullKeeperHistory('  ')
+    expect(callMcpTool).not.toHaveBeenCalled()
+  })
+
+  it('requests only the history tail (heavy sections stay disabled)', async () => {
+    callMcpTool.mockResolvedValue('{"name":"echo"}')
+
+    await loadFullKeeperHistory('echo')
+
+    expect(callMcpTool).toHaveBeenCalledWith('masc_keeper_status', {
+      name: 'echo',
+      fast: false,
+      include_context: false,
+      include_metrics_overview: false,
+      include_memory_bank: false,
+      include_history_tail: true,
+      include_compaction_history: false,
+      tail_turns: 0,
+      tail_messages: KEEPER_HISTORY_TAIL_MESSAGES,
+    })
+    expect(keeperStatusDetails.value.echo).toBeDefined()
+  })
+
+  it('swallows MCP failures and clears the hydrating flag', async () => {
+    callMcpTool.mockRejectedValue(new Error('history fetch failed'))
+
+    await expect(loadFullKeeperHistory('echo')).resolves.toBeUndefined()
+    expect(keeperHydrating.value.echo).toBe(false)
+  })
+
+  it('degrades gracefully on a malformed JSON response', async () => {
+    callMcpTool.mockResolvedValue('{{{ bad json }')
+
+    await expect(loadFullKeeperHistory('echo')).resolves.toBeUndefined()
+    expect(keeperStatusDetails.value.echo?.rawText).toBe('{{{ bad json }')
+  })
+})
+
+describe('probeKeeperRuntime', () => {
+  beforeEach(() => {
+    keeperStatusDetails.value = {}
+    keeperActionErrors.value = {}
+    keeperProbing.value = {}
+    keeperThreads.value = {}
+    runOperatorAction.mockReset()
+    refreshDashboard.mockClear()
+    invalidateDashboardCache.mockClear()
+  })
+
+  it('returns null for an empty name without an operator action', async () => {
+    expect(await probeKeeperRuntime('  ', 'operator')).toBeNull()
+    expect(runOperatorAction).not.toHaveBeenCalled()
+  })
+
+  it('sends keeper_probe and stores the returned diagnostic', async () => {
+    runOperatorAction.mockResolvedValue({
+      status: 'ok',
+      result: { status: 'running', diagnostic: VALID_DIAGNOSTIC_RAW },
+    })
+
+    const diagnostic = await probeKeeperRuntime('echo', 'operator')
+
+    expect(runOperatorAction).toHaveBeenCalledWith({
+      actor: 'operator',
+      action_type: 'keeper_probe',
+      target_type: 'keeper',
+      target_id: 'echo',
+      payload: {},
+    })
+    expect(diagnostic?.health_state).toBe('healthy')
+    expect(keeperStatusDetails.value.echo?.diagnostic?.health_state).toBe('healthy')
+    expect(invalidateDashboardCache).toHaveBeenCalled()
+    expect(refreshDashboard).toHaveBeenCalledWith({ force: true })
+  })
+
+  it('returns null when the probe result carries no valid diagnostic', async () => {
+    runOperatorAction.mockResolvedValue({ status: 'ok', result: {} })
+
+    expect(await probeKeeperRuntime('echo', 'operator')).toBeNull()
+    expect(keeperStatusDetails.value.echo).toBeUndefined()
+  })
+
+  it('records the error, rethrows, and clears the probing flag on failure', async () => {
+    runOperatorAction.mockRejectedValue(new Error('probe timeout'))
+
+    await expect(probeKeeperRuntime('echo', 'operator')).rejects.toThrow('probe timeout')
+    expect(keeperActionErrors.value.echo).toBe('probe timeout')
+    expect(keeperProbing.value.echo).toBe(false)
+  })
+})
+
+describe('recoverKeeperRuntime', () => {
+  beforeEach(() => {
+    keeperStatusDetails.value = {}
+    keeperActionErrors.value = {}
+    keeperRecovering.value = {}
+    keeperThreads.value = {}
+    runOperatorAction.mockReset()
+    refreshDashboard.mockClear()
+    invalidateDashboardCache.mockClear()
+  })
+
+  it('returns null for an empty name without an operator action', async () => {
+    expect(await recoverKeeperRuntime('  ', 'operator')).toBeNull()
+    expect(runOperatorAction).not.toHaveBeenCalled()
+  })
+
+  it('sends keeper_recover and returns the post-recovery diagnostic', async () => {
+    runOperatorAction.mockResolvedValue({
+      status: 'ok',
+      result: { recovered: true, after: VALID_DIAGNOSTIC_RAW },
+    })
+
+    const after = await recoverKeeperRuntime('echo', 'operator')
+
+    expect(runOperatorAction).toHaveBeenCalledWith({
+      actor: 'operator',
+      action_type: 'keeper_recover',
+      target_type: 'keeper',
+      target_id: 'echo',
+      payload: {},
+    })
+    expect(after?.health_state).toBe('healthy')
+    expect(keeperStatusDetails.value.echo?.diagnostic?.health_state).toBe('healthy')
+  })
+
+  it('returns null when recovery yields no after-diagnostic', async () => {
+    runOperatorAction.mockResolvedValue({ status: 'ok', result: { recovered: false } })
+
+    expect(await recoverKeeperRuntime('echo', 'operator')).toBeNull()
+  })
+
+  it('records the error, rethrows, and clears the recovering flag on failure', async () => {
+    runOperatorAction.mockRejectedValue(new Error('recover timeout'))
+
+    await expect(recoverKeeperRuntime('echo', 'operator')).rejects.toThrow('recover timeout')
+    expect(keeperActionErrors.value.echo).toBe('recover timeout')
+    expect(keeperRecovering.value.echo).toBe(false)
   })
 })

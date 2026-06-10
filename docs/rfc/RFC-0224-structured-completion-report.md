@@ -1,5 +1,5 @@
 ---
-rfc: "0223"
+rfc: "0224"
 title: "Structured completion report for free-text contract items"
 status: Draft
 created: 2026-06-10
@@ -11,7 +11,7 @@ related: ["0220", "0221", "0222"]
 implementation_prs: []
 ---
 
-# RFC-0223: Structured completion report for free-text contract items
+# RFC-0224: Structured completion report for free-text contract items
 
 Status: Draft · Subjective-lane companion to RFC-0222 · Parse-don't-validate on "did you address each obligation"
 Drafted by: Claude Fable 5 (operator-supervised keeper-PR disposition session 2026-06-10), pending owner review.

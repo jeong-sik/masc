@@ -67,6 +67,14 @@ let contains_substring haystack needle =
   in
   loop 0
 
+let env_file_path_from_docker_line line =
+  let rec loop = function
+    | "--env-file" :: path :: _ -> Some path
+    | _ :: rest -> loop rest
+    | [] -> None
+  in
+  loop (String.split_on_char ' ' line)
+
 let docker_spawn_in_flight () =
   let snapshot = Fd_accountant.fd_snapshot () in
   List.assoc Fd_accountant.Docker_spawn snapshot.per_kind
@@ -369,6 +377,27 @@ if [ \"$1\" = \"run\" ]; then\n\
   fi\n\
   sleep 0.2\n\
   printf 'slow ok\\n'\n\
+  exit 0\n\
+fi\n\
+printf 'unexpected docker invocation\\n' >&2\n\
+exit 2\n"
+
+let fake_docker_log_run_script =
+  "#!/bin/sh\n\
+log_file=${KEEPER_DOCKER_LOG:-}\n\
+if [ -n \"$log_file\" ]; then\n\
+  printf '%s\\n' \"$*\" >> \"$log_file\"\n\
+fi\n\
+if [ \"$1\" = \"info\" ]; then\n\
+  printf '[]\\n'\n\
+  exit 0\n\
+fi\n\
+if [ \"$1\" = \"image\" ] && [ \"$2\" = \"inspect\" ] && [ \"$3\" = \"alpine:test\" ]; then\n\
+  printf '[]\\n'\n\
+  exit 0\n\
+fi\n\
+if [ \"$1\" = \"run\" ]; then\n\
+  printf 'ok\\n'\n\
   exit 0\n\
 fi\n\
 printf 'unexpected docker invocation\\n' >&2\n\
@@ -1153,6 +1182,55 @@ let test_run_command_fallback_uses_docker_spawn_slot ~clock () =
    Alcotest.(check int) "Docker_spawn slot released" 0
      (docker_spawn_in_flight ())
 
+let test_run_command_projects_keeper_secret_dir () =
+  with_fake_docker fake_docker_log_run_script @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+  let base, config, meta = setup_config "minjae" in
+  let log_path = Filename.concat base "docker.log" in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  let secret_root =
+    Filename.concat
+      (Filename.concat (Filename.concat base Common.masc_dirname) "secrets")
+      (Workspace_utils.safe_filename meta.name)
+  in
+  let token_path = Filename.concat (Filename.concat secret_root "env") "GH_TOKEN" in
+  let ssh_path =
+    Filename.concat
+      (Filename.concat secret_root "files")
+      "home/keeper/.ssh/id_ed25519"
+  in
+  ensure_dir (Filename.dirname token_path);
+  ensure_dir (Filename.dirname ssh_path);
+  write_file token_path "projected-token\n";
+  write_file ssh_path "PRIVATE KEY";
+  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  match
+    Keeper_sandbox_read_backend.run_command_with_status
+      ~config
+      ~meta
+      ~command_argv:[ "echo"; "hello" ]
+      ~max_bytes:4096
+      ~timeout_sec:5.0
+      ()
+  with
+  | Error msg -> Alcotest.failf "expected success, got %s" msg
+  | Ok (_st, _out) ->
+    let line = read_file log_path in
+    Alcotest.(check bool) "projected raw token not in docker argv" false
+      (contains_substring line "projected-token");
+    Alcotest.(check bool) "projected env uses env-file" true
+      (contains_substring line "--env-file ");
+    Alcotest.(check bool) "projected file mounted read-only" true
+      (contains_substring line (ssh_path ^ ":/home/keeper/.ssh/id_ed25519:ro"));
+    (match env_file_path_from_docker_line line with
+     | None -> Alcotest.fail "missing --env-file path in docker log"
+     | Some env_file ->
+       Alcotest.(check bool) "env-file cleaned after docker run" false
+         (Sys.file_exists env_file))
+
 let test_run_command_scrubs_sensitive_env () =
   with_fake_docker fake_docker_env_dump_script @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
@@ -1375,6 +1453,8 @@ let run_tests ~clock () =
             test_run_command_preserves_bare_command_argv;
           Alcotest.test_case "fallback uses Docker_spawn slot" `Quick
             (test_run_command_fallback_uses_docker_spawn_slot ~clock);
+          Alcotest.test_case "projects keeper secret directory" `Quick
+            test_run_command_projects_keeper_secret_dir;
           Alcotest.test_case "default fs hardening helpers" `Quick
             test_default_fs_hardening_helpers;
           Alcotest.test_case "relaxed fs helpers" `Quick

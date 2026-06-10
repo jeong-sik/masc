@@ -55,7 +55,7 @@ let container_path_of_host ~config ~(meta : keeper_meta) ~host_path
    [program ; arg1 ; ... ] is appended by the caller via
    [build_docker_argv ~command_argv]. *)
 let build_docker_argv ~image ~container_name ~base_path ~host_root ~croot
-    ~uid ~gid ~seccomp_args ~command_argv =
+    ~uid ~gid ~seccomp_args ~secret_args ~command_argv =
   Keeper_sandbox_runtime.docker_command_argv ()
   @ [
       "run";
@@ -93,6 +93,7 @@ let build_docker_argv ~image ~container_name ~base_path ~host_root ~croot
   @ Keeper_sandbox_runtime.docker_workspace_state_mount_args
       ~base_path
       ~container_root:croot
+  @ secret_args
   @ [
     image;
   ]
@@ -154,18 +155,40 @@ let run_command_with_status ?turn_sandbox_factory
         let container_name = container_name_of meta in
         let uid = Unix.getuid () in
         let gid = Unix.getgid () in
+        match
+          Keeper_secret_projection.docker_args_for_keeper
+            ~base_path:config.base_path
+            ~keeper_name:meta.name
+            ~container_name
+        with
+        | Error err -> Error ("docker_read_failed: secret_projection: " ^ err)
+        | Ok secret_projection ->
         let argv =
-          build_docker_argv ~image ~container_name ~base_path:config.base_path ~host_root ~croot
-            ~uid ~gid ~seccomp_args ~command_argv
+          build_docker_argv
+            ~image
+            ~container_name
+            ~base_path:config.base_path
+            ~host_root
+            ~croot
+            ~uid
+            ~gid
+            ~seccomp_args
+            ~secret_args:secret_projection.docker_args
+            ~command_argv
         in
         let st, out =
-          Docker_spawn_throttle.with_slot (fun () ->
-              Masc_exec.Exec_gate.run_argv_with_status
-                ~actor:`System_sandbox
-                ~raw_source:(String.concat " " argv)
-                ~summary:"keeper docker read sandboxed command"
-                ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
-                ~cwd:(Sys.getcwd ()) ~timeout_sec argv)
+          Eio_guard.protect
+            ~finally:secret_projection.cleanup
+            (fun () ->
+               Docker_spawn_throttle.with_slot (fun () ->
+                 Masc_exec.Exec_gate.run_argv_with_status
+                   ~actor:`System_sandbox
+                   ~raw_source:(String.concat " " argv)
+                   ~summary:"keeper docker read sandboxed command"
+                   ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
+                   ~cwd:(Sys.getcwd ())
+                   ~timeout_sec
+                   argv))
         in
         (match st with
          | Unix.WEXITED code

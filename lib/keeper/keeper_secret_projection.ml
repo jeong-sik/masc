@@ -1,0 +1,303 @@
+type t =
+  { docker_args : string list
+  ; cleanup : unit -> unit
+  }
+
+type source_kind =
+  | Env_source
+  | File_source
+
+let trim_env_opt key =
+  match Sys.getenv_opt key with
+  | Some value ->
+    let trimmed = String.trim value in
+    if String.equal trimmed "" then None else Some trimmed
+  | None -> None
+;;
+
+let secret_root ~base_path ~keeper_name =
+  let keeper_dir = Workspace_utils.safe_filename keeper_name in
+  match trim_env_opt "MASC_SECRET_DIR" with
+  | Some root -> Filename.concat root keeper_dir
+  | None ->
+    Filename.concat
+      (Filename.concat (Common.masc_dir_from_base_path ~base_path) "secrets")
+      keeper_dir
+;;
+
+let path_exists path =
+  try Sys.file_exists path with
+  | Sys_error _ -> false
+;;
+
+let is_directory path =
+  try Sys.is_directory path with
+  | Sys_error _ -> false
+;;
+
+let list_dir_sorted path =
+  try Ok (Sys.readdir path |> Array.to_list |> List.sort String.compare) with
+  | Sys_error msg -> Error msg
+;;
+
+let lstat path =
+  try Ok (Unix.lstat path) with
+  | Unix.Unix_error (err, fn, arg) ->
+    Error
+      (Printf.sprintf
+         "%s%s%s"
+         (Unix.error_message err)
+         (if String.equal fn "" then "" else ": " ^ fn)
+         (if String.equal arg "" then "" else " " ^ arg))
+;;
+
+let source_label = function
+  | Env_source -> "env"
+  | File_source -> "files"
+;;
+
+let reject_symlink ~kind path =
+  match lstat path with
+  | Error err -> Error err
+  | Ok st ->
+    (match st.Unix.st_kind with
+     | Unix.S_LNK ->
+       Error
+         (Printf.sprintf
+            "keeper secret %s entry must not be a symlink: %s"
+            (source_label kind)
+            path)
+     | _ -> Ok st)
+;;
+
+let valid_env_name name =
+  let len = String.length name in
+  let valid_first = function
+    | 'A' .. 'Z' | 'a' .. 'z' | '_' -> true
+    | _ -> false
+  in
+  let valid_rest = function
+    | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '_' -> true
+    | _ -> false
+  in
+  len > 0
+  && valid_first name.[0]
+  &&
+  let rec loop i =
+    if i = len then true else valid_rest name.[i] && loop (i + 1)
+  in
+  loop 1
+;;
+
+let read_file path =
+  let ic = open_in_bin path in
+  Fun.protect ~finally:(fun () -> close_in ic) @@ fun () ->
+  really_input_string ic (in_channel_length ic)
+;;
+
+let strip_one_final_newline value =
+  let len = String.length value in
+  if len >= 2 && Char.equal value.[len - 2] '\r' && Char.equal value.[len - 1] '\n'
+  then String.sub value 0 (len - 2)
+  else if len >= 1 && (Char.equal value.[len - 1] '\n' || Char.equal value.[len - 1] '\r')
+  then String.sub value 0 (len - 1)
+  else value
+;;
+
+let contains_char value c =
+  String.contains value c
+;;
+
+let read_env_entry path =
+  try
+    let value = read_file path |> strip_one_final_newline in
+    if contains_char value '\n' || contains_char value '\r'
+    then Error (Printf.sprintf "keeper secret env value must be single-line: %s" path)
+    else if contains_char value '\000'
+    then Error (Printf.sprintf "keeper secret env value must not contain NUL: %s" path)
+    else Ok value
+  with
+  | Sys_error msg -> Error msg
+;;
+
+let load_env_entries env_root =
+  if not (path_exists env_root)
+  then Ok []
+  else if not (is_directory env_root)
+  then Error (Printf.sprintf "keeper secret env path is not a directory: %s" env_root)
+  else (
+    match reject_symlink ~kind:Env_source env_root with
+    | Error _ as err -> err
+    | Ok _ ->
+    (match list_dir_sorted env_root with
+     | Error err -> Error err
+     | Ok names ->
+      let rec loop acc = function
+        | [] -> Ok (List.rev acc)
+        | name :: rest ->
+          if not (valid_env_name name)
+          then Error (Printf.sprintf "invalid keeper secret env name: %s" name)
+          else
+            let path = Filename.concat env_root name in
+            (match reject_symlink ~kind:Env_source path with
+             | Error _ as err -> err
+             | Ok st ->
+               (match st.Unix.st_kind with
+                | Unix.S_REG ->
+                  (match read_env_entry path with
+                   | Error _ as err -> err
+                   | Ok value -> loop ((name, value) :: acc) rest)
+                | _ ->
+                  Error
+                    (Printf.sprintf
+                       "keeper secret env entry must be a regular file: %s"
+                       path)))
+      in
+      loop [] names))
+;;
+
+let valid_rel_component component =
+  not
+    (String.equal component ""
+     || String.equal component "."
+     || String.equal component ".."
+     || contains_char component '/')
+;;
+
+let container_path_of_rel rel =
+  "/" ^ String.concat "/" rel
+;;
+
+let collect_file_entries files_root =
+  let rec walk rel host_dir acc =
+    match reject_symlink ~kind:File_source host_dir with
+    | Error _ as err -> err
+    | Ok st ->
+      (match st.Unix.st_kind with
+       | Unix.S_DIR ->
+         (match list_dir_sorted host_dir with
+          | Error err -> Error err
+          | Ok names ->
+            let rec loop acc = function
+              | [] -> Ok acc
+              | name :: rest ->
+                if not (valid_rel_component name)
+                then
+                  Error
+                    (Printf.sprintf "invalid keeper secret file path component: %s" name)
+                else (
+                  match walk (rel @ [ name ]) (Filename.concat host_dir name) acc with
+                  | Error _ as err -> err
+                  | Ok acc -> loop acc rest)
+            in
+            loop acc names)
+       | Unix.S_REG ->
+         if rel = []
+         then Error (Printf.sprintf "keeper secret files root is not a directory: %s" files_root)
+         else Ok ((host_dir, container_path_of_rel rel) :: acc)
+       | Unix.S_LNK ->
+         Error
+           (Printf.sprintf "keeper secret file entry must not be a symlink: %s" host_dir)
+       | _ ->
+         Error
+           (Printf.sprintf
+              "keeper secret file entry must be a regular file or directory: %s"
+              host_dir))
+  in
+  if not (path_exists files_root)
+  then Ok []
+  else if not (is_directory files_root)
+  then Error (Printf.sprintf "keeper secret files path is not a directory: %s" files_root)
+  else
+    match walk [] files_root [] with
+    | Error _ as err -> err
+    | Ok entries -> Ok (List.rev entries)
+;;
+
+let write_env_file ~container_name entries =
+  if entries = []
+  then Ok None
+  else
+    let prefix =
+      "masc_keeper_secret_env_"
+      ^ Workspace_utils.safe_filename container_name
+      ^ "_"
+    in
+    try
+      let path = Filename.temp_file prefix ".env" in
+      (try
+         Unix.chmod path 0o600;
+         let oc = open_out_gen [ Open_wronly; Open_trunc; Open_binary ] 0o600 path in
+         Fun.protect
+           ~finally:(fun () -> close_out oc)
+           (fun () ->
+              List.iter
+                (fun (name, value) ->
+                   output_string oc name;
+                   output_char oc '=';
+                   output_string oc value;
+                   output_char oc '\n')
+                entries);
+         Ok (Some path)
+       with
+       | exn ->
+         (try if Sys.file_exists path then Sys.remove path with
+          | Sys_error _ | Unix.Unix_error _ -> ());
+         raise exn)
+    with
+    | Sys_error msg -> Error msg
+    | Unix.Unix_error (err, fn, arg) ->
+      Error
+        (Printf.sprintf
+           "%s%s%s"
+           (Unix.error_message err)
+           (if String.equal fn "" then "" else ": " ^ fn)
+           (if String.equal arg "" then "" else " " ^ arg))
+;;
+
+let cleanup_files paths =
+  List.iter
+    (fun path ->
+       try if Sys.file_exists path then Sys.remove path with
+       | Sys_error _ | Unix.Unix_error _ -> ())
+    paths
+;;
+
+let docker_args_for_keeper ~base_path ~keeper_name ~container_name =
+  let root = secret_root ~base_path ~keeper_name in
+  if not (path_exists root)
+  then Ok { docker_args = []; cleanup = (fun () -> ()) }
+  else if not (is_directory root)
+  then Error (Printf.sprintf "keeper secret root is not a directory: %s" root)
+  else (
+    match reject_symlink ~kind:File_source root with
+    | Error _ as err -> err
+    | Ok _ ->
+      let env_root = Filename.concat root "env" in
+      let files_root = Filename.concat root "files" in
+      (match load_env_entries env_root with
+       | Error _ as err -> err
+       | Ok env_entries ->
+         (match collect_file_entries files_root with
+          | Error _ as err -> err
+          | Ok file_entries ->
+            (match write_env_file ~container_name env_entries with
+             | Error _ as err -> err
+             | Ok env_file ->
+               let env_args =
+                 match env_file with
+                 | None -> []
+                 | Some path -> [ "--env-file"; path ]
+               in
+               let file_args =
+                 file_entries
+                 |> List.concat_map (fun (host, container) ->
+                   [ "-v"; host ^ ":" ^ container ^ ":ro" ])
+               in
+               let cleanup =
+                 match env_file with
+                 | None -> fun () -> ()
+                 | Some path -> fun () -> cleanup_files [ path ]
+               in
+               Ok { docker_args = env_args @ file_args; cleanup }))))
+;;

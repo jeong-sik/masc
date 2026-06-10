@@ -568,6 +568,7 @@ export interface DashboardRuntimeProviderSnapshot {
   is_default_runtime?: boolean
   max_context?: number | null
   tools_support?: boolean
+  thinking_support?: boolean
   streaming?: boolean
   model_count?: number | null
   models: string[]
@@ -729,6 +730,7 @@ function decodeRuntimeProviderSnapshot(raw: unknown): DashboardRuntimeProviderSn
     is_default_runtime: asBoolean(raw.is_default_runtime),
     max_context: asNumber(raw.max_context) ?? null,
     tools_support: asBoolean(raw.tools_support),
+    thinking_support: asBoolean(raw.thinking_support),
     streaming: asBoolean(raw.streaming),
     model_count: asNumber(raw.model_count) ?? null,
     models: asStringArray(raw.models),

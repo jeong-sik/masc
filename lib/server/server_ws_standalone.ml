@@ -35,6 +35,12 @@ let is_enabled () = Transport_metrics.ws_enabled ()
     classify_write_failure-recognised error. *)
 let heartbeat_interval_s = 30.0
 
+(** Deadline for a pong reply after sending a ping.  A peer that misses
+    this deadline is treated as dead and the session is cleaned up.
+    15s is ~half the heartbeat interval, so at most one missed ping
+    before the connection is reaped (worst case ~45s, average ~30s). *)
+let pong_timeout_s = 15.0
+
 let max_ws_close_reason_log_len = 96
 let max_ws_close_payload_len = 125
 
@@ -235,6 +241,10 @@ let make_websocket_handler ~sw ~clock ~on_message _client_addr (wsd : Ws.Wsd.t)
   Transport_metrics.set_ws_sessions
     (Server_mcp_transport_ws.with_sessions_rw (fun () ->
        Hashtbl.length Server_mcp_transport_ws.sessions));
+  (* Deadline for pong reply; [Float.infinity] means no pending
+     ping (idle or pong already received).  Updated on send_ping
+     success, reset on pong, checked in the heartbeat fiber. *)
+  let ping_deadline = ref Float.infinity in
   (* Register as SSE external subscriber for broadcast events *)
   Sse.subscribe_external
     ~id:session_id
@@ -260,8 +270,17 @@ let make_websocket_handler ~sw ~clock ~on_message _client_addr (wsd : Ws.Wsd.t)
       Eio.Time.sleep clock heartbeat_interval_s;
       if (not session.closed) && not (Ws.Wsd.is_closed session.wsd)
       then (
-        let send_failed = ref false in
-        (try Ws.Wsd.send_ping wsd with
+        (* If the peer missed the deadline for the previous ping,
+           treat the connection as dead and clean up immediately. *)
+        if !ping_deadline < Eio.Time.now clock
+        then (
+          Log.Server.info
+            "[ws-standalone] session %s pong timeout (deadline %.3fs); cleaning up"
+            session_id !ping_deadline;
+          Server_mcp_transport_ws.cleanup_session session_id)
+        else (
+          let send_failed = ref false in
+          (try Ws.Wsd.send_ping wsd with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
            send_failed := true;
@@ -276,6 +295,8 @@ let make_websocket_handler ~sw ~clock ~on_message _client_addr (wsd : Ws.Wsd.t)
                 "[ws-standalone] session %s heartbeat send_ping failed: %s"
                 session_id
                 (Printexc.to_string exn)));
+        if not !send_failed
+        then ping_deadline := Eio.Time.now clock +. pong_timeout_s;
         if !send_failed
         then
           (* If send_ping failed while [session.closed]/[Wsd.is_closed]
@@ -332,7 +353,10 @@ let make_websocket_handler ~sw ~clock ~on_message _client_addr (wsd : Ws.Wsd.t)
         | `Connection_close ->
           log_ws_client_close_payload ~session_id ~declared_len:len payload;
           Server_mcp_transport_ws.cleanup_session session_id
-        | `Pong | `Other _ -> Ws.Payload.close payload)
+        | `Pong ->
+          ping_deadline := Float.infinity;
+          Ws.Payload.close payload
+        | `Other _ -> Ws.Payload.close payload)
   ; eof =
       (fun ?error () ->
         Log.Server.debug

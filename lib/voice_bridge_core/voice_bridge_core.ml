@@ -141,10 +141,10 @@ let find_executable_in_path ?path_value executable =
   in
   List.find_opt (fun path -> Sys.file_exists path && not (Sys.is_directory path)) candidates
 
-(* `open` is intentionally NOT a candidate: it hands the file to an external
-   app and returns immediately, so it would report `Played ~0.1s` without the
-   audio having been heard — a fake success under the blocking speak
-   contract. Systems without a real player fail explicitly instead. *)
+(* `open` is intentionally last and reported as `Opened`, not `Played`: it hands
+   the file to a GUI app and returns immediately. It still matters on macOS
+   sessions where command-line CoreAudio backends cannot see a default output
+   device but Finder/QuickTime can. *)
 let local_playback_argvs ?path_value ~audio_file () =
   let commands =
     [
@@ -152,6 +152,7 @@ let local_playback_argvs ?path_value ~audio_file () =
       ("ffplay", [ "-nodisp"; "-autoexit"; "-loglevel"; "error" ]);
       ("mpg123", [ "-q" ]);
       ("play", [ "-q" ]);
+      ("open", []);
     ]
   in
   commands
@@ -247,6 +248,7 @@ let audio_duration_seconds ~audio_file =
       fibers both pass the outer [is_dedup_hit] before either records).
     - [`Skipped reason] if playback was intentionally skipped.
     - [`Failed reason] if playback was requested but unavailable or failed.
+    - [`Opened dur] if playback was handed off to macOS [open(1)].
     - [`Played dur] if playback succeeded with the given duration.
 
     When [message] is [None] the dedup re-check is skipped (legacy callers that
@@ -263,7 +265,7 @@ let run_local_playback ~sw:_ ~agent_id ?message ~audio_file () =
       match local_playback_argvs ~audio_file () with
       | [] ->
         let reason =
-          "no afplay/ffplay/mpg123/play executable found"
+          "no afplay/ffplay/mpg123/play/open executable found"
         in
         log_error
           (Printf.sprintf "local voice playback unavailable: %s" reason);
@@ -320,12 +322,21 @@ let run_local_playback ~sw:_ ~agent_id ?message ~audio_file () =
                   with
                   | Unix.WEXITED 0, _ ->
                     let dur = Unix.gettimeofday () -. t0 in
-                    log_info
-                      (Printf.sprintf
-                         "local voice playback finished: agent=%s file=%s via=%s \
-                          duration=%.1fs"
-                         agent_id audio_file executable dur);
-                    `Played dur
+                    if String.equal (Filename.basename executable) "open" then begin
+                      log_info
+                        (Printf.sprintf
+                           "local voice playback handed off: agent=%s file=%s via=%s \
+                            duration=%.1fs"
+                           agent_id audio_file executable dur);
+                      `Opened dur
+                    end else begin
+                      log_info
+                        (Printf.sprintf
+                           "local voice playback finished: agent=%s file=%s via=%s \
+                            duration=%.1fs"
+                           agent_id audio_file executable dur);
+                      `Played dur
+                    end
                   | Unix.WEXITED 124, _ ->
                     (* WEXITED 124 is Process_eio's synthesized status for a
                        timeout kill: the player ran past the probed duration
@@ -402,7 +413,12 @@ let run_local_playback ~sw:_ ~agent_id ?message ~audio_file () =
 let start_local_playback ~sw ~agent_id ~audio_file =
   ignore
     (run_local_playback ~sw ~agent_id ~audio_file ()
-      : [ `Dedup_hit | `Failed of string | `Played of float | `Skipped of string ])
+      : [ `Dedup_hit
+        | `Failed of string
+        | `Opened of float
+        | `Played of float
+        | `Skipped of string
+        ])
 
 (** Voice used when [load_voice_config ()] itself fails. This is the
     only remaining hardcoded fallback; the normal "agent not listed"

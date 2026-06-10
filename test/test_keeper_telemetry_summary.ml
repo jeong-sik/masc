@@ -27,6 +27,26 @@ let test_avg_duration_uses_timed_events_only () =
     check (float 0.001) "avg_duration_ms" 1000.0 counters.Summary.avg_duration_ms
 ;;
 
+let test_record_telemetry_payload_feeds_summary () =
+  Summary.reset ();
+  Summary.record_telemetry_payload
+    (`Assoc
+        [ "keeper_name", `String "agent-b"
+        ; "event_kind", `String "runtime_execution_built"
+        ; "runtime_id", `String "runtime-a"
+        ; "duration_ms", `Float 42.5
+        ; "success", `Bool true
+        ]);
+  let snapshot = Summary.snapshot () in
+  check int "total events" 1 snapshot.Summary.total_events;
+  check int "successful events" 1 snapshot.Summary.successful_events;
+  match Hashtbl.find_opt snapshot.Summary.per_keeper "agent-b" with
+  | None -> fail "missing keeper counters"
+  | Some counters ->
+    check int "keeper total" 1 counters.Summary.total;
+    check (float 0.001) "avg_duration_ms" 42.5 counters.Summary.avg_duration_ms
+;;
+
 let () =
   run
     "keeper_telemetry_summary"
@@ -35,5 +55,9 @@ let () =
             "untimed events do not count as zero-duration samples"
             `Quick
             test_avg_duration_uses_timed_events_only
+        ; test_case
+            "event-bus telemetry payload feeds the summary"
+            `Quick
+            test_record_telemetry_payload_feeds_summary
         ] )
     ]

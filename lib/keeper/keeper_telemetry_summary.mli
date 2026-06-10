@@ -47,6 +47,12 @@ val record_event
   -> success:bool
   -> unit
 
+(** Decode and record a [Custom("telemetry_event", payload)] event-bus
+    payload. Missing optional fields are treated conservatively: unknown
+    keeper/runtime labels are bounded, and observed telemetry events default
+    to success unless an explicit failure/error status is present. *)
+val record_telemetry_payload : Yojson.Safe.t -> unit
+
 (** Return a point-in-time snapshot of all aggregated counters.
     Non-blocking — reads atomics and a locked ring buffer. *)
 val snapshot : unit -> fleet_snapshot

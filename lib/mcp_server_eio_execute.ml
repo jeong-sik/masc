@@ -442,9 +442,35 @@ let execute_tool_eio
                        ~system_prompt:""
                        ~max_tokens:(Keeper_config.keeper_unified_max_tokens ())
                    in
-                               let turn_sandbox_factory =
-                                 Some (Keeper_sandbox_factory.create ~config ~meta ())
-                               in
+                   let turn_sandbox_factory_result =
+                     try Ok (Some (Keeper_sandbox_factory.create ~config ~meta ()))
+                     with exn ->
+                       Error (Keeper_sandbox_factory_failure.classify_error exn)
+                   in
+                   (match turn_sandbox_factory_result with
+                    | Error failure ->
+                      let failure_label =
+                        Keeper_sandbox_factory_failure.to_string failure
+                      in
+                      Log.Keeper.warn
+                        "internal keeper runtime sandbox factory failed: %s"
+                        failure_label;
+                      let message =
+                        Yojson.Safe.to_string
+                          (`Assoc
+                              [ "ok", `Bool false
+                              ; ( "error",
+                                  `String "sandbox factory setup failed" )
+                              ; "sandbox_failure_class", `String failure_label
+                              ])
+                      in
+                      Some
+                        (Tool_result.error
+                           ~failure_class:(Some Tool_result.Runtime_failure)
+                           ~tool_name:name
+                           ~start_time
+                           message)
+                    | Ok turn_sandbox_factory ->
                                let cleanup_one ~during_exception label = function
                                  | None -> ()
                      | Some factory ->
@@ -483,6 +509,7 @@ let execute_tool_eio
                      (if success
                       then Tool_result.ok ~tool_name:name ~start_time result.raw_output
                       else Tool_result.error ~tool_name:name ~start_time result.raw_output))
+                   )
             in
             (* Primary dispatch: mint token at I/O boundary, then O(1) tag lookup.
      Tool_token validates the name exists in the tag registry (Parse, Don't

@@ -34,7 +34,8 @@ let spawn_subscriber ~sw ~clock ~bus =
          List.iter
            (fun (evt : Agent_sdk.Event_bus.event) ->
               match evt.payload with
-              | Agent_sdk.Event_bus.Custom ("telemetry_event", _) ->
+              | Agent_sdk.Event_bus.Custom ("telemetry_event", payload) ->
+                  Keeper_telemetry_summary.record_telemetry_payload payload;
                   Otel_metric_store.inc_counter
                     telemetry_event_counter
                     ~labels:[ "result", "observed" ]

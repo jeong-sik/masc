@@ -7,6 +7,31 @@ open Masc_tui_loader
 (** Local exception for breaking the main TUI loop without using Exit. *)
 exception Break
 
+let json_string_field name = function
+  | `Assoc fields ->
+    (match List.assoc_opt name fields with
+     | Some (`String value) -> Some value
+     | _ -> None)
+  | _ -> None
+
+let stream_text_delta_of_sse_payload payload =
+  let trimmed = String.trim payload in
+  if trimmed = "" || String.equal trimmed "[DONE]" then None
+  else
+    match Yojson.Safe.from_string trimmed with
+    | `Assoc _ as json ->
+      let event_type = json_string_field "type" json in
+      (match event_type with
+       | Some "TEXT_MESSAGE_CONTENT"
+       | Some "TEXT_MESSAGE_DELTA"
+       | None -> json_string_field "delta" json
+       | Some "TEXT_MESSAGE_END"
+       | Some "RUN_FINISHED"
+       | Some "RUN_ERROR" -> None
+       | Some _ -> None)
+    | _ -> None
+    | exception Yojson.Json_error _ -> Some payload
+
 (** Send a message to a keeper via HTTP POST to /api/v1/keepers/chat/stream.
     Reads SSE chunks and updates [state.msg_streaming_text] incrementally. *)
 let send_keeper_message_stream (state : state) (keeper_name : string) (message : string) : string =
@@ -43,15 +68,16 @@ let send_keeper_message_stream (state : state) (keeper_name : string) (message :
         (* Read SSE chunks incrementally, updating streaming text *)
         let full_buf = Buffer.create 4096 in
         let line_buf = Buffer.create 256 in
-        let update_streaming_message payload =
-          state.msg_streaming_text <- payload;
+        let streaming_text = Buffer.create 1024 in
+        let update_streaming_message text =
+          state.msg_streaming_text <- text;
           let msg_count = List.length state.msg_history in
           if msg_count > 0 then begin
             let last_idx = msg_count - 1 in
             let entry = List.nth state.msg_history last_idx in
             state.msg_history <- List.init msg_count (fun i ->
               if i = last_idx && entry.me_role = "assistant" && entry.me_status = Streaming
-              then { entry with me_text = payload }
+              then { entry with me_text = text }
               else List.nth state.msg_history i);
             render state
           end
@@ -63,7 +89,11 @@ let send_keeper_message_stream (state : state) (keeper_name : string) (message :
           if terminated then Buffer.add_char full_buf '\n';
           if String.starts_with ~prefix:"data: " line then begin
             let payload = String.sub line 6 (String.length line - 6) in
-            update_streaming_message payload
+            match stream_text_delta_of_sse_payload payload with
+            | Some delta ->
+              Buffer.add_string streaming_text delta;
+              update_streaming_message (Buffer.contents streaming_text)
+            | None -> ()
           end
         in
         (try

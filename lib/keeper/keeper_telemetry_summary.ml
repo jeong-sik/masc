@@ -97,6 +97,61 @@ let record_event ~keeper_name ~event_kind ~runtime_id ~duration_ms ~success =
       recent_events := List.take max_recent_events !recent_events
   )
 
+let assoc_field name = function
+  | `Assoc fields -> List.assoc_opt name fields
+  | _ -> None
+
+let string_field names json =
+  List.find_map
+    (fun name ->
+       match assoc_field name json with
+       | Some (`String value) when String.trim value <> "" -> Some value
+       | Some (`Int value) -> Some (string_of_int value)
+       | Some (`Float value) -> Some (string_of_float value)
+       | _ -> None)
+    names
+
+let float_field names json =
+  List.find_map
+    (fun name ->
+       match assoc_field name json with
+       | Some (`Float value) -> Some value
+       | Some (`Int value) -> Some (Float.of_int value)
+       | Some (`String value) -> Float.of_string_opt (String.trim value)
+       | _ -> None)
+    names
+
+let success_field json =
+  match assoc_field "success" json with
+  | Some (`Bool value) -> value
+  | _ ->
+    (match string_field [ "result"; "outcome"; "status" ] json with
+     | Some value ->
+       let value = String.lowercase_ascii (String.trim value) in
+       not
+         (String.equal value "failure"
+          || String.equal value "failed"
+          || String.equal value "error")
+     | None -> true)
+
+let record_telemetry_payload payload =
+  let keeper_name =
+    string_field [ "keeper_name"; "keeper"; "agent_name"; "agent" ] payload
+    |> Option.value ~default:"unknown"
+  in
+  let event_kind =
+    string_field [ "event_kind"; "kind"; "event" ] payload
+    |> Option.value ~default:"telemetry_event"
+  in
+  let runtime_id = string_field [ "runtime_id"; "runtime"; "model_runtime" ] payload in
+  let duration_ms = float_field [ "duration_ms"; "elapsed_ms"; "latency_ms" ] payload in
+  record_event
+    ~keeper_name
+    ~event_kind
+    ~runtime_id
+    ~duration_ms
+    ~success:(success_field payload)
+
 let snapshot () =
   with_lock (fun () ->
     let per_keeper_snapshot = Hashtbl.create (Hashtbl.length per_keeper) in

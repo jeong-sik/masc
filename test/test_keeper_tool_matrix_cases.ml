@@ -334,6 +334,7 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
       `Assoc [ ("query", `String "tool matrix") ]
   | "keeper_library_read" ->
       `Assoc [ ("topic", `String (Generic.ensure_library_topic fixture.generic)) ]
+  | "keeper_surface_read" -> `Assoc [ ("surface", `String "dashboard") ]
   | "keeper_tasks_list" -> `Assoc [ ("include_done", `Bool true) ]
   | "keeper_task_force_release" ->
       `Assoc

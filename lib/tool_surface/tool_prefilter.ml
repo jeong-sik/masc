@@ -215,6 +215,14 @@ let synonyms : (string * string list) list =
       ; "full document"
       ; "knowledge article"
       ] )
+  ; ( "keeper_surface_read"
+    , [ "discord messages"
+      ; "channel conversation"
+      ; "surface lane"
+      ; "who said"
+      ; "participants roster"
+      ; "connected surface"
+      ] )
   ; ( "keeper_tools_list"
     , [ "what can you do"
       ; "capabilities"

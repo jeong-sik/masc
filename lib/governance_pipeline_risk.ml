@@ -23,6 +23,7 @@ let capability_classification : (string * capability_class list) list =
     ("keeper_memory_search", [ Sensitive_access ]);
     ("keeper_library_search", [ Sensitive_access ]);
     ("keeper_library_read", [ Sensitive_access ]);
+    ("keeper_surface_read", [ Sensitive_access ]);
     ("tool_edit_file", [ State_modification ]);
     ("tool_write_file", [ State_modification ]);
   ]
@@ -140,7 +141,8 @@ let risk_of_keeper (k : Keeper_tool_name.t) : risk_level =
   | Board_post_get | Board_list | Board_post | Board_search | Board_stats
   | Board_sub_board_get | Board_sub_board_list | Board_vote | Broadcast
   | Context_status | Handoff | Library_read | Library_search | Memory_search
-  | Memory_write | Search_files | Stay_silent | Tasks_audit | Tasks_list | Time_now
+  | Memory_write | Search_files | Stay_silent | Surface_read | Tasks_audit
+  | Tasks_list | Time_now
   | Tool_search | Tools_list | Voice_agent | Voice_listen
   | Voice_session_end | Voice_session_start | Voice_sessions | Voice_speak -> Low
   | Board_sub_board_create | Board_sub_board_update | Task_claim | Task_create | Task_done

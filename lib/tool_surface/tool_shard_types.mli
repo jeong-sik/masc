@@ -74,6 +74,9 @@ val voice_tools : Masc_domain.tool_schema list
 (** Voice tool schemas. *)
 
 val library_tools : Masc_domain.tool_schema list
+
+val surface_tools : Masc_domain.tool_schema list
+(** keeper_surface_read lane reading (RFC-0223 P3). *)
 (** Library tool schemas. *)
 
 val taskboard_tools : Masc_domain.tool_schema list

@@ -23,6 +23,7 @@
   tool_shard_types_schemas_execute
   tool_shard_types_schemas_filesystem
   tool_shard_types_schemas_library
+  tool_shard_types_schemas_surface
   tool_shard_types_schemas_search_files
   tool_shard_types_schemas_taskboard
   tool_shard_types_schemas_voice)

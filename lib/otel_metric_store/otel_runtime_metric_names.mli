@@ -10,13 +10,10 @@ val metric_mcp_tool_schema_count : string
 
 val metric_mcp_tool_schema_tokens_approx : string
 
-(** {1 Admission queue metrics} *)
 
-val metric_inference_queue_depth : string
 val metric_inference_queue_inflight : string
 val metric_inference_queue_acquired : string
 val metric_inference_queue_wait : string
-val metric_inference_queue_cancelled : string
 
 (** Total admission requests rejected before execution. Labels:
     [surface=with_permit|try_with_permit] and

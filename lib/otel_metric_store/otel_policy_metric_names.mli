@@ -6,7 +6,6 @@
 (** Aggregate counter for every fallback event across the runtime pipeline.
     Labels: [kind] enumerates the fallback class and [detail] carries the
     specific reason within the kind. *)
-val metric_board_truncated_posts : string
 
 (** Counter for board flusher actor startup non-success outcomes.
     Closed-vocabulary label [outcome] is [switch_finished | cas_exhausted]. *)
@@ -24,8 +23,4 @@ val metric_anti_rationalization_excuse_pattern : string
     value means runtime behavior drifted from the TLA-backed contract surface. *)
 val metric_fsm_guard_violation : string
 
-val metric_memory_pipeline_flushes : string
-val metric_memory_pipeline_flush_records : string
-
 (** Wall-clock seconds spent in the memory pipeline flush bridge. *)
-val metric_memory_pipeline_flush_duration_seconds : string

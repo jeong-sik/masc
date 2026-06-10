@@ -199,13 +199,11 @@ val metric_write_meta_cas_retry_total : string
     can silently drop board posts. Labels: keeper, kind=post_created|comment_added. *)
 
 val metric_cache_desync_cleared : string
-val metric_egress_audit_missing : string
 
 (** Runtime state synchronization failures: pause/resume/auto-pause paths
     only. Local discovery refresh failures use
     [metric_keeper_local_discovery_failures] so dashboards can attribute
     distinct failure classes. *)
-val metric_egress_audit_stale_orphan : string
 
 (** Local discovery readiness failures observed during create/turn paths.
     Separated from [metric_keeper_runtime_sync_failures] so dashboards do

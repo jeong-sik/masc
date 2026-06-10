@@ -20,6 +20,16 @@ type metric =
   }
 
 val register_counter : name:string -> help:string -> ?labels:label list -> unit -> unit
+
+(** [declare_counter name] registers the unlabeled 0-cell for [name] and
+    returns [name].  Used by metric-name modules
+    ([let metric_x = declare_counter "masc_..."]) so every declared counter
+    exports 0 from process start instead of staying invisible until its
+    first increment — without this, Grafana cannot distinguish "never
+    fired" (healthy) from "not wired" (broken).  Counters only; gauges and
+    histograms have no honest pre-first-sample value and stay lazy. *)
+val declare_counter : string -> string
+
 val register_gauge : name:string -> help:string -> ?labels:label list -> unit -> unit
 val register_histogram : name:string -> help:string -> ?labels:label list -> unit -> unit
 val inc_counter : string -> ?labels:label list -> ?delta:float -> unit -> unit

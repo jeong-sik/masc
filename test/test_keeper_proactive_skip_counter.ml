@@ -16,7 +16,7 @@
       string label the counter consumes.  Adding a new reason
       without updating dashboards becomes a test failure. *)
 
-module KM = Masc.Keeper_metrics
+module KM = Keeper_metrics
 module KW = Masc.Keeper_world_observation
 
 let test_metric_name_stable () =

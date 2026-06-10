@@ -6,7 +6,6 @@
 
 val metric_fd_open : string
 val metric_fd_limit : string
-val metric_fd_in_flight : string
 val metric_fd_pressure_active : string
 val metric_mcp_requests : string
 val metric_llm_inference_duration : string
@@ -33,7 +32,6 @@ val metric_error_events : string
 val metric_workspace_route_failures : string
 val metric_active_agents : string
 val metric_pending_tasks : string
-val metric_uptime_seconds : string
 
 (** Goal attainment percentage by [goal_id]. Companion
     {!metric_goal_attainment_measured} distinguishes real 0% from
@@ -47,13 +45,9 @@ val metric_goal_attainment_measured : string
 val metric_sse_connections_active : string
 val metric_sse_reconnects : string
 val metric_sse_idle_evictions : string
-val metric_sse_capacity_evictions : string
-val metric_sse_write_failures : string
 val metric_sse_rejects : string
 val metric_provider_prefix_cache_creation_tokens : string
 val metric_provider_prefix_cache_read_tokens : string
-val metric_tool_call : string
-val metric_tool_call_duration : string
 val metric_tool_input_validation : string
 val metric_llm_provider_http_status : string
 val metric_llm_provider_request_latency : string

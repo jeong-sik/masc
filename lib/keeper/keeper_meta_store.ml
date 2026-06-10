@@ -345,7 +345,7 @@ let write_meta_with_merge
        | Ok (Some latest) ->
          Otel_metric_store.inc_counter
            Otel_metric_store.metric_write_meta_cas_retry_total
-           ~labels:[("keeper_name", caller.name)]
+           ~labels:[("keeper", caller.name)]
            ();
          Log.Keeper.info
            "write_meta CAS retry %d/%d for %s (caller had %d, disk %d; field-level merge)"

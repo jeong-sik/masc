@@ -106,6 +106,27 @@ check_rule "R6-home-masc-root" 9 \
   '' \
   bin lib scripts docs
 
+# SSOT-R7 — OTel metric label key for keeper identity is "keeper".
+# "keeper_name" in a metric label list splits the label vocabulary: Grafana
+# template variables and panel group-bys query "keeper", so keeper_name-keyed
+# series render as 0/No data (masc-keeper-full broke this way; the $keeper
+# variable sourced label_values(masc_keeper_turns_total, keeper) and got an
+# empty list). JSON codec fields named "keeper_name" are NOT affected — this
+# rule only matches inside ~labels:[...] lists and let <name>labels = [...] bindings.
+# Needs -U (multiline): label lists wrap across lines.
+r7_pattern='(~labels:|let [a-z_]*labels\s*=\s*)\[[^\]]{0,400}"keeper_name"'
+r7_count="$({ rg -U -c --no-heading "$r7_pattern" bin lib test 2>/dev/null || true; } \
+  | awk -F: '{sum += $2} END {print sum+0}')"
+if [ "$r7_count" -gt 0 ]; then
+  echo "ERROR[R7-metric-label-keeper-name]: $r7_count occurrences (baseline 0)." >&2
+  echo "  Replace with: \"keeper\" — the canonical metric label key (cf. Keeper_hooks_oas_types.label_keeper)." >&2
+  echo "  Offending sites:" >&2
+  rg -U -l "$r7_pattern" bin lib test 2>/dev/null | sed 's/^/    /' >&2
+  fail=1
+else
+  echo "OK[R7-metric-label-keeper-name]: 0 occurrences (baseline 0)."
+fi
+
 # SSOT-R3 (tool-name literal) is intentionally deferred to #8448's landing:
 # the raw `"masc_..."` match is too noisy without the Tool_name.Keeper variant
 # refactor in place. Add to this script once #8448 introduces a narrow dispatch

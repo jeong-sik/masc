@@ -280,32 +280,32 @@ let emit_usage_metrics_and_log
   in
   Otel_metric_store.inc_counter
     Keeper_metrics.(to_string Turns)
-    ~labels:[ "keeper_name", updated_meta.name; "outcome", outcome_label ]
+    ~labels:[ "keeper", updated_meta.name; "outcome", outcome_label ]
     ();
   if usage_trusted
   then (
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string InputTokens)
-      ~labels:[ "keeper_name", updated_meta.name; "model", runtime_lane_label ]
+      ~labels:[ "keeper", updated_meta.name; "model", runtime_lane_label ]
       ~delta:(float_of_int result.usage.input_tokens)
       ();
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string OutputTokens)
-      ~labels:[ "keeper_name", updated_meta.name; "model", runtime_lane_label ]
+      ~labels:[ "keeper", updated_meta.name; "model", runtime_lane_label ]
       ~delta:(float_of_int result.usage.output_tokens)
       ();
     if result.usage.cache_creation_input_tokens > 0
     then
       Otel_metric_store.inc_counter
         Keeper_metrics.(to_string CacheCreationTokens)
-        ~labels:[ "keeper_name", updated_meta.name; "model", runtime_lane_label ]
+        ~labels:[ "keeper", updated_meta.name; "model", runtime_lane_label ]
         ~delta:(float_of_int result.usage.cache_creation_input_tokens)
         ();
     if result.usage.cache_read_input_tokens > 0
     then
       Otel_metric_store.inc_counter
         Keeper_metrics.(to_string CacheReadTokens)
-        ~labels:[ "keeper_name", updated_meta.name; "model", runtime_lane_label ]
+        ~labels:[ "keeper", updated_meta.name; "model", runtime_lane_label ]
         ~delta:(float_of_int result.usage.cache_read_input_tokens)
         ())
   else (
@@ -319,7 +319,7 @@ let emit_usage_metrics_and_log
          Otel_metric_store.inc_counter
            Keeper_metrics.(to_string UsageAnomalies)
            ~labels:
-             [ "keeper_name", updated_meta.name
+             [ "keeper", updated_meta.name
              ; "model", runtime_lane_label
              ; "reason", reason
              ]

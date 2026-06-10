@@ -88,7 +88,7 @@ let record_started_metrics ~keeper outcome =
     ~labels:[ ("keeper", keeper) ] ();
   Otel_metric_store.inc_counter
     Keeper_metrics.(to_string TurnScheduled)
-    ~labels:[ ("keeper_name", keeper) ] ();
+    ~labels:[ ("keeper", keeper) ] ();
   (match outcome with
    | Fresh -> ()
    | Reattempt _ ->

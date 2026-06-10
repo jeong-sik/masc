@@ -112,7 +112,7 @@ let handle_speak
     with
     | Some sw, Some clock, Some net ->
       (match
-         Voice_bridge.enqueue_agent_speak
+         Voice_bridge.agent_speak
            ~sw
            ~clock
            ~net

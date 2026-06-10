@@ -612,7 +612,9 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
       ~tool_calls:(collected_tool_calls ())
       ~source:chat_source
       ~assistant_content:(persisted_error_reply err)
-      ()
+      ();
+    Keeper_chat_broadcast.chat_appended
+      ~keeper_name:payload.name ~source:chat_source
   in
   let timeout_sec = Option.map float_of_int payload.timeout_sec in
   let request_id =
@@ -645,7 +647,7 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
         match dispatch_result with
         | Ok (true, body) ->
             let _payload_json_opt, visible_reply = extract_visible_reply body in
-            if not (is_continuation_checkpoint_reply visible_reply) then
+            if not (is_continuation_checkpoint_reply visible_reply) then begin
               Keeper_chat_store.append_turn
                 ~base_dir:state.Mcp_server.workspace_config.base_path
                 ~keeper_name:payload.name
@@ -655,6 +657,9 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
                 ~source:chat_source
                 ~assistant_content:visible_reply
                 ();
+              Keeper_chat_broadcast.chat_appended
+                ~keeper_name:payload.name ~source:chat_source
+            end;
             push_worker_event (Stream_terminal (true, body));
             Tool_result.ok ~tool_name:"masc_keeper_msg" ~start_time body
         | Ok (false, err) ->

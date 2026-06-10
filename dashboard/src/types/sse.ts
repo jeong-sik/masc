@@ -29,6 +29,7 @@ export type SSEEventType =
   | 'masc/keeper_guardrail'
   | 'keeper_phase_changed'
   | 'keeper_composite_changed'
+  | 'keeper_chat_appended'
   | 'keeper_tool_call'
   | 'masc/keeper_tool_call'
   | 'keeper_tool_skipped'
@@ -130,6 +131,10 @@ export interface SSEEvent {
   type: SSEEventType
   severity?: JournalSeverity
   source?: JournalSource
+  // Originating connector for keeper_chat_appended ('dashboard' |
+  // 'discord' | 'slack' | 'agent' | gate channel). Distinct from
+  // [source], which is reserved for the journal origin.
+  connector?: string
   agent?: string
   from?: string
   from_agent?: string

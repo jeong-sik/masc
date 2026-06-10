@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { callMcpTool } = vi.hoisted(() => ({ callMcpTool: vi.fn() }))
 const { runOperatorAction } = vi.hoisted(() => ({ runOperatorAction: vi.fn() }))
@@ -25,9 +25,47 @@ import { keeperThreads, keeperActionErrors } from './keeper-state'
 import {
   _resetChatHydrationForTests,
   hydrateKeeperChatHistory,
+  noteKeeperChatAppended,
   sendKeeperThreadMessage,
 } from './keeper-actions'
 import type { KeeperChatStreamEvent } from './api'
+
+describe('noteKeeperChatAppended', () => {
+  beforeEach(() => {
+    keeperThreads.value = {}
+    keeperActionErrors.value = {}
+    _resetChatHydrationForTests()
+    fetchKeeperChatHistory.mockReset()
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('skips keepers whose transcript was never hydrated', async () => {
+    noteKeeperChatAppended('echo')
+    await vi.runAllTimersAsync()
+    expect(fetchKeeperChatHistory).not.toHaveBeenCalled()
+  })
+
+  it('debounces a burst of appends into one forced refetch', async () => {
+    fetchKeeperChatHistory.mockResolvedValue([
+      { role: 'user', content: 'hi', ts: 1_780_000_000 },
+    ])
+    await hydrateKeeperChatHistory('echo')
+    expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(1)
+
+    noteKeeperChatAppended('echo')
+    noteKeeperChatAppended('echo')
+    noteKeeperChatAppended('echo')
+    await vi.runAllTimersAsync()
+
+    // One additional fetch despite the once-per-keeper hydration guard
+    // (force) and despite three push events (debounce).
+    expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(2)
+  })
+})
 
 describe('hydrateKeeperChatHistory', () => {
   beforeEach(() => {

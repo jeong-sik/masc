@@ -159,6 +159,29 @@ export async function hydrateKeeperChatHistory(
   }
 }
 
+// Trailing per-keeper debounce for keeper_chat_appended pushes so a
+// burst of turns (queue drain, multi-connector traffic) coalesces into
+// one history refetch instead of one round-trip per message.
+const chatRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>()
+const CHAT_APPENDED_REFRESH_DELAY_MS = 400
+
+/** React to a server `keeper_chat_appended` push: re-merge the
+ *  persisted transcript so messages arriving through other connectors
+ *  (Discord, Slack, agent MCP) appear without a page reload. Keepers
+ *  whose transcript was never hydrated are skipped — the mount
+ *  hydration fetches the full window when the panel first opens. */
+export function noteKeeperChatAppended(name: string): void {
+  const keeperName = name.trim()
+  if (!keeperName) return
+  if (!hydratedChatKeepers.has(keeperName)) return
+  const pending = chatRefreshTimers.get(keeperName)
+  if (pending) clearTimeout(pending)
+  chatRefreshTimers.set(keeperName, setTimeout(() => {
+    chatRefreshTimers.delete(keeperName)
+    void hydrateKeeperChatHistory(keeperName, { force: true })
+  }, CHAT_APPENDED_REFRESH_DELAY_MS))
+}
+
 export async function loadFullKeeperHistory(name: string): Promise<void> {
   const keeperName = name.trim()
   if (!keeperName) return

@@ -785,6 +785,8 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
         | _ ->
             None);
       (* Standalone WebSocket transport (enabled by default, opt-out via MASC_WS_ENABLED=0) *)
+      if Server_ws_standalone.is_enabled ()
+      then Server_mcp_transport_ws.init_heartbeat ~sw ~clock ~idle_timeout:300.0;
       Server_ws_standalone.start ~sw ~env
         ~on_message:(fun ws_session_id body_str ->
           Eio.Fiber.fork ~sw (fun () ->

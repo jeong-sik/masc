@@ -175,7 +175,9 @@ export function KeeperChatPanel({ name }: { name: string }) {
   const streamStartedAt = useMemo(() => signal<number | null>(null), [])
   const chatError = useMemo(() => signal(''), [])
   const searchQuery = useMemo(() => signal(''), [])
-  const historyLoaded = useMemo(() => signal(false), [])
+  // Keyed by keeper: switching the panel to another keeper must reset
+  // the flag, otherwise the new keeper's history is never hydrated.
+  const historyLoaded = useMemo(() => signal(false), [name])
 
   const activeAbortRef = useRef<AbortController | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)

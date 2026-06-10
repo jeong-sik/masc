@@ -19,7 +19,7 @@ let synthetic_retry_after_sec =
    task-714. *)
 let log_synthetic_backoff ~synthetic_sec ~source ~detail =
   Log.Server.info (fun f ->
-      f "synthetic_backoff: synthetic_sec=%d source=%s detail=%s"
+      f "Synthetic backoff applied (source=%s, backoff_sec=%d, detail=%s)"
         synthetic_sec source detail)
 
 let capacity_backpressure_source_of_http_error = function

@@ -71,6 +71,25 @@ let test_decide_and_record_try_next_source_none () =
     Alcotest.(check (option string)) "default source = None" None source
   | _ -> Alcotest.fail "expected Try_next from retryable Call_err"
 
+let test_decide_and_record_exhausted_retryable_last () =
+  match decide_and_record ~runtime_id:"test" ~source:None ~accept_on_exhaustion:false ~is_last:true
+           (Call_err (mk_http_err ~code:429 ())) with
+  | Exhausted _ -> Alcotest.(check bool) "retryable+last → Exhausted via decide_and_record" true true
+  | _ -> Alcotest.fail "retryable+last should yield Exhausted via decide_and_record"
+
+let test_decide_and_record_exhausted_terminal () =
+  match decide_and_record ~runtime_id:"test" ~source:None ~accept_on_exhaustion:false ~is_last:false
+           (Call_err (mk_provider_terminal ())) with
+  | Exhausted _ -> Alcotest.(check bool) "terminal → Exhausted via decide_and_record" true true
+  | _ -> Alcotest.fail "terminal should yield Exhausted via decide_and_record"
+
+let test_decide_and_record_try_next_source_some () =
+  match decide_and_record ~runtime_id:"test" ~source:(Some "provider-x") ~accept_on_exhaustion:false ~is_last:false
+           (Call_err (mk_http_err ~code:429 ())) with
+  | Try_next { source; _ } ->
+    Alcotest.(check (option string)) "source = Some provider-x" (Some "provider-x") source
+  | _ -> Alcotest.fail "expected Try_next from retryable Call_err with source=Some"
+
 (* --- to_user_message --- *)
 
 let test_user_message_http () =
@@ -104,6 +123,9 @@ let suite =
     ]);
     ("decide_and_record", [
       Alcotest.test_case "default source = None" `Quick test_decide_and_record_try_next_source_none;
+      Alcotest.test_case "exhausted retryable+last" `Quick test_decide_and_record_exhausted_retryable_last;
+      Alcotest.test_case "exhausted terminal" `Quick test_decide_and_record_exhausted_terminal;
+      Alcotest.test_case "source = Some provider-x" `Quick test_decide_and_record_try_next_source_some;
     ]);
     ("to_user_message", [
       Alcotest.test_case "HTTP 503 in message" `Quick test_user_message_http;

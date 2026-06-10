@@ -30,7 +30,7 @@ A task may pre-declare a `completion_contract : string list` (free-text checklis
 Facts about the current state **(verified 2026-06-10)**:
 
 - `MASC_VERIFICATION_FSM_ENABLED` default = `true` (`feature_flag_registry.ml:197-200`, since 0.9.3).
-- The legacy gate's only firing signature (`"contract unmet (legacy)"` / `"completion contract not satisfied"`) appears **0 times** in June `~/.masc/logs/system_log_*.jsonl` — the substring gate is dead on the production path.
+- The legacy gate's only firing signature (`"contract unmet (legacy)"` / `"completion contract not satisfied"`) appears **0 times** in June `<base-path>/.masc/logs/system_log_*.jsonl` — the substring gate is dead on the production path.
 - PR #20699 (closed 2026-06-10) added a word-boundary token fallback to the dead gate, claiming to fix the task-716 rejection cycle. The matching predicate was well-built and tested, but it strengthened a string classifier (CLAUDE.md workaround signature #2) on a path that never executes; the actual task-716 rejections came from the live Gate 3 / evidence-gate lane.
 
 The structural defect, independent of which layer fires: **the producer's claim of contract satisfaction is inferred from prose** — by substring in the dead lane, by an LLM reading unstructured notes in the live lane. A keeper can rationalize by silence: notes that simply never mention an obligation force the judge to infer the omission. That inference step is where both the false-reject churn (task-716 style) and the rationalization risk live.

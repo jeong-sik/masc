@@ -89,6 +89,12 @@ let start () =
 
 let dropped_count () = Atomic.get dropped
 
+let queue_depth () =
+  Mutex.lock mu;
+  let n = Queue.length queue in
+  Mutex.unlock mu;
+  n
+
 let write line =
   if not (Atomic.get enqueue_active)
   then current_writer () line

@@ -21,6 +21,10 @@ val write : string -> unit
 (** Total mirror lines dropped due to a blocked console writer. *)
 val dropped_count : unit -> int
 
+(** Lines currently queued for the writer thread. A rising depth means
+    the console fd is blocked (the failure mode behind #20684). *)
+val queue_depth : unit -> int
+
 module For_testing : sig
   (** Replace the fd writer ([None] restores stderr). *)
   val set_writer : (string -> unit) option -> unit

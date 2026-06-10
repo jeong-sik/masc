@@ -152,6 +152,8 @@ let with_append_queue_lock f =
 
 let queued_count_for_testing () =
   with_append_queue_lock (fun () -> Stdlib.Queue.length append_queue)
+
+let queue_depth = queued_count_for_testing
 ;;
 
 let dropped_count_for_testing () = Atomic.get append_queue_dropped

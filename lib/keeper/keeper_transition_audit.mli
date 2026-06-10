@@ -61,6 +61,11 @@ val start_flush_fiber : sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> unit
     this before reading; safe from any fiber. *)
 val flush_pending : unit -> int
 
+(** Forensics records queued for the async drain fiber. A rising depth
+    means the drain fiber is starved or the store append is parked
+    (#20677 failure mode). *)
+val queue_depth : unit -> int
+
 module For_testing : sig
   val reset_state : unit -> unit
   val clear_completed_turn_ring : keeper_name:string -> unit

@@ -42,7 +42,6 @@ val metric_goal_attainment_pct : string
     [0] when the dashboard projection is currently unmeasured. *)
 val metric_goal_attainment_measured : string
 
-val metric_sse_connections_active : string
 val metric_sse_reconnects : string
 val metric_sse_idle_evictions : string
 val metric_sse_rejects : string

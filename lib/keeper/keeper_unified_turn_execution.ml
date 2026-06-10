@@ -147,6 +147,7 @@ let run (ctx : ctx)
            meta.name;
          Keeper_unified_turn_attempt_watchdog.dispatch
            ~clock
+           ~keeper_name:meta.name
            ~attempt_watchdog_s:None
            ~on_cancelled:(fun reason ->
              record_streaming_cancelled_observation

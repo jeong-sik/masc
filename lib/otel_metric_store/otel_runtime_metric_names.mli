@@ -56,3 +56,8 @@ val metric_gc_promoted_words : string
 (** Approximate live OCaml heap memory usage in bytes, derived from
     [Gc.quick_stat.live_words] and [Sys.word_size]. *)
 val metric_memory_usage_bytes : string
+
+(** Eio main-domain scheduler lag (gauge, seconds): 1s sleep overshoot
+    sampled by the bootstrap lag fiber.  Sustained values mean the single
+    domain is blocked (2026-06 fleet-freeze root cause class). *)
+val metric_eio_loop_lag_seconds : string

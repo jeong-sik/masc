@@ -20,3 +20,9 @@ let metric_gc_live_words = "masc_gc_live_words"
 let metric_gc_compactions = "masc_gc_compactions"
 let metric_gc_promoted_words = "masc_gc_promoted_words"
 let metric_memory_usage_bytes = "masc_memory_usage_bytes"
+
+(* Eio main-domain scheduler lag: a 1s-interval fiber measures sleep
+   overshoot.  Sustained lag means the single domain is blocked by a
+   non-yielding syscall or CPU hog -- the shared root cause of the
+   2026-06 fleet freezes (#20677, #20684). *)
+let metric_eio_loop_lag_seconds = "masc_eio_loop_lag_seconds"

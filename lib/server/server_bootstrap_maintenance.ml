@@ -86,8 +86,30 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
      span / no [tool_dispatch_total] metric). *)
   Tool_dispatch.set_span_wrapper Tool_telemetry.with_span;
   Otel_metric_store.register_otel_source_once ();
+  Otel_runtime_observables.register_once
+    ~masc_root:(Workspace.masc_root_dir state.workspace_config)
+    ();
   Otel_spans.setup_exporter ~sw env;
   Shutdown.register ~name:"otel_exporter" ~priority:20 Otel_spans.shutdown;
+  (* Scheduler-lag probe: 1s sleep, gauge = overshoot. A pure-Eio fiber
+     cannot observe a blocked domain from inside while it is blocked, but
+     the first tick after the block lands carries the full stall duration,
+     which is exactly the post-hoc signal the 2026-06 freeze RCAs lacked. *)
+  fork_logged_fiber
+    ~sw
+    ~on_error:(log_server_fiber_crash "eio_loop_lag_probe")
+    (fun () ->
+      let interval_sec = 1.0 in
+      let rec tick () =
+        let before = Unix.gettimeofday () in
+        Eio.Time.sleep clock interval_sec;
+        let lag = Unix.gettimeofday () -. before -. interval_sec in
+        Otel_metric_store.set_gauge
+          Otel_metric_store.metric_eio_loop_lag_seconds
+          (Float.max 0.0 lag);
+        tick ()
+      in
+      tick ());
   (* Board_listener removed: filesystem-first principle.
      JSONL path emits SSE directly via Board_dispatch.emit_board_sse_event.
      PG path also uses Board_dispatch, making the pg_notify relay redundant. *)

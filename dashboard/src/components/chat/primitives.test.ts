@@ -180,3 +180,94 @@ describe('ChatTranscript', () => {
     expect(label).not.toContain('...')
   })
 })
+
+describe('ChatComposer queue & stall', () => {
+  let container: HTMLDivElement
+
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+  })
+
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+  })
+
+  it('keeps send enabled during streaming when queueing is on', () => {
+    render(
+      html`<${ChatComposer}
+        draft="다음 질문"
+        placeholder="메시지 입력..."
+        disabled=${false}
+        streaming=${true}
+        queueEnabled=${true}
+        queueCount=${2}
+        onDraftChange=${() => {}}
+        onSend=${() => {}}
+      />`,
+      container,
+    )
+
+    const buttons = [...container.querySelectorAll('button')]
+    const queueButton = buttons.find(button => button.textContent?.includes('대기열 추가'))
+    expect(queueButton).not.toBeUndefined()
+    expect(queueButton?.hasAttribute('disabled')).toBe(false)
+    expect(container.querySelector('[data-chat-queue-count]')?.textContent).toContain('대기 2')
+  })
+
+  it('blocks send during streaming when queueing is off', () => {
+    render(
+      html`<${ChatComposer}
+        draft="다음 질문"
+        placeholder="메시지 입력..."
+        disabled=${false}
+        streaming=${true}
+        queueEnabled=${false}
+        onDraftChange=${() => {}}
+        onSend=${() => {}}
+      />`,
+      container,
+    )
+
+    const buttons = [...container.querySelectorAll('button')]
+    const sendButton = buttons.find(button => button.textContent?.includes('응답 중'))
+    expect(sendButton?.hasAttribute('disabled')).toBe(true)
+  })
+
+  it('surfaces a stall hint when no stream event arrived recently', () => {
+    render(
+      html`<${ChatComposer}
+        draft=""
+        placeholder="메시지 입력..."
+        disabled=${false}
+        streaming=${true}
+        lastEventAt=${Date.now() - 30_000}
+        onDraftChange=${() => {}}
+        onSend=${() => {}}
+      />`,
+      container,
+    )
+
+    const hint = container.querySelector('[data-chat-stall-hint]')
+    expect(hint).not.toBeNull()
+    expect(hint?.textContent).toContain('지연')
+  })
+
+  it('shows no stall hint while events are flowing', () => {
+    render(
+      html`<${ChatComposer}
+        draft=""
+        placeholder="메시지 입력..."
+        disabled=${false}
+        streaming=${true}
+        lastEventAt=${Date.now() - 1_000}
+        onDraftChange=${() => {}}
+        onSend=${() => {}}
+      />`,
+      container,
+    )
+
+    expect(container.querySelector('[data-chat-stall-hint]')).toBeNull()
+  })
+})

@@ -4,6 +4,7 @@ import {
   appendAssistantDelta,
   setAssistantStreamState,
   updateThreadEntry,
+  insertThreadEntryBefore,
   finalizeAssistantEntry,
   clearActiveStream,
   activeStreamEntryId,
@@ -15,6 +16,14 @@ import {
 import { isRecord, asString } from './components/common/normalize'
 
 const CONTINUATION_CHECKPOINT_PREFIX = 'Continuation checkpoint saved;'
+
+// Most recent TOOL_CALL_START id per keeper — fallback target for
+// TOOL_CALL_ARGS / TOOL_CALL_END events that omit toolCallId.
+const lastToolCallIds = new Map<string, string>()
+
+function toolEntryId(toolCallId: string): string {
+  return `tool-${toolCallId}`
+}
 
 export function abortKeeperThreadMessage(name: string): void {
   const keeperName = name.trim()
@@ -60,6 +69,50 @@ export function applyKeeperStreamEvent(
     case 'TEXT_MESSAGE_END':
       setAssistantStreamState(keeperName, assistantEntryId, 'finalizing', 'streaming')
       return null
+    case 'TOOL_CALL_START': {
+      const toolCallId = event.toolCallId ?? `tc-${keeperName}-${Date.now()}`
+      lastToolCallIds.set(keeperName, toolCallId)
+      // Insert above the live assistant bubble so the final reply text
+      // stays the last entry in the transcript.
+      insertThreadEntryBefore(keeperName, assistantEntryId, {
+        id: toolEntryId(toolCallId),
+        role: 'tool',
+        source: 'tool_result',
+        label: event.toolCallName ?? event.name ?? 'tool',
+        text: '',
+        rawText: '',
+        timestamp: new Date().toISOString(),
+        delivery: 'streaming',
+        streamState: 'streaming',
+        details: null,
+      })
+      return null
+    }
+    case 'TOOL_CALL_ARGS': {
+      const toolCallId = event.toolCallId ?? lastToolCallIds.get(keeperName)
+      if (toolCallId && typeof event.delta === 'string' && event.delta) {
+        updateThreadEntry(keeperName, toolEntryId(toolCallId), entry => ({
+          ...entry,
+          text: `${entry.text}${event.delta}`,
+          rawText: `${entry.rawText ?? entry.text}${event.delta}`,
+        }))
+      }
+      return null
+    }
+    case 'TOOL_CALL_END': {
+      const toolCallId = event.toolCallId ?? lastToolCallIds.get(keeperName)
+      if (toolCallId) {
+        updateThreadEntry(keeperName, toolEntryId(toolCallId), entry => ({
+          ...entry,
+          delivery: 'delivered',
+          streamState: null,
+        }))
+        if (lastToolCallIds.get(keeperName) === toolCallId) {
+          lastToolCallIds.delete(keeperName)
+        }
+      }
+      return null
+    }
     case 'CUSTOM':
       if (event.name === 'KEEPER_QUEUE_REQUEST') {
         setAssistantStreamState(keeperName, assistantEntryId, 'opening', 'queued')

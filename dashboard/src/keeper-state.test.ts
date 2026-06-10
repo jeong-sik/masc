@@ -1,8 +1,17 @@
 import { describe, expect, it } from 'vitest'
+import { beforeEach } from 'vitest'
 import {
+  THREAD_ENTRY_CAP,
+  appendThreadEntry,
+  chatHistoryEntriesFromRest,
+  insertThreadEntryBefore,
   isVisibleDirectConversationEntry,
+  keeperThreads,
+  mergeServerHistoryEntries,
   normalizeStatusDetail,
+  setStatusDetail,
 } from './keeper-state'
+import type { KeeperConversationEntry } from './types'
 
 describe('normalizeStatusDetail', () => {
   it('infers and hides internal keeper history from direct comms', () => {
@@ -65,5 +74,98 @@ describe('normalizeStatusDetail', () => {
     })
 
     expect(detail.history.every(isVisibleDirectConversationEntry)).toBe(true)
+  })
+})
+
+describe('thread history merge & persistence', () => {
+  beforeEach(() => {
+    keeperThreads.value = {}
+  })
+
+  function entry(partial: Partial<KeeperConversationEntry>): KeeperConversationEntry {
+    return {
+      id: 'e-1',
+      role: 'user',
+      source: 'direct_user',
+      label: '사용자',
+      text: 'hello',
+      rawText: 'hello',
+      timestamp: '2026-06-10T00:00:00.000Z',
+      delivery: 'delivered',
+      streamState: null,
+      details: null,
+      ...partial,
+    }
+  }
+
+  it('keeps hydrated history when a status refresh carries no history', () => {
+    appendThreadEntry('echo', entry({ id: 'hist-1', delivery: 'history' }))
+    appendThreadEntry('echo', entry({ id: 'local-1', text: 'live', rawText: 'live' }))
+
+    // hydrateKeeperStatus fast path: include_history_tail=false → history: []
+    setStatusDetail('echo', {
+      name: 'echo',
+      diagnostic: null,
+      history: [],
+      rawText: '',
+      loadedAt: new Date().toISOString(),
+    })
+
+    const ids = (keeperThreads.value.echo ?? []).map(e => e.id)
+    expect(ids).toContain('hist-1')
+    expect(ids).toContain('local-1')
+  })
+
+  it('does not duplicate a local message when server history arrives with a different timestamp', () => {
+    appendThreadEntry('echo', entry({ id: 'local-1', text: 'gg', rawText: 'gg', timestamp: '2026-06-10T00:00:01.000Z' }))
+
+    mergeServerHistoryEntries('echo', [
+      entry({ id: 'hist-1', text: 'gg', rawText: 'gg', delivery: 'history', timestamp: '2026-06-10T00:00:05.000Z' }),
+    ])
+
+    const matches = (keeperThreads.value.echo ?? []).filter(e => e.text === 'gg')
+    expect(matches).toHaveLength(1)
+    expect(matches[0]?.delivery).toBe('history')
+  })
+
+  it('keeps local entries the server has not persisted yet', () => {
+    appendThreadEntry('echo', entry({ id: 'local-1', text: 'not yet saved' }))
+
+    mergeServerHistoryEntries('echo', [
+      entry({ id: 'hist-1', text: 'old message', delivery: 'history' }),
+    ])
+
+    const ids = (keeperThreads.value.echo ?? []).map(e => e.id)
+    expect(ids).toEqual(['hist-1', 'local-1'])
+  })
+
+  it('converts REST chat history into entries with chained sources', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      { role: 'user', content: 'hi', ts: 1_780_000_000 },
+      { role: 'assistant', content: 'hello there', ts: 1_780_000_000 },
+    ])
+    expect(entries).toHaveLength(2)
+    expect(entries[0]?.role).toBe('user')
+    expect(entries[0]?.delivery).toBe('history')
+    expect(entries[1]?.role).toBe('assistant')
+    expect(entries[1]?.label).toBe('echo')
+    expect(entries[1]?.timestamp).toBeTruthy()
+  })
+
+  it('inserts before the target entry and appends when the target is missing', () => {
+    appendThreadEntry('echo', entry({ id: 'reply-1', role: 'assistant', source: 'direct_assistant' }))
+    insertThreadEntryBefore('echo', 'reply-1', entry({ id: 'tool-1', role: 'tool', source: 'tool_result' }))
+    insertThreadEntryBefore('echo', 'missing', entry({ id: 'tail-1' }))
+
+    const ids = (keeperThreads.value.echo ?? []).map(e => e.id)
+    expect(ids).toEqual(['tool-1', 'reply-1', 'tail-1'])
+  })
+
+  it('caps the thread window at THREAD_ENTRY_CAP', () => {
+    for (let i = 0; i < THREAD_ENTRY_CAP + 5; i++) {
+      appendThreadEntry('echo', entry({ id: `e-${i}`, text: `m${i}` }))
+    }
+    expect(keeperThreads.value.echo).toHaveLength(THREAD_ENTRY_CAP)
+    expect(keeperThreads.value.echo?.[0]?.id).toBe('e-5')
   })
 })

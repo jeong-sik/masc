@@ -122,7 +122,7 @@ let known_default_sec = function
   | Http -> Some 15.0             (* tool_local_runtime_verify probe was 15s *)
   | Startup -> Some 30.0          (* server_bootstrap docker preflight 30s *)
   | Build_identity -> Some 5.0    (* git probe was 5s *)
-  | Voice -> Some 60.0            (* local playback was 60s — under-budget regression risk *)
+  | Voice -> Some 300.0            (* local playback was 60s — under-budget regression risk *)
   | Workspace_identity -> Some 5.0    (* tty probe was 5s *)
   | Http_routes -> Some 15.0      (* workspace git command via http was 15s *)
   | Repo_manager_git -> Some 300.0 (* repo_manager git was 300s — clone/fetch on slow networks *)

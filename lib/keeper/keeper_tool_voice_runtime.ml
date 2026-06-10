@@ -62,7 +62,7 @@ let handle_speak ~(meta : keeper_meta) ~(args : Yojson.Safe.t) =
     with
     | Some sw, Some clock, Some net ->
       (match
-         Voice_bridge.enqueue_agent_speak
+         Voice_bridge.agent_speak
            ~sw
            ~clock
            ~net

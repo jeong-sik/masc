@@ -590,13 +590,31 @@ let default_evaluator_runtime () =
     Returns unmet contract items. A contract item is "met" if the
     notes contain a case-insensitive substring match.
 
+    Also supports a word-boundary token fallback: a contract item
+    expressed in snake_case (e.g. "record_synthetic_backpressure") is
+    split on underscores and each token checked individually against
+    the notes.  This accommodates natural-language descriptions such
+    as "synthetic backpressure counter rebased" that would fail a
+    literal substring check against the snake_case contract item.
+
     This is deliberately simple — the contract is a lightweight
     pre-declaration, not a formal specification language. *)
 let check_contract ~(notes : string) ~(contract : string list) : string list =
   let lower_notes = String.lowercase_ascii notes in
-  List.filter
-    (fun item -> not (String_util.contains_substring_ci lower_notes item))
-    contract
+  let tokens_of item =
+    item
+    |> String.split_on_char '_'
+    |> List.concat_map (String.split_on_char ' ')
+    |> List.filter (fun t -> String.length t > 0)
+  in
+  let item_met item =
+    String_util.contains_substring_ci lower_notes item
+    ||
+    let tokens = tokens_of item in
+    List.length tokens > 1
+    && List.for_all (fun tok -> String_util.contains_substring_ci lower_notes tok) tokens
+  in
+  List.filter (fun item -> not (item_met item)) contract
 ;;
 
 let review

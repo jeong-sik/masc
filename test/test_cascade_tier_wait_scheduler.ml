@@ -295,6 +295,53 @@ let test_manual_release_wake () =
   | A.Capacity_full _ ->
       fail "should have granted on fresh admission")
 
+let test_manual_release_does_not_wait_for_backoff_timer () =
+  Eio_main.run (fun _env ->
+  let clock = Eio.Stdenv.clock _env in
+  let admission = A.create ~default_max_inflight:1 () in
+  let scheduler = W.create ~clock admission in
+  let raw_slot_held = ref false in
+  Fun.protect
+    ~finally:(fun () ->
+      if !raw_slot_held then A.release admission ~tier_id:"test")
+    (fun () ->
+       match A.try_acquire admission ~tier_id:"test" with
+       | A.Capacity_full _ ->
+           fail "should have granted on fresh admission"
+       | A.Granted _ ->
+           raw_slot_held := true;
+           let slow_config = {
+             W.backoff = W.Constant 60.0;
+             timeout_s = 60.0;
+             max_retries = None;
+           } in
+           Eio.Time.with_timeout_exn clock 0.5 (fun () ->
+               Eio.Switch.run @@ fun sw ->
+               let waiter_done, waiter_done_r = Eio.Promise.create () in
+               Eio.Fiber.fork ~sw (fun () ->
+                   let r = W.try_admission_or_wait scheduler ~tier_id:"test"
+                             ~wait_config:slow_config ~sw
+                             (fun () -> "woken") in
+                   Eio.Promise.resolve waiter_done_r r);
+               let rec wait_for_registered_waiter attempts =
+                 match W.stats scheduler ~tier_id:"test" with
+                 | Some s when s.waiting_fibers > 0 -> ()
+                 | _ when attempts > 100 ->
+                     fail "waiter did not register before manual wake"
+                 | _ ->
+                     Eio.Fiber.yield ();
+                     wait_for_registered_waiter (attempts + 1)
+               in
+               wait_for_registered_waiter 0;
+               A.release admission ~tier_id:"test";
+               raw_slot_held := false;
+               W.on_admission_release scheduler ~tier_id:"test";
+               match Eio.Promise.await waiter_done with
+               | Ok v -> check string "manual wake admitted" "woken" v
+               | Error re ->
+                   fail ("manual wake failed: "
+                         ^ Format.asprintf "%a" W.pp_rejection_detail re))))
+
 (* {1 Test suite} *)
 
 let () =
@@ -328,5 +375,7 @@ let () =
     "external", [
       test_case "manual release wake" `Quick
         test_manual_release_wake;
+      test_case "manual release does not wait for backoff timer" `Quick
+        test_manual_release_does_not_wait_for_backoff_timer;
     ];
   ]

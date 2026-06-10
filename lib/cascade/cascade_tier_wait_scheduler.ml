@@ -159,23 +159,27 @@ let backoff_sleep t ~sw delay_s waiter_promise =
     if Atomic.compare_and_set finished false true then
       Eio.Promise.resolve result_resolver winner
   in
-  (* Fiber 1: timer *)
-  Eio.Fiber.fork ~sw (fun () ->
-      (match t.clock with
-       | Some clock -> Eio.Time.sleep clock delay_s
-       | None ->
-           let start = Unix.gettimeofday () in
-           let rec loop () =
-             if Atomic.get finished then ()
-             else begin
-               Eio.Fiber.yield ();
-               let elapsed = Unix.gettimeofday () -. start in
-               if elapsed >= delay_s then ()
-               else loop ()
-             end
-           in
-           loop ());
-      resolve `Sleep_done);
+  (* Fiber 1: timer. It is daemonized so an early waiter wake does not
+     keep the caller's switch open until the original backoff delay expires. *)
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+      (try
+         (match t.clock with
+          | Some clock -> Eio.Time.sleep clock delay_s
+          | None ->
+              let start = Unix.gettimeofday () in
+              let rec loop () =
+                if Atomic.get finished then ()
+                else begin
+                  Eio.Fiber.yield ();
+                  let elapsed = Unix.gettimeofday () -. start in
+                  if elapsed >= delay_s then ()
+                  else loop ()
+                end
+              in
+              loop ());
+         resolve `Sleep_done
+       with Eio.Cancel.Cancelled _ -> ());
+      `Stop_daemon);
   (* Fiber 2: waiter wake signal — daemon so it doesn't block
      Switch.run completion when the timer wins the race *)
   Eio.Fiber.fork_daemon ~sw (fun () ->

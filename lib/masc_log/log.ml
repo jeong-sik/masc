@@ -681,7 +681,7 @@ let log level ?(ctx : string option) fmt =
         | Some c -> Printf.sprintf "[%s] [%s] [%s]" (timestamp ()) level_str c
         | None -> Printf.sprintf "[%s] [%s]" (timestamp ()) level_str
       in
-      Printf.eprintf "%s %s\n%!" prefix msg;
+      Console_sink.write (prefix ^ " " ^ msg);
       Ring.push ~level ~module_name ~message:msg ()
     end
   ) fmt
@@ -695,7 +695,7 @@ let emit level ?(module_name = "") ?(details = `Null) message =
       else
         Printf.sprintf "[%s] [%s] [%s]" (timestamp ()) level_str module_name
     in
-    Printf.eprintf "%s %s\n%!" prefix message;
+    Console_sink.write (prefix ^ " " ^ message);
     Ring.push ~level ~module_name ~message ~details ()
   end
 
@@ -733,7 +733,7 @@ let error ?ctx fmt = log Error ?ctx fmt
    [~level:Log.Error/Warn/Debug] explicitly, so the option was dead code
    masquerading as flexibility. *)
 let emit_legacy_raw ~level ?(module_name = "") ~source message =
-  Printf.eprintf "%s\n%!" message;
+  Console_sink.write message;
   Ring.push ~level ~source ~module_name ~message ()
 
 let legacy_stderr ~level ?module_name message =
@@ -743,7 +743,7 @@ let legacy_traceln ~level ?module_name message =
   emit_legacy_raw ~level ?module_name ~source:Legacy_traceln message
 
 let client_tool_host_error ?(module_name = "ToolHost") ?(details = `Null) message =
-  Printf.eprintf "%s\n%!" message;
+  Console_sink.write message;
   Ring.push ~level:Error ~source:Client_tool_host
     ~module_name ~message ~details ()
 
@@ -815,7 +815,7 @@ module Make (M : sig val name : string end) = struct
             Printf.sprintf "[%s] [%s] [%s]"
               (timestamp ()) level_str M.name
       in
-      Printf.eprintf "%s %s\n%!" prefix message;
+      Console_sink.write (prefix ^ " " ^ message);
       Ring.push ?keeper_name ?turn_id
         ~level ~module_name:M.name ~message ~details ()
     end

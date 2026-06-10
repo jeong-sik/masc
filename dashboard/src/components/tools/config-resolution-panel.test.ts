@@ -27,9 +27,14 @@ describe('ConfigResolutionPanel', () => {
   beforeEach(() => {
     container = document.createElement('div')
     document.body.appendChild(container)
+    // Mint a fresh Response per fetch call: a Response body is
+    // single-use, and fetchDashboardRuntimeProbe issues more than one
+    // fetch since #20734 (ensureDevToken precedes the probe request).
+    // A shared mockResolvedValue Response makes the second read fail
+    // with "failed to read response body".
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(
+      vi.fn().mockImplementation(async () =>
         new Response(
           JSON.stringify({
             generated_at: '2026-04-10T00:00:00Z',

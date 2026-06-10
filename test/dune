@@ -184,6 +184,7 @@
   test_keeper_fsm_guard_actions
   test_keeper_callback_hardening
   test_keeper_behavioral_regime
+  test_keeper_secret_projection
   test_keeper_toml
   test_runtime_toml_overrides
   test_runtime_provider_auth_headers
@@ -443,6 +444,7 @@
   test_keeper_fsm_guard_actions
   test_keeper_callback_hardening
   test_keeper_behavioral_regime
+  test_keeper_secret_projection
   test_keeper_toml
   test_runtime_toml_overrides
   test_runtime_provider_auth_headers

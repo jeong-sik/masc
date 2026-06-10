@@ -39,6 +39,7 @@
   keeper_tool_filesystem_runtime
   keeper_tool_registered_runtime
   keeper_tool_ide_runtime
+  keeper_secret_projection
   keeper_sandbox_docker
   keeper_tool_execute_runtime_paths
   keeper_tool_execute_path

@@ -100,6 +100,14 @@ let docker_log_has_container_execution log =
   contains_substring ("\n" ^ log) "\nrun "
   || contains_substring ("\n" ^ log) "\nexec "
 
+let env_file_path_from_docker_line line =
+  let rec loop = function
+    | "--env-file" :: path :: _ -> Some path
+    | _ :: rest -> loop rest
+    | [] -> None
+  in
+  loop (String.split_on_char ' ' line)
+
 let rec ensure_dir path =
   if path = "" || path = "." || path = "/" then ()
   else if Sys.file_exists path then ()
@@ -1748,6 +1756,39 @@ let test_docker_shell_mounts_numeric_user_identity () =
     (contains_substring (read_file group_path)
        (Printf.sprintf "keeper:x:%d:" (Unix.getgid ())))
 
+let test_docker_shell_projects_keeper_secret_dir () =
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  let secret_root =
+    Filename.concat
+      (Filename.concat (Filename.concat config.Workspace.base_path Common.masc_dirname) "secrets")
+      (Workspace_utils.safe_filename meta.name)
+  in
+  let token_path = Filename.concat (Filename.concat secret_root "env") "GH_TOKEN" in
+  let ssh_path =
+    Filename.concat
+      (Filename.concat secret_root "files")
+      "home/keeper/.ssh/id_ed25519"
+  in
+  ensure_dir (Filename.dirname token_path);
+  ensure_dir (Filename.dirname ssh_path);
+  write_file token_path "projected-token\n";
+  write_file ssh_path "PRIVATE KEY";
+  let log_path = Filename.concat config.Workspace.base_path "docker.log" in
+  let line = run_docker_shell_command ~config ~meta ~playground ~log_path in
+  Alcotest.(check bool) "projected raw token not in docker argv" false
+    (contains_substring line "projected-token");
+  Alcotest.(check bool) "projected env uses env-file" true
+    (contains_substring line "--env-file ");
+  Alcotest.(check bool) "projected file mounted read-only" true
+    (contains_substring line (ssh_path ^ ":/home/keeper/.ssh/id_ed25519:ro"));
+  (match env_file_path_from_docker_line line with
+   | None -> Alcotest.fail "missing --env-file path in docker log"
+   | Some env_file ->
+     Alcotest.(check bool) "env-file cleaned after docker run" false
+       (Sys.file_exists env_file))
+
 let test_docker_shell_does_not_synthesize_git_author_identity () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
@@ -1782,6 +1823,53 @@ let test_execute_fake_docker_executes () =
     (parse_string_field raw "via");
   Alcotest.(check bool) "bash output includes fake docker stdout" true
     (response_mentions raw "output" "stdout:")
+
+let test_turn_runtime_projects_keeper_secret_dir () =
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  let secret_root =
+    Filename.concat
+      (Filename.concat (Filename.concat config.Workspace.base_path Common.masc_dirname) "secrets")
+      (Workspace_utils.safe_filename meta.name)
+  in
+  let token_path = Filename.concat (Filename.concat secret_root "env") "GH_TOKEN" in
+  let ssh_path =
+    Filename.concat
+      (Filename.concat secret_root "files")
+      "home/keeper/.ssh/id_ed25519"
+  in
+  ensure_dir (Filename.dirname token_path);
+  ensure_dir (Filename.dirname ssh_path);
+  write_file token_path "projected-token\n";
+  write_file ssh_path "PRIVATE KEY";
+  let log_path = Filename.concat config.Workspace.base_path "docker.log" in
+  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  with_turn_sandbox_factory ~config ~meta @@ fun factory ->
+  let raw =
+    Keeper_tool_command_runtime.handle_tool_execute
+      ~turn_sandbox_factory:(Some factory)
+      ~exec_cache:None
+      ~config
+      ~meta
+      ~args:(tool_execute_typed_exec_args ~cwd:playground "echo" ~argv:[ "hello" ])
+      ()
+  in
+  Alcotest.(check (option bool)) "bash via fake docker is ok" (Some true)
+    (parse_bool_field raw "ok");
+  let log = read_file log_path in
+  Alcotest.(check bool) "projected raw token not in docker argv" false
+    (contains_substring log "projected-token");
+  Alcotest.(check bool) "turn container uses env-file" true
+    (contains_substring log "--env-file ");
+  Alcotest.(check bool) "turn container mounts file read-only" true
+    (contains_substring log (ssh_path ^ ":/home/keeper/.ssh/id_ed25519:ro"));
+  (match env_file_path_from_docker_line log with
+   | None -> Alcotest.fail "missing --env-file path in docker log"
+   | Some env_file ->
+     Alcotest.(check bool) "env-file cleaned after container start" false
+       (Sys.file_exists env_file))
 
 let test_execute_allows_validator_safe_pipe_redirect_in_docker_route () =
   with_tool_policy_config @@ fun () ->
@@ -2179,8 +2267,14 @@ let () =
             "docker shell mounts passwd entry for numeric uid"
             `Quick test_docker_shell_mounts_numeric_user_identity;
           Alcotest.test_case
+            "docker shell projects keeper secret directory"
+            `Quick test_docker_shell_projects_keeper_secret_dir;
+          Alcotest.test_case
             "docker shell does not synthesize git author identity"
             `Quick test_docker_shell_does_not_synthesize_git_author_identity;
+          Alcotest.test_case
+            "turn runtime projects keeper secret directory"
+            `Quick test_turn_runtime_projects_keeper_secret_dir;
           Alcotest.test_case
             "sandbox-root git with no repo blocks before docker exec"
             `Quick test_sandbox_root_git_cwd_zero_repo_blocks_before_exec;

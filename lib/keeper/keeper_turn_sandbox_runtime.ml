@@ -360,6 +360,14 @@ let start_container (t : t) ~timeout_sec =
        with
        | Error _ as err -> err
        | Ok identity_mounts ->
+       (match
+          Keeper_secret_projection.docker_args_for_keeper
+            ~base_path:t.config.base_path
+            ~keeper_name:t.meta.name
+            ~container_name
+        with
+        | Error err -> Error ("docker_container_start_failed: secret_projection: " ^ err)
+        | Ok secret_projection ->
          let argv =
            Keeper_sandbox_runtime.docker_command_argv ()
            @ [ "run"; "-d"; "--rm"; "--name"; container_name ]
@@ -399,11 +407,16 @@ let start_container (t : t) ~timeout_sec =
            @ Keeper_sandbox_runtime.docker_workspace_state_mount_args
                ~base_path:t.config.base_path
                ~container_root:t.container_root
+           @ secret_projection.docker_args
            @ identity_mounts
            @ network_args
            @ [ image; "tail"; "-f"; "/dev/null" ]
          in
-         let st, out = run_argv_with_status_retry_eintr argv in
+         let st, out =
+           Eio_guard.protect
+             ~finally:secret_projection.cleanup
+             (fun () -> run_argv_with_status_retry_eintr argv)
+         in
          (match st with
           | Unix.WEXITED 0 ->
             let inspect_argv =
@@ -464,7 +477,7 @@ let start_container (t : t) ~timeout_sec =
               (Printf.sprintf
                  "docker_container_start_failed: %s%s"
                  (Keeper_sandbox_runtime.docker_failure_output_for_log out)
-                 mount_context))))
+                 mount_context)))))
 ;;
 
 let ensure_started (t : t) ~timeout_sec =

@@ -286,6 +286,7 @@ let docker_run_argv
       ~gid
       ~seccomp_args
       ~identity_mounts
+      ~secret_args
       ~image
       ~ttl_sec
   =
@@ -324,6 +325,7 @@ let docker_run_argv
   @ Keeper_sandbox_runtime.docker_workspace_state_mount_args
       ~base_path:config.base_path
       ~container_root
+  @ secret_args
   @ network_args
   @ identity_mounts
   @ [ image; "bash"; "-l"; "-s" ]
@@ -543,80 +545,93 @@ let run_docker_shell_command_with_status_internal
                      with
                      | Error err -> sandbox_error err
                      | Ok identity_mounts ->
-                       let argv =
-                         docker_run_argv
-                           ~config
-                           ~meta
-                           ~container_name
-                           ~container_root
-                           ~container_cwd
-                           ~host_root
-                           ~network_label
-                           ~network_args
-                           ~uid
-                           ~gid
-                           ~seccomp_args
-                           ~identity_mounts
-                           ~image
-                           ~ttl_sec:(docker_oneshot_ttl_sec ~timeout_sec)
-                       in
-                       (try
-                          let status, output =
-                            Eio_guard.protect
-                              ~finally:(fun () ->
-                                cleanup_oneshot_container ~container_name)
-                            @@ fun () ->
-                            Docker_spawn_throttle.with_slot (fun () ->
-                              Masc_exec.Exec_gate.run_argv_with_stdin_and_status
-                                ~actor:`System_sandbox
-                                ~raw_source:(String.concat " " argv)
-                                ~summary:"keeper docker command"
-                                ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
-                                ~cwd:(Sys.getcwd ())
-                                ~timeout_sec
-                                ~stdin_content:cmd
-                                argv)
-                          in
-                          let semantic_status =
-                            docker_command_semantic_status ~cmd ~status ~output
-                          in
-                          let semantic_ok = semantic_ok_of_status semantic_status in
-                          if not semantic_ok
-                          then
-                            Keeper_sandbox_exec_failure.record_docker_failure
+                       (match
+                          Keeper_secret_projection.docker_args_for_keeper
+                            ~base_path:config.base_path
+                            ~keeper_name:meta.name
+                            ~container_name
+                        with
+                        | Error err ->
+                          sandbox_error ("docker_shell_failed: secret_projection: " ^ err)
+                        | Ok secret_projection ->
+                          let argv =
+                            docker_run_argv
                               ~config
                               ~meta
-                              ~image
-                              ~container_kind:"oneshot"
+                              ~container_name
+                              ~container_root
+                              ~container_cwd
+                              ~host_root
                               ~network_label
-                              ~status
-                              ~output
-                          else
-                            Keeper_registry.clear_error
-                              ~base_path:config.base_path
-                              meta.name;
-                          Ok
-                            { status
-                            ; output
-                            ; image
-                            ; network_label
-                            ; cwd
-                            ; semantic_status = Some semantic_status
-                            ; semantic_ok
-                            }
-                        with
-                        | Eio.Cancel.Cancelled _ as exn -> raise exn
-                        | Failure err -> sandbox_error err
-                        | Sys_error err ->
-                          sandbox_error
-                            (Printf.sprintf "docker_shell_failed: sys_error: %s" err)
-                        | Unix.Unix_error (code, fn, arg) ->
-                          sandbox_error
-                            (Printf.sprintf
-                               "docker_shell_failed: unix_error: %s: %s(%s)"
-                               (Unix.error_message code)
-                               fn
-                               arg))))))))
+                              ~network_args
+                              ~uid
+                              ~gid
+                              ~seccomp_args
+                              ~identity_mounts
+                              ~secret_args:secret_projection.docker_args
+                              ~image
+                              ~ttl_sec:(docker_oneshot_ttl_sec ~timeout_sec)
+                          in
+                          (try
+                             let status, output =
+                               Eio_guard.protect
+                                 ~finally:(fun () ->
+                                   secret_projection.cleanup ();
+                                   cleanup_oneshot_container ~container_name)
+                               @@ fun () ->
+                               Docker_spawn_throttle.with_slot (fun () ->
+                                 Masc_exec.Exec_gate.run_argv_with_stdin_and_status
+                                   ~actor:`System_sandbox
+                                   ~raw_source:(String.concat " " argv)
+                                   ~summary:"keeper docker command"
+                                   ~env:
+                                     (Env_keeper_scrub.filter_environment
+                                        (Unix.environment ()))
+                                   ~cwd:(Sys.getcwd ())
+                                   ~timeout_sec
+                                   ~stdin_content:cmd
+                                   argv)
+                             in
+                             let semantic_status =
+                               docker_command_semantic_status ~cmd ~status ~output
+                             in
+                             let semantic_ok = semantic_ok_of_status semantic_status in
+                             if not semantic_ok
+                             then
+                               Keeper_sandbox_exec_failure.record_docker_failure
+                                 ~config
+                                 ~meta
+                                 ~image
+                                 ~container_kind:"oneshot"
+                                 ~network_label
+                                 ~status
+                                 ~output
+                             else
+                               Keeper_registry.clear_error
+                                 ~base_path:config.base_path
+                                 meta.name;
+                             Ok
+                               { status
+                               ; output
+                               ; image
+                               ; network_label
+                               ; cwd
+                               ; semantic_status = Some semantic_status
+                               ; semantic_ok
+                               }
+                           with
+                           | Eio.Cancel.Cancelled _ as exn -> raise exn
+                           | Failure err -> sandbox_error err
+                           | Sys_error err ->
+                             sandbox_error
+                               (Printf.sprintf "docker_shell_failed: sys_error: %s" err)
+                           | Unix.Unix_error (code, fn, arg) ->
+                             sandbox_error
+                               (Printf.sprintf
+                                  "docker_shell_failed: unix_error: %s: %s(%s)"
+                                  (Unix.error_message code)
+                                  fn
+                                  arg)))))))))
 ;;
 
 let run_docker_shell_command_with_status =

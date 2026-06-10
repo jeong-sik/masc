@@ -61,10 +61,10 @@ module For_testing : sig
 
   val start_heartbeat_fiber :
     sw:Eio.Switch.t ->
-    clock:Eio.Time.clock ->
+    clock:float Eio.Time.clock_ty Eio.Resource.t ->
     session_id:string ->
-    session:Server_mcp_transport_ws.session ->
-    wsd:Ws.Wsd.t ->
+    session:Server_mcp_transport_ws.ws_session ->
+    wsd:Httpun_ws.Wsd.t ->
     unit
   (** [start_heartbeat_fiber ~sw ~clock ~session_id ~session ~wsd]
       spawns a background fiber that sends protocol-level pings every

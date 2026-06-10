@@ -42,23 +42,25 @@ let send_keeper_message_stream (state : state) (keeper_name : string) (message :
 
         (* Read SSE chunks incrementally, updating streaming text *)
         let full_buf = Buffer.create 4096 in
+        let line_buf = Buffer.create 256 in
+        let flush_line ~terminated =
+          let line = Buffer.contents line_buf in
+          Buffer.clear line_buf;
+          Buffer.add_string full_buf line;
+          if terminated then Buffer.add_char full_buf '\n';
+          if String.starts_with ~prefix:"data: " line then begin
+            let payload = String.sub line 6 (String.length line - 6) in
+            state.msg_streaming_text <- payload
+          end
+        in
         (try
-           let line_buf = Buffer.create 256 in
            while true do
              match input_char ic with
-             | '\n' ->
-               let line = Buffer.contents line_buf in
-               Buffer.clear line_buf;
-               Buffer.add_string full_buf line;
-               Buffer.add_char full_buf '\n';
-               (* Check for SSE data line *)
-               if String.starts_with ~prefix:"data: " line then begin
-                 let payload = String.sub line 6 (String.length line - 6) in
-                 state.msg_streaming_text <- payload
-               end
+             | '\n' -> flush_line ~terminated:true
              | c -> Buffer.add_char line_buf c
            done
-         with End_of_file -> ());
+         with End_of_file ->
+           if Buffer.length line_buf > 0 then flush_line ~terminated:false);
 
         let response = Buffer.contents full_buf in
         (match Tui_decode.parse_keeper_chat_response response with

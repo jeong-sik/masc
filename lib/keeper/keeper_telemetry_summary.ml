@@ -43,8 +43,10 @@ let successful_events = ref 0
 let failed_events = ref 0
 
 (* Per-keeper counters, protected by [mu].
-   Map keys are keeper names. Each entry is {total; success; failure; duration_sum_ms}. *)
-let per_keeper : (string, int * int * int * float) Hashtbl.t = Hashtbl.create 16
+   Map keys are keeper names. Each entry is
+   {total; success; failure; duration_sum_ms; duration_sample_count}. *)
+let per_keeper : (string, int * int * int * float * int) Hashtbl.t =
+  Hashtbl.create 16
 
 (* Ring buffer of recent events, protected by [mu].
    LIFO — most recent first. Trimmed to [max_recent_events] on insert. *)
@@ -74,17 +76,20 @@ let record_event ~keeper_name ~event_kind ~runtime_id ~duration_ms ~success =
     if success then incr successful_events else incr failed_events;
 
     (* Update per-keeper counters *)
-    let t, s, f, d =
+    let t, s, f, d, duration_samples =
       match Hashtbl.find_opt per_keeper keeper_name with
       | Some v -> v
-      | None -> (0, 0, 0, 0.0)
+      | None -> (0, 0, 0, 0.0, 0)
     in
-    let d' =
+    let d', duration_samples' =
       match duration_ms with
-      | Some ms -> d +. ms
-      | None -> d
+      | Some ms -> d +. ms, duration_samples + 1
+      | None -> d, duration_samples
     in
-    Hashtbl.replace per_keeper keeper_name ((t + 1), (if success then s + 1 else s), (if success then f else f + 1), d');
+    Hashtbl.replace
+      per_keeper
+      keeper_name
+      ((t + 1), (if success then s + 1 else s), (if success then f else f + 1), d', duration_samples');
 
     (* Append to recent events ring buffer *)
     recent_events := entry :: !recent_events;
@@ -95,9 +100,9 @@ let record_event ~keeper_name ~event_kind ~runtime_id ~duration_ms ~success =
 let snapshot () =
   with_lock (fun () ->
     let per_keeper_snapshot = Hashtbl.create (Hashtbl.length per_keeper) in
-    Hashtbl.iter (fun name (t, s, f, d) ->
+    Hashtbl.iter (fun name (t, s, f, d, duration_samples) ->
       let avg_duration_ms =
-        if t > 0 then d /. Float.of_int t else 0.0
+        if duration_samples > 0 then d /. Float.of_int duration_samples else 0.0
       in
       Hashtbl.replace per_keeper_snapshot name
         { total = t; success = s; failure = f; avg_duration_ms }

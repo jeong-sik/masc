@@ -127,6 +127,51 @@ let plan_ws_close_payload_chunk ~offset ~declared_len ~chunk_len =
     else Copy_then_continue { copy_len; next_offset })
 ;;
 
+(** [start_heartbeat_fiber ~sw ~clock ~session_id ~session ~wsd] spawns a
+    background fiber that sends protocol-level pings every
+    [heartbeat_interval_s] seconds.
+
+    The fiber self-exits once [session.closed] flips or the WSD writer is
+    closed, so it does not outlive the connection beyond one sleep tick.
+
+    Exposed through {!For_testing} so unit tests can activate the heartbeat
+    loop without a real TCP accept socket. *)
+let start_heartbeat_fiber
+      ~sw
+      ~clock
+      ~session_id
+      ~(session : Server_mcp_transport_ws.ws_session)
+      ~wsd
+  =
+  Eio.Fiber.fork ~sw (fun () ->
+    let rec loop () =
+      Eio.Time.sleep clock heartbeat_interval_s;
+      if (not session.closed) && not (Ws.Wsd.is_closed session.wsd)
+      then (
+        let send_failed = ref false in
+        (try Ws.Wsd.send_ping wsd with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn ->
+           send_failed := true;
+           (match Http_server_eio.Late_response.classify_write_failure exn with
+            | Some _ ->
+              Log.Server.debug
+                "[ws-standalone] session %s heartbeat skipped (writer closed during \
+                 cancel race)"
+                session_id
+            | None ->
+              Log.Server.warn
+                "[ws-standalone] session %s heartbeat send_ping failed: %s"
+                session_id
+                (Printexc.to_string exn)));
+        if !send_failed
+        then
+          Server_mcp_transport_ws.cleanup_session session_id
+        else loop ())
+    in
+    loop ())
+;;
+
 module For_testing = struct
   let max_ws_close_reason_log_len = max_ws_close_reason_log_len
   let max_ws_close_payload_len = max_ws_close_payload_len
@@ -218,45 +263,6 @@ let log_ws_client_close_payload ~session_id ~declared_len payload =
 let standalone_ws_eof_summary = function
   | None -> "error=none"
   | Some (`Exn exn) -> Printf.sprintf "error=%s" (Printexc.to_string exn)
-;;
-
-(** [start_heartbeat_fiber ~sw ~clock ~session_id ~session ~wsd] spawns a
-    background fiber that sends protocol-level pings every
-    [heartbeat_interval_s] seconds.
-
-    The fiber self-exits once [session.closed] flips or the WSD writer is
-    closed, so it does not outlive the connection beyond one sleep tick.
-
-    Exposed through {!For_testing} so unit tests can activate the heartbeat
-    loop without a real TCP accept socket. *)
-let start_heartbeat_fiber ~sw ~clock ~session_id ~session ~wsd =
-  Eio.Fiber.fork ~sw (fun () ->
-    let rec loop () =
-      Eio.Time.sleep clock heartbeat_interval_s;
-      if (not session.closed) && not (Ws.Wsd.is_closed session.wsd)
-      then (
-        let send_failed = ref false in
-        (try Ws.Wsd.send_ping wsd with
-         | Eio.Cancel.Cancelled _ as e -> raise e
-         | exn ->
-           send_failed := true;
-           (match Http_server_eio.Late_response.classify_write_failure exn with
-            | Some _ ->
-              Log.Server.debug
-                "[ws-standalone] session %s heartbeat skipped (writer closed during \
-                 cancel race)"
-                session_id
-            | None ->
-              Log.Server.warn
-                "[ws-standalone] session %s heartbeat send_ping failed: %s"
-                session_id
-                (Printexc.to_string exn)));
-        if !send_failed
-        then
-          Server_mcp_transport_ws.cleanup_session session_id
-        else loop ())
-    in
-    loop ())
 ;;
 
 (** WebSocket handler factory.

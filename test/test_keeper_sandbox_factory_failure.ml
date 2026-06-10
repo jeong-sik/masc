@@ -1,4 +1,5 @@
 open Alcotest
+open Masc
 module F = Keeper_sandbox_factory_failure
 
 let test_registry_lookup () =

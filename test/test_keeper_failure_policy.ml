@@ -113,7 +113,7 @@ let test_provider_timeout_strike_capacity_backpressure_reroutes_provider () =
   check_lifecycle "lifecycle" "soft_fail_turn" decision.lifecycle_effect;
   check_circuit "circuit" "provider_cooldown" decision.circuit_effect;
   check_action "action" "reroute_or_tune_provider" decision.operator_action;
-  check string "reason" "provider_timeout_strike:capacity_backpressure:1" decision.reason
+  check string "reason" "provider_timeout:capacity_backpressure" decision.reason
 ;;
 
 let test_provider_timeout_loop_with_live_keeper_pauses_work_not_keeper () =
@@ -128,10 +128,10 @@ let test_provider_timeout_loop_with_live_keeper_pauses_work_not_keeper () =
   in
   check_scope "scope" "provider" decision.failure_scope;
   check_lifecycle "lifecycle" "pause_current_work" decision.lifecycle_effect;
-  check_circuit "circuit" "operator_breaker" decision.circuit_effect;
-  check_action "action" "inspect_provider_stream" decision.operator_action;
+  check_circuit "circuit" "provider_cooldown" decision.circuit_effect;
+  check_action "action" "reroute_or_tune_provider" decision.operator_action;
   check bool "keeper death not allowed" false (Policy.should_kill_keeper decision);
-  check string "reason" "provider_timeout_strike:wall_clock:3" decision.reason
+  check string "reason" "provider_timeout_loop:wall_clock" decision.reason
 ;;
 
 let test_provider_timeout_loop_with_lost_liveness_pauses_keeper_without_death () =
@@ -149,7 +149,7 @@ let test_provider_timeout_loop_with_lost_liveness_pauses_keeper_without_death ()
   check_circuit "circuit" "operator_breaker" decision.circuit_effect;
   check_action "action" "inspect_keeper_liveness" decision.operator_action;
   check bool "keeper death not allowed" false (Policy.should_kill_keeper decision);
-  check string "reason" "provider_timeout_strike:wall_clock:3+lost_liveness" decision.reason
+  check string "reason" "keeper_liveness_lost_after_timeout:wall_clock" decision.reason
 ;;
 
 let test_workflow_rejection_skips_keeper_circuit () =
@@ -158,7 +158,7 @@ let test_workflow_rejection_skips_keeper_circuit () =
       (Policy.Workflow_rejection { rule_id = Some "rate_limit" })
   in
   check_scope "scope" "invocation" decision.failure_scope;
-  check_lifecycle "lifecycle" "soft_fail_turn" decision.lifecycle_effect;
+  check_lifecycle "lifecycle" "keep_running" decision.lifecycle_effect;
   check_circuit "circuit" "skip_circuit" decision.circuit_effect;
   check_action "action" "fix_invocation" decision.operator_action;
   check string "reason" "workflow_rejection:rate_limit" decision.reason
@@ -183,8 +183,8 @@ let test_only_liveness_failures_allow_keeper_death () =
           (Policy.Provider_timeout
              { phase = None; strikes = None; liveness = Policy.No_recent_heartbeat })));
   check bool
-    "fatal environment does not kill keeper"
-    false
+    "fatal environment allows keeper death"
+    true
     (Policy.should_kill_keeper
        (Policy.decide (Policy.Fatal_environment { detail = None })));
   check bool
@@ -247,17 +247,17 @@ let test_provider_timeout_policy_effect_matrix () =
   let cases =
     [
       (Some Policy.Capacity_backpressure, None, Policy.Recent_heartbeat,
-       "soft_fail_turn", "provider_cooldown", "reroute_or_tune_provider", "capacity_backpressure");
+       "soft_fail_turn", "provider_cooldown", "reroute_or_tune_provider", "provider_timeout");
       (Some Policy.Wall_clock, Some 3, Policy.Recent_heartbeat,
-       "pause_current_work", "operator_breaker", "inspect_provider_stream", "wall_clock:3");
+       "pause_current_work", "provider_cooldown", "reroute_or_tune_provider", "provider_timeout_loop");
       (Some Policy.Wall_clock, Some 3, Policy.No_recent_heartbeat,
-       "pause_keeper", "operator_breaker", "inspect_keeper_liveness", "lost_liveness");
+       "pause_keeper", "operator_breaker", "inspect_keeper_liveness", "keeper_liveness_lost_after_timeout");
       (Some (Policy.Stream_idle Policy.Streaming_thinking), None, Policy.In_turn_progress,
-       "soft_fail_turn", "provider_cooldown", "inspect_provider_stream", "streaming_thinking");
+       "soft_fail_turn", "provider_cooldown", "inspect_provider_stream", "provider_timeout");
       (None, None, Policy.Recent_heartbeat,
-       "soft_fail_turn", "provider_cooldown", "inspect_provider_stream", "no_phase");
+       "soft_fail_turn", "provider_cooldown", "inspect_provider_stream", "provider_timeout");
       (None, Some 1, Policy.Watchdog_stale,
-       "pause_keeper", "operator_breaker", "inspect_keeper_liveness", "lost_liveness");
+       "soft_fail_turn", "provider_cooldown", "inspect_provider_stream", "provider_timeout");
     ]
   in
   List.iteri

@@ -6,10 +6,9 @@
     This prevents the fleet freeze that occurred when the FSM audit
     append performed a blocking full-scan of the event timeline.
 
-    Design: incremental counter aggregation (no mutable shared state
-    across fibers beyond atomic Prometheus counters). The snapshot is
-    built from atomics + a small ring buffer of recent events, so reads
-    never block on writes. *)
+    Design: incremental counter aggregation behind a short critical
+    section plus a small ring buffer of recent events, so reads avoid
+    durable-history scans. *)
 
 (** Type of a single recorded telemetry event summary entry. *)
 type telemetry_entry = {

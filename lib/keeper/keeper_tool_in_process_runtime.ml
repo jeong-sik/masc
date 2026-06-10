@@ -85,6 +85,19 @@ let handle_library_read ~(meta : keeper_meta) ~args =
       (`Assoc [ "error", `String (Tool_result.message result) ])
 ;;
 
+let handle_surface_read ~config ~(meta : keeper_meta) ~args =
+  let surface = Safe_ops.json_string ~default:"" "surface" args in
+  let limit =
+    Safe_ops.json_int ~default:Keeper_surface_read.default_limit "limit" args
+  in
+  let messages =
+    Keeper_chat_store.load
+      ~base_dir:config.Workspace.base_path
+      ~keeper_name:meta.name
+  in
+  Keeper_surface_read.respond ~surface ~limit messages
+;;
+
 let handle_ide_annotate ~config ~(meta : keeper_meta) ~args =
   Keeper_tool_ide_runtime.handle_ide_annotate
     ~config

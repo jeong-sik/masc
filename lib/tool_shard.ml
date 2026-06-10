@@ -114,6 +114,17 @@ let shard_library : shard =
   }
 ;;
 
+(* RFC-0223 P3: connector surface lane reading. keeper_surface_post
+   (P4) joins this shard when it ships. *)
+let shard_surface : shard =
+  { name = "surface"
+  ; tools = surface_tools
+  ; read_only_tools = [ "keeper_surface_read" ]
+  ; removable = true
+  ; description = "Connected surfaces: read lane conversation, roster"
+  }
+;;
+
 let shard_taskboard : shard =
   { name = "taskboard"
   ; tools = taskboard_tools
@@ -168,6 +179,7 @@ let all_shards : shard StringMap.t =
     ; shard_search_files
     ; shard_voice
     ; shard_library
+    ; shard_surface
     ; shard_taskboard
     ]
 ;;

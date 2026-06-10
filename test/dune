@@ -73,6 +73,7 @@
   test_keeper_turn_terminal_disposition_field
   test_keeper_reconcile_state
   test_attempt_state
+  test_runtime_attempt_fsm
   test_actor_mailbox
   test_domain_pool
   test_sse
@@ -180,6 +181,7 @@
   test_keeper_unified_idle_cooldown
   test_keeper_unified_inline_skip
   test_keeper_unified_metacognition
+  test_keeper_surface_read
   test_keeper_surface_presence_prompt
   test_keeper_unified_verification_surface
   test_keeper_fsm_guard_actions
@@ -334,6 +336,7 @@
   test_keeper_turn_terminal_disposition_field
   test_keeper_reconcile_state
   test_attempt_state
+  test_runtime_attempt_fsm
   test_actor_mailbox
   test_domain_pool
   test_sse
@@ -441,6 +444,7 @@
   test_keeper_unified_idle_cooldown
   test_keeper_unified_inline_skip
   test_keeper_unified_metacognition
+  test_keeper_surface_read
   test_keeper_surface_presence_prompt
   test_keeper_unified_verification_surface
   test_keeper_fsm_guard_actions

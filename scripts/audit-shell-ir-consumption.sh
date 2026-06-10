@@ -133,7 +133,6 @@ g1_allowed_files=(
   "lib/exec/command_gate/shell_command_gate.ml"
   "lib/exec_policy/exec_policy.ml"
   "lib/exec_policy/exec_policy_command_syntax.ml"
-  "lib/exec_policy/exec_policy_log_sanitize.ml"
 )
 g1_current_files=$(list_code_files "$g1_pattern" \
   | rg -v '/dune$|\.dune$' \

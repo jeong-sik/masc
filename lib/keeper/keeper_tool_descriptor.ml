@@ -39,6 +39,7 @@ type runtime_handler =
   | Tool_memory_write
   | Tool_library_search
   | Tool_library_read
+  | Tool_surface_read
   | Tool_ide_annotate
   | Tool_voice_dispatch
   | Tool_task_dispatch
@@ -124,6 +125,7 @@ let runtime_handler_to_string = function
   | Tool_memory_write -> "tool_memory_write"
   | Tool_library_search -> "tool_library_search"
   | Tool_library_read -> "tool_library_read"
+  | Tool_surface_read -> "tool_surface_read"
   | Tool_ide_annotate -> "tool_ide_annotate"
   | Tool_voice_dispatch -> "tool_voice_dispatch"
   | Tool_task_dispatch -> "tool_task_dispatch"
@@ -655,6 +657,24 @@ let library_read_schema =
     ]
 ;;
 
+let surface_read_schema =
+  object_schema
+    ~required:[ "surface" ]
+    [ property
+        "surface"
+        "string"
+        "Lane label exactly as shown in Connected Surfaces or chat history \
+         source: 'dashboard', 'discord', 'slack', or another connector's \
+         channel label. Rows written before source labelling carry no label \
+         and are not returned."
+    ; property
+        "limit"
+        "integer"
+        "Maximum lane messages to return (default 20, max 100). The \
+         participant roster always covers the whole loaded lane."
+    ]
+;;
+
 let read_only_in_process_policy ?(inline_safe = false) ?(maintenance_only = false)
       ()
   =
@@ -986,6 +1006,18 @@ let internal_descriptors : t list =
       ~input_schema:library_read_schema
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_library_read
+    (* ── connector surfaces (RFC-0223 P3) ─────────────────────── *)
+  ; in_process_descriptor
+      ~id:"keeper.surface.read"
+      ~name:"keeper_surface_read"
+      ~description:
+        "Read recent conversation from one connected surface lane (dashboard, \
+         discord, slack, or another connector label) with speaker identity \
+         and a derived participant roster. Use after Connected Surfaces \
+         shows a lane you want context from."
+      ~input_schema:surface_read_schema
+      ~policy:(read_only_in_process_policy ())
+      ~handler:Tool_surface_read
     (* ── IDE (RFC-0179 PR-3) ──────────────────────────────────── *)
   ; in_process_descriptor
       ~id:"keeper.ide.annotate"

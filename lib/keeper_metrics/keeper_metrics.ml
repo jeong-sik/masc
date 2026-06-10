@@ -61,6 +61,7 @@ type t =
   | DispatchEventFailures
   | DirectiveFailures
   | ToolCallDuration
+  | ToolCallDurationBucket
   | WriteMetaFailures
   | MetaReadFailures
   | ApprovalQueueFailures
@@ -279,6 +280,7 @@ let to_string = function
   | DispatchEventFailures -> "masc_keeper_dispatch_event_failures_total"
   | DirectiveFailures -> "masc_keeper_directive_failures_total"
   | ToolCallDuration -> "masc_keeper_tool_call_duration_seconds"
+  | ToolCallDurationBucket -> "masc_keeper_tool_call_duration_seconds_bucket_total"
   | WriteMetaFailures -> "masc_keeper_write_meta_failures_total"
   | MetaReadFailures -> "masc_keeper_meta_read_failures_total"
   | ApprovalQueueFailures -> "masc_keeper_approval_queue_failures_total"
@@ -468,7 +470,7 @@ let all : t list =
     CompactionNoop; ToolPairRepair; ToolEmissionRegistrySize; ToolEmissionPushes;
     ToolUnderusedAllowedCount; ToolUnderusedAllowed; PathRejection; IdeOrphanWrites;
     PathResolverIdentityMismatch; HeartbeatSuccesses; HeartbeatFailures; CleanupTrackingFailures;
-    DispatchEventFailures; DirectiveFailures; ToolCallDuration; WriteMetaFailures;
+    DispatchEventFailures; DirectiveFailures; ToolCallDuration; ToolCallDurationBucket; WriteMetaFailures;
     MetaReadFailures; ApprovalQueueFailures; GuardsFailures; ProfileLoadFailures;
     CompactAuditFailures; CompactAuditRetentionParse; CompactAuditDrainBatches; CompactAuditDrainBatchSizeBucket;
     FsFailures; CrashPersistenceFailures; GenerationLineageFailures; KeepaliveSignalFailures;

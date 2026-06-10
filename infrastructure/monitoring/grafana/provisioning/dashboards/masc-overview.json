@@ -901,6 +901,569 @@
           "showLegend": true
         }
       }
+    },
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Fleet Health \u2014 Freeze Forensics",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 127,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Eio Loop Lag",
+      "gridPos": {
+        "x": 0,
+        "y": 128,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1.0
+              },
+              {
+                "color": "red",
+                "value": 5.0
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "max_over_time(masc_eio_loop_lag_seconds[1m])",
+          "legendFormat": "lag",
+          "refId": "A"
+        }
+      ],
+      "description": "1s sleep-overshoot of the main Eio domain. Sustained values = the single domain is blocked (June 2026 freeze root-cause class: #20677/#20684). First tick after a block carries the full stall duration."
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Console Sink (writer health)",
+      "gridPos": {
+        "x": 8,
+        "y": 128,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1024.0
+              },
+              {
+                "color": "red",
+                "value": 8192.0
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "masc_console_sink_queue_depth",
+          "legendFormat": "queue depth",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(masc_console_sink_dropped_total[5m]) * 60",
+          "legendFormat": "drops/min",
+          "refId": "B"
+        }
+      ],
+      "description": "Rising depth = console fd blocked (pty scrollback/copy-mode, #20684). Drops only lose the convenience mirror \u2014 file sink + ring stay lossless."
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Store Size (masc-root)",
+      "gridPos": {
+        "x": 16,
+        "y": 128,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "masc_store_bytes",
+          "legendFormat": "{{store}}",
+          "refId": "A"
+        }
+      ],
+      "description": "On-disk telemetry stores. tool_calls/oas-events growth starved the readers on 2026-06-09; trajectories hit 483MB (#20682)."
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Event Bus Backpressure",
+      "gridPos": {
+        "x": 0,
+        "y": 136,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum by (bus) (rate(masc_event_bus_subscriber_dropped_total[5m])) * 60",
+          "legendFormat": "{{bus}} drops/min",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (bus) (masc_event_bus_subscriber_depth)",
+          "legendFormat": "{{bus}} depth",
+          "refId": "B"
+        }
+      ],
+      "description": "Drop_oldest sheds on the oas_runtime bus (#20676); Block accumulates publish wait on masc_domain."
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Snapshot Loop Duty Cycle",
+      "gridPos": {
+        "x": 8,
+        "y": 136,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.3
+              },
+              {
+                "color": "red",
+                "value": 0.7
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "rate(masc_dashboard_snapshot_latency_seconds[5m])",
+          "legendFormat": "duty (s/s)",
+          "refId": "A"
+        }
+      ],
+      "description": "Fraction of wall-clock the 2s dashboard snapshot loop spends computing. ~1.0 = the loop re-parses continuously (pre-#20677 behaviour)."
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Telemetry Read Cost",
+      "gridPos": {
+        "x": 16,
+        "y": 136,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "Bps"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum by (store) (rate(masc_telemetry_snapshot_scanned_bytes_total[5m]))",
+          "legendFormat": "{{store}} B/s",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(masc_telemetry_summary_cache_rescans_total[5m])) * 60",
+          "legendFormat": "rescans/min",
+          "refId": "B"
+        }
+      ],
+      "description": "Bytes folded by the incremental readers (#20677). Rescans = boundary invalidation -> full re-parse."
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "FD Open vs Limit",
+      "gridPos": {
+        "x": 0,
+        "y": 144,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "masc_fd_open",
+          "legendFormat": "open",
+          "refId": "A"
+        },
+        {
+          "expr": "masc_fd_limit",
+          "legendFormat": "limit",
+          "refId": "B"
+        }
+      ],
+      "description": "Process fd usage vs RLIMIT_NOFILE soft cap (Fd_accountant.fd_snapshot)."
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Transition Audit Queue",
+      "gridPos": {
+        "x": 8,
+        "y": 144,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "masc_keeper_transition_audit_queue_depth",
+          "legendFormat": "depth",
+          "refId": "A"
+        },
+        {
+          "expr": "masc_fd_pressure_active * 100",
+          "legendFormat": "fd pressure x100",
+          "refId": "B"
+        }
+      ],
+      "description": "FSM forensics async drain queue (#20677). Rising depth = drain fiber starved or store append parked."
+    },
+    {
+      "id": 10,
+      "type": "stat",
+      "title": "Watchdog Fires (24h)",
+      "gridPos": {
+        "x": 16,
+        "y": 144,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(masc_keeper_attempt_watchdog_fired_total[24h]))",
+          "legendFormat": "fires",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1.0
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "description": "1800s safety-cap fires: definitively stuck provider attempts."
+    },
+    {
+      "id": 11,
+      "type": "row",
+      "title": "Provider Stalls",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 152,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Time To First Chunk (avg)",
+      "gridPos": {
+        "x": 0,
+        "y": 153,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 10.0
+              },
+              {
+                "color": "red",
+                "value": 55.0
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "rate(gen_ai_client_operation_time_to_first_chunk[5m]) / rate(gen_ai_client_operation_time_to_first_chunk_count_total[5m])",
+          "legendFormat": "avg TTFC",
+          "refId": "A"
+        }
+      ],
+      "description": "Average streaming first-chunk latency. The OAS stream-idle gate kills silent streams at 60s."
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "OAS Bridge Timeouts / Cancels",
+      "gridPos": {
+        "x": 8,
+        "y": 153,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(masc_oas_bridge_timeout_total[5m])) * 60",
+          "legendFormat": "timeouts/min",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(masc_oas_bridge_cancel_total[5m])) * 60",
+          "legendFormat": "cancels/min",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Provider Errors by Reason",
+      "gridPos": {
+        "x": 16,
+        "y": 153,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum by (reason) (rate(masc_llm_provider_errors_by_reason_total[5m])) * 60",
+          "legendFormat": "{{reason}}",
+          "refId": "A"
+        }
+      ],
+      "description": "Zero-filled counters: a flat 0 means wired-and-healthy; no series means not deployed."
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "HTTP Pool Occupancy",
+      "gridPos": {
+        "x": 0,
+        "y": 161,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "masc_pool_inflight_total",
+          "legendFormat": "inflight",
+          "refId": "A"
+        },
+        {
+          "expr": "masc_pool_idle_total",
+          "legendFormat": "idle",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(rate(masc_pool_create_total[5m])) * 60",
+          "legendFormat": "creates/min",
+          "refId": "C"
+        }
+      ],
+      "description": "Connection pool from Pool_metrics.current_snapshot (export wiring restored)."
     }
   ],
   "refresh": "30s",
@@ -919,5 +1482,5 @@
   "timezone": "browser",
   "title": "MASC Overview",
   "uid": "masc-overview",
-  "version": 1
+  "version": 2
 }

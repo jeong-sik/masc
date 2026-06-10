@@ -221,7 +221,7 @@ let ensure_voice_session fixture =
 let prepare_keeper_name fixture name =
   if
     List.mem name
-      [ "keeper_board_get"; "keeper_board_comment"; "keeper_board_vote";
+      [ "keeper_board_post_get"; "keeper_board_comment"; "keeper_board_vote";
         "keeper_board_search" ]
   then
     ignore (Generic.ensure_board_post fixture.generic);
@@ -275,11 +275,10 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
   | "keeper_board_post" ->
       `Assoc
         [
-          ("title", `String "Keeper Tool Matrix");
           ("content", `String "tool-matrix-post");
-          ("visibility", `String "internal");
+          ("hearth", `String "research");
         ]
-  | "keeper_board_get" ->
+  | "keeper_board_post_get" ->
       `Assoc [ ("post_id", `String (Generic.ensure_board_post fixture.generic)) ]
   | "keeper_board_list" -> `Assoc [ ("limit", `Int 5) ]
   | "keeper_board_curation_read" -> `Assoc []
@@ -396,9 +395,9 @@ let keeper_expectation_for_name name =
          tests without a playground file is an acceptable outcome. *)
       Expect_success_or_guard
         [ "file not found"; "keeper not found in registry"; "path_not_found_under_allowed_roots" ]
-  | "tool_edit_file" | "tool_search_files" | "tool_write_file" ->
+  | "tool_edit_file" | "tool_search_files" | "tool_write_file" | "keeper_ide_annotate" ->
       Expect_success_or_guard
-        [ "keeper not found in registry"; "tool call failed"; "path_not_found_under_allowed_roots" ]
+        [ "keeper not found in registry"; "tool call failed"; "path_not_found_under_allowed_roots"; "annotation sink is not installed" ]
   | _ -> Expect_success
 
 let extra_guard_fragments_for_name = function

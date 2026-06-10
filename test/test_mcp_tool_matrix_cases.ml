@@ -428,6 +428,17 @@ let ensure_plan_initialized fixture =
              ("task_id", `String task_id);
            ]))
 
+let ensure_run_initialized fixture =
+  let task_id = ensure_task fixture in
+  ignore
+    (execute_tool_ok fixture ~name:"masc_run_init"
+       ~arguments:
+         (`Assoc
+           [
+             ("task_id", `String task_id);
+             ("agent_name", `String fixture.agent_name);
+           ]))
+
 let ensure_board_post fixture =
   match fixture.board_post_id with
   | Some post_id -> post_id
@@ -437,10 +448,8 @@ let ensure_board_post fixture =
           ~arguments:
             (`Assoc
               [
-                ("author", `String fixture.agent_name);
-                ("title", `String "Tool Matrix Post");
                 ("content", `String "tool-matrix-post");
-                ("visibility", `String "internal");
+                ("hearth", `String "research");
               ])
       in
       let post_id =
@@ -513,6 +522,8 @@ let prepare_for_name fixture name =
     ignore (ensure_task fixture);
   if List.mem name [ "masc_plan_get"; "masc_plan_update"; "masc_plan_get_task"; "masc_plan_clear_task" ] then
     ensure_plan_initialized fixture;
+  if List.mem name [ "masc_run_plan"; "masc_run_get" ] then
+    ensure_run_initialized fixture;
   if List.mem name [ "masc_board_get"; "masc_board_comment"; "masc_board_vote"; "masc_board_comment_vote"; "masc_board_delete" ] then
     ignore (ensure_board_post fixture);
   (* masc_verify_* tools pruned from registry; no preparation needed. *)

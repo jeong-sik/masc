@@ -1694,6 +1694,53 @@ let test_claim_task_r_already_claimed () =
     | _ -> Alcotest.fail "Expected TaskAlreadyClaimed")
 ;;
 
+(* Schedule-level scope fallback (#20673): a keeper must not idle when the only
+   in-scope task is admission-blocked while an unscoped task is claimable. This
+   runs through claim_next_r with BOTH task_filter (scope) and admission_filter
+   (wip), the composition the resolver-direct test cannot exercise. *)
+let test_scope_widen_claims_unscoped_when_scoped_admission_blocked () =
+  with_test_env (fun config ->
+    (* task-001: scoped to goal-x but admission-blocked.
+       task-002: unscoped (goal_id=None), admission-eligible. *)
+    let _ =
+      Workspace.add_task ~goal_id:"goal-x" config ~title:"scoped blocked"
+        ~priority:1 ~description:""
+    in
+    let _ =
+      Workspace.add_task config ~title:"unscoped open" ~priority:1 ~description:""
+    in
+    let agent_name = "agent_llm_a" in
+    let task_filter (t : Masc_domain.task) =
+      match t.goal_id with
+      | Some g -> String.equal g "goal-x"
+      | None -> false
+    in
+    let admission_filter ~active_tasks:_ (t : Masc_domain.task) =
+      not (String.equal t.id "task-001")
+    in
+    (* Hard scope (default allow_scope_fallback=false): the scoped task is
+       admission-blocked and the unscoped task is out-of-scope -> no eligible. *)
+    (match
+       Workspace.claim_next_r config ~agent_name ~task_filter ~admission_filter ()
+     with
+     | Workspace.Claim_next_no_eligible _ -> ()
+     | Workspace.Claim_next_claimed { task_id; _ } ->
+       Alcotest.failf "hard scope must not claim, got %s" task_id
+     | _ -> Alcotest.fail "expected no_eligible under hard scope");
+    (* Fallback: widen drops scope but keeps admission -> claims the unscoped
+       task and flags scope_widened. The admission-blocked scoped task stays out. *)
+    match
+      Workspace.claim_next_r config ~agent_name ~task_filter ~admission_filter
+        ~allow_scope_fallback:true ()
+    with
+    | Workspace.Claim_next_claimed { task_id; scope_widened; _ } ->
+      Alcotest.(check string) "claimed unscoped via widen" "task-002" task_id;
+      Alcotest.(check bool) "scope_widened flag set" true scope_widened
+    | Workspace.Claim_next_no_eligible _ ->
+      Alcotest.fail "fallback must claim the unscoped task, got no_eligible"
+    | _ -> Alcotest.fail "expected claim under fallback")
+;;
+
 (* ============================================================ *)
 (* GC (Garbage Collection) Tests                                 *)
 (* ============================================================ *)
@@ -1964,6 +2011,10 @@ let () =
             "claim_task_r already claimed"
             `Quick
             test_claim_task_r_already_claimed
+        ; Alcotest.test_case
+            "scope fallback claims unscoped when scoped admission-blocked"
+            `Quick
+            test_scope_widen_claims_unscoped_when_scoped_admission_blocked
         ] )
     ; (* === GC === *)
       ( "gc"

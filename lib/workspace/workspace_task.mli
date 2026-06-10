@@ -82,6 +82,7 @@ type claim_next_result = Masc_domain.claim_next_result =
       priority : int;
       released_task_id : string option;
       message : string;
+      scope_widened : bool;
     }
   | Claim_next_no_unclaimed
   | Claim_next_no_eligible of

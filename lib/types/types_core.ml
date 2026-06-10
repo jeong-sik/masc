@@ -951,6 +951,11 @@ type claim_next_result =
       priority : int;
       released_task_id : string option;  (** Legacy field; claim_next no longer auto-releases active work. *)
       message : string;
+      scope_widened : bool;
+          (** True when goal-scope was widened to all_tasks because no scoped
+              task was admission-eligible (schedule-level fallback). Lets the
+              operator distinguish a scope-overriding claim from an ordinary
+              in-scope claim. *)
     }
   | Claim_next_no_unclaimed
   | Claim_next_no_eligible of

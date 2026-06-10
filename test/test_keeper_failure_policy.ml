@@ -161,6 +161,83 @@ let test_workflow_rejection_skips_keeper_circuit () =
   check bool "keeper death not allowed" false (Policy.should_kill_keeper decision)
 ;;
 
+let test_transient_provider_failure_decide () =
+  let decision =
+    Policy.decide Policy.Transient_provider_failure
+  in
+  check_scope "scope" "provider" decision.failure_scope;
+  check_lifecycle "lifecycle" "pause_keeper" decision.lifecycle_effect;
+  check_circuit "circuit" "operator_breaker" decision.circuit_effect;
+  check_action "action" "inspect_keeper_liveness" decision.operator_action;
+  check bool "keeper death not allowed" false (Policy.should_kill_keeper decision)
+;;
+
+let test_runtime_exhausted_retryable_decide () =
+  let decision =
+    Policy.decide (Policy.Runtime_exhausted { retryable = true })
+  in
+  check_scope "scope" "turn" decision.failure_scope;
+  check_lifecycle "lifecycle" "keep_running" decision.lifecycle_effect;
+  check_circuit "circuit" "skip_circuit" decision.circuit_effect;
+  check_action "action" "regenerate_turn" decision.operator_action;
+  check bool "keeper death not allowed" false (Policy.should_kill_keeper decision)
+;;
+
+let test_runtime_exhausted_non_retryable_decide () =
+  let decision =
+    Policy.decide (Policy.Runtime_exhausted { retryable = false })
+  in
+  check_scope "scope" "turn" decision.failure_scope;
+  check_lifecycle "lifecycle" "pause_keeper" decision.lifecycle_effect;
+  check_circuit "circuit" "operator_breaker" decision.circuit_effect;
+  check_action "action" "inspect_keeper_liveness" decision.operator_action;
+  check bool "keeper death not allowed" false (Policy.should_kill_keeper decision)
+;;
+
+let test_ambiguous_partial_commit_decide () =
+  let decision =
+    Policy.decide Policy.Ambiguous_partial_commit
+  in
+  check_scope "scope" "turn" decision.failure_scope;
+  check_lifecycle "lifecycle" "pause_keeper" decision.lifecycle_effect;
+  check_circuit "circuit" "operator_breaker" decision.circuit_effect;
+  check_action "action" "inspect_keeper_liveness" decision.operator_action;
+  check bool "keeper death not allowed" false (Policy.should_kill_keeper decision)
+;;
+
+let test_turn_failure_streak_decide () =
+  let decision =
+    Policy.decide (Policy.Turn_failure_streak { count = 3 })
+  in
+  check_scope "scope" "turn" decision.failure_scope;
+  check_lifecycle "lifecycle" "pause_keeper" decision.lifecycle_effect;
+  check_circuit "circuit" "operator_breaker" decision.circuit_effect;
+  check_action "action" "inspect_keeper_liveness" decision.operator_action;
+  check bool "keeper death not allowed" false (Policy.should_kill_keeper decision)
+;;
+
+let test_turn_overflow_pause_decide () =
+  let decision =
+    Policy.decide Policy.Turn_overflow_pause
+  in
+  check_scope "scope" "turn" decision.failure_scope;
+  check_lifecycle "lifecycle" "pause_keeper" decision.lifecycle_effect;
+  check_circuit "circuit" "operator_breaker" decision.circuit_effect;
+  check_action "action" "inspect_keeper_liveness" decision.operator_action;
+  check bool "keeper death not allowed" false (Policy.should_kill_keeper decision)
+;;
+
+let test_turn_livelock_pause_decide () =
+  let decision =
+    Policy.decide Policy.Turn_livelock_pause
+  in
+  check_scope "scope" "turn" decision.failure_scope;
+  check_lifecycle "lifecycle" "pause_keeper" decision.lifecycle_effect;
+  check_circuit "circuit" "operator_breaker" decision.circuit_effect;
+  check_action "action" "inspect_keeper_liveness" decision.operator_action;
+  check bool "keeper death not allowed" false (Policy.should_kill_keeper decision)
+;;
+
 let test_only_liveness_failures_allow_keeper_death () =
   let non_liveness_failures =
     [

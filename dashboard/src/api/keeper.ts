@@ -39,6 +39,8 @@ export type {
   KeeperLastOutcome,
   KeeperCompositeExecution,
   KeeperRuntimeAttention,
+  KeeperSecretProjection,
+  KeeperSecretFileMount,
   KeeperPhaseDiagnosis,
   KeeperPhaseDiagnosisRow,
   KeeperCompositePhase,

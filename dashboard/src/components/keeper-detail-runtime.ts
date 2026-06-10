@@ -22,6 +22,7 @@ import { formatIndependentCounters, formatRatioPair } from './counter-format'
 import type { Keeper } from '../types'
 import type {
   KeeperCompositeSnapshot,
+  KeeperSecretProjection,
   KeeperRuntimeLensClockEdge,
   KeeperRuntimeLensClockGroup,
   KeeperRuntimeLensLane,
@@ -305,6 +306,109 @@ export function KeeperLiveTruthPanel({
           ${summary.runtimeRepoLabel ? html`<span class="font-mono">repo ${summary.runtimeRepoLabel}</span>` : null}
         </div>
       ` : null}
+    </div>
+  `
+}
+
+function secretProjectionTone(status: string | null | undefined): StatusChipTone {
+  switch (status) {
+    case 'ready':
+      return 'ok'
+    case 'error':
+      return 'bad'
+    case 'empty':
+      return 'warn'
+    case 'absent':
+    default:
+      return 'neutral'
+  }
+}
+
+function secretProjectionLabel(status: string | null | undefined): string {
+  switch (status) {
+    case 'ready':
+      return 'ready'
+    case 'error':
+      return 'error'
+    case 'empty':
+      return 'empty'
+    case 'absent':
+      return 'not configured'
+    default:
+      return 'unknown'
+  }
+}
+
+function truncateSecretProjectionList(values: readonly string[], limit: number): string {
+  if (values.length === 0) return 'none'
+  const visible = values.slice(0, limit)
+  const suffix = values.length > visible.length ? ` +${values.length - visible.length}` : ''
+  return `${visible.join(', ')}${suffix}`
+}
+
+export function KeeperSecretProjectionPanel({
+  projection,
+}: {
+  projection: KeeperSecretProjection | null | undefined
+}) {
+  if (!projection) {
+    return html`
+      <div
+        class="rounded-[var(--r-5)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-4"
+        data-testid="keeper-secret-projection"
+      >
+        <div class="flex items-center justify-between gap-3">
+          <div>
+            <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Secret projection</div>
+            <div class="mt-1 text-sm font-medium text-[var(--color-fg-primary)]">backend not reporting</div>
+          </div>
+          <${StatusChip} tone="neutral" uppercase=${false}>unknown<//>
+        </div>
+      </div>
+    `
+  }
+
+  const tone = secretProjectionTone(projection.status)
+  const filePaths = projection.file_mounts.map(mount => mount.container_path)
+  const envSummary = truncateSecretProjectionList(projection.env_names, 5)
+  const fileSummary = truncateSecretProjectionList(filePaths, 4)
+  const summary =
+    projection.status === 'ready'
+      ? `${projection.env_count} env · ${projection.file_count} files`
+      : projection.status === 'error'
+        ? projection.error ?? 'projection error'
+        : projection.next_action
+
+  return html`
+    <div
+      class="rounded-[var(--r-5)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-4"
+      data-testid="keeper-secret-projection"
+    >
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div class="min-w-0">
+          <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Secret projection</div>
+          <div class="mt-1 flex flex-wrap items-center gap-2">
+            <${StatusChip} tone=${tone} uppercase=${false}>${secretProjectionLabel(projection.status)}<//>
+            <span class="text-sm font-medium text-[var(--color-fg-primary)]">${summary}</span>
+          </div>
+        </div>
+        <span class="font-mono text-3xs text-[var(--color-fg-muted)]">${projection.source}</span>
+      </div>
+
+      <div class="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
+        <${SignalRow} label="root" value=${projection.root} />
+        <${SignalRow} label="env names" value=${envSummary} />
+        <${SignalRow} label="file mounts" value=${fileSummary} />
+        <${SignalRow} label="validation" value=${projection.values_validated ? 'values validated · values redacted' : 'structure only'} />
+      </div>
+
+      ${projection.error
+        ? html`
+            <div class="mt-3 rounded-[var(--r-1)] border border-[var(--bad-20)] bg-[var(--bad-10)] px-3 py-2 text-xs text-[var(--bad-light)]">
+              ${projection.error}
+            </div>
+          `
+        : null}
     </div>
   `
 }

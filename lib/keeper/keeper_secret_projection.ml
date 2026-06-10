@@ -7,6 +7,11 @@ type source_kind =
   | Env_source
   | File_source
 
+type secret_root_info =
+  { root : string
+  ; source : string
+  }
+
 let trim_env_opt key =
   match Sys.getenv_opt key with
   | Some value ->
@@ -15,14 +20,21 @@ let trim_env_opt key =
   | None -> None
 ;;
 
-let secret_root ~base_path ~keeper_name =
+let secret_root_info ~base_path ~keeper_name =
   let keeper_dir = Workspace_utils.safe_filename keeper_name in
   match trim_env_opt "MASC_SECRET_DIR" with
-  | Some root -> Filename.concat root keeper_dir
+  | Some root -> { root = Filename.concat root keeper_dir; source = "MASC_SECRET_DIR" }
   | None ->
-    Filename.concat
-      (Filename.concat (Common.masc_dir_from_base_path ~base_path) "secrets")
-      keeper_dir
+    { root =
+        Filename.concat
+          (Filename.concat (Common.masc_dir_from_base_path ~base_path) "secrets")
+          keeper_dir
+    ; source = "workspace_masc_secrets"
+    }
+;;
+
+let secret_root ~base_path ~keeper_name =
+  (secret_root_info ~base_path ~keeper_name).root
 ;;
 
 let path_exists path =
@@ -212,6 +224,121 @@ let collect_file_entries files_root =
     match walk [] files_root [] with
     | Error _ as err -> err
     | Ok entries -> Ok (List.rev entries)
+;;
+
+let json_string_list values =
+  `List (List.map (fun value -> `String value) values)
+;;
+
+let file_mount_json (host_path, container_path) =
+  `Assoc [ "host_path", `String host_path; "container_path", `String container_path ]
+;;
+
+let status_json
+      ~root
+      ~source
+      ~status
+      ~configured
+      ~env_names
+      ~file_entries
+      ~error
+      ~next_action
+  =
+  `Assoc
+    [ "status", `String status
+    ; "configured", `Bool configured
+    ; "root", `String root
+    ; "source", `String source
+    ; "env_count", `Int (List.length env_names)
+    ; "file_count", `Int (List.length file_entries)
+    ; "env_names", json_string_list env_names
+    ; "file_mounts", `List (List.map file_mount_json file_entries)
+    ; "values_validated", `Bool true
+    ; "error", (match error with Some err -> `String err | None -> `Null)
+    ; "next_action", `String next_action
+    ]
+;;
+
+let dashboard_status_json ~base_path ~keeper_name =
+  let { root; source } = secret_root_info ~base_path ~keeper_name in
+  if not (path_exists root)
+  then
+    status_json
+      ~root
+      ~source
+      ~status:"absent"
+      ~configured:false
+      ~env_names:[]
+      ~file_entries:[]
+      ~error:None
+      ~next_action:("create " ^ root ^ "/env and/or " ^ root ^ "/files")
+  else if not (is_directory root)
+  then
+    status_json
+      ~root
+      ~source
+      ~status:"error"
+      ~configured:true
+      ~env_names:[]
+      ~file_entries:[]
+      ~error:(Some ("keeper secret root is not a directory: " ^ root))
+      ~next_action:"replace the secret root with a directory"
+  else (
+    match reject_symlink ~kind:File_source root with
+    | Error err ->
+      status_json
+        ~root
+        ~source
+        ~status:"error"
+        ~configured:true
+        ~env_names:[]
+        ~file_entries:[]
+        ~error:(Some err)
+        ~next_action:"replace the secret root symlink with a real directory"
+    | Ok _ ->
+      let env_root = Filename.concat root "env" in
+      let files_root = Filename.concat root "files" in
+      (match load_env_entries env_root with
+       | Error err ->
+         status_json
+           ~root
+           ~source
+           ~status:"error"
+           ~configured:true
+           ~env_names:[]
+           ~file_entries:[]
+           ~error:(Some err)
+           ~next_action:"fix keeper secret env entries"
+       | Ok env_entries ->
+         (match collect_file_entries files_root with
+          | Error err ->
+            status_json
+              ~root
+              ~source
+              ~status:"error"
+              ~configured:true
+              ~env_names:(List.map fst env_entries)
+              ~file_entries:[]
+              ~error:(Some err)
+              ~next_action:"fix keeper secret file entries"
+          | Ok file_entries ->
+            let status =
+              if env_entries = [] && file_entries = [] then "empty" else "ready"
+            in
+            let next_action =
+              if String.equal status "ready"
+              then "none"
+              else "add entries under env/ and/or files/"
+            in
+            status_json
+              ~root
+              ~source
+              ~status
+              ~configured:true
+              ~env_names:(List.map fst env_entries)
+              ~file_entries
+              ~error:None
+              ~next_action)))
 ;;
 
 let write_env_file ~container_name entries =

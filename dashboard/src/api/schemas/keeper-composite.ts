@@ -177,6 +177,25 @@ const KeeperRuntimeAttentionSchema = object({
   live_turn_last_progress_at: optional(nullable(number())),
 })
 
+const KeeperSecretFileMountSchema = object({
+  host_path: string(),
+  container_path: string(),
+})
+
+const KeeperSecretProjectionSchema = object({
+  status: string(),
+  configured: boolean(),
+  root: string(),
+  source: string(),
+  env_count: number(),
+  file_count: number(),
+  env_names: fallback(array(string()), []),
+  file_mounts: fallback(array(KeeperSecretFileMountSchema), []),
+  values_validated: boolean(),
+  error: nullable(string()),
+  next_action: string(),
+})
+
 const OperatorRecommendedActionSchema = object({
   action_type: string(),
   target_type: string(),
@@ -234,6 +253,7 @@ export const KeeperCompositeSnapshotSchema = object({
   last_turn_ts: optional(number()),
   execution: optional(KeeperCompositeExecutionSchema),
   runtime_attention: optional(KeeperRuntimeAttentionSchema),
+  secret_projection: optional(KeeperSecretProjectionSchema),
   recommended_actions: fallback(array(OperatorRecommendedActionSchema), []),
   /** @deprecated kept only for old backend experiments; new payloads use `execution`. */
   latest_receipt: optional(unknown()),
@@ -247,6 +267,8 @@ export type KeeperPhaseDiagnosisRow = InferOutput<typeof KeeperPhaseDiagnosisRow
 export type KeeperLastOutcome = InferOutput<typeof KeeperLastOutcomeSchema>
 export type KeeperCompositeExecution = InferOutput<typeof KeeperCompositeExecutionSchema>
 export type KeeperRuntimeAttention = InferOutput<typeof KeeperRuntimeAttentionSchema>
+export type KeeperSecretProjection = InferOutput<typeof KeeperSecretProjectionSchema>
+export type KeeperSecretFileMount = InferOutput<typeof KeeperSecretFileMountSchema>
 export type KeeperCompositePhase = InferOutput<typeof KeeperCompositePhaseSchema>
 export type KeeperCompositeTurnPhase = InferOutput<typeof KeeperCompositeTurnPhaseSchema>
 export type KeeperCompositeDecisionStage = InferOutput<typeof KeeperCompositeDecisionStageSchema>

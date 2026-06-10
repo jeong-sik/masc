@@ -65,6 +65,34 @@ let contains_substring haystack needle =
   loop 0
 ;;
 
+let assoc_member name = function
+  | `Assoc fields -> List.assoc_opt name fields
+  | _ -> None
+;;
+
+let json_string name json =
+  match assoc_member name json with
+  | Some (`String value) -> value
+  | _ -> Alcotest.failf "missing string field %s" name
+;;
+
+let json_int name json =
+  match assoc_member name json with
+  | Some (`Int value) -> value
+  | _ -> Alcotest.failf "missing int field %s" name
+;;
+
+let json_string_list name json =
+  match assoc_member name json with
+  | Some (`List values) ->
+    List.map
+      (function
+        | `String value -> value
+        | _ -> Alcotest.failf "non-string value in %s" name)
+      values
+  | _ -> Alcotest.failf "missing string list field %s" name
+;;
+
 let rec env_file_arg = function
   | "--env-file" :: path :: _ -> Some path
   | _ :: rest -> env_file_arg rest
@@ -229,6 +257,64 @@ let test_symlink_env_dir_rejects () =
            (contains_substring err "symlink"))
 ;;
 
+let test_dashboard_status_absent_root () =
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "MASC_SECRET_DIR" "" @@ fun () ->
+  let json =
+    Keeper_secret_projection.dashboard_status_json
+      ~base_path:base
+      ~keeper_name:"minjae"
+  in
+  Alcotest.(check string) "status" "absent" (json_string "status" json);
+  Alcotest.(check int) "env count" 0 (json_int "env_count" json);
+  Alcotest.(check int) "file count" 0 (json_int "file_count" json)
+;;
+
+let test_dashboard_status_redacts_values () =
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "MASC_SECRET_DIR" "" @@ fun () ->
+  let root = secret_root_default ~base ~keeper_name:"minjae" in
+  let token_path = Filename.concat (Filename.concat root "env") "GH_TOKEN" in
+  let ssh_path =
+    Filename.concat
+      (Filename.concat root "files")
+      "home/keeper/.ssh/id_ed25519"
+  in
+  write_file token_path "ghs_dashboard_secret\n";
+  write_file ssh_path "PRIVATE KEY";
+  let json =
+    Keeper_secret_projection.dashboard_status_json
+      ~base_path:base
+      ~keeper_name:"minjae"
+  in
+  let raw = Yojson.Safe.to_string json in
+  Alcotest.(check string) "status" "ready" (json_string "status" json);
+  Alcotest.(check int) "env count" 1 (json_int "env_count" json);
+  Alcotest.(check int) "file count" 1 (json_int "file_count" json);
+  Alcotest.(check (list string)) "env names" [ "GH_TOKEN" ]
+    (json_string_list "env_names" json);
+  Alcotest.(check bool) "raw env value redacted" false
+    (contains_substring raw "ghs_dashboard_secret")
+;;
+
+let test_dashboard_status_reports_projection_error () =
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "MASC_SECRET_DIR" "" @@ fun () ->
+  let root = secret_root_default ~base ~keeper_name:"minjae" in
+  write_file (Filename.concat (Filename.concat root "env") "BAD-NAME") "x";
+  let json =
+    Keeper_secret_projection.dashboard_status_json
+      ~base_path:base
+      ~keeper_name:"minjae"
+  in
+  Alcotest.(check string) "status" "error" (json_string "status" json);
+  Alcotest.(check bool) "mentions invalid env name" true
+    (contains_substring (Yojson.Safe.to_string json) "invalid keeper secret env name")
+;;
+
 let () =
   Alcotest.run
     "keeper secret projection"
@@ -244,6 +330,12 @@ let () =
         ; Alcotest.test_case "symlink file rejects" `Quick test_symlink_file_rejects
         ; Alcotest.test_case "symlink env dir rejects" `Quick
             test_symlink_env_dir_rejects
+        ; Alcotest.test_case "dashboard status absent root" `Quick
+            test_dashboard_status_absent_root
+        ; Alcotest.test_case "dashboard status redacts values" `Quick
+            test_dashboard_status_redacts_values
+        ; Alcotest.test_case "dashboard status reports projection error" `Quick
+            test_dashboard_status_reports_projection_error
         ] )
     ]
 ;;

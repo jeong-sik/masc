@@ -26,6 +26,11 @@ let enrich_composite_snapshot_json
       composite_recommended_actions_json ~keeper_name ~snapshot:json ~execution ~attention
     in
     let runtime_attention = composite_runtime_attention_json attention ~snapshot:json in
+    let secret_projection =
+      Keeper_secret_projection.dashboard_status_json
+        ~base_path:config.base_path
+        ~keeper_name
+    in
     `Assoc
       (fields
        @ [ "keeper", `String keeper_name
@@ -33,6 +38,7 @@ let enrich_composite_snapshot_json
          ; "execution", execution
          ; "runtime_attention", runtime_attention
          ; "recommended_actions", recommended_actions
+         ; "secret_projection", secret_projection
          ])
   | other -> other
 ;;

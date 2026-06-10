@@ -53,14 +53,14 @@ let sdk_error_capacity_backpressure_retry_hint (err : Agent_sdk.Error.sdk_error)
   | Some (Cascade_error_classify.Capacity_backpressure { retry_after_sec; _ }) ->
     (match retry_after_sec with
      | Some s when s > 0.0 ->
-       Log.Misc.info (fun f ->
-         f "capacity retry-hint: explicit %.1fs (from provider Retry-After)" s);
+       Log.Misc.info
+         "capacity retry-hint: explicit %.1fs (from provider Retry-After)" s;
        Some (Cbr_explicit s)
      | Some _ (* <= 0.0: treat as missing, fall back to synthetic *)
      | None ->
-       Log.Misc.warn (fun f ->
-         f "capacity retry-hint: synthetic backoff %.1fs (provider omitted Retry-After)"
-           default_capacity_backpressure_backoff_sec);
+       Log.Misc.warn
+         "capacity retry-hint: synthetic backoff %.1fs (provider omitted Retry-After)"
+         default_capacity_backpressure_backoff_sec;
        Some (Cbr_synthetic_default default_capacity_backpressure_backoff_sec))
   | Some (Cascade_error_classify.Cascade_exhausted _)
   | Some (Cascade_error_classify.Resumable_cli_session _)

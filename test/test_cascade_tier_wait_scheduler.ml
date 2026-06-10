@@ -177,6 +177,46 @@ let test_exception_releases_slot () =
   check int "slot released after exception" 0
     (A.current_inflight admission ~tier_id:"test"))
 
+let test_cancelled_waiter_removed_from_queue () =
+  Eio_main.run (fun _env ->
+  let admission = A.create ~default_max_inflight:1 () in
+  let scheduler = W.create ~clock:(Eio.Stdenv.clock _env) admission in
+  match A.try_acquire admission ~tier_id:"test" with
+  | A.Capacity_full _ ->
+      fail "fresh admission should grant"
+  | A.Granted _ ->
+      let wait_config = {
+        W.backoff = W.Constant 60.0;
+        timeout_s = 60.0;
+        max_retries = None;
+      } in
+      Fun.protect
+        ~finally:(fun () -> A.release admission ~tier_id:"test")
+        (fun () ->
+           (try
+              Eio.Switch.run @@ fun sw ->
+              Eio.Fiber.fork ~sw (fun () ->
+                  ignore (W.try_admission_or_wait scheduler ~tier_id:"test"
+                            ~wait_config ~sw
+                            (fun () -> ())));
+              let rec wait_for_registered_waiter attempts =
+                match W.stats scheduler ~tier_id:"test" with
+                | Some s when s.waiting_fibers > 0 -> ()
+                | _ when attempts > 100 ->
+                    fail "waiter did not register before cancellation"
+                | _ ->
+                    Eio.Fiber.yield ();
+                    wait_for_registered_waiter (attempts + 1)
+              in
+              wait_for_registered_waiter 0;
+              Eio.Switch.fail sw (Failure "synthetic cancellation")
+            with Failure _ -> ());
+           match W.stats scheduler ~tier_id:"test" with
+           | Some s ->
+               check int "cancelled waiter removed" 0 s.waiting_fibers
+           | None ->
+               fail "stats should exist after waiter cancellation"))
+
 (* {1 Stats observability} *)
 
 let test_stats_no_wait () =
@@ -276,6 +316,8 @@ let () =
     "safety", [
       test_case "exception releases slot" `Quick
         test_exception_releases_slot;
+      test_case "cancelled waiter removed from queue" `Quick
+        test_cancelled_waiter_removed_from_queue;
     ];
     "observability", [
       test_case "stats none when no wait" `Quick

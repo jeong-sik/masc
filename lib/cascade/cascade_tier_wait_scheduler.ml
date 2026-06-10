@@ -246,24 +246,31 @@ let try_admission_or_wait t ~tier_id ?(wait_config = t.default_wait_config)
               } in
               Eio.Mutex.use_rw ts.mu ~protect:false (fun () ->
                   Queue.push waiter ts.waiters);
+              let remove_waiter () =
+                Eio.Mutex.use_rw ts.mu ~protect:false (fun () ->
+                    (* Filter out our waiter if it was not yet consumed. *)
+                    let remaining = Queue.create () in
+                    Queue.transfer ts.waiters remaining;
+                    Queue.clear ts.waiters;
+                    Queue.iter
+                      (fun w ->
+                         if w != waiter then Queue.push w ts.waiters)
+                      remaining)
+              in
               (* Sleep for backoff delay or until woken — race *)
               let result_promise, sleep_finished =
                 backoff_sleep t ~sw delay waiter_promise in
-              let _race_outcome = Eio.Promise.await result_promise in
-              Atomic.set sleep_finished true;
+              let _race_outcome =
+                Fun.protect
+                  ~finally:(fun () ->
+                      Atomic.set sleep_finished true;
+                      remove_waiter ())
+                  (fun () -> Eio.Promise.await result_promise)
+              in
               let sleep_time =
                 min delay (Unix.gettimeofday () -. now)
               in
               let new_total = total_waited +. sleep_time in
-              (* Remove self from queue if still there (e.g. timeout) *)
-              Eio.Mutex.use_rw ts.mu ~protect:false (fun () ->
-                  (* Filter out our waiter if not yet consumed *)
-                  let remaining = Queue.create () in
-                  Queue.transfer ts.waiters remaining;
-                  Queue.clear ts.waiters;
-                  Queue.iter (fun w ->
-                      if w != waiter then Queue.push w ts.waiters
-                  ) remaining);
               (* Always try_acquire after sleep or wake *)
               match Cascade_tier_admission.try_acquire t.admission
                       ~tier_id with

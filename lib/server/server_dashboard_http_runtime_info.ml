@@ -1272,6 +1272,7 @@ let runtime_inventory_entry_json ~default_id (rt : Runtime.t) =
     ; "is_default_runtime", `Bool (Option.equal String.equal default_id (Some rt.id))
     ; "max_context", `Int rt.model.max_context
     ; "tools_support", `Bool rt.model.tools_support
+    ; "thinking_support", `Bool rt.model.thinking_support
     ; "streaming", `Bool rt.model.streaming
     ; "model_count", `Int (List.length models)
     ; "models", Json_util.json_string_list models

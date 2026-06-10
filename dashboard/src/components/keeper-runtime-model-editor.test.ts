@@ -9,6 +9,7 @@ const refs = vi.hoisted(() => ({
   config: null as unknown,
   status: 'loaded' as string,
   patch: vi.fn(),
+  providers: vi.fn(),
   applied: vi.fn(),
   load: vi.fn(),
 }))
@@ -17,6 +18,7 @@ const refs = vi.hoisted(() => ({
 // real module-level imports when [vi.importActual] loads it below.
 vi.mock('../api/dashboard', () => ({
   patchKeeperConfig: refs.patch,
+  fetchRuntimeProviders: refs.providers,
   fetchKeeperConfig: vi.fn(),
   fetchDashboardGoalsTree: vi.fn(),
 }))
@@ -63,6 +65,29 @@ function makeConfig(
   } as unknown as KeeperConfig
 }
 
+function makeRuntimeProvider(runtimeId: string, providerName: string, modelName: string) {
+  return {
+    provider: runtimeId,
+    runtime_id: runtimeId,
+    provider_id: runtimeId.split('.')[0],
+    provider_display_name: providerName,
+    model_id: runtimeId.split('.')[1],
+    model_api_name: modelName,
+    protocol: 'provider_d-http',
+    transport: 'http',
+    runtime_kind: 'cloud',
+    auth_kind: 'env',
+    status: 'configured',
+    available: true,
+    max_context: 128000,
+    tools_support: true,
+    thinking_support: true,
+    streaming: true,
+    models: [modelName],
+    endpoint_url: 'https://runtime.example/v1',
+  }
+}
+
 describe('uniqueNonEmpty', () => {
   it('drops empties and dedupes, preserving first-seen order', () => {
     expect(uniqueNonEmpty(['a.one', '', '  ', 'b.two', 'a.one', ' b.two '])).toEqual(['a.one', 'b.two'])
@@ -96,6 +121,13 @@ describe('KeeperRuntimeModelEditor', () => {
     refs.config = null
     refs.status = 'loaded'
     refs.patch.mockReset()
+    refs.providers.mockReset()
+    refs.providers.mockResolvedValue({
+      providers: [
+        makeRuntimeProvider('a.one', 'Provider A', 'model-a'),
+        makeRuntimeProvider('b.two', 'Provider B', 'model-b'),
+      ],
+    })
     refs.applied.mockReset()
     refs.load.mockReset()
   })
@@ -110,21 +142,24 @@ describe('KeeperRuntimeModelEditor', () => {
     render(html`<${KeeperRuntimeModelEditor} keeperName="editable-keeper" />`, container)
     await flush()
 
-    expect(container.textContent).toContain('런타임 model')
+    expect(container.textContent).toContain('런타임')
     expect(container.textContent).toContain('a.one')
-    const select = container.querySelector('select[aria-label="model"]') as HTMLSelectElement | null
+    const select = container.querySelector('select[aria-label="runtime"]') as HTMLSelectElement | null
     expect(select).not.toBeNull()
     expect(select!.value).toBe('a.one')
+    await flush()
+    expect(container.textContent).toContain('Provider A')
+    expect(container.textContent).toContain('model-a')
   })
 
-  it('patches runtime_id with the selected model and updates shared config', async () => {
+  it('patches runtime_id with the selected runtime and updates shared config', async () => {
     refs.config = makeConfig({ selected_runtime_id: 'a.one', runtime_options: ['a.one', 'b.two'] })
     refs.patch.mockResolvedValueOnce(makeConfig({ selected_runtime_id: 'b.two', runtime_options: ['a.one', 'b.two'] }))
 
     render(html`<${KeeperRuntimeModelEditor} keeperName="patch-keeper" />`, container)
     await flush()
 
-    const select = container.querySelector('select[aria-label="model"]') as HTMLSelectElement
+    const select = container.querySelector('select[aria-label="runtime"]') as HTMLSelectElement
     select.value = 'b.two'
     select.dispatchEvent(new Event('change', { bubbles: true }))
     await flush()
@@ -157,7 +192,7 @@ describe('KeeperRuntimeModelEditor', () => {
     render(html`<${KeeperRuntimeModelEditor} keeperName="persona-keeper" />`, container)
     await flush()
 
-    expect(container.querySelector('select[aria-label="model"]')).toBeNull()
+    expect(container.querySelector('select[aria-label="runtime"]')).toBeNull()
     expect(container.textContent).toContain('편집 가능한 TOML 소스가 아니')
     // Hint names the runtime assignment surface so the operator can unlock editing.
     expect(container.textContent).toContain('runtime.toml')
@@ -169,18 +204,18 @@ describe('KeeperRuntimeModelEditor', () => {
     render(html`<${KeeperRuntimeModelEditor} keeperName="keeper-alpha" />`, container)
     await flush()
 
-    const select = container.querySelector('select[aria-label="model"]') as HTMLSelectElement
+    const select = container.querySelector('select[aria-label="runtime"]') as HTMLSelectElement
     select.value = 'b.two'
     select.dispatchEvent(new Event('change', { bubbles: true }))
     await flush()
-    expect((container.querySelector('select[aria-label="model"]') as HTMLSelectElement).value).toBe('b.two')
+    expect((container.querySelector('select[aria-label="runtime"]') as HTMLSelectElement).value).toBe('b.two')
 
     // Navigate to a different keeper: the stale pending 'b.two' must not leak.
     refs.config = makeConfig({ selected_runtime_id: 'c.three', runtime_options: ['c.three', 'b.two'] })
     render(html`<${KeeperRuntimeModelEditor} keeperName="keeper-beta" />`, container)
     await flush()
 
-    expect((container.querySelector('select[aria-label="model"]') as HTMLSelectElement).value).toBe('c.three')
+    expect((container.querySelector('select[aria-label="runtime"]') as HTMLSelectElement).value).toBe('c.three')
   })
 
   it('renders a loading state until the config is available', async () => {

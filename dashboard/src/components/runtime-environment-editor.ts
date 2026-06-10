@@ -120,6 +120,88 @@ function SectionTitle({ children }: { children: unknown }) {
   `
 }
 
+interface RuntimeCatalogEntry {
+  id: string
+  binding: RuntimeTomlBinding
+  provider: RuntimeTomlProvider | null
+  model: RuntimeTomlModel | null
+  isDefault: boolean
+}
+
+function runtimeCatalogEntries(environment: RuntimeTomlEnvironment): RuntimeCatalogEntry[] {
+  return environment.bindings.map(binding => ({
+    id: binding.id,
+    binding,
+    provider: environment.providers.find(provider => provider.id === binding.providerId) ?? null,
+    model: environment.models.find(model => model.id === binding.modelId) ?? null,
+    isDefault: binding.id === environment.defaultRuntimeId || binding.isDefault,
+  }))
+}
+
+function compactContext(value: number | null | undefined): string {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return 'ctx -'
+  if (value >= 1_000_000) return `${Number.parseFloat((value / 1_000_000).toFixed(1))}M ctx`
+  if (value >= 1_000) return `${Math.round(value / 1_000)}K ctx`
+  return `${value} ctx`
+}
+
+function compactTransport(provider: RuntimeTomlProvider | null): string {
+  if (!provider) return 'transport -'
+  if (provider.transportKind === 'command') return 'cli'
+  if (provider.endpoint.startsWith('http://127.0.0.1') || provider.endpoint.startsWith('http://localhost')) return 'local'
+  if (provider.endpoint !== '') return 'cloud'
+  return provider.transportKind
+}
+
+function boolToken(label: string, value: boolean | undefined): string {
+  return `${label}:${value === true ? 'on' : 'off'}`
+}
+
+function RuntimeCatalogStrip({
+  entries,
+  selectedRuntimeId,
+  disabled,
+  onSelect,
+}: {
+  entries: RuntimeCatalogEntry[]
+  selectedRuntimeId: string
+  disabled: boolean
+  onSelect: (entry: RuntimeCatalogEntry) => void
+}) {
+  if (entries.length === 0) return null
+  return html`
+    <div class="grid gap-2 md:grid-cols-2 xl:grid-cols-3" data-testid="runtime-catalog-strip">
+      ${entries.map(entry => {
+        const active = entry.id === selectedRuntimeId
+        const providerLabel = entry.provider?.displayName || entry.provider?.id || entry.binding.providerId
+        const modelLabel = entry.model?.apiName || entry.model?.id || entry.binding.modelId
+        return html`
+          <button
+            type="button"
+            class="min-w-0 rounded-[var(--r-1)] border px-3 py-2 text-left transition-colors ${active ? 'border-[var(--color-accent-fg)] bg-[var(--accent-10)]' : 'border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)] hover:border-[var(--color-border-strong)]'}"
+            disabled=${disabled}
+            onClick=${() => onSelect(entry)}
+            aria-pressed=${active}
+          >
+            <div class="flex items-center justify-between gap-2">
+              <span class="truncate font-mono text-xs font-semibold text-[var(--color-fg-primary)]">${entry.id}</span>
+              ${entry.isDefault ? html`<span class="shrink-0 rounded-[var(--r-1)] border border-[var(--accent-30)] px-1.5 py-0.5 text-3xs font-bold uppercase tracking-[var(--track-caps)] text-[var(--color-accent-fg)]">default</span>` : null}
+            </div>
+            <div class="mt-1 truncate text-xs text-[var(--color-fg-secondary)]">${providerLabel}</div>
+            <div class="truncate text-2xs text-[var(--color-fg-muted)]">${modelLabel} · ${compactContext(entry.model?.maxContext)} · ${compactTransport(entry.provider)}</div>
+            <div class="mt-1 flex flex-wrap gap-1 text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">
+              <span>${boolToken('tools', entry.model?.toolsSupport)}</span>
+              <span>${boolToken('thinking', entry.model?.thinkingSupport)}</span>
+              <span>${boolToken('stream', entry.model?.streaming)}</span>
+              <span>concurrency:${entry.binding.maxConcurrent ?? '-'}</span>
+            </div>
+          </button>
+        `
+      })}
+    </div>
+  `
+}
+
 export function RuntimeEnvironmentEditor({
   sourceText,
   dirty,
@@ -154,6 +236,13 @@ export function RuntimeEnvironmentEditor({
   const selectedProvider = selectedItem<RuntimeTomlProvider>(environment.providers, selectedProviderId)
   const selectedModel = selectedItem<RuntimeTomlModel>(environment.models, selectedModelId)
   const isDisabled = disabled === true || saving === true
+  const catalogEntries = runtimeCatalogEntries(environment)
+
+  function selectRuntimeEntry(entry: RuntimeCatalogEntry) {
+    setSelectedRuntimeId(entry.id)
+    setSelectedProviderId(entry.binding.providerId)
+    setSelectedModelId(entry.binding.modelId)
+  }
 
   function updateDefault(runtimeId: string) {
     setSelectedRuntimeId(runtimeId)
@@ -234,6 +323,15 @@ export function RuntimeEnvironmentEditor({
           구조화해서 편집할 provider.model binding이 없습니다. 아래 raw editor에서 runtime.toml을 먼저 추가하세요.
         </div>
       ` : html`
+        <div class="mb-3 grid gap-2">
+          <${SectionTitle}>런타임 카탈로그<//>
+          <${RuntimeCatalogStrip}
+            entries=${catalogEntries}
+            selectedRuntimeId=${selectedRuntime?.id ?? ''}
+            disabled=${isDisabled}
+            onSelect=${selectRuntimeEntry}
+          />
+        </div>
         <div class="grid gap-3 xl:grid-cols-[minmax(16rem,0.8fr)_minmax(0,1.1fr)_minmax(0,1.1fr)_minmax(0,1fr)]">
           <div class="grid content-start gap-3 border-b border-[var(--color-border-divider)] pb-3 xl:border-b-0 xl:border-r xl:pb-0 xl:pr-3">
             <${SectionTitle}>기본 런타임<//>

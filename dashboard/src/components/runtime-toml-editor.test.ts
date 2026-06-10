@@ -162,6 +162,9 @@ describe('RuntimeTomlEditor', () => {
 
     await waitFor(() => {
       expect(container.textContent).toContain('런타임 환경')
+      expect(container.textContent).toContain('런타임 카탈로그')
+      expect(container.textContent).toContain('128K ctx')
+      expect(container.textContent).toContain('tools:on')
       expect((container.querySelector('[aria-label="provider transport value"]') as HTMLInputElement | null)?.value)
         .toBe('https://runpod.example/v1')
     })

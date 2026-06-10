@@ -48,6 +48,7 @@ type ctx =
   ; last_provider_timeout_budget : provider_timeout_budget option ref
   ; max_cost_usd : float option
   ; meta : keeper_meta
+  ; turn_ctx_cell : Keeper_tool_call_log.turn_ctx_cell
   ; observation : Keeper_world_observation.world_observation
   ; post_commit_failure_reason : Keeper_registry.failure_reason option ref
   ; profile_defaults : Keeper_types_profile.keeper_profile_defaults
@@ -85,6 +86,7 @@ let run (ctx : ctx)
 =
   let { config
       ; meta
+      ; turn_ctx_cell
       ; observation
       ; generation
       ; keeper_turn_id
@@ -172,6 +174,7 @@ let run (ctx : ctx)
              Keeper_agent_run.run_turn
                ~config
                ~meta:run_meta
+               ~turn_ctx_cell
                ~base_dir
                ~max_context:execution.max_context
                ~build_turn_prompt

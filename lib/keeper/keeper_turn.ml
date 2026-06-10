@@ -459,10 +459,12 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ctx args : tool_result
                 ~meta
                 world_observation
             in
+            (* RFC-0225 §3.3: per-run carrier for the chat lane. *)
+            let turn_ctx_cell = Keeper_tool_call_log.create_turn_ctx_cell () in
             let run_result, latency_ms =
               Keeper_context_runtime.timed (fun () ->
                   Keeper_agent_run.run_turn
-                    ~config:ctx.config ~meta ~base_dir
+                    ~config:ctx.config ~meta ~turn_ctx_cell ~base_dir
                     ~max_context:max_runtime_context
                     ~build_turn_prompt
                     ~user_message:message

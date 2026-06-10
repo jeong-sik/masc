@@ -421,6 +421,7 @@ let handle
       ~config
       ~base_dir
       ~meta
+      ~turn_ctx_cell
       ~observation
       ~previous_social_state
       ~final_execution
@@ -502,6 +503,7 @@ let handle
   KUM.append_decision_record
     ~config
     ~meta:updated_meta
+    ~turn_ctx_cell
     ~observation
     ~latency_ms
     ~outcome:"success"

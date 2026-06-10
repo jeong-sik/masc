@@ -34,6 +34,9 @@ let consume_truncation_info ~keeper_name () =
   | None -> 0, None
 ;;
 
+type turn_ctx_cell = Keeper_tool_call_log_context.cell
+
+let create_turn_ctx_cell = Keeper_tool_call_log_context.create_cell
 let set_turn_context = Keeper_tool_call_log_context.set_turn_context
 let get_turn_context = Keeper_tool_call_log_context.get_turn_context
 
@@ -43,10 +46,6 @@ let runtime_observability_contract_json_for_call =
 
 let action_radius_json_for_call =
   Keeper_tool_call_log_context.action_radius_json_for_call
-;;
-
-let get_turn_context_record =
-  Keeper_tool_call_log_context.get_turn_context_record
 ;;
 
 let parse_tool_output_json_sanitized =
@@ -152,8 +151,7 @@ let reset_for_testing () =
   Atomic.set async_append_active false;
   Atomic.set append_queue_dropped 0;
   with_append_queue_lock (fun () -> Stdlib.Queue.clear append_queue);
-  Hashtbl.reset pending_truncation;
-  Keeper_tool_call_log_context.reset_for_testing ()
+  Hashtbl.reset pending_truncation
 ;;
 
 let store_dir () =
@@ -441,119 +439,11 @@ let log_call
     match !store_ref with
     | None -> record_unavailable_coverage_gap ~keeper_name ~tool_name ?trace_id ()
     | Some store ->
-      let ctx = get_turn_context_record ~keeper_name () in
-      let ( ctx_lane
-          , ctx_tool_choice
-          , ctx_thinking_enabled
-          , ctx_thinking_budget
-          , ctx_prompt_fingerprint
-          , ctx_trace_id
-          , ctx_session_id
-          , ctx_turn
-          , ctx_keeper_turn_id
-          , ctx_task_id
-          , ctx_goal_ids
-          , ctx_sandbox_profile
-          , ctx_network_mode
-          , ctx_approval_mode )
-        =
-        get_turn_context ~keeper_name ()
-      in
-      let lane =
-        match lane with
-        | Some _ -> lane
-        | None -> ctx_lane
-      in
-      let tool_choice =
-        match tool_choice with
-        | Some _ -> tool_choice
-        | None -> ctx_tool_choice
-      in
-      let thinking_enabled =
-        match thinking_enabled with
-        | Some _ -> thinking_enabled
-        | None -> ctx_thinking_enabled
-      in
-      let thinking_budget =
-        match thinking_budget with
-        | Some _ -> thinking_budget
-        | None -> ctx_thinking_budget
-      in
-      let prompt_fingerprint =
-        match prompt_fingerprint with
-        | Some _ -> prompt_fingerprint
-        | None -> ctx_prompt_fingerprint
-      in
-      let trace_id =
-        match trace_id with
-        | Some _ -> trace_id
-        | None -> ctx_trace_id
-      in
-      let session_id =
-        match session_id with
-        | Some _ -> session_id
-        | None -> ctx_session_id
-      in
-      let turn =
-        match turn with
-        | Some _ -> turn
-        | None -> ctx_turn
-      in
-      let keeper_turn_id =
-        match keeper_turn_id with
-        | Some _ -> keeper_turn_id
-        | None -> ctx_keeper_turn_id
-      in
-      let task_id =
-        match task_id with
-        | Some _ -> task_id
-        | None -> ctx_task_id
-      in
-      let goal_ids =
-        match goal_ids with
-        | Some _ -> goal_ids
-        | None -> ctx_goal_ids
-      in
-      let sandbox_profile =
-        match sandbox_profile with
-        | Some _ -> sandbox_profile
-        | None -> ctx_sandbox_profile
-      in
-      let network_mode =
-        match network_mode with
-        | Some _ -> network_mode
-        | None -> ctx_network_mode
-      in
-      let approval_mode =
-        match approval_mode with
-        | Some _ -> approval_mode
-        | None -> ctx_approval_mode
-      in
-      let agent_name =
-        match agent_name with
-        | Some _ -> agent_name
-        | None -> ctx.agent_name
-      in
-      let generation =
-        match generation with
-        | Some _ -> generation
-        | None -> ctx.generation
-      in
-      let sandbox_root =
-        match sandbox_root with
-        | Some _ -> sandbox_root
-        | None -> ctx.sandbox_root
-      in
-      let allowed_paths =
-        match allowed_paths with
-        | Some _ -> allowed_paths
-        | None -> ctx.allowed_paths
-      in
-      let runtime_profile =
-        match runtime_profile with
-        | Some _ -> runtime_profile
-        | None -> ctx.runtime_profile
-      in
+      (* RFC-0225 §3.3: no ambient turn-context fallback. Both production
+         callers (keeper_hooks_oas, mcp_server_eio_call_tool) pass their
+         run identity explicitly; filling [None] from a keeper-name-keyed
+         global could attach an unrelated concurrent run's identity. A
+         [None] field now persists as absent, which is honest. *)
       let model_field =
         if model = "" then [] else [ "model", `String "runtime" ]
       in

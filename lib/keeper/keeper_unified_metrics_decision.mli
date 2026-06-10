@@ -3,6 +3,7 @@
 val append_decision_record :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
+  turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell ->
   observation:Keeper_world_observation.world_observation ->
   latency_ms:int ->
   outcome:string ->

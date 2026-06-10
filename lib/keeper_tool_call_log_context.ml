@@ -1,4 +1,9 @@
-(** Turn context state and derived runtime JSON for keeper tool-call logs. *)
+(** Turn context state and derived runtime JSON for keeper tool-call logs.
+
+    RFC-0225 §3.3: the context lives in a per-run [cell] threaded from turn
+    setup to every reader of the same run. The previous global table keyed
+    by keeper name let concurrent runs of one keeper overwrite each other,
+    so tool-call rows carried the wrong trace_id / keeper_turn_id. *)
 
 type turn_context =
   { agent_name : string option
@@ -45,10 +50,12 @@ let empty_turn_context =
   }
 ;;
 
-let pending_turn_context : (string, turn_context) Hashtbl.t = Hashtbl.create 8
+type cell = turn_context ref
+
+let create_cell () : cell = ref empty_turn_context
 
 let set_turn_context
-      ~keeper_name
+      ~(cell : cell)
       ?agent_name
       ?lane
       ?tool_choice
@@ -70,39 +77,33 @@ let set_turn_context
       ?runtime_profile
       ()
   =
-  Hashtbl.replace
-    pending_turn_context
-    keeper_name
-    { agent_name
-    ; lane
-    ; tool_choice
-    ; thinking_enabled
-    ; thinking_budget
-    ; prompt_fingerprint
-    ; trace_id
-    ; session_id
-    ; generation
-    ; turn
-    ; keeper_turn_id
-    ; task_id
-    ; goal_ids
-    ; sandbox_profile
-    ; sandbox_root
-    ; allowed_paths
-    ; network_mode
-    ; approval_mode
-    ; runtime_profile
-    }
+  cell
+  := { agent_name
+     ; lane
+     ; tool_choice
+     ; thinking_enabled
+     ; thinking_budget
+     ; prompt_fingerprint
+     ; trace_id
+     ; session_id
+     ; generation
+     ; turn
+     ; keeper_turn_id
+     ; task_id
+     ; goal_ids
+     ; sandbox_profile
+     ; sandbox_root
+     ; allowed_paths
+     ; network_mode
+     ; approval_mode
+     ; runtime_profile
+     }
 ;;
 
-let get_turn_context_record ~keeper_name () =
-  match Hashtbl.find_opt pending_turn_context keeper_name with
-  | Some ctx -> ctx
-  | None -> empty_turn_context
-;;
+let get_turn_context_record ~(cell : cell) () = !cell
 
-let get_turn_context ~keeper_name () =
-  let ctx = get_turn_context_record ~keeper_name () in
+let get_turn_context ~cell () =
+  let ctx = get_turn_context_record ~cell () in
   ( ctx.lane
   , ctx.tool_choice
   , ctx.thinking_enabled
@@ -119,8 +120,8 @@ let get_turn_context ~keeper_name () =
   , ctx.approval_mode )
 ;;
 
-let runtime_observability_contract_json_for_call ~keeper_name () =
-  let ctx = get_turn_context_record ~keeper_name () in
+let runtime_observability_contract_json_for_call ~keeper_name ~cell () =
+  let ctx = get_turn_context_record ~cell () in
   Keeper_runtime_contract.runtime_observability_contract_json_from_fields
     ~keeper_name
     ?agent_name:ctx.agent_name
@@ -140,7 +141,7 @@ let runtime_observability_contract_json_for_call ~keeper_name () =
 ;;
 
 let action_radius_json_for_call
-      ~keeper_name
+      ~cell
       ~tool_name
       ~input
       ~success
@@ -148,7 +149,7 @@ let action_radius_json_for_call
       ?error
       ()
   =
-  let ctx = get_turn_context_record ~keeper_name () in
+  let ctx = get_turn_context_record ~cell () in
   Keeper_runtime_contract.action_radius_json
     ~tool_name
     ~input
@@ -158,5 +159,3 @@ let action_radius_json_for_call
     ?sandbox_target:ctx.sandbox_profile
     ()
 ;;
-
-let reset_for_testing () = Hashtbl.reset pending_turn_context

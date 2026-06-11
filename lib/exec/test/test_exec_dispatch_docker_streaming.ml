@@ -2,6 +2,9 @@ let lit s = Masc_exec.Shell_ir.Lit (s, Masc_exec.Shell_ir.default_meta)
 
 let fail msg = raise (Failure msg)
 
+let sleep seconds =
+  Eio_main.run @@ fun env -> Eio.Time.sleep (Eio.Stdenv.clock env) seconds
+
 let bin s =
   match Masc_exec.Exec_program.of_string s with
   | Ok bin -> bin
@@ -47,7 +50,7 @@ let test_docker_simple_runner_callback_is_live () =
     assert (stdin_content = None);
     assert (argv = [ "printf"; "ignored" ]);
     Option.iter (fun f -> f "first") on_stdout_chunk;
-    Unix.sleepf 0.30;
+    sleep 0.30;
     Option.iter (fun f -> f "second") on_stdout_chunk;
     Option.iter (fun f -> f "err") on_stderr_chunk;
     Unix.WEXITED 0, "firstsecond", "err"
@@ -88,7 +91,7 @@ let test_docker_pipeline_runner_callback_is_live () =
   let pipeline_runner ~on_stdout_chunk ~on_stderr_chunk:_ ~stages =
     assert (List.length stages = 2);
     Option.iter (fun f -> f "pipe-first") on_stdout_chunk;
-    Unix.sleepf 0.30;
+    sleep 0.30;
     Option.iter (fun f -> f "pipe-second") on_stdout_chunk;
     Unix.WEXITED 0, "pipe-firstpipe-second", ""
   in

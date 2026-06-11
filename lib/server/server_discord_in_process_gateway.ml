@@ -98,6 +98,7 @@ let handle_message_create ~dispatch
 let on_event ~dispatch (ev : Gw.gateway_event) =
   match ev with
   | Gw.Ready { bot_user_id; _ } ->
+    State.record_ready ~bot_user_id;
     Log.Server.info "Discord gateway READY (bot_user_id=%s)" bot_user_id
   | Gw.Message_create
       { channel_id; message_id; author_id; author_name; content;

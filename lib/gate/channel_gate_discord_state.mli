@@ -83,6 +83,12 @@ val connected : unit -> bool
     [Connected]. Reads {!Discord_gateway_client.connection_state};
     no file indirection. RFC-0223 P2 presence. *)
 
+val record_ready : bot_user_id:string -> unit
+(** Called by the in-process gateway's READY handler. Stores the bot
+    identity and timestamp that {!status_json} reports as
+    [bot_user_id] / [last_ready_at]. Atomic write — safe to call from
+    the gateway fiber while HTTP handlers read. *)
+
 (** Typed failure modes for {!send_message}. Closed sum — adding
     a new variant forces every consumer to handle it. *)
 type send_error =

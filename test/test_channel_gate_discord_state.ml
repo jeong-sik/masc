@@ -95,6 +95,24 @@ let test_status_json_ignores_legacy_sidecar_status_file () =
     check int "runtime bindings from persisted bindings" 0
       (json |> U.member "runtime_bindings_count" |> U.to_int)))
 
+(* record_ready ordering: this test runs in the same process as the
+   blank-identity assertions above, so it must come after them in the
+   suite — last_ready is module-global and has no reset (production
+   never clears it; a fresh READY only overwrites). *)
+let test_record_ready_surfaces_bot_identity () =
+  with_temp_dir @@ fun dir ->
+  with_discord_paths dir (fun () ->
+  with_env "DISCORD_BOT_TOKEN" None (fun () ->
+    Discord_state.record_ready ~bot_user_id:"bot-42";
+    let json = Discord_state.status_json () in
+    check string "bot_user_id from READY" "bot-42"
+      (json |> U.member "bot_user_id" |> U.to_string);
+    check bool "last_ready_at non-empty" true
+      (String.length (json |> U.member "last_ready_at" |> U.to_string) > 0);
+    (* Identity is observation, not liveness: gateway is still down. *)
+    check bool "connected stays false" false
+      (json |> U.member "connected" |> U.to_bool)))
+
 let test_bind_persists_binding_and_audit () =
   with_temp_dir @@ fun dir ->
   with_discord_paths dir (fun () ->
@@ -278,6 +296,8 @@ let () =
             test_status_json_reports_in_process_gateway_status;
           test_case "ignores legacy sidecar status file" `Quick
             test_status_json_ignores_legacy_sidecar_status_file;
+          test_case "record_ready surfaces bot identity" `Quick
+            test_record_ready_surfaces_bot_identity;
           test_case "bind persists binding and audit" `Quick
             test_bind_persists_binding_and_audit;
           test_case "unbind removes binding" `Quick

@@ -205,6 +205,24 @@ let gateway_state_label = function
   | Reconnect_pending _ -> "reconnect_pending"
   | Failed _ -> "failed"
 
+(* Bot identity captured from the gateway's READY dispatch. The legacy
+   sidecar wrote this to status.json; the in-process gateway (RFC-0203)
+   keeps it in memory — nothing writes that file anymore. *)
+type ready_info = {
+  ready_bot_user_id : string;
+  ready_at : string;
+}
+
+let last_ready : ready_info option Atomic.t = Atomic.make None
+
+let record_ready ~bot_user_id =
+  Atomic.set last_ready
+    (Some
+       {
+         ready_bot_user_id = bot_user_id;
+         ready_at = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ());
+       })
+
 let status_json ?(audit_limit = 10) () =
   let status_path = status_path () in
   let binding_store_path = binding_store_read_path () in
@@ -257,9 +275,23 @@ let status_json ?(audit_limit = 10) () =
       ("names_path", `String names_path);
       ("names", Names.to_json name_map);
       ("updated_at", `String updated_at);
-      ("last_ready_at", `String (if connected then updated_at else ""));
+      ( "last_ready_at",
+        (* The READY timestamp survives reconnect_pending/resuming dips,
+           so operators can tell "was up, recovering" from "never came
+           up" — current liveness is gateway_state above. *)
+        `String
+          (match Atomic.get last_ready with
+           | Some { ready_at; _ } -> ready_at
+           | None -> "") );
+      (* READY carries only the bot user id; the gateway does not parse
+         the username. Empty is honest — the dead sidecar file used to
+         supply a stale value here. *)
       ("bot_user_name", `String "");
-      ("bot_user_id", `String "");
+      ( "bot_user_id",
+        `String
+          (match Atomic.get last_ready with
+           | Some { ready_bot_user_id; _ } -> ready_bot_user_id
+           | None -> "") );
       ("guild_count", `Int 0);
       ("gate_base_url", `String "in-process");
       ("gate_healthy", if connected then `Bool true else `Null);

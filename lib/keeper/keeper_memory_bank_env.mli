@@ -5,4 +5,5 @@ val memory_env_int_logged : string -> default:int -> int
 val memory_env_bool_logged : string -> default:bool -> bool
 val memory_llm_summary_enabled : unit -> bool
 val memory_os_librarian_enabled : unit -> bool
+val memory_os_recall_enabled : unit -> bool
 val max_memory_text_length : unit -> int

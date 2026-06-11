@@ -19,6 +19,7 @@ let prepare_agent_setup
       ~(turn_system_prompt : string)
       ~(user_message : string)
       ~(dynamic_context : string)
+      ~(memory_context : string)
       ~(history_messages : Agent_sdk.Types.message list)
       ~(prompt_metrics : Keeper_agent_prompt_metrics.prompt_metrics)
       ~(shared_context : Agent_sdk.Context.t)
@@ -652,7 +653,7 @@ let prepare_agent_setup
     }
   in
   Keeper_run_tools_hooks.assemble_hooks
-    ~ctx ~session ~user_message ~dynamic_context
+    ~ctx ~session ~user_message ~dynamic_context ~memory_context
     ~history_messages ~prompt_metrics ~shared_context
     ~start_turn_count ~generation
     ~runtime_id_string ~is_retry ~turn_affordances

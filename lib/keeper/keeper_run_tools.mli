@@ -86,6 +86,7 @@ val prepare_agent_setup
   -> turn_system_prompt:string
   -> user_message:string
   -> dynamic_context:string
+  -> memory_context:string
   -> history_messages:Agent_sdk.Types.message list
   -> prompt_metrics:Keeper_agent_prompt_metrics.prompt_metrics
   -> shared_context:Agent_sdk.Context.t

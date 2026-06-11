@@ -361,6 +361,7 @@ let run_turn
       ~turn_system_prompt
       ~user_message
       ~dynamic_context
+      ~memory_context
       ~history_messages
       ~prompt_metrics
       ~shared_context

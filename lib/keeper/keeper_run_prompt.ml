@@ -141,7 +141,15 @@ let build_turn_context
     in
     append_dynamic_context dynamic_context recent_failure_context
   in
-  let memory_context = "" in
+  let memory_context =
+    if Keeper_memory_bank_env.memory_os_recall_enabled ()
+    then
+      Keeper_memory_os_recall.render_context
+        ~keeper_id:meta.name
+        ~now:(Time_compat.now ())
+        ()
+    else ""
+  in
   let temporal_context =
     Masc_context_injector.render_temporal_summary shared_context
     |> Option.value ~default:""

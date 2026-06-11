@@ -48,11 +48,22 @@ type ctx =
   ; tools : Agent_sdk.Tool.t list
   }
 
+let append_extra_system_context existing addition =
+  let addition = String.trim addition in
+  if addition = ""
+  then existing
+  else
+    match existing with
+    | None -> Some addition
+    | Some current -> Some (current ^ "\n\n" ^ addition)
+;;
+
 let assemble_hooks
       ~(ctx : ctx)
       ~(session : Keeper_types.session_context)
       ~(user_message : string)
       ~(dynamic_context : string)
+      ~(memory_context : string)
       ~(history_messages : Agent_sdk.Types.message list)
       ~(prompt_metrics : Keeper_agent_prompt_metrics.prompt_metrics)
       ~(shared_context : Agent_sdk.Context.t)
@@ -238,20 +249,15 @@ let assemble_hooks
                   }
                 in
                 let ctx =
-                  if String.trim dynamic_context = ""
-                  then current_params.extra_system_context
-                  else (
-                    match current_params.extra_system_context with
-                    | None -> Some dynamic_context
-                    | Some existing -> Some (existing ^ "\n\n" ^ dynamic_context))
+                  append_extra_system_context
+                    current_params.extra_system_context
+                    dynamic_context
                 in
+                let ctx = append_extra_system_context ctx memory_context in
                 let ctx =
                   match Masc_context_injector.render_temporal_summary shared_context with
                   | None -> ctx
-                  | Some temporal ->
-                    (match ctx with
-                     | None -> Some temporal
-                     | Some existing -> Some (existing ^ "\n\n" ^ temporal))
+                  | Some temporal -> append_extra_system_context ctx temporal
                 in
                 let ctx =
                   match acc.meta.current_task_id with

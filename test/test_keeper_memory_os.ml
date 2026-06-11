@@ -3,6 +3,8 @@
 module Types = Masc.Keeper_memory_os_types
 module Policy = Masc.Keeper_memory_os_policy
 module Memory_io = Masc.Keeper_memory_os_io
+module Librarian = Masc.Keeper_librarian
+module Prompt_names = Keeper_prompt_names
 module Recall = Masc.Keeper_memory_os_recall
 
 let contains substring s =
@@ -16,6 +18,19 @@ let contains substring s =
     else aux (i + 1)
   in
   if sub_len = 0 then true else aux 0
+;;
+
+let index_of substring s =
+  let sub_len = String.length substring in
+  let str_len = String.length s in
+  let rec aux i =
+    if i + sub_len > str_len
+    then None
+    else if String.sub s i sub_len = substring
+    then Some i
+    else aux (i + 1)
+  in
+  if sub_len = 0 then Some 0 else aux 0
 ;;
 
 let fact_fixture ~now () =
@@ -64,6 +79,25 @@ let with_prompt_registry f =
       Prompt_registry.set_markdown_dir (Filename.concat (repo_root ()) "config/prompts");
       Masc.Prompt_defaults.init ();
       f ())
+;;
+
+let render_librarian_user_prompt inp =
+  match
+    Prompt_registry.render_prompt_template
+      Prompt_names.librarian_episode_extraction
+      (Librarian.prompt_variables inp)
+  with
+  | Ok prompt -> prompt
+  | Error msg -> Alcotest.fail msg
+;;
+
+let text_message ?(role = Agent_sdk.Types.User) text : Agent_sdk.Types.message =
+  { role
+  ; content = [ Agent_sdk.Types.Text text ]
+  ; name = None
+  ; tool_call_id = None
+  ; metadata = []
+  }
 ;;
 
 let episode_fixture ~now ~trace_id ~generation ~summary =
@@ -116,6 +150,212 @@ let test_json_roundtrip () =
     e2.Types.episode_summary;
   Alcotest.(check int) "claims length" 1 (List.length e2.Types.claims);
   Alcotest.(check int) "open_items length" 1 (List.length e2.Types.open_items)
+;;
+
+let test_librarian_prompt_renders () =
+  let inp : Librarian.input =
+    { Librarian.trace_id = "trace-abc"
+    ; generation = 0
+    ; messages = [ text_message "Please remember the project constraint." ]
+    }
+  in
+  with_prompt_registry (fun () ->
+    let prompt = render_librarian_user_prompt inp in
+    let system_prompt =
+      match Prompt_registry.render_prompt_template Prompt_names.librarian_system [] with
+      | Ok prompt -> prompt
+      | Error msg -> Alcotest.fail msg
+    in
+    Alcotest.(check bool)
+      "system prompt comes from registry"
+      true
+      (contains "structured JSON librarian" system_prompt);
+    Alcotest.(check bool)
+      "contains episode_summary"
+      true
+      (contains "episode_summary" prompt);
+    Alcotest.(check bool) "contains claims array" true (contains "\"claims\"" prompt);
+    Alcotest.(check bool)
+      "contains preserved_tool_refs"
+      true
+      (contains "preserved_tool_refs" prompt);
+    Alcotest.(check bool)
+      "placeholder replaced"
+      false
+      (contains "{{conversation_history}}" prompt);
+    Alcotest.(check bool)
+      "contains conversation"
+      true
+      (contains "[turn=0 role=user] Please remember the project constraint." prompt);
+    match
+      ( index_of "[turn=0 role=user] Please remember the project constraint." prompt
+      , index_of "Respond with ONLY the JSON object." prompt )
+    with
+    | Some conversation_at, Some respond_at ->
+      Alcotest.(check bool)
+        "conversation before final instruction"
+        true
+        (conversation_at < respond_at)
+    | _ -> Alcotest.fail "expected prompt sections")
+;;
+
+let test_librarian_prompt_omits_private_blocks () =
+  let msg : Agent_sdk.Types.message =
+    { role = Agent_sdk.Types.Assistant
+    ; content =
+        [ Agent_sdk.Types.Text "[STATE]\nsecret runtime marker\n[/STATE]\nvisible fact"
+        ; Agent_sdk.Types.Thinking
+            { thinking_type = "reasoning"; content = "hidden chain of thought" }
+        ; Agent_sdk.Types.RedactedThinking "redacted reasoning blob"
+        ; Agent_sdk.Types.ToolResult
+            { tool_use_id = "call_1"
+            ; content = "secret tool payload"
+            ; is_error = false
+            ; json = None
+            ; content_blocks = None
+            }
+        ]
+    ; name = None
+    ; tool_call_id = None
+    ; metadata = []
+    }
+  in
+  let inp : Librarian.input =
+    { Librarian.trace_id = "trace-abc"; generation = 0; messages = [ msg ] }
+  in
+  with_prompt_registry (fun () ->
+    let prompt = render_librarian_user_prompt inp in
+    Alcotest.(check bool) "keeps visible text" true (contains "visible fact" prompt);
+    Alcotest.(check bool)
+      "omits state block"
+      false
+      (contains "secret runtime marker" prompt);
+    Alcotest.(check bool)
+      "omits thinking content"
+      false
+      (contains "hidden chain of thought" prompt);
+    Alcotest.(check bool)
+      "omits redacted thinking"
+      false
+      (contains "redacted reasoning blob" prompt);
+    Alcotest.(check bool)
+      "omits tool payload"
+      false
+      (contains "secret tool payload" prompt);
+    Alcotest.(check bool)
+      "keeps tool provenance"
+      true
+      (contains "[tool result omitted: id=call_1 is_error=false]" prompt))
+;;
+
+let valid_librarian_output () =
+  `Assoc
+    [ "episode_summary", `String "Integer confidence should still persist"
+    ; ( "claims"
+      , `List
+          [ `Assoc
+              [ "claim", `String "Integer confidence survives parsing"
+              ; "confidence", `Int 1
+              ; "category", `String "test"
+              ; "source_turn", `Int 0
+              ]
+          ] )
+    ; "open_items", `List []
+    ; "constraints", `List []
+    ; "preserved_tool_refs", `List []
+    ]
+;;
+
+let test_librarian_accepts_integer_confidence () =
+  let inp : Librarian.input =
+    { Librarian.trace_id = "trace-int-confidence"
+    ; generation = 4
+    ; messages = [ text_message "turn-indexed memory" ]
+    }
+  in
+  let raw = valid_librarian_output () |> Yojson.Safe.to_string in
+  match Librarian.episode_of_output ~now:1_000_000.0 inp raw with
+  | Some episode ->
+    (match episode.Types.claims with
+     | [ fact ] ->
+       Alcotest.(check string)
+         "claim parsed"
+         "Integer confidence survives parsing"
+         fact.Types.claim;
+       Alcotest.(check (float 0.001)) "integer confidence parsed" 1.0 fact.Types.confidence;
+       Alcotest.(check int) "source turn parsed" 0 fact.Types.source.turn;
+       Alcotest.(check (float 0.001)) "created_at deterministic" 1_000_000.0 episode.created_at;
+       Alcotest.(check (option (pair int int)))
+         "source range parsed"
+         (Some (0, 0))
+         episode.Types.source_turn_range
+     | claims -> Alcotest.failf "expected one claim, got %d" (List.length claims))
+  | None -> Alcotest.fail "expected librarian output to parse"
+;;
+
+let test_librarian_rejects_invalid_claims () =
+  let inp : Librarian.input =
+    { Librarian.trace_id = "trace-invalid"; generation = 0; messages = [] }
+  in
+  let reject name json =
+    let raw = Yojson.Safe.to_string json in
+    let accepted =
+      match Librarian.episode_of_output ~now:1_000_000.0 inp raw with
+      | Some _ -> true
+      | None -> false
+    in
+    Alcotest.(check bool) name false accepted
+  in
+  reject
+    "rejects empty claim"
+    (`Assoc
+       [ "episode_summary", `String "summary"
+       ; ( "claims"
+         , `List
+             [ `Assoc
+                 [ "claim", `String ""
+                 ; "confidence", `Float 0.7
+                 ; "category", `String "fact"
+                 ; "source_turn", `Int 0
+                 ]
+             ] )
+       ; "open_items", `List []
+       ; "constraints", `List []
+       ; "preserved_tool_refs", `List []
+       ]);
+  reject
+    "rejects out-of-range confidence"
+    (`Assoc
+       [ "episode_summary", `String "summary"
+       ; ( "claims"
+         , `List
+             [ `Assoc
+                 [ "claim", `String "valid text"
+                 ; "confidence", `Float 1.7
+                 ; "category", `String "fact"
+                 ; "source_turn", `Int 0
+                 ]
+             ] )
+       ; "open_items", `List []
+       ; "constraints", `List []
+       ; "preserved_tool_refs", `List []
+       ]);
+  reject
+    "rejects missing source turn"
+    (`Assoc
+       [ "episode_summary", `String "summary"
+       ; ( "claims"
+         , `List
+             [ `Assoc
+                 [ "claim", `String "valid text"
+                 ; "confidence", `Float 0.7
+                 ; "category", `String "fact"
+                 ]
+             ] )
+       ; "open_items", `List []
+       ; "constraints", `List []
+       ; "preserved_tool_refs", `List []
+       ])
 ;;
 
 let test_policy_score_and_retention () =
@@ -340,6 +580,19 @@ let () =
     "keeper_memory_os"
     [ ( "json"
       , [ Alcotest.test_case "fact and episode round-trip" `Quick test_json_roundtrip
+        ; Alcotest.test_case "librarian prompt renders" `Quick test_librarian_prompt_renders
+        ; Alcotest.test_case
+            "librarian prompt omits private blocks"
+            `Quick
+            test_librarian_prompt_omits_private_blocks
+        ; Alcotest.test_case
+            "librarian accepts integer confidence"
+            `Quick
+            test_librarian_accepts_integer_confidence
+        ; Alcotest.test_case
+            "librarian rejects invalid claims"
+            `Quick
+            test_librarian_rejects_invalid_claims
         ] )
     ; ( "policy"
       , [ Alcotest.test_case "score and retention" `Quick test_policy_score_and_retention

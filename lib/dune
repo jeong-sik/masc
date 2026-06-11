@@ -148,6 +148,7 @@
   keeper_memory_bank
   keeper_memory_llm_summary
   keeper_memory_recall
+  keeper_librarian
   keeper_status_bridge
   keeper_runtime_trust_timeline
   keeper_hooks_oas_response_metrics

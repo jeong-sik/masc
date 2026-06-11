@@ -41,11 +41,11 @@ type world_observation =
   ; failed_task_count : int
   ; pending_verification_count : int
   ; backlog_updated_since_last_scheduled_autonomous : bool
+  ; board_health_score : float option
   ; active_agent_count : int
   }
 
 type keeper_cycle_channel =
-  Keeper_world_observation_turn_types.keeper_cycle_channel =
   | Reactive
   | Scheduled_autonomous
 
@@ -503,6 +503,7 @@ let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
   ; failed_task_count
   ; pending_verification_count
   ; backlog_updated_since_last_scheduled_autonomous
+  ; board_health_score = None
   ; active_agent_count = count_active_agents ~config
   }
 ;;
@@ -574,6 +575,7 @@ let effective_scheduled_autonomous_cooldown
       ~(base_cooldown : int)
       ~(since_last : int)
       ?(consecutive_noop_count = 0)
+      ?(health_score_multiplier : float option)
       ()
   : int
   =
@@ -584,7 +586,13 @@ let effective_scheduled_autonomous_cooldown
     if consecutive_noop_count <= 0 then 1 else 1 lsl min consecutive_noop_count 3
     (* 1, 2, 4, 8 *)
   in
-  let effective_base = base_cooldown * noop_multiplier in
+  let effective_base =
+    let base = base_cooldown * noop_multiplier in
+    match health_score_multiplier with
+    | Some m when m < 0.5 -> base * 4   (* Low health → less frequent turns *)
+    | Some m when m > 0.7 -> max 1 (base / 2)  (* High health → more frequent turns *)
+    | _ -> base
+  in
   let min_cooldown = Keeper_config.keeper_proactive_min_cooldown_sec () in
   (* Floor must not exceed the effective base cooldown — otherwise decay would
      paradoxically increase a short cooldown. *)
@@ -670,11 +678,18 @@ let keeper_cycle_decision
         ; idle_gate_sec = Some idle_gate_sec
         }
       else (
+        let health_score_multiplier =
+          match observation.board_health_score with
+          | Some score when score < 0.4 -> Some 0.0  (* CKR too low → skip *)
+          | Some score -> Some score
+          | None -> None
+        in
         let effective_cooldown =
           effective_scheduled_autonomous_cooldown
             ~base_cooldown:meta.proactive.cooldown_sec
             ~since_last:since_last_scheduled_autonomous
             ~consecutive_noop_count:meta.runtime.proactive_rt.consecutive_noop_count
+            ?health_score_multiplier
             ()
         in
         let task_cooldown_divisor =

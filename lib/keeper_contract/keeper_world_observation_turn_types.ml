@@ -55,6 +55,7 @@ type skip_reason =
   | Provider_cooldown_pending of { remaining_sec : int }
   | Idle_gate_pending of { remaining_sec : int }
   | Cooldown_pending of { remaining_sec : int }
+  | Health_score_cooldown of { remaining_sec : int }
   | No_signal
 
 type turn_verdict =
@@ -82,6 +83,7 @@ let skip_reason_to_string = function
   | Provider_cooldown_pending _ -> "provider_cooldown_pending"
   | Idle_gate_pending _ -> "idle_gate_pending"
   | Cooldown_pending _ -> "cooldown_pending"
+  | Health_score_cooldown _ -> "health_score_cooldown"
   | No_signal -> "no_signal"
 ;;
 

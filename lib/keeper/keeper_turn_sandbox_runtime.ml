@@ -190,8 +190,9 @@ let image_preflight_start_error (failure : Keeper_sandbox_runtime.classified_err
     failure
 ;;
 
+let max_eintr_retries = 8
+
 let run_argv_with_status_retry_eintr ?timeout_sec argv =
-  let max_eintr_retries = 8 in
   Docker_spawn_throttle.with_slot (fun () ->
     let rec loop attempts_left =
       let st, out =
@@ -221,19 +222,72 @@ let output_for_status ~(stdout : string) ~(stderr : string) =
   | out, err -> out ^ "\n" ^ err
 ;;
 
+let retryable_eintr_status ~attempts_left st ~stdout ~stderr =
+  match st with
+  | Unix.WEXITED 127
+    when attempts_left > 0
+         && String_util.contains_substring_ci
+              (output_for_status ~stdout ~stderr)
+              "interrupted system call" ->
+    true
+  | _ -> false
+;;
+
+let flush_chunk_buffer on_chunk chunks =
+  match on_chunk with
+  | None -> ()
+  | Some on_chunk -> List.iter on_chunk (List.rev !chunks)
+;;
+
+let run_split_retry_eintr_buffering_callbacks
+      ?on_stdout_chunk
+      ?on_stderr_chunk
+      ~run_attempt
+      ()
+  =
+  let rec loop attempts_left =
+    let stdout_chunks = ref [] in
+    let stderr_chunks = ref [] in
+    let attempt_on_stdout_chunk =
+      match on_stdout_chunk with
+      | None -> None
+      | Some _ -> Some (fun chunk -> stdout_chunks := chunk :: !stdout_chunks)
+    in
+    let attempt_on_stderr_chunk =
+      match on_stderr_chunk with
+      | None -> None
+      | Some _ -> Some (fun chunk -> stderr_chunks := chunk :: !stderr_chunks)
+    in
+    let st, stdout, stderr =
+      run_attempt
+        ?on_stdout_chunk:attempt_on_stdout_chunk
+        ?on_stderr_chunk:attempt_on_stderr_chunk
+        ()
+    in
+    if retryable_eintr_status ~attempts_left st ~stdout ~stderr
+    then loop (attempts_left - 1)
+    else (
+      flush_chunk_buffer on_stdout_chunk stdout_chunks;
+      flush_chunk_buffer on_stderr_chunk stderr_chunks;
+      st, stdout, stderr)
+  in
+  loop max_eintr_retries
+;;
+
 let run_argv_with_status_split_retry_eintr
       ?timeout_sec
       ?on_stdout_chunk
       ?on_stderr_chunk
       argv
   =
-  let max_eintr_retries = 8 in
   Docker_spawn_throttle.with_slot (fun () ->
-    let rec loop attempts_left =
-      let raw_source = String.concat " " argv in
-      let env = Env_keeper_scrub.filter_environment (Unix.environment ()) in
-      let cwd = Sys.getcwd () in
-      let st, stdout, stderr =
+    run_split_retry_eintr_buffering_callbacks
+      ?on_stdout_chunk
+      ?on_stderr_chunk
+      ~run_attempt:(fun ?on_stdout_chunk ?on_stderr_chunk () ->
+        let raw_source = String.concat " " argv in
+        let env = Env_keeper_scrub.filter_environment (Unix.environment ()) in
+        let cwd = Sys.getcwd () in
         match on_stdout_chunk, on_stderr_chunk with
         | None, None ->
           Masc_exec.Exec_gate.run_argv_with_status_split
@@ -262,21 +316,11 @@ let run_argv_with_status_split_retry_eintr
             ~cwd
             ~on_stdout_chunk
             ~on_stderr_chunk
-            argv
-      in
-      let out = output_for_status ~stdout ~stderr in
-      match st with
-      | Unix.WEXITED 127
-        when attempts_left > 0
-             && String_util.contains_substring_ci out "interrupted system call" ->
-        loop (attempts_left - 1)
-      | _ -> st, stdout, stderr
-    in
-    loop max_eintr_retries)
+            argv)
+      ())
 ;;
 
 let run_argv_with_stdin_and_status_retry_eintr ?timeout_sec ~stdin_content argv =
-  let max_eintr_retries = 8 in
   Docker_spawn_throttle.with_slot (fun () ->
     let rec loop attempts_left =
       let st, out =
@@ -307,13 +351,14 @@ let run_argv_with_stdin_and_status_split_retry_eintr
       ~stdin_content
       argv
   =
-  let max_eintr_retries = 8 in
   Docker_spawn_throttle.with_slot (fun () ->
-    let rec loop attempts_left =
-      let raw_source = String.concat " " argv in
-      let env = Env_keeper_scrub.filter_environment (Unix.environment ()) in
-      let cwd = Sys.getcwd () in
-      let st, stdout, stderr =
+    run_split_retry_eintr_buffering_callbacks
+      ?on_stdout_chunk
+      ?on_stderr_chunk
+      ~run_attempt:(fun ?on_stdout_chunk ?on_stderr_chunk () ->
+        let raw_source = String.concat " " argv in
+        let env = Env_keeper_scrub.filter_environment (Unix.environment ()) in
+        let cwd = Sys.getcwd () in
         Masc_exec.Exec_gate.run_argv_with_stdin_and_status_split
           ?timeout_sec
           ~actor:`System_sandbox
@@ -324,17 +369,8 @@ let run_argv_with_stdin_and_status_split_retry_eintr
           ?on_stdout_chunk
           ?on_stderr_chunk
           ~stdin_content
-          argv
-      in
-      let out = output_for_status ~stdout ~stderr in
-      match st with
-      | Unix.WEXITED 127
-        when attempts_left > 0
-             && String_util.contains_substring_ci out "interrupted system call" ->
-        loop (attempts_left - 1)
-      | _ -> st, stdout, stderr
-    in
-    loop max_eintr_retries)
+          argv)
+      ())
 ;;
 
 let run_argv_pipeline_with_status_split_retry_eintr
@@ -343,15 +379,16 @@ let run_argv_pipeline_with_status_split_retry_eintr
       ?on_stderr_chunk
       stages
   =
-  let max_eintr_retries = 8 in
   Docker_spawn_throttle.with_slot (fun () ->
-    let rec loop attempts_left =
-      let raw_source =
-        stages
-        |> List.map (fun stage -> String.concat " " stage.Process_eio.argv)
-        |> String.concat " | "
-      in
-      let st, stdout, stderr =
+    run_split_retry_eintr_buffering_callbacks
+      ?on_stdout_chunk
+      ?on_stderr_chunk
+      ~run_attempt:(fun ?on_stdout_chunk ?on_stderr_chunk () ->
+        let raw_source =
+          stages
+          |> List.map (fun stage -> String.concat " " stage.Process_eio.argv)
+          |> String.concat " | "
+        in
         Masc_exec.Exec_gate.run_argv_pipeline_with_status_split
           ?timeout_sec
           ~actor:`System_sandbox
@@ -359,17 +396,8 @@ let run_argv_pipeline_with_status_split_retry_eintr
           ~summary:"keeper turn sandbox pipeline command"
           ?on_stdout_chunk
           ?on_stderr_chunk
-          stages
-      in
-      let out = output_for_status ~stdout ~stderr in
-      match st with
-      | Unix.WEXITED 127
-        when attempts_left > 0
-             && String_util.contains_substring_ci out "interrupted system call" ->
-        loop (attempts_left - 1)
-      | _ -> st, stdout, stderr
-    in
-    loop max_eintr_retries)
+          stages)
+      ())
 ;;
 
 let container_inspect_timeout_sec () =

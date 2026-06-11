@@ -122,6 +122,13 @@ let emit_stdout_if_captured on_output_chunk stdout =
   | Some on_chunk when stdout <> "" -> on_chunk (`Stdout stdout)
   | Some _ -> ()
 
+let emit_pipeline_stage_result ?(emit_stdout = false) on_output_chunk result =
+  match on_output_chunk with
+  | None -> ()
+  | Some on_chunk ->
+      if emit_stdout && result.stdout <> "" then on_chunk (`Stdout result.stdout);
+      if result.stderr <> "" then on_chunk (`Stderr result.stderr)
+
 let status_is_success = function
   | Unix.WEXITED 0 -> true
   | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> false
@@ -197,6 +204,9 @@ let dispatch_simple ?stdin_content ?on_output_chunk (s : Shell_ir.simple) =
     match redirect_plan_of_redirects s.redirects with
     | Error message -> unsupported_redirect_result message
     | Ok redirect_plan -> (
+      let child_on_output_chunk =
+        if s.redirects = [] then on_output_chunk else None
+      in
       match s.sandbox with
       | Host ->
         let raw_source = String.concat " " argv in
@@ -204,7 +214,7 @@ let dispatch_simple ?stdin_content ?on_output_chunk (s : Shell_ir.simple) =
         let run () =
           match stdin_content with
           | None ->
-            (match on_output_chunk with
+            (match child_on_output_chunk with
              | None ->
                Exec_gate.run_argv_with_status_split
                  ~actor:`Tool_local_runtime
@@ -224,7 +234,7 @@ let dispatch_simple ?stdin_content ?on_output_chunk (s : Shell_ir.simple) =
                  ~on_stderr_chunk:(fun chunk -> on_chunk (`Stderr chunk))
                  argv)
           | Some stdin_content ->
-            (match on_output_chunk with
+            (match child_on_output_chunk with
              | None ->
                Exec_gate.run_argv_with_stdin_and_status_split
                  ~actor:`Tool_local_runtime
@@ -257,7 +267,7 @@ let dispatch_simple ?stdin_content ?on_output_chunk (s : Shell_ir.simple) =
              apply_redirect_plan redirect_plan { status; stdout; stderr })
       | Docker { runner; _ } ->
         let on_stdout_chunk, on_stderr_chunk =
-          match on_output_chunk with
+          match child_on_output_chunk with
           | None -> None, None
           | Some on_chunk ->
               ( Some (fun chunk -> on_chunk (`Stdout chunk))
@@ -399,19 +409,43 @@ let rec dispatch_pipeline ?stdin_content ?on_output_chunk stages =
                            ~stdin_content:prev_stdout
                            s
                        in
+                       let stage_streamed =
+                         Option.is_some stage_on_output_chunk
+                       in
                        let status = pipeline_status status stage_result.status in
                        let stderr = stderr ^ stage_result.stderr in
                        if status_is_timeout stage_result.status
                        then (
-                         if not is_final
-                         then emit_stdout_if_captured on_output_chunk stage_result.stdout;
+                         let () =
+                           if stage_streamed
+                           then
+                             if not is_final
+                             then
+                               emit_stdout_if_captured
+                                 on_output_chunk
+                                 stage_result.stdout
+                           else
+                             emit_pipeline_stage_result
+                               ~emit_stdout:true
+                               on_output_chunk
+                               stage_result
+                         in
                          { status; stdout = stage_result.stdout; stderr })
-                       else
+                       else (
+                         let () =
+                           if stage_streamed
+                           then ()
+                           else
+                             emit_pipeline_stage_result
+                               ~emit_stdout:is_final
+                               on_output_chunk
+                               stage_result
+                         in
                          chain
                            ~prev_stdout:stage_result.stdout
                            ~status
                            ~stderr
-                           rest
+                           rest)
                    | Pipeline _ :: _ ->
                        { status = Unix.WEXITED 1
                        ; stdout = ""
@@ -434,22 +468,44 @@ let rec dispatch_pipeline ?stdin_content ?on_output_chunk stages =
                         let first_result =
                           dispatch_simple ?on_output_chunk:first_on_output_chunk s
                         in
+                        let first_streamed =
+                          Option.is_some first_on_output_chunk
+                        in
                         let status =
                           pipeline_status (Unix.WEXITED 0) first_result.status
                         in
                         if status_is_timeout first_result.status
                         then (
-                          emit_stdout_if_captured on_output_chunk first_result.stdout;
+                          let () =
+                            if first_streamed
+                            then
+                              emit_stdout_if_captured
+                                on_output_chunk
+                                first_result.stdout
+                            else
+                              emit_pipeline_stage_result
+                                ~emit_stdout:true
+                                on_output_chunk
+                                first_result
+                          in
                           { status
                           ; stdout = first_result.stdout
                           ; stderr = first_result.stderr
                           })
-                        else
+                        else (
+                          let () =
+                            if first_streamed
+                            then ()
+                            else
+                              emit_pipeline_stage_result
+                                on_output_chunk
+                                first_result
+                          in
                           chain
                             ~prev_stdout:first_result.stdout
                             ~status
                             ~stderr:first_result.stderr
-                            rest
+                            rest)
                     | Pipeline _ ->
                         invalid_pipeline
                           "nested pipeline not supported in native dispatch" ))))

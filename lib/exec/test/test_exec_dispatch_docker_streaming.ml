@@ -185,7 +185,8 @@ let test_docker_decomposed_final_redirect_does_not_stream_dropped_stdout () =
     match argv, stdin_content with
     | [ "printf"; "mid" ], None ->
         Option.iter (fun f -> f "mid") on_stdout_chunk;
-        Unix.WEXITED 0, "mid", ""
+        Option.iter (fun f -> f "stage1-err") on_stderr_chunk;
+        Unix.WEXITED 0, "mid", "stage1-err"
     | [ "cat" ], Some "mid" ->
         (match on_stdout_chunk with
          | None -> ()
@@ -208,9 +209,81 @@ let test_docker_decomposed_final_redirect_does_not_stream_dropped_stdout () =
   in
   assert (result.status = Unix.WEXITED 0);
   assert (result.stdout = "");
-  assert (result.stderr = "final-err");
+  assert (result.stderr = "stage1-errfinal-err");
   assert (String.concat "" (List.rev !stdout_chunks) = "");
-  assert (String.concat "" (List.rev !stderr_chunks) = "final-err")
+  assert (String.concat "" (List.rev !stderr_chunks) = "stage1-errfinal-err")
+
+let test_docker_simple_redirect_does_not_stream_dropped_stdout () =
+  let stdout_chunks = ref [] in
+  let stderr_chunks = ref [] in
+  let on_output_chunk = function
+    | `Stdout chunk -> stdout_chunks := chunk :: !stdout_chunks
+    | `Stderr chunk -> stderr_chunks := chunk :: !stderr_chunks
+  in
+  let dev_null =
+    Masc_exec.Path_scope.classify ~raw:"/dev/null" ~cwd:"/tmp"
+  in
+  let drop_stdout =
+    Masc_exec.Redirect_scope.File
+      { fd = 1; target = dev_null; mode = Masc_exec.Redirect_scope.Write }
+  in
+  let runner ~on_stdout_chunk ~on_stderr_chunk ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ =
+    (match on_stdout_chunk with
+     | None -> ()
+     | Some _ -> fail "simple redirected command received live stdout callback");
+    (match on_stderr_chunk with
+     | None -> ()
+     | Some _ -> fail "simple redirected command received live stderr callback");
+    Unix.WEXITED 0, "dropped-simple-stdout", "simple-err"
+  in
+  let docker_sandbox =
+    Masc_exec.Sandbox_target.docker ~image:"fake-docker" ~runner ()
+  in
+  let result =
+    Masc_exec.Exec_dispatch.dispatch_simple
+      ~on_output_chunk
+      (simple ~sandbox:docker_sandbox ~redirects:[ drop_stdout ] "printf" [ "ignored" ])
+  in
+  assert (result.status = Unix.WEXITED 0);
+  assert (result.stdout = "");
+  assert (result.stderr = "simple-err");
+  assert (String.concat "" (List.rev !stdout_chunks) = "");
+  assert (String.concat "" (List.rev !stderr_chunks) = "simple-err")
+
+let test_docker_simple_fd_redirect_replays_stderr_as_stdout () =
+  let stdout_chunks = ref [] in
+  let stderr_chunks = ref [] in
+  let on_output_chunk = function
+    | `Stdout chunk -> stdout_chunks := chunk :: !stdout_chunks
+    | `Stderr chunk -> stderr_chunks := chunk :: !stderr_chunks
+  in
+  let stderr_to_stdout = Masc_exec.Redirect_scope.Fd_to_fd { src = 2; dst = 1 } in
+  let runner ~on_stdout_chunk ~on_stderr_chunk ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ =
+    (match on_stdout_chunk with
+     | None -> ()
+     | Some _ -> fail "simple fd redirect received live stdout callback");
+    (match on_stderr_chunk with
+     | None -> ()
+     | Some _ -> fail "simple fd redirect received live stderr callback");
+    Unix.WEXITED 0, "", "redirected-simple-err"
+  in
+  let docker_sandbox =
+    Masc_exec.Sandbox_target.docker ~image:"fake-docker" ~runner ()
+  in
+  let result =
+    Masc_exec.Exec_dispatch.dispatch_simple
+      ~on_output_chunk
+      (simple
+         ~sandbox:docker_sandbox
+         ~redirects:[ stderr_to_stdout ]
+         "printf"
+         [ "ignored" ])
+  in
+  assert (result.status = Unix.WEXITED 0);
+  assert (result.stdout = "redirected-simple-err");
+  assert (result.stderr = "");
+  assert (String.concat "" (List.rev !stdout_chunks) = "redirected-simple-err");
+  assert (String.concat "" (List.rev !stderr_chunks) = "")
 
 let test_docker_simple_runner_captured_error_is_streamed () =
   let stderr_chunks = ref [] in
@@ -325,6 +398,8 @@ let () =
   test_docker_pipeline_runner_callback_is_live ();
   test_docker_decomposed_fallback_callback_is_live ();
   test_docker_decomposed_final_redirect_does_not_stream_dropped_stdout ();
+  test_docker_simple_redirect_does_not_stream_dropped_stdout ();
+  test_docker_simple_fd_redirect_replays_stderr_as_stdout ();
   test_docker_simple_runner_captured_error_is_streamed ();
   test_docker_simple_runner_replays_unstreamed_stderr ();
   test_docker_pipeline_runner_captured_output_is_streamed ();

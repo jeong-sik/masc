@@ -44,6 +44,7 @@ let test_contextualize_message_includes_external_metadata () =
       ~channel_user_id:"user-42"
       ~channel_user_name:"Alice"
       ~channel_workspace_id:"workspace-9"
+      ~metadata:[]
       ~content:"hello keeper"
   in
   check string "message envelope"
@@ -64,6 +65,7 @@ let test_contextualize_message_sanitizes_context_lines () =
       ~channel_user_id:"user-42"
       ~channel_user_name:"Alice\tOps"
       ~channel_workspace_id:"workspace-9\rthread"
+      ~metadata:[]
       ~content:"hello keeper"
   in
   check string "sanitized context"
@@ -107,6 +109,37 @@ let test_persist_connector_assistant_reply_ignores_empty_reply () =
         ~keeper_name ~source:"discord" ~reply:"   ";
       check int "empty reply does not create chat file" 0
         (List.length (K.load ~base_dir ~keeper_name)))
+
+let test_contextualize_message_includes_channel_metadata () =
+  let rendered =
+    Gate_keeper_backend.contextualize_message
+      ~channel:"discord"
+      ~channel_user_id:"user-42"
+      ~channel_user_name:"Alice"
+      ~channel_workspace_id:"thread-9"
+      ~metadata:
+        [
+          ("discord.guild_id", "guild-1");
+          ("discord.bound_channel_id", "parent-1");
+          ("discord.binding_via_parent", "true");
+        ]
+      ~content:"hello from a thread"
+  in
+  check string "metadata envelope"
+    {|[External channel context]
+channel: discord
+workspace_id: thread-9
+user_id: user-42
+user_name: Alice
+
+[External channel metadata]
+discord.guild_id: guild-1
+discord.bound_channel_id: parent-1
+discord.binding_via_parent: true
+
+[User message]
+hello from a thread|}
+    rendered
 
 let test_parse_keeper_chat_stream_request_accepts_connector_context () =
   let body =
@@ -283,6 +316,8 @@ let () =
             test_persist_connector_assistant_reply_records_lane_reply;
           test_case "skips empty connector assistant reply" `Quick
             test_persist_connector_assistant_reply_ignores_empty_reply;
+          test_case "context envelope includes channel metadata" `Quick
+            test_contextualize_message_includes_channel_metadata;
           test_case "stream request accepts connector context" `Quick
             test_parse_keeper_chat_stream_request_accepts_connector_context;
           test_case "stream request rejects partial connector context" `Quick

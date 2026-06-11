@@ -73,6 +73,19 @@ val keeper_for_channel : channel_id:string -> string option
     Returns [None] when no binding exists, when the channel id is
     blank, or when the binding store is unreadable. *)
 
+type keeper_binding_resolution = {
+  keeper_name : string;
+  incoming_channel_id : string;
+  bound_channel_id : string;
+  via_parent : bool;
+}
+
+val resolve_keeper_for_channel :
+  channel_id:string -> keeper_binding_resolution option
+(** Resolve the keeper for [channel_id]. Exact bindings win. If no
+    exact binding exists and [channel_id] is a Discord thread known
+    in the names side-store, its parent channel binding is used. *)
+
 val bound_channels : keeper_name:string -> string list
 (** Channel snowflakes bound to [keeper_name], freshly read from the
     binding store on each call. Empty on blank name or unreadable

@@ -51,6 +51,7 @@ type dispatch_fn =
   channel_user_name:string ->
   channel_workspace_id:string ->
   keeper_name:string ->
+  metadata:(string * string) list ->
   content:string ->
   Gate_protocol.dispatch_result
 
@@ -186,6 +187,7 @@ let handle_inbound ~dispatch (msg : inbound_message) =
           ~channel_user_name:msg.channel_user_name
           ~channel_workspace_id:msg.channel_workspace_id
           ~keeper_name:keeper
+          ~metadata:msg.metadata
           ~content:(String.trim msg.content)
       in
       (match result with

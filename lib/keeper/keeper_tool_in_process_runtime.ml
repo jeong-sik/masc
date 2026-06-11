@@ -131,7 +131,7 @@ let handle_surface_post ~config ~(meta : keeper_meta) ~args =
           ~source:"dashboard";
         Keeper_surface_post.ok_json ~surface ()
     | Ok (Keeper_surface_post.To_discord { channel_id }) -> (
-        match Channel_gate_discord_state.send_message ~channel_id ~content with
+        match Channel_gate_discord_state.send_message ~channel_id ~content () with
         | Error send_error ->
             Keeper_surface_post.error_json
               (Format.asprintf "discord send failed: %a"

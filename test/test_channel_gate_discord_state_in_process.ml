@@ -70,7 +70,7 @@ let test_send_message_without_token_returns_missing_token () =
 
 let test_send_message_with_whitespace_token_returns_missing_token () =
   setenv "DISCORD_BOT_TOKEN" "   ";
-  (match State.send_message ~channel_id:"123" ~content:"hi" with
+  (match State.send_message ~channel_id:"123" ~content:"hi" () with
    | Error State.Missing_token -> ()
    | Error other ->
      fail

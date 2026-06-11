@@ -196,6 +196,13 @@ let test_connectors_json_advertises_gate_connector_descriptor () =
       (connector |> U.member "connector_id" |> U.to_string);
     check string "display name" "Discord"
       (connector |> U.member "display_name" |> U.to_string);
+    (* status_json carries these (#20813), but connector_json re-projects a
+       fixed field list, so passthrough must be asserted on the connectors
+       surface — the dashboard reads this endpoint, not status_json. *)
+    check string "status_source passthrough" "in_process_gateway"
+      (connector |> U.member "status_source" |> U.to_string);
+    check string "gateway_state passthrough" "disconnected"
+      (connector |> U.member "gateway_state" |> U.to_string);
     check bool "bindings capability exposed" true
       (connector |> U.member "capabilities" |> U.to_list
        |> List.exists (function

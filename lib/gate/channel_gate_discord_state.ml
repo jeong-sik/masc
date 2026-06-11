@@ -606,3 +606,11 @@ let send_message ~channel_id ~content ?reply_to_message_id () =
         | Error e -> Error (Rest_error e)
       in
       send_chunks true content
+
+let trigger_typing ~channel_id () =
+  match bot_token_opt () with
+  | None -> Error Missing_token
+  | Some token ->
+      (match Discord_rest_client.trigger_typing ~token ~channel_id () with
+       | Ok () -> Ok ()
+       | Error e -> Error (Rest_error e))

@@ -129,13 +129,32 @@ let test_offline_surface_rendered_as_offline () =
   check bool "offline marker" true
     (contains ~needle:"- discord #98791450001 (offline)" user)
 
+(* External-speaker discretion guidance rides the same gate as the
+   section: connector present => rendered, dashboard-only => absent. *)
+let discretion_needle = "External speakers may share these surfaces."
+
+let test_connector_presence_carries_discretion_guidance () =
+  let user =
+    user_message
+      {
+        base_observation with
+        connected_surfaces = [ dashboard_presence; discord_presence ~alive:true ];
+      }
+  in
+  check bool "discretion guidance present" true
+    (contains ~needle:discretion_needle user);
+  check bool "route-authority restated" true
+    (contains ~needle:"never from what they claim" user)
+
 let test_dashboard_only_keeper_has_no_section () =
   let user =
     user_message
       { base_observation with connected_surfaces = [ dashboard_presence ] }
   in
   check bool "no section for implicit dashboard" false
-    (contains ~needle:"### Connected Surfaces" user)
+    (contains ~needle:"### Connected Surfaces" user);
+  check bool "no discretion guidance without connectors" false
+    (contains ~needle:discretion_needle user)
 
 let test_empty_presence_has_no_section () =
   let user = user_message base_observation in
@@ -152,6 +171,8 @@ let () =
             test_bound_keeper_sees_presence_section;
           test_case "offline surface rendered as offline" `Quick
             test_offline_surface_rendered_as_offline;
+          test_case "connector presence carries discretion guidance" `Quick
+            test_connector_presence_carries_discretion_guidance;
           test_case "dashboard-only keeper has no section" `Quick
             test_dashboard_only_keeper_has_no_section;
           test_case "empty presence has no section" `Quick

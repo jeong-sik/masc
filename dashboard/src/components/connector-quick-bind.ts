@@ -1,8 +1,10 @@
 // QuickBindForm — single-row keeper↔channel binding without having to
 // scroll down to the keeper directory, expand a keeper, and then paste
-// the channel ID. Mounted at the top of a connector card when the
-// connector is live and has keepers available but zero bindings yet
-// (the gap state the rail marks "warn").
+// the channel ID. Mounted at the top of a connector card whenever the
+// connector is live and has keepers available. (Originally gated to
+// the zero-bindings gap state; widened 2026-06-11 after an operator
+// could not find the per-keeper add-channel affordance buried at the
+// bottom of the card — the form is the card's primary bind entry now.)
 //
 // The underlying POST body matches the existing bindConnector helper in
 // connector-status.ts — we don't duplicate the call path.

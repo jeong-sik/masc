@@ -36,6 +36,7 @@ import { SidecarLogToggle, SidecarLogViewer } from './sidecar-log-viewer'
 import { ConnectorConfigToggle, ConnectorConfigForm, openConnectorConfig } from './connector-config-form'
 import { ConnectorReadinessRail, deriveRail, getRailInflight, withRailInflight } from './connector-readiness-rail'
 import { StartupCheckBanner, markStartAttempt, clearStartAttempt } from './sidecar-startup-watch'
+import { showConnectorActionError } from './connector-action-error'
 import { QuickBindForm } from './connector-quick-bind'
 import { ConnectorOverviewStrip } from './connector-overview-strip'
 import { ConnectorKeeperMatrix, deriveMatrix } from './connector-keeper-matrix'
@@ -567,7 +568,7 @@ export async function startSidecar(connectorId: string) {
     showToast(`${connectorId} sidecar 시작 요청 — 잠시 후 상태 갱신됩니다.`, 'success')
     await refresh()
   } catch (err) {
-    showToast(err instanceof Error ? err.message : 'start failed', 'error')
+    showConnectorActionError(`${connectorId} sidecar 시작 실패`, err)
   } finally {
     patchConnectorUiState(connectorId, { actionLoading: false })
   }
@@ -583,7 +584,7 @@ export async function stopSidecar(connectorId: string) {
     showToast(`${connectorId} sidecar에 SIGTERM 전송`, 'success')
     await refresh()
   } catch (err) {
-    showToast(err instanceof Error ? err.message : 'stop failed', 'error')
+    showConnectorActionError(`${connectorId} sidecar 중지 실패`, err)
   } finally {
     patchConnectorUiState(connectorId, { actionLoading: false })
   }
@@ -607,7 +608,7 @@ export async function bindConnector(connectorId: string, keeperName: string, cha
     await refresh()
     showToast(`Bound ${channel} -> ${keeper}`, 'success')
   } catch (err) {
-    showToast(err instanceof Error ? err.message : 'bind failed', 'error')
+    showConnectorActionError(`바인딩 실패: ${channel} → ${keeper}`, err)
   } finally {
     patchConnectorUiState(connectorId, { actionLoading: false })
   }
@@ -625,7 +626,7 @@ async function unbindConnector(connectorId: string, channelId: string) {
     await refresh()
     showToast(`Unbound ${channel}`, 'success')
   } catch (err) {
-    showToast(err instanceof Error ? err.message : 'unbind failed', 'error')
+    showConnectorActionError(`바인딩 해제 실패: ${channel}`, err)
   } finally {
     patchConnectorUiState(connectorId, { actionLoading: false })
   }
@@ -876,7 +877,7 @@ function ConnectorLivePanel({
 
       <${StartupCheckBanner} connectorId=${connectorId} sidecarUp=${connector?.available === true} />
 
-      ${connector?.available === true && configuredBindings.length === 0 && keepers.length > 0
+      ${connector?.available === true && keepers.length > 0
         ? html`<${QuickBindForm} connectorId=${connectorId} keepers=${keepers} />`
         : null}
 
@@ -1185,12 +1186,12 @@ function ConnectorLivePanel({
                     ${bindingActionsEnabled
                       ? html`
                           <div class="mt-2">
-                            <button
-                              type="button"
-                              class="cursor-pointer text-2xs text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-primary)]"
-                              aria-label=${`add channel to ${group.name}`}
+                            <${ActionButton}
+                              variant="subtle"
+                              size="sm"
+                              ariaLabel=${`add channel to ${group.name}`}
                               onClick=${toggleExpand}
-                            >${expanded ? '− close' : '+ add channel'}</button>
+                            >${expanded ? '− 닫기' : '+ 채널 연결'}<//>
                           </div>
                           ${expanded
                             ? html`

@@ -230,6 +230,22 @@ let test_agent_fitness_specific () =
   Alcotest.(check bool) "has response" true (String.length (Tool_result.message result) > 0);
   )
 
+let test_agent_fitness_does_not_mutate_thompson_stats () =
+  with_ctx (fun ctx ->
+  let agent_name = "fitness-read-only-agent" in
+  let stats = Thompson_sampling.get_stats agent_name in
+  stats.alpha <- 2.0;
+  stats.beta <- 3.0;
+  stats.selections <- 4;
+  let args = `Assoc [("agent_name", `String agent_name); ("days", `Int 7)] in
+  let result = Tool_agent.handle_agent_fitness ctx args in
+  Alcotest.(check bool) "fitness succeeds" true (Tool_result.is_success result);
+  let after = Thompson_sampling.get_stats agent_name in
+  Alcotest.(check (float 0.0001)) "alpha unchanged" 2.0 after.alpha;
+  Alcotest.(check (float 0.0001)) "beta unchanged" 3.0 after.beta;
+  Alcotest.(check int) "selections unchanged" 4 after.selections;
+  )
+
 (* ============================================================
    Handler tests — meta_cognition_snapshot
    ============================================================ *)
@@ -400,6 +416,8 @@ let () =
     ("agent_update", [
       Alcotest.test_case "no agents" `Quick test_agent_fitness_no_agents;
       Alcotest.test_case "specific agent" `Quick test_agent_fitness_specific;
+      Alcotest.test_case "fitness is read-only for thompson" `Quick
+        test_agent_fitness_does_not_mutate_thompson_stats;
     ]);
     ("get_metrics", [
       Alcotest.test_case "no data returns not_found" `Quick test_get_metrics_no_data;

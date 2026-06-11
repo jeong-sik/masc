@@ -543,38 +543,34 @@ let append_direct_chat_pair_if_reply ~(config : Workspace.config) ~name ~args re
         (* Agent-initiated [masc_keeper_msg] path: only the final tool
            result is visible here (no stream events), so no tool lines
            are persisted for this surface. *)
-        (* RFC-0223 P1: the channel gate routes connector traffic
-           (Discord, openclaw, ...) through this same tool path and
-           passes its identity in [channel] / [channel_user_id] /
-           [channel_user_name] ([Gate_keeper_backend.dispatch]). With
-           them present the line carries the lane label and an External
-           speaker instead of the generic "agent" source; without them
-           this is a genuine agent-initiated message. *)
+        (* RFC-0226 ownership split: connector traffic (a non-empty
+           [channel], set by [Gate_keeper_backend.dispatch]) had its
+           user line recorded at the gate inbound boundary, at delivery
+           time — appending it again here would double-record. This
+           site owns the assistant reply only. Without [channel] this
+           is a genuine agent-initiated message with no upstream
+           recorder, so it still owns the full pair. *)
         let channel = String.trim (get_string args "channel" "") in
-        let source, speaker =
-          if channel = "" then ("agent", None)
-          else
-            let opt key =
-              match String.trim (get_string args key "") with
-              | "" -> None
-              | value -> Some value
-            in
-            ( channel,
-              Some
-                { Keeper_chat_store.speaker_id = opt "channel_user_id";
-                  speaker_name = opt "channel_user_name";
-                  speaker_authority = Keeper_chat_store.External } )
-        in
-        Keeper_chat_store.append_turn
-          ~base_dir:config.base_path
-          ~keeper_name:name
-          ~user_content
-          ~user_attachments:[]
-          ~source
-          ?speaker
-          ~assistant_content
-          ();
-        Keeper_chat_broadcast.chat_appended ~keeper_name:name ~source)
+        if channel = "" then begin
+          Keeper_chat_store.append_turn
+            ~base_dir:config.base_path
+            ~keeper_name:name
+            ~user_content
+            ~user_attachments:[]
+            ~source:"agent"
+            ~assistant_content
+            ();
+          Keeper_chat_broadcast.chat_appended ~keeper_name:name ~source:"agent"
+        end
+        else begin
+          Keeper_chat_store.append_assistant_message
+            ~base_dir:config.base_path
+            ~keeper_name:name
+            ~content:assistant_content
+            ~source:channel
+            ();
+          Keeper_chat_broadcast.chat_appended ~keeper_name:name ~source:channel
+        end)
 ;;
 
 (* RFC-0182 Phase 5 PR-B: ctx-free body for [masc_keeper_msg] descriptor

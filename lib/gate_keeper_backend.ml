@@ -105,6 +105,29 @@ let dispatch ~sw ~clock ~proc_mgr ~net ~config
       (filesystem_safe_or_unknown channel)
       (filesystem_safe_or_unknown channel_workspace_id)
   in
+  (* RFC-0226: the gate inbound boundary is the sole recorder of
+     connector user lines. Recording happens here — post
+     validation/dedup ([Channel_gate.handle_inbound]), pre turn — so a
+     failed or silent turn cannot drop the inbound message. The reply
+     path ([Keeper_tool_surface_ops.append_direct_chat_pair_if_reply])
+     appends the assistant line only for connector traffic. The line
+     carries the raw [content]; the contextualized wrapper below is
+     turn input, not conversation history. *)
+  let lane = String.trim channel in
+  let opt value = match String.trim value with "" -> None | v -> Some v in
+  Keeper_chat_store.append_user_message
+    ~base_dir:config.Workspace.base_path
+    ~keeper_name:(String.trim keeper_name)
+    ~content:(String.trim content)
+    ~source:lane
+    ~speaker:
+      { Keeper_chat_store.speaker_id = opt channel_user_id
+      ; speaker_name = opt channel_user_name
+      ; speaker_authority = Keeper_chat_store.External
+      }
+    ();
+  Keeper_chat_broadcast.chat_appended
+    ~keeper_name:(String.trim keeper_name) ~source:lane;
   let args =
     `Assoc [
       ("name", `String (String.trim keeper_name));

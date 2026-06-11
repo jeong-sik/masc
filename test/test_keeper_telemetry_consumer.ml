@@ -37,7 +37,7 @@ let test_drain_loop_yields_to_co_located_fiber () =
     let bus = Agent_sdk.Event_bus.create () in
     (try
       Eio.Switch.run (fun sw ->
-        KTC.spawn_subscriber ~sw ~clock ~bus;
+        KTC.spawn_subscriber ~sw ~clock ~base_path:(Sys.getcwd ()) ~bus;
         for _ = 1 to target_iters do
           Eio.Time.sleep clock inter_sleep_s;
           incr counter

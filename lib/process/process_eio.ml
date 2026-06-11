@@ -940,6 +940,7 @@ let run_argv_with_status_split_streaming
                 process_error_output ~label ~reason:(reason_of_exn_for_output exn) () ))))
 
 let run_argv_pipeline_with_status_split ?(timeout_sec = default_timeout_sec)
+    ?on_stdout_chunk ?on_stderr_chunk
     (stages : pipeline_stage list) : Unix.process_status * string * string =
   let fallback_buffered () =
     let rec chain prev_stdout = function
@@ -1042,15 +1043,39 @@ let run_argv_pipeline_with_status_split ?(timeout_sec = default_timeout_sec)
                        List.iter
                          (fun (_r, w) -> Eio.Flow.close w)
                          stderr_pairs;
+                       let drain_flow_to_buffer ?on_chunk r buf =
+                         let chunk = Cstruct.create 4096 in
+                         let rec loop () =
+                           match
+                             try Eio.Flow.single_read r chunk
+                             with End_of_file -> 0
+                           with
+                           | 0 -> Eio.Flow.close r
+                           | n ->
+                               let s =
+                                 Cstruct.to_string (Cstruct.sub chunk 0 n)
+                               in
+                               Option.iter
+                                 (fun f ->
+                                    try f s with
+                                    | exn ->
+                                      Log.Misc.warn
+                                        "[Process_eio] output chunk callback \
+                                         error, continuing: %s"
+                                        (Printexc.to_string exn))
+                                 on_chunk;
+                               Buffer.add_string buf s;
+                               loop ()
+                         in
+                         loop ()
+                       in
                        let drain_final_stdout () =
-                         Eio.Flow.copy final_stdout_r
-                           (Eio.Flow.buffer_sink stdout_buf);
-                         Eio.Flow.close final_stdout_r
+                         drain_flow_to_buffer ?on_chunk:on_stdout_chunk
+                           final_stdout_r stdout_buf
                        in
                        let drain_stderr idx (r, _w) =
                          let buf = List.nth stderr_buffers idx in
-                         Eio.Flow.copy r (Eio.Flow.buffer_sink buf);
-                         Eio.Flow.close r
+                         drain_flow_to_buffer ?on_chunk:on_stderr_chunk r buf
                        in
                        let await_all () =
                          List.map Eio.Process.await procs

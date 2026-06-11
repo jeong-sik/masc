@@ -5,6 +5,8 @@ code_refs:
   - lib/exec/exec_semantic.ml
   - lib/exec/exec_buffer.ml
   - lib/exec_core.ml
+  - lib/exec/exec_dispatch.ml
+  - lib/process/process_eio.ml
   - lib/exec/command_gate/shell_command_gate.ml
   - lib/exec_policy/exec_policy.ml
   - lib/keeper/keeper_tool_command_runtime.ml
@@ -73,6 +75,32 @@ Pipeline:
 Shell metacharacters inside `argv` are data. Use `pipeline` for pipes
 instead of embedding `|` in a string. For read-only observation prefer
 `Grep`; for file edits use `Edit`/`Write`.
+
+## Output Streaming
+
+The host native pipeline route forwards `on_output_chunk` while the pipeline is
+still running. The concrete route is:
+
+```text
+Exec_dispatch.dispatch_pipeline
+  -> Exec_gate.run_argv_pipeline_with_status_split
+  -> Process_eio.run_argv_pipeline_with_status_split
+```
+
+Callbacks are emitted from the final stdout pipe and each stage's stderr pipe as
+chunks are read. Intermediate stdout remains process-to-process pipe data and is
+not surfaced as user output.
+
+Docker pipeline execution and decomposed fallback paths still emit captured
+output after completion. Simple host commands with typed `stdin` also still use
+the completion-captured fallback path.
+
+Verification:
+
+```bash
+scripts/dune-local.sh build lib/exec/test/test_exec_dispatch_pipeline_streaming.exe
+./_build/default/lib/exec/test/test_exec_dispatch_pipeline_streaming.exe
+```
 
 ## Async Boundary Proof
 

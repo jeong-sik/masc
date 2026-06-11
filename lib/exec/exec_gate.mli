@@ -83,6 +83,8 @@ val run_argv_pipeline_with_status_split :
   raw_source:string ->
   summary:string ->
   ?timeout_sec:float ->
+  ?on_stdout_chunk:(string -> unit) ->
+  ?on_stderr_chunk:(string -> unit) ->
   Process_eio.pipeline_stage list ->
   (Unix.process_status * string * string)
 (** Delegates to [Process_eio.run_argv_pipeline_with_status_split]. *)

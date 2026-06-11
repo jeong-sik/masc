@@ -28,10 +28,10 @@ lib/process/process_eio.ml:459
 lib/process/process_eio.ml:490
 lib/process/process_eio.ml:521
 
-# lib/process/process_eio.ml:1023 — native pipeline stage spawn. Wrapped in
+# lib/process/process_eio.ml:1024 — native pipeline stage spawn. Wrapped in
 # Eio.Time.with_timeout_exn + fresh Eio.Switch.run inside
 # run_argv_pipeline_with_status_split.
-lib/process/process_eio.ml:1023
+lib/process/process_eio.ml:1024
 
 # lib/server/lsp_process_manager.ml:178 — LSP child process. Lifetime is
 # bound to the LSP session switch; idle eviction handled by the LSP

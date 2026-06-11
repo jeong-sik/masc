@@ -295,12 +295,13 @@ let docker_pipeline_specs stages =
 (* TEL-OK: this lower-level Shell IR dispatcher is wrapped by Execute/keeper
    telemetry at the action boundary; it only preserves captured output delivery. *)
 let rec dispatch_pipeline ?stdin_content ?on_output_chunk stages =
-  let result =
+  let result, emitted_live_output =
     match stages with
     | [] ->
-        invalid_pipeline "empty pipeline not supported in native dispatch"
+        (invalid_pipeline "empty pipeline not supported in native dispatch", false)
     | [ _ ] ->
-        invalid_pipeline "single-stage pipeline not supported in native dispatch"
+        ( invalid_pipeline "single-stage pipeline not supported in native dispatch"
+        , false )
     | _ ->
         (match host_pipeline_specs stages with
          | Some specs ->
@@ -310,18 +311,28 @@ let rec dispatch_pipeline ?stdin_content ?on_output_chunk stages =
                |> String.concat " | "
              in
              let status, stdout, stderr =
-               Exec_gate.run_argv_pipeline_with_status_split
-                 ~actor:`Tool_local_runtime
-                 ~raw_source
-                 ~summary:"exec dispatch pipeline"
-                 specs
+               match on_output_chunk with
+               | None ->
+                   Exec_gate.run_argv_pipeline_with_status_split
+                     ~actor:`Tool_local_runtime
+                     ~raw_source
+                     ~summary:"exec dispatch pipeline"
+                     specs
+               | Some on_chunk ->
+                   Exec_gate.run_argv_pipeline_with_status_split
+                     ~actor:`Tool_local_runtime
+                     ~raw_source
+                     ~summary:"exec dispatch pipeline streaming"
+                     ~on_stdout_chunk:(fun chunk -> on_chunk (`Stdout chunk))
+                     ~on_stderr_chunk:(fun chunk -> on_chunk (`Stderr chunk))
+                     specs
              in
-             { status; stdout; stderr }
+             ({ status; stdout; stderr }, Option.is_some on_output_chunk)
          | None -> (
              match docker_pipeline_specs stages with
              | Some (runner, specs) ->
                  let status, stdout, stderr = runner ~stages:specs in
-                 { status; stdout; stderr }
+                 ({ status; stdout; stderr }, false)
              | None ->
                  let rec chain ~prev_stdout ~status ~stderr = function
                    | [] -> { status; stdout = prev_stdout; stderr }
@@ -350,7 +361,8 @@ let rec dispatch_pipeline ?stdin_content ?on_output_chunk stages =
                  in
                  (match stages with
                   | [] | [ _ ] ->
-                      invalid_pipeline "invalid pipeline arity in native dispatch"
+                      ( invalid_pipeline "invalid pipeline arity in native dispatch"
+                      , false )
                   | first :: rest -> (
                     match first with
                     | Shell_ir.Simple s ->
@@ -360,21 +372,24 @@ let rec dispatch_pipeline ?stdin_content ?on_output_chunk stages =
                         in
                         if status_is_timeout first_result.status
                         then
-                          { status
-                          ; stdout = first_result.stdout
-                          ; stderr = first_result.stderr
-                          }
+                          ( { status
+                            ; stdout = first_result.stdout
+                            ; stderr = first_result.stderr
+                            }
+                          , false )
                         else
-                          chain
-                            ~prev_stdout:first_result.stdout
-                            ~status
-                            ~stderr:first_result.stderr
-                            rest
+                          ( chain
+                              ~prev_stdout:first_result.stdout
+                              ~status
+                              ~stderr:first_result.stderr
+                              rest
+                          , false )
                     | Pipeline _ ->
-                        invalid_pipeline
-                          "nested pipeline not supported in native dispatch" ))))
+                        ( invalid_pipeline
+                            "nested pipeline not supported in native dispatch"
+                        , false ) ))))
   in
-  emit_captured_output on_output_chunk result
+  if emitted_live_output then result else emit_captured_output on_output_chunk result
 
 and dispatch ?on_output_chunk (ir : Shell_ir.t) =
   match ir with

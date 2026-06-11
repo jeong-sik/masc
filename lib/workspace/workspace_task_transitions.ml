@@ -407,6 +407,12 @@ let transition_task_r
                  | Masc_domain.Approve_verification
                  | Masc_domain.Reject_verification -> ()));
              raise exn);
+          (* RFC-0221 §3.3: clear stale agent task-cache entries AFTER the
+             commit so agents that cache the task don't emit stale broadcasts
+             referencing the old status. *)
+          Task_cache_invariant.clear_stale_agent_task config
+            ~agent_name ~task_id ~status:new_status
+            ~module_name:"transition_task_r";
           (* RFC-0221 §3.2: write the verdict audit record best-effort AFTER the
              commit. The outcome already lives in [task_status] (approve → Done
              carrying the verdict in [notes]; reject → InProgress, its reason

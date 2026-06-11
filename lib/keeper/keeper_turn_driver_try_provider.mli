@@ -35,6 +35,7 @@ type try_provider_ctx =
   ; context_injector : Agent_sdk.Hooks.context_injector option
   ; context : Agent_sdk.Context.t option
   ; enable_thinking : bool option
+  ; preserve_thinking : bool option
   ; approval : Agent_sdk.Hooks.approval_callback option
   ; exit_condition : (int -> bool) option
   ; exit_condition_result : (int -> Runtime_agent.stop_reason * string option) option

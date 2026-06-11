@@ -373,6 +373,9 @@ let parse_model (id : string) (tbl : Otoml.t)
     let thinking_support =
       Otoml.find_or ~default:false tbl Otoml.get_boolean [ "thinking-support" ]
     in
+    let preserve_thinking =
+      Otoml.find_or ~default:false tbl Otoml.get_boolean [ "preserve-thinking" ]
+    in
     let max_thinking_budget =
       Otoml.find_opt tbl Otoml.get_integer [ "max-thinking-budget" ]
     in
@@ -408,6 +411,7 @@ let parse_model (id : string) (tbl : Otoml.t)
       ; tools_support
       ; max_context
       ; thinking_support
+      ; preserve_thinking
       ; max_thinking_budget
       ; streaming
       ; capabilities

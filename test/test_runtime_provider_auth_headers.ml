@@ -46,6 +46,7 @@ let qwen_model =
   ; tools_support = true
   ; max_context = 160000
   ; thinking_support = true
+  ; preserve_thinking = false
   ; max_thinking_budget = None
   ; streaming = true
   ; capabilities = None

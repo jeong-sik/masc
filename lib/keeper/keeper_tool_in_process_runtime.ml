@@ -159,7 +159,7 @@ let handle_masc_run ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~ar
 ;;
 
 let handle_masc_agent ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
-  let ctx : Tool_agent.context = { config; agent_name = meta.name } in
+  let ctx : Tool_agent.context = { config; agent_name = meta.name; event_bus = None } in
   Tool_agent.dispatch ctx ~name ~args |> dispatch_option_to_string ~name
 ;;
 

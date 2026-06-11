@@ -527,7 +527,7 @@ let start_keeper_loops
     let agent_name = actor in
     let ctx_workspace : Tool_workspace.context = { config; agent_name } in
     let ctx_task : Task.Tool.context = { config; agent_name; sw = Some sw } in
-    let ctx_agent : Tool_agent.context = { config; agent_name } in
+    let ctx_agent : Tool_agent.context = { config; agent_name; event_bus = None } in
     match name with
     | "masc_status" ->
       (match Tool_workspace.dispatch ctx_workspace ~name ~args with

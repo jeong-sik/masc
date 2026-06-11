@@ -293,7 +293,7 @@ let execute_tool_eio
                      ~args:coerced_args
                  | Mod_agent ->
                    Tool_agent.dispatch
-                     { Tool_agent.config; agent_name }
+                     { Tool_agent.config; agent_name; event_bus = None }
                      ~name
                      ~args:coerced_args
                  | Mod_task ->

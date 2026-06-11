@@ -22,6 +22,7 @@ open Tool_args
 type context = {
   config: Workspace.config;
   agent_name: string;
+  event_bus: Agent_sdk.Event_bus.t option;  (* [task-797] telemetry emission for selection outcomes *)
 }
 
 (* RFC-0189 PR-1b.14 — typed result helpers.
@@ -265,6 +266,22 @@ let score_for ?(weights = default_fitness_weights) ~min_avg ~agent_id metrics =
   in
   (score, completion, reliability, speed, handoff, thompson)
 
+(** [task-797] Emit tool_selection_outcome telemetry event for fitness calculation. *)
+let emit_selection_outcome ctx ~agent_id ~score ~thompson_stats =
+  match ctx.event_bus with
+  | None -> ()
+  | Some bus ->
+    let payload = Yojson.Safe.to_string (`Assoc [
+      ("event", `String "tool_selection_outcome");
+      ("agent_id", `String agent_id);
+      ("fitness_score", `Float score);
+      ("thompson_alpha", `Float thompson_stats.Thompson_sampling.alpha);
+      ("thompson_beta", `Float thompson_stats.Thompson_sampling.beta);
+      ("selections", `Int thompson_stats.Thompson_sampling.selections);
+    ]) in
+    Agent_sdk.Event_bus.publish bus
+      (Agent_sdk.Event_bus.mk_event (Custom ("telemetry_event", payload)))
+
 (** Handle masc_agent_fitness *)
 let handle_agent_fitness ?(tool_name = "masc_agent_fitness") ?(start_time = 0.0) ctx args
   : Tool_result.result
@@ -303,6 +320,7 @@ let handle_agent_fitness ?(tool_name = "masc_agent_fitness") ?(start_time = 0.0)
       List.map (fun (agent_id, metrics) ->
         let (score, completion, reliability, speed, handoff, thompson) = score_for ~min_avg ~agent_id metrics in
         let ts = Thompson_sampling.get_stats agent_id in
+        let _ = emit_selection_outcome ctx ~agent_id ~score ~thompson_stats:ts in
         `Assoc [
           ("agent_id", `String agent_id);
           ("fitness", `Float score);

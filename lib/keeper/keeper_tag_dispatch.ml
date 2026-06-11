@@ -112,7 +112,7 @@ let dispatch
         ~args
     | Mod_run ->
       Tool_run.dispatch { Tool_run.config; agent_name = Some agent_name } ~name ~args
-    | Mod_agent -> Tool_agent.dispatch { Tool_agent.config; agent_name } ~name ~args
+    | Mod_agent -> Tool_agent.dispatch { Tool_agent.config; agent_name; event_bus = None } ~name ~args
     | Mod_state -> Tool_workspace.dispatch { Tool_workspace.config; agent_name } ~name ~args
     | Mod_control ->
       if name = "masc_pause_status"

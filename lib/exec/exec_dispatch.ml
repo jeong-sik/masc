@@ -373,4 +373,15 @@ and dispatch ?on_output_chunk (ir : Shell_ir.t) =
 
 let dispatch_decided ?on_output_chunk (envelope : Shell_ir_risk.decided Shell_ir_risk.decided_ir) :
     dispatch_result =
+  (match envelope.Shell_ir_risk.risk with
+   | Shell_ir_risk.Destructive_protected ->
+       Logs.warn (fun m ->
+         m
+           "Exec_dispatch: destructive_protected command dispatched: %a"
+           Shell_ir.pp
+           envelope.Shell_ir_risk.ir)
+   | Shell_ir_risk.R0_Read
+   | Shell_ir_risk.R1_Reversible_mutation
+   | Shell_ir_risk.R2_Irreversible ->
+       ());
   dispatch ?on_output_chunk envelope.Shell_ir_risk.ir

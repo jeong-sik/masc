@@ -1,7 +1,8 @@
 module Shell_gate = Masc_exec_command_gate.Shell_command_gate
 
 let classify ir =
-  Masc_exec.Shell_ir_risk.classify (Masc_exec.Shell_ir_risk.undecided ir)
+  let checked = Masc_exec.Checked_shell_ir.classify_proof ir in
+  Masc_exec.Checked_shell_ir.to_decided_ir checked
 ;;
 
 let lit text = Masc_exec.Shell_ir.Lit (text, Masc_exec.Shell_ir.default_meta)

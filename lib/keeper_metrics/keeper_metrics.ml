@@ -218,6 +218,7 @@ type t =
   | KeeperTurnInstructionHash   (* gauge: hash of system+user prompt for change detection *)
   | KeeperToolCallRetryLoop     (* counter: consecutive identical tool calls with errors *)
   | AttemptWatchdogFired        (* counter: 1800s safety-cap watchdog killed a stuck attempt *)
+  | ShellIrEffectTotal          (* counter: fine-grained Shell IR effect decomposition *)
 
 (** String conversion
 
@@ -450,6 +451,7 @@ let to_string = function
   | KeeperTurnInstructionHash -> "masc_keeper_turn_instruction_hash"
   | KeeperToolCallRetryLoop -> "masc_keeper_tool_call_retry_loop_total"
   | AttemptWatchdogFired -> "masc_keeper_attempt_watchdog_fired_total"
+  | ShellIrEffectTotal -> "masc_keeper_shell_ir_effect_total"
 ;;
 
 (* Every constructor of [t], in declaration order.  Consumed by
@@ -509,7 +511,7 @@ let all : t list =
     UsageAnomalyReason; ConfigEnvParseFailures; PostTurnWireinFailures; RecurringFailures;
     TurnCleanupFailures; MemoryBankLoadHistorySwallowedExceptions; MemoryRecallReadErrors; RuntimeHttpProbeJsonParseFailures;
     PromptSegmentBytes; PromptTemplateRenderOutcome; ToolCallParamCompleteness; KeeperTurnInstructionHash;
-    KeeperToolCallRetryLoop; AttemptWatchdogFired
+    KeeperToolCallRetryLoop; AttemptWatchdogFired; ShellIrEffectTotal
   ]
 ;;
 

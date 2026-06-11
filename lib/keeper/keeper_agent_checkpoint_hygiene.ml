@@ -30,7 +30,7 @@ let prepare_resume_checkpoint_for_dispatch
   let pre_dispatch_meta =
     { meta with compaction = { meta.compaction with cooldown_sec = 0 } }
   in
-  let compacted_ctx, trigger, decision =
+  let compacted_ctx, trigger, decision, _librarian_episode =
     Keeper_compact_policy.compact_if_needed_typed ~meta:pre_dispatch_meta ~now_ts ctx_work
   in
   let after_tokens = Keeper_context_runtime.token_count compacted_ctx in

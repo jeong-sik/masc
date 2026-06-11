@@ -6,10 +6,13 @@
     summary from the latest state snapshot.
 
     This module owns only the checkpoint/lineage tail of a keeper turn.
-    Memory bank append, episode flush, and Hebbian learning are recorded
-    elsewhere:
-    - memory bank / episodes: [Keeper_agent_run] tail after [Agent.run]
+    Memory bank append and Hebbian learning are recorded elsewhere:
+    - memory bank: [Keeper_agent_run] tail after [Agent.run]
     - hebbian: task lifecycle in [Workspace_task]
+
+    The optional Memory OS librarian sidecar is committed here only after
+    the compacted checkpoint save succeeds, so memory logs do not advance
+    ahead of keeper state.
 
     Extracted from Keeper_context_runtime as part of #4955 god-file split.
 
@@ -92,6 +95,16 @@ type overflow_retry_recovery = {
   compaction : compaction_event;
   turn_generation : int;
 } [@@warning "-69"]
+
+let persist_librarian_episode ~keeper_id episode =
+  try Keeper_memory_os_io.append_episode_bundle ~keeper_id episode with
+  | exn ->
+    Log.Keeper.warn
+      "librarian persistence failed keeper=%s trace_id=%s: %s"
+      keeper_id
+      episode.Keeper_memory_os_types.trace_id
+      (Printexc.to_string exn)
+;;
 
 (* ── Tier A5: autonomous post-turn wire-in (Cycle 22) ──────────────
    Feature-flag-gated, non-invasive layer. When [MASC_AUTONOMOUS] is
@@ -553,7 +566,7 @@ let apply_post_turn_lifecycle_with_resilience_handles
           ~generation:base_meta.runtime.generation
           ()
       in
-      let compacted_ctx, trigger, decision =
+      let compacted_ctx, trigger, decision, librarian_episode =
         Keeper_compact_policy.compact_if_needed_typed ?librarian ~meta:base_meta ~now_ts ctx
       in
       let compaction_decided =
@@ -616,7 +629,11 @@ let apply_post_turn_lifecycle_with_resilience_handles
                ~agent_name:base_meta.agent_name
                ~ctx:compacted_ctx ~generation:current_generation
           with
-          | Ok saved_cp -> (true, None, compacted_ctx, Some saved_cp)
+          | Ok saved_cp ->
+              Option.iter
+                (persist_librarian_episode ~keeper_id:base_meta.name)
+                librarian_episode;
+              (true, None, compacted_ctx, Some saved_cp)
           | Error e ->
               Log.Keeper.error
                 "keeper:%s compaction checkpoint save failed: %s"
@@ -852,7 +869,7 @@ let recover_latest_checkpoint_for_overflow_retry
           ~generation:retry_meta.runtime.generation
           ()
       in
-      let compacted_ctx, trigger, base_decision =
+      let compacted_ctx, trigger, base_decision, librarian_episode =
         Keeper_compact_policy.compact_if_needed_typed
           ?librarian:librarian_retry
           ~meta:retry_meta
@@ -899,6 +916,9 @@ let recover_latest_checkpoint_for_overflow_retry
               ~ctx:compacted_ctx ~generation:turn_generation
           with
           | Ok checkpoint ->
+              Option.iter
+                (persist_librarian_episode ~keeper_id:retry_meta.name)
+                librarian_episode;
               Some { checkpoint; compaction; turn_generation }
           | Error e ->
               Log.Keeper.error

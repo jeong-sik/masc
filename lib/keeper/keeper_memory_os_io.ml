@@ -83,6 +83,12 @@ let append_episode ~keeper_id episode =
   write_file_atomically path (Yojson.Safe.pretty_to_string (episode_to_json episode))
 ;;
 
+let append_episode_bundle ~keeper_id episode =
+  append_episode ~keeper_id episode;
+  append_event ~keeper_id episode;
+  List.iter (append_fact ~keeper_id) episode.claims
+;;
+
 let save_tool_result ~keeper_id ~tool_call_id json =
   let path = tool_result_path ~keeper_id ~tool_call_id in
   write_file_atomically path (Yojson.Safe.pretty_to_string json)
@@ -121,23 +127,28 @@ let read_lines path =
 
 let take_last n xs =
   let rec drop k = function
-    | _ when k <= 0 -> []
+    | xs when k <= 0 -> xs
     | [] -> []
     | _ :: tl -> drop (k - 1) tl
   in
   let len = List.length xs in
-  if len <= n then xs else drop (len - n) xs
+  if n <= 0 then [] else if len <= n then xs else drop (len - n) xs
+;;
+
+let parse_json_line parse line =
+  try parse (Yojson.Safe.from_string line) with
+  | _ -> None
 ;;
 
 let read_facts_tail ~keeper_id ~n =
   read_lines (facts_path ~keeper_id)
-  |> List.filter_map (fun line -> fact_of_json (Yojson.Safe.from_string line))
+  |> List.filter_map (parse_json_line fact_of_json)
   |> take_last n
 ;;
 
 let read_events_tail ~keeper_id ~n =
   read_lines (events_path ~keeper_id)
-  |> List.filter_map (fun line -> episode_of_json (Yojson.Safe.from_string line))
+  |> List.filter_map (parse_json_line episode_of_json)
   |> take_last n
 ;;
 
@@ -160,5 +171,5 @@ let read_episodes_tail ~keeper_id ~n =
         (fun () ->
            let len = in_channel_length ic in
            let buf = really_input_string ic len in
-           episode_of_json (Yojson.Safe.from_string buf))))
+           parse_json_line episode_of_json buf)))
 ;;

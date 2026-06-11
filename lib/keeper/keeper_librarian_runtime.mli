@@ -2,11 +2,13 @@
 
     Builds a closure that sends the librarian prompt to the default
     runtime's direct-completion provider and parses the returned JSON
-    into a [Keeper_memory_os_types.episode]. *)
+    into a [Keeper_memory_os_types.episode]. Default-off behind
+    [MASC_KEEPER_MEMORY_OS_LIBRARIAN]. *)
 
 (** Build a librarian callback for the given trace/generation.
 
     Returns [None] when:
+    - [MASC_KEEPER_MEMORY_OS_LIBRARIAN] is unset/false,
     - the fiber-local Eio switch/net is unavailable,
     - no default runtime is configured,
     - the default provider is not a direct-completion provider.

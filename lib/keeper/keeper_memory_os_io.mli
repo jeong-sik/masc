@@ -19,6 +19,7 @@ val episode_path : keeper_id:string -> trace_id:string -> generation:int -> stri
 val append_fact : keeper_id:string -> fact -> unit
 val append_event : keeper_id:string -> episode -> unit
 val append_episode : keeper_id:string -> episode -> unit
+val append_episode_bundle : keeper_id:string -> episode -> unit
 val save_tool_result : keeper_id:string -> tool_call_id:string -> Yojson.Safe.t -> unit
 val load_tool_result : keeper_id:string -> tool_call_id:string -> Yojson.Safe.t option
 

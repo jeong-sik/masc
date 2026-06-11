@@ -45,6 +45,9 @@ let memory_env_bool_logged name ~default =
 let memory_llm_summary_enabled () =
   memory_env_bool_logged "MASC_KEEPER_MEMORY_LLM_SUMMARY" ~default:false
 
+let memory_os_librarian_enabled () =
+  memory_env_bool_logged "MASC_KEEPER_MEMORY_OS_LIBRARIAN" ~default:false
+
 let max_memory_text_length () =
   match memory_env_opt "MASC_KEEPER_MEMORY_MAX_LENGTH" with
   | None -> 4096

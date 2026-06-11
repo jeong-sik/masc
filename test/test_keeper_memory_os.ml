@@ -17,6 +17,19 @@ let contains substring s =
   if sub_len = 0 then true else aux 0
 ;;
 
+let index_of substring s =
+  let sub_len = String.length substring in
+  let str_len = String.length s in
+  let rec aux i =
+    if i + sub_len > str_len
+    then None
+    else if String.sub s i sub_len = substring
+    then Some i
+    else aux (i + 1)
+  in
+  if sub_len = 0 then Some 0 else aux 0
+;;
+
 let fact_fixture ~now () =
   { Types.claim = "User prefers concise responses"
   ; Types.confidence = 0.9
@@ -61,8 +74,19 @@ let test_json_roundtrip () =
 ;;
 
 let test_prompt_renders () =
+  let msg : Agent_sdk.Types.message =
+    { role = Agent_sdk.Types.User
+    ; content = [ Agent_sdk.Types.Text "Please remember the project constraint." ]
+    ; name = None
+    ; tool_call_id = None
+    ; metadata = []
+    }
+  in
   let inp : Librarian.input =
-    { Librarian.trace_id = "trace-abc"; Librarian.generation = 0; Librarian.messages = [] }
+    { Librarian.trace_id = "trace-abc"
+    ; Librarian.generation = 0
+    ; Librarian.messages = [ msg ]
+    }
   in
   let prompt = Librarian.prompt_of_input inp in
   Alcotest.(check bool)
@@ -73,7 +97,66 @@ let test_prompt_renders () =
   Alcotest.(check bool)
     "contains preserved_tool_refs"
     true
-    (contains "preserved_tool_refs" prompt)
+    (contains "preserved_tool_refs" prompt);
+  Alcotest.(check bool) "placeholder replaced" false (contains "%s" prompt);
+  Alcotest.(check bool)
+    "contains conversation"
+    true
+    (contains "[user] Please remember the project constraint." prompt);
+  match
+    index_of "[user] Please remember the project constraint." prompt,
+    index_of "Respond with ONLY the JSON object." prompt
+  with
+  | Some conversation_at, Some respond_at ->
+    Alcotest.(check bool) "conversation before final instruction" true (conversation_at < respond_at)
+  | _ -> Alcotest.fail "expected prompt sections"
+;;
+
+let test_prompt_omits_private_blocks () =
+  let msg : Agent_sdk.Types.message =
+    { role = Agent_sdk.Types.Assistant
+    ; content =
+        [ Agent_sdk.Types.Text "visible fact"
+        ; Agent_sdk.Types.Thinking
+            { thinking_type = "reasoning"; content = "hidden chain of thought" }
+        ; Agent_sdk.Types.RedactedThinking "redacted reasoning blob"
+        ; Agent_sdk.Types.ToolResult
+            { tool_use_id = "call_1"
+            ; content = "secret tool payload"
+            ; is_error = false
+            ; json = None
+            ; content_blocks = None
+            }
+        ]
+    ; name = None
+    ; tool_call_id = None
+    ; metadata = []
+    }
+  in
+  let inp : Librarian.input =
+    { Librarian.trace_id = "trace-abc"
+    ; Librarian.generation = 0
+    ; Librarian.messages = [ msg ]
+    }
+  in
+  let prompt = Librarian.prompt_of_input inp in
+  Alcotest.(check bool) "keeps visible text" true (contains "visible fact" prompt);
+  Alcotest.(check bool)
+    "omits thinking content"
+    false
+    (contains "hidden chain of thought" prompt);
+  Alcotest.(check bool)
+    "omits redacted thinking"
+    false
+    (contains "redacted reasoning blob" prompt);
+  Alcotest.(check bool)
+    "omits tool payload"
+    false
+    (contains "secret tool payload" prompt);
+  Alcotest.(check bool)
+    "keeps tool provenance"
+    true
+    (contains "[tool result omitted: id=call_1 is_error=false]" prompt)
 ;;
 
 let test_policy_score_and_retention () =
@@ -98,11 +181,15 @@ let test_bump_access () =
   let now = 1_000_000.0 in
   let f = fact_fixture ~now () in
   let bumped = Policy.bump_access_for_turn ~now [ f ] ~turn_text:"User prefers concise" in
-  Alcotest.(check int) "access bumped" 3 (List.hd bumped).Types.access_count;
+  (match bumped with
+   | [ got ] -> Alcotest.(check int) "access bumped" 3 got.Types.access_count
+   | _ -> Alcotest.fail "expected one bumped fact");
   let not_bumped =
     Policy.bump_access_for_turn ~now [ f ] ~turn_text:"completely unrelated"
   in
-  Alcotest.(check int) "access unchanged" 2 (List.hd not_bumped).Types.access_count
+  match not_bumped with
+  | [ got ] -> Alcotest.(check int) "access unchanged" 2 got.Types.access_count
+  | _ -> Alcotest.fail "expected one unchanged fact"
 ;;
 
 let () =
@@ -111,6 +198,10 @@ let () =
     [ ( "json"
       , [ Alcotest.test_case "fact and episode round-trip" `Quick test_json_roundtrip
         ; Alcotest.test_case "prompt renders schema" `Quick test_prompt_renders
+        ; Alcotest.test_case
+            "prompt omits private blocks"
+            `Quick
+            test_prompt_omits_private_blocks
         ] )
     ; ( "policy"
       , [ Alcotest.test_case "score and retention" `Quick test_policy_score_and_retention

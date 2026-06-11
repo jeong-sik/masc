@@ -1,10 +1,11 @@
 (** Keeper_librarian_runtime — LLM invocation wrapper for the librarian.
 
-    Uses the default runtime's provider config via [Llm_provider.Complete]
-    and parses the response with [Keeper_librarian.episode_of_output].
-    Eio resources are obtained from fiber-local [Eio_context] so callers
-    outside the immediate Eio fiber do not need to thread [sw]/[net]
-    explicitly. *)
+    This path is default-off because it creates an extra LLM call during
+    compaction. When enabled, it uses the default runtime's provider config
+    via [Llm_provider.Complete] and parses the response with
+    [Keeper_librarian.episode_of_output]. Eio resources are obtained from
+    fiber-local [Eio_context] so callers outside the immediate Eio fiber do
+    not need to thread [sw]/[net] explicitly. *)
 
 open Keeper_memory_os_types
 
@@ -49,7 +50,9 @@ let provider_for_librarian (provider_cfg : Llm_provider.Provider_config.t) =
 ;;
 
 let make ~trace_id ~generation () : Keeper_compact_policy.librarian_callback option =
-  match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
+  if not (Keeper_memory_bank_env.memory_os_librarian_enabled ())
+  then None
+  else match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
   | Some sw, Some net ->
     let clock = Eio_context.get_clock_opt () in
     (match Runtime.get_default_runtime () with

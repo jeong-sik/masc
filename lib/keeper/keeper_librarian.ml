@@ -17,9 +17,13 @@ let role_to_string = function
 let text_of_content = function
   | Agent_sdk.Types.Text s -> Some s
   | Agent_sdk.Types.ToolUse { name; _ } -> Some (Printf.sprintf "[tool use: %s]" name)
-  | Agent_sdk.Types.ToolResult { content; _ } -> Some (Printf.sprintf "[tool result: %s]" content)
-  | Agent_sdk.Types.Thinking { content; _ } -> Some (Printf.sprintf "[thinking: %s]" content)
-  | Agent_sdk.Types.RedactedThinking s -> Some (Printf.sprintf "[redacted thinking: %s]" s)
+  | Agent_sdk.Types.ToolResult { tool_use_id; is_error; _ } ->
+    Some
+      (Printf.sprintf
+         "[tool result omitted: id=%s is_error=%b]"
+         tool_use_id
+         is_error)
+  | Agent_sdk.Types.Thinking _ | Agent_sdk.Types.RedactedThinking _ -> None
   | _ -> None
 
 let message_to_text (m : Agent_sdk.Types.message) : string =
@@ -42,12 +46,34 @@ let format_messages_for_prompt messages =
   |> List.map (truncate_text 4000)
   |> String.concat "\n\n---\n\n"
 
-let prompt_of_input (inp : input) : string =
-  Keeper_librarian_prompts.episode_extraction
-  ^ format_messages_for_prompt inp.messages
-
 let scrub_messages_for_librarian messages =
   List.map Keeper_summarizer.scrub_text_blocks messages
+
+let replace_first_placeholder ~placeholder ~replacement template =
+  let placeholder_len = String.length placeholder in
+  let template_len = String.length template in
+  let rec find i =
+    if i + placeholder_len > template_len
+    then None
+    else if String.sub template i placeholder_len = placeholder
+    then Some i
+    else find (i + 1)
+  in
+  match find 0 with
+  | None -> template ^ replacement
+  | Some i ->
+    String.sub template 0 i
+    ^ replacement
+    ^ String.sub template (i + placeholder_len) (template_len - i - placeholder_len)
+
+let prompt_of_input (inp : input) : string =
+  replace_first_placeholder
+    ~placeholder:"%s"
+    ~replacement:
+      (inp.messages
+       |> scrub_messages_for_librarian
+       |> format_messages_for_prompt)
+    Keeper_librarian_prompts.episode_extraction
 
 let claim_source ~trace_id turn tool_call_id =
   { trace_id; turn; tool_call_id }
@@ -124,9 +150,21 @@ let episode_of_output (inp : input) (raw : string) : episode option =
          let source_turn_range =
            match claims with
            | [] -> None
-           | cs ->
-             let turns = List.map (fun c -> c.source.turn) cs in
-             Some (List.fold_left min (List.hd turns) (List.tl turns), List.fold_left max (List.hd turns) (List.tl turns))
+           | first :: rest ->
+             let init = first.source.turn in
+             let lo =
+               List.fold_left
+                 (fun acc claim -> min acc claim.source.turn)
+                 init
+                 rest
+             in
+             let hi =
+               List.fold_left
+                 (fun acc claim -> max acc claim.source.turn)
+                 init
+                 rest
+             in
+             Some (lo, hi)
          in
          Some
            { trace_id = inp.trace_id

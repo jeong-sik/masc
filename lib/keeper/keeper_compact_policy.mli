@@ -55,26 +55,33 @@ val compaction_policy_of_keeper : Keeper_meta_contract.keeper_meta -> float * in
 type librarian_callback =
   Agent_sdk.Types.message list -> Keeper_memory_os_types.episode option
 
+(** Full result from {!compact_if_needed_typed}. The librarian episode is
+    returned to the caller so it can be durably committed only after the
+    checkpoint save succeeds. *)
+type compact_result =
+  Keeper_context_core.working_context
+  * Compaction_trigger.t option
+  * compaction_decision
+  * Keeper_memory_os_types.episode option
+
 (** [compact_if_needed_typed ?librarian ~meta ~now_ts ctx] evaluates the
     compaction gates and either returns [ctx] unchanged or applies the
     OAS strategy chain plus the keeper-private fold reducer. When
     [librarian] is provided and compaction fires, the older portion of
     the conversation is sent to the librarian; any returned episode is
-    persisted via [Keeper_memory_os_io] before the OAS reducer mutates
-    the checkpoint.
+    returned to the caller for post-checkpoint persistence.
 
-    Return triple:
+    Return tuple:
     - the (possibly compacted) working context;
     - [Some trigger] when compaction was applied, [None] otherwise;
-    - a typed decision tag describing the gate outcome. *)
+    - a typed decision tag describing the gate outcome;
+    - an optional librarian episode to commit after checkpoint save. *)
 val compact_if_needed_typed
   :  ?librarian:librarian_callback
   -> meta:Keeper_meta_contract.keeper_meta
   -> now_ts:float
   -> Keeper_context_core.working_context
-  -> Keeper_context_core.working_context
-     * Compaction_trigger.t option
-     * compaction_decision
+  -> compact_result
 
 (** Compatibility wrapper around {!compact_if_needed_typed}; the third
     return value is {!compaction_decision_to_string}.  The [string option]

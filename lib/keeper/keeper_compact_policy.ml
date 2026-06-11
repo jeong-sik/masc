@@ -136,6 +136,12 @@ type compaction_decision =
       ; cooldown_sec : int
       }
 
+type compact_result =
+  working_context
+  * Compaction_trigger.t option
+  * compaction_decision
+  * Keeper_memory_os_types.episode option
+
 let compaction_decision_to_string = function
   | Applied trigger -> "applied:" ^ Compaction_trigger.to_human trigger
   | Blocked_below_thresholds -> "blocked:below_thresholds"
@@ -224,7 +230,7 @@ let compact_if_needed_typed
       ~(meta : keeper_meta)
       ~(now_ts : float)
       (ctx : working_context)
-  : working_context * Compaction_trigger.t option * compaction_decision
+  : compact_result
   =
   let ratio = context_ratio ctx in
   let msg_count = message_count ctx in
@@ -248,7 +254,7 @@ let compact_if_needed_typed
   in
   match decision with
   | Blocked_below_thresholds | Skipped_no_checkpoint | Skipped_continuity_reflection _ ->
-    ctx, None, decision
+    ctx, None, decision, None
   | Applied trigger ->
     (* RFC-0231: extract semantic episode from older messages before OAS
        compaction erases them. The librarian is pure; any LLM I/O lives
@@ -256,22 +262,11 @@ let compact_if_needed_typed
     let older_messages, _kept_messages =
       split_messages_for_librarian (messages_of_context ctx)
     in
-    (match librarian with
-     | Some extract when older_messages <> [] ->
-       (match extract older_messages with
-        | Some episode ->
-          (try
-             Keeper_memory_os_io.append_event ~keeper_id:meta.name episode;
-             List.iter (Keeper_memory_os_io.append_fact ~keeper_id:meta.name) episode.Keeper_memory_os_types.claims
-           with
-           | exn ->
-             Log.Harness.warn
-               "[compact_policy] librarian persistence failed keeper=%s trace_id=%s: %s"
-               meta.name
-               episode.Keeper_memory_os_types.trace_id
-               (Printexc.to_string exn))
-        | None -> ())
-     | _ -> ());
+    let librarian_episode =
+      match librarian with
+      | Some extract when older_messages <> [] -> extract older_messages
+      | _ -> None
+    in
     (* PreCompact observability: log strategy and context state (#3165) *)
     let strategies =
       Context_compact_oas.[ PruneToolOutputs; MergeContiguous; DropLowImportance ]
@@ -474,11 +469,13 @@ let compact_if_needed_typed
          saved_tokens
          pair_repair_stats.downgraded_tool_uses
          pair_repair_stats.downgraded_tool_results);
-    compacted_ctx, Some trigger, decision
+    compacted_ctx, Some trigger, decision, librarian_episode
 ;;
 
 let compact_if_needed ?librarian ~meta ~now_ts ctx =
-  let ctx, trigger, decision = compact_if_needed_typed ?librarian ~meta ~now_ts ctx in
+  let ctx, trigger, decision, _librarian_episode =
+    compact_if_needed_typed ?librarian ~meta ~now_ts ctx
+  in
   let trigger_str = Option.map Compaction_trigger.to_human trigger in
   ctx, trigger_str, compaction_decision_to_string decision
 ;;

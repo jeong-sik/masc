@@ -26,6 +26,7 @@ val prompt_of_input : input -> string
     (e.g., empty claims with zero confidence, missing required fields). *)
 val episode_of_output : input -> string -> Keeper_memory_os_types.episode option
 
-(** Convenience: scrub [STATE] blocks from messages before passing them to
-    the librarian, so extracted summaries do not echo internal markers. *)
+(** Convenience: scrub internal state markers from messages before passing
+    them to the librarian, so extracted summaries do not echo private
+    runtime markers. *)
 val scrub_messages_for_librarian : Agent_sdk.Types.message list -> Agent_sdk.Types.message list

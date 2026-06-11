@@ -25,7 +25,7 @@ Apply a consistent vendor-agnostic mapping across the 32 files. The mapping pres
 | `provider-d`, `Provider-D` | `provider-d`, `Provider-D` |
 | `provider-e`, `Provider-E`, `PROVIDER-A` (case) | `provider-e`, `Provider-E`, `PROVIDER-A` |
 | `provider-f`, `Provider-F` | `provider-f`, `Provider-F` |
-| `provider-g`, `Provider-G` | `provider-g`, `Provider-G` |
+| DeepSeek legacy slot | `runtime-slot-d`, `Runtime-Slot-D` |
 | `provider-h`, `Provider-H` (word) | `provider-h`, `Provider-H` |
 | `provider-i`, `Provider-I` | `provider-i`, `Provider-I` |
 | `provider-j`, `Provider-J` (word) | `provider-j`, `Provider-J` |
@@ -63,7 +63,7 @@ The mapping is **lossy by design**: a future operator reading `provider-a` does 
 
 ## 4. Verification
 
-- `rg -i 'provider-a|\bkimi\b|\bclaude\b|\bprovider-f\b|\bcodex\b|provider-b|provider-g|\bqwen\b|provider-j|\bgroq\b|gpt-|grok|\bxai\b|\bglm\b|provider-l' dashboard/design-system/{preview,ui_kits,headless-core}/` returns 0 hits.
+- `rg -i 'provider-a|\bkimi\b|\bclaude\b|\bprovider-f\b|\bcodex\b|provider-b|\bqwen\b|provider-j|\bgroq\b|gpt-|grok|\bxai\b|\bglm\b|provider-l' dashboard/design-system/{preview,ui_kits,headless-core}/` returns 0 hits.
 - `pnpm run typecheck` clean (no TS production code touched).
 - `dune build lib/ bin/` unchanged (no OCaml touched).
 

@@ -446,7 +446,8 @@ let claim_next_r
                 ; version = backlog.version + 1
                 }
               in
-              write_backlog config new_backlog
+              write_backlog config new_backlog;
+              Task_cache_invariant.clear_stale_agent_task config ~agent_name ~task_id:(Option.get released_task_id) ~status:Todo ~module_name:"workspace_task_schedule"
             | None -> ());
            clear_agent_state_after_release ();
           Claim_next_no_unclaimed, None
@@ -459,7 +460,8 @@ let claim_next_r
                 ; version = backlog.version + 1
                 }
               in
-              write_backlog config new_backlog
+              write_backlog config new_backlog;
+              Task_cache_invariant.clear_stale_agent_task config ~agent_name ~task_id:(Option.get released_task_id) ~status:Todo ~module_name:"workspace_task_schedule"
             | None -> ());
            clear_agent_state_after_release ();
           ( Claim_next_no_eligible
@@ -493,6 +495,7 @@ let claim_next_r
              }
            in
            write_backlog config new_backlog;
+           Task_cache_invariant.clear_stale_agent_task config ~agent_name ~task_id:task.id ~status:claimed_status ~module_name:"workspace_task_schedule";
            (* Update agent status — takes [with_file_lock] on the
              agent file via [Workspace_task.update_local_agent_state] to
              keep the record consistent with concurrent

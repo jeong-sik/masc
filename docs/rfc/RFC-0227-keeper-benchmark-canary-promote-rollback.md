@@ -1,5 +1,5 @@
 ---
-rfc: "0226"
+rfc: "0227"
 title: "Keeper benchmark canary: wire verify -> gated promote -> rollback for per-keeper model selection"
 status: Draft
 created: 2026-06-11
@@ -11,7 +11,7 @@ related: ["0220"]
 implementation_prs: []
 ---
 
-# RFC-0226: Keeper benchmark canary — verify -> gated promote -> rollback
+# RFC-0227: Keeper benchmark canary — verify -> gated promote -> rollback
 
 Status: Draft · Closes the half-built VPR loop around per-keeper model choice · No new conversation/runtime store
 Drafted by: Claude Opus 4.8 (research-to-RFC pass with owner, 2026-06-11).

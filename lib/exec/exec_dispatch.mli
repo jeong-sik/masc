@@ -38,7 +38,12 @@ val dispatch_decided :
     ensures the IR has passed through [Shell_ir_risk.classify]. *)
 
 val dispatch_pipeline :
-  ?stdin_content:string -> Shell_ir.t list -> dispatch_result
+  ?stdin_content:string ->
+  ?on_output_chunk:([ `Stdout of string | `Stderr of string ] -> unit) ->
+  Shell_ir.t list ->
+  dispatch_result
 (** Execute a pipeline of commands, streaming stdout between stages.
     Handles [Simple] stages natively; nested [Pipeline] stages are
-    rejected with an error. *)
+    rejected with an error.  [?on_output_chunk] receives the final
+    captured stdout/stderr after pipeline completion; it is not yet a
+    per-process-read streaming callback. *)

@@ -118,6 +118,57 @@ let () =
   assert (String.trim result.stdout = "y");
   assert (result.status <> Unix.WEXITED 124)
 
+(* --- dispatch_decided forwards pipeline captured output chunks --- *)
+
+let () =
+  with_eio @@ fun () ->
+  let open Masc_exec.Shell_ir in
+  let sh_bin = Masc_exec.Exec_program.of_string "sh" |> Result.get_ok in
+  let cat_bin = Masc_exec.Exec_program.of_string "cat" |> Result.get_ok in
+  let host_sandbox = Masc_exec.Sandbox_target.host () in
+  let sh_stage =
+    Simple
+      {
+        bin = sh_bin;
+        args =
+          [
+            Lit ("-c", default_meta);
+            Lit ("printf out; printf err >&2", default_meta);
+          ];
+        env = [];
+        cwd = None;
+        redirects = [];
+        sandbox = host_sandbox;
+      }
+  in
+  let cat_stage =
+    Simple
+      {
+        bin = cat_bin;
+        args = [];
+        env = [];
+        cwd = None;
+        redirects = [];
+        sandbox = host_sandbox;
+      }
+  in
+  let envelope =
+    { Masc_exec.Shell_ir_risk.ir = Pipeline [ sh_stage; cat_stage ]
+    ; risk = Masc_exec.Shell_ir_risk.R0_Read
+    }
+  in
+  let chunks = ref [] in
+  let result =
+    Masc_exec.Exec_dispatch.dispatch_decided
+      ~on_output_chunk:(fun chunk -> chunks := chunk :: !chunks)
+      envelope
+  in
+  assert (result.status = Unix.WEXITED 0);
+  assert (result.stdout = "out");
+  assert (result.stderr = "err");
+  assert (List.mem (`Stdout "out") !chunks);
+  assert (List.mem (`Stderr "err") !chunks)
+
 (* --- dispatch pipeline exit code: last nonzero wins --- *)
 
 let () =

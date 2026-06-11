@@ -86,6 +86,14 @@ let apply_redirect_plan plan result =
 let unsupported_redirect_result message =
   { status = Unix.WEXITED 1; stdout = ""; stderr = message }
 
+let emit_captured_output on_output_chunk result =
+  match on_output_chunk with
+  | None -> result
+  | Some on_chunk ->
+      on_chunk (`Stdout result.stdout);
+      on_chunk (`Stderr result.stderr);
+      result
+
 let status_is_success = function
   | Unix.WEXITED 0 -> true
   | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> false
@@ -284,92 +292,94 @@ let docker_pipeline_specs stages =
   in
   loop None None [] stages
 
-let rec dispatch_pipeline ?stdin_content stages =
-  match stages with
-  | [] ->
-      invalid_pipeline "empty pipeline not supported in native dispatch"
-  | [ _ ] ->
-      invalid_pipeline "single-stage pipeline not supported in native dispatch"
-  | _ ->
-      (match host_pipeline_specs stages with
-       | Some specs ->
-           let raw_source =
-             specs
-             |> List.map (fun stage -> String.concat " " stage.Process_eio.argv)
-             |> String.concat " | "
-           in
-           let status, stdout, stderr =
-             Exec_gate.run_argv_pipeline_with_status_split
-               ~actor:`Tool_local_runtime
-               ~raw_source
-               ~summary:"exec dispatch pipeline"
+(* TEL-OK: this lower-level Shell IR dispatcher is wrapped by Execute/keeper
+   telemetry at the action boundary; it only preserves captured output delivery. *)
+let rec dispatch_pipeline ?stdin_content ?on_output_chunk stages =
+  let result =
+    match stages with
+    | [] ->
+        invalid_pipeline "empty pipeline not supported in native dispatch"
+    | [ _ ] ->
+        invalid_pipeline "single-stage pipeline not supported in native dispatch"
+    | _ ->
+        (match host_pipeline_specs stages with
+         | Some specs ->
+             let raw_source =
                specs
-           in
-           { status; stdout; stderr }
-       | None -> (
-           match docker_pipeline_specs stages with
-           | Some (runner, specs) ->
-               let status, stdout, stderr = runner ~stages:specs in
-               { status; stdout; stderr }
-           | None ->
-               let rec chain ~prev_stdout ~status ~stderr = function
-                 | [] -> { status; stdout = prev_stdout; stderr }
-                 | Shell_ir.Simple s :: rest ->
-                     let stage_result =
-                       dispatch_simple
-                         ~stdin_content:prev_stdout
-                         s
-                     in
-                     let status = pipeline_status status stage_result.status in
-                     let stderr = stderr ^ stage_result.stderr in
-                     if status_is_timeout stage_result.status
-                     then { status; stdout = stage_result.stdout; stderr }
-                     else
-                       chain
-                         ~prev_stdout:stage_result.stdout
-                         ~status
-                         ~stderr
-                         rest
-                 | Pipeline _ :: _ ->
-                     { status = Unix.WEXITED 1
-                     ; stdout = ""
-                     ; stderr =
-                         stderr ^ "nested pipeline not supported in native dispatch"
-                     }
-               in
-               (match stages with
-                | [] | [ _ ] ->
-                    invalid_pipeline "invalid pipeline arity in native dispatch"
-                | first :: rest -> (
-                  match first with
-                  | Shell_ir.Simple s ->
-                      let first_result = dispatch_simple s in
-                      let status =
-                        pipeline_status (Unix.WEXITED 0) first_result.status
-                      in
-                      if status_is_timeout first_result.status
-                      then
-                        { status
-                        ; stdout = first_result.stdout
-                        ; stderr = first_result.stderr
-                        }
-                      else
-                        chain
-                          ~prev_stdout:first_result.stdout
-                          ~status
-                          ~stderr:first_result.stderr
-                          rest
-                  | Pipeline _ ->
-                      invalid_pipeline
-                        "nested pipeline not supported in native dispatch" ))))
+               |> List.map (fun stage -> String.concat " " stage.Process_eio.argv)
+               |> String.concat " | "
+             in
+             let status, stdout, stderr =
+               Exec_gate.run_argv_pipeline_with_status_split
+                 ~actor:`Tool_local_runtime
+                 ~raw_source
+                 ~summary:"exec dispatch pipeline"
+                 specs
+             in
+             { status; stdout; stderr }
+         | None -> (
+             match docker_pipeline_specs stages with
+             | Some (runner, specs) ->
+                 let status, stdout, stderr = runner ~stages:specs in
+                 { status; stdout; stderr }
+             | None ->
+                 let rec chain ~prev_stdout ~status ~stderr = function
+                   | [] -> { status; stdout = prev_stdout; stderr }
+                   | Shell_ir.Simple s :: rest ->
+                       let stage_result =
+                         dispatch_simple
+                           ~stdin_content:prev_stdout
+                           s
+                       in
+                       let status = pipeline_status status stage_result.status in
+                       let stderr = stderr ^ stage_result.stderr in
+                       if status_is_timeout stage_result.status
+                       then { status; stdout = stage_result.stdout; stderr }
+                       else
+                         chain
+                           ~prev_stdout:stage_result.stdout
+                           ~status
+                           ~stderr
+                           rest
+                   | Pipeline _ :: _ ->
+                       { status = Unix.WEXITED 1
+                       ; stdout = ""
+                       ; stderr =
+                           stderr ^ "nested pipeline not supported in native dispatch"
+                       }
+                 in
+                 (match stages with
+                  | [] | [ _ ] ->
+                      invalid_pipeline "invalid pipeline arity in native dispatch"
+                  | first :: rest -> (
+                    match first with
+                    | Shell_ir.Simple s ->
+                        let first_result = dispatch_simple s in
+                        let status =
+                          pipeline_status (Unix.WEXITED 0) first_result.status
+                        in
+                        if status_is_timeout first_result.status
+                        then
+                          { status
+                          ; stdout = first_result.stdout
+                          ; stderr = first_result.stderr
+                          }
+                        else
+                          chain
+                            ~prev_stdout:first_result.stdout
+                            ~status
+                            ~stderr:first_result.stderr
+                            rest
+                    | Pipeline _ ->
+                        invalid_pipeline
+                          "nested pipeline not supported in native dispatch" ))))
+  in
+  emit_captured_output on_output_chunk result
 
 and dispatch ?on_output_chunk (ir : Shell_ir.t) =
   match ir with
   | Shell_ir.Simple s -> dispatch_simple ?on_output_chunk s
-  | Pipeline stages ->
-    (* Pipelines do not yet expose per-stage chunk callbacks; an
-       [on_output_chunk] provided here is ignored. *)
-    dispatch_pipeline stages
+  | Pipeline stages -> dispatch_pipeline ?on_output_chunk stages
 
 let dispatch_decided ?on_output_chunk (envelope : Shell_ir_risk.decided Shell_ir_risk.decided_ir) :
     dispatch_result =

@@ -559,16 +559,10 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
       (if payload.attachments = [] then base_fields
        else ("attachments", `List (List.map attachment_json payload.attachments)) :: base_fields)
   in
-  (* Stream model text deltas live with per-delta redaction — the same
-     treatment ThinkingDelta and Tool_call_args already get in
-     [consume_worker_events]. A pattern that spans a delta boundary can
-     escape the live view; the persisted turn and the terminal reply still
-     pass through full-text redaction, so the durable record stays clean.
-     [streamed_text] keeps the raw concatenation as the terminal
-     empty-reply fallback; [deltas_sent] suppresses the terminal chunk
-     re-send so streamed text is not rendered twice. *)
+  (* Buffer model text deltas until the terminal payload arrives. This
+     avoids sending raw partial output before the full reply can pass
+     through keeper-scoped redaction. *)
   let streamed_text = Buffer.create 256 in
-  let deltas_sent = ref false in
   let worker_events = Eio.Stream.create 512 in
   let push_worker_event event =
     if not !closed then
@@ -755,9 +749,7 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
              Keeper_chat_events.publish events
                (Event_error { message = redact_text ("Timeout: " ^ reason) })
          | Agent_sdk.Types.ContentBlockDelta { delta = TextDelta text; _ } ->
-             deltas_sent := true;
-             Buffer.add_string streamed_text text;
-             Keeper_chat_events.publish events (Text_delta (redact_text text))
+             Buffer.add_string streamed_text text
          | Agent_sdk.Types.ContentBlockDelta { delta = ThinkingDelta text; _ } ->
              Keeper_chat_events.publish events
                (Custom
@@ -793,7 +785,7 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
           let is_checkpoint =
             is_continuation_checkpoint_reply visible_reply
           in
-          if (not is_checkpoint) && not !deltas_sent then
+          if not is_checkpoint then
             split_keeper_reply_chunks visible_reply
             |> List.iter (fun chunk ->
                    Keeper_chat_events.publish events (Text_delta chunk));

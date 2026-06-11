@@ -47,7 +47,13 @@ val delete_oas_history_files :
 
 (** Save [ckpt] via the OAS Checkpoint_store when an Eio FS is
     available; falls back to atomic file write otherwise. Always
-    appends to the OAS history archive on success. *)
+    appends to the OAS history archive on success.
+
+    RFC-0225 §3.2 stale-write guard: returns [Error] (and logs at
+    Error with the [oas_stale_write_rejected] failure site) when
+    [ckpt.turn_count] is older than the last checkpoint saved for the
+    same session — a stale writer must not clobber a conversation the
+    newer writer already persisted. Equal turn_count re-saves pass. *)
 val save_oas :
   session_dir:string ->
   Agent_sdk.Checkpoint.t ->
@@ -87,3 +93,9 @@ val load_oas :
   session_dir:string ->
   session_id:string ->
   (Agent_sdk.Checkpoint.t, checkpoint_load_error) result
+
+module For_testing : sig
+  val reset_stale_write_guard : unit -> unit
+  (** Clear the process-local last-saved turn_count map so tests that
+      reuse session ids across temp dirs start from a cold state. *)
+end

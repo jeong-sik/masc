@@ -138,7 +138,9 @@ let delete_oas_history_files ~(session_dir : string) ~(snapshot_ids : string lis
     snapshot_ids
   |> fun (deleted, missing) -> (List.rev deleted, List.rev missing)
 
-let save_oas ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t)
+(* Unguarded write body. Public [save_oas] (defined after [load_oas]
+   below) wraps this with the RFC-0225 §3.2 stale-write guard. *)
+let save_oas_unguarded ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t)
   : (unit, string) result =
   let fallback () =
     match Keeper_fs.save_atomic
@@ -282,3 +284,66 @@ let load_oas ~(session_dir : string) ~(session_id : string) :
        | Error e -> Error (Store_error (Agent_sdk.Error.to_string e)))
   | Some _ | None ->
       fallback ()
+
+(* ── RFC-0225 §3.2: stale checkpoint write guard ─────────────────────
+   Two writers for the same session are last-writer-wins on disk; a
+   stale writer (e.g. a lane that resumed from an older snapshot)
+   overwrote the conversation the newer writer had just persisted
+   (2026-06-10 voice incident: oas turn_count 1355 clobbered by 1324).
+   The checkpoint carrier is OAS-owned, so the version is tracked on
+   the MASC side: a process-local map of the highest turn_count saved
+   per checkpoint path, backfilled from disk once per session. *)
+
+let last_saved_oas_turn_count_mu = Stdlib.Mutex.create ()
+let last_saved_oas_turn_count : (string, int) Hashtbl.t = Hashtbl.create 16
+
+let known_oas_turn_count ~session_dir ~session_id =
+  let key = oas_checkpoint_path ~session_dir ~session_id in
+  let cached =
+    (* Stdlib mutex on purpose: the critical section is a pure Hashtbl
+       lookup, never yields. Disk backfill happens outside the lock. *)
+    Stdlib.Mutex.protect last_saved_oas_turn_count_mu (fun () ->
+      Hashtbl.find_opt last_saved_oas_turn_count key)
+  in
+  match cached with
+  | Some _ as hit -> hit
+  | None ->
+    (match load_oas ~session_dir ~session_id with
+     | Ok existing -> Some existing.turn_count
+     | Error _ -> None)
+
+let record_saved_oas_turn_count ~session_dir ~session_id turn_count =
+  let key = oas_checkpoint_path ~session_dir ~session_id in
+  Stdlib.Mutex.protect last_saved_oas_turn_count_mu (fun () ->
+    match Hashtbl.find_opt last_saved_oas_turn_count key with
+    | Some known when known >= turn_count -> ()
+    | Some _ | None -> Hashtbl.replace last_saved_oas_turn_count key turn_count)
+
+let save_oas ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t)
+  : (unit, string) result =
+  match known_oas_turn_count ~session_dir ~session_id:ckpt.session_id with
+  | Some known when ckpt.turn_count < known ->
+    Log.Keeper.error
+      "stale OAS checkpoint write rejected for %s: incoming turn_count=%d, last saved=%d"
+      ckpt.session_id ckpt.turn_count known;
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string CheckpointFailures)
+      ~labels:[("site", Keeper_checkpoint_store_failure_site.(to_label Oas_stale_write_rejected))]
+      ();
+    Error
+      (Printf.sprintf
+         "stale checkpoint write rejected for %s: incoming turn_count=%d < last saved %d"
+         ckpt.session_id ckpt.turn_count known)
+  | Some _ | None ->
+    (match save_oas_unguarded ~session_dir ckpt with
+     | Ok () ->
+       record_saved_oas_turn_count
+         ~session_dir ~session_id:ckpt.session_id ckpt.turn_count;
+       Ok ()
+     | Error _ as e -> e)
+
+module For_testing = struct
+  let reset_stale_write_guard () =
+    Stdlib.Mutex.protect last_saved_oas_turn_count_mu (fun () ->
+      Hashtbl.reset last_saved_oas_turn_count)
+end

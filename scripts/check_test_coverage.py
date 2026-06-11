@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 """Test coverage check for PRs modifying lib/.
 
-Rules:
+Checks that code changes to lib/ have accompanying test changes.
+
+Rules (checked for every non-skipped PR that touches lib/):
 - added_lib_lines > 10 && test_files == 0 -> warn (enforced)
 - lib_changed_files > 3 && test_files == 0 -> warn (enforced)
-- Branches starting with chore/ or docs/ -> skip
-- PR body containing '# ci:skip-test-coverage' -> skip
+
+Note: Branch skip (chore/, docs/) and PR body opt-out (# ci:skip-test-coverage)
+are handled by the GitHub Actions workflow-level if: guard, not in this script.
 """
 
 import os
-import re
-import submodule
+import subprocess
 import sys
 
 
@@ -18,14 +20,14 @@ def get_changed_lib_files():
     """Get list of lib/ files changed in this PR."""
     base_ref = os.environ.get("GITHUB_BASE_REF", "main")
     try:
-        result = submodule.run(
+        result = subprocess.run(
             ["git", "diff", "--name-only", f"origin/{base_ref}...HEAD", "--", "lib/"],
             capture_output=True,
             text=True,
             check=True,
         )
         return [f for f in result.stdout.strip().split("\n") if f]
-    except submodule.CalledProcessError:
+    except subprocess.CalledProcessError:
         return []
 
 
@@ -33,7 +35,7 @@ def get_changed_test_files():
     """Get list of test files changed in this PR."""
     base_ref = os.environ.get("GITHUB_BASE_REF", "main")
     try:
-        result = submodule.run(
+        result = subprocess.run(
             [
                 "git",
                 "diff",
@@ -50,7 +52,7 @@ def get_changed_test_files():
             check=True,
         )
         return [f for f in result.stdout.strip().split("\n") if f]
-    except submodule.CalledProcessError:
+    except subprocess.CalledProcessError:
         return []
 
 
@@ -60,7 +62,7 @@ def get_added_lines_count(lib_files):
     total = 0
     for f in lib_files:
         try:
-            result = submodule.run(
+            result = subprocess.run(
                 ["git", "diff", f"origin/{base_ref}...HEAD", "--", f],
                 capture_output=True,
                 text=True,
@@ -69,7 +71,7 @@ def get_added_lines_count(lib_files):
             for line in result.stdout.split("\n"):
                 if line.startswith("+") and not line.startswith("+++"):
                     total += 1
-        except submodule.CalledProcessError:
+        except subprocess.CalledProcessError:
             pass
     return total
 

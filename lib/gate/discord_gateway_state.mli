@@ -86,6 +86,15 @@ type dispatched_event =
             neither (RFC-0223 P1). *)
       ; content : string
       ; mentions_bot : bool
+      ; explicit_mentions_bot : bool
+        (** [true] only when message [content] contains a literal
+            Discord user mention for the bot, e.g. [<@123>] /
+            [<@!123>]. Discord may also include the bot in
+            [mentions] for reply-pings; those stay [mentions_bot]
+            but do not start a [Mention_only] turn by themselves. *)
+      ; message_reference_channel_id : string option
+      ; message_reference_message_id : string option
+      ; referenced_message_author_id : string option
       }
   | Reaction_add of
       { channel_id : string

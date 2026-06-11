@@ -109,6 +109,14 @@ let with_response_wait_typing_indicator ~clock ~channel_id f =
         finish ();
         raise exn)
 
+let metadata_opt key = function
+  | None -> []
+  | Some value ->
+      let value = String.trim value in
+      if value = "" then [] else [ (key, value) ]
+
+let metadata_bool key value = [ (key, string_of_bool value) ]
+
 let discord_conversation_id ~guild_id ~channel_id =
   let guild_label =
     match guild_id with
@@ -121,11 +129,6 @@ let discord_conversation_id ~guild_id ~channel_id =
 let discord_attention_surface ~guild_id ~channel_id =
   Keeper_external_attention.Discord
     { guild_id; channel_id; parent_channel_id = None; thread_id = None }
-
-let optional_metadata key = function
-  | Some value when not (String.equal (String.trim value) "") ->
-      [ key, value ]
-  | Some _ | None -> []
 
 let record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id
       ~message_id ~author_id ~author_name ~content ~mentions_bot ~route ~urgency
@@ -162,7 +165,7 @@ let record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id
         ; "mentions_bot", string_of_bool mentions_bot
         ; "discord_channel_id", channel_id
         ]
-        @ optional_metadata "discord_guild_id" guild_id
+        @ metadata_opt "discord_guild_id" guild_id
     }
   in
   match Keeper_external_attention.record ~base_path:base_dir item with
@@ -189,19 +192,67 @@ let mark_attention_resolved ~base_dir ~keeper_name ~event_id ~reason =
         "discord external attention resolve failed (keeper=%s event=%s): %s"
         keeper_name event_id error
 
+let resolve_binding_for_message ~channel_id ~message_reference_channel_id =
+  match State.resolve_keeper_for_channel ~channel_id with
+  | Some resolution -> Some (resolution, [])
+  | None -> (
+      match message_reference_channel_id with
+      | None -> None
+      | Some reference_channel_id ->
+          let reference_channel_id = String.trim reference_channel_id in
+          if reference_channel_id = "" || String.equal reference_channel_id channel_id
+          then None
+          else
+            match State.resolve_keeper_for_channel ~channel_id:reference_channel_id with
+            | None -> None
+            | Some resolution ->
+                Some
+                  ( {
+                      State.keeper_name = resolution.State.keeper_name;
+                      incoming_channel_id = channel_id;
+                      bound_channel_id = resolution.bound_channel_id;
+                      via_parent = true;
+                    },
+                    [ ("discord.binding_reference_channel_id", reference_channel_id) ] ))
+
 let handle_message_create ~dispatch
-      ~clock ~base_dir
-      ~(channel_id : string) ~(guild_id : string option) ~(message_id : string)
+      ~clock
+      ~(channel_id : string) ~(message_id : string)
+      ~(guild_id : string option)
+      ~base_dir
       ~(author_id : string) ~(author_name : string option)
-      ~(content : string) ~(mentions_bot : bool) =
-  match State.keeper_for_channel ~channel_id with
+      ~(content : string)
+      ~(mentions_bot : bool)
+      ~(explicit_mentions_bot : bool)
+      ~(message_reference_channel_id : string option)
+      ~(message_reference_message_id : string option)
+      ~(referenced_message_author_id : string option) =
+  match resolve_binding_for_message ~channel_id ~message_reference_channel_id with
   | None ->
     (* No binding for this channel — drop quietly. The bot may be in
        channels it isn't bound to (e.g. server-wide guild messages). *)
     Discord_observability.record_inbound_dispatch
       Discord_observability.Dropped_unbound;
     ()
-  | Some keeper_name ->
+  | Some (resolution, resolution_metadata) ->
+    let keeper_name = resolution.State.keeper_name in
+    let metadata =
+      [ ("discord.channel_id", channel_id)
+      ; ("discord.message_id", message_id)
+      ; ("discord.bound_channel_id", resolution.bound_channel_id)
+      ; ("discord.binding_via_parent", string_of_bool resolution.via_parent)
+      ]
+      @ resolution_metadata
+      @ metadata_opt "discord.guild_id" guild_id
+      @ metadata_bool "discord.mentions_bot" mentions_bot
+      @ metadata_bool "discord.explicit_mentions_bot" explicit_mentions_bot
+      @ metadata_opt "discord.message_reference_channel_id"
+          message_reference_channel_id
+      @ metadata_opt "discord.message_reference_message_id"
+          message_reference_message_id
+      @ metadata_opt "discord.referenced_message_author_id"
+          referenced_message_author_id
+    in
     let urgency =
       if mentions_bot then Keeper_external_attention.Mention
       else
@@ -226,7 +277,7 @@ let handle_message_create ~dispatch
       ; keeper_name
       ; content
       ; idempotency_key = Printf.sprintf "discord-msg-%s" message_id
-      ; metadata = []
+      ; metadata
       }
     in
     (match
@@ -277,12 +328,24 @@ let on_event ~dispatch ~clock ~base_dir (ev : Gw.gateway_event) =
     State.record_ready ~bot_user_id;
     Log.Server.info "Discord gateway READY (bot_user_id=%s)" bot_user_id
   | Gw.Message_create
-      { channel_id; guild_id; message_id; author_id; author_name; content;
-        mentions_bot } ->
+      { channel_id
+      ; message_id
+      ; guild_id
+      ; author_id
+      ; author_name
+      ; content
+      ; mentions_bot
+      ; explicit_mentions_bot
+      ; message_reference_channel_id
+      ; message_reference_message_id
+      ; referenced_message_author_id
+      } ->
     (* mentions_bot is already enforced by the trigger policy at the
        gateway-state layer; nothing extra to check here. *)
-    handle_message_create ~dispatch ~clock ~base_dir ~channel_id ~guild_id
-      ~message_id ~author_id ~author_name ~content ~mentions_bot
+    handle_message_create ~dispatch ~clock ~channel_id ~message_id ~author_id
+      ~guild_id ~base_dir ~author_name ~content ~mentions_bot ~explicit_mentions_bot
+      ~message_reference_channel_id ~message_reference_message_id
+      ~referenced_message_author_id
   | Gw.Reaction_add _ ->
     (* The previous Python sidecar used a configurable emoji
        trigger to drain pending messages. That feature is dropped in

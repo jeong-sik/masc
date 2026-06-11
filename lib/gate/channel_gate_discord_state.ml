@@ -527,7 +527,20 @@ let unbind ~channel_id ~actor_name =
 (* In-process gateway support — replaces sidecars/discord-bot/      *)
 (* ---------------------------------------------------------------- *)
 
-let keeper_for_channel ~channel_id =
+type keeper_binding_resolution = {
+  keeper_name : string;
+  incoming_channel_id : string;
+  bound_channel_id : string;
+  via_parent : bool;
+}
+
+let binding_for_channel bindings ~channel_id =
+  List.find_map
+    (fun (b : binding) ->
+      if String.equal b.channel_id channel_id then Some b else None)
+    bindings
+
+let resolve_keeper_for_channel ~channel_id =
   let normalized = String.trim channel_id in
   if String.equal normalized "" then None
   else
@@ -537,11 +550,41 @@ let keeper_for_channel ~channel_id =
       | Eio.Cancel.Cancelled _ as e -> raise e
       | _ -> []
     in
-    List.find_map
-      (fun (b : binding) ->
-        if String.equal b.channel_id normalized then Some b.keeper_name
-        else None)
-      candidates
+    match binding_for_channel candidates ~channel_id:normalized with
+    | Some b ->
+        Some
+          {
+            keeper_name = b.keeper_name;
+            incoming_channel_id = normalized;
+            bound_channel_id = b.channel_id;
+            via_parent = false;
+          }
+    | None -> (
+        let parent_channel_id =
+          try Names.resolve_parent_channel_id_for_channel ~channel_id:normalized
+          with
+          | Eio.Cancel.Cancelled _ as e -> raise e
+          | _ -> None
+        in
+        match parent_channel_id with
+        | None -> None
+        | Some parent_channel_id -> (
+            let parent_channel_id = String.trim parent_channel_id in
+            match binding_for_channel candidates ~channel_id:parent_channel_id with
+            | None -> None
+            | Some b ->
+                Some
+                  {
+                    keeper_name = b.keeper_name;
+                    incoming_channel_id = normalized;
+                    bound_channel_id = b.channel_id;
+                    via_parent = true;
+                  } ))
+
+let keeper_for_channel ~channel_id =
+  match resolve_keeper_for_channel ~channel_id with
+  | None -> None
+  | Some resolution -> Some resolution.keeper_name
 
 (* RFC-0223 P2: presence surface. Both recomputed per call — no cached
    presence state. *)

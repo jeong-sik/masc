@@ -661,6 +661,16 @@ case \"$1\" in\n\
     exit 0\n\
     ;;\n\
   exec)\n\
+    case \"$*\" in\n\
+      *progress*)\n\
+        printf 'progress-1\\n'\n\
+        sleep 1\n\
+        printf 'progress-2\\n'\n\
+        sleep 1\n\
+        printf 'done\\n'\n\
+        exit 0\n\
+        ;;\n\
+    esac\n\
     exec_count=$(read_count \"$exec_count_file\")\n\
     exec_count=$((exec_count + 1))\n\
     write_count \"$exec_count_file\" \"$exec_count\"\n\
@@ -1752,6 +1762,60 @@ let test_streaming_exec_buffers_eintr_retry_output () =
     false
     (contains_substring streamed_stderr "interrupted system call")
 
+let test_streaming_exec_keeps_successful_progress_live () =
+  with_fake_docker fake_docker_eintr_streaming_retry_script @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+  let base, config, meta = setup_config "minjae" in
+  let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
+  let host_config_dir =
+    Filename.concat (Filename.concat base Common.masc_dirname) "config"
+  in
+  ensure_dir host_root;
+  ensure_dir host_config_dir;
+  let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta ~turn_id:1 () in
+  Fun.protect ~finally:(fun () ->
+    Keeper_turn_sandbox_runtime.cleanup runtime;
+    cleanup_dir base) @@ fun () ->
+  let start = Unix.gettimeofday () in
+  let first_stdout_at = ref None in
+  let stdout_chunks = ref [] in
+  (match
+     Keeper_turn_sandbox_runtime.run_exec_with_status_split
+       ~on_stdout_chunk:(fun chunk ->
+         if Option.is_none !first_stdout_at
+         then first_stdout_at := Some (Unix.gettimeofday () -. start);
+         stdout_chunks := chunk :: !stdout_chunks)
+       ~timeout_sec:5.0
+       runtime
+       ~cwd:host_root
+       ~command_argv:[ "progress" ]
+   with
+   | Error msg -> Alcotest.failf "expected progress exec success, got %s" msg
+   | Ok (Unix.WEXITED 0, stdout, stderr) ->
+       Alcotest.(check string)
+         "progress stdout"
+         "progress-1\nprogress-2\ndone\n"
+         stdout;
+       Alcotest.(check string) "progress stderr" "" stderr
+   | Ok _ -> Alcotest.fail "expected progress exec exit 0");
+  let elapsed = Unix.gettimeofday () -. start in
+  let first_stdout_at =
+    match !first_stdout_at with
+    | Some at -> at
+    | None -> Alcotest.fail "expected progress stdout callback"
+  in
+  Alcotest.(check string)
+    "progress callback stdout"
+    "progress-1\nprogress-2\ndone\n"
+    (String.concat "" (List.rev !stdout_chunks));
+  Alcotest.(check bool)
+    "progress callback arrives before command completion"
+    true
+    (first_stdout_at < elapsed -. 0.5)
+
 let test_default_fs_hardening_helpers () =
   with_env "MASC_KEEPER_SANDBOX_RELAX_FS" "false" @@ fun () ->
   Alcotest.(check (list string)) "default helper keeps read-only rootfs"
@@ -1894,6 +1958,9 @@ let run_tests ~clock () =
           Alcotest.test_case
             "streaming exec buffers EINTR retry output"
             `Quick test_streaming_exec_buffers_eintr_retry_output;
+          Alcotest.test_case
+            "streaming exec keeps successful progress live"
+            `Quick test_streaming_exec_keeps_successful_progress_live;
           Alcotest.test_case
             "turn runtime relaxed fs omits readonly and noexec"
             `Quick test_turn_runtime_relaxed_fs_omits_readonly_and_noexec;

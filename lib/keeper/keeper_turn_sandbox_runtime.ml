@@ -233,30 +233,80 @@ let retryable_eintr_status ~attempts_left st ~stdout ~stderr =
   | _ -> false
 ;;
 
-let flush_chunk_buffer on_chunk chunks =
-  match on_chunk with
-  | None -> ()
-  | Some on_chunk -> List.iter on_chunk (List.rev !chunks)
+type retry_stream_guard = {
+  on_stdout_chunk : (string -> unit) option;
+  on_stderr_chunk : (string -> unit) option;
+  held_chunks : [ `Stdout of string | `Stderr of string ] list ref;
+  mutable held_count : int;
+  mutable saw_retry_marker : bool;
+  mutable pass_through : bool;
+  mutable visible_flushed : bool;
+}
+
+let retry_eintr_marker = "interrupted system call"
+
+let emit_guard_chunk guard = function
+  | `Stdout chunk ->
+    Option.iter (fun f -> f chunk) guard.on_stdout_chunk;
+    guard.visible_flushed <- true
+  | `Stderr chunk ->
+    Option.iter (fun f -> f chunk) guard.on_stderr_chunk;
+    guard.visible_flushed <- true
 ;;
 
-let run_split_retry_eintr_buffering_callbacks
+let flush_guard_held_chunks guard =
+  match !(guard.held_chunks) with
+  | [] -> ()
+  | chunks ->
+    List.iter (emit_guard_chunk guard) (List.rev chunks);
+    guard.held_chunks := [];
+    guard.held_count <- 0
+;;
+
+let maybe_release_guard_prefix guard =
+  if (not guard.saw_retry_marker) && guard.held_count >= 2
+  then (
+    flush_guard_held_chunks guard;
+    guard.pass_through <- true)
+;;
+
+let guard_attempt_callback guard stream chunk =
+  if guard.pass_through
+  then emit_guard_chunk guard (stream chunk)
+  else (
+    if String_util.contains_substring_ci chunk retry_eintr_marker
+    then guard.saw_retry_marker <- true;
+    guard.held_chunks := stream chunk :: !(guard.held_chunks);
+    guard.held_count <- guard.held_count + 1;
+    maybe_release_guard_prefix guard)
+;;
+
+let run_split_retry_eintr_with_live_callbacks
       ?on_stdout_chunk
       ?on_stderr_chunk
       ~run_attempt
       ()
   =
   let rec loop attempts_left =
-    let stdout_chunks = ref [] in
-    let stderr_chunks = ref [] in
+    let guard =
+      { on_stdout_chunk
+      ; on_stderr_chunk
+      ; held_chunks = ref []
+      ; held_count = 0
+      ; saw_retry_marker = false
+      ; pass_through = false
+      ; visible_flushed = false
+      }
+    in
     let attempt_on_stdout_chunk =
       match on_stdout_chunk with
       | None -> None
-      | Some _ -> Some (fun chunk -> stdout_chunks := chunk :: !stdout_chunks)
+      | Some _ -> Some (guard_attempt_callback guard (fun chunk -> `Stdout chunk))
     in
     let attempt_on_stderr_chunk =
       match on_stderr_chunk with
       | None -> None
-      | Some _ -> Some (fun chunk -> stderr_chunks := chunk :: !stderr_chunks)
+      | Some _ -> Some (guard_attempt_callback guard (fun chunk -> `Stderr chunk))
     in
     let st, stdout, stderr =
       run_attempt
@@ -265,10 +315,10 @@ let run_split_retry_eintr_buffering_callbacks
         ()
     in
     if retryable_eintr_status ~attempts_left st ~stdout ~stderr
+       && not guard.visible_flushed
     then loop (attempts_left - 1)
     else (
-      flush_chunk_buffer on_stdout_chunk stdout_chunks;
-      flush_chunk_buffer on_stderr_chunk stderr_chunks;
+      flush_guard_held_chunks guard;
       st, stdout, stderr)
   in
   loop max_eintr_retries
@@ -281,7 +331,7 @@ let run_argv_with_status_split_retry_eintr
       argv
   =
   Docker_spawn_throttle.with_slot (fun () ->
-    run_split_retry_eintr_buffering_callbacks
+    run_split_retry_eintr_with_live_callbacks
       ?on_stdout_chunk
       ?on_stderr_chunk
       ~run_attempt:(fun ?on_stdout_chunk ?on_stderr_chunk () ->
@@ -352,7 +402,7 @@ let run_argv_with_stdin_and_status_split_retry_eintr
       argv
   =
   Docker_spawn_throttle.with_slot (fun () ->
-    run_split_retry_eintr_buffering_callbacks
+    run_split_retry_eintr_with_live_callbacks
       ?on_stdout_chunk
       ?on_stderr_chunk
       ~run_attempt:(fun ?on_stdout_chunk ?on_stderr_chunk () ->
@@ -380,7 +430,7 @@ let run_argv_pipeline_with_status_split_retry_eintr
       stages
   =
   Docker_spawn_throttle.with_slot (fun () ->
-    run_split_retry_eintr_buffering_callbacks
+    run_split_retry_eintr_with_live_callbacks
       ?on_stdout_chunk
       ?on_stderr_chunk
       ~run_attempt:(fun ?on_stdout_chunk ?on_stderr_chunk () ->

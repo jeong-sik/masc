@@ -116,7 +116,59 @@ let test_docker_pipeline_runner_callback_is_live () =
   assert (String.concat "" (List.rev !stdout_chunks) = "pipe-firstpipe-second");
   assert_live_first_callback ~label:"docker pipeline" ~first_stdout_at ~elapsed
 
+let test_docker_decomposed_fallback_callback_is_live () =
+  (* NDT-OK: this regression asserts callback ordering across dispatch. *)
+  let start = Unix.gettimeofday () in
+  let first_stdout_at = ref None in
+  let stdout_chunks = ref [] in
+  let stderr_chunks = ref [] in
+  let on_output_chunk = function
+    | `Stdout chunk ->
+        if Option.is_none !first_stdout_at then
+          (* NDT-OK: record callback arrival time relative to dispatch start. *)
+          first_stdout_at := Some (Unix.gettimeofday () -. start);
+        stdout_chunks := chunk :: !stdout_chunks
+    | `Stderr chunk -> stderr_chunks := chunk :: !stderr_chunks
+  in
+  let runner ~on_stdout_chunk ~on_stderr_chunk ~stdin_content ~argv ~env:_ ~cwd:_ =
+    match argv, stdin_content with
+    | [ "printf"; "mid" ], None ->
+        Option.iter (fun f -> f "mid") on_stdout_chunk;
+        Option.iter (fun f -> f "stage1-err") on_stderr_chunk;
+        Unix.WEXITED 0, "mid", "stage1-err"
+    | [ "cat" ], Some "mid" ->
+        Option.iter (fun f -> f "final-first") on_stdout_chunk;
+        sleep 0.30;
+        Option.iter (fun f -> f "final-second") on_stdout_chunk;
+        Option.iter (fun f -> f "stage2-err") on_stderr_chunk;
+        Unix.WEXITED 0, "final-firstfinal-second", "stage2-err"
+    | _ -> fail "unexpected decomposed fallback stage"
+  in
+  let docker_sandbox =
+    Masc_exec.Sandbox_target.docker ~image:"fake-docker" ~runner ()
+  in
+  let result =
+    Masc_exec.Exec_dispatch.dispatch_pipeline
+      ~on_output_chunk
+      [ Masc_exec.Shell_ir.Simple
+          (simple ~sandbox:docker_sandbox "printf" [ "mid" ])
+      ; Masc_exec.Shell_ir.Simple (simple ~sandbox:docker_sandbox "cat" [])
+      ]
+  in
+  (* NDT-OK: compare dispatch completion time to first callback arrival. *)
+  let elapsed = Unix.gettimeofday () -. start in
+  assert (result.status = Unix.WEXITED 0);
+  assert (result.stdout = "final-firstfinal-second");
+  assert (result.stderr = "stage1-errstage2-err");
+  assert (String.concat "" (List.rev !stdout_chunks) = "final-firstfinal-second");
+  assert (String.concat "" (List.rev !stderr_chunks) = "stage1-errstage2-err");
+  assert_live_first_callback
+    ~label:"docker decomposed fallback"
+    ~first_stdout_at
+    ~elapsed
+
 let () =
   test_docker_simple_runner_callback_is_live ();
   test_docker_pipeline_runner_callback_is_live ();
+  test_docker_decomposed_fallback_callback_is_live ();
   print_endline "exec_dispatch_docker_streaming: ok"

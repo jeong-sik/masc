@@ -101,7 +101,9 @@ are emitted from that command's stdout/stderr pipes as chunks are read.
 Docker Shell IR targets receive the same stdout/stderr callback contract through
 `Sandbox_target.runner` and `Sandbox_target.pipeline_runner`; the keeper Docker
 adapter forwards those callbacks to the underlying `docker exec` process drain.
-Decomposed fallback pipeline paths still emit captured output after completion.
+When a pipeline falls back to decomposed stage execution, stage stderr is
+streamed as each stage runs and only the final stage's stdout is surfaced as
+user output; intermediate stdout remains stdin for the next stage.
 
 Verification:
 

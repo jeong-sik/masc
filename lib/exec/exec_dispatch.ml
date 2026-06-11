@@ -284,8 +284,19 @@ let docker_pipeline_specs stages =
   loop None None [] stages
 
 (* TEL-OK: this lower-level Shell IR dispatcher is wrapped by Execute/keeper
-   telemetry at the action boundary; it only preserves captured output delivery. *)
+   telemetry at the action boundary; it preserves output delivery but does not
+   record action-level telemetry directly. *)
 let rec dispatch_pipeline ?stdin_content ?on_output_chunk stages =
+  let decomposed_stage_callback ~is_final on_output_chunk =
+    match on_output_chunk with
+    | None -> None
+    | Some on_chunk ->
+        Some
+          (function
+          | `Stdout chunk ->
+              if is_final then on_chunk (`Stdout chunk)
+          | `Stderr chunk -> on_chunk (`Stderr chunk))
+  in
   let result, emitted_live_output =
     match stages with
     | [] ->
@@ -337,8 +348,13 @@ let rec dispatch_pipeline ?stdin_content ?on_output_chunk stages =
                  let rec chain ~prev_stdout ~status ~stderr = function
                    | [] -> { status; stdout = prev_stdout; stderr }
                    | Shell_ir.Simple s :: rest ->
+                       let is_final = match rest with [] -> true | _ -> false in
+                       let stage_on_output_chunk =
+                         decomposed_stage_callback ~is_final on_output_chunk
+                       in
                        let stage_result =
                          dispatch_simple
+                           ?on_output_chunk:stage_on_output_chunk
                            ~stdin_content:prev_stdout
                            s
                        in
@@ -366,7 +382,14 @@ let rec dispatch_pipeline ?stdin_content ?on_output_chunk stages =
                   | first :: rest -> (
                     match first with
                     | Shell_ir.Simple s ->
-                        let first_result = dispatch_simple s in
+                        let first_on_output_chunk =
+                          decomposed_stage_callback
+                            ~is_final:false
+                            on_output_chunk
+                        in
+                        let first_result =
+                          dispatch_simple ?on_output_chunk:first_on_output_chunk s
+                        in
                         let status =
                           pipeline_status (Unix.WEXITED 0) first_result.status
                         in
@@ -376,14 +399,14 @@ let rec dispatch_pipeline ?stdin_content ?on_output_chunk stages =
                             ; stdout = first_result.stdout
                             ; stderr = first_result.stderr
                             }
-                          , false )
+                          , Option.is_some on_output_chunk )
                         else
                           ( chain
                               ~prev_stdout:first_result.stdout
                               ~status
                               ~stderr:first_result.stderr
                               rest
-                          , false )
+                          , Option.is_some on_output_chunk )
                     | Pipeline _ ->
                         ( invalid_pipeline
                             "nested pipeline not supported in native dispatch"

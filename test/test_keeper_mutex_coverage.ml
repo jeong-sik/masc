@@ -361,6 +361,68 @@ let test_keeper_msg_async_rejects_oversized_request_id () =
          (Keeper_msg_async.For_testing.record_path ~base_path ~request_id:too_long))
 ;;
 
+let test_keeper_msg_async_request_id_boundary () =
+  let base_path = temp_dir "keeper-msg-id-boundary-" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+       (* Empty (0-char) — rejected *)
+       check
+         (option string)
+         "empty request id rejected"
+         None
+         (Keeper_msg_async.For_testing.record_path ~base_path ~request_id:"");
+       (* 1-char — accepted *)
+       check
+         bool
+         "1-char request id accepted"
+         true
+         (Option.is_some
+            (Keeper_msg_async.For_testing.record_path ~base_path ~request_id:"x"));
+       (* 127-char — accepted (boundary below max) *)
+       check
+         bool
+         "127-char request id accepted"
+         true
+         (Option.is_some
+            (Keeper_msg_async.For_testing.record_path ~base_path ~request_id:(String.make 127 'x')));
+       (* Special chars that should be rejected *)
+       check
+         (option string)
+         "slash in request id rejected"
+         None
+         (Keeper_msg_async.For_testing.record_path ~base_path ~request_id:"foo/bar");
+       check
+         (option string)
+         "unicode in request id rejected"
+         None
+         (Keeper_msg_async.For_testing.record_path ~base_path ~request_id:"héllo");
+       check
+         (option string)
+         "space in request id rejected"
+         None
+         (Keeper_msg_async.For_testing.record_path ~base_path ~request_id:"foo bar");
+       (* Valid special chars that should be accepted *)
+       check
+         bool
+         "hyphen accepted"
+         true
+         (Option.is_some
+            (Keeper_msg_async.For_testing.record_path ~base_path ~request_id:"foo-bar"));
+       check
+         bool
+         "underscore accepted"
+         true
+         (Option.is_some
+            (Keeper_msg_async.For_testing.record_path ~base_path ~request_id:"foo_bar"));
+       check
+         bool
+         "dot accepted"
+         true
+         (Option.is_some
+            (Keeper_msg_async.For_testing.record_path ~base_path ~request_id:"foo.bar")))
+;;
+
 let test_yield_meter_noops_without_runnable_fiber () =
   let meter = Eio_guard.create_yield_meter ~interval:0 () in
   Eio_guard.enable ();
@@ -445,6 +507,10 @@ let () =
             "oversized request id rejected"
             `Quick
             test_keeper_msg_async_rejects_oversized_request_id
+        ; test_case
+            "request_id boundary: empty, 1-char, 127-char, special/unicode"
+            `Quick
+            test_keeper_msg_async_request_id_boundary
         ] )
     ; ( "eio_guard"
       , [ test_case

@@ -60,7 +60,7 @@ let test_pp_rest_error_wraps_inner_error () =
 
 let test_send_message_without_token_returns_missing_token () =
   unsetenv "DISCORD_BOT_TOKEN";
-  match State.send_message ~channel_id:"123" ~content:"hi" with
+  match State.send_message ~channel_id:"123" ~content:"hi" () with
   | Error State.Missing_token -> ()
   | Error other ->
     fail

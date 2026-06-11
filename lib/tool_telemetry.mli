@@ -33,7 +33,7 @@ type trace_id = string
 val with_span
   :  ?force_new_trace_id:bool
   -> tool_name:string
-  -> ((unit -> trace_id option) -> 'a * string)
+  -> ((unit -> (trace_id * trace_id) option) -> 'a * string)
   -> 'a * string
 
 (** Register the [tool_dispatch_total] Otel_metric_store counter with labels

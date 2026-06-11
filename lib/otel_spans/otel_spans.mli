@@ -52,7 +52,7 @@ val with_span :
   name:string ->
   ?attrs:Opentelemetry.key_value list ->
   ?force_new_trace_id:bool ->
-  ((unit -> string option) -> 'a) ->
+  ((unit -> (string * string) option) -> 'a) ->
   'a
 
 (** [add_event ~name ~attrs ()] appends an event to the active OTel span.

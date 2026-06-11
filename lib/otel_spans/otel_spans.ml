@@ -212,7 +212,9 @@ let with_span ~name ?(attrs = []) ?(force_new_trace_id = false) f =
     OT.Trace.with_ ~force_new_trace_id name ~attrs (fun scope ->
       f (fun () ->
         let ctx = OT.Scope.to_span_ctx scope in
-        Some (OT.Trace_id.to_hex (OT.Span_ctx.trace_id ctx))))
+        let trace_id = OT.Trace_id.to_hex (OT.Span_ctx.trace_id ctx) in
+        let span_id = OT.Span_id.to_hex (OT.Span_ctx.parent_id ctx) in
+        Some (trace_id, span_id)))
 
 (** Add an event to the active OTel span. No-op when disabled or when no
     ambient span exists. *)

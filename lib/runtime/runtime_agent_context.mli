@@ -63,6 +63,7 @@ type config = {
   description : string option;
   initial_messages : Agent_sdk.Types.message list;
   raw_trace : Agent_sdk.Raw_trace.t option;
+  trace_link : (string * string) option;
   enable_thinking : bool option;
   transport : Masc_grpc_transport.t;
   allowed_paths : string list;

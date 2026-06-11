@@ -21,6 +21,27 @@ let pp_error = function
   | Missing_value name -> Printf.sprintf "option --%s requires a value" name
   | Missing_positional name -> Printf.sprintf "missing positional argument: %s" name
 
+(** {1 Query helpers} *)
+
+let get_flag t name =
+  try
+    let v = Hashtbl.find t.named name in
+    v = "true"
+  with Not_found -> false
+
+let has_flag = get_flag
+
+let positional_args t = t.positional
+
+let get_option t name =
+  try
+    let v = Hashtbl.find t.named name in
+    if v = "true" then None    (* it's a flag, not an option value *)
+    else Some v
+  with Not_found -> None
+
+(** {1 Parse} *)
+
 let parse specs argv =
   (* Build lookup maps *)
   let flags = Hashtbl.create 16 in
@@ -109,13 +130,6 @@ let parse specs argv =
   done;
 
   (* Check missing required positionals *)
-  Hashtbl.iter (fun name _ ->
-    if not (Hashtbl.mem named name) then
-      (* This is a required positional not yet assigned *)
-      ignore name
-  ) positionals;
-
-  (* Check that all required pos_args got a value *)
   let missing = ref [] in
   Hashtbl.iter (fun name _ ->
     if not (Hashtbl.mem named name) then

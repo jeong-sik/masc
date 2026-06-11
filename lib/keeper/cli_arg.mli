@@ -1,55 +1,63 @@
-(** Command-line argument parser — typed, standalone.
+(** CLI argument parser for ocaml-masc.
 
-    Supports:
-    - {b Positional arguments} — ordered, required, named.
-    - {b Flags} — boolean switches ([--verbose]).
-    - {b Options} — key-value flags ([--output file.txt]).
+    Parses [argv]-style arrays against a [spec] list. Supports
+    long flags (--verbose), long options with space or [=] separator
+    (--output file.txt / --output=file.txt), positional arguments,
+    optional positionals with defaults, and [--] separator.
 
-    The parser operates on [Sys.argv] style [string array] input
-    and produces a typed result via {!parse}.
+    A successful parse returns [t] with query helpers; on failure
+    an [error] variant makes diagnostics straightforward. *)
 
-    @since 3.0.0 *)
+(** {1 Specification} *)
 
-(** {1 Specifications} *)
-
-(** A spec describes one command-line parameter. *)
 type spec =
-  (** A positional argument with a name (for help/errors). *)
   | Positional of string
-  (** A boolean flag: [--verbose] sets true. *)
+      (** Required positional argument, e.g. [Positional "filename"]. *)
   | Flag of string
-  (** An option with a value: [--output file.txt] stores ["file.txt"]. *)
+      (** Boolean flag, e.g. [Flag "verbose"]. Present → ["true"]. *)
   | Option of string
-  (** A named positional with default value. *)
+      (** Flag that takes a value, e.g. [Option "output"]. *)
   | Positional_opt of string * string
+      (** Optional positional with default value,
+          e.g. [Positional_opt ("format", "json")]. *)
 
-(** {1 Parsed result} *)
+(** {1 Result} *)
 
-(** Parsed arguments indexed by spec name. *)
 type t = {
-  positional : string list;       (** unnamed positional args *)
-  named : (string, string) Hashtbl.t;  (** spec name -> parsed value *)
+  positional : string list;
+      (** Trailing positional arguments beyond the spec. *)
+  named : (string, string) Hashtbl.t;
+      (** All named values — flags, options, positional assignments. *)
 }
 
-(** {1 Errors} *)
-
 type error =
-  | Unknown_flag of string
-  | Missing_value of string
-  | Missing_positional of string
+  | Unknown_flag of string  (** e.g. [--undefined] *)
+  | Missing_value of string (** e.g. [--output] without argument *)
+  | Missing_positional of string  (** required positional absent *)
 
 val pp_error : error -> string
 (** Human-readable error message. *)
 
-(** {1 Parsing} *)
+(** {1 Parse} *)
 
 val parse : spec list -> string array -> (t, error) result
-(** [parse specs argv] parses [argv] according to [specs].
-    - Leading positional args before any [--] are matched left-to-right.
-    - Flags ([--name]) are matched by name.
-    - Options ([--name value]) consume the next token.
-    - [--] ends flag/option parsing; remaining tokens are positional.
-    - Unrecognised flags/options return {!Unknown_flag}.
-    - Missing option values return {!Missing_value}.
-    - Missing required positionals return {!Missing_positional}.
-    - Bool flags default to [false]; optional strings default to [""]. *)
+(** [parse specs argv] consumes [argv] (skipping [argv.(0)] as the
+    program name) according to [specs]. Returns [Ok t] on success,
+    [Error err] on first parse error. *)
+
+(** {1 Query helpers} *)
+
+val get_flag : t -> string -> bool
+(** [get_flag t name] returns [true] if the flag [--name] was set,
+    [false] otherwise. *)
+
+val has_flag : t -> string -> bool
+(** Alias for {!get_flag}. *)
+
+val positional_args : t -> string list
+(** [positional_args t] returns leftover positional arguments that
+    did not match any [Positional] or [Positional_opt] spec. *)
+
+val get_option : t -> string -> string option
+(** [get_option t name] returns [Some value] if option [--name] was
+    provided, [None] if absent or if [name] is a plain flag. *)

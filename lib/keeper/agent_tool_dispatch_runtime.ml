@@ -8,6 +8,7 @@
 
 open Keeper_types
 open Agent_tool_shared_runtime
+open Keeper_event_publisher
 include Keeper_tool_registry
 include Keeper_tool_policy
 
@@ -520,5 +521,17 @@ let execute_keeper_tool_call
       ~input
       ()
   in
+  let outcome_str =
+    match result.outcome with
+    | `Success -> "success"
+    | `Failure -> "failure"
+  in
+  publish_telemetry_event
+    ~event_name:"tool_dispatch"
+    ~payload:(`Assoc
+      [ ("keeper_name", `String meta.name)
+      ; ("tool_name", `String name)
+      ; ("outcome", `String outcome_str)
+      ]);
   result.raw_output
 ;;

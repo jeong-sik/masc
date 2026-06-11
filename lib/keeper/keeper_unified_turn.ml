@@ -8,6 +8,7 @@
 
 open Keeper_types
 open Keeper_context_runtime
+open Keeper_event_publisher
 module Social = Keeper_social_model
 module KCP = Keeper_cascade_profile
 include Keeper_turn_helpers
@@ -116,6 +117,15 @@ let run_keeper_cycle
     ~turn_id:keeper_turn_id
     ~prev:Keeper_turn_fsm.Idle
     Keeper_turn_fsm.Phase_gating;
+  publish_telemetry_event
+    ~event_name:"turn_admitted"
+    ~payload:(`Assoc
+      [ ("keeper_name", `String meta.name)
+      ; ("turn_id", `Int keeper_turn_id)
+      ; ( "turn_source"
+        , `String (Keeper_world_observation.channel_to_string channel) )
+      ; ("generation", `Int generation)
+      ]);
   (* SupervisorRequestsStop / HonorStopSignal — check stop signal at turn entry.
      If the supervisor set [fiber_stop] between the [should_run_turn] gate in the
      heartbeat loop and this point, honor it cooperatively before any I/O is issued.
@@ -608,6 +618,14 @@ let run_keeper_cycle
                     Keeper_metrics.(to_string Turns)
                     ~labels:[ "keeper_name", meta.name; "outcome", "input_required" ]
                     ();
+                  publish_telemetry_event ~event_name:"turn_completed"
+                    ~payload:(`Assoc
+                      [ "keeper_name", `String meta.name
+                      ; "turn_id", `String (Keeper_turn_id.to_string keeper_turn_id)
+                      ; "outcome", `String "input_required"
+                      ; "latency_ms", `Float latency_ms
+                      ; "generation", `Int meta.generation
+                      ]);
                   cycle_completed := true;
                   post_turn_complete_task ~cycle_completed;
                   Ok meta
@@ -927,6 +945,15 @@ let run_keeper_cycle
                     ~is_auto_recoverable
                     ~err
                     ~error_text:e_str;
+                  publish_telemetry_event ~event_name:"turn_completed"
+                    ~payload:(`Assoc
+                      [ "keeper_name", `String meta.name
+                      ; "turn_id", `String (Keeper_turn_id.to_string keeper_turn_id)
+                      ; "outcome", `String "failure"
+                      ; "latency_ms", `Float latency_ms
+                      ; "generation", `Int meta.generation
+                      ; "error", `String e_str
+                      ]);
                   Error err
                 | Ok result ->
                   let final_execution = !last_execution in
@@ -965,6 +992,14 @@ let run_keeper_cycle
                   in
                   (* Cycle 45: KeeperTaskAcquisition.tla TurnComplete post-action. *)
                   cycle_completed := true;
+                  publish_telemetry_event ~event_name:"turn_completed"
+                    ~payload:(`Assoc
+                      [ "keeper_name", `String meta.name
+                      ; "turn_id", `String (Keeper_turn_id.to_string keeper_turn_id)
+                      ; "outcome", `String "success"
+                      ; "latency_ms", `Float latency_ms
+                      ; "generation", `Int meta.generation
+                      ]);
                   post_turn_complete_task ~cycle_completed;
                   Ok updated_meta))))
   in

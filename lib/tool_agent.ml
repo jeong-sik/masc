@@ -14,6 +14,7 @@ module String = Stdlib.String
 module Char = Stdlib.Char
 module Int = Stdlib.Int
 module Float = Stdlib.Float
+module Keeper_event_publisher = Keeper_event_publisher
 
 (** Tool_agent - Agent management, metrics, and capability discovery handlers *)
 
@@ -310,6 +311,20 @@ let handle_agent_fitness ?(tool_name = "masc_agent_fitness") ?(start_time = 0.0)
       List.map (fun (agent_id, metrics) ->
         let (score, completion, reliability, speed, handoff, thompson) = score_for ~min_avg ~agent_id metrics in
         let ts = Thompson_sampling.get_stats agent_id in
+        Keeper_event_publisher.publish_telemetry_event
+          ~event_name:"tool_selection_outcome"
+          ~payload:(`Assoc
+            [ ("agent_id", `String agent_id)
+            ; ("fitness", `Float score)
+            ; ("completion", `Float completion)
+            ; ("reliability", `Float reliability)
+            ; ("speed", `Float speed)
+            ; ("handoff", `Float handoff)
+            ; ("thompson", `Float thompson)
+            ; ("selections", `Int ts.Thompson_sampling.selections)
+            ; ("alpha", `Float ts.Thompson_sampling.alpha)
+            ; ("beta", `Float ts.Thompson_sampling.beta)
+            ]);
         `Assoc [
           ("agent_id", `String agent_id);
           ("fitness", `Float score);

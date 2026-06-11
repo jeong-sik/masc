@@ -8,6 +8,7 @@
 
 open Keeper_types
 open Keeper_context_runtime
+open Keeper_event_publisher
 
 type cascade_resolution =
   { resolved_meta : keeper_meta
@@ -88,4 +89,17 @@ let resolve_cascade
        ])
   in
   append_cascade_routed_manifest ~cascade_name:resolved_cascade ~decision;
+  publish_telemetry_event
+    ~event_name:"cascade_resolution"
+    ~payload:(`Assoc
+      [ ("keeper_name", `String meta.name)
+      ; ("base_cascade", `String (cascade_name_of_meta meta))
+      ; ("effective_cascade", `String routing.effective_cascade)
+      ; ("resolved_cascade", `String resolved_cascade)
+      ; ("routing_reason", `String routing.reason)
+      ; ( "fail_opened"
+        , `Bool
+            (not (String.equal resolved_cascade routing.effective_cascade))
+        )
+      ]);
   { resolved_meta = routed_meta; resolved_cascade }

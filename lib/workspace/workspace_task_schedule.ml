@@ -451,7 +451,10 @@ let claim_next_r
          discipline used by [Workspace_task] transitions (PR #6634). *)
         let clear_agent_state_after_release () =
           match released_task_id with
-          | Some _ ->
+          | Some rid ->
+            (* RFC-0221 §3.2: flush stale current_task from in-memory context cache *)
+            Task_cache_invariant.clear_stale_agent_task config ~agent_name
+              ~task_id:rid ~status:Masc_domain.Todo ~module_name:"claim_next_r";
             Workspace_task.update_local_agent_state config ~agent_name (fun agent ->
               { agent with status = Active; current_task = None })
           | None -> ()

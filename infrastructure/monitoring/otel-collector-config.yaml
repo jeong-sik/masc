@@ -16,7 +16,8 @@ receivers:
 processors:
   batch:
     timeout: 1s
-    send_batch_size: 1024
+    send_batch_size: 128
+    send_batch_max_size: 256
 
 exporters:
   otlp/jaeger:
@@ -29,6 +30,11 @@ exporters:
     tls:
       insecure: true
     # No external_labels; service.name etc. come from OTLP resource attrs.
+
+  loki:
+    endpoint: http://loki:3100/loki/api/v1/push
+    tls:
+      insecure: true
 
   debug:
     verbosity: detailed
@@ -44,6 +50,11 @@ service:
       receivers: [otlp]
       processors: [batch]
       exporters: [prometheusremotewrite]
+
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [loki]
 
   telemetry:
     logs:

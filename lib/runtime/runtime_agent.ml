@@ -611,9 +611,17 @@ let run
         | Ok c -> Some c
         | Error _ -> Eio_context.get_clock_opt ()
       in
-      match on_event with
-      | Some cb -> Agent_sdk.Agent.run_stream ~sw ?clock ?on_yield ?on_resume ~on_event:cb agent goal
-      | None -> Agent_sdk.Agent.run ~sw ?clock ?on_yield ?on_resume agent goal
+      Otel_spans.with_span
+        ~name:"llm_call"
+        ~attrs:[
+          "gen_ai.request.model", `String config.model_id;
+          "gen_ai.provider.name", `String (Llm_provider.Provider_config.string_of_provider_kind config.provider_cfg.kind);
+          "masc.runtime_id", `String config.name;
+        ]
+        (fun _trace_id ->
+          match on_event with
+          | Some cb -> Agent_sdk.Agent.run_stream ~sw ?clock ?on_yield ?on_resume ~on_event:cb agent goal
+          | None -> Agent_sdk.Agent.run ~sw ?clock ?on_yield ?on_resume agent goal)
     in
     let run_total_duration_ms = run_duration_ms_since run_started_at in
     let checkpoint =

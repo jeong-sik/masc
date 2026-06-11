@@ -36,6 +36,7 @@
   masc.types_boundary
   time_compat
   masc.dated_jsonl
-  masc.masc_process)
+  masc.masc_process
+  masc.otel_spans)
  (preprocess
   (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq)))

@@ -103,7 +103,7 @@
             "pointSize": 0,
             "showPoints": "never"
           },
-          "unit": "ms"
+          "unit": "cpm"
         },
         "overrides": [
           {
@@ -172,22 +172,12 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.5, sum(rate(masc_keeper_turn_latency_bucket_total{keeper=~\"$keeper\"}[$__rate_interval])) by (le)) * 1000",
-          "legendFormat": "p50",
+          "expr": "sum by (bucket) (rate(masc_keeper_turn_latency_bucket_total{keeper=~\"$keeper\"}[$__rate_interval])) * 60",
+          "legendFormat": "{{bucket}}",
           "refId": "A"
-        },
-        {
-          "expr": "histogram_quantile(0.9, sum(rate(masc_keeper_turn_latency_bucket_total{keeper=~\"$keeper\"}[$__rate_interval])) by (le)) * 1000",
-          "legendFormat": "p90",
-          "refId": "B"
-        },
-        {
-          "expr": "histogram_quantile(0.99, sum(rate(masc_keeper_turn_latency_bucket_total{keeper=~\"$keeper\"}[$__rate_interval])) by (le)) * 1000",
-          "legendFormat": "p99",
-          "refId": "C"
         }
       ],
-      "title": "Turn Latency p50 / p90 / p99",
+      "title": "Turn Latency Distribution (buckets/min)",
       "transparent": true,
       "type": "timeseries"
     },
@@ -209,7 +199,7 @@
             "pointSize": 0,
             "showPoints": "never"
           },
-          "unit": "ms"
+          "unit": "cpm"
         }
       },
       "gridPos": {
@@ -235,12 +225,12 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.9, sum(rate(masc_keeper_turn_latency_by_model_bucket_total{keeper=~\"$keeper\"}[$__rate_interval])) by (le, model)) * 1000",
-          "legendFormat": "{{model}}",
+          "expr": "sum by (bucket, model) (rate(masc_keeper_turn_latency_by_model_bucket_total{keeper=~\"$keeper\"}[$__rate_interval])) * 60",
+          "legendFormat": "{{model}} / {{bucket}}",
           "refId": "A"
         }
       ],
-      "title": "Turn Latency p90 by Model",
+      "title": "Turn Latency by Model (buckets/min)",
       "transparent": true,
       "type": "timeseries"
     },
@@ -288,8 +278,8 @@
       },
       "targets": [
         {
-          "expr": "sum by (phase) (rate(masc_keeper_turn_phase_duration_seconds_count_total{keeper=~\"$keeper\"}[$__rate_interval]))",
-          "legendFormat": "{{phase}}",
+          "expr": "sum by (from) (rate(masc_keeper_turn_phase_duration_seconds_count_total{keeper=~\"$keeper\"}[$__rate_interval]))",
+          "legendFormat": "{{from}}",
           "refId": "A"
         }
       ],

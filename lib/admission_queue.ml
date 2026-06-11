@@ -188,20 +188,27 @@ let check_host_resources ~surface ~keeper_name =
 ;;
 
 let with_permit ?wait_timeout_sec:_ ~priority:_ ~keeper_name ~runtime_id f =
-  match
-    check_host_resources ~surface:Admission_queue_metrics.With_permit ~keeper_name
-  with
-  | Error _ as e -> e
-  | Ok () ->
-    (* Passthrough: provider-level throttling belongs in OAS (runtime),
-         not in MASC.  The runtime distributes requests across providers
-         and handles 429/timeout by falling to the next provider.
-         Gating here starves cloud-routed keepers behind a serial local
-         decode and cannot express per-provider capacity.
-         Metric and snapshot observation track real inflight even though
-         gating is off.
-         RFC-0026 PR-E-1.6/1.7; audit response 2026-05-05 §3.1. *)
-    Ok (with_inflight_observation ~keeper_name ~runtime_id f)
+  Otel_spans.with_span
+    ~name:"admission_queue"
+    ~attrs:[
+      "keeper.name", `String keeper_name;
+      "masc.runtime_id", `String runtime_id;
+    ]
+    (fun _trace_id ->
+      match
+        check_host_resources ~surface:Admission_queue_metrics.With_permit ~keeper_name
+      with
+      | Error _ as e -> e
+      | Ok () ->
+        (* Passthrough: provider-level throttling belongs in OAS (runtime),
+             not in MASC.  The runtime distributes requests across providers
+             and handles 429/timeout by falling to the next provider.
+             Gating here starves cloud-routed keepers behind a serial local
+             decode and cannot express per-provider capacity.
+             Metric and snapshot observation track real inflight even though
+             gating is off.
+             RFC-0026 PR-E-1.6/1.7; audit response 2026-05-05 §3.1. *)
+        Ok (with_inflight_observation ~keeper_name ~runtime_id f))
 ;;
 
 let try_with_permit ~priority:_ ~keeper_name ~runtime_id f =

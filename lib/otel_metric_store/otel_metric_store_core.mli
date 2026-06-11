@@ -36,6 +36,12 @@ val inc_counter : string -> ?labels:label list -> ?delta:float -> unit -> unit
 val set_gauge : string -> ?labels:label list -> float -> unit
 val inc_gauge : string -> ?labels:label list -> ?delta:float -> unit -> unit
 val dec_gauge : string -> ?labels:label list -> ?delta:float -> unit -> unit
+val register_histogram_buckets : string -> float list -> unit
+(** Register histogram bucket upper bounds for a histogram metric.
+    Once registered, [observe_histogram] will automatically increment
+    the corresponding [name_bucket_total] counters with [le] labels
+    alongside the existing [name_count_total] counter. *)
+
 val observe_histogram : string -> ?labels:label list -> float -> unit
 val get_metric_value : string -> ?labels:label list -> unit -> float option
 val metric_value_or_zero : string -> ?labels:label list -> unit -> float

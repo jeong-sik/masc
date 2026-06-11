@@ -20,6 +20,7 @@ open Keeper_alerting
 open Keeper_keepalive
 open Keeper_execution
 open Keeper_turn_setup
+open Otel_spans
 
 type tool_result = Keeper_types_profile.tool_result
 
@@ -161,6 +162,13 @@ let preflight_keeper_msg ctx args : (unit, string) result =
    below exits first). Do not add keeper-state mutation ahead of the
    validation guards without moving it behind the slot. *)
 let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ctx args : tool_result =
+  with_span
+    ~name:"keeper_turn"
+    ~attrs:[
+      "keeper.name", `String (get_string args "name" "");
+      "masc.turn_type", `String "direct";
+    ]
+    (fun _trace_id ->
   let on_event =
     match on_event with
     | Some cb -> Some cb
@@ -694,7 +702,7 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ctx args : tool_result
               in
               tool_result_ok (Yojson.Safe.to_string reply_json)
 
-))))))
+)))))))
 
 let handle_keeper_msg ?on_text_delta ?on_event ctx args : tool_result =
   let name = get_string args "name" "" in

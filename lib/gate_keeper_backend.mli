@@ -53,7 +53,9 @@ val persist_connector_assistant_reply :
   base_dir:string ->
   keeper_name:string ->
   source:string ->
+  ?conversation_id:string ->
   reply:string ->
+  unit ->
   unit
 (** Persist a completed connector direct reply on the same chat lane that
     received the inbound user line. Empty replies are ignored. *)

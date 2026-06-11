@@ -42,6 +42,8 @@ let msg ~role ?(ts = Some 1.0) ?(source = None) ?(speaker = None) content
   ; tool_call_id = None
   ; tool_call_name = None
   ; source
+  ; conversation_id = None
+  ; external_message_id = None
   ; speaker
   }
 ;;

@@ -130,6 +130,12 @@ let discord_attention_surface ~guild_id ~channel_id =
   Keeper_external_attention.Discord
     { guild_id; channel_id; parent_channel_id = None; thread_id = None }
 
+let discord_chat_metadata ~guild_id ~channel_id ~message_id =
+  [
+    ("conversation_id", discord_conversation_id ~guild_id ~channel_id);
+    ("external_message_id", message_id);
+  ]
+
 let record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id
       ~message_id ~author_id ~author_name ~content ~mentions_bot ~route ~urgency
   =
@@ -237,7 +243,8 @@ let handle_message_create ~dispatch
   | Some (resolution, resolution_metadata) ->
     let keeper_name = resolution.State.keeper_name in
     let metadata =
-      [ ("discord.channel_id", channel_id)
+      discord_chat_metadata ~guild_id ~channel_id ~message_id
+      @ [ ("discord.channel_id", channel_id)
       ; ("discord.message_id", message_id)
       ; ("discord.bound_channel_id", resolution.bound_channel_id)
       ; ("discord.binding_via_parent", string_of_bool resolution.via_parent)
@@ -387,6 +394,8 @@ let handle_ambient ~base_dir
       Keeper_chat_store.append_user_message
         ~base_dir ~keeper_name ~content:trimmed
         ~source:State.channel
+        ~conversation_id:(discord_conversation_id ~guild_id ~channel_id)
+        ~external_message_id:message_id
         ~speaker:
           { Keeper_chat_store.speaker_id = Some author_id
           ; speaker_name = author_name

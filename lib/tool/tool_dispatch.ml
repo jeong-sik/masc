@@ -139,7 +139,7 @@ type trace_id = string
 type span_wrapper =
   ?force_new_trace_id:bool
   -> tool_name:string
-  -> ((unit -> trace_id option) -> Tool_result.result option * string)
+  -> ((unit -> (trace_id * trace_id) option) -> Tool_result.result option * string)
   -> Tool_result.result option * string
 
 let identity_span_wrapper : span_wrapper =

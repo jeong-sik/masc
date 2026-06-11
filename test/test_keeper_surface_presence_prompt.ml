@@ -75,6 +75,25 @@ let init_runtime_default_for_tests () =
   | Ok () -> ()
   | Error e -> Alcotest.failf "Runtime.init_default failed: %s" e
 
+let init_prompt_config_for_tests () =
+  let original_cwd = Sys.getcwd () in
+  let rec find_root dir hops =
+    if hops > 8 then None
+    else if Sys.file_exists (Filename.concat dir "config/prompts/behavior")
+    then Some dir
+    else
+      let parent = Filename.dirname dir in
+      if parent = dir then None else find_root parent (hops + 1)
+  in
+  match find_root original_cwd 0 with
+  | None ->
+      Alcotest.fail
+        "could not locate repo root (config/prompts/behavior) from test cwd"
+  | Some root ->
+      Unix.putenv "MASC_CONFIG_DIR" (Filename.concat root "config");
+      Config_dir_resolver.reset ();
+      Masc.Keeper_prompt_external.reset_cache ()
+
 let user_message observation =
   let _system, user =
     Prompt.build_prompt ~meta ~base_path:"/tmp/unused" ~observation ()
@@ -130,7 +149,7 @@ let test_offline_surface_rendered_as_offline () =
 
 (* External-speaker discretion guidance rides the same gate as the
    section: connector present => rendered, dashboard-only => absent. *)
-let discretion_needle = "External speakers may share these surfaces."
+let discretion_needle = "External speakers may share connected surfaces."
 let surface_read_needle =
   "Read an alive connector lane with keeper_surface_read"
 let external_post_guard_needle =
@@ -173,6 +192,7 @@ let test_empty_presence_has_no_section () =
     (contains ~needle:"### Connected Surfaces" user)
 
 let () =
+  init_prompt_config_for_tests ();
   init_runtime_default_for_tests ();
   run "keeper_surface_presence_prompt"
     [

@@ -1,0 +1,31 @@
+name: Test Coverage Check
+on:
+  pull_request:
+    paths:
+      - 'lib/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    if: |
+      !contains(github.head_ref, 'chore/') &&
+      !contains(github.head_ref, 'docs/')
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check PR body for opt-out
+        id: skip_check
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          if echo "$PR_BODY" | grep -q '# ci:skip-test-coverage'; then
+            echo "skip=true" >> ${{ GITHUB_OUTPUT }}
+          else
+            echo "skip=false" >> ${{ GITHUB_OUTPUT }}
+          fi
+      - name: Run test coverage check
+        if: steps.skip_check.outputs.skip != 'true'
+        run: python3 scripts/check_test_coverage.py

@@ -328,9 +328,10 @@ let docker_pipeline_specs stages =
    record action-level telemetry directly. *)
 let rec dispatch_pipeline ?stdin_content ?on_output_chunk stages =
   let on_output_chunk, emitted = tracked_output_callback on_output_chunk in
-  let decomposed_stage_callback ~is_final on_output_chunk =
+  let decomposed_stage_callback ~is_final (simple : Shell_ir.simple) on_output_chunk =
     match on_output_chunk with
     | None -> None
+    | Some _ when simple.redirects <> [] -> None
     | Some on_chunk ->
         Some
           (function
@@ -390,7 +391,7 @@ let rec dispatch_pipeline ?stdin_content ?on_output_chunk stages =
                    | Shell_ir.Simple s :: rest ->
                        let is_final = match rest with [] -> true | _ -> false in
                        let stage_on_output_chunk =
-                         decomposed_stage_callback ~is_final on_output_chunk
+                         decomposed_stage_callback ~is_final s on_output_chunk
                        in
                        let stage_result =
                          dispatch_simple
@@ -427,6 +428,7 @@ let rec dispatch_pipeline ?stdin_content ?on_output_chunk stages =
                         let first_on_output_chunk =
                           decomposed_stage_callback
                             ~is_final:false
+                            s
                             on_output_chunk
                         in
                         let first_result =

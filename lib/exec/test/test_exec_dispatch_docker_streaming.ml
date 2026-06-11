@@ -10,13 +10,13 @@ let bin s =
   | Ok bin -> bin
   | Error (`Unknown name) -> fail ("unknown exec program: " ^ name)
 
-let simple ?sandbox executable args =
+let simple ?sandbox ?(redirects = []) executable args =
   let open Masc_exec.Shell_ir in
   { bin = bin executable
   ; args = List.map lit args
   ; env = []
   ; cwd = None
-  ; redirects = []
+  ; redirects
   (* DET-OK: test helper default keeps sandbox choice explicit at call sites. *)
   ; sandbox = Option.value sandbox ~default:(Masc_exec.Sandbox_target.host ())
   }
@@ -167,6 +167,51 @@ let test_docker_decomposed_fallback_callback_is_live () =
     ~first_stdout_at
     ~elapsed
 
+let test_docker_decomposed_final_redirect_does_not_stream_dropped_stdout () =
+  let stdout_chunks = ref [] in
+  let stderr_chunks = ref [] in
+  let on_output_chunk = function
+    | `Stdout chunk -> stdout_chunks := chunk :: !stdout_chunks
+    | `Stderr chunk -> stderr_chunks := chunk :: !stderr_chunks
+  in
+  let dev_null =
+    Masc_exec.Path_scope.classify ~raw:"/dev/null" ~cwd:"/tmp"
+  in
+  let drop_stdout =
+    Masc_exec.Redirect_scope.File
+      { fd = 1; target = dev_null; mode = Masc_exec.Redirect_scope.Write }
+  in
+  let runner ~on_stdout_chunk ~on_stderr_chunk ~stdin_content ~argv ~env:_ ~cwd:_ =
+    match argv, stdin_content with
+    | [ "printf"; "mid" ], None ->
+        Option.iter (fun f -> f "mid") on_stdout_chunk;
+        Unix.WEXITED 0, "mid", ""
+    | [ "cat" ], Some "mid" ->
+        (match on_stdout_chunk with
+         | None -> ()
+         | Some _ -> fail "redirected final stage received live stdout callback");
+        Option.iter (fun f -> f "final-err") on_stderr_chunk;
+        Unix.WEXITED 0, "dropped-final-stdout", "final-err"
+    | _ -> fail "unexpected redirected decomposed fallback stage"
+  in
+  let docker_sandbox =
+    Masc_exec.Sandbox_target.docker ~image:"fake-docker" ~runner ()
+  in
+  let result =
+    Masc_exec.Exec_dispatch.dispatch_pipeline
+      ~on_output_chunk
+      [ Masc_exec.Shell_ir.Simple
+          (simple ~sandbox:docker_sandbox "printf" [ "mid" ])
+      ; Masc_exec.Shell_ir.Simple
+          (simple ~sandbox:docker_sandbox ~redirects:[ drop_stdout ] "cat" [])
+      ]
+  in
+  assert (result.status = Unix.WEXITED 0);
+  assert (result.stdout = "");
+  assert (result.stderr = "final-err");
+  assert (String.concat "" (List.rev !stdout_chunks) = "");
+  assert (String.concat "" (List.rev !stderr_chunks) = "final-err")
+
 let test_docker_simple_runner_captured_error_is_streamed () =
   let stderr_chunks = ref [] in
   let on_output_chunk = function
@@ -279,6 +324,7 @@ let () =
   test_docker_simple_runner_callback_is_live ();
   test_docker_pipeline_runner_callback_is_live ();
   test_docker_decomposed_fallback_callback_is_live ();
+  test_docker_decomposed_final_redirect_does_not_stream_dropped_stdout ();
   test_docker_simple_runner_captured_error_is_streamed ();
   test_docker_simple_runner_replays_unstreamed_stderr ();
   test_docker_pipeline_runner_captured_output_is_streamed ();

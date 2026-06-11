@@ -389,6 +389,24 @@ let inspect_container_exists ~timeout_sec container_name =
   | _ -> Error inspect_out
 ;;
 
+let inspect_container_running ~timeout_sec container_name =
+  let inspect_argv =
+    Keeper_sandbox_runtime.docker_command_argv ()
+    @ [ "inspect"; "--format"; "{{.State.Running}}"; container_name ]
+  in
+  let inspect_st, inspect_out =
+    run_argv_with_status_retry_eintr ~timeout_sec inspect_argv
+  in
+  match inspect_st, String.trim inspect_out with
+  | Unix.WEXITED 0, "true" -> Ok ()
+  | Unix.WEXITED 0, state ->
+    Error
+      (Printf.sprintf
+         "docker_container_not_running: %s"
+         (if state = "" then "<empty>" else state))
+  | _ -> Error inspect_out
+;;
+
 let start_container (t : t) ~timeout_sec =
   let image =
     match t.meta.sandbox_image with
@@ -546,7 +564,7 @@ let ensure_started ?(validate_running = false) (t : t) ~timeout_sec =
     then Ok container_name
     else (
       match
-        inspect_container_exists
+        inspect_container_running
           ~timeout_sec:(container_inspect_timeout_sec ())
           container_name
       with
@@ -557,7 +575,7 @@ let ensure_started ?(validate_running = false) (t : t) ~timeout_sec =
   | Not_started -> start_container t ~timeout_sec
 ;;
 
-let run_exec_with_status_once
+let run_exec_with_status_split_once
       ?(validate_cached_container = false)
       ?(stdin_content : string option)
       ?on_stdout_chunk
@@ -603,33 +621,29 @@ let run_exec_with_status_once
     let has_output_callback =
       Option.is_some on_stdout_chunk || Option.is_some on_stderr_chunk
     in
-    let st, out =
+    let st, stdout, stderr =
       match stdin_content, has_output_callback with
       | Some content, false ->
-        run_argv_with_stdin_and_status_retry_eintr ~stdin_content:content argv
-      | None, false -> run_argv_with_status_retry_eintr argv
+        run_argv_with_stdin_and_status_split_retry_eintr
+          ~stdin_content:content
+          argv
+      | None, false -> run_argv_with_status_split_retry_eintr argv
       | Some content, true ->
-        let st, stdout, stderr =
-          run_argv_with_stdin_and_status_split_retry_eintr
-            ?on_stdout_chunk
-            ?on_stderr_chunk
-            ~stdin_content:content
-            argv
-        in
-        st, output_for_status ~stdout ~stderr
+        run_argv_with_stdin_and_status_split_retry_eintr
+          ?on_stdout_chunk
+          ?on_stderr_chunk
+          ~stdin_content:content
+          argv
       | None, true ->
-        let st, stdout, stderr =
-          run_argv_with_status_split_retry_eintr
-            ?on_stdout_chunk
-            ?on_stderr_chunk
-            argv
-        in
-        st, output_for_status ~stdout ~stderr
+        run_argv_with_status_split_retry_eintr
+          ?on_stdout_chunk
+          ?on_stderr_chunk
+          argv
     in
-    Ok (st, out)
+    Ok (st, stdout, stderr)
 ;;
 
-let run_exec_with_status
+let run_exec_with_status_split
       ?stdin_content
       ?on_stdout_chunk
       ?on_stderr_chunk
@@ -642,7 +656,7 @@ let run_exec_with_status
     Option.is_some on_stdout_chunk || Option.is_some on_stderr_chunk
   in
   match
-    run_exec_with_status_once
+    run_exec_with_status_split_once
       ~validate_cached_container:has_output_callback
       ?stdin_content
       ?on_stdout_chunk
@@ -653,10 +667,11 @@ let run_exec_with_status
       ~command_argv
   with
   | Error _ as err -> err
-  | Ok ((Unix.WEXITED 126 | Unix.WEXITED 127), out) when container_missing_error out ->
+  | Ok ((Unix.WEXITED 126 | Unix.WEXITED 127), stdout, stderr)
+    when container_missing_error (output_for_status ~stdout ~stderr) ->
     t.state <- Not_started;
     (match
-       run_exec_with_status_once
+       run_exec_with_status_split_once
          ?stdin_content
          ?on_stdout_chunk
          ?on_stderr_chunk
@@ -668,6 +683,30 @@ let run_exec_with_status
      | Ok _ as ok -> ok
      | Error _ as err -> err)
   | Ok other -> Ok other
+;;
+
+let run_exec_with_status
+      ?stdin_content
+      ?on_stdout_chunk
+      ?on_stderr_chunk
+      ~timeout_sec
+      (t : t)
+      ~(cwd : string)
+      ~(command_argv : string list)
+  =
+  match
+    run_exec_with_status_split
+      ?stdin_content
+      ?on_stdout_chunk
+      ?on_stderr_chunk
+      ~timeout_sec
+      t
+      ~cwd
+      ~command_argv
+  with
+  | Error _ as err -> err
+  | Ok (status, stdout, stderr) ->
+    Ok (status, output_for_status ~stdout ~stderr)
 ;;
 
 type exec_pipeline_stage = {

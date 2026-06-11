@@ -83,7 +83,7 @@ let docker_target ~turn_sandbox_factory ~meta ~cwd =
         else
           let cwd = stage_cwd_or_default stage_cwd in
           match
-            Keeper_turn_sandbox_runtime.run_exec_with_status
+            Keeper_turn_sandbox_runtime.run_exec_with_status_split
               ?stdin_content
               ?on_stdout_chunk
               ?on_stderr_chunk
@@ -92,7 +92,7 @@ let docker_target ~turn_sandbox_factory ~meta ~cwd =
               ~cwd
               ~command_argv:argv
            with
-           | Ok (status, output) -> status, output, ""
+           | Ok result -> result
            | Error err -> Unix.WEXITED 1, "", err
        in
       let pipeline_runner ~on_stdout_chunk ~on_stderr_chunk ~stages =

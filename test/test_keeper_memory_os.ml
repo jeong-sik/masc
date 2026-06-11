@@ -6,6 +6,7 @@ module Librarian = Masc.Keeper_librarian
 module Compact = Masc.Keeper_compact_policy
 module Context = Masc.Keeper_context_core
 module Memory_io = Masc.Keeper_memory_os_io
+module Prompt_names = Keeper_prompt_names
 module Recall = Masc.Keeper_memory_os_recall
 
 let contains substring s =
@@ -51,6 +52,42 @@ let with_temp_keepers_dir f =
   let marker = Filename.temp_file "keeper-memory-os-" ".tmp" in
   Sys.remove marker;
   Memory_io.For_testing.with_keepers_dir marker (fun () -> f marker)
+;;
+
+let has_librarian_prompt_root path =
+  Sys.file_exists
+    (Filename.concat path "config/prompts/keeper.librarian.episode_extraction.md")
+
+let repo_root () =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root when has_librarian_prompt_root root -> root
+  | _ ->
+    let rec ascend path =
+      if has_librarian_prompt_root path
+      then path
+      else (
+        let parent = Filename.dirname path in
+        if String.equal parent path then Sys.getcwd () else ascend parent)
+    in
+    ascend (Sys.getcwd ())
+
+let with_prompt_registry f =
+  Fun.protect
+    ~finally:Prompt_registry.clear
+    (fun () ->
+      Prompt_registry.clear ();
+      Prompt_registry.set_markdown_dir (Filename.concat (repo_root ()) "config/prompts");
+      Masc.Prompt_defaults.init ();
+      f ())
+
+let render_librarian_user_prompt inp =
+  match
+    Prompt_registry.render_prompt_template
+      Prompt_names.librarian_episode_extraction
+      (Librarian.prompt_variables inp)
+  with
+  | Ok prompt -> prompt
+  | Error msg -> Alcotest.fail msg
 ;;
 
 let text_message text : Agent_sdk.Types.message =
@@ -194,28 +231,46 @@ let test_prompt_renders () =
     ; Librarian.messages = [ msg ]
     }
   in
-  let prompt = Librarian.prompt_of_input inp in
-  Alcotest.(check bool)
-    "contains episode_summary"
-    true
-    (contains "episode_summary" prompt);
-  Alcotest.(check bool) "contains claims array" true (contains "\"claims\"" prompt);
-  Alcotest.(check bool)
-    "contains preserved_tool_refs"
-    true
-    (contains "preserved_tool_refs" prompt);
-  Alcotest.(check bool) "placeholder replaced" false (contains "%s" prompt);
-  Alcotest.(check bool)
-    "contains conversation"
-    true
-    (contains "[user] Please remember the project constraint." prompt);
-  match
-    index_of "[user] Please remember the project constraint." prompt,
-    index_of "Respond with ONLY the JSON object." prompt
-  with
-  | Some conversation_at, Some respond_at ->
-    Alcotest.(check bool) "conversation before final instruction" true (conversation_at < respond_at)
-  | _ -> Alcotest.fail "expected prompt sections"
+  with_prompt_registry (fun () ->
+    let prompt = render_librarian_user_prompt inp in
+    let system_prompt =
+      match
+        Prompt_registry.render_prompt_template Prompt_names.librarian_system []
+      with
+      | Ok prompt -> prompt
+      | Error msg -> Alcotest.fail msg
+    in
+    Alcotest.(check bool)
+      "system prompt comes from registry"
+      true
+      (contains "structured JSON librarian" system_prompt);
+    Alcotest.(check bool)
+      "contains episode_summary"
+      true
+      (contains "episode_summary" prompt);
+    Alcotest.(check bool) "contains claims array" true (contains "\"claims\"" prompt);
+    Alcotest.(check bool)
+      "contains preserved_tool_refs"
+      true
+      (contains "preserved_tool_refs" prompt);
+    Alcotest.(check bool)
+      "placeholder replaced"
+      false
+      (contains "{{conversation_history}}" prompt);
+    Alcotest.(check bool)
+      "contains conversation"
+      true
+      (contains "[user] Please remember the project constraint." prompt);
+    match
+      ( index_of "[user] Please remember the project constraint." prompt
+      , index_of "Respond with ONLY the JSON object." prompt )
+    with
+    | Some conversation_at, Some respond_at ->
+      Alcotest.(check bool)
+        "conversation before final instruction"
+        true
+        (conversation_at < respond_at)
+    | _ -> Alcotest.fail "expected prompt sections")
 ;;
 
 let test_prompt_omits_private_blocks () =
@@ -245,24 +300,25 @@ let test_prompt_omits_private_blocks () =
     ; Librarian.messages = [ msg ]
     }
   in
-  let prompt = Librarian.prompt_of_input inp in
-  Alcotest.(check bool) "keeps visible text" true (contains "visible fact" prompt);
-  Alcotest.(check bool)
-    "omits thinking content"
-    false
-    (contains "hidden chain of thought" prompt);
-  Alcotest.(check bool)
-    "omits redacted thinking"
-    false
-    (contains "redacted reasoning blob" prompt);
-  Alcotest.(check bool)
-    "omits tool payload"
-    false
-    (contains "secret tool payload" prompt);
-  Alcotest.(check bool)
-    "keeps tool provenance"
-    true
-    (contains "[tool result omitted: id=call_1 is_error=false]" prompt)
+  with_prompt_registry (fun () ->
+    let prompt = render_librarian_user_prompt inp in
+    Alcotest.(check bool) "keeps visible text" true (contains "visible fact" prompt);
+    Alcotest.(check bool)
+      "omits thinking content"
+      false
+      (contains "hidden chain of thought" prompt);
+    Alcotest.(check bool)
+      "omits redacted thinking"
+      false
+      (contains "redacted reasoning blob" prompt);
+    Alcotest.(check bool)
+      "omits tool payload"
+      false
+      (contains "secret tool payload" prompt);
+    Alcotest.(check bool)
+      "keeps tool provenance"
+      true
+      (contains "[tool result omitted: id=call_1 is_error=false]" prompt))
 ;;
 
 let test_policy_score_and_retention () =

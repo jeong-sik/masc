@@ -16,6 +16,8 @@ val tool_preferred_empty : string
 val tool_unknown_guard : string
 val recovery_block : string
 val turn_intent : string
+val librarian_system : string
+val librarian_episode_extraction : string
 
 (** Turn-intent substitution prose template keys. *)
 val turn_intent_claim_guidance_a : string

@@ -49,31 +49,13 @@ let format_messages_for_prompt messages =
 let scrub_messages_for_librarian messages =
   List.map Keeper_summarizer.scrub_text_blocks messages
 
-let replace_first_placeholder ~placeholder ~replacement template =
-  let placeholder_len = String.length placeholder in
-  let template_len = String.length template in
-  let rec find i =
-    if i + placeholder_len > template_len
-    then None
-    else if String.sub template i placeholder_len = placeholder
-    then Some i
-    else find (i + 1)
-  in
-  match find 0 with
-  | None -> template ^ replacement
-  | Some i ->
-    String.sub template 0 i
-    ^ replacement
-    ^ String.sub template (i + placeholder_len) (template_len - i - placeholder_len)
-
-let prompt_of_input (inp : input) : string =
-  replace_first_placeholder
-    ~placeholder:"%s"
-    ~replacement:
-      (inp.messages
-       |> scrub_messages_for_librarian
-       |> format_messages_for_prompt)
-    Keeper_librarian_prompts.episode_extraction
+let prompt_variables (inp : input) : (string * string) list =
+  [ ( "conversation_history"
+    , inp.messages
+      |> scrub_messages_for_librarian
+      |> format_messages_for_prompt
+    )
+  ]
 
 let claim_source ~trace_id turn tool_call_id =
   { trace_id; turn; tool_call_id }

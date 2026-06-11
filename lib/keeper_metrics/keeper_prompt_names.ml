@@ -16,6 +16,8 @@ let tool_preferred_empty = "keeper.tool_preferred_empty"
 let tool_unknown_guard = "keeper.tool_unknown_guard"
 let recovery_block = "keeper.recovery_block"
 let turn_intent = "keeper.turn_intent"
+let librarian_system = "keeper.librarian.system"
+let librarian_episode_extraction = "keeper.librarian.episode_extraction"
 
 (** Turn-intent substitution prose files. Each holds a single bullet (or
     short block) that the OCaml side injects into [turn_intent] when the

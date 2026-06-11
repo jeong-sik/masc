@@ -1,12 +1,10 @@
-(** Keeper_librarian_prompts — prompt templates for the Memory OS librarian.
+---
+description: Memory OS librarian episode extraction prompt
+category: keeper
+template_variables: [conversation_history]
+---
 
-    Keeping prompts outside the pure logic module makes them easier to
-    audit, diff, and eventually migrate to [masc.prompt_registry]. TODO:
-    register this template under [keeper/librarian/episode_extraction]
-    once the registry supports runtime overrides (#20829 follow-up). *)
-
-let episode_extraction =
-  {|You are a librarian for an AI agent. Your job is to read a slice of the agent's conversation history and extract a structured memory summary.
+You are a librarian for an AI agent. Your job is to read a slice of the agent's conversation history and extract a structured memory summary.
 
 Rules:
 1. Be objective. Extract only facts, decisions, constraints, and open items.
@@ -33,7 +31,6 @@ Output schema:
 }
 
 Conversation history:
-%s
+{{conversation_history}}
 
-Respond with ONLY the JSON object.|}
-;;
+Respond with ONLY the JSON object.

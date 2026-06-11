@@ -21,22 +21,40 @@ let response_text (response : Agent_sdk.Types.api_response) : string option =
   if text = "" then None else Some text
 ;;
 
-let librarian_prompt_messages (prompt : string) : Agent_sdk.Types.message list =
+let librarian_prompt_messages ~system_prompt ~user_prompt : Agent_sdk.Types.message list =
   let open Agent_sdk.Types in
   [ { role = System
-    ; content = [ Text "You are a structured JSON librarian. Output ONLY valid JSON matching the requested schema." ]
+    ; content = [ Text system_prompt ]
     ; name = None
     ; tool_call_id = None
     ; metadata = []
     }
   ; { role = User
-    ; content = [ Text prompt ]
+    ; content = [ Text user_prompt ]
     ; name = None
     ; tool_call_id = None
     ; metadata = []
     }
   ]
 ;;
+
+let render_librarian_prompt_messages inp =
+  match
+    Prompt_registry.render_prompt_template Keeper_prompt_names.librarian_system []
+  with
+  | Error msg -> Error msg
+  | Ok system_prompt ->
+    (match
+       Prompt_registry.render_prompt_template
+         Keeper_prompt_names.librarian_episode_extraction
+         (Keeper_librarian.prompt_variables inp)
+     with
+     | Error msg -> Error msg
+     | Ok user_prompt ->
+       Ok
+         (librarian_prompt_messages
+            ~system_prompt:(String.trim system_prompt)
+            ~user_prompt:(String.trim user_prompt)))
 
 let provider_for_librarian (provider_cfg : Llm_provider.Provider_config.t) =
   { provider_cfg with
@@ -71,51 +89,58 @@ let make ~trace_id ~generation () : Keeper_compact_policy.librarian_callback opt
               let inp : Keeper_librarian.input =
                 { Keeper_librarian.trace_id; generation; messages }
               in
-              let prompt = Keeper_librarian.prompt_of_input inp in
-              let llm_messages = librarian_prompt_messages prompt in
-              (match
-                 Llm_provider.Complete.complete
-                   ~sw
-                   ~net
-                   ?clock
-                   ~config:provider_cfg
-                   ~messages:llm_messages
-                   ()
-               with
-               | Ok response ->
-                 (match response_text response with
-                  | Some raw -> Keeper_librarian.episode_of_output inp raw
-                  | None ->
-                    Log.Keeper.warn
-                      "librarian empty response trace_id=%s generation=%d"
-                      trace_id
-                      generation;
-                    None)
-               | Error err ->
-                 Log.Keeper.warn
-                   "librarian LLM call failed trace_id=%s generation=%d: %s"
-                   trace_id
-                   generation
-                   (match err with
-                    | Llm_provider.Http_client.NetworkError { message; _ } -> message
-                    | Llm_provider.Http_client.TimeoutError { message; phase } ->
-                      Printf.sprintf
-                        "provider timeout: %s: %s"
-                        (Llm_provider.Http_client.timeout_phase_to_label phase)
-                        message
-                    | Llm_provider.Http_client.AcceptRejected { reason } -> reason
-                    | Llm_provider.Http_client.ProviderTerminal { message; _ } ->
-                      Printf.sprintf "provider terminal: %s" message
-                    | Llm_provider.Http_client.ProviderFailure { kind; message } ->
-                      Llm_provider.Http_client.provider_failure_to_string ~kind ~message
-                    | Llm_provider.Http_client.HttpError { code; body } ->
-                      Printf.sprintf
-                        "HTTP %d: %s"
-                        code
-                        (if String.length body > 200
-                         then String.sub body 0 200 ^ "..."
-                         else body));
-                 None)))
+              match render_librarian_prompt_messages inp with
+              | Error msg ->
+                Log.Keeper.warn
+                  "librarian prompt unavailable trace_id=%s generation=%d: %s"
+                  trace_id
+                  generation
+                  msg;
+                None
+              | Ok llm_messages ->
+                (match
+                   Llm_provider.Complete.complete
+                     ~sw
+                     ~net
+                     ?clock
+                     ~config:provider_cfg
+                     ~messages:llm_messages
+                     ()
+                 with
+                 | Ok response ->
+                   (match response_text response with
+                    | Some raw -> Keeper_librarian.episode_of_output inp raw
+                    | None ->
+                      Log.Keeper.warn
+                        "librarian empty response trace_id=%s generation=%d"
+                        trace_id
+                        generation;
+                      None)
+                 | Error err ->
+                   Log.Keeper.warn
+                     "librarian LLM call failed trace_id=%s generation=%d: %s"
+                     trace_id
+                     generation
+                     (match err with
+                      | Llm_provider.Http_client.NetworkError { message; _ } -> message
+                      | Llm_provider.Http_client.TimeoutError { message; phase } ->
+                        Printf.sprintf
+                          "provider timeout: %s: %s"
+                          (Llm_provider.Http_client.timeout_phase_to_label phase)
+                          message
+                      | Llm_provider.Http_client.AcceptRejected { reason } -> reason
+                      | Llm_provider.Http_client.ProviderTerminal { message; _ } ->
+                        Printf.sprintf "provider terminal: %s" message
+                      | Llm_provider.Http_client.ProviderFailure { kind; message } ->
+                        Llm_provider.Http_client.provider_failure_to_string ~kind ~message
+                      | Llm_provider.Http_client.HttpError { code; body } ->
+                        Printf.sprintf
+                          "HTTP %d: %s"
+                          code
+                          (if String.length body > 200
+                           then String.sub body 0 200 ^ "..."
+                           else body));
+                   None)))
      | None ->
        Log.Keeper.warn "librarian runtime skipped: no default runtime configured";
        None)

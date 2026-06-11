@@ -1,8 +1,8 @@
 (** Keeper_librarian — structured claim extraction for the Memory OS.
 
     This module is intentionally pure: it does not perform I/O or LLM calls.
-    It produces a prompt from a slice of messages and parses the LLM's
-    structured JSON response into a [Keeper_memory_os_types.episode].
+    It produces prompt variables from a slice of messages and parses the
+    LLM's structured JSON response into a [Keeper_memory_os_types.episode].
 
     The caller (typically the compaction pipeline in [Keeper_compact_policy])
     is responsible for:
@@ -17,9 +17,8 @@ type input =
   ; messages : Agent_sdk.Types.message list
   }
 
-(** Render the librarian extraction prompt from a message slice.
-    The prompt asks for strict JSON matching the episode schema. *)
-val prompt_of_input : input -> string
+(** Prompt variables for the externalized librarian extraction template. *)
+val prompt_variables : input -> (string * string) list
 
 (** Parse a raw LLM response into an [episode].
     Returns [None] if the response is not valid JSON or violates invariants

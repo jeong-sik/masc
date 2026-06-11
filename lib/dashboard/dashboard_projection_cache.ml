@@ -16,7 +16,7 @@ let normalize_actor_name = function
       if trimmed <> "" then trimmed else "dashboard"
   | None -> "dashboard"
 
-let snapshot_cache_ttl_s = 3.0
+let snapshot_cache_ttl_s = 5.0
 let digest_cache_ttl_s = 5.0
 
 let get_or_compute_snapshot_json ~config ~actor compute =

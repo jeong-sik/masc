@@ -11,7 +11,7 @@ type t =
   | Board_comment_vote
   | Board_curation_read
   | Board_curation_submit
-  | Board_get
+  | Board_post_get
   | Board_list
   | Board_post
   | Board_search
@@ -35,6 +35,9 @@ type t =
   | Memory_write
   | Search_files
   | Stay_silent
+  | Surface_read
+  | Surface_post
+  | Person_note_set
   | Task_claim
   | Task_create
   | Task_done
@@ -45,7 +48,6 @@ type t =
   | Time_now
   | Tool_search
   | Tools_list
-  | State_report
   | Voice_agent
   | Voice_listen
   | Voice_session_end
@@ -56,14 +58,6 @@ type t =
 val to_string : t -> string
 val of_string : string -> t option
 val pp : Format.formatter -> t -> unit
-
-(** Public MCP-client names still accepted while runtime descriptors project
-    keeper-owned tools onto the public MCP surface. *)
-val legacy_masc_claim_next_name : string
-
-val legacy_masc_broadcast_name : string
-
-val legacy_masc_deliver_name : string
 
 (** Public MCP names intentionally served outside the keeper descriptor spine.
     Keep this exact allowlist on the keeper side so prefix canonicalisation

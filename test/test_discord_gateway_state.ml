@@ -295,20 +295,62 @@ let test_heartbeat_tick_when_connected () =
 (* ---------------------------------------------------------------- *)
 
 let message_create_payload
-    ~id ~channel_id ~author_id ~content ~mention_ids () : Yojson.Safe.t =
+    ~id ~channel_id ~author_id ?guild_id ?username ?global_name
+    ?message_reference_channel_id ?message_reference_message_id
+    ?referenced_message_author_id ~content ~mention_ids ()
+    : Yojson.Safe.t =
   let mentions =
     `List
       (List.map
          (fun uid -> `Assoc [ ("id", `String uid) ])
          mention_ids)
   in
-  `Assoc
+  let author_fields =
+    ("id", `String author_id)
+    :: (match username with
+        | Some u -> [ ("username", `String u) ]
+        | None -> [])
+    @ (match global_name with
+       | Some g -> [ ("global_name", `String g) ]
+       | None -> [])
+  in
+  let base_fields =
     [ ("id", `String id)
     ; ("channel_id", `String channel_id)
-    ; ("author", `Assoc [ ("id", `String author_id) ])
+    ; ("author", `Assoc author_fields)
     ; ("content", `String content)
     ; ("mentions", mentions)
     ]
+  in
+  let with_guild =
+    match guild_id with
+    | None -> base_fields
+    | Some gid -> ("guild_id", `String gid) :: base_fields
+  in
+  let with_reference =
+    match message_reference_channel_id, message_reference_message_id with
+    | None, None -> with_guild
+    | channel_id, message_id ->
+        let fields =
+          (match channel_id with
+           | Some cid -> [ ("channel_id", `String cid) ]
+           | None -> [])
+          @
+          match message_id with
+          | Some mid -> [ ("message_id", `String mid) ]
+          | None -> []
+        in
+        ("message_reference", `Assoc fields) :: with_guild
+  in
+  let with_referenced =
+    match referenced_message_author_id with
+    | None -> with_reference
+    | Some author_id ->
+        ( "referenced_message",
+          `Assoc [ ("author", `Assoc [ ("id", `String author_id) ]) ] )
+        :: with_reference
+  in
+  `Assoc with_referenced
 
 let reaction_add_payload
     ~channel_id ~message_id ~user_id ~emoji_name ?emoji_id () : Yojson.Safe.t =
@@ -330,9 +372,13 @@ let test_decode_message_create_with_mention () =
     message_create_payload
       ~id:"MSG1"
       ~channel_id:"CH1"
+      ~guild_id:"G1"
       ~author_id:"USER1"
-      ~content:"@BOT hi"
+      ~content:"<@BOT> hi"
       ~mention_ids:[ "BOT" ]
+      ~message_reference_channel_id:"CH0"
+      ~message_reference_message_id:"MSG0"
+      ~referenced_message_author_id:"OTHER"
       ()
   in
   match
@@ -345,13 +391,61 @@ let test_decode_message_create_with_mention () =
       (S.Message_create
         { channel_id = "CH1"
         ; message_id = "MSG1"
+        ; guild_id = Some "G1"
         ; author_id = "USER1"
-        ; content = "@BOT hi"
+        ; author_name = None
+        ; content = "<@BOT> hi"
         ; mentions_bot = true
+        ; explicit_mentions_bot = true
+        ; message_reference_channel_id = Some "CH0"
+        ; message_reference_message_id = Some "MSG0"
+        ; referenced_message_author_id = Some "OTHER"
         }) ->
       ()
   | Ok _ -> fail "decoded wrong MESSAGE_CREATE fields"
   | Error msg -> fail msg
+
+(* RFC-0223 P1 — author display name extraction. *)
+
+let decode_author_name ~payload =
+  match
+    S.decode_dispatch
+      ~bot_user_id:(Some "BOT")
+      ~event_name:"MESSAGE_CREATE"
+      ~payload
+  with
+  | Ok (S.Message_create { author_name; _ }) -> author_name
+  | Ok _ -> fail "expected MESSAGE_CREATE"
+  | Error msg -> fail msg
+
+let test_decode_author_name_prefers_global_name () =
+  let payload =
+    message_create_payload
+      ~id:"MSG10" ~channel_id:"CH1" ~author_id:"USER1"
+      ~username:"minsu_handle" ~global_name:"Minsu"
+      ~content:"hi" ~mention_ids:[] ()
+  in
+  Alcotest.(check (option string)) "global_name wins"
+    (Some "Minsu") (decode_author_name ~payload)
+
+let test_decode_author_name_falls_back_to_username () =
+  let payload =
+    message_create_payload
+      ~id:"MSG11" ~channel_id:"CH1" ~author_id:"USER1"
+      ~username:"minsu_handle"
+      ~content:"hi" ~mention_ids:[] ()
+  in
+  Alcotest.(check (option string)) "username fallback"
+    (Some "minsu_handle") (decode_author_name ~payload)
+
+let test_decode_author_name_absent_when_payload_has_neither () =
+  let payload =
+    message_create_payload
+      ~id:"MSG12" ~channel_id:"CH1" ~author_id:"USER1"
+      ~content:"hi" ~mention_ids:[] ()
+  in
+  Alcotest.(check (option string)) "no name fields -> None"
+    None (decode_author_name ~payload)
 
 let test_decode_message_create_without_mention () =
   let payload =
@@ -371,6 +465,63 @@ let test_decode_message_create_without_mention () =
   with
   | Ok (S.Message_create { mentions_bot = false; _ }) -> ()
   | Ok _ -> fail "expected mentions_bot=false"
+  | Error msg -> fail msg
+
+let test_decode_message_create_preserves_guild_id () =
+  let payload =
+    message_create_payload
+      ~id:"MSG3"
+      ~channel_id:"CH1"
+      ~guild_id:"GUILD1"
+      ~author_id:"USER1"
+      ~content:"guild message"
+      ~mention_ids:[]
+      ()
+  in
+  match
+    S.decode_dispatch
+      ~bot_user_id:(Some "BOT")
+      ~event_name:"MESSAGE_CREATE"
+      ~payload
+  with
+  | Ok (S.Message_create { guild_id = Some "GUILD1"; _ }) -> ()
+  | Ok (S.Message_create { guild_id = Some other; _ }) ->
+      failf "expected guild_id=GUILD1, got %s" other
+  | Ok (S.Message_create { guild_id = None; _ }) ->
+      fail "expected guild_id to be preserved"
+  | Ok _ -> fail "expected MESSAGE_CREATE"
+  | Error msg -> fail msg
+
+let test_decode_message_create_reply_ping_is_not_explicit_mention () =
+  let payload =
+    message_create_payload
+      ~id:"MSG3"
+      ~channel_id:"CH1"
+      ~author_id:"USER1"
+      ~content:"reply without visible mention"
+      ~mention_ids:[ "BOT" ]
+      ~message_reference_channel_id:"CH1"
+      ~message_reference_message_id:"BOTMSG"
+      ~referenced_message_author_id:"BOT"
+      ()
+  in
+  match
+    S.decode_dispatch
+      ~bot_user_id:(Some "BOT")
+      ~event_name:"MESSAGE_CREATE"
+      ~payload
+  with
+  | Ok
+      (S.Message_create
+        { mentions_bot = true
+        ; explicit_mentions_bot = false
+        ; message_reference_channel_id = Some "CH1"
+        ; message_reference_message_id = Some "BOTMSG"
+        ; referenced_message_author_id = Some "BOT"
+        ; _
+        }) ->
+      ()
+  | Ok _ -> fail "expected reply ping metadata without explicit mention"
   | Error msg -> fail msg
 
 let test_decode_reaction_add_unicode () =
@@ -449,6 +600,9 @@ let connected_with_policy ~policy ~bot_user_id =
 let has_emit_event effects =
   List.exists (function S.Emit_event _ -> true | _ -> false) effects
 
+let has_emit_ambient effects =
+  List.exists (function S.Emit_ambient _ -> true | _ -> false) effects
+
 let dispatch_frame ~event_name ~payload ~seq : S.frame =
   { op = S.Op_dispatch
   ; s = Some seq
@@ -460,7 +614,7 @@ let test_policy_mention_only_message_with_mention_passes () =
   let m = connected_with_policy ~policy:S.Mention_only ~bot_user_id:"BOT" in
   let payload =
     message_create_payload
-      ~id:"M1" ~channel_id:"C1" ~author_id:"U1" ~content:"hi @BOT"
+      ~id:"M1" ~channel_id:"C1" ~author_id:"U1" ~content:"hi <@BOT>"
       ~mention_ids:[ "BOT" ] ()
   in
   let _, effects =
@@ -584,6 +738,97 @@ let test_policy_all_emits_messages_and_reactions () =
   in
   check bool "Emit_event for any reaction under All" true
     (has_emit_event react_effects)
+
+(* ---------------------------------------------------------------- *)
+(* RFC-0226 — ambient lane recording. A message that fails the      *)
+(* trigger policy (and is not the bot's own echo) is delivered as   *)
+(* Emit_ambient: record-only, never a turn. Policy decides exactly  *)
+(* one thing — whether a turn starts.                               *)
+(* ---------------------------------------------------------------- *)
+
+let step_message m ~author_id ?(content = "ambient text") ?(mention_ids = []) () =
+  let payload =
+    message_create_payload
+      ~id:"AMB" ~channel_id:"C1" ~author_id ~content
+      ~mention_ids ()
+  in
+  let _, effects =
+    S.step m ~now_mono:3.0
+      (S.Frame_received
+         (dispatch_frame ~event_name:"MESSAGE_CREATE" ~payload ~seq:9))
+  in
+  effects
+
+let test_ambient_mention_only_plain_message () =
+  let m = connected_with_policy ~policy:S.Mention_only ~bot_user_id:"BOT" in
+  let effects = step_message m ~author_id:"U1" () in
+  check bool "no turn for non-mention" false (has_emit_event effects);
+  check bool "ambient delivery for non-mention" true
+    (has_emit_ambient effects)
+
+let test_ambient_mention_only_reply_ping_is_ambient () =
+  let m = connected_with_policy ~policy:S.Mention_only ~bot_user_id:"BOT" in
+  let payload =
+    message_create_payload
+      ~id:"REPLY1"
+      ~channel_id:"C1"
+      ~author_id:"U1"
+      ~content:"reply without visible mention"
+      ~mention_ids:[ "BOT" ]
+      ~message_reference_channel_id:"C1"
+      ~message_reference_message_id:"BOTMSG"
+      ~referenced_message_author_id:"BOT"
+      ()
+  in
+  let _, effects =
+    S.step m ~now_mono:3.0
+      (S.Frame_received
+         (dispatch_frame ~event_name:"MESSAGE_CREATE" ~payload ~seq:9))
+  in
+  check bool "reply-ping does not start a turn" false
+    (has_emit_event effects);
+  check bool "reply-ping is still recorded as ambient" true
+    (has_emit_ambient effects)
+
+let test_ambient_absent_when_policy_passes () =
+  let m = connected_with_policy ~policy:S.Mention_only ~bot_user_id:"BOT" in
+  let effects =
+    step_message m ~author_id:"U1" ~content:"<@BOT> ambient text"
+      ~mention_ids:[ "BOT" ] ()
+  in
+  check bool "turn for mention" true (has_emit_event effects);
+  check bool "no double delivery when policy passes" false
+    (has_emit_ambient effects)
+
+let test_ambient_user_only_other_author () =
+  let m =
+    connected_with_policy ~policy:(S.User_only "VINCENT") ~bot_user_id:"BOT"
+  in
+  let effects = step_message m ~author_id:"STRANGER" () in
+  check bool "no turn for other author" false (has_emit_event effects);
+  check bool "ambient delivery for other author" true
+    (has_emit_ambient effects)
+
+let test_ambient_never_for_self () =
+  let m = connected_with_policy ~policy:S.All ~bot_user_id:"BOT" in
+  let effects = step_message m ~author_id:"BOT" () in
+  check bool "self echo never a turn" false (has_emit_event effects);
+  check bool "self echo never ambient (outbound persisted at send)"
+    false (has_emit_ambient effects)
+
+let test_ambient_not_for_reactions () =
+  let m = connected_with_policy ~policy:S.Mention_only ~bot_user_id:"BOT" in
+  let payload =
+    reaction_add_payload
+      ~channel_id:"C1" ~message_id:"M1" ~user_id:"U1" ~emoji_name:"👍" ()
+  in
+  let _, effects =
+    S.step m ~now_mono:3.0
+      (S.Frame_received
+         (dispatch_frame ~event_name:"MESSAGE_REACTION_ADD" ~payload ~seq:9))
+  in
+  check bool "a reaction is a trigger signal, not conversation" false
+    (has_emit_ambient effects)
 
 (* ---------------------------------------------------------------- *)
 (* RFC-0203 Phase 3 follow-up — self-skip guard. Bot-authored events *)
@@ -921,6 +1166,16 @@ let () =
             `Quick test_decode_message_create_with_mention
         ; test_case "MESSAGE_CREATE without mention sets mentions_bot=false"
             `Quick test_decode_message_create_without_mention
+        ; test_case "MESSAGE_CREATE preserves guild_id" `Quick
+            test_decode_message_create_preserves_guild_id
+        ; test_case "MESSAGE_CREATE reply-ping is not explicit mention"
+            `Quick test_decode_message_create_reply_ping_is_not_explicit_mention
+        ; test_case "author_name prefers global_name" `Quick
+            test_decode_author_name_prefers_global_name
+        ; test_case "author_name falls back to username" `Quick
+            test_decode_author_name_falls_back_to_username
+        ; test_case "author_name absent when payload has neither" `Quick
+            test_decode_author_name_absent_when_payload_has_neither
         ; test_case "MESSAGE_REACTION_ADD unicode emoji" `Quick
             test_decode_reaction_add_unicode
         ; test_case "MESSAGE_REACTION_ADD custom emoji => name:id" `Quick
@@ -944,6 +1199,20 @@ let () =
             `Quick test_policy_user_only_reaction_matching_reactor_passes
         ; test_case "all + any message + any reaction => both Emit_event"
             `Quick test_policy_all_emits_messages_and_reactions
+        ] )
+    ; ( "ambient lane (RFC-0226)"
+      , [ test_case "mention_only + plain message => Emit_ambient" `Quick
+            test_ambient_mention_only_plain_message
+        ; test_case "mention_only + reply-ping => Emit_ambient" `Quick
+            test_ambient_mention_only_reply_ping_is_ambient
+        ; test_case "policy pass => Emit_event only, no ambient" `Quick
+            test_ambient_absent_when_policy_passes
+        ; test_case "user_only + other author => Emit_ambient" `Quick
+            test_ambient_user_only_other_author
+        ; test_case "self echo => neither event nor ambient" `Quick
+            test_ambient_never_for_self
+        ; test_case "reactions never ambient" `Quick
+            test_ambient_not_for_reactions
         ] )
     ; ( "self-skip guard"
       , [ test_case "self message suppressed under All" `Quick

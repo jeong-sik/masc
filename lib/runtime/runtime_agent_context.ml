@@ -5,6 +5,12 @@
     [Runtime_agent] remains the public facade and still performs the
     approval wiring and final [build_safe] / [Agent.resume] calls. *)
 
+(** Turn count is no longer the primary execution budget.
+    timeout_sec and stream_idle_timeout_sec govern keeper runs.
+    Agent_sdk requires a positive int for max_turns; we pass the
+    largest possible value to effectively disable the turn ceiling. *)
+let max_turns_disabled = Int.max_int
+
 type stop_reason =
   | Completed
   | TurnBudgetExhausted of
@@ -25,7 +31,6 @@ type config =
   ; system_prompt : string
   ; tools : Agent_sdk.Tool.t list
   ; runtime_mcp_policy : Llm_provider.Llm_transport.runtime_mcp_policy option
-  ; max_turns : int
   ; max_idle_turns : int
   ; stream_idle_timeout_s : float option
   ; max_execution_time_s : float option
@@ -57,8 +62,9 @@ type config =
   ; description : string option
   ; initial_messages : Agent_sdk.Types.message list
   ; raw_trace : Agent_sdk.Raw_trace.t option
-  ; tool_retry_policy : Agent_sdk.Tool_retry_policy.t option
+  ; trace_link : (string * string) option
   ; enable_thinking : bool option
+  ; preserve_thinking : bool option
   ; transport : Masc_grpc_transport.t
   ; allowed_paths : string list
   ; checkpoint_sidecar : Yojson.Safe.t option
@@ -76,6 +82,46 @@ type config =
           Emergency-phase compaction. Defaults to OAS's extractive
           default. Keeper workers inject [Keeper_summarizer.keeper_summarizer]
           to scrub [STATE] blocks before the 100-char truncation. *)
+  ; execution_idle_timeout_s : float option
+    (** Per-run inactivity deadline forwarded to OAS
+        [Builder.with_execution_idle_timeout]. Resets on each unit of
+        progress (streamed token or completed turn) and fires only on
+        genuine silence, surfacing [Error.AgentExecutionIdleTimeout].
+        Unlike [max_execution_time_s] (total wall-clock), this never
+        cancels a run that is still producing output.
+        @since 0.201.0 OAS *)
+  ; thinking_budget : int option
+    (** Token budget for extended thinking, forwarded to OAS
+        [Builder.with_thinking_budget]. Only meaningful when
+        [enable_thinking = Some true]. *)
+  ; min_p : float option
+    (** Minimum probability threshold for nucleus sampling, forwarded
+        to OAS [Builder.with_min_p]. [None] leaves the provider default;
+        [Some 0.0] is a no-op and some providers reject the field. *)
+  ; on_run_complete : (bool -> unit) option
+    (** Callback invoked when an OAS run finishes (success or failure).
+        Forwarded to [Builder.with_on_run_complete]. Useful for emitting
+        telemetry, flushing OTel spans, or finalizing receipts. *)
+  ; disclosure_level : Agent_sdk.Tool.disclosure_level option
+    (** Tool schema disclosure level forwarded to
+        [Builder.with_disclosure_level]. Controls whether full schemas
+        or minimal name+description indices are sent to the LLM.
+        [None] preserves the default (Full_schema). *)
+  ; disclosure_resolver
+      : (Agent_sdk.Types.tool_result list -> Agent_sdk.Tool.disclosure_level option) option
+    (** Per-turn resolver that adapts disclosure based on previous tool
+        results. Forwarded to [Builder.with_disclosure_resolver].
+        Overrides [disclosure_level] for the current turn when [Some]
+        is returned. *)
+  ; tool_selector : Agent_sdk.Tool_selector.strategy option
+    (** Tool selection strategy for large tool catalogs, forwarded to
+        [Builder.with_tool_selector]. When tool count exceeds ~15,
+        narrows candidates per turn before sending schemas to the LLM. *)
+  ; checkpoint_sink : Agent_sdk.Agent.checkpoint_sink option
+    (** Caller-owned turn-boundary checkpoint sink, forwarded to
+        [Builder.with_checkpoint_sink]. Allows consumers to persist
+        checkpoints at OAS turn boundaries without the full
+        checkpoint_dir filesystem path. *)
   }
 
 let default_config
@@ -97,7 +143,6 @@ let default_config
   ; system_prompt
   ; tools
   ; runtime_mcp_policy = None
-  ; max_turns = 20
   ; max_idle_turns = 3
   ; stream_idle_timeout_s = None
   ; max_execution_time_s = None
@@ -115,8 +160,9 @@ let default_config
   ; description = None
   ; initial_messages = []
   ; raw_trace = None
-  ; tool_retry_policy = None
+  ; trace_link = None
   ; enable_thinking = None
+  ; preserve_thinking = None
   ; transport = Masc_grpc_transport.from_env ()
   ; allowed_paths = []
   ; checkpoint_sidecar = None
@@ -130,8 +176,19 @@ let default_config
   ; exit_condition = None
   ; exit_condition_result = None
   ; summarizer = None
+  ; execution_idle_timeout_s = None
+  ; thinking_budget = None
+  ; min_p = None
+  ; on_run_complete = None
+  ; disclosure_level = None
+  ; disclosure_resolver = None
+  ; tool_selector = None
+  ; checkpoint_sink = None
   }
 ;;
+
+let oas_tracer_ref = ref Agent_sdk.Tracing.null
+let set_oas_tracer tracer = oas_tracer_ref := tracer
 
 let guardrails_of_config (config : config) =
   let tool_names = List.map (fun (t : Agent_sdk.Tool.t) -> t.schema.name) config.tools in
@@ -159,7 +216,7 @@ let builder_without_approval
     |> Agent_sdk.Builder.with_name config.name
     |> Agent_sdk.Builder.with_system_prompt config.system_prompt
     |> Agent_sdk.Builder.with_max_tokens config.max_tokens
-    |> Agent_sdk.Builder.with_max_turns config.max_turns
+    |> Agent_sdk.Builder.with_max_turns max_turns_disabled
     |> Agent_sdk.Builder.with_max_idle_turns config.max_idle_turns
     |> Agent_sdk.Builder.with_temperature config.temperature
     |> Agent_sdk.Builder.with_provider config.provider
@@ -209,13 +266,13 @@ let builder_without_approval
     | None -> builder
   in
   let builder =
-    match config.tool_retry_policy with
-    | Some policy -> Agent_sdk.Builder.with_tool_retry_policy policy builder
+    match config.enable_thinking with
+    | Some enabled -> Agent_sdk.Builder.with_enable_thinking enabled builder
     | None -> builder
   in
   let builder =
-    match config.enable_thinking with
-    | Some enabled -> Agent_sdk.Builder.with_enable_thinking enabled builder
+    match config.preserve_thinking with
+    | Some preserve -> Agent_sdk.Builder.with_preserve_thinking preserve builder
     | None -> builder
   in
   let builder =
@@ -288,6 +345,54 @@ let builder_without_approval
     | Some s -> Agent_sdk.Builder.with_summarizer s builder
     | None -> builder
   in
+  let builder =
+    match config.execution_idle_timeout_s with
+    | Some s -> Agent_sdk.Builder.with_execution_idle_timeout s builder
+    | None -> builder
+  in
+  let builder =
+    match config.thinking_budget with
+    | Some budget -> Agent_sdk.Builder.with_thinking_budget budget builder
+    | None -> builder
+  in
+  let builder =
+    match config.min_p with
+    | Some min_p -> Agent_sdk.Builder.with_min_p min_p builder
+    | None -> builder
+  in
+  let builder =
+    match config.event_bus with
+    | Some bus -> Agent_sdk.Builder.with_event_bus bus builder
+    | None -> builder
+  in
+  let builder =
+    match config.on_run_complete with
+    | Some cb -> Agent_sdk.Builder.with_on_run_complete cb builder
+    | None -> builder
+  in
+  let builder =
+    match config.disclosure_level with
+    | Some level -> Agent_sdk.Builder.with_disclosure_level level builder
+    | None -> builder
+  in
+  let builder =
+    match config.disclosure_resolver with
+    | Some resolver -> Agent_sdk.Builder.with_disclosure_resolver resolver builder
+    | None -> builder
+  in
+  let builder =
+    match config.tool_selector with
+    | Some strategy -> Agent_sdk.Builder.with_tool_selector strategy builder
+    | None -> builder
+  in
+  let builder =
+    match config.checkpoint_sink with
+    | Some sink -> Agent_sdk.Builder.with_checkpoint_sink sink builder
+    | None -> builder
+  in
+  let builder =
+    Agent_sdk.Builder.with_tracer !oas_tracer_ref builder
+  in
   match transport with
   | Some transport -> Agent_sdk.Builder.with_transport transport builder
   | None -> builder
@@ -302,7 +407,7 @@ type prepared_resume =
 let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
   : prepared_resume
   =
-  let effective_max_turns = checkpoint.turn_count + config.max_turns in
+
   let effective_max_cost_usd =
     match config.max_cost_usd with
     | Some budget -> Some (checkpoint.usage.estimated_cost_usd +. budget)
@@ -314,6 +419,8 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
     ; system_prompt = Some config.system_prompt
     ; temperature = Some config.temperature
     ; enable_thinking = config.enable_thinking
+    ; preserve_thinking = config.preserve_thinking
+    ; thinking_budget = config.thinking_budget
     ; cache_system_prompt = config.cache_system_prompt
     ; max_input_tokens = config.max_input_tokens
     ; max_total_tokens = None
@@ -325,9 +432,11 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
     ; model = config.model_id
     ; system_prompt = Some config.system_prompt
     ; max_tokens = Some config.max_tokens
-    ; max_turns = effective_max_turns
+    ; max_turns = max_turns_disabled
     ; temperature = Some config.temperature
     ; enable_thinking = config.enable_thinking
+    ; preserve_thinking = config.preserve_thinking
+    ; thinking_budget = config.thinking_budget
     ; cache_system_prompt = config.cache_system_prompt
     ; max_input_tokens = config.max_input_tokens
     ; max_cost_usd = effective_max_cost_usd
@@ -345,12 +454,12 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
     ; stream_idle_timeout_s = config.stream_idle_timeout_s
     ; max_execution_time_s = config.max_execution_time_s
     ; body_timeout_s = config.body_timeout_s
+    ; execution_idle_timeout_s = config.execution_idle_timeout_s
     ; guardrails = guardrails_of_config config
     ; context_reducer = config.context_reducer
     ; context_injector = config.context_injector
     ; event_bus = config.event_bus
     ; raw_trace = config.raw_trace
-    ; tool_retry_policy = config.tool_retry_policy
     ; allowed_paths = config.allowed_paths
     ; description = config.description
     ; approval = config.approval
@@ -359,6 +468,10 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
     ; runtime_mcp_policy = config.runtime_mcp_policy
     ; summarizer = config.summarizer
     ; priority = config.priority
+    ; on_run_complete = config.on_run_complete
+    ; disclosure_level = config.disclosure_level
+    ; disclosure_resolver = config.disclosure_resolver
+    ; tool_selector = config.tool_selector
     }
   in
   { patched_checkpoint; agent_config; options }

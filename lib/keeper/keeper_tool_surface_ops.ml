@@ -540,12 +540,37 @@ let append_direct_chat_pair_if_reply ~(config : Workspace.config) ~name ~args re
     match user_content, direct_reply_visible_text (tool_result_body result) with
     | "", _ | _, None -> ()
     | _, Some assistant_content ->
-        Keeper_chat_store.append_pair
-          ~base_dir:config.base_path
-          ~keeper_name:name
-          ~user_content
-          ~assistant_content
-          ~user_attachments:[])
+        (* Agent-initiated [masc_keeper_msg] path: only the final tool
+           result is visible here (no stream events), so no tool lines
+           are persisted for this surface. *)
+        (* RFC-0226 ownership split: connector traffic (a non-empty
+           [channel], set by [Gate_keeper_backend.dispatch]) had its
+           user line recorded at the gate inbound boundary, at delivery
+           time — appending it again here would double-record. This
+           site owns the assistant reply only. Without [channel] this
+           is a genuine agent-initiated message with no upstream
+           recorder, so it still owns the full pair. *)
+        let channel = String.trim (get_string args "channel" "") in
+        if channel = "" then begin
+          Keeper_chat_store.append_turn
+            ~base_dir:config.base_path
+            ~keeper_name:name
+            ~user_content
+            ~user_attachments:[]
+            ~source:"agent"
+            ~assistant_content
+            ();
+          Keeper_chat_broadcast.chat_appended ~keeper_name:name ~source:"agent"
+        end
+        else begin
+          Keeper_chat_store.append_assistant_message
+            ~base_dir:config.base_path
+            ~keeper_name:name
+            ~content:assistant_content
+            ~source:channel
+            ();
+          Keeper_chat_broadcast.chat_appended ~keeper_name:name ~source:channel
+        end)
 ;;
 
 (* RFC-0182 Phase 5 PR-B: ctx-free body for [masc_keeper_msg] descriptor
@@ -706,12 +731,12 @@ let keeper_msg_queue_body ~(config : Workspace.config) args : tool_result =
 let handle_keeper_msg_queue ctx args : tool_result =
   keeper_msg_queue_body ~config:ctx.config args
 
-let handle_keeper_msg_stream ~on_text_delta ctx args : tool_result =
+let handle_keeper_msg_stream ?on_text_delta ?on_event ctx args : tool_result =
   match resolve_keeper_name ctx args with
   | Error err -> tool_result_error err
   | Ok name ->
       let resolved_args = with_keeper_name args name in
-      let result = Turn.handle_keeper_msg ~on_text_delta ctx resolved_args in
+      let result = Turn.handle_keeper_msg ?on_text_delta ?on_event ctx resolved_args in
       if not (tool_result_success result) then result
       else begin
         let body = tool_result_body result in

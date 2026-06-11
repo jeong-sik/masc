@@ -263,6 +263,16 @@ let all_task_actions =
     Submit_for_verification; Approve_verification; Reject_verification ]
 let valid_task_action_strings = List.map task_action_to_string all_task_actions
 
+(* RFC-0220: the verification sub-state (previously a separate request_status
+   store: `Pending / `Assigned) is folded into [task_status] so the illegal
+   "task Todo + request Pending" pair is unrepresentable. *)
+type verification_phase =
+  | Awaiting_verifier
+      (** No verifier assigned yet (was verification request [`Pending]). *)
+  | Verifier_assigned of { verifier: string }
+      (** A verifier keeper is assigned (was [`Assigned verifier]). *)
+[@@deriving show]
+
 type task_status =
   | Todo
   | Claimed of { assignee: string; claimed_at: string }
@@ -271,11 +281,28 @@ type task_status =
       assignee: string;
       submitted_at: string;
       verification_id: string;
-      deadline: string option;
+      phase: verification_phase;
+        (** RFC-0220: replaces [deadline : string option]. The deadline is
+            dropped per I2 (no per-obligation wall-clock deadline); the
+            verification sub-state lives here so it cannot drift from a
+            separate store. *)
     }
   | Done of { assignee: string; completed_at: string; notes: string option }
   | Cancelled of { cancelled_by: string; cancelled_at: string; reason: string option }
 [@@deriving show]
+
+(** RFC-0220 §3.5: the [task_status] of an [AwaitingVerification] obligation
+    once [verifier] has claimed it as its satisfier. The obligation is preserved
+    (it stays in the verifier pool, and any non-submitter can still
+    approve/reject it — [decide]'s approval arms match the phase with [_]) and
+    the verifier is recorded in [phase]. Single construction site shared by the
+    FSM decider and both claim writers ([claim_task_r], [claim_next_r]) so the
+    bound-verifier shape never drifts across surfaces. The binding is advisory:
+    it records who is verifying, not who is permitted to — an abandoned
+    [Verifier_assigned] task is re-claimable by another verifier. *)
+let bind_verifier ~verifier ~assignee ~submitted_at ~verification_id =
+  AwaitingVerification
+    { assignee; submitted_at; verification_id; phase = Verifier_assigned { verifier } }
 
 (* Simple string representation for dashboard *)
 let task_status_to_string = function
@@ -364,7 +391,7 @@ let task_status_schema_witnesses : task_status list =
       { assignee = placeholder
       ; submitted_at = placeholder
       ; verification_id = placeholder
-      ; deadline = None
+      ; phase = Awaiting_verifier
       }
   ; Done { assignee = placeholder; completed_at = placeholder; notes = None }
   ; Cancelled
@@ -398,15 +425,20 @@ let task_status_to_yojson = function
         ("completed_at", `String completed_at);
         ("notes", Json_util.string_opt_to_json notes);
       ]
-  | AwaitingVerification { assignee; submitted_at; verification_id;
-                           deadline; _ } ->
-      `Assoc [
+  | AwaitingVerification { assignee; submitted_at; verification_id; phase } ->
+      let phase_fields =
+        match phase with
+        | Awaiting_verifier -> [ ("phase", `String "awaiting_verifier") ]
+        | Verifier_assigned { verifier } ->
+            [ ("phase", `String "verifier_assigned");
+              ("verifier", `String verifier) ]
+      in
+      `Assoc ([
         ("status", `String "awaiting_verification");
         ("assignee", `String assignee);
         ("submitted_at", `String submitted_at);
         ("verification_id", `String verification_id);
-        ("deadline", Json_util.string_opt_to_json deadline);
-      ]
+      ] @ phase_fields)
   | Cancelled { cancelled_by; cancelled_at; reason } ->
       `Assoc [
         ("status", `String "cancelled");
@@ -428,11 +460,20 @@ let task_status_of_yojson json =
     | "done" ->
         Ok (Done { assignee = req "assignee"; completed_at = req "completed_at"; notes = opt "notes" })
     | "awaiting_verification" ->
+        (* RFC-0220 migration tolerance: legacy backlogs carry [deadline]
+           (now dropped) and no [phase]; a missing/legacy phase defaults to
+           [Awaiting_verifier]. *)
+        let phase =
+          match opt "phase" with
+          | Some "verifier_assigned" ->
+              Verifier_assigned { verifier = req "verifier" }
+          | Some "awaiting_verifier" | None | Some _ -> Awaiting_verifier
+        in
         Ok (AwaitingVerification
               { assignee = req "assignee"
               ; submitted_at = req "submitted_at"
               ; verification_id = req "verification_id"
-              ; deadline = opt "deadline"
+              ; phase
               })
     | "cancelled" ->
         Ok (Cancelled
@@ -479,6 +520,8 @@ type task_contract = {
   required_evidence : string list; [@default []]
   inspect_gate_evidence : string list; [@default []]
   verify_gate_evidence : string list; [@default []]
+  evidence_claims : Evidence_claim.t list; [@default []]
+  (* RFC-0199 Phase B: typed deterministic completion criteria (see .mli). *)
   stale_claim_timeout_sec : int; [@default 0]
   links : task_execution_links; [@default { operation_id = None; session_id = None }]
 } [@@deriving show, yojson { strict = false }]
@@ -526,7 +569,6 @@ type task = {
   files: string list; [@default []]
   created_at: string;
   created_by: string option; [@default None]
-  goal_id: string option; [@default None]  (** Structured goal linkage SSOT *)
   contract: task_contract option; [@default None]
   handoff_context: task_handoff_context option; [@default None]
   cycle_count: int; [@default 0]
@@ -576,9 +618,14 @@ let task_claim_decision (task : task) =
        Claim_available (task_claim_readiness task)
      | Reclaim_gate_blocked_by_policy reason ->
        Claim_unavailable (Claim_block_reclaim_policy reason))
+  | AwaitingVerification { verification_id; _ } ->
+    (* Verification tasks with a valid verification_id can be claimed by
+       other agents for cross-agent verification dispatch. The actual
+       cross-agent check (self-verification block) happens in claim_task_r.
+       Issue #19314. verification_id is a non-empty string — always claimable. *)
+    Claim_available (task_claim_readiness task)
   | Claimed _
   | InProgress _
-  | AwaitingVerification _
   | Done _
   | Cancelled _ ->
     Claim_unavailable (Claim_block_not_todo task.task_status)
@@ -621,14 +668,10 @@ let task_to_yojson t =
     | None -> base
     | Some created_by -> base @ [("created_by", `String created_by)]
   in
-  let with_goal_id = match t.goal_id with
-    | None -> with_created_by
-    | Some goal_id -> with_created_by @ [("goal_id", `String goal_id)]
-  in
   let with_contract = match t.contract with
-    | None -> with_goal_id
+    | None -> with_created_by
     | Some contract ->
-        with_goal_id @ [ ("contract", task_contract_to_yojson contract) ]
+        with_created_by @ [ ("contract", task_contract_to_yojson contract) ]
   in
   let with_handoff_context = match t.handoff_context with
     | None -> with_contract
@@ -671,7 +714,6 @@ let task_of_yojson json =
     let files = Json_util.get_string_list json "files" in
     let created_at = req "created_at" in
     let created_by = opt "created_by" in
-    let goal_id = opt "goal_id" in
     let contract = match m "contract" with
       | `Null -> None
       | contract_json ->
@@ -708,7 +750,6 @@ let task_of_yojson json =
             files;
             created_at;
             created_by;
-            goal_id;
             contract;
             handoff_context;
             cycle_count;
@@ -903,6 +944,11 @@ type claim_next_result =
       priority : int;
       released_task_id : string option;  (** Legacy field; claim_next no longer auto-releases active work. *)
       message : string;
+      scope_widened : bool;
+          (** True when goal-scope was widened to all_tasks because no scoped
+              task was admission-eligible (schedule-level fallback). Lets the
+              operator distinguish a scope-overriding claim from an ordinary
+              in-scope claim. *)
     }
   | Claim_next_no_unclaimed
   | Claim_next_no_eligible of

@@ -78,6 +78,7 @@ val per_provider_timeout_for_turn
 val run_turn
   :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
+  -> turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell
   -> base_dir:string
   -> max_context:int
   -> build_turn_prompt:
@@ -109,5 +110,6 @@ val run_turn
   -> ?is_retry:bool
   -> ?shared_context:Agent_sdk.Context.t
   -> ?event_bus:Agent_sdk.Event_bus.t
+  -> ?trace_link:string * string
   -> unit
   -> (run_result, Agent_sdk.Error.sdk_error) result

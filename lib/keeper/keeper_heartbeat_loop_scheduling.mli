@@ -12,8 +12,7 @@ type keepalive_scheduling_decision = {
 val decide_keepalive_scheduling :
   ?runtime_id_of_meta:(Keeper_meta_contract.keeper_meta -> string) ->
   ?runtime_resilience_of_name:(string -> string option) ->
-  ?runtime_status_of_name:
-    (runtime_id:string -> Keeper_health_probe.health_status) ->
+  ?reactive_wake:bool ->
   stop:bool Atomic.t ->
   meta:Keeper_meta_contract.keeper_meta ->
   Keeper_world_observation.world_observation ->

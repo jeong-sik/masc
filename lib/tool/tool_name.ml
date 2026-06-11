@@ -34,7 +34,6 @@ module Task_name = struct
   type t =
     | Add_task
     | Batch_add_tasks
-    | Claim_next
     | Task_history
     | Tasks
     | Transition
@@ -43,7 +42,6 @@ module Task_name = struct
   let to_string = function
     | Add_task -> "masc_add_task"
     | Batch_add_tasks -> "masc_batch_add_tasks"
-    | Claim_next -> "masc_claim_next"
     | Task_history -> "masc_task_history"
     | Tasks -> "masc_tasks"
     | Transition -> "masc_transition"
@@ -53,7 +51,6 @@ module Task_name = struct
   let of_string = function
     | "masc_add_task" -> Some Add_task
     | "masc_batch_add_tasks" -> Some Batch_add_tasks
-    | "masc_claim_next" -> Some Claim_next
     | "masc_task_history" -> Some Task_history
     | "masc_tasks" -> Some Tasks
     | "masc_transition" -> Some Transition
@@ -72,7 +69,7 @@ module Board_name = struct
     | Board_curation_read
     | Board_curation_submit
     | Board_delete
-    | Board_get
+    | Board_post_get
     | Board_hearths
     | Board_list
     | Board_post
@@ -94,7 +91,7 @@ module Board_name = struct
     | Board_curation_read -> "masc_board_curation_read"
     | Board_curation_submit -> "masc_board_curation_submit"
     | Board_delete -> "masc_board_delete"
-    | Board_get -> "masc_board_get"
+    | Board_post_get -> "masc_board_post_get"
     | Board_hearths -> "masc_board_hearths"
     | Board_list -> "masc_board_list"
     | Board_post -> "masc_board_post"
@@ -117,7 +114,7 @@ module Board_name = struct
     | "masc_board_curation_read" -> Some Board_curation_read
     | "masc_board_curation_submit" -> Some Board_curation_submit
     | "masc_board_delete" -> Some Board_delete
-    | "masc_board_get" -> Some Board_get
+    | "masc_board_post_get" -> Some Board_post_get
     | "masc_board_hearths" -> Some Board_hearths
     | "masc_board_list" -> Some Board_list
     | "masc_board_post" -> Some Board_post

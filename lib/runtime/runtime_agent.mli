@@ -35,7 +35,7 @@ type stop_reason = Runtime_agent_context.stop_reason =
     }
 (** Why this single OAS call yielded control. [Completed] is the
     model's success path; [TurnBudgetExhausted] means the per-call
-    [max_turns] checkpoint was reached and the keeper should continue
+    turn budget checkpoint was reached and the keeper should continue
     from the persisted checkpoint on the next cycle; [MutationBoundaryReached]
     fires when the keeper hit a mutation tool while in read-only mode
     (the [tool_name] surfaces which tool triggered the gate). *)
@@ -52,7 +52,6 @@ type config = Runtime_agent_context.config = {
   tools : Agent_sdk.Tool.t list;
   runtime_mcp_policy :
     Llm_provider.Llm_transport.runtime_mcp_policy option;
-  max_turns : int;
   max_idle_turns : int;
   stream_idle_timeout_s : float option;
   max_execution_time_s : float option;
@@ -70,8 +69,9 @@ type config = Runtime_agent_context.config = {
   description : string option;
   initial_messages : Agent_sdk.Types.message list;
   raw_trace : Agent_sdk.Raw_trace.t option;
-  tool_retry_policy : Agent_sdk.Tool_retry_policy.t option;
+  trace_link : (string * string) option;
   enable_thinking : bool option;
+  preserve_thinking : bool option;
   transport : Masc_grpc_transport.t;
   allowed_paths : string list;
   checkpoint_sidecar : Yojson.Safe.t option;
@@ -85,6 +85,15 @@ type config = Runtime_agent_context.config = {
   exit_condition : (int -> bool) option;
   exit_condition_result : (int -> stop_reason * string option) option;
   summarizer : (Agent_sdk.Types.message list -> string) option;
+  execution_idle_timeout_s : float option;
+  thinking_budget : int option;
+  min_p : float option;
+  on_run_complete : (bool -> unit) option;
+  disclosure_level : Agent_sdk.Tool.disclosure_level option;
+  disclosure_resolver
+      : (Agent_sdk.Types.tool_result list -> Agent_sdk.Tool.disclosure_level option) option;
+  tool_selector : Agent_sdk.Tool_selector.strategy option;
+  checkpoint_sink : Agent_sdk.Agent.checkpoint_sink option;
 }
 
 val default_config :
@@ -140,9 +149,6 @@ val provider_caps_of_config :
   Llm_provider.Provider_config.t ->
   Llm_provider.Capabilities.capabilities
 val provider_label : Llm_provider.Provider_config.t -> string
-val provider_effective_max_turns :
-  Llm_provider.Provider_config.provider_kind -> int -> int
-
 (** {1 Runtime-MCP policy} *)
 
 val runtime_mcp_tool_requires_bound_actor : string -> bool
@@ -179,6 +185,12 @@ val resolve_tool_lane_for_oas_tools :
     Agent_sdk.Error.sdk_error )
   result
 
+val runtime_observation_for_terminal_config :
+  total_duration_ms:float ->
+  ?error:string ->
+  config ->
+  Runtime_observation.runtime_observation
+
 module For_testing : sig
   val request_runtime_fields_on_base_config :
     base:Llm_provider.Provider_config.t ->
@@ -190,8 +202,22 @@ module For_testing : sig
 
   val runtime_id_of_config : config -> string
 
+  (* RFC-OAS-026 §4.6 fail-fast (pure decision; raises [Failure] when an idle
+     deadline is configured but no clock resolves). *)
+  val decide_clock_for_idle :
+    stream_idle_timeout_s:float option ->
+    process_clock:(float Eio.Time.clock_ty Eio.Resource.t, string) result ->
+    ctx_clock:float Eio.Time.clock_ty Eio.Resource.t option ->
+    float Eio.Time.clock_ty Eio.Resource.t option
+
   val runtime_observation_for_completed_config :
     total_duration_ms:float -> config -> Runtime_observation.runtime_observation
+
+  val runtime_observation_for_terminal_config :
+    total_duration_ms:float ->
+    ?error:string ->
+    config ->
+    Runtime_observation.runtime_observation
 end
 
 (** {1 Lifecycle / checkpoint helpers (re-exported)} *)
@@ -229,8 +255,7 @@ val resume_from_checkpoint :
   (Agent_sdk.Agent.t, Agent_sdk.Error.sdk_error) result
 (** Resumes from a persisted checkpoint.  Uses
     [Runtime_agent_context.prepare_resume] to reconcile
-    [checkpoint.turn_count] with the current
-    [config.max_turns]. *)
+    [checkpoint.turn_count] with the current config. *)
 
 val run :
   sw:Eio.Switch.t ->

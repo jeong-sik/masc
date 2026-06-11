@@ -167,19 +167,6 @@ val normalize_continuity_compaction_cooldown_sec : int -> int
     behavior in [Keeper_compact_policy]. *)
 val default_keep_recent_tool_results : int
 
-(** Default message-count floor for the tool-heavy compaction gate.
-    Wired into [decide_compaction] by PR-B.  Operator override (PR-C):
-    [MASC_KEEPER_TOOL_HEAVY_MSG_THRESHOLD] (valid range [1, 10_000];
-    out-of-range warns and falls back to 40, mirroring
-    [Keeper_compact_policy.emergency_compact_ratio_threshold]). *)
-val default_tool_heavy_msg_threshold : int
-
-(** Default context-ratio floor for the tool-heavy compaction gate.
-    Wired into [decide_compaction] by PR-B.  Operator override (PR-C):
-    [MASC_KEEPER_TOOL_HEAVY_RATIO_FLOOR] (valid range [0.0, 1.0);
-    out-of-range or non-finite values warn and fall back to 0.15). *)
-val default_tool_heavy_ratio_floor : float
-
 (** Hard upper bound for operator-supplied
     [keep_recent_tool_results] (typo guard). *)
 val keep_recent_tool_results_max : int
@@ -215,22 +202,11 @@ val keeper_proactive_task_cooldown_divisor : unit -> int
 val keeper_proactive_task_min_cooldown_sec : unit -> int
 
 val keeper_batch_limit : unit -> int
-val keeper_board_debounce_window_sec : unit -> float
-(** Time window (seconds) to coalesce board signals into a single keeper turn.
-    Env: [MASC_KEEPER_BOARD_DEBOUNCE_SEC], default [2.0], range [0.0..30.0]. *)
-val keeper_tool_cost_max_usd : unit -> float option
-val keeper_board_event_limit : unit -> int
-val keeper_turn_capacity_limit : unit -> int
-val keeper_per_keeper_turn_capacity_limit : unit -> int
-(** Per-keeper concurrent turn capacity limit.
-    Runtime param [keeper.turn.per_keeper_capacity_limit], default 2, range [0, 64].
-    0 disables the per-keeper gate. *)
 val keeper_llm_rerank_enabled : unit -> bool
 val keeper_llm_rerank_runtime : unit -> string
 (** Reranker runtime profile. Defaults through [routes.llm_rerank]; env
     overrides may be either a concrete profile name or a logical route key. *)
 
-val keeper_rule_reflect_repetition_threshold : unit -> float
 val keeper_rule_plan_goal_alignment_threshold : unit -> float
 val keeper_rule_plan_response_alignment_threshold : unit -> float
 val keeper_rule_guardrail_repetition_threshold : unit -> float

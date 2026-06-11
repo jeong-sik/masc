@@ -18,6 +18,16 @@ let normalized_header_value name headers =
   |> List.find_map (fun (k, v) ->
     if String.equal name (String.lowercase_ascii k) then Some v else None)
 
+let with_env key value f =
+  let previous = Sys.getenv_opt key in
+  Unix.putenv key value;
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some previous -> Unix.putenv key previous
+      | None -> Unix.putenv key "")
+    f
+
 let runpod_provider =
   { Runtime_schema.id = "runpod_mtp"
   ; display_name = "RunPod"
@@ -36,6 +46,7 @@ let qwen_model =
   ; tools_support = true
   ; max_context = 160000
   ; thinking_support = true
+  ; preserve_thinking = false
   ; max_thinking_budget = None
   ; streaming = true
   ; capabilities = None
@@ -140,6 +151,91 @@ key = " OLLAMA_CLOUD_API_KEY "
         | Some _ -> fail "expected env credential"
         | None -> fail "expected credential")
      | _ -> fail "expected one provider")
+
+let deepseek_runtime_toml =
+  {|
+[runtime]
+default = "deepseek.deepseek-v4-pro"
+
+[providers.deepseek]
+display-name = "DeepSeek API"
+protocol = "provider_d-http"
+endpoint = "https://api.deepseek.com"
+
+[providers.deepseek.credentials]
+type = "env"
+key = "DEEPSEEK_API_KEY"
+
+[models.deepseek-v4-pro]
+api-name = "deepseek-v4-pro"
+max-context = 1000000
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.deepseek-v4-pro.capabilities]
+max-output-tokens = 384000
+supports-tool-choice = true
+supports-extended-thinking = true
+supports-reasoning-budget = true
+thinking-control-format = "reasoning-effort"
+supports-native-streaming = true
+supports-response-format-json = true
+supports-structured-output = true
+
+[deepseek.deepseek-v4-pro]
+max-concurrent = 2
+|}
+
+let deepseek_runtime_config_or_fail () =
+  match Runtime_toml.parse_string deepseek_runtime_toml with
+  | Ok cfg -> cfg
+  | Error errors ->
+    failf
+      "expected DeepSeek runtime TOML to parse: %s"
+      (String.concat
+         "; "
+         (List.map
+            (fun (err : Runtime_toml.parse_error) ->
+               Printf.sprintf "%s: %s" err.path err.message)
+            errors))
+
+let deepseek_provider_config_or_fail () =
+  let cfg = deepseek_runtime_config_or_fail () in
+  match cfg.bindings with
+  | [ binding ] ->
+    (match Runtime_adapter.binding_to_provider_config cfg binding with
+     | Ok provider_cfg -> provider_cfg
+     | Error msg -> failf "unexpected DeepSeek adapter error: %s" msg)
+  | bindings -> failf "expected one DeepSeek binding, got %d" (List.length bindings)
+
+let with_deepseek_env deepseek f = with_env "DEEPSEEK_API_KEY" deepseek f
+
+let test_runtime_toml_accepts_deepseek_reasoning_effort_capability () =
+  let cfg = deepseek_runtime_config_or_fail () in
+  match cfg.models with
+  | [ model ] ->
+    (match model.capabilities with
+     | Some caps ->
+       check bool "reasoning effort parsed" true
+         (caps.thinking_control_format = Runtime_schema.Reasoning_effort);
+       check (option int) "max output" (Some 384000) caps.max_output_tokens
+     | None -> fail "expected model capabilities")
+  | models -> failf "expected one model, got %d" (List.length models)
+
+let test_runtime_adapter_materializes_deepseek_openai_compat () =
+  with_deepseek_env "ds-test-key" (fun () ->
+    let provider_cfg = deepseek_provider_config_or_fail () in
+    check bool "kind" true
+      (provider_cfg.kind = Llm_provider.Provider_config.OpenAI_compat);
+    check string "base_url" "https://api.deepseek.com" provider_cfg.base_url;
+    check string "request_path" "/chat/completions" provider_cfg.request_path;
+    check string "model_id" "deepseek-v4-pro" provider_cfg.model_id;
+    check string "api key" "ds-test-key" provider_cfg.api_key;
+    check (option int) "max_context" (Some 1000000) provider_cfg.max_context;
+    check (option int) "max_tokens" (Some 384000) provider_cfg.max_tokens;
+    check int "Authorization header count" 0
+      (normalized_header_count "Authorization" provider_cfg.headers))
 
 let test_runtime_adapter_keeps_auth_out_of_headers () =
   let cfg =
@@ -362,6 +458,66 @@ let test_runtime_agent_terminal_observation_uses_runtime_identity () =
   check string "attempt detail source" "runtime_agent_terminal"
     observation.attempt_details_source
 
+let test_runtime_agent_terminal_error_observation_marks_failed_attempt () =
+  let config =
+    Runtime_agent.default_config
+      ~name:"oas-runpod_mtp.qwen"
+      ~provider_cfg:(provider_cfg ())
+      ~system_prompt:""
+      ~tools:[]
+  in
+  let config =
+    { config with description = Some "runtime:runpod_mtp.qwen/runtime" }
+  in
+  let error = "Not found: OpenAI-compatible endpoint returned 404" in
+  let observation =
+    Runtime_agent.For_testing.runtime_observation_for_terminal_config
+      ~total_duration_ms:31.2
+      ~error
+      config
+  in
+  check string "runtime id" "runpod_mtp.qwen" observation.runtime_id;
+  check (option string) "selected model" (Some "qwen")
+    observation.selected_model;
+  check int "attempt count" 1 (List.length observation.attempts);
+  check string "attempt detail source" "runtime_agent_terminal_error"
+    observation.attempt_details_source;
+  (match observation.attempts with
+   | [ attempt ] ->
+     check (option string) "attempt error" (Some error) attempt.error
+   | _ -> fail "expected one terminal attempt");
+  check string "runtime outcome" "failed"
+    (Keeper_execution_receipt.runtime_outcome_to_string
+       (Keeper_agent_error.runtime_outcome_of_observation
+          (Some observation)))
+
+let test_not_found_enrichment_includes_runtime_endpoint_model () =
+  let provider_cfg = provider_cfg () in
+  let enriched =
+    Keeper_runtime_attempt.enrich_sdk_error
+      ~runtime_id:"runpod_mtp.qwen"
+      ~provider_cfg
+      (Agent_sdk.Error.Api (Llm_provider.Retry.NotFound { message = "" }))
+  in
+  (match enriched with
+   | Agent_sdk.Error.Api (Llm_provider.Retry.NotFound { message }) ->
+     check bool "mentions 404 marker" true
+       (String_util.contains_substring
+          message
+          "OpenAI-compatible endpoint returned 404");
+     check bool "mentions runtime id" true
+       (String_util.contains_substring message "runtime_id=runpod_mtp.qwen");
+     check bool "mentions model" true
+       (String_util.contains_substring message "model=qwen");
+     check bool "mentions endpoint" true
+       (String_util.contains_substring
+          message
+          "endpoint=https://example-runpod.proxy.runpod.net/v1")
+   | _ -> fail "expected enriched NotFound");
+  check bool "404 is terminal provider failure" true
+    (Keeper_turn_driver.sdk_error_is_terminal_provider_runtime_failure
+       enriched)
+
 let test_runtime_agent_max_turns_is_continuation_checkpoint () =
   let lifecycle =
     Runtime_agent.worker_lifecycle_classification_of_result
@@ -372,6 +528,38 @@ let test_runtime_agent_max_turns_is_continuation_checkpoint () =
   check string "event" "completed" lifecycle.event;
   check string "status" "continuation_checkpoint" lifecycle.status;
   check (option string) "no error" None lifecycle.error
+
+(* RFC-OAS-026 §4.6: a configured stream-idle deadline with no resolvable clock
+   must fail loudly rather than silently disarm the only I2-legitimate
+   streaming timeout. *)
+let test_clock_failfast_raises_when_idle_set_without_clock () =
+  try
+    let _ =
+      Runtime_agent.For_testing.decide_clock_for_idle
+        ~stream_idle_timeout_s:(Some 120.0)
+        ~process_clock:(Error "process runtime not initialised")
+        ~ctx_clock:None
+    in
+    fail "expected failure when idle is configured but no clock resolves"
+  with
+  | Failure msg ->
+    check
+      bool
+      "message identifies the configured idle deadline with no clock"
+      true
+      (String.starts_with
+         ~prefix:"runtime_agent: stream_idle_timeout_s configured"
+         msg)
+
+let test_clock_failfast_opt_out_when_no_idle_no_clock () =
+  (* Legitimate opt-out: no idle deadline + no clock stays None, no raise. *)
+  let clock =
+    Runtime_agent.For_testing.decide_clock_for_idle
+      ~stream_idle_timeout_s:None
+      ~process_clock:(Error "no runtime")
+      ~ctx_clock:None
+  in
+  check bool "no idle + no clock -> None" true (Option.is_none clock)
 
 let () =
   run "runtime_provider_auth_headers"
@@ -397,9 +585,25 @@ let () =
             `Quick
             test_runtime_toml_trims_env_credential_key
         ; test_case
+            "runtime TOML accepts DeepSeek reasoning effort"
+            `Quick
+            test_runtime_toml_accepts_deepseek_reasoning_effort_capability
+        ; test_case
+            "runtime adapter materializes DeepSeek OpenAI compat"
+            `Quick
+            test_runtime_adapter_materializes_deepseek_openai_compat
+        ; test_case
             "runtime agent terminal observation carries model identity"
             `Quick
             test_runtime_agent_terminal_observation_uses_runtime_identity
+        ; test_case
+            "runtime agent terminal error observation marks failed attempt"
+            `Quick
+            test_runtime_agent_terminal_error_observation_marks_failed_attempt
+        ; test_case
+            "NotFound enrichment includes runtime endpoint and model"
+            `Quick
+            test_not_found_enrichment_includes_runtime_endpoint_model
         ; test_case
             "max turns is continuation checkpoint"
             `Quick
@@ -408,5 +612,13 @@ let () =
             "dashboard runtime provider reachability contracts"
             `Quick
             test_dashboard_runtime_probe_reachability_contracts
+        ; test_case
+            "clock fail-fast raises when idle set without clock (RFC-OAS-026)"
+            `Quick
+            test_clock_failfast_raises_when_idle_set_without_clock
+        ; test_case
+            "clock fail-fast opt-out when no idle no clock"
+            `Quick
+            test_clock_failfast_opt_out_when_no_idle_no_clock
         ] )
     ]

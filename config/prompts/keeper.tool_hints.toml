@@ -19,8 +19,8 @@ call = "`keeper_task_create` { title: \"actionable title\", description: \"accep
 description = "create a new backlog task with keeper-native evidence"
 
 [[hints]]
-name = "keeper_board_get"
-call = "`keeper_board_get` { post_id: \"POST_ID\" }"
+name = "keeper_board_post_get"
+call = "`keeper_board_post_get` { post_id: \"POST_ID\" }"
 description = "read one board post only after you have its post_id"
 
 [[hints]]

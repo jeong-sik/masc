@@ -20,10 +20,16 @@ type gateway_event = Discord_gateway_state.dispatched_event =
       }
   | Message_create of
       { channel_id : string
+      ; guild_id : string option
       ; message_id : string
       ; author_id : string
+      ; author_name : string option
       ; content : string
       ; mentions_bot : bool
+      ; explicit_mentions_bot : bool
+      ; message_reference_channel_id : string option
+      ; message_reference_message_id : string option
+      ; referenced_message_author_id : string option
       }
   | Reaction_add of
       { channel_id : string
@@ -82,7 +88,18 @@ let log_effect level message =
   | `Warn -> Log.Discord.warn "%s" message
   | `Error -> Log.Discord.error "%s" message
 
-let run ~sw ~env ~token ~intents ~trigger_policy ~on_event () =
+(* RFC-0223 P2: the run loop's connection state, published so presence
+   derivation (Channel_gate_discord_state.connected) can read it without
+   file indirection. One gateway per process (single bot token), so a
+   module-level register is unambiguous. Written only by [run]'s
+   state-machine step; everyone else reads. *)
+let published_connection_state : Discord_gateway_state.connection_state Atomic.t
+  =
+  Atomic.make Discord_gateway_state.Disconnected
+
+let connection_state () = Atomic.get published_connection_state
+
+let run ~sw ~env ~token ~intents ~trigger_policy ~on_event ~on_ambient () =
   let config : Discord_gateway_state.config = {
     token; intents; bot_user_id = None; trigger_policy;
   } in
@@ -127,6 +144,9 @@ let run ~sw ~env ~token ~intents ~trigger_policy ~on_event () =
     let open Discord_gateway_state in
     match eff with
     | Open_wss { url } ->
+      Discord_observability.record_gateway_event
+        ~route:Discord_observability.Control
+        Discord_observability.Open_wss;
       (match !conn_ref with
        | Some _ ->
          log_effect `Warn
@@ -136,7 +156,7 @@ let run ~sw ~env ~token ~intents ~trigger_policy ~on_event () =
          let conn = Discord_wss_connection.connect ~sw ~env ~url in
          conn_ref := Some conn;
          Eio.Fiber.fork ~sw (fun () -> reader_loop conn))
-    | Close_wss _ ->
+    | Close_wss { code; reason = _ } ->
       (* Phase 1.4b: explicit close. Discord_wss_connection.close
          resolves the inner session switch's close-signal promise,
          which lets that switch return, which cancels reader/writer
@@ -144,6 +164,7 @@ let run ~sw ~env ~token ~intents ~trigger_policy ~on_event () =
          pending read raises Cancelled; our reader_loop exception
          arm pushes a redundant Wss_closed input that the state
          machine no-ops because it is already in Reconnect_pending. *)
+      Discord_observability.record_gateway_close ~code;
       (match !conn_ref with
        | Some c -> Discord_wss_connection.close c
        | None -> ());
@@ -167,10 +188,33 @@ let run ~sw ~env ~token ~intents ~trigger_policy ~on_event () =
     | Schedule_heartbeat { interval_ms } ->
       heartbeat_ms := Some interval_ms
     | Schedule_backoff { delay_ms } ->
+      Discord_observability.record_gateway_reconnect_scheduled ();
       Eio.Fiber.fork ~sw (fun () ->
         Eio.Time.sleep clock (float_of_int delay_ms /. 1000.0);
         Eio.Stream.add input_mailbox Discord_gateway_state.Backoff_elapsed)
-    | Emit_event ev -> on_event ev
+    | Emit_event ev ->
+      let event, route =
+        match ev with
+        | Ready _ -> Discord_observability.Ready, Discord_observability.Control
+        | Message_create _ ->
+          Discord_observability.Message_create, Discord_observability.Triggered
+        | Reaction_add _ ->
+          Discord_observability.Reaction_add, Discord_observability.Triggered
+        | Ignored _ -> Discord_observability.Ignored, Discord_observability.Control
+      in
+      Discord_observability.record_gateway_event ~route event;
+      on_event ev
+    | Emit_ambient ev ->
+      let event =
+        match ev with
+        | Ready _ -> Discord_observability.Ready
+        | Message_create _ -> Discord_observability.Message_create
+        | Reaction_add _ -> Discord_observability.Reaction_add
+        | Ignored _ -> Discord_observability.Ignored
+      in
+      Discord_observability.record_gateway_event
+        ~route:Discord_observability.Ambient event;
+      on_ambient ev
     | Log { level; message } -> log_effect level message
   in
 
@@ -178,6 +222,7 @@ let run ~sw ~env ~token ~intents ~trigger_policy ~on_event () =
     let now = now_mono env in
     let (s', effects) = Discord_gateway_state.step !state ~now_mono:now input in
     state := s';
+    Atomic.set published_connection_state (Discord_gateway_state.state s');
     List.iter run_effect effects
   in
 

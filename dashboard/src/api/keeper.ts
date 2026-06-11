@@ -39,6 +39,8 @@ export type {
   KeeperLastOutcome,
   KeeperCompositeExecution,
   KeeperRuntimeAttention,
+  KeeperSecretProjection,
+  KeeperSecretFileMount,
   KeeperPhaseDiagnosis,
   KeeperPhaseDiagnosisRow,
   KeeperCompositePhase,
@@ -369,6 +371,14 @@ export interface StreamAttachment {
   data: string
 }
 
+/** Outcome of a keeper chat stream read loop.
+ *  `terminal: false` means the connection closed without a
+ *  RUN_FINISHED / RUN_ERROR event — the response was cut mid-stream
+ *  and callers must not present it as a completed reply. */
+export interface KeeperStreamOutcome {
+  terminal: boolean
+}
+
 export async function streamKeeperMessage(
   name: string,
   message: string,
@@ -381,7 +391,7 @@ export async function streamKeeperMessage(
     onEvent: (event: KeeperChatStreamEvent) => void
     attachments?: StreamAttachment[]
   },
-): Promise<void> {
+): Promise<KeeperStreamOutcome> {
   const body: Record<string, unknown> = {
     name,
     message,
@@ -443,7 +453,7 @@ export async function streamKeeperMessage(
           } catch {
             // Ignore stream cancellation errors after terminal events.
           }
-          return
+          return { terminal: true }
         }
       }
       if (done) break
@@ -451,8 +461,13 @@ export async function streamKeeperMessage(
     const tail = buffer.trim()
     if (tail) {
       const event = parseSseEvent(tail)
-      if (event) onEvent(event)
+      if (event) {
+        onEvent(event)
+        if (isTerminalKeeperStreamEvent(event)) return { terminal: true }
+      }
     }
+    // Connection closed without RUN_FINISHED / RUN_ERROR: mid-stream cut.
+    return { terminal: false }
   } finally {
     reader.releaseLock()
   }
@@ -466,8 +481,9 @@ export async function fetchKeeperChatHistory(
   // P1 silent-failure fix: previously HTTP non-2xx and network/parse
   // errors both mapped to `return []`, leaving the caller unable to
   // distinguish "no chat history yet" from "fetch failed."  Now both
-  // throw, and the caller (keeper-chat-panel.ts) is responsible for
-  // surfacing via chatError.value.  Per-item safeParse drift remains
+  // throw, and the caller (hydrateKeeperChatHistory in
+  // keeper-actions.ts) is responsible for surfacing the failure to
+  // the operator.  Per-item safeParse drift remains
   // tolerant — only network / HTTP / shape errors throw.
   const resp = await fetch(
     `/api/v1/keepers/${encodeURIComponent(name)}/chat/history`,

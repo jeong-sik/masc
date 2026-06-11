@@ -239,18 +239,18 @@ let make
             | None -> Error "no default runtime configured")
          with
          | Error err ->
-             Log.Keeper.warn
-               "keeper:%s memory LLM summary provider resolution failed runtime=%s: %s"
-               keeper_name runtime_id err;
+             Log.Keeper.warn ~keeper_name:keeper_name
+               "memory LLM summary provider resolution failed runtime=%s: %s"
+               runtime_id err;
              None
          | Ok providers ->
              let providers =
                List.filter is_direct_completion_provider providers
              in
              if providers = [] then begin
-               Log.Keeper.warn
-                 "keeper:%s memory LLM summary has no direct completion providers runtime=%s"
-                 keeper_name runtime_id;
+               Log.Keeper.warn ~keeper_name:keeper_name
+                 "memory LLM summary has no direct completion providers runtime=%s"
+                 runtime_id;
                None
              end else
                Some
@@ -258,7 +258,7 @@ let make
                    summarize_with_providers ?complete ?clock ?timeout_sec
                      ~runtime_id ~sw ~net ~providers ~trace_id ~texts ()))
     | _ ->
-        Log.Keeper.warn
-          "keeper:%s memory LLM summary skipped: Eio context unavailable runtime=%s"
-          keeper_name runtime_id;
+        Log.Keeper.warn ~keeper_name:keeper_name
+          "memory LLM summary skipped: Eio context unavailable runtime=%s"
+          runtime_id;
         None

@@ -505,6 +505,86 @@ describe('ConnectorStatusPanel', () => {
     expect(text).not.toContain('disconnected')
   })
 
+  it('shows the gateway machine-state chip when it adds info beyond the coarse label', async () => {
+    const fetchGateStatus = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleGateResponse())
+    const fetchGateConnectors = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleConnectorsResponse({
+      connectors: [{
+        ...sampleConnectorsResponse().connectors[0],
+        connected: false,
+        status: 'disconnected',
+        gateway_state: 'reconnect_pending',
+        status_source: 'in_process_gateway',
+      }],
+    }))
+    const fetchGateKeepers = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleKeepersResponse())
+
+    const { ConnectorStatusPanel } = await loadComponentWithApi({
+      fetchGateStatus,
+      fetchGateConnectors,
+      fetchGateKeepers,
+      lastEvent: signal(null),
+    })
+
+    render(html`<${ConnectorStatusPanel} />`, container)
+    await flushUi()
+
+    const chip = container.querySelector('[data-gateway-state-chip]') as HTMLElement | null
+    expect(chip).not.toBeNull()
+    expect(chip!.textContent).toContain('reconnect_pending')
+  })
+
+  it('hides the gateway chip when the machine state merely repeats the coarse label', async () => {
+    const fetchGateStatus = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleGateResponse())
+    const fetchGateConnectors = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleConnectorsResponse({
+      connectors: [{
+        ...sampleConnectorsResponse().connectors[0],
+        connected: true,
+        status: 'connected',
+        gateway_state: 'connected',
+        status_source: 'in_process_gateway',
+      }],
+    }))
+    const fetchGateKeepers = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleKeepersResponse())
+
+    const { ConnectorStatusPanel } = await loadComponentWithApi({
+      fetchGateStatus,
+      fetchGateConnectors,
+      fetchGateKeepers,
+      lastEvent: signal(null),
+    })
+
+    render(html`<${ConnectorStatusPanel} />`, container)
+    await flushUi()
+
+    expect(container.querySelector('[data-gateway-state-chip]')).toBeNull()
+  })
+
+  it('mounts the message-flow section fed by gate status data', async () => {
+    const fetchGateStatus = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleGateResponse())
+    const fetchGateConnectors = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleConnectorsResponse())
+    const fetchGateKeepers = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleKeepersResponse())
+
+    const { ConnectorStatusPanel } = await loadComponentWithApi({
+      fetchGateStatus,
+      fetchGateConnectors,
+      fetchGateKeepers,
+      lastEvent: signal(null),
+    })
+
+    render(html`<${ConnectorStatusPanel} />`, container)
+    await flushUi()
+
+    const flow = container.querySelector('[data-connector-flow="discord"]') as HTMLElement | null
+    expect(flow).not.toBeNull()
+    // Channel aggregate from sampleGateResponse: 12 in / 10 ok.
+    expect(flow!.querySelector('[data-flow-stats]')?.textContent).toContain('12')
+    // Per-keeper binding traffic row.
+    expect(flow!.querySelector('[data-flow-bindings]')?.textContent).toContain('luna')
+    // Recent gate event + binding audit history.
+    expect(flow!.querySelector('[data-flow-events]')?.textContent).toContain('keeper_error')
+    expect(flow!.querySelector('[data-flow-audit]')?.textContent).toContain('bind')
+  })
+
   it('renders iMessage reply mode metadata when advertised by the runtime', async () => {
     const fetchGateStatus = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleGateResponse())
     const fetchGateConnectors = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleConnectorsResponse({
@@ -782,6 +862,7 @@ describe('ConnectorStatusPanel', () => {
     // No Start/Stop button, no copyable run.sh command.
     expect(inProcessPanel!.querySelector('button[aria-label*="start"]')).toBeNull()
     expect(inProcessPanel!.querySelector('[data-copy-button]')).toBeNull()
+    expect(container.querySelector('[aria-controls="sidecar-log-discord"]')).toBeNull()
   })
 
   it('shows no-keepers empty state when keeper directory is empty', async () => {

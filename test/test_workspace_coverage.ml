@@ -1694,6 +1694,49 @@ let test_claim_task_r_already_claimed () =
     | _ -> Alcotest.fail "Expected TaskAlreadyClaimed")
 ;;
 
+(* Schedule-level scope fallback (#20673): a keeper must not idle when the only
+   in-scope task is admission-blocked while an unscoped task is claimable. This
+   runs through claim_next_r with BOTH task_filter (scope) and admission_filter
+   (wip), the composition the resolver-direct test cannot exercise. *)
+let test_scope_widen_claims_unscoped_when_scoped_admission_blocked () =
+  with_test_env (fun config ->
+    (* task-001: scoped to goal-x but admission-blocked.
+       task-002: unscoped (goal_id=None), admission-eligible. *)
+    let _ =
+      Workspace.add_task ~goal_id:"goal-x" config ~title:"scoped blocked"
+        ~priority:1 ~description:""
+    in
+    let _ =
+      Workspace.add_task config ~title:"unscoped open" ~priority:1 ~description:""
+    in
+    let agent_name = "agent_llm_a" in
+    let task_filter (_t : Masc_domain.task) = false in
+    let admission_filter ~active_tasks:_ (t : Masc_domain.task) =
+      not (String.equal t.id "task-001")
+    in
+    (* Hard scope (default allow_scope_fallback=false): the scoped task is
+       admission-blocked and the unscoped task is out-of-scope -> no eligible. *)
+    (match
+       Workspace.claim_next_r config ~agent_name ~task_filter ~admission_filter ()
+     with
+     | Workspace.Claim_next_no_eligible _ -> ()
+     | Workspace.Claim_next_claimed { task_id; _ } ->
+       Alcotest.failf "hard scope must not claim, got %s" task_id
+     | _ -> Alcotest.fail "expected no_eligible under hard scope");
+    (* Fallback: widen drops scope but keeps admission -> claims the unscoped
+       task and flags scope_widened. The admission-blocked scoped task stays out. *)
+    match
+      Workspace.claim_next_r config ~agent_name ~task_filter ~admission_filter
+        ~allow_scope_fallback:true ()
+    with
+    | Workspace.Claim_next_claimed { task_id; scope_widened; _ } ->
+      Alcotest.(check string) "claimed unscoped via widen" "task-002" task_id;
+      Alcotest.(check bool) "scope_widened flag set" true scope_widened
+    | Workspace.Claim_next_no_eligible _ ->
+      Alcotest.fail "fallback must claim the unscoped task, got no_eligible"
+    | _ -> Alcotest.fail "expected claim under fallback")
+;;
+
 (* ============================================================ *)
 (* GC (Garbage Collection) Tests                                 *)
 (* ============================================================ *)
@@ -1750,62 +1793,8 @@ let test_task_id_to_int_only_prefix () =
 (* Update Agent Tests                                            *)
 (* ============================================================ *)
 
-let test_update_agent_status () =
-  with_test_env (fun config ->
-    let _ = Workspace.bind_session config ~agent_name:"provider_f" ~capabilities:[ "test" ] () in
-    (* Get the actual agent name (auto-generated nickname) *)
-    let agents = Workspace.get_agents_raw config in
-    let provider_f =
-      List.find_opt
-        (fun (a : Masc_domain.agent) ->
-           String.length a.name >= 6 && String.sub a.name 0 6 = "provider_f")
-        agents
-    in
-    match provider_f with
-    | Some agent ->
-      let result =
-        Workspace.update_agent_r config ~agent_name:agent.name ~status:"listening" ()
-      in
-      (match result with
-       | Ok _ -> ()
-       | Error _ -> Alcotest.fail "Expected Ok")
-    | None -> Alcotest.fail "Provider_f agent not found")
-;;
-
-let test_update_agent_capabilities () =
-  with_test_env (fun config ->
-    let _ = Workspace.bind_session config ~agent_name:"provider_f" ~capabilities:[] () in
-    let agents = Workspace.get_agents_raw config in
-    let provider_f =
-      List.find_opt
-        (fun (a : Masc_domain.agent) ->
-           String.length a.name >= 6 && String.sub a.name 0 6 = "provider_f")
-        agents
-    in
-    match provider_f with
-    | Some agent ->
-      let result =
-        Workspace.update_agent_r
-          config
-          ~agent_name:agent.name
-          ~capabilities:[ "python"; "code-review" ]
-          ()
-      in
-      (match result with
-       | Ok _ -> ()
-       | Error _ -> Alcotest.fail "Expected Ok")
-    | None -> Alcotest.fail "Provider_f agent not found")
-;;
-
-let test_update_agent_not_found () =
-  with_test_env (fun config ->
-    let result =
-      Workspace.update_agent_r config ~agent_name:"nonexistent" ~status:"active" ()
-    in
-    match result with
-    | Error (Masc_domain.Agent (Masc_domain.Agent_error.NotFound _)) -> ()
-    | _ -> Alcotest.fail "Expected AgentNotFound")
-;;
+(* test_update_agent_status / _capabilities / _not_found removed (2026-06-09):
+   Workspace.update_agent_r deleted with the dead agent-status surface. *)
 
 (* ============================================================ *)
 (* Archive Task Tests                                            *)
@@ -1817,7 +1806,6 @@ let test_append_archive_tasks () =
       { id = "task-test"
       ; title = "Archive Test"
       ; description = "Test description"
-      ; goal_id = None
       ; task_status =
           Masc_domain.Done
             { assignee = "agent_llm_a"; completed_at = "2026-01-01T00:00:00Z"; notes = None }
@@ -2018,6 +2006,10 @@ let () =
             "claim_task_r already claimed"
             `Quick
             test_claim_task_r_already_claimed
+        ; Alcotest.test_case
+            "scope fallback claims unscoped when scoped admission-blocked"
+            `Quick
+            test_scope_widen_claims_unscoped_when_scoped_admission_blocked
         ] )
     ; (* === GC === *)
       ( "gc"
@@ -2031,12 +2023,6 @@ let () =
         ; Alcotest.test_case "invalid prefix" `Quick test_task_id_to_int_invalid_prefix
         ; Alcotest.test_case "empty" `Quick test_task_id_to_int_empty
         ; Alcotest.test_case "only prefix" `Quick test_task_id_to_int_only_prefix
-        ] )
-    ; (* === Update Agent === *)
-      ( "update_agent"
-      , [ Alcotest.test_case "status" `Quick test_update_agent_status
-        ; Alcotest.test_case "capabilities" `Quick test_update_agent_capabilities
-        ; Alcotest.test_case "not found" `Quick test_update_agent_not_found
         ] )
     ; (* === Archive === *)
       "archive", [ Alcotest.test_case "append tasks" `Quick test_append_archive_tasks ]

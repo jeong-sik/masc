@@ -167,6 +167,44 @@ let test_read_with_visible_repo_cwd_and_relative_file_path () =
     (parse_string "content" raw)
 ;;
 
+(* Regression: a repo-prefixed read of a path that does not exist (e.g.
+   the masc-mcp->masc rename-drift case, or a hallucinated file) routes
+   through resolve_shared. Before the fix, resolve_shared wrapped every
+   error as Read_path_error -> bare {error}, so the keeper-facing result
+   omitted your_playground / available_repos even though the message text
+   says "check your_playground for available files". The fix mirrors
+   resolve_projected: a path_not_found_under_allowed_roots rejection
+   becomes Missing_file -> rich missing_file_error_json. Assert the rich
+   hint reaches the keeper-facing result. *)
+let test_repo_prefixed_missing_read_surfaces_playground_hint () =
+  setup
+  @@ fun ~config ~meta ~playground:_ ->
+  allow_repo ~config ~meta "masc";
+  let raw =
+    Keeper_tool_filesystem_runtime.handle_read_file
+      ~turn_sandbox_factory:None
+      ~config
+      ~keeper_name:meta.name
+      ~args:
+        (`Assoc
+            [ "path", `String "repos/masc/lib/keeper/does_not_exist_xyz.ml"
+            ; "max_bytes", `Int 4096
+            ])
+  in
+  if parse_ok raw then Alcotest.failf "expected Read to fail, got ok: %s" raw;
+  (* missing_file_error_json carries your_playground + available_repos;
+     Read_path_error (the old behaviour) carries neither. *)
+  let has_hint =
+    let json = parse raw in
+    (match Json.member "your_playground" json with `Null -> false | _ -> true)
+    || (match Json.member "available_repos" json with `Null -> false | _ -> true)
+  in
+  Alcotest.(check bool)
+    "repo-prefixed not-found surfaces your_playground/available_repos hint"
+    true
+    has_hint
+;;
+
 let test_write_visible_mind_path () =
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
@@ -211,6 +249,10 @@ let () =
             "Write visible mind path"
             `Quick
             test_write_visible_mind_path
+        ; Alcotest.test_case
+            "repo-prefixed missing read surfaces playground hint"
+            `Quick
+            test_repo_prefixed_missing_read_surfaces_playground_hint
         ] )
     ]
 ;;

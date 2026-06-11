@@ -46,13 +46,6 @@ type validator_stage =
   | Probe_search
   | Allowed
 
-let validator_stage_to_string = function
-  | Probe_task_state -> "probe_task_state"
-  | Probe_http -> "probe_http"
-  | Probe_search -> "probe_search"
-  | Allowed -> "allowed"
-;;
-
 type artifact_policy =
   | Inline_only
   | Persist_if_large
@@ -336,7 +329,7 @@ let classify_command_of_ir ir =
     Masc_exec.Shell_ir_risk.classify (Masc_exec.Shell_ir_risk.undecided ir)
   in
   let risk_class = envelope.Masc_exec.Shell_ir_risk.risk in
-  let is_destructive = Exec_policy.is_destructive_bash_operation ir in
+  let is_destructive = Masc_exec.Shell_ir_risk.is_destructive envelope in
   let family =
     match first_effective_stage ir with
     | Some stage -> family_of_stage ~risk_class stage

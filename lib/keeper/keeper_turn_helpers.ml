@@ -132,9 +132,8 @@ let record_execution_receipt_gap
       Keeper_metrics.(to_string WriteMetaFailures)
       ~labels:[ "keeper", meta.name; "phase", "receipt_coverage_gap" ]
       ();
-    Log.Keeper.warn
-      "keeper:%s pre-dispatch execution_receipt coverage gap append failed: %s"
-      meta.name
+    Log.Keeper.warn ~keeper_name:meta.name
+      "pre-dispatch execution_receipt coverage gap append failed: %s"
       (Printexc.to_string exn)
 ;;
 
@@ -306,9 +305,8 @@ let record_pre_dispatch_terminal_observation
         Keeper_metrics.(to_string WriteMetaFailures)
         ~labels:[ "keeper", meta.name; "phase", "receipt_append" ]
         ();
-      Log.Keeper.warn
-        "keeper:%s pre-dispatch execution_receipt append failed: %s"
-        meta.name
+      Log.Keeper.warn ~keeper_name:meta.name
+        "pre-dispatch execution_receipt append failed: %s"
         error;
       record_execution_receipt_gap
         ~config

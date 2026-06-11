@@ -66,7 +66,6 @@ let limit_for_category config = function
 let category_for_tool_opt = function
   | "masc_broadcast" -> Some BroadcastLimit
   | "masc_add_task"
-  | "masc_claim_next"
   | "masc_update_priority"
   | "masc_plan_set_task"
   | "masc_plan_clear_task"

@@ -10,13 +10,10 @@ val metric_mcp_tool_schema_count : string
 
 val metric_mcp_tool_schema_tokens_approx : string
 
-(** {1 Admission queue metrics} *)
 
-val metric_inference_queue_depth : string
 val metric_inference_queue_inflight : string
 val metric_inference_queue_acquired : string
 val metric_inference_queue_wait : string
-val metric_inference_queue_cancelled : string
 
 (** Total admission requests rejected before execution. Labels:
     [surface=with_permit|try_with_permit] and
@@ -59,3 +56,8 @@ val metric_gc_promoted_words : string
 (** Approximate live OCaml heap memory usage in bytes, derived from
     [Gc.quick_stat.live_words] and [Sys.word_size]. *)
 val metric_memory_usage_bytes : string
+
+(** Eio main-domain scheduler lag (gauge, seconds): 1s sleep overshoot
+    sampled by the bootstrap lag fiber.  Sustained values mean the single
+    domain is blocked (2026-06 fleet-freeze root cause class). *)
+val metric_eio_loop_lag_seconds : string

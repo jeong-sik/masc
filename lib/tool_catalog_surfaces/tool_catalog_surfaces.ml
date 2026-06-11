@@ -56,7 +56,6 @@ let public_mcp_surface_tools =
     "masc_add_task"
   ; "masc_batch_add_tasks"
   ; "masc_tasks"
-  ; "masc_claim_next"
   ; "masc_transition"
   ; (* Planning *)
     "masc_goal_list"
@@ -75,15 +74,14 @@ let public_mcp_surface_tools =
        operator/client counterpart to existing board comment/vote actions. *)
     "masc_board_post"
   ; "masc_board_list"
-  ; "masc_board_get"
+  ; "masc_board_post_get"
   ; "masc_board_comment"
   ; "masc_board_vote"
   ; "masc_board_curation_read"
   ; "masc_board_curation_submit"
   ; "masc_board_reaction"
   ; (* Agent discovery *)
-    "masc_agents"
-  ; "masc_agent_card"
+    "masc_agent_card"
   ; "masc_dashboard"
   ; (* Utility *)
     "masc_tool_help"
@@ -98,11 +96,9 @@ let public_mcp_surface_tools =
 let spawned_agent_surface_tools =
   [ "masc_status"
   ; "masc_tasks"
-  ; "masc_claim_next"
   ; "masc_transition"
   ; "masc_task_history"
   ; "masc_broadcast"
-  ; "masc_agent_update"
   ; "masc_add_task"
   ; "masc_heartbeat"
   ; "masc_messages"
@@ -114,7 +110,7 @@ let spawned_agent_surface_tools =
   ; "masc_board_post"
   ; "masc_board_comment"
   ; "masc_board_vote"
-  ; "masc_board_get"
+  ; "masc_board_post_get"
   ; "masc_board_search"
   ; "masc_board_stats"
   ; "masc_board_profile"
@@ -139,11 +135,9 @@ let spawned_agent_surface_tools =
 let local_worker_surface_tools =
   [ "masc_status"
   ; "masc_tasks"
-  ; "masc_claim_next"
   ; "masc_transition"
   ; "masc_add_task"
   ; "masc_heartbeat"
-  ; "masc_agents"
   ; "masc_agent_card"
   ; "masc_goal_list"
   ; "masc_goal_upsert"
@@ -151,7 +145,7 @@ let local_worker_surface_tools =
   ; "masc_goal_verify"
   ; "masc_board_post"
   ; "masc_board_list"
-  ; "masc_board_get"
+  ; "masc_board_post_get"
   ; "masc_board_comment"
   ; "masc_board_vote"
   ; "masc_board_search"
@@ -167,8 +161,6 @@ let local_worker_surface_tools =
   ; "masc_board_curation_submit"
   ; "masc_run_init"
   ; "masc_run_plan"
-  ; "masc_run_log"
-  ; "masc_run_deliverable"
   ; "masc_run_get"
   ; "masc_run_list"
   ]
@@ -177,7 +169,6 @@ let local_worker_surface_tools =
 let session_min_surface_tools =
   [ "masc_status"
   ; "masc_tasks"
-  ; "masc_claim_next"
   ; "masc_plan_set_task"
   ; "masc_transition"
   ; "masc_add_task"
@@ -245,22 +236,18 @@ let workspace_role_tools : string list =
   ; "masc_board_post"
   ; "masc_board_comment"
   ; "masc_board_vote"
-  ; "masc_board_get"
+  ; "masc_board_post_get"
   ; "masc_board_sub_board_list"
   ; "masc_board_sub_board_get"
-  ; "masc_claim_next"
   ; "masc_transition"
   ]
 ;;
 
 let execution_role_tools : string list =
   [ "masc_heartbeat"
-  ; "masc_claim_next"
   ; "masc_transition"
   ; "masc_broadcast"
   ; "masc_run_init"
-  ; "masc_run_log"
-  ; "masc_run_deliverable"
   ; "masc_run_get"
   ; "masc_tool_help"
   ]

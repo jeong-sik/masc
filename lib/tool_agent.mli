@@ -21,16 +21,6 @@ val dispatch : context -> name:string -> args:Yojson.Safe.t -> Tool_result.resul
 
 val schemas : Masc_domain.tool_schema list
 
-(** Handle masc_agents *)
-val handle_agents :
-  ?tool_name:string -> ?start_time:float ->
-  context -> Yojson.Safe.t -> Tool_result.result
-
-(** Handle masc_agent_update *)
-val handle_agent_update :
-  ?tool_name:string -> ?start_time:float ->
-  context -> Yojson.Safe.t -> Tool_result.result
-
 (** Handle masc_get_metrics *)
 val handle_get_metrics :
   ?tool_name:string -> ?start_time:float ->

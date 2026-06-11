@@ -57,6 +57,9 @@ let handle_filesystem ctx descriptor args =
   | Tool_memory_write
   | Tool_library_search
   | Tool_library_read
+  | Tool_surface_read
+  | Tool_surface_post
+  | Tool_person_note_set
   | Tool_ide_annotate
   | Tool_voice_dispatch
   | Tool_task_dispatch
@@ -108,6 +111,9 @@ let handle_shell_ir ctx descriptor args =
   | Tool_memory_write
   | Tool_library_search
   | Tool_library_read
+  | Tool_surface_read
+  | Tool_surface_post
+  | Tool_person_note_set
   | Tool_ide_annotate
   | Tool_voice_dispatch
   | Tool_task_dispatch
@@ -165,6 +171,24 @@ let handle_in_process ctx descriptor args =
   | Tool_library_read ->
     Some
       (Keeper_tool_in_process_runtime.handle_library_read ~meta:ctx.meta ~args)
+  | Tool_surface_read ->
+    Some
+      (Keeper_tool_in_process_runtime.handle_surface_read
+         ~config:ctx.config
+         ~meta:ctx.meta
+         ~args)
+  | Tool_surface_post ->
+    Some
+      (Keeper_tool_in_process_runtime.handle_surface_post
+         ~config:ctx.config
+         ~meta:ctx.meta
+         ~args)
+  | Tool_person_note_set ->
+    Some
+      (Keeper_tool_in_process_runtime.handle_person_note_set
+         ~config:ctx.config
+         ~meta:ctx.meta
+         ~args)
   | Tool_ide_annotate ->
     Some
       (Keeper_tool_in_process_runtime.handle_ide_annotate

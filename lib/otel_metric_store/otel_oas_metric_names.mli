@@ -26,7 +26,6 @@ val metric_oas_sse_relay_queue_depth : string
     intentionally not relayed over SSE. Labels: [model_bucket], [phase], and
     [token_bucket]. Cardinality bound: 8 model buckets * 2 phases * 5 token
     buckets = 80 labelled series. *)
-val metric_oas_inference_telemetry_tokens : string
 
 (** Histogram populated from OAS [InferenceTelemetry.prompt_ms] and
     [prompt_tokens]. Labels: [model_bucket] only. *)

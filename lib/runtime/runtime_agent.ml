@@ -30,7 +30,6 @@ type config =
   tools : Agent_sdk.Tool.t list;
   runtime_mcp_policy :
     Llm_provider.Llm_transport.runtime_mcp_policy option;
-  max_turns : int;
   max_idle_turns : int;
   stream_idle_timeout_s : float option;
   max_execution_time_s : float option;
@@ -48,8 +47,9 @@ type config =
   description : string option;
   initial_messages : Agent_sdk.Types.message list;
   raw_trace : Agent_sdk.Raw_trace.t option;
-  tool_retry_policy : Agent_sdk.Tool_retry_policy.t option;
+  trace_link : (string * string) option;
   enable_thinking : bool option;
+  preserve_thinking : bool option;
   transport : Masc_grpc_transport.t;
   allowed_paths : string list;
   checkpoint_sidecar : Yojson.Safe.t option;
@@ -67,6 +67,15 @@ type config =
           Emergency-phase compaction. Defaults to OAS's extractive
           default. Keeper workers inject [Keeper_summarizer.keeper_summarizer]
           to scrub [STATE] blocks before the 100-char truncation. *)
+  execution_idle_timeout_s : float option;
+  thinking_budget : int option;
+  min_p : float option;
+  on_run_complete : (bool -> unit) option;
+  disclosure_level : Agent_sdk.Tool.disclosure_level option;
+  disclosure_resolver
+      : (Agent_sdk.Types.tool_result list -> Agent_sdk.Tool.disclosure_level option) option;
+  tool_selector : Agent_sdk.Tool_selector.strategy option;
+  checkpoint_sink : Agent_sdk.Agent.checkpoint_sink option;
 }
 
 let default_config = Runtime_agent_context.default_config
@@ -169,9 +178,6 @@ let runtime_mcp_policy_of_tool_names =
 let provider_label =
   Runtime_transport.provider_label
 
-let provider_effective_max_turns =
-  Runtime_transport.provider_effective_max_turns
-
 let resolve_tool_lane_for_oas_tools =
   Runtime_transport.resolve_tool_lane_for_oas_tools
 
@@ -187,6 +193,7 @@ let request_runtime_fields_on_base_config
     min_p = req_config.min_p;
     system_prompt = req_config.system_prompt;
     enable_thinking = req_config.enable_thinking;
+    preserve_thinking = req_config.preserve_thinking;
     thinking_budget = req_config.thinking_budget;
     clear_thinking = req_config.clear_thinking;
     tool_stream = req_config.tool_stream;
@@ -222,9 +229,21 @@ let provider_http_slot_transport transport =
 let provider_config_preserving_http_transport
     ~sw
     ~net
+    ?clock
+    ?stream_idle_timeout_s
+    ?body_timeout_s
     ~(provider_cfg : Llm_provider.Provider_config.t)
+    ()
   : Llm_provider.Llm_transport.t =
-  let http_transport = Llm_provider.Complete.make_http_transport ~sw ~net in
+  let http_transport =
+    Llm_provider.Complete.make_http_transport
+      ?clock
+      ?stream_idle_timeout_s
+      ?body_timeout_s
+      ~sw
+      ~net
+      ()
+  in
   let patch_request (req : Llm_provider.Llm_transport.completion_request) =
     { req with
       config =
@@ -249,12 +268,12 @@ let provider_config_preserving_http_transport
           (patch_request req));
     }
 
-let transport_for_provider ~sw ~net ~provider_cfg () =
+let transport_for_provider ~sw ~net ?clock ?stream_idle_timeout_s ?body_timeout_s ~provider_cfg () =
   (* CLI subprocess transport removed (2026-05-31); every provider dispatches
      over HTTP. Runtime MCP policy is applied via the tool-lane resolver and
      per-request patching, not at transport construction, so it is no longer
      threaded here. *)
-  Ok (Some (provider_config_preserving_http_transport ~sw ~net ~provider_cfg))
+  Ok (Some (provider_config_preserving_http_transport ~sw ~net ?clock ?stream_idle_timeout_s ?body_timeout_s ~provider_cfg ()))
 
 let runtime_id_of_config (config : config) =
   let runtime_prefix = "runtime:" in
@@ -269,14 +288,14 @@ let runtime_id_of_config (config : config) =
       if len > 0 then String.sub description prefix_len len else config.name
   | _ -> config.name
 
-let runtime_observation_for_completed_config ~total_duration_ms
+let runtime_observation_for_terminal_config ~total_duration_ms ?error
     (config : config) =
   let latency_ms = Some (int_of_float total_duration_ms) in
   let capture, _metrics =
     Runtime_observation.runtime_metrics_for_candidates ~candidate_count:1 ()
   in
   Runtime_observation.record_attempt_terminal capture ~model_id:config.model_id
-    ~latency_ms ~error:None;
+    ~latency_ms ~error;
   Runtime_observation.runtime_observation_with_metrics
     ~runtime_id:(runtime_id_of_config config)
     ~strategy:"single_provider_runtime"
@@ -285,8 +304,51 @@ let runtime_observation_for_completed_config ~total_duration_ms
     ~candidate_count:1
     ~selected_model_raw:(Some config.model_id)
     ~capture
-    ~attempt_details_source:"runtime_agent_terminal"
+    ~attempt_details_source:
+      (match error with
+       | None -> "runtime_agent_terminal"
+       | Some _ -> "runtime_agent_terminal_error")
     ()
+
+let runtime_observation_for_completed_config ~total_duration_ms config =
+  runtime_observation_for_terminal_config ~total_duration_ms config
+
+(* RFC-OAS-026 §4.6: [read_sse] arms the stream-idle deadline only when BOTH a
+   clock and the idle timeout are present. masc's clock derivation resolves to
+   [None] when the process runtime is uninitialised; a [None] clock with a
+   configured [stream_idle_timeout_s] would silently disarm the only
+   I2-legitimate streaming timeout and let a mid-stream stall hang to the
+   attempt watchdog (the exact silent no-op the RFC forbids). Fail loudly so a
+   wiring regression is visible. A [None] idle (the legitimate opt-out) with a
+   [None] clock stays [None]. Split into a pure decision over the two clock
+   sources so the failure path is testable without an Eio runtime. *)
+let decide_clock_for_idle
+    ~(stream_idle_timeout_s : float option)
+    ~(process_clock : (float Eio.Time.clock_ty Eio.Resource.t, string) result)
+    ~(ctx_clock : float Eio.Time.clock_ty Eio.Resource.t option)
+  : float Eio.Time.clock_ty Eio.Resource.t option =
+  match process_clock, ctx_clock with
+  | Ok c, _ -> Some c
+  | Error _, (Some _ as c) -> c
+  | Error e, None ->
+    (match stream_idle_timeout_s with
+     | Some idle ->
+       failwith
+         (Printf.sprintf
+            "runtime_agent: stream_idle_timeout_s configured (%.1fs) but no \
+             clock resolvable (%s); refusing to run with a silently disarmed \
+             stream idle timeout"
+            idle
+            e)
+     | None -> None)
+;;
+
+let resolve_clock_for_idle ~(stream_idle_timeout_s : float option) =
+  decide_clock_for_idle
+    ~stream_idle_timeout_s
+    ~process_clock:(Process_eio.get_clock ())
+    ~ctx_clock:(Eio_context.get_clock_opt ())
+;;
 
 module For_testing = struct
   let request_runtime_fields_on_base_config =
@@ -296,6 +358,9 @@ module For_testing = struct
   let runtime_id_of_config = runtime_id_of_config
   let runtime_observation_for_completed_config =
     runtime_observation_for_completed_config
+  let runtime_observation_for_terminal_config =
+    runtime_observation_for_terminal_config
+  let decide_clock_for_idle = decide_clock_for_idle
 end
 
 (* ================================================================ *)
@@ -325,7 +390,7 @@ let provider_lifecycle_attrs (config : config) =
     ("model_id", `String config.model_id);
     ("provider_model_id", `String provider_cfg.model_id);
     ("max_tokens", `Int config.max_tokens);
-    ("max_turns", `Int config.max_turns);
+
   ]
   @ nonempty_string "base_url" provider_cfg.base_url
   @ nonempty_string "request_path" provider_cfg.request_path
@@ -353,8 +418,18 @@ let build
     ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
     ~(config : config)
   : (Agent_sdk.Agent.t, Agent_sdk.Error.sdk_error) result =
+  let clock =
+    resolve_clock_for_idle ~stream_idle_timeout_s:config.stream_idle_timeout_s
+  in
   match
-    transport_for_provider ~sw ~net ~provider_cfg:config.provider_cfg ()
+    transport_for_provider
+      ~sw
+      ~net
+      ?clock
+      ?stream_idle_timeout_s:config.stream_idle_timeout_s
+      ?body_timeout_s:config.body_timeout_s
+      ~provider_cfg:config.provider_cfg
+      ()
   with
   | Error _ as e -> e
   | Ok transport ->
@@ -427,11 +502,10 @@ let close_agent_for_cleanup ?(propagate_cancel = true) ~config agent =
 
     The checkpoint provides: messages, turn_count, usage_stats.
     The MASC config provides: provider, model_id, system_prompt,
-    max_turns, temperature, tools, hooks, guardrails, etc.
+    temperature, tools, hooks, guardrails, etc.
 
-    [max_turns] and [max_cost_usd] are adjusted to account for
-    cumulative values in the checkpoint — the keeper's per-call budget
-    is added on top of the checkpoint's accumulated state.
+    [max_cost_usd] is adjusted to account for cumulative values in
+    the checkpoint.
 
     @boundary-contract
     - MASC owns: per-turn config selection (model, temperature, tools,
@@ -448,8 +522,18 @@ let resume_from_checkpoint
     ~(config : config)
     ~(checkpoint : Agent_sdk.Checkpoint.t)
   : (Agent_sdk.Agent.t, Agent_sdk.Error.sdk_error) result =
+  let clock =
+    resolve_clock_for_idle ~stream_idle_timeout_s:config.stream_idle_timeout_s
+  in
   match
-    transport_for_provider ~sw ~net ~provider_cfg:config.provider_cfg ()
+    transport_for_provider
+      ~sw
+      ~net
+      ?clock
+      ?stream_idle_timeout_s:config.stream_idle_timeout_s
+      ?body_timeout_s:config.body_timeout_s
+      ~provider_cfg:config.provider_cfg
+      ()
   with
   | Error _ as e -> e
   | Ok transport ->
@@ -457,9 +541,8 @@ let resume_from_checkpoint
         Runtime_agent_context.prepare_resume ~config ~checkpoint
       in
       Log.Misc.info
-        "oas_worker %s: resume checkpoint_turn_count=%d per_call_turn_budget=%d effective_max_turns=%d"
-        config.name checkpoint.turn_count config.max_turns
-        prepared_resume.agent_config.max_turns;
+        "oas_worker %s: resume checkpoint_turn_count=%d turn_limit=unlimited"
+        config.name checkpoint.turn_count;
       let options = { prepared_resume.options with transport } in
       Ok
         (Agent_sdk.Agent.resume ~net ~checkpoint:prepared_resume.patched_checkpoint
@@ -537,11 +620,19 @@ let run
       let clock =
         match Process_eio.get_clock () with
         | Ok c -> Some c
-        | Error _ -> None
+        | Error _ -> Eio_context.get_clock_opt ()
       in
-      match on_event with
-      | Some cb -> Agent_sdk.Agent.run_stream ~sw ?clock ?on_yield ?on_resume ~on_event:cb agent goal
-      | None -> Agent_sdk.Agent.run ~sw ?clock ?on_yield ?on_resume agent goal
+      Otel_spans.with_span
+        ~name:"llm_call"
+        ~attrs:[
+          "gen_ai.request.model", `String config.model_id;
+          "gen_ai.provider.name", `String (Llm_provider.Provider_config.string_of_provider_kind config.provider_cfg.kind);
+          "masc.runtime_id", `String config.name;
+        ]
+        (fun _trace_id ->
+          match on_event with
+          | Some cb -> Agent_sdk.Agent.run_stream ~sw ?clock ?on_yield ?on_resume ~on_event:cb agent goal
+          | None -> Agent_sdk.Agent.run ~sw ?clock ?on_yield ?on_resume agent goal)
     in
     let run_total_duration_ms = run_duration_ms_since run_started_at in
     let checkpoint =
@@ -679,11 +770,10 @@ let run
           ~session_id
           ~text:
             (Printf.sprintf
-               "[agent execution timeout: elapsed=%.1fs timeout=%.1fs turns=%d/%d]"
+               "[agent execution timeout: elapsed=%.1fs timeout=%.1fs turns=%d]"
                r.elapsed_sec
                r.timeout_sec
-               r.turn_count
-               r.max_turns)
+               r.turn_count)
       in
       record_dashboard_oas_response
         ~config
@@ -705,11 +795,10 @@ let run
           ~session_id
           ~text:
             (Printf.sprintf
-               "[agent idle timeout: idle=%.1fs timeout=%.1fs turns=%d/%d]"
+               "[agent idle timeout: idle=%.1fs timeout=%.1fs turns=%d]"
                r.idle_sec
                r.idle_timeout_sec
-               r.turn_count
-               r.max_turns)
+               r.turn_count)
       in
       record_dashboard_oas_response
         ~config

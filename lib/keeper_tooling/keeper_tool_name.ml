@@ -13,7 +13,7 @@ type t =
   | Board_comment_vote
   | Board_curation_read
   | Board_curation_submit
-  | Board_get
+  | Board_post_get
   | Board_list
   | Board_post
   | Board_search
@@ -37,6 +37,9 @@ type t =
   | Memory_write
   | Search_files
   | Stay_silent
+  | Surface_read
+  | Surface_post
+  | Person_note_set
   | Task_claim
   | Task_create
   | Task_done
@@ -47,7 +50,6 @@ type t =
   | Time_now
   | Tool_search
   | Tools_list
-  | State_report
   | Voice_agent
   | Voice_listen
   | Voice_session_end
@@ -61,7 +63,7 @@ let to_string = function
   | Board_comment_vote -> "keeper_board_comment_vote"
   | Board_curation_read -> "keeper_board_curation_read"
   | Board_curation_submit -> "keeper_board_curation_submit"
-  | Board_get -> "keeper_board_get"
+  | Board_post_get -> "keeper_board_post_get"
   | Board_list -> "keeper_board_list"
   | Board_post -> "keeper_board_post"
   | Board_search -> "keeper_board_search"
@@ -85,6 +87,9 @@ let to_string = function
   | Memory_write -> "keeper_memory_write"
   | Search_files -> "tool_search_files"
   | Stay_silent -> "keeper_stay_silent"
+  | Surface_read -> "keeper_surface_read"
+  | Surface_post -> "keeper_surface_post"
+  | Person_note_set -> "keeper_person_note_set"
   | Task_claim -> "keeper_task_claim"
   | Task_create -> "keeper_task_create"
   | Task_done -> "keeper_task_done"
@@ -95,7 +100,6 @@ let to_string = function
   | Time_now -> "keeper_time_now"
   | Tool_search -> "keeper_tool_search"
   | Tools_list -> "keeper_tools_list"
-  | State_report -> "keeper_report_state"
   | Voice_agent -> "keeper_voice_agent"
   | Voice_listen -> "keeper_voice_listen"
   | Voice_session_end -> "keeper_voice_session_end"
@@ -110,7 +114,7 @@ let of_string = function
   | "keeper_board_comment_vote" -> Some Board_comment_vote
   | "keeper_board_curation_read" -> Some Board_curation_read
   | "keeper_board_curation_submit" -> Some Board_curation_submit
-  | "keeper_board_get" -> Some Board_get
+  | "keeper_board_post_get" -> Some Board_post_get
   | "keeper_board_list" -> Some Board_list
   | "keeper_board_post" -> Some Board_post
   | "keeper_board_search" -> Some Board_search
@@ -134,6 +138,9 @@ let of_string = function
   | "keeper_memory_write" -> Some Memory_write
   | "tool_search_files" -> Some Search_files
   | "keeper_stay_silent" -> Some Stay_silent
+  | "keeper_surface_read" -> Some Surface_read
+  | "keeper_surface_post" -> Some Surface_post
+  | "keeper_person_note_set" -> Some Person_note_set
   | "keeper_task_claim" -> Some Task_claim
   | "keeper_task_create" -> Some Task_create
   | "keeper_task_done" -> Some Task_done
@@ -144,7 +151,6 @@ let of_string = function
   | "keeper_time_now" -> Some Time_now
   | "keeper_tool_search" -> Some Tool_search
   | "keeper_tools_list" -> Some Tools_list
-  | "keeper_report_state" -> Some State_report
   | "keeper_voice_agent" -> Some Voice_agent
   | "keeper_voice_listen" -> Some Voice_listen
   | "keeper_voice_session_end" -> Some Voice_session_end
@@ -157,13 +163,10 @@ let of_string = function
 let pp fmt t = Format.pp_print_string fmt (to_string t)
 ;;
 
-let legacy_masc_claim_next_name = "masc_claim_next"
-let legacy_masc_broadcast_name = "masc_broadcast"
-let legacy_masc_deliver_name = "masc_deliver"
 
 let public_mcp_non_descriptor_names =
   [ "masc_start"
-  ; legacy_masc_broadcast_name
+  ; "masc_broadcast"
   ; "masc_messages"
   ; "masc_keeper_sandbox_status"
   ; "masc_keeper_create_from_persona"
@@ -178,7 +181,7 @@ let is_keeper_board_tool = function
   | Board_comment_vote
   | Board_curation_read
   | Board_curation_submit
-  | Board_get
+  | Board_post_get
   | Board_list
   | Board_post
   | Board_search
@@ -203,6 +206,9 @@ let is_keeper_board_tool = function
   | Memory_write
   | Search_files
   | Stay_silent
+  | Surface_read
+  | Surface_post
+  | Person_note_set
   | Task_claim
   | Task_create
   | Task_done
@@ -213,7 +219,6 @@ let is_keeper_board_tool = function
   | Time_now
   | Tool_search
   | Tools_list
-  | State_report
   | Voice_agent
   | Voice_listen
   | Voice_session_end
@@ -222,34 +227,10 @@ let is_keeper_board_tool = function
   | Voice_speak -> false
 ;;
 
-let legacy_masc_board_surface_names =
-  [ "masc_board_cleanup"
-  ; "masc_board_comment"
-  ; "masc_board_comment_vote"
-  ; "masc_board_curation_read"
-  ; "masc_board_curation_submit"
-  ; "masc_board_delete"
-  ; "masc_board_get"
-  ; "masc_board_hearths"
-  ; "masc_board_list"
-  ; "masc_board_post"
-  ; "masc_board_profile"
-  ; "masc_board_reaction"
-  ; "masc_board_search"
-  ; "masc_board_stats"
-  ; "masc_board_sub_board_create"
-  ; "masc_board_sub_board_delete"
-  ; "masc_board_sub_board_get"
-  ; "masc_board_sub_board_list"
-  ; "masc_board_sub_board_update"
-  ; "masc_board_vote"
-  ]
-;;
-
 let is_board_surface_name name =
   match of_string name with
   | Some tool -> is_keeper_board_tool tool
-  | None -> List.mem name legacy_masc_board_surface_names
+  | None -> String.starts_with ~prefix:"masc_board_" name
 ;;
 
 let strip_mcp_masc_prefix name =

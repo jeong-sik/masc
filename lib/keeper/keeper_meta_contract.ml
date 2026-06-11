@@ -65,17 +65,6 @@ type compaction_policy =
        (consumed by [Agent_sdk.Context_reducer.stub_tool_results
        ~keep_recent]).  Default 2; parsers clamp to
        [[0, Keeper_config.keep_recent_tool_results_max]]. *)
-  ; tool_heavy_msg_threshold : int
-    (* Per-keeper message-count floor for the tool-heavy compaction
-       gate.  Default {!Keeper_config.default_tool_heavy_msg_threshold}
-       (40); preserves prior global behavior in
-       [Keeper_compact_policy].  Heavy-tool keepers can lower this
-       to compact sooner without code change.  Wired by PR-B. *)
-  ; tool_heavy_ratio_floor : float
-    (* Per-keeper context-ratio floor for the tool-heavy compaction
-       gate.  Default
-       {!Keeper_config.default_tool_heavy_ratio_floor} (0.15);
-       preserves prior global behavior.  Wired by PR-B. *)
   }
 
 type proactive_policy =
@@ -195,7 +184,6 @@ type blocker_class =
   | Sdk_cost_budget_exceeded
   | Sdk_unrecognized_stop_reason
   | Sdk_idle_detected
-  | Sdk_tool_retry_exhausted
   | Sdk_guardrail_violation
   | Sdk_tripwire_violation
   | Sdk_exit_condition_met
@@ -221,7 +209,6 @@ let blocker_class_to_string = function
   | Sdk_cost_budget_exceeded -> "sdk_cost_budget_exceeded"
   | Sdk_unrecognized_stop_reason -> "sdk_unrecognized_stop_reason"
   | Sdk_idle_detected -> "sdk_idle_detected"
-  | Sdk_tool_retry_exhausted -> "sdk_tool_retry_exhausted"
   | Sdk_guardrail_violation -> "sdk_guardrail_violation"
   | Sdk_tripwire_violation -> "sdk_tripwire_violation"
   | Sdk_exit_condition_met -> "sdk_exit_condition_met"
@@ -248,7 +235,6 @@ let blocker_class_of_serialized_string = function
   | "sdk_cost_budget_exceeded" -> Some Sdk_cost_budget_exceeded
   | "sdk_unrecognized_stop_reason" -> Some Sdk_unrecognized_stop_reason
   | "sdk_idle_detected" -> Some Sdk_idle_detected
-  | "sdk_tool_retry_exhausted" -> Some Sdk_tool_retry_exhausted
   | "sdk_guardrail_violation" -> Some Sdk_guardrail_violation
   | "sdk_tripwire_violation" -> Some Sdk_tripwire_violation
   | "sdk_exit_condition_met" -> Some Sdk_exit_condition_met
@@ -296,7 +282,6 @@ let blocker_class_continue_gate = function
   | Sdk_cost_budget_exceeded
   | Sdk_unrecognized_stop_reason
   | Sdk_idle_detected
-  | Sdk_tool_retry_exhausted
   | Sdk_guardrail_violation
   | Sdk_tripwire_violation
   | Sdk_exit_condition_met

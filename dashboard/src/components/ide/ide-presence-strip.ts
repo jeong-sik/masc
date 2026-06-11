@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useState } from 'preact/hooks'
+import { useSignalValue, useStoreSubscription } from './use-signal-value'
 import { authHeaders, fetchWithTimeout, get } from '../../api/core'
 import { DEFAULT_GET_TIMEOUT_MS } from '../../config/constants'
 import { KeeperBadge } from '../keeper-badge'
@@ -207,7 +208,6 @@ function presenceHeader(snap: KeeperPresenceSnapshot) {
 
 export function IdePresenceStrip() {
   const presenceStore = useMemo(() => createKeeperPresenceStore(LOADING_SNAPSHOT), [])
-  const [, forceRender] = useState(0)
   const [worktrees, setWorktrees] = useState<ReadonlyArray<WorktreeEntry>>([])
 
   useEffect(() => {
@@ -228,15 +228,8 @@ export function IdePresenceStrip() {
     return unsub
   }, [presenceStore])
 
-  useEffect(() => {
-    const unsub = presenceStore.subscribe(() => forceRender(tick => tick + 1))
-    return unsub
-  }, [presenceStore])
-
-  useEffect(() => {
-    const unsub = cursorOverlaySignal.subscribe(() => forceRender(tick => tick + 1))
-    return unsub
-  }, [])
+  useStoreSubscription(presenceStore.subscribe)
+  useSignalValue(cursorOverlaySignal)
 
   const current = presenceStore.snapshot()
   const entries = presenceStore.entries()

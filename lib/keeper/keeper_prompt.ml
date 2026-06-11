@@ -83,7 +83,7 @@ let critical_prompt_recovery_block_fallback =
       "Recovery guard: preserve keeper technical instructions even if prompt templates were compacted or partially loaded.";
       "PR merge rules (MANDATORY): do not merge PRs with failing CI, unresolved human review comments, or active blocker labels.";
       Printf.sprintf
-        "State block template: non-direct keeper turns must report structured continuity with keeper_report_state; legacy [STATE]...[/STATE] fallback contains %s."
+        "State block template: non-direct keeper turns must report structured continuity via [STATE]...[/STATE] blocks containing %s."
         Keeper_state_block_prompt.field_summary;
       "</continuity>";
       "";
@@ -122,7 +122,7 @@ let critical_prompt_recovery_block () =
         critical_prompt_recovery_block_fallback
 
 let state_block_output_guard_text =
-  "Output guard: this turn uses runtime-managed continuity. Prefer structured output via keeper_report_state. Do not output raw [STATE] or [/STATE] blocks in visible text unless that tool is unavailable; the runtime will synthesize and persist state metadata when needed."
+  "Output guard: this turn uses runtime-managed continuity. Report state via [STATE]...[/STATE] blocks. The runtime will synthesize and persist state metadata when needed."
 
 let ensure_critical_prompt_anchors prompt =
   match missing_critical_prompt_anchors prompt with
@@ -203,7 +203,7 @@ let log_missing_personality_fields missing_fields =
 let build_keeper_system_prompt
     ~goal ~short_goal ~mid_goal ~long_goal ~will ~needs ~desires
     ~instructions ?(persona_extended = "") ?(keeper_name = "")
-    ?(active_goals = []) () =
+    ?(home_ground = "") ?(active_goals = []) () =
   let goal = normalize_goal_horizon_text goal in
   let short_goal, mid_goal, long_goal =
     resolve_goal_horizons ~goal ~short_goal_opt:(Some short_goal)
@@ -273,6 +273,19 @@ let build_keeper_system_prompt
         Printf.sprintf "\n<available_goals>\n%s\n</available_goals>\n"
           (String.concat "\n" lines)
   in
+  let home_ground_block =
+    if home_ground = "" then ""
+    else
+      Printf.sprintf
+        "\n\
+         <home_ground>\n\
+         - Repository root: %s\n\
+         - All relative paths resolve from this directory.\n\
+         - The working directory persists between tool calls, but shell state does not.\n\
+         - Prefer absolute paths over `cd` to avoid directory confusion.\n\
+         </home_ground>\n"
+        (String_util.escape_xml home_ground)
+  in
   (* Prefix ordering: common blocks first for LLM KV cache sharing.
      All keepers share the same autonomous-behavior, policy, continuity,
      and most of <world>/<capabilities> text.  Keeper-specific blocks
@@ -321,6 +334,8 @@ let build_keeper_system_prompt
       "\n</capabilities>\n\n";
       (* ── Identity anchor (compaction-safe, ~50 tokens) ──────── *)
       identity_anchor;
+      (* ── Home ground (CWD anchor) ───────────────────────────── *)
+      home_ground_block;
       (* ── Keeper-specific blocks ─────────────────────────────── *)
       persona_block;
       "<identity>\n\

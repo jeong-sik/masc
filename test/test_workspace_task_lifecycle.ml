@@ -21,7 +21,7 @@ let mk_in_progress assignee =
 
 let mk_awaiting assignee =
   D.AwaitingVerification
-    { assignee; submitted_at = now; verification_id = "v1"; deadline = None }
+    { assignee; submitted_at = now; verification_id = "v1"; phase = Awaiting_verifier }
 ;;
 
 let mk_done assignee =
@@ -66,6 +66,27 @@ let assert_actions ~ctx ~expected ~actual =
       (render expected)
       (render actual);
     exit 1)
+;;
+
+let fail msg =
+  Printf.printf "FAIL %s\n%!" msg;
+  exit 1
+;;
+
+let decide_claim ~same_agent ~agent_name ~task_id ~task_status =
+  L.decide
+    ~verification_enabled:true
+    ~verification_timeout_seconds:0.0
+    ~new_verification_id:(fun () -> "vrf-new")
+    ~same_agent
+    ~agent_name
+    ~task_id
+    ~task_status
+    ~action:D.Claim
+    ~now
+    ~force:false
+    ~notes:""
+    ~reason:""
 ;;
 
 (* Cross-check: [valid_next_actions] returns exactly the [task_action]s for
@@ -201,8 +222,11 @@ let test_awaiting_verification_by_other () =
     L.valid_next_actions
       ~verification_enabled:true ~same_agent:false ~force:false ~task_status
   in
-  (* Approver path: same_agent=false (not the submitter) → Approve / Reject ok. *)
-  let expected = [ D.Approve_verification; D.Reject_verification ] in
+  (* same_agent=false (not the submitter): a verifier may Approve / Reject, and
+     may also Claim the task to verify it (cross-agent verification dispatch,
+     Issue #19314 / RFC-0220 §3.5). The prior expectation predated #19314's
+     cross-agent Claim arm in [decide]; align it with the actual behavior. *)
+  let expected = [ D.Claim; D.Approve_verification; D.Reject_verification ] in
   assert_actions ~ctx:"awaiting-by-other" ~expected ~actual;
   assert_consistent_with_decide
     ~ctx:"awaiting-by-other/consistency" ~verification_enabled:true
@@ -307,6 +331,88 @@ let test_exhaustive_consistency () =
     statuses
 ;;
 
+(* ── RFC-0220 §3.5: cross-agent claim binds the verifier ───── *)
+
+(* A verifier (not the submitter) claiming an [AwaitingVerification] obligation
+   preserves the obligation and records the claimer in [phase] —
+   [Verifier_assigned] — with [set_current] pointing the verifier at the task.
+   The status is NOT clobbered to [Claimed]; the submitter is preserved as
+   [assignee]. This is the satisfier binding that the auto-claim path also
+   reuses via [resolve_claim]. *)
+let test_claim_awaiting_binds_verifier () =
+  match
+    decide_claim
+      ~same_agent:(fun a -> String.equal a "verifier-x")
+      ~agent_name:"verifier-x"
+      ~task_id:"task-1"
+      ~task_status:(mk_awaiting other)
+  with
+  | Ok
+      { L.new_status =
+          D.AwaitingVerification { phase = D.Verifier_assigned { verifier }; assignee; _ }
+      ; set_current
+      ; _
+      } ->
+    if not (String.equal verifier "verifier-x") then fail "verifier not bound to the claimer";
+    if not (String.equal assignee other) then fail "submitter (assignee) must be preserved";
+    (match set_current with
+     | Some t when String.equal t "task-1" -> ()
+     | _ -> fail "cross-agent claim must point the verifier at the task (set_current)")
+  | Ok { L.new_status; _ } ->
+    fail
+      (Printf.sprintf
+         "expected AwaitingVerification/Verifier_assigned, got %s"
+         (D.task_status_to_string new_status))
+  | Error _ -> fail "cross-agent claim of AwaitingVerification must be accepted"
+;;
+
+(* The submitter cannot claim (self-verify) their own obligation. *)
+let test_claim_awaiting_by_self_blocked () =
+  match
+    decide_claim
+      ~same_agent:(fun a -> String.equal a owner)
+      ~agent_name:owner
+      ~task_id:"task-2"
+      ~task_status:(mk_awaiting owner)
+  with
+  | Error _ -> ()
+  | Ok _ -> fail "submitter must not claim (self-verify) their own AwaitingVerification"
+;;
+
+(* [resolve_claim] is the single claim decision shared by both writers. Pin all
+   four outcomes, including the self-block. *)
+let test_resolve_claim_outcomes () =
+  let actor x a = String.equal a x in
+  (match L.resolve_claim ~same_actor:(actor "w") ~agent_name:"w" ~now D.Todo with
+   | L.Worker_claim (D.Claimed { assignee = "w"; _ }) -> ()
+   | _ -> fail "Todo should resolve to Worker_claim Claimed");
+  (match L.resolve_claim ~same_actor:(actor "v") ~agent_name:"v" ~now (mk_awaiting other) with
+   | L.Verifier_claim
+       (D.AwaitingVerification { phase = D.Verifier_assigned { verifier = "v" }; assignee; _ })
+     when String.equal assignee other -> ()
+   | _ -> fail "cross-agent AwaitingVerification should resolve to Verifier_claim (verifier bound, submitter preserved)");
+  (match L.resolve_claim ~same_actor:(actor other) ~agent_name:other ~now (mk_awaiting other) with
+   | L.Self_owned -> ()
+   | _ -> fail "own AwaitingVerification should resolve to Self_owned (the self-block)");
+  (match L.resolve_claim ~same_actor:(actor "z") ~agent_name:"z" ~now (mk_claimed other) with
+   | L.Held_by_other h when String.equal h other -> ()
+   | _ -> fail "Claimed-by-other should resolve to Held_by_other naming the holder")
+;;
+
+(* [Verifier_assigned] must survive a serialize -> parse round-trip so the
+   satisfier binding is durable across backlog writes. *)
+let test_verifier_assigned_codec_roundtrip () =
+  let status =
+    D.bind_verifier ~verifier:"v" ~assignee:other ~submitted_at:now ~verification_id:"vrf-1"
+  in
+  match D.task_status_of_yojson (D.task_status_to_yojson status) with
+  | Ok
+      (D.AwaitingVerification
+        { phase = D.Verifier_assigned { verifier = "v" }; verification_id = "vrf-1"; assignee; _ })
+    when String.equal assignee other -> ()
+  | _ -> fail "Verifier_assigned must round-trip through the task_status codec"
+;;
+
 (* ── runner ───────────────────────────────────────────────── *)
 
 let () =
@@ -321,5 +427,9 @@ let () =
   test_cancelled ();
   test_verification_disabled_todo ();
   test_exhaustive_consistency ();
+  test_claim_awaiting_binds_verifier ();
+  test_claim_awaiting_by_self_blocked ();
+  test_resolve_claim_outcomes ();
+  test_verifier_assigned_codec_roundtrip ();
   print_endline "test_task_state_lifecycle: all assertions passed"
 ;;

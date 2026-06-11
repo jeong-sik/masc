@@ -42,6 +42,8 @@ export interface IdeDataWorkspaceStore {
   readonly subscribeDiffRows: (listener: () => void) => () => void
   readonly workspaceSource: () => WorkspaceSource
   readonly subscribeWorkspaceSource: (listener: () => void) => () => void
+  readonly workspaceBasePath: () => string | null
+  readonly subscribeWorkspaceBasePath: (listener: () => void) => () => void
   readonly repositories: () => ReadonlyArray<Repository>
   readonly activeRepositoryId: () => string | null
   readonly setActiveRepositoryId: (repoId: string | null) => void
@@ -116,6 +118,7 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
 
   const diffRowsSignal = signal<ReadonlyArray<UnifiedDiffRow>>([])
   const workspaceSourceSignal = signal<WorkspaceSource>({ kind: 'project' })
+  const workspaceBasePathSignal = signal<string | null>(null)
   const repositoriesSignal = signal<ReadonlyArray<Repository>>([])
   const activeRepositoryIdSignal = signal<string | null>(null)
   const annotationsSignal = signal<ReadonlyArray<IdeAnnotation>>([])
@@ -166,10 +169,11 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
     const opts = { keeper: keeperParam, repoId, signal }
 
     // Load file tree (independent of active file — needed to suggest first file)
-    fetchWorkspaceTree(2, opts).then(({ nodes, source }) => {
+    fetchWorkspaceTree(2, opts).then(({ nodes, source, basePath }) => {
       if (signal.aborted) return
       fileTreeStore.seed(nodes)
       workspaceSourceSignal.value = source
+      workspaceBasePathSignal.value = basePath
 
       // Self-healing: if the selected repo is unreachable (missing .git,
       // path does not exist, etc.), exclude it and auto-switch to the next
@@ -257,6 +261,9 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
     // signal core's internal tracking).
     subscribeWorkspaceSource: (listener: () => void) =>
       workspaceSourceSignal.subscribe(listener),
+    workspaceBasePath: () => workspaceBasePathSignal.value,
+    subscribeWorkspaceBasePath: (listener: () => void) =>
+      workspaceBasePathSignal.subscribe(listener),
     repositories: () => repositoriesSignal.value,
     activeRepositoryId: () => activeRepositoryIdSignal.value,
     setActiveRepositoryId: (repoId: string | null) => {

@@ -88,7 +88,6 @@ let blocker_class_indicates_overflow (klass : blocker_class) : bool =
   | Sdk_cost_budget_exceeded
   | Sdk_unrecognized_stop_reason
   | Sdk_idle_detected
-  | Sdk_tool_retry_exhausted
   | Sdk_guardrail_violation
   | Sdk_tripwire_violation
   | Sdk_exit_condition_met
@@ -120,9 +119,8 @@ let append_lineage_artifacts_best_effort
         Keeper_metrics.(to_string RolloverFailures)
         ~labels:[("keeper", child.name); ("site", "lineage_append")]
         ();
-      Log.Keeper.warn
-        "keeper:%s lineage append skipped after rollover trace=%s->%s: %s"
-        child.name
+      Log.Keeper.warn ~keeper_name:child.name
+        "lineage append skipped after rollover trace=%s->%s: %s"
         parent_trace_id
         (Keeper_id.Trace_id.to_string child.runtime.trace_id)
         (Printexc.to_string exn)
@@ -284,9 +282,9 @@ let maybe_rollover_oas_handoff
                 Keeper_metrics.(to_string CheckpointFailures)
                 ~labels:[("keeper", base_meta.name); ("site", "rollover_handoff_save")]
                 ();
-              Log.Keeper.error
-                "keeper:%s OAS handoff rollover ABORTED — checkpoint save failed: %s"
-                base_meta.name e;
+              Log.Keeper.error ~keeper_name:base_meta.name
+                "OAS handoff rollover ABORTED — checkpoint save failed: %s"
+                e;
               { rollover_base with attempted = true; failure_reason = Some e }
           | Ok _checkpoint ->
               (match Keeper_id.Trace_id.of_string new_trace_id with
@@ -295,9 +293,9 @@ let maybe_rollover_oas_handoff
                    Keeper_metrics.(to_string RolloverFailures)
                    ~labels:[("keeper", base_meta.name); ("site", "invalid_trace_id")]
                    ();
-                 Log.Keeper.error
-                   "keeper:%s OAS handoff rollover ABORTED — generated invalid trace_id %s: %s"
-                   base_meta.name new_trace_id err;
+                 Log.Keeper.error ~keeper_name:base_meta.name
+                   "OAS handoff rollover ABORTED — generated invalid trace_id %s: %s"
+                   new_trace_id err;
                  { rollover_base with
                    attempted = true;
                    failure_reason = Some err;
@@ -335,9 +333,9 @@ let maybe_rollover_oas_handoff
                        ("trigger_reason", `String trigger_reason);
                      ]
                  in
-                 Log.Keeper.info
-                   "keeper:%s OAS handoff rollover trace=%s->%s gen=%d->%d ratio=%.3f trigger=%s"
-                   base_meta.name (Keeper_id.Trace_id.to_string prev_trace_id) new_trace_id current_generation
+                 Log.Keeper.info ~keeper_name:base_meta.name
+                   "OAS handoff rollover trace=%s->%s gen=%d->%d ratio=%.3f trigger=%s"
+                   (Keeper_id.Trace_id.to_string prev_trace_id) new_trace_id current_generation
                    next_generation ratio trigger_reason;
                  (* OAS owns checkpoint/session continuity.
                     MASC lineage telemetry is append-only best-effort data and

@@ -28,38 +28,15 @@ let task_is_claim_pool_candidate (task : Masc_domain.task) =
   Masc_domain.task_claim_next_action_is_claimable task
 ;;
 
-type verification_claim_state =
-  [ `Pending
-  | `Assigned
-  | `Passed
-  | `Rejected
-  ]
-
-let verification_claim_state_of_status (status : Workspace_verification_store.request_status) =
-  match status with
-  | `Pending -> `Pending
-  | `Assigned _ -> `Assigned
-  | `Completed `Pass -> `Passed
-  | `Completed (`Fail _ | `Partial _) -> `Rejected
-;;
-
-let latest_verification_status_by_task config =
-  let latest = Hashtbl.create 16 in
-  Workspace_verification_store.list_request_headers config.base_path
-  |> List.iter (fun (req : Workspace_verification_store.request_header) ->
-    let state = verification_claim_state_of_status req.status in
-    match Hashtbl.find_opt latest req.task_id with
-    | Some (latest_created_at, _) when latest_created_at >= req.created_at -> ()
-    | Some _ | None -> Hashtbl.replace latest req.task_id (req.created_at, state));
-  latest
-;;
-
-let verification_blocks_claim latest_status_by_task (task : Masc_domain.task) =
-  match Hashtbl.find_opt latest_status_by_task task.id with
-  | Some (_, `Pending) | Some (_, `Assigned) -> true
-  | Some (_, `Rejected) -> false
-  | Some (_, `Passed) | None -> false
-;;
+(* RFC-0220 §3.2: verification state no longer gates the worker claim pool.
+   The cross-store join (request_status -> claim eligibility) is removed: an
+   AwaitingVerification obligation stays claimable by a verifier (§3.5), and a
+   drifted Todo task with a dangling Pending evidence record is just a normal
+   claimable Todo (the evidence record is no longer read for scheduling). This
+   removal is the part that makes the §1.1 stranding disappear — there is
+   nothing left to drift against. (The now-always-empty [verification_blocked_*]
+   plumbing + the [verification_blocked_count] field are cosmetic dead code,
+   removed in a follow-up per §11.) *)
 
 let underscore_name = Workspace_task_receipts.underscore_name
 let hyphen_name = Workspace_task_receipts.hyphen_name
@@ -230,6 +207,7 @@ let claim_next_r
       ?(admission_filter :
          active_tasks:Masc_domain.task list -> Masc_domain.task -> bool =
         fun ~active_tasks:_ _ -> true)
+      ?(allow_scope_fallback = false)
       ()
   =
   let exception Existing_claim of claim_next_result in
@@ -296,6 +274,7 @@ let claim_next_r
                    ; priority = prev.priority
                    ; released_task_id = None
                    ; message
+                   ; scope_widened = false
                    })));
         let released_task_id, working_tasks = None, backlog.tasks in
         let active_admission_tasks =
@@ -303,7 +282,8 @@ let claim_next_r
             (fun (task : Masc_domain.task) ->
                match task.task_status with
                | Claimed _ | InProgress _ -> true
-               | Todo | AwaitingVerification _ | Done _ | Cancelled _ -> false)
+               | AwaitingVerification { assignee; _ } -> assignee <> agent_name
+               | Todo | Done _ | Cancelled _ -> false)
             working_tasks
         in
         (* Starvation prevention: Calculate effective priority
@@ -347,10 +327,8 @@ let claim_next_r
                  false)
             all_todo
         in
-        let latest_verification_status = latest_verification_status_by_task config in
-        let verification_blocked_todo =
-          List.filter (verification_blocks_claim latest_verification_status) all_todo
-        in
+        (* RFC-0220 §3.2: no verification-based exclusion from the claim pool. *)
+        let verification_blocked_todo : Masc_domain.task list = [] in
         if blocked_todo <> []
         then
           log_event
@@ -371,8 +349,29 @@ let claim_next_r
                 ; "blocked", `Int (List.length verification_blocked_todo)
                 ; "ts", `String (now_iso ())
                 ]);
+        (* RFC-0220 §3.5: eligibility and the claim outcome are one decision
+           ([Workspace_task_lifecycle.resolve_claim]). A submitter's own
+           [AwaitingVerification] resolves to [Self_owned] and is excluded here,
+           so a worker never auto-claims (self-verifies) its own obligation; a
+           cross-agent obligation resolves to [Verifier_claim] and stays
+           eligible so the satisfier is always reachable.
+           [task_claim_next_action_is_claimable] still owns the Todo reclaim
+           gate. *)
+        let same_actor a = Workspace_task_classify.same_task_actor config a agent_name in
+        let resolves_claimable (t : Masc_domain.task) =
+          match
+            Workspace_task_lifecycle.resolve_claim
+              ~same_actor ~agent_name ~now:(now_iso ()) t.task_status
+          with
+          | Workspace_task_lifecycle.Worker_claim _
+          | Workspace_task_lifecycle.Verifier_claim _ -> true
+          | Workspace_task_lifecycle.Self_owned
+          | Workspace_task_lifecycle.Held_by_other _ -> false
+        in
         let unclaimed =
-          List.filter Masc_domain.task_claim_next_action_is_claimable sorted
+          sorted
+          |> List.filter Masc_domain.task_claim_next_action_is_claimable
+          |> List.filter resolves_claimable
         in
         (* Also exclude the just-released task: the agent is moving on,
          re-claiming the same task would be a no-op loop. *)
@@ -411,7 +410,30 @@ let claim_next_r
                (not (List.mem t.id all_excluded)) && effective_task_filter t)
             candidates
         in
-        let eligible = eligible_from unclaimed in
+        let scoped_eligible = eligible_from unclaimed in
+        (* Goal-scope must not starve a keeper: when [allow_scope_fallback] and no
+           scoped task is admission-eligible, widen to all_tasks. [admission_allowed]
+           and [all_excluded] are still enforced — only [task_filter] (the goal
+           scope) is dropped — so a wip-blocked scoped task stays excluded while an
+           unscoped task can be claimed. Schedule-level companion to the RFC-0067 §1
+           resolve-side fallback; this layer additionally covers the
+           scoped-task-exists-but-admission-blocked case that the resolver cannot
+           see. *)
+        let eligible, scope_widened =
+          match scoped_eligible with
+          | _ :: _ -> scoped_eligible, false
+          | [] when allow_scope_fallback ->
+            let widened =
+              List.filter
+                (fun (t : task) ->
+                   (not (List.mem t.id all_excluded)) && admission_allowed t)
+                unclaimed
+            in
+            (match widened with
+             | _ :: _ -> widened, true
+             | [] -> [], false)
+          | [] -> scoped_eligible, false
+        in
         let explicit_excluded_count =
           List.length exclude_task_ids
           +
@@ -429,7 +451,10 @@ let claim_next_r
          discipline used by [Workspace_task] transitions (PR #6634). *)
         let clear_agent_state_after_release () =
           match released_task_id with
-          | Some _ ->
+          | Some rid ->
+            (* RFC-0221 §3.2: flush stale current_task from in-memory context cache *)
+            Task_cache_invariant.clear_stale_agent_task config ~agent_name
+              ~task_id:rid ~status:Masc_domain.Todo ~module_name:"claim_next_r";
             Workspace_task.update_local_agent_state config ~agent_name (fun agent ->
               { agent with status = Active; current_task = None })
           | None -> ()
@@ -472,17 +497,32 @@ let claim_next_r
               }
           , None )
          | _ :: _, task :: _ ->
-           (* Claim this task *)
+           (* Claim this task. [resolve_claim] yields the post-claim status:
+              [Claimed] for a Todo worker claim, or a verifier-bound
+              [AwaitingVerification] for a cross-agent verification claim
+              (RFC-0220 §3.5 — preserve the obligation as the satisfier, do not
+              clobber it to [Claimed]). The [Self_owned]/[Held_by_other] arms
+              are unreachable here: [unclaimed] admits only tasks that resolve
+              to a claim (same [resolve_claim]); the defensive fallback keeps
+              the worker-claim behavior rather than raising on the claim path. *)
+           let claimed_status =
+             match
+               Workspace_task_lifecycle.resolve_claim
+                 ~same_actor ~agent_name ~now:(now_iso ()) task.task_status
+             with
+             | Workspace_task_lifecycle.Worker_claim s
+             | Workspace_task_lifecycle.Verifier_claim s -> s
+             | Workspace_task_lifecycle.Self_owned
+             | Workspace_task_lifecycle.Held_by_other _ ->
+               Masc_domain.Claimed { assignee = agent_name; claimed_at = now_iso () }
+           in
            let new_tasks =
              List.map
                (fun (t : task) ->
                   if t.id = task.id
                   then (
                     let t = Workspace_task.clear_reclaim_decision t in
-                    { t with
-                      task_status =
-                        Claimed { assignee = agent_name; claimed_at = now_iso () }
-                    })
+                    { t with task_status = claimed_status })
                   else t)
                working_tasks
            in
@@ -492,7 +532,12 @@ let claim_next_r
              ; version = backlog.version + 1
              }
            in
-           write_backlog config new_backlog;
+           write_backlog
+             ~after_commit:(fun () ->
+               Task_cache_invariant.clear_stale_agent_task config
+                 ~agent_name ~task_id:task.id ~status:claimed_status
+                 ~module_name:"claim_next_r.claim")
+             config new_backlog;
            (* Update agent status — takes [with_file_lock] on the
              agent file via [Workspace_task.update_local_agent_state] to
              keep the record consistent with concurrent
@@ -537,10 +582,8 @@ let claim_next_r
              ~transition:Masc_domain.Claim
              ~details:
                (Workspace_task.task_transition_details
-                  ~from_status:Masc_domain.Todo
-                  ~to_status:
-                    (Masc_domain.Claimed
-                       { assignee = agent_name; claimed_at = now_iso () })
+                  ~from_status:task.task_status
+                  ~to_status:claimed_status
                   ());
           let message =
             match released_task_id with
@@ -566,6 +609,7 @@ let claim_next_r
               ; priority = task.priority
               ; released_task_id
               ; message
+              ; scope_widened
               }
           , Some task.id ))
     with

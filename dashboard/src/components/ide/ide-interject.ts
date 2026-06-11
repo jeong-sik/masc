@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
+import { useStoreSubscription } from './use-signal-value'
 import type { FunctionComponent } from 'preact'
 import { dispatchKeeperInterjectAction } from '../../keeper-actions'
 import { activeKeeperName } from '../../keeper-state'
@@ -43,12 +44,14 @@ export const IdeInterject: FunctionComponent<IdeInterjectProps> = ({ keeperName 
       initialActiveKeeper: resolveActiveKeeper(keeperName),
       dispatch: dispatchInterject,
     }))
-  const [, forceRender] = useState(0)
+  useStoreSubscription(interjectStore.subscribe)
 
   useEffect(() => {
-    const unsub = interjectStore.subscribe(() => forceRender(tick => tick + 1))
+    const unsub = activeKeeperName.subscribe(name => {
+      interjectStore.setActiveKeeper(keeperName?.trim() || name)
+    })
     return () => unsub()
-  }, [interjectStore])
+  }, [interjectStore, keeperName])
   useEffect(() => {
     const unsub = activeKeeperName.subscribe(name => {
       interjectStore.setActiveKeeper(keeperName?.trim() || name)

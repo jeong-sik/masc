@@ -1,22 +1,10 @@
-(** Tool execution handlers — command execution and structured Grep ops.
+(** Tool execution handlers — command execution and ripgrep search.
 
     Handles [Execute] (arbitrary commands with blocklist) and
-    [Grep] / [tool_search_files] (structured ops: ls, cat, find, rg,
-    head, tail, wc, tree, git-log, git-diff, git-status, pwd).
+    [Grep] / [tool_search_files] (ripgrep pattern search).
 
     Both tools default to the keeper playground unless an explicit
     allowed [cwd] is provided. *)
-
-(** Issue #8524: Variant SSOT for Grep op. Mirror in
-    [Tool_shard.tool_search_files_op_enum_strings] (cycle-aware, sync test
-    catches drift). *)
-type shell_op =
-  | Pwd | Ls | Cat | Rg | Git_status | Find | Head | Tail | Wc | Tree
-  | Git_log | Git_diff
-
-val shell_op_to_string : shell_op -> string
-val all_shell_ops : shell_op list
-val valid_shell_op_strings : string list
 
 val readonly_hint_of_category : string -> string
 (** Return the Good:/Bad: rewrite hint shown in
@@ -29,17 +17,6 @@ val diagnosis_of_block_reason :
     reason. Kept on the facade because the shell executor is the public
     entry point used by tests and callers; implementation lives in
     [Keeper_tool_execute_readonly_policy]. *)
-
-val tool_dispatch_min_timeout_sec : float
-(** Minimum timeout_sec floor applied to load-bearing tool dispatch. Exposed so
-    regression tests can lock the floor against drift back to
-    sub-I/O-latency values. *)
-
-val keeper_tool_execute_shell_ir_native_min_timeout_sec : float
-(** Minimum timeout_sec floor applied to Shell IR on the *native*
-    executor path. Exposed so regression tests can lock the floor
-    against drift back to sub-I/O-latency values.  Container-backed
-    dispatch paths re-clamp independently inside their backend. *)
 
 val rewrite_turn_runtime_paths_to_host :
   config:Workspace.config ->

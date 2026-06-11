@@ -12,6 +12,7 @@ open Keeper_agent_prompt_metrics
 let prepare_agent_setup
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
+      ~(turn_ctx_cell : Keeper_tool_call_log.turn_ctx_cell)
       ~(ctx_work : working_context)
       ~(session : Keeper_types.session_context)
       ~(base_system_prompt : string)
@@ -333,8 +334,8 @@ let prepare_agent_setup
      counterparts are implementation details.
 
      Order matters: compute [descriptor_public_names] against the UNFILTERED
-     internal allowlist, because tool_policy.toml / tool_access still expresses
-     allowlists in descriptor/internal names (tool_execute, tool_read_file, ...).
+     internal candidate set. Descriptor/internal names (tool_execute,
+     tool_read_file, ...) drive the visible surface.
      Stripping internals before the descriptor expansion check would leave
      [descriptor_public_names] empty and drop "Execute"/"Read"/... from the
      visible surface. See PR #14596 review. *)
@@ -641,6 +642,7 @@ let prepare_agent_setup
     ; keeper_tools_cleanup
     ; manifest_keeper_turn_id
     ; meta
+    ; turn_ctx_cell
     ; receipt_turn_count_ref
     ; receipt_model_used_ref
     ; receipt_stop_reason_ref

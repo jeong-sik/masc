@@ -10,9 +10,6 @@
 val sort_order_enum_strings : string list
 (** Hand-mirrored from [Board_dispatch.valid_sort_order_strings] (#8513). *)
 
-val tool_search_files_op_enum_strings : string list
-(** Hand-mirrored from [Keeper_tool_command_runtime.valid_shell_op_strings] (#8524). *)
-
 val memory_search_source_enum_strings : string list
 (** Hand-mirrored from [Keeper_tool_memory_runtime.valid_memory_search_source_strings]
     (#8484). *)
@@ -77,6 +74,9 @@ val voice_tools : Masc_domain.tool_schema list
 (** Voice tool schemas. *)
 
 val library_tools : Masc_domain.tool_schema list
+
+val surface_tools : Masc_domain.tool_schema list
+(** keeper_surface_read lane reading (RFC-0223 P3). *)
 (** Library tool schemas. *)
 
 val taskboard_tools : Masc_domain.tool_schema list

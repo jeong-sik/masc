@@ -118,3 +118,52 @@ describe('applyKeeperStreamEvent', () => {
     })).toBe('boom')
   })
 })
+
+describe('applyKeeperStreamEvent tool calls', () => {
+  beforeEach(() => {
+    keeperThreads.value = {}
+  })
+
+  it('streams a live tool-call entry above the assistant bubble', () => {
+    assistantEntry()
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TOOL_CALL_START',
+      toolCallId: 'tc-1',
+      toolCallName: 'masc_status',
+    })).toBeNull()
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TOOL_CALL_ARGS', toolCallId: 'tc-1', delta: '{"fast":' })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TOOL_CALL_ARGS', toolCallId: 'tc-1', delta: 'true}' })
+
+    const thread = keeperThreads.value.sangsu ?? []
+    const toolIndex = thread.findIndex(entry => entry.id === 'tool-tc-1')
+    const replyIndex = thread.findIndex(entry => entry.id === 'reply-1')
+    expect(toolIndex).toBeGreaterThanOrEqual(0)
+    expect(toolIndex).toBeLessThan(replyIndex)
+
+    const tool = thread[toolIndex]!
+    expect(tool.role).toBe('tool')
+    expect(tool.label).toBe('masc_status')
+    expect(tool.text).toBe('{"fast":true}')
+    expect(tool.delivery).toBe('streaming')
+
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TOOL_CALL_END', toolCallId: 'tc-1' })
+    const finished = keeperThreads.value.sangsu?.find(entry => entry.id === 'tool-tc-1')
+    expect(finished?.delivery).toBe('delivered')
+    expect(finished?.streamState).toBeNull()
+  })
+
+  it('routes args to the last started tool call when toolCallId is missing', () => {
+    assistantEntry()
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TOOL_CALL_START',
+      toolCallId: 'tc-fallback',
+      toolCallName: 'keeper_board_post',
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TOOL_CALL_ARGS', delta: '{"post_id":"p-1"}' })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TOOL_CALL_END' })
+
+    const tool = keeperThreads.value.sangsu?.find(entry => entry.id === 'tool-tc-fallback')
+    expect(tool?.text).toBe('{"post_id":"p-1"}')
+    expect(tool?.delivery).toBe('delivered')
+  })
+})

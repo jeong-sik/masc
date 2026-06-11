@@ -55,7 +55,6 @@ let task_to_tree_json ((task, linkage_source) : Masc_domain.task * string) =
     [
       ("id", `String task.id);
       ("title", `String task.title);
-      ("goal_id", Json_util.string_opt_to_json task.goal_id);
       ("status", `String status);
       ("status_color", `String (task_status_color status));
       ("priority", `Int task.priority);

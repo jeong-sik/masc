@@ -75,6 +75,9 @@ let is_masc_mcp_descriptor (d : Keeper_tool_descriptor.t) =
   | Tool_memory_write
   | Tool_library_search
   | Tool_library_read
+  | Tool_surface_read
+  | Tool_surface_post
+  | Tool_person_note_set
   | Tool_ide_annotate
   | Tool_voice_dispatch
   | Tool_task_dispatch
@@ -135,6 +138,16 @@ let record_route_outcome ~tool ~routed_to ~result =
       [ "tool", safe_tool_label tool
       ; "routed_to", safe_routed_to_label routed_to
       ; "result", result
+      ]
+    ();
+  (* Instruction monitoring: track per-tool invocation completeness.
+     result="ok" means parameters were accepted by the runtime surface;
+     other results (miss/error) indicate the call did not complete normally. *)
+  Otel_metric_store.inc_counter
+    (Keeper_metrics.to_string ToolCallParamCompleteness)
+    ~labels:
+      [ ("tool", safe_tool_label tool)
+      ; ("status", if String.equal result "ok" then "complete" else "incomplete")
       ]
     ()
 ;;

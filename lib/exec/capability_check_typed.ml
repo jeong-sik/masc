@@ -412,8 +412,16 @@ let of_command = function
       arg action_flag :: compression_flags @ [ arg "-f"; arg archive ]
     in
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Tar, flag_args @ List.map arg paths) ]
-  | Shell_ir_typed.W (Make { target; jobs }) ->
-    let flag_args = match jobs with None -> [] | Some j -> [ arg "-j"; arg (string_of_int j) ] in
+  | Shell_ir_typed.W (Make { target; jobs; directory; makefile; dry_run; keep_going; silent; always_make }) ->
+    let flag_args =
+      (match jobs with None -> [] | Some j -> [ arg "-j"; arg (string_of_int j) ])
+      @ (match directory with None -> [] | Some d -> [ arg "-C"; arg d ])
+      @ (match makefile with None -> [] | Some f -> [ arg "-f"; arg f ])
+      @ (if dry_run then [ arg "-n" ] else [])
+      @ (if keep_going then [ arg "-k" ] else [])
+      @ (if silent then [ arg "-s" ] else [])
+      @ (if always_make then [ arg "-B" ] else [])
+    in
     let target_args = match target with None -> [] | Some t -> [ arg t ] in
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Make, flag_args @ target_args) ]
   | Shell_ir_typed.W (Diff { file1; file2; unified; brief }) ->

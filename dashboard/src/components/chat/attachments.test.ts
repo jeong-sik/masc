@@ -1,0 +1,40 @@
+import { describe, expect, it } from 'vitest'
+import {
+  MAX_FILE_SIZE,
+  MAX_IMAGE_SIZE,
+  validateFile,
+} from './attachments'
+
+function fileOfSize(name: string, type: string, size: number): File {
+  const file = new File(['x'], name, { type })
+  Object.defineProperty(file, 'size', { value: size })
+  return file
+}
+
+describe('validateFile', () => {
+  it('accepts allowed image types within the size budget', () => {
+    expect(validateFile(fileOfSize('a.png', 'image/png', 1024))).toBeNull()
+    expect(validateFile(fileOfSize('a.webp', 'image/webp', MAX_IMAGE_SIZE))).toBeNull()
+  })
+
+  it('rejects unsupported image types', () => {
+    expect(validateFile(fileOfSize('a.tiff', 'image/tiff', 1024))).toContain('지원하지 않는 이미지 형식')
+  })
+
+  it('rejects oversized images', () => {
+    expect(validateFile(fileOfSize('a.png', 'image/png', MAX_IMAGE_SIZE + 1))).toContain('이미지 크기 초과')
+  })
+
+  it('accepts allowed text-like files within the size budget', () => {
+    expect(validateFile(fileOfSize('a.md', 'text/markdown', MAX_FILE_SIZE))).toBeNull()
+    expect(validateFile(fileOfSize('a.json', 'application/json', 10))).toBeNull()
+  })
+
+  it('rejects unsupported file types', () => {
+    expect(validateFile(fileOfSize('a.bin', 'application/octet-stream', 10))).toContain('지원하지 않는 파일 형식')
+  })
+
+  it('rejects oversized files', () => {
+    expect(validateFile(fileOfSize('a.txt', 'text/plain', MAX_FILE_SIZE + 1))).toContain('파일 크기 초과')
+  })
+})

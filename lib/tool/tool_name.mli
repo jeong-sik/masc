@@ -11,7 +11,6 @@ module Task_name : sig
   type t =
     | Add_task
     | Batch_add_tasks
-    | Claim_next
     | Task_history
     | Tasks
     | Transition
@@ -30,7 +29,7 @@ module Board_name : sig
     | Board_curation_read
     | Board_curation_submit
     | Board_delete
-    | Board_get
+    | Board_post_get
     | Board_hearths
     | Board_list
     | Board_post

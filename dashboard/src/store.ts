@@ -434,6 +434,7 @@ export const oasHealthSummary: ReadonlySignal<OasHealthSummary> = computed(() =>
   replayLoadedEvents: oasReplayLoadedEvents.value,
   replayTotalMatchingEvents: oasReplayTotalMatchingEvents.value,
   replayTruncated: oasReplayTruncated.value,
+  hasMore: oasReplayTruncated.value,
   totalLlmCalls: oasTotalLlmCalls.value,
   totalErrors: oasTotalErrors.value,
   lastLlmCallTs: oasLastLlmCallTs.value,

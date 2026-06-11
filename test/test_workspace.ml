@@ -854,7 +854,7 @@ let test_release_stale_claims_releases_stale_verification () =
                    { assignee = stale_nick
                    ; submitted_at = old_time
                    ; verification_id = "vrf-test"
-                   ; deadline = None
+                   ; phase = Masc_domain.Awaiting_verifier
                    }
              }
            else task)
@@ -884,19 +884,8 @@ let test_heartbeat_nonexistent_agent () =
     Alcotest.(check bool) "heartbeat for nonexistent" true (contains_warning result)
   )
 
-let test_get_agents_status () =
-  with_test_env (fun config ->
-    let _ = Workspace.bind_session config ~agent_name:"provider_f" ~capabilities:["python"] () in
-    let _ = Workspace.bind_session config ~agent_name:"agent_code" ~capabilities:["rust"] () in
-
-    let status = Workspace.get_agents_status config in
-    (* Should be a JSON with agents array *)
-    let has_agents = match status with
-      | `Assoc fields -> List.mem_assoc "agents" fields
-      | _ -> false
-    in
-    Alcotest.(check bool) "has agents field" true has_agents
-  )
+(* test_get_agents_status removed (2026-06-09): get_agents_status deleted with
+   the dead agent-status surface. *)
 
 let test_cleanup_zombies_empty () =
   with_test_env (fun config ->
@@ -1033,57 +1022,9 @@ let test_cleanup_zombies_preserves_non_json_files () =
 (* Agent Discovery / Capability Tests                           *)
 (* ============================================================ *)
 
-let contains_antenna result = String.sub result 0 4 = "\xF0\x9F\x93\xA1"  (* 📡 *)
-
-let test_register_capabilities () =
-  with_test_env (fun config ->
-    let _ = Workspace.bind_session config ~agent_name:"provider_f" ~capabilities:[] () in
-
-    (* Register capabilities *)
-    let result = Workspace.register_capabilities config ~agent_name:"provider_f"
-      ~capabilities:["python"; "web-search"; "code-review"] in
-    Alcotest.(check bool) "capabilities registered" true (contains_antenna result)
-  )
-
-let test_find_by_capability () =
-  with_test_env (fun config ->
-    let _ = Workspace.bind_session config ~agent_name:"provider_f" ~capabilities:["python"; "search"] () in
-    let _ = Workspace.bind_session config ~agent_name:"agent_code" ~capabilities:["python"; "rust"] () in
-
-    (* Find agents with python capability *)
-    let result = Workspace.find_agents_by_capability config ~capability:"python" in
-    (* Verify result has correct structure (agents array exists) *)
-    let has_agents_key = match result with
-      | `Assoc fields -> List.mem_assoc "agents" fields && List.mem_assoc "count" fields
-      | _ -> false
-    in
-    Alcotest.(check bool) "result has agents structure" true has_agents_key
-  )
-
-let test_find_by_capability_no_match () =
-  with_test_env (fun config ->
-    let _ = Workspace.bind_session config ~agent_name:"provider_f" ~capabilities:["python"] () in
-
-    (* Find agents with nonexistent capability *)
-    let result = Workspace.find_agents_by_capability config ~capability:"haskell" in
-    let agents = match result with
-      | `Assoc fields -> (
-          match List.assoc_opt "agents" fields with
-          | Some (`List l) -> List.length l
-          | _ -> 0
-        )
-      | _ -> 0
-    in
-    Alcotest.(check bool) "found 0 agents" true (agents = 0)
-  )
-
-let test_register_capabilities_nonexistent_agent () =
-  with_test_env (fun config ->
-    (* Register for non-bound agent *)
-    let result = Workspace.register_capabilities config ~agent_name:"ghost"
-      ~capabilities:["magic"] in
-    Alcotest.(check bool) "register for nonexistent" true (contains_warning result)
-  )
+(* Capability registration/discovery tests removed (2026-06-09):
+   Workspace.register_capabilities / find_agents_by_capability deleted with the
+   dead agent-status surface (.masc/agents/ producer had 0 call sites). *)
 
 (* Workspace_vote / Workspace_tempo removed — dead prod code (Epic #7261 Step 5 audit). *)
 
@@ -1226,26 +1167,8 @@ let test_many_tasks () =
     Alcotest.(check bool) "20 tasks created" true (str_contains tasks "Task 20")
   )
 
-let test_many_agents () =
-  with_test_env (fun config ->
-    (* Join many agents *)
-    for i = 1 to 10 do
-      let _ = Workspace.bind_session config ~agent_name:(Printf.sprintf "agent%d" i) ~capabilities:["test"] () in
-      ()
-    done;
-
-    let status = Workspace.get_agents_status config in
-    let count = match status with
-      | `Assoc fields -> (
-          match List.assoc_opt "count" fields with
-          | Some (`Int n) -> n
-          | _ -> 0
-        )
-      | _ -> 0
-    in
-    (* 10 agents + agent_llm_a (from with_test_env init) = 11 *)
-    Alcotest.(check bool) "many agents" true (count >= 10)
-  )
+(* test_many_agents removed (2026-06-09): get_agents_status deleted with the
+   dead agent-status surface. *)
 
 (* ============================================================ *)
 (* Portal Advanced Tests                                        *)
@@ -1814,7 +1737,6 @@ let () =
       Alcotest.test_case "updates last_seen" `Quick test_heartbeat_updates_lastseen;
       Alcotest.test_case "default join keeps bound status" `Quick test_is_agent_session_bound_after_default_join;
       Alcotest.test_case "nonexistent agent" `Quick test_heartbeat_nonexistent_agent;
-      Alcotest.test_case "get agents status" `Quick test_get_agents_status;
       Alcotest.test_case "backend bootstrap preserves workspace state" `Quick test_workspace_bootstrap_preserves_backend_state;
       Alcotest.test_case "bootstrap ignores invalid workspace id in flat mode" `Quick test_workspace_bootstrap_ignores_invalid_workspace_id_in_flat_mode;
       Alcotest.test_case "read_backlog_r recovers from last good snapshot" `Quick
@@ -1839,13 +1761,6 @@ let () =
       Alcotest.test_case "cleanup preserves non-json files" `Quick test_cleanup_zombies_preserves_non_json_files;
     ];
 
-    (* === Agent Discovery / Capability Tests === *)
-    "capabilities", [
-      Alcotest.test_case "register capabilities" `Quick test_register_capabilities;
-      Alcotest.test_case "find by capability" `Quick test_find_by_capability;
-      Alcotest.test_case "find no match" `Quick test_find_by_capability_no_match;
-      Alcotest.test_case "register nonexistent agent" `Quick test_register_capabilities_nonexistent_agent;
-    ];
 
     (* === Input Validation Tests === *)
     "validation", [
@@ -1877,7 +1792,6 @@ let () =
     (* === Stress Tests === *)
     "stress", [
       Alcotest.test_case "many tasks" `Quick test_many_tasks;
-      Alcotest.test_case "many agents" `Quick test_many_agents;
     ];
 
     (* === Portal Extended Tests === *)

@@ -132,94 +132,52 @@ let note_turn_failures_preserved_after_heartbeat ~(ctx : _ context) ~(meta : kee
 let sync_keeper_presence
       ~(ctx : _ context)
       ~(meta_current : keeper_meta)
-      ~(t_presence_start : float)
       ~(consecutive_failures : int ref)
       ~(last_successful_heartbeat_ts : float ref)
-      ~(work_as_hb : unit -> bool)
-      ~(max_silence : unit -> float)
   : keeper_meta
   =
-  let presence_fresh =
-    work_as_hb () && t_presence_start -. !last_successful_heartbeat_ts < max_silence ()
-  in
-  if presence_fresh
-  then (
-    Log.Keeper.debug
-      "presence sync skipped: fresh heartbeat %.0fs ago"
-      (t_presence_start -. !last_successful_heartbeat_ts);
+  try
+    let synced = meta_current in
+    consecutive_failures := 0;
+    last_successful_heartbeat_ts := Time_compat.now ();
     Keeper_registry.dispatch_event_unit
       ~base_path:ctx.config.base_path
       meta_current.name
       Keeper_state_machine.Heartbeat_ok;
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string HeartbeatSuccesses)
+      ~labels:[ "keeper", meta_current.name ]
+      ();
     note_turn_failures_preserved_after_heartbeat ~ctx ~meta:meta_current;
-    meta_current)
-  else (
-    try
-      let synced = meta_current in
-      let presence_errors = [] in
-      if presence_errors <> []
-      then (
-        incr consecutive_failures;
-        Log.Keeper.warn
-          "workspace presence failed (%d/%d)"
-          !consecutive_failures
-          (Keeper_heartbeat_snapshot.max_consecutive_heartbeat_failures ());
-        (* RFC-0002: dispatch heartbeat failure *)
-        (* RFC-0002: dispatch heartbeat failure *)
-        Otel_metric_store.inc_counter
-          Keeper_metrics.(to_string HeartbeatFailures)
-          ~labels:[ "keeper", meta_current.name ]
-          ();
-        Keeper_registry.dispatch_event_unit
-          ~base_path:ctx.config.base_path
-          meta_current.name
-          (Keeper_state_machine.Heartbeat_failed
-             { consecutive = !consecutive_failures
-             ; max_allowed =
-                 Keeper_heartbeat_snapshot.max_consecutive_heartbeat_failures ()
-             }))
-      else (
-        consecutive_failures := 0;
-        last_successful_heartbeat_ts := Time_compat.now ();
-        (* RFC-0002: dispatch heartbeat success *)
-        Keeper_registry.dispatch_event_unit
-          ~base_path:ctx.config.base_path
-          meta_current.name
-          Keeper_state_machine.Heartbeat_ok;
-        Otel_metric_store.inc_counter
-          Keeper_metrics.(to_string HeartbeatSuccesses)
-          ~labels:[ "keeper", meta_current.name ]
-          ();
-        note_turn_failures_preserved_after_heartbeat ~ctx ~meta:meta_current);
-      match write_meta ctx.config synced with
-      | Ok () -> synced
-      | Error e ->
-        Otel_metric_store.inc_counter
-          Keeper_metrics.(to_string WriteMetaFailures)
-          ~labels:[ "keeper", synced.name; "phase", "heartbeat" ]
-          ();
-        Log.Keeper.warn "write_meta failed (heartbeat): %s" e;
-        synced
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-      incr consecutive_failures;
+    match write_meta ctx.config synced with
+    | Ok () -> synced
+    | Error e ->
       Otel_metric_store.inc_counter
-        Keeper_metrics.(to_string WorkspaceHeartbeatFailures)
-        ~labels:[ "keeper", meta_current.name ]
+        Keeper_metrics.(to_string WriteMetaFailures)
+        ~labels:[ "keeper", synced.name; "phase", "heartbeat" ]
         ();
-      Log.Keeper.error
-        "workspace heartbeat failed (%d/%d): %s"
-        !consecutive_failures
-        (Keeper_heartbeat_snapshot.max_consecutive_heartbeat_failures ())
-        (Printexc.to_string exn);
-      (* RFC-0002: dispatch heartbeat failure *)
-      Keeper_registry.dispatch_event_unit
-        ~base_path:ctx.config.base_path
-        meta_current.name
-        (Keeper_state_machine.Heartbeat_failed
-           { consecutive = !consecutive_failures
-           ; max_allowed = Keeper_heartbeat_snapshot.max_consecutive_heartbeat_failures ()
-           });
-      meta_current)
+      Log.Keeper.warn "write_meta failed (heartbeat): %s" e;
+      synced
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+    incr consecutive_failures;
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string WorkspaceHeartbeatFailures)
+      ~labels:[ "keeper", meta_current.name ]
+      ();
+    Log.Keeper.error
+      "workspace heartbeat failed (%d/%d): %s"
+      !consecutive_failures
+      (Keeper_heartbeat_snapshot.max_consecutive_heartbeat_failures ())
+      (Printexc.to_string exn);
+    (* RFC-0002: dispatch heartbeat failure *)
+    Keeper_registry.dispatch_event_unit
+      ~base_path:ctx.config.base_path
+      meta_current.name
+      (Keeper_state_machine.Heartbeat_failed
+         { consecutive = !consecutive_failures
+         ; max_allowed = Keeper_heartbeat_snapshot.max_consecutive_heartbeat_failures ()
+         });
+    meta_current
 ;;

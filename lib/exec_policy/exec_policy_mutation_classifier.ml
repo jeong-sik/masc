@@ -7,31 +7,13 @@ open Masc_exec
 
 (* ---- Stage-word extraction from Shell IR ---------------------- *)
 
-(** Extract literal words from a single [Shell_ir.simple] stage:
-    [[bin; arg0; arg1; ...]]. Non-literal args ([Concat], [Var])
-    abort the extraction by returning [None] -- these were valid IR
-    parses but cannot be matched against the closed sub-command set,
-    so they fall through to a [false] classification (mirroring the
-    string-era behavior where the legacy tokenizer also returned [Ok]
-    for them but the [List.mem] checks could not match a [$VAR]). *)
-let literal_words_of_simple (simple : Shell_ir.simple) : string list option =
-  let rec collect acc = function
-    | [] -> Some (List.rev acc)
-    | Shell_ir.Lit (a, _) :: rest -> collect (a :: acc) rest
-    | Shell_ir.Concat _ :: _ | Shell_ir.Var _ :: _ -> None
-  in
-  match collect [] simple.args with
-  | None -> None
-  | Some args -> Some (Exec_program.to_string simple.bin :: args)
-;;
-
 (** Flatten all literal stage words into one list (matches the
     historical flattened-string return shape: stages concatenated).
     Non-literal-only stages contribute their literal prefix only. *)
 let flat_stage_words (ir : Shell_ir.t) : string list =
   let rec collect acc = function
     | Shell_ir.Simple s ->
-      (match literal_words_of_simple s with
+      (match Shell_ir_risk.literal_words_of_simple s with
        | Some ws -> ws :: acc
        | None -> acc)
     | Shell_ir.Pipeline stages ->
@@ -117,27 +99,6 @@ let is_destructive_bash_operation (ir : Shell_ir.t) : bool =
   let parts = flat_stage_words ir in
   let is_short_option arg = String.length arg > 1 && arg.[0] = '-' && arg.[1] <> '-' in
   let has_short_flag flag arg = is_short_option arg && String.contains arg flag in
-  let is_protected_branch_target arg =
-    let target = String.lowercase_ascii arg in
-    List.mem
-      target
-      [ "main"
-      ; "master"
-      ; "origin/main"
-      ; "origin/master"
-      ; "refs/heads/main"
-      ; "refs/heads/master"
-      ]
-    || List.exists
-         (fun suffix -> String.ends_with ~suffix target)
-         [ ":main"
-         ; ":master"
-         ; ":origin/main"
-         ; ":origin/master"
-         ; ":refs/heads/main"
-         ; ":refs/heads/master"
-         ]
-  in
   match parts with
   | "git" :: "push" :: rest ->
     List.exists
@@ -146,7 +107,6 @@ let is_destructive_bash_operation (ir : Shell_ir.t) : bool =
          || arg = "-f"
          || String.starts_with ~prefix:"--force-with-lease" arg)
       rest
-    || List.exists is_protected_branch_target rest
   | "git" :: "reset" :: rest -> List.mem "--hard" rest
   | "rm" :: rest ->
     let option_args =
@@ -185,7 +145,7 @@ let is_destructive_bash_operation (ir : Shell_ir.t) : bool =
 let stages_words_of_ir (ir : Shell_ir.t) : string list list =
   let rec collect acc = function
     | Shell_ir.Simple s ->
-      (match literal_words_of_simple s with
+      (match Shell_ir_risk.literal_words_of_simple s with
        | Some ws -> ws :: acc
        | None -> acc)
     | Shell_ir.Pipeline stages ->

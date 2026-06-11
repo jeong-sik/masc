@@ -191,6 +191,7 @@ let empty_task_contract =
   ; required_evidence = []
   ; inspect_gate_evidence = []
   ; verify_gate_evidence = []
+  ; evidence_claims = []
   ; stale_claim_timeout_sec = 0
   ; links = { operation_id = None; session_id = None }
   }
@@ -336,7 +337,7 @@ let task_assignee_of_status = Masc_domain.task_assignee_of_status
 let valid_next_actions_for_status
   : Masc_domain.task_status -> Masc_domain.task_action list
   = function
-  | Masc_domain.Todo -> [ Masc_domain.Claim; Masc_domain.Cancel ]
+  | Masc_domain.Todo -> [ Masc_domain.Claim; Masc_domain.Release; Masc_domain.Cancel ]
   | Masc_domain.Claimed _ ->
     [ Masc_domain.Start
     ; Masc_domain.Done_action

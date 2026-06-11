@@ -22,9 +22,12 @@ let () = Printexc.register_printer (function
   | _ -> None)
 
 let raw_value_opt name =
-  match Sys.getenv_opt name with
-  | Some _ as value -> value
-  | None -> Config_boot_overrides.get_opt name
+  match Unix.getenv name with
+  | v -> Some v
+  | exception Not_found ->
+    match Sys.getenv_opt name with
+    | Some _ as value -> value
+    | None -> Config_boot_overrides.get_opt name
 
 (** Safe getters with defaults *)
 let get_string ~default name =
@@ -493,6 +496,14 @@ let parse_warn_enabled () =
 let governance_level () =
   get_string ~default:"production" governance_level_env_key
   |> String.lowercase_ascii
+
+let disable_hitl_env_key = "MASC_DISABLE_HITL"
+
+(** Whether to disable HITL (human-in-the-loop) approval gates. Default: true.
+    @category Security
+    @ops_class operator *)
+let disable_hitl () =
+  get_bool ~default:true "MASC_DISABLE_HITL"
 
 (** {1 Build Identity} *)
 

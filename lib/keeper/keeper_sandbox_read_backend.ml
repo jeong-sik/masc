@@ -55,7 +55,7 @@ let container_path_of_host ~config ~(meta : keeper_meta) ~host_path
    [program ; arg1 ; ... ] is appended by the caller via
    [build_docker_argv ~command_argv]. *)
 let build_docker_argv ~image ~container_name ~base_path ~host_root ~croot
-    ~uid ~gid ~seccomp_args ~command_argv =
+    ~uid ~gid ~seccomp_args ~secret_args ~command_argv =
   Keeper_sandbox_runtime.docker_command_argv ()
   @ [
       "run";
@@ -93,6 +93,7 @@ let build_docker_argv ~image ~container_name ~base_path ~host_root ~croot
   @ Keeper_sandbox_runtime.docker_workspace_state_mount_args
       ~base_path
       ~container_root:croot
+  @ secret_args
   @ [
     image;
   ]
@@ -110,7 +111,7 @@ let run_command_with_status ?turn_sandbox_factory
     ~(command_argv : string list) ~(max_bytes : int)
     ~(timeout_sec : float) () : (Unix.process_status * string, string) result =
   let cwd = host_playground_root ~config ~meta in
-  let runtime_opt =
+  let resolve_result =
     Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd
   in
   let image =
@@ -118,7 +119,12 @@ let run_command_with_status ?turn_sandbox_factory
     | Some img when String.trim img <> "" -> img
     | _ -> Env_config_sandbox.Runtime.docker_image ()
   in
-  if Option.is_none runtime_opt && String.trim image = "" then
+  let no_runtime =
+    match resolve_result with
+    | Runtime _ -> false
+    | No_factory | Local_profile -> true
+  in
+  if no_runtime && String.trim image = "" then
     Error "keeper sandbox docker image is not configured"
   else if command_argv = [] then
     Error "run_command_with_status: command_argv is empty"
@@ -126,11 +132,11 @@ let run_command_with_status ?turn_sandbox_factory
     let head_program =
       match command_argv with prog :: _ -> prog | [] -> "?"
     in
-    match runtime_opt with
-    | Some runtime ->
+    match resolve_result with
+    | Runtime runtime ->
       Keeper_turn_sandbox_runtime.run_command_with_status
-        ~ok_exit_codes runtime ~cwd ~command_argv ~max_bytes ~timeout_sec ()
-    | None ->
+        ~ok_exit_codes runtime ~timeout_sec ~cwd ~command_argv ~max_bytes ()
+    | No_factory | Local_profile ->
       match Keeper_sandbox_runtime.ensure_keeper_sandbox_image_present ~image ~timeout_sec with
       | Error err ->
         let typed = Keeper_sandbox_error.Image_not_found { image } in
@@ -149,18 +155,40 @@ let run_command_with_status ?turn_sandbox_factory
         let container_name = container_name_of meta in
         let uid = Unix.getuid () in
         let gid = Unix.getgid () in
+        match
+          Keeper_secret_projection.docker_args_for_keeper
+            ~base_path:config.base_path
+            ~keeper_name:meta.name
+            ~container_name
+        with
+        | Error err -> Error ("docker_read_failed: secret_projection: " ^ err)
+        | Ok secret_projection ->
         let argv =
-          build_docker_argv ~image ~container_name ~base_path:config.base_path ~host_root ~croot
-            ~uid ~gid ~seccomp_args ~command_argv
+          build_docker_argv
+            ~image
+            ~container_name
+            ~base_path:config.base_path
+            ~host_root
+            ~croot
+            ~uid
+            ~gid
+            ~seccomp_args
+            ~secret_args:secret_projection.docker_args
+            ~command_argv
         in
         let st, out =
-          Docker_spawn_throttle.with_slot (fun () ->
-              Masc_exec.Exec_gate.run_argv_with_status
-                ~actor:`System_sandbox
-                ~raw_source:(String.concat " " argv)
-                ~summary:"keeper docker read sandboxed command"
-                ~env:(Unix.environment ())
-                ~cwd:(Sys.getcwd ()) ~timeout_sec argv)
+          Eio_guard.protect
+            ~finally:secret_projection.cleanup
+            (fun () ->
+               Docker_spawn_throttle.with_slot (fun () ->
+                 Masc_exec.Exec_gate.run_argv_with_status
+                   ~actor:`System_sandbox
+                   ~raw_source:(String.concat " " argv)
+                   ~summary:"keeper docker read sandboxed command"
+                   ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
+                   ~cwd:(Sys.getcwd ())
+                   ~timeout_sec
+                   argv))
         in
         (match st with
          | Unix.WEXITED code
@@ -212,8 +240,9 @@ let read_file ?turn_sandbox_factory ~config ~(meta : keeper_meta) ~host_path
       Error
         (Printf.sprintf
            "docker_cat_failed: path_is_directory: %s (Read requires a file, \
-            not a directory; use the currently exposed read/listing tools for directory \
-            listings)"
+            not a directory; to list a directory use Execute with ls, e.g. \
+            executable='ls' argv=['-la','%s'])"
+           host_path
            host_path)
     else
       run_command ?turn_sandbox_factory ~config ~meta

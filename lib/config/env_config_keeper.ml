@@ -269,11 +269,6 @@ module KeeperKeepalive = struct
   (** Board-reactive wakeup debounce in seconds. Prevents rapid repeated
       wakeups from the same board post. Default: 60.0.
       Range: [5, 300]. *)
-  let board_debounce_sec =
-    Float.max
-      5.0
-      (Float.min 300.0 (get_float ~default:60.0 "MASC_KEEPER_BOARD_DEBOUNCE_SEC"))
-  ;;
 
   (** Interruptible sleep chunk size in seconds. Smaller = faster wakeup
       response but more CPU polling. Default: 2.0.
@@ -344,33 +339,6 @@ module KeeperKeepalive = struct
          (get_float ~default:600.0 "MASC_KEEPER_TURN_TIMEOUT_SEC"))
   ;;
 
-  (** Maximum time a proactive keeper will wait in the MASC admission queue
-      before abandoning the current OAS attempt.
-
-      With admission max_concurrent=1 (MLX decode serial), a keeper may wait
-      for the full duration of the preceding keeper's turn. Observed turn
-      durations: 180-963s. Default 180s covers the common case (GLM runtime
-      completes in ~180s) while avoiding indefinite waits.
-
-      Env: [MASC_KEEPER_ADMISSION_WAIT_TIMEOUT_SEC]. Default: 180.0.
-      Range: [5, 1200]. *)
-  let admission_wait_timeout_sec =
-    Float.max
-      5.0
-      (Float.min
-         1200.0
-         (get_float ~default:180.0 "MASC_KEEPER_ADMISSION_WAIT_TIMEOUT_SEC"))
-  ;;
-
-  (** Global concurrent keeper turn capacity. This is a machine-level admission
-      cap, not a per-keeper slot.
-      @category Concurrency
-      @ops_class operator
-
-      Env: [MASC_KEEPER_TURN_CAPACITY_LIMIT]. Default: 32. Range: [0, 1024]. *)
-  let turn_capacity_limit =
-    min 1024 (get_int_nonneg ~default:32 "MASC_KEEPER_TURN_CAPACITY_LIMIT")
-  ;;
 
   (** Per-call OAS timeout override in seconds.
 
@@ -393,43 +361,6 @@ module KeeperKeepalive = struct
     | None -> None
   ;;
 
-  (** Maximum turns per single OAS Agent.run call.
-      Keeper resumes via checkpoint in the next keepalive cycle when
-      {!Runtime_agent.TurnBudgetExhausted} is returned.
-      Previous default of 200 caused "ambiguous partial commit" errors:
-      the 300s timeout would fire mid-turn after tools had already executed,
-      leaving the keeper in an ambiguous state. With 30 turns per call and
-      adaptive timeout, each turn gets a realistic time budget. Budget=5
-      was too low: mutation boundary blocks tools after the first write,
-      leaving only 1 productive action per cycle.
-      Env: [MASC_KEEPER_OAS_MAX_TURNS_PER_CALL]. Default: 30. Range: [1, 100]. *)
-  let oas_max_turns_per_call =
-    max 1 (min 100 (get_int ~default:30 "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL"))
-  ;;
-
-  (** Smaller turn budget for scheduled autonomous cycles so one keeper does
-      not monopolize the autonomous semaphore for minutes at a time.
-      Reactive turns keep the general budget because they correspond to
-      explicit external stimuli.
-
-      Default raised to 10 after Docker oas_env propagation was restored so
-      autonomous keepers can complete deeper handoff tasks without relying on
-      per-profile overrides.
-      Reactive turns retain the larger budget.
-
-      Env: [MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS].
-      Default: min(global, 10). Range: [1, global]. *)
-  let oas_max_turns_per_call_scheduled_autonomous =
-    let default = min oas_max_turns_per_call 10 in
-    max
-      1
-      (min
-         oas_max_turns_per_call
-         (min
-            100
-            (get_int ~default "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS")))
-  ;;
-
   (* RFC-0156/RFC-020x: OAS total timeout removed. Resolved OAS-call budget =
      override when set, else turn_timeout_sec. stream_idle_timeout handles
      per-stream idle; runtime rotation triggers on stream_idle + HTTP error +
@@ -441,6 +372,24 @@ module KeeperKeepalive = struct
     match oas_timeout_sec_override with
     | Some v -> v
     | None -> turn_timeout_sec
+  ;;
+
+  (** Per-attempt wall-clock safety cap for the streaming watchdog.
+
+      Prevents a single provider attempt from locking a keeper in
+      [Streaming] state forever (network hang, silent provider crash).
+      The cap is intentionally generous — any attempt making zero
+      progress for this duration is definitively stuck.
+
+      Env: [MASC_KEEPER_ATTEMPT_WATCHDOG_SAFETY_CAP_SEC].
+      Default: 1800 (30 min). Range: [300, 7200]. *)
+  let attempt_watchdog_safety_cap_sec =
+    Float.max
+      300.0
+      (Float.min
+         7200.0
+         (get_float ~default:1800.0
+            "MASC_KEEPER_ATTEMPT_WATCHDOG_SAFETY_CAP_SEC"))
   ;;
 
   (** Idle-gap timeout for streaming OAS provider responses.

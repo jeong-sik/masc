@@ -26,11 +26,6 @@ let observe_goal_attainment_metrics (goal : Goal_store.goal) attainment =
   Otel_metric_store.set_gauge Otel_metric_store.metric_goal_attainment_measured ~labels
     measured
 
-
-
-
-
-
 let keeper_runtime_trust_snapshot_json ~config ~(meta : Keeper_meta_contract.keeper_meta) =
   try Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta with
   | exn ->
@@ -75,6 +70,7 @@ let build_forest ~(config : Workspace.config) ~goals ~tasks =
     |> List.map (fun (meta : Keeper_meta_contract.keeper_meta) -> meta.name)
     |> Keeper_execution_receipt.latest_json_by_keeper config
   in
+  let goal_task_index = Workspace_goal_index.build_task_goal_index () in
   let context =
     {
       now_ts = Time_compat.now ();
@@ -87,6 +83,7 @@ let build_forest ~(config : Workspace.config) ~goals ~tasks =
         |> List.map (fun (meta : Keeper_meta_contract.keeper_meta) ->
                ( meta.name,
                  keeper_runtime_trust_snapshot_json ~config ~meta ));
+      goal_task_index;
     }
   in
   goals
@@ -153,6 +150,24 @@ let build_goal_verification_projection ~(config : Workspace.config) goals =
     (fun goal_id -> Hashtbl.find_opt latest_request_table goal_id),
     (fun goal_id ->
       Option.value (Hashtbl.find_opt events_table goal_id) ~default:[]) )
+
+let emit_all_goal_attainment_metrics ~(config : Workspace.config) =
+  let goals = Goal_store.list_goals config () in
+  let tasks = Workspace.get_tasks_safe config in
+  let ( _effective_policy_for_goal,
+        _open_request_for_goal,
+        _latest_request_for_goal,
+        _events_for_goal ) =
+    build_goal_verification_projection ~config goals
+  in
+  let forest = build_forest ~config ~goals ~tasks in
+  let all_nodes = flatten_tree [] forest in
+  List.iter
+    (fun (node : tree_node) ->
+      let goal = node.goal in
+      let attainment = goal_attainment_to_json goal node in
+      observe_goal_attainment_metrics goal attainment)
+    all_nodes
 
 let rec tree_node_to_json ?(effective_policy_for_goal = fun _ -> None)
     ?(open_request_for_goal = fun _ -> None)

@@ -298,8 +298,6 @@ let test_full_universe_worktree_en () =
 (* ================================================================ *)
 
 let () =
-  let base_path = Masc_test_deps.find_project_root () in
-  ignore (Result.get_ok (Keeper_tool_dispatch_runtime.init_policy_config ~base_path));
   Alcotest.run "keeper_retrieval_quality"
     [
       ( "file_ops",

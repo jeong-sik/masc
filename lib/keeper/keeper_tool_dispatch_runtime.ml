@@ -316,9 +316,8 @@ let execute_keeper_tool_call_with_outcome
         Keeper_metrics.(to_string AgentToolDispatchRuntimeFailures)
         ~labels:[ "keeper", meta.name; "tool", name ]
         ();
-      Log.Keeper.error
-        "keeper:%s tool:%s produced malformed structured payload: %s"
-        meta.name
+      Log.Keeper.error ~keeper_name:meta.name
+        "tool:%s produced malformed structured payload: %s"
         name
         parse_error;
       let breaker_msg = Printf.sprintf "malformed_tool_result: %s" parse_error in

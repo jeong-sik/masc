@@ -46,8 +46,6 @@ val default_config :
   tools:Agent_sdk.Tool.t list ->
   t ->
   Runtime_agent.config
-val enrich_sdk_error :
-  runtime_id:string -> t -> Agent_sdk.Error.sdk_error -> Agent_sdk.Error.sdk_error
 val first_health_cooldown : t -> (string * string) option
 val has_recovery_evidence : t -> bool
 

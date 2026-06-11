@@ -47,15 +47,17 @@ let test_init () =
     Otel_metric_store.snapshot ()
     |> List.exists (fun (m : Otel_metric_store.metric) -> String.equal m.name name)
   in
-  check bool "sse sessions metric registered" true
-    (has_metric "masc_sse_sessions_total");
-  check bool "grpc active streams metric registered" true
-    (has_metric "masc_grpc_active_streams_total");
-  check bool "agent heartbeat age metric registered" true
-    (has_metric "masc_agent_heartbeat_age_seconds");
-  check bool "http accept metric registered" true
+  (* Counters zero-fill at module init (declare_counter); gauges and
+     histograms are lazy — they appear on first set/observe.  The
+     registration sweep this test originally asserted died with the
+     retired scrape backend (RFC-0217). *)
+  check bool "http accept counter zero-filled" true
     (has_metric "masc_http_accepts_total");
-  check bool "ws hello latency metric registered" true
+  TM.set_grpc_active_streams 0;
+  check bool "grpc active streams gauge appears once set" true
+    (has_metric "masc_grpc_active_streams_total");
+  TM.observe_ws_dashboard_hello_latency ~success:true 0.0;
+  check bool "ws hello latency appears once observed" true
     (has_metric "masc_ws_dashboard_hello_latency_seconds")
 
 (* ============================================================

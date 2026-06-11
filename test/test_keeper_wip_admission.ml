@@ -8,7 +8,7 @@ let scope ?goal_id ?(category = Admission.Fix) repo =
 let item ?goal_id ?(category = Admission.Fix) repo id =
   { Admission.id; scope = scope ?goal_id ~category repo }
 
-let task ?goal_id ?(status = Masc_domain.Todo) ?(title = "fix: task") id =
+let task ?(status = Masc_domain.Todo) ?(title = "fix: task") id =
   { Masc_domain.id
   ; title
   ; description = ""
@@ -17,7 +17,6 @@ let task ?goal_id ?(status = Masc_domain.Todo) ?(title = "fix: task") id =
   ; files = []
   ; created_at = "2026-05-21T00:00:00Z"
   ; created_by = None
-  ; goal_id
   ; contract = None
   ; handoff_context = None
   ; cycle_count = 0
@@ -108,11 +107,13 @@ let test_decision_json_rejects_with_scope_key () =
     Yojson.Safe.Util.(json |> member "scope_key" |> to_string)
 
 let test_scope_of_task_uses_repo_goal_and_title_category () =
+  let task_goal_index = Hashtbl.create 1 in
+  Hashtbl.replace task_goal_index "task-001" ["goal-a"];
   let scope =
     Admission.scope_of_task
+      ~task_goal_index
       ~default_repo:"fallback"
       (task
-         ~goal_id:"goal-a"
          ~title:"refactor(keeper): split claim gate"
          "task-001")
   in
@@ -124,7 +125,6 @@ let test_active_items_only_include_claimed_or_in_progress () =
   let tasks =
     [ task
         ~status:(Masc_domain.Claimed { assignee = "a"; claimed_at = "now" })
-        ~goal_id:"goal-a"
         "task-001"
     ; task
         ~status:(Masc_domain.InProgress { assignee = "b"; started_at = "now" })

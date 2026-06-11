@@ -45,6 +45,9 @@ let normalized_or_unknown value =
   | "" -> "unknown"
   | trimmed -> trimmed
 
+let string_assoc_json fields =
+  `Assoc (List.map (fun (key, value) -> (key, `String value)) fields)
+
 (** Sanitize a value for use as a filesystem path component.
     Replaces everything outside [A-Za-z0-9_-] with '_' so that the resulting
     string cannot escape its intended parent directory via '/', '\\', or '..'
@@ -71,27 +74,66 @@ let agent_name_for_channel_actor ~channel ~channel_workspace_id ~channel_user_id
     (filesystem_safe_or_unknown channel_user_id)
 
 let contextualize_message ~channel ~channel_user_id ~channel_user_name
-    ~channel_workspace_id ~content =
+    ~channel_workspace_id ~metadata ~content =
   let safe_channel = normalized_or_unknown channel in
   let safe_user_id = normalized_or_unknown channel_user_id in
   let safe_user_name = normalized_or_unknown channel_user_name in
   let safe_workspace_id = normalized_or_unknown channel_workspace_id in
   let safe_content = String.trim content in
-  String.concat "\n"
+  let metadata_lines =
+    metadata
+    |> List.filter_map (fun (key, value) ->
+           let key = normalized_context_value key in
+           let value = normalized_context_value value in
+           if key = "" || value = "" then None
+           else Some (key ^ ": " ^ value))
+  in
+  let context_lines =
     [
       "[External channel context]";
       "channel: " ^ safe_channel;
       "workspace_id: " ^ safe_workspace_id;
       "user_id: " ^ safe_user_id;
       "user_name: " ^ safe_user_name;
-      "";
-      "[User message]";
-      safe_content;
     ]
+  in
+  let metadata_block =
+    match metadata_lines with
+    | [] -> []
+    | lines -> "" :: "[External channel metadata]" :: lines
+  in
+  String.concat "\n"
+    (context_lines
+     @ metadata_block
+     @ [ ""; "[User message]"; safe_content ])
+
+let metadata_value key metadata =
+  match List.assoc_opt key metadata with
+  | Some value ->
+      let value = String.trim value in
+      if value = "" then None else Some value
+  | None -> None
+
+let persist_connector_assistant_reply ~base_dir ~keeper_name ~source
+    ?conversation_id ~reply () =
+  let content = String.trim reply in
+  if content <> "" then begin
+    Keeper_chat_store.append_assistant_message ~base_dir ~keeper_name
+      ~content ~source ?conversation_id ();
+    Keeper_chat_broadcast.chat_appended ~keeper_name ~source
+  end
 
 let dispatch ~sw ~clock ~proc_mgr ~net ~config
     ~channel ~channel_user_id ~channel_user_name ~channel_workspace_id
-    ~keeper_name ~content =
+    ~keeper_name ~metadata ~content =
+  let keeper_name = String.trim keeper_name in
+  let redaction =
+    Keeper_secret_redaction.snapshot
+      ~base_path:config.Workspace.base_path
+      ~keeper_name
+  in
+  let redact_text = Keeper_secret_redaction.redact_text redaction in
+  let redact_json = Keeper_secret_redaction.redact_json redaction in
   let agent_name =
     agent_name_for_channel_actor ~channel ~channel_workspace_id ~channel_user_id
   in
@@ -105,15 +147,51 @@ let dispatch ~sw ~clock ~proc_mgr ~net ~config
       (filesystem_safe_or_unknown channel)
       (filesystem_safe_or_unknown channel_workspace_id)
   in
+  (* RFC-0226: the gate inbound boundary is the sole recorder of
+     connector user lines. Recording happens here — post
+     validation/dedup ([Channel_gate.handle_inbound]), pre turn — so a
+     failed or silent turn cannot drop the inbound message. The final
+     connector reply is appended below after [dispatch_stream] returns
+     the keeper's direct reply. The user line carries the raw [content];
+     the contextualized wrapper below is turn input, not conversation
+     history. *)
+  let lane = String.trim channel in
+  let opt value = match String.trim value with "" -> None | v -> Some v in
+  let conversation_id = metadata_value "conversation_id" metadata in
+  let external_message_id = metadata_value "external_message_id" metadata in
+  Keeper_chat_store.append_user_message
+    ~base_dir:config.Workspace.base_path
+    ~keeper_name
+    ~content:(String.trim content)
+    ~source:lane
+    ?conversation_id
+    ?external_message_id
+    ~speaker:
+      { Keeper_chat_store.speaker_id = opt channel_user_id
+      ; speaker_name = opt channel_user_name
+      ; speaker_authority = Keeper_chat_store.External
+      }
+    ();
+  Keeper_chat_broadcast.chat_appended
+    ~keeper_name ~source:lane;
   let args =
     `Assoc [
-      ("name", `String (String.trim keeper_name));
+      ("name", `String keeper_name);
       ( "message",
         `String
           (contextualize_message ~channel ~channel_user_id ~channel_user_name
-             ~channel_workspace_id ~content) );
+             ~channel_workspace_id ~metadata ~content) );
       ("direct_reply", `Bool true);
       ("channel_session_key", `String channel_session_key);
+      (* RFC-0223 P1: raw connector identity, consumed by
+         [Keeper_tool_surface_ops.append_direct_chat_pair_if_reply] so the
+         persisted chat line carries the lane label and speaker instead
+         of the generic "agent" source. Internal-only args, same class
+         as [direct_reply] / [channel_session_key]. *)
+      ("channel", `String channel);
+      ("channel_user_id", `String channel_user_id);
+      ("channel_user_name", `String channel_user_name);
+      ("channel_metadata", string_assoc_json metadata);
     ]
   in
   let keeper_ctx : _ Keeper_tool_surface.context = {
@@ -136,14 +214,17 @@ let dispatch ~sw ~clock ~proc_mgr ~net ~config
       let duration_ms =
         int_of_float ((Unix.gettimeofday () -. start_time) *. 1000.0)
       in
-      let reply = extract_reply_text body in
-      let structured = extract_structured body in
+      let reply = extract_reply_text body |> redact_text in
+      let structured = Option.map redact_json (extract_structured body) in
       let stats = match extract_turn_stats body with
         | Some s -> Some { s with duration_ms }
         | None -> Some { Gate_protocol.model_used = "runtime"; duration_ms; tokens_used = 0 }
       in
+      persist_connector_assistant_reply
+        ~base_dir:config.Workspace.base_path ~keeper_name ~source:lane
+        ?conversation_id ~reply ();
       Gate_protocol.Reply { content = reply; structured; stats }
   | Some result ->
-      Gate_protocol.Keeper_error_result (Tool_result.message result)
+      Gate_protocol.Keeper_error_result (redact_text (Tool_result.message result))
   | None ->
       Gate_protocol.Unavailable_result

@@ -212,8 +212,8 @@ let handle_runtime_ollama_probe _ctx args : Core.tool_result =
     | Some (`Intlit value) ->
         (match Core.parse_int_opt value with
          | Some parsed -> parsed
-         | None -> Tool_local_runtime_probe.default_probe_timeout_sec)
-    | _ -> Tool_local_runtime_probe.default_probe_timeout_sec
+         | None -> 6)
+    | _ -> 6
   in
   let think_mode =
     match Json_util.assoc_member_opt "think_mode" args with

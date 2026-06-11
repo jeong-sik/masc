@@ -202,6 +202,7 @@ type build_context = {
   keeper_metas : Keeper_meta_contract.keeper_meta list;
   latest_receipts : (string * Yojson.Safe.t) list;
   latest_runtime_trusts : (string * Yojson.Safe.t) list;
+  goal_task_index : (string, string list) Hashtbl.t;
 }
 
 let rec build_tree context goals goal =
@@ -215,7 +216,7 @@ let rec build_tree context goals goal =
   let linked_tasks =
     context.all_tasks
     |> List.filter_map (fun task ->
-           task_linkage_source_opt task goal.Goal_store.id
+           task_linkage_source_opt ~goal_task_index:context.goal_task_index task goal.Goal_store.id
            |> Option.map (fun source -> (task, source)))
   in
   let direct_linkage_source =

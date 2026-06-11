@@ -11,17 +11,12 @@ type t =
       { count : int
       ; threshold : int
       }
-  | Tool_heavy of
-      { messages : int
-      ; ratio : float
-      }
   | Manual
 
 let to_label = function
   | Ratio_threshold _ -> "ratio"
   | Message_count _ -> "messages"
   | Token_count _ -> "tokens"
-  | Tool_heavy _ -> "tool_heavy"
   | Manual -> "manual"
 ;;
 
@@ -31,8 +26,6 @@ let to_human = function
   | Message_count { count; threshold } ->
     Printf.sprintf "messages(%d>=%d)" count threshold
   | Token_count { count; threshold } -> Printf.sprintf "tokens(%d>=%d)" count threshold
-  | Tool_heavy { messages; ratio } ->
-    Printf.sprintf "tool_heavy(msgs=%d,ratio=%.4f)" messages ratio
   | Manual -> "manual"
 ;;
 
@@ -45,9 +38,6 @@ let to_detail_json : t -> Yojson.Safe.t = function
       [ "kind", `String "messages"; "count", `Int count; "threshold", `Int threshold ]
   | Token_count { count; threshold } ->
     `Assoc [ "kind", `String "tokens"; "count", `Int count; "threshold", `Int threshold ]
-  | Tool_heavy { messages; ratio } ->
-    `Assoc
-      [ "kind", `String "tool_heavy"; "messages", `Int messages; "ratio", `Float ratio ]
   | Manual -> `Assoc [ "kind", `String "manual" ]
 ;;
 
@@ -84,10 +74,9 @@ let of_detail_json (json : Yojson.Safe.t) : t option =
        (match num_int "count", num_int "threshold" with
         | Some count, Some threshold -> Some (Token_count { count; threshold })
         | _ -> None)
-     | Some "tool_heavy" ->
-       (match num_int "messages", num_float "ratio" with
-        | Some messages, Some ratio -> Some (Tool_heavy { messages; ratio })
-        | _ -> None)
+     (* "tool_heavy" rows persist in historical JSONL; the trigger was removed
+        (gate measured stored-history bulk that the OAS call-time pruner already
+        bounds per call) so they parse to None like any unknown kind. *)
      | Some "manual" -> Some Manual
      | _ -> None)
   | _ -> None

@@ -227,20 +227,13 @@ let test_contract_status_labels_unique () =
 let test_pp_contract_status_surfaces_missing_list () =
   let s =
     format_to_string Keeper_contract_classifier.pp_contract_status
-      (Surface_mismatch { missing = [ "keeper_task_claim"; "masc_claim_next" ] })
+      (Surface_mismatch { missing = [ "keeper_task_claim" ] })
   in
   Alcotest.(check bool)
     "pp_contract_status surfaces first missing tool"
     true
     (try
        ignore (Str.search_forward (Str.regexp_string "keeper_task_claim") s 0);
-       true
-     with Not_found -> false);
-  Alcotest.(check bool)
-    "pp_contract_status surfaces second missing tool"
-    true
-    (try
-       ignore (Str.search_forward (Str.regexp_string "masc_claim_next") s 0);
        true
      with Not_found -> false)
 

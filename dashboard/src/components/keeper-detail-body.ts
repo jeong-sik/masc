@@ -22,6 +22,7 @@ import {
 } from './keeper-detail-telemetry'
 import {
   KeeperLiveTruthPanel,
+  KeeperSecretProjectionPanel,
   RuntimeLensSection,
   RuntimeSignals,
   TurnBudgetSection,
@@ -102,6 +103,9 @@ export function KeeperDetailBody({
 }: KeeperDetailBodyProps) {
   return html`
     <div class="mx-auto flex w-full max-w-[1180px] flex-col gap-5">
+        <${KeeperRuntimeAlertStrip} keeper=${keeper} />
+        <${KeeperDetailSectionRail} />
+
         <${KeeperDetailSection}
           id="keeper-comms"
           eyebrow="대화 & 세션"
@@ -114,9 +118,6 @@ export function KeeperDetailBody({
             <${SessionTraceView} agentName=${keeper.name} isKeeper=${true} keeperStatus=${keeper.status} keeperGeneration=${keeper.generation} />
           <//>
         <//>
-
-        <${KeeperRuntimeAlertStrip} keeper=${keeper} />
-        <${KeeperDetailSectionRail} />
 
         <${KeeperDetailSection}
           id="keeper-summary"
@@ -180,6 +181,7 @@ export function KeeperDetailBody({
           ${'' /* ── 런타임 model 편집 (RFC-0207 persona runtime_id) — surfaced here so it is one expand away, not buried under 설정 → Keeper 설정 → 소스 ── */}
           <${KeeperRuntimeModelEditor} keeperName=${keeper.name} />
           <${KeeperToolTelemetry} keeperName=${keeper.name} />
+          <${KeeperSecretProjectionPanel} projection=${compositeSnapshot?.secret_projection} />
           <${KeeperEvalQualityPanel} keeperName=${keeper.name} />
           <${CollapsibleSection} title="Live Truth (composite/runtime 합성)" open=${false}>
             <${KeeperLiveTruthPanel}

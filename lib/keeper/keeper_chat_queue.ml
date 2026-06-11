@@ -54,6 +54,51 @@ let dequeue ~keeper_name =
           Eio.Mutex.use_rw ~protect:true entry.mutex (fun () ->
               if Queue.is_empty entry.q then None else Some (Queue.pop entry.q)))
 
+let same_source a b =
+  match (a, b) with
+  | Dashboard, Dashboard -> true
+  | ( Discord { channel_id = c1; user_id = u1 },
+      Discord { channel_id = c2; user_id = u2 } ) ->
+      String.equal c1 c2 && String.equal u1 u2
+  | Slack { channel = c1; user_id = u1 }, Slack { channel = c2; user_id = u2 }
+    ->
+      String.equal c1 c2 && String.equal u1 u2
+  | Dashboard, (Discord _ | Slack _)
+  | Discord _, (Dashboard | Slack _)
+  | Slack _, (Dashboard | Discord _) ->
+      false
+
+let dequeue_batch ~keeper_name =
+  Eio.Mutex.use_rw ~protect:true registry_mutex (fun () ->
+      match Hashtbl.find_opt registry keeper_name with
+      | None -> []
+      | Some entry ->
+          Eio.Mutex.use_rw ~protect:true entry.mutex (fun () ->
+              match Queue.take_opt entry.q with
+              | None -> []
+              | Some first ->
+                  let rec drain acc =
+                    match Queue.peek_opt entry.q with
+                    | Some next when same_source first.source next.source ->
+                        let next = Queue.pop entry.q in
+                        drain (next :: acc)
+                    | Some _ | None -> List.rev acc
+                  in
+                  first :: drain []))
+
+let merge_batch batch =
+  match batch with
+  | [] -> None
+  | [ msg ] -> Some msg
+  | first :: _ ->
+      Some
+        {
+          content = String.concat "\n\n" (List.map (fun m -> m.content) batch);
+          attachments = List.concat_map (fun m -> m.attachments) batch;
+          timestamp = first.timestamp;
+          source = first.source;
+        }
+
 let length ~keeper_name =
   Eio.Mutex.use_rw ~protect:true registry_mutex (fun () ->
       match Hashtbl.find_opt registry keeper_name with

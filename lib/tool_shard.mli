@@ -9,10 +9,6 @@
     [test_types.ml :: sort_order_schema_ssot] catches drift. *)
 val sort_order_enum_strings : string list
 
-(** Issue #8524: hand-mirrored from
-    [Keeper_tool_command_runtime.valid_shell_op_strings]. Sync regression test in
-    [test_types.ml :: tool_search_files_op_ssot] catches drift. *)
-val tool_search_files_op_enum_strings : string list
 
 (** Issue #8484: hand-mirrored from
     [Keeper_tool_memory_runtime.valid_memory_search_source_strings]. Sync

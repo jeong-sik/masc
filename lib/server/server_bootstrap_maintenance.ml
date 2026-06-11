@@ -74,6 +74,10 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     ~cluster_name:state.workspace_config.backend_config.Backend_types.cluster_name
     ();
   Keeper_tool_call_log.start_flush_fiber ~sw ~clock;
+  (* Transition-audit forensics writes leave the keeper hot path: recorders
+     enqueue and this fiber drains (2026-06-10 fleet-freeze fix — the inline
+     append serialized all keepers on one store mutex). *)
+  Keeper_transition_audit.start_flush_fiber ~sw ~clock;
   Otel_dispatch_hook.install ();
   (* PR-S3: register the OTel/Otel_metric_store dispatch span wrapper. [Tool_dispatch]
      (lib/tool/, masc_tool_dispatch) no longer code-depends on [Tool_telemetry]
@@ -82,8 +86,45 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
      span / no [tool_dispatch_total] metric). *)
   Tool_dispatch.set_span_wrapper Tool_telemetry.with_span;
   Otel_metric_store.register_otel_source_once ();
+  Otel_runtime_observables.register_once
+    ~masc_root:(Workspace.masc_root_dir state.workspace_config)
+    ();
   Otel_spans.setup_exporter ~sw env;
   Shutdown.register ~name:"otel_exporter" ~priority:20 Otel_spans.shutdown;
+  (* RFC-0217 S4-2: wire OAS OTLP exporter so OAS spans/metrics reach the
+     same collector as MASC-native telemetry.  The endpoint is read from
+     the same env-var that MASC's own OTLP client uses. *)
+  (match Sys.getenv_opt "OTEL_EXPORTER_OTLP_ENDPOINT" with
+   | Some endpoint ->
+     let config = Agent_sdk.Otel_export.default_export_config ~endpoint in
+     let instance = Agent_sdk.Otel_tracer.create_instance_eio () in
+     let tracer = Agent_sdk.Otel_tracer.tracer_of_instance instance in
+     Runtime_agent_context.set_oas_tracer tracer;
+     let (_state : Agent_sdk.Otel_export.t) =
+       Agent_sdk.Otel_export.start_daemon ~sw ~clock:env#clock ~net:env#net ~config instance
+     in
+     Log.Server.info "OAS OTLP exporter daemon started (endpoint=%s)" endpoint
+   | None ->
+     Log.Server.info "OTEL_EXPORTER_OTLP_ENDPOINT not set; OAS telemetry export disabled");
+  (* Scheduler-lag probe: 1s sleep, gauge = overshoot. A pure-Eio fiber
+     cannot observe a blocked domain from inside while it is blocked, but
+     the first tick after the block lands carries the full stall duration,
+     which is exactly the post-hoc signal the 2026-06 freeze RCAs lacked. *)
+  fork_logged_fiber
+    ~sw
+    ~on_error:(log_server_fiber_crash "eio_loop_lag_probe")
+    (fun () ->
+      let interval_sec = 1.0 in
+      let rec tick () =
+        let before = Unix.gettimeofday () in
+        Eio.Time.sleep clock interval_sec;
+        let lag = Unix.gettimeofday () -. before -. interval_sec in
+        Otel_metric_store.set_gauge
+          Otel_metric_store.metric_eio_loop_lag_seconds
+          (Float.max 0.0 lag);
+        tick ()
+      in
+      tick ());
   (* Board_listener removed: filesystem-first principle.
      JSONL path emits SSE directly via Board_dispatch.emit_board_sse_event.
      PG path also uses Board_dispatch, making the pg_notify relay redundant. *)
@@ -171,7 +212,8 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
          (match
             Keeper_sandbox_runtime.maybe_cleanup_stale_containers
               ~base_path:state.workspace_config.base_path
-              ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Startup ())
+              ~timeout_sec:
+                (Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Cleanup_rm ())
               ()
           with
           | None -> ()
@@ -211,6 +253,10 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
                + prune_dir (Filename.concat masc "activity-events")
                + prune_dir (Filename.concat masc "voice_sessions")
                + prune_dir (Filename.concat masc "tool_calls")
+               (* transition-audit was absent from this list since its
+                  introduction (RFC-0002) — 82 MB across 3 month-dirs by
+                  2026-06-10, scanned by every store-fallback read. *)
+               + prune_dir (Filename.concat masc "transition-audit")
              in
              if total > 0
              then

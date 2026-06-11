@@ -186,9 +186,22 @@ let resolve_provider_api_key_env_name ~runtime_id:_ ~provider_cfg =
 
 let enrich_sdk_error ~runtime_id ~(provider_cfg : Llm_provider.Provider_config.t) err =
   let append_hint message hint_marker detail =
+    let message = String.trim message in
     if String_util.contains_substring_ci message hint_marker
     then message
+    else if String.equal message ""
+    then Printf.sprintf "%s: %s" hint_marker detail
     else Printf.sprintf "%s (%s: %s)" message hint_marker detail
+  in
+  let openai_compat_not_found_detail () =
+    Printf.sprintf
+      "runtime_id=%s model=%s base_url=%s request_path=%s endpoint=%s"
+      runtime_id
+      provider_cfg.Llm_provider.Provider_config.model_id
+      provider_cfg.Llm_provider.Provider_config.base_url
+      provider_cfg.Llm_provider.Provider_config.request_path
+      (provider_cfg.Llm_provider.Provider_config.base_url
+       ^ provider_cfg.Llm_provider.Provider_config.request_path)
   in
   match err with
   | Agent_sdk.Error.Api (Llm_provider.Retry.AuthError { message }) ->
@@ -210,18 +223,22 @@ let enrich_sdk_error ~runtime_id ~(provider_cfg : Llm_provider.Provider_config.t
          { message = append_hint message provider_auth_hint_marker detail })
   | Agent_sdk.Error.Api (Llm_provider.Retry.InvalidRequest { message })
     when retry_message_looks_like_not_found message ->
-    let detail =
-      Printf.sprintf
-        "base_url=%s request_path=%s endpoint=%s"
-        provider_cfg.Llm_provider.Provider_config.base_url
-        provider_cfg.Llm_provider.Provider_config.request_path
-        (provider_cfg.Llm_provider.Provider_config.base_url
-         ^ provider_cfg.Llm_provider.Provider_config.request_path)
-    in
     Agent_sdk.Error.Api
       (Llm_provider.Retry.InvalidRequest
          { message =
-             append_hint message openai_compat_not_found_hint_marker detail
+             append_hint
+               message
+               openai_compat_not_found_hint_marker
+               (openai_compat_not_found_detail ())
+         })
+  | Agent_sdk.Error.Api (Llm_provider.Retry.NotFound { message }) ->
+    Agent_sdk.Error.Api
+      (Llm_provider.Retry.NotFound
+         { message =
+             append_hint
+               message
+               openai_compat_not_found_hint_marker
+               (openai_compat_not_found_detail ())
          })
   | _ -> err
 
@@ -290,6 +307,8 @@ let message_looks_like_terminal_provider_runtime_failure message =
       && (contains "jsonrpc" || contains "jsonrpcmessage"))
 
 let sdk_error_is_terminal_provider_runtime_failure = function
+  | Agent_sdk.Error.Api (Llm_provider.Retry.NotFound _)
+  | Agent_sdk.Error.Provider (Llm_provider.Error.NotFound _) -> true
   | Agent_sdk.Error.Internal message
   | Agent_sdk.Error.Api (Llm_provider.Retry.NetworkError { message; _ })
   | Agent_sdk.Error.Api (Llm_provider.Retry.InvalidRequest { message }) ->
@@ -307,67 +326,6 @@ let sdk_error_is_hard_quota = function
       | ServerError { message; _ }) ->
     message_looks_like_cli_wrapped_hard_quota message
   | _ -> false
-
-let retry_api_error_to_provider_error ~provider:_ ~capacity_backpressure api_err =
-  match api_err with
-  | Llm_provider.Retry.RateLimited { retry_after; _ } ->
-    Some (Provider_error.RateLimit { retry_after })
-  | Overloaded _ when capacity_backpressure ->
-    Some (Provider_error.CapacityBackpressure { scope = `Provider })
-  | AuthError _ -> Some Provider_error.AuthError
-  | NotFound _ -> Some Provider_error.ModelNotFound
-  | InvalidRequest { message } -> Some (Provider_error.InvalidRequest { reason = message })
-  | ServerError { status; _ } ->
-    Some (Provider_error.ServerError { code = status; transient = status >= 500 })
-  | ContextOverflow _
-  | NetworkError _
-  | Timeout _
-  | Overloaded _ -> None
-
-let sdk_error_to_provider_error ~provider = function
-  | Agent_sdk.Error.Api api_err ->
-    retry_api_error_to_provider_error
-      ~provider
-      ~capacity_backpressure:false
-      api_err
-  | Agent_sdk.Error.Provider (Llm_provider.Error.CapacityExhausted _) ->
-    Some (Provider_error.CapacityBackpressure { scope = `Provider })
-  | Agent_sdk.Error.Provider (Llm_provider.Error.RateLimit { retry_after; _ }) ->
-    Some (Provider_error.RateLimit { retry_after })
-  | Agent_sdk.Error.Provider (Llm_provider.Error.AuthError _) ->
-    Some Provider_error.AuthError
-  | Agent_sdk.Error.Provider (Llm_provider.Error.InvalidRequest { reason; _ }) ->
-    Some (Provider_error.InvalidRequest { reason })
-  | Agent_sdk.Error.Provider (Llm_provider.Error.ProviderTerminal { detail; _ }) ->
-    Some (Provider_error.PermissionDenied { resource = Some detail })
-  | Agent_sdk.Error.Provider (Llm_provider.Error.NotFound _) ->
-    Some Provider_error.ModelNotFound
-  | _ -> None
-
-let provider_error_total_metric = "masc_provider_error_total"
-let label_kind = "kind"
-let label_runtime = "runtime_id"
-
-let provider_label label =
-  let label = String.trim label in
-  if label = "" then "unknown_provider" else label
-
-let emit_provider_error_metric ~runtime_id ~provider error =
-  Otel_metric_store.inc_counter
-    provider_error_total_metric
-    ~labels:
-      [ label_kind, Provider_error.to_error_kind error
-      ; label_runtime, runtime_id
-      ; "provider", provider_label provider
-      ]
-    ()
-
-let emit_sdk_provider_error_metric ~runtime_id ~provider err =
-  match sdk_error_to_provider_error ~provider err with
-  | None -> None
-  | Some provider_error ->
-    emit_provider_error_metric ~runtime_id ~provider provider_error;
-    Some provider_error
 
 let sdk_error_soft_rate_limited = function
   | Agent_sdk.Error.Api (Llm_provider.Retry.RateLimited { retry_after; _ } as err) ->
@@ -392,6 +350,12 @@ let sdk_error_capacity_backpressure_retry_hint err =
   | Some
       (Keeper_internal_error.Capacity_backpressure
          { retry_after = Synthetic_default s; _ }) -> Some (Cbr_synthetic_default s)
+  | Some
+      (Keeper_internal_error.Capacity_backpressure
+         { retry_after = No_retry_hint; _ }) ->
+    Some
+      (Cbr_synthetic_default
+         Keeper_binding_health_config.default_capacity_backpressure_backoff_sec)
   | _ -> None
 
 let sdk_error_capacity_backpressure_retry_after_s = function

@@ -33,7 +33,7 @@ let status_awaiting =
     { assignee = "k1"
     ; submitted_at = now
     ; verification_id = "req-1"
-    ; deadline = None
+    ; phase = Awaiting_verifier
     }
 
 let test_is_terminal_done () =
@@ -90,7 +90,6 @@ let make_task ~id ~status =
   ; files = []
   ; created_at = now
   ; created_by = None
-  ; goal_id = None
   ; contract = None
   ; handoff_context = None
   ; cycle_count = 0

@@ -29,7 +29,6 @@ type path_context =
   { path_repo_name : string
   ; path_repo_root : string
   ; path_root : string
-  ; path_is_worktree : bool
   ; accepted_toplevels : string list
   }
 
@@ -49,28 +48,12 @@ let classify_path ~(config : Workspace.config) ~(meta : keeper_meta) ~path =
         String.sub path (String.length prefix) (String.length path - String.length prefix)
       in
       match String.split_on_char '/' suffix with
-      | repo_name :: ".worktrees" :: task_name :: _
-        when safe_repo_component repo_name && safe_repo_component task_name ->
-        let repo_root = Filename.concat repos_root repo_name in
-        let worktree_root =
-          Filename.concat (Filename.concat repo_root ".worktrees") task_name
-          |> normalize_path
-        in
-        Some
-          { path_repo_name = repo_name
-          ; path_repo_root = normalize_path repo_root
-          ; path_root = worktree_root
-          ; path_is_worktree = true
-          ; accepted_toplevels = [ worktree_root ]
-          }
       | repo_name :: _ when safe_repo_component repo_name ->
-        let repo_root = Filename.concat repos_root repo_name in
-        let repo_root = normalize_path repo_root in
+        let repo_root = Filename.concat repos_root repo_name |> normalize_path in
         Some
           { path_repo_name = repo_name
           ; path_repo_root = repo_root
           ; path_root = repo_root
-          ; path_is_worktree = false
           ; accepted_toplevels = [ repo_root ]
           }
       | _ -> None
@@ -99,8 +82,6 @@ type execution_location_scope =
   | Playground_subpath
   | Repo_root
   | Repo_subpath
-  | Repo_worktree_root
-  | Repo_worktree_subpath
   | Outside_playground
 
 let string_of_execution_location_scope = function
@@ -108,8 +89,6 @@ let string_of_execution_location_scope = function
   | Playground_subpath -> "playground_subpath"
   | Repo_root -> "repo_root"
   | Repo_subpath -> "repo_subpath"
-  | Repo_worktree_root -> "repo_worktree_root"
-  | Repo_worktree_subpath -> "repo_worktree_subpath"
   | Outside_playground -> "outside_playground"
 
 let path_segments path =
@@ -148,10 +127,10 @@ let execution_location_json
   let cwd = normalize_path cwd in
   let playground_segments = path_segments playground in
   let cwd_segments = path_segments cwd in
-  let scope, relative_segments, repo_name, repo_root, worktree_name, worktree_root =
+  let scope, relative_segments, repo_name, repo_root =
     match strip_segment_prefix ~prefix:playground_segments cwd_segments with
-    | None -> Outside_playground, [], None, None, None, None
-    | Some [] -> Playground_root, [], None, None, None, None
+    | None -> Outside_playground, [], None, None
+    | Some [] -> Playground_root, [], None, None
     | Some ("repos" :: repo_name :: rest)
       when safe_repo_component repo_name ->
       let repo_root =
@@ -160,46 +139,15 @@ let execution_location_json
       in
       (match rest with
        | [] ->
-         Repo_root, [ "repos"; repo_name ], Some repo_name, Some repo_root, None, None
-       | ".worktrees" :: task_name :: tail
-         when safe_repo_component task_name ->
-         let worktree_root =
-           Filename.concat (Filename.concat repo_root ".worktrees") task_name
-           |> normalize_path
-         in
-         let scope =
-           match tail with
-           | [] -> Repo_worktree_root
-           | _ -> Repo_worktree_subpath
-         in
-         ( scope
-         , [ "repos"; repo_name; ".worktrees"; task_name ] @ tail
-         , Some repo_name
-         , Some repo_root
-         , Some task_name
-         , Some worktree_root )
+         Repo_root, [ "repos"; repo_name ], Some repo_name, Some repo_root
        | _ ->
-         Repo_subpath, [ "repos"; repo_name ] @ rest, Some repo_name, Some repo_root, None, None)
-    | Some rest -> Playground_subpath, rest, None, None, None, None
+         Repo_subpath, [ "repos"; repo_name ] @ rest, Some repo_name, Some repo_root)
+    | Some rest -> Playground_subpath, rest, None, None
   in
   let relative_cwd =
     match scope with
     | Outside_playground -> `Null
     | _ -> `String (relative_path_of_segments relative_segments)
-  in
-  let selected_worktree =
-    match repo_name, repo_root, worktree_name, worktree_root with
-    | Some repo_name, Some repo_root, Some worktree_name, Some worktree_root ->
-      `Assoc
-        [ "repo_name", `String repo_name
-        ; "repo_root", `String repo_root
-        ; "worktree_name", `String worktree_name
-        ; "worktree_root", `String worktree_root
-        ; "selection_source", `String "execution_cwd"
-        ; "scope", `String (string_of_execution_location_scope scope)
-        ; "relative_cwd", relative_cwd
-        ]
-    | _ -> `Null
   in
   `Assoc
     [ "cwd", `String cwd
@@ -211,8 +159,4 @@ let execution_location_json
     ; "argv_relative_paths_resolve_against_cwd", `Bool true
     ; "repo_name", Json_util.string_opt_to_json repo_name
     ; "repo_root", Json_util.string_opt_to_json repo_root
-    ; "worktree_selected", `Bool (Option.is_some worktree_root)
-    ; "worktree_name", Json_util.string_opt_to_json worktree_name
-    ; "worktree_root", Json_util.string_opt_to_json worktree_root
-    ; "selected_worktree", selected_worktree
     ]

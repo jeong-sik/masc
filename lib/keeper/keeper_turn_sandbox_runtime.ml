@@ -190,18 +190,18 @@ let image_preflight_start_error (failure : Keeper_sandbox_runtime.classified_err
     failure
 ;;
 
-let run_argv_with_status_retry_eintr ~timeout_sec argv =
+let run_argv_with_status_retry_eintr ?timeout_sec argv =
   let max_eintr_retries = 8 in
   Docker_spawn_throttle.with_slot (fun () ->
     let rec loop attempts_left =
       let st, out =
         Masc_exec.Exec_gate.run_argv_with_status
+          ?timeout_sec
           ~actor:`System_sandbox
           ~raw_source:(String.concat " " argv)
           ~summary:"keeper turn sandbox command"
-          ~env:(Unix.environment ())
+          ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
           ~cwd:(Sys.getcwd ())
-          ~timeout_sec
           argv
       in
       match st with
@@ -221,18 +221,18 @@ let output_for_status ~(stdout : string) ~(stderr : string) =
   | out, err -> out ^ "\n" ^ err
 ;;
 
-let run_argv_with_status_split_retry_eintr ~timeout_sec argv =
+let run_argv_with_status_split_retry_eintr ?timeout_sec argv =
   let max_eintr_retries = 8 in
   Docker_spawn_throttle.with_slot (fun () ->
     let rec loop attempts_left =
       let st, stdout, stderr =
         Masc_exec.Exec_gate.run_argv_with_status_split
+          ?timeout_sec
           ~actor:`System_sandbox
           ~raw_source:(String.concat " " argv)
           ~summary:"keeper turn sandbox command"
-          ~env:(Unix.environment ())
+          ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
           ~cwd:(Sys.getcwd ())
-          ~timeout_sec
           argv
       in
       let out = output_for_status ~stdout ~stderr in
@@ -246,18 +246,18 @@ let run_argv_with_status_split_retry_eintr ~timeout_sec argv =
     loop max_eintr_retries)
 ;;
 
-let run_argv_with_stdin_and_status_retry_eintr ~timeout_sec ~stdin_content argv =
+let run_argv_with_stdin_and_status_retry_eintr ?timeout_sec ~stdin_content argv =
   let max_eintr_retries = 8 in
   Docker_spawn_throttle.with_slot (fun () ->
     let rec loop attempts_left =
       let st, out =
         Masc_exec.Exec_gate.run_argv_with_stdin_and_status
+          ?timeout_sec
           ~actor:`System_sandbox
           ~raw_source:(String.concat " " argv)
           ~summary:"keeper turn sandbox stdin command"
-          ~env:(Unix.environment ())
+          ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
           ~cwd:(Sys.getcwd ())
-          ~timeout_sec
           ~stdin_content
           argv
       in
@@ -271,18 +271,18 @@ let run_argv_with_stdin_and_status_retry_eintr ~timeout_sec ~stdin_content argv 
     loop max_eintr_retries)
 ;;
 
-let run_argv_with_stdin_and_status_split_retry_eintr ~timeout_sec ~stdin_content argv =
+let run_argv_with_stdin_and_status_split_retry_eintr ?timeout_sec ~stdin_content argv =
   let max_eintr_retries = 8 in
   Docker_spawn_throttle.with_slot (fun () ->
     let rec loop attempts_left =
       let st, stdout, stderr =
         Masc_exec.Exec_gate.run_argv_with_stdin_and_status_split
+          ?timeout_sec
           ~actor:`System_sandbox
           ~raw_source:(String.concat " " argv)
           ~summary:"keeper turn sandbox stdin command"
-          ~env:(Unix.environment ())
+          ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
           ~cwd:(Sys.getcwd ())
-          ~timeout_sec
           ~stdin_content
           argv
       in
@@ -297,19 +297,19 @@ let run_argv_with_stdin_and_status_split_retry_eintr ~timeout_sec ~stdin_content
     loop max_eintr_retries)
 ;;
 
-let run_argv_pipeline_with_status_split_retry_eintr ~timeout_sec stages =
+let run_argv_pipeline_with_status_split_retry_eintr ?timeout_sec stages =
   let max_eintr_retries = 8 in
   Docker_spawn_throttle.with_slot (fun () ->
     let rec loop attempts_left =
       let st, stdout, stderr =
         Masc_exec.Exec_gate.run_argv_pipeline_with_status_split
+          ?timeout_sec
           ~actor:`System_sandbox
           ~raw_source:
             (stages
              |> List.map (fun stage -> String.concat " " stage.Process_eio.argv)
              |> String.concat " | ")
           ~summary:"keeper turn sandbox pipeline command"
-          ~timeout_sec
           stages
       in
       let out = output_for_status ~stdout ~stderr in
@@ -323,7 +323,7 @@ let run_argv_pipeline_with_status_split_retry_eintr ~timeout_sec stages =
     loop max_eintr_retries)
 ;;
 
-let start_container (t : t) ~(timeout_sec : float) =
+let start_container (t : t) ~timeout_sec =
   let image =
     match t.meta.sandbox_image with
     | Some img when String.trim img <> "" -> img
@@ -342,7 +342,7 @@ let start_container (t : t) ~(timeout_sec : float) =
       let _cleanup =
         Keeper_sandbox_runtime.maybe_cleanup_stale_containers
           ~base_path:t.config.base_path
-          ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Turn_sandbox ())
+
           ()
       in
       match Keeper_sandbox_runtime.ensure_keeper_sandbox_runtime ~timeout_sec with
@@ -360,6 +360,14 @@ let start_container (t : t) ~(timeout_sec : float) =
        with
        | Error _ as err -> err
        | Ok identity_mounts ->
+       (match
+          Keeper_secret_projection.docker_args_for_keeper
+            ~base_path:t.config.base_path
+            ~keeper_name:t.meta.name
+            ~container_name
+        with
+        | Error err -> Error ("docker_container_start_failed: secret_projection: " ^ err)
+        | Ok secret_projection ->
          let argv =
            Keeper_sandbox_runtime.docker_command_argv ()
            @ [ "run"; "-d"; "--rm"; "--name"; container_name ]
@@ -399,11 +407,16 @@ let start_container (t : t) ~(timeout_sec : float) =
            @ Keeper_sandbox_runtime.docker_workspace_state_mount_args
                ~base_path:t.config.base_path
                ~container_root:t.container_root
+           @ secret_projection.docker_args
            @ identity_mounts
            @ network_args
            @ [ image; "tail"; "-f"; "/dev/null" ]
          in
-         let st, out = run_argv_with_status_retry_eintr ~timeout_sec argv in
+         let st, out =
+           Eio_guard.protect
+             ~finally:secret_projection.cleanup
+             (fun () -> run_argv_with_status_retry_eintr argv)
+         in
          (match st with
           | Unix.WEXITED 0 ->
             let inspect_argv =
@@ -464,10 +477,10 @@ let start_container (t : t) ~(timeout_sec : float) =
               (Printf.sprintf
                  "docker_container_start_failed: %s%s"
                  (Keeper_sandbox_runtime.docker_failure_output_for_log out)
-                 mount_context))))
+                 mount_context)))))
 ;;
 
-let ensure_started (t : t) ~(timeout_sec : float) =
+let ensure_started (t : t) ~timeout_sec =
   match t.state with
   | Running { container_name } -> Ok container_name
   | Not_started -> start_container t ~timeout_sec
@@ -476,7 +489,7 @@ let ensure_started (t : t) ~(timeout_sec : float) =
 let run_exec_with_status_once
       ?(stdin_content : string option)
       (t : t)
-      ~(timeout_sec : float)
+      ~timeout_sec
       ~(cwd : string)
       ~(command_argv : string list)
   =
@@ -517,18 +530,17 @@ let run_exec_with_status_once
       match stdin_content with
       | Some content ->
         run_argv_with_stdin_and_status_retry_eintr
-          ~timeout_sec
           ~stdin_content:content
           argv
-      | None -> run_argv_with_status_retry_eintr ~timeout_sec argv
+      | None -> run_argv_with_status_retry_eintr argv
     in
     Ok (st, out)
 ;;
 
 let run_exec_with_status
       ?stdin_content
+      ~timeout_sec
       (t : t)
-      ~(timeout_sec : float)
       ~(cwd : string)
       ~(command_argv : string list)
   =
@@ -577,7 +589,7 @@ let docker_exec_pipeline_argv (t : t) ~container_name ~container_cwd command_arg
 
 let run_exec_pipeline_with_status_once
       (t : t)
-      ~(timeout_sec : float)
+      ~timeout_sec
       ~(cwd : string)
       ~(stages : exec_pipeline_stage list)
   =
@@ -590,13 +602,13 @@ let run_exec_pipeline_with_status_once
           let cwd = Option.value stage_cwd ~default:cwd in
           let container_cwd = container_cwd_of_host t ~host_cwd:cwd in
           let argv = docker_exec_pipeline_argv t ~container_name ~container_cwd command_argv in
-          { Process_eio.argv; env = Some (Unix.environment ()); cwd = Some (Sys.getcwd ()) })
+          { Process_eio.argv; env = Some (Env_keeper_scrub.filter_environment (Unix.environment ())); cwd = Some (Sys.getcwd ()) })
         stages
     in
-    Ok (run_argv_pipeline_with_status_split_retry_eintr ~timeout_sec process_stages)
+    Ok (run_argv_pipeline_with_status_split_retry_eintr process_stages)
 ;;
 
-let run_exec_pipeline_with_status t ~timeout_sec ~cwd ~stages =
+let run_exec_pipeline_with_status ~timeout_sec t ~cwd ~stages =
   match run_exec_pipeline_with_status_once t ~timeout_sec ~cwd ~stages with
   | Error _ as err -> err
   | Ok ((Unix.WEXITED 126 | Unix.WEXITED 127), stdout, stderr)
@@ -610,11 +622,11 @@ let run_exec_pipeline_with_status t ~timeout_sec ~cwd ~stages =
 
 let run_command_with_status
       ?(ok_exit_codes = [ 0 ])
+      ~timeout_sec
       (t : t)
       ~(cwd : string)
       ~(command_argv : string list)
       ~(max_bytes : int)
-      ~(timeout_sec : float)
       ()
   =
   match command_argv with
@@ -633,15 +645,15 @@ let run_command_with_status
         | _ -> Error (format_docker_exec_error ~head_program ~st ~out)))
 ;;
 
-let run_command ?(ok_exit_codes = [ 0 ]) t ~cwd ~command_argv ~max_bytes ~timeout_sec () =
+let run_command ?(ok_exit_codes = [ 0 ]) ~timeout_sec t ~cwd ~command_argv ~max_bytes () =
   match
-    run_command_with_status ~ok_exit_codes t ~cwd ~command_argv ~max_bytes ~timeout_sec ()
+    run_command_with_status ~ok_exit_codes ~timeout_sec t ~cwd ~command_argv ~max_bytes ()
   with
   | Ok (_st, out) -> Ok out
   | Error _ as err -> err
 ;;
 
-let run_bash_with_status (t : t) ~(cwd : string) ~(cmd : string) ~(timeout_sec : float) ()
+let run_bash_with_status ~timeout_sec (t : t) ~(cwd : string) ~(cmd : string) ()
   =
   let cmd =
     Keeper_sandbox_runtime.rewrite_host_root_to_container_root
@@ -671,7 +683,6 @@ let run_bash_with_status (t : t) ~(cwd : string) ~(cmd : string) ~(timeout_sec :
     let argv = docker_exec_argv ~container_name in
     let st, out =
       run_argv_with_stdin_and_status_split_retry_eintr
-        ~timeout_sec
         ~stdin_content:cmd
         argv
     in
@@ -686,7 +697,6 @@ let run_bash_with_status (t : t) ~(cwd : string) ~(cmd : string) ~(timeout_sec :
            let argv = docker_exec_argv ~container_name in
            Ok
              (run_argv_with_stdin_and_status_split_retry_eintr
-                ~timeout_sec
                 ~stdin_content:cmd
                 argv))
       | _ -> Ok (st, out))
@@ -694,10 +704,10 @@ let run_bash_with_status (t : t) ~(cwd : string) ~(cmd : string) ~(timeout_sec :
 ;;
 
 let write_file_common
+      ~timeout_sec:_
       (t : t)
       ~(host_path : string)
       ~(content : string)
-      ~timeout_sec:_
       ~(append : bool)
       ()
   =
@@ -723,12 +733,12 @@ let write_file_common
             (if String.equal arg "" then "" else " " ^ arg)))
 ;;
 
-let overwrite_file t ~host_path ~content ~timeout_sec () =
-  write_file_common t ~host_path ~content ~timeout_sec ~append:false ()
+let overwrite_file ~timeout_sec t ~host_path ~content () =
+  write_file_common ~timeout_sec t ~host_path ~content ~append:false ()
 ;;
 
-let append_file t ~host_path ~content ~timeout_sec () =
-  write_file_common t ~host_path ~content ~timeout_sec ~append:true ()
+let append_file ~timeout_sec t ~host_path ~content () =
+  write_file_common ~timeout_sec t ~host_path ~content ~append:true ()
 ;;
 
 let cleanup (t : t) =

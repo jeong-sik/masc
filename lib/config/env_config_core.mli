@@ -192,6 +192,8 @@ val log_level_opt : unit -> string option
 val telemetry_enabled : unit -> bool
 val parse_warn_enabled : unit -> bool
 val governance_level : unit -> string
+val disable_hitl_env_key : string
+val disable_hitl : unit -> bool
 
 (** {1 Build identity / pubsub} *)
 

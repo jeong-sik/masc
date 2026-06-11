@@ -9,21 +9,6 @@
     in [Keeper_sandbox_exec_failure]. Call those qualified rather than
     relying on a re-export here. *)
 
-(** Path of the per-keeper egress policy file
-    [<sandbox_root>/egress.json]. *)
-val egress_policy_path :
-  config:Workspace.config ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  string
-
-(** Check [cmd] against [Masc_exec.Egress_policy] for the keeper.
-    Returns [Some blocked_json] when blocked, [None] when allowed. *)
-val check_egress :
-  config:Workspace.config ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  cmd:string ->
-  string option
-
 (** Per-invocation container name [masc-keeper-<safe>-<pid>-<ms>]. *)
 val keeper_sandbox_container_name :
   Keeper_meta_contract.keeper_meta -> string
@@ -92,11 +77,10 @@ type docker_shell_result =
 
 (** Cold-start floor (seconds) for [docker run --rm].  The wall-clock
     budget covers slot_wait + spawn + container cold start + actual
-    cmd + drain; the default ([20.0]) matches the tool dispatch floor
-    ([tool_dispatch_min_timeout_sec = 15s]) plus 5s headroom for image
-    pull and container creation.  Operators can override via
-    [MASC_KEEPER_DOCKER_RUN_MIN_TIMEOUT_SEC] (read once at module
-    load, clamped to [Timeout_floor.Docker_run]). *)
+    cmd + drain; the default ([20.0]) is the sandbox's own internal
+    budget — the caller does not observe this.  Operators can override
+    via [MASC_KEEPER_DOCKER_RUN_MIN_TIMEOUT_SEC] (read once at module
+    load, clamped to [20.0]). *)
 val docker_run_min_timeout_sec : float
 
 (** Run [cmd] inside the keeper Docker sandbox; clamps

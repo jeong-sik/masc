@@ -10,11 +10,7 @@ open Masc
 (* ── Helpers ──────────────────────────────────────────────────── *)
 
 let init_registry () =
-  Masc_test_deps.init_keeper_tool_registry ();
-  let base_path = Masc_test_deps.find_project_root () in
-  match Keeper_tool_policy.init_policy_config ~base_path with
-  | Ok () -> ()
-  | Error e -> failwith (Printf.sprintf "init_policy_config failed: %s" e)
+  Masc_test_deps.init_keeper_tool_registry ()
 
 let file_contains_pattern file_rel pattern =
   let source_root =
@@ -282,38 +278,6 @@ let test_correction_pipeline_log_preserves_detail_fields () =
     ; "changed_fields", {|; "changed_fields"|}
     ]
 
-let tool_policy_unloaded_metric accessor =
-  Otel_metric_store.metric_value_or_zero Otel_metric_store.metric_tool_policy_unloaded_query
-    ~labels:[("accessor", accessor)]
-    ()
-
-let test_tool_policy_unloaded_accessors_emit_metric () =
-  Keeper_tool_policy.reset_policy_config_for_test ();
-  let fallback_accessors : (string * (unit -> unit)) list = [] in
-  List.iter
-    (fun (accessor, call) ->
-      let before = tool_policy_unloaded_metric accessor in
-      call ();
-      let after = tool_policy_unloaded_metric accessor in
-      check bool (accessor ^ " pre-init query increments metric") true
-        (after >= before +. 1.0))
-    fallback_accessors;
-  init_registry ()
-
-let tool_policy_init_failed_metric base_path =
-  Otel_metric_store.metric_value_or_zero Otel_metric_store.metric_tool_policy_init_failed
-    ~labels:[("base_path", base_path)]
-    ()
-
-let test_tool_policy_init_failure_emits_metric () =
-  let base_path = "/tmp/masc-test-tool-policy-init-failed" in
-  let before = tool_policy_init_failed_metric base_path in
-  Server_runtime_bootstrap.record_tool_policy_init_failure ~base_path
-    "synthetic test failure";
-  let after = tool_policy_init_failed_metric base_path in
-  check bool "tool policy init failure increments metric" true
-    (after >= before +. 1.0)
-
 (* ── Runner ───────────────────────────────────────────────────── *)
 
 let () =
@@ -347,9 +311,5 @@ let () =
             test_oas_mainline_warns_are_promoted_in_bridge;
           test_case "correction pipeline log preserves detail fields" `Quick
             test_correction_pipeline_log_preserves_detail_fields;
-          test_case "tool policy pre-init accessors emit metric" `Quick
-            test_tool_policy_unloaded_accessors_emit_metric;
-          test_case "tool policy init failure emits metric" `Quick
-            test_tool_policy_init_failure_emits_metric;
         ] );
     ]

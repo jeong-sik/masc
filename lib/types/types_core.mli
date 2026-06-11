@@ -71,6 +71,13 @@ val task_action_to_string : task_action -> string
 val all_task_actions : task_action list
 val valid_task_action_strings : string list
 
+(* RFC-0220: verification sub-state folded into [task_status] (was a separate
+   request_status store) so the illegal Todo+Pending pair is unrepresentable. *)
+type verification_phase =
+  | Awaiting_verifier
+  | Verifier_assigned of { verifier : string }
+[@@deriving show]
+
 type task_status =
   | Todo
   | Claimed of { assignee : string; claimed_at : string }
@@ -79,11 +86,23 @@ type task_status =
       { assignee : string
       ; submitted_at : string
       ; verification_id : string
-      ; deadline : string option
+      ; phase : verification_phase
       }
   | Done of { assignee : string; completed_at : string; notes : string option }
   | Cancelled of { cancelled_by : string; cancelled_at : string; reason : string option }
 [@@deriving show]
+
+(** RFC-0220 §3.5: [task_status] of an [AwaitingVerification] obligation once
+    [verifier] has claimed it as its satisfier — status preserved, verifier
+    recorded in [phase]. Single construction authority shared by [decide] and
+    both claim writers. Advisory binding: records who is verifying, not who is
+    permitted to (any non-submitter may still approve/reject). *)
+val bind_verifier
+  :  verifier:string
+  -> assignee:string
+  -> submitted_at:string
+  -> verification_id:string
+  -> task_status
 
 val task_status_to_string : task_status -> string
 val string_of_task_status : task_status -> string
@@ -109,6 +128,14 @@ type task_contract =
   ; required_evidence : string list [@default []]
   ; inspect_gate_evidence : string list [@default []]
   ; verify_gate_evidence : string list [@default []]
+  ; evidence_claims : Evidence_claim.t list [@default []]
+        (* RFC-0199 Phase B: typed deterministic completion criteria the
+           harness can check without verifier judgment. Declared by the task
+           author (masc_add_task contract arg), evaluated by
+           Deterministic_evidence_evaluator. Re-introduced with producer +
+           consumer wired (unlike the fan-in-0 required_evidence_typed removed
+           2026-06-03); legacy required_evidence strings are NOT auto-parsed
+           into claims (that would be a substring classifier). *)
   ; stale_claim_timeout_sec : int [@default 0]
   ; links : task_execution_links
         [@default { operation_id = None; session_id = None }]
@@ -146,7 +173,6 @@ type task =
   ; files : string list [@default []]
   ; created_at : string
   ; created_by : string option [@default None]
-  ; goal_id : string option [@default None]
   ; contract : task_contract option [@default None]
   ; handoff_context : task_handoff_context option [@default None]
   ; cycle_count : int [@default 0]
@@ -293,6 +319,7 @@ type claim_next_result =
       ; priority : int
       ; released_task_id : string option
       ; message : string
+      ; scope_widened : bool
       }
   | Claim_next_no_unclaimed
   | Claim_next_no_eligible of

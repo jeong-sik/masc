@@ -205,7 +205,11 @@ let no_eligible_action_for_claim_scope claim_goal_scope ~excluded_count =
     let scope_hint =
       match claim_goal_scope.Keeper_runtime_contract.mode with
       | "active_goal_ids" ->
-        " Active goal scope is a hard claim gate; create/link a matching task or clear active_goal_ids."
+        (* Scope only stays in [active_goal_ids] mode when a Todo task IS linked
+           to the goal (otherwise the resolver falls back to all_tasks). So a
+           no-eligible here means those scoped tasks exist but are blocked /
+           awaiting verification — not a scope lock to clear. *)
+        " Scoped tasks exist but are blocked or awaiting verification; resolve those blockers."
       | _ -> ""
     in
     Printf.sprintf
@@ -268,9 +272,8 @@ let wip_admission_result_fields rejections =
 ;;
 
 let find_task_goal_id config task_id =
-  Workspace.get_tasks_raw config
-  |> List.find_map (fun (task : Masc_domain.task) ->
-         if String.equal task.id task_id then task.goal_id else None)
+  let index = Workspace_goal_index.build_task_goal_index () in
+  try Some (List.hd (Hashtbl.find index task_id)) with Not_found -> None
 ;;
 
 let merge_current_task_id ~(latest : keeper_meta) ~(caller : keeper_meta) =
@@ -288,9 +291,9 @@ let sync_keeper_meta_current_task
   =
   match Keeper_id.Task_id.of_string task_id with
   | Error msg ->
-    Log.Keeper.warn
-      "keeper:%s could not sync claimed task %s into current_task_id: %s"
-      meta.name task_id msg
+    Log.Keeper.warn ~keeper_name:meta.name
+      "could not sync claimed task %s into current_task_id: %s"
+      task_id msg
   | Ok current_task_id ->
     let updated_meta =
       { meta with current_task_id = Some current_task_id; updated_at = now_iso () }
@@ -305,9 +308,9 @@ let sync_keeper_meta_current_task
          Keeper_metrics.(to_string WriteMetaFailures)
          ~labels:[("keeper", meta.name); ("phase", "claim_task_id")]
          ();
-       Log.Keeper.warn
-         "keeper:%s failed to persist claimed current_task_id=%s: %s"
-         meta.name task_id msg)
+       Log.Keeper.warn ~keeper_name:meta.name
+         "failed to persist claimed current_task_id=%s: %s"
+         task_id msg)
 ;;
 
 (* Cluster sub-dispatch via closed sum type — string [name] is converted
@@ -324,7 +327,6 @@ type task_op =
   | Task_create
   | Task_claim
   | Task_done
-  | State_report
 
 let task_op_of_keeper_tool = function
   | Keeper_tool_name.Tasks_list -> Some Tasks_list
@@ -335,7 +337,6 @@ let task_op_of_keeper_tool = function
   | Keeper_tool_name.Task_create -> Some Task_create
   | Keeper_tool_name.Task_claim -> Some Task_claim
   | Keeper_tool_name.Task_done -> Some Task_done
-  | Keeper_tool_name.State_report -> Some State_report
   | _ -> None
 ;;
 
@@ -343,49 +344,6 @@ let task_op_of_name name =
   match Keeper_tool_name.of_string name with
   | Some tool -> task_op_of_keeper_tool tool
   | None -> None
-;;
-
-let state_report_result_json ~(config : Workspace.config) ~(meta : keeper_meta) args =
-  let snapshot, has_state =
-    match Keeper_memory_policy.structured_state_snapshot_schema.parse args with
-    | Ok snapshot -> Keeper_memory_policy.cap_snapshot snapshot, true
-    | Error _ -> Keeper_memory_policy.empty_keeper_state_snapshot, false
-  in
-  let progress_snapshot = Keeper_memory_policy.forward_looking_snapshot snapshot in
-  let progress_snapshot_saved =
-    if not has_state
-    then false
-    else (
-      let progress_path = Keeper_types_support.keeper_progress_path config meta.name in
-      match
-        Keeper_memory_policy.write_progress_snapshot_path
-          ~path:progress_path
-          ~generation:meta.runtime.generation
-          ~updated_at:(now_iso ())
-          progress_snapshot
-      with
-      | Ok () -> true
-      | Error err ->
-        Log.Keeper.warn
-          "keeper:%s report_state progress snapshot write failed: %s"
-          meta.name err;
-        Otel_metric_store.inc_counter
-          Keeper_metrics.(to_string SnapshotWriteFailures)
-          ~labels:[("keeper", meta.name)]
-          ();
-        false)
-  in
-  Yojson.Safe.to_string
-    (`Assoc
-       [ "ok", `Bool true
-       ; ( "state_snapshot"
-         , Keeper_memory_policy.keeper_state_snapshot_to_json snapshot )
-       ; ( "progress_snapshot"
-         , Keeper_memory_policy.keeper_state_snapshot_to_json progress_snapshot )
-       ; "progress_snapshot_saved", `Bool progress_snapshot_saved
-       ; "state_block", `String (Keeper_memory_policy.render_state_block snapshot)
-       ; "typed_outcome", Keeper_tool_outcome.to_json Keeper_tool_outcome.Progress
-       ])
 ;;
 
 let handle_keeper_task_tool
@@ -578,13 +536,15 @@ let handle_keeper_task_tool
       then wip_rejections := (task_id, rejection) :: !wip_rejections
     in
     let wip_admission_filter ~active_tasks task =
+      let task_goal_index = Workspace_goal_index.build_task_goal_index () in
       let active_items =
         Keeper_wip_admission.active_items_of_tasks
+          ~task_goal_index
           ~default_repo:wip_default_repo
           active_tasks
       in
       let scope =
-        Keeper_wip_admission.scope_of_task ~default_repo:wip_default_repo task
+        Keeper_wip_admission.scope_of_task ~task_goal_index ~default_repo:wip_default_repo task
       in
       match Keeper_wip_admission.decide active_items ~scope with
       | Keeper_wip_admission.Admit _ -> true
@@ -596,13 +556,25 @@ let handle_keeper_task_tool
       Workspace.claim_next_r config ~agent_name:meta.agent_name
         ~task_filter:claim_goal_scope.task_filter
         ~admission_filter:wip_admission_filter
+        ~allow_scope_fallback:true
         ()
     in
     let wip_rejections = List.rev !wip_rejections in
     let auto_started_ok = ref false in
+    let harness_completed = ref false in
     (match result with
-     | Workspace.Claim_next_claimed { task_id; _ } ->
+     | Workspace.Claim_next_claimed { task_id; scope_widened; _ } ->
        sync_keeper_meta_current_task ~config ~meta ~task_id;
+       (* Make the scope override visible: this is a claim outside the keeper's
+          active_goal_ids, taken because no in-scope task was admission-eligible
+          (schedule-level fallback). Silent widening would let operators misread
+          the keeper's scope. *)
+       if scope_widened then
+         Log.Keeper.info ~keeper_name:meta.name
+           "goal-scope widened to all_tasks for claim of %s: no in-scope task was \
+            admission-eligible (active_goal_ids=[%s])"
+           task_id
+           (String.concat ", " meta.active_goal_ids);
        (* Guard: claim_next_r returns existing active tasks via Existing_claim
           (task_state_schedule.ml:302). When the task is already InProgress,
           dispatching Start produces an InvalidState transition error every
@@ -626,7 +598,45 @@ let handle_keeper_task_tool
          in
          auto_started_ok := Tool_result.is_success start_result
        end else
-         auto_started_ok := true
+         auto_started_ok := true;
+       (* RFC-0199 Phase B: deterministic evidence harness. When the claimed
+          task declares typed [evidence_claims] and all are satisfied by a file
+          probe, complete it immediately — no LLM turn. Uses [force_done_task_r]
+          so a deterministic check does not route through the non-deterministic
+          anti-rationalization gate (force_done is the existing keeper-Done
+          path; Done_action is exempt from the CDAL substring gate). Guarded to
+          Claimed/InProgress so it never hits the AwaitingVerification
+          Invalid_transition; idempotent if another agent reached Done first. *)
+       (match
+          Workspace.get_tasks_raw config
+          |> List.find_opt (fun (t : Masc_domain.task) ->
+                 String.equal t.id task_id)
+        with
+        | Some
+            { contract = Some { evidence_claims = _ :: _ as claims; _ }
+            ; task_status = (Masc_domain.Claimed _ | Masc_domain.InProgress _)
+            ; _
+            }
+          when Keeper_deterministic_evidence_probe.all_satisfied ~config ~meta
+                 claims ->
+          let summary =
+            claims
+            |> List.map Evidence_claim.to_human_string
+            |> String.concat "; "
+          in
+          let notes =
+            Printf.sprintf
+              "RFC-0199 deterministic harness: %d evidence claim(s) satisfied \
+               [%s]"
+              (List.length claims) summary
+          in
+          (match
+             Workspace.force_done_task_r config
+               ~agent_name:(keeper_agent_sender ~meta) ~task_id ~notes ()
+           with
+           | Ok _ -> harness_completed := true
+           | Error _ -> ())
+        | _ -> ())
      | Workspace.Claim_next_no_unclaimed
      | Workspace.Claim_next_no_eligible _
      | Workspace.Claim_next_error _ -> ());
@@ -643,7 +653,12 @@ let handle_keeper_task_tool
     let message =
       match result with
       | Workspace.Claim_next_claimed { message; _ } ->
-          if !auto_started_ok then message ^ " Task auto-started — begin work now."
+          if !harness_completed then
+            message
+            ^ " Task completed immediately — all declared evidence claims were \
+               already satisfied (no work needed)."
+          else if !auto_started_ok then
+            message ^ " Task auto-started — begin work now."
           else message
       | Workspace.Claim_next_no_unclaimed -> "No unclaimed tasks. ACTION: Stop task-checking — nothing to claim."
       | Workspace.Claim_next_no_eligible
@@ -763,7 +778,6 @@ let handle_keeper_task_tool
          match accountability_warning with
          | Some warning -> [ ("routing_warning", `String warning) ]
          | None -> []))
-    | State_report -> state_report_result_json ~config ~meta args
     | Task_done ->
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
     let result_text = Safe_ops.json_string ~default:"" "result" args |> String.trim in

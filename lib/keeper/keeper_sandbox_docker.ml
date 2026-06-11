@@ -51,20 +51,6 @@ let docker_mount_preflight_details
     ]
 ;;
 
-let egress_policy_path ~(config : Workspace.config) ~(meta : keeper_meta) =
-  let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
-  Filename.concat playground "egress.json"
-;;
-
-let check_egress ~(config : Workspace.config) ~(meta : keeper_meta) ~cmd =
-  let path = egress_policy_path ~config ~meta in
-  let policy = Masc_exec.Egress_policy.of_file path in
-  match Masc_exec.Egress_policy.check_command policy cmd with
-  | Masc_exec.Egress_policy.Allowed -> None
-  | Masc_exec.Egress_policy.Blocked _ as blocked ->
-    Some (Masc_exec.Egress_policy.blocked_to_json ~expected_policy_path:path blocked)
-;;
-
 (* ── Container naming ──────────────────────────────────── *)
 
 let keeper_sandbox_container_name =
@@ -165,20 +151,12 @@ let docker_result_pair = function
 ;;
 
 (* docker run --rm wall-clock covers slot_wait + spawn + container
-   cold start + actual cmd + drain. A 5s floor was insufficient under
-   typical conditions — trivial commands such as [git -C ... status]
-   were timing out at 5s because the cold-start path alone (image pull
-   + container creation + shell init) can take 10-60s on a cold host.
-
-   Load-bearing tool dispatch uses a 15s floor for the same class of
-   failure (sub-I/O-latency timeouts cascading into retries); the docker
-   path was left at 5s — an N-of-M between sibling timeout floors. This
-   restores parity (15s dispatch + 5s headroom for container creation) and
-   exposes an env override so operators can tune for slow-pull fleets without
-   rebuilding.
-
-   This minimum applies only to the [docker run] path, not to
-   [docker exec] against a warm container. *)
+   cold start + actual cmd + drain. The floor is hardcoded at 20s because
+   the hang modes (docker daemon stall, container start stall, command
+   stall) are the same domain — the sandbox's own.  Caller does not
+   observe this: tool dispatch path owns its hang protection via
+   git --no-optional-locks / ollama OLLAMA_LOAD_TIMEOUT, not via a
+   caller-side timeout knob. *)
 
 let resolve_sandbox_image (meta : keeper_meta) =
   match meta.sandbox_image with
@@ -187,13 +165,13 @@ let resolve_sandbox_image (meta : keeper_meta) =
 ;;
 
 let docker_run_min_timeout_sec =
-  let floor = Timeout_floor.Docker_run in
-  let default = Timeout_floor.default_sec floor in
+  let floor = 20.0 in
   let raw =
-    try float_of_string (Sys.getenv "MASC_KEEPER_DOCKER_RUN_MIN_TIMEOUT_SEC")
-    with Not_found | Failure _ -> default
+    match Sys.getenv_opt "MASC_KEEPER_DOCKER_RUN_MIN_TIMEOUT_SEC" with
+    | Some s -> (match float_of_string_opt s with Some f -> f | None -> floor)
+    | None -> floor
   in
-  Timeout_floor.clamp floor raw
+  max floor raw
 ;;
 
 let docker_cleanup_rm_timeout_sec () =
@@ -219,7 +197,7 @@ let cleanup_oneshot_container ~container_name =
         ~actor:`System_sandbox
         ~raw_source:(String.concat " " argv)
         ~summary:"keeper docker oneshot cleanup"
-        ~env:(Unix.environment ())
+        ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
         ~cwd:(Sys.getcwd ())
         ~timeout_sec:(docker_cleanup_rm_timeout_sec ())
         argv)
@@ -308,6 +286,7 @@ let docker_run_argv
       ~gid
       ~seccomp_args
       ~identity_mounts
+      ~secret_args
       ~image
       ~ttl_sec
   =
@@ -346,6 +325,7 @@ let docker_run_argv
   @ Keeper_sandbox_runtime.docker_workspace_state_mount_args
       ~base_path:config.base_path
       ~container_root
+  @ secret_args
   @ network_args
   @ identity_mounts
   @ [ image; "bash"; "-l"; "-s" ]
@@ -546,8 +526,7 @@ let run_docker_shell_command_with_status_internal
                 let _cleanup =
                   Keeper_sandbox_runtime.maybe_cleanup_stale_containers
                     ~base_path:config.base_path
-                    ~timeout_sec:
-                      (Env_config_exec_timeout.timeout_sec ~caller:Sandbox ())
+                    ~timeout_sec
                     ()
                 in
                 match ensure_keeper_sandbox_runtime ~timeout_sec with
@@ -566,80 +545,93 @@ let run_docker_shell_command_with_status_internal
                      with
                      | Error err -> sandbox_error err
                      | Ok identity_mounts ->
-                       let argv =
-                         docker_run_argv
-                           ~config
-                           ~meta
-                           ~container_name
-                           ~container_root
-                           ~container_cwd
-                           ~host_root
-                           ~network_label
-                           ~network_args
-                           ~uid
-                           ~gid
-                           ~seccomp_args
-                           ~identity_mounts
-                           ~image
-                           ~ttl_sec:(docker_oneshot_ttl_sec ~timeout_sec)
-                       in
-                       (try
-                          let status, output =
-                            Eio_guard.protect
-                              ~finally:(fun () ->
-                                cleanup_oneshot_container ~container_name)
-                            @@ fun () ->
-                            Docker_spawn_throttle.with_slot (fun () ->
-                              Masc_exec.Exec_gate.run_argv_with_stdin_and_status
-                                ~actor:`System_sandbox
-                                ~raw_source:(String.concat " " argv)
-                                ~summary:"keeper docker command"
-                                ~env:(Unix.environment ())
-                                ~cwd:(Sys.getcwd ())
-                                ~timeout_sec
-                                ~stdin_content:cmd
-                                argv)
-                          in
-                          let semantic_status =
-                            docker_command_semantic_status ~cmd ~status ~output
-                          in
-                          let semantic_ok = semantic_ok_of_status semantic_status in
-                          if not semantic_ok
-                          then
-                            Keeper_sandbox_exec_failure.record_docker_failure
+                       (match
+                          Keeper_secret_projection.docker_args_for_keeper
+                            ~base_path:config.base_path
+                            ~keeper_name:meta.name
+                            ~container_name
+                        with
+                        | Error err ->
+                          sandbox_error ("docker_shell_failed: secret_projection: " ^ err)
+                        | Ok secret_projection ->
+                          let argv =
+                            docker_run_argv
                               ~config
                               ~meta
-                              ~image
-                              ~container_kind:"oneshot"
+                              ~container_name
+                              ~container_root
+                              ~container_cwd
+                              ~host_root
                               ~network_label
-                              ~status
-                              ~output
-                          else
-                            Keeper_registry.clear_error
-                              ~base_path:config.base_path
-                              meta.name;
-                          Ok
-                            { status
-                            ; output
-                            ; image
-                            ; network_label
-                            ; cwd
-                            ; semantic_status = Some semantic_status
-                            ; semantic_ok
-                            }
-                        with
-                        | Eio.Cancel.Cancelled _ as exn -> raise exn
-                        | Failure err -> sandbox_error err
-                        | Sys_error err ->
-                          sandbox_error
-                            (Printf.sprintf "docker_shell_failed: sys_error: %s" err)
-                        | Unix.Unix_error (code, fn, arg) ->
-                          sandbox_error
-                            (Printf.sprintf
-                               "docker_shell_failed: unix_error: %s: %s(%s)"
-                               (Unix.error_message code)
-                               fn
-                               arg))))))))
+                              ~network_args
+                              ~uid
+                              ~gid
+                              ~seccomp_args
+                              ~identity_mounts
+                              ~secret_args:secret_projection.docker_args
+                              ~image
+                              ~ttl_sec:(docker_oneshot_ttl_sec ~timeout_sec)
+                          in
+                          (try
+                             let status, output =
+                               Eio_guard.protect
+                                 ~finally:(fun () ->
+                                   secret_projection.cleanup ();
+                                   cleanup_oneshot_container ~container_name)
+                               @@ fun () ->
+                               Docker_spawn_throttle.with_slot (fun () ->
+                                 Masc_exec.Exec_gate.run_argv_with_stdin_and_status
+                                   ~actor:`System_sandbox
+                                   ~raw_source:(String.concat " " argv)
+                                   ~summary:"keeper docker command"
+                                   ~env:
+                                     (Env_keeper_scrub.filter_environment
+                                        (Unix.environment ()))
+                                   ~cwd:(Sys.getcwd ())
+                                   ~timeout_sec
+                                   ~stdin_content:cmd
+                                   argv)
+                             in
+                             let semantic_status =
+                               docker_command_semantic_status ~cmd ~status ~output
+                             in
+                             let semantic_ok = semantic_ok_of_status semantic_status in
+                             if not semantic_ok
+                             then
+                               Keeper_sandbox_exec_failure.record_docker_failure
+                                 ~config
+                                 ~meta
+                                 ~image
+                                 ~container_kind:"oneshot"
+                                 ~network_label
+                                 ~status
+                                 ~output
+                             else
+                               Keeper_registry.clear_error
+                                 ~base_path:config.base_path
+                                 meta.name;
+                             Ok
+                               { status
+                               ; output
+                               ; image
+                               ; network_label
+                               ; cwd
+                               ; semantic_status = Some semantic_status
+                               ; semantic_ok
+                               }
+                           with
+                           | Eio.Cancel.Cancelled _ as exn -> raise exn
+                           | Failure err -> sandbox_error err
+                           | Sys_error err ->
+                             sandbox_error
+                               (Printf.sprintf "docker_shell_failed: sys_error: %s" err)
+                           | Unix.Unix_error (code, fn, arg) ->
+                             sandbox_error
+                               (Printf.sprintf
+                                  "docker_shell_failed: unix_error: %s: %s(%s)"
+                                  (Unix.error_message code)
+                                  fn
+                                  arg)))))))))
 ;;
 
 let run_docker_shell_command_with_status =
@@ -698,7 +690,7 @@ let docker_result_to_bash_response ~config ~meta result =
     ~semantic_status:result.semantic_status
 ;;
 
-(** Shared container-backed bash execution: egress check →
+(** Shared container-backed bash execution:
     [run_docker_shell_command_with_status] → response JSON.
     Used by [run_docker_bash]. *)
 let run_docker_bash_via_container
@@ -709,16 +701,13 @@ let run_docker_bash_via_container
       ~(cmd : string)
       ~(network_mode : network_mode)
   =
-  match check_egress ~config ~meta ~cmd with
-  | Some blocked_json -> blocked_json
-  | None ->
-    (match
-	 run_docker_shell_command_with_status
-	         ~config ~meta ~cwd ~timeout_sec ~cmd ~network_mode
-     with
-     | Error message -> error_json message
-     | Ok result ->
-       docker_result_to_bash_response ~config ~meta result)
+  match
+    run_docker_shell_command_with_status
+      ~config ~meta ~cwd ~timeout_sec ~cmd ~network_mode
+  with
+  | Error message -> error_json message
+  | Ok result ->
+    docker_result_to_bash_response ~config ~meta result
 ;;
 
 let run_docker_bash
@@ -743,9 +732,9 @@ let run_docker_bash
          (match
             Keeper_turn_sandbox_runtime.run_bash_with_status
               runtime
+              ~timeout_sec
               ~cwd
               ~cmd
-              ~timeout_sec
               ()
           with
           | Error message -> sandbox_error_json message

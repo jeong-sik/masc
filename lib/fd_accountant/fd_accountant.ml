@@ -43,11 +43,40 @@ let read_cap kind =
 
 (* Per-kind state: configured cap + semaphore (lazily realised; first
    acquire is during startup which is sequential, so a Lazy.force race
-   is harmless). *)
+   is harmless).
+
+   The holding invariant is a typed state machine, not an int counter.
+   PR-C1 (follow-up to PR-B / PR #20583) replaces the
+   `int Atomic.t` (which was paired with a
+   `Eio.Switch.on_release` callback that could
+   *over-decrement* under parent-fibre cancellation and was
+   hidden by a `max 0 (current - 1)` clamp) with a variant that
+   the type system protects from stuck-positive states.
+
+   - [Idle] — no slot held.
+   - [In_flight { acquired_at; hold_id }] — slot held;
+     [hold_id] is strictly monotonic and [acquired_at] is the
+     wall-clock at acquire time.
+
+   All transitions go through [mark_acquire] / [mark_release]
+   under [slot_state.mutex].  The 0/1 projection for the
+   dashboard ([in_flight]) is derived from the variant on
+   read; there is no [max 0] clamp because the type system
+   makes underflow unrepresentable.  The semaphore and the
+   holding state are *separate* concerns: the semaphore is
+   the back-pressure primitive, the holding state is the
+   counter-style invariant.  PR-C1 does not touch the
+   semaphore; only the counter site is replaced. *)
+type fd_holding_state =
+  | Idle
+  | In_flight of { acquired_at : float; hold_id : int }
+
 type slot_state =
   { cap : int
   ; sem : Eio.Semaphore.t
-  ; in_flight : int Atomic.t
+  ; mutex : Eio.Mutex.t
+  ; mutable holding_state : fd_holding_state
+  ; mutable next_hold_id : int
   }
 
 let pressure_active_hook = ref (fun () -> false)
@@ -61,15 +90,50 @@ let _state_for_kind : (kind * slot_state) list =
   List.map
     (fun kind ->
       let cap = read_cap kind in
-      (kind, { cap ; sem = Eio.Semaphore.make cap ; in_flight = Atomic.make 0 }))
+      (kind, { cap
+              ; sem = Eio.Semaphore.make cap
+              ; mutex = Eio.Mutex.create ()
+              ; holding_state = Idle
+              ; next_hold_id = 0
+              }))
     all_kinds
 
 let state_of kind = List.assoc kind _state_for_kind
 
-let note_acquire state = Atomic.incr state.in_flight
+(* Typed-state transitions under the per-slot mutex.  The mutex
+   scope is one record update; it does not span the caller's
+   `f ()` so contention is bounded.  [Eio.Mutex.use_rw ~protect:true]
+   is cancel-safe (caller's `Eio.Cancel.Cancelled` will release the
+   mutex on unwind). *)
+(* Internal per-slot state-record form.  Not exported -- callers
+   go through the kind-level entry points below. *)
+let mark_acquire_slot state =
+  Eio.Mutex.use_rw ~protect:true state.mutex (fun () ->
+      let hold_id = state.next_hold_id in
+      state.next_hold_id <- hold_id + 1;
+      let acquired_at = Unix.gettimeofday () in
+      state.holding_state <- In_flight { acquired_at; hold_id };
+      hold_id)
 
-let note_release state =
-  Lockfree_atomic.update state.in_flight (fun current -> max 0 (current - 1))
+let mark_release_slot state ~hold_id =
+  Eio.Mutex.use_rw ~protect:true state.mutex (fun () ->
+      match state.holding_state with
+      | Idle -> ()
+      | In_flight _ -> state.holding_state <- Idle)
+
+let read_holding_slot state =
+  Eio.Mutex.use_rw ~protect:true state.mutex (fun () ->
+      match state.holding_state with
+      | Idle -> 0 | In_flight _ -> 1)
+
+(* Public kind-level entry points -- the typed-state transition
+   API the regression suite drives.  PR-C1 (follow-up to PR-B
+   / PR #20583) mirrors [dashboard_governance_judge]':s
+   [read_in_flight] / [mark_compute_start] / [mark_compute_finish]
+   pattern: typed variant, [hold_id] monotonic, no [max 0] clamp. *)
+let read_holding ~kind = read_holding_slot (state_of kind)
+let mark_acquire ~kind = mark_acquire_slot (state_of kind)
+let mark_release ~kind ~hold_id = mark_release_slot (state_of kind) ~hold_id
 
 (* Shared FD-pressure gate — when Keeper_fd_pressure.active () is true,
    all top-level kinds serialize through one global slot. Nested cross-kind
@@ -121,13 +185,13 @@ let with_slot ~kind f =
     Eio.Switch.run @@ fun sw ->
     Eio.Switch.on_release sw release_pressure ;
     Eio.Semaphore.acquire sem ;
-    note_acquire state ;
-    Eio.Switch.on_release sw (fun () ->
-        note_release state ;
-        Eio.Semaphore.release sem) ;
+    let hold_id = mark_acquire_slot state in
     let held = { kind ; active = Atomic.make true } in
     Fun.protect
-      ~finally:(fun () -> Atomic.set held.active false)
+      ~finally:(fun () ->
+          mark_release_slot state ~hold_id ;
+          Eio.Semaphore.release sem ;
+          Atomic.set held.active false)
       (fun () -> Eio.Fiber.with_binding held_kinds_key (held :: held_kinds ()) f)
 
 let acquire_lifetime_slot ~kind () =
@@ -137,11 +201,11 @@ let acquire_lifetime_slot ~kind () =
    | exn ->
      release_pressure ();
      raise exn);
-  note_acquire state;
+  let hold_id = mark_acquire_slot state in
   let released = Atomic.make false in
   fun () ->
     if Atomic.compare_and_set released false true then (
-      note_release state;
+      mark_release_slot state ~hold_id ;
       Eio.Semaphore.release sem;
       release_pressure ())
 
@@ -205,13 +269,19 @@ let () =
   install_autonomy_exec_sandbox_exec_guard ();
   install_bg_sandbox_exec_guard ()
 
-(* Use explicit atomic counters instead of reading semaphore credits here.
-   Dashboard projections run on worker domains, while the semaphores are used
+(* Dashboard projections run on worker domains, while the semaphores are used
    by the main Eio domain; observing them through [get_value] can cross Eio
-   domain ownership boundaries. *)
+   domain ownership boundaries.
+
+   The in-flight count is now a pure projection of the typed
+   state machine ([Idle] → 0, [In_flight _] → 1) — the previous
+   [max 0 (Atomic.get …)] clamp is gone because the typed
+   invariant does not admit underflow. *)
 let in_flight kind =
-  let { in_flight ; _ } = state_of kind in
-  max 0 (Atomic.get in_flight)
+  let { holding_state ; _ } = state_of kind in
+  match holding_state with
+  | Idle -> 0
+  | In_flight _ -> 1
 
 (* Best-effort FD-open count using /dev/fd (macOS) or /proc/self/fd
    (Linux). Returns -1 on other platforms. *)

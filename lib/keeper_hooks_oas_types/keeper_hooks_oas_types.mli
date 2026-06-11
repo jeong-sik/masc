@@ -197,6 +197,11 @@ val telemetry_has_canonical_model_id :
   Agent_sdk.Types.inference_telemetry option -> bool
 (** Internal: true when telemetry carries a non-empty canonical_model_id. *)
 
+val canonical_model_id_of_telemetry :
+  Agent_sdk.Types.inference_telemetry option -> string option
+(** Internal: returns the canonical model id when telemetry carries a
+    non-empty one, [None] otherwise. *)
+
 val is_runtime_selector_alias : string -> bool
 (** Internal: true when the trimmed model leaf equals ["auto"]. *)
 

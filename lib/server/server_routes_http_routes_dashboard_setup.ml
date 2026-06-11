@@ -54,6 +54,34 @@ let handle_dashboard_link_previews = Server_routes_http_dashboard_handlers.handl
 let handle_dashboard_task_history = Server_routes_http_dashboard_handlers.handle_dashboard_task_history
 let handle_dashboard_workspace = Server_routes_http_dashboard_handlers.handle_dashboard_workspace
 
+(* Default page sizes for /api/v1/dashboard/telemetry when the client
+   omits [n]. A windowed request (since_ms/until_ms) previously defaulted
+   to n=0 (unbounded): a single Observatory poll
+   ([observatory.ts] fetchTelemetry with since_ms/until_ms and no n) then
+   Yojson-parsed up to the telemetry read clamp (50k, #20659) entries per
+   source across all sources — enough to peg the single Eio domain on a
+   non-yielding parse and freeze the keeper fleet. Bound the DEFAULT here;
+   an explicit n=0 still honours the all-in-window contract from #20659. *)
+let default_telemetry_limit = 100
+let default_windowed_telemetry_limit = 2000
+
+(* Resolve the effective entry limit for /api/v1/dashboard/telemetry.
+   Absent or unparseable [n_param] falls back to a bounded default
+   (windowed: [default_windowed_telemetry_limit], else
+   [default_telemetry_limit]) so no request defaults to an unbounded read.
+   An explicit n=0 parses to [Some 0] and is preserved (all-in-window,
+   clamped downstream by #20659). Pure + exposed so the freeze guard
+   (no permissive 0 default) is unit-testable. *)
+let resolve_telemetry_n ~has_time_window ~(n_param : string option) =
+  let default_n =
+    if has_time_window
+    then default_windowed_telemetry_limit
+    else default_telemetry_limit
+  in
+  match n_param with
+  | Some raw -> Option.value ~default:default_n (int_of_string_opt raw) |> max 0
+  | None -> default_n
+
 (* Telemetry unified view handler — extracted from add_routes pipeline
    as part of godfile near-threshold split. *)
 let handle_telemetry request reqd =
@@ -78,12 +106,15 @@ let handle_telemetry request reqd =
     in
     let has_time_window = Option.is_some since_ts || Option.is_some until_ts in
     let n =
-      match Server_utils.query_param req "n" with
+      resolve_telemetry_n ~has_time_window
+        ~n_param:(Server_utils.query_param req "n")
+    in
+    let offset =
+      match Server_utils.query_param req "offset" with
       | Some raw ->
-        Option.value ~default:(if has_time_window then 0 else 100)
-          (int_of_string_opt raw)
-        |> max 0
-      | None -> if has_time_window then 0 else 100
+        Option.value ~default:0 (int_of_string_opt raw)
+        |> max 0 |> min 5000
+      | None -> 0
     in
     let sources =
       match Server_utils.query_param req "source" with
@@ -107,6 +138,7 @@ let handle_telemetry request reqd =
                    `String (Telemetry_unified.source_to_string source))
                  sources) );
           ("n", `Int n);
+          ("offset", `Int offset);
           ( "keeper",
             Option.fold ~none:`Null
               ~some:(fun value -> `String value)
@@ -144,8 +176,8 @@ let handle_telemetry request reqd =
     let opt_ts = function None -> "" | Some f -> Printf.sprintf "%.3f" f in
     let cache_key =
       Printf.sprintf
-        "telemetry:%s:%s:src=%s:n=%d:k=%s:s=%s:o=%s:w=%s:since=%s:until=%s"
-        base_path masc_root sources_key n
+        "telemetry:%s:%s:src=%s:n=%d:off=%d:k=%s:s=%s:o=%s:w=%s:since=%s:until=%s"
+        base_path masc_root sources_key n offset
         (opt_str keeper_name) (opt_str session_id)
         (opt_str operation_id) (opt_str worker_run_id)
         (opt_ts since_ts) (opt_ts until_ts)
@@ -156,7 +188,7 @@ let handle_telemetry request reqd =
         Server_timing.measure timing Telemetry_query (fun () ->
           Telemetry_unified.read_unified_result ~base_path ~masc_root
             ~sources ?keeper_name ?session_id ?operation_id
-            ?worker_run_id ?since_ts ?until_ts ~n ())
+            ?worker_run_id ?since_ts ?until_ts ~n ~offset ())
       in
       let generated_at = Masc_domain.now_iso () in
       Server_timing.measure timing Json_serialize (fun () ->
@@ -171,6 +203,8 @@ let handle_telemetry request reqd =
           ("query", query_json);
           ("count", `Int (List.length result.entries));
           ("total_matching_entries", `Int result.total_matching_entries);
+          ("offset", `Int offset);
+          ("has_more", `Bool (offset + List.length result.entries < result.total_matching_entries));
           ("truncated", `Bool result.truncated);
           ("entries", `List result.entries);
         ])

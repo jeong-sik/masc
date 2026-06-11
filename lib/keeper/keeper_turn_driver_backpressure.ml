@@ -14,6 +14,16 @@ open Keeper_internal_error
 let synthetic_retry_after_sec =
   Keeper_binding_health_config.default_capacity_backpressure_backoff_sec
 
+(* Emit a structured log line whenever a synthetic (default) backoff is used
+   instead of an explicit retry_after hint.  Replaces the retired metric
+   path per task-714. *)
+let log_synthetic_backoff ~synthetic_sec ~source ~detail =
+  Log.Server.info
+    "Synthetic backoff applied (source=%s, backoff_sec=%.0f, detail=%s)"
+    source
+    synthetic_sec
+    detail
+
 let capacity_backpressure_source_of_http_error = function
   | Llm_provider.Http_client.NetworkError
       { kind = Llm_provider.Http_client.Local_resource_exhaustion; _ } ->
@@ -49,7 +59,11 @@ let capacity_backpressure_of_http_error ?source ~runtime_id last_err =
            retry_after =
              (match retry_after with
               | Some s -> Explicit s
-              | None -> Synthetic_default synthetic_retry_after_sec);
+              | None ->
+                let syn_sec = synthetic_retry_after_sec in
+                log_synthetic_backoff ~synthetic_sec:syn_sec
+                  ~source:"Provider_capacity" ~detail:message;
+                Synthetic_default syn_sec);
          })
   | Some
       (Llm_provider.Http_client.NetworkError
@@ -63,7 +77,11 @@ let capacity_backpressure_of_http_error ?source ~runtime_id last_err =
            runtime_id;
            source = Option.value source ~default:Runtime_slot;
            detail = message;
-           retry_after = Synthetic_default synthetic_retry_after_sec;
+           retry_after =
+               let syn_sec = synthetic_retry_after_sec in
+               log_synthetic_backoff ~synthetic_sec:syn_sec
+                 ~source:"Runtime_slot" ~detail:message;
+               Synthetic_default syn_sec;
          })
   | Some
       (Llm_provider.Http_client.HttpError _
@@ -105,7 +123,11 @@ let capacity_backpressure_of_sdk_error
               retry_after =
                 (match retry_after with
                  | Some s -> Explicit s
-                 | None -> Synthetic_default synthetic_retry_after_sec);
+                 | None ->
+                   let syn_sec = synthetic_retry_after_sec in
+                   log_synthetic_backoff ~synthetic_sec:syn_sec
+                     ~source:"Provider_capacity" ~detail;
+                   Synthetic_default syn_sec);
             }))
   | Agent_sdk.Error.Internal msg
     when message_looks_like_capacity_backpressure msg ->
@@ -116,7 +138,11 @@ let capacity_backpressure_of_sdk_error
               runtime_id;
               source = Provider_capacity;
               detail = msg;
-              retry_after = Synthetic_default synthetic_retry_after_sec;
+              retry_after =
+                let syn_sec = synthetic_retry_after_sec in
+                log_synthetic_backoff ~synthetic_sec:syn_sec
+                  ~source:"Provider_capacity" ~detail:msg;
+                Synthetic_default syn_sec;
             }))
   | Agent_sdk.Error.Api _
   | Agent_sdk.Error.Provider _

@@ -39,7 +39,7 @@ let agents_safe config =
 
 let messages_safe config =
   if Workspace.is_initialized config
-  then Workspace.get_messages_raw config ~since_seq:0 ~limit:50
+  then Workspace.get_messages_raw config ~since_seq:0 ~limit:20
   else []
 ;;
 
@@ -163,7 +163,7 @@ let observe_dashboard_snapshot_latency ms =
   inc_bucket "+Inf"
 ;;
 
-let dashboard_all_zero_labels = [ "keeper_name", "__dashboard__" ]
+let dashboard_all_zero_labels = [ "keeper", "__dashboard__" ]
 
 let render_sub_operation_timings_all_zero (t : render_phase_timings_ms) =
   t.n_keepers > 0

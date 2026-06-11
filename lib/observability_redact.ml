@@ -39,6 +39,9 @@ let redact_patterns (s : string) : string =
   let s = Re.replace_string url_credential_re ~by:"://[REDACTED]@" s in
   Re.replace_string sensitive_value_re ~by:"[REDACTED]" s
 
+let redact_text (s : string) : string =
+  redact_patterns s
+
 let truncate ?(max_len = default_max_len) (s : string) : string =
   let s = String.trim s in
   if String.length s <= max_len then s
@@ -69,6 +72,18 @@ let rec preview_json_strings ?(max_len = default_max_len) (json : Yojson.Safe.t)
         (List.map (fun (k, v) -> (k, preview_json_strings ~max_len v)) fields)
   | `List items -> `List (List.map (preview_json_strings ~max_len) items)
   | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as j -> j
+
+let rec redact_json_strings = function
+  | `String s -> `String (redact_text s)
+  | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (key, value) ->
+             if is_sensitive_key key then (key, `String "[REDACTED]")
+             else (key, redact_json_strings value))
+           fields)
+  | `List items -> `List (List.map redact_json_strings items)
+  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as json -> json
 
 let rec redact_json_value = function
   | `Assoc fields ->

@@ -91,12 +91,13 @@ val apply_result_transformer : Tool_result.result -> Tool_result.result
 type trace_id = string
 
 type span_wrapper =
-  tool_name:string
-  -> ((unit -> trace_id option) -> Tool_result.result option * string)
+  ?force_new_trace_id:bool
+  -> tool_name:string
+  -> ((unit -> (trace_id * trace_id) option) -> Tool_result.result option * string)
   -> Tool_result.result option * string
 (** Wrapper applied around the dispatch body in {!guarded_dispatch}. Mirrors the
     shape of [Tool_telemetry.with_span]: it opens a span, runs the body (which
-    receives a trace-id thunk and returns [(result, outcome_label)]), and
+    receives a trace-link thunk and returns [(result, outcome_label)]), and
     finalizes the metric with [outcome_label]. The default is the identity
     wrapper. *)
 

@@ -98,7 +98,8 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
     | Ok () ->
         match
           Keeper_sandbox_runtime.ensure_keeper_startup_preflight
-            ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Turn_up ()) ~sandbox_profile
+            ~timeout_sec:(Env_config_sandbox.Preflight.max_timeout_sec ())
+            ~sandbox_profile
         with
         | Error err ->
             Otel_metric_store.inc_counter
@@ -395,10 +396,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             Keeper_context_core.default_max_checkpoint_messages;
           keep_recent_tool_results =
             Keeper_config.default_keep_recent_tool_results;
-          tool_heavy_msg_threshold =
-            Keeper_config.default_tool_heavy_msg_threshold;
-          tool_heavy_ratio_floor =
-            Keeper_config.default_tool_heavy_ratio_floor;
         };
         auto_handoff;
         handoff_threshold;

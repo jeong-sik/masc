@@ -49,9 +49,9 @@ let run_named
     ?(system_prompt = "")
     ?(tools = [])
     ?(initial_messages = [])
-    ?(max_turns = 20)
     ?(max_idle_turns = 3)
     ?stream_idle_timeout_s
+    ?body_timeout_s
     ?(temperature = Runtime_provider_defaults.agent_default_temperature)
     ?(max_tokens = Runtime_provider_defaults.agent_default_max_tokens)
     ?max_input_tokens
@@ -61,7 +61,6 @@ let run_named
     ?guardrails
     ?hooks
     ?context_reducer
-    ?tool_retry_policy
     ?raw_trace
     ?on_event
     ?on_yield
@@ -83,7 +82,9 @@ let run_named
     ?exit_condition_result
     ?summarizer
     ?oas_checkpoint
+    ?trace_link
     ?event_bus
+    ?on_runtime_observation
     ?runtime_manifest_context
     ?runtime_manifest_append
     ?sw
@@ -103,6 +104,13 @@ let run_named
   let runtime_id = String.trim runtime_id in
   let error_runtime_id = runtime_id in
   let runtime_mcp_policy = runtime_mcp_policy_for_tools ~keeper_name tools in
+  let runtime_seed = Runtime_inference.for_runtime ~name:runtime_id in
+  let enable_thinking =
+    match runtime_seed.thinking_enabled with
+    | Some enabled -> Some enabled
+    | None -> enable_thinking
+  in
+  let preserve_thinking = runtime_seed.preserve_thinking in
   (* Parameters that only fed the deleted multi-candidate machinery
      (provider selection, admission queue gating, per-candidate accept). *)
   ignore provider_filter;
@@ -147,9 +155,9 @@ let run_named
     system_prompt;
     tools;
     initial_messages;
-    max_turns;
     max_idle_turns;
     stream_idle_timeout_s;
+    body_timeout_s;
     temperature;
     max_tokens;
     max_input_tokens;
@@ -157,7 +165,6 @@ let run_named
     guardrails;
     hooks;
     context_reducer;
-    tool_retry_policy;
     raw_trace;
     transport_resolved;
     runtime_mcp_policy;
@@ -171,17 +178,20 @@ let run_named
     context_injector;
     context;
     enable_thinking;
+    preserve_thinking;
     approval;
     exit_condition;
     exit_condition_result;
     summarizer;
     oas_checkpoint;
+    trace_link;
     sw;
     net;
     on_event;
     on_yield;
     on_resume;
     agent_ref;
+    on_runtime_observation;
     event_bus;
     runtime_manifest_context;
     runtime_manifest_append;

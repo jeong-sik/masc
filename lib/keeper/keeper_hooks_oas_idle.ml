@@ -25,7 +25,7 @@ let suggest_alternatives ~(allowed_tools : string list)
 let includes_tool name tools = List.exists (String.equal name) tools
 
 let board_get_recovery_hint ~allowed_tools ~tool_names =
-  if not (includes_tool "keeper_board_get" tool_names) then
+  if not (includes_tool "keeper_board_post_get" tool_names) then
     None
   else
     let discovery_tools =
@@ -40,8 +40,8 @@ let board_get_recovery_hint ~allowed_tools ~tool_names =
     in
     Some
       (Printf.sprintf
-         "keeper_board_get requires post_id; if no post_id is visible, use %s first. \
-          Do not call keeper_board_get with {}."
+         "keeper_board_post_get requires post_id; if no post_id is visible, use %s first. \
+          Do not call keeper_board_post_get with {}."
          discovery)
 
 (** Pure decision logic for the on_idle hook.  Testable without Workspace.config.
@@ -112,7 +112,15 @@ let on_idle_decision ~consecutive_idle_turns ~allowed_tools ~tool_names
   on_idle_decision_with_threshold ~skip_at ~consecutive_idle_turns
     ~allowed_tools ~tool_names
 
-let keeper_idle_decision ~meta_ref ~consecutive_idle_turns ~tool_names =
+let keeper_idle_decision
+    ~(meta_ref : Keeper_meta_contract.keeper_meta ref)
+    ~consecutive_idle_turns
+    ~tool_names =
+  let keeper_name = (!meta_ref).name in
+  Otel_metric_store.set_gauge
+    Keeper_metrics.(to_string ConsecutiveIdle)
+    ~labels:[ label_keeper, keeper_name ]
+    (Float.of_int (max 0 consecutive_idle_turns));
   let allowed_tools =
     Keeper_tool_policy.keeper_allowed_tool_names !meta_ref in
   let decision =
@@ -122,11 +130,11 @@ let keeper_idle_decision ~meta_ref ~consecutive_idle_turns ~tool_names =
     | [] -> "<none>" | names -> String.concat ", " names in
   (match decision with
    | Agent_sdk.Hooks.Skip ->
-     Log.Keeper.warn "keeper:%s idle_turns=%d repeated_tools=[%s] — requesting stop"
-       (!meta_ref).name consecutive_idle_turns tools_str
+     Log.Keeper.warn ~keeper_name "idle_turns=%d repeated_tools=[%s] — requesting stop"
+       consecutive_idle_turns tools_str
    | Agent_sdk.Hooks.Nudge _ ->
-     Log.Keeper.info "keeper:%s idle_turns=%d tools=[%s] — nudging LLM via Nudge"
-       (!meta_ref).name consecutive_idle_turns tools_str
+     Log.Keeper.info ~keeper_name "idle_turns=%d tools=[%s] — nudging LLM via Nudge"
+       consecutive_idle_turns tools_str
    | _ -> ());
   decision
 

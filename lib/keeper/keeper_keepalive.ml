@@ -573,7 +573,8 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
                    | None -> Keeper_registry.Exception "fiber_crash"
                  in
                  record_crash reason)
-             | Eio.Cancel.Cancelled _ as e -> raise e
+             | Eio.Cancel.Cancelled _ ->
+               record_stopped "cancelled"
              | exn ->
                if Atomic.get stop
                then record_stopped "manual stop"

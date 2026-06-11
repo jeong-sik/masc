@@ -494,7 +494,7 @@ module McpSessionStore = struct
   let state_mutex = Mutex.create ()
   let loop_started = Atomic.make false
 
-  let max_age = ref Env_config.Session.max_age_seconds
+  let max_age = Env_config.Session.max_age_seconds
 
   let process_msg state msg =
     match msg with
@@ -599,7 +599,7 @@ module McpSessionStore = struct
 
   let cleanup_stale () =
     let p, r = Eio.Promise.create () in
-    dispatch (Cleanup_stale (Time_compat.now (), !max_age, r));
+    dispatch (Cleanup_stale (Time_compat.now (), max_age, r));
     await_if_needed p
 
   let to_json (s : mcp_session) : Yojson.Safe.t =

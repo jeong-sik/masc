@@ -36,10 +36,9 @@ let degraded_retry_runtime_of_wire ?(log_invalid = true) ~keeper_name raw =
     | Some _ as parsed -> parsed
     | None ->
       if log_invalid then
-        Log.Keeper.warn
-          "keeper:%s execution_receipt degraded_retry_runtime %S is not a \
+        Log.Keeper.warn ~keeper_name:keeper_name
+          "execution_receipt degraded_retry_runtime %S is not a \
            qualified or re-qualifiable runtime name; dropping receipt field"
-          keeper_name
           raw;
       None
 

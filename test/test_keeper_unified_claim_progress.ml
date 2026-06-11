@@ -10,11 +10,7 @@ let test_claim_tool_classification_covers_supported_claim_tools () =
     "keeper claim is claim tool"
     true
     (KTP.is_claim_tool_name "keeper_task_claim");
-  check
-    bool
-    "masc claim next is claim tool"
-    true
-    (KTP.is_claim_tool_name "masc_claim_next");
+
   check
     bool
     "removed claim task alias is not claim tool"

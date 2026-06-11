@@ -417,10 +417,6 @@ let apply_post_turn_lifecycle_with_resilience_handles
     in
     match snapshot with
     | None ->
-        Otel_metric_store.inc_counter
-          Keeper_metrics.(to_string ContinuityNoState)
-          ~labels:[("keeper", meta.name)]
-          ();
         (* No state captured this turn — neither LLM [STATE] block nor OAS
            checkpoint working_context produced a snapshot.  Still advance the
            continuity cooldown timestamp so the compaction cooldown gate in
@@ -428,7 +424,8 @@ let apply_post_turn_lifecycle_with_resilience_handles
            otherwise keepers that never emit [STATE] would bypass the
            cooldown every turn while only emergency ratio (0.8) acts as a
            safety net.  Record a counter so prompt / runtime drift becomes
-           observable. *)
+           observable.  (ContinuityNoState was an exact duplicate of this
+           counter — same site, same labels — and was removed.) *)
         Otel_metric_store.inc_counter
           Keeper_metrics.(to_string StateSnapshotSkippedNoState)
           ~labels:[("keeper", meta.name)]

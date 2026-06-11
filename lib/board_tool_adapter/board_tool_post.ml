@@ -188,6 +188,13 @@ let handle_post_list_uncached ~tool_name ~start_time args : Tool_result.result =
       if String.equal s "" then None else Some s
     | None -> None
   in
+  let exclude_author_filter =
+    match get_string_opt args "exclude_author" with
+    | Some s ->
+      let s = String.trim s in
+      if String.equal s "" then None else Some s
+    | None -> None
+  in
   let since = get_float_opt args "since" in
   let visibility_filter =
     match visibility_str with
@@ -215,6 +222,7 @@ let handle_post_list_uncached ~tool_name ~start_time args : Tool_result.result =
         ~visibility_filter
         ?hearth
         ?author_filter
+        ?exclude_author_filter
         ~exclude_system
         ~exclude_automation
         ~sort_by

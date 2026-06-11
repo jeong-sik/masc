@@ -504,48 +504,52 @@ let parse_review_verdict_from_json (args : Yojson.Safe.t) : (verdict, string) re
 let parse_verdict (text : string) : (verdict, string) result =
   let trimmed = String.trim text in
   let upper = String.uppercase_ascii trimmed in
-  let has_boundary prefix =
-    let plen = String.length prefix in
-    String.length upper = plen
-    || (String.length upper > plen
-        &&
-        let c = upper.[plen] in
-        c = ' ' || c = ':' || c = '-')
+  
+  (* Scan for APPROVE/REJECT keyword anywhere in text (case-insensitive) *)
+  let scan_for_keyword () =
+    let upper_len = String.length upper in
+    let rec scan_idx idx =
+      if idx >= upper_len then None
+      else if idx + 7 <= upper_len && String.starts_with ~prefix:"APPROVE" (String.sub upper idx 7)
+      then Some (idx, "APPROVE", 7)
+      else if idx + 6 <= upper_len && String.starts_with ~prefix:"REJECT" (String.sub upper idx 6)
+      then Some (idx, "REJECT", 6)
+      else scan_idx (idx + 1)
+    in
+    scan_idx 0
   in
-  if
-    String.length upper >= 7
-    && String.starts_with ~prefix:"APPROVE" upper
-    && has_boundary "APPROVE"
-  then Ok Approve
-  else if
-    String.length upper >= 6
-    && String.starts_with ~prefix:"REJECT" upper
-    && has_boundary "REJECT"
-  then (
-    let rest =
-      if String.length trimmed > 6
-      then String.trim (String.sub trimmed 6 (String.length trimmed - 6))
-      else ""
+  
+  match scan_for_keyword () with
+  | Some (pos, keyword, len) ->
+    (* Extract reason after keyword *)
+    let rest_start = pos + len in
+    let rest = 
+      if rest_start < String.length text 
+      then 
+        let raw_rest = String.sub text rest_start (String.length text - rest_start) in
+        String.trim raw_rest
+      else "" 
     in
-    let reason =
-      if String.length rest > 0 && (rest.[0] = ':' || rest.[0] = '-')
+    (* Strip leading colon/dash/space from reason *)
+    let reason = 
+      if String.length rest > 0 && (rest.[0] = ':' || rest.[0] = '-' || rest.[0] = ' ')
       then String.trim (String.sub rest 1 (String.length rest - 1))
-      else rest
+      else rest 
     in
-    if reason = ""
-    then Ok (Reject "completion notes did not address the task")
-    else Ok (Reject reason))
-  else if String.length trimmed = 0
-  then Error "empty review output"
-  else
-    (* ADR D3: unknown format is NOT silently approved.
-       Previous behavior defaulted to Approve here — this was a
-       D3 + Unknown→Permissive double violation. *)
-    Error
-      (sprintf
-         "unrecognized review format: %s"
-         (String_util.utf8_safe ~max_bytes:83 ~suffix:"..." trimmed
-          |> String_util.to_string))
+    if keyword = "APPROVE" then Ok Approve
+    else 
+      let final_reason = if reason = "" then "completion notes did not address the task" else reason in
+      Ok (Reject final_reason)
+  | None ->
+    (* No keyword found - check if text is empty *)
+    if String.length trimmed = 0
+    then Error "empty review output"
+    else
+      Error
+        (sprintf
+           "unrecognized review format: %s"
+           (String_util.utf8_safe ~max_bytes:83 ~suffix:"..." trimmed
+            |> String_util.to_string))
 ;;
 
 (* ================================================================ *)

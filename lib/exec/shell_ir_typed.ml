@@ -443,14 +443,22 @@ let pp fmt = function
        | `Bzip2 -> "bzip2"
        | `Xz -> "xz"
        | `Zstd -> "zstd")
-  | W (Make { target; jobs }) ->
+  | W (Make { target; jobs; directory; makefile; dry_run; keep_going; silent; always_make }) ->
     Format.fprintf
       fmt
-      "Make(target=%a, jobs=%a)"
+      "Make(target=%a, jobs=%a, directory=%a, makefile=%a, dry_run=%b, keep_going=%b, silent=%b, always_make=%b)"
       (Format.pp_print_option Format.pp_print_string)
       target
       (Format.pp_print_option Format.pp_print_int)
       jobs
+      (Format.pp_print_option Format.pp_print_string)
+      directory
+      (Format.pp_print_option Format.pp_print_string)
+      makefile
+      dry_run
+      keep_going
+      silent
+      always_make
   | W (Diff { file1; file2; unified; brief }) ->
     Format.fprintf fmt "Diff(file1=%s, file2=%s, unified=%b, brief=%b)" file1 file2 unified brief
   | W (Sed { expression; file; in_place; extended_regex; suppress_output }) ->

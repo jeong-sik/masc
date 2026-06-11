@@ -115,9 +115,12 @@ let local_model_gate =
   }
 ;;
 
-(* Boundary: MASC selects the internal retry policy, but OAS owns
-   retry classification, feedback synthesis, and loop control. *)
-let default_internal_tool_retry_policy = Agent_sdk.Tool_retry_policy.default_internal
+(* Boundary: MASC does not impose a tool-retry budget on workers. Retrying a
+   malformed tool call is the keeper's own competence — the SDK delivers the
+   validation error back to the model (pipeline [None] branch) and the agent
+   loop decides whether to re-emit. OAS owns retry classification, feedback
+   synthesis, and loop control; runaway is bounded by token budget + idle
+   turns, not a code-level retry count. *)
 let default_gate_config () = { local_model_gate with denied_tools = [] }
 
 (* ================================================================ *)
@@ -182,7 +185,6 @@ let build_agent
     |> Agent_sdk.Builder.with_tools tools
     |> Agent_sdk.Builder.with_hooks hooks
     |> Agent_sdk.Builder.with_guardrails guardrails
-    |> Agent_sdk.Builder.with_tool_retry_policy default_internal_tool_retry_policy
     |> Agent_sdk.Builder.with_raw_trace raw_trace
     |> Agent_sdk.Builder.with_periodic_callbacks heartbeat_callbacks
     |> Agent_sdk.Builder.with_description (description_of_meta meta)
@@ -324,11 +326,7 @@ let make_tool_tracking_hooks ?gate_config ?context () =
                | None -> Agent_sdk.Hooks.Continue
                | Some (gate : Eval_gate.gate_config) ->
                  (* Gate 0: Deny list *)
-                 if
-                   Tool_access_policy.selector_matches_name
-                     (Tool_access_policy.Names gate.denied_tools)
-                     tool_name
-                 then (
+                 if List.mem tool_name gate.denied_tools then (
                    Log.LocalWorker.warn "worker deny list: blocked %s" tool_name;
                    Agent_sdk.Hooks.Override
                      (render_worker_skip_reason
@@ -627,7 +625,6 @@ and resume_worker_via_oas
       ~raw_trace
       ~periodic_callbacks:heartbeat_cbs
       ~guardrails
-      ~tool_retry_policy:default_internal_tool_retry_policy
       ()
   in
   let options =
@@ -689,7 +686,21 @@ and run_existing_worker_agent
           worker_name
           (Printexc.to_string exn))
     (fun () ->
-       let result = Agent_sdk.Agent.run ~sw agent prompt in
+       let clock =
+         match Eio_context.get_clock_opt () with
+         | Some c -> Some c
+         | None ->
+           (match Process_eio.get_clock () with
+            | Ok c -> Some c
+            | Error _ -> None)
+       in
+       let result =
+         Agent_sdk.Agent.run
+           ~sw
+           ?clock
+           agent
+           prompt
+       in
        let raw_trace_run = Agent_sdk.Agent.last_raw_trace_run agent in
        let evidence_session_id =
          Worker_container.evidence_session_id_of_worker_run

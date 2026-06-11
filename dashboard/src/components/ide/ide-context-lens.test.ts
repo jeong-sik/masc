@@ -40,6 +40,16 @@ const events: ReadonlyArray<RunActivityEvent> = [
     kind: 'board.comment.created',
     tags: ['pr:15000', 'goal:goal-ide'],
     timestamp_ms: 100,
+    // Structured surface classification (#20513 replaced regex/tag/text
+    // parsing with event.context for surface counts). Drives goal/task/
+    // board/pr/git surfaces; comment stays sourced from the annotation.
+    context: {
+      goal_id: 'goal-ide',
+      task_id: 'task-42',
+      board_post_id: 'post-1',
+      pr_id: '15000',
+      git_ref: 'abc123',
+    },
   },
 ]
 
@@ -768,6 +778,17 @@ describe('IdeContextLens', () => {
           'line:27',
         ].join(' '),
         tags: ['pr:15000'],
+        // Surface classification/count reads event.context (#20513); the
+        // detail text still feeds route-link refs (eventRouteRefs retained).
+        // pr_id selects the PR surface; session/op/wr light the runtime
+        // surface. line stays in detail (context.line without file_path is
+        // filtered out by deriveIdeContextLens).
+        context: {
+          pr_id: '15000',
+          session_id: 'sess-9',
+          operation_id: 'op-9',
+          worker_run_id: 'wr-9',
+        },
       }],
       overlay: { ...overlay, cursors: new Map() },
     })
@@ -831,6 +852,14 @@ describe('IdeContextLens', () => {
         target: 'runtime scope',
         timestamp_ms: 400,
         detail: 'session:sess-9 op:op-9 wr:wr-9 line:27',
+        // Runtime surface classification reads event.context (#20513).
+        // line stays in detail (refs.line); context.line without file_path
+        // would be filtered out by deriveIdeContextLens.
+        context: {
+          session_id: 'sess-9',
+          operation_id: 'op-9',
+          worker_run_id: 'wr-9',
+        },
       }],
       overlay: { ...overlay, cursors: new Map() },
     })

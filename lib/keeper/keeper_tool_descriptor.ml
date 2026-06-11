@@ -39,6 +39,9 @@ type runtime_handler =
   | Tool_memory_write
   | Tool_library_search
   | Tool_library_read
+  | Tool_surface_read
+  | Tool_surface_post
+  | Tool_person_note_set
   | Tool_ide_annotate
   | Tool_voice_dispatch
   | Tool_task_dispatch
@@ -124,6 +127,9 @@ let runtime_handler_to_string = function
   | Tool_memory_write -> "tool_memory_write"
   | Tool_library_search -> "tool_library_search"
   | Tool_library_read -> "tool_library_read"
+  | Tool_surface_read -> "tool_surface_read"
+  | Tool_surface_post -> "tool_surface_post"
+  | Tool_person_note_set -> "tool_person_note_set"
   | Tool_ide_annotate -> "tool_ide_annotate"
   | Tool_voice_dispatch -> "tool_voice_dispatch"
   | Tool_task_dispatch -> "tool_task_dispatch"
@@ -235,7 +241,7 @@ let write_file_schema =
 let search_files_schema =
   object_schema
     ~required:[ "pattern" ]
-    [ property "pattern" "string" "Regular expression to search for."
+    [ property "pattern" "string" "Regular expression to search file contents for (ripgrep)."
     ; property
         "path"
         "string"
@@ -344,15 +350,17 @@ let translate_write_file input =
   | _ -> input
 ;;
 
+(* search_files is rg (pattern search) only. Fold -i into the pattern as a
+   (?i) prefix; pass pattern/path/glob/type through. *)
 let translate_search_files input =
   match input with
   | `Assoc fields ->
-    let out = ref [ "op", `String "rg" ] in
     let is_case_insensitive =
       match List.assoc_opt "-i" fields with
       | Some (`Bool true) -> true
       | _ -> false
     in
+    let out = ref [] in
     List.iter
       (fun (k, v) ->
          match k with
@@ -366,29 +374,15 @@ let translate_search_files input =
              else v
            in
            out := (k, v') :: !out
-         | "path" | "glob" | "type" -> out := (k, v) :: !out
-         | "op" | "-i" -> ()
+         | "-i" -> ()
          | _ -> out := (k, v) :: !out)
       fields;
     `Assoc (List.rev !out)
   | _ -> input
 ;;
 
-let search_files_op (input : Yojson.Safe.t) : string option =
-  match input with
-  | `Assoc fields ->
-    (match List.assoc_opt "op" fields with
-     | Some (`String s) -> Some (String.lowercase_ascii (String.trim s))
-     | _ -> None)
-  | _ -> None
-;;
-
-let search_files_readonly_of_input input =
-  match search_files_op input with
-  | Some op when List.mem op Keeper_workspace_op.valid_strings -> Some true
-  | Some _ -> None
-  | None -> None
-;;
+(* search_files is now rg (pattern search) only — always read-only. *)
+let search_files_readonly_of_input _input = Some true
 
 let descriptor_with_public_aliases
       ~public_aliases
@@ -487,9 +481,10 @@ let public_descriptors =
       ~public_aliases:[ "Search" ]
       ~internal_name:"tool_search_files"
       ~description:
-        "Inspect the project workspace through structured read-only operations \
-         including ripgrep search, file reads, directory listings, and scoped \
-         git status/log/diff views."
+        "Search file contents with ripgrep: provide a regex `pattern` (and \
+         optionally path/glob/type). To list a directory, read a file, or run \
+         git status/log/diff, use the Execute tool (e.g. executable='ls' \
+         argv=['-la','<path>'])."
       ~input_schema:search_files_schema
       ~policy:
         (policy
@@ -510,8 +505,9 @@ let public_descriptors =
       ~internal_name:"tool_read_file"
       ~description:
         "Read one existing file from the keeper sandbox or an allowed path with no \
-         implicit cwd. Pass cwd explicitly for repo-relative reads. Read never \
-         inherits Execute cwd."
+         implicit cwd. Read targets a single FILE; to list a directory use the \
+         Execute tool with ls. Pass cwd explicitly for repo-relative reads. Read \
+         never inherits Execute cwd."
       ~input_schema:read_file_schema
       ~policy:
         (policy
@@ -628,6 +624,13 @@ let passthrough_object_schema =
     [ "type", `String "object"; "additionalProperties", `Bool true ]
 ;;
 
+let find_taskboard_schema_opt name =
+  List.find_opt (fun (s : Masc_domain.tool_schema) -> String.equal s.name name)
+    Tool_shard_types.taskboard_tools
+  |> Option.map (fun (s : Masc_domain.tool_schema) -> s.input_schema)
+;;
+
+
 let tool_search_schema =
   object_schema
     ~required:[ "query" ]
@@ -655,6 +658,58 @@ let library_read_schema =
         "topic"
         "string"
         "Exact document topic name from search results or known context."
+    ]
+;;
+
+let surface_read_schema =
+  object_schema
+    ~required:[ "surface" ]
+    [ property
+        "surface"
+        "string"
+        "Lane label exactly as shown in Connected Surfaces or chat history \
+         source: 'dashboard', 'discord', 'slack', or another connector's \
+         channel label. Rows written before source labelling carry no label \
+         and are not returned."
+    ; property
+        "limit"
+        "integer"
+        "Maximum lane messages to return (default 20, max 100). The \
+         participant roster always covers the whole loaded lane."
+    ]
+;;
+
+let surface_post_schema =
+  object_schema
+    ~required:[ "surface"; "content" ]
+    [ property
+        "surface"
+        "string"
+        "Lane to post to: 'dashboard' or 'discord'. Posting to a surface \
+         this keeper is not bound to is an error, not a no-op."
+    ; property "content" "string" "Message text to deliver on the lane."
+    ; property
+        "channel_id"
+        "string"
+        "Discord channel snowflake. Required only when more than one \
+         channel is bound to this keeper; must be one of the bound \
+         channels."
+    ]
+;;
+
+let person_note_set_schema =
+  object_schema
+    ~required:[ "speaker_id"; "note" ]
+    [ property
+        "speaker_id"
+        "string"
+        "Stable speaker id from the roster (Discord snowflake). Notes \
+         attach to ids, never to display names."
+    ; property
+        "note"
+        "string"
+        "What to remember about this person. Blank clears the note \
+         (tombstone)."
     ]
 ;;
 
@@ -715,11 +770,16 @@ let cluster_descriptor ~id ~name ~description ~handler ~readonly
     then read_only_in_process_policy ~inline_safe ~maintenance_only ()
     else write_in_process_policy ~inline_safe ~maintenance_only ()
   in
+  let input_schema =
+    match find_taskboard_schema_opt name with
+    | Some schema -> schema
+    | None -> passthrough_object_schema
+  in
   in_process_descriptor
     ~id
     ~name
     ~description
-    ~input_schema:passthrough_object_schema
+    ~input_schema
     ~policy
     ~handler
 ;;
@@ -984,6 +1044,39 @@ let internal_descriptors : t list =
       ~input_schema:library_read_schema
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_library_read
+    (* ── connector surfaces (RFC-0223 P3) ─────────────────────── *)
+  ; in_process_descriptor
+      ~id:"keeper.surface.read"
+      ~name:"keeper_surface_read"
+      ~description:
+        "Read recent conversation from one connected surface lane (dashboard, \
+         discord, slack, or another connector label) with speaker identity \
+         and a derived participant roster. Use after Connected Surfaces \
+         shows a lane you want context from."
+      ~input_schema:surface_read_schema
+      ~policy:(read_only_in_process_policy ())
+      ~handler:Tool_surface_read
+  ; in_process_descriptor
+      ~id:"keeper.surface.post"
+      ~name:"keeper_surface_post"
+      ~description:
+        "Post a message to one connected surface lane: 'dashboard' (appears \
+         in the operator's chat transcript) or 'discord' (sends to the bound \
+         channel). Posting to an unbound surface is an error."
+      ~input_schema:surface_post_schema
+      ~policy:(write_in_process_policy ())
+      ~handler:Tool_surface_post
+  ; in_process_descriptor
+      ~id:"keeper.person.note_set"
+      ~name:"keeper_person_note_set"
+      ~description:
+        "Remember (or clear) a note about a person met on a connected \
+         surface, keyed by their roster speaker_id. Deliberate memory: \
+         the note survives after their chat rows age out of the log \
+         window and shows up on the keeper_surface_read roster."
+      ~input_schema:person_note_set_schema
+      ~policy:(write_in_process_policy ())
+      ~handler:Tool_person_note_set
     (* ── IDE (RFC-0179 PR-3) ──────────────────────────────────── *)
   ; in_process_descriptor
       ~id:"keeper.ide.annotate"
@@ -1061,7 +1154,7 @@ let internal_descriptors : t list =
     (* ── board cluster (RFC-0179 PR-3, 14 tools) ──────────────── *)
   ; board_descriptor
       "keeper_board_comment"
-      "Comment on one board post. Requires an exact post_id from board activity, keeper_board_list, keeper_board_search, or keeper_board_get."
+      "Comment on one board post. Requires an exact post_id from board activity, keeper_board_list, keeper_board_search, or keeper_board_post_get."
       ~readonly:false
   ; board_descriptor
       "keeper_board_comment_vote"
@@ -1076,7 +1169,7 @@ let internal_descriptors : t list =
       "Submit a board entry for curation."
       ~readonly:false
   ; board_descriptor
-      "keeper_board_get"
+      "keeper_board_post_get"
       "Read one board post by exact post_id. Use keeper_board_list or keeper_board_search first when no post_id is visible; do not call with empty arguments."
       ~readonly:true
   ; board_descriptor
@@ -1117,15 +1210,13 @@ let internal_descriptors : t list =
       ~readonly:false
   ; board_descriptor
       "keeper_board_vote"
-      "Vote on one board post. Requires an exact post_id from board activity, keeper_board_list, keeper_board_search, or keeper_board_get."
+      "Vote on one board post. Requires an exact post_id from board activity, keeper_board_list, keeper_board_search, or keeper_board_post_get."
       ~readonly:false
   (* ── RFC-0182 §3.1 — masc_task_* cluster (7 entries) ─────────── *)
   ; masc_task_descriptor "add" "masc_add_task"
       "Add a task to the workspace plan." ~readonly:false
   ; masc_task_descriptor "batch_add" "masc_batch_add_tasks"
       "Add multiple tasks in a single call." ~readonly:false
-  ; masc_task_descriptor "claim_next" "masc_claim_next"
-      "Claim the next available task." ~readonly:false
   ; masc_task_descriptor "task_history" "masc_task_history"
       "Read history events for a task." ~readonly:true
   ; masc_task_descriptor "tasks" "masc_tasks"
@@ -1152,7 +1243,7 @@ let internal_descriptors : t list =
       "Append a workspace note." ~readonly:false
   ; masc_plan_descriptor "deliver" "masc_deliver"
       "Record a deliverable against the plan." ~readonly:false
-  (* ── RFC-0182 §3.1 — masc_run_* cluster (6 entries) ──────────── *)
+  (* ── RFC-0182 §3.1 — masc_run_* cluster (4 entries) ──────────── *)
   ; masc_run_descriptor "masc_run_init"
       "Initialise a workspace run." ~readonly:false
   ; masc_run_descriptor "masc_run_list"
@@ -1160,21 +1251,15 @@ let internal_descriptors : t list =
   ; masc_run_descriptor "masc_run_get"
       "Read a single run by id, creating an empty run record when missing."
       ~readonly:false
-  ; masc_run_descriptor "masc_run_log"
-      "Read or append run log events." ~readonly:false
   ; masc_run_descriptor "masc_run_plan"
       "Read the run plan." ~readonly:true
-  ; masc_run_descriptor "masc_run_deliverable"
-      "Read or attach a run deliverable." ~readonly:false
-  (* ── RFC-0182 §3.1 — masc_agent_* cluster (5 entries) ────────── *)
-  ; masc_agent_descriptor "agents" "masc_agents"
-      "List registered agents." ~readonly:true
+  (* ── RFC-0182 §3.1 — masc_agent_* cluster (3 entries; masc_agents +
+       masc_agent_update removed 2026-06-09 with the dead agent-status
+       surface) ────────── *)
   ; masc_agent_descriptor "card" "masc_agent_card"
       "Read an agent card." ~readonly:true
   ; masc_agent_descriptor "fitness" "masc_agent_fitness"
       "Read agent fitness metrics." ~readonly:true
-  ; masc_agent_descriptor "update" "masc_agent_update"
-      "Update agent registration metadata." ~readonly:false
   ; masc_agent_descriptor "get_metrics" "masc_get_metrics"
       "Read aggregated agent metrics." ~readonly:true
   (* ── RFC-0182 §3.1 — masc_workspace_* cluster (8 entries) ────────── *)

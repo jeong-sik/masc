@@ -20,39 +20,6 @@ let clear_reclaim_decision (task : Masc_domain.task) =
     { task with reclaim_policy = None; do_not_reclaim_reason = None }
 ;;
 
-(** Preempt Claimed-only tasks owned by [agent_name] back to Todo.
-    InProgress/AwaitingVerification tasks are left untouched. *)
-let auto_release_claimed_for_agent config ~agent_name ~exclude_task_id (backlog : Masc_domain.backlog)
-    =
-  let claimed_by_me =
-    backlog.tasks |> List.filter_map (fun (t : task) ->
-      match t.task_status with
-      | Claimed { assignee; _ }
-        when Workspace_task_classify.same_task_actor config assignee agent_name
-             && t.id <> exclude_task_id -> Some t.id
-      | Todo | Claimed _ | InProgress _
-      | AwaitingVerification _ | Done _ | Cancelled _ -> None)
-  in
-  match claimed_by_me with
-  | [] -> (backlog, [])
-  | ids ->
-    let new_tasks = List.map (fun (t : task) ->
-      if List.mem t.id ids then { t with task_status = Todo } else t) backlog.tasks in
-    ({ backlog with tasks = new_tasks }, ids)
-
-(* fire-and-forget: broadcast auto-release for operator visibility *)
-let broadcast_auto_releases config ~agent_name ~claimed_task_id auto_released_ids =
-  List.iter (fun released_id ->
-      ignore (broadcast config ~from_agent:agent_name
-        ~content:(Printf.sprintf "Auto-released %s (claimed, not started) to claim %s"
-           released_id claimed_task_id));
-      log_event config (`Assoc
-        [ ("type", `String "task_auto_release"); ("agent", `String agent_name)
-        ; ("task", `String released_id); ("reason", `String "preempted_for_claim")
-        ; ("ts", `String (now_iso ())) ]))
-    auto_released_ids
-;;
-
 let active_owned_task_ids_for_agent config ~agent_name (backlog : Masc_domain.backlog)
   =
   backlog.tasks
@@ -141,9 +108,6 @@ let claim_task_r config ~agent_name ~task_id ()
                   (Printf.sprintf "Task %s is blocked from re-claim: %s" task_id r)))
            | Claim_available _ | Claim_unavailable (Claim_block_not_todo _) -> Ok ()
          in
-         let (backlog, auto_released_ids) =
-           auto_release_claimed_for_agent config ~agent_name ~exclude_task_id:task_id backlog
-         in
          let* () =
            match task.task_status with
            | Todo ->
@@ -171,26 +135,29 @@ let claim_task_r config ~agent_name ~task_id ()
              (fun (state, acc) (t : task) ->
                 if t.id = task_id
                 then (
-                  match t.task_status with
-                  | Todo ->
+                  (* RFC-0220 §3.5: one claim decision, shared with the
+                     auto-claim path ([claim_next_r]). [resolve_claim] owns the
+                     self-check (normalized via [same_task_actor]) and, for a
+                     cross-agent verification claim, binds the verifier into the
+                     [AwaitingVerification] status — no longer a status-
+                     preserving no-op that deferred verifier identity to a
+                     separate store (#19314). *)
+                  match
+                    Workspace_task_lifecycle.resolve_claim
+                      ~same_actor:(fun a ->
+                        Workspace_task_classify.same_task_actor config a agent_name)
+                      ~agent_name
+                      ~now:(now_iso ())
+                      t.task_status
+                  with
+                  | Workspace_task_lifecycle.Worker_claim status ->
                     let t = clear_reclaim_decision t in
-                    let t' =
-                      { t with
-                        task_status =
-                          Claimed { assignee = agent_name; claimed_at = now_iso () }
-                      }
-                    in
-                    `Claimed_ok, t' :: acc
-                  | Claimed { assignee; _ }
-                  | InProgress { assignee; _ }
-                  | AwaitingVerification { assignee; _ }
-                    when assignee = agent_name -> `Already_mine, t :: acc
-                  | Claimed { assignee; _ }
-                  | InProgress { assignee; _ }
-                  | AwaitingVerification { assignee; _ }
-                  | Done { assignee; _ }
-                  | Cancelled { cancelled_by = assignee; _ } ->
-                    `Claimed_by assignee, t :: acc)
+                    `Claimed_ok, { t with task_status = status } :: acc
+                  | Workspace_task_lifecycle.Verifier_claim status ->
+                    `Claimed_verification, { t with task_status = status } :: acc
+                  | Workspace_task_lifecycle.Self_owned -> `Already_mine, t :: acc
+                  | Workspace_task_lifecycle.Held_by_other holder ->
+                    `Claimed_by holder, t :: acc)
                 else state, t :: acc)
              (`Not_found, [])
              backlog.tasks
@@ -205,14 +172,76 @@ let claim_task_r config ~agent_name ~task_id ()
                { message = Printf.sprintf "Task %s is already claimed by you" task_id
                ; auto_released_task_ids = []
                })
-         | `Claimed_ok ->
+         | `Claimed_verification ->
+           (* Issue #19314 / RFC-0220 §3.5: cross-agent verification dispatch.
+              The task stays [AwaitingVerification]; [resolve_claim] has bound
+              this agent as the verifier in [phase] (Verifier_assigned). Persist
+              that status and point the agent at the task. The verifier binding
+              now lives in the task FSM (single authority via [phase]), so the
+              former defer-to-dispatch-loop workaround is gone — no cross-lib
+              call into [Verification.assign_verifier] is needed. *)
+           let claimed_task =
+             List.find (fun (t : Masc_domain.task) -> String.equal t.id task_id) new_tasks
+           in
            let new_backlog =
              { tasks = new_tasks
              ; last_updated = now_iso ()
              ; version = backlog.version + 1
              }
            in
-           write_backlog config new_backlog;
+           write_backlog
+             ~after_commit:(fun () ->
+               Task_cache_invariant.clear_stale_agent_task config
+                 ~agent_name ~task_id ~status:claimed_task.task_status
+                 ~module_name:"claim_task_r.verification")
+             config new_backlog;
+           Workspace_task_classify.update_local_agent_state config ~agent_name (fun agent ->
+             { agent with status = Busy; current_task = Some task_id });
+           let _ =
+             broadcast
+               config
+               ~from_agent:agent_name
+               ~content:(Printf.sprintf "Assigned as verifier for %s" task_id)
+           in
+           Workspace_task_classify.emit_task_activity
+             config
+             ~agent_name
+             ~task_id
+             ~kind:(Event_kind.Task.to_string Event_kind.Task.Claimed)
+             ~payload:(`Assoc
+               [ "task_id", `String task_id
+               ; "verification_dispatch", `Bool true
+               ]);
+           log_event
+             config
+             (`Assoc
+               [ "type", `String "task_claim_verification"
+               ; "agent", `String agent_name
+               ; "actor_kind", `String (Workspace_task_classify.task_actor_kind agent_name)
+               ; "task", `String task_id
+               ; "ts", `String (now_iso ())
+               ]);
+           Ok
+             (`New_claim
+               { message = Printf.sprintf "%s assigned as verifier for %s" agent_name task_id
+               ; auto_released_task_ids = []
+               })
+         | `Claimed_ok ->
+           let claimed_task =
+             List.find (fun (t : Masc_domain.task) -> String.equal t.id task_id) new_tasks
+           in
+           let new_backlog =
+             { tasks = new_tasks
+             ; last_updated = now_iso ()
+             ; version = backlog.version + 1
+             }
+           in
+           write_backlog
+             ~after_commit:(fun () ->
+               Task_cache_invariant.clear_stale_agent_task config
+                 ~agent_name ~task_id ~status:claimed_task.task_status
+                 ~module_name:"claim_task_r.claimed_ok")
+             config new_backlog;
            Workspace_task_classify.update_local_agent_state config ~agent_name (fun agent ->
              { agent with status = Busy; current_task = Some task_id });
            let _ =
@@ -247,18 +276,10 @@ let claim_task_r config ~agent_name ~task_id ()
                   ~to_status:
                     (Masc_domain.Claimed { assignee = agent_name; claimed_at = now_iso () })
                   ());
-           (* Broadcast auto-released tasks (Claimed-only, preempted for this claim) *)
-           broadcast_auto_releases config ~agent_name ~claimed_task_id:task_id auto_released_ids;
-           let claim_msg =
-             match auto_released_ids with
-             | [] -> Printf.sprintf "%s claimed %s" agent_name task_id
-             | ids ->
-               Printf.sprintf "%s claimed %s (auto-released %s)"
-                 agent_name task_id (String.concat ", " ids)
-           in
+           let claim_msg = Printf.sprintf "%s claimed %s" agent_name task_id in
            Ok
              (`New_claim
-               { message = claim_msg; auto_released_task_ids = auto_released_ids })
+               { message = claim_msg; auto_released_task_ids = [] })
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | e -> Error (Masc_domain.System (Masc_domain.System_error.IoError (Printexc.to_string e)))))

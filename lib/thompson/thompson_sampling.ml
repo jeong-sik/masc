@@ -425,8 +425,7 @@ let record_action ~agent_name ~action =
       post-verifier false positives exist.
 
     These should be calibrated against actual agent performance data once
-    Phase 0 instrumentation (RFC-0001) collects baseline metrics.
-    TODO(RFC-0001): Register in Runtime_params for runtime tuning. *)
+    Phase 0 instrumentation (RFC-0001) collects baseline metrics. *)
 let quality_pass_alpha_boost = 0.3
 let quality_warn_beta_nudge  = 0.1
 let quality_fail_beta_penalty = 0.5

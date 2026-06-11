@@ -92,7 +92,7 @@ let test_of_agent_session_bound () =
   assert (e.event_type = Run_started);
   assert (e.thread_id = "default");
   assert (e.run_id = Some "agent_llm_a");
-  assert (e.custom_name = Some "AGENT_JOINED")
+  assert (e.custom_name = Some "AGENT_SESSION_BOUND")
 
 let test_of_agent_unbound () =
   let e = of_agent_unbound ~agent_name:"agent_llm_a" in

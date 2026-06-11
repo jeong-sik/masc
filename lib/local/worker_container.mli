@@ -205,7 +205,6 @@ val build_resume_config :
   raw_trace:Agent_sdk.Raw_trace.t ->
   ?periodic_callbacks:Agent_sdk.Agent.periodic_callback list ->
   ?guardrails:Agent_sdk.Guardrails.t ->
-  ?tool_retry_policy:Agent_sdk.Tool_retry_policy.t ->
   unit ->
   Agent_sdk.Types.agent_config * Agent_sdk.Agent.options
 (** Assembles the [(config, options)] pair consumed by

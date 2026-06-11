@@ -410,6 +410,25 @@ let attempt_tts_endpoint
                    ; "local_playback_reason", `String reason
                    ])
                endpoint)
+        | `Opened handoff_seconds ->
+          Ok
+            (append_provider_metadata
+               (`Assoc
+                   [ "status", `String "spoken"
+                   ; "agent_id", `String agent_id
+                   ; "voice", `String voice
+                   ; "audio_file", `String audio_file
+                   ; "audio_size", `Int file_size
+                   ; ( "message_preview"
+                     , `String
+                         (String.sub message 0 (min 50 (String.length message))) )
+                   ; "local_playback_status", `String "opened"
+                   ; "local_playback_reason"
+                     , `String
+                         "blocking local players failed; handed audio file to macOS open"
+                   ; "open_handoff_seconds", `Float handoff_seconds
+                   ])
+               endpoint)
         | `Played played_seconds ->
           Ok
             (append_provider_metadata
@@ -653,193 +672,6 @@ let agent_speak ~sw ~clock ~net ~agent_id ~message ?provider ?(priority = 1) () 
     if endpoints = []
     then Error "no configured TTS endpoint"
     else try_endpoints [] endpoints)
-;;
-
-type queued_agent_speak_job =
-  { job_id : string
-  ; agent_id : string
-  ; message : string
-  ; provider : string option
-  ; priority : int
-  ; submitted_at : float
-  ; sequence : int
-  }
-
-let speak_queue_mu = Stdlib.Mutex.create ()
-let speak_queue : queued_agent_speak_job list ref = ref []
-let speak_worker_running = ref false
-let speak_next_sequence = Atomic.make 0
-
-let job_precedes a b =
-  if a.priority <> b.priority
-  then a.priority > b.priority
-  else a.sequence < b.sequence
-
-let insert_speak_job job queue =
-  let rec loop acc = function
-    | [] -> List.rev (job :: acc)
-    | head :: rest when job_precedes job head ->
-      List.rev_append acc (job :: head :: rest)
-    | head :: rest -> loop (head :: acc) rest
-  in
-  loop [] queue
-
-let message_preview message =
-  String.sub message 0 (min 80 (String.length message))
-
-let dequeue_speak_job () =
-  Stdlib.Mutex.protect speak_queue_mu (fun () ->
-    match !speak_queue with
-    | [] ->
-      speak_worker_running := false;
-      None
-    | job :: rest ->
-      speak_queue := rest;
-      Some job)
-
-let queue_size () =
-  Stdlib.Mutex.protect speak_queue_mu (fun () -> List.length !speak_queue)
-
-let discard_queued_agent_speak ~agent_id =
-  let removed, remaining =
-    Stdlib.Mutex.protect speak_queue_mu (fun () ->
-      let rec loop kept removed = function
-        | [] -> removed, List.rev kept
-        | job :: rest when String.equal job.agent_id agent_id ->
-          loop kept (removed + 1) rest
-        | job :: rest -> loop (job :: kept) removed rest
-      in
-      let removed, kept = loop [] 0 !speak_queue in
-      speak_queue := kept;
-      removed, List.length kept)
-  in
-  if removed > 0
-  then
-    Log.Transport.warn
-      "voice_queue discarded queued jobs for ended session agent=%s removed=%d remaining=%d"
-      agent_id
-      removed
-      remaining;
-  removed
-
-let rec drain_agent_speak_queue ~sw ~clock ~net () =
-  match dequeue_speak_job () with
-  | None -> ()
-  | Some job ->
-    (try
-       match
-         agent_speak
-           ~sw
-           ~clock
-           ~net
-           ~agent_id:job.agent_id
-           ~message:job.message
-           ?provider:job.provider
-           ~priority:job.priority
-           ()
-       with
-       | Ok _ ->
-         Log.Transport.info
-           "voice_queue completed job=%s agent=%s remaining=%d"
-           job.job_id
-           job.agent_id
-           (queue_size ())
-       | Error err ->
-         Log.Transport.error
-           "voice_queue failed job=%s agent=%s error=%s"
-           job.job_id
-           job.agent_id
-           err
-     with
-     | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | exn ->
-       Log.Transport.error
-         "voice_queue exception job=%s agent=%s exn=%s"
-         job.job_id
-         job.agent_id
-         (Printexc.to_string exn));
-    drain_agent_speak_queue ~sw ~clock ~net ()
-
-let reset_speak_worker_running () =
-  Stdlib.Mutex.protect speak_queue_mu (fun () -> speak_worker_running := false)
-
-let run_agent_speak_queue_worker ~sw ~clock ~net () =
-  try drain_agent_speak_queue ~sw ~clock ~net () with
-  | Eio.Cancel.Cancelled _ as exn ->
-    reset_speak_worker_running ();
-    raise exn
-  | exn ->
-    reset_speak_worker_running ();
-    raise exn
-
-let enqueue_agent_speak
-      ~sw
-      ~clock
-      ~net
-      ~agent_id
-      ~message
-      ?provider
-      ?(priority = 1)
-      ?(start_worker = true)
-      ()
-  =
-  let message = String.trim message in
-  if message = ""
-  then Error "message is required. Good: message='Hello team.'. Bad: message=''."
-  else (
-    let sequence = Atomic.fetch_and_add speak_next_sequence 1 in
-    let submitted_at = Time_compat.now () in
-    let job_id =
-      Printf.sprintf
-        "voice-%s-%d"
-        (safe_agent_id agent_id)
-        sequence
-    in
-    let job =
-      { job_id
-      ; agent_id
-      ; message
-      ; provider =
-          (provider
-           |> Option.map String.trim
-           |> function
-           | Some value when value <> "" -> Some value
-           | _ -> None)
-      ; priority = max 1 priority
-      ; submitted_at
-      ; sequence
-      }
-    in
-    let should_start, queue_position, queue_size =
-      Stdlib.Mutex.protect speak_queue_mu (fun () ->
-        speak_queue := insert_speak_job job !speak_queue;
-        let rec position index = function
-          | [] -> index
-          | queued :: _
-            when queued.sequence = sequence && String.equal queued.job_id job_id -> index
-          | _ :: rest -> position (index + 1) rest
-        in
-        let queue_position = position 1 !speak_queue in
-        let queue_size = List.length !speak_queue in
-        let should_start = start_worker && not !speak_worker_running in
-        if should_start then speak_worker_running := true;
-        should_start, queue_position, queue_size)
-    in
-    if should_start
-    then Eio.Fiber.fork ~sw (fun () -> run_agent_speak_queue_worker ~sw ~clock ~net ());
-    Ok
-      (`Assoc
-          [ "status", `String "queued"
-          ; "job_id", `String job_id
-          ; "agent_id", `String agent_id
-          ; "voice", `String (get_voice_for_agent agent_id)
-          ; "queue_position", `Int queue_position
-          ; "queue_size", `Int queue_size
-          ; "priority", `Int job.priority
-          ; "submitted_at", `Float submitted_at
-          ; "execution", `String "background_voice_queue"
-          ; "message_preview", `String (message_preview message)
-          ]))
 ;;
 
 (** List active voice sessions *)

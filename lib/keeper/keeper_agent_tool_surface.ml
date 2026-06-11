@@ -78,7 +78,7 @@ let tools_for_affordance = function
     [ "keeper_board_post"; "keeper_board_comment"; "masc_broadcast" ]
   | Message_sweep -> [ "masc_messages"; "masc_keeper_msg" ]
   | Task_claim ->
-    [ "keeper_task_claim"; "masc_claim_next" ]
+    [ "keeper_task_claim" ]
   | Task_audit ->
     [ "keeper_tasks_audit"; "keeper_task_force_release"; "keeper_task_force_done";
       "keeper_tasks_list"; "masc_tasks" ]
@@ -116,7 +116,7 @@ let preferred_tool_names_for_turn_affordances turn_affordances =
        | Message_sweep ->
          [ "masc_keeper_msg"; "masc_broadcast" ]
        | Task_claim ->
-         [ "keeper_task_claim"; "masc_claim_next" ]
+         [ "keeper_task_claim" ]
        | Task_audit ->
          [ "keeper_tasks_audit"; "keeper_task_force_release";
            "keeper_task_force_done" ]
@@ -177,7 +177,7 @@ let keeper_selection_bm25_prefilter_n = 30
    Execute/Grep rows. *)
 let tool_search_alias_entries =
   [ "keeper_board_post", "게시판 글 작성 올리기 포스트"
-  ; "keeper_board_get", "게시판 글 상세 단건 본문 댓글 post_id 읽기 보기"
+  ; "keeper_board_post_get", "게시판 글 상세 단건 본문 댓글 post_id 읽기 보기"
   ; "keeper_board_list", "게시판 목록 최근글 post_id 찾기 조회 나열"
   ; "keeper_board_comment", "게시판 댓글 답글 코멘트"
   ; "keeper_board_vote", "게시판 투표 추천 반대"
@@ -198,6 +198,9 @@ let tool_search_alias_entries =
   ; "keeper_memory_search", "기억 검색 대화 이전 메시지"
   ; "keeper_library_search", "라이브러리 지식 문서 검색"
   ; "keeper_library_read", "라이브러리 문서 읽기 지식"
+  ; "keeper_surface_read", "커넥터 대화 읽기 디스코드 채널 화자 명부 서피스"
+  ; "keeper_surface_post", "커넥터 발화 보내기 디스코드 채널 메시지 전송 서피스"
+  ; "keeper_person_note_set", "사람 기억 노트 저장 화자 메모 명부 로스터"
   ; "keeper_time_now", "시간 현재 타임스탬프"
   ; "keeper_context_status", "컨텍스트 상태 토큰 사용량"
   ; "keeper_tools_list", "도구 목록 기능 할수있는것 능력"
@@ -219,8 +222,6 @@ let tool_search_alias_entries =
   ; "masc_plan_init", "계획 플랜 초기화 생성"
   ; "masc_plan_set_task", "계획 태스크 설정 할당"
   ; "masc_plan_get_task", "계획 태스크 조회"
-  ; "masc_agents", "에이전트 목록 현황 누구"
-  ; "masc_agent_update", "에이전트 업데이트 상태변경"
   ; "masc_keeper_list", "키퍼 목록 현황"
   ; "masc_keeper_msg", "키퍼 메시지 전달 대화"
   ; "masc_keeper_status", "키퍼 상태 확인"
@@ -232,7 +233,7 @@ let tool_search_alias_entries =
   ; "masc_agent_fitness", "에이전트 평가 점수 피트니스"
   ; "masc_web_search", "웹 검색 인터넷 온라인 구글"
   ; "masc_web_fetch", "웹 페이지 가져오기 읽기 URL 페치"
-  ; "masc_claim_next", "다음태스크 가져오기 할당"
+
   ]
 
 let tool_search_aliases name =

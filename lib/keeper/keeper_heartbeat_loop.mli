@@ -19,11 +19,8 @@ val repair_identity_drift_for_keepalive :
 val sync_keeper_presence :
   ctx:'a context ->
   meta_current:keeper_meta ->
-  t_presence_start:float ->
   consecutive_failures:int ref ->
   last_successful_heartbeat_ts:float ref ->
-  work_as_hb:(unit -> bool) ->
-  max_silence:(unit -> float) ->
   keeper_meta
 
 val collect_keepalive_board_events :
@@ -74,8 +71,7 @@ type keepalive_scheduling_decision = {
 val decide_keepalive_scheduling :
   ?runtime_id_of_meta:(keeper_meta -> string) ->
   ?runtime_resilience_of_name:(string -> string option) ->
-  ?runtime_status_of_name:
-    (runtime_id:string -> Keeper_health_probe.health_status) ->
+  ?reactive_wake:bool ->
   stop:bool Atomic.t ->
   meta:keeper_meta ->
   Keeper_world_observation.world_observation ->
@@ -92,18 +88,13 @@ val provider_timeout_policy_decision :
     This heartbeat-loop path is reached after the keeper turn returned, so
     timeout evidence is not liveness loss by itself. *)
 
-val persist_message_cursor_updates :
-  config:Workspace.config -> keeper_meta -> (string * int) list -> keeper_meta
-(** Persist workspace-message cursor updates immediately after observation.
-    This is intentionally exposed for the regression that proves a failed
-    turn cannot replay the same scoped messages forever. *)
-
 val run_keepalive_unified_turn :
   ctx:'a context ->
   meta_after_triage:keeper_meta ->
   pending_board_events:Keeper_world_observation.pending_board_event list ->
   stop:bool Atomic.t ->
   proactive_warmup_elapsed:bool ->
+  reactive_wake:bool ->
   shared_context:Agent_sdk.Context.t ->
   keeper_meta
 
@@ -169,6 +160,7 @@ val run_smart_heartbeat_gate :
   smart_hb_config:Keeper_heartbeat_smart.config ->
   last_successful_heartbeat_ts:float ref ->
   last_heartbeat_cycle_ts:float ref ->
+  wake_source:Keeper_keepalive_signal.sleep_outcome ref ->
   bool
 
 val maybe_write_heartbeat_snapshot :

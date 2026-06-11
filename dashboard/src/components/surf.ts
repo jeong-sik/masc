@@ -7,15 +7,15 @@
 // Why a new atom: dashboard duplicates this pattern across the
 // codebase with drifting hardcoded values:
 //
-//   keeper-chat-panel.ts  rgba(239,68,68,0.24) + rgba(127,29,29,0.24)
+//   keeper-shared.ts (ex keeper-chat-panel)  rgba(239,68,68,0.24) + rgba(127,29,29,0.24)
 //                          — SPEC surf-err reconstructed from rgba
 //                          literals.
 //   auth-status RemoteWarningBanner  bg-[var(--warn-10)] +
 //                          border-[var(--warn-20)] —
 //                          SPEC surf-warn reconstructed from token
 //                          subset.
-//   handoff-timeline / excuse-patterns / harness-health / keeper-tool-
-//   telemetry  text-only `text-[var(--bad-light)]` — *no surface*.
+//   excuse-patterns / harness-health / keeper-tool-telemetry
+//   text-only `text-[var(--bad-light)]` — *no surface*.
 //
 // Surf consolidates these into a single SSOT atom. The SPEC calls for
 // kind-specific tokens (--{kind}-soft / --{kind}-border / --{kind}-fg)

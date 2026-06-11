@@ -3,7 +3,6 @@ status: Draft
 last_verified: 2026-05-08
 code_refs:
   - lib/keeper/keeper_runtime.ml
-  - lib/keeper/keeper_health_probe.ml
   - lib/keeper/keeper_supervisor.ml
   - lib/keeper/keeper_unified_turn.ml
 ---

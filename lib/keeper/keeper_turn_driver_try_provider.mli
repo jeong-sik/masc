@@ -11,9 +11,9 @@ type try_provider_ctx =
   ; system_prompt : string
   ; tools : Agent_sdk.Tool.t list
   ; initial_messages : Agent_sdk.Types.message list
-  ; max_turns : int
   ; max_idle_turns : int
   ; stream_idle_timeout_s : float option
+  ; body_timeout_s : float option
   ; temperature : float
   ; max_tokens : int
   ; max_input_tokens : int option
@@ -21,8 +21,8 @@ type try_provider_ctx =
   ; guardrails : Agent_sdk.Guardrails.t option
   ; hooks : Agent_sdk.Hooks.hooks option
   ; context_reducer : Agent_sdk.Context_reducer.t option
-  ; tool_retry_policy : Agent_sdk.Tool_retry_policy.t option
   ; raw_trace : Agent_sdk.Raw_trace.t option
+  ; trace_link : (string * string) option
   ; transport_resolved : Masc_grpc_transport.t
   ; runtime_mcp_policy : Llm_provider.Llm_transport.runtime_mcp_policy option
   ; allowed_paths : string list
@@ -35,6 +35,7 @@ type try_provider_ctx =
   ; context_injector : Agent_sdk.Hooks.context_injector option
   ; context : Agent_sdk.Context.t option
   ; enable_thinking : bool option
+  ; preserve_thinking : bool option
   ; approval : Agent_sdk.Hooks.approval_callback option
   ; exit_condition : (int -> bool) option
   ; exit_condition_result : (int -> Runtime_agent.stop_reason * string option) option
@@ -46,6 +47,8 @@ type try_provider_ctx =
   ; on_yield : (unit -> unit) option
   ; on_resume : (unit -> unit) option
   ; agent_ref : Agent_sdk.Agent.t option ref option
+  ; on_runtime_observation :
+      (Runtime_observation.runtime_observation -> unit) option
   ; event_bus : Agent_sdk.Event_bus.t option
   ; runtime_manifest_context : Keeper_runtime_manifest.turn_context option
   ; runtime_manifest_append : (Keeper_runtime_manifest.t -> unit) option

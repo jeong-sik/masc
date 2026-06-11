@@ -83,13 +83,6 @@ val dedupe_tool_names : string list -> string list
     Must be called once during server initialization. *)
 val inject_masc_schemas : Masc_domain.tool_schema list -> unit
 
-(** Load tool group definitions from [config/tool_policy.toml].
-    Must be called once during server initialization.
-    Raises [Failure] if the config file is missing or malformed.
-    Call [inject_masc_schemas] before the first resolution so injected
-    [masc_*] schemas can join the active keeper surface. *)
-val init_policy_config : base_path:string -> (unit, string) result
-
 (** Classification of a keeper tool result payload for circuit-breaker
     bookkeeping.
 

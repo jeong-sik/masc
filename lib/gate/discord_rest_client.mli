@@ -1,6 +1,7 @@
 (** Discord_rest_client — outbound Discord REST API client.
 
-    Single function: post a message to a channel. Threads, DMs, and
+    Primary functions: post a message to a channel and trigger the
+    channel typing indicator. Threads, DMs, and
     guild text channels are all addressed by the same snowflake
     [channel_id], so no per-surface dispatch is needed.
 
@@ -10,6 +11,10 @@
 
     See: docs/rfc/RFC-0203-discord-builtin-gateway.md §Modules,
          lib/masc_http_client/masc_http_client.mli *)
+
+val message_content_limit : int
+(** Discord text-message content limit, in Unicode scalar units.
+    Messages longer than this must be split into multiple payloads. *)
 
 (** Typed error from Discord REST. Closed sum — anything Discord
     returns that does not map to one of these becomes [Other]
@@ -34,13 +39,28 @@ val send_message :
   token:string ->
   channel_id:string ->
   content:string ->
+  ?reply_to_message_id:string ->
+  unit ->
   (string, error) result
-(** [send_message ~token ~channel_id ~content] posts to
-    [POST /api/v10/channels/{channel_id}/messages] with body
-    [{"content": <content>}]. Returns the created message id on [Ok].
+(** [send_message ~token ~channel_id ~content ?reply_to_message_id ()]
+    posts to [POST /api/v10/channels/{channel_id}/messages].
+    When [reply_to_message_id] is provided, the message is sent as
+    a reply (Discord threads the conversation). Returns the created
+    message id on [Ok].
 
-    Works for guild text channels, DM channels (use the snowflake
-    Discord returns from [POST /users/@me/channels]), and threads.
+    Works for guild text channels, DM channels, and threads.
+
+    @raise nothing — failures are surfaced as typed {!error}. *)
+
+val trigger_typing :
+  token:string ->
+  channel_id:string ->
+  unit ->
+  (unit, error) result
+(** [trigger_typing ~token ~channel_id ()] posts to
+    [POST /api/v10/channels/{channel_id}/typing]. Discord expires the
+    typing indicator after 10 seconds, so callers handling long-running
+    work should refresh it periodically until the final message is sent.
 
     @raise nothing — failures are surfaced as typed {!error}. *)
 
@@ -55,10 +75,22 @@ val build_request :
   token:string ->
   channel_id:string ->
   content:string ->
+  ?reply_to_message_id:string ->
+  unit ->
   string * (string * string) list * string
-(** [(url, headers, body) = build_request ~token ~channel_id ~content].
-    Headers include Authorization (Bot scheme), Content-Type, and a
-    Discord-required User-Agent. *)
+(** [(url, headers, body) = build_request ~token ~channel_id ~content
+    ?reply_to_message_id ()].  Headers include Authorization (Bot
+    scheme), Content-Type, and a Discord-required User-Agent.  When
+    [reply_to_message_id] is provided, the body includes a
+    [message_reference] field so Discord threads the reply. *)
+
+val build_typing_request :
+  token:string ->
+  channel_id:string ->
+  unit ->
+  string * (string * string) list * string
+(** [(url, headers, body) = build_typing_request ~token ~channel_id ()].
+    The body is empty; headers include Authorization and User-Agent. *)
 
 val parse_response :
   status:int ->
@@ -69,3 +101,12 @@ val parse_response :
     - 2xx with body shape mismatch                 → [Error (Other _)]
     - non-2xx with Discord error envelope          → [Error (Discord_api _)]
     - non-2xx without that envelope                → [Error (Http_status _)] *)
+
+val parse_empty_response :
+  status:int ->
+  body:string ->
+  (unit, error) result
+(** Classifies a Discord HTTP response for empty-success endpoints:
+    - 2xx → [Ok ()]
+    - non-2xx with Discord error envelope → [Error (Discord_api _)]
+    - non-2xx without that envelope → [Error (Http_status _)] *)

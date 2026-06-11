@@ -30,10 +30,16 @@ type gateway_event = Discord_gateway_state.dispatched_event =
       }
   | Message_create of
       { channel_id : string
+      ; guild_id : string option
       ; message_id : string
       ; author_id : string
+      ; author_name : string option
       ; content : string
       ; mentions_bot : bool
+      ; explicit_mentions_bot : bool
+      ; message_reference_channel_id : string option
+      ; message_reference_message_id : string option
+      ; referenced_message_author_id : string option
       }
   | Reaction_add of
       { channel_id : string
@@ -59,11 +65,17 @@ val run :
   intents:intent list ->
   trigger_policy:trigger_policy ->
   on_event:(gateway_event -> unit) ->
+  on_ambient:(gateway_event -> unit) ->
   unit ->
   unit
 (** Connect to Discord Gateway, identify with [intents], dispatch
     events that pass [trigger_policy] to [on_event]. Blocks until
     [sw] is closed.
+
+    [on_ambient] receives [Message_create] events that fail
+    [trigger_policy] but are not the bot's own echo (RFC-0226):
+    record-only delivery — the handler persists the line to the bound
+    keeper's lane history and must not start a turn.
 
     Internally:
     1. Create {!Discord_gateway_state.t} with [trigger_policy].
@@ -74,3 +86,11 @@ val run :
     4. On [Close_wss] effect: tear down, reschedule per backoff.
 
     @raise Failure until Phase 1.2 ships the implementation. *)
+
+(** {1 Connection state (RFC-0223 P2)} *)
+
+val connection_state : unit -> Discord_gateway_state.connection_state
+(** Last connection state published by the {!run} loop's state machine.
+    [Disconnected] until [run] has started. One gateway per process
+    (single bot token); written only by [run], safe to read from any
+    fiber. Feeds connector presence ([Channel_gate_discord_state]). *)

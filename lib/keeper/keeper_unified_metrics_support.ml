@@ -249,7 +249,7 @@ let record_usage_trust ~keeper_name ~(trust : usage_trust) =
   | Usage_missing | Usage_trusted -> ()
 
 let record_keeper_total_cost_usd ~keeper_name ~total_cost_usd =
-  let labels = [ ("keeper_name", keeper_name) ] in
+  let labels = [ ("keeper", keeper_name) ] in
   Otel_metric_store.register_gauge
     ~name:Keeper_metrics.(to_string TotalCostUsd)
     ~help:keeper_total_cost_usd_help
@@ -263,7 +263,7 @@ let record_keeper_total_cost_usd ~keeper_name ~total_cost_usd =
 let record_keeper_idle_seconds ~keeper_name ~idle_seconds =
   Otel_metric_store.set_gauge
     Keeper_metrics.(to_string IdleSeconds)
-    ~labels:[ ("keeper_name", keeper_name) ]
+    ~labels:[ ("keeper", keeper_name) ]
     (float_of_int (max 0 idle_seconds))
 
 (* RFC-0182 §3.1 cycle break — codecs live in [Turn_mode_codec]. *)

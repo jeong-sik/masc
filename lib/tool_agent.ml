@@ -104,30 +104,10 @@ let agent_card_action_of_string raw =
   | "refresh" -> Some Agent_card_refresh
   | _ -> None
 
-(** Handle masc_agents *)
-let handle_agents ?(tool_name = "masc_agents") ?(start_time = 0.0) ctx args
-  : Tool_result.result
-  =
-  let limit = get_int args "limit" 20 |> max 1 |> min 50 in
-  let json = Workspace.get_agents_status ctx.config in
-  let json = match json with
-    | `List items -> `List (List.filteri (fun i _ -> i < limit) items)
-    | other -> other
-  in
-  json_ok ~tool_name ~start_time json
-
-(** Handle masc_agent_update *)
-let handle_agent_update ?(tool_name = "masc_agent_update") ?(start_time = 0.0) ctx args
-  : Tool_result.result
-  =
-  let status = get_string_opt args "status" in
-  let capabilities =
-    match Json_util.assoc_member_opt "capabilities" args with
-    | Some (`List _) -> Some (get_string_list args "capabilities")
-    | _ -> None
-  in
-  result_to_response ~tool_name ~start_time
-    (Workspace.update_agent_r ctx.config ~agent_name:ctx.agent_name ?status ?capabilities ())
+(* masc_agents / masc_agent_update handlers removed (2026-06-09): both read/
+   wrote the disk-backed .masc/agents/ registry whose producer
+   (Workspace_eio.register_agent) had zero call sites. Live agent status is
+   served by the `who` resource (Session.get_agent_statuses). *)
 
 (** Handle masc_get_metrics *)
 let handle_get_metrics ?(tool_name = "masc_get_metrics") ?(start_time = 0.0) ctx args
@@ -210,8 +190,10 @@ let min_avg_time metrics_list =
     to prioritize "finishes correctly" over "finishes fast" based on observed MASC
     usage patterns where incomplete tasks cause more rework than slow tasks.
 
-    TODO: Validate empirically — track selection outcomes vs task success rate
-    to determine if the current weighting produces better team compositions. *)
+    TODO: Validate empirically — correlate ranking snapshots with later task
+    success rate to determine if the current weighting produces better team
+    compositions.  This read path must not update Thompson alpha/beta directly; real
+    task outcome feedback flows through [Workspace_hooks.record_thompson_result_fn]. *)
 type fitness_weights = {
   w_completion : float;
   w_reliability : float;
@@ -377,9 +359,7 @@ let handle_agent_card ?(tool_name = "masc_agent_card") ?(start_time = 0.0) ctx a
                  (fun name -> `String name)
                  [
                    "masc_status";
-                   "masc_agents";
                    "masc_tasks";
-                   "masc_claim_next";
                    "masc_transition";
                    "masc_dashboard";
                    "masc_tool_help";
@@ -392,9 +372,6 @@ let handle_agent_card ?(tool_name = "masc_agent_card") ?(start_time = 0.0) ctx a
 let dispatch ctx ~name ~args : Tool_result.result option =
   let start = Time_compat.now () in
   match name with
-  | "masc_agents" -> Some (handle_agents ~tool_name:name ~start_time:start ctx args)
-  | "masc_agent_update" ->
-      Some (handle_agent_update ~tool_name:name ~start_time:start ctx args)
   | "masc_get_metrics" ->
       Some (handle_get_metrics ~tool_name:name ~start_time:start ctx args)
   | "masc_agent_fitness" ->
@@ -410,7 +387,7 @@ let schemas = Tool_schemas_agent.schemas
 (* ================================================================ *)
 
 let tool_spec_read_only =
-  [ "masc_agents"; "masc_agent_card" ]
+  [ "masc_agent_card" ]
 
 let () =
   List.iter

@@ -6,6 +6,7 @@
 
 open Server_auth
 open Server_utils
+open Masc_domain
 module Http = Http_server_eio
 
 let base_path_of_state state = state.Mcp_server.workspace_config.base_path
@@ -207,6 +208,47 @@ let build_cursor_snapshot state uri =
 let add_routes router =
   Ide_bridge.install_agent_observation_sinks ();
   router
+  |> Http.Router.get "/api/v1/agents" (fun request reqd ->
+    with_public_read
+      (fun state _req reqd ->
+         let agents = Client_registry_eio.list_active ~within_seconds:300.0 () in
+         let entries =
+           List.map
+             (fun (a : Client_identity.t) ->
+                `Assoc
+                  [ "name", `String a.Client_identity.agent_name
+                  ; "status", `String "active"
+                  ; "current_task", `Null
+                  ; "model", `Null
+                  ])
+             agents
+         in
+         Http.Response.json_value
+           ~compress:true
+           ~request
+           (json_ok (`Assoc [ "agents", `List entries ]))
+           reqd)
+      request
+      reqd)
+  |> Http.Router.get "/api/v1/status" (fun request reqd ->
+    with_public_read
+      (fun state _req reqd ->
+         let config = state.Mcp_server.workspace_config in
+         let workspace_state = Workspace.read_state config in
+         let tempo = Tempo.get_tempo config in
+         let json = `Assoc [
+           "cluster", `String (Env_config_core.cluster_name ());
+           "project", `String workspace_state.project;
+           "tempo_interval_s", `Float tempo.current_interval_s;
+           "paused", `Bool workspace_state.paused;
+         ] in
+         Http.Response.json_value
+           ~compress:true
+           ~request
+           (json_ok json)
+           reqd)
+      request
+      reqd)
   |> Http.Router.get "/api/v1/ide/annotations" (fun request reqd ->
     with_public_read
       (fun state _req reqd ->

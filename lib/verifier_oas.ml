@@ -101,7 +101,7 @@ let verify (req : Core.verification_request) : (Core.verdict, string) result =
         ~goal:prompt
         ~masc_tools:[ Core.report_verdict_schema ]
         ~dispatch
-        ~max_turns:1
+        
         ~temperature:Runtime_provider_defaults.deterministic_temperature
         ~max_tokens:200
         ~approval:Approval_callbacks.auto_approve

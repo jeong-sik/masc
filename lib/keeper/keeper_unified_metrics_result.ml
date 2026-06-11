@@ -147,22 +147,26 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
                ~has_tool_calls:visible_tool_signal_present
            else rt.proactive_rt.last_outcome);
         last_reason =
-          (if not update_proactive_rt || not is_scheduled_autonomous_cycle
-           then rt.proactive_rt.last_reason
-           else if has_substantive_tools then
-             Printf.sprintf "unified:tools=[%s]"
-               (String.concat "," tool_names)
-           else if has_validated_evidence then
-             (match validated_evidence with
-              | Some v ->
-                Printf.sprintf "unified:validated_evidence(ok=%b,file_write=%b,evidence=%d)"
-                  v.ok v.has_file_write (List.length v.evidence)
-              | None -> "unified:validated_evidence(unreachable)")
-           else if not has_text then
-             "unified:"
-             ^ proactive_cycle_outcome_to_string Proactive_silent
-            else if has_text then "unified:text_response"
-            else rt.proactive_rt.last_reason);
+          (if not update_proactive_rt then rt.proactive_rt.last_reason
+           else if is_scheduled_autonomous_cycle then
+             (if has_substantive_tools then
+                Printf.sprintf "unified:tools=[%s]"
+                  (String.concat "," tool_names)
+              else if has_validated_evidence then
+                (match validated_evidence with
+                 | Some v ->
+                   Printf.sprintf "unified:validated_evidence(ok=%b,file_write=%b,evidence=%d)"
+                     v.ok v.has_file_write (List.length v.evidence)
+                 | None -> "unified:validated_evidence(unreachable)")
+              else if not has_text then
+                "unified:"
+                ^ proactive_cycle_outcome_to_string Proactive_silent
+              else "unified:text_response")
+           else
+             (* Clear out previous error text if this was a successful reactive cycle *)
+             if String.starts_with ~prefix:"unified:error:" rt.proactive_rt.last_reason
+             then "unified:reactive_success"
+             else rt.proactive_rt.last_reason);
         last_preview =
           (if not update_proactive_rt || not is_scheduled_autonomous_cycle
            then rt.proactive_rt.last_preview

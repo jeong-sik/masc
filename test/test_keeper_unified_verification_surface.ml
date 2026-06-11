@@ -8,7 +8,6 @@ let base_observation : WO.world_observation =
     pending_mentions = [];
     pending_board_events = [];
     pending_scope_messages = [];
-    message_cursor_updates = [];
     idle_seconds = 0;
     active_goals = [];
     continuity_summary = "";
@@ -20,6 +19,7 @@ let base_observation : WO.world_observation =
     pending_verification_count = 0;
     backlog_updated_since_last_scheduled_autonomous = false;
     active_agent_count = 0;
+    connected_surfaces = [];
   }
 
 let sample_board_event : WO.pending_board_event =

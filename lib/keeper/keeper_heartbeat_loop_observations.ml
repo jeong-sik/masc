@@ -53,52 +53,25 @@ let strip_prefix ~prefix value =
   else None
 ;;
 
-let runtime_backpressure_class_reason ~reason =
-  let component = skip_reason_component reason in
-  let label =
-    match strip_prefix ~prefix:"failure_ratio_" component with
-    | Some suffix -> suffix
-    | None -> component
-  in
-  match Keeper_health_probe.runtime_pressure_class_of_label label with
-  | Some cls ->
-    Some ("class_" ^ Keeper_health_probe.runtime_pressure_class_to_string cls)
-  | None -> None
-;;
-
 let runtime_backpressure_observation_reasons ~reason =
   let category =
     if String.starts_with ~prefix:"runtime_resilience_" reason
     then "runtime_resilience"
     else "runtime_unhealthy"
   in
-  let base = [ "runtime_backpressure"; category ] in
-  let class_reasons =
-    match runtime_backpressure_class_reason ~reason with
-    | Some class_reason -> [ class_reason ]
-    | None -> []
-  in
-  base @ class_reasons @ [ "reason_" ^ skip_reason_component reason ]
+  [ "runtime_backpressure"; category; "reason_" ^ skip_reason_component reason ]
 ;;
 
 let runtime_backpressure_decision
       ~runtime_resilience
       ~should_run_turn
       ~runtime_id
-      ~runtime_status
   =
-  let resilience_reason =
-    match runtime_resilience with
-    | None -> None
-    | Some blocker -> Some ("runtime_resilience_" ^ blocker)
-  in
-  match should_run_turn, runtime_status, resilience_reason with
-  | true, Keeper_health_probe.Unhealthy reason, _ ->
-    Runtime_backpressured { runtime_id; reason }
-  | true, _, Some reason -> Runtime_backpressured { runtime_id; reason }
-  | false, _, _
-  | true, Keeper_health_probe.Unknown, None
-  | true, Keeper_health_probe.Healthy, None -> Runtime_admitted
+  match should_run_turn, runtime_resilience with
+  | true, Some blocker ->
+    Runtime_backpressured
+      { runtime_id; reason = "runtime_resilience_" ^ blocker }
+  | false, _ | true, None -> Runtime_admitted
 ;;
 
 let record_runtime_backpressure_observation ~base_path ~keeper_name ~reason =
@@ -120,31 +93,7 @@ let prior_provider_timeout_strikes ~base_path ~keeper_name =
 ;;
 
 let is_provider_timeout_error (err : Agent_sdk.Error.sdk_error) =
-  (* Enumerate every [masc_internal_error] variant + [None] so the
-     compiler flags any new constructor here. Mirrors the fix in
-     [degraded_retry_bypasses_slot_phase_guard] (PR #14716) and
-     [runtime_permanently_dead] (PR #14762); this site was missed in
-     both sweeps — the same predicate shape exists in three places
-     and only this one still had a catch-all. *)
-  match Keeper_turn_driver.classify_masc_internal_error err with
-  | Some (Keeper_turn_driver.Provider_timeout _) -> true
-  | Some
-      ( Keeper_turn_driver.Runtime_exhausted _
-      | Keeper_turn_driver.Capacity_backpressure _
-      | Keeper_turn_driver.Resumable_cli_session _
-
-      | Keeper_turn_driver.Accept_rejected _
-      | Keeper_turn_driver.Admission_queue_timeout _
-      | Keeper_turn_driver.Admission_queue_rejected _
-      | Keeper_turn_driver.Turn_timeout _
-      | Keeper_turn_driver.Max_tokens_ceiling_violation _
-      | Keeper_turn_driver.Ambiguous_post_commit _
-      (* RFC-0159 Phase A: Internal_* variants are not OAS-budget timeouts. *)
-      | Keeper_turn_driver.Internal_unhandled_exception _
-      | Keeper_turn_driver.Internal_bridge_exception _
-      | Keeper_turn_driver.Internal_contract_rejected _ )
-  | None ->
-    false
+  Keeper_provider_runtime_boundary.is_provider_timeout_error err
 ;;
 
 let timeout_phase_of_provider_timeout_phase phase =
@@ -161,33 +110,11 @@ let provider_timeout_policy_decision
       ~(strikes : int)
       (err : Agent_sdk.Error.sdk_error)
   : Keeper_failure_policy.decision option
-  =
-  match Keeper_turn_driver.classify_masc_internal_error err with
-  | Some (Keeper_turn_driver.Provider_timeout { phase; _ }) ->
-    Some
-      (Keeper_failure_policy.decide
-         (Keeper_failure_policy.Provider_timeout
-            { phase = timeout_phase_of_provider_timeout_phase phase
-            ; strikes = Some strikes
-            ; liveness = Keeper_failure_policy.Recent_heartbeat
-            }))
-  | Some
-      ( Keeper_turn_driver.Runtime_exhausted _
-      | Keeper_turn_driver.Capacity_backpressure _
-      | Keeper_turn_driver.Resumable_cli_session _
-
-      | Keeper_turn_driver.Accept_rejected _
-      | Keeper_turn_driver.Admission_queue_timeout _
-      | Keeper_turn_driver.Admission_queue_rejected _
-      | Keeper_turn_driver.Turn_timeout _
-      | Keeper_turn_driver.Max_tokens_ceiling_violation _
-      | Keeper_turn_driver.Ambiguous_post_commit _
-      (* RFC-0159 Phase A: Internal_* variants are not OAS-budget timeouts. *)
-      | Keeper_turn_driver.Internal_unhandled_exception _
-      | Keeper_turn_driver.Internal_bridge_exception _
-      | Keeper_turn_driver.Internal_contract_rejected _ )
-  | None ->
-    None
+=
+  Keeper_provider_runtime_boundary.provider_timeout_policy_decision
+    ~strikes
+    ~liveness:Keeper_failure_policy.Recent_heartbeat
+    err
 ;;
 
 let provider_timeout_metric_outcome

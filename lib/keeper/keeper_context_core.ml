@@ -396,10 +396,12 @@ let cap_checkpoint_message_to_remaining_content
                    Agent_sdk.Types.ToolResult
                      { tool_use_id; content; is_error; json = None; content_blocks })
                  content
-           | Agent_sdk.Types.Thinking { content; _ } ->
-               cap_content (fun text -> Agent_sdk.Types.Text text) content
+           | Agent_sdk.Types.Thinking t ->
+               cap_content
+                 (fun text -> Agent_sdk.Types.Thinking { t with content = text })
+                 t.content
            | Agent_sdk.Types.RedactedThinking text ->
-               cap_content (fun text -> Agent_sdk.Types.Text text) text
+               cap_content (fun text -> Agent_sdk.Types.RedactedThinking text) text
            | _ -> (block :: kept_rev, stats))
         ([], empty_checkpoint_sanitize_stats)
         msg.content

@@ -72,43 +72,48 @@ let test_inject_injects_when_missing () =
     out_list "GIT_ASKPASS="
 
 let test_scrub_membership () =
-  assert_true "ANTHROPIC_API_KEY scrubbed"
-    (Env_keeper_scrub.is_scrubbed "ANTHROPIC_API_KEY");
-  assert_true "AWS_SECRET_ACCESS_KEY scrubbed"
-    (Env_keeper_scrub.is_scrubbed "AWS_SECRET_ACCESS_KEY");
-  assert_true "ACTIONS_ID_TOKEN_REQUEST_TOKEN scrubbed"
-    (Env_keeper_scrub.is_scrubbed "ACTIONS_ID_TOKEN_REQUEST_TOKEN");
-  assert_true "OTEL_EXPORTER_OTLP_HEADERS scrubbed"
-    (Env_keeper_scrub.is_scrubbed "OTEL_EXPORTER_OTLP_HEADERS");
-  assert_true "GH_TOKEN scrubbed"
-    (Env_keeper_scrub.is_scrubbed "GH_TOKEN");
-  assert_true "GITHUB_TOKEN scrubbed"
-    (Env_keeper_scrub.is_scrubbed "GITHUB_TOKEN");
-  assert_true "GH_CONFIG_DIR scrubbed"
-    (Env_keeper_scrub.is_scrubbed "GH_CONFIG_DIR");
-  assert_true "SSH_AUTH_SOCK scrubbed"
-    (Env_keeper_scrub.is_scrubbed "SSH_AUTH_SOCK");
-  assert_true "GIT_CONFIG_GLOBAL scrubbed"
-    (Env_keeper_scrub.is_scrubbed "GIT_CONFIG_GLOBAL");
-  assert_true "GIT_CONFIG_COUNT scrubbed"
-    (Env_keeper_scrub.is_scrubbed "GIT_CONFIG_COUNT");
-  assert_false "PATH NOT scrubbed (neutral)"
-    (Env_keeper_scrub.is_scrubbed "PATH")
+  assert_true "ANTHROPIC_API_KEY denied"
+    (not (Env_keeper_scrub.is_allowed "ANTHROPIC_API_KEY"));
+  assert_true "AWS_SECRET_ACCESS_KEY denied"
+    (not (Env_keeper_scrub.is_allowed "AWS_SECRET_ACCESS_KEY"));
+  assert_true "ACTIONS_ID_TOKEN_REQUEST_TOKEN denied"
+    (not (Env_keeper_scrub.is_allowed "ACTIONS_ID_TOKEN_REQUEST_TOKEN"));
+  assert_true "OTEL_EXPORTER_OTLP_HEADERS denied"
+    (not (Env_keeper_scrub.is_allowed "OTEL_EXPORTER_OTLP_HEADERS"));
+  assert_true "GH_TOKEN denied"
+    (not (Env_keeper_scrub.is_allowed "GH_TOKEN"));
+  assert_true "GITHUB_TOKEN denied"
+    (not (Env_keeper_scrub.is_allowed "GITHUB_TOKEN"));
+  assert_true "GH_CONFIG_DIR denied"
+    (not (Env_keeper_scrub.is_allowed "GH_CONFIG_DIR"));
+  assert_true "SSH_AUTH_SOCK denied"
+    (not (Env_keeper_scrub.is_allowed "SSH_AUTH_SOCK"));
+  assert_true "GIT_CONFIG_GLOBAL denied"
+    (not (Env_keeper_scrub.is_allowed "GIT_CONFIG_GLOBAL"));
+  assert_true "GIT_CONFIG_COUNT denied"
+    (not (Env_keeper_scrub.is_allowed "GIT_CONFIG_COUNT"));
+  assert_true "PATH allowed"
+    (Env_keeper_scrub.is_allowed "PATH")
 
 let test_scrub_exact_match_only () =
-  (* Prefix match is explicitly a non-goal. *)
-  assert_false "ANTHROPIC_API_KEY_SUFFIX not scrubbed (exact match)"
-    (Env_keeper_scrub.is_scrubbed "ANTHROPIC_API_KEY_SUFFIX");
-  assert_false "PREFIX_ANTHROPIC_API_KEY not scrubbed (exact match)"
-    (Env_keeper_scrub.is_scrubbed "PREFIX_ANTHROPIC_API_KEY")
+  (* Suffix pattern now blocks anything ending in _API_KEY. *)
+  assert_true "ANTHROPIC_API_KEY_SUFFIX denied (suffix match)"
+    (not (Env_keeper_scrub.is_allowed "ANTHROPIC_API_KEY_SUFFIX"));
+  assert_true "PREFIX_ANTHROPIC_API_KEY denied (suffix match)"
+    (not (Env_keeper_scrub.is_allowed "PREFIX_ANTHROPIC_API_KEY"))
 
 let test_scrub_and_pass_disjoint () =
+  let safe =
+    [ "GIT_AUTHOR_NAME"; "GIT_AUTHOR_EMAIL"
+    ; "GIT_COMMITTER_NAME"; "GIT_COMMITTER_EMAIL"
+    ]
+  in
   List.iter
     (fun p ->
-      assert_false
-        (Printf.sprintf "pass-list entry %s must not be on scrub list" p)
-        (Env_keeper_scrub.is_scrubbed p))
-    Env_keeper_scrub.pass
+      assert_true
+        (Printf.sprintf "safe entry %s must be allowed" p)
+        (Env_keeper_scrub.is_allowed p))
+    safe
 
 let test_filter_environment () =
   let env = [|
@@ -127,9 +132,10 @@ let test_filter_environment () =
   let out = Env_keeper_scrub.filter_environment env in
   let out_list = Array.to_list out in
   assert_contains ~msg:"PATH preserved" out_list "PATH=/usr/bin";
-  assert_contains ~msg:"FOO preserved (neutral)" out_list "FOO=bar";
-  assert_contains ~msg:"entries without = are kept"
-    out_list "malformed_entry_no_equals";
+  assert_false "FOO dropped (not on allowlist)"
+    (List.mem "FOO=bar" out_list);
+  assert_false "malformed_entry_no_equals dropped (not on allowlist)"
+    (List.mem "malformed_entry_no_equals" out_list);
   assert_false "ANTHROPIC_API_KEY stripped"
     (List.exists (fun e -> String.starts_with ~prefix:"ANTHROPIC_API_KEY=" e) out_list);
   assert_false "AWS_SECRET_ACCESS_KEY stripped"

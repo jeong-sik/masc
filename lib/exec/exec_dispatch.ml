@@ -86,6 +86,14 @@ let apply_redirect_plan plan result =
 let unsupported_redirect_result message =
   { status = Unix.WEXITED 1; stdout = ""; stderr = message }
 
+let emit_captured_output on_output_chunk result =
+  match on_output_chunk with
+  | None -> result
+  | Some on_chunk ->
+      on_chunk (`Stdout result.stdout);
+      on_chunk (`Stderr result.stderr);
+      result
+
 let status_is_success = function
   | Unix.WEXITED 0 -> true
   | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> false
@@ -143,10 +151,6 @@ let resolve_host_env = function
    [Exec_gate] (no behavior change for non-keeper callers); the Docker
    case is wired up by [lib/keeper] using a closure over
    [Keeper_turn_sandbox_runtime]. *)
-let dispatch_timeout_sec = function
-  | Some timeout_sec -> timeout_sec
-  | None -> Env_config_exec_timeout.timeout_sec ~caller:Dispatch ()
-
 let process_spec_of_simple (s : Shell_ir.simple) =
   let bin = Exec_program.to_string s.bin in
   let argv = bin :: List.map resolve_arg s.args in
@@ -158,9 +162,8 @@ let process_spec_of_simple (s : Shell_ir.simple) =
   in
   (argv, env, cwd)
 
-let dispatch_simple ?timeout_sec ?stdin_content ?on_output_chunk (s : Shell_ir.simple) =
+let dispatch_simple ?stdin_content ?on_output_chunk (s : Shell_ir.simple) =
   let argv, env, cwd = process_spec_of_simple s in
-  let timeout_sec = dispatch_timeout_sec timeout_sec in
   match redirect_plan_of_redirects s.redirects with
   | Error message -> unsupported_redirect_result message
   | Ok redirect_plan -> (
@@ -177,7 +180,6 @@ let dispatch_simple ?timeout_sec ?stdin_content ?on_output_chunk (s : Shell_ir.s
                ~actor:`Tool_local_runtime
                ~raw_source
                ~summary:"exec dispatch simple"
-               ~timeout_sec
                ?env:host_env
                ?cwd
                argv
@@ -186,7 +188,6 @@ let dispatch_simple ?timeout_sec ?stdin_content ?on_output_chunk (s : Shell_ir.s
                ~actor:`Tool_local_runtime
                ~raw_source
                ~summary:"exec dispatch simple streaming"
-               ~timeout_sec
                ?env:host_env
                ?cwd
                ~on_stdout_chunk:(fun chunk -> on_chunk (`Stdout chunk))
@@ -199,7 +200,6 @@ let dispatch_simple ?timeout_sec ?stdin_content ?on_output_chunk (s : Shell_ir.s
                ~actor:`Tool_local_runtime
                ~raw_source
                ~summary:"exec dispatch simple stdin"
-               ~timeout_sec
                ?env:host_env
                ?cwd
                ~stdin_content
@@ -214,7 +214,6 @@ let dispatch_simple ?timeout_sec ?stdin_content ?on_output_chunk (s : Shell_ir.s
                  ~actor:`Tool_local_runtime
                  ~raw_source
                  ~summary:"exec dispatch simple stdin streaming"
-                 ~timeout_sec
                  ?env:host_env
                  ?cwd
                  ~stdin_content
@@ -235,7 +234,7 @@ let dispatch_simple ?timeout_sec ?stdin_content ?on_output_chunk (s : Shell_ir.s
        the callback, if provided, receives the full captured output after
        completion.  근본 해결: extend the Docker runner contract with
        ~on_stdout_chunk/~on_stderr_chunk. *)
-    (match runner ~stdin_content ~argv ~env ~cwd ~timeout_sec with
+    (match runner ~stdin_content ~argv ~env ~cwd with
      | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
      | exception exn ->
        { status = Unix.WEXITED 1; stdout = ""; stderr = Printexc.to_string exn }
@@ -250,22 +249,6 @@ let dispatch_simple ?timeout_sec ?stdin_content ?on_output_chunk (s : Shell_ir.s
 (* --- pipeline + entry point (mutually recursive) --- *)
 
 let invalid_pipeline stderr = { status = Unix.WEXITED 1; stdout = ""; stderr }
-
-let pipeline_timeout_result ~timeout_sec =
-  { status = Unix.WEXITED 124
-  ; stdout = ""
-  ; stderr = Printf.sprintf "pipeline timed out after %.3fs" timeout_sec
-  }
-
-let dispatch_simple_before_deadline ?stdin_content ~deadline ~pipeline_timeout_sec s =
-  let remaining_timeout_sec = deadline -. Unix.gettimeofday () in
-  if remaining_timeout_sec <= 0.0
-  then pipeline_timeout_result ~timeout_sec:pipeline_timeout_sec
-  else
-    dispatch_simple
-      ~timeout_sec:remaining_timeout_sec
-      ?stdin_content
-      s
 
 let host_pipeline_specs stages =
   let rec loop acc = function
@@ -309,105 +292,106 @@ let docker_pipeline_specs stages =
   in
   loop None None [] stages
 
-let rec dispatch_pipeline ?timeout_sec stages =
-  let pipeline_timeout_sec = dispatch_timeout_sec timeout_sec in
-  match stages with
-  | [] ->
-      invalid_pipeline "empty pipeline not supported in native dispatch"
-  | [ _ ] ->
-      invalid_pipeline "single-stage pipeline not supported in native dispatch"
-  | _ ->
-      (match host_pipeline_specs stages with
-       | Some specs ->
-           let raw_source =
-             specs
-             |> List.map (fun stage -> String.concat " " stage.Process_eio.argv)
-             |> String.concat " | "
-           in
-           let status, stdout, stderr =
-             Exec_gate.run_argv_pipeline_with_status_split
-               ~actor:`Tool_local_runtime
-               ~raw_source
-               ~summary:"exec dispatch pipeline"
-               ~timeout_sec:pipeline_timeout_sec
+(* TEL-OK: this lower-level Shell IR dispatcher is wrapped by Execute/keeper
+   telemetry at the action boundary; it only preserves captured output delivery. *)
+let rec dispatch_pipeline ?stdin_content ?on_output_chunk stages =
+  let result =
+    match stages with
+    | [] ->
+        invalid_pipeline "empty pipeline not supported in native dispatch"
+    | [ _ ] ->
+        invalid_pipeline "single-stage pipeline not supported in native dispatch"
+    | _ ->
+        (match host_pipeline_specs stages with
+         | Some specs ->
+             let raw_source =
                specs
-           in
-           { status; stdout; stderr }
-       | None -> (
-           match docker_pipeline_specs stages with
-           | Some (runner, specs) ->
-               let status, stdout, stderr =
-                 runner ~stages:specs ~timeout_sec:pipeline_timeout_sec
-               in
-               { status; stdout; stderr }
-           | None ->
-               let deadline = Unix.gettimeofday () +. pipeline_timeout_sec in
-               let rec chain ~prev_stdout ~status ~stderr = function
-                 | [] -> { status; stdout = prev_stdout; stderr }
-                 | Shell_ir.Simple s :: rest ->
-                     let stage_result =
-                       dispatch_simple_before_deadline
-                         ~stdin_content:prev_stdout
-                         ~deadline
-                         ~pipeline_timeout_sec
-                         s
-                     in
-                     let status = pipeline_status status stage_result.status in
-                     let stderr = stderr ^ stage_result.stderr in
-                     if status_is_timeout stage_result.status
-                     then { status; stdout = stage_result.stdout; stderr }
-                     else
-                       chain
-                         ~prev_stdout:stage_result.stdout
-                         ~status
-                         ~stderr
-                         rest
-                 | Pipeline _ :: _ ->
-                     { status = Unix.WEXITED 1
-                     ; stdout = ""
-                     ; stderr =
-                         stderr ^ "nested pipeline not supported in native dispatch"
-                     }
-               in
-               (match stages with
-                | [] | [ _ ] ->
-                    invalid_pipeline "invalid pipeline arity in native dispatch"
-                | first :: rest -> (
-                  match first with
-                  | Shell_ir.Simple s ->
-                      let first_result =
-                        dispatch_simple_before_deadline
-                          ~deadline
-                          ~pipeline_timeout_sec
-                          s
-                      in
-                      let status =
-                        pipeline_status (Unix.WEXITED 0) first_result.status
-                      in
-                      if status_is_timeout first_result.status
-                      then
-                        { status
-                        ; stdout = first_result.stdout
-                        ; stderr = first_result.stderr
-                        }
-                      else
-                        chain
-                          ~prev_stdout:first_result.stdout
-                          ~status
-                          ~stderr:first_result.stderr
-                          rest
-                  | Pipeline _ ->
-                      invalid_pipeline
-                        "nested pipeline not supported in native dispatch" ))))
+               |> List.map (fun stage -> String.concat " " stage.Process_eio.argv)
+               |> String.concat " | "
+             in
+             let status, stdout, stderr =
+               Exec_gate.run_argv_pipeline_with_status_split
+                 ~actor:`Tool_local_runtime
+                 ~raw_source
+                 ~summary:"exec dispatch pipeline"
+                 specs
+             in
+             { status; stdout; stderr }
+         | None -> (
+             match docker_pipeline_specs stages with
+             | Some (runner, specs) ->
+                 let status, stdout, stderr = runner ~stages:specs in
+                 { status; stdout; stderr }
+             | None ->
+                 let rec chain ~prev_stdout ~status ~stderr = function
+                   | [] -> { status; stdout = prev_stdout; stderr }
+                   | Shell_ir.Simple s :: rest ->
+                       let stage_result =
+                         dispatch_simple
+                           ~stdin_content:prev_stdout
+                           s
+                       in
+                       let status = pipeline_status status stage_result.status in
+                       let stderr = stderr ^ stage_result.stderr in
+                       if status_is_timeout stage_result.status
+                       then { status; stdout = stage_result.stdout; stderr }
+                       else
+                         chain
+                           ~prev_stdout:stage_result.stdout
+                           ~status
+                           ~stderr
+                           rest
+                   | Pipeline _ :: _ ->
+                       { status = Unix.WEXITED 1
+                       ; stdout = ""
+                       ; stderr =
+                           stderr ^ "nested pipeline not supported in native dispatch"
+                       }
+                 in
+                 (match stages with
+                  | [] | [ _ ] ->
+                      invalid_pipeline "invalid pipeline arity in native dispatch"
+                  | first :: rest -> (
+                    match first with
+                    | Shell_ir.Simple s ->
+                        let first_result = dispatch_simple s in
+                        let status =
+                          pipeline_status (Unix.WEXITED 0) first_result.status
+                        in
+                        if status_is_timeout first_result.status
+                        then
+                          { status
+                          ; stdout = first_result.stdout
+                          ; stderr = first_result.stderr
+                          }
+                        else
+                          chain
+                            ~prev_stdout:first_result.stdout
+                            ~status
+                            ~stderr:first_result.stderr
+                            rest
+                    | Pipeline _ ->
+                        invalid_pipeline
+                          "nested pipeline not supported in native dispatch" ))))
+  in
+  emit_captured_output on_output_chunk result
 
-and dispatch ?timeout_sec ?on_output_chunk (ir : Shell_ir.t) =
+and dispatch ?on_output_chunk (ir : Shell_ir.t) =
   match ir with
-  | Shell_ir.Simple s -> dispatch_simple ?timeout_sec ?on_output_chunk s
-  | Pipeline stages ->
-    (* Pipelines do not yet expose per-stage chunk callbacks; an
-       [on_output_chunk] provided here is ignored. *)
-    dispatch_pipeline ?timeout_sec stages
+  | Shell_ir.Simple s -> dispatch_simple ?on_output_chunk s
+  | Pipeline stages -> dispatch_pipeline ?on_output_chunk stages
 
-let dispatch_decided ?timeout_sec ?on_output_chunk (envelope : Shell_ir_risk.decided Shell_ir_risk.decided_ir) :
+let dispatch_decided ?on_output_chunk (envelope : Shell_ir_risk.decided Shell_ir_risk.decided_ir) :
     dispatch_result =
-  dispatch ?timeout_sec ?on_output_chunk envelope.Shell_ir_risk.ir
+  (match envelope.Shell_ir_risk.risk with
+   | Shell_ir_risk.Destructive_protected ->
+       Logs.warn (fun m ->
+         m
+           "Exec_dispatch: destructive_protected command dispatched: %a"
+           Shell_ir.pp
+           envelope.Shell_ir_risk.ir)
+   | Shell_ir_risk.R0_Read
+   | Shell_ir_risk.R1_Reversible_mutation
+   | Shell_ir_risk.R2_Irreversible ->
+       ());
+  dispatch ?on_output_chunk envelope.Shell_ir_risk.ir

@@ -20,9 +20,9 @@ let register_metrics () =
   end
 ;;
 
-let with_span ~tool_name f =
+let with_span ?(force_new_trace_id = false) ~tool_name f =
   let span_name = "tool_dispatch." ^ tool_name in
-  Otel_spans.with_span ~name:span_name (fun trace_id_thunk ->
+  Otel_spans.with_span ~name:span_name ~force_new_trace_id (fun trace_id_thunk ->
     let result, outcome = f trace_id_thunk in
     Otel_metric_store.inc_counter
       counter_name

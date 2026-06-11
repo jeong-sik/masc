@@ -27,12 +27,14 @@ type keepalive_scheduling_decision = {
 let decide_keepalive_scheduling
       ?(runtime_id_of_meta = Keeper_meta_contract.runtime_id_of_meta)
       ?(runtime_resilience_of_name = fun _ -> None)
-      ?(runtime_status_of_name = fun ~runtime_id:_ -> Keeper_health_probe.Unknown)
+      ?(reactive_wake = false)
       ~stop
       ~meta
       obs
   =
-  let turn_decision = Keeper_world_observation.keeper_cycle_decision ~meta obs in
+  let turn_decision =
+    Keeper_world_observation.keeper_cycle_decision ~reactive_wake ~meta obs
+  in
   let requested_should_run_turn =
     (not (Atomic.get stop)) && turn_decision.should_run
   in
@@ -42,7 +44,6 @@ let decide_keepalive_scheduling
       ~runtime_resilience:(runtime_resilience_of_name runtime_id)
       ~should_run_turn:requested_should_run_turn
       ~runtime_id
-      ~runtime_status:(runtime_status_of_name ~runtime_id)
   in
   let should_run_turn =
     match runtime_backpressure with
@@ -50,7 +51,10 @@ let decide_keepalive_scheduling
     | Runtime_backpressured _ -> false
   in
   let verdict_reasons =
-    Keeper_world_observation.verdict_reasons_to_strings turn_decision.verdict
+    let base = Keeper_world_observation.verdict_reasons_to_strings turn_decision.verdict in
+    match runtime_backpressure with
+    | Runtime_backpressured _ -> "runtime_backpressure" :: base
+    | Runtime_admitted -> base
   in
   let channel = Keeper_world_observation.channel_to_string turn_decision.channel in
   { turn_decision

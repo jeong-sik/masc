@@ -30,6 +30,8 @@ function deliveryLabel(entry: KeeperConversationEntry): string {
       return 'timeout'
     case 'error':
       return 'error'
+    case 'interrupted':
+      return 'interrupted'
     case 'history':
       return 'saved'
     default:
@@ -48,7 +50,7 @@ function liveMessageLabel(entry: KeeperConversationEntry): string | null {
 }
 
 function bubbleTone(entry: KeeperConversationEntry): string {
-  if (entry.delivery === 'error' || entry.delivery === 'timeout') return 'error'
+  if (entry.delivery === 'error' || entry.delivery === 'timeout' || entry.delivery === 'interrupted') return 'error'
   if (entry.role === 'user') return 'user'
   if (entry.role === 'assistant') return 'assistant'
   if (entry.role === 'tool') return 'tool'
@@ -487,6 +489,11 @@ function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
   `
 }
 
+// A reader within this distance of the bottom is considered "pinned":
+// new content keeps auto-scrolling. Scrolling further up unpins so the
+// transcript stops yanking the viewport while old messages are read.
+const STICK_TO_BOTTOM_THRESHOLD_PX = 80
+
 export function ChatTranscript({
   entries,
   emptyText,
@@ -501,15 +508,38 @@ export function ChatTranscript({
   size?: ChatTranscriptSize
 }) {
   const scrollerRef = useRef<HTMLDivElement | null>(null)
+  const pinnedRef = useRef(true)
+  const [unread, setUnread] = useState(false)
   const lastSignature = useMemo(
     () => entries.map(entry => `${entry.id}:${entry.text.length}:${entry.delivery}:${entry.streamState ?? ''}`).join('|'),
     [entries],
   )
 
-  useEffect(() => {
+  const scrollToBottom = () => {
     const el = scrollerRef.current
     if (!el) return
     el.scrollTop = el.scrollHeight
+    pinnedRef.current = true
+    setUnread(false)
+  }
+
+  const handleScroll = () => {
+    const el = scrollerRef.current
+    if (!el) return
+    const distance = el.scrollHeight - el.scrollTop - el.clientHeight
+    const pinned = distance <= STICK_TO_BOTTOM_THRESHOLD_PX
+    pinnedRef.current = pinned
+    if (pinned) setUnread(false)
+  }
+
+  useEffect(() => {
+    const el = scrollerRef.current
+    if (!el) return
+    if (pinnedRef.current) {
+      el.scrollTop = el.scrollHeight
+    } else {
+      setUnread(true)
+    }
   }, [lastSignature])
 
   const isPrimary = size === 'primary'
@@ -518,32 +548,51 @@ export function ChatTranscript({
     : 'min-h-75 max-h-130'
 
   return html`
-    <div
-      class=${`chat-transcript ${isPrimary ? 'chat-transcript-airy' : ''} flex ${heightClass} flex-col overflow-y-auto ${
-        isPrimary
-          ? 'gap-5 rounded-[var(--r-2)] border border-transparent px-0 py-2 shadow-none'
-          : variant === 'messenger'
-          ? 'gap-4 rounded-[var(--radius-xl)] px-4 py-5 sm:px-5'
-          : 'gap-3 rounded-[var(--radius-xl)] px-3 py-4'
-      }`}
-      data-chat-variant=${variant}
-      data-chat-size=${size}
-      ref=${scrollerRef}
-    >
-      ${entries.length === 0
+    <div class=${`relative flex min-h-0 flex-col ${isPrimary ? 'flex-1' : ''}`}>
+      <div
+        class=${`chat-transcript ${isPrimary ? 'chat-transcript-airy' : ''} flex ${heightClass} flex-col overflow-y-auto ${
+          isPrimary
+            ? 'gap-5 rounded-[var(--r-2)] border border-transparent px-0 py-2 shadow-none'
+            : variant === 'messenger'
+            ? 'gap-4 rounded-[var(--radius-xl)] px-4 py-5 sm:px-5'
+            : 'gap-3 rounded-[var(--radius-xl)] px-3 py-4'
+        }`}
+        data-chat-variant=${variant}
+        data-chat-size=${size}
+        ref=${scrollerRef}
+        onScroll=${handleScroll}
+      >
+        ${entries.length === 0
+          ? html`
+              <div class="flex min-h-55 flex-col items-center justify-center rounded-card border border-dashed border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-6 text-center">
+                <div class="text-2xs font-semibold uppercase tracking-5 text-[var(--color-fg-muted)]">직접 메시지 없음</div>
+                <div class="mt-3 max-w-[34rem] text-sm leading-airy text-[var(--color-fg-secondary)]">${emptyText}</div>
+              </div>
+            `
+          : entries.map(entry => entry.role === 'tool'
+              ? html`<${ToolCallBubble} key=${entry.id} entry=${entry} />`
+              : html`<${ChatMessageBubble} key=${entry.id} entry=${entry} showMetadata=${showMetadata !== false} variant=${variant} />`
+          )}
+      </div>
+      ${unread
         ? html`
-            <div class="flex min-h-55 flex-col items-center justify-center rounded-card border border-dashed border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-6 text-center">
-              <div class="text-2xs font-semibold uppercase tracking-5 text-[var(--color-fg-muted)]">직접 메시지 없음</div>
-              <div class="mt-3 max-w-[34rem] text-sm leading-airy text-[var(--color-fg-secondary)]">${emptyText}</div>
-            </div>
+            <button
+              type="button"
+              class="absolute bottom-3 left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 rounded-full border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3.5 py-1.5 text-2xs font-medium text-[var(--color-fg-primary)] shadow-[var(--shadow-raised)] transition-colors hover:bg-[var(--color-bg-hover)]"
+              onClick=${scrollToBottom}
+              data-chat-jump-latest
+            >
+              새 메시지 ↓
+            </button>
           `
-        : entries.map(entry => entry.role === 'tool'
-            ? html`<${ToolCallBubble} key=${entry.id} entry=${entry} />`
-            : html`<${ChatMessageBubble} key=${entry.id} entry=${entry} showMetadata=${showMetadata !== false} variant=${variant} />`
-        )}
+        : null}
     </div>
   `
 }
+
+// Streaming with no SSE event for longer than this is surfaced as a
+// stall so the operator can tell "slow model" from "dead transport".
+export const STREAM_STALL_THRESHOLD_S = 15
 
 export function ChatComposer({
   draft,
@@ -551,6 +600,9 @@ export function ChatComposer({
   disabled,
   streaming,
   streamStartedAt,
+  lastEventAt,
+  queueEnabled = false,
+  queueCount = 0,
   onDraftChange,
   onSend,
   onAbort,
@@ -561,6 +613,12 @@ export function ChatComposer({
   disabled: boolean
   streaming: boolean
   streamStartedAt?: number | null
+  /** Wall-clock ms of the most recent stream event; drives the stall hint. */
+  lastEventAt?: number | null
+  /** When true, sending stays enabled during streaming — the host panel
+   *  enqueues the message instead of dispatching it immediately. */
+  queueEnabled?: boolean
+  queueCount?: number
   onDraftChange: (value: string) => void
   onSend: () => void
   onAbort?: () => void
@@ -579,10 +637,21 @@ export function ChatComposer({
     return () => clearInterval(id)
   }, [streaming, streamStartedAt])
 
+  // Derived from the 1 s elapsed tick above — no extra interval needed.
+  const sinceLastEvent =
+    streaming && typeof lastEventAt === 'number'
+      ? Math.round((Date.now() - lastEventAt) / 1000)
+      : null
+  const isStalled = sinceLastEvent !== null && sinceLastEvent >= STREAM_STALL_THRESHOLD_S
+
+  const canQueue = queueEnabled && streaming
   const streamLabel = streaming
-    ? `응답 중${elapsed > 0 ? ` ${elapsed}s` : ''}`
+    ? canQueue
+      ? '대기열 추가'
+      : `응답 중${elapsed > 0 ? ` ${elapsed}s` : ''}`
     : '보내기'
   const isStreamWarning = streaming && elapsed > 60
+  const sendDisabled = disabled || draft.trim() === '' || (streaming && !queueEnabled)
 
   const isPrimary = layout === 'primary'
 
@@ -605,7 +674,7 @@ export function ChatComposer({
         onKeyDown=${(event: KeyboardEvent) => {
           if (event.key === 'Enter' && !event.shiftKey) {
             event.preventDefault()
-            if (!disabled && !streaming && draft.trim() !== '') {
+            if (!sendDisabled) {
               onSend()
             }
           }
@@ -613,16 +682,37 @@ export function ChatComposer({
         disabled=${disabled}
       ></textarea>
       <div class="flex flex-wrap items-center justify-between gap-2">
-        <div class="text-2xs leading-paragraph text-[var(--color-fg-muted)]">
-          ${streaming
-            ? '키퍼 응답 스트림이 활성 상태입니다. 멈춘 것 같으면 중지할 수 있습니다.'
-            : '직접 메시지만 이 레인에 표시됩니다. 내부 키퍼 프롬프트는 숨겨집니다.'}
+        <div class="flex min-w-0 flex-col gap-1">
+          <div class="text-2xs leading-paragraph text-[var(--color-fg-muted)]">
+            ${streaming
+              ? canQueue
+                ? '응답 스트리밍 중 — 지금 보내는 메시지는 대기열에 쌓였다가 차례로 전달됩니다.'
+                : '키퍼 응답 스트림이 활성 상태입니다. 멈춘 것 같으면 중지할 수 있습니다.'
+              : '직접 메시지만 이 레인에 표시됩니다. 내부 키퍼 프롬프트는 숨겨집니다.'}
+          </div>
+          ${isStalled
+            ? html`
+                <div class="text-2xs font-medium text-[var(--color-status-warn)]" data-chat-stall-hint>
+                  마지막 수신 ${sinceLastEvent}초 전 — 스트림이 지연되고 있습니다. 계속 멈춰 있으면 중지 후 다시 시도하세요.
+                </div>
+              `
+            : null}
         </div>
         <div class="flex gap-2 items-center">
+        ${queueCount > 0
+          ? html`
+              <span
+                class="inline-flex items-center rounded-full border border-[var(--accent-20)] bg-[var(--accent-10)] px-2.5 py-1 text-2xs font-medium text-[var(--color-fg-secondary)]"
+                data-chat-queue-count
+              >
+                대기 ${queueCount}
+              </span>
+            `
+          : null}
         <${ActionButton}
-          variant=${isStreamWarning ? 'danger' : 'primary'}
+          variant=${isStreamWarning && !canQueue ? 'danger' : 'primary'}
           onClick=${onSend}
-          disabled=${disabled || streaming || draft.trim() === ''}
+          disabled=${sendDisabled}
         >
           ${streamLabel}
         <//>
@@ -632,7 +722,7 @@ export function ChatComposer({
                 variant="ghost"
                 onClick=${onAbort}
               >
-                중지
+                중지${elapsed > 0 ? ` (${elapsed}s)` : ''}
               <//>
             `
           : null}

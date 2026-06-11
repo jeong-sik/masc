@@ -8,12 +8,33 @@ val self_identity_tokens : keeper_meta -> string list
 val is_self_author : self_tokens:string list -> string -> bool
 val is_keeper_authored_message : string -> bool
 
+(** [line_mentions ~targets content] is true when some whitespace token of
+    [content] equals ["@" ^ target] for a target, after trimming surrounding
+    punctuation. Token equality (not substring) so ["@dreamerx"] and
+    ["email@dreamer.com"] do not match ["@dreamer"]. *)
+val line_mentions : targets:string list -> string -> bool
+
+(** [pending_mentions_of_messages ~targets messages] returns the [(speaker,
+    content)] of every user line that mentions a target and arrives after the
+    keeper's own last line. Pure (no I/O) so the watermark logic is testable
+    directly; this is the core of {!collect_message_scope}. *)
+val pending_mentions_of_messages
+  :  targets:string list
+  -> Keeper_chat_store.chat_message list
+  -> (string * string) list
+
+(** [pending_scope_of_messages ~targets messages] returns the [(speaker,
+    content)] of every unanswered Owner-authored user line that is {e not} a
+    mention — the operator addressing the keeper without an "@name". External
+    (connector) lines and lines already counted as mentions are excluded, so
+    this signal stays disjoint from mentions and does not flood on busy
+    channels. Same watermark as {!pending_mentions_of_messages}; pure. *)
+val pending_scope_of_messages
+  :  targets:string list
+  -> Keeper_chat_store.chat_message list
+  -> (string * string) list
+
 val collect_message_scope
   :  config:Workspace.config
   -> meta:keeper_meta
-  -> (string * string) list * (string * string) list * (string * int) list
-
-val apply_message_cursor_updates
-  :  keeper_meta
-  -> (string * int) list
-  -> keeper_meta
+  -> (string * string) list * (string * string) list

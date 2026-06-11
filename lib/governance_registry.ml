@@ -575,8 +575,6 @@ let surfaces =
       param_keys = [
         "keeper.turn.temperature";
         "keeper.turn.max_output_tokens";
-        "keeper.turn.board_event_limit";
-        "keeper.turn.tool_cost_max_usd";
         "keeper.turn.llm_rerank";
         "keeper.turn.llama_slots";
         "keeper.turn.tool_search_top_k";
@@ -612,7 +610,6 @@ let surfaces =
       description = "Keeper rule engine thresholds (reflect, plan, guardrail)";
       risk = "low";
       param_keys = [
-        "keeper.rule.reflect_repetition";
         "keeper.rule.plan_goal_alignment_max";
         "keeper.rule.plan_response_alignment_max";
         "keeper.rule.guardrail_repetition";

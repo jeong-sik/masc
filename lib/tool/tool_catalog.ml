@@ -199,17 +199,15 @@ let explicit_metadata : (string * metadata) list =
     ("masc_status", read_state_tool);
     ("masc_tasks", read_state_tool);
     ("masc_messages", read_state_tool);
-    ("masc_agents", read_state_tool);
     ("masc_agent_card", read_state_tool);
     ("masc_dashboard", read_state_tool);
     ("masc_board_list", read_state_tool);
-    ("masc_board_get", read_state_tool);
+    ("masc_board_post_get", read_state_tool);
     ("masc_board_curation_read", read_state_tool);
     ( "masc_board_curation_submit",
       actor_broadcast_tool );
     ("masc_tool_help", read_state_tool);
     ("masc_plan_get", broadcast_tool);
-    ("masc_claim_next", claim_task_tool);
     ("masc_transition", complete_task_tool);
     ("masc_plan_set_task", actor_broadcast_tool);
     ("masc_broadcast", broadcast_tool);
@@ -249,7 +247,6 @@ let explicit_metadata : (string * metadata) list =
     ("masc_web_fetch", read_state_tool);
     ("masc_agent_fitness", read_state_tool);
     ("masc_agent_timeline", read_state_tool);
-    ("masc_agent_update", broadcast_tool);
     ("masc_get_metrics", read_state_tool);
     ("masc_operator_snapshot", read_state_tool);
     ("masc_operator_digest", read_state_tool);
@@ -281,8 +278,6 @@ let explicit_metadata : (string * metadata) list =
     ("masc_run_list", read_state_tool);
     ("masc_run_init", broadcast_tool);
     ("masc_run_plan", broadcast_tool);
-    ("masc_run_log", broadcast_tool);
-    ("masc_run_deliverable", broadcast_tool);
     ( "sidecar",
       {
         destructive_tool with

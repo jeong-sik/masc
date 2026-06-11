@@ -298,9 +298,10 @@ let parse_thinking_control_format ~(path : string) (raw : string)
     Runtime_schema.No_thinking_control
   | "thinking-object" | "thinking_object" -> Runtime_schema.Thinking_object
   | "chat-template-kwargs" | "chat_template_kwargs" -> Runtime_schema.Chat_template_kwargs
+  | "reasoning-effort" | "reasoning_effort" -> Runtime_schema.Reasoning_effort
   | other ->
     Log.Runtime.warn "runtime_toml: %s.capabilities.thinking-control-format = %S — expected one of \
-         none|thinking-object|chat-template-kwargs, defaulting to none"
+         none|thinking-object|chat-template-kwargs|reasoning-effort, defaulting to none"
         path
         other;
     Runtime_schema.No_thinking_control
@@ -372,6 +373,9 @@ let parse_model (id : string) (tbl : Otoml.t)
     let thinking_support =
       Otoml.find_or ~default:false tbl Otoml.get_boolean [ "thinking-support" ]
     in
+    let preserve_thinking =
+      Otoml.find_or ~default:false tbl Otoml.get_boolean [ "preserve-thinking" ]
+    in
     let max_thinking_budget =
       Otoml.find_opt tbl Otoml.get_integer [ "max-thinking-budget" ]
     in
@@ -407,6 +411,7 @@ let parse_model (id : string) (tbl : Otoml.t)
       ; tools_support
       ; max_context
       ; thinking_support
+      ; preserve_thinking
       ; max_thinking_budget
       ; streaming
       ; capabilities

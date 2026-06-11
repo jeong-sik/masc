@@ -236,9 +236,7 @@ let clamp01 value = Float.max 0.0 (Float.min 1.0 value)
     Beta distribution feedback (votes, quality signals).
 
     Board activity is capped at [board_activity_cap] to prevent
-    high-volume low-quality posting from inflating scores.
-
-    TODO(RFC-0001 Phase 3): Register in Runtime_params for tuning. *)
+    high-volume low-quality posting from inflating scores. *)
 let weight_completion = 0.35
 let weight_response   = 0.25
 let weight_board      = 0.25

@@ -14,20 +14,18 @@ type command_result =
   ; status : Unix.process_status
   }
 
-(* Read-only git probe timeout. Large monorepos (~/me, kidsnote-backend)
-   repeatedly trip a 5 s budget on first probe after filesystem cache
-   eviction; 15 s matches [server_dashboard_http_runtime_info]'s sibling
-   probe that was bumped for the same reason in #9765/#9775. *)
-let read_only_probe_timeout_sec = 15.0
-
-let run_git ~timeout_sec ~clone_path args =
+(* Read-only git probe: hang protection is git's responsibility via
+   `--no-optional-locks` (refuses to take a long-lived lock per command).
+   NFS or corrupt-repo hang is the tool's domain, not the caller's;
+   see PR #20479 spirit (caller-specific timeout closure). *)
+let run_git ~clone_path args =
   let argv = [ "git"; "-C"; clone_path; "--no-optional-locks" ] @ args in
   let status, output =
     Masc_exec.Exec_gate.run_argv_with_status
       ~actor:`Workspace_git
       ~raw_source:(String.concat " " argv)
       ~summary:"playground repo readiness git probe"
-      ~timeout_sec argv
+      argv
   in
   { ok = status = Unix.WEXITED 0; output = String.trim output; status }
 
@@ -58,7 +56,6 @@ let shell_quote_path path =
 let deleted_tracked_files_restore_hint ~clone_path =
   let status =
     run_git
-      ~timeout_sec:read_only_probe_timeout_sec
       ~clone_path
       [ "status"; "--porcelain"; "-z" ]
   in
@@ -110,7 +107,7 @@ let same_path a b = String.equal (normalize_path a) (normalize_path b)
 
 let git_toplevel path =
   let probe =
-    run_git ~timeout_sec:read_only_probe_timeout_sec ~clone_path:path
+    run_git ~clone_path:path
       [ "rev-parse"; "--show-toplevel" ]
   in
   if probe.ok then Some probe.output else None
@@ -224,11 +221,11 @@ let inspect
       ]
   else
     let inside =
-      run_git ~timeout_sec:read_only_probe_timeout_sec ~clone_path [ "rev-parse"; "--is-inside-work-tree" ]
+      run_git ~clone_path [ "rev-parse"; "--is-inside-work-tree" ]
     in
     let top =
       if inside.ok then
-        run_git ~timeout_sec:read_only_probe_timeout_sec ~clone_path
+        run_git ~clone_path
           [ "rev-parse"; "--show-toplevel" ]
       else { inside with ok = false; output = "" }
     in
@@ -246,20 +243,19 @@ let inspect
     else
       let status =
         run_git
-          ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Repo_readiness ())
           ~clone_path [ "status"; "--porcelain" ]
       in
       let dirty = status.ok && String.trim status.output <> "" in
       let branch =
-        run_git ~timeout_sec:read_only_probe_timeout_sec ~clone_path [ "branch"; "--show-current" ]
+        run_git ~clone_path [ "branch"; "--show-current" ]
         |> fun r -> if r.ok then first_line_opt r.output else None
       in
       let head =
-        run_git ~timeout_sec:read_only_probe_timeout_sec ~clone_path [ "rev-parse"; "--short"; "HEAD" ]
+        run_git ~clone_path [ "rev-parse"; "--short"; "HEAD" ]
         |> fun r -> if r.ok then first_line_opt r.output else None
       in
       let upstream =
-        run_git ~timeout_sec:read_only_probe_timeout_sec ~clone_path
+        run_git ~clone_path
           [ "rev-parse"; "--abbrev-ref"; "--symbolic-full-name"; "@{upstream}" ]
       in
       let upstream_name = if upstream.ok then first_line_opt upstream.output else None in
@@ -269,7 +265,6 @@ let inspect
         | Some _ -> (
             let counts =
               run_git
-                ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Repo_readiness ())
                 ~clone_path
                 [ "rev-list"; "--left-right"; "--count"; "@{upstream}...HEAD" ]
             in
@@ -280,7 +275,7 @@ let inspect
             else None, None)
       in
       let origin =
-        run_git ~timeout_sec:read_only_probe_timeout_sec ~clone_path [ "remote"; "get-url"; "origin" ]
+        run_git ~clone_path [ "remote"; "get-url"; "origin" ]
       in
       let has_origin = origin.ok && String.trim origin.output <> "" in
       (* Currency against [origin/<default_branch>] explicitly, independent of
@@ -292,7 +287,6 @@ let inspect
       let behind_default =
         let counts =
           run_git
-            ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Repo_readiness ())
             ~clone_path
             [ "rev-list"; "--count"; "HEAD..origin/" ^ default_branch ]
         in
@@ -410,7 +404,6 @@ let ensure_ready ~(config : Workspace.config) ~(meta : keeper_meta) ~repo_name (
                 (Printf.sprintf "mv %s %s" (Filename.quote path)
                    (Filename.quote quarantine))
               ~summary:"quarantine corrupt sandbox repo before reclone"
-              ~timeout_sec:read_only_probe_timeout_sec
               [ "mv"; path; quarantine ]
           in
           ());
@@ -443,372 +436,6 @@ let ensure_ready ~(config : Workspace.config) ~(meta : keeper_meta) ~repo_name (
         (Printf.sprintf
            "repo %s is in state %s; auto-repair not applicable"
            repo_name other)
-
-let ensure_parent_clone_for_worktree ~(config : Workspace.config) ~(meta : keeper_meta)
-    ~repo_name =
-  let repo_path = clone_path ~config ~meta ~repo_name in
-  if safe_is_dir repo_path then (
-    let inside =
-      run_git ~timeout_sec:read_only_probe_timeout_sec ~clone_path:repo_path
-        [ "rev-parse"; "--is-inside-work-tree" ]
-    in
-    let top =
-      if inside.ok then
-        run_git ~timeout_sec:read_only_probe_timeout_sec ~clone_path:repo_path
-          [ "rev-parse"; "--show-toplevel" ]
-      else { inside with ok = false; output = "" }
-    in
-    if inside.ok && top.ok && same_path repo_path top.output then Ok repo_path
-    else
-      match ensure_ready ~config ~meta ~repo_name () with
-      | Ok () -> Ok repo_path
-      | Error msg -> Error msg)
-  else
-    match ensure_ready ~config ~meta ~repo_name () with
-    | Ok () -> Ok repo_path
-    | Error msg -> Error msg
-
-let best_effort_fetch_origin repo_path =
-  ignore
-    (run_git
-       ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Repo_readiness ())
-       ~clone_path:repo_path
-       [ "fetch"; "--quiet"; "origin" ])
-
-let first_existing_ref ~repo_path refs =
-  let rec loop = function
-    | [] -> None
-    | ref_name :: rest ->
-      let probe =
-        run_git ~timeout_sec:read_only_probe_timeout_sec ~clone_path:repo_path
-          [ "rev-parse"; "--verify"; "--quiet"; ref_name ]
-      in
-      if probe.ok then Some ref_name else loop rest
-  in
-  loop refs
-
-let worktree_base_ref ~repo_path =
-  best_effort_fetch_origin repo_path;
-  let remote_head =
-    let probe =
-      run_git ~timeout_sec:read_only_probe_timeout_sec ~clone_path:repo_path
-        [ "symbolic-ref"; "--quiet"; "--short"; "refs/remotes/origin/HEAD" ]
-    in
-    if probe.ok then first_line_opt probe.output else None
-  in
-  let candidates =
-    List.filter_map
-      (fun x -> x)
-      [ remote_head; Some "origin/main"; Some "origin/master"; Some "origin/develop" ]
-  in
-  first_existing_ref ~repo_path candidates
-
-let is_standard_worktree_path ~repo_path ~task_name ~worktree_path =
-  let expected_worktree_path =
-    Filename.concat (Filename.concat repo_path ".worktrees") task_name
-  in
-  same_path worktree_path expected_worktree_path
-
-let relative_gitdir_of_pointer ~repo_path pointer =
-  let prefix = "gitdir:" in
-  if not (String.starts_with ~prefix pointer) then
-    Error "worktree .git file is not a gitdir pointer"
-  else
-    let gitdir =
-      String.sub
-        pointer
-        (String.length prefix)
-        (String.length pointer - String.length prefix)
-      |> String.trim
-    in
-    if gitdir = "" then Error "worktree .git file has an empty gitdir pointer"
-    else if Filename.is_relative gitdir then Ok None
-    else
-      let gitdir = normalize_path gitdir in
-      let worktrees_dir =
-        Filename.concat (Filename.concat repo_path ".git") "worktrees"
-        |> normalize_path
-      in
-      if String.starts_with ~prefix:(worktrees_dir ^ "/") gitdir then
-        let suffix =
-          String.sub
-            gitdir
-            (String.length worktrees_dir + 1)
-            (String.length gitdir - String.length worktrees_dir - 1)
-        in
-        Ok (Some (Printf.sprintf "../../.git/worktrees/%s" suffix))
-      else
-        Error
-          (Printf.sprintf
-             "worktree gitdir %s is not under %s"
-             gitdir worktrees_dir)
-
-let read_file_trim path =
-  let ic = open_in path in
-  Fun.protect
-    ~finally:(fun () -> close_in_noerr ic)
-    (fun () ->
-       let len = in_channel_length ic in
-       really_input_string ic len |> String.trim)
-
-let write_file path contents =
-  let oc = open_out path in
-  Fun.protect
-    ~finally:(fun () -> close_out_noerr oc)
-    (fun () -> output_string oc contents)
-
-let worktree_git_marker_path worktree_path =
-  Filename.concat worktree_path ".git"
-
-let quarantine_candidate path =
-  let rec loop n =
-    let candidate =
-      if n = 0 then path ^ ".broken"
-      else Printf.sprintf "%s.broken-%d" path n
-    in
-    if safe_exists candidate then loop (n + 1) else candidate
-  in
-  loop 0
-
-let quarantine_broken_worktree_slot ~worktree_path =
-  let quarantine = quarantine_candidate worktree_path in
-  try
-    Sys.rename worktree_path quarantine;
-    Ok quarantine
-  with
-  | Sys_error msg ->
-    Error
-      (Printf.sprintf
-         "failed to quarantine broken worktree %s to %s: %s"
-         worktree_path quarantine msg)
-
-let prepare_worktree_path_for_add ~worktree_path =
-  if not (safe_exists worktree_path) then Ok None
-  else if safe_is_dir worktree_path
-          && safe_exists (worktree_git_marker_path worktree_path)
-  then
-    quarantine_broken_worktree_slot ~worktree_path
-    |> Result.map (fun path -> Some path)
-  else
-    Error
-      (Printf.sprintf
-         "worktree path %s already exists but is not a git checkout and has no \
-          .git marker; refusing to overwrite"
-         worktree_path)
-
-let normalize_worktree_gitdir_file ~repo_path ~task_name ~worktree_path =
-  if not (is_standard_worktree_path ~repo_path ~task_name ~worktree_path) then
-    Ok ()
-  else
-    let git_file = worktree_git_marker_path worktree_path in
-    if not (Sys.file_exists git_file) then
-      Error (Printf.sprintf "worktree %s has no .git file" worktree_path)
-    else if Sys.is_directory git_file then Ok ()
-    else (
-      try
-        let current = read_file_trim git_file in
-        match relative_gitdir_of_pointer ~repo_path current with
-        | Error msg ->
-          Error (Printf.sprintf "worktree %s %s" worktree_path msg)
-        | Ok None -> Ok ()
-        | Ok (Some relative_gitdir) ->
-          write_file git_file ("gitdir: " ^ relative_gitdir ^ "\n");
-          Ok ()
-      with
-      | Sys_error msg ->
-        Error
-          (Printf.sprintf
-             "failed to normalize worktree gitdir for %s: %s"
-             worktree_path msg))
-
-(** [ensure_worktree_ready ~config ~meta ~repo_name ~task_name ~worktree_path ()]
-    ensures a git worktree exists at [worktree_path] inside the sandbox clone for
-    [repo_name].  If the worktree is missing, first ensures the parent repo is a
-    valid git clone (reclone if needed), then creates the worktree from the
-    fetched default origin branch.  Parent clone dirtiness is preserved and does
-    not block creating a separate task worktree.  Returns [Ok ()] when the
-    worktree is a valid git checkout, or [Error msg] if creation failed.
-
-    Root fixes for the Docker sandbox Git/CWD boundary:
-    - when the keeper cwd targets a worktree path that doesn't exist in the
-      sandbox clone, recreate it instead of failing with
-      [sandbox_repo_not_ready];
-    - when the worktree exists, normalize its [.git] gitdir pointer to a
-      relative path so Git can resolve the metadata from both the host and the
-      container mount. *)
-let ensure_worktree_ready
-      ~(config : Workspace.config)
-      ~(meta : keeper_meta)
-      ~(repo_name : string)
-      ~(task_name : string)
-      ~(worktree_path : string)
-      () : (unit, string) result =
-  if not (safe_repo_component repo_name) then
-    Error (Printf.sprintf "invalid repo_name: %s" repo_name)
-  else if not (safe_repo_component task_name) then
-    Error (Printf.sprintf "invalid task_name: %s" task_name)
-  else
-    (* Fast path: worktree already exists and is a valid git checkout.
-       Skip parent repo validation — the parent may be "dirty" from worktree
-       metadata (.git/worktrees/), which is normal and expected. *)
-    match git_toplevel worktree_path with
-    | Some top when same_path worktree_path top ->
-      let repo_path = clone_path ~config ~meta ~repo_name in
-      normalize_worktree_gitdir_file ~repo_path ~task_name ~worktree_path
-    | Some top ->
-      Error
-        (Printf.sprintf
-           "worktree path %s is not an independent git checkout (git_toplevel=%s)"
-           worktree_path top)
-    | None ->
-      (* Worktree missing or corrupt — ensure parent repo exists, then create *)
-      match ensure_parent_clone_for_worktree ~config ~meta ~repo_name with
-      | Error msg ->
-        Error (Printf.sprintf "parent repo %s not usable for worktree: %s" repo_name msg)
-      | Ok repo_path -> (
-        match prepare_worktree_path_for_add ~worktree_path with
-        | Error msg -> Error msg
-        | Ok _quarantined -> (
-          match worktree_base_ref ~repo_path with
-        | None ->
-          Error
-            (Printf.sprintf
-               "worktree add failed for %s/%s at %s: no base ref found"
-               repo_name task_name worktree_path)
-        | Some base_ref ->
-          (* [git worktree add --detach <path> <ref>] avoids inheriting a dirty
-             parent task branch as the new task's base. *)
-          let add_result =
-            run_git ~timeout_sec:(read_only_probe_timeout_sec *. 2.0)
-              ~clone_path:repo_path
-              [ "worktree"; "add"; "--detach"; worktree_path; base_ref ]
-          in
-          if add_result.ok then (
-            match
-              normalize_worktree_gitdir_file ~repo_path ~task_name ~worktree_path
-            with
-            | Error msg -> Error msg
-            | Ok () ->
-              (* Create a task branch in the new worktree *)
-              let branch_name = Printf.sprintf "task/%s" task_name in
-              let checkout =
-                run_git ~timeout_sec:read_only_probe_timeout_sec
-                  ~clone_path:worktree_path
-                  [ "checkout"; "-b"; branch_name ]
-              in
-              if checkout.ok then Ok ()
-              else
-                (* worktree created but branch checkout failed — still usable *)
-                Ok ())
-          else
-            Error
-              (Printf.sprintf
-                 "worktree add failed for %s/%s at %s from %s: %s"
-                 repo_name task_name worktree_path base_ref add_result.output)))
-
-(** [provision_worktrees_for_task ~config ~agent_name ~task_id ()] scans all
-    repos in the keeper's docker playground and creates a worktree for [task_id]
-    in each repo that is ready.  Called best-effort at task claim time so that
-    worktrees exist before the LLM tries to use them.
-
-    Only operates for Docker-sandboxed keepers (local keepers use the project
-    root directly and don't need worktree provisioning).
-
-    Computes paths directly from [config.base_path] and [agent_name] to avoid
-    constructing a full [keeper_meta] record.  Uses [run_git] directly for
-    worktree operations.
-
-    Failures in individual repos are logged but do not propagate — the
-    validation-time [ensure_worktree_ready] safety net handles any misses. *)
-let provision_worktrees_for_task
-      ~(config : Workspace.config)
-      ~(agent_name : string)
-      ~(task_id : string)
-      () =
-  if not (safe_repo_component task_id) then
-    Log.Workspace.info "provision_worktrees: invalid task_id %S, skipping" task_id
-  else
-    let safe_name = Playground_paths.sanitize_keeper_name agent_name in
-    let playground =
-      Filename.concat config.Workspace.base_path
-        (Printf.sprintf ".masc/playground/docker/%s" safe_name)
-    in
-    let repos_dir = Filename.concat playground "repos" in
-    if not (safe_is_dir repos_dir) then ()
-    else
-      let entries =
-        try Sys.readdir repos_dir with Sys_error _ -> [||]
-      in
-      Array.iter
-        (fun repo_name ->
-           if not (safe_repo_component repo_name) then ()
-           else
-             let repo_path = Filename.concat repos_dir repo_name in
-             if not (safe_is_dir repo_path) then ()
-             else
-               let worktree_path =
-                 Filename.concat
-                   (Filename.concat repo_path ".worktrees")
-                   task_id
-               in
-               match git_toplevel worktree_path with
-               | Some top when same_path worktree_path top -> ()
-               | Some top ->
-                 Log.Workspace.debug
-                   "provision_worktrees: skipped %s/%s: %s is not an independent \
-                    git checkout (git_toplevel=%s)"
-                   repo_name task_id worktree_path top
-               | None -> (
-                   match prepare_worktree_path_for_add ~worktree_path with
-                   | Error msg ->
-                     Log.Workspace.debug
-                       "provision_worktrees: skipped %s/%s: %s"
-                       repo_name task_id msg
-                   | Ok _quarantined -> (
-                     match worktree_base_ref ~repo_path with
-                   | None ->
-                     Log.Workspace.debug
-                       "provision_worktrees: skipped %s/%s: no base ref found"
-                       repo_name task_id
-                   | Some base_ref ->
-                     (* Create worktree in the sandbox clone from origin, not
-                        from whatever task branch the parent clone is currently
-                        on. *)
-                     let add_result =
-                       run_git
-                         ~timeout_sec:(read_only_probe_timeout_sec *. 2.0)
-                         ~clone_path:repo_path
-                         [ "worktree"; "add"; "--detach"; worktree_path; base_ref ]
-                     in
-                     if add_result.ok then (
-                       (match
-                          normalize_worktree_gitdir_file
-                            ~repo_path
-                            ~task_name:task_id
-                            ~worktree_path
-                        with
-                        | Ok () -> ()
-                        | Error msg ->
-                          Log.Workspace.debug
-                            "provision_worktrees: gitdir normalization failed for %s/%s: %s"
-                            repo_name task_id msg);
-                       let branch_name =
-                         Printf.sprintf "task/%s" task_id
-                       in
-                       let _checkout =
-                         run_git ~timeout_sec:read_only_probe_timeout_sec
-                           ~clone_path:worktree_path
-                           [ "checkout"; "-b"; branch_name ]
-                       in
-                       Log.Workspace.info
-                         "provision_worktrees: worktree created for %s/%s"
-                         repo_name task_id
-                     )
-                     else
-                       Log.Workspace.debug
-                         "provision_worktrees: skipped %s/%s from %s: %s"
-                         repo_name task_id base_ref add_result.output)))
-        entries
 
 (* ── Sandbox repo currency (fetch + work-preserving fast-forward) ──── *)
 
@@ -849,7 +476,7 @@ type currency_outcome =
 
 let count_behind ~clone_path ~target_ref =
   let r =
-    run_git ~timeout_sec:read_only_probe_timeout_sec ~clone_path
+    run_git ~clone_path
       [ "rev-list"; "--count"; "HEAD.." ^ target_ref ]
   in
   if r.ok then int_of_string_opt (String.trim r.output) else None
@@ -859,7 +486,7 @@ let count_behind ~clone_path ~target_ref =
     on probe error. [git merge-base --is-ancestor] exits 0 = yes, 1 = no. *)
 let is_ancestor ~clone_path ~ancestor ~descendant =
   let r =
-    run_git ~timeout_sec:read_only_probe_timeout_sec ~clone_path
+    run_git ~clone_path
       [ "merge-base"; "--is-ancestor"; ancestor; descendant ]
   in
   match r.status with
@@ -905,14 +532,12 @@ let ensure_current ~(config : Workspace.config) ~(meta : keeper_meta) ~repo_name
                 let behind = count_behind ~clone_path:cpath ~target_ref in
                 let dirty =
                   let s =
-                    run_git ~timeout_sec:read_only_probe_timeout_sec
-                      ~clone_path:cpath [ "status"; "--porcelain" ]
+                    run_git ~clone_path:cpath [ "status"; "--porcelain" ]
                   in
                   s.ok && String.trim s.output <> ""
                 in
                 let branch =
-                  run_git ~timeout_sec:read_only_probe_timeout_sec
-                    ~clone_path:cpath [ "branch"; "--show-current" ]
+                  run_git ~clone_path:cpath [ "branch"; "--show-current" ]
                   |> fun r -> if r.ok then first_line_opt r.output else None
                 in
                 match behind with

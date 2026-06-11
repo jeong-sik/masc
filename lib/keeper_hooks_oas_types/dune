@@ -5,8 +5,4 @@
  (public_name masc.keeper_hooks_oas_types)
  (wrapped false)
  (modules keeper_hooks_oas_types)
- (libraries
-  agent_sdk
-  masc.keeper_tooling
-  masc.types_boundary
-  yojson))
+ (libraries agent_sdk masc.keeper_tooling masc.types_boundary yojson))

@@ -68,7 +68,9 @@ let test_with_slot_releases_on_exception () =
   (try
      FA.with_slot ~kind:Provider_http (fun () -> raise exn) |> ignore
    with Failure _ -> ()) ;
-  (* Re-acquire should succeed — release happened via on_release. *)
+  (* Re-acquire should succeed — release happened via [Fun.protect]'s
+     [finally] (PR-C1 removed the [Eio.Switch.on_release] counter
+     callback, see plan sharded-swinging-mccarthy.md PR-C1). *)
   let v = FA.with_slot ~kind:Provider_http (fun () -> 7) in
   check int "slot reusable after exception" 7 v
 

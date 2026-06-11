@@ -85,7 +85,6 @@ end
 
 module Spawn : sig
   val timeout_seconds : int
-  val coding_timeout_seconds : int
   val grace_period_seconds : int
 end
 

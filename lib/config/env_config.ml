@@ -55,10 +55,9 @@ let print_summary () =
   Log.Env.info "KeeperAlert(SlackDM): enabled=%b user_id_set=%b"
     Env_config_keeper.KeeperAlert.slack_dm_enabled
     (String.trim Env_config_keeper.KeeperAlert.slack_dm_user_id <> "");
-  Log.Env.info "KeeperKeepalive: interval=%ds max_hb_failures=%d debounce=%.0fs sleep_chunk=%.1fs jitter=%.2f"
+  Log.Env.info "KeeperKeepalive: interval=%ds max_hb_failures=%d sleep_chunk=%.1fs jitter=%.2f"
     Env_config_keeper.KeeperKeepalive.interval_sec
     Env_config_keeper.KeeperKeepalive.max_consecutive_failures
-    Env_config_keeper.KeeperKeepalive.board_debounce_sec
     Env_config_keeper.KeeperKeepalive.sleep_chunk_sec
     Env_config_keeper.KeeperKeepalive.jitter_factor;
   Log.Env.info "WorkAsHeartbeat: enabled=%b max_silence=%.0fs"

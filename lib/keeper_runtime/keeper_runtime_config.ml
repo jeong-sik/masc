@@ -13,11 +13,9 @@ let key_to_env =
     "bootstrap.max_active_keepers",     "MASC_KEEPER_BOOTSTRAP_MAX_ACTIVE_KEEPERS";
     "bootstrap.autoboot_max",           "MASC_KEEPER_AUTOBOOT_MAX";
     (* [autonomous] *)
-    "autonomous.max_turns_per_call",    "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS";
     "autonomous.fairness_cooldown_sec", "MASC_KEEPER_AUTONOMOUS_FAIRNESS_COOLDOWN_SEC";
     "autonomous.max_idle_turns",        "MASC_KEEPER_MAX_IDLE_TURNS_AUTONOMOUS";
     (* [reactive] *)
-    "reactive.max_turns_per_call",      "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL";
     "reactive.max_idle_turns",          "MASC_KEEPER_MAX_IDLE_TURNS_REACTIVE";
     (* [heartbeat] *)
     "heartbeat.interval_sec",           "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC";
@@ -27,7 +25,6 @@ let key_to_env =
     "heartbeat.smart_heartbeat",        "MASC_KEEPER_SMART_HEARTBEAT";
     "heartbeat.jitter_factor",          "MASC_KEEPER_HEARTBEAT_JITTER_FACTOR";
     "heartbeat.sleep_chunk_sec",        "MASC_KEEPER_SLEEP_CHUNK_SEC";
-    "heartbeat.board_debounce_sec",     "MASC_KEEPER_BOARD_DEBOUNCE_SEC";
     "heartbeat.board_generic_wakeup_limit", "MASC_KEEPER_BOARD_GENERIC_WAKEUP_LIMIT";
     "heartbeat.board_wakeup_max",       "MASC_KEEPER_BOARD_WAKEUP_MAX";
     (* [proactive] *)
@@ -37,13 +34,10 @@ let key_to_env =
     "turn.oas_timeout_sec",             "MASC_KEEPER_OAS_TIMEOUT_SEC";
     "turn.stream_idle_timeout_sec",     "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC";
     "turn.cli_subprocess_idle_sec",     "MASC_KEEPER_CLI_SUBPROCESS_IDLE_SEC";
-    "turn.admission_wait_timeout_sec",  "MASC_KEEPER_ADMISSION_WAIT_TIMEOUT_SEC";
     "turn.capacity_limit",              "MASC_KEEPER_TURN_CAPACITY_LIMIT";
     "turn.max_consecutive_hb_failures", "MASC_KEEPER_MAX_CONSECUTIVE_HB_FAILURES";
     "turn.max_consecutive_turn_failures", "MASC_KEEPER_MAX_CONSECUTIVE_TURN_FAILURES";
     "turn.batch_limit",                 "MASC_KEEPER_BATCH_LIMIT";
-    "turn.tool_cost_max_usd",           "MASC_KEEPER_TOOL_COST_MAX_USD";
-    "turn.board_event_limit",           "MASC_KEEPER_BOARD_EVENT_LIMIT";
     "turn.llm_rerank",                  "MASC_KEEPER_LLM_RERANK";
     "turn.llm_rerank_runtime",          "MASC_KEEPER_LLM_RERANK_RUNTIME";
     "turn.temperature",                 "MASC_KEEPER_UNIFIED_TEMP";

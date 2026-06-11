@@ -4,8 +4,8 @@
 
     The .ml is intentionally private-heavy: the bulk of it implements the
     full {!Opentelemetry.Collector.BACKEND} module
-    (Httpc client, Batch / Signal helpers, GC metrics
-    sampler, custom emitter pipeline). External callers get only backend
+    (Httpc client, Batch / Signal helpers, custom emitter pipeline).
+    External callers get only backend
     lifecycle entry points plus the small tick-health accessors that
     {!Otel_spans} surfaces in [/health]. Pinning that minimal surface lets the
     BACKEND machinery evolve internally without contract churn.
@@ -13,14 +13,15 @@
     Internal helpers stay private at this boundary
     (the [OT] / [Signal] / [Batch] aliases, the
     [( let@ )] / [spf] helpers, [set_headers] /
-    [get_headers], the GC-metric atomics
-    [needs_gc_metrics] / [last_gc_metrics] /
-    [timeout_gc_metrics], the {!GC_metrics} sub-module,
-    [sample_gc_metrics_if_needed], [error] type, the
+    [get_headers], the [error] type, the
     [n_errors] / [n_dropped] counters, [report_err_],
     the {!Httpc} module, the {!EMITTER} module type,
     [mk_emitter], the {!Backend} functor, [create_backend], [setup_],
-    [with_setup]). *)
+    [with_setup]).
+
+    Library [Opentelemetry.GC_metrics] sampling is intentionally absent:
+    process.runtime.ocaml.gc.* duplicated the masc_gc_* gauges exported
+    through Otel_metric_store. *)
 
 module Config : sig
   type t

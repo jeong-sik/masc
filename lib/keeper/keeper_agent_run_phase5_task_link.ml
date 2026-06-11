@@ -49,9 +49,8 @@ let run ~config ~(meta : Keeper_meta_contract.keeper_meta)
           ~task_id:task_id_str
           ~trace_id:trace_id_str
       | Error err ->
-        Log.Keeper.warn
-          "keeper:%s link_task_execution_artifacts failed for task=%s: %s"
-          meta.name
+        Log.Keeper.warn ~keeper_name:meta.name
+          "link_task_execution_artifacts failed for task=%s: %s"
           task_id_str
           (Masc_domain.masc_error_to_string err))
 ;;

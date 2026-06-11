@@ -39,17 +39,8 @@ let synonyms : (string * string list) list =
     , [ "happening"; "activity"; "overview"; "summary"; "monitor"; "big picture" ] )
   ; ( "masc_broadcast"
     , [ "notify"; "announce"; "tell"; "inform"; "alert"; "everyone"; "let know" ] )
-  ; ( "masc_claim_next"
-    , [ "claim next task"
-      ; "pick up task"
-      ; "assign me"
-      ; "next task"
-      ; "give me work"
-      ; "take task"
-      ] )
   ; "masc_add_task", [ "create task"; "new task"; "make task"; "register task" ]
   ; "masc_messages", [ "chat"; "conversation"; "history"; "log"; "what was said" ]
-  ; "masc_agents", [ "who is working"; "team members"; "workers"; "collaborators" ]
   ; "masc_status", [ "how are things"; "state"; "health"; "situation" ]
   ; ( "tool_read_file"
     , [ "contents"
@@ -109,7 +100,7 @@ let synonyms : (string * string list) list =
       ; "shell command"
       ; "bash command"
       ] )
-  ; ( "keeper_board_get"
+  ; ( "keeper_board_post_get"
     , [ "read post"
       ; "view post"
       ; "get post"
@@ -223,6 +214,28 @@ let synonyms : (string * string list) list =
       ; "library topic"
       ; "full document"
       ; "knowledge article"
+      ] )
+  ; ( "keeper_surface_read"
+    , [ "discord messages"
+      ; "channel conversation"
+      ; "surface lane"
+      ; "who said"
+      ; "participants roster"
+      ; "connected surface"
+      ] )
+  ; ( "keeper_surface_post"
+    , [ "send discord message"
+      ; "post to channel"
+      ; "reply on surface"
+      ; "message the dashboard"
+      ; "speak on lane"
+      ] )
+  ; ( "keeper_person_note_set"
+    , [ "remember this person"
+      ; "note about speaker"
+      ; "who is this user"
+      ; "save person info"
+      ; "clear person note"
       ] )
   ; ( "keeper_tools_list"
     , [ "what can you do"
@@ -349,8 +362,6 @@ let synonyms : (string * string list) list =
     , [ "clear plan task"; "remove plan task"; "unassign plan task" ] )
   ; (* masc_agent_* — agent management *)
     "masc_agent_card", [ "agent card"; "agent profile"; "agent info"; "who is agent" ]
-  ; ( "masc_agent_update"
-    , [ "update agent"; "change agent"; "agent modify"; "agent settings" ] )
   ; ( "masc_agent_fitness"
     , [ "agent fitness"; "agent evaluation"; "agent score"; "rate agent" ] )
   ; (* masc web search + fetch *)

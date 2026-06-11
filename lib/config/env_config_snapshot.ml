@@ -483,10 +483,6 @@ let keeper_grpc_entries =
 
 let keeper_keepalive_entries =
   [
-    entry ~default:"180.0" "MASC_KEEPER_ADMISSION_WAIT_TIMEOUT_SEC"
-      "Max wait in admission queue before abandoning OAS attempt (clamped 5-1200)";
-    entry ~default:"60.0" "MASC_KEEPER_BOARD_DEBOUNCE_SEC"
-      "Board-reactive wakeup debounce (seconds, clamped 5-300)";
     entry ~default:"30" "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC"
       "Heartbeat cycle interval (clamped 5-300 seconds)";
     entry ~default:"0.2" "MASC_KEEPER_HEARTBEAT_JITTER_FACTOR"
@@ -513,6 +509,8 @@ let keeper_keepalive_entries =
       "Max seconds a keeper turn id may stay active before livelock guard blocks";
     entry ~default:"600.0" "MASC_KEEPER_TURN_TIMEOUT_SEC"
       "Wall-clock timeout for a single unified turn (clamped 60-900 seconds)";
+    entry ~default:"1800.0" "MASC_KEEPER_ATTEMPT_WATCHDOG_SAFETY_CAP_SEC"
+      "Per-attempt wall-clock safety cap for stuck Streaming fibers (clamped 300-7200 seconds)";
     entry ~default:"(none)" "MASC_KEEPER_WORK_AS_HEARTBEAT"
       "Successful workspace heartbeat after turn counts as presence proof (feature flag)";
   ]
@@ -573,8 +571,8 @@ let lock_entries =
   [
     entry ~default:"300.0" "MASC_LOCK_EXPIRY_WARNING_SEC"
       "Lock expiry warning threshold (seconds before expiry)";
-    entry ~default:"1800.0" "MASC_LOCK_TIMEOUT_SEC"
-      "Default lock timeout (seconds, 30 min)";
+    entry ~default:"120.0" "MASC_LOCK_TIMEOUT_SEC"
+      "Default lock timeout (seconds, 2 min)";
   ]
 
 let memory_entries = []
@@ -707,8 +705,6 @@ let smart_heartbeat_entries =
 
 let spawn_entries =
   [
-    entry ~default:"7200.0" "MASC_SPAWN_CODING_TIMEOUT_SEC"
-      "Extended timeout for coding mode (seconds, 2 hours)";
     entry ~default:"60.0" "MASC_SPAWN_GRACE_PERIOD_SEC"
       "Grace period before timeout for SIGTERM checkpoint (seconds)";
     entry ~default:"600.0" "MASC_SPAWN_TIMEOUT_SEC"

@@ -24,6 +24,11 @@
     [keeper_sandbox_docker] only consumes [Keeper_turn_sandbox_runtime.t]
     as a parameter and never constructs one itself. *)
 
+type resolve_result =
+  | Runtime of Keeper_turn_sandbox_runtime.t
+  | No_factory
+  | Local_profile
+
 type t
 
 val create :
@@ -39,23 +44,24 @@ val create :
 val resolve :
   t ->
   cwd:string ->
-  Keeper_turn_sandbox_runtime.t option
-(** Returns [Some runtime] when {!Keeper_sandbox_runner.effective_sandbox_profile}
+  resolve_result
+(** Returns [Runtime runtime] when {!Keeper_sandbox_runner.effective_sandbox_profile}
     yields [Docker] for the current registry meta, falling back to the
     construction meta when the keeper is not registered. [in_playground] is
     derived from [cwd] vs the keeper's playground root for runtime workspace
     reuse only. Memoizes per [(in_playground, network_mode, host_root, image)]
     so subsequent compatible calls reuse the same container without crossing
-    sandbox-profile or image drift. *)
+    sandbox-profile or image drift.
+
+    [Local_profile] is returned when the effective sandbox profile is [Local].
+    [No_factory] is only produced by {!resolve_opt}. *)
 
 val resolve_opt :
   t option ->
   cwd:string ->
-  Keeper_turn_sandbox_runtime.t option
-(** Convenience wrapper: [None] when [t option] is [None], otherwise
-    delegates to {!resolve}.  Lets call sites that previously matched
-    on [Keeper_turn_sandbox_runtime.t option] keep the same shape after
-    the factory rewrite. *)
+  resolve_result
+(** [No_factory] when [t option] is [None]. Otherwise delegates to {!resolve}.
+    Lets call sites distinguish "factory missing" from "Local profile". *)
 
 val container_cwd_of_host_opt : t option -> host_cwd:string -> string option
 (** Pure Docker CWD projection for response shaping. Unlike {!resolve_opt},

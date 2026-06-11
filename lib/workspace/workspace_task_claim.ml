@@ -180,13 +180,21 @@ let claim_task_r config ~agent_name ~task_id ()
               now lives in the task FSM (single authority via [phase]), so the
               former defer-to-dispatch-loop workaround is gone — no cross-lib
               call into [Verification.assign_verifier] is needed. *)
+           let claimed_task =
+             List.find (fun (t : Masc_domain.task) -> String.equal t.id task_id) new_tasks
+           in
            let new_backlog =
              { tasks = new_tasks
              ; last_updated = now_iso ()
              ; version = backlog.version + 1
              }
            in
-           write_backlog config new_backlog;
+           write_backlog
+             ~after_commit:(fun () ->
+               Task_cache_invariant.clear_stale_agent_task config
+                 ~agent_name ~task_id ~status:claimed_task.task_status
+                 ~module_name:"claim_task_r.verification")
+             config new_backlog;
            Workspace_task_classify.update_local_agent_state config ~agent_name (fun agent ->
              { agent with status = Busy; current_task = Some task_id });
            let _ =
@@ -219,13 +227,21 @@ let claim_task_r config ~agent_name ~task_id ()
                ; auto_released_task_ids = []
                })
          | `Claimed_ok ->
+           let claimed_task =
+             List.find (fun (t : Masc_domain.task) -> String.equal t.id task_id) new_tasks
+           in
            let new_backlog =
              { tasks = new_tasks
              ; last_updated = now_iso ()
              ; version = backlog.version + 1
              }
            in
-           write_backlog config new_backlog;
+           write_backlog
+             ~after_commit:(fun () ->
+               Task_cache_invariant.clear_stale_agent_task config
+                 ~agent_name ~task_id ~status:claimed_task.task_status
+                 ~module_name:"claim_task_r.claimed_ok")
+             config new_backlog;
            Workspace_task_classify.update_local_agent_state config ~agent_name (fun agent ->
              { agent with status = Busy; current_task = Some task_id });
            let _ =

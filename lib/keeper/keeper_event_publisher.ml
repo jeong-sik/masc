@@ -204,3 +204,24 @@ let publish_runtime_execution_built
   ] in
   masc_publish
     (Agent_sdk.Event_bus.mk_event (Custom ("telemetry_event", payload)))
+
+(** Generic telemetry event publisher for OAS telemetry observability.
+    Callers provide the event name segment (e.g. "tool_dispatch",
+    "turn_admitted", "turn_completed") and a Yojson payload.
+    The Consumer subscriber on the OAS event bus persists these
+    to a Dated_jsonl store under [<base_path>/telemetry_events/]. *)
+let publish_telemetry_event ~event_name ~payload =
+  (* All telemetry events use the canonical [Custom(\"telemetry_event\", _)]
+     name so the consumer subscriber in Keeper_telemetry_consumer can
+     observe them uniformly. The [event_name] parameter is embedded in
+     the payload for downstream routing. *)
+  let payload_with_name =
+    match payload with
+    | `Assoc fields -> `Assoc (("event_name", `String event_name) :: fields)
+    | other -> other
+  in
+  match Keeper_event_bus.get () with
+  | Some bus ->
+      Agent_sdk_metrics_bridge.publish bus
+        (Agent_sdk.Event_bus.mk_event (Custom ("telemetry_event", payload_with_name)))
+  | None -> ()

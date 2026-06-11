@@ -89,6 +89,17 @@ val publish_keeper_lifecycle :
     exactly the events that signal supervisor recovery actions
     where observability matters most. *)
 
+(** {1 Telemetry events} *)
+
+val publish_telemetry_event :
+  event_name:string -> payload:Yojson.Safe.t -> unit
+(** Publishes [masc.telemetry.<event_name>] with the given [payload].
+    The event is routed through the MASC Event_bus for consumption
+    by {!Keeper_telemetry_consumer} and downstream observers.
+    MASC does not deserialize OAS-level provider/model telemetry;
+    the raw [Yojson.Safe.t] payload is appended to the Dated_jsonl
+    store by the consumer subscriber. *)
+
 val publish_keeper_dead :
   keeper_name:string ->
   reason:string ->

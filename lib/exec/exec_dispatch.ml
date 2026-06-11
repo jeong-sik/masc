@@ -205,23 +205,16 @@ let dispatch_simple ?stdin_content ?on_output_chunk (s : Shell_ir.simple) =
                ~stdin_content
                argv
            | Some on_chunk ->
-             (* WORKAROUND: streaming stdin path is not yet wired; callback
-                receives the full stdout/stderr after completion. 근본 해결:
-                extend Process_eio.run_argv_with_stdin_and_status_split with
-                chunk callbacks and route here. *)
-             let status, stdout, stderr =
-               Exec_gate.run_argv_with_stdin_and_status_split
-                 ~actor:`Tool_local_runtime
-                 ~raw_source
-                 ~summary:"exec dispatch simple stdin streaming"
-                 ?env:host_env
-                 ?cwd
-                 ~stdin_content
-                 argv
-             in
-             on_chunk (`Stdout stdout);
-             on_chunk (`Stderr stderr);
-             status, stdout, stderr)
+             Exec_gate.run_argv_with_stdin_and_status_split
+               ~actor:`Tool_local_runtime
+               ~raw_source
+               ~summary:"exec dispatch simple stdin streaming"
+               ?env:host_env
+               ?cwd
+               ~on_stdout_chunk:(fun chunk -> on_chunk (`Stdout chunk))
+               ~on_stderr_chunk:(fun chunk -> on_chunk (`Stderr chunk))
+               ~stdin_content
+               argv)
       in
       (match run () with
        | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn

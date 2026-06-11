@@ -18,8 +18,8 @@ val dispatch_simple :
     forwarded without dropping the stage's sandbox target.
     [?on_output_chunk] is invoked for every chunk read from
     stdout/stderr while the process is running on the host sandbox
-    path; Docker and stdin fallback paths currently emit the full captured
-    output after completion. *)
+    path, including host commands that receive typed stdin. Docker fallback
+    paths currently emit the full captured output after completion. *)
 
 val dispatch :
   ?on_output_chunk:([ `Stdout of string | `Stderr of string ] -> unit) ->

@@ -73,6 +73,8 @@ val run_argv_with_stdin_and_status_split :
   ?timeout_sec:float ->
   ?env:string array ->
   ?cwd:string ->
+  ?on_stdout_chunk:(string -> unit) ->
+  ?on_stderr_chunk:(string -> unit) ->
   stdin_content:string ->
   string list ->
   (Unix.process_status * string * string)

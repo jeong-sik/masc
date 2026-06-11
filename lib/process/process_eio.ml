@@ -685,18 +685,27 @@ let run_argv_with_stdin_and_status_split
     ?(timeout_sec = default_timeout_sec)
     ?env
     ?cwd
+    ?on_stdout_chunk
+    ?on_stderr_chunk
     ~(stdin_content : string)
     (argv : string list) : Unix.process_status * string * string =
   Exec_tap.record ~kind:Exec_tap.Process_eio_run_argv_with_stdin_and_status ~argv ?env ();
+  let fallback_with_callbacks () =
+    let status, stdout, stderr =
+      run_unix_argv_with_stdin_and_status_split_fallback ~timeout_sec ?env
+        ?cwd ~stdin_content argv
+    in
+    Option.iter (fun f -> if stdout <> "" then f stdout) on_stdout_chunk;
+    Option.iter (fun f -> if stderr <> "" then f stderr) on_stderr_chunk;
+    status, stdout, stderr
+  in
   with_spawn_guard (fun () ->
       if not (is_initialized ()) then
-        run_unix_argv_with_stdin_and_status_split_fallback ~timeout_sec ?env
-          ?cwd ~stdin_content argv
+        fallback_with_callbacks ()
       else
         match get_proc_mgr (), get_clock (), get_cwd_default () with
         | Error _, _, _ | _, Error _, _ | _, _, Error _ ->
-            run_unix_argv_with_stdin_and_status_split_fallback ~timeout_sec
-              ?env ?cwd ~stdin_content argv
+            fallback_with_callbacks ()
         | Ok pm, Ok clk, Ok default_cwd ->
             let effective_cwd =
               match cwd with
@@ -712,8 +721,34 @@ let run_argv_with_stdin_and_status_split
               Eio.Time.with_timeout_exn clk timeout_sec (fun () ->
                   let unix_status =
                     Eio.Switch.run (fun sw ->
-                        spawn_and_drain_both ~phase_ref ~sw pm ~cwd:effective_cwd ?env
-                          ~stdin_source argv stdout_buf stderr_buf)
+                        match on_stdout_chunk, on_stderr_chunk with
+                        | None, None ->
+                            spawn_and_drain_both ~phase_ref ~sw pm
+                              ~cwd:effective_cwd ?env ~stdin_source argv
+                              stdout_buf stderr_buf
+                        | _ ->
+                            let on_stdout_chunk =
+                              match on_stdout_chunk with
+                              | Some f -> f
+                              | None -> fun _ -> ()
+                            in
+                            let on_stderr_chunk =
+                              match on_stderr_chunk with
+                              | Some f -> f
+                              | None -> fun _ -> ()
+                            in
+                            spawn_and_drain_both_streaming
+                              ~phase_ref
+                              ~sw
+                              pm
+                              ~cwd:effective_cwd
+                              ?env
+                              ~stdin_source
+                              argv
+                              ~on_stdout_chunk
+                              ~on_stderr_chunk
+                              stdout_buf
+                              stderr_buf)
                   in
                   ( unix_status,
                     Buffer.contents stdout_buf,
@@ -739,8 +774,7 @@ let run_argv_with_stdin_and_status_split
                   Log.Misc.warn
                     "[Process_eio] argv bind error, retrying via Unix fallback: %s — %s"
                     label (Printexc.to_string exn);
-                  run_unix_argv_with_stdin_and_status_split_fallback
-                    ~timeout_sec ?env ?cwd ~stdin_content argv
+                  fallback_with_callbacks ()
                 ) else if is_downstream_pipe_closed exn then (
                   (* Downstream reader closed the pipe (head/tail/grep -m
                      finished reading and exited).  Kernel returns EPIPE on

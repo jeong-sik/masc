@@ -112,11 +112,16 @@ val run_argv_with_stdin_and_status_split :
   ?timeout_sec:float ->
   ?env:string array ->
   ?cwd:string ->
+  ?on_stdout_chunk:(string -> unit) ->
+  ?on_stderr_chunk:(string -> unit) ->
   stdin_content:string ->
   string list ->
   (Unix.process_status * string * string)
 (** Like [run_argv_with_stdin_and_status], but returns
-    [(status, stdout, stderr)] without combining stderr into stdout. *)
+    [(status, stdout, stderr)] without combining stderr into stdout. When
+    callback arguments are supplied on the Eio path, they are invoked for
+    stdout/stderr chunks while the process is still running. Fallback Unix
+    execution remains completion-captured. *)
 
 (** Run command with explicit argv, return (Unix.process_status, stdout).
     Uses spawn + await to get exit status without raising.

@@ -183,6 +183,9 @@ let default_config
   }
 ;;
 
+let oas_tracer_ref = ref Agent_sdk.Tracing.null
+let set_oas_tracer tracer = oas_tracer_ref := tracer
+
 let guardrails_of_config (config : config) =
   let tool_names = List.map (fun (t : Agent_sdk.Tool.t) -> t.schema.name) config.tools in
   match config.guardrails with
@@ -377,6 +380,9 @@ let builder_without_approval
     match config.checkpoint_sink with
     | Some sink -> Agent_sdk.Builder.with_checkpoint_sink sink builder
     | None -> builder
+  in
+  let builder =
+    Agent_sdk.Builder.with_tracer !oas_tracer_ref builder
   in
   match transport with
   | Some transport -> Agent_sdk.Builder.with_transport transport builder

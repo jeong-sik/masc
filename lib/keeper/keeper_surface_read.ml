@@ -7,6 +7,7 @@ type participant = {
   first_seen : float option;
   last_seen : float option;
   message_count : int;
+  note : string option;
 }
 
 let default_limit = 20
@@ -46,7 +47,8 @@ let participant_json (p : participant) : Yojson.Safe.t =
     @ [ ("authority", `String (Store.authority_label p.authority)) ]
     @ opt_float_field "first_seen" p.first_seen
     @ opt_float_field "last_seen" p.last_seen
-    @ [ ("message_count", `Int p.message_count) ])
+    @ [ ("message_count", `Int p.message_count) ]
+    @ opt_string_field "note" p.note)
 
 (* Roster fold: one bucket per speaker_id over user lines. The most
    recent non-empty name wins (people rename; the log remembers, the
@@ -67,6 +69,7 @@ let roster (lane : Store.chat_message list) : participant list =
                   first_seen = m.ts;
                   last_seen = m.ts;
                   message_count = 1;
+                  note = None;
                 }
             | Some p ->
                 {
@@ -117,8 +120,43 @@ let page_oldest_ts (messages : Store.chat_message list) : float option =
       | some, _ -> some)
     None messages
 
-let respond ~surface ~limit ~has_more (messages : Store.chat_message list) :
-    string =
+(* RFC-0229 P1: notes are keeper-scoped deliberate memory. Union them
+   into the roster — annotating people still present, and resurrecting
+   noted people whose chat rows aged out of the window (note-only
+   entries: no sightings, zero message_count, External authority since
+   ids come from connector rosters). *)
+let with_notes (notes : (string * string) list) (roster : participant list) :
+    participant list =
+  let annotated =
+    List.map
+      (fun p ->
+        match List.assoc_opt p.id notes with
+        | Some n when String.trim n <> "" -> { p with note = Some n }
+        | Some _ | None -> p)
+      roster
+  in
+  let known = List.map (fun p -> p.id) annotated in
+  let note_only =
+    List.filter_map
+      (fun (id, n) ->
+        if String.trim n = "" || List.mem id known then None
+        else
+          Some
+            {
+              id;
+              name = None;
+              authority = Store.External;
+              first_seen = None;
+              last_seen = None;
+              message_count = 0;
+              note = Some n;
+            })
+      notes
+  in
+  annotated @ note_only
+
+let respond ~surface ~limit ~has_more ~notes
+    (messages : Store.chat_message list) : string =
   let surface = String.trim surface in
   if surface = "" then
     Yojson.Safe.to_string
@@ -146,7 +184,9 @@ let respond ~surface ~limit ~has_more (messages : Store.chat_message list) :
         ([
            ("surface", `String surface);
            ("messages", `List (List.map message_json shown));
-           ("participants", `List (List.map participant_json (roster lane)));
+           ( "participants",
+            `List (List.map participant_json (with_notes notes (roster lane)))
+          );
            ("lane_row_count", `Int (List.length lane));
            ("returned", `Int (List.length shown));
            ("has_more", `Bool has_more);

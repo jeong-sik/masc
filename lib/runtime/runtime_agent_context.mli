@@ -145,6 +145,11 @@ type prepared_resume = {
     up where the previous run left off without re-counting
     consumed turns. *)
 
+val set_oas_tracer : Agent_sdk.Tracing.t -> unit
+(** Set the OAS tracer used by {!builder_without_approval}.  Called once
+    at server bootstrap so OAS spans flow to the same OTLP collector as
+    MASC-native telemetry.  Defaults to [Tracing.null] until set. *)
+
 val prepare_resume :
   config:config -> checkpoint:Agent_sdk.Checkpoint.t -> prepared_resume
 (** [prepare_resume ~config ~checkpoint] computes the patched

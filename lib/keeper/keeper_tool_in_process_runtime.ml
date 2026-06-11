@@ -98,9 +98,46 @@ let handle_surface_read ~config ~(meta : keeper_meta) ~args =
       ?before
       ()
   in
+  let notes =
+    Keeper_person_notes.notes
+      ~base_dir:config.Workspace.base_path
+      ~keeper_name:meta.name
+  in
   Keeper_surface_read.respond ~surface ~limit
     ~has_more:page.Keeper_chat_store.has_more
+    ~notes
     page.Keeper_chat_store.messages
+;;
+
+let handle_person_note_set ~config ~(meta : keeper_meta) ~args =
+  let speaker_id =
+    String.trim (Safe_ops.json_string ~default:"" "speaker_id" args)
+  in
+  (* note is NOT trimmed to emptiness-only: a blank note is the
+     deliberate tombstone (RFC-0229 §3.1). *)
+  let note = Safe_ops.json_string ~default:"" "note" args in
+  if speaker_id = "" then
+    Yojson.Safe.to_string
+      (`Assoc
+        [ ( "error"
+          , `String
+              "speaker_id is required. Use the id field from the \
+               keeper_surface_read roster." )
+        ])
+  else begin
+    Keeper_person_notes.set_note
+      ~base_dir:config.Workspace.base_path
+      ~keeper_name:meta.name
+      ~speaker_id
+      ~note
+      ();
+    Yojson.Safe.to_string
+      (`Assoc
+        [ "ok", `Bool true
+        ; "speaker_id", `String speaker_id
+        ; "cleared", `Bool (String.trim note = "")
+        ])
+  end
 ;;
 
 let handle_surface_post ~config ~(meta : keeper_meta) ~args =

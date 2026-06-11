@@ -91,6 +91,21 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     ();
   Otel_spans.setup_exporter ~sw env;
   Shutdown.register ~name:"otel_exporter" ~priority:20 Otel_spans.shutdown;
+  (* RFC-0217 S4-2: wire OAS OTLP exporter so OAS spans/metrics reach the
+     same collector as MASC-native telemetry.  The endpoint is read from
+     the same env-var that MASC's own OTLP client uses. *)
+  (match Sys.getenv_opt "OTEL_EXPORTER_OTLP_ENDPOINT" with
+   | Some endpoint ->
+     let config = Agent_sdk.Otel_export.default_export_config ~endpoint in
+     let instance = Agent_sdk.Otel_tracer.create_instance_eio () in
+     let tracer = Agent_sdk.Otel_tracer.tracer_of_instance instance in
+     Runtime_agent_context.set_oas_tracer tracer;
+     let (_state : Agent_sdk.Otel_export.t) =
+       Agent_sdk.Otel_export.start_daemon ~sw ~clock:env#clock ~net:env#net ~config instance
+     in
+     Log.Server.info "OAS OTLP exporter daemon started (endpoint=%s)" endpoint
+   | None ->
+     Log.Server.info "OTEL_EXPORTER_OTLP_ENDPOINT not set; OAS telemetry export disabled");
   (* Scheduler-lag probe: 1s sleep, gauge = overshoot. A pure-Eio fiber
      cannot observe a blocked domain from inside while it is blocked, but
      the first tick after the block lands carries the full stall duration,

@@ -230,6 +230,13 @@ let synonyms : (string * string list) list =
       ; "message the dashboard"
       ; "speak on lane"
       ] )
+  ; ( "keeper_person_note_set"
+    , [ "remember this person"
+      ; "note about speaker"
+      ; "who is this user"
+      ; "save person info"
+      ; "clear person note"
+      ] )
   ; ( "keeper_tools_list"
     , [ "what can you do"
       ; "capabilities"

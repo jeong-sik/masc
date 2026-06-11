@@ -60,6 +60,12 @@ val handle_surface_post
   -> args:Yojson.Safe.t
   -> string
 
+val handle_person_note_set
+  :  config:Workspace.config
+  -> meta:keeper_meta
+  -> args:Yojson.Safe.t
+  -> string
+
 val handle_ide_annotate
   :  config:Workspace.config
   -> meta:keeper_meta

@@ -71,6 +71,8 @@ services:
       - "16686:16686"
     environment:
       COLLECTOR_OTLP_ENABLED: "true"
+    command:
+      - "--collector.otlp.grpc.max-message-size=16777216"
     restart: unless-stopped
 
   victoriametrics:
@@ -80,6 +82,14 @@ services:
       - "8428:8428"
     command:
       - "-retentionPeriod=7d"
+    restart: unless-stopped
+
+  loki:
+    image: grafana/loki:latest
+    container_name: masc-loki
+    ports:
+      - "3100:3100"
+    command: ["-config.file=/etc/loki/local-config.yaml"]
     restart: unless-stopped
 
   grafana:
@@ -96,6 +106,7 @@ services:
     depends_on:
       - jaeger
       - victoriametrics
+      - loki
     restart: unless-stopped
 
 volumes:

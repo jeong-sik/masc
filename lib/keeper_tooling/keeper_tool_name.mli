@@ -37,6 +37,7 @@ type t =
   | Stay_silent
   | Surface_read
   | Surface_post
+  | Person_note_set
   | Task_claim
   | Task_create
   | Task_done

@@ -38,6 +38,7 @@ type t =
   | Search_files
   | Stay_silent
   | Surface_read
+  | Surface_post
   | Task_claim
   | Task_create
   | Task_done
@@ -86,6 +87,7 @@ let to_string = function
   | Search_files -> "tool_search_files"
   | Stay_silent -> "keeper_stay_silent"
   | Surface_read -> "keeper_surface_read"
+  | Surface_post -> "keeper_surface_post"
   | Task_claim -> "keeper_task_claim"
   | Task_create -> "keeper_task_create"
   | Task_done -> "keeper_task_done"
@@ -135,6 +137,7 @@ let of_string = function
   | "tool_search_files" -> Some Search_files
   | "keeper_stay_silent" -> Some Stay_silent
   | "keeper_surface_read" -> Some Surface_read
+  | "keeper_surface_post" -> Some Surface_post
   | "keeper_task_claim" -> Some Task_claim
   | "keeper_task_create" -> Some Task_create
   | "keeper_task_done" -> Some Task_done
@@ -201,6 +204,7 @@ let is_keeper_board_tool = function
   | Search_files
   | Stay_silent
   | Surface_read
+  | Surface_post
   | Task_claim
   | Task_create
   | Task_done

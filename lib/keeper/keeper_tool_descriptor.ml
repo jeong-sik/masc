@@ -40,6 +40,7 @@ type runtime_handler =
   | Tool_library_search
   | Tool_library_read
   | Tool_surface_read
+  | Tool_surface_post
   | Tool_ide_annotate
   | Tool_voice_dispatch
   | Tool_task_dispatch
@@ -126,6 +127,7 @@ let runtime_handler_to_string = function
   | Tool_library_search -> "tool_library_search"
   | Tool_library_read -> "tool_library_read"
   | Tool_surface_read -> "tool_surface_read"
+  | Tool_surface_post -> "tool_surface_post"
   | Tool_ide_annotate -> "tool_ide_annotate"
   | Tool_voice_dispatch -> "tool_voice_dispatch"
   | Tool_task_dispatch -> "tool_task_dispatch"
@@ -675,6 +677,24 @@ let surface_read_schema =
     ]
 ;;
 
+let surface_post_schema =
+  object_schema
+    ~required:[ "surface"; "content" ]
+    [ property
+        "surface"
+        "string"
+        "Lane to post to: 'dashboard' or 'discord'. Posting to a surface \
+         this keeper is not bound to is an error, not a no-op."
+    ; property "content" "string" "Message text to deliver on the lane."
+    ; property
+        "channel_id"
+        "string"
+        "Discord channel snowflake. Required only when more than one \
+         channel is bound to this keeper; must be one of the bound \
+         channels."
+    ]
+;;
+
 let read_only_in_process_policy ?(inline_safe = false) ?(maintenance_only = false)
       ()
   =
@@ -1018,6 +1038,16 @@ let internal_descriptors : t list =
       ~input_schema:surface_read_schema
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_surface_read
+  ; in_process_descriptor
+      ~id:"keeper.surface.post"
+      ~name:"keeper_surface_post"
+      ~description:
+        "Post a message to one connected surface lane: 'dashboard' (appears \
+         in the operator's chat transcript) or 'discord' (sends to the bound \
+         channel). Posting to an unbound surface is an error."
+      ~input_schema:surface_post_schema
+      ~policy:(write_in_process_policy ())
+      ~handler:Tool_surface_post
     (* ── IDE (RFC-0179 PR-3) ──────────────────────────────────── *)
   ; in_process_descriptor
       ~id:"keeper.ide.annotate"

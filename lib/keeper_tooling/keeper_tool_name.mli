@@ -36,6 +36,7 @@ type t =
   | Search_files
   | Stay_silent
   | Surface_read
+  | Surface_post
   | Task_claim
   | Task_create
   | Task_done

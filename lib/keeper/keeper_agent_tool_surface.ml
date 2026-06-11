@@ -199,6 +199,7 @@ let tool_search_alias_entries =
   ; "keeper_library_search", "라이브러리 지식 문서 검색"
   ; "keeper_library_read", "라이브러리 문서 읽기 지식"
   ; "keeper_surface_read", "커넥터 대화 읽기 디스코드 채널 화자 명부 서피스"
+  ; "keeper_surface_post", "커넥터 발화 보내기 디스코드 채널 메시지 전송 서피스"
   ; "keeper_time_now", "시간 현재 타임스탬프"
   ; "keeper_context_status", "컨텍스트 상태 토큰 사용량"
   ; "keeper_tools_list", "도구 목록 기능 할수있는것 능력"

@@ -98,6 +98,56 @@ let handle_surface_read ~config ~(meta : keeper_meta) ~args =
   Keeper_surface_read.respond ~surface ~limit messages
 ;;
 
+let handle_surface_post ~config ~(meta : keeper_meta) ~args =
+  let surface = String.trim (Safe_ops.json_string ~default:"" "surface" args) in
+  let content = Safe_ops.json_string ~default:"" "content" args in
+  let channel_id =
+    match String.trim (Safe_ops.json_string ~default:"" "channel_id" args) with
+    | "" -> None
+    | id -> Some id
+  in
+  if surface = "" then
+    Keeper_surface_post.error_json
+      "surface is required. Good: surface='dashboard'."
+  else if String.trim content = "" then
+    Keeper_surface_post.error_json "content is required and must be non-empty."
+  else
+    let bound_discord_channels =
+      Channel_gate_discord_state.bound_channels ~keeper_name:meta.name
+    in
+    match
+      Keeper_surface_post.resolve_target ~surface ~channel_id
+        ~bound_discord_channels
+    with
+    | Error message -> Keeper_surface_post.error_json message
+    | Ok Keeper_surface_post.To_dashboard ->
+        Keeper_chat_store.append_assistant_message
+          ~base_dir:config.Workspace.base_path
+          ~keeper_name:meta.name
+          ~content
+          ~source:"dashboard"
+          ();
+        Keeper_chat_broadcast.chat_appended ~keeper_name:meta.name
+          ~source:"dashboard";
+        Keeper_surface_post.ok_json ~surface ()
+    | Ok (Keeper_surface_post.To_discord { channel_id }) -> (
+        match Channel_gate_discord_state.send_message ~channel_id ~content with
+        | Error send_error ->
+            Keeper_surface_post.error_json
+              (Format.asprintf "discord send failed: %a"
+                 Channel_gate_discord_state.pp_send_error send_error)
+        | Ok message_id ->
+            Keeper_chat_store.append_assistant_message
+              ~base_dir:config.Workspace.base_path
+              ~keeper_name:meta.name
+              ~content
+              ~source:"discord"
+              ();
+            Keeper_chat_broadcast.chat_appended ~keeper_name:meta.name
+              ~source:"discord";
+            Keeper_surface_post.ok_json ~surface ~message_id ())
+;;
+
 let handle_ide_annotate ~config ~(meta : keeper_meta) ~args =
   Keeper_tool_ide_runtime.handle_ide_annotate
     ~config

@@ -223,6 +223,13 @@ let synonyms : (string * string list) list =
       ; "participants roster"
       ; "connected surface"
       ] )
+  ; ( "keeper_surface_post"
+    , [ "send discord message"
+      ; "post to channel"
+      ; "reply on surface"
+      ; "message the dashboard"
+      ; "speak on lane"
+      ] )
   ; ( "keeper_tools_list"
     , [ "what can you do"
       ; "capabilities"

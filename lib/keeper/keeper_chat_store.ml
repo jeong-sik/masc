@@ -180,6 +180,47 @@ let append_turn ~base_dir ~keeper_name ~(user_content : string)
     Log.Keeper.warn "keeper_chat_store: append failed for %s: %s"
       (sanitize_name keeper_name) (Printexc.to_string exn)
 
+(* RFC-0223 P4: keeper-initiated message on one lane. A single
+   assistant line — there is no user turn to pair it with. *)
+let append_assistant_message ~base_dir ~keeper_name ~(content : string)
+    ?source () =
+  try
+    ensure_dir_once ~base_dir;
+    let path = chat_path ~base_dir ~keeper_name in
+    let ts = Time_compat.now () in
+    let line = encode_line ~role:"assistant" ~content ~ts ?source () in
+    Fs_compat.append_file path (line ^ "\n")
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string ChatStoreFailures)
+      ~labels:[("operation", Keeper_chat_store_operation.(to_label Append))]
+      ();
+    Log.Keeper.warn "keeper_chat_store: assistant append failed for %s: %s"
+      (sanitize_name keeper_name) (Printexc.to_string exn)
+
+(* RFC-0226: inbound user line recorded at delivery time, before (and
+   independent of) any turn. A single user line — the assistant reply,
+   if one ever comes, is appended separately by the reply path. *)
+let append_user_message ~base_dir ~keeper_name ~(content : string)
+    ?source ?speaker () =
+  try
+    ensure_dir_once ~base_dir;
+    let path = chat_path ~base_dir ~keeper_name in
+    let ts = Time_compat.now () in
+    let line = encode_line ~role:"user" ~content ~ts ?source ?speaker () in
+    Fs_compat.append_file path (line ^ "\n")
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string ChatStoreFailures)
+      ~labels:[("operation", Keeper_chat_store_operation.(to_label Append))]
+      ();
+    Log.Keeper.warn "keeper_chat_store: user append failed for %s: %s"
+      (sanitize_name keeper_name) (Printexc.to_string exn)
+
 let parse_line ~file_path (line : string) : chat_message option =
   try
     let json = Yojson.Safe.from_string line in
@@ -286,13 +327,26 @@ let rec drop_leading_tool_messages = function
   | msg :: rest when is_tool_message msg -> drop_leading_tool_messages rest
   | messages -> messages
 
+(* RFC-0226 P2: [load] serves a fixed window ([max_total_lines]) but
+   used to read and JSON-parse the whole file to build it, so its cost
+   scaled with lane size — the same pathology family as the
+   2026-06-09 telemetry-JSONL incident (multi-MB files starving the
+   Eio domain). Read a bounded tail instead: [max_total_lines] lines
+   at ~10 KiB each leaves wide slack over the gate's 4 KB content
+   bound. A tail whose recent lines are larger (attachment payloads)
+   degrades to a shorter window, never to an error or a full scan. *)
+let tail_read_bytes = 4 * 1024 * 1024
+
 let load ~base_dir ~keeper_name : chat_message list =
   let path = chat_path ~base_dir ~keeper_name in
   if not (Sys.file_exists path) then []
   else
   try
-    let content = Fs_compat.load_file path in
-    let lines = String.split_on_char '\n' content in
+    let from =
+      match Fs_compat.file_size path with
+      | Some size when size > tail_read_bytes -> size - tail_read_bytes
+      | Some _ | None -> 0
+    in
     (* Single pass: keep a running window of the last [max_history]
        user/assistant messages plus their tool lines. *)
     let q = Queue.create () in
@@ -301,22 +355,30 @@ let load ~base_dir ~keeper_name : chat_message list =
       let popped = Queue.pop q in
       if not (is_tool_message popped) then decr primary_count
     in
-    List.iter
-      (fun line ->
-        let trimmed = String.trim line in
-        if trimmed <> "" then
-          match parse_line ~file_path:path trimmed with
-          | Some msg ->
-              Queue.push msg q;
-              if not (is_tool_message msg) then incr primary_count;
-              while
-                !primary_count > max_history
-                || Queue.length q > max_total_lines
-              do
-                pop_front ()
-              done
-          | None -> ())
-      lines;
+    (* A mid-line [from] makes the first folded item a line fragment;
+       dropping it unconditionally when [from > 0] also drops one full
+       line when [from] lands exactly on a boundary — irrelevant under
+       the window's slack, and it keeps fragment noise out of the
+       read-drop metrics. *)
+    let skip_partial_first = ref (from > 0) in
+    let (), _boundary =
+      Fs_compat.fold_appended_lines ~path ~from ~init:() ~f:(fun () line ->
+        if !skip_partial_first then skip_partial_first := false
+        else
+          let trimmed = String.trim line in
+          if trimmed <> "" then
+            match parse_line ~file_path:path trimmed with
+            | Some msg ->
+                Queue.push msg q;
+                if not (is_tool_message msg) then incr primary_count;
+                while
+                  !primary_count > max_history
+                  || Queue.length q > max_total_lines
+                do
+                  pop_front ()
+                done
+            | None -> ())
+    in
     Queue.fold (fun acc msg -> msg :: acc) [] q
     |> List.rev
     |> drop_leading_tool_messages

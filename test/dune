@@ -181,6 +181,7 @@
   test_keeper_unified_idle_cooldown
   test_keeper_unified_inline_skip
   test_keeper_unified_metacognition
+  test_keeper_surface_post
   test_keeper_surface_read
   test_keeper_surface_presence_prompt
   test_keeper_unified_verification_surface
@@ -444,6 +445,7 @@
   test_keeper_unified_idle_cooldown
   test_keeper_unified_inline_skip
   test_keeper_unified_metacognition
+  test_keeper_surface_post
   test_keeper_surface_read
   test_keeper_surface_presence_prompt
   test_keeper_unified_verification_surface

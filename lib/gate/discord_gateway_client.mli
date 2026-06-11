@@ -60,11 +60,17 @@ val run :
   intents:intent list ->
   trigger_policy:trigger_policy ->
   on_event:(gateway_event -> unit) ->
+  on_ambient:(gateway_event -> unit) ->
   unit ->
   unit
 (** Connect to Discord Gateway, identify with [intents], dispatch
     events that pass [trigger_policy] to [on_event]. Blocks until
     [sw] is closed.
+
+    [on_ambient] receives [Message_create] events that fail
+    [trigger_policy] but are not the bot's own echo (RFC-0226):
+    record-only delivery — the handler persists the line to the bound
+    keeper's lane history and must not start a turn.
 
     Internally:
     1. Create {!Discord_gateway_state.t} with [trigger_policy].

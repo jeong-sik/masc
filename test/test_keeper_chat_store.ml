@@ -182,6 +182,48 @@ let test_speaker_external_roundtrip () =
       | messages ->
           Alcotest.failf "expected 2 messages, got %d" (List.length messages))
 
+(* RFC-0226: an inbound line recorded at delivery time stands alone —
+   no paired assistant turn — and a later reply-path assistant append
+   joins it on the same lane without duplicating the user line. *)
+let test_append_user_message_roundtrip () =
+  let base_dir = temp_base_path "keeper-chat-store-ambient" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-ambient" in
+      K.append_user_message ~base_dir ~keeper_name
+        ~content:"two humans chatting, no mention"
+        ~source:"discord"
+        ~speaker:
+          { K.speaker_id = Some "55501";
+            speaker_name = Some "jane";
+            speaker_authority = K.External }
+        ();
+      K.append_assistant_message ~base_dir ~keeper_name
+        ~content:"reply recorded separately" ~source:"discord" ();
+      match K.load ~base_dir ~keeper_name with
+      | [ user; assistant ] ->
+          Alcotest.(check string) "lone user line first" "user" user.K.role;
+          Alcotest.(check string) "content"
+            "two humans chatting, no mention" user.K.content;
+          Alcotest.(check (option string)) "source"
+            (Some "discord") user.K.source;
+          (match user.speaker with
+           | Some sp ->
+               Alcotest.(check (option string)) "speaker id"
+                 (Some "55501") sp.K.speaker_id;
+               Alcotest.(check (option string)) "speaker name"
+                 (Some "jane") sp.K.speaker_name;
+               Alcotest.(check string) "authority external"
+                 "external" (K.authority_label sp.K.speaker_authority)
+           | None -> Alcotest.fail "ambient user line lost its speaker");
+          Alcotest.(check string) "assistant joins the lane"
+            "assistant" assistant.K.role;
+          Alcotest.(check string) "no duplicated user line"
+            "reply recorded separately" assistant.K.content
+      | messages ->
+          Alcotest.failf "expected 2 messages, got %d" (List.length messages))
+
 let test_speaker_owner_roundtrip () =
   let base_dir = temp_base_path "keeper-chat-store-speaker-own" in
   Fun.protect
@@ -300,6 +342,51 @@ let test_orphan_leading_tool_lines_trimmed () =
       Alcotest.(check (list string)) "leading orphan tool trimmed"
         [ "user"; "assistant" ] (roles messages))
 
+(* RFC-0226 P2: a lane larger than the tail-read bound must still
+   yield exactly the window a full scan would — the bound only caps
+   bytes read, never changes window semantics. 5,200 x ~1 KiB lines
+   ≈ 5.3 MiB > the 4 MiB tail bound, so [load] starts mid-file. *)
+let test_tail_bounded_load_matches_full_scan_window () =
+  let base_dir = temp_base_path "keeper-chat-store-tail" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-tail" in
+      let path = chat_path ~base_dir ~keeper_name in
+      let padding = String.make 1000 'x' in
+      let total = 5200 in
+      let buf = Buffer.create (total * 1100) in
+      for i = 1 to total do
+        let role = if i mod 2 = 1 then "user" else "assistant" in
+        let line =
+          Yojson.Safe.to_string
+            (`Assoc
+               [ ("role", `String role);
+                 ("content", `String (Printf.sprintf "msg-%04d %s" i padding));
+                 ("ts", `Float (float_of_int i));
+               ])
+        in
+        Buffer.add_string buf line;
+        Buffer.add_char buf '\n'
+      done;
+      write_file path (Buffer.contents buf);
+      let messages = K.load ~base_dir ~keeper_name in
+      Alcotest.(check int) "window is 100 primaries" 100 (List.length messages);
+      let content_prefix (m : K.chat_message) = String.sub m.K.content 0 8 in
+      (match messages with
+       | first :: _ ->
+           Alcotest.(check string) "window starts at line 5101"
+             "msg-5101" (content_prefix first);
+           Alcotest.(check string) "line 5101 is a user line" "user" first.K.role
+       | [] -> Alcotest.fail "expected non-empty window");
+      (match List.rev messages with
+       | last :: _ ->
+           Alcotest.(check string) "window ends at line 5200"
+             "msg-5200" (content_prefix last);
+           Alcotest.(check string) "line 5200 is an assistant line"
+             "assistant" last.K.role
+       | [] -> Alcotest.fail "expected non-empty window"))
+
 let () =
   Alcotest.run "keeper_chat_store"
     [
@@ -314,6 +401,8 @@ let () =
         [
           Alcotest.test_case "external speaker roundtrip" `Quick
             test_speaker_external_roundtrip;
+          Alcotest.test_case "ambient user line roundtrip (RFC-0226)" `Quick
+            test_append_user_message_roundtrip;
           Alcotest.test_case "owner speaker roundtrip" `Quick
             test_speaker_owner_roundtrip;
           Alcotest.test_case "unknown authority reported, not guessed" `Quick
@@ -329,5 +418,7 @@ let () =
             test_window_keeps_tool_lines_of_retained_turns;
           Alcotest.test_case "orphan leading tool lines trimmed" `Quick
             test_orphan_leading_tool_lines_trimmed;
+          Alcotest.test_case "tail-bounded load matches full-scan window (RFC-0226 P2)"
+            `Quick test_tail_bounded_load_matches_full_scan_window;
         ] );
     ]

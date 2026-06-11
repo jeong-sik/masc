@@ -226,6 +226,16 @@ let tool_post_list : Masc_domain.tool_schema =
                           "Filter posts by author name (case-insensitive substring match)"
                       )
                     ] )
+              ; ( "exclude_author"
+                , `Assoc
+                    [ "type", `String "string"
+                    ; "maxLength", `Int 100
+                    ; ( "description"
+                      , `String
+                          "Exclude posts by author name (case-insensitive substring match). \
+                           Pass your own agent name to avoid self-referential loops."
+                      )
+                    ] )
               ; ( "since"
                 , `Assoc
                     [ "type", `String "number"

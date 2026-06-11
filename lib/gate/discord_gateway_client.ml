@@ -94,7 +94,7 @@ let published_connection_state : Discord_gateway_state.connection_state Atomic.t
 
 let connection_state () = Atomic.get published_connection_state
 
-let run ~sw ~env ~token ~intents ~trigger_policy ~on_event () =
+let run ~sw ~env ~token ~intents ~trigger_policy ~on_event ~on_ambient () =
   let config : Discord_gateway_state.config = {
     token; intents; bot_user_id = None; trigger_policy;
   } in
@@ -183,6 +183,7 @@ let run ~sw ~env ~token ~intents ~trigger_policy ~on_event () =
         Eio.Time.sleep clock (float_of_int delay_ms /. 1000.0);
         Eio.Stream.add input_mailbox Discord_gateway_state.Backoff_elapsed)
     | Emit_event ev -> on_event ev
+    | Emit_ambient ev -> on_ambient ev
     | Log { level; message } -> log_effect level message
   in
 

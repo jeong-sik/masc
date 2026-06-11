@@ -220,6 +220,8 @@ let record_ready ~bot_user_id =
     (Some
        {
          ready_bot_user_id = bot_user_id;
+         (* NDT-OK: READY wall-clock is operator-facing telemetry only
+            (status_json last_ready_at); no control flow reads it. *)
          ready_at = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ());
        })
 

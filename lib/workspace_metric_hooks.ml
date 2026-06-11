@@ -390,7 +390,7 @@ let install () =
       || ((not (String.contains author ' ')) && String.ends_with ~suffix:"-probe" author)
     in
     let now = Time_compat.now () in
-    Board_dispatch.list_posts ~sort_by:Board_dispatch.Recent ~limit:5200 ()
+    Masc_board_handlers.Board_dispatch.list_posts ~sort_by:Masc_board_handlers.Board_dispatch.Recent ~limit:5200 ()
     |> List.fold_left
          (fun removed (post : Board.post) ->
             let author = Board.Agent_id.to_string post.author in
@@ -401,7 +401,7 @@ let install () =
                   && now -. post.updated_at >= stale_system_daily_sec)
             then (
               match
-                Board_dispatch.delete_post ~post_id:(Board.Post_id.to_string post.id)
+                Masc_board_handlers.Board_dispatch.delete_post ~post_id:(Board.Post_id.to_string post.id)
               with
               | Ok () -> removed + 1
               | Error _ -> removed)

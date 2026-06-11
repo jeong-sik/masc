@@ -36,8 +36,8 @@ let json_float_null_member name fields =
 ;;
 
 let board_signal_kind_of_string = function
-  | "post_created" | "post" -> Some Board_dispatch.Board_post_created
-  | "comment_added" | "comment" -> Some Board_dispatch.Board_comment_added
+  | "post_created" | "post" -> Some Masc_board_handlers.Board_dispatch.Board_post_created
+  | "comment_added" | "comment" -> Some Masc_board_handlers.Board_dispatch.Board_comment_added
   | _ -> None
 ;;
 
@@ -59,7 +59,7 @@ let of_stimulus_payload payload =
        | Some kind, Some post_id, Some author, Some title, Some content ->
          Option.map
            (fun kind ->
-              { Board_dispatch.kind
+              { Masc_board_handlers.Board_dispatch.kind
               ; post_id
               ; author
               ; title
@@ -88,13 +88,13 @@ let list_posts_after_cursor (cursor_ts, cursor_post_id) =
   let is_after_cursor post =
     compare_cursor_token (cursor_token_of_post post) (cursor_ts, cursor_post_id) > 0
   in
-  Board_dispatch.list_posts ~sort_by:Board_dispatch.Updated ~limit:max_int ()
+  Masc_board_handlers.Board_dispatch.list_posts ~sort_by:Masc_board_handlers.Board_dispatch.Updated ~limit:max_int ()
   |> List.filter is_after_cursor
   |> List.sort (fun (a : Board.post) (b : Board.post) ->
     compare_cursor_token (cursor_token_of_post a) (cursor_token_of_post b))
 ;;
 
-let text (signal : Board_dispatch.board_signal) =
+let text (signal : Masc_board_handlers.Board_dispatch.board_signal) =
   String.concat
     "\n"
     (List.filter
@@ -110,7 +110,7 @@ let text (signal : Board_dispatch.board_signal) =
 let match_signal
       ~continuity_summary:(_ : string)
       ~(meta : keeper_meta)
-      ~(signal : Board_dispatch.board_signal)
+      ~(signal : Masc_board_handlers.Board_dispatch.board_signal)
   : match_result
   =
   let self_tokens = Message_scope.self_identity_tokens meta in
@@ -138,7 +138,7 @@ let match_signal
     or updated_at). Based on BDI commitment reconsideration: a committed
     response is only re-evaluated when new external beliefs arrive. *)
 let check_self_comment_status ~self_tokens ~(post_id : string) : comment_status =
-  match Board_dispatch.get_comments ~post_id with
+  match Masc_board_handlers.Board_dispatch.get_comments ~post_id with
   | Error _ -> `Never
   | Ok comments ->
     let my_comments =
@@ -186,7 +186,7 @@ let check_self_comment_status ~self_tokens ~(post_id : string) : comment_status 
 
 type stigmergy_match_result = { overall_score : int }
 
-let stigmergy_match ~(meta : keeper_meta) ~(signal : Board_dispatch.board_signal)
+let stigmergy_match ~(meta : keeper_meta) ~(signal : Masc_board_handlers.Board_dispatch.board_signal)
   : stigmergy_match_result
   =
   let signal_text = String.lowercase_ascii (text signal) in
@@ -211,7 +211,7 @@ let stigmergy_match ~(meta : keeper_meta) ~(signal : Board_dispatch.board_signal
 let wake_reason
       ~continuity_summary
       ~(meta : keeper_meta)
-      ~(signal : Board_dispatch.board_signal)
+      ~(signal : Masc_board_handlers.Board_dispatch.board_signal)
   : string option
   =
   let matched = match_signal ~continuity_summary ~meta ~signal in
@@ -224,9 +224,9 @@ let wake_reason
     else (
       let self_tokens = Message_scope.self_identity_tokens meta in
       match signal.kind with
-      | Board_dispatch.Board_comment_added ->
+      | Masc_board_handlers.Board_dispatch.Board_comment_added ->
         (match check_self_comment_status ~self_tokens ~post_id:signal.post_id with
          | `New_external _ -> Some "thread_reply_after_self_comment"
          | `Never | `No_new_external -> None)
-      | Board_dispatch.Board_post_created -> None))
+      | Masc_board_handlers.Board_dispatch.Board_post_created -> None))
 ;;

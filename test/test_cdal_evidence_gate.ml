@@ -2,7 +2,7 @@
 
     The gate verifies explicit verification submissions by the presence of
     evidence a reviewer can inspect downstream: substantive notes plus the
-    contract's required_evidence, or a handoff reference. There is no verdict
+    contract's verify_gate_evidence, or a handoff reference. There is no verdict
     ledger; the gate consults only the task + notes + handoff. *)
 
 open Alcotest
@@ -36,17 +36,15 @@ let make_task
 let make_contract
       ?(strict = false)
       ?(completion_contract = [])
-      ?(required_evidence = [])
-      ?(inspect_gate_evidence = [])
       ?(verify_gate_evidence = [])
+      ?(inspect_gate_evidence = [])
       ()
     : Masc_domain.task_contract
   =
   { strict
   ; completion_contract
-  ; required_evidence
-  ; inspect_gate_evidence
   ; verify_gate_evidence
+  ; inspect_gate_evidence
   ; evidence_claims = []
   ; stale_claim_timeout_sec = 0
   ; links = { operation_id = None; session_id = None }
@@ -92,9 +90,9 @@ let test_no_task_passes () =
   | Gate.Reject { rule_id; _ } ->
     failf "missing task should Pass, got Reject rule_id=%s" rule_id
 
-(* Contract + all required_evidence mentioned + substantive notes → Pass *)
-let test_required_evidence_satisfied_passes () =
-  let contract = make_contract ~required_evidence:[ "src/main.ml" ] () in
+(* Contract + all verify_gate_evidence mentioned + substantive notes → Pass *)
+let test_verify_gate_evidence_satisfied_passes () =
+  let contract = make_contract ~verify_gate_evidence:[ "src/main.ml" ] () in
   let task = make_task ~contract:(Some contract) () in
   match
     Gate.decide
@@ -106,9 +104,9 @@ let test_required_evidence_satisfied_passes () =
   with
   | Gate.Pass -> ()
   | Gate.Reject { rule_id; _ } ->
-    failf "satisfied required_evidence should Pass, got Reject rule_id=%s" rule_id
+    failf "satisfied verify_gate_evidence should Pass, got Reject rule_id=%s" rule_id
 
-(* Contract (no required_evidence) + substantive notes → Pass *)
+(* Contract (no verify_gate_evidence) + substantive notes → Pass *)
 let test_substantive_notes_pass () =
   let task = make_task ~contract:(Some (make_contract ())) () in
   match
@@ -123,7 +121,7 @@ let test_substantive_notes_pass () =
   | Gate.Reject { rule_id; _ } ->
     failf "substantive notes should Pass, got Reject rule_id=%s" rule_id
 
-(* Contract (no required_evidence) + handoff reference url, empty notes → Pass *)
+(* Contract (no verify_gate_evidence) + handoff reference url, empty notes → Pass *)
 let test_handoff_reference_passes () =
   let task = make_task ~contract:(Some (make_contract ())) () in
   match
@@ -139,10 +137,10 @@ let test_handoff_reference_passes () =
   | Gate.Reject { rule_id; _ } ->
     failf "handoff reference should Pass, got Reject rule_id=%s" rule_id
 
-(* Contract + required_evidence unsatisfied → Reject *)
-let test_required_evidence_unsatisfied_rejects () =
+(* Contract + verify_gate_evidence unsatisfied → Reject *)
+let test_verify_gate_evidence_unsatisfied_rejects () =
   let contract =
-    make_contract ~required_evidence:[ "test_results"; "coverage_report" ] ()
+    make_contract ~verify_gate_evidence:[ "test_results"; "coverage_report" ] ()
   in
   let task = make_task ~contract:(Some contract) () in
   match
@@ -153,20 +151,20 @@ let test_required_evidence_unsatisfied_rejects () =
       ~handoff_context:None
       ()
   with
-  | Gate.Pass -> fail "unsatisfied required_evidence must Reject"
+  | Gate.Pass -> fail "unsatisfied verify_gate_evidence must Reject"
   | Gate.Reject { rule_id; payload_json; _ } ->
     check string "rule_id" Gate.rule_id_evidence_incomplete rule_id;
     (match payload_json with
      | `Assoc fields ->
-       (match List.assoc_opt "required_evidence_unsatisfied" fields with
+       (match List.assoc_opt "verify_gate_evidence_unsatisfied" fields with
         | Some (`List xs) -> check int "unsatisfied count" 2 (List.length xs)
-        | _ -> fail "payload missing required_evidence_unsatisfied");
+        | _ -> fail "payload missing verify_gate_evidence_unsatisfied");
        (match List.assoc_opt "evidence_summary" fields with
         | Some (`Assoc _) -> ()
         | _ -> fail "payload missing evidence_summary")
      | _ -> fail "payload is not Assoc")
 
-(* Contract (no required_evidence) + placeholder notes, no handoff → Reject *)
+(* Contract (no verify_gate_evidence) + placeholder notes, no handoff → Reject *)
 let test_placeholder_notes_reject () =
   let task = make_task ~contract:(Some (make_contract ())) () in
   List.iter
@@ -195,12 +193,12 @@ let () =
     [ ( "evidence-substantiveness"
       , [ test_case "no contract → Pass" `Quick test_no_contract_passes
         ; test_case "no task → Pass" `Quick test_no_task_passes
-        ; test_case "required_evidence satisfied → Pass" `Quick
-            test_required_evidence_satisfied_passes
+        ; test_case "verify_gate_evidence satisfied → Pass" `Quick
+            test_verify_gate_evidence_satisfied_passes
         ; test_case "substantive notes → Pass" `Quick test_substantive_notes_pass
         ; test_case "handoff reference → Pass" `Quick test_handoff_reference_passes
-        ; test_case "required_evidence unsatisfied → Reject" `Quick
-            test_required_evidence_unsatisfied_rejects
+        ; test_case "verify_gate_evidence unsatisfied → Reject" `Quick
+            test_verify_gate_evidence_unsatisfied_rejects
         ; test_case "placeholder notes → Reject" `Quick
             test_placeholder_notes_reject
         ] )

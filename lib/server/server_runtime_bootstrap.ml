@@ -772,7 +772,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
         | "board" ->
             Some
               (Server_dashboard_http.dashboard_board_json
-                 ~sort_by:Board_dispatch.Recent ~exclude_system:true
+                 ~sort_by:Masc_board_handlers.Board_dispatch.Recent ~exclude_system:true
                  ~limit:100 ~offset:0 ())
         | "goals" ->
             Some

@@ -37,8 +37,8 @@ module Types = Masc_domain
 module Tempo = Masc.Tempo
 module Auth = Masc.Auth
 module Board = Masc.Board
-module Board_curation = Masc.Board_curation
-module Board_dispatch = Masc.Board_dispatch
+module Board_curation = Masc_board_handlers.Board_curation
+module Board_dispatch = Masc_board_handlers.Board_dispatch
 module Task = Masc.Task
 module Http_negotiation = Mcp_transport_protocol.Http_negotiation
 module Progress = Masc.Progress
@@ -258,7 +258,7 @@ let dispatch_route ~router ~request ~path reqd =
       let json = `Assoc [("flairs", `List flairs)] in
       Http.Response.json (Yojson.Safe.to_string json) reqd
   | `GET, "/api/v1/board/hearths" ->
-      let hearths = Board_dispatch.list_hearths () in
+      let hearths = Masc_board_handlers.Board_dispatch.list_hearths () in
       let json = `Assoc [
         ("hearths", `List (List.map (fun (name, count) ->
           `Assoc [("name", `String name); ("count", `Int count)]
@@ -267,14 +267,14 @@ let dispatch_route ~router ~request ~path reqd =
       Http.Response.json (Yojson.Safe.to_string json) reqd
   | `GET, "/api/v1/board/curation" ->
       let json =
-        match Board_dispatch.latest_curation_snapshot () with
+        match Masc_board_handlers.Board_dispatch.latest_curation_snapshot () with
         | None -> `Assoc [ ("snapshot", `Null) ]
         | Some snap ->
-            `Assoc [ ("snapshot", Board_curation.snapshot_to_yojson snap) ]
+            `Assoc [ ("snapshot", Masc_board_handlers.Board_curation.snapshot_to_yojson snap) ]
       in
       Http.Response.json (Yojson.Safe.to_string json) reqd
   | `GET, "/api/v1/board/sub-boards" ->
-      let sub_boards = Board_dispatch.list_sub_boards () in
+      let sub_boards = Masc_board_handlers.Board_dispatch.list_sub_boards () in
       let json =
         `Assoc
           [
@@ -288,9 +288,9 @@ let dispatch_route ~router ~request ~path reqd =
       let limit =
         int_query_param request "limit" ~default:500 |> clamp ~min_v:1 ~max_v:5000
       in
-      let events = Board_dispatch.get_karma_ledger ?agent ~limit () in
+      let events = Masc_board_handlers.Board_dispatch.get_karma_ledger ?agent ~limit () in
       let totals =
-        Board_dispatch.get_all_karma ()
+        Masc_board_handlers.Board_dispatch.get_all_karma ()
         |> List.sort (fun (_, a) (_, b) -> compare b a)
       in
       let json =
@@ -332,7 +332,7 @@ let dispatch_route ~router ~request ~path reqd =
                 {|{"error":"target_type must be post or comment"}|} reqd
           | Some target_type ->
               (match
-                 Board_dispatch.toggle_reaction ~target_type ~target_id
+                 Masc_board_handlers.Board_dispatch.toggle_reaction ~target_type ~target_id
                    ~user_id ~emoji
                with
                | Ok result ->
@@ -368,7 +368,7 @@ let dispatch_route ~router ~request ~path reqd =
              {|{"error":"target_type must be post or comment"}|} reqd
        | Some target_type ->
            (match
-              Board_dispatch.list_reactions ~target_type ~target_id ?user_id ()
+              Masc_board_handlers.Board_dispatch.list_reactions ~target_type ~target_id ?user_id ()
             with
             | Ok summary ->
                 let json =
@@ -776,7 +776,7 @@ let run_cmd host port base_path =
             Log.Server.info "[Shutdown] Phase 3/4 BOARD: flush starting (timeout=2.0s)";
             (try
               Eio.Time.with_timeout_exn clock 2.0
-                (fun () -> Board_dispatch.flush ())
+                (fun () -> Masc_board_handlers.Board_dispatch.flush ())
             with
             | Eio.Time.Timeout ->
                 Log.Server.warn

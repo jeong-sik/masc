@@ -317,7 +317,7 @@ let add_delete_action_routes router =
              | None ->
                  respond_error ~request:req reqd (invalid_request "post_id")
              | Some post_id ->
-             match Board_dispatch.delete_post ~post_id with
+             match Masc_board_handlers.Board_dispatch.delete_post ~post_id with
              | Ok () -> respond_ok ~request:req reqd
              | Error err ->
                  respond_error ~status:`Not_found ~request:req reqd
@@ -442,16 +442,16 @@ let add_delete_action_routes router =
                |> Option.value ~default:"post"
              in
              let target_kind =
-               Board_moderation.target_kind_of_string target_kind_str
-               |> Option.value ~default:Board_moderation.Target_post
+               Masc_board_handlers.Board_moderation.target_kind_of_string target_kind_str
+               |> Option.value ~default:Masc_board_handlers.Board_moderation.Target_post
              in
              let reason_str =
                Safe_ops.json_string_opt "reason" json
                |> Option.value ~default:"spam"
              in
              let reason =
-               Board_moderation.flag_reason_of_string reason_str
-               |> Option.value ~default:Board_moderation.Spam
+               Masc_board_handlers.Board_moderation.flag_reason_of_string reason_str
+               |> Option.value ~default:Masc_board_handlers.Board_moderation.Spam
              in
             (match Safe_ops.json_string_opt "target_id" json with
              | None ->
@@ -461,7 +461,7 @@ let add_delete_action_routes router =
                     Safe_ops.json_string_opt "reporter" json
                     |> Option.value ~default:"operator"
                   in
-                   (match Board_moderation.flag ~target_kind ~target_id ~reporter ~reason with
+                   (match Masc_board_handlers.Board_moderation.flag ~target_kind ~target_id ~reporter ~reason with
                     | Error msg ->
                        Http.Response.json_value ~status:`Conflict ~request:req
                          (`Assoc [("ok", `Bool false); ("error", `String msg)])
@@ -471,7 +471,7 @@ let add_delete_action_routes router =
                          (`Assoc
                             [
                               ("ok", `Bool true);
-                              ("entry", Board_moderation.queue_entry_to_json entry);
+                              ("entry", Masc_board_handlers.Board_moderation.queue_entry_to_json entry);
                             ])
                          reqd))
            with Yojson.Json_error _ ->
@@ -488,10 +488,10 @@ let add_delete_action_routes router =
            | Some "false" -> Some false
            | _            -> None
          in
-         let entries = Board_moderation.get_queue ?resolved:resolved_param () in
+         let entries = Masc_board_handlers.Board_moderation.get_queue ?resolved:resolved_param () in
          let json = `Assoc [
            ("ok",      `Bool true);
-           ("entries", `List (List.map Board_moderation.queue_entry_to_json entries));
+           ("entries", `List (List.map Masc_board_handlers.Board_moderation.queue_entry_to_json entries));
            ("count",   `Int (List.length entries));
          ] in
          Http.Response.json_value ~compress:true ~request:req json reqd
@@ -508,14 +508,14 @@ let add_delete_action_routes router =
                |> Option.value ~default:"post"
              in
              let target_kind =
-               Board_moderation.target_kind_of_string target_kind_str
-               |> Option.value ~default:Board_moderation.Target_post
+               Masc_board_handlers.Board_moderation.target_kind_of_string target_kind_str
+               |> Option.value ~default:Masc_board_handlers.Board_moderation.Target_post
              in
              let action_str =
                Safe_ops.json_string_opt "action" json
                |> Option.value ~default:""
              in
-               (match Board_moderation.action_kind_of_string action_str with
+               (match Masc_board_handlers.Board_moderation.action_kind_of_string action_str with
                 | None ->
                   Http.Response.json_value ~status:`Bad_request ~request:req
                     (`Assoc
@@ -535,7 +535,7 @@ let add_delete_action_routes router =
                        let reason =
                          Option.bind
                            (Safe_ops.json_string_opt "reason" json)
-                           Board_moderation.flag_reason_of_string
+                           Masc_board_handlers.Board_moderation.flag_reason_of_string
                        in
                        let note = Safe_ops.json_string_opt "note" json in
                        let actor =
@@ -543,7 +543,7 @@ let add_delete_action_routes router =
                          | Some a -> (match String_util.trim_to_option a with Some trimmed -> trimmed | None -> agent_name)
                          | _ -> agent_name
                        in
-                       (match Board_moderation.record_action ~target_kind ~target_id
+                       (match Masc_board_handlers.Board_moderation.record_action ~target_kind ~target_id
                                 ~actor ~action ?reason ?note () with
                         | Error msg ->
                             Http.Response.json_value
@@ -554,14 +554,14 @@ let add_delete_action_routes router =
                         | Ok entry ->
                             (* If the action is Remove, also delete from board *)
                             let delete_result =
-                              if action = Board_moderation.Remove then
+                              if action = Masc_board_handlers.Board_moderation.Remove then
                                 (match target_kind with
-                                 | Board_moderation.Target_post ->
-                                     (match Board_dispatch.delete_post ~post_id:target_id with
+                                 | Masc_board_handlers.Board_moderation.Target_post ->
+                                     (match Masc_board_handlers.Board_dispatch.delete_post ~post_id:target_id with
                                       | Ok () -> None
                                       | Error e ->
                                           Some (Board_types.show_board_error e))
-                                 | Board_moderation.Target_comment ->
+                                 | Masc_board_handlers.Board_moderation.Target_comment ->
                                      (* Comment removal not yet backed by dispatch; note only *)
                                      None)
                               else
@@ -576,7 +576,7 @@ let add_delete_action_routes router =
                               (`Assoc
                                  ([ ("ok", `Bool true);
                                     ( "entry",
-                                      Board_moderation.audit_entry_to_json entry
+                                      Masc_board_handlers.Board_moderation.audit_entry_to_json entry
                                     );
                                   ]
                                   @ extra))

@@ -30,7 +30,7 @@ let handle_sub_board_create ~tool_name ~start_time args : Tool_result.result =
   let members = get_string_list args "members" in
   let owner = get_string_opt args "owner" |> Option.value ~default:"" in
   match
-    Board_dispatch.create_sub_board
+    Masc_board_handlers.Board_dispatch.create_sub_board
       ~slug
       ~name
       ~description
@@ -56,7 +56,7 @@ let handle_sub_board_create ~tool_name ~start_time args : Tool_result.result =
 ;;
 
 let handle_sub_board_list ~tool_name ~start_time _args : Tool_result.result =
-  let boards = Board_dispatch.list_sub_boards () in
+  let boards = Masc_board_handlers.Board_dispatch.list_sub_boards () in
   let lines =
     List.map
       (fun (sb : Board.sub_board) ->
@@ -79,7 +79,7 @@ let handle_sub_board_list ~tool_name ~start_time _args : Tool_result.result =
 
 let handle_sub_board_get ~tool_name ~start_time args : Tool_result.result =
   let sub_board_id = get_string_opt args "sub_board_id" |> Option.value ~default:"" in
-  match Board_dispatch.get_sub_board ~sub_board_id with
+  match Masc_board_handlers.Board_dispatch.get_sub_board ~sub_board_id with
   | Ok sb ->
     let members =
       List.map Board.Agent_id.to_string sb.Board.members |> String.concat ", "
@@ -122,7 +122,7 @@ let handle_sub_board_update ~tool_name ~start_time args : Tool_result.result =
   let members_raw = get_string_list args "members" in
   let members = if members_raw = [] then None else Some members_raw in
   match
-    Board_dispatch.update_sub_board
+    Masc_board_handlers.Board_dispatch.update_sub_board
       ~sub_board_id
       ?name
       ?description
@@ -148,7 +148,7 @@ let handle_sub_board_update ~tool_name ~start_time args : Tool_result.result =
 
 let handle_sub_board_delete ~tool_name ~start_time args : Tool_result.result =
   let sub_board_id = get_string_opt args "sub_board_id" |> Option.value ~default:"" in
-  match Board_dispatch.delete_sub_board ~sub_board_id with
+  match Masc_board_handlers.Board_dispatch.delete_sub_board ~sub_board_id with
   | Ok () ->
     Tool_result.make_ok
       ~tool_name

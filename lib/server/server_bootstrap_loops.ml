@@ -43,7 +43,7 @@ let autoboot_proactive_warmup_sec ~base_warmup ~stagger_window_sec ~keeper_name 
 
 let board_sse_event_params event =
   match event with
-  | Board_dispatch.Post_created { post_id; author; title; content; post_kind; hearth } ->
+  | Masc_board_handlers.Board_dispatch.Post_created { post_id; author; title; content; post_kind; hearth } ->
     let preview =
       if String.length content > 200 then String.sub content 0 200 else content
     in
@@ -62,7 +62,7 @@ let board_sse_event_params event =
       (match hearth with
        | Some h -> ("hearth", `String h) :: base
        | None -> base)
-  | Board_dispatch.Comment_added { post_id; comment_id; author } ->
+  | Masc_board_handlers.Board_dispatch.Comment_added { post_id; comment_id; author } ->
     `Assoc
       [ "type", `String "comment_added"
       ; "event_type", `String "comment.created"
@@ -71,8 +71,8 @@ let board_sse_event_params event =
       ; "author", `String author
       ; "author_identity", Server_utils.board_actor_identity_json author
       ]
-  | Board_dispatch.Post_voted { post_id; voter; direction } ->
-    let dir = Board_votes.vote_direction_to_string direction in
+  | Masc_board_handlers.Board_dispatch.Post_voted { post_id; voter; direction } ->
+    let dir = Masc_board_handlers.Board_votes.vote_direction_to_string direction in
     `Assoc
       [ "type", `String "post_voted"
       ; "event_type", `String "vote.changed"
@@ -82,8 +82,8 @@ let board_sse_event_params event =
       ; "voter_identity", Server_utils.board_actor_identity_json voter
       ; "direction", `String dir
       ]
-  | Board_dispatch.Comment_voted { comment_id; voter; direction } ->
-    let dir = Board_votes.vote_direction_to_string direction in
+  | Masc_board_handlers.Board_dispatch.Comment_voted { comment_id; voter; direction } ->
+    let dir = Masc_board_handlers.Board_votes.vote_direction_to_string direction in
     `Assoc
       [ "type", `String "comment_voted"
       ; "event_type", `String "vote.changed"
@@ -93,7 +93,7 @@ let board_sse_event_params event =
       ; "voter_identity", Server_utils.board_actor_identity_json voter
       ; "direction", `String dir
       ]
-  | Board_dispatch.Reaction_changed { target_type; target_id; user_id; emoji; reacted } ->
+  | Masc_board_handlers.Board_dispatch.Reaction_changed { target_type; target_id; user_id; emoji; reacted } ->
     `Assoc
       [ "type", `String "reaction_changed"
       ; "event_type", `String "reaction.changed"
@@ -434,11 +434,11 @@ let start_keeper_loops
     loop ());
   (* Inject Event_bus into keeper keepalive runtime for telemetry publishing *)
   Keeper_keepalive.set_bus event_bus;
-  Board_dispatch.set_board_signal_hook (fun signal ->
+  Masc_board_handlers.Board_dispatch.set_board_signal_hook (fun signal ->
     Keeper_keepalive.wakeup_relevant_keeper_for_board_signal
       ~config:state.workspace_config
       signal);
-  Board_dispatch.set_board_sse_hook (fun event ->
+  Masc_board_handlers.Board_dispatch.set_board_sse_hook (fun event ->
     let params = board_sse_event_params event in
     Sse.broadcast
       (`Assoc
@@ -449,7 +449,7 @@ let start_keeper_loops
     (* Emit activity event so Discord/external connectors can detect board posts *)
     let activity_kind, activity_actor, activity_subject, activity_payload =
       match event with
-      | Board_dispatch.Post_created { post_id; author; title; content; post_kind; hearth }
+      | Masc_board_handlers.Board_dispatch.Post_created { post_id; author; title; content; post_kind; hearth }
         ->
         let base =
           [ "post_id", `String post_id
@@ -469,7 +469,7 @@ let start_keeper_loops
         , Server_utils.board_actor_entity author
         , Some (Activity_graph.entity ~kind:"post" post_id)
         , `Assoc payload_fields )
-      | Board_dispatch.Comment_added { post_id; comment_id; author } ->
+      | Masc_board_handlers.Board_dispatch.Comment_added { post_id; comment_id; author } ->
         ( Event_kind.Board.to_string Event_kind.Board.Commented
         , Server_utils.board_actor_entity author
         , Some (Activity_graph.entity ~kind:"post" post_id)
@@ -479,8 +479,8 @@ let start_keeper_loops
             ; "author", `String author
             ; "author_identity", Server_utils.board_actor_identity_json author
             ] )
-      | Board_dispatch.Post_voted { post_id; voter; direction } ->
-        let dir = Board_votes.vote_direction_to_string direction in
+      | Masc_board_handlers.Board_dispatch.Post_voted { post_id; voter; direction } ->
+        let dir = Masc_board_handlers.Board_votes.vote_direction_to_string direction in
         ( Event_kind.Board.to_string Event_kind.Board.Voted
         , Server_utils.board_actor_entity voter
         , Some (Activity_graph.entity ~kind:"post" post_id)
@@ -490,8 +490,8 @@ let start_keeper_loops
             ; "voter_identity", Server_utils.board_actor_identity_json voter
             ; "direction", `String dir
             ] )
-      | Board_dispatch.Comment_voted { comment_id; voter; direction } ->
-        let dir = Board_votes.vote_direction_to_string direction in
+      | Masc_board_handlers.Board_dispatch.Comment_voted { comment_id; voter; direction } ->
+        let dir = Masc_board_handlers.Board_votes.vote_direction_to_string direction in
         ( Event_kind.Board.to_string Event_kind.Board.Voted
         , Server_utils.board_actor_entity voter
         , Some (Activity_graph.entity ~kind:"comment" comment_id)
@@ -501,7 +501,7 @@ let start_keeper_loops
             ; "voter_identity", Server_utils.board_actor_identity_json voter
             ; "direction", `String dir
             ] )
-      | Board_dispatch.Reaction_changed
+      | Masc_board_handlers.Board_dispatch.Reaction_changed
           { target_type; target_id; user_id; emoji; reacted } ->
         ( Event_kind.Board.to_string Event_kind.Board.Voted
         , Server_utils.board_actor_entity user_id

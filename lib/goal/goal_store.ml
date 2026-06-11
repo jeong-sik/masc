@@ -1,25 +1,4 @@
-(* Goal store — shared planning goals with a dedicated lifecycle phase.
-   Legacy [status] remains persisted for compatibility, but it is derived
-   from [phase] on write and inferred on read for old rows. *)
-
-type goal_status =
-  | Active
-  | Paused
-  | Done
-  | Dropped
-
-let goal_status_to_yojson = function
-  | Active -> `String "active"
-  | Paused -> `String "paused"
-  | Done -> `String "done"
-  | Dropped -> `String "dropped"
-
-let goal_status_of_yojson = function
-  | `String "active" -> Ok Active
-  | `String "paused" -> Ok Paused
-  | `String "done" -> Ok Done
-  | `String "dropped" -> Ok Dropped
-  | j -> Error ("goal_status_of_yojson: " ^ Yojson.Safe.to_string j)
+(* Goal store — shared planning goals with a dedicated lifecycle phase. *)
 
 type horizon =
   | Short
@@ -96,7 +75,6 @@ type goal = {
   target_value : string option;
   due_date : string option;
   priority : int;
-  status : goal_status;
   phase : Goal_phase.t;
   verifier_policy : Goal_verification.goal_verifier_policy option;
   require_completion_approval : bool;
@@ -132,7 +110,6 @@ and goal_to_yojson (goal : goal) =
       ("target_value", Json_util.string_opt_to_json goal.target_value);
       ("due_date", Json_util.string_opt_to_json goal.due_date);
       ("priority", `Int goal.priority);
-      ("status", goal_status_to_yojson goal.status);
       ("phase", Goal_phase.to_yojson goal.phase);
       ( "verifier_policy",
         match goal.verifier_policy with
@@ -172,17 +149,17 @@ and goal_of_yojson = function
       begin
         match Json_util.assoc_member_opt "id" json, horizon_of_yojson (Option.value ~default:`Null (Json_util.assoc_member_opt "horizon" json)), Json_util.assoc_member_opt "title" json with
         | Some (`String id), Ok horizon, Some (`String title) ->
-            let legacy_status =
-              match Json_util.assoc_member_opt "status" json with
-              | None | Some `Null -> Ok Active
-              | Some status_json -> goal_status_of_yojson status_json
-            in
             let phase =
               match Json_util.assoc_member_opt "phase" json with
               | None | Some `Null -> (
-                  match legacy_status with
-                  | Ok status -> Ok (phase_of_goal_status status)
-                  | Error msg -> Error msg)
+                  (* Legacy fallback: derive phase from old status field *)
+                  match Json_util.assoc_member_opt "status" json with
+                  | None | Some `Null -> Ok Goal_phase.Executing
+                  | Some (`String "active") -> Ok Goal_phase.Executing
+                  | Some (`String "paused") -> Ok Goal_phase.Paused
+                  | Some (`String "done") -> Ok Goal_phase.Completed
+                  | Some (`String "dropped") -> Ok Goal_phase.Dropped
+                  | Some _ -> Error "goal_of_yojson: invalid legacy status")
               | Some phase_json -> Goal_phase.of_yojson phase_json
             in
             let verifier_policy =
@@ -204,8 +181,8 @@ and goal_of_yojson = function
               | _ -> Error "goal_of_yojson: updated_at missing"
             in
             begin
-              match legacy_status, phase, verifier_policy, created_at, updated_at with
-              | Ok _legacy_status, Ok phase, Ok verifier_policy, Ok created_at, Ok updated_at ->
+              match phase, verifier_policy, created_at, updated_at with
+              | Ok phase, Ok verifier_policy, Ok created_at, Ok updated_at ->
                   Ok
                     (normalize_goal
                        {
@@ -219,7 +196,6 @@ and goal_of_yojson = function
                            (match Json_util.assoc_member_opt "priority" json with
                            | Some (`Int value) -> clamp_priority value
                            | _ -> 3);
-                         status = goal_status_of_phase phase;
                          phase;
                          verifier_policy;
                          require_completion_approval =
@@ -234,11 +210,10 @@ and goal_of_yojson = function
                          created_at;
                          updated_at;
                        })
-              | Error msg, _, _, _, _
-              | _, Error msg, _, _, _
-              | _, _, Error msg, _, _
-              | _, _, _, Error msg, _
-              | _, _, _, _, Error msg ->
+              | Error msg, _, _, _
+              | _, Error msg, _, _
+              | _, _, Error msg, _
+              | _, _, _, Error msg ->
                   Error msg
             end
         | _ -> Error "goal_of_yojson: invalid goal"
@@ -249,7 +224,6 @@ and goal_of_yojson = function
 and normalize_goal (goal : goal) =
   {
     goal with
-    status = goal_status_of_phase goal.phase;
     active_verification_request_id =
       (* Enumerate every [Goal_phase.t] variant so the compiler flags any
          new phase added here. Only [Awaiting_verification] keeps an
@@ -264,23 +238,6 @@ and normalize_goal (goal : goal) =
         | Goal_phase.Blocked | Goal_phase.Paused
         | Goal_phase.Completed | Goal_phase.Dropped ), _ -> None);
   }
-
-and goal_status_of_phase = function
-  | Goal_phase.Executing
-  | Goal_phase.Awaiting_verification
-  | Goal_phase.Awaiting_approval ->
-      Active
-  | Goal_phase.Paused
-  | Goal_phase.Blocked ->
-      Paused
-  | Goal_phase.Completed -> Done
-  | Goal_phase.Dropped -> Dropped
-
-and phase_of_goal_status = function
-  | Active -> Goal_phase.Executing
-  | Paused -> Goal_phase.Paused
-  | Done -> Goal_phase.Completed
-  | Dropped -> Goal_phase.Dropped
 
 type rollup = {
   short_count : int;
@@ -321,16 +278,6 @@ let parse_horizon = function
       | "short" -> Some Short
       | "mid" -> Some Mid
       | "long" -> Some Long
-      | _ -> None)
-  | None -> None
-
-let parse_goal_status = function
-  | Some s -> (
-      match normalize_lower s with
-      | "active" -> Some Active
-      | "paused" -> Some Paused
-      | "done" -> Some Done
-      | "dropped" -> Some Dropped
       | _ -> None)
   | None -> None
 
@@ -512,17 +459,13 @@ let sort_goals goals =
           String.compare right.updated_at left.updated_at)
     goals
 
-let list_goals config ?horizon ?status ?phase () =
+let list_goals config ?horizon ?phase () =
   read_state config
   |> fun state -> state.goals
   |> List.filter (fun goal ->
          match horizon with
          | None -> true
          | Some horizon -> goal.horizon = horizon)
-  |> List.filter (fun goal ->
-         match status with
-         | None -> true
-         | Some status -> goal.status = status)
   |> List.filter (fun goal ->
          match phase with
          | None -> true
@@ -560,19 +503,16 @@ let validate_parent_goal_id goals ~goal_id ~parent_goal_id =
         Ok ()
 
 let upsert_goal config ?id ?horizon ?title ?metric ?target_value ?due_date
-    ?priority ?status ?phase ?parent_goal_id ?verifier_policy
+    ?priority ?phase ?parent_goal_id ?verifier_policy
     ?require_completion_approval () =
   let is_new_goal = id = None in
   if is_new_goal && (title = None || title = Some "") then
     Error "title required for new goal"
   else
     let resolved_phase =
-      match phase, status with
-      | Some phase, Some status when phase <> phase_of_goal_status status ->
-          Error "phase and legacy status disagree"
-      | Some phase, _ -> Ok phase
-      | None, Some status -> Ok (phase_of_goal_status status)
-      | None, None -> Ok Goal_phase.Executing
+      match phase with
+      | Some phase -> Ok phase
+      | None -> Ok Goal_phase.Executing
     in
     match resolved_phase with
     | Error msg -> Error msg
@@ -613,10 +553,9 @@ let upsert_goal config ?id ?horizon ?title ?metric ?target_value ?due_date
               match find_goal state.goals resolved_id with
               | Some existing ->
                   let next_phase =
-                    match phase, status with
-                    | Some phase, _ -> phase
-                    | None, Some legacy_status -> phase_of_goal_status legacy_status
-                    | None, None -> existing.phase
+                    match phase with
+                    | Some phase -> phase
+                    | None -> existing.phase
                   in
                   let next_goal =
                     normalize_goal
@@ -636,7 +575,6 @@ let upsert_goal config ?id ?horizon ?title ?metric ?target_value ?due_date
                         priority =
                           clamp_priority
                             (Option.value priority ~default:existing.priority);
-                        status = goal_status_of_phase next_phase;
                         phase = next_phase;
                         verifier_policy =
                           (match verifier_policy with
@@ -671,7 +609,6 @@ let upsert_goal config ?id ?horizon ?title ?metric ?target_value ?due_date
                         target_value;
                         due_date;
                         priority = clamp_priority (Option.value priority ~default:3);
-                        status = goal_status_of_phase default_phase;
                         phase = default_phase;
                         verifier_policy;
                         require_completion_approval =
@@ -705,10 +642,10 @@ let compute_rollup goals =
     short_count = count (fun goal -> goal.horizon = Short);
     mid_count = count (fun goal -> goal.horizon = Mid);
     long_count = count (fun goal -> goal.horizon = Long);
-    active_count = count (fun goal -> goal.status = Active);
-    paused_count = count (fun goal -> goal.status = Paused);
-    done_count = count (fun goal -> goal.status = Done);
-    dropped_count = count (fun goal -> goal.status = Dropped);
+    active_count = count (fun goal -> match goal.phase with Goal_phase.Executing | Goal_phase.Awaiting_verification | Goal_phase.Awaiting_approval -> true | _ -> false);
+    paused_count = count (fun goal -> match goal.phase with Goal_phase.Paused | Goal_phase.Blocked -> true | _ -> false);
+    done_count = count (fun goal -> match goal.phase with Goal_phase.Completed -> true | _ -> false);
+    dropped_count = count (fun goal -> match goal.phase with Goal_phase.Dropped -> true | _ -> false);
   }
 
 let snapshot config ~mode =
@@ -817,7 +754,7 @@ let refresh config ~mode =
   }
 
 let active_goals config =
-  list_goals config ~status:Active ()
+  list_goals config ~phase:Goal_phase.Executing ()
 
 let has_scheduler_state config =
   Workspace_utils.path_exists config (scheduler_state_path config)

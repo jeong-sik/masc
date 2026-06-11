@@ -122,7 +122,7 @@ let handle_vote ~tool_name ~start_time args =
     (match Board.vote_direction_of_string_opt direction_str with
      | None -> invalid_vote_direction ~tool_name ~start_time direction_str
      | Some direction ->
-       (match Board_dispatch.vote ~voter ~post_id ~direction with
+       (match Masc_board_handlers.Board_dispatch.vote ~voter ~post_id ~direction with
         | Ok new_score ->
           let arrow = if direction = Board.Up then "↑" else "↓" in
           (* SOUL Evolution via callback (breaks compile-time dependency cycle). *)
@@ -130,7 +130,7 @@ let handle_vote ~tool_name ~start_time args =
             match Atomic.get evolution_hook with
             | None -> "" (* Not initialized yet. *)
             | Some cb ->
-              (match Board_dispatch.get_post ~post_id with
+              (match Masc_board_handlers.Board_dispatch.get_post ~post_id with
                | Ok post ->
                  let author = Board.Agent_id.to_string post.author in
                  (* Agent-only evolution: 에이전트끼리만 서로 진화시킴. *)
@@ -169,7 +169,7 @@ let handle_vote ~tool_name ~start_time args =
         | Error (Board.Already_voted _) ->
           (* Idempotent: same-direction duplicate vote is a no-op success.
              The desired state already exists, so the tool call succeeds. *)
-          (match Board_dispatch.get_post ~post_id with
+          (match Masc_board_handlers.Board_dispatch.get_post ~post_id with
            | Ok post ->
              let score = post.votes_up - post.votes_down in
              let arrow = if direction = Board.Up then "↑" else "↓" in
@@ -194,7 +194,7 @@ let handle_vote ~tool_name ~start_time args =
 ;;
 
 let handle_stats ~tool_name ~start_time _args : Tool_result.result =
-  let stats = Board_dispatch.stats () in
+  let stats = Masc_board_handlers.Board_dispatch.stats () in
   Tool_result.make_ok
     ~tool_name
     ~start_time
@@ -216,7 +216,7 @@ let handle_search ~tool_name ~start_time args : Tool_result.result =
       ~start_time
       "query required"
   else (
-    let results = Board_dispatch.search ~query ~limit in
+    let results = Masc_board_handlers.Board_dispatch.search ~query ~limit in
     if Stdlib.List.length results = 0
     then
       Tool_result.make_ok
@@ -261,7 +261,7 @@ let handle_comment_vote ~tool_name ~start_time args : Tool_result.result =
         ~start_time
         "comment_id required"
     else (
-      match Board_dispatch.vote_comment ~voter ~comment_id ~direction with
+      match Masc_board_handlers.Board_dispatch.vote_comment ~voter ~comment_id ~direction with
       | Ok score ->
         Tool_result.make_ok
           ~tool_name
@@ -317,7 +317,7 @@ let handle_reaction ~tool_name ~start_time args : Tool_result.result =
         ~start_time
         "user_id required"
     else (
-      match Board_dispatch.toggle_reaction ~target_type ~target_id ~user_id ~emoji with
+      match Masc_board_handlers.Board_dispatch.toggle_reaction ~target_type ~target_id ~user_id ~emoji with
       | Ok result ->
         Tool_result.make_ok
           ~tool_name
@@ -342,7 +342,7 @@ let handle_profile ~tool_name ~start_time args : Tool_result.result =
       ~start_time
       "agent required"
   else (
-    let all_posts : Board.post list = Board_dispatch.list_posts ~limit:1000 () in
+    let all_posts : Board.post list = Masc_board_handlers.Board_dispatch.list_posts ~limit:1000 () in
     let norm s = String.lowercase_ascii (String.trim s) in
     let agent_norm = norm agent in
     let agent_posts =
@@ -357,7 +357,7 @@ let handle_profile ~tool_name ~start_time args : Tool_result.result =
         0
         agent_posts
     in
-    let all_comments : Board.comment list = Board_dispatch.list_comments () in
+    let all_comments : Board.comment list = Masc_board_handlers.Board_dispatch.list_comments () in
     let agent_comments =
       List.filter
         (fun (c : Board.comment) ->
@@ -388,7 +388,7 @@ let handle_profile ~tool_name ~start_time args : Tool_result.result =
 
 (** Hearth list. *)
 let handle_hearth_list ~tool_name ~start_time _args : Tool_result.result =
-  let hearths = Board_dispatch.list_hearths () in
+  let hearths = Masc_board_handlers.Board_dispatch.list_hearths () in
   if Stdlib.List.length hearths = 0
   then
     Tool_result.make_ok
@@ -423,7 +423,7 @@ let handle_delete ~tool_name ~start_time args : Tool_result.result =
       ~start_time
       "post_id is required"
   else (
-    match Board_dispatch.delete_post ~post_id with
+    match Masc_board_handlers.Board_dispatch.delete_post ~post_id with
     | Ok () ->
       Tool_result.make_ok
         ~tool_name
@@ -458,7 +458,7 @@ let handle_board_cleanup ~tool_name ~start_time args : Tool_result.result =
     | Some n -> String_util.contains_substring (String.lowercase_ascii s) n
   in
   let all_posts =
-    Board_dispatch.list_posts ~sort_by:Board_tool_format.Recent ~limit:500 ()
+    Masc_board_handlers.Board_dispatch.list_posts ~sort_by:Board_tool_format.Recent ~limit:500 ()
   in
   let candidates =
     List.filter
@@ -519,7 +519,7 @@ let handle_board_cleanup ~tool_name ~start_time args : Tool_result.result =
       (fun (p : Board.post) ->
          let pid = Board.Post_id.to_string p.id in
          try
-           match Board_dispatch.delete_post ~post_id:pid with
+           match Masc_board_handlers.Board_dispatch.delete_post ~post_id:pid with
            | Ok () -> Stdlib.incr deleted
            | Error _ -> Stdlib.incr failed
          with

@@ -7,13 +7,13 @@
     validation / response-shape contract.
 
     Internal: ~25 helpers + 6 string lists stay private —
-    \[goal_horizon_strings] / \[goal_status_strings] /
+    \[goal_horizon_strings] /
     \[goal_phase_strings] / \[goal_transition_action_strings] /
     \[goal_vote_decision_strings] (allowed-value tables for
     enum field validation), the
     \[make_enum_field_error] / \[make_type_field_error] error
     formatters, the 11 \[parse_optional_*] field parsers
-    (horizon, goal_status, goal_phase, priority, bool, policy,
+    (horizon, goal_phase, priority, bool, policy,
     principal, vote_decision, transition_action, string_list),
     \[goal_upsert_lifecycle_error], \[validate_goal_completion_ready],
     \[goal_policy_nodes], \[verification_summary_json],
@@ -21,7 +21,7 @@
     inside the 4 public {!handle_goal_*} entries. *)
 
 (** [handle_goal_list ctx args] handles [masc_goal_list].
-    Optional filters: [horizon] (short / mid / long), [status]
+    Optional filters: [horizon] (short / mid / long), [phase]
     (active / paused / done / dropped), [phase] (executing /
     awaiting_verification / etc.).  Returns the goal list with a
     rollup summary.  Validation errors return

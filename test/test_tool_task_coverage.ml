@@ -453,7 +453,7 @@ let () = test "handle_add_task_persists_contract" (fun () ->
                 ("strict", `Bool true);
                 ( "completion_contract",
                   `List [ `String "deliverable-ready" ] );
-                ("required_evidence", `List [ `String "run_deliverable" ]);
+                ("verify_gate_evidence", `List [ `String "run_deliverable" ]);
               ] );
         ])
   in
@@ -463,7 +463,7 @@ let () = test "handle_add_task_persists_contract" (fun () ->
       match task.contract with
       | Some contract ->
           assert contract.strict;
-          assert (contract.required_evidence = [ "run_deliverable" ])
+          assert (contract.verify_gate_evidence = [ "run_deliverable" ])
       | None -> failwith "expected persisted task contract")
   | _ -> failwith "expected exactly one task"
 )
@@ -485,8 +485,8 @@ let () = test "handle_add_task_injects_default_verification_contract" (fun () ->
       | Some contract ->
           assert (not contract.strict);
           assert (contract.completion_contract <> []);
-          assert (List.mem "completion_notes" contract.required_evidence);
-          assert (List.mem "reviewable_evidence_ref" contract.required_evidence);
+          assert (List.mem "completion_notes" contract.verify_gate_evidence);
+          assert (List.mem "reviewable_evidence_ref" contract.verify_gate_evidence);
           assert (List.mem "completion_notes" contract.verify_gate_evidence);
           assert (List.mem "reviewable_evidence_ref" contract.verify_gate_evidence);
           assert (str_contains (List.hd contract.completion_contract)
@@ -538,7 +538,7 @@ let () = test "handle_done_uses_llm_review_without_keeper_verifier_redirect" (fu
                       ("strict", `Bool true);
                       ( "completion_contract",
                         `List [ `String "deliverable-ready" ] );
-                      ("required_evidence", `List [ `String "run_deliverable" ]);
+                      ("verify_gate_evidence", `List [ `String "run_deliverable" ]);
                     ] );
               ])
         in

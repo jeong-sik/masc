@@ -528,7 +528,7 @@ let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
         Atomic.set Task.Handlers.get_few_shot_block_fn (fun () ->
           Eval_calibration.format_few_shot_block
             (Eval_calibration.select_examples ~max_examples:3));
-        Board_dispatch.init_jsonl ())
+        Masc_board_handlers.Board_dispatch.init_jsonl ())
       base_path
   in
   let registry = Session.create () in

@@ -61,7 +61,6 @@ let add_strict_task config =
   let contract : Masc_domain.task_contract = {
     strict = true;
     completion_contract = ["tests pass"];
-    required_evidence = [];
     inspect_gate_evidence = [];
     verify_gate_evidence = ["output.json"];
     evidence_claims = [];
@@ -79,7 +78,7 @@ let add_strict_task config =
   | Some t -> t.id
   | None -> Alcotest.fail "new task not found after add_task"
 
-let add_required_evidence_only_task config =
+let add_verify_gate_evidence_only_task config =
   let existing_ids =
     Workspace.read_backlog config
     |> fun backlog -> List.map (fun (t : Masc_domain.task) -> t.id) backlog.tasks
@@ -87,9 +86,8 @@ let add_required_evidence_only_task config =
   let contract : Masc_domain.task_contract = {
     strict = true;
     completion_contract = [];
-    required_evidence = ["artifact://coverage.json"];
     inspect_gate_evidence = [];
-    verify_gate_evidence = [];
+    verify_gate_evidence = ["artifact://coverage.json"];
     evidence_claims = [];
     stale_claim_timeout_sec = 0;
     links = { operation_id = None; session_id = None };
@@ -115,9 +113,8 @@ let add_placeholder_evidence_task config =
   let contract : Masc_domain.task_contract = {
     strict = true;
     completion_contract = ["tests pass"];
-    required_evidence = ["completion_notes"];
     inspect_gate_evidence = [];
-    verify_gate_evidence = ["reviewable_evidence_ref"];
+    verify_gate_evidence = ["reviewable_evidence_ref"; "completion_notes"];
     evidence_claims = [];
     stale_claim_timeout_sec = 0;
     links = { operation_id = None; session_id = None };
@@ -440,9 +437,9 @@ let test_submit_populates_criteria_from_completion_contract () =
     Alcotest.(check (list string)) "evidence_refs from verify_gate_evidence"
       ["output.json"] persisted_refs)
 
-let test_submit_uses_required_evidence_when_verify_refs_empty () =
+let test_submit_uses_verify_gate_evidence_when_verify_refs_empty () =
   with_temp_config ~fsm_enabled:true (fun config ->
-    let task_id = add_required_evidence_only_task config in
+    let task_id = add_verify_gate_evidence_only_task config in
     claim_and_start config "worker" task_id;
     let captured_refs = ref None in
     let result =
@@ -464,11 +461,11 @@ let test_submit_uses_required_evidence_when_verify_refs_empty () =
        Alcotest.fail
          (Printf.sprintf "submit failed: %s" (Masc_domain.show_masc_error e)));
     (* Phase E (2026-05-27): notes survives the typed concat alongside
-       the contract's required_evidence. Pre-Phase-E the substring
+       the contract's verify_gate_evidence. Pre-Phase-E the substring
        classifier would have dropped "implementation complete" — now
        observability metadata reflects what the keeper actually wrote. *)
     Alcotest.(check (list string))
-      "required_evidence + notes carried to verification refs"
+      "verify_gate_evidence + notes carried to verification refs"
       ["artifact://coverage.json"; "implementation complete"]
       (Option.value ~default:[] !captured_refs))
 
@@ -943,8 +940,8 @@ let () =
         test_submit_retry_records_request_created_backlog_orphan_policy;
       Alcotest.test_case "submit splits criteria/evidence by contract field"
         `Quick test_submit_populates_criteria_from_completion_contract;
-      Alcotest.test_case "submit carries required_evidence into verifier refs"
-        `Quick test_submit_uses_required_evidence_when_verify_refs_empty;
+      Alcotest.test_case "submit carries verify_gate_evidence into verifier refs"
+        `Quick test_submit_uses_verify_gate_evidence_when_verify_refs_empty;
       Alcotest.test_case "submit marks conflict triage from completed deliverable"
         `Quick test_submit_marks_conflict_triage_when_deliverable_claims_completion;
       Alcotest.test_case "cross-agent approve moves to done" `Quick

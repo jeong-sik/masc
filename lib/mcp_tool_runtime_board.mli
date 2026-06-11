@@ -65,7 +65,7 @@ val dispatch :
     when the main runtime router has no match.  Currently routes:
 
     - [masc_board_post] -> identity enforcement +
-      {!Board_dispatch.create_post} +
+      {!Masc_board_handlers.Board_dispatch.create_post} +
       {!Notify.notify_mention} on [@target].
     - everything else -> [None] (caller falls through to remaining
       dispatchers).

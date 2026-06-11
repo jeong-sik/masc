@@ -1,1 +1,0 @@
-include Masc_board_handlers.Board_metrics_hooks

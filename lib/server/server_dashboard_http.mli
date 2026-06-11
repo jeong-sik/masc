@@ -51,7 +51,7 @@ val dashboard_board_json :
   ?config:Workspace.config ->
   ?hearth:string ->
   ?author_filter:string ->
-  ?sort_by:Board_dispatch.sort_order ->
+  ?sort_by:Masc_board_handlers.Board_dispatch.sort_order ->
   ?exclude_system:bool ->
   ?exclude_automation:bool ->
   ?limit:int ->

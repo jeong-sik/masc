@@ -8,10 +8,6 @@
     - a {!Goal_phase.t} (canonical lifecycle: [Executing] /
       [Awaiting_verification] / [Blocked] / [Completed] /
       [Paused] / [Dropped]),
-    - a legacy {!goal_status} kept for backward-compat with
-      consumers that have not migrated to phases yet
-      (derived from phase on write, inferred on read for
-      old rows),
     - a {!horizon} ([Short] / [Mid] / [Long]) used by the
       refresh / snapshot scheduler to decide which cohort
       to scan,
@@ -40,22 +36,7 @@
     [snapshots_dir], [ensure_dirs], [default_state],
     [clamp_priority]). *)
 
-(** {1 Status / horizon variants} *)
-
-type goal_status =
-  | Active
-  | Paused
-  | Done
-  | Dropped
-  (** Legacy lifecycle status.  Persisted alongside
-      {!Goal_phase.t} for backward-compat; derived from the
-      phase on write via {!goal_status_of_phase} and
-      inferred on read for old rows.  New code paths should
-      branch on [.phase] instead of [.status]. *)
-
-val goal_status_to_yojson : goal_status -> Yojson.Safe.t
-val goal_status_of_yojson :
-  Yojson.Safe.t -> (goal_status, string) result
+(** {1 Horizon variants} *)
 
 type horizon =
   | Short
@@ -74,28 +55,9 @@ val parse_horizon : string option -> horizon option
 (** Case-insensitive, trim-tolerant.  [None]/empty string
     pass through as [None]. *)
 
-val parse_goal_status : string option -> goal_status option
-(** Same shape as {!parse_horizon}. *)
-
 val parse_goal_phase : string option -> Goal_phase.t option
 (** Delegates to {!Goal_phase.parse}.  [None] passes
     through. *)
-
-(** {1 Phase ↔ legacy status bridge} *)
-
-val goal_status_of_phase : Goal_phase.t -> goal_status
-(** Forward derivation used on write.  Maps every phase to
-    its canonical legacy status:
-    - [Executing] / [Awaiting_verification] → [Active]
-    - [Paused] → [Paused]
-    - [Completed] → [Done]
-    - [Blocked] / [Dropped] → [Dropped] *)
-
-val phase_of_goal_status : goal_status -> Goal_phase.t
-(** Reverse inference used on read for rows persisted
-    before phases existed.  Maps [Active] → [Executing],
-    [Paused] → [Paused], [Done] → [Completed], [Dropped] →
-    [Dropped]. *)
 
 (** {1 Goal record} *)
 
@@ -107,7 +69,6 @@ type goal = {
   target_value : string option;
   due_date : string option;
   priority : int;
-  status : goal_status;
   phase : Goal_phase.t;
   verifier_policy : Goal_verification.goal_verifier_policy option;
   require_completion_approval : bool;
@@ -156,8 +117,8 @@ type rollup = {
 val rollup_to_yojson : rollup -> Yojson.Safe.t
 
 val compute_rollup : goal list -> rollup
-(** Field-wise count of goals per horizon and per legacy
-    status.  Single pass; no allocation beyond the result
+(** Field-wise count of goals per horizon and per phase
+    cohort.  Single pass; no allocation beyond the result
     record. *)
 
 (** {1 Persistence paths} *)
@@ -171,7 +132,7 @@ val read_state : Workspace_utils.config -> state
 (** Reads {!goals_path}; returns an empty default state on
     missing file or parse failure.  Goals loaded from disk
     are passed through the internal normaliser ([priority]
-    clamp + phase/status reconciliation). *)
+    clamp + phase normalisation). *)
 
 val write_state : Workspace_utils.config -> state -> unit
 (** Direct overwrite of {!goals_path} with the supplied state.
@@ -210,7 +171,6 @@ val delete_goal :
 val list_goals :
   Workspace_utils.config ->
   ?horizon:horizon ->
-  ?status:goal_status ->
   ?phase:Goal_phase.t ->
   unit ->
   goal list
@@ -226,7 +186,6 @@ val upsert_goal :
   ?target_value:string ->
   ?due_date:string ->
   ?priority:int ->
-  ?status:goal_status ->
   ?phase:Goal_phase.t ->
   ?parent_goal_id:string ->
   ?verifier_policy:Goal_verification.goal_verifier_policy ->
@@ -242,6 +201,5 @@ val upsert_goal :
     Errors:
     - [title] required for new goals (omit / empty string
       on a new goal id).
-    - [phase] and legacy [status] disagree (when both are
-      supplied and {!phase_of_goal_status} of [status] does
-      not equal [phase]). *)
+    - [title] required for new goals (omit / empty string
+      on a new goal id). *)

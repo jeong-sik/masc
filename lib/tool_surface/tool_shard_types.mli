@@ -8,7 +8,7 @@
     etc. unchanged. *)
 
 val sort_order_enum_strings : string list
-(** Hand-mirrored from [Board_dispatch.valid_sort_order_strings] (#8513). *)
+(** Hand-mirrored from [Masc_board_handlers.Board_dispatch.valid_sort_order_strings] (#8513). *)
 
 val memory_search_source_enum_strings : string list
 (** Hand-mirrored from [Keeper_tool_memory_runtime.valid_memory_search_source_strings]
@@ -23,7 +23,7 @@ val fs_write_mode_enum_strings : string list
     (#8490). *)
 
 val vote_direction_enum_strings : string list
-(** Hand-mirrored from [Board_votes.valid_vote_direction_strings] (#8506). *)
+(** Hand-mirrored from [Masc_board_handlers.Board_votes.valid_vote_direction_strings] (#8506). *)
 
 (** A named collection of tools that can be granted/revoked. *)
 type shard = {

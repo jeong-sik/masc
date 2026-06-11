@@ -21,8 +21,8 @@ let post_digest_key post =
   | _ -> None
 
 let latest_digest_post () =
-  Board_dispatch.list_posts ~hearth:digest_hearth
-    ~post_kind_filter:Board.Automation_post ~sort_by:Board_dispatch.Recent
+  Masc_board_handlers.Board_dispatch.list_posts ~hearth:digest_hearth
+    ~post_kind_filter:Board.Automation_post ~sort_by:Masc_board_handlers.Board_dispatch.Recent
     ~limit:20 ()
   |> List.find_map (fun post ->
          Option.map (fun digest_key -> (post, digest_key)) (post_digest_key post))

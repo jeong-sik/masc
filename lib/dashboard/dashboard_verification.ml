@@ -35,7 +35,7 @@ let completion_contract_of_criteria (criteria : V.criterion list) : string list 
 (** The Verification_protocol.on_submit_for_verification writes
     [output = { evidence_refs = [...]; task_title = "..." }]. We read
     evidence_refs in a tolerant way: missing or malformed -> empty list. *)
-let required_evidence_of_output (output : Yojson.Safe.t) : string list =
+let evidence_refs_of_output (output : Yojson.Safe.t) : string list =
   match output with
   | `Assoc fields ->
       (match List.assoc_opt "evidence_refs" fields with
@@ -121,7 +121,7 @@ let request_to_json (req : V.verification_request) : Yojson.Safe.t =
     derive_status_fields req
   in
   let contract = completion_contract_of_criteria req.criteria in
-  let evidence = required_evidence_of_output req.output in
+  let evidence = evidence_refs_of_output req.output in
   let task_title = task_title_of_output req.output in
   let request_kind = request_kind_of_output req.output in
   let request_summary = request_summary_of_output req.output in
@@ -143,7 +143,7 @@ let request_to_json (req : V.verification_request) : Yojson.Safe.t =
     ("approved_by", Json_util.string_opt_to_json approved_by);
     ("completion_contract",
      `List (List.map (fun s -> `String s) contract));
-    ("required_evidence",
+    ("verify_gate_evidence",
      `List (List.map (fun s -> `String s) evidence));
     ("verdict", Json_util.string_opt_to_json verdict_opt);
     ("verdict_reason", `String verdict_reason);

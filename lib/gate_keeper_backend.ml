@@ -107,11 +107,19 @@ let contextualize_message ~channel ~channel_user_id ~channel_user_name
      @ metadata_block
      @ [ ""; "[User message]"; safe_content ])
 
-let persist_connector_assistant_reply ~base_dir ~keeper_name ~source ~reply =
+let metadata_value key metadata =
+  match List.assoc_opt key metadata with
+  | Some value ->
+      let value = String.trim value in
+      if value = "" then None else Some value
+  | None -> None
+
+let persist_connector_assistant_reply ~base_dir ~keeper_name ~source
+    ?conversation_id ~reply () =
   let content = String.trim reply in
   if content <> "" then begin
     Keeper_chat_store.append_assistant_message ~base_dir ~keeper_name
-      ~content ~source ();
+      ~content ~source ?conversation_id ();
     Keeper_chat_broadcast.chat_appended ~keeper_name ~source
   end
 
@@ -149,11 +157,15 @@ let dispatch ~sw ~clock ~proc_mgr ~net ~config
      history. *)
   let lane = String.trim channel in
   let opt value = match String.trim value with "" -> None | v -> Some v in
+  let conversation_id = metadata_value "conversation_id" metadata in
+  let external_message_id = metadata_value "external_message_id" metadata in
   Keeper_chat_store.append_user_message
     ~base_dir:config.Workspace.base_path
     ~keeper_name
     ~content:(String.trim content)
     ~source:lane
+    ?conversation_id
+    ?external_message_id
     ~speaker:
       { Keeper_chat_store.speaker_id = opt channel_user_id
       ; speaker_name = opt channel_user_name
@@ -209,8 +221,8 @@ let dispatch ~sw ~clock ~proc_mgr ~net ~config
         | None -> Some { Gate_protocol.model_used = "runtime"; duration_ms; tokens_used = 0 }
       in
       persist_connector_assistant_reply
-        ~base_dir:config.Workspace.base_path
-        ~keeper_name ~source:lane ~reply;
+        ~base_dir:config.Workspace.base_path ~keeper_name ~source:lane
+        ?conversation_id ~reply ();
       Gate_protocol.Reply { content = reply; structured; stats }
   | Some result ->
       Gate_protocol.Keeper_error_result (redact_text (Tool_result.message result))

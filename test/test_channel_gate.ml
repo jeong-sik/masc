@@ -232,6 +232,35 @@ let test_handle_inbound_passes_channel_context_to_dispatch () =
       | None -> fail "dispatch should receive connector context" )
   | Error e -> fail (Channel_gate.gate_error_to_string e)
 
+let test_handle_inbound_passes_metadata_to_dispatch () =
+  reset_dedup ();
+  let seen = ref None in
+  let dispatch ~channel:_ ~channel_user_id:_ ~channel_user_name:_
+      ~channel_workspace_id:_ ~keeper_name:_ ~metadata ~content:_ =
+    seen := Some metadata;
+    Gate_protocol.Reply { content = "ok"; structured = None; stats = None }
+  in
+  let msg =
+    {
+      (make_message ~idempotency_key:(unique_key "dispatch-metadata") ()) with
+      metadata =
+        [
+          ("conversation_id", "discord:guild-1:channel:thread-7");
+          ("external_message_id", "msg-7");
+        ];
+    }
+  in
+  match Channel_gate.handle_inbound ~dispatch msg with
+  | Ok _ -> (
+      match !seen with
+      | Some metadata ->
+          check string "conversation id" "discord:guild-1:channel:thread-7"
+            (List.assoc "conversation_id" metadata);
+          check string "external message id" "msg-7"
+            (List.assoc "external_message_id" metadata)
+      | None -> fail "dispatch should receive metadata")
+  | Error e -> fail (Channel_gate.gate_error_to_string e)
+
 let () =
   Alcotest.run "Channel_gate"
     [
@@ -264,6 +293,8 @@ let () =
             test_handle_inbound_success;
           test_case "passes channel context to dispatch" `Quick
             test_handle_inbound_passes_channel_context_to_dispatch;
+          test_case "passes metadata to dispatch" `Quick
+            test_handle_inbound_passes_metadata_to_dispatch;
           test_case "returns keeper error" `Quick
             test_handle_inbound_keeper_error;
           test_case "returns unavailable" `Quick

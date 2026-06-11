@@ -86,15 +86,21 @@ let test_persist_connector_assistant_reply_records_lane_reply () =
     (fun () ->
       let keeper_name = "discord-reply-keeper" in
       K.append_user_message ~base_dir ~keeper_name
-        ~content:"<@bot> factorio?" ~source:"discord" ();
+        ~content:"<@bot> factorio?" ~source:"discord"
+        ~conversation_id:"discord:guild-1:channel:chan-9" ();
       Gate_keeper_backend.persist_connector_assistant_reply ~base_dir
-        ~keeper_name ~source:"discord" ~reply:"already answered";
+        ~keeper_name ~source:"discord"
+        ~conversation_id:"discord:guild-1:channel:chan-9"
+        ~reply:"already answered" ();
       match K.load ~base_dir ~keeper_name with
       | [ user; assistant ] ->
           check string "user line first" "user" user.K.role;
           check string "assistant reply persisted" "assistant" assistant.K.role;
           check string "assistant lane" "discord"
             (Option.value assistant.K.source ~default:"");
+          check string "assistant conversation id"
+            "discord:guild-1:channel:chan-9"
+            (Option.value assistant.K.conversation_id ~default:"");
           check string "assistant content" "already answered" assistant.K.content
       | messages ->
           failf "expected 2 chat messages, got %d" (List.length messages))
@@ -106,7 +112,7 @@ let test_persist_connector_assistant_reply_ignores_empty_reply () =
     (fun () ->
       let keeper_name = "discord-empty-reply-keeper" in
       Gate_keeper_backend.persist_connector_assistant_reply ~base_dir
-        ~keeper_name ~source:"discord" ~reply:"   ";
+        ~keeper_name ~source:"discord" ~reply:"   " ();
       check int "empty reply does not create chat file" 0
         (List.length (K.load ~base_dir ~keeper_name)))
 

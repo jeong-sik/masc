@@ -11,6 +11,11 @@
     {v {"role":"tool","content":"{\"path\":\"x\"}","ts":...,
         "tool_call_id":"toolu_1","tool_call_name":"Read","source":"dashboard"} v}
 
+    Connector rows may additionally carry opaque route coordinates:
+    [conversation_id] for channel/thread grouping and [external_message_id]
+    for the inbound platform message. The store does not interpret these
+    values.
+
     @since 2.145.0 *)
 
 let sanitize_name name =
@@ -83,6 +88,8 @@ type chat_message = {
   tool_call_id : string option;
   tool_call_name : string option;
   source : string option;
+  conversation_id : string option;
+  external_message_id : string option;
   speaker : speaker option;
 }
 
@@ -116,7 +123,7 @@ let speaker_fields = function
       @ [ ("speaker_authority", `String (authority_label sp.speaker_authority)) ]
 
 let encode_line ~role ~content ~ts ?attachments ?tool_call_id ?tool_call_name
-    ?source ?speaker () : string =
+    ?source ?conversation_id ?external_message_id ?speaker () : string =
   let base_fields = [
     ("role", `String role);
     ("content", `String content);
@@ -144,6 +151,8 @@ let encode_line ~role ~content ~ts ?attachments ?tool_call_id ?tool_call_name
     @ opt_string_field "tool_call_id" tool_call_id
     @ opt_string_field "tool_call_name" tool_call_name
     @ opt_string_field "source" source
+    @ opt_string_field "conversation_id" conversation_id
+    @ opt_string_field "external_message_id" external_message_id
     @ speaker_fields speaker
   in
   Yojson.Safe.to_string (`Assoc all_fields)
@@ -158,8 +167,9 @@ let normalize_tool_call_id ~position call_id =
   if String.trim call_id = "" then Printf.sprintf "tc-%d" position else call_id
 
 let append_turn ~base_dir ~keeper_name ~(user_content : string)
-    ~(user_attachments : attachment list) ?(tool_calls = []) ?source ?speaker
-    ~(assistant_content : string) () =
+    ~(user_attachments : attachment list) ?(tool_calls = []) ?source
+    ?conversation_id ?external_message_id ?speaker ~(assistant_content : string)
+    () =
   try
     ensure_dir_once ~base_dir;
     let redaction = redaction_for ~base_dir ~keeper_name in
@@ -179,7 +189,8 @@ let append_turn ~base_dir ~keeper_name ~(user_content : string)
        assistant lines are the keeper's own output. *)
     let user_line =
       encode_line ~role:"user" ~content:user_content ~ts
-        ~attachments:user_attachments ?source ?speaker ()
+        ~attachments:user_attachments ?source ?conversation_id
+        ?external_message_id ?speaker ()
     in
     let tool_lines =
       List.mapi
@@ -189,11 +200,12 @@ let append_turn ~base_dir ~keeper_name ~(user_content : string)
             ~ts
             ~tool_call_id:(normalize_tool_call_id ~position tc.call_id)
             ~tool_call_name:tc.call_name
-            ?source ())
+            ?source ?conversation_id ())
         tool_calls
     in
     let asst_line =
-      encode_line ~role:"assistant" ~content:assistant_content ~ts ?source ()
+      encode_line ~role:"assistant" ~content:assistant_content ~ts ?source
+        ?conversation_id ()
     in
     let payload =
       String.concat "\n" ((user_line :: tool_lines) @ [ asst_line ]) ^ "\n"
@@ -212,14 +224,16 @@ let append_turn ~base_dir ~keeper_name ~(user_content : string)
 (* RFC-0223 P4: keeper-initiated message on one lane. A single
    assistant line — there is no user turn to pair it with. *)
 let append_assistant_message ~base_dir ~keeper_name ~(content : string)
-    ?source () =
+    ?source ?conversation_id () =
   try
     ensure_dir_once ~base_dir;
     let redaction = redaction_for ~base_dir ~keeper_name in
     let content = Keeper_secret_redaction.redact_text redaction content in
     let path = chat_path ~base_dir ~keeper_name in
     let ts = Time_compat.now () in
-    let line = encode_line ~role:"assistant" ~content ~ts ?source () in
+    let line =
+      encode_line ~role:"assistant" ~content ~ts ?source ?conversation_id ()
+    in
     Fs_compat.append_file path (line ^ "\n")
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -235,14 +249,17 @@ let append_assistant_message ~base_dir ~keeper_name ~(content : string)
    independent of) any turn. A single user line — the assistant reply,
    if one ever comes, is appended separately by the reply path. *)
 let append_user_message ~base_dir ~keeper_name ~(content : string)
-    ?source ?speaker () =
+    ?source ?conversation_id ?external_message_id ?speaker () =
   try
     ensure_dir_once ~base_dir;
     let redaction = redaction_for ~base_dir ~keeper_name in
     let content = Keeper_secret_redaction.redact_text redaction content in
     let path = chat_path ~base_dir ~keeper_name in
     let ts = Time_compat.now () in
-    let line = encode_line ~role:"user" ~content ~ts ?source ?speaker () in
+    let line =
+      encode_line ~role:"user" ~content ~ts ?source ?conversation_id
+        ?external_message_id ?speaker ()
+    in
     Fs_compat.append_file path (line ^ "\n")
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -270,6 +287,8 @@ let parse_line ~file_path (line : string) : chat_message option =
     let tool_call_id = opt_string "tool_call_id" in
     let tool_call_name = opt_string "tool_call_name" in
     let source = opt_string "source" in
+    let conversation_id = opt_string "conversation_id" in
+    let external_message_id = opt_string "external_message_id" in
     let speaker =
       let speaker_id = opt_string "speaker_id" in
       let speaker_name = opt_string "speaker_name" in
@@ -336,7 +355,7 @@ let parse_line ~file_path (line : string) : chat_message option =
     else
       Some
         { role; content; ts; attachments; tool_call_id; tool_call_name;
-          source; speaker }
+          source; conversation_id; external_message_id; speaker }
   with Yojson.Json_error detail ->
     report_persistence_read_drop
       ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
@@ -514,6 +533,8 @@ let to_json_array (messages : chat_message list) : Yojson.Safe.t =
               @ opt_string_field "tool_call_id" m.tool_call_id
               @ opt_string_field "tool_call_name" m.tool_call_name
               @ opt_string_field "source" m.source
+              @ opt_string_field "conversation_id" m.conversation_id
+              @ opt_string_field "external_message_id" m.external_message_id
               @ speaker_fields m.speaker
               @ (match m.attachments with
                  | None | Some [] -> []

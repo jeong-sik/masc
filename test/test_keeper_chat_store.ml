@@ -289,13 +289,16 @@ let test_append_user_message_roundtrip () =
       K.append_user_message ~base_dir ~keeper_name
         ~content:"two humans chatting, no mention"
         ~source:"discord"
+        ~conversation_id:"discord:guild-1:channel:chan-7"
+        ~external_message_id:"msg-7"
         ~speaker:
           { K.speaker_id = Some "55501";
             speaker_name = Some "jane";
             speaker_authority = K.External }
         ();
       K.append_assistant_message ~base_dir ~keeper_name
-        ~content:"reply recorded separately" ~source:"discord" ();
+        ~content:"reply recorded separately" ~source:"discord"
+        ~conversation_id:"discord:guild-1:channel:chan-7" ();
       match K.load ~base_dir ~keeper_name with
       | [ user; assistant ] ->
           Alcotest.(check string) "lone user line first" "user" user.K.role;
@@ -303,6 +306,10 @@ let test_append_user_message_roundtrip () =
             "two humans chatting, no mention" user.K.content;
           Alcotest.(check (option string)) "source"
             (Some "discord") user.K.source;
+          Alcotest.(check (option string)) "conversation id"
+            (Some "discord:guild-1:channel:chan-7") user.K.conversation_id;
+          Alcotest.(check (option string)) "external message id"
+            (Some "msg-7") user.K.external_message_id;
           (match user.speaker with
            | Some sp ->
                Alcotest.(check (option string)) "speaker id"
@@ -314,8 +321,32 @@ let test_append_user_message_roundtrip () =
            | None -> Alcotest.fail "ambient user line lost its speaker");
           Alcotest.(check string) "assistant joins the lane"
             "assistant" assistant.K.role;
+          Alcotest.(check (option string)) "assistant conversation id"
+            (Some "discord:guild-1:channel:chan-7") assistant.K.conversation_id;
+          Alcotest.(check (option string)) "assistant has no inbound message id"
+            None assistant.K.external_message_id;
           Alcotest.(check string) "no duplicated user line"
-            "reply recorded separately" assistant.K.content
+            "reply recorded separately" assistant.K.content;
+          let json_rows = K.to_json_array [ user; assistant ] in
+          (match Yojson.Safe.Util.to_list json_rows with
+          | user_json :: assistant_json :: _ ->
+              Alcotest.(check string) "json conversation id"
+                "discord:guild-1:channel:chan-7"
+                Yojson.Safe.Util.(
+                  user_json |> member "conversation_id" |> to_string);
+              Alcotest.(check string) "json external message id" "msg-7"
+                Yojson.Safe.Util.(
+                  user_json |> member "external_message_id" |> to_string);
+              Alcotest.(check string) "json assistant conversation id"
+                "discord:guild-1:channel:chan-7"
+                Yojson.Safe.Util.(
+                  assistant_json |> member "conversation_id" |> to_string);
+              Alcotest.(check bool) "json assistant omits inbound message id" true
+                Yojson.Safe.Util.(
+                  assistant_json |> member "external_message_id" = `Null)
+          | rows ->
+              Alcotest.failf "expected 2 json rows, got %d"
+                (List.length rows))
       | messages ->
           Alcotest.failf "expected 2 messages, got %d" (List.length messages))
 

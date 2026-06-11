@@ -475,7 +475,7 @@ let transition_task_r
              backlog commit. The in-memory agent cache must not retain a
              reference to the old task status after a state transition. *)
           Task_cache_invariant.clear_stale_agent_task config ~agent_name ~task_id
-            ~status:task.task_status ~module_name:"transition_task_r";
+            ~status:new_status ~module_name:"transition_task_r";
           update_local_agent_state config ~agent_name (fun agent ->
             match set_current with
             | Some _ -> { agent with status = Busy; current_task = Some task_id }

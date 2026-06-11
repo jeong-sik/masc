@@ -24,8 +24,8 @@ type trace_id = string
     increments [tool_dispatch_total] with labels [tool = tool_name] and
     [outcome = <outcome returned by f>].
 
-    [f] receives a thunk that returns [Some trace_id_hex] when an OTel
-    span is active, [None] otherwise (e.g. when the exporter is disabled).
+    [f] receives a thunk that returns [Some (trace_id_hex, span_id_hex)] when an
+    OTel span is active, [None] otherwise (e.g. when the exporter is disabled).
 
     [f] returns a pair [(result, outcome)] where [outcome] is the metric
     label. PR-10 will replace the [string] outcome with a typed

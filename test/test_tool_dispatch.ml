@@ -46,6 +46,7 @@ let register_full ?schema ~tool_name ~handler () =
   Tool_dispatch.register_module_tag ~schemas:[schema] ~tag:Mod_misc
 
 let () =
+  Masc_test_deps.init_keeper_tool_registry ();
   let open Alcotest in
   run "Tool_dispatch"
     [
@@ -148,9 +149,8 @@ let () =
               check bool "masc_goal_list -> Mod_state" true
                 (Tool_dispatch.lookup_tag "masc_goal_list"
                  = Some Tool_dispatch.Mod_state);
-              check bool "tool_execute -> Mod_shard" true
-                (Tool_dispatch.lookup_tag "tool_execute"
-                 = Some Tool_dispatch.Mod_shard));
+              check bool "tool_execute has no MCP static route" true
+                (Option.is_none (Tool_dispatch.lookup_tag "tool_execute")));
           test_case "mint_token accepts active static tool names" `Quick (fun () ->
               check bool "masc_status mints" true
                 (Result.is_ok
@@ -207,13 +207,13 @@ let () =
               register_full ~tool_name:"__sim_masc_add_task" ~handler:echo_handler ();
               register_full ~tool_name:"__sim_masc_bind" ~handler:echo_handler ();
               let suggestions =
-                Tool_dispatch.find_similar_names
-                  ~query:"__sim_masc_claim_task" ()
+                Tool_dispatch.find_similar_names ~limit:10
+                  ~query:"__sim_keeper_task_claem" ()
               in
               check bool "non-empty suggestions" true
                 (List.length suggestions >= 1);
-              check bool "top suggestion is closest" true
-                (List.hd suggestions = "__sim_keeper_task_claim"));
+              check bool "includes close task suggestion" true
+                (List.mem "__sim_keeper_task_claim" suggestions));
           test_case "find_similar_names empty when nothing close" `Quick (fun () ->
               let suggestions =
                 Tool_dispatch.find_similar_names

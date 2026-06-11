@@ -46,15 +46,15 @@ type attachment = {
 }
 
 type chat_message = {
-  role : string;
+  role : Keeper_chat_role.t;
   content : string;
   ts : float option;
   attachments : attachment list option;
 }
 
-let encode_line ~role ~content ~ts ?attachments () : string =
+let encode_line ~(role : Keeper_chat_role.t) ~content ~ts ?attachments () : string =
   let base_fields = [
-    ("role", `String role);
+    ("role", Keeper_chat_role.to_yojson role);
     ("content", `String content);
     ("ts", `Float ts);
   ] in
@@ -82,8 +82,8 @@ let append_pair ~base_dir ~keeper_name
     ensure_dir_once ~base_dir;
     let path = chat_path ~base_dir ~keeper_name in
     let ts = Time_compat.now () in
-    let user_line = encode_line ~role:"user" ~content:user_content ~ts ~attachments:user_attachments () in
-    let asst_line = encode_line ~role:"assistant" ~content:assistant_content ~ts () in
+    let user_line = encode_line ~role:Keeper_chat_role.User ~content:user_content ~ts ~attachments:user_attachments () in
+    let asst_line = encode_line ~role:Keeper_chat_role.Assistant ~content:assistant_content ~ts () in
     Fs_compat.append_file path (user_line ^ "\n" ^ asst_line ^ "\n")
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -98,7 +98,17 @@ let append_pair ~base_dir ~keeper_name
 let parse_line ~file_path (line : string) : chat_message option =
   try
     let json = Yojson.Safe.from_string line in
-    let role = Json_util.get_string_with_default json ~key:"role" ~default:"" in
+    let role_str = Json_util.get_string_with_default json ~key:"role" ~default:"" in
+    let role =
+      match Keeper_chat_role.of_string role_str with
+      | Ok r -> r
+      | Error _ ->
+          report_persistence_read_drop
+            ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+            ~path:file_path
+            ~detail:("invalid role: " ^ role_str);
+          None
+    in
     let content = Json_util.get_string_with_default json ~key:"content" ~default:"" in
     let ts =
       (try Some ((match Json_util.assoc_member_opt "ts" json with Some (`Float f) -> f | _ -> 0.0))
@@ -125,13 +135,16 @@ let parse_line ~file_path (line : string) : chat_message option =
           if atts = [] then None else Some atts
       | _ -> None
     in
-    if role = "" || content = "" then (
-      report_persistence_read_drop
-        ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
-        ~path:file_path
-        ~detail:"chat row missing non-empty role/content";
-      None)
-    else Some { role; content; ts; attachments }
+    match role with
+    | None -> None
+    | Some role ->
+        if content = "" then (
+          report_persistence_read_drop
+            ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+            ~path:file_path
+            ~detail:"chat row missing non-empty content";
+          None)
+        else Some { role; content; ts; attachments }
   with Yojson.Json_error detail ->
     report_persistence_read_drop
       ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
@@ -139,36 +152,19 @@ let parse_line ~file_path (line : string) : chat_message option =
       ~detail;
     None
 
-let max_history = 100
-
-let load ~base_dir ~keeper_name : chat_message list =
+let load ~base_dir ~keeper_name =
   let path = chat_path ~base_dir ~keeper_name in
-  if not (Sys.file_exists path) then []
-  else
-  try
-    let content = Fs_compat.load_file path in
-    let lines = String.split_on_char '\n' content in
-    (* Single pass: keep a running window of last max_history entries *)
-    let q = Queue.create () in
-    List.iter
-      (fun line ->
-        let trimmed = String.trim line in
-        if trimmed <> "" then
-          match parse_line ~file_path:path trimmed with
-          | Some msg ->
-              Queue.push msg q;
-              if Queue.length q > max_history then ignore (Queue.pop q)
-          | None -> ())
-      lines;
-    Queue.fold (fun acc msg -> msg :: acc) [] q |> List.rev
-  with
-  | Sys_error detail ->
-      report_persistence_read_drop
-        ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
-        ~path
-        ~detail;
-      []
-  | exn ->
+  match Keeper_fs.file_size path with
+  | exception _ -> []
+  | _size ->
+    try
+      let contents = Fs_compat.read_file path in
+      let lines = String.split_on_char '\n' contents in
+      let records = List.filter_map (parse_line ~file_path:path) lines in
+      records
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
       Otel_metric_store.inc_counter
         Keeper_metrics.(to_string ChatStoreFailures)
         ~labels:[("operation", Keeper_chat_store_operation.(to_label Load))]
@@ -182,7 +178,7 @@ let to_json_array (messages : chat_message list) : Yojson.Safe.t =
     (List.map
        (fun m ->
          `Assoc
-           ([ ("role", `String m.role);
+           ([ ("role", Keeper_chat_role.to_yojson m.role);
               ("content", `String m.content);
             ] @ (match m.ts with
                  | Some t -> [("ts", `Float t)]

@@ -1,4 +1,6 @@
-type role = User | Assistant
+(** See [keeper_chat_events.mli] for the contract. *)
+
+type role = Keeper_chat_role.t
 
 type keeper_chat_event =
   | Run_started of { run_id : string; thread_id : string }

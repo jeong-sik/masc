@@ -8,7 +8,9 @@
 
 (** {1 Types} *)
 
-type role = User | Assistant
+type role = Keeper_chat_role.t
+(** Re-export for callers that pattern-match on [role].
+    See {!Keeper_chat_role} for typed constructors and JSON helpers. *)
 
 type keeper_chat_event =
   | Run_started of { run_id : string; thread_id : string }

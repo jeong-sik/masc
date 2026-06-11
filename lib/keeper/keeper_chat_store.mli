@@ -20,7 +20,7 @@ type attachment = {
 }
 
 type chat_message = {
-  role : string;
+  role : Keeper_chat_role.t;
   content : string;
   ts : float option;
   attachments : attachment list option;

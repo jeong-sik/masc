@@ -1,6 +1,7 @@
 (** Discord_rest_client — outbound Discord REST API client.
 
-    Single function: post a message to a channel. Threads, DMs, and
+    Primary functions: post a message to a channel and trigger the
+    channel typing indicator. Threads, DMs, and
     guild text channels are all addressed by the same snowflake
     [channel_id], so no per-surface dispatch is needed.
 
@@ -51,6 +52,18 @@ val send_message :
 
     @raise nothing — failures are surfaced as typed {!error}. *)
 
+val trigger_typing :
+  token:string ->
+  channel_id:string ->
+  unit ->
+  (unit, error) result
+(** [trigger_typing ~token ~channel_id ()] posts to
+    [POST /api/v10/channels/{channel_id}/typing]. Discord expires the
+    typing indicator after 10 seconds, so callers handling long-running
+    work should refresh it periodically until the final message is sent.
+
+    @raise nothing — failures are surfaced as typed {!error}. *)
+
 (** {1 Internal — exposed for unit testing}
 
     These functions decompose [send_message] so request shape and
@@ -71,6 +84,14 @@ val build_request :
     [reply_to_message_id] is provided, the body includes a
     [message_reference] field so Discord threads the reply. *)
 
+val build_typing_request :
+  token:string ->
+  channel_id:string ->
+  unit ->
+  string * (string * string) list * string
+(** [(url, headers, body) = build_typing_request ~token ~channel_id ()].
+    The body is empty; headers include Authorization and User-Agent. *)
+
 val parse_response :
   status:int ->
   body:string ->
@@ -80,3 +101,12 @@ val parse_response :
     - 2xx with body shape mismatch                 → [Error (Other _)]
     - non-2xx with Discord error envelope          → [Error (Discord_api _)]
     - non-2xx without that envelope                → [Error (Http_status _)] *)
+
+val parse_empty_response :
+  status:int ->
+  body:string ->
+  (unit, error) result
+(** Classifies a Discord HTTP response for empty-success endpoints:
+    - 2xx → [Ok ()]
+    - non-2xx with Discord error envelope → [Error (Discord_api _)]
+    - non-2xx without that envelope → [Error (Http_status _)] *)

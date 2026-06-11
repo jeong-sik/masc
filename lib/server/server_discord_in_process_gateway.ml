@@ -55,7 +55,59 @@ let resolved_trigger_policy () =
 (* Inbound delivery                                                 *)
 (* ---------------------------------------------------------------- *)
 
+(* Discord typing indicators expire after 10s. Refresh below that window while
+   the accepted inbound is waiting for keeper output. *)
+let typing_refresh_interval_s = 8.0
+
+let trigger_typing_once ~channel_id =
+  match State.trigger_typing ~channel_id () with
+  | Ok () -> ()
+  | Error State.Missing_token ->
+      Log.Server.debug
+        "discord trigger_typing skipped: DISCORD_BOT_TOKEN is unset"
+  | Error e ->
+      Log.Server.debug
+        "discord trigger_typing failed (channel=%s): %s"
+        channel_id
+        (Format.asprintf "%a" State.pp_send_error e)
+
+(* Discord exposes only a typing indicator; MASC still treats
+   "response requested", "waiting for a keeper response", and "streaming
+   response text" as separate runtime phases. This helper projects only the
+   waiting phase to Discord UX without making typing a MASC state source of
+   truth. Streaming text should be a separate edit-loop transport. *)
+let with_response_wait_typing_indicator ~clock ~channel_id f =
+  trigger_typing_once ~channel_id;
+  Eio.Switch.run (fun typing_sw ->
+    let done_p, done_r = Eio.Promise.create () in
+    let finish () = Eio.Promise.resolve done_r () in
+    Eio.Fiber.fork ~sw:typing_sw (fun () ->
+      let rec loop () =
+        match
+          Eio.Fiber.first
+            (fun () ->
+              Eio.Promise.await done_p;
+              `Done)
+            (fun () ->
+              Eio.Time.sleep clock typing_refresh_interval_s;
+              `Tick)
+        with
+        | `Done -> ()
+        | `Tick ->
+            trigger_typing_once ~channel_id;
+            loop ()
+      in
+      loop ());
+    match f () with
+    | result ->
+        finish ();
+        result
+    | exception exn ->
+        finish ();
+        raise exn)
+
 let handle_message_create ~dispatch
+      ~clock
       ~(channel_id : string) ~(message_id : string)
       ~(author_id : string) ~(author_name : string option)
       ~(content : string) =
@@ -82,7 +134,10 @@ let handle_message_create ~dispatch
       ; metadata = []
       }
     in
-    (match Channel_gate.handle_inbound ~dispatch msg with
+    (match
+       with_response_wait_typing_indicator ~clock ~channel_id (fun () ->
+         Channel_gate.handle_inbound ~dispatch msg)
+     with
      | Error gate_err ->
        Discord_observability.record_inbound_dispatch
          Discord_observability.Gate_error;
@@ -111,7 +166,7 @@ let handle_message_create ~dispatch
               channel_id
               (Format.asprintf "%a" State.pp_send_error e)))
 
-let on_event ~dispatch (ev : Gw.gateway_event) =
+let on_event ~dispatch ~clock (ev : Gw.gateway_event) =
   match ev with
   | Gw.Ready { bot_user_id; _ } ->
     State.record_ready ~bot_user_id;
@@ -121,7 +176,7 @@ let on_event ~dispatch (ev : Gw.gateway_event) =
         mentions_bot = _ } ->
     (* mentions_bot is already enforced by the trigger policy at the
        gateway-state layer; nothing extra to check here. *)
-    handle_message_create ~dispatch ~channel_id ~message_id ~author_id
+    handle_message_create ~dispatch ~clock ~channel_id ~message_id ~author_id
       ~author_name ~content
   | Gw.Reaction_add _ ->
     (* The previous Python sidecar used a configurable emoji
@@ -209,7 +264,7 @@ let start ~sw ~env ~clock ~state =
           ~sw ~env ~token
           ~intents:default_intents
           ~trigger_policy:policy
-          ~on_event:(on_event ~dispatch)
+          ~on_event:(on_event ~dispatch ~clock)
           ~on_ambient:(fun ev ->
             (* Read base_path per event: [workspace_config] is mutable
                (workspace-switch tools swap it). *)

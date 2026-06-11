@@ -27,6 +27,11 @@ let message_content_limit = 2000
 let user_agent =
   "DiscordBot (https://github.com/jeong-sik/masc, 0.1)"
 
+let auth_headers ~token =
+  [ "Authorization", "Bot " ^ token
+  ; "User-Agent", user_agent
+  ]
+
 let build_request ~token ~channel_id ~content ?reply_to_message_id () =
   let url =
     Printf.sprintf
@@ -34,10 +39,7 @@ let build_request ~token ~channel_id ~content ?reply_to_message_id () =
       channel_id
   in
   let headers =
-    [ "Authorization", "Bot " ^ token
-    ; "Content-Type", "application/json"
-    ; "User-Agent", user_agent
-    ]
+    ("Content-Type", "application/json") :: auth_headers ~token
   in
   let fields = [ "content", `String content ] in
   let fields =
@@ -50,14 +52,38 @@ let build_request ~token ~channel_id ~content ?reply_to_message_id () =
   let body = Yojson.Safe.to_string (`Assoc fields) in
   (url, headers, body)
 
+let build_typing_request ~token ~channel_id () =
+  let url =
+    Printf.sprintf
+      "https://discord.com/api/v10/channels/%s/typing"
+      channel_id
+  in
+  (url, auth_headers ~token, "")
+
+let parse_json_safe s =
+  try Some (Yojson.Safe.from_string s) with Yojson.Json_error _ -> None
+
+let field_opt name = function
+  | `Assoc fields -> List.assoc_opt name fields
+  | _ -> None
+
+let error_of_non2xx ~status ~body =
+  match parse_json_safe body with
+  | None -> Http_status { code = status; body }
+  | Some json ->
+      let code =
+        match field_opt "code" json with
+        | Some (`Int c) -> c
+        | _ -> status
+      in
+      let message =
+        match field_opt "message" json with
+        | Some (`String s) -> s
+        | _ -> body
+      in
+      Discord_api { code; message }
+
 let parse_response ~status ~body =
-  let parse_json_safe s =
-    try Some (Yojson.Safe.from_string s) with Yojson.Json_error _ -> None
-  in
-  let field_opt name = function
-    | `Assoc fields -> List.assoc_opt name fields
-    | _ -> None
-  in
   if status >= 200 && status < 300 then
     match parse_json_safe body with
     | None ->
@@ -67,20 +93,11 @@ let parse_response ~status ~body =
          | Some (`String id) -> Ok id
          | _ -> Error (Other "2xx response missing 'id' string"))
   else
-    match parse_json_safe body with
-    | None -> Error (Http_status { code = status; body })
-    | Some json ->
-        let code =
-          match field_opt "code" json with
-          | Some (`Int c) -> c
-          | _ -> status
-        in
-        let message =
-          match field_opt "message" json with
-          | Some (`String s) -> s
-          | _ -> body
-        in
-        Error (Discord_api { code; message })
+    Error (error_of_non2xx ~status ~body)
+
+let parse_empty_response ~status ~body =
+  if status >= 200 && status < 300 then Ok ()
+  else Error (error_of_non2xx ~status ~body)
 
 let send_message ~token ~channel_id ~content ?reply_to_message_id () =
   let (url, headers, body) =
@@ -89,3 +106,9 @@ let send_message ~token ~channel_id ~content ?reply_to_message_id () =
   match Masc_http_client.post_sync ~url ~headers ~body () with
   | Error msg -> Error (Network msg)
   | Ok (status, body) -> parse_response ~status ~body
+
+let trigger_typing ~token ~channel_id () =
+  let url, headers, body = build_typing_request ~token ~channel_id () in
+  match Masc_http_client.post_sync ~url ~headers ~body () with
+  | Error msg -> Error (Network msg)
+  | Ok (status, body) -> parse_empty_response ~status ~body

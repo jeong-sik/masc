@@ -89,7 +89,7 @@ val record_ready : bot_user_id:string -> unit
     [bot_user_id] / [last_ready_at]. Atomic write — safe to call from
     the gateway fiber while HTTP handlers read. *)
 
-(** Typed failure modes for {!send_message}. Closed sum — adding
+(** Typed failure modes for Discord REST actions. Closed sum — adding
     a new variant forces every consumer to handle it. *)
 type send_error =
   | Missing_token
@@ -114,3 +114,11 @@ val send_message :
 
     Must be called inside an Eio context (the underlying REST
     client uses the piaf-backed http pool). *)
+
+val trigger_typing :
+  channel_id:string ->
+  unit ->
+  (unit, send_error) result
+(** Trigger Discord's typing indicator for [channel_id]. Bot token is
+    resolved from [DISCORD_BOT_TOKEN] at call time, matching
+    {!send_message}. *)

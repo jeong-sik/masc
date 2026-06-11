@@ -64,6 +64,7 @@ type config =
   ; raw_trace : Agent_sdk.Raw_trace.t option
   ; trace_link : (string * string) option
   ; enable_thinking : bool option
+  ; preserve_thinking : bool option
   ; transport : Masc_grpc_transport.t
   ; allowed_paths : string list
   ; checkpoint_sidecar : Yojson.Safe.t option
@@ -161,6 +162,7 @@ let default_config
   ; raw_trace = None
   ; trace_link = None
   ; enable_thinking = None
+  ; preserve_thinking = None
   ; transport = Masc_grpc_transport.from_env ()
   ; allowed_paths = []
   ; checkpoint_sidecar = None
@@ -266,6 +268,11 @@ let builder_without_approval
   let builder =
     match config.enable_thinking with
     | Some enabled -> Agent_sdk.Builder.with_enable_thinking enabled builder
+    | None -> builder
+  in
+  let builder =
+    match config.preserve_thinking with
+    | Some preserve -> Agent_sdk.Builder.with_preserve_thinking preserve builder
     | None -> builder
   in
   let builder =
@@ -412,6 +419,7 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
     ; system_prompt = Some config.system_prompt
     ; temperature = Some config.temperature
     ; enable_thinking = config.enable_thinking
+    ; preserve_thinking = config.preserve_thinking
     ; thinking_budget = config.thinking_budget
     ; cache_system_prompt = config.cache_system_prompt
     ; max_input_tokens = config.max_input_tokens
@@ -427,6 +435,7 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
     ; max_turns = max_turns_disabled
     ; temperature = Some config.temperature
     ; enable_thinking = config.enable_thinking
+    ; preserve_thinking = config.preserve_thinking
     ; thinking_budget = config.thinking_budget
     ; cache_system_prompt = config.cache_system_prompt
     ; max_input_tokens = config.max_input_tokens

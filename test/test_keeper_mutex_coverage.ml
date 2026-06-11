@@ -416,6 +416,41 @@ let test_voice_output_turn_serializes_speakers () =
     (Atomic.get second_entered)
 ;;
 
+let test_keeper_msg_async_switch_timeout_race () =
+  with_eio_env
+  @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let outer_sw = Eio.Fiber.switch ~on_release:(fun _ -> ()) () in
+  let base_path = temp_dir "keeper-msg-async-switch-race-" in
+  let never, _release_never = Eio.Promise.create () in
+  let request_id =
+    Keeper_msg_async.submit ~clock ~timeout_sec:0.01 ~sw:outer_sw ~base_path
+      ~f:(fun () ->
+        Eio.Promise.await never;
+        tr_ok "should not complete")
+      ~keeper_name:"executor"
+      ()
+  in
+  (* Let the fiber start, then cancel the outer switch immediately *)
+  Eio.Fiber.yield ();
+  Eio.Switch.fail outer_sw Keeper_msg_async.CancelledByOperator;
+  let entry = wait_for_done_with_clock clock request_id in
+  (* The fiber terminates via one of two race outcomes:
+     - timeout (with_timeout_exn fires before switch cancel propagates)
+     - lost (switch cancel propagates before previous_result is observed) *)
+  let acceptable =
+    match entry.status with
+    | Done { ok = false; _ } -> (
+      match entry.completed_at with
+      | Some _ -> true
+      | None -> false)
+    | Lost _ -> true
+    | _ -> false
+  in
+  Alcotest.(check bool) "switch+timeout race: Done(timeout) or Lost" true acceptable;
+  Alcotest.(check bool) "completed_at is set" true (Option.is_some entry.completed_at)
+;;
+
 let () =
   run
     "keeper_mutex_coverage"
@@ -437,6 +472,10 @@ let () =
             "timeout is terminal error"
             `Quick
             test_keeper_msg_async_timeout_is_terminal_error
+        ; test_case
+            "switch+timeout race: Done or Lost"
+            `Quick
+            test_keeper_msg_async_switch_timeout_race
         ; test_case
             "gc removes stale terminal disk record"
             `Quick

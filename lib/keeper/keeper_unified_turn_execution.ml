@@ -419,6 +419,16 @@ let run (ctx : ctx)
             err
         with
         | Degraded_retry_allowed degraded_retry ->
+          Keeper_unified_turn_cascade_resolution.publish_cascade_resolution
+            ~keeper_name:meta.name
+            ~runtime_id:execution.runtime_id
+            ~decision:Degraded_retry_allowed
+            ~reason:(EC.degraded_retry_reason_to_string degraded_retry.fallback_reason)
+            ~next_runtime:(Some degraded_retry.next_runtime)
+            ~attempt
+            ~error_kind:(Some (Keeper_agent_error.sdk_error_kind err))
+            ~error_message:(Some (Agent_sdk.Error.to_string err))
+            ();
           (match
              Keeper_unified_turn_pre_dispatch
              .build_runtime_execution
@@ -506,6 +516,16 @@ let run (ctx : ctx)
                    next_execution_runtime_id :: attempted_runtimes
                })
         | Degraded_retry_slot_phase_exhausted degraded_retry ->
+          Keeper_unified_turn_cascade_resolution.publish_cascade_resolution
+            ~keeper_name:meta.name
+            ~runtime_id:execution.runtime_id
+            ~decision:Degraded_retry_slot_phase_exhausted
+            ~reason:(EC.degraded_retry_reason_to_string degraded_retry.fallback_reason)
+            ~next_runtime:(Some degraded_retry.next_runtime)
+            ~attempt
+            ~error_kind:(Some (Keeper_agent_error.sdk_error_kind err))
+            ~error_message:(Some (Agent_sdk.Error.to_string err))
+            ();
           let productive_phase_elapsed_ms, retry_phase_elapsed_ms =
             current_turn_phase_elapsed_ms ()
           in
@@ -535,6 +555,16 @@ let run (ctx : ctx)
         | No_degraded_retry
           when EC.is_transient_network_error err
                && attempt <= EC.max_transient_retries () ->
+          Keeper_unified_turn_cascade_resolution.publish_cascade_resolution
+            ~keeper_name:meta.name
+            ~runtime_id:execution.runtime_id
+            ~decision:Transient_network_retry
+            ~reason:"transient_network_error"
+            ~next_runtime:None
+            ~attempt
+            ~error_kind:(Some (Keeper_agent_error.sdk_error_kind err))
+            ~error_message:(Some (Agent_sdk.Error.to_string err))
+            ();
           let delay = EC.transient_backoff_sec attempt in
           Log.Keeper.warn
             "%s: transient network error runtime=%s max_context=%d \
@@ -576,6 +606,16 @@ let run (ctx : ctx)
             ; attempted_runtimes
             }
         | No_degraded_retry when EC.is_context_overflow err ->
+          Keeper_unified_turn_cascade_resolution.publish_cascade_resolution
+            ~keeper_name:meta.name
+            ~runtime_id:execution.runtime_id
+            ~decision:No_degraded_retry
+            ~reason:"context_overflow_after_oas_retry"
+            ~next_runtime:None
+            ~attempt
+            ~error_kind:(Some (Keeper_agent_error.sdk_error_kind err))
+            ~error_message:(Some (Agent_sdk.Error.to_string err))
+            ();
           let current_turn_event_bus =
             drain_turn_event_bus ~site:"context_overflow_capture" ()
           in
@@ -611,6 +651,16 @@ let run (ctx : ctx)
           mark_terminal_error err;
           Error err
         | No_degraded_retry ->
+          Keeper_unified_turn_cascade_resolution.publish_cascade_resolution
+            ~keeper_name:meta.name
+            ~runtime_id:execution.runtime_id
+            ~decision:No_degraded_retry
+            ~reason:"terminal_error_no_degraded_retry"
+            ~next_runtime:None
+            ~attempt
+            ~error_kind:(Some (Keeper_agent_error.sdk_error_kind err))
+            ~error_message:(Some (Agent_sdk.Error.to_string err))
+            ();
           mark_terminal_error err;
           Error err)
   in

@@ -72,9 +72,11 @@ let fact_of_json ~trace_id (j : Yojson.Safe.t) : fact option =
     in
     (match find_string "claim", find_float "confidence", find_string "category" with
      | Some claim, Some confidence, Some category ->
+       (* DET-OK: source_turn is advisory provenance; absent means turn 0. *)
        let turn = Option.value (find_int "source_turn") ~default:0 in
        let tool_call_id = find_string "source_tool_call_id" in
        let source = claim_source ~trace_id turn tool_call_id in
+       (* NDT-OK: extraction timestamp used for retention scoring/provenance only. *)
        let now = Unix.gettimeofday () in
        Some
          { claim
@@ -135,6 +137,7 @@ let episode_of_output (inp : input) (raw : string) : episode option =
            ; constraints
            ; preserved_tool_refs
            ; source_turn_range
+           (* NDT-OK: episode creation timestamp used for retention/eviction only. *)
            ; created_at = Unix.gettimeofday ()
            ; schema_version
            }

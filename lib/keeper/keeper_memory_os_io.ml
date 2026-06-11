@@ -67,6 +67,7 @@ let append_event ~keeper_id episode =
 
 let write_file_atomically path content =
   ensure_dir (Filename.dirname path);
+  (* NDT-OK: PID is used only to avoid temp-file collisions in a single process; atomic rename guarantees correctness. *)
   let tmp = path ^ ".tmp." ^ string_of_int (Unix.getpid ()) in
   let oc = open_out_bin tmp in
   Fun.protect

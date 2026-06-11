@@ -124,8 +124,11 @@ let fact_of_json = function
      | Some claim, Some confidence, Some category, Some source_json ->
        (match provenance_event_of_json source_json with
         | Some source ->
+          (* DET-OK: backward-compatible defaults for optional persisted fields. *)
           let access_count = Option.value (json_int_field "access_count" fields) ~default:0 in
+          (* DET-OK: absent first_seen defaults to epoch for migration safety. *)
           let first_seen = Option.value (json_float_field "first_seen" fields) ~default:0.0 in
+          (* DET-OK: absent last_accessed inherits first_seen. *)
           let last_accessed = Option.value (json_float_field "last_accessed" fields) ~default:first_seen in
           let valid_until = json_float_field "valid_until" fields in
           Some
@@ -138,6 +141,7 @@ let fact_of_json = function
             ; last_accessed
             ; valid_until
             ; schema_version =
+                (* DET-OK: default to current schema for forward compatibility. *)
                 Option.value (json_string_field "schema_version" fields) ~default:schema_version
             }
         | None -> None)
@@ -176,8 +180,11 @@ let episode_of_json = function
      with
      | Some trace_id, Some generation, Some episode_summary, Some (`List claim_items) ->
        let claims = List.filter_map fact_of_json claim_items in
+       (* DET-OK: optional list fields default to empty. *)
        let open_items = Option.value (json_string_list_field "open_items" fields) ~default:[] in
+       (* DET-OK: optional list fields default to empty. *)
        let constraints = Option.value (json_string_list_field "constraints" fields) ~default:[] in
+       (* DET-OK: optional list fields default to empty. *)
        let preserved_tool_refs =
          Option.value (json_string_list_field "preserved_tool_refs" fields) ~default:[]
        in
@@ -189,6 +196,7 @@ let episode_of_json = function
             | _ -> None)
          | _ -> None
        in
+       (* DET-OK: absent created_at defaults to epoch for migration safety. *)
        let created_at = Option.value (json_float_field "created_at" fields) ~default:0.0 in
        Some
          { trace_id
@@ -201,6 +209,7 @@ let episode_of_json = function
          ; source_turn_range
          ; created_at
          ; schema_version =
+             (* DET-OK: default to current schema for forward compatibility. *)
              Option.value (json_string_field "schema_version" fields) ~default:schema_version
          }
      | _ -> None)

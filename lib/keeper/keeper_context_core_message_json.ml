@@ -24,12 +24,16 @@ let content_blocks_to_json
   `List
     (List.map
        (function
-        | Agent_sdk.Types.Thinking { content; _ } ->
-          `Assoc [ ("type", `String "thinking"); ("thinking", `String content) ]
+        | Agent_sdk.Types.Thinking { thinking_type; content } ->
+          `Assoc
+            [ ("type", `String "thinking")
+            ; ("thinking", `String content)
+            ; ("thinking_type", `String thinking_type)
+            ]
         | Agent_sdk.Types.RedactedThinking text ->
           `Assoc
             [ ("type", `String "redacted_thinking")
-            ; ("thinking", `String text)
+            ; ("data", `String text)
             ]
         | block -> Agent_sdk.Api.content_block_to_json block)
        blocks)
@@ -47,7 +51,7 @@ let content_blocks_of_json
                 Some (Agent_sdk.Types.Thinking { thinking_type = "thinking"; content })
               | None -> None)
            | Some "redacted_thinking" ->
-             (match Json_util.get_string j "thinking" with
+             (match Json_util.get_string j "data" with
               | Some text -> Some (Agent_sdk.Types.RedactedThinking text)
               | None -> None)
            | _ -> Agent_sdk.Api.content_block_of_json j)

@@ -238,5 +238,5 @@ let with_keeper_turn_span
          #20581). Tool dispatches already start their own trace, so this does
          not lose a parent/child link that previously existed. *)
       ~force_new_trace_id:true
-      (fun _trace_id -> f ()))
+      (fun trace_link -> f trace_link)))
 ;;

@@ -143,7 +143,7 @@ let run (ctx : ctx)
         (Option.map
            Keeper_id.Task_id.to_string
            run_meta.current_task_id)
-      (fun () ->
+      (fun trace_link ->
          Keeper_registry.mark_turn_provider_attempt_started
            ~base_path:config.base_path
            meta.name;
@@ -212,6 +212,7 @@ let run (ctx : ctx)
                ~is_retry
                ?shared_context
                ?event_bus:(Keeper_event_bus.get ())
+               ?trace_link:(trace_link ())
                ()))
   in
   let rec retry_loop (input : retry_loop_input) =

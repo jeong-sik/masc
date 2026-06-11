@@ -111,6 +111,7 @@ let run_turn
       ?(is_retry = false)
       ?shared_context
       ?event_bus
+      ?trace_link
       ()
   : (run_result, Agent_sdk.Error.sdk_error) result
   =
@@ -547,6 +548,7 @@ let run_turn
              natural completion (max_turns or model end_turn). *)
                     ?oas_checkpoint:resume_oas_checkpoint
                     ?event_bus
+                    ?trace_link
                     ?per_provider_timeout_s
                     ()
               in

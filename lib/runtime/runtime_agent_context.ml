@@ -62,6 +62,7 @@ type config =
   ; description : string option
   ; initial_messages : Agent_sdk.Types.message list
   ; raw_trace : Agent_sdk.Raw_trace.t option
+  ; trace_link : (string * string) option
   ; enable_thinking : bool option
   ; transport : Masc_grpc_transport.t
   ; allowed_paths : string list
@@ -158,6 +159,7 @@ let default_config
   ; description = None
   ; initial_messages = []
   ; raw_trace = None
+  ; trace_link = None
   ; enable_thinking = None
   ; transport = Masc_grpc_transport.from_env ()
   ; allowed_paths = []
@@ -259,6 +261,11 @@ let builder_without_approval
   let builder =
     match config.raw_trace with
     | Some raw_trace -> Agent_sdk.Builder.with_raw_trace raw_trace builder
+    | None -> builder
+  in
+  let builder =
+    match config.trace_link with
+    | Some link -> Agent_sdk.Builder.with_trace_link (Some link) builder
     | None -> builder
   in
   let builder =

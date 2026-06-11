@@ -12,14 +12,23 @@ include Workspace_task_transitions
 let release_task_r config ~agent_name ~task_id ?expected_version ?handoff_context ()
   : string Masc_domain.masc_result
   =
-  transition_task_r
-    config
-    ~agent_name
-    ~task_id
-    ~action:Masc_domain.Release
-    ?expected_version
-    ?handoff_context
-    ()
+  let result =
+    transition_task_r
+      config
+      ~agent_name
+      ~task_id
+      ~action:Masc_domain.Release
+      ?expected_version
+      ?handoff_context
+      ()
+  in
+  (* RFC-0221 §3.2: clear stale agent task after atomic backlog commit in transition_task_r *)
+  (match result with
+   | Ok _ ->
+     Task_cache_invariant.clear_stale_agent_task config ~agent_name
+       ~task_id ~status:Masc_domain.Todo ~module_name:"release_task_r"
+   | Error _ -> ());
+  result
 ;;
 
 (** Force-release a task regardless of assignee. Keeper privilege. *)

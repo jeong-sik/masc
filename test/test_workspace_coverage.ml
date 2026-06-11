@@ -607,6 +607,20 @@ let test_release_hard_stop_blocks_future_claim_next () =
      with
      | Ok _ -> ()
      | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e));
+    (* RFC-0221 §3.2: release_task_r clears the agent's stale current_task *)
+    let agent_after_release =
+      match
+        List.find_opt
+          (fun (a : Masc_domain.agent) -> String.equal a.name agent_llm_a)
+          (Workspace.get_agents_raw config)
+      with
+      | Some a -> a
+      | None -> Alcotest.fail "agent_llm_a not found after release"
+    in
+    Alcotest.(check (option string))
+      "release clears agent current_task"
+      None
+      agent_after_release.current_task;
     let task_001 =
       match
         List.find_opt

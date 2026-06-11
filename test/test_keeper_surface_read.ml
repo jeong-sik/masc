@@ -52,7 +52,7 @@ let discord_fixture : Store.chat_message list =
   ]
 
 let test_lane_filter_excludes_other_sources_and_legacy () =
-  let json = parse (SR.respond ~surface:"discord" ~limit:50 discord_fixture) in
+  let json = parse (SR.respond ~surface:"discord" ~limit:50 ~has_more:false discord_fixture) in
   check int "lane rows" 4 (to_int (member "lane_row_count" json));
   check int "returned" 4 (to_int (member "returned" json));
   let contents =
@@ -69,7 +69,7 @@ let test_lane_filter_excludes_other_sources_and_legacy () =
     contents
 
 let test_roster_groups_by_id_latest_name_wins () =
-  let json = parse (SR.respond ~surface:"discord" ~limit:50 discord_fixture) in
+  let json = parse (SR.respond ~surface:"discord" ~limit:50 ~has_more:false discord_fixture) in
   let participants = to_list (member "participants" json) in
   check int "two participants" 2 (List.length participants);
   let find id =
@@ -92,7 +92,7 @@ let test_roster_groups_by_id_latest_name_wins () =
     (to_string_j (member "id" (List.hd participants)))
 
 let test_limit_truncates_messages_not_roster () =
-  let json = parse (SR.respond ~surface:"discord" ~limit:2 discord_fixture) in
+  let json = parse (SR.respond ~surface:"discord" ~limit:2 ~has_more:false discord_fixture) in
   check int "returned capped" 2 (to_int (member "returned" json));
   check int "lane count still full" 4 (to_int (member "lane_row_count" json));
   check int "roster still full" 2
@@ -106,7 +106,7 @@ let test_limit_truncates_messages_not_roster () =
     contents
 
 let test_keeper_own_lines_are_not_participants () =
-  let json = parse (SR.respond ~surface:"discord" ~limit:50 discord_fixture) in
+  let json = parse (SR.respond ~surface:"discord" ~limit:50 ~has_more:false discord_fixture) in
   let ids =
     to_list (member "participants" json)
     |> List.map (fun p -> to_string_j (member "id" p))
@@ -115,18 +115,45 @@ let test_keeper_own_lines_are_not_participants () =
     (List.exists (fun id -> String.equal id "keeper") ids)
 
 let test_blank_surface_is_error () =
-  let json = parse (SR.respond ~surface:"  " ~limit:10 discord_fixture) in
+  let json = parse (SR.respond ~surface:"  " ~limit:10 ~has_more:false discord_fixture) in
   check bool "error field present" true (member "error" json <> `Null)
 
 let test_empty_lane_is_success_with_zero_rows () =
-  let json = parse (SR.respond ~surface:"slack" ~limit:10 discord_fixture) in
+  let json = parse (SR.respond ~surface:"slack" ~limit:10 ~has_more:false discord_fixture) in
   check int "lane empty" 0 (to_int (member "lane_row_count" json));
   check int "no participants" 0
     (List.length (to_list (member "participants" json)))
 
+(* RFC-0228 P1 — paging fields. oldest_ts spans the whole page (the
+   dashboard ts=1.0 row), not just the discord lane, so a walk makes
+   progress through pages that hold no rows for the requested lane. *)
+let test_paging_fields_reflect_page_not_lane () =
+  let json =
+    parse (SR.respond ~surface:"discord" ~limit:50 ~has_more:true discord_fixture)
+  in
+  check bool "has_more passthrough" true
+    (Yojson.Safe.Util.to_bool (member "has_more" json));
+  check (float 0.0001) "oldest_ts is page-wide" 1.0
+    (Yojson.Safe.Util.to_number (member "oldest_ts" json))
+
+let test_oldest_ts_absent_when_page_unstamped () =
+  let json =
+    parse
+      (SR.respond ~surface:"discord" ~limit:10 ~has_more:false
+         [ msg ~source:"discord" ~role:"user" "no ts row" ])
+  in
+  check bool "oldest_ts omitted" true (member "oldest_ts" json = `Null)
+
 let () =
   run "keeper_surface_read"
     [
+      ( "paging (RFC-0228)",
+        [
+          test_case "has_more + page-wide oldest_ts" `Quick
+            test_paging_fields_reflect_page_not_lane;
+          test_case "oldest_ts absent when page unstamped" `Quick
+            test_oldest_ts_absent_when_page_unstamped;
+        ] );
       ( "lane filter",
         [
           test_case "excludes other sources and legacy rows" `Quick

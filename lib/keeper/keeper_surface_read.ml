@@ -105,7 +105,20 @@ let take_last n items =
     in
     drop (len - n) items
 
-let respond ~surface ~limit (messages : Store.chat_message list) : string =
+(* Oldest ts across the whole loaded page (not just the lane filter):
+   passing it back as the next [before] guarantees walk progress even
+   when a page holds no rows for the requested lane (RFC-0228 P1). *)
+let page_oldest_ts (messages : Store.chat_message list) : float option =
+  List.fold_left
+    (fun acc (m : Store.chat_message) ->
+      match (acc, m.ts) with
+      | None, ts -> ts
+      | Some a, Some t when t < a -> Some t
+      | some, _ -> some)
+    None messages
+
+let respond ~surface ~limit ~has_more (messages : Store.chat_message list) :
+    string =
   let surface = String.trim surface in
   if surface = "" then
     Yojson.Safe.to_string
@@ -130,10 +143,12 @@ let respond ~surface ~limit (messages : Store.chat_message list) : string =
     let shown = take_last limit lane in
     Yojson.Safe.to_string
       (`Assoc
-        [
-          ("surface", `String surface);
-          ("messages", `List (List.map message_json shown));
-          ("participants", `List (List.map participant_json (roster lane)));
-          ("lane_row_count", `Int (List.length lane));
-          ("returned", `Int (List.length shown));
-        ])
+        ([
+           ("surface", `String surface);
+           ("messages", `List (List.map message_json shown));
+           ("participants", `List (List.map participant_json (roster lane)));
+           ("lane_row_count", `Int (List.length lane));
+           ("returned", `Int (List.length shown));
+           ("has_more", `Bool has_more);
+         ]
+        @ opt_float_field "oldest_ts" (page_oldest_ts messages)))

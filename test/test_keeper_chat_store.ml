@@ -387,9 +387,89 @@ let test_tail_bounded_load_matches_full_scan_window () =
              "assistant" last.K.role
        | [] -> Alcotest.fail "expected non-empty window"))
 
+(* RFC-0228 P1 — backward paging. Raw JSONL with controlled ts so the
+   page boundaries are exact. *)
+let write_numbered_lane ~path ~total ~pad_bytes =
+  let padding = String.make pad_bytes 'x' in
+  let buf = Buffer.create (total * (pad_bytes + 80)) in
+  for i = 1 to total do
+    Buffer.add_string buf
+      (Yojson.Safe.to_string
+         (`Assoc
+            [
+              ("role", `String (if i mod 2 = 1 then "user" else "assistant"));
+              ("content", `String (Printf.sprintf "msg-%04d %s" i padding));
+              ("ts", `Float (float_of_int i));
+            ]));
+    Buffer.add_char buf '\n'
+  done;
+  write_file path (Buffer.contents buf)
+
+let content_no (m : K.chat_message) =
+  int_of_string (String.sub m.K.content 4 4)
+
+let test_load_page_walks_backward_small_file () =
+  let base_dir = temp_base_path "keeper-chat-store-page-small" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-page-small" in
+      write_numbered_lane
+        ~path:(chat_path ~base_dir ~keeper_name)
+        ~total:300 ~pad_bytes:0;
+      (* Page 1: strictly older than ts 250 → window 150..249. *)
+      let p1 = K.load_page ~base_dir ~keeper_name ~before:250.0 () in
+      Alcotest.(check int) "window size" 100 (List.length p1.K.messages);
+      Alcotest.(check int) "first" 150 (content_no (List.hd p1.K.messages));
+      Alcotest.(check int) "last" 249
+        (content_no (List.hd (List.rev p1.K.messages)));
+      Alcotest.(check bool) "older rows remain" true p1.K.has_more;
+      (* Page 2: walk with the oldest returned ts. *)
+      let p2 = K.load_page ~base_dir ~keeper_name ~before:150.0 () in
+      Alcotest.(check int) "page2 first" 50 (content_no (List.hd p2.K.messages));
+      (* Final page: fewer rows than the window, nothing older. *)
+      let p3 = K.load_page ~base_dir ~keeper_name ~before:50.0 () in
+      Alcotest.(check int) "page3 size" 49 (List.length p3.K.messages);
+      Alcotest.(check int) "page3 first" 1 (content_no (List.hd p3.K.messages));
+      Alcotest.(check bool) "history exhausted" false p3.K.has_more;
+      (* before older than everything → empty, exhausted. *)
+      let p4 = K.load_page ~base_dir ~keeper_name ~before:1.0 () in
+      Alcotest.(check int) "empty page" 0 (List.length p4.K.messages);
+      Alcotest.(check bool) "empty page exhausted" false p4.K.has_more)
+
+let test_load_page_binary_search_large_file () =
+  let base_dir = temp_base_path "keeper-chat-store-page-large" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-page-large" in
+      (* ~5.3 MiB: larger than both the 4 MiB window slice and the
+         256 KiB probe, so find_cut's loop actually narrows. *)
+      write_numbered_lane
+        ~path:(chat_path ~base_dir ~keeper_name)
+        ~total:5200 ~pad_bytes:1000;
+      let p = K.load_page ~base_dir ~keeper_name ~before:5000.0 () in
+      Alcotest.(check int) "window size" 100 (List.length p.K.messages);
+      Alcotest.(check int) "first" 4900 (content_no (List.hd p.K.messages));
+      Alcotest.(check int) "last" 4999
+        (content_no (List.hd (List.rev p.K.messages)));
+      Alcotest.(check bool) "older rows remain" true p.K.has_more;
+      (* Tail mode on the same file reports more history too. *)
+      let tail = K.load_page ~base_dir ~keeper_name () in
+      Alcotest.(check int) "tail last" 5200
+        (content_no (List.hd (List.rev tail.K.messages)));
+      Alcotest.(check bool) "tail has_more" true tail.K.has_more)
+
 let () =
   Alcotest.run "keeper_chat_store"
     [
+      ( "paging (RFC-0228)",
+        [
+          Alcotest.test_case "load_page walks backward (small file)" `Quick
+            test_load_page_walks_backward_small_file;
+          Alcotest.test_case "load_page binary search (large file)" `Quick
+            test_load_page_binary_search_large_file;
+        ] );
       ( "persistence_read_drops",
         [
           Alcotest.test_case "malformed rows increment drop metrics" `Quick

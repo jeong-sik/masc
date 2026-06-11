@@ -158,6 +158,12 @@ val fold_jsonl_lines
     truncated or rotated) restarts the scan from byte 0. Returns
     [(init, 0)] when [path] does not exist. Lines are raw strings;
     callers parse (and decide how to surface malformed rows). *)
+(** [read_slice ~path ~from ~len] returns the byte slice
+    [[from, from+len)] of the file, clamped to its current size.
+    Missing file or empty clamped range returns [""]. Callers bound
+    [len], so one call never scales with file size (RFC-0228 P1). *)
+val read_slice : path:string -> from:int -> len:int -> string
+
 val fold_appended_lines
   :  path:string
   -> from:int

@@ -90,12 +90,17 @@ let handle_surface_read ~config ~(meta : keeper_meta) ~args =
   let limit =
     Safe_ops.json_int ~default:Keeper_surface_read.default_limit "limit" args
   in
-  let messages =
-    Keeper_chat_store.load
+  let before = Safe_ops.json_float_opt "before" args in
+  let page =
+    Keeper_chat_store.load_page
       ~base_dir:config.Workspace.base_path
       ~keeper_name:meta.name
+      ?before
+      ()
   in
-  Keeper_surface_read.respond ~surface ~limit messages
+  Keeper_surface_read.respond ~surface ~limit
+    ~has_more:page.Keeper_chat_store.has_more
+    page.Keeper_chat_store.messages
 ;;
 
 let handle_surface_post ~config ~(meta : keeper_meta) ~args =

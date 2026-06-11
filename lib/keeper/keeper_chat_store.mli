@@ -123,6 +123,20 @@ val append_user_message :
 val load :
   base_dir:string -> keeper_name:string -> chat_message list
 
+type page = { messages : chat_message list; has_more : bool }
+
+(** [load_page ~base_dir ~keeper_name ?before ()] is the paged form of
+    {!load} (RFC-0228 P1): with [before] (a message [ts]) it returns
+    the window of messages strictly older than that stamp; without it,
+    the tail window. [has_more] reports whether rows older than the
+    returned window remain — walk backward by passing the oldest
+    returned [ts] as the next [before]. Bounded I/O per call:
+    binary-search probes plus one window slice, never a full scan.
+    Legacy rows without [ts] are unreachable through paging (the tail
+    window still serves them). *)
+val load_page :
+  base_dir:string -> keeper_name:string -> ?before:float -> unit -> page
+
 (** {1 Serialisation} *)
 
 (** JSON array of messages. Entries without a timestamp omit the

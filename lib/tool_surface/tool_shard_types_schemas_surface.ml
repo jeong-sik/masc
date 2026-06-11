@@ -31,6 +31,17 @@ let surface_tools : Masc_domain.tool_schema list =
                             "Maximum lane messages to return (default 20, \
                              max 100)" )
                       ] )
+                ; ( "before"
+                  , `Assoc
+                      [ "type", `String "number"
+                      ; ( "description"
+                        , `String
+                            "Page backward: return messages strictly older \
+                             than this ts (a message timestamp from a \
+                             previous call). Walk history by passing the \
+                             oldest_ts of the previous response; stop when \
+                             has_more is false." )
+                      ] )
                 ] )
           ; "required", `List [ `String "surface" ]
           ]

@@ -337,58 +337,123 @@ let rec drop_leading_tool_messages = function
    degrades to a shorter window, never to an error or a full scan. *)
 let tail_read_bytes = 4 * 1024 * 1024
 
-let load ~base_dir ~keeper_name : chat_message list =
+(* RFC-0228 P1: binary-search probes for [before]-paging are tiny
+   bounded reads; a probe only needs to span a handful of lines. A
+   probe landing inside an oversized line degrades the cut estimate
+   (shorter window), never correctness — the final ts filter discards
+   overshoot rows. *)
+let probe_bytes = 256 * 1024
+
+type page = { messages : chat_message list; has_more : bool }
+
+(* Lines of the byte slice [[from, upto)). When [from > 0] the first
+   element is a (potentially partial) line fragment — dropped, same
+   rationale as the RFC-0226 P2 tail read. A final element without a
+   terminating '\n' (mid-line [upto], or a writer-in-flight tail) is
+   dropped the same way; split yields [""] there for boundary cuts, so
+   only true fragments are removed. *)
+let slice_lines ~path ~from ~upto : string list =
+  if upto <= from then []
+  else
+    let slice = Fs_compat.read_slice ~path ~from ~len:(upto - from) in
+    let lines = String.split_on_char '\n' slice in
+    let lines = match lines with _ :: rest when from > 0 -> rest | l -> l in
+    match List.rev lines with
+    | last :: rev_rest when last <> "" -> List.rev rev_rest
+    | _ -> lines
+
+(* Metric-quiet ts extractor for probes: probed lines are re-read by
+   the real parse later, so a malformed row must not double-count in
+   the read-drop metrics. *)
+let quiet_line_ts line : float option =
+  try
+    match Json_util.assoc_member_opt "ts" (Yojson.Safe.from_string line) with
+    | Some (`Float f) -> Some f
+    | _ -> None
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | _ -> None
+
+let probe_ts ~path ~size pos : float option =
+  let upto = min size (pos + probe_bytes) in
+  List.find_map
+    (fun line ->
+      let trimmed = String.trim line in
+      if trimmed = "" then None else quiet_line_ts trimmed)
+    (slice_lines ~path ~from:pos ~upto)
+
+(* Largest prefix [[0, cut)) holding only lines with ts < [before].
+   Append-only wall-clock stamps make line ts monotone in byte offset,
+   so this is a plain byte-offset binary search: ~log2(size/probe)
+   probes, each bounded. The returned cut overshoots by at most one
+   probe window; callers filter by ts. *)
+let find_cut ~path ~size ~before : int =
+  let lo = ref 0 and hi = ref size in
+  while !hi - !lo > probe_bytes do
+    let mid = !lo + ((!hi - !lo) / 2) in
+    match probe_ts ~path ~size mid with
+    | Some t when t < before -> lo := mid
+    | Some _ | None -> hi := mid
+  done;
+  !hi
+
+let load_page ~base_dir ~keeper_name ?before () : page =
   let path = chat_path ~base_dir ~keeper_name in
-  if not (Sys.file_exists path) then []
+  if not (Sys.file_exists path) then { messages = []; has_more = false }
   else
   try
-    let from =
-      match Fs_compat.file_size path with
-      | Some size when size > tail_read_bytes -> size - tail_read_bytes
-      | Some _ | None -> 0
+    let size = Option.value (Fs_compat.file_size path) ~default:0 in
+    let upto, keep =
+      match before with
+      | None -> (size, fun (_ : chat_message) -> true)
+      | Some b ->
+          (* Rows without ts (legacy) are unorderable and stay
+             unreachable through paging; the tail window still serves
+             them. *)
+          ( find_cut ~path ~size ~before:b,
+            fun (m : chat_message) ->
+              match m.ts with Some t -> t < b | None -> false )
     in
+    let from = if upto > tail_read_bytes then upto - tail_read_bytes else 0 in
     (* Single pass: keep a running window of the last [max_history]
        user/assistant messages plus their tool lines. *)
     let q = Queue.create () in
     let primary_count = ref 0 in
+    let evicted = ref false in
     let pop_front () =
+      evicted := true;
       let popped = Queue.pop q in
       if not (is_tool_message popped) then decr primary_count
     in
-    (* A mid-line [from] makes the first folded item a line fragment;
-       dropping it unconditionally when [from > 0] also drops one full
-       line when [from] lands exactly on a boundary — irrelevant under
-       the window's slack, and it keeps fragment noise out of the
-       read-drop metrics. *)
-    let skip_partial_first = ref (from > 0) in
-    let (), _boundary =
-      Fs_compat.fold_appended_lines ~path ~from ~init:() ~f:(fun () line ->
-        if !skip_partial_first then skip_partial_first := false
-        else
-          let trimmed = String.trim line in
-          if trimmed <> "" then
-            match parse_line ~file_path:path trimmed with
-            | Some msg ->
-                Queue.push msg q;
-                if not (is_tool_message msg) then incr primary_count;
-                while
-                  !primary_count > max_history
-                  || Queue.length q > max_total_lines
-                do
-                  pop_front ()
-                done
-            | None -> ())
+    List.iter
+      (fun line ->
+        let trimmed = String.trim line in
+        if trimmed <> "" then
+          match parse_line ~file_path:path trimmed with
+          | Some msg when keep msg ->
+              Queue.push msg q;
+              if not (is_tool_message msg) then incr primary_count;
+              while
+                !primary_count > max_history
+                || Queue.length q > max_total_lines
+              do
+                pop_front ()
+              done
+          | Some _ | None -> ())
+      (slice_lines ~path ~from ~upto);
+    let messages =
+      Queue.fold (fun acc msg -> msg :: acc) [] q
+      |> List.rev
+      |> drop_leading_tool_messages
     in
-    Queue.fold (fun acc msg -> msg :: acc) [] q
-    |> List.rev
-    |> drop_leading_tool_messages
+    { messages; has_more = from > 0 || !evicted }
   with
   | Sys_error detail ->
       report_persistence_read_drop
         ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
         ~path
         ~detail;
-      []
+      { messages = []; has_more = false }
   | exn ->
       Otel_metric_store.inc_counter
         Keeper_metrics.(to_string ChatStoreFailures)
@@ -396,7 +461,10 @@ let load ~base_dir ~keeper_name : chat_message list =
         ();
       Log.Keeper.warn "keeper_chat_store: load failed for %s: %s"
         (sanitize_name keeper_name) (Printexc.to_string exn);
-      []
+      { messages = []; has_more = false }
+
+let load ~base_dir ~keeper_name : chat_message list =
+  (load_page ~base_dir ~keeper_name ()).messages
 
 let to_json_array (messages : chat_message list) : Yojson.Safe.t =
   `List

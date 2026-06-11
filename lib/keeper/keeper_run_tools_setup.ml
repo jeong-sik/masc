@@ -12,6 +12,7 @@ open Keeper_agent_prompt_metrics
 let prepare_agent_setup
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
+      ~(turn_ctx_cell : Keeper_tool_call_log.turn_ctx_cell)
       ~(ctx_work : working_context)
       ~(session : Keeper_types.session_context)
       ~(base_system_prompt : string)
@@ -641,6 +642,7 @@ let prepare_agent_setup
     ; keeper_tools_cleanup
     ; manifest_keeper_turn_id
     ; meta
+    ; turn_ctx_cell
     ; receipt_turn_count_ref
     ; receipt_model_used_ref
     ; receipt_stop_reason_ref

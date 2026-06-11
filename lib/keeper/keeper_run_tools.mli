@@ -79,6 +79,7 @@ type agent_setup =
 val prepare_agent_setup
   :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
+  -> turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell
   -> ctx_work:working_context
   -> session:Keeper_types.session_context
   -> base_system_prompt:string

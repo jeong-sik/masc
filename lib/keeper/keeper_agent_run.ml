@@ -78,6 +78,7 @@ end
 let run_turn
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
+      ~(turn_ctx_cell : Keeper_tool_call_log.turn_ctx_cell)
       ~(base_dir : string)
       ~(max_context : int)
       ~(build_turn_prompt :
@@ -352,6 +353,7 @@ let run_turn
     Keeper_run_tools.prepare_agent_setup
       ~config
       ~meta
+      ~turn_ctx_cell
       ~ctx_work
       ~session
       ~base_system_prompt

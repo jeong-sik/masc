@@ -218,6 +218,7 @@ include Keeper_hooks_oas_idle
 let make_hooks
     ~(config : Workspace.config)
     ~(meta_ref : Keeper_meta_contract.keeper_meta ref)
+    ~(turn_ctx_cell : Keeper_tool_call_log.turn_ctx_cell)
     ~(generation : int)
     ?(max_cost_usd : float option)
     ?(destructive_check : bool = true)
@@ -600,22 +601,12 @@ let make_hooks
             ~keeper_name:(!meta_ref).name ()
         in
         let result_bytes = if original_bytes > 0 then original_bytes else out_len in
-        let ( lane
-            , tool_choice
-            , thinking_enabled
-            , thinking_budget
-            , prompt_fingerprint
-            , trace_id
-            , session_id
-            , turn
-            , keeper_turn_id
-            , task_id
-            , goal_ids
-            , sandbox_profile
-            , network_mode
-            , approval_mode ) =
-          Keeper_tool_call_log.get_turn_context
-            ~keeper_name:(!meta_ref).name ()
+        (* Full record read: log_call no longer falls back to ambient
+           context (RFC-0225 §3.3), so every field this row should carry
+           must be passed explicitly from the run's own cell. *)
+        let tctx : Keeper_tool_call_log_context.turn_context =
+          Keeper_tool_call_log_context.get_turn_context_record
+            ~cell:turn_ctx_cell ()
         in
         (try
            Keeper_tool_call_log.log_call
@@ -623,10 +614,21 @@ let make_hooks
              ~tool_name ~input ~output_text
              ~success:(outcome = Tool_result.Ok) ~duration_ms
              ~model:(current_keeper_model !meta_ref)
-             ?lane ?tool_choice ?thinking_enabled ?thinking_budget
-             ?prompt_fingerprint
-             ?trace_id ?session_id ?turn ?keeper_turn_id ?task_id ?goal_ids
-             ?sandbox_profile ?network_mode ?approval_mode
+             ?agent_name:tctx.agent_name
+             ?lane:tctx.lane ?tool_choice:tctx.tool_choice
+             ?thinking_enabled:tctx.thinking_enabled
+             ?thinking_budget:tctx.thinking_budget
+             ?prompt_fingerprint:tctx.prompt_fingerprint
+             ?trace_id:tctx.trace_id ?session_id:tctx.session_id
+             ?generation:tctx.generation
+             ?turn:tctx.turn ?keeper_turn_id:tctx.keeper_turn_id
+             ?task_id:tctx.task_id ?goal_ids:tctx.goal_ids
+             ?sandbox_profile:tctx.sandbox_profile
+             ?sandbox_root:tctx.sandbox_root
+             ?allowed_paths:tctx.allowed_paths
+             ?network_mode:tctx.network_mode
+             ?approval_mode:tctx.approval_mode
+             ?runtime_profile:tctx.runtime_profile
              ~result_bytes ?truncated_to ()
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
@@ -659,11 +661,12 @@ let make_hooks
            let runtime_contract =
              Keeper_tool_call_log.runtime_observability_contract_json_for_call
                ~keeper_name
+               ~cell:turn_ctx_cell
                ()
            in
            let action_radius =
              Keeper_tool_call_log.action_radius_json_for_call
-               ~keeper_name
+               ~cell:turn_ctx_cell
                ~tool_name
                ~input:safe_input
                ~success:(outcome = Tool_result.Ok)

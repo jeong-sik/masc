@@ -274,6 +274,13 @@ let run_keeper_cycle
                    ~generation:meta.runtime.generation ()
                in
                let max_cost_usd = None in
+               (* RFC-0225 §3.3: one carrier per cycle. The pre-request hook
+                  writes the effective turn policy here; the decision records
+                  below read the same cell, so a concurrent run of this keeper
+                  can never substitute its own identity. *)
+               let turn_ctx_cell =
+                 Keeper_tool_call_log.create_turn_ctx_cell ()
+               in
                (* 4. Build turn prompt callback: use our unified system prompt *)
                let build_turn_prompt ~base_system_prompt:_ ~messages:_
                  : Keeper_agent_run.turn_prompt
@@ -479,6 +486,7 @@ let run_keeper_cycle
                           ; last_provider_timeout_budget
                           ; max_cost_usd
                           ; meta
+                          ; turn_ctx_cell
                           ; observation
                           ; post_commit_failure_reason
                           ; profile_defaults
@@ -802,6 +810,7 @@ let run_keeper_cycle
                   Keeper_unified_metrics.append_decision_record
                     ~config
                     ~meta:updated_meta
+                    ~turn_ctx_cell
                     ~observation
                     ~latency_ms
                     ~outcome:(if is_ambiguous_partial then "partial" else "error")
@@ -903,6 +912,7 @@ dominant source of the observed CAS race exhaustion after
                       ~config
                       ~base_dir
                       ~meta
+                      ~turn_ctx_cell
                       ~observation
                       ~previous_social_state
                       ~final_execution

@@ -232,8 +232,12 @@ let test_blocked_structured_output_keeps_semantic_category () =
 
 let test_turn_context_fields_stored () =
   with_tmp_log (fun () ->
+    (* Mirrors the production reader (keeper_hooks_oas): context is
+       written to a per-run cell, read back as a record, and passed
+       explicitly to log_call — there is no ambient fallback. *)
+    let cell = Keeper_tool_call_log.create_turn_ctx_cell () in
     Keeper_tool_call_log.set_turn_context
-      ~keeper_name:"k"
+      ~cell
       ~agent_name:"keeper-k-agent"
       ~lane:"tool_optional"
       ~tool_choice:"auto"
@@ -254,11 +258,30 @@ let test_turn_context_fields_stored () =
       ~approval_mode:"manual"
       ~runtime_profile:"tool_use_strict"
       ();
+    let tctx : Keeper_tool_call_log_context.turn_context =
+      Keeper_tool_call_log_context.get_turn_context_record ~cell ()
+    in
     Keeper_tool_call_log.log_call
       ~keeper_name:"k" ~tool_name:"masc_status"
       ~input:(`Assoc [("path", `String "/tmp/k-sandbox/status.json")])
       ~output_text:"ok"
-      ~success:true ~duration_ms:2.0 ();
+      ~success:true ~duration_ms:2.0
+      ?agent_name:tctx.agent_name
+      ?lane:tctx.lane ?tool_choice:tctx.tool_choice
+      ?thinking_enabled:tctx.thinking_enabled
+      ?thinking_budget:tctx.thinking_budget
+      ?prompt_fingerprint:tctx.prompt_fingerprint
+      ?trace_id:tctx.trace_id ?session_id:tctx.session_id
+      ?generation:tctx.generation
+      ?turn:tctx.turn ?keeper_turn_id:tctx.keeper_turn_id
+      ?task_id:tctx.task_id ?goal_ids:tctx.goal_ids
+      ?sandbox_profile:tctx.sandbox_profile
+      ?sandbox_root:tctx.sandbox_root
+      ?allowed_paths:tctx.allowed_paths
+      ?network_mode:tctx.network_mode
+      ?approval_mode:tctx.approval_mode
+      ?runtime_profile:tctx.runtime_profile
+      ();
     let entries = Keeper_tool_call_log.read_recent () in
     Alcotest.(check int) "one entry" 1 (List.length entries);
     let entry = List.hd entries in
@@ -345,6 +368,38 @@ let test_turn_context_fields_stored () =
       (Safe_ops.json_string_opt "target_path" action_radius);
     Alcotest.(check bool) "action_radius success" true
       (Safe_ops.json_bool ~default:false "success" action_radius))
+
+(* RFC-0225 §3.3 regression: two runs of the SAME keeper each carry their
+   own cell — setting one must not disturb the other. Under the previous
+   keeper_name-keyed global the second set overwrote the first and the
+   first run's tool calls were logged with the second run's identity. *)
+let test_turn_context_cells_do_not_cross_runs () =
+  let cell_a = Keeper_tool_call_log.create_turn_ctx_cell () in
+  let cell_b = Keeper_tool_call_log.create_turn_ctx_cell () in
+  Keeper_tool_call_log.set_turn_context
+    ~cell:cell_a ~trace_id:"trace-a" ~keeper_turn_id:1 ();
+  Keeper_tool_call_log.set_turn_context
+    ~cell:cell_b ~trace_id:"trace-b" ~keeper_turn_id:2 ();
+  let ctx_a : Keeper_tool_call_log_context.turn_context =
+    Keeper_tool_call_log_context.get_turn_context_record ~cell:cell_a ()
+  in
+  let ctx_b : Keeper_tool_call_log_context.turn_context =
+    Keeper_tool_call_log_context.get_turn_context_record ~cell:cell_b ()
+  in
+  Alcotest.(check (option string)) "run A keeps its trace_id"
+    (Some "trace-a") ctx_a.trace_id;
+  Alcotest.(check (option int)) "run A keeps its keeper_turn_id"
+    (Some 1) ctx_a.keeper_turn_id;
+  Alcotest.(check (option string)) "run B keeps its trace_id"
+    (Some "trace-b") ctx_b.trace_id;
+  Alcotest.(check (option int)) "run B keeps its keeper_turn_id"
+    (Some 2) ctx_b.keeper_turn_id;
+  let fresh : Keeper_tool_call_log_context.turn_context =
+    Keeper_tool_call_log_context.get_turn_context_record
+      ~cell:(Keeper_tool_call_log.create_turn_ctx_cell ()) ()
+  in
+  Alcotest.(check (option string)) "fresh cell reads empty" None
+    fresh.trace_id
 
 let test_turn_context_fields_absent_without_context () =
   with_tmp_log (fun () ->
@@ -1078,6 +1133,8 @@ let () =
         ; eio_test "blocked output keeps semantic category"
             test_blocked_structured_output_keeps_semantic_category
         ; eio_test "turn context fields stored" test_turn_context_fields_stored
+        ; Alcotest.test_case "turn context cells do not cross runs" `Quick
+            test_turn_context_cells_do_not_cross_runs
         ; eio_test "turn context fields absent without context"
             test_turn_context_fields_absent_without_context
         ; eio_test "route evidence stored for git push"

@@ -169,6 +169,7 @@ val recent_tool_streak_count :
 val make_hooks :
   config:Workspace.config ->
   meta_ref:Keeper_meta_contract.keeper_meta ref ->
+  turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell ->
   generation:int ->
   ?max_cost_usd:float ->
   ?destructive_check:bool ->

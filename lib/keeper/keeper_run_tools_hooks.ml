@@ -233,8 +233,12 @@ let assemble_hooks
                     thinking_budget = adaptive_thinking_budget
                   ; enable_thinking =
                       (match runtime_seed.thinking_enabled with
-                       | Some false -> Some false
-                       | _ -> current_params.enable_thinking)
+                       | Some enabled -> Some enabled
+                       | None -> current_params.enable_thinking)
+                  ; preserve_thinking =
+                      (match runtime_seed.preserve_thinking with
+                       | Some preserve -> Some preserve
+                       | None -> current_params.preserve_thinking)
                   }
                 in
                 let ctx =

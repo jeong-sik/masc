@@ -18,7 +18,7 @@ val provider_for_summary :
   Llm_provider.Provider_config.t -> Llm_provider.Provider_config.t
 
 val messages_for_summary :
-  trace_id:string -> texts:string list -> Agent_sdk.Types.message list
+  trace_id:string -> texts:string list -> (Agent_sdk.Types.message list, string) result
 
 val make :
   ?complete:complete_fn ->

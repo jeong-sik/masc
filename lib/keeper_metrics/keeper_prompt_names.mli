@@ -18,6 +18,11 @@ val recovery_block : string
 val turn_intent : string
 val librarian_system : string
 val librarian_episode_extraction : string
+val memory_llm_summary_system : string
+val memory_llm_summary_user : string
+val memory_os_recall_context : string
+val memory_os_recall_facts_section : string
+val memory_os_recall_episodes_section : string
 
 (** Turn-intent substitution prose template keys. *)
 val turn_intent_claim_guidance_a : string

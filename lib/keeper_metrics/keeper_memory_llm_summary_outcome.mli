@@ -27,5 +27,8 @@ type t =
       (** Provider returned 2xx but [response_text] collapsed to
           empty after trim — usually a model that produced only
           whitespace or refused the task. *)
+  | Prompt_unavailable
+      (** Prompt registry failed to render the externalized summary
+          prompts, so no provider call was made. *)
 
 val to_label : t -> string

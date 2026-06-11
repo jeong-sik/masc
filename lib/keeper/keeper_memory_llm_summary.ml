@@ -34,8 +34,9 @@ let () =
     ~name:Keeper_metrics.(to_string MemoryLlmSummaryOutcomes)
     ~help:
       "Total [summarize_with_provider] attempts classified by label \
-       [outcome] (ok_summary | timed_out | http_error | empty_response). \
-       Labels: [outcome], [provider] (model_id), [runtime_id]."
+       [outcome] (ok_summary | timed_out | http_error | empty_response | \
+       prompt_unavailable). Labels: [outcome], [provider] (model_id), \
+       [runtime_id]."
     ();
   Otel_metric_store.register_counter
     ~name:Keeper_metrics.(to_string MemoryLlmSummaryChainExhausted)
@@ -93,22 +94,24 @@ let bounded_notes_text texts =
   |> String_util.to_string
 
 let messages_for_summary ~trace_id ~texts =
-  let system =
-    "You summarize keeper progress notes into one durable memory-bank entry. \
-     Preserve concrete code paths, commands, decisions, blockers, and next \
-     steps. Do not invent facts. Do not include [STATE] blocks or markdown \
-     fences. Output only the summary text."
-  in
-  let user =
-    Printf.sprintf
-      "trace_id: %s\n\
-       notes:\n\
-       %s\n\n\
-       Write a concise durable summary for future keeper code work."
-      trace_id
-      (bounded_notes_text texts)
-  in
-  [ message Agent_sdk.Types.System system; message Agent_sdk.Types.User user ]
+  match
+    Prompt_registry.render_prompt_template
+      Keeper_prompt_names.memory_llm_summary_system
+      []
+  with
+  | Error msg -> Error msg
+  | Ok system ->
+    (match
+       Prompt_registry.render_prompt_template
+         Keeper_prompt_names.memory_llm_summary_user
+         [ "trace_id", trace_id; "notes", bounded_notes_text texts ]
+     with
+     | Error msg -> Error msg
+     | Ok user ->
+       Ok
+         [ message Agent_sdk.Types.System (String.trim system)
+         ; message Agent_sdk.Types.User (String.trim user)
+         ])
 
 let response_text (response : Agent_sdk.Types.api_response) : string option =
   let text =
@@ -151,33 +154,39 @@ let summarize_with_provider
     ~(provider_cfg : Llm_provider.Provider_config.t)
     ~trace_id
     ~texts
-    () : string option =
+  () : string option =
   let provider_cfg = provider_for_summary provider_cfg in
-  let messages = messages_for_summary ~trace_id ~texts in
   let result, outcome =
-    match
-      with_timeout ?clock ~timeout_sec (fun () ->
-        complete ~sw ~net ?clock ~config:provider_cfg ~messages ())
-    with
-    | None ->
+    match messages_for_summary ~trace_id ~texts with
+    | Error msg ->
         Log.Keeper.warn
-          "memory LLM summary timed out trace_id=%s provider=%s timeout_sec=%.1f"
-          trace_id provider_cfg.model_id timeout_sec;
-        None, Keeper_memory_llm_summary_outcome.Timed_out
-    | Some (Ok response) ->
-        (match response_text response with
-         | Some _ as summary ->
-             summary, Keeper_memory_llm_summary_outcome.Ok_summary
-         | None ->
-             Log.Keeper.warn
-               "memory LLM summary empty trace_id=%s provider=%s"
-               trace_id provider_cfg.model_id;
-             None, Keeper_memory_llm_summary_outcome.Empty_response)
-    | Some (Error err) ->
-        Log.Keeper.warn
-          "memory LLM summary failed trace_id=%s provider=%s: %s"
-          trace_id provider_cfg.model_id (http_error_message err);
-        None, Keeper_memory_llm_summary_outcome.Http_error
+          "memory LLM summary prompt unavailable trace_id=%s provider=%s: %s"
+          trace_id provider_cfg.model_id msg;
+        None, Keeper_memory_llm_summary_outcome.Prompt_unavailable
+    | Ok messages -> (
+        match
+          with_timeout ?clock ~timeout_sec (fun () ->
+            complete ~sw ~net ?clock ~config:provider_cfg ~messages ())
+        with
+        | None ->
+            Log.Keeper.warn
+              "memory LLM summary timed out trace_id=%s provider=%s timeout_sec=%.1f"
+              trace_id provider_cfg.model_id timeout_sec;
+            None, Keeper_memory_llm_summary_outcome.Timed_out
+        | Some (Ok response) -> (
+            match response_text response with
+            | Some _ as summary ->
+                summary, Keeper_memory_llm_summary_outcome.Ok_summary
+            | None ->
+                Log.Keeper.warn
+                  "memory LLM summary empty trace_id=%s provider=%s"
+                  trace_id provider_cfg.model_id;
+                None, Keeper_memory_llm_summary_outcome.Empty_response)
+        | Some (Error err) ->
+            Log.Keeper.warn
+              "memory LLM summary failed trace_id=%s provider=%s: %s"
+              trace_id provider_cfg.model_id (http_error_message err);
+            None, Keeper_memory_llm_summary_outcome.Http_error)
   in
   record_summary_outcome ~runtime_id ~provider_cfg ~outcome;
   result

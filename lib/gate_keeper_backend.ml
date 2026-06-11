@@ -89,6 +89,14 @@ let contextualize_message ~channel ~channel_user_id ~channel_user_name
       safe_content;
     ]
 
+let persist_connector_assistant_reply ~base_dir ~keeper_name ~source ~reply =
+  let content = String.trim reply in
+  if content <> "" then begin
+    Keeper_chat_store.append_assistant_message ~base_dir ~keeper_name
+      ~content ~source ();
+    Keeper_chat_broadcast.chat_appended ~keeper_name ~source
+  end
+
 let dispatch ~sw ~clock ~proc_mgr ~net ~config
     ~channel ~channel_user_id ~channel_user_name ~channel_workspace_id
     ~keeper_name ~content =
@@ -116,11 +124,11 @@ let dispatch ~sw ~clock ~proc_mgr ~net ~config
   (* RFC-0226: the gate inbound boundary is the sole recorder of
      connector user lines. Recording happens here — post
      validation/dedup ([Channel_gate.handle_inbound]), pre turn — so a
-     failed or silent turn cannot drop the inbound message. The reply
-     path ([Keeper_tool_surface_ops.append_direct_chat_pair_if_reply])
-     appends the assistant line only for connector traffic. The line
-     carries the raw [content]; the contextualized wrapper below is
-     turn input, not conversation history. *)
+     failed or silent turn cannot drop the inbound message. The final
+     connector reply is appended below after [dispatch_stream] returns
+     the keeper's direct reply. The user line carries the raw [content];
+     the contextualized wrapper below is turn input, not conversation
+     history. *)
   let lane = String.trim channel in
   let opt value = match String.trim value with "" -> None | v -> Some v in
   Keeper_chat_store.append_user_message
@@ -181,6 +189,9 @@ let dispatch ~sw ~clock ~proc_mgr ~net ~config
         | Some s -> Some { s with duration_ms }
         | None -> Some { Gate_protocol.model_used = "runtime"; duration_ms; tokens_used = 0 }
       in
+      persist_connector_assistant_reply
+        ~base_dir:config.Workspace.base_path
+        ~keeper_name ~source:lane ~reply;
       Gate_protocol.Reply { content = reply; structured; stats }
   | Some result ->
       Gate_protocol.Keeper_error_result (redact_text (Tool_result.message result))

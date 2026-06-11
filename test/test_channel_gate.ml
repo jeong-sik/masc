@@ -66,6 +66,10 @@ let test_validate_allows_key_after_cleanup () =
   | Ok () -> ()
   | Error _ -> fail "cleanup should evict expired idempotency key"
 
+let test_dedup_ttl_covers_discord_resume_replays () =
+  check bool "default ttl spans long gateway resume/replay windows" true
+    (Channel_gate.dedup_ttl_sec () >= 3600.0)
+
 let test_failed_validation_does_not_consume_idempotency_key () =
   reset_dedup ();
   let key = unique_key "retryable" in
@@ -238,6 +242,8 @@ let () =
             test_validate_rejects_duplicate_message;
           test_case "allows key after cleanup" `Quick
             test_validate_allows_key_after_cleanup;
+          test_case "dedup ttl covers discord resume replays" `Quick
+            test_dedup_ttl_covers_discord_resume_replays;
           test_case "failed validation does not consume key" `Quick
             test_failed_validation_does_not_consume_idempotency_key;
           test_case "serializes duplicate race under eio" `Quick

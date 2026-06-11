@@ -471,7 +471,11 @@ let claim_next_r
                 ; version = backlog.version + 1
                 }
               in
-              write_backlog config new_backlog
+              write_backlog config new_backlog;
+              (* RFC-0221 §3.2: clear stale agent task after atomic backlog commit *)
+              (match released_task_id with
+               | Some rid -> Task_cache_invariant.clear_stale_agent_task config ~agent_name ~task_id:rid ~status:Masc_domain.Todo ~module_name:"claim_next"
+               | None -> ())
             | None -> ());
            clear_agent_state_after_release ();
           Claim_next_no_unclaimed, None
@@ -484,7 +488,11 @@ let claim_next_r
                 ; version = backlog.version + 1
                 }
               in
-              write_backlog config new_backlog
+              write_backlog config new_backlog;
+              (* RFC-0221 §3.2: clear stale agent task after atomic backlog commit *)
+              (match released_task_id with
+               | Some rid -> Task_cache_invariant.clear_stale_agent_task config ~agent_name ~task_id:rid ~status:Masc_domain.Todo ~module_name:"claim_next"
+               | None -> ())
             | None -> ());
            clear_agent_state_after_release ();
           ( Claim_next_no_eligible
@@ -533,6 +541,11 @@ let claim_next_r
              }
            in
            write_backlog config new_backlog;
+           (* RFC-0221 §3.2: clear stale agent task after atomic backlog commit *)
+           Task_cache_invariant.clear_stale_agent_task config ~agent_name
+             ~task_id:task.id
+             ~status:(Masc_domain.Claimed { assignee = agent_name; claimed_at = now_iso () })
+             ~module_name:"claim_next";
            (* Update agent status — takes [with_file_lock] on the
              agent file via [Workspace_task.update_local_agent_state] to
              keep the record consistent with concurrent

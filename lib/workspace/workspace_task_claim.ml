@@ -187,6 +187,9 @@ let claim_task_r config ~agent_name ~task_id ()
              }
            in
            write_backlog config new_backlog;
+           (* RFC-0221 §3.2: clear stale agent task after atomic backlog commit *)
+           Task_cache_invariant.clear_stale_agent_task config ~agent_name
+             ~task_id ~status:Masc_domain.AwaitingVerification ~module_name:"claim_r";
            Workspace_task_classify.update_local_agent_state config ~agent_name (fun agent ->
              { agent with status = Busy; current_task = Some task_id });
            let _ =
@@ -226,6 +229,9 @@ let claim_task_r config ~agent_name ~task_id ()
              }
            in
            write_backlog config new_backlog;
+           (* RFC-0221 §3.2: clear stale agent task after atomic backlog commit *)
+           Task_cache_invariant.clear_stale_agent_task config ~agent_name
+             ~task_id ~status:Masc_domain.Claimed ~module_name:"claim_r";
            Workspace_task_classify.update_local_agent_state config ~agent_name (fun agent ->
              { agent with status = Busy; current_task = Some task_id });
            let _ =

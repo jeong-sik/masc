@@ -136,6 +136,16 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Masc_domain.masc_
                  }
                in
                write_backlog config new_backlog;
+               (* RFC-0221 §3.2: clear stale agent task after atomic backlog commit *)
+               Task_cache_invariant.clear_stale_agent_task config ~agent_name
+                 ~task_id
+                 ~status:
+                   (Masc_domain.Cancelled
+                      { cancelled_by = agent_name
+                      ; cancelled_at = now_iso ()
+                      ; reason = (if reason = "" then None else Some reason)
+                      })
+                 ~module_name:"force_release_task_r";
                (* Update agent status if they had this task *)
                update_local_agent_state config ~agent_name (fun agent ->
                  if agent.current_task = Some task_id

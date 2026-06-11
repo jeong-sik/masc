@@ -256,7 +256,7 @@ let () =
               let probe : Tool_dispatch.span_wrapper =
                 fun ?force_new_trace_id:_ ~tool_name body ->
                   calls := tool_name :: !calls;
-                  body (fun () -> Some "probe-trace")
+                  body (fun () -> Some ("probe-trace", "probe-trace"))
               in
               Tool_dispatch.set_span_wrapper probe;
               let token =

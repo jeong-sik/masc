@@ -264,11 +264,6 @@ let builder_without_approval
     | None -> builder
   in
   let builder =
-    match config.trace_link with
-    | Some link -> Agent_sdk.Builder.with_trace_link (Some link) builder
-    | None -> builder
-  in
-  let builder =
     match config.enable_thinking with
     | Some enabled -> Agent_sdk.Builder.with_enable_thinking enabled builder
     | None -> builder

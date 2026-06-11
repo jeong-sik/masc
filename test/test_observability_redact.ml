@@ -27,6 +27,29 @@ let test_short_input_unchanged () =
   let preview = Observability_redact.redact_preview input in
   Alcotest.(check string) "short input preserved" "hello world" preview
 
+let test_redact_text_does_not_truncate () =
+  let secret = "sk-proj-abcdefghijklmnopqrstuvwxyz" in
+  let input = String.make 300 'x' ^ secret in
+  let redacted = Observability_redact.redact_text input in
+  Alcotest.(check bool) "not preview-truncated" false
+    (String_util.contains_substring redacted "...(truncated)");
+  Alcotest.(check bool) "secret removed" false
+    (String_util.contains_substring redacted secret)
+
+let test_redact_json_strings_redacts_sensitive_keys () =
+  let json =
+    `Assoc
+      [ ("content", `String "hello");
+        ("api_key", `String "short-but-sensitive");
+        ("nested", `Assoc [ ("token", `String "nested-token") ]) ]
+  in
+  let redacted = Observability_redact.redact_json_strings json in
+  let raw = Yojson.Safe.to_string redacted in
+  Alcotest.(check bool) "api_key hidden" false
+    (String_util.contains_substring raw "short-but-sensitive");
+  Alcotest.(check bool) "nested token hidden" false
+    (String_util.contains_substring raw "nested-token")
+
 let test_denied_tool_input_returns_none () =
   let result = Observability_redact.redact_tool_input
     ~tool_name:"tool_auth_create" (`String "secret data") in
@@ -119,6 +142,10 @@ let () =
           Alcotest.test_case "URL credential redacted" `Quick test_url_credential_redacted;
           Alcotest.test_case "max length enforced" `Quick test_max_length_enforced;
           Alcotest.test_case "short input unchanged" `Quick test_short_input_unchanged;
+          Alcotest.test_case "redact_text does not truncate" `Quick
+            test_redact_text_does_not_truncate;
+          Alcotest.test_case "redact_json_strings redacts sensitive keys"
+            `Quick test_redact_json_strings_redacts_sensitive_keys;
           Alcotest.test_case "blob marker preserves structure" `Quick
             test_blob_marker_preserves_structure;
           Alcotest.test_case "blob marker redacts preview body" `Quick

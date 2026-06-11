@@ -86,6 +86,24 @@ type chat_message = {
   speaker : speaker option;
 }
 
+let redaction_for ~base_dir ~keeper_name =
+  Keeper_secret_redaction.snapshot ~base_path:base_dir ~keeper_name
+
+let redact_attachment redaction att =
+  { att with data = Keeper_secret_redaction.redact_text redaction att.data }
+
+let redact_tool_call redaction tc =
+  { tc with args = Keeper_secret_redaction.redact_text redaction tc.args }
+
+let redact_message redaction msg =
+  let attachments =
+    Option.map (List.map (redact_attachment redaction)) msg.attachments
+  in
+  { msg with
+    content = Keeper_secret_redaction.redact_text redaction msg.content;
+    attachments;
+  }
+
 let opt_string_field key = function
   | None -> []
   | Some value -> [ (key, `String value) ]
@@ -144,6 +162,17 @@ let append_turn ~base_dir ~keeper_name ~(user_content : string)
     ~(assistant_content : string) () =
   try
     ensure_dir_once ~base_dir;
+    let redaction = redaction_for ~base_dir ~keeper_name in
+    let user_content =
+      Keeper_secret_redaction.redact_text redaction user_content
+    in
+    let user_attachments =
+      List.map (redact_attachment redaction) user_attachments
+    in
+    let tool_calls = List.map (redact_tool_call redaction) tool_calls in
+    let assistant_content =
+      Keeper_secret_redaction.redact_text redaction assistant_content
+    in
     let path = chat_path ~base_dir ~keeper_name in
     let ts = Time_compat.now () in
     (* Speaker identity belongs to the user line only: tool and
@@ -186,6 +215,8 @@ let append_assistant_message ~base_dir ~keeper_name ~(content : string)
     ?source () =
   try
     ensure_dir_once ~base_dir;
+    let redaction = redaction_for ~base_dir ~keeper_name in
+    let content = Keeper_secret_redaction.redact_text redaction content in
     let path = chat_path ~base_dir ~keeper_name in
     let ts = Time_compat.now () in
     let line = encode_line ~role:"assistant" ~content ~ts ?source () in
@@ -207,6 +238,8 @@ let append_user_message ~base_dir ~keeper_name ~(content : string)
     ?source ?speaker () =
   try
     ensure_dir_once ~base_dir;
+    let redaction = redaction_for ~base_dir ~keeper_name in
+    let content = Keeper_secret_redaction.redact_text redaction content in
     let path = chat_path ~base_dir ~keeper_name in
     let ts = Time_compat.now () in
     let line = encode_line ~role:"user" ~content ~ts ?source ?speaker () in
@@ -442,9 +475,11 @@ let load_page ~base_dir ~keeper_name ?before () : page =
           | Some _ | None -> ())
       (slice_lines ~path ~from ~upto);
     let messages =
+      let redaction = redaction_for ~base_dir ~keeper_name in
       Queue.fold (fun acc msg -> msg :: acc) [] q
       |> List.rev
       |> drop_leading_tool_messages
+      |> List.map (redact_message redaction)
     in
     { messages; has_more = from > 0 || !evicted }
   with

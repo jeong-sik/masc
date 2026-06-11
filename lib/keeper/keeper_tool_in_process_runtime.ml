@@ -143,6 +143,12 @@ let handle_person_note_set ~config ~(meta : keeper_meta) ~args =
 let handle_surface_post ~config ~(meta : keeper_meta) ~args =
   let surface = String.trim (Safe_ops.json_string ~default:"" "surface" args) in
   let content = Safe_ops.json_string ~default:"" "content" args in
+  let redaction =
+    Keeper_secret_redaction.snapshot
+      ~base_path:config.Workspace.base_path
+      ~keeper_name:meta.name
+  in
+  let safe_content = Keeper_secret_redaction.redact_text redaction content in
   let channel_id =
     match String.trim (Safe_ops.json_string ~default:"" "channel_id" args) with
     | "" -> None
@@ -166,14 +172,14 @@ let handle_surface_post ~config ~(meta : keeper_meta) ~args =
         Keeper_chat_store.append_assistant_message
           ~base_dir:config.Workspace.base_path
           ~keeper_name:meta.name
-          ~content
+          ~content:safe_content
           ~source:"dashboard"
           ();
         Keeper_chat_broadcast.chat_appended ~keeper_name:meta.name
           ~source:"dashboard";
         Keeper_surface_post.ok_json ~surface ()
     | Ok (Keeper_surface_post.To_discord { channel_id }) -> (
-        match Channel_gate_discord_state.send_message ~channel_id ~content () with
+        match Channel_gate_discord_state.send_message ~channel_id ~content:safe_content () with
         | Error send_error ->
             Keeper_surface_post.error_json
               (Format.asprintf "discord send failed: %a"
@@ -182,7 +188,7 @@ let handle_surface_post ~config ~(meta : keeper_meta) ~args =
             Keeper_chat_store.append_assistant_message
               ~base_dir:config.Workspace.base_path
               ~keeper_name:meta.name
-              ~content
+              ~content:safe_content
               ~source:"discord"
               ();
             Keeper_chat_broadcast.chat_appended ~keeper_name:meta.name

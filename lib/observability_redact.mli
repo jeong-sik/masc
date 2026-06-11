@@ -20,6 +20,16 @@ val redact_preview : ?max_len:int -> string -> string
     and redact only the user-visible preview body so sha256/bytes/mime
     survive intact for downstream parsers. *)
 
+val redact_text : string -> string
+(** Strip known sensitive patterns without truncating or trimming the
+    input. Use this for user-visible chat/transport text where the full
+    message length must be preserved. *)
+
+val redact_json_strings : Yojson.Safe.t -> Yojson.Safe.t
+(** Recursively apply {!redact_text} to string leaves and replace
+    sensitive-key fields with [\[REDACTED\]], preserving structure and
+    without truncation. *)
+
 val preview_json_strings : ?max_len:int -> Yojson.Safe.t -> Yojson.Safe.t
 (** Recursively apply [redact_preview] to every string leaf, preserving
     JSON structure. Use this instead of [Yojson.Safe.to_string |>

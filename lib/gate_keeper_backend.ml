@@ -92,6 +92,14 @@ let contextualize_message ~channel ~channel_user_id ~channel_user_name
 let dispatch ~sw ~clock ~proc_mgr ~net ~config
     ~channel ~channel_user_id ~channel_user_name ~channel_workspace_id
     ~keeper_name ~content =
+  let keeper_name = String.trim keeper_name in
+  let redaction =
+    Keeper_secret_redaction.snapshot
+      ~base_path:config.Workspace.base_path
+      ~keeper_name
+  in
+  let redact_text = Keeper_secret_redaction.redact_text redaction in
+  let redact_json = Keeper_secret_redaction.redact_json redaction in
   let agent_name =
     agent_name_for_channel_actor ~channel ~channel_workspace_id ~channel_user_id
   in
@@ -117,7 +125,7 @@ let dispatch ~sw ~clock ~proc_mgr ~net ~config
   let opt value = match String.trim value with "" -> None | v -> Some v in
   Keeper_chat_store.append_user_message
     ~base_dir:config.Workspace.base_path
-    ~keeper_name:(String.trim keeper_name)
+    ~keeper_name
     ~content:(String.trim content)
     ~source:lane
     ~speaker:
@@ -127,10 +135,10 @@ let dispatch ~sw ~clock ~proc_mgr ~net ~config
       }
     ();
   Keeper_chat_broadcast.chat_appended
-    ~keeper_name:(String.trim keeper_name) ~source:lane;
+    ~keeper_name ~source:lane;
   let args =
     `Assoc [
-      ("name", `String (String.trim keeper_name));
+      ("name", `String keeper_name);
       ( "message",
         `String
           (contextualize_message ~channel ~channel_user_id ~channel_user_name
@@ -167,14 +175,14 @@ let dispatch ~sw ~clock ~proc_mgr ~net ~config
       let duration_ms =
         int_of_float ((Unix.gettimeofday () -. start_time) *. 1000.0)
       in
-      let reply = extract_reply_text body in
-      let structured = extract_structured body in
+      let reply = extract_reply_text body |> redact_text in
+      let structured = Option.map redact_json (extract_structured body) in
       let stats = match extract_turn_stats body with
         | Some s -> Some { s with duration_ms }
         | None -> Some { Gate_protocol.model_used = "runtime"; duration_ms; tokens_used = 0 }
       in
       Gate_protocol.Reply { content = reply; structured; stats }
   | Some result ->
-      Gate_protocol.Keeper_error_result (Tool_result.message result)
+      Gate_protocol.Keeper_error_result (redact_text (Tool_result.message result))
   | None ->
       Gate_protocol.Unavailable_result

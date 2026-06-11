@@ -190,8 +190,10 @@ let min_avg_time metrics_list =
     to prioritize "finishes correctly" over "finishes fast" based on observed MASC
     usage patterns where incomplete tasks cause more rework than slow tasks.
 
-    TODO: Validate empirically — track selection outcomes vs task success rate
-    to determine if the current weighting produces better team compositions. *)
+    TODO: Validate empirically — correlate ranking snapshots with later task
+    success rate to determine if the current weighting produces better team
+    compositions.  This read path must not update Thompson alpha/beta directly; real
+    task outcome feedback flows through [Workspace_hooks.record_thompson_result_fn]. *)
 type fitness_weights = {
   w_completion : float;
   w_reliability : float;

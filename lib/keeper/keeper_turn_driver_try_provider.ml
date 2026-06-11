@@ -67,6 +67,8 @@ type try_provider_ctx =
   ; on_yield : (unit -> unit) option
   ; on_resume : (unit -> unit) option
   ; agent_ref : Agent_sdk.Agent.t option ref option
+  ; on_runtime_observation :
+      (Runtime_observation.runtime_observation -> unit) option
   ; (* Event bus *)
     event_bus : Agent_sdk.Event_bus.t option
   ; runtime_manifest_context : Keeper_runtime_manifest.turn_context option
@@ -294,6 +296,11 @@ let run_try_provider
        No separate liveness FSM — provider stall is an OAS-level concern.
        No per-lane capacity gate — provider load is managed by operator
        adjusting keeper count. *)
+    let run_started_at =
+      Unix.gettimeofday ()
+      (* NDT-OK: provider-attempt latency telemetry only; dispatch/control
+         decisions do not branch on this timestamp. *)
+    in
     let result =
       Eio.Switch.run (fun attempt_sw ->
         let effective_checkpoint =
@@ -352,6 +359,22 @@ let run_try_provider
            ~provider_cfg:(Runtime_candidate.provider_cfg candidate))
         result
     in
+    (match ctx.on_runtime_observation, result with
+     | Some emit, Ok run_result ->
+       Option.iter emit run_result.Runtime_agent.runtime_observation
+     | Some emit, Error err ->
+       let total_duration_ms =
+         (Unix.gettimeofday ()
+          (* NDT-OK: closes the provider-attempt latency telemetry sample above. *)
+          -. run_started_at)
+         *. 1000.0
+       in
+       Runtime_agent.runtime_observation_for_terminal_config
+         ~total_duration_ms
+         ~error:(Agent_sdk.Error.to_string err)
+         config
+       |> emit
+     | None, _ -> ());
     let checkpoint_after =
       Keeper_turn_driver_helpers.checkpoint_after_attempt
         ?agent_ref:ctx.agent_ref

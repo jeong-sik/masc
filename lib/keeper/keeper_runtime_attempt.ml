@@ -186,9 +186,22 @@ let resolve_provider_api_key_env_name ~runtime_id:_ ~provider_cfg =
 
 let enrich_sdk_error ~runtime_id ~(provider_cfg : Llm_provider.Provider_config.t) err =
   let append_hint message hint_marker detail =
+    let message = String.trim message in
     if String_util.contains_substring_ci message hint_marker
     then message
+    else if String.equal message ""
+    then Printf.sprintf "%s: %s" hint_marker detail
     else Printf.sprintf "%s (%s: %s)" message hint_marker detail
+  in
+  let openai_compat_not_found_detail () =
+    Printf.sprintf
+      "runtime_id=%s model=%s base_url=%s request_path=%s endpoint=%s"
+      runtime_id
+      provider_cfg.Llm_provider.Provider_config.model_id
+      provider_cfg.Llm_provider.Provider_config.base_url
+      provider_cfg.Llm_provider.Provider_config.request_path
+      (provider_cfg.Llm_provider.Provider_config.base_url
+       ^ provider_cfg.Llm_provider.Provider_config.request_path)
   in
   match err with
   | Agent_sdk.Error.Api (Llm_provider.Retry.AuthError { message }) ->
@@ -210,18 +223,22 @@ let enrich_sdk_error ~runtime_id ~(provider_cfg : Llm_provider.Provider_config.t
          { message = append_hint message provider_auth_hint_marker detail })
   | Agent_sdk.Error.Api (Llm_provider.Retry.InvalidRequest { message })
     when retry_message_looks_like_not_found message ->
-    let detail =
-      Printf.sprintf
-        "base_url=%s request_path=%s endpoint=%s"
-        provider_cfg.Llm_provider.Provider_config.base_url
-        provider_cfg.Llm_provider.Provider_config.request_path
-        (provider_cfg.Llm_provider.Provider_config.base_url
-         ^ provider_cfg.Llm_provider.Provider_config.request_path)
-    in
     Agent_sdk.Error.Api
       (Llm_provider.Retry.InvalidRequest
          { message =
-             append_hint message openai_compat_not_found_hint_marker detail
+             append_hint
+               message
+               openai_compat_not_found_hint_marker
+               (openai_compat_not_found_detail ())
+         })
+  | Agent_sdk.Error.Api (Llm_provider.Retry.NotFound { message }) ->
+    Agent_sdk.Error.Api
+      (Llm_provider.Retry.NotFound
+         { message =
+             append_hint
+               message
+               openai_compat_not_found_hint_marker
+               (openai_compat_not_found_detail ())
          })
   | _ -> err
 
@@ -290,6 +307,8 @@ let message_looks_like_terminal_provider_runtime_failure message =
       && (contains "jsonrpc" || contains "jsonrpcmessage"))
 
 let sdk_error_is_terminal_provider_runtime_failure = function
+  | Agent_sdk.Error.Api (Llm_provider.Retry.NotFound _)
+  | Agent_sdk.Error.Provider (Llm_provider.Error.NotFound _) -> true
   | Agent_sdk.Error.Internal message
   | Agent_sdk.Error.Api (Llm_provider.Retry.NetworkError { message; _ })
   | Agent_sdk.Error.Api (Llm_provider.Retry.InvalidRequest { message }) ->

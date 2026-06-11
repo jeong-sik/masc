@@ -322,6 +322,12 @@ let runtime_outcome_of_observation
     : _ -> Keeper_execution_receipt.runtime_outcome = function
   | Some (obs : Runtime_observation.runtime_observation) when obs.fallback_applied ->
     Keeper_execution_receipt.Runtime_passed_to_next_model
+  | Some obs
+    when List.exists
+           (fun (attempt : Runtime_observation.runtime_attempt) ->
+              Option.is_some attempt.error)
+           obs.attempts ->
+    Keeper_execution_receipt.Runtime_failed
   | Some _ -> Keeper_execution_receipt.Runtime_completed
   | None -> Keeper_execution_receipt.Runtime_not_observed
 ;;

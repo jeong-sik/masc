@@ -133,6 +133,7 @@ val run_named :
   ?oas_checkpoint:Agent_sdk.Checkpoint.t ->
   ?trace_link:string * string ->
   ?event_bus:Agent_sdk.Event_bus.t ->
+  ?on_runtime_observation:(Runtime_observation.runtime_observation -> unit) ->
   ?runtime_manifest_context:Keeper_runtime_manifest.turn_context ->
   ?runtime_manifest_append:(Keeper_runtime_manifest.t -> unit) ->
   ?sw:Eio.Switch.t ->

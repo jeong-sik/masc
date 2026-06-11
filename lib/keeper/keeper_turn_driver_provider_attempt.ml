@@ -252,6 +252,9 @@ let sdk_error_is_terminal_provider_runtime_failure
     (err : Agent_sdk.Error.sdk_error) : bool =
   let direct_typed_network =
     match err with
+    | Agent_sdk.Error.Api (Llm_provider.Retry.NotFound _)
+    | Agent_sdk.Error.Provider (Llm_provider.Error.NotFound _) ->
+        true
     | Agent_sdk.Error.Api (Llm_provider.Retry.NetworkError { kind; _ }) ->
         network_error_kind_is_terminal kind
     | _ -> false

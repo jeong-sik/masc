@@ -286,14 +286,14 @@ let runtime_id_of_config (config : config) =
       if len > 0 then String.sub description prefix_len len else config.name
   | _ -> config.name
 
-let runtime_observation_for_completed_config ~total_duration_ms
+let runtime_observation_for_terminal_config ~total_duration_ms ?error
     (config : config) =
   let latency_ms = Some (int_of_float total_duration_ms) in
   let capture, _metrics =
     Runtime_observation.runtime_metrics_for_candidates ~candidate_count:1 ()
   in
   Runtime_observation.record_attempt_terminal capture ~model_id:config.model_id
-    ~latency_ms ~error:None;
+    ~latency_ms ~error;
   Runtime_observation.runtime_observation_with_metrics
     ~runtime_id:(runtime_id_of_config config)
     ~strategy:"single_provider_runtime"
@@ -302,8 +302,14 @@ let runtime_observation_for_completed_config ~total_duration_ms
     ~candidate_count:1
     ~selected_model_raw:(Some config.model_id)
     ~capture
-    ~attempt_details_source:"runtime_agent_terminal"
+    ~attempt_details_source:
+      (match error with
+       | None -> "runtime_agent_terminal"
+       | Some _ -> "runtime_agent_terminal_error")
     ()
+
+let runtime_observation_for_completed_config ~total_duration_ms config =
+  runtime_observation_for_terminal_config ~total_duration_ms config
 
 (* RFC-OAS-026 §4.6: [read_sse] arms the stream-idle deadline only when BOTH a
    clock and the idle timeout are present. masc's clock derivation resolves to
@@ -350,6 +356,8 @@ module For_testing = struct
   let runtime_id_of_config = runtime_id_of_config
   let runtime_observation_for_completed_config =
     runtime_observation_for_completed_config
+  let runtime_observation_for_terminal_config =
+    runtime_observation_for_terminal_config
   let decide_clock_for_idle = decide_clock_for_idle
 end
 

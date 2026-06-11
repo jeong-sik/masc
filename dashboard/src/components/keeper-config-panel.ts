@@ -280,6 +280,7 @@ export function resetKeeperConfig(): void {
 export function applyKeeperConfigUpdate(name: string, updated: KeeperConfig): void {
   configKeeperName.value = name
   configState.value = loaded(updated)
+  runtimeDraft.value = initRuntimeDraftFromConfig(updated)
 }
 
 export function peekLoadedKeeperConfig(name: string): KeeperConfig | null {
@@ -319,17 +320,17 @@ async function loadGoalOptions(options?: { force?: boolean }): Promise<void> {
 
 function ConfigRow({ label, value }: { label: string; value: string }) {
   return html`
-    <div class="flex items-center justify-between py-2 px-3 rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-[var(--shadow-1)] mb-1.5">
-      <${MutedLabel}>${label}</${MutedLabel}>
-      <span class="text-xs font-semibold text-text-strong">${value}</span>
+    <div class="flex items-center justify-between py-2.5 px-4 rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-[var(--shadow-1)] mb-2">
+      <span class="text-sm font-medium text-text-muted">${label}</span>
+      <span class="text-sm font-semibold text-text-strong">${value}</span>
     </div>
   `
 }
 
 function BoolRow({ label, value }: { label: string; value: boolean }) {
   return html`
-    <div class="flex items-center justify-between py-2 px-3 rounded-[var(--r-1)] bg-[var(--color-bg-surface)]">
-      <span class="text-xs text-[var(--color-fg-muted)]">${label}</span>
+    <div class="flex items-center justify-between py-2.5 px-4 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] mb-2">
+      <span class="text-sm text-[var(--color-fg-muted)]">${label}</span>
       <${BoolBadge} value=${value} />
     </div>
   `
@@ -352,8 +353,8 @@ function perProviderTimeoutLabel(execution: KeeperConfig['execution']): string {
 
 function MajorSectionHeader({ title }: { title: string }) {
   return html`
-    <div class="text-2xs font-bold uppercase tracking-[var(--track-caps)] text-accent-fg mt-6 mb-3 pb-1.5 border-b border-[var(--accent-20)] flex items-center gap-2">
-      <${StatusDot} size="xs" class="bg-[var(--accent-50)] shadow-[0_0_8px_rgb(var(--info-glow)/0.6)]" />
+    <div class="text-xs font-bold uppercase tracking-[var(--track-caps)] text-accent-fg mt-8 mb-4 pb-2 border-b border-[var(--accent-20)] flex items-center gap-2">
+      <${StatusDot} size="sm" class="bg-[var(--accent-50)] shadow-[0_0_8px_rgb(var(--info-glow)/0.6)]" />
       ${title}
     </div>
   `
@@ -456,15 +457,15 @@ function PromptBlock({
 
 function InlineToggleRow({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) {
   return html`
-    <div class="flex items-center justify-between py-2 px-3 rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-[var(--shadow-1)] mb-1.5">
-      <${MutedLabel}>${label}</${MutedLabel}>
+    <div class="flex items-center justify-between py-2.5 px-4 rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-[var(--shadow-1)] mb-2">
+      <span class="text-sm font-medium text-text-muted">${label}</span>
       <button type="button"
-        class="relative inline-flex h-5 w-9 items-center rounded-[var(--r-0)] transition-colors cursor-pointer ${value ? 'bg-ok/60' : 'bg-[var(--color-bg-hover)]'}"
+        class="relative inline-flex h-6 w-11 items-center rounded-[var(--r-0)] transition-colors cursor-pointer ${value ? 'bg-ok/60' : 'bg-[var(--color-bg-hover)]'}"
         aria-label=${`${label} ${value ? '비활성화' : '활성화'}`}
         aria-pressed=${value ? 'true' : 'false'}
         onClick=${() => onChange(!value)}
       >
-        <span class="inline-block h-3.5 w-3.5 rounded-[var(--r-0)] bg-white shadow-1 transition-transform ${value ? 'translate-x-[18px]' : 'translate-x-[3px]'}" />
+        <span class="inline-block h-4 w-4 rounded-[var(--r-0)] bg-white shadow-1 transition-transform ${value ? 'translate-x-[22px]' : 'translate-x-[3px]'}" />
       </button>
     </div>
   `
@@ -475,12 +476,12 @@ function InlineNumberRow({ label, value, onChange, min, max, step, suffix }: {
   min?: number; max?: number; step?: number; suffix?: string
 }) {
   return html`
-    <div class="flex items-center justify-between py-2 px-3 rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-[var(--shadow-1)] mb-1.5">
-      <${MutedLabel}>${label}</${MutedLabel}>
-      <div class="flex items-center gap-1.5">
+    <div class="flex items-center justify-between py-2.5 px-4 rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-[var(--shadow-1)] mb-2">
+      <span class="text-sm font-medium text-text-muted">${label}</span>
+      <div class="flex items-center gap-2">
         <input type="number"
           aria-label=${label}
-          class="w-20 text-right bg-card/60 text-text-strong text-xs font-semibold border border-card-border rounded-[var(--r-1)] py-1 px-2 focus:outline-none focus:border-accent-fg/50 transition-colors"
+          class="w-24 text-right bg-card/60 text-text-strong text-sm font-semibold border border-card-border rounded-[var(--r-1)] py-1.5 px-2 focus:outline-none focus:border-accent-fg/50 transition-colors"
           value=${value}
           min=${min}
           max=${max}
@@ -490,7 +491,7 @@ function InlineNumberRow({ label, value, onChange, min, max, step, suffix }: {
             if (!isNaN(v)) onChange(v)
           }}
         />
-        ${suffix ? html`<span class="text-3xs text-text-dim w-4">${suffix}</span>` : null}
+        ${suffix ? html`<span class="text-xs text-text-dim w-5">${suffix}</span>` : null}
       </div>
     </div>
   `
@@ -508,11 +509,11 @@ export function InlineSelectRow({
   onChange: (v: string) => void
 }) {
   return html`
-    <div class="flex items-center justify-between py-2 px-3 rounded-[var(--r-4)] border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-[var(--shadow-1)] mb-1.5 gap-3">
-      <${MutedLabel}>${label}</${MutedLabel}>
+    <div class="flex items-center justify-between py-2.5 px-4 rounded-[var(--r-4)] border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-[var(--shadow-1)] mb-2 gap-3">
+      <span class="text-sm font-medium text-text-muted">${label}</span>
       <select
         aria-label=${label}
-        class="text-xs bg-card/60 border border-card-border rounded-[var(--r-1)] px-2 py-1 text-text-strong"
+        class="text-sm bg-card/60 border border-card-border rounded-[var(--r-1)] px-3 py-1.5 text-text-strong"
         value=${value}
         onChange=${(e: Event) => onChange((e.target as HTMLSelectElement).value)}
       >
@@ -757,6 +758,23 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         />
       </div>
 
+      ${runtimeHasChanges ? html`
+        <div class="sticky top-0 z-20 flex flex-wrap items-center gap-2 p-3 rounded-[var(--r-1)] border border-[var(--accent-30)] bg-[var(--accent-5)] shadow-[var(--shadow-2)] mb-3">
+          <span class="text-xs font-semibold text-accent-fg">변경된 런타임 설정이 있습니다</span>
+          <div class="flex-1"></div>
+          <button type="button"
+            class="${BTN_FILLED_BASE} bg-[var(--color-status-ok)] text-[var(--color-fg-on-ok)] text-sm"
+            onClick=${saveRuntimeConfig}
+            disabled=${runtimeSaving.value}
+          >${runtimeSaving.value ? '저장 중...' : '런타임 설정 저장'}</button>
+          <button type="button"
+            class="${BTN_FILLED_BASE} bg-[var(--color-bg-hover)] text-[var(--color-fg-secondary)] text-sm"
+            title="초기화: 변경한 런타임 설정 draft 를 서버 값으로 되돌립니다"
+            onClick=${resetRuntimeDraft}
+          >초기화하기</button>
+        </div>
+      ` : null}
+
       <${MajorSectionHeader} title="소스" />
       <${Callout}
         title="Runtime 선택"
@@ -836,19 +854,26 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
           options=${['local', 'docker'] as const}
           onChange=${(value: string) => updateRuntimeDraft('sandbox_profile', value as SandboxProfile)}
         />
+        ${c.sandbox_profile === 'docker' && rd.sandbox_profile === 'local' ? html`
+          <${Callout}
+            title="격리 해제 경고"
+            body="Docker → Local 전환은 컨테이너 격리를 해제하고 호스트 프로세스 네임스페이스에서 실행합니다."
+            tone="warn"
+          />
+        ` : null}
         <${InlineSelectRow}
           label="network_mode"
           value=${rd.network_mode}
           options=${rd.sandbox_profile === 'docker' ? ['inherit', 'none'] as const : ['inherit'] as const}
           onChange=${(value: string) => updateRuntimeDraft('network_mode', value as SandboxNetworkMode)}
         />
-        <div class="py-2 px-3 rounded-[var(--r-1)] bg-[var(--color-bg-surface)]">
-          <div class="flex items-center justify-between mb-1">
-            <span class="text-xs text-[var(--color-fg-secondary)]">allowed_paths</span>
-            <span class="text-3xs text-[var(--color-fg-muted)]">한 줄에 하나씩. 명시 경로만 허용됩니다.</span>
+        <div class="py-2.5 px-4 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] mb-2">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-sm text-[var(--color-fg-secondary)]">allowed_paths</span>
+            <span class="text-xs text-[var(--color-fg-muted)]">한 줄에 하나씩. 명시 경로만 허용됩니다.</span>
           </div>
-          <textarea aria-label="allowed_paths" class="w-full text-xs font-mono bg-[var(--color-bg-hover)] border border-[var(--color-border-default)] rounded-[var(--r-1)] px-2 py-1.5 text-[var(--color-fg-secondary)] resize-y"
-            rows=${3}
+          <textarea aria-label="allowed_paths" class="w-full text-sm font-mono bg-[var(--color-bg-hover)] border border-[var(--color-border-default)] rounded-[var(--r-1)] px-3 py-2 text-[var(--color-fg-secondary)] resize-y"
+            rows=${4}
             value=${rd.allowed_paths_text}
             placeholder=".masc/keepers/<name>/"
             onInput=${(e: Event) => updateRuntimeDraft('allowed_paths_text', (e.target as HTMLTextAreaElement).value)}
@@ -984,18 +1009,19 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       `}
 
       ${runtimeHasChanges ? html`
-        <div class="flex gap-2 items-center mt-4 mb-2 p-3 rounded-[var(--r-1)] border border-[var(--accent-30)] bg-[var(--accent-5)]">
+        <div class="sticky bottom-4 z-20 flex flex-wrap items-center gap-2 mt-4 mb-2 p-4 rounded-[var(--r-1)] border border-[var(--accent-30)] bg-[var(--accent-5)] shadow-[var(--shadow-2)]">
+          <span class="text-sm font-semibold text-accent-fg">변경된 설정을 저장하세요</span>
+          <div class="flex-1"></div>
           <button type="button"
-            class="${BTN_FILLED_BASE} bg-[var(--color-status-ok)] text-[var(--color-fg-on-ok)]"
+            class="${BTN_FILLED_BASE} bg-[var(--color-status-ok)] text-[var(--color-fg-on-ok)] text-sm"
             onClick=${saveRuntimeConfig}
             disabled=${runtimeSaving.value}
           >${runtimeSaving.value ? '저장 중...' : '런타임 설정 저장'}</button>
           <button type="button"
-            class="${BTN_FILLED_BASE} bg-[var(--color-bg-hover)] text-[var(--color-fg-secondary)]"
+            class="${BTN_FILLED_BASE} bg-[var(--color-bg-hover)] text-[var(--color-fg-secondary)] text-sm"
             title="초기화: 변경한 런타임 설정 draft 를 서버 값으로 되돌립니다"
             onClick=${resetRuntimeDraft}
           >초기화하기</button>
-          <span class="text-3xs text-accent-fg">변경된 설정이 있습니다</span>
         </div>
       ` : null}
 

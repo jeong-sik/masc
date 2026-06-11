@@ -22,21 +22,27 @@ type participant = {
 val default_limit : int
 val max_limit : int
 
-(** [respond ~surface ~limit messages] filters [messages] to rows whose
-    [source] label equals [surface] (trimmed, exact), returning a JSON
-    object string:
-    [{surface, messages, participants, lane_row_count, returned}].
+(** [respond ~surface ~limit ~has_more messages] filters [messages] to
+    rows whose [source] label equals [surface] (trimmed, exact),
+    returning a JSON object string: [{surface, messages, participants,
+    lane_row_count, returned, has_more, oldest_ts?}].
 
     - [messages]: the last [limit] lane rows (chronological), each with
       role/content/ts/source and speaker fields when present — the
       same field vocabulary as the REST history endpoint.
     - [participants]: roster folded over ALL loaded lane rows (not just
       the returned slice), sorted by [last_seen] descending.
+    - [has_more] / [oldest_ts] (RFC-0228 P1): [oldest_ts] is the oldest
+      stamp across the whole loaded page — not just the lane — so
+      passing it as the next call's [before] always makes progress,
+      even through pages with no rows for this lane. Omitted when the
+      page carries no stamped rows.
     - Rows without a [source] label (written before source labelling)
       never match; the description of the tool says so.
     - Blank [surface] is an error JSON, not a default lane. *)
 val respond :
   surface:string ->
   limit:int ->
+  has_more:bool ->
   Keeper_chat_store.chat_message list ->
   string

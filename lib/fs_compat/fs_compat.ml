@@ -448,6 +448,28 @@ let load_jsonl_diagnostics (path : string) : Yojson.Safe.t list * int =
     Malformed lines are logged and dropped. *)
 let load_jsonl (path : string) : Yojson.Safe.t list = fst (load_jsonl_diagnostics path)
 
+(* Bounded byte slice of a file. Clamps to the current size; a missing
+   file or an empty clamped range returns "". Stdlib-blocking like the
+   other tail-readers — callers bound [len], so the read cost is fixed
+   regardless of file size (RFC-0228 P1). *)
+let read_slice ~path ~from ~len =
+  if not (file_exists path) || len <= 0 then ""
+  else begin
+    let ic = Stdlib.open_in_bin path in
+    Stdlib.Fun.protect
+      ~finally:(fun () -> Stdlib.close_in_noerr ic)
+      (fun () ->
+         let size = Stdlib.in_channel_length ic in
+         let from = if from < 0 then 0 else if from > size then size else from in
+         let len = Stdlib.min len (size - from) in
+         if len <= 0 then ""
+         else begin
+           Stdlib.seek_in ic from;
+           Stdlib.really_input_string ic len
+         end)
+  end
+;;
+
 (* Fold over newline-terminated lines appended after byte offset [from].
    Append-only JSONL stores never rewrite earlier bytes, so a (offset,
    accumulator) pair is a pure function of the file prefix — callers cache

@@ -71,19 +71,18 @@ export function channelIdPlaceholder(connectorId: string): string {
 }
 
 async function submit(connectorId: string, entry: FormEntry) {
+  // The Bind button is disabled while submitting, but the Enter key path
+  // is not — without this guard a second Enter (double-tap or held-key
+  // auto-repeat) fires a concurrent bind POST for the same draft.
+  if (entry.submitting) return
   const channel = entry.channelId.trim()
   if (!channel || !entry.keeperName) return
   setEntry(connectorId, { submitting: true })
-  try {
-    await bindConnector(connectorId, entry.keeperName, channel)
-    // bindConnector already refreshes + toasts; we just clear the local
-    // channel draft so the operator can immediately bind another.
-    setEntry(connectorId, { channelId: '', submitting: false })
-  } catch {
-    // bindConnector already surfaced the toast; still need to unwedge the
-    // submitting state so the operator can retry.
-    setEntry(connectorId, { submitting: false })
-  }
+  const ok = await bindConnector(connectorId, entry.keeperName, channel)
+  // bindConnector surfaces success/error toasts itself and never rejects.
+  // Clear the draft only on success — on failure the operator needs the
+  // typed channel ID intact to retry.
+  setEntry(connectorId, ok ? { channelId: '', submitting: false } : { submitting: false })
 }
 
 export function QuickBindForm({ connectorId, keepers }: {

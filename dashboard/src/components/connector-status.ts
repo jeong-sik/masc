@@ -590,10 +590,13 @@ export async function stopSidecar(connectorId: string) {
   }
 }
 
-export async function bindConnector(connectorId: string, keeperName: string, channelId: string) {
+/** Returns true only when the bind POST succeeded. Errors are surfaced
+    here (toast + 상세 dialog) and swallowed, so this promise never
+    rejects — callers must branch on the boolean, not try/catch. */
+export async function bindConnector(connectorId: string, keeperName: string, channelId: string): Promise<boolean> {
   const keeper = keeperName.trim()
   const channel = channelId.trim()
-  if (!keeper || !channel) return
+  if (!keeper || !channel) return false
 
   patchConnectorUiState(connectorId, { actionLoading: true })
   try {
@@ -607,8 +610,10 @@ export async function bindConnector(connectorId: string, keeperName: string, cha
     })
     await refresh()
     showToast(`Bound ${channel} -> ${keeper}`, 'success')
+    return true
   } catch (err) {
     showConnectorActionError(`바인딩 실패: ${channel} → ${keeper}`, err)
+    return false
   } finally {
     patchConnectorUiState(connectorId, { actionLoading: false })
   }

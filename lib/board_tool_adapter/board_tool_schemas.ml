@@ -161,14 +161,14 @@ let tool_post_list : Masc_domain.tool_schema =
                       , `List
                           (List.map
                              (fun s -> `String s)
-                             Masc_board_handlers.Board_core_classify.valid_visibility_strings) )
+                             Board_core_classify.valid_visibility_strings) )
                     ; ( "description"
                       , `String
                           (Printf.sprintf
                              "Filter by visibility (%s)"
                              (String.concat
                                 " | "
-                                Masc_board_handlers.Board_core_classify.valid_visibility_strings)) )
+                                Board_core_classify.valid_visibility_strings)) )
                     ] )
               ; ( "hearth"
                 , `Assoc
@@ -192,14 +192,14 @@ let tool_post_list : Masc_domain.tool_schema =
               ; ( "sort_by"
                 , `Assoc
                     [ "type", `String "string"
-                    ; (* Issue #8449 PR A: derived from Masc_board_handlers.Board_dispatch.sort_order Variant SSOT.
+                    ; (* Issue #8449 PR A: derived from Board_dispatch.sort_order Variant SSOT.
            Hand-rolled enum had 5 values that happened to be in sync; future
            constructor would silently miss this site. *)
                       ( "enum"
                       , `List
                           (List.map
                              (fun s -> `String s)
-                             Masc_board_handlers.Board_dispatch.valid_sort_order_strings) )
+                             Board_dispatch.valid_sort_order_strings) )
                     ; "description", `String "Sort order (default: hot)"
                     ] )
               ; ( "exclude_system"

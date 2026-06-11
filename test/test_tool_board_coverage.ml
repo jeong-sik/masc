@@ -29,11 +29,11 @@ let cleanup () =
     rng_initialized := true
   end;
   Board.reset_global_for_test ();
-  Masc_board_handlers.Board_dispatch.reset_for_test ();
-  Masc_board_handlers.Board_curation.reset_for_test ();
-  Masc_board_handlers.Board_moderation.reset_for_test ();
+  Board_dispatch.reset_for_test ();
+  Board_curation.reset_for_test ();
+  Board_moderation.reset_for_test ();
   remove_path (Filename.concat _test_base_path Common.masc_dirname);
-  Masc_board_handlers.Board_dispatch.init_jsonl ()
+  Board_dispatch.init_jsonl ()
 
 let dispatch name args =
   let result = Board_tool.handle_tool name args in
@@ -106,7 +106,7 @@ let test_visibility_of_string () =
 
 (* Issue #8449 PR B: [Board_tool.sort_order_of_string] removed —
    replaced by [parse_sort_order] (Result-returning) which delegates to
-   [Masc_board_handlers.Board_dispatch.sort_order_of_string_opt]. The previous silent
+   [Board_dispatch.sort_order_of_string_opt]. The previous silent
    "unknown defaults to Hot" behavior is now an explicit Error so
    garbage input is surfaced instead of swallowed. *)
 let test_sort_order_of_string () =
@@ -230,7 +230,7 @@ let test_board_dashboard_json_embeds_reaction_summaries () =
   cleanup ();
   let post =
     match
-      Masc_board_handlers.Board_dispatch.create_post ~author:"reaction-author"
+      Board_dispatch.create_post ~author:"reaction-author"
         ~content:"reactable post" ~post_kind:Board.Human_post ()
     with
     | Ok post -> post
@@ -238,14 +238,14 @@ let test_board_dashboard_json_embeds_reaction_summaries () =
   in
   let post_id = Board.Post_id.to_string post.id in
   (match
-     Masc_board_handlers.Board_dispatch.toggle_reaction ~target_type:Board.Reaction_post
+     Board_dispatch.toggle_reaction ~target_type:Board.Reaction_post
        ~target_id:post_id ~user_id:"reactor" ~emoji:"🚀"
    with
    | Ok _ -> ()
    | Error e -> Alcotest.fail (Board.show_board_error e));
   let comment =
     match
-      Masc_board_handlers.Board_dispatch.add_comment ~post_id ~author:"commenter"
+      Board_dispatch.add_comment ~post_id ~author:"commenter"
         ~content:"reactable comment" ()
     with
     | Ok comment -> comment
@@ -253,7 +253,7 @@ let test_board_dashboard_json_embeds_reaction_summaries () =
   in
   let comment_id = Board.Comment_id.to_string comment.id in
   (match
-     Masc_board_handlers.Board_dispatch.toggle_reaction ~target_type:Board.Reaction_comment
+     Board_dispatch.toggle_reaction ~target_type:Board.Reaction_comment
        ~target_id:comment_id ~user_id:"reactor" ~emoji:"👏"
    with
    | Ok _ -> ()
@@ -298,7 +298,7 @@ let test_board_dashboard_json_embeds_moderation_projection () =
   cleanup ();
   let post =
     match
-      Masc_board_handlers.Board_dispatch.create_post ~author:"moderated-author"
+      Board_dispatch.create_post ~author:"moderated-author"
         ~content:"moderation projection post" ~post_kind:Board.Human_post ()
     with
     | Ok post -> post
@@ -307,7 +307,7 @@ let test_board_dashboard_json_embeds_moderation_projection () =
   let post_id = Board.Post_id.to_string post.id in
   let comment =
     match
-      Masc_board_handlers.Board_dispatch.add_comment ~post_id ~author:"moderated-commenter"
+      Board_dispatch.add_comment ~post_id ~author:"moderated-commenter"
         ~content:"moderation projection comment" ()
     with
     | Ok comment -> comment
@@ -315,15 +315,15 @@ let test_board_dashboard_json_embeds_moderation_projection () =
   in
   let comment_id = Board.Comment_id.to_string comment.id in
   (match
-     Masc_board_handlers.Board_moderation.flag ~target_kind:Masc_board_handlers.Board_moderation.Target_post
-       ~target_id:post_id ~reporter:"reporter-a" ~reason:Masc_board_handlers.Board_moderation.Spam
+     Board_moderation.flag ~target_kind:Board_moderation.Target_post
+       ~target_id:post_id ~reporter:"reporter-a" ~reason:Board_moderation.Spam
    with
    | Ok _ -> ()
    | Error e -> Alcotest.fail e);
   (match
-     Masc_board_handlers.Board_moderation.flag ~target_kind:Masc_board_handlers.Board_moderation.Target_comment
+     Board_moderation.flag ~target_kind:Board_moderation.Target_comment
        ~target_id:comment_id ~reporter:"reporter-b"
-       ~reason:Masc_board_handlers.Board_moderation.Harassment
+       ~reason:Board_moderation.Harassment
    with
    | Ok _ -> ()
    | Error e -> Alcotest.fail e);
@@ -360,24 +360,24 @@ let test_board_dashboard_json_hides_unvoted_scores_when_blind () =
   cleanup ();
   let post =
     match
-      Masc_board_handlers.Board_dispatch.create_post ~author:"blind-author"
+      Board_dispatch.create_post ~author:"blind-author"
         ~content:"vote blind post" ~post_kind:Board.Human_post ()
     with
     | Ok post -> post
     | Error e -> Alcotest.fail (Board.show_board_error e)
   in
   let post_id = Board.Post_id.to_string post.id in
-  (match Masc_board_handlers.Board_dispatch.vote ~voter:"peer" ~post_id ~direction:Board.Up with
+  (match Board_dispatch.vote ~voter:"peer" ~post_id ~direction:Board.Up with
   | Ok _ -> ()
   | Error e -> Alcotest.fail (Board.show_board_error e));
   let post =
-    match Masc_board_handlers.Board_dispatch.get_post ~post_id with
+    match Board_dispatch.get_post ~post_id with
     | Ok post -> post
     | Error e -> Alcotest.fail (Board.show_board_error e)
   in
   let comment =
     match
-      Masc_board_handlers.Board_dispatch.add_comment ~post_id ~author:"blind-commenter"
+      Board_dispatch.add_comment ~post_id ~author:"blind-commenter"
         ~content:"vote blind comment" ()
     with
     | Ok comment -> comment
@@ -385,13 +385,13 @@ let test_board_dashboard_json_hides_unvoted_scores_when_blind () =
   in
   let comment_id = Board.Comment_id.to_string comment.id in
   (match
-     Masc_board_handlers.Board_dispatch.vote_comment ~voter:"peer" ~comment_id
+     Board_dispatch.vote_comment ~voter:"peer" ~comment_id
        ~direction:Board.Up
    with
    | Ok _ -> ()
    | Error e -> Alcotest.fail (Board.show_board_error e));
   let comment =
-    match Masc_board_handlers.Board_dispatch.get_comments ~post_id with
+    match Board_dispatch.get_comments ~post_id with
     | Ok (comment :: _) -> comment
     | Ok [] -> Alcotest.fail "expected comment"
     | Error e -> Alcotest.fail (Board.show_board_error e)
@@ -441,7 +441,7 @@ let test_board_dashboard_json_embeds_contributor_quality () =
   cleanup ();
   let post =
     match
-      Masc_board_handlers.Board_dispatch.create_post ~author:"quality-author"
+      Board_dispatch.create_post ~author:"quality-author"
         ~content:"quality projection post" ~post_kind:Board.Human_post ()
     with
     | Ok post -> post
@@ -792,7 +792,7 @@ let test_keeper_board_post_rejects_quantitative_line_claim_without_evidence () =
     "missing_quantitative_evidence"
     Yojson.Safe.Util.(json |> member "reason" |> to_string);
   Alcotest.(check int) "no post created" 0
-    (List.length (Masc_board_handlers.Board_dispatch.list_posts ~limit:10 ()))
+    (List.length (Board_dispatch.list_posts ~limit:10 ()))
 
 let test_keeper_board_post_rejects_keyword_only_quantitative_evidence () =
   Eio_main.run @@ fun env ->
@@ -818,7 +818,7 @@ let test_keeper_board_post_rejects_keyword_only_quantitative_evidence () =
     "missing_quantitative_evidence"
     Yojson.Safe.Util.(json |> member "reason" |> to_string);
   Alcotest.(check int) "no post created" 0
-    (List.length (Masc_board_handlers.Board_dispatch.list_posts ~limit:10 ()))
+    (List.length (Board_dispatch.list_posts ~limit:10 ()))
 
 let test_keeper_board_post_rejects_numeric_line_claim_without_keyword () =
   Eio_main.run @@ fun env ->
@@ -844,7 +844,7 @@ let test_keeper_board_post_rejects_numeric_line_claim_without_keyword () =
     "missing_quantitative_evidence"
     Yojson.Safe.Util.(json |> member "reason" |> to_string);
   Alcotest.(check int) "no post created" 0
-    (List.length (Masc_board_handlers.Board_dispatch.list_posts ~limit:10 ()))
+    (List.length (Board_dispatch.list_posts ~limit:10 ()))
 
 let test_keeper_board_post_accepts_inline_quantitative_command_evidence () =
   Eio_main.run @@ fun env ->
@@ -867,7 +867,7 @@ let test_keeper_board_post_accepts_inline_quantitative_command_evidence () =
   in
   ignore (parse_create_response_json body);
   Alcotest.(check int) "one post created" 1
-    (List.length (Masc_board_handlers.Board_dispatch.list_posts ~limit:10 ()))
+    (List.length (Board_dispatch.list_posts ~limit:10 ()))
 
 let test_keeper_board_post_accepts_quantitative_line_claim_with_evidence () =
   Eio_main.run @@ fun env ->
@@ -904,7 +904,7 @@ let test_keeper_board_post_accepts_quantitative_line_claim_with_evidence () =
       |> member "command"
       |> to_string);
   Alcotest.(check int) "one post created" 1
-    (List.length (Masc_board_handlers.Board_dispatch.list_posts ~limit:10 ()))
+    (List.length (Board_dispatch.list_posts ~limit:10 ()))
 
 let test_keeper_board_dispatch_uses_typed_tool_names () =
   Eio_main.run @@ fun env ->
@@ -1322,13 +1322,13 @@ let test_post_list_filter_combinations () =
   cleanup ();
   ignore (dispatch "masc_board_post"
     (make_args [("content", `String "human"); ("author", `String "human-author")]));
-  ignore (Masc_board_handlers.Board_dispatch.create_post ~author:"dashboard-harness-bot"
+  ignore (Board_dispatch.create_post ~author:"dashboard-harness-bot"
             ~content:"automation" ~visibility:Board.Internal ~ttl_hours:1
             ~hearth:"dashboard-harness" ~post_kind:Board.Automation_post ());
-  ignore (Masc_board_handlers.Board_dispatch.create_post ~author:"dm-keeper" ~content:"keeper"
+  ignore (Board_dispatch.create_post ~author:"dm-keeper" ~content:"keeper"
             ~post_kind:Board.Automation_post
             ~meta_json:(`Assoc [ ("source", `String "keeper_board_post") ]) ());
-  ignore (Masc_board_handlers.Board_dispatch.create_post ~author:"keeper-alert-bot" ~content:"system"
+  ignore (Board_dispatch.create_post ~author:"keeper-alert-bot" ~content:"system"
             ~post_kind:Board.System_post ());
   let ok1, body1 = dispatch "masc_board_list"
     (make_args [("exclude_system", `Bool true)]) in
@@ -1776,7 +1776,7 @@ let test_rate_window_expiry_allows_more () =
   let post_id = rate_test_post_id store in
   let old = Unix.gettimeofday () -. 600.0 in
   for i = 1 to 30 do
-    Masc_board_handlers.Board_core.record_comment_timestamp ~author:"tester" ~now:(old +. float_of_int i)
+    Board_core.record_comment_timestamp ~author:"tester" ~now:(old +. float_of_int i)
   done;
   (match rate_add_comment store post_id 1 with
    | Ok _ -> ()
@@ -1787,7 +1787,7 @@ let test_rate_disabled_when_limit_zero () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   ignore (Board.create_store ());
-  (match Masc_board_handlers.Board_core.check_comment_rate_limit ~author:"unknown-agent" ~now:(Unix.gettimeofday ()) with
+  (match Board_core.check_comment_rate_limit ~author:"unknown-agent" ~now:(Unix.gettimeofday ()) with
    | None -> ()
    | Some _ -> Alcotest.fail "unknown author should not be rate-limited")
 

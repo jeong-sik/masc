@@ -24,20 +24,20 @@ let take = List.take
 let drop = List.drop
 
 (** Issue #8449 PR C: HTTP query-param sort_by parser. Delegates to
-    [Board.Board_dispatch.sort_order_of_string_opt] instead of duplicating
+    [Board_dispatch.sort_order_of_string_opt] instead of duplicating
     the inline match. HTTP semantics keep the "default to Hot" fallback
     for missing or invalid query params — graceful UI degradation, not
     silent data corruption. *)
 let board_sort_order_of_request request =
   match query_param request "sort_by" with
-  | None -> Board.Board_dispatch.Hot
+  | None -> Board_dispatch.Hot
   | Some sort ->
-    (match Board.Board_dispatch.sort_order_of_string_opt sort with
+    (match Board_dispatch.sort_order_of_string_opt sort with
      | Some s -> s
-     | None -> Board.Board_dispatch.Hot)
+     | None -> Board_dispatch.Hot)
 
 (** Issue #8449 PR C: thin alias over the Variant SSOT helper. *)
-let board_sort_label = Board.Board_dispatch.sort_order_to_string
+let board_sort_label = Board_dispatch.sort_order_to_string
 
 let filter_board_posts ~exclude_system ~exclude_automation posts =
   posts
@@ -114,7 +114,7 @@ let board_current_vote_for_post ~voter ~post_id =
   match voter with
   | None -> None
   | Some voter -> (
-      match Board.Board_dispatch.current_vote_for_post ~voter ~post_id with
+      match Board_dispatch.current_vote_for_post ~voter ~post_id with
       | Ok vote -> Some vote
       | Error _ -> Some None)
 
@@ -122,7 +122,7 @@ let board_current_vote_for_comment ~voter ~comment_id =
   match voter with
   | None -> None
   | Some voter -> (
-      match Board.Board_dispatch.current_vote_for_comment ~voter ~comment_id with
+      match Board_dispatch.current_vote_for_comment ~voter ~comment_id with
       | Ok vote -> Some vote
       | Error _ -> Some None)
 
@@ -160,7 +160,7 @@ let board_vote_blind_fields ~blind_active =
 
 let board_reactions_for_post ~voter ~post_id =
   match
-    Board.Board_dispatch.list_reactions ~target_type:Board.Reaction_post
+    Board_dispatch.list_reactions ~target_type:Board.Reaction_post
       ~target_id:post_id ?user_id:voter ()
   with
   | Ok summaries -> summaries
@@ -171,7 +171,7 @@ let board_reactions_for_post ~voter ~post_id =
 
 let board_reactions_for_comment ~voter ~comment_id =
   match
-    Board.Board_dispatch.list_reactions ~target_type:Board.Reaction_comment
+    Board_dispatch.list_reactions ~target_type:Board.Reaction_comment
       ~target_id:comment_id ?user_id:voter ()
   with
   | Ok summaries -> summaries
@@ -183,7 +183,7 @@ let board_reactions_for_comment ~voter ~comment_id =
 let board_reactions_batch ~targets ~voter =
   match targets with
   | [] -> []
-  | _ -> Board.Board_dispatch.list_reactions_batch ~targets ?user_id:voter ()
+  | _ -> Board_dispatch.list_reactions_batch ~targets ?user_id:voter ()
 
 let board_reactions_lookup rows =
   let table = Hashtbl.create (List.length rows) in
@@ -200,10 +200,10 @@ let board_reaction_fields = function
 let board_moderation_fields ~include_moderation ~target_kind ~target_id =
   if not include_moderation then []
   else
-    let summary = Board.Board_moderation.target_summary ~target_kind ~target_id in
+    let summary = Board_moderation.target_summary ~target_kind ~target_id in
     [
-      ("report_count", `Int summary.Board.Board_moderation.report_count);
-      ("moderation_status", `String summary.Board.Board_moderation.moderation_status);
+      ("report_count", `Int summary.Board_moderation.report_count);
+      ("moderation_status", `String summary.Board_moderation.moderation_status);
     ]
 
 let board_contributor_quality_band score =
@@ -281,7 +281,7 @@ let board_comment_dashboard_json ?(include_moderation = false)
         (fields
          @ [ ("author_identity", board_actor_identity_json author) ]
          @ board_moderation_fields ~include_moderation
-             ~target_kind:Board.Board_moderation.Target_comment
+             ~target_kind:Board_moderation.Target_comment
              ~target_id:comment_id
          @ (if blind_active then [ ("votes", `Null) ] else [])
          @ board_vote_blind_fields ~blind_active
@@ -296,7 +296,7 @@ let board_post_dashboard_json ?(include_moderation = false)
   let author = Board.Agent_id.to_string p.author in
   let post_id = Board.Post_id.to_string p.id in
   let base_fields =
-    match Board.Board_dispatch.post_to_yojson_with_karma p ~author_karma with
+    match Board_dispatch.post_to_yojson_with_karma p ~author_karma with
     | `Assoc fields -> fields
     | _ -> []
   in
@@ -334,7 +334,7 @@ let board_post_dashboard_json ?(include_moderation = false)
           ("author_identity", board_actor_identity_json author);
         ]
       @ board_moderation_fields ~include_moderation
-          ~target_kind:Board.Board_moderation.Target_post
+          ~target_kind:Board_moderation.Target_post
           ~target_id:post_id
       @ board_contributor_quality_fields contributor_quality
       @ board_vote_blind_fields ~blind_active

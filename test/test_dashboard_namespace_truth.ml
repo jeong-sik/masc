@@ -468,9 +468,9 @@ let test_dashboard_namespace_truth_does_not_auto_post_meta_digest () =
              ~state ~sw ~clock:(Eio.Stdenv.clock env)
              (request "/api/v1/dashboard/namespace-truth"));
         let posts =
-          Lib.Masc_board_handlers.Board_dispatch.list_posts ~hearth:"meta-cognition"
+          Lib.Board_dispatch.list_posts ~hearth:"meta-cognition"
             ~post_kind_filter:Lib.Board.Automation_post
-            ~sort_by:Lib.Masc_board_handlers.Board_dispatch.Recent ~limit:10 ()
+            ~sort_by:Lib.Board_dispatch.Recent ~limit:10 ()
         in
         check int "namespace-truth leaves meta-cognition board empty" 0
           (List.length posts)))

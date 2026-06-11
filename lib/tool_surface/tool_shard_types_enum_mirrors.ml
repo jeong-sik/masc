@@ -9,7 +9,7 @@
 
     Canonical owners (single source of truth per enum):
       - [sort_order_enum_strings]
-          mirrors [Masc_board_handlers.Board_dispatch.valid_sort_order_strings] (#8513)
+          mirrors [Board_dispatch.valid_sort_order_strings] (#8513)
       - [memory_search_source_enum_strings]
           mirrors [Keeper_tool_memory_runtime.valid_memory_search_source_strings] (#8484)
       - [memory_kind_enum_strings]
@@ -17,7 +17,7 @@
       - [fs_write_mode_enum_strings]
           mirrors [Keeper_tool_filesystem_runtime.valid_fs_write_mode_strings] (#8490)
       - [vote_direction_enum_strings]
-          mirrors [Masc_board_handlers.Board_votes.valid_vote_direction_strings] (#8506)
+          mirrors [Board_votes.valid_vote_direction_strings] (#8506)
 
     Adding a new enum value MUST be done in the canonical owner first;
     the test suite then forces a sync edit here.

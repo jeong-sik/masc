@@ -1,7 +1,7 @@
 (* test/test_board_metrics_labels.ml
 
    Pins the Otel_metric_store label strings emitted for the typed metric-label
-   closed sums on [Masc_board_handlers.Board_metrics_hooks.observer]. The refactor replaced
+   closed sums on [Board_metrics_hooks.observer]. The refactor replaced
    bare [string] label params with closed sums; the [variant -> string]
    mapping lives only in the Otel_metric_store adapter
    ([Board_metric_hooks_adapter.*_to_label]).
@@ -12,8 +12,8 @@
    drifts a Otel_metric_store label. *)
 
 module BPH = Masc.Board_metric_hooks_adapter
-module BMH = Masc_board_handlers.Board_metrics_hooks
-module BCC = Masc_board_handlers.Board_core_classify
+module BMH = Masc.Board_metrics_hooks
+module BCC = Masc.Board_core_classify
 module RDR = Read_drop_reason
 
 let check_label name expected actual =

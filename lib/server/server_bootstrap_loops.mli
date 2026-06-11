@@ -36,7 +36,7 @@ module For_testing : sig
   val autoboot_proactive_warmup_sec :
     base_warmup:int -> stagger_window_sec:int -> keeper_name:string -> int
 
-  val board_sse_event_params : Masc_board_handlers.Board_dispatch.board_sse_event -> Yojson.Safe.t
+  val board_sse_event_params : Board_dispatch.board_sse_event -> Yojson.Safe.t
 
   val queued_chat_projection :
     Keeper_chat_queue.queued_message -> queued_chat_projection

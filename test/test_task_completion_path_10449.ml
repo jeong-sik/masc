@@ -17,6 +17,7 @@ let empty_links : T.task_execution_links = {
 let empty_contract : T.task_contract = {
   strict = false;
   completion_contract = [];
+  required_evidence = [];
   inspect_gate_evidence = [];
   verify_gate_evidence = [];
   evidence_claims = [];
@@ -28,7 +29,7 @@ let with_completion =
   { empty_contract with completion_contract = ["scan files"] }
 
 let with_evidence =
-  { empty_contract with verify_gate_evidence = ["board post"] }
+  { empty_contract with required_evidence = ["board post"] }
 
 let test_contract_state () =
   check string "no contract record" "no_contract"
@@ -38,7 +39,7 @@ let test_contract_state () =
   check string "completion_contract non-empty triggers with_contract"
     "with_contract"
     (CT.classify_contract_state (Some with_completion));
-  check string "verify_gate_evidence non-empty alone triggers with_contract"
+  check string "required_evidence non-empty alone triggers with_contract"
     "with_contract"
     (CT.classify_contract_state (Some with_evidence))
 

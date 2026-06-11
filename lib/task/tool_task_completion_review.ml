@@ -75,7 +75,7 @@ let concrete_verification_evidence_refs ?(notes = "") ?handoff_context
     (task : Masc_domain.task) =
   let contract_refs =
     match task.contract with
-    | Some contract -> contract.verify_gate_evidence
+    | Some contract -> contract.verify_gate_evidence @ contract.required_evidence
     | None -> []
   in
   let resolved_handoff_context =

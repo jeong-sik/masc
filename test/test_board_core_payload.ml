@@ -1,4 +1,4 @@
-(** Regression tests for Masc_board_handlers.Board_core_payload.derive_post_title.
+(** Regression tests for Board_core_payload.derive_post_title.
 
     Issue #7690: byte-based String.sub of the title cut through multi-byte
     UTF-8 characters (Korean, emoji), producing invalid UTF-8 lines in
@@ -6,7 +6,7 @@
 
 open Alcotest
 open Masc
-module BP = Masc_board_handlers.Board_core_payload
+module BP = Board_core_payload
 
 let is_valid_utf8 s =
   try

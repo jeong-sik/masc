@@ -121,7 +121,7 @@ let observe_task_transition_fn
       (fun _config ~agent_name:_ ~task_id:_ ~transition:_
            ~details:_ -> ())
 
-(** Board artifact cleanup — wraps Masc_board_handlers.Board_dispatch.list_posts + delete_post.
+(** Board artifact cleanup — wraps Board_dispatch.list_posts + delete_post.
     Returns number of deleted posts. *)
 let cleanup_board_artifacts_fn
   : (unit -> int) Atomic.t
@@ -189,7 +189,7 @@ let tool_assigned_fn
     days saw only 1 (6.25%) traverse the [awaiting_verification]
     gate. The [verifier-gate redirect] in [Task.Tool] only fires
     when [task.contract] has a non-empty [completion_contract] or
-    [verify_gate_evidence] list, so tasks created without contracts
+    [required_evidence] list, so tasks created without contracts
     bypass verification entirely.
 
     The pre-existing [fsm_drift_observer_fn] only counts the

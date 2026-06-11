@@ -18,7 +18,7 @@ let curation_tag_suggestions_arg args =
     then None
     else
       Some
-        { Masc_board_handlers.Board_curation.post_id
+        { Board_curation.post_id
         ; tags = Board_tool_format.string_list_field fields "tags"
         ; rationale = Board_tool_format.string_field fields "rationale" ""
         })
@@ -35,7 +35,7 @@ let curation_answer_matches_arg args =
     then None
     else
       Some
-        { Masc_board_handlers.Board_curation.question_post_id
+        { Board_curation.question_post_id
         ; answer_post_id
         ; score = Board_tool_format.float_field fields "score" 0.0
         ; rationale = Board_tool_format.string_field fields "rationale" ""
@@ -50,7 +50,7 @@ let curation_health_components_arg args =
     then None
     else
       Some
-        { Masc_board_handlers.Board_curation.name
+        { Board_curation.name
         ; score = Board_tool_format.float_field fields "score" 0.0
         ; weight = Board_tool_format.float_field fields "weight" 0.0
         ; rationale = Board_tool_format.string_field fields "rationale" ""
@@ -64,10 +64,10 @@ let curation_health_components_arg args =
    [~data] directly. *)
 
 let handle_board_curation_read ~tool_name ~start_time _args : Tool_result.result =
-  match Masc_board_handlers.Board_dispatch.latest_curation_snapshot () with
+  match Board_dispatch.latest_curation_snapshot () with
   | None -> Tool_result.make_ok ~tool_name ~start_time ~data:`Null ()
   | Some snap ->
-    let json = Masc_board_handlers.Board_curation.snapshot_to_yojson snap in
+    let json = Board_curation.snapshot_to_yojson snap in
     Tool_result.make_ok ~tool_name ~start_time ~data:json ()
 ;;
 
@@ -106,7 +106,7 @@ let handle_board_curation_submit ~tool_name ~start_time args : Tool_result.resul
     | Ok provenance ->
       (try
          let snap =
-           Masc_board_handlers.Board_dispatch.submit_curation_snapshot
+           Board_dispatch.submit_curation_snapshot
              ~submitted_by
              ?summary
              ~ordering
@@ -122,7 +122,7 @@ let handle_board_curation_submit ~tool_name ~start_time args : Tool_result.resul
          Tool_result.make_ok
            ~tool_name
            ~start_time
-           ~data:(Masc_board_handlers.Board_curation.snapshot_to_yojson snap)
+           ~data:(Board_curation.snapshot_to_yojson snap)
            ()
        with
        | Invalid_argument msg ->

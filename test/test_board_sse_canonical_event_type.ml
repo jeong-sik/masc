@@ -14,7 +14,7 @@ let check_event_type label expected event =
 
 let test_post_created_alias () =
   check_event_type "post_created" "post.created"
-    (Masc_board_handlers.Board_dispatch.Post_created
+    (Board_dispatch.Post_created
        {
          post_id = "post-1";
          author = "writer";
@@ -26,13 +26,13 @@ let test_post_created_alias () =
 
 let test_comment_created_alias () =
   check_event_type "comment_added" "comment.created"
-    (Masc_board_handlers.Board_dispatch.Comment_added
+    (Board_dispatch.Comment_added
        { post_id = "post-1"; comment_id = "comment-1"; author = "reader" })
 
 let test_vote_changed_aliases () =
   let post_vote =
     Boot.board_sse_event_params
-      (Masc_board_handlers.Board_dispatch.Post_voted
+      (Board_dispatch.Post_voted
          { post_id = "post-1"; voter = "reader"; direction = Board.Up })
   in
   Alcotest.(check string) "post vote canonical event_type" "vote.changed"
@@ -41,7 +41,7 @@ let test_vote_changed_aliases () =
     (string_field "target_type" post_vote);
   let comment_vote =
     Boot.board_sse_event_params
-      (Masc_board_handlers.Board_dispatch.Comment_voted
+      (Board_dispatch.Comment_voted
          { comment_id = "comment-1"; voter = "reader"; direction = Board.Down })
   in
   Alcotest.(check string) "comment vote canonical event_type" "vote.changed"
@@ -51,7 +51,7 @@ let test_vote_changed_aliases () =
 
 let test_reaction_changed_alias () =
   check_event_type "reaction_changed" "reaction.changed"
-    (Masc_board_handlers.Board_dispatch.Reaction_changed
+    (Board_dispatch.Reaction_changed
        {
          target_type = Board.Reaction_post;
          target_id = "post-1";

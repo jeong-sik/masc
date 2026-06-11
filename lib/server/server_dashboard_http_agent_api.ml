@@ -81,7 +81,7 @@ let add_agent_api_routes router =
              Tool_agent_timeline.build_timeline
                state.Mcp_server.workspace_config
                ~agent_name ~since_hours ~limit
-               ~include_tasks:true
+               ~include_tasks:true ~include_board:false
                ~include_tool_calls:true
            in
           Http.Response.json_value ~compress:true ~request:req json reqd

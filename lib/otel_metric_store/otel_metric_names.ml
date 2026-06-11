@@ -93,7 +93,7 @@
    Labels: provider. *)
 
 (* #10569: board persist mutex acquire / held latency.  Recorded by
-   [Masc_board_handlers.Board_core.with_persist_lock] so operators can distinguish
+   [Board_core.with_persist_lock] so operators can distinguish
    queueing from syscall stall when keeper_board_post / comment / vote
    tool calls hit the 60s default tool timeout. *)
 let metric_board_persist_lock_acquire_sec = "masc_board_persist_lock_acquire_sec"

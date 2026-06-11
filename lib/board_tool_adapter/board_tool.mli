@@ -69,21 +69,21 @@ val detect_truncated_markdown_with_reason :
 
 (** {1 Sort order} *)
 
-type sort_order = Masc_board_handlers.Board_dispatch.sort_order =
+type sort_order = Board_dispatch.sort_order =
   | Hot
   | Trending
   | Recent
   | Updated
   | Discussed
-(** Type re-export from {!Masc_board_handlers.Board_dispatch.sort_order}.
+(** Type re-export from {!Board_dispatch.sort_order}.
     Identity preserved so [Board_tool.sort_order] and
-    [Masc_board_handlers.Board_dispatch.sort_order] are interchangeable. *)
+    [Board_dispatch.sort_order] are interchangeable. *)
 
 val parse_sort_order : string -> (sort_order, string) Result.t
 (** Delegates to
-    {!Masc_board_handlers.Board_dispatch.sort_order_of_string_opt} for canonical sort names.
+    {!Board_dispatch.sort_order_of_string_opt} for canonical sort names.
     Error message lists
-    {!Masc_board_handlers.Board_dispatch.valid_sort_order_strings} so adding
+    {!Board_dispatch.valid_sort_order_strings} so adding
     a constructor automatically updates the user-facing
     catalogue. *)
 

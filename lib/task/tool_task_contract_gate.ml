@@ -20,7 +20,7 @@ let task_has_strict_persisted_contract = function
 
 let contract_requires_verification (contract : Masc_domain.task_contract) =
   Stdlib.List.length contract.completion_contract > 0
-  || Stdlib.List.length contract.verify_gate_evidence > 0
+  || Stdlib.List.length contract.required_evidence > 0
   || Stdlib.List.length contract.verify_gate_evidence > 0
 
 let task_requires_verification = function

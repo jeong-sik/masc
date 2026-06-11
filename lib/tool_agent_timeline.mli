@@ -39,10 +39,11 @@ val build_timeline :
   since_hours:float ->
   limit:int ->
   include_tasks:bool ->
+  include_board:bool ->
   include_tool_calls:bool ->
   Yojson.Safe.t
 (** [build_timeline config ~agent_name ~since_hours ~limit
-      ~include_tasks ~include_tool_calls] returns a
+      ~include_tasks ~include_board ~include_tool_calls] returns a
     JSON object with source metadata plus the timeline payload:
 
     - [dashboard_surface], [source], [retention], [generated_at_iso]
@@ -61,6 +62,8 @@ val build_timeline :
     - [include_tasks = false] -> [task_events] is skipped.
     - [include_tool_calls = false] -> [tool_call_events] is
       skipped.
+    - [include_board] is currently unused (reserved for future
+      board-event integration).
 
     Per-source internal limits are pinned at 200 events
     ([message_events], [tool_call_events], [keeper_cdal_events],

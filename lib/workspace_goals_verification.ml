@@ -78,6 +78,7 @@ let update_goal_phase
   Goal_store.update_goal ctx.config ~goal_id:goal.id (fun current ->
     { current with
       phase
+    ; status = Goal_store.goal_status_of_phase phase
     ; active_verification_request_id =
         (if clear_active_verification_request
          then None

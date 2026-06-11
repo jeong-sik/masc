@@ -202,8 +202,8 @@ let rec tree_node_to_json ?(effective_policy_for_goal = fun _ -> None)
       ("id", `String goal.id);
       ("title", `String goal.title);
       ("horizon", Goal_store.horizon_to_yojson goal.horizon);
-      ("status", Goal_phase.to_yojson goal.phase);
-      ("status_color", `String (goal_phase_color goal.phase));
+      ("status", Goal_store.goal_status_to_yojson goal.status);
+      ("status_color", `String (goal_status_color goal.status));
       ("phase", Goal_phase.to_yojson goal.phase);
       ("phase_color", `String (goal_phase_color goal.phase));
       ("goal_fsm", goal_fsm_to_json ~effective_policy goal node);
@@ -408,8 +408,7 @@ let dashboard_goals_tree_json ~(config : Workspace.config) : Yojson.Safe.t =
   in
   let active_goal_count =
     goals
-    |> List.filter (fun (goal : Goal_store.goal) ->
-         match goal.phase with Goal_phase.Executing | Goal_phase.Awaiting_verification | Goal_phase.Awaiting_approval -> true | _ -> false)
+    |> List.filter (fun (goal : Goal_store.goal) -> goal.status = Goal_store.Active)
     |> List.length
   in
   let pending_approval_total =

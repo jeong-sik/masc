@@ -26,7 +26,7 @@ let fresh_test_base_path () =
 
 let test_load_persisted_posts_missing_file () =
   let _dir = fresh_test_base_path () in
-  let store = Masc_board_handlers.Board_core.create_store () in
+  let store = Board_core.create_store () in
   match Masc_board_handlers.Board_votes_json.load_persisted_posts store with
   | Ok 0 -> ()
   | Ok n -> Alcotest.failf "expected Ok 0 for missing file, got Ok %d" n
@@ -39,7 +39,7 @@ let test_load_persisted_posts_missing_file () =
 
 let test_load_persisted_comments_missing_file () =
   let _dir = fresh_test_base_path () in
-  let store = Masc_board_handlers.Board_core.create_store () in
+  let store = Board_core.create_store () in
   match Masc_board_handlers.Board_votes_json.load_persisted_comments store with
   | Ok 0 -> ()
   | Ok n -> Alcotest.failf "expected Ok 0 for missing file, got Ok %d" n

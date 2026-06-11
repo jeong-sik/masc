@@ -547,8 +547,14 @@ let apply_post_turn_lifecycle_with_resilience_handles
             meta
       in
       let before_tokens = token_count ctx in
+      let librarian =
+        Keeper_librarian_runtime.make
+          ~trace_id:(Keeper_id.Trace_id.to_string base_meta.runtime.trace_id)
+          ~generation:base_meta.runtime.generation
+          ()
+      in
       let compacted_ctx, trigger, decision =
-        Keeper_compact_policy.compact_if_needed_typed ~meta:base_meta ~now_ts ctx
+        Keeper_compact_policy.compact_if_needed_typed ?librarian ~meta:base_meta ~now_ts ctx
       in
       let compaction_decided =
         Keeper_compact_policy.compaction_decision_applied decision
@@ -840,8 +846,18 @@ let recover_latest_checkpoint_for_overflow_retry
       let retry_meta =
         forced_overflow_retry_meta meta ~turn_generation ~now_ts
       in
+      let librarian_retry =
+        Keeper_librarian_runtime.make
+          ~trace_id:(Keeper_id.Trace_id.to_string retry_meta.runtime.trace_id)
+          ~generation:retry_meta.runtime.generation
+          ()
+      in
       let compacted_ctx, trigger, base_decision =
-        Keeper_compact_policy.compact_if_needed_typed ~meta:retry_meta ~now_ts ctx
+        Keeper_compact_policy.compact_if_needed_typed
+          ?librarian:librarian_retry
+          ~meta:retry_meta
+          ~now_ts
+          ctx
       in
       let after_tokens = token_count compacted_ctx in
       let compaction_applied =

@@ -15,6 +15,24 @@
 
 (** {1 Types} *)
 
+(** First-class role for chat messages. Corresponds to the JSON [role]
+    field: "user", "assistant", or "tool" (tool results). *)
+type role =
+  | User
+  | Assistant
+  | Tool
+
+val role_to_string : role -> string
+val role_of_string : string -> role option
+
+(** A filter over {!role} used to scope loaded pages. [AllRoles] returns
+    every message; [Roles rs] returns only messages whose role is in [rs]. *)
+type role_filter =
+  | AllRoles
+  | Roles of role list
+
+val role_filter_matches : role_filter -> string -> bool
+
 type attachment = {
   id : string;
   att_type : string;
@@ -121,7 +139,7 @@ val append_user_message :
     tool lines belonging to them (absolute bound 400 lines). Missing
     files return [[]]. Unparseable lines are skipped. *)
 val load :
-  base_dir:string -> keeper_name:string -> chat_message list
+  base_dir:string -> keeper_name:string -> ?role_filter:role_filter -> unit -> chat_message list
 
 type page = { messages : chat_message list; has_more : bool }
 
@@ -135,7 +153,7 @@ type page = { messages : chat_message list; has_more : bool }
     Legacy rows without [ts] are unreachable through paging (the tail
     window still serves them). *)
 val load_page :
-  base_dir:string -> keeper_name:string -> ?before:float -> unit -> page
+  base_dir:string -> keeper_name:string -> ?before:float -> ?role_filter:role_filter -> unit -> page
 
 (** {1 Serialisation} *)
 

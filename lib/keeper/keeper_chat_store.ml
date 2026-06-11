@@ -13,6 +13,34 @@
 
     @since 2.145.0 *)
 
+(* ─── Role type ─────────────────────────────────────────────────── *)
+
+type role = User | Assistant | Tool
+
+let role_to_string : role -> string = function
+  | User -> "user"
+  | Assistant -> "assistant"
+  | Tool -> "tool"
+
+let role_of_string (s : string) : role option =
+  match s with
+  | "user" -> Some User
+  | "assistant" -> Some Assistant
+  | "tool" -> Some Tool
+  | _ -> None
+
+(* ─── Role filter ──────────────────────────────────────────────── *)
+
+type role_filter = AllRoles | Roles of role list
+
+let role_filter_matches (filter : role_filter) (msg_role : string) : bool =
+  match filter with
+  | AllRoles -> true
+  | Roles rs ->
+    match role_of_string msg_role with
+    | Some r -> List.mem r rs
+    | None -> false
+
 let sanitize_name name =
   Workspace_utils_backend_setup.sanitize_namespace_segment name
 
@@ -430,7 +458,7 @@ let find_cut ~path ~size ~before : int =
   done;
   !hi
 
-let load_page ~base_dir ~keeper_name ?before () : page =
+let load_page ~base_dir ~keeper_name ?before ?(role_filter = AllRoles) () : page =
   let path = chat_path ~base_dir ~keeper_name in
   if not (Sys.file_exists path) then { messages = []; has_more = false }
   else
@@ -463,7 +491,7 @@ let load_page ~base_dir ~keeper_name ?before () : page =
         let trimmed = String.trim line in
         if trimmed <> "" then
           match parse_line ~file_path:path trimmed with
-          | Some msg when keep msg ->
+          | Some msg when keep msg && role_filter_matches role_filter msg.role ->
               Queue.push msg q;
               if not (is_tool_message msg) then incr primary_count;
               while
@@ -498,8 +526,8 @@ let load_page ~base_dir ~keeper_name ?before () : page =
         (sanitize_name keeper_name) (Printexc.to_string exn);
       { messages = []; has_more = false }
 
-let load ~base_dir ~keeper_name : chat_message list =
-  (load_page ~base_dir ~keeper_name ()).messages
+let load ~base_dir ~keeper_name ?role_filter () : chat_message list =
+  (load_page ~base_dir ~keeper_name ?role_filter ()).messages
 
 let to_json_array (messages : chat_message list) : Yojson.Safe.t =
   `List

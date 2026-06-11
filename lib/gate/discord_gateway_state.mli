@@ -75,6 +75,9 @@ type dispatched_event =
       }
   | Message_create of
       { channel_id : string
+      ; guild_id : string option
+        (** Guild snowflake when Discord includes one. Direct messages and
+            some partial payloads omit it. *)
       ; message_id : string
       ; author_id : string
       ; author_name : string option

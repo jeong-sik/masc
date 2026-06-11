@@ -109,11 +109,91 @@ let with_response_wait_typing_indicator ~clock ~channel_id f =
         finish ();
         raise exn)
 
+let discord_conversation_id ~guild_id ~channel_id =
+  let guild_label =
+    match guild_id with
+    | Some guild_id when not (String.equal (String.trim guild_id) "") ->
+        guild_id
+    | Some _ | None -> "dm"
+  in
+  Printf.sprintf "discord:%s:channel:%s" guild_label channel_id
+
+let discord_attention_surface ~guild_id ~channel_id =
+  Keeper_external_attention.Discord
+    { guild_id; channel_id; parent_channel_id = None; thread_id = None }
+
+let optional_metadata key = function
+  | Some value when not (String.equal (String.trim value) "") ->
+      [ key, value ]
+  | Some _ | None -> []
+
+let record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id
+      ~message_id ~author_id ~author_name ~content ~mentions_bot ~route ~urgency
+  =
+  let surface = discord_attention_surface ~guild_id ~channel_id in
+  let conversation_id = discord_conversation_id ~guild_id ~channel_id in
+  let dedupe_key =
+    Printf.sprintf "discord:%s:%s" conversation_id message_id
+  in
+  let event_id = Keeper_external_attention.event_id_of_dedupe_key dedupe_key in
+  let item : Keeper_external_attention.item =
+    { event_id
+    ; dedupe_key
+    ; keeper_name
+    ; conversation = { conversation_id; surface }
+    ; external_message =
+        Some { surface; message_id; reply_to_message_id = None }
+    ; source_label = State.channel
+    ; actor =
+        { actor_id = Some author_id
+        ; display_name = author_name
+        ; authority = Keeper_chat_store.External
+        }
+    ; urgency
+    ; content_preview = content
+    ; content_ref = None
+    ; received_at =
+        Unix.gettimeofday ()
+        (* NDT-OK: Discord ingress wall-clock timestamp. The value is
+           persisted as event evidence and for pending-order projection;
+           it does not branch deterministic policy. *)
+    ; metadata =
+        [ "route", route
+        ; "mentions_bot", string_of_bool mentions_bot
+        ; "discord_channel_id", channel_id
+        ]
+        @ optional_metadata "discord_guild_id" guild_id
+    }
+  in
+  match Keeper_external_attention.record ~base_path:base_dir item with
+  | `Recorded -> Some event_id
+  | `Duplicate item -> Some item.event_id
+  | `Error error ->
+      Log.Server.warn
+        "discord external attention record failed (channel=%s keeper=%s): %s"
+        channel_id keeper_name error;
+      None
+
+let mark_attention_resolved ~base_dir ~keeper_name ~event_id ~reason =
+  match
+    Keeper_external_attention.mark_resolved
+      ~base_path:base_dir
+      ~keeper_name
+      ~event_ids:[ event_id ]
+      ~reason
+      ()
+  with
+  | Ok () -> ()
+  | Error error ->
+      Log.Server.warn
+        "discord external attention resolve failed (keeper=%s event=%s): %s"
+        keeper_name event_id error
+
 let handle_message_create ~dispatch
-      ~clock
-      ~(channel_id : string) ~(message_id : string)
+      ~clock ~base_dir
+      ~(channel_id : string) ~(guild_id : string option) ~(message_id : string)
       ~(author_id : string) ~(author_name : string option)
-      ~(content : string) =
+      ~(content : string) ~(mentions_bot : bool) =
   match State.keeper_for_channel ~channel_id with
   | None ->
     (* No binding for this channel — drop quietly. The bot may be in
@@ -122,6 +202,18 @@ let handle_message_create ~dispatch
       Discord_observability.Dropped_unbound;
     ()
   | Some keeper_name ->
+    let urgency =
+      if mentions_bot then Keeper_external_attention.Mention
+      else
+        match guild_id with
+        | None -> Keeper_external_attention.Direct_message
+        | Some _ -> Keeper_external_attention.Ambient
+    in
+    let attention_event_id =
+      record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id
+        ~message_id ~author_id ~author_name ~content ~mentions_bot
+        ~route:"triggered" ~urgency
+    in
     let msg : Channel_gate.inbound_message =
       { channel = State.channel
       ; channel_user_id = author_id
@@ -149,6 +241,11 @@ let handle_message_create ~dispatch
          (Channel_gate.gate_error_to_string gate_err)
      | Ok out ->
        if String.equal out.content "" then begin
+         (match attention_event_id with
+          | Some event_id ->
+              mark_attention_resolved ~base_dir ~keeper_name ~event_id
+                ~reason:"discord_empty_reply"
+          | None -> ());
          Discord_observability.record_inbound_dispatch
            Discord_observability.Empty_reply;
          Discord_observability.record_reply Discord_observability.Reply_empty
@@ -156,6 +253,11 @@ let handle_message_create ~dispatch
        else
          (match State.send_message ~channel_id ~content:out.content ~reply_to_message_id:message_id () with
           | Ok _ ->
+            (match attention_event_id with
+             | Some event_id ->
+                 mark_attention_resolved ~base_dir ~keeper_name ~event_id
+                   ~reason:"discord_reply_sent"
+             | None -> ());
             Discord_observability.record_inbound_dispatch
               Discord_observability.Reply_sent;
             Discord_observability.record_reply
@@ -169,18 +271,18 @@ let handle_message_create ~dispatch
               channel_id
               (Format.asprintf "%a" State.pp_send_error e)))
 
-let on_event ~dispatch ~clock (ev : Gw.gateway_event) =
+let on_event ~dispatch ~clock ~base_dir (ev : Gw.gateway_event) =
   match ev with
   | Gw.Ready { bot_user_id; _ } ->
     State.record_ready ~bot_user_id;
     Log.Server.info "Discord gateway READY (bot_user_id=%s)" bot_user_id
   | Gw.Message_create
-      { channel_id; message_id; author_id; author_name; content;
-        mentions_bot = _ } ->
+      { channel_id; guild_id; message_id; author_id; author_name; content;
+        mentions_bot } ->
     (* mentions_bot is already enforced by the trigger policy at the
        gateway-state layer; nothing extra to check here. *)
-    handle_message_create ~dispatch ~clock ~channel_id ~message_id ~author_id
-      ~author_name ~content
+    handle_message_create ~dispatch ~clock ~base_dir ~channel_id ~guild_id
+      ~message_id ~author_id ~author_name ~content ~mentions_bot
   | Gw.Reaction_add _ ->
     (* The previous Python sidecar used a configurable emoji
        trigger to drain pending messages. That feature is dropped in
@@ -194,8 +296,8 @@ let on_event ~dispatch ~clock (ev : Gw.gateway_event) =
    a single user line — no dispatch, no turn. Unbound channels drop, as
    on the dispatch path. *)
 let handle_ambient ~base_dir
-      ~(channel_id : string) ~(author_id : string)
-      ~(author_name : string option) ~(content : string) =
+      ~(channel_id : string) ~(guild_id : string option) ~(message_id : string)
+      ~(author_id : string) ~(author_name : string option) ~(content : string) =
   match State.keeper_for_channel ~channel_id with
   | None ->
     Discord_observability.record_ambient
@@ -213,6 +315,12 @@ let handle_ambient ~base_dir
       Discord_observability.record_ambient
         Discord_observability.Ambient_dropped_too_long
     else begin
+      let (_ : string option) =
+        record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id
+          ~message_id ~author_id ~author_name ~content:trimmed
+          ~mentions_bot:false ~route:"ambient"
+          ~urgency:Keeper_external_attention.Ambient
+      in
       Keeper_chat_store.append_user_message
         ~base_dir ~keeper_name ~content:trimmed
         ~source:State.channel
@@ -229,8 +337,11 @@ let handle_ambient ~base_dir
 
 let on_ambient ~base_dir (ev : Gw.gateway_event) =
   match ev with
-  | Gw.Message_create { channel_id; author_id; author_name; content; _ } ->
-    handle_ambient ~base_dir ~channel_id ~author_id ~author_name ~content
+  | Gw.Message_create
+      { channel_id; guild_id; message_id; author_id; author_name; content; _ }
+    ->
+    handle_ambient ~base_dir ~channel_id ~guild_id ~message_id ~author_id
+      ~author_name ~content
   | Gw.Ready _ | Gw.Reaction_add _ | Gw.Ignored _ -> ()
 
 (* ---------------------------------------------------------------- *)
@@ -267,7 +378,14 @@ let start ~sw ~env ~clock ~state =
           ~sw ~env ~token
           ~intents:default_intents
           ~trigger_policy:policy
-          ~on_event:(on_event ~dispatch ~clock)
+          ~on_event:(fun ev ->
+            (* Read base_path per event: [workspace_config] is mutable
+               (workspace-switch tools swap it). *)
+            on_event
+              ~dispatch
+              ~clock
+              ~base_dir:state.Mcp_server.workspace_config.base_path
+              ev)
           ~on_ambient:(fun ev ->
             (* Read base_path per event: [workspace_config] is mutable
                (workspace-switch tools swap it). *)

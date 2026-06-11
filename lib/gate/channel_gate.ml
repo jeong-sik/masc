@@ -58,7 +58,10 @@ type dispatch_fn =
 
 let max_content_length () = 4000
 
-let dedup_ttl_sec () = 300.0
+let dedup_ttl_sec () =
+  Env_config_core.get_int ~default:3600 "MASC_CHANNEL_GATE_DEDUP_TTL_SEC"
+  |> max 1
+  |> float_of_int
 
 (* ── Deduplication (TTL hashtable, Eio-guarded mutex) ───────── *)
 

@@ -7,13 +7,29 @@ Rules (checked for every non-skipped PR that touches lib/):
 - added_lib_lines > 10 && test_files == 0 -> warn (enforced)
 - lib_changed_files > 3 && test_files == 0 -> warn (enforced)
 
-Note: Branch skip (chore/, docs/) and PR body opt-out (# ci:skip-test-coverage)
-are handled by the GitHub Actions workflow-level if: guard, not in this script.
+Opt-out mechanisms (checked in order):
+1. Branch name contains "ci-skip" — workflow if: guard
+2. PR body contains "# ci:skip-test-coverage" — workflow if: guard + script defense-in-depth
+3. Commit message contains "# ci:skip-test-coverage" — script-level check
 """
 
 import os
 import subprocess
 import sys
+
+
+def is_opt_out_commit():
+    """Check if the latest commit message contains opt-out marker."""
+    try:
+        result = subprocess.run(
+            ["git", "log", "-1", "--format=%s%n%b"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return "# ci:skip-test-coverage" in result.stdout.lower()
+    except subprocess.CalledProcessError:
+        return False
 
 
 def get_changed_lib_files():
@@ -77,6 +93,18 @@ def get_added_lines_count(lib_files):
 
 
 def check_coverage():
+    # Defense-in-depth: check PR_BODY for opt-out
+    # (also guarded by workflow-level if:, but this catches edge cases)
+    pr_body = os.environ.get("PR_BODY", "")
+    if "# ci:skip-test-coverage" in pr_body.lower():
+        print("Skipped: opt-out via PR body")
+        sys.exit(0)
+
+    # Check commit message for opt-out
+    if is_opt_out_commit():
+        print("Skipped: opt-out via commit message")
+        sys.exit(0)
+
     lib_files = get_changed_lib_files()
     test_files = get_changed_test_files()
     added_lines = get_added_lines_count(lib_files)

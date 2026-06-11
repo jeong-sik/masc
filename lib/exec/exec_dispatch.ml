@@ -223,20 +223,18 @@ let dispatch_simple ?stdin_content ?on_output_chunk (s : Shell_ir.simple) =
        | status, stdout, stderr ->
          apply_redirect_plan redirect_plan { status; stdout; stderr })
     | Docker { runner; _ } ->
-    (* WORKAROUND: Docker sandbox runner does not expose chunk callbacks yet;
-       the callback, if provided, receives the full captured output after
-       completion.  근본 해결: extend the Docker runner contract with
-       ~on_stdout_chunk/~on_stderr_chunk. *)
-    (match runner ~stdin_content ~argv ~env ~cwd with
+    let on_stdout_chunk, on_stderr_chunk =
+      match on_output_chunk with
+      | None -> None, None
+      | Some on_chunk ->
+        ( Some (fun chunk -> on_chunk (`Stdout chunk))
+        , Some (fun chunk -> on_chunk (`Stderr chunk)) )
+    in
+    (match runner ~on_stdout_chunk ~on_stderr_chunk ~stdin_content ~argv ~env ~cwd with
      | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
      | exception exn ->
        { status = Unix.WEXITED 1; stdout = ""; stderr = Printexc.to_string exn }
      | status, stdout, stderr ->
-       (match on_output_chunk with
-        | None -> ()
-        | Some on_chunk ->
-          on_chunk (`Stdout stdout);
-          on_chunk (`Stderr stderr));
        apply_redirect_plan redirect_plan { status; stdout; stderr }))
 
 (* --- pipeline + entry point (mutually recursive) --- *)
@@ -324,8 +322,17 @@ let rec dispatch_pipeline ?stdin_content ?on_output_chunk stages =
          | None -> (
              match docker_pipeline_specs stages with
              | Some (runner, specs) ->
-                 let status, stdout, stderr = runner ~stages:specs in
-                 ({ status; stdout; stderr }, false)
+                 let on_stdout_chunk, on_stderr_chunk =
+                   match on_output_chunk with
+                   | None -> None, None
+                   | Some on_chunk ->
+                       ( Some (fun chunk -> on_chunk (`Stdout chunk))
+                       , Some (fun chunk -> on_chunk (`Stderr chunk)) )
+                 in
+                 let status, stdout, stderr =
+                   runner ~on_stdout_chunk ~on_stderr_chunk ~stages:specs
+                 in
+                 ({ status; stdout; stderr }, Option.is_some on_output_chunk)
              | None ->
                  let rec chain ~prev_stdout ~status ~stderr = function
                    | [] -> { status; stdout = prev_stdout; stderr }

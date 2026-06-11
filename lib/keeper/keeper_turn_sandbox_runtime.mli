@@ -41,6 +41,8 @@ val run_command_with_status :
 
 val run_exec_with_status :
   ?stdin_content:string ->
+  ?on_stdout_chunk:(string -> unit) ->
+  ?on_stderr_chunk:(string -> unit) ->
   timeout_sec:float ->
   t ->
   cwd:string ->
@@ -56,6 +58,8 @@ type exec_pipeline_stage = {
 }
 
 val run_exec_pipeline_with_status :
+  ?on_stdout_chunk:(string -> unit) ->
+  ?on_stderr_chunk:(string -> unit) ->
   timeout_sec:float ->
   t ->
   cwd:string ->

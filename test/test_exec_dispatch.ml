@@ -248,7 +248,7 @@ let () =
   let a_bin = Masc_exec.Exec_program.of_string "a" |> Result.get_ok in
   let b_bin = Masc_exec.Exec_program.of_string "b" |> Result.get_ok in
   let c_bin = Masc_exec.Exec_program.of_string "c" |> Result.get_ok in
-  let mock_runner ~stdin_content ~argv ~env:_ ~cwd:_ =
+  let mock_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content ~argv ~env:_ ~cwd:_ =
     match argv, stdin_content with
     | [ "a" ], None -> Unix.WEXITED 7, "a-out", "a-err;"
     | [ "b" ], Some "a-out" -> Unix.WEXITED 0, "b-out", "b-err;"
@@ -355,7 +355,7 @@ let () =
   let runner_argv = ref [] in
   let runner_env = ref [||] in
   let runner_cwd = ref (Some "should_be_none") in
-  let mock_runner ~stdin_content:_ ~argv ~env ~cwd =
+  let mock_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content:_ ~argv ~env ~cwd =
     runner_called := true;
     runner_argv := argv;
     runner_env := env;
@@ -397,7 +397,7 @@ let () =
   let dev_null =
     Masc_exec.Path_scope.classify ~raw:"/dev/null" ~cwd:"/tmp"
   in
-  let mock_runner ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ =
+  let mock_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ =
     Unix.WEXITED 0, "stdout", "stderr"
   in
   let docker_sandbox =
@@ -430,7 +430,7 @@ let () =
   let dev_null =
     Masc_exec.Path_scope.classify ~raw:"/dev/null" ~cwd:"/tmp"
   in
-  let mock_runner ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ =
+  let mock_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ =
     Unix.WEXITED 0, "stdout", "stderr"
   in
   let docker_sandbox =
@@ -465,7 +465,7 @@ let () =
   let unsupported_target =
     Masc_exec.Path_scope.classify ~raw:"/tmp/exec-dispatch-out" ~cwd:"/tmp"
   in
-  let mock_runner ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ =
+  let mock_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ =
     runner_called := true;
     Unix.WEXITED 0, "stdout", "stderr"
   in
@@ -504,7 +504,7 @@ let () =
   let printf_bin = Masc_exec.Exec_program.of_string "printf" |> Result.get_ok in
   let wc_bin = Masc_exec.Exec_program.of_string "wc" |> Result.get_ok in
   let runner_calls = ref [] in
-  let mock_runner ~stdin_content ~argv ~env:_ ~cwd =
+  let mock_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content ~argv ~env:_ ~cwd =
     runner_calls := (argv, cwd, stdin_content) :: !runner_calls;
     match argv, stdin_content with
     | [ "printf"; "typed" ], None -> Unix.WEXITED 0, "typed", ""
@@ -557,7 +557,7 @@ let () =
   let slow_bin = Masc_exec.Exec_program.of_string "slow" |> Result.get_ok in
   let next_bin = Masc_exec.Exec_program.of_string "next" |> Result.get_ok in
   let runner_calls = ref [] in
-  let mock_runner ~stdin_content ~argv ~env:_ ~cwd:_ =
+  let mock_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content ~argv ~env:_ ~cwd:_ =
     runner_calls := (argv, stdin_content) :: !runner_calls;
     match argv, stdin_content with
     | [ "slow" ], None ->
@@ -599,11 +599,11 @@ let () =
   let wc_bin = Masc_exec.Exec_program.of_string "wc" |> Result.get_ok in
   let simple_runner_called = ref false in
   let pipeline_runner_calls = ref [] in
-  let simple_runner ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ =
+  let simple_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ =
     simple_runner_called := true;
     Unix.WEXITED 3, "", "simple runner should not be used"
   in
-  let pipeline_runner ~stages =
+  let pipeline_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stages =
     pipeline_runner_calls := stages :: !pipeline_runner_calls;
     Unix.WEXITED 0, "5\n", "pipeline-stderr"
   in
@@ -662,23 +662,23 @@ let () =
   let second_simple_calls = ref [] in
   let first_pipeline_called = ref false in
   let second_pipeline_called = ref false in
-  let first_simple_runner ~stdin_content ~argv ~env:_ ~cwd:_ =
+  let first_simple_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content ~argv ~env:_ ~cwd:_ =
     first_simple_calls := (argv, stdin_content) :: !first_simple_calls;
     match argv, stdin_content with
     | [ "printf"; "typed" ], None -> Unix.WEXITED 0, "typed", ""
     | _ -> Unix.WEXITED 2, "", "unexpected first runner call"
   in
-  let second_simple_runner ~stdin_content ~argv ~env:_ ~cwd:_ =
+  let second_simple_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content ~argv ~env:_ ~cwd:_ =
     second_simple_calls := (argv, stdin_content) :: !second_simple_calls;
     match argv, stdin_content with
     | [ "wc"; "-c" ], Some "typed" -> Unix.WEXITED 0, "5\n", ""
     | _ -> Unix.WEXITED 2, "", "unexpected second runner call"
   in
-  let first_pipeline_runner ~stages:_ =
+  let first_pipeline_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stages:_ =
     first_pipeline_called := true;
     Unix.WEXITED 3, "", "first pipeline runner should not be used"
   in
-  let second_pipeline_runner ~stages:_ =
+  let second_pipeline_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stages:_ =
     second_pipeline_called := true;
     Unix.WEXITED 3, "", "second pipeline runner should not be used"
   in
@@ -736,14 +736,14 @@ let () =
   in
   let simple_runner_calls = ref [] in
   let pipeline_runner_called = ref false in
-  let simple_runner ~stdin_content ~argv ~env:_ ~cwd:_ =
+  let simple_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content ~argv ~env:_ ~cwd:_ =
     simple_runner_calls := (argv, stdin_content) :: !simple_runner_calls;
     match argv, stdin_content with
     | [ "printf"; "typed" ], None -> Unix.WEXITED 0, "typed", "hidden"
     | [ "wc"; "-c" ], Some "typed" -> Unix.WEXITED 0, "5\n", ""
     | _ -> Unix.WEXITED 2, "", "unexpected mock runner call"
   in
-  let pipeline_runner ~stages:_ =
+  let pipeline_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stages:_ =
     pipeline_runner_called := true;
     Unix.WEXITED 3, "", "pipeline runner should not be used for redirects"
   in
@@ -795,7 +795,7 @@ let () =
   with_eio @@ fun () ->
   let open Masc_exec.Shell_ir in
   let bin = Masc_exec.Exec_program.of_string "echo" |> Result.get_ok in
-  let mock_runner ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ =
+  let mock_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ =
     failwith "mock docker failure"
   in
   let docker_sandbox =

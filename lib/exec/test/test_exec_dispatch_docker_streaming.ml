@@ -1,0 +1,118 @@
+let lit s = Masc_exec.Shell_ir.Lit (s, Masc_exec.Shell_ir.default_meta)
+
+let fail msg = raise (Failure msg)
+
+let bin s =
+  match Masc_exec.Exec_program.of_string s with
+  | Ok bin -> bin
+  | Error (`Unknown name) -> fail ("unknown exec program: " ^ name)
+
+let simple ?sandbox executable args =
+  let open Masc_exec.Shell_ir in
+  { bin = bin executable
+  ; args = List.map lit args
+  ; env = []
+  ; cwd = None
+  ; redirects = []
+  ; sandbox = Option.value sandbox ~default:(Masc_exec.Sandbox_target.host ())
+  }
+
+let assert_live_first_callback ~label ~first_stdout_at ~elapsed =
+  match !first_stdout_at with
+  | None -> fail (label ^ ": expected live stdout callback")
+  | Some t ->
+      if not (t < elapsed -. 0.12) then
+        fail
+          (Printf.sprintf
+             "%s: expected first stdout callback before dispatch completion \
+              (first=%.3fs elapsed=%.3fs)"
+             label t elapsed)
+
+let test_docker_simple_runner_callback_is_live () =
+  (* NDT-OK: this regression asserts callback ordering across dispatch. *)
+  let start = Unix.gettimeofday () in
+  let first_stdout_at = ref None in
+  let stdout_chunks = ref [] in
+  let stderr_chunks = ref [] in
+  let on_output_chunk = function
+    | `Stdout chunk ->
+        if Option.is_none !first_stdout_at then
+          (* NDT-OK: record callback arrival time relative to dispatch start. *)
+          first_stdout_at := Some (Unix.gettimeofday () -. start);
+        stdout_chunks := chunk :: !stdout_chunks
+    | `Stderr chunk -> stderr_chunks := chunk :: !stderr_chunks
+  in
+  let runner ~on_stdout_chunk ~on_stderr_chunk ~stdin_content ~argv ~env:_ ~cwd:_ =
+    assert (stdin_content = None);
+    assert (argv = [ "printf"; "ignored" ]);
+    Option.iter (fun f -> f "first") on_stdout_chunk;
+    Unix.sleepf 0.30;
+    Option.iter (fun f -> f "second") on_stdout_chunk;
+    Option.iter (fun f -> f "err") on_stderr_chunk;
+    Unix.WEXITED 0, "firstsecond", "err"
+  in
+  let docker_sandbox =
+    Masc_exec.Sandbox_target.docker ~image:"fake-docker" ~runner ()
+  in
+  let result =
+    Masc_exec.Exec_dispatch.dispatch_simple
+      ~on_output_chunk
+      (simple ~sandbox:docker_sandbox "printf" [ "ignored" ])
+  in
+  (* NDT-OK: compare dispatch completion time to first callback arrival. *)
+  let elapsed = Unix.gettimeofday () -. start in
+  assert (result.status = Unix.WEXITED 0);
+  assert (result.stdout = "firstsecond");
+  assert (result.stderr = "err");
+  assert (String.concat "" (List.rev !stdout_chunks) = "firstsecond");
+  assert (String.concat "" (List.rev !stderr_chunks) = "err");
+  assert_live_first_callback ~label:"docker simple" ~first_stdout_at ~elapsed
+
+let test_docker_pipeline_runner_callback_is_live () =
+  (* NDT-OK: this regression asserts callback ordering across dispatch. *)
+  let start = Unix.gettimeofday () in
+  let first_stdout_at = ref None in
+  let stdout_chunks = ref [] in
+  let on_output_chunk = function
+    | `Stdout chunk ->
+        if Option.is_none !first_stdout_at then
+          (* NDT-OK: record callback arrival time relative to dispatch start. *)
+          first_stdout_at := Some (Unix.gettimeofday () -. start);
+        stdout_chunks := chunk :: !stdout_chunks
+    | `Stderr _ -> ()
+  in
+  let runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ =
+    Unix.WEXITED 9, "", "simple runner should not be used"
+  in
+  let pipeline_runner ~on_stdout_chunk ~on_stderr_chunk:_ ~stages =
+    assert (List.length stages = 2);
+    Option.iter (fun f -> f "pipe-first") on_stdout_chunk;
+    Unix.sleepf 0.30;
+    Option.iter (fun f -> f "pipe-second") on_stdout_chunk;
+    Unix.WEXITED 0, "pipe-firstpipe-second", ""
+  in
+  let docker_sandbox =
+    Masc_exec.Sandbox_target.docker
+      ~image:"fake-docker"
+      ~runner
+      ~pipeline_runner
+      ()
+  in
+  let result =
+    Masc_exec.Exec_dispatch.dispatch_pipeline
+      ~on_output_chunk
+      [ Masc_exec.Shell_ir.Simple (simple ~sandbox:docker_sandbox "printf" [ "x" ])
+      ; Masc_exec.Shell_ir.Simple (simple ~sandbox:docker_sandbox "wc" [ "-c" ])
+      ]
+  in
+  (* NDT-OK: compare dispatch completion time to first callback arrival. *)
+  let elapsed = Unix.gettimeofday () -. start in
+  assert (result.status = Unix.WEXITED 0);
+  assert (result.stdout = "pipe-firstpipe-second");
+  assert (String.concat "" (List.rev !stdout_chunks) = "pipe-firstpipe-second");
+  assert_live_first_callback ~label:"docker pipeline" ~first_stdout_at ~elapsed
+
+let () =
+  test_docker_simple_runner_callback_is_live ();
+  test_docker_pipeline_runner_callback_is_live ();
+  print_endline "exec_dispatch_docker_streaming: ok"

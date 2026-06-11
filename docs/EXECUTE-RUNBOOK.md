@@ -79,8 +79,9 @@ instead of embedding `|` in a string. For read-only observation prefer
 
 ## Output Streaming
 
-The host native pipeline and host simple typed-stdin routes forward
-`on_output_chunk` while the process is still running. The concrete routes are:
+The host native pipeline, host simple typed-stdin, and Docker runner contract
+routes forward `on_output_chunk` while the process is still running. The
+concrete host routes are:
 
 ```text
 Exec_dispatch.dispatch_pipeline
@@ -97,8 +98,10 @@ stderr pipe as chunks are read. Intermediate stdout remains process-to-process
 pipe data and is not surfaced as user output. Simple host typed-stdin callbacks
 are emitted from that command's stdout/stderr pipes as chunks are read.
 
-Docker execution and decomposed fallback paths still emit captured output after
-completion.
+Docker Shell IR targets receive the same stdout/stderr callback contract through
+`Sandbox_target.runner` and `Sandbox_target.pipeline_runner`; the keeper Docker
+adapter forwards those callbacks to the underlying `docker exec` process drain.
+Decomposed fallback pipeline paths still emit captured output after completion.
 
 Verification:
 
@@ -107,6 +110,8 @@ scripts/dune-local.sh build lib/exec/test/test_exec_dispatch_pipeline_streaming.
 ./_build/default/lib/exec/test/test_exec_dispatch_pipeline_streaming.exe
 scripts/dune-local.sh build lib/exec/test/test_exec_dispatch_stdin_streaming.exe
 ./_build/default/lib/exec/test/test_exec_dispatch_stdin_streaming.exe
+scripts/dune-local.sh build lib/exec/test/test_exec_dispatch_docker_streaming.exe
+./_build/default/lib/exec/test/test_exec_dispatch_docker_streaming.exe
 ```
 
 ## Async Boundary Proof

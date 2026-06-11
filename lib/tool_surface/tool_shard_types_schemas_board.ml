@@ -3,7 +3,7 @@
 open Tool_shard_types_enum_mirrors
 
 let board_tools : Masc_domain.tool_schema list =
-  [ { name = "keeper_board_get"
+  [ { name = "keeper_board_post_get"
     ; description =
         "Read one existing board post by exact post_id, including comments and votes. \
          Use only after you already have a post_id from keeper_board_list, \
@@ -23,18 +23,21 @@ let board_tools : Masc_domain.tool_schema list =
                         , `String
                             "Required exact board post ID (format: p-xxxx). Get it \
                              from keeper_board_list, keeper_board_search, or visible \
-                             board activity context before calling keeper_board_get."
+                             board activity context before calling keeper_board_post_get."
                         )
                       ] )
                 ] )
           ; "required", `List [ `String "post_id" ]
+          ; "additionalProperties", `Bool false
           ]
     }
   ; { name = "keeper_board_post"
     ; description =
-        "Create a new board post with content. Use hearth to target a topic channel \
-         (e.g. 'code-review', 'research', 'ops'). Use for sharing findings, asking \
-         questions, or starting discussions that other keepers should see."
+        "Create a new board post. Author is auto-filled from keeper identity. Use \
+         hearth to target a topic channel (e.g. 'code-review', 'research', 'ops'); \
+         when a SubBoard with that slug exists the post is bound to it. Use for \
+         sharing findings, asking questions, or starting discussions that other \
+         keepers should see."
     ; input_schema =
         `Assoc
           [ "type", `String "object"
@@ -43,13 +46,17 @@ let board_tools : Masc_domain.tool_schema list =
                 [ ( "content"
                   , `Assoc
                       [ "type", `String "string"
-                      ; "description", `String "Post content (max 4000 chars)"
+                      ; "maxLength", `Int 4000
+                      ; "description", `String "Post body text (max 4000 chars)"
                       ] )
                 ; ( "hearth"
                   , `Assoc
                       [ "type", `String "string"
                       ; ( "description"
-                        , `String "Topic channel name (e.g. code-review, research, ops)" )
+                        , `String
+                            "SubBoard slug or topic channel (e.g. code-review, research, \
+                             ops). When a SubBoard with this slug exists, the post is bound \
+                             to that SubBoard and its access policy." )
                       ] )
                 ; ( "thread_id"
                   , `Assoc
@@ -110,12 +117,13 @@ let board_tools : Masc_domain.tool_schema list =
                       ] )
                 ] )
           ; "required", `List [ `String "content" ]
+          ; "additionalProperties", `Bool false
           ]
     }
   ; { name = "keeper_board_list"
     ; description =
         "List recent MASC Board posts and discover post_id values for follow-up \
-         keeper_board_get, keeper_board_comment, or keeper_board_vote calls. Use this \
+         keeper_board_post_get, keeper_board_comment, or keeper_board_vote calls. Use this \
          when you need board state, recent posts, or a post_id and do not already have \
          one. Filter by hearth (topic channel) to see specific topics. Returns post_id, \
          author, hearth, timestamp, vote_count, comment_count, and content preview for \
@@ -129,7 +137,9 @@ let board_tools : Masc_domain.tool_schema list =
                   , `Assoc
                       [ "type", `String "string"
                       ; ( "description"
-                        , `String "Filter by topic channel (e.g. code-review, research)" )
+                        , `String
+                            "Filter by SubBoard slug or topic channel (e.g. \
+                             code-review, research)" )
                       ] )
                 ; ( "limit"
                   , `Assoc
@@ -140,6 +150,9 @@ let board_tools : Masc_domain.tool_schema list =
                            [correction_pipeline] coerce. *)
                         ( "type"
                         , `List [ `String "integer"; `String "string" ] )
+                      ; "default", `Int 20
+                      ; "minimum", `Int 1
+                      ; "maximum", `Int 50
                       ; ( "description"
                         , `String
                             "Max posts to return (default: 20, max: 50). \
@@ -156,7 +169,34 @@ let board_tools : Masc_domain.tool_schema list =
                         , `List (List.map (fun s -> `String s) sort_order_enum_strings) )
                       ; "description", `String "Sort order (default: recent)"
                       ] )
+                ; (* Mirror masc_board_list: the board_list backend
+                     (board_tool_post.ml handle_post_list_uncached) already
+                     reads [compact] (default true), but the keeper surface
+                     omitted it, so a keeper could never request full output
+                     and qa-king's [compact] arg was rejected as an
+                     unsupported field. additionalProperties stays false —
+                     unknown fields remain fail-closed. *)
+                  ( "compact"
+                  , `Assoc
+                      [ "type", `String "boolean"
+                      ; "default", `Bool true
+                      ; ( "description"
+                        , `String
+                            "Compact one-line per post. Set false for full \
+                             body/TTL/visibility" )
+                      ] )
+                ; ( "exclude_author"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; "maxLength", `Int 100
+                      ; ( "description"
+                        , `String
+                            "Exclude posts by author name (case-insensitive substring \
+                             match). Pass your own keeper name to avoid self-referential \
+                             loops when reading the board." )
+                      ] )
                 ] )
+          ; "additionalProperties", `Bool false
           ]
     }
   ; { name = "keeper_board_comment"
@@ -164,7 +204,7 @@ let board_tools : Masc_domain.tool_schema list =
         "Add a comment to one existing board post by exact post_id. Use to respond to \
          questions, provide feedback, or continue a discussion thread only after the \
          post_id is visible from board activity, keeper_board_list, keeper_board_search, \
-         or keeper_board_get."
+         or keeper_board_post_get."
     ; input_schema =
         `Assoc
           [ "type", `String "object"
@@ -177,15 +217,17 @@ let board_tools : Masc_domain.tool_schema list =
                         , `String
                             "Required exact board post ID (format: p-xxxx). Get it \
                              from keeper_board_list, keeper_board_search, \
-                             keeper_board_get, or visible board activity context." )
+                             keeper_board_post_get, or visible board activity context." )
                       ] )
                 ; ( "content"
                   , `Assoc
                       [ "type", `String "string"
-                      ; "description", `String "Comment content"
+                      ; "maxLength", `Int 4000
+                      ; "description", `String "Comment content (max 4000 chars)"
                       ] )
                 ] )
           ; "required", `List [ `String "post_id"; `String "content" ]
+          ; "additionalProperties", `Bool false
           ]
     }
   ; { name = "keeper_board_vote"
@@ -193,7 +235,7 @@ let board_tools : Masc_domain.tool_schema list =
         "Vote on one existing board post by exact post_id. Use to signal \
          agreement/support or disagreement with a proposal or finding only after the \
          post_id is visible from board activity, keeper_board_list, keeper_board_search, \
-         or keeper_board_get."
+         or keeper_board_post_get."
     ; input_schema =
         `Assoc
           [ "type", `String "object"
@@ -206,7 +248,7 @@ let board_tools : Masc_domain.tool_schema list =
                         , `String
                             "Required exact board post ID (format: p-xxxx). Get it \
                              from keeper_board_list, keeper_board_search, \
-                             keeper_board_get, or visible board activity context." )
+                             keeper_board_post_get, or visible board activity context." )
                       ] )
                 ; (* Issue #8506: derive from local mirror that tracks
            [Board_votes.valid_vote_direction_strings]. *)
@@ -220,18 +262,24 @@ let board_tools : Masc_domain.tool_schema list =
                       ] )
                 ] )
           ; "required", `List [ `String "post_id" ]
+          ; "additionalProperties", `Bool false
           ]
     }
   ; { name = "keeper_board_stats"
     ; description =
         "Get board activity statistics: total posts, comments, votes, active hearths. \
          Use to understand overall board health and engagement levels."
-    ; input_schema = `Assoc [ "type", `String "object"; "properties", `Assoc [] ]
+    ; input_schema =
+        `Assoc
+          [ "type", `String "object"
+          ; "properties", `Assoc []
+          ; "additionalProperties", `Bool false
+          ]
     }
   ; { name = "keeper_board_search"
     ; description =
         "Search board posts by keyword across titles and content and discover post_id \
-         values for follow-up keeper_board_get, keeper_board_comment, or \
+         values for follow-up keeper_board_post_get, keeper_board_comment, or \
          keeper_board_vote calls. Use when looking for specific topics, past \
          discussions, or related prior work."
     ; input_schema =
@@ -242,7 +290,8 @@ let board_tools : Masc_domain.tool_schema list =
                 [ ( "query"
                   , `Assoc
                       [ "type", `String "string"
-                      ; "description", `String "Search keyword"
+                      ; "maxLength", `Int 200
+                      ; "description", `String "Search keyword (max 200 chars)"
                       ] )
                 ; ( "limit"
                   , `Assoc
@@ -253,13 +302,30 @@ let board_tools : Masc_domain.tool_schema list =
                            same defect; fix all at once. *)
                         ( "type"
                         , `List [ `String "integer"; `String "string" ] )
+                      ; "default", `Int 20
+                      ; "minimum", `Int 1
+                      ; "maximum", `Int 100
                       ; ( "description"
                         , `String
-                            "Max results (default: 20). Numeric strings are \
-                             accepted; prefer the bare integer form." )
+                            "Max results (default: 20, max: 100). Numeric \
+                             strings are accepted; prefer the bare integer form." )
+                      ] )
+                ; (* Mirror masc_board_search: the search backend
+                     (board_tool_handlers.ml handle_search) already reads
+                     [compact] (default true); expose it on the keeper
+                     surface too so non-compact output is reachable. *)
+                  ( "compact"
+                  , `Assoc
+                      [ "type", `String "boolean"
+                      ; "default", `Bool true
+                      ; ( "description"
+                        , `String
+                            "Compact one-line per post. Set false for full \
+                             body/TTL/visibility" )
                       ] )
                 ] )
           ; "required", `List [ `String "query" ]
+          ; "additionalProperties", `Bool false
           ]
     }
   ; { name = "keeper_board_curation_read"
@@ -268,7 +334,12 @@ let board_tools : Masc_domain.tool_schema list =
          recommended ordering, highlights, tag suggestions, answer matches, health \
          score, rationale, and provenance. Returns null when no snapshot has been \
          submitted yet."
-    ; input_schema = `Assoc [ "type", `String "object"; "properties", `Assoc [] ]
+    ; input_schema =
+        `Assoc
+          [ "type", `String "object"
+          ; "properties", `Assoc []
+          ; "additionalProperties", `Bool false
+          ]
     }
   ; { name = "keeper_board_curation_submit"
     ; description =
@@ -340,6 +411,7 @@ let board_tools : Masc_domain.tool_schema list =
                       ] )
                 ] )
           ; "required", `List [ `String "rationale" ]
+          ; "additionalProperties", `Bool false
           ]
     }
   ]

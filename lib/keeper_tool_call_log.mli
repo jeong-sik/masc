@@ -26,8 +26,16 @@ val consume_truncation_info :
     the pending state. Returns [(0, None)] when no truncation info
     was set (e.g. OAS-internal tool call that bypassed the wrapper). *)
 
+type turn_ctx_cell = Keeper_tool_call_log_context.cell
+(** Per-run turn-context carrier (RFC-0225 §3.3). Created once per
+    [run_turn] invocation and threaded to every context reader of the
+    same run, so concurrent runs of one keeper cannot overwrite each
+    other's attribution. *)
+
+val create_turn_ctx_cell : unit -> turn_ctx_cell
+
 val set_turn_context :
-  keeper_name:string ->
+  cell:turn_ctx_cell ->
   ?agent_name:string ->
   ?lane:string ->
   ?tool_choice:string ->
@@ -49,27 +57,28 @@ val set_turn_context :
   ?runtime_profile:string ->
   unit ->
   unit
-(** [set_turn_context ...] stores the current effective turn policy for
-    subsequent tool-call logs emitted by the keeper during this turn. *)
+(** [set_turn_context ~cell ...] stores the current effective turn policy
+    for subsequent tool-call logs emitted during this run. *)
 
 val get_turn_context :
-  keeper_name:string ->
+  cell:turn_ctx_cell ->
   unit ->string option * string option * bool option * int option * string option * string option * string option * int option * int option * string option * string list option * string option * string option * string option
 (** Returns [(lane, tool_choice, thinking_enabled, thinking_budget, trace_id,
     prompt_fingerprint, session_id, turn, keeper_turn_id, task_id, goal_ids,
     sandbox_profile, network_mode, approval_mode)] for
-    the keeper, or [None] values when no turn context has
+    the run, or [None] values when no turn context has
     been recorded. *)
 
 val runtime_observability_contract_json_for_call :
   keeper_name:string ->
+  cell:turn_ctx_cell ->
   unit ->
   Yojson.Safe.t
-(** [runtime_observability_contract_json_for_call ~keeper_name ()] returns the
-    observability projection from the current turn context. *)
+(** [runtime_observability_contract_json_for_call ~keeper_name ~cell ()]
+    returns the observability projection from the run's turn context. *)
 
 val action_radius_json_for_call :
-  keeper_name:string ->
+  cell:turn_ctx_cell ->
   tool_name:string ->
   input:Yojson.Safe.t ->
   success:bool ->

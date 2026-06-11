@@ -173,3 +173,34 @@ let publish_audit_event ~id ~ts ~actor ~kind ?target ~summary ~severity
     ("payload", payload_json);
   ] in
   masc_publish (Agent_sdk.Event_bus.mk_event (Custom ("masc.audit_event", event_payload)))
+
+(** {1 Runtime Execution Telemetry Events} *)
+
+(** Publish a telemetry event when runtime execution parameters are
+    successfully built during keeper pre-dispatch. The
+    [keeper_telemetry_consumer] observes [Custom("telemetry_event", _)]
+    on the bus and increments [masc_keeper_telemetry_events_consumed_total].
+    Before this publisher existed, the Ok path of
+    [build_runtime_execution] never emitted a telemetry event, so the
+    counter stayed at zero despite successful turn setups. *)
+let publish_runtime_execution_built
+    ~keeper_name
+    ~runtime_id
+    ~max_tokens
+    ~max_context
+    ~effective_budget
+    ~temperature
+    ~generation
+  =
+  let payload = `Assoc [
+    ("keeper_name", `String keeper_name);
+    ("runtime_id", `String runtime_id);
+    ("max_tokens", `Int max_tokens);
+    ("max_context", `Int max_context);
+    ("max_context_resolution", `String (string_of_int effective_budget));
+    ("temperature", `Float temperature);
+    ("generation", `Int generation);
+    ("timestamp", `Float (Time_compat.now ()));
+  ] in
+  masc_publish
+    (Agent_sdk.Event_bus.mk_event (Custom ("telemetry_event", payload)))

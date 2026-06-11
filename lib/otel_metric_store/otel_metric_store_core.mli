@@ -20,12 +20,28 @@ type metric =
   }
 
 val register_counter : name:string -> help:string -> ?labels:label list -> unit -> unit
+
+(** [declare_counter name] registers the unlabeled 0-cell for [name] and
+    returns [name].  Used by metric-name modules
+    ([let metric_x = declare_counter "masc_..."]) so every declared counter
+    exports 0 from process start instead of staying invisible until its
+    first increment — without this, Grafana cannot distinguish "never
+    fired" (healthy) from "not wired" (broken).  Counters only; gauges and
+    histograms have no honest pre-first-sample value and stay lazy. *)
+val declare_counter : string -> string
+
 val register_gauge : name:string -> help:string -> ?labels:label list -> unit -> unit
 val register_histogram : name:string -> help:string -> ?labels:label list -> unit -> unit
 val inc_counter : string -> ?labels:label list -> ?delta:float -> unit -> unit
 val set_gauge : string -> ?labels:label list -> float -> unit
 val inc_gauge : string -> ?labels:label list -> ?delta:float -> unit -> unit
 val dec_gauge : string -> ?labels:label list -> ?delta:float -> unit -> unit
+val register_histogram_buckets : string -> float list -> unit
+(** Register histogram bucket upper bounds for a histogram metric.
+    Once registered, [observe_histogram] will automatically increment
+    the corresponding [name_bucket_total] counters with [le] labels
+    alongside the existing [name_count_total] counter. *)
+
 val observe_histogram : string -> ?labels:label list -> float -> unit
 val get_metric_value : string -> ?labels:label list -> unit -> float option
 val metric_value_or_zero : string -> ?labels:label list -> unit -> float

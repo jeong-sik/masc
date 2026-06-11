@@ -5,7 +5,7 @@
     Called by [mcp_server_eio_call_tool] on tool failure: the
     hint is appended to the error envelope so the agent can pick
     the suggested follow-up tool ([masc_init], [masc_status],
-    [masc_claim_next], …) without round-tripping through the
+    [keeper_task_claim], …) without round-tripping through the
     operator.
 
     Internal helper [contains] (byte-wise substring scan,
@@ -28,7 +28,7 @@ val recovery_hint : string -> string option
       [masc_start(path=…)]
     - "not session-bound" / "bind the session" → [masc_start]
     - "task not found" / ("not found" ∧ "task") → [masc_status]
-    - "already claimed" → [masc_status] / [masc_claim_next]
+    - "already claimed" → [masc_status] / [keeper_task_claim]
     - "no unclaimed tasks" → [masc_add_task]
     - "rate limit" / "too many" → wait + retry (transient)
     - "workspace" ∧ "set" → [masc_start(path=…)]

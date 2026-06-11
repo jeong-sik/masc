@@ -11,8 +11,9 @@
     - the [None / None] forms remain byte-identical to pre-PR-1 output
     - JSON serializer round-trips the optional fields
 
-    Data flow (runtime [Provider_error.ServerError] → these fields) is
-    PR-2 scope; PR-1 only ships the typed carrier. *)
+    The runtime-error → these-fields data flow was never wired; the dead
+    [Core.Provider_error] carrier it would have used has since been removed.
+    This test only covers the typed carrier itself. *)
 
 open Alcotest
 

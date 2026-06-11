@@ -149,17 +149,15 @@ let test_cycle_pauses_on_skip_idle () =
 
 let test_visibility_gate_delays_unobserved_idle_emit () =
   let now = 1_000.0 in
-  match
+  let decision =
     KK.visibility_gate_decision
       ~visible_consumers:0
       ~has_pending_signal:false
       ~now
       ~last_heartbeat_cycle_ts:(now -. 60.0)
       HS.Emit
-  with
-  | HS.Skip_idle next ->
-    check bool "next heartbeat stays bounded" true (next > now)
-  | HS.Emit | HS.Skip_busy -> fail "expected unobserved emit to become Skip_idle"
+  in
+  check bool "unobserved idle remains emit because visibility gate backoff is disabled" true (decision = HS.Emit)
 
 let test_visibility_gate_allows_pending_signal () =
   let decision =

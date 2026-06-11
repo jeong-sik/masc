@@ -18,6 +18,28 @@ type decision =
   ; drift : drift option
   }
 
+(** RFC-0220 §3.5: the outcome of an agent claiming a task in a given status,
+    shared by the explicit and auto claim writers so they never diverge on the
+    same claimable status. The self-block (a submitter cannot verify their own
+    [AwaitingVerification]) lives in {!resolve_claim}, once, under one
+    [same_actor] equality. *)
+type claim_resolution =
+  | Worker_claim of Masc_domain.task_status
+  | Verifier_claim of Masc_domain.task_status
+  | Self_owned
+  | Held_by_other of string
+
+(** [resolve_claim ~same_actor ~agent_name ~now status] is the claim outcome.
+    [same_actor name] must report whether [name] is the same logical actor as
+    the claiming agent (callers pass
+    [Workspace_task_classify.same_task_actor config _ agent_name]). *)
+val resolve_claim
+  :  same_actor:(string -> bool)
+  -> agent_name:string
+  -> now:string
+  -> Masc_domain.task_status
+  -> claim_resolution
+
 val decide
   :  verification_enabled:bool
   -> verification_timeout_seconds:float

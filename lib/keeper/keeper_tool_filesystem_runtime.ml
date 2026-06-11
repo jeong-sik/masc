@@ -151,6 +151,21 @@ let resolve_read_file_target
       let resolve_shared candidate =
         match resolve_keeper_read_path ~config ~meta ~raw_path:candidate with
         | Ok _ as ok -> ok
+        (* Mirror resolve_projected below: route a
+           path_not_found_under_allowed_roots rejection to Missing_file so
+           the keeper gets the rich missing_file_error_json (your_playground
+           + live available_repos scan) instead of the bare {error}. The
+           bare message text says "check your_playground for available
+           files" but Read_path_error omits that field, so repo-prefixed
+           paths (incl. masc-mcp->masc rename-drift victims) could not
+           self-correct. This removes an asymmetry between the two sibling
+           resolvers; it adds no new classifier (the prefix check already
+           exists in resolve_projected). *)
+        | Error e
+          when String.starts_with
+                 ~prefix:"path_not_found_under_allowed_roots:"
+                 e ->
+          Error (Missing_file { target = candidate; error = e })
         | Error e -> Error (Read_path_error e)
       in
       let resolve_projected candidate =
@@ -245,7 +260,9 @@ let handle_read_file
        check above remains as defense-in-depth. *)
              if Keeper_sandbox_read_runner.should_route_read ~meta
              then (
-               let timeout_sec = Env_config_exec_timeout.timeout_sec ~caller:Fs () in
+               let timeout_sec =
+                 Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ()
+               in
                match
                  Keeper_sandbox_read_runner.read_file
                    ?turn_sandbox_factory
@@ -508,8 +525,8 @@ let check_invariant_sandbox_isolation
   | Some factory ->
     let cwd = Filename.dirname target in
     (match Keeper_sandbox_factory.resolve_opt (Some factory) ~cwd with
-     | None -> Ok ()
-     | Some runtime ->
+     | No_factory | Local_profile -> Ok ()
+     | Runtime runtime ->
        let host_root = Keeper_turn_sandbox_runtime.host_root runtime in
        Keeper_invariant.sandbox_isolation
          ~sandbox_roots:[ host_root ]
@@ -599,15 +616,18 @@ let handle_file_write
                                 turn_sandbox_factory
                                 ~cwd:target
                             with
-                            | Some runtime ->
+                            | Runtime runtime ->
                               Keeper_turn_sandbox_runtime.overwrite_file
                                 runtime
                                 ~host_path:target
                                 ~content:updated
                                 ~timeout_sec:
-                                  (Env_config_exec_timeout.timeout_sec ~caller:Fs ())
+                                  (Env_config_sandbox.Shell_timeout.timeout_sec
+                                     ~bucket:Io
+                                     ())
                                 ()
-                            | None -> Keeper_fs.save_atomic target updated
+                            | No_factory | Local_profile ->
+                              Keeper_fs.save_atomic target updated
                           in
                           (match write_result with
                            | Error msg ->
@@ -681,7 +701,7 @@ let handle_file_write
                             turn_sandbox_factory
                             ~cwd:target
                         with
-                        | Some runtime ->
+                        | Runtime runtime ->
                           (match mode with
                            | Append ->
                              Keeper_turn_sandbox_runtime.append_file
@@ -689,7 +709,9 @@ let handle_file_write
                                ~host_path:target
                                ~content
                                ~timeout_sec:
-                                 (Env_config_exec_timeout.timeout_sec ~caller:Fs ())
+                                 (Env_config_sandbox.Shell_timeout.timeout_sec
+                                    ~bucket:Io
+                                    ())
                                ()
                            | Overwrite ->
                              Keeper_turn_sandbox_runtime.overwrite_file
@@ -697,10 +719,12 @@ let handle_file_write
                                ~host_path:target
                                ~content
                                ~timeout_sec:
-                                 (Env_config_exec_timeout.timeout_sec ~caller:Fs ())
+                                 (Env_config_sandbox.Shell_timeout.timeout_sec
+                                    ~bucket:Io
+                                    ())
                                ()
                            | Patch -> Ok ())
-                        | None ->
+                        | No_factory | Local_profile ->
                           (match mode with
                            | Append ->
                              let parent = Filename.dirname target in

@@ -63,6 +63,7 @@ let assemble_cost_event_payload
     ?(usage_missing : bool = false)
     ?usage_trust
     ?(telemetry : Agent_sdk.Types.inference_telemetry option)
+    ?(model : string option)
     () : assembled_cost_event_payload =
   let int_field name = function
     | Some n -> [ (name, `Int n) ]
@@ -110,6 +111,14 @@ let assemble_cost_event_payload
       ~input_tokens
       ~output_tokens
       ~cost_usd
+  in
+  (* #18460: when the response model is a runtime selector alias (e.g. "auto"),
+     prefer the canonical model id from telemetry so downstream cost analysis
+     can look up the actual model instead of the unresolved alias. *)
+  let key_model_value =
+    match canonical_model_id_of_telemetry telemetry with
+    | Some canonical_id -> canonical_id
+    | None -> runtime_lane_label
   in
   let default_safe_cost_usd = 0.0 in
   let safe_cost_usd =
@@ -165,7 +174,7 @@ let assemble_cost_event_payload
     (key_agent, `String agent_name);
     ("task_id", Json_util.string_opt_to_json task_id);
     (key_provider, `String runtime_lane_label);
-    (key_model, `String runtime_lane_label);
+    (key_model, `String key_model_value);
     (key_input_tokens, `Int safe_input_tokens);
     (key_output_tokens, `Int safe_output_tokens);
     (key_cost_usd, `Float safe_cost_usd);
@@ -197,6 +206,7 @@ let cost_event_payload
     ?(usage_missing : bool = false)
     ?usage_trust
     ?(telemetry : Agent_sdk.Types.inference_telemetry option)
+    ?(model : string option)
     () : Yojson.Safe.t =
   (assemble_cost_event_payload
      ~agent_name
@@ -207,6 +217,7 @@ let cost_event_payload
      ~usage_missing
      ?usage_trust
      ?telemetry
+     ?model
      ()).payload
 
 (** Date-split cost ledger root inside [masc_root].  See
@@ -223,6 +234,7 @@ let emit_cost_event
     ?(usage_missing : bool = false)
     ?usage_trust
     ?(telemetry : Agent_sdk.Types.inference_telemetry option)
+    ?(model : string option)
     () : unit =
   (* Tier-A perf change: previously appended to a single unbounded
      [masc_root/costs.jsonl] (14k lines, 7.5MB observed in [<base-path>/.masc]),
@@ -247,6 +259,7 @@ let emit_cost_event
       ~usage_missing
       ?usage_trust
       ?telemetry
+      ?model
       ()
   in
   Otel_metric_store.inc_counter

@@ -78,6 +78,7 @@ end
 let run_turn
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
+      ~(turn_ctx_cell : Keeper_tool_call_log.turn_ctx_cell)
       ~(base_dir : string)
       ~(max_context : int)
       ~(build_turn_prompt :
@@ -110,6 +111,7 @@ let run_turn
       ?(is_retry = false)
       ?shared_context
       ?event_bus
+      ?trace_link
       ()
   : (run_result, Agent_sdk.Error.sdk_error) result
   =
@@ -155,7 +157,11 @@ let run_turn
         }
     in
     fun () ->
-      (try emit_observation_turn_end () with _ -> ());
+      (try emit_observation_turn_end ()
+       with Eio.Cancel.Cancelled _ as ce -> raise ce
+       | exn ->
+         Log.Keeper.warn "keeper:%s emit_observation_turn_end failed: %s"
+           meta.name (Printexc.to_string exn));
       Turn_helpers.emit_turn_end_safely ~keeper_name:meta.name ()
   in
   Eio_guard.protect ~finally:safe_emit_turn_end
@@ -348,6 +354,7 @@ let run_turn
     Keeper_run_tools.prepare_agent_setup
       ~config
       ~meta
+      ~turn_ctx_cell
       ~ctx_work
       ~session
       ~base_system_prompt
@@ -360,7 +367,6 @@ let run_turn
       ~context_injector
       ~start_turn_count
       ~generation
-      ~max_turns
       ~runtime_id
       ~is_retry
       ~turn_affordances
@@ -373,6 +379,7 @@ let run_turn
       ~trajectory_acc
       ~tool_overlay
       ~runtime_manifest_context
+      ~max_turns
       ()
   in
   (* Section 2: prepare runtime tools and hooks. *)
@@ -419,7 +426,7 @@ let run_turn
       if
         Llm_provider.Request_priority.resolve priority
         = Llm_provider.Request_priority.Proactive
-      then Some (Keeper_runtime_resolved.admission_wait_timeout_sec ())
+      then Some 180.0
       else None
     in
     ignore (Keeper_alerting_path.ensure_sandbox_bundle ~config ~meta);
@@ -502,22 +509,15 @@ let run_turn
                           ~site:"runtime_runtime"
                           config
                           manifest)
-                      (* Keepers use turn-level retry for transient errors but benefit
-              from OAS per-call retry for validation errors (malformed tool
-              args). retry_on_validation_error=true lets OAS re-prompt the
-              LLM with structured feedback instead of wasting a full turn.
-              retry_on_recoverable_tool_error remains false — tool-level
-              errors are handled by MASC's consecutive failure guardrail. *)
-                    ~tool_retry_policy:
-                      { Agent_sdk.Tool_retry_policy.max_retries = 2
-                      ; retry_on_validation_error = true
-                      ; retry_on_recoverable_tool_error = false
-                      ; feedback_style =
-                          Agent_sdk.Tool_retry_policy.Structured_tool_result
-                      }
-                    ~max_turns
+                      (* No code-level tool-retry budget. Retrying a malformed
+              tool call (e.g. missing required arg) is the keeper's own
+              competence: the SDK delivers the validation error back to the
+              model (pipeline [None] branch) and the agent loop decides whether
+              to re-emit. Runaway is bounded by max_idle_turns + token budget,
+              not a retry count that halts the turn. *)
                     ~max_idle_turns
                     ?stream_idle_timeout_s
+                    ~body_timeout_s:timeout_s
                     ~temperature
                     ~max_tokens
                     ?max_cost_usd
@@ -548,6 +548,10 @@ let run_turn
              natural completion (max_turns or model end_turn). *)
                     ?oas_checkpoint:resume_oas_checkpoint
                     ?event_bus
+                    ?trace_link
+                    ~on_runtime_observation:
+                      (fun observation ->
+                         receipt_runtime_observation_ref := Some observation)
                     ?per_provider_timeout_s
                     ()
               in
@@ -574,10 +578,11 @@ let run_turn
                  receipt_model_used_ref := Some model;
                  receipt_stop_reason_ref := Some result.stop_reason;
                  receipt_runtime_observation_ref := result.runtime_observation;
-                 Keeper_agent_run_thinking_trajectory.persist_response_content
-                   ~keeper_name:meta.name
-                   ~trajectory_acc
-                   result.response.content;
+                 (* Thinking is now persisted per-turn inside the after_turn
+                    hook (Keeper_hooks_oas), untruncated, for EVERY turn. The
+                    old post-run single-shot capture here saved only the final
+                    turn's reasoning and would double-write the terminal turn
+                    now, so it was removed. *)
                  let actual_keeper_tool_names =
                    Keeper_agent_result.tool_names_of_calls (List.rev acc.tool_calls)
                  in

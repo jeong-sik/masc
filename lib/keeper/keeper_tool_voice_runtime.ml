@@ -111,8 +111,13 @@ let handle_speak
       , Eio_context.get_net_opt () )
     with
     | Some sw, Some clock, Some net ->
+      (* Synchronous on purpose: the tool schema promises "blocks until
+         playback finishes". The former fire-and-forget queue returned
+         status="queued" immediately, so the model never saw playback
+         complete and re-spoke the same content every sub-turn
+         (2026-06-10 sangsu voice repeat incident). *)
       (match
-         Voice_bridge.enqueue_agent_speak
+         Voice_bridge.agent_speak
            ~sw
            ~clock
            ~net
@@ -123,16 +128,24 @@ let handle_speak
            ()
        with
        | Ok json ->
-         let memory_status =
+         let spoken =
+           match Json_util.get_string json "status" with
+           | Some "spoken" -> true
+           | Some _ | None -> false
+         in
+         if spoken
+         then (
+           let memory_status =
              record_voice_output
                ~config
                ~meta
                ~provider
                ~priority
-               ~execution:"background_voice_queue"
+               ~execution:"synchronous"
                ~message
-         in
-         Yojson.Safe.to_string (attach_memory_status json memory_status)
+           in
+           Yojson.Safe.to_string (attach_memory_status json memory_status))
+         else Yojson.Safe.to_string json
        | Error err ->
          Tool_args.error_response_with
            [ "agent_id", `String meta.name
@@ -202,15 +215,11 @@ let handle_session_start ~(meta : keeper_meta) ~(args : Yojson.Safe.t) =
 
 let handle_session_end ~(meta : keeper_meta) =
   let mgr = Keeper_voice_local.get_session_manager () in
-  let discarded_voice_queue_jobs =
-    Voice_bridge.discard_queued_agent_speak ~agent_id:meta.name
-  in
   let ended = Voice_session_manager.end_session mgr ~agent_id:meta.name in
   Yojson.Safe.to_string
     (`Assoc
         [ "status", `String (if ended then "ended" else "no_active_session")
         ; "agent_id", `String meta.name
-        ; "discarded_voice_queue_jobs", `Int discarded_voice_queue_jobs
         ])
 
 let handle

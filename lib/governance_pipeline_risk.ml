@@ -23,6 +23,9 @@ let capability_classification : (string * capability_class list) list =
     ("keeper_memory_search", [ Sensitive_access ]);
     ("keeper_library_search", [ Sensitive_access ]);
     ("keeper_library_read", [ Sensitive_access ]);
+    ("keeper_surface_read", [ Sensitive_access ]);
+    ("keeper_surface_post", [ State_modification ]);
+    ("keeper_person_note_set", [ State_modification ]);
     ("tool_edit_file", [ State_modification ]);
     ("tool_write_file", [ State_modification ]);
   ]
@@ -137,13 +140,15 @@ let risk_of_keeper (k : Keeper_tool_name.t) : risk_level =
   match k with
   | Execute -> Critical
   | Board_comment | Board_comment_vote | Board_curation_read | Board_curation_submit
-  | Board_get | Board_list | Board_post | Board_search | Board_stats
+  | Board_post_get | Board_list | Board_post | Board_search | Board_stats
   | Board_sub_board_get | Board_sub_board_list | Board_vote | Broadcast
   | Context_status | Handoff | Library_read | Library_search | Memory_search
-  | Memory_write | Search_files | Stay_silent | Tasks_audit | Tasks_list | Time_now
-  | Tool_search | Tools_list | State_report | Voice_agent | Voice_listen
+  | Memory_write | Search_files | Stay_silent | Surface_read | Tasks_audit
+  | Tasks_list | Time_now
+  | Tool_search | Tools_list | Voice_agent | Voice_listen
   | Voice_session_end | Voice_session_start | Voice_sessions | Voice_speak -> Low
   | Board_sub_board_create | Board_sub_board_update | Task_claim | Task_create | Task_done
+  | Surface_post | Person_note_set
     -> Medium
   | Fs_edit | Fs_write | Fs_read | Ide_annotate -> High
   | Board_sub_board_delete | Task_force_done | Task_force_release -> Critical
@@ -309,7 +314,7 @@ let classify_with_payload ~tool_name ~input =
       else None
 
 let pre_metadata_risk_overrides : (string * risk_level) list =
-  [ "masc_bind", Medium; "masc_unbind", Medium ]
+  [ "masc_bind", Medium; "masc_unbind", Medium; "masc_goal_upsert", Medium; "masc_goal_verify", Medium ]
 
 let baseline_risk ~tool_name ~input =
   match List.assoc_opt tool_name pre_metadata_risk_overrides with

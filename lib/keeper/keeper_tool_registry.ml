@@ -44,7 +44,7 @@ let keeper_voice_tool_schemas =
 let core_always_tools =
   List.map
     Keeper_tool_name.to_string
-    Keeper_tool_name.[ Context_status; Stay_silent; Tool_search; State_report ]
+    Keeper_tool_name.[ Context_status; Stay_silent; Tool_search ]
   @ [ "extend_turns" ]
 ;;
 
@@ -80,7 +80,7 @@ let base_core_tools =
         ; Task_create
         ; Memory_search
         ; (* Board: core interaction *)
-          Board_get
+          Board_post_get
         ; Board_post
         ; Board_comment
         ; Board_vote
@@ -253,7 +253,7 @@ let reconcile_safe_tools =
         ; Board_comment_vote
         ; Board_curation_submit
         ]
-  @ [ Keeper_tool_name.legacy_masc_broadcast_name ]
+  @ [ "masc_broadcast" ]
 ;;
 
 let reconcile_safe_set : (string, unit) Hashtbl.t =

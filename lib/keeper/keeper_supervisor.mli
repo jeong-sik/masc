@@ -108,3 +108,11 @@ val restart_launch_noop_enabled_for_test : unit -> bool
 val with_restart_launch_noop_for_test : (unit -> 'a) -> 'a
 (** Test-only: scoped restart-launch noop override. Nested and overlapping
     scopes restore the prior flag only after the outer scope exits. *)
+
+val set_global_switch : Eio.Switch.t -> unit
+(** Set the global server switch to run keepalive fibers and supervisor sweeps
+    under a long-lived context. *)
+
+val get_global_switch : unit -> Eio.Switch.t option
+(** Retrieve the global server switch if configured. *)
+

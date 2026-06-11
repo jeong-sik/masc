@@ -49,7 +49,7 @@ let starts_for ~keeper =
 
 let scheduled_for ~keeper =
   Metrics.metric_value_or_zero Keeper_metrics.(to_string TurnScheduled)
-    ~labels:[ ("keeper_name", keeper) ] ()
+    ~labels:[ ("keeper", keeper) ] ()
 
 let reattempts_for ~keeper =
   Metrics.metric_value_or_zero Keeper_metrics.(to_string TurnReattempts)
@@ -270,6 +270,46 @@ let test_guard_forward_advance_resets () =
    | L.Started L.Fresh -> ()
    | _ -> Alcotest.fail "turn 8 should reset guard state")
 
+(* F2: a provider_timeout terminal (the attempt watchdog firing mid-stream)
+   resets the livelock entry via [reset_keeper_livelock] before the same
+   turn_id is re-dispatched (see keeper_unified_turn_types.ml,
+   "attempt_watchdog_safety_deadline" arm). Pin the invariant that wiring
+   relies on: a re-dispatch whose age would otherwise cross
+   [stuck_after_sec] is reclassified [Fresh] once the entry is reset, so a
+   transport stall routes to autonomous retry instead of
+   [Stuck_age_exceeded] -> operator_pause. Mirror of
+   [test_guard_blocks_on_stuck_age] with the reset interposed. *)
+let test_reset_clears_stuck_age_for_provider_timeout () =
+  L.reset_for_tests ();
+  let keeper = "test-keeper-reset-stuck-age-10121" in
+  let now = ref 10.0 in
+  let call () =
+    L.guard_and_record_turn_start
+      ~now:(fun () -> !now)
+      ~keeper
+      ~turn_id:24
+      ~max_attempts:10
+      ~stuck_after_sec:30.0
+      ()
+  in
+  (match call () with
+   | L.Started L.Fresh -> ()
+   | _ -> Alcotest.fail "first attempt should start fresh");
+  (* Age now far exceeds the threshold; without the reset this is the exact
+     scenario [test_guard_blocks_on_stuck_age] proves blocks. *)
+  now := 1810.0;
+  L.reset_keeper_livelock ~keeper;
+  (match call () with
+   | L.Started L.Fresh -> ()
+   | L.Blocked (L.Stuck_age_exceeded _) ->
+     Alcotest.fail
+       "after reset_keeper_livelock the same turn_id must not trip stuck-age"
+   | _ -> Alcotest.fail "after reset the same turn_id should start Fresh");
+  Alcotest.(check (float 0.0001))
+    "no stuck-age block recorded for this keeper after reset"
+    0.0
+    (blocks_for ~keeper ~reason:"stuck_age_exceeded")
+
 let () =
   Alcotest.run "keeper_turn_livelock_10121"
     [
@@ -310,5 +350,7 @@ let () =
             (with_eio test_guard_blocks_on_stuck_age);
           Alcotest.test_case "forward advance resets guard" `Quick
             (with_eio test_guard_forward_advance_resets);
+          Alcotest.test_case "reset clears stuck-age (provider_timeout)" `Quick
+            (with_eio test_reset_clears_stuck_age_for_provider_timeout);
         ] );
     ]

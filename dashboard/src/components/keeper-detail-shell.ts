@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
-import { useState } from 'preact/hooks'
+import { signal } from '@preact/signals'
 import { TimeAgo } from './common/time-ago'
 import type { Keeper } from '../types'
 import { keepers } from '../store'
@@ -115,6 +115,8 @@ type KeeperDetailSectionId =
   | 'keeper-config'
   | 'keeper-debug'
 
+export const activeKeeperDetailSection = signal<KeeperDetailSectionId>('keeper-comms')
+
 const KEEPER_DETAIL_SECTIONS: Array<{
   id: KeeperDetailSectionId
   label: string
@@ -145,22 +147,29 @@ const KEEPER_DETAIL_SECTIONS: Array<{
   },
 ]
 
-function scrollToKeeperDetailSection(sectionId: KeeperDetailSectionId): void {
-  document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+function selectKeeperDetailSection(sectionId: KeeperDetailSectionId): void {
+  activeKeeperDetailSection.value = sectionId
 }
 
 export function KeeperDetailSectionRail() {
+  const active = activeKeeperDetailSection.value
   return html`
     <nav
-      class="sticky top-[64px] z-10 overflow-x-auto border-b border-[var(--color-border-default)] bg-[var(--color-bg-page)] py-1.5"
+      class="sm:sticky sm:top-[var(--header-h)] z-10 overflow-x-auto border-b border-[var(--color-border-default)] bg-[var(--color-bg-page)] py-1.5"
       aria-label="키퍼 상세 섹션"
     >
-      <div class="flex min-w-max items-center gap-1.5 px-1">
+      <div class="flex min-w-max items-center gap-1.5 px-1" role="tablist" aria-label="키퍼 상세 탭">
         ${KEEPER_DETAIL_SECTIONS.map((section) => html`
           <button
+            id=${`${section.id}-tab`}
             type="button"
-            class="h-8 shrink-0 rounded-[var(--r-1)] border border-transparent px-3 text-2xs font-semibold text-[var(--color-fg-muted)] transition-colors hover:border-[var(--color-border-default)] hover:bg-[var(--color-bg-surface)] hover:text-[var(--color-fg-primary)]"
-            onClick=${() => scrollToKeeperDetailSection(section.id)}
+            role="tab"
+            aria-selected=${active === section.id}
+            aria-controls=${section.id}
+            class=${active === section.id
+              ? 'h-8 shrink-0 rounded-[var(--r-1)] border border-[var(--accent-30)] bg-[var(--accent-12)] px-3 text-2xs font-semibold text-[var(--color-accent-fg)] transition-colors'
+              : 'h-8 shrink-0 rounded-[var(--r-1)] border border-transparent px-3 text-2xs font-semibold text-[var(--color-fg-muted)] transition-colors hover:border-[var(--color-border-default)] hover:bg-[var(--color-bg-surface)] hover:text-[var(--color-fg-primary)]'}
+            onClick=${() => selectKeeperDetailSection(section.id)}
           >
             ${section.label}
           </button>
@@ -174,7 +183,6 @@ export function KeeperDetailSection({
   id,
   eyebrow,
   title,
-  defaultCollapsed = false,
   lockedOpen = false,
   variant = 'default',
   children,
@@ -182,11 +190,8 @@ export function KeeperDetailSection({
   id: KeeperDetailSectionId
   eyebrow: string
   title: string
-  /** When true, the section body starts collapsed and the operator
-   *  expands it by clicking the header. Defaults to expanded so the
-   *  long-standing always-open behaviour is preserved for callers
-   *  that do not opt in. Quick-jump links via [scrollToKeeperDetailSection]
-   *  still resolve to the header anchor regardless of the body state. */
+  /** Preserved for old call sites; top-level keeper detail sections now render
+   *  as tabs, while nested CollapsibleSection handles local disclosure. */
   defaultCollapsed?: boolean
   /** Primary sections, such as the chat lane, stay open and do not expose
    *  collapse controls. */
@@ -194,8 +199,7 @@ export function KeeperDetailSection({
   variant?: 'default' | 'primary'
   children: ComponentChildren
 }) {
-  const [collapsed, setCollapsed] = useState(lockedOpen ? false : defaultCollapsed)
-  const isCollapsed = lockedOpen ? false : collapsed
+  const isActive = activeKeeperDetailSection.value === id
   const bodyId = `${id}-body`
   const sectionClass = variant === 'primary'
     ? 'scroll-mt-24 rounded-[var(--r-2)] bg-transparent shadow-none'
@@ -203,6 +207,7 @@ export function KeeperDetailSection({
   const headerClass = variant === 'primary'
     ? 'sr-only'
     : 'flex w-full items-center justify-between gap-3 border-b border-[var(--color-border-default)] px-4 py-3 text-left transition-colors hover:bg-[var(--color-bg-hover)] sm:px-5'
+  if (!isActive) return null
   const headerContent = html`
     <div class="min-w-0">
       <div class="text-3xs font-semibold uppercase tracking-[var(--track-brand)] text-[var(--color-fg-muted)]">${eyebrow}</div>
@@ -212,37 +217,20 @@ export function KeeperDetailSection({
       ? html`<span class="shrink-0 rounded-[var(--r-0)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-2 py-1 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-accent-fg)]">기본</span>`
       : lockedOpen
         ? null
-      : html`
-        <span
-          aria-hidden="true"
-          class=${`shrink-0 text-[var(--color-fg-muted)] transition-transform duration-[var(--t-med)] ${isCollapsed ? '' : 'rotate-180'}`}
-        >▾</span>
-      `}
+      : null}
   `
   return html`
     <section
       id=${id}
       class=${sectionClass}
       aria-label=${title}
+      aria-labelledby=${`${id}-tab`}
+      role="tabpanel"
     >
-      ${lockedOpen
-        ? html`<div class=${headerClass}>${headerContent}</div>`
-        : html`
-          <button
-            type="button"
-            class=${headerClass}
-            aria-expanded=${!isCollapsed}
-            aria-controls=${bodyId}
-            onClick=${() => setCollapsed((c: boolean) => !c)}
-          >
-            ${headerContent}
-          </button>
-        `}
-      ${isCollapsed ? null : html`
-        <div id=${bodyId} class=${variant === 'primary' ? 'flex flex-col gap-4 px-0 py-0' : 'flex flex-col gap-4 px-4 py-4 sm:px-5'}>
-          ${children}
-        </div>
-      `}
+      <div class=${headerClass}>${headerContent}</div>
+      <div id=${bodyId} class=${variant === 'primary' ? 'flex flex-col gap-4 px-0 py-0' : 'flex flex-col gap-4 px-4 py-4 sm:px-5'}>
+        ${children}
+      </div>
     </section>
   `
 }

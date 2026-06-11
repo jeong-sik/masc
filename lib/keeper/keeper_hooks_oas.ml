@@ -218,6 +218,7 @@ include Keeper_hooks_oas_idle
 let make_hooks
     ~(config : Workspace.config)
     ~(meta_ref : Keeper_meta_contract.keeper_meta ref)
+    ~(turn_ctx_cell : Keeper_tool_call_log.turn_ctx_cell)
     ~(generation : int)
     ?(max_cost_usd : float option)
     ?(destructive_check : bool = true)
@@ -317,16 +318,16 @@ let make_hooks
             | reasons -> reasons
           in
           if Keeper_usage_trust.warns_operator usage_trust then
-            Log.Keeper.warn
-              "keeper:%s after_turn usage telemetry untrusted runtime_lane=%s reasons=%s input=%d output=%d context_max=%d"
-              meta.name runtime_lane_label
+            Log.Keeper.warn ~keeper_name:meta.name
+              "after_turn usage telemetry untrusted runtime_lane=%s reasons=%s input=%d output=%d context_max=%d"
+              runtime_lane_label
               (String.concat "," reasons)
               raw_input_tok raw_output_tok
               (context_max_of_telemetry response.telemetry)
           else
-            Log.Keeper.info
-              "keeper:%s after_turn usage telemetry unavailable runtime_lane=%s reasons=%s input=%d output=%d context_max=%d"
-              meta.name runtime_lane_label
+            Log.Keeper.info ~keeper_name:meta.name
+              "after_turn usage telemetry unavailable runtime_lane=%s reasons=%s input=%d output=%d context_max=%d"
+              runtime_lane_label
               (String.concat "," reasons)
               raw_input_tok raw_output_tok
               (context_max_of_telemetry response.telemetry));
@@ -431,9 +432,9 @@ let make_hooks
         let prompt_tok_s = fmt_tok_s prompt_tok_s_opt in
         let decode_tok_s = fmt_tok_s decode_tok_s_opt in
         let thinking = summarize_thinking_blocks response.content in
-        Log.Keeper.info
-          "keeper:%s turn=%d total_turns=%d runtime_lane=%s tokens=%d wall_tok_s=%s prompt_tok_s=%s decode_tok_s=%s latency_ms=%d thinking_present=%b thinking_blocks=%d thinking_chars=%d redacted_thinking_blocks=%d thinking_kind=%s"
-          meta.name turn meta.runtime.usage.total_turns model total_tok
+        Log.Keeper.info ~keeper_name:meta.name
+          "turn=%d total_turns=%d runtime_lane=%s tokens=%d wall_tok_s=%s prompt_tok_s=%s decode_tok_s=%s latency_ms=%d thinking_present=%b thinking_blocks=%d thinking_chars=%d redacted_thinking_blocks=%d thinking_kind=%s"
+          turn meta.runtime.usage.total_turns model total_tok
           wall_tok_s prompt_tok_s decode_tok_s latency_ms
           thinking.thinking_present
           thinking.thinking_blocks
@@ -449,16 +450,24 @@ let make_hooks
              ~input_tokens:raw_input_tok ~output_tokens:raw_output_tok
              ~cost_usd:cost_usd_for_event ~usage_missing
              ~usage_trust
-             ?telemetry:response.telemetry ()
+             ?telemetry:response.telemetry
+             ~model:response.model ();
+           (* 남김없이: persist THIS turn's reasoning (full, untruncated) every
+              turn. The prior single post-run capture (Keeper_agent_run) saved
+              only the final turn's thinking; turns 1..N-1 were merely counted
+              by the log line above. *)
+           Keeper_agent_run_thinking_trajectory.persist_response_content
+             ~keeper_name:meta.name ~trajectory_acc:(Some acc) ~turn
+             response.content
          | None -> ());
         let text = Agent_sdk.Types.text_of_content response.content in
         let has_state_block =
           Option.is_some (Keeper_memory_policy.find_state_block text)
         in
         if not has_state_block && turn > 0 then
-          Log.Keeper.debug
-            "keeper:%s turn=%d state_block=absent (awaiting post-run synthesis)"
-            meta.name turn;
+          Log.Keeper.debug ~keeper_name:meta.name
+            "turn=%d state_block=absent (awaiting post-run synthesis)"
+            turn;
         (try
            Sse.broadcast
              (`Assoc
@@ -492,9 +501,9 @@ let make_hooks
                Keeper_metrics.(to_string LifecycleCallbackFailures)
                ~labels:[(label_keeper, meta.name); (label_callback, callback_label_after_turn_sse_broadcast)]
                ();
-             Log.Keeper.warn
-               "keeper:%s turn=%d sse_turn_complete broadcast failed: %s"
-               meta.name turn (Printexc.to_string exn));
+             Log.Keeper.warn ~keeper_name:meta.name
+               "turn=%d sse_turn_complete broadcast failed: %s"
+               turn (Printexc.to_string exn));
         (* Reset same-name streak at turn boundary so it doesn't
            carry across turns (e.g., 4 calls in turn N + 1 in turn N+1
            should not hit threshold 5). *)
@@ -592,22 +601,12 @@ let make_hooks
             ~keeper_name:(!meta_ref).name ()
         in
         let result_bytes = if original_bytes > 0 then original_bytes else out_len in
-        let ( lane
-            , tool_choice
-            , thinking_enabled
-            , thinking_budget
-            , prompt_fingerprint
-            , trace_id
-            , session_id
-            , turn
-            , keeper_turn_id
-            , task_id
-            , goal_ids
-            , sandbox_profile
-            , network_mode
-            , approval_mode ) =
-          Keeper_tool_call_log.get_turn_context
-            ~keeper_name:(!meta_ref).name ()
+        (* Full record read: log_call no longer falls back to ambient
+           context (RFC-0225 §3.3), so every field this row should carry
+           must be passed explicitly from the run's own cell. *)
+        let tctx : Keeper_tool_call_log_context.turn_context =
+          Keeper_tool_call_log_context.get_turn_context_record
+            ~cell:turn_ctx_cell ()
         in
         (try
            Keeper_tool_call_log.log_call
@@ -615,10 +614,21 @@ let make_hooks
              ~tool_name ~input ~output_text
              ~success:(outcome = Tool_result.Ok) ~duration_ms
              ~model:(current_keeper_model !meta_ref)
-             ?lane ?tool_choice ?thinking_enabled ?thinking_budget
-             ?prompt_fingerprint
-             ?trace_id ?session_id ?turn ?keeper_turn_id ?task_id ?goal_ids
-             ?sandbox_profile ?network_mode ?approval_mode
+             ?agent_name:tctx.agent_name
+             ?lane:tctx.lane ?tool_choice:tctx.tool_choice
+             ?thinking_enabled:tctx.thinking_enabled
+             ?thinking_budget:tctx.thinking_budget
+             ?prompt_fingerprint:tctx.prompt_fingerprint
+             ?trace_id:tctx.trace_id ?session_id:tctx.session_id
+             ?generation:tctx.generation
+             ?turn:tctx.turn ?keeper_turn_id:tctx.keeper_turn_id
+             ?task_id:tctx.task_id ?goal_ids:tctx.goal_ids
+             ?sandbox_profile:tctx.sandbox_profile
+             ?sandbox_root:tctx.sandbox_root
+             ?allowed_paths:tctx.allowed_paths
+             ?network_mode:tctx.network_mode
+             ?approval_mode:tctx.approval_mode
+             ?runtime_profile:tctx.runtime_profile
              ~result_bytes ?truncated_to ()
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
@@ -632,9 +642,9 @@ let make_hooks
                Keeper_metrics.(to_string LifecycleCallbackFailures)
                ~labels:[(label_keeper, (!meta_ref).name); (label_callback, callback_label_post_tool_log_write)]
                ();
-             Log.Keeper.warn
-               "keeper:%s tool=%s log_call write failed: %s"
-               (!meta_ref).name tool_name (Printexc.to_string exn));
+             Log.Keeper.warn ~keeper_name:(!meta_ref).name
+               "tool=%s log_call write failed: %s"
+               tool_name (Printexc.to_string exn));
         (match trajectory_acc with
          | None -> ()
          | Some acc ->
@@ -651,11 +661,12 @@ let make_hooks
            let runtime_contract =
              Keeper_tool_call_log.runtime_observability_contract_json_for_call
                ~keeper_name
+               ~cell:turn_ctx_cell
                ()
            in
            let action_radius =
              Keeper_tool_call_log.action_radius_json_for_call
-               ~keeper_name
+               ~cell:turn_ctx_cell
                ~tool_name
                ~input:safe_input
                ~success:(outcome = Tool_result.Ok)
@@ -713,11 +724,11 @@ let make_hooks
                 Keeper_metrics.(to_string LifecycleCallbackFailures)
                 ~labels:[(label_keeper, (!meta_ref).name); (label_callback, callback_label_on_tool_executed)]
                 ();
-              Log.Keeper.error "keeper:%s on_tool_executed callback failed for %s: %s"
-                (!meta_ref).name tool_name (Printexc.to_string exn));
+              Log.Keeper.error ~keeper_name:(!meta_ref).name "on_tool_executed callback failed for %s: %s"
+                tool_name (Printexc.to_string exn));
         if is_keeper_board_write_tool_name tool_name then
-          Log.Keeper.debug "keeper:%s social_event tool=%s"
-            (!meta_ref).name tool_name;
+          Log.Keeper.debug ~keeper_name:(!meta_ref).name "social_event tool=%s"
+            tool_name;
         Agent_sdk.Hooks.Continue
       | _event -> Agent_sdk.Hooks.Continue);
 
@@ -769,8 +780,8 @@ let make_hooks
           Keeper_metrics.(to_string LifecycleCallbackFailures)
           ~labels:[(label_keeper, (!meta_ref).name); (label_callback, callback_label_on_error)]
           ();
-        Log.Keeper.error "keeper:%s on_error: %s (context: %s)"
-          (!meta_ref).name detail err_ctx;
+        Log.Keeper.error ~keeper_name:(!meta_ref).name "on_error: %s (context: %s)"
+          detail err_ctx;
         Agent_sdk.Hooks.Continue
       | _event -> Agent_sdk.Hooks.Continue);
 
@@ -779,8 +790,8 @@ let make_hooks
         let keeper_name = (!meta_ref).name in
         (match self_correcting_tool_failure_class ~base_path:config.base_path error with
          | Some failure_class ->
-           Log.Keeper.warn "keeper:%s tool_%s: %s — %s"
-             keeper_name failure_class tool_name error
+           Log.Keeper.warn ~keeper_name "tool_%s: %s — %s"
+             failure_class tool_name error
          | None ->
            (* Always increment the durable Otel_metric_store signal for real
               tool/runtime failures: noise dedupe is a log-surface concern
@@ -811,16 +822,16 @@ let make_hooks
                 ()
             with
             | `First ->
-              Log.Keeper.error "keeper:%s tool_error: %s — %s"
-                keeper_name tool_name error
+              Log.Keeper.error ~keeper_name "tool_error: %s — %s"
+                tool_name error
             | `Repeated n ->
-              Log.Keeper.debug
-                "keeper:%s tool_error repeated (total=%d, dedup): %s — %s"
-                keeper_name n tool_name error
+              Log.Keeper.debug ~keeper_name:keeper_name
+                "tool_error repeated (total=%d, dedup): %s — %s"
+                n tool_name error
             | `Threshold_silence n ->
-              Log.Keeper.error
-                "keeper:%s tool_error threshold-silence after %d identical: %s — %s"
-                keeper_name n tool_name error;
+              Log.Keeper.error ~keeper_name:keeper_name
+                "tool_error threshold-silence after %d identical: %s — %s"
+                n tool_name error;
               Otel_metric_store.inc_counter
                 Keeper_metrics.(to_string LifecycleCallbackFailures)
                 ~labels:
@@ -840,8 +851,8 @@ let make_hooks
            hook runs. Emitting a second ERROR here with the same error
            content produces paired duplicate lines per tool failure —
            keep a debug trace for hook-chain readers only. *)
-        Log.Keeper.debug "keeper:%s tool_use_failure: %s — %s"
-          meta.name tool_name error;
+        Log.Keeper.debug ~keeper_name:meta.name "tool_use_failure: %s — %s"
+          tool_name error;
         (* #9919: this path is a count event, not a heuristic decision. *)
         record_tool_use_failure ~keeper_name:meta.name ~tool_name;
         Agent_sdk.Hooks.Continue

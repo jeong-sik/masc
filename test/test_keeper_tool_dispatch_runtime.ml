@@ -723,19 +723,28 @@ let test_workflow_rejection_payload_skips_circuit_breaker () =
       "No such file or directory"
   in
   check (option string) "extracts workflow class" (Some "workflow_rejection")
-    (KET.failure_class_of_tool_result_payload workflow_payload);
+    (Option.map Tool_result.tool_failure_class_to_string
+       (KET.failure_class_of_tool_result_payload workflow_payload));
   check bool "workflow rejection does not trip circuit breaker" false
-    (KET.should_apply_circuit_breaker_to_failure_payload workflow_payload);
+    (KET.should_apply_circuit_breaker_to_failure_payload
+       (KET.failure_class_of_tool_result_payload workflow_payload));
   check (option string) "extracts egress policy class" (Some "policy_rejection")
-    (KET.failure_class_of_tool_result_payload egress_payload);
+    (Option.map Tool_result.tool_failure_class_to_string
+       (KET.failure_class_of_tool_result_payload egress_payload));
   check bool "egress policy rejection does not trip circuit breaker" false
-    (KET.should_apply_circuit_breaker_to_failure_payload egress_payload);
-  check (option string) "legacy egress has no inferred class" None
-    (KET.failure_class_of_tool_result_payload legacy_egress_payload);
+    (KET.should_apply_circuit_breaker_to_failure_payload
+       (KET.failure_class_of_tool_result_payload egress_payload));
+  (* legacy egress has no failure_class field → typed parser defaults to
+     Runtime_failure (conservative: unknown → fail, CLAUDE.md anti-pattern #2). *)
+  check (option string) "legacy egress defaults to runtime_failure" (Some "runtime_failure")
+    (Option.map Tool_result.tool_failure_class_to_string
+       (KET.failure_class_of_tool_result_payload legacy_egress_payload));
   check bool "legacy egress still trips circuit breaker" true
-    (KET.should_apply_circuit_breaker_to_failure_payload legacy_egress_payload);
+    (KET.should_apply_circuit_breaker_to_failure_payload
+       (KET.failure_class_of_tool_result_payload legacy_egress_payload));
   check bool "runtime failure still trips circuit breaker" true
-    (KET.should_apply_circuit_breaker_to_failure_payload runtime_payload)
+    (KET.should_apply_circuit_breaker_to_failure_payload
+       (KET.failure_class_of_tool_result_payload runtime_payload))
 
 let test_tool_execute_raw_cmd_requires_typed_shell_ir () =
   with_exec_fixture "tool_execute_raw_cmd_requires_typed_shell_ir"
@@ -872,9 +881,6 @@ let test_exec_cache_stats_json () =
 
 let () =
   Masc_test_deps.init_keeper_tool_registry ();
-  ignore
-    (Result.get_ok
-       (KET.init_policy_config ~base_path:(Masc_test_deps.find_project_root ())));
   run "Keeper_tool_dispatch_runtime" [
     ("classify_tool_result_payload", [
       test_case "plain text" `Quick test_plain_text_is_success_shape;

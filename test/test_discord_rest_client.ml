@@ -18,7 +18,7 @@ let header_value headers name =
 
 let test_build_request_url_targets_channel () =
   let url, _, _ =
-    R.build_request ~token:"abc" ~channel_id:"1234567890" ~content:"hi"
+    R.build_request ~token:"abc" ~channel_id:"1234567890" ~content:"hi" ()
   in
   check string "v10 channel URL"
     "https://discord.com/api/v10/channels/1234567890/messages"
@@ -26,7 +26,7 @@ let test_build_request_url_targets_channel () =
 
 let test_build_request_authorization_uses_bot_scheme () =
   let _, headers, _ =
-    R.build_request ~token:"sekret" ~channel_id:"CH" ~content:"."
+    R.build_request ~token:"sekret" ~channel_id:"CH" ~content:"." ()
   in
   check string "Authorization header" "Bot sekret"
     (header_value headers "Authorization");
@@ -35,7 +35,7 @@ let test_build_request_authorization_uses_bot_scheme () =
 
 let test_build_request_user_agent_present () =
   let _, headers, _ =
-    R.build_request ~token:"t" ~channel_id:"c" ~content:"."
+    R.build_request ~token:"t" ~channel_id:"c" ~content:"." ()
   in
   let ua = header_value headers "User-Agent" in
   (* Discord requires DiscordBot ($url, $version) shape. *)
@@ -45,7 +45,7 @@ let test_build_request_user_agent_present () =
 
 let test_build_request_body_is_content_object () =
   let _, _, body =
-    R.build_request ~token:"t" ~channel_id:"c" ~content:"hello \"world\""
+    R.build_request ~token:"t" ~channel_id:"c" ~content:"hello \"world\"" ()
   in
   let json = Yojson.Safe.from_string body in
   match json with
@@ -54,6 +54,26 @@ let test_build_request_body_is_content_object () =
       failf
         "body shape wrong: %s"
         (Yojson.Safe.to_string json)
+
+let test_build_typing_request_url_targets_channel () =
+  let url, _, body =
+    R.build_typing_request ~token:"abc" ~channel_id:"1234567890" ()
+  in
+  check string "v10 typing URL"
+    "https://discord.com/api/v10/channels/1234567890/typing"
+    url;
+  check string "empty typing body" "" body
+
+let test_build_typing_request_authorization_uses_bot_scheme () =
+  let _, headers, _ =
+    R.build_typing_request ~token:"sekret" ~channel_id:"CH" ()
+  in
+  check string "Authorization header" "Bot sekret"
+    (header_value headers "Authorization");
+  let ua = header_value headers "User-Agent" in
+  check bool "User-Agent starts with DiscordBot" true
+    (String.length ua >= 10
+     && String.sub ua 0 10 = "DiscordBot")
 
 (* ---------------------------------------------------------------- *)
 (* parse_response                                                   *)
@@ -115,6 +135,23 @@ let test_parse_response_non2xx_json_without_envelope_falls_back () =
         "expected Discord_api with code=400 fallback when JSON lacks \
          'code' field"
 
+let test_parse_empty_response_204_returns_ok () =
+  match R.parse_empty_response ~status:204 ~body:"" with
+  | Ok () -> ()
+  | Error e ->
+      failf "expected Ok, got %s" (Format.asprintf "%a" R.pp_error e)
+
+let test_parse_empty_response_discord_error_envelope () =
+  let body = {|{"code":50013,"message":"Missing Permissions"}|} in
+  match R.parse_empty_response ~status:403 ~body with
+  | Error (R.Discord_api { code = 50013; message = "Missing Permissions" }) ->
+      ()
+  | Ok () -> fail "expected Discord_api error"
+  | Error e ->
+      failf
+        "expected Discord_api 50013, got %s"
+        (Format.asprintf "%a" R.pp_error e)
+
 (* ---------------------------------------------------------------- *)
 (* Entry                                                            *)
 (* ---------------------------------------------------------------- *)
@@ -130,6 +167,10 @@ let () =
             test_build_request_user_agent_present
         ; test_case "body is { content: <content> } JSON" `Quick
             test_build_request_body_is_content_object
+        ; test_case "typing URL targets channel" `Quick
+            test_build_typing_request_url_targets_channel
+        ; test_case "typing Authorization uses Bot scheme" `Quick
+            test_build_typing_request_authorization_uses_bot_scheme
         ] )
     ; ( "parse_response"
       , [ test_case "2xx with id => Ok id" `Quick
@@ -144,5 +185,9 @@ let () =
             test_parse_response_5xx_non_json_is_http_status
         ; test_case "non-2xx JSON without envelope => Discord_api fallback"
             `Quick test_parse_response_non2xx_json_without_envelope_falls_back
+        ; test_case "empty 204 => Ok" `Quick
+            test_parse_empty_response_204_returns_ok
+        ; test_case "empty non-2xx Discord envelope => Discord_api"
+            `Quick test_parse_empty_response_discord_error_envelope
         ] )
     ]

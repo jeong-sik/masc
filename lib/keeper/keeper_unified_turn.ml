@@ -211,6 +211,14 @@ let run_keeper_cycle
               ~trajectory_outcome:Trajectory.Completed
               ~keeper_turn_id
               ();
+            Keeper_event_publisher.publish_runtime_execution_built
+              ~keeper_name:meta.name
+              ~runtime_id:initial_execution.runtime_id
+              ~max_tokens:initial_execution.max_tokens
+              ~max_context:initial_execution.max_context
+              ~effective_budget:initial_execution.max_context_resolution.effective_budget
+              ~temperature:initial_execution.temperature
+              ~generation;
             let turn_id = keeper_turn_id in
             (match
                Keeper_turn_livelock.guard_and_record_turn_start
@@ -265,7 +273,14 @@ let run_keeper_cycle
                    ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
                    ~generation:meta.runtime.generation ()
                in
-               let max_cost_usd = Keeper_config.keeper_tool_cost_max_usd () in
+               let max_cost_usd = None in
+               (* RFC-0225 §3.3: one carrier per cycle. The pre-request hook
+                  writes the effective turn policy here; the decision records
+                  below read the same cell, so a concurrent run of this keeper
+                  can never substitute its own identity. *)
+               let turn_ctx_cell =
+                 Keeper_tool_call_log.create_turn_ctx_cell ()
+               in
                (* 4. Build turn prompt callback: use our unified system prompt *)
                let build_turn_prompt ~base_system_prompt:_ ~messages:_
                  : Keeper_agent_run.turn_prompt
@@ -471,6 +486,7 @@ let run_keeper_cycle
                           ; last_provider_timeout_budget
                           ; max_cost_usd
                           ; meta
+                          ; turn_ctx_cell
                           ; observation
                           ; post_commit_failure_reason
                           ; profile_defaults
@@ -568,7 +584,7 @@ let run_keeper_cycle
                     (Trajectory.Gated "input_required");
                   Otel_metric_store.inc_counter
                     Keeper_metrics.(to_string Turns)
-                    ~labels:[ "keeper_name", meta.name; "outcome", "input_required" ]
+                    ~labels:[ "keeper", meta.name; "outcome", "input_required" ]
                     ();
                   cycle_completed := true;
                   post_turn_complete_task ~cycle_completed;
@@ -582,7 +598,6 @@ let run_keeper_cycle
                     (Trajectory.Failed (Agent_sdk.Error.to_string err));
                   let e_str = Agent_sdk.Error.to_string err in
                   let is_transient = EC.is_transient_network_error err in
-                  let is_tool_retry_exhausted = EC.is_tool_retry_exhausted_error err in
                   (match Keeper_turn_driver.classify_masc_internal_error err with
                    | Some (Keeper_turn_driver.Provider_timeout _) ->
                      Otel_metric_store.inc_counter
@@ -619,7 +634,7 @@ let run_keeper_cycle
                   let is_ambiguous_partial = ambiguous_commit_tools <> [] in
                   Otel_metric_store.inc_counter
                     Keeper_metrics.(to_string Turns)
-                    ~labels:[ "keeper_name", meta.name; "outcome", "failure" ]
+                    ~labels:[ "keeper", meta.name; "outcome", "failure" ]
                     ();
                   (if EC.is_provider_timeout_error err
                    then
@@ -667,8 +682,6 @@ let run_keeper_cycle
                      then " (ambiguous partial commit)"
                      else if is_server_parse_rejection
                      then " (server parse rejection, auto-recoverable)"
-                     else if is_tool_retry_exhausted
-                     then " (tool retry exhausted, auto-recoverable)"
                      else if is_transient
                      then " (transient, cooldown preserved)"
                      else if EC.should_warn_keeper_cycle_failed err
@@ -797,6 +810,7 @@ let run_keeper_cycle
                   Keeper_unified_metrics.append_decision_record
                     ~config
                     ~meta:updated_meta
+                    ~turn_ctx_cell
                     ~observation
                     ~latency_ms
                     ~outcome:(if is_ambiguous_partial then "partial" else "error")
@@ -875,6 +889,14 @@ dominant source of the observed CAS race exhaustion after
                     ~is_auto_recoverable
                     ~err
                     ~error_text:e_str;
+                  (* RFC-0221 §3.4: emit turn_completed telemetry on all exit paths
+                     after Agent.run() — success path emits via
+                     Keeper_unified_turn_success → keeper_unified_metrics_snapshot;
+                     failure path emits here directly. *)
+                  Otel_metric_store.inc_counter
+                    Keeper_metrics.(to_string TurnCompleted)
+                    ~labels:[("keeper", meta.name)]
+                    ();
                   Error err
                 | Ok result ->
                   let final_execution = !last_execution in
@@ -898,6 +920,7 @@ dominant source of the observed CAS race exhaustion after
                       ~config
                       ~base_dir
                       ~meta
+                      ~turn_ctx_cell
                       ~observation
                       ~previous_social_state
                       ~final_execution

@@ -73,7 +73,36 @@ val keeper_for_channel : channel_id:string -> string option
     Returns [None] when no binding exists, when the channel id is
     blank, or when the binding store is unreadable. *)
 
-(** Typed failure modes for {!send_message}. Closed sum — adding
+type keeper_binding_resolution = {
+  keeper_name : string;
+  incoming_channel_id : string;
+  bound_channel_id : string;
+  via_parent : bool;
+}
+
+val resolve_keeper_for_channel :
+  channel_id:string -> keeper_binding_resolution option
+(** Resolve the keeper for [channel_id]. Exact bindings win. If no
+    exact binding exists and [channel_id] is a Discord thread known
+    in the names side-store, its parent channel binding is used. *)
+
+val bound_channels : keeper_name:string -> string list
+(** Channel snowflakes bound to [keeper_name], freshly read from the
+    binding store on each call. Empty on blank name or unreadable
+    store. RFC-0223 P2 presence. *)
+
+val connected : unit -> bool
+(** Whether the in-process gateway's run loop currently reports
+    [Connected]. Reads {!Discord_gateway_client.connection_state};
+    no file indirection. RFC-0223 P2 presence. *)
+
+val record_ready : bot_user_id:string -> unit
+(** Called by the in-process gateway's READY handler. Stores the bot
+    identity and timestamp that {!status_json} reports as
+    [bot_user_id] / [last_ready_at]. Atomic write — safe to call from
+    the gateway fiber while HTTP handlers read. *)
+
+(** Typed failure modes for Discord REST actions. Closed sum — adding
     a new variant forces every consumer to handle it. *)
 type send_error =
   | Missing_token
@@ -86,11 +115,23 @@ val pp_send_error : Format.formatter -> send_error -> unit
 val send_message :
   channel_id:string ->
   content:string ->
+  ?reply_to_message_id:string ->
+  unit ->
   (string, send_error) result
-(** Post a single message to a Discord channel. Returns the created
-    message id on success. Bot token is resolved from
+(** Post a single message to a Discord channel.  When
+    [reply_to_message_id] is provided, the message is sent as a
+    reply (Discord threads the conversation).  Returns the created
+    message id on success.  Bot token is resolved from
     [DISCORD_BOT_TOKEN] at call time so a token rotation doesn't
     require a server restart.
 
     Must be called inside an Eio context (the underlying REST
     client uses the piaf-backed http pool). *)
+
+val trigger_typing :
+  channel_id:string ->
+  unit ->
+  (unit, send_error) result
+(** Trigger Discord's typing indicator for [channel_id]. Bot token is
+    resolved from [DISCORD_BOT_TOKEN] at call time, matching
+    {!send_message}. *)

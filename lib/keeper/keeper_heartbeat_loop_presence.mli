@@ -23,10 +23,7 @@ val note_turn_failures_preserved_after_heartbeat :
 val sync_keeper_presence :
   ctx:'a Keeper_types_profile.context ->
   meta_current:Keeper_meta_contract.keeper_meta ->
-  t_presence_start:float ->
   consecutive_failures:int ref ->
   last_successful_heartbeat_ts:float ref ->
-  work_as_hb:(unit -> bool) ->
-  max_silence:(unit -> float) ->
   Keeper_meta_contract.keeper_meta
 (** Publish keeper heartbeat presence and update failure counters. *)

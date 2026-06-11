@@ -19,7 +19,6 @@ type sdk_termination_semantics =
   | Oas_token_budget_exhausted
   | Oas_cost_budget_exhausted
   | Oas_cost_budget_unenforceable
-  | Oas_tool_retry_exhausted
   | Oas_guardrail_violation
   | Oas_tripwire_violation
   | Oas_input_required
@@ -71,7 +70,7 @@ val checkpoint_persistence_error
 
 (** Map an optional runtime observation to a typed runtime outcome
     ([Runtime_passed_to_next_model] / [Runtime_completed] /
-    [Runtime_not_observed]). *)
+    [Runtime_failed] / [Runtime_not_observed]). *)
 val runtime_outcome_of_observation
   :  Runtime_observation.runtime_observation option
   -> Keeper_execution_receipt.runtime_outcome

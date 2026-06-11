@@ -280,32 +280,32 @@ let emit_usage_metrics_and_log
   in
   Otel_metric_store.inc_counter
     Keeper_metrics.(to_string Turns)
-    ~labels:[ "keeper_name", updated_meta.name; "outcome", outcome_label ]
+    ~labels:[ "keeper", updated_meta.name; "outcome", outcome_label ]
     ();
   if usage_trusted
   then (
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string InputTokens)
-      ~labels:[ "keeper_name", updated_meta.name; "model", runtime_lane_label ]
+      ~labels:[ "keeper", updated_meta.name; "model", runtime_lane_label ]
       ~delta:(float_of_int result.usage.input_tokens)
       ();
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string OutputTokens)
-      ~labels:[ "keeper_name", updated_meta.name; "model", runtime_lane_label ]
+      ~labels:[ "keeper", updated_meta.name; "model", runtime_lane_label ]
       ~delta:(float_of_int result.usage.output_tokens)
       ();
     if result.usage.cache_creation_input_tokens > 0
     then
       Otel_metric_store.inc_counter
         Keeper_metrics.(to_string CacheCreationTokens)
-        ~labels:[ "keeper_name", updated_meta.name; "model", runtime_lane_label ]
+        ~labels:[ "keeper", updated_meta.name; "model", runtime_lane_label ]
         ~delta:(float_of_int result.usage.cache_creation_input_tokens)
         ();
     if result.usage.cache_read_input_tokens > 0
     then
       Otel_metric_store.inc_counter
         Keeper_metrics.(to_string CacheReadTokens)
-        ~labels:[ "keeper_name", updated_meta.name; "model", runtime_lane_label ]
+        ~labels:[ "keeper", updated_meta.name; "model", runtime_lane_label ]
         ~delta:(float_of_int result.usage.cache_read_input_tokens)
         ())
   else (
@@ -319,7 +319,7 @@ let emit_usage_metrics_and_log
          Otel_metric_store.inc_counter
            Keeper_metrics.(to_string UsageAnomalies)
            ~labels:
-             [ "keeper_name", updated_meta.name
+             [ "keeper", updated_meta.name
              ; "model", runtime_lane_label
              ; "reason", reason
              ]
@@ -395,18 +395,16 @@ let persist_success_meta ~config ~original_meta ~updated_meta =
 let reset_turn_failures_for_stop_reason ~config ~updated_meta result =
   match result.Keeper_agent_run.stop_reason with
   | Runtime_agent.TurnBudgetExhausted { turns_used; limit } ->
-    Log.Keeper.info
-      "keeper:%s turn budget exhausted (%d/%d), checkpoint saved — will resume next cycle"
-      updated_meta.name
+    Log.Keeper.info ~keeper_name:updated_meta.name
+      "turn budget exhausted (%d/%d), checkpoint saved — will resume next cycle"
       turns_used
       limit;
     Keeper_registry.reset_turn_failures
       ~base_path:config.Workspace.base_path
       updated_meta.name
   | Runtime_agent.MutationBoundaryReached { tool_name; _ } ->
-    Log.Keeper.info
-      "keeper:%s mutation boundary reached after %s, checkpoint saved — will resume next cycle"
-      updated_meta.name
+    Log.Keeper.info ~keeper_name:updated_meta.name
+      "mutation boundary reached after %s, checkpoint saved — will resume next cycle"
       (match tool_name with
        | Some tool -> tool
        | None -> "committed tool");
@@ -423,6 +421,7 @@ let handle
       ~config
       ~base_dir
       ~meta
+      ~turn_ctx_cell
       ~observation
       ~previous_social_state
       ~final_execution
@@ -504,6 +503,7 @@ let handle
   KUM.append_decision_record
     ~config
     ~meta:updated_meta
+    ~turn_ctx_cell
     ~observation
     ~latency_ms
     ~outcome:"success"

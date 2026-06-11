@@ -12,7 +12,6 @@ type try_runtime_ctx =
   ; name : string
   ; candidate_count : int
   ; configured_labels : string list
-  ; error_selected_model_raw : string option
   ; capture : Runtime_observation.runtime_metrics_capture
   ; runtime_strategy_name_ref : string option ref
   ; try_provider_ctx : Keeper_turn_driver_try_provider.try_provider_ctx
@@ -37,8 +36,6 @@ type try_runtime_ctx =
   ; record_provider_health_result :
       Runtime_candidate.t -> success:bool -> http_status:int option -> unit
   ; filter_provider_health_fail_open : Runtime_candidate.t list -> Runtime_candidate.t list
-  ; record_provider_health_error :
-      Runtime_candidate.t -> Provider_error.t -> unit
   ; wait_timeout_sec : float option
   ; turn_deadline : Runtime_deadline.t option
   }
@@ -131,7 +128,6 @@ let run
     ( pre_dispatch_required_tool_rejections_rev
     , ctx.candidate_count
     , ctx.configured_labels
-    , ctx.error_selected_model_raw
     , ctx.capture
     , ctx.runtime_mcp_policy
     , ctx.tools
@@ -144,7 +140,6 @@ let run
     , ctx.session_id
     , ctx.error_runtime_id_for_backpressure
     , ctx.filter_provider_health_fail_open
-    , ctx.record_provider_health_error
     , ctx.wait_timeout_sec
     , ctx.turn_deadline )
   in
@@ -168,6 +163,7 @@ let run
       (match result with
        | Ok run_result when ctx.accept run_result.Runtime_agent.response ->
          Keeper_turn_driver_provider_attempt.record_candidate_health_success
+           ~keeper_name:ctx.keeper_name
            candidate
            ~latency_ms;
          ctx.record_provider_health_result candidate ~success:true ~http_status:None;
@@ -176,6 +172,7 @@ let run
        | Ok run_result ->
          let reason = "accept predicate rejected runtime response" in
          Keeper_turn_driver_provider_attempt.record_candidate_health_rejected
+           ~keeper_name:ctx.keeper_name
            candidate
            ~reason;
          let last_err =
@@ -186,6 +183,7 @@ let run
          else loop checkpoint_after last_err rest
        | Error err ->
          Keeper_turn_driver_provider_attempt.record_candidate_health_error
+           ~keeper_name:ctx.keeper_name
            candidate
            err;
          let http_err = sdk_error_to_http_error err in

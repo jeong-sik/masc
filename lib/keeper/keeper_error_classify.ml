@@ -181,31 +181,8 @@ let is_receipt_lost_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Io _ -> false
   | Agent_sdk.Error.Orchestration _ -> false
 
-(** Provider-level timeout (not structural OAS wall-clock budget). *)
 let is_provider_timeout_error (err : Agent_sdk.Error.sdk_error) : bool =
-  match err with
-  | Agent_sdk.Error.Api (Timeout _) -> true
-  | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _) -> true
-  (* Not a provider-level timeout. *)
-  | Agent_sdk.Error.Api (NetworkError _ | Overloaded _ | ServerError _
-    | RateLimited _ | AuthError _ | InvalidRequest _ | NotFound _
-    | ContextOverflow _) -> false
-  | Agent_sdk.Error.Provider
-      (Llm_provider.Error.NetworkError _ | Llm_provider.Error.ServerError _
-      | Llm_provider.Error.RateLimit _ | Llm_provider.Error.AuthError _
-      | Llm_provider.Error.MissingApiKey _ | Llm_provider.Error.NotFound _
-      | Llm_provider.Error.CapacityExhausted _ | Llm_provider.Error.HardQuota _
-      | Llm_provider.Error.InvalidRequest _ | Llm_provider.Error.InvalidConfig _
-      | Llm_provider.Error.ParseError _ | Llm_provider.Error.ProviderUnavailable _
-      | Llm_provider.Error.ProviderTerminal _
-      | Llm_provider.Error.UnknownVariant _) -> false
-  | Agent_sdk.Error.Agent _ -> false
-  | Agent_sdk.Error.Mcp _ -> false
-  | Agent_sdk.Error.Config _ -> false
-  | Agent_sdk.Error.Serialization _ -> false
-  | Agent_sdk.Error.Io _ -> false
-  | Agent_sdk.Error.Orchestration _ -> false
-  | Agent_sdk.Error.Internal _ -> false
+  Keeper_provider_runtime_boundary.is_provider_timeout_error err
 
 (* 524 is Cloudflare's "origin responded too slowly" timeout. At keeper
    orchestration level this means the current provider lane is saturated or
@@ -218,10 +195,6 @@ let is_auto_recoverable_runtime_exhausted_error (err : Agent_sdk.Error.sdk_error
   | Some
       (Keeper_turn_driver.Runtime_exhausted
          { reason = Keeper_turn_driver.Candidates_filtered_after_cycles; _ }) ->
-      true
-  | Some
-      (Keeper_turn_driver.Runtime_exhausted
-         { reason = Keeper_turn_driver.Max_turns_exceeded; _ }) ->
       true
   | Some
       (Keeper_turn_driver.Runtime_exhausted
@@ -268,7 +241,6 @@ let is_resumable_cli_session_error (err : Agent_sdk.Error.sdk_error) : bool =
 let is_auto_recoverable_runtime_fail_open_error
     (err : Agent_sdk.Error.sdk_error) : bool =
   Keeper_turn_driver.sdk_error_is_hard_quota err
-  || Keeper_turn_driver.sdk_error_is_max_turns_exceeded err
   || is_resumable_cli_session_error err
   || is_auto_recoverable_runtime_exhausted_error err
 
@@ -279,7 +251,6 @@ let is_auto_recoverable_runtime_fail_open_error
    [degraded_retry_reason_to_string]. *)
 type degraded_retry_reason =
   | Hard_quota
-  | Max_turns
   | Resumable_cli_session
   | Admission_queue_timeout
   | Provider_timeout
@@ -293,7 +264,6 @@ type degraded_retry_reason =
 
 let degraded_retry_reason_to_string = function
   | Hard_quota -> "hard_quota"
-  | Max_turns -> "max_turns"
   | Resumable_cli_session -> "resumable_cli_session"
   | Admission_queue_timeout -> "admission_queue_timeout"
   | Provider_timeout -> "provider_timeout"
@@ -358,8 +328,6 @@ let degraded_retry_after_recoverable_error
   then None
   else if Keeper_turn_driver.sdk_error_is_hard_quota err then
     phase_recovery_retry Hard_quota
-  else if Keeper_turn_driver.sdk_error_is_max_turns_exceeded err then
-    phase_recovery_retry Max_turns
   else
     match Keeper_turn_driver.classify_masc_internal_error err with
     | Some (Keeper_turn_driver.Resumable_cli_session _) ->
@@ -381,10 +349,7 @@ let degraded_retry_after_recoverable_error
            { reason = Keeper_turn_driver.Candidates_filtered_after_cycles; _ }) ->
         phase_recovery_retry Runtime_candidates_filtered
     | Some
-        (Keeper_turn_driver.Runtime_exhausted
-           { reason = Keeper_turn_driver.Max_turns_exceeded; _ }) ->
-        phase_recovery_retry Max_turns
-    | Some (Keeper_turn_driver.Runtime_exhausted _)
+        (Keeper_turn_driver.Runtime_exhausted _)
     | Some (Keeper_turn_driver.Accept_rejected _)
     | Some (Keeper_turn_driver.Admission_queue_rejected _)
     | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
@@ -400,8 +365,6 @@ let degraded_retry_after_recoverable_error
 let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
   if Keeper_turn_driver.sdk_error_is_hard_quota err then
     Some Hard_quota
-  else if Keeper_turn_driver.sdk_error_is_max_turns_exceeded err then
-    Some Max_turns
   else
     match Keeper_turn_driver.classify_masc_internal_error err with
     | Some (Keeper_turn_driver.Resumable_cli_session _) ->
@@ -423,10 +386,7 @@ let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
            { reason = Keeper_turn_driver.Candidates_filtered_after_cycles; _ }) ->
         Some Runtime_candidates_filtered
     | Some
-        (Keeper_turn_driver.Runtime_exhausted
-           { reason = Keeper_turn_driver.Max_turns_exceeded; _ }) ->
-        Some Max_turns
-    | Some (Keeper_turn_driver.Runtime_exhausted _) ->
+        (Keeper_turn_driver.Runtime_exhausted _) ->
         (* Generic runtime exhaustion: all candidates failed without a more
            specific reason. Treat as recoverable so declarative
            [fallback_runtime] hints declared in runtime.toml actually
@@ -643,39 +603,23 @@ let degraded_rotation_after_recoverable_error
          (* Contract violation: all candidates exhausted. Cap rotation. *)
          None)
 
-let is_tool_retry_exhausted_error (err : Agent_sdk.Error.sdk_error) : bool =
-  match err with
-  | Agent_sdk.Error.Agent (ToolRetryExhausted _) -> true
-  | Agent_sdk.Error.Api _
-  | Agent_sdk.Error.Provider _
-  | Agent_sdk.Error.Agent _
-  | Agent_sdk.Error.Mcp _
-  | Agent_sdk.Error.Config _
-  | Agent_sdk.Error.Serialization _
-  | Agent_sdk.Error.Io _
-  | Agent_sdk.Error.Orchestration _
-  | Agent_sdk.Error.Internal _ -> false
-
 let is_auto_recoverable_turn_error (err : Agent_sdk.Error.sdk_error) : bool =
   is_transient_network_error err
   || is_server_rejected_parse_error err
-  || is_tool_retry_exhausted_error err
-  || Keeper_turn_driver.sdk_error_is_max_turns_exceeded err
-  || is_resumable_cli_session_error err
   || is_auto_recoverable_runtime_exhausted_error err
 
 let should_warn_keeper_cycle_failed (err : Agent_sdk.Error.sdk_error) : bool =
-  if is_tool_retry_exhausted_error err
+  if Keeper_provider_runtime_boundary.is_provider_timeout_error err
   then true
   else
-  match Keeper_turn_driver.classify_masc_internal_error err with
-  | Some (Keeper_turn_driver.Provider_timeout _) -> true
+    match Keeper_turn_driver.classify_masc_internal_error err with
   | Some (Keeper_turn_driver.Capacity_backpressure _) -> true
   | Some (Keeper_turn_driver.Runtime_exhausted _)
   | Some (Keeper_turn_driver.Resumable_cli_session _)
   | Some (Keeper_turn_driver.Accept_rejected _)
   | Some (Keeper_turn_driver.Admission_queue_timeout _)
   | Some (Keeper_turn_driver.Admission_queue_rejected _)
+  | Some (Keeper_turn_driver.Provider_timeout _)
   | Some (Keeper_turn_driver.Turn_timeout _)
   | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
   | Some (Keeper_turn_driver.Ambiguous_post_commit _)
@@ -730,7 +674,6 @@ let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Agent (CostBudgetUnenforceable _)
   | Agent_sdk.Error.Agent (UnrecognizedStopReason _)
   | Agent_sdk.Error.Agent (IdleDetected _)
-  | Agent_sdk.Error.Agent (ToolRetryExhausted _)
   | Agent_sdk.Error.Agent (GuardrailViolation _)
   | Agent_sdk.Error.Agent (TripwireViolation _)
   | Agent_sdk.Error.Agent (ExitConditionMet _) -> false
@@ -768,7 +711,6 @@ let is_input_required_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Agent (TokenBudgetExceeded _)
   | Agent_sdk.Error.Agent (UnrecognizedStopReason _)
   | Agent_sdk.Error.Agent (IdleDetected _)
-  | Agent_sdk.Error.Agent (ToolRetryExhausted _)
   | Agent_sdk.Error.Agent (GuardrailViolation _)
   | Agent_sdk.Error.Agent (TripwireViolation _)
   | Agent_sdk.Error.Agent (ExitConditionMet _) -> false

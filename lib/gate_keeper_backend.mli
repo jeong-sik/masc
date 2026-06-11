@@ -21,6 +21,7 @@ val dispatch :
   channel_user_name:string ->
   channel_workspace_id:string ->
   keeper_name:string ->
+  metadata:(string * string) list ->
   content:string ->
   Gate_protocol.dispatch_result
 (** Build a keeper context, call [Keeper_tool_surface.dispatch], and parse
@@ -42,10 +43,22 @@ val contextualize_message :
   channel_user_id:string ->
   channel_user_name:string ->
   channel_workspace_id:string ->
+  metadata:(string * string) list ->
   content:string ->
   string
 (** Render a stable external-channel context envelope ahead of the raw
     user message so keeper memory can retain actor/channel metadata. *)
+
+val persist_connector_assistant_reply :
+  base_dir:string ->
+  keeper_name:string ->
+  source:string ->
+  ?conversation_id:string ->
+  reply:string ->
+  unit ->
+  unit
+(** Persist a completed connector direct reply on the same chat lane that
+    received the inbound user line. Empty replies are ignored. *)
 
 val filesystem_safe_or_unknown : string -> string
 (** Sanitize a value for use as a filesystem path component.

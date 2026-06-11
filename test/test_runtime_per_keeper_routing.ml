@@ -394,6 +394,104 @@ let test_turn_budget_uses_routed_runtime () =
       budget)
 ;;
 
+(* ---- per-model thinking gate: runtime.toml [thinking-support] drives the
+   keeper thinking seed via [Runtime_inference.for_runtime] ----
+
+   The keeper turn loop ([Keeper_run_tools_hooks]) treats the seed's
+   [thinking_enabled] as the runtime model's explicit policy: [Some false]
+   forces thinking off, [Some true] enables thinking even when the global
+   default is off, and [None] leaves the caller policy unchanged. *)
+
+let runtime_config_thinking =
+  {|
+[runtime]
+default = "ollama_cloud.think"
+
+[providers.ollama_cloud]
+display-name = "Ollama Cloud"
+protocol = "provider_d-http"
+endpoint = "https://ollama.example/v1"
+
+[models.think]
+api-name = "think"
+max-context = 128000
+tools-support = true
+thinking-support = true
+preserve-thinking = true
+streaming = true
+
+[models.nothink]
+api-name = "nothink"
+max-context = 128000
+tools-support = true
+thinking-support = false
+streaming = true
+
+[ollama_cloud.think]
+is-default = true
+max-concurrent = 1
+
+[ollama_cloud.nothink]
+max-concurrent = 1
+|}
+;;
+
+let with_runtime_thinking f =
+  with_temp_dir "runtime-thinking-gate" @@ fun dir ->
+  let path = Filename.concat dir "runtime.toml" in
+  write_file path runtime_config_thinking;
+  (match Runtime.init_default ~config_path:path with
+   | Ok () -> ()
+   | Error msg -> Alcotest.failf "runtime init_default failed: %s" msg);
+  f ()
+;;
+
+let test_thinking_support_true_enables_thinking_and_preserves () =
+  with_runtime_thinking (fun () ->
+    let seed = Runtime_inference.for_runtime ~name:"ollama_cloud.think" in
+    Alcotest.(check (option bool))
+      "thinking-support true emits Some true"
+      (Some true)
+      seed.Runtime_inference.thinking_enabled;
+    Alcotest.(check (option bool))
+      "preserve-thinking true emits Some true"
+      (Some true)
+      seed.Runtime_inference.preserve_thinking)
+;;
+
+let test_thinking_support_false_forces_off () =
+  with_runtime_thinking (fun () ->
+    let seed = Runtime_inference.for_runtime ~name:"ollama_cloud.nothink" in
+    Alcotest.(check (option bool))
+      "non-thinking model emits Some false (capability gate forces thinking off)"
+      (Some false)
+      seed.Runtime_inference.thinking_enabled)
+;;
+
+let test_thinking_unknown_runtime_defers () =
+  with_runtime_thinking (fun () ->
+    let seed = Runtime_inference.for_runtime ~name:"bogus.binding" in
+    Alcotest.(check (option bool))
+      "unknown runtime id emits None (no per-model signal)"
+      None
+      seed.Runtime_inference.thinking_enabled)
+;;
+
+let test_seed_of_thinking_support_gate_contract () =
+  Alcotest.(check (option bool))
+    "Some false -> force thinking off"
+    (Some false)
+    (Runtime_inference.seed_of_thinking_support (Some false)).Runtime_inference.thinking_enabled;
+  Alcotest.(check (option bool))
+    "Some true -> enable thinking"
+    (Some true)
+    (Runtime_inference.seed_of_thinking_support (Some true)).Runtime_inference.thinking_enabled;
+  Alcotest.(check (option bool))
+    "None -> leave caller policy unchanged"
+    None
+    (Runtime_inference.seed_of_thinking_support None).Runtime_inference.thinking_enabled
+;;
+
 let () =
   Alcotest.run
     "runtime_per_keeper_routing"
@@ -448,6 +546,24 @@ let () =
             "turn budget uses the routed runtime"
             `Quick
             test_turn_budget_uses_routed_runtime
+        ] )
+    ; ( "per-model thinking gate"
+      , [ Alcotest.test_case
+            "thinking-support=true enables thinking and preserve-thinking"
+            `Quick
+            test_thinking_support_true_enables_thinking_and_preserves
+        ; Alcotest.test_case
+            "thinking-support=false forces thinking off (Some false)"
+            `Quick
+            test_thinking_support_false_forces_off
+        ; Alcotest.test_case
+            "unknown runtime id defers (None)"
+            `Quick
+            test_thinking_unknown_runtime_defers
+        ; Alcotest.test_case
+            "seed_of_thinking_support gate contract (pure)"
+            `Quick
+            test_seed_of_thinking_support_gate_contract
         ] )
     ]
 ;;

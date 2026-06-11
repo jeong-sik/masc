@@ -3,27 +3,8 @@
    [handle_tool_execute] lives in [Keeper_tool_execute_runtime].
    [handle_tool_search_files] lives in [Keeper_workspace_ops]. *)
 
-type shell_op = Keeper_workspace_op.t =
-  | Pwd
-  | Ls
-  | Cat
-  | Rg
-  | Git_status
-  | Find
-  | Head
-  | Tail
-  | Wc
-  | Tree
-  | Git_log
-  | Git_diff
-
-let shell_op_to_string = Keeper_workspace_op.to_string
-let all_shell_ops = Keeper_workspace_op.all
-let valid_shell_op_strings = Keeper_workspace_op.valid_strings
 let readonly_hint_of_category = Keeper_tool_execute_readonly_policy.readonly_hint_of_category
 let diagnosis_of_block_reason = Keeper_tool_execute_readonly_policy.diagnosis_of_block_reason
-let tool_dispatch_min_timeout_sec = Keeper_tool_execute_timeout.tool_dispatch_min_timeout_sec
-let keeper_tool_execute_shell_ir_native_min_timeout_sec = Keeper_tool_execute_timeout.keeper_tool_execute_shell_ir_native_min_timeout_sec
 let rewrite_turn_runtime_paths_to_host =
   Keeper_tool_execute_runtime_paths.rewrite_turn_runtime_paths_to_host
 

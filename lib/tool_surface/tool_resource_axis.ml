@@ -199,7 +199,6 @@ let classify_catalog_tool ~tool_name =
   | "masc_board_vote" -> Some Board_write
   | "masc_add_task"
   | "masc_batch_add_tasks"
-  | "masc_claim_next"
   | "masc_deliver"
   | "masc_goal_transition"
   | "masc_goal_upsert"
@@ -215,12 +214,11 @@ let classify_catalog_tool ~tool_name =
   | "masc_tool_revoke"
   | "masc_transition"
   | "masc_update_priority" -> Some Workspace_write
-  | "masc_agent_update"
   | "masc_broadcast"
   | "masc_cleanup_zombies"
   | "masc_gc" -> Some Generic_write
   | "masc_board_curation_read"
-  | "masc_board_get"
+  | "masc_board_post_get"
   | "masc_board_hearths"
   | "masc_board_list"
   | "masc_board_profile"

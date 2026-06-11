@@ -107,15 +107,15 @@ let run_grpc_heartbeat_fiber
       ~(interval_sec : float)
       ~(clock : _ Eio.Time.clock)
   =
-  match Eio_context.get_switch_opt (), Atomic.get grpc_env_ref with
-  | None, _ | _, None ->
+  match Atomic.get grpc_env_ref with
+  | None ->
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string HeartbeatFailures)
-      ~labels:[ "keeper", agent_name; "site", "grpc_no_eio_context" ]
+      ~labels:[ "keeper", agent_name; "site", "grpc_no_env" ]
       ();
-    Log.Keeper.warn "gRPC heartbeat: Eio context or env not available";
+    Log.Keeper.warn "gRPC heartbeat: Eio env not available";
     None
-  | Some grpc_sw, Some env ->
+  | Some env ->
     let close_ref = Atomic.make false in
     Eio.Fiber.fork ~sw (fun () ->
       let rec connect_loop attempts =
@@ -133,7 +133,7 @@ let run_grpc_heartbeat_fiber
             agent_name)
         else (
           let send, recv, close_stream =
-            Masc_grpc_client.heartbeat_stream grpc_client ~sw:grpc_sw ~env
+            Masc_grpc_client.heartbeat_stream grpc_client ~sw ~env
           in
           (try
              run_grpc_heartbeat_stream
@@ -181,8 +181,9 @@ let start_keeper_grpc_heartbeat
         m.name
         (Int64.of_float (Time_compat.now () *. 1000.0))
     in
+    let sw = Option.value (Keeper_supervisor.get_global_switch ()) ~default:ctx.sw in
     run_grpc_heartbeat_fiber
-      ~sw:ctx.sw
+      ~sw
       ~stop
       ~grpc_client:client
       ~config:ctx.config

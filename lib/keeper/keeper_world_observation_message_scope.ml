@@ -44,64 +44,137 @@ let is_keeper_authored_message author =
   Option.is_some (Keeper_identity.canonical_keeper_name_from_agent_name author)
 ;;
 
-(** Prefix for chat cursor keys stored in [oas_env]. *)
-let chat_cursor_oas_key_prefix = "MASC_KEEPER_OAS_CHAT_CURSOR_"
-
-(** [cursor_key_of_keeper_name name] builds the oas_env key for
-    storing the per-keeper chat cursor (line count). *)
-let cursor_key_of_keeper_name name =
-  let sanitized = String.uppercase_ascii name in
-  chat_cursor_oas_key_prefix ^ sanitized
+(* Trim non-word characters from both ends of a token, keeping internal ones.
+   Word chars are [a-z0-9@_-]; '.' is NOT a word char, so "@dreamer." trims to
+   "@dreamer" while the internal '.' in "email@dreamer.com" is preserved (the
+   whole token stays "email@dreamer.com" and never equals "@dreamer"). *)
+let trim_token_edges s =
+  let is_word c =
+    (c >= 'a' && c <= 'z')
+    || (c >= '0' && c <= '9')
+    || c = '@'
+    || c = '_'
+    || c = '-'
+  in
+  let n = String.length s in
+  let i = ref 0 in
+  let j = ref (n - 1) in
+  while !i < n && not (is_word s.[!i]) do incr i done;
+  while !j >= !i && not (is_word s.[!j]) do decr j done;
+  if !j < !i then "" else String.sub s !i (!j - !i + 1)
 ;;
 
-(** [read_cursor_from_meta ~meta ~keeper_name] reads the current
-    positional watermark (line count) for a keeper from meta.oas_env.
-    Returns 0 when absent. *)
-let read_cursor_from_meta ~(meta : keeper_meta) ~keeper_name : int =
-  let key = cursor_key_of_keeper_name keeper_name in
-  match List.assoc_opt key meta.oas_env with
-  | Some raw -> (try int_of_string raw with _ -> 0)
-  | None -> 0
+(* A line mentions a target when some whitespace token equals "@<target>"
+   after edge-trimming. Token equality (not substring) is why "@dreamerx" and
+   "email@dreamer.com" do not match "@dreamer". *)
+let line_mentions ~(targets : string list) (content : string) : bool =
+  let needles =
+    List.filter_map
+      (fun target ->
+        let t = String.lowercase_ascii (String.trim target) in
+        if t = "" then None else Some ("@" ^ t))
+      targets
+  in
+  if needles = []
+  then false
+  else (
+    let normalized =
+      String.map
+        (fun c -> match c with '\t' | '\n' | '\r' -> ' ' | _ -> c)
+        (String.lowercase_ascii content)
+    in
+    String.split_on_char ' ' normalized
+    |> List.exists (fun token -> List.mem (trim_token_edges token) needles))
 ;;
 
-(** [chat_line_count ~base_dir ~keeper_name] returns the number of
-    JSONL lines in the keeper's chat store file. *)
-let chat_line_count ~base_dir ~keeper_name : int =
-  let messages = Keeper_chat_store.load ~base_dir ~keeper_name in
-  List.length messages
+let speaker_display (m : Keeper_chat_store.chat_message) : string =
+  let from_speaker =
+    match m.speaker with
+    | Some (s : Keeper_chat_store.speaker) -> s.speaker_name
+    | None -> None
+  in
+  match from_speaker with
+  | Some name when String.trim name <> "" -> name
+  | _ ->
+    (match m.source with
+     | Some src when String.trim src <> "" -> src
+     | _ -> "someone")
+;;
+
+(* RFC-0230: the lane is the state. A mention is pending when it arrives after
+   the keeper's own last lane line; the keeper replying (a new assistant line,
+   written when it posts to the lane) advances that watermark and clears the
+   mention. No cursor, no stored engagement — "have I answered" is "is the
+   mention newer than my last line". An unanswered mention stays pending across
+   observations (it keeps the keeper reactive until it replies in the lane).
+
+   Pure over the loaded lane so it is testable without I/O; [collect_message_scope]
+   only adds the [Keeper_chat_store.load]. *)
+
+(* The watermark: ts of the keeper's own last lane line (assistant role). A user
+   line at or before it is already answered. *)
+let last_self_ts (messages : Keeper_chat_store.chat_message list) : float =
+  List.fold_left
+    (fun acc (m : Keeper_chat_store.chat_message) ->
+      match m.ts with
+      | Some ts when m.role = "assistant" && ts > acc -> ts
+      | _ -> acc)
+    0.0
+    messages
+;;
+
+let is_owner_authored (m : Keeper_chat_store.chat_message) : bool =
+  match m.speaker with
+  | Some (s : Keeper_chat_store.speaker) -> s.speaker_authority = Keeper_chat_store.Owner
+  | None -> false
+;;
+
+let pending_mentions_of_messages
+      ~(targets : string list)
+      (messages : Keeper_chat_store.chat_message list)
+  : (string * string) list
+  =
+  let my_last_ts = last_self_ts messages in
+  List.filter_map
+    (fun (m : Keeper_chat_store.chat_message) ->
+      match m.ts with
+      | Some ts when ts > my_last_ts && m.role = "user" && line_mentions ~targets m.content
+        -> Some (speaker_display m, m.content)
+      | _ -> None)
+    messages
+;;
+
+(* RFC-0230 P2 — scope messages: a keeper's lane is, in practice, an operator
+   (Owner) conversation. The operator often addresses the keeper without an
+   "@name", so an unanswered Owner line that is not already a mention is a scope
+   message. External (connector) chatter without a mention is ignored, so a busy
+   channel does not flood the keeper. Same watermark as mentions; the mention
+   exclusion keeps the two reactive signals disjoint. *)
+let pending_scope_of_messages
+      ~(targets : string list)
+      (messages : Keeper_chat_store.chat_message list)
+  : (string * string) list
+  =
+  let my_last_ts = last_self_ts messages in
+  List.filter_map
+    (fun (m : Keeper_chat_store.chat_message) ->
+      match m.ts with
+      | Some ts
+        when ts > my_last_ts
+             && m.role = "user"
+             && is_owner_authored m
+             && not (line_mentions ~targets m.content) -> Some (speaker_display m, m.content)
+      | _ -> None)
+    messages
 ;;
 
 let collect_message_scope ~(config : Workspace.config) ~(meta : keeper_meta)
-  : (string * string) list * (string * string) list * (string * int) list
+  : (string * string) list * (string * string) list
   =
+  let messages =
+    Keeper_chat_store.load ~base_dir:config.base_path ~keeper_name:meta.name
+  in
   let targets = message_feed_targets meta in
-  let base_dir = config.base_path in
-  let updates =
-    List.filter_map (fun name ->
-      let current_cursor = read_cursor_from_meta ~meta ~keeper_name:name in
-      let actual_line_count = chat_line_count ~base_dir ~keeper_name:name in
-      if actual_line_count > current_cursor then
-        Some (name, actual_line_count)
-      else
-        None
-    ) targets
-  in
-  [], [], updates
-;;
-
-let apply_message_cursor_updates (meta : keeper_meta) (updates : (string * int) list)
-  : keeper_meta
-  =
-  let new_entries =
-    List.map (fun (name, cursor) ->
-      (cursor_key_of_keeper_name name, string_of_int cursor)
-    ) updates
-  in
-  let merged =
-    List.fold_left (fun acc (k, v) ->
-      (* Replace existing entry or add new *)
-      (k, v) :: List.filter (fun (k', _) -> k' <> k) acc
-    ) meta.oas_env new_entries
-  in
-  { meta with oas_env = merged }
+  ( pending_mentions_of_messages ~targets messages
+  , pending_scope_of_messages ~targets messages )
 ;;

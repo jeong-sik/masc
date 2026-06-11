@@ -48,6 +48,7 @@ type ctx =
   ; last_provider_timeout_budget : provider_timeout_budget option ref
   ; max_cost_usd : float option
   ; meta : keeper_meta
+  ; turn_ctx_cell : Keeper_tool_call_log.turn_ctx_cell
   ; observation : Keeper_world_observation.world_observation
   ; post_commit_failure_reason : Keeper_registry.failure_reason option ref
   ; profile_defaults : Keeper_types_profile.keeper_profile_defaults
@@ -78,13 +79,14 @@ let run (ctx : ctx)
       ~(user_message : string)
       ~(registry_base_path : string)
       ~(degraded_retry_slot_phase_budget_sec : float)
-      ~(record_streaming_cancelled_observation : config:Workspace.config -> run_meta:keeper_meta -> run_generation:int -> runtime_id:string -> keeper_turn_id:int -> unit -> unit)
+      ~(record_streaming_cancelled_observation : ?cancel_reason:string -> config:Workspace.config -> run_meta:keeper_meta -> run_generation:int -> runtime_id:string -> keeper_turn_id:int -> unit -> unit)
       ~(runtime_id_of_meta : keeper_meta -> string)
       ~(start_background_turn_event_bus_drain : clock:float Eio.Time.clock_ty Eio.Resource.t -> unit)
   : (Keeper_agent_run.run_result, Agent_sdk.Error.sdk_error) result
 =
   let { config
       ; meta
+      ; turn_ctx_cell
       ; observation
       ; generation
       ; keeper_turn_id
@@ -123,7 +125,6 @@ let run (ctx : ctx)
         ~run_generation
         ~is_retry
         ~oas_timeout_s
-        ~attempt_watchdog_s
     =
     last_execution := execution;
     Otel_genai.with_keeper_turn_span
@@ -142,21 +143,17 @@ let run (ctx : ctx)
         (Option.map
            Keeper_id.Task_id.to_string
            run_meta.current_task_id)
-      (fun () ->
+      (fun trace_link ->
          Keeper_registry.mark_turn_provider_attempt_started
            ~base_path:config.base_path
            meta.name;
-         Keeper_turn_fsm.emit_transition
-           ~keeper_name:meta.name
-           ~turn_id:keeper_turn_id
-           ~prev:Keeper_turn_fsm.Awaiting_provider
-           Keeper_turn_fsm.Streaming;
          Keeper_unified_turn_attempt_watchdog.dispatch
            ~clock
-           ~attempt_watchdog_s
-           ~oas_timeout_s
-           ~on_cancelled:(fun () ->
+           ~keeper_name:meta.name
+           ~attempt_watchdog_s:None
+           ~on_cancelled:(fun reason ->
              record_streaming_cancelled_observation
+               ~cancel_reason:reason
                ~config
                ~run_meta
                ~run_generation
@@ -164,9 +161,20 @@ let run (ctx : ctx)
                ~keeper_turn_id
                ())
            ~run:(fun () ->
+             (* Emit INSIDE the watchdog window: the 2026-06-10 freeze showed
+                this transition's forensics append can park, and any park
+                before [dispatch] arms its [Eio.Time.with_timeout_exn] is
+                unrescuable by design — the safety cap must cover everything
+                that happens once the keeper claims to be Streaming. *)
+             Keeper_turn_fsm.emit_transition
+               ~keeper_name:meta.name
+               ~turn_id:keeper_turn_id
+               ~prev:Keeper_turn_fsm.Awaiting_provider
+               Keeper_turn_fsm.Streaming;
              Keeper_agent_run.run_turn
                ~config
                ~meta:run_meta
+               ~turn_ctx_cell
                ~base_dir
                ~max_context:execution.max_context
                ~build_turn_prompt
@@ -204,6 +212,7 @@ let run (ctx : ctx)
                ~is_retry
                ?shared_context
                ?event_bus:(Keeper_event_bus.get ())
+               ?trace_link:(trace_link ())
                ()))
   in
   let rec retry_loop (input : retry_loop_input) =
@@ -280,18 +289,12 @@ let run (ctx : ctx)
       in
       attempt_provider_timeout_budget := Some provider_timeout_budget;
       last_provider_timeout_budget := Some provider_timeout_budget;
-      let attempt_watchdog_s =
-        attempt_watchdog_timeout_sec_opt
-          ~remaining_turn_budget_s:(remaining_turn_budget_s ())
-          provider_timeout_budget
-      in
       do_run
         ~execution
         ~run_meta
         ~run_generation
         ~is_retry
         ~oas_timeout_s:provider_timeout_budget.effective_timeout_sec
-        ~attempt_watchdog_s
     in
     match attempt_result with
     | Ok result ->
@@ -417,6 +420,15 @@ let run (ctx : ctx)
             err
         with
         | Degraded_retry_allowed degraded_retry ->
+          Keeper_unified_turn_cascade_resolution.publish_cascade_resolution
+            ~keeper_name:meta.name
+            ~runtime_id:execution.runtime_id
+            ~decision:Degraded_retry_allowed
+            ~reason:(EC.degraded_retry_reason_to_string degraded_retry.fallback_reason)
+            ~next_runtime:(Some degraded_retry.next_runtime)
+            ~attempt
+            ~error_kind:(Some (Keeper_agent_error.sdk_error_kind err))
+            ~error_message:(Some (Agent_sdk.Error.to_string err));
           (match
              Keeper_unified_turn_pre_dispatch
              .build_runtime_execution
@@ -504,6 +516,15 @@ let run (ctx : ctx)
                    next_execution_runtime_id :: attempted_runtimes
                })
         | Degraded_retry_slot_phase_exhausted degraded_retry ->
+          Keeper_unified_turn_cascade_resolution.publish_cascade_resolution
+            ~keeper_name:meta.name
+            ~runtime_id:execution.runtime_id
+            ~decision:Degraded_retry_slot_phase_exhausted
+            ~reason:(EC.degraded_retry_reason_to_string degraded_retry.fallback_reason)
+            ~next_runtime:(Some degraded_retry.next_runtime)
+            ~attempt
+            ~error_kind:(Some (Keeper_agent_error.sdk_error_kind err))
+            ~error_message:(Some (Agent_sdk.Error.to_string err));
           let productive_phase_elapsed_ms, retry_phase_elapsed_ms =
             current_turn_phase_elapsed_ms ()
           in
@@ -533,6 +554,15 @@ let run (ctx : ctx)
         | No_degraded_retry
           when EC.is_transient_network_error err
                && attempt <= EC.max_transient_retries () ->
+          Keeper_unified_turn_cascade_resolution.publish_cascade_resolution
+            ~keeper_name:meta.name
+            ~runtime_id:execution.runtime_id
+            ~decision:Transient_network_retry
+            ~reason:"transient_network_error"
+            ~next_runtime:None
+            ~attempt
+            ~error_kind:(Some (Keeper_agent_error.sdk_error_kind err))
+            ~error_message:(Some (Agent_sdk.Error.to_string err));
           let delay = EC.transient_backoff_sec attempt in
           Log.Keeper.warn
             "%s: transient network error runtime=%s max_context=%d \
@@ -574,6 +604,15 @@ let run (ctx : ctx)
             ; attempted_runtimes
             }
         | No_degraded_retry when EC.is_context_overflow err ->
+          Keeper_unified_turn_cascade_resolution.publish_cascade_resolution
+            ~keeper_name:meta.name
+            ~runtime_id:execution.runtime_id
+            ~decision:No_degraded_retry
+            ~reason:"context_overflow_after_oas_retry"
+            ~next_runtime:None
+            ~attempt
+            ~error_kind:(Some (Keeper_agent_error.sdk_error_kind err))
+            ~error_message:(Some (Agent_sdk.Error.to_string err));
           let current_turn_event_bus =
             drain_turn_event_bus ~site:"context_overflow_capture" ()
           in
@@ -609,6 +648,15 @@ let run (ctx : ctx)
           mark_terminal_error err;
           Error err
         | No_degraded_retry ->
+          Keeper_unified_turn_cascade_resolution.publish_cascade_resolution
+            ~keeper_name:meta.name
+            ~runtime_id:execution.runtime_id
+            ~decision:No_degraded_retry
+            ~reason:"terminal_error_no_degraded_retry"
+            ~next_runtime:None
+            ~attempt
+            ~error_kind:(Some (Keeper_agent_error.sdk_error_kind err))
+            ~error_message:(Some (Agent_sdk.Error.to_string err));
           mark_terminal_error err;
           Error err)
   in

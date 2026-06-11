@@ -3,6 +3,7 @@
 // Redesigned: clean section headers, consistent row styling, proper form controls.
 
 import { html } from 'htm/preact'
+import { useState } from 'preact/hooks'
 import { signal } from '@preact/signals'
 import {
   fetchDashboardGoalsTree,
@@ -217,6 +218,27 @@ function sameStringArray(a: readonly string[], b: readonly string[]): boolean {
   return a.every((value, index) => value === b[index])
 }
 
+function computeRuntimeDirtyFlags(rd: RuntimeDraft, c: KeeperConfig): Record<string, boolean> {
+  const payload = buildRuntimePayload(rd, c)
+  return {
+    runtime_id: 'runtime_id' in payload,
+    active_goal_ids: 'active_goal_ids' in payload,
+    allowed_paths: 'allowed_paths' in payload,
+    sandbox_profile: 'sandbox_profile' in payload,
+    network_mode: 'network_mode' in payload,
+    proactive_enabled: 'proactive_enabled' in payload,
+    proactive_idle_sec: 'proactive_idle_sec' in payload,
+    proactive_cooldown_sec: 'proactive_cooldown_sec' in payload,
+    compaction_ratio_gate: 'compaction_ratio_gate' in payload,
+    compaction_message_gate: 'compaction_message_gate' in payload,
+    compaction_token_gate: 'compaction_token_gate' in payload,
+    compaction_cooldown_sec: 'continuity_compaction_cooldown_sec' in payload,
+    auto_handoff: 'auto_handoff' in payload,
+    handoff_threshold: 'handoff_threshold' in payload,
+    handoff_cooldown_sec: 'handoff_cooldown_sec' in payload,
+  }
+}
+
 function dedupeStrings(values: readonly string[]): string[] {
   const seen = new Set<string>()
   const next: string[] = []
@@ -280,6 +302,7 @@ export function resetKeeperConfig(): void {
 export function applyKeeperConfigUpdate(name: string, updated: KeeperConfig): void {
   configKeeperName.value = name
   configState.value = loaded(updated)
+  runtimeDraft.value = initRuntimeDraftFromConfig(updated)
 }
 
 export function peekLoadedKeeperConfig(name: string): KeeperConfig | null {
@@ -319,17 +342,17 @@ async function loadGoalOptions(options?: { force?: boolean }): Promise<void> {
 
 function ConfigRow({ label, value }: { label: string; value: string }) {
   return html`
-    <div class="flex items-center justify-between py-2 px-3 rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-[var(--shadow-1)] mb-1.5">
-      <${MutedLabel}>${label}</${MutedLabel}>
-      <span class="text-xs font-semibold text-text-strong">${value}</span>
+    <div class="flex items-center justify-between py-2.5 px-4 rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-[var(--shadow-1)] mb-2">
+      <span class="text-sm font-medium text-text-muted">${label}</span>
+      <span class="text-sm font-semibold text-text-strong">${value}</span>
     </div>
   `
 }
 
 function BoolRow({ label, value }: { label: string; value: boolean }) {
   return html`
-    <div class="flex items-center justify-between py-2 px-3 rounded-[var(--r-1)] bg-[var(--color-bg-surface)]">
-      <span class="text-xs text-[var(--color-fg-muted)]">${label}</span>
+    <div class="flex items-center justify-between py-2.5 px-4 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] mb-2">
+      <span class="text-sm text-[var(--color-fg-muted)]">${label}</span>
       <${BoolBadge} value=${value} />
     </div>
   `
@@ -352,9 +375,9 @@ function perProviderTimeoutLabel(execution: KeeperConfig['execution']): string {
 
 function MajorSectionHeader({ title }: { title: string }) {
   return html`
-    <div class="text-2xs font-bold uppercase tracking-[var(--track-caps)] text-accent-fg mt-6 mb-3 pb-1.5 border-b border-[var(--accent-20)] flex items-center gap-2">
-      <${StatusDot} size="xs" class="bg-[var(--accent-50)] shadow-[0_0_8px_rgb(var(--info-glow)/0.6)]" />
-      ${title}
+    <div class="rounded-[var(--r-3)] border border-[var(--accent-20)] bg-[var(--accent-5)] px-4 py-3 mt-8 mb-4 flex items-center gap-2 shadow-[var(--shadow-1)]">
+      <${StatusDot} size="sm" class="bg-[var(--accent-50)] shadow-[0_0_8px_rgb(var(--info-glow)/0.6)]" />
+      <span class="text-xs font-bold uppercase tracking-[var(--track-caps)] text-accent-fg">${title}</span>
     </div>
   `
 }
@@ -454,43 +477,46 @@ function PromptBlock({
 
 // ── Inline editing components for runtime config ────────
 
-function InlineToggleRow({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) {
+function InlineToggleRow({ label, value, onChange, dirty = false }: { label: string; value: boolean; onChange: (v: boolean) => void; dirty?: boolean }) {
   return html`
-    <div class="flex items-center justify-between py-2 px-3 rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-[var(--shadow-1)] mb-1.5">
-      <${MutedLabel}>${label}</${MutedLabel}>
+    <div class="flex items-center justify-between py-2.5 px-4 rounded-[var(--r-1)] border ${dirty ? 'border-l-4 border-l-[var(--color-accent-fg)] border-card-border/50' : 'border-card-border/50'} bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-[var(--shadow-1)] mb-2">
+      <span class="text-sm font-medium text-text-muted">${label}${dirty ? html`<span class="ml-2 text-2xs text-[var(--color-accent-fg)] font-semibold">●</span>` : null}</span>
       <button type="button"
-        class="relative inline-flex h-5 w-9 items-center rounded-[var(--r-0)] transition-colors cursor-pointer ${value ? 'bg-ok/60' : 'bg-[var(--color-bg-hover)]'}"
+        class="relative inline-flex h-6 w-11 items-center rounded-[var(--r-0)] transition-colors cursor-pointer ${value ? 'bg-ok/60' : 'bg-[var(--color-bg-hover)]'}"
         aria-label=${`${label} ${value ? '비활성화' : '활성화'}`}
         aria-pressed=${value ? 'true' : 'false'}
         onClick=${() => onChange(!value)}
       >
-        <span class="inline-block h-3.5 w-3.5 rounded-[var(--r-0)] bg-white shadow-1 transition-transform ${value ? 'translate-x-[18px]' : 'translate-x-[3px]'}" />
+        <span class="inline-block h-4 w-4 rounded-[var(--r-0)] bg-white shadow-1 transition-transform ${value ? 'translate-x-[22px]' : 'translate-x-[3px]'}" />
       </button>
     </div>
   `
 }
 
-function InlineNumberRow({ label, value, onChange, min, max, step, suffix }: {
+function InlineNumberRow({ label, value, onChange, min, max, step, suffix, dirty = false }: {
   label: string; value: number; onChange: (v: number) => void;
-  min?: number; max?: number; step?: number; suffix?: string
+  min?: number; max?: number; step?: number; suffix?: string; dirty?: boolean
 }) {
+  const [invalid, setInvalid] = useState(false)
   return html`
-    <div class="flex items-center justify-between py-2 px-3 rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-[var(--shadow-1)] mb-1.5">
-      <${MutedLabel}>${label}</${MutedLabel}>
-      <div class="flex items-center gap-1.5">
+    <div class="flex items-center justify-between py-2.5 px-4 rounded-[var(--r-1)] border ${dirty ? 'border-l-4 border-l-[var(--color-accent-fg)] border-card-border/50' : 'border-card-border/50'} bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-[var(--shadow-1)] mb-2">
+      <span class="text-sm font-medium text-text-muted">${label}${dirty ? html`<span class="ml-2 text-2xs text-[var(--color-accent-fg)] font-semibold">●</span>` : null}</span>
+      <div class="flex items-center gap-2">
         <input type="number"
           aria-label=${label}
-          class="w-20 text-right bg-card/60 text-text-strong text-xs font-semibold border border-card-border rounded-[var(--r-1)] py-1 px-2 focus:outline-none focus:border-accent-fg/50 transition-colors"
+          class="w-24 text-right bg-card/60 text-text-strong text-sm font-semibold border ${invalid ? 'border-[var(--color-status-err)]' : 'border-card-border'} rounded-[var(--r-1)] py-1.5 px-2 focus:outline-none focus:border-accent-fg/50 transition-colors"
           value=${value}
           min=${min}
           max=${max}
           step=${step}
           onInput=${(e: Event) => {
-            const v = parseFloat((e.target as HTMLInputElement).value)
+            const input = e.target as HTMLInputElement
+            const v = parseFloat(input.value)
+            setInvalid(!input.checkValidity())
             if (!isNaN(v)) onChange(v)
           }}
         />
-        ${suffix ? html`<span class="text-3xs text-text-dim w-4">${suffix}</span>` : null}
+        ${suffix ? html`<span class="text-xs text-text-dim w-5">${suffix}</span>` : null}
       </div>
     </div>
   `
@@ -501,18 +527,20 @@ export function InlineSelectRow({
   value,
   options,
   onChange,
+  dirty = false,
 }: {
   label: string
   value: string
   options: readonly string[]
   onChange: (v: string) => void
+  dirty?: boolean
 }) {
   return html`
-    <div class="flex items-center justify-between py-2 px-3 rounded-[var(--r-4)] border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-[var(--shadow-1)] mb-1.5 gap-3">
-      <${MutedLabel}>${label}</${MutedLabel}>
+    <div class="flex items-center justify-between py-2.5 px-4 rounded-[var(--r-4)] border ${dirty ? 'border-l-4 border-l-[var(--color-accent-fg)] border-card-border/50' : 'border-card-border/50'} bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-[var(--shadow-1)] mb-2 gap-3">
+      <span class="text-sm font-medium text-text-muted">${label}${dirty ? html`<span class="ml-2 text-2xs text-[var(--color-accent-fg)] font-semibold">●</span>` : null}</span>
       <select
         aria-label=${label}
-        class="text-xs bg-card/60 border border-card-border rounded-[var(--r-1)] px-2 py-1 text-text-strong"
+        class="text-sm bg-card/60 border border-card-border rounded-[var(--r-1)] px-3 py-1.5 text-text-strong"
         value=${value}
         onChange=${(e: Event) => onChange((e.target as HTMLSelectElement).value)}
       >
@@ -592,6 +620,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
     runtimeDraft.value = initRuntimeDraftFromConfig(c)
   }
   const rd = runtimeDraft.value
+  const dirtyFlags = rd ? computeRuntimeDirtyFlags(rd, c) : {}
 
   const runtimeHasChanges = rd ? Object.keys(buildRuntimePayload(rd, c)).length > 0 : false
   const runtimeOptions = rd
@@ -757,6 +786,23 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         />
       </div>
 
+      ${runtimeHasChanges ? html`
+        <div class="sticky top-0 z-20 flex flex-wrap items-center gap-2 p-3 rounded-[var(--r-1)] border border-[var(--accent-30)] bg-[var(--accent-5)] shadow-[var(--shadow-2)] mb-3">
+          <span class="text-xs font-semibold text-accent-fg">변경된 런타임 설정이 있습니다</span>
+          <div class="flex-1"></div>
+          <button type="button"
+            class="${BTN_FILLED_BASE} bg-[var(--color-status-ok)] text-[var(--color-fg-on-ok)] text-sm"
+            onClick=${saveRuntimeConfig}
+            disabled=${runtimeSaving.value}
+          >${runtimeSaving.value ? '저장 중...' : '런타임 설정 저장'}</button>
+          <button type="button"
+            class="${BTN_FILLED_BASE} bg-[var(--color-bg-hover)] text-[var(--color-fg-secondary)] text-sm"
+            title="초기화: 변경한 런타임 설정 draft 를 서버 값으로 되돌립니다"
+            onClick=${resetRuntimeDraft}
+          >초기화하기</button>
+        </div>
+      ` : null}
+
       <${MajorSectionHeader} title="소스" />
       <${Callout}
         title="Runtime 선택"
@@ -769,6 +815,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
           value=${rd.runtime_id}
           options=${runtimeOptions}
           onChange=${(value: string) => updateRuntimeDraft('runtime_id', value)}
+          dirty=${dirtyFlags.runtime_id}
         />
       ` : html`
         <${ConfigRow} label="선택 runtime" value=${c.execution.selected_runtime_id || MISSING_DATA_DASH} />
@@ -813,14 +860,17 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       ${rd ? html`
         <${InlineNumberRow} label="비율 게이트 (%)" value=${Math.round(rd.compaction_ratio_gate * 100)}
           onChange=${(v: number) => updateRuntimeDraft('compaction_ratio_gate', v / 100)}
-          min=${0} max=${100} step=${5} suffix="%" />
+          min=${0} max=${100} step=${5} suffix="%"
+          dirty=${dirtyFlags.compaction_ratio_gate} />
         <${InlineNumberRow} label="메시지 게이트" value=${rd.compaction_message_gate}
           onChange=${(v: number) => updateRuntimeDraft('compaction_message_gate', v)}
-          min=${0} max=${500} step=${5} />
+          min=${0} max=${500} step=${5}
+          dirty=${dirtyFlags.compaction_message_gate} />
         <${ConfigRow} label="토큰 게이트" value=${formatTokens(c.compaction.token_gate)} />
         <${InlineNumberRow} label="쿨다운 (초)" value=${rd.compaction_cooldown_sec}
           onChange=${(v: number) => updateRuntimeDraft('compaction_cooldown_sec', v)}
-          min=${0} max=${3600} step=${30} suffix="s" />
+          min=${0} max=${3600} step=${30} suffix="s"
+          dirty=${dirtyFlags.compaction_cooldown_sec} />
       ` : html`
         <${ConfigRow} label="비율 게이트" value=${formatPct(c.compaction.ratio_gate)} />
         <${ConfigRow} label="메시지 게이트" value=${String(c.compaction.message_gate)} />
@@ -835,20 +885,29 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
           value=${rd.sandbox_profile}
           options=${['local', 'docker'] as const}
           onChange=${(value: string) => updateRuntimeDraft('sandbox_profile', value as SandboxProfile)}
+          dirty=${dirtyFlags.sandbox_profile}
         />
+        ${c.sandbox_profile === 'docker' && rd.sandbox_profile === 'local' ? html`
+          <${Callout}
+            title="격리 해제 경고"
+            body="Docker → Local 전환은 컨테이너 격리를 해제하고 호스트 프로세스 네임스페이스에서 실행합니다."
+            tone="warn"
+          />
+        ` : null}
         <${InlineSelectRow}
           label="network_mode"
           value=${rd.network_mode}
           options=${rd.sandbox_profile === 'docker' ? ['inherit', 'none'] as const : ['inherit'] as const}
           onChange=${(value: string) => updateRuntimeDraft('network_mode', value as SandboxNetworkMode)}
+          dirty=${dirtyFlags.network_mode}
         />
-        <div class="py-2 px-3 rounded-[var(--r-1)] bg-[var(--color-bg-surface)]">
-          <div class="flex items-center justify-between mb-1">
-            <span class="text-xs text-[var(--color-fg-secondary)]">allowed_paths</span>
-            <span class="text-3xs text-[var(--color-fg-muted)]">한 줄에 하나씩. 명시 경로만 허용됩니다.</span>
+        <div class="py-2.5 px-4 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] mb-2 ${dirtyFlags.allowed_paths ? 'border-l-4 border-l-[var(--color-accent-fg)]' : ''}">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-sm text-[var(--color-fg-secondary)]">allowed_paths</span>
+            <span class="text-xs text-[var(--color-fg-muted)]">한 줄에 하나씩. 명시 경로만 허용됩니다.</span>
           </div>
-          <textarea aria-label="allowed_paths" class="w-full text-xs font-mono bg-[var(--color-bg-hover)] border border-[var(--color-border-default)] rounded-[var(--r-1)] px-2 py-1.5 text-[var(--color-fg-secondary)] resize-y"
-            rows=${3}
+          <textarea aria-label="allowed_paths" class="w-full text-sm font-mono bg-[var(--color-bg-hover)] border border-[var(--color-border-default)] rounded-[var(--r-1)] px-3 py-2 text-[var(--color-fg-secondary)] resize-y"
+            rows=${4}
             value=${rd.allowed_paths_text}
             placeholder=".masc/keepers/<name>/"
             onInput=${(e: Event) => updateRuntimeDraft('allowed_paths_text', (e.target as HTMLTextAreaElement).value)}
@@ -888,13 +947,16 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       <${SectionHeader} title="프로액티브" />
       ${rd ? html`
         <${InlineToggleRow} label="활성" value=${rd.proactive_enabled}
-          onChange=${(v: boolean) => updateRuntimeDraft('proactive_enabled', v)} />
+          onChange=${(v: boolean) => updateRuntimeDraft('proactive_enabled', v)}
+          dirty=${dirtyFlags.proactive_enabled} />
         <${InlineNumberRow} label="유휴 트리거 (초)" value=${rd.proactive_idle_sec}
           onChange=${(v: number) => updateRuntimeDraft('proactive_idle_sec', v)}
-          min=${10} max=${3600} step=${10} suffix="s" />
+          min=${10} max=${3600} step=${10} suffix="s"
+          dirty=${dirtyFlags.proactive_idle_sec} />
         <${InlineNumberRow} label="쿨다운 (초)" value=${rd.proactive_cooldown_sec}
           onChange=${(v: number) => updateRuntimeDraft('proactive_cooldown_sec', v)}
-          min=${10} max=${3600} step=${10} suffix="s" />
+          min=${10} max=${3600} step=${10} suffix="s"
+          dirty=${dirtyFlags.proactive_cooldown_sec} />
       ` : html`
         <${BoolRow} label="활성" value=${c.proactive.enabled} />
         <${ConfigRow} label="유휴 트리거" value=${c.proactive.idle_sec + 's'} />
@@ -969,13 +1031,16 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       <${SectionHeader} title="핸드오프" />
       ${rd ? html`
         <${InlineToggleRow} label="자동" value=${rd.auto_handoff}
-          onChange=${(v: boolean) => updateRuntimeDraft('auto_handoff', v)} />
+          onChange=${(v: boolean) => updateRuntimeDraft('auto_handoff', v)}
+          dirty=${dirtyFlags.auto_handoff} />
         <${InlineNumberRow} label="임계값 (%)" value=${Math.round(rd.handoff_threshold * 100)}
           onChange=${(v: number) => updateRuntimeDraft('handoff_threshold', v / 100)}
-          min=${0} max=${100} step=${5} suffix="%" />
+          min=${0} max=${100} step=${5} suffix="%"
+          dirty=${dirtyFlags.handoff_threshold} />
         <${InlineNumberRow} label="쿨다운 (초)" value=${rd.handoff_cooldown_sec}
           onChange=${(v: number) => updateRuntimeDraft('handoff_cooldown_sec', v)}
-          min=${0} max=${3600} step=${30} suffix="s" />
+          min=${0} max=${3600} step=${30} suffix="s"
+          dirty=${dirtyFlags.handoff_cooldown_sec} />
       ` : html`
         <${BoolRow} label="자동" value=${c.handoff.auto} />
         </div>
@@ -984,18 +1049,19 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       `}
 
       ${runtimeHasChanges ? html`
-        <div class="flex gap-2 items-center mt-4 mb-2 p-3 rounded-[var(--r-1)] border border-[var(--accent-30)] bg-[var(--accent-5)]">
+        <div class="sticky bottom-4 z-20 flex flex-wrap items-center gap-2 mt-4 mb-2 p-4 rounded-[var(--r-1)] border border-[var(--accent-30)] bg-[var(--accent-5)] shadow-[var(--shadow-2)]">
+          <span class="text-sm font-semibold text-accent-fg">변경된 설정을 저장하세요</span>
+          <div class="flex-1"></div>
           <button type="button"
-            class="${BTN_FILLED_BASE} bg-[var(--color-status-ok)] text-[var(--color-fg-on-ok)]"
+            class="${BTN_FILLED_BASE} bg-[var(--color-status-ok)] text-[var(--color-fg-on-ok)] text-sm"
             onClick=${saveRuntimeConfig}
             disabled=${runtimeSaving.value}
           >${runtimeSaving.value ? '저장 중...' : '런타임 설정 저장'}</button>
           <button type="button"
-            class="${BTN_FILLED_BASE} bg-[var(--color-bg-hover)] text-[var(--color-fg-secondary)]"
+            class="${BTN_FILLED_BASE} bg-[var(--color-bg-hover)] text-[var(--color-fg-secondary)] text-sm"
             title="초기화: 변경한 런타임 설정 draft 를 서버 값으로 되돌립니다"
             onClick=${resetRuntimeDraft}
           >초기화하기</button>
-          <span class="text-3xs text-accent-fg">변경된 설정이 있습니다</span>
         </div>
       ` : null}
 

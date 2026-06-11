@@ -42,6 +42,7 @@ import { selectedAgentName } from './components/agent-detail-selection'
 import { selectedTask } from './components/goals/task-detail-selection'
 import { ToastContainer } from './components/common/toast'
 import { ConfirmDialogOverlay } from './components/common/confirm-dialog'
+import { BundleStalenessBanner, installBundleStalenessWatch } from './components/bundle-staleness-banner'
 import { startErrorCleanup, stopErrorCleanup } from './components/common/error-notification-state'
 import { DashboardStatusTray } from './components/status-tray'
 import { DashboardFocusModeToggle, dashboardFocusMode } from './components/focus-mode-toggle'
@@ -216,6 +217,9 @@ export function App() {
     // Error notification cleanup (removes old acknowledged errors)
     startErrorCleanup()
 
+    // Detect a newer served bundle when the tab is picked up again
+    const uninstallStalenessWatch = installBundleStalenessWatch()
+
     return () => {
       cancelled = true
       stopSseFallback()
@@ -227,6 +231,7 @@ export function App() {
       stopPeriodicRefresh()
       stopErrorCleanup()
       disposeNamespaceTruthScheduler()
+      uninstallStalenessWatch()
     }
   }, [])
 
@@ -366,6 +371,7 @@ export function App() {
       `}
       <${ToastContainer} />
       <${ConfirmDialogOverlay} />
+      <${BundleStalenessBanner} />
       <${Suspense} fallback=${null}>
         <${LazyCommandPalette} />
       <//>

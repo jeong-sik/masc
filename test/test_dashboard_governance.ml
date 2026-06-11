@@ -5,6 +5,7 @@ module Types = Masc_domain
 module Lib = Masc
 
 open Alcotest
+open Printf
 
 let test_dir () =
   let tmp = Filename.temp_file "masc_dashboard_governance" "" in
@@ -332,16 +333,63 @@ let test_dashboard_surfaces_compute_telemetry () =
       with_test_fs env @@ fun () ->
       let st = Dashboard_governance_judge.get_state dir in
       let now = Unix.gettimeofday () in
+      (* The in-flight state is governed by the typed state
+         machine ([mark_compute_start] / [mark_compute_finish])
+         and is exercised through that API, not by mutating a
+         removed counter field.  Terminal-cycle telemetry is
+         recorded by [mark_compute_finish] and the test's last
+         finish call seeds it with the values the dashboard
+         assertion expects. *)
+      (* Idle → 0 *)
+      check int "idle state projects to 0 in-flight" 0
+        (Dashboard_governance_judge.read_in_flight st);
+      (* Idle → In_flight : 1, with monotonic cycle_id *)
+      let first_cycle = Dashboard_governance_judge.mark_compute_start st in
+      check int "after start, in-flight = 1" 1
+        (Dashboard_governance_judge.read_in_flight st);
+      (* A second start before finish: routine log + replace;
+         still 1 in-flight, but cycle_id advanced.  This is
+         the typed invariant the previous int counter could
+         not preserve. *)
+      let second_cycle = Dashboard_governance_judge.mark_compute_start st in
+      check bool "second start advances cycle_id" true
+        (second_cycle > first_cycle);
+      check int "after second start (no finish), in-flight = 1" 1
+        (Dashboard_governance_judge.read_in_flight st);
+      let started_at = Unix.gettimeofday () in
+      ignore
+        (Dashboard_governance_judge.mark_compute_finish st ~cycle_id:second_cycle ~started_at
+           ~outcome:"ok" ~reason:"");
+      check int "after finish, in-flight = 0" 0
+        (Dashboard_governance_judge.read_in_flight st);
+      (* finish is idempotent: a stray finish on Idle is a
+         routine log + no-op, still 0. *)
+      ignore
+        (Dashboard_governance_judge.mark_compute_finish st ~cycle_id:second_cycle ~started_at
+           ~outcome:"ok" ~reason:"");
+      check int "stray finish is a no-op (Idle → 0)" 0
+        (Dashboard_governance_judge.read_in_flight st);
+      (* Seed terminal-cycle telemetry with the values the
+         runtime/JSON assertions check, while leaving the
+         state in Idle so the dashboard reads 0 in-flight
+         with last-outcome=error / last-reason=timeout.  The
+         per-cycle budget field [last_compute_timeout_sec]
+         is not written by [mark_compute_finish] (the
+         governance judge no longer carries a per-cycle
+         budget) and is seeded directly here to keep the
+         surface-render assertion honest. *)
+      let started_at = now -. 12.5 in
+      ignore
+        (Dashboard_governance_judge.mark_compute_finish st ~cycle_id:second_cycle ~started_at
+           ~outcome:"error" ~reason:"timeout");
+
       Dashboard_governance_judge.with_lock st (fun () ->
-        st.compute_in_flight <- 2;
-        st.last_compute_duration_sec <- Some 12.5;
-        st.last_compute_timeout_sec <- Some 45.0;
-        st.last_compute_outcome <- Some "error";
-        st.last_compute_reason <- Some "timeout");
+        st.last_compute_timeout_sec <- Some 45.0);
+
       let status =
         Dashboard_governance_judge.runtime_status_at ~now_ts:now dir
       in
-      check int "runtime exposes compute in-flight" 2
+      check int "runtime exposes compute in-flight" 0
         status.compute_in_flight;
       check (option string) "runtime exposes compute outcome" (Some "error")
         status.last_compute_outcome;
@@ -363,7 +411,7 @@ let test_dashboard_surfaces_compute_telemetry () =
       in
       let open Yojson.Safe.Util in
       let judge = json |> member "judge" in
-      check int "dashboard exposes compute in-flight" 2
+      check int "dashboard exposes compute in-flight" 0
         (judge |> member "compute_in_flight" |> to_int);
       check (float 0.001) "dashboard exposes compute duration" 12.5
         (judge |> member "last_compute_duration_sec" |> to_float);

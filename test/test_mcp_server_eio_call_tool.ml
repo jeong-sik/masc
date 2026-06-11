@@ -23,16 +23,6 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
-let with_env key value f =
-  let previous = Sys.getenv_opt key in
-  Unix.putenv key (Option.value ~default:"" value);
-  Fun.protect
-    ~finally:(fun () ->
-      match previous with
-      | Some raw -> Unix.putenv key raw
-      | None -> Unix.putenv key "")
-    f
-
 let make_keeper_meta ?agent_name ?current_task_id ?(goal_ids = [])
     ?tool_access name =
   let agent_name =
@@ -77,6 +67,7 @@ let empty_contract : Masc_domain.task_contract =
     required_evidence = [];
     inspect_gate_evidence = [];
     verify_gate_evidence = [];
+    evidence_claims = [];
     stale_claim_timeout_sec = 0;
     links =
       {
@@ -224,69 +215,12 @@ let test_contains_casefold_keeps_semantics () =
   check bool "needle longer than haystack" false (contains "short" "shorter");
   check bool "absent substring" false (contains "Invalid JSON" "timeout")
 
-let test_transition_has_no_fixed_timeout () =
-  check bool "masc_transition has no fixed timeout"
-    true
-    (Masc.Mcp_server_eio_call_tool.tool_timeout_sec_opt
-       ~tool_name:"masc_transition"
-       ~_arguments:(`Assoc [])
-     = None)
-
-let test_regular_tool_uses_default_timeout () =
-  match
-    Masc.Mcp_server_eio_call_tool.tool_timeout_sec_opt
-      ~tool_name:"masc_status"
-      ~_arguments:(`Assoc [])
-  with
-  | Some timeout_sec -> check bool "default timeout remains enabled" true (timeout_sec >= 5.)
-  | None -> fail "expected masc_status to keep fixed timeout"
-
-let timeout_for_tool name =
-  match
-    Masc.Mcp_server_eio_call_tool.tool_timeout_sec_opt
-      ~tool_name:name
-      ~_arguments:(`Assoc [])
-  with
-  | Some timeout_sec -> timeout_sec
-  | None -> fail ("expected bounded timeout for " ^ name)
-
-let test_board_write_tools_use_board_timeout_default () =
-  with_env "MASC_TOOL_TIMEOUT_DEFAULT_SEC" (Some "60") @@ fun () ->
-  with_env "MASC_TOOL_TIMEOUT_BOARD_SEC" None @@ fun () ->
-  List.iter
-    (fun name ->
-       check (float 0.0001) (name ^ " timeout") 90.0 (timeout_for_tool name))
-    [
-      "keeper_board_post";
-      "keeper_board_comment";
-      "keeper_board_vote";
-      "keeper_board_comment_vote";
-      "keeper_board_curation_submit";
-      "masc_board_post";
-      "masc_board_comment";
-      "masc_board_vote";
-      "masc_board_comment_vote";
-      "masc_board_delete";
-      "masc_board_cleanup";
-      "masc_board_reaction";
-      "masc_board_curation_submit";
-    ];
-  check (float 0.0001) "regular tool keeps generic default" 60.0
-    (timeout_for_tool "masc_status")
-
-let test_board_write_timeout_can_override_and_clamps () =
-  with_env "MASC_TOOL_TIMEOUT_DEFAULT_SEC" (Some "60") @@ fun () ->
-  with_env "MASC_TOOL_TIMEOUT_BOARD_SEC" (Some "120") @@ fun () ->
-  check (float 0.0001) "board override" 120.0
-    (timeout_for_tool "keeper_board_post");
-  check (float 0.0001) "regular unaffected" 60.0
-    (timeout_for_tool "masc_status");
-  with_env "MASC_TOOL_TIMEOUT_BOARD_SEC" (Some "1") @@ fun () ->
-  check (float 0.0001) "board min clamp" 5.0
-    (timeout_for_tool "keeper_board_post");
-  with_env "MASC_TOOL_TIMEOUT_BOARD_SEC" (Some "999") @@ fun () ->
-  check (float 0.0001) "board max clamp" 300.0
-    (timeout_for_tool "keeper_board_post")
+(* Per-caller wrapper timeout was removed on 2026-06-08 (PR cleanup,
+   spirit: "tool 자체가 알아서 타임아웃으로 튕기든 해야지 그걸 왜 되나 안
+   되나 우리가 관찰하고 있나?").  The previous test_block asserted caller
+   timeout policy (default/board-write/min-max clamps) — that domain is
+   gone, so the tests are deleted rather than rewritten to assert "no
+   timeout".  The tool itself owns hang protection. *)
 
 let test_runtime_mcp_keeper_log_context_uses_keeper_trace_and_current_turn () =
   let base_path = temp_dir () in
@@ -562,12 +496,6 @@ let () =
             test_records_mcp_server_operation_duration_metric;
           test_case "contains casefold keeps semantics" `Quick
             test_contains_casefold_keeps_semantics;
-          test_case "transition has no fixed timeout" `Quick test_transition_has_no_fixed_timeout;
-          test_case "regular tool keeps default timeout" `Quick test_regular_tool_uses_default_timeout;
-          test_case "board write tools use board timeout default" `Quick
-            test_board_write_tools_use_board_timeout_default;
-          test_case "board write timeout override clamps" `Quick
-            test_board_write_timeout_can_override_and_clamps;
           test_case "runtime MCP log context uses keeper trace/current turn" `Quick
             test_runtime_mcp_keeper_log_context_uses_keeper_trace_and_current_turn;
           test_case "runtime MCP log context loads current task contract" `Quick

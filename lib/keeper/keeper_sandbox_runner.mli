@@ -47,11 +47,6 @@ type route =
   | Sandbox_backend
 
 module type Backend = sig
-  val egress_policy_path :
-    config:Workspace.config ->
-    meta:Keeper_meta_contract.keeper_meta ->
-    string
-
   val effective_sandbox_profile :
     meta:Keeper_meta_contract.keeper_meta ->
     Keeper_types_profile_sandbox.sandbox_profile * Keeper_types_profile_sandbox.network_mode
@@ -97,11 +92,6 @@ module type Backend = sig
 end
 
 module Make (Backend : Backend) : sig
-  val egress_policy_path :
-    config:Workspace.config ->
-    meta:Keeper_meta_contract.keeper_meta ->
-    string
-
   val effective_sandbox_profile :
     meta:Keeper_meta_contract.keeper_meta ->
     Keeper_types_profile_sandbox.sandbox_profile * Keeper_types_profile_sandbox.network_mode
@@ -145,11 +135,6 @@ module Make (Backend : Backend) : sig
     network_mode:Keeper_types_profile_sandbox.network_mode ->
     string
 end
-
-val egress_policy_path :
-  config:Workspace.config ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  string
 
 val effective_sandbox_profile :
   meta:Keeper_meta_contract.keeper_meta ->

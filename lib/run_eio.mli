@@ -4,9 +4,7 @@
     files live under the run directory:
 
     - [run.json]       — metadata ({!run_record} serialised)
-    - [plan.md]        — planning document
-    - [deliverable.md] — task output
-    - [log.jsonl]      — append-only event log ({!log_entry}) *)
+    - [plan.md]        — planning document *)
 
 (** {1 Types} *)
 
@@ -14,14 +12,8 @@ type run_record = {
   task_id : string;
   agent_name : string option;
   plan : string;
-  deliverable : string;
   created_at : string;
   updated_at : string;
-}
-
-type log_entry = {
-  timestamp : string;
-  note : string;
 }
 
 (** {1 JSON serde}
@@ -33,10 +25,6 @@ val run_record_to_json : run_record -> Yojson.Safe.t
 
 val run_record_of_json : Yojson.Safe.t -> run_record option
 
-val log_entry_to_json : log_entry -> Yojson.Safe.t
-
-val log_entry_of_json : Yojson.Safe.t -> log_entry option
-
 (** {1 Path builders} *)
 
 val runs_dir : Workspace_utils.config -> string
@@ -46,10 +34,6 @@ val run_dir : Workspace_utils.config -> string -> string
 val run_json_path : Workspace_utils.config -> string -> string
 
 val plan_path : Workspace_utils.config -> string -> string
-
-val deliverable_path : Workspace_utils.config -> string -> string
-
-val log_path : Workspace_utils.config -> string -> string
 
 (** Create {!run_dir} and parents if missing. *)
 val ensure_run_dir : Workspace_utils.config -> string -> unit
@@ -62,9 +46,9 @@ val write_text_file : string -> string -> unit
 
 (** {1 Run lifecycle}
 
-    [init] / [update_plan] / [set_deliverable] / [append_log] implement
-    read-modify-write safety via per-[run.json] file locks to prevent
-    lost updates across concurrent fibers. *)
+    [init] / [update_plan] implement read-modify-write safety via
+    per-[run.json] file locks to prevent lost updates across
+    concurrent fibers. *)
 
 val write_run : Workspace_utils.config -> run_record -> unit
 
@@ -72,8 +56,7 @@ val read_run :
   Workspace_utils.config -> string -> (run_record, string) result
 
 (** [init config ~task_id ~agent_name] creates the run directory,
-    default [plan.md] / [deliverable.md] / [log.jsonl], and writes an
-    initial [run.json]. *)
+    a default [plan.md], and writes an initial [run.json]. *)
 val init :
   Workspace_utils.config ->
   task_id:string ->
@@ -87,34 +70,10 @@ val update_plan :
   content:string ->
   (run_record, string) result
 
-(** File-locked append to [log.jsonl]. *)
-val append_log :
-  Workspace_utils.config ->
-  task_id:string ->
-  note:string ->
-  (log_entry, string) result
-
-(** File-locked read-modify-write on [run.json]. *)
-val set_deliverable :
-  Workspace_utils.config ->
-  task_id:string ->
-  content:string ->
-  (run_record, string) result
-
 (** {1 Queries} *)
 
-(** [read_logs ?limit ()] returns all log entries when [limit] is
-    absent; otherwise the last [limit] entries (tail). *)
-val read_logs :
-  Workspace_utils.config ->
-  task_id:string ->
-  ?limit:int ->
-  unit ->
-  log_entry list
-
-(** Bundle {!run_record} + plan text + deliverable text + last 50 logs
-    into a single JSON object. Creates the run scaffold first when
-    [run.json] is missing. *)
+(** Bundle {!run_record} + plan text into a single JSON object.
+    Creates the run scaffold first when [run.json] is missing. *)
 val get :
   ?agent_name:string ->
   Workspace_utils.config ->

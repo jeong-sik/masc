@@ -65,7 +65,7 @@ let shard_board : shard =
   { name = "board"
   ; tools = board_tools
   ; read_only_tools =
-      [ "keeper_board_get"
+      [ "keeper_board_post_get"
       ; "keeper_board_list"
       ; "keeper_board_stats"
       ; "keeper_board_search"
@@ -111,6 +111,17 @@ let shard_library : shard =
   ; read_only_tools = [ "keeper_library_search"; "keeper_library_read" ]
   ; removable = true
   ; description = "Knowledge library: search, read documents"
+  }
+;;
+
+(* RFC-0223 P3/P4 + RFC-0229: connector surface lane reading, acting,
+   and per-person notes. *)
+let shard_surface : shard =
+  { name = "surface"
+  ; tools = surface_tools
+  ; read_only_tools = [ "keeper_surface_read" ]
+  ; removable = true
+  ; description = "Connected surfaces: read lane conversation, roster, person notes"
   }
 ;;
 
@@ -168,6 +179,7 @@ let all_shards : shard StringMap.t =
     ; shard_search_files
     ; shard_voice
     ; shard_library
+    ; shard_surface
     ; shard_taskboard
     ]
 ;;

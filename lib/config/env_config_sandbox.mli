@@ -1,7 +1,6 @@
 (** Sandbox configuration SSOT.
 
-    Mirrors {!Env_config_exec_timeout} (#10426) and the
-    {!Env_config_oas_bridge} precedent (#10094).  This module is the
+    Mirrors the {!Env_config_oas_bridge} precedent (#10094).  This module is the
     authoritative source for sandbox env settings + hardcoded
     constants used by keeper sandbox and docker playground execution
     paths — one typed surface so:
@@ -12,8 +11,7 @@
     2. Tests pin the default table once; drift is a compile or test
        failure rather than a silent budget shift.
     3. The {!Shell_timeout} sub-module exposes the typed-bucket
-       pattern from {!Env_config_exec_timeout} for shell timeout
-       buckets. *)
+       pattern for shell timeout buckets. *)
 
 (** {1 Hardening — security policy and resource limits} *)
 module Hardening : sig
@@ -146,9 +144,8 @@ end
 
 (** {1 Shell_timeout — typed-bucket per-command timeout SSOT}
 
-    Mirrors {!Env_config_exec_timeout} but for command-class buckets
-    rather than per-call-site.  Each bucket names a class of shell
-    commands that share a budget. *)
+    Per-command-class timeout buckets for the keeper sandbox shell path.
+    Each bucket names a class of shell commands that share a budget. *)
 module Shell_timeout : sig
   type bucket =
     | Io

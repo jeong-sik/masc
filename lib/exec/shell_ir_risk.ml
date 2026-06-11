@@ -543,29 +543,14 @@ let is_write_operation (words : string list) =
   | [] -> false
 ;;
 
-let is_protected_branch_target arg =
-  let target = String.lowercase_ascii arg in
-  List.mem
-    target
-    [ "main"; "master"; "origin/main"; "origin/master";
-      "refs/heads/main"; "refs/heads/master" ]
-  || List.exists
-       (fun suffix -> String.ends_with ~suffix target)
-       [ ":main"; ":master"; ":origin/main"; ":origin/master";
-         ":refs/heads/main"; ":refs/heads/master" ]
-;;
-
 let is_destructive_bash_operation (words : string list) =
   match words with
   | "git" :: "push" :: rest ->
-    let has_force =
-      List.exists
-        (fun arg ->
-           arg = "--force" || arg = "-f"
-           || String.starts_with ~prefix:"--force-with-lease" arg)
-        rest
-    in
-    has_force && List.exists is_protected_branch_target rest
+    List.exists
+      (fun arg ->
+         arg = "--force" || arg = "-f"
+         || String.starts_with ~prefix:"--force-with-lease" arg)
+      rest
   | "rm" :: rest ->
     let option_args =
       List.filter (fun arg -> String.length arg > 0 && arg.[0] = '-') rest
@@ -835,17 +820,10 @@ let risk_of_typed (w : Shell_ir_typed.wrapped) : risk_class =
   | W (Pnpm { subcommand; _ }) ->
     if List.mem subcommand npm_write_subcommands then R1_Reversible_mutation
     else R0_Read
-  (* git push: force / force-with-lease to a protected branch is
-     Destructive_protected (word-list parity via [is_protected_branch_target]
-     on the typed [branch] field); any other push is R1 *)
-  | W (Git_push { force; force_with_lease; branch; _ }) ->
-    let forced = force || force_with_lease in
-    let protected_target =
-      match branch with
-      | Some b -> is_protected_branch_target b
-      | None -> false
-    in
-    if forced && protected_target then Destructive_protected
+  (* git push: force / force-with-lease is Destructive_protected;
+     protected-branch escalation lives in policy hooks (RFC-0208). *)
+  | W (Git_push { force; force_with_lease; _ }) ->
+    if force || force_with_lease then Destructive_protected
     else R1_Reversible_mutation
   (* --- irreversible: R2 --------------------------------------------- *)
   (* Su / Dd / Mkfs: word-list head-token match missed Su/Mkfs (-> R0);
@@ -957,17 +935,14 @@ let rec composed_decision (ir : Shell_ir.t) : risk_class =
       stages
 ;;
 
-(* The decision is the stricter of the per-stage composed verdict and the
-   flattened word-list floor, so it is monotone-safe by construction:
-   never lower than the legacy flat verdict and never lower than the
-   typed verdict. [composed_decision] dominates the flat floor for every
-   input the floor is head-anchored over, but the flat floor is retained
-   as a conservative lower bound (it can still catch a cross-stage
-   concatenation the per-stage scope does not). Retiring the floor is
-   gated on the differential-safety harness (RFC-0208 P2/P6). *)
+(* RFC-0208 P6: [classify] returns [composed_decision] directly.
+   The legacy flat word-list floor was removed: per-stage [max_risk]
+   composition (P0) already covers every cross-stage scenario the flat
+   floor caught, and P2 harness data showed 84% redundancy / 0%
+   structural load-bearing. Any remaining string-borne gaps are owned by
+   Hook/Policy pre-flight checks, not core classification. *)
 let classify (T ir : undecided t) : decided decided_ir =
-  let flat_floor = classify_words (flat_stage_words ir) in
-  { ir; risk = max_risk flat_floor (composed_decision ir) }
+  { ir; risk = composed_decision ir }
 ;;
 
 (* RFC-0208 P1 observability: did the typed lowering classify every

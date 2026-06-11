@@ -100,9 +100,6 @@ let init_keeper_bridge =
          direct shortcut and falls into the exe-relative walk that picks up
          the partial _build/default/config/runtime.json. *)
       let base_path = Masc_test_deps.find_project_root () in
-      (match KET.init_policy_config ~base_path with
-       | Ok () -> ()
-       | Error err -> Printf.eprintf "[WARN] init_policy_config failed: %s\n" err);
       let runtime_config_path = Filename.concat base_path "config/runtime.toml" in
       let config_path =
         if Sys.file_exists runtime_config_path then
@@ -337,6 +334,15 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
       `Assoc [ ("query", `String "tool matrix") ]
   | "keeper_library_read" ->
       `Assoc [ ("topic", `String (Generic.ensure_library_topic fixture.generic)) ]
+  | "keeper_surface_read" -> `Assoc [ ("surface", `String "dashboard") ]
+  | "keeper_surface_post" ->
+      `Assoc
+        [ ("surface", `String "dashboard");
+          ("content", `String "tool matrix surface post") ]
+  | "keeper_person_note_set" ->
+      `Assoc
+        [ ("speaker_id", `String "98791450001");
+          ("note", `String "tool matrix person note") ]
   | "keeper_tasks_list" -> `Assoc [ ("include_done", `Bool true) ]
   | "keeper_task_force_release" ->
       `Assoc

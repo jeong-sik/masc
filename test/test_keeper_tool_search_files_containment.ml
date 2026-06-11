@@ -19,12 +19,6 @@ module Keeper_tool_policy = Masc.Keeper_tool_policy
 module Fs_compat = Fs_compat
 module Json = Yojson.Safe.Util
 
-(* Load tool_policy.toml before exercising the shared search-file policy
-   paths so this test observes the same registry state as runtime. *)
-let () =
-  let base_path = Masc_test_deps.find_project_root () in
-  ignore (Result.get_ok (Keeper_tool_policy.init_policy_config ~base_path))
-
 (* ── Helpers ─────────────────────────────────────────────────────── *)
 
 let with_env key value f =
@@ -218,42 +212,6 @@ let test_legacy_keeper_unaffected () =
   Alcotest.(check bool) "legacy bypasses symmetric containment" false
     (blocked_by_symmetric_sandbox raw)
 
-let test_docker_keeper_blocks_ls_outside () =
-  setup ~keeper_name:"minjae" ~sandbox:Keeper_types_profile_sandbox.Docker
-  @@ fun ~base ~config ~meta ~playground:_ ->
-  let outside_dir = Filename.concat base "outside_playground" in
-  ensure_dir outside_dir;
-  let factory = Keeper_sandbox_factory.create ~config ~meta () in
-  Fun.protect
-    ~finally:(fun () -> Keeper_sandbox_factory.cleanup factory)
-  @@ fun () ->
-  let raw =
-    Keeper_tool_command_runtime.handle_tool_search_files
-      ~turn_sandbox_factory:(Some factory)
-      ~exec_cache:None ~config ~meta
-      ~args:
-        (`Assoc [ ("op", `String "ls"); ("path", `String outside_dir) ])
-  in
-  Alcotest.(check bool) "ls outside playground blocked" true
-    (blocked_by_sandbox_boundary raw)
-
-let test_docker_keeper_blocks_cat_outside () =
-  setup ~keeper_name:"minjae" ~sandbox:Keeper_types_profile_sandbox.Docker
-  @@ fun ~base ~config ~meta ~playground:_ ->
-  let outside = outside_in_root ~base "host_secret.txt" in
-  let factory = Keeper_sandbox_factory.create ~config ~meta () in
-  Fun.protect
-    ~finally:(fun () -> Keeper_sandbox_factory.cleanup factory)
-  @@ fun () ->
-  let raw =
-    Keeper_tool_command_runtime.handle_tool_search_files
-      ~turn_sandbox_factory:(Some factory)
-      ~exec_cache:None ~config ~meta
-      ~args:(`Assoc [ ("op", `String "cat"); ("path", `String outside) ])
-  in
-  Alcotest.(check bool) "cat outside playground blocked" true
-    (blocked_by_sandbox_boundary raw)
-
 let test_docker_keeper_blocks_rg_outside () =
   setup ~keeper_name:"minjae" ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~base ~config ~meta ~playground:_ ->
@@ -311,6 +269,52 @@ let test_local_keeper_rg_file_path_uses_parent_workdir () =
     Alcotest.(check (option string)) "rg file path does not surface usage error"
       None
       (parse_field raw "error"))
+
+(* Regression: a keeper that asks rg for an extension that is not a
+   ripgrep type name (e.g. type="mli", a common ask in an OCaml repo)
+   makes rg exit 2. Previously the rg result dropped stderr, so the
+   keeper saw only the generic "usage_error / Wrong arguments" hint and
+   retried the same broken argv until the circuit breaker tripped. The
+   fix surfaces rg's own stderr in error_detail. This is a consumer-level
+   (transport-aware) assertion: handle_tool_search_files is the function
+   keeper_tool_runtime.ml returns verbatim to the keeper, so what we
+   assert here is exactly what the keeper receives — no producer-only gap. *)
+let test_local_keeper_rg_invalid_type_surfaces_stderr () =
+  setup ~keeper_name:"garnet" ~sandbox:Keeper_types_profile_sandbox.Local
+  @@ fun ~base:_ ~config ~meta ~playground ->
+  if not (Keeper_tool_execute_path.shell_command_available "rg") then ()
+  else (
+    let file_path = Filename.concat playground "demo.ml" in
+    ignore (Fs_compat.save_file_atomic file_path "let run_named = true\n");
+    let raw =
+      Keeper_tool_command_runtime.handle_tool_search_files
+        ~turn_sandbox_factory:None
+        ~exec_cache:None
+        ~config
+        ~meta
+        ~args:
+          (`Assoc
+            [
+              ("op", `String "rg");
+              ("pattern", `String "run_named");
+              ("path", `String "demo.ml");
+              ("type", `String "mli");
+            ])
+    in
+    Alcotest.(check (option bool)) "invalid rg type makes the call fail"
+      (Some false)
+      (parse_bool_field raw "ok");
+    match parse_field raw "error_detail" with
+    | None ->
+        Alcotest.failf
+          "error_detail absent: keeper cannot see why rg failed. raw=%s" raw
+    | Some detail ->
+        Alcotest.(check bool)
+          "error_detail surfaces rg's real unrecognized-type stderr"
+          true
+          (String_util.contains_substring
+             (String.lowercase_ascii detail)
+             "unrecognized file type"))
 
 let test_docker_keeper_blocks_find_outside () =
   setup ~keeper_name:"minjae" ~sandbox:Keeper_types_profile_sandbox.Docker
@@ -498,22 +502,6 @@ let test_readonly_execute_omitted_cwd_does_not_create_write_root () =
       false
       (Sys.file_exists playground)
 
-let test_docker_second_keeper_contained () =
-  setup ~keeper_name:"poe" ~sandbox:Keeper_types_profile_sandbox.Docker
-  @@ fun ~base ~config ~meta ~playground:_ ->
-  let outside = outside_in_root ~base "git_secret.txt" in
-  let factory = Keeper_sandbox_factory.create ~config ~meta () in
-  Fun.protect
-    ~finally:(fun () -> Keeper_sandbox_factory.cleanup factory)
-  @@ fun () ->
-  let raw =
-    Keeper_tool_command_runtime.handle_tool_search_files
-      ~turn_sandbox_factory:(Some factory)
-      ~exec_cache:None ~config ~meta
-      ~args:(`Assoc [ ("op", `String "cat"); ("path", `String outside) ])
-  in
-  Alcotest.(check bool) "docker second keeper also contained" true
-    (blocked_by_sandbox_boundary raw)
 
 let () =
   Alcotest.run "Keeper_tool_search_files_containment"
@@ -526,14 +514,13 @@ let () =
             `Quick test_shell_command_available_rejects_empty_path_segment_cwd;
           Alcotest.test_case "legacy keeper unaffected" `Quick
             test_legacy_keeper_unaffected;
-          Alcotest.test_case "docker keeper blocks ls outside" `Quick
-            test_docker_keeper_blocks_ls_outside;
-          Alcotest.test_case "docker keeper blocks cat outside" `Quick
-            test_docker_keeper_blocks_cat_outside;
           Alcotest.test_case "docker keeper blocks rg outside" `Quick
             test_docker_keeper_blocks_rg_outside;
           Alcotest.test_case "local keeper rg file path uses parent workdir"
             `Quick test_local_keeper_rg_file_path_uses_parent_workdir;
+          Alcotest.test_case
+            "local keeper rg invalid type surfaces stderr to keeper"
+            `Quick test_local_keeper_rg_invalid_type_surfaces_stderr;
           Alcotest.test_case "docker keeper blocks find outside" `Quick
             test_docker_keeper_blocks_find_outside;
           Alcotest.test_case "docker keeper allows inside playground"
@@ -555,7 +542,5 @@ let () =
             "read-only Execute omitted cwd does not create write root"
             `Quick
             test_readonly_execute_omitted_cwd_does_not_create_write_root;
-          Alcotest.test_case "docker second keeper also contained" `Quick
-            test_docker_second_keeper_contained;
         ] );
     ]

@@ -206,7 +206,7 @@ let test_keeper_tool_called_scope_promoted_for_filters () =
                 `String "Tool_called";
                 `Assoc
                   [
-                    ("tool_name", `String "masc_claim_next");
+                    ("tool_name", `String "keeper_task_claim");
                     ("success", `Bool true);
                     ("duration_ms", `Int 42);
                     ("agent_id", `String "agent_code-mcp-client");
@@ -228,7 +228,7 @@ let test_keeper_tool_called_scope_promoted_for_filters () =
   match List.hd result.entries with
   | `Assoc fields ->
     let json = `Assoc fields in
-    Alcotest.(check string) "tool promoted" "masc_claim_next"
+    Alcotest.(check string) "tool promoted" "keeper_task_claim"
       (json_string_field "tool_name" json);
     Alcotest.(check string) "session promoted" "mcp-session-1"
       (json_string_field "session_id" json);
@@ -516,6 +516,31 @@ let test_time_window_n_zero_disables_truncation () =
   Alcotest.(check int) "returns every matching entry" 3 (List.length result.entries);
   Alcotest.(check int) "total matching preserved" 3 result.total_matching_entries;
   Alcotest.(check bool) "unbounded result is not truncated" false result.truncated
+
+(* n=0 ("unlimited") with no time window must reach the tail-bounded reader
+   ([read_recent]), not the full-store [read_range] scan (1970->today) that
+   Yojson-parsed the whole store and starved keeper fibers, and not the empty
+   list the #20649 regression produced for fixed sources. With fewer entries
+   than [unbounded_window_scan_cap], all are returned. *)
+let test_n_zero_no_window_returns_bounded () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "telem_n0_no_window" in
+  let telemetry_dir = Filename.concat dir ".masc/telemetry" in
+  Fs_compat.mkdir_p telemetry_dir;
+  let now = Unix.gettimeofday () in
+  write_jsonl telemetry_dir [
+    `Assoc [("timestamp", `Float (now -. 900.0)); ("event", `String "a")];
+    `Assoc [("timestamp", `Float (now -. 600.0)); ("event", `String "b")];
+    `Assoc [("timestamp", `Float (now -. 300.0)); ("event", `String "c")];
+  ];
+  let result =
+    Telemetry_unified.read_unified_result ~base_path:dir
+      ~masc_root:(masc_root dir)
+      ~sources:[ Telemetry_unified.Agent_event ] ~n:0 ()
+  in
+  Alcotest.(check int) "n=0 no-window returns all via bounded reader" 3
+    (List.length result.entries)
 
 (* ── Summary with data ───────────────────────────── *)
 
@@ -1217,6 +1242,67 @@ let test_cluster_keeper_metrics () =
   in
   Alcotest.(check int) "cluster keeper metric found" 1 (List.length entries)
 
+(* ── Trajectory summary incremental cache ─────────── *)
+
+let trajectory_row ~ts ~tool_name =
+  Yojson.Safe.to_string
+    (`Assoc
+       [ ("ts", `Float ts)
+       ; ("turn", `Int 1)
+       ; ("tool_name", `String tool_name)
+       ; ("args", `Assoc [])
+       ; ("result", `String "ok")
+       ])
+  ^ "\n"
+
+let thinking_row ~ts =
+  Yojson.Safe.to_string
+    (`Assoc
+       [ ("type", `String "thinking")
+       ; ("ts", `Float ts)
+       ; ("content", `String "reasoning text")
+       ])
+  ^ "\n"
+
+(* The (count, latest_ts) summary must (a) count only tool-call rows,
+   (b) pick appended rows up on the next call without any cache reset —
+   the snapshot loop calls this every 2 s and must not re-parse the whole
+   store — and (c) agree with a cold-cache recomputation. *)
+let test_trajectory_summary_incremental () =
+  Telemetry_unified.For_testing.reset_trajectory_summary_cache_for_testing ();
+  let dir = tmpdir "telem_traj_summary_incr" in
+  let root = masc_root dir in
+  let keeper_dir = Filename.concat root "trajectories/alice" in
+  Fs_compat.mkdir_p keeper_dir;
+  let trace = Filename.concat keeper_dir "trace-1.jsonl" in
+  Fs_compat.append_file trace (trajectory_row ~ts:100.0 ~tool_name:"tool_a");
+  Fs_compat.append_file trace (thinking_row ~ts:150.0);
+  Fs_compat.append_file trace (trajectory_row ~ts:200.0 ~tool_name:"tool_b");
+  let count, latest =
+    Telemetry_unified.For_testing.trajectory_tool_call_summary_stats
+      ~masc_root:root
+  in
+  Alcotest.(check int) "thinking rows excluded from count" 2 count;
+  Alcotest.(check (option (float 0.001))) "latest ts from tool rows only"
+    (Some 200.0) latest;
+  (* Append behind the warm cache: the delta must be picked up without a
+     reset (this is the property the 2 s snapshot loop depends on). *)
+  Fs_compat.append_file trace (trajectory_row ~ts:300.0 ~tool_name:"tool_c");
+  let count2, latest2 =
+    Telemetry_unified.For_testing.trajectory_tool_call_summary_stats
+      ~masc_root:root
+  in
+  Alcotest.(check int) "appended tool row visible without reset" 3 count2;
+  Alcotest.(check (option (float 0.001))) "latest ts advanced" (Some 300.0) latest2;
+  (* Cold cache must agree with the warm incremental result. *)
+  Telemetry_unified.For_testing.reset_trajectory_summary_cache_for_testing ();
+  let count3, latest3 =
+    Telemetry_unified.For_testing.trajectory_tool_call_summary_stats
+      ~masc_root:root
+  in
+  Alcotest.(check int) "cold recomputation agrees" count2 count3;
+  Alcotest.(check (option (float 0.001))) "cold latest agrees" latest2 latest3
+
 (* ── Runner ──────────────────────────────────────── *)
 
 let () =
@@ -1250,6 +1336,8 @@ let () =
             test_time_window_reads_matching_day_files;
           Alcotest.test_case "time window n=0 disables truncation" `Quick
             test_time_window_n_zero_disables_truncation;
+          Alcotest.test_case "n=0 no-window returns bounded (not full scan)"
+            `Quick test_n_zero_no_window_returns_bounded;
           Alcotest.test_case "trajectory and receipts" `Quick
             test_read_unified_reads_trajectory_and_execution_receipts;
           Alcotest.test_case "runtime contract scope filter" `Quick
@@ -1287,6 +1375,8 @@ let () =
             test_summary_bad_trajectory_root_observed_once;
           Alcotest.test_case "counts all rows beyond recent cap" `Quick
             test_summary_counts_all_entries_beyond_recent_cap;
+          Alcotest.test_case "trajectory summary cache is incremental" `Quick
+            test_trajectory_summary_incremental;
           Alcotest.test_case "replay retention selected sources" `Quick
             test_replay_retention_lists_selected_sources;
         ] );

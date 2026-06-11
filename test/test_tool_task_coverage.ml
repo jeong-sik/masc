@@ -343,7 +343,7 @@ let () = test "dispatch_transition_claim" (fun () ->
 let () = test "dispatch_claim_next" (fun () ->
   let ctx = make_test_ctx () in
   let args = `Assoc [] in
-  match Task.Tool.dispatch ctx ~name:"masc_claim_next" ~args with
+  match Task.Tool.dispatch ctx ~name:"keeper_task_claim" ~args with
   | Some _ -> ()
   | None -> failwith "dispatch returned None"
 )
@@ -1386,8 +1386,6 @@ let () = test "handle_claim_next_ignores_keeper_tool_access_for_open_claims" (fu
   let agent_name = "keeper-social-sync-agent" in
   let keeper_name = "social-sync" in
   let ctx = make_test_ctx_with_agent agent_name in
-  let base_path = Masc_test_deps.find_project_root () in
-  ignore (Result.get_ok (Keeper_tool_policy.init_policy_config ~base_path));
   let initial_meta =
     match
       Masc_test_deps.meta_of_json_fixture
@@ -1405,12 +1403,8 @@ let () = test "handle_claim_next_ignores_keeper_tool_access_for_open_claims" (fu
   (match Keeper_meta_store.write_meta ~force:true ctx.config initial_meta with
   | Ok () -> ()
   | Error e -> failwith ("write_meta failed: " ^ e));
-  (match
-     Workspace.update_agent_r ctx.config ~agent_name
-       ~capabilities:[ "keeper" ] ()
-   with
-  | Ok _ -> ()
-  | Error e -> failwith (Masc_domain.masc_error_to_string e));
+  (* Workspace.update_agent_r setup removed (2026-06-09): the agent-status
+     registry it wrote was dead; claim eligibility uses keeper_meta above. *)
   let _ =
     Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc [ ("title", `String "Open claim task") ])

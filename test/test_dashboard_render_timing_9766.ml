@@ -73,7 +73,7 @@ let snapshot_latency_bucket le =
 let dashboard_all_zero_value () =
   Metrics.metric_value_or_zero
     Metrics.metric_dashboard_metric_all_zeros
-    ~labels:[("keeper_name", "__dashboard__")]
+    ~labels:[("keeper", "__dashboard__")]
     ()
 
 let test_record_timings_observes_otel_metric_store () =

@@ -73,7 +73,7 @@ let runtime_rotation_outcome_to_string = function
 
 (* Receipt-level summary of how the in-turn runtime attempt sequence
    ended.  Closed set across two producer paths:
-     - [Keeper_agent_error.runtime_outcome_of_observation] — 3 values
+    - [Keeper_agent_error.runtime_outcome_of_observation] — 4 values
        sourced from [Runtime_legacy_runner.runtime_observation].
      - [keeper_turn_helpers.build_pending_receipt] — emits
        [Runtime_not_dispatched] for pre-dispatch pending receipts.
@@ -82,12 +82,14 @@ let runtime_rotation_outcome_to_string = function
 type runtime_outcome =
   | Runtime_passed_to_next_model
   | Runtime_completed
+  | Runtime_failed
   | Runtime_not_observed
   | Runtime_not_dispatched
 
 let runtime_outcome_to_string = function
   | Runtime_passed_to_next_model -> "passed_to_next_model"
   | Runtime_completed -> "completed"
+  | Runtime_failed -> "failed"
   | Runtime_not_observed -> "not_observed"
   | Runtime_not_dispatched -> "not_dispatched"
 ;;
@@ -95,8 +97,8 @@ let runtime_outcome_to_string = function
 (* Receipt-level result of the completion-contract evaluation for the turn.
    Closed union of three producer paths:
      1. Initial-state marker from [keeper_run_tools]: [Contract_unknown].
-     2. Boundary-state overrides: [Contract_violated] (agent_run
-        CompletionContractViolation), [Contract_not_dispatched]
+     2. Boundary-state overrides: [Contract_violated] (text-only turn
+        with no keeper tool names), [Contract_not_dispatched]
         (turn_helpers pre-dispatch), [Contract_no_capable_provider]
         (run_tools no-provider escape).
      3. Six outcomes mirrored from

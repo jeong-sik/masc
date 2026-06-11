@@ -302,11 +302,13 @@ let record_turn_tool_events
     events
 ;;
 
-(** Record the observation for a streaming turn that was cancelled
-    externally (supervisor stop or external cancel). FSM emits +
-    record_pre_dispatch_terminal_observation are *boundary* side
-    effects intentionally retained from the godfile. *)
+(** Record the observation for a streaming turn that was cancelled.
+    [cancel_reason] distinguishes the source:
+      - ["attempt_watchdog_safety_deadline"] — wall-clock watchdog timeout
+      - ["supervisor_stop"] — supervisor requested stop
+      - ["external_cancel"] — external fiber cancellation *)
 let record_streaming_cancelled_observation
+      ?(cancel_reason : string = "external_cancel")
       ~(config : Workspace.config)
       ~(run_meta : Keeper_meta_contract.keeper_meta)
       ~(run_generation : int)
@@ -320,6 +322,12 @@ let record_streaming_cancelled_observation
     | Some entry -> Atomic.get entry.fiber_stop
     | None -> false
   in
+  let terminal_reason_code =
+    (* Priority: explicit cancel_reason > fiber_stop inference *)
+    if cancel_reason <> "external_cancel"
+    then cancel_reason
+    else if fiber_stop_set then "supervisor_stop" else "external_cancel"
+  in
   if fiber_stop_set
   then
     (* FSM: SupervisorRequestsStop — stop signal confirmed while streaming;
@@ -329,9 +337,6 @@ let record_streaming_cancelled_observation
       ~turn_id:keeper_turn_id
       ~prev:Keeper_turn_fsm.Streaming
       Keeper_turn_fsm.Streaming;
-  let terminal_reason_code =
-    if fiber_stop_set then "supervisor_stop" else "external_cancel"
-  in
   Keeper_turn_helpers.record_pre_dispatch_terminal_observation
     ~config
     ~meta:run_meta
@@ -343,10 +348,33 @@ let record_streaming_cancelled_observation
     ~trajectory_outcome:(Trajectory.Gated terminal_reason_code)
     ~keeper_turn_id
     ();
-  (* FSM: HonorStopSignal — cooperative cancel. *)
+  let cancelled_variant =
+    match terminal_reason_code with
+    | "attempt_watchdog_safety_deadline" ->
+      (* The attempt watchdog firing is an environmental terminal (the
+         provider stalled mid-stream), not a same-turn re-dispatch storm.
+         [Keeper_turn_livelock.classify_and_decide] keys [Stuck_age_exceeded]
+         off [first_started_at], i.e. the FIRST dispatch of this turn_id; a
+         retry after the watchdog cancel inherits that ~watchdog-budget-old
+         timestamp and trips the stuck-age gate on the very next dispatch,
+         routing the keeper to operator_pause (human-gated resume). That
+         pause on a transport stall contradicts the invariant that a keeper
+         keeps acting autonomously. Reset the livelock entry so the retry is
+         classified Fresh. Rapid re-dispatch storm detection is unaffected:
+         only the watchdog/provider_timeout terminal clears the counter, and
+         only for the keeper whose turn just timed out. The underlying
+         mid-stream stall (dropped OAS stream-idle deadline) is addressed
+         separately; this prevents the symptom from escalating to a
+         fleet-wide pause. *)
+      Keeper_turn_livelock.reset_keeper_livelock ~keeper:run_meta.name;
+      Keeper_turn_fsm.Cancelled Keeper_turn_fsm.Cancelled_provider_timeout
+    | _ ->
+      (* supervisor_stop, external_cancel, or any future reason *)
+      Keeper_turn_fsm.Cancelled Keeper_turn_fsm.Cancelled_supervisor_stop
+  in
   Keeper_turn_fsm.emit_transition
     ~keeper_name:run_meta.name
     ~turn_id:keeper_turn_id
     ~prev:Keeper_turn_fsm.Streaming
-    (Keeper_turn_fsm.Cancelled Keeper_turn_fsm.Cancelled_supervisor_stop)
+    cancelled_variant
 ;;

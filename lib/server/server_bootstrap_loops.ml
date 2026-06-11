@@ -203,13 +203,6 @@ let start_keeper_loops
   Progress.set_sse_callback Sse.broadcast;
   (* Wire stop_keeper hook so zombie GC can terminate keeper fibers *)
   Atomic.set Workspace_hooks.stop_keeper_fn Keeper_keepalive.stop_keepalive;
-  (* Wire claim_post_provision hook: create worktrees at task claim time
-     so docker-backed keepers find them when the LLM picks a worktree cwd.
-     Only Docker keepers benefit; local keepers operate on the project root. *)
-  Atomic.set Workspace_hooks.claim_post_provision_fn
-    (fun config ~agent_name ~task_id ->
-       Playground_repo_readiness.provision_worktrees_for_task
-         ~config ~agent_name ~task_id ());
   (* Shared Agent_sdk Event_bus used as the runtime transport between subsystems.
      Configuration is sourced from [Masc_event_bus_policy.oas_runtime] so the
      buffer-size/policy choice is auditable in source rather than implicit in
@@ -582,7 +575,6 @@ let start_keeper_loops
   let judge_tool_names =
     [ "masc_status"
     ; Tool_name.Task_name.to_string Tool_name.Task_name.Tasks
-    ; "masc_agents"
     ; Tool_name.Board_name.to_string Tool_name.Board_name.Board_list
     ]
   in
@@ -599,7 +591,7 @@ let start_keeper_loops
     let agent_name = actor in
     let ctx_workspace : Tool_workspace.context = { config; agent_name } in
     let ctx_task : Task.Tool.context = { config; agent_name; sw = Some sw } in
-    let ctx_agent : Tool_agent.context = { config; agent_name } in
+    (* ctx_agent removed with the masc_agents judge dispatch case (2026-06-09). *)
     match name with
     | "masc_status" ->
       (match Tool_workspace.dispatch ctx_workspace ~name ~args with
@@ -619,13 +611,6 @@ let start_keeper_loops
          Tool_result.error
            ~failure_class:(Some Tool_result.Runtime_failure)
            ~tool_name:name ~start_time "masc_tasks: dispatch failed")
-    | "masc_agents" ->
-      (match Tool_agent.dispatch ctx_agent ~name ~args with
-       | Some result -> result
-       | None ->
-         Tool_result.error
-           ~failure_class:(Some Tool_result.Runtime_failure)
-           ~tool_name:name ~start_time "masc_agents: dispatch failed")
     | "masc_board_list" ->
       Board_tool.handle_tool name args
     | _ ->
@@ -638,27 +623,13 @@ let start_keeper_loops
         ~start_time
         (Printf.sprintf "judge: tool '%s' not allowed" name)
   in
-  let governance_judge_dispatch = make_judge_dispatch ~actor:"governance-judge" in
+  (* governance_judge subsystem removed (2026-06-09): its only factual input
+     was [Workspace.get_agents_status], which read the disk-backed
+     [.masc/agents/] registry whose producer ([Workspace_eio.register_agent])
+     had zero call sites. items/activity were already hardcoded []. So the
+     judge ran ~100 empty LLM cycles/day producing 0 judgments for ~12 days.
+     Removing the daemon rather than leaving a permanently-empty input. *)
   let operator_judge_dispatch = make_judge_dispatch ~actor:"operator-judge" in
-  fork_subsystem "governance_judge" (fun () ->
-    Dashboard_governance_judge.start
-      ~sw
-      ~clock
-      ~net
-      ~base_path:state.workspace_config.base_path
-      ~masc_tools:judge_masc_tools
-      ~dispatch:governance_judge_dispatch
-      ~build_facts:(fun () ->
-        let base =
-          `Assoc
-            [ "generated_at", `String (Masc_domain.now_iso ())
-            ; "items", `List []
-            ; "activity", `List []
-            ]
-        in
-        let agents = Workspace.get_agents_status state.workspace_config in
-        Operator_control_snapshot.merge_json_objects base (`Assoc [ "agents", agents ]))
-      ());
   fork_subsystem "operator_judge" (fun () ->
     let operator_judge_ctx : _ Operator_control.context =
       { config = state.workspace_config
@@ -929,6 +900,7 @@ let start_keeper_loops
          handle_turn wires process_single_turn for actual turn execution. *)
       (try
          Keeper_chat_consumer.start ~sw ~clock
+           ~base_path:state.Mcp_server.workspace_config.base_path
            ~handle_turn:(fun ~sw ~keeper_name ~queued_message ->
              let open Server_routes_http_keeper_stream in
              let now = Time_compat.now () in
@@ -970,9 +942,23 @@ let start_keeper_loops
                     keeper_name;
                   (match discord_bot_token_opt () with
                    | Some token ->
-                       Eio.Fiber.fork ~sw (fun () ->
-                         Keeper_chat_discord.adapter_loop ~token
-                           ~channel_id ~events)
+                       (* fork_logged_fiber, not bare Eio.Fiber.fork: the
+                          adapter body runs after this synchronous frame
+                          returns, so the enclosing try/with cannot catch an
+                          exception it raises later. A bare fork would fail
+                          the shared [sw] and cancel every sibling fiber under
+                          it. [on_error] contains non-Cancelled exceptions;
+                          [fork_logged_fiber] re-raises Cancelled to preserve
+                          structured teardown. *)
+                       fork_logged_fiber ~sw
+                         ~on_error:(fun exn ->
+                           Log.Keeper.error
+                             "keeper_chat_consumer: Discord adapter fiber \
+                              crashed for keeper=%s: %s"
+                             keeper_name (Printexc.to_string exn))
+                         (fun () ->
+                           Keeper_chat_discord.adapter_loop ~token
+                             ~channel_id ~events)
                    | None ->
                        Log.Keeper.warn
                          "keeper_chat_consumer: \
@@ -986,9 +972,18 @@ let start_keeper_loops
                     keeper_name;
                   (match Sys.getenv_opt "MASC_SLACK_BOT_TOKEN" with
                    | Some token ->
-                       Eio.Fiber.fork ~sw (fun () ->
-                         Keeper_chat_slack.adapter_loop ~token
-                           ~channel ~events)
+                       (* Isolate from the shared [sw] like the Discord arm
+                          above; a bare fork would cancel sibling fibers if
+                          the adapter raises a non-Cancelled exception. *)
+                       fork_logged_fiber ~sw
+                         ~on_error:(fun exn ->
+                           Log.Keeper.error
+                             "keeper_chat_consumer: Slack adapter fiber \
+                              crashed for keeper=%s: %s"
+                             keeper_name (Printexc.to_string exn))
+                         (fun () ->
+                           Keeper_chat_slack.adapter_loop ~token
+                             ~channel ~events)
                    | None ->
                        Log.Keeper.warn
                          "keeper_chat_consumer: \

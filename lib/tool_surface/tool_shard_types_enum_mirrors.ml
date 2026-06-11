@@ -10,8 +10,6 @@
     Canonical owners (single source of truth per enum):
       - [sort_order_enum_strings]
           mirrors [Board_dispatch.valid_sort_order_strings] (#8513)
-      - [tool_search_files_op_enum_strings]
-          mirrors [Keeper_tool_command_runtime.valid_shell_op_strings] (#8524)
       - [memory_search_source_enum_strings]
           mirrors [Keeper_tool_memory_runtime.valid_memory_search_source_strings] (#8484)
       - [memory_kind_enum_strings]
@@ -45,19 +43,3 @@ let memory_kind_enum_strings =
 let fs_write_mode_enum_strings = [ "overwrite"; "append"; "patch" ]
 let sort_order_enum_strings = [ "hot"; "trending"; "recent"; "updated"; "discussed" ]
 let vote_direction_enum_strings = [ "up"; "down" ]
-
-let tool_search_files_op_enum_strings =
-  [ "pwd"
-  ; "ls"
-  ; "cat"
-  ; "rg"
-  ; "git_status"
-  ; "find"
-  ; "head"
-  ; "tail"
-  ; "wc"
-  ; "tree"
-  ; "git_log"
-  ; "git_diff"
-  ]
-;;

@@ -238,25 +238,54 @@ let keeper_error_hint ~agent_status ~meta =
           | Some reason when looks_error_like reason -> Some reason
           | _ -> None))
 
+(* A live signal newer than the persisted error snapshot means
+   [last_proactive_reason] is stale and must not surface as a current error.
+   Shared by quiet-reason classification and the dashboard diagnostic so a
+   running keeper that has recovered does not keep showing a dead error string
+   — including across server restarts, where the persisted snapshot is reloaded
+   verbatim and never reset.
+
+   Two independent supersede paths, because the persisted error and the live
+   signal can come from different sources:
+
+   - Keeper self-progress: the error is recorded on the last *proactive* cycle
+     ([proactive_rt.last_ts]). If the keeper has completed any later turn
+     ([usage.last_turn_ts] strictly greater), the proactive error predates the
+     keeper's current activity and is stale. Keepers do not publish an external
+     agent-registry record ([.masc/agents/]), so this is the only path that
+     fires for them. Equality (the erroring proactive turn *is* the latest
+     turn) does not supersede — a fresh error stays visible.
+
+   - External agent-registry signal: present for non-keeper participants that
+     write an agent record. A fresh live presence newer than all recorded
+     activity. Threshold preserved verbatim so non-keeper behaviour is
+     unchanged. *)
+let live_signal_supersedes_persisted_error ~keepalive_running ~agent_status ~meta =
+  if not keepalive_running then false
+  else begin
+    let proactive_error_ts = meta.runtime.proactive_rt.last_ts in
+    let last_turn_ts = meta.runtime.usage.last_turn_ts in
+    let self_progressed_past_proactive_error =
+      proactive_error_ts > 0.0 && last_turn_ts > proactive_error_ts
+    in
+    let external_live_signal =
+      json_bool "exists" agent_status false
+      && agent_runtime_has_live_signal agent_status
+      &&
+      match agent_last_seen_ts_opt agent_status with
+      | Some last_seen_ts -> last_seen_ts > max proactive_error_ts last_turn_ts
+      | None -> false
+    in
+    self_progressed_past_proactive_error || external_live_signal
+  end
+
 let classify_keeper_quiet_reason ~meta ~keepalive_running ~agent_status ~now_ts =
   let quiet_active = quiet_hours_active () in
   let agent_exists = json_bool "exists" agent_status false in
   let agent_status_text = agent_status_text agent_status in
-  let live_signal_supersedes_persisted_error =
-    keepalive_running
-    && agent_exists
-    && agent_runtime_has_live_signal agent_status
-    &&
-    match agent_last_seen_ts_opt agent_status with
-    | Some last_seen_ts ->
-        let persisted_error_ts =
-          max meta.runtime.proactive_rt.last_ts meta.runtime.usage.last_turn_ts
-        in
-        last_seen_ts > persisted_error_ts
-    | None -> false
-  in
   let error_hint =
-    if live_signal_supersedes_persisted_error then None
+    if live_signal_supersedes_persisted_error ~keepalive_running ~agent_status ~meta
+    then None
     else keeper_error_hint ~agent_status ~meta
   in
   if not meta.proactive.enabled then
@@ -515,7 +544,13 @@ let keeper_diagnostic_json
     keeper_reply_snapshot_of_history history_items
   in
   let last_error =
-    Json_util.string_opt_to_json (keeper_error_hint ~agent_status ~meta)
+    (* Mirror classify_keeper_quiet_reason: a recovered running keeper whose
+       live signal postdates the persisted error must not surface the stale
+       reason. Without this guard the dashboard "이전 오류" badge survives
+       server restarts because the snapshot is reloaded verbatim. *)
+    if live_signal_supersedes_persisted_error ~keepalive_running ~agent_status ~meta
+    then `Null
+    else Json_util.string_opt_to_json (keeper_error_hint ~agent_status ~meta)
   in
   `Assoc
     [

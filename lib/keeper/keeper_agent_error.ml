@@ -21,7 +21,6 @@ type sdk_termination_semantics =
   | Oas_token_budget_exhausted
   | Oas_cost_budget_exhausted
   | Oas_cost_budget_unenforceable
-  | Oas_tool_retry_exhausted
   | Oas_guardrail_violation
   | Oas_tripwire_violation
   | Oas_input_required
@@ -51,8 +50,6 @@ let sdk_termination_semantics = function
     Oas_cost_budget_exhausted
   | Agent_sdk.Error.Agent (Agent_sdk.Error.CostBudgetUnenforceable _) ->
     Oas_cost_budget_unenforceable
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.ToolRetryExhausted _) ->
-    Oas_tool_retry_exhausted
   | Agent_sdk.Error.Agent (Agent_sdk.Error.GuardrailViolation _) ->
     Oas_guardrail_violation
   | Agent_sdk.Error.Agent (Agent_sdk.Error.TripwireViolation _) ->
@@ -78,7 +75,6 @@ let sdk_termination_semantics_to_string = function
   | Oas_token_budget_exhausted -> "oas_token_budget_exhausted"
   | Oas_cost_budget_exhausted -> "oas_cost_budget_exhausted"
   | Oas_cost_budget_unenforceable -> "oas_cost_budget_unenforceable"
-  | Oas_tool_retry_exhausted -> "oas_tool_retry_exhausted"
   | Oas_guardrail_violation -> "oas_guardrail_violation"
   | Oas_tripwire_violation -> "oas_tripwire_violation"
   | Oas_input_required -> "oas_input_required"
@@ -214,8 +210,6 @@ let agent_error_terminal_reason_code = function
     Printf.sprintf
       "agent_error_idle_detected:consecutive_idle_turns=%d"
       consecutive_idle_turns
-  | Agent_sdk.Error.ToolRetryExhausted { attempts; limit; detail = _ } ->
-    Printf.sprintf "agent_error_tool_retry_exhausted:attempts=%d,limit=%d" attempts limit
   | Agent_sdk.Error.GuardrailViolation { validator; reason = _ } ->
     Printf.sprintf "agent_error_guardrail_violation:validator=%s" validator
   | Agent_sdk.Error.TripwireViolation { tripwire; reason = _ } ->
@@ -311,7 +305,6 @@ let receipt_outcome_kind_of_sdk_error err =
   | Oas_token_budget_exhausted
   | Oas_cost_budget_exhausted
   | Oas_cost_budget_unenforceable
-  | Oas_tool_retry_exhausted
   | Oas_guardrail_violation
   | Oas_tripwire_violation
   | Sdk_error_failure -> `Error
@@ -329,6 +322,12 @@ let runtime_outcome_of_observation
     : _ -> Keeper_execution_receipt.runtime_outcome = function
   | Some (obs : Runtime_observation.runtime_observation) when obs.fallback_applied ->
     Keeper_execution_receipt.Runtime_passed_to_next_model
+  | Some obs
+    when List.exists
+           (fun (attempt : Runtime_observation.runtime_attempt) ->
+              Option.is_some attempt.error)
+           obs.attempts ->
+    Keeper_execution_receipt.Runtime_failed
   | Some _ -> Keeper_execution_receipt.Runtime_completed
   | None -> Keeper_execution_receipt.Runtime_not_observed
 ;;

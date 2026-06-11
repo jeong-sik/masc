@@ -761,7 +761,7 @@ describe('TelemetryUnified', () => {
           'Streaming_first_chunk',
           {
             provider: 'openai_compat',
-            model: 'provider-g-v4-flash:cloud',
+            model: 'deepseek-v4-flash:cloud',
             ttfrc_ms: 1685,
           },
         ],
@@ -787,7 +787,7 @@ describe('TelemetryUnified', () => {
       category: 'turn',
     })
 
-    const cloudMatches = filterTelemetryDisplayItems(items, 'provider-g-v4-flash:cloud')
+    const cloudMatches = filterTelemetryDisplayItems(items, 'deepseek-v4-flash:cloud')
     expect(cloudMatches).toHaveLength(1)
     expect(cloudMatches[0]).toMatchObject({ kind: 'entry' })
   })
@@ -928,7 +928,7 @@ describe('TelemetryUnified', () => {
           'Streaming_summary',
           {
             provider: 'openai_compat',
-            model: 'provider-g-v4-flash:cloud',
+            model: 'deepseek-v4-flash:cloud',
             total_ms: 3450,
           },
         ],
@@ -943,7 +943,7 @@ describe('TelemetryUnified', () => {
     expect(streamingMatches).toHaveLength(1)
     expect(streamingMatches[0]).toMatchObject({ kind: 'entry' })
 
-    const modelMatches = filterTelemetryDisplayItems(items, 'provider-g-v4-flash:cloud')
+    const modelMatches = filterTelemetryDisplayItems(items, 'deepseek-v4-flash:cloud')
     expect(modelMatches).toHaveLength(1)
     expect(modelMatches[0]).toMatchObject({ kind: 'entry' })
   })

@@ -162,9 +162,7 @@ let is_alert_deduplicated ~(keeper_name : string) ~(reasons : string list) : boo
     The score is the sum of matched weights, capped at 1.0.
 
     Signal bonuses are additive modifiers for structural indicators
-    (guardrail stops, context pressure, alignment drops, tool usage).
-
-    TODO(RFC-0001 Phase 3): Register in Runtime_params for runtime tuning. *)
+    (guardrail stops, context pressure, alignment drops, tool usage). *)
 
 let alert_keyword_weights : (string * float) list = [
   ("장애",     0.35);  (* Korean: outage/failure *)
@@ -327,7 +325,7 @@ let post_keeper_alert_slack
         ~actor:`System_notify
         ~raw_source:(String.concat " " argv)
         ~summary:"keeper alert slack webhook"
-        ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Alerting ())
+
         ~stdin_content:payload
         argv
     in
@@ -377,7 +375,7 @@ let slack_api_post_json
       ~actor:`System_notify
       ~raw_source:(String.concat " " argv)
       ~summary:"keeper alert slack api post"
-      ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Alerting ())
+
       ~stdin_content:body
       argv
   in
@@ -471,7 +469,7 @@ let post_keeper_alert_github
         ~actor:`Workspace_git
         ~raw_source:(String.concat " " args)
         ~summary:"keeper alert gh issue create"
-        ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Alerting ())
+
         args
     in
     match status with

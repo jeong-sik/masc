@@ -76,7 +76,7 @@ let schemas : tool_schema list =
       description =
         "List shared planning goals from the Goal Store, optionally filtered by horizon or explicit phase. \
 Use when a PM/planner agent needs current long/mid/short goals before creating tasks or reviews. \
-The dashboard Goal Tree reads the same store. Linked tasks require structured task.goal_id. \
+The dashboard Goal Tree reads the same store. Goal-task links are managed externally. \
 The response includes each goal's explicit lifecycle phase and verification policy.";
       input_schema =
         `Assoc
@@ -96,7 +96,7 @@ The response includes each goal's explicit lifecycle phase and verification poli
       description =
         "Create or update a shared Goal Store entry used by Planning > Goal Tree. \
 For new goals, provide at least title; omitted horizon defaults to short. \
-After creation, link tasks into the tree with task.goal_id=<goal_id>. \
+After creation, goal-task links are registered separately by the keeper orchestrator. \
 Use this tool for goal metadata, parent linkage, and verifier-policy configuration. \
 Lifecycle status/phase fields are intentionally omitted here; use masc_goal_transition / masc_goal_verify for lifecycle moves.";
       input_schema =

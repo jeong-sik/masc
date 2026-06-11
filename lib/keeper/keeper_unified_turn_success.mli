@@ -4,6 +4,7 @@ val handle
   :  config:Workspace.config
   -> base_dir:string
   -> meta:Keeper_meta_contract.keeper_meta
+  -> turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell
   -> observation:Keeper_world_observation.world_observation
   -> previous_social_state:Keeper_social_model.social_state option
   -> final_execution:Keeper_turn_runtime_budget.runtime_execution

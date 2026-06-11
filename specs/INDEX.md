@@ -5,7 +5,7 @@ Edit the generator, not this file. Re-run: scripts/gen-tla-index.sh > specs/INDE
 
 # TLA+ Spec Index
 
-Generated: 2026-06-07T13:29:07Z (HEAD: 4428536f05)
+Generated: 2026-06-10T13:37:43Z (HEAD: 75c984bec)
 
 Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to refresh.
 
@@ -13,12 +13,12 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 
 | Metric | Value |
 |--------|-------|
-| Total .tla files | 90 |
-| Manual specs | 90 |
+| Total .tla files | 91 |
+| Manual specs | 91 |
 | TTrace (auto-generated) | 0 |
 | Directories | 19 |
-| Total .cfg files | 186 |
-| Buggy .cfg (bug-model pair) | 95 |
+| Total .cfg files | 188 |
+| Buggy .cfg (bug-model pair) | 96 |
 
 `kind` column: **manual** = hand-authored spec; **ttrace** = TLC counterexample export (`*TTrace*` or trace marker in header). `cfg`/`buggy` columns count companion `.cfg` files. `invariants/properties` lists names per cfg label (`clean=...`, `buggy=...`). `source hash` is the tracked `.tla` blob fingerprint.
 
@@ -63,7 +63,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | ToolCallContract.tla | ToolCallContract | manual | 2 | 1 | clean={inv:Safety} buggy={inv:NeverDropSilently} | a33a3185f14e |
 | TurnEvidenceChain.tla | TurnEvidenceChain | manual | 2 | 1 | clean={inv:TypeOK, inv:TerminalHasFullEvidence, inv:TerminalVisibleInRuntimeLens, inv:OasBoundaryGeneric} buggy={inv:TerminalHasFullEvidence} | 0790cfbf9572 |
 
-### specs/bug-models (20 specs)
+### specs/bug-models (21 specs)
 
 | File | Module | Kind | cfg | buggy | Invariants / Properties | Source Hash |
 |------|--------|------|-----|-------|-------------------------|---------------|
@@ -81,6 +81,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | KeepalivePhaseConsistency.tla | KeepalivePhaseConsistency | manual | 2 | 1 | clean={inv:TypeOK, inv:KeepalivePhaseConsistent, inv:InFlightImpliesRunning} buggy={inv:TypeOK, inv:KeepalivePhaseConsistent, inv:InFlightImpliesRunning} | dd37d9bd7796 |
 | KeeperPhaseRace.tla | KeeperPhaseRace | manual | 2 | 1 | clean={inv:TypeOK, inv:CrashImpliesThreshold, inv:RecordOnlyOnCrash, inv:CounterBoundedByObservations} buggy={inv:TypeOK, inv:CrashImpliesThreshold, inv:RecordOnlyOnCrash, inv:CounterBoundedByObservations} | 3c697ce837c8 |
 | KeeperTaskInterlock.tla | KeeperTaskInterlock | manual | 3 | 1 | clean={inv:TypeOK, inv:NoDeadKeeperHoldsTask, inv:ClaimerNotDead, inv:AwaitingVerificationHasClaimer} buggy={inv:TypeOK, inv:NoDeadKeeperHoldsTask, inv:ClaimerNotDead} current={inv:TypeOK} | c14aa70b51e4 |
+| KeeperTurnSingleFlight.tla | KeeperTurnSingleFlight | manual | 2 | 1 | clean={inv:TypeOK, inv:SingleFlight} buggy={inv:TypeOK, inv:SingleFlight} | b9c881db6540 |
 | KeeperWorkPipelineBug.tla | KeeperWorkPipelineBug | manual | 2 | 1 | clean={inv:TypeOK, inv:WorkspaceAlwaysBounded, inv:IdentityConsistent} buggy={inv:TypeOK, inv:WorkspaceAlwaysBounded} | dc1e83209ec5 |
 | KeeperWorktreeContainment.tla | KeeperWorktreeContainment | manual | 3 | 2 | clean={inv:KeeperWorktreeKind, inv:KeeperWorktreeOwner, inv:TypeOK} other-playground-buggy={inv:KeeperWorktreeKind, inv:KeeperWorktreeOwner, inv:TypeOK} server-root-buggy={inv:KeeperWorktreeKind, inv:KeeperWorktreeOwner, inv:TypeOK} | fc57677b6dc2 |
 | MemoryCompaction.tla | MemoryCompaction | manual | 2 | 1 | clean={inv:ConstraintsPreserved NeverEmpty ResultBounded LongTermProtected RecentFloorRespected} buggy={inv:ConstraintsPreserved NeverEmpty ResultBounded LongTermProtected RecentFloorRespected} | 0002c4c1a901 |

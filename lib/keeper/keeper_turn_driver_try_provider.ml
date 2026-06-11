@@ -28,9 +28,9 @@ type try_provider_ctx =
   ; system_prompt : string
   ; tools : Agent_sdk.Tool.t list
   ; initial_messages : Agent_sdk.Types.message list
-  ; max_turns : int
   ; max_idle_turns : int
   ; stream_idle_timeout_s : float option
+  ; body_timeout_s : float option
   ; temperature : float
   ; max_tokens : int
   ; max_input_tokens : int option
@@ -38,8 +38,8 @@ type try_provider_ctx =
   ; guardrails : Agent_sdk.Guardrails.t option
   ; hooks : Agent_sdk.Hooks.hooks option
   ; context_reducer : Agent_sdk.Context_reducer.t option
-  ; tool_retry_policy : Agent_sdk.Tool_retry_policy.t option
   ; raw_trace : Agent_sdk.Raw_trace.t option
+  ; trace_link : (string * string) option
   ; (* Transport *)
     transport_resolved : Masc_grpc_transport.t
   ; runtime_mcp_policy : Llm_provider.Llm_transport.runtime_mcp_policy option
@@ -54,6 +54,7 @@ type try_provider_ctx =
   ; context_injector : Agent_sdk.Hooks.context_injector option
   ; context : Agent_sdk.Context.t option
   ; enable_thinking : bool option
+  ; preserve_thinking : bool option
   ; approval : Agent_sdk.Hooks.approval_callback option
   ; exit_condition : (int -> bool) option
   ; exit_condition_result : (int -> Runtime_agent.stop_reason * string option) option
@@ -67,6 +68,8 @@ type try_provider_ctx =
   ; on_yield : (unit -> unit) option
   ; on_resume : (unit -> unit) option
   ; agent_ref : Agent_sdk.Agent.t option ref option
+  ; on_runtime_observation :
+      (Runtime_observation.runtime_observation -> unit) option
   ; (* Event bus *)
     event_bus : Agent_sdk.Event_bus.t option
   ; runtime_manifest_context : Keeper_runtime_manifest.turn_context option
@@ -248,7 +251,6 @@ let run_try_provider
              candidate)
             with
             priority = ctx.priority
-          ; max_turns = ctx.max_turns
           ; max_tokens = ctx.max_tokens
           ; max_input_tokens = ctx.max_input_tokens
           ; max_cost_usd = ctx.max_cost_usd
@@ -256,20 +258,12 @@ let run_try_provider
               stream_idle_timeout_for_attempt ~configured:ctx.stream_idle_timeout_s
           ; max_execution_time_s =
               max_execution_time_for_attempt ?per_provider_timeout_s ()
-          ; body_timeout_s =
-              (* SSOT: Keeper_runtime_resolved.body_timeout_override_sec
-                 (driven by MASC_KEEPER_BODY_TIMEOUT_SEC). OAS applies this
-                 only to non-streaming sync body reads; streaming attempts
-                 deliberately rely on [stream_idle_timeout_s] plus liveness
-                 observation so healthy reasoning bursts are not killed by
-                 total duration. *)
-              body_timeout_for_attempt ?per_provider_timeout_s ()
+          ; body_timeout_s = ctx.body_timeout_s
           ; temperature = ctx.temperature
           ; max_idle_turns = ctx.max_idle_turns
           ; guardrails = ctx.guardrails
           ; hooks
           ; context_reducer = ctx.context_reducer
-          ; tool_retry_policy = ctx.tool_retry_policy
           ; description =
               Some (Printf.sprintf "runtime:%s/runtime" ctx.runtime_id)
           ; transport = ctx.transport_resolved
@@ -283,6 +277,7 @@ let run_try_provider
           ; context_injector = ctx.context_injector
           ; context = ctx.context
           ; enable_thinking = ctx.enable_thinking
+          ; preserve_thinking = ctx.preserve_thinking
           ; event_bus = ctx.event_bus
           ; approval = ctx.approval
           ; exit_condition = ctx.exit_condition
@@ -290,6 +285,7 @@ let run_try_provider
           ; summarizer = ctx.summarizer
           ; initial_messages = ctx.initial_messages
           ; raw_trace = ctx.raw_trace
+          ; trace_link = ctx.trace_link
           ; yield_on_tool = ctx.yield_on_tool
           ; runtime_mcp_policy
           }
@@ -302,6 +298,11 @@ let run_try_provider
        No separate liveness FSM — provider stall is an OAS-level concern.
        No per-lane capacity gate — provider load is managed by operator
        adjusting keeper count. *)
+    let run_started_at =
+      Unix.gettimeofday ()
+      (* NDT-OK: provider-attempt latency telemetry only; dispatch/control
+         decisions do not branch on this timestamp. *)
+    in
     let result =
       Eio.Switch.run (fun attempt_sw ->
         let effective_checkpoint =
@@ -350,12 +351,32 @@ let run_try_provider
            | None -> run_fn ()))
     in
     let result =
+      (* Restore typed provider-context enrichment (auth-env / not-found hints).
+         [Runtime_candidate] lives below [lib/keeper] and cannot reach this
+         keeper-level helper, so the enrichment is applied here at the consumer
+         with the candidate's provider config. *)
       Result.map_error
-        (Runtime_candidate.enrich_sdk_error
+        (Keeper_runtime_attempt.enrich_sdk_error
            ~runtime_id:ctx.error_runtime_id
-           candidate)
+           ~provider_cfg:(Runtime_candidate.provider_cfg candidate))
         result
     in
+    (match ctx.on_runtime_observation, result with
+     | Some emit, Ok run_result ->
+       Option.iter emit run_result.Runtime_agent.runtime_observation
+     | Some emit, Error err ->
+       let total_duration_ms =
+         (Unix.gettimeofday ()
+          (* NDT-OK: closes the provider-attempt latency telemetry sample above. *)
+          -. run_started_at)
+         *. 1000.0
+       in
+       Runtime_agent.runtime_observation_for_terminal_config
+         ~total_duration_ms
+         ~error:(Agent_sdk.Error.to_string err)
+         config
+       |> emit
+     | None, _ -> ());
     let checkpoint_after =
       Keeper_turn_driver_helpers.checkpoint_after_attempt
         ?agent_ref:ctx.agent_ref

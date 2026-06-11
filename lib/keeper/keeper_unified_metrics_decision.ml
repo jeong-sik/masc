@@ -16,6 +16,7 @@ include Keeper_unified_metrics_json_support
 let append_decision_record
     ~(config : Workspace.config)
     ~(meta : keeper_meta)
+    ~(turn_ctx_cell : Keeper_tool_call_log.turn_ctx_cell)
     ~(observation : Keeper_world_observation.world_observation)
     ~(latency_ms : int)
     ~(outcome : string)
@@ -57,7 +58,7 @@ let append_decision_record
       , _sandbox_profile
       , _network_mode
       , approval_mode ) =
-    Keeper_tool_call_log.get_turn_context ~keeper_name:meta.name ()
+    Keeper_tool_call_log.get_turn_context ~cell:turn_ctx_cell ()
   in
   let turn_id =
     Option.value ~default:meta.runtime.usage.total_turns turn_id_opt

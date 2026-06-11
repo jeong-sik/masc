@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { useSignalValue, useStoreSubscription } from './use-signal-value'
 import { get } from '../../api/core'
 import { fetchIdeEvents, type IdeBridgeEvent } from '../../api/ide'
 import { asRecord, isPositiveSafeInteger } from '../common/normalize'
@@ -432,7 +433,6 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
     store.seed(EMPTY_ACTIVITY)
     return store
   }, [])
-  const [, forceRender] = useState(0)
   const [refreshState, setRefreshState] = useState<ActivityRefreshState>(INITIAL_REFRESH_STATE)
   const emittedTraceIds = useRef<ReadonlySet<string>>(new Set())
   const refreshMs = normalizedPollMs(pollMs)
@@ -475,26 +475,11 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
     }
   }, [store, refreshMs])
 
-  useEffect(() => {
-    const unsub = store.subscribe(() => forceRender(tick => tick + 1))
-    return () => unsub()
-  }, [store])
-  useEffect(() => {
-    const unsub = globalPresenceSnapshot.subscribe(() => forceRender(tick => tick + 1))
-    return () => unsub()
-  }, [])
-  useEffect(() => {
-    const unsub = cursorOverlaySignal.subscribe(() => forceRender(tick => tick + 1))
-    return () => unsub()
-  }, [])
-  useEffect(() => {
-    const unsub = ideConversationThreadSnapshot.subscribe(() => forceRender(tick => tick + 1))
-    return () => unsub()
-  }, [])
-  useEffect(() => {
-    const unsub = lspDiagnosticSnapshot.subscribe(() => forceRender(tick => tick + 1))
-    return () => unsub()
-  }, [])
+  useStoreSubscription(store.subscribe)
+  useSignalValue(globalPresenceSnapshot)
+  useSignalValue(cursorOverlaySignal)
+  useSignalValue(ideConversationThreadSnapshot)
+  useSignalValue(lspDiagnosticSnapshot)
 
   const events = store.events()
   const keepers = store.knownKeepers()

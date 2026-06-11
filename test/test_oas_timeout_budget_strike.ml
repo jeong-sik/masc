@@ -71,6 +71,18 @@ let provider_timeout_error ~phase =
        ; phase
        })
 
+let raw_provider_timeout_error ~phase =
+  Agent_sdk.Error.Provider
+    (Llm_provider.Error.Timeout
+       { provider = "test_provider"
+       ; timeout_phase = phase
+       ; detail = "provider timeout"
+       })
+
+let raw_api_timeout_error () =
+  Agent_sdk.Error.Api
+    (Llm_provider.Retry.Timeout { message = "Per-provider timeout after 90.0s" })
+
 let turn_timeout_error () =
   KTD.sdk_error_of_masc_internal_error (KTD.Turn_timeout { elapsed_sec = 600.0 })
 
@@ -94,15 +106,6 @@ let tls_handshake_internal_error () =
        ; exn_repr = "TLS alert from peer: handshake failure"
        })
 
-let tool_retry_exhausted_error () =
-  Agent_sdk.Error.Agent
-    (Agent_sdk.Error.ToolRetryExhausted
-       { attempts = 2
-       ; limit = 2
-       ; detail =
-           "Tool retry budget exhausted after 2/2 retries: Grep {} Errors: \
-            pattern missing"
-       })
 
 let test_cycle_failed_log_level_is_policy_aware () =
   Alcotest.(check bool)
@@ -115,24 +118,47 @@ let test_cycle_failed_log_level_is_policy_aware () =
     false
     (EC.should_warn_keeper_cycle_failed (turn_timeout_error ()))
 
-let test_tool_retry_exhausted_preserves_keeper_liveness () =
-  let err = tool_retry_exhausted_error () in
+let test_raw_oas_provider_timeout_uses_same_policy () =
+  let err =
+    raw_provider_timeout_error
+      ~phase:
+        (Some
+           (Llm_provider.Http_client.Stream_idle
+              Llm_provider.Http_client.Streaming_thinking))
+  in
   Alcotest.(check bool)
-    "tool retry exhaustion is detected"
+    "raw provider timeout is a provider timeout"
     true
-    (EC.is_tool_retry_exhausted_error err);
+    (EC.is_provider_timeout_error err);
   Alcotest.(check bool)
-    "tool retry exhaustion is auto-recoverable at keeper turn level"
+    "raw provider timeout cycle failure is warn"
     true
-    (EC.is_auto_recoverable_turn_error err);
+    (EC.should_warn_keeper_cycle_failed err);
+  match
+    KH.provider_timeout_policy_decision
+      ~strikes:KK.provider_timeout_strike_limit
+      err
+  with
+  | None -> Alcotest.fail "expected provider timeout policy decision"
+  | Some decision ->
+    Alcotest.(check string)
+      "reason preserves OAS timeout phase"
+      "provider_timeout_loop:stream_idle:streaming_thinking"
+      decision.reason
+
+let test_raw_oas_api_timeout_uses_same_policy () =
+  let err = raw_api_timeout_error () in
   Alcotest.(check bool)
-    "tool retry exhaustion is not runtime exhaustion"
-    false
-    (EC.is_runtime_exhausted_error err);
-  Alcotest.(check bool)
-    "tool retry exhaustion logs as warn, not fatal error"
+    "raw API timeout is a provider timeout"
     true
-    (EC.should_warn_keeper_cycle_failed err)
+    (EC.is_provider_timeout_error err);
+  match KH.provider_timeout_policy_decision ~strikes:1 err with
+  | None -> Alcotest.fail "expected provider timeout policy decision"
+  | Some decision ->
+    Alcotest.(check string)
+      "phase-free API timeout keeps generic reason"
+      "provider_timeout"
+      decision.reason
 
 let test_tls_handshake_internal_error_is_transient () =
   let err = tls_handshake_internal_error () in
@@ -148,68 +174,6 @@ let test_tls_handshake_internal_error_is_transient () =
     "runtime_runner TLS handshake failure is auto-recoverable at turn level"
     true
     (EC.is_auto_recoverable_turn_error err)
-
-let test_attempt_watchdog_timeout_reclassifies_as_provider_timeout () =
-  let budget : KCB.provider_timeout_budget =
-    { effective_timeout_sec = 555.0
-    ; adaptive_timeout_sec = 600.0
-    ; keeper_turn_timeout_sec = 600.0
-    ; remaining_turn_budget_sec = 571.0
-    ; estimated_input_tokens = 10_000
-    ; max_turns = 6
-    ; source = "turn_budget_capped"
-    }
-  in
-  let err =
-    Agent_sdk.Error.Api
-      (Timeout
-         { message =
-             "Turn wall-clock budget exhausted during runtime attempt \
-              (budget=555.0s, watchdog=570.0s)"
-         })
-  in
-  let reclassified =
-    KCB.reclassify_provider_timeout_for_attempt
-      ~provider_timeout_budget:(Some budget)
-      err
-  in
-  (match KTD.classify_masc_internal_error reclassified with
-   | Some (KTD.Provider_timeout timeout) ->
-     Alcotest.(check string)
-       "phase"
-       "runtime_attempt_watchdog"
-       timeout.phase;
-     Alcotest.(check (float 0.001))
-       "budget"
-       555.0
-       timeout.budget_sec
-   | Some other ->
-     Alcotest.failf
-       "expected Provider_timeout, got %s"
-       (Option.value
-          ~default:"<no summary>"
-          (KTD.summary_of_masc_internal_error other))
-   | None -> Alcotest.fail "expected structured Provider_timeout");
-  Alcotest.(check bool)
-    "provider timeout cycle failure is warn"
-    true
-    (EC.should_warn_keeper_cycle_failed reclassified)
-
-let test_attempt_watchdog_always_returns_some () =
-  let budget : KCB.provider_timeout_budget =
-    { effective_timeout_sec = 555.0
-    ; adaptive_timeout_sec = 600.0
-    ; keeper_turn_timeout_sec = 600.0
-    ; remaining_turn_budget_sec = 571.0
-    ; estimated_input_tokens = 10_000
-    ; max_turns = 6
-    ; source = "turn_budget_capped"
-    }
-  in
-  (match KCB.attempt_watchdog_timeout_sec_opt ~remaining_turn_budget_s:571.0 budget with
-   | Some actual ->
-     Alcotest.(check (float 0.001)) "watchdog is always present" 570.0 actual
-   | None -> Alcotest.fail "attempt watchdog should always return Some")
 
 let test_retry_timeout_budget_ignores_expired_outer_turn_budget () =
   let budget =
@@ -394,20 +358,12 @@ let () =
           test_strike_limit_is_soft_backoff;
         Alcotest.test_case "cycle failure log level is policy-aware" `Quick
           test_cycle_failed_log_level_is_policy_aware;
-        Alcotest.test_case
-          "tool retry exhaustion preserves keeper liveness"
-          `Quick
-          test_tool_retry_exhausted_preserves_keeper_liveness;
+        Alcotest.test_case "raw OAS provider timeout uses same policy" `Quick
+          test_raw_oas_provider_timeout_uses_same_policy;
+        Alcotest.test_case "raw OAS API timeout uses same policy" `Quick
+          test_raw_oas_api_timeout_uses_same_policy;
         Alcotest.test_case "TLS handshake internal error is transient" `Quick
           test_tls_handshake_internal_error_is_transient;
-        Alcotest.test_case
-          "attempt watchdog timeout reclassifies as provider timeout"
-          `Quick
-          test_attempt_watchdog_timeout_reclassifies_as_provider_timeout;
-        Alcotest.test_case
-          "attempt watchdog always returns Some after liveness removal"
-          `Quick
-          test_attempt_watchdog_always_returns_some;
         Alcotest.test_case
           "retry timeout budget ignores expired outer turn budget"
           `Quick

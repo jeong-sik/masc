@@ -24,5 +24,10 @@ let dispatch
      -> Tool_result.result option)
       ref
   =
-  ref (fun ~config:_ ~agent_name:_ ~name:_ ~args:_ -> None)
+  ref (fun ~config:_ ~agent_name:_ ~name ~args:_ ->
+    failwith
+      (Printf.sprintf
+         "workspace_dispatch_ref: dispatch called for tool %S before boot registration — \
+          ensure Mcp_server_eio_execute registers Tool_workspace.dispatch"
+         name))
 ;;

@@ -29,6 +29,8 @@ type parsed_args = {
   compaction_message_gate_opt : int option;
   compaction_token_gate_opt : int option;
   continuity_compaction_cooldown_sec_opt : int option;
+  sandbox_profile_opt : string option;
+  network_mode_opt : string option;
   tool_access_opt : string list option;
   tool_denylist_opt : string list option;
   auto_handoff_opt : bool option;
@@ -194,6 +196,8 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
     let continuity_compaction_cooldown_sec_opt =
       Safe_ops.json_int_opt "continuity_compaction_cooldown_sec" args
     in
+    let sandbox_profile_opt = Safe_ops.json_string_opt "sandbox_profile" args in
+    let network_mode_opt = Safe_ops.json_string_opt "network_mode" args in
     let tool_denylist_opt_res = parse_present_tool_name_list_opt args "tool_denylist" in
     let auto_handoff_opt = get_bool_opt args "auto_handoff" in
     let handoff_threshold_opt = Safe_ops.json_float_opt "handoff_threshold" args in
@@ -250,6 +254,8 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
       compaction_message_gate_opt;
       compaction_token_gate_opt;
       continuity_compaction_cooldown_sec_opt;
+      sandbox_profile_opt;
+      network_mode_opt;
       tool_access_opt;
       tool_denylist_opt;
       auto_handoff_opt;

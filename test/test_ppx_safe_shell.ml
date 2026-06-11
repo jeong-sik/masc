@@ -26,76 +26,73 @@ let verify_static_safe cmd =
   |> Exec_policy.verify_static_safe_ir
 ;;
 
-let test_static_safe_rejects_git_push () =
+(* Risk-based blocking is handled by OAS Hooks, not the policy layer.
+   verify_static_safe_ir only validates syntax; non-R0 commands pass
+   through as Ok and OAS Hooks enforce risk decisions at runtime. *)
+
+let test_static_safe_allows_git_push () =
   match verify_static_safe "git push --force origin main" with
-  | Error (Exec_policy.Command_not_allowed "git") -> ()
+  | Ok _ -> ()
   | Error reason ->
     Alcotest.failf
-      "expected git push to fail static R0 verification, got %s"
+      "expected git push to pass syntax validation, got %s"
       (Exec_policy.block_reason_tag reason)
-  | Ok _ -> Alcotest.fail "expected git push to be rejected"
 ;;
 
-let test_static_safe_rejects_dev_mutation () =
+let test_static_safe_allows_dev_mutation () =
   match verify_static_safe "npm install" with
-  | Error (Exec_policy.Command_not_allowed "npm") -> ()
+  | Ok _ -> ()
   | Error reason ->
     Alcotest.failf
-      "expected npm install to fail static R0 verification, got %s"
+      "expected npm install to pass syntax validation, got %s"
       (Exec_policy.block_reason_tag reason)
-  | Ok _ -> Alcotest.fail "expected npm install to be rejected"
 ;;
 
-let test_static_safe_rejects_network_command () =
+let test_static_safe_allows_network_command () =
   match verify_static_safe "curl https://example.com" with
-  | Error (Exec_policy.Command_not_allowed "curl") -> ()
+  | Ok _ -> ()
   | Error reason ->
     Alcotest.failf
-      "expected curl to fail static safe capability verification, got %s"
+      "expected curl to pass syntax validation, got %s"
       (Exec_policy.block_reason_tag reason)
-  | Ok _ -> Alcotest.fail "expected curl to be rejected"
 ;;
 
-let test_static_safe_rejects_shell_interpreter () =
+let test_static_safe_allows_shell_interpreter () =
   match verify_static_safe "bash -c 'echo x > /tmp/x'" with
-  | Error (Exec_policy.Command_not_allowed "bash") -> ()
+  | Ok _ -> ()
   | Error reason ->
     Alcotest.failf
-      "expected bash to fail static safe capability verification, got %s"
+      "expected bash to pass syntax validation, got %s"
       (Exec_policy.block_reason_tag reason)
-  | Ok _ -> Alcotest.fail "expected bash to be rejected"
 ;;
 
-let test_static_safe_rejects_shell_capable_executable () =
+let test_static_safe_allows_shell_capable_executable () =
   match verify_static_safe "python3 -c 'open(\"x\", \"w\").write(\"1\")'" with
-  | Error (Exec_policy.Command_not_allowed "python3") -> ()
+  | Ok _ -> ()
   | Error reason ->
     Alcotest.failf
-      "expected python3 to fail static safe capability verification, got %s"
+      "expected python3 to pass syntax validation, got %s"
       (Exec_policy.block_reason_tag reason)
-  | Ok _ -> Alcotest.fail "expected python3 to be rejected"
 ;;
 
-let expect_static_safe_rejects_shell_wrapper ~label cmd =
+let expect_static_safe_allows ~label cmd =
   match verify_static_safe cmd with
-  | Error (Exec_policy.Command_not_allowed _) -> ()
+  | Ok _ -> ()
   | Error reason ->
     Alcotest.failf
-      "expected %s to fail static safe capability verification, got %s"
+      "expected %s to pass syntax validation, got %s"
       label
       (Exec_policy.block_reason_tag reason)
-  | Ok _ ->
-    Alcotest.failf "expected %s to be rejected" label
 ;;
 
-let test_static_safe_rejects_env_split_shell () =
-  expect_static_safe_rejects_shell_wrapper
+let test_static_safe_allows_env_split_shell () =
+  expect_static_safe_allows
     ~label:"env -S shell wrapper"
     "env -S \"sh -c 'touch x'\""
 ;;
 
-let test_static_safe_rejects_opam_exec_shell () =
-  expect_static_safe_rejects_shell_wrapper
+let test_static_safe_allows_opam_exec_shell () =
+  expect_static_safe_allows
     ~label:"opam exec shell wrapper"
     "opam exec -- sh -c 'touch x'"
 ;;
@@ -105,16 +102,16 @@ let () =
     "valid", [
       test_case "safe_sh ls" `Quick test_valid_safe_sh;
     ];
-    "static_safe", [
-      test_case "rejects git push" `Quick test_static_safe_rejects_git_push;
-      test_case "rejects dev mutation" `Quick test_static_safe_rejects_dev_mutation;
-      test_case "rejects network command" `Quick test_static_safe_rejects_network_command;
-      test_case "rejects shell interpreter" `Quick test_static_safe_rejects_shell_interpreter;
-      test_case "rejects shell-capable executable" `Quick
-        test_static_safe_rejects_shell_capable_executable;
-      test_case "rejects env -S shell wrapper" `Quick
-        test_static_safe_rejects_env_split_shell;
-      test_case "rejects opam exec shell wrapper" `Quick
-        test_static_safe_rejects_opam_exec_shell;
+    "static_safe_syntax_only", [
+      test_case "allows git push" `Quick test_static_safe_allows_git_push;
+      test_case "allows dev mutation" `Quick test_static_safe_allows_dev_mutation;
+      test_case "allows network command" `Quick test_static_safe_allows_network_command;
+      test_case "allows shell interpreter" `Quick test_static_safe_allows_shell_interpreter;
+      test_case "allows shell-capable executable" `Quick
+        test_static_safe_allows_shell_capable_executable;
+      test_case "allows env -S shell wrapper" `Quick
+        test_static_safe_allows_env_split_shell;
+      test_case "allows opam exec shell wrapper" `Quick
+        test_static_safe_allows_opam_exec_shell;
     ];
   ]

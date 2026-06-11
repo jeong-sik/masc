@@ -44,3 +44,14 @@ worktree_cleanup_is_runtime_referenced() {
   [ -n "$_WORKTREE_CLEANUP_RUNTIME_REFS" ] || return 1
   printf '%s\n' "$_WORKTREE_CLEANUP_RUNTIME_REFS" | grep -F -- "$wt_path" >/dev/null 2>&1
 }
+
+# Lock guard: skip worktrees held by a live process.
+# Sourced from scripts/lib/worktree-lock.sh.
+worktree_cleanup_is_locked() {
+  local wt_path="$1"
+  local lock_file="$wt_path/.masc-lock"
+  [ -f "$lock_file" ] || return 1
+  local pid
+  pid="$(awk '{print $NF}' "$lock_file" 2>/dev/null || true)"
+  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
+}

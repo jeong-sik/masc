@@ -12,36 +12,10 @@ open Keeper_agent_result
 let reported_state_snapshot_from_checkpoint
     (checkpoint : Agent_sdk.Checkpoint.t option)
   : Keeper_memory_policy.keeper_state_snapshot option =
-  let snapshot_of_content = function
-    | Agent_sdk.Types.ToolUse { name; input; _ }
-      when String.equal name
-             (Keeper_tool_name.to_string Keeper_tool_name.State_report) ->
-      (match Keeper_memory_policy.structured_state_snapshot_schema.parse input with
-       | Ok snapshot -> Some snapshot
-       | Error detail ->
-         Log.Keeper.warn
-           "keeper_report_state input ignored: invalid structured state: %s"
-           detail;
-         None)
-    | Agent_sdk.Types.Text _
-    | Agent_sdk.Types.Thinking _
-    | Agent_sdk.Types.RedactedThinking _
-    | Agent_sdk.Types.Image _
-    | Agent_sdk.Types.Document _
-    | Agent_sdk.Types.Audio _
-    | Agent_sdk.Types.ToolUse _
-    | Agent_sdk.Types.ToolResult _ -> None
-  in
-  let rec messages_loop = function
-    | [] -> None
-    | (msg : Agent_sdk.Types.message) :: rest ->
-      (match List.find_map snapshot_of_content msg.content with
-       | Some _ as snapshot -> snapshot
-       | None -> messages_loop rest)
-  in
-  match checkpoint with
-  | None -> None
-  | Some checkpoint -> messages_loop (List.rev checkpoint.messages)
+  (* keeper_report_state tool removed — state reporting uses [STATE] text
+     blocks parsed by Keeper_memory_policy elsewhere. *)
+  ignore (checkpoint : Agent_sdk.Checkpoint.t option);
+  None
 
 let finalize
     ~config
@@ -169,9 +143,8 @@ let finalize
            Keeper_runtime_manifest.Checkpoint_saved;
          Ok (Some patched)
        | Error e ->
-         Log.Keeper.error
-           "keeper:%s runtime=%s OAS checkpoint save failed: %s"
-           meta.name
+         Log.Keeper.error ~keeper_name:meta.name
+           "runtime=%s OAS checkpoint save failed: %s"
            (Keeper_meta_contract.runtime_id_of_meta meta)
            e;
          Otel_metric_store.inc_counter
@@ -183,9 +156,8 @@ let finalize
               ~keeper_name:meta.name
               ~detail:("OAS checkpoint save failed: " ^ e)))
     | None ->
-      Log.Keeper.error
-        "keeper:%s runtime=%s missing OAS checkpoint after run"
-        meta.name
+      Log.Keeper.error ~keeper_name:meta.name
+        "runtime=%s missing OAS checkpoint after run"
         (Keeper_meta_contract.runtime_id_of_meta meta);
       Otel_metric_store.inc_counter
         Keeper_metrics.(to_string CheckpointFailures)

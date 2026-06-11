@@ -100,7 +100,7 @@ You have access to MASC MCP tools via mcp__masc__* prefix.
 - mcp__masc__masc_status - Get project status
 - mcp__masc__masc_tasks - List all tasks
 - mcp__masc__masc_transition - Claim/start/done/cancel/release a task
-- mcp__masc__masc_claim_next - Auto-claim highest priority
+- mcp__masc__keeper_task_claim - Auto-claim highest priority
 - mcp__masc__masc_broadcast - Send message to all
 - mcp__masc__masc_heartbeat - Update your heartbeat
 

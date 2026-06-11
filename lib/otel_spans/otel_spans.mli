@@ -44,11 +44,15 @@ val shutdown : ?enabled:bool -> unit -> unit
 (** [with_span ~name ~attrs f] wraps [f] in an OTel span.
     When disabled, calls [f] with a no-op trace-id extractor.
     [f] receives a thunk that returns [Some trace_id_hex] inside a span,
-    [None] otherwise. *)
+    [None] otherwise.
+
+    [force_new_trace_id] starts a fresh trace root instead of nesting under
+    the ambient parent. Use at operation boundaries to keep traces small. *)
 val with_span :
   name:string ->
   ?attrs:Opentelemetry.key_value list ->
-  ((unit -> string option) -> 'a) ->
+  ?force_new_trace_id:bool ->
+  ((unit -> (string * string) option) -> 'a) ->
   'a
 
 (** [add_event ~name ~attrs ()] appends an event to the active OTel span.

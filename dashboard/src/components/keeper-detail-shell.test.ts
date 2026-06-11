@@ -1,7 +1,15 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { html } from 'htm/preact'
 import { render } from 'preact'
-import { KeeperDetailSection, KeeperDetailSectionRail } from './keeper-detail-shell'
+import {
+  KeeperDetailSection,
+  KeeperDetailSectionRail,
+  activeKeeperDetailSection,
+} from './keeper-detail-shell'
+
+async function flush() {
+  await new Promise(resolve => setTimeout(resolve, 0))
+}
 
 describe('KeeperDetailSection', () => {
   let container: HTMLDivElement
@@ -9,6 +17,7 @@ describe('KeeperDetailSection', () => {
   beforeEach(() => {
     container = document.createElement('div')
     document.body.appendChild(container)
+    activeKeeperDetailSection.value = 'keeper-summary'
   })
 
   afterEach(() => {
@@ -34,6 +43,7 @@ describe('KeeperDetailSection', () => {
   })
 
   it('sets section id and aria-label', () => {
+    activeKeeperDetailSection.value = 'keeper-debug'
     render(
       html`<${KeeperDetailSection}
         id="keeper-debug"
@@ -51,6 +61,7 @@ describe('KeeperDetailSection', () => {
   })
 
   it('applies scroll margin and compact section styling', () => {
+    activeKeeperDetailSection.value = 'keeper-config'
     render(
       html`<${KeeperDetailSection}
         id="keeper-config"
@@ -69,6 +80,7 @@ describe('KeeperDetailSection', () => {
   })
 
   it('keeps locked-open primary sections visible without a collapse button', () => {
+    activeKeeperDetailSection.value = 'keeper-comms'
     render(
       html`<${KeeperDetailSection}
         id="keeper-comms"
@@ -96,6 +108,7 @@ describe('KeeperDetailSectionRail', () => {
   beforeEach(() => {
     container = document.createElement('div')
     document.body.appendChild(container)
+    activeKeeperDetailSection.value = 'keeper-comms'
   })
 
   afterEach(() => {
@@ -116,5 +129,30 @@ describe('KeeperDetailSectionRail', () => {
     expect(container.textContent).toContain('디버그')
     expect(container.textContent).not.toContain('상태 기계, KPI')
     expect(container.textContent).not.toContain('실시간 대화와 세션 이벤트')
+  })
+
+  it('switches the active detail tab', async () => {
+    render(html`
+      <${KeeperDetailSectionRail} />
+      <${KeeperDetailSection} id="keeper-comms" eyebrow="CHAT" title="Conversation">
+        <div data-testid="comms-child">Comms</div>
+      <//>
+      <${KeeperDetailSection} id="keeper-runtime" eyebrow="RUN" title="Runtime">
+        <div data-testid="runtime-child">Runtime</div>
+      <//>
+    `, container)
+
+    expect(container.querySelector('[data-testid="comms-child"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="runtime-child"]')).toBeNull()
+
+    const runtimeTab = Array.from(container.querySelectorAll('button[role="tab"]'))
+      .find(button => button.textContent === '진단') as HTMLButtonElement | undefined
+    expect(runtimeTab).toBeTruthy()
+    runtimeTab!.click()
+    await flush()
+
+    expect(activeKeeperDetailSection.value).toBe('keeper-runtime')
+    expect(container.querySelector('[data-testid="comms-child"]')).toBeNull()
+    expect(container.querySelector('[data-testid="runtime-child"]')).not.toBeNull()
   })
 })

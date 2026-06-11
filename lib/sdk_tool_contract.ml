@@ -63,13 +63,6 @@ let sdk_bindings : sdk_tool_binding list =
       arg_bindings = [ ("tasks", Input_field "tasks") ];
     };
     {
-      sdk_name = "masc_claim_next";
-      canonical_operation = "masc_claim_next";
-      description = "Claim the next available task automatically by priority order. Use when you are ready to work and any pending task is acceptable.";
-      input_schema = object_schema [];
-      arg_bindings = [ ("agent_name", Agent_name) ];
-    };
-    {
       sdk_name = "masc_broadcast";
       canonical_operation = "masc_broadcast";
       description = "Broadcast a message to all active agents. Use when sharing status updates, workspace signals, or requesting help from any available agent.";
@@ -117,8 +110,6 @@ let core_remote_operation_names =
     (List.map (fun binding -> binding.canonical_operation) sdk_bindings
     @ [
         "masc_status";
-        "masc_agents";
-        "masc_agent_update";
         "masc_messages";
         "masc_plan_init";
         "masc_plan_get";

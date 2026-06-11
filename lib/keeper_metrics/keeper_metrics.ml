@@ -47,7 +47,6 @@ type t =
   | OperatorCompact
   | OperatorClear
   | CompactionNoop
-  | ContinuityNoState
   | ToolPairRepair
   | ToolEmissionRegistrySize
   | ToolEmissionPushes
@@ -62,6 +61,7 @@ type t =
   | DispatchEventFailures
   | DirectiveFailures
   | ToolCallDuration
+  | ToolCallDurationBucket
   | WriteMetaFailures
   | MetaReadFailures
   | ApprovalQueueFailures
@@ -157,6 +157,7 @@ type t =
   | AlertPersistFailures
   | MetricsSseFailures
   | ChatStoreFailures
+  | PersonNoteStoreFailures
   | ObservationQueryFailures
   | OasOnStop
   | OasOnIdleEscalated
@@ -211,6 +212,14 @@ type t =
   | MemoryBankLoadHistorySwallowedExceptions
   | MemoryRecallReadErrors
   | RuntimeHttpProbeJsonParseFailures
+  (* Instruction monitoring metrics *)
+  | PromptSegmentBytes          (* histogram: bytes per prompt segment *)
+  | PromptTemplateRenderOutcome (* counter: template render ok/fallback/empty *)
+  | ToolCallParamCompleteness   (* counter: tool calls with all required params vs missing *)
+  | KeeperTurnInstructionHash   (* gauge: hash of system+user prompt for change detection *)
+  | KeeperToolCallRetryLoop     (* counter: consecutive identical tool calls with errors *)
+  | AttemptWatchdogFired        (* counter: 1800s safety-cap watchdog killed a stuck attempt *)
+  | ShellIrEffectTotal          (* counter: fine-grained Shell IR effect decomposition *)
 
 (** String conversion
 
@@ -259,7 +268,6 @@ let to_string = function
   | OperatorCompact -> "masc_keeper_operator_compact_total"
   | OperatorClear -> "masc_keeper_operator_clear_total"
   | CompactionNoop -> "masc_keeper_compaction_noop_total"
-  | ContinuityNoState -> "masc_keeper_continuity_no_state_total"
   | ToolPairRepair -> "masc_keeper_tool_pair_repair_total"
   | ToolEmissionRegistrySize -> "masc_keeper_tool_emission_registry_size"
   | ToolEmissionPushes -> "masc_keeper_tool_emission_pushes_total"
@@ -274,6 +282,7 @@ let to_string = function
   | DispatchEventFailures -> "masc_keeper_dispatch_event_failures_total"
   | DirectiveFailures -> "masc_keeper_directive_failures_total"
   | ToolCallDuration -> "masc_keeper_tool_call_duration_seconds"
+  | ToolCallDurationBucket -> "masc_keeper_tool_call_duration_seconds_bucket_total"
   | WriteMetaFailures -> "masc_keeper_write_meta_failures_total"
   | MetaReadFailures -> "masc_keeper_meta_read_failures_total"
   | ApprovalQueueFailures -> "masc_keeper_approval_queue_failures_total"
@@ -376,6 +385,7 @@ let to_string = function
   | AlertPersistFailures -> "masc_keeper_alert_persist_failures_total"
   | MetricsSseFailures -> "masc_keeper_metrics_sse_failures_total"
   | ChatStoreFailures -> "masc_keeper_chat_store_failures_total"
+  | PersonNoteStoreFailures -> "masc_keeper_person_note_store_failures_total"
   | ObservationQueryFailures -> "masc_keeper_observation_query_failures_total"
   | OasOnStop -> "masc_keeper_oas_on_stop_total"
   | OasOnIdleEscalated -> "masc_keeper_oas_on_idle_escalated_total"
@@ -437,4 +447,87 @@ let to_string = function
       "masc_keeper_memory_recall_read_errors_total"
   | RuntimeHttpProbeJsonParseFailures ->
       "masc_runtime_http_probe_json_parse_failures_total"
+  | PromptSegmentBytes -> "masc_keeper_prompt_segment_bytes"
+  | PromptTemplateRenderOutcome -> "masc_keeper_prompt_template_render_outcome_total"
+  | ToolCallParamCompleteness -> "masc_keeper_tool_call_param_completeness_total"
+  | KeeperTurnInstructionHash -> "masc_keeper_turn_instruction_hash"
+  | KeeperToolCallRetryLoop -> "masc_keeper_tool_call_retry_loop_total"
+  | AttemptWatchdogFired -> "masc_keeper_attempt_watchdog_fired_total"
+  | ShellIrEffectTotal -> "masc_keeper_shell_ir_effect_total"
+;;
+
+(* Every constructor of [t], in declaration order.  Consumed by
+   [register_zero_fill] below.  The compiler cannot enforce membership
+   here (no enumerate ppx in this repo): when you add a constructor,
+   exhaustiveness already forces you to edit [to_string] in this file --
+   add the constructor to [all] in the same edit. *)
+let all : t list =
+  [ Turns; InputTokens; OutputTokens; CacheCreationTokens;
+    CacheReadTokens; UsageAnomalies; TotalCostUsd; TurnScheduled;
+    TurnCompleted; IdleSeconds; ContractViolations; MetricEmitDropped;
+    ContextMaxObserved; TurnStarts; TurnReattempts; TurnRegressions;
+    TurnLivelockBlocks; TurnLivelockBlocksRepeated; TurnLivelockBlocksThresholdPark; TurnLatencyBucket;
+    TurnLatencyByModelBucket; ProviderCooldownSkip; ProviderCooldownRemainingSec; ProviderBlockDurationSec;
+    TurnQueueDepth; SupervisorSweepStarts; SupervisorLastSweepUnixtime; DomainPoolFork;
+    TurnHolderBookkeepingFailures; Compactions; CompactionRatioChange; CompactionSavedTokens;
+    CompactionPairRepairFabrications; EmergencyCompactRatioThreshold; OperatorCompact; OperatorClear;
+    CompactionNoop; ToolPairRepair; ToolEmissionRegistrySize; ToolEmissionPushes;
+    ToolUnderusedAllowedCount; ToolUnderusedAllowed; PathRejection; IdeOrphanWrites;
+    PathResolverIdentityMismatch; HeartbeatSuccesses; HeartbeatFailures; CleanupTrackingFailures;
+    DispatchEventFailures; DirectiveFailures; ToolCallDuration; ToolCallDurationBucket; WriteMetaFailures;
+    MetaReadFailures; ApprovalQueueFailures; GuardsFailures; ProfileLoadFailures;
+    CompactAuditFailures; CompactAuditRetentionParse; CompactAuditDrainBatches; CompactAuditDrainBatchSizeBucket;
+    FsFailures; CrashPersistenceFailures; GenerationLineageFailures; KeepaliveSignalFailures;
+    BoardSignalWakeupCappedTotal; BoardSignalNoWakeTotal; MetaJsonFailures; ToolsOasFailures;
+    ToolsOasDeterministicFailures; TurnUpUpdateFailures; AgentToolDispatchRuntimeFailures; CircuitBreakerTrips;
+    PromptFailures; RunContextFailures; SearchFilesFailures; TagDispatchFailures;
+    TraceEmitFailures; TransitionAuditFailures; ExecutionReceiptFailures; OperatorBroadcastSuppressed;
+    LlmBridgeFailures; SessionCleanupFailures; ToolExecuteFailures; RolloverFailures;
+    LifecycleDispatchRejections; RecordingErrorDedup; PausedStatePersistErrors; UnexpectedToolPartialTolerance;
+    ToolCallTotal; ProfileConfigConflicts; OasTimeoutClassifications; NoToolProvider;
+    ProactiveOutcome; OllamaSaturationSkip; TaskLoadFailures; ToolSelectionFailures;
+    ToolPolicyFailures; ReconcileFailures; DecisionAuditFlushFailures; OasCancel;
+    ClaimAutoProvision; TomlInvalid; PersonaDriftMissing; WorkspaceInitFailures;
+    PresenceSyncFailures; SelfPreservationUniversal; StaleStormPaused; ProviderTimeoutLoopPaused;
+    CycleExceptions; SnapshotWriteFailures; StateSnapshotSkippedNoState; ProgressUpdatedLineFailures;
+    SseBroadcastFailures; WorkspaceHeartbeatFailures; TurnMetricsSnapshotFailures; OasExecutionErrors;
+    EpisodeCreateFailures; MemoryActivityEmitFailures; SupervisorSweepFailures; TomlReconcileSweepFailures;
+    TomlReconcileDedup; ReconcileDisabled; ToolUsageFlushFailures; TurnTimeoutCommitted;
+    TurnErrorAfterTools; RuntimeSyncFailures; LocalDiscoveryFailures; ThinkingPersistFailures;
+    CheckpointFailures; DecisionAuditRingOverflows; ReplySkillRouteStrips; ReplySkillRouteLinesRemoved;
+    MemoryLlmSummaryOutcomes; MemoryLlmSummaryChainExhausted; UserVisibleReplySource; ContinuitySummarySource;
+    SummarizerStateScrubs; SummarizerStateBlocksRemoved; OasEnvKeyRejections; ContinuityTsRecovered;
+    MemoryWriteFailures; MemoryConsolidations; WriteMetaCycleFailures; AlertPersistFailures;
+    MetricsSseFailures; ChatStoreFailures; PersonNoteStoreFailures; ObservationQueryFailures; OasOnStop;
+    OasOnIdleEscalated; InvariantViolations; FsmEdgeTransitions; TurnFsmTransitions;
+    TurnPhaseDuration; LifecycleTransitions; LifecycleCallbackFailures; CompactionCallbackRecoveries;
+    EventBusDrain; SupervisorCleanupFailures; SpawnSlotDenied; RegistryUpdateDropped;
+    RegistryOrphanThresholdBreached; DeadTotal; AutoResumedTotal; AutoResumeBlockedTotal;
+    SkipIdleWakeResumed; EventQueueOverride; StimulusConsumed; UnsupportedStimulus;
+    NearExhaustionTotal; RestartAttempts; RestartOutcomes; ConsecutiveIdle;
+    LastProductiveTs; ProviderTimeoutStrike; StaleTerminationTotal; StaleTerminationByClass;
+    ProviderTimeoutWatchdogTermination; StaleTerminationThresholdBreached; StaleTerminationBatch; StaleBroadcastEmitFailures;
+    OasRunTimeout; RuntimeSaturationSignal; ToolUseFailure; ToolNotAllowed;
+    TurnGateRejectedTerminal; ReceiptUnmappedDisposition; ExecuteNetworkUpgrade; ExecuteLocalExecution;
+    DockerRuntimeDiscarded; ProactiveSkip; StaySilentLoopDetected; UsageTrust;
+    UsageAnomalyReason; ConfigEnvParseFailures; PostTurnWireinFailures; RecurringFailures;
+    TurnCleanupFailures; MemoryBankLoadHistorySwallowedExceptions; MemoryRecallReadErrors; RuntimeHttpProbeJsonParseFailures;
+    PromptSegmentBytes; PromptTemplateRenderOutcome; ToolCallParamCompleteness; KeeperTurnInstructionHash;
+    KeeperToolCallRetryLoop; AttemptWatchdogFired; ShellIrEffectTotal
+  ]
+;;
+
+(* Zero-fill: register the unlabeled 0-cell of every counter at module
+   init so each declared keeper counter exports 0 from process start.
+   Without this a counter that never fired is indistinguishable in
+   Grafana from a counter that is not wired.  Counter detection is by
+   [_total] suffix -- gauges/histograms in [t] do not use it and stay
+   lazy (a never-set gauge has no honest value). *)
+let () =
+  List.iter
+    (fun m ->
+      let name = to_string m in
+      if String.ends_with ~suffix:"_total" name then
+        Otel_metric_store_core.register_counter ~name ~help:name ())
+    all
 ;;

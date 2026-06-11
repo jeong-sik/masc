@@ -29,7 +29,12 @@ let taskboard_tools : Masc_domain.tool_schema list =
                       ] )
                 ; ( "limit"
                   , `Assoc
-                      [ "type", `String "integer"
+                      [ (* Issue #18472: wire-format widening — same
+                           pattern as PR #19383 on [limit] siblings.
+                           The runtime accepts both shapes; strict
+                           ["integer"] only fires correction_pipeline. *)
+                        ( "type"
+                        , `List [ `String "integer"; `String "string" ] )
                       ; "description", `String "Max tasks to return (default: 50)"
                       ; "minimum", `Int 1
                       ; "maximum", `Int 100
@@ -50,7 +55,11 @@ let taskboard_tools : Masc_domain.tool_schema list =
             , `Assoc
                 [ ( "limit"
                   , `Assoc
-                      [ "type", `String "integer"
+                      [ (* Issue #18472: wire-format widening — bundled
+                           with keeper_tasks_list.limit above per
+                           RFC-0088 §3 N-of-M avoidance. *)
+                        ( "type"
+                        , `List [ `String "integer"; `String "string" ] )
                       ; "description", `String "Max orphans to return (default: 20)"
                       ; "minimum", `Int 1
                       ; "maximum", `Int 50
@@ -267,80 +276,6 @@ let taskboard_tools : Masc_domain.tool_schema list =
                       ] )
                 ] )
           ; "required", `List [ `String "title"; `String "description" ]
-          ]
-    }
-  ; { name = "keeper_report_state"
-    ; description =
-        "Report your current turn state for continuity across cycles. \
-         Call this at the end of every non-direct keeper turn. Provides \
-         structured state (goal, progress, next steps, decisions, open \
-         questions, constraints) that survives cycle boundaries."
-    ; input_schema =
-        `Assoc
-          [ "type", `String "object"
-          ; ( "properties"
-            , `Assoc
-                [ ( "goal"
-                  , `Assoc
-                      [ "type", `String "string"
-                      ; ( "description"
-                        , `String "Current active goal (one sentence)" )
-                      ] )
-                ; ( "progress"
-                  , `Assoc
-                      [ "type", `String "string"
-                      ; ( "description"
-                        , `String
-                            "Summary of what was accomplished this turn" )
-                      ] )
-                ; ( "done_summary"
-                  , `Assoc
-                      [ "type", `String "string"
-                      ; ( "description"
-                        , `String
-                            "Detailed summary of completed work this turn" )
-                      ] )
-                ; ( "next_summary"
-                  , `Assoc
-                      [ "type", `String "string"
-                      ; ( "description"
-                        , `String
-                            "What the next turn should focus on" )
-                      ] )
-                ; ( "next_items"
-                  , `Assoc
-                      [ "type", `String "array"
-                      ; "items", `Assoc [ "type", `String "string" ]
-                      ; ( "description"
-                        , `String
-                            "Specific action items for the next turn" )
-                      ] )
-                ; ( "decisions"
-                  , `Assoc
-                      [ "type", `String "array"
-                      ; "items", `Assoc [ "type", `String "string" ]
-                      ; ( "description"
-                        , `String
-                            "Key decisions made this turn" )
-                      ] )
-                ; ( "open_questions"
-                  , `Assoc
-                      [ "type", `String "array"
-                      ; "items", `Assoc [ "type", `String "string" ]
-                      ; ( "description"
-                        , `String
-                            "Unresolved questions or blockers" )
-                      ] )
-                ; ( "constraints"
-                  , `Assoc
-                      [ "type", `String "array"
-                      ; "items", `Assoc [ "type", `String "string" ]
-                      ; ( "description"
-                        , `String
-                            "Active constraints or limitations" )
-                      ] )
-                ] )
-          ; "required", `List []
           ]
     }
   ]

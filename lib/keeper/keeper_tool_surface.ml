@@ -715,7 +715,7 @@ let dispatch ctx ~name ~args : tool_result option =
 (** Streaming dispatch: only handles keeper_msg with text delta forwarding.
     Returns None for all other tool names.
     Called from server_routes_http_keeper_stream. *)
-let dispatch_stream ~on_text_delta ctx ~name ~args : tool_result option =
+let dispatch_stream ?on_text_delta ?on_event ctx ~name ~args : tool_result option =
   maybe_bootstrap_existing_keepalives ctx ~name ~args;
   let ctx = resolve_ctx ctx ~name args in
   match name with
@@ -723,7 +723,7 @@ let dispatch_stream ~on_text_delta ctx ~name ~args : tool_result option =
       Some
         (tool_result_with_tool_name
            ~tool_name:name
-           (handle_keeper_msg_stream ~on_text_delta ctx args))
+           (handle_keeper_msg_stream ?on_text_delta ?on_event ctx args))
   | _ -> None
 
 (* ================================================================ *)

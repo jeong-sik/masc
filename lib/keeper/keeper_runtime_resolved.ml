@@ -85,7 +85,7 @@ let turn_timeout_sec_live () =
 let admission_wait_timeout_sec_live () =
   Float.max 5.0
     (Float.min 1200.0
-       (get_float ~default:180.0 "MASC_KEEPER_ADMISSION_WAIT_TIMEOUT_SEC"))
+       (180.0))
 
 let stream_idle_timeout_sec_live () =
   Float.max 5.0

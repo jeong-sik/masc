@@ -9,7 +9,11 @@
 open Alcotest
 
 module H = Masc.Keeper_lifecycle_hooks
-module P = Otel_metric_store
+(* Masc.Otel_metric_store is the store production code writes to.
+   The bare Otel_metric_store module here is the test shim
+   (test/deps/otel_metric_store.ml) with its own private store, so
+   reading it can never observe lib emits. *)
+module P = Masc.Otel_metric_store
 module SM = Keeper_state_machine
 module TCG = Telemetry_coverage_gap
 

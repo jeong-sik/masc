@@ -368,6 +368,37 @@ and handle_transition ~tool_name ~start_time ctx args =
     | Masc_domain.Reject_verification ->
       None
   in
+  (* RFC-0221 §3.1: compensation for [Submit_for_verification]. If the status
+     commit fails after [prepare_verification_request] wrote the record,
+     [transition_task_r] calls this to delete the orphaned record so the two
+     stores never disagree. Best-effort: a failure is logged, not propagated —
+     the transition is already failing on its own error. *)
+  let compensate_verification_request =
+    match action with
+    | Masc_domain.Submit_for_verification ->
+      Some
+        (fun ~verification_id ->
+           match
+             (Atomic.get Workspace_hooks.verification_delete_request_fn)
+               ctx.config
+               ~verification_id
+           with
+           | Ok () -> ()
+           | Error e ->
+             task_log_warn
+               ~task_id
+               "[RFC-0221] compensation delete_request failed (vrf=%s): %s"
+               verification_id
+               e)
+    | Masc_domain.Claim
+    | Masc_domain.Start
+    | Masc_domain.Done_action
+    | Masc_domain.Cancel
+    | Masc_domain.Release
+    | Masc_domain.Approve_verification
+    | Masc_domain.Reject_verification ->
+      None
+  in
   let prepare_verification_verdict =
     match action with
     | Masc_domain.Approve_verification
@@ -419,6 +450,7 @@ and handle_transition ~tool_name ~start_time ctx args =
       let r = Workspace.transition_task_r ctx.config ~agent_name:ctx.agent_name
                 ~task_id ~action ?expected_version:ev ~notes ~reason
                 ?handoff_context ?prepare_verification_request
+                ?compensate_verification_request
                 ?prepare_verification_verdict () in
       if is_version_mismatch r && attempt < max_cas_retries then begin
         task_log_info ~task_id "CAS version mismatch on %s (attempt %d/%d), retrying in %.0fms"
@@ -639,7 +671,6 @@ let dispatch ctx ~name ~args : Tool_result.result option =
   match name with
   | "masc_add_task" -> Some (handle_add_task ~tool_name:name ~start_time:start ctx args)
   | "masc_batch_add_tasks" -> Some (handle_batch_add_tasks ~tool_name:name ~start_time:start ctx args)
-  | "masc_claim_next" -> Some (handle_claim_next ~tool_name:name ~start_time:start ctx args)
   | "masc_transition" -> Some (handle_transition ~tool_name:name ~start_time:start ctx args)
   | "masc_update_priority" -> Some (handle_update_priority ~tool_name:name ~start_time:start ctx args)
   | "masc_tasks" -> Some (handle_tasks ~tool_name:name ~start_time:start ctx args)

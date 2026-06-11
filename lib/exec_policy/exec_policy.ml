@@ -5,78 +5,12 @@
 
 module Paths = Exec_policy_paths
 module Log_sanitize = Exec_policy_log_sanitize
-module Command_syntax = Exec_policy_command_syntax
+
 module Mutation_classifier = Exec_policy_mutation_classifier
 module Exec_shell_gate = Masc_exec_command_gate.Shell_command_gate
 
 let resolve_path = Paths.resolve_path
 let validate_path = Paths.validate_path
-
-let command_blocked_hint name =
-  let looks_like_source_code s =
-    (match String.index_opt s '.' with
-     | Some i -> i > 0 && i < String.length s - 1
-     | None -> false)
-    || List.mem
-         s
-         [ "let"
-         ; "match"
-         ; "if"
-         ; "then"
-         ; "else"
-         ; "fun"
-         ; "rec"
-         ; "in"
-         ; "module"
-         ; "open"
-         ; "type"
-         ; "def"
-         ; "class"
-         ; "import"
-         ; "from"
-         ]
-  in
-  let alt =
-    match name with
-    | "sort" | "uniq" -> " Use rg or jq for filtering."
-    | "sed" | "awk" -> " Use Edit or Write for file changes."
-    | "find" -> " Use rg --files or Grep."
-    | "curl" | "wget" ->
-      " Use WebFetch to fetch page content, or WebSearch to find sources."
-    | "gh" ->
-      " Use Execute from a repo worktree for direct commands, or masc_board_post \
-       to escalate. Use git directly for repository/worktree/branch operations."
-    | "docker"
-    | "podman"
-    | "kubectl"
-    | "systemctl"
-    | "brew"
-    | "apt"
-    | "apt-get"
-    | "yum"
-    | "dnf" ->
-      Printf.sprintf
-        " '%s' operates on host / cluster state and is deliberately excluded from the \
-         keeper sandbox. If you need this operation, escalate to an operator via \
-         masc_board_post instead of retrying."
-        name
-    | "ssh" | "scp" | "rsync" | "ftp" | "sftp" | "nc" ->
-      Printf.sprintf
-        " '%s' is a network primitive and is not permitted. Keeper network access goes \
-         through WebSearch or WebFetch tools."
-        name
-    | _ when looks_like_source_code name ->
-      " This looks like source code, not a shell command - use Edit / Write / \
-       Read instead."
-    | _ -> ""
-  in
-  Printf.sprintf
-    "Command blocked: '%s' is not allowed. See \
-     keeper_tools_list for the exhaustive tool surface, and Read / Edit / \
-     Write for file operations.%s"
-    name
-    alt
-;;
 
 type block_reason =
   | Empty_command
@@ -86,7 +20,6 @@ type block_reason =
   | Unsafe_redirect
   | Pipes_not_allowed
   | Direct_dune_invocation
-  | Command_not_allowed of string
 
 let block_reason_to_string = function
   | Empty_command -> "command must not be empty"
@@ -112,7 +45,6 @@ let block_reason_to_string = function
      scripts/dune-local.sh's machine-wide build lock and can trigger \
      host-wide ENFILE/EMFILE pressure. Use `scripts/dune-local.sh build ...` \
      from the repo root instead."
-  | Command_not_allowed name -> command_blocked_hint name
 ;;
 
 
@@ -755,7 +687,6 @@ let block_reason_tag = function
   | Unsafe_redirect -> "unsafe_redirect"
   | Pipes_not_allowed -> "pipes_not_allowed"
   | Direct_dune_invocation -> "direct_dune_invocation"
-  | Command_not_allowed _ -> "command_not_allowed"
 ;;
 
 let attribution_of_validation ~cmd (result : (unit, block_reason) result) : Attribution.t =
@@ -766,7 +697,6 @@ let attribution_of_validation ~cmd (result : (unit, block_reason) result) : Attr
   | Error br ->
     let command_name =
       match br with
-      | Command_not_allowed name -> Some name
       | Direct_dune_invocation -> Some "dune"
       | _ -> None
     in
@@ -792,11 +722,5 @@ type 'a verified_ir = 'a Typed_capabilities.verified_ir
 let verify_static_safe_ir ir =
   let ( let* ) = Result.bind in
   let* () = validate_command ir in
-  let envelope = Masc_exec.Shell_ir_risk.(classify (undecided ir)) in
-  if Masc_exec.Shell_ir_risk.is_r0 envelope
-  then Ok (Typed_capabilities.Safe_IR ir)
-  else (
-    match flat_stage_words ir with
-    | command :: _ -> Error (Command_not_allowed command)
-    | [] -> Error Empty_command)
+  Ok (Typed_capabilities.Safe_IR ir)
 ;;

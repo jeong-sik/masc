@@ -110,11 +110,10 @@ let read_continuity_summary ~(config : Workspace.config) ~(meta : keeper_meta) :
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-    Log.Keeper.warn
-      "keeper:%s read_continuity_summary caught exception in fallback \
+    Log.Keeper.warn ~keeper_name:meta.name
+      "read_continuity_summary caught exception in fallback \
        chain (%s) -- using meta_fallback; investigate progress \
        snapshot or checkpoint store"
-      meta.name
       (Printexc.to_string exn);
     meta_fallback ~source:Keeper_continuity_summary_source.Meta_fallback_exception
 ;;

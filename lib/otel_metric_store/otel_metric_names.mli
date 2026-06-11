@@ -198,19 +198,12 @@ val metric_write_meta_cas_retry_total : string
     REPO_WAKE_UP audit finding: keepers with narrow mention targets
     can silently drop board posts. Labels: keeper, kind=post_created|comment_added. *)
 
-(** Total keeper OAS hook tool-output JSON parse failures. Labels:
-    [surface] is the parser-owned hook surface. *)
-val metric_tool_policy_unloaded_query : string
-
-val metric_tool_policy_init_failed : string
 val metric_cache_desync_cleared : string
-val metric_egress_audit_missing : string
 
 (** Runtime state synchronization failures: pause/resume/auto-pause paths
     only. Local discovery refresh failures use
     [metric_keeper_local_discovery_failures] so dashboards can attribute
     distinct failure classes. *)
-val metric_egress_audit_stale_orphan : string
 
 (** Local discovery readiness failures observed during create/turn paths.
     Separated from [metric_keeper_runtime_sync_failures] so dashboards do
@@ -258,3 +251,9 @@ val metric_persistence_read_drops : string
 val metric_persistence_utf8_repair : string
 
 val metric_discovery_history_failures : string
+
+(** #18855: per-tool correction_pipeline fix counter.
+    Incremented when the OAS agent_tools module reports that
+    correction_pipeline fixed input fields for a tool.
+    Labels: [tool_name]. *)
+val metric_oas_correction_pipeline_fixes_total : string

@@ -42,7 +42,7 @@ val completion_rejection_message : ?allow_force:bool -> string -> string
 
 (** [build_claim_observation_payload ~now ~agent_name ~task_id] builds the
     downstream collaboration-observation fragment for a successful
-    [masc_claim_next] write/readback result. MASC uses a central workspace
+    [keeper_task_claim] write/readback result. MASC uses a central workspace
     store here, so CRDT-specific [logical_clock] and [convergence_delay_ms]
     are left null. *)
 val build_claim_observation_payload :

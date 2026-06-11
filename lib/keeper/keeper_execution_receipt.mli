@@ -95,6 +95,7 @@ val runtime_rotation_outcome_to_string : runtime_rotation_outcome -> string
 type runtime_outcome =
   | Runtime_passed_to_next_model
   | Runtime_completed
+  | Runtime_failed
   | Runtime_not_observed
   | Runtime_not_dispatched
 

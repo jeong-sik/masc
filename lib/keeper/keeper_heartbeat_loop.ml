@@ -79,15 +79,6 @@ type keepalive_scheduling_decision = Keeper_heartbeat_loop_scheduling.keepalive_
 
 let decide_keepalive_scheduling = Keeper_heartbeat_loop_scheduling.decide_keepalive_scheduling
 
-let runtime_status_of_health_snapshot ~base_path =
-  let snapshot = Keeper_health_probe.check_runtime_health ~base_path in
-  fun ~runtime_id ->
-    match List.assoc_opt runtime_id snapshot with
-    | Some true -> Keeper_health_probe.Healthy
-    | Some false -> Keeper_health_probe.Unhealthy "runtime_failure"
-    | None -> Keeper_health_probe.Unknown
-;;
-
 let provider_timeout_observation_reasons =
   Observations.provider_timeout_observation_reasons
 ;;
@@ -126,8 +117,6 @@ let provider_timeout_metric_outcome =
   Observations.provider_timeout_metric_outcome
 ;;
 
-let persist_message_cursor_updates = Keeper_heartbeat_loop_persist_cursor.persist_message_cursor_updates
-
 (** Run keeper cycle with holder diagnostics. *)
 let run_keeper_cycle = Keeper_heartbeat_loop_cycle.run_keeper_cycle
 
@@ -137,6 +126,7 @@ let run_keepalive_unified_turn
       ~pending_board_events
       ~(stop : bool Atomic.t)
       ~(proactive_warmup_elapsed : bool)
+      ~(reactive_wake : bool)
       ~(shared_context : Agent_sdk.Context.t)
   : keeper_meta
   =
@@ -156,8 +146,7 @@ let run_keepalive_unified_turn
       in
       let scheduling =
         decide_keepalive_scheduling
-          ~runtime_status_of_name:
-            (runtime_status_of_health_snapshot ~base_path:ctx.config.base_path)
+          ~reactive_wake
           ~stop
           ~meta:meta_after_triage
           obs
@@ -169,12 +158,6 @@ let run_keepalive_unified_turn
          or operator-driven (board/keeper_chat), not blocker-driven. *)
       let runtime_backpressure = scheduling.runtime_backpressure in
       let should_run_turn = scheduling.should_run_turn in
-      let meta_after_cursor_persist =
-        persist_message_cursor_updates
-          ~config:ctx.config
-          meta_after_triage
-          obs.message_cursor_updates
-      in
       let format_opt_int = function
         | Some value -> string_of_int value
         | None -> "-"
@@ -312,14 +295,14 @@ let run_keepalive_unified_turn
           ~base_path:ctx.config.base_path
           ~keeper_name:meta_after_triage.name);
       if Atomic.get stop
-      then meta_after_cursor_persist
+      then meta_after_triage
       else if should_run_turn && Keeper_fd_pressure.active ()
       then (
         Log.Keeper.debug
           "%s: skipping turn while fd-pressure circuit breaker is active (remaining=%.0fs)"
           meta_after_triage.name
           (Keeper_fd_pressure.remaining_sec ());
-        meta_after_cursor_persist)
+        meta_after_triage)
       else if should_run_turn && Keeper_disk_pressure.active ()
       then (
         Log.Keeper.debug
@@ -327,7 +310,7 @@ let run_keepalive_unified_turn
            (remaining=%.0fs)"
           meta_after_triage.name
           (Keeper_disk_pressure.remaining_sec ());
-        meta_after_cursor_persist)
+        meta_after_triage)
       else if
         should_run_turn
         && not
@@ -338,7 +321,7 @@ let run_keepalive_unified_turn
         Log.Keeper.debug
           "%s: skipping turn because projected FD budget is exhausted before pressure"
           meta_after_triage.name;
-        meta_after_cursor_persist)
+        meta_after_triage)
       else if
         should_run_turn
         && not
@@ -349,19 +332,17 @@ let run_keepalive_unified_turn
         Log.Keeper.debug
           "%s: skipping turn because disk free-space budget is below fleet floor"
           meta_after_triage.name;
-        meta_after_cursor_persist)
+        meta_after_triage)
       else if should_run_turn
       then (
         run_keeper_cycle
           ~ctx
-          ~meta_after_cursor_persist
+          ~meta_after_triage
           ~stop
           ~obs
           ~turn_decision
           ~shared_context
           ())
-      else if obs.message_cursor_updates <> []
-      then meta_after_cursor_persist
       else meta_after_triage
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
@@ -419,6 +400,7 @@ let run_smart_heartbeat_gate
       ~(smart_hb_config : Keeper_heartbeat_smart.config)
       ~(last_successful_heartbeat_ts : float ref)
       ~(last_heartbeat_cycle_ts : float ref)
+      ~(wake_source : Keeper_keepalive_signal.sleep_outcome ref)
   : bool
   =
   let smart_hb_decision =
@@ -556,6 +538,12 @@ let run_smart_heartbeat_gate
            ~labels:[ "keeper", meta_current.name ]
            ()
        | Keeper_keepalive_signal.Stopped | Keeper_keepalive_signal.Timeout -> ());
+      (* Carry the idle-backoff sleep result forward so the turn evaluator can
+         tell a broadcast-driven [Woken] from this keeper's own cadence
+         [Timeout]. Only the real sleep (Skip_idle) writes here; Emit/Skip_busy
+         synthesize [Timeout] without sleeping and must NOT clobber the prior
+         inter-cycle wake source used by active keepers. *)
+      wake_source := outcome;
       outcome
     | Keeper_heartbeat_smart.Emit ->
       last_heartbeat_cycle_ts := Time_compat.now ();
@@ -638,7 +626,7 @@ let run_heartbeat_loop
      Updated ONLY on Workspace.heartbeat success after turn. *)
   let last_successful_heartbeat_ts = ref (Time_compat.now ()) in
   let work_as_hb () = Runtime_params.get Governance_registry.keeper_work_as_hb_enabled in
-  let max_silence () =
+  let _max_silence () =
     Runtime_params.get Governance_registry.keeper_work_as_hb_max_silence_sec
   in
   (* Phase 2: smart heartbeat — adaptive scheduling via Keeper_heartbeat_smart *)
@@ -659,6 +647,12 @@ let run_heartbeat_loop
      no operator has modified it.  Initialized to 0.0 so the first
      cycle always reads. *)
   let last_meta_mtime = ref 0.0 in
+  (* Wake-source carry (thundering-herd fix). Records whether the most recent
+     sleep ended via an external broadcast wakeup ([Woken]) or this keeper's own
+     cadence timer ([Timeout]). Read at turn dispatch so a broadcast-driven early
+     wake does not let the GLOBAL task backlog drive a turn on every keeper at
+     once. Single-fiber owned, like the other loop-local refs above. *)
+  let last_wake_source = ref Keeper_keepalive_signal.Timeout in
   let rec loop () =
     if Atomic.get stop
     then ()
@@ -713,17 +707,15 @@ let run_heartbeat_loop
           ~smart_hb_config
           ~last_successful_heartbeat_ts
           ~last_heartbeat_cycle_ts
+          ~wake_source:last_wake_source
       then (
-        (* Phase 1: skip presence sync when recent workspace heartbeat proves freshness *)
+        (* Phase 1: sync presence and emit heartbeat metric *)
         let meta_current =
           sync_keeper_presence
             ~ctx
             ~meta_current
-            ~t_presence_start
             ~consecutive_failures
             ~last_successful_heartbeat_ts
-            ~work_as_hb
-            ~max_silence
         in
         (* RFC-0002: fiber crash on heartbeat threshold breach *)
         if
@@ -772,6 +764,15 @@ let run_heartbeat_loop
              pre/post guards mirror the spec's [turn_state] transition
              "running" -> "idle". *)
           turn_running := true;
+          (* [Woken] => this cycle was triggered by an external broadcast, not
+             the keeper's own cadence; suppress global-backlog-driven turns to
+             avoid the all-keeper stampede. *)
+          let reactive_wake =
+            match !last_wake_source with
+            | Keeper_keepalive_signal.Woken -> true
+            | Keeper_keepalive_signal.Timeout | Keeper_keepalive_signal.Stopped ->
+              false
+          in
           let r =
             run_keepalive_unified_turn
               ~ctx
@@ -779,6 +780,7 @@ let run_heartbeat_loop
               ~pending_board_events
               ~stop
               ~proactive_warmup_elapsed
+              ~reactive_wake
               ~shared_context
           in
           Keeper_keepalive_signal.pre_turn_complete_heartbeat ~turn_running;
@@ -858,13 +860,16 @@ let run_heartbeat_loop
         let jitter =
           base *. Env_config.KeeperKeepalive.jitter_factor *. Random.float 1.0
         in
-        ignore
-          (Keeper_keepalive_signal.interruptible_sleep
-             ~clock:ctx.clock
-             ~stop
-             ~wakeup
-             (base +. jitter)
-           : Keeper_keepalive_signal.sleep_outcome));
+        (* Carry the inter-cycle sleep result into the next iteration so the
+           turn evaluator can distinguish a broadcast wakeup ([Woken]) from this
+           keeper's own cadence ([Timeout]). For active keepers this is the only
+           sleep, so it is the dominant wake-source signal. *)
+        last_wake_source :=
+          Keeper_keepalive_signal.interruptible_sleep
+            ~clock:ctx.clock
+            ~stop
+            ~wakeup
+            (base +. jitter));
       if Atomic.get stop then () else loop ())
   in
   loop ()

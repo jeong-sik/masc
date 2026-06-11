@@ -93,7 +93,7 @@ let keeper_schemas : tool_schema list = [
         ]);
         ("tool_access",
           tool_access_schema
-            "Canonical tool candidate profile list, e.g. ['masc_status', 'tool_execute']. Runtime execution also applies descriptor availability, denylist, per-turn OAS allowlist, and eval gates.");
+            "Persisted tool candidate profiles for discovery. Does not alone grant execution; runtime applies descriptor availability, denylist, per-turn OAS policy, and eval gates.");
         ("tool_denylist", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
@@ -243,11 +243,11 @@ let keeper_schemas : tool_schema list = [
         ]);
         ("tool_access",
           tool_access_schema
-            "Canonical tool candidate profile list, e.g. ['masc_status', 'tool_execute']. Runtime execution also applies descriptor availability, denylist, per-turn OAS allowlist, and eval gates.");
+            "Persisted tool candidate profiles for discovery. Does not alone grant execution; runtime applies descriptor availability, denylist, per-turn OAS policy, and eval gates.");
         ("tool_denylist", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Tool names to remove after tool_access candidate profile resolution.");
+          ("description", `String "Execution removal layer after candidate discovery. Excludes matching tools from runtime execution.");
         ]);
       ]);
       ("required", `List [`String "name"]);

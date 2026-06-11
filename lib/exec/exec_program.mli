@@ -16,6 +16,10 @@ type risk_class =
         the fallback for names that the registry does not know. *)
   ]
 
+val risk_class_max : risk_class -> risk_class -> risk_class
+(** [risk_class_max a b] returns the stricter of the two risk classes.
+    Order: [`Privileged] > [`Audited] > [`Safe]. *)
+
 (** Finer-grained classification for typed dispatch.  Callers that
     used to switch on [Exec_program.to_string bin = "git"] should switch on
     [Exec_program.kind bin] instead so a new audited bin forces a compile

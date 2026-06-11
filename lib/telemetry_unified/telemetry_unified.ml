@@ -431,22 +431,42 @@ let matches_scope ?session_id ?operation_id ?worker_run_id (json : Yojson.Safe.t
 
 (* ── Read from a single fixed-path source ───────────── *)
 
+(* A non-positive [n] means "unlimited" at the call sites (dashboard /telemetry
+   sends no [n], so [read_unified_result] derives per_source = 0). Scanning the
+   entire store for that case Yojson-parsed every entry over 1970->today on the
+   keeper's Eio domain, and major-GC starved keeper fibers (measured: a single
+   no-[n] /api/v1/dashboard/telemetry request held one core at 100%+ for ~8s on
+   a 224MB execution-receipts store, blocking turns). Clamp "unlimited" to this
+   cap so every read goes through the tail-bounded readers instead of a
+   full-store [read_range]. The cap is large enough that real dashboard windows
+   never hit it; if a future caller needs more, raise it deliberately rather
+   than reintroducing an unbounded scan. *)
+let unbounded_window_scan_cap = 50_000
+
+(* Shared read path for directory-backed Dated_jsonl stores. Always routes
+   through the tail-bounded readers ([read_recent] / [read_range_recent]) so a
+   wide window or an "unlimited" ([n] <= 0) request cannot parse the whole
+   store. Returns entries filtered to the requested timestamp window, untagged;
+   callers tag with their source. *)
+let bounded_entries_for_window store ~n ?since_ts ?until_ts () =
+  let effective_n = if n <= 0 then unbounded_window_scan_cap else n in
+  let entries =
+    match effective_day_window ?since_ts ?until_ts () with
+    | None -> Dated_jsonl.read_recent store effective_n
+    | Some (since_day, until_day) ->
+      Dated_jsonl.read_range_recent store ~since:since_day ~until:until_day
+        effective_n
+  in
+  List.filter (within_requested_window ?since_ts ?until_ts) entries
+
 let read_fixed_source dir source ~n ?since_ts ?until_ts () : Yojson.Safe.t list =
   match classify_store_dir source ~site:"read_fixed_source_dir" dir with
   | Store_missing | Store_invalid -> []
   | Store_directory ->
     match Dated_jsonl.create ~base_dir:dir () with
     | store ->
-      let entries =
-        match effective_day_window ?since_ts ?until_ts () with
-        | None -> Dated_jsonl.read_recent store n
-        | Some (since_day, until_day) ->
-          Dated_jsonl.read_range store ~since:since_day ~until:until_day
-      in
-      let entries =
-        List.filter (within_requested_window ?since_ts ?until_ts) entries
-      in
-      List.map (tag_entry source) entries
+      bounded_entries_for_window store ~n ?since_ts ?until_ts ()
+      |> List.map (tag_entry source)
     | exception (Eio.Cancel.Cancelled _ as e) -> raise e
     | exception exn ->
       observe_source_read_failure_exn source ~site:"read_fixed_source" exn;
@@ -498,19 +518,12 @@ let read_keeper_metrics_fast_top ~masc_root ~n () : Yojson.Safe.t list =
   in
   loop [] probes
 
+(* Execution-receipt stores read through the same tail-bounded helper as the
+   fixed sources. Previously an "unlimited" ([n] <= 0) request here scanned
+   1970->today via [read_range] — the measured GC-starvation path for the
+   dashboard /telemetry endpoint. *)
 let dated_jsonl_entries store ~n ?since_ts ?until_ts () =
-  let entries =
-    match effective_day_window ?since_ts ?until_ts () with
-    | Some (since_day, until_day) ->
-        Dated_jsonl.read_range store ~since:since_day ~until:until_day
-    | None when n <= 0 ->
-        let until_ts = Unix.gettimeofday () in
-        let since_day = "1970-01-01" in
-        let until_day = day_string_of_unix_seconds until_ts in
-        Dated_jsonl.read_range store ~since:since_day ~until:until_day
-    | None -> Dated_jsonl.read_recent store n
-  in
-  List.filter (within_requested_window ?since_ts ?until_ts) entries
+  bounded_entries_for_window store ~n ?since_ts ?until_ts ()
 
 let read_execution_receipts ~masc_root ?keeper_name ?since_ts ?until_ts ~n ()
     : Yojson.Safe.t list =
@@ -536,7 +549,7 @@ let read_execution_receipts ~masc_root ?keeper_name ?since_ts ?until_ts ~n ()
         [])
     dirs
 
-let read_trajectory_file path ?since_ts ?until_ts () =
+let read_trajectory_file path ~max_lines ?since_ts ?until_ts () =
   if
     not
       (is_jsonl_file Trajectory_tool_call
@@ -547,8 +560,15 @@ let read_trajectory_file path ?since_ts ?until_ts () =
       ~default:[] (fun () ->
       let parse_error_count = ref 0 in
       let entries =
-        Fs_compat.load_file path
-        |> String.split_on_char '\n'
+        (* Tail-bounded read: trajectory trace files grow append-only (one
+           measured at 12MB); [load_file] parsed the whole file on the keeper
+           Eio domain. Measured post-#20659/#20662: the trajectory source was
+           ~6.9s of an 8.3s /telemetry request — the dominant keeper-fleet
+           freeze cost, since [read_trajectory_tool_calls] ignored its [n] and
+           full-parsed every trace. Read only the newest [max_lines] from the
+           tail; trajectories are append-ordered so the tail is the recent
+           window the dashboard polls. *)
+        Dated_jsonl.load_tail_lines path ~max_lines
         |> List.filter_map (fun line ->
              let line = String.trim line in
              if line = "" then None
@@ -571,6 +591,22 @@ let read_trajectory_file path ?since_ts ?until_ts () =
                !parse_error_count);
       entries)
 
+(* A trace file whose last write predates [since_ts] cannot hold entries in the
+   requested window: traces are append-ordered, so the file mtime tracks the
+   newest entry. Skip such files without opening them. Observatory polls a 1h
+   window, but the store keeps ~84 trace files across keepers (most >7d old), so
+   the windowed read tail-read every one (#20665 bounded per-file lines but not
+   the file fan-out — measured 3.2s windowed vs 0.25s no-window). mtime-skip
+   cuts the per-call fan-out from all-files to in-window-files. Conservative on
+   stat failure (keeps the file) and when no window is requested. *)
+let trace_file_within_since ~since_ts path =
+  match since_ts with
+  | None -> true
+  | Some since ->
+    (match Unix.stat path with
+     | st -> st.Unix.st_mtime >= since
+     | exception _ -> true)
+
 let read_trajectory_tool_calls ~masc_root ?keeper_name ?since_ts ?until_ts ~n ()
     : Yojson.Safe.t list =
   let dirs = discover_trajectory_keeper_dirs masc_root in
@@ -579,6 +615,11 @@ let read_trajectory_tool_calls ~masc_root ?keeper_name ?since_ts ?until_ts ~n ()
     | None -> dirs
     | Some name -> List.filter (fun (k, _) -> String.equal k name) dirs
   in
+  (* Bound the per-file tail read. A non-positive [n] ("unlimited") clamps to
+     [unbounded_window_scan_cap] so no trace file is full-parsed. The final
+     [take_first n] still trims the merged set; this only stops the read itself
+     from being unbounded (the freeze cause). *)
+  let max_lines = if n <= 0 then unbounded_window_scan_cap else n in
   let entries =
     List.concat_map
       (fun (_name, dir) ->
@@ -586,11 +627,13 @@ let read_trajectory_tool_calls ~masc_root ?keeper_name ?since_ts ?until_ts ~n ()
           ~site:"read_trajectory_tool_calls_readdir" ~default:[] (fun () ->
           Sys.readdir dir
           |> Array.to_list
-          |> List.filter (fun name -> Filename.check_suffix name ".jsonl")
+          |> List.filter (fun name ->
+               Filename.check_suffix name ".jsonl"
+               && trace_file_within_since ~since_ts (Filename.concat dir name))
           |> List.concat_map (fun name ->
                read_trajectory_file
                  (Filename.concat dir name)
-                 ?since_ts ?until_ts ())))
+                 ~max_lines ?since_ts ?until_ts ())))
       dirs
   in
   let entries = sort_newest_first entries in
@@ -629,7 +672,7 @@ let read_goal_events ~masc_root ?since_ts ?until_ts ~n () : Yojson.Safe.t list =
 
 let read_unified_result ~base_path ~masc_root ?(sources = all_sources)
     ?keeper_name ?session_id ?operation_id ?worker_run_id ?since_ts ?until_ts
-    ?(n = 100) () : read_result =
+    ?(n = 100) ?(offset = 0) () : read_result =
   let limited = n > 0 in
   let has_filter =
     Option.is_some keeper_name || Option.is_some session_id
@@ -638,8 +681,8 @@ let read_unified_result ~base_path ~masc_root ?(sources = all_sources)
   in
   let per_source =
     if not limited then 0
-    else if has_filter then max n (n * 2)
-    else n + 1
+    else if has_filter then max (n + offset) ((n + offset) * 2)
+    else n + offset + 1
   in
   let all_entries =
     List.concat_map (fun source ->
@@ -694,16 +737,16 @@ let read_unified_result ~base_path ~masc_root ?(sources = all_sources)
   let sorted = sort_newest_first filtered in
   let total_matching_entries = List.length sorted in
   let entries =
-    if not limited || total_matching_entries <= n then sorted
-    else take_first n sorted
+    if not limited || total_matching_entries <= offset + n then sorted
+    else sorted |> List.drop offset |> take_first n
   in
-  { entries; total_matching_entries; truncated = limited && total_matching_entries > n }
+  { entries; total_matching_entries; truncated = limited && total_matching_entries > offset + n }
 
 let read_unified ~base_path ~masc_root ?sources ?keeper_name ?session_id
-    ?operation_id ?worker_run_id ?since_ts ?until_ts ?n () :
+    ?operation_id ?worker_run_id ?since_ts ?until_ts ?n ?offset () :
     Yojson.Safe.t list =
   (read_unified_result ~base_path ~masc_root ?sources ?keeper_name ?session_id
-     ?operation_id ?worker_run_id ?since_ts ?until_ts ?n ()).entries
+     ?operation_id ?worker_run_id ?since_ts ?until_ts ?n ?offset ()).entries
 
 (* ── Summary ────────────────────────────────────────── *)
 
@@ -745,25 +788,117 @@ let execution_receipt_summary_stats ~masc_root =
            (count_acc, latest_acc))
        (0, None)
 
+(* Per-trace-file incremental summary cache for the snapshot loop.
+
+   The 2 s [Dashboard_snapshot.refresh_loop] calls [summary_json] on every
+   cycle; until 2026-06-10 this path tail-re-parsed every trace file in
+   every keeper dir (~480 MB store) through Yojson on each cycle, pegging
+   Executor_pool worker domains from boot — the measured CPU burn behind
+   the 16-keeper fleet freeze (capture:
+   .tmp/masc-freeze-captures/20260610-094442).
+
+   Trace files are append-only whole-line JSONL, so (tool-call count,
+   latest tool-call ts) up to a byte boundary is a pure function of the
+   file prefix: closed trace files hit the cache forever and the live
+   trace file re-parses only the bytes appended since the previous cycle.
+   A boundary past the current size (rotation/manual edit) rescans from
+   byte 0. Entries for deleted files are dropped on the next readdir pass
+   that no longer lists them only via rescan-from-zero semantics; the
+   residual map entry costs one small record per departed path. *)
+type trajectory_file_summary =
+  { tfs_boundary : int
+  ; tfs_tool_calls : int
+  ; tfs_latest_ts : float option
+  }
+
+let trajectory_summary_cache : (string, trajectory_file_summary) Hashtbl.t =
+  Hashtbl.create 64
+
+let trajectory_summary_cache_mu = Stdlib.Mutex.create ()
+
+let reset_trajectory_summary_cache_for_testing () =
+  Stdlib.Mutex.protect trajectory_summary_cache_mu (fun () ->
+    Hashtbl.reset trajectory_summary_cache)
+
+let trajectory_file_summary path : trajectory_file_summary option =
+  match Unix.stat path with
+  | exception (Unix.Unix_error _ | Sys_error _) -> None
+  | st ->
+    let size = st.Unix.st_size in
+    let cached =
+      Stdlib.Mutex.protect trajectory_summary_cache_mu (fun () ->
+        Hashtbl.find_opt trajectory_summary_cache path)
+    in
+    (match cached with
+     | Some e when e.tfs_boundary = size -> Some e
+     | cached ->
+       let from, count0, latest0 =
+         match cached with
+         | Some e when e.tfs_boundary < size ->
+           e.tfs_boundary, e.tfs_tool_calls, e.tfs_latest_ts
+         | Some _ ->
+           (* boundary past the file size: shrink/rotation — full re-parse *)
+           Otel_metric_store_core.inc_counter
+             Otel_builtin_metric_names.metric_telemetry_cache_rescans
+             ~labels:[ ("store", "trajectories") ]
+             ();
+           0, 0, None
+         | None -> 0, 0, None
+       in
+       let (count, latest), boundary =
+         Fs_compat.fold_appended_lines ~path ~from ~init:(count0, latest0)
+           ~f:(fun (count, latest) line ->
+             match Yojson.Safe.from_string line with
+             | exception Yojson.Json_error _ -> count, latest
+             | json ->
+               if trajectory_tool_call_json json
+               then begin
+                 let latest =
+                   match extract_ts json with
+                   | ts when ts > 0.0 -> max_ts_opt latest ts
+                   | _ -> latest
+                 in
+                 count + 1, latest
+               end
+               else count, latest)
+       in
+       Otel_metric_store_core.inc_counter
+         Otel_builtin_metric_names.metric_telemetry_scanned_bytes
+         ~labels:[ ("store", "trajectories") ]
+         ~delta:(Float.of_int (max 0 (boundary - from)))
+         ();
+       let entry =
+         { tfs_boundary = boundary; tfs_tool_calls = count; tfs_latest_ts = latest }
+       in
+       Stdlib.Mutex.protect trajectory_summary_cache_mu (fun () ->
+         Hashtbl.replace trajectory_summary_cache path entry);
+       Some entry)
+
 let trajectory_tool_call_summary_stats ~masc_root =
   discover_trajectory_keeper_dirs masc_root
   |> List.fold_left
        (fun (count_acc, latest_acc) (_name, dir) ->
-         let entries =
-           protect_source_read Trajectory_tool_call
-             ~site:"trajectory_tool_call_summary_readdir" ~default:[]
-             (fun () ->
-             if not (Sys.file_exists dir) then []
-             else Sys.readdir dir
-             |> Array.to_list
-             |> List.filter (fun name -> Filename.check_suffix name ".jsonl")
-             |> List.concat_map (fun name ->
-                  read_trajectory_file (Filename.concat dir name) ()))
-         in
-         ( count_acc + List.length entries,
-           match latest_ts_of_entries entries with
-           | Some ts -> max_ts_opt latest_acc ts
-           | None -> latest_acc ))
+         protect_source_read Trajectory_tool_call
+           ~site:"trajectory_tool_call_summary_readdir"
+           ~default:(count_acc, latest_acc)
+           (fun () ->
+             if not (Sys.file_exists dir) then (count_acc, latest_acc)
+             else
+               Sys.readdir dir
+               |> Array.to_list
+               |> List.filter (fun name -> Filename.check_suffix name ".jsonl")
+               |> List.fold_left
+                    (fun (count_acc, latest_acc) name ->
+                      match
+                        trajectory_file_summary (Filename.concat dir name)
+                      with
+                      | None -> count_acc, latest_acc
+                      | Some s ->
+                        ( count_acc + s.tfs_tool_calls,
+                          match s.tfs_latest_ts with
+                          | Some ts -> max_ts_opt latest_acc ts
+                          | None -> latest_acc ))
+                    (count_acc, latest_acc)))
        (0, None)
 
 let goal_event_summary_stats ~masc_root =
@@ -1006,3 +1141,10 @@ let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
     ("coverage_gaps", `List coverage_gaps);
     ("total_entries", `Int total_entries);
   ]
+
+module For_testing = struct
+  let trajectory_tool_call_summary_stats = trajectory_tool_call_summary_stats
+
+  let reset_trajectory_summary_cache_for_testing =
+    reset_trajectory_summary_cache_for_testing
+end

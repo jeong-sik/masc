@@ -72,16 +72,20 @@ let init_runtime_context env =
   let domain_mgr = Eio.Stdenv.domain_mgr env in
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let fs = Eio.Stdenv.fs env in
+  (* MASC_MODEL_CATALOG as convenience alias for OAS_MODEL_CATALOG.
+     OAS auto-discovers from ~/.masc/config/models.toml, cwd parents,
+     and $OAS_MODEL_CATALOG. Setting MASC_MODEL_CATALOG forwards it
+     so masc operators don't need to know OAS internals.
+     OAS lazily loads the catalog on first model capability query. *)
+  (match Sys.getenv_opt "MASC_MODEL_CATALOG" with
+   | Some path when Sys.getenv_opt "OAS_MODEL_CATALOG" = None ->
+     Unix.putenv "OAS_MODEL_CATALOG" path;
+     Log.Misc.info "model_catalog: MASC_MODEL_CATALOG=%s forwarded to OAS" path
+   | Some _ ->
+     Log.Misc.info "model_catalog: OAS_MODEL_CATALOG already set, MASC_MODEL_CATALOG ignored"
+   | None ->
+     ());
   (clock, mono_clock, net, domain_mgr, proc_mgr, fs)
-
-let record_tool_policy_init_failure ~base_path msg =
-  Otel_metric_store.inc_counter Otel_metric_store.metric_tool_policy_init_failed
-    ~labels:[("base_path", base_path)]
-    ();
-  Otel_metric_store.inc_counter Otel_metric_store.metric_error_events
-    ~labels:[("type", Error_event_type.(to_label Missing_config))]
-    ();
-  Log.Server.error "Fatal tool policy config load failure: %s" msg
 
 let metric_keeper_runtime_config_load_failures =
   "masc_keeper_runtime_config_load_failures_total"
@@ -153,24 +157,6 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
        Log.Server.warn "runtime.toml load failed: %s (continuing with env defaults)" msg);
   Keeper_runtime_resolved.init ();
   Keeper_task_owner_backend.install_hooks ();
-  (* Load tool policy groups from config/tool_policy.toml *)
-  (match Keeper_tool_dispatch_runtime.init_policy_config ~base_path with
-   | Ok () -> ()
-   | Error msg ->
-       record_tool_policy_init_failure ~base_path msg;
-       exit 1);
-  (* Validate Tool_spec <-> TOML coverage *)
-  let policy_config =
-    Option.map
-      (fun cfg ->
-        { Tool_registration_check.configured_tools =
-            Keeper_tool_policy_config.all_group_tools cfg
-            @ Keeper_tool_policy_config.all_masc_tools cfg
-        })
-      (Keeper_tool_policy.policy_config_for_validation ())
-  in
-  let validation = Tool_registration_check.validate ?policy_config () in
-  Tool_registration_check.log_validation_result validation;
   let state =
     Mcp_eio.create_state_eio ~sw ~proc_mgr ~fs ~clock
       ~mono_clock ~net
@@ -228,7 +214,6 @@ let bootstrap_server_state_blocking (state : Mcp_server.server_state) =
      stale process-global config resolution in place. *)
   Config_dir_resolver.reset ();
   let (_init_msg : string) = Workspace.init state.workspace_config ~agent_name:None in
-  audit_keeper_egress_policies state;
   Mcp_server.set_sse_callback state Sse.broadcast
 
 

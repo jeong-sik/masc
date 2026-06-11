@@ -99,16 +99,6 @@ let diagnosis_of_block_reason reason =
              reference it in the second command."
       ; tool_suggestion = None
       }
-  | Exec_policy.Command_not_allowed name ->
-    Some
-      { Exec_core.rule_id = "command_not_allowed"
-      ; explanation =
-          Printf.sprintf
-            "'%s' is not on the allowed command list for this Execute surface."
-            name
-      ; rewrite = None
-      ; tool_suggestion = None
-      }
   | Exec_policy.Empty_command ->
     Some
       { Exec_core.rule_id = "command_empty"

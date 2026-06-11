@@ -669,7 +669,7 @@ let test_ensure_keeper_credential_archives_dual_identity_bare () =
       let archive_metric () =
         Masc.Otel_metric_store.metric_value_or_zero
           Masc.Otel_metric_store.metric_config_credential_archived_starvation
-          ~labels:[("keeper_name", "sangsu")]
+          ~labels:[("keeper", "sangsu")]
           ()
       in
       let before_archive_metric = archive_metric () in

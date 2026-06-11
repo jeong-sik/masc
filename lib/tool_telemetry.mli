@@ -24,15 +24,16 @@ type trace_id = string
     increments [tool_dispatch_total] with labels [tool = tool_name] and
     [outcome = <outcome returned by f>].
 
-    [f] receives a thunk that returns [Some trace_id_hex] when an OTel
-    span is active, [None] otherwise (e.g. when the exporter is disabled).
+    [f] receives a thunk that returns [Some (trace_id_hex, span_id_hex)] when an
+    OTel span is active, [None] otherwise (e.g. when the exporter is disabled).
 
     [f] returns a pair [(result, outcome)] where [outcome] is the metric
     label. PR-10 will replace the [string] outcome with a typed
     [Dispatch_outcome.t]. *)
 val with_span
-  :  tool_name:string
-  -> ((unit -> trace_id option) -> 'a * string)
+  :  ?force_new_trace_id:bool
+  -> tool_name:string
+  -> ((unit -> (trace_id * trace_id) option) -> 'a * string)
   -> 'a * string
 
 (** Register the [tool_dispatch_total] Otel_metric_store counter with labels

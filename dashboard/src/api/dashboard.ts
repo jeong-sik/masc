@@ -12,6 +12,7 @@ import {
 import { normalizePendingConfirmation } from '../pending-confirm'
 import { normalizeKeeperTrustTerminalReason } from '../keeper-store-normalize'
 import { currentDashboardActor, get, post, withRetries, type AbortableRequestOptions } from './core'
+import { ensureDevToken } from './dev-token'
 import { DEFAULT_WINDOW_MINUTES_24H } from '../config/constants'
 import {
   parseAgentRelationsResponse,
@@ -568,6 +569,7 @@ export interface DashboardRuntimeProviderSnapshot {
   is_default_runtime?: boolean
   max_context?: number | null
   tools_support?: boolean
+  thinking_support?: boolean
   streaming?: boolean
   model_count?: number | null
   models: string[]
@@ -729,6 +731,7 @@ function decodeRuntimeProviderSnapshot(raw: unknown): DashboardRuntimeProviderSn
     is_default_runtime: asBoolean(raw.is_default_runtime),
     max_context: asNumber(raw.max_context) ?? null,
     tools_support: asBoolean(raw.tools_support),
+    thinking_support: asBoolean(raw.thinking_support),
     streaming: asBoolean(raw.streaming),
     model_count: asNumber(raw.model_count) ?? null,
     models: asStringArray(raw.models),
@@ -1798,11 +1801,12 @@ export function fetchToolMetrics(): Promise<ToolMetricsResponse> {
   return get('/api/v1/tool-metrics')
 }
 
-export function fetchDashboardRuntimeProbe(
+export async function fetchDashboardRuntimeProbe(
   force = false,
   opts?: AbortableRequestOptions,
 ): Promise<DashboardRuntimeProbeResponse> {
   const query = force ? '?force=1' : ''
+  await ensureDevToken()
   return get(`/api/v1/dashboard/runtime-probe${query}`, { signal: opts?.signal })
 }
 
@@ -2184,10 +2188,11 @@ export type KeeperConfigUpdatePayload = {
   handoff_cooldown_sec?: number
 }
 
-export function patchKeeperConfig(
+export async function patchKeeperConfig(
   name: string,
   payload: KeeperConfigUpdatePayload,
 ): Promise<KeeperConfig> {
+  await ensureDevToken()
   return post<unknown>(
     `/api/v1/keepers/${encodeURIComponent(name)}/config`,
     payload,
@@ -2215,11 +2220,13 @@ function normalizeRuntimeTomlConfig(raw: unknown): RuntimeTomlConfig {
   }
 }
 
-export function fetchRuntimeTomlConfig(): Promise<RuntimeTomlConfig> {
+export async function fetchRuntimeTomlConfig(): Promise<RuntimeTomlConfig> {
+  await ensureDevToken()
   return get<unknown>('/api/v1/runtime/config/raw').then(normalizeRuntimeTomlConfig)
 }
 
-export function saveRuntimeTomlConfig(sourceText: string): Promise<RuntimeTomlConfig> {
+export async function saveRuntimeTomlConfig(sourceText: string): Promise<RuntimeTomlConfig> {
+  await ensureDevToken()
   return post<unknown>('/api/v1/runtime/config/raw', {
     source_text: sourceText,
   }).then(normalizeRuntimeTomlConfig)
@@ -2273,10 +2280,13 @@ export function fetchKeeperTrajectory(
   // so omitting the param means "don't include".
   params.set('include_thinking', includeThinking ? 'true' : 'false')
   // Request full output for session trace detail view.
-  // Backend caps at 10000 for results, 50000 for thinking content.
+  // content_max_len=0 → no cap: surface the COMPLETE reasoning text in the
+  // detail view (남김없이). The backend persists thinking untruncated and
+  // treats 0 as "no truncation"; size is intentionally accepted here, this is
+  // the drill-in surface (the timeline list keeps the default preview cap).
   if (fullOutput) {
     params.set('result_max_len', '10000')
-    params.set('content_max_len', '50000')
+    params.set('content_max_len', '0')
   }
   const qs = params.toString()
   return get<TrajectoryResponse>(
@@ -2646,6 +2656,8 @@ export type TelemetryResponse = {
   query?: Record<string, unknown>
   count: number
   total_matching_entries?: number
+  offset?: number
+  has_more?: boolean
   truncated?: boolean
   entries: TelemetryEntry[]
 }
@@ -2735,6 +2747,8 @@ function decodeTelemetryResponse(raw: unknown): TelemetryResponse | null {
     query: isRecord(raw.query) ? raw.query : undefined,
     count: asNumber(raw.count, 0),
     total_matching_entries: asNumber(raw.total_matching_entries, asNumber(raw.count, 0)),
+    offset: asNumber(raw.offset, 0),
+    has_more: asBoolean(raw.has_more, false),
     truncated: asBoolean(raw.truncated, false),
     entries: asRecordArray(raw.entries)
       .map(decodeTelemetryEntry)
@@ -2823,6 +2837,7 @@ export function fetchTelemetry(opts?: {
   since_ms?: number
   until_ms?: number
   n?: number
+  offset?: number
   signal?: AbortSignal
 }): Promise<TelemetryResponse> {
   const params = new URLSearchParams()
@@ -2834,6 +2849,7 @@ export function fetchTelemetry(opts?: {
   if (typeof opts?.since_ms === 'number') params.set('since_ms', String(opts.since_ms))
   if (typeof opts?.until_ms === 'number') params.set('until_ms', String(opts.until_ms))
   if (typeof opts?.n === 'number') params.set('n', String(opts.n))
+  if (typeof opts?.offset === 'number') params.set('offset', String(opts.offset))
   const qs = params.toString()
   return get<Record<string, unknown>>(`/api/v1/dashboard/telemetry${qs ? '?' + qs : ''}`, { signal: opts?.signal })
     .then((raw) => {

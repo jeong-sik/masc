@@ -63,6 +63,60 @@ let _keeper_snapshot_max_concurrency =
 
 let _keeper_sem = Eio.Semaphore.make _keeper_snapshot_max_concurrency
 
+(* PR-C2: encapsulate [Eio.Semaphore.acquire]/[release] inside a single
+   helper scope so the slot is released even when the body raises
+   non-Cancelled exceptions (which the previous on_release callback could
+   not guarantee -- a [Log.Dashboard.info] failure inside the callback
+   would skip the release and leak the slot).
+
+   - [wait_ms] measures contention on the acquire call.
+   - [work_ms] measures the body's wall time.
+   - The 500ms threshold log fires only on the *normal-exit* path:
+     Cancelled propagation skips the log to avoid double-reporting;
+     the exception itself carries the unwind trace.
+
+   No typed state machine is introduced -- the slot itself is
+   encapsulated by the helper, so there is no counter/state to
+   desynchronise.  Mirrors PR-B/PR-C1 in spirit (no separate counter
+   for the per-fiber slot) but expressed as a scope rather than a
+   state transition. *)
+let with_keeper_slot ~sem ~name f =
+  let t_wait_start = Time_compat.now () in
+  Eio.Semaphore.acquire sem;
+  let t_work_start = Time_compat.now () in
+  let wait_ms = (t_work_start -. t_wait_start) *. 1000.0 in
+  (* fun-protect-finally-ok: Eio.Semaphore.release is non-suspending
+     (Atomic.incr + run-queue wake, no fiber switch). *)
+  Fun.protect
+
+    ~finally:(fun () -> Eio.Semaphore.release sem)
+    (fun () ->
+       try
+         let v = f () in
+         let work_ms = (Time_compat.now () -. t_work_start) *. 1000.0 in
+         if work_ms > 500.0 || wait_ms > 500.0
+         then
+           Log.Dashboard.info
+             "[keepers_json:%s] wait=%.0fms work=%.0fms"
+             name
+             wait_ms
+             work_ms;
+         v
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+         let work_ms = (Time_compat.now () -. t_work_start) *. 1000.0 in
+         if work_ms > 500.0 || wait_ms > 500.0
+         then
+           Log.Dashboard.info
+             "[keepers_json:%s] wait=%.0fms work=%.0fms (exn: %s)"
+             name
+             wait_ms
+             work_ms
+             (Printexc.to_string exn);
+         raise exn)
+;;
+
 let compact_keeper_runtime_trust_json = Operator_control_snapshot_trust.compact_keeper_runtime_trust_json
 let degraded_keeper_snapshot_row = Operator_control_snapshot_trust.degraded_keeper_snapshot_row
 let keepers_json
@@ -88,36 +142,35 @@ let keepers_json
     (List.mapi
        (fun idx name () ->
           Eio.Switch.run
-          @@ fun keeper_sw ->
-          (* Two-phase timing so we can distinguish semaphore contention
-            from per-keeper I/O cost when dashboard snapshots stall.
-            Emits [keepers_json:NAME wait=… work=…] only when either
-            half exceeds the same 500ms threshold used by the outer
-            [timed] helper, keeping the log quiet on healthy snapshots. *)
-          let t_wait_start = Time_compat.now () in
-          Eio.Semaphore.acquire keeper_sem;
-          let t_work_start = Time_compat.now () in
-          let wait_ms = (t_work_start -. t_wait_start) *. 1000.0 in
-          Eio.Switch.on_release keeper_sw (fun () ->
-            Eio.Semaphore.release keeper_sem;
-            let work_ms = (Time_compat.now () -. t_work_start) *. 1000.0 in
-            if work_ms > 500.0 || wait_ms > 500.0
-            then
-              Log.Dashboard.info
-                "[keepers_json:%s] wait=%.0fms work=%.0fms"
-                name
-                wait_ms
-                work_ms);
-          (* Per-sub-op timing for #8822: attribute ~3100ms snapshot cost.
-            Threshold 300ms — lower than outer 500ms for more data. *)
-          let dt_meta = ref 0.0 in
-          let dt_agent = ref 0.0 in
-          let dt_ka = ref 0.0 in
-          let dt_audit = ref 0.0 in
-          let dt_profile = ref 0.0 in
-          let dt_phase = ref 0.0 in
-          let dt_trust = ref 0.0 in
-          let dt_activity = ref 0.0 in
+          @@ fun _keeper_sw ->
+          (* PR-C2: pair acquire/release inside a single [with_keeper_slot]
+            scope instead of the previous
+            [Eio.Switch.on_release (fun () -> Eio.Semaphore.release ...)]
+            pattern.  The on_release callback is *cancel-safe* (it fires on
+            both normal exit and Cancel.Cancelled unwind) but its [release]
+            was *not exception-safe* -- a [Log.Dashboard.info] failure inside
+            the callback would skip the release and leak the slot.  Fun.protect
+            is exception-safe, never double-releases, and matches PR-B's
+            typed-state pattern (no separate counter, lifecycle absorbed by
+            the helper).
+
+            Two-phase timing: [wait_ms] measures semaphore contention
+            (acquire delay), [work_ms] measures per-keeper I/O cost.
+            We log only when either half exceeds 500ms so healthy
+            snapshots stay quiet.  The log is part of the *success path*
+            inside [with_keeper_slot]; Cancelled propagation skips it. *)
+          with_keeper_slot ~sem:keeper_sem ~name (fun () ->
+            let t_work_start = Time_compat.now () in
+            (* Per-sub-op timing for #8822: attribute ~3100ms snapshot cost.
+              Threshold 300ms — lower than outer 500ms for more data. *)
+            let dt_meta = ref 0.0 in
+            let dt_agent = ref 0.0 in
+            let dt_ka = ref 0.0 in
+            let dt_audit = ref 0.0 in
+            let dt_profile = ref 0.0 in
+            let dt_phase = ref 0.0 in
+            let dt_trust = ref 0.0 in
+            let dt_activity = ref 0.0 in
           let emit_timing_log total_work =
             if total_work > 0.3
             then
@@ -444,88 +497,7 @@ let keepers_json
                            ; "proactive_idle_sec", `Int meta.proactive.idle_sec
                            ; "proactive_cooldown_sec", `Int meta.proactive.cooldown_sec
                            ; ( "turn_budget"
-                             , let t_profile = Time_compat.now () in
-                               let cache_key = "kpd:" ^ meta.name in
-                               let keeper_profile_cache_ttl_s = 10.0 in
-                               let result =
-                                 Dashboard_cache.get_or_compute
-                                   cache_key
-                                   ~ttl:keeper_profile_cache_ttl_s
-                                   (fun () ->
-                                      let profile =
-                                        Keeper_types_profile.load_keeper_profile_defaults
-                                          meta.name
-                                      in
-                                      let env_reactive =
-                                        Env_config_keeper.KeeperKeepalive
-                                        .oas_max_turns_per_call
-                                      in
-                                      let env_autonomous =
-                                        Env_config_keeper.KeeperKeepalive
-                                        .oas_max_turns_per_call_scheduled_autonomous
-                                      in
-                                      let reactive_effective =
-                                        Keeper_types_profile.effective_max_turns_per_call
-                                          profile
-                                      in
-                                      let reactive_source =
-                                        max_turns_override_source
-                                          profile.max_turns_per_call
-                                      in
-                                      let autonomous_effective =
-                                        Keeper_types_profile
-                                        .effective_max_turns_per_call_scheduled_autonomous
-                                          profile
-                                      in
-                                      let autonomous_source =
-                                        max_turns_override_source
-                                          profile.max_turns_per_call_scheduled_autonomous
-                                      in
-                                      let raw_override_int = Json_util.int_opt_to_json in
-                                      let manifest_path_json =
-                                        Json_util.string_opt_to_json profile.manifest_path
-                                      in
-                                      `Assoc
-                                        [ ( "reactive"
-                                          , `Assoc
-                                              [ "value", `Int reactive_effective
-                                              ; "source", `String reactive_source
-                                              ; "env_default", `Int env_reactive
-                                              ; ( "env_var"
-                                                , `String
-                                                    "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL" )
-                                              ; ( "raw_override"
-                                                , raw_override_int
-                                                    profile.max_turns_per_call )
-                                              ] )
-                                        ; ( "scheduled_autonomous"
-                                          , `Assoc
-                                              [ "value", `Int autonomous_effective
-                                              ; "source", `String autonomous_source
-                                              ; "env_default", `Int env_autonomous
-                                              ; ( "env_var"
-                                                , `String
-                                                    "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS"
-                                                )
-                                              ; ( "raw_override"
-                                                , raw_override_int
-                                                    profile
-                                                      .max_turns_per_call_scheduled_autonomous
-                                                )
-                                              ] )
-                                        ; "manifest_path", manifest_path_json
-                                        ; ( "clamp_min"
-                                          , `Int
-                                              Keeper_runtime_resolved
-                                              .max_turns_per_call_min )
-                                        ; ( "clamp_max"
-                                          , `Int
-                                              Keeper_runtime_resolved
-                                              .max_turns_per_call_max )
-                                        ])
-                               in
-                               dt_profile := Time_compat.now () -. t_profile;
-                               result )
+                             , `String "disabled — governed by timeout_sec" )
                            ; ( "last_proactive_reason"
                              , Json_util.string_opt_to_json
                                  (let value =
@@ -598,7 +570,7 @@ let keepers_json
                   "keepers_json fiber error (%s): %s"
                   name
                   (Printexc.to_string exn);
-                None))
+                None)))
        names);
   let rows = Array.to_list results |> List.filter_map Fun.id in
   `Assoc [ "count", `Int (List.length rows); "items", `List rows ]

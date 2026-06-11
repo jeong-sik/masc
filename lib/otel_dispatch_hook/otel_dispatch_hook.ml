@@ -194,9 +194,13 @@ let tool_span_attrs (result : Tool_result.result) =
   gen_ai_attrs @ request_context_attrs () @ status_attrs
 ;;
 
-(** Record a tool call as an OTel span. *)
+(** Record a tool call as an OTel span or attach to the ambient dispatch span.
+
+    When an ambient dispatch span exists (e.g. [Tool_telemetry.with_span]),
+    attributes and status are attached to that span so the trace stays at
+    [spans=1].  Only falls back to creating a standalone span when no ambient
+    scope is present. *)
 let on_tool_result (result : Tool_result.result) : unit =
-  (* OTel span: only when enabled *)
   if enabled ()
   then (
     let status =
@@ -208,11 +212,18 @@ let on_tool_result (result : Tool_result.result) : unit =
              ~message:(Tool_result.message result)
              ~code:OT.Span_status.Status_code_error)
     in
-    emit_span
-      ~name:(tool_call_span_name ~tool_name:(Tool_result.tool_name result))
-      ~attrs:(tool_span_attrs result)
-      ?status
-      ())
+    match OT.Scope.get_ambient_scope () with
+    | Some scope ->
+      (* Attach to the ambient dispatch span instead of creating a nested
+         child span.  Keeps per-tool traces at spans=1. *)
+      OT.Scope.add_attrs scope (fun () -> tool_span_attrs result);
+      Option.iter (OT.Scope.set_status scope) status
+    | None ->
+      emit_span
+        ~name:(tool_call_span_name ~tool_name:(Tool_result.tool_name result))
+        ~attrs:(tool_span_attrs result)
+        ?status
+        ())
 ;;
 
 (* Histogram + span emission fires only for handled results. Non-handled

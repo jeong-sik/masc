@@ -14,7 +14,6 @@ val run_model_by_label :
   goal:string ->
   ?system_prompt:string ->
   ?tools:Agent_sdk.Tool.t list ->
-  ?max_turns:int ->
   ?max_idle_turns:int ->
   ?stream_idle_timeout_s:float ->
   ?temperature:float ->
@@ -26,7 +25,6 @@ val run_model_by_label :
   ?guardrails:Agent_sdk.Guardrails.t ->
   ?hooks:Agent_sdk.Hooks.hooks ->
   ?context_reducer:Agent_sdk.Context_reducer.t ->
-  ?tool_retry_policy:Agent_sdk.Tool_retry_policy.t ->
   ?enable_thinking:bool ->
   ?compact_ratio:float ->
   ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
@@ -47,7 +45,6 @@ val run_named_with_masc_tools :
   ?system_prompt:string ->
   masc_tools:Masc_domain.tool_schema list ->
   dispatch:(name:string -> args:Yojson.Safe.t -> Tool_result.result) ->
-  ?max_turns:int ->
   ?stream_idle_timeout_s:float ->
   ?temperature:float ->
   ?max_tokens:int ->
@@ -57,7 +54,6 @@ val run_named_with_masc_tools :
   ?accept:(Agent_sdk_response.api_response -> bool) ->
   ?guardrails:Agent_sdk.Guardrails.t ->
   ?hooks:Agent_sdk.Hooks.hooks ->
-  ?tool_retry_policy:Agent_sdk.Tool_retry_policy.t ->
   ?raw_trace:Agent_sdk.Raw_trace.t ->
   ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
   ?on_yield:(unit -> unit) ->
@@ -79,7 +75,6 @@ val run_model_with_masc_tools :
   ?system_prompt:string ->
   masc_tools:Masc_domain.tool_schema list ->
   dispatch:(name:string -> args:Yojson.Safe.t -> Tool_result.result) ->
-  ?max_turns:int ->
   ?stream_idle_timeout_s:float ->
   ?temperature:float ->
   ?max_tokens:int ->
@@ -88,7 +83,6 @@ val run_model_with_masc_tools :
   ?wait_timeout_sec:float ->
   ?guardrails:Agent_sdk.Guardrails.t ->
   ?hooks:Agent_sdk.Hooks.hooks ->
-  ?tool_retry_policy:Agent_sdk.Tool_retry_policy.t ->
   ?enable_thinking:bool ->
   ?compact_ratio:float ->
   ?raw_trace:Agent_sdk.Raw_trace.t ->

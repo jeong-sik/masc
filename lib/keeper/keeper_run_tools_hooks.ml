@@ -37,6 +37,9 @@ type ctx =
   ; keeper_tools_cleanup : unit -> unit
   ; manifest_keeper_turn_id : int option
   ; meta : Keeper_meta_contract.keeper_meta
+  ; turn_ctx_cell : Keeper_tool_call_log.turn_ctx_cell
+    (* RFC-0225 §3.3: per-run carrier; written by the pre-request hook
+       below, read by the post-tool hooks in Keeper_hooks_oas. *)
   ; receipt_turn_count_ref : int option ref
   ; receipt_model_used_ref : string option ref
   ; receipt_stop_reason_ref : Runtime_agent.stop_reason option ref
@@ -77,6 +80,7 @@ let assemble_hooks
   let keeper_tools_cleanup = ctx.keeper_tools_cleanup in
   let manifest_keeper_turn_id = ctx.manifest_keeper_turn_id in
   let meta = ctx.meta in
+  let turn_ctx_cell = ctx.turn_ctx_cell in
   let receipt_turn_count_ref = ctx.receipt_turn_count_ref in
   let receipt_model_used_ref = ctx.receipt_model_used_ref in
   let receipt_stop_reason_ref = ctx.receipt_stop_reason_ref in
@@ -113,6 +117,7 @@ let assemble_hooks
       Keeper_hooks_oas.make_hooks
         ~config
         ~meta_ref
+        ~turn_ctx_cell
         ~generation
         ?max_cost_usd
         ?trajectory_acc
@@ -228,8 +233,12 @@ let assemble_hooks
                     thinking_budget = adaptive_thinking_budget
                   ; enable_thinking =
                       (match runtime_seed.thinking_enabled with
-                       | Some false -> Some false
-                       | _ -> current_params.enable_thinking)
+                       | Some enabled -> Some enabled
+                       | None -> current_params.enable_thinking)
+                  ; preserve_thinking =
+                      (match runtime_seed.preserve_thinking with
+                       | Some preserve -> Some preserve
+                       | None -> current_params.preserve_thinking)
                   }
                 in
                 let ctx =
@@ -341,7 +350,7 @@ let assemble_hooks
                   | None -> Keeper_config.keeper_enable_thinking ()
                 in
                 Keeper_tool_call_log.set_turn_context
-                  ~keeper_name:meta.name
+                  ~cell:turn_ctx_cell
                   ~agent_name:meta.agent_name
                   ~lane:
                     (Keeper_agent_tool_surface.turn_lane_to_string lane)

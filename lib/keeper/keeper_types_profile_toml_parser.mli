@@ -64,8 +64,6 @@ val normalize_compaction_message_gate : int -> int
 val normalize_compaction_token_gate : int -> int
 val normalize_continuity_compaction_cooldown_sec : int -> int
 val default_keep_recent_tool_results : int
-val default_tool_heavy_msg_threshold : int
-val default_tool_heavy_ratio_floor : float
 val keep_recent_tool_results_max : int
 val normalize_keep_recent_tool_results : ?keeper_name:string -> int -> int
 val normalize_proactive_idle_sec : int -> int
@@ -84,13 +82,8 @@ val keeper_proactive_min_interval_sec : unit -> int
 val keeper_proactive_task_cooldown_divisor : unit -> int
 val keeper_proactive_task_min_cooldown_sec : unit -> int
 val keeper_batch_limit : unit -> int
-val keeper_board_debounce_window_sec : unit -> float
-val keeper_tool_cost_max_usd : unit -> float option
-val keeper_board_event_limit : unit -> int
-val keeper_turn_capacity_limit : unit -> int
 val keeper_llm_rerank_enabled : unit -> bool
 val keeper_llm_rerank_runtime : unit -> string
-val keeper_rule_reflect_repetition_threshold : unit -> float
 val keeper_rule_plan_goal_alignment_threshold : unit -> float
 val keeper_rule_plan_response_alignment_threshold : unit -> float
 val keeper_rule_guardrail_repetition_threshold : unit -> float

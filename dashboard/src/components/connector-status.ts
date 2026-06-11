@@ -36,7 +36,9 @@ import { SidecarLogToggle, SidecarLogViewer } from './sidecar-log-viewer'
 import { ConnectorConfigToggle, ConnectorConfigForm, openConnectorConfig } from './connector-config-form'
 import { ConnectorReadinessRail, deriveRail, getRailInflight, withRailInflight } from './connector-readiness-rail'
 import { StartupCheckBanner, markStartAttempt, clearStartAttempt } from './sidecar-startup-watch'
+import { showConnectorActionError } from './connector-action-error'
 import { QuickBindForm } from './connector-quick-bind'
+import { ConnectorFlowSection } from './connector-flow'
 import { ConnectorOverviewStrip } from './connector-overview-strip'
 import { ConnectorKeeperMatrix, deriveMatrix } from './connector-keeper-matrix'
 import { ConnectorPathsStrip } from './connector-paths-strip'
@@ -494,6 +496,8 @@ function placeholderConnector(connectorId: KnownConnectorId): GateConnectorInfo 
     connected: false,
     stale: false,
     stale_after_sec: 0,
+    gateway_state: '',
+    status_source: '',
     error: '',
     status_path: '',
     binding_store_path: '',
@@ -567,7 +571,7 @@ export async function startSidecar(connectorId: string) {
     showToast(`${connectorId} sidecar 시작 요청 — 잠시 후 상태 갱신됩니다.`, 'success')
     await refresh()
   } catch (err) {
-    showToast(err instanceof Error ? err.message : 'start failed', 'error')
+    showConnectorActionError(`${connectorId} sidecar 시작 실패`, err)
   } finally {
     patchConnectorUiState(connectorId, { actionLoading: false })
   }
@@ -583,16 +587,19 @@ export async function stopSidecar(connectorId: string) {
     showToast(`${connectorId} sidecar에 SIGTERM 전송`, 'success')
     await refresh()
   } catch (err) {
-    showToast(err instanceof Error ? err.message : 'stop failed', 'error')
+    showConnectorActionError(`${connectorId} sidecar 중지 실패`, err)
   } finally {
     patchConnectorUiState(connectorId, { actionLoading: false })
   }
 }
 
-export async function bindConnector(connectorId: string, keeperName: string, channelId: string) {
+/** Returns true only when the bind POST succeeded. Errors are surfaced
+    here (toast + 상세 dialog) and swallowed, so this promise never
+    rejects — callers must branch on the boolean, not try/catch. */
+export async function bindConnector(connectorId: string, keeperName: string, channelId: string): Promise<boolean> {
   const keeper = keeperName.trim()
   const channel = channelId.trim()
-  if (!keeper || !channel) return
+  if (!keeper || !channel) return false
 
   patchConnectorUiState(connectorId, { actionLoading: true })
   try {
@@ -606,8 +613,10 @@ export async function bindConnector(connectorId: string, keeperName: string, cha
     })
     await refresh()
     showToast(`Bound ${channel} -> ${keeper}`, 'success')
+    return true
   } catch (err) {
-    showToast(err instanceof Error ? err.message : 'bind failed', 'error')
+    showConnectorActionError(`바인딩 실패: ${channel} → ${keeper}`, err)
+    return false
   } finally {
     patchConnectorUiState(connectorId, { actionLoading: false })
   }
@@ -625,7 +634,7 @@ async function unbindConnector(connectorId: string, channelId: string) {
     await refresh()
     showToast(`Unbound ${channel}`, 'success')
   } catch (err) {
-    showToast(err instanceof Error ? err.message : 'unbind failed', 'error')
+    showConnectorActionError(`바인딩 해제 실패: ${channel}`, err)
   } finally {
     patchConnectorUiState(connectorId, { actionLoading: false })
   }
@@ -662,6 +671,11 @@ function ConnectorLivePanel({
   const bindingActionsEnabled = connector != null && connector.capabilities.includes('bindings')
   const directLabel = connectorStateLabel(connector)
   const directTone = connectorStateTone(connector)
+  // In-process gateway machine state (RFC-0203 / #20813). Shown only
+  // when the connector advertises it AND it adds information beyond
+  // the coarse 4-word label (reconnect_pending, identifying, failed...).
+  const gatewayState = connector?.gateway_state ?? ''
+  const showGatewayChip = gatewayState !== '' && gatewayState !== directLabel
 
   let gateHealthLabel = 'unknown'
   if (connector?.gate_healthy === true) {
@@ -809,6 +823,9 @@ function ConnectorLivePanel({
           <span class=${`inline-block h-2 w-2 rounded-full ${dotClassForLabel(directLabel)}`}></span>
           <span>${directLabel}</span>
         </span>
+        ${showGatewayChip
+          ? html`<span class="text-3xs lowercase text-[var(--color-fg-disabled)]" data-gateway-state-chip>gw ${gatewayState}</span>`
+          : null}
         <${MutedSpan}><span aria-hidden="true">· </span>hb ${timeAgo(connector?.updated_at ?? '')}</${MutedSpan}>
         ${connector?.reply_mode
           ? html`<${MutedSpan}><span aria-hidden="true">· </span>reply ${connector.reply_mode}</${MutedSpan}>`
@@ -828,9 +845,11 @@ function ConnectorLivePanel({
                 >${isActionLoading ? '…' : 'Stop'}</button>
               `
             : null}
-          <${SidecarLogToggle} connectorId=${connectorId} />
+          ${!isInProcessConnector(connectorId)
+            ? html`<${SidecarLogToggle} connectorId=${connectorId} />`
+            : null}
           <${ConnectorConfigToggle} connectorId=${connectorId} />
-          ${sidecarLogPath
+          ${sidecarLogPath && !isInProcessConnector(connectorId)
             ? html`<span class="cursor-help text-3xs text-[var(--color-fg-disabled)]" title=${sidecarLogPath} aria-hidden="true">↗</span>`
             : null}
           <button
@@ -876,9 +895,11 @@ function ConnectorLivePanel({
 
       <${StartupCheckBanner} connectorId=${connectorId} sidecarUp=${connector?.available === true} />
 
-      ${connector?.available === true && configuredBindings.length === 0 && keepers.length > 0
+      ${connector?.available === true && keepers.length > 0
         ? html`<${QuickBindForm} connectorId=${connectorId} keepers=${keepers} />`
         : null}
+
+      <${ConnectorFlowSection} connector=${connector} gate=${gate} />
 
       ${ui.headerExpanded
         ? html`
@@ -928,7 +949,9 @@ function ConnectorLivePanel({
           `
         : null}
 
-      <${SidecarLogViewer} connectorId=${connectorId} />
+      ${!isInProcessConnector(connectorId)
+        ? html`<${SidecarLogViewer} connectorId=${connectorId} />`
+        : null}
       <${ConnectorConfigForm} connectorId=${connectorId} />
 
       ${keeperDirectoryError && keepers.length === 0
@@ -1185,12 +1208,12 @@ function ConnectorLivePanel({
                     ${bindingActionsEnabled
                       ? html`
                           <div class="mt-2">
-                            <button
-                              type="button"
-                              class="cursor-pointer text-2xs text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-primary)]"
-                              aria-label=${`add channel to ${group.name}`}
+                            <${ActionButton}
+                              variant="subtle"
+                              size="sm"
+                              ariaLabel=${`add channel to ${group.name}`}
                               onClick=${toggleExpand}
-                            >${expanded ? '− close' : '+ add channel'}</button>
+                            >${expanded ? '− 닫기' : '+ 채널 연결'}<//>
                           </div>
                           ${expanded
                             ? html`

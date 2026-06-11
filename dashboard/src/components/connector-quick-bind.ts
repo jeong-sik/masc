@@ -1,8 +1,10 @@
 // QuickBindForm — single-row keeper↔channel binding without having to
 // scroll down to the keeper directory, expand a keeper, and then paste
-// the channel ID. Mounted at the top of a connector card when the
-// connector is live and has keepers available but zero bindings yet
-// (the gap state the rail marks "warn").
+// the channel ID. Mounted at the top of a connector card whenever the
+// connector is live and has keepers available. (Originally gated to
+// the zero-bindings gap state; widened 2026-06-11 after an operator
+// could not find the per-keeper add-channel affordance buried at the
+// bottom of the card — the form is the card's primary bind entry now.)
 //
 // The underlying POST body matches the existing bindConnector helper in
 // connector-status.ts — we don't duplicate the call path.
@@ -69,19 +71,18 @@ export function channelIdPlaceholder(connectorId: string): string {
 }
 
 async function submit(connectorId: string, entry: FormEntry) {
+  // The Bind button is disabled while submitting, but the Enter key path
+  // is not — without this guard a second Enter (double-tap or held-key
+  // auto-repeat) fires a concurrent bind POST for the same draft.
+  if (entry.submitting) return
   const channel = entry.channelId.trim()
   if (!channel || !entry.keeperName) return
   setEntry(connectorId, { submitting: true })
-  try {
-    await bindConnector(connectorId, entry.keeperName, channel)
-    // bindConnector already refreshes + toasts; we just clear the local
-    // channel draft so the operator can immediately bind another.
-    setEntry(connectorId, { channelId: '', submitting: false })
-  } catch {
-    // bindConnector already surfaced the toast; still need to unwedge the
-    // submitting state so the operator can retry.
-    setEntry(connectorId, { submitting: false })
-  }
+  const ok = await bindConnector(connectorId, entry.keeperName, channel)
+  // bindConnector surfaces success/error toasts itself and never rejects.
+  // Clear the draft only on success — on failure the operator needs the
+  // typed channel ID intact to retry.
+  setEntry(connectorId, ok ? { channelId: '', submitting: false } : { submitting: false })
 }
 
 export function QuickBindForm({ connectorId, keepers }: {

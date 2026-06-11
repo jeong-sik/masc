@@ -1,7 +1,7 @@
 (** Tool_schemas_run — SSOT for run-tracking tool schemas.
 
-    Defines schemas for task execution lifecycle: init, plan, log,
-    deliverable, get, and list.
+    Defines schemas for task execution lifecycle: init, plan, get,
+    and list.
 *)
 
 open Masc_domain
@@ -40,41 +40,6 @@ let schemas : Masc_domain.tool_schema list =
                   ("plan", `Assoc [ ("type", `String "string") ]);
                 ] );
             ("required", `List [ `String "task_id"; `String "plan" ]);
-            ("additionalProperties", `Bool false);
-          ];
-    };
-    {
-      name = "masc_run_log";
-      description =
-        "Append a timestamped note to a task's execution log for audit and handoff continuity. Use when reaching milestones, finding blockers, or making key decisions during execution.";
-      input_schema =
-        `Assoc
-          [
-            ("type", `String "object");
-            ( "properties",
-              `Assoc
-                [
-                  ("task_id", `Assoc [ ("type", `String "string") ]);
-                  ("note", `Assoc [ ("type", `String "string") ]);
-                ] );
-            ("required", `List [ `String "task_id"; `String "note" ]);
-            ("additionalProperties", `Bool false);
-          ];
-    };
-    {
-      name = "masc_run_deliverable";
-      description = "Record the final deliverable/output of a task run.";
-      input_schema =
-        `Assoc
-          [
-            ("type", `String "object");
-            ( "properties",
-              `Assoc
-                [
-                  ("task_id", `Assoc [ ("type", `String "string") ]);
-                  ("deliverable", `Assoc [ ("type", `String "string") ]);
-                ] );
-            ("required", `List [ `String "task_id"; `String "deliverable" ]);
             ("additionalProperties", `Bool false);
           ];
     };

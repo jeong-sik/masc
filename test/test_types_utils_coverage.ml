@@ -382,7 +382,6 @@ let test_task_roundtrip () =
     id = "task-123";
     title = "Test Task";
     description = "A test task for coverage";
-    goal_id = None;
     task_status = Todo;
     priority = 2;
     files = ["file1.ml"; "file2.ml"];
@@ -402,13 +401,13 @@ let test_backlog_roundtrip () =
   let backlog = Masc_domain.{
     tasks = [
       { id = "t1"; title = "Task 1"; description = "Desc 1";
-        task_status = Todo; goal_id = None; priority = 1; files = [];
+        task_status = Todo; priority = 1; files = [];
         created_at = "2024-01-01T00:00:00Z";
         created_by = None;
         contract = None; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None };
       { id = "t2"; title = "Task 2"; description = "Desc 2";
         task_status = Done { assignee = "a"; completed_at = "2024-01-02T00:00:00Z"; notes = None };
-        goal_id = None; priority = 2; files = []; created_at = "2024-01-01T01:00:00Z";
+        priority = 2; files = []; created_at = "2024-01-01T01:00:00Z";
         created_by = None;
         contract = None; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None };
     ];

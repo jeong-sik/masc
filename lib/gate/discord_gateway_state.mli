@@ -75,10 +75,26 @@ type dispatched_event =
       }
   | Message_create of
       { channel_id : string
+      ; guild_id : string option
+        (** Guild snowflake when Discord includes one. Direct messages and
+            some partial payloads omit it. *)
       ; message_id : string
       ; author_id : string
+      ; author_name : string option
+        (** Display name: [author.global_name] when set, else
+            [author.username]; [None] only when the payload carries
+            neither (RFC-0223 P1). *)
       ; content : string
       ; mentions_bot : bool
+      ; explicit_mentions_bot : bool
+        (** [true] only when message [content] contains a literal
+            Discord user mention for the bot, e.g. [<@123>] /
+            [<@!123>]. Discord may also include the bot in
+            [mentions] for reply-pings; those stay [mentions_bot]
+            but do not start a [Mention_only] turn by themselves. *)
+      ; message_reference_channel_id : string option
+      ; message_reference_message_id : string option
+      ; referenced_message_author_id : string option
       }
   | Reaction_add of
       { channel_id : string
@@ -149,6 +165,11 @@ type gateway_effect =
   | Schedule_heartbeat of { interval_ms : int }
   | Schedule_backoff of { delay_ms : int }
   | Emit_event of dispatched_event   (** Surface to caller's on_event. *)
+  | Emit_ambient of dispatched_event
+      (** Record-only delivery (RFC-0226): a [Message_create] that
+          failed [trigger_policy] but is not the bot's own echo. The
+          I/O layer persists it to the bound keeper's lane history;
+          it must not start a turn. *)
   | Log of { level : [ `Info | `Warn | `Error ]; message : string }
 
 (** {1 Configuration} *)

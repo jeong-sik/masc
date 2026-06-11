@@ -121,7 +121,7 @@ val cost_event_payload :
   cost_usd:float ->
   ?usage_missing:bool ->
   ?usage_trust:Keeper_usage_trust.t ->
-  ?telemetry:Agent_sdk.Types.inference_telemetry -> unit -> Yojson.Safe.t
+  ?telemetry:Agent_sdk.Types.inference_telemetry -> ?model:string -> unit -> Yojson.Safe.t
 (** Assemble the structured cost-ledger event without writing it. *)
 
 val emit_cost_event :
@@ -133,7 +133,8 @@ val emit_cost_event :
   cost_usd:float ->
   ?usage_missing:bool ->
   ?usage_trust:Keeper_usage_trust.t ->
-  ?telemetry:Agent_sdk.Types.inference_telemetry -> unit -> unit
+  ?telemetry:Agent_sdk.Types.inference_telemetry ->
+  ?model:string -> unit -> unit
 (** Append a structured cost-ledger event to [costs.jsonl]. *)
 
 (** {1 Idle-loop policy} *)
@@ -168,6 +169,7 @@ val recent_tool_streak_count :
 val make_hooks :
   config:Workspace.config ->
   meta_ref:Keeper_meta_contract.keeper_meta ref ->
+  turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell ->
   generation:int ->
   ?max_cost_usd:float ->
   ?destructive_check:bool ->

@@ -31,6 +31,7 @@ val transition_task_r :
      verification_id:string ->
      evidence_refs:string list ->
      (unit, string) result) ->
+  ?compensate_verification_request:(verification_id:string -> unit) ->
   ?prepare_verification_verdict:
     (task:Masc_domain.task ->
      verifier:string ->
@@ -81,6 +82,7 @@ type claim_next_result = Masc_domain.claim_next_result =
       priority : int;
       released_task_id : string option;
       message : string;
+      scope_widened : bool;
     }
   | Claim_next_no_unclaimed
   | Claim_next_no_eligible of

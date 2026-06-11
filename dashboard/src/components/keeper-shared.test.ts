@@ -17,6 +17,7 @@ vi.mock('../keeper-runtime', async () => {
   return {
     abortKeeperThreadMessage: vi.fn(),
     hydrateKeeperStatus: vi.fn(async () => null),
+    hydrateKeeperChatHistory: vi.fn(async () => undefined),
     loadFullKeeperHistory: vi.fn(async () => null),
     keeperActionErrors: signal({}),
     keeperHydrating: signal({}),
@@ -25,6 +26,7 @@ vi.mock('../keeper-runtime', async () => {
     keeperSending: signal({}),
     keeperStatusDetails: signal({}),
     keeperStreamStartedAt: signal({}),
+    keeperStreamLastEventAt: signal({}),
     keeperThreads: signal({}),
     probeKeeperRuntime: vi.fn(),
     recoverKeeperRuntime: vi.fn(),
@@ -54,7 +56,58 @@ import { keeperActionErrors, keeperHydrating, keeperSending, keeperStreamStarted
 import { keeperStatusDetails } from '../keeper-runtime'
 import { hydrateKeeperStatus } from '../keeper-runtime'
 import { shellAuthSummary } from '../store'
-import { KeeperConversationPanel, KeeperDiagnosticSummary, KeeperRuntimeActions } from './keeper-shared'
+import type { KeeperConversationEntry } from '../types'
+import {
+  KeeperConversationPanel,
+  KeeperDiagnosticSummary,
+  KeeperRuntimeActions,
+  filterConversationEntries,
+} from './keeper-shared'
+
+describe('filterConversationEntries', () => {
+  function entry(partial: Partial<KeeperConversationEntry>): KeeperConversationEntry {
+    return {
+      id: 'e-1',
+      role: 'user',
+      source: 'direct_user',
+      label: '사용자',
+      text: 'hello',
+      rawText: 'hello',
+      timestamp: '2026-06-10T00:00:00.000Z',
+      delivery: 'history',
+      streamState: null,
+      details: null,
+      ...partial,
+    }
+  }
+
+  it('returns the input untouched for empty and whitespace-only queries', () => {
+    const entries = [entry({ id: 'a' }), entry({ id: 'b' })]
+    expect(filterConversationEntries(entries, '')).toBe(entries)
+    expect(filterConversationEntries(entries, '   ')).toBe(entries)
+  })
+
+  it('filters case-insensitively on entry text', () => {
+    const entries = [
+      entry({ id: 'a', text: 'Deploy the Dashboard' }),
+      entry({ id: 'b', text: 'unrelated' }),
+    ]
+    expect(filterConversationEntries(entries, 'dashboard').map(e => e.id)).toEqual(['a'])
+  })
+
+  it('matches non-ASCII content and trims query whitespace', () => {
+    const entries = [
+      entry({ id: 'a', text: '배포 완료했습니다' }),
+      entry({ id: 'b', text: 'done' }),
+    ]
+    expect(filterConversationEntries(entries, ' 배포 ').map(e => e.id)).toEqual(['a'])
+  })
+
+  it('does not match on role labels', () => {
+    const entries = [entry({ id: 'a', label: '사용자', text: 'plain' })]
+    expect(filterConversationEntries(entries, '사용자')).toEqual([])
+  })
+})
 
 describe('KeeperConversationPanel', () => {
   let container: HTMLDivElement
@@ -214,6 +267,37 @@ describe('KeeperConversationPanel', () => {
     expect(placeholder).not.toBeNull()
     expect(placeholder?.textContent).toContain('응답 작성 중...')
     expect(container.querySelector('[data-chat-delivery="live"]')).not.toBeNull()
+  })
+
+  it('renders the unified composer chrome: search input and attach button', async () => {
+    keeperThreads.value = {
+      sangsu: [
+        {
+          id: 'direct-user',
+          role: 'user',
+          source: 'direct_user',
+          label: '사용자',
+          text: '첨부 테스트',
+          rawText: '첨부 테스트',
+          timestamp: '2026-03-24T00:01:00.000Z',
+          delivery: 'history',
+          streamState: null,
+          details: null,
+          error: null,
+        },
+      ],
+    }
+
+    render(
+      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." />`,
+      container,
+    )
+    await Promise.resolve()
+
+    // The former secondary KeeperChatPanel owned search + attachments;
+    // after unification the shared panel must expose both.
+    expect(container.querySelector('[data-chat-attach-button]')).not.toBeNull()
+    expect(container.querySelector('input[name="keeper_chat_search"]')).not.toBeNull()
   })
 
   it('renders probe and recover buttons in RuntimeActions', async () => {

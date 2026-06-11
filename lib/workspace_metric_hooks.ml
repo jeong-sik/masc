@@ -494,7 +494,7 @@ let install () =
              ~goal:prompt
              ~masc_tools:[ report_tool_schema ]
              ~dispatch
-             ~max_turns:1
+             
              ~temperature:Runtime_provider_defaults.deterministic_temperature
              ~max_tokens:200
              ~approval:Approval_callbacks.auto_approve
@@ -555,6 +555,10 @@ let install () =
          ~assignee
          ~verification_id
          ~evidence_refs);
+
+  Atomic.set Workspace_hooks.verification_delete_request_fn
+    (fun config ~verification_id ->
+       Verification_protocol.delete_verification_request ~config ~verification_id);
 
   Atomic.set Workspace_hooks.verification_record_verdict_fn
     (fun config ~task_id ~verifier ~verification_id ~decision ->

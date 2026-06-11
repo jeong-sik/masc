@@ -223,79 +223,6 @@ let normalize_continuity_compaction_cooldown_sec (v : int) : int =
     Preserves prior hardcoded behavior in [keeper_compact_policy.ml]. *)
 let default_keep_recent_tool_results = 2
 
-(** Default message-count floor for the tool-heavy compaction gate.
-    Mirrors the prior global constant in [keeper_compact_policy.ml].
-    Per-keeper override lives at [compaction_policy.tool_heavy_msg_threshold];
-    wired into [decide_compaction] by PR-B.
-
-    Operator override (PR-C, this commit): [MASC_KEEPER_TOOL_HEAVY_MSG_THRESHOLD]
-    sets the global default that personas without an explicit value inherit.
-    Valid range [1, 10_000]; out-of-range or unparseable values warn and fall
-    back to the built-in default 40 (parse-correctness, not silent coercion —
-    mirrors [emergency_compact_ratio_threshold] in
-    [Keeper_compact_policy]). Read once at module init; restart required. *)
-let default_tool_heavy_msg_threshold : int =
-  let env_var = "MASC_KEEPER_TOOL_HEAVY_MSG_THRESHOLD" in
-  let default_value = 40 in
-  let min_valid = 1 in
-  let max_valid = 10_000 in
-  match Sys.getenv_opt env_var with
-  | None -> default_value
-  | Some raw ->
-    (match int_of_string_opt (String.trim raw) with
-     | None ->
-       Log.Keeper.warn
-         "[keeper_config] %s=%S is not a parseable int; falling back to default \
-          %d"
-         env_var raw default_value;
-       default_value
-     | Some parsed when parsed < min_valid || parsed > max_valid ->
-       Log.Keeper.warn
-         "[keeper_config] %s=%d out of range [%d, %d]; falling back to default \
-          %d"
-         env_var parsed min_valid max_valid default_value;
-       default_value
-     | Some parsed -> parsed)
-
-(** Default context-ratio floor for the tool-heavy compaction gate.
-    Mirrors the prior global constant in [keeper_compact_policy.ml].
-    Per-keeper override lives at [compaction_policy.tool_heavy_ratio_floor];
-    wired into [decide_compaction] by PR-B.
-
-    Operator override (PR-C, this commit): [MASC_KEEPER_TOOL_HEAVY_RATIO_FLOOR]
-    sets the global default that personas without an explicit value inherit.
-    Valid range [0.0, 1.0); out-of-range, non-finite, or unparseable values
-    warn and fall back to the built-in default 0.15 (parse-correctness;
-    mirrors [emergency_compact_ratio_threshold]). Read once at module init. *)
-let default_tool_heavy_ratio_floor : float =
-  let env_var = "MASC_KEEPER_TOOL_HEAVY_RATIO_FLOOR" in
-  let default_value = 0.15 in
-  let min_valid = 0.0 in
-  let max_valid = 1.0 in
-  match Sys.getenv_opt env_var with
-  | None -> default_value
-  | Some raw ->
-    (match Float.of_string_opt (String.trim raw) with
-     | None ->
-       Log.Keeper.warn
-         "[keeper_config] %s=%S is not a parseable float; falling back to \
-          default %.2f"
-         env_var raw default_value;
-       default_value
-     | Some parsed when not (Float.is_finite parsed) ->
-       Log.Keeper.warn
-         "[keeper_config] %s=%s parsed to non-finite %f; falling back to \
-          default %.2f"
-         env_var raw parsed default_value;
-       default_value
-     | Some parsed when parsed < min_valid || parsed >= max_valid ->
-       Log.Keeper.warn
-         "[keeper_config] %s=%f out of range [%.2f, %.2f); falling back to \
-          default %.2f"
-         env_var parsed min_valid max_valid default_value;
-       default_value
-     | Some parsed -> parsed)
-
 (** Hard upper bound for operator-supplied [keep_recent_tool_results].
     Values above this likely indicate operator typos (e.g. 5000); we
     log a warn and clamp back to the safe default so a typo does not
@@ -410,64 +337,9 @@ let keeper_batch_limit_rp =
 let keeper_batch_limit () : int =
   Runtime_params.get keeper_batch_limit_rp
 
-let keeper_board_debounce_window_sec_rp =
-  _rp_float ~key:"keeper.board.debounce_window_sec"
-    ~default:(fun () -> float_of_env_default "MASC_KEEPER_BOARD_DEBOUNCE_SEC"
-                          ~default:2.0 ~min_v:0.0 ~max_v:30.0)
-    ~min_v:0.0 ~max_v:30.0
-    ~description:"Time window to coalesce board signals into one turn (seconds)" ()
-let keeper_board_debounce_window_sec () : float =
-  Runtime_params.get keeper_board_debounce_window_sec_rp
 
-let keeper_tool_cost_max_usd_rp =
-  _rp_float ~key:"keeper.turn.tool_cost_max_usd"
-    ~default:(fun () -> float_of_env_default "MASC_KEEPER_TOOL_COST_MAX_USD"
-                          ~default:0.0 ~min_v:0.0 ~max_v:50.0)
-    ~min_v:0.0 ~max_v:50.0
-    ~description:"Per-tool cost ceiling (USD, 0=disabled)" ()
-let keeper_tool_cost_max_usd () : float option =
-  match Runtime_params.get keeper_tool_cost_max_usd_rp with
-  | v when Float.compare v 0.0 <= 0 -> None
-  | v -> Some v
 
-let keeper_board_event_limit_rp =
-  _rp_int ~key:"keeper.turn.board_event_limit"
-    ~default:(fun () -> int_of_env_default "MASC_KEEPER_BOARD_EVENT_LIMIT"
-                          ~default:10 ~min_v:1 ~max_v:50)
-    ~min_v:1 ~max_v:50
-    ~description:"Max board events injected per turn" ()
-let keeper_board_event_limit () : int =
-  Runtime_params.get keeper_board_event_limit_rp
 
-let keeper_turn_capacity_limit_rp =
-  _rp_int
-    ~key:"keeper.turn.capacity_limit"
-    ~default:(fun () -> Env_config_keeper.KeeperKeepalive.turn_capacity_limit)
-    ~min_v:0
-    ~max_v:1024
-    ~description:"Global concurrent keeper turn capacity limit (0 disables the gate)"
-    ()
-;;
-
-let keeper_turn_capacity_limit () : int =
-  Runtime_params.get keeper_turn_capacity_limit_rp
-;;
-
-let keeper_per_keeper_turn_capacity_limit_rp =
-  _rp_int
-    ~key:"keeper.turn.per_keeper_capacity_limit"
-    ~default:(fun () -> 2)
-    ~min_v:0
-    ~max_v:64
-    ~description:
-      "Per-keeper concurrent turn capacity limit (0 disables per-keeper gate). \
-       Default 2: with ~15 keepers, max concurrent = 30 < global limit 32."
-    ()
-;;
-
-let keeper_per_keeper_turn_capacity_limit () : int =
-  Runtime_params.get keeper_per_keeper_turn_capacity_limit_rp
-;;
 
 let keeper_llm_rerank_enabled_rp =
   _rp_bool ~key:"keeper.turn.llm_rerank"
@@ -531,8 +403,6 @@ let keeper_tool_search_top_k () : int =
     before [Runtime_params.restore]. Call from server bootstrap. *)
 let ensure_runtime_params_init () =
   let (_ : float) = Runtime_params.get keeper_unified_temperature_rp in
-  let (_ : int) = Runtime_params.get keeper_turn_capacity_limit_rp in
-  let (_ : int) = Runtime_params.get keeper_per_keeper_turn_capacity_limit_rp in
   ()
 
 let keeper_enable_thinking_rp =

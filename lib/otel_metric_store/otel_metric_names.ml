@@ -140,16 +140,16 @@ let metric_backend_mutex_held_sec = "masc_backend_mutex_held_sec"
    this Otel_metric_store counter exposes per-drop emission so alerting on
    sustained pressure does not depend on log scraping. *)
 let metric_tool_metrics_persist_dropped =
-  "masc_tool_metrics_persist_dropped_total"
+  Otel_metric_store_core.declare_counter "masc_tool_metrics_persist_dropped_total"
 
 let metric_tool_bind_required_guard =
-  "masc_tool_bind_required_guard_total"
+  Otel_metric_store_core.declare_counter "masc_tool_bind_required_guard_total"
 
 (* keeper_tool_call_log async append queue overflow.
    Counts full-I/O tool-call records dropped because the bounded
    best-effort queue is full. No labels (single source). *)
 let metric_keeper_tool_call_log_queue_dropped =
-  "masc_keeper_tool_call_log_queue_dropped_total"
+  Otel_metric_store_core.declare_counter "masc_keeper_tool_call_log_queue_dropped_total"
 
 (* keeper_tool_surface.cached_text_by_key CAS conflicts.
    Incremented once per recursive retry caused by an
@@ -159,14 +159,14 @@ let metric_keeper_tool_call_log_queue_dropped =
    currently used only for keeper_list_cache; add a cache label if a
    second caller is introduced. *)
 let metric_tool_keeper_cache_cas_conflicts =
-  "masc_tool_keeper_cache_cas_conflicts_total"
+  Otel_metric_store_core.declare_counter "masc_tool_keeper_cache_cas_conflicts_total"
 
 (* File_lock_eio lock-table CAS retries (single shared atomic).
    Bumped from [atomic_update] / [atomic_update_with_result] retry
    branches via [on_cas_retry_fn] callback wired in workspace.ml — the
    masc_process sub-library cannot depend on Otel_metric_store directly. *)
 let metric_file_lock_table_cas_retries =
-  "masc_file_lock_table_cas_retries_total"
+  Otel_metric_store_core.declare_counter "masc_file_lock_table_cas_retries_total"
 
 (* keeper_tool_surface.cache_ttl_seconds env-var parse fallback observability.
    Operator-supplied env var (e.g. MASC_KEEPER_LIST_CACHE_TTL_S) is
@@ -177,9 +177,9 @@ let metric_file_lock_table_cas_retries =
      env_var: the env var name (bounded to the handful of callers)
      reason:  invalid_float | negative_or_nan *)
 let metric_tool_keeper_cache_ttl_parse_failures =
-  "masc_tool_keeper_cache_ttl_parse_failures_total"
+  Otel_metric_store_core.declare_counter "masc_tool_keeper_cache_ttl_parse_failures_total"
 
-let metric_timeout_policy_overshoot = "masc_timeout_policy_overshoot_total"
+let metric_timeout_policy_overshoot = Otel_metric_store_core.declare_counter "masc_timeout_policy_overshoot_total"
 
 (* Keeper compaction (keeper_compact_policy.ml, keeper_tool_surface.ml). *)
 
@@ -240,7 +240,7 @@ let metric_timeout_policy_overshoot = "masc_timeout_policy_overshoot_total"
    runtime lane and semaphore path. *)
 
 (* Keeper keepalive (keeper_keepalive.ml). *)
-let metric_write_meta_cas_retry_total = "masc_write_meta_cas_retry_total"
+let metric_write_meta_cas_retry_total = Otel_metric_store_core.declare_counter "masc_write_meta_cas_retry_total"
 
 (* #10474: proactive cycle outcome counters.
    [Keeper_metrics.(to_string NoToolProvider)] fires every time a keeper's
@@ -251,14 +251,14 @@ let metric_write_meta_cas_retry_total = "masc_write_meta_cas_retry_total"
    health ratio in Grafana. *)
 (* PR-B: keeper turn skipped due to ollama saturation pre-check.
    Labelled by [keeper] and [runtime]. *)
-(* Tool-setup and task-load failures during keeper tool surface assembly.
-   task_load: Workspace.get_tasks_raw exception while loading current task contract.
-   tool_selection: TopK_llm or tool discovery exception during per-turn tool set assembly. *)
-let metric_tool_policy_unloaded_query = "masc_tool_policy_unloaded_query_total"
-let metric_tool_policy_init_failed = "masc_tool_policy_init_failed_total"
-let metric_cache_desync_cleared = "masc_cache_desync_cleared_total"
-let metric_egress_audit_missing = "masc_egress_audit_missing_total"
-let metric_egress_audit_stale_orphan = "masc_egress_audit_stale_orphan_total"
-let metric_persistence_read_drops = "masc_persistence_read_drops_total"
-let metric_persistence_utf8_repair = "masc_persistence_utf8_repair_total"
-let metric_discovery_history_failures = "masc_discovery_history_failures_total"
+let metric_cache_desync_cleared = Otel_metric_store_core.declare_counter "masc_cache_desync_cleared_total"
+let metric_persistence_read_drops = Otel_metric_store_core.declare_counter "masc_persistence_read_drops_total"
+let metric_persistence_utf8_repair = Otel_metric_store_core.declare_counter "masc_persistence_utf8_repair_total"
+let metric_discovery_history_failures = Otel_metric_store_core.declare_counter "masc_discovery_history_failures_total"
+
+(* #18855: per-tool correction_pipeline fix counter.
+   Incremented when the OAS agent_tools module reports that
+   correction_pipeline fixed input fields for a tool.
+   Labels: [tool_name]. *)
+let metric_oas_correction_pipeline_fixes_total =
+  Otel_metric_store_core.declare_counter "masc_oas_correction_pipeline_fixes_total"

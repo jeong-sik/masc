@@ -1,4 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+
+const devTokenMock = vi.hoisted(() => ({
+  ensureDevToken: vi.fn(() => Promise.resolve()),
+}))
+
+vi.mock('./dev-token', () => ({
+  ensureDevToken: devTokenMock.ensureDevToken,
+}))
+
 import {
   fetchDashboardShell,
   fetchDashboardExecutionTrust,
@@ -12,6 +21,7 @@ import {
   fetchDashboardMemory,
   fetchDashboardMission,
   fetchDashboardMissionBriefing,
+  fetchDashboardRuntimeProbe,
   fetchCostLatency,
   fetchKeeperConfig,
   fetchKeeperCostMetrics,
@@ -20,6 +30,7 @@ import {
   fetchRuntimeProviders,
   fetchRuntimeTomlConfig,
   fetchRuntimeModelMetrics,
+  patchKeeperConfig,
   saveRuntimeTomlConfig,
   fetchDashboardCacheStats,
   fetchTelemetry,
@@ -32,6 +43,8 @@ import { keeperRuntimeBlockerLabel } from '../lib/keeper-runtime-display'
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  devTokenMock.ensureDevToken.mockClear()
+  devTokenMock.ensureDevToken.mockResolvedValue(undefined)
 })
 
 function makeRawGoalNode(overrides: Record<string, unknown> = {}) {
@@ -1582,7 +1595,6 @@ describe('fetchKeeperConfig', () => {
       ['sdk_cost_budget_exceeded', 'SDK 비용 예산 초과'],
       ['sdk_unrecognized_stop_reason', 'SDK 미식별 정지 사유'],
       ['sdk_idle_detected', 'SDK Idle 감지'],
-      ['sdk_tool_retry_exhausted', 'SDK 도구 재시도 소진'],
       ['sdk_guardrail_violation', 'SDK 가드레일 위반'],
       ['sdk_tripwire_violation', 'SDK Tripwire 위반'],
       ['sdk_exit_condition_met', 'SDK 종료 조건 충족'],
@@ -1614,6 +1626,72 @@ describe('fetchKeeperConfig', () => {
   })
 })
 
+describe('keeper config mutation API', () => {
+  it('ensures dashboard auth before posting runtime_id changes', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        name: 'keeper-sangsu',
+        execution: {
+          selected_runtime_id: 'b.two',
+          selected_runtime_canonical: 'b.two',
+          runtime_options: ['a.one', 'b.two'],
+        },
+        sources: {
+          default_source_kind: 'toml',
+          default_manifest_path: '/tmp/.masc/config/keepers/sangsu.toml',
+        },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await patchKeeperConfig('keeper-sangsu', { runtime_id: 'b.two' })
+
+    expect(devTokenMock.ensureDevToken).toHaveBeenCalledTimes(1)
+    expect(devTokenMock.ensureDevToken.mock.invocationCallOrder[0]).toBeLessThan(
+      fetchMock.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    )
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/v1/keepers/keeper-sangsu/config')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body as string)).toEqual({ runtime_id: 'b.two' })
+    expect(result.execution.selected_runtime_id).toBe('b.two')
+  })
+})
+
+describe('dashboard runtime probe API', () => {
+  it('ensures dashboard auth before fetching runtime probe status', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        generated_at: '2026-06-10T12:00:00Z',
+        probe: {
+          status: 'ok',
+          probe_ok: true,
+          summary: { runtimes: 1, reachable: 1, failed: 0 },
+          providers: [],
+        },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchDashboardRuntimeProbe(true)
+
+    expect(devTokenMock.ensureDevToken).toHaveBeenCalledTimes(1)
+    expect(devTokenMock.ensureDevToken.mock.invocationCallOrder[0]).toBeLessThan(
+      fetchMock.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    )
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/runtime-probe?force=1')
+    expect(result.probe?.probe_ok).toBe(true)
+  })
+})
+
 describe('runtime.toml raw config API', () => {
   it('fetches and normalizes the raw runtime.toml source', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
@@ -1632,6 +1710,10 @@ describe('runtime.toml raw config API', () => {
 
     const result = await fetchRuntimeTomlConfig()
 
+    expect(devTokenMock.ensureDevToken).toHaveBeenCalledTimes(1)
+    expect(devTokenMock.ensureDevToken.mock.invocationCallOrder[0]).toBeLessThan(
+      fetchMock.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    )
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/runtime/config/raw')
     expect(result.path).toBe('/tmp/.masc/config/runtime.toml')
     expect(result.file_name).toBe('runtime.toml')
@@ -1657,6 +1739,10 @@ describe('runtime.toml raw config API', () => {
 
     const result = await saveRuntimeTomlConfig(sourceText)
 
+    expect(devTokenMock.ensureDevToken).toHaveBeenCalledTimes(1)
+    expect(devTokenMock.ensureDevToken.mock.invocationCallOrder[0]).toBeLessThan(
+      fetchMock.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    )
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toBe('/api/v1/runtime/config/raw')

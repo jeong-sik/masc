@@ -53,7 +53,7 @@ let archive_credential_file config ~agent_name ~reason =
       then
         Otel_metric_store.inc_counter
           Otel_metric_store.metric_config_credential_archived_starvation
-          ~labels:[ "keeper_name", agent_name ]
+          ~labels:[ "keeper", agent_name ]
           ()
     with
     | Eio.Cancel.Cancelled _ as e -> raise e

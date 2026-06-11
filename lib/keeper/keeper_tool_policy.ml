@@ -1,8 +1,7 @@
 (** Keeper_tool_policy — keeper tool surface and denylist resolution.
 
-    Group definitions are loaded from [config/tool_policy.toml] at startup
-    via {!Keeper_tool_policy_config} for legacy/recovery surfaces. They do not
-    form the runtime execution allowlist for descriptor-backed keeper tools.
+    Tool access is descriptor/registry driven with denylist filtering only.
+    Policy group classification and config-driven groups have been removed.
 
     Consumes [Keeper_tool_registry] for candidate aggregation and core tools.
     Produces the access-policy types and functions used by the dispatch layer. *)
@@ -49,68 +48,10 @@ let is_masc_write_allowed path =
     String.starts_with path ~prefix
   ) keeper_writable_prefixes
 
-(* -- Config-driven policy group resolution ------------------------- *)
-
-(* Loaded by init_policy_config at server startup.
-   None = config not yet loaded (init_policy_config not yet called). *)
-let policy_config : Keeper_tool_policy_config.t option ref = ref None
-let policy_config_unloaded_warned : (string, unit) Hashtbl.t = Hashtbl.create 16
-let policy_config_unloaded_mutex = Stdlib.Mutex.create ()
-
-let policy_config_for_validation () = !policy_config
-
-let warn_unloaded_policy_config_once ~accessor ~outcome =
-  let should_warn =
-    Stdlib.Mutex.lock policy_config_unloaded_mutex;
-    Fun.protect
-      ~finally:(fun () -> Stdlib.Mutex.unlock policy_config_unloaded_mutex)
-      (fun () ->
-        if Hashtbl.mem policy_config_unloaded_warned accessor then
-          false
-        else (
-          Hashtbl.replace policy_config_unloaded_warned accessor ();
-          true))
-  in
-  if should_warn then
-    Log.Keeper.warn
-      "tool_policy.%s called before init_policy_config loaded config/tool_policy.toml; %s"
-      accessor outcome
-
-(* PR #13129 review: the warn message originally hard-coded
-   "returning fallback", which is misleading on the strict
-   accessor path that raises [Invalid_argument] instead.  Take
-   [outcome] from the caller so the log line accurately describes
-   what the call site did. *)
-let observe_unloaded_policy_config ~accessor ~outcome =
-  Otel_metric_store.inc_counter Otel_metric_store.metric_tool_policy_unloaded_query
-    ~labels:[("accessor", accessor)]
-    ();
-  warn_unloaded_policy_config_once ~accessor ~outcome
-
-let with_policy_config_or ?(on_none = fun () -> ()) ~accessor ~default f =
-  match !policy_config with
-  | None ->
-    observe_unloaded_policy_config ~accessor ~outcome:"returning fallback";
-    on_none ();
-    default
-  | Some cfg -> f cfg
-
-let reset_policy_config_for_test () =
-  policy_config := None;
-  Stdlib.Mutex.lock policy_config_unloaded_mutex;
-  Fun.protect
-    ~finally:(fun () -> Stdlib.Mutex.unlock policy_config_unloaded_mutex)
-    (fun () -> Hashtbl.clear policy_config_unloaded_warned)
-
-let init_policy_config ~base_path =
-  match Keeper_tool_policy_config.load ~base_path with
-  | Ok cfg ->
-    policy_config := Some cfg;
-    Log.Keeper.info "tool policy config loaded: %d groups"
-      (List.length (Keeper_tool_policy_config.group_names cfg));
-    Ok ()
-  | Error msg ->
-    Error msg
+(* -- Policy group resolution removed ----------------------------- *)
+(* Config-driven policy groups (tool_policy.toml) have been deleted.
+   Tool access is now descriptor/registry driven with denylist filtering.
+   See keeper_tool_policy_config removal PR. *)
 
 let dedupe_tool_schemas (schemas : Masc_domain.tool_schema list) =
   let seen = Hashtbl.create (max 16 (List.length schemas)) in
@@ -230,9 +171,8 @@ let descriptor_candidate_tool_names () =
   |> dedupe_tool_names
 
 let keeper_base_candidate_tool_names () =
-  (* Candidate existence is registry/descriptor driven. [tool_access] and
-     tool_policy.toml groups must not be a second execution allowlist for
-     keeper-owned tools. *)
+  (* Candidate existence is registry/descriptor driven.
+     Denylist filtering only; no secondary allowlist layer. *)
   dedupe_tool_names
     ( effective_core_tools ()
     @ tool_schema_names Tool_shard.all_keeper_tool_schemas
@@ -240,27 +180,6 @@ let keeper_base_candidate_tool_names () =
     @ keeper_internal_candidate_tool_names
     @ injected_masc_tool_names () )
   |> List.filter (fun name -> not (is_keeper_maintenance_only_tool name))
-
-(** Resolve a named group from tool_policy.toml.  Returns the hardcoded
-    fallback when config is not loaded. *)
-let resolve_policy_group ~(fallback : string list) (group_name : string) : string list =
-  with_policy_config_or
-    ~accessor:("resolve_policy_group." ^ group_name)
-    ~default:fallback
-    (fun cfg ->
-      match Keeper_tool_policy_config.resolve_group cfg group_name with
-      | Some tools -> dedupe_tool_names tools
-      | None ->
-        Log.Keeper.warn "tool_policy group %S not found, using fallback (%d tools)"
-          group_name (List.length fallback);
-        fallback)
-
-let tool_policy_of_meta (meta : keeper_meta) =
-  let allow = Tool_access_policy.Names meta.tool_access in
-  {
-    Tool_access_policy.allow;
-    deny = Tool_access_policy.Names meta.tool_denylist;
-  }
 
 module StringSet = Set_util.StringSet
 
@@ -298,18 +217,21 @@ let tool_access_lookup_of_meta (meta : keeper_meta) =
   let base = keeper_base_candidate_tool_names () in
   let candidate_names = dedupe_tool_names base in
   let candidate_set = tool_name_set candidate_names in
+  let deny_set = expanded_tool_name_set meta.tool_denylist in
   let allow_names =
-    Tool_access_policy.resolve
-      ~candidates:candidate_names
-      (tool_policy_of_meta meta)
-    |> List.filter (fun name -> StringSet.mem name candidate_set)
-    |> dedupe_tool_names
+    if meta.tool_access = [] then
+      candidate_names
+    else
+      meta.tool_access
+      |> List.filter (fun name -> StringSet.mem name candidate_set)
+      |> List.filter (fun name -> not (StringSet.mem name deny_set))
+      |> dedupe_tool_names
   in
   {
     candidate_names;
     candidate_set;
     allow_set = tool_name_set allow_names;
-    deny_set = expanded_tool_name_set meta.tool_denylist;
+    deny_set;
   }
 
 (** Candidate reachability: a tool is reachable iff it is a registered
@@ -361,21 +283,25 @@ let keeper_universe_masc_tool_schemas (meta : keeper_meta) : Masc_domain.tool_sc
     In Failing phase the keeper must retain a guaranteed floor of tools
     regardless of custom allowlist, deny-list, or policy config.  The floor is
     determined solely by shard removability (structural, not policy). *)
-(** Essential MASC tools always available in Failing recovery,
+(** Essential tools always available in Failing recovery,
     on top of [removable=false] shard floor. Mirrors [masc.essential]
-    in tool_policy.toml. Sync regression: any drift here vs the toml
-    group is caught by [test_failing_minimum_essential.ml].
+    hardcoded in this module. Sync regression: any drift is caught by
+    [test_failing_minimum_essential.ml].
 
-    Rationale (board P1, 9 keepers × 0 claimable masc_web_search):
+    Rationale (board P1, 9 keepers × 0 claimable web search):
     a Failing keeper still needs to check workspace state, look up
     information for recovery, and defer to operator approval. Removing
     these from the recovery floor caused task contracts that require
-    [masc_web_search] to become unclaimable when any keeper entered
-    decision_layer >= 2. *)
+    web search to become unclaimable when any keeper entered
+    decision_layer >= 2.
+
+    Note: WebSearch / WebFetch are the public_names used by the keeper
+    agent; masc_web_search / masc_web_fetch are keeper-internal and
+    are not exposed as operator MCP tool calls. *)
 let essential_masc_minimum_names : string list = [
   "masc_status";
-  "masc_web_search";
-  "masc_web_fetch";
+  "WebSearch";
+  "WebFetch";
 ]
 
 let failing_minimum_tool_names () : string list =

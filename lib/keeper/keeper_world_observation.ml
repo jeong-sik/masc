@@ -30,7 +30,6 @@ type world_observation =
   { pending_mentions : (string * string) list
   ; pending_board_events : pending_board_event list
   ; pending_scope_messages : (string * string) list
-  ; message_cursor_updates : (string * int) list
   ; idle_seconds : int
   ; active_goals : string list
   ; continuity_summary : string
@@ -42,6 +41,7 @@ type world_observation =
   ; pending_verification_count : int
   ; backlog_updated_since_last_scheduled_autonomous : bool
   ; active_agent_count : int
+  ; connected_surfaces : Gate_surface.surface_presence list
   }
 
 type keeper_cycle_channel =
@@ -119,7 +119,6 @@ module Inputs = Keeper_world_observation_inputs
 let self_identity_tokens = Message_scope.self_identity_tokens
 let is_self_author = Message_scope.is_self_author
 let collect_message_scope = Message_scope.collect_message_scope
-let apply_message_cursor_updates = Message_scope.apply_message_cursor_updates
 let read_backlog_counts = Inputs.read_backlog_counts
 let count_active_agents = Inputs.count_active_agents
 let compute_idle_seconds = Inputs.compute_idle_seconds
@@ -259,8 +258,7 @@ let collect_board_events_with_cursor_policy
                 targets)
            recent)
     in
-    let event_limit = Keeper_config.keeper_board_event_limit () in
-    let rec consume_posts remaining last_cursor acc = function
+    let rec consume_posts last_cursor acc = function
       | [] -> List.rev acc, last_cursor
       | (p : Board.post) :: rest ->
         let post_id = Board.Post_id.to_string p.id in
@@ -271,7 +269,7 @@ let collect_board_events_with_cursor_policy
            Log.Keeper.debug
              "board dedup: skipping post_id=%s (no new external since my comment)"
              post_id;
-           consume_posts remaining (Some next_cursor) acc rest
+           consume_posts (Some next_cursor) acc rest
          | `Never ->
            let signal : Board_dispatch.board_signal =
              { kind = Board_dispatch.Board_post_created
@@ -290,12 +288,10 @@ let collect_board_events_with_cursor_policy
                "board dedup: skipping post_id=%s (no explicit mention and no prior \
                 keeper participation)"
                post_id;
-             consume_posts remaining (Some next_cursor) acc rest)
-           else if remaining <= 0
-           then List.rev acc, last_cursor
+             consume_posts (Some next_cursor) acc rest)
            else
              consume_posts
-               (remaining - 1)
+               
                (Some next_cursor)
                ({ post_id
                 ; author = Board.Agent_id.to_string p.author
@@ -314,9 +310,7 @@ let collect_board_events_with_cursor_policy
                 :: acc)
                rest
          | `New_external (count, ext_author, ext_preview) ->
-           if remaining <= 0
-           then List.rev acc, last_cursor
-           else (
+           (
              let signal : Board_dispatch.board_signal =
                { kind = Board_dispatch.Board_post_created
                ; post_id
@@ -329,7 +323,7 @@ let collect_board_events_with_cursor_policy
              in
              let matched = board_signal_match ~continuity_summary ~meta ~signal in
              consume_posts
-               (remaining - 1)
+               
                (Some next_cursor)
                ({ post_id
                 ; author = Board.Agent_id.to_string p.author
@@ -348,7 +342,7 @@ let collect_board_events_with_cursor_policy
                 :: acc)
                rest))
     in
-    let final_events, last_cursor = consume_posts event_limit None [] recent in
+    let final_events, last_cursor = consume_posts None [] recent in
     if advance_cursor
     then (
       match last_cursor with
@@ -430,7 +424,7 @@ let observe
       ~(meta : keeper_meta)
   : world_observation
   =
-  let pending_mentions, pending_scope_messages, message_cursor_updates =
+  let pending_mentions, pending_scope_messages =
     collect_message_scope ~config ~meta
   in
   let ( unclaimed_task_count
@@ -460,7 +454,6 @@ let observe
   { pending_mentions
   ; pending_board_events
   ; pending_scope_messages
-  ; message_cursor_updates
   ; idle_seconds
   ; active_goals = meta.active_goal_ids
   ; continuity_summary
@@ -472,6 +465,8 @@ let observe
   ; pending_verification_count
   ; backlog_updated_since_last_scheduled_autonomous
   ; active_agent_count
+  ; connected_surfaces =
+      Gate_surface.connected_surfaces_for_keeper ~keeper_name:meta.name
   }
 ;;
 
@@ -492,7 +487,6 @@ let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
   { pending_mentions = []
   ; pending_board_events = []
   ; pending_scope_messages = []
-  ; message_cursor_updates = []
   ; idle_seconds = compute_idle_seconds ~meta
   ; active_goals = meta.active_goal_ids
   ; continuity_summary = read_continuity_summary ~config ~meta
@@ -504,6 +498,8 @@ let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
   ; pending_verification_count
   ; backlog_updated_since_last_scheduled_autonomous
   ; active_agent_count = count_active_agents ~config
+  ; connected_surfaces =
+      Gate_surface.connected_surfaces_for_keeper ~keeper_name:meta.name
   }
 ;;
 
@@ -513,7 +509,7 @@ let durable_signal_present
       ~(meta : keeper_meta)
   : bool
   =
-  let pending_mentions, pending_scope_messages, _message_cursor_updates =
+  let pending_mentions, pending_scope_messages =
     collect_message_scope ~config ~meta
   in
   let ( _unclaimed_task_count
@@ -574,6 +570,7 @@ let effective_scheduled_autonomous_cooldown
       ~(base_cooldown : int)
       ~(since_last : int)
       ?(consecutive_noop_count = 0)
+      ?(board_health_score : float option)
       ()
   : int
   =
@@ -589,13 +586,24 @@ let effective_scheduled_autonomous_cooldown
   (* Floor must not exceed the effective base cooldown — otherwise decay would
      paradoxically increase a short cooldown. *)
   let floor = min min_cooldown effective_base in
-  if since_last <= effective_base
-  then effective_base
+  (* Board health score adjustment: unhealthy board (<0.3) → 2x cooldown
+     (less polling), healthy board (>0.7) → 0.5x (more polling when the
+     board is thriving). Neutral/None → 1.0x. *)
+  let health_multiplier =
+    match board_health_score with
+    | None -> 1.0
+    | Some h when h < 0.3 -> 2.0
+    | Some h when h > 0.7 -> 0.5
+    | Some _ -> 1.0
+  in
+  let health_base = max 1 (int_of_float (Float.round (float_of_int effective_base *. health_multiplier))) in
+  if since_last <= health_base
+  then health_base
   else (
-    let decay_periods = (since_last - effective_base) / max 1 effective_base in
+    let decay_periods = (since_last - health_base) / max 1 health_base in
     let capped_periods = min decay_periods 4 in
     let factor = 1.0 /. Float.pow 2.0 (float_of_int capped_periods) in
-    max floor (int_of_float (float_of_int effective_base *. factor)))
+    max floor (int_of_float (Float.round (float_of_int health_base *. factor))))
 ;;
 
 let entropic_oscillation_interval_sec = 600
@@ -609,6 +617,7 @@ let should_inject_entropic_oscillation ~since_last_scheduled_autonomous ~draw_pe
 
 let keeper_cycle_decision
       ?(provider_cooldown_remaining_sec = provider_cooldown_remaining_sec_for_runtime)
+      ?(reactive_wake = false)
       ~(meta : keeper_meta)
       (observation : world_observation)
   =
@@ -670,11 +679,19 @@ let keeper_cycle_decision
         ; idle_gate_sec = Some idle_gate_sec
         }
       else (
+        (* Read latest board curation snapshot for health-based
+           cooldown adjustment. *)
+        let board_health_score =
+          match Board_curation.latest_snapshot () with
+          | Some { health_score = Some h; _ } -> Some h
+          | _ -> None
+        in
         let effective_cooldown =
           effective_scheduled_autonomous_cooldown
             ~base_cooldown:meta.proactive.cooldown_sec
             ~since_last:since_last_scheduled_autonomous
             ~consecutive_noop_count:meta.runtime.proactive_rt.consecutive_noop_count
+            ?board_health_score
             ()
         in
         let task_cooldown_divisor =
@@ -737,20 +754,33 @@ let keeper_cycle_decision
                ~since_last_scheduled_autonomous
                ~draw_percent:(Random.int 100)
         in
+        (* Reactive-wake gate (thundering-herd fix). When this evaluation runs
+           because an external broadcast woke the keeper early ([reactive_wake]),
+           the GLOBAL task backlog must not, on its own, drive a turn: otherwise
+           a single task release/add broadcasts to every keeper and all of them
+           run a full LLM turn against the shared (claimable-by-anyone) pool — N
+           turns for work at most one keeper can claim. Global backlog is instead
+           picked up on the keeper's own cadence (sleep Timeout) and by the
+           supervisor sweep. Per-keeper signals (mention/board/scope) are handled
+           by the Reactive channel above and are unaffected. Time-based liveness
+           reasons (bootstrap / min_interval / idle_gate+cooldown / oscillation)
+           key on the keeper's own clock, so they stay ungated. *)
+        let backlog_drives_turn =
+          (not reactive_wake) && (backlog_fresh || backlog_elapsed)
+        in
         let should_run =
           is_bootstrap
           || should_oscillate
           || min_interval_elapsed
           || (proactive_work_ready
-              && (backlog_fresh
-                  || backlog_elapsed
-                  || (idle_gate_elapsed && cooldown_elapsed)))
+              && (backlog_drives_turn || (idle_gate_elapsed && cooldown_elapsed)))
         in
         let runtime_id = runtime_id_of_meta meta in
         let provider_cooldown_remaining_sec =
           if should_run
           then
             provider_cooldown_remaining_sec
+              ~keeper_name:meta.name
               ~runtime_id:(runtime_id)
           else None
         in

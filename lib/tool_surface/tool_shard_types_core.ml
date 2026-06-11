@@ -28,7 +28,8 @@ let select_named_schemas (names : string list) (schemas : Masc_domain.tool_schem
 ;;
 
 let default_shard_names : string list =
-  [ "base"; "board"; "filesystem"; "search_files"; "library"; "taskboard" ]
+  [ "base"; "board"; "filesystem"; "search_files"; "library"; "surface"
+  ; "taskboard" ]
 ;;
 
 let tool_spec_read_only = []

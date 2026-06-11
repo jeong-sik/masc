@@ -135,7 +135,13 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Masc_domain.masc_
                  ; version = backlog.version + 1
                  }
                in
-               write_backlog config new_backlog;
+               write_backlog
+                 ~after_commit:(fun () ->
+                   Task_cache_invariant.clear_stale_agent_task config
+                     ~agent_name ~task_id
+                     ~status:(Cancelled { cancelled_by = agent_name; cancelled_at = now_iso (); reason = Some reason })
+                     ~module_name:"cancel_task_r")
+                 config new_backlog;
                (* Update agent status if they had this task *)
                update_local_agent_state config ~agent_name (fun agent ->
                  if agent.current_task = Some task_id
@@ -227,6 +233,7 @@ type claim_next_result = Masc_domain.claim_next_result =
       ; priority : int
       ; released_task_id : string option
       ; message : string
+      ; scope_widened : bool
       }
   | Claim_next_no_unclaimed
   | Claim_next_no_eligible of

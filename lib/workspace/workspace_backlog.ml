@@ -53,7 +53,15 @@ let read_backlog config =
       Log.Misc.error "%s" msg;
       { tasks = []; last_updated = now_iso (); version = 1 }
 
-let write_backlog config backlog =
+(** [write_backlog ?after_commit config backlog] persists the backlog to
+    both the primary and recovery paths, then invokes [after_commit] if
+    provided.  The callback runs only after both writes succeed, making it
+    the correct place for cache-invalidation side-effects that must not
+    fire unless the backlog actually landed on disk (RFC-0221 §3.3). *)
+let write_backlog ?after_commit config backlog =
   let json = backlog_to_yojson backlog in
   write_json config (backlog_path config) json;
-  write_json config (backlog_recovery_path config) json
+  write_json config (backlog_recovery_path config) json;
+  (match after_commit with
+   | Some f -> f ()
+   | None -> ())

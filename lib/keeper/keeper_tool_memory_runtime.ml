@@ -446,9 +446,8 @@ let keeper_memory_search_json
        Keeper_metrics.(to_string DecisionAuditFlushFailures)
        ~labels:[ "keeper", meta.name ]
        ();
-     Log.Keeper.warn
-       "keeper:%s memory_search decision-log append failed: %s"
-       meta.name
+     Log.Keeper.warn ~keeper_name:meta.name
+       "memory_search decision-log append failed: %s"
        (Printexc.to_string exn));
   Yojson.Safe.to_string result
 ;;
@@ -519,7 +518,7 @@ let keeper_context_status_json
       ~include_preflight:true
       ~config
       ~meta
-      ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Memory_audit ())
+      ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Io ())
       ~verbose:false
       ()
   in

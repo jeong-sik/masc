@@ -9,7 +9,7 @@
     Properties pinned:
     1. Shard floor preserved (5 base read-only tools present).
     2. Essential MASC subset present (masc_status / web_search / web_fetch)
-       — mirrors [masc.essential] in tool_policy.toml.
+       — hardcoded in [Masc.Keeper_tool_policy.essential_masc_minimum_names].
     3. No duplicates (sort_uniq).
     4. Non-empty (TLA+ ToolSetNeverEmpty). *)
 
@@ -32,8 +32,8 @@ let test_includes_essential_masc () =
       (Printf.sprintf "%s in essential masc" tool) true (List.mem tool names)
   in
   assert_includes "masc_status";
-  assert_includes "masc_web_search";
-  assert_includes "masc_web_fetch"
+  assert_includes "WebSearch";
+  assert_includes "WebFetch"
 
 let test_no_duplicates () =
   let names = Masc.Keeper_tool_policy.failing_minimum_tool_names () in
@@ -46,16 +46,15 @@ let test_nonempty () =
   Alcotest.(check bool) "non-empty (TLA+ ToolSetNeverEmpty)"
     true (names <> [])
 
-let test_essential_masc_ssot_matches_toml () =
-  (* Mirrors [masc.essential] in config/tool_policy.toml. If toml drifts,
-     update [Masc.Keeper_tool_policy.essential_masc_minimum_names] to match. *)
+let test_essential_masc_ssot_matches_hardcoded () =
+  (* Mirrors [Masc.Keeper_tool_policy.essential_masc_minimum_names]. *)
   let expected = [
     "masc_status";
-    "masc_web_search";
-    "masc_web_fetch";
+    "WebSearch";
+    "WebFetch";
   ] in
   Alcotest.(check (list string))
-    "essential_masc_minimum_names mirrors [masc.essential] toml group"
+    "essential_masc_minimum_names matches hardcoded list"
     expected
     Masc.Keeper_tool_policy.essential_masc_minimum_names
 
@@ -68,8 +67,8 @@ let () =
       Alcotest.test_case "essential MASC included" `Quick test_includes_essential_masc;
     ];
     "ssot", [
-      Alcotest.test_case "essential masc list matches toml" `Quick
-        test_essential_masc_ssot_matches_toml;
+      Alcotest.test_case "essential masc list matches hardcoded" `Quick
+        test_essential_masc_ssot_matches_hardcoded;
     ];
     "invariants", [
       Alcotest.test_case "no duplicates" `Quick test_no_duplicates;

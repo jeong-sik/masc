@@ -40,7 +40,7 @@ let recovery_hint (message : string) : string option =
   else if contains msg "task not found" || contains msg "not found" && contains msg "task" then
     Some "Call masc_status to see available tasks."
   else if contains msg "already claimed" then
-    Some "Call masc_status to see other available tasks, or use masc_claim_next."
+    Some "Call masc_status to see other available tasks, or use keeper_task_claim."
   else if contains msg "no unclaimed tasks" then
     Some "Call masc_add_task to create a new task."
   else if contains msg "rate limit" || contains msg "too many" then

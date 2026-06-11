@@ -7,7 +7,6 @@
  (modules
   keeper_accountability_claim_types
   keeper_transition_audit_types
-  keeper_workspace_op
   keeper_world_observation_turn_types
   keeper_approval_queue_rules_types
   keeper_invariant

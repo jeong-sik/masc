@@ -60,6 +60,17 @@ let register_counter ~name ~help ?(labels = []) () =
         Hashtbl.add metrics key { name; help; metric_type = Counter; value = 0.0; labels }))
 ;;
 
+(* Zero-fill declaration: registers the unlabeled 0-cell at module-init time
+   and hands the name back so `let metric_x = declare_counter "..."` keeps
+   the constant shape.  Counters only: a counter that has not fired IS 0,
+   so exporting the 0-cell removes the absence-vs-zero ambiguity in
+   dashboards (a gauge that was never set has no honest value — gauges and
+   histograms stay lazy). *)
+let declare_counter name =
+  register_counter ~name ~help:name ();
+  name
+;;
+
 let register_gauge ~name ~help ?(labels = []) () =
   best_effort (fun () ->
     let key = metric_key name labels in
@@ -75,6 +86,13 @@ let register_histogram ~name ~help ?(labels = []) () =
       if not (Hashtbl.mem metrics key)
       then
         Hashtbl.add metrics key { name; help; metric_type = Histogram; value = 0.0; labels }))
+;;
+
+let histogram_buckets : (string, float list) Hashtbl.t = Hashtbl.create 16
+
+let register_histogram_buckets name bounds =
+  best_effort (fun () ->
+    with_lock (fun () -> Hashtbl.replace histogram_buckets name bounds))
 ;;
 
 let inc_counter name ?(labels = []) ?(delta = 1.0) () =
@@ -161,16 +179,53 @@ let observe_histogram name ?(labels = []) value =
            metrics
            key
            { name; help = name; metric_type = Histogram; value; labels });
-      match Hashtbl.find_opt metrics count_key with
-      | Some m -> m.value <- m.value +. 1.0
-      | None ->
-        Hashtbl.add
-          metrics
-          count_key
-          { name = name ^ "_count"
-          ; help = name ^ " observation count"
-          ; metric_type = Counter
-          ; value = 1.0
-          ; labels
-          }))
+      (match Hashtbl.find_opt metrics count_key with
+       | Some m -> m.value <- m.value +. 1.0
+       | None ->
+         Hashtbl.add
+           metrics
+           count_key
+           { name = name ^ "_count"
+           ; help = name ^ " observation count"
+           ; metric_type = Counter
+           ; value = 1.0
+           ; labels
+           });
+      (match Hashtbl.find_opt histogram_buckets name with
+       | Some bounds ->
+         List.iter
+           (fun bound ->
+              let le = Printf.sprintf "%g" bound in
+              let bucket_labels = ("le", le) :: labels in
+              let bucket_key = metric_key (name ^ "_bucket") bucket_labels in
+              if value <= bound
+              then
+                match Hashtbl.find_opt metrics bucket_key with
+                | Some m -> m.value <- m.value +. 1.0
+                | None ->
+                  Hashtbl.add
+                    metrics
+                    bucket_key
+                    { name = name ^ "_bucket"
+                    ; help = name ^ " bucket"
+                    ; metric_type = Counter
+                    ; value = 1.0
+                    ; labels = bucket_labels
+                    })
+           bounds;
+         let inf_labels = ("le", "+Inf") :: labels in
+         let inf_key = metric_key (name ^ "_bucket") inf_labels in
+         (match Hashtbl.find_opt metrics inf_key with
+          | Some m -> m.value <- m.value +. 1.0
+          | None ->
+            Hashtbl.add
+              metrics
+              inf_key
+              { name = name ^ "_bucket"
+              ; help = name ^ " bucket"
+              ; metric_type = Counter
+              ; value = 1.0
+              ; labels = inf_labels
+              })
+       | None -> ())))
 ;;

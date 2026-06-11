@@ -29,6 +29,8 @@
 
 (tests
  (names
+  test_keeper_reactive_wake_backlog_gate
+  test_keeper_mention_scope
   test_board_activity_cache
   test_jsonl_mtime_projection
   test_jsonl_incremental_projection
@@ -49,9 +51,13 @@
   test_error_body_wire_shape
   test_session_lifecycle_event
   test_fd_accountant
+  test_fd_accountant_state
+  test_operator_control_snapshot_state
+  test_with_cleanups_on_release
   test_auth_login
   test_audit_log
   test_system_log_category
+  test_console_sink
   test_governance_anomaly
   test_http_negotiation
   test_mcp_h1_h2_admission_parity
@@ -59,14 +65,17 @@
   test_mcp_session_id_header
   test_keeper_sdk_error_typed_bridge
   test_keeper_status_bridge
+  test_keeper_diagnostic_stale_last_error
   test_read_drop_reason
   test_log_ring_encoder
   test_eio_context_fiber_local
   test_pool
   test_keeper_turn_disposition
   test_keeper_turn_terminal_disposition_field
+  test_keeper_memory_os
   test_keeper_reconcile_state
   test_attempt_state
+  test_runtime_attempt_fsm
   test_actor_mailbox
   test_domain_pool
   test_sse
@@ -103,6 +112,8 @@
   test_masc_oas_bridge_timeout_guard
   test_keeper_llm_bridge
   test_keeper_hooks_oas_log_shape
+  test_keeper_idle_metric
+  test_keeper_tool_duration_buckets
   test_keeper_tool_use_failure_counter
   test_keeper_compaction_outcome_counter
   test_keeper_usage_trust_counter
@@ -112,13 +123,11 @@
   test_cost_token_decouple
   test_response_model_empty_10083
   test_keeper_proactive_skip_counter
-  test_keeper_health_probe
   test_oas_empty_response_diagnostic
   test_board_author_identity_10297
   test_fsm_drift_counter
   test_gc_sampler
   test_process_timeout_counter
-  test_timeout_floor
   test_timeout_origin
   test_git_fetch_timeout_9587
   test_inference_utils
@@ -129,6 +138,7 @@
   test_keeper_token_count
   test_cli_arg
   test_keeper_chat_store
+  test_keeper_external_attention
   test_keeper_runtime_trust_snapshot
   test_keeper_tool_audit_snapshot
   test_ide_annotations
@@ -175,14 +185,20 @@
   test_keeper_unified_idle_cooldown
   test_keeper_unified_inline_skip
   test_keeper_unified_metacognition
+  test_keeper_surface_post
+  test_keeper_person_notes
+  test_fact_retention_reachability
+  test_keeper_surface_read
+  test_keeper_surface_presence_prompt
   test_keeper_unified_verification_surface
   test_keeper_fsm_guard_actions
   test_keeper_callback_hardening
   test_keeper_behavioral_regime
+  test_keeper_secret_projection
+  test_keeper_secret_redaction
   test_keeper_toml
   test_runtime_toml_overrides
   test_runtime_provider_auth_headers
-  test_keeper_tool_policy_config
   test_keeper_tool_policy_masc_surface
   test_keeper_tool_visibility_projection
   test_keeper_tool_capability_axis
@@ -202,6 +218,7 @@
   test_exec_dispatch
   test_shell_ir_risk
   test_exec_effect
+  test_checked_shell_ir
   test_keeper_tool_execute_typed_input
   test_hitl_approval
   test_keeper_discovered_tools
@@ -220,7 +237,6 @@
   test_keeper_fs_edit_patch
   test_keeper_sandbox_read_backend
   test_keeper_path_ssot
-  test_keeper_egress_audit
   test_tool_input_validation
   test_cdal_evidence_gate
   test_ocaml_north_star_task_lifecycle
@@ -255,6 +271,7 @@
   test_keeper_social_model_magentic_ledger_fsm
   test_keeper_overflow_recovery
   test_telemetry_unified
+  test_telemetry_unified_source
   test_telemetry_error_occurred_wire_10358
   test_keeper_topk_llm
   test_warn_root_causes
@@ -282,8 +299,12 @@
   test_alignment_score
   test_blocker_class_exhaustiveness
   test_workspace_goal_index
-  test_log_severity_outcome_level)
+  test_log_severity_outcome_level
+  test_env_keeper_scrub)
  (modules
+  test_env_keeper_scrub
+  test_keeper_reactive_wake_backlog_gate
+  test_keeper_mention_scope
   test_board_activity_cache
   test_jsonl_mtime_projection
   test_jsonl_incremental_projection
@@ -304,9 +325,13 @@
   test_error_body_wire_shape
   test_session_lifecycle_event
   test_fd_accountant
+  test_fd_accountant_state
+  test_operator_control_snapshot_state
+  test_with_cleanups_on_release
   test_auth_login
   test_audit_log
   test_system_log_category
+  test_console_sink
   test_governance_anomaly
   test_http_negotiation
   test_mcp_h1_h2_admission_parity
@@ -314,14 +339,17 @@
   test_mcp_session_id_header
   test_keeper_sdk_error_typed_bridge
   test_keeper_status_bridge
+  test_keeper_diagnostic_stale_last_error
   test_read_drop_reason
   test_log_ring_encoder
   test_eio_context_fiber_local
   test_pool
   test_keeper_turn_disposition
   test_keeper_turn_terminal_disposition_field
+  test_keeper_memory_os
   test_keeper_reconcile_state
   test_attempt_state
+  test_runtime_attempt_fsm
   test_actor_mailbox
   test_domain_pool
   test_sse
@@ -358,6 +386,8 @@
   test_masc_oas_bridge_timeout_guard
   test_keeper_llm_bridge
   test_keeper_hooks_oas_log_shape
+  test_keeper_idle_metric
+  test_keeper_tool_duration_buckets
   test_keeper_tool_use_failure_counter
   test_keeper_compaction_outcome_counter
   test_keeper_usage_trust_counter
@@ -367,13 +397,11 @@
   test_cost_token_decouple
   test_response_model_empty_10083
   test_keeper_proactive_skip_counter
-  test_keeper_health_probe
   test_oas_empty_response_diagnostic
   test_board_author_identity_10297
   test_fsm_drift_counter
   test_gc_sampler
   test_process_timeout_counter
-  test_timeout_floor
   test_timeout_origin
   test_git_fetch_timeout_9587
   test_inference_utils
@@ -384,6 +412,7 @@
   test_keeper_token_count
   test_cli_arg
   test_keeper_chat_store
+  test_keeper_external_attention
   test_keeper_runtime_trust_snapshot
   test_keeper_tool_audit_snapshot
   test_ide_annotations
@@ -430,14 +459,20 @@
   test_keeper_unified_idle_cooldown
   test_keeper_unified_inline_skip
   test_keeper_unified_metacognition
+  test_keeper_surface_post
+  test_keeper_person_notes
+  test_fact_retention_reachability
+  test_keeper_surface_read
+  test_keeper_surface_presence_prompt
   test_keeper_unified_verification_surface
   test_keeper_fsm_guard_actions
   test_keeper_callback_hardening
   test_keeper_behavioral_regime
+  test_keeper_secret_projection
+  test_keeper_secret_redaction
   test_keeper_toml
   test_runtime_toml_overrides
   test_runtime_provider_auth_headers
-  test_keeper_tool_policy_config
   test_keeper_tool_policy_masc_surface
   test_keeper_tool_visibility_projection
   test_keeper_tool_capability_axis
@@ -457,6 +492,7 @@
   test_exec_dispatch
   test_shell_ir_risk
   test_exec_effect
+  test_checked_shell_ir
   test_keeper_tool_execute_typed_input
   test_hitl_approval
   test_keeper_discovered_tools
@@ -475,7 +511,6 @@
   test_keeper_fs_edit_patch
   test_keeper_sandbox_read_backend
   test_keeper_path_ssot
-  test_keeper_egress_audit
   test_tool_input_validation
   ; test_contract_risk removed (team session cleanup)
   ; test_contract_composer removed (team session cleanup)
@@ -514,6 +549,7 @@
   test_keeper_social_model_magentic_ledger_fsm
   test_keeper_overflow_recovery
   test_telemetry_unified
+  test_telemetry_unified_source
   test_telemetry_error_occurred_wire_10358
   test_keeper_topk_llm
   test_warn_root_causes
@@ -544,7 +580,8 @@
   test_alignment_score
   test_blocker_class_exhaustiveness
   test_workspace_goal_index
-  test_log_severity_outcome_level)
+  test_log_severity_outcome_level
+  test_env_keeper_scrub)
  (libraries masc_test_deps multimodal))
 
 ; Focused CI gate for runtime TOML validity.
@@ -555,6 +592,7 @@
  (libraries masc_test_deps))
 
 ; RFC-0207: per-keeper LLM runtime routing (persona [model] selection + driver fail-fast).
+
 (test
  (name test_runtime_per_keeper_routing)
  (modules test_runtime_per_keeper_routing)
@@ -738,7 +776,6 @@
   test_tool_result
   test_tool_hooks
   test_governance_pipeline
-  test_keeper_routine_allowlist
   test_keeper_agent_isolation
   test_sse_external_sub
   test_ws_transport
@@ -764,6 +801,7 @@
   test_keeper_prompt_external
   test_keeper_recurring
   test_evidence_claim_schema
+  test_deterministic_evidence_evaluator
   test_verification_fsm
   test_governance_yojson_roundtrip
   test_eval_calibration
@@ -773,7 +811,6 @@
   test_goal_verification
   test_string_util
   test_system_error_class
-  test_keeper_provider_error_class
   test_set_util
   test_board_core_payload
   test_board_attachment_meta
@@ -918,7 +955,6 @@
   test_tool_result
   test_tool_hooks
   test_governance_pipeline
-  test_keeper_routine_allowlist
   test_keeper_agent_isolation
   test_sse_external_sub
   test_ws_transport
@@ -944,6 +980,7 @@
   test_keeper_prompt_external
   test_keeper_recurring
   test_evidence_claim_schema
+  test_deterministic_evidence_evaluator
   test_verification_fsm
   test_governance_yojson_roundtrip
   test_eval_calibration
@@ -953,7 +990,6 @@
   test_goal_verification
   test_string_util
   test_system_error_class
-  test_keeper_provider_error_class
   test_set_util
   test_board_core_payload
   test_board_attachment_meta
@@ -1002,7 +1038,6 @@
  (libraries masc_test_deps))
 
 ; Typed catalog query bridge (RFC-0143 Phase 1).
-
 
 ; Group 4: Coverage tests (generated by Agent Autonomy)
 
@@ -1183,7 +1218,6 @@
  (modules keeper_tool_matrix_case_runner)
  (libraries masc_test_deps keeper_tool_matrix_cases_lib))
 
-
 ; Individual test stanzas — each in its own file to prevent
 ; merge conflicts when multiple PRs add tests concurrently.
 ; To add a new test: create test/stanzas/test_name.inc and
@@ -1220,33 +1254,9 @@
 
 (include stanzas/test_briefing_sections.inc)
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 (include stanzas/test_audit_keeper_fleet_readiness.inc)
 
 (include stanzas/test_keeper_production_readiness_gate.inc)
-
-
 
 (include stanzas/test_channel_gate.inc)
 
@@ -1255,11 +1265,13 @@
 (include stanzas/test_channel_gate_metrics.inc)
 
 (include stanzas/test_channel_gate_discord_state_in_process.inc)
+(include stanzas/test_gate_surface.inc)
 
 (include stanzas/test_discord_gateway_state.inc)
 
-(include stanzas/test_discord_rest_client.inc)
+(include stanzas/test_discord_observability.inc)
 
+(include stanzas/test_discord_rest_client.inc)
 
 (include stanzas/test_ci_run_tests_script.inc)
 
@@ -1267,16 +1279,17 @@
 
 (include stanzas/test_continuity_forward_filter.inc)
 
+(include stanzas/test_otel_runtime_observables.inc)
+(include stanzas/test_otel_zero_fill.inc)
 (include stanzas/test_workspace_bootstrap.inc)
+
 (include stanzas/test_workspace_base_path_cache.inc)
 
 (include stanzas/test_dashboard_feature_health.inc)
 
-
 (include stanzas/test_dashboard_governance_metrics.inc)
 
 (include stanzas/test_dashboard_keeper_metrics_10286.inc)
-
 
 (include stanzas/test_dashboard_tla_specs.inc)
 
@@ -1304,8 +1317,6 @@
 
 (include stanzas/test_env_config_dashboard_shell_prewarm.inc)
 
-(include stanzas/test_env_config_exec_timeout_10426.inc)
-
 (include stanzas/test_env_config_get_ratio.inc)
 
 (include stanzas/test_env_config_keeper_bootstrap_intervals.inc)
@@ -1327,7 +1338,6 @@
 (include stanzas/test_export_symbol_graph.inc)
 
 (include stanzas/test_feature_flag_registry.inc)
-
 
 (include stanzas/test_fs_atomic_orphan_sweep_10130.inc)
 
@@ -1371,14 +1381,13 @@
 
 (include stanzas/test_keeper_auto_pause_blocker_persist_12683.inc)
 
-
 (include stanzas/test_keeper_agent_run_sandbox_source.inc)
 
 (include stanzas/test_keeper_autoboot_supervisor_start_10125.inc)
 
-
-
 (include stanzas/test_keeper_checkpoint_classify.inc)
+
+(include stanzas/test_keeper_checkpoint_stale_guard.inc)
 
 (include stanzas/test_keeper_compaction_noop_counter_9943.inc)
 
@@ -1406,7 +1415,6 @@
 
 (include stanzas/test_keeper_workspace_ops.inc)
 
-
 (include stanzas/test_keeper_identity_drift_counter.inc)
 
 (include stanzas/test_keeper_runtime_manifest_completeness.inc)
@@ -1419,6 +1427,10 @@
 
 (include stanzas/test_keeper_msg_cancel.inc)
 
+(include stanzas/test_keeper_chat_coalescing.inc)
+
+(include stanzas/test_keeper_turn_admission.inc)
+
 (include stanzas/test_keeper_memory_bank_consensus_re_10399.inc)
 
 (include stanzas/test_keeper_meta_canonical_seed.inc)
@@ -1426,7 +1438,6 @@
 (include stanzas/test_keeper_meta_unknown_keys_warn.inc)
 
 (include stanzas/test_keeper_mutex_coverage.inc)
-
 
 (include stanzas/test_keeper_path_roots_leak_10349.inc)
 
@@ -1492,7 +1503,6 @@
 
 (include stanzas/test_keeper_runtime_config_leaf.inc)
 
-
 (include stanzas/test_local_review_script.inc)
 
 (include stanzas/test_magentic_ledger_cap.inc)
@@ -1515,12 +1525,9 @@
 
 (include stanzas/test_oas_bridge_timeout_ssot_10094.inc)
 
-
 (include stanzas/test_oas_timeout_budget_strike.inc)
 
-
 (include stanzas/test_oas_worker_exec_close_cancel_source.inc)
-
 
 (include stanzas/test_oas_worker_exec_checkpoint.inc)
 
@@ -1529,7 +1536,6 @@
 (include stanzas/test_openapi_api_e2e.inc)
 
 (include stanzas/test_masc_oas_bridge_cancel_boundary.inc)
-
 
 (include stanzas/test_operator_mcp_e2e.inc)
 
@@ -1551,8 +1557,6 @@
 
 (include stanzas/test_claim_outcome_typed.inc)
 
-(include stanzas/test_execute_timeout_schema_widen.inc)
-
 (include stanzas/test_limit_schema_widen.inc)
 
 (include stanzas/test_parse_outcome.inc)
@@ -1560,8 +1564,6 @@
 (include stanzas/test_pr_open_script.inc)
 
 (include stanzas/test_process_eio_default_timeout.inc)
-
-
 
 (include stanzas/test_release_train_guard_script.inc)
 
@@ -1591,8 +1593,9 @@
 
 (include stanzas/test_timeout_policy.inc)
 
-(include stanzas/test_timeout_policy_overshoot_counter.inc)
+(include stanzas/test_masc_event_bus_policy.inc)
 
+(include stanzas/test_timeout_policy_overshoot_counter.inc)
 
 (include stanzas/test_tool_call_replay_harness.inc)
 
@@ -1630,7 +1633,6 @@
  (name test_misc_coverage)
  (modules test_misc_coverage)
  (libraries masc_test_deps))
-
 
 ; RFC-0057 Phase 0 — regression test for bin/gen_tool_descriptors.ml.
 ; Compares generated masc_config tool_schema against the hand-written
@@ -1797,15 +1799,16 @@
  (modules test_server_bootstrap_loop_fork_helper)
  (libraries alcotest))
 
-
-
 ; RFC-0085 PR-3 — server runtime PID lock absorbed into Host_config.run_dir,
 ; and server bootstrap kept free of provider-specific OAS policy wiring.
 
 (test
  (name test_rfc_0085_pr3_server_runtime_paths)
  (modules test_rfc_0085_pr3_server_runtime_paths)
- (libraries alcotest ast_grep))
+ (libraries alcotest ast_grep)
+ (deps
+  ../lib/server/server_startup_takeover.ml
+  ../lib/server/server_runtime_bootstrap.ml))
 
 ; RFC-0085 PR-6 — Host_config exposes env-derived path fields
 ; (base_path / config_dir / data_dir / personas_dir) + from_env alias.
@@ -1820,7 +1823,10 @@
 (test
  (name test_rfc_0085_pr4_tool_library_proof_store)
  (modules test_rfc_0085_pr4_tool_library_proof_store)
- (libraries alcotest ast_grep))
+ (libraries alcotest ast_grep)
+ (deps
+  ../lib/tool_library.ml
+  ../lib/cdal_runtime/proof_store.ml))
 
 ; Verify the shared MCP dispatch finalizer fires typed observers and applies
 ; the result transformer before observers run.
@@ -1828,7 +1834,13 @@
 (test
  (name test_tool_dispatch_emit)
  (modules test_tool_dispatch_emit)
- (libraries alcotest masc masc.masc_tool_surface masc.masc_tool_dispatch masc.tool_types unix))
+ (libraries
+  alcotest
+  masc
+  masc.masc_tool_surface
+  masc.masc_tool_dispatch
+  masc.tool_types
+  unix))
 
 ; Regression: an OAS input-validation failure reaches the dispatch
 ; observers (Tool_metrics) instead of being dropped by the prior
@@ -1837,25 +1849,36 @@
 (test
  (name test_dispatch_observer_validation_failure)
  (modules test_dispatch_observer_validation_failure)
- (libraries alcotest masc masc.masc_tool_surface masc.masc_tool_dispatch masc.tool_types unix))
+ (libraries
+  alcotest
+  masc
+  masc.masc_tool_surface
+  masc.masc_tool_dispatch
+  masc.tool_types
+  unix))
 
 ; RFC-0085 PR-8 — config_dir_resolver env-derived path reads routed through
 ; Host_config.from_env; Env_config_core config_dir_opt + personas_dir_opt
 ; removed.
 
 (test
- (name test_rfc_0085_pr8_config_dir_resolver_host_config)
- (modules test_rfc_0085_pr8_config_dir_resolver_host_config)
- (libraries alcotest ast_grep))
+  (name test_rfc_0085_pr8_config_dir_resolver_host_config)
+  (modules test_rfc_0085_pr8_config_dir_resolver_host_config)
+  (libraries alcotest ast_grep)
+  (deps
+   (source_tree ../lib)
+   (source_tree ../bin)))
 
 ; RFC-0085 PR-7 — Retroactive AST test for retired_pg_env_keys +
 ; clear_retired_pg_envs deletion (#15468 user-identified legacy;
 ; shipped without a regression test; restored by #15495).
 
 (test
- (name test_rfc_0085_pr7_retired_pg_envs_purge)
- (modules test_rfc_0085_pr7_retired_pg_envs_purge)
- (libraries alcotest ast_grep))
+  (name test_rfc_0085_pr7_retired_pg_envs_purge)
+  (modules test_rfc_0085_pr7_retired_pg_envs_purge)
+  (libraries alcotest ast_grep)
+  (deps
+   ../lib/server/server_runtime_bootstrap.ml))
 
 ; RFC-0086 — keeper namespace bulk promotion invariant.
 ; Pins G-A (Phase 2.A wave 1, #15474): every .ml/.mli under
@@ -1871,92 +1894,128 @@
 ; restored by #15495).
 
 (test
- (name test_rfc_0085_pr18_execution_surfaces_rename)
- (modules test_rfc_0085_pr18_execution_surfaces_rename)
- (libraries alcotest ast_grep))
+  (name test_rfc_0085_pr18_execution_surfaces_rename)
+  (modules test_rfc_0085_pr18_execution_surfaces_rename)
+  (libraries alcotest ast_grep)
+  (deps
+   ../lib/server/server_dashboard_http_execution_surfaces.ml
+   ../lib/server/server_dashboard_http_namespace_truth.ml
+   ../lib/server/server_dashboard_http_namespace_truth_support.ml))
 
 ; RFC-0085 PR-17 — Retroactive AST test for 4 dead deletion + 2 rename
 ; (#15485 shipped without a regression test; restored by #15495).
 
 (test
- (name test_rfc_0085_pr17_dead_purge_and_rename)
- (modules test_rfc_0085_pr17_dead_purge_and_rename)
- (libraries alcotest ast_grep))
+  (name test_rfc_0085_pr17_dead_purge_and_rename)
+  (modules test_rfc_0085_pr17_dead_purge_and_rename)
+  (libraries alcotest ast_grep)
+  (deps
+   ../lib/workspace/workspace_utils_paths_backend.ml
+   ../lib/server_base_path_diagnostics.ml
+   ../lib/dashboard/dashboard_briefing.ml
+   ../lib/gate/channel_gate_metrics.ml))
 
 ; RFC-0085 PR-16 — Retroactive AST test for dashboard_http_core rename
 ; (#15484 shipped without a regression test; restored by #15495).
 
 (test
- (name test_rfc_0085_pr16_dashboard_http_core_rename)
- (modules test_rfc_0085_pr16_dashboard_http_core_rename)
- (libraries alcotest ast_grep))
+  (name test_rfc_0085_pr16_dashboard_http_core_rename)
+  (modules test_rfc_0085_pr16_dashboard_http_core_rename)
+  (libraries alcotest ast_grep)
+  (deps
+   ../lib/server/server_dashboard_http_core.ml))
 
 ; RFC-0085 PR-15 — Retroactive AST test for tool_schemas_inline rename
 ; (#15483 shipped without a regression test; restored by #15495).
 
 (test
- (name test_rfc_0085_pr15_tool_schemas_inline_rename)
- (modules test_rfc_0085_pr15_tool_schemas_inline_rename)
- (libraries alcotest ast_grep))
+  (name test_rfc_0085_pr15_tool_schemas_inline_rename)
+  (modules test_rfc_0085_pr15_tool_schemas_inline_rename)
+  (libraries alcotest ast_grep)
+  (deps
+   ../lib/tool_schemas/tool_schemas_inline.ml
+   ../lib/tool_schemas/tool_schemas_inline_infra.ml))
 
 ; RFC-0085 PR-14 — dispatch / dispatch_structured / guarded_dispatch
 ; 3-step chain inlined; guarded_dispatch is the only dispatch entry.
 
 (test
- (name test_rfc_0085_pr14_dispatch_inline)
- (modules test_rfc_0085_pr14_dispatch_inline)
- (libraries alcotest ast_grep))
+  (name test_rfc_0085_pr14_dispatch_inline)
+  (modules test_rfc_0085_pr14_dispatch_inline)
+  (libraries alcotest ast_grep)
+  (deps
+   ../lib/tool/tool_dispatch.ml
+   ../lib/keeper/keeper_tool_registered_runtime.ml))
 
 ; RFC-0085 PR-13 — Underscore-prefix audit: 1 truly-dead deletion +
 ; 8 active rename across 7 modules.
 
 (test
- (name test_rfc_0085_pr13_underscore_rename)
- (modules test_rfc_0085_pr13_underscore_rename)
- (libraries alcotest ast_grep))
+  (name test_rfc_0085_pr13_underscore_rename)
+  (modules test_rfc_0085_pr13_underscore_rename)
+  (libraries alcotest ast_grep)
+  (deps
+   ../lib/governance_pipeline_risk.ml
+   ../lib/config_dir_resolver/config_dir_resolver.ml
+   ../lib/keeper/keeper_tool_surface_ops.ml
+   ../lib/board_tool_adapter/board_tool_cache.ml
+   ../lib/tool_workspace.ml))
 
 ; RFC-0085 PR-12 — Tool_spec list bindings renamed (drop misleading
 ; _ prefix that signalled "unused" in OCaml but was wrong because the
 ; bindings are actively used by List.mem in the Tool_spec.register loop).
 
 (test
- (name test_rfc_0085_pr12_tool_spec_rename)
- (modules test_rfc_0085_pr12_tool_spec_rename)
- (libraries alcotest ast_grep))
+  (name test_rfc_0085_pr12_tool_spec_rename)
+  (modules test_rfc_0085_pr12_tool_spec_rename)
+  (libraries alcotest ast_grep)
+  (deps
+   ../lib/tool_workspace.ml))
 
 ; RFC-0085 PR-11 — Env_config_core deprecation mechanism removed.
 
 (test
- (name test_rfc_0085_pr11_deprecation_purge)
- (modules test_rfc_0085_pr11_deprecation_purge)
- (libraries alcotest ast_grep))
+  (name test_rfc_0085_pr11_deprecation_purge)
+  (modules test_rfc_0085_pr11_deprecation_purge)
+  (libraries alcotest ast_grep)
+  (deps
+   (source_tree ../lib)
+   (source_tree ../bin)))
 
 ; RFC-0085 PR-10 — home + assets_dir env readers absorbed into
 ; Host_config.t; Env_config_core.assets_dir_opt fully removed,
 ; home_dir_opt demoted to file-private.
 
 (test
- (name test_rfc_0085_pr10_home_assets_purge)
- (modules test_rfc_0085_pr10_home_assets_purge)
- (libraries alcotest ast_grep masc.host_config))
+  (name test_rfc_0085_pr10_home_assets_purge)
+  (modules test_rfc_0085_pr10_home_assets_purge)
+  (libraries alcotest ast_grep masc.host_config)
+  (deps
+   (source_tree ../lib)
+   (source_tree ../bin)))
 
 ; RFC-0085 PR-9 — Env_config_core.base_path_opt + base_path_raw_opt
 ; public-surface purge; 9 caller migrate to Host_config.from_env;
 ; Host_config.t gains base_path (normalised) + base_path_raw fields.
 
 (test
- (name test_rfc_0085_pr9_base_path_opt_purge)
- (modules test_rfc_0085_pr9_base_path_opt_purge)
- (libraries alcotest ast_grep))
-
+  (name test_rfc_0085_pr9_base_path_opt_purge)
+  (modules test_rfc_0085_pr9_base_path_opt_purge)
+  (libraries alcotest ast_grep)
+  (deps
+   (source_tree ../lib)
+   (source_tree ../bin)))
 
 ; Regression for local-overrotation: Execute / tool_execute must not route
 ; sandbox_profile=local through Docker merely because DockerPlayground is on.
+
 (test
  (name test_keeper_local_profile_docker_playground)
  (modules test_keeper_local_profile_docker_playground)
  (action
-  (setenv MASC_KEEPER_DOCKER_PLAYGROUND true
+  (setenv
+   MASC_KEEPER_DOCKER_PLAYGROUND
+   true
    (run %{test})))
  (libraries masc_test_deps))
 
@@ -1975,5 +2034,6 @@
 (test
  (name test_ppx_safe_shell)
  (modules test_ppx_safe_shell)
- (preprocess (pps ppx_safe_shell))
+ (preprocess
+  (pps ppx_safe_shell))
  (libraries alcotest masc.masc_exec masc.exec_policy))

@@ -32,6 +32,46 @@ let verification_deadline ~now ~timeout_seconds =
   Some (Masc_domain.iso8601_of_unix_seconds (submitted_at +. timeout_seconds))
 ;;
 
+(** RFC-0220 §3.5: the outcome of [agent_name] claiming a task in [status].
+    Shared by the explicit ([Workspace_task_claim.claim_task_r]) and auto
+    ([Workspace_task_schedule.claim_next_r]) claim writers so they never
+    diverge on the same claimable status — the divergence flagged in §3.5 was
+    that auto-claim overwrote [AwaitingVerification] with [Claimed], clobbering
+    the verification obligation. [same_actor] normalizes actor identity (keeper
+    alias vs nickname); both writers pass
+    [Workspace_task_classify.same_task_actor config _ agent_name], so the
+    self-block lives here once, in one equality semantics. *)
+type claim_resolution =
+  | Worker_claim of Masc_domain.task_status
+      (** [Todo] -> [Claimed] by this agent. *)
+  | Verifier_claim of Masc_domain.task_status
+      (** [AwaitingVerification] submitted by another actor -> the obligation is
+          preserved with this agent bound as verifier ([phase]). *)
+  | Self_owned
+      (** This actor already holds the task (own [Claimed]/[InProgress]) or
+          submitted the obligation (own [AwaitingVerification]); claiming is a
+          no-op, never a self-verification. *)
+  | Held_by_other of string
+      (** Held by another actor, or terminal ([Done]/[Cancelled]); the string
+          names the current holder for the caller's error message. *)
+
+let resolve_claim ~same_actor ~agent_name ~now (status : Masc_domain.task_status) =
+  match status with
+  | Masc_domain.Todo ->
+    Worker_claim (Masc_domain.Claimed { assignee = agent_name; claimed_at = now })
+  | Masc_domain.AwaitingVerification { assignee; submitted_at; verification_id; _ } ->
+    if same_actor assignee
+    then Self_owned
+    else
+      Verifier_claim
+        (Masc_domain.bind_verifier
+           ~verifier:agent_name ~assignee ~submitted_at ~verification_id)
+  | Masc_domain.Claimed { assignee; _ } | Masc_domain.InProgress { assignee; _ } ->
+    if same_actor assignee then Self_owned else Held_by_other assignee
+  | Masc_domain.Done { assignee; _ } -> Held_by_other assignee
+  | Masc_domain.Cancelled { cancelled_by; _ } -> Held_by_other cancelled_by
+;;
+
 let decide
       ~verification_enabled
       ~verification_timeout_seconds
@@ -56,7 +96,23 @@ let decide
     , (Masc_domain.Claimed { assignee; _ } | Masc_domain.InProgress { assignee; _ }) ) ->
     if same_agent assignee then ok task_status else Error Invalid_transition
   | Masc_domain.Claim, Masc_domain.Done _ -> ok task_status
-  | Masc_domain.Claim, (Masc_domain.AwaitingVerification _ | Masc_domain.Cancelled _) ->
+  | ( Masc_domain.Claim
+    , Masc_domain.AwaitingVerification { assignee; submitted_at; verification_id; _ } ) ->
+    (* Cross-agent verification dispatch (#19314): a verifier — not the
+       submitter — claims the obligation. RFC-0220 §3.5: preserve the
+       [AwaitingVerification] status and bind the verifier in [phase] so the
+       satisfier is recorded in the task FSM (single authority) instead of a
+       separate store. [set_current] points the verifier at the task, matching
+       the explicit claim path. Self-claim is blocked: the submitter cannot
+       verify their own work. *)
+    if same_agent assignee
+    then Error Invalid_transition
+    else
+      ok
+        ~set_current:task_id
+        (Masc_domain.bind_verifier
+           ~verifier:agent_name ~assignee ~submitted_at ~verification_id)
+  | Masc_domain.Claim, Masc_domain.Cancelled _ ->
     Error Invalid_transition
   (* ── Start ────────────────────────────────────── *)
   | Masc_domain.Start, Masc_domain.Claimed { assignee; _ } ->
@@ -120,8 +176,9 @@ let decide
            { assignee
            ; submitted_at = now
            ; verification_id = new_verification_id ()
-           ; deadline =
-               verification_deadline ~now ~timeout_seconds:verification_timeout_seconds
+           (* RFC-0220: a fresh submission has no verifier yet. [deadline]
+              dropped per I2 (no per-obligation wall-clock deadline). *)
+           ; phase = Masc_domain.Awaiting_verifier
            })
     else Error Invalid_transition
   | ( Masc_domain.Submit_for_verification

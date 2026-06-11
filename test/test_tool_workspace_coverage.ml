@@ -636,7 +636,7 @@ let () =
       assert (
         str_contains result "Lifecycle actions are credential-blocked for test-agent");
       assert (not (str_contains result "Suggested next: masc_status -> masc_transition"));
-      assert (not (str_contains result "Suggested next: masc_claim_next"))
+      assert (not (str_contains result "Suggested next: keeper_task_claim"))
     | None -> failwith "dispatch returned None")
 ;;
 
@@ -688,7 +688,7 @@ let () =
       assert (str_contains result "owned=- | current=task-001");
       assert (str_contains result "drift_reason=no_owned");
       assert (str_contains result "claim_first_suppressed=no");
-      assert_contains result "Suggested next: masc_claim_next -> masc_status";
+      assert_contains result "Suggested next: keeper_task_claim -> masc_status";
       assert_not_contains result "Suggested next: masc_status -> masc_transition"
     | None -> failwith "dispatch returned None")
 ;;
@@ -829,9 +829,10 @@ let () =
 let next_hint = Workspace_task.next_actions_hint
 
 let () =
-  test "next_hint_todo lists claim and cancel" (fun () ->
+  test "next_hint_todo lists claim, release, and cancel" (fun () ->
     let h = next_hint Masc_domain.Todo in
     assert (str_contains h "claim");
+    assert (str_contains h "release");
     assert (str_contains h "cancel");
     assert (str_contains h "valid_next_actions="))
 ;;
@@ -859,7 +860,7 @@ let () =
     let h =
       next_hint
         (Masc_domain.AwaitingVerification
-           { assignee = "a"; submitted_at = "t"; verification_id = "v"; deadline = None })
+           { assignee = "a"; submitted_at = "t"; verification_id = "v"; phase = Masc_domain.Awaiting_verifier })
     in
     assert (str_contains h "approve");
     assert (str_contains h "reject"))

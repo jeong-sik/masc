@@ -17,6 +17,7 @@ let pp_error fmt = function
 let slack_message_limit = 4000
 
 let send_message ~token ~channel ~content =
+  let content = Observability_redact.redact_text content in
   let truncated =
     if String.length content > slack_message_limit then
       String.sub content 0 slack_message_limit
@@ -81,6 +82,8 @@ let adapter_loop ~token ~channel ~events =
     | Custom { name; value = _ } ->
         Log.Keeper.debug
           "keeper_chat_slack: custom event %s" name;
+        loop ~acc_text ~run_id_opt
+    | Tool_call_start _ | Tool_call_args _ | Tool_call_end _ ->
         loop ~acc_text ~run_id_opt
   in
   loop ~acc_text:"" ~run_id_opt:None

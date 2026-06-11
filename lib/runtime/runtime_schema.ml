@@ -85,6 +85,7 @@ type thinking_control_format =
   | No_thinking_control
   | Thinking_object
   | Chat_template_kwargs
+  | Reasoning_effort
 [@@deriving show, eq]
 
 (** Per-model capabilities, mirroring OAS [Llm_provider.Capabilities] for the
@@ -150,6 +151,7 @@ type model_spec =
   ; tools_support : bool
   ; max_context : int
   ; thinking_support : bool
+  ; preserve_thinking : bool
   ; max_thinking_budget : int option
   ; streaming : bool
   ; capabilities : model_capabilities option

@@ -40,7 +40,6 @@ val sdk_error_is_hard_quota : Agent_sdk.Error.sdk_error -> bool
 val sdk_error_soft_rate_limited :
   Agent_sdk.Error.sdk_error -> float option option
 
-val sdk_error_is_max_turns_exceeded : Agent_sdk.Error.sdk_error -> bool
 
 val sdk_error_runtime_fallback_class :
   Agent_sdk.Error.sdk_error -> string option
@@ -99,9 +98,9 @@ val run_named :
   ?system_prompt:string ->
   ?tools:Agent_sdk.Tool.t list ->
   ?initial_messages:Agent_sdk.Types.message list ->
-  ?max_turns:int ->
   ?max_idle_turns:int ->
   ?stream_idle_timeout_s:float ->
+  ?body_timeout_s:float ->
   ?temperature:float ->
   ?max_tokens:int ->
   ?max_input_tokens:int ->
@@ -111,7 +110,6 @@ val run_named :
   ?guardrails:Agent_sdk.Guardrails.t ->
   ?hooks:Agent_sdk.Hooks.hooks ->
   ?context_reducer:Agent_sdk.Context_reducer.t ->
-  ?tool_retry_policy:Agent_sdk.Tool_retry_policy.t ->
   ?raw_trace:Agent_sdk.Raw_trace.t ->
   ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
   ?on_yield:(unit -> unit) ->
@@ -133,7 +131,9 @@ val run_named :
   ?exit_condition_result:(int -> Runtime_agent.stop_reason * string option) ->
   ?summarizer:(Agent_sdk.Types.message list -> string) ->
   ?oas_checkpoint:Agent_sdk.Checkpoint.t ->
+  ?trace_link:string * string ->
   ?event_bus:Agent_sdk.Event_bus.t ->
+  ?on_runtime_observation:(Runtime_observation.runtime_observation -> unit) ->
   ?runtime_manifest_context:Keeper_runtime_manifest.turn_context ->
   ?runtime_manifest_append:(Keeper_runtime_manifest.t -> unit) ->
   ?sw:Eio.Switch.t ->

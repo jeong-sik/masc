@@ -302,7 +302,7 @@ let task_already_claimed ~task_id ~claimed_by : t =
     ])
     ~hints:[
       Printf.sprintf "Align with '%s' who owns this task" claimed_by;
-      "Use masc_claim_next to get the next available task";
+      "Use keeper_task_claim to get the next available task";
       "Or create a new task with masc_add_task";
     ]
     ()

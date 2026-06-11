@@ -69,9 +69,8 @@ let execute_tool_eio
   Otel_metric_store.record_request ();
   let config = state.Mcp_server.workspace_config in
   let registry = state.Mcp_server.session_registry in
-  (* Fix 3: Cache workspace_initialized to avoid repeated stat syscalls.
-     Updated after auto-init succeeds. *)
-  let workspace_init_cached = ref (Workspace.is_initialized config) in
+  (* Fix 3: Cache workspace_initialized to avoid repeated stat syscalls. *)
+  let workspace_init_cached = Workspace.is_initialized config in
   (* Fix 4: Check resolved-name cache for fast identity resolution.
      On 2nd+ call in the same MCP session, the cached name preserves the
      nickname selected by the prior session binding without relying on sidecar files. *)
@@ -88,7 +87,7 @@ let execute_tool_eio
   let caller_identity =
     Mcp_server_eio_caller_identity.resolve ~config ~tool_name:name ~arguments
       ~identity ~cached_resolved_agent ~auth_token ~internal_keeper_runtime
-      ~workspace_initialized:(fun () -> !workspace_init_cached)
+      ~workspace_initialized:(fun () -> workspace_init_cached)
       ~log_mcp_exn
   in
   let agent_name = caller_identity.agent_name in
@@ -181,7 +180,7 @@ let execute_tool_eio
           in
           (match owner_keeper_identity with
            | Some (keeper_name, keeper_id)
-             when agent_name <> "unknown" && !workspace_init_cached ->
+             when agent_name <> "unknown" && workspace_init_cached ->
              (try
                 Workspace_task.update_local_agent_state config ~agent_name (fun agent ->
                   let meta =
@@ -229,7 +228,7 @@ let execute_tool_eio
               | Tool_catalog.Real | Tool_catalog.Adapter | Tool_catalog.Placeholder ->
                 false
             in
-            if (not skip_heartbeat) && !workspace_init_cached
+            if (not skip_heartbeat) && workspace_init_cached
             then (
               try
                 let (_ : string) = Workspace.heartbeat config ~agent_name in
@@ -497,7 +496,7 @@ let execute_tool_eio
                the keeper turn migration in PR-7. *)
             let dispatch_internal_with_telemetry () =
               let result, _outcome =
-                Tool_telemetry.with_span ~tool_name:name (fun _trace_id_thunk ->
+                Tool_telemetry.with_span ~force_new_trace_id:true ~tool_name:name (fun _trace_id_thunk ->
                   let r = dispatch_internal_keeper_runtime_tool () in
                   (* Route through the shared dispatch finalizer so MCP
                      internal-keeper-runtime calls run the same result
@@ -534,7 +533,7 @@ let execute_tool_eio
                     Tool_telemetry.with_span for 4-tuple emission. *)
                  let dispatch_tag_with_telemetry tag =
                    let result, _outcome =
-                     Tool_telemetry.with_span ~tool_name:name (fun _trace_id_thunk ->
+                     Tool_telemetry.with_span ~force_new_trace_id:true ~tool_name:name (fun _trace_id_thunk ->
                        let r = dispatch_by_tag tag in
                        (* Keep external MCP tools/call on the same
                           post-dispatch contract as internal keeper calls. *)

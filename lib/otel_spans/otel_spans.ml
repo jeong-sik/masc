@@ -36,6 +36,14 @@ let init () =
   if Otel_config.enabled && not (Atomic.get initialized) then begin
     Atomic.set initialized true;
     OT.Globals.service_name := Otel_config.service_name;
+    (* Disable the opentelemetry library's internal self-instrumentation
+       ("encode-proto" spans emitted by Self_trace.with_ in client/signal.ml).
+       When the exporter encodes a batch while running on a keeper fiber, the
+       self-span nests into that fiber's active ambient scope and attaches to
+       the live invoke_agent (keeper-turn) trace. Measured on a post-deploy
+       production trace (commit c36e0d1, masc service): 2260 of 2283 spans
+       (99%) were encode-proto noise. These carry no application signal. *)
+    Opentelemetry_client.Self_trace.set_enabled false;
     (* ambient-context-eio storage is set automatically when the library is linked.
        Eio fiber-local context propagation works via Ambient_context_eio.storage. *)
     ignore (Ambient_context_eio.storage : Ambient_context.Storage.t)
@@ -58,8 +66,8 @@ let consecutive_failures () = Atomic.get _consecutive_failures
 let setup_exporter_with ?(enabled = Otel_config.enabled) ~endpoint ~setup () =
   if enabled then begin
     Opentelemetry_client_cohttp_eio.reset_tick_health ();
-    init ();
     try
+      init ();
       setup ();
       Atomic.set exporter_active true;
       Atomic.set _last_successful_export (Some (Unix.gettimeofday ()));
@@ -97,68 +105,86 @@ let setup_exporter ~sw (env : Eio_unix.Stdenv.base) =
   let endpoint = Otel_config.endpoint in
   let clock = Eio.Stdenv.clock env in
   Opentelemetry_client_cohttp_eio.reset_tick_health ();
+  (* Shared setup: init library, register OTLP backend, fork health-check fiber.
+     Called only after probe confirms collector is reachable. *)
+  let start_exporter () =
+    (* Initialize the OTel library only when we have a reachable collector.
+       Calling [init] before probe would start the internal tick loop even
+       when no collector exists, producing WARN spam on every export cycle. *)
+    init ();
+    let config =
+      Opentelemetry_client_cohttp_eio.Config.make ~url:endpoint ()
+    in
+    Opentelemetry_client_cohttp_eio.setup ~sw ~config env;
+    Atomic.set exporter_active true;
+    Atomic.set _last_successful_export (Some (Unix.gettimeofday ()));
+    Atomic.set _consecutive_failures 0;
+    Log.Otel.info "OTLP exporter started -> %s" endpoint;
+    let rec health_loop () =
+      Eio.Time.sleep clock 30.0;
+      if probe_endpoint ~env endpoint then begin
+        Atomic.set _consecutive_failures 0;
+        health_loop ()
+      end else begin
+        let failures = Atomic.get _consecutive_failures + 1 in
+        Atomic.set _consecutive_failures failures;
+        Log.Otel.warn "OTLP health check failed (%d consecutive) -> %s"
+          failures endpoint;
+        if Atomic.get exporter_active && failures >= 3 then begin
+          Log.Otel.error "OTLP exporter marked inactive after %d consecutive failures -> %s"
+            failures endpoint;
+          Atomic.set exporter_active false
+        end;
+        health_loop ()
+      end
+    in
+    Eio.Fiber.fork ~sw health_loop
+  in
   let rec try_setup attempt =
     if not (enabled ()) then ()
-    else begin
-      init ();
-      let setup () =
-        let config =
-          Opentelemetry_client_cohttp_eio.Config.make ~url:endpoint ()
+    else if not (probe_endpoint ~env endpoint) then
+      if attempt < 5 then begin
+        let delay = Float.of_int (1 lsl attempt) in
+        Log.Otel.warn "OTLP collector unreachable (%s), retry %d/5 in %.1fs"
+          endpoint (attempt + 1) delay;
+        Eio.Time.sleep clock delay;
+        try_setup (attempt + 1)
+      end else begin
+        Log.Otel.warn
+          "OTLP collector unreachable after 5 retries (%s), recovery probe every 30s"
+          endpoint;
+        Atomic.set exporter_active false;
+        (* Recovery fiber: masc typically starts before Docker containers.
+           Probe every 30s and call [start_exporter] when collector becomes
+           available.  No WARN spam — [init] is deferred until success. *)
+        let rec recovery_loop () =
+          Eio.Time.sleep clock 30.0;
+          if not (enabled ()) then ()
+          else if probe_endpoint ~env endpoint then
+            (try start_exporter () with
+             | Eio.Cancel.Cancelled _ as e -> raise e
+             | exn ->
+               Atomic.set exporter_active false;
+               Log.Otel.warn "OTLP recovery setup failed (%s): %s, retrying in 30s"
+                 endpoint (Printexc.to_string exn);
+               recovery_loop ())
+          else recovery_loop ()
         in
-        Opentelemetry_client_cohttp_eio.setup ~sw ~config env
-      in
-      if not (probe_endpoint ~env endpoint) then
-        if attempt < 5 then begin
-          let delay = Float.of_int (1 lsl attempt) in
-          Log.Otel.warn "OTLP collector unreachable (%s), retry %d/5 in %.1fs"
-            endpoint (attempt + 1) delay;
-          Eio.Time.sleep clock delay;
-          try_setup (attempt + 1)
-        end else begin
-          Log.Otel.warn "OTLP collector unreachable after 5 retries (%s), continuing without export"
-            endpoint;
-          Atomic.set exporter_active false
-        end
-      else
-        try
-          setup ();
-          Atomic.set exporter_active true;
-          Atomic.set _last_successful_export (Some (Unix.gettimeofday ()));
-          Atomic.set _consecutive_failures 0;
-          Log.Otel.info "OTLP exporter started -> %s" endpoint;
-          (* Health check fiber: probe collector every 30s *)
-          let rec health_loop () =
-            Eio.Time.sleep clock 30.0;
-            if probe_endpoint ~env endpoint then begin
-              Atomic.set _consecutive_failures 0;
-              health_loop ()
-            end else begin
-              let failures = Atomic.get _consecutive_failures + 1 in
-              Atomic.set _consecutive_failures failures;
-              Log.Otel.warn "OTLP health check failed (%d consecutive) -> %s"
-                failures endpoint;
-              if Atomic.get exporter_active && failures >= 3 then begin
-                Log.Otel.error "OTLP exporter marked inactive after %d consecutive failures -> %s"
-                  failures endpoint;
-                Atomic.set exporter_active false
-              end;
-              health_loop ()
-            end
-          in
-          Eio.Fiber.fork ~sw health_loop
-        with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | exn when attempt < 5 ->
-          let delay = Float.of_int (1 lsl attempt) in
-          Log.Otel.warn "OTLP exporter attempt %d/6 failed, retry in %.1fs: %s"
-            (attempt + 1) delay (Printexc.to_string exn);
-          Eio.Time.sleep clock delay;
-          try_setup (attempt + 1)
-        | exn ->
-          Atomic.set exporter_active false;
-          Log.Otel.warn "OTLP exporter unavailable after 6 attempts (%s): %s"
-            endpoint (Printexc.to_string exn)
-    end
+        Eio.Fiber.fork ~sw recovery_loop
+      end
+    else
+      try start_exporter () with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn when attempt < 5 ->
+        let delay = Float.of_int (1 lsl attempt) in
+        Log.Otel.warn "OTLP exporter attempt %d/6 failed, retry in %.1fs: %s"
+          (attempt + 1) delay (Printexc.to_string exn);
+        Eio.Time.sleep clock delay;
+        try_setup (attempt + 1)
+      | exn ->
+        Atomic.set exporter_active false;
+        Log.Otel.warn "OTLP exporter unavailable after 6 attempts (%s): %s"
+          endpoint (Printexc.to_string exn)
   in
   try_setup 0
 
@@ -176,14 +202,19 @@ let shutdown ?(enabled = Otel_config.enabled) () =
   Atomic.set _consecutive_failures 0
 
 (** Wrap a function in an OTel span. No-op when disabled.
-    Returns the result of [f]. *)
-let with_span ~name ?(attrs = []) f =
+    Returns the result of [f].
+    When [force_new_trace_id] is true, starts a fresh trace root instead
+    of nesting under the ambient parent span. Use at operation boundaries
+    (e.g. each tool dispatch) to keep traces small and readable. *)
+let with_span ~name ?(attrs = []) ?(force_new_trace_id = false) f =
   if not Otel_config.enabled then f (fun () -> None)
   else
-    OT.Trace.with_ name ~attrs (fun scope ->
+    OT.Trace.with_ ~force_new_trace_id name ~attrs (fun scope ->
       f (fun () ->
         let ctx = OT.Scope.to_span_ctx scope in
-        Some (OT.Trace_id.to_hex (OT.Span_ctx.trace_id ctx))))
+        let trace_id = OT.Trace_id.to_hex (OT.Span_ctx.trace_id ctx) in
+        let span_id = OT.Span_id.to_hex (OT.Span_ctx.parent_id ctx) in
+        Some (trace_id, span_id)))
 
 (** Add an event to the active OTel span. No-op when disabled or when no
     ambient span exists. *)

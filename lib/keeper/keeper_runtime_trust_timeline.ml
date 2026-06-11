@@ -365,7 +365,10 @@ let receipt_timeline_event receipt =
           match error_kind with
           | Some _ -> "bad"
           | None ->
-              if String.equal completion_contract_result "violated" then "bad"
+              if
+                String.equal completion_contract_result "violated"
+                || String.equal runtime_outcome "failed"
+              then "bad"
               else if
                 String.equal runtime_outcome "passed_to_next_model"
                 || (receipt |> json_member "runtime"

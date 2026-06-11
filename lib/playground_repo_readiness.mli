@@ -1,6 +1,6 @@
 (** Playground repository readiness.
 
-    Owns repository clone/worktree readiness for playground repo lanes. Keeper
+    Owns repository clone readiness for playground repo lanes. Keeper
     execution code should treat this as the provisioning boundary rather than
     carrying repo lifecycle policy itself. *)
 
@@ -11,19 +11,14 @@ type command_result =
   ; status : Unix.process_status
   }
 
-(** Read-only git probe timeout (seconds). Bumped to 15s in
-    #9765/#9775 to absorb large-monorepo first-probe latency. *)
-val read_only_probe_timeout_sec : float
+(** Run [git -C clone_path --no-optional-locks args] and capture exit/stdout.
+    Hang protection is git's responsibility via [--no-optional-locks].
+    Caller does not pass a timeout (PR #20479 spirit). *)
+val run_git : clone_path:string -> string list -> command_result
 
-(** Run [git -C clone_path --no-optional-locks args] with [timeout_sec].
-    Trims the captured output. *)
-val run_git :
-  timeout_sec:float -> clone_path:string -> string list -> command_result
-
-val deleted_tracked_files_restore_hint : clone_path:string -> string option
 (** Return a concise restore hint when [git status --porcelain] contains only
     tracked-file deletions, otherwise [None]. *)
-
+val deleted_tracked_files_restore_hint : clone_path:string -> string option
 (** [safe_is_dir path] is [true] iff [path] exists and is a directory,
     swallowing [Sys_error]. *)
 val safe_is_dir : string -> bool
@@ -88,35 +83,6 @@ val ensure_ready :
   unit ->
   (unit, string) result
 
-(** [ensure_worktree_ready ~config ~meta ~repo_name ~task_name ~worktree_path ()]
-    ensures a git worktree exists at [worktree_path] inside the sandbox clone.
-    If the worktree is missing, first ensures the parent repo is a valid git
-    clone (reclone if needed), then creates the worktree from the fetched
-    default origin branch. Parent clone dirtiness is preserved and does not block
-    creating a separate task worktree. Existing and newly-created worktrees have
-    their [.git] gitdir pointer normalized to a relative path so Docker-mounted
-    Git can resolve the worktree metadata. Returns [Ok ()] when the worktree is a
-    valid git checkout, or [Error msg] if creation failed. *)
-val ensure_worktree_ready :
-  config:Workspace.config ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  repo_name:string ->
-  task_name:string ->
-  worktree_path:string ->
-  unit ->
-  (unit, string) result
-
-(** [provision_worktrees_for_task ~config ~agent_name ~task_id ()] scans all
-    repos in the keeper's playground and creates a worktree for [task_id] in
-    each repo that is ready.  Called best-effort at task claim time so worktrees
-    exist before the LLM tries to use them.  Only operates for Docker-sandboxed
-    keepers.  Failures in individual repos are logged but do not propagate. *)
-val provision_worktrees_for_task :
-  config:Workspace.config ->
-  agent_name:string ->
-  task_id:string ->
-  unit ->
-  unit
 
 (** Outcome of an [ensure_current] pass. Every non-[Advanced] case leaves the
     working tree byte-for-byte untouched. *)

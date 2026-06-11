@@ -705,7 +705,9 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
          let sandbox_live =
            Keeper_sandbox_control.live_status_json
              ~include_preflight:false
-             ~config:config ~meta:m ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Status_detail ()) ~verbose:false ()
+             ~config:config ~meta:m
+             ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Io ())
+             ~verbose:false ()
          in
          let runtime_blocker_fields =
           runtime_blocker_fields_json config m
@@ -1004,20 +1006,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
                  let entries = Fs_compat.load_jsonl pr_path in
                  (* Last 10 PRs, most recent first *)
                  `List (List.take 10 (List.rev entries))
-               with Sys_error _ -> `List []);
-             ("active_worktrees",
-               let worktrees_dir = Filename.concat config.base_path ".worktrees" in
-               try
-                 let entries = Sys.readdir worktrees_dir |> Array.to_list in
-                 let keeper_prefix = Keeper_alerting_path.sanitize_keeper_name m.name in
-                 let matching = List.filter (fun name ->
-                   String.starts_with ~prefix:(keeper_prefix ^ "-") name
-                   || String.starts_with ~prefix:(keeper_prefix ^ "/") name
-                   || name = keeper_prefix) entries in
-                 `List (List.map (fun name -> `Assoc [
-                   "name", `String name;
-                   "path", `String (Filename.concat ".worktrees" name);
-                 ]) matching)
                with Sys_error _ -> `List []);
            ]);
          ]) in

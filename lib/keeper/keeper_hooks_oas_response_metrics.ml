@@ -51,9 +51,9 @@ let resolve_after_turn_model ~keeper_name
     in
     Otel_metric_store.inc_counter empty_response_model_metric
       ~labels:[ (label_keeper, keeper_name); (label_source, source) ] ();
-    Log.Keeper.warn
-      "keeper:%s after_turn response.model empty -> runtime_lane source=%s"
-      keeper_name source;
+    Log.Keeper.warn ~keeper_name:keeper_name
+      "after_turn response.model empty -> runtime_lane source=%s"
+      source;
     runtime_lane_label
   end else begin
     if is_runtime_selector_alias raw_model then (
@@ -66,9 +66,9 @@ let resolve_after_turn_model ~keeper_name
             (label_source, source_telemetry_canonical);
           ]
         ();
-      Log.Keeper.warn
-        "keeper:%s after_turn response.model selector -> runtime_lane source=%s"
-        keeper_name "telemetry_canonical");
+      Log.Keeper.warn ~keeper_name:keeper_name
+        "after_turn response.model selector -> runtime_lane source=%s"
+        "telemetry_canonical");
     runtime_lane_label
   end
 
@@ -121,6 +121,40 @@ let record_response_content_quality_metric ~keeper_name
         ]
       ()
 
+let tool_call_duration_bucket_metric =
+  Keeper_metrics.(to_string ToolCallDurationBucket)
+
+let tool_call_duration_bucket_bounds =
+  [ 0.05, "0.05"
+  ; 0.1, "0.1"
+  ; 0.25, "0.25"
+  ; 0.5, "0.5"
+  ; 1.0, "1"
+  ; 2.5, "2.5"
+  ; 5.0, "5"
+  ; 10.0, "10"
+  ; 30.0, "30"
+  ; 60.0, "60"
+  ]
+
+let record_keeper_tool_duration_bucket ~labels duration_seconds =
+  let duration_seconds = max 0.0 duration_seconds in
+  let emit_bucket le ~increment =
+    let labels = labels @ [ "le", le ] in
+    Otel_metric_store.register_counter
+      ~name:tool_call_duration_bucket_metric
+      ~help:tool_call_duration_bucket_metric
+      ~labels
+      ();
+    if increment then
+      Otel_metric_store.inc_counter tool_call_duration_bucket_metric ~labels ()
+  in
+  List.iter
+    (fun (upper_bound, le) ->
+       emit_bucket le ~increment:(duration_seconds <= upper_bound))
+    tool_call_duration_bucket_bounds;
+  emit_bucket "+Inf" ~increment:true
+
 (* default_context_max + context_max_of_telemetry moved to
    Keeper_hooks_oas_types (intra-library file split, 2026-05-16). *)
 
@@ -157,15 +191,19 @@ let record_keeper_tool_duration_metric
     ~(keeper_name : string)
     (summary : tool_execution_summary)
   : unit =
+  let labels =
+    [label_keeper, keeper_name
+    ; label_provider, summary.provider
+    ; label_tool, summary.tool_name
+    ; label_outcome, summary.outcome
+    ]
+  in
+  let duration_seconds = summary.duration_ms /. ms_per_second in
   Otel_metric_store.observe_histogram
     Keeper_metrics.(to_string ToolCallDuration)
-    ~labels:
-      [label_keeper, keeper_name
-      ; "provider", summary.provider
-      ; "tool", summary.tool_name
-      ; "outcome", summary.outcome
-      ]
-    (summary.duration_ms /. ms_per_second)
+    ~labels
+    duration_seconds;
+  record_keeper_tool_duration_bucket ~labels duration_seconds
 
 (** Emit prompt/decode tokens-per-second histograms from an OAS turn
     response.  Safe to call with [telemetry = None] (no-op) and with

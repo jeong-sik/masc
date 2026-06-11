@@ -111,18 +111,18 @@ let emergency_compact_ratio_threshold : float =
   effective
 ;;
 
-(* Tool-heavy compaction thresholds.  Per-keeper values live on
-   [meta.compaction.tool_heavy_msg_threshold] and
-   [meta.compaction.tool_heavy_ratio_floor]; defaults at
-   {!Keeper_config.default_tool_heavy_msg_threshold} (40) and
-   {!Keeper_config.default_tool_heavy_ratio_floor} (0.15).
-
-   When message count exceeds the threshold AND context ratio exceeds
-   the floor, [decide_compaction] applies a Tool_heavy trigger that
-   bypasses the continuity-reflection cooldown, the same way the
-   emergency ratio gate does.  PR-A introduced the meta fields with
-   defaults preserving the prior global behavior; PR-B (this commit)
-   wires the meta values into the gate. *)
+(* The former tool_heavy trigger (msg_count > 40 && ratio > 0.15,
+   cooldown-bypassing) was removed: it gated on stored-history bulk that the
+   OAS call-time pruner (Agent_turn.prepare_messages: stub_tool_results
+   keep_recent + keep_last, applied on every LLM call without mutating
+   stored history) already bounds, while its destructive remedy
+   (prune/stub/drop on the checkpoint) erased in-flight investigation
+   state and did not push msg_count back under its own threshold —
+   re-arming itself within seconds.  Fleet logs 2026-06-08..10: 26/26
+   compactions fired via tool_heavy, none via the pressure gates below;
+   68k tokens saved vs ~1.2-2.6M re-spent on forced re-reads.
+   Real context pressure remains covered by ratio/message/token gates,
+   the emergency floor above, and the OAS overflow-retry summarizer. *)
 
 type compaction_decision =
   | Applied of Compaction_trigger.t
@@ -155,8 +155,6 @@ let decide_compaction
       ~message_gate
       ~token_gate
       ~cooldown_sec
-      ~tool_heavy_msg_threshold
-      ~tool_heavy_ratio_floor
       ~last_continuity_update_ts
       ~last_proactive_ts
       ~now_ts
@@ -176,15 +174,7 @@ let decide_compaction
     then 0.0
     else max 0.0 (Float.of_int cooldown_sec -. (now_ts -. last_reflection_ts))
   in
-  (* Tool-heavy compaction is an operational safety valve: accumulated
-     tool result bloat slows local inference and can hide below the
-     normal ratio/message/token gates, so it bypasses the reflection
-     cooldown like the emergency ratio gate. *)
-  let tool_heavy =
-    msg_count > tool_heavy_msg_threshold
-    && ratio > tool_heavy_ratio_floor
-  in
-  if not reflection_ready && not tool_heavy
+  if not reflection_ready
   then Skipped_continuity_reflection { hold_s; cooldown_sec }
   else if ratio >= ratio_gate
   then Applied (Compaction_trigger.Ratio_threshold { ratio; threshold = ratio_gate })
@@ -192,8 +182,6 @@ let decide_compaction
   then Applied (Compaction_trigger.Message_count { count = msg_count; threshold = message_gate })
   else if token_gate > 0 && tok_count >= token_gate
   then Applied (Compaction_trigger.Token_count { count = tok_count; threshold = token_gate })
-  else if tool_heavy
-  then Applied (Compaction_trigger.Tool_heavy { messages = msg_count; ratio })
   else Blocked_below_thresholds
 ;;
 
@@ -223,8 +211,6 @@ let compact_if_needed_typed
       ~message_gate
       ~token_gate
       ~cooldown_sec:meta.compaction.cooldown_sec
-      ~tool_heavy_msg_threshold:meta.compaction.tool_heavy_msg_threshold
-      ~tool_heavy_ratio_floor:meta.compaction.tool_heavy_ratio_floor
       ~last_continuity_update_ts:meta.runtime.last_continuity_update_ts
       ~last_proactive_ts:meta.runtime.proactive_rt.last_ts
       ~now_ts

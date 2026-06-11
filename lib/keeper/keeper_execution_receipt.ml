@@ -178,8 +178,8 @@ let operator_disposition (receipt : t)
   in
   (* Pre-typing, this branch also matched runtime_outcome="runtime_exhausted"
      and "exhausted" — neither is in the producer's closed [runtime_outcome]
-     set ([Runtime_passed_to_next_model] / [_completed] / [_not_observed] /
-     [_not_dispatched]).  Those branches were unreachable workarounds; the
+     set ([Runtime_passed_to_next_model] / [_completed] / [_failed] /
+     [_not_observed] / [_not_dispatched]).  Those branches were unreachable workarounds; the
      typed migration drops them.  Runtime exhaustion still reaches this
      branch via [terminal_reason="runtime_exhausted"]. *)
   match terminal_reason with

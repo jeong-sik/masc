@@ -179,7 +179,18 @@ let handle_keeper_board_tool
       (String_util.utf8_safe ~max_bytes:203 ~suffix:"..." msg |> String_util.to_string);
     tool_result_or_error result)
   | "keeper_board_list" -> dispatch_board Tool_name.Board_name.Board_list args
-  | "keeper_board_get" -> dispatch_board Tool_name.Board_name.Board_get args
+  | "keeper_board_post_get" ->
+    (match string_arg "post_id" args with
+     | Some pid when String.trim pid <> "" ->
+       dispatch_board Tool_name.Board_name.Board_post_get args
+     | _ ->
+       error_json
+         ~fields:[ "reason", `String "missing_post_id"
+                 ; "recovery", `String "call keeper_board_list or keeper_board_search first" ]
+         "keeper_board_post_get requires post_id (format: p-xxxx). \
+          You sent empty or missing post_id. Call keeper_board_list \
+          or keeper_board_search first to discover available post IDs, \
+          then retry with the post_id you want to read.")
   | "keeper_board_comment" ->
     dispatch_board
       Tool_name.Board_name.Board_comment

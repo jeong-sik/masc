@@ -45,8 +45,10 @@ type attainment_unit =
 
 (** {1 Pure task-status helpers} *)
 
-val task_is_linked_to_goal : Masc_domain.task -> string -> bool
-val task_linkage_source_opt : Masc_domain.task -> string -> string option
+val task_is_linked_to_goal :
+  ?goal_task_index:(string, string list) Hashtbl.t -> Masc_domain.task -> string -> bool
+val task_linkage_source_opt :
+  ?goal_task_index:(string, string list) Hashtbl.t -> Masc_domain.task -> string -> string option
 val task_assignee : Masc_domain.task -> string option
 val task_status_label : Masc_domain.task -> string
 val task_is_terminal : Masc_domain.task -> bool
@@ -306,6 +308,7 @@ type build_context = {
   keeper_metas : Keeper_meta_contract.keeper_meta list;
   latest_receipts : (string * Yojson.Safe.t) list;
   latest_runtime_trusts : (string * Yojson.Safe.t) list;
+  goal_task_index : (string, string list) Hashtbl.t;
 }
 
 (** Recursive pure projection: given a [build_context] snapshot, build

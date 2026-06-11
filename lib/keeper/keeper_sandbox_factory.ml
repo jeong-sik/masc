@@ -1,3 +1,8 @@
+type resolve_result =
+  | Runtime of Keeper_turn_sandbox_runtime.t
+  | No_factory
+  | Local_profile
+
 type t = {
   config : Workspace.config;
   meta : Keeper_meta_contract.keeper_meta;
@@ -58,7 +63,7 @@ let resolve (t : t) ~cwd =
       Option.value t.default_network_override ~default:effective_network
     in
     match effective_profile with
-    | Keeper_types_profile_sandbox.Local -> None
+    | Keeper_types_profile_sandbox.Local -> Local_profile
     | Keeper_types_profile_sandbox.Docker ->
       let host_root =
         Keeper_sandbox.host_root_abs_of_meta ~config:t.config meta
@@ -72,7 +77,7 @@ let resolve (t : t) ~cwd =
         , image )
       in
       match Hashtbl.find_opt t.cache key with
-      | Some r -> Some r
+      | Some r -> Runtime r
       | None ->
         let r =
           Keeper_turn_sandbox_runtime.create
@@ -83,10 +88,12 @@ let resolve (t : t) ~cwd =
             ()
         in
         Hashtbl.add t.cache key r;
-        Some r)
+        Runtime r)
 
 let resolve_opt t_opt ~cwd =
-  Option.bind t_opt (fun t -> resolve t ~cwd)
+  match t_opt with
+  | None -> No_factory
+  | Some t -> resolve t ~cwd
 
 let container_cwd_of_host t ~host_cwd =
   let meta = current_meta t in

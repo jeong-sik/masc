@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { useSignalValue } from './use-signal-value'
 import { fetchBoard } from '../../api/board'
 import type { BoardPost } from '../../types/core'
 import { bridgePostsToTrace } from './anchored-thread-trace-bridge'
@@ -92,23 +93,22 @@ function parseIsoToMs(iso: string): number {
   return new Date(iso).getTime()
 }
 
-function boardKindFromPost(post: BoardPost): ThreadKind {
-  if (post.hearth) {
-    switch (post.hearth.toLowerCase()) {
-      case 'approve': return 'approve'
-      case 'flag': return 'flag'
-      case 'question': return 'question'
-      case 'suggest': return 'suggest'
-      case 'note': return 'note'
-    }
+function parseThreadKind(hearth: string): ThreadKind | null {
+  switch (hearth.toLowerCase()) {
+    case 'approve': return 'approve'
+    case 'flag': return 'flag'
+    case 'question': return 'question'
+    case 'suggest': return 'suggest'
+    case 'note': return 'note'
+    default: return null
   }
-  const body = (post.body ?? '').toLowerCase()
-  const title = (post.title ?? '').toLowerCase()
-  const text = `${title} ${body}`
-  if (text.includes('approve') || text.includes('ship it') || text.includes('looks good')) return 'approve'
-  if (text.includes('flag') || text.includes('blocker') || text.includes('race condition')) return 'flag'
-  if (text.includes('suggest') || text.includes('could you') || text.includes('recommend')) return 'suggest'
-  if (text.includes('?') || text.includes('question') || text.includes('should')) return 'question'
+}
+
+export function boardKindFromPost(post: BoardPost): ThreadKind {
+  if (post.hearth) {
+    const kind = parseThreadKind(post.hearth)
+    if (kind !== null) return kind
+  }
   return 'note'
 }
 
@@ -120,16 +120,9 @@ export function IdeConversationRail() {
   const [replayUntilMs, setReplayUntilMs] = useState<number | null>(ideReplayUntilMs.value)
   const [activeFile, setActiveFile] = useState(activeIdeFile.value)
   const [keeperName, setKeeperName] = useState(activeKeeperName.value)
-  const [, forceRender] = useState(0)
-
-  useEffect(() => {
-    const unsub = globalPresenceSnapshot.subscribe(() => forceRender((t: number) => t + 1))
-    return () => unsub()
-  }, [])
-  useEffect(() => {
-    const unsub = cursorOverlaySignal.subscribe(() => forceRender((t: number) => t + 1))
-    return () => unsub()
-  }, [])
+  const [, bumpThreads] = useState(0)
+  useSignalValue(globalPresenceSnapshot)
+  useSignalValue(cursorOverlaySignal)
   useEffect(() => {
     const unsub = ideReplayUntilMs.subscribe(value => setReplayUntilMs(value))
     return () => unsub()
@@ -158,7 +151,7 @@ export function IdeConversationRail() {
   useEffect(() => {
     const publish = () => {
       publishIdeConversationThreads(threadStore.filePath(), threadStore.visibleThreads())
-      forceRender((t: number) => t + 1)
+      bumpThreads((t: number) => t + 1)
     }
     const unsub = threadStore.subscribe(publish)
     publish()

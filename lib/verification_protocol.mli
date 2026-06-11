@@ -39,6 +39,14 @@ val create_submit_request :
     board persistence fails or the task does not satisfy the
     contract gap pre-check. *)
 
+val delete_verification_request :
+  config:Workspace.config ->
+  verification_id:string ->
+  (unit, string) result
+(** RFC-0221 §3.1 compensation: remove the verification record for
+    [verification_id] when its task_status commit did not land, so the two
+    stores never disagree. A missing record is success (idempotent). *)
+
 val notify_submit_for_verification :
   config:Workspace.config ->
   task:Masc_domain.task ->

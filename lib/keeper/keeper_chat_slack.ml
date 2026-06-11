@@ -17,6 +17,7 @@ let pp_error fmt = function
 let slack_message_limit = 4000
 
 let send_message ~token ~channel ~content =
+  let content = Observability_redact.redact_text content in
   let truncated =
     if String.length content > slack_message_limit then
       String.sub content 0 slack_message_limit

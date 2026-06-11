@@ -512,6 +512,12 @@ type keeper_stream_worker_event =
 let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
     ~payload ~run_id ~message_id ~agent_name
     ~(events : Keeper_chat_events.keeper_chat_event Eio.Stream.t) =
+  let base_path = state.Mcp_server.workspace_config.base_path in
+  let redaction =
+    Keeper_secret_redaction.snapshot ~base_path ~keeper_name:payload.name
+  in
+  let redact_text = Keeper_secret_redaction.redact_text redaction in
+  let redact_json = Keeper_secret_redaction.redact_json redaction in
   Keeper_chat_events.publish events
     (Run_started { run_id; thread_id });
   Keeper_chat_events.publish events
@@ -553,11 +559,10 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
       (if payload.attachments = [] then base_fields
        else ("attachments", `List (List.map attachment_json payload.attachments)) :: base_fields)
   in
-  (* Track whether any text deltas were streamed to the client.
-     When streaming is active, the MODEL text is sent token-by-token
-     during the call; we only need to send the final batch chunks
-     if no deltas were emitted (fallback path). *)
-  let deltas_sent = ref false in
+  (* Buffer model text deltas until the terminal payload arrives. This
+     avoids sending raw partial output before the full reply can pass
+     through keeper-scoped redaction. *)
+  let streamed_text = Buffer.create 256 in
   let worker_events = Eio.Stream.create 512 in
   let push_worker_event event =
     if not !closed then
@@ -621,7 +626,7 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
   in
   let persist_failure_reply err =
     Keeper_chat_store.append_turn
-      ~base_dir:state.Mcp_server.workspace_config.base_path
+      ~base_dir:base_path
       ~keeper_name:payload.name
       ~user_content:payload.message
       ~user_attachments:payload.attachments
@@ -636,7 +641,7 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
   let timeout_sec = Option.map float_of_int payload.timeout_sec in
   let request_id =
     Keeper_msg_async.submit ?timeout_sec ~clock ~sw
-      ~base_path:state.Mcp_server.workspace_config.base_path
+      ~base_path
       ~keeper_name:payload.name
       ~f:(fun () ->
         let start_time = Time_compat.now () in
@@ -666,7 +671,7 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
             let _payload_json_opt, visible_reply = extract_visible_reply body in
             if not (is_continuation_checkpoint_reply visible_reply) then begin
               Keeper_chat_store.append_turn
-                ~base_dir:state.Mcp_server.workspace_config.base_path
+                ~base_dir:base_path
                 ~keeper_name:payload.name
                 ~user_content:payload.message
                 ~user_attachments:payload.attachments
@@ -717,6 +722,7 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
              }
        });
   let publish_terminal ~status ~ok ?(message = "") () =
+    let message = redact_text message in
     let payload_json =
       keeper_request_terminal_payload ~request_id ~keeper_name:payload.name
         ~status ~ok ~message ()
@@ -740,40 +746,55 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
          | Agent_sdk.Types.Connected ->
              Keeper_chat_events.publish events (Custom { name = "KEEPER_CONNECTED"; value = `Null })
          | Agent_sdk.Types.Timeout reason ->
-             Keeper_chat_events.publish events (Event_error { message = "Timeout: " ^ reason })
+             Keeper_chat_events.publish events
+               (Event_error { message = redact_text ("Timeout: " ^ reason) })
          | Agent_sdk.Types.ContentBlockDelta { delta = TextDelta text; _ } ->
-             deltas_sent := true;
-             Keeper_chat_events.publish events (Text_delta text)
+             Buffer.add_string streamed_text text
          | Agent_sdk.Types.ContentBlockDelta { delta = ThinkingDelta text; _ } ->
-             Keeper_chat_events.publish events (Custom { name = "KEEPER_THINKING_DELTA"; value = `Assoc [ ("delta", `String text) ] })
+             Keeper_chat_events.publish events
+               (Custom
+                  { name = "KEEPER_THINKING_DELTA";
+                    value = `Assoc [ ("delta", `String (redact_text text)) ] })
          | Agent_sdk.Types.ContentBlockStart { index; tool_id = Some tid; tool_name = Some tname; _ } ->
              Hashtbl.replace index_to_tool_id index tid;
              Keeper_chat_events.publish events (Tool_call_start { tool_call_id = tid; tool_call_name = tname })
          | Agent_sdk.Types.ContentBlockDelta { index; delta = InputJsonDelta args } ->
              let tid = Hashtbl.find_opt index_to_tool_id index |> Option.value ~default:"" in
-             Keeper_chat_events.publish events (Tool_call_args { tool_call_id = tid; delta = args })
+             Keeper_chat_events.publish events
+               (Tool_call_args { tool_call_id = tid; delta = redact_text args })
          | Agent_sdk.Types.ContentBlockStop { index } ->
              let tid = Hashtbl.find_opt index_to_tool_id index |> Option.value ~default:"" in
              Keeper_chat_events.publish events (Tool_call_end { tool_call_id = tid })
          | _ -> ());
         consume_worker_events ()
     | Stream_terminal (false, err) ->
+        let err = redact_text err in
         publish_terminal ~status:"error" ~ok:false ~message:err ();
         Keeper_chat_events.publish events (Event_error { message = err })
     | Stream_terminal (true, body) -> (
         try
           let payload_json_opt, visible_reply = extract_visible_reply body in
+          let visible_reply =
+            match String.trim visible_reply with
+            | "" ->
+                let streamed = Buffer.contents streamed_text |> String.trim in
+                if streamed = "" then visible_reply else streamed
+            | _ -> visible_reply
+          in
+          let visible_reply = redact_text visible_reply in
           let is_checkpoint =
             is_continuation_checkpoint_reply visible_reply
           in
-          if (not !deltas_sent) && not is_checkpoint then
+          if not is_checkpoint then
             split_keeper_reply_chunks visible_reply
             |> List.iter (fun chunk ->
                    Keeper_chat_events.publish events (Text_delta chunk));
           (match payload_json_opt with
            | Some payload_json ->
                Keeper_chat_events.publish events
-                 (Custom { name = "KEEPER_REPLY_DETAILS"; value = payload_json })
+                 (Custom
+                    { name = "KEEPER_REPLY_DETAILS";
+                      value = redact_json payload_json })
            | None -> ());
           if is_checkpoint then
             Keeper_chat_events.publish events
@@ -790,7 +811,7 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
         with
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn ->
-            let message = Printexc.to_string exn in
+            let message = redact_text (Printexc.to_string exn) in
             publish_terminal ~status:"error" ~ok:false ~message ();
             Keeper_chat_events.publish events
               (Event_error { message }))
@@ -799,6 +820,13 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
 
 
 let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
+  let redaction =
+    Keeper_secret_redaction.snapshot
+      ~base_path:state.Mcp_server.workspace_config.base_path
+      ~keeper_name:payload.name
+  in
+  let redact_text = Keeper_secret_redaction.redact_text redaction in
+  let redact_json = Keeper_secret_redaction.redact_json redaction in
   let origin = get_origin request in
   let headers =
     Httpun.Headers.of_list
@@ -838,6 +866,7 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
       | Keeper_chat_events.Assistant -> Ag_ui.Assistant
     in
     let send_error message =
+      let message = redact_text message in
       match !current_run_id with
       | Some run_id ->
           send_keeper_error writer mutex closed ~thread_id:!current_thread_id
@@ -875,7 +904,8 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
               keeper_stream_send_event writer mutex closed
                 Ag_ui.(
                   make_event ~thread_id:!current_thread_id ~run_id:!current_run_id
-                    ~message_id:!current_message_id ~delta:(Some text)
+                    ~message_id:!current_message_id
+                    ~delta:(Some (redact_text text))
                     Text_message_content)
             then loop ()
         | Text_message_end ->
@@ -890,7 +920,9 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
               keeper_stream_send_event writer mutex closed
                 Ag_ui.(
                   make_event ~thread_id:!current_thread_id ~run_id:!current_run_id
-                    ~custom_name:(Some name) ~custom_value:(Some value) Custom)
+                    ~custom_name:(Some name)
+                    ~custom_value:(Some (redact_json value))
+                    Custom)
             then loop ()
         | Tool_call_start { tool_call_id; tool_call_name } ->
             if
@@ -905,7 +937,8 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
               keeper_stream_send_event writer mutex closed
                 Ag_ui.(
                   make_event ~thread_id:!current_thread_id ~run_id:!current_run_id
-                    ~tool_call_id:(Some tool_call_id) ~delta:(Some delta)
+                    ~tool_call_id:(Some tool_call_id)
+                    ~delta:(Some (redact_text delta))
                     Tool_call_args)
             then loop ()
         | Tool_call_end { tool_call_id } ->

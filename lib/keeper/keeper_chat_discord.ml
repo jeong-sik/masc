@@ -1,6 +1,7 @@
 (** Keeper_chat_discord — Discord delivery adapter for keeper chat events. *)
 
 let send_message ~token ~channel_id ~content =
+  let content = Observability_redact.redact_text content in
   let limit = Discord_rest_client.message_content_limit in
   let len = String.length content in
   if len = 0 then ()

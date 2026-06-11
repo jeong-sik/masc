@@ -29,6 +29,32 @@ let write_file path content =
     ~finally:(fun () -> close_out_noerr oc)
     (fun () -> output_string oc content)
 
+let read_file path =
+  let ic = open_in_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () -> really_input_string ic (in_channel_length ic))
+
+let with_env key value f =
+  let prior = Sys.getenv_opt key in
+  Unix.putenv key value;
+  Fun.protect
+    ~finally:(fun () ->
+      match prior with
+      | Some v -> Unix.putenv key v
+      | None -> Unix.putenv key "")
+    f
+
+let contains_substring haystack needle =
+  String_util.contains_substring haystack needle
+
+let secret_root_default ~base_dir ~keeper_name =
+  Filename.concat
+    (Filename.concat
+       (Common.masc_dir_from_base_path ~base_path:base_dir)
+       "secrets")
+    (Workspace_utils.safe_filename keeper_name)
+
 let drop_value reason =
   P.metric_value_or_zero P.metric_persistence_read_drops
     ~labels:[("surface", "keeper_chat_store"); ("reason", reason)]
@@ -142,6 +168,75 @@ let test_legacy_lines_parse_without_new_fields () =
             None assistant.tool_call_id
       | messages ->
           Alcotest.failf "expected 2 messages, got %d" (List.length messages))
+
+let test_append_turn_redacts_projected_secrets () =
+  let base_dir = temp_base_path "keeper-chat-store-redact" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      with_env "MASC_SECRET_DIR" "" @@ fun () ->
+      let keeper_name = "keeper-chat-redact" in
+      let root = secret_root_default ~base_dir ~keeper_name in
+      let env_secret = "chat.secret!" in
+      let file_secret = "file.secret!" in
+      write_file (Filename.concat (Filename.concat root "env") "GH_TOKEN")
+        (env_secret ^ "\n");
+      write_file
+        (Filename.concat (Filename.concat root "files") "home/keeper/key")
+        file_secret;
+      K.append_turn ~base_dir ~keeper_name
+        ~user_content:("use " ^ env_secret)
+        ~user_attachments:
+          [ { K.id = "att-1";
+              att_type = "text";
+              name = "secret.txt";
+              size = String.length file_secret;
+              mime_type = "text/plain";
+              data = file_secret } ]
+        ~tool_calls:
+          [ { K.call_id = "toolu_1";
+              call_name = "keeper_exec";
+              args = {|{"token":"|} ^ env_secret ^ {|"}|} } ]
+        ~assistant_content:("done " ^ file_secret)
+        ();
+      let raw = read_file (chat_path ~base_dir ~keeper_name) in
+      Alcotest.(check bool) "env secret not persisted" false
+        (contains_substring raw env_secret);
+      Alcotest.(check bool) "file secret not persisted" false
+        (contains_substring raw file_secret);
+      let messages = K.load ~base_dir ~keeper_name in
+      let rendered = Yojson.Safe.to_string (K.to_json_array messages) in
+      Alcotest.(check bool) "loaded view stays redacted" false
+        (contains_substring rendered env_secret);
+      Alcotest.(check bool) "redaction marker present" true
+        (contains_substring rendered "[REDACTED]"))
+
+let test_load_redacts_legacy_raw_secret_rows () =
+  let base_dir = temp_base_path "keeper-chat-store-read-redact" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      with_env "MASC_SECRET_DIR" "" @@ fun () ->
+      let keeper_name = "keeper-chat-read-redact" in
+      let root = secret_root_default ~base_dir ~keeper_name in
+      let secret = "legacy.secret!" in
+      write_file (Filename.concat (Filename.concat root "env") "GH_TOKEN") secret;
+      let path = chat_path ~base_dir ~keeper_name in
+      write_file path
+        (Yojson.Safe.to_string
+           (`Assoc
+              [ ("role", `String "assistant");
+                ("content", `String ("old row " ^ secret));
+                ("ts", `Float 1.0) ])
+         ^ "\n");
+      match K.load ~base_dir ~keeper_name with
+      | [ msg ] ->
+          Alcotest.(check bool) "legacy raw value hidden on read" false
+            (contains_substring msg.K.content secret);
+          Alcotest.(check bool) "marker present on read" true
+            (contains_substring msg.K.content "[REDACTED]")
+      | messages ->
+          Alcotest.failf "expected 1 message, got %d" (List.length messages))
 
 (* RFC-0223 P1 — speaker identity round-trips on the user line only. *)
 
@@ -494,6 +589,10 @@ let () =
             test_append_turn_roundtrip;
           Alcotest.test_case "legacy lines parse" `Quick
             test_legacy_lines_parse_without_new_fields;
+          Alcotest.test_case "append_turn redacts projected secrets" `Quick
+            test_append_turn_redacts_projected_secrets;
+          Alcotest.test_case "load redacts legacy raw secret rows" `Quick
+            test_load_redacts_legacy_raw_secret_rows;
           Alcotest.test_case "window counts primaries only" `Quick
             test_window_keeps_tool_lines_of_retained_turns;
           Alcotest.test_case "orphan leading tool lines trimmed" `Quick

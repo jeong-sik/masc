@@ -27,19 +27,20 @@ export function showConnectorActionError(headline: string, err: unknown): void {
   )
 }
 
-/** requestConfirm doubles as the read-only detail dialog: confirm =
-    close, the secondary (cancel) slot = copy-and-close. Copy is the
-    one follow-up operators actually take from here (pasting the raw
-    text into an issue or a terminal search). */
+/** requestConfirm doubles as the read-only detail dialog. Copy must
+    sit on the CONFIRM slot: ConfirmDialogOverlay maps Escape and
+    backdrop-click to onCancel, so anything on the cancel slot also
+    fires on accidental dismissal. Confirm only fires on a deliberate
+    button click — cancel/Escape/backdrop are all a plain close. */
 export async function openConnectorErrorDetail(headline: string, raw: string): Promise<void> {
-  const closedWithoutCopy = await requestConfirm({
+  const copyRequested = await requestConfirm({
     title: headline,
     message: raw,
-    confirmText: '닫기',
-    cancelText: '복사 후 닫기',
+    confirmText: '복사 후 닫기',
+    cancelText: '닫기',
     tone: 'info',
   })
-  if (!closedWithoutCopy) {
+  if (copyRequested) {
     try {
       await navigator.clipboard.writeText(raw)
       showToast('오류 내용을 클립보드에 복사했습니다.', 'success')

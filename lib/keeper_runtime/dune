@@ -18,6 +18,7 @@
   keeper_livelock_state
   keeper_binding_health_config
   keeper_recording_error_state
+  keeper_ops_iteration
   keeper_internal_error
   keeper_event_queue)
  (libraries

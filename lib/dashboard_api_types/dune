@@ -3,7 +3,7 @@
 (library
  (name masc_dashboard_api_types)
  (public_name masc.masc_dashboard_api_types)
- (modules keepers)
+ (modules keepers iteration)
  ; RFC-0071 §3.4 Phase 5 ratchet (warning 4)
  (flags
   (:standard -w +4))

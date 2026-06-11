@@ -361,6 +361,132 @@ let test_keeper_msg_async_rejects_oversized_request_id () =
          (Keeper_msg_async.For_testing.record_path ~base_path ~request_id:too_long))
 ;;
 
+(* ── timeout_sec boundary tests ── *)
+
+let test_keeper_msg_async_timeout_sec_zero () =
+  with_eio_env
+  @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run
+  @@ fun sw ->
+  let base_path = temp_dir "keeper-msg-async-timeout0-" in
+  let request_id =
+    Keeper_msg_async.submit
+      ~clock
+      ~timeout_sec:0.0
+      ~sw
+      ~base_path
+      ~keeper_name:"t0"
+      ~f:(fun () ->
+        Eio.Fiber.yield ();
+        Eio.Time.sleep clock 10.0;
+        tr_ok "too-late")
+      ()
+  in
+  let entry = wait_for_done_with_clock clock request_id in
+  (match entry.Keeper_msg_async.status with
+   | Done { ok = false; body } ->
+     Alcotest.(check bool)
+       "timeout_sec=0.0 triggers immediate timeout"
+       true
+       (contains_substring ~needle:"keeper_msg_timeout" body)
+   | Done { ok = true; _ } ->
+     Alcotest.fail "timeout_sec=0.0 should not produce ok=true"
+   | Running -> Alcotest.fail "timeout_sec=0.0 should not remain running"
+   | Lost _ -> Alcotest.fail "timeout_sec=0.0 should not produce lost");
+  rm_rf base_path
+;;
+
+let test_keeper_msg_async_timeout_sec_infinity () =
+  with_eio_env
+  @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run
+  @@ fun sw ->
+  let base_path = temp_dir "keeper-msg-async-timeoutinf-" in
+  let request_id =
+    Keeper_msg_async.submit
+      ~clock
+      ~timeout_sec:Float.infinity
+      ~sw
+      ~base_path
+      ~keeper_name:"tinf"
+      ~f:(fun () ->
+        Eio.Fiber.yield ();
+        tr_ok (Yojson.Safe.to_string (`Assoc [ "kind", `String "infinity-ok" ])))
+      ()
+  in
+  let entry = wait_for_done request_id in
+  Alcotest.(check bool)
+    "timeout_sec=infinity completes normally"
+    true
+    (match entry.Keeper_msg_async.status with
+     | Done { ok = true; body } ->
+       String.length body > 0
+       && contains_substring ~needle:"infinity-ok" body
+     | _ -> false);
+  rm_rf base_path
+;;
+
+let test_keeper_msg_async_timeout_sec_negative () =
+  with_eio_env
+  @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run
+  @@ fun sw ->
+  let base_path = temp_dir "keeper-msg-async-negtimeout-" in
+  let request_id =
+    Keeper_msg_async.submit
+      ~clock
+      ~timeout_sec:(-1.0)
+      ~sw
+      ~base_path
+      ~keeper_name:"tneg"
+      ~f:(fun () ->
+        Eio.Fiber.yield ();
+        tr_ok (Yojson.Safe.to_string (`Assoc [ "kind", `String "negative-ok" ])))
+      ()
+  in
+  let entry = wait_for_done_with_clock clock request_id in
+  (match entry.Keeper_msg_async.status with
+   | Done { ok = false; body } ->
+     Alcotest.(check bool)
+       "negative timeout handled gracefully (timeout)"
+       true
+       (contains_substring ~needle:"keeper_msg_timeout" body)
+   | Done { ok = true; _ } -> ()
+   | Running -> Alcotest.fail "negative timeout should not remain running"
+   | Lost _ -> Alcotest.fail "negative timeout should not produce lost");
+  rm_rf base_path
+;;
+
+let test_keeper_msg_async_timeout_sec_zero_no_clock () =
+  with_eio_env
+  @@ fun _env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let base_path = temp_dir "keeper-msg-async-t0noclock-" in
+  let request_id =
+    Keeper_msg_async.submit
+      ~timeout_sec:0.0
+      ~sw
+      ~base_path
+      ~keeper_name:"t0nc"
+      ~f:(fun () ->
+        Eio.Fiber.yield ();
+        tr_ok "no-clock-ok")
+      ()
+  in
+  let entry = wait_for_done request_id in
+  Alcotest.(check bool)
+    "timeout_sec without clock is ignored, completes normally"
+    true
+    (match entry.Keeper_msg_async.status with
+     | Done { ok = true; _ } -> true
+     | _ -> false);
+  rm_rf base_path
+;;
+
 let test_yield_meter_noops_without_runnable_fiber () =
   let meter = Eio_guard.create_yield_meter ~interval:0 () in
   Eio_guard.enable ();
@@ -441,6 +567,22 @@ let () =
             "gc removes stale terminal disk record"
             `Quick
             test_keeper_msg_async_gc_removes_stale_terminal_disk_record
+        ; test_case
+            "timeout_sec=0.0 triggers immediate timeout"
+            `Quick
+            test_keeper_msg_async_timeout_sec_zero
+        ; test_case
+            "timeout_sec=infinity completes normally"
+            `Quick
+            test_keeper_msg_async_timeout_sec_infinity
+        ; test_case
+            "timeout_sec=negative handled gracefully"
+            `Quick
+            test_keeper_msg_async_timeout_sec_negative
+        ; test_case
+            "timeout_sec without clock is ignored"
+            `Quick
+            test_keeper_msg_async_timeout_sec_zero_no_clock
         ; test_case
             "oversized request id rejected"
             `Quick

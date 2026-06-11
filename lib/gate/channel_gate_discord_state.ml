@@ -229,6 +229,8 @@ let status_json ?(audit_limit = 10) () =
     | Reconnect_pending _ | Failed _ -> false
   in
   let stale = false in
+  (* NDT-OK: status_json is a dashboard observation boundary; this timestamp
+     only reports gateway freshness and is not used for control flow. *)
   let updated_at = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ()) in
   let error =
     match gateway_state with
@@ -264,6 +266,8 @@ let status_json ?(audit_limit = 10) () =
       ("gate_health_checked_at", `String (if connected then updated_at else ""));
       ("binding_source", `String "persisted");
       ("runtime_bindings_count", `Int (List.length configured_bindings));
+      (* NDT-OK: pid is process identity telemetry for operators; availability
+         and connection status come from the gateway state above. *)
       ("pid", `Int (if available then Unix.getpid () else 0));
       ( "configured_bindings",
         `List (List.map binding_json configured_bindings) );

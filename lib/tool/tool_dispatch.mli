@@ -97,7 +97,7 @@ type span_wrapper =
   -> Tool_result.result option * string
 (** Wrapper applied around the dispatch body in {!guarded_dispatch}. Mirrors the
     shape of [Tool_telemetry.with_span]: it opens a span, runs the body (which
-    receives a trace-id thunk and returns [(result, outcome_label)]), and
+    receives a trace-link thunk and returns [(result, outcome_label)]), and
     finalizes the metric with [outcome_label]. The default is the identity
     wrapper. *)
 

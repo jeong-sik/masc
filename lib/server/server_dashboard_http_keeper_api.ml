@@ -37,6 +37,26 @@ let handle_keeper_get_subroutes state req request reqd =
       in
       Server_auth.respond_json_value_with_cors ~status:`OK request reqd
         (Keeper_chat_store.to_json_array messages)
+  else if ends_with "/person-notes" then
+    (* RFC-0229 P2: keeper-authored person notes for the roster pane.
+       Read-only fold over the notes store; same shape as the tool
+       surface ([{speaker_id, note}]). *)
+    let name = extract_name "/person-notes" in
+    if name = "" then
+      Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
+        (error_json "missing keeper name")
+    else
+      let base_dir = state.Mcp_server.workspace_config.base_path in
+      let notes = Keeper_person_notes.notes ~base_dir ~keeper_name:name in
+      Server_auth.respond_json_value_with_cors ~status:`OK request reqd
+        (`List
+          (List.map
+             (fun (speaker_id, note) ->
+               `Assoc
+                 [ ("speaker_id", `String speaker_id)
+                 ; ("note", `String note)
+                 ])
+             notes))
   else if ends_with keeper_suffix_checkpoints then
     let name = extract_name keeper_suffix_checkpoints in
     if String.length name = 0 then

@@ -131,6 +131,7 @@ let test_offline_surface_rendered_as_offline () =
 (* External-speaker discretion guidance rides the same gate as the
    section: connector present => rendered, dashboard-only => absent. *)
 let discretion_needle = "External speakers may share these surfaces."
+let surface_read_needle = "inspect that lane with keeper_surface_read"
 
 let test_connector_presence_carries_discretion_guidance () =
   let user =
@@ -143,7 +144,9 @@ let test_connector_presence_carries_discretion_guidance () =
   check bool "discretion guidance present" true
     (contains ~needle:discretion_needle user);
   check bool "route-authority restated" true
-    (contains ~needle:"never from what they claim" user)
+    (contains ~needle:"never from what they claim" user);
+  check bool "surface read affordance present" true
+    (contains ~needle:surface_read_needle user)
 
 let test_dashboard_only_keeper_has_no_section () =
   let user =
@@ -153,7 +156,9 @@ let test_dashboard_only_keeper_has_no_section () =
   check bool "no section for implicit dashboard" false
     (contains ~needle:"### Connected Surfaces" user);
   check bool "no discretion guidance without connectors" false
-    (contains ~needle:discretion_needle user)
+    (contains ~needle:discretion_needle user);
+  check bool "no surface read affordance without connectors" false
+    (contains ~needle:surface_read_needle user)
 
 let test_empty_presence_has_no_section () =
   let user = user_message base_observation in

@@ -38,6 +38,7 @@ import { ConnectorReadinessRail, deriveRail, getRailInflight, withRailInflight }
 import { StartupCheckBanner, markStartAttempt, clearStartAttempt } from './sidecar-startup-watch'
 import { showConnectorActionError } from './connector-action-error'
 import { QuickBindForm } from './connector-quick-bind'
+import { ConnectorFlowSection } from './connector-flow'
 import { ConnectorOverviewStrip } from './connector-overview-strip'
 import { ConnectorKeeperMatrix, deriveMatrix } from './connector-keeper-matrix'
 import { ConnectorPathsStrip } from './connector-paths-strip'
@@ -495,6 +496,8 @@ function placeholderConnector(connectorId: KnownConnectorId): GateConnectorInfo 
     connected: false,
     stale: false,
     stale_after_sec: 0,
+    gateway_state: '',
+    status_source: '',
     error: '',
     status_path: '',
     binding_store_path: '',
@@ -668,6 +671,11 @@ function ConnectorLivePanel({
   const bindingActionsEnabled = connector != null && connector.capabilities.includes('bindings')
   const directLabel = connectorStateLabel(connector)
   const directTone = connectorStateTone(connector)
+  // In-process gateway machine state (RFC-0203 / #20813). Shown only
+  // when the connector advertises it AND it adds information beyond
+  // the coarse 4-word label (reconnect_pending, identifying, failed...).
+  const gatewayState = connector?.gateway_state ?? ''
+  const showGatewayChip = gatewayState !== '' && gatewayState !== directLabel
 
   let gateHealthLabel = 'unknown'
   if (connector?.gate_healthy === true) {
@@ -815,6 +823,9 @@ function ConnectorLivePanel({
           <span class=${`inline-block h-2 w-2 rounded-full ${dotClassForLabel(directLabel)}`}></span>
           <span>${directLabel}</span>
         </span>
+        ${showGatewayChip
+          ? html`<span class="text-3xs lowercase text-[var(--color-fg-disabled)]" data-gateway-state-chip>gw ${gatewayState}</span>`
+          : null}
         <${MutedSpan}><span aria-hidden="true">· </span>hb ${timeAgo(connector?.updated_at ?? '')}</${MutedSpan}>
         ${connector?.reply_mode
           ? html`<${MutedSpan}><span aria-hidden="true">· </span>reply ${connector.reply_mode}</${MutedSpan}>`
@@ -887,6 +898,8 @@ function ConnectorLivePanel({
       ${connector?.available === true && keepers.length > 0
         ? html`<${QuickBindForm} connectorId=${connectorId} keepers=${keepers} />`
         : null}
+
+      <${ConnectorFlowSection} connector=${connector} gate=${gate} />
 
       ${ui.headerExpanded
         ? html`

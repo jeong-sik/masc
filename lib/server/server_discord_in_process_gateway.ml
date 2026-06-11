@@ -75,7 +75,10 @@ let trigger_typing_once ~channel_id =
    "response requested", "waiting for a keeper response", and "streaming
    response text" as separate runtime phases. This helper projects only the
    waiting phase to Discord UX without making typing a MASC state source of
-   truth. Streaming text should be a separate edit-loop transport. *)
+   truth. If the keeper is already running another lane, the dispatch waits
+   behind the same turn-admission slot; this refresh loop is the Discord-side
+   projection of that derived Busy/waiting state. Streaming text should be a
+   separate edit-loop transport. *)
 let with_response_wait_typing_indicator ~clock ~channel_id f =
   trigger_typing_once ~channel_id;
   Eio.Switch.run (fun typing_sw ->

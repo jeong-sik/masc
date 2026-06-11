@@ -208,6 +208,7 @@ type t =
   | KeeperTurnInstructionHash
   | KeeperToolCallRetryLoop
   | AttemptWatchdogFired
+  | ShellIrEffectTotal
 
 val to_string : t -> string
 

@@ -18,7 +18,8 @@
   eio
   unix
   yojson
-  re))
+  re
+  logs))
 
 ; RFC-0054 PR-3 — auto-generate parallel-verification walkers for
 ; Shell_ir_typed. The generator's spec lives in

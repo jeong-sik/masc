@@ -414,15 +414,40 @@ let handle_tool_execute_typed
                of live traffic observable. An offline scan of typed_hit=true
                / total gives the real exercise rate of the typed model vs the
                Generic escape hatch. *)
+            let effects = Masc_exec.Exec_effect.extract ir in
+            let effects_str = Format.asprintf "%a" Masc_exec.Exec_effect.pp_set effects in
             Log.Keeper.info
-              "shell_ir dispatch keeper=%s sandbox=%s status=%s elapsed_ms=%d risk_class=%s typed_hit=%b"
+              "shell_ir dispatch keeper=%s sandbox=%s status=%s elapsed_ms=%d risk_class=%s typed_hit=%b effects=%s"
               meta.name
               (Keeper_types_profile_sandbox.sandbox_profile_to_string sandbox_profile)
               (Keeper_sandbox_exec_failure.status_label result.status)
               elapsed_ms
               (Masc_exec.Shell_ir_risk.string_of_risk_class
                  (Masc_exec.Shell_ir_risk.risk_class envelope))
-              (Masc_exec.Shell_ir_risk.typed_hit_of_ir ir);
+              (Masc_exec.Shell_ir_risk.typed_hit_of_ir ir)
+              effects_str;
+            Otel_spans.add_attrs
+              ~attrs:[
+                ( "shell_ir.risk_class"
+                , `String
+                    (Masc_exec.Shell_ir_risk.string_of_risk_class
+                       (Masc_exec.Shell_ir_risk.risk_class envelope)) )
+              ; ( "shell_ir.typed_hit"
+                , `Bool (Masc_exec.Shell_ir_risk.typed_hit_of_ir ir) )
+              ; "shell_ir.effects", `String effects_str
+              ]
+              ();
+            List.iter
+              (fun (eff : Masc_exec.Exec_effect.t) ->
+                 Otel_metric_store.inc_counter
+                   (Keeper_metrics.to_string Keeper_metrics.ShellIrEffectTotal)
+                   ~labels:[
+                     ( "kind"
+                     , Masc_exec.Exec_effect.string_of_effect_kind eff.kind )
+                   ; "source", eff.source
+                   ]
+                   ())
+              effects;
             let output =
               if String.equal result.stderr ""
               then result.stdout

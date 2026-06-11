@@ -204,11 +204,20 @@ time.
   `Keeper_responded` → `Acknowledged` → `Quiet` (re-fire suppressed without a
   cursor); only the addressed keeper wakes (targeted, not herd).
 
-### P3 — Targeted-wake assertion (TLA+ bug-model)
-- `OnlyAddressedKeeperReacts` and `AcknowledgedNeverReReacts` invariants. Bug
-  actions `MentionLostToHerd` (every keeper reacts) and `AckedReReacts` (an
-  `Acknowledged` engagement re-wakes) must each violate an invariant; the clean
-  model must satisfy both (software-development.md §TLA+ bug-model).
+### P3 — Wake/silence assertions (TLA+ bug-model)
+Three invariants, two directions:
+- Noise side: `OnlyAddressedKeeperReacts` (no herd) and
+  `AcknowledgedNeverReReacts` (no re-fire). Bug actions `MentionLostToHerd`
+  (every keeper reacts) and `AckedReReacts` must each violate one.
+- Silence side: `AddressedNeverSilentlyDropped` — an `Addressed` engagement
+  leaves that state only via `Keeper_responded` (→ `Acknowledged`) or a fresh
+  addressing signal (→ `Addressed`); never to `Disengaged`, a pruned slot, or a
+  `Quiet` terminal without a `Keeper_responded`. Bug action `AddressedTimedOut`
+  (`Addressed → Disengaged` on idle) must violate it; the clean model must
+  satisfy it.
+
+This is the formal guard against the side effect of keepers going quiet where
+they should react (software-development.md §TLA+ bug-model).
 
 ## §5 Verification
 
@@ -253,3 +262,40 @@ time.
    fold board posts into the same engagement FSM so posts and lane lines share
    one attention model (and board sheds its cursor too). Out of scope here;
    flagged so the two paths converge rather than drift.
+
+## §8 Silence / starvation analysis
+
+The danger of adding a salience gate is the inverse of the herd: a keeper that
+should react goes quiet. This section enumerates the failure modes and the
+design rule that closes each.
+
+### 8.1 Baseline guarantee — this RFC cannot wake less than today
+
+Today a keeper wakes via registry-wide `wakeup_all` (content-free) and the live
+reactive discriminator is `pending_board_events`; `pending_mentions` /
+`pending_scope_messages` are stubbed empty and contribute nothing. The
+post-action guard ORs the three independently (`keeper_turn_helpers.ml:155-156`
+**(verified)**). This RFC fills the mention/scope producer **additively** — it
+does not touch `wakeup_all` or the board path. So a buggy FSM degrades to
+today's behavior (silent on mentions), never below it. There is no path by
+which this RFC removes a wake that exists today.
+
+### 8.2 Transition traps and their rules
+
+| # | Trap | Direction | Rule that closes it |
+|---|------|-----------|---------------------|
+| 1 | `Keeper_responded` acknowledges a mention in a different conversation | silence | `Keeper_responded` carries a `conversation_key`; it advances only that key's engagement. A keyless/coarse ack is forbidden. |
+| 2 | idle or the §7.2 prune removes an `Addressed` entry | silence | `Addressed` is non-terminal. `Conversation_idle` and prune act only on `Acknowledged` / `Disengaged`. `Addressed → Disengaged` is not a legal transition. |
+| 3 | a follow-up with no `@mention` after `Acknowledged` stays quiet | silence | `Scope_message` (not only `Direct_mention`) re-addresses `Acknowledged → Addressed`. Residual risk: a bare follow-up outside scope — flagged, not silently assumed solved. |
+| 4 | mention parse miss (nickname/format) → `Ambient` | silence (= today) | board path stays live; degrades to today, not a regression. Parser test fixtures (§4 P1) bound this. |
+| 5 | `conversation_key` mismatch so ack never lands | noise (keeps waking) | opposite direction — surfaces as re-fire, caught by `AcknowledgedNeverReReacts`, not a silence bug. |
+
+### 8.3 Where silence risk actually concentrates (and why it is deferred)
+
+The research goal of cutting the herd means eventually gating `wakeup_all` on
+relevance — i.e. *replacing* a content-free wake with the FSM. That change can
+silence a keeper if the FSM is wrong, and it is **not in this RFC**. It must be
+its own RFC, gated on the §8.2 rules holding and the §4 P3 silence invariant
+(`AddressedNeverSilentlyDropped`) passing TLA+. Keeping additive salience
+(RFC-0230) separate from wake replacement is the boundary that prevents the
+silence side effect from shipping unproven.

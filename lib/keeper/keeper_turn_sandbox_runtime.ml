@@ -372,6 +372,23 @@ let run_argv_pipeline_with_status_split_retry_eintr
     loop max_eintr_retries)
 ;;
 
+let container_inspect_timeout_sec () =
+  Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Cleanup_rm ()
+;;
+
+let inspect_container_exists ~timeout_sec container_name =
+  let inspect_argv =
+    Keeper_sandbox_runtime.docker_command_argv ()
+    @ [ "inspect"; "--format"; "{{.Id}}"; container_name ]
+  in
+  let inspect_st, inspect_out =
+    run_argv_with_status_retry_eintr ~timeout_sec inspect_argv
+  in
+  match inspect_st with
+  | Unix.WEXITED 0 -> Ok ()
+  | _ -> Error inspect_out
+;;
+
 let start_container (t : t) ~timeout_sec =
   let image =
     match t.meta.sandbox_image with
@@ -467,22 +484,16 @@ let start_container (t : t) ~timeout_sec =
              (fun () -> run_argv_with_status_retry_eintr argv)
          in
          (match st with
-          | Unix.WEXITED 0 ->
-            let inspect_argv =
-              Keeper_sandbox_runtime.docker_command_argv ()
-              @ [ "inspect"; "--format"; "{{.Id}}"; container_name ]
-            in
-            let inspect_st, inspect_out =
-              run_argv_with_status_retry_eintr
-                ~timeout_sec:
-                  (Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Cleanup_rm ())
-                inspect_argv
-            in
-            (match inspect_st with
-             | Unix.WEXITED 0 ->
+         | Unix.WEXITED 0 ->
+            (match
+               inspect_container_exists
+                 ~timeout_sec:(container_inspect_timeout_sec ())
+                 container_name
+             with
+             | Ok () ->
                t.state <- Running { container_name };
                Ok container_name
-             | _ ->
+             | Error inspect_out ->
                (* Inspect failed after a successful `docker run`. Without an
                   explicit cleanup the container would leak: t.state stays
                   Not_started, so [cleanup] would skip `docker rm`. Best-effort
@@ -493,8 +504,7 @@ let start_container (t : t) ~timeout_sec =
                in
                let _rm_st, _rm_out =
                  run_argv_with_status_retry_eintr
-                   ~timeout_sec:
-                     (Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Cleanup_rm ())
+                   ~timeout_sec:(container_inspect_timeout_sec ())
                    rm_argv
                in
                Error
@@ -529,13 +539,26 @@ let start_container (t : t) ~timeout_sec =
                  mount_context)))))
 ;;
 
-let ensure_started (t : t) ~timeout_sec =
+let ensure_started ?(validate_running = false) (t : t) ~timeout_sec =
   match t.state with
-  | Running { container_name } -> Ok container_name
+  | Running { container_name } ->
+    if not validate_running
+    then Ok container_name
+    else (
+      match
+        inspect_container_exists
+          ~timeout_sec:(container_inspect_timeout_sec ())
+          container_name
+      with
+      | Ok () -> Ok container_name
+      | Error _ ->
+        t.state <- Not_started;
+        start_container t ~timeout_sec)
   | Not_started -> start_container t ~timeout_sec
 ;;
 
 let run_exec_with_status_once
+      ?(validate_cached_container = false)
       ?(stdin_content : string option)
       ?on_stdout_chunk
       ?on_stderr_chunk
@@ -544,7 +567,7 @@ let run_exec_with_status_once
       ~(cwd : string)
       ~(command_argv : string list)
   =
-  match ensure_started t ~timeout_sec with
+  match ensure_started ~validate_running:validate_cached_container t ~timeout_sec with
   | Error _ as err -> err
   | Ok container_name ->
     let container_cwd = container_cwd_of_host t ~host_cwd:cwd in
@@ -615,8 +638,12 @@ let run_exec_with_status
       ~(cwd : string)
       ~(command_argv : string list)
   =
+  let has_output_callback =
+    Option.is_some on_stdout_chunk || Option.is_some on_stderr_chunk
+  in
   match
     run_exec_with_status_once
+      ~validate_cached_container:has_output_callback
       ?stdin_content
       ?on_stdout_chunk
       ?on_stderr_chunk
@@ -677,6 +704,7 @@ let docker_exec_pipeline_argv (t : t) ~container_name ~container_cwd command_arg
 ;;
 
 let run_exec_pipeline_with_status_once
+      ?(validate_cached_container = false)
       ?on_stdout_chunk
       ?on_stderr_chunk
       (t : t)
@@ -684,7 +712,7 @@ let run_exec_pipeline_with_status_once
       ~(cwd : string)
       ~(stages : exec_pipeline_stage list)
   =
-  match ensure_started t ~timeout_sec with
+  match ensure_started ~validate_running:validate_cached_container t ~timeout_sec with
   | Error _ as err -> err
   | Ok container_name ->
     let process_stages =
@@ -704,8 +732,12 @@ let run_exec_pipeline_with_status_once
 ;;
 
 let run_exec_pipeline_with_status ?on_stdout_chunk ?on_stderr_chunk ~timeout_sec t ~cwd ~stages =
+  let has_output_callback =
+    Option.is_some on_stdout_chunk || Option.is_some on_stderr_chunk
+  in
   match
     run_exec_pipeline_with_status_once
+      ~validate_cached_container:has_output_callback
       t
       ~timeout_sec
       ?on_stdout_chunk

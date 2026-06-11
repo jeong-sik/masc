@@ -167,8 +167,120 @@ let test_docker_decomposed_fallback_callback_is_live () =
     ~first_stdout_at
     ~elapsed
 
+let test_docker_simple_runner_captured_error_is_streamed () =
+  let stderr_chunks = ref [] in
+  let on_output_chunk = function
+    | `Stdout _ -> ()
+    | `Stderr chunk -> stderr_chunks := chunk :: !stderr_chunks
+  in
+  let runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ =
+    Unix.WEXITED 1, "", "setup-error"
+  in
+  let docker_sandbox =
+    Masc_exec.Sandbox_target.docker ~image:"fake-docker" ~runner ()
+  in
+  let result =
+    Masc_exec.Exec_dispatch.dispatch_simple
+      ~on_output_chunk
+      (simple ~sandbox:docker_sandbox "printf" [ "ignored" ])
+  in
+  assert (result.status = Unix.WEXITED 1);
+  assert (result.stderr = "setup-error");
+  assert (String.concat "" (List.rev !stderr_chunks) = "setup-error")
+
+let test_docker_simple_runner_replays_unstreamed_stderr () =
+  let stdout_chunks = ref [] in
+  let stderr_chunks = ref [] in
+  let on_output_chunk = function
+    | `Stdout chunk -> stdout_chunks := chunk :: !stdout_chunks
+    | `Stderr chunk -> stderr_chunks := chunk :: !stderr_chunks
+  in
+  let runner ~on_stdout_chunk ~on_stderr_chunk:_ ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ =
+    Option.iter (fun f -> f "live-out") on_stdout_chunk;
+    Unix.WEXITED 1, "live-out", "buffered-err"
+  in
+  let docker_sandbox =
+    Masc_exec.Sandbox_target.docker ~image:"fake-docker" ~runner ()
+  in
+  let result =
+    Masc_exec.Exec_dispatch.dispatch_simple
+      ~on_output_chunk
+      (simple ~sandbox:docker_sandbox "printf" [ "ignored" ])
+  in
+  assert (result.status = Unix.WEXITED 1);
+  assert (result.stdout = "live-out");
+  assert (result.stderr = "buffered-err");
+  assert (String.concat "" (List.rev !stdout_chunks) = "live-out");
+  assert (String.concat "" (List.rev !stderr_chunks) = "buffered-err")
+
+let test_docker_pipeline_runner_captured_output_is_streamed () =
+  let stdout_chunks = ref [] in
+  let stderr_chunks = ref [] in
+  let on_output_chunk = function
+    | `Stdout chunk -> stdout_chunks := chunk :: !stdout_chunks
+    | `Stderr chunk -> stderr_chunks := chunk :: !stderr_chunks
+  in
+  let runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ =
+    Unix.WEXITED 9, "", "simple runner should not be used"
+  in
+  let pipeline_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stages:_ =
+    Unix.WEXITED 0, "buffered-out", "buffered-err"
+  in
+  let docker_sandbox =
+    Masc_exec.Sandbox_target.docker
+      ~image:"fake-docker"
+      ~runner
+      ~pipeline_runner
+      ()
+  in
+  let result =
+    Masc_exec.Exec_dispatch.dispatch_pipeline
+      ~on_output_chunk
+      [ Masc_exec.Shell_ir.Simple (simple ~sandbox:docker_sandbox "printf" [ "x" ])
+      ; Masc_exec.Shell_ir.Simple (simple ~sandbox:docker_sandbox "wc" [ "-c" ])
+      ]
+  in
+  assert (result.status = Unix.WEXITED 0);
+  assert (result.stdout = "buffered-out");
+  assert (result.stderr = "buffered-err");
+  assert (String.concat "" (List.rev !stdout_chunks) = "buffered-out");
+  assert (String.concat "" (List.rev !stderr_chunks) = "buffered-err")
+
+let test_docker_decomposed_timeout_stdout_is_streamed () =
+  let stdout_chunks = ref [] in
+  let on_output_chunk = function
+    | `Stdout chunk -> stdout_chunks := chunk :: !stdout_chunks
+    | `Stderr _ -> ()
+  in
+  let runner ~on_stdout_chunk ~on_stderr_chunk:_ ~stdin_content ~argv ~env:_ ~cwd:_ =
+    match argv, stdin_content with
+    | [ "printf"; "slow" ], None ->
+        Option.iter (fun f -> f "partial") on_stdout_chunk;
+        Unix.WEXITED 124, "partial", "timeout"
+    | _ -> fail "unexpected stage after timeout"
+  in
+  let docker_sandbox =
+    Masc_exec.Sandbox_target.docker ~image:"fake-docker" ~runner ()
+  in
+  let result =
+    Masc_exec.Exec_dispatch.dispatch_pipeline
+      ~on_output_chunk
+      [ Masc_exec.Shell_ir.Simple
+          (simple ~sandbox:docker_sandbox "printf" [ "slow" ])
+      ; Masc_exec.Shell_ir.Simple (simple ~sandbox:docker_sandbox "cat" [])
+      ]
+  in
+  assert (result.status = Unix.WEXITED 124);
+  assert (result.stdout = "partial");
+  assert (result.stderr = "timeout");
+  assert (String.concat "" (List.rev !stdout_chunks) = "partial")
+
 let () =
   test_docker_simple_runner_callback_is_live ();
   test_docker_pipeline_runner_callback_is_live ();
   test_docker_decomposed_fallback_callback_is_live ();
+  test_docker_simple_runner_captured_error_is_streamed ();
+  test_docker_simple_runner_replays_unstreamed_stderr ();
+  test_docker_pipeline_runner_captured_output_is_streamed ();
+  test_docker_decomposed_timeout_stdout_is_streamed ();
   print_endline "exec_dispatch_docker_streaming: ok"

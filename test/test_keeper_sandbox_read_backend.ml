@@ -460,6 +460,74 @@ esac\n\
 printf 'unexpected docker invocation\\n' >&2\n\
 exit 2\n"
 
+let fake_docker_stale_streaming_retry_script =
+  "#!/bin/sh\n\
+log_file=${KEEPER_DOCKER_LOG:-}\n\
+inspect_count_file=${KEEPER_DOCKER_INSPECT_COUNT:-}\n\
+exec_count_file=${KEEPER_DOCKER_EXEC_COUNT:-}\n\
+if [ -n \"$log_file\" ]; then\n\
+  printf '%s\\n' \"$*\" >> \"$log_file\"\n\
+fi\n\
+read_count() {\n\
+  if [ -n \"$1\" ] && [ -f \"$1\" ]; then\n\
+    cat \"$1\"\n\
+  else\n\
+    printf '0'\n\
+  fi\n\
+}\n\
+write_count() {\n\
+  if [ -n \"$1\" ]; then\n\
+    printf '%s' \"$2\" > \"$1\"\n\
+  fi\n\
+}\n\
+case \"$1\" in\n\
+  info)\n\
+    printf '[]\\n'\n\
+    exit 0\n\
+    ;;\n\
+  image)\n\
+    if [ \"$2\" = \"inspect\" ] && [ \"$3\" = \"alpine:test\" ]; then\n\
+      printf '[]\\n'\n\
+      exit 0\n\
+    fi\n\
+    printf 'missing image\\n' >&2\n\
+    exit 1\n\
+    ;;\n\
+  run)\n\
+    printf 'runtime-container\\n'\n\
+    exit 0\n\
+    ;;\n\
+  inspect)\n\
+    count=$(read_count \"$inspect_count_file\")\n\
+    count=$((count + 1))\n\
+    write_count \"$inspect_count_file\" \"$count\"\n\
+    if [ \"$count\" = \"2\" ]; then\n\
+      printf 'No such container: runtime-container\\n' >&2\n\
+      exit 1\n\
+    fi\n\
+    printf 'runtime-container-id\\n'\n\
+    exit 0\n\
+    ;;\n\
+  exec)\n\
+    exec_count=$(read_count \"$exec_count_file\")\n\
+    exec_count=$((exec_count + 1))\n\
+    write_count \"$exec_count_file\" \"$exec_count\"\n\
+    inspect_count=$(read_count \"$inspect_count_file\")\n\
+    if [ \"$exec_count\" = \"2\" ] && [ \"$inspect_count\" -lt 2 ]; then\n\
+      printf 'No such container: runtime-container\\n' >&2\n\
+      exit 127\n\
+    fi\n\
+    printf 'exec ok\\n'\n\
+    exit 0\n\
+    ;;\n\
+  rm)\n\
+    printf 'removed\\n'\n\
+    exit 0\n\
+    ;;\n\
+esac\n\
+printf 'unexpected docker invocation\\n' >&2\n\
+exit 2\n"
+
 let fake_docker_preflight_ok_script =
   "#!/bin/sh\n\
 case \"$1\" in\n\
@@ -1331,6 +1399,59 @@ let test_turn_runtime_reuses_single_container () =
   Alcotest.(check bool) "turn exec pins MASC_CONFIG_DIR" true
     (contains_substring exec_line ("MASC_CONFIG_DIR=" ^ container_config_dir))
 
+let test_streaming_exec_validates_cached_container_before_retry () =
+  with_fake_docker fake_docker_stale_streaming_retry_script @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+  let base, config, meta = setup_config "minjae" in
+  let log_path = Filename.concat base "docker.log" in
+  let inspect_count_path = Filename.concat base "inspect.count" in
+  let exec_count_path = Filename.concat base "exec.count" in
+  let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
+  let host_config_dir =
+    Filename.concat (Filename.concat base Common.masc_dirname) "config"
+  in
+  ensure_dir host_root;
+  ensure_dir host_config_dir;
+  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  with_env "KEEPER_DOCKER_INSPECT_COUNT" inspect_count_path @@ fun () ->
+  with_env "KEEPER_DOCKER_EXEC_COUNT" exec_count_path @@ fun () ->
+  let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta ~turn_id:1 () in
+  Fun.protect ~finally:(fun () ->
+    Keeper_turn_sandbox_runtime.cleanup runtime;
+    cleanup_dir base) @@ fun () ->
+  (match
+     Keeper_turn_sandbox_runtime.run_exec_with_status
+       ~timeout_sec:5.0
+       runtime
+       ~cwd:host_root
+       ~command_argv:[ "cat"; "/tmp/first" ]
+   with
+   | Error msg -> Alcotest.failf "expected initial exec success, got %s" msg
+   | Ok (Unix.WEXITED 0, out) ->
+       Alcotest.(check string) "initial exec output" "exec ok\n" out
+   | Ok _ -> Alcotest.fail "expected initial exec exit 0");
+  let stderr_chunks = ref [] in
+  (match
+     Keeper_turn_sandbox_runtime.run_exec_with_status
+       ~on_stderr_chunk:(fun chunk -> stderr_chunks := chunk :: !stderr_chunks)
+       ~timeout_sec:5.0
+       runtime
+       ~cwd:host_root
+       ~command_argv:[ "cat"; "/tmp/second" ]
+   with
+   | Error msg -> Alcotest.failf "expected retried exec success, got %s" msg
+   | Ok (Unix.WEXITED 0, out) ->
+       Alcotest.(check string) "retried exec output" "exec ok\n" out
+   | Ok _ -> Alcotest.fail "expected retried exec exit 0");
+  let streamed_stderr = String.concat "" (List.rev !stderr_chunks) in
+  Alcotest.(check bool)
+    "stale container error is not streamed"
+    false
+    (contains_substring streamed_stderr "No such container")
+
 let test_default_fs_hardening_helpers () =
   with_env "MASC_KEEPER_SANDBOX_RELAX_FS" "false" @@ fun () ->
   Alcotest.(check (list string)) "default helper keeps read-only rootfs"
@@ -1461,6 +1582,9 @@ let run_tests ~clock () =
             test_relaxed_fs_helpers;
           Alcotest.test_case "turn runtime reuses single container" `Quick
             test_turn_runtime_reuses_single_container;
+          Alcotest.test_case
+            "streaming exec validates cached container before retry"
+            `Quick test_streaming_exec_validates_cached_container_before_retry;
           Alcotest.test_case
             "turn runtime relaxed fs omits readonly and noexec"
             `Quick test_turn_runtime_relaxed_fs_omits_readonly_and_noexec;

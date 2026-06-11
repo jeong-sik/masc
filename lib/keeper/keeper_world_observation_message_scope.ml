@@ -44,17 +44,64 @@ let is_keeper_authored_message author =
   Option.is_some (Keeper_identity.canonical_keeper_name_from_agent_name author)
 ;;
 
+(** Prefix for chat cursor keys stored in [oas_env]. *)
+let chat_cursor_oas_key_prefix = "MASC_KEEPER_OAS_CHAT_CURSOR_"
+
+(** [cursor_key_of_keeper_name name] builds the oas_env key for
+    storing the per-keeper chat cursor (line count). *)
+let cursor_key_of_keeper_name name =
+  let sanitized = String.uppercase_ascii name in
+  chat_cursor_oas_key_prefix ^ sanitized
+;;
+
+(** [read_cursor_from_meta ~meta ~keeper_name] reads the current
+    positional watermark (line count) for a keeper from meta.oas_env.
+    Returns 0 when absent. *)
+let read_cursor_from_meta ~(meta : keeper_meta) ~keeper_name : int =
+  let key = cursor_key_of_keeper_name keeper_name in
+  match List.assoc_opt key meta.oas_env with
+  | Some raw -> (try int_of_string raw with _ -> 0)
+  | None -> 0
+;;
+
+(** [chat_line_count ~base_dir ~keeper_name] returns the number of
+    JSONL lines in the keeper's chat store file. *)
+let chat_line_count ~base_dir ~keeper_name : int =
+  let messages = Keeper_chat_store.load ~base_dir ~keeper_name in
+  List.length messages
+;;
+
 let collect_message_scope ~(config : Workspace.config) ~(meta : keeper_meta)
   : (string * string) list * (string * string) list * (string * int) list
   =
-  let _ = config in
-  let _ = meta in
-  [], [], []
+  let targets = message_feed_targets meta in
+  let base_dir = config.base_path in
+  let updates =
+    List.filter_map (fun name ->
+      let current_cursor = read_cursor_from_meta ~meta ~keeper_name:name in
+      let actual_line_count = chat_line_count ~base_dir ~keeper_name:name in
+      if actual_line_count > current_cursor then
+        Some (name, actual_line_count)
+      else
+        None
+    ) targets
+  in
+  [], [], updates
 ;;
 
 let apply_message_cursor_updates (meta : keeper_meta) (updates : (string * int) list)
   : keeper_meta
   =
-  let _ = updates in
-  meta
+  let new_entries =
+    List.map (fun (name, cursor) ->
+      (cursor_key_of_keeper_name name, string_of_int cursor)
+    ) updates
+  in
+  let merged =
+    List.fold_left (fun acc (k, v) ->
+      (* Replace existing entry or add new *)
+      (k, v) :: List.filter (fun (k', _) -> k' <> k) acc
+    ) meta.oas_env new_entries
+  in
+  { meta with oas_env = merged }
 ;;

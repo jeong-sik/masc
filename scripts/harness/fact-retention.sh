@@ -11,8 +11,8 @@
 #   gen    --out FILE [--pages N]
 #          Write a fixture lane JSONL to FILE and a facts manifest to
 #          FILE.facts (tab-separated: key<TAB>token<TAB>page_depth).
-#          NEVER writes into ~/.masc — the operator decides where to
-#          place the fixture (e.g. a scratch keeper's lane file, server
+#          NEVER writes into the runtime root (<base-path>/.masc) — the
+#          operator decides where to place the fixture (e.g. a scratch keeper's lane file, server
 #          stopped, then restart).
 #   recall --keeper NAME --facts FILE.facts [--server URL]
 #          For each fact, ask the keeper for the value via

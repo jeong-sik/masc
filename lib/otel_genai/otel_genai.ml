@@ -210,7 +210,7 @@ let with_keeper_turn_span
       f
   =
   if not Otel_config.enabled
-  then f ()
+  then f (fun () -> None)
   else (
     let attrs =
       keeper_turn_attrs
@@ -238,5 +238,5 @@ let with_keeper_turn_span
          #20581). Tool dispatches already start their own trace, so this does
          not lose a parent/child link that previously existed. *)
       ~force_new_trace_id:true
-      (fun trace_link -> f trace_link)))
+      (fun trace_link -> f trace_link))
 ;;

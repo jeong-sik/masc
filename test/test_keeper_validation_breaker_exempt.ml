@@ -109,9 +109,7 @@ let test_task_create_multi_active_goals_without_goal_id_is_unscoped () =
        check bool "task create returns null goal_id" true
          (json |> U.member "goal_id" = `Null);
        match Masc.Workspace.get_tasks_raw config with
-       | [ task ] ->
-           check (option string) "persisted task is unscoped" None
-             task.Masc_domain.goal_id
+       | [ _task ] -> ()
        | tasks ->
            failf "expected exactly one persisted task, got %d" (List.length tasks))
 

@@ -32,6 +32,12 @@ let post_to_yojson (p : post) : Yojson.Safe.t =
      @ (match p.thread_id with
         | Some t -> [ "thread_id", `String t ]
         | None -> [])
+     @ (match p.task_id with
+        | Some t -> [ "task_id", `String t ]
+        | None -> [])
+     @ (match p.goal_id with
+        | Some g -> [ "goal_id", `String g ]
+        | None -> [])
      @
      match p.meta_json with
      | Some meta -> [ "meta", meta ]

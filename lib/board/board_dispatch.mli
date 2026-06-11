@@ -139,6 +139,8 @@ val create_post :
   ?ttl_hours:int ->
   ?hearth:string ->
   ?thread_id:string ->
+  ?task_id:string ->
+  ?goal_id:string ->
   unit ->
   (Board.post, Board.board_error) Result.t
 

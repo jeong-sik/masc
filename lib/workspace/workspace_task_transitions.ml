@@ -8,6 +8,28 @@ open Workspace_backlog
 include Workspace_task_classify
 include Workspace_task_create
 include Workspace_task_claim
+
+(** Map a task action to the corresponding event-kind variant.
+    Used by the board-notification stub below. *)
+let event_kind_of_task_action = function
+  | Masc_domain.Claim -> Event_kind.Task.Claimed
+  | Masc_domain.Start -> Event_kind.Task.Started
+  | Masc_domain.Done_action -> Event_kind.Task.Done
+  | Masc_domain.Cancel -> Event_kind.Task.Cancelled
+  | Masc_domain.Release -> Event_kind.Task.Released
+  | Masc_domain.Submit_for_verification -> Event_kind.Task.Submit_for_verification
+  | Masc_domain.Approve_verification -> Event_kind.Task.Approved
+  | Masc_domain.Reject_verification -> Event_kind.Task.Rejected
+;;
+
+(** Stub: notify the board subsystem that a task event occurred.
+    This is a hook point for the future event→board pipeline.
+    Currently a no-op until wired at runtime. *)
+let notify_board_of_task_event ~(task : Masc_domain.task) ~(action : Masc_domain.task_action) =
+  let event = event_kind_of_task_action action in
+  (Atomic.get Workspace_hooks.notify_board_of_task_event_fn) ~task ~event
+;;
+
 let transition_task_r
       config
       ~agent_name
@@ -564,6 +586,8 @@ let transition_task_r
                ~task_id
                ~kind:(Event_kind.Task.to_string Event_kind.Task.Rejected)
                ~payload:(`Assoc [ "task_id", `String task_id ]));
+          (* Future: wire task events to automatic board posts. *)
+          notify_board_of_task_event ~task ~action;
           let duration_ms = match action with
             | Masc_domain.Done_action | Masc_domain.Cancel ->
               Some (max 0 (int_of_float ((now_ts -. task_started_at_unix task.task_status) *. 1000.0)))

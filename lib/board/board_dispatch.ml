@@ -354,12 +354,14 @@ let matching_post_ids_for_comment_author_filter ~needle (comments : Board.commen
 
 let create_post ~author ~content ?title ?body ~post_kind ?meta_json
     ?(visibility = Board.Internal)
-    ?(ttl_hours = Board.Limits.default_ttl_hours) ?hearth ?thread_id () =
+    ?(ttl_hours = Board.Limits.default_ttl_hours) ?hearth ?thread_id
+    ?task_id ?goal_id () =
   match backend () with
   | Jsonl store ->
       (match
          Board.create_post_with_outcome store ~author ~content ?title ?body
-           ~post_kind ?meta_json ~visibility ~ttl_hours ?hearth ?thread_id ()
+           ~post_kind ?meta_json ~visibility ~ttl_hours ?hearth ?thread_id
+           ?task_id ?goal_id ()
        with
       | Ok (Board.Fresh_post post) ->
           let pid = Board.Post_id.to_string post.id in

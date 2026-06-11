@@ -231,6 +231,8 @@ val create_post_with_outcome
   -> ?ttl_hours:int
   -> ?hearth:string
   -> ?thread_id:string
+  -> ?task_id:string
+  -> ?goal_id:string
   -> unit
   -> (create_post_outcome, board_error) Result.t
 
@@ -258,6 +260,8 @@ val create_post
   -> ?ttl_hours:int
   -> ?hearth:string
   -> ?thread_id:string
+  -> ?task_id:string
+  -> ?goal_id:string
   -> unit
   -> (post, board_error) Result.t
 

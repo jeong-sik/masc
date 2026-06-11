@@ -160,6 +160,8 @@ type post = {
   reply_count: int;
   hearth: string option;     (* Topic category within the Board *)
   thread_id: string option;  (* Linked Conversation thread *)
+  task_id: string option;    (* Typed link to a workspace task *)
+  goal_id: string option;    (* Typed link to a workspace goal *)
 }
 
 type comment = {

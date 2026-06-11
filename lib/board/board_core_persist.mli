@@ -72,12 +72,14 @@ type create_post_outcome =
 
 val post_of_create_post_outcome : create_post_outcome -> post
 val status_rollup_task_id :
-  title:string -> body:string -> meta_json:Yojson.Safe.t option -> string option
+  ?typed_task_id:string -> title:string -> body:string -> meta_json:Yojson.Safe.t option -> unit -> string option
 val is_status_rollup_candidate :
   post_kind:post_kind ->
   title:string ->
   body:string ->
   meta_json:Yojson.Safe.t option ->
+  ?task_id:string ->
+  unit ->
   bool
 val find_status_rollup_target_unlocked :
   store ->
@@ -100,6 +102,8 @@ val create_post_with_outcome :
   ?ttl_hours:int ->
   ?hearth:string ->
   ?thread_id:string ->
+  ?task_id:string ->
+  ?goal_id:string ->
   unit ->
   (create_post_outcome, board_error) result
 
@@ -115,5 +119,7 @@ val create_post :
   ?ttl_hours:int ->
   ?hearth:string ->
   ?thread_id:string ->
+  ?task_id:string ->
+  ?goal_id:string ->
   unit ->
   (post, board_error) result

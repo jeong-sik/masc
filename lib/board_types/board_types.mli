@@ -106,6 +106,8 @@ type post = {
   reply_count : int;
   hearth : string option;
   thread_id : string option;
+  task_id : string option;
+  goal_id : string option;
 }
 
 type comment = {

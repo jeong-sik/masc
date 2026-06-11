@@ -60,17 +60,31 @@ let task_id_from_text text =
   loop 0
 ;;
 
-let status_rollup_task_id ~title ~body ~meta_json =
-  match
-    List.find_map
-      (fun key -> Option.bind meta_json (Json_util.assoc_string_opt key))
-      [ "task_id"; "current_task_id"; "claimed_task_id"; "task" ]
-  with
+let status_rollup_task_id ?typed_task_id ~title ~body ~meta_json () =
+  match typed_task_id with
   | Some task_id -> Some (String.lowercase_ascii task_id)
   | None ->
-    (match task_id_from_text body with
-     | Some _ as task_id -> task_id
-     | None -> task_id_from_text title)
+    match
+      List.find_map
+        (fun key -> Option.bind meta_json (Json_util.assoc_string_opt key))
+        [ "task_id"; "current_task_id"; "claimed_task_id"; "task" ]
+    with
+    | Some task_id -> Some (String.lowercase_ascii task_id)
+    | None ->
+      (match task_id_from_text body with
+       | Some _ as task_id -> task_id
+       | None -> task_id_from_text title)
+;;
+
+(** Goal-based rollup — stub for future use. Returns [None] until
+    goal-level board aggregation is implemented. *)
+let status_rollup_goal_id ?typed_goal_id ~title ~body ~meta_json () =
+  match typed_goal_id with
+  | Some goal_id -> Some (String.lowercase_ascii goal_id)
+  | None ->
+    (match Option.bind meta_json (Json_util.assoc_string_opt "goal_id") with
+     | Some goal_id -> Some (String.lowercase_ascii goal_id)
+     | None -> None)
 ;;
 
 let status_only_terms =
@@ -131,12 +145,13 @@ let proof_or_handoff_terms =
   ]
 ;;
 
-let is_status_rollup_candidate ~post_kind ~title ~body ~meta_json =
+let is_status_rollup_candidate ~post_kind ~title ~body ~meta_json ?task_id () =
   match post_kind with
   | Human_post | System_post -> false
   | Automation_post ->
     String.length body <= max_status_rollup_body_length
-    && Option.is_some (status_rollup_task_id ~title ~body ~meta_json)
+    && (Option.is_some task_id
+        || Option.is_some (status_rollup_task_id ~title ~body ~meta_json ()))
     && contains_any_substring body status_only_terms
     && not (contains_any_substring body proof_or_handoff_terms)
 ;;
@@ -156,14 +171,18 @@ let find_status_rollup_target_unlocked
        in
        let same_hearth = Option.equal String.equal post.hearth hearth in
        let same_task =
-         match
-           status_rollup_task_id
-             ~title:post.title
-             ~body:post.body
-             ~meta_json:post.meta_json
-         with
+         match post.task_id with
          | Some existing_task_id -> String.equal existing_task_id task_id
-         | None -> false
+         | None ->
+           (match
+              status_rollup_task_id
+                ~title:post.title
+                ~body:post.body
+                ~meta_json:post.meta_json
+                ()
+            with
+            | Some existing_task_id -> String.equal existing_task_id task_id
+            | None -> false)
        in
        let recent =
          Stdlib.Float.compare (now -. post.updated_at) status_rollup_window_sec <= 0
@@ -179,6 +198,8 @@ let find_status_rollup_target_unlocked
               ~title:post.title
               ~body:post.body
               ~meta_json:post.meta_json
+              ?task_id:post.task_id
+              ()
        then (
          match acc with
          | Some current when current.updated_at >= post.updated_at -> acc

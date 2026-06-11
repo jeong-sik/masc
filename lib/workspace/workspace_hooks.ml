@@ -365,6 +365,12 @@ let push_task_event_fn
   : (event_type:string -> details:(string * Yojson.Safe.t) list -> unit) Atomic.t
   = Atomic.make (fun ~event_type:_ ~details:_ -> ())
 
+(** Stub hook for task-event → board post wiring.
+    Default no-op until the runtime fills it at boot. *)
+let notify_board_of_task_event_fn
+  : (task:Masc_domain.task -> event:Event_kind.Task.t -> unit) Atomic.t
+  = Atomic.make (fun ~task:_ ~event:_ -> ())
+
 let verification_submit_request_fn
   : (Workspace_utils_backend_setup.config ->
      task:Masc_domain.task ->

@@ -36,6 +36,8 @@ let post_of_yojson (json : Yojson.Safe.t) : post option =
     let reply_count = Safe_ops.json_int ~default:0 "reply_count" json in
     let hearth = Safe_ops.json_string_opt "hearth" json in
     let thread_id = Safe_ops.json_string_opt "thread_id" json in
+    let task_id = Safe_ops.json_string_opt "task_id" json in
+    let goal_id = Safe_ops.json_string_opt "goal_id" json in
     let post_kind_opt =
       match Safe_ops.json_string_opt "post_kind" json with
       | Some raw -> post_kind_of_string raw
@@ -105,6 +107,8 @@ let post_of_yojson (json : Yojson.Safe.t) : post option =
             ; reply_count
             ; hearth
             ; thread_id
+            ; task_id
+            ; goal_id
             })
      | _ -> None)
   | _ -> None

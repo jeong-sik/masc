@@ -380,6 +380,8 @@ let create_post_with_outcome
       ?(ttl_hours = Limits.default_ttl_hours)
   ?hearth
   ?thread_id
+  ?task_id
+  ?goal_id
   ()
   : (create_post_outcome, board_error) Result.t
   =
@@ -486,6 +488,8 @@ let create_post_with_outcome
                     ; reply_count = 0
                     ; hearth
                     ; thread_id
+                    ; task_id
+                    ; goal_id
                     }
                   in
                   Hashtbl.add store.posts (Post_id.to_string post.id) post;
@@ -494,18 +498,23 @@ let create_post_with_outcome
                   Ok (`Fresh post)
               in
               let rollup_task_id =
-                if
-                  is_status_rollup_candidate
-                    ~post_kind:normalized_kind
-                    ~title:normalized_title
-                    ~body:normalized_body
-                    ~meta_json:normalized_meta
-                then
-                  status_rollup_task_id
-                    ~title:normalized_title
-                    ~body:normalized_body
-                    ~meta_json:normalized_meta
-                else None
+                match task_id with
+                | Some t -> Some t
+                | None ->
+                  if
+                    is_status_rollup_candidate
+                      ~post_kind:normalized_kind
+                      ~title:normalized_title
+                      ~body:normalized_body
+                      ~meta_json:normalized_meta
+                      ()
+                  then
+                    status_rollup_task_id
+                      ~title:normalized_title
+                      ~body:normalized_body
+                      ~meta_json:normalized_meta
+                      ()
+                  else None
               in
               (match rollup_task_id with
                | Some task_id ->
@@ -577,6 +586,8 @@ let create_post
       ?ttl_hours
       ?hearth
       ?thread_id
+      ?task_id
+      ?goal_id
       ()
   =
   match
@@ -592,6 +603,8 @@ let create_post
       ?ttl_hours
       ?hearth
       ?thread_id
+      ?task_id
+      ?goal_id
       ()
   with
   | Ok outcome -> Ok (post_of_create_post_outcome outcome)

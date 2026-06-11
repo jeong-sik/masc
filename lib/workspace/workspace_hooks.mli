@@ -127,6 +127,13 @@ val record_thompson_result_fn :
 val push_task_event_fn :
   (event_type:string -> details:(string * Yojson.Safe.t) list -> unit) Atomic.t
 
+(** Stub hook for task-event → board post wiring.
+    Accepts a task record and an event kind so that task lifecycle
+    events (Created, Done, etc.) can automatically generate board posts.
+    Default no-op until the runtime fills it at boot. *)
+val notify_board_of_task_event_fn :
+  (task:Masc_domain.task -> event:Event_kind.Task.t -> unit) Atomic.t
+
 val verification_submit_request_fn :
   (Workspace_utils_backend_setup.config ->
    task:Masc_domain.task ->

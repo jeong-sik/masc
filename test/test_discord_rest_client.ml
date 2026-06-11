@@ -18,7 +18,7 @@ let header_value headers name =
 
 let test_build_request_url_targets_channel () =
   let url, _, _ =
-    R.build_request ~token:"abc" ~channel_id:"1234567890" ~content:"hi"
+    R.build_request ~token:"abc" ~channel_id:"1234567890" ~content:"hi" ()
   in
   check string "v10 channel URL"
     "https://discord.com/api/v10/channels/1234567890/messages"
@@ -26,7 +26,7 @@ let test_build_request_url_targets_channel () =
 
 let test_build_request_authorization_uses_bot_scheme () =
   let _, headers, _ =
-    R.build_request ~token:"sekret" ~channel_id:"CH" ~content:"."
+    R.build_request ~token:"sekret" ~channel_id:"CH" ~content:"." ()
   in
   check string "Authorization header" "Bot sekret"
     (header_value headers "Authorization");
@@ -35,7 +35,7 @@ let test_build_request_authorization_uses_bot_scheme () =
 
 let test_build_request_user_agent_present () =
   let _, headers, _ =
-    R.build_request ~token:"t" ~channel_id:"c" ~content:"."
+    R.build_request ~token:"t" ~channel_id:"c" ~content:"." ()
   in
   let ua = header_value headers "User-Agent" in
   (* Discord requires DiscordBot ($url, $version) shape. *)
@@ -45,7 +45,7 @@ let test_build_request_user_agent_present () =
 
 let test_build_request_body_is_content_object () =
   let _, _, body =
-    R.build_request ~token:"t" ~channel_id:"c" ~content:"hello \"world\""
+    R.build_request ~token:"t" ~channel_id:"c" ~content:"hello \"world\"" ()
   in
   let json = Yojson.Safe.from_string body in
   match json with

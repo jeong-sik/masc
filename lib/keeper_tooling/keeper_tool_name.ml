@@ -39,6 +39,7 @@ type t =
   | Stay_silent
   | Surface_read
   | Surface_post
+  | Person_note_set
   | Task_claim
   | Task_create
   | Task_done
@@ -88,6 +89,7 @@ let to_string = function
   | Stay_silent -> "keeper_stay_silent"
   | Surface_read -> "keeper_surface_read"
   | Surface_post -> "keeper_surface_post"
+  | Person_note_set -> "keeper_person_note_set"
   | Task_claim -> "keeper_task_claim"
   | Task_create -> "keeper_task_create"
   | Task_done -> "keeper_task_done"
@@ -138,6 +140,7 @@ let of_string = function
   | "keeper_stay_silent" -> Some Stay_silent
   | "keeper_surface_read" -> Some Surface_read
   | "keeper_surface_post" -> Some Surface_post
+  | "keeper_person_note_set" -> Some Person_note_set
   | "keeper_task_claim" -> Some Task_claim
   | "keeper_task_create" -> Some Task_create
   | "keeper_task_done" -> Some Task_done
@@ -205,6 +208,7 @@ let is_keeper_board_tool = function
   | Stay_silent
   | Surface_read
   | Surface_post
+  | Person_note_set
   | Task_claim
   | Task_create
   | Task_done

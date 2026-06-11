@@ -17,6 +17,8 @@ type participant = {
   first_seen : float option;
   last_seen : float option;
   message_count : int;
+  note : string option;
+      (** Keeper-authored person note (RFC-0229), latest non-blank. *)
 }
 
 val default_limit : int
@@ -44,5 +46,11 @@ val respond :
   surface:string ->
   limit:int ->
   has_more:bool ->
+  notes:(string * string) list ->
   Keeper_chat_store.chat_message list ->
   string
+(** [notes] (RFC-0229 P1) are keeper-scoped (not lane-scoped): they
+    annotate matching roster entries, and a noted speaker absent from
+    the loaded rows still appears as a note-only participant (zero
+    [message_count], no sightings) — deliberate memory outliving the
+    log window. *)

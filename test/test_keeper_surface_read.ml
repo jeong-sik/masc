@@ -52,7 +52,7 @@ let discord_fixture : Store.chat_message list =
   ]
 
 let test_lane_filter_excludes_other_sources_and_legacy () =
-  let json = parse (SR.respond ~surface:"discord" ~limit:50 ~has_more:false discord_fixture) in
+  let json = parse (SR.respond ~surface:"discord" ~limit:50 ~has_more:false ~notes:[] discord_fixture) in
   check int "lane rows" 4 (to_int (member "lane_row_count" json));
   check int "returned" 4 (to_int (member "returned" json));
   let contents =
@@ -69,7 +69,7 @@ let test_lane_filter_excludes_other_sources_and_legacy () =
     contents
 
 let test_roster_groups_by_id_latest_name_wins () =
-  let json = parse (SR.respond ~surface:"discord" ~limit:50 ~has_more:false discord_fixture) in
+  let json = parse (SR.respond ~surface:"discord" ~limit:50 ~has_more:false ~notes:[] discord_fixture) in
   let participants = to_list (member "participants" json) in
   check int "two participants" 2 (List.length participants);
   let find id =
@@ -92,7 +92,7 @@ let test_roster_groups_by_id_latest_name_wins () =
     (to_string_j (member "id" (List.hd participants)))
 
 let test_limit_truncates_messages_not_roster () =
-  let json = parse (SR.respond ~surface:"discord" ~limit:2 ~has_more:false discord_fixture) in
+  let json = parse (SR.respond ~surface:"discord" ~limit:2 ~has_more:false ~notes:[] discord_fixture) in
   check int "returned capped" 2 (to_int (member "returned" json));
   check int "lane count still full" 4 (to_int (member "lane_row_count" json));
   check int "roster still full" 2
@@ -106,7 +106,7 @@ let test_limit_truncates_messages_not_roster () =
     contents
 
 let test_keeper_own_lines_are_not_participants () =
-  let json = parse (SR.respond ~surface:"discord" ~limit:50 ~has_more:false discord_fixture) in
+  let json = parse (SR.respond ~surface:"discord" ~limit:50 ~has_more:false ~notes:[] discord_fixture) in
   let ids =
     to_list (member "participants" json)
     |> List.map (fun p -> to_string_j (member "id" p))
@@ -115,11 +115,11 @@ let test_keeper_own_lines_are_not_participants () =
     (List.exists (fun id -> String.equal id "keeper") ids)
 
 let test_blank_surface_is_error () =
-  let json = parse (SR.respond ~surface:"  " ~limit:10 ~has_more:false discord_fixture) in
+  let json = parse (SR.respond ~surface:"  " ~limit:10 ~has_more:false ~notes:[] discord_fixture) in
   check bool "error field present" true (member "error" json <> `Null)
 
 let test_empty_lane_is_success_with_zero_rows () =
-  let json = parse (SR.respond ~surface:"slack" ~limit:10 ~has_more:false discord_fixture) in
+  let json = parse (SR.respond ~surface:"slack" ~limit:10 ~has_more:false ~notes:[] discord_fixture) in
   check int "lane empty" 0 (to_int (member "lane_row_count" json));
   check int "no participants" 0
     (List.length (to_list (member "participants" json)))
@@ -129,17 +129,43 @@ let test_empty_lane_is_success_with_zero_rows () =
    progress through pages that hold no rows for the requested lane. *)
 let test_paging_fields_reflect_page_not_lane () =
   let json =
-    parse (SR.respond ~surface:"discord" ~limit:50 ~has_more:true discord_fixture)
+    parse (SR.respond ~surface:"discord" ~limit:50 ~has_more:true ~notes:[] discord_fixture)
   in
   check bool "has_more passthrough" true
     (Yojson.Safe.Util.to_bool (member "has_more" json));
   check (float 0.0001) "oldest_ts is page-wide" 1.0
     (Yojson.Safe.Util.to_number (member "oldest_ts" json))
 
+(* RFC-0229 P1 — roster union with person notes. *)
+let test_notes_annotate_and_resurrect_participants () =
+  let notes =
+    [ ("98791450001", "deploy owner"); ("00009999", "met three weeks ago") ]
+  in
+  let json =
+    parse
+      (SR.respond ~surface:"discord" ~limit:50 ~has_more:false ~notes
+         discord_fixture)
+  in
+  let participants = to_list (member "participants" json) in
+  let find id =
+    List.find
+      (fun p -> to_string_j (member "id" p) = id)
+      participants
+  in
+  check string "lane participant annotated" "deploy owner"
+    (to_string_j (member "note" (find "98791450001")));
+  let ghost = find "00009999" in
+  check string "note-only participant resurrected" "met three weeks ago"
+    (to_string_j (member "note" ghost));
+  check int "note-only has no sightings" 0
+    (to_int (member "message_count" ghost));
+  check bool "unnoted participant carries no note field" true
+    (member "note" (find "55500001111") = `Null)
+
 let test_oldest_ts_absent_when_page_unstamped () =
   let json =
     parse
-      (SR.respond ~surface:"discord" ~limit:10 ~has_more:false
+      (SR.respond ~surface:"discord" ~limit:10 ~has_more:false ~notes:[]
          [ msg ~source:"discord" ~role:"user" "no ts row" ])
   in
   check bool "oldest_ts omitted" true (member "oldest_ts" json = `Null)
@@ -153,6 +179,8 @@ let () =
             test_paging_fields_reflect_page_not_lane;
           test_case "oldest_ts absent when page unstamped" `Quick
             test_oldest_ts_absent_when_page_unstamped;
+          test_case "notes annotate and resurrect participants" `Quick
+            test_notes_annotate_and_resurrect_participants;
         ] );
       ( "lane filter",
         [

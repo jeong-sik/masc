@@ -189,7 +189,8 @@
   meta_cognition_interpret
   meta_cognition_digest
   keeper_memory_os_io
-  keeper_librarian_runtime)
+  keeper_librarian_runtime
+  keeper_librarian_prompts)
  (libraries
   mcp_protocol
   mcp_protocol.eio

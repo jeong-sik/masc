@@ -194,14 +194,22 @@ let compaction_policy_of_keeper (meta : keeper_meta) : float * int * int =
 
 let librarian_keep_message_count = 20
 
-let rec take n = function
-  | [] -> []
-  | x :: xs -> if n <= 0 then [] else x :: take (n - 1) xs
+let take n xs =
+  let rec aux acc n = function
+    | [] -> List.rev acc
+    | _ when n <= 0 -> List.rev acc
+    | x :: xs -> aux (x :: acc) (n - 1) xs
+  in
+  aux [] (max 0 n) xs
 ;;
 
-let rec drop n = function
-  | [] -> []
-  | _ :: xs -> if n <= 0 then [] else drop (n - 1) xs
+let drop n xs =
+  let rec aux n = function
+    | [] -> []
+    | xs when n <= 0 -> xs
+    | _ :: xs -> aux (n - 1) xs
+  in
+  aux (max 0 n) xs
 ;;
 
 let split_messages_for_librarian messages =

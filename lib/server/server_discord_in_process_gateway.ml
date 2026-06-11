@@ -88,7 +88,7 @@ let handle_message_create ~dispatch
      | Ok out ->
        if String.equal out.content "" then ()
        else
-         (match State.send_message ~channel_id ~content:out.content with
+         (match State.send_message ~channel_id ~content:out.content ~reply_to_message_id:message_id () with
           | Ok _ -> ()
           | Error e ->
             Log.Server.error "discord send_message failed (channel=%s): %s"

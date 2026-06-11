@@ -18,12 +18,16 @@ let pp_error fmt = function
       Format.fprintf fmt "discord %d: %s" code message
   | Other msg -> Format.fprintf fmt "other: %s" msg
 
+(* Discord text-message content limit, in Unicode scalar units.
+   Messages longer than this must be split into multiple payloads. *)
+let message_content_limit = 2000
+
 (* Discord requires a specific User-Agent format:
    "DiscordBot ($url, $version)". *)
 let user_agent =
   "DiscordBot (https://github.com/jeong-sik/masc, 0.1)"
 
-let build_request ~token ~channel_id ~content =
+let build_request ~token ~channel_id ~content ?reply_to_message_id () =
   let url =
     Printf.sprintf
       "https://discord.com/api/v10/channels/%s/messages"
@@ -35,9 +39,15 @@ let build_request ~token ~channel_id ~content =
     ; "User-Agent", user_agent
     ]
   in
-  let body =
-    Yojson.Safe.to_string (`Assoc [ "content", `String content ])
+  let fields = [ "content", `String content ] in
+  let fields =
+    match reply_to_message_id with
+    | None -> fields
+    | Some ref_id ->
+        ("message_reference", `Assoc [ "message_id", `String ref_id ])
+        :: fields
   in
+  let body = Yojson.Safe.to_string (`Assoc fields) in
   (url, headers, body)
 
 let parse_response ~status ~body =
@@ -72,8 +82,10 @@ let parse_response ~status ~body =
         in
         Error (Discord_api { code; message })
 
-let send_message ~token ~channel_id ~content =
-  let (url, headers, body) = build_request ~token ~channel_id ~content in
+let send_message ~token ~channel_id ~content ?reply_to_message_id () =
+  let (url, headers, body) =
+    build_request ~token ~channel_id ~content ?reply_to_message_id ()
+  in
   match Masc_http_client.post_sync ~url ~headers ~body () with
   | Error msg -> Error (Network msg)
   | Ok (status, body) -> parse_response ~status ~body

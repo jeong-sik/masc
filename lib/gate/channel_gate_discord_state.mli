@@ -96,9 +96,13 @@ val pp_send_error : Format.formatter -> send_error -> unit
 val send_message :
   channel_id:string ->
   content:string ->
+  ?reply_to_message_id:string ->
+  unit ->
   (string, send_error) result
-(** Post a single message to a Discord channel. Returns the created
-    message id on success. Bot token is resolved from
+(** Post a single message to a Discord channel.  When
+    [reply_to_message_id] is provided, the message is sent as a
+    reply (Discord threads the conversation).  Returns the created
+    message id on success.  Bot token is resolved from
     [DISCORD_BOT_TOKEN] at call time so a token rotation doesn't
     require a server restart.
 

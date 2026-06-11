@@ -538,10 +538,31 @@ let bot_token_opt () =
     let trimmed = String.trim raw in
     if String.equal trimmed "" then None else Some trimmed
 
-let send_message ~channel_id ~content =
+let send_message ~channel_id ~content ?reply_to_message_id () =
   match bot_token_opt () with
   | None -> Error Missing_token
   | Some token ->
-    (match Discord_rest_client.send_message ~token ~channel_id ~content with
-     | Ok id -> Ok id
-     | Error e -> Error (Rest_error e))
+    let limit = Discord_rest_client.message_content_limit in
+    let len = String.length content in
+    if len <= limit then
+      (match Discord_rest_client.send_message ~token ~channel_id ~content ?reply_to_message_id () with
+       | Ok id -> Ok id
+       | Error e -> Error (Rest_error e))
+    else
+      let rec send_chunks first rest =
+        let rlen = String.length rest in
+        let chunk, remaining =
+          if rlen <= limit then rest, None
+          else
+            ( String.sub rest 0 limit
+            , Some (String.sub rest limit (rlen - limit)) )
+        in
+        let ref_id = if first then reply_to_message_id else None in
+        match Discord_rest_client.send_message ~token ~channel_id ~content:chunk ?reply_to_message_id:ref_id () with
+        | Ok id ->
+            (match remaining with
+             | None -> Ok id
+             | Some next -> send_chunks false next)
+        | Error e -> Error (Rest_error e)
+      in
+      send_chunks true content

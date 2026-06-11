@@ -11,6 +11,10 @@
     See: docs/rfc/RFC-0203-discord-builtin-gateway.md §Modules,
          lib/masc_http_client/masc_http_client.mli *)
 
+val message_content_limit : int
+(** Discord text-message content limit, in Unicode scalar units.
+    Messages longer than this must be split into multiple payloads. *)
+
 (** Typed error from Discord REST. Closed sum — anything Discord
     returns that does not map to one of these becomes [Other]
     (preserving the JSON for inspection) so we never silently consume
@@ -34,13 +38,16 @@ val send_message :
   token:string ->
   channel_id:string ->
   content:string ->
+  ?reply_to_message_id:string ->
+  unit ->
   (string, error) result
-(** [send_message ~token ~channel_id ~content] posts to
-    [POST /api/v10/channels/{channel_id}/messages] with body
-    [{"content": <content>}]. Returns the created message id on [Ok].
+(** [send_message ~token ~channel_id ~content ?reply_to_message_id ()]
+    posts to [POST /api/v10/channels/{channel_id}/messages].
+    When [reply_to_message_id] is provided, the message is sent as
+    a reply (Discord threads the conversation). Returns the created
+    message id on [Ok].
 
-    Works for guild text channels, DM channels (use the snowflake
-    Discord returns from [POST /users/@me/channels]), and threads.
+    Works for guild text channels, DM channels, and threads.
 
     @raise nothing — failures are surfaced as typed {!error}. *)
 
@@ -55,10 +62,14 @@ val build_request :
   token:string ->
   channel_id:string ->
   content:string ->
+  ?reply_to_message_id:string ->
+  unit ->
   string * (string * string) list * string
-(** [(url, headers, body) = build_request ~token ~channel_id ~content].
-    Headers include Authorization (Bot scheme), Content-Type, and a
-    Discord-required User-Agent. *)
+(** [(url, headers, body) = build_request ~token ~channel_id ~content
+    ?reply_to_message_id ()].  Headers include Authorization (Bot
+    scheme), Content-Type, and a Discord-required User-Agent.  When
+    [reply_to_message_id] is provided, the body includes a
+    [message_reference] field so Discord threads the reply. *)
 
 val parse_response :
   status:int ->

@@ -45,16 +45,9 @@ let is_keeper_authored_message author =
 ;;
 
 let collect_message_scope ~(config : Workspace.config) ~(meta : keeper_meta)
-  : (string * string) list * (string * string) list * (string * int) list
+  : (string * string) list * (string * string) list
   =
   let _ = config in
   let _ = meta in
-  [], [], []
-;;
-
-let apply_message_cursor_updates (meta : keeper_meta) (updates : (string * int) list)
-  : keeper_meta
-  =
-  let _ = updates in
-  meta
+  [], []
 ;;

@@ -40,11 +40,6 @@ type world_observation = {
       global/all keeper is explicitly allowed to observe in the flattened
       namespace. *)
 
-  message_cursor_updates : (string * int) list;
-  (** Deterministic message cursor watermarks collected during observation.
-      These are applied to keeper meta before the next turn to avoid
-      reprocessing the same broadcast stream. *)
-
   idle_seconds : int;
   (** Seconds since last keeper activity (turn or scheduled autonomous cycle). *)
 
@@ -254,11 +249,6 @@ val durable_signal_present :
 
 (** Structured work signal present in the observation itself. *)
 val actionable_signal_present : world_observation -> bool
-
-val apply_message_cursor_updates :
-  Keeper_meta_contract.keeper_meta ->
-  (string * int) list ->
-  Keeper_meta_contract.keeper_meta
 
 (** Compute effective scheduled autonomous cooldown with idle decay.
     After extended idle (> base cooldown), halve the cooldown each

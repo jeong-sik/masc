@@ -117,8 +117,6 @@ let provider_timeout_metric_outcome =
   Observations.provider_timeout_metric_outcome
 ;;
 
-let persist_message_cursor_updates = Keeper_heartbeat_loop_persist_cursor.persist_message_cursor_updates
-
 (** Run keeper cycle with holder diagnostics. *)
 let run_keeper_cycle = Keeper_heartbeat_loop_cycle.run_keeper_cycle
 
@@ -160,12 +158,6 @@ let run_keepalive_unified_turn
          or operator-driven (board/keeper_chat), not blocker-driven. *)
       let runtime_backpressure = scheduling.runtime_backpressure in
       let should_run_turn = scheduling.should_run_turn in
-      let meta_after_cursor_persist =
-        persist_message_cursor_updates
-          ~config:ctx.config
-          meta_after_triage
-          obs.message_cursor_updates
-      in
       let format_opt_int = function
         | Some value -> string_of_int value
         | None -> "-"
@@ -303,14 +295,14 @@ let run_keepalive_unified_turn
           ~base_path:ctx.config.base_path
           ~keeper_name:meta_after_triage.name);
       if Atomic.get stop
-      then meta_after_cursor_persist
+      then meta_after_triage
       else if should_run_turn && Keeper_fd_pressure.active ()
       then (
         Log.Keeper.debug
           "%s: skipping turn while fd-pressure circuit breaker is active (remaining=%.0fs)"
           meta_after_triage.name
           (Keeper_fd_pressure.remaining_sec ());
-        meta_after_cursor_persist)
+        meta_after_triage)
       else if should_run_turn && Keeper_disk_pressure.active ()
       then (
         Log.Keeper.debug
@@ -318,7 +310,7 @@ let run_keepalive_unified_turn
            (remaining=%.0fs)"
           meta_after_triage.name
           (Keeper_disk_pressure.remaining_sec ());
-        meta_after_cursor_persist)
+        meta_after_triage)
       else if
         should_run_turn
         && not
@@ -329,7 +321,7 @@ let run_keepalive_unified_turn
         Log.Keeper.debug
           "%s: skipping turn because projected FD budget is exhausted before pressure"
           meta_after_triage.name;
-        meta_after_cursor_persist)
+        meta_after_triage)
       else if
         should_run_turn
         && not
@@ -340,19 +332,17 @@ let run_keepalive_unified_turn
         Log.Keeper.debug
           "%s: skipping turn because disk free-space budget is below fleet floor"
           meta_after_triage.name;
-        meta_after_cursor_persist)
+        meta_after_triage)
       else if should_run_turn
       then (
         run_keeper_cycle
           ~ctx
-          ~meta_after_cursor_persist
+          ~meta_after_triage
           ~stop
           ~obs
           ~turn_decision
           ~shared_context
           ())
-      else if obs.message_cursor_updates <> []
-      then meta_after_cursor_persist
       else meta_after_triage
     with
     | Eio.Cancel.Cancelled _ as e -> raise e

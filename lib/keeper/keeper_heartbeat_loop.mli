@@ -88,12 +88,6 @@ val provider_timeout_policy_decision :
     This heartbeat-loop path is reached after the keeper turn returned, so
     timeout evidence is not liveness loss by itself. *)
 
-val persist_message_cursor_updates :
-  config:Workspace.config -> keeper_meta -> (string * int) list -> keeper_meta
-(** Persist workspace-message cursor updates immediately after observation.
-    This is intentionally exposed for the regression that proves a failed
-    turn cannot replay the same scoped messages forever. *)
-
 val run_keepalive_unified_turn :
   ctx:'a context ->
   meta_after_triage:keeper_meta ->

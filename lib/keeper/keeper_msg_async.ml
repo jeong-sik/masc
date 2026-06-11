@@ -408,6 +408,8 @@ let submit ?clock ?timeout_sec ~sw ~base_path ~(f : unit -> tool_result)
 
 (** Poll for the result of an async keeper_msg request. *)
 let poll ?base_path request_id : entry option =
+  if not (is_safe_request_id request_id) then None
+  else
   match Eio.Mutex.use_ro mu (fun () -> Hashtbl.find_opt pending request_id) with
   | Some _ as found -> found
   | None ->
@@ -471,6 +473,8 @@ let entry_to_json (e : entry) : Yojson.Safe.t =
 ;;
 
 let cancel ?base_path request_id : bool =
+  if not (is_safe_request_id request_id) then false
+  else
   let sw_opt = with_lock (fun () -> Hashtbl.find_opt active_switches request_id) in
   match sw_opt with
   | Some sw ->

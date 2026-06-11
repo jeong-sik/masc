@@ -32,6 +32,7 @@ type skip_reason =
   | Provider_cooldown_pending of { remaining_sec : int }
   | Idle_gate_pending of { remaining_sec : int }
   | Cooldown_pending of { remaining_sec : int }
+  | Health_score_cooldown of { remaining_sec : int }
   | No_signal
 
 type turn_verdict =

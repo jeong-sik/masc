@@ -74,6 +74,10 @@ type world_observation = {
       autonomous attempt. Lets task-triggered wakeups bypass cooldown once
       so newly added work is not delayed behind the previous turn's timer. *)
 
+  board_health_score : float option;
+  (** Optional curation health score [0.0, 1.0] from the board. Below 0.4
+      the scheduled autonomous cooldown is multiplied to suppress turns. *)
+
   active_agent_count : int;
   (** Number of agents currently active in the workspace. *)
 

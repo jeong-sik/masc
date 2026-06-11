@@ -362,6 +362,66 @@ let test_runtime_agent_terminal_observation_uses_runtime_identity () =
   check string "attempt detail source" "runtime_agent_terminal"
     observation.attempt_details_source
 
+let test_runtime_agent_terminal_error_observation_marks_failed_attempt () =
+  let config =
+    Runtime_agent.default_config
+      ~name:"oas-runpod_mtp.qwen"
+      ~provider_cfg:(provider_cfg ())
+      ~system_prompt:""
+      ~tools:[]
+  in
+  let config =
+    { config with description = Some "runtime:runpod_mtp.qwen/runtime" }
+  in
+  let error = "Not found: OpenAI-compatible endpoint returned 404" in
+  let observation =
+    Runtime_agent.For_testing.runtime_observation_for_terminal_config
+      ~total_duration_ms:31.2
+      ~error
+      config
+  in
+  check string "runtime id" "runpod_mtp.qwen" observation.runtime_id;
+  check (option string) "selected model" (Some "qwen")
+    observation.selected_model;
+  check int "attempt count" 1 (List.length observation.attempts);
+  check string "attempt detail source" "runtime_agent_terminal_error"
+    observation.attempt_details_source;
+  (match observation.attempts with
+   | [ attempt ] ->
+     check (option string) "attempt error" (Some error) attempt.error
+   | _ -> fail "expected one terminal attempt");
+  check string "runtime outcome" "failed"
+    (Keeper_execution_receipt.runtime_outcome_to_string
+       (Keeper_agent_error.runtime_outcome_of_observation
+          (Some observation)))
+
+let test_not_found_enrichment_includes_runtime_endpoint_model () =
+  let provider_cfg = provider_cfg () in
+  let enriched =
+    Keeper_runtime_attempt.enrich_sdk_error
+      ~runtime_id:"runpod_mtp.qwen"
+      ~provider_cfg
+      (Agent_sdk.Error.Api (Llm_provider.Retry.NotFound { message = "" }))
+  in
+  (match enriched with
+   | Agent_sdk.Error.Api (Llm_provider.Retry.NotFound { message }) ->
+     check bool "mentions 404 marker" true
+       (String_util.contains_substring
+          message
+          "OpenAI-compatible endpoint returned 404");
+     check bool "mentions runtime id" true
+       (String_util.contains_substring message "runtime_id=runpod_mtp.qwen");
+     check bool "mentions model" true
+       (String_util.contains_substring message "model=qwen");
+     check bool "mentions endpoint" true
+       (String_util.contains_substring
+          message
+          "endpoint=https://example-runpod.proxy.runpod.net/v1")
+   | _ -> fail "expected enriched NotFound");
+  check bool "404 is terminal provider failure" true
+    (Keeper_turn_driver.sdk_error_is_terminal_provider_runtime_failure
+       enriched)
+
 let test_runtime_agent_max_turns_is_continuation_checkpoint () =
   let lifecycle =
     Runtime_agent.worker_lifecycle_classification_of_result
@@ -432,6 +492,14 @@ let () =
             "runtime agent terminal observation carries model identity"
             `Quick
             test_runtime_agent_terminal_observation_uses_runtime_identity
+        ; test_case
+            "runtime agent terminal error observation marks failed attempt"
+            `Quick
+            test_runtime_agent_terminal_error_observation_marks_failed_attempt
+        ; test_case
+            "NotFound enrichment includes runtime endpoint and model"
+            `Quick
+            test_not_found_enrichment_includes_runtime_endpoint_model
         ; test_case
             "max turns is continuation checkpoint"
             `Quick

@@ -184,6 +184,12 @@ val resolve_tool_lane_for_oas_tools :
     Agent_sdk.Error.sdk_error )
   result
 
+val runtime_observation_for_terminal_config :
+  total_duration_ms:float ->
+  ?error:string ->
+  config ->
+  Runtime_observation.runtime_observation
+
 module For_testing : sig
   val request_runtime_fields_on_base_config :
     base:Llm_provider.Provider_config.t ->
@@ -205,6 +211,12 @@ module For_testing : sig
 
   val runtime_observation_for_completed_config :
     total_duration_ms:float -> config -> Runtime_observation.runtime_observation
+
+  val runtime_observation_for_terminal_config :
+    total_duration_ms:float ->
+    ?error:string ->
+    config ->
+    Runtime_observation.runtime_observation
 end
 
 (** {1 Lifecycle / checkpoint helpers (re-exported)} *)

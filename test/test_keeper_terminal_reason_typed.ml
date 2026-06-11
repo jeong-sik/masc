@@ -333,6 +333,7 @@ let fallback_bools = [ false; true ]
 
 let runtime_outcomes =
   [ R.Runtime_completed
+  ; R.Runtime_failed
   ; R.Runtime_passed_to_next_model
   ; R.Runtime_not_observed
   ; R.Runtime_not_dispatched

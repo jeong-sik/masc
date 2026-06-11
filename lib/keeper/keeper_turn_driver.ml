@@ -84,6 +84,7 @@ let run_named
     ?oas_checkpoint
     ?trace_link
     ?event_bus
+    ?on_runtime_observation
     ?runtime_manifest_context
     ?runtime_manifest_append
     ?sw
@@ -182,6 +183,7 @@ let run_named
     on_yield;
     on_resume;
     agent_ref;
+    on_runtime_observation;
     event_bus;
     runtime_manifest_context;
     runtime_manifest_append;

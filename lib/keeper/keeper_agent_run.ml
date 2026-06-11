@@ -549,6 +549,9 @@ let run_turn
                     ?oas_checkpoint:resume_oas_checkpoint
                     ?event_bus
                     ?trace_link
+                    ~on_runtime_observation:
+                      (fun observation ->
+                         receipt_runtime_observation_ref := Some observation)
                     ?per_provider_timeout_s
                     ()
               in

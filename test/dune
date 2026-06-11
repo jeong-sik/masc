@@ -2069,3 +2069,8 @@
  (preprocess
   (pps ppx_safe_shell))
  (libraries alcotest masc.masc_exec masc.exec_policy))
+
+(test
+ (name test_sliding_window_rate_limit)
+ (modules test_sliding_window_rate_limit)
+ (libraries masc_test_deps))

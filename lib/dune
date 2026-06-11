@@ -3,6 +3,7 @@
  (name masc)
  (public_name masc)
 (private_modules
+ cli_arg
  http_body_buffer
  http_response_payload
  error_event_type

@@ -127,6 +127,7 @@
   test_keeper_wake_telemetry
   test_keeper_timing
   test_keeper_token_count
+  test_cli_arg
   test_keeper_chat_store
   test_keeper_runtime_trust_snapshot
   test_keeper_tool_audit_snapshot
@@ -381,6 +382,7 @@
   test_keeper_wake_telemetry
   test_keeper_timing
   test_keeper_token_count
+  test_cli_arg
   test_keeper_chat_store
   test_keeper_runtime_trust_snapshot
   test_keeper_tool_audit_snapshot

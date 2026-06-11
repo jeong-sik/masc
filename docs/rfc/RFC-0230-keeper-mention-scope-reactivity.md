@@ -13,8 +13,9 @@ implementation_prs: []
 
 # RFC-0230: Keeper mention/scope reactivity — cursor-free salience
 
-Status: Draft · Implements the starved `collect_message_scope` as a turn-trigger
-salience signal · Retires the per-message cursor scaffolding (RFC-0223 §1.5)
+Status: Draft · Models keeper attention as a typed engagement state machine
+(salience), not a string/recency scan · Retires the per-message cursor
+scaffolding (RFC-0223 §1.5)
 Drafted by: Claude Opus 4.8 (research-to-RFC pass with owner, 2026-06-11).
 
 > Anchors marked **(verified)** were read against `origin/main` (`95150953b`)
@@ -99,95 +100,156 @@ So this RFC separates the two:
    element, `apply_message_cursor_updates`, `message_cursor_updates` field,
    `persist_message_cursor_updates`) — the mechanism §1.5/§2.6 reject.
 
-Salience is recomputed each observation from existing keeper state, the same
-way presence already is: `connected_surfaces` is rebuilt every `observe()` via
-`Gate_surface.connected_surfaces_for_keeper ~keeper_name:meta.name`
-(`keeper_world_observation.ml:471-472` **(verified)**) with no cursor. Mention
-and scope salience follow that template.
+Salience is **not** a per-observation string scan plus a numeric recency
+compare (that would be the substring-classifier + magic-number signatures
+CLAUDE.md rejects). It is a typed engagement state machine (§3), advanced by
+typed events; the state replaces the cursor.
 
-## §3 Design
+## §3 Design — a typed engagement state machine
 
-### 3.1 New signature (cursor-free)
+The exemplar is `keeper_failure_policy`
+(`lib/keeper_failure_policy/keeper_failure_policy.mli:9-57` **(verified)**):
+closed-sum state types (`stream_idle_state`, `timeout_phase`,
+`liveness_evidence`, `failure`), `_of_label` / `_to_label` only at the
+serialization boundary, predicates and a total decision over the sum. Salience
+follows that shape.
+
+### 3.1 Parse to a typed signal at the boundary, once
+
+Detection is a one-time boundary parse, not a per-observation re-scan.
+`pending_board_event` already does exactly this for board posts —
+`explicit_mention : bool`, `matched_targets : string list`,
+`post_kind : Board.post_kind` (`keeper_world_observation.ml:13-25`
+**(verified)**). Lane lines get the same typed treatment:
 
 ```ocaml
-val collect_message_scope :
-  config:Workspace.config -> meta:keeper_meta ->
-  (string * string) list * (string * string) list
-  (* mentions, scope_messages — the (string * int) cursor element is removed *)
+type lane_signal =
+  | Direct_mention of { speaker : string; at : float }
+  | Scope_message  of { speaker : string; at : float }
+  | Self_authored
+  | Ambient
 ```
 
-- **Mentions**: scan the keeper's lane window (tail-bounded read, reusing the
-  RFC-0226 P2 `tail_read_bytes` bound — no full-file scan) for messages whose
-  text addresses `meta.name` (the existing `Keeper_identity` self-token logic
-  already present in the module is the matcher). Return `(speaker, text)` pairs.
-- **Scope messages**: the same window filtered to the keeper's subscribed scope,
-  excluding keeper-authored lines (`is_keeper_authored_message`, already in the
-  module).
-- **Recency**: "new to this keeper" is derived from the keeper's own continuity
-  marker (`continuity_summary`, already read in `observe()` and already used by
-  `collect_board_events ~meta ~continuity_summary`), not from a separate cursor
-  store. See §7 open question on board/message symmetry.
+The `@<keeper>` text match runs once here (reusing the existing
+`Keeper_identity` self-token logic), producing a typed value — the same way
+board derives `matched_targets`. There is no substring gate downstream of this
+parse.
 
-### 3.2 Removed (the cursor scaffolding)
+### 3.2 Engagement is a per-conversation FSM, keyed like board (by post/thread)
 
-- `apply_message_cursor_updates` and its `.mli`.
-- `world_observation.message_cursor_updates` field and the `observe()` binding.
-- `Keeper_heartbeat_loop_persist_cursor.persist_message_cursor_updates` (its
-  only callers are the heartbeat loop persisting empty cursor updates).
+```ocaml
+type engagement =
+  | Idle
+  | Addressed   of { since : float; by : string }
+  | Acknowledged of { at : float }
+  | Disengaged  of { resolved_at : float }
 
-Removing a field forces every construction site to be updated at compile time;
-OCaml's exhaustiveness is the safety net.
+type engagement_event =
+  | Lane of lane_signal
+  | Keeper_responded
+  | Conversation_idle of { for_seconds : float }
+
+val advance : engagement -> engagement_event -> engagement
+(* total: every (state x event) pair is explicit, no `_ ->` catch-all
+   (software-development.md AI anti-pattern #4). Each arm comments its path,
+   e.g. Idle x Lane (Direct_mention _) -> Addressed;
+        Addressed _ x Keeper_responded -> Acknowledged;
+        Acknowledged _ x Lane (Direct_mention _) -> Addressed (re-addressed). *)
+```
+
+The keeper holds a typed map `conversation_key -> engagement` (mirroring
+board's per-post tracking), persisted in `keeper_meta`. "Have I already handled
+this mention" is the predicate `is Acknowledged`, never a `ts` comparison — the
+state **is** the memory, so there is no cursor.
+
+### 3.3 Salience is derived and total
+
+```ocaml
+type salience = Wake of { reason : string } | Quiet
+val reactive_salience : engagement -> salience
+(* Addressed _ -> Wake; Idle | Acknowledged _ | Disengaged _ -> Quiet *)
+```
+
+`observe()` builds `pending_mentions` / `pending_scope_messages` from the
+entries whose engagement is `Addressed`. The consumer graph (§1) is unchanged —
+only the producer becomes a typed FSM read instead of a stub.
+
+### 3.4 Removed (the cursor scaffolding)
+
+The `(string * int)` tuple element, `apply_message_cursor_updates`
+(`keeper_world_observation_message_scope.ml:55-59` **(verified)**),
+`world_observation.message_cursor_updates`
+(`keeper_world_observation.ml:33,459` **(verified)**), and
+`Keeper_heartbeat_loop_persist_cursor.persist_message_cursor_updates`
+(`keeper_heartbeat_loop_persist_cursor.ml:33` **(verified)**) are superseded by
+the engagement map — an explicit typed lifecycle, not a numeric per-source
+pointer. Removing the field forces every construction site to update at compile
+time.
 
 ## §4 Phases
 
-### P1 — Mention salience (cursor-free)
-- Implement the mention half; drop the cursor tuple element + scaffolding.
-- Wire nothing new downstream — the consumers already read `pending_mentions`.
-- Tests: a lane with `@<keeper>` produces a non-empty `pending_mentions` for
-  that keeper and empty for others (targeted, not herd); no mention → empty.
+### P1 — Typed lane signal at the boundary
+- Add `lane_signal` and the one-time parse (reusing `Keeper_identity`); replace
+  the raw `(string * string)` detection with typed signals.
+- No FSM yet; no behavior change beyond producing typed values.
+- Tests: a lane line addressing `<keeper>` parses to `Direct_mention`; a
+  self-authored line to `Self_authored`; unrelated to `Ambient`.
 
-### P2 — Scope salience
-- Implement the scope-message half (subscribed scope, non-self-authored).
-- Tests: scope message in-scope → `pending_scope_messages` non-empty; out of
-  scope / self-authored → empty.
+### P2 — Engagement FSM + remove cursor scaffolding
+- Add `engagement`, `engagement_event`, total `advance`, `reactive_salience`.
+- Persist the `conversation_key -> engagement` map in `keeper_meta`; wire
+  `observe()` to surface `Addressed` entries as `pending_mentions` /
+  `pending_scope_messages`. Delete the cursor scaffolding (§3.4).
+- Tests: `advance` is exhaustive; mention → `Addressed` → `Wake`; after
+  `Keeper_responded` → `Acknowledged` → `Quiet` (re-fire suppressed without a
+  cursor); only the addressed keeper wakes (targeted, not herd).
 
-### P3 — Targeted-wake assertion
-- Property test (TLA+ optional, software-development.md §TLA+): given a mention
-  for keeper A only, A's post-action guard pins a reactive turn and B's does
-  not. A `MentionLostToHerd` bug-action (every keeper reacts) must violate a
-  `OnlyAddressedKeeperReacts` invariant; the clean model must satisfy it.
+### P3 — Targeted-wake assertion (TLA+ bug-model)
+- `OnlyAddressedKeeperReacts` and `AcknowledgedNeverReReacts` invariants. Bug
+  actions `MentionLostToHerd` (every keeper reacts) and `AckedReReacts` (an
+  `Acknowledged` engagement re-wakes) must each violate an invariant; the clean
+  model must satisfy both (software-development.md §TLA+ bug-model).
 
 ## §5 Verification
 
 | Claim | How |
 |-------|-----|
-| Producer no longer starves consumers | Test: `pending_mentions` non-empty on a planted mention |
-| Targeted, not herd | Test: only the addressed keeper's observation carries the mention |
-| No new store | Code review: salience derived from lane window + existing continuity marker |
-| Cursor scaffolding gone | `git grep message_cursor_updates` → empty after P1 |
-| Read cost bounded | Code review: tail-bounded read, no full-file scan (RFC-0226 P2 bound) |
+| Producer no longer starves consumers | Test: `pending_mentions` non-empty when an `Addressed` engagement exists |
+| Detection is typed, not a downstream substring gate | Code review: string match confined to the §3.1 boundary parse → `lane_signal` |
+| `advance` is total | OCaml exhaustive match, no catch-all (CI ratchet guards `_ ->`) |
+| Re-fire suppressed without a cursor | Test: `Acknowledged` + same mention → `Quiet`; no `ts` compare in the path |
+| Targeted, not herd | Test/TLA+: only the addressed keeper's engagement is `Addressed` |
+| Cursor scaffolding gone | `git grep message_cursor_updates` → empty after P2 |
 
 ## §6 Workaround self-check (CLAUDE.md signatures)
 
-- Telemetry-as-fix: no — this implements a behavior (salience), not a counter.
-- String classifier: the mention matcher is the existing typed `Keeper_identity`
-  self-token logic, not a new substring gate. No new prefix classifier.
-- N-of-M: no — single function, single locus.
+- Telemetry-as-fix: no — implements a behavior (a typed FSM), not a counter.
+- String/substring classifier: the `@<keeper>` match is a one-time boundary
+  parse producing a typed `lane_signal` (like board's `matched_targets`), not a
+  downstream substring gate. No new prefix classifier; no magic-number recency
+  compare (the FSM state replaces it).
+- N-of-M: no — one signal type, one FSM, one locus.
 - Cap/cooldown/dedup/repair: **net removal** of the cursor scaffolding; no cap,
-  no cooldown introduced. The tail-bound reuses the existing RFC-0226 bound.
+  no cooldown, no dedup pointer introduced.
 
 ## §7 Open questions
 
-1. **Board/message cursor symmetry.** `collect_board_events` today uses a cursor
-   policy (`collect_board_events_with_cursor_policy`,
-   `keeper_world_observation.ml:221` **(verified)**), so making message scope
-   cursor-free creates two different "what's new for me" bases in the same
-   `observe()`. Options: (a) ship message salience cursor-free now and migrate
-   board events to the same continuity basis in a follow-up (aligns §2.6); (b)
-   mirror the board cursor policy for messages now (symmetry, but perpetuates a
-   cursor §2.6 wants gone). This RFC proposes (a); confirm.
-2. **Continuity marker sufficiency.** Is `continuity_summary` a precise enough
-   recency anchor to avoid re-surfacing an already-handled mention every
-   observation, without a per-message cursor? If not, the minimal addition is a
-   single keeper-owned last-observed lane `ts` in `keeper_meta` (not a
-   per-source cursor table) — to be decided in P1, not assumed here.
+1. **Engagement key granularity.** Proposed: a per-conversation map keyed by
+   board-post / lane-thread id (mirrors `pending_board_event`'s per-post
+   tracking, and matches the human model of being pulled into several threads).
+   Alternatives: a single per-keeper `engagement`, or per-speaker. Confirm the
+   per-conversation map.
+2. **Persistence locus and size.** The `conversation_key -> engagement` map
+   lives in `keeper_meta` (typed, serialized with the rest of meta). This is
+   state, not a cursor (§2.6 distinguishes a typed lifecycle from a numeric
+   pointer), but its growth needs a bound — proposal: prune `Disengaged`/
+   `Acknowledged` entries older than the lane tail window. Confirm the prune
+   rule (this is the one place a bound is introduced; it is a GC of dead state,
+   not a cap on behavior).
+3. **Unify board into the same FSM?** `pending_board_event` is a parallel
+   typed-event path with its own cursor policy
+   (`collect_board_events_with_cursor_policy`,
+   `keeper_world_observation.ml:221` **(verified)**). A larger follow-up could
+   fold board posts into the same engagement FSM so posts and lane lines share
+   one attention model (and board sheds its cursor too). Out of scope here;
+   flagged so the two paths converge rather than drift.

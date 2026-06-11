@@ -416,6 +416,57 @@ let test_voice_output_turn_serializes_speakers () =
     (Atomic.get second_entered)
 ;;
 
+let test_keeper_msg_async_timeout_zero_immediate () =
+  with_eio_env
+  @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let sw = Eio.Fiber.switch ~on_release:(fun _ -> ()) () in
+  let base_path = temp_dir "keeper-msg-async-timeout0-" in
+  let never, _release_never = Eio.Promise.create () in
+  let request_id =
+    Keeper_msg_async.submit ~clock ~timeout_sec:0.0 ~sw ~base_path
+      ~f:(fun () ->
+        Eio.Promise.await never;
+        tr_ok "should have timed out")
+      ~keeper_name:"executor"
+      ()
+  in
+  let entry = wait_for_done_with_clock clock request_id in
+  let timeout_body =
+    match entry.status with
+    | Done { ok = false; body } -> body
+    | _ -> Alcotest.fail "expected timeout Done for timeout_sec=0.0"
+  in
+  Alcotest.(check string) "error code is keeper_msg_timeout" "keeper_msg_timeout"
+    (match Yojson.Safe.from_string timeout_body with
+     | `Assoc items -> (match List.assoc "error" items with `String s -> s | _ -> "not_string")
+     | _ -> "not_json");
+  ()
+;;
+
+let test_keeper_msg_async_timeout_infinity_never () =
+  with_eio_env
+  @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let sw = Eio.Fiber.switch ~on_release:(fun _ -> ()) () in
+  let base_path = temp_dir "keeper-msg-async-infinity-" in
+  let request_id =
+    Keeper_msg_async.submit ~clock ~timeout_sec:Float.infinity ~sw ~base_path
+      ~f:(fun () -> tr_ok "completed with infinity timeout")
+      ~keeper_name:"executor"
+      ()
+  in
+  let entry = wait_for_done_with_clock clock request_id in
+  let body =
+    match entry.status with
+    | Done { ok = true; body } -> body
+    | Done { ok = false; body } ->
+      Alcotest.failf "infinity timeout returned error: %s" body
+    | _ -> Alcotest.fail "expected success Done for infinity timeout"
+  in
+  Alcotest.(check string) "body matches" "completed with infinity timeout" body
+;;
+
 let () =
   run
     "keeper_mutex_coverage"
@@ -437,6 +488,14 @@ let () =
             "timeout is terminal error"
             `Quick
             test_keeper_msg_async_timeout_is_terminal_error
+        ; test_case
+            "timeout_sec=0.0 triggers immediate timeout"
+            `Quick
+            test_keeper_msg_async_timeout_zero_immediate
+        ; test_case
+            "timeout_sec=infinity never times out"
+            `Quick
+            test_keeper_msg_async_timeout_infinity_never
         ; test_case
             "gc removes stale terminal disk record"
             `Quick

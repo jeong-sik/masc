@@ -110,20 +110,31 @@ let speaker_display (m : Keeper_chat_store.chat_message) : string =
 
    Pure over the loaded lane so it is testable without I/O; [collect_message_scope]
    only adds the [Keeper_chat_store.load]. *)
+
+(* The watermark: ts of the keeper's own last lane line (assistant role). A user
+   line at or before it is already answered. *)
+let last_self_ts (messages : Keeper_chat_store.chat_message list) : float =
+  List.fold_left
+    (fun acc (m : Keeper_chat_store.chat_message) ->
+      match m.ts with
+      | Some ts when m.role = "assistant" && ts > acc -> ts
+      | _ -> acc)
+    0.0
+    messages
+;;
+
+let is_owner_authored (m : Keeper_chat_store.chat_message) : bool =
+  match m.speaker with
+  | Some (s : Keeper_chat_store.speaker) -> s.speaker_authority = Keeper_chat_store.Owner
+  | None -> false
+;;
+
 let pending_mentions_of_messages
       ~(targets : string list)
       (messages : Keeper_chat_store.chat_message list)
   : (string * string) list
   =
-  let my_last_ts =
-    List.fold_left
-      (fun acc (m : Keeper_chat_store.chat_message) ->
-        match m.ts with
-        | Some ts when m.role = "assistant" && ts > acc -> ts
-        | _ -> acc)
-      0.0
-      messages
-  in
+  let my_last_ts = last_self_ts messages in
   List.filter_map
     (fun (m : Keeper_chat_store.chat_message) ->
       match m.ts with
@@ -133,12 +144,37 @@ let pending_mentions_of_messages
     messages
 ;;
 
-(* [pending_scope_messages] (the second list) is reserved for RFC-0230 P2. *)
+(* RFC-0230 P2 — scope messages: a keeper's lane is, in practice, an operator
+   (Owner) conversation. The operator often addresses the keeper without an
+   "@name", so an unanswered Owner line that is not already a mention is a scope
+   message. External (connector) chatter without a mention is ignored, so a busy
+   channel does not flood the keeper. Same watermark as mentions; the mention
+   exclusion keeps the two reactive signals disjoint. *)
+let pending_scope_of_messages
+      ~(targets : string list)
+      (messages : Keeper_chat_store.chat_message list)
+  : (string * string) list
+  =
+  let my_last_ts = last_self_ts messages in
+  List.filter_map
+    (fun (m : Keeper_chat_store.chat_message) ->
+      match m.ts with
+      | Some ts
+        when ts > my_last_ts
+             && m.role = "user"
+             && is_owner_authored m
+             && not (line_mentions ~targets m.content) -> Some (speaker_display m, m.content)
+      | _ -> None)
+    messages
+;;
+
 let collect_message_scope ~(config : Workspace.config) ~(meta : keeper_meta)
   : (string * string) list * (string * string) list
   =
   let messages =
     Keeper_chat_store.load ~base_dir:config.base_path ~keeper_name:meta.name
   in
-  pending_mentions_of_messages ~targets:(message_feed_targets meta) messages, []
+  let targets = message_feed_targets meta in
+  ( pending_mentions_of_messages ~targets messages
+  , pending_scope_of_messages ~targets messages )
 ;;

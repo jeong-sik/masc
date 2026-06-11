@@ -127,6 +127,13 @@ let read_env_entry path =
     then Error (Printf.sprintf "keeper secret env value must be single-line: %s" path)
     else if contains_char value '\000'
     then Error (Printf.sprintf "keeper secret env value must not contain NUL: %s" path)
+    else if String.length value > 0 && Char.equal value.[0] '#'
+    then
+      Error
+        (Printf.sprintf
+           "keeper secret env value must not start with '#', which docker --env-file \
+            treats as a comment: %s"
+           path)
     else Ok value
   with
   | Sys_error msg -> Error msg

@@ -294,8 +294,10 @@
   test_alignment_score
   test_blocker_class_exhaustiveness
   test_workspace_goal_index
-  test_log_severity_outcome_level)
+  test_log_severity_outcome_level
+  test_env_keeper_scrub)
  (modules
+  test_env_keeper_scrub
   test_keeper_reactive_wake_backlog_gate
   test_keeper_lane_signal
   test_board_activity_cache
@@ -568,7 +570,8 @@
   test_alignment_score
   test_blocker_class_exhaustiveness
   test_workspace_goal_index
-  test_log_severity_outcome_level)
+  test_log_severity_outcome_level
+  test_env_keeper_scrub)
  (libraries masc_test_deps multimodal))
 
 ; Focused CI gate for runtime TOML validity.

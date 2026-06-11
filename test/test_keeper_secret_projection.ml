@@ -315,6 +315,24 @@ let test_dashboard_status_reports_projection_error () =
     (contains_substring (Yojson.Safe.to_string json) "invalid keeper secret env name")
 ;;
 
+let test_env_value_leading_hash_rejects () =
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "MASC_SECRET_DIR" "" @@ fun () ->
+  let root = secret_root_default ~base ~keeper_name:"minjae" in
+  write_file (Filename.concat (Filename.concat root "env") "GH_TOKEN") "#starts_with_hash";
+  match
+    Keeper_secret_projection.docker_args_for_keeper
+      ~base_path:base
+      ~keeper_name:"minjae"
+      ~container_name:"container"
+  with
+  | Ok _ -> Alcotest.fail "expected leading-hash env value rejection"
+  | Error err ->
+    Alcotest.(check bool) "mentions docker env-file comment" true
+      (contains_substring err "docker --env-file")
+;;
+
 let () =
   Alcotest.run
     "keeper secret projection"
@@ -336,6 +354,8 @@ let () =
             test_dashboard_status_redacts_values
         ; Alcotest.test_case "dashboard status reports projection error" `Quick
             test_dashboard_status_reports_projection_error
+        ; Alcotest.test_case "env value leading hash rejects" `Quick
+            test_env_value_leading_hash_rejects
         ] )
     ]
 ;;

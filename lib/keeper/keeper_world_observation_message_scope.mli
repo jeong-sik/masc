@@ -23,6 +23,17 @@ val pending_mentions_of_messages
   -> Keeper_chat_store.chat_message list
   -> (string * string) list
 
+(** [pending_scope_of_messages ~targets messages] returns the [(speaker,
+    content)] of every unanswered Owner-authored user line that is {e not} a
+    mention — the operator addressing the keeper without an "@name". External
+    (connector) lines and lines already counted as mentions are excluded, so
+    this signal stays disjoint from mentions and does not flood on busy
+    channels. Same watermark as {!pending_mentions_of_messages}; pure. *)
+val pending_scope_of_messages
+  :  targets:string list
+  -> Keeper_chat_store.chat_message list
+  -> (string * string) list
+
 val collect_message_scope
   :  config:Workspace.config
   -> meta:keeper_meta

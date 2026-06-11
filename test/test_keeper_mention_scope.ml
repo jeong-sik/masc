@@ -81,6 +81,42 @@ let test_assistant_self_mention_ignored () =
     (contents (MS.pending_mentions_of_messages ~targets messages))
 ;;
 
+let speaker_with authority : Store.speaker option =
+  Some { speaker_id = None; speaker_name = None; speaker_authority = authority }
+;;
+
+let owner = speaker_with Store.Owner
+let external_ = speaker_with Store.External
+
+let test_owner_unmentioned_line_is_scope () =
+  let messages = [ msg ~role:"user" ~ts:(Some 10.0) ~speaker:owner "can you check the deploy" ] in
+  check (list string) "operator without @ -> scope" [ "can you check the deploy" ]
+    (contents (MS.pending_scope_of_messages ~targets messages))
+;;
+
+let test_owner_mention_is_not_scope () =
+  (* an owner line that mentions is a mention, not a scope message (disjoint) *)
+  let messages = [ msg ~role:"user" ~ts:(Some 10.0) ~speaker:owner "@dreamer check it" ] in
+  check (list string) "owner mention excluded from scope" []
+    (contents (MS.pending_scope_of_messages ~targets messages))
+;;
+
+let test_external_unmentioned_is_not_scope () =
+  let messages = [ msg ~role:"user" ~ts:(Some 10.0) ~speaker:external_ "random channel chatter" ] in
+  check (list string) "external without @ -> ignored" []
+    (contents (MS.pending_scope_of_messages ~targets messages))
+;;
+
+let test_answered_owner_line_is_cleared () =
+  let messages =
+    [ msg ~role:"user" ~ts:(Some 10.0) ~speaker:owner "please check"
+    ; msg ~role:"assistant" ~ts:(Some 11.0) "done"
+    ]
+  in
+  check (list string) "answered owner line -> cleared" []
+    (contents (MS.pending_scope_of_messages ~targets messages))
+;;
+
 let () =
   run "keeper_mention_scope"
     [ ( "line_mentions"
@@ -97,6 +133,12 @@ let () =
         ; test_case "answered_cleared" `Quick test_answered_mention_is_cleared
         ; test_case "rementioned_pending" `Quick test_rementioned_after_reply_is_pending
         ; test_case "assistant_self_ignored" `Quick test_assistant_self_mention_ignored
+        ] )
+    ; ( "pending_scope_of_messages"
+      , [ test_case "owner_unmentioned_is_scope" `Quick test_owner_unmentioned_line_is_scope
+        ; test_case "owner_mention_not_scope" `Quick test_owner_mention_is_not_scope
+        ; test_case "external_unmentioned_ignored" `Quick test_external_unmentioned_is_not_scope
+        ; test_case "answered_owner_cleared" `Quick test_answered_owner_line_is_cleared
         ] )
     ]
 ;;

@@ -310,7 +310,7 @@ let handle_add_task ~tool_name ~start_time ctx args =
           ~tool_name ~start_time error
     | Ok contract ->
         Tool_result.ok ~tool_name ~start_time
-          (Workspace.add_task ?contract ?goal_id
+          (Workspace.add_task ?contract
             ~reject_if:(Workspace_task_capacity.rejection_for_add_task ?goal_id)
             ~created_by:ctx.agent_name ctx.config ~title:trimmed_title
             ~priority ~description)

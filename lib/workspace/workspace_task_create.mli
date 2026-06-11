@@ -13,7 +13,7 @@ val normalize_title_for_dedup : string -> string
 (** Normalize title for deduplication: lowercase, keep only alphanumeric+space. *)
 
 val find_duplicate_task :
-  Masc_domain.backlog -> title:string -> goal_id:string option -> string option
+  Masc_domain.backlog -> title:string -> string option
 (** Check if a task with a similar title already exists in the backlog.
     Returns [Some existing_task_id] if a duplicate is found, [None] otherwise. *)
 

@@ -30,12 +30,12 @@ let backend_of_meta (meta : keeper_meta) =
   | Docker -> "docker"
   | Local -> "local"
 
-let task_is_linked_to_keeper_goals goal_ids (task : Masc_domain.task) =
+let task_is_linked_to_keeper_goals ?(task_goal_index = Hashtbl.create 0) goal_ids (task : Masc_domain.task) =
+  let task_goal_ids =
+    try Hashtbl.find task_goal_index task.id with Not_found -> []
+  in
   List.exists
-    (fun goal_id ->
-       match task.goal_id with
-       | Some task_goal_id -> String.equal task_goal_id goal_id
-       | None -> false)
+    (fun goal_id -> List.mem goal_id task_goal_ids)
     goal_ids
 
 (* A task is claimable-by-a-fresh-keeper only in [Todo]. Enumerate every
@@ -60,7 +60,7 @@ type claim_goal_scope = {
 
 (* Pure in-memory scope derived from [meta] alone — no disk read. The
    [active_goal_ids] hard filter; an empty scope means all_tasks. *)
-let meta_only_claim_goal_scope (meta : keeper_meta) =
+let meta_only_claim_goal_scope ?task_goal_index (meta : keeper_meta) =
   match meta.active_goal_ids with
   | [] ->
       {
@@ -71,7 +71,7 @@ let meta_only_claim_goal_scope (meta : keeper_meta) =
       }
   | goal_ids ->
       {
-        task_filter = task_is_linked_to_keeper_goals goal_ids;
+        task_filter = task_is_linked_to_keeper_goals ?task_goal_index goal_ids;
         mode = "active_goal_ids";
         effective_goal_ids = goal_ids;
         fallback_reason = None;
@@ -100,13 +100,15 @@ let resolve_claim_goal_scope ~(config : Workspace.config) ~(meta : keeper_meta) 
   match meta.active_goal_ids with
   | [] -> meta_only_claim_goal_scope meta
   | goal_ids ->
+    let tasks = Workspace.get_tasks_safe config in
+    let task_goal_index = Workspace_goal_index.build_task_goal_index () in
     let scoped_claimable_exists =
-      Workspace.get_tasks_safe config
-      |> List.exists (fun task ->
+      List.exists (fun task ->
              task_is_unclaimed_todo task
-             && task_is_linked_to_keeper_goals goal_ids task)
+             && task_is_linked_to_keeper_goals ~task_goal_index goal_ids task)
+        tasks
     in
-    if scoped_claimable_exists then meta_only_claim_goal_scope meta
+    if scoped_claimable_exists then meta_only_claim_goal_scope ~task_goal_index meta
     else
       {
         task_filter = (fun (_task : Masc_domain.task) -> true);

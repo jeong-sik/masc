@@ -1710,11 +1710,7 @@ let test_scope_widen_claims_unscoped_when_scoped_admission_blocked () =
       Workspace.add_task config ~title:"unscoped open" ~priority:1 ~description:""
     in
     let agent_name = "agent_llm_a" in
-    let task_filter (t : Masc_domain.task) =
-      match t.goal_id with
-      | Some g -> String.equal g "goal-x"
-      | None -> false
-    in
+    let task_filter (_t : Masc_domain.task) = false in
     let admission_filter ~active_tasks:_ (t : Masc_domain.task) =
       not (String.equal t.id "task-001")
     in
@@ -1810,7 +1806,6 @@ let test_append_archive_tasks () =
       { id = "task-test"
       ; title = "Archive Test"
       ; description = "Test description"
-      ; goal_id = None
       ; task_status =
           Masc_domain.Done
             { assignee = "agent_llm_a"; completed_at = "2026-01-01T00:00:00Z"; notes = None }

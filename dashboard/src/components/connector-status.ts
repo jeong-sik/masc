@@ -834,9 +834,11 @@ function ConnectorLivePanel({
                 >${isActionLoading ? '…' : 'Stop'}</button>
               `
             : null}
-          <${SidecarLogToggle} connectorId=${connectorId} />
+          ${!isInProcessConnector(connectorId)
+            ? html`<${SidecarLogToggle} connectorId=${connectorId} />`
+            : null}
           <${ConnectorConfigToggle} connectorId=${connectorId} />
-          ${sidecarLogPath
+          ${sidecarLogPath && !isInProcessConnector(connectorId)
             ? html`<span class="cursor-help text-3xs text-[var(--color-fg-disabled)]" title=${sidecarLogPath} aria-hidden="true">↗</span>`
             : null}
           <button
@@ -934,7 +936,9 @@ function ConnectorLivePanel({
           `
         : null}
 
-      <${SidecarLogViewer} connectorId=${connectorId} />
+      ${!isInProcessConnector(connectorId)
+        ? html`<${SidecarLogViewer} connectorId=${connectorId} />`
+        : null}
       <${ConnectorConfigForm} connectorId=${connectorId} />
 
       ${keeperDirectoryError && keepers.length === 0

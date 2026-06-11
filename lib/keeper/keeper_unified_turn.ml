@@ -889,6 +889,14 @@ dominant source of the observed CAS race exhaustion after
                     ~is_auto_recoverable
                     ~err
                     ~error_text:e_str;
+                  (* RFC-0221 §3.4: emit turn_completed telemetry on all exit paths
+                     after Agent.run() — success path emits via
+                     Keeper_unified_turn_success → keeper_unified_metrics_snapshot;
+                     failure path emits here directly. *)
+                  Otel_metric_store.inc_counter
+                    Keeper_metrics.(to_string TurnCompleted)
+                    ~labels:[("keeper", meta.name)]
+                    ();
                   Error err
                 | Ok result ->
                   let final_execution = !last_execution in

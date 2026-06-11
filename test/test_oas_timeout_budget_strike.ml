@@ -71,6 +71,18 @@ let provider_timeout_error ~phase =
        ; phase
        })
 
+let raw_provider_timeout_error ~phase =
+  Agent_sdk.Error.Provider
+    (Llm_provider.Error.Timeout
+       { provider = "test_provider"
+       ; timeout_phase = phase
+       ; detail = "provider timeout"
+       })
+
+let raw_api_timeout_error () =
+  Agent_sdk.Error.Api
+    (Llm_provider.Retry.Timeout { message = "Per-provider timeout after 90.0s" })
+
 let turn_timeout_error () =
   KTD.sdk_error_of_masc_internal_error (KTD.Turn_timeout { elapsed_sec = 600.0 })
 
@@ -106,6 +118,47 @@ let test_cycle_failed_log_level_is_policy_aware () =
     false
     (EC.should_warn_keeper_cycle_failed (turn_timeout_error ()))
 
+let test_raw_oas_provider_timeout_uses_same_policy () =
+  let err =
+    raw_provider_timeout_error
+      ~phase:
+        (Some
+           (Llm_provider.Http_client.Stream_idle
+              Llm_provider.Http_client.Streaming_thinking))
+  in
+  Alcotest.(check bool)
+    "raw provider timeout is a provider timeout"
+    true
+    (EC.is_provider_timeout_error err);
+  Alcotest.(check bool)
+    "raw provider timeout cycle failure is warn"
+    true
+    (EC.should_warn_keeper_cycle_failed err);
+  match
+    KH.provider_timeout_policy_decision
+      ~strikes:KK.provider_timeout_strike_limit
+      err
+  with
+  | None -> Alcotest.fail "expected provider timeout policy decision"
+  | Some decision ->
+    Alcotest.(check string)
+      "reason preserves OAS timeout phase"
+      "provider_timeout_loop:stream_idle:streaming_thinking"
+      decision.reason
+
+let test_raw_oas_api_timeout_uses_same_policy () =
+  let err = raw_api_timeout_error () in
+  Alcotest.(check bool)
+    "raw API timeout is a provider timeout"
+    true
+    (EC.is_provider_timeout_error err);
+  match KH.provider_timeout_policy_decision ~strikes:1 err with
+  | None -> Alcotest.fail "expected provider timeout policy decision"
+  | Some decision ->
+    Alcotest.(check string)
+      "phase-free API timeout keeps generic reason"
+      "provider_timeout"
+      decision.reason
 
 let test_tls_handshake_internal_error_is_transient () =
   let err = tls_handshake_internal_error () in
@@ -305,6 +358,10 @@ let () =
           test_strike_limit_is_soft_backoff;
         Alcotest.test_case "cycle failure log level is policy-aware" `Quick
           test_cycle_failed_log_level_is_policy_aware;
+        Alcotest.test_case "raw OAS provider timeout uses same policy" `Quick
+          test_raw_oas_provider_timeout_uses_same_policy;
+        Alcotest.test_case "raw OAS API timeout uses same policy" `Quick
+          test_raw_oas_api_timeout_uses_same_policy;
         Alcotest.test_case "TLS handshake internal error is transient" `Quick
           test_tls_handshake_internal_error_is_transient;
         Alcotest.test_case

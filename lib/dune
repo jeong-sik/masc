@@ -94,6 +94,7 @@
   keeper_agent_run_sidecar
   keeper_agent_run_finalize_response
   keeper_agent_result
+  keeper_provider_runtime_boundary
   keeper_agent_error
   keeper_run_tools_hooks
   keeper_run_tools_search

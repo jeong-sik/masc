@@ -527,6 +527,61 @@ if [[ "${GITHUB_ACTIONS:-}" != "true" \
 fi
 # -----------------------------------------------------------------------
 
+# --- auto-clean stale _build on installed agent_sdk interface change ----
+# The pin guard can be intentionally bypassed during local surgery with
+# MASC_SKIP_PIN_CHECK=1.  Even then, the shared opam switch may have moved
+# from one agent_sdk build to another while _build still contains CMIs
+# compiled against the previous Llm_provider.Provider_config interface.
+# Track the actual installed Provider_config CMI checksum and clear _build
+# when it changes, before Dune can produce a cascade of "inconsistent
+# assumptions" diagnostics.
+#
+# This guard is intentionally independent of MASC_SKIP_PIN_CHECK.  It does
+# not prove the pin is correct; it only keeps the current build directory
+# internally consistent with whatever agent_sdk is installed right now.
+_current_agent_sdk_provider_config_crc() {
+  command -v ocamlobjinfo >/dev/null 2>&1 || return 1
+
+  local llm_provider_dir provider_config_cmi
+  if command -v ocamlfind >/dev/null 2>&1; then
+    llm_provider_dir="$(ocamlfind query agent_sdk.llm_provider 2>/dev/null || true)"
+  elif command -v opam >/dev/null 2>&1; then
+    llm_provider_dir="$(opam exec -- ocamlfind query agent_sdk.llm_provider 2>/dev/null || true)"
+  else
+    return 1
+  fi
+
+  [[ -n "${llm_provider_dir}" ]] || return 1
+  provider_config_cmi="${llm_provider_dir%/}/llm_provider__Provider_config.cmi"
+  [[ -r "${provider_config_cmi}" ]] || return 1
+
+  ocamlobjinfo "${provider_config_cmi}" 2>/dev/null \
+    | awk '$2 == "Llm_provider__Provider_config" { print $1; found = 1; exit }
+           END { if (!found) exit 1 }'
+}
+
+if [[ "${GITHUB_ACTIONS:-}" != "true" \
+      && "${MASC_DUNE_DRY_RUN:-0}" != "1" \
+      && "${_subcommand}" != "clean" ]]; then
+  _provider_config_crc="$(_current_agent_sdk_provider_config_crc || true)"
+  if [[ -n "${_provider_config_crc}" ]]; then
+    _provider_config_build_dir="${DUNE_BUILD_DIR:-$repo_root/_build}"
+    _provider_config_marker="${_provider_config_build_dir}/.last-agent-sdk-provider-config-crc"
+    if [[ -f "${_provider_config_marker}" ]]; then
+      _last_provider_config_crc="$(cat "${_provider_config_marker}" 2>/dev/null || true)"
+      if [[ -n "${_last_provider_config_crc}" \
+            && "${_last_provider_config_crc}" != "${_provider_config_crc}" ]]; then
+        printf '[dune-local] agent_sdk Provider_config interface changed (%.8s -> %.8s) - cleaning stale _build artifacts\n' \
+          "${_last_provider_config_crc}" "${_provider_config_crc}" >&2
+        rm -rf "${_provider_config_build_dir}"
+      fi
+    fi
+    mkdir -p "${_provider_config_build_dir}" 2>/dev/null || true
+    printf '%s' "${_provider_config_crc}" > "${_provider_config_marker}"
+  fi
+fi
+# -----------------------------------------------------------------------
+
 # --- core opam-deps installed guard ------------------------------------
 # Catch the "deps declared but not installed" failure mode before Dune
 # emits a wall of cryptic abstract-cmi errors:

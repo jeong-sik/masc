@@ -160,7 +160,7 @@ let board_tools : Masc_domain.tool_schema list =
                              integer form." )
                       ] )
                 ; (* Issue #8513: derive from local mirror tracking
-           [Masc_board_handlers.Board_dispatch.valid_sort_order_strings].  Schema used to
+           [Board_dispatch.valid_sort_order_strings].  Schema used to
            expose only 3 of 5 sort orders. *)
                   ( "sort_by"
                   , `Assoc
@@ -251,7 +251,7 @@ let board_tools : Masc_domain.tool_schema list =
                              keeper_board_post_get, or visible board activity context." )
                       ] )
                 ; (* Issue #8506: derive from local mirror that tracks
-           [Masc_board_handlers.Board_votes.valid_vote_direction_strings]. *)
+           [Board_votes.valid_vote_direction_strings]. *)
                   ( "direction"
                   , `Assoc
                       [ "type", `String "string"

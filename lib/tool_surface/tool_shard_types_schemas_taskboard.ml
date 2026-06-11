@@ -190,7 +190,7 @@ let taskboard_tools : Masc_domain.tool_schema list =
                         , `String
                             "Verification handoff notes (>= 20 chars). For \
                              contracted tasks: summarise what changed AND \
-                             mention each contract.verify_gate_evidence entry \
+                             mention each contract.required_evidence entry \
                              verbatim. Ignored when the task has no contract."
                         )
                       ] )
@@ -257,7 +257,7 @@ let taskboard_tools : Masc_domain.tool_schema list =
                                   [ "type", `String "array"
                                   ; "items", `Assoc [ "type", `String "string" ]
                                   ] )
-                            ; ( "verify_gate_evidence"
+                            ; ( "required_evidence"
                               , `Assoc
                                   [ "type", `String "array"
                                   ; "items", `Assoc [ "type", `String "string" ]

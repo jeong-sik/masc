@@ -1,7 +1,7 @@
 (** Otel_metric_store adapter for neutral Board metric hooks.
 
     Holds the only [variant -> Otel_metric_store label string] mappings for the
-    typed label dimensions on {!Board.Board_metrics_hooks.observer}. The emitted
+    typed label dimensions on {!Board_metrics_hooks.observer}. The emitted
     strings are byte-identical to the values the pre-typed string hooks
     passed, so existing dashboards and alerts keyed on these labels keep
     working. The mappings are total (no [_ ->] wildcard) so adding a label
@@ -9,11 +9,11 @@
 
 (* surface label for masc_persistence_read_drops_total *)
 let board_persist_surface_to_label :
-  Board.Board_metrics_hooks.board_persist_surface -> string = function
+  Board_metrics_hooks.board_persist_surface -> string = function
   | Board_post_meta_json -> "board_post_meta_json"
 
 (* outcome label for masc_board_dispatch_flusher_start_outcomes_total *)
-let flusher_outcome_to_label : Board.Board_metrics_hooks.flusher_outcome -> string =
+let flusher_outcome_to_label : Board_metrics_hooks.flusher_outcome -> string =
   function
   | Switch_finished -> "switch_finished"
   | Cas_exhausted -> "cas_exhausted"
@@ -34,7 +34,7 @@ let read_drop_reason_to_label : Read_drop_reason.t -> string =
   Read_drop_reason.to_wire
 
 let install () =
-  Board.Board_metrics_hooks.set_observer
+  Board_metrics_hooks.set_observer
     {
       observe_persist_lock_acquire_sec =
         (fun seconds ->

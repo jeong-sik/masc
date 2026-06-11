@@ -21,20 +21,20 @@ let with_eio f () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   ignore (fresh_test_base_path ());
   Board.reset_global_for_test ();
-  Masc_board_handlers.Board_dispatch.reset_for_test ();
-  Masc_board_handlers.Board_dispatch.init_jsonl ();
+  Board_dispatch.reset_for_test ();
+  Board_dispatch.init_jsonl ();
   f ()
 
 let test_exact_duplicate_returns_same_post () =
   let first =
-    match Masc_board_handlers.Board_dispatch.create_post ~author:"dedup-test"
+    match Board_dispatch.create_post ~author:"dedup-test"
              ~content:"identical body text"
              ~post_kind:Board.Human_post () with
     | Ok p -> p
     | Error e -> Alcotest.fail (Board.show_board_error e)
   in
   let second =
-    match Masc_board_handlers.Board_dispatch.create_post ~author:"dedup-test"
+    match Board_dispatch.create_post ~author:"dedup-test"
              ~content:"identical body text"
              ~post_kind:Board.Human_post () with
     | Ok p -> p
@@ -46,14 +46,14 @@ let test_exact_duplicate_returns_same_post () =
 
 let test_different_body_creates_separate_post () =
   let _first =
-    match Masc_board_handlers.Board_dispatch.create_post ~author:"dedup-test"
+    match Board_dispatch.create_post ~author:"dedup-test"
              ~content:"body A"
              ~post_kind:Board.Human_post () with
     | Ok p -> p
     | Error e -> Alcotest.fail (Board.show_board_error e)
   in
   let second =
-    match Masc_board_handlers.Board_dispatch.create_post ~author:"dedup-test"
+    match Board_dispatch.create_post ~author:"dedup-test"
              ~content:"body B"
              ~post_kind:Board.Human_post () with
     | Ok p -> p
@@ -62,21 +62,21 @@ let test_different_body_creates_separate_post () =
   let pid = Board.Post_id.to_string second.id in
   Alcotest.(check string) "different body gets new id"
     "body B" second.content;
-  match Masc_board_handlers.Board_dispatch.get_post ~post_id:pid with
+  match Board_dispatch.get_post ~post_id:pid with
   | Ok _ -> ()
   | Error e -> Alcotest.fail (Printf.sprintf "second post should exist: %s"
                                 (Board.show_board_error e))
 
 let test_different_author_creates_separate_post () =
   let _first =
-    match Masc_board_handlers.Board_dispatch.create_post ~author:"agent-alpha"
+    match Board_dispatch.create_post ~author:"agent-alpha"
              ~content:"shared body"
              ~post_kind:Board.Human_post () with
     | Ok p -> p
     | Error e -> Alcotest.fail (Board.show_board_error e)
   in
   let second =
-    match Masc_board_handlers.Board_dispatch.create_post ~author:"agent-beta"
+    match Board_dispatch.create_post ~author:"agent-beta"
              ~content:"shared body"
              ~post_kind:Board.Human_post () with
     | Ok p -> p
@@ -90,24 +90,24 @@ let test_different_author_creates_separate_post () =
 let test_triple_duplicate_count_stays_at_one () =
   let content = "triple-dup-content" in
   let p1 =
-    match Masc_board_handlers.Board_dispatch.create_post ~author:"triple-test"
+    match Board_dispatch.create_post ~author:"triple-test"
              ~content ~post_kind:Board.Human_post () with
     | Ok p -> p
     | Error e -> Alcotest.fail (Board.show_board_error e)
   in
   let _p2 =
-    match Masc_board_handlers.Board_dispatch.create_post ~author:"triple-test"
+    match Board_dispatch.create_post ~author:"triple-test"
              ~content ~post_kind:Board.Human_post () with
     | Ok p -> p
     | Error e -> Alcotest.fail (Board.show_board_error e)
   in
   let _p3 =
-    match Masc_board_handlers.Board_dispatch.create_post ~author:"triple-test"
+    match Board_dispatch.create_post ~author:"triple-test"
              ~content ~post_kind:Board.Human_post () with
     | Ok p -> p
     | Error e -> Alcotest.fail (Board.show_board_error e)
   in
-  let posts = Masc_board_handlers.Board_dispatch.list_posts () in
+  let posts = Board_dispatch.list_posts () in
   let same_id_count =
     List.filter (fun (p : Board.post) ->
       String.equal
@@ -120,14 +120,14 @@ let test_triple_duplicate_count_stays_at_one () =
 
 let create_post_or_fail ~author ~content =
   match
-    Masc_board_handlers.Board_dispatch.create_post ~author ~content ~post_kind:Board.Human_post ()
+    Board_dispatch.create_post ~author ~content ~post_kind:Board.Human_post ()
   with
   | Ok post -> post
   | Error e -> Alcotest.fail (Board.show_board_error e)
 
 let create_automation_post_or_fail ?meta_json ~author ~content () =
   match
-    Masc_board_handlers.Board_dispatch.create_post
+    Board_dispatch.create_post
       ~author
       ~content
       ~post_kind:Board.Automation_post
@@ -138,7 +138,7 @@ let create_automation_post_or_fail ?meta_json ~author ~content () =
   | Error e -> Alcotest.fail (Board.show_board_error e)
 
 let add_comment_or_fail ~post_id ~author ~content ?parent_id () =
-  match Masc_board_handlers.Board_dispatch.add_comment ~post_id ~author ~content ?parent_id () with
+  match Board_dispatch.add_comment ~post_id ~author ~content ?parent_id () with
   | Ok comment -> comment
   | Error e -> Alcotest.fail (Board.show_board_error e)
 
@@ -147,16 +147,16 @@ let test_exact_duplicate_comment_returns_same_comment () =
   let post_id = Board.Post_id.to_string post.id in
   let keeper_comment_signals = ref 0 in
   let sse_comment_events = ref 0 in
-  Masc_board_handlers.Board_dispatch.set_board_signal_hook (fun signal ->
+  Board_dispatch.set_board_signal_hook (fun signal ->
     match signal.kind with
-    | Masc_board_handlers.Board_dispatch.Board_comment_added -> incr keeper_comment_signals
-    | Masc_board_handlers.Board_dispatch.Board_post_created -> ());
-  Masc_board_handlers.Board_dispatch.set_board_sse_hook (function
-    | Masc_board_handlers.Board_dispatch.Comment_added _ -> incr sse_comment_events
-    | Masc_board_handlers.Board_dispatch.Post_created _
-    | Masc_board_handlers.Board_dispatch.Post_voted _
-    | Masc_board_handlers.Board_dispatch.Comment_voted _
-    | Masc_board_handlers.Board_dispatch.Reaction_changed _ ->
+    | Board_dispatch.Board_comment_added -> incr keeper_comment_signals
+    | Board_dispatch.Board_post_created -> ());
+  Board_dispatch.set_board_sse_hook (function
+    | Board_dispatch.Comment_added _ -> incr sse_comment_events
+    | Board_dispatch.Post_created _
+    | Board_dispatch.Post_voted _
+    | Board_dispatch.Comment_voted _
+    | Board_dispatch.Reaction_changed _ ->
       ());
   let first =
     add_comment_or_fail
@@ -177,13 +177,13 @@ let test_exact_duplicate_comment_returns_same_comment () =
     (Board.Comment_id.to_string first.id)
     (Board.Comment_id.to_string second.id);
   let comments =
-    match Masc_board_handlers.Board_dispatch.get_comments ~post_id with
+    match Board_dispatch.get_comments ~post_id with
     | Ok comments -> comments
     | Error e -> Alcotest.fail (Board.show_board_error e)
   in
   Alcotest.(check int) "only one comment persisted" 1 (List.length comments);
   let updated_post =
-    match Masc_board_handlers.Board_dispatch.get_post ~post_id with
+    match Board_dispatch.get_post ~post_id with
     | Ok post -> post
     | Error e -> Alcotest.fail (Board.show_board_error e)
   in
@@ -245,7 +245,7 @@ let test_status_only_automation_posts_roll_up_by_task () =
     post_id
     (Board.Post_id.to_string second.id);
   let updated =
-    match Masc_board_handlers.Board_dispatch.get_post ~post_id with
+    match Board_dispatch.get_post ~post_id with
     | Ok post -> post
     | Error e -> Alcotest.fail (Board.show_board_error e)
   in
@@ -253,7 +253,7 @@ let test_status_only_automation_posts_roll_up_by_task () =
     "rolled post stores latest status body"
     "Task-370: Actually investigating codebase now."
     updated.content;
-  let posts = Masc_board_handlers.Board_dispatch.list_posts () in
+  let posts = Board_dispatch.list_posts () in
   let same_author_posts =
     posts
     |> List.filter (fun (post : Board.post) ->

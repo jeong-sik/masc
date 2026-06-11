@@ -293,11 +293,11 @@ let select_board_wakeup_candidates
 ;;
 
 let board_signal_kind_to_string = function
-  | Masc_board_handlers.Board_dispatch.Board_post_created -> "post_created"
-  | Masc_board_handlers.Board_dispatch.Board_comment_added -> "comment_added"
+  | Board_dispatch.Board_post_created -> "post_created"
+  | Board_dispatch.Board_comment_added -> "comment_added"
 ;;
 
-let board_signal_stimulus ~(reason : string) (signal : Masc_board_handlers.Board_dispatch.board_signal) =
+let board_signal_stimulus ~(reason : string) (signal : Board_dispatch.board_signal) =
   let payload =
     `Assoc
       [ "source", `String "board_signal"
@@ -363,7 +363,7 @@ let board_signal_wake_paused_keeper
 let board_signal_wake_keeper
       ~(config : Workspace.config)
       ~(reason : string)
-      ~(signal : Masc_board_handlers.Board_dispatch.board_signal)
+      ~(signal : Board_dispatch.board_signal)
       (meta : keeper_meta)
   =
   let stimulus = board_signal_stimulus ~reason signal in
@@ -376,7 +376,7 @@ let board_signal_wake_keeper
 
 let wakeup_relevant_keeper_for_board_signal
       ~(config : Workspace.config)
-      (signal : Masc_board_handlers.Board_dispatch.board_signal)
+      (signal : Board_dispatch.board_signal)
   =
   let registry_entries =
     Keeper_registry.all ~base_path:config.base_path ()
@@ -384,8 +384,8 @@ let wakeup_relevant_keeper_for_board_signal
   in
   let signal_kind_label =
     match signal.kind with
-    | Masc_board_handlers.Board_dispatch.Board_post_created -> "post_created"
-    | Masc_board_handlers.Board_dispatch.Board_comment_added -> "comment_added"
+    | Board_dispatch.Board_post_created -> "post_created"
+    | Board_dispatch.Board_comment_added -> "comment_added"
   in
   (* Yield meter: scanning all running keepers' meta files is CPU-bound
      when many keepers share a domain.  Yield every ~1000 iterations. *)

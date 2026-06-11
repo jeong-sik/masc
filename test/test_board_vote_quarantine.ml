@@ -2,7 +2,7 @@
 
 open Alcotest
 
-module BV = Masc_board_handlers.Board_votes
+module BV = Masc.Board_votes
 module P = Masc.Otel_metric_store
 
 let with_env key value f =

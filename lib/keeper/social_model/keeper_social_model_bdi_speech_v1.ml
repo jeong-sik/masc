@@ -318,7 +318,7 @@ let deliver_request_help_post ~(meta : keeper_meta)
             ])
       in
       match
-        Masc_board_handlers.Board_dispatch.create_post ~author:meta.name ~title ~body ~content:body
+        Board_dispatch.create_post ~author:meta.name ~title ~body ~content:body
           ~post_kind:Board.Automation_post ?meta_json
           ~visibility:Board.Internal ~ttl_hours:24 ~hearth:"keepers" ()
       with

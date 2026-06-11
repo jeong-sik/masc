@@ -29,7 +29,7 @@ let is_placeholder_verification_evidence value =
 let verification_submission_evidence_refs task ~notes handoff_context =
   let contract_refs =
     match task.contract with
-    | Some c -> c.verify_gate_evidence
+    | Some c -> c.verify_gate_evidence @ c.required_evidence
     | None -> []
   in
   let handoff_refs, summary_refs =

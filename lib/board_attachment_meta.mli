@@ -1,3 +1,3 @@
 include module type of struct
-  include Board.Board_attachment_meta
+  include Masc_board_handlers.Board_attachment_meta
 end

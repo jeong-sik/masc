@@ -55,7 +55,7 @@ let validation_error_result
 ;;
 
 let goal_horizon_strings = [ "short"; "mid"; "long" ]
-
+let goal_status_strings = [ "active"; "paused"; "done"; "dropped" ]
 
 let goal_phase_strings =
   [ "executing"
@@ -110,6 +110,24 @@ let parse_optional_horizon args field =
      | Some horizon -> Ok (Some horizon)
      | None ->
        Error (make_enum_field_error ~field ~allowed:goal_horizon_strings ~received:raw))
+  | Some json ->
+    Error
+      (make_type_field_error
+         ~field
+         ~constraint_violated:Type_string
+         ~expected:"string"
+         ~received:(Yojson.Safe.to_string json))
+;;
+
+let parse_optional_goal_status args field =
+  match Json_util.assoc_member_opt field args with
+  | None | Some `Null -> Ok None
+  | Some (`String raw) when String.trim raw = "" -> Ok None
+  | Some (`String raw) ->
+    (match Goal_store.parse_goal_status (Some raw) with
+     | Some status -> Ok (Some status)
+     | None ->
+       Error (make_enum_field_error ~field ~allowed:goal_status_strings ~received:raw))
   | Some json ->
     Error
       (make_type_field_error
@@ -390,17 +408,20 @@ let handle_goal_list ~tool_name ~start_time (ctx : context) args : Tool_result.r
 let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result.result =
   match
     ( parse_optional_horizon args "horizon"
+    , parse_optional_goal_status args "status"
     , parse_optional_goal_phase args "phase"
     , parse_optional_priority args "priority"
     , parse_optional_policy args "verifier_policy"
     , parse_optional_bool args "require_completion_approval" )
   with
-  | Error err, _, _, _, _
-  | _, Error err, _, _, _
-  | _, _, Error err, _, _
-  | _, _, _, Error err, _
-  | _, _, _, _, Error err -> validation_error_result ~tool_name ~start_time [ err ]
+  | Error err, _, _, _, _, _
+  | _, Error err, _, _, _, _
+  | _, _, Error err, _, _, _
+  | _, _, _, Error err, _, _
+  | _, _, _, _, Error err, _
+  | _, _, _, _, _, Error err -> validation_error_result ~tool_name ~start_time [ err ]
   | ( Ok horizon
+    , Ok status
     , Ok phase
     , Ok priority
     , Ok verifier_policy
@@ -411,12 +432,10 @@ let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result
     let target_value = get_string_opt args "target_value" in
     let due_date = get_string_opt args "due_date" in
     let parent_goal_id = get_string_opt args "parent_goal_id" in
-    (match phase with
-     | Some _ -> goal_upsert_lifecycle_error ~tool_name ~start_time "phase"
-     | _ -> (
-       match Json_util.assoc_member_opt "status" args with
-       | Some _ -> goal_upsert_lifecycle_error ~tool_name ~start_time "status"
-       | None ->
+    (match phase, status with
+     | Some _, _ -> goal_upsert_lifecycle_error ~tool_name ~start_time "phase"
+     | _, Some _ -> goal_upsert_lifecycle_error ~tool_name ~start_time "status"
+     | _ ->
        (match
           Goal_store.upsert_goal
             ctx.config
@@ -427,6 +446,7 @@ let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result
             ?target_value
             ?due_date
             ?priority
+            ?status
             ?phase
             ?parent_goal_id
             ?verifier_policy
@@ -457,7 +477,7 @@ let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result
             ; "task_link_mode", `String "structured_goal_id"
             ; ( "linked_task_title_example"
               , `String (Printf.sprintf "[child] %s" goal.title) )
-            ])))
+            ]))
 ;;
 
 let handle_goal_transition ~tool_name ~start_time (ctx : context) args : Tool_result.result =

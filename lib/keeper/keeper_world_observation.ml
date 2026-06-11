@@ -141,13 +141,13 @@ let pending_board_event_of_board_signal
       ~continuity_summary
       ~(meta : keeper_meta)
       ~(arrived_at : float)
-      (signal : Masc_board_handlers.Board_dispatch.board_signal)
+      (signal : Board_dispatch.board_signal)
   : pending_board_event
   =
   let self_tokens = self_identity_tokens meta in
   let matched = board_signal_match ~continuity_summary ~meta ~signal in
   let post_snapshot =
-    match Masc_board_handlers.Board_dispatch.get_post ~post_id:signal.post_id with
+    match Board_dispatch.get_post ~post_id:signal.post_id with
     | Ok post -> Some post
     | Error _ -> None
   in
@@ -168,8 +168,8 @@ let pending_board_event_of_board_signal
   in
   let self_commented, new_external_since, latest_external_author, latest_external_preview =
     match signal.kind with
-    | Masc_board_handlers.Board_dispatch.Board_post_created -> false, 0, None, None
-    | Masc_board_handlers.Board_dispatch.Board_comment_added ->
+    | Board_dispatch.Board_post_created -> false, 0, None, None
+    | Board_dispatch.Board_comment_added ->
       (match check_self_comment_status ~self_tokens ~post_id:signal.post_id with
        | `New_external (count, author, preview) -> true, count, Some author, Some preview
        | `No_new_external ->
@@ -271,8 +271,8 @@ let collect_board_events_with_cursor_policy
              post_id;
            consume_posts (Some next_cursor) acc rest
          | `Never ->
-           let signal : Masc_board_handlers.Board_dispatch.board_signal =
-             { kind = Masc_board_handlers.Board_dispatch.Board_post_created
+           let signal : Board_dispatch.board_signal =
+             { kind = Board_dispatch.Board_post_created
              ; post_id
              ; author = Board.Agent_id.to_string p.author
              ; title = p.title
@@ -311,8 +311,8 @@ let collect_board_events_with_cursor_policy
                rest
          | `New_external (count, ext_author, ext_preview) ->
            (
-             let signal : Masc_board_handlers.Board_dispatch.board_signal =
-               { kind = Masc_board_handlers.Board_dispatch.Board_post_created
+             let signal : Board_dispatch.board_signal =
+               { kind = Board_dispatch.Board_post_created
                ; post_id
                ; author = Board.Agent_id.to_string p.author
                ; title = p.title
@@ -682,7 +682,7 @@ let keeper_cycle_decision
         (* Read latest board curation snapshot for health-based
            cooldown adjustment. *)
         let board_health_score =
-          match Masc_board_handlers.Board_curation.latest_snapshot () with
+          match Board_curation.latest_snapshot () with
           | Some { health_score = Some h; _ } -> Some h
           | _ -> None
         in

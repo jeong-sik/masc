@@ -11,18 +11,18 @@ let rule_id_evidence_incomplete = "cdal_evidence_incomplete"
 
 let hint_evidence_incomplete =
   "Supply task-completion evidence: notes >= 20 chars summarising what \
-   changed AND every contract.verify_gate_evidence entry mentioned verbatim, \
+   changed AND every contract.required_evidence entry mentioned verbatim, \
    OR at least one handoff_context.evidence_refs reference (file path, PR \
    number, commit hash, trace id, or any reference URL). Pure-placeholder \
-   notes ('done', 'ok', etc.) with no verify_gate_evidence mention and no \
+   notes ('done', 'ok', etc.) with no required_evidence mention and no \
    handoff evidence_refs keep this gate closed."
 
-let reason_evidence_incomplete ~unsatisfied_evidence =
+let reason_evidence_incomplete ~required_evidence =
   Printf.sprintf
     "Task-completion evidence is insufficient: %d required evidence \
      entry/entries unsatisfied and no substantive notes or handoff \
      reference supplied"
-    (List.length unsatisfied_evidence)
+    (List.length required_evidence)
 
 (* Heuristic: an "evidence entry" is satisfied when the notes or
    handoff_context.evidence_refs mention a non-placeholder string that
@@ -64,7 +64,7 @@ let evidence_entry_satisfied
     in
     in_notes || in_handoff
 
-let unsatisfied_verify_gate_evidence
+let unsatisfied_required_evidence
     ~notes
     ~handoff_context
     (contract : Masc_domain.task_contract option)
@@ -74,7 +74,7 @@ let unsatisfied_verify_gate_evidence
   | Some c ->
     List.filter
       (fun e -> not (evidence_entry_satisfied ~notes ~handoff_context e))
-      c.verify_gate_evidence
+      c.required_evidence
 
 let task_has_contract (task_opt : Masc_domain.task option) =
   match task_opt with
@@ -118,10 +118,10 @@ let handoff_supplies_evidence
    task completion is LLM-reviewed before it reaches [Done]; this gate only
    checks that a caller putting a task into AwaitingVerification supplied
    evidence a reviewer can inspect downstream. A contracted task passes when
-   *every* verify_gate_evidence entry is mentioned in notes/handoff AND the caller
+   *every* required_evidence entry is mentioned in notes/handoff AND the caller
    supplied at least one of: substantive notes, or a handoff evidence reference
    (file path, PR number, commit hash, trace id, or any reference URL). Empty
-   notes with empty verify_gate_evidence still rejects, since that carries no
+   notes with empty required_evidence still rejects, since that carries no
    evidence at all. *)
 let evidence_is_substantive
     ~notes
@@ -130,13 +130,13 @@ let evidence_is_substantive
   match contract with
   | None -> false
   | Some c ->
-    let verify_gate_evidence_satisfied =
-      unsatisfied_verify_gate_evidence ~notes ~handoff_context (Some c) = []
+    let required_evidence_satisfied =
+      unsatisfied_required_evidence ~notes ~handoff_context (Some c) = []
     in
     let any_evidence_supplied =
       notes_are_substantive notes || handoff_supplies_evidence handoff_context
     in
-    verify_gate_evidence_satisfied && any_evidence_supplied
+    required_evidence_satisfied && any_evidence_supplied
 
 let evidence_summary_payload
     ~(notes : string)
@@ -162,21 +162,21 @@ let decide ~task_id ~task_opt ~notes ~handoff_context () =
     end
     else
       let unsatisfied =
-        unsatisfied_verify_gate_evidence ~notes ~handoff_context t.contract
+        unsatisfied_required_evidence ~notes ~handoff_context t.contract
       in
       Log.Task.warn "cdal_evidence_gate REJECT task=%s unsatisfied=%d notes_len=%d handoff_refs=%d rule=%s"
         task_id (List.length unsatisfied) (String.length (String.trim notes))
         (match handoff_context with None -> 0 | Some hc -> List.length hc.evidence_refs)
         rule_id_evidence_incomplete;
       Reject
-        { reason = reason_evidence_incomplete ~unsatisfied_evidence:unsatisfied
+        { reason = reason_evidence_incomplete ~required_evidence:unsatisfied
         ; rule_id = rule_id_evidence_incomplete
         ; hint = hint_evidence_incomplete
         ; payload_json =
             `Assoc
               [ "task_id", `String task_id
               ; "contract_required", `Bool true
-              ; ( "verify_gate_evidence_unsatisfied"
+              ; ( "required_evidence_unsatisfied"
                 , Json_util.json_string_list unsatisfied )
               ; ( "evidence_summary"
                 , evidence_summary_payload ~notes ~handoff_context )

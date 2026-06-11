@@ -471,6 +471,11 @@ let transition_task_r
               | Masc_domain.Cancel
               | Masc_domain.Release
               | Masc_domain.Submit_for_verification -> ()));
+          (* RFC-0221 §3.2: clear stale agent task assignment after atomic
+             backlog commit. The in-memory agent cache must not retain a
+             reference to the old task status after a state transition. *)
+          Task_cache_invariant.clear_stale_agent_task config ~agent_name ~task_id
+            ~status:task.task_status ~module_name:"transition_task_r";
           update_local_agent_state config ~agent_name (fun agent ->
             match set_current with
             | Some _ -> { agent with status = Busy; current_task = Some task_id }

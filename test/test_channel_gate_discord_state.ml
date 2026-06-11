@@ -220,6 +220,7 @@ let test_name_map_round_trip () =
         guild_names = [ ("123", "sangsu-lab") ];
         channel_names = [ ("456", "#general") ];
         channel_to_guild = [ ("456", "123") ];
+        channel_to_parent = [ ("789", "456") ];
         updated_at = "2026-04-15T00:00:00Z";
       }
     in
@@ -231,6 +232,8 @@ let test_name_map_round_trip () =
       (List.assoc "456" loaded.channel_names);
     check string "channel_to_guild round-trips" "123"
       (List.assoc "456" loaded.channel_to_guild);
+    check string "channel_to_parent round-trips" "456"
+      (List.assoc "789" loaded.channel_to_parent);
     check string "updated_at round-trips" "2026-04-15T00:00:00Z"
       loaded.updated_at)
 
@@ -242,6 +245,8 @@ let test_read_name_map_missing_returns_empty () =
     check int "no channel names" 0 (List.length loaded.channel_names);
     check int "no channel_to_guild entries" 0
       (List.length loaded.channel_to_guild);
+    check int "no channel_to_parent entries" 0
+      (List.length loaded.channel_to_parent);
     check string "empty updated_at" "" loaded.updated_at)
 
 let test_resolve_guild_id_hits_and_misses () =
@@ -252,12 +257,17 @@ let test_resolve_guild_id_hits_and_misses () =
         guild_names = [ ("123", "sangsu-lab") ];
         channel_names = [ ("456", "#general") ];
         channel_to_guild = [ ("456", "123") ];
+        channel_to_parent = [ ("789", "456") ];
         updated_at = "2026-04-15T00:00:00Z";
       };
     check (option string) "hit returns guild id" (Some "123")
       (Discord_names.resolve_guild_id_for_channel ~channel_id:"456");
     check (option string) "miss returns None" None
       (Discord_names.resolve_guild_id_for_channel ~channel_id:"999");
+    check (option string) "parent hit returns parent channel id" (Some "456")
+      (Discord_names.resolve_parent_channel_id_for_channel ~channel_id:"789");
+    check (option string) "parent miss returns None" None
+      (Discord_names.resolve_parent_channel_id_for_channel ~channel_id:"999");
     check (option string) "empty channel_id returns None" None
       (Discord_names.resolve_guild_id_for_channel ~channel_id:""))
 
@@ -269,6 +279,7 @@ let test_bind_populates_guild_id_when_names_available () =
         guild_names = [ ("guild-1", "sangsu-lab") ];
         channel_names = [ ("chan-1", "#general") ];
         channel_to_guild = [ ("chan-1", "guild-1") ];
+        channel_to_parent = [];
         updated_at = "2026-04-15T00:00:00Z";
       };
     match
@@ -293,6 +304,53 @@ let test_bind_accepts_missing_names_with_empty_guild_id () =
         let audit = json |> U.member "recent_audit" |> U.to_list in
         check string "audit guild_id empty when names absent" ""
           (List.hd audit |> U.member "guild_id" |> U.to_string))
+
+let test_resolve_keeper_for_thread_parent_binding () =
+  with_temp_dir @@ fun dir ->
+  with_discord_paths dir (fun () ->
+    Discord_names.save
+      {
+        guild_names = [ ("guild-1", "sangsu-lab") ];
+        channel_names = [ ("parent-1", "#personal-agents"); ("thread-1", "thread") ];
+        channel_to_guild = [ ("parent-1", "guild-1"); ("thread-1", "guild-1") ];
+        channel_to_parent = [ ("thread-1", "parent-1") ];
+        updated_at = "2026-04-15T00:00:00Z";
+      };
+    ignore
+      (Discord_state.bind ~channel_id:"parent-1" ~keeper_name:"luna"
+         ~actor_name:"dashboard");
+    match Discord_state.resolve_keeper_for_channel ~channel_id:"thread-1" with
+    | None -> fail "expected parent binding to resolve"
+    | Some resolution ->
+        check string "keeper" "luna" resolution.keeper_name;
+        check string "incoming" "thread-1" resolution.incoming_channel_id;
+        check string "bound" "parent-1" resolution.bound_channel_id;
+        check bool "via parent" true resolution.via_parent)
+
+let test_resolve_keeper_exact_binding_wins_over_parent () =
+  with_temp_dir @@ fun dir ->
+  with_discord_paths dir (fun () ->
+    Discord_names.save
+      {
+        guild_names = [ ("guild-1", "sangsu-lab") ];
+        channel_names = [ ("parent-1", "#personal-agents"); ("thread-1", "thread") ];
+        channel_to_guild = [ ("parent-1", "guild-1"); ("thread-1", "guild-1") ];
+        channel_to_parent = [ ("thread-1", "parent-1") ];
+        updated_at = "2026-04-15T00:00:00Z";
+      };
+    ignore
+      (Discord_state.bind ~channel_id:"parent-1" ~keeper_name:"luna"
+         ~actor_name:"dashboard");
+    ignore
+      (Discord_state.bind ~channel_id:"thread-1" ~keeper_name:"sangsu"
+         ~actor_name:"dashboard");
+    match Discord_state.resolve_keeper_for_channel ~channel_id:"thread-1" with
+    | None -> fail "expected exact binding to resolve"
+    | Some resolution ->
+        check string "keeper" "sangsu" resolution.keeper_name;
+        check string "incoming" "thread-1" resolution.incoming_channel_id;
+        check string "bound" "thread-1" resolution.bound_channel_id;
+        check bool "not via parent" false resolution.via_parent)
 
 let () =
   run "channel_gate_discord_state"
@@ -323,5 +381,9 @@ let () =
             test_bind_populates_guild_id_when_names_available;
           test_case "bind accepts missing names with empty guild_id" `Quick
             test_bind_accepts_missing_names_with_empty_guild_id;
+          test_case "thread resolves through parent binding" `Quick
+            test_resolve_keeper_for_thread_parent_binding;
+          test_case "exact binding wins over parent" `Quick
+            test_resolve_keeper_exact_binding_wins_over_parent;
         ] );
     ]

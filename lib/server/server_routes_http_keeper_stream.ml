@@ -532,6 +532,7 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
          ~channel_user_id:payload.channel_user_id
          ~channel_user_name:payload.channel_user_name
          ~channel_workspace_id:payload.channel_workspace_id
+         ~metadata:[]
          ~content:payload.message
     else
       payload.message

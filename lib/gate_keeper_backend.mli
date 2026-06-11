@@ -21,6 +21,7 @@ val dispatch :
   channel_user_name:string ->
   channel_workspace_id:string ->
   keeper_name:string ->
+  metadata:(string * string) list ->
   content:string ->
   Gate_protocol.dispatch_result
 (** Build a keeper context, call [Keeper_tool_surface.dispatch], and parse
@@ -42,6 +43,7 @@ val contextualize_message :
   channel_user_id:string ->
   channel_user_name:string ->
   channel_workspace_id:string ->
+  metadata:(string * string) list ->
   content:string ->
   string
 (** Render a stable external-channel context envelope ahead of the raw

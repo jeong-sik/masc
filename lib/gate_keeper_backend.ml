@@ -45,6 +45,9 @@ let normalized_or_unknown value =
   | "" -> "unknown"
   | trimmed -> trimmed
 
+let string_assoc_json fields =
+  `Assoc (List.map (fun (key, value) -> (key, `String value)) fields)
+
 (** Sanitize a value for use as a filesystem path component.
     Replaces everything outside [A-Za-z0-9_-] with '_' so that the resulting
     string cannot escape its intended parent directory via '/', '\\', or '..'
@@ -71,23 +74,38 @@ let agent_name_for_channel_actor ~channel ~channel_workspace_id ~channel_user_id
     (filesystem_safe_or_unknown channel_user_id)
 
 let contextualize_message ~channel ~channel_user_id ~channel_user_name
-    ~channel_workspace_id ~content =
+    ~channel_workspace_id ~metadata ~content =
   let safe_channel = normalized_or_unknown channel in
   let safe_user_id = normalized_or_unknown channel_user_id in
   let safe_user_name = normalized_or_unknown channel_user_name in
   let safe_workspace_id = normalized_or_unknown channel_workspace_id in
   let safe_content = String.trim content in
-  String.concat "\n"
+  let metadata_lines =
+    metadata
+    |> List.filter_map (fun (key, value) ->
+           let key = normalized_context_value key in
+           let value = normalized_context_value value in
+           if key = "" || value = "" then None
+           else Some (key ^ ": " ^ value))
+  in
+  let context_lines =
     [
       "[External channel context]";
       "channel: " ^ safe_channel;
       "workspace_id: " ^ safe_workspace_id;
       "user_id: " ^ safe_user_id;
       "user_name: " ^ safe_user_name;
-      "";
-      "[User message]";
-      safe_content;
     ]
+  in
+  let metadata_block =
+    match metadata_lines with
+    | [] -> []
+    | lines -> "" :: "[External channel metadata]" :: lines
+  in
+  String.concat "\n"
+    (context_lines
+     @ metadata_block
+     @ [ ""; "[User message]"; safe_content ])
 
 let persist_connector_assistant_reply ~base_dir ~keeper_name ~source ~reply =
   let content = String.trim reply in
@@ -99,7 +117,7 @@ let persist_connector_assistant_reply ~base_dir ~keeper_name ~source ~reply =
 
 let dispatch ~sw ~clock ~proc_mgr ~net ~config
     ~channel ~channel_user_id ~channel_user_name ~channel_workspace_id
-    ~keeper_name ~content =
+    ~keeper_name ~metadata ~content =
   let keeper_name = String.trim keeper_name in
   let redaction =
     Keeper_secret_redaction.snapshot
@@ -150,7 +168,7 @@ let dispatch ~sw ~clock ~proc_mgr ~net ~config
       ( "message",
         `String
           (contextualize_message ~channel ~channel_user_id ~channel_user_name
-             ~channel_workspace_id ~content) );
+             ~channel_workspace_id ~metadata ~content) );
       ("direct_reply", `Bool true);
       ("channel_session_key", `String channel_session_key);
       (* RFC-0223 P1: raw connector identity, consumed by
@@ -161,6 +179,7 @@ let dispatch ~sw ~clock ~proc_mgr ~net ~config
       ("channel", `String channel);
       ("channel_user_id", `String channel_user_id);
       ("channel_user_name", `String channel_user_name);
+      ("channel_metadata", string_assoc_json metadata);
     ]
   in
   let keeper_ctx : _ Keeper_tool_surface.context = {

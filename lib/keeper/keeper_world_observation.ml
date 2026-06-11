@@ -30,7 +30,6 @@ type world_observation =
   { pending_mentions : (string * string) list
   ; pending_board_events : pending_board_event list
   ; pending_scope_messages : (string * string) list
-  ; message_cursor_updates : (string * int) list
   ; idle_seconds : int
   ; active_goals : string list
   ; continuity_summary : string
@@ -120,7 +119,6 @@ module Inputs = Keeper_world_observation_inputs
 let self_identity_tokens = Message_scope.self_identity_tokens
 let is_self_author = Message_scope.is_self_author
 let collect_message_scope = Message_scope.collect_message_scope
-let apply_message_cursor_updates = Message_scope.apply_message_cursor_updates
 let read_backlog_counts = Inputs.read_backlog_counts
 let count_active_agents = Inputs.count_active_agents
 let compute_idle_seconds = Inputs.compute_idle_seconds
@@ -426,7 +424,7 @@ let observe
       ~(meta : keeper_meta)
   : world_observation
   =
-  let pending_mentions, pending_scope_messages, message_cursor_updates =
+  let pending_mentions, pending_scope_messages =
     collect_message_scope ~config ~meta
   in
   let ( unclaimed_task_count
@@ -456,7 +454,6 @@ let observe
   { pending_mentions
   ; pending_board_events
   ; pending_scope_messages
-  ; message_cursor_updates
   ; idle_seconds
   ; active_goals = meta.active_goal_ids
   ; continuity_summary
@@ -490,7 +487,6 @@ let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
   { pending_mentions = []
   ; pending_board_events = []
   ; pending_scope_messages = []
-  ; message_cursor_updates = []
   ; idle_seconds = compute_idle_seconds ~meta
   ; active_goals = meta.active_goal_ids
   ; continuity_summary = read_continuity_summary ~config ~meta
@@ -513,7 +509,7 @@ let durable_signal_present
       ~(meta : keeper_meta)
   : bool
   =
-  let pending_mentions, pending_scope_messages, _message_cursor_updates =
+  let pending_mentions, pending_scope_messages =
     collect_message_scope ~config ~meta
   in
   let ( _unclaimed_task_count

@@ -30,6 +30,7 @@
 (tests
  (names
   test_keeper_reactive_wake_backlog_gate
+  test_keeper_mention_scope
   test_board_activity_cache
   test_jsonl_mtime_projection
   test_jsonl_incremental_projection
@@ -298,6 +299,7 @@
  (modules
   test_env_keeper_scrub
   test_keeper_reactive_wake_backlog_gate
+  test_keeper_mention_scope
   test_board_activity_cache
   test_jsonl_mtime_projection
   test_jsonl_incremental_projection

@@ -41,6 +41,7 @@ type runtime_handler =
   | Tool_library_read
   | Tool_surface_read
   | Tool_surface_post
+  | Tool_person_note_set
   | Tool_ide_annotate
   | Tool_voice_dispatch
   | Tool_task_dispatch
@@ -128,6 +129,7 @@ let runtime_handler_to_string = function
   | Tool_library_read -> "tool_library_read"
   | Tool_surface_read -> "tool_surface_read"
   | Tool_surface_post -> "tool_surface_post"
+  | Tool_person_note_set -> "tool_person_note_set"
   | Tool_ide_annotate -> "tool_ide_annotate"
   | Tool_voice_dispatch -> "tool_voice_dispatch"
   | Tool_task_dispatch -> "tool_task_dispatch"
@@ -695,6 +697,22 @@ let surface_post_schema =
     ]
 ;;
 
+let person_note_set_schema =
+  object_schema
+    ~required:[ "speaker_id"; "note" ]
+    [ property
+        "speaker_id"
+        "string"
+        "Stable speaker id from the roster (Discord snowflake). Notes \
+         attach to ids, never to display names."
+    ; property
+        "note"
+        "string"
+        "What to remember about this person. Blank clears the note \
+         (tombstone)."
+    ]
+;;
+
 let read_only_in_process_policy ?(inline_safe = false) ?(maintenance_only = false)
       ()
   =
@@ -1048,6 +1066,17 @@ let internal_descriptors : t list =
       ~input_schema:surface_post_schema
       ~policy:(write_in_process_policy ())
       ~handler:Tool_surface_post
+  ; in_process_descriptor
+      ~id:"keeper.person.note_set"
+      ~name:"keeper_person_note_set"
+      ~description:
+        "Remember (or clear) a note about a person met on a connected \
+         surface, keyed by their roster speaker_id. Deliberate memory: \
+         the note survives after their chat rows age out of the log \
+         window and shows up on the keeper_surface_read roster."
+      ~input_schema:person_note_set_schema
+      ~policy:(write_in_process_policy ())
+      ~handler:Tool_person_note_set
     (* ── IDE (RFC-0179 PR-3) ──────────────────────────────────── *)
   ; in_process_descriptor
       ~id:"keeper.ide.annotate"

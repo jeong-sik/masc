@@ -114,14 +114,14 @@ let shard_library : shard =
   }
 ;;
 
-(* RFC-0223 P3: connector surface lane reading. keeper_surface_post
-   (P4) joins this shard when it ships. *)
+(* RFC-0223 P3/P4 + RFC-0229: connector surface lane reading, acting,
+   and per-person notes. *)
 let shard_surface : shard =
   { name = "surface"
   ; tools = surface_tools
   ; read_only_tools = [ "keeper_surface_read" ]
   ; removable = true
-  ; description = "Connected surfaces: read lane conversation, roster"
+  ; description = "Connected surfaces: read lane conversation, roster, person notes"
   }
 ;;
 

@@ -148,6 +148,7 @@ type t =
   | AlertPersistFailures
   | MetricsSseFailures
   | ChatStoreFailures
+  | PersonNoteStoreFailures
   | ObservationQueryFailures
   | OasOnStop
   | OasOnIdleEscalated

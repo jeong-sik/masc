@@ -80,4 +80,35 @@ let surface_tools : Masc_domain.tool_schema list =
           ; "required", `List [ `String "surface"; `String "content" ]
           ]
     }
+  ; { name = "keeper_person_note_set"
+    ; description =
+        "Remember (or clear) a note about a person met on a connected \
+         surface, keyed by their roster speaker_id (RFC-0229). The note \
+         survives after their messages age out of the log window and \
+         shows up on the keeper_surface_read roster."
+    ; input_schema =
+        `Assoc
+          [ "type", `String "object"
+          ; ( "properties"
+            , `Assoc
+                [ ( "speaker_id"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; ( "description"
+                        , `String
+                            "Stable speaker id from the roster (Discord \
+                             snowflake); notes attach to ids, never names" )
+                      ] )
+                ; ( "note"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; ( "description"
+                        , `String
+                            "What to remember about this person; blank \
+                             clears the note" )
+                      ] )
+                ] )
+          ; "required", `List [ `String "speaker_id"; `String "note" ]
+          ]
+    }
   ]

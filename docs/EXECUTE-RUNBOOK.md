@@ -1,6 +1,6 @@
 ---
 status: runbook
-last_verified: 2026-05-21
+last_verified: 2026-06-11
 code_refs:
   - lib/exec/exec_semantic.ml
   - lib/exec/exec_buffer.ml
@@ -30,6 +30,8 @@ background task lifecycle are not part of the callable surface.
 - `Grep` owns file/content search. Execute owns typed command execution.
 - Does not cover: the runtime verifier itself or the approval layer for MCP
   tools.
+- Async boundary: background shell lifecycle primitives live in `Bg_task`;
+  they are not exposed through the typed `Execute` callable surface.
 
 ## Current Rollout State
 
@@ -71,6 +73,24 @@ Pipeline:
 Shell metacharacters inside `argv` are data. Use `pipeline` for pipes
 instead of embedding `|` in a string. For read-only observation prefer
 `Grep`; for file edits use `Edit`/`Write`.
+
+## Async Boundary Proof
+
+`Execute` remains synchronous at the callable-surface level. The public schema
+rejects legacy background flags and accepts only typed command fields:
+`executable`, `argv`, `pipeline`, `env`, `cwd`, `timeout_sec`, `stdin`,
+`stdout`, and `stderr`.
+
+Background shell lifecycle support exists below that boundary in `Bg_task`
+(`spawn` / `read` / `kill` / `list`). Keeper-turn async messaging is a separate
+surface (`keeper_msg`, `keeper_msg_result`, `keeper_msg_cancel`,
+`keeper_msg_list`) and is serialized through `Keeper_turn_admission`.
+
+Verification:
+
+```bash
+bash scripts/check-execute-async-surface.sh
+```
 
 ## Counter Endpoint
 

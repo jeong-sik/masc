@@ -406,6 +406,9 @@ jobs:
         if: needs.changes.outputs.lib_deps == 'true'
         run: python3 scripts/lib_dep_report.py --self-test
 
+      - name: Check Execute async surface contract
+        run: bash scripts/check-execute-async-surface.sh
+
       - name: Sublib boundary gate self-test (RFC-0056 G1)
         if: needs.changes.outputs.lib_deps == 'true'
         run: python3 scripts/audit-sublib-cycle.py --self-test

@@ -63,6 +63,8 @@ let handle_message_create ~dispatch
   | None ->
     (* No binding for this channel — drop quietly. The bot may be in
        channels it isn't bound to (e.g. server-wide guild messages). *)
+    Discord_observability.record_inbound_dispatch
+      Discord_observability.Dropped_unbound;
     ()
   | Some keeper_name ->
     let msg : Channel_gate.inbound_message =
@@ -82,15 +84,29 @@ let handle_message_create ~dispatch
     in
     (match Channel_gate.handle_inbound ~dispatch msg with
      | Error gate_err ->
+       Discord_observability.record_inbound_dispatch
+         Discord_observability.Gate_error;
        Log.Server.warn "discord inbound -> keeper failed (channel=%s keeper=%s): %s"
          channel_id keeper_name
          (Channel_gate.gate_error_to_string gate_err)
      | Ok out ->
-       if String.equal out.content "" then ()
+       if String.equal out.content "" then begin
+         Discord_observability.record_inbound_dispatch
+           Discord_observability.Empty_reply;
+         Discord_observability.record_reply Discord_observability.Reply_empty
+       end
        else
          (match State.send_message ~channel_id ~content:out.content ~reply_to_message_id:message_id () with
-          | Ok _ -> ()
+          | Ok _ ->
+            Discord_observability.record_inbound_dispatch
+              Discord_observability.Reply_sent;
+            Discord_observability.record_reply
+              Discord_observability.Reply_send_ok
           | Error e ->
+            Discord_observability.record_inbound_dispatch
+              Discord_observability.Reply_send_error;
+            Discord_observability.record_reply
+              Discord_observability.Reply_send_failed;
             Log.Server.error "discord send_message failed (channel=%s): %s"
               channel_id
               (Format.asprintf "%a" State.pp_send_error e)))
@@ -123,16 +139,21 @@ let handle_ambient ~base_dir
       ~(channel_id : string) ~(author_id : string)
       ~(author_name : string option) ~(content : string) =
   match State.keeper_for_channel ~channel_id with
-  | None -> ()
+  | None ->
+    Discord_observability.record_ambient
+      Discord_observability.Ambient_dropped_unbound
   | Some keeper_name ->
     let trimmed = String.trim content in
-    if String.equal trimmed "" then ()
+    if String.equal trimmed "" then
+      Discord_observability.record_ambient
+        Discord_observability.Ambient_dropped_empty
     else if String.length trimmed > Channel_gate.max_content_length () then
       (* Same inbound bound the turn path enforces
          ([Channel_gate.handle_inbound] validation): a message this
          size cannot become a turn either; it is rejected, not
          truncated. *)
-      ()
+      Discord_observability.record_ambient
+        Discord_observability.Ambient_dropped_too_long
     else begin
       Keeper_chat_store.append_user_message
         ~base_dir ~keeper_name ~content:trimmed
@@ -143,7 +164,9 @@ let handle_ambient ~base_dir
           ; speaker_authority = Keeper_chat_store.External
           }
         ();
-      Keeper_chat_broadcast.chat_appended ~keeper_name ~source:State.channel
+      Keeper_chat_broadcast.chat_appended ~keeper_name ~source:State.channel;
+      Discord_observability.record_ambient
+        Discord_observability.Ambient_recorded
     end
 
 let on_ambient ~base_dir (ev : Gw.gateway_event) =

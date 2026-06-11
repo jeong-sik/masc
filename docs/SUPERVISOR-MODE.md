@@ -2,7 +2,6 @@
 status: runbook
 last_verified: 2026-04-23
 code_refs:
-  - lib/supervisor.ml
   - lib/tool_operator.ml
   - lib/operator/operator_control.ml
 ---

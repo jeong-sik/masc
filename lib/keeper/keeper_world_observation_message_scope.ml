@@ -44,6 +44,42 @@ let is_keeper_authored_message author =
   Option.is_some (Keeper_identity.canonical_keeper_name_from_agent_name author)
 ;;
 
+(* RFC-0230 §3.1 — boundary parse: turn one lane line into a typed signal.
+
+   Pure over primitive inputs: [self_tokens] is the keeper's identity-token set
+   (see [self_identity_tokens]) and [mention_targets] its addressable names (see
+   [message_feed_targets]). The "@<target>" substring scan mirrors the board
+   mention matcher (Keeper_world_observation_board_signal.match_signal) and runs
+   once here, producing a typed [lane_signal] rather than a downstream substring
+   gate. P1 classifies a non-self, non-mention line as [Ambient]; [Scope_message]
+   is emitted in RFC-0230 P2 once scope subscription is wired. *)
+type lane_signal =
+  | Direct_mention of { speaker : string; at : float }
+  | Scope_message of { speaker : string; at : float }
+  | Self_authored
+  | Ambient
+
+let classify_lane_line
+      ~(self_tokens : string list)
+      ~(mention_targets : string list)
+      ~(speaker : string)
+      ~(text : string)
+      ~(at : float)
+  : lane_signal
+  =
+  if is_self_author ~self_tokens speaker
+  then Self_authored
+  else (
+    let haystack = String.lowercase_ascii text in
+    let is_mention target =
+      let needle = "@" ^ String.lowercase_ascii (String.trim target) in
+      needle <> "@" && String_util.contains_substring haystack needle
+    in
+    if List.exists is_mention mention_targets
+    then Direct_mention { speaker; at }
+    else Ambient)
+;;
+
 let collect_message_scope ~(config : Workspace.config) ~(meta : keeper_meta)
   : (string * string) list * (string * string) list * (string * int) list
   =

@@ -25,7 +25,7 @@ val drift_variant_label : Workspace_task_lifecycle.drift -> string
 (** Three-way classification of a task's contract surface:
     - ["no_contract"] — [task.contract = None]
     - ["empty_contract"] — contract record present but both
-      [completion_contract] and [required_evidence] are empty lists
+      [completion_contract] and [verify_gate_evidence] are empty lists
     - ["with_contract"] — at least one of those lists is non-empty,
       so [Tool_task]'s LLM completion reviewer receives contract context
 

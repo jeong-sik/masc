@@ -4,7 +4,7 @@ module Mcp_eio = Masc.Mcp_server_eio
 module Server_runtime_bootstrap = Server_runtime_bootstrap
 module Server_bootstrap_loops = Server_bootstrap_loops
 module Shutdown_hooks = Masc.Shutdown_hooks
-module Board_dispatch = Masc.Board_dispatch
+module Board_dispatch = Masc_board_handlers.Board_dispatch
 
 open Cmdliner
 
@@ -34,7 +34,7 @@ let run_cmd base_path =
   ignore (Server_bootstrap_loops.start_background_maintenance ~sw ~clock ~env state);
   Fun.protect
     ~finally:(fun () ->
-      (try Board_dispatch.flush ()
+      (try Masc_board_handlers.Board_dispatch.flush ()
        with
        | Eio.Cancel.Cancelled _ -> ()
        | exn ->

@@ -56,9 +56,8 @@ let test_contracted_task_includes_contract_refs () =
   let contract : Masc_domain.task_contract =
     { strict = false
     ; completion_contract = []
-    ; required_evidence = [ "test_keeper_lifecycle PASS" ]
     ; inspect_gate_evidence = []
-    ; verify_gate_evidence = [ "PR #18810 merged" ]
+    ; verify_gate_evidence = [ "PR #18810 merged"; "test_keeper_lifecycle PASS" ]
     ; evidence_claims = []
     ; stale_claim_timeout_sec = 0
     ; links = { operation_id = None; session_id = None }
@@ -71,7 +70,7 @@ let test_contracted_task_includes_contract_refs () =
     true
     (List.mem "PR #18810 merged" refs);
   Alcotest.(check bool)
-    "required_evidence included"
+    "verify_gate_evidence included"
     true
     (List.mem "test_keeper_lifecycle PASS" refs)
 

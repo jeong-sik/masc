@@ -139,7 +139,7 @@ let handle_post_create ~tool_name ~start_time args : Tool_result.result =
           msg
       | Ok post_kind ->
         (match
-           Board_dispatch.create_post
+           Masc_board_handlers.Board_dispatch.create_post
              ~author
              ~content
              ?title
@@ -215,10 +215,10 @@ let handle_post_list_uncached ~tool_name ~start_time args : Tool_result.result =
       msg
   | Ok sort_by ->
     (* Fetch exactly what we need: offset posts to skip + limit posts to show.
-       Board_dispatch.list_posts already applies visibility/hearth/author filters. *)
+       Masc_board_handlers.Board_dispatch.list_posts already applies visibility/hearth/author filters. *)
     let fetch_limit = limit + offset in
     let sorted_posts =
-      Board_dispatch.list_posts
+      Masc_board_handlers.Board_dispatch.list_posts
         ~visibility_filter
         ?hearth
         ?author_filter
@@ -305,7 +305,7 @@ let handle_post_list ~tool_name ~start_time args =
 
 let handle_post_get ~tool_name ~start_time args : Tool_result.result =
   let post_id = get_string args "post_id" "" in
-  match Board_dispatch.get_post_and_comments ~post_id with
+  match Masc_board_handlers.Board_dispatch.get_post_and_comments ~post_id with
   | Error (Board.Post_not_found _) ->
     (* Idempotent: post no longer exists (deleted/expired/TTL).
        Return success so agent tool metrics don't count this as failure.
@@ -380,7 +380,7 @@ let handle_comment_add ~tool_name ~start_time args : Tool_result.result =
          Board.Limits.max_content_length)
   else (
     match
-      Board_dispatch.add_comment
+      Masc_board_handlers.Board_dispatch.add_comment
         ~post_id
         ~author:(Option.value author ~default:"")
         ~content

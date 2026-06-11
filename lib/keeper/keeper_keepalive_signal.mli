@@ -168,7 +168,7 @@ val select_board_wakeup_candidates :
   ('a * string) list * int
 
 val wakeup_relevant_keeper_for_board_signal :
-  config:Workspace.config -> Board_dispatch.board_signal -> unit
+  config:Workspace.config -> Masc_board_handlers.Board_dispatch.board_signal -> unit
 
 (** Per-stage timing accumulator for Phase 0 profiling. *)
 type stage_timing = {

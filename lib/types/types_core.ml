@@ -492,10 +492,15 @@ type task_execution_links = {
 
 (** Task contract - persisted deterministic gate inputs.
 
-    [required_evidence : string list] is the live source of truth: the CDAL
+    [verify_gate_evidence : string list] is the live source of truth: the CDAL
     evidence gate ([Cdal_evidence_gate]) substring-matches each entry against
     task-completion notes / handoff refs to decide whether a contracted task
     may complete.
+
+    The legacy [required_evidence : string list] field was removed
+    (2026-06-11): it was subsumed by [verify_gate_evidence] which already
+    served the same purpose. All consumers now read [verify_gate_evidence]
+    exclusively.
 
     RFC-0199 Phase A added a parallel [required_evidence_typed :
     Evidence_claim.t list] meant for a future [Deterministic_evidence_evaluator]
@@ -504,7 +509,7 @@ type task_execution_links = {
     Phase B evaluator was never implemented. The [Evidence_claim] schema module
     is retained for when Phase B is built; see RFC-0199 for the deferral note.
     A future Phase B should re-introduce a typed field with a migration that
-    parses legacy [required_evidence] strings (RFC-0199 open question), not a
+    parses legacy [verify_gate_evidence] strings (RFC-0199 open question), not a
     silently-empty parallel field.
 
     A [required_tools : string list] field was also removed (2026-06-03,
@@ -517,7 +522,6 @@ type task_execution_links = {
 type task_contract = {
   strict : bool; [@default false]
   completion_contract : string list; [@default []]
-  required_evidence : string list; [@default []]
   inspect_gate_evidence : string list; [@default []]
   verify_gate_evidence : string list; [@default []]
   evidence_claims : Evidence_claim.t list; [@default []]

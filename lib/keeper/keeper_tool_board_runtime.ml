@@ -118,7 +118,7 @@ let ensure_keeper_board_post_args ~author ~source args =
           rename of [Automation_post] forces this site to update too.
           Same pattern family as #8354 / #8392. *)
        ; ( "post_kind"
-         , `String (Board_core_classify.post_kind_to_string Board_types.Automation_post) )
+         , `String (Masc_board_handlers.Board_core_classify.post_kind_to_string Board_types.Automation_post) )
        ; "meta", keeper_board_meta ?quantitative_evidence ~source raw_meta
        ]
        @ fields)

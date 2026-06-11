@@ -125,7 +125,6 @@ type task_execution_links =
 type task_contract =
   { strict : bool [@default false]
   ; completion_contract : string list [@default []]
-  ; required_evidence : string list [@default []]
   ; inspect_gate_evidence : string list [@default []]
   ; verify_gate_evidence : string list [@default []]
   ; evidence_claims : Evidence_claim.t list [@default []]
@@ -134,7 +133,7 @@ type task_contract =
            author (masc_add_task contract arg), evaluated by
            Deterministic_evidence_evaluator. Re-introduced with producer +
            consumer wired (unlike the fan-in-0 required_evidence_typed removed
-           2026-06-03); legacy required_evidence strings are NOT auto-parsed
+           2026-06-03); legacy verify_gate_evidence strings are NOT auto-parsed
            into claims (that would be a substring classifier). *)
   ; stale_claim_timeout_sec : int [@default 0]
   ; links : task_execution_links

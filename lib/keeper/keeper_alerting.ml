@@ -296,7 +296,7 @@ let post_keeper_alert_board
   in
   let meta_json = Some (`Assoc [ ("source", `String "keeper_alert_board") ]) in
   match
-    Board_dispatch.create_post ~author ~content:alert_text
+    Masc_board_handlers.Board_dispatch.create_post ~author ~content:alert_text
       ~post_kind:Board.System_post ?meta_json
       ~visibility ~ttl_hours:24 ?hearth:hearth_opt ()
   with

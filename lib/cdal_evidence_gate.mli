@@ -6,7 +6,7 @@
 
     Explicit verification submission is checked for the presence of evidence
     the reviewer can inspect downstream — substantive
-    notes plus the contract's [required_evidence] entries, or a handoff
+    notes plus the contract's [verify_gate_evidence] entries, or a handoff
     reference (file path, PR number, commit hash, trace id, or any
     reference URL). There is no internal proof/verdict pipeline.
 
@@ -15,7 +15,7 @@
     | task.contract | evidence | Decision |
     |---------------|----------|----------|
     | [None] | any | [Pass] (analysis-only task bypass) |
-    | [Some _] | all [required_evidence] mentioned AND (substantive notes OR handoff reference) | [Pass] |
+    | [Some _] | all [verify_gate_evidence] mentioned AND (substantive notes OR handoff reference) | [Pass] |
     | [Some _] | otherwise | [Reject] with unsatisfied required-evidence list | *)
 
 (** A decision from the evidence gate. *)
@@ -30,7 +30,7 @@ type decision =
 
 val rule_id_evidence_incomplete : string
 (** ["cdal_evidence_incomplete"] — a contracted task tried to complete
-    without sufficient evidence (required_evidence unsatisfied and no
+    without sufficient evidence (verify_gate_evidence unsatisfied and no
     substantive notes / handoff reference). *)
 
 (** [decide] applies the evidence-substantiveness matrix above. *)

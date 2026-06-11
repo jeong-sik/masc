@@ -17,7 +17,7 @@
       "1" / "true" (case-insensitive) → true, anything else →
       false. Empty / unset → false (warn-only default). *)
 
-module BV = Masc.Board_votes
+module BV = Masc_board_handlers.Board_votes
 
 let is_fixture = function
   | BV.Fixture_voter _ -> true

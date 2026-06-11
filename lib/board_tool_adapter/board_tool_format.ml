@@ -379,15 +379,15 @@ let detect_truncated_markdown_with_reason (text : string) : truncation_signal op
 
 (** {1 Sort order}
 
-    Issue #8449 PR B: [sort_order] re-exports [Board_dispatch.sort_order]
+    Issue #8449 PR B: [sort_order] re-exports [Masc_board_handlers.Board_dispatch.sort_order]
     (type-alias with definition equality). Constructors are
     interchangeable across modules — no conversion needed.
     [parse_sort_order] delegates to
-    [Board_dispatch.sort_order_of_string_opt] for canonical sort names;
+    [Masc_board_handlers.Board_dispatch.sort_order_of_string_opt] for canonical sort names;
     error message derives from
-    [Board_dispatch.valid_sort_order_strings] so adding a constructor
+    [Masc_board_handlers.Board_dispatch.valid_sort_order_strings] so adding a constructor
     automatically updates the user-facing list. *)
-type sort_order = Board_dispatch.sort_order =
+type sort_order = Masc_board_handlers.Board_dispatch.sort_order =
   | Hot
   | Trending
   | Recent
@@ -395,13 +395,13 @@ type sort_order = Board_dispatch.sort_order =
   | Discussed
 
 let parse_sort_order value =
-  match Board_dispatch.sort_order_of_string_opt value with
+  match Masc_board_handlers.Board_dispatch.sort_order_of_string_opt value with
   | Some s -> Ok s
   | None ->
     Error
       (Printf.sprintf
          "invalid sort. Valid: %s"
-         (String.concat ", " Board_dispatch.valid_sort_order_strings))
+         (String.concat ", " Masc_board_handlers.Board_dispatch.valid_sort_order_strings))
 ;;
 
 (** {1 JSON argument coercion}

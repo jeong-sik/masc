@@ -18,6 +18,7 @@
   masc.mcp_session
   masc.mcp_transport_protocol
   masc.board_tool_adapter
+  masc.board_handlers
   masc_eio_context
   cmdliner
   eio
@@ -79,6 +80,7 @@
   cohttp-eio
   masc.prompt_registry
   masc.mcp_transport_protocol
+  masc.board_handlers
   agent_sdk
   agent_sdk.llm_provider))
 

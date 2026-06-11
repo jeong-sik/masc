@@ -9,7 +9,7 @@ type truncation_signal =
   | Unfinished_image
   | Odd_double_asterisk
 
-type sort_order = Board_dispatch.sort_order =
+type sort_order = Masc_board_handlers.Board_dispatch.sort_order =
   | Hot
   | Trending
   | Recent

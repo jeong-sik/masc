@@ -25,7 +25,7 @@ let dashboard_board_json
       ?config
       ?hearth
       ?author_filter
-      ?(sort_by = Board_dispatch.Hot)
+      ?(sort_by = Masc_board_handlers.Board_dispatch.Hot)
       ?(exclude_system = false)
       ?(exclude_automation = false)
       ?(limit = 100)
@@ -75,7 +75,7 @@ let dashboard_board_json
          entirely inside the fetched window — otherwise null (unknown). *)
       let probe_fetch = base_fetch + 1 in
       let posts =
-        Board_dispatch.list_posts
+        Masc_board_handlers.Board_dispatch.list_posts
           ?hearth
           ~sort_by
           ~exclude_system
@@ -84,7 +84,7 @@ let dashboard_board_json
           ~limit:probe_fetch
           ()
       in
-      let karma_map = Board_dispatch.get_all_karma () in
+      let karma_map = Masc_board_handlers.Board_dispatch.get_all_karma () in
       let get_karma author = Option.value ~default:0 (List.assoc_opt author karma_map) in
       let fetched_len = List.length posts in
       let window_end = offset + limit in

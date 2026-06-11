@@ -8,7 +8,7 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0203", "0223"]
-implementation_prs: []
+implementation_prs: ["20771"]
 ---
 
 # RFC-0226: Ambient lane recording — record ≠ trigger
@@ -41,7 +41,11 @@ turn-triggering and to replying**, in both trigger-policy modes:
    which is gated on `direct_reply=true && tool_result_success`. A
    silent turn, a non-reply action, or a failed turn drops the inbound
    message from history. Even maximal triggering does not give
-   complete recording.
+   complete recording. This hole covers **every gate consumer**, not
+   just Discord: sidecar connectors enter through
+   `POST /api/v1/gate/message` (imessage-bot, cli-connector —
+   `sidecars/shared/gate_shared/gate_client_base.py`) and converge on
+   the same reply-path persistence.
 
 The root cause is ownership: today the *reply path* owns inbound
 persistence, so anything that doesn't end in a reply records nothing.
@@ -52,13 +56,17 @@ persistence, so anything that doesn't end in a reply records nothing.
    for every bound-channel message, regardless of trigger policy.
    Trigger policy decides exactly one thing: whether a turn starts.
    The two decisions share an input, never an outcome.
-2. **Ownership split, not dedup.** The gateway becomes the sole
-   recorder of inbound Discord user lines; the reply path stops
-   writing the user+assistant pair and appends the assistant line
-   only (`append_assistant_message`, shipped in RFC-0223 P4). Double
-   recording is prevented by construction — there is no idempotency
-   cache, no dedup pass (CLAUDE.md workaround bar; owner constraint
-   RFC-0223 §2 principle 6).
+2. **Ownership split, not dedup.** The inbound delivery boundary
+   becomes the sole recorder of connector user lines: the gate
+   dispatch entry (`Gate_keeper_backend.dispatch` — post
+   validation/dedup, pre turn) records everything that starts a turn,
+   and the Discord gateway's ambient arm records what the policy
+   filtered out. A message takes exactly one of the two routes, so
+   the split is exhaustive and disjoint by construction. The reply
+   path stops writing the user+assistant pair and appends the
+   assistant line only (`append_assistant_message`, shipped in
+   RFC-0223 P4). No idempotency cache, no dedup pass (CLAUDE.md
+   workaround bar; owner constraint RFC-0223 §2 principle 6).
 3. **Bind = consent.** Only bound channels record. Binding is an
    explicit operator action with an audit trail
    (`channel_gate_discord_state.ml` bind/unbind + `binding_audit`),
@@ -121,22 +129,34 @@ val append_user_message :
   ?source:string -> ?speaker:speaker -> unit -> unit
 ```
 
-### 3.3 Reply-path ownership migration
+### 3.3 Gate dispatch recording + reply-path ownership migration
 
-`append_direct_chat_pair_if_reply` changes meaning: the gate path
-stops persisting the user line (the gateway recorded it at delivery)
-and appends the assistant reply only. The agent-initiated path
-(`channel = ""`, source `"agent"`) keeps the pair — there is no
-gateway recorder for it. This is the one behavioral change to an
-existing site, and it is what removes the `All`-mode silent-turn hole
-(§1.2) without any dedup.
+> Amended during implementation (P1 PR): the original draft assumed
+> sidecar connectors enter via the keeper stream route. They do not —
+> imessage-bot and cli-connector POST to `/api/v1/gate/message` and
+> converge on the same reply-path persistence as Discord. The
+> recording site therefore moves up to the convergence point.
 
-HTTP-stream connectors (slack/telegram sidecars, dashboard) are NOT
-migrated: their inbound *is* the turn request, and the stream route's
+`Gate_keeper_backend.dispatch` — the single point every gate inbound
+passes through (in-process Discord gateway and the HTTP gate route
+alike), after `Channel_gate.handle_inbound` validation/dedup and
+before the keeper turn — appends the user line at entry via
+`append_user_message`. The line carries the **raw** `content` with
+the External speaker fields; the `[External channel context]` wrapper
+(`contextualize_message`) remains turn input only, not conversation
+history.
+
+`append_direct_chat_pair_if_reply` then changes meaning: for
+connector traffic (non-empty `channel`) it appends the assistant
+reply only. The agent-initiated path (`channel = ""`, source
+`"agent"`) keeps the pair — there is no upstream recorder for it.
+This removes the silent-turn hole (§1.2) for **all** gate consumers —
+Discord and gate-route sidecars — without any dedup, and without a
+per-connector (string-keyed) recorder split.
+
+The keeper stream route (dashboard chat) is NOT migrated: its
 `append_turn` already records every request unconditionally
-(`server_routes_http_keeper_stream.ml:623/:668`). Recording there is
-already complete; only the in-process Discord gateway had the
-policy-drop hole.
+(`server_routes_http_keeper_stream.ml:623/:668`).
 
 ### 3.4 Read-cost bound (P2 of this RFC)
 
@@ -157,7 +177,7 @@ for the cost curve, not a cap on writes.
 
 | Phase | Scope | Ships alone? |
 |---|---|---|
-| P1 | `Emit_ambient` variant + gateway arm + `append_user_message` + reply-path ownership migration | yes — recording becomes complete for Discord in all trigger modes |
+| P1 | `Emit_ambient` variant + gateway arm + `append_user_message` + gate dispatch recording + reply-path ownership migration | yes — recording becomes complete for every gate consumer (Discord + gate-route sidecars) in all trigger modes |
 | P2 | tail-bounded `load` | yes — independent read-cost fix, valuable even without P1 |
 
 P1 and P2 are independent; either may land first.

@@ -6,12 +6,40 @@
 
 open Keeper_memory_os_types
 
-let ensure_dir path =
-  if not (Sys.file_exists path && Sys.is_directory path)
-  then Unix.mkdir path 0o755
+let rec ensure_dir path =
+  if path = "" || path = Filename.current_dir_name
+  then ()
+  else if Sys.file_exists path
+  then (
+    if not (Sys.is_directory path)
+    then invalid_arg (Printf.sprintf "not a directory: %s" path))
+  else (
+    let parent = Filename.dirname path in
+    if parent <> path then ensure_dir parent;
+    try Unix.mkdir path 0o755 with
+    | Unix.Unix_error (Unix.EEXIST, _, _) ->
+      if not (Sys.file_exists path && Sys.is_directory path)
+      then invalid_arg (Printf.sprintf "not a directory: %s" path))
 ;;
 
-let keepers_dir () = Config_dir_resolver.keepers_dir ()
+let keepers_dir_override : string option ref = ref None
+
+let keepers_dir () =
+  match !keepers_dir_override with
+  | Some path -> path
+  | None -> Config_dir_resolver.keepers_dir ()
+;;
+
+module For_testing = struct
+  let with_keepers_dir path f =
+    ensure_dir path;
+    let previous = !keepers_dir_override in
+    keepers_dir_override := Some path;
+    Fun.protect
+      ~finally:(fun () -> keepers_dir_override := previous)
+      f
+  ;;
+end
 
 let facts_path ~keeper_id =
   Filename.concat (keepers_dir ()) (keeper_id ^ ".facts.jsonl")

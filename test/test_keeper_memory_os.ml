@@ -3,6 +3,9 @@
 module Types = Masc.Keeper_memory_os_types
 module Policy = Masc.Keeper_memory_os_policy
 module Librarian = Masc.Keeper_librarian
+module Compact = Masc.Keeper_compact_policy
+module Context = Masc.Keeper_context_core
+module Memory_io = Masc.Keeper_memory_os_io
 
 let contains substring s =
   let sub_len = String.length substring in
@@ -39,6 +42,108 @@ let fact_fixture ~now () =
   ; Types.first_seen = now -. 86400.0
   ; Types.last_accessed = now -. 3600.0
   ; Types.valid_until = None
+  ; Types.schema_version = Types.schema_version
+  }
+;;
+
+let with_temp_keepers_dir f =
+  let marker = Filename.temp_file "keeper-memory-os-" ".tmp" in
+  Sys.remove marker;
+  Memory_io.For_testing.with_keepers_dir marker (fun () -> f marker)
+;;
+
+let text_message text : Agent_sdk.Types.message =
+  { role = Agent_sdk.Types.User
+  ; content = [ Agent_sdk.Types.Text text ]
+  ; name = None
+  ; tool_call_id = None
+  ; metadata = []
+  }
+;;
+
+let write_file path content =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+;;
+
+let runtime_toml =
+  {|
+[runtime]
+default = "test_provider.test_model"
+
+[providers.test_provider]
+display-name = "Test Provider"
+protocol = "provider_d-http"
+endpoint = "http://127.0.0.1:1"
+
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[test_provider.test_model]
+is-default = true
+max-concurrent = 1
+|}
+;;
+
+let init_runtime_default_for_tests () =
+  let path = Filename.temp_file "keeper_memory_os_runtime_" ".toml" in
+  write_file path runtime_toml;
+  match Runtime.init_default ~config_path:path with
+  | Ok () -> ()
+  | Error e -> Alcotest.failf "Runtime.init_default failed: %s" e
+;;
+
+let make_meta_for_virtual_keeper () : Masc.Keeper_meta_contract.keeper_meta =
+  let json =
+    `Assoc
+      [ "name", `String "virtual-memory-keeper"
+      ; "trace_id", `String "trace-virtual-memory"
+      ; "goal", `String "exercise memory-os virtual keeper boundary"
+      ]
+  in
+  match Masc_test_deps.meta_of_json_fixture json with
+  | Ok meta ->
+    { meta with
+      compaction =
+        { meta.compaction with
+          ratio_gate = 0.99
+        ; message_gate = 21
+        ; token_gate = 0
+        ; cooldown_sec = 0
+        }
+    }
+  | Error e -> Alcotest.fail ("meta_of_json_fixture failed: " ^ e)
+;;
+
+let virtual_episode ~now ~trace_id ~generation ~older_messages =
+  let source_turn_range = Some (0, List.length older_messages - 1) in
+  let fact =
+    { Types.claim = "Virtual keeper persisted the Memory OS boundary fact"
+    ; Types.confidence = 0.95
+    ; Types.category = "test"
+    ; Types.source = { Types.trace_id; turn = 0; tool_call_id = None }
+    ; Types.access_count = 0
+    ; Types.first_seen = now
+    ; Types.last_accessed = now
+    ; Types.valid_until = None
+    ; Types.schema_version = Types.schema_version
+    }
+  in
+  { Types.trace_id
+  ; Types.generation
+  ; Types.episode_summary =
+      "A virtual keeper compacted old turns and persisted an episode bundle."
+  ; Types.claims = [ fact ]
+  ; Types.open_items = [ "keep fake provider boundary deterministic" ]
+  ; Types.constraints = [ "do not call a live provider" ]
+  ; Types.preserved_tool_refs = []
+  ; Types.source_turn_range
+  ; Types.created_at = now
   ; Types.schema_version = Types.schema_version
   }
 ;;
@@ -192,6 +297,80 @@ let test_bump_access () =
   | _ -> Alcotest.fail "expected one unchanged fact"
 ;;
 
+let test_virtual_keeper_compaction_persists_memory_bundle () =
+  init_runtime_default_for_tests ();
+  with_temp_keepers_dir (fun keepers_dir ->
+    let keeper_id = "virtual-memory-keeper" in
+    let meta = make_meta_for_virtual_keeper () in
+    let messages =
+      List.init 25 (fun i -> text_message (Printf.sprintf "virtual turn %02d" i))
+    in
+    let ctx =
+      Context.create ~system_prompt:"virtual keeper memory smoke" ~max_tokens:1_000_000
+      |> fun ctx -> Context.append_many ctx messages
+    in
+    let seen_by_librarian = ref [] in
+    let now = 1_000_000.0 in
+    let librarian older_messages =
+      seen_by_librarian := older_messages;
+      Some
+        (virtual_episode
+           ~now
+           ~trace_id:"trace-virtual-memory"
+           ~generation:7
+           ~older_messages)
+    in
+    let _compacted_ctx, trigger, decision, episode =
+      Compact.compact_if_needed_typed ~librarian ~meta ~now_ts:now ctx
+    in
+    Alcotest.(check bool)
+      "compaction applied"
+      true
+      (Compact.compaction_decision_applied decision);
+    Alcotest.(check bool) "trigger emitted" true (Option.is_some trigger);
+    Alcotest.(check int) "librarian sees older prefix" 5 (List.length !seen_by_librarian);
+    let librarian_text =
+      String.concat "\n" (List.map Agent_sdk.Types.text_of_message !seen_by_librarian)
+    in
+    Alcotest.(check bool) "includes oldest turn" true (contains "virtual turn 00" librarian_text);
+    Alcotest.(check bool) "excludes retained recent turn" false (contains "virtual turn 24" librarian_text);
+    Alcotest.(check int)
+      "no durable facts before post-checkpoint commit"
+      0
+      (List.length (Memory_io.read_facts_tail ~keeper_id ~n:1));
+    let episode =
+      match episode with
+      | Some episode -> episode
+      | None -> Alcotest.fail "expected librarian episode"
+    in
+    Memory_io.append_episode_bundle ~keeper_id episode;
+    Alcotest.(check bool)
+      "facts path stays inside virtual keepers dir"
+      true
+      (String.starts_with ~prefix:keepers_dir (Memory_io.facts_path ~keeper_id));
+    (match Memory_io.read_facts_tail ~keeper_id ~n:1 with
+     | [ fact ] ->
+       Alcotest.(check string)
+         "fact claim read back"
+         "Virtual keeper persisted the Memory OS boundary fact"
+         fact.Types.claim
+     | facts -> Alcotest.failf "expected one fact, got %d" (List.length facts));
+    (match Memory_io.read_events_tail ~keeper_id ~n:1 with
+     | [ event ] ->
+       Alcotest.(check string)
+         "event summary read back"
+         episode.Types.episode_summary
+         event.Types.episode_summary
+     | events -> Alcotest.failf "expected one event, got %d" (List.length events));
+    match Memory_io.read_episodes_tail ~keeper_id ~n:1 with
+    | [ stored_episode ] ->
+      Alcotest.(check string)
+        "episode summary read back"
+        episode.Types.episode_summary
+        stored_episode.Types.episode_summary
+    | episodes -> Alcotest.failf "expected one episode, got %d" (List.length episodes))
+;;
+
 let () =
   Alcotest.run
     "keeper_memory_os"
@@ -206,6 +385,12 @@ let () =
     ; ( "policy"
       , [ Alcotest.test_case "score and retention" `Quick test_policy_score_and_retention
         ; Alcotest.test_case "bump access" `Quick test_bump_access
+        ] )
+    ; ( "virtual_keeper"
+      , [ Alcotest.test_case
+            "compaction persists memory bundle"
+            `Quick
+            test_virtual_keeper_compaction_persists_memory_bundle
         ] )
     ]
 ;;

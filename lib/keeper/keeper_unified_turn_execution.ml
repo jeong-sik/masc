@@ -428,8 +428,7 @@ let run (ctx : ctx)
             ~next_runtime:(Some degraded_retry.next_runtime)
             ~attempt
             ~error_kind:(Some (Keeper_agent_error.sdk_error_kind err))
-            ~error_message:(Some (Agent_sdk.Error.to_string err))
-            ();
+            ~error_message:(Some (Agent_sdk.Error.to_string err));
           (match
              Keeper_unified_turn_pre_dispatch
              .build_runtime_execution
@@ -525,8 +524,7 @@ let run (ctx : ctx)
             ~next_runtime:(Some degraded_retry.next_runtime)
             ~attempt
             ~error_kind:(Some (Keeper_agent_error.sdk_error_kind err))
-            ~error_message:(Some (Agent_sdk.Error.to_string err))
-            ();
+            ~error_message:(Some (Agent_sdk.Error.to_string err));
           let productive_phase_elapsed_ms, retry_phase_elapsed_ms =
             current_turn_phase_elapsed_ms ()
           in
@@ -564,8 +562,7 @@ let run (ctx : ctx)
             ~next_runtime:None
             ~attempt
             ~error_kind:(Some (Keeper_agent_error.sdk_error_kind err))
-            ~error_message:(Some (Agent_sdk.Error.to_string err))
-            ();
+            ~error_message:(Some (Agent_sdk.Error.to_string err));
           let delay = EC.transient_backoff_sec attempt in
           Log.Keeper.warn
             "%s: transient network error runtime=%s max_context=%d \
@@ -615,8 +612,7 @@ let run (ctx : ctx)
             ~next_runtime:None
             ~attempt
             ~error_kind:(Some (Keeper_agent_error.sdk_error_kind err))
-            ~error_message:(Some (Agent_sdk.Error.to_string err))
-            ();
+            ~error_message:(Some (Agent_sdk.Error.to_string err));
           let current_turn_event_bus =
             drain_turn_event_bus ~site:"context_overflow_capture" ()
           in
@@ -660,8 +656,7 @@ let run (ctx : ctx)
             ~next_runtime:None
             ~attempt
             ~error_kind:(Some (Keeper_agent_error.sdk_error_kind err))
-            ~error_message:(Some (Agent_sdk.Error.to_string err))
-            ();
+            ~error_message:(Some (Agent_sdk.Error.to_string err));
           mark_terminal_error err;
           Error err)
   in

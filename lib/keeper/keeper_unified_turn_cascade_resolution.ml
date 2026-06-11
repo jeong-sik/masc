@@ -6,6 +6,12 @@
 
     @since task-786 *)
 
+type cascade_decision_kind =
+  | Degraded_retry_allowed
+  | Degraded_retry_slot_phase_exhausted
+  | No_degraded_retry
+  | Transient_network_retry
+
 let decision_kind_to_string : cascade_decision_kind -> string = function
   | Degraded_retry_allowed -> "degraded_retry_allowed"
   | Degraded_retry_slot_phase_exhausted -> "degraded_retry_slot_phase_exhausted"
@@ -21,7 +27,6 @@ let publish_cascade_resolution
     ~attempt
     ~error_kind
     ~error_message
-    ()
   =
   let payload = `Assoc
     [ "keeper_name", `String keeper_name

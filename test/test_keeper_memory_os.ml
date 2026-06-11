@@ -186,6 +186,28 @@ let virtual_episode ~now ~trace_id ~generation ~older_messages =
   }
 ;;
 
+let episode_fixture ~now ~trace_id ~generation ~summary =
+  let fact =
+    { (fact_fixture ~now ()) with
+      Types.claim = summary ^ " fact"
+    ; Types.source = { Types.trace_id; turn = 0; tool_call_id = None }
+    ; Types.first_seen = now
+    ; Types.last_accessed = now
+    }
+  in
+  { Types.trace_id
+  ; Types.generation
+  ; Types.episode_summary = summary
+  ; Types.claims = [ fact ]
+  ; Types.open_items = []
+  ; Types.constraints = []
+  ; Types.preserved_tool_refs = []
+  ; Types.source_turn_range = Some (0, 0)
+  ; Types.created_at = now
+  ; Types.schema_version = Types.schema_version
+  }
+;;
+
 let test_json_roundtrip () =
   let now = 1_000_000.0 in
   let f = fact_fixture ~now () in
@@ -260,9 +282,9 @@ let test_prompt_renders () =
     Alcotest.(check bool)
       "contains conversation"
       true
-      (contains "[user] Please remember the project constraint." prompt);
+      (contains "[turn=0 role=user] Please remember the project constraint." prompt);
     match
-      ( index_of "[user] Please remember the project constraint." prompt
+      ( index_of "[turn=0 role=user] Please remember the project constraint." prompt
       , index_of "Respond with ONLY the JSON object." prompt )
     with
     | Some conversation_at, Some respond_at ->
@@ -321,6 +343,49 @@ let test_prompt_omits_private_blocks () =
       (contains "[tool result omitted: id=call_1 is_error=false]" prompt))
 ;;
 
+let test_librarian_accepts_integer_confidence () =
+  let inp : Librarian.input =
+    { Librarian.trace_id = "trace-int-confidence"
+    ; Librarian.generation = 4
+    ; Librarian.messages = [ text_message "turn-indexed memory" ]
+    }
+  in
+  let raw =
+    `Assoc
+      [ "episode_summary", `String "Integer confidence should still persist"
+      ; ( "claims"
+        , `List
+            [ `Assoc
+                [ "claim", `String "Integer confidence survives parsing"
+                ; "confidence", `Int 1
+                ; "category", `String "test"
+                ; "source_turn", `Int 0
+                ]
+            ] )
+      ; "open_items", `List []
+      ; "constraints", `List []
+      ; "preserved_tool_refs", `List []
+      ]
+    |> Yojson.Safe.to_string
+  in
+  match Librarian.episode_of_output inp raw with
+  | Some episode ->
+    (match episode.Types.claims with
+     | [ fact ] ->
+       Alcotest.(check string)
+         "claim parsed"
+         "Integer confidence survives parsing"
+         fact.Types.claim;
+       Alcotest.(check (float 0.001)) "integer confidence parsed" 1.0 fact.Types.confidence;
+       Alcotest.(check int) "source turn parsed" 0 fact.Types.source.turn;
+       Alcotest.(check (option (pair int int)))
+         "source range parsed"
+         (Some (0, 0))
+         episode.Types.source_turn_range
+     | claims -> Alcotest.failf "expected one claim, got %d" (List.length claims))
+  | None -> Alcotest.fail "expected librarian output to parse"
+;;
+
 let test_policy_score_and_retention () =
   let now = 1_000_000.0 in
   let f = fact_fixture ~now () in
@@ -352,6 +417,114 @@ let test_bump_access () =
   match not_bumped with
   | [ got ] -> Alcotest.(check int) "access unchanged" 2 got.Types.access_count
   | _ -> Alcotest.fail "expected one unchanged fact"
+;;
+
+let json_episode_file_count ~keeper_id =
+  Memory_io.episodes_dir ~keeper_id
+  |> Sys.readdir
+  |> Array.to_list
+  |> List.filter (fun name -> Filename.check_suffix name ".json")
+  |> List.length
+;;
+
+let test_episode_files_do_not_overwrite_generation () =
+  with_temp_keepers_dir (fun _keepers_dir ->
+    let keeper_id = "episode-unique-keeper" in
+    let first =
+      episode_fixture
+        ~now:1_000_000.0
+        ~trace_id:"trace-same"
+        ~generation:9
+        ~summary:"first compaction"
+    in
+    let second =
+      episode_fixture
+        ~now:1_000_001.0
+        ~trace_id:"trace-same"
+        ~generation:9
+        ~summary:"second compaction"
+    in
+    Memory_io.append_episode ~keeper_id first;
+    Memory_io.append_episode ~keeper_id second;
+    Alcotest.(check int) "two episode files persisted" 2 (json_episode_file_count ~keeper_id);
+    match Memory_io.read_episodes_tail ~keeper_id ~n:2 with
+    | [ older; newer ] ->
+      Alcotest.(check string)
+        "older summary retained"
+        first.Types.episode_summary
+        older.Types.episode_summary;
+      Alcotest.(check string)
+        "newer summary retained"
+        second.Types.episode_summary
+        newer.Types.episode_summary
+    | episodes -> Alcotest.failf "expected two episodes, got %d" (List.length episodes))
+;;
+
+let test_episode_file_tail_uses_created_at_not_filename () =
+  with_temp_keepers_dir (fun _keepers_dir ->
+    let keeper_id = "episode-order-keeper" in
+    let older =
+      episode_fixture
+        ~now:1_000_000.0
+        ~trace_id:"trace-zz"
+        ~generation:1
+        ~summary:"older lexicographically last"
+    in
+    let newer =
+      episode_fixture
+        ~now:1_000_100.0
+        ~trace_id:"trace-aa"
+        ~generation:1
+        ~summary:"newer lexicographically first"
+    in
+    Memory_io.append_episode ~keeper_id older;
+    Memory_io.append_episode ~keeper_id newer;
+    match Memory_io.read_episodes_tail ~keeper_id ~n:1 with
+    | [ got ] ->
+      Alcotest.(check string)
+        "newest episode returned"
+        newer.Types.episode_summary
+        got.Types.episode_summary
+    | episodes -> Alcotest.failf "expected one episode, got %d" (List.length episodes))
+;;
+
+let test_jsonl_tail_reads_last_entries () =
+  with_temp_keepers_dir (fun _keepers_dir ->
+    let keeper_id = "jsonl-tail-keeper" in
+    let first =
+      episode_fixture
+        ~now:1_000_000.0
+        ~trace_id:"trace-first"
+        ~generation:1
+        ~summary:"first event"
+    in
+    let second =
+      episode_fixture
+        ~now:1_000_100.0
+        ~trace_id:"trace-second"
+        ~generation:2
+        ~summary:"second event"
+    in
+    Memory_io.append_episode_bundle ~keeper_id first;
+    Memory_io.append_episode_bundle ~keeper_id second;
+    Alcotest.(check int)
+      "zero facts requested"
+      0
+      (List.length (Memory_io.read_facts_tail ~keeper_id ~n:0));
+    (match Memory_io.read_facts_tail ~keeper_id ~n:1 with
+     | [ fact ] ->
+       Alcotest.(check string)
+         "last fact returned"
+         "second event fact"
+         fact.Types.claim
+     | facts -> Alcotest.failf "expected one fact, got %d" (List.length facts));
+    match Memory_io.read_episodes_tail ~keeper_id ~n:1 with
+    | [ event ] ->
+      Alcotest.(check string)
+        "last episode event returned"
+        second.Types.episode_summary
+        event.Types.episode_summary
+    | events -> Alcotest.failf "expected one event, got %d" (List.length events))
 ;;
 
 let test_virtual_keeper_compaction_persists_memory_bundle () =
@@ -522,10 +695,28 @@ let () =
             "prompt omits private blocks"
             `Quick
             test_prompt_omits_private_blocks
+        ; Alcotest.test_case
+            "librarian accepts integer confidence"
+            `Quick
+            test_librarian_accepts_integer_confidence
         ] )
     ; ( "policy"
       , [ Alcotest.test_case "score and retention" `Quick test_policy_score_and_retention
         ; Alcotest.test_case "bump access" `Quick test_bump_access
+        ] )
+    ; ( "io"
+      , [ Alcotest.test_case
+            "episode files do not overwrite generation"
+            `Quick
+            test_episode_files_do_not_overwrite_generation
+        ; Alcotest.test_case
+            "episode file tail uses created_at"
+            `Quick
+            test_episode_file_tail_uses_created_at_not_filename
+        ; Alcotest.test_case
+            "jsonl tail reads last entries"
+            `Quick
+            test_jsonl_tail_reads_last_entries
         ] )
     ; ( "virtual_keeper"
       , [ Alcotest.test_case

@@ -26,13 +26,14 @@ let text_of_content = function
   | Agent_sdk.Types.Thinking _ | Agent_sdk.Types.RedactedThinking _ -> None
   | _ -> None
 
-let message_to_text (m : Agent_sdk.Types.message) : string =
+let message_to_text ~turn (m : Agent_sdk.Types.message) : string =
   let parts = List.filter_map text_of_content m.content in
   let body = String.concat "\n" parts |> String.trim in
+  let header = Printf.sprintf "turn=%d role=%s" turn (role_to_string m.role) in
   if body = "" then
-    Printf.sprintf "[%s] (empty)" (role_to_string m.role)
+    Printf.sprintf "[%s] (empty)" header
   else
-    Printf.sprintf "[%s] %s" (role_to_string m.role) body
+    Printf.sprintf "[%s] %s" header body
 
 let truncate_text max_len s =
   if String.length s <= max_len then
@@ -42,7 +43,7 @@ let truncate_text max_len s =
 
 let format_messages_for_prompt messages =
   messages
-  |> List.map message_to_text
+  |> List.mapi (fun turn message -> message_to_text ~turn message)
   |> List.map (truncate_text 4000)
   |> String.concat "\n\n---\n\n"
 
@@ -68,9 +69,10 @@ let fact_of_json ~trace_id (j : Yojson.Safe.t) : fact option =
       | Some (`String s) -> Some s
       | _ -> None
     in
-    let find_float key =
+    let find_number key =
       match List.assoc_opt key fields with
       | Some (`Float f) -> Some f
+      | Some (`Int i) -> Some (float_of_int i)
       | _ -> None
     in
     let find_int key =
@@ -78,7 +80,7 @@ let fact_of_json ~trace_id (j : Yojson.Safe.t) : fact option =
       | Some (`Int i) -> Some i
       | _ -> None
     in
-    (match find_string "claim", find_float "confidence", find_string "category" with
+    (match find_string "claim", find_number "confidence", find_string "category" with
      | Some claim, Some confidence, Some category ->
        (* DET-OK: source_turn is advisory provenance; absent means turn 0. *)
        let turn = Option.value (find_int "source_turn") ~default:0 in

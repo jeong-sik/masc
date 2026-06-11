@@ -71,14 +71,51 @@ let episode_path ~keeper_id ~trace_id ~generation =
     (Printf.sprintf "%s-g%04d.json" trace_id generation)
 ;;
 
+let unique_episode_path ~keeper_id episode =
+  let created_ms =
+    episode.created_at *. 1000.0 |> Float.max 0.0 |> Int64.of_float
+  in
+  let base =
+    Filename.concat
+      (episodes_dir ~keeper_id)
+      (Printf.sprintf
+         "%s-g%04d-t%013Ld"
+         episode.trace_id
+         episode.generation
+         created_ms)
+  in
+  let rec loop suffix =
+    let path =
+      if suffix = 0
+      then base ^ ".json"
+      else Printf.sprintf "%s-%04d.json" base suffix
+    in
+    if Sys.file_exists path then loop (suffix + 1) else path
+  in
+  loop 0
+;;
+
 (* ---------- Append helpers ---------- *)
+
+let remove_noerr path =
+  try
+    if Sys.file_exists path then Sys.remove path
+  with
+  | _ -> ()
+;;
 
 let append_line path line =
   ensure_dir (Filename.dirname path);
   let oc = open_out_gen [ Open_append; Open_creat; Open_text ] 0o644 path in
-  Fun.protect
-    ~finally:(fun () -> close_out_noerr oc)
-    (fun () -> output_string oc (line ^ "\n"))
+  let close_attempted = ref false in
+  try
+    output_string oc (line ^ "\n");
+    close_attempted := true;
+    close_out oc
+  with
+  | exn ->
+    if not !close_attempted then close_out_noerr oc;
+    raise exn
 ;;
 
 let append_json path json =
@@ -98,16 +135,21 @@ let write_file_atomically path content =
   (* NDT-OK: PID is used only to avoid temp-file collisions in a single process; atomic rename guarantees correctness. *)
   let tmp = path ^ ".tmp." ^ string_of_int (Unix.getpid ()) in
   let oc = open_out_bin tmp in
-  Fun.protect
-    ~finally:(fun () -> close_out_noerr oc)
-    (fun () -> output_string oc content);
-  Sys.rename tmp path
+  let close_attempted = ref false in
+  try
+    output_string oc content;
+    close_attempted := true;
+    close_out oc;
+    Sys.rename tmp path
+  with
+  | exn ->
+    if not !close_attempted then close_out_noerr oc;
+    remove_noerr tmp;
+    raise exn
 ;;
 
 let append_episode ~keeper_id episode =
-  let path =
-    episode_path ~keeper_id ~trace_id:episode.trace_id ~generation:episode.generation
-  in
+  let path = unique_episode_path ~keeper_id episode in
   write_file_atomically path (Yojson.Safe.pretty_to_string (episode_to_json episode))
 ;;
 
@@ -138,19 +180,58 @@ let load_tool_result ~keeper_id ~tool_call_id =
 
 (* ---------- Tail reads ---------- *)
 
-let read_lines path =
-  if not (Sys.file_exists path)
+let count_newlines s =
+  let count = ref 0 in
+  String.iter (fun ch -> if Char.equal ch '\n' then incr count) s;
+  !count
+;;
+
+let split_lines s =
+  let len = String.length s in
+  let rec loop start i acc =
+    if i = len
+    then (
+      let acc =
+        if start = len
+        then acc
+        else String.sub s start (len - start) :: acc
+      in
+      List.rev acc)
+    else if Char.equal s.[i] '\n'
+    then (
+      let line_len = i - start in
+      let line =
+        if line_len > 0 && Char.equal s.[i - 1] '\r'
+        then String.sub s start (line_len - 1)
+        else String.sub s start line_len
+      in
+      loop (i + 1) (i + 1) (line :: acc))
+    else
+      loop start (i + 1) acc
+  in
+  loop 0 0 []
+;;
+
+let read_lines_tail path ~n =
+  if n <= 0 || not (Sys.file_exists path)
   then []
   else (
-    let ic = open_in path in
-    let rec loop acc =
-      match input_line ic with
-      | line -> loop (line :: acc)
-      | exception End_of_file -> List.rev acc
+    let ic = open_in_bin path in
+    let rec loop pos chunks newline_count =
+      if pos <= 0 || newline_count > n
+      then chunks
+      else (
+        let chunk_len = min 8192 pos in
+        let next_pos = pos - chunk_len in
+        seek_in ic next_pos;
+        let chunk = really_input_string ic chunk_len in
+        loop next_pos (chunk :: chunks) (newline_count + count_newlines chunk))
     in
     Fun.protect
       ~finally:(fun () -> close_in_noerr ic)
-      (fun () -> loop []))
+      (fun () ->
+         let len = in_channel_length ic in
+         loop len [] 0 |> String.concat "" |> split_lines))
 ;;
 
 let take_last n xs =
@@ -169,35 +250,58 @@ let parse_json_line parse line =
 ;;
 
 let read_facts_tail ~keeper_id ~n =
-  read_lines (facts_path ~keeper_id)
+  read_lines_tail (facts_path ~keeper_id) ~n
   |> List.filter_map (parse_json_line fact_of_json)
   |> take_last n
 ;;
 
 let read_events_tail ~keeper_id ~n =
-  read_lines (events_path ~keeper_id)
+  read_lines_tail (events_path ~keeper_id) ~n
   |> List.filter_map (parse_json_line episode_of_json)
   |> take_last n
 ;;
 
-let read_episodes_tail ~keeper_id ~n =
+let read_episode_file path =
+  let ic = open_in_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () ->
+       let len = in_channel_length ic in
+       let buf = really_input_string ic len in
+       parse_json_line episode_of_json buf)
+;;
+
+let compare_episode_recency a b =
+  let by_created = Float.compare a.created_at b.created_at in
+  if by_created <> 0
+  then by_created
+  else (
+    let by_trace = String.compare a.trace_id b.trace_id in
+    if by_trace <> 0
+    then by_trace
+    else (
+      let by_generation = Int.compare a.generation b.generation in
+      if by_generation <> 0
+      then by_generation
+      else String.compare a.episode_summary b.episode_summary))
+;;
+
+let read_episode_files_tail ~keeper_id ~n =
   let dir = Filename.concat (keepers_dir ()) (Filename.concat keeper_id "episodes") in
-  if not (Sys.file_exists dir && Sys.is_directory dir)
+  if n <= 0 || not (Sys.file_exists dir && Sys.is_directory dir)
   then []
   else (
-    let entries = Array.to_list (Sys.readdir dir) in
-    let paths =
-      List.map (fun name -> Filename.concat dir name) entries
-      |> List.filter Sys.file_exists
-      |> List.sort String.compare
-    in
-    take_last n paths
-    |> List.filter_map (fun path ->
-      let ic = open_in_bin path in
-      Fun.protect
-        ~finally:(fun () -> close_in_noerr ic)
-        (fun () ->
-           let len = in_channel_length ic in
-           let buf = really_input_string ic len in
-           parse_json_line episode_of_json buf)))
+    Sys.readdir dir
+    |> Array.to_list
+    |> List.filter (fun name -> Filename.check_suffix name ".json")
+    |> List.map (fun name -> Filename.concat dir name)
+    |> List.filter Sys.file_exists
+    |> List.filter_map read_episode_file
+    |> List.sort compare_episode_recency
+    |> take_last n)
+;;
+
+let read_episodes_tail ~keeper_id ~n =
+  let events = read_events_tail ~keeper_id ~n in
+  if events = [] then read_episode_files_tail ~keeper_id ~n else events
 ;;

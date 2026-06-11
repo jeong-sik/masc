@@ -12,8 +12,8 @@ jobs:
   check:
     runs-on: ubuntu-latest
     if: |
-      !contains(github.head_ref, 'chore/') &&
-      !contains(github.head_ref, 'docs/')
+      !startsWith(github.head_ref, 'chore/') &&
+      !startsWith(github.head_ref, 'docs/')
     steps:
       - uses: actions/checkout@v4
         with:

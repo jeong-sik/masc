@@ -69,8 +69,6 @@ def get_changed_test_files():
             f"origin/{base_ref}...HEAD",
             "--",
             "*test*",
-            "*/test*",
-            "*_test*",
             "*spec*",
         ]
     )

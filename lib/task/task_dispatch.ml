@@ -19,7 +19,7 @@ type backend_state =
 (** Current backend state. Single Atomic.t avoids contradictory
     initialized/backend pairs and removes the OCaml 5 multidomain data
     race that the previous [ref] cell had. Mirrors the pattern already
-    used by Board_dispatch.backend_state. *)
+    used by Masc_board_handlers.Board_dispatch.backend_state. *)
 let backend_state : backend_state Atomic.t = Atomic.make Uninitialized
 
 let is_initialized () =

@@ -200,15 +200,15 @@ let test_requests_json_shape () =
            | _ -> Alcotest.fail "contract entry must be string"
          ) items
      | _ -> Alcotest.fail "completion_contract should be list");
-    (match member "required_evidence" r with
+    (match member "verify_gate_evidence" r with
      | `List items ->
-         Alcotest.(check int) "required_evidence len"
+         Alcotest.(check int) "verify_gate_evidence len"
            2 (List.length items);
          List.iter (function
            | `String _ -> ()
            | _ -> Alcotest.fail "evidence entry must be string"
          ) items
-     | _ -> Alcotest.fail "required_evidence should be list");
+     | _ -> Alcotest.fail "verify_gate_evidence should be list");
     (* Pending status (no verifier yet) *)
     (match member "status" r with
      | `String "pending" -> ()

@@ -34,7 +34,7 @@ let drift_variant_label = function
 let classify_contract_state (contract : Masc_domain.task_contract option) =
   match contract with
   | None -> "no_contract"
-  | Some c when c.completion_contract = [] && c.required_evidence = [] -> "empty_contract"
+  | Some c when c.completion_contract = [] && c.verify_gate_evidence = [] -> "empty_contract"
   | Some _ -> "with_contract"
 ;;
 
@@ -178,7 +178,6 @@ let normalize_execution_links (links : Masc_domain.task_execution_links) =
 let normalize_task_contract (contract : Masc_domain.task_contract) =
   { contract with
     completion_contract = normalized_string_list contract.completion_contract
-  ; required_evidence = normalized_string_list contract.required_evidence
   ; inspect_gate_evidence = normalized_string_list contract.inspect_gate_evidence
   ; verify_gate_evidence = normalized_string_list contract.verify_gate_evidence
   ; links = normalize_execution_links contract.links
@@ -188,7 +187,6 @@ let normalize_task_contract (contract : Masc_domain.task_contract) =
 let empty_task_contract =
   { strict = false
   ; completion_contract = []
-  ; required_evidence = []
   ; inspect_gate_evidence = []
   ; verify_gate_evidence = []
   ; evidence_claims = []
@@ -231,20 +229,13 @@ let ensure_task_contract_for_verification ?contract ~title ~description () =
     then base.completion_contract
     else [ default_completion_contract_text ~title ~description ]
   in
-  let required_evidence =
-    if base.required_evidence <> []
-    then base.required_evidence
-    else default_verification_evidence_refs
-  in
   let verify_gate_evidence =
     if base.verify_gate_evidence <> []
     then base.verify_gate_evidence
-    else if base.required_evidence <> []
-    then base.required_evidence
     else default_verification_evidence_refs
   in
   normalize_task_contract
-    { base with completion_contract; required_evidence; verify_gate_evidence }
+    { base with completion_contract; verify_gate_evidence }
 ;;
 
 let merge_execution_links

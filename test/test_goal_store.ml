@@ -45,7 +45,7 @@ let make_goal id title =
   {
     Goal_store.id; horizon = Short; title;
     metric = None; target_value = None; due_date = None;
-    priority = 3; status = Active; phase = Goal_phase.Executing;
+    priority = 3; phase = Goal_phase.Executing;
     verifier_policy = None; require_completion_approval = false;
     active_verification_request_id = None; parent_goal_id = None;
     last_review_note = None; last_review_at = None;
@@ -135,11 +135,9 @@ let test_legacy_status_defaults_phase () =
   | [ goal ] ->
       check string "legacy active becomes executing" "executing"
         (Goal_phase.to_string goal.phase);
-      check string "legacy active status preserved" "active"
-        (match goal.status with Active -> "active" | _ -> "other")
   | _ -> fail "expected one legacy goal"
 
-let test_blocked_phase_projects_legacy_status () =
+let test_blocked_phase_persisted () =
   with_workspace @@ fun config ->
   let goal, _kind =
     match Goal_store.upsert_goal config ~title:"Blocked goal"
@@ -148,9 +146,7 @@ let test_blocked_phase_projects_legacy_status () =
     | Ok payload -> payload
     | Error msg -> fail msg
   in
-  check string "blocked phase stored" "blocked" (Goal_phase.to_string goal.phase);
-  check string "blocked phase projects to paused status" "paused"
-    (match goal.status with Paused -> "paused" | _ -> "other")
+  check string "blocked phase stored" "blocked" (Goal_phase.to_string goal.phase)
 
 let test_list_goals_filters_by_phase () =
   with_workspace @@ fun config ->
@@ -227,8 +223,8 @@ let () =
             test_updated_at_also_refreshed;
           test_case "legacy status defaults phase" `Quick
             test_legacy_status_defaults_phase;
-          test_case "blocked phase projects legacy status" `Quick
-            test_blocked_phase_projects_legacy_status;
+          test_case "blocked phase persisted" `Quick
+            test_blocked_phase_persisted;
           test_case "list_goals filters by phase" `Quick
             test_list_goals_filters_by_phase;
           test_case "missing update: no bump" `Quick

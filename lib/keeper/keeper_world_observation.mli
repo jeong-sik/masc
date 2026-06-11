@@ -187,13 +187,13 @@ val collect_board_events_without_advancing_cursor :
 val board_signal_match :
   continuity_summary:string ->
   meta:Keeper_meta_contract.keeper_meta ->
-  signal:Board_dispatch.board_signal ->
+  signal:Masc_board_handlers.Board_dispatch.board_signal ->
   board_signal_match
 
 val board_signal_wake_reason :
   continuity_summary:string ->
   meta:Keeper_meta_contract.keeper_meta ->
-  signal:Board_dispatch.board_signal ->
+  signal:Masc_board_handlers.Board_dispatch.board_signal ->
   string option
 
 (** Convert a queued Event Layer stimulus back into structured board activity

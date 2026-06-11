@@ -40,8 +40,8 @@ let with_eio f () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   ignore (fresh_test_base_path ());
   Board.reset_global_for_test ();
-  Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ();
+  Masc_board_handlers.Board_dispatch.reset_for_test ();
+  Masc_board_handlers.Board_dispatch.init_jsonl ();
   f ()
 
 let read_ts_rows path =
@@ -77,7 +77,7 @@ let find_row ~target ~voter rows =
 
 let create_post_exn ~author ~content =
   match
-    Board_dispatch.create_post ~author ~content
+    Masc_board_handlers.Board_dispatch.create_post ~author ~content
       ~post_kind:Board.Human_post ()
   with
   | Ok post -> post
@@ -94,10 +94,10 @@ let test_flush_preserves_cast_ts () =
   in
   let pid = Board.Post_id.to_string post.id in
   let target = "post:" ^ pid ^ ":" ^ voter in
-  (match Board_dispatch.vote ~voter ~post_id:pid ~direction:Board.Up with
+  (match Masc_board_handlers.Board_dispatch.vote ~voter ~post_id:pid ~direction:Board.Up with
    | Ok _ -> ()
    | Error e -> Alcotest.fail (Board.show_board_error e));
-  let append_rows = read_ts_rows (Board_votes.vote_log_path ()) in
+  let append_rows = read_ts_rows (Masc_board_handlers.Board_votes.vote_log_path ()) in
   let cast_ts =
     match find_row ~target ~voter append_rows with
     | Some (_, _, ts) -> ts
@@ -112,9 +112,9 @@ let test_flush_preserves_cast_ts () =
     "wall clock advanced past cast" true
     (before_flush_now > cast_ts +. 0.01);
   (* Force rewrite via the dispatch backend's Jsonl store. *)
-  (match Board_dispatch.backend () with
-   | Board_dispatch.Jsonl store -> Board.flush_dirty store);
-  let rewrite_rows = read_ts_rows (Board_votes.vote_log_path ()) in
+  (match Masc_board_handlers.Board_dispatch.backend () with
+   | Masc_board_handlers.Board_dispatch.Jsonl store -> Board.flush_dirty store);
+  let rewrite_rows = read_ts_rows (Masc_board_handlers.Board_votes.vote_log_path ()) in
   let rewritten_ts =
     match find_row ~target ~voter rewrite_rows with
     | Some (_, _, ts) -> ts
@@ -139,20 +139,20 @@ let test_flip_inherits_flip_time () =
   in
   let pid = Board.Post_id.to_string post.id in
   let target = "post:" ^ pid ^ ":" ^ voter in
-  (match Board_dispatch.vote ~voter ~post_id:pid ~direction:Board.Up with
+  (match Masc_board_handlers.Board_dispatch.vote ~voter ~post_id:pid ~direction:Board.Up with
    | Ok _ -> ()
    | Error e -> Alcotest.fail (Board.show_board_error e));
-  let up_rows = read_ts_rows (Board_votes.vote_log_path ()) in
+  let up_rows = read_ts_rows (Masc_board_handlers.Board_votes.vote_log_path ()) in
   let up_ts =
     match find_row ~target ~voter up_rows with
     | Some (_, _, ts) -> ts
     | None -> Alcotest.fail "jsonl missing up row"
   in
   Unix.sleepf 0.05;
-  (match Board_dispatch.vote ~voter ~post_id:pid ~direction:Board.Down with
+  (match Masc_board_handlers.Board_dispatch.vote ~voter ~post_id:pid ~direction:Board.Down with
    | Ok _ -> ()
    | Error e -> Alcotest.fail (Board.show_board_error e));
-  let flip_rows = read_ts_rows (Board_votes.vote_log_path ()) in
+  let flip_rows = read_ts_rows (Masc_board_handlers.Board_votes.vote_log_path ()) in
   (* The append-only log has BOTH rows; the latest entry (last in
      file, since we append) carries the flip-time. *)
   let last_flip_row =
@@ -169,9 +169,9 @@ let test_flip_inherits_flip_time () =
         true (flip_ts > up_ts +. 0.01);
       (* Flush now and verify the latest-in-store ts matches the
          flip row's ts (and not the original up ts). *)
-      (match Board_dispatch.backend () with
-       | Board_dispatch.Jsonl store -> Board.flush_dirty store);
-      let rewrite_rows = read_ts_rows (Board_votes.vote_log_path ()) in
+      (match Masc_board_handlers.Board_dispatch.backend () with
+       | Masc_board_handlers.Board_dispatch.Jsonl store -> Board.flush_dirty store);
+      let rewrite_rows = read_ts_rows (Masc_board_handlers.Board_votes.vote_log_path ()) in
       let rewritten_ts =
         match find_row ~target ~voter rewrite_rows with
         | Some (_, _, ts) -> ts

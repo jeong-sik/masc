@@ -111,12 +111,12 @@ let respond_high_risk_param_blocked request reqd ~param_key ~risk =
        ])
 
 let board_curation_json () =
-  match Board_dispatch.latest_curation_snapshot () with
+  match Masc_board_handlers.Board_dispatch.latest_curation_snapshot () with
   | None -> `Assoc [ ("snapshot", `Null) ]
-  | Some snap -> `Assoc [ ("snapshot", Board_curation.snapshot_to_yojson snap) ]
+  | Some snap -> `Assoc [ ("snapshot", Masc_board_handlers.Board_curation.snapshot_to_yojson snap) ]
 
 let board_sub_boards_json () =
-  let sub_boards = Board_dispatch.list_sub_boards () in
+  let sub_boards = Masc_board_handlers.Board_dispatch.list_sub_boards () in
   `Assoc
     [
       ( "sub_boards",
@@ -126,9 +126,9 @@ let board_sub_boards_json () =
 let board_karma_ledger_json req =
   let agent = query_param req "agent" in
   let limit = int_query_param req "limit" ~default:500 |> clamp ~min_v:1 ~max_v:5000 in
-  let events = Board_dispatch.get_karma_ledger ?agent ~limit () in
+  let events = Masc_board_handlers.Board_dispatch.get_karma_ledger ?agent ~limit () in
   let totals =
-    Board_dispatch.get_all_karma ()
+    Masc_board_handlers.Board_dispatch.get_all_karma ()
     |> List.sort (fun (_, a) (_, b) -> compare b a)
   in
   `Assoc
@@ -270,10 +270,10 @@ let add_routes ~sw ~clock router =
              req
          in
          let posts =
-           Board_dispatch.list_posts ?hearth ~sort_by ~exclude_system
+           Masc_board_handlers.Board_dispatch.list_posts ?hearth ~sort_by ~exclude_system
              ~exclude_automation ?author_filter ~limit:base_fetch ()
          in
-         let karma_map = Board_dispatch.get_all_karma () in
+         let karma_map = Masc_board_handlers.Board_dispatch.get_all_karma () in
          let get_karma author =
            List.assoc_opt author karma_map |> Option.value ~default:0
          in
@@ -318,7 +318,7 @@ let add_routes ~sw ~clock router =
 
   |> Http.Router.get "/api/v1/board/hearths" (fun request reqd ->
        with_public_read (fun _state _req reqd ->
-         let hearths = Board_dispatch.list_hearths () in
+         let hearths = Masc_board_handlers.Board_dispatch.list_hearths () in
          let json = `Assoc [
            ("hearths", `List (List.map (fun (name, count) ->
              `Assoc [("name", `String name); ("count", `Int count)]
@@ -368,7 +368,7 @@ let add_routes ~sw ~clock router =
                | Some s -> Board.sub_board_access_of_string_opt s
                | None -> None
              in
-             (match Board_dispatch.create_sub_board ~slug ~name ~description
+             (match Masc_board_handlers.Board_dispatch.create_sub_board ~slug ~name ~description
                       ~owner:agent_name ~members ?access () with
               | Ok sb ->
                   Http.Response.json_value (Board.sub_board_to_yojson sb) reqd
@@ -390,7 +390,7 @@ let add_routes ~sw ~clock router =
               (`Assoc [("error", `String "sub_board_id is required")])
               reqd
         | Some sub_board_id ->
-            (match Board_dispatch.get_sub_board ~sub_board_id with
+            (match Masc_board_handlers.Board_dispatch.get_sub_board ~sub_board_id with
              | Ok sb ->
                  Http.Response.json_value (Board.sub_board_to_yojson sb) reqd
              | Error e ->
@@ -408,7 +408,7 @@ let add_routes ~sw ~clock router =
                 (`Assoc [("error", `String "sub_board_id is required")])
                 reqd
           | Some sub_board_id ->
-              (match Board_dispatch.delete_sub_board ~sub_board_id with
+              (match Masc_board_handlers.Board_dispatch.delete_sub_board ~sub_board_id with
                | Ok () ->
                    Http.Response.json_value (`Assoc [("deleted", `Bool true)]) reqd
                | Error e ->
@@ -439,7 +439,7 @@ let add_routes ~sw ~clock router =
                     (`Assoc [("error", `String "sub_board_id is required")])
                     reqd
               | Some sub_board_id ->
-                  (match Board_dispatch.update_sub_board ~sub_board_id ?name ?description ?members:members_arg ?access () with
+                  (match Masc_board_handlers.Board_dispatch.update_sub_board ~sub_board_id ?name ?description ?members:members_arg ?access () with
                    | Ok sb ->
                        Http.Response.json_value (Board.sub_board_to_yojson sb) reqd
                    | Error e ->
@@ -604,7 +604,7 @@ let add_routes ~sw ~clock router =
        ) request reqd)
   |> Http.Router.get "/api/v1/karma" (fun request reqd ->
        with_public_read (fun _state _req reqd ->
-         let karma_list = Board_dispatch.get_all_karma () in
+         let karma_list = Masc_board_handlers.Board_dispatch.get_all_karma () in
          let sorted = List.sort (fun (_, a) (_, b) -> compare b a) karma_list in
          let json = `Assoc [
            ("karma", `List (List.map (fun (agent, k) ->

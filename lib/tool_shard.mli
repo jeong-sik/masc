@@ -4,7 +4,7 @@
     @since 2.62.0 *)
 
 (** Issue #8513: hand-mirrored from
-    [Board_dispatch.valid_sort_order_strings] (#8453 SSOT). Schema
+    [Board.Board_dispatch.valid_sort_order_strings] (#8453 SSOT). Schema
     previously hand-listed 3 of 5 sort orders; sync regression test in
     [test_types.ml :: sort_order_schema_ssot] catches drift. *)
 val sort_order_enum_strings : string list
@@ -28,7 +28,7 @@ val fs_write_mode_enum_strings : string list
 
 
 (** Issue #8506: hand-mirrored from
-    [Board_votes.valid_vote_direction_strings]. Sync regression test
+    [Board.Board_votes.valid_vote_direction_strings]. Sync regression test
     in [test_types.ml :: vote_direction_ssot] catches drift. *)
 val vote_direction_enum_strings : string list
 

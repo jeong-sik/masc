@@ -109,7 +109,6 @@ let warn_contract_gap (task : Masc_domain.task) =
        task.id
    | Some c
      when c.completion_contract = []
-          && c.required_evidence = []
           && c.verify_gate_evidence = [] ->
      Log.Task.warn
        ~keeper_name:task.id
@@ -165,7 +164,7 @@ let notify_submit_for_verification ~(config : Workspace.config)
     ("next_action", `String spec.next_action);
   ] in
   let () =
-    match Board_dispatch.create_post
+    match Board.Board_dispatch.create_post
       ~author:"system"
       ~content:spec.board_content
       ~title:spec.board_title
@@ -234,7 +233,7 @@ let notify_approve_verification ~task_id ~verifier ~verification_id ~notes =
     ("verdict", `String "approved");
   ] in
   let () =
-    match Board_dispatch.create_post
+    match Board.Board_dispatch.create_post
       ~author:verifier
       ~content:(Printf.sprintf "Approved task %s (vrf:%s)%s"
         task_id verification_id
@@ -306,7 +305,7 @@ let notify_reject_verification ~task_id ~verifier ~verification_id ~reason =
     ("verdict", `String "rejected");
   ] in
   let () =
-    match Board_dispatch.create_post
+    match Board.Board_dispatch.create_post
       ~author:verifier
       ~content:(Printf.sprintf "Rejected task %s (vrf:%s): %s"
         task_id verification_id reason)

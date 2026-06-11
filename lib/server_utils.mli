@@ -44,15 +44,15 @@ val drop : int -> 'a list -> 'a list
 (** {1 Board sort helpers} *)
 
 val board_sort_order_of_request :
-  Httpun.Request.t -> Board_dispatch.sort_order
+  Httpun.Request.t -> Board.Board_dispatch.sort_order
 (** [board_sort_order_of_request request] reads [sort_by] query
     param and resolves it through
-    {!Board_dispatch.sort_order_of_string_opt}.  Missing or
-    invalid values fall back to {!Board_dispatch.Hot} — graceful
+    {!Board.Board_dispatch.sort_order_of_string_opt}.  Missing or
+    invalid values fall back to {!Board.Board_dispatch.Hot} — graceful
     UI degradation, not silent data corruption. *)
 
-val board_sort_label : Board_dispatch.sort_order -> string
-(** Thin alias over {!Board_dispatch.sort_order_to_string}. *)
+val board_sort_label : Board.Board_dispatch.sort_order -> string
+(** Thin alias over {!Board.Board_dispatch.sort_order_to_string}. *)
 
 (** {1 Board post / comment filtering} *)
 

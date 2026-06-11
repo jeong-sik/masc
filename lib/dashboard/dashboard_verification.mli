@@ -37,7 +37,7 @@
         "submitted_by":       "keeper-name",
         "approved_by":        "keeper-name" | null,
         "completion_contract": [ "criterion text", ... ],
-        "required_evidence":   [ "evidence description or ref", ... ],
+        "verify_gate_evidence":   [ "evidence description or ref", ... ],
         "verdict":             "pass" | "fail" | "partial" | null,
         "verdict_reason":      "..."
       }

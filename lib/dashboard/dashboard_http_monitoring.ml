@@ -113,7 +113,7 @@ let board_monitoring_json ~(now_ts : float) : Yojson.Safe.t * bool =
   let bad_age_s = 21600 in
   let slo_target_age_s = 900 in
   try
-    let posts = Board_dispatch.list_posts ~sort_by:Board_dispatch.Updated ~limit:200 () in
+    let posts = Masc_board_handlers.Board_dispatch.list_posts ~sort_by:Masc_board_handlers.Board_dispatch.Updated ~limit:200 () in
     let total_posts = List.length posts in
     let new_posts_24h =
       List.fold_left

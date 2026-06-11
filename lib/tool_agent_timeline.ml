@@ -420,7 +420,7 @@ let turn_completed_events (config : Workspace.config) ~agent_name ~limit :
 
 (* Build the full timeline *)
 let build_timeline (config : Workspace.config) ~agent_name ~since_hours ~limit
-    ~include_tasks ~include_board:_ ~include_tool_calls =
+    ~include_tasks ~include_tool_calls =
   let now = Time_compat.now () in
   let cutoff = now -. (since_hours *. Masc_time_constants.hour) in
   (* Collect events from the default namespace. *)
@@ -599,15 +599,6 @@ let schemas : Masc_domain.tool_schema list =
                           `String
                             "Include task state changes (default: true)" );
                       ] );
-                  ( "include_board",
-                    `Assoc
-                      [
-                        ("type", `String "boolean");
-                        ( "description",
-                          `String
-                            "Include board activity (default: false, \
-                             reserved)" );
-                      ] );
                   ( "include_tool_calls",
                     `Assoc
                       [
@@ -643,11 +634,10 @@ let handle_agent_timeline ~tool_name ~start_time (ctx : context) args
     let since_hours = get_float args "since_hours" 24.0 in
     let limit = get_int args "limit" 50 in
     let include_tasks = get_bool args "include_tasks" true in
-    let include_board = get_bool args "include_board" false in
     let include_tool_calls = get_bool args "include_tool_calls" true in
     let json =
       build_timeline ctx.config ~agent_name ~since_hours ~limit ~include_tasks
-        ~include_board ~include_tool_calls
+        ~include_tool_calls
     in
     Tool_result.make_ok ~tool_name ~start_time ~data:json ()
 

@@ -26,9 +26,9 @@ jobs:
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
-          # GITHUB_OUTPUT is an environment variable, not an expression
-          # context: ${{ GITHUB_OUTPUT }} expands to "" and breaks the
-          # redirect.
+          # GITHUB_OUTPUT must be referenced as a shell variable; the
+          # expression-context form is undefined there and invalidates
+          # the whole workflow file (even inside a shell comment).
           if echo "$PR_BODY" | grep -q '# ci:skip-test-coverage'; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else

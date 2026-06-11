@@ -187,7 +187,8 @@
   meta_cognition_snapshot
   meta_cognition_parse
   meta_cognition_interpret
-  meta_cognition_digest)
+  meta_cognition_digest
+  keeper_memory_os_io)
  (libraries
   mcp_protocol
   mcp_protocol.eio

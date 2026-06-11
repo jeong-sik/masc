@@ -63,6 +63,7 @@ type thinking_control_format =
   | No_thinking_control
   | Thinking_object
   | Chat_template_kwargs
+  | Reasoning_effort
 [@@deriving show, eq]
 
 type model_capabilities =

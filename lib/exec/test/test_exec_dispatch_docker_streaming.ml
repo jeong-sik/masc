@@ -14,6 +14,7 @@ let simple ?sandbox executable args =
   ; env = []
   ; cwd = None
   ; redirects = []
+  (* DET-OK: test helper default keeps sandbox choice explicit at call sites. *)
   ; sandbox = Option.value sandbox ~default:(Masc_exec.Sandbox_target.host ())
   }
 

@@ -245,9 +245,11 @@ let run_argv_with_status_split_retry_eintr
             ~cwd
             argv
         | _ ->
+          (* DET-OK: absent stream callbacks mean the caller requested capture only. *)
           let on_stdout_chunk =
             Option.value on_stdout_chunk ~default:(fun _ -> ())
           in
+          (* DET-OK: stderr callback absence has the same capture-only meaning. *)
           let on_stderr_chunk =
             Option.value on_stderr_chunk ~default:(fun _ -> ())
           in

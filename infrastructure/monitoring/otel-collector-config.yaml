@@ -31,8 +31,8 @@ exporters:
       insecure: true
     # No external_labels; service.name etc. come from OTLP resource attrs.
 
-  loki:
-    endpoint: http://loki:3100/loki/api/v1/push
+  otlphttp/loki:
+    endpoint: http://loki:3100/otlp
     tls:
       insecure: true
 
@@ -54,7 +54,7 @@ service:
     logs:
       receivers: [otlp]
       processors: [batch]
-      exporters: [loki]
+      exporters: [otlphttp/loki]
 
   telemetry:
     logs:

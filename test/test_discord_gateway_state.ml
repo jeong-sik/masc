@@ -295,7 +295,8 @@ let test_heartbeat_tick_when_connected () =
 (* ---------------------------------------------------------------- *)
 
 let message_create_payload
-    ~id ~channel_id ~author_id ?username ?global_name ~content ~mention_ids ()
+    ~id ~channel_id ?guild_id ~author_id ?username ?global_name ~content
+    ~mention_ids ()
     : Yojson.Safe.t =
   let mentions =
     `List
@@ -312,13 +313,19 @@ let message_create_payload
        | Some g -> [ ("global_name", `String g) ]
        | None -> [])
   in
+  let guild_fields =
+    match guild_id with
+    | Some guild_id -> [ ("guild_id", `String guild_id) ]
+    | None -> []
+  in
   `Assoc
-    [ ("id", `String id)
-    ; ("channel_id", `String channel_id)
-    ; ("author", `Assoc author_fields)
-    ; ("content", `String content)
-    ; ("mentions", mentions)
-    ]
+    ([ ("id", `String id)
+     ; ("channel_id", `String channel_id)
+     ; ("author", `Assoc author_fields)
+     ; ("content", `String content)
+     ; ("mentions", mentions)
+     ]
+    @ guild_fields)
 
 let reaction_add_payload
     ~channel_id ~message_id ~user_id ~emoji_name ?emoji_id () : Yojson.Safe.t =
@@ -354,6 +361,7 @@ let test_decode_message_create_with_mention () =
   | Ok
       (S.Message_create
         { channel_id = "CH1"
+        ; guild_id = None
         ; message_id = "MSG1"
         ; author_id = "USER1"
         ; author_name = None
@@ -424,6 +432,31 @@ let test_decode_message_create_without_mention () =
   with
   | Ok (S.Message_create { mentions_bot = false; _ }) -> ()
   | Ok _ -> fail "expected mentions_bot=false"
+  | Error msg -> fail msg
+
+let test_decode_message_create_preserves_guild_id () =
+  let payload =
+    message_create_payload
+      ~id:"MSG3"
+      ~channel_id:"CH1"
+      ~guild_id:"GUILD1"
+      ~author_id:"USER1"
+      ~content:"guild message"
+      ~mention_ids:[]
+      ()
+  in
+  match
+    S.decode_dispatch
+      ~bot_user_id:(Some "BOT")
+      ~event_name:"MESSAGE_CREATE"
+      ~payload
+  with
+  | Ok (S.Message_create { guild_id = Some "GUILD1"; _ }) -> ()
+  | Ok (S.Message_create { guild_id = Some other; _ }) ->
+      failf "expected guild_id=GUILD1, got %s" other
+  | Ok (S.Message_create { guild_id = None; _ }) ->
+      fail "expected guild_id to be preserved"
+  | Ok _ -> fail "expected MESSAGE_CREATE"
   | Error msg -> fail msg
 
 let test_decode_reaction_add_unicode () =
@@ -1043,6 +1076,8 @@ let () =
             `Quick test_decode_message_create_with_mention
         ; test_case "MESSAGE_CREATE without mention sets mentions_bot=false"
             `Quick test_decode_message_create_without_mention
+        ; test_case "MESSAGE_CREATE preserves guild_id" `Quick
+            test_decode_message_create_preserves_guild_id
         ; test_case "author_name prefers global_name" `Quick
             test_decode_author_name_prefers_global_name
         ; test_case "author_name falls back to username" `Quick

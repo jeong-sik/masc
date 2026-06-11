@@ -76,6 +76,7 @@ type dispatched_event =
       }
   | Message_create of
       { channel_id : string
+      ; guild_id : string option
       ; message_id : string
       ; author_id : string
       ; author_name : string option
@@ -265,6 +266,7 @@ let decode_ready ~payload =
 
 let decode_message_create ~bot_user_id ~payload =
   let channel_id = field_string_opt "channel_id" payload in
+  let guild_id = field_string_opt "guild_id" payload in
   let message_id = field_string_opt "id" payload in
   let content =
     match field_string_opt "content" payload with
@@ -304,7 +306,7 @@ let decode_message_create ~bot_user_id ~payload =
   | Some channel_id, Some message_id, Some author_id ->
       Ok
         (Message_create
-           { channel_id; message_id; author_id; author_name; content;
+           { channel_id; guild_id; message_id; author_id; author_name; content;
              mentions_bot })
   | _ ->
       Error "MESSAGE_CREATE payload: missing channel_id / id / author.id"

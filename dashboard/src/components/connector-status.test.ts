@@ -782,6 +782,7 @@ describe('ConnectorStatusPanel', () => {
     // No Start/Stop button, no copyable run.sh command.
     expect(inProcessPanel!.querySelector('button[aria-label*="start"]')).toBeNull()
     expect(inProcessPanel!.querySelector('[data-copy-button]')).toBeNull()
+    expect(container.querySelector('[aria-controls="sidecar-log-discord"]')).toBeNull()
   })
 
   it('shows no-keepers empty state when keeper directory is empty', async () => {

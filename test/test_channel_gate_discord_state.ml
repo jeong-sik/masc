@@ -48,9 +48,10 @@ let with_discord_paths dir f =
       with_env "MASC_DISCORD_BINDING_AUDIT_PATH" (Some audit_path) (fun () ->
         with_env "MASC_DISCORD_NAMES_PATH" (Some names_path) f)))
 
-let test_status_json_reports_missing_live_status () =
+let test_status_json_reports_in_process_gateway_status () =
   with_temp_dir @@ fun dir ->
   with_discord_paths dir (fun () ->
+  with_env "DISCORD_BOT_TOKEN" None (fun () ->
     let json = Discord_state.status_json () in
     check string "channel" "discord"
       (json |> U.member "channel" |> U.to_string);
@@ -58,12 +59,41 @@ let test_status_json_reports_missing_live_status () =
       (json |> U.member "available" |> U.to_bool);
     check bool "connected false" false
       (json |> U.member "connected" |> U.to_bool);
-    check bool "stale true" true
+    check bool "stale false" false
       (json |> U.member "stale" |> U.to_bool);
-    check string "generic missing-status error" "connector status file not found"
+    check string "status source" "in_process_gateway"
+      (json |> U.member "status_source" |> U.to_string);
+    check string "gateway state" "disconnected"
+      (json |> U.member "gateway_state" |> U.to_string);
+    check string "missing-token error" "DISCORD_BOT_TOKEN is unset or empty"
       (json |> U.member "error" |> U.to_string);
     check int "no configured bindings" 0
-      (json |> U.member "configured_bindings" |> U.to_list |> List.length))
+      (json |> U.member "configured_bindings" |> U.to_list |> List.length)))
+
+let test_status_json_ignores_legacy_sidecar_status_file () =
+  with_temp_dir @@ fun dir ->
+  with_discord_paths dir (fun () ->
+  with_env "DISCORD_BOT_TOKEN" None (fun () ->
+    let status_path = Filename.concat dir "status.json" in
+    Yojson.Safe.to_file status_path
+      (`Assoc
+        [
+          ("updated_at", `String "2026-05-10T16:49:47Z");
+          ("connected", `Bool true);
+          ("bot_user_name", `String "legacy-sidecar");
+          ("runtime_bindings_count", `Int 99);
+        ]);
+    let json = Discord_state.status_json () in
+    check string "source" "in_process_gateway"
+      (json |> U.member "status_source" |> U.to_string);
+    check bool "legacy stale file ignored" false
+      (json |> U.member "stale" |> U.to_bool);
+    check bool "legacy connected file ignored" false
+      (json |> U.member "connected" |> U.to_bool);
+    check string "legacy bot name ignored" ""
+      (json |> U.member "bot_user_name" |> U.to_string);
+    check int "runtime bindings from persisted bindings" 0
+      (json |> U.member "runtime_bindings_count" |> U.to_int)))
 
 let test_bind_persists_binding_and_audit () =
   with_temp_dir @@ fun dir ->
@@ -244,8 +274,10 @@ let () =
     [
       ( "status",
         [
-          test_case "missing live status" `Quick
-            test_status_json_reports_missing_live_status;
+          test_case "in-process gateway status" `Quick
+            test_status_json_reports_in_process_gateway_status;
+          test_case "ignores legacy sidecar status file" `Quick
+            test_status_json_ignores_legacy_sidecar_status_file;
           test_case "bind persists binding and audit" `Quick
             test_bind_persists_binding_and_audit;
           test_case "unbind removes binding" `Quick

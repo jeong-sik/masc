@@ -183,20 +183,30 @@ let bool_member json key =
 let bool_option_member json key =
   Json_util.get_bool json key
 
-let stale_of_updated_at updated_at =
-  match Gate_time_util.parse_iso8601_opt updated_at with
-  | Some ts -> Unix.gettimeofday () -. ts > float_of_int (stale_after_sec ())
-  | None -> true
-
 let connector_state_label ~available ~connected ~stale =
   if not available then "offline"
   else if stale then "stale"
   else if connected then "connected"
   else "disconnected"
 
+let bot_token_opt () =
+  match Sys.getenv_opt "DISCORD_BOT_TOKEN" with
+  | None -> None
+  | Some raw ->
+    let trimmed = String.trim raw in
+    if String.equal trimmed "" then None else Some trimmed
+
+let gateway_state_label = function
+  | Discord_gateway_state.Disconnected -> "disconnected"
+  | Awaiting_hello -> "awaiting_hello"
+  | Identifying -> "identifying"
+  | Resuming -> "resuming"
+  | Connected _ -> "connected"
+  | Reconnect_pending _ -> "reconnect_pending"
+  | Failed _ -> "failed"
+
 let status_json ?(audit_limit = 10) () =
   let status_path = status_path () in
-  let live_status = read_json_file_opt status_path in
   let binding_store_path = binding_store_read_path () in
   let audit_path = binding_audit_read_path () in
   let names_path = Names.names_read_path () in
@@ -204,23 +214,29 @@ let status_json ?(audit_limit = 10) () =
   let configured_bindings = read_bindings () in
   let recent_audit = read_recent_audit ~limit:audit_limit in
   let channel = "discord" in
-  let available = Option.is_some live_status in
-  let updated_at =
-    match live_status with
-    | Some json -> string_member json "updated_at"
-    | None -> ""
+  let gateway_state = Discord_gateway_client.connection_state () in
+  let token_present = Option.is_some (bot_token_opt ()) in
+  let available =
+    match gateway_state with
+    | Disconnected -> token_present
+    | Awaiting_hello | Identifying | Resuming | Connected _
+    | Reconnect_pending _ | Failed _ -> true
   in
-  let stale = if not available then true else stale_of_updated_at updated_at in
   let connected =
-    match live_status with
-    | Some json -> bool_member json "connected" && not stale
-    | None -> false
+    match gateway_state with
+    | Connected _ -> true
+    | Disconnected | Awaiting_hello | Identifying | Resuming
+    | Reconnect_pending _ | Failed _ -> false
   in
-  let error = if available then "" else "connector status file not found" in
-  let status_field key f default =
-    match live_status with
-    | Some json -> f json key
-    | None -> default
+  let stale = false in
+  let updated_at = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ()) in
+  let error =
+    match gateway_state with
+    | Disconnected ->
+      if token_present then "" else "DISCORD_BOT_TOKEN is unset or empty"
+    | Failed msg -> msg
+    | Awaiting_hello | Identifying | Resuming | Connected _
+    | Reconnect_pending _ -> ""
   in
   `Assoc
     [
@@ -231,33 +247,24 @@ let status_json ?(audit_limit = 10) () =
       ("stale_after_sec", `Int (stale_after_sec ()));
       ("status", `String (connector_state_label ~available ~connected ~stale));
       ("error", `String error);
+      ("status_source", `String "in_process_gateway");
+      ("gateway_state", `String (gateway_state_label gateway_state));
       ("status_path", `String status_path);
       ("binding_store_path", `String binding_store_path);
       ("audit_path", `String audit_path);
       ("names_path", `String names_path);
       ("names", Names.to_json name_map);
       ("updated_at", `String updated_at);
-      ( "last_ready_at",
-        `String (status_field "last_ready_at" string_member "") );
-      ( "bot_user_name",
-        `String (status_field "bot_user_name" string_member "") );
-      ("bot_user_id", `String (status_field "bot_user_id" string_member ""));
-      ("guild_count", `Int (status_field "guild_count" int_member 0));
-      ( "gate_base_url",
-        `String (status_field "gate_base_url" string_member "") );
-      ( "gate_healthy",
-        Option.value ~default:`Null
-          (Option.map (fun value -> `Bool value)
-             (match live_status with
-              | Some json -> bool_option_member json "gate_healthy"
-              | None -> None)) );
-      ( "gate_health_checked_at",
-        `String (status_field "gate_health_checked_at" string_member "") );
-      ( "binding_source",
-        `String (status_field "binding_source" string_member "") );
-      ( "runtime_bindings_count",
-        `Int (status_field "runtime_bindings_count" int_member 0) );
-      ("pid", `Int (status_field "pid" int_member 0));
+      ("last_ready_at", `String (if connected then updated_at else ""));
+      ("bot_user_name", `String "");
+      ("bot_user_id", `String "");
+      ("guild_count", `Int 0);
+      ("gate_base_url", `String "in-process");
+      ("gate_healthy", if connected then `Bool true else `Null);
+      ("gate_health_checked_at", `String (if connected then updated_at else ""));
+      ("binding_source", `String "persisted");
+      ("runtime_bindings_count", `Int (List.length configured_bindings));
+      ("pid", `Int (if available then Unix.getpid () else 0));
       ( "configured_bindings",
         `List (List.map binding_json configured_bindings) );
       ("recent_audit", `List recent_audit);
@@ -530,13 +537,6 @@ let pp_send_error fmt = function
     Format.fprintf fmt "DISCORD_BOT_TOKEN is unset or empty"
   | Rest_error e ->
     Format.fprintf fmt "discord rest error: %a" Discord_rest_client.pp_error e
-
-let bot_token_opt () =
-  match Sys.getenv_opt "DISCORD_BOT_TOKEN" with
-  | None -> None
-  | Some raw ->
-    let trimmed = String.trim raw in
-    if String.equal trimmed "" then None else Some trimmed
 
 let send_message ~channel_id ~content ?reply_to_message_id () =
   match bot_token_opt () with

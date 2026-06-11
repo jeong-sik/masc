@@ -358,7 +358,26 @@ let test_keeper_msg_async_rejects_oversized_request_id () =
          (option string)
          "129-char request id rejected"
          None
-         (Keeper_msg_async.For_testing.record_path ~base_path ~request_id:too_long))
+         (Keeper_msg_async.For_testing.record_path ~base_path ~request_id:too_long);
+       (* path traversal: ".." must be rejected *)
+       check
+         (option string)
+         ".. path traversal rejected"
+         None
+         (Keeper_msg_async.For_testing.record_path ~base_path ~request_id:"..");
+       (* path traversal: "." must be rejected *)
+       check
+         (option string)
+         ". path traversal rejected"
+         None
+         (Keeper_msg_async.For_testing.record_path ~base_path ~request_id:".");
+       (* regression: "good.id" still accepted *)
+       check
+         bool
+         "good.id still accepted (regression)"
+         true
+         (Option.is_some
+            (Keeper_msg_async.For_testing.record_path ~base_path ~request_id:"good.id")))
 ;;
 
 let test_yield_meter_noops_without_runnable_fiber () =

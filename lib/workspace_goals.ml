@@ -309,11 +309,6 @@ let parse_optional_transition_action args field =
          ~received:(Yojson.Safe.to_string json))
 ;;
 
-let task_has_goal_id ~goal_id (task : Masc_domain.task) =
-  match task.goal_id with
-  | Some task_goal_id -> String.equal task_goal_id goal_id
-  | None -> false
-
 let validate_goal_completion_ready config ~goal_id ~override_note =
   match override_note with
   | Some note when not (String.equal (String.trim note) "") -> Ok ()
@@ -321,6 +316,7 @@ let validate_goal_completion_ready config ~goal_id ~override_note =
     let index =
       Workspace_goal_index.build_goal_task_index
         (Workspace_query.get_tasks_safe config)
+        ~goal_task_links:[]
     in
     let linked_tasks =
       Workspace_goal_index.tasks_for_goal index ~goal_id

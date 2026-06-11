@@ -16,7 +16,6 @@ let dummy_task ?contract ?handoff_context () : Masc_domain.task =
   { id = "t-phase-e"
   ; title = "phase e regression"
   ; description = ""
-  ; goal_id = None
   ; files = []
   ; created_at = "2026-05-27T00:00:00Z"
   ; task_status = Masc_domain.Todo

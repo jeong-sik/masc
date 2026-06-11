@@ -90,7 +90,6 @@ let make_task ~id ~status =
   ; files = []
   ; created_at = now
   ; created_by = None
-  ; goal_id = None
   ; contract = None
   ; handoff_context = None
   ; cycle_count = 0

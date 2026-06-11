@@ -29,7 +29,7 @@ let normalize_title_for_dedup (title : string) : string =
 (** Check if a task with a similar title already exists in the backlog.
     Returns [Some existing_task_id] if a duplicate is found, [None] otherwise.
     Uses normalized title comparison — deterministic, no fuzzy matching. *)
-let find_duplicate_task (backlog : backlog) ~(title : string) ~(goal_id : string option)
+let find_duplicate_task (backlog : backlog) ~(title : string)
   : string option
   =
   let norm = normalize_title_for_dedup title in
@@ -40,7 +40,6 @@ let find_duplicate_task (backlog : backlog) ~(title : string) ~(goal_id : string
       (fun (t : task) ->
          let t_norm = normalize_title_for_dedup t.title in
          t_norm = norm
-         && Option.equal String.equal t.goal_id goal_id
          && not (Masc_domain.task_status_is_terminal t.task_status))
       backlog.tasks
     |> Option.map (fun (t : task) -> t.id)
@@ -75,7 +74,7 @@ let add_task
           | Some msg -> Printf.sprintf "Error: %s" msg
           | None ->
         (* Dedup guard: reject if an active task with the same normalized title exists *)
-        (match find_duplicate_task backlog ~title ~goal_id with
+        (match find_duplicate_task backlog ~title with
          | Some existing_id ->
            Printf.sprintf
              "Duplicate rejected: '%s' matches existing %s. Use that task instead."
@@ -95,7 +94,6 @@ let add_task
              { id = task_id
              ; title
              ; description
-             ; goal_id
              ; task_status = Todo
              ; priority
              ; files = []
@@ -158,7 +156,7 @@ let batch_add_tasks_internal ?created_by config tasks =
     | Ok backlog ->
       (try
          let next_num = ref (next_task_number config backlog) in
-         let added_tasks =
+         let added_tasks_with_goal_ids =
            List.map
              (fun (title, priority, description, contract, goal_id) ->
                 let task_id = Printf.sprintf "task-%03d" !next_num in
@@ -171,23 +169,26 @@ let batch_add_tasks_internal ?created_by config tasks =
                        ~description
                        ())
                 in
-                { id = task_id
-                ; title
-                ; description
-                ; goal_id
-                ; task_status = Todo
-                ; priority
-                ; files = []
-                ; created_at = now_iso ()
-                ; created_by
-                ; contract
-                ; handoff_context = None
-                ; cycle_count = 0
-                ; reclaim_policy = None
-                ; do_not_reclaim_reason = None
-                })
+                let task =
+                  { id = task_id
+                  ; title
+                  ; description
+                  ; task_status = Todo
+                  ; priority
+                  ; files = []
+                  ; created_at = now_iso ()
+                  ; created_by
+                  ; contract
+                  ; handoff_context = None
+                  ; cycle_count = 0
+                  ; reclaim_policy = None
+                  ; do_not_reclaim_reason = None
+                  }
+                in
+                (task, goal_id))
              tasks
          in
+         let added_tasks = List.map fst added_tasks_with_goal_ids in
          let new_backlog =
            { tasks = backlog.tasks @ added_tasks
            ; last_updated = now_iso ()
@@ -196,7 +197,7 @@ let batch_add_tasks_internal ?created_by config tasks =
          in
          write_backlog config new_backlog;
          List.iter
-           (fun (task : Masc_domain.task) ->
+           (fun ((task : Masc_domain.task), goal_id) ->
               let created_by_json = Json_util.string_opt_to_json task.created_by in
               Workspace_task_classify.emit_task_activity
                 config
@@ -207,7 +208,7 @@ let batch_add_tasks_internal ?created_by config tasks =
                   (`Assoc
                       [ "task_id", `String task.id
                       ; "title", `String task.title
-                      ; "goal_id", Json_util.string_opt_to_json task.goal_id
+                      ; "goal_id", Json_util.string_opt_to_json goal_id
                       ; "priority", `Int task.priority
                       ; "created_by", created_by_json
                       ; ( "strict_contract"
@@ -216,7 +217,7 @@ let batch_add_tasks_internal ?created_by config tasks =
                              | Some contract -> contract.strict
                              | None -> false) )
                       ]))
-           added_tasks;
+           added_tasks_with_goal_ids;
          let summary =
            String.concat ", " (List.map (fun (t : Masc_domain.task) -> t.id) added_tasks)
          in

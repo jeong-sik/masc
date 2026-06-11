@@ -272,9 +272,8 @@ let wip_admission_result_fields rejections =
 ;;
 
 let find_task_goal_id config task_id =
-  Workspace.get_tasks_raw config
-  |> List.find_map (fun (task : Masc_domain.task) ->
-         if String.equal task.id task_id then task.goal_id else None)
+  let index = Workspace_goal_index.build_task_goal_index () in
+  try Some (List.hd (Hashtbl.find index task_id)) with Not_found -> None
 ;;
 
 let merge_current_task_id ~(latest : keeper_meta) ~(caller : keeper_meta) =
@@ -537,13 +536,15 @@ let handle_keeper_task_tool
       then wip_rejections := (task_id, rejection) :: !wip_rejections
     in
     let wip_admission_filter ~active_tasks task =
+      let task_goal_index = Workspace_goal_index.build_task_goal_index () in
       let active_items =
         Keeper_wip_admission.active_items_of_tasks
+          ~task_goal_index
           ~default_repo:wip_default_repo
           active_tasks
       in
       let scope =
-        Keeper_wip_admission.scope_of_task ~default_repo:wip_default_repo task
+        Keeper_wip_admission.scope_of_task ~task_goal_index ~default_repo:wip_default_repo task
       in
       match Keeper_wip_admission.decide active_items ~scope with
       | Keeper_wip_admission.Admit _ -> true

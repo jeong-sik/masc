@@ -28,7 +28,7 @@ val default_goal_open_limit : int
 
     When [goal_id = None] the check is a no-op (returns [None]) — orphan
     tasks bypass the per-goal cap. *)
-val check : ?goal_id:string -> Masc_domain.backlog -> capacity_error option
+val check : ?goal_id:string -> ?goal_task_links:(string * string list) list -> Masc_domain.backlog -> capacity_error option
 
 (** [error_to_json_string err] serializes to the same JSON-string shape
     that the pre-RFC-0034.v2 keeper task runtime helper produced

@@ -118,7 +118,6 @@ let make_task ~id ~status : Masc_domain.task = {
   id;
   title = "Test Task";
   description = "";
-  goal_id = None;
   task_status = status;
   priority = 3;
   files = [];
@@ -156,7 +155,6 @@ let make_task_with_priority ~id ~priority : Masc_domain.task = {
   title = "Task";
   description = "";
   task_status = Masc_domain.Todo;
-  goal_id = None;
   priority;
   files = [];
   created_at = "2024-01-01T00:00:00Z";

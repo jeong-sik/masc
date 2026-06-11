@@ -11,7 +11,7 @@ val validate_active_goal_ids :
 
 val backend_of_meta : Keeper_meta_contract.keeper_meta -> string
 val task_is_linked_to_keeper_goals :
-  string list -> Masc_domain.task -> bool
+  ?task_goal_index:(string, string list) Hashtbl.t -> string list -> Masc_domain.task -> bool
 
 type claim_goal_scope = {
   task_filter : Masc_domain.task -> bool;

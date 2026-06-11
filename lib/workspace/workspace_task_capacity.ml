@@ -17,32 +17,29 @@ type capacity_error = {
 
 let default_goal_open_limit = 3
 
-let task_matches_goal ~goal_id (task : Masc_domain.task) =
-  match task.goal_id with
-  | Some linked_goal_id -> String.equal linked_goal_id goal_id
-  | None -> false
+(** Compatibility wrapper — O(k) lookup via a pre-built index.
+    Retained for existing callers that have an index available. *)
+let open_task_count_for_goal ~goal_id index =
+  Workspace_goal_index.open_task_count_for_goal_indexed index ~goal_id
 ;;
 
-(** Compatibility wrapper -- O(n) linear scan over the full backlog.
-    Retained for existing callers that pass a [backlog] directly. *)
-let open_task_count_for_goal (backlog : Masc_domain.backlog) ~goal_id =
-  List.fold_left
-    (fun count (task : Masc_domain.task) ->
-       if
-         (not (Masc_domain.task_status_is_terminal task.task_status))
-         && task_matches_goal ~goal_id task
-       then count + 1
-       else count)
-    0
-    backlog.tasks
-;;
+(** [check ?goal_id backlog] returns [None] when [add_task] may proceed,
+    [Some err] when adding another open task linked to [goal_id] would
+    exceed [default_goal_open_limit].
 
-let check ?goal_id (backlog : Masc_domain.backlog) =
+    When [goal_id = None] the check is a no-op (returns [None]) — orphan
+    tasks bypass the per-goal cap.
+
+    Note: after the task↔goal boundary refactor, goal-task links are no
+    longer stored on task records. The capacity check relies on an
+    external [goal_task_links] registry. Until that registry is wired,
+    passing [goal_id] without supplying links will always yield [None]. *)
+let check ?goal_id ?(goal_task_links = []) (backlog : Masc_domain.backlog) =
   match goal_id with
   | None -> None
   | Some goal_id ->
     let index =
-      Workspace_goal_index.build_goal_task_index backlog.tasks
+      Workspace_goal_index.build_goal_task_index backlog.tasks ~goal_task_links
     in
     let open_task_count =
       Workspace_goal_index.open_task_count_for_goal_indexed index ~goal_id

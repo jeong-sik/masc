@@ -569,7 +569,6 @@ type task = {
   files: string list; [@default []]
   created_at: string;
   created_by: string option; [@default None]
-  goal_id: string option; [@default None]  (** Structured goal linkage SSOT *)
   contract: task_contract option; [@default None]
   handoff_context: task_handoff_context option; [@default None]
   cycle_count: int; [@default 0]
@@ -669,14 +668,10 @@ let task_to_yojson t =
     | None -> base
     | Some created_by -> base @ [("created_by", `String created_by)]
   in
-  let with_goal_id = match t.goal_id with
-    | None -> with_created_by
-    | Some goal_id -> with_created_by @ [("goal_id", `String goal_id)]
-  in
   let with_contract = match t.contract with
-    | None -> with_goal_id
+    | None -> with_created_by
     | Some contract ->
-        with_goal_id @ [ ("contract", task_contract_to_yojson contract) ]
+        with_created_by @ [ ("contract", task_contract_to_yojson contract) ]
   in
   let with_handoff_context = match t.handoff_context with
     | None -> with_contract
@@ -719,7 +714,6 @@ let task_of_yojson json =
     let files = Json_util.get_string_list json "files" in
     let created_at = req "created_at" in
     let created_by = opt "created_by" in
-    let goal_id = opt "goal_id" in
     let contract = match m "contract" with
       | `Null -> None
       | contract_json ->
@@ -756,7 +750,6 @@ let task_of_yojson json =
             files;
             created_at;
             created_by;
-            goal_id;
             contract;
             handoff_context;
             cycle_count;

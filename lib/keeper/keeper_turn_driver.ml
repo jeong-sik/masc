@@ -82,6 +82,7 @@ let run_named
     ?exit_condition_result
     ?summarizer
     ?oas_checkpoint
+    ?trace_link
     ?event_bus
     ?runtime_manifest_context
     ?runtime_manifest_append
@@ -174,6 +175,7 @@ let run_named
     exit_condition_result;
     summarizer;
     oas_checkpoint;
+    trace_link;
     sw;
     net;
     on_event;

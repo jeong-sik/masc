@@ -118,5 +118,5 @@ val with_keeper_turn_span
   -> channel:string
   -> is_retry:bool
   -> current_task_id:string option
-  -> (unit -> 'a)
+  -> ((unit -> (string * string) option) -> 'a)
   -> 'a

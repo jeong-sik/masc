@@ -131,6 +131,7 @@ val run_named :
   ?exit_condition_result:(int -> Runtime_agent.stop_reason * string option) ->
   ?summarizer:(Agent_sdk.Types.message list -> string) ->
   ?oas_checkpoint:Agent_sdk.Checkpoint.t ->
+  ?trace_link:string * string ->
   ?event_bus:Agent_sdk.Event_bus.t ->
   ?runtime_manifest_context:Keeper_runtime_manifest.turn_context ->
   ?runtime_manifest_append:(Keeper_runtime_manifest.t -> unit) ->

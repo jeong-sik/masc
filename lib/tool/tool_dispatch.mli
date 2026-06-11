@@ -93,7 +93,7 @@ type trace_id = string
 type span_wrapper =
   ?force_new_trace_id:bool
   -> tool_name:string
-  -> ((unit -> trace_id option) -> Tool_result.result option * string)
+  -> ((unit -> (trace_id * trace_id) option) -> Tool_result.result option * string)
   -> Tool_result.result option * string
 (** Wrapper applied around the dispatch body in {!guarded_dispatch}. Mirrors the
     shape of [Tool_telemetry.with_span]: it opens a span, runs the body (which

@@ -22,6 +22,7 @@ type try_provider_ctx =
   ; hooks : Agent_sdk.Hooks.hooks option
   ; context_reducer : Agent_sdk.Context_reducer.t option
   ; raw_trace : Agent_sdk.Raw_trace.t option
+  ; trace_link : (string * string) option
   ; transport_resolved : Masc_grpc_transport.t
   ; runtime_mcp_policy : Llm_provider.Llm_transport.runtime_mcp_policy option
   ; allowed_paths : string list

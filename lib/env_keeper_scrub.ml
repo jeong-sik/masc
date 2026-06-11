@@ -25,6 +25,15 @@ let allow_exact : string list =
     (* Docker CLI remote daemon connectivity *)
   ; "DOCKER_HOST"; "DOCKER_TLS_VERIFY"; "DOCKER_CERT_PATH"
 
+    (* Corporate proxy / certificate — required in restricted network
+       environments. Values are not credentials by themselves. *)
+  ; "HTTP_PROXY"; "HTTPS_PROXY"; "NO_PROXY"
+  ; "SSL_CERT_FILE"
+
+    (* GitHub token for gh CLI / API access — explicitly projected by
+       operator into keeper secret dir, not ambient host token. *)
+  ; "GITHUB_TOKEN"; "GH_TOKEN"
+
     (* Git user identity — not credentials by themselves. *)
   ; "GIT_AUTHOR_NAME"; "GIT_AUTHOR_EMAIL"
   ; "GIT_COMMITTER_NAME"; "GIT_COMMITTER_EMAIL"

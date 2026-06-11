@@ -16,16 +16,26 @@ jobs:
       !contains(github.head_ref, 'docs/')
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The coverage script diffs origin/$GITHUB_BASE_REF...HEAD; a
+          # shallow clone has neither the base ref nor the merge history,
+          # so the diff fails and the check silently no-ops.
+          fetch-depth: 0
       - name: Check PR body for opt-out
         id: skip_check
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
+          # GITHUB_OUTPUT is an environment variable, not an expression
+          # context: ${{ GITHUB_OUTPUT }} expands to "" and breaks the
+          # redirect.
           if echo "$PR_BODY" | grep -q '# ci:skip-test-coverage'; then
-            echo "skip=true" >> ${{ GITHUB_OUTPUT }}
+            echo "skip=true" >> "$GITHUB_OUTPUT"
           else
-            echo "skip=false" >> ${{ GITHUB_OUTPUT }}
+            echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
       - name: Run test coverage check
         if: steps.skip_check.outputs.skip != 'true'
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
         run: python3 scripts/check_test_coverage.py

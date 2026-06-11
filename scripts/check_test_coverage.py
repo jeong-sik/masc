@@ -32,44 +32,49 @@ def is_opt_out_commit():
         return False
 
 
-def get_changed_lib_files():
-    """Get list of lib/ files changed in this PR."""
-    base_ref = os.environ.get("GITHUB_BASE_REF", "main")
+def run_diff_or_fail(args):
+    """Run a git diff; a failure means the check cannot see the PR's
+    changes (shallow clone, missing base ref), which must fail the job
+    loudly — an empty result here would silently pass every PR."""
     try:
-        result = subprocess.run(
-            ["git", "diff", "--name-only", f"origin/{base_ref}...HEAD", "--", "lib/"],
+        return subprocess.run(
+            args,
             capture_output=True,
             text=True,
             check=True,
-        )
-        return [f for f in result.stdout.strip().split("\n") if f]
-    except subprocess.CalledProcessError:
-        return []
+        ).stdout
+    except subprocess.CalledProcessError as e:
+        print(f"::error::Test coverage check cannot diff against the base ref: {e.stderr.strip()}")
+        print("::error::Refusing to report a pass without seeing the diff (checkout needs fetch-depth: 0).")
+        sys.exit(2)
+
+
+def get_changed_lib_files():
+    """Get list of lib/ files changed in this PR."""
+    base_ref = os.environ.get("GITHUB_BASE_REF", "main")
+    stdout = run_diff_or_fail(
+        ["git", "diff", "--name-only", f"origin/{base_ref}...HEAD", "--", "lib/"]
+    )
+    return [f for f in stdout.strip().split("\n") if f]
 
 
 def get_changed_test_files():
     """Get list of test files changed in this PR."""
     base_ref = os.environ.get("GITHUB_BASE_REF", "main")
-    try:
-        result = subprocess.run(
-            [
-                "git",
-                "diff",
-                "--name-only",
-                f"origin/{base_ref}...HEAD",
-                "--",
-                "*test*",
-                "*/test*",
-                "*_test*",
-                "*spec*",
-            ],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        return [f for f in result.stdout.strip().split("\n") if f]
-    except subprocess.CalledProcessError:
-        return []
+    stdout = run_diff_or_fail(
+        [
+            "git",
+            "diff",
+            "--name-only",
+            f"origin/{base_ref}...HEAD",
+            "--",
+            "*test*",
+            "*/test*",
+            "*_test*",
+            "*spec*",
+        ]
+    )
+    return [f for f in stdout.strip().split("\n") if f]
 
 
 def get_added_lines_count(lib_files):
@@ -77,18 +82,10 @@ def get_added_lines_count(lib_files):
     base_ref = os.environ.get("GITHUB_BASE_REF", "main")
     total = 0
     for f in lib_files:
-        try:
-            result = subprocess.run(
-                ["git", "diff", f"origin/{base_ref}...HEAD", "--", f],
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-            for line in result.stdout.split("\n"):
-                if line.startswith("+") and not line.startswith("+++"):
-                    total += 1
-        except subprocess.CalledProcessError:
-            pass
+        stdout = run_diff_or_fail(["git", "diff", f"origin/{base_ref}...HEAD", "--", f])
+        for line in stdout.split("\n"):
+            if line.startswith("+") and not line.startswith("+++"):
+                total += 1
     return total
 
 
@@ -124,9 +121,9 @@ def check_coverage():
         )
 
     if violations:
-        print("::warning::Test Coverage Check Failed")
+        print("::error::Test Coverage Check Failed")
         for v in violations:
-            print(f"::warning::{v}")
+            print(f"::error::{v}")
         sys.exit(1)
     else:
         print("Test coverage check passed.")

@@ -69,7 +69,10 @@ let test_no_conflict_writes_first_attempt () =
       | Ok (Some m) -> m
       | _ -> fail "disk read failed"
     in
-    let m1 = { disk with goal = "updated goal" } in
+    (* #20781: [goal] became TOML-only (meta JSON persists runtime state),
+       so the round-trip payload marker is [continuity_summary], which is
+       still JSON-persisted. *)
+    let m1 = { disk with continuity_summary = "updated summary" } in
     match
       Keeper_meta_store.write_meta_with_merge
         ~merge:Keeper_meta_merge.caller_wins config m1
@@ -79,7 +82,8 @@ let test_no_conflict_writes_first_attempt () =
         | Ok (Some m) -> m
         | _ -> fail "read after write failed"
       in
-      check string "goal updated" "updated goal" after.goal
+      check string "continuity_summary updated" "updated summary"
+        after.continuity_summary
     | Error e -> fail ("second write failed: " ^ e))
 
 let test_retry_succeeds_after_concurrent_bump () =
@@ -100,14 +104,16 @@ let test_retry_succeeds_after_concurrent_bump () =
     in
     (* Simulate a concurrent writer bumping the disk version while
        [caller_view] is held by the cycle-completion fiber. *)
-    let racing = { caller_view with goal = "racing writer" } in
+    let racing = { caller_view with continuity_summary = "racing writer" } in
     (match Keeper_meta_store.write_meta config racing with
      | Ok () -> ()
      | Error e -> fail ("racing write failed: " ^ e));
     (* Now the cycle attempts to write its own payload. CAS would fail
        once; caller_wins retry must lift the payload onto the new disk
        version and succeed. *)
-    let cycle_payload = { caller_view with goal = "cycle payload" } in
+    let cycle_payload =
+      { caller_view with continuity_summary = "cycle payload" }
+    in
     let before_retry_metric =
       Otel_metric_store.metric_value_or_zero
         Otel_metric_store.metric_write_meta_cas_retry_total
@@ -130,7 +136,8 @@ let test_retry_succeeds_after_concurrent_bump () =
       | Ok (Some m) -> m
       | _ -> fail "final read failed"
     in
-    check string "cycle payload wins (last writer)" "cycle payload" final.goal;
+    check string "cycle payload wins (last writer)" "cycle payload"
+      final.continuity_summary;
     check bool "version moved past racing write" true
       (final.meta_version > racing.meta_version + 1);
     check (float 0.001) "CAS retry metric increments" 1.0

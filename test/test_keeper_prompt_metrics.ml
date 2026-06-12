@@ -175,6 +175,15 @@ let test_hard_constraints_in_system_only () =
   check bool "no output guard in dynamic" true
     (not (has_in tp.dynamic_context "Output guard:"))
 
+let test_direct_reply_prompt_requires_action_evidence () =
+  let tp = build_separated () in
+  check bool "direct reply prompt binds action claims to tool evidence" true
+    (has_in tp.system_prompt "matching tool-call evidence");
+  check bool "board read claims require same-turn board evidence" true
+    (has_in tp.system_prompt "same-turn board-read evidence");
+  check bool "tool failures must be reported as attempts" true
+    (has_in tp.system_prompt "do not phrase the attempt as a completed check")
+
 let test_soft_context_in_dynamic_only () =
   let tp = build_separated () in
   let has_in s needle =
@@ -520,6 +529,8 @@ let () =
         [
           test_case "hard constraints in system only" `Quick
             test_hard_constraints_in_system_only;
+          test_case "direct reply prompt requires action evidence" `Quick
+            test_direct_reply_prompt_requires_action_evidence;
           test_case "soft context in dynamic only" `Quick
             test_soft_context_in_dynamic_only;
           test_case "direct reply prompt matches server-managed heartbeat policy" `Quick

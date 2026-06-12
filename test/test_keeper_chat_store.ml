@@ -1,5 +1,7 @@
 module K = Masc.Keeper_chat_store
+module MS = Masc.Keeper_world_observation_message_scope
 module P = Masc.Otel_metric_store
+module KT = Masc.Keeper_turn
 
 let rec remove_tree path =
   if Sys.file_exists path then
@@ -67,6 +69,18 @@ let chat_path ~base_dir ~keeper_name =
        "keeper_chat")
     (Workspace_utils_backend_setup.sanitize_namespace_segment keeper_name ^ ".jsonl")
 
+let make_meta name =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+         [ ("name", `String name)
+         ; ("trace_id", `String ("test-trace-" ^ name))
+         ; ("goal", `String "test goal")
+         ])
+  with
+  | Ok meta -> meta
+  | Error err -> failwith ("meta_of_json failed: " ^ err)
+
 let test_load_records_malformed_row_drops () =
   let base_dir = temp_base_path "keeper-chat-store-drops" in
   Fun.protect
@@ -113,6 +127,9 @@ let test_load_records_malformed_row_drops () =
 
 let roles messages =
   List.map (fun (m : K.chat_message) -> K.Role.to_label m.role) messages
+
+let recent_roles lines =
+  List.map (fun (line : MS.recent_direct_line) -> line.role_label) lines
 
 let test_append_turn_roundtrip () =
   let base_dir = temp_base_path "keeper-chat-store-turn" in
@@ -169,6 +186,98 @@ let test_legacy_lines_parse_without_new_fields () =
             None assistant.tool_call_id
       | messages ->
           Alcotest.failf "expected 2 messages, got %d" (List.length messages))
+
+let test_recent_direct_context_renders_prior_reply_and_tool_evidence () =
+  let base_dir = temp_base_path "keeper-chat-recent-context" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-recent-context" in
+      K.append_turn ~base_dir ~keeper_name
+        ~user_content:"what were you doing"
+        ~user_attachments:[]
+        ~surface:(Masc.Surface_ref.Dashboard { session_id = None })
+        ~assistant_content:"I was reading the board."
+        ();
+      K.append_turn ~base_dir ~keeper_name
+        ~user_content:"what did you actually check"
+        ~user_attachments:[]
+        ~tool_calls:
+          [ { K.call_id = "toolu_board";
+              call_name = "keeper_board_list";
+              args = {|{"limit":20}|} } ]
+        ~surface:(Masc.Surface_ref.Dashboard { session_id = None })
+        ~assistant_content:"This time I checked the board list."
+        ();
+      let lines =
+        K.load ~base_dir ~keeper_name
+        |> MS.recent_direct_conversation_of_messages ~limit:4
+      in
+      Alcotest.(check (list string)) "bounded tail keeps prior reply and tool"
+        [ "assistant"; "user"; "tool_call"; "assistant" ]
+        (recent_roles lines);
+      let rendered = MS.render_recent_direct_conversation_context lines in
+      Alcotest.(check bool) "previous assistant utterance is visible" true
+        (contains_substring rendered "I was reading the board.");
+      Alcotest.(check bool) "tool evidence keeps only call name" true
+        (contains_substring rendered "tool_call: keeper_board_list");
+      Alcotest.(check bool) "tool args are not prompt evidence" false
+        (contains_substring rendered {|{"limit":20}|});
+      Alcotest.(check bool) "grounding guard present" true
+        (contains_substring rendered "without tool evidence"))
+
+let test_recent_direct_context_omits_transport_failure_as_self_reply () =
+  let base_dir = temp_base_path "keeper-chat-recent-failure" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-recent-failure" in
+      K.append_turn ~base_dir ~keeper_name
+        ~user_content:"please answer this"
+        ~user_attachments:[]
+        ~surface:(Masc.Surface_ref.Dashboard { session_id = None })
+        ~assistant_kind:K.Row_kind.Transport_failure
+        ~assistant_content:"Keeper request failed: timeout"
+        ();
+      let lines =
+        K.load ~base_dir ~keeper_name
+        |> MS.recent_direct_conversation_of_messages
+      in
+      Alcotest.(check (list string)) "failed request keeps user only"
+        [ "user" ] (recent_roles lines);
+      let rendered = MS.render_recent_direct_conversation_context lines in
+      Alcotest.(check bool) "failure text is not a self utterance" false
+        (contains_substring rendered "Keeper request failed"))
+
+let test_direct_owner_context_excludes_connector_turns () =
+  let base_dir = temp_base_path "keeper-chat-direct-owner-gate" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-direct-owner-gate" in
+      K.append_turn ~base_dir ~keeper_name
+        ~user_content:"what did you just say"
+        ~user_attachments:[]
+        ~surface:(Masc.Surface_ref.Dashboard { session_id = None })
+        ~assistant_content:"I just answered from direct chat."
+        ();
+      let config = Masc.Workspace.default_config base_dir in
+      let meta = make_meta keeper_name in
+      let context ?channel_session_key ~direct_reply ~channel () =
+        KT.For_testing.direct_owner_conversation_context
+          ~config ~meta ~direct_reply ~channel_session_key ~channel
+      in
+      Alcotest.(check bool) "owner direct receives recent transcript" true
+        (contains_substring
+           (context ~direct_reply:true ~channel:"" ())
+           "I just answered from direct chat.");
+      Alcotest.(check string) "connector channel suppresses transcript" ""
+        (context ~direct_reply:true ~channel:"discord" ());
+      Alcotest.(check string) "connector session suppresses transcript" ""
+        (context ~direct_reply:true ~channel:""
+           ~channel_session_key:"discord_workspace" ());
+      Alcotest.(check string) "non-direct turn suppresses transcript" ""
+        (context ~direct_reply:false ~channel:"" ()))
 
 let test_append_turn_redacts_projected_secrets () =
   let base_dir = temp_base_path "keeper-chat-store-redact" in
@@ -727,6 +836,12 @@ let () =
             test_append_turn_roundtrip;
           Alcotest.test_case "legacy lines parse" `Quick
             test_legacy_lines_parse_without_new_fields;
+          Alcotest.test_case "recent context renders reply and tool evidence" `Quick
+            test_recent_direct_context_renders_prior_reply_and_tool_evidence;
+          Alcotest.test_case "recent context omits transport failure as reply" `Quick
+            test_recent_direct_context_omits_transport_failure_as_self_reply;
+          Alcotest.test_case "recent context is owner-direct only" `Quick
+            test_direct_owner_context_excludes_connector_turns;
           Alcotest.test_case "append_turn redacts projected secrets" `Quick
             test_append_turn_redacts_projected_secrets;
           Alcotest.test_case "load redacts legacy raw secret rows" `Quick

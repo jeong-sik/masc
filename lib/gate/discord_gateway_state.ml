@@ -184,8 +184,14 @@ let parse_trigger_policy s =
   | _ ->
       Error
         (Printf.sprintf
-           "unknown trigger policy %S — expected mention_only | mention_or_thread | user_only:<id> | all"
+           "unknown trigger policy %S — expected mention_or_thread | mention_only | user_only:<id> | all"
            s)
+
+let trigger_policy_to_string = function
+  | Mention_only -> "mention_only"
+  | Mention_or_thread -> "mention_or_thread"
+  | User_only id -> Printf.sprintf "user_only:%s" id
+  | All -> "all"
 
 (* ── Opaque state ──────────────────────────────────────────────── *)
 

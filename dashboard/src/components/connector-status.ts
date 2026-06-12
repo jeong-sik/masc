@@ -1697,6 +1697,7 @@ export function ConnectorStatusPanel() {
             <${ConnectorOverviewStrip}
               connectors=${allConnectors}
               keeperCount=${snapshot.keepers.length}
+              discordTriggerPolicy=${snapshot.connectors?.discord_trigger_policy}
               selectedConnectorId=${focusedConnectorId}
               onSelectConnector=${(connectorId: KnownConnectorId) => { selectedConnectorId.value = connectorId }}
               detailTargetId="connector-detail-panel"

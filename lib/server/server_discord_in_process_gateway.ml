@@ -31,7 +31,7 @@ let bot_token_opt () = trimmed_env "DISCORD_BOT_TOKEN"
    compile at every call site rather than silently falling through. *)
 let parse_trigger_policy raw : Gw.trigger_policy =
   let s = String.trim raw in
-  if String.equal s "" then Gw.Mention_only
+  if String.equal s "" then Gw.Mention_or_thread
   else
     match s with
     | "mention_only" -> Gw.Mention_only
@@ -44,13 +44,29 @@ let parse_trigger_policy raw : Gw.trigger_policy =
          && String.equal (String.sub other 0 plen) prefix
       then
         let id = String.trim (String.sub other plen (String.length other - plen)) in
-        if String.equal id "" then Gw.Mention_only else Gw.User_only id
-      else Gw.Mention_only
+        if String.equal id "" then Gw.Mention_or_thread else Gw.User_only id
+      else Gw.Mention_or_thread
 
 let resolved_trigger_policy () =
-  match trimmed_env "MASC_DISCORD_TRIGGER_POLICY" with
-  | None -> Gw.Mention_only
+  let from_toml () =
+    try
+      let resolution = Config_dir_resolver.resolve () in
+      let toml_path =
+        Filename.concat resolution.Config_dir_resolver.config_root.path
+          Config_dir_resolver.runtime_toml_filename
+      in
+      if Sys.file_exists toml_path then
+        let tbl = Otoml.Parser.from_file toml_path in
+        Otoml.find_opt tbl Otoml.get_string [ "discord"; "trigger_policy" ]
+      else None
+    with _ -> None
+  in
+  match from_toml () with
   | Some raw -> parse_trigger_policy raw
+  | None ->
+    (match trimmed_env "MASC_DISCORD_TRIGGER_POLICY" with
+    | None -> Gw.Mention_or_thread
+    | Some raw -> parse_trigger_policy raw)
 
 (* ---------------------------------------------------------------- *)
 (* Inbound delivery                                                 *)
@@ -482,6 +498,7 @@ let start ~sw ~env ~clock ~state =
       "RFC-0203: DISCORD_BOT_TOKEN is unset; in-process Discord gateway not started"
   | Some token ->
     let policy = resolved_trigger_policy () in
+    State.set_trigger_policy policy;
     let dispatch =
       Gate_keeper_backend.dispatch
         ~sw ~clock
@@ -489,13 +506,7 @@ let start ~sw ~env ~clock ~state =
         ~net:state.Mcp_server.net
         ~config:state.Mcp_server.workspace_config
     in
-    let policy_label =
-      match policy with
-      | Gw.Mention_only -> "mention_only"
-      | Gw.Mention_or_thread -> "mention_or_thread"
-      | Gw.All -> "all"
-      | Gw.User_only _ -> "user_only:<id>"
-    in
+    let policy_label = Discord_gateway_state.trigger_policy_to_string policy in
     Log.Server.info
       "RFC-0203: starting in-process Discord gateway (policy=%s, intents=%d)"
       policy_label

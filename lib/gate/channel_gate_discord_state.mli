@@ -122,6 +122,17 @@ val is_known_thread : channel_id:string -> bool
 val registered_thread_count : unit -> int
 (** Number of threads currently in the registry. For diagnostics. *)
 
+(** {2 Trigger policy}
+
+    Set once at gateway startup, read by [connectors_json] for dashboard
+    display. Same mutable-ref pattern as [record_ready]. *)
+
+val set_trigger_policy : Discord_gateway_state.trigger_policy -> unit
+(** Store the resolved trigger policy. Called once at gateway startup. *)
+
+val get_trigger_policy : unit -> Discord_gateway_state.trigger_policy option
+(** Current trigger policy. [None] before gateway startup. *)
+
 (** Typed failure modes for Discord REST actions. Closed sum — adding
     a new variant forces every consumer to handle it. *)
 type send_error =

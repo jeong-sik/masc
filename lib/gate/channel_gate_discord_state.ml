@@ -170,6 +170,19 @@ let is_known_thread ~channel_id =
 
 let registered_thread_count () = Hashtbl.length thread_parent_table
 
+(* ── Trigger policy registry ──────────────────────────────────────
+   Set once at gateway startup by [set_trigger_policy]. Read by
+   [connectors_json] for dashboard display. Same mutable-ref pattern
+   as [record_ready]. *)
+
+let trigger_policy_ref : Discord_gateway_state.trigger_policy option ref =
+  ref None
+
+let set_trigger_policy (policy : Discord_gateway_state.trigger_policy) =
+  trigger_policy_ref := Some policy
+
+let get_trigger_policy () = !trigger_policy_ref
+
 let read_recent_audit ~limit =
   let path = binding_audit_read_path () in
   if limit <= 0 || not (Sys.file_exists path) then

@@ -149,6 +149,7 @@
   keeper_memory_llm_summary
   keeper_memory_recall
   keeper_librarian
+  keeper_librarian_runtime
   keeper_status_bridge
   keeper_runtime_trust_timeline
   keeper_hooks_oas_response_metrics
@@ -248,6 +249,7 @@
   ;; leaf sub-library. The parent library still references those modules
   ;; unqualified, so it must depend on the leaf explicitly.
   masc.tool_types
+  masc.tool_contract_prompts
   ;; Shared leaf helpers extracted out of include_subdirs-unqualified ownership.
   masc.lockfree_atomic
   masc.json_field

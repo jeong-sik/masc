@@ -188,3 +188,20 @@ let render_context
       (Printexc.to_string exn);
     ""
 ;;
+
+let enabled () =
+  (* Default on, mirroring the librarian (write side): persisted memory
+     that never reaches a prompt is dead weight. Env var = kill switch. *)
+  Keeper_memory_bank_env.memory_env_bool_logged
+    "MASC_KEEPER_MEMORY_OS_RECALL"
+    ~default:true
+;;
+
+let render_if_enabled ~keeper_id ~now () =
+  if not (enabled ())
+  then None
+  else (
+    match String.trim (render_context ~keeper_id ~now ()) with
+    | "" -> None
+    | block -> Some block)
+;;

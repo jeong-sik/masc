@@ -176,11 +176,13 @@ let search_memory_bank
     then parsed
     else List.filter (fun m -> String_util.equals_ci m.kind kind_filter) parsed
   in
-  (* Text match: query against text field (non-deterministic data) *)
+  (* Text match: query against text field (non-deterministic data).
+     Token-AND, not whole-query substring — "소주 갑오징어" must match a
+     note containing both words in any order (issue #20908). *)
   let matched =
     if query = ""
     then filtered
-    else List.filter (fun m -> String_util.contains_substring_ci m.text query) filtered
+    else List.filter (fun m -> String_util.contains_all_tokens_ci m.text query) filtered
   in
   (* Scoring: priority * recency_weight.
      recency_weight normalizes age relative to the oldest note in the result set.
@@ -309,7 +311,7 @@ let search_history
     @ fst (dedup (snd (dedup seen0 current_history)) prev_history)
   in
   all_candidates
-  |> List.filter (fun msg -> query <> "" && String_util.contains_substring_ci msg query)
+  |> List.filter (fun msg -> query <> "" && String_util.contains_all_tokens_ci msg query)
   |> List.rev
   |> take limit
 ;;

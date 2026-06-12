@@ -113,8 +113,8 @@ let match_signal
       ~(signal : Board_dispatch.board_signal)
   : match_result
   =
-  let self_tokens = Message_scope.self_identity_tokens meta in
-  if Message_scope.is_self_author ~self_tokens signal.author
+  let self_ids = Message_scope.self_ids meta in
+  if Message_scope.is_self_author ~self_ids signal.author
   then { explicit_mention = false; matched_targets = []; score = 0 }
   else (
     let targets =
@@ -137,7 +137,7 @@ let match_signal
     Uses actual comment stream as ground truth (no proxy like reply_count
     or updated_at). Based on BDI commitment reconsideration: a committed
     response is only re-evaluated when new external beliefs arrive. *)
-let check_self_comment_status ~self_tokens ~(post_id : string) : comment_status =
+let check_self_comment_status ~self_ids ~(post_id : string) : comment_status =
   match Board_dispatch.get_comments ~post_id with
   | Error _ -> `Never
   | Ok comments ->
@@ -145,7 +145,7 @@ let check_self_comment_status ~self_tokens ~(post_id : string) : comment_status 
       List.filter
         (fun (c : Board.comment) ->
            Message_scope.is_self_author
-             ~self_tokens
+             ~self_ids
              (Board.Agent_id.to_string c.author))
         comments
     in
@@ -163,7 +163,7 @@ let check_self_comment_status ~self_tokens ~(post_id : string) : comment_status 
           (fun (c : Board.comment) ->
              (not
                 (Message_scope.is_self_author
-                   ~self_tokens
+                   ~self_ids
                    (Board.Agent_id.to_string c.author)))
              && c.created_at > my_latest_ts)
           comments
@@ -222,10 +222,10 @@ let wake_reason
     if stigmergy.overall_score > 0
     then Some ("stigmergy: score=" ^ string_of_int stigmergy.overall_score)
     else (
-      let self_tokens = Message_scope.self_identity_tokens meta in
+      let self_ids = Message_scope.self_ids meta in
       match signal.kind with
       | Board_dispatch.Board_comment_added ->
-        (match check_self_comment_status ~self_tokens ~post_id:signal.post_id with
+        (match check_self_comment_status ~self_ids ~post_id:signal.post_id with
          | `New_external _ -> Some "thread_reply_after_self_comment"
          | `Never | `No_new_external -> None)
       | Board_dispatch.Board_post_created -> None))

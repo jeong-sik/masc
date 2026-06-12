@@ -217,6 +217,40 @@ let test_contains_substring_ci_empty_and_literal () =
   check bool "regex wildcard is not magic" false
     (SU.contains_substring_ci "literal abc needle" ".*")
 
+(* ---- query_tokens / contains_all_tokens_ci ---- *)
+
+(* Regression fixture (issue #20908): the memory bank note contained both
+   words in reverse order with text in between; whole-query substring
+   matching returned 0 matches for the query "소주 갑오징어". *)
+let memory_note = "갑오징어 레시피 정리, 소주 얘기가 계속 살아있는 이유"
+
+let test_query_tokens_basic () =
+  check (list string) "splits on spaces" [ "소주"; "갑오징어" ]
+    (SU.query_tokens "소주 갑오징어");
+  check (list string) "collapses runs and mixed whitespace" [ "a"; "b"; "c" ]
+    (SU.query_tokens "  a\tb\n c\r\n");
+  check (list string) "empty query has no tokens" [] (SU.query_tokens "");
+  check (list string) "whitespace-only query has no tokens" []
+    (SU.query_tokens " \t\n")
+
+let test_contains_all_tokens_ci_order_independent () =
+  check bool "tokens match in any order with gaps" true
+    (SU.contains_all_tokens_ci memory_note "소주 갑오징어");
+  check bool "single token still matches" true
+    (SU.contains_all_tokens_ci memory_note "갑오징어");
+  check bool "agglutinative suffix covered by substring" true
+    (SU.contains_all_tokens_ci "어제 소주를 마셨다" "소주");
+  check bool "one absent token fails the AND" false
+    (SU.contains_all_tokens_ci memory_note "소주 맥주")
+
+let test_contains_all_tokens_ci_ascii_ci_and_empty () =
+  check bool "ASCII tokens are case-insensitive" true
+    (SU.contains_all_tokens_ci "Keeper Board POST" "board KEEPER");
+  check bool "no tokens yields false like empty needle" false
+    (SU.contains_all_tokens_ci "abc" "");
+  check bool "whitespace-only query yields false" false
+    (SU.contains_all_tokens_ci "abc" "  \t")
+
 let test_starts_with_ci_basic () =
   check bool "exact case" true
     (SU.starts_with_ci ~prefix:"Bearer " "Bearer abc123");
@@ -313,6 +347,12 @@ let () =
         [ test_case "ASCII" `Quick test_contains_substring_ci_ascii;
           test_case "empty and literal" `Quick
             test_contains_substring_ci_empty_and_literal ] );
+      ( "contains_all_tokens_ci",
+        [ test_case "query_tokens basic" `Quick test_query_tokens_basic;
+          test_case "order-independent token AND" `Quick
+            test_contains_all_tokens_ci_order_independent;
+          test_case "ASCII ci and empty query" `Quick
+            test_contains_all_tokens_ci_ascii_ci_and_empty ] );
       ( "starts_with_ci",
         [ test_case "basic" `Quick test_starts_with_ci_basic;
           test_case "boundaries" `Quick test_starts_with_ci_boundaries ] );

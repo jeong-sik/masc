@@ -4,6 +4,7 @@ module Types = Masc.Keeper_memory_os_types
 module Policy = Masc.Keeper_memory_os_policy
 module Memory_io = Masc.Keeper_memory_os_io
 module Librarian = Masc.Keeper_librarian
+module Librarian_runtime = Masc.Keeper_librarian_runtime
 module Prompt_names = Keeper_prompt_names
 module Recall = Masc.Keeper_memory_os_recall
 
@@ -98,6 +99,49 @@ let text_message ?(role = Agent_sdk.Types.User) text : Agent_sdk.Types.message =
   ; tool_call_id = None
   ; metadata = []
   }
+;;
+
+let message_text (message : Agent_sdk.Types.message) =
+  message.content
+  |> List.filter_map (function
+    | Agent_sdk.Types.Text text -> Some text
+    | Agent_sdk.Types.Thinking _
+    | Agent_sdk.Types.RedactedThinking _
+    | Agent_sdk.Types.ToolUse _
+    | Agent_sdk.Types.ToolResult _
+    | Agent_sdk.Types.Image _
+    | Agent_sdk.Types.Document _
+    | Agent_sdk.Types.Audio _ -> None)
+  |> String.concat "\n"
+;;
+
+let fake_response raw : Agent_sdk.Types.api_response =
+  { id = "fake-librarian-response"
+  ; model = "fake-librarian-model"
+  ; stop_reason = Agent_sdk.Types.EndTurn
+  ; content = [ Agent_sdk.Types.Text raw ]
+  ; usage = None
+  ; telemetry = None
+  }
+;;
+
+let test_provider_cfg () =
+  Llm_provider.Provider_config.make
+    ~kind:Llm_provider.Provider_config.OpenAI_compat
+    ~model_id:"fake-librarian-model"
+    ~base_url:"http://127.0.0.1:1"
+    ~max_tokens:4096
+    ~enable_thinking:true
+    ~preserve_thinking:true
+    ~thinking_budget:512
+    ()
+;;
+
+let with_eio f =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw -> f ~sw ~net:(Eio.Stdenv.net env) ~clock:(Eio.Stdenv.clock env)
 ;;
 
 let episode_fixture ~now ~trace_id ~generation ~summary =
@@ -358,6 +402,123 @@ let test_librarian_rejects_invalid_claims () =
        ])
 ;;
 
+let json_episode_file_count ~keeper_id =
+  Memory_io.episodes_dir ~keeper_id
+  |> Sys.readdir
+  |> Array.to_list
+  |> List.filter (fun name -> Filename.check_suffix name ".json")
+  |> List.length
+;;
+
+let test_librarian_runtime_appends_episode_bundle () =
+  with_prompt_registry (fun () ->
+    with_temp_keepers_dir (fun _keepers_dir ->
+      with_eio (fun ~sw ~net ~clock ->
+        let keeper_id = "runtime-librarian-keeper" in
+        let captured = ref None in
+        let complete ~sw:_ ~net:_ ?clock:_ ~config ~messages () =
+          captured := Some (config, messages);
+          Ok (fake_response (valid_librarian_output () |> Yojson.Safe.to_string))
+        in
+        let private_msg : Agent_sdk.Types.message =
+          { role = Agent_sdk.Types.Assistant
+          ; content =
+              [ Agent_sdk.Types.Text
+                  "[STATE]\nruntime secret sentinel\n[/STATE]\nvisible durable fact"
+              ; Agent_sdk.Types.Thinking
+                  { thinking_type = "reasoning"; content = "hidden chain of thought" }
+              ; Agent_sdk.Types.ToolResult
+                  { tool_use_id = "call_runtime"
+                  ; content = "secret tool payload"
+                  ; is_error = false
+                  ; json = None
+                  ; content_blocks = None
+                  }
+              ]
+          ; name = None
+          ; tool_call_id = None
+          ; metadata = []
+          }
+        in
+        let inp : Librarian.input =
+          { Librarian.trace_id = "trace-runtime"
+          ; generation = 7
+          ; messages =
+              [ text_message "older message"
+              ; text_message "Please remember the runtime boundary."
+              ; private_msg
+              ]
+          }
+        in
+        (match
+           Librarian_runtime.extract_and_append_with_provider
+             ~complete
+             ~clock
+             ~timeout_sec:1.0
+             ~sw
+             ~net
+             ~keeper_id
+             ~provider_cfg:(test_provider_cfg ())
+             inp
+         with
+         | Error msg -> Alcotest.fail msg
+         | Ok episode ->
+           Alcotest.(check string) "trace id" "trace-runtime" episode.Types.trace_id;
+           Alcotest.(check int) "generation" 7 episode.Types.generation;
+           Alcotest.(check int) "claim persisted in result" 1 (List.length episode.Types.claims));
+        (match !captured with
+         | None -> Alcotest.fail "expected fake provider to be called"
+         | Some (provider_cfg, messages) ->
+           Alcotest.(check (option bool))
+             "thinking disabled"
+             (Some false)
+             provider_cfg.Llm_provider.Provider_config.enable_thinking;
+           Alcotest.(check (option bool))
+             "thinking preservation disabled"
+             (Some false)
+             provider_cfg.Llm_provider.Provider_config.preserve_thinking;
+           Alcotest.(check bool)
+             "json mode"
+             true
+             (provider_cfg.response_format = Agent_sdk.Types.JsonMode);
+           Alcotest.(check int) "system+user prompt" 2 (List.length messages);
+           let rendered_prompt = messages |> List.map message_text |> String.concat "\n" in
+           Alcotest.(check bool)
+             "contains visible prompt"
+             true
+             (contains "visible durable fact" rendered_prompt);
+           Alcotest.(check bool)
+             "scrubs state text"
+             false
+             (contains "runtime secret sentinel" rendered_prompt);
+           Alcotest.(check bool)
+             "scrubs thinking"
+             false
+             (contains "hidden chain of thought" rendered_prompt);
+           Alcotest.(check bool)
+             "scrubs tool payload"
+             false
+             (contains "secret tool payload" rendered_prompt));
+        Alcotest.(check int)
+          "episode file persisted"
+          1
+          (json_episode_file_count ~keeper_id);
+        (match Memory_io.read_events_tail ~keeper_id ~n:1 with
+         | [ episode ] ->
+           Alcotest.(check string)
+             "event persisted"
+             "Integer confidence should still persist"
+             episode.Types.episode_summary
+         | events -> Alcotest.failf "expected one event, got %d" (List.length events));
+        match Memory_io.read_facts_tail ~keeper_id ~n:1 with
+        | [ fact ] ->
+          Alcotest.(check string)
+            "fact persisted"
+            "Integer confidence survives parsing"
+            fact.Types.claim
+        | facts -> Alcotest.failf "expected one fact, got %d" (List.length facts))))
+;;
+
 let test_policy_score_and_retention () =
   let now = 1_000_000.0 in
   let f = fact_fixture ~now () in
@@ -389,14 +550,6 @@ let test_bump_access () =
   match not_bumped with
   | [ got ] -> Alcotest.(check int) "access unchanged" 2 got.Types.access_count
   | _ -> Alcotest.fail "expected one unchanged fact"
-;;
-
-let json_episode_file_count ~keeper_id =
-  Memory_io.episodes_dir ~keeper_id
-  |> Sys.readdir
-  |> Array.to_list
-  |> List.filter (fun name -> Filename.check_suffix name ".json")
-  |> List.length
 ;;
 
 let test_episode_files_do_not_overwrite_generation () =
@@ -512,6 +665,74 @@ let test_recall_context_empty_without_memory () =
     Alcotest.(check string) "empty recall context" "" ctx)
 ;;
 
+(* render_if_enabled — the extra_system_context gate wired into
+   keeper_run_tools_hooks. Env reads are live (Env_config_core uses
+   Unix.getenv), so putenv steers the flag per test. *)
+let with_recall_env value f =
+  let var = "MASC_KEEPER_MEMORY_OS_RECALL" in
+  Unix.putenv var value;
+  Fun.protect ~finally:(fun () -> Unix.putenv var "") f
+;;
+
+let test_render_if_enabled_default_is_on () =
+  with_recall_env "" (fun () ->
+    Alcotest.(check bool) "flag unset → enabled by default" true (Recall.enabled ()))
+;;
+
+let test_render_if_enabled_explicit_off () =
+  with_recall_env "false" (fun () ->
+    with_temp_keepers_dir (fun _keepers_dir ->
+      match
+        Recall.render_if_enabled ~keeper_id:"virtual-memory-keeper" ~now:1_000_000.0 ()
+      with
+      | None -> ()
+      | Some block -> Alcotest.failf "expected None with kill switch set, got %S" block))
+;;
+
+let test_render_if_enabled_empty_store_yields_none () =
+  with_recall_env "true" (fun () ->
+    with_temp_keepers_dir (fun _keepers_dir ->
+      match
+        Recall.render_if_enabled ~keeper_id:"virtual-memory-keeper" ~now:1_000_000.0 ()
+      with
+      | None -> ()
+      | Some block -> Alcotest.failf "expected None for empty store, got %S" block))
+;;
+
+let test_render_if_enabled_renders_persisted_memory () =
+  with_recall_env "true" (fun () ->
+    with_prompt_registry (fun () ->
+      with_temp_keepers_dir (fun _keepers_dir ->
+        let keeper_id = "virtual-memory-keeper" in
+        let now = 1_000_000.0 in
+        let fact =
+          { (fact_fixture ~now ()) with
+            Types.claim = "Gated recall should surface saved facts"
+          }
+        in
+        let episode =
+          { Types.trace_id = "trace-recall-gate"
+          ; Types.generation = 1
+          ; Types.episode_summary = "gated recall episode"
+          ; Types.claims = [ fact ]
+          ; Types.open_items = []
+          ; Types.constraints = []
+          ; Types.preserved_tool_refs = []
+          ; Types.source_turn_range = Some (1, 2)
+          ; Types.created_at = now
+          ; Types.schema_version = Types.schema_version
+          }
+        in
+        Memory_io.append_episode_bundle ~keeper_id episode;
+        match Recall.render_if_enabled ~keeper_id ~now () with
+        | None -> Alcotest.fail "expected Some block with flag set and seeded store"
+        | Some block ->
+          Alcotest.(check bool)
+            "block carries the persisted claim"
+            true
+            (contains "Gated recall should surface saved facts" block))))
+;;
+
 let test_recall_context_renders_sanitized_memory () =
   with_prompt_registry (fun () ->
     with_temp_keepers_dir (fun _keepers_dir ->
@@ -593,6 +814,10 @@ let () =
             "librarian rejects invalid claims"
             `Quick
             test_librarian_rejects_invalid_claims
+        ; Alcotest.test_case
+            "librarian runtime appends episode bundle"
+            `Quick
+            test_librarian_runtime_appends_episode_bundle
         ] )
     ; ( "policy"
       , [ Alcotest.test_case "score and retention" `Quick test_policy_score_and_retention
@@ -621,6 +846,22 @@ let () =
             "renders sanitized memory"
             `Quick
             test_recall_context_renders_sanitized_memory
+        ; Alcotest.test_case
+            "render_if_enabled default is on"
+            `Quick
+            test_render_if_enabled_default_is_on
+        ; Alcotest.test_case
+            "render_if_enabled explicit off"
+            `Quick
+            test_render_if_enabled_explicit_off
+        ; Alcotest.test_case
+            "render_if_enabled empty store yields none"
+            `Quick
+            test_render_if_enabled_empty_store_yields_none
+        ; Alcotest.test_case
+            "render_if_enabled renders persisted memory"
+            `Quick
+            test_render_if_enabled_renders_persisted_memory
         ] )
     ]
 ;;

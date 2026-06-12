@@ -158,7 +158,7 @@ interface ErrorRecoverableProps {
 
 /** Soft / amber tier — the operation bounced through fallback paths
     and ended up in a state where another attempt will likely succeed
-    (e.g. runtime exhausted at provider X, retry will rotate to Y). */
+    (e.g. runtime exhausted at the selected provider, retry will rotate to a fallback). */
 export function ErrorRecoverable({
   title,
   detail,

@@ -94,8 +94,8 @@ let test_persist_connector_assistant_reply_records_lane_reply () =
         ~reply:"already answered" ();
       match K.load ~base_dir ~keeper_name with
       | [ user; assistant ] ->
-          check string "user line first" "user" user.K.role;
-          check string "assistant reply persisted" "assistant" assistant.K.role;
+          check string "user line first" "user" (K.Role.to_label user.K.role);
+          check string "assistant reply persisted" "assistant" (K.Role.to_label assistant.K.role);
           check string "assistant lane" "discord"
             (Option.value assistant.K.source ~default:"");
           check string "assistant conversation id"

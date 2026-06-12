@@ -35,6 +35,22 @@ type tool_call = {
   args : string;
 }
 
+(** Lane line role as a closed sum (RFC-0232 P1). Parsed once at the
+    read boundary; a line whose persisted label is none of
+    ["user"] / ["assistant"] / ["tool"] is reported as a persistence
+    read drop and excluded — it can participate in no lane semantics
+    (watermark, pending, rendering). On-disk labels are unchanged. *)
+module Role : sig
+  type t =
+    | User
+    | Assistant
+    | Tool
+
+  val to_label : t -> string
+  val of_label : string -> t option
+  val equal : t -> t -> bool
+end
+
 (** Authority class of the human (or agent) whose message opened a
     turn. Derived structurally from the arrival route, never from
     message content: the authenticated dashboard route is [Owner];
@@ -57,7 +73,7 @@ type speaker = {
 }
 
 type chat_message = {
-  role : string;
+  role : Role.t;
   content : string;
   ts : float option;
   attachments : attachment list option;

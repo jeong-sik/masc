@@ -15,8 +15,6 @@ import {
 } from './keeper-state'
 import { isRecord, asString } from './components/common/normalize'
 
-const CONTINUATION_CHECKPOINT_PREFIX = 'Continuation checkpoint saved;'
-
 // Most recent TOOL_CALL_START id per keeper — fallback target for
 // TOOL_CALL_ARGS / TOOL_CALL_END events that omit toolCallId.
 const lastToolCallIds = new Map<string, string>()
@@ -157,7 +155,7 @@ export function applyKeeperStreamEvent(
         if (details) {
           updateThreadEntry(keeperName, assistantEntryId, entry => {
             const rawText = details.replyText ?? entry.rawText ?? entry.text
-            if (rawText.trim().startsWith(CONTINUATION_CHECKPOINT_PREFIX)) {
+            if (details.turnOutcome === 'continuation_checkpoint') {
               return {
                 ...entry,
                 details,

@@ -4,8 +4,20 @@ open Keeper_meta_contract
 open Keeper_types_profile
 
 val message_feed_targets : keeper_meta -> string list
-val self_identity_tokens : keeper_meta -> string list
-val is_self_author : self_tokens:string list -> string -> bool
+
+val self_ids : keeper_meta -> Keeper_identity.Keeper_id.t list
+(** The keeper's own identities, minted from [meta.name] and
+    [meta.agent_name] at the parse boundary (RFC-0232 §3.4).  Usually a
+    single canonical id; at most two. *)
+
+val is_self_author
+  :  self_ids:Keeper_identity.Keeper_id.t list
+  -> string
+  -> bool
+(** [is_self_author ~self_ids author] mints [author]'s id and compares
+    with {!Keeper_identity.Keeper_id.equal} — the single source of truth
+    for "is this author one of us?". *)
+
 val is_keeper_authored_message : string -> bool
 
 (** [line_mentions ~targets content] is true when some whitespace token of

@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Changed
+- Bumped the OAS agent SDK pin to `v0.206.0` at
+  `a5038de0c43d70b091418041ba1afde5486d30c7` and raised the
+  `agent_sdk` dependency floor to `0.206.0`.
+
 ## [0.19.40] - 2026-06-09
 
 ### Changed

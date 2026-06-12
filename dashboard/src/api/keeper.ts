@@ -111,8 +111,6 @@ const TERMINAL_QUEUED_KEEPER_MESSAGE_STATUSES = new Set<QueuedKeeperMessageStatu
   'cancelled',
 ])
 
-const CONTINUATION_CHECKPOINT_PREFIX = 'Continuation checkpoint saved;'
-
 function normalizeQueuedKeeperMessageStatus(value: unknown): QueuedKeeperMessageStatus {
   switch (asString(value, '').trim()) {
     case 'queued':
@@ -184,10 +182,6 @@ function parseQueuedKeeperMessageCancelResult(data: unknown): QueuedKeeperMessag
 
 export function isTerminalQueuedKeeperMessage(result: QueuedKeeperMessageResult): boolean {
   return TERMINAL_QUEUED_KEEPER_MESSAGE_STATUSES.has(result.status)
-}
-
-export function isKeeperContinuationCheckpointText(text: string): boolean {
-  return text.trim().startsWith(CONTINUATION_CHECKPOINT_PREFIX)
 }
 
 // Server no longer enforces an external timeout for keeper_msg.

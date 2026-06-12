@@ -701,6 +701,9 @@ let run
       let partial_response =
         partial_response_of_stop
           ~session_id
+          (* Display text only.  Checkpoint classification flows through
+             [stop_reason] → [Keeper_turn_outcome] (RFC-0232 P2); no
+             consumer may sniff this string. *)
           ~text:
             "Continuation checkpoint saved; keeper remains scheduled for the \
              next cycle."

@@ -505,30 +505,22 @@ let resolve_keeper_name_config ~(config : Workspace.config) args =
 let resolve_keeper_name ctx args =
   resolve_keeper_name_config ~config:ctx.config args
 
-let has_string_prefix ~prefix value =
-  let prefix_len = String.length prefix in
-  String.length value >= prefix_len
-  && String.equal (String.sub value 0 prefix_len) prefix
-;;
-
-let continuation_checkpoint_prefix = "Continuation checkpoint saved;"
-
 let direct_reply_visible_text body =
   try
     let json = Yojson.Safe.from_string body in
-    match Json_util.get_string json "reply" with
-    | None -> None
-    | Some reply ->
-        let visible =
-          reply
-          |> Keeper_skill_routing.strip_skill_route_lines
-          |> Keeper_execution.strip_state_blocks_text
-          |> String.trim
-        in
-        if visible = ""
-           || has_string_prefix ~prefix:continuation_checkpoint_prefix visible
-        then None
-        else Some visible
+    match Keeper_turn_outcome.of_reply_payload (Some json) with
+    | Keeper_turn_outcome.Continuation_checkpoint -> None
+    | Keeper_turn_outcome.Visible_reply -> (
+        match Json_util.get_string json "reply" with
+        | None -> None
+        | Some reply ->
+            let visible =
+              reply
+              |> Keeper_skill_routing.strip_skill_route_lines
+              |> Keeper_execution.strip_state_blocks_text
+              |> String.trim
+            in
+            if visible = "" then None else Some visible)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | Yojson.Json_error _ -> None

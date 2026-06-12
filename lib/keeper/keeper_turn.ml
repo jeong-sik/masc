@@ -686,6 +686,11 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ctx args : tool_result
                 in
                 `Assoc [
                   ("reply", `String result.response_text);
+                  ( Keeper_turn_outcome.wire_key,
+                    `String
+                      (Keeper_turn_outcome.to_label
+                         (Keeper_turn_outcome.of_stop_reason
+                            result.stop_reason)) );
                   ("model", `String surface_model_used);
                   ("model_used_raw", `String surface_model_used);
                   ("turns", `Int result.turn_count);

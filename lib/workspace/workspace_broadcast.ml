@@ -244,6 +244,20 @@ let broadcast ?trace_context ?(msg_type = "broadcast")
        Log.Misc.error "broadcast publish failed: %s" (Backend_types.show_error e));
   emit_message_activity config ~from_agent:safe_agent ~content:safe_content
     ~mention ();
+  (match mention with
+   | Some target when String.trim target <> "" ->
+       let record = Mention_inbox.{
+         id = Mention_inbox.generate_mention_id ();
+         target_agent = target;
+         source_agent = safe_agent;
+         source_kind = "broadcast_message";
+         source_id = string_of_int seq;
+         content_preview = String.sub safe_content 0 (min 200 (String.length safe_content));
+         created_at = Unix.gettimeofday ();
+         read_at = 0.0;
+       } in
+       Mention_inbox.append_mention config record
+   | None | Some _ -> ());
   (try !on_broadcast_mention mention
    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
      Log.Misc.warn "on_broadcast_mention callback failed: %s"

@@ -278,7 +278,23 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
         (match mention with
          | Some target ->
              Notify.notify_mention ~from_agent:author
-               ~target_agent:target ~message:content ()
+               ~target_agent:target ~message:content ();
+             (* Persist mention to inbox *)
+             (try
+                let record = Mention_inbox.{
+                  id = Mention_inbox.generate_mention_id ();
+                  target_agent = target;
+                  source_agent = author;
+                  source_kind = "board_post";
+                  source_id = Option.value ~default:"unknown" post_id;
+                  content_preview = String.sub content 0 (min 200 (String.length content));
+                  created_at = Unix.gettimeofday ();
+                  read_at = 0.0;
+                } in
+                Mention_inbox.append_mention config record
+              with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+                Log.Misc.warn "mention_inbox append failed (board_post): %s"
+                  (Printexc.to_string exn))
          | None -> ())
       end;
       Some result_tr
@@ -332,7 +348,23 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
         (match mention with
          | Some target ->
              Notify.notify_mention ~from_agent:author
-               ~target_agent:target ~message:content ()
+               ~target_agent:target ~message:content ();
+             (* Persist mention to inbox *)
+             (try
+                let record = Mention_inbox.{
+                  id = Mention_inbox.generate_mention_id ();
+                  target_agent = target;
+                  source_agent = author;
+                  source_kind = "board_comment";
+                  source_id = post_id;
+                  content_preview = String.sub content 0 (min 200 (String.length content));
+                  created_at = Unix.gettimeofday ();
+                  read_at = 0.0;
+                } in
+                Mention_inbox.append_mention config record
+              with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+                Log.Misc.warn "mention_inbox append failed (board_comment): %s"
+                  (Printexc.to_string exn))
          | None -> ())
       end;
       Some result_tr

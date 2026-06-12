@@ -90,7 +90,24 @@ let handle_broadcast ~tool_name ~start_time (ctx : context) : tool_result option
         Mcp_server.sse_broadcast state notification;
         Subscriptions.push_event_to_sessions notification;
         (match mention with
-         | Some target -> Notify.notify_mention ~from_agent:agent_name ~target_agent:target ~message ()
+         | Some target ->
+             Notify.notify_mention ~from_agent:agent_name ~target_agent:target ~message ();
+             (* Persist mention to inbox *)
+             (try
+                let record = Mention_inbox.{
+                  id = Mention_inbox.generate_mention_id ();
+                  target_agent = target;
+                  source_agent = agent_name;
+                  source_kind = "direct_message";
+                  source_id = "";
+                  content_preview = String.sub message 0 (min 200 (String.length message));
+                  created_at = Unix.gettimeofday ();
+                  read_at = 0.0;
+                } in
+                Mention_inbox.append_mention config record
+              with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+                Log.Misc.warn "mention_inbox append failed (comm): %s"
+                  (Printexc.to_string exn))
          | None -> ());
         ignore (config, agent_name);
         Audit_log.log_broadcast config ~agent_id:agent_name

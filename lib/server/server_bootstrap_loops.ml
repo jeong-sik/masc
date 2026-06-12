@@ -999,6 +999,10 @@ let start_keeper_loops
            Log.Keeper.warn
              "keeper_chat_consumer: failed to start: %s"
              (Printexc.to_string exn)));
+  (* Discord presence bridge — syncs keeper liveness to bot status. *)
+  fork_subsystem "discord_presence" (fun () ->
+    Discord_presence_bridge.start
+      ~sw ~clock ~workspace_config:state.workspace_config ());
   (* Phase 5: unified startup subsystem summary *)
   Log.Startup.info "subsystems: keeper loops started"
 ;;

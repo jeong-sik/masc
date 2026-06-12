@@ -30,7 +30,7 @@ let find_row ~provider ~model ~keeper rows =
       && row.keeper_profile = keeper)
     rows
 
-let json_check_status_completed : Tool_call_quality_benchmark_types.json_check =
+let json_check_status_completed : Tool_call_quality_benchmark.json_check =
   {
     path = "$.status";
     equals = Some (`String "completed");
@@ -40,11 +40,11 @@ let json_check_status_completed : Tool_call_quality_benchmark_types.json_check =
   }
 
 let selector_case ?(forbidden_tools = []) ?(forbidden_selectors = []) () :
-    Tool_call_quality_benchmark_types.benchmark_case =
+    Tool_call_quality_benchmark.benchmark_case =
   {
     id = "selector_case";
     prompt = "synthetic selector scoring case";
-    category = Tool_call_quality_benchmark_types.Tool_use;
+    category = Tool_call_quality_benchmark.Tool_use;
     keeper_profiles = [ "bench-selector" ];
     forbidden_tools;
     forbidden_selectors;
@@ -55,7 +55,7 @@ let selector_case ?(forbidden_tools = []) ?(forbidden_selectors = []) () :
   }
 
 let selector_tool_call ?route_evidence tool_name :
-    Tool_call_quality_benchmark_types.tool_call =
+    Tool_call_quality_benchmark.tool_call =
   {
     tool_name;
     success = true;
@@ -65,7 +65,7 @@ let selector_tool_call ?route_evidence tool_name :
     duration_ms = None;
   }
 
-let selector_run tool_calls : Tool_call_quality_benchmark_types.evidence_run =
+let selector_run tool_calls : Tool_call_quality_benchmark.evidence_run =
   {
     case_id = "selector_case";
     provider = "provider-d";
@@ -81,7 +81,7 @@ let selector_run tool_calls : Tool_call_quality_benchmark_types.evidence_run =
     input_tokens = None;
     output_tokens = None;
     cost_usd = None;
-    status = Tool_call_quality_benchmark_types.Run_ok;
+    status = Tool_call_quality_benchmark.Run_ok;
     tool_calls;
   }
 

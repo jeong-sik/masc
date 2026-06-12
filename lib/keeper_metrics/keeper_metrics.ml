@@ -42,7 +42,7 @@ type t =
   | Compactions
   | CompactionRatioChange
   | CompactionSavedTokens
-  | CompactionPairRepairFabrications
+  | CompactionPairRepairDrops
   | EmergencyCompactRatioThreshold
   | OperatorCompact
   | OperatorClear
@@ -262,8 +262,8 @@ let to_string = function
   | Compactions -> "masc_keeper_compactions_total"
   | CompactionRatioChange -> "masc_keeper_compaction_ratio_change"
   | CompactionSavedTokens -> "masc_keeper_compaction_saved_tokens_total"
-  | CompactionPairRepairFabrications ->
-    "masc_keeper_compaction_pair_repair_fabrications_total"
+  | CompactionPairRepairDrops ->
+    "masc_keeper_compaction_pair_repair_drops_total"
   | EmergencyCompactRatioThreshold ->
     "masc_keeper_emergency_compact_ratio_threshold"
   | OperatorCompact -> "masc_keeper_operator_compact_total"
@@ -472,7 +472,7 @@ let all : t list =
     TurnLatencyByModelBucket; ProviderCooldownSkip; ProviderCooldownRemainingSec; ProviderBlockDurationSec;
     TurnQueueDepth; SupervisorSweepStarts; SupervisorLastSweepUnixtime; DomainPoolFork;
     TurnHolderBookkeepingFailures; Compactions; CompactionRatioChange; CompactionSavedTokens;
-    CompactionPairRepairFabrications; EmergencyCompactRatioThreshold; OperatorCompact; OperatorClear;
+    CompactionPairRepairDrops; EmergencyCompactRatioThreshold; OperatorCompact; OperatorClear;
     CompactionNoop; ToolPairRepair; ToolEmissionRegistrySize; ToolEmissionPushes;
     ToolUnderusedAllowedCount; ToolUnderusedAllowed; PathRejection; IdeOrphanWrites;
     PathResolverIdentityMismatch; HeartbeatSuccesses; HeartbeatFailures; CleanupTrackingFailures;

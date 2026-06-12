@@ -499,28 +499,10 @@ let assemble_hooks
         | Some r -> [ r ]
         | None -> []
       in
-      let tool_pair_counts messages =
-        List.fold_left
-          (fun (uses, results) (msg : Agent_sdk.Types.message) ->
-             List.fold_left
-               (fun (uses, results) -> function
-                 | Agent_sdk.Types.ToolUse _ -> uses + 1, results
-                 | Agent_sdk.Types.ToolResult _ -> uses, results + 1
-                 | Agent_sdk.Types.Text _
-                 | Agent_sdk.Types.Thinking _
-                 | Agent_sdk.Types.RedactedThinking _
-                 | Agent_sdk.Types.Image _
-                 | Agent_sdk.Types.Document _
-                 | Agent_sdk.Types.Audio _ -> uses, results)
-               (uses, results)
-               msg.content)
-          (0, 0)
-          messages
-      in
       let repair_broken_tool_call_pairs_observed messages =
-        let before_uses, before_results = tool_pair_counts messages in
-        let repaired = Keeper_context_core.repair_broken_tool_call_pairs messages in
-        let after_uses, after_results = tool_pair_counts repaired in
+        let repaired, stats =
+          Keeper_context_core.repair_broken_tool_call_pairs_with_stats messages
+        in
         let record kind delta =
           if delta > 0 then
             Otel_metric_store.inc_counter
@@ -529,8 +511,40 @@ let assemble_hooks
               ~delta:(float_of_int delta)
               ()
         in
-        record "dangling_tool_use" (max 0 (before_uses - after_uses));
-        record "orphan_tool_result" (max 0 (before_results - after_results));
+        record "dropped_tool_use" stats.dropped_tool_uses;
+        record "dropped_tool_result" stats.dropped_tool_results;
+        if Keeper_context_core.tool_pair_repair_stats_changed stats then (
+          let tool_use_sample_json =
+            List.map
+              (fun (tool_use_id, tool_name) ->
+                 `Assoc
+                   [ "tool_use_id", `String tool_use_id
+                   ; "tool_name", `String tool_name
+                   ])
+              stats.dropped_tool_use_samples
+          in
+          let tool_result_id_json =
+            List.map
+              (fun tool_use_id -> `String tool_use_id)
+              stats.dropped_tool_result_ids
+          in
+          Log.Harness.emit
+            Log.Warn
+            ~details:
+              (`Assoc
+                  [ "keeper_name", `String agent_name
+                  ; "site", `String "keeper_reducer"
+                  ; "dropped_tool_uses", `Int stats.dropped_tool_uses
+                  ; "dropped_tool_results", `Int stats.dropped_tool_results
+                  ; "dropped_tool_use_samples", `List tool_use_sample_json
+                  ; "dropped_tool_result_ids", `List tool_result_id_json
+                  ])
+            (Printf.sprintf
+               "keeper_reducer_pair_repair keeper=%s dropped_tool_uses=%d \
+                dropped_tool_results=%d"
+               agent_name
+               stats.dropped_tool_uses
+               stats.dropped_tool_results));
         repaired
       in
       Agent_sdk.Context_reducer.compose

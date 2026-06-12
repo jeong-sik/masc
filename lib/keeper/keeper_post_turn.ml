@@ -93,6 +93,30 @@ type overflow_retry_recovery = {
   turn_generation : int;
 } [@@warning "-69"]
 
+let log_orphan_tool_result_repair
+    ~keeper_name
+    ~site
+    (stats : Keeper_context_core.tool_pair_repair_stats) =
+  if Keeper_context_core.tool_pair_repair_stats_changed stats then
+    Log.Harness.emit
+      Log.Warn
+      ~details:
+        (`Assoc
+            [ "keeper_name", `String keeper_name
+            ; "site", `String site
+            ; "dropped_tool_results", `Int stats.dropped_tool_results
+            ; ( "dropped_tool_result_ids"
+              , `List
+                  (List.map
+                     (fun tool_use_id -> `String tool_use_id)
+                     stats.dropped_tool_result_ids) )
+            ])
+      (Printf.sprintf
+         "orphan_tool_result_repair keeper=%s site=%s dropped_tool_results=%d"
+         keeper_name
+         site
+         stats.dropped_tool_results)
+
 (* ── Tier A5: autonomous post-turn wire-in (Cycle 22) ──────────────
    Feature-flag-gated, non-invasive layer. When [MASC_AUTONOMOUS] is
    off (default), this is a pure pass-through — zero impact on the
@@ -593,14 +617,20 @@ let apply_post_turn_lifecycle_with_resilience_handles
             create_session ~session_id:(Keeper_id.Trace_id.to_string base_meta.runtime.trace_id) ~base_dir
           in
           let compacted_ctx =
+            let messages, pair_repair_stats =
+              repair_orphan_tool_result_messages_with_stats
+                (messages_of_context compacted_ctx)
+            in
+            log_orphan_tool_result_repair
+              ~keeper_name:base_meta.agent_name
+              ~site:"post_turn_compaction"
+              pair_repair_stats;
             {
               compacted_ctx with
               checkpoint =
                 {
                   (checkpoint_of_context compacted_ctx) with
-                  messages =
-                    repair_orphan_tool_result_messages
-                      (messages_of_context compacted_ctx);
+                  messages;
                 };
             }
           in
@@ -864,14 +894,20 @@ let recover_latest_checkpoint_for_overflow_retry
           }
         in
         let compacted_ctx =
+          let messages, pair_repair_stats =
+            repair_orphan_tool_result_messages_with_stats
+              (messages_of_context compacted_ctx)
+          in
+          log_orphan_tool_result_repair
+            ~keeper_name:meta.agent_name
+            ~site:"post_turn_compaction_recovery"
+            pair_repair_stats;
           {
             compacted_ctx with
             checkpoint =
               {
                 (checkpoint_of_context compacted_ctx) with
-                messages =
-                  repair_orphan_tool_result_messages
-                    (messages_of_context compacted_ctx);
+                messages;
               };
           }
         in

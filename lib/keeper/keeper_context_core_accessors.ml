@@ -252,72 +252,230 @@ let pair_repair_metadata_keys =
 let with_pair_repair_metadata =
   Keeper_context_core_pair_repair_stats.with_pair_repair_metadata
 
-let repair_dangling_tool_use_messages_with_stats
+type tool_pair_repair_mode =
+  { drop_dangling_uses : bool
+  ; drop_orphan_results : bool
+  }
+
+let record_dropped_tool_use stats id name =
+  let id = bound_pair_repair_diagnostic_string id in
+  let name = bound_pair_repair_diagnostic_string name in
+  stats :=
+    add_tool_pair_repair_stats
+      !stats
+      { empty_tool_pair_repair_stats with
+        dropped_tool_uses = 1
+      ; dropped_tool_use_samples = [ id, name ]
+      }
+
+let record_dropped_tool_result stats tool_use_id =
+  let tool_use_id = bound_pair_repair_diagnostic_string tool_use_id in
+  stats :=
+    add_tool_pair_repair_stats
+      !stats
+      { empty_tool_pair_repair_stats with
+        dropped_tool_results = 1
+      ; dropped_tool_result_ids = [ tool_use_id ]
+      }
+
+let pair_repair_metadata_kind stats =
+  match stats.dropped_tool_uses > 0, stats.dropped_tool_results > 0 with
+  | true, true -> "dropped_tool_pair_blocks"
+  | true, false -> "dropped_tool_use"
+  | false, true -> "dropped_tool_result"
+  | false, false -> "none"
+
+let annotate_pair_repair_metadata stats (msg : Agent_sdk.Types.message) =
+  if not (tool_pair_repair_stats_changed stats)
+  then msg
+  else
+    msg
+    |> with_pair_repair_metadata
+         ~tool_use_samples:stats.dropped_tool_use_samples
+         ~tool_result_ids:stats.dropped_tool_result_ids
+         ~kind:(pair_repair_metadata_kind stats)
+         ~count:(stats.dropped_tool_uses + stats.dropped_tool_results)
+
+let repaired_message_opt msg stats content =
+  match content with
+  | [] -> None
+  | content -> Some ({ msg with content } |> annotate_pair_repair_metadata stats)
+
+let is_tool_result_span_message msg =
+  has_tool_result_block msg && tool_use_ids_of_message msg = []
+
+let split_tool_result_group messages =
+  let rec loop original result remainder = function
+    | msg :: rest when tool_use_ids_of_message msg <> [] ->
+        List.rev original, List.rev result, List.rev remainder, msg :: rest
+    | msg :: rest when is_tool_result_span_message msg ->
+        loop (msg :: original) (msg :: result) remainder rest
+    | msg :: rest -> loop (msg :: original) result (msg :: remainder) rest
+    | [] -> List.rev original, List.rev result, List.rev remainder, []
+  in
+  loop [] [] [] messages
+
+let filter_group_message_content
+    mode
+    ~(allowed_tool_use_ids : string list)
+    ~(matched_tool_result_ids : string list)
+    ~(seen_tool_result_ids : string list ref)
+    (msg : Agent_sdk.Types.message)
+    : Agent_sdk.Types.content_block list * tool_pair_repair_stats =
+  let stats = ref empty_tool_pair_repair_stats in
+  let content =
+    List.filter_map
+      (function
+        | Agent_sdk.Types.ToolUse { id; name; _ }
+          when mode.drop_dangling_uses
+               && not (List.mem id matched_tool_result_ids) ->
+            record_dropped_tool_use stats id name;
+            None
+        | Agent_sdk.Types.ToolResult { tool_use_id; _ } as block
+          when mode.drop_orphan_results ->
+            let allowed = List.mem tool_use_id allowed_tool_use_ids in
+            let duplicate = List.mem tool_use_id !seen_tool_result_ids in
+            if allowed && not duplicate
+            then (
+              seen_tool_result_ids := tool_use_id :: !seen_tool_result_ids;
+              Some block)
+            else (
+              record_dropped_tool_result stats tool_use_id;
+              None)
+        | other -> Some other)
+      msg.content
+  in
+  content, !stats
+
+let filter_orphan_result_message_content
+    mode
+    (msg : Agent_sdk.Types.message)
+    : Agent_sdk.Types.content_block list * tool_pair_repair_stats =
+  if not mode.drop_orphan_results
+  then msg.content, empty_tool_pair_repair_stats
+  else
+    let stats = ref empty_tool_pair_repair_stats in
+    let content =
+      List.filter_map
+        (function
+          | Agent_sdk.Types.ToolResult { tool_use_id; _ } ->
+              record_dropped_tool_result stats tool_use_id;
+              None
+          | other -> Some other)
+        msg.content
+    in
+    content, !stats
+
+let order_tool_result_group_by_tool_use_ids tool_use_ids messages =
+  let rec index_of needle index = function
+    | [] -> None
+    | id :: rest ->
+        if String.equal needle id
+        then Some index
+        else index_of needle (index + 1) rest
+  in
+  let message_rank msg =
+    msg
+    |> tool_result_ids_of_message
+    |> List.filter_map (fun id -> index_of id 0 tool_use_ids)
+    |> function
+    | [] -> max_int
+    | ranks -> List.fold_left min max_int ranks
+  in
+  messages
+  |> List.mapi (fun original_index msg -> message_rank msg, original_index, msg)
+  |> List.sort (fun (left_rank, left_index, _) (right_rank, right_index, _) ->
+    match Int.compare left_rank right_rank with
+    | 0 -> Int.compare left_index right_index
+    | comparison -> comparison)
+  |> List.map (fun (_, _, msg) -> msg)
+
+let repair_tool_call_pairs_with_stats
+    mode
     (messages : Agent_sdk.Types.message list)
     : Agent_sdk.Types.message list * tool_pair_repair_stats =
-  let repair_with_next
-      (current : Agent_sdk.Types.message)
-      (next_opt : Agent_sdk.Types.message option) =
-    let next_tool_result_ids =
-      match next_opt with
-      | Some next -> tool_result_ids_of_message next
-      | None -> []
+  let reorder_for_pairing = mode.drop_dangling_uses && mode.drop_orphan_results in
+  let append_repaired acc stats msg content =
+    match repaired_message_opt msg stats content with
+    | None -> acc
+    | Some repaired -> repaired :: acc
+  in
+  let append_filtered_group_message
+      allowed_tool_use_ids
+      matched_tool_result_ids
+      seen_tool_result_ids
+      (acc, acc_stats)
+      msg =
+    let content, stats =
+      filter_group_message_content
+        mode
+        ~allowed_tool_use_ids
+        ~matched_tool_result_ids
+        ~seen_tool_result_ids
+        msg
     in
-    let has_dangling =
-      List.exists
-        (function
-          | Agent_sdk.Types.ToolUse { id; _ } ->
-              not (List.mem id next_tool_result_ids)
-          (* Only [ToolUse] blocks can be dangling without a paired ToolResult. *)
-          | Agent_sdk.Types.Text _
-          | Agent_sdk.Types.Thinking _
-          | Agent_sdk.Types.RedactedThinking _
-          | Agent_sdk.Types.ToolResult _
-          | Agent_sdk.Types.Image _
-          | Agent_sdk.Types.Document _
-          | Agent_sdk.Types.Audio _ -> false)
-        current.content
-    in
-    if not has_dangling then (current, empty_tool_pair_repair_stats)
-    else
-      let dropped_tool_uses = ref 0 in
-      let dropped_tool_use_samples = ref [] in
-      let content =
-        List.filter_map
-          (function
-            | Agent_sdk.Types.ToolUse { id; name; _ }
-              when not (List.mem id next_tool_result_ids) ->
-                incr dropped_tool_uses;
-                let id = bound_pair_repair_diagnostic_string id in
-                let name = bound_pair_repair_diagnostic_string name in
-                dropped_tool_use_samples := (id, name) :: !dropped_tool_use_samples;
-                None
-            | other -> Some other)
-          current.content
-      in
-      let dropped_tool_use_samples = List.rev !dropped_tool_use_samples in
-      ( { current with content }
-        |> with_pair_repair_metadata
-             ~tool_use_samples:dropped_tool_use_samples
-             ~kind:"dropped_tool_use"
-             ~count:!dropped_tool_uses
-      , { empty_tool_pair_repair_stats with
-          dropped_tool_uses = !dropped_tool_uses
-        ; dropped_tool_use_samples
-        } )
+    ( append_repaired acc stats msg content
+    , add_tool_pair_repair_stats acc_stats stats )
   in
   let rec loop acc_stats acc = function
     | [] -> List.rev acc, acc_stats
-    | [ current ] ->
-        let repaired, repair_stats = repair_with_next current None in
-        let acc = if repaired.content = [] then acc else repaired :: acc in
-        List.rev acc, add_tool_pair_repair_stats acc_stats repair_stats
-    | current :: ((next :: _) as rest) ->
-        let repaired, repair_stats = repair_with_next current (Some next) in
-        let acc = if repaired.content = [] then acc else repaired :: acc in
-        loop (add_tool_pair_repair_stats acc_stats repair_stats) acc rest
+    | msg :: rest ->
+        let tool_use_ids = tool_use_ids_of_message msg in
+        if tool_use_ids <> []
+        then
+          let original_group, result_group, remainder_group, rest =
+            split_tool_result_group rest
+          in
+          let matched_tool_result_ids =
+            tool_result_ids_of_message msg
+            @ List.concat_map tool_result_ids_of_message result_group
+          in
+          let seen_tool_result_ids = ref [] in
+          let current_content, current_stats =
+            filter_group_message_content
+              mode
+              ~allowed_tool_use_ids:tool_use_ids
+              ~matched_tool_result_ids
+              ~seen_tool_result_ids
+              msg
+          in
+          let acc = append_repaired acc current_stats msg current_content in
+          let acc_stats =
+            add_tool_pair_repair_stats acc_stats current_stats
+          in
+          let group =
+            if reorder_for_pairing
+            then
+              order_tool_result_group_by_tool_use_ids tool_use_ids result_group
+              @ remainder_group
+            else original_group
+          in
+          let acc, acc_stats =
+            List.fold_left
+              (append_filtered_group_message
+                 tool_use_ids
+                 matched_tool_result_ids
+                 seen_tool_result_ids)
+              (acc, acc_stats)
+              group
+          in
+          loop acc_stats acc rest
+        else if has_tool_result_block msg
+        then
+          let content, stats = filter_orphan_result_message_content mode msg in
+          let acc = append_repaired acc stats msg content in
+          loop (add_tool_pair_repair_stats acc_stats stats) acc rest
+        else
+          loop acc_stats (msg :: acc) rest
   in
   loop empty_tool_pair_repair_stats [] messages
+
+let repair_dangling_tool_use_messages_with_stats
+    (messages : Agent_sdk.Types.message list)
+    : Agent_sdk.Types.message list * tool_pair_repair_stats =
+  repair_tool_call_pairs_with_stats
+    { drop_dangling_uses = true; drop_orphan_results = false }
+    messages
 
 let repair_dangling_tool_use_messages messages =
   fst (repair_dangling_tool_use_messages_with_stats messages)
@@ -325,74 +483,9 @@ let repair_dangling_tool_use_messages messages =
 let repair_orphan_tool_result_messages_with_stats
     (messages : Agent_sdk.Types.message list)
     : Agent_sdk.Types.message list * tool_pair_repair_stats =
-  let rec loop acc_stats prev acc = function
-    | [] -> List.rev acc, acc_stats
-    | msg :: rest ->
-        let repaired, stats =
-          if not (has_tool_result_block msg) then
-            (msg, empty_tool_pair_repair_stats)
-          else
-            let prev_tool_use_ids =
-              match prev with
-              | Some previous -> tool_use_ids_of_message previous
-              | None -> []
-            in
-            (* Anthropic validates ToolResult blocks against ToolUse blocks
-               in the immediately previous message. If checkpoint capping
-               drops that predecessor, the resumed history becomes invalid.
-               Drop only the orphaned structured result blocks from visible
-               content and retain bounded diagnostics in pair-repair stats
-               and metadata. *)
-            let has_orphan =
-              List.exists
-                (function
-                  | Agent_sdk.Types.ToolResult { tool_use_id; _ } ->
-                      not (List.mem tool_use_id prev_tool_use_ids)
-                  (* Only [ToolResult] can be orphaned w.r.t. prior ToolUse ids. *)
-                  | Agent_sdk.Types.Text _
-                  | Agent_sdk.Types.Thinking _
-                  | Agent_sdk.Types.RedactedThinking _
-                  | Agent_sdk.Types.ToolUse _
-                  | Agent_sdk.Types.Image _
-                  | Agent_sdk.Types.Document _
-                  | Agent_sdk.Types.Audio _ -> false)
-                msg.content
-            in
-            if not has_orphan then (msg, empty_tool_pair_repair_stats)
-            else
-              let dropped_tool_results = ref 0 in
-              let dropped_tool_result_ids = ref [] in
-              let content =
-                List.filter_map
-                  (function
-                    | Agent_sdk.Types.ToolResult { tool_use_id; _ }
-                      when not (List.mem tool_use_id prev_tool_use_ids) ->
-                        incr dropped_tool_results;
-                        let tool_use_id =
-                          bound_pair_repair_diagnostic_string tool_use_id
-                        in
-                        dropped_tool_result_ids := tool_use_id :: !dropped_tool_result_ids;
-                        None
-                    | other -> Some other)
-                  msg.content
-              in
-              let dropped_tool_result_ids = List.rev !dropped_tool_result_ids in
-              ( { msg with content }
-                |> with_pair_repair_metadata
-                     ~tool_result_ids:dropped_tool_result_ids
-                     ~kind:"dropped_tool_result"
-                     ~count:!dropped_tool_results
-              , { empty_tool_pair_repair_stats with
-                  dropped_tool_results = !dropped_tool_results
-                ; dropped_tool_result_ids
-                } )
-        in
-        let prev, acc =
-          if repaired.content = [] then prev, acc else Some repaired, repaired :: acc
-        in
-        loop (add_tool_pair_repair_stats acc_stats stats) prev acc rest
-  in
-  loop empty_tool_pair_repair_stats None [] messages
+  repair_tool_call_pairs_with_stats
+    { drop_dangling_uses = false; drop_orphan_results = true }
+    messages
 
 let repair_orphan_tool_result_messages messages =
   fst (repair_orphan_tool_result_messages_with_stats messages)
@@ -400,9 +493,9 @@ let repair_orphan_tool_result_messages messages =
 let repair_broken_tool_call_pairs_with_stats
     (messages : Agent_sdk.Types.message list)
     : Agent_sdk.Types.message list * tool_pair_repair_stats =
-  let messages, dangling_stats = repair_dangling_tool_use_messages_with_stats messages in
-  let messages, orphan_stats = repair_orphan_tool_result_messages_with_stats messages in
-  messages, add_tool_pair_repair_stats dangling_stats orphan_stats
+  repair_tool_call_pairs_with_stats
+    { drop_dangling_uses = true; drop_orphan_results = true }
+    messages
 
 let repair_broken_tool_call_pairs
     (messages : Agent_sdk.Types.message list) : Agent_sdk.Types.message list =

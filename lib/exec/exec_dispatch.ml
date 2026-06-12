@@ -127,13 +127,18 @@ let env_key entry =
   | None -> entry
   | Some idx -> String.sub entry 0 idx
 
-let resolve_host_env = function
-  | [] -> None
+let resolve_host_env ?base_host_env = function
+  | [] -> base_host_env
   | env_bindings ->
       let overrides = resolve_env env_bindings |> Array.to_list in
       let override_keys = List.map env_key overrides in
+      let base =
+        match base_host_env with
+        | Some env -> env
+        | None -> Unix.environment ()
+      in
       let inherited =
-        Unix.environment ()
+        base
         |> Array.to_list
         |> List.filter (fun entry ->
           not (List.mem (env_key entry) override_keys))
@@ -162,7 +167,7 @@ let process_spec_of_simple (s : Shell_ir.simple) =
   in
   (argv, env, cwd)
 
-let dispatch_simple ?stdin_content ?on_output_chunk (s : Shell_ir.simple) =
+let dispatch_simple ?base_host_env ?stdin_content ?on_output_chunk (s : Shell_ir.simple) =
   let argv, env, cwd = process_spec_of_simple s in
   match redirect_plan_of_redirects s.redirects with
   | Error message -> unsupported_redirect_result message
@@ -170,7 +175,7 @@ let dispatch_simple ?stdin_content ?on_output_chunk (s : Shell_ir.simple) =
     match s.sandbox with
     | Host ->
       let raw_source = String.concat " " argv in
-      let host_env = resolve_host_env s.env in
+      let host_env = resolve_host_env ?base_host_env s.env in
       let run () =
         match stdin_content with
         | None ->
@@ -250,7 +255,7 @@ let dispatch_simple ?stdin_content ?on_output_chunk (s : Shell_ir.simple) =
 
 let invalid_pipeline stderr = { status = Unix.WEXITED 1; stdout = ""; stderr }
 
-let host_pipeline_specs stages =
+let host_pipeline_specs ?base_host_env stages =
   let rec loop acc = function
     | [] -> Some (List.rev acc)
     | Shell_ir.Simple simple :: rest ->
@@ -258,7 +263,7 @@ let host_pipeline_specs stages =
          | Host when simple.redirects = [] ->
              let argv, _env, cwd = process_spec_of_simple simple in
              let stage : Process_eio.pipeline_stage =
-               { argv; env = resolve_host_env simple.env; cwd }
+               { argv; env = resolve_host_env ?base_host_env simple.env; cwd }
              in
              loop (stage :: acc) rest
          | _unsupported -> None)
@@ -294,7 +299,7 @@ let docker_pipeline_specs stages =
 
 (* TEL-OK: this lower-level Shell IR dispatcher is wrapped by Execute/keeper
    telemetry at the action boundary; it only preserves captured output delivery. *)
-let rec dispatch_pipeline ?stdin_content ?on_output_chunk stages =
+let rec dispatch_pipeline ?base_host_env ?stdin_content ?on_output_chunk stages =
   let result =
     match stages with
     | [] ->
@@ -302,7 +307,7 @@ let rec dispatch_pipeline ?stdin_content ?on_output_chunk stages =
     | [ _ ] ->
         invalid_pipeline "single-stage pipeline not supported in native dispatch"
     | _ ->
-        (match host_pipeline_specs stages with
+        (match host_pipeline_specs ?base_host_env stages with
          | Some specs ->
              let raw_source =
                specs
@@ -328,6 +333,7 @@ let rec dispatch_pipeline ?stdin_content ?on_output_chunk stages =
                    | Shell_ir.Simple s :: rest ->
                        let stage_result =
                          dispatch_simple
+                           ?base_host_env
                            ~stdin_content:prev_stdout
                            s
                        in
@@ -354,7 +360,7 @@ let rec dispatch_pipeline ?stdin_content ?on_output_chunk stages =
                   | first :: rest -> (
                     match first with
                     | Shell_ir.Simple s ->
-                        let first_result = dispatch_simple s in
+                        let first_result = dispatch_simple ?base_host_env s in
                         let status =
                           pipeline_status (Unix.WEXITED 0) first_result.status
                         in
@@ -376,12 +382,12 @@ let rec dispatch_pipeline ?stdin_content ?on_output_chunk stages =
   in
   emit_captured_output on_output_chunk result
 
-and dispatch ?on_output_chunk (ir : Shell_ir.t) =
+and dispatch ?base_host_env ?on_output_chunk (ir : Shell_ir.t) =
   match ir with
-  | Shell_ir.Simple s -> dispatch_simple ?on_output_chunk s
-  | Pipeline stages -> dispatch_pipeline ?on_output_chunk stages
+  | Shell_ir.Simple s -> dispatch_simple ?base_host_env ?on_output_chunk s
+  | Pipeline stages -> dispatch_pipeline ?base_host_env ?on_output_chunk stages
 
-let dispatch_decided ?on_output_chunk (envelope : Shell_ir_risk.decided Shell_ir_risk.decided_ir) :
+let dispatch_decided ?base_host_env ?on_output_chunk (envelope : Shell_ir_risk.decided Shell_ir_risk.decided_ir) :
     dispatch_result =
   (match envelope.Shell_ir_risk.risk with
    | Shell_ir_risk.Destructive_protected ->
@@ -394,4 +400,4 @@ let dispatch_decided ?on_output_chunk (envelope : Shell_ir_risk.decided Shell_ir
    | Shell_ir_risk.R1_Reversible_mutation
    | Shell_ir_risk.R2_Irreversible ->
        ());
-  dispatch ?on_output_chunk envelope.Shell_ir_risk.ir
+  dispatch ?base_host_env ?on_output_chunk envelope.Shell_ir_risk.ir

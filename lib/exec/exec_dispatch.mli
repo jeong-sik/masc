@@ -9,6 +9,7 @@ val resolve_arg : Shell_ir.arg -> string
 
 
 val dispatch_simple :
+  ?base_host_env:string array ->
   ?stdin_content:string ->
   ?on_output_chunk:([ `Stdout of string | `Stderr of string ] -> unit) ->
   Shell_ir.simple ->
@@ -22,6 +23,7 @@ val dispatch_simple :
     output after completion. *)
 
 val dispatch :
+  ?base_host_env:string array ->
   ?on_output_chunk:([ `Stdout of string | `Stderr of string ] -> unit) ->
   Shell_ir.t ->
   dispatch_result
@@ -31,6 +33,7 @@ val dispatch :
     Exposed for tests and legacy call sites. *)
 
 val dispatch_decided :
+  ?base_host_env:string array ->
   ?on_output_chunk:([ `Stdout of string | `Stderr of string ] -> unit) ->
   Shell_ir_risk.decided Shell_ir_risk.decided_ir ->
   dispatch_result
@@ -38,6 +41,7 @@ val dispatch_decided :
     ensures the IR has passed through [Shell_ir_risk.classify]. *)
 
 val dispatch_pipeline :
+  ?base_host_env:string array ->
   ?stdin_content:string ->
   ?on_output_chunk:([ `Stdout of string | `Stderr of string ] -> unit) ->
   Shell_ir.t list ->

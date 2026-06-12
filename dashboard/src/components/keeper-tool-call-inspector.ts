@@ -2,10 +2,11 @@
 // Fetches from GET /api/v1/keepers/:name/tool-calls
 
 import { html } from 'htm/preact'
-import { useEffect } from 'preact/hooks'
+import { useCallback, useEffect } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
 import { fetchKeeperToolCalls } from '../api/dashboard'
 import type { ToolCallEntry, ToolCallsResponse, TelemetryFreshnessMetadata } from '../api/dashboard'
+import { lastEvent } from '../sse'
 import { formatTimeHms } from '../lib/format-time'
 import { formatMsCompact } from '../lib/format-number'
 import { LoadingState } from './common/feedback-state'
@@ -25,6 +26,7 @@ import {
   routeLinksForContext,
   type IdeContextRouteLink,
 } from './ide/ide-context-lens'
+import { isKeeperToolActivityEvent, sseEventMatchesKeeper } from './keeper-sse-match'
 
 // Delegated to lib/format-time (SSOT)
 const formatTimestamp = formatTimeHms
@@ -594,14 +596,27 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
   const resource = useManagedAsyncResource<ToolCallsResponse | null>(null)
   const filterTool = useSignal('')
 
+  const loadToolCalls = useCallback((signal: AbortSignal) =>
+    fetchKeeperToolCalls(keeperName, 100, { signal }), [keeperName])
+
   useEffect(() => {
-    void resource.load(async (signal) => {
-      return await fetchKeeperToolCalls(keeperName, 100, { signal })
-    })
+    void resource.load(loadToolCalls)
     return () => {
       resource.cancel()
     }
-  }, [keeperName, resource])
+  }, [loadToolCalls, resource])
+
+  useEffect(() => {
+    const unsubscribe = lastEvent.subscribe((event) => {
+      if (!event) return
+      if (!isKeeperToolActivityEvent(event)) return
+      if (!sseEventMatchesKeeper(event, keeperName)) return
+      void resource.load(loadToolCalls)
+    })
+    return () => {
+      unsubscribe()
+    }
+  }, [keeperName, loadToolCalls, resource])
 
   const response = resource.state.value.data
   const allEntries = response?.entries ?? []

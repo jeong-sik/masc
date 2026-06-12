@@ -1054,6 +1054,11 @@
  (modules test_schedule_store)
  (libraries masc_test_deps masc_schedule))
 
+(test
+ (name test_schedule_service)
+ (modules test_schedule_service)
+ (libraries masc_test_deps masc_schedule))
+
 ; Typed TOML field resolution helper (RFC-0141 Phase 1).
 
 (test

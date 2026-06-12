@@ -654,6 +654,7 @@
   ; test_command_plane_help removed (CP purge)
   test_dashboard_cache
   test_dashboard_http_core
+  test_dashboard_keeper_worker_degrade_source
   test_eval_feed
   test_dashboard_verification
   test_tool_quality_classify
@@ -835,6 +836,7 @@
   ; test_command_plane_help removed (CP purge)
   test_dashboard_cache
   test_dashboard_http_core
+  test_dashboard_keeper_worker_degrade_source
   test_eval_feed
   test_dashboard_verification
   test_tool_quality_classify

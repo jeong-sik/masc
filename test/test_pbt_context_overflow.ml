@@ -267,6 +267,17 @@ let assistant_tool_use ?(input = `Null) id name : Agent_sdk.Types.message =
   ; metadata = []
   }
 
+let assistant_text_and_tool_use ?(input = `Null) text id name : Agent_sdk.Types.message =
+  { role = Agent_sdk.Types.Assistant
+  ; content =
+      [ Agent_sdk.Types.Text text
+      ; Agent_sdk.Types.ToolUse { id; name; input }
+      ]
+  ; name = None
+  ; tool_call_id = None
+  ; metadata = []
+  }
+
 let user_tool_result id content : Agent_sdk.Types.message =
   { role = Agent_sdk.Types.User
   ; content =
@@ -283,50 +294,22 @@ let user_tool_result id content : Agent_sdk.Types.message =
   ; metadata = []
   }
 
-let test_pair_repair_stats_count_downgrades () =
-  let messages =
-    [ user_text "q"
-    ; assistant_tool_use "dangling" "calc"
-    ; user_text "interrupt"
-    ; user_tool_result "orphan" "late"
-    ]
-  in
-  let repaired, stats = KC.repair_broken_tool_call_pairs_with_stats messages in
-  Alcotest.(check bool)
-    "repair stats changed"
-    true
-    (KC.tool_pair_repair_stats_changed stats);
-  Alcotest.(check int) "dangling tool use downgraded" 1 stats.downgraded_tool_uses;
-  Alcotest.(check int) "orphan tool result downgraded" 1 stats.downgraded_tool_results;
-  let repair_metadata =
-    List.filter_map
-      (fun (msg : Agent_sdk.Types.message) ->
-         match
-           ( List.assoc_opt "was_fabricated" msg.metadata
-           , List.assoc_opt KC.pair_repair_metadata_key msg.metadata )
-         with
-         | Some (`Bool true), Some (`Assoc fields) ->
-           (match List.assoc_opt "kind" fields, List.assoc_opt "count" fields with
-            | Some (`String kind), Some (`Int count) -> Some (kind, count)
-            | _ -> None)
-         | _ -> None)
-      repaired
-  in
-  Alcotest.(check (list (pair string int)))
-    "repaired messages carry fabrication metadata"
-    [ "downgraded_tool_use", 1; "downgraded_tool_result", 1 ]
-    repair_metadata;
-  let has_structured_tool_block =
-    List.exists
-      (fun (msg : Agent_sdk.Types.message) ->
-         List.exists
-           (function
-             | Agent_sdk.Types.ToolUse _ | Agent_sdk.Types.ToolResult _ -> true
-             | _ -> false)
-           msg.content)
-      repaired
-  in
-  Alcotest.(check bool) "structured tool blocks removed" false has_structured_tool_block
+let user_text_and_tool_result text id content : Agent_sdk.Types.message =
+  { role = Agent_sdk.Types.User
+  ; content =
+      [ Agent_sdk.Types.Text text
+      ; Agent_sdk.Types.ToolResult
+          { tool_use_id = id
+          ; content
+          ; is_error = false
+          ; json = None
+          ; content_blocks = None
+          }
+      ]
+  ; name = None
+  ; tool_call_id = None
+  ; metadata = []
+  }
 
 let text_blocks (messages : Agent_sdk.Types.message list) =
   List.concat_map
@@ -347,7 +330,65 @@ let text_blocks (messages : Agent_sdk.Types.message list) =
 let text_contains needle texts =
   List.exists (fun text -> Astring.String.is_infix ~affix:needle text) texts
 
-let test_pair_repair_elides_dangling_tool_use_details () =
+let test_pair_repair_stats_count_drops () =
+  let messages =
+    [ user_text "q"
+    ; assistant_text_and_tool_use "assistant kept text" "dangling" "calc"
+    ; user_text "interrupt"
+    ; user_text_and_tool_result "result wrapper kept text" "orphan" "late"
+    ]
+  in
+  let repaired, stats = KC.repair_broken_tool_call_pairs_with_stats messages in
+  Alcotest.(check bool)
+    "repair stats changed"
+    true
+    (KC.tool_pair_repair_stats_changed stats);
+  Alcotest.(check int) "dangling tool use dropped" 1 stats.dropped_tool_uses;
+  Alcotest.(check int) "orphan tool result dropped" 1 stats.dropped_tool_results;
+  Alcotest.(check (list (pair string string)))
+    "dropped tool use sample preserved in stats"
+    [ "dangling", "calc" ]
+    stats.dropped_tool_use_samples;
+  Alcotest.(check (list string))
+    "dropped tool result id preserved in stats"
+    [ "orphan" ]
+    stats.dropped_tool_result_ids;
+  let repair_metadata =
+    List.filter_map
+      (fun (msg : Agent_sdk.Types.message) ->
+         match
+           ( List.assoc_opt "was_repaired" msg.metadata
+           , List.assoc_opt KC.pair_repair_metadata_key msg.metadata )
+         with
+         | Some (`Bool true), Some (`Assoc fields) ->
+           (match List.assoc_opt "kind" fields, List.assoc_opt "count" fields with
+            | Some (`String kind), Some (`Int count) -> Some (kind, count)
+            | _ -> None)
+         | _ -> None)
+      repaired
+  in
+  Alcotest.(check (list (pair string int)))
+    "repaired messages carry pair-repair metadata"
+    [ "dropped_tool_use", 1; "dropped_tool_result", 1 ]
+    repair_metadata;
+  let texts = text_blocks repaired in
+  Alcotest.(check bool)
+    "repair marker is not visible text"
+    false
+    (text_contains "unpaired tool use elided" texts);
+  let has_structured_tool_block =
+    List.exists
+      (fun (msg : Agent_sdk.Types.message) ->
+         List.exists
+           (function
+             | Agent_sdk.Types.ToolUse _ | Agent_sdk.Types.ToolResult _ -> true
+             | _ -> false)
+           msg.content)
+      repaired
+  in
+  Alcotest.(check bool) "structured tool blocks removed" false has_structured_tool_block
+
+let test_pair_repair_drops_dangling_tool_use_details () =
   let messages =
     [ user_text "다른 Discord 채널 뭐 있음?"
     ; assistant_tool_use
@@ -361,21 +402,140 @@ let test_pair_repair_elides_dangling_tool_use_details () =
     ]
   in
   let repaired, stats = KC.repair_broken_tool_call_pairs_with_stats messages in
-  Alcotest.(check int) "dangling tool use downgraded" 1 stats.downgraded_tool_uses;
-  Alcotest.(check int) "orphan tool result downgraded" 1 stats.downgraded_tool_results;
+  Alcotest.(check int) "dangling tool use dropped" 1 stats.dropped_tool_uses;
+  Alcotest.(check int) "orphan tool result dropped" 1 stats.dropped_tool_results;
+  Alcotest.(check (list (pair string string)))
+    "dropped tool use diagnostic sample preserved"
+    [ "toolu_1", "keeper_tools_list" ]
+    stats.dropped_tool_use_samples;
+  Alcotest.(check (list string))
+    "dropped tool result diagnostic id preserved"
+    [ "toolu_1" ]
+    stats.dropped_tool_result_ids;
   let texts = text_blocks repaired in
   Alcotest.(check bool)
-    "dangling tool-use fallback names the repair, not the tool"
-    true
+    "dangling tool-use repair marker is not visible"
+    false
     (text_contains "unpaired tool use elided" texts);
   Alcotest.(check bool)
-    "dangling tool-use fallback omits tool name"
+    "dangling tool-use fallback is not fabricated"
     false
-    (text_contains "[tool use keeper_tools_list" texts);
+    (text_contains "[tool use" texts);
   Alcotest.(check bool)
-    "dangling tool-use fallback omits serialized input"
+    "dangling tool-use input is not serialized into text"
     false
     (text_contains "input={}" texts)
+
+let test_checkpoint_sanitize_preserves_pair_repair_stats () =
+  let messages =
+    [ user_text "q"
+    ; assistant_text_and_tool_use "assistant kept text" "dangling" "calc"
+    ; user_text "interrupt"
+    ; user_text_and_tool_result "result wrapper kept text" "orphan" "late"
+    ]
+  in
+  let ctx = KC.create ~system_prompt:"system" ~max_tokens:4096 in
+  let ctx = KC.append_many ctx messages in
+  let checkpoint = KC.checkpoint_of_context ctx in
+  let sanitized, stats = KC.sanitize_oas_checkpoint checkpoint in
+  Alcotest.(check bool)
+    "sanitize reports pair repair"
+    true
+    (KC.checkpoint_sanitize_changed stats);
+  Alcotest.(check int)
+    "sanitize keeps dropped tool-use count"
+    1
+    stats.tool_pair_repair.dropped_tool_uses;
+  Alcotest.(check int)
+    "sanitize keeps dropped tool-result count"
+    1
+    stats.tool_pair_repair.dropped_tool_results;
+  Alcotest.(check (list (pair string string)))
+    "sanitize keeps dropped tool-use sample"
+    [ "dangling", "calc" ]
+    stats.tool_pair_repair.dropped_tool_use_samples;
+  Alcotest.(check (list string))
+    "sanitize keeps dropped tool-result id"
+    [ "orphan" ]
+    stats.tool_pair_repair.dropped_tool_result_ids;
+  let texts = text_blocks sanitized.Agent_sdk.Checkpoint.messages in
+  Alcotest.(check bool)
+    "sanitize does not create visible repair marker"
+    false
+    (text_contains "unpaired tool use elided" texts)
+
+let test_pair_repair_drops_empty_structural_messages_with_stats () =
+  let messages =
+    [ user_text "q"
+    ; assistant_tool_use
+        ~input:(`Assoc [ "expr", `String "1+1" ])
+        "dangling-only"
+        "calc"
+    ; user_tool_result "orphan-only" "late"
+    ]
+  in
+  let repaired, stats = KC.repair_broken_tool_call_pairs_with_stats messages in
+  Alcotest.(check int)
+    "dangling-only tool use dropped"
+    1
+    stats.dropped_tool_uses;
+  Alcotest.(check int)
+    "orphan-only tool result dropped"
+    1
+    stats.dropped_tool_results;
+  Alcotest.(check (list (pair string string)))
+    "dangling-only tool use sample preserved"
+    [ "dangling-only", "calc" ]
+    stats.dropped_tool_use_samples;
+  Alcotest.(check (list string))
+    "orphan-only tool result id preserved"
+    [ "orphan-only" ]
+    stats.dropped_tool_result_ids;
+  Alcotest.(check int)
+    "empty structural messages removed"
+    1
+    (List.length repaired);
+  let texts = text_blocks repaired in
+  Alcotest.(check bool)
+    "empty structural drop does not create visible repair marker"
+    false
+    (text_contains "unpaired tool use elided" texts)
+
+let test_pair_repair_caps_diagnostic_sample_strings () =
+  let long_id =
+    "toolu_"
+    ^ String.make (KC.pair_repair_diagnostic_max_bytes + 32) 'x'
+  in
+  let long_name =
+    "keeper_"
+    ^ String.make (KC.pair_repair_diagnostic_max_bytes + 32) 'y'
+  in
+  let messages =
+    [ user_text "q"
+    ; assistant_text_and_tool_use "assistant kept text" long_id long_name
+    ; user_text "interrupt"
+    ; user_text_and_tool_result "result wrapper kept text" long_id "late"
+    ]
+  in
+  let _repaired, stats = KC.repair_broken_tool_call_pairs_with_stats messages in
+  let expected_id = KC.bound_pair_repair_diagnostic_string long_id in
+  let expected_name = KC.bound_pair_repair_diagnostic_string long_name in
+  Alcotest.(check int)
+    "diagnostic tool-use id capped"
+    KC.pair_repair_diagnostic_max_bytes
+    (String.length expected_id);
+  Alcotest.(check int)
+    "diagnostic tool-name capped"
+    KC.pair_repair_diagnostic_max_bytes
+    (String.length expected_name);
+  Alcotest.(check (list (pair string string)))
+    "tool-use diagnostic sample strings are capped"
+    [ expected_id, expected_name ]
+    stats.dropped_tool_use_samples;
+  Alcotest.(check (list string))
+    "tool-result diagnostic id strings are capped"
+    [ expected_id ]
+    stats.dropped_tool_result_ids
 
 (* ── Gospel-style specification (documentation) ────────── *)
 (*
@@ -412,9 +572,15 @@ let () =
         test_cap_message_tokens_integration;
       Alcotest.test_case "local pair repair integrated in reducer chain" `Quick
         test_pair_repair_integration;
-      Alcotest.test_case "pair repair stats count downgrades" `Quick
-        test_pair_repair_stats_count_downgrades;
-      Alcotest.test_case "pair repair elides dangling tool-use details" `Quick
-        test_pair_repair_elides_dangling_tool_use_details;
+      Alcotest.test_case "pair repair stats count drops" `Quick
+        test_pair_repair_stats_count_drops;
+      Alcotest.test_case "pair repair drops dangling tool-use details" `Quick
+        test_pair_repair_drops_dangling_tool_use_details;
+      Alcotest.test_case "checkpoint sanitize preserves pair repair stats" `Quick
+        test_checkpoint_sanitize_preserves_pair_repair_stats;
+      Alcotest.test_case "pair repair drops empty structural messages with stats" `Quick
+        test_pair_repair_drops_empty_structural_messages_with_stats;
+      Alcotest.test_case "pair repair caps diagnostic sample strings" `Quick
+        test_pair_repair_caps_diagnostic_sample_strings;
     ]);
   ]

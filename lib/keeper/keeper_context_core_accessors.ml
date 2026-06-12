@@ -228,11 +228,11 @@ let tool_result_text_of_block ~tool_use_id ~content ~json =
     ~max_chars:default_max_checkpoint_tool_result_chars
 ;;
 
-let tool_use_text_of_block = Keeper_context_tool_text_block.tool_use_text_of_block
-
 type tool_pair_repair_stats = Keeper_context_core_pair_repair_stats.tool_pair_repair_stats =
-  { downgraded_tool_uses : int
-  ; downgraded_tool_results : int
+  { dropped_tool_uses : int
+  ; dropped_tool_results : int
+  ; dropped_tool_use_samples : (string * string) list
+  ; dropped_tool_result_ids : string list
   }
 
 let empty_tool_pair_repair_stats =
@@ -241,6 +241,10 @@ let add_tool_pair_repair_stats =
   Keeper_context_core_pair_repair_stats.add_tool_pair_repair_stats
 let tool_pair_repair_stats_changed =
   Keeper_context_core_pair_repair_stats.tool_pair_repair_stats_changed
+let pair_repair_diagnostic_max_bytes =
+  Keeper_context_core_pair_repair_stats.pair_repair_diagnostic_max_bytes
+let bound_pair_repair_diagnostic_string =
+  Keeper_context_core_pair_repair_stats.bound_pair_repair_diagnostic_string
 let pair_repair_metadata_key =
   Keeper_context_core_pair_repair_stats.pair_repair_metadata_key
 let pair_repair_metadata_keys =
@@ -276,35 +280,42 @@ let repair_dangling_tool_use_messages_with_stats
     in
     if not has_dangling then (current, empty_tool_pair_repair_stats)
     else
-      let downgraded_tool_uses = ref 0 in
+      let dropped_tool_uses = ref 0 in
+      let dropped_tool_use_samples = ref [] in
       let content =
-        List.map
+        List.filter_map
           (function
-            | Agent_sdk.Types.ToolUse { id; name; input }
+            | Agent_sdk.Types.ToolUse { id; name; _ }
               when not (List.mem id next_tool_result_ids) ->
-                incr downgraded_tool_uses;
-                Agent_sdk.Types.Text
-                  (tool_use_text_of_block
-                     ~tool_use_id:id ~tool_name:name ~input)
-            | other -> other)
+                incr dropped_tool_uses;
+                let id = bound_pair_repair_diagnostic_string id in
+                let name = bound_pair_repair_diagnostic_string name in
+                dropped_tool_use_samples := (id, name) :: !dropped_tool_use_samples;
+                None
+            | other -> Some other)
           current.content
       in
+      let dropped_tool_use_samples = List.rev !dropped_tool_use_samples in
       ( { current with content }
         |> with_pair_repair_metadata
-             ~kind:"downgraded_tool_use"
-             ~count:!downgraded_tool_uses
+             ~tool_use_samples:dropped_tool_use_samples
+             ~kind:"dropped_tool_use"
+             ~count:!dropped_tool_uses
       , { empty_tool_pair_repair_stats with
-          downgraded_tool_uses = !downgraded_tool_uses
+          dropped_tool_uses = !dropped_tool_uses
+        ; dropped_tool_use_samples
         } )
   in
   let rec loop acc_stats acc = function
     | [] -> List.rev acc, acc_stats
     | [ current ] ->
         let repaired, repair_stats = repair_with_next current None in
-        List.rev (repaired :: acc), add_tool_pair_repair_stats acc_stats repair_stats
+        let acc = if repaired.content = [] then acc else repaired :: acc in
+        List.rev acc, add_tool_pair_repair_stats acc_stats repair_stats
     | current :: ((next :: _) as rest) ->
         let repaired, repair_stats = repair_with_next current (Some next) in
-        loop (add_tool_pair_repair_stats acc_stats repair_stats) (repaired :: acc) rest
+        let acc = if repaired.content = [] then acc else repaired :: acc in
+        loop (add_tool_pair_repair_stats acc_stats repair_stats) acc rest
   in
   loop empty_tool_pair_repair_stats [] messages
 
@@ -329,9 +340,9 @@ let repair_orphan_tool_result_messages_with_stats
             (* Anthropic validates ToolResult blocks against ToolUse blocks
                in the immediately previous message. If checkpoint capping
                drops that predecessor, the resumed history becomes invalid.
-               Downgrade only the orphaned structured result blocks to
-               plain text so the semantic output survives without replaying
-               provider-specific tool metadata. *)
+               Drop only the orphaned structured result blocks from visible
+               content and retain bounded diagnostics in pair-repair stats
+               and metadata. *)
             let has_orphan =
               List.exists
                 (function
@@ -349,26 +360,37 @@ let repair_orphan_tool_result_messages_with_stats
             in
             if not has_orphan then (msg, empty_tool_pair_repair_stats)
             else
-              let downgraded_tool_results = ref 0 in
+              let dropped_tool_results = ref 0 in
+              let dropped_tool_result_ids = ref [] in
               let content =
-                List.map
+                List.filter_map
                   (function
-                    | Agent_sdk.Types.ToolResult { tool_use_id; content; json; _ } ->
-                        incr downgraded_tool_results;
-                        Agent_sdk.Types.Text
-                          (tool_result_text_of_block ~tool_use_id ~content ~json)
-                    | other -> other)
+                    | Agent_sdk.Types.ToolResult { tool_use_id; _ }
+                      when not (List.mem tool_use_id prev_tool_use_ids) ->
+                        incr dropped_tool_results;
+                        let tool_use_id =
+                          bound_pair_repair_diagnostic_string tool_use_id
+                        in
+                        dropped_tool_result_ids := tool_use_id :: !dropped_tool_result_ids;
+                        None
+                    | other -> Some other)
                   msg.content
               in
+              let dropped_tool_result_ids = List.rev !dropped_tool_result_ids in
               ( { msg with content }
                 |> with_pair_repair_metadata
-                     ~kind:"downgraded_tool_result"
-                     ~count:!downgraded_tool_results
+                     ~tool_result_ids:dropped_tool_result_ids
+                     ~kind:"dropped_tool_result"
+                     ~count:!dropped_tool_results
               , { empty_tool_pair_repair_stats with
-                  downgraded_tool_results = !downgraded_tool_results
+                  dropped_tool_results = !dropped_tool_results
+                ; dropped_tool_result_ids
                 } )
         in
-        loop (add_tool_pair_repair_stats acc_stats stats) (Some repaired) (repaired :: acc) rest
+        let prev, acc =
+          if repaired.content = [] then prev, acc else Some repaired, repaired :: acc
+        in
+        loop (add_tool_pair_repair_stats acc_stats stats) prev acc rest
   in
   loop empty_tool_pair_repair_stats None [] messages
 
@@ -463,6 +485,7 @@ type checkpoint_sanitize_stats = {
   dropped_chars : int;
   truncated_blocks : int;
   truncated_chars : int;
+  tool_pair_repair : tool_pair_repair_stats;
 }
 
 let empty_checkpoint_sanitize_stats =
@@ -472,6 +495,7 @@ let empty_checkpoint_sanitize_stats =
     dropped_chars = 0;
     truncated_blocks = 0;
     truncated_chars = 0;
+    tool_pair_repair = empty_tool_pair_repair_stats;
   }
 
 let checkpoint_sanitize_changed (stats : checkpoint_sanitize_stats) : bool =
@@ -480,3 +504,4 @@ let checkpoint_sanitize_changed (stats : checkpoint_sanitize_stats) : bool =
   || stats.dropped_chars > 0
   || stats.truncated_blocks > 0
   || stats.truncated_chars > 0
+  || tool_pair_repair_stats_changed stats.tool_pair_repair

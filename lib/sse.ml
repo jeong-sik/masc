@@ -116,8 +116,23 @@ let session_kind_to_string = function
 
 let take = List.take
 
+(** Generation counter: incremented on every session register/unregister.
+    [sync_transport_snapshot] skips rebuilding when the generation has not
+    changed since the last call, avoiding O(N) walks of the client registry
+    on every broadcast/send_to. *)
+let snapshot_generation = Atomic.make 0
+
+let last_snapshot_generation = Atomic.make (-1)
+
+let bump_snapshot_generation () = Atomic.incr snapshot_generation
+
 let sync_transport_snapshot () =
-  let now = Time_compat.now () in
+  let gen = Atomic.get snapshot_generation in
+  if Atomic.get last_snapshot_generation = gen then
+    ()
+  else (
+    Atomic.set last_snapshot_generation gen;
+    let now = Time_compat.now () in
   (* Single-pass aggregation: previously [SMap.fold] built a
      [(sid, client)] tuple list, then [List.map] re-walked it to
      produce [session_snapshot] records.  [SMap.iter] over the
@@ -182,6 +197,7 @@ let sync_transport_snapshot () =
   Transport_metrics.set_sse_sessions ~kind:"presence" !presence;
   Transport_metrics.set_sse_queue_snapshot ~avg_depth
     ~max_depth:!max_queue_depth ~hot_sessions
+  )
 
 let mark_seen (client : client) =
   Atomic.set client.last_seen_at (Time_compat.now ())
@@ -455,6 +471,7 @@ let register ?(kind = Agent_stream) ?on_disconnect session_id ~last_event_id =
        invoke_disconnect_hook_for sid
    | None ->
        ());
+  bump_snapshot_generation ();
   sync_transport_snapshot ();
   (client_id, event_stream, evicted)
 
@@ -493,6 +510,7 @@ let unregister session_id =
        and no infinite-loop risk.  Snapshot recording is sequenced AFTER the
        hook so observers see [info.closed = true] in the same tick. *)
     invoke_disconnect_hook_for session_id;
+    bump_snapshot_generation ();
     sync_transport_snapshot ()
   end else
     (* Even on no-op unregister we still clear any orphaned hook to avoid
@@ -526,6 +544,7 @@ let unregister_if_current session_id client_id =
   if removed then begin
     (* See [unregister] for the hook ordering rationale. *)
     invoke_disconnect_hook_for session_id;
+    bump_snapshot_generation ();
     sync_transport_snapshot ()
   end
 

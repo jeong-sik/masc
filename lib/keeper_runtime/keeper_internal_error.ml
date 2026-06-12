@@ -101,6 +101,21 @@ let runtime_exhaustion_reason_of_json = function
      | _ -> None)
   | _ -> None
 
+type accept_rejection_kind =
+  | Accept_no_usable_progress
+  | Accept_predicate_rejected
+
+let accept_rejection_kind_to_string = function
+  | Accept_no_usable_progress -> "no_usable_progress"
+  | Accept_predicate_rejected -> "predicate_rejected"
+;;
+
+let accept_rejection_kind_of_string = function
+  | "no_usable_progress" -> Some Accept_no_usable_progress
+  | "predicate_rejected" -> Some Accept_predicate_rejected
+  | _ -> None
+;;
+
 type masc_internal_error =
   | Runtime_exhausted of {
       runtime_id : string;
@@ -120,6 +135,7 @@ type masc_internal_error =
   | Accept_rejected of {
       scope : string;
       model : string option;
+      reason_kind : accept_rejection_kind option;
       reason : string;
     }
   | Admission_queue_timeout of {
@@ -244,12 +260,15 @@ let masc_internal_error_to_json = function
         ("detail", `String detail);
         ("exit_code", Json_util.int_opt_to_json exit_code);
       ]
-  | Accept_rejected { scope; model; reason } ->
+  | Accept_rejected { scope; model; reason_kind; reason } ->
     `Assoc
       [
         ("kind", `String "accept_rejected");
         ("scope", `String scope);
         ("model", Json_util.string_opt_to_json model);
+        ( "reason_kind",
+          Json_util.string_opt_to_json
+            (Option.map accept_rejection_kind_to_string reason_kind) );
         ("reason", `String reason);
       ]
   | Admission_queue_timeout { keeper_name; runtime_id; wait_sec } ->
@@ -523,6 +542,10 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
                  {
                    scope;
                    model = string_opt_of_assoc "model" json;
+                   reason_kind =
+                     Option.bind
+                       (string_opt_of_assoc "reason_kind" json)
+                       accept_rejection_kind_of_string;
                    reason;
                  })
           | _ -> None)

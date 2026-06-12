@@ -17,19 +17,50 @@ let normalize_response_text ~(text : string) ~(tool_names : string list) ()
            (String.concat ", " tool_names)))
 ;;
 
+type accept_rejection_kind =
+  | No_usable_progress
+  | Predicate_rejected
+
+type accept_rejection =
+  { kind : accept_rejection_kind
+  ; reason : string
+  }
+
+let accept_rejection_kind_to_string = function
+  | No_usable_progress -> "no_usable_progress"
+  | Predicate_rejected -> "predicate_rejected"
+;;
+
+let response_accept_rejection (response : Agent_sdk.Types.api_response) =
+  if Agent_sdk.Response_shape.ended_without_deliverable_content response
+  then
+    Some
+      { kind = No_usable_progress
+      ; reason = Agent_sdk.Response_shape.diagnostic_summary response
+      }
+  else None
+;;
+
+let accept_rejection_of_response ~runtime_id response =
+  match response_accept_rejection response with
+  | Some rejection ->
+    { rejection with
+      reason =
+        Printf.sprintf
+          "response rejected by accept (runtime=%s): %s"
+          runtime_id
+          rejection.reason
+    }
+  | None ->
+    { kind = Predicate_rejected
+    ; reason =
+        Printf.sprintf
+          "response rejected by accept (runtime=%s); \
+           built_in_progress_contract=accepted"
+          runtime_id
+    }
+;;
+
 let response_has_text_or_tool_progress (response : Agent_sdk.Types.api_response) =
-  let text = Agent_sdk.Types.text_of_content response.content |> String.trim in
-  text <> ""
-  || List.exists
-       (function
-         | Agent_sdk.Types.ToolUse _ -> true
-         | Agent_sdk.Types.Text _
-         | Agent_sdk.Types.Thinking _
-         | Agent_sdk.Types.RedactedThinking _
-         | Agent_sdk.Types.ToolResult _
-         | Agent_sdk.Types.Image _
-         | Agent_sdk.Types.Document _
-         | Agent_sdk.Types.Audio _ -> false)
-       response.content
-  || response.stop_reason <> Agent_sdk.Types.EndTurn
+  Option.is_none (response_accept_rejection response)
 ;;

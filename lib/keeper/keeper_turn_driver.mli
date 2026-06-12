@@ -24,6 +24,8 @@ include
      and type capacity_retry_after = Keeper_internal_error.capacity_retry_after
      and type runtime_exhaustion_reason =
       Keeper_internal_error.runtime_exhaustion_reason
+     and type accept_rejection_kind =
+      Keeper_internal_error.accept_rejection_kind
      and type masc_internal_error = Keeper_internal_error.masc_internal_error
 
 (** {1 Provider error helpers} *)

@@ -674,14 +674,19 @@ let with_recall_env value f =
   Fun.protect ~finally:(fun () -> Unix.putenv var "") f
 ;;
 
-let test_render_if_enabled_off_by_default () =
+let test_render_if_enabled_default_is_on () =
   with_recall_env "" (fun () ->
+    Alcotest.(check bool) "flag unset → enabled by default" true (Recall.enabled ()))
+;;
+
+let test_render_if_enabled_explicit_off () =
+  with_recall_env "false" (fun () ->
     with_temp_keepers_dir (fun _keepers_dir ->
       match
         Recall.render_if_enabled ~keeper_id:"virtual-memory-keeper" ~now:1_000_000.0 ()
       with
       | None -> ()
-      | Some block -> Alcotest.failf "expected None with flag unset, got %S" block))
+      | Some block -> Alcotest.failf "expected None with kill switch set, got %S" block))
 ;;
 
 let test_render_if_enabled_empty_store_yields_none () =
@@ -842,9 +847,13 @@ let () =
             `Quick
             test_recall_context_renders_sanitized_memory
         ; Alcotest.test_case
-            "render_if_enabled off by default"
+            "render_if_enabled default is on"
             `Quick
-            test_render_if_enabled_off_by_default
+            test_render_if_enabled_default_is_on
+        ; Alcotest.test_case
+            "render_if_enabled explicit off"
+            `Quick
+            test_render_if_enabled_explicit_off
         ; Alcotest.test_case
             "render_if_enabled empty store yields none"
             `Quick

@@ -660,6 +660,21 @@ let test_policy_marks_live_admission_caps_transient () =
     (Policy.is_transient_admission_memory_text
        "Task claim attempt was rejected because all WIP admission slots are occupied by other agents.");
   Alcotest.(check bool)
+    "goal cap wait is transient"
+    true
+    (Policy.is_transient_admission_memory_text
+       "Agent has no active desire and intends to stay silent until the goal cap clears.");
+  Alcotest.(check bool)
+    "claim cooldown is transient"
+    true
+    (Policy.is_transient_admission_memory_text
+       "Agent operates under a 150-second cooldown period after task actions before being able to claim new tasks.");
+  Alcotest.(check bool)
+    "self imposed claim block is transient"
+    true
+    (Policy.is_transient_admission_memory_text
+       "Agent has a self-imposed constraint against claiming new tasks, documented at 0.95 confidence due to repeated claim-then-silence failure loops.");
+  Alcotest.(check bool)
     "stale diagnostic is durable meta"
     false
     (Policy.is_transient_admission_memory_text

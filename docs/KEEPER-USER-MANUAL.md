@@ -394,10 +394,11 @@ live observer는 shell gate counter와 semantic marker 계열만 남는다.
 | 필드 | 타입 | `-`일 때 의미 | 채우는 방법 |
 |------|------|--------------|------------|
 | `goal`, `short_goal`, `mid_goal`, `long_goal` | string | keeper TOML 또는 기존 meta 사용 | profile.json의 `keeper.*_goal` |
+| `will`, `needs`, `desires`, `instructions` | string | keeper TOML overlay 또는 기존 meta 사용 | profile.json의 `keeper.*` self-model |
 | `mention_targets` | string array | persona 이름 fallback | profile.json의 `keeper.mention_targets` |
 | `proactive_*` | bool/int | keeper TOML 또는 runtime default 사용 | profile.json의 proactive defaults |
 
-`profile.json`의 `keeper.will`, `keeper.needs`, `keeper.desires`, `keeper.instructions`는 더 이상 로드하지 않는다. 기존 keeper meta 또는 `keeper.toml` overlay가 self-model/prompt의 소유자다.
+`profile.json`의 `keeper.will`, `keeper.needs`, `keeper.desires`, `keeper.instructions`는 persona identity 기본값이다. 같은 keeper의 `keeper.toml`에 값이 있으면 TOML overlay가 persona 기본값을 덮어쓴다.
 
 **페르소나 프로필 필드** (Neo4j Agent 노드에서 로드):
 

@@ -259,9 +259,9 @@ let user_text text : Agent_sdk.Types.message =
   ; metadata = []
   }
 
-let assistant_tool_use id name : Agent_sdk.Types.message =
+let assistant_tool_use ?(input = `Null) id name : Agent_sdk.Types.message =
   { role = Agent_sdk.Types.Assistant
-  ; content = [ Agent_sdk.Types.ToolUse { id; name; input = `Null } ]
+  ; content = [ Agent_sdk.Types.ToolUse { id; name; input } ]
   ; name = None
   ; tool_call_id = None
   ; metadata = []
@@ -328,6 +328,55 @@ let test_pair_repair_stats_count_downgrades () =
   in
   Alcotest.(check bool) "structured tool blocks removed" false has_structured_tool_block
 
+let text_blocks (messages : Agent_sdk.Types.message list) =
+  List.concat_map
+    (fun (msg : Agent_sdk.Types.message) ->
+       List.filter_map
+         (function
+           | Agent_sdk.Types.Text text -> Some text
+           | Agent_sdk.Types.Thinking _
+           | Agent_sdk.Types.RedactedThinking _
+           | Agent_sdk.Types.ToolUse _
+           | Agent_sdk.Types.ToolResult _
+           | Agent_sdk.Types.Image _
+           | Agent_sdk.Types.Document _
+           | Agent_sdk.Types.Audio _ -> None)
+         msg.content)
+    messages
+
+let text_contains needle texts =
+  List.exists (fun text -> Astring.String.is_infix ~affix:needle text) texts
+
+let test_pair_repair_elides_dangling_tool_use_details () =
+  let messages =
+    [ user_text "다른 Discord 채널 뭐 있음?"
+    ; assistant_tool_use
+        ~input:(`Assoc [])
+        "toolu_1"
+        "keeper_tools_list"
+    ; user_text
+        "keeper_tools_list lists capabilities; use keeper_surface_read for lane \
+         context."
+    ; user_tool_result "toolu_1" {|{"meta":["keeper_tools_list"]}|}
+    ]
+  in
+  let repaired, stats = KC.repair_broken_tool_call_pairs_with_stats messages in
+  Alcotest.(check int) "dangling tool use downgraded" 1 stats.downgraded_tool_uses;
+  Alcotest.(check int) "orphan tool result downgraded" 1 stats.downgraded_tool_results;
+  let texts = text_blocks repaired in
+  Alcotest.(check bool)
+    "dangling tool-use fallback names the repair, not the tool"
+    true
+    (text_contains "unpaired tool use elided" texts);
+  Alcotest.(check bool)
+    "dangling tool-use fallback omits tool name"
+    false
+    (text_contains "[tool use keeper_tools_list" texts);
+  Alcotest.(check bool)
+    "dangling tool-use fallback omits serialized input"
+    false
+    (text_contains "input={}" texts)
+
 (* ── Gospel-style specification (documentation) ────────── *)
 (*
    @gospel — formal specification (Ortac runtime not available on 5.4)
@@ -365,5 +414,7 @@ let () =
         test_pair_repair_integration;
       Alcotest.test_case "pair repair stats count downgrades" `Quick
         test_pair_repair_stats_count_downgrades;
+      Alcotest.test_case "pair repair elides dangling tool-use details" `Quick
+        test_pair_repair_elides_dangling_tool_use_details;
     ]);
   ]

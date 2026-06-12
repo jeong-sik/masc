@@ -501,6 +501,42 @@ let test_pair_repair_drops_empty_structural_messages_with_stats () =
     false
     (text_contains "unpaired tool use elided" texts)
 
+let test_pair_repair_caps_diagnostic_sample_strings () =
+  let long_id =
+    "toolu_"
+    ^ String.make (KC.pair_repair_diagnostic_max_bytes + 32) 'x'
+  in
+  let long_name =
+    "keeper_"
+    ^ String.make (KC.pair_repair_diagnostic_max_bytes + 32) 'y'
+  in
+  let messages =
+    [ user_text "q"
+    ; assistant_text_and_tool_use "assistant kept text" long_id long_name
+    ; user_text "interrupt"
+    ; user_text_and_tool_result "result wrapper kept text" long_id "late"
+    ]
+  in
+  let _repaired, stats = KC.repair_broken_tool_call_pairs_with_stats messages in
+  let expected_id = KC.bound_pair_repair_diagnostic_string long_id in
+  let expected_name = KC.bound_pair_repair_diagnostic_string long_name in
+  Alcotest.(check int)
+    "diagnostic tool-use id capped"
+    KC.pair_repair_diagnostic_max_bytes
+    (String.length expected_id);
+  Alcotest.(check int)
+    "diagnostic tool-name capped"
+    KC.pair_repair_diagnostic_max_bytes
+    (String.length expected_name);
+  Alcotest.(check (list (pair string string)))
+    "tool-use diagnostic sample strings are capped"
+    [ expected_id, expected_name ]
+    stats.dropped_tool_use_samples;
+  Alcotest.(check (list string))
+    "tool-result diagnostic id strings are capped"
+    [ expected_id ]
+    stats.dropped_tool_result_ids
+
 (* ── Gospel-style specification (documentation) ────────── *)
 (*
    @gospel — formal specification (Ortac runtime not available on 5.4)
@@ -544,5 +580,7 @@ let () =
         test_checkpoint_sanitize_preserves_pair_repair_stats;
       Alcotest.test_case "pair repair drops empty structural messages with stats" `Quick
         test_pair_repair_drops_empty_structural_messages_with_stats;
+      Alcotest.test_case "pair repair caps diagnostic sample strings" `Quick
+        test_pair_repair_caps_diagnostic_sample_strings;
     ]);
   ]

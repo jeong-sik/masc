@@ -94,6 +94,8 @@ type tool_pair_repair_stats =
   }
 
 val tool_pair_repair_stats_changed : tool_pair_repair_stats -> bool
+val pair_repair_diagnostic_max_bytes : int
+val bound_pair_repair_diagnostic_string : string -> string
 
 val pair_repair_metadata_key : string
 (** Message metadata key carrying bounded provenance for tool-pair repair

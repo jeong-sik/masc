@@ -241,6 +241,10 @@ let add_tool_pair_repair_stats =
   Keeper_context_core_pair_repair_stats.add_tool_pair_repair_stats
 let tool_pair_repair_stats_changed =
   Keeper_context_core_pair_repair_stats.tool_pair_repair_stats_changed
+let pair_repair_diagnostic_max_bytes =
+  Keeper_context_core_pair_repair_stats.pair_repair_diagnostic_max_bytes
+let bound_pair_repair_diagnostic_string =
+  Keeper_context_core_pair_repair_stats.bound_pair_repair_diagnostic_string
 let pair_repair_metadata_key =
   Keeper_context_core_pair_repair_stats.pair_repair_metadata_key
 let pair_repair_metadata_keys =
@@ -284,8 +288,8 @@ let repair_dangling_tool_use_messages_with_stats
             | Agent_sdk.Types.ToolUse { id; name; _ }
               when not (List.mem id next_tool_result_ids) ->
                 incr dropped_tool_uses;
-                let id = Inference_utils.sanitize_text_utf8 (String.trim id) in
-                let name = Inference_utils.sanitize_text_utf8 (String.trim name) in
+                let id = bound_pair_repair_diagnostic_string id in
+                let name = bound_pair_repair_diagnostic_string name in
                 dropped_tool_use_samples := (id, name) :: !dropped_tool_use_samples;
                 None
             | other -> Some other)
@@ -365,7 +369,7 @@ let repair_orphan_tool_result_messages_with_stats
                       when not (List.mem tool_use_id prev_tool_use_ids) ->
                         incr dropped_tool_results;
                         let tool_use_id =
-                          Inference_utils.sanitize_text_utf8 (String.trim tool_use_id)
+                          bound_pair_repair_diagnostic_string tool_use_id
                         in
                         dropped_tool_result_ids := tool_use_id :: !dropped_tool_result_ids;
                         None

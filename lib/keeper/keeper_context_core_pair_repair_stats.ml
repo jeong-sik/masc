@@ -47,6 +47,14 @@ let add_tool_pair_repair_stats left right =
 let tool_pair_repair_stats_changed stats =
   stats.dropped_tool_uses > 0 || stats.dropped_tool_results > 0
 
+let pair_repair_diagnostic_max_bytes = 256
+
+let bound_pair_repair_diagnostic_string value =
+  value
+  |> String.trim
+  |> Inference_utils.sanitize_text_utf8
+  |> String_util.utf8_prefix ~max_bytes:pair_repair_diagnostic_max_bytes
+
 let pair_repair_metadata_key = "masc.tool_pair_repair"
 
 let pair_repair_metadata_keys =

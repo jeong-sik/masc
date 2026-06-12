@@ -174,6 +174,53 @@ let test_thinking_with_tool_use_is_accepted () =
     Alcotest.failf "thinking plus tool use should pass accept: %s"
       (Agent_sdk.Error.to_string err)
 
+let check_accept_matches_oas_shape label content =
+  let response = response ~content () in
+  let expected =
+    response
+    |> Agent_sdk.Response_shape.summarize
+    |> Agent_sdk.Response_shape.has_deliverable_content
+  in
+  Alcotest.(check bool)
+    label
+    expected
+    (Keeper_tool_response.response_has_text_or_tool_progress response)
+
+let test_accept_contract_delegates_to_oas_response_shape () =
+  check_accept_matches_oas_shape "empty" [];
+  check_accept_matches_oas_shape
+    "thinking only"
+    [
+      Agent_sdk.Types.Thinking
+        { thinking_type = "reasoning"; content = "internal chain" };
+    ];
+  check_accept_matches_oas_shape "blank text" [ Agent_sdk.Types.Text " \n\t " ];
+  check_accept_matches_oas_shape "text" [ Agent_sdk.Types.Text "visible answer" ];
+  check_accept_matches_oas_shape
+    "tool use"
+    [
+      Agent_sdk.Types.ToolUse
+        { id = "tool-1"; name = "keeper_board_search"; input = `Assoc [] };
+    ];
+  check_accept_matches_oas_shape
+    "tool result"
+    [
+      Agent_sdk.Types.ToolResult
+        {
+          tool_use_id = "tool-1";
+          content = "ok";
+          is_error = false;
+          json = None;
+          content_blocks = None;
+        };
+    ];
+  check_accept_matches_oas_shape
+    "media"
+    [
+      Agent_sdk.Types.Image
+        { media_type = "image/png"; data = "redacted"; source_type = "base64" };
+    ]
+
 let test_thinking_only_non_end_turn_response_is_rejected () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
@@ -334,6 +381,8 @@ let () =
             test_thinking_with_text_is_accepted;
           Alcotest.test_case "thinking plus tool use is accepted" `Quick
             test_thinking_with_tool_use_is_accepted;
+          Alcotest.test_case "accept delegates to OAS response shape" `Quick
+            test_accept_contract_delegates_to_oas_response_shape;
           Alcotest.test_case "thinking-only non-end-turn response is rejected" `Quick
             test_thinking_only_non_end_turn_response_is_rejected;
           Alcotest.test_case "empty non-end-turn response is rejected" `Quick

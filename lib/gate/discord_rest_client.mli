@@ -157,6 +157,27 @@ val build_edit_request :
     ~message_id ~content ()].  Content exceeding {!message_content_limit}
     is silently truncated. *)
 
+val build_embed_request :
+  token:string ->
+  channel_id:string ->
+  content:string ->
+  ?embeds:embed list ->
+  unit ->
+  string * (string * string) list * string
+(** Embed variant of {!build_request}. Body contains [embeds] array
+    when embeds are provided. Exposed for unit testing. *)
+
+val build_edit_embed_request :
+  token:string ->
+  channel_id:string ->
+  message_id:string ->
+  content:string ->
+  ?embeds:embed list ->
+  unit ->
+  string * (string * string) list * string
+(** Embed variant of {!build_edit_request}. Patches a message with
+    updated content and/or embeds. Exposed for unit testing. *)
+
 val parse_response :
   status:int ->
   body:string ->

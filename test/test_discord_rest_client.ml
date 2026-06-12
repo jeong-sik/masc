@@ -214,6 +214,112 @@ let test_parse_empty_response_discord_error_envelope () =
         (Format.asprintf "%a" R.pp_error e)
 
 (* ---------------------------------------------------------------- *)
+(* embed_to_json                                                     *)
+(* ---------------------------------------------------------------- *)
+
+let test_embed_to_json_minimal () =
+  let embed : R.embed =
+    { title = "Tool"; description = None; color = 0x3498DB; fields = [] }
+  in
+  let json = R.embed_to_json embed in
+  match json with
+  | `Assoc fields ->
+      check bool "has title" true (List.mem_assoc "title" fields);
+      check bool "has color" true (List.mem_assoc "color" fields);
+      check bool "no description" false (List.mem_assoc "description" fields);
+      check bool "no fields" false (List.mem_assoc "fields" fields)
+  | _ -> fail "embed_to_json: expected Assoc"
+
+let test_embed_to_json_full () =
+  let embed : R.embed =
+    { title = "My Tool"
+    ; description = Some "Running..."
+    ; color = 0x2ECC71
+    ; fields = [ ("key", "val", true) ]
+    }
+  in
+  let json = R.embed_to_json embed in
+  match json with
+  | `Assoc fields ->
+      (match List.assoc_opt "fields" fields with
+       | Some (`List [ `Assoc field_items ]) ->
+           check bool "field has name" true
+             (List.mem_assoc "name" field_items);
+           check bool "field has value" true
+             (List.mem_assoc "value" field_items);
+           check bool "field has inline" true
+             (List.mem_assoc "inline" field_items)
+       | _ -> fail "fields shape wrong")
+  | _ -> fail "embed_to_json: expected Assoc"
+
+(* ---------------------------------------------------------------- *)
+(* build_embed_request                                               *)
+(* ---------------------------------------------------------------- *)
+
+let test_build_embed_request_url_targets_channel () =
+  let url, _, _ =
+    R.build_embed_request ~token:"t" ~channel_id:"CH1"
+      ~content:"hi" ~embeds:[] ()
+  in
+  check string "URL targets channel"
+    "https://discord.com/api/v10/channels/CH1/messages" url
+
+let test_build_embed_request_empty_content_omits_field () =
+  let _, _, body =
+    R.build_embed_request ~token:"t" ~channel_id:"c"
+      ~content:"" ~embeds:[] ()
+  in
+  let json = Yojson.Safe.from_string body in
+  match json with
+  | `Assoc [] -> ()  (* empty content + no embeds = empty object *)
+  | _ -> failf "expected empty Assoc, got: %s" (Yojson.Safe.to_string json)
+
+let test_build_embed_request_embeds_included () =
+  let embed : R.embed =
+    { title = "T"; description = None; color = 1; fields = [] }
+  in
+  let _, _, body =
+    R.build_embed_request ~token:"t" ~channel_id:"c"
+      ~content:"" ~embeds:[embed] ()
+  in
+  let json = Yojson.Safe.from_string body in
+  match json with
+  | `Assoc fields ->
+      check bool "has embeds key" true (List.mem_assoc "embeds" fields);
+      (match List.assoc_opt "embeds" fields with
+       | Some (`List [ _ ]) -> ()  (* one embed *)
+       | _ -> fail "embeds should be a list with one element")
+  | _ -> fail "expected Assoc"
+
+(* ---------------------------------------------------------------- *)
+(* build_edit_embed_request                                          *)
+(* ---------------------------------------------------------------- *)
+
+let test_build_edit_embed_request_url_targets_message () =
+  let url, _, _ =
+    R.build_edit_embed_request ~token:"t" ~channel_id:"CH"
+      ~message_id:"MSG1" ~content:"hi" ~embeds:[] ()
+  in
+  check string "URL targets message"
+    "https://discord.com/api/v10/channels/CH/messages/MSG1" url
+
+let test_build_edit_embed_request_embeds_and_content () =
+  let embed : R.embed =
+    { title = "Done"; description = Some "Done"; color = 0x2ECC71
+    ; fields = [] }
+  in
+  let _, _, body =
+    R.build_edit_embed_request ~token:"t" ~channel_id:"c"
+      ~message_id:"m" ~content:"ok" ~embeds:[embed] ()
+  in
+  let json = Yojson.Safe.from_string body in
+  match json with
+  | `Assoc fields ->
+      check bool "has content" true (List.mem_assoc "content" fields);
+      check bool "has embeds" true (List.mem_assoc "embeds" fields)
+  | _ -> fail "expected Assoc"
+
+(* ---------------------------------------------------------------- *)
 (* Entry                                                            *)
 (* ---------------------------------------------------------------- *)
 
@@ -244,6 +350,26 @@ let () =
             test_build_edit_request_content_truncated_at_limit
         ; test_case "short content not truncated" `Quick
             test_build_edit_request_short_content_not_truncated
+        ] )
+    ; ( "embed_to_json"
+      , [ test_case "minimal embed (no description/fields)" `Quick
+            test_embed_to_json_minimal
+        ; test_case "full embed (description + fields)" `Quick
+            test_embed_to_json_full
+        ] )
+    ; ( "build_embed_request"
+      , [ test_case "URL targets channel" `Quick
+            test_build_embed_request_url_targets_channel
+        ; test_case "empty content omits content field" `Quick
+            test_build_embed_request_empty_content_omits_field
+        ; test_case "embeds included in body" `Quick
+            test_build_embed_request_embeds_included
+        ] )
+    ; ( "build_edit_embed_request"
+      , [ test_case "URL targets channel/message" `Quick
+            test_build_edit_embed_request_url_targets_message
+        ; test_case "embeds and content both present" `Quick
+            test_build_edit_embed_request_embeds_and_content
         ] )
     ; ( "parse_response"
       , [ test_case "2xx with id => Ok id" `Quick

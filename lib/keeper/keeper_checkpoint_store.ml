@@ -319,28 +319,51 @@ let record_saved_oas_turn_count ~session_dir ~session_id turn_count =
     | Some known when known >= turn_count -> ()
     | Some _ | None -> Hashtbl.replace last_saved_oas_turn_count key turn_count)
 
-let save_oas ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t)
-  : (unit, string) result =
-  match known_oas_turn_count ~session_dir ~session_id:ckpt.session_id with
+type save_oas_relation = [ `Cold | `Forward | `Equal ]
+
+type save_oas_outcome =
+  | Saved of { relation : save_oas_relation; turn_count : int }
+  | Stale_noop of { incoming_turn_count : int; known_turn_count : int }
+
+let save_relation ~known ~incoming =
+  match known with
+  | None -> `Cold
+  | Some previous when incoming > previous -> `Forward
+  | Some _ -> `Equal
+
+let save_oas_classified ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t)
+  : (save_oas_outcome, string) result =
+  let known = known_oas_turn_count ~session_dir ~session_id:ckpt.session_id in
+  match known with
   | Some known when ckpt.turn_count < known ->
-    Log.Keeper.error
-      "stale OAS checkpoint write rejected for %s: incoming turn_count=%d, last saved=%d"
+    Log.Keeper.warn
+      "stale OAS checkpoint write skipped for %s: incoming turn_count=%d, last saved=%d"
       ckpt.session_id ckpt.turn_count known;
     Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string CheckpointFailures)
-      ~labels:[("site", Keeper_checkpoint_store_failure_site.(to_label Oas_stale_write_rejected))]
+      "masc_keeper_checkpoint_stale_noop_total"
+      ~labels:[("site", "store_watermark")]
       ();
-    Error
-      (Printf.sprintf
-         "stale checkpoint write rejected for %s: incoming turn_count=%d < last saved %d"
-         ckpt.session_id ckpt.turn_count known)
+    Ok (Stale_noop
+          { incoming_turn_count = ckpt.turn_count
+          ; known_turn_count = known
+          })
   | Some _ | None ->
     (match save_oas_unguarded ~session_dir ckpt with
      | Ok () ->
        record_saved_oas_turn_count
          ~session_dir ~session_id:ckpt.session_id ckpt.turn_count;
-       Ok ()
+       Ok
+         (Saved
+            { relation = save_relation ~known ~incoming:ckpt.turn_count
+            ; turn_count = ckpt.turn_count
+            })
      | Error _ as e -> e)
+
+let save_oas ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t)
+  : (unit, string) result =
+  match save_oas_classified ~session_dir ckpt with
+  | Ok (Saved _) | Ok (Stale_noop _) -> Ok ()
+  | Error _ as e -> e
 
 module For_testing = struct
   let reset_stale_write_guard () =

@@ -231,7 +231,6 @@ let run_turn
   in
   let context_injector = ctx.context_injector in
   let shared_context = ctx.shared_context in
-  let session_dir = ctx.session_dir in
   let session = ctx.session in
   let base_system_prompt = ctx.base_system_prompt in
   let resume_oas_checkpoint = ctx.resume_oas_checkpoint in
@@ -537,7 +536,6 @@ let run_turn
                     ~allowed_paths:oas_allowed_paths
                     ~cache_system_prompt:true
                     ~yield_on_tool
-                    ~checkpoint_dir:session_dir
                     ~context_injector
                     ~context:shared_context
                     ~approval:

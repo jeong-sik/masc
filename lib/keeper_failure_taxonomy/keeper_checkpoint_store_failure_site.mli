@@ -15,8 +15,5 @@ type t =
   | Oas_delete (** OAS checkpoint delete failed. *)
   | Oas_archive_fallback (** Archive-tier fallback save failed. *)
   | Oas_archive_primary (** Archive-tier primary save failed. *)
-  | Oas_stale_write_rejected
-      (** Save refused: incoming turn_count older than the last saved
-          checkpoint for the session (RFC-0225 §3.2). *)
 
 val to_label : t -> string

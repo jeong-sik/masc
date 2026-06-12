@@ -34,49 +34,6 @@ let is_keeper_authored_message author =
   Option.is_some (Keeper_identity.canonical_keeper_name_from_agent_name author)
 ;;
 
-(* Trim non-word characters from both ends of a token, keeping internal ones.
-   Word chars are [a-z0-9@_-]; '.' is NOT a word char, so "@dreamer." trims to
-   "@dreamer" while the internal '.' in "email@dreamer.com" is preserved (the
-   whole token stays "email@dreamer.com" and never equals "@dreamer"). *)
-let trim_token_edges s =
-  let is_word c =
-    (c >= 'a' && c <= 'z')
-    || (c >= '0' && c <= '9')
-    || c = '@'
-    || c = '_'
-    || c = '-'
-  in
-  let n = String.length s in
-  let i = ref 0 in
-  let j = ref (n - 1) in
-  while !i < n && not (is_word s.[!i]) do incr i done;
-  while !j >= !i && not (is_word s.[!j]) do decr j done;
-  if !j < !i then "" else String.sub s !i (!j - !i + 1)
-;;
-
-(* A line mentions a target when some whitespace token equals "@<target>"
-   after edge-trimming. Token equality (not substring) is why "@dreamerx" and
-   "email@dreamer.com" do not match "@dreamer". *)
-let line_mentions ~(targets : string list) (content : string) : bool =
-  let needles =
-    List.filter_map
-      (fun target ->
-        let t = String.lowercase_ascii (String.trim target) in
-        if t = "" then None else Some ("@" ^ t))
-      targets
-  in
-  if needles = []
-  then false
-  else (
-    let normalized =
-      String.map
-        (fun c -> match c with '\t' | '\n' | '\r' -> ' ' | _ -> c)
-        (String.lowercase_ascii content)
-    in
-    String.split_on_char ' ' normalized
-    |> List.exists (fun token -> List.mem (trim_token_edges token) needles))
-;;
-
 let speaker_display (m : Keeper_chat_store.chat_message) : string =
   let from_speaker =
     match m.speaker with
@@ -136,9 +93,10 @@ let pending_mentions_of_messages
       (messages : Keeper_chat_store.chat_message list)
   : (string * string) list
   =
+  let target_ids = Keeper_lane_mentions.target_ids_of targets in
   user_lines_after_last_self messages
   |> List.filter_map (fun (m : Keeper_chat_store.chat_message) ->
-    if line_mentions ~targets m.content
+    if Keeper_lane_mentions.ids_match ~target_ids m.mentions
     then Some (speaker_display m, m.content)
     else None)
 ;;
@@ -154,9 +112,12 @@ let pending_scope_of_messages
       (messages : Keeper_chat_store.chat_message list)
   : (string * string) list
   =
+  let target_ids = Keeper_lane_mentions.target_ids_of targets in
   user_lines_after_last_self messages
   |> List.filter_map (fun (m : Keeper_chat_store.chat_message) ->
-    if is_owner_authored m && not (line_mentions ~targets m.content)
+    if
+      is_owner_authored m
+      && not (Keeper_lane_mentions.ids_match ~target_ids m.mentions)
     then Some (speaker_display m, m.content)
     else None)
 ;;

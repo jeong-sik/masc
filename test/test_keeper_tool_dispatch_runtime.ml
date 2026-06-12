@@ -236,6 +236,46 @@ let test_registered_descriptor_bypasses_tool_access_allowlist () =
          | `Assoc _ -> true
          | _ -> false))
 
+let test_public_read_rejects_unsupported_range_fields () =
+  with_exec_fixture
+    "keeper_tool_dispatch_runtime_read_rejects_range_fields"
+    (fun ~config ~meta ~ctx_work ->
+      let result =
+        KET.execute_keeper_tool_call_with_outcome
+          ~config
+          ~meta
+          ~ctx_work
+          ~exec_cache:None
+          ~name:"Read"
+          ~input:
+            (`Assoc
+               [ "file_path", `String "lib/keeper/keeper_transition_audit.ml"
+               ; "start_line", `Int 255
+               ])
+          ()
+      in
+      check string "runtime outcome" "failure"
+        (match result.outcome with `Success -> "success" | `Failure -> "failure");
+      check string "runtime payload shape" "structured_error"
+        (payload_kind result.payload_shape);
+      let json = Yojson.Safe.from_string result.raw_output in
+      let error =
+        Yojson.Safe.Util.(member "error" json |> to_string_option)
+        |> Option.value ~default:""
+      in
+      check bool "error mentions unsupported field" true
+        (contains_substring error "unsupported field");
+      check bool "error mentions start_line" true
+        (contains_substring error "start_line");
+      check string "validation source" "oas_tool_middleware"
+        Yojson.Safe.Util.(member "validation" json |> to_string);
+      check string "failure class" "policy_rejection"
+        Yojson.Safe.Util.(member "failure_class" json |> to_string);
+      check bool "did not reach file runtime" false
+        (match Yojson.Safe.Util.member "path_resolution" json with
+         | `Assoc _ -> true
+         | _ -> false))
+
 let counter_for_tool_not_allowed ~keeper ~tool ~reason =
   Masc.Otel_metric_store.metric_value_or_zero
     Keeper_metrics.(to_string ToolNotAllowed)
@@ -349,9 +389,11 @@ let test_keeper_tools_list_json_uses_typed_groups () =
              "keeper_board_fake";
              "keeper_voice_speak";
              "keeper_task_claim";
+             "keeper_surface_read";
              "tool_search_files";
              "tool_read_file";
              "keeper_memory_search";
+             "keeper_tools_list";
            ])
       ()
   in
@@ -367,6 +409,12 @@ let test_keeper_tools_list_json_uses_typed_groups () =
     (member "voice" "keeper_voice_speak");
   check bool "task tool grouped as workspace" true
     (member "workspace" "keeper_task_claim");
+  check bool "surface read grouped as surface" true
+    (member "surface" "keeper_surface_read");
+  check bool "surface read not hidden under meta" false
+    (member "meta" "keeper_surface_read");
+  check bool "tools_list remains a meta introspection tool" true
+    (member "meta" "keeper_tools_list");
   check bool "Grep tool grouped" true
     (member "search_files" "tool_search_files");
   check bool "fs tool grouped" true
@@ -898,6 +946,8 @@ let () =
     ("execute_keeper_tool_call_with_outcome", [
       test_case "registered descriptor bypasses tool_access allowlist" `Quick
         test_registered_descriptor_bypasses_tool_access_allowlist;
+      test_case "public Read rejects unsupported range fields" `Quick
+        test_public_read_rejects_unsupported_range_fields;
       test_case "missing file is failure" `Quick
         test_execute_with_outcome_missing_file_is_failure;
       test_case "bad query is failure" `Quick

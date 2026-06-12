@@ -108,9 +108,9 @@ val ingest_pr_event :
   timestamp_ms:int64 ->
   unit
 
-(** Try to detect PR creation from Execute tool output and ingest a PR event.
-    Only fires when [tool_name = "execute"] and output contains a GitHub pull request URL.
-    Heuristic — falls back to output parsing if descriptor is not available. *)
+(** Ingest descriptor-backed PR events from successful Execute tool output.
+    Raw stdout URL scanning is intentionally not a PR signal; only an explicit
+    successful wrapper result with a command descriptor may ingest PR events. *)
 val ingest_pr_event_from_hook :
   base_path:string ->
   keeper_id:string ->
@@ -120,7 +120,9 @@ val ingest_pr_event_from_hook :
   unit
 
 (** Ingest PR event from command_descriptor (deterministic).
-    Extracts descriptor from tool result JSON, falls back to heuristic.
+    Extracts descriptor and structured PR result JSON from tool result JSON.
+    For descriptor-confirmed [gh pr create] only, falls back to the GitHub CLI's
+    documented stdout URL when no structured result JSON is present.
     Only proceeds when [success] is [true] — failed tool executions
     (auth/network/validation errors) must not produce phantom PR events. *)
 val ingest_pr_event_from_descriptor :
@@ -135,4 +137,4 @@ val ingest_pr_event_from_descriptor :
 (** Extract command_descriptor from tool result JSON. *)
 val extract_descriptor_from_output : string -> command_descriptor option
 
-val parse_pull_request_link_from_output : string -> (int * string) option
+val parse_pull_request_result_from_output : string -> (int * string) option

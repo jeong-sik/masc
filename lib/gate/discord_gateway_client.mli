@@ -35,6 +35,7 @@ type gateway_event = Discord_gateway_state.dispatched_event =
       ; author_id : string
       ; author_name : string option
       ; content : string
+      ; mention_user_ids : string list
       ; mentions_bot : bool
       ; explicit_mentions_bot : bool
       ; message_reference_channel_id : string option

@@ -71,6 +71,7 @@ val status_to_string : request_status -> string
 val entry_to_json : entry -> Yojson.Safe.t
 
 module For_testing : sig
+  val is_safe_request_id : string -> bool
   val forget : string -> unit
   val clear : unit -> unit
   val record_path : base_path:string -> request_id:string -> string option

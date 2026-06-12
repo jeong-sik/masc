@@ -680,6 +680,42 @@ let parse_pull_request_result_from_output (output : string) : (int * string) opt
   try Yojson.Safe.from_string output |> from_json with
   | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ | Failure _ -> None
 
+let parse_github_pr_url_candidate raw =
+  let candidate = String.trim raw in
+  let parts = String.split_on_char '/' candidate in
+  match parts with
+  | "https:" :: "" :: "github.com" :: _owner :: _repo :: "pull" :: number :: _ ->
+    Option.bind (int_of_string_opt number) (fun n ->
+      if n > 0 then Some (n, candidate) else None)
+  | _ -> None
+
+let descriptor_confirmed_pr_url_from_output output =
+  let raw_output =
+    try
+      match Yojson.Safe.from_string output |> Yojson.Safe.Util.member "output" with
+      | `String nested -> nested
+      | _ -> output
+    with
+    | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ | Failure _ -> output
+  in
+  raw_output
+  |> String.split_on_char '\n'
+  |> List.find_map parse_github_pr_url_candidate
+
+let explicit_tool_success_from_output output =
+  try
+    let json = Yojson.Safe.from_string output in
+    let bool_field name =
+      match Yojson.Safe.Util.member name json with
+      | `Bool value -> Some value
+      | _ -> None
+    in
+    match bool_field "ok" with
+    | Some value -> value
+    | None -> Option.value ~default:false (bool_field "success")
+  with
+  | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ | Failure _ -> false
+
 (** Ingest PR event from command_descriptor (deterministic).
     Reads PR number/URL only from structured result JSON when available.
     Only proceeds when [success] is [true] — failed tool executions
@@ -702,7 +738,10 @@ let ingest_pr_event_from_descriptor
     | Some (Ide_event_types.Gh_pr_create { title; base = _; draft = _ }) ->
       let pr_number, pull_request_url = match parse_pull_request_result_from_output output_text with
         | Some (n, url) -> (n, url)
-        | None -> (0, "")
+        | None ->
+          Option.value
+            ~default:(0, "")
+            (descriptor_confirmed_pr_url_from_output output_text)
       in
       ingest_pr_event
         ~base_path ~pr_number ~pull_request_url ~pr_title:title
@@ -780,7 +819,7 @@ let ingest_pr_event_from_hook
     ~turn_id
     ~output_text
     ~tool_name
-    ~success:true
+    ~success:(explicit_tool_success_from_output output_text)
 
 let install_agent_observation_sinks () =
   Agent_observation.register_tool_event_sink

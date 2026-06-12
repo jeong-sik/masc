@@ -473,6 +473,35 @@ let test_pr_event_from_hook_uses_structured_descriptor_output () =
     check string "pr_title" "feat" pr_title)
 ;;
 
+let test_pr_event_from_hook_uses_descriptor_confirmed_cli_url () =
+  with_temp_dir (fun base_dir ->
+    let output =
+      {|{"ok":true,"output":"https://github.com/jeong-sik/masc/pull/456","command_descriptor":{"kind":"gh_pr_create","title":"feat cli","base":"main","draft":false}}|}
+    in
+    Ide_bridge.ingest_pr_event_from_hook
+      ~base_path:base_dir
+      ~keeper_id:"k1"
+      ~turn_id:"t1"
+      ~output_text:output
+      ~tool_name:"execute";
+    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Orphan in
+    let path = Filename.concat dir "pr_events.jsonl" in
+    check bool "file exists" true (Sys.file_exists path);
+    let ic = open_in path in
+    let line = input_line ic in
+    close_in ic;
+    let json = Yojson.Safe.from_string line in
+    let pr_number = Yojson.Safe.Util.member "pr_number" json |> Yojson.Safe.Util.to_int in
+    let pull_request_url =
+      Yojson.Safe.Util.member "pull_request_url" json |> Yojson.Safe.Util.to_string
+    in
+    check int "pr_number" 456 pr_number;
+    check string
+      "pull_request_url"
+      "https://github.com/jeong-sik/masc/pull/456"
+      pull_request_url)
+;;
+
 let test_pr_event_from_hook_ignores_non_execute () =
   with_temp_dir (fun base_dir ->
     let output = "https://github.com/owner/repo/pull/456" in
@@ -529,6 +558,22 @@ let test_descriptor_gated_on_success () =
     let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Orphan in
     let path = Filename.concat dir "pr_events.jsonl" in
     check bool "file not created on failure" false (Sys.file_exists path))
+;;
+
+let test_legacy_hook_uses_explicit_success_flag () =
+  with_temp_dir (fun base_dir ->
+    let failed_output =
+      {|{"ok":false,"output":"https://github.com/jeong-sik/masc/pull/456","command_descriptor":{"kind":"gh_pr_create","title":"feat failed","base":"main","draft":false},"error":"authentication failed"}|}
+    in
+    Ide_bridge.ingest_pr_event_from_hook
+      ~base_path:base_dir
+      ~keeper_id:"k1"
+      ~turn_id:"t1"
+      ~output_text:failed_output
+      ~tool_name:"execute";
+    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Orphan in
+    let path = Filename.concat dir "pr_events.jsonl" in
+    check bool "file not created on failed wrapper result" false (Sys.file_exists path))
 ;;
 
 let test_descriptor_ingested_on_success () =
@@ -619,10 +664,12 @@ let () =
     ; ( "pr_event"
       , [ test_case "pr event ingest" `Quick test_pr_event_ingest
         ; test_case "from hook uses structured descriptor output" `Quick test_pr_event_from_hook_uses_structured_descriptor_output
+        ; test_case "from hook uses descriptor-confirmed CLI URL" `Quick test_pr_event_from_hook_uses_descriptor_confirmed_cli_url
         ; test_case "from hook ignores non-execute" `Quick test_pr_event_from_hook_ignores_non_execute
         ; test_case "from hook ignores no url" `Quick test_pr_event_from_hook_ignores_no_url
         ; test_case "from hook ignores raw url" `Quick test_pr_event_from_hook_ignores_raw_url
         ; test_case "descriptor gated on success" `Quick test_descriptor_gated_on_success
+        ; test_case "legacy hook uses explicit success flag" `Quick test_legacy_hook_uses_explicit_success_flag
         ; test_case "descriptor ingested on success" `Quick test_descriptor_ingested_on_success
         ] )
     ; ( "concurrency"

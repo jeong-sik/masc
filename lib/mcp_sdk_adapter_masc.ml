@@ -16,7 +16,7 @@ let handles_method method_ =
   List.mem method_ sdk_owned_methods
 
 let instructions_for_profile = function
-  | Full -> TP.default_instructions
+  | Full -> TP.default_instructions ()
   | Managed_agent -> TP.managed_agent_instructions
   | Operator_remote -> TP.operator_remote_instructions
 

@@ -206,7 +206,7 @@ let test_descriptor_resolution_capabilities_for_public_aliases () =
 ;;
 
 let test_default_instructions_pin_start_transition_workflow () =
-  let instructions = Masc.Mcp_server_eio_tool_profile.default_instructions in
+  let instructions = Masc.Mcp_server_eio_tool_profile.default_instructions () in
   check
     bool
     "write summary names start"
@@ -223,7 +223,7 @@ let test_default_instructions_pin_start_transition_workflow () =
     false
     (contains_substring
        instructions
-       "masc_transition(claim) \226\134\146 work in a repo-local worktree")
+       "masc_transition(claim) -> work in a repo-local worktree")
 ;;
 
 let () =

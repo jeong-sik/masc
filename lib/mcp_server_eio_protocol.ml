@@ -163,7 +163,7 @@ let handle_initialize_eio ?(profile = Full) id params =
              ; ( "instructions"
                , `String
                    (match profile with
-                    | Full -> TP.default_instructions
+                    | Full -> TP.default_instructions ()
                     | Managed_agent -> TP.managed_agent_instructions
                     | Operator_remote -> TP.operator_remote_instructions) )
              ; ( "_meta"
@@ -181,7 +181,7 @@ let handle_initialize_eio ?(profile = Full) id params =
 ;;
 
 let profile_instructions = function
-  | Full -> TP.default_instructions
+  | Full -> TP.default_instructions ()
   | Managed_agent -> TP.managed_agent_instructions
   | Operator_remote -> TP.operator_remote_instructions
 ;;

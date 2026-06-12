@@ -274,14 +274,39 @@ let endpoint_base_url (endpoint : Voice_config.endpoint) =
   | _ -> Option.map normalize_base_url endpoint.base_url
 ;;
 
-let elevenlabs_voice_id voice =
+let elevenlabs_premade_voice_ids =
+  [ "Sarah", "EXAVITQu4vr4xnSDxMaL"
+  ; "Roger", "CwhRBWXzGAHq8TQ4Fs17"
+  ; "George", "JBFqnCBsd6RMkjVDRZzb"
+  ; "Laura", "FGY2WhTYpPnrIDTdsKH5"
+  ]
+;;
+
+let is_elevenlabs_voice_id value =
+  let len = String.length value in
+  len >= 20
+  && len <= 64
+  && String.for_all
+       (function
+         | '0' .. '9' | 'A' .. 'Z' | 'a' .. 'z' -> true
+         | _ -> false)
+       value
+;;
+
+let elevenlabs_voice_id_result voice =
   match String.trim voice with
-  | "Sarah" -> "EXAVITQu4vr4xnSDxMaL"
-  | "Roger" -> "CwhRBWXzGAHq8TQ4Fs17"
-  | "George" -> "JBFqnCBsd6RMkjVDRZzb"
-  | "Laura" -> "FGY2WhTYpPnrIDTdsKH5"
-  | "" -> "21m00Tcm4TlvDq8ikWAM"
-  | value -> value
+  | "" -> Ok "21m00Tcm4TlvDq8ikWAM"
+  | value ->
+    (match List.assoc_opt value elevenlabs_premade_voice_ids with
+     | Some voice_id -> Ok voice_id
+     | None when is_elevenlabs_voice_id value -> Ok value
+     | None ->
+       Error
+         (Printf.sprintf
+            "ElevenLabs direct TTS requires a voice_id or known premade alias \
+             (got %S). Add shared/library voices to the account first, then \
+             store the resulting voice_id in voice config."
+            value))
 ;;
 
 let http_request_for_tts
@@ -340,11 +365,14 @@ let http_request_for_tts
               ] )
         ]
     in
-    Ok
-      { url = Printf.sprintf "%s/text-to-speech/%s" base_url (elevenlabs_voice_id voice)
-      ; headers
-      ; body_json
-      }
+    (match elevenlabs_voice_id_result voice with
+     | Error err -> Error err
+     | Ok voice_id ->
+       Ok
+         { url = Printf.sprintf "%s/text-to-speech/%s" base_url voice_id
+         ; headers
+         ; body_json
+         })
 ;;
 
 let stt_request_for_endpoint (endpoint : Voice_config.endpoint) ~api_key ~audio_file ~model =

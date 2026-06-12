@@ -110,6 +110,81 @@ let test_voice_mcp_env_no_longer_overrides_default_session_url () =
               (Voice.default_session_url ~path:"/mcp"))))))
 ;;
 
+let elevenlabs_tts_endpoint : Voice_config.endpoint =
+  { id = "test-tts"
+  ; kind = Voice_config.Elevenlabs_direct
+  ; base_url = Some "https://api.elevenlabs.io/v1"
+  ; mcp_url = None
+  ; health_url = None
+  ; api_key_env = Some "ELEVENLABS_API_KEY"
+  ; enabled = true
+  ; timeout_seconds = Some 30.0
+  ; max_retries = Some 2
+  }
+;;
+
+let default_voice_tuning : Voice_config.voice_tuning =
+  { stability = 0.55; similarity_boost = 0.75; style = 0.0 }
+;;
+
+let test_tts_request_elevenlabs_accepts_voice_id () =
+  match
+    Voice.http_request_for_tts
+      elevenlabs_tts_endpoint
+      ~api_key:"test-key-123"
+      ~message:"hello"
+      ~voice:"CwhRBWXzGAHq8TQ4Fs17"
+      ~model:"eleven_multilingual_v2"
+      ~tuning:default_voice_tuning
+  with
+  | Ok req ->
+    check
+      string
+      "url uses configured voice_id"
+      "https://api.elevenlabs.io/v1/text-to-speech/CwhRBWXzGAHq8TQ4Fs17"
+      req.url
+  | Error err -> fail (Printf.sprintf "expected Ok, got Error: %s" err)
+;;
+
+let test_tts_request_elevenlabs_maps_premade_alias () =
+  match
+    Voice.http_request_for_tts
+      elevenlabs_tts_endpoint
+      ~api_key:"test-key-123"
+      ~message:"hello"
+      ~voice:"Roger"
+      ~model:"eleven_multilingual_v2"
+      ~tuning:default_voice_tuning
+  with
+  | Ok req ->
+    check
+      string
+      "url maps Roger alias"
+      "https://api.elevenlabs.io/v1/text-to-speech/CwhRBWXzGAHq8TQ4Fs17"
+      req.url
+  | Error err -> fail (Printf.sprintf "expected Ok, got Error: %s" err)
+;;
+
+let test_tts_request_elevenlabs_rejects_unknown_name () =
+  match
+    Voice.http_request_for_tts
+      elevenlabs_tts_endpoint
+      ~api_key:"test-key-123"
+      ~message:"hello"
+      ~voice:"Charlotte"
+      ~model:"eleven_multilingual_v2"
+      ~tuning:default_voice_tuning
+  with
+  | Ok _ -> fail "expected Error for unknown ElevenLabs voice name"
+  | Error err ->
+    check
+      bool
+      "error explains voice_id requirement"
+      true
+      (String_util.contains_substring err "voice_id"
+       && String_util.contains_substring err "Charlotte")
+;;
+
 let test_stt_request_elevenlabs_direct () =
   let endpoint : Voice_config.endpoint =
     { id = "test-stt"
@@ -513,6 +588,20 @@ let () =
             test_stt_request_elevenlabs_direct
         ; test_case "stt request provider_d compat" `Quick test_stt_request_openai_compat
         ; test_case "stt request mcp rejected" `Quick test_stt_request_mcp_rejected
+        ] )
+    ; ( "tts"
+      , [ test_case
+            "tts request elevenlabs accepts voice_id"
+            `Quick
+            test_tts_request_elevenlabs_accepts_voice_id
+        ; test_case
+            "tts request elevenlabs maps premade alias"
+            `Quick
+            test_tts_request_elevenlabs_maps_premade_alias
+        ; test_case
+            "tts request elevenlabs rejects unknown name"
+            `Quick
+            test_tts_request_elevenlabs_rejects_unknown_name
         ] )
     ; ( "keeper_voice_speak"
       , [ test_case

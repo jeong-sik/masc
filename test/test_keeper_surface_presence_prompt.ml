@@ -8,6 +8,45 @@ open Alcotest
 
 module WO = Masc.Keeper_world_observation
 module Prompt = Masc.Keeper_unified_prompt
+module KTP = Masc.Keeper_types_profile
+
+let has_repo_prompts root =
+  Sys.file_exists (Filename.concat root "config/prompts/keeper.unified.system.md")
+
+let repo_root () =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root when has_repo_prompts root -> root
+  | _ ->
+    let rec ascend path =
+      if has_repo_prompts path then path
+      else
+        let parent = Filename.dirname path in
+        if String.equal parent path then Sys.getcwd () else ascend parent
+    in
+    ascend (Sys.getcwd ())
+
+let restore_env name = function
+  | Some value -> Unix.putenv name value
+  | None -> Unix.putenv name ""
+
+let with_repo_prompt_config f =
+  let root = repo_root () in
+  let config_dir = Filename.concat root "config" in
+  let prompts_dir = Filename.concat config_dir "prompts" in
+  let original_config = Sys.getenv_opt "MASC_CONFIG_DIR" in
+  Fun.protect
+    ~finally:(fun () ->
+      restore_env "MASC_CONFIG_DIR" original_config;
+      Config_dir_resolver.reset ();
+      Prompt_registry.clear ())
+    (fun () ->
+      Unix.putenv "MASC_CONFIG_DIR" config_dir;
+      Config_dir_resolver.reset ();
+      Prompt_registry.clear ();
+      Prompt_registry.set_markdown_dir prompts_dir;
+      Masc.Prompt_defaults.init ();
+      Masc.Keeper_prompt_external.reset_cache ();
+      f ())
 
 let base_observation : WO.world_observation =
   {
@@ -80,6 +119,13 @@ let user_message observation =
     Prompt.build_prompt ~meta ~base_path:"/tmp/unused" ~observation ()
   in
   user
+
+let system_prompt ?profile_defaults observation =
+  let system, _user =
+    Prompt.build_prompt ~meta ~base_path:"/tmp/unused" ?profile_defaults
+      ~observation ()
+  in
+  system
 
 let contains ~needle haystack =
   let n = String.length needle and h = String.length haystack in
@@ -183,6 +229,29 @@ let test_namespace_state_names_running_keeper_fibers () =
   check bool "legacy active agents label absent" false
     (contains ~needle:"- Active agents:" user)
 
+let test_profile_defaults_feed_identity_prompt () =
+  with_repo_prompt_config @@ fun () ->
+  let profile_defaults =
+    {
+      KTP.empty_keeper_profile_defaults with
+      will = Some "soul will";
+      needs = Some "soul needs";
+      desires = Some "soul desires";
+      instructions = Some "soul instructions";
+    }
+  in
+  let system =
+    system_prompt ~profile_defaults base_observation
+  in
+  check bool "profile will in system prompt" true
+    (contains ~needle:"Will: soul will" system);
+  check bool "profile needs in system prompt" true
+    (contains ~needle:"Needs: soul needs" system);
+  check bool "profile desires in system prompt" true
+    (contains ~needle:"Desires: soul desires" system);
+  check bool "profile instructions in system prompt" true
+    (contains ~needle:"Instructions:\nsoul instructions" system)
+
 let () =
   init_runtime_default_for_tests ();
   run "keeper_surface_presence_prompt"
@@ -201,5 +270,7 @@ let () =
             test_empty_presence_has_no_section;
           test_case "namespace state names running keeper fibers" `Quick
             test_namespace_state_names_running_keeper_fibers;
+          test_case "profile defaults feed identity prompt" `Quick
+            test_profile_defaults_feed_identity_prompt;
         ] );
     ]

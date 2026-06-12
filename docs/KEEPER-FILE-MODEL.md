@@ -87,6 +87,10 @@ These are the identity fields that should live in persona by default.
 | `short_goal` | Optional | Short-horizon goal | Defaults to `goal` in create paths. |
 | `mid_goal` | Optional | Mid-horizon goal | Defaults to `goal` in create paths. |
 | `long_goal` | Optional | Long-horizon goal | Defaults to `goal` in create paths. |
+| `will` | Optional | Keeper drive / self-model | Used as prompt default unless a keeper TOML overlay overrides it. |
+| `needs` | Optional | Resources or context the keeper believes it needs | Used as prompt default unless a keeper TOML overlay overrides it. |
+| `desires` | Optional | Desired end state / motivational bias | Used as prompt default unless a keeper TOML overlay overrides it. |
+| `instructions` | Optional | Persona-specific behavior and voice instructions | Used as prompt default unless a keeper TOML overlay overrides it. |
 | `mention_targets` | Optional | Default mention aliases | If omitted, create-from-persona falls back to `[persona_name]`. |
 | `tool_access` | Optional | Default tool candidate profile list | String array of tool names used as profile input; omitted means `[]`. It is not the complete execution gate. |
 | `tool_denylist` | Optional | Tools to remove after candidate profile resolution | Optional policy refinement. |
@@ -100,7 +104,6 @@ These may still be parsed today, but they are **not** the preferred place to enc
 | Field | Status | Preferred owner |
 | --- | --- | --- |
 | `allowed_paths` | Ignored by design | nowhere in persona |
-| `will`, `needs`, `desires`, `instructions` | Ignored by design | existing keeper meta / `keeper.toml` overlay |
 | `runtime_id`, `model`, `runtime_ref` | Removed | `runtime.toml [[runtime.assignments]]` |
 | `persona_ref` | Removed | `keeper.persona_name` |
 | `telemetry_feedback_*` | Compatibility-only | `keeper.toml` or runtime policy |

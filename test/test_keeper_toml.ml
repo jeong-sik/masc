@@ -755,26 +755,44 @@ let require_nonempty_option path field value =
   | _ ->
     fail
       (Printf.sprintf
-         "%s must declare non-empty keeper.%s; persona profile self-model \
-          fields are legacy and ignored by the prompt defaults loader"
+         "%s must resolve non-empty keeper.%s from persona defaults or TOML \
+          overlay"
          path
          field)
 
-let test_bundled_keeper_tomls_declare_prompt_self_model () =
-  let keepers_dir = Filename.concat (repo_root ()) "config/keepers" in
-  Sys.readdir keepers_dir
-  |> Array.to_list
-  |> List.filter (fun file ->
-       Filename.check_suffix file ".toml"
-       && not (String.equal file "base.toml"))
-  |> List.iter (fun file ->
-       let path = Filename.concat keepers_dir file in
-       match KTP.load_keeper_toml path with
-       | Error e -> fail (Printf.sprintf "%s failed to load: %s" path e)
-       | Ok (_, defaults) ->
-         require_nonempty_option path "will" defaults.will;
-         require_nonempty_option path "needs" defaults.needs;
-         require_nonempty_option path "desires" defaults.desires)
+let test_bundled_keeper_profiles_resolve_prompt_self_model () =
+  let repo = repo_root () in
+  let original_config = Sys.getenv_opt "MASC_CONFIG_DIR" in
+  let original_personas = Sys.getenv_opt "MASC_PERSONAS_DIR" in
+  let restore key = function
+    | Some value -> Unix.putenv key value
+    | None -> Unix.putenv key ""
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      restore "MASC_CONFIG_DIR" original_config;
+      restore "MASC_PERSONAS_DIR" original_personas;
+      Config_dir_resolver.reset ())
+    (fun () ->
+      Unix.putenv "MASC_CONFIG_DIR" (Filename.concat repo "config");
+      Unix.putenv "MASC_PERSONAS_DIR"
+        (Filename.concat (Filename.concat repo "config") "personas");
+      Config_dir_resolver.reset ();
+      let keepers_dir = Filename.concat repo "config/keepers" in
+      Sys.readdir keepers_dir
+      |> Array.to_list
+      |> List.filter (fun file ->
+           Filename.check_suffix file ".toml"
+           && not (String.equal file "base.toml"))
+      |> List.iter (fun file ->
+           let path = Filename.concat keepers_dir file in
+           let name = Filename.chop_extension file in
+           match KTP.load_keeper_profile_defaults_result name with
+           | Error e -> fail (Printf.sprintf "%s failed to resolve: %s" path e)
+           | Ok defaults ->
+             require_nonempty_option path "will" defaults.will;
+             require_nonempty_option path "needs" defaults.needs;
+             require_nonempty_option path "desires" defaults.desires))
 
 let with_temp_dir prefix f =
   let dir = Filename.temp_file prefix "" in
@@ -969,7 +987,7 @@ let test_persona_resolver_omits_unspecified_tool_access () =
        | `Null -> ()
        | _ -> fail "unspecified tool_access should be omitted")
 
-let test_persona_defaults_ignore_legacy_self_model_fields () =
+let test_persona_defaults_load_self_model_fields () =
   with_personas_dir @@ fun personas_dir ->
   let persona_dir = Filename.concat personas_dir "probe" in
   mkdir_p persona_dir;
@@ -990,10 +1008,12 @@ let test_persona_defaults_ignore_legacy_self_model_fields () =
   let defaults = KTP.load_keeper_profile_defaults_from_persona "probe" in
   check (option string) "goal still loads" (Some "test persona keeper")
     defaults.goal;
-  check (option string) "legacy will ignored" None defaults.will;
-  check (option string) "legacy needs ignored" None defaults.needs;
-  check (option string) "legacy desires ignored" None defaults.desires;
-  check (option string) "legacy instructions ignored" None defaults.instructions
+  check (option string) "will loads" (Some "legacy will") defaults.will;
+  check (option string) "needs loads" (Some "legacy needs") defaults.needs;
+  check (option string) "desires loads" (Some "legacy desires")
+    defaults.desires;
+  check (option string) "instructions load" (Some "legacy instructions")
+    defaults.instructions
 
 let test_persona_resolver_rejects_operator_todo_profile () =
   with_personas_dir @@ fun personas_dir ->
@@ -1843,12 +1863,12 @@ let () =
           test_case "with files" `Quick test_discover_with_files;
           test_case "nonexistent dir" `Quick test_discover_nonexistent_dir;
           test_case "skips bad files" `Quick test_discover_skips_bad_files;
-          test_case "bundled keeper TOMLs declare prompt self-model" `Quick
-            test_bundled_keeper_tomls_declare_prompt_self_model;
+          test_case "bundled keeper profiles resolve prompt self-model" `Quick
+            test_bundled_keeper_profiles_resolve_prompt_self_model;
           test_case "persona resolver omits unspecified tool_access" `Quick
             test_persona_resolver_omits_unspecified_tool_access;
-          test_case "persona defaults ignore legacy self-model fields" `Quick
-            test_persona_defaults_ignore_legacy_self_model_fields;
+          test_case "persona defaults load self-model fields" `Quick
+            test_persona_defaults_load_self_model_fields;
           test_case "persona resolver rejects OPERATOR_TODO profile" `Quick
             test_persona_resolver_rejects_operator_todo_profile;
           test_case "persona resolver reports placeholder defaults source" `Quick

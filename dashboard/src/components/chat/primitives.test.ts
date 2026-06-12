@@ -271,3 +271,60 @@ describe('ChatComposer queue & stall', () => {
     expect(container.querySelector('[data-chat-stall-hint]')).toBeNull()
   })
 })
+
+describe('ChatComposer IME composition guard', () => {
+  let container: HTMLDivElement
+
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+  })
+
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+  })
+
+  function renderComposer(onSend: () => void) {
+    render(
+      html`<${ChatComposer}
+        draft="소주에 갑오징어 먹었닭"
+        placeholder="메시지 입력..."
+        disabled=${false}
+        streaming=${false}
+        onDraftChange=${() => {}}
+        onSend=${onSend}
+      />`,
+      container,
+    )
+    const textarea = container.querySelector('textarea')
+    expect(textarea).not.toBeNull()
+    return textarea as HTMLTextAreaElement
+  }
+
+  it('ignores Enter fired while the last Hangul syllable is composing', () => {
+    // Regression: the composition-commit Enter used to send the message,
+    // the IME flushed the trailing syllable back into the cleared input,
+    // and the queue re-sent that single character after the reply arrived.
+    let sent = 0
+    const textarea = renderComposer(() => { sent += 1 })
+
+    textarea.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true }),
+    )
+    expect(sent).toBe(0)
+
+    textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    expect(sent).toBe(1)
+  })
+
+  it('keeps Shift+Enter as newline (no send)', () => {
+    let sent = 0
+    const textarea = renderComposer(() => { sent += 1 })
+
+    textarea.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true }),
+    )
+    expect(sent).toBe(0)
+  })
+})

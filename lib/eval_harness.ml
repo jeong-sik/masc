@@ -183,12 +183,17 @@ let check_tool_expectations_with_evidence
     let detail =
       if not required_ok then
         Printf.sprintf "required tool selector '%s' was not called" selector_label
-      else if not max_ok then
-        Printf.sprintf "tool selector '%s' called %d times (max: %d)"
-          selector_label call_count (Option.value ~default:0 exp.max_calls)
-      else
+      else (
+        match exp.max_calls with
+        | Some max when call_count > max ->
+          Printf.sprintf
+            "tool selector '%s' called %d times (max: %d)"
+            selector_label
+            call_count
+            max
+        | _ ->
         Printf.sprintf "tool selector '%s' called %d times — OK"
-          selector_label call_count
+          selector_label call_count)
     in
     { grader_desc = Printf.sprintf "tool_expectation: %s" selector_label;
       score = if passed then 1.0 else 0.0;
@@ -484,10 +489,12 @@ let scenario_of_json (json : Yojson.Safe.t) : (scenario, string) result =
           List.filter_map (fun te ->
             try
               let legacy_tool =
-                Json_util.get_string te "tool"
-                |> Option.value ~default:
-                     (Json_util.get_string te "tool_name"
-                      |> Option.value ~default:"")
+                match Json_util.get_string te "tool" with
+                | Some tool -> tool
+                | None -> (
+                  match Json_util.get_string te "tool_name" with
+                  | Some tool_name -> tool_name
+                  | None -> "")
               in
               let selector =
                 match Json_util.assoc_member_opt "selector" te with

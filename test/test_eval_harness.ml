@@ -142,7 +142,8 @@ let test_tool_expect_max_calls_exceeded () =
   let results = Eval_harness.check_tool_expectations expectations actual in
   let r = List.hd results in
   Alcotest.(check bool) "exceeded penalty" true (r.Eval_harness.score < 1.0);
-  Alcotest.(check bool) "has warning" true (String.length r.Eval_harness.detail > 0)
+  Alcotest.(check bool) "has max detail" true
+    (String_util.contains_substring r.Eval_harness.detail "max: 2")
 
 let test_tool_expect_descriptor_selector () =
   let expectations : Eval_harness.tool_expectation list = [
@@ -264,6 +265,28 @@ let test_parse_regex_grader () =
        | _ -> Alcotest.fail "Expected Deterministic grader")
   | Error e -> Alcotest.fail (Printf.sprintf "Parse failed: %s" e)
 
+let test_parse_tool_expectation_tool_name_fallback () =
+  let json = Yojson.Safe.from_string {|{
+    "id": "tool-name-fallback",
+    "goal": "Test legacy tool_name fallback",
+    "tool_expectations": [
+      {"tool_name": "keeper_task_claim", "required": true}
+    ]
+  }|} in
+  match Eval_harness.scenario_of_json json with
+  | Ok s ->
+      (match s.Eval_harness.tool_expectations with
+       | [ expectation ] ->
+           Alcotest.(check string) "legacy label" "keeper_task_claim"
+             expectation.Eval_harness.tool_name;
+           (match expectation.Eval_harness.selector with
+            | Eval_tool_selector.Tool_name tool_name ->
+                Alcotest.(check string) "selector fallback" "keeper_task_claim"
+                  tool_name
+            | _ -> Alcotest.fail "Expected Tool_name selector")
+       | _ -> Alcotest.fail "Expected exactly one tool expectation")
+  | Error e -> Alcotest.fail (Printf.sprintf "Parse failed: %s" e)
+
 let test_parse_model_grader () =
   let json = Yojson.Safe.from_string {|{
     "id": "model-test",
@@ -368,6 +391,8 @@ let () =
       Alcotest.test_case "minimal" `Quick test_parse_minimal_scenario;
       Alcotest.test_case "full scenario" `Quick test_parse_full_scenario;
       Alcotest.test_case "regex grader" `Quick test_parse_regex_grader;
+      Alcotest.test_case "tool_name fallback" `Quick
+        test_parse_tool_expectation_tool_name_fallback;
       Alcotest.test_case "model grader" `Quick test_parse_model_grader;
     ]);
     ("file_loading", [

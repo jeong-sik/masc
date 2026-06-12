@@ -21,24 +21,21 @@ let label = function
   | Receipt_label (key, value) -> "receipt_label:" ^ key ^ "=" ^ value
   | Eval_tag value -> "eval_tag:" ^ value
 
-let kind_value = function
-  | Tool_name value -> ("tool_name", value)
-  | Descriptor_id value -> ("descriptor_id", value)
-  | Runtime_handler value -> ("runtime_handler", value)
-  | Eval_tag value -> ("eval_tag", value)
-  | Receipt_label _ -> ("receipt_label", "")
-
 let to_yojson selector =
+  let kind_value kind value =
+    `Assoc [ ("type", `String kind); ("value", `String value) ]
+  in
   match selector with
+  | Tool_name value -> kind_value "tool_name" value
+  | Descriptor_id value -> kind_value "descriptor_id" value
+  | Runtime_handler value -> kind_value "runtime_handler" value
+  | Eval_tag value -> kind_value "eval_tag" value
   | Receipt_label (key, value) ->
       `Assoc
         [ ("type", `String "receipt_label")
         ; ("key", `String key)
         ; ("value", `String value)
         ]
-  | Tool_name _ | Descriptor_id _ | Runtime_handler _ | Eval_tag _ ->
-      let kind, value = kind_value selector in
-      `Assoc [ ("type", `String kind); ("value", `String value) ]
 
 let string_field json key =
   match Json_util.assoc_member_opt key json with

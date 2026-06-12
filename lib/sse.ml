@@ -343,6 +343,31 @@ let format_event ?id ?event_type data =
   Buffer.add_string buf "\n\n";
   Buffer.contents buf
 
+(** Format SSE event from a [Yojson.Safe.t] value without the intermediate
+    [to_string] allocation.  Writes JSON bytes directly into the SSE event
+    buffer via [Yojson.Safe.to_buffer], cutting one string allocation per
+    broadcast (~9/sec → ~9 fewer short-lived strings/sec for GC to collect). *)
+let format_event_yojson ?id ?event_type json =
+  let effective_id =
+    match id with
+    | Some i -> i
+    | None -> Atomic.fetch_and_add event_counter 1 + 1
+  in
+  let buf = Buffer.create 128 in
+  Buffer.add_string buf "id: ";
+  Buffer.add_string buf (string_of_int effective_id);
+  Buffer.add_char buf '\n';
+  (match event_type with
+   | Some e ->
+       Buffer.add_string buf "event: ";
+       Buffer.add_string buf e;
+       Buffer.add_char buf '\n'
+   | None -> ());
+  Buffer.add_string buf "data: ";
+  Yojson.Safe.to_buffer buf json;
+  Buffer.add_string buf "\n\n";
+  Buffer.contents buf
+
 (** Get current event ID *)
 let current_id () = Atomic.get event_counter
 
@@ -782,14 +807,16 @@ let reap_dead_external_subscribers () =
 let broadcast_impl ?(buffer = true) ?(notify_external = true)
     ?(event_type = "message") target json =
   let t0 = Time_compat.now () in
-  let data = Yojson.Safe.to_string json in
   let jsonrpc_payload =
     Sse_jsonrpc_filter.jsonrpc_message_for_agent_stream json
   in
   (* Atomically allocate the event id so two concurrent broadcasts
      cannot observe the same peeked counter value and emit duplicates. *)
   let current_event_id = next_id () in
-  let event = format_event ~id:current_event_id ~event_type data in
+  (* Write JSON directly into the SSE event buffer, avoiding the
+     intermediate [Yojson.Safe.to_string] allocation.  The output
+     is byte-for-byte identical to the previous two-step approach. *)
+  let event = format_event_yojson ~id:current_event_id ~event_type json in
   if buffer then
     buffer_event current_event_id event;
   (* The [SMap.t] returned by [Atomic.get] is immutable

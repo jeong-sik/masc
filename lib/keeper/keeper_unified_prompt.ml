@@ -373,10 +373,11 @@ let fallback_externalized_bullet key =
   if String.equal key Keeper_prompt_names.turn_intent_claim_guidance_a then
     Some
       "- Claimable backlog is visible and you do not already hold a task. \
-       `keeper_task_claim {}` is available, not mandatory: claim only when \
+       `keeper_task_claim {}` is available, not mandatory; use \
+       `keeper_task_claim { \"task_id\": \"task-123\" }` when a user, mention, \
+       board item, or task list row points to a specific task. Claim only when \
        the work fits your current goal, persona, and capacity. Use \
-       `keeper_tasks_list` when you need to inspect backlog state before \
-       deciding."
+       `keeper_tasks_list` when you need to inspect backlog state before deciding."
   else if String.equal key Keeper_prompt_names.turn_intent_claim_guidance_b then
     Some
       "- Repo and remote PR/issue inspection is observation, not progress by itself. \
@@ -412,8 +413,10 @@ let fallback_externalized_bullet key =
   else if String.equal key Keeper_prompt_names.immediate_task_move then
     Some
       "- Claimable backlog exists. `keeper_task_claim {}` may claim the next \
-       eligible unclaimed task, but this is an intake option rather than a \
-       required move.\n\
+       eligible unclaimed task; when a user, mention, board item, or \
+       `keeper_tasks_list` row names a specific task, use `keeper_task_claim { \
+       \"task_id\": \"task-123\" }` instead. Claiming is an intake option \
+       rather than a required move.\n\
        - Use keeper_tasks_list to inspect backlog state, diagnose missing \
        work, or verify task lifecycle before deciding. Never substitute \
        Execute probes (ls/cat/find against .masc/, backlog.json, or \

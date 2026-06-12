@@ -421,19 +421,40 @@ let handle_keeper_task_tool
          force-released. Example: reason='assignee offline >10 min, no heartbeat'."
     else (
       let agent = keeper_agent_sender ~meta in
-      let _ =
-        Workspace.broadcast
-          config
-          ~from_agent:agent
-          ~content:
-            (Printf.sprintf
-               "Force-releasing task %s (reason: %s)"
-               task_id
-               reason)
+      let result = Workspace.force_release_task_r config ~agent_name:agent ~task_id () in
+      let is_noop =
+        match result with
+        | Ok msg -> String_util.contains_substring_ci msg "no-op"
+        | Error _ -> false
+      in
+      let () =
+        if not is_noop then
+          let _ =
+            Workspace.broadcast
+              config
+              ~from_agent:agent
+              ~content:
+                (Printf.sprintf
+                   "Force-releasing task %s (reason: %s)"
+                   task_id
+                   reason)
+          in
+          ()
+        else ()
+      in
+      let typed_outcome =
+        match result with
+        | Ok _ when is_noop ->
+          Keeper_tool_outcome.No_progress
+            { reason = Keeper_tool_outcome.No_work_available }
+        | Ok _ -> Keeper_tool_outcome.Progress
+        | Error e ->
+          Keeper_tool_outcome.Error
+            { reason = Masc_domain.masc_error_to_string e }
       in
       keeper_task_result_json
-        ~typed_outcome:(Some Keeper_tool_outcome.Progress)
-        (Workspace.force_release_task_r config ~agent_name:agent ~task_id ()))
+        ~typed_outcome:(Some typed_outcome)
+        result)
     | Task_force_done ->
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
     let notes = Safe_ops.json_string ~default:"" "notes" args |> String.trim in
@@ -555,12 +576,66 @@ let handle_keeper_task_tool
         remember_wip_rejection task.id rejection;
         false
     in
+    let requested_task_id =
+      Safe_ops.json_string ~default:"" "task_id" args |> String.trim
+    in
+    let explicit_claim_result () =
+      let tasks = Workspace.get_tasks_raw config in
+      let claim_specific task =
+        let active_tasks =
+          List.filter
+            (fun (active : Masc_domain.task) ->
+               not (String.equal active.id requested_task_id))
+            tasks
+        in
+        if not (wip_admission_filter ~active_tasks task)
+        then
+          Workspace.Claim_next_no_eligible
+            { excluded_count = 1
+            ; blocked_count = 0
+            ; verification_blocked_count = 0
+            ; scope_excluded_count = 0
+            ; explicit_excluded_count = 1
+            ; claim_pool_candidate_count = 1
+            }
+        else (
+          match
+            Workspace.claim_task_r
+              config
+              ~agent_name:meta.agent_name
+              ~task_id:requested_task_id
+              ()
+          with
+          | Ok outcome ->
+            Workspace.Claim_next_claimed
+              { task_id = requested_task_id
+              ; title = task.title
+              ; priority = task.priority
+              ; released_task_id = None
+              ; message = outcome.message
+              ; scope_widened = false
+              }
+          | Error e -> Workspace.Claim_next_error (Masc_domain.masc_error_to_string e))
+      in
+      match
+        List.find_opt
+          (fun (task : Masc_domain.task) -> String.equal task.id requested_task_id)
+          tasks
+      with
+      | None ->
+        Workspace.Claim_next_error
+          (Printf.sprintf "unknown task_id: %s" requested_task_id)
+      | Some task -> claim_specific task
+    in
     let result =
-      Workspace.claim_next_r config ~agent_name:meta.agent_name
-        ~task_filter:claim_goal_scope.task_filter
-        ~admission_filter:wip_admission_filter
-        ~allow_scope_fallback:true
-        ()
+      if requested_task_id <> "" then
+        explicit_claim_result ()
+      else
+        Workspace.claim_next_r config ~agent_name:meta.agent_name
+          ~task_filter:claim_goal_scope.task_filter
+          ~admission_filter:wip_admission_filter
+          ~allow_scope_fallback:true
+          ()
     in
     let wip_rejections = List.rev !wip_rejections in
     let auto_started_ok = ref false in

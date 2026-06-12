@@ -5,8 +5,8 @@
 
 [[hints]]
 name = "keeper_task_claim"
-call = "`keeper_task_claim` {}"
-description = "reserve the next eligible task"
+call = "`keeper_task_claim` {} or { task_id: \"task-123\" }"
+description = "reserve the next eligible task or an explicitly requested task"
 
 [[hints]]
 name = "keeper_tasks_list"

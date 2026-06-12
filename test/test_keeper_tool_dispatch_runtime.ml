@@ -567,6 +567,84 @@ let test_public_local_aliases_dispatch_to_runtime_handlers () =
       check bool "Execute ran in requested cwd" true
         (contains_substring execute_result.raw_output playground))
 
+let test_keeper_task_claim_accepts_specific_task_id () =
+  with_exec_fixture "keeper_tool_dispatch_specific_task_claim"
+    (fun ~config ~meta ~ctx_work ->
+      ignore (Workspace.init config ~agent_name:(Some meta.agent_name));
+      ignore
+        (Workspace.add_task config ~title:"higher priority task" ~priority:1
+           ~description:"should not be claimed by explicit task_id");
+      ignore
+        (Workspace.add_task config ~title:"requested task" ~priority:3
+           ~description:"must be claimed by explicit task_id");
+      let result =
+        KET.execute_keeper_tool_call_with_outcome
+          ~config
+          ~meta
+          ~ctx_work
+          ~exec_cache:None
+          ~name:"keeper_task_claim"
+          ~input:(`Assoc [ "task_id", `String "task-002" ])
+          ()
+      in
+      check string "specific claim outcome" "success" (outcome_label result.outcome);
+      check string "specific claim payload shape" "structured_success"
+        (payload_kind result.payload_shape);
+      let json = Yojson.Safe.from_string result.raw_output in
+      let claimed_task = Yojson.Safe.Util.member "claimed_task" json in
+      check string "claimed requested task" "task-002"
+        Yojson.Safe.Util.(member "task_id" claimed_task |> to_string);
+      let tasks = Workspace.get_tasks_raw config in
+      let task_status task_id =
+        match
+          List.find_opt
+            (fun (task : Masc_domain.task) -> String.equal task.id task_id)
+            tasks
+        with
+        | None -> fail (Printf.sprintf "missing %s" task_id)
+        | Some task -> task.Masc_domain.task_status
+      in
+      (match task_status "task-001" with
+       | Masc_domain.Todo -> ()
+       | _ -> fail "higher priority task should remain todo");
+      match task_status "task-002" with
+      | Masc_domain.Claimed { assignee; _ }
+      | Masc_domain.InProgress { assignee; _ } ->
+        check string "assignee" meta.agent_name assignee
+      | _ -> fail "requested task should be claimed or auto-started")
+
+let test_keeper_task_force_release_noop_is_no_progress () =
+  with_exec_fixture "keeper_tool_dispatch_force_release_noop"
+    (fun ~config ~meta ~ctx_work ->
+      ignore (Workspace.init config ~agent_name:(Some meta.agent_name));
+      ignore
+        (Workspace.add_task config ~title:"todo task" ~priority:1
+           ~description:"release is a no-op while todo");
+      let result =
+        KET.execute_keeper_tool_call_with_outcome
+          ~config
+          ~meta
+          ~ctx_work
+          ~exec_cache:None
+          ~name:"keeper_task_force_release"
+          ~input:
+            (`Assoc
+               [ "task_id", `String "task-001"
+               ; "reason", `String "already todo smoke"
+               ])
+          ()
+      in
+      check string "force release noop outcome" "success"
+        (outcome_label result.outcome);
+      let json = Yojson.Safe.from_string result.raw_output in
+      check bool "force release noop ok" true
+        (json_bool_field ~default:false "ok" json);
+      let typed = Yojson.Safe.Util.member "typed_outcome" json in
+      check string "typed outcome" "No_progress"
+        Yojson.Safe.Util.(member "kind" typed |> to_string);
+      check string "no-progress reason" "No_work_available"
+        Yojson.Safe.Util.(member "reason" typed |> member "kind" |> to_string))
+
 let test_public_masc_web_search_alias_dispatches_to_misc_runtime () =
   with_exec_fixture "keeper_tool_dispatch_web_search_alias"
     (fun ~config ~meta ~ctx_work ->
@@ -1022,6 +1100,10 @@ let () =
         test_execute_with_outcome_bad_query_is_failure;
       test_case "public local aliases dispatch to runtime handlers" `Quick
         test_public_local_aliases_dispatch_to_runtime_handlers;
+      test_case "keeper_task_claim accepts explicit task_id" `Quick
+        test_keeper_task_claim_accepts_specific_task_id;
+      test_case "keeper_task_force_release todo no-op is no progress" `Quick
+        test_keeper_task_force_release_noop_is_no_progress;
       test_case "public WebSearch alias reaches misc runtime" `Quick
         test_public_masc_web_search_alias_dispatches_to_misc_runtime;
       test_case "public WebFetch alias reaches misc runtime" `Quick

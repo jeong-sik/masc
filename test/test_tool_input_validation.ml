@@ -1408,6 +1408,38 @@ let test_orchestrator_prompt_pins_start_transition () =
   assert_contains "orchestrator prompt starts before work" prompt "action: \"start\"";
   assert_contains "orchestrator prompt marks done" prompt "action: \"done\""
 
+let test_task_lifecycle_guidance_is_externalized () =
+  let rule =
+    read_source_file "config/prompts/tool_contract.task_lifecycle_rule.md"
+  in
+  let workflow =
+    read_source_file "config/prompts/tool_contract.task_lifecycle_workflow.md"
+  in
+  assert_contains
+    "external rule pins start before done"
+    rule
+    "action='start' before action='done'";
+  assert_contains
+    "external workflow includes start transition"
+    workflow
+    "masc_transition(start)";
+  assert_contains
+    "external workflow keeps worktree guidance"
+    workflow
+    "work in a repo-local worktree";
+  let schema_source = read_source_file "lib/task/tool_task_schemas.ml" in
+  let profile_source =
+    read_source_file "lib/mcp_server_eio_tool_profile.ml"
+  in
+  assert_not_contains
+    "task schema does not own lifecycle prose literal"
+    schema_source
+    "For normal task work, claim first";
+  assert_not_contains
+    "profile does not own workflow prose literal"
+    profile_source
+    "masc_status -> masc_transition(claim) -> masc_transition(start)"
+
 let test_board_prompt_does_not_require_optional_hearth () =
   let prompt = read_source_file "config/prompts/keeper.capabilities.md" in
   assert_contains
@@ -1950,6 +1982,8 @@ let () =
         test_keeper_tool_hint_contracts_match_required_fields;
       Alcotest.test_case "orchestrator prompt includes start transition" `Quick
         test_orchestrator_prompt_pins_start_transition;
+      Alcotest.test_case "task lifecycle guidance is externalized" `Quick
+        test_task_lifecycle_guidance_is_externalized;
       Alcotest.test_case "board prompt does not require optional hearth" `Quick
         test_board_prompt_does_not_require_optional_hearth;
     ]);

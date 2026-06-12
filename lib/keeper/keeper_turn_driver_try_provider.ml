@@ -186,7 +186,14 @@ let body_timeout_for_attempt ?per_provider_timeout_s () =
   | Some _ as s -> s
   | None -> max_execution_time_for_attempt ?per_provider_timeout_s ()
 
-let accept_rejected_error ~runtime_id =
+let accept_rejection_reason response =
+  match Keeper_tool_response.response_accept_rejection_reason response with
+  | Some reason -> reason
+  | None -> "accept_predicate_false"
+;;
+
+let accept_rejected_error ~runtime_id response =
+  let reason_code = accept_rejection_reason response in
   Keeper_internal_error.sdk_error_of_masc_internal_error
     (Keeper_internal_error.Accept_rejected
        {
@@ -196,12 +203,15 @@ let accept_rejected_error ~runtime_id =
              (Boundary_redaction.to_string
                 Boundary_redaction.runtime_model_label);
          reason =
-           Printf.sprintf "response rejected by accept (runtime=%s)" runtime_id;
+           Printf.sprintf
+             "response rejected by accept (runtime=%s reason=%s)"
+             runtime_id
+             reason_code;
        })
 
 let apply_accept ~runtime_id ~accept (run_result : Runtime_agent.run_result) =
   if accept run_result.response then Ok run_result
-  else Error (accept_rejected_error ~runtime_id)
+  else Error (accept_rejected_error ~runtime_id run_result.response)
 
 (** Run a single provider attempt within the runtime.
 

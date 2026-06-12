@@ -33,3 +33,37 @@ let response_has_text_or_tool_progress (response : Agent_sdk.Types.api_response)
        response.content
   || response.stop_reason <> Agent_sdk.Types.EndTurn
 ;;
+
+let response_accept_rejection_reason (response : Agent_sdk.Types.api_response) =
+  if response_has_text_or_tool_progress response
+  then None
+  else (
+    let has_thinking =
+      List.exists
+        (function
+          | Agent_sdk.Types.Thinking _ | Agent_sdk.Types.RedactedThinking _ -> true
+          | _ -> false)
+        response.content
+    in
+    let has_blank_text =
+      List.exists
+        (function
+          | Agent_sdk.Types.Text text -> String.trim text = ""
+          | _ -> false)
+        response.content
+    in
+    let has_tool_result =
+      List.exists
+        (function
+          | Agent_sdk.Types.ToolResult _ -> true
+          | _ -> false)
+        response.content
+    in
+    Some
+      (match response.content with
+       | [] -> "empty_end_turn"
+       | _ when has_thinking -> "thinking_only"
+       | _ when has_blank_text -> "blank_text"
+       | _ when has_tool_result -> "tool_result_only"
+       | _ -> "no_visible_progress"))
+;;

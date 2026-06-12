@@ -15,3 +15,8 @@ val normalize_response_text
     Empty [end_turn] responses are rejected so runtime can try the next
     candidate instead of failing later as "no textual reply". *)
 val response_has_text_or_tool_progress : Agent_sdk.Types.api_response -> bool
+
+(** Stable reason code for responses rejected by
+    {!response_has_text_or_tool_progress}. Returns [None] for acceptable
+    responses. *)
+val response_accept_rejection_reason : Agent_sdk.Types.api_response -> string option

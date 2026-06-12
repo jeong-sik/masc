@@ -120,7 +120,7 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_KEEPER_ALERT_SLACK_DM_USER_ID` | typed:string | unclassified | unclassified | 127 |  |
 | `MASC_KEEPER_ALERT_SLACK_ENABLED` | feature_flag | n/a | n/a | 118 | Slack fanout configuration |
 | `MASC_KEEPER_ALERT_SLACK_WEBHOOK_URL` | typed:string | unclassified | unclassified | 120 | Slack fanout configuration |
-| `MASC_KEEPER_ATTEMPT_WATCHDOG_SAFETY_CAP_SEC` | typed:float | unclassified | unclassified | 392 | Per-attempt wall-clock safety cap for the streaming watchdog. Prevents a single provider attempt from locking a keepe... |
+| `MASC_KEEPER_ATTEMPT_WATCHDOG_SAFETY_CAP_SEC` | typed:float | unclassified | unclassified | 392 | Deprecated compatibility knob. Not applied as a MASC wall-clock timeout around active provider/tool execution. |
 | `MASC_KEEPER_BODY_TIMEOUT_SEC` | string_literal | n/a | n/a | 441 | Total HTTP body-consumption deadline for non-streaming OAS completion calls. In agent_sdk this wraps [Complete.comple... |
 | `MASC_KEEPER_BOOTSTRAP_ENABLED` | feature_flag | n/a | n/a | 20 | Enable startup keeper bootstrap scan |
 | `MASC_KEEPER_BOOTSTRAP_LAZY_STARTUP_POLL_INTERVAL_SEC` | typed:float | unclassified | unclassified | 46 | Polling interval (seconds) for the lazy-startup wait loop in [server_bootstrap_loops.ml]. The autoboot fiber wakes up... |
@@ -133,7 +133,7 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_KEEPER_CRASH_PERSIST_DRAIN_INTERVAL_SEC` | typed:float | unclassified | unclassified | 161 | Crash persistence drain fiber wake interval in seconds. Drain fiber batches in-memory crash events and persists them ... |
 | `MASC_KEEPER_DEBUG` | feature_flag | n/a | n/a | 169 | Enable keeper debug logging. Default: false. |
 | `MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD` | typed:float | unclassified | unclassified | 175 | Daily budget for keeper deliberation (USD). Default: 0.10. Re-readable within the process. Live operator control shou... |
-| `MASC_KEEPER_EXECUTION_IDLE_TIMEOUT_SEC` | typed:float | Timeouts | operator | 422 | OAS Agent.run inactivity deadline. This is progress-based rather than cumulative wall-clock: OAS resets the timer whe... |
+| `MASC_KEEPER_EXECUTION_IDLE_TIMEOUT_SEC` | typed:float | Timeouts | operator | 422 | Parsed compatibility knob. Keeper path does not forward it until active tool execution is excluded from idle accounting. |
 | `MASC_KEEPER_GRPC_MAX_RECONNECT` | typed:int | unclassified | unclassified | 481 | Maximum gRPC reconnect attempts before stopping the heartbeat fiber. Default: 5. Range: [1, 20]. |
 | `MASC_KEEPER_GRPC_RECONNECT_BACKOFF_SEC` | typed:float | unclassified | unclassified | 489 | Backoff delay between gRPC reconnect attempts in seconds. Default: 5.0. Range: [1.0, 60.0]. |
 | `MASC_KEEPER_HEARTBEAT_INTERVAL_SEC` | typed:int | unclassified | unclassified | 218 | Shared: keepalive interval, read early so WorkAsHeartbeat can reference it. |

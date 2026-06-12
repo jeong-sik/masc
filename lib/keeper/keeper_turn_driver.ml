@@ -144,7 +144,14 @@ let run_named
   let turn_start = Mtime_clock.now () in
   let seq_ref = ref 0 in
   let execution_idle_timeout_s =
-    Keeper_runtime_resolved.execution_idle_timeout_sec ()
+    (* Keep parsing [turn.execution_idle_timeout_sec] for compatibility, but do
+       not forward it on the keeper path until OAS proves active tool execution
+       is excluded from idle accounting. Otherwise this becomes another MASC
+       knob that can kill a healthy long-running tool call. *)
+    let (_resolved_but_not_forwarded : float option) =
+      Keeper_runtime_resolved.execution_idle_timeout_sec ()
+    in
+    None
   in
   let try_provider_ctx : Keeper_turn_driver_try_provider.try_provider_ctx = {
     runtime_id;

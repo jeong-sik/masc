@@ -270,10 +270,10 @@ let test_guard_forward_advance_resets () =
    | L.Started L.Fresh -> ()
    | _ -> Alcotest.fail "turn 8 should reset guard state")
 
-(* F2: a provider_timeout terminal (the attempt watchdog firing mid-stream)
-   resets the livelock entry via [reset_keeper_livelock] before the same
+(* F2: a legacy provider_timeout terminal resets the livelock entry via
+   [reset_keeper_livelock] before the same
    turn_id is re-dispatched (see keeper_unified_turn_types.ml,
-   "attempt_watchdog_safety_deadline" arm). Pin the invariant that wiring
+   legacy "attempt_watchdog_safety_deadline" arm). Pin the invariant that wiring
    relies on: a re-dispatch whose age would otherwise cross
    [stuck_after_sec] is reclassified [Fresh] once the entry is reset, so a
    transport stall routes to autonomous retry instead of

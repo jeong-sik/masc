@@ -47,6 +47,7 @@ import { SessionTraceView } from './session-trace/session-trace-view'
 import { KeeperToolTelemetry } from './keeper-tool-telemetry'
 import { KeeperEvalQualityPanel } from './keeper-eval-quality'
 import { KeeperToolCallInspector } from './keeper-tool-call-inspector'
+import { KeeperTurnInspector } from './keeper-turn-inspector'
 import { SupervisorDiagnosticsPanel } from './keeper-supervisor-diagnostics'
 import { KeeperBDIPanel } from './keeper-bdi-panel'
 import { KeeperConfigPanel } from './keeper-config-panel'
@@ -215,6 +216,10 @@ export function KeeperDetailBody({
               <div class="pt-3 border-t border-[var(--color-border-divider)]">
                 <${SectionHeader} size="xs" class="mb-3">호출 검사기</${SectionHeader}>
                 ${diagOpen ? html`<${KeeperToolCallInspector} keeperName=${keeper.name} />` : null}
+              </div>
+              <div class="pt-3 border-t border-[var(--color-border-divider)]">
+                <${SectionHeader} size="xs" class="mb-3">턴 검사기 (컨텍스트 블록 diff)</${SectionHeader}>
+                ${diagOpen ? html`<${KeeperTurnInspector} keeperName=${keeper.name} />` : null}
               </div>
             </div>
           <//>

@@ -703,5 +703,28 @@ let run_turn
           ~usage
           ~execution_ids
           ~blocks:acc.prompt_blocks
+          ();
+        (* RFC-0233 §2.3 PR-4: project the same record onto the ambient
+           turn span. Both turn drivers (unified "invoke_agent <keeper>"
+           and direct "keeper_turn") keep their span open across this
+           tail on the same fiber, so one add_attrs covers both. The
+           OTel value type has no array — blocks serialize through the
+           Turn_record codec (single encoding SSOT), execution ids join
+           with commas. *)
+        Otel_spans.add_attrs
+          ~attrs:
+            [ ( Otel_genai.Attr_key.masc_turn_blocks
+              , `String
+                  (Yojson.Safe.to_string
+                     (`List
+                        (List.map Turn_record.prompt_block_to_json
+                           acc.prompt_blocks))) )
+            ; ( Otel_genai.Attr_key.masc_turn_profile
+              , `String runtime_id_string )
+            ; ( Otel_genai.Attr_key.masc_turn_execution_ids
+              , `String
+                  (String.concat ","
+                     (List.map Ids.Execution_id.to_string execution_ids)) )
+            ]
           ());
        receipt_result)

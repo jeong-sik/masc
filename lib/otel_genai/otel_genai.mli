@@ -22,6 +22,9 @@ module Attr_key : sig
   val masc_gen_ai_keeper_name : string
   val masc_gen_ai_runtime_id : string
   val masc_gen_ai_response_finish_reason : string
+  val masc_turn_blocks : string
+  val masc_turn_profile : string
+  val masc_turn_execution_ids : string
   val keeper_name : string
   val keeper_agent_name : string
   val keeper_trace_id : string

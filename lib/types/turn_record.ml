@@ -198,3 +198,20 @@ let diff_blocks ~(prev : t) ~(next : t) : block_diff =
       next_blocks
   in
   { added; removed; changed }
+
+let entries_with_diffs (records : t list) : (t * block_diff option) list =
+  (* A diff is only meaningful against the previous record of the SAME
+     trace: a generation boundary legitimately replaces the whole
+     assembly, and that diff would be noise rather than signal. *)
+  let rec walk prev = function
+    | [] -> []
+    | record :: rest ->
+        let diff =
+          match prev with
+          | Some p when String.equal p.trace_id record.trace_id ->
+              Some (diff_blocks ~prev:p ~next:record)
+          | Some _ | None -> None
+        in
+        (record, diff) :: walk (Some record) rest
+  in
+  walk None records

@@ -71,6 +71,14 @@ module Attr_key = struct
     register Masc_extension "masc.gen_ai.response.finish_reason"
   ;;
 
+  (* RFC-0233 §2.3 - per-turn TurnRecord projection onto the turn span. *)
+  let masc_turn_blocks = register Masc_extension "masc.turn.blocks"
+  let masc_turn_profile = register Masc_extension "masc.turn.profile"
+
+  let masc_turn_execution_ids =
+    register Masc_extension "masc.turn.execution_ids"
+  ;;
+
   let keeper_name = register Legacy "keeper.name"
   let keeper_agent_name = register Legacy "keeper.agent_name"
   let keeper_trace_id = register Legacy "keeper.trace_id"

@@ -35,6 +35,7 @@ type try_provider_ctx =
   ; max_tokens : int
   ; max_input_tokens : int option
   ; max_cost_usd : float option
+  ; accept : Agent_sdk_response.api_response -> bool
   ; guardrails : Agent_sdk.Guardrails.t option
   ; hooks : Agent_sdk.Hooks.hooks option
   ; context_reducer : Agent_sdk.Context_reducer.t option
@@ -184,6 +185,23 @@ let body_timeout_for_attempt ?per_provider_timeout_s () =
   match Keeper_runtime_resolved.body_timeout_override_sec () with
   | Some _ as s -> s
   | None -> max_execution_time_for_attempt ?per_provider_timeout_s ()
+
+let accept_rejected_error ~runtime_id =
+  Keeper_internal_error.sdk_error_of_masc_internal_error
+    (Keeper_internal_error.Accept_rejected
+       {
+         scope = runtime_id;
+         model =
+           Some
+             (Boundary_redaction.to_string
+                Boundary_redaction.runtime_model_label);
+         reason =
+           Printf.sprintf "response rejected by accept (runtime=%s)" runtime_id;
+       })
+
+let apply_accept ~runtime_id ~accept (run_result : Runtime_agent.run_result) =
+  if accept run_result.response then Ok run_result
+  else Error (accept_rejected_error ~runtime_id)
 
 (** Run a single provider attempt within the runtime.
 
@@ -361,6 +379,13 @@ let run_try_provider
            ~provider_cfg:(Runtime_candidate.provider_cfg candidate))
         result
     in
+    let result =
+      match result with
+      | Ok run_result ->
+        apply_accept ~runtime_id:ctx.error_runtime_id ~accept:ctx.accept
+          run_result
+      | Error _ as err -> err
+    in
     (match ctx.on_runtime_observation, result with
      | Some emit, Ok run_result ->
        Option.iter emit run_result.Runtime_agent.runtime_observation
@@ -390,4 +415,5 @@ module For_testing = struct
   let stream_idle_timeout_for_attempt = stream_idle_timeout_for_attempt
   let sanitize_runtime_mcp_external_tool_choice =
     sanitize_runtime_mcp_external_tool_choice
+  let apply_accept = apply_accept
 end

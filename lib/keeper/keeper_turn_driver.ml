@@ -112,11 +112,10 @@ let run_named
   in
   let preserve_thinking = runtime_seed.preserve_thinking in
   (* Parameters that only fed the deleted multi-candidate machinery
-     (provider selection, admission queue gating, per-candidate accept). *)
+     (provider selection and admission queue gating). *)
   ignore provider_filter;
   ignore base_path;
   ignore wait_timeout_sec;
-  ignore (accept : Agent_sdk_response.api_response -> bool);
   (* RFC-0207: dispatch to the *requested* runtime (a keeper's persona [model]
      selection or the global default, both produced by [runtime_id_of_meta])
      instead of unconditionally the default.  A requested id that does not
@@ -162,6 +161,7 @@ let run_named
     max_tokens;
     max_input_tokens;
     max_cost_usd;
+    accept;
     guardrails;
     hooks;
     context_reducer;

@@ -1,5 +1,12 @@
 # Changelog
 
+
+## [0.19.42] - 2026-06-12
+
+### Fixed
+- `release`: disabled OTLP export in release binary smoke so GitHub release jobs
+  validate boot/listening without blocking on a collector that is intentionally
+  absent in CI.
 ## [Unreleased]
 
 ## [0.19.41] - 2026-06-12

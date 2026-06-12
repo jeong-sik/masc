@@ -278,6 +278,64 @@ let assistant_text_and_tool_use ?(input = `Null) text id name : Agent_sdk.Types.
   ; metadata = []
   }
 
+let assistant_tool_uses uses : Agent_sdk.Types.message =
+  { role = Agent_sdk.Types.Assistant
+  ; content =
+      List.map
+        (fun (id, name) -> Agent_sdk.Types.ToolUse { id; name; input = `Null })
+        uses
+  ; name = None
+  ; tool_call_id = None
+  ; metadata = []
+  }
+
+let assistant_text_and_tool_uses text uses : Agent_sdk.Types.message =
+  { role = Agent_sdk.Types.Assistant
+  ; content =
+      Agent_sdk.Types.Text text
+      :: List.map
+           (fun (id, name) ->
+             Agent_sdk.Types.ToolUse { id; name; input = `Null })
+           uses
+  ; name = None
+  ; tool_call_id = None
+  ; metadata = []
+  }
+
+let assistant_same_message_tool_pair id name content : Agent_sdk.Types.message =
+  { role = Agent_sdk.Types.Assistant
+  ; content =
+      [ Agent_sdk.Types.ToolUse { id; name; input = `Null }
+      ; Agent_sdk.Types.ToolResult
+          { tool_use_id = id
+          ; content
+          ; is_error = false
+          ; json = None
+          ; content_blocks = None
+          }
+      ]
+  ; name = None
+  ; tool_call_id = None
+  ; metadata = []
+  }
+
+let tool_result_message ?(role = Agent_sdk.Types.User) id content
+    : Agent_sdk.Types.message =
+  { role
+  ; content =
+      [ Agent_sdk.Types.ToolResult
+          { tool_use_id = id
+          ; content
+          ; is_error = false
+          ; json = None
+          ; content_blocks = None
+          }
+      ]
+  ; name = None
+  ; tool_call_id = None
+  ; metadata = []
+  }
+
 let user_tool_result id content : Agent_sdk.Types.message =
   { role = Agent_sdk.Types.User
   ; content =
@@ -329,6 +387,24 @@ let text_blocks (messages : Agent_sdk.Types.message list) =
 
 let text_contains needle texts =
   List.exists (fun text -> Astring.String.is_infix ~affix:needle text) texts
+
+let count_tool_blocks messages =
+  List.fold_left
+    (fun counts (msg : Agent_sdk.Types.message) ->
+       List.fold_left
+         (fun (tool_uses, tool_results) -> function
+           | Agent_sdk.Types.ToolUse _ -> tool_uses + 1, tool_results
+           | Agent_sdk.Types.ToolResult _ -> tool_uses, tool_results + 1
+           | Agent_sdk.Types.Text _
+           | Agent_sdk.Types.Thinking _
+           | Agent_sdk.Types.RedactedThinking _
+           | Agent_sdk.Types.Image _
+           | Agent_sdk.Types.Document _
+           | Agent_sdk.Types.Audio _ -> tool_uses, tool_results)
+         counts
+         msg.content)
+    (0, 0)
+    messages
 
 let test_pair_repair_stats_count_drops () =
   let messages =
@@ -425,6 +501,93 @@ let test_pair_repair_drops_dangling_tool_use_details () =
     "dangling tool-use input is not serialized into text"
     false
     (text_contains "input={}" texts)
+
+let test_pair_repair_preserves_same_message_tool_pair () =
+  let messages =
+    [ assistant_same_message_tool_pair "toolu_same" "lookup" {|{"ok":true}|} ]
+  in
+  let repaired, stats = KC.repair_broken_tool_call_pairs_with_stats messages in
+  Alcotest.(check bool)
+    "same-message pair does not need repair"
+    false
+    (KC.tool_pair_repair_stats_changed stats);
+  Alcotest.(check int) "same-message pair message preserved" 1 (List.length repaired);
+  Alcotest.(check (pair int int))
+    "same-message ToolUse and ToolResult preserved"
+    (1, 1)
+    (count_tool_blocks repaired)
+
+let test_pair_repair_preserves_contiguous_result_span () =
+  let messages =
+    [ assistant_tool_uses [ "toolu_a", "one"; "toolu_b", "two" ]
+    ; tool_result_message "toolu_a" "a"
+    ; tool_result_message "toolu_b" "b"
+    ; user_text "after"
+    ]
+  in
+  let repaired, stats = KC.repair_broken_tool_call_pairs_with_stats messages in
+  Alcotest.(check bool)
+    "contiguous result span does not need repair"
+    false
+    (KC.tool_pair_repair_stats_changed stats);
+  Alcotest.(check int) "contiguous span messages preserved" 4 (List.length repaired);
+  Alcotest.(check (pair int int))
+    "contiguous span ToolUse and ToolResult blocks preserved"
+    (2, 2)
+    (count_tool_blocks repaired)
+
+let test_pair_repair_drops_only_invalid_blocks_in_span () =
+  let messages =
+    [ assistant_tool_uses [ "toolu_a", "one"; "toolu_b", "two" ]
+    ; tool_result_message "toolu_a" "a"
+    ; tool_result_message "toolu_c" "c"
+    ; user_text "after"
+    ]
+  in
+  let repaired, stats = KC.repair_broken_tool_call_pairs_with_stats messages in
+  Alcotest.(check int) "unmatched ToolUse dropped" 1 stats.dropped_tool_uses;
+  Alcotest.(check int) "orphan ToolResult dropped" 1 stats.dropped_tool_results;
+  Alcotest.(check (list (pair string string)))
+    "unmatched ToolUse sample preserved"
+    [ "toolu_b", "two" ]
+    stats.dropped_tool_use_samples;
+  Alcotest.(check (list string))
+    "orphan ToolResult id preserved"
+    [ "toolu_c" ]
+    stats.dropped_tool_result_ids;
+  Alcotest.(check int)
+    "empty orphan-only result message dropped"
+    3
+    (List.length repaired);
+  Alcotest.(check (pair int int))
+    "only valid pair remains structured"
+    (1, 1)
+    (count_tool_blocks repaired)
+
+let test_pair_repair_metadata_samples_bounded () =
+  let uses =
+    List.init 10 (fun index ->
+      Printf.sprintf "toolu_%02d" index, Printf.sprintf "tool_%02d" index)
+  in
+  let messages = [ assistant_text_and_tool_uses "kept" uses ] in
+  let repaired, stats = KC.repair_broken_tool_call_pairs_with_stats messages in
+  Alcotest.(check int) "all dangling ToolUses counted" 10 stats.dropped_tool_uses;
+  Alcotest.(check int)
+    "stats ToolUse samples bounded"
+    8
+    (List.length stats.dropped_tool_use_samples);
+  let metadata_sample_count =
+    match repaired with
+    | [ msg ] ->
+        (match List.assoc_opt KC.pair_repair_metadata_key msg.metadata with
+         | Some (`Assoc fields) ->
+             (match List.assoc_opt "tool_use_samples" fields with
+              | Some (`List samples) -> List.length samples
+              | _ -> 0)
+         | _ -> 0)
+    | _ -> 0
+  in
+  Alcotest.(check int) "metadata ToolUse samples bounded" 8 metadata_sample_count
 
 let test_checkpoint_sanitize_preserves_pair_repair_stats () =
   let messages =
@@ -576,6 +739,14 @@ let () =
         test_pair_repair_stats_count_drops;
       Alcotest.test_case "pair repair drops dangling tool-use details" `Quick
         test_pair_repair_drops_dangling_tool_use_details;
+      Alcotest.test_case "pair repair preserves same-message tool pair" `Quick
+        test_pair_repair_preserves_same_message_tool_pair;
+      Alcotest.test_case "pair repair preserves contiguous result span" `Quick
+        test_pair_repair_preserves_contiguous_result_span;
+      Alcotest.test_case "pair repair drops only invalid span blocks" `Quick
+        test_pair_repair_drops_only_invalid_blocks_in_span;
+      Alcotest.test_case "pair repair metadata samples bounded" `Quick
+        test_pair_repair_metadata_samples_bounded;
       Alcotest.test_case "checkpoint sanitize preserves pair repair stats" `Quick
         test_checkpoint_sanitize_preserves_pair_repair_stats;
       Alcotest.test_case "pair repair drops empty structural messages with stats" `Quick

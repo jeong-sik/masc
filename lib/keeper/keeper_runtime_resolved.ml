@@ -66,11 +66,24 @@ let autonomous_max_turns_per_call_live () =
           (get_int ~default
              "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS")))
 
+(* The idle loop guard must sit strictly above the graduated idle hook's
+   skip threshold ([Env_config_keeper.KeeperKeepalive.idle_skip_threshold],
+   default 4): the hook ends an idle run gracefully (Skip) at skip_at,
+   while the OAS guard aborts the run with IdleDetected at the guard
+   value. A guard <= skip_at makes Skip unreachable and turns die as
+   errors instead (the 2026-06-12 sangsu kmsg kills). The floor enforces
+   that contract at resolution time, so an env override cannot silently
+   reintroduce the dead zone. *)
+let idle_guard_floor () =
+  Env_config_keeper.KeeperKeepalive.idle_skip_threshold + 1
+
 let reactive_max_idle_turns_live () =
-  max 2 (min 50 (get_int ~default:15 "MASC_KEEPER_MAX_IDLE_TURNS_REACTIVE"))
+  max (idle_guard_floor ())
+    (min 50 (get_int ~default:15 "MASC_KEEPER_MAX_IDLE_TURNS_REACTIVE"))
 
 let autonomous_max_idle_turns_live () =
-  max 2 (min 50 (get_int ~default:10 "MASC_KEEPER_MAX_IDLE_TURNS_AUTONOMOUS"))
+  max (idle_guard_floor ())
+    (min 50 (get_int ~default:10 "MASC_KEEPER_MAX_IDLE_TURNS_AUTONOMOUS"))
 
 let turn_timeout_sec_live () =
   (* SSOT: must match Env_config_keeper.KeeperKeepalive.turn_timeout_sec

@@ -61,6 +61,33 @@ let test_final_warning_has_a_reaction_turn () =
     true
     (autonomous > final_warning_at + 1)
 
+(* An env override below the hook's skip threshold must not be able to
+   reintroduce the dead zone: resolution clamps the guard to
+   skip_at + 1. This is the exact reproduction that used to fail —
+   MASC_KEEPER_MAX_IDLE_TURNS_REACTIVE=3 with skip_at=4. *)
+let with_env key value f =
+  let prev = Sys.getenv_opt key in
+  Unix.putenv key value;
+  Fun.protect
+    ~finally:(fun () ->
+      (match prev with
+       | Some v -> Unix.putenv key v
+       | None -> Unix.putenv key "");
+      Masc.Keeper_runtime_resolved.reset_for_tests ())
+    f
+
+let test_env_override_cannot_lower_guard_below_skip () =
+  with_env "MASC_KEEPER_MAX_IDLE_TURNS_REACTIVE" "3" (fun () ->
+    Masc.Keeper_runtime_resolved.reset_for_tests ();
+    let guard = Masc.Keeper_runtime_resolved.reactive_max_idle_turns () in
+    check bool
+      (Printf.sprintf
+         "override 3 resolves to %d, still above skip threshold (%d)"
+         guard
+         skip_at)
+      true
+      (guard > skip_at))
+
 let () =
   Alcotest.run
     "Keeper_idle_threshold_contract"
@@ -71,5 +98,9 @@ let () =
             "final warning leaves a reaction turn"
             `Quick
             test_final_warning_has_a_reaction_turn
+        ; test_case
+            "env override cannot lower guard below skip"
+            `Quick
+            test_env_override_cannot_lower_guard_below_skip
         ] )
     ]

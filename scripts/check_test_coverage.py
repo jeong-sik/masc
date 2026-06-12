@@ -19,17 +19,35 @@ import sys
 
 
 def is_opt_out_commit():
-    """Check if the latest commit message contains opt-out marker."""
+    """Check if any PR commit message contains opt-out marker.
+
+    Scans all commits in the PR range (origin/BASE_REF...HEAD) so that
+    a single opt-out commit in a multi-commit PR does not bypass the
+    check for earlier commits (edge case: opt-out buried in the last
+    commit while substantive changes sit in earlier commits).
+    Falls back to the latest commit alone when the base ref is
+    unavailable (local runs outside CI).
+    """
+    base_ref = os.environ.get("GITHUB_BASE_REF", "main")
     try:
         result = subprocess.run(
-            ["git", "log", "-1", "--format=%s%n%b"],
+            ["git", "log", f"origin/{base_ref}...HEAD", "--format=%s%n%b"],
             capture_output=True,
             text=True,
             check=True,
         )
         return "# ci:skip-test-coverage" in result.stdout.lower()
     except subprocess.CalledProcessError:
-        return False
+        try:
+            result = subprocess.run(
+                ["git", "log", "-1", "--format=%s%n%b"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            return "# ci:skip-test-coverage" in result.stdout.lower()
+        except subprocess.CalledProcessError:
+            return False
 
 
 def run_diff_or_fail(args):
@@ -59,7 +77,12 @@ def get_changed_lib_files():
 
 
 def get_changed_test_files():
-    """Get list of test files changed in this PR."""
+    """Get list of test files changed in this PR.
+
+    Uses multiple pathspec globs to catch common OCaml test file naming
+    conventions: *test*, *spec*, *check_*, *validator*, and test/
+    directories.
+    """
     base_ref = os.environ.get("GITHUB_BASE_REF", "main")
     stdout = run_diff_or_fail(
         [
@@ -70,6 +93,9 @@ def get_changed_test_files():
             "--",
             "*test*",
             "*spec*",
+            "*check_*",
+            "*validator*",
+            "**/test/",
         ]
     )
     return [f for f in stdout.strip().split("\n") if f]

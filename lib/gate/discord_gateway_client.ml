@@ -111,14 +111,16 @@ let published_connection_state : Discord_gateway_state.connection_state Atomic.t
 
 let connection_state () = Atomic.get published_connection_state
 
-(* Module-level ref to the gateway's input mailbox, set by [run].
+(* Module-level cell for the gateway's input mailbox, set by [run].
    Allows external callers to push [Status_change] inputs without
-   a direct handle on the mailbox. Only written once (by [run]). *)
-let input_mailbox_ref :
-  Discord_gateway_state.input Eio.Stream.t option ref = ref None
+   a direct handle on the mailbox. One gateway is expected per process,
+   but the release hook avoids leaving a stale stream after shutdown. *)
+let input_mailbox_cell :
+  Discord_gateway_state.input Eio.Stream.t option Atomic.t =
+  Atomic.make None
 
 let set_presence (status : Discord_gateway_state.presence_status) =
-  match !input_mailbox_ref with
+  match Atomic.get input_mailbox_cell with
   | None ->
     Log.Discord.debug
       "set_presence ignored: gateway not running (status=%s)"
@@ -133,7 +135,10 @@ let run ~sw ~env ~token ~intents ~trigger_policy ~on_event ~on_ambient () =
   let state = ref (Discord_gateway_state.create ~config) in
   let conn_ref : Discord_wss_connection.conn option ref = ref None in
   let input_mailbox = Eio.Stream.create 64 in
-  input_mailbox_ref := Some input_mailbox;
+  let published_mailbox = Some input_mailbox in
+  Atomic.set input_mailbox_cell published_mailbox;
+  Eio.Switch.on_release sw (fun () ->
+    ignore (Atomic.compare_and_set input_mailbox_cell published_mailbox None));
   let heartbeat_ms = ref None in
   (* Heartbeat ACK tracking. The heartbeat fiber clears on tick; the
      reader sets on Op_heartbeat_ack.  Starts [true] so the first tick

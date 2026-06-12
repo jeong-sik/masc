@@ -1073,7 +1073,12 @@ let step t ~now_mono input =
                         (presence_status_to_string status)
                     }
              ] )
-       | _ ->
+       | Disconnected
+       | Awaiting_hello
+       | Identifying
+       | Resuming
+       | Reconnect_pending _
+       | Failed _ ->
            ( t
            , [ Log { level = `Info
                     ; message = Printf.sprintf

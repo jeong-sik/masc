@@ -42,6 +42,26 @@ let test_no_counter_tick_when_all_keys_canonical () =
     before
     after
 
+let test_self_model_keys_are_canonical () =
+  let before = counter_total () in
+  Keeper_meta_json.warn_unknown_keeper_meta_keys
+    ~path:"/test/self-model.json"
+    (`Assoc
+      [ ("name", `String "self-model")
+      ; ("agent_name", `String "self-model")
+      ; ("trace_id", `String "trace-self-model")
+      ; ("tool_access", `List [])
+      ; ("will", `String "persist intent")
+      ; ("needs", `String "runtime truth")
+      ; ("desires", `String "quiet logs")
+      ; ("instructions", `String "preserve operator guidance")
+      ]);
+  let after = counter_total () in
+  Alcotest.(check (float 0.0001))
+    "self-model keys are canonical persisted keeper meta keys"
+    before
+    after
+
 let test_counter_ticks_on_genuine_unknown_key () =
   (* Sanity: the warn path still fires when a real unknown key is present. *)
   let before = counter_total () in
@@ -97,6 +117,10 @@ let () =
             "no counter tick when all keys canonical"
             `Quick
             test_no_counter_tick_when_all_keys_canonical
+        ; Alcotest.test_case
+            "self-model keys are canonical"
+            `Quick
+            test_self_model_keys_are_canonical
         ; Alcotest.test_case
             "counter still ticks on genuine unknown"
             `Quick

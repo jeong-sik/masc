@@ -600,9 +600,14 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
         { Keeper_chat_store.call_id; call_name; args = Buffer.contents buf })
       !tool_calls_rev
   in
-  let chat_source =
-    if has_connector_context then payload.channel else "dashboard"
+  (* RFC-0232 P5: the typed surface is the write-side truth; the label
+     [chat_source] is its derivation, used for broadcast metadata. *)
+  let chat_surface =
+    if has_connector_context then
+      Surface_ref.Gate { label = payload.channel; address = [] }
+    else Surface_ref.Dashboard { session_id = None }
   in
+  let chat_source = Surface_ref.lane_label chat_surface in
   (* RFC-0223 P1: authority derives from the arrival route. Connector
      context means an arbitrary external person on that channel; its
      absence means the authenticated dashboard operator (the route is
@@ -630,7 +635,7 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
       ~user_content:payload.message
       ~user_attachments:payload.attachments
       ~tool_calls:(collected_tool_calls ())
-      ~source:chat_source
+      ~surface:chat_surface
       ~speaker:chat_speaker
       ~assistant_content:(persisted_error_reply err)
       ();
@@ -677,7 +682,7 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
                 ~user_content:payload.message
                 ~user_attachments:payload.attachments
                 ~tool_calls:(collected_tool_calls ())
-                ~source:chat_source
+                ~surface:chat_surface
                 ~speaker:chat_speaker
                 ~assistant_content:visible_reply
                 ();

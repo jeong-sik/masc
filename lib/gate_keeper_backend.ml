@@ -118,8 +118,11 @@ let persist_connector_assistant_reply ~base_dir ~keeper_name ~source
     ?conversation_id ~reply () =
   let content = String.trim reply in
   if content <> "" then begin
+    (* RFC-0232 P5: the gate recorder knows the connector label only;
+       coordinates ride [conversation_id] as before. *)
+    let surface = Surface_ref.Gate { label = source; address = [] } in
     Keeper_chat_store.append_assistant_message ~base_dir ~keeper_name
-      ~content ~source ?conversation_id ();
+      ~content ~surface ?conversation_id ();
     Keeper_chat_broadcast.chat_appended ~keeper_name ~source
   end
 
@@ -173,7 +176,7 @@ let dispatch ~sw ~clock ~proc_mgr ~net ~config
     ~base_dir:config.Workspace.base_path
     ~keeper_name
     ~content:(String.trim content)
-    ~source:lane
+    ~surface:(Surface_ref.Gate { label = lane; address = [] })
     ?conversation_id
     ?external_message_id
     ~speaker:

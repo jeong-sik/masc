@@ -19,7 +19,10 @@ let persistence_surface = "keeper_external_attention"
 
 let default_claim_stale_after_s = 900.0
 
-type surface_ref =
+(* RFC-0232 P5: the surface vocabulary moved to the shared [Surface_ref]
+   module; this equation re-exports it so existing consumers keep
+   constructing/matching [Keeper_external_attention.Dashboard] etc. *)
+type surface_ref = Surface_ref.t =
   | Dashboard of { session_id : string option }
   | Discord of {
       guild_id : string option;
@@ -34,6 +37,7 @@ type surface_ref =
     }
   | Github of { repo : string; notification_id : string option }
   | Webhook of { source : string; event_id : string }
+  | Agent
   | Gate of { label : string; address : (string * string) list }
 
 type conversation_ref = {
@@ -185,80 +189,9 @@ let optional_object key = function
 
 let ( let* ) = Result.bind
 
-let surface_ref_to_json = function
-  | Dashboard { session_id } ->
-      `Assoc
-        ([ ("kind", `String "dashboard") ] @ opt_string_field "session_id" session_id)
-  | Discord { guild_id; channel_id; parent_channel_id; thread_id } ->
-      `Assoc
-        ([ ("kind", `String "discord"); ("channel_id", `String channel_id) ]
-        @ opt_string_field "guild_id" guild_id
-        @ opt_string_field "parent_channel_id" parent_channel_id
-        @ opt_string_field "thread_id" thread_id)
-  | Slack { team_id; channel_id; thread_ts } ->
-      `Assoc
-        ([ ("kind", `String "slack"); ("channel_id", `String channel_id) ]
-        @ opt_string_field "team_id" team_id
-        @ opt_string_field "thread_ts" thread_ts)
-  | Github { repo; notification_id } ->
-      `Assoc
-        ([ ("kind", `String "github"); ("repo", `String repo) ]
-        @ opt_string_field "notification_id" notification_id)
-  | Webhook { source; event_id } ->
-      `Assoc
-        [
-          ("kind", `String "webhook");
-          ("source", `String source);
-          ("event_id", `String event_id);
-        ]
-  | Gate { label; address } ->
-      `Assoc
-        [
-          ("kind", `String "gate");
-          ("label", `String label);
-          ("address", string_assoc_json address);
-        ]
+let surface_ref_to_json = Surface_ref.to_json
 
-let surface_ref_of_json json =
-  let* kind = required_string "kind" json in
-  match kind with
-  | "dashboard" -> Ok (Dashboard { session_id = optional_string "session_id" json })
-  | "discord" ->
-      let* channel_id = required_string "channel_id" json in
-      Ok
-        (Discord
-           {
-             guild_id = optional_string "guild_id" json;
-             channel_id;
-             parent_channel_id = optional_string "parent_channel_id" json;
-             thread_id = optional_string "thread_id" json;
-           })
-  | "slack" ->
-      let* channel_id = required_string "channel_id" json in
-      Ok
-        (Slack
-           {
-             team_id = optional_string "team_id" json;
-             channel_id;
-             thread_ts = optional_string "thread_ts" json;
-           })
-  | "github" ->
-      let* repo = required_string "repo" json in
-      Ok (Github { repo; notification_id = optional_string "notification_id" json })
-  | "webhook" ->
-      let* source = required_string "source" json in
-      let* event_id = required_string "event_id" json in
-      Ok (Webhook { source; event_id })
-  | "gate" ->
-      let* label = required_string "label" json in
-      let address =
-        match optional_object "address" json with
-        | None -> Ok []
-        | Some obj -> string_assoc_of_json obj
-      in
-      let* address = address in
-      Ok (Gate { label; address })
-  | other -> Error (Printf.sprintf "unknown surface kind %S" other)
+let surface_ref_of_json = Surface_ref.of_json
 
 let conversation_ref_to_json c =
   `Assoc

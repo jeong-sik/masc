@@ -129,7 +129,7 @@ let test_append_turn_roundtrip () =
             (* Empty args normalise to "{}", empty id to a positional one. *)
             { K.call_id = ""; call_name = "masc_status"; args = "  " };
           ]
-        ~source:"dashboard"
+        ~surface:(Masc.Surface_ref.Dashboard { session_id = None })
         ~assistant_content:"all green"
         ();
       let messages = K.load ~base_dir ~keeper_name in
@@ -255,7 +255,7 @@ let test_speaker_external_roundtrip () =
       K.append_turn ~base_dir ~keeper_name
         ~user_content:"hello from discord"
         ~user_attachments:[]
-        ~source:"discord"
+        ~surface:(Masc.Surface_ref.Gate { label = "discord"; address = [] })
         ~speaker:
           { K.speaker_id = Some "98791450001";
             speaker_name = Some "minsu";
@@ -289,7 +289,7 @@ let test_append_user_message_roundtrip () =
       let keeper_name = "keeper-chat-ambient" in
       K.append_user_message ~base_dir ~keeper_name
         ~content:"two humans chatting, no mention"
-        ~source:"discord"
+        ~surface:(Masc.Surface_ref.Gate { label = "discord"; address = [] })
         ~conversation_id:"discord:guild-1:channel:chan-7"
         ~external_message_id:"msg-7"
         ~speaker:
@@ -298,7 +298,8 @@ let test_append_user_message_roundtrip () =
             speaker_authority = K.External }
         ();
       K.append_assistant_message ~base_dir ~keeper_name
-        ~content:"reply recorded separately" ~source:"discord"
+        ~content:"reply recorded separately"
+        ~surface:(Masc.Surface_ref.Gate { label = "discord"; address = [] })
         ~conversation_id:"discord:guild-1:channel:chan-7" ();
       match K.load ~base_dir ~keeper_name with
       | [ user; assistant ] ->
@@ -360,7 +361,7 @@ let test_speaker_owner_roundtrip () =
       K.append_turn ~base_dir ~keeper_name
         ~user_content:"deploy it"
         ~user_attachments:[]
-        ~source:"dashboard"
+        ~surface:(Masc.Surface_ref.Dashboard { session_id = None })
         ~speaker:
           { K.speaker_id = None;
             speaker_name = None;

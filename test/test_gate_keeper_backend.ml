@@ -86,7 +86,8 @@ let test_persist_connector_assistant_reply_records_lane_reply () =
     (fun () ->
       let keeper_name = "discord-reply-keeper" in
       K.append_user_message ~base_dir ~keeper_name
-        ~content:"<@bot> factorio?" ~source:"discord"
+        ~content:"<@bot> factorio?"
+        ~surface:(Masc.Surface_ref.Gate { label = "discord"; address = [] })
         ~conversation_id:"discord:guild-1:channel:chan-9" ();
       Gate_keeper_backend.persist_connector_assistant_reply ~base_dir
         ~keeper_name ~source:"discord"

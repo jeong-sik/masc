@@ -114,6 +114,12 @@ type chat_message = {
   tool_call_id : string option;
   tool_call_name : string option;
   source : string option;
+      (* Legacy lane label.  Derived from [surface] at write since
+         RFC-0232 P5 (writers no longer pass label strings); read
+         verbatim from the wire so pre-P5 rows keep their label. *)
+  surface : Surface_ref.t option;
+      (* RFC-0232 P5: the typed surface, persisted as a structured
+         [surface] field.  [None] on rows written before P5. *)
   conversation_id : string option;
   external_message_id : string option;
   speaker : speaker option;
@@ -154,9 +160,18 @@ let speaker_fields = function
       @ [ ("speaker_authority", `String (authority_label sp.speaker_authority)) ]
 
 let encode_line ~(role : Role.t) ~content ~ts ?attachments ?tool_call_id
-    ?tool_call_name ?source ?conversation_id ?external_message_id ?speaker
+    ?tool_call_name ?surface ?conversation_id ?external_message_id ?speaker
     ?(mentions = []) ()
     : string =
+  (* RFC-0232 P5: the label is a derivation of the typed surface — the
+     single site that turns a [Surface_ref.t] into the legacy [source]
+     string. *)
+  let source = Option.map Surface_ref.lane_label surface in
+  let surface_field =
+    match surface with
+    | None -> []
+    | Some s -> [ ("surface", Surface_ref.to_json s) ]
+  in
   let base_fields = [
     ("role", `String (Role.to_label role));
     ("content", `String content);
@@ -197,6 +212,7 @@ let encode_line ~(role : Role.t) ~content ~ts ?attachments ?tool_call_id
     @ opt_string_field "tool_call_id" tool_call_id
     @ opt_string_field "tool_call_name" tool_call_name
     @ opt_string_field "source" source
+    @ surface_field
     @ opt_string_field "conversation_id" conversation_id
     @ opt_string_field "external_message_id" external_message_id
     @ speaker_fields speaker
@@ -221,7 +237,7 @@ let user_line_mentions ~extra_mentions content =
   |> List.sort_uniq Keeper_identity.Keeper_id.compare
 
 let append_turn ~base_dir ~keeper_name ~(user_content : string)
-    ~(user_attachments : attachment list) ?(tool_calls = []) ?source
+    ~(user_attachments : attachment list) ?(tool_calls = []) ?surface
     ?conversation_id ?external_message_id ?speaker ?(extra_mentions = [])
     ~(assistant_content : string)
     () =
@@ -244,7 +260,7 @@ let append_turn ~base_dir ~keeper_name ~(user_content : string)
        assistant lines are the keeper's own output. *)
     let user_line =
       encode_line ~role:Role.User ~content:user_content ~ts
-        ~attachments:user_attachments ?source ?conversation_id
+        ~attachments:user_attachments ?surface ?conversation_id
         ?external_message_id ?speaker
         ~mentions:(user_line_mentions ~extra_mentions user_content) ()
     in
@@ -256,11 +272,11 @@ let append_turn ~base_dir ~keeper_name ~(user_content : string)
             ~ts
             ~tool_call_id:(normalize_tool_call_id ~position tc.call_id)
             ~tool_call_name:tc.call_name
-            ?source ?conversation_id ())
+            ?surface ?conversation_id ())
         tool_calls
     in
     let asst_line =
-      encode_line ~role:Role.Assistant ~content:assistant_content ~ts ?source
+      encode_line ~role:Role.Assistant ~content:assistant_content ~ts ?surface
         ?conversation_id ()
     in
     let payload =
@@ -280,7 +296,7 @@ let append_turn ~base_dir ~keeper_name ~(user_content : string)
 (* RFC-0223 P4: keeper-initiated message on one lane. A single
    assistant line — there is no user turn to pair it with. *)
 let append_assistant_message ~base_dir ~keeper_name ~(content : string)
-    ?source ?conversation_id () =
+    ?surface ?conversation_id () =
   try
     ensure_dir_once ~base_dir;
     let redaction = redaction_for ~base_dir ~keeper_name in
@@ -288,7 +304,7 @@ let append_assistant_message ~base_dir ~keeper_name ~(content : string)
     let path = chat_path ~base_dir ~keeper_name in
     let ts = Time_compat.now () in
     let line =
-      encode_line ~role:Role.Assistant ~content ~ts ?source ?conversation_id ()
+      encode_line ~role:Role.Assistant ~content ~ts ?surface ?conversation_id ()
     in
     Fs_compat.append_file path (line ^ "\n")
   with
@@ -305,7 +321,7 @@ let append_assistant_message ~base_dir ~keeper_name ~(content : string)
    independent of) any turn. A single user line — the assistant reply,
    if one ever comes, is appended separately by the reply path. *)
 let append_user_message ~base_dir ~keeper_name ~(content : string)
-    ?source ?conversation_id ?external_message_id ?speaker
+    ?surface ?conversation_id ?external_message_id ?speaker
     ?(extra_mentions = []) () =
   try
     ensure_dir_once ~base_dir;
@@ -314,7 +330,7 @@ let append_user_message ~base_dir ~keeper_name ~(content : string)
     let path = chat_path ~base_dir ~keeper_name in
     let ts = Time_compat.now () in
     let line =
-      encode_line ~role:Role.User ~content ~ts ?source ?conversation_id
+      encode_line ~role:Role.User ~content ~ts ?surface ?conversation_id
         ?external_message_id ?speaker
         ~mentions:(user_line_mentions ~extra_mentions content) ()
     in
@@ -347,6 +363,21 @@ let parse_line ~file_path (line : string) : chat_message option =
     let tool_call_id = opt_string "tool_call_id" in
     let tool_call_name = opt_string "tool_call_name" in
     let source = opt_string "source" in
+    let surface =
+      match Json_util.assoc_member_opt "surface" json with
+      | None -> None
+      | Some surface_json -> (
+          match Surface_ref.of_json surface_json with
+          | Ok s -> Some s
+          | Error detail ->
+              (* Unknown/invalid surface payload: surface it, keep the
+                 row (the label in [source] still renders). *)
+              report_persistence_read_drop
+                ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                ~path:file_path
+                ~detail:(Printf.sprintf "invalid surface field: %s" detail);
+              None)
+    in
     let conversation_id = opt_string "conversation_id" in
     let external_message_id = opt_string "external_message_id" in
     let speaker =
@@ -463,7 +494,7 @@ let parse_line ~file_path (line : string) : chat_message option =
       | Some role ->
           Some
             { role; content; ts; attachments; tool_call_id; tool_call_name;
-              source; conversation_id; external_message_id; speaker;
+              source; surface; conversation_id; external_message_id; speaker;
               mentions }
   with Yojson.Json_error detail ->
     report_persistence_read_drop

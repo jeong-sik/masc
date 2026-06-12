@@ -31,7 +31,7 @@ let run_result () : Runtime_agent.run_result =
 
 let test_accept_keeps_result () =
   let result =
-    Keeper_turn_driver_try_provider.For_testing.apply_accept
+    Masc.Keeper_turn_driver.For_testing.apply_accept
       ~runtime_id:"ollama.test"
       ~accept:(fun _ -> true)
       (run_result ())
@@ -45,7 +45,7 @@ let test_accept_keeps_result () =
 
 let test_rejects_as_typed_accept_error () =
   let result =
-    Keeper_turn_driver_try_provider.For_testing.apply_accept
+    Masc.Keeper_turn_driver.For_testing.apply_accept
       ~runtime_id:"ollama.gemma4-26b-a4b-qat"
       ~accept:(fun _ -> false)
       (run_result ())

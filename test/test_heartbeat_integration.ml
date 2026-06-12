@@ -532,6 +532,92 @@ let test_direct_start_keepalive_resolves_done_on_stop () =
            fail ("expected stopped promise, got crashed: " ^ reason)
          | None -> fail "expected done_p to resolve on stop"))
 
+let test_start_keepalive_preserves_unresolved_failing_entry () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  R.clear ();
+  let base_dir = temp_dir "direct-keepalive-live-failing" in
+  let keeper_name = "live-failing-entry" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_keepalive.stop_keepalive keeper_name;
+      R.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      ignore (Masc.Workspace.init config ~agent_name:(Some "tester"));
+      let meta = make_meta keeper_name in
+      let original = R.register ~base_path:config.base_path keeper_name meta in
+      ignore
+        (R.dispatch_event
+           ~base_path:config.base_path
+           keeper_name
+           (KSM.Turn_failed { consecutive = 1; max_allowed = 3 }));
+      Eio.Switch.run @@ fun sw ->
+      let ctx : _ Keeper_types_profile.context =
+        {
+          config;
+          agent_name = "tester";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+        }
+      in
+      Masc.Keeper_keepalive.start_keepalive ctx meta;
+      match R.get ~base_path:config.base_path keeper_name with
+      | None -> fail "expected live-failing-entry registry entry"
+      | Some entry ->
+        check string "phase remains failing" "failing" (KSM.phase_to_string entry.phase);
+        check bool "unresolved failing entry is preserved" true
+          (entry.done_p == original.done_p);
+        check bool "done promise remains unresolved" true
+          (Option.is_none (Eio.Promise.peek entry.done_p)))
+
+let test_start_keepalive_reclaims_finished_failing_entry () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  R.clear ();
+  let base_dir = temp_dir "direct-keepalive-stale-failing" in
+  let keeper_name = "stale-failing-entry" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_keepalive.stop_keepalive keeper_name;
+      R.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      ignore (Masc.Workspace.init config ~agent_name:(Some "tester"));
+      let meta = make_meta keeper_name in
+      let original = R.register ~base_path:config.base_path keeper_name meta in
+      ignore
+        (R.dispatch_event
+           ~base_path:config.base_path
+           keeper_name
+           (KSM.Turn_failed { consecutive = 1; max_allowed = 3 }));
+      resolve_done_for_test original (`Crashed "provider runtime error");
+      Eio.Switch.run @@ fun sw ->
+      let ctx : _ Keeper_types_profile.context =
+        {
+          config;
+          agent_name = "tester";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+        }
+      in
+      Masc.Keeper_keepalive.start_keepalive ctx meta;
+      match R.get ~base_path:config.base_path keeper_name with
+      | None -> fail "expected stale-failing-entry registry entry"
+      | Some entry ->
+        check string "phase is running after reclaim" "running"
+          (KSM.phase_to_string entry.phase);
+        check bool "stale entry was replaced" true (entry.done_p != original.done_p);
+        check bool "new done promise is unresolved" true
+          (Option.is_none (Eio.Promise.peek entry.done_p));
+        Masc.Keeper_keepalive.stop_keepalive keeper_name)
+
 let test_stop_keepalive_resolves_running_entry_immediately () =
   R.clear ();
   let keeper_name = "manual-stop-entry" in
@@ -747,6 +833,10 @@ let () =
     "direct_keepalive", [
       test_case "stop resolves done promise" `Quick
         test_direct_start_keepalive_resolves_done_on_stop;
+      test_case "unresolved failing entry is preserved" `Quick
+        test_start_keepalive_preserves_unresolved_failing_entry;
+      test_case "finished failing entry is reclaimed" `Quick
+        test_start_keepalive_reclaims_finished_failing_entry;
       test_case "manual stop resolves running entry immediately" `Quick
         test_stop_keepalive_resolves_running_entry_immediately;
       test_case "manual stop preserves crashed outcome" `Quick

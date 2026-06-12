@@ -234,6 +234,10 @@ type t =
     (* (session_id, last_seq_at_disconnect). Set when leaving Connected
        via a resumable disconnect; cleared on fresh identify path. Lets
        handle_hello choose Identify vs Resume after Awaiting_hello. *)
+  ; awaiting_hello_since_mono : float option
+    (* Timestamp (mono) when Awaiting_hello was entered. Used by
+       Heartbeat_tick to detect a stuck hello-wait (no server response)
+       and escape via Reconnect_pending. None when not in Awaiting_hello. *)
   ; thread_parents : string StringMap.t
     (* thread_id -> parent_channel_id. Populated by THREAD_CREATE
        dispatches. Used by [Mention_or_thread] trigger policy to
@@ -248,6 +252,7 @@ let create ~config =
   ; heartbeat_interval_ms = None
   ; resume_gateway_url = None
   ; resume_context = None
+  ; awaiting_hello_since_mono = None
   ; thread_parents = StringMap.empty
   }
 
@@ -617,6 +622,12 @@ let backoff_ms ~attempts =
   let shift = min attempts 6 in
   min cap (base * Int.shift_left 1 shift)
 
+(* Safety-net timeout: if the gateway stays in Awaiting_hello longer than
+   this, the next Heartbeat_tick will escape to Reconnect_pending.  This
+   prevents a permanent stall when Open_wss was dropped by the I/O layer
+   (stale conn_ref) or the server never sends Hello. *)
+let awaiting_hello_timeout_seconds = 30.0
+
 (* ── Transition function ────────────────────────────────────────
 
    Every [input] variant is matched explicitly. No catch-all arm.
@@ -663,6 +674,7 @@ let handle_hello t (frame : frame) =
            ( { t with
                state = next_state
              ; heartbeat_interval_ms = Some interval_ms
+             ; awaiting_hello_since_mono = None
              }
            , [ Schedule_heartbeat { interval_ms }
              ; Send_frame outbound_frame
@@ -855,7 +867,13 @@ let handle_wss_closed t ~now_mono ~code ~reason =
             ~resume_context
         in
         ( t'
-        , [ Schedule_backoff { delay_ms }
+        , [ Close_wss { code; reason }
+            (* Emit Close_wss so the I/O layer clears conn_ref even when
+               the close originated from a server Close frame (where the
+               socket is already shutting down). Without this, conn_ref
+               stays Some and blocks the next Open_wss, permanently
+               stalling in Awaiting_hello. *)
+          ; Schedule_backoff { delay_ms }
           ; Log
               { level = `Warn
               ; message =
@@ -890,14 +908,17 @@ let handle_heartbeat_ack_timeout t ~now_mono =
       log_warn t
         "Heartbeat_ack_timeout outside Connected state; ignoring"
 
-let handle_backoff_elapsed t =
+let handle_backoff_elapsed t ~now_mono =
   match t.state with
   | Reconnect_pending { resumable = true; _ } ->
       (* Resumable path. Need a resume URL; if missing, defensively
          fall through to fresh identify. *)
       (match t.resume_gateway_url, t.resume_context with
        | Some url, Some _ ->
-           ( { t with state = Awaiting_hello }
+           ( { t with
+               state = Awaiting_hello
+             ; awaiting_hello_since_mono = Some now_mono
+             }
            , [ Open_wss { url }
              ; Log
                  { level = `Info
@@ -906,7 +927,11 @@ let handle_backoff_elapsed t =
                  }
              ] )
        | _ ->
-           ( { t with state = Awaiting_hello; resume_context = None }
+           ( { t with
+               state = Awaiting_hello
+             ; resume_context = None
+             ; awaiting_hello_since_mono = Some now_mono
+             }
            , [ Open_wss { url = gateway_url }
              ; Log
                  { level = `Warn
@@ -916,7 +941,11 @@ let handle_backoff_elapsed t =
                  }
              ] ))
   | Reconnect_pending { resumable = false; _ } ->
-      ( { t with state = Awaiting_hello; resume_context = None }
+      ( { t with
+          state = Awaiting_hello
+        ; resume_context = None
+        ; awaiting_hello_since_mono = Some now_mono
+        }
       , [ Open_wss { url = gateway_url }
         ; Log
             { level = `Info
@@ -1014,10 +1043,13 @@ let step_frame t ~now_mono (frame : frame) =
 
 (* ── Per-input handlers for state-sensitive non-frame inputs ── *)
 
-let handle_connect_requested t =
+let handle_connect_requested t ~now_mono =
   match t.state with
   | Disconnected ->
-      ( { t with state = Awaiting_hello }
+      ( { t with
+          state = Awaiting_hello
+        ; awaiting_hello_since_mono = Some now_mono
+        }
       , [ Open_wss { url = gateway_url }
         ; Log
             { level = `Info; message = "connecting to Discord Gateway" }
@@ -1026,11 +1058,40 @@ let handle_connect_requested t =
   | Connected _ | Reconnect_pending _ | Failed _ ->
       log_warn t "Connect_requested in non-Disconnected state; ignoring"
 
-let handle_heartbeat_tick t =
+let handle_heartbeat_tick t ~now_mono =
   match t.state with
   | Connected _ | Identifying | Resuming ->
       (t, [ Send_frame (heartbeat_frame ~last_seq:t.last_seq) ])
-  | Disconnected | Awaiting_hello
+  | Awaiting_hello ->
+      (match t.awaiting_hello_since_mono with
+       | Some entered when
+           now_mono -. entered > awaiting_hello_timeout_seconds ->
+           (* Safety-net: been in Awaiting_hello too long. The server never
+              sent Hello, or Open_wss was dropped by the I/O layer. Escape
+              to Reconnect_pending so the backoff+retry cycle resumes. *)
+           let resume_context = t.resume_context in
+           let resumable = Option.is_some resume_context in
+           let delay_ms = backoff_ms ~attempts:t.reconnect_attempts in
+           let t' =
+             make_reconnect_pending t ~now_mono ~delay_ms ~resumable
+               ~resume_context
+           in
+           ( t'
+           , [ Schedule_backoff { delay_ms }
+             ; Log
+                 { level = `Warn
+                 ; message =
+                     Printf.sprintf
+                       "Awaiting_hello timeout (%.0fs elapsed); reconnect \
+                        in %dms (resumable=%b)"
+                       (now_mono -. entered) delay_ms resumable
+                 }
+             ] )
+       | _ ->
+           (* Just entered Awaiting_hello or mono clock unavailable;
+              keep waiting. *)
+           log_info t "Heartbeat_tick in pre-connection state; skipping")
+  | Disconnected
   | Reconnect_pending _ | Failed _ ->
       log_info t "Heartbeat_tick in pre-connection state; skipping"
 
@@ -1051,15 +1112,15 @@ let build_status_update_frame (status : presence_status) : frame =
 
 let step t ~now_mono input =
   match input with
-  | Connect_requested -> handle_connect_requested t
+  | Connect_requested -> handle_connect_requested t ~now_mono
   | Frame_received frame -> step_frame t ~now_mono frame
   | Frame_parse_error reason ->
       log_warn t (Printf.sprintf "frame parse error: %s" reason)
   | Wss_closed { code; reason } ->
       handle_wss_closed t ~now_mono ~code ~reason
-  | Heartbeat_tick -> handle_heartbeat_tick t
+  | Heartbeat_tick -> handle_heartbeat_tick t ~now_mono
   | Heartbeat_ack_timeout -> handle_heartbeat_ack_timeout t ~now_mono
-  | Backoff_elapsed -> handle_backoff_elapsed t
+  | Backoff_elapsed -> handle_backoff_elapsed t ~now_mono
   | Status_change status ->
       (* Presence updates are only valid when connected. Silently
          ignore in other states (reconnect will use Online by default). *)

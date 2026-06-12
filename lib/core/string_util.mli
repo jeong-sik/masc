@@ -20,6 +20,18 @@ val string_contains_substring_ci : needle:string -> string -> bool
     [string_contains_substring_ci ~needle haystack] is equivalent to
     [contains_substring_ci haystack needle]. *)
 
+val query_tokens : string -> string list
+(** [query_tokens query] splits a free-text query on ASCII whitespace
+    (space, tab, CR, LF) into non-empty tokens. UTF-8 bytes pass
+    through opaquely. *)
+
+val contains_all_tokens_ci : string -> string -> bool
+(** [contains_all_tokens_ci haystack query] — token-AND containment:
+    every token of [query_tokens query] appears in [haystack] as a
+    case-insensitive substring, in any order. A query with no tokens
+    yields [false], matching [contains_substring_ci]'s empty-needle
+    behavior. *)
+
 val starts_with_ci : prefix:string -> string -> bool
 (** [starts_with_ci ~prefix s] is the ASCII case-insensitive variant of
     [String.starts_with]. Performs no allocation; lowercases each byte

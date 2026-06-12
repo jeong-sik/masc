@@ -27,6 +27,61 @@ let resolve_prompt_markdown_dir ~workspace_path ~base_path =
 
 let bootstrapped_signature : (string * string) option ref = ref None
 
+(* ── Binary-embedded prompt asset sync (#20929) ─────────────────────────
+   The binary embeds the repo's config/ tree (lib/embedded_config); the
+   runtime markdown dir under <base>/.masc/config/prompts is derived
+   distribution state.  Operator customization has its own layer
+   (prompt_overrides.json, replayed after directory load), so prompt
+   markdown that differs from the embedded asset is stale, not customized
+   — overwriting is the correct convergence.  Only the prompts/ subtree
+   syncs: the rest of .masc/config (tool_policy.toml, runtime.toml, …) is
+   operator-edited in place and must never be auto-overwritten. *)
+
+let prompts_asset_prefix = "prompts/"
+
+type sync_result = {
+  copied : string list;
+  overwritten : string list;
+  failed : (string * string) list;
+}
+
+let read_file_opt path =
+  if Sys.file_exists path then
+    try Some (In_channel.with_open_text path In_channel.input_all)
+    with Sys_error _ -> None
+  else None
+
+let sync_prompt_assets ~read ~files ~prompts_dir () =
+  let prefix_len = String.length prompts_asset_prefix in
+  List.fold_left
+    (fun acc rel ->
+      if not (String.starts_with ~prefix:prompts_asset_prefix rel) then acc
+      else
+        match read rel with
+        | None ->
+            { acc with failed = (rel, "embedded asset unreadable") :: acc.failed }
+        | Some content ->
+            let dest =
+              Filename.concat prompts_dir
+                (String.sub rel prefix_len (String.length rel - prefix_len))
+            in
+            let existing = read_file_opt dest in
+            (match existing with
+             | Some current when String.equal current content -> acc
+             | _ -> (
+                 try
+                   Fs_compat.mkdir_p (Filename.dirname dest);
+                   Fs_compat.save_file dest content;
+                   if Option.is_some existing then
+                     { acc with overwritten = rel :: acc.overwritten }
+                   else { acc with copied = rel :: acc.copied }
+                 with
+                 | Eio.Cancel.Cancelled _ as e -> raise e
+                 | Sys_error msg ->
+                     { acc with failed = (rel, msg) :: acc.failed })))
+    { copied = []; overwritten = []; failed = [] }
+    files
+
 (** Scan the current markdown dir and register all prompts with frontmatter.
     Called by [bootstrap_runtime]; also usable in tests after [set_markdown_dir]. *)
 let init () =

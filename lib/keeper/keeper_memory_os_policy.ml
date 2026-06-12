@@ -83,6 +83,7 @@ let string_contains_any needles str =
 let transient_admission_markers =
   [ "goal_cap"
   ; "goal cap"
+  ; "goal capacity"
   ; "wip cap"
   ; "wip 3/3"
   ; "wip 4/3"
@@ -94,6 +95,14 @@ let transient_admission_markers =
   ; "claim new task"
   ; "claiming new task"
   ; "new task claim"
+  ; "new task assignment"
+  ; "new task assignments"
+  ; "accept new task"
+  ; "accept new tasks"
+  ; "accepting new task"
+  ; "accepting new tasks"
+  ; "acceptance of new task"
+  ; "acceptance of new tasks"
   ]
 ;;
 
@@ -113,6 +122,9 @@ let transient_blocker_markers =
   ; "slots held"
   ; "occupied by other agents"
   ; "no new tasks can be claimed"
+  ; "no more goals can be claimed"
+  ; "full"
+  ; "stuck"
   ]
 ;;
 

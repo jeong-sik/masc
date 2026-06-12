@@ -110,7 +110,7 @@ let global_backlog_obs : WO.world_observation =
   ; failed_task_count = 0
   ; pending_verification_count = 0
   ; backlog_updated_since_last_scheduled_autonomous = true
-  ; active_agent_count = 1
+  ; running_keeper_fiber_count = 1
   ; connected_surfaces = []
   }
 
@@ -170,7 +170,7 @@ let test_live_keeper_count_ignores_empty_agent_registry () =
       ignore
         (Masc.Keeper_registry.register ~base_path:config.base_path meta.name meta);
       check int "counts running keepers, not .masc/agents" 1
-        (Masc.Keeper_world_observation_inputs.count_active_agents ~config))
+        (Masc.Keeper_world_observation_inputs.count_running_keeper_fibers ~config))
 
 let () = init_runtime_default_for_tests ()
 

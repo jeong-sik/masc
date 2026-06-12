@@ -9,7 +9,7 @@ type deliberation_trigger =
   | DirectMention
   | NewUnclaimedTask
   | FailedTask
-  | AgentSessionBoundOrLeft
+  | KeeperFiberStartedOrStopped
   | GoalDeadline
   | BoardActivity of string
   | IdleTimeout
@@ -57,8 +57,8 @@ type world_observation = {
   message_content: string;
   unclaimed_task_count: int;
   failed_task_count: int;
-  active_agent_count: int;
-  agent_count_changed: bool;
+  running_keeper_fiber_count: int;
+  keeper_fiber_count_changed: bool;
   active_goal_count: int;
   idle_seconds: int;
   idle_gate: int;

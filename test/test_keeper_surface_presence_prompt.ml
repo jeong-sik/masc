@@ -24,7 +24,7 @@ let base_observation : WO.world_observation =
     failed_task_count = 0;
     pending_verification_count = 0;
     backlog_updated_since_last_scheduled_autonomous = false;
-    active_agent_count = 0;
+    running_keeper_fiber_count = 0;
     connected_surfaces = [];
   }
 
@@ -174,7 +174,7 @@ let test_empty_presence_has_no_section () =
 
 let test_namespace_state_names_running_keeper_fibers () =
   let user =
-    user_message { base_observation with active_agent_count = 2 }
+    user_message { base_observation with running_keeper_fiber_count = 2 }
   in
   check bool "namespace state present" true
     (contains ~needle:"### Namespace State" user);

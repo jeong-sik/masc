@@ -186,7 +186,7 @@ let append_decision_record
                       - observation.claimable_task_count)) );
               ("failed_task_count", `Int observation.failed_task_count);
               ("pending_verification_count", `Int observation.pending_verification_count);
-              ("active_agent_count", `Int observation.active_agent_count);
+              ("running_keeper_fiber_count", `Int observation.running_keeper_fiber_count);
             ] );
         ("claim_absolute_available", `Bool (observation.unclaimed_task_count > 0));
         ("claim_matched_available", `Bool (observation.claimable_task_count > 0));

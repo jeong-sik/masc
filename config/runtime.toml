@@ -163,3 +163,13 @@ max-concurrent = 1
 # [runtime.assignments]
 # sangsu = "glm-coding.glm-5-turbo"
 # nick0cave = "ollama.gemma4-26b-a4b-qat"
+
+# ── Discord ──────────────────────────────────────────────────────────
+# Trigger policy controls which inbound Discord events the bot responds to.
+#   mention_or_thread  — 스레드에서 자동 응답, 일반 채널은 멘션 필요 (기본값)
+#   mention_only       — @멘션된 메시지만 응답
+#   all                — 모든 메시지에 응답
+#   user_only:<snowflake> — 특정 사용자만
+# Env var MASC_DISCORD_TRIGGER_POLICY overrides this value.
+[discord]
+trigger_policy = "mention_or_thread"

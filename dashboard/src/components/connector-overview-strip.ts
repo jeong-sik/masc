@@ -155,6 +155,7 @@ async function runBulk(
 interface OverviewProps {
   connectors: GateConnectorInfo[]
   keeperCount: number
+  discordTriggerPolicy?: string
   selectedConnectorId?: KnownConnectorId | null
   onSelectConnector?: (connectorId: KnownConnectorId) => void
   detailTargetId?: string
@@ -719,6 +720,7 @@ function IncidentBanner({ droppedIds }: { droppedIds: string[] }) {
 export function ConnectorOverviewStrip({
   connectors,
   keeperCount,
+  discordTriggerPolicy,
   selectedConnectorId = null,
   onSelectConnector,
   detailTargetId = 'connector-detail-panel',
@@ -749,7 +751,13 @@ export function ConnectorOverviewStrip({
     <${SurfaceCard} class="mb-4 !p-3" data-overview-strip-root>
       <${IncidentBanner} droppedIds=${droppedIds} />
       <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <${StatusSummaryLine} summary=${summary} connectors=${connectors} />
+        <div class="flex flex-wrap items-center gap-2">
+          <${StatusSummaryLine} summary=${summary} connectors=${connectors} />
+          ${discordTriggerPolicy && discordTriggerPolicy !== 'unknown'
+            ? html`<span class="rounded-[var(--r-0)] border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2 py-0.5 text-3-xs font-medium text-[var(--color-fg-secondary)]">trigger: ${discordTriggerPolicy}</span>`
+            : null
+          }
+        </div>
         <${BulkActions} connectors=${connectors} />
       </div>
       <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">

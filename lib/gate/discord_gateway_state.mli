@@ -201,9 +201,12 @@ and trigger_policy =
 
 val parse_trigger_policy : string -> (trigger_policy, string) result
 (** Decodes [DISCORD_TRIGGER_POLICY] env value. Accepts exactly
-    ["mention_only"], ["user_only:<snowflake>"], ["all"]. Anything
+    ["mention_only"], ["mention_or_thread"], ["user_only:<snowflake>"], ["all"]. Anything
     else returns [Error] — no string-classifier inference
     (RFC-0203 §Non-goals). *)
+
+val trigger_policy_to_string : trigger_policy -> string
+(** Inverse of {!parse_trigger_policy}. Used for diagnostics and API exposure. *)
 
 (** {1 The state machine itself} *)
 

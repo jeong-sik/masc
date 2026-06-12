@@ -1906,6 +1906,17 @@
  (modules test_rfc_0086_keeper_namespace_invariant)
  (libraries alcotest))
 
+; Eval_tool_selector is an observational harness/benchmark matcher.  It
+; must not become a live keeper/runtime routing gate or tool policy surface.
+
+(test
+ (name test_eval_tool_selector_boundary)
+ (modules test_eval_tool_selector_boundary)
+ (libraries alcotest)
+ (deps
+  (source_tree ../lib/keeper)
+  (source_tree ../lib/runtime)))
+
 ; RFC-0085 PR-18 — Retroactive AST test for execution_surfaces +
 ; namespace_truth rename (#15486 shipped without a regression test;
 ; restored by #15495).

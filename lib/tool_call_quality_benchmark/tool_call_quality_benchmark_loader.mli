@@ -48,7 +48,7 @@ val load_cases_from_file :
     - [category] defaults to [["tool_use"]] when absent;
       unknown categories return [Error "unknown tool-call-quality
       category: <other>"]
-    - [forbidden_tools] / [arg_checks]
+    - [forbidden_tools] / [forbidden_selectors] / [arg_checks]
       default to empty lists
     - [recovery_policy] defaults to [None] (case has no recovery
       requirement)
@@ -88,6 +88,7 @@ val load_runs_from_file :
     | [success] | [false] |
     | [input] | [`Assoc []] |
     | [output] | [None] |
+    | [route_evidence] | [None] |
     | [duration_ms] | [None] |
 
     The [tool_name] vs [tool] alias is intentional — older

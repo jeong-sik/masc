@@ -98,9 +98,17 @@ let test_regex_no_match () =
 (* Test: check_tool_expectations                                     *)
 (* ================================================================ *)
 
+let tool_expect ?max_calls ?(required = true) tool_name =
+  { Eval_harness.tool_name
+  ; selector = Eval_tool_selector.Tool_name tool_name
+  ; required
+  ; max_calls
+  ; args_contain = None
+  }
+
 let test_tool_expect_required_met () =
   let expectations : Eval_harness.tool_expectation list = [
-    { tool_name = "tool_execute"; required = true; max_calls = None; args_contain = None };
+    tool_expect "tool_execute";
   ] in
   let actual = ["tool_execute"; "tool_execute"] in
   let results = Eval_harness.check_tool_expectations expectations actual in
@@ -109,7 +117,7 @@ let test_tool_expect_required_met () =
 
 let test_tool_expect_required_missing () =
   let expectations : Eval_harness.tool_expectation list = [
-    { tool_name = "tool_execute"; required = true; max_calls = None; args_contain = None };
+    tool_expect "tool_execute";
   ] in
   let actual = ["tool_read_file"] in
   let results = Eval_harness.check_tool_expectations expectations actual in
@@ -119,7 +127,7 @@ let test_tool_expect_required_missing () =
 
 let test_tool_expect_max_calls_ok () =
   let expectations : Eval_harness.tool_expectation list = [
-    { tool_name = "tool_execute"; required = true; max_calls = Some 3; args_contain = None };
+    tool_expect ~max_calls:3 "tool_execute";
   ] in
   let actual = ["tool_execute"; "tool_execute"] in
   let results = Eval_harness.check_tool_expectations expectations actual in
@@ -128,13 +136,45 @@ let test_tool_expect_max_calls_ok () =
 
 let test_tool_expect_max_calls_exceeded () =
   let expectations : Eval_harness.tool_expectation list = [
-    { tool_name = "tool_execute"; required = true; max_calls = Some 2; args_contain = None };
+    tool_expect ~max_calls:2 "tool_execute";
   ] in
   let actual = ["tool_execute"; "tool_execute"; "tool_execute"; "tool_execute"; "tool_execute"] in
   let results = Eval_harness.check_tool_expectations expectations actual in
   let r = List.hd results in
   Alcotest.(check bool) "exceeded penalty" true (r.Eval_harness.score < 1.0);
   Alcotest.(check bool) "has warning" true (String.length r.Eval_harness.detail > 0)
+
+let test_tool_expect_descriptor_selector () =
+  let expectations : Eval_harness.tool_expectation list = [
+    { tool_name = "agent profile lookup"
+    ; selector = Eval_tool_selector.Descriptor_id "masc.agent.card"
+    ; required = false
+    ; max_calls = Some 0
+    ; args_contain = None
+    };
+  ] in
+  let actual =
+    [
+      ({ tool_name = "masc_agent_card"
+       ; route_evidence =
+           Some
+             (`Assoc
+                [
+                  ("descriptor_id", `String "masc.agent.card");
+                  ("runtime_handler", `String "Tool_masc_agent_dispatch");
+                ])
+       } : Eval_tool_selector.call);
+    ]
+  in
+  let results =
+    Eval_harness.check_tool_expectations_with_evidence expectations actual
+  in
+  let r = List.hd results in
+  Alcotest.(check (float 0.01)) "descriptor selector exceeded max" 0.0
+    r.Eval_harness.score;
+  Alcotest.(check bool) "detail names selector" true
+    (String_util.contains_substring r.Eval_harness.detail
+       "descriptor_id:masc.agent.card")
 
 (* ================================================================ *)
 (* Test: compute_pass_at_k                                           *)
@@ -315,6 +355,8 @@ let () =
       Alcotest.test_case "required missing" `Quick test_tool_expect_required_missing;
       Alcotest.test_case "max_calls ok" `Quick test_tool_expect_max_calls_ok;
       Alcotest.test_case "max_calls exceeded" `Quick test_tool_expect_max_calls_exceeded;
+      Alcotest.test_case "descriptor selector" `Quick
+        test_tool_expect_descriptor_selector;
     ]);
     ("pass_at_k", [
       Alcotest.test_case "all pass" `Quick test_pass_at_k_all_pass;

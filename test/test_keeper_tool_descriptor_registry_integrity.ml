@@ -145,6 +145,73 @@ let test_no_blank_names () =
           d.Descriptor.public_name)
     (all_descriptors ())
 
+let eval_tag_charset_ok c =
+  (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c = '_'
+
+let assert_eval_tags_unique descriptor =
+  let seen = Hashtbl.create 8 in
+  List.iter
+    (fun tag ->
+      if Hashtbl.mem seen tag
+      then
+        Alcotest.failf
+          "descriptor %S has duplicate eval_tag %S"
+          descriptor.Descriptor.internal_name
+          tag;
+      Hashtbl.replace seen tag ())
+    descriptor.Descriptor.eval_tags
+;;
+
+let test_eval_tags_are_normalized () =
+  List.iter
+    (fun d ->
+      assert_eval_tags_unique d;
+      List.iter
+        (fun tag ->
+          if is_blank tag
+          then
+            Alcotest.failf
+              "descriptor %S has blank eval_tag"
+              d.Descriptor.internal_name;
+          if not (String.equal tag (String.trim tag))
+          then
+            Alcotest.failf
+              "descriptor %S has untrimmed eval_tag %S"
+              d.Descriptor.internal_name
+              tag;
+          String.iter
+            (fun c ->
+              if not (eval_tag_charset_ok c)
+              then
+                Alcotest.failf
+                  "descriptor %S eval_tag %S contains invalid character %C \
+                   (allowed: a-z, 0-9, _)"
+                  d.Descriptor.internal_name
+                  tag
+                  c)
+            tag)
+        d.Descriptor.eval_tags)
+    (all_descriptors ())
+
+let test_seed_eval_tags_are_registered () =
+  let check tool_name expected =
+    let descriptor =
+      match Descriptor.descriptors_for_internal tool_name with
+      | descriptor :: _ -> descriptor
+      | [] -> Alcotest.failf "missing internal descriptor: %s" tool_name
+    in
+    Alcotest.(check (list string))
+      (tool_name ^ " eval_tags")
+      expected
+      descriptor.Descriptor.eval_tags
+  in
+  check "keeper_tools_list" [ "capability_introspection" ];
+  check "keeper_tool_search" [ "capability_introspection" ];
+  check "keeper_surface_read" [ "surface_context_read" ];
+  check "masc_agent_card" [ "agent_profile_lookup" ];
+  check "keeper_time_now" []
+;;
+
 let internal_name_charset_ok c =
   (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c = '_'
 
@@ -833,6 +900,11 @@ let () =
     ; ( "format"
       , [ test_case "no blank name fields" `Quick test_no_blank_names
         ; test_case "internal_name is snake_case" `Quick test_internal_name_snake_case
+        ; test_case "eval_tags are normalized" `Quick test_eval_tags_are_normalized
+        ; test_case
+            "seed eval_tags are registered"
+            `Quick
+            test_seed_eval_tags_are_registered
         ] )
     ; ( "agent-contract"
       , [ test_case

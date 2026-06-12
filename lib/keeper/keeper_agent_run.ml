@@ -510,6 +510,7 @@ let run_turn
               to re-emit. Runaway is bounded by max_idle_turns + token budget,
               not a retry count that halts the turn. *)
                     ~max_idle_turns
+                    ~max_turns
                     ?stream_idle_timeout_s
                     ~body_timeout_s:timeout_s
                     ~temperature

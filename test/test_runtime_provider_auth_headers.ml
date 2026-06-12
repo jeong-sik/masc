@@ -803,6 +803,63 @@ let test_runtime_agent_max_turns_is_continuation_checkpoint () =
   check string "status" "continuation_checkpoint" lifecycle.status;
   check (option string) "no error" None lifecycle.error
 
+let test_runtime_agent_context_uses_configured_turn_budget () =
+  let config =
+    Runtime_agent.default_config
+      ~name:"oas-runpod_mtp.qwen"
+      ~provider_cfg:(provider_cfg ())
+      ~system_prompt:""
+      ~tools:[]
+  in
+  let config = { config with max_turns = 7 } in
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      let builder =
+        Runtime_agent_context.builder_without_approval
+          ~net:(Eio.Stdenv.net env)
+          ~config
+          ()
+      in
+      match Agent_sdk.Builder.build_safe builder with
+      | Error err -> fail (Agent_sdk.Error.to_string err)
+      | Ok agent ->
+        check int "builder max_turns" 7
+          (Agent_sdk.Agent.state agent).config.max_turns;
+        Eio.Switch.on_release sw (fun () ->
+          Agent_sdk.Agent.close agent)));
+  let checkpoint =
+    { Agent_sdk.Checkpoint.version = Agent_sdk.Checkpoint.checkpoint_version
+    ; session_id = "session"
+    ; agent_name = "oas-runpod_mtp.qwen"
+    ; model = "qwen"
+    ; system_prompt = Some ""
+    ; messages = []
+    ; usage = Agent_sdk.Types.empty_usage
+    ; turn_count = 24
+    ; created_at = 0.0
+    ; tools = []
+    ; tool_choice = None
+    ; disable_parallel_tool_use = false
+    ; temperature = Some 0.3
+    ; top_p = None
+    ; top_k = None
+    ; min_p = None
+    ; enable_thinking = None
+    ; preserve_thinking = None
+    ; response_format = Agent_sdk.Types.default_config.response_format
+    ; thinking_budget = None
+    ; cache_system_prompt = false
+    ; max_input_tokens = None
+    ; max_total_tokens = None
+    ; context = Agent_sdk.Context.create ()
+    ; mcp_sessions = []
+    ; working_context = None
+    }
+  in
+  let prepared = Runtime_agent_context.prepare_resume ~config ~checkpoint in
+  check int "resume adds fresh per-call turn budget" 31
+    prepared.agent_config.max_turns
+
 (* RFC-OAS-026 §4.6: a configured stream-idle deadline with no resolvable clock
    must fail loudly rather than silently disarm the only I2-legitimate
    streaming timeout. *)
@@ -910,6 +967,10 @@ let () =
             "max turns is continuation checkpoint"
             `Quick
             test_runtime_agent_max_turns_is_continuation_checkpoint
+        ; test_case
+            "runtime agent context uses configured turn budget"
+            `Quick
+            test_runtime_agent_context_uses_configured_turn_budget
         ; test_case
             "dashboard runtime provider reachability contracts"
             `Quick

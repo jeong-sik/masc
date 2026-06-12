@@ -28,6 +28,7 @@ type try_provider_ctx =
   ; system_prompt : string
   ; tools : Agent_sdk.Tool.t list
   ; initial_messages : Agent_sdk.Types.message list
+  ; max_turns : int
   ; max_idle_turns : int
   ; stream_idle_timeout_s : float option
   ; execution_idle_timeout_s : float option
@@ -360,6 +361,7 @@ let run_try_provider
                None)
           ; body_timeout_s = ctx.body_timeout_s
           ; temperature = ctx.temperature
+          ; max_turns = ctx.max_turns
           ; max_idle_turns = ctx.max_idle_turns
           ; guardrails = ctx.guardrails
           ; hooks

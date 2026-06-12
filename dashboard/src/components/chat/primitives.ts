@@ -7,7 +7,63 @@ import { ActionButton } from '../common/button'
 import { formatTimeHms } from '../../lib/format-time'
 import { formatCost } from '../../lib/format-number'
 import { isSubmitEnter } from '../../lib/keyboard'
-import type { KeeperConversationAttachment, KeeperConversationDetails, KeeperConversationEntry } from '../../types'
+import type { KeeperConversationAttachment, KeeperConversationDetails, KeeperConversationEntry, SurfaceRef } from '../../types'
+
+function surfaceLink(surface?: SurfaceRef | null): { url: string; label: string; icon: string } | null {
+  if (!surface || !surface.kind) return null
+  switch (surface.kind) {
+    case 'discord':
+      if (surface.channel_id) {
+        const targetId = surface.thread_id || surface.channel_id
+        const guild = surface.guild_id || '@me'
+        return {
+          url: `https://discord.com/channels/${guild}/${targetId}`,
+          label: surface.thread_id ? 'Discord Thread' : 'Discord Channel',
+          icon: '🎮',
+        }
+      }
+      break
+    case 'slack':
+      if (surface.channel_id) {
+        const team = surface.team_id ? `&team=${surface.team_id}` : ''
+        return {
+          url: `https://slack.com/app_redirect?channel=${surface.channel_id}${team}`,
+          label: 'Slack Channel',
+          icon: '💬',
+        }
+      }
+      break
+    case 'github':
+      if (surface.repo) {
+        const path = surface.notification_id ? `/notifications/${surface.notification_id}` : ''
+        return {
+          url: `https://github.com/${surface.repo}${path}`,
+          label: `GitHub: ${surface.repo}`,
+          icon: '🐙',
+        }
+      }
+      break
+    case 'dashboard':
+      return {
+        url: '#',
+        label: 'Dashboard',
+        icon: '💻',
+      }
+    case 'agent':
+      return {
+        url: '#',
+        label: 'Agent (Self)',
+        icon: '🤖',
+      }
+    case 'gate':
+      return {
+        url: '#',
+        label: `Gate: ${surface.label || 'connector'}`,
+        icon: '⚡',
+      }
+  }
+  return null
+}
 
 type ChatTranscriptVariant = 'default' | 'messenger'
 type ChatTranscriptSize = 'default' | 'primary'
@@ -240,6 +296,7 @@ function ChatMessageBubble({
   const delivery = deliveryLabel(entry)
   const timestamp = timeLabel(entry.timestamp)
   const attachments = entry.attachments ?? []
+  const surfaceInfo = surfaceLink(entry.surface)
 
   return html`
     <article
@@ -279,6 +336,30 @@ function ChatMessageBubble({
                           </span>
                         `
                       : null}
+                    ${surfaceInfo && surfaceInfo.url !== '#'
+                      ? html`
+                          <a
+                            href=${surfaceInfo.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            class="inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-2 py-0.5 text-3xs font-medium text-[var(--color-accent-fg)] hover:bg-[var(--accent-20)]"
+                            title=${surfaceInfo.label}
+                          >
+                            <span>${surfaceInfo.icon}</span>
+                            <span>${surfaceInfo.label}</span>
+                          </a>
+                        `
+                      : surfaceInfo
+                      ? html`
+                          <span
+                            class="inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-3xs font-medium text-[var(--color-fg-muted)]"
+                            title=${surfaceInfo.label}
+                          >
+                            <span>${surfaceInfo.icon}</span>
+                            <span>${surfaceInfo.label}</span>
+                          </span>
+                        `
+                      : null}
                   </div>
                 `
               : html`
@@ -302,6 +383,30 @@ function ChatMessageBubble({
                       ? html`
                           <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] px-2.5 py-1 text-3xs font-medium tabular-nums text-[var(--color-fg-muted)]">
                             ${timestamp}
+                          </span>
+                        `
+                      : null}
+                    ${surfaceInfo && surfaceInfo.url !== '#'
+                      ? html`
+                          <a
+                            href=${surfaceInfo.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            class="inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-2.5 py-1 text-3xs font-medium text-[var(--color-accent-fg)] hover:bg-[var(--accent-20)]"
+                            title=${surfaceInfo.label}
+                          >
+                            <span>${surfaceInfo.icon}</span>
+                            <span>${surfaceInfo.label}</span>
+                          </a>
+                        `
+                      : surfaceInfo
+                      ? html`
+                          <span
+                            class="inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] px-2.5 py-1 text-3xs font-medium text-[var(--color-fg-muted)]"
+                            title=${surfaceInfo.label}
+                          >
+                            <span>${surfaceInfo.icon}</span>
+                            <span>${surfaceInfo.label}</span>
                           </span>
                         `
                       : null}

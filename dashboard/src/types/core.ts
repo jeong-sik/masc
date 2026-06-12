@@ -743,6 +743,23 @@ export type KeeperConversationStreamState =
   | 'finalizing'
   | null
 
+export interface SurfaceRef {
+  kind: 'dashboard' | 'discord' | 'slack' | 'github' | 'webhook' | 'agent' | 'gate' | string
+  session_id?: string
+  guild_id?: string
+  channel_id?: string
+  parent_channel_id?: string
+  thread_id?: string
+  team_id?: string
+  thread_ts?: string
+  repo?: string
+  notification_id?: string
+  source?: string
+  event_id?: string
+  label?: string
+  address?: Record<string, string>
+}
+
 export interface KeeperConversationEntry {
   id: string
   role: KeeperConversationRole
@@ -756,6 +773,7 @@ export interface KeeperConversationEntry {
   attachments?: KeeperConversationAttachment[]
   details?: KeeperConversationDetails | null
   error?: string | null
+  surface?: SurfaceRef | null
 }
 
 export interface KeeperStatusDetail {

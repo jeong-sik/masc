@@ -23,6 +23,16 @@ let test_runtime_json_not_in_repo_config () =
   let path = Filename.concat (repo_root ()) "config/runtime.json" in
   check bool "retired runtime.json absent" false (Sys.file_exists path)
 
+let test_repo_runtime_toml_loads () =
+  let path = Filename.concat (repo_root ()) "config/runtime.toml" in
+  check bool "repo runtime.toml present" true (Sys.file_exists path);
+  match Runtime.load_list ~config_path:path with
+  | Error msg -> failf "repo runtime.toml should load: %s" msg
+  | Ok (runtimes, default, assignments) ->
+    check bool "at least one runtime" true (List.length runtimes > 0);
+    check string "default runtime" "ollama.gemma4-26b-a4b-qat" default.Runtime.id;
+    check int "no explicit keeper pins in seed" 0 (List.length assignments)
+
 let test_toml_catalog_resolves_lifecycle_keys () =
   let doc =
     parse_or_fail
@@ -50,6 +60,8 @@ let () =
     [ ( "runtime TOML gate",
         [ test_case "runtime.json is not a repo config source" `Quick
             test_runtime_json_not_in_repo_config;
+          test_case "repo runtime.toml loads through runtime parser" `Quick
+            test_repo_runtime_toml_loads;
           test_case
             "lifecycle TOML keys resolve through the declarative catalog"
             `Quick test_toml_catalog_resolves_lifecycle_keys ] )

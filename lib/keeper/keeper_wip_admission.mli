@@ -50,6 +50,7 @@ type reject_reason =
   | Category_cap
 
 val reject_reason_to_string : reject_reason -> string
+val reject_reason_axis : reject_reason -> string
 
 type rejection = {
   reason : reject_reason;

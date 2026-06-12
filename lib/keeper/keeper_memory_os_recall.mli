@@ -13,11 +13,11 @@ val render_context
   -> string
 
 val enabled : unit -> bool
-(** Opt-in flag [MASC_KEEPER_MEMORY_OS_RECALL] (default [false]). Read
-    side of Memory OS; the write side (librarian) is gated separately by
-    [MASC_KEEPER_MEMORY_OS_LIBRARIAN]. *)
+(** Kill-switch flag [MASC_KEEPER_MEMORY_OS_RECALL] (default [true]).
+    Read side of Memory OS; the write side (librarian) is gated
+    separately by [MASC_KEEPER_MEMORY_OS_LIBRARIAN]. *)
 
 val render_if_enabled : keeper_id:string -> now:float -> unit -> string option
 (** [render_if_enabled ~keeper_id ~now ()] is [Some block] when the
-    opt-in flag is set and the store yields advisory content, [None]
-    otherwise. Intended for the [extra_system_context] assembly site. *)
+    flag is on and the store yields advisory content, [None] otherwise.
+    Intended for the [extra_system_context] assembly site. *)

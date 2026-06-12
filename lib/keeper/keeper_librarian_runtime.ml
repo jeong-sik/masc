@@ -16,9 +16,12 @@ let default_complete ~sw ~net ?clock ~config ~messages () =
 ;;
 
 let enabled () =
+  (* Default on: a keeper without conversation ingestion is the pathology
+     the Memory OS exists to fix (2026-06-12 diagnosis, issue #20909).
+     The env var stays as the kill switch. *)
   Keeper_memory_bank_env.memory_env_bool_logged
     "MASC_KEEPER_MEMORY_OS_LIBRARIAN"
-    ~default:false
+    ~default:true
 ;;
 
 let max_messages () =

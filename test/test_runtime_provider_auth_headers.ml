@@ -223,6 +223,51 @@ let test_runtime_toml_accepts_deepseek_reasoning_effort_capability () =
      | None -> fail "expected model capabilities")
   | models -> failf "expected one model, got %d" (List.length models)
 
+let test_runtime_toml_accepts_chat_template_token_capability () =
+  let toml =
+    {|
+[runtime]
+default = "ollama.gemma4"
+
+[providers.ollama]
+display-name = "Local Ollama"
+protocol = "ollama-http"
+endpoint = "http://localhost:11434"
+
+[models.gemma4]
+api-name = "hf.co/unsloth/gemma-4-26B-A4B-it-qat-GGUF:UD-Q4_K_XL"
+max-context = 262144
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.gemma4.capabilities]
+thinking-control-format = "chat_template_token"
+
+[ollama.gemma4]
+max-concurrent = 1
+|}
+  in
+  match Runtime_toml.parse_string toml with
+  | Error errors ->
+    failf
+      "expected Gemma4 runtime TOML to parse: %s"
+      (String.concat
+         "; "
+         (List.map
+            (fun (err : Runtime_toml.parse_error) ->
+               Printf.sprintf "%s: %s" err.path err.message)
+            errors))
+  | Ok cfg ->
+    (match cfg.models with
+     | [ model ] ->
+       (match model.capabilities with
+        | Some caps ->
+          check bool "chat template token parsed" true
+            (caps.thinking_control_format = Runtime_schema.Chat_template_token)
+        | None -> fail "expected model capabilities")
+     | models -> failf "expected one model, got %d" (List.length models))
+
 let test_runtime_adapter_materializes_deepseek_openai_compat () =
   with_deepseek_env "ds-test-key" (fun () ->
     let provider_cfg = deepseek_provider_config_or_fail () in
@@ -588,6 +633,10 @@ let () =
             "runtime TOML accepts DeepSeek reasoning effort"
             `Quick
             test_runtime_toml_accepts_deepseek_reasoning_effort_capability
+        ; test_case
+            "runtime TOML accepts chat template token thinking"
+            `Quick
+            test_runtime_toml_accepts_chat_template_token_capability
         ; test_case
             "runtime adapter materializes DeepSeek OpenAI compat"
             `Quick

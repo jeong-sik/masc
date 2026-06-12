@@ -35,7 +35,25 @@ let test_repo_runtime_toml_loads () =
     check int "one local Gemma canary pin in seed" 1 (List.length assignments);
     check (option string) "nick0cave Gemma canary pin"
       (Some "ollama.gemma4-26b-a4b-qat")
-      (List.assoc_opt "nick0cave" assignments)
+      (List.assoc_opt "nick0cave" assignments);
+    (match
+       List.find_opt
+         (fun (runtime : Runtime.t) ->
+            String.equal runtime.id "ollama.gemma4-26b-a4b-qat")
+         runtimes
+     with
+     | None -> fail "expected Gemma4 Ollama runtime in seed"
+     | Some runtime ->
+       check bool "Gemma4 thinking enabled" true runtime.model.thinking_support;
+       check bool "Gemma4 thinking not preserved" false
+         runtime.model.preserve_thinking;
+       (match runtime.model.capabilities with
+        | Some caps ->
+          check bool "Gemma4 chat-template-token thinking control" true
+            (Runtime_schema.equal_thinking_control_format
+               caps.thinking_control_format
+               Runtime_schema.Chat_template_token)
+        | None -> fail "expected Gemma4 capabilities"))
 
 let test_toml_catalog_resolves_lifecycle_keys () =
   let doc =

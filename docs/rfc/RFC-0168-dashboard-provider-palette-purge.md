@@ -24,7 +24,7 @@ After RFC-0165 / 0166 / 0167 cleared all upstream-LLM-provider and MCP-client na
 
 - Remove both palette sections from `dashboard/design-system/tokens/source.ts` and regenerate all live outputs via `pnpm tokens:build`.
 - Sed-purge the same token names from the stale generated artifacts and from `dashboard/src/styles/tokens.css`.
-- Rewrite the `overlay-runtime.solid.test.tsx` SAMPLE_HIT fixture to use neutral `sample-provider-x` / `sample-model-y` strings; restate the negation assertions in terms of the new fixture or the generic `--color-p-` prefix.
+- Rewrite the `overlay-runtime.solid.test.tsx` SAMPLE_HIT fixture to use neutral `sample-provider-alpha` / `sample-model-beta` strings; restate the negation assertions in terms of the new fixture or the generic `--color-p-` prefix.
 - Preview/audit HTML files under `dashboard/design-system/preview/` and the RFC-style audit reports under `dashboard/design-system/audits/` retain historical references — they are out of scope (handled by a later docs sweep).
 
 ## 3. Behavior consequences (operator-acknowledged)

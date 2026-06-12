@@ -187,9 +187,63 @@ let body_timeout_for_attempt ?per_provider_timeout_s () =
   | Some _ as s -> s
   | None -> max_execution_time_for_attempt ?per_provider_timeout_s ()
 
-let accept_rejected_error ~runtime_id ~(response : Agent_sdk_response.api_response) =
+type last_tool_progress_context =
+  { tool_name : string
+  ; tool_effect : string
+  }
+
+let last_tool_use_of_messages (messages : Agent_sdk.Types.message list) =
+  let last_tool_in_message (msg : Agent_sdk.Types.message) acc =
+    if msg.role <> Agent_sdk.Types.Assistant
+    then acc
+    else
+      List.fold_left
+        (fun acc -> function
+          | Agent_sdk.Types.ToolUse { name; input; _ } -> Some (name, input)
+          | _ -> acc)
+        acc
+        msg.content
+  in
+  List.fold_left (fun acc msg -> last_tool_in_message msg acc) None messages
+;;
+
+let last_tool_progress_context_of_messages messages =
+  match last_tool_use_of_messages messages with
+  | None -> None
+  | Some (tool_name, input) ->
+    let tool_name = String.trim tool_name in
+    let tool_name = if tool_name = "" then "unknown" else tool_name in
+    let tool_effect =
+      if Keeper_tool_registry.is_read_only_with_input ~tool_name ~input
+      then "read_only"
+      else "mutating"
+    in
+    Some { tool_name; tool_effect }
+;;
+
+let accept_rejection_context_of_run_result (run_result : Runtime_agent.run_result) =
+  match run_result.checkpoint with
+  | None -> None
+  | Some checkpoint ->
+    last_tool_progress_context_of_messages checkpoint.Agent_sdk.Checkpoint.messages
+;;
+
+let format_last_tool_progress_context = function
+  | None -> None
+  | Some { tool_name; tool_effect } ->
+    Some (Printf.sprintf "last_tool=%s; last_tool_effect=%s" tool_name tool_effect)
+;;
+
+let accept_rejected_error ~progress_context ~runtime_id
+    ~(response : Agent_sdk_response.api_response) =
   let rejection =
     Keeper_tool_response.accept_rejection_of_response ~runtime_id response
+  in
+  let rejection =
+    match progress_context with
+    | Some context when String.trim context <> "" ->
+      { rejection with reason = rejection.reason ^ "; " ^ context }
+    | Some _ | None -> rejection
   in
   let reason_kind =
     match rejection.kind with
@@ -212,7 +266,17 @@ let accept_rejected_error ~runtime_id ~(response : Agent_sdk_response.api_respon
 
 let apply_accept ~runtime_id ~accept (run_result : Runtime_agent.run_result) =
   if accept run_result.response then Ok run_result
-  else Error (accept_rejected_error ~runtime_id ~response:run_result.response)
+  else
+    let progress_context =
+      run_result
+      |> accept_rejection_context_of_run_result
+      |> format_last_tool_progress_context
+    in
+    Error
+      (accept_rejected_error
+         ~progress_context
+         ~runtime_id
+         ~response:run_result.response)
 
 (** Run a single provider attempt within the runtime.
 
@@ -416,4 +480,6 @@ module For_testing = struct
   let sanitize_runtime_mcp_external_tool_choice =
     sanitize_runtime_mcp_external_tool_choice
   let apply_accept = apply_accept
+  let last_tool_progress_context_of_messages = last_tool_progress_context_of_messages
+  let format_last_tool_progress_context = format_last_tool_progress_context
 end

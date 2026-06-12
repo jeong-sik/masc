@@ -47,12 +47,36 @@ let sdk_error_to_http_error err =
     Some (Llm_provider.Http_client.AcceptRejected { reason })
   | Some (Runtime_attempt_fsm.Call_ok _) | None -> None
 
+let is_accept_rejected_sdk_error err =
+  match Keeper_internal_error.classify_masc_internal_error err with
+  | Some (Keeper_internal_error.Accept_rejected _) -> true
+  | Some
+      ( Keeper_internal_error.Runtime_exhausted _
+      | Keeper_internal_error.Capacity_backpressure _
+      | Keeper_internal_error.Resumable_cli_session _
+      | Keeper_internal_error.Admission_queue_timeout _
+      | Keeper_internal_error.Admission_queue_rejected _
+      | Keeper_internal_error.Turn_timeout _
+      | Keeper_internal_error.Provider_timeout _
+      | Keeper_internal_error.Max_tokens_ceiling_violation _
+      | Keeper_internal_error.Ambiguous_post_commit _
+      | Keeper_internal_error.Internal_unhandled_exception _
+      | Keeper_internal_error.Internal_bridge_exception _
+      | Keeper_internal_error.Internal_contract_rejected _ )
+  | None ->
+    false
+
 let http_status_of_http_error = function
   | Some (Llm_provider.Http_client.HttpError { code; _ }) -> Some code
   | _ -> None
 
 let sdk_error_of_exhausted last_err =
   Agent_sdk.Error.Internal (Runtime_attempt_fsm.to_user_message last_err)
+
+let sdk_error_of_nonretryable_attempt_error ~original_error last_err =
+  if is_accept_rejected_sdk_error original_error
+  then original_error
+  else sdk_error_of_exhausted (Some last_err)
 
 let maybe_mark_provider_attempt_started ctx =
   match ctx.base_path, String.trim ctx.keeper_name with
@@ -170,34 +194,40 @@ let run
          on_success ~provider_key:(Runtime_candidate.health_key candidate);
          Ok run_result
        | Ok run_result ->
-         let reason = "accept predicate rejected runtime response" in
+         let err =
+           Keeper_turn_driver_try_provider.accept_rejected_error
+             ~progress_context:None
+             ~runtime_id:ctx.error_runtime_id
+             ~response:run_result.Runtime_agent.response
+         in
+         let reason =
+           match Keeper_internal_error.classify_masc_internal_error err with
+           | Some (Keeper_internal_error.Accept_rejected { reason; _ }) -> reason
+           | _ -> Agent_sdk.Error.to_string err
+         in
          Keeper_turn_driver_provider_attempt.record_candidate_health_rejected
            ~keeper_name:ctx.keeper_name
            candidate
            ~reason;
-         let last_err =
-           Some (Llm_provider.Http_client.AcceptRejected { reason })
-         in
-         if is_last
-         then Error (sdk_error_of_exhausted last_err)
-         else loop checkpoint_after last_err rest
+         Error err
        | Error err ->
          Keeper_turn_driver_provider_attempt.record_candidate_health_error
            ~keeper_name:ctx.keeper_name
            candidate
            err;
+         let original_error = err in
          let http_err = sdk_error_to_http_error err in
          ctx.record_provider_health_result
            candidate
            ~success:false
            ~http_status:(http_status_of_http_error http_err);
          match http_err with
-         | Some err when (not is_last) && Runtime_attempt_fsm.should_try_next err ->
-           loop checkpoint_after (Some err) rest
-         | Some err ->
-           if is_last
-           then Error (sdk_error_of_exhausted (Some err))
-           else Error (sdk_error_of_exhausted (Some err))
+         | Some http_err
+           when (not is_last) && Runtime_attempt_fsm.should_try_next http_err ->
+           loop checkpoint_after (Some http_err) rest
+         | Some http_err ->
+           Error
+             (sdk_error_of_nonretryable_attempt_error ~original_error http_err)
          | None ->
            if is_last then Error err else loop checkpoint_after last_err rest)
   in

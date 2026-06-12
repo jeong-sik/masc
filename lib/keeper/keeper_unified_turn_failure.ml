@@ -36,25 +36,48 @@ let record_failure_and_maybe_escalate
     && count >= Keeper_behavioral_regime.turn_fail_streak_threshold
     && not updated_meta.paused
   in
+  let completion_contract_auto_paused =
+    EC.is_accept_no_usable_progress_error err
+    && count >= Keeper_behavioral_regime.turn_fail_streak_threshold
+    && not updated_meta.paused
+  in
   let auto_pause_succeeded =
-    if runtime_auto_paused
+    if runtime_auto_paused || completion_contract_auto_paused
     then (
       let released_task_id = None in
-      let pause_meta = updated_meta in
+      let pause_meta =
+        if completion_contract_auto_paused
+        then
+          let blocker =
+            Keeper_meta_contract.blocker_info_of_class
+              ~detail:
+                (Keeper_types_profile.short_preview error_text)
+              Keeper_meta_contract.Completion_contract_violation
+          in
+          { updated_meta with
+            runtime = { updated_meta.runtime with last_blocker = Some blocker }
+          }
+        else updated_meta
+      in
+      let resume_policy =
+        if completion_contract_auto_paused
+        then Keeper_supervisor_pause_policy.Manual_resume_required
+        else Keeper_supervisor_pause_policy.Auto_resume_with_backoff
+      in
       match
         Keeper_turn_runtime_budget.sync_keeper_paused_state_with_resume_policy
           ~config
           ~meta:pause_meta
           ~paused:true
-          ~resume_policy:Keeper_supervisor_pause_policy.Auto_resume_with_backoff
+          ~resume_policy
       with
       | Ok _ ->
+        Keeper_registry.set_failure_reason
+          ~base_path:config.base_path
+          meta.name
+          (Some (Keeper_registry.Turn_consecutive_failures count));
         if runtime_auto_paused
-        then (
-          Keeper_registry.set_failure_reason
-            ~base_path:config.base_path
-            meta.name
-            (Some (Keeper_registry.Turn_consecutive_failures count));
+        then
           Log.Keeper.warn
             "%s: auto-paused after %d runtime_exhausted failures \
              (pause_threshold=%d, crash_threshold=%d); operator must resume after \
@@ -62,12 +85,12 @@ let record_failure_and_maybe_escalate
             meta.name
             count
             Keeper_behavioral_regime.turn_fail_streak_threshold
-            threshold)
+            threshold
         else
           Log.Keeper.warn
-            "%s: auto-paused after %d tool-route contract failures \
+            "%s: auto-paused after %d completion contract no-progress failures \
              (pause_threshold=%d, crash_threshold=%d, released_task=%s); operator \
-             must inspect provider tool route before resuming"
+             must inspect provider/model reasoning output before resuming"
             meta.name
             count
             Keeper_behavioral_regime.turn_fail_streak_threshold

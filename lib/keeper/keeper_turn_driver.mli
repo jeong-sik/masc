@@ -161,4 +161,12 @@ module For_testing : sig
     accept:(Agent_sdk_response.api_response -> bool) ->
     Runtime_agent.run_result ->
     (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
+
+  val last_tool_progress_context_string_of_messages :
+    Agent_sdk.Types.message list -> string option
+
+  val sdk_error_of_nonretryable_attempt_error :
+    original_error:Agent_sdk.Error.sdk_error ->
+    Llm_provider.Http_client.http_error ->
+    Agent_sdk.Error.sdk_error
 end

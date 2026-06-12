@@ -32,9 +32,7 @@ let decide ~accept_on_exhaustion ~is_last = function
   | Accept_rejected { response; reason } ->
     if is_last && accept_on_exhaustion
     then Accept_on_exhaustion { response; reason }
-    else if is_last
-    then Exhausted { last_err = Some (Llm_provider.Http_client.AcceptRejected { reason }) }
-    else Try_next { last_err = Some (Llm_provider.Http_client.AcceptRejected { reason }) }
+    else Exhausted { last_err = Some (Llm_provider.Http_client.AcceptRejected { reason }) }
   | Call_err err ->
     if (not is_last) && should_try_next err
     then Try_next { last_err = Some err }

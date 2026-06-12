@@ -127,6 +127,51 @@ let test_on_idle_tools_list_loop_suggests_surface_read () =
             (Agent_sdk.Hooks.classify_decision other)))
 ;;
 
+let test_on_idle_tool_search_loop_suggests_code_search () =
+  let decision =
+    HK.on_idle_decision_with_threshold
+      ~skip_at:3
+      ~consecutive_idle_turns:1
+      ~allowed_tools:
+        [ "keeper_context_status"
+        ; "keeper_tool_search"
+        ; "Grep"
+        ; "Read"
+        ; "Execute"
+        ; "keeper_stay_silent"
+        ]
+      ~tool_names:[ "keeper_tool_search" ]
+  in
+  match decision with
+  | Agent_sdk.Hooks.Nudge msg ->
+    check
+      bool
+      "tool_search loop nudge explains schema-only search"
+      true
+      (contains_substring msg "discovers active tool schemas only");
+    check
+      bool
+      "tool_search loop nudge says it is not repo file search"
+      true
+      (contains_substring msg "does not search repository files");
+    check
+      bool
+      "tool_search loop prioritizes Grep"
+      true
+      (contains_substring msg "Available alternatives: Grep");
+    check
+      bool
+      "tool_search loop points at source symbol search"
+      true
+      (contains_substring msg "functions, types, or symbols")
+  | other ->
+    fail
+      (Printf.sprintf
+         "expected Nudge, got %s"
+         (Agent_sdk.Hooks.decision_kind_to_string
+            (Agent_sdk.Hooks.classify_decision other)))
+;;
+
 let test_on_idle_final_warning_before_skip () =
   let decision =
     HK.on_idle_decision_with_threshold
@@ -228,6 +273,10 @@ let () =
             "on_idle tools_list loop suggests surface_read"
             `Quick
             test_on_idle_tools_list_loop_suggests_surface_read
+        ; test_case
+            "on_idle tool_search loop suggests code search"
+            `Quick
+            test_on_idle_tool_search_loop_suggests_code_search
         ; test_case
             "on_idle final warning before skip"
             `Quick

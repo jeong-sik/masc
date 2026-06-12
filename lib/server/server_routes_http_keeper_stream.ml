@@ -633,6 +633,10 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
        operator but does not advance the lane watermark, so the user
        message it failed to answer stays pending for the keeper's next
        turn — and the keeper never reads the error as its own words. *)
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string ChatTransportFailures)
+      ~labels:[ ("keeper", payload.name); ("source", chat_source) ]
+      ();
     Keeper_chat_store.append_turn
       ~base_dir:base_path
       ~keeper_name:payload.name

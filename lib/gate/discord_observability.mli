@@ -18,6 +18,7 @@ type gateway_event =
 
 type inbound_outcome =
   | Dropped_unbound
+  | Dispatch_unavailable
   | Gate_error
   | Empty_reply
   | Reply_sent
@@ -43,6 +44,7 @@ val reply_outcome_label : reply_outcome -> string
 val record_gateway_event : route:gateway_route -> gateway_event -> unit
 val record_gateway_close : code:int -> unit
 val record_gateway_reconnect_scheduled : unit -> unit
+val record_gateway_ack_timeout : unit -> unit
 val record_inbound_dispatch : inbound_outcome -> unit
 val record_ambient : ambient_outcome -> unit
 val record_reply : reply_outcome -> unit

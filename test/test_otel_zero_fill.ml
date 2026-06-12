@@ -46,11 +46,18 @@ let test_keeper_metrics_zero_filled () =
   | Some m ->
     check (float 0.0) "keeper failure counter starts at 0" 0.0 m.value
 
+let test_chat_transport_metric_zero_filled () =
+  match find_unlabeled Keeper_metrics.(to_string ChatTransportFailures) with
+  | None ->
+    fail "masc_keeper_chat_transport_failures_total must be registered at module init"
+  | Some m ->
+    check (float 0.0) "chat transport failure counter starts at 0" 0.0 m.value
+
 let test_keeper_metrics_all_complete () =
   (* [Keeper_metrics.all] cannot be compiler-enforced without an enumerate
      ppx; this count is the drift tripwire.  If this fails after adding a
      constructor, add it to [all] as well. *)
-  check int "Keeper_metrics.all covers every constructor" 207
+  check int "Keeper_metrics.all covers every constructor" 210
     (List.length Keeper_metrics.all);
   let names = List.map Keeper_metrics.to_string Keeper_metrics.all in
   check int "to_string is injective over all"
@@ -66,6 +73,8 @@ let () =
     ; ( "module-init"
       , [ test_case "name module constant" `Quick test_name_module_constant_zero_filled
         ; test_case "keeper metrics" `Quick test_keeper_metrics_zero_filled
+        ; test_case "chat transport metric" `Quick
+            test_chat_transport_metric_zero_filled
         ; test_case "keeper all complete" `Quick test_keeper_metrics_all_complete
         ] )
     ]

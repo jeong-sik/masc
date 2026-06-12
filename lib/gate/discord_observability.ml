@@ -14,6 +14,7 @@ type gateway_event =
 
 type inbound_outcome =
   | Dropped_unbound
+  | Dispatch_unavailable
   | Gate_error
   | Empty_reply
   | Reply_sent
@@ -44,6 +45,7 @@ let gateway_event_label = function
 
 let inbound_outcome_label = function
   | Dropped_unbound -> "dropped_unbound"
+  | Dispatch_unavailable -> "dispatch_unavailable"
   | Gate_error -> "gate_error"
   | Empty_reply -> "empty_reply"
   | Reply_sent -> "reply_sent"
@@ -80,6 +82,9 @@ let record_gateway_reconnect_scheduled () =
   inc
     Otel_transport_metric_names.metric_discord_gateway_reconnect_scheduled
     ~labels:[]
+
+let record_gateway_ack_timeout () =
+  inc Otel_transport_metric_names.metric_discord_gateway_ack_timeouts ~labels:[]
 
 let record_inbound_dispatch outcome =
   inc

@@ -60,10 +60,14 @@ val metric_discord_gateway_closes : string
 (** Discord gateway reconnect backoffs scheduled by the state machine. *)
 val metric_discord_gateway_reconnect_scheduled : string
 
+(** Discord gateway heartbeat ACK liveness failures detected by the WSS I/O
+    loop before forcing a reconnect. *)
+val metric_discord_gateway_ack_timeouts : string
+
 (** Triggered Discord inbound messages after keeper binding lookup.
     Labels: [outcome] =
-    [dropped_unbound | gate_error | empty_reply | reply_sent |
-     reply_send_error]. *)
+    [dropped_unbound | dispatch_unavailable | gate_error | empty_reply |
+     reply_sent | reply_send_error]. *)
 val metric_discord_inbound_dispatch : string
 
 (** Ambient Discord messages that did not trigger a turn.

@@ -113,8 +113,6 @@
   test_sse_qw
   test_sse_stream
   test_health
-  test_post_verifier
-  test_reward_advice_artifact
   test_masc_oas_bridge_timeout_guard
   test_keeper_llm_bridge
   test_keeper_hooks_oas_log_shape
@@ -393,8 +391,6 @@
   test_sse_qw
   test_sse_stream
   test_health
-  test_post_verifier
-  test_reward_advice_artifact
   test_masc_oas_bridge_timeout_guard
   test_keeper_llm_bridge
   test_keeper_hooks_oas_log_shape

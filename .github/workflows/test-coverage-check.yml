@@ -3,6 +3,10 @@ on:
   pull_request:
     paths:
       - 'lib/**'
+      - 'dashboard/**'
+      - 'config/**'
+      - '.github/workflows/test-coverage-check.yml'
+      - 'scripts/check_test_coverage.py'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

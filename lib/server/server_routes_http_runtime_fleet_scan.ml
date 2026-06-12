@@ -236,6 +236,7 @@ let keeper_fleet_meta_scan ?(include_paused_details = true) config =
     sorted_unique_strings (configured_names @ Keeper_meta_store.keeper_names config)
   in
   let is_configured name = List.exists (String.equal name) configured_names in
+  let should_count_autoboot_target name = is_configured name in
   let scan =
     all_names
     |> List.fold_left
@@ -257,7 +258,11 @@ let keeper_fleet_meta_scan ?(include_paused_details = true) config =
            match Keeper_meta_store.read_meta config name with
            | Ok (Some meta) ->
              let autoboot_enabled = effective_autoboot_enabled name meta in
-             let acc = if autoboot_enabled then add_autoboot acc meta.name else acc in
+             let acc =
+               if autoboot_enabled && should_count_autoboot_target meta.name
+               then add_autoboot acc meta.name
+               else acc
+             in
              let acc =
                if (not meta.paused) && autoboot_enabled
                then add_bootable acc meta.name
@@ -289,14 +294,26 @@ let keeper_fleet_meta_scan ?(include_paused_details = true) config =
                }
              else acc
            | Ok None ->
-             if Keeper_meta_store.declarative_autoboot_enabled_by_default name
+             if
+               should_count_autoboot_target name
+               && Keeper_meta_store.declarative_autoboot_enabled_by_default name
              then add_autoboot acc name |> fun acc -> add_bootable acc name
              else acc
            | Error err ->
              (* Preserve the existing conservative behavior: unreadable meta is
-                still counted as autoboot/bootable so the operator sees a
-                degraded fleet instead of a silently shrinking target. *)
-             let acc = add_autoboot acc name |> fun acc -> add_bootable acc name in
+                still counted as autoboot/bootable for configured keepers so
+                the operator sees a degraded fleet instead of a silently
+                shrinking target. *)
+             let acc =
+               if should_count_autoboot_target name
+               then add_autoboot acc name |> fun acc -> add_bootable acc name
+               else acc
+             in
+             let autoboot_read_errors =
+               if should_count_autoboot_target name
+               then (name, err) :: acc.autoboot_scan.read_errors
+               else acc.autoboot_scan.read_errors
+             in
              {
                acc with
                paused_scan =
@@ -307,7 +324,7 @@ let keeper_fleet_meta_scan ?(include_paused_details = true) config =
                autoboot_scan =
                  {
                    acc.autoboot_scan with
-                   read_errors = (name, err) :: acc.autoboot_scan.read_errors;
+                   read_errors = autoboot_read_errors;
                  };
              })
          {
@@ -340,7 +357,8 @@ let keeper_fleet_meta_scan ?(include_paused_details = true) config =
   }
 
 let autoboot_enabled_keeper_scan config =
-  sorted_unique_strings (Keeper_meta_store.configured_keeper_names config @ Keeper_meta_store.keeper_names config)
+  Keeper_meta_store.configured_keeper_names config
+  |> sorted_unique_strings
   |> List.fold_left
        (fun acc name ->
          match Keeper_meta_store.read_meta config name with

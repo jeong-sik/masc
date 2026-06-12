@@ -2244,6 +2244,8 @@ export type TrajectoryEntry = {
   ts: number
   ts_iso: string
   turn: number
+  // RFC-0233: canonical execution identity minted at dispatch (absent on pre-PR-1 rows)
+  execution_id?: string
   // Tool-call fields (absent on thinking entries)
   round?: number
   tool_name?: string
@@ -2543,6 +2545,8 @@ export type ToolCallEntry = {
   keeper_turn_id?: number
   task_id?: string
   lane?: string
+  // RFC-0233: canonical execution identity minted at dispatch (absent on pre-PR-1 rows)
+  execution_id?: string
 }
 
 export type ToolCallsResponse = TelemetryFreshnessMetadata & {
@@ -2593,6 +2597,7 @@ function decodeToolCallEntry(raw: unknown): ToolCallEntry | null {
     keeper_turn_id: asNumber(raw.keeper_turn_id),
     task_id: asString(raw.task_id),
     lane: asString(raw.lane),
+    execution_id: asString(raw.execution_id),
   }
 }
 

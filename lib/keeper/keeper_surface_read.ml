@@ -167,8 +167,9 @@ let respond ~surface ~limit ~has_more ~notes
         [
           ( "error",
             `String
-              "surface is required. Good: surface='discord'. The lane label \
-               equals the source shown in Connected Surfaces or chat history."
+              "surface is required. Use a lane label shown in Connected \
+               Surfaces or chat history; this tool reads that connected lane, \
+               not a connector-wide channel registry."
           );
         ])
   else

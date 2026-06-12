@@ -349,9 +349,11 @@ let test_keeper_tools_list_json_uses_typed_groups () =
              "keeper_board_fake";
              "keeper_voice_speak";
              "keeper_task_claim";
+             "keeper_surface_read";
              "tool_search_files";
              "tool_read_file";
              "keeper_memory_search";
+             "keeper_tools_list";
            ])
       ()
   in
@@ -367,6 +369,12 @@ let test_keeper_tools_list_json_uses_typed_groups () =
     (member "voice" "keeper_voice_speak");
   check bool "task tool grouped as workspace" true
     (member "workspace" "keeper_task_claim");
+  check bool "surface read grouped as surface" true
+    (member "surface" "keeper_surface_read");
+  check bool "surface read not hidden under meta" false
+    (member "meta" "keeper_surface_read");
+  check bool "tools_list remains a meta introspection tool" true
+    (member "meta" "keeper_tools_list");
   check bool "Grep tool grouped" true
     (member "search_files" "tool_search_files");
   check bool "fs tool grouped" true

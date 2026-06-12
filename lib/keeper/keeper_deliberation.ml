@@ -316,7 +316,7 @@ let world_observation_to_prompt_section (obs : world_observation) : string =
     "World state:\n\
     \  - Unclaimed tasks: %d\n\
     \  - Failed tasks: %d\n\
-    \  - Active agents: %d\n\
+    \  - Running keeper fibers: %d\n\
     \  - Agent count changed: %b\n\
     \  - Active goals: %d\n\
     \  - Idle seconds: %d (gate: %d)\n\

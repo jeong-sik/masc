@@ -324,7 +324,7 @@ let observation_summary = function
   | None -> "obs=none"
   | Some obs ->
       Printf.sprintf
-        "obs=ratio=%.2f agents=%d unclaimed=%d single_task=%b ctx=%dk local=%b"
+        "obs=ratio=%.2f keepers=%d unclaimed=%d single_task=%b ctx=%dk local=%b"
         obs.context_ratio obs.active_agent_count obs.unclaimed_task_count
         obs.is_single_focused_task (obs.context_window / 1000) obs.is_local_model
 

@@ -15,5 +15,9 @@ val read_backlog_counts
   -> int * int * int * int * bool
 
 val count_active_agents : config:Workspace.config -> int
+(** Count live keeper fibers for [config.base_path].
+
+    This intentionally does not read the legacy [.masc/agents/] registry; that
+    registry may be empty while keeper fibers are healthy and running. *)
 val compute_idle_seconds : meta:keeper_meta -> int
 val read_context_ratio : config:Workspace.config -> meta:keeper_meta -> float

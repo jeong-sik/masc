@@ -222,8 +222,9 @@ let apply_accept ~runtime_id ~accept (run_result : Runtime_agent.run_result) =
 
     @param ctx Explicit closure context (captures from [run_named]).
     @param resume_checkpoint Checkpoint from a previous failed provider.
-    @param per_provider_timeout_s Legacy per-provider budget; not forwarded as
-    a cumulative OAS execution timeout on the keeper path.
+    @param per_provider_timeout_s Legacy per-provider budget used for manifest
+    diagnostics only. It is not applied as a cumulative timeout around
+    [Runtime_agent.run] because that run may include active tool execution.
     @param candidate The opaque runtime candidate to attempt.
     @return [(result, checkpoint_after, liveness_success_sample)] tuple. The
     sample is not recorded here; the caller records it only after the runtime
@@ -287,7 +288,12 @@ let run_try_provider
               stream_idle_timeout_for_attempt ~configured:ctx.stream_idle_timeout_s
           ; max_execution_time_s =
               max_execution_time_for_attempt ?per_provider_timeout_s ()
-          ; execution_idle_timeout_s = ctx.execution_idle_timeout_s
+          ; execution_idle_timeout_s =
+              (* Keeper/provider attempts must not forward Agent.run idle
+                 timeout until active tool execution is excluded from OAS idle
+                 accounting. *)
+              (let _ = ctx.execution_idle_timeout_s in
+               None)
           ; body_timeout_s = ctx.body_timeout_s
           ; temperature = ctx.temperature
           ; max_idle_turns = ctx.max_idle_turns
@@ -353,32 +359,14 @@ let run_try_provider
             ~agent_ref:local_agent_ref
             ctx.goal
         in
-        match per_provider_timeout_s with
-        | None -> run_fn ()
-        | Some t ->
-          let clock_opt =
-            match Masc_eio_env.get_opt () with
-            | Some env ->
-              (match env.clock with
-               | Some _ as clock_opt -> clock_opt
-               | None -> Eio_context.get_clock_opt ())
-            | None -> Eio_context.get_clock_opt ()
-          in
-          (match clock_opt with
-           | Some clock ->
-             (try Eio.Time.with_timeout_exn clock t run_fn with
-              | Eio.Time.Timeout ->
-                Log.Misc.info
-                  "[runtime-fallback] runtime %s: per-provider timeout after %.1fs"
-                  ctx.runtime_id
-                  t;
-                Error
-                  (Agent_sdk.Error.Api
-                     (Timeout
-                        { message =
-                            Printf.sprintf "Per-provider timeout after %.1fs" t
-                        })))
-           | None -> run_fn ()))
+        (* Do not wrap [Runtime_agent.run] in a MASC wall-clock timeout here.
+           OAS provider stream/body timeouts and tool-local subprocess budgets
+           are the safe liveness boundaries. A cumulative wrapper at this layer
+           cannot distinguish provider silence from active tool execution. *)
+        (match per_provider_timeout_s with
+         | Some (_ : float) -> ()
+         | None -> ());
+        run_fn ())
     in
     let result =
       (* Restore typed provider-context enrichment (auth-env / not-found hints).

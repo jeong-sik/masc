@@ -53,8 +53,12 @@ val turn_timeout_sec : unit -> float
 val admission_wait_timeout_sec : unit -> float
 val stream_idle_timeout_sec : unit -> float
 val execution_idle_timeout_sec : unit -> float option
-(** OAS Agent.run inactivity deadline. [Some s] forwards to
-    [Builder.with_execution_idle_timeout] and resets on OAS progress.
+(** Resolved [turn.execution_idle_timeout_sec].
+
+    The keeper runtime currently parses this value but does not forward it to
+    OAS until active tool execution is proven to be excluded from idle
+    accounting.
+
     Default disabled, clamped to [5, 600] when explicitly set. Unset, invalid,
     [MASC_KEEPER_EXECUTION_IDLE_TIMEOUT_SEC=0], or
     [turn.execution_idle_timeout_sec = 0] disables it. *)

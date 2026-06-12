@@ -149,7 +149,7 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
     | Oas_agent_execution_timeout ->
       if summary = ""
       then
-        "OAS Agent.run or the enclosing runtime-attempt watchdog hit its execution timeout; this is not a provider HTTP timeout."
+        "OAS Agent.run reported an execution timeout; inspect whether progress accounting excluded active tool execution."
       else summary
     | Completion_contract_violation ->
       (* TEL-OK: string literal in blocker classification summary, not an action handler *)

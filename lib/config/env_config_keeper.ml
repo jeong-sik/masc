@@ -374,12 +374,12 @@ module KeeperKeepalive = struct
     | None -> turn_timeout_sec
   ;;
 
-  (** Per-attempt wall-clock safety cap for the streaming watchdog.
+  (** Deprecated compatibility knob for the removed whole-run attempt watchdog.
 
-      Prevents a single provider attempt from locking a keeper in
-      [Streaming] state forever (network hang, silent provider crash).
-      The cap is intentionally generous — any attempt making zero
-      progress for this duration is definitively stuck.
+      The keeper runtime must not apply this as a wall-clock timeout around
+      active provider/tool execution. Real liveness policy must live at a
+      narrower boundary: admission/queue wait, provider connect/stream progress,
+      or tool-local policy owned by the tool substrate.
 
       Env: [MASC_KEEPER_ATTEMPT_WATCHDOG_SAFETY_CAP_SEC].
       Default: 1800 (30 min). Range: [300, 7200]. *)
@@ -408,6 +408,9 @@ module KeeperKeepalive = struct
       [stream_idle_timeout_sec], which watches transport line gaps; this knob
       catches Agent-level no-progress stalls that still keep a transport
       connection superficially alive.
+
+      The keeper path parses this knob but does not forward it until OAS proves
+      active tool execution is excluded from idle accounting.
 
       Env: [MASC_KEEPER_EXECUTION_IDLE_TIMEOUT_SEC]. Default: disabled.
       Range when enabled: [5, 600]. Unset, invalid, [0], or a negative

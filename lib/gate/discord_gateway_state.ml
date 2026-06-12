@@ -258,6 +258,7 @@ let create ~config =
 
 let state t = t.state
 let config t = t.config
+let resume_context t = t.resume_context
 
 (* ── JSON helpers (internal) ───────────────────────────────────── *)
 

@@ -150,6 +150,11 @@ let run ~sw ~env ~token ~intents ~trigger_policy ~on_event ~on_ambient () =
      Schedule_heartbeat (new session after reconnect) so a fresh
      heartbeat cycle starts with a clean slate. *)
   let heartbeat_ack_ok = Atomic.make true in
+  (* Reconnect observability: tracks whether this is the first connection
+     or a reconnection, and which method (resume vs fresh identify) was
+     used for the last reconnect attempt. *)
+  let has_connected_before = ref false in
+  let last_reconnect_was_resume = ref false in
 
   let clock = Eio.Stdenv.clock env in
   Eio.Fiber.fork ~sw (fun () ->
@@ -277,12 +282,37 @@ let run ~sw ~env ~token ~intents ~trigger_policy ~on_event ~on_ambient () =
     | Schedule_backoff { delay_ms } ->
       Discord_observability.record_gateway_reconnect_scheduled ();
       Eio.Fiber.fork ~sw (fun () ->
-        Eio.Time.sleep clock (float_of_int delay_ms /. 1000.0);
+        (* Add ±25% jitter to the backoff delay. The state machine's
+           backoff_ms remains deterministic for testability; jitter
+           belongs in the I/O layer per RFC-0203. Prevents thundering
+           herd when multiple instances restart simultaneously. *)
+        let jitter_factor =
+          let raw = Mirage_crypto_rng.generate 1 in
+          let byte = Char.code raw.[0] in
+          0.75 +. 0.5 *. (float_of_int byte /. 255.0)
+        in
+        let jittered_ms =
+          int_of_float (float_of_int delay_ms *. jitter_factor)
+        in
+        Eio.Time.sleep clock (float_of_int jittered_ms /. 1000.0);
         Eio.Stream.add input_mailbox Discord_gateway_state.Backoff_elapsed)
     | Emit_event ev ->
       let event, route =
         match ev with
-        | Ready _ -> Discord_observability.Ready, Discord_observability.Control
+        | Ready _ ->
+          (* Track reconnect outcomes: first Ready is initial connect,
+             subsequent ones are reconnect successes. *)
+          if !has_connected_before then begin
+            let method_ =
+              if !last_reconnect_was_resume
+              then Discord_observability.Resume
+              else Discord_observability.Fresh_identify
+            in
+            Discord_observability.record_gateway_reconnect_outcome
+              ~method_ ~outcome:Discord_observability.Reconnect_succeeded
+          end;
+          has_connected_before := true;
+          Discord_observability.Ready, Discord_observability.Control
         | Message_create _ ->
           Discord_observability.Message_create, Discord_observability.Triggered
         | Reaction_add _ ->
@@ -310,6 +340,20 @@ let run ~sw ~env ~token ~intents ~trigger_policy ~on_event ~on_ambient () =
 
   let step_now input =
     let now = now_mono env in
+    (* Track reconnect method for observability: check resume_context
+       before stepping so we know whether this Backoff_elapsed leads
+       to a resume or fresh identify path. *)
+    (match input with
+     | Discord_gateway_state.Backoff_elapsed ->
+         last_reconnect_was_resume :=
+           Option.is_some (Discord_gateway_state.resume_context !state)
+     | Discord_gateway_state.Connect_requested
+     | Discord_gateway_state.Frame_received _
+     | Discord_gateway_state.Frame_parse_error _
+     | Discord_gateway_state.Wss_closed _
+     | Discord_gateway_state.Heartbeat_tick
+     | Discord_gateway_state.Heartbeat_ack_timeout
+     | Discord_gateway_state.Status_change _ -> ());
     let (s', effects) = Discord_gateway_state.step !state ~now_mono:now input in
     state := s';
     Atomic.set published_connection_state (Discord_gateway_state.state s');

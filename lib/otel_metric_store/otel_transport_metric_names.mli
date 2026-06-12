@@ -64,6 +64,11 @@ val metric_discord_gateway_reconnect_scheduled : string
     loop before forcing a reconnect. *)
 val metric_discord_gateway_ack_timeouts : string
 
+(** Discord gateway reconnect attempt outcomes.
+    Labels: [method] = [resume | fresh_identify],
+    [outcome] = [succeeded | failed]. *)
+val metric_discord_gateway_reconnect_outcomes : string
+
 (** Triggered Discord inbound messages after keeper binding lookup.
     Labels: [outcome] =
     [dropped_unbound | dispatch_unavailable | gate_error | empty_reply |

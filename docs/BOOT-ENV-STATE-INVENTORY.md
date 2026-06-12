@@ -121,7 +121,7 @@ Legacy compatibility names are not TOML preemption keys. For example,
 only the canonical `MASC_KEEPER_AUTOBOOT_MAX` boot override unless that exact
 canonical process env var is already set.
 
-**Sections** (74 knobs total):
+**Sections** (75 knobs total):
 
 | Section | Count | Key examples |
 | --- | --- | --- |
@@ -129,7 +129,7 @@ canonical process env var is already set.
 | `[autonomous]` | 3 | `max_turns_per_call`, `fairness_cooldown_sec`, `max_idle_turns` |
 | `[reactive]` | 2 | `max_turns_per_call`, `max_idle_turns` |
 | `[heartbeat]` | 10 | `interval_sec`, `max_silence_sec`, `smart_heartbeat`, `board_generic_wakeup_limit` |
-| `[turn]` | 18 | `timeout_sec`, `stream_idle_timeout_sec`, `tool_cost_max_usd`, `temperature` |
+| `[turn]` | 19 | `timeout_sec`, `stream_idle_timeout_sec`, `execution_idle_timeout_sec`, `tool_cost_max_usd`, `temperature` |
 | `[proactive]` | 1 | `min_interval_sec` |
 | `[supervisor]` | 4 | `max_restarts`, `backoff_base_sec`, `backoff_max_sec` |
 | `[lifecycle]` | 4 | `self_preservation_ratio`, `dead_ttl_sec` |
@@ -158,6 +158,8 @@ max_active_keepers = 12
 
 [turn]
 stream_idle_timeout_sec = 120
+# Optional Agent.run no-progress guard. Tool timeouts live in the tool layer.
+# execution_idle_timeout_sec = 300
 tool_cost_max_usd = 1.25
 llm_rerank = true
 

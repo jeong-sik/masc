@@ -19,6 +19,7 @@ type t = {
   admission_wait_timeout_sec : float field;
   oas_timeout_override_sec : float option field;
   stream_idle_timeout_sec : float field;
+  execution_idle_timeout_sec : float option field;
   body_timeout_override_sec : float option field;
   oas_timeout_per_1k : float field;
   oas_timeout_per_turn : float field;
@@ -91,6 +92,19 @@ let stream_idle_timeout_sec_live () =
   Float.max 5.0
     (Float.min 600.0
        (get_float ~default:120.0 "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC"))
+
+let execution_idle_timeout_sec_of_raw = function
+  | None -> None
+  | Some raw -> (
+      match Float.of_string_opt (String.trim raw) with
+      | Some value when Float.is_finite value && value <= 0.0 -> None
+      | Some value when Float.is_finite value ->
+          Some (Float.max 5.0 (Float.min 600.0 value))
+      | Some _ | None -> None)
+
+let execution_idle_timeout_sec_live () =
+  execution_idle_timeout_sec_of_raw
+    (Env_config_core.raw_value_opt "MASC_KEEPER_EXECUTION_IDLE_TIMEOUT_SEC")
 
 (* Per-call CLI subprocess idle timeout. Read fresh each turn rather than
    frozen at server boot — the value sits outside the keepalive budget
@@ -192,6 +206,15 @@ let freeze_from_current () =
       "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC"
       (stream_idle_timeout_sec_live ())
   in
+  let execution_idle_timeout_sec =
+    {
+      value = execution_idle_timeout_sec_live ();
+      source =
+        (match source_of_env_name "MASC_KEEPER_EXECUTION_IDLE_TIMEOUT_SEC" with
+         | Some source -> source
+         | None -> Default);
+    }
+  in
   let body_timeout_override_sec =
     {
       value = body_timeout_override_sec_live ();
@@ -220,6 +243,7 @@ let freeze_from_current () =
     admission_wait_timeout_sec;
     oas_timeout_override_sec;
     stream_idle_timeout_sec;
+    execution_idle_timeout_sec;
     body_timeout_override_sec;
     oas_timeout_per_1k;
     oas_timeout_per_turn;
@@ -263,6 +287,7 @@ let to_yojson (runtime : t) =
       ("admission_wait_timeout_sec", field_to_yojson (fun value -> `Float value) runtime.admission_wait_timeout_sec);
       ("oas_timeout_override_sec", field_to_yojson option_float_to_yojson runtime.oas_timeout_override_sec);
       ("stream_idle_timeout_sec", field_to_yojson (fun value -> `Float value) runtime.stream_idle_timeout_sec);
+      ("execution_idle_timeout_sec", field_to_yojson option_float_to_yojson runtime.execution_idle_timeout_sec);
       ("body_timeout_override_sec", field_to_yojson option_float_to_yojson runtime.body_timeout_override_sec);
       ("oas_timeout_per_1k", field_to_yojson (fun value -> `Float value) runtime.oas_timeout_per_1k);
       ("oas_timeout_per_turn", field_to_yojson (fun value -> `Float value) runtime.oas_timeout_per_turn);
@@ -291,6 +316,9 @@ let admission_wait_timeout_sec () =
 
 let stream_idle_timeout_sec () =
   (current ()).stream_idle_timeout_sec.value
+
+let execution_idle_timeout_sec () =
+  (current ()).execution_idle_timeout_sec.value
 
 let stream_idle_timeout_for_total_timeout ~(total_timeout_s : float) =
   Float.min total_timeout_s (stream_idle_timeout_sec ())

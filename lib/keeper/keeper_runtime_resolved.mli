@@ -28,6 +28,7 @@ type t = {
   admission_wait_timeout_sec : float field;
   oas_timeout_override_sec : float option field;
   stream_idle_timeout_sec : float field;
+  execution_idle_timeout_sec : float option field;
   body_timeout_override_sec : float option field;
   oas_timeout_per_1k : float field;
   oas_timeout_per_turn : float field;
@@ -51,6 +52,13 @@ val autonomous_max_idle_turns : unit -> int
 val turn_timeout_sec : unit -> float
 val admission_wait_timeout_sec : unit -> float
 val stream_idle_timeout_sec : unit -> float
+val execution_idle_timeout_sec : unit -> float option
+(** OAS Agent.run inactivity deadline. [Some s] forwards to
+    [Builder.with_execution_idle_timeout] and resets on OAS progress.
+    Default disabled, clamped to [5, 600] when explicitly set. Unset, invalid,
+    [MASC_KEEPER_EXECUTION_IDLE_TIMEOUT_SEC=0], or
+    [turn.execution_idle_timeout_sec = 0] disables it. *)
+
 val stream_idle_timeout_for_total_timeout : total_timeout_s:float -> float
 
 (** Non-streaming HTTP body-consumption deadline override.

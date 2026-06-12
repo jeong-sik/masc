@@ -130,6 +130,16 @@ module KeeperKeepalive : sig
       Default: 1800 (30 min). Clamp range: [300, 7200] s. *)
   val stream_idle_timeout_sec : float
 
+  val execution_idle_timeout_sec : float option
+  (** OAS Agent.run inactivity deadline. [Some s] forwards to
+      [Builder.with_execution_idle_timeout] through the keeper runtime
+      resolver. [None] disables that builder wire.
+
+      Env: [MASC_KEEPER_EXECUTION_IDLE_TIMEOUT_SEC]. Default: disabled.
+      Clamp range when enabled: [5, 600] s. Unset, invalid, [0], or a
+      negative value disables it. Kept opt-in because this is an Agent.run-level
+      stall detector, not provider transport policy or tool timeout policy. *)
+
   val body_timeout_sec_override : float option
   (** Total HTTP body-consumption deadline for non-streaming OAS completion
       calls. [None] (env unset) leaves the runtime builder wire untouched.

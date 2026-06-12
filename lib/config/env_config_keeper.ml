@@ -401,6 +401,30 @@ module KeeperKeepalive = struct
       (Float.min 600.0 (get_float ~default:120.0 "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC"))
   ;;
 
+  (** OAS Agent.run inactivity deadline.
+
+      This is progress-based rather than cumulative wall-clock: OAS resets the
+      timer when the run emits progress. It complements
+      [stream_idle_timeout_sec], which watches transport line gaps; this knob
+      catches Agent-level no-progress stalls that still keep a transport
+      connection superficially alive.
+
+      Env: [MASC_KEEPER_EXECUTION_IDLE_TIMEOUT_SEC]. Default: disabled.
+      Range when enabled: [5, 600]. Unset, invalid, [0], or a negative
+      value disables it. This stays opt-in because it is an Agent.run-level
+      stall detector, not provider transport policy or tool timeout policy.
+      @category Timeouts
+      @ops_class operator *)
+  let execution_idle_timeout_sec =
+    match Env_config_core.raw_value_opt "MASC_KEEPER_EXECUTION_IDLE_TIMEOUT_SEC" with
+    | None -> None
+    | Some _ ->
+      let value = get_float ~default:0.0 "MASC_KEEPER_EXECUTION_IDLE_TIMEOUT_SEC" in
+      if (not (Float.is_finite value)) || value <= 0.0
+      then None
+      else Some (Float.max 5.0 (Float.min 600.0 value))
+  ;;
+
   (** Total HTTP body-consumption deadline for non-streaming OAS completion
       calls. In agent_sdk this wraps [Complete.complete]'s synchronous HTTP
       body read; streaming calls deliberately ignore the knob so active

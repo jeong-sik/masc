@@ -143,6 +143,9 @@ let run_named
   in
   let turn_start = Mtime_clock.now () in
   let seq_ref = ref 0 in
+  let execution_idle_timeout_s =
+    Keeper_runtime_resolved.execution_idle_timeout_sec ()
+  in
   let try_provider_ctx : Keeper_turn_driver_try_provider.try_provider_ctx = {
     runtime_id;
     error_runtime_id;
@@ -156,6 +159,7 @@ let run_named
     initial_messages;
     max_idle_turns;
     stream_idle_timeout_s;
+    execution_idle_timeout_s;
     body_timeout_s;
     temperature;
     max_tokens;

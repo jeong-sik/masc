@@ -788,11 +788,10 @@ let run
     | Error
         (Agent_sdk.Error.Agent
            (Agent_sdk.Error.AgentExecutionIdleTimeout r as agent_err)) ->
-      (* No-progress (idle) timeout. masc does not currently set
-         [execution_idle_timeout_s] (liveness is the keeper stale watchdog
-         + stream_idle), so this arm is here for type exhaustiveness and
-         future opt-in; treated like a timeout for the dashboard but with
-         the idle-specific fields/text. *)
+      (* No-progress (idle) timeout. Keeper runtime config may set
+         [execution_idle_timeout_s] to catch Agent-level stalls while leaving
+         healthy streaming runs alive. Treat it like a timeout for the
+         dashboard, preserving idle-specific fields/text. *)
       let partial_response =
         partial_response_of_stop
           ~session_id

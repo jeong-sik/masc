@@ -511,6 +511,8 @@ let keeper_keepalive_entries =
       "Wall-clock timeout for a single unified turn (clamped 60-900 seconds)";
     entry ~default:"1800.0" "MASC_KEEPER_ATTEMPT_WATCHDOG_SAFETY_CAP_SEC"
       "Per-attempt wall-clock safety cap for stuck Streaming fibers (clamped 300-7200 seconds)";
+    entry ~default:"(none)" "MASC_KEEPER_EXECUTION_IDLE_TIMEOUT_SEC"
+      "Opt-in OAS Agent.run inactivity timeout (clamped 5-600 seconds; 0/unset disables)";
     entry ~default:"(none)" "MASC_KEEPER_WORK_AS_HEARTBEAT"
       "Successful workspace heartbeat after turn counts as presence proof (feature flag)";
   ]

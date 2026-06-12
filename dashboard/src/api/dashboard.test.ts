@@ -1383,6 +1383,7 @@ describe('fetchKeeperConfig', () => {
         },
         effective_system_prompt: 'full prompt',
         unified_system_prompt: 'unified prompt',
+        unified_user_message_preview: 'world state',
       },
       execution: {
         models: 'llama:test-balanced',

@@ -2036,6 +2036,8 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
       },
       effective_system_prompt: asNullableString(prompt.effective_system_prompt) ?? '',
       unified_system_prompt: asNullableString(prompt.unified_system_prompt) ?? '',
+      unified_user_message_preview:
+        asNullableString(prompt.unified_user_message_preview) ?? '',
     },
     execution: {
       models: normalizeStringList(execution.models),

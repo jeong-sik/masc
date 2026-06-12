@@ -117,6 +117,11 @@ type chat_message = {
   conversation_id : string option;
   external_message_id : string option;
   speaker : speaker option;
+  mentions : Keeper_identity.Keeper_id.t list;
+      (* RFC-0232 §3.3: parsed once at append from the persisted content
+         (plus connector-provided explicit mentions); [] = none.  Rows
+         written before P4 lack the field and read as []; the offline
+         backfill tool stamps them. *)
 }
 
 let redaction_for ~base_dir ~keeper_name =
@@ -149,13 +154,26 @@ let speaker_fields = function
       @ [ ("speaker_authority", `String (authority_label sp.speaker_authority)) ]
 
 let encode_line ~(role : Role.t) ~content ~ts ?attachments ?tool_call_id
-    ?tool_call_name ?source ?conversation_id ?external_message_id ?speaker ()
+    ?tool_call_name ?source ?conversation_id ?external_message_id ?speaker
+    ?(mentions = []) ()
     : string =
   let base_fields = [
     ("role", `String (Role.to_label role));
     ("content", `String content);
     ("ts", `Float ts);
   ] in
+  let mention_fields =
+    match mentions with
+    | [] -> []
+    | ids ->
+        [ ( "mentions",
+            `List
+              (List.map
+                 (fun id ->
+                   `String (Keeper_identity.Keeper_id.to_string id))
+                 ids) )
+        ]
+  in
   let attachment_fields =
     match attachments with
     | None | Some [] -> []
@@ -175,6 +193,7 @@ let encode_line ~(role : Role.t) ~content ~ts ?attachments ?tool_call_id
   let all_fields =
     base_fields
     @ attachment_fields
+    @ mention_fields
     @ opt_string_field "tool_call_id" tool_call_id
     @ opt_string_field "tool_call_name" tool_call_name
     @ opt_string_field "source" source
@@ -193,9 +212,18 @@ let normalize_tool_args args =
 let normalize_tool_call_id ~position call_id =
   if String.trim call_id = "" then Printf.sprintf "tc-%d" position else call_id
 
+(* RFC-0232 §3.3: the append IS the parse boundary.  Mentions are
+   derived from the content that is actually persisted (post-redaction),
+   so an offline re-parse of the stored line reproduces the field;
+   connectors with structured mention data add [extra_mentions]. *)
+let user_line_mentions ~extra_mentions content =
+  Keeper_lane_mentions.mention_ids_of_content content @ extra_mentions
+  |> List.sort_uniq Keeper_identity.Keeper_id.compare
+
 let append_turn ~base_dir ~keeper_name ~(user_content : string)
     ~(user_attachments : attachment list) ?(tool_calls = []) ?source
-    ?conversation_id ?external_message_id ?speaker ~(assistant_content : string)
+    ?conversation_id ?external_message_id ?speaker ?(extra_mentions = [])
+    ~(assistant_content : string)
     () =
   try
     ensure_dir_once ~base_dir;
@@ -217,7 +245,8 @@ let append_turn ~base_dir ~keeper_name ~(user_content : string)
     let user_line =
       encode_line ~role:Role.User ~content:user_content ~ts
         ~attachments:user_attachments ?source ?conversation_id
-        ?external_message_id ?speaker ()
+        ?external_message_id ?speaker
+        ~mentions:(user_line_mentions ~extra_mentions user_content) ()
     in
     let tool_lines =
       List.mapi
@@ -276,7 +305,8 @@ let append_assistant_message ~base_dir ~keeper_name ~(content : string)
    independent of) any turn. A single user line — the assistant reply,
    if one ever comes, is appended separately by the reply path. *)
 let append_user_message ~base_dir ~keeper_name ~(content : string)
-    ?source ?conversation_id ?external_message_id ?speaker () =
+    ?source ?conversation_id ?external_message_id ?speaker
+    ?(extra_mentions = []) () =
   try
     ensure_dir_once ~base_dir;
     let redaction = redaction_for ~base_dir ~keeper_name in
@@ -285,7 +315,8 @@ let append_user_message ~base_dir ~keeper_name ~(content : string)
     let ts = Time_compat.now () in
     let line =
       encode_line ~role:Role.User ~content ~ts ?source ?conversation_id
-        ?external_message_id ?speaker ()
+        ?external_message_id ?speaker
+        ~mentions:(user_line_mentions ~extra_mentions content) ()
     in
     Fs_compat.append_file path (line ^ "\n")
   with
@@ -369,6 +400,43 @@ let parse_line ~file_path (line : string) : chat_message option =
           if atts = [] then None else Some atts
       | _ -> None
     in
+    let mentions =
+      (* Absent field = pre-P4 row or no mentions; both read as [].
+         Entries that cannot mint an id are reported and skipped — the
+         row itself stays valid (losing one malformed mention must not
+         drop the whole line from the lane). *)
+      match Json_util.assoc_member_opt "mentions" json with
+      | None -> []
+      | Some (`List items) ->
+          List.filter_map
+            (fun item ->
+              match item with
+              | `String value -> (
+                  match Keeper_identity.Keeper_id.of_string value with
+                  | Some _ as id -> id
+                  | None ->
+                      report_persistence_read_drop
+                        ~reason:
+                          Safe_ops.persistence_read_drop_reason_invalid_payload
+                        ~path:file_path
+                        ~detail:
+                          (Printf.sprintf "empty mention entry %S" value);
+                      None)
+              | _ ->
+                  report_persistence_read_drop
+                    ~reason:
+                      Safe_ops.persistence_read_drop_reason_invalid_payload
+                    ~path:file_path
+                    ~detail:"non-string mention entry";
+                  None)
+            items
+      | Some _ ->
+          report_persistence_read_drop
+            ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+            ~path:file_path
+            ~detail:"mentions field is not a list";
+          []
+    in
     if role_label = "" || content = "" then (
       report_persistence_read_drop
         ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
@@ -395,7 +463,8 @@ let parse_line ~file_path (line : string) : chat_message option =
       | Some role ->
           Some
             { role; content; ts; attachments; tool_call_id; tool_call_name;
-              source; conversation_id; external_message_id; speaker }
+              source; conversation_id; external_message_id; speaker;
+              mentions }
   with Yojson.Json_error detail ->
     report_persistence_read_drop
       ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error

@@ -159,6 +159,16 @@ let dispatch ~sw ~clock ~proc_mgr ~net ~config
   let opt value = match String.trim value with "" -> None | v -> Some v in
   let conversation_id = metadata_value "conversation_id" metadata in
   let external_message_id = metadata_value "external_message_id" metadata in
+  (* RFC-0232 §3.3: the connector decoded a structured mention of this
+     channel's bound keeper (e.g. Discord <@snowflake>, invisible to
+     the content token parser), so the recorder persists it as an
+     explicit mention of the lane owner. *)
+  let extra_mentions =
+    match metadata_value "mentions_bound_keeper" metadata with
+    | Some "true" ->
+        Option.to_list (Keeper_identity.Keeper_id.of_string keeper_name)
+    | Some _ | None -> []
+  in
   Keeper_chat_store.append_user_message
     ~base_dir:config.Workspace.base_path
     ~keeper_name
@@ -171,6 +181,7 @@ let dispatch ~sw ~clock ~proc_mgr ~net ~config
       ; speaker_name = opt channel_user_name
       ; speaker_authority = Keeper_chat_store.External
       }
+    ~extra_mentions
     ();
   Keeper_chat_broadcast.chat_appended
     ~keeper_name ~source:lane;

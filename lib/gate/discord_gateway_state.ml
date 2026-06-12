@@ -81,6 +81,10 @@ type dispatched_event =
       ; author_id : string
       ; author_name : string option
       ; content : string
+      ; mention_user_ids : string list
+            (* RFC-0232 §3.3: the structured [mentions] member ids are
+               kept at decode instead of being reduced to a bot bool;
+               the gate maps what its bindings can resolve. *)
       ; mentions_bot : bool
       ; explicit_mentions_bot : bool
       ; message_reference_channel_id : string option
@@ -313,17 +317,16 @@ let decode_message_create ~bot_user_id ~payload =
         | Some _ as name -> name
         | None -> field_string_opt "username" a)
   in
+  let mention_user_ids =
+    match assoc_opt "mentions" payload with
+    | Some (`List items) ->
+        List.filter_map (fun item -> field_string_opt "id" item) items
+    | Some _ | None -> []
+  in
   let mentions_bot =
-    match bot_user_id, assoc_opt "mentions" payload with
-    | None, _ | _, None -> false
-    | Some bot_id, Some (`List items) ->
-        List.exists
-          (fun item ->
-            match field_string_opt "id" item with
-            | Some id -> String.equal id bot_id
-            | None -> false)
-          items
-    | Some _, Some _ -> false
+    match bot_user_id with
+    | None -> false
+    | Some bot_id -> List.exists (String.equal bot_id) mention_user_ids
   in
   let explicit_mentions_bot =
     match bot_user_id with
@@ -359,6 +362,7 @@ let decode_message_create ~bot_user_id ~payload =
            ; author_id
            ; author_name
            ; content
+           ; mention_user_ids
            ; mentions_bot
            ; explicit_mentions_bot
            ; message_reference_channel_id

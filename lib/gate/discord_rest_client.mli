@@ -79,6 +79,45 @@ val trigger_typing :
 
     @raise nothing — failures are surfaced as typed {!error}. *)
 
+(** {1 Embed support} *)
+
+type embed =
+  { title : string
+  ; description : string option
+  ; color : int
+  ; fields : (string * string * bool) list
+  }
+(** Simplified Discord embed for tool visualization. [color] is decimal
+    RGB (0xRRGGBB). [fields] are (name, value, inline) tuples. *)
+
+val embed_to_json : embed -> Yojson.Safe.t
+(** Convert an embed to its JSON representation. Exposed for testing. *)
+
+val color_blue : int
+val color_green : int
+val color_red : int
+(** Predefined embed colors: blue=running, green=success, red=error. *)
+
+val send_embed_message :
+  token:string ->
+  channel_id:string ->
+  content:string ->
+  ?embeds:embed list ->
+  unit ->
+  (string, error) result
+(** [send_embed_message] posts a message with optional embeds.
+    Returns the created message id on [Ok]. *)
+
+val edit_embed_message :
+  token:string ->
+  channel_id:string ->
+  message_id:string ->
+  content:string ->
+  ?embeds:embed list ->
+  unit ->
+  (unit, error) result
+(** [edit_embed_message] patches a message with updated content/embeds. *)
+
 (** {1 Internal — exposed for unit testing}
 
     These functions decompose [send_message] so request shape and

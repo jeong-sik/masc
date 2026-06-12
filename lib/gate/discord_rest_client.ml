@@ -141,3 +141,110 @@ let trigger_typing ~token ~channel_id () =
   match Masc_http_client.post_sync ~url ~headers ~body () with
   | Error msg -> Error (Network msg)
   | Ok (status, body) -> parse_empty_response ~status ~body
+
+(* ── Embed support ──────────────────────────────────────────────── *)
+
+(* Simplified Discord embed. Only the fields we use for tool
+   visualization. Discord enforces: sum of all text fields ≤ 6000
+   characters, max 10 embeds per message, embed title ≤ 256 chars. *)
+type embed =
+  { title : string
+  ; description : string option
+  ; color : int  (* Decimal RGB: 0xRRGGBB *)
+  ; fields : (string * string * bool) list
+    (* (name, value, inline) tuples. Max 25. *)
+  }
+
+let embed_to_json (e : embed) : Yojson.Safe.t =
+  let base =
+    [ ("title", `String e.title)
+    ; ("color", `Int e.color)
+    ]
+  in
+  let base =
+    match e.description with
+    | None -> base
+    | Some d -> ("description", `String d) :: base
+  in
+  let base =
+    match e.fields with
+    | [] -> base
+    | fields ->
+        let field_jsons =
+          List.map (fun (name, value, inline) ->
+            `Assoc
+              [ ("name", `String name)
+              ; ("value", `String value)
+              ; ("inline", `Bool inline)
+              ])
+            fields
+        in
+        ("fields", `List field_jsons) :: base
+  in
+  `Assoc base
+
+(* Embed colors *)
+let color_blue = 0x3498DB    (* Running / in progress *)
+let color_green = 0x2ECC71   (* Success *)
+let color_red = 0xE74C3C     (* Error *)
+
+let build_embed_request ~token ~channel_id ~content ?embeds () =
+  let url =
+    Printf.sprintf
+      "https://discord.com/api/v10/channels/%s/messages"
+      channel_id
+  in
+  let headers =
+    ("Content-Type", "application/json") :: auth_headers ~token
+  in
+  let fields =
+    match content with
+    | "" | " " -> []
+    | c -> [ ("content", `String c) ]
+  in
+  let fields =
+    match embeds with
+    | None | Some [] -> fields
+    | Some es -> ("embeds", `List (List.map embed_to_json es)) :: fields
+  in
+  let body = Yojson.Safe.to_string (`Assoc fields) in
+  (url, headers, body)
+
+let build_edit_embed_request ~token ~channel_id ~message_id
+      ~content ?embeds () =
+  let url =
+    Printf.sprintf
+      "https://discord.com/api/v10/channels/%s/messages/%s"
+      channel_id message_id
+  in
+  let headers =
+    ("Content-Type", "application/json") :: auth_headers ~token
+  in
+  let fields =
+    match content with
+    | "" | " " -> []
+    | c -> [ ("content", `String c) ]
+  in
+  let fields =
+    match embeds with
+    | None | Some [] -> fields
+    | Some es -> ("embeds", `List (List.map embed_to_json es)) :: fields
+  in
+  let body = Yojson.Safe.to_string (`Assoc fields) in
+  (url, headers, body)
+
+let send_embed_message ~token ~channel_id ~content ?embeds () =
+  let (url, headers, body) =
+    build_embed_request ~token ~channel_id ~content ?embeds ()
+  in
+  match Masc_http_client.post_sync ~url ~headers ~body () with
+  | Error msg -> Error (Network msg)
+  | Ok (status, body) -> parse_response ~status ~body
+
+let edit_embed_message ~token ~channel_id ~message_id ~content ?embeds () =
+  let (url, headers, body) =
+    build_edit_embed_request ~token ~channel_id ~message_id ~content ?embeds ()
+  in
+  match Masc_http_client.patch_sync ~url ~headers ~body () with
+  | Error msg -> Error (Network msg)
+  | Ok (status, body) -> parse_empty_response ~status ~body

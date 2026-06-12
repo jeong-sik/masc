@@ -331,6 +331,37 @@ let test_docker_simple_runner_replays_unstreamed_stderr () =
   assert (String.concat "" (List.rev !stdout_chunks) = "live-out");
   assert (String.concat "" (List.rev !stderr_chunks) = "buffered-err")
 
+let test_docker_simple_runner_callback_exception_is_not_replayed () =
+  let stdout_calls = ref 0 in
+  let on_output_chunk = function
+    | `Stdout chunk ->
+        assert (chunk = "live-out");
+        incr stdout_calls;
+        raise (Failure "callback boom")
+    | `Stderr _ -> fail "unexpected stderr callback"
+  in
+  let runner ~on_stdout_chunk ~on_stderr_chunk:_ ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ =
+    (match on_stdout_chunk with
+     | None -> fail "expected stdout callback"
+     | Some f -> (
+       try f "live-out" with
+       | Failure _ -> ()
+       | exn -> raise exn));
+    Unix.WEXITED 0, "live-out", ""
+  in
+  let docker_sandbox =
+    Masc_exec.Sandbox_target.docker ~image:"fake-docker" ~runner ()
+  in
+  let result =
+    Masc_exec.Exec_dispatch.dispatch_simple
+      ~on_output_chunk
+      (simple ~sandbox:docker_sandbox "printf" [ "ignored" ])
+  in
+  assert (result.status = Unix.WEXITED 0);
+  assert (result.stdout = "live-out");
+  assert (result.stderr = "");
+  assert (!stdout_calls = 1)
+
 let test_docker_pipeline_runner_captured_output_is_streamed () =
   let stdout_chunks = ref [] in
   let stderr_chunks = ref [] in
@@ -402,6 +433,7 @@ let () =
   test_docker_simple_fd_redirect_replays_stderr_as_stdout ();
   test_docker_simple_runner_captured_error_is_streamed ();
   test_docker_simple_runner_replays_unstreamed_stderr ();
+  test_docker_simple_runner_callback_exception_is_not_replayed ();
   test_docker_pipeline_runner_captured_output_is_streamed ();
   test_docker_decomposed_timeout_stdout_is_streamed ();
   print_endline "exec_dispatch_docker_streaming: ok"

@@ -662,6 +662,23 @@ case \"$1\" in\n\
     ;;\n\
   exec)\n\
     case \"$*\" in\n\
+      *marker-prefix-progress*)\n\
+        printf 'inter'\n\
+        sleep 1\n\
+        printf 'done\\n'\n\
+        exit 0\n\
+        ;;\n\
+      *slow-timeout*)\n\
+        sleep 2\n\
+        printf 'late\\n'\n\
+        exit 0\n\
+        ;;\n\
+      *sparse-progress*)\n\
+        printf 'ready\\n'\n\
+        sleep 1\n\
+        printf 'done\\n'\n\
+        exit 0\n\
+        ;;\n\
       *progress*)\n\
         printf 'progress-1\\n'\n\
         sleep 1\n\
@@ -675,6 +692,23 @@ case \"$1\" in\n\
     exec_count=$((exec_count + 1))\n\
     write_count \"$exec_count_file\" \"$exec_count\"\n\
     if [ \"$exec_count\" = \"2\" ]; then\n\
+      case \"$*\" in\n\
+        *early-eintr*)\n\
+          printf 'early-progress\\n'\n\
+          sleep 0.3\n\
+          printf 'retry-only stderr: interrupted system call\\n' >&2\n\
+          exit 127\n\
+          ;;\n\
+        *split-eintr*)\n\
+          printf 'retry-only stdout a\\n'\n\
+          sleep 0.05\n\
+          printf 'retry-only stdout b\\n'\n\
+          printf 'interrupted sys' >&2\n\
+          sleep 0.01\n\
+          printf 'tem call\\n' >&2\n\
+          exit 127\n\
+          ;;\n\
+      esac\n\
       printf 'retry-only stdout\\n'\n\
       printf 'retry-only stderr: interrupted system call\\n' >&2\n\
       exit 127\n\
@@ -1653,8 +1687,97 @@ let test_streaming_exec_preserves_split_stderr () =
       Alcotest.(check string)
         "stderr callback receives stderr"
         "only stderr\n"
-        (String.concat "" (List.rev !stderr_chunks))
+      (String.concat "" (List.rev !stderr_chunks))
   | Ok _ -> Alcotest.fail "expected stderr-only exec exit 7"
+
+let test_streaming_exec_forwards_timeout_to_split_exec () =
+  with_fake_docker fake_docker_eintr_streaming_retry_script @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+  let base, config, meta = setup_config "minjae" in
+  let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
+  let host_config_dir =
+    Filename.concat (Filename.concat base Common.masc_dirname) "config"
+  in
+  ensure_dir host_root;
+  ensure_dir host_config_dir;
+  let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta ~turn_id:1 () in
+  Fun.protect ~finally:(fun () ->
+    Keeper_turn_sandbox_runtime.cleanup runtime;
+    cleanup_dir base) @@ fun () ->
+  let start = Unix.gettimeofday () in
+  (match
+     Keeper_turn_sandbox_runtime.run_exec_with_status_split
+       ~timeout_sec:0.2
+       runtime
+       ~cwd:host_root
+       ~command_argv:[ "slow-timeout" ]
+   with
+   | Error msg -> Alcotest.failf "expected split timeout result, got %s" msg
+   | Ok (Unix.WEXITED 124, stdout, stderr) ->
+       Alcotest.(check string) "timeout stdout" "" stdout;
+       Alcotest.(check bool)
+         "timeout stderr surfaced"
+         true
+         (contains_substring stderr "timeout after")
+   | Ok _ -> Alcotest.fail "expected split exec timeout exit 124");
+  let elapsed = Unix.gettimeofday () -. start in
+  Alcotest.(check bool)
+    "split exec timeout uses caller budget"
+    true
+    (elapsed < 1.5)
+
+let test_streaming_pipeline_forwards_timeout_to_split_exec () =
+  with_fake_docker fake_docker_eintr_streaming_retry_script @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+  let base, config, meta = setup_config "minjae" in
+  let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
+  let host_config_dir =
+    Filename.concat (Filename.concat base Common.masc_dirname) "config"
+  in
+  ensure_dir host_root;
+  ensure_dir host_config_dir;
+  let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta ~turn_id:1 () in
+  Fun.protect ~finally:(fun () ->
+    Keeper_turn_sandbox_runtime.cleanup runtime;
+    cleanup_dir base) @@ fun () ->
+  let stdout_chunks = ref [] in
+  let start = Unix.gettimeofday () in
+  (match
+     Keeper_turn_sandbox_runtime.run_exec_pipeline_with_status
+       ~on_stdout_chunk:(fun chunk -> stdout_chunks := chunk :: !stdout_chunks)
+       ~timeout_sec:0.2
+       runtime
+       ~cwd:host_root
+       ~stages:
+         [ { Keeper_turn_sandbox_runtime.command_argv = [ "slow-timeout" ]
+           ; cwd = None
+           }
+         ; { command_argv = [ "slow-timeout" ]; cwd = None }
+         ]
+   with
+   | Error msg -> Alcotest.failf "expected pipeline timeout result, got %s" msg
+   | Ok (Unix.WEXITED 124, stdout, stderr) ->
+       Alcotest.(check string) "pipeline timeout stdout" "" stdout;
+       Alcotest.(check bool)
+         "pipeline timeout stderr surfaced"
+         true
+         (contains_substring stderr "timeout after")
+   | Ok _ -> Alcotest.fail "expected pipeline timeout exit 124");
+  let elapsed = Unix.gettimeofday () -. start in
+  Alcotest.(check string)
+    "pipeline timeout callback stdout"
+    ""
+    (String.concat "" (List.rev !stdout_chunks));
+  Alcotest.(check bool)
+    "split pipeline timeout uses caller budget"
+    true
+    (elapsed < 1.5)
 
 let test_streaming_exec_restarts_stopped_container_before_exec () =
   with_fake_docker fake_docker_stopped_streaming_retry_script @@ fun () ->
@@ -1816,6 +1939,240 @@ let test_streaming_exec_keeps_successful_progress_live () =
     true
     (first_stdout_at < elapsed -. 0.5)
 
+let test_streaming_exec_keeps_sparse_progress_live () =
+  with_fake_docker fake_docker_eintr_streaming_retry_script @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+  let base, config, meta = setup_config "minjae" in
+  let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
+  let host_config_dir =
+    Filename.concat (Filename.concat base Common.masc_dirname) "config"
+  in
+  ensure_dir host_root;
+  ensure_dir host_config_dir;
+  let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta ~turn_id:1 () in
+  Fun.protect ~finally:(fun () ->
+    Keeper_turn_sandbox_runtime.cleanup runtime;
+    cleanup_dir base) @@ fun () ->
+  let start = Unix.gettimeofday () in
+  let first_stdout_at = Atomic.make None in
+  let stdout_chunks = ref [] in
+  let stdout_mu = Stdlib.Mutex.create () in
+  (match
+     Keeper_turn_sandbox_runtime.run_exec_with_status_split
+       ~on_stdout_chunk:(fun chunk ->
+         if Option.is_none (Atomic.get first_stdout_at)
+         then Atomic.set first_stdout_at (Some (Unix.gettimeofday () -. start));
+         Stdlib.Mutex.protect stdout_mu (fun () ->
+           stdout_chunks := chunk :: !stdout_chunks))
+       ~timeout_sec:5.0
+       runtime
+       ~cwd:host_root
+       ~command_argv:[ "sparse-progress" ]
+   with
+   | Error msg -> Alcotest.failf "expected sparse progress exec success, got %s" msg
+   | Ok (Unix.WEXITED 0, stdout, stderr) ->
+       Alcotest.(check string) "sparse progress stdout" "ready\ndone\n" stdout;
+       Alcotest.(check string) "sparse progress stderr" "" stderr
+   | Ok _ -> Alcotest.fail "expected sparse progress exec exit 0");
+  let elapsed = Unix.gettimeofday () -. start in
+  let first_stdout_at =
+    match Atomic.get first_stdout_at with
+    | Some at -> at
+    | None -> Alcotest.fail "expected sparse progress stdout callback"
+  in
+  let streamed_stdout =
+    Stdlib.Mutex.protect stdout_mu (fun () ->
+      String.concat "" (List.rev !stdout_chunks))
+  in
+  Alcotest.(check string)
+    "sparse progress callback stdout"
+    "ready\ndone\n"
+    streamed_stdout;
+  Alcotest.(check bool)
+    "single sparse progress callback arrives before command completion"
+    true
+    (first_stdout_at < elapsed -. 0.2)
+
+let test_streaming_exec_releases_retry_marker_prefix_progress () =
+  with_fake_docker fake_docker_eintr_streaming_retry_script @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+  let base, config, meta = setup_config "minjae" in
+  let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
+  let host_config_dir =
+    Filename.concat (Filename.concat base Common.masc_dirname) "config"
+  in
+  ensure_dir host_root;
+  ensure_dir host_config_dir;
+  let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta ~turn_id:1 () in
+  Fun.protect ~finally:(fun () ->
+    Keeper_turn_sandbox_runtime.cleanup runtime;
+    cleanup_dir base) @@ fun () ->
+  let start = Unix.gettimeofday () in
+  let first_stdout_at = Atomic.make None in
+  let stdout_chunks = ref [] in
+  let stdout_mu = Stdlib.Mutex.create () in
+  (match
+     Keeper_turn_sandbox_runtime.run_exec_with_status_split
+       ~on_stdout_chunk:(fun chunk ->
+         if Option.is_none (Atomic.get first_stdout_at)
+         then Atomic.set first_stdout_at (Some (Unix.gettimeofday () -. start));
+         Stdlib.Mutex.protect stdout_mu (fun () ->
+           stdout_chunks := chunk :: !stdout_chunks))
+       ~timeout_sec:5.0
+       runtime
+       ~cwd:host_root
+       ~command_argv:[ "marker-prefix-progress" ]
+   with
+   | Error msg ->
+       Alcotest.failf "expected marker-prefix progress exec success, got %s" msg
+   | Ok (Unix.WEXITED 0, stdout, stderr) ->
+       Alcotest.(check string)
+         "marker-prefix progress stdout"
+         "interdone\n"
+         stdout;
+       Alcotest.(check string) "marker-prefix progress stderr" "" stderr
+   | Ok _ -> Alcotest.fail "expected marker-prefix progress exec exit 0");
+  let elapsed = Unix.gettimeofday () -. start in
+  let first_stdout_at =
+    match Atomic.get first_stdout_at with
+    | Some at -> at
+    | None -> Alcotest.fail "expected marker-prefix progress stdout callback"
+  in
+  let streamed_stdout =
+    Stdlib.Mutex.protect stdout_mu (fun () ->
+      String.concat "" (List.rev !stdout_chunks))
+  in
+  Alcotest.(check string)
+    "marker-prefix progress callback stdout"
+    "interdone\n"
+    streamed_stdout;
+  Alcotest.(check bool)
+    "retry-marker prefix callback arrives before command completion"
+    true
+    (first_stdout_at < elapsed -. 0.2)
+
+let test_streaming_exec_retries_split_eintr_marker_without_leak () =
+  with_fake_docker fake_docker_eintr_streaming_retry_script @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+  let base, config, meta = setup_config "minjae" in
+  let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
+  let host_config_dir =
+    Filename.concat (Filename.concat base Common.masc_dirname) "config"
+  in
+  ensure_dir host_root;
+  ensure_dir host_config_dir;
+  let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta ~turn_id:1 () in
+  Fun.protect ~finally:(fun () ->
+    Keeper_turn_sandbox_runtime.cleanup runtime;
+    cleanup_dir base) @@ fun () ->
+  (match
+     Keeper_turn_sandbox_runtime.run_exec_with_status
+       ~timeout_sec:5.0
+       runtime
+       ~cwd:host_root
+       ~command_argv:[ "cat"; "/tmp/first" ]
+   with
+   | Error msg -> Alcotest.failf "expected initial exec success, got %s" msg
+   | Ok (Unix.WEXITED 0, out) ->
+       Alcotest.(check string) "initial exec output" "exec ok\n" out
+   | Ok _ -> Alcotest.fail "expected initial exec exit 0");
+  let stdout_chunks = ref [] in
+  let stderr_chunks = ref [] in
+  (match
+     Keeper_turn_sandbox_runtime.run_exec_with_status_split
+       ~on_stdout_chunk:(fun chunk -> stdout_chunks := chunk :: !stdout_chunks)
+       ~on_stderr_chunk:(fun chunk -> stderr_chunks := chunk :: !stderr_chunks)
+       ~timeout_sec:5.0
+       runtime
+       ~cwd:host_root
+       ~command_argv:[ "split-eintr" ]
+   with
+   | Error msg -> Alcotest.failf "expected split marker retry success, got %s" msg
+   | Ok (Unix.WEXITED 0, stdout, stderr) ->
+       Alcotest.(check string) "split marker retried stdout" "exec ok\n" stdout;
+       Alcotest.(check string) "split marker retried stderr" "" stderr
+   | Ok _ -> Alcotest.fail "expected split marker retry exit 0");
+  let streamed_stdout = String.concat "" (List.rev !stdout_chunks) in
+  let streamed_stderr = String.concat "" (List.rev !stderr_chunks) in
+  Alcotest.(check string) "split marker callback stdout" "exec ok\n" streamed_stdout;
+  Alcotest.(check string) "split marker callback stderr" "" streamed_stderr;
+  Alcotest.(check bool)
+    "split marker retry-only stdout is not streamed"
+    false
+    (contains_substring streamed_stdout "retry-only stdout");
+  Alcotest.(check bool)
+    "split marker retry-only stderr is not streamed"
+    false
+    (contains_substring streamed_stderr "interrupted system call")
+
+let test_streaming_exec_retries_after_visible_progress () =
+  with_fake_docker fake_docker_eintr_streaming_retry_script @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+  let base, config, meta = setup_config "minjae" in
+  let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
+  let host_config_dir =
+    Filename.concat (Filename.concat base Common.masc_dirname) "config"
+  in
+  ensure_dir host_root;
+  ensure_dir host_config_dir;
+  let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta ~turn_id:1 () in
+  Fun.protect ~finally:(fun () ->
+    Keeper_turn_sandbox_runtime.cleanup runtime;
+    cleanup_dir base) @@ fun () ->
+  (match
+     Keeper_turn_sandbox_runtime.run_exec_with_status
+       ~timeout_sec:5.0
+       runtime
+       ~cwd:host_root
+       ~command_argv:[ "cat"; "/tmp/first" ]
+   with
+   | Error msg -> Alcotest.failf "expected initial exec success, got %s" msg
+   | Ok (Unix.WEXITED 0, out) ->
+       Alcotest.(check string) "initial exec output" "exec ok\n" out
+   | Ok _ -> Alcotest.fail "expected initial exec exit 0");
+  let stdout_chunks = ref [] in
+  let stderr_chunks = ref [] in
+  (match
+     Keeper_turn_sandbox_runtime.run_exec_with_status_split
+       ~on_stdout_chunk:(fun chunk -> stdout_chunks := chunk :: !stdout_chunks)
+       ~on_stderr_chunk:(fun chunk -> stderr_chunks := chunk :: !stderr_chunks)
+       ~timeout_sec:5.0
+       runtime
+       ~cwd:host_root
+       ~command_argv:[ "early-eintr" ]
+   with
+   | Error msg -> Alcotest.failf "expected visible-progress retry success, got %s" msg
+   | Ok (Unix.WEXITED 0, stdout, stderr) ->
+       Alcotest.(check string) "visible-progress retried stdout" "exec ok\n" stdout;
+       Alcotest.(check string) "visible-progress retried stderr" "" stderr
+   | Ok _ -> Alcotest.fail "expected visible-progress retry exit 0");
+  let streamed_stdout = String.concat "" (List.rev !stdout_chunks) in
+  let streamed_stderr = String.concat "" (List.rev !stderr_chunks) in
+  Alcotest.(check bool)
+    "early visible progress stays streamed"
+    true
+    (contains_substring streamed_stdout "early-progress\n");
+  Alcotest.(check bool)
+    "retried stdout is streamed"
+    true
+    (contains_substring streamed_stdout "exec ok\n");
+  Alcotest.(check bool)
+    "visible-progress retry stderr is not streamed"
+    false
+    (contains_substring streamed_stderr "interrupted system call")
+
 let test_default_fs_hardening_helpers () =
   with_env "MASC_KEEPER_SANDBOX_RELAX_FS" "false" @@ fun () ->
   Alcotest.(check (list string)) "default helper keeps read-only rootfs"
@@ -1953,6 +2310,12 @@ let run_tests ~clock () =
             "streaming exec preserves split stderr"
             `Quick test_streaming_exec_preserves_split_stderr;
           Alcotest.test_case
+            "streaming exec forwards timeout to split exec"
+            `Quick test_streaming_exec_forwards_timeout_to_split_exec;
+          Alcotest.test_case
+            "streaming pipeline forwards timeout to split exec"
+            `Quick test_streaming_pipeline_forwards_timeout_to_split_exec;
+          Alcotest.test_case
             "streaming exec restarts stopped container before exec"
             `Quick test_streaming_exec_restarts_stopped_container_before_exec;
           Alcotest.test_case
@@ -1961,6 +2324,18 @@ let run_tests ~clock () =
           Alcotest.test_case
             "streaming exec keeps successful progress live"
             `Quick test_streaming_exec_keeps_successful_progress_live;
+          Alcotest.test_case
+            "streaming exec keeps sparse progress live"
+            `Quick test_streaming_exec_keeps_sparse_progress_live;
+          Alcotest.test_case
+            "streaming exec releases retry-marker prefix progress"
+            `Quick test_streaming_exec_releases_retry_marker_prefix_progress;
+          Alcotest.test_case
+            "streaming exec retries split EINTR marker without leak"
+            `Quick test_streaming_exec_retries_split_eintr_marker_without_leak;
+          Alcotest.test_case
+            "streaming exec retries after visible progress"
+            `Quick test_streaming_exec_retries_after_visible_progress;
           Alcotest.test_case
             "turn runtime relaxed fs omits readonly and noexec"
             `Quick test_turn_runtime_relaxed_fs_omits_readonly_and_noexec;

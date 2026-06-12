@@ -98,11 +98,11 @@ let tracked_output_callback on_output_chunk =
   | Some on_chunk ->
       let on_chunk = function
         | `Stdout chunk ->
-            on_chunk (`Stdout chunk);
-            emitted.stdout_emitted := true
+            emitted.stdout_emitted := true;
+            on_chunk (`Stdout chunk)
         | `Stderr chunk ->
-            on_chunk (`Stderr chunk);
-            emitted.stderr_emitted := true
+            emitted.stderr_emitted := true;
+            on_chunk (`Stderr chunk)
       in
       Some on_chunk, emitted
 

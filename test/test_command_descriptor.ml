@@ -268,7 +268,7 @@ let test_extract_descriptor_gh_pr_create () =
 
 let test_descriptor_to_pr_event () =
   with_temp_dir (fun base_dir ->
-    let output = {|{"ok":true,"output":"https://github.com/jeong-sik/masc/pull/999","command_descriptor":{"kind":"gh_pr_create","title":"test PR","base":"main","draft":false}}|} in
+    let output = {|{"ok":true,"output":"{\"number\":999,\"url\":\"https://github.com/jeong-sik/masc/pull/999\"}","command_descriptor":{"kind":"gh_pr_create","title":"test PR","base":"main","draft":false}}|} in
     Ide_bridge.ingest_pr_event_from_descriptor
       ~base_path:base_dir
       ~keeper_id:"k1"

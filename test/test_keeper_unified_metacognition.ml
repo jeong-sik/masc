@@ -81,6 +81,52 @@ let test_on_idle_board_get_nudge_names_post_id_discovery () =
             (Agent_sdk.Hooks.classify_decision other)))
 ;;
 
+let test_on_idle_tools_list_loop_suggests_surface_read () =
+  let decision =
+    HK.on_idle_decision_with_threshold
+      ~skip_at:3
+      ~consecutive_idle_turns:1
+      ~allowed_tools:
+        [ "keeper_context_status"
+        ; "keeper_tool_search"
+        ; "extend_turns"
+        ; "keeper_broadcast"
+        ; "keeper_tasks_list"
+        ; "keeper_surface_read"
+        ; "keeper_stay_silent"
+        ]
+      ~tool_names:[ "keeper_tools_list" ]
+  in
+  match decision with
+  | Agent_sdk.Hooks.Nudge msg ->
+    check
+      bool
+      "tools_list loop nudge names surface_read"
+      true
+      (contains_substring msg "keeper_surface_read");
+    check
+      bool
+      "tools_list loop nudge explains capability-list trap"
+      true
+      (contains_substring msg "keeper_tools_list lists capabilities");
+    check
+      bool
+      "tools_list loop nudge points at connected-surface labels"
+      true
+      (contains_substring msg "Connected Surfaces");
+    check
+      bool
+      "tools_list loop nudge does not hardcode a discord surface argument"
+      false
+      (contains_substring msg "surface=\"discord\"")
+  | other ->
+    fail
+      (Printf.sprintf
+         "expected Nudge, got %s"
+         (Agent_sdk.Hooks.decision_kind_to_string
+            (Agent_sdk.Hooks.classify_decision other)))
+;;
+
 let test_on_idle_final_warning_before_skip () =
   let decision =
     HK.on_idle_decision_with_threshold
@@ -178,6 +224,10 @@ let () =
             "on_idle board_get nudge names post_id discovery"
             `Quick
             test_on_idle_board_get_nudge_names_post_id_discovery
+        ; test_case
+            "on_idle tools_list loop suggests surface_read"
+            `Quick
+            test_on_idle_tools_list_loop_suggests_surface_read
         ; test_case
             "on_idle final warning before skip"
             `Quick

@@ -4,41 +4,66 @@
 # workspaces. Existing live config roots are preserved and must be edited
 # explicitly through the dashboard/runtime config path.
 #
-# Gemma 4 QAT on Ollama uses Gemma's chat-template/control-token thinking path.
-# Do not translate thinking-support=true into a generic provider "think": true
-# parameter; the OAS Ollama adapter owns the Gemma 4 template behavior.
+# Local Gemma 4 QAT is a canary runtime, not the fleet default. Keep the
+# default on the cloud runtime and pin only one keeper to local Ollama until
+# sustained turns prove the local box can absorb more load.
 
 [runtime]
-default = "ollama.gemma4-26b-a4b-qat"
+default = "ollama_cloud.deepseek-v4-flash"
+
+[providers.ollama_cloud]
+display-name = "Ollama Cloud"
+protocol = "provider_d-http"
+endpoint = "https://ollama.com/v1"
+
+[providers.ollama_cloud.credentials]
+type = "env"
+key = "OLLAMA_CLOUD_API_KEY"
+
+[providers.ollama_cloud.capabilities]
+supports-runtime-mcp-tools = true
+supports-runtime-tool-events = true
+supports-runtime-mcp-http-headers = true
 
 [providers.ollama]
 display-name = "Local Ollama"
 protocol = "ollama-http"
 endpoint = "http://localhost:11434"
 
+[models.deepseek-v4-flash]
+api-name = "deepseek-v4-flash"
+max-context = 262144
+tools-support = true
+thinking-support = true
+streaming = true
+
 [models.gemma4-26b-a4b-qat]
 api-name = "hf.co/unsloth/gemma-4-26B-A4B-it-qat-GGUF:UD-Q4_K_XL"
 max-context = 262144
 tools-support = true
-thinking-support = true
-preserve-thinking = true
+# This exact QAT model is served by local Ollama with tools/vision, but Ollama
+# rejects generic thinking enablement for it. OAS Gemma 4 template/control-token
+# handling belongs in the adapter path; the runtime seed keeps keeper thinking
+# off for this local canary.
+thinking-support = false
+preserve-thinking = false
 streaming = true
 
 [models.gemma4-26b-a4b-qat.capabilities]
 supports-tool-choice = true
-thinking-control-format = "chat-template-kwargs"
 supports-native-streaming = true
 supports-top-k = true
 supports-seed = true
 supports-image-input = true
 supports-multimodal-inputs = true
 
+[ollama_cloud.deepseek-v4-flash]
+max-concurrent = 4
+
 [ollama.gemma4-26b-a4b-qat]
 max-concurrent = 1
 
-# Optional explicit keeper pins. Omit this table to let keepers use
-# [runtime].default.
-#
-# [runtime.assignments]
-# sangsu = "ollama.gemma4-26b-a4b-qat"
-# executor = "ollama.gemma4-26b-a4b-qat"
+# Local Gemma 4 canary: one keeper only. Other keepers fall back to
+# [runtime].default unless the live config pins them elsewhere.
+[runtime.assignments]
+nick0cave = "ollama.gemma4-26b-a4b-qat"

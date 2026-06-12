@@ -30,8 +30,12 @@ let test_repo_runtime_toml_loads () =
   | Error msg -> failf "repo runtime.toml should load: %s" msg
   | Ok (runtimes, default, assignments) ->
     check bool "at least one runtime" true (List.length runtimes > 0);
-    check string "default runtime" "ollama.gemma4-26b-a4b-qat" default.Runtime.id;
-    check int "no explicit keeper pins in seed" 0 (List.length assignments)
+    check string "default runtime" "ollama_cloud.deepseek-v4-flash"
+      default.Runtime.id;
+    check int "one local Gemma canary pin in seed" 1 (List.length assignments);
+    check (option string) "nick0cave Gemma canary pin"
+      (Some "ollama.gemma4-26b-a4b-qat")
+      (List.assoc_opt "nick0cave" assignments)
 
 let test_toml_catalog_resolves_lifecycle_keys () =
   let doc =

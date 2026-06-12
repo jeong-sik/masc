@@ -91,7 +91,7 @@ resolved config root는 별도 탐색 규칙을 가진다: `MASC_CONFIG_DIR` -> 
 | `MASC_SPAWN_TIMEOUT_SEC` | float | 600.0 | 스폰 기본 타임아웃 (10분) |
 | `MASC_SPAWN_CODING_TIMEOUT_SEC` | float | 7200.0 | 코딩 모드 타임아웃 (2시간) |
 | `MASC_SPAWN_GRACE_PERIOD_SEC` | float | 60.0 | SIGTERM 유예 기간 |
-| `LLAMA_SERVER_URL` | string | `Agent_sdk.Defaults.local_llm_url` | 로컬 Provider-D-compatible runtime URL |
+| `LLAMA_SERVER_URL` | string | `Agent_sdk.Defaults.local_llm_url` | 로컬 OpenAI-compatible runtime URL |
 | `LLAMA_DEFAULT_MODEL` | string | `explicit-model-required` | 로컬 기본 모델 |
 | `MASC_LOCAL_MAX_TOKENS` | int | 32768 | 로컬 LLM max_tokens 상한 (fallback: `MASC_LLAMA_MAX_TOKENS`) |
 | `MASC_CANCELLATION_TOKEN_MAX_AGE_SEC` | float | 3600.0 | 취소 토큰 최대 수명 |
@@ -119,7 +119,7 @@ contains four sections: `tts`, `stt`, `session`, `local_playback`.
 |----------|------|--------|------|
 | `MASC_TIMEOUT_GCLOUD_AUTH_SEC` | float | 15.0 | GCP 인증 타임아웃 |
 | `MASC_TIMEOUT_PROVIDER-A_SEC` | int | 120 | Provider-A API 타임아웃 |
-| `MASC_TIMEOUT_OPENAI_COMPAT_SEC` | int | 60 | Provider-D 호환 API 타임아웃 |
+| `MASC_TIMEOUT_OPENAI_COMPAT_SEC` | int | 60 | OpenAI-compatible API 타임아웃 |
 | `MASC_TIMEOUT_MODEL_GRACE_SEC` | float | 5.0 | 모델 호출 네트워크 유예 |
 | `MASC_TIMEOUT_GRAPHQL_SEC` | float | 5.0 | GraphQL 쿼리 타임아웃 |
 | `MASC_TIMEOUT_KEEPER_STATUS_SEC` | float | 5.0 | Keeper 상태 확인 타임아웃 |
@@ -157,7 +157,7 @@ contains four sections: `tts`, `stt`, `session`, `local_playback`.
 | `MASC_CLI_TOOL_A_AUTO_MODELS` | csv string | `"auto"` | 설정 시 `cli-tool-d:auto`를 operator 지정 후보 목록으로 확장. 미설정이면 CLI-Tool-A 기본 모델에 위임한다. |
 | `PROVIDER-C_DEFAULT_MODEL` | string | OAS runtime binding/catalog default | 설정 시 `provider-c` provider `auto` 기본 모델로 사용. |
 | `PROVIDER-A_DEFAULT_MODEL` | string | OAS runtime binding/catalog default | 설정 시 `agent-llm-a` provider `auto` 기본 모델로 사용. |
-| `OPENAI_DEFAULT_MODEL` | string | OAS runtime binding/catalog default | 설정 시 `provider-d` provider `auto` 기본 모델로 사용. |
+| `OPENAI_DEFAULT_MODEL` | string | OAS runtime binding/catalog default | 설정 시 OpenAI-compatible provider `auto` 기본 모델로 사용. |
 | `OLLAMA_DEFAULT_MODEL` | string | `""` | `ollama` provider `auto` 기본 모델 (lib/config/env_config_runtime.ml:181) |
 | `LLAMA_DEFAULT_MODEL` | string | `"explicit-model-required"` | `llama` provider legacy local runtime 기본 모델 (lib/config/env_config_runtime.ml:150) |
 | `OPENROUTER_DEFAULT_MODEL` | string | (없음) | `openrouter` provider `auto` 기본 모델 (lib/runtime/runtime_model_resolve.ml:76) |
@@ -325,7 +325,7 @@ Tier는 mode/category와 독립적으로 적용되는 추가 필터 레이어다
 
 ```toml
 [providers.cli-tool-a]
-protocol = "provider-d-cli"
+protocol = "openai-compatible-cli"
 command = "agent-code"
 is-non-interactive = true
 
@@ -365,7 +365,7 @@ Tier member는 `<provider_id>.<model_id>` 또는
 | Provider | Env Config 모듈 | 기본 모델 |
 |----------|----------------|----------|
 | `ollama` | `Local_runtime` | `OLLAMA_DEFAULT_MODEL` (port 11434, 262k context) |
-| `llama` | `Local_runtime` | `LLAMA_DEFAULT_MODEL` (legacy local Provider-D-compatible runtime) |
+| `llama` | `Local_runtime` | `LLAMA_DEFAULT_MODEL` (legacy local OpenAI-compatible runtime) |
 | `provider-k` | `Glm` | `ZAI_DEFAULT_MODEL` |
 | `provider-k-coding` | `Glm` | `ZAI_CODING_DEFAULT_MODEL` |
 | `provider-f` | `Provider-F` | `PROVIDER-F_DEFAULT_MODEL` |
@@ -373,7 +373,7 @@ Tier member는 `<provider_id>.<model_id>` 또는
 | `cli-tool-a` | CLI transport | `MASC_AGENT-CODE_CLI_AUTO_MODELS` when model is `auto` |
 | `cli-tool-d` | CLI transport | `MASC_CLI_TOOL_A_AUTO_MODELS` when model is `auto` |
 | `agent-llm-a` | `Agent-LLM-A` | `PROVIDER-A_DEFAULT_MODEL` |
-| `provider-d` | `Provider-D` | `OPENAI_DEFAULT_MODEL` |
+| `openai-compatible` | OpenAI-compatible runtime | `OPENAI_DEFAULT_MODEL` |
 | `openrouter` | `OpenRouter` | `OPENROUTER_DEFAULT_MODEL` |
 
 ### 7.3 Per-runtime 추론 파라미터

@@ -16,6 +16,11 @@
   thinking, and strict runtime/provider materialization coverage (#20971).
 
 ### Changed
+- `runtime`: renamed checked-in OpenAI-compatible runtime protocol labels from
+  `provider_d-http`/`provider-d-cli` to `openai-compatible-http` and
+  `openai-compatible-cli`; the TOML parser still accepts legacy provider-letter
+  aliases but canonicalizes parsed provider records before exposing runtime
+  metadata.
 - Bumped the OAS agent SDK pin to `v0.206.1` at
   `a5006c5444c04e4a8af9c650015a91a098cd1d9f` and raised the
   `agent_sdk` dependency floor to `0.206.1`, picking up duplicate

@@ -24,6 +24,7 @@ let msg ?ts ?source ?speaker ~role content : Store.chat_message =
     external_message_id = None;
     speaker;
     mentions = [];
+    kind = Store.Row_kind.Utterance;
   }
 
 let external_speaker ?name id : Store.speaker =

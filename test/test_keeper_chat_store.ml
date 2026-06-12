@@ -610,6 +610,78 @@ let test_load_page_binary_search_large_file () =
         (content_no (List.hd (List.rev tail.K.messages)));
       Alcotest.(check bool) "tail has_more" true tail.K.has_more)
 
+(* ── Row_kind (typed transport-failure marker) ───────────── *)
+
+let test_failure_turn_kind_roundtrip () =
+  let base_dir = temp_base_path "keeper-chat-store-kind" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-kind" in
+      K.append_turn ~base_dir ~keeper_name
+        ~user_content:"ping"
+        ~user_attachments:[]
+        ~surface:(Masc.Surface_ref.Dashboard { session_id = None })
+        ~assistant_kind:K.Row_kind.Transport_failure
+        ~assistant_content:"Keeper request failed: boom"
+        ();
+      match K.load ~base_dir ~keeper_name with
+      | [ user; asst ] ->
+          Alcotest.(check bool) "user row is an utterance" true
+            (K.Row_kind.equal user.kind K.Row_kind.Utterance);
+          Alcotest.(check bool) "assistant row is a transport failure" true
+            (K.Row_kind.equal asst.kind K.Row_kind.Transport_failure);
+          let raw = read_file (chat_path ~base_dir ~keeper_name) in
+          Alcotest.(check bool) "failure row persists the kind field" true
+            (contains_substring raw {|"kind":"transport_failure"|})
+      | messages ->
+          Alcotest.failf "expected 2 rows, got %d" (List.length messages))
+
+let test_kind_absent_reads_utterance () =
+  (* Every row written before the [kind] field existed is an utterance;
+     the writer also omits the field for utterances, so ordinary rows
+     stay byte-identical to the pre-[kind] format. *)
+  let base_dir = temp_base_path "keeper-chat-store-kind-absent" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-kind-absent" in
+      K.append_turn ~base_dir ~keeper_name
+        ~user_content:"hello" ~user_attachments:[]
+        ~assistant_content:"world" ();
+      let raw = read_file (chat_path ~base_dir ~keeper_name) in
+      Alcotest.(check bool) "utterance rows carry no kind field" false
+        (contains_substring raw {|"kind"|});
+      match K.load ~base_dir ~keeper_name with
+      | [ user; asst ] ->
+          Alcotest.(check bool) "user reads as utterance" true
+            (K.Row_kind.equal user.kind K.Row_kind.Utterance);
+          Alcotest.(check bool) "assistant reads as utterance" true
+            (K.Row_kind.equal asst.kind K.Row_kind.Utterance)
+      | messages ->
+          Alcotest.failf "expected 2 rows, got %d" (List.length messages))
+
+let test_unknown_kind_reported_reads_utterance () =
+  let base_dir = temp_base_path "keeper-chat-store-kind-unknown" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-kind-unknown" in
+      let invalid_payload = Safe_ops.persistence_read_drop_reason_invalid_payload in
+      let before = drop_value invalid_payload in
+      let path = chat_path ~base_dir ~keeper_name in
+      write_file path
+        ({|{"role":"assistant","content":"hi","ts":1.0,"kind":"weird"}|} ^ "\n");
+      match K.load ~base_dir ~keeper_name with
+      | [ asst ] ->
+          Alcotest.(check bool)
+            "unknown kind reads as utterance (conservative arm)" true
+            (K.Row_kind.equal asst.kind K.Row_kind.Utterance);
+          Alcotest.(check (float 0.001)) "unknown kind reported" 1.0
+            (drop_value invalid_payload -. before)
+      | messages ->
+          Alcotest.failf "expected 1 row, got %d" (List.length messages))
+
 let () =
   Alcotest.run "keeper_chat_store"
     [
@@ -628,6 +700,15 @@ let () =
             test_tool_row_missing_name_dropped;
           Alcotest.test_case "unknown role row dropped (RFC-0232)" `Quick
             test_unknown_role_row_dropped;
+        ] );
+      ( "row_kind",
+        [
+          Alcotest.test_case "failure turn kind roundtrip" `Quick
+            test_failure_turn_kind_roundtrip;
+          Alcotest.test_case "absent kind reads utterance" `Quick
+            test_kind_absent_reads_utterance;
+          Alcotest.test_case "unknown kind reported, reads utterance" `Quick
+            test_unknown_kind_reported_reads_utterance;
         ] );
       ( "speaker_identity",
         [

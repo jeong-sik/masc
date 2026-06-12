@@ -629,6 +629,10 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
     push_worker_event (Stream_event evt)
   in
   let persist_failure_reply err =
+    (* The failure marker is typed, not an utterance: it renders for the
+       operator but does not advance the lane watermark, so the user
+       message it failed to answer stays pending for the keeper's next
+       turn — and the keeper never reads the error as its own words. *)
     Keeper_chat_store.append_turn
       ~base_dir:base_path
       ~keeper_name:payload.name
@@ -637,6 +641,7 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
       ~tool_calls:(collected_tool_calls ())
       ~surface:chat_surface
       ~speaker:chat_speaker
+      ~assistant_kind:Keeper_chat_store.Row_kind.Transport_failure
       ~assistant_content:(persisted_error_reply err)
       ();
     Keeper_chat_broadcast.chat_appended

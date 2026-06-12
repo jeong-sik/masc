@@ -97,9 +97,10 @@ val route_evidence_json_of_tool_io :
 (** [route_evidence_json_of_tool_io] extracts first-class route proof from a
     keeper tool call. Descriptor-backed calls always include descriptor route
     fields such as [descriptor_id], [public_name], [canonical_name], [executor],
-    [backend], [sandbox], and policy labels. Runtime route/status fields such
-    as [via], [sandbox_profile], [network_mode], [status], and redacted
-    command/cwd/path are added when present. *)
+    [backend], [sandbox], evaluation-only [eval_tags], and policy labels.
+    Runtime route/status fields such as [via], [sandbox_profile],
+    [network_mode], [status], and redacted command/cwd/path are added when
+    present. *)
 
 val init : ?cluster_name:string -> base_path:string -> unit -> unit
 (** [init ?cluster_name ~base_path ()] creates the cluster-aware Dated_jsonl

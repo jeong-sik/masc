@@ -662,6 +662,33 @@ let test_route_evidence_records_masc_board_descriptor () =
         (Safe_ops.json_string_opt "runtime_handler" evidence)
     | _ -> Alcotest.fail "expected exactly one entry")
 
+let route_evidence_for_tool tool_name =
+  match
+    Keeper_tool_call_log.route_evidence_json_of_tool_io
+      ~tool_name
+      ~input:(`Assoc [])
+      ~output_text:"{}"
+  with
+  | Some evidence -> evidence
+  | None -> Alcotest.failf "missing route evidence for %s" tool_name
+;;
+
+let check_eval_tags tool_name expected =
+  let evidence = route_evidence_for_tool tool_name in
+  Alcotest.(check (list string))
+    (tool_name ^ " eval tags")
+    expected
+    (Safe_ops.json_string_list "eval_tags" evidence)
+;;
+
+let test_route_evidence_records_descriptor_eval_tags () =
+  check_eval_tags "keeper_tools_list" [ "capability_introspection" ];
+  check_eval_tags "keeper_tool_search" [ "capability_introspection" ];
+  check_eval_tags "keeper_surface_read" [ "surface_context_read" ];
+  check_eval_tags "masc_agent_card" [ "agent_profile_lookup" ];
+  check_eval_tags "keeper_time_now" []
+;;
+
 let test_non_object_input_still_logs_action_radius () =
   with_tmp_log (fun () ->
     Keeper_tool_call_log.log_call
@@ -1147,6 +1174,10 @@ let () =
             test_route_evidence_records_internal_descriptor
         ; eio_test "route evidence records masc board descriptor"
             test_route_evidence_records_masc_board_descriptor
+        ; Alcotest.test_case
+            "route evidence records descriptor eval tags"
+            `Quick
+            test_route_evidence_records_descriptor_eval_tags
         ; eio_test "non-object input still logs action radius"
             test_non_object_input_still_logs_action_radius
         ; eio_test "dashboard aggregate groups runtime fields"

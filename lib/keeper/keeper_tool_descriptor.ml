@@ -84,6 +84,7 @@ type t =
   ; runtime_handler : runtime_handler
   ; translate : Yojson.Safe.t -> Yojson.Safe.t
   ; receipt_labels : (string * string) list
+  ; eval_tags : string list
   }
 
 let executor_to_string = function
@@ -427,6 +428,7 @@ let descriptor_with_public_aliases
   ; runtime_handler
   ; translate
   ; receipt_labels
+  ; eval_tags = []
   }
 ;;
 
@@ -455,7 +457,11 @@ let descriptor
     ~backend
     ~sandbox
     ~runtime_handler
-    ~translate
+      ~translate
+;;
+
+let with_eval_tags eval_tags descriptor =
+  { descriptor with eval_tags }
 ;;
 
 let public_descriptors =
@@ -992,26 +998,28 @@ let internal_descriptors : t list =
       ~input_schema:empty_object_schema
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_stay_silent
-  ; in_process_descriptor
-      ~id:"keeper.tools_list"
-      ~name:"keeper_tools_list"
-      ~description:
-        "List the active keeper tool surface from descriptors and registered schemas. \
-         This is capability introspection, not connector content lookup. Use \
-         keeper_surface_read only for current connected-surface lane context. \
-         No arguments."
-      ~input_schema:empty_object_schema
-      ~policy:(read_only_in_process_policy ())
-      ~handler:Tool_tools_list
-  ; in_process_descriptor
-      ~id:"keeper.tool_search"
-      ~name:"keeper_tool_search"
-      ~description:
-        "Search keeper tool schemas by free-text query. Returns ranked tool \
-         descriptions and input schemas."
-      ~input_schema:tool_search_schema
-      ~policy:(read_only_in_process_policy ())
-      ~handler:Tool_tool_search
+  ; (in_process_descriptor
+       ~id:"keeper.tools_list"
+       ~name:"keeper_tools_list"
+       ~description:
+         "List the active keeper tool surface from descriptors and registered schemas. \
+          This is capability introspection, not connector content lookup. Use \
+          keeper_surface_read only for current connected-surface lane context. \
+          No arguments."
+       ~input_schema:empty_object_schema
+       ~policy:(read_only_in_process_policy ())
+       ~handler:Tool_tools_list
+     |> with_eval_tags [ "capability_introspection" ])
+  ; (in_process_descriptor
+       ~id:"keeper.tool_search"
+       ~name:"keeper_tool_search"
+       ~description:
+         "Search keeper tool schemas by free-text query. Returns ranked tool \
+          descriptions and input schemas."
+       ~input_schema:tool_search_schema
+       ~policy:(read_only_in_process_policy ())
+       ~handler:Tool_tool_search
+     |> with_eval_tags [ "capability_introspection" ])
     (* ── memory / context (RFC-0179 PR-3) ─────────────────────── *)
   ; in_process_descriptor
       ~id:"keeper.context.status"
@@ -1053,20 +1061,21 @@ let internal_descriptors : t list =
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_library_read
     (* ── connector surfaces (RFC-0223 P3) ─────────────────────── *)
-  ; in_process_descriptor
-      ~id:"keeper.surface.read"
-      ~name:"keeper_surface_read"
-      ~description:
-        "Read recent conversation from one connected surface lane (dashboard, \
-         discord, slack, or another connector label) with speaker identity \
-         and a derived participant roster. Use when the user asks about a \
-         current connector lane, recent lane messages, or participants. This \
-         does not enumerate connector-wide channel registries; if asked for \
-         channels outside Connected Surfaces, read only visible lane evidence \
-         and state that the wider registry is unavailable."
-      ~input_schema:surface_read_schema
-      ~policy:(read_only_in_process_policy ())
-      ~handler:Tool_surface_read
+  ; (in_process_descriptor
+       ~id:"keeper.surface.read"
+       ~name:"keeper_surface_read"
+       ~description:
+         "Read recent conversation from one connected surface lane (dashboard, \
+          discord, slack, or another connector label) with speaker identity \
+          and a derived participant roster. Use when the user asks about a \
+          current connector lane, recent lane messages, or participants. This \
+          does not enumerate connector-wide channel registries; if asked for \
+          channels outside Connected Surfaces, read only visible lane evidence \
+          and state that the wider registry is unavailable."
+       ~input_schema:surface_read_schema
+       ~policy:(read_only_in_process_policy ())
+       ~handler:Tool_surface_read
+     |> with_eval_tags [ "surface_context_read" ])
   ; in_process_descriptor
       ~id:"keeper.surface.post"
       ~name:"keeper_surface_post"
@@ -1267,8 +1276,9 @@ let internal_descriptors : t list =
   (* ── RFC-0182 §3.1 — masc_agent_* cluster (3 entries; masc_agents +
        masc_agent_update removed 2026-06-09 with the dead agent-status
        surface) ────────── *)
-  ; masc_agent_descriptor "card" "masc_agent_card"
-      "Read an agent card." ~readonly:true
+  ; (masc_agent_descriptor "card" "masc_agent_card"
+       "Read an agent card." ~readonly:true
+     |> with_eval_tags [ "agent_profile_lookup" ])
   ; masc_agent_descriptor "fitness" "masc_agent_fitness"
       "Read agent fitness metrics." ~readonly:true
   ; masc_agent_descriptor "get_metrics" "masc_get_metrics"
@@ -1439,6 +1449,10 @@ let receipt_labels_json d =
   `Assoc (List.map (fun (key, value) -> key, `String value) d.receipt_labels)
 ;;
 
+let eval_tags_json d =
+  `List (List.map (fun tag -> `String tag) d.eval_tags)
+;;
+
 let route_evidence_json d =
   let policy = d.policy in
   let policy_fields =
@@ -1459,6 +1473,7 @@ let route_evidence_json d =
      ; "sandbox", `String (sandbox_to_string d.sandbox)
      ; "runtime_handler", `String (runtime_handler_to_string d.runtime_handler)
      ; "receipt_labels", receipt_labels_json d
+     ; "eval_tags", eval_tags_json d
      ; "approval", `String (approval_to_string policy.approval)
      ; "retryable", `Bool policy.retryable
      ; "cwd_scope", Json_util.string_opt_to_json policy.cwd_scope

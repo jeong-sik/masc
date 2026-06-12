@@ -97,6 +97,14 @@ type dispatched_event =
       ; user_id : string
       ; emoji : string
       }
+  | Thread_tracked of
+      { thread_id : string
+      ; parent_channel_id : string
+      }
+      (** Discord thread discovered via THREAD_CREATE dispatch. The I/O
+          layer uses this to populate binding-resolution registries;
+          the state machine stores it in [thread_parents] for
+          [Mention_or_thread] trigger policy evaluation. *)
   | Ignored of string
 
 (* ── Frame ─────────────────────────────────────────────────────── *)
@@ -144,6 +152,9 @@ type gateway_effect =
 
 type trigger_policy =
   | Mention_only
+  | Mention_or_thread
+      (** Mention in regular channels, auto-respond in Discord threads.
+          Threads are identified by the [thread_parents] registry in [t]. *)
   | User_only of string
   | All
 
@@ -157,6 +168,7 @@ type config =
 let parse_trigger_policy s =
   match s with
   | "mention_only" -> Ok Mention_only
+  | "mention_or_thread" -> Ok Mention_or_thread
   | "all" -> Ok All
   | _ when String.length s > 10 && String.sub s 0 10 = "user_only:" ->
       let id = String.sub s 10 (String.length s - 10) in
@@ -165,12 +177,14 @@ let parse_trigger_policy s =
   | _ ->
       Error
         (Printf.sprintf
-           "unknown trigger policy %S — expected mention_only | user_only:<id> | all"
+           "unknown trigger policy %S — expected mention_only | mention_or_thread | user_only:<id> | all"
            s)
 
 (* ── Opaque state ──────────────────────────────────────────────── *)
 
 let gateway_url = "wss://gateway.discord.gg/?v=10&encoding=json"
+
+module StringMap = Map.Make (String)
 
 type t =
   { state : connection_state
@@ -183,6 +197,10 @@ type t =
     (* (session_id, last_seq_at_disconnect). Set when leaving Connected
        via a resumable disconnect; cleared on fresh identify path. Lets
        handle_hello choose Identify vs Resume after Awaiting_hello. *)
+  ; thread_parents : string StringMap.t
+    (* thread_id -> parent_channel_id. Populated by THREAD_CREATE
+       dispatches. Used by [Mention_or_thread] trigger policy to
+       auto-accept messages in known threads without @mention. *)
   }
 
 let create ~config =
@@ -193,6 +211,7 @@ let create ~config =
   ; heartbeat_interval_ms = None
   ; resume_gateway_url = None
   ; resume_context = None
+  ; thread_parents = StringMap.empty
   }
 
 let state t = t.state
@@ -395,11 +414,23 @@ let decode_reaction_add ~payload =
         "MESSAGE_REACTION_ADD payload: missing channel_id / message_id / \
          user_id / emoji.name"
 
+let decode_thread_create ~payload =
+  let thread_id = field_string_opt "id" payload in
+  let parent_channel_id = field_string_opt "parent_id" payload in
+  match thread_id, parent_channel_id with
+  | Some thread_id, Some parent_channel_id ->
+      if String.equal (String.trim thread_id) ""
+         || String.equal (String.trim parent_channel_id) ""
+      then Ok (Ignored "THREAD_CREATE: empty id or parent_id")
+      else Ok (Thread_tracked { thread_id; parent_channel_id })
+  | _ -> Ok (Ignored "THREAD_CREATE: missing id or parent_id")
+
 let decode_dispatch ~bot_user_id ~event_name ~payload =
   match event_name with
   | "READY" -> decode_ready ~payload
   | "MESSAGE_CREATE" -> decode_message_create ~bot_user_id ~payload
   | "MESSAGE_REACTION_ADD" -> decode_reaction_add ~payload
+  | "THREAD_CREATE" | "THREAD_UPDATE" -> decode_thread_create ~payload
   | other -> Ok (Ignored other)
 
 (* ── Trigger policy filters ────────────────────────────────────────
@@ -421,12 +452,14 @@ let is_self ~bot_user_id actor_id =
   | Some self -> String.equal self actor_id
   | None -> false
 
-let message_passes_policy policy ~bot_user_id ~author_id ~explicit_mentions_bot =
+let message_passes_policy policy ~bot_user_id ~author_id ~explicit_mentions_bot
+      ~is_thread =
   if is_self ~bot_user_id author_id then false
   else
     match policy with
     | All -> true
     | Mention_only -> explicit_mentions_bot
+    | Mention_or_thread -> explicit_mentions_bot || is_thread
     | User_only id -> String.equal author_id id
 
 let reaction_passes_policy policy ~bot_user_id ~user_id =
@@ -435,6 +468,7 @@ let reaction_passes_policy policy ~bot_user_id ~user_id =
     match policy with
     | All -> true
     | Mention_only -> false
+    | Mention_or_thread -> false
     | User_only id -> String.equal user_id id
 
 (* ── Outbound frame builders (internal) ────────────────────────── *)
@@ -584,11 +618,12 @@ let handle_dispatch t (frame : frame) =
                  ; message = Printf.sprintf "READY (bot_user_id=%s)" bot_user_id
                  }
              ] )
-       | Ok (Message_create { author_id; explicit_mentions_bot; _ } as ev) ->
+       | Ok (Message_create { channel_id; author_id; explicit_mentions_bot; _ } as ev) ->
+           let is_thread = StringMap.mem channel_id t'.thread_parents in
            if
              message_passes_policy t'.config.trigger_policy
                ~bot_user_id:t'.config.bot_user_id ~author_id
-               ~explicit_mentions_bot
+               ~explicit_mentions_bot ~is_thread
            then (t', [ Emit_event ev ])
            else if is_self ~bot_user_id:t'.config.bot_user_id author_id
            then
@@ -608,6 +643,20 @@ let handle_dispatch t (frame : frame) =
                ~bot_user_id:t'.config.bot_user_id ~user_id
            then (t', [ Emit_event ev ])
            else no_op t'
+       | Ok (Thread_tracked { thread_id; parent_channel_id } as ev) ->
+           let thread_parents' =
+             StringMap.add thread_id parent_channel_id t'.thread_parents
+           in
+           ( { t' with thread_parents = thread_parents' }
+           , [ Emit_event ev
+             ; Log
+                 { level = `Info
+                 ; message =
+                     Printf.sprintf
+                       "thread tracked: %s -> parent %s"
+                       thread_id parent_channel_id
+                 }
+             ] )
        | Ok (Ignored "RESUMED") ->
            (* Successful resume — server has replayed missed events
               and signalled completion. Recover session_id from

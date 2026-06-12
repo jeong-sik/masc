@@ -48,10 +48,15 @@ type gateway_event = Discord_gateway_state.dispatched_event =
       ; user_id : string
       ; emoji : string
       }
+  | Thread_tracked of
+      { thread_id : string
+      ; parent_channel_id : string
+      }
   | Ignored of string
 
 type trigger_policy = Discord_gateway_state.trigger_policy =
   | Mention_only
+  | Mention_or_thread
   | User_only of string
   | All
 

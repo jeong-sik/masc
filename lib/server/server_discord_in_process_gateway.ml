@@ -35,6 +35,7 @@ let parse_trigger_policy raw : Gw.trigger_policy =
   else
     match s with
     | "mention_only" -> Gw.Mention_only
+    | "mention_or_thread" -> Gw.Mention_or_thread
     | "all" -> Gw.All
     | other ->
       let prefix = "user_only:" in
@@ -393,6 +394,12 @@ let on_event ~dispatch ~clock ~base_dir (ev : Gw.gateway_event) =
        trigger to drain pending messages. That feature is dropped in
        the in-process gateway; re-add as a follow-up if needed. *)
     ()
+  | Gw.Thread_tracked { thread_id; parent_channel_id } ->
+    State.register_thread ~thread_id ~parent_channel_id;
+    Log.Server.info
+      "Discord thread registered: %s -> parent %s (total=%d)"
+      thread_id parent_channel_id
+      (State.registered_thread_count ())
   | Gw.Ignored _ ->
     ()
 
@@ -456,7 +463,7 @@ let on_ambient ~base_dir (ev : Gw.gateway_event) =
     ->
     handle_ambient ~base_dir ~channel_id ~guild_id ~message_id ~author_id
       ~author_name ~content
-  | Gw.Ready _ | Gw.Reaction_add _ | Gw.Ignored _ -> ()
+  | Gw.Ready _ | Gw.Reaction_add _ | Gw.Thread_tracked _ | Gw.Ignored _ -> ()
 
 (* ---------------------------------------------------------------- *)
 (* Start                                                            *)
@@ -479,6 +486,7 @@ let start ~sw ~env ~clock ~state =
     let policy_label =
       match policy with
       | Gw.Mention_only -> "mention_only"
+      | Gw.Mention_or_thread -> "mention_or_thread"
       | Gw.All -> "all"
       | Gw.User_only _ -> "user_only:<id>"
     in

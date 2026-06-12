@@ -144,6 +144,32 @@ let rec drop_left n xs =
     | [] -> []
     | _ :: tl -> drop_left (n - 1) tl
 
+(* ── Thread registry ──────────────────────────────────────────────
+   Thread→parent mapping populated from THREAD_CREATE gateway events.
+   Used by [resolve_keeper_for_channel] to resolve bindings for thread
+   messages whose channel_id is the thread's snowflake, not the parent
+   channel's. Module-level mutable state (same pattern as [last_ready]). *)
+
+let thread_parent_table : (string, string) Hashtbl.t =
+  Hashtbl.create 16
+
+let register_thread ~thread_id ~parent_channel_id =
+  let tid = String.trim thread_id in
+  let pid = String.trim parent_channel_id in
+  if tid <> "" && pid <> "" then
+    Hashtbl.replace thread_parent_table tid pid
+
+let parent_channel_of_thread ~channel_id : string option =
+  let cid = String.trim channel_id in
+  if cid = "" then None
+  else Hashtbl.find_opt thread_parent_table cid
+
+let is_known_thread ~channel_id =
+  let cid = String.trim channel_id in
+  cid <> "" && Hashtbl.mem thread_parent_table cid
+
+let registered_thread_count () = Hashtbl.length thread_parent_table
+
 let read_recent_audit ~limit =
   let path = binding_audit_read_path () in
   if limit <= 0 || not (Sys.file_exists path) then
@@ -560,26 +586,63 @@ let resolve_keeper_for_channel ~channel_id =
             via_parent = false;
           }
     | None -> (
-        let parent_channel_id =
-          try Names.resolve_parent_channel_id_for_channel ~channel_id:normalized
-          with
-          | Eio.Cancel.Cancelled _ as e -> raise e
-          | _ -> None
-        in
-        match parent_channel_id with
-        | None -> None
-        | Some parent_channel_id -> (
-            let parent_channel_id = String.trim parent_channel_id in
-            match binding_for_channel candidates ~channel_id:parent_channel_id with
+        (* Thread fallback: if this channel_id is a known Discord thread,
+           try resolving via its parent channel's binding. *)
+        match parent_channel_of_thread ~channel_id:normalized with
+        | Some parent_id when parent_id <> normalized ->
+            (match binding_for_channel candidates ~channel_id:parent_id with
+             | Some b ->
+                 Some
+                   {
+                     keeper_name = b.keeper_name;
+                     incoming_channel_id = normalized;
+                     bound_channel_id = b.channel_id;
+                     via_parent = true;
+                   }
+             | None -> (
+                 (* Final fallback: names file (legacy sidecar data). *)
+                 let names_parent =
+                   try Names.resolve_parent_channel_id_for_channel ~channel_id:normalized
+                   with
+                   | Eio.Cancel.Cancelled _ as e -> raise e
+                   | _ -> None
+                 in
+                 match names_parent with
+                 | None -> None
+                 | Some names_parent ->
+                     let names_parent = String.trim names_parent in
+                     match binding_for_channel candidates ~channel_id:names_parent with
+                     | None -> None
+                     | Some b ->
+                         Some
+                           {
+                             keeper_name = b.keeper_name;
+                             incoming_channel_id = normalized;
+                             bound_channel_id = b.channel_id;
+                             via_parent = true;
+                           } ))
+        | _ -> (
+            (* No thread match — try names file (legacy sidecar data). *)
+            let parent_channel_id =
+              try Names.resolve_parent_channel_id_for_channel ~channel_id:normalized
+              with
+              | Eio.Cancel.Cancelled _ as e -> raise e
+              | _ -> None
+            in
+            match parent_channel_id with
             | None -> None
-            | Some b ->
-                Some
-                  {
-                    keeper_name = b.keeper_name;
-                    incoming_channel_id = normalized;
-                    bound_channel_id = b.channel_id;
-                    via_parent = true;
-                  } ))
+            | Some parent_channel_id -> (
+                let parent_channel_id = String.trim parent_channel_id in
+                match binding_for_channel candidates ~channel_id:parent_channel_id with
+                | None -> None
+                | Some b ->
+                    Some
+                      {
+                        keeper_name = b.keeper_name;
+                        incoming_channel_id = normalized;
+                        bound_channel_id = b.channel_id;
+                        via_parent = true;
+                      } )) )
 
 let keeper_for_channel ~channel_id =
   match resolve_keeper_for_channel ~channel_id with

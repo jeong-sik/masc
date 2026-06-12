@@ -82,7 +82,7 @@ let base_observation : WO.world_observation =
   ; failed_task_count = 0
   ; pending_verification_count = 0
   ; backlog_updated_since_last_scheduled_autonomous = false
-  ; active_agent_count = 0
+  ; running_keeper_fiber_count = 0
   ; connected_surfaces = []
   }
 

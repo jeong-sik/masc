@@ -14,7 +14,7 @@ val read_backlog_counts
   -> meta:keeper_meta
   -> int * int * int * int * bool
 
-val count_active_agents : config:Workspace.config -> int
+val count_running_keeper_fibers : config:Workspace.config -> int
 (** Count live keeper fibers for [config.base_path].
 
     This intentionally does not read the legacy [.masc/agents/] registry; that

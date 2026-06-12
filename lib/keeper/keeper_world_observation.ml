@@ -40,7 +40,7 @@ type world_observation =
   ; failed_task_count : int
   ; pending_verification_count : int
   ; backlog_updated_since_last_scheduled_autonomous : bool
-  ; active_agent_count : int
+  ; running_keeper_fiber_count : int
   ; connected_surfaces : Gate_surface.surface_presence list
   }
 
@@ -120,7 +120,7 @@ let self_ids = Message_scope.self_ids
 let is_self_author = Message_scope.is_self_author
 let collect_message_scope = Message_scope.collect_message_scope
 let read_backlog_counts = Inputs.read_backlog_counts
-let count_active_agents = Inputs.count_active_agents
+let count_running_keeper_fibers = Inputs.count_running_keeper_fibers
 let compute_idle_seconds = Inputs.compute_idle_seconds
 let read_context_ratio = Inputs.read_context_ratio
 let board_signal_match = Board_signal.match_signal
@@ -438,7 +438,7 @@ let observe
   let provider_capacity_blocked_task_count =
     provider_capacity_blocked_task_count ~meta ~claimable_task_count ()
   in
-  let active_agent_count = count_active_agents ~config in
+  let running_keeper_fiber_count = count_running_keeper_fibers ~config in
   let idle_seconds = compute_idle_seconds ~meta in
   let context_ratio = read_context_ratio ~config ~meta in
   let continuity_summary = read_continuity_summary ~config ~meta in
@@ -464,7 +464,7 @@ let observe
   ; failed_task_count
   ; pending_verification_count
   ; backlog_updated_since_last_scheduled_autonomous
-  ; active_agent_count
+  ; running_keeper_fiber_count
   ; connected_surfaces =
       Gate_surface.connected_surfaces_for_keeper ~keeper_name:meta.name
   }
@@ -497,7 +497,7 @@ let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
   ; failed_task_count
   ; pending_verification_count
   ; backlog_updated_since_last_scheduled_autonomous
-  ; active_agent_count = count_active_agents ~config
+  ; running_keeper_fiber_count = count_running_keeper_fibers ~config
   ; connected_surfaces =
       Gate_surface.connected_surfaces_for_keeper ~keeper_name:meta.name
   }

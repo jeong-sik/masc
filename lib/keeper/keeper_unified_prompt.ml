@@ -666,7 +666,7 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
     || observation.claimable_task_count > 0
     || observation.provider_capacity_blocked_task_count > 0
     || observation.failed_task_count > 0
-    || observation.active_agent_count > 0
+    || observation.running_keeper_fiber_count > 0
   then (
     Buffer.add_string ubuf "### Namespace State\n";
     if observation.unclaimed_task_count > 0 then
@@ -703,7 +703,7 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
     Buffer.add_string ubuf
       (Printf.sprintf
          "- Running keeper fibers: %d\n"
-         observation.active_agent_count);
+         observation.running_keeper_fiber_count);
     Buffer.add_char ubuf '\n');
   (* 4. Context health — stable resource framing *)
   Buffer.add_string ubuf

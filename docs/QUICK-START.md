@@ -225,6 +225,8 @@ Allowlist SSOT: `lib/tool/tool_catalog.ml` > `public_mcp_tools`
 Keeper WebSearch/WebFetch backend 메모:
 
 - `masc_web_search` / `masc_web_fetch`는 Keeper-internal backend 이름이며 MCP `tools/list` public surface에는 노출되지 않는다.
+- `web_search` / `web_fetch` are not OAS-owned capabilities; Keeper agents should call the MASC-owned public aliases shown in their tool list (`WebSearch` / `WebFetch`).
+- `WebSearch { includeContent: true }`는 검색 결과마다 best-effort `page_content`를 붙인다. `WebFetch`는 선택한 단일 URL을 더 깊게 읽을 때 쓴다.
 - `MASC_SEARXNG_URL` 설정 시 self-hosted SearXNG가 최우선 provider로 작동한다.
 - 기본 auto 모드는 공식 provider key가 있으면 `searxng`, `brave`, `tavily`, `exa`, `bing_api` 순으로 먼저 시도한다.
 - 공식 provider가 없거나 실패하면 `duckduckgo`, `bing_rss` 순으로 fallback 한다.

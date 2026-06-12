@@ -264,6 +264,27 @@ let search_web_schema =
     ~required:[ "query" ]
     [ property "query" "string" "Search query text for current public web information."
     ; property "limit" "integer" "Maximum number of results to return."
+    ; property
+        "includeContent"
+        "boolean"
+        "When true, best-effort fetch readable page_content for each returned result."
+    ; ( "contentMaxChars",
+        `Assoc
+          [ "type", `String "integer"
+          ; "description",
+            `String "Maximum readable page_content characters per result."
+          ; "minimum", `Int 100
+          ; "maximum", `Int 20000
+          ; "default", `Int 4000
+          ] )
+    ; ( "contentTimeout",
+        `Assoc
+          [ "type", `String "integer"
+          ; "description", `String "Per-result content fetch timeout in seconds."
+          ; "minimum", `Int 1
+          ; "maximum", `Int 60
+          ; "default", `Int 15
+          ] )
     ]
 ;;
 
@@ -571,7 +592,9 @@ let public_descriptors =
       ~id:"agent.search_web"
       ~public_name:"WebSearch"
       ~internal_name:"masc_web_search"
-      ~description:"Search the public web for current information."
+      ~description:
+        "Search the public web for current information using the MASC-owned \
+         tool-list alias, not a generic snake_case web tool id."
       ~input_schema:search_web_schema
       ~policy:
         (policy
@@ -589,7 +612,9 @@ let public_descriptors =
       ~id:"agent.fetch_web"
       ~public_name:"WebFetch"
       ~internal_name:"masc_web_fetch"
-      ~description:"Fetch a selected web page for source-backed reading."
+      ~description:
+        "Fetch a selected web page for source-backed reading using the \
+         MASC-owned tool-list alias, not a generic snake_case web tool id."
       ~input_schema:fetch_web_schema
       ~policy:
         (policy
@@ -1312,7 +1337,7 @@ let internal_descriptors : t list =
   ; masc_misc_descriptor "tool_help" "masc_tool_help"
       "Read help text for a tool name." ~readonly:true
   (* [masc_web_search] / [masc_web_fetch] are already owned by the
-     LLM-native WebSearch / WebFetch descriptors above. Do not add
+     MASC-owned web descriptors above. Do not add
      duplicate internal descriptors here; that would make runtime receipt
      projection depend on list order. *)
   (* ── RFC-0182 §3.1 — masc_control_* cluster (2 entries) ──────── *)

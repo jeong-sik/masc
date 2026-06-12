@@ -838,7 +838,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         row = {
             "ts": 110.0,
             "keeper": "alpha",
-            "tool": "SearchWeb",
+            "tool": "WebSearch",
             "input": {"query": "latest MASC MCP keeper proof"},
             "output": json.dumps({"ok": True}),
             "success": True,
@@ -849,7 +849,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         self.assertEqual(
             evidence,
             {
-                "web_search:SearchWeb:"
+                "web_search:WebSearch:"
                 "query=latest MASC MCP keeper proof:"
                 "ts=110:"
                 "source=06.jsonl"

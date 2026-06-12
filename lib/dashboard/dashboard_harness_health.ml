@@ -66,6 +66,8 @@ type wake_payload_event =
   ; role_counts : (string * int) list
   ; tool_count : int
   ; has_compact_happened : bool
+  ; prompt_assembly_sections : string list
+  ; tool_guidance_drift : bool
   }
 
 type handoff_event =
@@ -304,6 +306,10 @@ let role_counts_of_json json : (string * int) list =
 
 let public_runtime_model_id = "runtime"
 
+let prompt_assembly_sections_to_json (sections : string list) =
+  `List (List.map (fun s -> `String s) sections)
+;;
+
 let wake_payload_record_json (event : wake_payload_event) =
   `Assoc
     [ "record_type", `String "wake_payload"
@@ -321,6 +327,8 @@ let wake_payload_record_json (event : wake_payload_event) =
     ; "role_counts", role_counts_to_json event.role_counts
     ; "tool_count", `Int event.tool_count
     ; "has_compact_happened", `Bool event.has_compact_happened
+    ; "prompt_assembly_sections", prompt_assembly_sections_to_json event.prompt_assembly_sections
+    ; "tool_guidance_drift", `Bool event.tool_guidance_drift
     ]
 ;;
 
@@ -340,6 +348,8 @@ let wake_payload_event_json (event : wake_payload_event) =
     ; "role_counts", role_counts_to_json event.role_counts
     ; "tool_count", `Int event.tool_count
     ; "has_compact_happened", `Bool event.has_compact_happened
+    ; "prompt_assembly_sections", prompt_assembly_sections_to_json event.prompt_assembly_sections
+    ; "tool_guidance_drift", `Bool event.tool_guidance_drift
     ]
 ;;
 
@@ -368,6 +378,15 @@ let wake_payload_event_of_json json =
       ; tool_count = Safe_ops.json_int ~default:0 "tool_count" json
       ; has_compact_happened =
           Safe_ops.json_bool ~default:false "has_compact_happened" json
+      ; prompt_assembly_sections =
+          (try
+             let l = Safe_ops.json_list "prompt_assembly_sections" json in
+             List.filter_map
+               (function `String s -> Some s | _ -> None)
+               l
+           with _ -> [])
+      ; tool_guidance_drift =
+          Safe_ops.json_bool ~default:false "tool_guidance_drift" json
       }
 ;;
 
@@ -707,6 +726,8 @@ let record_wake_payload_at
       ~role_counts
       ~tool_count
       ~has_compact_happened
+      ~prompt_assembly_sections
+      ~tool_guidance_drift
   =
   let model_id = public_runtime_model_id in
   (* Project World Building: Broadcast live Yjs telemetry *)
@@ -726,6 +747,8 @@ let record_wake_payload_at
     ; role_counts
     ; tool_count
     ; has_compact_happened
+    ; prompt_assembly_sections
+    ; tool_guidance_drift
     }
   in
   append_store_json_fail_open
@@ -750,6 +773,8 @@ let record_wake_payload
       ~role_counts
       ~tool_count
       ~has_compact_happened
+      ~prompt_assembly_sections
+      ~tool_guidance_drift
   =
   record_wake_payload_at
     ~timestamp:(Time_compat.now ())
@@ -766,6 +791,8 @@ let record_wake_payload
     ~role_counts
     ~tool_count
     ~has_compact_happened
+    ~prompt_assembly_sections
+    ~tool_guidance_drift
 ;;
 
 let recent_verdicts_json ?since ?until () =
@@ -883,8 +910,8 @@ let json ~(config : Workspace.config) ?since ?until () =
 ;;
 
 let () =
-  Keeper_keepalive_signal.register_record_wake_payload (fun ~keeper_name ~trace_id ~turn_index ~model_id ~context_window ~approx_body_bytes ~system_prompt_bytes ~tool_defs_bytes ~messages_bytes ~message_count ~role_counts ~tool_count ~has_compact_happened ->
-    ignore (record_wake_payload ~keeper_name ~trace_id ~turn_index ~model_id ~context_window ~approx_body_bytes ~system_prompt_bytes ~tool_defs_bytes ~messages_bytes ~message_count ~role_counts ~tool_count ~has_compact_happened)
+  Keeper_keepalive_signal.register_record_wake_payload (fun ~keeper_name ~trace_id ~turn_index ~model_id ~context_window ~approx_body_bytes ~system_prompt_bytes ~tool_defs_bytes ~messages_bytes ~message_count ~role_counts ~tool_count ~has_compact_happened ~prompt_assembly_sections ~tool_guidance_drift ->
+    ignore (record_wake_payload ~keeper_name ~trace_id ~turn_index ~model_id ~context_window ~approx_body_bytes ~system_prompt_bytes ~tool_defs_bytes ~messages_bytes ~message_count ~role_counts ~tool_count ~has_compact_happened ~prompt_assembly_sections ~tool_guidance_drift)
   );
 
   Keeper_compact_policy.register_record_pre_compact (fun ~keeper_name ~context_ratio ~message_count ~token_count ~strategies ~context_window ~is_local_model ~trigger ->

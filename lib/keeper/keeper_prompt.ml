@@ -374,4 +374,28 @@ let append_trait_clause ~(base : string) ~(clause : string) : string =
   else if String_util.contains_substring_ci b c then b
   else Printf.sprintf "%s; %s" b c
 
+let assembly_section_names : string list =
+  [ "profile_policy"
+  ; "continuity_contract"
+  ; "state_block_template"
+  ; "constitution"
+  ; "tool_guidance"
+  ]
+
+let detect_assembly_sections ~system_prompt : string list =
+  List.filter_map
+    (fun section ->
+       let needle =
+         match section with
+         | "state_block_template" -> "State block template"
+         | "constitution" -> "<continuity>"
+         | "tool_guidance" -> "Tool guidance"
+         | _ -> Printf.sprintf "<!-- %s -->" section
+       in
+       if String_util.contains_substring system_prompt needle
+       then Some section
+       else None)
+    assembly_section_names
+;;
+
 include Keeper_text_processing

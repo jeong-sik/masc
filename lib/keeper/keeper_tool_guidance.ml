@@ -199,3 +199,7 @@ let render_preferred_tools ~allowed_tool_names =
 let render_unknown_tool_guard () =
   load_prose Keeper_prompt_names.tool_unknown_guard
 ;;
+
+let has_config_drift () =
+  Option.is_some (get_hint_inventory ()).config_drift_marker
+;;

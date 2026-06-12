@@ -25,6 +25,13 @@ let record_if_enabled
         | m :: _ -> m
         | [] -> "auto"
       in
+      (* Detect prompt assembly sections and tool guidance drift *)
+      let prompt_assembly_sections =
+        Keeper_prompt.detect_assembly_sections ~system_prompt:turn_system_prompt
+      in
+      let tool_guidance_drift =
+        Keeper_tool_guidance.has_config_drift ()
+      in
       let () =
         !Keeper_keepalive_signal.record_wake_payload_callback
           ~keeper_name:meta.name
@@ -40,6 +47,8 @@ let record_if_enabled
           ~role_counts:sizes.role_counts
           ~tool_count:sizes.tool_count
           ~has_compact_happened:pre_dispatch_compacted
+          ~prompt_assembly_sections
+          ~tool_guidance_drift
       in
       ()
     with

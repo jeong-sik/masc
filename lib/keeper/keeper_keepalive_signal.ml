@@ -25,10 +25,10 @@ let register_grpc_heartbeat_starter (f : grpc_heartbeat_starter_fn) =
 let grpc_heartbeat_starter ~ctx ~m ~stop =
   (!grpc_heartbeat_starter_fn).f ~ctx ~m ~stop
 
-let record_wake_payload_callback : (keeper_name:string -> trace_id:string -> turn_index:int -> model_id:string -> context_window:int -> approx_body_bytes:int -> system_prompt_bytes:int -> tool_defs_bytes:int -> messages_bytes:int -> message_count:int -> role_counts:(string * int) list -> tool_count:int -> has_compact_happened:bool -> unit) ref =
-  ref (fun ~keeper_name:_ ~trace_id:_ ~turn_index:_ ~model_id:_ ~context_window:_ ~approx_body_bytes:_ ~system_prompt_bytes:_ ~tool_defs_bytes:_ ~messages_bytes:_ ~message_count:_ ~role_counts:_ ~tool_count:_ ~has_compact_happened:_ -> ())
+let record_wake_payload_callback : (keeper_name:string -> trace_id:string -> turn_index:int -> model_id:string -> context_window:int -> approx_body_bytes:int -> system_prompt_bytes:int -> tool_defs_bytes:int -> messages_bytes:int -> message_count:int -> role_counts:(string * int) list -> tool_count:int -> has_compact_happened:bool -> prompt_assembly_sections:string list -> tool_guidance_drift:bool -> unit) ref =
+  ref (fun ~keeper_name:_ ~trace_id:_ ~turn_index:_ ~model_id:_ ~context_window:_ ~approx_body_bytes:_ ~system_prompt_bytes:_ ~tool_defs_bytes:_ ~messages_bytes:_ ~message_count:_ ~role_counts:_ ~tool_count:_ ~has_compact_happened:_ ~prompt_assembly_sections:_ ~tool_guidance_drift:_ -> ())
 
-let register_record_wake_payload (f : (keeper_name:string -> trace_id:string -> turn_index:int -> model_id:string -> context_window:int -> approx_body_bytes:int -> system_prompt_bytes:int -> tool_defs_bytes:int -> messages_bytes:int -> message_count:int -> role_counts:(string * int) list -> tool_count:int -> has_compact_happened:bool -> unit)) =
+let register_record_wake_payload (f : (keeper_name:string -> trace_id:string -> turn_index:int -> model_id:string -> context_window:int -> approx_body_bytes:int -> system_prompt_bytes:int -> tool_defs_bytes:int -> messages_bytes:int -> message_count:int -> role_counts:(string * int) list -> tool_count:int -> has_compact_happened:bool -> prompt_assembly_sections:string list -> tool_guidance_drift:bool -> unit)) =
   record_wake_payload_callback := f
 ;;
 

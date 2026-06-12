@@ -1,4 +1,14 @@
-(** Keeper_chat_discord — Discord delivery adapter for keeper chat events. *)
+(** Keeper_chat_discord — Discord delivery adapter for keeper chat events.
+
+    Streaming mode: on the first [Text_delta], POST creates the Discord
+    message.  Subsequent deltas PATCH the message content at most once
+    per [min_edit_interval_s] (rate limit: 5 edits / 5 s per channel).
+    [Text_message_end] and [Run_finished] force a final PATCH so the
+    user always sees the complete text. *)
+
+(* Minimum seconds between PATCH edits. Discord allows 5 edits per 5 s;
+   1.0 s is 80 % of that budget, leaving headroom for the final edit. *)
+let min_edit_interval_s = 1.0
 
 let send_message ~token ~channel_id ~content =
   let content = Observability_redact.redact_text content in
@@ -37,16 +47,89 @@ let send_message ~token ~channel_id ~content =
     in
     send_chunks content
 
+(* Truncate to Discord message limit for PATCH edits. *)
+let truncate content =
+  let limit = Discord_rest_client.message_content_limit in
+  if String.length content <= limit then content
+  else String.sub content 0 limit
+
+let edit_message_silent ~token ~channel_id ~message_id ~content =
+  let content = Observability_redact.redact_text content in
+  match Discord_rest_client.edit_message
+          ~token ~channel_id ~message_id ~content ()
+  with
+  | Ok () -> ()
+  | Error err ->
+      let err_str = Format.asprintf "%a" Discord_rest_client.pp_error err in
+      Log.Keeper.warn
+        "keeper_chat_discord: edit_message failed (msg=%s): %s"
+        message_id err_str
+
+(* NDT-OK: wall-clock used for Discord rate-limit backoff only,
+   not for deterministic policy or state transitions. *)
+let now () = Unix.gettimeofday ()
+
 let adapter_loop ~token ~channel_id ~events =
-  let rec loop ~acc_text ~run_id_opt =
+  (* Streaming state:
+     - msg_id: Some once the initial POST succeeds
+     - last_edit_time: wall-clock of last PATCH (rate limiting)
+     - last_edited_text: snapshot of acc_text at last PATCH (skip no-op edits) *)
+  let rec loop ~acc_text ~msg_id ~last_edit_time ~last_edited_text =
     match Keeper_chat_events.subscribe events with
     | Text_delta text ->
-        loop ~acc_text:(acc_text ^ text) ~run_id_opt
+        let acc_text = acc_text ^ text in
+        (match msg_id with
+         | None ->
+             (* First delta — POST to create the message. *)
+             (match Discord_rest_client.send_message
+                     ~token ~channel_id ~content:(truncate acc_text) ()
+             with
+              | Ok created_id ->
+                  loop ~acc_text
+                    ~msg_id:(Some created_id)
+                    ~last_edit_time:(now ())
+                    ~last_edited_text:acc_text
+              | Error err ->
+                  let err_str =
+                    Format.asprintf "%a" Discord_rest_client.pp_error err
+                  in
+                  Log.Keeper.warn
+                    "keeper_chat_discord: streaming POST failed: %s" err_str;
+                  (* Keep accumulating; will try again on next delta. *)
+                  loop ~acc_text ~msg_id:None
+                    ~last_edit_time ~last_edited_text)
+         | Some mid ->
+             let elapsed = now () -. last_edit_time in
+             if elapsed >= min_edit_interval_s then begin
+               edit_message_silent ~token ~channel_id
+                 ~message_id:mid ~content:(truncate acc_text);
+               loop ~acc_text ~msg_id
+                 ~last_edit_time:(now ())
+                 ~last_edited_text:acc_text
+             end else
+               (* Rate limited — skip this PATCH. *)
+               loop ~acc_text ~msg_id ~last_edit_time ~last_edited_text)
     | Text_message_end ->
-        loop ~acc_text ~run_id_opt
+        (* Force a final PATCH for this text message if content changed. *)
+        (match msg_id with
+         | Some mid when acc_text <> last_edited_text ->
+             edit_message_silent ~token ~channel_id
+               ~message_id:mid ~content:(truncate acc_text);
+             loop ~acc_text ~msg_id
+               ~last_edit_time:(now ())
+               ~last_edited_text:acc_text
+         | _ ->
+             loop ~acc_text ~msg_id ~last_edit_time ~last_edited_text)
     | Run_finished { run_id = _ } ->
-        if String.length acc_text > 0 then
-          send_message ~token ~channel_id ~content:acc_text;
+        (match msg_id with
+         | None ->
+             (* No deltas received — fall back to single send. *)
+             if String.length acc_text > 0 then
+               send_message ~token ~channel_id ~content:acc_text
+         | Some mid ->
+             (* Final PATCH with complete text (may be a no-op). *)
+             edit_message_silent ~token ~channel_id
+               ~message_id:mid ~content:(truncate acc_text));
         (* Loop exits after one turn. *)
         ()
     | Event_error { message } ->
@@ -54,15 +137,15 @@ let adapter_loop ~token ~channel_id ~events =
           ~content:("Keeper error: " ^ message);
         (* Loop exits after error. *)
         ()
-    | Run_started { run_id; thread_id = _ } ->
-        loop ~acc_text:"" ~run_id_opt:(Some run_id)
+    | Run_started { run_id = _; thread_id = _ } ->
+        loop ~acc_text:"" ~msg_id:None ~last_edit_time:0.0 ~last_edited_text:""
     | Text_message_start { message_id = _; role = _ } ->
-        loop ~acc_text ~run_id_opt
+        loop ~acc_text ~msg_id ~last_edit_time ~last_edited_text
     | Custom { name; value = _ } ->
         Log.Keeper.debug
           "keeper_chat_discord: custom event %s" name;
-        loop ~acc_text ~run_id_opt
+        loop ~acc_text ~msg_id ~last_edit_time ~last_edited_text
     | Tool_call_start _ | Tool_call_args _ | Tool_call_end _ ->
-        loop ~acc_text ~run_id_opt
+        loop ~acc_text ~msg_id ~last_edit_time ~last_edited_text
   in
-  loop ~acc_text:"" ~run_id_opt:None
+  loop ~acc_text:"" ~msg_id:None ~last_edit_time:0.0 ~last_edited_text:""

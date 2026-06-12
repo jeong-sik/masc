@@ -1,5 +1,21 @@
 
-include module type of Tool_call_quality_benchmark_types
+include
+  module type of Tool_call_quality_benchmark_types
+    with type case_category = Tool_call_quality_benchmark_types.case_category
+     and type json_check = Tool_call_quality_benchmark_types.json_check
+     and type arg_check = Tool_call_quality_benchmark_types.arg_check
+     and type recovery_policy =
+      Tool_call_quality_benchmark_types.recovery_policy
+     and type benchmark_case =
+      Tool_call_quality_benchmark_types.benchmark_case
+     and type tool_call = Tool_call_quality_benchmark_types.tool_call
+     and type run_status = Tool_call_quality_benchmark_types.run_status
+     and type evidence_run = Tool_call_quality_benchmark_types.evidence_run
+     and type case_score = Tool_call_quality_benchmark_types.case_score
+     and type summary_view = Tool_call_quality_benchmark_types.summary_view
+     and type summary_row = Tool_call_quality_benchmark_types.summary_row
+     and type benchmark_summary =
+      Tool_call_quality_benchmark_types.benchmark_summary
 
 val default_case_set_path : repo_root:string -> string
 val default_evidence_path : repo_root:string -> string

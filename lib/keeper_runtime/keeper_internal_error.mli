@@ -37,6 +37,13 @@ val runtime_exhaustion_reason_retryable : runtime_exhaustion_reason -> bool
 val runtime_exhaustion_reason_to_json : runtime_exhaustion_reason -> Yojson.Safe.t
 val runtime_exhaustion_reason_of_json : Yojson.Safe.t -> runtime_exhaustion_reason option
 
+type accept_rejection_kind =
+  | Accept_no_usable_progress
+  | Accept_predicate_rejected
+
+val accept_rejection_kind_to_string : accept_rejection_kind -> string
+val accept_rejection_kind_of_string : string -> accept_rejection_kind option
+
 type masc_internal_error =
   | Runtime_exhausted of {
       runtime_id : string;
@@ -56,6 +63,7 @@ type masc_internal_error =
   | Accept_rejected of {
       scope : string;
       model : string option;
+      reason_kind : accept_rejection_kind option;
       reason : string;
     }
   | Admission_queue_timeout of {

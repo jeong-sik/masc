@@ -30,6 +30,7 @@ type try_provider_ctx =
   ; initial_messages : Agent_sdk.Types.message list
   ; max_idle_turns : int
   ; stream_idle_timeout_s : float option
+  ; execution_idle_timeout_s : float option
   ; body_timeout_s : float option
   ; temperature : float
   ; max_tokens : int
@@ -276,6 +277,7 @@ let run_try_provider
               stream_idle_timeout_for_attempt ~configured:ctx.stream_idle_timeout_s
           ; max_execution_time_s =
               max_execution_time_for_attempt ?per_provider_timeout_s ()
+          ; execution_idle_timeout_s = ctx.execution_idle_timeout_s
           ; body_timeout_s = ctx.body_timeout_s
           ; temperature = ctx.temperature
           ; max_idle_turns = ctx.max_idle_turns

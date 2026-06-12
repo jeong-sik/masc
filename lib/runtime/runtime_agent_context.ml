@@ -6,7 +6,9 @@
     approval wiring and final [build_safe] / [Agent.resume] calls. *)
 
 (** Turn count is no longer the primary execution budget.
-    timeout_sec and stream_idle_timeout_sec govern keeper runs.
+    timeout_sec controls retry/admission, stream_idle_timeout_sec controls
+    provider stream liveness, and execution_idle_timeout_sec is an opt-in
+    Agent.run no-progress guard. Tool invocation timeouts are separate.
     Agent_sdk requires a positive int for max_turns; we pass the
     largest possible value to effectively disable the turn ceiling. *)
 let max_turns_disabled = Int.max_int

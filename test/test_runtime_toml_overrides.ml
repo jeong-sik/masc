@@ -145,12 +145,13 @@ let test_applies_turn_execution_overrides () =
      llm_rerank_runtime = \"tool_rerank_fast\"\n\
      temperature = 0.65\n\
      max_output_tokens = 8192\n\
-     stream_idle_timeout_sec = 90\n"
+     stream_idle_timeout_sec = 90\n\
+     execution_idle_timeout_sec = 95\n"
   in
   let count, overrides =
     Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
   in
-  check int "applied 6" 5 count;
+  check int "applied 6" 6 count;
   check (option string) "llm rerank"
     (Some "true")
     (List.assoc_opt "MASC_KEEPER_LLM_RERANK" overrides);
@@ -165,7 +166,10 @@ let test_applies_turn_execution_overrides () =
     (List.assoc_opt "MASC_KEEPER_UNIFIED_MAX_TOKENS" overrides);
   check (option string) "stream idle timeout"
     (Some "90")
-    (List.assoc_opt "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC" overrides)
+    (List.assoc_opt "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC" overrides);
+  check (option string) "execution idle timeout"
+    (Some "95")
+    (List.assoc_opt "MASC_KEEPER_EXECUTION_IDLE_TIMEOUT_SEC" overrides)
 
 let test_applies_proactive_min_interval_override () =
   let doc = parse_or_fail "[proactive]\nmin_interval_sec = 1234\n" in
@@ -190,7 +194,7 @@ let test_applies_memory_overrides () =
   let count, overrides =
     Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
   in
-  check int "applied 6" 5 count;
+  check int "applied 6" 6 count;
   check (option string) "memory max notes"
     (Some "321")
     (List.assoc_opt "MASC_KEEPER_MEMORY_MAX_NOTES" overrides);
@@ -420,6 +424,46 @@ let test_resolved_stream_idle_timeout_uses_toml () =
     "toml"
     (Keeper_runtime_resolved.source_to_string runtime.stream_idle_timeout_sec.source)
 
+let test_resolved_execution_idle_timeout_default_disabled () =
+  with_clean_boot_overrides @@ fun () ->
+  Keeper_runtime_resolved.init ();
+  let runtime = Keeper_runtime_resolved.current () in
+  check (option (float 0.0001)) "execution idle timeout default"
+    None runtime.execution_idle_timeout_sec.value;
+  check string "execution idle timeout default source"
+    "default"
+    (Keeper_runtime_resolved.source_to_string runtime.execution_idle_timeout_sec.source)
+
+let test_resolved_execution_idle_timeout_uses_toml () =
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  write_toml base_path "[turn]\nexecution_idle_timeout_sec = 75\n";
+  (match Keeper_runtime_config.load_and_apply ~base_path with
+   | Error msg -> failf "unexpected error: %s" msg
+   | Ok _ -> ());
+  Keeper_runtime_resolved.init ();
+  let runtime = Keeper_runtime_resolved.current () in
+  check (option (float 0.0001)) "execution idle timeout from toml"
+    (Some 75.0) runtime.execution_idle_timeout_sec.value;
+  check string "execution idle timeout source"
+    "toml"
+    (Keeper_runtime_resolved.source_to_string runtime.execution_idle_timeout_sec.source)
+
+let test_resolved_execution_idle_timeout_zero_disables () =
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  write_toml base_path "[turn]\nexecution_idle_timeout_sec = 0\n";
+  (match Keeper_runtime_config.load_and_apply ~base_path with
+   | Error msg -> failf "unexpected error: %s" msg
+   | Ok _ -> ());
+  Keeper_runtime_resolved.init ();
+  let runtime = Keeper_runtime_resolved.current () in
+  check (option (float 0.0001)) "execution idle timeout disabled by toml"
+    None runtime.execution_idle_timeout_sec.value;
+  check string "execution idle timeout source"
+    "toml"
+    (Keeper_runtime_resolved.source_to_string runtime.execution_idle_timeout_sec.source)
+
 let test_resolved_runtime_prefers_env_over_toml () =
   with_clean_boot_overrides @@ fun () ->
   with_base_path @@ fun base_path ->
@@ -545,6 +589,9 @@ let () =
         ; test_case "resolved runtime accepts max_turns ceiling" `Quick test_resolved_runtime_accepts_max_turns_ceiling
         ; test_case "resolved stream idle timeout defaults and clamps to total" `Quick test_resolved_stream_idle_timeout_defaults_and_clamps_to_total
         ; test_case "resolved stream idle timeout uses toml" `Quick test_resolved_stream_idle_timeout_uses_toml
+        ; test_case "execution idle timeout default disabled" `Quick test_resolved_execution_idle_timeout_default_disabled
+        ; test_case "execution idle timeout uses toml" `Quick test_resolved_execution_idle_timeout_uses_toml
+        ; test_case "execution idle timeout zero disables" `Quick test_resolved_execution_idle_timeout_zero_disables
         ; test_case "resolved runtime prefers env over toml" `Quick test_resolved_runtime_prefers_env_over_toml
         ; test_case "cli subprocess idle default 120s" `Quick test_resolved_cli_subprocess_idle_default_120s
         ; test_case "cli subprocess idle from toml" `Quick test_resolved_cli_subprocess_idle_from_toml

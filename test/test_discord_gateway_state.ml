@@ -16,6 +16,7 @@ let test_opcode_round_trip () =
     [ 0, S.Op_dispatch
     ; 1, S.Op_heartbeat
     ; 2, S.Op_identify
+    ; 3, S.Op_status_update
     ; 6, S.Op_resume
     ; 7, S.Op_reconnect
     ; 9, S.Op_invalid_session
@@ -88,6 +89,19 @@ let test_parse_trigger_policy_rejects () =
       | Ok _ -> failf "expected Error for %S" input
       | Error _ -> ())
     bad
+
+let test_presence_status_strings () =
+  let cases =
+    [ S.Online, "online"
+    ; S.Idle, "idle"
+    ; S.Dnd, "dnd"
+    ; S.Invisible, "invisible"
+    ]
+  in
+  List.iter
+    (fun (status, expected) ->
+      check string expected expected (S.presence_status_to_string status))
+    cases
 
 (* ---------------------------------------------------------------- *)
 (* parse_frame                                                      *)
@@ -201,6 +215,20 @@ let has_send_heartbeat effects =
       | S.Send_frame { op = S.Op_heartbeat; _ } -> true
       | _ -> false)
     effects
+
+let status_update_frame effects =
+  List.find_map
+    (function
+      | S.Send_frame ({ op = S.Op_status_update; _ } as frame) -> Some frame
+      | _ -> None)
+    effects
+
+let has_status_update effects =
+  Option.is_some (status_update_frame effects)
+
+let json_field name = function
+  | `Assoc fields -> List.assoc_opt name fields
+  | _ -> None
 
 let has_emit_ready ~session_id effects =
   List.exists
@@ -611,6 +639,64 @@ let dispatch_frame ~event_name ~payload ~seq : S.frame =
   ; t = Some event_name
   ; d = payload
   }
+
+let test_status_change_connected_emits_status_update () =
+  let m =
+    connected_with_policy ~policy:S.Mention_only ~bot_user_id:"BOT"
+  in
+  let _, effects = S.step m ~now_mono:3.0 (S.Status_change S.Dnd) in
+  let frame =
+    match status_update_frame effects with
+    | Some frame -> frame
+    | None -> fail "expected Op_status_update frame"
+  in
+  check int "opcode 3" 3 (S.opcode_to_int frame.op);
+  check (option int) "no sequence" None frame.s;
+  check (option string) "no dispatch event name" None frame.t;
+  check (option string) "status=dnd" (Some "dnd")
+    (match json_field "status" frame.d with
+     | Some (`String s) -> Some s
+     | _ -> None);
+  check (option bool) "afk=false for dnd" (Some false)
+    (match json_field "afk" frame.d with
+     | Some (`Bool b) -> Some b
+     | _ -> None);
+  check bool "activities is empty list" true
+    (match json_field "activities" frame.d with
+     | Some (`List []) -> true
+     | _ -> false);
+  check bool "since is null" true
+    (match json_field "since" frame.d with
+     | Some `Null -> true
+     | _ -> false)
+
+let test_status_change_idle_sets_afk () =
+  let m =
+    connected_with_policy ~policy:S.Mention_only ~bot_user_id:"BOT"
+  in
+  let _, effects = S.step m ~now_mono:3.0 (S.Status_change S.Idle) in
+  let frame =
+    match status_update_frame effects with
+    | Some frame -> frame
+    | None -> fail "expected Op_status_update frame"
+  in
+  check (option string) "status=idle" (Some "idle")
+    (match json_field "status" frame.d with
+     | Some (`String s) -> Some s
+     | _ -> None);
+  check (option bool) "afk=true for idle" (Some true)
+    (match json_field "afk" frame.d with
+     | Some (`Bool b) -> Some b
+     | _ -> None)
+
+let test_status_change_ignored_when_not_connected () =
+  let m = S.create ~config:(mk_config ()) in
+  let m', effects = S.step m ~now_mono:0.0 (S.Status_change S.Online) in
+  (match S.state m' with
+   | S.Disconnected -> ()
+   | _ -> fail "presence update should not change disconnected state");
+  check bool "no status frame while disconnected" false
+    (has_status_update effects)
 
 let test_policy_mention_only_message_with_mention_passes () =
   let m = connected_with_policy ~policy:S.Mention_only ~bot_user_id:"BOT" in
@@ -1577,6 +1663,8 @@ let () =
     [ ( "primitives"
       , [ test_case "opcode round-trip" `Quick test_opcode_round_trip
         ; test_case "intents bitmask" `Quick test_intents_bitmask
+        ; test_case "presence status strings" `Quick
+            test_presence_status_strings
         ; test_case "parse_trigger_policy accepts 3 values" `Quick
             test_parse_trigger_policy_accepts
         ; test_case "parse_trigger_policy rejects others" `Quick
@@ -1605,6 +1693,14 @@ let () =
             test_ready_transition
         ; test_case "Heartbeat_tick (Connected) → Send_frame Op_heartbeat"
             `Quick test_heartbeat_tick_when_connected
+        ] )
+    ; ( "presence"
+      , [ test_case "Status_change (Connected) → opcode 3 STATUS_UPDATE"
+            `Quick test_status_change_connected_emits_status_update
+        ; test_case "Status_change Idle sets afk=true" `Quick
+            test_status_change_idle_sets_afk
+        ; test_case "Status_change ignored before Connected" `Quick
+            test_status_change_ignored_when_not_connected
         ] )
     ; ( "dispatch decode"
       , [ test_case "MESSAGE_CREATE with mention sets mentions_bot=true"

@@ -18,6 +18,7 @@ type opcode =
   | Op_dispatch
   | Op_heartbeat
   | Op_identify
+  | Op_status_update
   | Op_resume
   | Op_reconnect
   | Op_invalid_session
@@ -28,6 +29,7 @@ let opcode_to_int = function
   | Op_dispatch -> 0
   | Op_heartbeat -> 1
   | Op_identify -> 2
+  | Op_status_update -> 3
   | Op_resume -> 6
   | Op_reconnect -> 7
   | Op_invalid_session -> 9
@@ -38,6 +40,7 @@ let opcode_of_int = function
   | 0 -> Ok Op_dispatch
   | 1 -> Ok Op_heartbeat
   | 2 -> Ok Op_identify
+  | 3 -> Ok Op_status_update
   | 6 -> Ok Op_resume
   | 7 -> Ok Op_reconnect
   | 9 -> Ok Op_invalid_session
@@ -143,6 +146,19 @@ type connection_state =
 
 (* ── Inputs and effects ────────────────────────────────────────── *)
 
+(* Discord presence status values for STATUS_UPDATE (opcode 3). *)
+type presence_status =
+  | Online
+  | Idle
+  | Dnd
+  | Invisible
+
+let presence_status_to_string = function
+  | Online -> "online"
+  | Idle -> "idle"
+  | Dnd -> "dnd"
+  | Invisible -> "invisible"
+
 type input =
   | Connect_requested
   | Frame_received of frame
@@ -151,6 +167,7 @@ type input =
   | Heartbeat_tick
   | Heartbeat_ack_timeout
   | Backoff_elapsed
+  | Status_change of presence_status
 
 type gateway_effect =
   | Open_wss of { url : string }
@@ -992,6 +1009,8 @@ let step_frame t ~now_mono (frame : frame) =
       log_warn t "Op_identify received from server (unexpected)"
   | Op_resume ->
       log_warn t "Op_resume received from server (unexpected)"
+  | Op_status_update ->
+      log_warn t "Op_status_update received from server (unexpected)"
 
 (* ── Per-input handlers for state-sensitive non-frame inputs ── *)
 
@@ -1015,6 +1034,21 @@ let handle_heartbeat_tick t =
   | Reconnect_pending _ | Failed _ ->
       log_info t "Heartbeat_tick in pre-connection state; skipping"
 
+(* Discord STATUS_UPDATE (opcode 3) frame builder.
+   Only valid when the gateway is in Connected state; silently ignored
+   otherwise. The bot's presence in the member list changes immediately. *)
+let build_status_update_frame (status : presence_status) : frame =
+  { op = Op_status_update
+  ; s = None
+  ; t = None
+  ; d = `Assoc
+      [ ("since", `Null)
+      ; ("activities", `List [])
+      ; ("status", `String (presence_status_to_string status))
+      ; ("afk", `Bool (status = Idle))
+      ]
+  }
+
 let step t ~now_mono input =
   match input with
   | Connect_requested -> handle_connect_requested t
@@ -1026,3 +1060,29 @@ let step t ~now_mono input =
   | Heartbeat_tick -> handle_heartbeat_tick t
   | Heartbeat_ack_timeout -> handle_heartbeat_ack_timeout t ~now_mono
   | Backoff_elapsed -> handle_backoff_elapsed t
+  | Status_change status ->
+      (* Presence updates are only valid when connected. Silently
+         ignore in other states (reconnect will use Online by default). *)
+      (match t.state with
+       | Connected _ ->
+           ( t
+           , [ Send_frame (build_status_update_frame status)
+             ; Log { level = `Info
+                    ; message = Printf.sprintf
+                        "presence update: %s"
+                        (presence_status_to_string status)
+                    }
+             ] )
+       | Disconnected
+       | Awaiting_hello
+       | Identifying
+       | Resuming
+       | Reconnect_pending _
+       | Failed _ ->
+           ( t
+           , [ Log { level = `Info
+                    ; message = Printf.sprintf
+                        "presence update %s ignored (state not Connected)"
+                        (presence_status_to_string status)
+                    }
+             ] ))

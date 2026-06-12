@@ -40,6 +40,7 @@ type opcode =
   | Op_dispatch          (** 0 — server → client event. *)
   | Op_heartbeat         (** 1 — bidirectional liveness ping. *)
   | Op_identify          (** 2 — client → server authentication. *)
+  | Op_status_update     (** 3 — client → server presence update. *)
   | Op_resume            (** 6 — client → server replay request. *)
   | Op_reconnect         (** 7 — server tells us to disconnect+resume. *)
   | Op_invalid_session   (** 9 — server rejects our session; may be resumable. *)
@@ -159,6 +160,16 @@ type connection_state =
 
 (** {1 Input — what feeds the state machine} *)
 
+(** Discord presence status values for STATUS_UPDATE (opcode 3).
+    Used to control the bot's visual status in the member list. *)
+type presence_status =
+  | Online    (** Green circle — bot is active. *)
+  | Idle      (** Yellow moon — bot has been inactive. *)
+  | Dnd        (** Red circle — bot should not be disturbed. *)
+  | Invisible  (** Appears offline but can still receive events. *)
+
+val presence_status_to_string : presence_status -> string
+
 (** All events the state machine consumes. Closed sum. *)
 type input =
   | Connect_requested          (** External: start a connection. *)
@@ -168,6 +179,8 @@ type input =
   | Heartbeat_tick             (** Clock fired heartbeat interval. *)
   | Heartbeat_ack_timeout      (** No ack within 2x interval. *)
   | Backoff_elapsed            (** Reconnect timer fired. *)
+  | Status_change of presence_status
+      (** External: update bot presence. Only effective in [Connected] state. *)
 
 (** {1 Output — what the state machine asks the I/O layer to do} *)
 

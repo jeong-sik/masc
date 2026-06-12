@@ -136,13 +136,16 @@ let run ~sw ~env ~token ~intents ~trigger_policy ~on_event ~on_ambient () =
               send the next heartbeat and start waiting for its ACK. *)
            Atomic.set heartbeat_ack_ok false;
            Eio.Stream.add input_mailbox Discord_gateway_state.Heartbeat_tick
-         end else
-           (* Discord docs: "If a client does not receive a heartbeat
-              ack between its attempts at sending heartbeats, it should
-              immediately terminate the connection with a non-1000
-              close code and reconnect." *)
-           Eio.Stream.add input_mailbox
-             Discord_gateway_state.Heartbeat_ack_timeout);
+        end else
+          (* Discord docs: "If a client does not receive a heartbeat
+             ack between its attempts at sending heartbeats, it should
+             immediately terminate the connection with a non-1000
+             close code and reconnect." *)
+          begin
+            Discord_observability.record_gateway_ack_timeout ();
+            Eio.Stream.add input_mailbox
+              Discord_gateway_state.Heartbeat_ack_timeout
+          end);
       loop ()
     in
     loop ());

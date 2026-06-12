@@ -18,6 +18,8 @@ let test_label_contract () =
     (Obs.gateway_event_label Obs.Message_create);
   check string "dispatch dropped_unbound" "dropped_unbound"
     (Obs.inbound_outcome_label Obs.Dropped_unbound);
+  check string "dispatch unavailable" "dispatch_unavailable"
+    (Obs.inbound_outcome_label Obs.Dispatch_unavailable);
   check string "ambient too_long" "dropped_too_long"
     (Obs.ambient_outcome_label Obs.Ambient_dropped_too_long);
   check string "reply failed" "send_error"
@@ -37,10 +39,14 @@ let test_gateway_reconnect_counter () =
   check_delta Names.metric_discord_gateway_reconnect_scheduled (fun () ->
     Obs.record_gateway_reconnect_scheduled ())
 
+let test_gateway_ack_timeout_counter () =
+  check_delta Names.metric_discord_gateway_ack_timeouts (fun () ->
+    Obs.record_gateway_ack_timeout ())
+
 let test_inbound_dispatch_counter () =
-  let labels = [ "outcome", "gate_error" ] in
+  let labels = [ "outcome", "dispatch_unavailable" ] in
   check_delta Names.metric_discord_inbound_dispatch ~labels (fun () ->
-    Obs.record_inbound_dispatch Obs.Gate_error)
+    Obs.record_inbound_dispatch Obs.Dispatch_unavailable)
 
 let test_ambient_counter () =
   let labels = [ "outcome", "recorded" ] in
@@ -63,6 +69,8 @@ let () =
         ; test_case "gateway close counter" `Quick test_gateway_close_counter
         ; test_case "gateway reconnect counter" `Quick
             test_gateway_reconnect_counter
+        ; test_case "gateway ack timeout counter" `Quick
+            test_gateway_ack_timeout_counter
         ; test_case "inbound dispatch counter" `Quick
             test_inbound_dispatch_counter
         ; test_case "ambient counter" `Quick test_ambient_counter

@@ -309,12 +309,12 @@ let handle_message_create ~dispatch
                   ~reply_to_message_id:message_id () with
            | Ok _ ->
              Discord_observability.record_inbound_dispatch
-               Discord_observability.Reply_sent;
+               Discord_observability.Dispatch_unavailable;
              Discord_observability.record_reply
                Discord_observability.Reply_send_ok
            | Error e ->
              Discord_observability.record_inbound_dispatch
-               Discord_observability.Gate_error;
+               Discord_observability.Dispatch_unavailable;
              Discord_observability.record_reply
                Discord_observability.Reply_send_failed;
              Log.Server.error

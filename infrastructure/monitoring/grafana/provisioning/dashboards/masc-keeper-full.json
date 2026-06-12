@@ -2443,12 +2443,11 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "Receipts with unmapped disposition values by keeper.",
+      "description": "Keeper chat request failures written as transport_failure rows, grouped by source. Non-zero values explain conversations that looked dropped but remain pending for retry.",
       "fieldConfig": {
         "defaults": {
           "color": {
-            "fixedColor": "dark-yellow",
-            "mode": "fixed"
+            "mode": "thresholds"
           },
           "custom": {
             "drawStyle": "line",
@@ -2457,7 +2456,24 @@
             "pointSize": 0,
             "showPoints": "never"
           },
-          "unit": "cpm"
+          "unit": "ops",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.1
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
         }
       },
       "gridPos": {
@@ -2468,9 +2484,13 @@
       },
       "options": {
         "legend": {
-          "displayMode": "list",
+          "displayMode": "table",
           "placement": "bottom",
-          "showLegend": true
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
         },
         "tooltip": {
           "mode": "multi",
@@ -2479,12 +2499,12 @@
       },
       "targets": [
         {
-          "expr": "sum by (keeper) (rate(masc_keeper_receipt_unmapped_disposition_total{keeper=~\"$keeper\"}[$__rate_interval])) * 60",
-          "legendFormat": "{{keeper}}",
+          "expr": "sum by (keeper, source) (rate(masc_keeper_chat_transport_failures_total{keeper=~\"$keeper\"}[$__rate_interval])) * 60",
+          "legendFormat": "{{keeper}} {{source}}",
           "refId": "A"
         }
       ],
-      "title": "Receipt Unmapped Disposition",
+      "title": "Chat Transport Failures",
       "transparent": true,
       "type": "timeseries"
     },
@@ -2604,5 +2624,5 @@
   "timezone": "browser",
   "title": "MASC Keeper Full Observability",
   "uid": "masc-keeper-full",
-  "version": 1
+  "version": 2
 }

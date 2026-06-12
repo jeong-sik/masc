@@ -59,6 +59,11 @@ let metric_discord_gateway_reconnect_scheduled =
     "masc_discord_gateway_reconnect_scheduled_total"
 ;;
 
+let metric_discord_gateway_ack_timeouts =
+  Otel_metric_store_core.declare_counter
+    "masc_discord_gateway_ack_timeouts_total"
+;;
+
 let metric_discord_inbound_dispatch =
   Otel_metric_store_core.declare_counter "masc_discord_inbound_dispatch_total"
 ;;

@@ -281,8 +281,6 @@ let live_signal_supersedes_persisted_error ~keepalive_running ~agent_status ~met
 
 let classify_keeper_quiet_reason ~meta ~keepalive_running ~agent_status ~now_ts =
   let quiet_active = quiet_hours_active () in
-  let agent_exists = json_bool "exists" agent_status false in
-  let agent_status_text = agent_status_text agent_status in
   let error_hint =
     if live_signal_supersedes_persisted_error ~keepalive_running ~agent_status ~meta
     then None
@@ -292,11 +290,6 @@ let classify_keeper_quiet_reason ~meta ~keepalive_running ~agent_status ~now_ts 
     Some "disabled"
   else if not keepalive_running then
     Some "not_running"
-  else if
-    not agent_exists
-    || agent_status_text = "offline"
-    || agent_status_text = "inactive"
-  then Some "agent_missing"
   else if meta.runtime.usage.total_turns = 0 && meta.runtime.proactive_rt.count_total = 0 then
     let keeper_age_s =
       match Workspace_resilience.Time.parse_iso8601_opt meta.created_at with
@@ -371,12 +364,14 @@ let keeper_health_state ?(fiber_health = Fiber_unknown)
     else
       last_turn_ago_s
   in
-  if not agent_exists || agent_status_text = "offline" || agent_status_text = "inactive"
+  if
+    (not keepalive_running)
+    && (not agent_exists || agent_status_text = "offline" || agent_status_text = "inactive")
   then KH_offline
   (* H-4 fix: true zombies are stale regardless of keepalive state *)
   else if is_zombie then KH_stale
   else if keepalive_running then
-    if last_seen_ago_s > 2.0 *. keepalive_interval_s then KH_stale
+    if agent_exists && last_seen_ago_s > 2.0 *. keepalive_interval_s then KH_stale
     else
       (match quiet_reason with
     | Some "graphql_error" | Some "model_error" -> KH_degraded

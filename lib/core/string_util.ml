@@ -98,6 +98,40 @@ let starts_with_ci ~prefix s =
     in
     match_at 0
 
+(* Whitespace tokenization for free-text queries.  ASCII whitespace
+   only; multibyte text passes through opaquely so UTF-8 tokens stay
+   intact. *)
+let is_ascii_space = function
+  | ' ' | '\t' | '\n' | '\r' -> true
+  | _ -> false
+
+let query_tokens query =
+  let buf = Buffer.create 16 in
+  let out = ref [] in
+  let flush () =
+    if Buffer.length buf > 0
+    then begin
+      out := Buffer.contents buf :: !out;
+      Buffer.clear buf
+    end
+  in
+  String.iter
+    (fun c -> if is_ascii_space c then flush () else Buffer.add_char buf c)
+    query;
+  flush ();
+  List.rev !out
+
+(* Token-AND containment: every whitespace-separated token of [query]
+   must appear in [haystack] as a case-insensitive substring, in any
+   order with arbitrary gaps ("갑오징어 ... 소주" matches the query
+   "소주 갑오징어").  Agglutinative suffixes are covered by substring
+   matching ("소주를" contains "소주").  A query with no tokens yields
+   [false], matching [contains_substring_ci]'s empty-needle behavior. *)
+let contains_all_tokens_ci haystack query =
+  match query_tokens query with
+  | [] -> false
+  | tokens -> List.for_all (contains_substring_ci haystack) tokens
+
 (* ASCII case-insensitive equality.  No allocation; equivalent to
    [String.lowercase_ascii a = String.lowercase_ascii b] but
    short-circuits on length and on first mismatching byte. *)

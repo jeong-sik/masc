@@ -151,6 +151,19 @@ describe('applyKeeperStreamEvent', () => {
       value: { message: 'boom' },
     })).toBe('boom')
   })
+
+  it('sets thinking state on KEEPER_THINKING_DELTA', () => {
+    assistantEntry()
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_THINKING_DELTA',
+      value: { delta: 'reasoning about the problem...' },
+    })).toBeNull()
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(entry?.streamState).toBe('thinking')
+    expect(entry?.delivery).toBe('streaming')
+  })
 })
 
 describe('applyKeeperStreamEvent tool calls', () => {

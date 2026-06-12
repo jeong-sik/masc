@@ -102,6 +102,33 @@ describe('ChatTranscript', () => {
     expect(container.querySelector('[data-chat-delivery="live"]')).not.toBeNull()
   })
 
+  it('renders a thinking placeholder when the model is reasoning', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({ id: 'u1', text: 'ping' }),
+          entry({
+            id: 'a1',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'sangsu',
+            text: '',
+            delivery: 'streaming',
+            streamState: 'thinking',
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const placeholder = container.querySelector('[data-chat-stream-placeholder]')
+    expect(placeholder).not.toBeNull()
+    expect(placeholder?.textContent).toContain('생각 중...')
+    expect(container.querySelector('[data-chat-delivery="thinking"]')).not.toBeNull()
+  })
+
   it('uses a parent-bounded flexible transcript in primary mode', () => {
     render(
       html`<${ChatTranscript}

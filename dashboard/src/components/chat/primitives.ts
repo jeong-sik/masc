@@ -26,6 +26,7 @@ function deliveryLabel(entry: KeeperConversationEntry): string {
     case 'sending':
       return 'sending'
     case 'streaming':
+      if (entry.streamState === 'thinking') return 'thinking'
       return entry.streamState === 'finalizing' ? 'finalizing' : 'live'
     case 'timeout':
       return 'timeout'
@@ -43,6 +44,7 @@ function deliveryLabel(entry: KeeperConversationEntry): string {
 function liveMessageLabel(entry: KeeperConversationEntry): string | null {
   if (entry.text.trim()) return null
   if (entry.delivery === 'streaming') {
+    if (entry.streamState === 'thinking') return '생각 중...'
     return entry.streamState === 'finalizing' ? '응답 마무리 중...' : '응답 작성 중...'
   }
   if (entry.delivery === 'sending') return '응답 연결 중...'

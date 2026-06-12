@@ -1040,6 +1040,13 @@
  (modules test_lockfree_atomic)
  (libraries alcotest masc.lockfree_atomic))
 
+; Scheduled internal automation domain guardrails.
+
+(test
+ (name test_schedule_domain)
+ (modules test_schedule_domain)
+ (libraries alcotest yojson masc_schedule))
+
 ; Typed TOML field resolution helper (RFC-0141 Phase 1).
 
 (test

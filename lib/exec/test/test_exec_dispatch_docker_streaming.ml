@@ -8,7 +8,7 @@ let sleep seconds =
 let bin s =
   match Masc_exec.Exec_program.of_string s with
   | Ok bin -> bin
-  | Error (`Unknown name) -> fail ("unknown exec program: " ^ name)
+  | Error (`Unknown name) -> fail ("unknown exec program: " ^ s)
 
 let simple ?sandbox ?(redirects = []) executable args =
   let open Masc_exec.Shell_ir in

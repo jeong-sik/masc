@@ -39,6 +39,16 @@ let string_member key json =
   | _ -> None
 ;;
 
+let nullable_string_member key json =
+  match json with
+  | `Assoc fields -> (
+      match List.assoc_opt key fields with
+      | Some (`String s) -> Some s
+      | Some `Null | None -> None
+      | _ -> None)
+  | _ -> None
+;;
+
 let meta_with_persisted_error ~proactive_ts ~last_turn_ts =
   match
     Masc_test_deps.meta_of_json_fixture
@@ -80,6 +90,15 @@ let last_error_of_diagnostic ~meta ~agent_status ~keepalive_running =
     ~history_items:[]
     ~now_ts
   |> string_member "last_error"
+;;
+
+let diagnostic_of ~meta ~agent_status ~keepalive_running =
+  Keeper_status_runtime.keeper_diagnostic_json
+    ~meta
+    ~agent_status
+    ~keepalive_running
+    ~history_items:[]
+    ~now_ts
 ;;
 
 (* Production case: keeper (exists=false agent_status) that turned after its
@@ -133,6 +152,29 @@ let test_external_live_signal_hides_stale_error () =
     (last_error_of_diagnostic ~meta ~agent_status ~keepalive_running:true)
 ;;
 
+(* Keepers run as supervised fibers and do not normally publish a separate
+   [.masc/agents/<agent>.json] record. A live keepalive loop is therefore the
+   stronger liveness signal; missing agent-registry state must not make the
+   dashboard report the keeper as offline/recovering. *)
+let test_keepalive_without_agent_record_is_healthy () =
+  let meta =
+    meta_with_persisted_error
+      ~proactive_ts:(now_ts -. 300.0)
+      ~last_turn_ts:(now_ts -. 120.0)
+  in
+  let diagnostic =
+    diagnostic_of ~meta ~agent_status:keeper_agent_status ~keepalive_running:true
+  in
+  Alcotest.(check (option string))
+    "keepalive-running keeper without agent record is healthy"
+    (Some "healthy")
+    (string_member "health_state" diagnostic);
+  Alcotest.(check (option string))
+    "missing agent record is not a quiet reason for live keeper fibers"
+    None
+    (nullable_string_member "quiet_reason" diagnostic)
+;;
+
 let () =
   Alcotest.run
     "keeper_diagnostic_stale_last_error"
@@ -153,6 +195,10 @@ let () =
             "external live signal hides stale error"
             `Quick
             test_external_live_signal_hides_stale_error
+        ; Alcotest.test_case
+            "keepalive without agent record is healthy"
+            `Quick
+            test_keepalive_without_agent_record_is_healthy
         ] )
     ]
 ;;

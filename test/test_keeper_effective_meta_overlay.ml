@@ -262,6 +262,14 @@ tool_access = ["tool_execute"]
       in
       let self_model = json_assoc_field "self_model" status_json in
       Alcotest.(check (option string))
+        "status keeps persona snapshot"
+        (Some "probe")
+        (json_string_field "persona" status_json);
+      Alcotest.(check (option string))
+        "status self_model keeps persona snapshot"
+        (Some "probe")
+        (json_string_field "persona" self_model);
+      Alcotest.(check (option string))
         "status self_model keeps instructions snapshot"
         (Some "profile instructions")
         (json_string_field "instructions" self_model)

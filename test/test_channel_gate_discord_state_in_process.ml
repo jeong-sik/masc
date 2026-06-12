@@ -3,8 +3,9 @@
    - [keeper_for_channel] (binding lookup)
    - [send_error] / [pp_send_error] (typed REST error wrapper)
    - [send_message] error path with [DISCORD_BOT_TOKEN] unset
+   - [trigger_typing] error path with [DISCORD_BOT_TOKEN] unset
 
-   The happy path of [send_message] requires a live Discord API call
+   The happy path of [send_message] and [trigger_typing] requires a live Discord API call
    and is left to operational verification. *)
 
 open Alcotest
@@ -79,6 +80,16 @@ let test_send_message_with_whitespace_token_returns_missing_token () =
    | Ok _ -> fail "expected error, got Ok");
   unsetenv "DISCORD_BOT_TOKEN"
 
+let test_trigger_typing_without_token_returns_missing_token () =
+  unsetenv "DISCORD_BOT_TOKEN";
+  match State.trigger_typing ~channel_id:"123" () with
+  | Error State.Missing_token -> ()
+  | Error other ->
+    fail
+      (Format.asprintf
+         "expected Missing_token, got %a" State.pp_send_error other)
+  | Ok () -> fail "expected error, got Ok"
+
 (* ---------------------------------------------------------------- *)
 (* Entry                                                            *)
 (* ---------------------------------------------------------------- *)
@@ -104,5 +115,9 @@ let () =
             test_send_message_without_token_returns_missing_token
         ; test_case "whitespace token => Missing_token" `Quick
             test_send_message_with_whitespace_token_returns_missing_token
+        ] )
+    ; ( "trigger_typing"
+      , [ test_case "unset token => Missing_token" `Quick
+            test_trigger_typing_without_token_returns_missing_token
         ] )
     ]

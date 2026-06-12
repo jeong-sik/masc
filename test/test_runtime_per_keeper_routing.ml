@@ -398,10 +398,9 @@ let test_turn_budget_uses_routed_runtime () =
    keeper thinking seed via [Runtime_inference.for_runtime] ----
 
    The keeper turn loop ([Keeper_run_tools_hooks]) treats the seed's
-   [thinking_enabled] as a capability gate: [Some false] forces thinking off,
-   [Some true]/[None] defer to [keeper.turn.enable_thinking].  So a model
-   declared [thinking-support = false] never thinks regardless of the global
-   policy, while a thinking-capable model follows it. *)
+   [thinking_enabled] as the runtime model's explicit policy: [Some false]
+   forces thinking off, [Some true] enables thinking even when the global
+   default is off, and [None] leaves the caller policy unchanged. *)
 
 let runtime_config_thinking =
   {|
@@ -418,6 +417,7 @@ api-name = "think"
 max-context = 128000
 tools-support = true
 thinking-support = true
+preserve-thinking = true
 streaming = true
 
 [models.nothink]
@@ -446,13 +446,17 @@ let with_runtime_thinking f =
   f ()
 ;;
 
-let test_thinking_support_true_defers_to_policy () =
+let test_thinking_support_true_enables_thinking_and_preserves () =
   with_runtime_thinking (fun () ->
     let seed = Runtime_inference.for_runtime ~name:"ollama_cloud.think" in
     Alcotest.(check (option bool))
-      "thinking-capable model emits Some true (defer to keeper.turn.enable_thinking)"
+      "thinking-support true emits Some true"
       (Some true)
-      seed.Runtime_inference.thinking_enabled)
+      seed.Runtime_inference.thinking_enabled;
+    Alcotest.(check (option bool))
+      "preserve-thinking true emits Some true"
+      (Some true)
+      seed.Runtime_inference.preserve_thinking)
 ;;
 
 let test_thinking_support_false_forces_off () =
@@ -468,7 +472,7 @@ let test_thinking_unknown_runtime_defers () =
   with_runtime_thinking (fun () ->
     let seed = Runtime_inference.for_runtime ~name:"bogus.binding" in
     Alcotest.(check (option bool))
-      "unknown runtime id emits None (no per-model signal, defer to policy)"
+      "unknown runtime id emits None (no per-model signal)"
       None
       seed.Runtime_inference.thinking_enabled)
 ;;
@@ -479,11 +483,11 @@ let test_seed_of_thinking_support_gate_contract () =
     (Some false)
     (Runtime_inference.seed_of_thinking_support (Some false)).Runtime_inference.thinking_enabled;
   Alcotest.(check (option bool))
-    "Some true -> defer to policy"
+    "Some true -> enable thinking"
     (Some true)
     (Runtime_inference.seed_of_thinking_support (Some true)).Runtime_inference.thinking_enabled;
   Alcotest.(check (option bool))
-    "None -> defer to policy"
+    "None -> leave caller policy unchanged"
     None
     (Runtime_inference.seed_of_thinking_support None).Runtime_inference.thinking_enabled
 ;;
@@ -545,9 +549,9 @@ let () =
         ] )
     ; ( "per-model thinking gate"
       , [ Alcotest.test_case
-            "thinking-support=true defers to keeper policy (Some true)"
+            "thinking-support=true enables thinking and preserve-thinking"
             `Quick
-            test_thinking_support_true_defers_to_policy
+            test_thinking_support_true_enables_thinking_and_preserves
         ; Alcotest.test_case
             "thinking-support=false forces thinking off (Some false)"
             `Quick

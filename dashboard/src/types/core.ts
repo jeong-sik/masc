@@ -707,6 +707,11 @@ interface KeeperConversationUsage {
   totalTokens?: number | null
 }
 
+// RFC-0232 P2: producer-typed turn outcome carried in the reply payload
+// (`turn_outcome`). `continuation_checkpoint` marks the synthetic
+// resume-next-cycle notice; everything else is model output.
+export type KeeperTurnOutcome = 'visible_reply' | 'continuation_checkpoint'
+
 export interface KeeperConversationDetails {
   traceId?: string | null
   generation?: number | null
@@ -718,6 +723,7 @@ export interface KeeperConversationDetails {
   skillReason?: string | null
   stateBlock?: string | null
   replyText?: string | null
+  turnOutcome?: KeeperTurnOutcome | null
   rawPayload?: unknown
 }
 

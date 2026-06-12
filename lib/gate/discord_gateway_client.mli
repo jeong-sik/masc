@@ -30,11 +30,16 @@ type gateway_event = Discord_gateway_state.dispatched_event =
       }
   | Message_create of
       { channel_id : string
+      ; guild_id : string option
       ; message_id : string
       ; author_id : string
       ; author_name : string option
       ; content : string
       ; mentions_bot : bool
+      ; explicit_mentions_bot : bool
+      ; message_reference_channel_id : string option
+      ; message_reference_message_id : string option
+      ; referenced_message_author_id : string option
       }
   | Reaction_add of
       { channel_id : string

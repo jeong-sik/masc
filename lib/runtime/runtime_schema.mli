@@ -63,6 +63,8 @@ type thinking_control_format =
   | No_thinking_control
   | Thinking_object
   | Chat_template_kwargs
+  | Chat_template_token
+  | Reasoning_effort
 [@@deriving show, eq]
 
 type model_capabilities =
@@ -100,6 +102,7 @@ type model_spec =
   ; tools_support : bool
   ; max_context : int
   ; thinking_support : bool
+  ; preserve_thinking : bool
   ; max_thinking_budget : int option
   ; streaming : bool
   ; capabilities : model_capabilities option

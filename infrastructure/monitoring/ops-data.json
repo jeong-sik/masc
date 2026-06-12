@@ -1,0 +1,360 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-06-11T19:13:48Z",
+  "source": "MASC board posts (ops hearth), iterations 1-13",
+  "live_system": "8935",
+  "date_range": "2026-05-15T10:22:01Z ~ 2026-05-15T23:50:00Z",
+
+  "iterations": [
+    {
+      "iter": 1,
+      "timestamp": "~2026-05-15T20:55:00Z",
+      "delta_lines": 48787,
+      "errors": 3268,
+      "warnings": 2893,
+      "errors_per_min": null,
+      "warnings_per_min": null,
+      "clusters_new": ["A", "B", "C"],
+      "clusters_recovered": [],
+      "clusters": {
+        "A": {"issue": "#15526", "name": "cascade providers unavailable", "error_count": 679, "warn_count": 1677, "rate": null, "status": "new"},
+        "B": {"issue": "#15527", "name": "keeper_bash Path syntax blocked", "error_count": 395, "warn_count": 0, "rate": null, "status": "new"},
+        "C": {"issue": "#15319 (comment)", "name": "stale_turn_timeout / stale_fleet_batch", "error_count": 141, "warn_count": 91, "rate": null, "status": "new"}
+      },
+      "recovery_count": 0,
+      "success_count": 0,
+      "cascade_dead": 0,
+      "key_finding": "Initial 3-cluster discovery. A+C share tier-group.ollama_cloud_stable root hypothesis. B is validator-side typed dispatch missing."
+    },
+
+    {
+      "iter": 2,
+      "timestamp": "~2026-05-15T21:14:00Z",
+      "delta_lines": 9176,
+      "errors": 815,
+      "warnings": 912,
+      "errors_per_min": 47.9,
+      "warnings_per_min": 53.6,
+      "clusters_new": ["D", "E"],
+      "clusters_recovered": [],
+      "clusters": {
+        "A": {"issue": "#15526", "name": "cascade providers unavailable", "error_count": null, "warn_count": null, "rate": "19.1/min (x2.7)", "status": "accelerating"},
+        "B": {"issue": "#15527", "name": "keeper_bash Path syntax blocked", "error_count": null, "warn_count": null, "rate": "3.5/min (x5.1)", "status": "accelerating"},
+        "D": {"issue": "#15529", "name": "sandbox cwd/config missing", "error_count": 72, "warn_count": 0, "rate": null, "status": "new"},
+        "E": {"issue": "#15530", "name": "decisions.jsonl missing_success_model", "error_count": 0, "warn_count": 76, "rate": null, "status": "new"}
+      },
+      "recovery_count": 0,
+      "success_count": 0,
+      "cascade_dead": 0,
+      "key_finding": "D: sandbox bind-mount or MASC_CONFIG_DIR missing. E: cascade_exhausted fail turn telemetry without success_model → schema reject → silent drop. A→E single causal chain hypothesis."
+    },
+
+    {
+      "iter": 3,
+      "timestamp": "~2026-05-15T21:34:00Z",
+      "delta_lines": null,
+      "errors": null,
+      "warnings": null,
+      "errors_per_min": null,
+      "warnings_per_min": null,
+      "clusters_new": [],
+      "clusters_recovered": [],
+      "clusters": {
+        "A": {"issue": "#15526", "name": "cascade providers unavailable", "rate": null, "status": "noise deceleration is keeper-pause, not recovery"},
+        "B": {"issue": "#15527", "name": "keeper_bash Path syntax blocked", "rate": null, "status": "maintained"},
+        "C": {"issue": "#15319", "name": "stale_turn_timeout", "rate": null, "status": "cascade fanout 3→5, shared cascade with A"},
+        "D": {"issue": "#15529", "name": "sandbox cwd/config missing", "rate": null, "status": "maintained"},
+        "E": {"issue": "#15530", "name": "decisions.jsonl missing_success_model", "rate": null, "status": "maintained"}
+      },
+      "recovery_count": 0,
+      "success_count": 0,
+      "cascade_dead": 0,
+      "key_finding": "Noise deceleration is keeper-pause (not recovery). Cascade fanout 3→5. C shares cascade with A."
+    },
+
+    {
+      "iter": 4,
+      "timestamp": "~2026-05-15T21:54:00Z",
+      "delta_lines": null,
+      "errors": null,
+      "warnings": null,
+      "errors_per_min": null,
+      "warnings_per_min": null,
+      "clusters_new": [],
+      "clusters_recovered": [],
+      "clusters": {
+        "A": {"issue": "#15526", "name": "cascade providers unavailable", "rate": null, "status": "re-accelerating (pause cycle bistable)"},
+        "B": {"issue": "#15527", "name": "keeper_bash Path syntax blocked", "rate": null, "status": "maintained"},
+        "E": {"issue": "#15530", "name": "decisions.jsonl missing_success_model", "rate": null, "status": "stopped (51min quiet)"}
+      },
+      "recovery_count": 0,
+      "success_count": 0,
+      "cascade_dead": 0,
+      "key_finding": "A shows pause cycle bistable behavior. A→E causality weakened. E entered quiet phase."
+    },
+
+    {
+      "iter": 5,
+      "timestamp": "~2026-05-15T22:19:00Z",
+      "delta_lines": 8456,
+      "errors": 418,
+      "warnings": 484,
+      "errors_per_min": 24.9,
+      "warnings_per_min": 28.8,
+      "clusters_new": [],
+      "clusters_recovered": ["F (D sub-variant: 201, 13h)", "required_tool_contract_violation (181)", "oas_timeout_budget (59)", "alive-but-stuck (10)"],
+      "clusters": {
+        "A": {"issue": "#15526", "name": "cascade providers unavailable", "rate": "5.16/min", "status": "decelerating. 3-axis failure modes confirmed: cascade_exhausted, oas_timeout_budget, required_tool_contract_violation. 178min, 0 recovery, 0 success. alive-but-stuck detected."},
+        "B": {"issue": "#15527", "name": "keeper_bash Path syntax blocked", "rate": "1.2/min", "status": "decelerating. keeper-pause effect, structural fix 0."},
+        "D": {"issue": "#15529", "name": "sandbox cwd/config missing", "rate": null, "status": "sub-variant F recovered: multi-sandbox repos. F: 13h/201 missed."},
+        "E": {"issue": "#15530", "name": "decisions.jsonl missing_success_model", "rate": null, "status": "stopped (51min+ quiet)"}
+      },
+      "recovery_count": 0,
+      "success_count": 0,
+      "cascade_dead": 3,
+      "key_finding": "First stem normalization (4 patterns recovered: F:201, required_tool:181, oas_timeout:59, alive-but-stuck:10). A identified as 3-axis failure. D sub-variant F (multi-sandbox) recovered."
+    },
+
+    {
+      "iter": 6,
+      "timestamp": "~2026-05-15T22:34:00Z",
+      "delta_lines": 3952,
+      "errors": 139,
+      "warnings": 190,
+      "errors_per_min": 9.3,
+      "warnings_per_min": 12.7,
+      "clusters_new": [],
+      "clusters_recovered": ["K (#15542): 479, 13h"],
+      "clusters": {
+        "A": {"issue": "#15526", "name": "cascade providers unavailable", "rate": "2.4/min", "status": "decelerating. 13:31:41 fiber storm (7 fiber_unresolved + 7 error + 12 Eio.Not_first). scholar also alive-but-stuck (3059s)."},
+        "B": {"issue": "#15527", "name": "keeper_bash Path syntax blocked", "rate": "0.4/min", "status": "decelerating"},
+        "D": {"issue": "#15529", "name": "sandbox cwd/config missing", "rate": null, "status": "sangsu re-fired (3 events)."},
+        "E": {"issue": "#15530", "name": "decisions.jsonl missing_success_model", "rate": null, "status": "stopped (66min)."},
+        "K": {"issue": "#15542", "name": "Completion contract require_tool_use violated", "error_count": 233, "warn_count": 246, "cumulative": 479, "duration_hours": 13, "rate": null, "status": "recovered. model picks read-only tool (keeper_board_list) in required_tool=true turn → contract violation."}
+      },
+      "recovery_count": 0,
+      "success_count": 0,
+      "cascade_dead": 6,
+      "key_finding": "Massive K cluster (479, 13h) recovered — largest missed cluster after A. Tool catalog exposes read-only tools in required_tool contexts. 6th cascade label 'tier-group.strict_tool_candidates' emerged. Monitoring tool self-criticism #2 (brackets wildcard missing)."
+    },
+
+    {
+      "iter": 7,
+      "timestamp": "~2026-05-15T22:45:00Z",
+      "delta_lines": 3178,
+      "errors": 160,
+      "warnings": 144,
+      "errors_per_min": 14.5,
+      "warnings_per_min": 13.1,
+      "clusters_new": [],
+      "clusters_recovered": [],
+      "clusters": {
+        "A": {"issue": "#15526", "name": "cascade providers unavailable", "rate": "2.3/min", "status": "stable. 6 cascade dead, 204min, 12 keeper recovery triggered."},
+        "B": {"issue": "#15527", "name": "keeper_bash Path syntax blocked", "rate": "2.1/min (x5)", "status": "re-accelerating 5x. paused keepers released retry-loop. circuit breaker misses Path syntax blocked."},
+        "D": {"issue": "#15529", "name": "sandbox cwd/config missing", "rate": null, "status": "supervisor self-repair active. risk: workaround hardening without permanent fix."},
+        "E": {"issue": "#15530", "name": "decisions.jsonl missing_success_model", "rate": null, "status": "stopped (77min)."},
+        "K": {"issue": "#15542", "name": "Completion contract require_tool_use violated", "rate": null, "status": "K2 sub-variant (41 cases, no-op turn tools=0). Same contract, two fix surfaces."}
+      },
+      "recovery_count": 12,
+      "success_count": 0,
+      "cascade_dead": 6,
+      "key_finding": "First recovery signal! Alive-but-stuck recovery realized: 12 keepers recovered (taskmaster, scholar, sangsu, ramarama, jobsian_purist, issue_king). 60 gitdir paths restored across 4 keepers. But keeper-side recovery ≠ cascade recovery — retry triggers re-fail (B 5x re-acceleration evidence)."
+    },
+
+    {
+      "iter": 8,
+      "timestamp": "~2026-05-15T22:54:00Z",
+      "delta_lines": 2485,
+      "errors": 59,
+      "warnings": 109,
+      "errors_per_min": 6.6,
+      "warnings_per_min": 12.1,
+      "clusters_new": [],
+      "clusters_recovered": [],
+      "clusters": {
+        "A": {"issue": "#15526", "name": "cascade providers unavailable", "rate": "0.89/min (x0.39)", "status": "decelerating. bistable coupled-oscillator: 6s burst then 9min quiet. 26 keeper recovery cumulative."},
+        "E": {"issue": "#15530", "name": "decisions.jsonl missing_success_model", "rate": null, "status": "burst: 58 WARN in 5s after 85min silence. hypothesis PROVEN: periodic re-scan. same rows re-dropped+re-logged each cycle."},
+        "K": {"issue": "#15542", "name": "Completion contract require_tool_use violated", "rate": null, "status": "partial fix surface observed: shell command surface + mix tools partial OK. K1 surface (read-only tool selection) unprotected."}
+      },
+      "recovery_count": 0,
+      "success_count": 0,
+      "cascade_dead": 6,
+      "key_finding": "E periodic re-scan hypothesis PROVEN: reader re-drops same rows on each cycle. A shows bistable coupled-oscillator mode. K has partial fix surface but K1 (read-only tool removal from visible-list) still needs priority fix. 0 new clusters."
+    },
+
+    {
+      "iter": 9,
+      "timestamp": "~2026-05-15T23:14:00Z",
+      "delta_lines": 5526,
+      "errors": 147,
+      "warnings": 217,
+      "errors_per_min": 7.4,
+      "warnings_per_min": 10.9,
+      "clusters_new": ["L"],
+      "clusters_recovered": [],
+      "clusters": {
+        "A": {"issue": "#15526", "name": "cascade providers unavailable", "rate": null, "status": "bistable desync detected. recovery 2.3x accelerated."},
+        "B": {"issue": "#15527", "name": "keeper_bash Path syntax blocked", "rate": null, "status": "maintained"},
+        "L": {"issue": "#15545", "name": "keeper_bash Path blocked outside allowed directories", "error_count": 127, "warn_count": 0, "duration_hours": 12, "rate": null, "status": "new. sibling of B but whitelist vs syntax mechanism. monitoring missed due to prefix collision (Path blocked vs Path syntax blocked). Third large missed cluster (D 1st, K 6th, L 9th)."}
+      },
+      "recovery_count": 0,
+      "success_count": 0,
+      "cascade_dead": 6,
+      "key_finding": "Cluster L recovered (127, 12h whitelist rejection). Third massive missed cluster in monitoring tool. A: recovery 2.3x accelerated → bistable desync. recovery 157+ cumulative."
+    },
+
+    {
+      "iter": 10,
+      "timestamp": "~2026-05-15T23:34:00Z",
+      "delta_lines": 5466,
+      "errors": 161,
+      "warnings": 323,
+      "errors_per_min": 8.1,
+      "warnings_per_min": 16.2,
+      "clusters_new": [],
+      "clusters_recovered": [],
+      "clusters": {
+        "A": {"issue": "#15526", "name": "cascade providers unavailable", "rate": "2.5/min (x1.3)", "status": "re-accelerating. synchronized with recovery frequency. cascade self-recovery 0 → infinite cycle. strike per-keeper confirmed."},
+        "E": {"issue": "#15530", "name": "decisions.jsonl missing_success_model", "rate": null, "status": "burst #5 (84 WARN at 14:17:13). cycle duration: 15→14→85→23min — load-variable, not uniform. A's fail turn load may trigger E."}
+      },
+      "recovery_count": 0,
+      "success_count": 0,
+      "cascade_dead": 6,
+      "key_finding": "A and E frequency synchronized. strike per-keeper confirmed (nick0cave/imseonghan/taskmaster each strike 1/3). E cycle is load-variable not uniform. A→E causality partially re-emerges."
+    },
+
+    {
+      "iter": 11,
+      "timestamp": "~2026-05-15T23:50:00Z",
+      "delta_lines": null,
+      "errors": null,
+      "warnings": null,
+      "errors_per_min": null,
+      "warnings_per_min": null,
+      "clusters_new": [],
+      "clusters_recovered": [],
+      "clusters": {
+        "A": {"issue": "#15526", "name": "cascade providers unavailable", "status": "strike 1/3→2/3 escalation"},
+        "B": {"issue": "#15527", "name": "keeper_bash Path syntax blocked", "status": "scope expanded to keeper_pr_review_comment"}
+      },
+      "recovery_count": 0,
+      "success_count": 0,
+      "cascade_dead": null,
+      "key_finding": "Strike escalation phase. B scope expanded beyond keeper_bash to keeper_pr_review_comment. 3 idle crash chain events."
+    },
+
+    {
+      "iter": 12,
+      "timestamp": "~2026-05-15T23:50:00Z",
+      "delta_lines": null,
+      "errors": null,
+      "warnings": null,
+      "errors_per_min": null,
+      "warnings_per_min": null,
+      "clusters_new": ["M"],
+      "clusters_recovered": [],
+      "clusters": {
+        "M": {"issue": null, "name": "worktree-task lifecycle", "error_count": 219, "warn_count": 0, "status": "new. strike 3/3 → AUTO-PAUSE realized."},
+        "E": {"issue": "#15530", "name": "decisions.jsonl missing_success_model", "status": "burst #6"}
+      },
+      "recovery_count": 0,
+      "success_count": 0,
+      "cascade_dead": null,
+      "key_finding": "strike 3/3 → AUTO-PAUSE realized on all 3 keepers. New M cluster (219, worktree-task lifecycle). E burst #6."
+    },
+
+    {
+      "iter": 13,
+      "timestamp": "~2026-05-15T23:50:00Z",
+      "delta_lines": null,
+      "errors": null,
+      "warnings": null,
+      "errors_per_min": null,
+      "warnings_per_min": null,
+      "clusters_new": [],
+      "clusters_recovered": [],
+      "clusters": {
+        "A": {"issue": "#15526", "name": "cascade providers unavailable", "status": "back-off cycle re-acceleration. fiber storm #2."},
+        "K": {"issue": "#15542", "name": "Completion contract require_tool_use violated", "status": "AllowList = K fix partial"}
+      },
+      "recovery_count": 0,
+      "success_count": 0,
+      "cascade_dead": null,
+      "key_finding": "A back-off cycle re-acceleration with fiber storm #2. K AllowList fix is partial. No new clusters."
+    }
+  ],
+
+  "clusters_index": {
+    "#15526": {
+      "name": "Cluster A — cascade providers unavailable",
+      "type": "live-defect",
+      "category": "cascade-side",
+      "total_duration_minutes": 253,
+      "max_rate": "19.1/min (iter 2)",
+      "total_recovery": 157,
+      "total_success": 0,
+      "cascade_dead_count": 6,
+      "root_cause_hypothesis": "Single upstream SPOF + cooldown 1-way street. 3-axis failure: cascade_exhausted, oas_timeout_budget, required_tool_contract_violation.",
+      "behaviors_observed": ["pause cycle bistable", "coupled oscillator with recovery", "fiber storm (iter 6, 13)", "back-off cycle", "strike escalation"]
+    },
+    "#15527": {
+      "name": "Cluster B — keeper_bash Path syntax blocked",
+      "type": "live-defect",
+      "category": "validator-side",
+      "root_cause_hypothesis": "Typed dispatch missing — rg/grep pattern arg misclassified as path. Surface narrowing to masc_code_search needed.",
+      "scope_expansion": "expanded from keeper_bash to keeper_pr_review_comment (iter 11)"
+    },
+    "#15529": {
+      "name": "Cluster D — keeper sandbox cwd/config missing",
+      "type": "live-defect",
+      "category": "sandbox-side",
+      "root_cause_hypothesis": "Bind-mount or MASC_CONFIG_DIR not passed to sandbox. Sub-variant F: multi-sandbox repos."
+    },
+    "#15530": {
+      "name": "Cluster E — decisions.jsonl missing_success_model",
+      "type": "live-defect",
+      "category": "data-schema-side",
+      "behaviors": ["periodic re-scan (proven iter 8)", "load-variable cycle (15→14→85→23min)", "bursts identified: #5 (84 WARN), #6"],
+      "root_cause_hypothesis": "Writer-side optional + reader-side relax + schema migration. Per-row processed ledger or stream-only validate."
+    },
+    "#15542": {
+      "name": "Cluster K — Completion contract require_tool_use violated",
+      "type": "live-defect",
+      "category": "model-contract-side",
+      "total_events": 479,
+      "sub_variants": {"K1": "read-only tool selection (191)", "K2": "no-op turn tools=0 (42)"},
+      "root_cause_hypothesis": "Tool catalog exposes read-only tools in required_tool=true turns. AllowList filter is partial fix."
+    },
+    "#15545": {
+      "name": "Cluster L — keeper_bash Path blocked outside allowed directories",
+      "type": "live-defect",
+      "category": "whitelist-side",
+      "total_events": 127,
+      "duration_hours": 12,
+      "note": "Sibling of B but whitelist vs syntax mechanism. Monitoring prefix collision hid it."
+    },
+    "M": {
+      "name": "Cluster M — worktree-task lifecycle",
+      "type": "live-defect",
+      "category": "worktree-side",
+      "total_events": 219,
+      "iter_discovered": 12
+    }
+  },
+
+  "monitoring_tool_self_criticism": [
+    {"iter": 4, "finding": "stem fragmentation acknowledged. normalization inadequate."},
+    {"iter": 5, "finding": "4 patterns recovered after normalization fix."},
+    {"iter": 6, "finding": "K (479) still missed — brackets/parens wildcard missing in monitoring patterns."},
+    {"iter": 9, "finding": "L (127, 12h) missed third time — Path blocked vs Path syntax blocked prefix collision."}
+  ],
+
+  "fleet_state_summary": {
+    "total_keepers": 12,
+    "keepers_recovered": ["taskmaster", "scholar", "sangsu", "ramarama", "jobsian_purist", "issue_king"],
+    "gitdir_paths_restored": 60,
+    "strikes_observed": {"nick0cave": {"strike_count": 1, "max": 3}, "imseonghan": {"strike_count": 1, "max": 3}, "taskmaster": {"strike_count": 1, "max": 3}},
+    "auto_pause_triggered": true,
+    "strike_escalation": "strike 3/3 → AUTO-PAUSE realized on all 3 keepers (iter 12)"
+  }
+}

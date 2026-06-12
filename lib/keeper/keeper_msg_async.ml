@@ -47,6 +47,8 @@ let is_safe_request_id request_id =
   let len = String.length request_id in
   if len = 0
   then false
+  else if request_id = "." || request_id = ".."
+  then false
   else if len > max_request_id_len
   then false
   else (
@@ -494,6 +496,7 @@ let cancel ?base_path request_id : bool =
 ;;
 
 module For_testing = struct
+  let is_safe_request_id = is_safe_request_id
   let forget request_id = with_lock (fun () -> Hashtbl.remove pending request_id)
   let clear () = with_lock (fun () -> Hashtbl.clear pending)
   let record_path = record_path

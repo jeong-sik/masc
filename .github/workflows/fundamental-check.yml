@@ -301,3 +301,37 @@ jobs:
       - uses: actions/checkout@v4
       - name: Run lint
         run: bash scripts/lint/exhaustive-guard.sh
+
+  fun-protect-finalizer:
+    name: Fun.protect finalizer guard
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Run guard
+        run: |
+          python3 scripts/ci/check-fun-protect-finally-guard.py \
+            --base "${{ github.event.pull_request.base.sha }}" \
+            --head HEAD
+
+  spawn-bounded:
+    name: Spawn-bounded ratchet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ripgrep
+        run: sudo apt-get install -y -qq ripgrep
+      - name: Run lint
+        run: bash scripts/lint-spawn-bounded.sh
+
+  audit-path-ssot:
+    name: audit-path-ssot
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ripgrep
+        run: sudo apt-get update && sudo apt-get install -y -qq ripgrep
+      - name: Run path SSOT audit
+        run: bash scripts/audit-path-ssot.sh

@@ -76,11 +76,16 @@ type dispatched_event =
       }
   | Message_create of
       { channel_id : string
+      ; guild_id : string option
       ; message_id : string
       ; author_id : string
       ; author_name : string option
       ; content : string
       ; mentions_bot : bool
+      ; explicit_mentions_bot : bool
+      ; message_reference_channel_id : string option
+      ; message_reference_message_id : string option
+      ; referenced_message_author_id : string option
       }
   | Reaction_add of
       { channel_id : string
@@ -209,6 +214,25 @@ let field_bool_opt name json =
   | Some (`Bool b) -> Some b
   | _ -> None
 
+let contains_substring ~needle haystack =
+  let needle_len = String.length needle in
+  let haystack_len = String.length haystack in
+  if needle_len = 0 then true
+  else if needle_len > haystack_len then false
+  else
+    let rec loop i =
+      if i + needle_len > haystack_len then false
+      else if String.sub haystack i needle_len = needle then true
+      else loop (i + 1)
+    in
+    loop 0
+
+let content_mentions_user ~user_id content =
+  let user_id = String.trim user_id in
+  user_id <> ""
+  && (contains_substring ~needle:("<@" ^ user_id ^ ">") content
+      || contains_substring ~needle:("<@!" ^ user_id ^ ">") content)
+
 (* ── Frame parse / encode ──────────────────────────────────────── *)
 
 let parse_frame (json : Yojson.Safe.t) =
@@ -265,6 +289,7 @@ let decode_ready ~payload =
 
 let decode_message_create ~bot_user_id ~payload =
   let channel_id = field_string_opt "channel_id" payload in
+  let guild_id = field_string_opt "guild_id" payload in
   let message_id = field_string_opt "id" payload in
   let content =
     match field_string_opt "content" payload with
@@ -300,12 +325,46 @@ let decode_message_create ~bot_user_id ~payload =
           items
     | Some _, Some _ -> false
   in
+  let explicit_mentions_bot =
+    match bot_user_id with
+    | None -> false
+    | Some bot_id -> content_mentions_user ~user_id:bot_id content
+  in
+  let message_reference = assoc_opt "message_reference" payload in
+  let message_reference_channel_id =
+    match message_reference with
+    | Some json -> field_string_opt "channel_id" json
+    | None -> None
+  in
+  let message_reference_message_id =
+    match message_reference with
+    | Some json -> field_string_opt "message_id" json
+    | None -> None
+  in
+  let referenced_message_author_id =
+    match assoc_opt "referenced_message" payload with
+    | Some referenced -> (
+        match assoc_opt "author" referenced with
+        | Some author -> field_string_opt "id" author
+        | None -> None)
+    | None -> None
+  in
   match channel_id, message_id, author_id with
   | Some channel_id, Some message_id, Some author_id ->
       Ok
         (Message_create
-           { channel_id; message_id; author_id; author_name; content;
-             mentions_bot })
+           { channel_id
+           ; message_id
+           ; guild_id
+           ; author_id
+           ; author_name
+           ; content
+           ; mentions_bot
+           ; explicit_mentions_bot
+           ; message_reference_channel_id
+           ; message_reference_message_id
+           ; referenced_message_author_id
+           })
   | _ ->
       Error "MESSAGE_CREATE payload: missing channel_id / id / author.id"
 
@@ -358,12 +417,12 @@ let is_self ~bot_user_id actor_id =
   | Some self -> String.equal self actor_id
   | None -> false
 
-let message_passes_policy policy ~bot_user_id ~author_id ~mentions_bot =
+let message_passes_policy policy ~bot_user_id ~author_id ~explicit_mentions_bot =
   if is_self ~bot_user_id author_id then false
   else
     match policy with
     | All -> true
-    | Mention_only -> mentions_bot
+    | Mention_only -> explicit_mentions_bot
     | User_only id -> String.equal author_id id
 
 let reaction_passes_policy policy ~bot_user_id ~user_id =
@@ -521,11 +580,11 @@ let handle_dispatch t (frame : frame) =
                  ; message = Printf.sprintf "READY (bot_user_id=%s)" bot_user_id
                  }
              ] )
-       | Ok (Message_create { author_id; mentions_bot; _ } as ev) ->
+       | Ok (Message_create { author_id; explicit_mentions_bot; _ } as ev) ->
            if
              message_passes_policy t'.config.trigger_policy
                ~bot_user_id:t'.config.bot_user_id ~author_id
-               ~mentions_bot
+               ~explicit_mentions_bot
            then (t', [ Emit_event ev ])
            else if is_self ~bot_user_id:t'.config.bot_user_id author_id
            then

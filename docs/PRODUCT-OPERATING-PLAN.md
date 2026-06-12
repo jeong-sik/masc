@@ -9,10 +9,10 @@ code_refs:
 
 # Product Operating Plan
 
-> Current package version: v0.19.40
-> Latest changelog entry: v0.19.40 (2026-06-09)
-> Latest published GitHub release: v0.19.35 (2026-05-27)
-> Updated: 2026-06-09
+> Current package version: v0.19.41
+> Latest changelog entry: v0.19.41 (2026-06-12)
+> Latest published GitHub release: v0.19.41 (2026-06-12)
+> Updated: 2026-06-12
 > Release line: pre-1.0 (`0.y.z`); legacy `v2.*` tags are frozen history
 
 Execution companion for capsule-only workspace collaboration hardening:

@@ -233,8 +233,12 @@ let assemble_hooks
                     thinking_budget = adaptive_thinking_budget
                   ; enable_thinking =
                       (match runtime_seed.thinking_enabled with
-                       | Some false -> Some false
-                       | _ -> current_params.enable_thinking)
+                       | Some enabled -> Some enabled
+                       | None -> current_params.enable_thinking)
+                  ; preserve_thinking =
+                      (match runtime_seed.preserve_thinking with
+                       | Some preserve -> Some preserve
+                       | None -> current_params.preserve_thinking)
                   }
                 in
                 let ctx =
@@ -317,6 +321,20 @@ let assemble_hooks
                           smallest essential tool set if a tool call is strictly \
                           necessary.")
                   else ctx
+                in
+                let ctx =
+                  (* Memory OS recall — bounded advisory block rendered from
+                     persisted facts/episodes (read side; the write side is
+                     the librarian wired in #20897). Opt-in via
+                     MASC_KEEPER_MEMORY_OS_RECALL. *)
+                  match
+                    Keeper_memory_os_recall.render_if_enabled
+                      ~keeper_id:meta.name
+                      ~now:(Time_compat.now ())
+                      ()
+                  with
+                  | None -> ctx
+                  | Some block -> append_ctx ctx block
                 in
                 let tool_filter =
                   Agent_sdk.Guardrails.AllowList schema_filter

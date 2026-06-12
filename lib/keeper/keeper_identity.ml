@@ -120,6 +120,39 @@ let explicit_keeper_name raw_name =
     | None ->
       if Keeper_config.validate_name trimmed then Some trimmed else None
 
+(* RFC-0232 §3.4 — structural keeper identity.  [of_string] is the single
+   parse boundary: it folds case, then runs the same canonicalizers the
+   legacy token-set expansion used, with [canonical_keeper_name_from_agent_name]
+   first because it is the more specific form (wrapper unwrap, nickname →
+   agent type) and [canonical_keeper_name] as the broad fallback.  Inputs
+   that no canonicalizer recognizes keep their case-folded raw form so
+   non-keeper authors (humans, external bots) still mint comparable ids. *)
+module Keeper_id = struct
+  type t = string
+
+  let of_string value =
+    let folded = String.lowercase_ascii (String.trim value) in
+    if folded = "" then None
+    else (
+      let canonical =
+        match canonical_keeper_name_from_agent_name folded with
+        | Some c -> Some c
+        | None -> canonical_keeper_name folded
+      in
+      (* DET-OK: the raw fallback is the contract, not a permissive
+         default — authors that are not keepers (humans, external bots)
+         must still mint a comparable id, and their canonical form IS
+         the case-folded raw string.  Keeper-shaped inputs never reach
+         the fallback. *)
+      match String.trim (Option.value canonical ~default:folded) with
+      | "" -> None
+      | id -> Some (String.lowercase_ascii id))
+
+  let to_string id = id
+  let equal = String.equal
+  let compare = String.compare
+end
+
 type name_bundle = {
   persona_name : string;
   keeper_name : string;

@@ -77,26 +77,28 @@ let docker_target ~turn_sandbox_factory ~meta ~cwd =
      with
      | Error failure -> Error (image_preflight_target_error failure)
      | Ok () ->
-       let runner ~stdin_content ~argv ~env ~cwd:stage_cwd =
-         if Array.length env > 0 then
-           (Unix.WEXITED 1, "", "typed Shell IR Docker dispatch does not support env yet")
-         else
-           let cwd = stage_cwd_or_default stage_cwd in
-           match
-             Keeper_turn_sandbox_runtime.run_exec_with_status
-               ?stdin_content
-               runtime
-               ~timeout_sec
-               ~cwd
-               ~command_argv:argv
+      let runner ~on_stdout_chunk ~on_stderr_chunk ~stdin_content ~argv ~env ~cwd:stage_cwd =
+        if Array.length env > 0 then
+          (Unix.WEXITED 1, "", "typed Shell IR Docker dispatch does not support env yet")
+        else
+          let cwd = stage_cwd_or_default stage_cwd in
+          match
+            Keeper_turn_sandbox_runtime.run_exec_with_status_split
+              ?stdin_content
+              ?on_stdout_chunk
+              ?on_stderr_chunk
+              ~timeout_sec
+              runtime
+              ~cwd
+              ~command_argv:argv
            with
-           | Ok (status, output) -> status, output, ""
+           | Ok result -> result
            | Error err -> Unix.WEXITED 1, "", err
        in
-       let pipeline_runner ~stages =
-         match
-           List.find_opt
-             (fun stage -> Array.length stage.Masc_exec.Sandbox_target.env > 0)
+      let pipeline_runner ~on_stdout_chunk ~on_stderr_chunk ~stages =
+        match
+          List.find_opt
+            (fun stage -> Array.length stage.Masc_exec.Sandbox_target.env > 0)
              stages
          with
          | Some _ ->
@@ -112,11 +114,13 @@ let docker_target ~turn_sandbox_factory ~meta ~cwd =
                stages
            in
            match
-             Keeper_turn_sandbox_runtime.run_exec_pipeline_with_status
-               runtime
-               ~timeout_sec
-               ~cwd
-               ~stages
+            Keeper_turn_sandbox_runtime.run_exec_pipeline_with_status
+              ?on_stdout_chunk
+              ?on_stderr_chunk
+              ~timeout_sec
+              runtime
+              ~cwd
+              ~stages
            with
            | Ok result -> result
            | Error err -> Unix.WEXITED 1, "", err

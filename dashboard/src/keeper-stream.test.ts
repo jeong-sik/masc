@@ -94,7 +94,27 @@ describe('applyKeeperStreamEvent', () => {
     expect(entry?.text).toBe('Keeper request failed: Timeout after 630.0s')
   })
 
-  it('does not render continuation checkpoint text as a chat reply', () => {
+  // RFC-0232 P2: the checkpoint distinction rides the producer-typed
+  // `turn_outcome` field, not the reply text.
+  it('does not render a declared continuation checkpoint as a chat reply', () => {
+    assistantEntry()
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_REPLY_DETAILS',
+      value: {
+        reply: 'Continuation checkpoint saved; keeper remains scheduled for the next cycle.',
+        turn_outcome: 'continuation_checkpoint',
+      },
+    })).toBeNull()
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(entry?.text).toBe('')
+    expect(entry?.rawText).toBe('Continuation checkpoint saved; keeper remains scheduled for the next cycle.')
+    expect(entry?.delivery).toBe('queued')
+    expect(entry?.streamState).toBeNull()
+  })
+
+  it('renders checkpoint-shaped text as a reply when not declared a checkpoint', () => {
     assistantEntry()
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM',
@@ -105,10 +125,24 @@ describe('applyKeeperStreamEvent', () => {
     })).toBeNull()
 
     const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(entry?.text).toBe('Continuation checkpoint saved; keeper remains scheduled for the next cycle.')
+    expect(entry?.delivery).toBe('sending')
+  })
+
+  it('suppresses a declared checkpoint regardless of reply text', () => {
+    assistantEntry()
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_REPLY_DETAILS',
+      value: {
+        reply: '작업을 완료했습니다.',
+        turn_outcome: 'continuation_checkpoint',
+      },
+    })).toBeNull()
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
     expect(entry?.text).toBe('')
-    expect(entry?.rawText).toBe('Continuation checkpoint saved; keeper remains scheduled for the next cycle.')
     expect(entry?.delivery).toBe('queued')
-    expect(entry?.streamState).toBeNull()
   })
 
   it('extracts error messages from events', () => {

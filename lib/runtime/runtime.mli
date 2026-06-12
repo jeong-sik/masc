@@ -65,6 +65,13 @@ val thinking_support_of_runtime_id : string -> bool option
     {!Runtime_inference.for_runtime} to gate keeper thinking per model from the
     runtime.toml SSOT. *)
 
+val preserve_thinking_of_runtime_id : string -> bool option
+(** [Some true] when the model bound to runtime [id] opts into
+    [preserve-thinking].  [None] means unknown runtime, uninitialized cache, or
+    the default false value.  Consumed by {!Runtime_inference.for_runtime} to
+    preserve Qwen3.6 reasoning traces on OpenAI-compatible runtimes that
+    support it without spraying explicit false fields at every provider. *)
+
 val get_default_runtime_id : unit -> string
 (** @raise Failure if {!init_default} has not run. No silent fallback
     (RFC-0206 §2.1): an unresolved default is a startup-ordering bug, not a

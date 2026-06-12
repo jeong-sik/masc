@@ -16,6 +16,7 @@ import {
 } from '../store'
 import { missionSnapshot } from '../mission-signals'
 import { namespaceTruth } from '../namespace-truth-store'
+import { fleetCompositeSnapshot } from '../composite-signals'
 
 function makeAgent(overrides: Partial<Agent> = {}): Agent {
   return {
@@ -24,6 +25,37 @@ function makeAgent(overrides: Partial<Agent> = {}): Agent {
     current_task: null,
     ...overrides,
   }
+}
+
+function makeCompositeSnapshot(
+  overrides: Partial<KeeperCompositeSnapshot> = {},
+): KeeperCompositeSnapshot {
+  return {
+    keeper: 'sangsu',
+    correlation_id: 'keeper:sangsu:1',
+    run_id: 'r-1',
+    ts: 0,
+    phase: 'running',
+    turn_phase: 'idle',
+    decision: { stage: 'undecided' },
+    runtime: { state: 'idle' },
+    compaction: { stage: 'accumulating' },
+    measurement: { captured: false },
+    invariants: {
+      phase_turn_alignment: true,
+      no_runtime_before_measurement: true,
+      compaction_atomicity: true,
+      event_priority_monotone: true,
+      phase_derivation_agreement: true,
+    },
+    fsm_guard_violations: 0,
+    fsm_guard_violation_breakdown: [],
+    is_live: false,
+    live_turn: null,
+    last_outcome: null,
+    recommended_actions: [],
+    ...overrides,
+  } as KeeperCompositeSnapshot
 }
 
 async function flushUi(): Promise<void> {
@@ -503,6 +535,7 @@ describe('AgentRoster live-only cards', () => {
     serverStatus.value = null
     namespaceTruth.value = null
     missionSnapshot.value = null
+    fleetCompositeSnapshot.value = null
   })
 
   afterEach(() => {
@@ -518,6 +551,7 @@ describe('AgentRoster live-only cards', () => {
     serverStatus.value = null
     namespaceTruth.value = null
     missionSnapshot.value = null
+    fleetCompositeSnapshot.value = null
   })
 
   it('renders keeper cards from live runtime data and ignores stale mission brief fields', async () => {
@@ -825,6 +859,99 @@ describe('AgentRoster live-only cards', () => {
     const text = container.textContent ?? ''
     expect(text).toContain('일시정지 원인: 런타임 후보 소진')
     expect(text).toContain('런타임 후보가 모두 소진되어 runtime 상태 확인이 필요합니다.')
+  })
+
+  it('projects live composite turns into keeper operation presence', async () => {
+    agents.value = [
+      makeAgent({
+        name: 'keeper-sangsu-agent',
+        status: 'active',
+      }),
+    ]
+    keepers.value = [
+      {
+        name: 'sangsu',
+        agent_name: 'keeper-sangsu-agent',
+        status: 'active',
+        phase: 'Running',
+        pipeline_stage: 'idle',
+        registered: true,
+        keepalive_running: true,
+      } as Keeper,
+    ]
+    fleetCompositeSnapshot.value = {
+      generated_at: 1,
+      count: 1,
+      snapshots: [
+        makeCompositeSnapshot({
+          keeper: 'sangsu',
+          is_live: true,
+          turn_phase: 'executing',
+          live_turn: {
+            turn_id: 686,
+            started_at: 1_781_184_817,
+            last_progress_at: 1_781_184_843,
+            last_progress_kind: 'sse_thinking_delta',
+          },
+        }),
+      ],
+    }
+
+    await act(async () => {
+      render(html`<${AgentRoster} keeperFilter="keeper-only" />`, container)
+    })
+    await flushUi()
+
+    const row = container.querySelector('[data-testid="keeper-operations-row"]') as HTMLElement
+    const presence = row.querySelector('[data-agent-presence]') as HTMLElement
+    expect(presence.dataset.presenceRawStatus).toBe('busy')
+    expect(presence.dataset.presenceState).toBe('working')
+    expect(presence.dataset.presenceLabel).toBe('작업 중')
+    expect(presence.textContent).toContain('executing live')
+  })
+
+  it('projects non-live composite keepers as waiting instead of busy', async () => {
+    agents.value = [
+      makeAgent({
+        name: 'keeper-sangsu-agent',
+        status: 'active',
+      }),
+    ]
+    keepers.value = [
+      {
+        name: 'sangsu',
+        agent_name: 'keeper-sangsu-agent',
+        status: 'active',
+        phase: 'Running',
+        pipeline_stage: 'idle',
+        registered: true,
+        keepalive_running: true,
+      } as Keeper,
+    ]
+    fleetCompositeSnapshot.value = {
+      generated_at: 1,
+      count: 1,
+      snapshots: [
+        makeCompositeSnapshot({
+          keeper: 'sangsu',
+          is_live: false,
+          turn_phase: 'idle',
+          live_turn: null,
+        }),
+      ],
+    }
+
+    await act(async () => {
+      render(html`<${AgentRoster} keeperFilter="keeper-only" />`, container)
+    })
+    await flushUi()
+
+    const row = container.querySelector('[data-testid="keeper-operations-row"]') as HTMLElement
+    const presence = row.querySelector('[data-agent-presence]') as HTMLElement
+    expect(presence.dataset.presenceRawStatus).toBe('idle')
+    expect(presence.dataset.presenceState).toBe('idle')
+    expect(presence.dataset.presenceLabel).toBe('대기')
+    expect(presence.textContent).toContain('대기 중')
   })
 
   it('uses heartbeat and full keeper model for cards when action/model fallbacks disagree', async () => {

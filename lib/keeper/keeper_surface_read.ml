@@ -34,9 +34,12 @@ let message_json (m : Store.chat_message) : Yojson.Safe.t =
           ]
   in
   `Assoc
-    ([ ("role", `String m.role); ("content", `String m.content) ]
+    ([ ("role", `String (Store.Role.to_label m.role));
+       ("content", `String m.content) ]
     @ opt_float_field "ts" m.ts
     @ opt_string_field "source" m.source
+    @ opt_string_field "conversation_id" m.conversation_id
+    @ opt_string_field "external_message_id" m.external_message_id
     @ opt_string_field "tool_call_name" m.tool_call_name
     @ speaker_fields)
 

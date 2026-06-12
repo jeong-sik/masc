@@ -13,6 +13,7 @@ type name_map = {
   guild_names : (string * string) list;
   channel_names : (string * string) list;
   channel_to_guild : (string * string) list;
+  channel_to_parent : (string * string) list;
   updated_at : string;
 }
 
@@ -51,4 +52,10 @@ val to_json : name_map -> Yojson.Safe.t
     [channel_to_guild] map from {!read}. [None] when [channel_id]
     is empty/whitespace or unknown. *)
 val resolve_guild_id_for_channel :
+  channel_id:string -> string option
+
+(** Return the parent channel id for a Discord thread/channel, using
+    the cached [channel_to_parent] map from {!read}. [None] when
+    [channel_id] is empty/whitespace or unknown. *)
+val resolve_parent_channel_id_for_channel :
   channel_id:string -> string option

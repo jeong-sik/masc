@@ -49,6 +49,7 @@ type config =
   raw_trace : Agent_sdk.Raw_trace.t option;
   trace_link : (string * string) option;
   enable_thinking : bool option;
+  preserve_thinking : bool option;
   transport : Masc_grpc_transport.t;
   allowed_paths : string list;
   checkpoint_sidecar : Yojson.Safe.t option;
@@ -192,6 +193,7 @@ let request_runtime_fields_on_base_config
     min_p = req_config.min_p;
     system_prompt = req_config.system_prompt;
     enable_thinking = req_config.enable_thinking;
+    preserve_thinking = req_config.preserve_thinking;
     thinking_budget = req_config.thinking_budget;
     clear_thinking = req_config.clear_thinking;
     tool_stream = req_config.tool_stream;
@@ -699,6 +701,9 @@ let run
       let partial_response =
         partial_response_of_stop
           ~session_id
+          (* Display text only.  Checkpoint classification flows through
+             [stop_reason] → [Keeper_turn_outcome] (RFC-0232 P2); no
+             consumer may sniff this string. *)
           ~text:
             "Continuation checkpoint saved; keeper remains scheduled for the \
              next cycle."

@@ -80,8 +80,8 @@ description = "approve or reject an awaiting_verification task after inspecting 
 
 [[hints]]
 name = "keeper_task_done"
-call = "`keeper_task_done` { notes: \"evidence\" }"
-description = "close non-PR task work with evidence"
+call = "`keeper_task_done` { task_id: \"TASK_ID\", result: \"completion evidence\" }"
+description = "close claimed task work with task_id and concrete result evidence"
 
 [[hints]]
 name = "keeper_stay_silent"

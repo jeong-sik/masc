@@ -29,6 +29,103 @@ let timeout_phase_of_masc_internal_phase phase =
   if String.equal phase "" then None else timeout_phase_of_label phase
 ;;
 
+let substring_index haystack needle =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  let rec loop idx =
+    if needle_len = 0
+    then Some idx
+    else if idx + needle_len > haystack_len
+    then None
+    else if String.sub haystack idx needle_len = needle
+    then Some idx
+    else loop (idx + 1)
+  in
+  loop 0
+;;
+
+let suffix_after_prefix text prefix =
+  if String.starts_with ~prefix text
+  then
+    let prefix_len = String.length prefix in
+    Some (String.sub text prefix_len (String.length text - prefix_len) |> String.trim)
+  else None
+;;
+
+let trim_phase_token token =
+  let rec trim_right s =
+    let len = String.length s in
+    if len = 0
+    then s
+    else (
+      match s.[len - 1] with
+      | ':' | ',' | ';' | '.' | ')' -> trim_right (String.sub s 0 (len - 1))
+      | _ -> s)
+  in
+  token |> String.trim |> trim_right
+;;
+
+let phase_label_after_marker detail marker =
+  let detail = String.lowercase_ascii detail in
+  let marker = String.lowercase_ascii marker in
+  match substring_index detail marker with
+  | None -> None
+  | Some marker_start ->
+    let token_start = marker_start + String.length marker in
+    let rec token_end idx =
+      if idx >= String.length detail
+      then idx
+      else (
+        match detail.[idx] with
+        | ' ' | '\t' | '\n' | '\r' -> idx
+        | _ -> token_end (idx + 1))
+    in
+    let token_end = token_end token_start in
+    if token_end <= token_start
+    then None
+    else
+      Some
+        (String.sub detail token_start (token_end - token_start)
+         |> trim_phase_token)
+;;
+
+let provider_runtime_error_timeout_phase_label ~code ~detail =
+  let code = String.lowercase_ascii (String.trim code) in
+  let code_phase =
+    match suffix_after_prefix code "provider_error_timeout:" with
+    | Some label -> Some label
+    | None -> suffix_after_prefix code "provider_error_network:timeout:"
+  in
+  match Option.map trim_phase_token code_phase with
+  | Some phase when not (String.equal phase "") -> Some phase
+  | Some _ | None -> phase_label_after_marker detail "timeout phase="
+;;
+
+let provider_runtime_error_looks_like_timeout ~code ~detail =
+  let code = String.lowercase_ascii (String.trim code) in
+  String.equal code "provider_error_timeout"
+  || String.starts_with ~prefix:"provider_error_timeout:" code
+  || String.equal code "provider_error_network:timeout"
+  || String.starts_with ~prefix:"provider_error_network:timeout:" code
+  || String_util.contains_substring_ci detail "timeout phase="
+  || String_util.contains_substring_ci
+       detail
+       "http operation exceeded wall-clock timeout"
+;;
+
+let classify_provider_runtime_error_record ~code ~detail =
+  if provider_runtime_error_looks_like_timeout ~code ~detail
+  then
+    Provider_timeout
+      { source = Oas_provider
+      ; phase =
+        (Option.bind
+           (provider_runtime_error_timeout_phase_label ~code ~detail)
+           timeout_phase_of_label)
+      }
+  else Not_provider_runtime_failure
+;;
+
 let provider_timeout ~source ~phase =
   Provider_timeout { source; phase }
 ;;

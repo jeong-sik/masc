@@ -7,6 +7,7 @@
 - `release`: disabled OTLP export in release binary smoke so GitHub release jobs
   validate boot/listening without blocking on a collector that is intentionally
   absent in CI.
+
 ## [Unreleased]
 
 ### Added
@@ -17,8 +18,14 @@
 ### Changed
 - Bumped the OAS agent SDK pin to `v0.206.1` at
   `a5006c5444c04e4a8af9c650015a91a098cd1d9f` and raised the
-  `agent_sdk` dependency floor to `0.206.1`, picking up the Z.AI
+  `agent_sdk` dependency floor to `0.206.1`, picking up duplicate
+  streaming request-field deduplication from OAS #2022 and the Z.AI
   preserved-thinking request mapping from OAS #2023.
+
+### Fixed
+- `keeper`: classified provider timeout catch-all records such as
+  `provider_error_timeout:http_operation` as retryable provider timeouts
+  instead of terminal `provider_runtime_error` blockers.
 
 ## [0.19.41] - 2026-06-12
 

@@ -176,11 +176,16 @@ let search_memory_bank
     then parsed
     else List.filter (fun m -> String_util.equals_ci m.kind kind_filter) parsed
   in
-  (* Text match: query against text field (non-deterministic data) *)
+  (* Text match: token-AND over whitespace-separated query tokens.
+     Whole-query substring match (the previous approach) failed on
+     multi-word Korean queries where a single substring span doesn't
+     match — e.g. query "기억 능력" expects docs containing both
+     "기억" AND "능력", not the exact contiguous substring "기억 능력". *)
+  let query_tokens = String.split_on_char ' ' query |> List.filter (fun t -> t <> "") in
   let matched =
-    if query = ""
+    if query = "" || query_tokens = []
     then filtered
-    else List.filter (fun m -> String_util.contains_substring_ci m.text query) filtered
+    else List.filter (fun m -> List.for_all (fun tok -> String_util.contains_substring_ci m.text tok) query_tokens) filtered
   in
   (* Scoring: priority * recency_weight.
      recency_weight normalizes age relative to the oldest note in the result set.
@@ -309,7 +314,11 @@ let search_history
     @ fst (dedup (snd (dedup seen0 current_history)) prev_history)
   in
   all_candidates
-  |> List.filter (fun msg -> query <> "" && String_util.contains_substring_ci msg query)
+  |> List.filter (fun msg ->
+    query <> ""
+    && String.split_on_char ' ' query
+       |> List.filter (fun t -> t <> "")
+       |> (fun tokens -> tokens <> [] && List.for_all (fun tok -> String_util.contains_substring_ci msg tok) tokens))
   |> List.rev
   |> take limit
 ;;

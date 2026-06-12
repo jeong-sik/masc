@@ -100,7 +100,9 @@ let workflow_rejection_info_of_json json =
   ; rule_id
   ; tool_suggestion
   ; alternatives =
-      Option.value ~default:[] (json_or_detail_string_list_opt "alternatives" json)
+      (match json_or_detail_string_list_opt "alternatives" json with
+       | Some alternatives -> alternatives
+       | None -> [])
   ; hint = json_or_detail_string_opt "hint" json
   ; scope_policy
   }
@@ -262,18 +264,22 @@ let workflow_rejection_info_of_raw raw =
 let workflow_rejection_family_key ~tool_name (info : workflow_rejection_info) =
   let next_tool_key =
     match info.tool_suggestion with
-    | Some tool -> Some tool
+    | Some tool -> tool
     | None ->
-      List.find_opt
-        (fun alternative -> not (String.equal alternative tool_name))
-        info.alternatives
+      (match
+         List.find_opt
+           (fun alternative -> not (String.equal alternative tool_name))
+           info.alternatives
+       with
+       | Some tool -> tool
+       | None -> "unknown_tool")
   in
   Printf.sprintf
     "%s:%s:%s:%s"
     (Option.value ~default:"unknown_task" info.task_id)
     tool_name
     (Option.value ~default:"unknown_rule" info.rule_id)
-    (Option.value ~default:"unknown_tool" next_tool_key)
+    next_tool_key
 ;;
 
 let workflow_rejection_recovery_instruction ~tool_name ~count (info : workflow_rejection_info) =

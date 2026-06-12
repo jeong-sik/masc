@@ -803,6 +803,9 @@ const TIMELINE_HOURS = 24
 const TIMELINE_LIMIT = 200
 const TRAJECTORY_LIMIT = 100
 const TOOL_CALL_LIMIT = 100
+const SESSION_TRACE_RELOAD_DEBOUNCE_MS = 1_000
+
+const sessionTraceReloadTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
 export async function loadSessionTrace(agentName: string, isKeeper: boolean): Promise<void> {
   // Bump fetch token for this agent — any prior in-flight fetch becomes stale.
@@ -846,7 +849,30 @@ export async function loadSessionTrace(agentName: string, isKeeper: boolean): Pr
   }
 }
 
+export function scheduleSessionTraceReload(
+  agentName: string,
+  isKeeper: boolean,
+  delayMs = SESSION_TRACE_RELOAD_DEBOUNCE_MS,
+): void {
+  if (traceSlots.value[agentName] == null) return
+
+  const existing = sessionTraceReloadTimers.get(agentName)
+  if (existing != null) clearTimeout(existing)
+
+  const timer = setTimeout(() => {
+    sessionTraceReloadTimers.delete(agentName)
+    if (traceSlots.value[agentName] == null) return
+    void loadSessionTrace(agentName, isKeeper)
+  }, delayMs)
+  sessionTraceReloadTimers.set(agentName, timer)
+}
+
 export function closeSessionTrace(agentName: string): void {
+  const timer = sessionTraceReloadTimers.get(agentName)
+  if (timer != null) {
+    clearTimeout(timer)
+    sessionTraceReloadTimers.delete(agentName)
+  }
   const next = { ...traceSlots.value }
   delete next[agentName]
   traceSlots.value = next

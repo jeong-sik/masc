@@ -32,8 +32,8 @@ let accept_rejection_kind_to_string = function
 ;;
 
 let response_accept_rejection (response : Agent_sdk.Types.api_response) =
-  if Agent_sdk.Response_shape.ended_without_deliverable_content response
-  then
+  let shape = Agent_sdk.Response_shape.summarize response in
+  if not (Agent_sdk.Response_shape.has_deliverable_content shape) then
     Some
       { kind = No_usable_progress
       ; reason = Agent_sdk.Response_shape.diagnostic_summary response

@@ -174,6 +174,59 @@ let test_thinking_with_tool_use_is_accepted () =
     Alcotest.failf "thinking plus tool use should pass accept: %s"
       (Agent_sdk.Error.to_string err)
 
+let test_empty_non_end_turn_response_is_rejected () =
+  let result =
+    Masc.Keeper_turn_driver.For_testing.apply_accept
+      ~runtime_id:"runtime.empty-stop-sequence"
+      ~accept:Keeper_tool_response.response_has_text_or_tool_progress
+      (run_result ~stop_reason:Agent_sdk.Types.StopSequence ())
+  in
+  let err, reason_kind, reason = expect_accept_rejected result in
+  Alcotest.(check bool)
+    "reason kind is no usable progress"
+    true
+    (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress);
+  Alcotest.(check bool)
+    "reason identifies empty shape"
+    true
+    (contains ~needle:"shape=empty" reason);
+  Alcotest.(check bool)
+    "reason keeps non-end stop reason"
+    true
+    (contains ~needle:"stop_reason=stop_sequence" reason);
+  Alcotest.(check bool)
+    "no-progress accept rejection is typed"
+    true
+    (Masc.Keeper_error_classify.is_accept_no_usable_progress_error err)
+
+let test_blank_text_non_end_turn_response_is_rejected () =
+  let result =
+    Masc.Keeper_turn_driver.For_testing.apply_accept
+      ~runtime_id:"runtime.blank-max-tokens"
+      ~accept:Keeper_tool_response.response_has_text_or_tool_progress
+      (run_result
+         ~content:[ Agent_sdk.Types.Text " \n\t " ]
+         ~stop_reason:Agent_sdk.Types.MaxTokens
+         ())
+  in
+  let _err, reason_kind, reason = expect_accept_rejected result in
+  Alcotest.(check bool)
+    "reason kind is no usable progress"
+    true
+    (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress);
+  Alcotest.(check bool)
+    "reason identifies blank text"
+    true
+    (contains ~needle:"shape=blank_text_only" reason);
+  Alcotest.(check bool)
+    "reason reports zero trimmed text chars"
+    true
+    (contains ~needle:"text_chars=0" reason);
+  Alcotest.(check bool)
+    "reason keeps max-token stop reason"
+    true
+    (contains ~needle:"stop_reason=max_tokens" reason)
+
 let test_custom_accept_reject_preserves_predicate_reason () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
@@ -253,6 +306,10 @@ let () =
             test_thinking_with_text_is_accepted;
           Alcotest.test_case "thinking plus tool use is accepted" `Quick
             test_thinking_with_tool_use_is_accepted;
+          Alcotest.test_case "empty non-end-turn response is rejected" `Quick
+            test_empty_non_end_turn_response_is_rejected;
+          Alcotest.test_case "blank text non-end-turn response is rejected" `Quick
+            test_blank_text_non_end_turn_response_is_rejected;
           Alcotest.test_case "custom predicate rejection stays distinct" `Quick
             test_custom_accept_reject_preserves_predicate_reason;
           Alcotest.test_case "mixed non-progress rejection is diagnosed" `Quick

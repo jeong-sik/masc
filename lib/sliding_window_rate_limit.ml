@@ -34,13 +34,14 @@ let now () = Unix.gettimeofday ()
 let prune_queue ~window_start q =
   (* Remove timestamps that have fallen outside the window *)
   while not (Queue.is_empty q) && Queue.peek q < window_start do
-    ignore (Queue.take q)
+    let _dropped = Queue.take q in
+    ()
   done
 
 let check t ~key =
-  let n = now () in
-  let window_start = n -. t.window_sec in
   Eio.Mutex.use_rw t.mutex (fun () ->
+    let n = now () in
+    let window_start = n -. t.window_sec in
     let entry =
       match StringMap.find_opt key t.entries with
       | Some e ->
@@ -61,9 +62,9 @@ let check t ~key =
   )
 
 let remaining t ~key =
-  let n = now () in
-  let window_start = n -. t.window_sec in
   Eio.Mutex.use_rw t.mutex (fun () ->
+    let n = now () in
+    let window_start = n -. t.window_sec in
     match StringMap.find_opt key t.entries with
     | None -> t.max_requests
     | Some entry ->
@@ -74,13 +75,14 @@ let remaining t ~key =
 let cleanup t ~older_than_seconds =
   let cutoff = now () -. older_than_seconds in
   Eio.Mutex.use_rw t.mutex (fun () ->
-    let keep, removed =
-      StringMap.filter_map (fun key entry ->
+    let before = StringMap.cardinal t.entries in
+    let keep =
+      StringMap.filter_map (fun _key entry ->
         if entry.last_access < cutoff then None
         else Some entry
       ) t.entries
     in
-    let removed_count = StringMap.cardinal t.entries - StringMap.cardinal keep in
+    let removed_count = before - StringMap.cardinal keep in
     t.entries <- keep;
     removed_count
   )

@@ -57,6 +57,7 @@ let test_cleanup_removes_stale () =
   ignore (check limiter ~key:"fresh");
   ignore (check limiter ~key:"stale");
   Unix.sleepf 0.01;
+  ignore (check limiter ~key:"fresh");
   let removed = cleanup limiter ~older_than_seconds:0.005 in
   Alcotest.(check int) "one stale removed" 1 removed;
   Alcotest.(check bool) "fresh still works" true (check limiter ~key:"fresh");

@@ -76,7 +76,7 @@ let sdk_cases : (string * SdkE.sdk_error * string) list =
     , SdkE.Agent (SdkE.CostBudgetExceeded { spent_usd = 0.42; limit_usd = 0.40 })
     , "agent_error_cost_budget_exceeded:spent_usd=0.42,limit_usd=0.40" )
   ; ( "Agent/CostBudgetUnenforceable"
-    , SdkE.Agent (SdkE.CostBudgetUnenforceable { model_id = "provider_k-5.1"; limit_usd = 0.40 })
+    , SdkE.Agent (SdkE.CostBudgetUnenforceable { model_id = "glm-5.1"; limit_usd = 0.40 })
     , "agent_error_cost_budget_unenforceable:runtime=runtime,limit_usd=0.40" )
   ; ( "Agent/IdleDetected"
     , SdkE.Agent (SdkE.IdleDetected { consecutive_idle_turns = 3 })

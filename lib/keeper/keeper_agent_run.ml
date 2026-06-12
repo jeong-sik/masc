@@ -91,7 +91,12 @@ let run_turn
       ~(generation : int)
       ?(max_turns : int = Keeper_runtime_resolved.reactive_max_turns_per_call ())
       (* Per-call turn budget. Keeper resumes via checkpoint if exhausted. *)
-      ?(max_idle_turns : int = 3)
+      ~(max_idle_turns : int)
+      (* Required, no default: the OAS loop guard kills the run at this
+         count, so the caller must pick the channel-appropriate threshold
+         (reactive/autonomous). A silent default of 3 sat below the
+         graduated idle hook's skip threshold (4), making graceful Skip
+         unreachable — user chat turns died as IdleDetected errors. *)
       ?(history_user_source = "direct_user")
       ?(history_assistant_source = "direct_assistant")
       ?guardrails

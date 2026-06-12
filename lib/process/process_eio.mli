@@ -112,11 +112,16 @@ val run_argv_with_stdin_and_status_split :
   ?timeout_sec:float ->
   ?env:string array ->
   ?cwd:string ->
+  ?on_stdout_chunk:(string -> unit) ->
+  ?on_stderr_chunk:(string -> unit) ->
   stdin_content:string ->
   string list ->
   (Unix.process_status * string * string)
 (** Like [run_argv_with_stdin_and_status], but returns
-    [(status, stdout, stderr)] without combining stderr into stdout. *)
+    [(status, stdout, stderr)] without combining stderr into stdout. When
+    callback arguments are supplied on the Eio path, they are invoked for
+    stdout/stderr chunks while the process is still running. Fallback Unix
+    execution remains completion-captured. *)
 
 (** Run command with explicit argv, return (Unix.process_status, stdout).
     Uses spawn + await to get exit status without raising.
@@ -158,11 +163,18 @@ type pipeline_stage = {
 (** One argv-only process stage in a native pipeline. *)
 
 val run_argv_pipeline_with_status_split :
-  ?timeout_sec:float -> pipeline_stage list -> (Unix.process_status * string * string)
+  ?timeout_sec:float ->
+  ?on_stdout_chunk:(string -> unit) ->
+  ?on_stderr_chunk:(string -> unit) ->
+  pipeline_stage list ->
+  (Unix.process_status * string * string)
 (** Run host stages as a native pipeline. Adjacent stages are connected with
     process pipes so intermediate stdout is streamed with backpressure rather
     than buffered into OCaml strings. The returned stdout is the final stage's
-    stdout; stderr is captured from every stage in stage order. *)
+    stdout; stderr is captured from every stage in stage order. When callback
+    arguments are supplied on the Eio path, they are invoked for chunks read
+    from the final stdout pipe and per-stage stderr pipes while the pipeline is
+    still running. *)
 
 type detached_handle = {
   pid : int;

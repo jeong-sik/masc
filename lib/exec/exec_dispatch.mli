@@ -18,9 +18,9 @@ val dispatch_simple :
     used by pipeline dispatch when a previous stage's stdout must be
     forwarded without dropping the stage's sandbox target.
     [?on_output_chunk] is invoked for every chunk read from
-    stdout/stderr while the process is running on the host sandbox
-    path; Docker and pipeline paths currently emit the full captured
-    output after completion. *)
+    stdout/stderr while the process is running on the host sandbox path,
+    including host commands that receive typed stdin. Docker runner targets
+    receive the same callback contract. *)
 
 val dispatch :
   ?base_host_env:string array ->
@@ -48,6 +48,10 @@ val dispatch_pipeline :
   dispatch_result
 (** Execute a pipeline of commands, streaming stdout between stages.
     Handles [Simple] stages natively; nested [Pipeline] stages are
-    rejected with an error.  [?on_output_chunk] receives the final
-    captured stdout/stderr after pipeline completion; it is not yet a
-    per-process-read streaming callback. *)
+    rejected with an error.  [?on_output_chunk] is invoked for chunks read
+    from the host native pipeline's final stdout and per-stage stderr pipes
+    while the pipeline is still running. Docker pipeline runners receive the
+    same callback contract. Decomposed fallback pipeline paths stream each
+    stage's stderr and the final stage's stdout through the same callback
+    contract while preserving intermediate stdout as stdin for the next
+    stage. *)

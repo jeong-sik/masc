@@ -113,6 +113,12 @@ type dispatched_event =
   | Threads_bulk_tracked of
       { threads : (string * string) list
       }
+  | Thread_removed of
+      { thread_id : string
+      }
+      (** A Discord thread was deleted or archived. The state machine
+          removes it from [thread_parents]; the I/O layer should clean
+          its mutable registries accordingly. *)
   | Ignored of string  (** Known dispatch type we deliberately don't surface. *)
 
 (** {1 Inbound frame — what comes off the wire} *)

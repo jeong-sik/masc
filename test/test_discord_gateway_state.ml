@@ -1404,6 +1404,170 @@ let test_thread_registry_survives_reconnect () =
   check bool "thread_parents survives reconnect cycle" true
     (has_emit_event effects)
 
+(* ── Thread removal lifecycle ─────────────────────────────────────── *)
+
+let thread_delete_frame ~thread_id ~seq : S.frame =
+  { op = S.Op_dispatch
+  ; s = Some seq
+  ; t = Some "THREAD_DELETE"
+  ; d =
+      `Assoc
+        [ ("id", `String thread_id)
+        ; ("guild_id", `String "G1")
+        ; ("parent_id", `String "CH1")
+        ; ("type", `Int 11)
+        ]
+  }
+
+let thread_update_archived_frame ~thread_id ~parent_id ~seq : S.frame =
+  { op = S.Op_dispatch
+  ; s = Some seq
+  ; t = Some "THREAD_UPDATE"
+  ; d =
+      `Assoc
+        [ ("id", `String thread_id)
+        ; ("parent_id", `String parent_id)
+        ; ("type", `Int 11)
+        ; ("thread_metadata", `Assoc [ ("archived", `Bool true) ])
+        ]
+  }
+
+let has_emit_thread_removed ~thread_id effects =
+  List.exists
+    (function
+      | S.Emit_event (S.Thread_removed { thread_id = tid }) ->
+          String.equal tid thread_id
+      | _ -> false)
+    effects
+
+(* Decode: THREAD_DELETE => Thread_removed *)
+let test_decode_thread_delete () =
+  let payload =
+    `Assoc [ ("id", `String "THR1"); ("parent_id", `String "CH1") ]
+  in
+  match S.decode_dispatch ~bot_user_id:None ~event_name:"THREAD_DELETE" ~payload with
+  | Ok (S.Thread_removed { thread_id = "THR1" }) -> ()
+  | Ok _ -> fail "decoded THREAD_DELETE to wrong variant"
+  | Error e -> fail (Printf.sprintf "THREAD_DELETE decode error: %s" e)
+
+(* Decode: THREAD_DELETE missing id => Ignored *)
+let test_decode_thread_delete_missing_id () =
+  let payload = `Assoc [ ("parent_id", `String "CH1") ] in
+  match S.decode_dispatch ~bot_user_id:None ~event_name:"THREAD_DELETE" ~payload with
+  | Ok (S.Ignored _) -> ()
+  | Ok _ -> fail "expected Ignored for THREAD_DELETE without id"
+  | Error e -> fail (Printf.sprintf "THREAD_DELETE decode error: %s" e)
+
+(* Decode: THREAD_UPDATE with archived=true => Thread_removed *)
+let test_decode_thread_update_archived () =
+  let payload =
+    `Assoc
+      [ ("id", `String "THR1")
+      ; ("parent_id", `String "P1")
+      ; ("thread_metadata", `Assoc [ ("archived", `Bool true) ])
+      ]
+  in
+  match S.decode_dispatch ~bot_user_id:None ~event_name:"THREAD_UPDATE" ~payload with
+  | Ok (S.Thread_removed { thread_id = "THR1" }) -> ()
+  | Ok _ -> fail "THREAD_UPDATE archived=true should decode to Thread_removed"
+  | Error e -> fail (Printf.sprintf "THREAD_UPDATE decode error: %s" e)
+
+(* Decode: THREAD_UPDATE with archived=false => Thread_tracked (unchanged) *)
+let test_decode_thread_update_active_still_tracked () =
+  let payload =
+    `Assoc
+      [ ("id", `String "THR1")
+      ; ("parent_id", `String "P1")
+      ; ("thread_metadata", `Assoc [ ("archived", `Bool false) ])
+      ]
+  in
+  match S.decode_dispatch ~bot_user_id:None ~event_name:"THREAD_UPDATE" ~payload with
+  | Ok (S.Thread_tracked { thread_id = "THR1"; parent_channel_id = "P1" }) -> ()
+  | Ok _ -> fail "THREAD_UPDATE archived=false should still be Thread_tracked"
+  | Error e -> fail (Printf.sprintf "THREAD_UPDATE decode error: %s" e)
+
+(* Step: THREAD_DELETE removes from thread_parents *)
+let test_step_thread_delete_removes_from_registry () =
+  let m = connected_with_policy ~policy:S.Mention_or_thread ~bot_user_id:"BOT" in
+  (* Register thread *)
+  let m, _ =
+    S.step m ~now_mono:5.0
+      (S.Frame_received (thread_create_frame ~thread_id:"THR1" ~parent_id:"CH1" ~seq:10))
+  in
+  (* Verify thread is tracked *)
+  let payload1 =
+    message_create_payload
+      ~id:"M1" ~channel_id:"THR1" ~author_id:"U1" ~content:"in thread"
+      ~mention_ids:[] ()
+  in
+  let _, effects1 =
+    S.step m ~now_mono:6.0
+      (S.Frame_received
+         (dispatch_frame ~event_name:"MESSAGE_CREATE" ~payload:payload1 ~seq:11))
+  in
+  check bool "before delete: thread message passes policy" true
+    (has_emit_event effects1);
+  (* Delete thread *)
+  let m, effects2 =
+    S.step m ~now_mono:7.0
+      (S.Frame_received (thread_delete_frame ~thread_id:"THR1" ~seq:12))
+  in
+  check bool "Thread_removed emitted" true
+    (has_emit_thread_removed ~thread_id:"THR1" effects2);
+  (* Verify thread is no longer tracked *)
+  let payload3 =
+    message_create_payload
+      ~id:"M3" ~channel_id:"THR1" ~author_id:"U1" ~content:"after delete"
+      ~mention_ids:[] ()
+  in
+  let _, effects3 =
+    S.step m ~now_mono:8.0
+      (S.Frame_received
+         (dispatch_frame ~event_name:"MESSAGE_CREATE" ~payload:payload3 ~seq:13))
+  in
+  check bool "after delete: thread message suppressed (no longer tracked)" true
+    (not (has_emit_event effects3))
+
+(* Step: THREAD_UPDATE archived=true removes from thread_parents *)
+let test_step_thread_update_archived_removes_from_registry () =
+  let m = connected_with_policy ~policy:S.Mention_or_thread ~bot_user_id:"BOT" in
+  (* Register thread *)
+  let m, _ =
+    S.step m ~now_mono:5.0
+      (S.Frame_received (thread_create_frame ~thread_id:"THR1" ~parent_id:"CH1" ~seq:10))
+  in
+  (* Archive the thread *)
+  let m, effects =
+    S.step m ~now_mono:6.0
+      (S.Frame_received
+         (thread_update_archived_frame ~thread_id:"THR1" ~parent_id:"CH1" ~seq:11))
+  in
+  check bool "Thread_removed emitted on archive" true
+    (has_emit_thread_removed ~thread_id:"THR1" effects);
+  (* Verify thread is no longer tracked *)
+  let payload =
+    message_create_payload
+      ~id:"M2" ~channel_id:"THR1" ~author_id:"U1" ~content:"in archived"
+      ~mention_ids:[] ()
+  in
+  let _, effects2 =
+    S.step m ~now_mono:7.0
+      (S.Frame_received
+         (dispatch_frame ~event_name:"MESSAGE_CREATE" ~payload ~seq:12))
+  in
+  check bool "after archive: thread message suppressed" true
+    (not (has_emit_event effects2))
+
+(* Step: deleting a non-existent thread is a no-op *)
+let test_step_thread_delete_unknown_is_noop () =
+  let m = connected_with_policy ~policy:S.Mention_or_thread ~bot_user_id:"BOT" in
+  let _, effects =
+    S.step m ~now_mono:5.0
+      (S.Frame_received (thread_delete_frame ~thread_id:"NEVER_EXISTED" ~seq:10))
+  in
+  check bool "Thread_removed emitted for unknown thread" true
+    (has_emit_thread_removed ~thread_id:"NEVER_EXISTED" effects)
+
 (* ---------------------------------------------------------------- *)
 (* Entry                                                            *)
 (* ---------------------------------------------------------------- *)
@@ -1546,6 +1710,14 @@ let () =
             test_decode_guild_create_without_threads
         ; test_case "THREAD_UPDATE decodes same as THREAD_CREATE" `Quick
             test_decode_thread_update_same_as_create
+        ; test_case "THREAD_DELETE => Thread_removed" `Quick
+            test_decode_thread_delete
+        ; test_case "THREAD_DELETE missing id => Ignored" `Quick
+            test_decode_thread_delete_missing_id
+        ; test_case "THREAD_UPDATE archived=true => Thread_removed" `Quick
+            test_decode_thread_update_archived
+        ; test_case "THREAD_UPDATE archived=false => Thread_tracked" `Quick
+            test_decode_thread_update_active_still_tracked
         ] )
     ; ( "thread tracking + Mention_or_thread policy"
       , [ test_case
@@ -1572,5 +1744,14 @@ let () =
         ; test_case
             "thread_parents survives reconnect cycle"
             `Quick test_thread_registry_survives_reconnect
+        ; test_case
+            "THREAD_DELETE removes from thread_parents"
+            `Quick test_step_thread_delete_removes_from_registry
+        ; test_case
+            "THREAD_UPDATE archived=true removes from thread_parents"
+            `Quick test_step_thread_update_archived_removes_from_registry
+        ; test_case
+            "THREAD_DELETE for unknown thread is a no-op"
+            `Quick test_step_thread_delete_unknown_is_noop
         ] )
     ]

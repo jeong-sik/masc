@@ -55,6 +55,9 @@ type gateway_event = Discord_gateway_state.dispatched_event =
   | Threads_bulk_tracked of
       { threads : (string * string) list
       }
+  | Thread_removed of
+      { thread_id : string
+      }
   | Ignored of string
 
 type trigger_policy = Discord_gateway_state.trigger_policy =

@@ -180,10 +180,16 @@ let object_schema ?(required = []) properties =
     ]
 ;;
 
+let closed_object_schema ?(required = []) properties =
+  match object_schema ~required properties with
+  | `Assoc fields -> `Assoc (fields @ [ "additionalProperties", `Bool false ])
+  | schema -> schema
+;;
+
 let execute_schema = Tool_shard_types.tool_execute_schema.input_schema
 
 let read_file_schema =
-  object_schema
+  closed_object_schema
     ~required:[ "file_path" ]
     [ property
         "file_path"

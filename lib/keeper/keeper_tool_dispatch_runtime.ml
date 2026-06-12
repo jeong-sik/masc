@@ -415,15 +415,17 @@ let execute_keeper_tool_call_with_outcome
        in
        let descriptor_output =
          match
-           Keeper_tool_descriptor_resolution.descriptor_and_input_for_tool_call
+           Keeper_tool_descriptor_resolution.validated_descriptor_and_input_for_tool_call
              ~tool_name:name
              ~input:args
          with
-         | Some (descriptor, translated_args) ->
+         | Some (Ok (descriptor, translated_args)) ->
            Keeper_tool_runtime.handle
              keeper_tool_runtime_context
              ~descriptor
              ~args:translated_args
+         | Some (Error validation_result) ->
+           Some (Yojson.Safe.to_string (Tool_result.data validation_result))
          | None -> Keeper_tool_runtime.handle_internal keeper_tool_runtime_context ~name ~args
        in
        match descriptor_output with

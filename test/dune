@@ -1498,6 +1498,8 @@
 
 (include stanzas/test_keeper_turn_livelock_10121.inc)
 
+(include stanzas/test_keeper_unified_turn_attempt_watchdog.inc)
+
 (include stanzas/test_keeper_turn_helpers_side_effect_metric.inc)
 
 (include stanzas/test_keeper_transition_audit_types.inc)

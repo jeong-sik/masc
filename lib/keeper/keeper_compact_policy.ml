@@ -221,7 +221,8 @@ let compact_if_needed_typed
   | Applied trigger ->
     (* PreCompact observability: log strategy and context state (#3165) *)
     let strategies =
-      Context_compact_oas.[ PruneToolOutputs; MergeContiguous; DropLowImportance ]
+      Context_compact_oas.
+        [ PruneToolOutputs; MergeContiguous; SummarizeOld; DropLowImportance ]
     in
     (* Use OAS stub_tool_results instead of MASC's FoldCompleted —
          OAS owns context reduction, MASC is a consumer. *)

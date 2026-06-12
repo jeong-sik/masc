@@ -1442,12 +1442,20 @@ let snapshot_json ?actor ?view ?(include_messages = true)
          let sessions_ref = ref empty_section in
          let keepers_ref = ref empty_section in
          let persistent_ref = ref empty_section in
+         let safe_section_fiber f =
+           fun () ->
+             try f () with
+             | Eio.Cancel.Cancelled _ as e -> raise e
+             | exn ->
+                 Log.Dashboard.error "snapshot section error: %s"
+                   (Printexc.to_string exn)
+         in
          Eio.Fiber.all [
-           (fun () ->
+           safe_section_fiber (fun () ->
              (* Team sessions removed — always empty *)
              ignore (lightweight_summary, status_cache);
              sessions_ref := empty_section);
-           (fun () ->
+           safe_section_fiber (fun () ->
              let keepers_json_value =
                timed "keepers_json" (fun () ->
                  if initialized && include_keepers then

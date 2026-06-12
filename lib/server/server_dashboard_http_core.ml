@@ -1009,17 +1009,35 @@ let dashboard_shell_payload_json ?(light = false) (config : Coord.config) : Yojs
     Eio.Fiber.all
       [
         (fun () ->
-          meta_cognition_r :=
-            measure_json_projection "meta_cognition" (fun () ->
-                meta_cognition_summary_cached config));
+          try
+            meta_cognition_r :=
+              measure_json_projection "meta_cognition" (fun () ->
+                  meta_cognition_summary_cached config)
+          with
+          | Eio.Cancel.Cancelled _ as e -> raise e
+          | exn ->
+              Log.Dashboard.error "dashboard meta_cognition section: %s"
+                (Printexc.to_string exn));
         (fun () ->
-          config_resolution_r :=
-            measure_json_projection "config_resolution" (fun () ->
-                Config_dir_resolver.(resolve () |> to_json)));
+          try
+            config_resolution_r :=
+              measure_json_projection "config_resolution" (fun () ->
+                  Config_dir_resolver.(resolve () |> to_json))
+          with
+          | Eio.Cancel.Cancelled _ as e -> raise e
+          | exn ->
+              Log.Dashboard.error "dashboard config_resolution section: %s"
+                (Printexc.to_string exn));
         (fun () ->
-          runtime_resolution_r :=
-            measure_json_projection "runtime_resolution" (fun () ->
-                Server_dashboard_http_runtime_info.runtime_resolution_json config));
+          try
+            runtime_resolution_r :=
+              measure_json_projection "runtime_resolution" (fun () ->
+                  Server_dashboard_http_runtime_info.runtime_resolution_json config)
+          with
+          | Eio.Cancel.Cancelled _ as e -> raise e
+          | exn ->
+              Log.Dashboard.error "dashboard runtime_resolution section: %s"
+                (Printexc.to_string exn));
       ];
   let meta_cognition_json, meta_cognition_ms = !meta_cognition_r in
   let config_resolution_json, config_resolution_ms = !config_resolution_r in

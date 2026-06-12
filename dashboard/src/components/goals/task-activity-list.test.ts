@@ -152,6 +152,40 @@ describe('TaskActivityList', () => {
     expect(text).toContain('turn_completed')
   })
 
+  it('shows tok/sec for LLM response activity rows', async () => {
+    const { container } = render(h(TaskActivityList, {
+      events: [sampleToolCallEvent({
+        kind: 'lifecycle',
+        summary: 'LLM response',
+        toolArgs: undefined,
+        toolResult: null,
+        duration_ms: 2000,
+        detail: {
+          durable_kind: 'llm_response',
+          output_tokens: 80,
+          duration_ms: 2000,
+          stop_reason: 'stop',
+        },
+      })],
+      loading: false,
+      error: null,
+      showToolCalls: true,
+    }))
+
+    expect(screen.getByText('40.0 tok/s')).toBeInTheDocument()
+
+    const details = container.querySelector('details')
+    expect(details).not.toBeNull()
+    if (!details) return
+
+    details.open = true
+    fireEvent(details, new Event('toggle', { bubbles: true }))
+
+    await waitFor(() => {
+      expect(screen.getByText('tok/sec: 40.0 tok/s')).toBeInTheDocument()
+    })
+  })
+
   it('marks decorative icons as hidden from assistive tech', () => {
     const { container } = render(h(TaskActivityList, {
       events: [sampleToolCallEvent({ toolArgs: undefined, toolResult: null })],
@@ -184,4 +218,3 @@ describe('TaskActivityList', () => {
     expect(screen.getByText('broadcast message')).toBeInTheDocument()
   })
 })
-

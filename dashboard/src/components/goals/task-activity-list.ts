@@ -8,7 +8,7 @@ import { ErrorState, LoadingState } from '../common/feedback-state'
 import { TimeAgo } from '../common/time-ago'
 import { TextInput } from '../common/input'
 import { JsonViewerCard, parseJsonLikeData } from '../common/json-viewer'
-import { formatCost } from '../../lib/format-number'
+import { deriveTokPerSec, formatCost, formatTokPerSec } from '../../lib/format-number'
 import { Settings, MessageSquare, CheckSquare, Heart, RefreshCcw, Dot, ChevronRight } from 'lucide-preact'
 import type { UnifiedTraceEvent, TraceEventKind } from '../session-trace/session-trace-state'
 import { activeFilter, activityListSearchQuery, type ActivityFilter } from './task-detail-state'
@@ -65,9 +65,21 @@ function durationColor(ms: number | undefined): string {
   return 'text-bad'
 }
 
+function asDetailNumber(detail: unknown, key: string): number | null {
+  if (!detail || typeof detail !== 'object') return null
+  const value = (detail as Record<string, unknown>)[key]
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function eventTokPerSec(event: UnifiedTraceEvent): number | null {
+  const outputTokens = asDetailNumber(event.detail, 'output_tokens')
+  const durationMs = event.duration_ms ?? asDetailNumber(event.detail, 'duration_ms')
+  return deriveTokPerSec(outputTokens, durationMs)
+}
 
 function ActivityEntry({ event }: { event: UnifiedTraceEvent }) {
   const hasDetail = event.toolArgs != null || event.toolResult != null || (event.detail && Object.keys(event.detail).length > 0)
+  const tokPerSec = eventTokPerSec(event)
   const [isOpen, setIsOpen] = useState(false)
 
   if (!hasDetail) {
@@ -76,6 +88,7 @@ function ActivityEntry({ event }: { event: UnifiedTraceEvent }) {
         <span class="text-sm ${kindColor(event.kind)}">${kindIcon(event.kind)}</span>
         <span class="flex-1 text-xs text-text-body truncate">${event.summary}</span>
         ${event.duration_ms != null ? html`<span class="text-3xs tabular-nums ${durationColor(event.duration_ms)}">${event.duration_ms}ms</span>` : null}
+        ${tokPerSec != null ? html`<span class="text-3xs tabular-nums text-[var(--color-status-ok)]">${formatTokPerSec(tokPerSec)}</span>` : null}
         ${event.ts_iso ? html`<${TimeAgo} timestamp=${event.ts_iso} class="text-3xs text-text-dim shrink-0" />` : null}
       </div>
     `
@@ -92,6 +105,7 @@ function ActivityEntry({ event }: { event: UnifiedTraceEvent }) {
         <span class="text-sm ${kindColor(event.kind)}">${kindIcon(event.kind)}</span>
         <span class="flex-1 text-xs text-text-body truncate">${event.summary}</span>
         ${event.duration_ms != null ? html`<span class="text-3xs tabular-nums ${durationColor(event.duration_ms)}">${event.duration_ms}ms</span>` : null}
+        ${tokPerSec != null ? html`<span class="text-3xs tabular-nums text-[var(--color-status-ok)]">${formatTokPerSec(tokPerSec)}</span>` : null}
         ${event.ts_iso ? html`<${TimeAgo} timestamp=${event.ts_iso} class="text-3xs text-text-dim shrink-0" />` : null}
         <span class="text-3xs text-text-dim flex items-center justify-center"><${ChevronRight} size=${14} aria-hidden="true" focusable="false" /></span>
       </summary>
@@ -114,6 +128,7 @@ function ActivityEntry({ event }: { event: UnifiedTraceEvent }) {
           ` : null}
           ${event.error ? html`<div class="text-2xs text-[var(--bad-light)] mt-1">${event.error}</div>` : null}
           ${event.cost_usd != null ? html`<div class="text-3xs text-text-dim mt-1">cost: ${formatCost(event.cost_usd)}</div>` : null}
+          ${tokPerSec != null ? html`<div class="text-3xs text-text-dim mt-1">tok/sec: ${formatTokPerSec(tokPerSec)}</div>` : null}
         </div>
       ` : null}
     </details>

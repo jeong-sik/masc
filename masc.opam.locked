@@ -11,7 +11,7 @@ homepage: "https://github.com/jeong-sik/masc"
 doc: "https://github.com/jeong-sik/masc"
 bug-reports: "https://github.com/jeong-sik/masc/issues"
 depends: [
-  "agent_sdk" {= "0.206.5"}
+  "agent_sdk" {= "0.206.6"}
   "alcotest" {= "1.9.1" & with-test}
   "ambient-context" {= "0.2"}
   "ambient-context-eio" {= "0.2"}
@@ -217,8 +217,8 @@ build: [
 dev-repo: "git+https://github.com/jeong-sik/masc.git"
 pin-depends: [
   [
-  "agent_sdk.0.206.5"
-  "git+https://github.com/jeong-sik/oas.git#e54b8050e60cfadfa205e3f93204535f88246ee8"
+  "agent_sdk.0.206.6"
+  "git+https://github.com/jeong-sik/oas.git#6475a19ec5ef58691edff232bd72ce5288b8b04e"
 ]
   [
     "bisect_ppx.2.8.3"

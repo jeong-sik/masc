@@ -539,8 +539,15 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
   (* Parallel keeper I/O: each keeper's metadata + metrics reads run concurrently.
      Results are collected into a shared ref array, then filter_map'd. *)
   let results = Array.make (List.length names) None in
+  let safe_keeper_fiber f () =
+    try f () with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
+        Log.Dashboard.error "keeper meta section error: %s"
+          (Printexc.to_string exn)
+  in
   Eio.Fiber.all
-    (List.mapi (fun idx name -> fun () ->
+    (List.mapi (fun idx name -> safe_keeper_fiber (fun () ->
       results.(idx) <- (
       match Keeper_types.read_meta config name with
       | Error _ | Ok None -> None

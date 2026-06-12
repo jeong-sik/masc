@@ -53,7 +53,31 @@ let test_repo_runtime_toml_loads () =
             (Runtime_schema.equal_thinking_control_format
                caps.thinking_control_format
                Runtime_schema.Chat_template_token)
-        | None -> fail "expected Gemma4 capabilities"))
+        | None -> fail "expected Gemma4 capabilities"));
+    (match
+       List.find_opt
+         (fun (runtime : Runtime.t) ->
+            String.equal runtime.id "glm-coding.glm-4-7-coding")
+         runtimes
+     with
+     | None -> fail "expected GLM Coding Plan runtime in seed"
+     | Some runtime ->
+       check string "GLM Coding Plan model api name" "glm-4.7"
+         runtime.model.api_name;
+       check int "GLM Coding Plan context" 200000 runtime.model.max_context;
+       check bool "GLM Coding Plan thinking enabled" true
+         runtime.model.thinking_support;
+       check bool "GLM Coding Plan preserves thinking" true
+         runtime.model.preserve_thinking;
+       (match runtime.model.capabilities with
+        | Some caps ->
+          check (option int) "GLM Coding Plan output cap" (Some 128000)
+            caps.max_output_tokens;
+          check bool "GLM Coding Plan forced tool_choice disabled" false
+            caps.supports_tool_choice;
+          check bool "GLM Coding Plan extended thinking" true
+            caps.supports_extended_thinking
+        | None -> fail "expected GLM Coding Plan capabilities"))
 
 let test_toml_catalog_resolves_lifecycle_keys () =
   let doc =

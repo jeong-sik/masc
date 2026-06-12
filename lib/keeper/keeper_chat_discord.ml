@@ -47,14 +47,14 @@ let send_message ~token ~channel_id ~content =
     in
     send_chunks content
 
-(* Truncate to Discord message limit for PATCH edits. *)
+(* Truncate to Discord message limit for PATCH edits, with redaction. *)
 let truncate content =
+  let content = Observability_redact.redact_text content in
   let limit = Discord_rest_client.message_content_limit in
   if String.length content <= limit then content
   else String.sub content 0 limit
 
 let edit_message_silent ~token ~channel_id ~message_id ~content =
-  let content = Observability_redact.redact_text content in
   match Discord_rest_client.edit_message
           ~token ~channel_id ~message_id ~content ()
   with
@@ -123,13 +123,29 @@ let adapter_loop ~token ~channel_id ~events =
     | Run_finished { run_id = _ } ->
         (match msg_id with
          | None ->
-             (* No deltas received — fall back to single send. *)
+             (* No deltas received — fall back to single send (chunks). *)
              if String.length acc_text > 0 then
                send_message ~token ~channel_id ~content:acc_text
          | Some mid ->
-             (* Final PATCH with complete text (may be a no-op). *)
+             (* Redact once, then split head/tail at the 2000-char limit. *)
+             let redacted = Observability_redact.redact_text acc_text in
+             let limit = Discord_rest_client.message_content_limit in
+             let rlen = String.length redacted in
+             let head =
+               if rlen <= limit then redacted
+               else String.sub redacted 0 limit
+             in
+             (* Final PATCH with the head (first 2000 chars). *)
              edit_message_silent ~token ~channel_id
-               ~message_id:mid ~content:(truncate acc_text));
+               ~message_id:mid ~content:head;
+             (* Send overflow as follow-up messages, matching the original
+                chunking behavior. send_message handles further splitting. *)
+             if rlen > limit then begin
+               let overflow =
+                 String.sub redacted limit (rlen - limit)
+               in
+               send_message ~token ~channel_id ~content:overflow
+             end);
         (* Loop exits after one turn. *)
         ()
     | Event_error { message } ->

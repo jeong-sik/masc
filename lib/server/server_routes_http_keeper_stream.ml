@@ -293,11 +293,6 @@ let strip_keeper_visible_reply (reply : string) =
   |> Keeper_execution.strip_state_blocks_text
   |> String.trim
 
-let continuation_checkpoint_prefix = "Continuation checkpoint saved;"
-
-let is_continuation_checkpoint_reply text =
-  has_prefix ~prefix:continuation_checkpoint_prefix (String.trim text)
-
 let split_keeper_reply_chunks (text : string) : string list =
   let len = String.length text in
   if len = 0 then
@@ -672,8 +667,10 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
         in
         match dispatch_result with
         | Ok (true, body) ->
-            let _payload_json_opt, visible_reply = extract_visible_reply body in
-            if not (is_continuation_checkpoint_reply visible_reply) then begin
+            let payload_json_opt, visible_reply = extract_visible_reply body in
+            (match Keeper_turn_outcome.of_reply_payload payload_json_opt with
+            | Keeper_turn_outcome.Continuation_checkpoint -> ()
+            | Keeper_turn_outcome.Visible_reply ->
               Keeper_chat_store.append_turn
                 ~base_dir:base_path
                 ~keeper_name:payload.name
@@ -685,8 +682,7 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
                 ~assistant_content:visible_reply
                 ();
               Keeper_chat_broadcast.chat_appended
-                ~keeper_name:payload.name ~source:chat_source
-            end;
+                ~keeper_name:payload.name ~source:chat_source);
             push_worker_event (Stream_terminal (true, body));
             Tool_result.ok ~tool_name:"masc_keeper_msg" ~start_time body
         | Ok (false, err) ->
@@ -792,7 +788,9 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
           in
           let visible_reply = redact_text visible_reply in
           let is_checkpoint =
-            is_continuation_checkpoint_reply visible_reply
+            match Keeper_turn_outcome.of_reply_payload payload_json_opt with
+            | Keeper_turn_outcome.Continuation_checkpoint -> true
+            | Keeper_turn_outcome.Visible_reply -> false
           in
           if
             (not is_checkpoint)

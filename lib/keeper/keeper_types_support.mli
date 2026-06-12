@@ -29,6 +29,10 @@ val keeper_metrics_store : Workspace.config -> string -> Dated_jsonl.t
     [.masc/keepers/<name>/execution-receipts/YYYY-MM/DD.jsonl]. *)
 val keeper_execution_receipt_store : Workspace.config -> string -> Dated_jsonl.t
 
+(** Date-split TurnRecord store (RFC-0233 §2.2):
+    [.masc/keepers/<name>/turn-records/YYYY-MM/DD.jsonl]. *)
+val keeper_turn_record_store : Workspace.config -> string -> Dated_jsonl.t
+
 val keeper_memory_bank_path : Workspace.config -> string -> string
 val keeper_progress_path : Workspace.config -> string -> string
 val keeper_generation_index_path : Workspace.config -> string -> string

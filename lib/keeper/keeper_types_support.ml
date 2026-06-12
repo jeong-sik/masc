@@ -64,6 +64,22 @@ let keeper_execution_receipt_store config name : Dated_jsonl.t =
   in
   Eio_guard.with_mutex execution_receipt_store_mu lookup
 
+(* RFC-0233 PR-3: TurnRecord JSONL store next to the receipt store. *)
+let turn_record_store_cache : (string, Dated_jsonl.t) Hashtbl.t = Hashtbl.create 8
+let turn_record_store_mu = Eio.Mutex.create ()
+
+let keeper_turn_record_store config name : Dated_jsonl.t =
+  let dir = Filename.concat (keeper_dir_ config) (name ^ "/turn-records") in
+  let lookup () =
+    match Hashtbl.find_opt turn_record_store_cache dir with
+    | Some store -> store
+    | None ->
+      let store = Dated_jsonl.create ~base_dir:dir () in
+      Hashtbl.replace turn_record_store_cache dir store;
+      store
+  in
+  Eio_guard.with_mutex turn_record_store_mu lookup
+
 let keeper_memory_bank_path config name =
   Filename.concat (keeper_dir_ config) (name ^ ".memory.jsonl")
 

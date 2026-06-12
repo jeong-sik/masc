@@ -22,6 +22,13 @@ type hook_accumulator =
   ; mutable requested_tool_names : string list
   ; mutable receipt_completion_contract_result :
       Keeper_execution_receipt.completion_contract_result
+    (* RFC-0233 PR-3: last SDK turn's context assembly, written by the
+       before_turn_params hook, read at the receipt/TurnRecord write site
+       in run_turn. Last-write-wins matches the turn-context cell
+       semantics the receipt already uses. *)
+  ; mutable prompt_blocks : Turn_record.prompt_block list
+  ; mutable extra_system_context_digest : string option
+  ; mutable extra_system_context_size : int option
   }
 
 type hook_outputs =

@@ -174,15 +174,22 @@ let finalize
     (* CDAL proof evaluation / verdict-ledger persistence removed: task/goal
        completion is verified by [Cdal_evidence_gate] (evidence-substantiveness),
        not by an internal proof/verdict pipeline. *)
+    let librarian_messages =
+      match saved_checkpoint with
+      | Some checkpoint -> checkpoint.Agent_sdk.Checkpoint.messages
+      | None -> [ assistant_msg ]
+    in
     Keeper_agent_run_post_turn_memory.run
       ~config
       ~meta
+      ~generation
       ~turn:manifest_keeper_turn_id
       ~oas_turn_count:result.turns
       ~response_text
       ~actual_tools:actual_keeper_tool_names
       ~state_snapshot
       ~state_snapshot_source
+      ~librarian_messages
       ~post_turn_t0
       ?provider_filter
       ~runtime_id:runtime_id_string

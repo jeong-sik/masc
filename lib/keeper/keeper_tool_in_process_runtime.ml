@@ -317,6 +317,11 @@ let handle_masc_agent_timeline ~(config : Workspace.config) ~(meta : keeper_meta
   Tool_agent_timeline.dispatch ctx ~name ~args |> dispatch_option_to_string ~name
 ;;
 
+let handle_masc_schedule ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
+  let ctx : Tool_schedule.context = { config; agent_name = meta.name } in
+  Tool_schedule.dispatch ctx ~name ~args |> dispatch_option_to_string ~name
+;;
+
 (* RFC-0182 §3.1 — masc_tool_shard cluster.  [Tool_shard.execute]
    returns the older [(bool * Yojson.Safe.t)] tuple (predates RFC-0189
    typed-result migration), same shape as Tool_local_runtime.  Tool_shard

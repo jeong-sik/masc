@@ -55,6 +55,7 @@ let string_of_tag (tag : Tool_dispatch.module_tag) : string =
   | Mod_state -> "state"
   | Mod_control -> "control"
   | Mod_agent_timeline -> "agent_timeline"
+  | Mod_schedule -> "schedule"
   | Mod_misc -> "misc"
   | Mod_inline -> "inline"
   | Mod_operator -> "operator"
@@ -126,6 +127,8 @@ let dispatch
                 name))
     | Mod_agent_timeline ->
       Tool_agent_timeline.dispatch { Tool_agent_timeline.config; agent_name } ~name ~args
+    | Mod_schedule ->
+      Tool_schedule.dispatch { Tool_schedule.config; agent_name } ~name ~args
     | Mod_misc -> Tool_misc.dispatch { Tool_misc.config; agent_name } ~name ~args
     | Mod_library -> Tool_library.dispatch { Tool_library.agent_name } ~name ~args
     (* ── Tier A special: Tool_shard returns Yojson.Safe.t ──────── *)

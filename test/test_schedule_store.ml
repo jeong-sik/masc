@@ -129,6 +129,19 @@ let test_grant_records_and_schedules_request () =
   | None -> fail "schedule missing"
 ;;
 
+let test_cancel_request_marks_cancelled () =
+  with_workspace
+  @@ fun config ->
+  let req = make_request ~schedule_id:"cancel-1" ~risk_class:Read_only () in
+  ignore (insert_ok config req);
+  (match cancel_request config ~schedule_id:req.schedule_id with
+   | Ok updated -> check_status "cancelled status" Cancelled updated.status
+   | Error err -> fail (store_error_to_string err));
+  match get_schedule config ~schedule_id:req.schedule_id with
+  | Some stored -> check_status "stored cancelled" Cancelled stored.status
+  | None -> fail "schedule missing"
+;;
+
 let test_requester_grant_rejected_without_bump () =
   with_workspace
   @@ fun config ->
@@ -204,6 +217,8 @@ let () =
             test_store_rejects_side_effecting_scheduled_insert;
           test_case "grant records and schedules request" `Quick
             test_grant_records_and_schedules_request;
+          test_case "cancel request marks cancelled" `Quick
+            test_cancel_request_marks_cancelled;
           test_case "requester grant rejected without bump" `Quick
             test_requester_grant_rejected_without_bump;
         ] );

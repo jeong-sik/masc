@@ -55,6 +55,7 @@ type runtime_handler =
   | Tool_masc_misc_dispatch
   | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch
+  | Tool_masc_schedule_dispatch
   | Tool_masc_keeper_dispatch
   | Tool_masc_surface_audit
 
@@ -144,6 +145,7 @@ let runtime_handler_to_string = function
   | Tool_masc_misc_dispatch -> "tool_masc_misc_dispatch"
   | Tool_masc_control_dispatch -> "tool_masc_control_dispatch"
   | Tool_masc_agent_timeline_dispatch -> "tool_masc_agent_timeline_dispatch"
+  | Tool_masc_schedule_dispatch -> "tool_masc_schedule_dispatch"
   | Tool_masc_keeper_dispatch -> "tool_masc_keeper_dispatch"
   | Tool_masc_surface_audit -> "tool_masc_surface_audit"
 ;;
@@ -992,6 +994,21 @@ let masc_agent_timeline_descriptor name description ~readonly =
     ~maintenance_only:false
 ;;
 
+let masc_schedule_descriptor (definition : Tool_schemas_schedule.definition) =
+  let schema : Masc_domain.tool_schema = definition.schema in
+  { (cluster_descriptor
+       ~id:("masc.schedule." ^ definition.id)
+       ~name:schema.name
+       ~description:schema.description
+       ~handler:Tool_masc_schedule_dispatch
+       ~readonly:definition.read_only
+       ~inline_safe:false
+       ~maintenance_only:false)
+    with
+    input_schema = schema.input_schema
+  }
+;;
+
 let masc_keeper_descriptor id name description ~readonly =
   cluster_descriptor
     ~id:("masc.keeper." ^ id)
@@ -1348,11 +1365,15 @@ let internal_descriptors : t list =
   (* ── RFC-0182 §3.1 — masc_agent_timeline singleton (1 entry) ── *)
   ; masc_agent_timeline_descriptor "masc_agent_timeline"
       "Read agent timeline events." ~readonly:true
+  (* ── RFC-0234 — scheduled internal automation (6 entries) ─────── *)
+  ]
+  @ List.map masc_schedule_descriptor Tool_schemas_schedule.definitions
+  @ [
   (* ── RFC-0182 §3.1 — masc_keeper cluster (1 entry today) ──── *)
   (* Other masc_keeper_ tools (status, msg, clear, compact, repair,
      sandbox lifecycle) use the keeper Eio context and are gated on
      Phase 5 Eio plumbing scope. *)
-  ; masc_keeper_descriptor "list" "masc_keeper_list"
+    masc_keeper_descriptor "list" "masc_keeper_list"
       "List configured keepers with optional detailed metadata." ~readonly:true
   ; masc_keeper_descriptor "msg_result" "masc_keeper_msg_result"
       "Poll an async keeper_msg dispatch by request_id." ~readonly:true

@@ -34,6 +34,21 @@ let is_nickname mention =
   let parts = String.split_on_char '-' mention in
   List.length parts >= 3
 
+(* ── Boundary helpers ──────────────────────────────────────────── *)
+
+let is_word_char c =
+  match c with
+  | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' -> true
+  | _ -> false
+
+(** Returns [true] when [offset] is either start-of-string or preceded
+    by a non-word character.  Prevents mid-word/email false positives
+    such as [user@domain.com] or [hello@agent]. *)
+let at_word_boundary content offset =
+  offset = 0 || not (is_word_char content.[offset - 1])
+
+(* ── Regex patterns ────────────────────────────────────────────── *)
+
 (* The three mention patterns are static.  [Re.compile] runs the
    DFA construction once at module load instead of per [parse] call;
    on a high-broadcast workspace every message previously paid three
@@ -68,12 +83,29 @@ let mention_re =
           ]));
         ]))
 
+(** Extract first match group + its offset, then validate word boundary.
+    Returns [None] when the match starts mid-word (email, mid-word false positives). *)
+let match_at_boundary re content =
+  match Re.exec_opt re content with
+  | None -> None
+  | Some g ->
+    let offset = Re.Match.get_offset g 1 in
+    if at_word_boundary content offset then Some g
+    else None
+
 (** Parse @mention from message content
 
     Priority order:
     1. @@agent → Broadcast
     2. @agent-adj-animal → Stateful
     3. @agent → Stateless
+
+    Word-boundary enforcement for [@@] and [@-adj-animal] is implicit
+    (the patterns are specific enough), but enforced for plain @agent
+    to prevent:
+    - Email false positives:  [user@domain.com] → [domain] is not a mention
+    - Mid-word false positives:  [hello@agent] → [agent] is not a mention
+    - Punctuation adjacency: [(@agent)] → still matches (word boundary is `(`)
 *)
 let parse content =
   match Re.exec_opt broadcast_re content with
@@ -82,7 +114,7 @@ let parse content =
     match Re.exec_opt stateful_re content with
     | Some g -> Stateful (Re.Group.get g 1)
     | None ->
-      match Re.exec_opt mention_re content with
+      match match_at_boundary mention_re content with
       | Some g ->
         let matched = Re.Group.get g 1 in
         (* Heuristic: if contains hyphen but not 3-part nickname, still stateful *)

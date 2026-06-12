@@ -634,7 +634,12 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Workspace.
     | _ -> None
   in
   let resolved_agent_name_result =
-    match dashboard_actor_for_request ~base_path:config.base_path request with
+    match token_credential_result with
+    (* Keep stale bearer tokens visible as auth failures in shell summaries instead of
+       recovering a request actor hint as the effective actor. *)
+    | Some (Error err) -> Error err
+    | _ ->
+    (match dashboard_actor_for_request ~base_path:config.base_path request with
     | Some agent_name -> Ok agent_name
     | None ->
       if auth_cfg.enabled && auth_cfg.require_token && token_present
@@ -646,12 +651,12 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Workspace.
                 ; message = "Agent name required (X-Gate-Agent / X-MASC-Agent or token-bound \
                              credential)"
                 }))
-      else Ok "dashboard"
+      else Ok "dashboard")
   in
   let effective_agent =
     match resolved_agent_name_result with
     | Ok agent_name -> Some agent_name
-    | Error _ -> requested_agent
+    | Error _ -> None
   in
   let effective_role_result =
     match resolved_agent_name_result with

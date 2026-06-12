@@ -744,6 +744,36 @@ let test_dashboard_shell_auth_json_reports_missing_token () =
   check string "missing token code surfaced" "missing_token"
     (auth |> member "auth_error_code" |> to_string)
 
+let test_dashboard_shell_auth_json_rejects_stale_token_actor_hint () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let cfg =
+    { Masc_domain.default_auth_config with enabled = true; require_token = true }
+  in
+  Auth.save_auth_config config.base_path cfg;
+  let json =
+    Server_dashboard_http_core.dashboard_shell_http_json
+      ~request:
+        (request_with_headers "/api/v1/dashboard/shell"
+           [
+             ("authorization", "Bearer stale-dashboard-token");
+             ("x-masc-agent", "dashboard");
+           ])
+      config
+  in
+  let open Yojson.Safe.Util in
+  let auth = json |> member "auth" in
+  check bool "token_valid false" false (auth |> member "token_valid" |> to_bool);
+  check string "requested actor surfaced for diagnosis" "dashboard"
+    (auth |> member "requested_agent" |> to_string);
+  check bool "effective actor not recovered from request hint" true
+    (match auth |> member "effective_agent" with `Null -> true | _ -> false);
+  check bool "effective role unavailable" true
+    (match auth |> member "effective_role" with `Null -> true | _ -> false);
+  check string "invalid token code surfaced" "invalid_token"
+    (auth |> member "auth_error_code" |> to_string);
+  check bool "keeper message blocked" false
+    (auth |> member "can_keeper_msg" |> to_bool)
+
 let test_dashboard_shell_snapshot_selector_injects_auth () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   Dashboard_snapshot.reset_for_test ();
@@ -1215,6 +1245,8 @@ let () =
             test_dashboard_shell_auth_json_canonicalizes_token_owner;
           test_case "shell auth reports missing token" `Quick
             test_dashboard_shell_auth_json_reports_missing_token;
+          test_case "shell auth rejects stale token actor hint" `Quick
+            test_dashboard_shell_auth_json_rejects_stale_token_actor_hint;
           test_case "shell snapshot selector injects auth" `Quick
             test_dashboard_shell_snapshot_selector_injects_auth;
           test_case "execution actor canonicalizes token owner" `Quick

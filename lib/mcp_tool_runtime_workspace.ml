@@ -133,12 +133,22 @@ let handle_start ~tool_name ~start_time (ctx : context) : Tool_result.result opt
     | Ok () ->
       (* Step 3: add_task + claim + plan_set_task (if task_title provided) *)
       if String.equal task_title "" then
+        let unread =
+          try Mention_inbox.unread_count config agent_name
+          with _ -> 0
+        in
+        let mention_suffix =
+          if unread > 0 then
+            Printf.sprintf " You have %d unread mention(s) from your absence." unread
+          else ""
+        in
         Some
           (runtime_ok ~tool_name ~start_time
              (Printf.sprintf
-                "masc_start complete (project scope set + session bound as %s). No task created — use %s to create one."
+                "masc_start complete (project scope set + session bound as %s). No task created — use %s to create one.%s"
                 agent_name
-                masc_add_task_name))
+                masc_add_task_name
+                mention_suffix))
       else begin
         (* RFC-0034.v2: per-goal cap guard. masc_start does not pass a
            [goal_id], so the guard is a no-op for orphan tasks. Wired so
@@ -178,10 +188,19 @@ let handle_start ~tool_name ~start_time (ctx : context) : Tool_result.result opt
             (* [Planning_eio.set_current_task] internal store failure. *)
             Some (runtime_err_runtime ~tool_name ~start_time msg)
           | Ok () ->
-              Some
+              let unread =
+          try Mention_inbox.unread_count config agent_name
+          with _ -> 0
+        in
+        let mention_suffix =
+          if unread > 0 then
+            Printf.sprintf " You have %d unread mention(s) from your absence." unread
+          else ""
+        in
+        Some
                 (runtime_ok ~tool_name ~start_time
                    (Printf.sprintf
-                      "masc_start complete: project scope set, session bound as %s, task %s created+claimed+set as current."
-                      agent_name task_id))
+                      "masc_start complete: project scope set, session bound as %s, task %s created+claimed+set as current.%s"
+                      agent_name task_id mention_suffix))
         end
       end

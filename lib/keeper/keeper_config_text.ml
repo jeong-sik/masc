@@ -48,9 +48,28 @@ let default_proactive_enabled = true
 let default_proactive_idle_sec = 120
 let default_proactive_cooldown_sec = 300
 let approval_queue_stale_max_wait_sec = 600.0
-let default_goal_horizon_max_chars = 480
+
+(* Environment-configurable caps. Defaults were raised from 480/320 to 4096
+   because silent truncation in the dashboard made operators think edits were
+   not persisting. Operators can lower them via env vars if a deployment needs
+   tighter prompt budgets. *)
+let default_goal_horizon_max_chars =
+  match Env_config_core.raw_value_opt "MASC_KEEPER_GOAL_HORIZON_MAX_CHARS" with
+  | Some v ->
+    (match int_of_string_opt (String.trim v) with
+     | Some n when n > 0 -> n
+     | _ -> 4096)
+  | None -> 4096
+
 let default_drift_max_clauses = 6
-let prompt_render_max_bytes = 320
+
+let prompt_render_max_bytes =
+  match Env_config_core.raw_value_opt "MASC_KEEPER_SELF_MODEL_MAX_BYTES" with
+  | Some v ->
+    (match int_of_string_opt (String.trim v) with
+     | Some n when n > 0 -> n
+     | _ -> 4096)
+  | None -> 4096
 
 (* ── Removed / rejected keeper input keys ───────────────────── *)
 

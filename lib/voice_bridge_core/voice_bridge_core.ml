@@ -443,10 +443,10 @@ let get_voice_for_agent agent_id =
     TTS Adapters
     ============================================ *)
 
-(* elevenlabs_voice_ids removed: dead code. Voice name → ID resolution
-   is config-driven via Voice_config.load () → agent_voices. The
-   ElevenLabs API accepts voice names directly, making a hardcoded
-   lookup table unnecessary. *)
+(* ElevenLabs direct TTS URLs require voice IDs. Voice_config.load ()
+   supplies configured per-agent values; Voice_runtime_overlay keeps a small
+   premade-name compatibility map and rejects arbitrary names before the
+   network call. *)
 
 let trim_opt = Env_config_core.trim_opt
 

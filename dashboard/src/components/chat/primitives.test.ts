@@ -129,6 +129,54 @@ describe('ChatTranscript', () => {
     expect(container.querySelector('[data-chat-delivery="thinking"]')).not.toBeNull()
   })
 
+  it('shows a streaming cursor while content is streaming', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({ id: 'u1', text: 'ping' }),
+          entry({
+            id: 'a1',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'sangsu',
+            text: '안녕하세요',
+            delivery: 'streaming',
+            streamState: 'streaming',
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    expect(container.textContent).toContain('안녕하세요')
+    const cursor = container.querySelector('.animate-pulse')
+    expect(cursor).not.toBeNull()
+  })
+
+  it('hides the streaming cursor when delivery is not streaming', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'a1',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'sangsu',
+            text: '완료된 응답',
+            delivery: 'delivered',
+          }),
+        ]}
+        emptyText="empty"
+      />`,
+      container,
+    )
+
+    const cursor = container.querySelector('.animate-pulse')
+    expect(cursor).toBeNull()
+  })
+
   it('uses a parent-bounded flexible transcript in primary mode', () => {
     render(
       html`<${ChatTranscript}

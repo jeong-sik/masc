@@ -634,28 +634,74 @@ let run_turn
                           ~raw_response_text:response_text
                           ())))
                in
-       Keeper_agent_run_receipt.finalize
-         ~config
-         ~meta
-         ~generation
-         ~manifest_keeper_turn_id
-         ~runtime_id
-         ~keeper_visible_sandbox_root
-         ~receipt_started_at
-         ~runtime_manifest_context
-         ~acc
-         ~pre_dispatch_compacted
-         ~pre_dispatch_compaction_trigger:ctx.pre_dispatch_compaction_trigger
-         ~pre_dispatch_compaction_before_tokens:ctx.pre_dispatch_compaction_before_tokens
-         ~pre_dispatch_compaction_after_tokens:ctx.pre_dispatch_compaction_after_tokens
-         ~degraded_retry_applied
-         ~degraded_retry_runtime
-         ~fallback_reason
-         ~runtime_rotation_attempts
-         ~turn_result
-         ~receipt_turn_count_ref
-         ~receipt_model_used_ref
-         ~receipt_stop_reason_ref
-         ~receipt_runtime_observation_ref
-         ~receipt_response_text_present_ref
-         ())
+       let receipt_result =
+         Keeper_agent_run_receipt.finalize
+           ~config
+           ~meta
+           ~generation
+           ~manifest_keeper_turn_id
+           ~runtime_id
+           ~keeper_visible_sandbox_root
+           ~receipt_started_at
+           ~runtime_manifest_context
+           ~acc
+           ~pre_dispatch_compacted
+           ~pre_dispatch_compaction_trigger:ctx.pre_dispatch_compaction_trigger
+           ~pre_dispatch_compaction_before_tokens:ctx.pre_dispatch_compaction_before_tokens
+           ~pre_dispatch_compaction_after_tokens:ctx.pre_dispatch_compaction_after_tokens
+           ~degraded_retry_applied
+           ~degraded_retry_runtime
+           ~fallback_reason
+           ~runtime_rotation_attempts
+           ~turn_result
+           ~receipt_turn_count_ref
+           ~receipt_model_used_ref
+           ~receipt_stop_reason_ref
+           ~receipt_runtime_observation_ref
+           ~receipt_response_text_present_ref
+           ()
+       in
+       (* RFC-0233 PR-3: TurnRecord — same per-keeper-turn cadence as the
+          receipt above. execution_ids come from the trajectory
+          accumulator (every entry of this run carries the id minted at
+          the dispatch boundary); sampling reads the last SDK turn's
+          effective values from the turn context cell. *)
+       (let tctx =
+          Keeper_tool_call_log_context.get_turn_context_record
+            ~cell:turn_ctx_cell ()
+        in
+        let execution_ids =
+          match trajectory_acc with
+          | None -> []
+          | Some tacc ->
+            (* entries are prepended on record; rev restores call order *)
+            List.rev
+              (List.filter_map
+                 (fun (e : Trajectory.tool_call_entry) ->
+                    Option.map Ids.Execution_id.of_string e.execution_id)
+                 tacc.Trajectory.entries)
+        in
+        let usage : Turn_record.usage =
+          match turn_result with
+          | Ok result when result.usage_reported ->
+            { input_tokens = Some result.usage.input_tokens
+            ; output_tokens = Some result.usage.output_tokens
+            }
+          | Ok _ | Error _ -> { input_tokens = None; output_tokens = None }
+        in
+        Keeper_turn_record_writer.write
+          ~config
+          ~keeper_name:meta.name
+          ~trace_id
+          ~absolute_turn:manifest_keeper_turn_id
+          ~runtime_profile:runtime_id_string
+          ~sampling:
+            { temperature = Some temperature
+            ; thinking_budget = tctx.thinking_budget
+            ; enable_thinking = tctx.thinking_enabled
+            }
+          ~usage
+          ~execution_ids
+          ~blocks:acc.prompt_blocks
+          ());
+       receipt_result)

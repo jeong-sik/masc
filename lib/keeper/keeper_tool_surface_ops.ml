@@ -495,12 +495,29 @@ let keeper_status_body ~(config : Workspace.config) ~(agent_name : string) args 
 let handle_keeper_status ctx args : tool_result =
   keeper_status_body ~config:ctx.config ~agent_name:ctx.agent_name args
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
+let keeper_name_lookup_candidates raw_name =
+  let trimmed = String.trim raw_name in
+  if String.equal trimmed "" then
+    []
+  else
+    let aliases =
+      match Keeper_identity.canonical_keeper_name trimmed with
+      | Some candidate when not (String.equal candidate trimmed) -> [ candidate ]
+      | Some _ | None -> []
+    in
+    trimmed :: aliases
+
 let resolve_keeper_name_config ~(config : Workspace.config) args =
   let name = String.trim (get_string args "name" "") in
-  match read_meta_resolved config name with
-  | Ok (Some (resolved_name, _meta)) -> Ok resolved_name
-  | Ok None -> Error (Printf.sprintf "keeper not found: %s" name)
-  | Error err -> Error (Printf.sprintf "%s" err)
+  let rec loop = function
+    | [] -> Error (Printf.sprintf "keeper not found: %s" name)
+    | candidate :: rest -> (
+        match read_meta_resolved config candidate with
+        | Ok (Some (resolved_name, _meta)) -> Ok resolved_name
+        | Ok None -> loop rest
+        | Error err -> Error (Printf.sprintf "%s" err))
+  in
+  loop (keeper_name_lookup_candidates name)
 
 let resolve_keeper_name ctx args =
   resolve_keeper_name_config ~config:ctx.config args

@@ -150,12 +150,16 @@ goal = "%s"
        sandbox_profile
        goal)
 
-let status_goal config name =
-  let args = `Assoc [ ("name", `String name); ("fast", `Bool true) ] in
+let status_goal_with ?(agent_name = "test-agent") ?name config =
+  let args =
+    match name with
+    | Some name -> `Assoc [ ("name", `String name); ("fast", `Bool true) ]
+    | None -> `Assoc [ ("fast", `Bool true) ]
+  in
   let result =
     Status_detail.handle_keeper_status_config
       ~config
-      ~agent_name:"test-agent"
+      ~agent_name
       args
   in
   if not (Profile.tool_result_success result) then
@@ -164,6 +168,51 @@ let status_goal config name =
   match json_string_field "goal" json with
   | Some goal -> goal
   | None -> Alcotest.fail "status response missing goal"
+
+let status_goal config name = status_goal_with ~name config
+
+let resolved_keeper_name config name =
+  match
+    Keeper_tool_surface_ops.resolve_keeper_name_config
+      ~config
+      (`Assoc [ ("name", `String name) ])
+  with
+  | Ok resolved -> resolved
+  | Error err -> Alcotest.failf "resolve_keeper_name_config failed: %s" err
+
+let test_status_resolves_keeper_alias_names () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
+  let name = "aliasprobe" in
+  write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"local"
+    ~goal:"alias status goal";
+  let config = Workspace.default_config base in
+  ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
+  Alcotest.(check string)
+    "explicit agent alias reaches canonical keeper"
+    "alias status goal"
+    (status_goal_with ~name:"keeper-aliasprobe-agent" config);
+  Alcotest.(check string)
+    "prefixed alias reaches canonical keeper"
+    "alias status goal"
+    (status_goal_with ~name:"keeper-aliasprobe" config);
+  Alcotest.(check string)
+    "self fallback agent alias reaches canonical keeper"
+    "alias status goal"
+    (status_goal_with ~agent_name:"keeper-aliasprobe-agent" config)
+
+let test_keeper_surface_resolves_alias_names () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir:_ ->
+  let name = "aliasmsg" in
+  let config = Workspace.default_config base in
+  ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
+  Alcotest.(check string)
+    "agent alias resolves for keeper surface tools"
+    name
+    (resolved_keeper_name config "keeper-aliasmsg-agent");
+  Alcotest.(check string)
+    "prefixed alias resolves for keeper surface tools"
+    name
+    (resolved_keeper_name config "keeper-aliasmsg")
 
 let test_toml_overlay_reaches_effective_meta () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
@@ -567,6 +616,10 @@ let () =
           Alcotest.test_case
             "profile identity snapshot reaches meta JSON"
             `Quick test_profile_identity_snapshot_reaches_meta_json;
+          Alcotest.test_case "status resolves keeper alias names" `Quick
+            test_status_resolves_keeper_alias_names;
+          Alcotest.test_case "keeper surface resolves alias names" `Quick
+            test_keeper_surface_resolves_alias_names;
           Alcotest.test_case "turn setup uses effective meta" `Quick
             test_turn_setup_uses_effective_meta;
           Alcotest.test_case

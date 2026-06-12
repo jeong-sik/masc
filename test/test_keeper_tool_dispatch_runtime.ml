@@ -818,6 +818,74 @@ let test_tool_execute_raw_cmd_requires_typed_shell_ir () =
       check bool "single hard-cut rejection does not enrich circuit breaker" true
         Yojson.Safe.Util.(member "circuit_breaker" json = `Null))
 
+let keeper_msg_input_schema () =
+  match
+    List.find_opt
+      (fun (schema : Masc_domain.tool_schema) ->
+        String.equal schema.name "masc_keeper_msg")
+      Masc.Keeper_schema.schemas
+  with
+  | Some schema -> schema.input_schema
+  | None -> fail "masc_keeper_msg schema missing"
+
+let test_oas_handler_threads_eio_context_to_keeper_dispatch () =
+  let dir = temp_dir "oas-handler-eio-context" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let net = Eio.Stdenv.net env in
+      let clock = Eio.Stdenv.clock env in
+      let mono_clock = Eio.Stdenv.mono_clock env in
+      Eio.Switch.run @@ fun root_sw ->
+      Eio_context.with_test_env ~net ~clock ~mono_clock ~sw:root_sw @@ fun () ->
+      Eio.Switch.run @@ fun turn_sw ->
+      Eio_context.with_turn_switch turn_sw @@ fun () ->
+      let config = Workspace.default_config dir in
+      let meta = make_meta ~tool_access:[ "masc_keeper_msg" ] () in
+      ignore (Masc.Keeper_registry.register ~base_path:config.base_path meta.name meta);
+      let previous_dispatch = !(Masc.Keeper_dispatch_ref.dispatch) in
+      let saw_turn_sw = Atomic.make false in
+      let saw_clock = Atomic.make false in
+      Fun.protect
+        ~finally:(fun () ->
+          Masc.Keeper_dispatch_ref.dispatch := previous_dispatch;
+          Masc.Keeper_registry.unregister ~base_path:config.base_path meta.name)
+        (fun () ->
+          Masc.Keeper_dispatch_ref.dispatch :=
+            (fun ~config:_ ~agent_name:_ ?sw ?clock ?proc_mgr:_ ?net:_ ?mcp_session_id:_
+                 ~name ~args:_ () ->
+              check string "keeper dispatch tool" "masc_keeper_msg" name;
+              Atomic.set saw_turn_sw
+                (match sw with Some sw -> sw == turn_sw | None -> false);
+              Atomic.set saw_clock (Option.is_some clock);
+              Some
+                (Tool_result.ok ~tool_name:name ~start_time:0.0
+                   "{\"ok\":true,\"request_id\":\"test-request\"}"));
+          let handler =
+            Masc.Keeper_tools_oas_handler.make_keeper_tool_handler
+              ~name:"masc_keeper_msg"
+              ~input_schema:(keeper_msg_input_schema ())
+              ~config
+              ~meta
+              ~ctx_snapshot:(make_ctx ())
+              ~exec_cache:None
+              ~failure_counts:(Masc.Keeper_tools_oas.create_failure_counts ())
+              ()
+          in
+          let result =
+            handler
+              (`Assoc
+                [
+                  ("name", `String "keeper-target");
+                  ("message", `String "hello");
+                ])
+          in
+          check bool "handler succeeds" true (Tool_result.is_success result);
+          check bool "turn switch reaches keeper dispatch" true (Atomic.get saw_turn_sw);
+          check bool "clock reaches keeper dispatch" true (Atomic.get saw_clock)))
+
 let registered_dispatch_probe_tool = "test_keeper_registered_dispatch_probe"
 
 let probe_input_schema =
@@ -968,6 +1036,8 @@ let () =
         test_workflow_rejection_payload_skips_circuit_breaker;
       test_case "tool_execute raw cmd requires typed Shell IR" `Quick
         test_tool_execute_raw_cmd_requires_typed_shell_ir;
+      test_case "OAS handler threads Eio context to keeper dispatch" `Quick
+        test_oas_handler_threads_eio_context_to_keeper_dispatch;
       test_case "registered dispatch does not require masc_ prefix" `Quick
         test_registered_tool_dispatch_without_masc_prefix;
       test_case "registered dispatch preserves workflow failure class" `Quick

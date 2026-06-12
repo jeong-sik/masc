@@ -62,20 +62,6 @@ let to_user_message = function
     Llm_provider.Http_client.provider_failure_to_string ~kind ~message
   | None -> "No providers available"
 
-let format_exhausted_error last_err =
-  let message = to_user_message last_err in
-  let kind =
-    match last_err with
-    | Some (Llm_provider.Http_client.NetworkError { kind; _ }) -> kind
-    | Some (Llm_provider.Http_client.TimeoutError _) -> Llm_provider.Http_client.Timeout
-    | _ -> Llm_provider.Http_client.Unknown
-  in
-  match last_err with
-  | Some (Llm_provider.Http_client.AcceptRejected _ as err) -> err
-  | _ ->
-    Llm_provider.Http_client.NetworkError
-      { message = Printf.sprintf "All providers failed: %s" message; kind }
-
 let provider_outcome_to_string = function
   | Call_ok _ -> "call-ok"
   | Call_err _ -> "call-err"

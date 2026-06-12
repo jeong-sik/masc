@@ -237,6 +237,7 @@ val create : config:config -> t
 
 val state : t -> connection_state
 val config : t -> config
+val resume_context : t -> (string * int option) option
 
 (** {2 Transition function} *)
 

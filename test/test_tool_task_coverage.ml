@@ -2248,8 +2248,8 @@ let () = test "rfc_0034_v2_operator_task_inject_orphan_bypasses_cap" (fun () ->
          result))
 
 (* RFC-0034.v2 unit-level: capacity check helper on a goal-bound
-   backlog. Pins the [check] / [rejection_for_add_task] semantics that
-   all 4 entrypoints inherit. *)
+   backlog. Pins the config-aware registry path used by task creation
+   entrypoints. *)
 let () = test "rfc_0034_v2_capacity_check_returns_some_at_limit" (fun () ->
   let ctx = make_test_ctx () in
   let goal, _ =
@@ -2271,7 +2271,7 @@ let () = test "rfc_0034_v2_capacity_check_returns_some_at_limit" (fun () ->
    | None -> ()
    | Some _ ->
        failwith "orphan check (goal_id=None) should be a no-op");
-  (match Workspace_task_capacity.check ~goal_id:goal.id backlog with
+  (match Workspace_task_capacity.check_for_config ctx.config ~goal_id:goal.id backlog with
    | Some err ->
        assert (err.open_task_count = 3);
        assert (err.limit = Workspace_task_capacity.default_goal_open_limit);

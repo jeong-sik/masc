@@ -8,6 +8,33 @@
     [goal_task_links] mappings. *)
 
 open Masc_domain
+open Masc
+
+let with_test_env f =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let tmp_dir =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf
+         "masc_goal_index_%d_%d"
+         (Unix.getpid ())
+         (int_of_float (Unix.gettimeofday () *. 1000.)))
+  in
+  Unix.mkdir tmp_dir 0o755;
+  let config = Workspace.default_config tmp_dir in
+  let _ = Workspace.init config ~agent_name:(Some "agent_llm_a") in
+  try
+    f config;
+    let _ = Workspace.reset config in
+    Unix.rmdir tmp_dir
+  with
+  | e ->
+    let _ = Workspace.reset config in
+    Unix.rmdir tmp_dir;
+    raise e
+;;
 
 let make_task ~id ~status =
   { id
@@ -142,6 +169,43 @@ let test_open_count_all_terminal () =
   check_int "all terminal -> 0 open tasks" 0 count
 ;;
 
+(* ── persistent goal-task registry ──────────────────────────────────── *)
+
+let test_add_task_persists_goal_link () =
+  with_test_env (fun config ->
+    let result =
+      Workspace.add_task
+        ~goal_id:"goal-a"
+        config
+        ~title:"linked task"
+        ~priority:1
+        ~description:""
+    in
+    check_bool "add_task succeeds" true (String.starts_with ~prefix:"Added task-001" result);
+    let links = Workspace_goal_index.read_goal_task_links config in
+    check_bool
+      "registry records goal link"
+      true
+      (List.exists
+         (fun (goal_id, task_ids) ->
+            String.equal goal_id "goal-a" && List.mem "task-001" task_ids)
+         links);
+    let tasks = Workspace.get_tasks_safe config in
+    let index = Workspace_goal_index.build_goal_task_index_for_config config tasks in
+    check_list_len
+      "config-aware index sees linked task"
+      1
+      (Workspace_goal_index.tasks_for_goal index ~goal_id:"goal-a");
+    let task_goal_index =
+      Workspace_goal_index.build_task_goal_index_for_config config
+    in
+    check_bool
+      "reverse index sees linked goal"
+      true
+      (try List.mem "goal-a" (Hashtbl.find task_goal_index "task-001") with
+       | Not_found -> false))
+;;
+
 (* ── test suite ─────────────────────────────────────────────────────── *)
 
 let () =
@@ -158,5 +222,12 @@ let () =
                  ; test_case "empty index has 0" `Quick test_open_count_empty
                  ; test_case "all terminal has 0" `Quick test_open_count_all_terminal
                  ] )
+    ; ( "persistent registry"
+      , Alcotest.
+          [ test_case
+              "add_task persists explicit goal link"
+              `Quick
+              test_add_task_persists_goal_link
+          ] )
     ]
 ;;

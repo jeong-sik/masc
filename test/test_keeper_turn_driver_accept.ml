@@ -174,6 +174,34 @@ let test_thinking_with_tool_use_is_accepted () =
     Alcotest.failf "thinking plus tool use should pass accept: %s"
       (Agent_sdk.Error.to_string err)
 
+let test_thinking_only_non_end_turn_response_is_rejected () =
+  let result =
+    Masc.Keeper_turn_driver.For_testing.apply_accept
+      ~runtime_id:"runtime.thinking-stop-sequence"
+      ~accept:Keeper_tool_response.response_has_text_or_tool_progress
+      (run_result
+         ~content:
+           [
+             Agent_sdk.Types.Thinking
+               { thinking_type = "reasoning"; content = "internal chain" };
+           ]
+         ~stop_reason:Agent_sdk.Types.StopSequence
+         ())
+  in
+  let _err, reason_kind, reason = expect_accept_rejected result in
+  Alcotest.(check bool)
+    "reason kind is no usable progress"
+    true
+    (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress);
+  Alcotest.(check bool)
+    "reason identifies thinking-only shape"
+    true
+    (contains ~needle:"shape=thinking_only" reason);
+  Alcotest.(check bool)
+    "reason keeps non-end stop reason"
+    true
+    (contains ~needle:"stop_reason=stop_sequence" reason)
+
 let test_empty_non_end_turn_response_is_rejected () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
@@ -306,6 +334,8 @@ let () =
             test_thinking_with_text_is_accepted;
           Alcotest.test_case "thinking plus tool use is accepted" `Quick
             test_thinking_with_tool_use_is_accepted;
+          Alcotest.test_case "thinking-only non-end-turn response is rejected" `Quick
+            test_thinking_only_non_end_turn_response_is_rejected;
           Alcotest.test_case "empty non-end-turn response is rejected" `Quick
             test_empty_non_end_turn_response_is_rejected;
           Alcotest.test_case "blank text non-end-turn response is rejected" `Quick

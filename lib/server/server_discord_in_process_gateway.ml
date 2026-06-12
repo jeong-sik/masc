@@ -303,7 +303,7 @@ let handle_message_create ~dispatch
         | Channel_gate.Dispatch_unavailable ->
           let notice =
             Printf.sprintf
-              "⚠️ `%s` keeper가 현재 오프라인입니다. 잠시 후 다시 시도해주세요."
+              "⚠️ `%s`가 현재 오프라인입니다. 잠시 후 다시 시도해주세요."
               keeper_name
           in
           (match State.send_message ~channel_id ~content:notice

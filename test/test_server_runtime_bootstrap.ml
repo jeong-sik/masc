@@ -1271,6 +1271,10 @@ let test_health_json_degrades_when_reaction_capacity_below_target () =
              |> to_int);
           Alcotest.(check int) "health exposes blocked shortfall" 2
             (fleet_safety |> member "blocked_count" |> to_int);
+          Alcotest.(check (list string)) "health exposes blocked keeper names"
+            [ "capacity-paused"; "example" ]
+            (fleet_safety |> member "blocked_keeper_names" |> to_list
+             |> List.map to_string);
           Alcotest.(check string) "health marks fleet degraded" "degraded"
             (fleet_safety |> member "status" |> to_string);
           Alcotest.(check string) "health marks target-capacity blocker"
@@ -1315,6 +1319,14 @@ let test_health_json_distinguishes_failing_executable_keepers () =
             (fleet_safety |> member "failing_keeper_fiber_count" |> to_int);
           Alcotest.(check int) "health exposes executable keeper fibers" 1
             (fleet_safety |> member "executable_keeper_fiber_count" |> to_int);
+          Alcotest.(check (list string)) "health exposes recovering keeper names"
+            [ "capacity-failing" ]
+            (fleet_safety |> member "recovering_keeper_names" |> to_list
+             |> List.map to_string);
+          Alcotest.(check (list string)) "health exposes executable keeper names"
+            [ "capacity-failing" ]
+            (fleet_safety |> member "executable_keeper_names" |> to_list
+             |> List.map to_string);
           Alcotest.(check bool) "health marks no running fibers" true
             (fleet_safety |> member "no_running_fibers" |> to_bool);
           Alcotest.(check bool) "health does not mark no executable fibers" false

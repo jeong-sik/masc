@@ -98,6 +98,109 @@
         "required": false,
         "success_after_failure": false
       }
+    },
+    {
+      "id": "discord_channel_list_surface_read",
+      "prompt": "List the available Discord channels by calling keeper_surface_read with args containing `channels` and the channel type set to `discord`. Report how many channels are returned.",
+      "category": "tool_selection_discord",
+      "keeper_profiles": ["bench-executor", "bench-verifier"],
+      "forbidden_tools": ["tool_execute"],
+      "max_tool_calls": 2,
+      "success_checks": [
+        { "path": "$.status", "equals": "completed" },
+        { "path": "$.channel_count", "min_int": 0 }
+      ],
+      "arg_checks": [
+        {
+          "tool_name": "keeper_surface_read",
+          "path": "$.args",
+          "contains": "channels"
+        },
+        {
+          "tool_name": "keeper_surface_read",
+          "path": "$.args",
+          "contains": "discord"
+        }
+      ],
+      "recovery_policy": {
+        "required": false,
+        "success_after_failure": false
+      }
+    },
+    {
+      "id": "discord_channel_list_no_fallback_to_execute",
+      "prompt": "List the available Discord channels. Use keeper_surface_read with a `channels` argument — do not fall back to tool_execute or any shell command.",
+      "category": "tool_selection_discord",
+      "keeper_profiles": ["bench-analyst", "bench-executor"],
+      "forbidden_tools": ["tool_execute"],
+      "max_tool_calls": 2,
+      "success_checks": [
+        { "path": "$.status", "equals": "completed" },
+        { "path": "$.correct_tool_used", "equals": true }
+      ],
+      "arg_checks": [
+        {
+          "tool_name": "keeper_surface_read",
+          "path": "$.args",
+          "contains": "channels"
+        }
+      ],
+      "recovery_policy": {
+        "required": true,
+        "success_after_failure": true,
+        "max_failures_before_success": 1
+      }
+    },
+    {
+      "id": "discord_post_via_surface_post",
+      "prompt": "Post a message `Hello from bench test` to a Discord channel by calling keeper_surface_post with the channel type set to `discord`. Do not use tool_execute.",
+      "category": "tool_selection_discord",
+      "keeper_profiles": ["bench-executor"],
+      "forbidden_tools": ["tool_execute"],
+      "max_tool_calls": 2,
+      "success_checks": [
+        { "path": "$.status", "equals": "completed" }
+      ],
+      "arg_checks": [
+        {
+          "tool_name": "keeper_surface_post",
+          "path": "$.args",
+          "contains": "discord"
+        },
+        {
+          "tool_name": "keeper_surface_post",
+          "path": "$.args",
+          "contains": "Hello from bench test"
+        }
+      ],
+      "recovery_policy": {
+        "required": false,
+        "success_after_failure": false
+      }
+    },
+    {
+      "id": "discord_intent_disambiguation",
+      "prompt": "The user wants to know what channels are available in Discord. Select the correct tool: keeper_surface_read (for reading/listening) vs keeper_surface_post (for posting) vs tool_execute (for shell). Call only the read variant with `channels` and `discord` in the args.",
+      "category": "tool_selection_discord",
+      "keeper_profiles": ["bench-analyst", "bench-verifier"],
+      "forbidden_tools": ["tool_execute"],
+      "max_tool_calls": 1,
+      "success_checks": [
+        { "path": "$.status", "equals": "completed" },
+        { "path": "$.correct_tool", "equals": "keeper_surface_read" }
+      ],
+      "arg_checks": [
+        {
+          "tool_name": "keeper_surface_read",
+          "path": "$.args",
+          "contains": "channels"
+        }
+      ],
+      "recovery_policy": {
+        "required": true,
+        "success_after_failure": true,
+        "max_failures_before_success": 1
+      }
     }
   ]
 }

@@ -26,10 +26,41 @@ supports-runtime-mcp-tools = true
 supports-runtime-tool-events = true
 supports-runtime-mcp-http-headers = true
 
+[providers.deepseek]
+display-name = "DeepSeek API"
+protocol = "provider_d-http"
+endpoint = "https://api.deepseek.com"
+
+[providers.deepseek.credentials]
+type = "env"
+key = "DEEPSEEK_API_KEY"
+
+[providers.deepseek.capabilities]
+supports-runtime-mcp-tools = true
+supports-runtime-tool-events = true
+supports-runtime-mcp-http-headers = true
+
 [providers.ollama]
 display-name = "Local Ollama"
 protocol = "ollama-http"
 endpoint = "http://localhost:11434"
+
+[models.deepseek-v4-pro]
+api-name = "deepseek-v4-pro"
+max-context = 1000000
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.deepseek-v4-pro.capabilities]
+max-output-tokens = 384000
+supports-tool-choice = true
+supports-extended-thinking = true
+supports-reasoning-budget = true
+thinking-control-format = "reasoning-effort"
+supports-native-streaming = true
+supports-response-format-json = true
+supports-structured-output = true
 
 [models.deepseek-v4-flash]
 api-name = "deepseek-v4-flash"
@@ -58,6 +89,12 @@ supports-image-input = true
 supports-multimodal-inputs = true
 
 [ollama_cloud.deepseek-v4-flash]
+max-concurrent = 4
+
+[deepseek.deepseek-v4-pro]
+max-concurrent = 2
+
+[deepseek.deepseek-v4-flash]
 max-concurrent = 4
 
 [ollama.gemma4-26b-a4b-qat]

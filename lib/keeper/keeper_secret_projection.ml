@@ -211,6 +211,17 @@ let local_env_entries_with_defaults entries =
   else ("GH_CONFIG_DIR", local_empty_gh_config_dir) :: entries
 ;;
 
+let local_base_host_env ?host_env () =
+  let base =
+    match host_env with
+    | Some env -> env
+    | None -> Unix.environment ()
+  in
+  base
+  |> Env_keeper_scrub.filter_environment
+  |> Env_git_noninteractive.inject_into_environment
+;;
+
 let valid_rel_component component =
   not
     (String.equal component ""
@@ -436,7 +447,9 @@ let cleanup_files paths =
 let local_env_for_keeper ?host_env ~base_path ~keeper_name () =
   let root = secret_root ~base_path ~keeper_name in
   if not (path_exists root)
-  then Ok None
+  then
+    let env_entries = local_env_entries_with_defaults [] in
+    Ok (Some (overlay_env_entries (local_base_host_env ?host_env ()) env_entries))
   else if not (is_directory root)
   then Error (Printf.sprintf "keeper secret root is not a directory: %s" root)
   else (
@@ -448,21 +461,12 @@ let local_env_for_keeper ?host_env ~base_path ~keeper_name () =
       (match load_env_entries env_root with
        | Error _ as err -> err
        | Ok env_entries ->
-         (match collect_file_entries files_root with
-          | Error _ as err -> err
-          | Ok _file_entries ->
-            let env_entries = local_env_entries_with_defaults env_entries in
-            let base =
-              match host_env with
-              | Some env -> env
-              | None -> Unix.environment ()
-            in
-            let base =
-              base
-              |> Env_keeper_scrub.filter_environment
-              |> Env_git_noninteractive.inject_into_environment
-            in
-            Ok (Some (overlay_env_entries base env_entries)))))
+	         (match collect_file_entries files_root with
+	          | Error _ as err -> err
+	          | Ok _file_entries ->
+	            let env_entries = local_env_entries_with_defaults env_entries in
+	            let base = local_base_host_env ?host_env () in
+	            Ok (Some (overlay_env_entries base env_entries)))))
 ;;
 
 let docker_args_for_keeper ~base_path ~keeper_name ~container_name =

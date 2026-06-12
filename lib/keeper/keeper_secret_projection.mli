@@ -19,13 +19,13 @@ val local_env_for_keeper :
   unit ->
   (string array option, string) result
 (** Build the child-process environment for local keeper execution from
-    [secrets/<keeper>/env]. Returns [None] when the keeper secret root is
-    absent. When present, the host environment is keeper-scrubbed, git/gh
-    noninteractive defaults are injected, secret files are validated, and
-    env entries are overlaid without writing temp files. If the keeper does
-    not supply [GH_CONFIG_DIR], local execution points [gh] at an empty
-    system config directory when available to avoid ambient host config
-    fallback. *)
+    [secrets/<keeper>/env]. The host environment is keeper-scrubbed and
+    git/gh noninteractive defaults are injected even when the keeper secret
+    root is absent; a missing root only means there are no keeper-specific
+    env/file overlays. When present, secret files are validated and env
+    entries are overlaid without writing temp files. If the keeper does not
+    supply [GH_CONFIG_DIR], local execution points [gh] at an empty system
+    config directory when available to avoid ambient host config fallback. *)
 
 val docker_args_for_keeper :
   base_path:string -> keeper_name:string -> container_name:string -> (t, string) result

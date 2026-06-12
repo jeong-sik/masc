@@ -203,20 +203,47 @@ let test_secret_dir_override_uses_keeper_subdir () =
             projection.cleanup ()))
 ;;
 
-let test_local_env_missing_secret_dir_is_none () =
+let test_local_env_missing_secret_dir_is_scrubbed () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   with_env "MASC_SECRET_DIR" "" @@ fun () ->
+  let host_env =
+    [| "PATH=/usr/bin"
+     ; "GH_TOKEN=ambient-gh"
+     ; "GITHUB_TOKEN=ambient-github"
+     ; "GH_CONFIG_DIR=/Users/operator/.config/gh"
+     ; "SSH_AUTH_SOCK=/tmp/operator-agent.sock"
+     ; "GIT_TERMINAL_PROMPT=1"
+    |]
+  in
   match
     Keeper_secret_projection.local_env_for_keeper
-      ~host_env:[| "PATH=/usr/bin"; "GH_TOKEN=ambient" |]
+      ~host_env
       ~base_path:base
       ~keeper_name:"minjae"
       ()
   with
   | Error err -> Alcotest.fail err
-  | Ok None -> ()
-  | Ok (Some _) -> Alcotest.fail "expected missing local secret root to be None"
+  | Ok None -> Alcotest.fail "expected scrubbed local env for missing secret root"
+  | Ok (Some env) ->
+    Alcotest.(check (option string)) "ambient gh token stripped" None
+      (env_value "GH_TOKEN" env);
+    Alcotest.(check (option string)) "ambient github token stripped" None
+      (env_value "GITHUB_TOKEN" env);
+    Alcotest.(check bool) "ambient gh config not inherited" true
+      (env_value "GH_CONFIG_DIR" env <> Some "/Users/operator/.config/gh");
+    if Sys.file_exists "/var/empty" && Sys.is_directory "/var/empty"
+    then
+      Alcotest.(check (option string))
+        "empty gh config fallback"
+        (Some "/var/empty")
+        (env_value "GH_CONFIG_DIR" env);
+    Alcotest.(check (option string)) "ambient ssh agent stripped" None
+      (env_value "SSH_AUTH_SOCK" env);
+    Alcotest.(check (option string)) "noninteractive git prompt injected" (Some "0")
+      (env_value "GIT_TERMINAL_PROMPT" env);
+    Alcotest.(check (option string)) "safe PATH preserved" (Some "/usr/bin")
+      (env_value "PATH" env)
 ;;
 
 let test_local_env_uses_keeper_secret_env_without_ambient_credentials () =
@@ -446,8 +473,8 @@ let () =
             test_env_and_files_project_to_docker_args
         ; Alcotest.test_case "MASC_SECRET_DIR uses keeper subdir" `Quick
             test_secret_dir_override_uses_keeper_subdir
-        ; Alcotest.test_case "local env missing secret dir is noop" `Quick
-            test_local_env_missing_secret_dir_is_none
+        ; Alcotest.test_case "local env missing secret dir is scrubbed" `Quick
+            test_local_env_missing_secret_dir_is_scrubbed
         ; Alcotest.test_case "local env uses keeper env without ambient creds" `Quick
             test_local_env_uses_keeper_secret_env_without_ambient_credentials
         ; Alcotest.test_case "invalid env name rejects" `Quick

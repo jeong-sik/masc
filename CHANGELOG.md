@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Added
+- `runtime`: added the GLM Coding Plan seed as `glm-coding.glm-4-7-coding`
+  with the dedicated Z.AI Coding endpoint, `ZAI_CODING_API_KEY`, preserved
+  thinking, and strict runtime/provider materialization coverage (#20971).
+
+### Changed
+- Bumped the OAS agent SDK pin to `v0.206.1` at
+  `a5006c5444c04e4a8af9c650015a91a098cd1d9f` and raised the
+  `agent_sdk` dependency floor to `0.206.1`, picking up the Z.AI
+  preserved-thinking request mapping from OAS #2023.
+
 ## [0.19.41] - 2026-06-12
 
 ### Added

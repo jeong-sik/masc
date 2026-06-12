@@ -40,6 +40,20 @@ supports-runtime-mcp-tools = true
 supports-runtime-tool-events = true
 supports-runtime-mcp-http-headers = true
 
+[providers.glm-coding]
+display-name = "GLM Coding Plan"
+protocol = "provider_d-http"
+endpoint = "https://api.z.ai/api/coding/paas/v4"
+
+[providers.glm-coding.credentials]
+type = "env"
+key = "ZAI_CODING_API_KEY"
+
+[providers.glm-coding.capabilities]
+supports-runtime-mcp-tools = true
+supports-runtime-tool-events = true
+supports-runtime-mcp-http-headers = true
+
 [providers.ollama]
 display-name = "Local Ollama"
 protocol = "ollama-http"
@@ -69,6 +83,24 @@ tools-support = true
 thinking-support = true
 streaming = true
 
+[models.glm-4-7-coding]
+api-name = "glm-4.7"
+max-context = 200000
+tools-support = true
+thinking-support = true
+# GLM Coding Plan uses Z.AI's preserved-thinking path. OAS maps this runtime
+# seed to thinking.clear_thinking=false when preserve-thinking is enabled.
+preserve-thinking = true
+streaming = true
+
+[models.glm-4-7-coding.capabilities]
+max-output-tokens = 128000
+supports-tool-choice = false
+supports-extended-thinking = true
+supports-native-streaming = true
+supports-response-format-json = true
+supports-structured-output = false
+
 [models.gemma4-26b-a4b-qat]
 api-name = "hf.co/unsloth/gemma-4-26B-A4B-it-qat-GGUF:UD-Q4_K_XL"
 max-context = 262144
@@ -96,6 +128,9 @@ max-concurrent = 2
 
 [deepseek.deepseek-v4-flash]
 max-concurrent = 4
+
+[glm-coding.glm-4-7-coding]
+max-concurrent = 3
 
 [ollama.gemma4-26b-a4b-qat]
 max-concurrent = 1

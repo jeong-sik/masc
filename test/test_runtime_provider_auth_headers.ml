@@ -211,6 +211,66 @@ let deepseek_provider_config_or_fail () =
 
 let with_deepseek_env deepseek f = with_env "DEEPSEEK_API_KEY" deepseek f
 
+let glm_coding_runtime_toml =
+  {|
+[runtime]
+default = "glm-coding.glm-4-7-coding"
+
+[providers.glm-coding]
+display-name = "GLM Coding Plan"
+protocol = "provider_d-http"
+endpoint = "https://api.z.ai/api/coding/paas/v4"
+
+[providers.glm-coding.credentials]
+type = "env"
+key = "ZAI_CODING_API_KEY"
+
+[models.glm-4-7-coding]
+api-name = "glm-4.7"
+max-context = 200000
+tools-support = true
+thinking-support = true
+preserve-thinking = true
+streaming = true
+
+[models.glm-4-7-coding.capabilities]
+max-output-tokens = 128000
+supports-tool-choice = false
+supports-extended-thinking = true
+supports-native-streaming = true
+supports-response-format-json = true
+supports-structured-output = false
+
+[glm-coding.glm-4-7-coding]
+max-concurrent = 3
+|}
+
+let glm_coding_runtime_config_or_fail () =
+  match Runtime_toml.parse_string glm_coding_runtime_toml with
+  | Ok cfg -> cfg
+  | Error errors ->
+    failf
+      "expected GLM Coding Plan runtime TOML to parse: %s"
+      (String.concat
+         "; "
+         (List.map
+            (fun (err : Runtime_toml.parse_error) ->
+               Printf.sprintf "%s: %s" err.path err.message)
+            errors))
+
+let glm_coding_provider_config_or_fail () =
+  let cfg = glm_coding_runtime_config_or_fail () in
+  match cfg.bindings with
+  | [ binding ] ->
+    (match Runtime_adapter.binding_to_provider_config cfg binding with
+     | Ok provider_cfg -> provider_cfg
+     | Error msg -> failf "unexpected GLM Coding Plan adapter error: %s" msg)
+  | bindings ->
+    failf "expected one GLM Coding Plan binding, got %d" (List.length bindings)
+
+let with_glm_coding_env general coding f =
+  with_env "ZAI_API_KEY" general (fun () -> with_env "ZAI_CODING_API_KEY" coding f)
+
 let test_runtime_toml_accepts_deepseek_reasoning_effort_capability () =
   let cfg = deepseek_runtime_config_or_fail () in
   match cfg.models with
@@ -279,6 +339,37 @@ let test_runtime_adapter_materializes_deepseek_openai_compat () =
     check string "api key" "ds-test-key" provider_cfg.api_key;
     check (option int) "max_context" (Some 1000000) provider_cfg.max_context;
     check (option int) "max_tokens" (Some 384000) provider_cfg.max_tokens;
+    check int "Authorization header count" 0
+      (normalized_header_count "Authorization" provider_cfg.headers))
+
+let test_runtime_toml_accepts_glm_coding_capability () =
+  let cfg = glm_coding_runtime_config_or_fail () in
+  match cfg.models with
+  | [ model ] ->
+    check bool "thinking enabled" true model.thinking_support;
+    check bool "preserve thinking" true model.preserve_thinking;
+    (match model.capabilities with
+     | Some caps ->
+       check (option int) "max output" (Some 128000) caps.max_output_tokens;
+       check bool "forced tool choice disabled" false caps.supports_tool_choice;
+       check bool "extended thinking" true caps.supports_extended_thinking
+     | None -> fail "expected model capabilities")
+  | models -> failf "expected one model, got %d" (List.length models)
+
+let test_runtime_adapter_materializes_glm_coding_provider () =
+  with_glm_coding_env "general-key" "coding-key" (fun () ->
+    let provider_cfg = glm_coding_provider_config_or_fail () in
+    check bool "kind" true
+      (provider_cfg.kind = Llm_provider.Provider_config.Glm);
+    check string "base_url" "https://api.z.ai/api/coding/paas/v4"
+      provider_cfg.base_url;
+    check string "request_path" "/chat/completions" provider_cfg.request_path;
+    check string "model_id" "glm-4.7" provider_cfg.model_id;
+    check string "api key uses coding lane" "coding-key" provider_cfg.api_key;
+    check (option int) "max_context" (Some 200000) provider_cfg.max_context;
+    check (option int) "max_tokens" (Some 128000) provider_cfg.max_tokens;
+    check (option bool) "tool choice override" (Some false)
+      provider_cfg.supports_tool_choice_override;
     check int "Authorization header count" 0
       (normalized_header_count "Authorization" provider_cfg.headers))
 
@@ -634,6 +725,10 @@ let () =
             `Quick
             test_runtime_toml_accepts_deepseek_reasoning_effort_capability
         ; test_case
+            "runtime TOML accepts GLM Coding Plan capabilities"
+            `Quick
+            test_runtime_toml_accepts_glm_coding_capability
+        ; test_case
             "runtime TOML accepts chat template token thinking"
             `Quick
             test_runtime_toml_accepts_chat_template_token_capability
@@ -641,6 +736,10 @@ let () =
             "runtime adapter materializes DeepSeek OpenAI compat"
             `Quick
             test_runtime_adapter_materializes_deepseek_openai_compat
+        ; test_case
+            "runtime adapter materializes GLM Coding Plan provider"
+            `Quick
+            test_runtime_adapter_materializes_glm_coding_provider
         ; test_case
             "runtime agent terminal observation carries model identity"
             `Quick

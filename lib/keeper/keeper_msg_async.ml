@@ -58,7 +58,7 @@ let is_safe_request_id request_id =
         | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '-' | '.' -> loop (i + 1)
         | _ -> false)
     in
-    loop 0)
+    loop 0 && request_id <> ".." && request_id <> ".")
 ;;
 
 let record_path ~base_path ~request_id =

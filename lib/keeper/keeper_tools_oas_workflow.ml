@@ -27,6 +27,7 @@ type workflow_rejection_info =
   { task_id : string option
   ; rule_id : string option
   ; tool_suggestion : string option
+  ; alternatives : string list
   ; hint : string option
   ; scope_policy : workflow_rejection_scope_policy
   }
@@ -44,6 +45,31 @@ let json_nonempty_string_opt key json =
     let value = String.trim value in
     if String.equal value "" then None else Some value
   | _ -> None
+;;
+
+let json_string_list_opt key json =
+  match json_assoc_field_opt key json with
+  | Some (`List values) ->
+    let strings =
+      List.filter_map
+        (function
+          | `String value ->
+            let value = String.trim value in
+            if String.equal value "" then None else Some value
+          | _ -> None)
+        values
+    in
+    if strings = [] then None else Some strings
+  | _ -> None
+;;
+
+let json_or_detail_string_list_opt key json =
+  match json_string_list_opt key json with
+  | Some _ as value -> value
+  | None ->
+    (match detail_json_opt json with
+     | Some detail -> json_string_list_opt key detail
+     | None -> None)
 ;;
 
 let workflow_rejection_info_of_json json =
@@ -73,6 +99,8 @@ let workflow_rejection_info_of_json json =
   { task_id
   ; rule_id
   ; tool_suggestion
+  ; alternatives =
+      Option.value ~default:[] (json_or_detail_string_list_opt "alternatives" json)
   ; hint = json_or_detail_string_opt "hint" json
   ; scope_policy
   }
@@ -232,26 +260,56 @@ let workflow_rejection_info_of_raw raw =
 ;;
 
 let workflow_rejection_family_key ~tool_name (info : workflow_rejection_info) =
+  let next_tool_key =
+    match info.tool_suggestion with
+    | Some tool -> Some tool
+    | None ->
+      List.find_opt
+        (fun alternative -> not (String.equal alternative tool_name))
+        info.alternatives
+  in
   Printf.sprintf
     "%s:%s:%s:%s"
     (Option.value ~default:"unknown_task" info.task_id)
     tool_name
     (Option.value ~default:"unknown_rule" info.rule_id)
-    (Option.value ~default:"unknown_tool" info.tool_suggestion)
+    (Option.value ~default:"unknown_tool" next_tool_key)
 ;;
 
 let workflow_rejection_recovery_instruction ~tool_name ~count (info : workflow_rejection_info) =
-  match info.tool_suggestion with
-  | Some next_tool when count >= 2 ->
+  let next_tool =
+    match info.tool_suggestion with
+    | Some tool -> Some (`Required tool)
+    | None ->
+      Option.map
+        (fun tool -> `Alternative tool)
+        (List.find_opt
+           (fun alternative -> not (String.equal alternative tool_name))
+           info.alternatives)
+  in
+  match next_tool with
+  | Some (`Required next_tool) when count >= 2 ->
     Printf.sprintf
       "Stop retrying %s variants for this workflow rejection. Call %s next and \
        follow the hint/alternatives in detail."
       tool_name
       next_tool
-  | Some next_tool ->
+  | Some (`Required next_tool) ->
     Printf.sprintf
       "Use %s next for this workflow rejection and follow the hint/alternatives \
        in detail; %s is not the next valid action."
+      next_tool
+      tool_name
+  | Some (`Alternative next_tool) when count >= 2 ->
+    Printf.sprintf
+      "Stop retrying %s variants for this workflow rejection. Use %s or another \
+       listed alternative from detail."
+      tool_name
+      next_tool
+  | Some (`Alternative next_tool) ->
+    Printf.sprintf
+      "Use %s or another listed alternative for this workflow rejection; %s is \
+       not the next valid action."
       next_tool
       tool_name
   | None when count >= 2 ->
@@ -273,6 +331,24 @@ let workflow_rejection_recovery_fields ~tool_name ~count raw =
       | Some value -> [ key, `String value ]
       | None -> []
     in
+    let alternatives_field =
+      match info.alternatives with
+      | [] -> []
+      | alternatives ->
+        [ "alternatives", `List (List.map (fun name -> `String name) alternatives) ]
+    in
+    let next_tool_fields =
+      match info.tool_suggestion with
+      | Some next_tool -> [ "required_next_tool", `String next_tool ]
+      | None ->
+        (match
+           List.find_opt
+             (fun alternative -> not (String.equal alternative tool_name))
+             info.alternatives
+         with
+         | Some next_tool -> [ "suggested_next_tool", `String next_tool ]
+         | None -> [])
+    in
     let recovery =
       [ "count", `Int count
       ; "instruction", `String (workflow_rejection_recovery_instruction ~tool_name ~count info)
@@ -280,6 +356,7 @@ let workflow_rejection_recovery_fields ~tool_name ~count raw =
       @ optional_string "rule_id" info.rule_id
       @ optional_string "tool_suggestion" info.tool_suggestion
       @ optional_string "hint" info.hint
+      @ alternatives_field
       @ [ ( "scope_policy"
           , `String (workflow_rejection_scope_policy_to_string info.scope_policy) )
         ]
@@ -287,7 +364,7 @@ let workflow_rejection_recovery_fields ~tool_name ~count raw =
     [ "self_correction_required", `Bool true
     ; "workflow_rejection_recovery", `Assoc recovery
     ]
-    @ optional_string "required_next_tool" info.tool_suggestion
+    @ next_tool_fields
     @ if count >= 2 then [ "workflow_rejection_loop", `Bool true ] else []
 ;;
 

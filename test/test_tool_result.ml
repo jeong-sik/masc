@@ -375,6 +375,7 @@ let test_workflow_recovery_with_tool_suggestion_routes_next_tool () =
     { task_id = Some "task-944"
     ; rule_id = Some "task_done_requires_claimed_or_started"
     ; tool_suggestion = Some "keeper_task_claim"
+    ; alternatives = [ "keeper_task_claim"; "keeper_tasks_list" ]
     ; hint = Some "Claim it first"
     ; scope_policy = Keeper_tools_oas_workflow.Observe_scope
     }
@@ -426,6 +427,43 @@ let test_workflow_recovery_fields_require_next_tool () =
     "instruction names next tool"
     true
     (str_contains instruction "Use keeper_task_claim next");
+  Alcotest.(check bool)
+    "instruction avoids same-tool retry"
+    false
+    (str_contains instruction "retry this keeper_task_done call")
+;;
+
+let test_workflow_recovery_uses_alternatives_without_tool_suggestion () =
+  let raw =
+    {|{"ok":false,"error":"task_id is required","failure_class":"workflow_rejection","alternatives":["keeper_task_claim","keeper_tasks_list"],"diagnosis":{"rule_id":"keeper_task_argument_rejected","scope_policy":"observe"}}|}
+  in
+  let fields =
+    Keeper_tools_oas_workflow.workflow_rejection_recovery_fields
+      ~tool_name:"keeper_task_done"
+      ~count:1
+      raw
+  in
+  let suggested_next_tool =
+    match List.assoc_opt "suggested_next_tool" fields with
+    | Some (`String value) -> value
+    | _ -> Alcotest.fail "missing suggested_next_tool"
+  in
+  let instruction =
+    match List.assoc_opt "workflow_rejection_recovery" fields with
+    | Some (`Assoc recovery) ->
+      (match List.assoc_opt "instruction" recovery with
+       | Some (`String value) -> value
+       | _ -> Alcotest.fail "missing recovery instruction")
+    | _ -> Alcotest.fail "missing workflow_rejection_recovery"
+  in
+  Alcotest.(check string)
+    "suggested next tool"
+    "keeper_task_claim"
+    suggested_next_tool;
+  Alcotest.(check bool)
+    "instruction names alternative tool"
+    true
+    (str_contains instruction "Use keeper_task_claim");
   Alcotest.(check bool)
     "instruction avoids same-tool retry"
     false
@@ -507,6 +545,10 @@ let () =
             "recovery fields require next tool"
             `Quick
             test_workflow_recovery_fields_require_next_tool
+        ; Alcotest.test_case
+            "recovery fields use alternatives"
+            `Quick
+            test_workflow_recovery_uses_alternatives_without_tool_suggestion
         ] )
     ]
 ;;

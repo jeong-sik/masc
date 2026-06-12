@@ -57,6 +57,8 @@ export function Tools() {
         runtimeResolution=${data?.runtime_resolution}
       />
 
+      <${PromptRegistryPanel} />
+
       <${SectionCard} label="시스템 도구 목록" class="section mb-4">
         <${FullInventoryView}
           inventory=${inventory}
@@ -97,7 +99,6 @@ export function Tools() {
           </div>`
         : null}
 
-      <${PromptRegistryPanel} />
     </div>`}
     </div>
   `

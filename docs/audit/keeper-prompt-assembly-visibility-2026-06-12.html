@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Keeper Prompt Assembly Visibility Audit</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #080b10;
+      --panel: #101620;
+      --panel-2: #151e2b;
+      --text: #e7edf7;
+      --muted: #94a3b8;
+      --line: #273449;
+      --hot: #f97316;
+      --warn: #fbbf24;
+      --bad: #fb7185;
+      --ok: #34d399;
+      --info: #38bdf8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 14px/1.55 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    main { max-width: 1160px; margin: 0 auto; padding: 28px 20px 48px; }
+    header {
+      border: 1px solid rgba(249, 115, 22, .42);
+      background: linear-gradient(135deg, rgba(249, 115, 22, .18), rgba(56, 189, 248, .08));
+      padding: 22px;
+      border-radius: 8px;
+    }
+    h1, h2, h3 { margin: 0; line-height: 1.15; }
+    h1 { font-size: clamp(28px, 4vw, 48px); letter-spacing: 0; }
+    h2 { margin-top: 30px; font-size: 22px; }
+    h3 { margin-top: 18px; font-size: 16px; color: var(--info); }
+    p { color: var(--muted); }
+    .lede { max-width: 860px; margin: 12px 0 0; color: #d7e2ef; font-size: 15px; }
+    .grid { display: grid; gap: 12px; }
+    .grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .card {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .metric { font: 700 26px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .metric.warn { color: var(--warn); }
+    .metric.bad { color: var(--bad); }
+    .metric.ok { color: var(--ok); }
+    .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; overflow: hidden; border-radius: 8px; }
+    th, td { border: 1px solid var(--line); padding: 9px 10px; text-align: left; vertical-align: top; }
+    th { background: var(--panel-2); color: #cbd5e1; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+    td { background: rgba(16, 22, 32, .72); }
+    code {
+      color: #f8fafc;
+      background: rgba(148, 163, 184, .14);
+      border: 1px solid rgba(148, 163, 184, .2);
+      padding: 1px 5px;
+      border-radius: 4px;
+      font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      padding: 2px 7px;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      margin: 0 4px 4px 0;
+      color: #cbd5e1;
+      background: rgba(148, 163, 184, .08);
+    }
+    .tag.bad { border-color: rgba(251, 113, 133, .35); color: var(--bad); background: rgba(251, 113, 133, .12); }
+    .tag.warn { border-color: rgba(251, 191, 36, .35); color: var(--warn); background: rgba(251, 191, 36, .12); }
+    .tag.ok { border-color: rgba(52, 211, 153, .35); color: var(--ok); background: rgba(52, 211, 153, .10); }
+    .callout {
+      border-left: 4px solid var(--hot);
+      background: rgba(249, 115, 22, .10);
+      padding: 12px 14px;
+      margin-top: 14px;
+      border-radius: 6px;
+    }
+    ol, ul { padding-left: 20px; }
+    li { margin: 6px 0; color: var(--d7e2ef, #d7e2ef); }
+    @media (max-width: 860px) {
+      .grid-4, .grid-2 { grid-template-columns: 1fr; }
+      main { padding: 18px 12px 32px; }
+      table { font-size: 12px; }
+      th, td { padding: 7px; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="label">MASC Keeper Prompt Assembly Audit · 2026-06-12</div>
+    <h1>Keeper 최종 삽입 프롬프트가 보이지 않는 문제</h1>
+    <p class="lede">
+      현재 dashboard는 프롬프트 파일과 override 편집은 보여주지만, 실제 Keeper turn에서 어떤 조각이
+      system prompt, user/world message, OAS extra_system_context, tool policy로 흘러 들어가는지 한 화면에
+      보여주지 않는다. 이 문서는 첫 PR의 목표 UI와 stale tool guidance 정리 기준을 고정한다.
+    </p>
+  </header>
+
+  <h2>확인된 현재 상태</h2>
+  <div class="grid grid-4">
+    <section class="card">
+      <div class="label">Runtime</div>
+      <div class="metric ok">0.19.40</div>
+      <p>Live server는 <code>/health?full=1</code> 기준 정상 응답.</p>
+    </section>
+    <section class="card">
+      <div class="label">Runtime commit</div>
+      <div class="metric">3f337cf12</div>
+      <p>실행 중 binary/repo head 확인값.</p>
+    </section>
+    <section class="card">
+      <div class="label">Active prompt root</div>
+      <div class="metric warn">.masc</div>
+      <p><code>/Users/dancer/me/.masc/config/prompts</code>가 live source.</p>
+    </section>
+    <section class="card">
+      <div class="label">Repo/live drift</div>
+      <div class="metric bad">8</div>
+      <p>주요 Keeper prompt 파일 8개가 repo seed와 live runtime 사이에서 다름.</p>
+    </section>
+  </div>
+
+  <h2>최종 조립 경로</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>순서</th>
+        <th>주입 lane</th>
+        <th>무엇이 들어가나</th>
+        <th>대표 소스</th>
+        <th>현재 가시성</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>1</td>
+        <td><span class="tag ok">registry</span></td>
+        <td>Config root, prompt markdown, runtime override를 로딩한다.</td>
+        <td><code>Prompt_defaults.bootstrap_runtime</code>, <code>/api/v1/prompts</code></td>
+        <td>Prompt Registry에서 일부 확인 가능.</td>
+      </tr>
+      <tr>
+        <td>2</td>
+        <td><span class="tag">system</span></td>
+        <td>core behavior, profile policy, continuity, constitution, world, capabilities, identity/persona/goals.</td>
+        <td><code>Keeper_prompt.build_keeper_system_prompt</code></td>
+        <td>최종 조립표 없음. 파일별로 흩어짐.</td>
+      </tr>
+      <tr>
+        <td>3</td>
+        <td><span class="tag">user/world</span></td>
+        <td>unified system framing, turn intent, current world state, claimable work, board activity.</td>
+        <td><code>Keeper_unified_prompt.build_prompt</code></td>
+        <td>Prompt telemetry는 있으나 provenance 없음.</td>
+      </tr>
+      <tr>
+        <td>4</td>
+        <td><span class="tag warn">extra_system_context</span></td>
+        <td>continuity snapshot, durable memory, skill route, worktree, telemetry feedback, turn instruction.</td>
+        <td><code>Keeper_turn.build_turn_prompt</code></td>
+        <td>가장 중요한데 operator UI에서 거의 안 보임.</td>
+      </tr>
+      <tr>
+        <td>5</td>
+        <td><span class="tag warn">OAS hook</span></td>
+        <td>temporal summary, claimed-task nudge, retry hint, Memory OS recall, tool filter/choice.</td>
+        <td><code>Keeper_run_tools_hooks.before_turn_params</code></td>
+        <td>digest/size 중심. 사람이 읽는 조립표 없음.</td>
+      </tr>
+      <tr>
+        <td>6</td>
+        <td><span class="tag">manifest</span></td>
+        <td>context_injected edge와 prompt metrics가 기록된다.</td>
+        <td><code>Keeper_agent_run.append_manifest</code></td>
+        <td>edge는 있으나 segment provenance가 부족.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Stale tool guidance 위험</h2>
+  <div class="callout">
+    <strong>핵심 문제:</strong> tool 사용법이 prompt, live .masc config, keeper TOML, tool hints에 중복되어 있고
+    일부는 실제 public alias나 argument shape와 어긋난다. 모델 성격 변화처럼 보이는 현상 중 일부는 이 지침 drift로 설명된다.
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>패턴</th>
+        <th>관찰된 예</th>
+        <th>위험</th>
+        <th>정리 방향</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Retired alias</td>
+        <td><code>keeper_board_get</code> vs <code>keeper_board_post_get</code></td>
+        <td>없는 도구 호출, 같은 실패 반복.</td>
+        <td>active schema/public alias 기준 linter.</td>
+      </tr>
+      <tr>
+        <td>Stale args</td>
+        <td><code>keeper_task_done { notes }</code> vs <code>{ task_id, result }</code></td>
+        <td>완료 보고 실패, task oscillation.</td>
+        <td><code>keeper.tool_hints.toml</code>을 schema example SSOT로 제한.</td>
+      </tr>
+      <tr>
+        <td>Conflicting PR flow</td>
+        <td><code>keeper_pr_create</code> 지침과 Execute typed argv 지침 공존</td>
+        <td>모델이 금지/허용 경계를 혼동.</td>
+        <td>Keeper TOML에는 persona만, 공통 tool grammar 제거.</td>
+      </tr>
+      <tr>
+        <td>Hardcoded path</td>
+        <td><code>repos/masc/lib/foo.ml</code></td>
+        <td>worktree-first 정책 위반, stale path probe.</td>
+        <td><code>repos/REPO_NAME/.worktrees/TASK_NAME</code> 예시로 통일.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>첫 PR 개선 목표</h2>
+  <ol>
+    <li>Keeper detail 화면에 aggressive prompt assembly 패널을 추가한다.</li>
+    <li>Prompt Registry 상단에도 Keeper assembly/stale guidance 요약을 노출한다.</li>
+    <li>각 row는 stage, lane, source prompt, source type, override 상태, byte size, risk를 보여준다.</li>
+    <li>stale alias/args/path/PR-flow warning을 prompt effective text에서 즉시 스캔한다.</li>
+    <li>다음 PR에서 runtime manifest에 segment provenance를 추가할 수 있도록 UI 용어를 고정한다.</li>
+  </ol>
+
+  <h2>Done 기준</h2>
+  <ul>
+    <li>Operator가 Keeper detail에서 최종 삽입 경로를 표로 본다.</li>
+    <li>Override가 최종 prompt에 영향을 주는지 source badge로 바로 보인다.</li>
+    <li>Live .masc prompt가 stale tool guidance를 품으면 dashboard가 경고한다.</li>
+    <li>HTML audit artifact가 PR에 포함되어 review context를 제공한다.</li>
+  </ul>
+</main>
+</body>
+</html>

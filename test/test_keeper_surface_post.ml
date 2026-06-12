@@ -99,7 +99,7 @@ let test_assistant_message_persists_with_source () =
       let messages = Store.load ~base_dir ~keeper_name:"post-keeper" in
       check int "one line" 1 (List.length messages);
       let m = List.hd messages in
-      check string "role" "assistant" m.Store.role;
+      check string "role" "assistant" (Store.Role.to_label m.Store.role);
       check string "content" "keeper-initiated hello" m.Store.content;
       check (option string) "source" (Some "discord") m.Store.source;
       check bool "no speaker on keeper output" true (m.Store.speaker = None))

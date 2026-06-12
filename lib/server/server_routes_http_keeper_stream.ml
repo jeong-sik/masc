@@ -551,9 +551,19 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
        | Some timeout_sec -> [ ("timeout_sec", `Int timeout_sec) ]
        | None -> [])
     in
+    let connector_fields =
+      if has_connector_context then
+        [ ("channel", `String payload.channel);
+          ("channel_user_id", `String payload.channel_user_id);
+          ("channel_user_name", `String payload.channel_user_name);
+          ("channel_workspace_id", `String payload.channel_workspace_id) ]
+      else
+        []
+    in
+    let fields = base_fields @ connector_fields in
     `Assoc
-      (if payload.attachments = [] then base_fields
-       else ("attachments", `List (List.map attachment_json payload.attachments)) :: base_fields)
+      (if payload.attachments = [] then fields
+       else ("attachments", `List (List.map attachment_json payload.attachments)) :: fields)
   in
   (* Stream model text deltas live with per-delta redaction — the same
      treatment ThinkingDelta and Tool_call_args already get in

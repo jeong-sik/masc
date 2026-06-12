@@ -20,6 +20,31 @@ val is_self_author
 
 val is_keeper_authored_message : string -> bool
 
+type recent_direct_line = {
+  role_label : string;
+  speaker_label : string option;
+  content : string;
+}
+(** Bounded transcript line for direct-chat continuity. Tool rows retain
+    only the call name; assistant transport failures are omitted because
+    they are server failures, not keeper utterances. *)
+
+val recent_direct_conversation_of_messages
+  :  ?limit:int
+  -> Keeper_chat_store.chat_message list
+  -> recent_direct_line list
+
+val collect_recent_direct_conversation
+  :  ?limit:int
+  -> config:Workspace.config
+  -> meta:keeper_meta
+  -> unit
+  -> recent_direct_line list
+
+val render_recent_direct_conversation_context
+  :  recent_direct_line list
+  -> string
+
 (** [pending_mentions_of_messages ~targets messages] returns the [(speaker,
     content)] of every user line whose persisted [mentions] (RFC-0232
     §3.3: parsed once at append) hit a target and that arrives after the

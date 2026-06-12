@@ -4,8 +4,11 @@ import type { BoardActorIdentity, BoardPost } from './core'
 
 export type SSEEventType =
   | 'agent_bound'
+  | 'masc/agent_bound'
   | 'agent_unbound'
+  | 'masc/agent_unbound'
   | 'broadcast'
+  | 'masc/broadcast'
   | 'task_update'
   | 'board_post'
   | 'masc/board_post'

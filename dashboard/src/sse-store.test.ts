@@ -240,6 +240,38 @@ describe('setupSSEReaction reconnect hydration', () => {
     cleanup()
   })
 
+  it('normalizes MASC lifecycle aliases before route-scoped execution refresh', async () => {
+    const { sseStore, sse } = await loadSseStore()
+    route.value = { tab: 'monitoring', params: { section: 'agents' }, postId: null }
+    const cleanup = sseStore.setupSSEReaction()
+
+    sse.lastEvent.value = {
+      type: 'masc/keeper_guardrail',
+      name: 'qa-king',
+      reason: 'tool boundary',
+    }
+    vi.advanceTimersByTime(1_000)
+    await flushAsyncWork()
+
+    expect(refreshExecution).toHaveBeenCalledTimes(1)
+    cleanup()
+  })
+
+  it('normalizes MASC broadcast aliases before route-scoped execution refresh', async () => {
+    const { sseStore } = await loadSseStore()
+    route.value = { tab: 'monitoring', params: { section: 'agents' }, postId: null }
+
+    sseStore.routeServerPushEvent({
+      type: 'masc/broadcast',
+      from: 'operator',
+      content: 'heads up',
+    })
+    vi.advanceTimersByTime(1_000)
+    await flushAsyncWork()
+
+    expect(refreshExecution).toHaveBeenCalledTimes(1)
+  })
+
   it('keeps operator lifecycle refreshes scoped to the command route', async () => {
     const { sseStore, sse } = await loadSseStore()
     const refreshOperator = vi.fn()
@@ -259,6 +291,22 @@ describe('setupSSEReaction reconnect hydration', () => {
     expect(refreshExecution).not.toHaveBeenCalled()
 
     cleanup()
+  })
+
+  it('routes all board SSE wire variants through the board refresh budget', async () => {
+    const { sseStore } = await loadSseStore()
+    route.value = { tab: 'workspace', params: { section: 'board' }, postId: null }
+
+    for (const type of ['board_post', 'masc/board_comment', 'board_delete'] as const) {
+      refreshBoard.mockClear()
+      sseStore.routeServerPushEvent({
+        type,
+        post_id: 'post-1',
+      })
+      vi.advanceTimersByTime(1_000)
+      await flushAsyncWork()
+      expect(refreshBoard).toHaveBeenCalledTimes(1)
+    }
   })
 
   it('routes websocket raw push events through the same route-scoped refresh budget', async () => {

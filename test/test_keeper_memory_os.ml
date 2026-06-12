@@ -337,6 +337,107 @@ let test_librarian_accepts_integer_confidence () =
   | None -> Alcotest.fail "expected librarian output to parse"
 ;;
 
+let test_librarian_filters_transient_admission_memory () =
+  let inp : Librarian.input =
+    { Librarian.trace_id = "trace-filter-transient-cap"
+    ; generation = 1
+    ; messages = [ text_message "Goal cap moved while the agent was working." ]
+    }
+  in
+  let raw =
+    `Assoc
+      [ "episode_summary", `String "Mixed durable memory and transient admission state"
+      ; ( "claims"
+        , `List
+            [ `Assoc
+                [ "claim", `String "Goal cap is 3/3, blocking new task claims."
+                ; "confidence", `Float 0.95
+                ; "category", `String "constraint"
+                ; "source_turn", `Int 3
+                ]
+            ; `Assoc
+                [ ( "claim"
+                  , `String
+                      "Memory OS holds stale goal_cap information that incorrectly suggests task claiming is blocked."
+                  )
+                ; "confidence", `Float 0.9
+                ; "category", `String "fact"
+                ; "source_turn", `Int 4
+                ]
+            ] )
+      ; ( "open_items"
+        , `List
+            [ `String "Wait for goal cap 3/3 before claiming new task."
+            ; `String "Audit Memory OS write-side filtering."
+            ] )
+      ; ( "constraints"
+        , `List
+            [ `String "Goal cap 3/3 is blocking task claim."
+            ; `String "Use worktrees for code changes."
+            ] )
+      ; "preserved_tool_refs", `List [ `String "call_transient_cap" ]
+      ]
+    |> Yojson.Safe.to_string
+  in
+  match Librarian.episode_of_output ~now:1_000_000.0 inp raw with
+  | Some episode ->
+    (match episode.Types.claims with
+     | [ fact ] ->
+       Alcotest.(check string)
+         "keeps durable diagnostic claim"
+         "Memory OS holds stale goal_cap information that incorrectly suggests task claiming is blocked."
+         fact.Types.claim;
+       Alcotest.(check int) "durable claim turn drives range" 4 fact.Types.source.turn
+     | claims -> Alcotest.failf "expected one durable claim, got %d" (List.length claims));
+    Alcotest.(check (list string))
+      "filters transient open item"
+      [ "Audit Memory OS write-side filtering." ]
+      episode.Types.open_items;
+    Alcotest.(check (list string))
+      "filters transient constraint"
+      [ "Use worktrees for code changes." ]
+      episode.Types.constraints;
+    Alcotest.(check (option (pair int int)))
+      "source range recomputed after filtering"
+      (Some (4, 4))
+      episode.Types.source_turn_range
+  | None -> Alcotest.fail "expected mixed episode to survive filtering"
+;;
+
+let test_librarian_discards_pure_transient_admission_episode () =
+  let inp : Librarian.input =
+    { Librarian.trace_id = "trace-pure-transient-cap"
+    ; generation = 1
+    ; messages = [ text_message "Claim was rejected by goal cap." ]
+    }
+  in
+  let raw =
+    `Assoc
+      [ ( "episode_summary"
+        , `String "Agent is blocked by goal_cap 3/3 and cannot claim new tasks." )
+      ; ( "claims"
+        , `List
+            [ `Assoc
+                [ "claim", `String "Goal cap is 3/3, blocking new task claims."
+                ; "confidence", `Float 0.95
+                ; "category", `String "constraint"
+                ; "source_turn", `Int 3
+                ]
+            ] )
+      ; "open_items", `List [ `String "Wait for goal cap 3/3 before claiming new task." ]
+      ; "constraints", `List [ `String "Goal cap 3/3 is blocking task claim." ]
+      ; "preserved_tool_refs", `List []
+      ]
+    |> Yojson.Safe.to_string
+  in
+  match Librarian.episode_of_output ~now:1_000_000.0 inp raw with
+  | None -> ()
+  | Some episode ->
+    Alcotest.failf
+      "expected pure transient admission episode to be discarded, got %s"
+      episode.Types.episode_summary
+;;
+
 let test_librarian_rejects_invalid_claims () =
   let inp : Librarian.input =
     { Librarian.trace_id = "trace-invalid"; generation = 0; messages = [] }
@@ -900,6 +1001,14 @@ let () =
             "librarian accepts integer confidence"
             `Quick
             test_librarian_accepts_integer_confidence
+        ; Alcotest.test_case
+            "librarian filters transient admission memory"
+            `Quick
+            test_librarian_filters_transient_admission_memory
+        ; Alcotest.test_case
+            "librarian discards pure transient admission episode"
+            `Quick
+            test_librarian_discards_pure_transient_admission_episode
         ; Alcotest.test_case
             "librarian rejects invalid claims"
             `Quick

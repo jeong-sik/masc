@@ -25,7 +25,8 @@ let () =
        Printf.printf "test1: PASS — no config keys in output\n"
      | _ -> Printf.printf "FAIL test1: not Assoc\n"; exit 1);
 
-  (* Test 2: Runtime JSON with TOML-owned config fields is rejected *)
+  (* Test 2: Runtime JSON with legacy TOML-owned config fields is tolerated on
+     read for compatibility, then scrubbed from the next write. *)
   let existing = Yojson.Safe.from_string {|
 {"name": "analyst", "agent_name": "keeper-analyst", "trace_id": "trace-001",
  "goal": "test goal", "sandbox_profile": "docker", "network_mode": "inherit",
@@ -34,16 +35,24 @@ let () =
  "total_turns": 42, "total_input_tokens": 1000}
 |} in
   (match Keeper_meta_json_parse.meta_of_json existing with
-   | Ok _ ->
-     Printf.printf "FAIL test2: config fields should be rejected\n"; exit 1
    | Error msg ->
-     let prefix =
-       "config-only keeper meta fields are no longer supported in runtime JSON: "
-     in
-     if not (String.starts_with ~prefix msg) then begin
-       Printf.printf "FAIL test2: unexpected rejection: %s\n" msg; exit 1
-     end;
-     Printf.printf "test2: PASS — config fields rejected\n");
+     Printf.printf "FAIL test2: legacy config field read failed: %s\n" msg;
+     exit 1
+   | Ok meta ->
+     (match Keeper_meta_json.meta_to_json meta with
+      | `Assoc fields ->
+        let keys = List.map fst fields in
+        let config_keys = Keeper_meta_json_scrub.config_field_names in
+        let leaked = List.filter (fun k -> List.mem k config_keys) keys in
+        if leaked <> [] then begin
+          Printf.printf "FAIL test2: config keys in output: %s\n"
+            (String.concat ", " leaked);
+          exit 1
+        end;
+        Printf.printf "test2: PASS — legacy config fields scrubbed on write\n"
+      | _ ->
+        Printf.printf "FAIL test2: not Assoc\n";
+        exit 1));
 
   (* Test 3: meta_to_json output has no config keys *)
   let existing = Yojson.Safe.from_string {|

@@ -14,6 +14,10 @@ open Masc
    it does not pin a key the JSON serialisation no longer emits. *)
 let target_keys =
   [ "trace_history"
+  ; "will"
+  ; "needs"
+  ; "desires"
+  ; "instructions"
   ; "last_runtime_attempt"
   ; "last_turn_tool_calls"
   ; "current_task_id"
@@ -48,9 +52,7 @@ let test_meta_to_json_redacts_last_model_used () =
       [ "name", `String "meta-redaction"
       ; "agent_name", `String "meta-redaction"
       ; "trace_id", `String "trace-meta-redaction"
-      ; "runtime_id", `String "test-provider.test-model"
-      ; "sandbox_profile", `String "local"
-      ; "network_mode", `String "none"
+      ; "tool_access", `List []
       ; "last_model_used", `String "openai:gpt-5.4"
       ]
   in
@@ -58,19 +60,13 @@ let test_meta_to_json_redacts_last_model_used () =
   | Error err -> Alcotest.fail ("meta_of_json failed: " ^ err)
   | Ok meta ->
     let emitted = Keeper_meta_json.meta_to_json meta in
-    let last_model_used =
+    let has_last_model_used =
       match emitted with
-      | `Assoc fields -> (
-        match List.assoc_opt "last_model_used" fields with
-        | Some (`String value) -> value
-        | Some _ -> Alcotest.fail "last_model_used must remain a string key"
-        | None -> Alcotest.fail "last_model_used key missing")
+      | `Assoc fields -> List.mem_assoc "last_model_used" fields
       | _ -> Alcotest.fail "meta_to_json must emit an object"
     in
-    Alcotest.(check string)
-      "legacy last_model_used key is redacted on write"
-      ""
-      last_model_used
+    Alcotest.(check bool) "legacy last_model_used key is redacted on write" false
+      has_last_model_used
 
 let () =
   Alcotest.run

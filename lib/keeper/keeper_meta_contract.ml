@@ -605,6 +605,7 @@ let effective_meta_of_profile_defaults
       in
       Ok
         { meta with
+          persona = apply_profile_default_opt defaults.persona_name meta.persona;
           proactive =
             {
               enabled =

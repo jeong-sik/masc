@@ -116,17 +116,38 @@ let session_kind_to_string = function
 
 let take = List.take
 
+(** Cached snapshot state — reused when [registry_epoch] hasn't changed. *)
+let cached_snapshot :
+  (int                   (* epoch *)
+  * int                  (* observer *)
+  * int                  (* agent_stream *)
+  * int                  (* presence *)
+  * float                (* avg_depth *)
+  * int                  (* max_queue_depth *)
+  * Transport_metrics.hot_session list)
+  option ref = ref None
+
 let sync_transport_snapshot () =
-  let now = Time_compat.now () in
-  (* Single-pass aggregation: previously [SMap.fold] built a
-     [(sid, client)] tuple list, then [List.map] re-walked it to
-     produce [session_snapshot] records.  [SMap.iter] over the
-     immutable map snapshot folds both passes into one, dropping
-     the per-client tuple cons cell.  Counters and the [sessions]
-     accumulator share the iteration; [total_sessions] is also
-     counted in-line, avoiding a trailing [List.length].  Called
-     on every [broadcast_impl] invocation, so the saved allocation
-     compounds with the fan-out itself. *)
+  let current_epoch = Atomic.get registry_epoch in
+  (match !cached_snapshot with
+   | Some (epoch, obs, agent, pres, avg_d, max_d, hot) when epoch = current_epoch ->
+       Transport_metrics.set_sse_sessions ~kind:"observer" obs;
+       Transport_metrics.set_sse_sessions ~kind:"agent_stream" agent;
+       Transport_metrics.set_sse_sessions ~kind:"presence" pres;
+       Transport_metrics.set_sse_queue_snapshot ~avg_depth:avg_d ~max_depth:max_d ~hot_sessions:hot;
+       last_snapshot_epoch := current_epoch;
+       ()
+   | _ ->
+       (* Single-pass aggregation: previously [SMap.fold] built a
+          [(sid, client)] tuple list, then [List.map] re-walked it to
+          produce [session_snapshot] records.  [SMap.iter] over the
+          immutable map snapshot folds both passes into one, dropping
+          the per-client tuple cons cell.  Counters and the [sessions]
+          accumulator share the iteration; [total_sessions] is also
+          counted in-line, avoiding a trailing [List.length].  Called
+          on every [broadcast_impl] invocation, so the saved allocation
+          compounds with the fan-out itself. *)
+       let now = Time_compat.now () in
   let observer = ref 0 in
   let agent_stream = ref 0 in
   let presence = ref 0 in
@@ -188,6 +209,13 @@ let mark_seen (client : client) =
 
 (** Monotonic client id for safe replacement/unregister *)
 let client_id_counter = Atomic.make 0
+
+(** Monotonic registry epoch — bumped on every register/unregister.
+    [sync_transport_snapshot] caches its last-computed epoch and
+    skips the full session iteration when the epoch hasn't changed
+    since the last call. *)
+let registry_epoch = Atomic.make 0
+let last_snapshot_epoch = ref 0
 
 (** Global event counter for resumability *)
 let event_counter = Atomic.make 0
@@ -455,6 +483,7 @@ let register ?(kind = Agent_stream) ?on_disconnect session_id ~last_event_id =
        invoke_disconnect_hook_for sid
    | None ->
        ());
+  Atomic.incr registry_epoch;
   sync_transport_snapshot ();
   (client_id, event_stream, evicted)
 
@@ -493,6 +522,7 @@ let unregister session_id =
        and no infinite-loop risk.  Snapshot recording is sequenced AFTER the
        hook so observers see [info.closed = true] in the same tick. *)
     invoke_disconnect_hook_for session_id;
+    Atomic.incr registry_epoch;
     sync_transport_snapshot ()
   end else
     (* Even on no-op unregister we still clear any orphaned hook to avoid

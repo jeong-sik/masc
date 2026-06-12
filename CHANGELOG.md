@@ -1,14 +1,7 @@
 # Changelog
 
 
-## [0.19.42] - 2026-06-12
-
-### Fixed
-- `release`: disabled OTLP export in release binary smoke so GitHub release jobs
-  validate boot/listening without blocking on a collector that is intentionally
-  absent in CI.
-
-## [Unreleased]
+## [0.19.43] - 2026-06-12
 
 ### Added
 - `runtime`: added the GLM Coding Plan seed as `glm-coding.glm-4-7-coding`
@@ -31,6 +24,16 @@
 - `keeper`: classified provider timeout catch-all records such as
   `provider_error_timeout:http_operation` as retryable provider timeouts
   instead of terminal `provider_runtime_error` blockers.
+- `release`: allowed README subcommand drift smoke to pass when README has no
+  `masc <subcommand>` snippets, instead of treating grep's no-match status as a
+  failed release.
+
+## [0.19.42] - 2026-06-12
+
+### Fixed
+- `release`: disabled OTLP export in release binary smoke so GitHub release jobs
+  validate boot/listening without blocking on a collector that is intentionally
+  absent in CI.
 
 ## [0.19.41] - 2026-06-12
 

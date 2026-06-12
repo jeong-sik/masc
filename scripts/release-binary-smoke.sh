@@ -108,7 +108,7 @@ readme_subcmds=$(awk '
     }
   }
 ' README.md \
-  | grep -hoE '(main_eio\.exe|masc) +[a-z][a-z0-9_-]*' \
+  | { grep -hoE '(main_eio\.exe|masc) +[a-z][a-z0-9_-]*' || true; } \
   | awk '{print $2}' | sort -u)
 
 drift=0

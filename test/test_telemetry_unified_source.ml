@@ -3,6 +3,7 @@
     Covers all 9 variants plus edge cases for [source_of_string]. *)
 
 open Masc
+open Telemetry_unified_source
 
 let roundtrip_all_variants () =
   List.iter (fun (expected, label) ->

@@ -763,12 +763,20 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
              ("mid", `String m.mid_goal);
              ("long", `String m.long_goal);
            ]);
+           ( "persona",
+             match m.persona with
+             | Some persona when String.trim persona <> "" -> `String persona
+             | _ -> `Null );
            ("will", if String.trim m.will = "" then `Null else `String m.will);
            ("needs", if String.trim m.needs = "" then `Null else `String m.needs);
            ("desires", if String.trim m.desires = "" then `Null else `String m.desires);
            ("instructions",
             if String.trim m.instructions = "" then `Null else `String m.instructions);
            ("self_model", `Assoc [
+             ( "persona",
+               match m.persona with
+               | Some persona when String.trim persona <> "" -> `String persona
+               | _ -> `Null );
              ("will", if String.trim m.will = "" then `Null else `String m.will);
              ("needs", if String.trim m.needs = "" then `Null else `String m.needs);
              ("desires", if String.trim m.desires = "" then `Null else `String m.desires);

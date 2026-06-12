@@ -922,11 +922,20 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                   ]
                 else
                   `Null );
-                ("will", if String.trim m.will = "" then `Null else `String m.will);              ("needs", if String.trim m.needs = "" then `Null else `String m.needs);
+              ( "persona",
+                match m.persona with
+                | Some persona when String.trim persona <> "" -> `String persona
+                | _ -> `Null );
+              ("will", if String.trim m.will = "" then `Null else `String m.will);
+              ("needs", if String.trim m.needs = "" then `Null else `String m.needs);
               ("desires", if String.trim m.desires = "" then `Null else `String m.desires);
               ("instructions",
                 if String.trim m.instructions = "" then `Null else `String m.instructions);
               ("self_model", `Assoc [
+                ( "persona",
+                  match m.persona with
+                  | Some persona when String.trim persona <> "" -> `String persona
+                  | _ -> `Null );
                 ("will", if String.trim m.will = "" then `Null else `String m.will);
                 ("needs", if String.trim m.needs = "" then `Null else `String m.needs);
                 ("desires", if String.trim m.desires = "" then `Null else `String m.desires);

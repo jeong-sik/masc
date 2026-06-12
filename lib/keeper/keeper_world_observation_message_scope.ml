@@ -70,8 +70,8 @@ let speaker_display (m : Keeper_chat_store.chat_message) : string =
    shared positional watermark for mentions and scope. Only an assistant
    *utterance* is a self reply; a [Transport_failure] row is the server
    persisting a failed request terminal — the keeper never answered, so
-   the user line stays pending and the keeper revisits it on its next
-   turn. *)
+   the user line stays pending until the keeper's next real utterance
+   (which, per positional semantics, clears every pending line). *)
 let user_lines_after_last_self (messages : Keeper_chat_store.chat_message list)
   : Keeper_chat_store.chat_message list
   =

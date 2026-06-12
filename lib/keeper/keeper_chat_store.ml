@@ -91,11 +91,11 @@ end
    [Utterance] is something the keeper actually said; [Transport_failure]
    is the server persisting a failed request terminal ("Keeper request
    failed: ...") so the operator still sees the failure after a reload.
-   Readers branch on the type: a transport failure is not a self reply
-   (it must not advance the lane watermark — the user line it answered
-   stays pending and the keeper revisits it) and is never quoted back
-   as the keeper's own words. On disk the field is ["kind"], absent for
-   utterances so pre-existing rows read unchanged. *)
+   Readers branch on the type: a transport failure is not a self reply —
+   it does not advance the lane watermark, so the user line it failed to
+   answer stays pending until the keeper's next real utterance — and it
+   is never quoted back as the keeper's own words. On disk the field is
+   ["kind"], absent for utterances so pre-existing rows read unchanged. *)
 module Row_kind = struct
   type t =
     | Utterance
@@ -733,6 +733,13 @@ let to_json_array (messages : chat_message list) : Yojson.Safe.t =
             ] @ (match m.ts with
                  | Some t -> [("ts", `Float t)]
                  | None -> [])
+              (* Dashboard history: surface the writer-declared kind for
+                 non-utterance rows so a reload can tell a transport
+                 failure apart from keeper speech. *)
+              @ (match m.kind with
+                 | Row_kind.Utterance -> []
+                 | Row_kind.Transport_failure ->
+                     [ ("kind", `String (Row_kind.to_label m.kind)) ])
               @ opt_string_field "tool_call_id" m.tool_call_id
               @ opt_string_field "tool_call_name" m.tool_call_name
               @ opt_string_field "source" m.source

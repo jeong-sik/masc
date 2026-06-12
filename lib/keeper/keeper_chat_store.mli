@@ -56,11 +56,11 @@ end
     [Transport_failure] is the server persisting a failed request
     terminal (["Keeper request failed: ..."]) so the operator still sees
     the failure after a reload — it is {e not} a self reply: it does not
-    advance the lane watermark (the user line it answered stays pending
-    and the keeper revisits it on its next turn) and observation never
-    quotes it back as the keeper's own words. Persisted as ["kind"];
-    the field is absent for utterances, so rows written before it
-    existed read unchanged. *)
+    advance the lane watermark, so the user line it failed to answer
+    stays pending until the keeper's next real utterance, and
+    observation never quotes it back as the keeper's own words.
+    Persisted as ["kind"]; the field is absent for utterances, so rows
+    written before it existed read unchanged. *)
 module Row_kind : sig
   type t =
     | Utterance

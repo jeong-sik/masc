@@ -59,7 +59,7 @@ type EditDraft = {
 const editDraft = signal<EditDraft | null>(null)
 const hookFilterQuery = signal<string>('')
 const lastSavedAt = signal<string | null>(null)
-const promptPreviewTab = signal<'blocks' | 'effective'>('blocks')
+const promptPreviewTab = signal<'blocks' | 'system' | 'world'>('blocks')
 
 // ── Hook slot filter ─────────────────────────────────────
 
@@ -580,19 +580,7 @@ function updateDraft(field: keyof EditDraft, value: string | boolean | number) {
   editDraft.value = { ...d, [field]: value }
 }
 
-function EditTextarea({
-  field,
-  label,
-  rows = 6,
-  maxBytes,
-  maxChars,
-}: {
-  field: keyof EditDraft
-  label: string
-  rows?: number
-  maxBytes?: number
-  maxChars?: number
-}) {
+function EditTextarea({ field, label, rows = 6 }: { field: keyof EditDraft; label: string; rows?: number }) {
   const d = editDraft.value
   if (!d) return null
   const val = d[field] as string
@@ -609,8 +597,6 @@ function EditTextarea({
         value=${val}
         rows=${rows}
         dirty=${dirty}
-        maxBytes=${maxBytes}
-        maxChars=${maxChars}
         onChange=${(value: string) => updateDraft(field, value)}
       />
     </div>
@@ -766,13 +752,13 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
   // --- Prompt section (editable) ---
   const promptSection = isEditing ? html`
     <${MajorSectionHeader} title="프롬프트 (편집)" />
-    <${EditTextarea} field="goal" label="목표" rows=${8} maxChars=${4096} />
-    <${EditTextarea} field="short_goal" label="단기 목표" rows=${5} maxChars=${4096} />
-    <${EditTextarea} field="mid_goal" label="중기 목표" rows=${5} maxChars=${4096} />
-    <${EditTextarea} field="long_goal" label="장기 목표" rows=${5} maxChars=${4096} />
-    <${EditTextarea} field="will" label="의지" rows=${4} maxBytes=${4096} />
-    <${EditTextarea} field="needs" label="필요" rows=${4} maxBytes=${4096} />
-    <${EditTextarea} field="desires" label="욕구" rows=${4} maxBytes=${4096} />
+    <${EditTextarea} field="goal" label="목표" rows=${8} />
+    <${EditTextarea} field="short_goal" label="단기 목표" rows=${5} />
+    <${EditTextarea} field="mid_goal" label="중기 목표" rows=${5} />
+    <${EditTextarea} field="long_goal" label="장기 목표" rows=${5} />
+    <${EditTextarea} field="will" label="의지" rows=${4} />
+    <${EditTextarea} field="needs" label="필요" rows=${4} />
+    <${EditTextarea} field="desires" label="욕구" rows=${4} />
     <${EditTextarea} field="instructions" label="지시사항" rows=${10} />
   ` : html`
     <${MajorSectionHeader} title="프롬프트" />
@@ -803,17 +789,24 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       >블록</button>
       <button
         type="button"
-        class="text-2xs px-2 py-1 rounded-[var(--r-1)] border transition-colors ${promptPreviewTab.value === 'effective' ? 'bg-[var(--accent-10)] border-[var(--accent-20)] text-accent-fg' : 'border-card-border text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-surface)]'}"
-        onClick=${() => { promptPreviewTab.value = 'effective' }}
-      >최종 프롬프트</button>
+        class="text-2xs px-2 py-1 rounded-[var(--r-1)] border transition-colors ${promptPreviewTab.value === 'system' ? 'bg-[var(--accent-10)] border-[var(--accent-20)] text-accent-fg' : 'border-card-border text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-surface)]'}"
+        onClick=${() => { promptPreviewTab.value = 'system' }}
+      >통합 시스템</button>
+      <button
+        type="button"
+        class="text-2xs px-2 py-1 rounded-[var(--r-1)] border transition-colors ${promptPreviewTab.value === 'world' ? 'bg-[var(--accent-10)] border-[var(--accent-20)] text-accent-fg' : 'border-card-border text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-surface)]'}"
+        onClick=${() => { promptPreviewTab.value = 'world' }}
+      >월드 상태</button>
     </div>
-    ${promptPreviewTab.value === 'blocks' ? html`
-      <${PromptBlock} title="헌법" block=${c.prompt.system_prompt_blocks.constitution} />
-      <${PromptBlock} title="세계관" block=${c.prompt.system_prompt_blocks.world} />
-      <${PromptBlock} title="능력" block=${c.prompt.system_prompt_blocks.capabilities} />
-    ` : html`
-      <${LongText} text=${c.prompt.unified_system_prompt || c.prompt.effective_system_prompt} truncateAt=${null} />
-    `}
+    ${promptPreviewTab.value === 'blocks'
+      ? html`
+          <${PromptBlock} title="헌법" block=${c.prompt.system_prompt_blocks.constitution} />
+          <${PromptBlock} title="세계관" block=${c.prompt.system_prompt_blocks.world} />
+          <${PromptBlock} title="능력" block=${c.prompt.system_prompt_blocks.capabilities} />
+        `
+      : promptPreviewTab.value === 'system'
+        ? html`<${LongText} text=${c.prompt.unified_system_prompt || c.prompt.effective_system_prompt} truncateAt=${null} />`
+        : html`<${LongText} text=${c.prompt.unified_user_message_preview} truncateAt=${null} />`}
   `
 
   const goalState = goalOptionsState.value

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { formatInput } from './keeper-tool-call-inspector'
+import { blobMarkerOfOutput, formatInput } from './keeper-tool-call-inspector'
 
 describe('formatInput', () => {
   it('returns dash for null', () => {
@@ -44,5 +44,33 @@ describe('formatInput', () => {
     const result = formatInput(obj)
     expect(typeof result).toBe('string')
     expect(result.length).toBeGreaterThan(0)
+  })
+})
+
+describe('blobMarkerOfOutput', () => {
+  const sha = 'a'.repeat(64)
+
+  it('extracts the marker from the normalized {_blob} descriptor', () => {
+    const marker = blobMarkerOfOutput({
+      _blob: { sha256: sha, bytes: 2237, mime: 'application/json', preview: '{"con' },
+    })
+    expect(marker).toEqual({
+      sha256: sha,
+      bytes: 2237,
+      mime: 'application/json',
+      preview: '{"con',
+    })
+  })
+
+  it('extracts the marker from the legacy [masc:blob ...] string', () => {
+    const raw = `[masc:blob sha256=${sha} bytes=2237 mime=application/json preview="{\\"con"]`
+    const marker = blobMarkerOfOutput(raw)
+    expect(marker?.sha256).toBe(sha)
+    expect(marker?.bytes).toBe(2237)
+  })
+
+  it('returns null for inline string outputs', () => {
+    expect(blobMarkerOfOutput('{"ok":true}')).toBeNull()
+    expect(blobMarkerOfOutput('')).toBeNull()
   })
 })

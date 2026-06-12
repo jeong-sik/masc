@@ -350,6 +350,9 @@ function ChatMessageBubble({
                 )
               }}
             />
+            ${entry.delivery === 'streaming'
+              ? html`<span class="inline-block ml-0.5 animate-pulse text-[var(--color-status-info)]" aria-hidden="true">▍</span>`
+              : null}
           `}
       ${isCollapsible
         ? html`

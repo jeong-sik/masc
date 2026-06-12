@@ -661,6 +661,8 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
   in
   if connector_presence <> [] then (
     Buffer.add_string ubuf "### Connected Surfaces\n";
+    Buffer.add_string ubuf
+      "You (this Keeper) are bound to and operating on the following active integration surfaces:\n";
     List.iter
       (fun p ->
         Buffer.add_string ubuf

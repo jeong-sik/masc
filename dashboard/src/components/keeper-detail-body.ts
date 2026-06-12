@@ -50,6 +50,7 @@ import { KeeperToolCallInspector } from './keeper-tool-call-inspector'
 import { SupervisorDiagnosticsPanel } from './keeper-supervisor-diagnostics'
 import { KeeperBDIPanel } from './keeper-bdi-panel'
 import { KeeperConfigPanel } from './keeper-config-panel'
+import { KeeperPromptAssemblyPanel } from './keeper-prompt-assembly-panel'
 import { KeeperRuntimeModelEditor } from './keeper-runtime-model-editor'
 import { KeeperConditionsDivergent } from './keeper-conditions-divergent'
 import { KeeperActivitySummary } from './keeper-detail-activity-summary'
@@ -164,6 +165,9 @@ export function KeeperDetailBody({
 
       ${'' /* ── CTX composition by category ── */}
       <${CtxCompositionPanel} keeper=${keeper} />
+
+      ${'' /* ── Keeper prompt assembly provenance and stale guidance audit ── */}
+      <${KeeperPromptAssemblyPanel} compact=${true} />
 
       ${'' /* ── Prompt fingerprint / segment telemetry ── */}
       <${PromptTelemetryPanel} keeper=${keeper} />

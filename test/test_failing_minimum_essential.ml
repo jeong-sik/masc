@@ -8,7 +8,7 @@
 
     Properties pinned:
     1. Shard floor preserved (5 base read-only tools present).
-    2. Essential MASC subset present (masc_status / web_search / web_fetch)
+    2. Essential MASC subset present (masc_status / WebSearch / WebFetch)
        — hardcoded in [Masc.Keeper_tool_policy.essential_masc_minimum_names].
     3. No duplicates (sort_uniq).
     4. Non-empty (TLA+ ToolSetNeverEmpty). *)

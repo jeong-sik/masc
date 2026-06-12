@@ -6,7 +6,8 @@
     input translator, and an optional public schema.
 
     Two descriptor-backed surfaces:
-    - LLM native tools: Execute, Grep/Search, Read, Edit, Write, WebSearch, WebFetch
+    - LLM native-style tools: Execute, Grep/Search, Read, Edit, Write,
+      WebSearch, WebFetch
     - MCP tools: names with the masc_ prefix
 
     Internal [keeper_*] names are implementation details of the routing layer,

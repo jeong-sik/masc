@@ -391,6 +391,112 @@ let () = test "web_search_simulate_for_test_reports_all_failures" (fun () ->
     (str_contains (Tool_result.message result) "bing_rss: rss unavailable")
 )
 
+let () = test "dispatch_web_search_include_content_enriches_results" (fun () ->
+  let ctx = make_test_ctx () in
+  let query = "include content enrichment regression" in
+  let url = "https://example.com/masc-web-search-content" in
+  let html =
+    {|<!doctype html>
+<html>
+  <head><title>Result Page &amp; Proof</title></head>
+  <body>
+    <article>
+      <h1>Result Page</h1>
+      <p>Readable <b>page</b> content &amp; proof.</p>
+    </article>
+  </body>
+</html>|}
+  in
+  Tool_misc.with_web_search_simulation_for_test
+    ~outcomes:[ ("duckduckgo", `Hits [ ("Result", url, "Snippet") ]) ]
+    (fun () ->
+      Tool_misc.with_web_fetch_http_get_for_test
+        (fun ~timeout_sec ~headers:_ ~max_response_bytes url_arg ->
+           assert (timeout_sec = 9);
+           assert (max_response_bytes = 2_000_000);
+           assert (url_arg = url);
+           Ok (Some 200, html))
+        (fun () ->
+          let args =
+            `Assoc
+              [ ("query", `String query)
+              ; ("limit", `Int 1)
+              ; ("includeContent", `Bool true)
+              ; ("contentMaxChars", `Int 300)
+              ; ("contentTimeout", `Int 9)
+              ]
+          in
+          match Tool_misc.dispatch ctx ~name:"masc_web_search" ~args with
+          | Some result ->
+              assert (Tool_result.is_success result);
+              let json = parse_json (Tool_result.message result) in
+              let open Yojson.Safe.Util in
+              let result_json = json |> member "result" in
+              assert (result_json |> member "content_enriched" |> to_bool);
+              assert (result_json |> member "content_result_count" |> to_int = 1);
+              assert (result_json |> member "content_error_count" |> to_int = 0);
+              assert (result_json |> member "content_max_chars" |> to_int = 300);
+              assert (result_json |> member "content_timeout" |> to_int = 9);
+              let hits = result_json |> member "results" |> to_list in
+              assert (List.length hits = 1);
+              let hit = List.hd hits in
+              assert (hit |> member "page_content_status" |> to_string = "ok");
+              assert (hit |> member "page_content_http_status" |> to_int = 200);
+              assert (hit |> member "page_content_truncated" |> to_bool = false);
+              assert
+                (str_contains
+                   (hit |> member "page_content" |> to_string)
+                   "# Result Page");
+              assert
+                (str_contains
+                   (hit |> member "page_content" |> to_string)
+                   "Readable page content & proof.")
+          | None -> failwith "dispatch returned None"))
+)
+
+let () = test "dispatch_web_search_include_content_keeps_result_on_fetch_error" (fun () ->
+  let ctx = make_test_ctx () in
+  let query = "include content fetch failure regression" in
+  let url = "https://example.com/masc-web-search-fetch-failure" in
+  Tool_misc.with_web_search_simulation_for_test
+    ~outcomes:[ ("duckduckgo", `Hits [ ("Result", url, "Snippet") ]) ]
+    (fun () ->
+      Tool_misc.with_web_fetch_http_get_for_test
+        (fun ~timeout_sec:_ ~headers:_ ~max_response_bytes:_ url_arg ->
+           assert (url_arg = url);
+           Error "network unavailable")
+        (fun () ->
+          let args =
+            `Assoc
+              [ ("query", `String query)
+              ; ("limit", `Int 1)
+              ; ("includeContent", `Bool true)
+              ]
+          in
+          match Tool_misc.dispatch ctx ~name:"masc_web_search" ~args with
+          | Some result ->
+              assert (Tool_result.is_success result);
+              let json = parse_json (Tool_result.message result) in
+              let open Yojson.Safe.Util in
+              let result_json = json |> member "result" in
+              assert (result_json |> member "content_enriched" |> to_bool);
+              assert (result_json |> member "content_result_count" |> to_int = 0);
+              assert (result_json |> member "content_error_count" |> to_int = 1);
+              let hit =
+                result_json |> member "results" |> to_list |> List.hd
+              in
+              assert (hit |> member "page_content_status" |> to_string = "error");
+              assert
+                (str_contains
+                   (hit |> member "page_content" |> to_string)
+                   "_Failed to retrieve page content:");
+              assert
+                (str_contains
+                   (hit |> member "page_content" |> to_string)
+                   ("Source: " ^ url))
+          | None -> failwith "dispatch returned None"))
+)
+
 let () = test "parse_official_provider_json_payloads" (fun () ->
   let brave =
     Tool_misc.parse_brave_json

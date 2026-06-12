@@ -47,7 +47,7 @@ Current main already points in the right direction.
 - `Execute` and `Grep` are descriptor-routed through `Shell_ir`.
 - `Read`, `Edit`, and `Write` are descriptor-routed through
   `Filesystem`.
-- `WebSearch` and `WebFetch` are keeper-internal web backend names routed
+- `WebSearch` and `WebFetch` are keeper-facing web aliases routed
   through `In_process` and `Tool_masc_misc_dispatch`; they are not MCP
   `tools/list` entries.
 - RFC-0160 is implemented: typed Execute lowers once to Shell IR, classifies

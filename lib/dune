@@ -183,6 +183,7 @@
   keeper_tool_persona_audit
   tool_misc_web_search
   tool_misc_web_fetch
+  tool_misc_web_enrichment
   meta_cognition_types
   meta_cognition_rules
   meta_cognition_snapshot

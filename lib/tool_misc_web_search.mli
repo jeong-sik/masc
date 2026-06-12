@@ -143,6 +143,10 @@ val handle : tool_name:string -> start_time:float -> Yojson.Safe.t -> Tool_resul
 (** [handle ~tool_name ~start_time args] handles [masc_web_search] tool dispatch.
     Required: [query] (string).  Optional: [limit] (int,
     clamped to [\[1, 10\]], default 5).
+    The misc facade also accepts [includeContent=true] to best-effort enrich
+    each result with readable [page_content] via [WebFetch], plus optional
+    [contentMaxChars] and [contentTimeout] controls. This module remains the
+    search-provider boundary to avoid depending on fetch.
 
     On success the payload [data] is wrapped as
     [`Assoc [ "text", `String json ]] where [json] is the

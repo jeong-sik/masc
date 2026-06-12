@@ -2,7 +2,7 @@
 # Guard against re-emergence of pre-RFC-0064 public tool names in the
 # descriptor-backed tool surface and keeper-facing prompt/persona/config files.
 #
-# After RFC-0202 tool name alignment, the active LLM-native public names are:
+# After the MASC web-alias split, the active keeper-facing public names are:
 #   Execute, Read, Edit, Write, Grep, Search, WebSearch, WebFetch
 #
 # The retired names — Bash, ReadFile, WriteFile, EditFile, SearchFiles,

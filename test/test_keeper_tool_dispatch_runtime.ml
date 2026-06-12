@@ -567,7 +567,7 @@ let test_public_local_aliases_dispatch_to_runtime_handlers () =
       check bool "Execute ran in requested cwd" true
         (contains_substring execute_result.raw_output playground))
 
-let test_public_web_search_alias_dispatches_to_misc_runtime () =
+let test_public_masc_web_search_alias_dispatches_to_misc_runtime () =
   with_exec_fixture "keeper_tool_dispatch_web_search_alias"
     (fun ~config ~meta ~ctx_work ->
       Masc.Tool_misc.with_web_search_simulation_for_test
@@ -622,7 +622,7 @@ let test_public_web_search_alias_dispatches_to_misc_runtime () =
               Yojson.Safe.Util.(member "snippet" hit |> to_string)
           | _ -> fail "expected one web search hit"))
 
-let test_public_web_fetch_alias_dispatches_to_misc_runtime () =
+let test_public_masc_web_fetch_alias_dispatches_to_misc_runtime () =
   with_exec_fixture "keeper_tool_dispatch_web_fetch_alias"
     (fun ~config ~meta ~ctx_work ->
       let requested_url = "https://example.com/alias-web-fetch" in
@@ -698,7 +698,7 @@ let test_public_web_fetch_alias_dispatches_to_misc_runtime () =
                Yojson.Safe.Util.(member "text" json |> to_string)
                "Body content & proof.")))
 
-let test_public_web_fetch_blocks_localhost_before_runtime () =
+let test_public_masc_web_fetch_blocks_localhost_before_runtime () =
   with_exec_fixture "keeper_tool_dispatch_web_fetch_blocks_localhost"
     (fun ~config ~meta ~ctx_work ->
       Masc.Tool_misc.with_web_fetch_http_get_for_test
@@ -955,11 +955,11 @@ let () =
       test_case "public local aliases dispatch to runtime handlers" `Quick
         test_public_local_aliases_dispatch_to_runtime_handlers;
       test_case "public WebSearch alias reaches misc runtime" `Quick
-        test_public_web_search_alias_dispatches_to_misc_runtime;
+        test_public_masc_web_search_alias_dispatches_to_misc_runtime;
       test_case "public WebFetch alias reaches misc runtime" `Quick
-        test_public_web_fetch_alias_dispatches_to_misc_runtime;
+        test_public_masc_web_fetch_alias_dispatches_to_misc_runtime;
       test_case "public WebFetch blocks localhost before runtime" `Quick
-        test_public_web_fetch_blocks_localhost_before_runtime;
+        test_public_masc_web_fetch_blocks_localhost_before_runtime;
       test_case "task FSM errors require explicit failure_class" `Quick
         test_tool_result_does_not_infer_task_fsm_rejections_from_message;
       test_case "tool_result_or_error preserves failure_class" `Quick

@@ -200,7 +200,48 @@ and handle_transition ~tool_name ~start_time ctx args =
   match completion_state_error with
   | Some err ->
     log_task_transition_failed ~agent_name:ctx.agent_name err;
-    result_to_response ~tool_name ~start_time (Error err)
+    let message = Masc_domain.masc_error_to_string err in
+    let rule_id, tool_suggestion, hint, alternatives =
+      match err with
+      | Masc_domain.Task (Masc_domain.Task_error.NotClaimed _) ->
+        ( Some "task_done_requires_claimed_or_started"
+        , Some "masc_transition"
+        , Some
+            "The task is still todo. Use masc_transition with action=claim for \
+             this task_id, then action=start, and call keeper_task_done only \
+             after the deliverable is complete."
+        , [ "masc_transition"; "keeper_task_claim"; "keeper_tasks_list" ] )
+      | Masc_domain.Task (Masc_domain.Task_error.AlreadyClaimed _) ->
+        ( Some "task_done_requires_current_owner"
+        , Some "keeper_tasks_list"
+        , Some
+            "Another agent owns this task. Inspect the task list, ask for handoff, \
+             or claim different unowned work instead of retrying keeper_task_done."
+        , [ "keeper_tasks_list"; "keeper_board_post"; "keeper_task_claim" ] )
+      | Masc_domain.Task (Masc_domain.Task_error.InvalidState _) ->
+        ( Some "task_done_invalid_lifecycle_state"
+        , Some "keeper_tasks_list"
+        , Some
+            "The task lifecycle state does not accept keeper_task_done. Inspect \
+             task status and use the valid next lifecycle action."
+        , [ "keeper_tasks_list"; "masc_transition" ] )
+      | _ ->
+        ( Some "task_done_lifecycle_rejected"
+        , Some "keeper_tasks_list"
+        , Some "Inspect the task status before trying another lifecycle action."
+        , [ "keeper_tasks_list"; "masc_transition" ] )
+    in
+    Tool_result.error
+      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~tool_name
+      ~start_time
+      (workflow_rejection_payload_json
+         ?rule_id
+         ?tool_suggestion
+         ?hint
+         ~scope_policy:"observe"
+         ~alternatives
+         message)
   | None ->
   match client_side_transition_gate_error ~task_opt ~action ~action_s with
   | Some err ->

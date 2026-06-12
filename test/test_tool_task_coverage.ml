@@ -1765,7 +1765,18 @@ let () = test "handle_done_todo_guidance" (fun () ->
     Task.Tool.handle_done ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("task_id", `String "task-001"); ("notes", `String "")])
   in
   assert (not (Tool_result.is_success result));
-  assert (str_contains (Tool_result.message result) "Claim/start it first")
+  assert (str_contains (Tool_result.message result) "Claim/start it first");
+  let data = Tool_result.data result in
+  let diagnosis = Yojson.Safe.Util.(data |> member "diagnosis") in
+  assert (
+    Yojson.Safe.Util.(diagnosis |> member "rule_id" |> to_string)
+    = "task_done_requires_claimed_or_started");
+  assert (
+    Yojson.Safe.Util.(diagnosis |> member "tool_suggestion" |> to_string)
+    = "masc_transition");
+  assert (
+    Yojson.Safe.Util.(data |> member "hint" |> to_string)
+    |> fun hint -> str_contains hint "action=claim")
 )
 
 (* Test handle_done reports already-done guidance instead of generic not-claimed *)

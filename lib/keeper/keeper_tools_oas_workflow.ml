@@ -250,10 +250,10 @@ let workflow_rejection_recovery_instruction ~tool_name ~count (info : workflow_r
       next_tool
   | Some next_tool ->
     Printf.sprintf
-      "Revise your approach and retry this %s call, or call %s next and follow \
-       the hint/alternatives in detail."
-      tool_name
+      "Use %s next for this workflow rejection and follow the hint/alternatives \
+       in detail; %s is not the next valid action."
       next_tool
+      tool_name
   | None when count >= 2 ->
     Printf.sprintf
       "Stop retrying %s variants for this workflow rejection. Use a different \

@@ -54,12 +54,25 @@ module Turn_id : sig
   val of_yojson : Yojson.Safe.t -> (t, string) result
 end
 
-(** Keeper identifier — deterministic UUIDv5 derived from
-    [keeper:<name>:<path>]. Nested {!Keeper_id.Trace_id} and
-    {!Keeper_id.Task_id} modules carry validated string newtypes used
-    on tracing/auth boundaries. *)
+(** Keeper identifier — structural record with uid, name, path.
+
+    RFC-0232 P3: [t] changed from string-alias to a concrete record
+    so that message-scope and board-signal modules can compare keeper
+    identity by structural fields instead of reverse-parsing through
+    Keeper_identity.canonical_keeper_name string gymnastics.
+
+    {[type t = { uid : string; name : string; path : string }]}
+
+    [uid] is the deterministic UUIDv5 of @"masc-keeper:<name>:<path>"@.
+    [equal] compares by [uid] alone.
+    [to_string] returns [uid]; [to_yojson] serialises as [`String uid]
+    for backward compatibility with persisted state. *)
 module Keeper_id : sig
   type t
+  val make : uid:string -> name:string -> path:string -> t
+  val uid : t -> string
+  val name : t -> string
+  val path : t -> string
   val of_string : string -> t
   val to_string : t -> string
   val equal : t -> t -> bool
@@ -67,6 +80,7 @@ module Keeper_id : sig
   val generate : name:string -> path:string -> t
   val to_yojson : t -> Yojson.Safe.t
   val of_yojson : Yojson.Safe.t -> (t, string) result
+  val uid_of_yojson : Yojson.Safe.t -> (t, string) result
   module Trace_id : sig
     type t
     val of_string : string -> (t, string) result

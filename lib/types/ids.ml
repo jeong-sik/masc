@@ -124,6 +124,10 @@ end
 (** Keeper identifier - deterministic UUIDv5 from namespace + name + path *)
 module Keeper_id : sig
   type t
+  val make : uid:string -> name:string -> path:string -> t
+  val uid : t -> string
+  val name : t -> string
+  val path : t -> string
   val of_string : string -> t
   val to_string : t -> string
   val equal : t -> t -> bool
@@ -131,6 +135,7 @@ module Keeper_id : sig
   val generate : name:string -> path:string -> t
   val to_yojson : t -> Yojson.Safe.t
   val of_yojson : Yojson.Safe.t -> (t, string) result
+  val uid_of_yojson : Yojson.Safe.t -> (t, string) result
   module Trace_id : sig
     type t
     val of_string : string -> (t, string) result
@@ -144,20 +149,40 @@ module Keeper_id : sig
     val equal : t -> t -> bool
   end
 end = struct
-  type t = string
-  let of_string s = s
-  let to_string t = t
-  let equal = String.equal
-  let pp fmt t = Format.fprintf fmt "%s" t
+  (** Structural record carrying uid, name, and path.
+      Previously [type t = string] (bare UUIDv5). The serialization
+      contract is backward-compatible: [to_yojson] emits [`String uid]
+      and [of_yojson] accepts [`String s] by reconstructing with
+      [name=s; path=s] as fallback. *)
+  type t = {
+    uid : string;
+    name : string;
+    path : string;
+  }
+  let make ~uid ~name ~path = { uid; name; path }
+  let uid t = t.uid
+  let name t = t.name
+  let path t = t.path
+  let of_string s = { uid = s; name = s; path = s }
+  let to_string t = t.uid
+  let equal a b = String.equal a.uid b.uid
+  let pp fmt t = Format.fprintf fmt "%s" t.uid
   let generate ~name ~path =
     let input = Printf.sprintf "masc-keeper:%s:%s" name path in
-    Uuidm.v5 Uuidm.ns_dns input |> Uuidm.to_string |> of_string
-  let to_yojson t = `String t
+    let uid = Uuidm.v5 Uuidm.ns_dns input |> Uuidm.to_string in
+    { uid; name; path }
+  let to_yojson t = `String t.uid
   let of_yojson = function
-    | `String s -> Ok s
+    | `String s -> Ok { uid = s; name = s; path = s }
     | other ->
         Error
           (Printf.sprintf "Expected string for Keeper_id (received %s)"
+             (Json_util.kind_name other))
+  let uid_of_yojson = function
+    | `String s -> Ok { uid = s; name = s; path = s }
+    | other ->
+        Error
+          (Printf.sprintf "Expected string for Keeper_id uid (received %s)"
              (Json_util.kind_name other))
   module Keeper_name = struct
     type t = string

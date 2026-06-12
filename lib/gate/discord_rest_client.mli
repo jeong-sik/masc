@@ -52,6 +52,21 @@ val send_message :
 
     @raise nothing — failures are surfaced as typed {!error}. *)
 
+val edit_message :
+  token:string ->
+  channel_id:string ->
+  message_id:string ->
+  content:string ->
+  unit ->
+  (unit, error) result
+(** [edit_message ~token ~channel_id ~message_id ~content ()] patches
+    [PATCH /api/v10/channels/{channel_id}/messages/{message_id}].
+    Used for streaming message display — the message content is updated
+    in-place on Discord. Content exceeding {!message_content_limit} is
+    silently truncated to the first 2000 characters.
+
+    @raise nothing — failures are surfaced as typed {!error}. *)
+
 val trigger_typing :
   token:string ->
   channel_id:string ->
@@ -91,6 +106,17 @@ val build_typing_request :
   string * (string * string) list * string
 (** [(url, headers, body) = build_typing_request ~token ~channel_id ()].
     The body is empty; headers include Authorization and User-Agent. *)
+
+val build_edit_request :
+  token:string ->
+  channel_id:string ->
+  message_id:string ->
+  content:string ->
+  unit ->
+  string * (string * string) list * string
+(** [(url, headers, body) = build_edit_request ~token ~channel_id
+    ~message_id ~content ()].  Content exceeding {!message_content_limit}
+    is silently truncated. *)
 
 val parse_response :
   status:int ->

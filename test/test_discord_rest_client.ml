@@ -76,6 +76,67 @@ let test_build_typing_request_authorization_uses_bot_scheme () =
      && String.sub ua 0 10 = "DiscordBot")
 
 (* ---------------------------------------------------------------- *)
+(* build_edit_request                                               *)
+(* ---------------------------------------------------------------- *)
+
+let test_build_edit_request_url_targets_message () =
+  let url, _, _ =
+    R.build_edit_request ~token:"abc" ~channel_id:"CH123"
+      ~message_id:"MSG456" ~content:"hi" ()
+  in
+  check string "v10 edit URL"
+    "https://discord.com/api/v10/channels/CH123/messages/MSG456"
+    url
+
+let test_build_edit_request_authorization_uses_bot_scheme () =
+  let _, headers, _ =
+    R.build_edit_request ~token:"sekret" ~channel_id:"c"
+      ~message_id:"m" ~content:"." ()
+  in
+  check string "Authorization header" "Bot sekret"
+    (header_value headers "Authorization");
+  check string "Content-Type header" "application/json"
+    (header_value headers "Content-Type")
+
+let test_build_edit_request_body_is_content_object () =
+  let _, _, body =
+    R.build_edit_request ~token:"t" ~channel_id:"c"
+      ~message_id:"m" ~content:"updated text" ()
+  in
+  let json = Yojson.Safe.from_string body in
+  match json with
+  | `Assoc [ ("content", `String "updated text") ] -> ()
+  | _ ->
+      failf
+        "body shape wrong: %s"
+        (Yojson.Safe.to_string json)
+
+let test_build_edit_request_content_truncated_at_limit () =
+  let long_content = String.make 2500 'x' in
+  let _, _, body =
+    R.build_edit_request ~token:"t" ~channel_id:"c"
+      ~message_id:"m" ~content:long_content ()
+  in
+  let json = Yojson.Safe.from_string body in
+  match json with
+  | `Assoc [ ("content", `String truncated) ] ->
+      check int "truncated length" 2000 (String.length truncated)
+  | _ ->
+      failf "body shape wrong: %s" (Yojson.Safe.to_string json)
+
+let test_build_edit_request_short_content_not_truncated () =
+  let short_content = "hello" in
+  let _, _, body =
+    R.build_edit_request ~token:"t" ~channel_id:"c"
+      ~message_id:"m" ~content:short_content ()
+  in
+  let json = Yojson.Safe.from_string body in
+  match json with
+  | `Assoc [ ("content", `String "hello") ] -> ()
+  | _ ->
+      failf "body shape wrong: %s" (Yojson.Safe.to_string json)
+
+(* ---------------------------------------------------------------- *)
 (* parse_response                                                   *)
 (* ---------------------------------------------------------------- *)
 
@@ -171,6 +232,18 @@ let () =
             test_build_typing_request_url_targets_channel
         ; test_case "typing Authorization uses Bot scheme" `Quick
             test_build_typing_request_authorization_uses_bot_scheme
+        ] )
+    ; ( "build_edit_request"
+      , [ test_case "URL targets channel/message" `Quick
+            test_build_edit_request_url_targets_message
+        ; test_case "Authorization uses Bot scheme" `Quick
+            test_build_edit_request_authorization_uses_bot_scheme
+        ; test_case "body is { content: <content> } JSON" `Quick
+            test_build_edit_request_body_is_content_object
+        ; test_case "content truncated at 2000 chars" `Quick
+            test_build_edit_request_content_truncated_at_limit
+        ; test_case "short content not truncated" `Quick
+            test_build_edit_request_short_content_not_truncated
         ] )
     ; ( "parse_response"
       , [ test_case "2xx with id => Ok id" `Quick

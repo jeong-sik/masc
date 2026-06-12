@@ -1,25 +1,52 @@
 (** Keeper_chat_discord — Discord delivery adapter for keeper chat events.
 
-    Subscribes to a [Keeper_chat_events] stream, accumulates assistant
-    text deltas, and sends the final reply to a Discord channel via the
-    REST API when the run finishes.
+    Streaming mode: the first stable text segment POST creates the Discord
+    message. Subsequent deltas PATCH the message at most once per
+    {!min_edit_interval_s} (Discord rate limit: 5 edits / 5 s).
+    [Text_message_end] and [Run_finished] force a final PATCH so the
+    user always sees the complete text. Streaming PATCH/POST content
+    holds back the current trailing non-whitespace segment until a
+    delimiter arrives, so partial secret-like tokens are not published
+    before the redactor can see the complete token.
 
     @since 2.145.0 *)
+
+val min_edit_interval_s : float
+(** Minimum seconds between PATCH edits (default 1.0). *)
 
 val send_message :
   token:string -> channel_id:string -> content:string -> unit
 (** [send_message ~token ~channel_id ~content] posts to Discord.
     Errors are logged as warnings but never raised.
-    The content is truncated to Discord's 2000-character limit. *)
+    Content exceeding Discord's 2000-character limit is split into
+    multiple messages. *)
 
 val adapter_loop :
   token:string ->
   channel_id:string ->
   events:Keeper_chat_events.keeper_chat_event Eio.Stream.t ->
   unit
-(** [adapter_loop ~token ~channel_id ~events] blocks on the event
-    stream until [Run_finished] or [Error], then sends the accumulated
-    text (or error message) to the given Discord channel.
+(** [adapter_loop ~token ~channel_id ~events] subscribes to the event
+    stream and delivers text to Discord in real time:
+    - [Text_delta] (first stable segment): POST creates the message,
+      stores its id.
+    - [Text_delta] (subsequent): PATCH edits the message content, at most
+      once per {!min_edit_interval_s}.
+    - [Text_message_end]: force PATCH if content changed since last edit.
+    - [Run_finished]: force final PATCH with complete text.
+    - [Event_error]: sends error text as a new message.
+
+    Falls back to a single POST if no deltas arrive before [Run_finished].
 
     The loop exits after one turn; the caller must restart it for
     subsequent turns. *)
+
+module For_testing : sig
+  val streaming_patch_content : string -> string
+  (** Redacted, Discord-sized content suitable for streaming POST/PATCH.
+      The current trailing non-whitespace segment is withheld. *)
+
+  val final_head_and_overflow : string -> string * string option
+  (** Redacted final content split into the first Discord message body and
+      optional overflow for follow-up chunked delivery. *)
+end

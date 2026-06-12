@@ -107,6 +107,35 @@ let send_message ~token ~channel_id ~content ?reply_to_message_id () =
   | Error msg -> Error (Network msg)
   | Ok (status, body) -> parse_response ~status ~body
 
+(* Truncate content to Discord's message_content_limit for PATCH edits.
+   Discord rejects messages exceeding 2000 Unicode scalar units. *)
+let truncate_to_limit content =
+  if String.length content <= message_content_limit then content
+  else String.sub content 0 message_content_limit
+
+let build_edit_request ~token ~channel_id ~message_id ~content () =
+  let url =
+    Printf.sprintf
+      "https://discord.com/api/v10/channels/%s/messages/%s"
+      channel_id message_id
+  in
+  let headers =
+    ("Content-Type", "application/json") :: auth_headers ~token
+  in
+  let truncated = truncate_to_limit content in
+  let body =
+    Yojson.Safe.to_string (`Assoc [ "content", `String truncated ])
+  in
+  (url, headers, body)
+
+let edit_message ~token ~channel_id ~message_id ~content () =
+  let (url, headers, body) =
+    build_edit_request ~token ~channel_id ~message_id ~content ()
+  in
+  match Masc_http_client.patch_sync ~url ~headers ~body () with
+  | Error msg -> Error (Network msg)
+  | Ok (status, body) -> parse_empty_response ~status ~body
+
 let trigger_typing ~token ~channel_id () =
   let url, headers, body = build_typing_request ~token ~channel_id () in
   match Masc_http_client.post_sync ~url ~headers ~body () with

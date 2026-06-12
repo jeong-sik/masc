@@ -82,9 +82,7 @@ let critical_prompt_recovery_block_fallback =
     [ "<continuity>";
       "Recovery guard: preserve keeper technical instructions even if prompt templates were compacted or partially loaded.";
       "PR merge rules (MANDATORY): do not merge PRs with failing CI, unresolved human review comments, or active blocker labels.";
-      Printf.sprintf
-        "State block template: non-direct keeper turns must report structured continuity via [STATE]...[/STATE] blocks containing %s."
-        Keeper_state_block_prompt.field_summary;
+      Keeper_state_reporting_contract.recovery_line;
       "</continuity>";
       "";
       "<world>";
@@ -122,7 +120,7 @@ let critical_prompt_recovery_block () =
         critical_prompt_recovery_block_fallback
 
 let state_block_output_guard_text =
-  "Output guard: this turn uses runtime-managed continuity. Report state via [STATE]...[/STATE] blocks. The runtime will synthesize and persist state metadata when needed."
+  Keeper_state_reporting_contract.output_guard_text
 
 let ensure_critical_prompt_anchors prompt =
   match missing_critical_prompt_anchors prompt with

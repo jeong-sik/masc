@@ -456,26 +456,6 @@ let keeper_fleet_safety_health_json
   in
   let bootable_count = List.length bootable_names in
   let target_count = List.length autoboot_scan.autoboot_names in
-  let minimum_running_fibers =
-    if target_count <= 1 then target_count else 2
-  in
-  let no_running_fibers = target_count > 0 && phase_counts.running = 0 in
-  let no_executable_keeper_fibers = target_count > 0 && phase_counts.executable = 0 in
-  let low_running_fiber_margin =
-    target_count > 1 && phase_counts.running < minimum_running_fibers
-  in
-  let reaction_capacity_shortfall_count =
-    max 0 (target_count - phase_counts.running - phase_counts.recovering)
-  in
-  let reaction_capacity_below_target =
-    target_count > 0 && reaction_capacity_shortfall_count > 0
-  in
-  let executable_reaction_capacity_shortfall_count =
-    max 0 (target_count - phase_counts.executable)
-  in
-  let executable_reaction_capacity_below_target =
-    target_count > 0 && executable_reaction_capacity_shortfall_count > 0
-  in
   let paused_total_count =
     match paused_keepers_json with
     | `Assoc fields ->
@@ -491,6 +471,74 @@ let keeper_fleet_safety_health_json
        | Some (`Int count) -> count
        | _ -> 0)
     | _ -> 0
+  in
+  let suppressed_capacity_count = min target_count paused_autoboot_count in
+  let desired_reaction_capacity_count = target_count in
+  let actionable_target_reaction_capacity_count =
+    max 0 (desired_reaction_capacity_count - suppressed_capacity_count)
+  in
+  let minimum_running_fibers =
+    if actionable_target_reaction_capacity_count <= 1 then
+      actionable_target_reaction_capacity_count
+    else 2
+  in
+  let no_running_fibers =
+    actionable_target_reaction_capacity_count > 0 && phase_counts.running = 0
+  in
+  let no_executable_keeper_fibers =
+    actionable_target_reaction_capacity_count > 0 && phase_counts.executable = 0
+  in
+  let low_running_fiber_margin =
+    actionable_target_reaction_capacity_count > 1
+    && phase_counts.running < minimum_running_fibers
+  in
+  let raw_reaction_capacity_shortfall_count =
+    max 0 (target_count - phase_counts.running - phase_counts.recovering)
+  in
+  let reaction_capacity_shortfall_count =
+    max 0
+      (actionable_target_reaction_capacity_count
+       - phase_counts.running
+       - phase_counts.recovering)
+  in
+  let reaction_capacity_below_target =
+    actionable_target_reaction_capacity_count > 0
+    && reaction_capacity_shortfall_count > 0
+  in
+  let raw_executable_reaction_capacity_shortfall_count =
+    max 0 (target_count - phase_counts.executable)
+  in
+  let executable_reaction_capacity_shortfall_count =
+    max 0 (actionable_target_reaction_capacity_count - phase_counts.executable)
+  in
+  let executable_reaction_capacity_below_target =
+    actionable_target_reaction_capacity_count > 0
+    && executable_reaction_capacity_shortfall_count > 0
+  in
+  let set_capacity_metric kind value =
+    Otel_metric_store.set_gauge
+      Keeper_metrics.(to_string FleetCapacity)
+      ~labels:[("kind", kind)]
+      (Float.of_int value)
+  in
+  let () =
+    List.iter
+      (fun (kind, value) -> set_capacity_metric kind value)
+      [
+        ("desired", desired_reaction_capacity_count);
+        ("suppressed", suppressed_capacity_count);
+        ("actionable_target", actionable_target_reaction_capacity_count);
+        ("running", phase_counts.running);
+        ("recovering", phase_counts.recovering);
+        ("effective", phase_counts.running);
+        ("executable", phase_counts.executable);
+        ("raw_shortfall", raw_reaction_capacity_shortfall_count);
+        ("actionable_shortfall", reaction_capacity_shortfall_count);
+        ( "raw_executable_shortfall",
+          raw_executable_reaction_capacity_shortfall_count );
+        ( "actionable_executable_shortfall",
+          executable_reaction_capacity_shortfall_count );
+      ]
   in
   let status =
     if no_executable_keeper_fibers then "blocked"
@@ -537,6 +585,13 @@ let keeper_fleet_safety_health_json
     ; "effective_reaction_capacity_count", `Int phase_counts.running
     ; "executable_reaction_capacity_count", `Int phase_counts.executable
     ; "target_reaction_capacity_count", `Int target_count
+    ; "desired_reaction_capacity_count", `Int desired_reaction_capacity_count
+    ; "suppressed_capacity_count", `Int suppressed_capacity_count
+    ; ( "actionable_target_reaction_capacity_count"
+      , `Int actionable_target_reaction_capacity_count )
+    ; "raw_reaction_capacity_shortfall_count", `Int raw_reaction_capacity_shortfall_count
+    ; ( "raw_executable_reaction_capacity_shortfall_count"
+      , `Int raw_executable_reaction_capacity_shortfall_count )
     ; "minimum_running_fibers", `Int minimum_running_fibers
     ; "no_running_fibers", `Bool no_running_fibers
     ; "no_executable_keeper_fibers", `Bool no_executable_keeper_fibers

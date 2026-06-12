@@ -1136,6 +1136,14 @@ let test_health_json_surfaces_durable_paused_keepers () =
             (fleet_safety |> member "paused_autoboot_enabled_keeper_count" |> to_int);
           Alcotest.(check int) "health exposes target reaction capacity" 3
             (fleet_safety |> member "target_reaction_capacity_count" |> to_int);
+          Alcotest.(check int) "health exposes desired reaction capacity" 3
+            (fleet_safety |> member "desired_reaction_capacity_count" |> to_int);
+          Alcotest.(check int) "health exposes suppressed capacity" 1
+            (fleet_safety |> member "suppressed_capacity_count" |> to_int);
+          Alcotest.(check int) "health exposes actionable target capacity" 2
+            (fleet_safety
+             |> member "actionable_target_reaction_capacity_count"
+             |> to_int);
           Alcotest.(check int) "health exposes minimum running fibers" 2
             (fleet_safety |> member "minimum_running_fibers" |> to_int);
           Alcotest.(check string) "health marks fleet blocked" "blocked"
@@ -1147,7 +1155,9 @@ let test_health_json_surfaces_durable_paused_keepers () =
             (fleet_safety |> member "no_executable_keeper_fibers" |> to_bool);
           Alcotest.(check bool) "health marks capacity below target" true
             (fleet_safety |> member "reaction_capacity_below_target" |> to_bool);
-          Alcotest.(check int) "health exposes capacity shortfall" 3
+          Alcotest.(check int) "health exposes raw capacity shortfall" 3
+            (fleet_safety |> member "raw_reaction_capacity_shortfall_count" |> to_int);
+          Alcotest.(check int) "health exposes actionable capacity shortfall" 2
             (fleet_safety |> member "reaction_capacity_shortfall_count" |> to_int);
           Alcotest.(check bool) "health fleet asks for operator action" true
             (fleet_safety |> member "operator_action_required" |> to_bool);
@@ -1257,19 +1267,33 @@ let test_health_json_degrades_when_reaction_capacity_below_target () =
             (fleet_safety |> member "failing_keeper_fiber_count" |> to_int);
           Alcotest.(check int) "health exposes target reaction capacity" 4
             (fleet_safety |> member "target_reaction_capacity_count" |> to_int);
+          Alcotest.(check int) "health exposes desired reaction capacity" 4
+            (fleet_safety |> member "desired_reaction_capacity_count" |> to_int);
+          Alcotest.(check int) "health exposes suppressed capacity" 1
+            (fleet_safety |> member "suppressed_capacity_count" |> to_int);
+          Alcotest.(check int) "health exposes actionable target capacity" 3
+            (fleet_safety
+             |> member "actionable_target_reaction_capacity_count"
+             |> to_int);
           Alcotest.(check int) "health exposes minimum running fibers" 2
             (fleet_safety |> member "minimum_running_fibers" |> to_int);
           Alcotest.(check bool) "health is not below minimum margin" false
             (fleet_safety |> member "low_running_fiber_margin" |> to_bool);
           Alcotest.(check bool) "health marks capacity below target" true
             (fleet_safety |> member "reaction_capacity_below_target" |> to_bool);
-          Alcotest.(check int) "health exposes capacity shortfall" 2
+          Alcotest.(check int) "health exposes raw capacity shortfall" 2
+            (fleet_safety |> member "raw_reaction_capacity_shortfall_count" |> to_int);
+          Alcotest.(check int) "health exposes actionable capacity shortfall" 1
             (fleet_safety |> member "reaction_capacity_shortfall_count" |> to_int);
-          Alcotest.(check int) "health exposes executable capacity shortfall" 2
+          Alcotest.(check int) "health exposes raw executable capacity shortfall" 2
+            (fleet_safety
+             |> member "raw_executable_reaction_capacity_shortfall_count"
+             |> to_int);
+          Alcotest.(check int) "health exposes actionable executable capacity shortfall" 1
             (fleet_safety
              |> member "executable_reaction_capacity_shortfall_count"
              |> to_int);
-          Alcotest.(check int) "health exposes blocked shortfall" 2
+          Alcotest.(check int) "health exposes blocked shortfall" 1
             (fleet_safety |> member "blocked_count" |> to_int);
           Alcotest.(check string) "health marks fleet degraded" "degraded"
             (fleet_safety |> member "status" |> to_string);
@@ -1279,6 +1303,60 @@ let test_health_json_degrades_when_reaction_capacity_below_target () =
 	          Alcotest.(check bool) "health fleet asks for operator action" true
 	            (fleet_safety |> member "operator_action_required" |> to_bool);
 	          ())))
+
+let test_health_json_suppresses_operator_paused_capacity () =
+  let keeper_names = List.init 17 (fun i -> Printf.sprintf "keeper-%02d" i) in
+  let phase_counts : Server_routes_http_runtime_fleet_scan.keeper_phase_counts =
+    { running = 11; failing = 0; recovering = 0; executable = 11 }
+  in
+  let paused_keepers_json =
+    `Assoc
+      [
+        ("count", `Int 6);
+        ("autoboot_enabled_count", `Int 6);
+      ]
+  in
+  let autoboot_scan : Server_routes_http_runtime_fleet_scan.autoboot_keeper_scan =
+    { autoboot_names = keeper_names; read_errors = [] }
+  in
+  let json =
+    Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json
+      ~bootable_names:keeper_names
+      ~autoboot_scan
+      ~phase_counts
+      ~paused_keepers_json
+      ()
+  in
+  let open Yojson.Safe.Util in
+  Alcotest.(check string) "paused-only capacity is ok" "ok"
+    (json |> member "status" |> to_string);
+  Alcotest.(check string) "paused blocker is informational"
+    "durable_paused_autoboot_enabled"
+    (json |> member "blocker" |> to_string);
+  Alcotest.(check int) "desired capacity" 17
+    (json |> member "desired_reaction_capacity_count" |> to_int);
+  Alcotest.(check int) "suppressed capacity" 6
+    (json |> member "suppressed_capacity_count" |> to_int);
+  Alcotest.(check int) "actionable target" 11
+    (json |> member "actionable_target_reaction_capacity_count" |> to_int);
+  Alcotest.(check int) "raw shortfall remains visible" 6
+    (json |> member "raw_reaction_capacity_shortfall_count" |> to_int);
+  Alcotest.(check int) "actionable shortfall is zero" 0
+    (json |> member "reaction_capacity_shortfall_count" |> to_int);
+  Alcotest.(check bool) "not below actionable target" false
+    (json |> member "reaction_capacity_below_target" |> to_bool);
+  Alcotest.(check bool) "no operator action for operator-paused capacity" false
+    (json |> member "operator_action_required" |> to_bool);
+  Alcotest.(check (float 0.001)) "Grafana suppressed gauge" 6.0
+    (Otel_metric_store.metric_value_or_zero
+       Keeper_metrics.(to_string FleetCapacity)
+       ~labels:[("kind", "suppressed")]
+       ());
+  Alcotest.(check (float 0.001)) "Grafana actionable shortfall gauge" 0.0
+    (Otel_metric_store.metric_value_or_zero
+       Keeper_metrics.(to_string FleetCapacity)
+       ~labels:[("kind", "actionable_shortfall")]
+       ())
 
 let test_health_json_distinguishes_failing_executable_keepers () =
   with_temp_dir "health-failing-executable-keepers" (fun dir ->
@@ -2864,6 +2942,9 @@ let () =
           Alcotest.test_case
             "health json degrades when reaction capacity is below target"
             `Quick test_health_json_degrades_when_reaction_capacity_below_target;
+          Alcotest.test_case
+            "health json suppresses operator-paused capacity"
+            `Quick test_health_json_suppresses_operator_paused_capacity;
           Alcotest.test_case
             "health json distinguishes failing executable keepers"
             `Quick test_health_json_distinguishes_failing_executable_keepers;

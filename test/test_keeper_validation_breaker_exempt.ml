@@ -48,6 +48,11 @@ let meta_with_active_goals goal_ids =
   | Ok meta -> meta
   | Error err -> fail ("meta_of_json_fixture failed: " ^ err)
 
+let retired_state_tool () =
+  match Keeper_state_reporting_contract.forbidden_tool_tokens with
+  | token :: _ -> token
+  | [] -> fail "state-reporting contract must name retired tool tokens"
+
 (* The error a keeper sees when it sends a non-object contract — the residual
    validation case after D1 makes an OMITTED contract [Ok None]. *)
 let payload =
@@ -113,7 +118,7 @@ let test_task_create_multi_active_goals_without_goal_id_is_unscoped () =
        | tasks ->
            failf "expected exactly one persisted task, got %d" (List.length tasks))
 
-let test_keeper_report_state_returns_state_block () =
+let test_retired_state_tool_is_not_task_tool () =
   let base_path = temp_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_path)
@@ -125,26 +130,23 @@ let test_keeper_report_state_returns_state_block () =
          Task.handle_keeper_task_tool
            ~config
            ~meta
-           ~name:"keeper_report_state"
-           ~args:
-             (`Assoc
-               [ "goal", `String "Keep runtime visible"
-               ; "next_items", `List [ `String "Check main CI" ]
-               ; "constraints", `List [ `String "Use worktrees" ]
-               ])
+           ~name:(retired_state_tool ())
+           ~args:(`Assoc [])
        in
        let json = Yojson.Safe.from_string payload in
-       check bool "state report succeeds" true (json |> U.member "ok" |> U.to_bool);
-       check string "state report keeps goal" "Keep runtime visible"
-         (json
-          |> U.member "state_snapshot"
-          |> U.member "goal"
-          |> U.to_string);
-       check string "state report renders state block"
-         "[STATE]\nGoal: Keep runtime visible\nNext: Check main CI\nConstraints: Use worktrees\n[/STATE]"
-         (json |> U.member "state_block" |> U.to_string);
-       check bool "state report returns typed outcome" true
-         (json |> U.member "typed_outcome" <> `Null))
+       check bool "retired state report is not ok=true" true
+         (match json |> U.member "ok" with
+          | `Bool true -> false
+          | `Bool false
+          | `Null ->
+            true
+          | _ -> false);
+       check string "retired state report is unknown task tool"
+         "unknown_task_tool"
+         (json |> U.member "error" |> U.to_string);
+       check string "retired tool echoed for diagnosis"
+         (retired_state_tool ())
+         (json |> U.member "tool" |> U.to_string))
 
 let () =
   run "keeper validation breaker exemption"
@@ -159,7 +161,7 @@ let () =
             "keeper_task_create treats ambiguous active_goal_ids as advisory"
             `Quick
             test_task_create_multi_active_goals_without_goal_id_is_unscoped
-        ; test_case "keeper_report_state returns state block" `Quick
-            test_keeper_report_state_returns_state_block
+        ; test_case "retired state-reporting tool is not a task tool" `Quick
+            test_retired_state_tool_is_not_task_tool
         ] )
     ]

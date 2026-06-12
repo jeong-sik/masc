@@ -14,6 +14,7 @@ module KP = Masc.Keeper_prompt
 module KRP = Masc.Keeper_run_prompt
 module KCB = Masc.Keeper_failure_circuit_breaker
 module KUP = Masc.Keeper_unified_prompt
+module KPT = Masc.Keeper_prompt_tool_token_audit
 
 (* CJK-aware token estimator from OAS *)
 let estimate_tokens s =
@@ -23,6 +24,11 @@ let estimate_tokens s =
 let has_in s needle =
   try ignore (Str.search_forward (Str.regexp_string needle) s 0); true
   with Not_found -> false
+
+let retired_state_tool () =
+  match Keeper_state_reporting_contract.forbidden_tool_tokens with
+  | token :: _ -> token
+  | [] -> fail "state-reporting contract must name retired tool tokens"
 
 let has_prompt_root path =
   Sys.file_exists (Filename.concat path "config/prompts/keeper.world.md")
@@ -268,31 +274,59 @@ let test_state_block_guard_is_runtime_managed_not_absolute_never () =
   let guard = KP.state_block_output_guard_text in
   check bool "guard mentions runtime-managed continuity" true
     (has_in guard "runtime-managed continuity");
-  check bool "guard prefers structured output" true
-    (has_in guard "structured output");
-  check bool "guard names keeper_report_state" true
-    (has_in guard "keeper_report_state");
+  check bool "guard names STATE block" true
+    (has_in guard "[STATE]...[/STATE]");
+  check bool "guard does not name retired state tool" false
+    (has_in guard (retired_state_tool ()));
   check bool "guard avoids absolute NEVER state wording" false
     (has_in guard ("NEVER output " ^ "[STATE]"));
-  check bool "guard names raw state markers" true
-    (has_in guard "raw [STATE]");
   check bool "guard mentions runtime persistence" true
     (has_in guard "persist state metadata")
 
 let test_unified_state_instruction_respects_turn_level_guard () =
   let text = KUP.state_block_instruction_text in
   check bool "instruction is scoped to non-direct turns" true
-    (has_in text "For non-direct keeper turns");
-  check bool "instruction prefers structured output" true
-    (has_in text "structured output");
-  check bool "instruction names keeper_report_state" true
-    (has_in text "keeper_report_state");
-  check bool "instruction keeps raw state fallback scoped" true
-    (has_in text "Only if keeper_report_state is unavailable");
+    (has_in text "for non-direct keeper turns");
+  check bool "instruction names STATE block" true
+    (has_in text "[STATE] block");
+  check bool "instruction carries contract version" true
+    (has_in text "state-reporting.v1");
+  check bool "instruction does not name retired state tool" false
+    (has_in text (retired_state_tool ()));
   check bool "instruction avoids old unconditional wording" false
     (has_in text
        ("End every response with a "
         ^ "[STATE]...[/STATE] block:"))
+
+let test_prompt_tool_token_audit_rejects_retired_state_tool () =
+  let token = retired_state_tool () in
+  let violations =
+    KPT.violations
+      ("State block template: call " ^ token ^ " after every turn.")
+  in
+  check int "one violation" 1 (List.length violations);
+  let violation = List.hd violations in
+  check string "retired token" token violation.KPT.token;
+  check string "retired token reason" "forbidden_retired_tool" violation.KPT.reason
+
+let test_rendered_keeper_prompt_has_no_unknown_tool_tokens () =
+  let prompt =
+    KP.build_keeper_system_prompt
+      ~goal:"Keep keeper guidance aligned with runtime behavior"
+      ~short_goal:"verify tool-token integrity"
+      ~mid_goal:"ship coherent keeper guidance"
+      ~long_goal:"avoid retired tool prompt drift"
+      ~will:"maintain coherent identity"
+      ~needs:"runtime truth and durable continuity"
+      ~desires:"observable progress"
+      ~instructions:""
+      ()
+  in
+  check (list string) "no retired/unknown tool-like tokens" []
+    (List.map
+       (fun (violation : KPT.violation) ->
+          violation.token ^ ":" ^ violation.reason)
+       (KPT.violations prompt))
 
 let test_state_block_schema_is_canonical_six_field_shape () =
   let text = KUP.state_block_instruction_text in
@@ -343,7 +377,7 @@ let test_prompt_mentions_runtime_operator_approval_for_risky_actions () =
 let test_keeper_oas_guardrails_are_visibility_neutral () =
   let source_guardrails =
     { Agent_sdk.Guardrails.tool_filter =
-        Agent_sdk.Guardrails.AllowList [ "keeper_report_state" ]
+        Agent_sdk.Guardrails.AllowList [ "keeper_task_done" ]
     ; max_tool_calls_per_turn = Some 7
     }
   in
@@ -539,6 +573,10 @@ let () =
             test_state_block_guard_is_runtime_managed_not_absolute_never;
           test_case "unified state instruction respects turn-level guard" `Quick
             test_unified_state_instruction_respects_turn_level_guard;
+          test_case "prompt token audit rejects retired state tool" `Quick
+            test_prompt_tool_token_audit_rejects_retired_state_tool;
+          test_case "rendered keeper prompt has no unknown tool tokens" `Quick
+            test_rendered_keeper_prompt_has_no_unknown_tool_tokens;
           test_case "state block schema is canonical six-field shape" `Quick
             test_state_block_schema_is_canonical_six_field_shape;
           test_case "constitution uses canonical state instruction" `Quick

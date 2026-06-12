@@ -169,10 +169,16 @@ val make_health_json :
     the FSM intentionally allows [Failing] keepers to finish or attempt turns.
     It reports [blocked] when autoboot-enabled keepers exist but no executable
     fiber remains, and [degraded] when executable fibers remain but healthy
-    running capacity is zero, below the safety margin, or below
-    [target_reaction_capacity_count].
-    [paused_autoboot_enabled_keeper_count] makes the intended fleet size
-    visible even when durable pauses suppress every bootable keeper.
+    running capacity is zero, below the safety margin, or below the
+    actionable target.  [target_reaction_capacity_count] /
+    [desired_reaction_capacity_count] keep the configured fleet size visible,
+    while [suppressed_capacity_count] and
+    [actionable_target_reaction_capacity_count] separate durable
+    operator-paused keepers from actual capacity that requires intervention.
+    The raw total shortfall remains available as
+    [raw_reaction_capacity_shortfall_count]; status and
+    [operator_action_required] are driven by
+    [reaction_capacity_shortfall_count], the actionable shortfall.
 
     [keeper_reaction_ledger] summarizes recent durable stimulus -> reaction
     rows per keeper.  It reports [degraded] when a persisted stimulus has no

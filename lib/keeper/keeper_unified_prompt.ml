@@ -234,6 +234,19 @@ let sanitize_retired_tool_names text =
 
 let state_block_instruction_text = Keeper_state_block_prompt.instruction_text
 
+let observe_prompt_tool_token_violations ~keeper text =
+  Keeper_prompt_tool_token_audit.violations text
+  |> List.iter (fun (violation : Keeper_prompt_tool_token_audit.violation) ->
+    Otel_metric_store.inc_counter
+      (Keeper_metrics.to_string PromptUnknownToolTokens)
+      ~labels:
+        [
+          ("keeper", keeper);
+          ("token", violation.token);
+          ("reason", violation.reason);
+        ]
+      ())
+
 (* In-binary mirror of config/prompts/keeper.turn_intent.md (minus the
    {{...}} substitution slots that cannot be filled during a fallback).
    Used only when [resolve_turn_intent_block] fails or the registry
@@ -786,6 +799,7 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
   in
   let sanitized_system = sanitize_retired_tool_names system_prompt in
   let sanitized_user = sanitize_retired_tool_names user_message in
+  observe_prompt_tool_token_violations ~keeper:meta.name sanitized_system;
   (* set_gauge only: a stray inc_counter here used to create this
      (name, labels) cell as Counter first, so the system_prompt series
      kept Counter kind, carried a non-monotonic byte length, and exported

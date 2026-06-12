@@ -71,23 +71,24 @@ let test_extend_turns_resolved () =
       fail (Printf.sprintf "extend_turns should resolve, got Unknown (tried: %s)"
               (TR.string_of_tried tried))
 
-let test_keeper_report_state_core_always () =
+let retired_state_tool () =
+  match Keeper_state_reporting_contract.forbidden_tool_tokens with
+  | token :: _ -> token
+  | [] -> fail "state-reporting contract must name retired tool tokens"
+
+let test_retired_state_tool_does_not_resolve () =
+  let token = retired_state_tool () in
   check bool
-    "keeper_report_state is core always"
-    true
-    (Masc.Keeper_tool_registry.is_core_always_tool "keeper_report_state");
-  match TR.resolve "keeper_report_state" with
-  | TR.Resolved { via = TR.Registry_core_tools; _ } -> ()
+    "retired state tool is not core always"
+    false
+    (Masc.Keeper_tool_registry.is_core_always_tool token);
+  match TR.resolve token with
+  | TR.Unknown _ -> ()
   | TR.Resolved { via; _ } | TR.Alias_to { via; _ } ->
       fail
         (Printf.sprintf
-           "keeper_report_state should resolve via Registry_core_tools, got via %s"
+           "retired state tool should not resolve, got via %s"
            (TR.string_of_tried_source via))
-  | TR.Unknown { tried; _ } ->
-      fail
-        (Printf.sprintf
-           "keeper_report_state should resolve, got Unknown (tried: %s)"
-           (TR.string_of_tried tried))
 
 let test_tool_execute_resolves () =
   (* Was "resolves via surface"; the per-actor Surface source was removed in
@@ -319,7 +320,7 @@ let () =
         test_case "mcp prefix stripped and resolved" `Quick test_mcp_prefix_stripped;
         test_case "unknown returns tried list" `Quick test_unknown_returns_tried_list;
         test_case "extend_turns resolves" `Quick test_extend_turns_resolved;
-        test_case "keeper_report_state is core-always structured state tool" `Quick test_keeper_report_state_core_always;
+        test_case "retired state-reporting tool does not resolve" `Quick test_retired_state_tool_does_not_resolve;
         test_case "tool_execute resolves" `Quick test_tool_execute_resolves;
         test_case "masc_keeper_* cluster resolves via descriptor registry (boot guard)" `Quick test_descriptor_registry_admits_masc_keeper_cluster;
         test_case "masc_board_post resolves" `Quick test_masc_board_post_resolves;

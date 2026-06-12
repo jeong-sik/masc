@@ -217,7 +217,7 @@ let test_finalizer_prefers_reported_state_snapshot () =
   let reported_state_snapshot =
     make_snapshot
       ~goal:(Some "Tool state goal")
-      ~progress:(Some "Reported through keeper_report_state")
+      ~progress:(Some "Reported through STATE block")
       ~done_summary:None
       ~next_summary:None
       ~next_items:[]
@@ -231,7 +231,7 @@ let test_finalizer_prefers_reported_state_snapshot () =
       ~reported_state_snapshot:(Some reported_state_snapshot)
       ~keeper_name:"test"
       ~goal:"Fallback goal"
-      ~actual_keeper_tool_names:[ "keeper_report_state" ]
+      ~actual_keeper_tool_names:[]
       ~stop_reason:Runtime_agent.Completed
       ~raw_response_text:"Visible reply"
       ()
@@ -250,7 +250,7 @@ let test_finalizer_prefers_reported_state_snapshot () =
     state_snapshot_source;
   Alcotest.(check (option string))
     "progress"
-    (Some "Reported through keeper_report_state")
+    (Some "Reported through STATE block")
     state_snapshot.progress;
   Alcotest.(check string)
     "visible response"

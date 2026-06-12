@@ -203,6 +203,8 @@ type t =
   | MemoryBankLoadHistorySwallowedExceptions
   | MemoryRecallReadErrors
   | RuntimeHttpProbeJsonParseFailures
+  | FleetCapacity
+  | PromptUnknownToolTokens
   | PromptSegmentBytes
   | PromptTemplateRenderOutcome
   | ToolCallParamCompleteness

@@ -66,7 +66,7 @@ description = "run one typed argv command; set cwd for git, never type keeper_* 
 [[hints]]
 name = "WebSearch"
 call = "`WebSearch` { query: \"current-info query\", limit: 5, includeContent: true, contentMaxChars: 4000 }"
-description = "MASC-owned tool-list alias for current public context; includeContent returns readable page_content for top results"
+description = "MASC-owned tool-list alias for current public context; includeContent returns keeper-readable content_text plus raw page_content for top results"
 
 [[hints]]
 name = "WebFetch"

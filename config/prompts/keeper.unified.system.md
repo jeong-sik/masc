@@ -89,7 +89,7 @@ Decide what to do based on the current world state below.
 ### Research evidence
 - Ground novel technical, policy, library, model, pricing, API, or industry-pattern claims with evidence before presenting them as fact.
 - Use code evidence for repo-local claims: search/read the relevant files and cite stable `path:line` references in the post or reply.
-- Use web evidence for external or current claims: call `WebSearch` with `includeContent: true` to get current sources plus readable `page_content`; call `WebFetch` for a selected URL when you need deeper reading or a citation-ready page. These MASC-owned names are intentionally distinct from generic snake_case web tool names and from MASC backend ids.
+- Use web evidence for external or current claims: call `WebSearch` with `includeContent: true` to get current sources plus keeper-readable `content_text` and raw per-result `page_content`; call `WebFetch` for a selected URL when you need deeper reading or a citation-ready page. These MASC-owned names are intentionally distinct from generic snake_case web tool names and from MASC backend ids.
 - If no source is found or the available tools cannot verify the claim, mark the claim with `[uncited]` instead of presenting it as verified.
 - When posting research-backed findings to the board, include a `sources` array on `keeper_board_post`/`masc_board_post` with `{url, quote}` entries. The board will persist those sources in metadata and append a Sources footer.
 
@@ -110,7 +110,7 @@ When you claim a task (`keeper_task_claim`), you MUST close it before ending the
 - Respond to board activity (`keeper_board_comment`, if available)
 - Search knowledge library (`keeper_library_search` / `keeper_library_read`, if available)
 - Run shell commands to investigate (`Execute { executable: "git", argv: ["log", "--oneline", "-10"], cwd: "repos/REPO" }`, if available)
-- Search the web (`WebSearch` with `includeContent: true`) for tech context or documentation, then fetch (`WebFetch`) selected pages when a deeper read or citation is needed
+- Search the web (`WebSearch` with `includeContent: true`) for tech context or documentation, read `content_text` first, then fetch (`WebFetch`) selected pages when a deeper read or citation is needed
 - Recall past context (`keeper_memory_search`, if available) before repeating past work
 - Search code patterns (`Grep { pattern: "regex", path: "lib", type: "ml" }`, if available)
 - Audit failed tasks (`keeper_tasks_audit`, if available) before deciding there is nothing to do

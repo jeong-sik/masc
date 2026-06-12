@@ -440,6 +440,14 @@ let () = test "dispatch_web_search_include_content_enriches_results" (fun () ->
               let hits = result_json |> member "results" |> to_list in
               assert (List.length hits = 1);
               let hit = List.hd hits in
+              let content_text = result_json |> member "content_text" |> to_string in
+              assert (str_contains content_text "WebSearch readable results");
+              assert (str_contains content_text ("Query: " ^ query));
+              assert (str_contains content_text "1. Result");
+              assert (str_contains content_text ("URL: " ^ url));
+              assert (str_contains content_text "Snippet: Snippet");
+              assert (str_contains content_text "Content status: ok (http=200");
+              assert (str_contains content_text "Readable page content & proof.");
               assert (hit |> member "page_content_status" |> to_string = "ok");
               assert (hit |> member "page_content_http_status" |> to_int = 200);
               assert (hit |> member "page_content_truncated" |> to_bool = false);
@@ -485,6 +493,13 @@ let () = test "dispatch_web_search_include_content_keeps_result_on_fetch_error" 
               let hit =
                 result_json |> member "results" |> to_list |> List.hd
               in
+              let content_text = result_json |> member "content_text" |> to_string in
+              assert (str_contains content_text "WebSearch readable results");
+              assert (str_contains content_text ("Query: " ^ query));
+              assert (str_contains content_text ("URL: " ^ url));
+              assert (str_contains content_text "Content status: error");
+              assert (str_contains content_text "_Failed to retrieve page content:");
+              assert (str_contains content_text ("Source: " ^ url));
               assert (hit |> member "page_content_status" |> to_string = "error");
               assert
                 (str_contains

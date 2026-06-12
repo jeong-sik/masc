@@ -913,10 +913,8 @@ let send_to session_id json =
       "Dropping non-JSON-RPC payload sent via Sse.send_to for session %s"
       session_id
   else
-  let data = Yojson.Safe.to_string json in
-  (* Atomic allocation — see [broadcast_impl] for rationale. *)
   let current_event_id = next_id () in
-  let event = format_event ~id:current_event_id ~event_type:"message" data in
+  let event = format_event_yojson ~id:current_event_id ~event_type:"message" json in
   buffer_event current_event_id event;
   let client_opt = SMap.find_opt session_id (Atomic.get clients).entries in
   match client_opt with

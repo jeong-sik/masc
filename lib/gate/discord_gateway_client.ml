@@ -108,6 +108,12 @@ let run ~sw ~env ~token ~intents ~trigger_policy ~on_event ~on_ambient () =
   let conn_ref : Discord_wss_connection.conn option ref = ref None in
   let input_mailbox = Eio.Stream.create 64 in
   let heartbeat_ms = ref None in
+  (* Heartbeat ACK tracking. The heartbeat fiber clears on tick; the
+     reader sets on Op_heartbeat_ack.  Starts [true] so the first tick
+     after HELLO does not false-trigger a timeout.  Reset to [true] in
+     Schedule_heartbeat (new session after reconnect) so a fresh
+     heartbeat cycle starts with a clean slate. *)
+  let heartbeat_ack_ok = Atomic.make true in
 
   let clock = Eio.Stdenv.clock env in
   Eio.Fiber.fork ~sw (fun () ->
@@ -117,7 +123,18 @@ let run ~sw ~env ~token ~intents ~trigger_policy ~on_event ~on_ambient () =
          Eio.Time.sleep clock 0.5
        | Some ms ->
          Eio.Time.sleep clock (float_of_int ms /. 1000.0);
-         Eio.Stream.add input_mailbox Discord_gateway_state.Heartbeat_tick);
+         if Atomic.get heartbeat_ack_ok then begin
+           (* Previous heartbeat was ACK'd (or first tick after HELLO) —
+              send the next heartbeat and start waiting for its ACK. *)
+           Atomic.set heartbeat_ack_ok false;
+           Eio.Stream.add input_mailbox Discord_gateway_state.Heartbeat_tick
+         end else
+           (* Discord docs: "If a client does not receive a heartbeat
+              ack between its attempts at sending heartbeats, it should
+              immediately terminate the connection with a non-1000
+              close code and reconnect." *)
+           Eio.Stream.add input_mailbox
+             Discord_gateway_state.Heartbeat_ack_timeout);
       loop ()
     in
     loop ());
@@ -134,7 +151,23 @@ let run ~sw ~env ~token ~intents ~trigger_policy ~on_event ~on_ambient () =
              { code = 1011; reason = Printexc.to_string e })
       | frame ->
         (match frame_to_input frame with
-         | Some inp -> Eio.Stream.add input_mailbox inp
+         | Some inp ->
+           (* Side-channel: track heartbeat ACK arrival for I/O-layer
+              liveness detection.  The [when] guard avoids a fragile
+              catch-all on the [input] type — the state machine still
+              receives every input unchanged. *)
+           (match inp with
+            | Discord_gateway_state.Frame_received f
+              when f.op = Discord_gateway_state.Op_heartbeat_ack ->
+              Atomic.set heartbeat_ack_ok true
+            | Discord_gateway_state.Frame_received _
+            | Discord_gateway_state.Connect_requested
+            | Discord_gateway_state.Frame_parse_error _
+            | Discord_gateway_state.Wss_closed _
+            | Discord_gateway_state.Heartbeat_tick
+            | Discord_gateway_state.Heartbeat_ack_timeout
+            | Discord_gateway_state.Backoff_elapsed -> ());
+           Eio.Stream.add input_mailbox inp
          | None -> ());
         loop ()
     in
@@ -187,7 +220,11 @@ let run ~sw ~env ~token ~intents ~trigger_policy ~on_event ~on_ambient () =
          in
          Discord_wss_connection.write conn ws)
     | Schedule_heartbeat { interval_ms } ->
-      heartbeat_ms := Some interval_ms
+      heartbeat_ms := Some interval_ms;
+      (* New HELLO received (fresh connect or reconnect) — reset the
+         ACK flag so the first tick in the new session sends a heartbeat
+         rather than immediately triggering a timeout. *)
+      Atomic.set heartbeat_ack_ok true
     | Schedule_backoff { delay_ms } ->
       Discord_observability.record_gateway_reconnect_scheduled ();
       Eio.Fiber.fork ~sw (fun () ->

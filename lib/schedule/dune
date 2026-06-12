@@ -1,0 +1,11 @@
+(include_subdirs no)
+
+;; Scheduled internal automation domain. This stays pure: no runner, shell,
+;; transport, or storage dependency in the first slice.
+
+(library
+ (name masc_schedule)
+ (public_name masc.masc_schedule)
+ (wrapped false)
+ (modules schedule_domain)
+ (libraries digestif yojson))

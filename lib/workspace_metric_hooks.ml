@@ -531,10 +531,10 @@ let install () =
   Atomic.set Workspace_hooks.record_thompson_result_fn (fun ~agent_name ~success ~reason ->
     let direction = if success then `Up else `Down in
     let verdict =
-      if success then Post_verifier.Pass
+      if success then Thompson_sampling.Pass
       else
         let r = Option.value ~default:"task_cancelled" reason in
-        Post_verifier.Fail r
+        Thompson_sampling.Fail r
     in
     Thompson_sampling.record_vote ~agent_name ~direction;
     Thompson_sampling.record_quality_signal ~agent_name ~verdict);

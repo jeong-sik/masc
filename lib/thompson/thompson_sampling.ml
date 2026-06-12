@@ -8,6 +8,11 @@
     - [A Tutorial on Thompson Sampling](https://web.stanford.edu/~bvr/pubs/TS_Tutorial.pdf)
     - [Thompson Sampling with Fairness Constraints](https://arxiv.org/abs/2005.06725) *)
 
+type quality_verdict =
+  | Pass
+  | Warn of string
+  | Fail of string
+
 (** {1 Types} *)
 
 (* #9919 audit follow-up: Otel_metric_store counter for priority-trigger
@@ -448,13 +453,13 @@ let record_guard_penalty ~agent_name =
     s.updated_at <- Time_compat.now ())
 
 (** Record Post Verifier result into Thompson Sampling priors. *)
-let record_quality_signal ~agent_name ~(verdict : Post_verifier.verdict) =
+let record_quality_signal ~agent_name ~(verdict : quality_verdict) =
   let s = get_stats agent_name in
   with_ts_rw (fun () ->
     (match verdict with
-     | Post_verifier.Pass -> s.alpha <- s.alpha +. quality_pass_alpha_boost
-     | Post_verifier.Warn _ -> s.beta <- s.beta +. quality_warn_beta_nudge
-     | Post_verifier.Fail _ -> s.beta <- s.beta +. quality_fail_beta_penalty);
+     | Pass -> s.alpha <- s.alpha +. quality_pass_alpha_boost
+     | Warn _ -> s.beta <- s.beta +. quality_warn_beta_nudge
+     | Fail _ -> s.beta <- s.beta +. quality_fail_beta_penalty);
     s.alpha <- Float.max min_prior s.alpha;
     s.beta <- Float.max min_prior s.beta;
     s.updated_at <- Time_compat.now ())

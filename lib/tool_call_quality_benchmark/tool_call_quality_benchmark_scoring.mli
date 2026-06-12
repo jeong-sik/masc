@@ -65,11 +65,3 @@ val score_run :
     when any call exists.  [forbidden_count] counts calls matching either
     [forbidden_tools] or [forbidden_selectors], with each call counted at
     most once. *)
-
-val to_reward_advice :
-  agent_name:string ->
-  ?task_id:string ->
-  Tool_call_quality_benchmark_types.case_score ->
-  Reward_advice_artifact.reward_advice_artifact
-(** Build a {!Reward_advice_artifact.reward_advice_artifact} from a case score.
-    Maps [composite_score] to a reward multiplier and generates an advisory message. *)

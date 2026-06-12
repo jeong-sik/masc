@@ -160,6 +160,41 @@ let test_diff_identical_records_is_empty () =
   check int "no removed" 0 (List.length diff.removed);
   check int "no changed" 0 (List.length diff.changed)
 
+let test_entries_with_diffs_same_trace_only () =
+  let r1 =
+    { (record_with_blocks [ sample_block Prompt_block_id.Persona "aaaa" ]) with
+      trace_id = "trace-A"
+    ; absolute_turn = 1
+    }
+  in
+  let r2 =
+    { (record_with_blocks
+         [ sample_block Prompt_block_id.Persona "aaaa"
+         ; sample_block Prompt_block_id.Retry_nudge "rrrr"
+         ])
+      with
+      trace_id = "trace-A"
+    ; absolute_turn = 2
+    }
+  in
+  let r3 =
+    { (record_with_blocks [ sample_block Prompt_block_id.Persona "zzzz" ]) with
+      trace_id = "trace-B" (* new generation: diff must be None *)
+    ; absolute_turn = 3
+    }
+  in
+  match Turn_record.entries_with_diffs [ r1; r2; r3 ] with
+  | [ (_, first); (_, second); (_, third) ] ->
+    check bool "first record has no predecessor" true (first = None);
+    (match second with
+     | Some diff ->
+       check (list block_id) "same-trace diff sees the added nudge"
+         [ Prompt_block_id.Retry_nudge ]
+         (List.map (fun (b : Turn_record.prompt_block) -> b.block) diff.added)
+     | None -> fail "expected a diff for the same-trace successor");
+    check bool "trace boundary yields no diff" true (third = None)
+  | _ -> fail "expected three paired entries"
+
 let () =
   run "turn_record"
     [ ( "prompt_block_id"
@@ -178,5 +213,7 @@ let () =
             test_diff_added_removed_changed
         ; test_case "identical records diff empty" `Quick
             test_diff_identical_records_is_empty
+        ; test_case "entries_with_diffs pairs same-trace only" `Quick
+            test_entries_with_diffs_same_trace_only
         ] )
     ]

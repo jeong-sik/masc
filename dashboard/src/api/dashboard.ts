@@ -2634,6 +2634,150 @@ export function fetchKeeperToolCalls(
   })
 }
 
+// ── Keeper turn records (RFC-0233 PR-4) ─────────────────
+
+export type TurnBlock = {
+  block: string
+  bytes: number
+  digest: string
+}
+
+export type TurnRecordEntry = {
+  execution_ids: string[]
+  keeper: string
+  trace_id: string
+  absolute_turn: number
+  blocks: TurnBlock[]
+  runtime_profile: string
+  temperature?: number
+  thinking_budget?: number
+  enable_thinking?: boolean
+  input_tokens?: number
+  output_tokens?: number
+  ts: number
+}
+
+export type TurnBlockDiff = {
+  added: TurnBlock[]
+  removed: TurnBlock[]
+  changed: { prev: TurnBlock; next: TurnBlock }[]
+}
+
+export type TurnRecordRow = {
+  record: TurnRecordEntry
+  // null on the first record of a trace (no same-trace predecessor)
+  diff_vs_prev: TurnBlockDiff | null
+}
+
+export type TurnRecordsResponse = TelemetryFreshnessMetadata & {
+  keeper: string
+  count: number
+  // malformed JSONL rows the server refused to decode (never repaired)
+  skipped_rows: number
+  entries: TurnRecordRow[]
+}
+
+function decodeTurnBlock(raw: unknown): TurnBlock | null {
+  if (!isRecord(raw)) return null
+  const block = asString(raw.block)
+  const digest = asString(raw.digest)
+  const bytes = asNumber(raw.bytes)
+  if (!block || !digest || bytes == null) return null
+  return { block, bytes, digest }
+}
+
+function decodeTurnBlockList(raw: unknown): TurnBlock[] {
+  return asRecordArray(raw)
+    .map(decodeTurnBlock)
+    .filter((block): block is TurnBlock => block !== null)
+}
+
+function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
+  if (!isRecord(raw)) return null
+  const keeper = asString(raw.keeper)
+  const trace_id = asString(raw.trace_id)
+  const absolute_turn = asNumber(raw.absolute_turn)
+  const runtime_profile = asString(raw.runtime_profile)
+  const ts = asNumber(raw.ts)
+  if (!keeper || !trace_id || absolute_turn == null || !runtime_profile || ts == null) {
+    return null
+  }
+  const execution_ids = Array.isArray(raw.execution_ids)
+    ? raw.execution_ids.filter((id): id is string => typeof id === 'string')
+    : []
+  return {
+    execution_ids,
+    keeper,
+    trace_id,
+    absolute_turn,
+    blocks: decodeTurnBlockList(raw.blocks),
+    runtime_profile,
+    temperature: asNumber(raw.temperature),
+    thinking_budget: asNumber(raw.thinking_budget),
+    enable_thinking: typeof raw.enable_thinking === 'boolean' ? raw.enable_thinking : undefined,
+    input_tokens: asNumber(raw.input_tokens),
+    output_tokens: asNumber(raw.output_tokens),
+    ts,
+  }
+}
+
+function decodeTurnBlockDiff(raw: unknown): TurnBlockDiff | null {
+  if (!isRecord(raw)) return null
+  const changed = asRecordArray(raw.changed)
+    .map((pair) => {
+      const prev = decodeTurnBlock(pair.prev)
+      const next = decodeTurnBlock(pair.next)
+      return prev && next ? { prev, next } : null
+    })
+    .filter((pair): pair is { prev: TurnBlock; next: TurnBlock } => pair !== null)
+  return {
+    added: decodeTurnBlockList(raw.added),
+    removed: decodeTurnBlockList(raw.removed),
+    changed,
+  }
+}
+
+function decodeTurnRecordRow(raw: unknown): TurnRecordRow | null {
+  if (!isRecord(raw)) return null
+  const record = decodeTurnRecordEntry(raw.record)
+  if (!record) return null
+  return {
+    record,
+    diff_vs_prev: decodeTurnBlockDiff(raw.diff_vs_prev),
+  }
+}
+
+function decodeTurnRecordsResponse(raw: unknown): TurnRecordsResponse | null {
+  if (!isRecord(raw)) return null
+  const keeper = asString(raw.keeper)
+  if (!keeper) return null
+  return {
+    ...decodeTelemetryFreshnessMetadata(raw),
+    keeper,
+    count: asNumber(raw.count, 0),
+    skipped_rows: asNumber(raw.skipped_rows, 0),
+    entries: asRecordArray(raw.entries)
+      .map(decodeTurnRecordRow)
+      .filter((row): row is TurnRecordRow => row !== null),
+  }
+}
+
+export function fetchKeeperTurnRecords(
+  name: string,
+  limit?: number,
+  opts?: AbortableRequestOptions,
+): Promise<TurnRecordsResponse> {
+  const params = limit != null ? `?limit=${limit}` : ''
+  return get<Record<string, unknown>>(
+    `/api/v1/keepers/${encodeURIComponent(name)}/turn-records${params}`,
+    { signal: opts?.signal },
+  ).then((raw) => {
+    const decoded = decodeTurnRecordsResponse(raw)
+    if (!decoded) throw new Error('유효하지 않은 keeper turn record payload')
+    return decoded
+  })
+}
+
 // ── Unified telemetry ──────────────────────────────────
 
 export type TelemetrySource =

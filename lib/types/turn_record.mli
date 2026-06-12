@@ -40,6 +40,8 @@ type t =
   ; ts : float
   }
 
+val prompt_block_to_json : prompt_block -> Yojson.Safe.t
+
 val to_json : t -> Yojson.Safe.t
 
 val of_json : Yojson.Safe.t -> (t, string) result
@@ -58,3 +60,8 @@ type block_diff =
 val diff_blocks : prev:t -> next:t -> block_diff
 (** Blocks are keyed by [block] id; assembly produces at most one block
     per id, so first occurrence wins if a malformed row repeats one. *)
+
+val entries_with_diffs : t list -> (t * block_diff option) list
+(** Pair each record (oldest-first) with its diff against the previous
+    record of the same trace; [None] at trace boundaries, where the
+    whole assembly legitimately changes and a diff would be noise. *)

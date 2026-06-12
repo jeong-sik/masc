@@ -18,6 +18,7 @@ type try_provider_ctx =
   ; max_tokens : int
   ; max_input_tokens : int option
   ; max_cost_usd : float option
+  ; accept : Agent_sdk_response.api_response -> bool
   ; guardrails : Agent_sdk.Guardrails.t option
   ; hooks : Agent_sdk.Hooks.hooks option
   ; context_reducer : Agent_sdk.Context_reducer.t option
@@ -76,4 +77,10 @@ module For_testing : sig
     runtime_mcp_external_tools:bool ->
     Agent_sdk.Hooks.turn_params ->
     Agent_sdk.Hooks.turn_params
+
+  val apply_accept :
+    runtime_id:string ->
+    accept:(Agent_sdk_response.api_response -> bool) ->
+    Runtime_agent.run_result ->
+    (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
 end

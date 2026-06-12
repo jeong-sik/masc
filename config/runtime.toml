@@ -1,0 +1,44 @@
+# MASC runtime seed.
+#
+# This file is copied into <base-path>/.masc/config/runtime.toml for new
+# workspaces. Existing live config roots are preserved and must be edited
+# explicitly through the dashboard/runtime config path.
+#
+# Gemma 4 QAT on Ollama uses Gemma's chat-template/control-token thinking path.
+# Do not translate thinking-support=true into a generic provider "think": true
+# parameter; the OAS Ollama adapter owns the Gemma 4 template behavior.
+
+[runtime]
+default = "ollama.gemma4-26b-a4b-qat"
+
+[providers.ollama]
+display-name = "Local Ollama"
+protocol = "ollama-http"
+endpoint = "http://localhost:11434"
+
+[models.gemma4-26b-a4b-qat]
+api-name = "hf.co/unsloth/gemma-4-26B-A4B-it-qat-GGUF:UD-Q4_K_XL"
+max-context = 262144
+tools-support = true
+thinking-support = true
+preserve-thinking = true
+streaming = true
+
+[models.gemma4-26b-a4b-qat.capabilities]
+supports-tool-choice = true
+thinking-control-format = "chat-template-kwargs"
+supports-native-streaming = true
+supports-top-k = true
+supports-seed = true
+supports-image-input = true
+supports-multimodal-inputs = true
+
+[ollama.gemma4-26b-a4b-qat]
+max-concurrent = 1
+
+# Optional explicit keeper pins. Omit this table to let keepers use
+# [runtime].default.
+#
+# [runtime.assignments]
+# sangsu = "ollama.gemma4-26b-a4b-qat"
+# executor = "ollama.gemma4-26b-a4b-qat"

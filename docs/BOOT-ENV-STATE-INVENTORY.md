@@ -89,8 +89,10 @@ The checked-in versioned seed config tree currently contains:
 | `config/prompts/*.md` | Versioned system prompt fragments and governance/keeper prompt templates. |
 | `config/excuse_patterns.json` | Auxiliary config used by selected flows. |
 
-`runtime.toml` is not checked into the repo seed tree. It is an optional
-active-root file at `<active config root>/runtime.toml`.
+`runtime.toml` is checked into the repo seed tree as a local-first example and
+bootstrap default. Live authoring still happens in the active-root file at
+`<active config root>/runtime.toml`; existing active roots are preserved and
+are not overwritten by the seed.
 
 ### 1.3 runtime.toml — per-base-path startup keeper env seeding
 

@@ -56,14 +56,19 @@ let () =
   Dashboard_snapshot.register_namespace_truth_snapshot Server_dashboard_http_namespace_truth.namespace_truth_snapshot_from_caches;
   if Option.is_none (Sys.getenv_opt "OCAMLRUNPARAM") then begin
     let open Gc in
+    let gc_space_overhead =
+      try int_of_string (Sys.getenv "MASC_GC_SPACE_OVERHEAD")
+      with Not_found -> 100
+    in
     let ctrl = get () in
     set { ctrl with
       minor_heap_size = 2 * 1024 * 1024;  (* 2M words = 16MB on 64-bit; reduces minor->major promotion rate *)
-      space_overhead = 100;               (* default 120; triggers major GC when free > live (was 200/3x).
-                                             Lower value = shorter individual pauses at the cost of more
-                                             frequent GC slices.  P0 allocation fixes (PR #20965) reduced
-                                             broadcast hot-path allocation by ~97%, so the increased GC
-                                             frequency has negligible throughput impact. *)
+      space_overhead = gc_space_overhead;  (* default 120. Configurable via MASC_GC_SPACE_OVERHEAD.
+                                             100 = triggers major GC when free > live (was 200/3x).
+                                             Lower = shorter individual pauses, more frequent slices.
+                                             P0 allocation fixes (PR #20965) reduced broadcast hot-path
+                                             allocation by ~97%, so the increased frequency has negligible
+                                             throughput impact. *)
       max_overhead = 500;                 (* compaction triggers when free memory exceeds 500% of live data *)
     }
   end

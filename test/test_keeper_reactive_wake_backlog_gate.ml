@@ -35,7 +35,7 @@ default = "test_provider.test_model"
 
 [providers.test_provider]
 display-name = "Test Provider"
-protocol = "provider_d-http"
+protocol = "openai-compatible-http"
 endpoint = "http://127.0.0.1:1"
 
 [models.test_model]

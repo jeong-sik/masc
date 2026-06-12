@@ -105,12 +105,12 @@ budgettest = "openai.gpt"
 
 [providers.runpod_mtp]
 display-name = "RunPod"
-protocol = "provider_d-http"
+protocol = "openai-compatible-http"
 endpoint = "https://runpod.example/v1"
 
 [providers.openai]
 display-name = "OpenAI"
-protocol = "provider_d-http"
+protocol = "openai-compatible-http"
 endpoint = "https://api.openai.example/v1"
 
 [models.qwen]
@@ -142,12 +142,12 @@ default = "openai.gpt"
 
 [providers.runpod_mtp]
 display-name = "RunPod"
-protocol = "provider_d-http"
+protocol = "openai-compatible-http"
 endpoint = "https://runpod.example/v1"
 
 [providers.openai]
 display-name = "OpenAI"
-protocol = "provider_d-http"
+protocol = "openai-compatible-http"
 endpoint = "https://api.openai.example/v1"
 
 [models.qwen]
@@ -409,7 +409,7 @@ default = "ollama_cloud.think"
 
 [providers.ollama_cloud]
 display-name = "Ollama Cloud"
-protocol = "provider_d-http"
+protocol = "openai-compatible-http"
 endpoint = "https://ollama.example/v1"
 
 [models.think]

@@ -302,7 +302,7 @@ default = "sse_storm.smoke"
 
 [providers.sse_storm]
 display-name = "SSE Storm Smoke"
-protocol = "provider_d-http"
+protocol = "openai-compatible-http"
 endpoint = "http://127.0.0.1:9/v1"
 
 [models.smoke]

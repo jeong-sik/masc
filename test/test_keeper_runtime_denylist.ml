@@ -27,7 +27,7 @@ default = "test.local"
 
 [providers.test]
 display-name = "Test"
-protocol = "provider_d-http"
+protocol = "openai-compatible-http"
 endpoint = "http://127.0.0.1:1"
 
 [models.local]

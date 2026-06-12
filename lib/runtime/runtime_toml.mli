@@ -32,7 +32,10 @@ val parse_file : string -> (Runtime_schema.config, parse_error list) result
 (** {1 Internal: protocol resolution} *)
 
 val api_format_of_protocol : string -> (Runtime_schema.api_format, string) result
-(** Map a TOML protocol string to a {!Runtime_schema.api_format} variant. *)
+(** Map a TOML protocol string to a {!Runtime_schema.api_format} variant.
+    Deprecated provider-letter aliases are accepted only for existing live
+    config compatibility; parsed provider records use canonical protocol
+    labels. *)
 
 val transport_of_provider :
   Otoml.t -> string -> (Runtime_schema.transport, string) result

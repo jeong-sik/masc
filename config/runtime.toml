@@ -14,7 +14,7 @@ default = "ollama_cloud.deepseek-v4-flash"
 
 [providers.ollama_cloud]
 display-name = "Ollama Cloud"
-protocol = "provider_d-http"
+protocol = "openai-compatible-http"
 endpoint = "https://ollama.com/v1"
 
 [providers.ollama_cloud.credentials]
@@ -28,7 +28,7 @@ supports-runtime-mcp-http-headers = true
 
 [providers.deepseek]
 display-name = "DeepSeek API"
-protocol = "provider_d-http"
+protocol = "openai-compatible-http"
 endpoint = "https://api.deepseek.com"
 
 [providers.deepseek.credentials]
@@ -42,7 +42,7 @@ supports-runtime-mcp-http-headers = true
 
 [providers.glm-coding]
 display-name = "GLM Coding Plan"
-protocol = "provider_d-http"
+protocol = "openai-compatible-http"
 endpoint = "https://api.z.ai/api/coding/paas/v4"
 
 [providers.glm-coding.credentials]

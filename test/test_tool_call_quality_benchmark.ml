@@ -172,7 +172,7 @@ let test_forbidden_selector_matches_descriptor_evidence () =
       ()
   in
   let run = selector_run [ selector_tool_call ~route_evidence "masc_agent_card" ] in
-  match Tool_call_quality_benchmark_scoring.score_run ~cases:[ case ] run with
+  match Tool_call_quality_benchmark.score_run ~cases:[ case ] run with
   | Some score ->
       check bool "selector degrades pass" false score.passed;
       check (float 0.0001) "tool selection failed" 0.0 score.tool_selection;
@@ -194,7 +194,7 @@ let test_forbidden_selector_matches_eval_tag_evidence () =
       ()
   in
   let run = selector_run [ selector_tool_call ~route_evidence "renamed_agent_card" ] in
-  match Tool_call_quality_benchmark_scoring.score_run ~cases:[ case ] run with
+  match Tool_call_quality_benchmark.score_run ~cases:[ case ] run with
   | Some score ->
       check bool "eval tag degrades pass" false score.passed;
       check (float 0.0001) "tool selection failed" 0.0 score.tool_selection

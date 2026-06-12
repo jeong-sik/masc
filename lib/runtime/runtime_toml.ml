@@ -61,21 +61,36 @@ let partition_results
 
 (* --- Protocol string -> Runtime_schema.api_format --- *)
 
+let canonical_protocol_of_protocol = function
+  | "provider_a-cli" -> Some "messages-cli"
+  | "provider_a-http" -> Some "messages-http"
+  | "provider_d-cli" | "provider_f-cli" | "provider_c-cli" ->
+    Some "openai-compatible-cli"
+  | "provider_d-http" -> Some "openai-compatible-http"
+  | "messages-cli" | "messages-http" | "openai-compatible-cli"
+  | "openai-compatible-http" | "ollama-http" as protocol -> Some protocol
+  | _ -> None
+;;
+
+let unknown_protocol_error s =
+  Printf.sprintf
+    "unknown protocol %S: expected one of messages-cli, messages-http, \
+     openai-compatible-cli, openai-compatible-http, ollama-http"
+    s
+;;
+
 let api_format_of_protocol (s : string)
   : (Runtime_schema.api_format, string) result
   =
   match s with
+  | "messages-cli" | "messages-http" -> Ok Runtime_schema.Messages_api
+  | "openai-compatible-cli" | "openai-compatible-http" ->
+    Ok Runtime_schema.Chat_completions_api
   | "provider_a-cli" | "provider_a-http" -> Ok Runtime_schema.Messages_api
   | "provider_d-cli" | "provider_d-http" | "provider_f-cli" | "provider_c-cli" ->
     Ok Runtime_schema.Chat_completions_api
   | "ollama-http" -> Ok Runtime_schema.Ollama_api
-  | _ ->
-    Error
-      (Printf.sprintf
-         "unknown protocol %S: expected one of provider_a-cli, provider_a-http, \
-          provider_d-cli, provider_d-http, provider_f-cli, provider_c-cli, \
-          ollama-http"
-         s)
+  | _ -> Error (unknown_protocol_error s)
 ;;
 
 (* --- Transport extraction --- *)
@@ -231,7 +246,10 @@ let parse_provider (id : string) (tbl : Otoml.t)
     match Otoml.find_opt tbl Otoml.get_string [ "protocol" ] with
     | Some p ->
       (match api_format_of_protocol p with
-       | Ok fmt -> Ok (p, fmt)
+       | Ok fmt ->
+         (match canonical_protocol_of_protocol p with
+          | Some protocol -> Ok (protocol, fmt)
+          | None -> Error (unknown_protocol_error p))
        | Error e -> Error e)
     | None -> Error "missing required field 'protocol'"
   in

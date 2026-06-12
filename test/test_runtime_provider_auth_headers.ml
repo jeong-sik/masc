@@ -31,7 +31,7 @@ let with_env key value f =
 let runpod_provider =
   { Runtime_schema.id = "runpod_mtp"
   ; display_name = "RunPod"
-  ; protocol = "provider_d-http"
+  ; protocol = "openai-compatible-http"
   ; api_format = Chat_completions_api
   ; transport = Http "https://example-runpod.proxy.runpod.net/v1"
   ; is_non_interactive = true
@@ -72,7 +72,7 @@ default = "runpod_mtp.qwen"
 
 [providers.runpod_mtp]
 display-name = "RunPod"
-protocol = "provider_d-http"
+protocol = "openai-compatible-http"
 endpoint = "https://example-runpod.proxy.runpod.net/v1"
 
 %s
@@ -152,6 +152,45 @@ key = " OLLAMA_CLOUD_API_KEY "
         | None -> fail "expected credential")
      | _ -> fail "expected one provider")
 
+let test_runtime_toml_canonicalizes_legacy_protocol_alias () =
+  let content =
+    {|
+[runtime]
+default = "legacy_openai_compat.test_model"
+
+[providers.legacy_openai_compat]
+display-name = "Legacy OpenAI-Compatible"
+protocol = "provider_d-http"
+endpoint = "https://legacy-openai-compatible.example/v1"
+
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[legacy_openai_compat.test_model]
+max-concurrent = 1
+|}
+  in
+  match Runtime_toml.parse_string content with
+  | Error errors ->
+    fail
+      (errors
+       |> List.map (fun (err : Runtime_toml.parse_error) ->
+         err.path ^ ": " ^ err.message)
+       |> String.concat "; ")
+  | Ok config ->
+    (match config.providers with
+     | [ provider ] ->
+       check string "canonical protocol" "openai-compatible-http"
+         provider.Runtime_schema.protocol;
+       check bool "chat-completions api format" true
+         (match provider.Runtime_schema.api_format with
+          | Chat_completions_api -> true
+          | Messages_api | Ollama_api -> false)
+     | _ -> fail "expected one provider")
+
 let deepseek_runtime_toml =
   {|
 [runtime]
@@ -159,7 +198,7 @@ default = "deepseek.deepseek-v4-pro"
 
 [providers.deepseek]
 display-name = "DeepSeek API"
-protocol = "provider_d-http"
+protocol = "openai-compatible-http"
 endpoint = "https://api.deepseek.com"
 
 [providers.deepseek.credentials]
@@ -218,7 +257,7 @@ default = "glm-coding.glm-4-7-coding"
 
 [providers.glm-coding]
 display-name = "GLM Coding Plan"
-protocol = "provider_d-http"
+protocol = "openai-compatible-http"
 endpoint = "https://api.z.ai/api/coding/paas/v4"
 
 [providers.glm-coding.credentials]
@@ -720,6 +759,10 @@ let () =
             "runtime TOML trims env credential key"
             `Quick
             test_runtime_toml_trims_env_credential_key
+        ; test_case
+            "runtime TOML canonicalizes legacy protocol alias"
+            `Quick
+            test_runtime_toml_canonicalizes_legacy_protocol_alias
         ; test_case
             "runtime TOML accepts DeepSeek reasoning effort"
             `Quick

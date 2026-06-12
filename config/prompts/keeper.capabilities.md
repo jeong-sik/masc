@@ -17,6 +17,8 @@ Call only the exact tool names in your active schema. Prefer public aliases when
 NEVER encode chaining (&&, ||, ;), file redirects (>, >>), command substitution, or background operators in Execute. Use typed `executable`/`argv` or explicit `pipeline: [{ executable, argv }, ...]`.
 NEVER request files without first checking the active schema and choosing a visible read/search tool.
 LLM-native tool names map to keeper capabilities: Execute backs command execution, Read backs single-file reads, and Grep backs scoped ripgrep search. Treat alias results exactly like keeper-native tool results, but do not spell hidden keeper_* backing names in your tool call.
+`keeper_tool_search` discovers available tool schemas only. It does not search repository files, definitions, functions, types, or symbols. For source symbols, use Grep first, then Read the file or run one scoped typed Execute command for an exact line slice.
+`Read` accepts only `file_path`, optional `cwd`, and optional byte `limit`. Do not pass `start_line`, `end_line`, `offset`, or line-count fields; `limit` is bytes, not lines.
 NEVER type MASC tool names as shell commands. `keeper_board_list`, `keeper_task_claim`, and other keeper_* / masc_* names are JSON tools, not programs in Execute.
 After pushing a prepared branch for assigned code work, create or update the remote PR through Execute as an ordinary typed-argv CLI call from scoped repo cwd. PR creation is not a keeper-native tool concept.
 Do NOT use shell status commands whose red/failed state is encoded as a non-zero exit as a success/failure gate inside Execute. Red CI is data; prefer structured status queries when explicitly assigned to inspect a PR.
@@ -59,6 +61,8 @@ Public tool examples:
   GOOD: Grep pattern="add_comment" path=repos/REPO_NAME/.worktrees/TASK_NAME/lib glob="*.ml"
   BAD:  raw shell text: "cat file 2>/dev/null || echo missing"
   GOOD: Read file_path=file                                 (let the tool error explain missing files)
+  BAD:  Read file_path=file start_line=20 end_line=40
+  GOOD: Grep pattern="target_symbol" path=repos/REPO_NAME/.worktrees/TASK_NAME/lib glob="*.ml"
   BAD:  raw shell text: "ls path 2>/dev/null && echo EXISTS || echo NOT_FOUND"
   GOOD: Execute executable="ls" argv=["path"]              (let the tool error explain missing paths)
   BAD:  raw shell text: "python3 -c 'open(path).write(text)'"
@@ -71,8 +75,8 @@ Public tool examples:
 ## What you can do with your tools
 
 File operations:
-- Read a specific file: Read (preferred for single files) when visible.
-- Search file contents: Grep with pattern=regex, path=dir/path (optional: type=ml, glob="*.ts") when visible.
+- Read a specific file: Read (preferred for single files) when visible. `limit` is approximate bytes. No line offsets or line ranges are supported.
+- Search file contents: Grep with pattern=regex, path=dir/path (optional: type=ml, glob="*.ts") when visible. Use this for functions, types, and symbols.
 - Find files by name: prefer Grep for content, or one scoped Execute `find` typed argv call with cwd set to the repo when Execute is visible.
 - List directory contents: one scoped Execute `ls` typed argv call when Execute is visible.
 - Git history: Execute `executable="git" argv=["log","--oneline","-10"]` with cwd inside the target repo.

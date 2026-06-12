@@ -205,6 +205,15 @@ let schema_required_fields schema =
   | other -> Alcotest.failf "input_schema is not an object: %s" (Yojson.Safe.to_string other)
 ;;
 
+let schema_forbids_additional_properties schema =
+  match schema with
+  | `Assoc fields ->
+    (match List.assoc_opt "additionalProperties" fields with
+     | Some (`Bool false) -> true
+     | _ -> false)
+  | other -> Alcotest.failf "input_schema is not an object: %s" (Yojson.Safe.to_string other)
+;;
+
 let required_board_schema name =
   match List.find_opt (fun (s : Masc_domain.tool_schema) -> s.name = name) Board.board_tools with
   | Some schema -> schema
@@ -223,6 +232,86 @@ let required_masc_board_schema name =
 
 let check_contains label ~sub text =
   Alcotest.(check bool) label true (string_contains ~sub text)
+;;
+
+let test_read_public_descriptor_schema_is_closed () =
+  let descriptor = required_public_descriptor "Read" in
+  Alcotest.(check bool)
+    "Read schema forbids additional properties"
+    true
+    (schema_forbids_additional_properties descriptor.input_schema)
+;;
+
+let test_read_public_validation_rejects_line_fields () =
+  let input =
+    `Assoc
+      [ "file_path", `String "lib/keeper/keeper_transition_audit.ml"
+      ; "start_line", `Int 255
+      ; "end_line", `Int 280
+      ]
+  in
+  match Resolution.validate_public_input_for_tool_call ~tool_name:"Read" ~input with
+  | Some (Error validation_result) ->
+    let data = Tool_result.data validation_result |> Yojson.Safe.to_string in
+    check_contains
+      "Read validation reports unsupported start_line"
+      ~sub:"start_line"
+      data;
+    check_contains
+      "Read validation reports unsupported end_line"
+      ~sub:"end_line"
+      data;
+    check_contains
+      "Read validation is policy rejection"
+      ~sub:"policy_rejection"
+      data
+  | Some (Ok _) -> Alcotest.fail "Read public validation unexpectedly accepted line fields"
+  | None -> Alcotest.fail "Read public descriptor did not resolve"
+;;
+
+let test_read_public_validation_translates_supported_fields () =
+  let input =
+    `Assoc
+      [ "file_path", `String "lib/keeper/keeper_transition_audit.ml"
+      ; "cwd", `String "repos/masc"
+      ; "limit", `Int 4096
+      ]
+  in
+  match
+    Resolution.validated_descriptor_and_input_for_tool_call
+      ~tool_name:"Read"
+      ~input
+  with
+  | Some (Ok (descriptor, `Assoc fields)) ->
+    Alcotest.(check string)
+      "Read resolves to tool_read_file"
+      "tool_read_file"
+      descriptor.internal_name;
+    Alcotest.(check (option string))
+      "file_path translates to path"
+      (Some "lib/keeper/keeper_transition_audit.ml")
+      (match List.assoc_opt "path" fields with
+       | Some (`String path) -> Some path
+       | _ -> None);
+    Alcotest.(check (option string))
+      "cwd passes through"
+      (Some "repos/masc")
+      (match List.assoc_opt "cwd" fields with
+       | Some (`String cwd) -> Some cwd
+       | _ -> None);
+    Alcotest.(check (option int))
+      "limit translates to max_bytes"
+      (Some 4096)
+      (match List.assoc_opt "max_bytes" fields with
+       | Some (`Int max_bytes) -> Some max_bytes
+       | _ -> None)
+  | Some (Ok (_, other)) ->
+    Alcotest.failf "Read translated input is not an object: %s" (Yojson.Safe.to_string other)
+  | Some (Error validation_result) ->
+    Alcotest.failf
+      "Read public validation unexpectedly failed: %s"
+      (Tool_result.data validation_result |> Yojson.Safe.to_string)
+  | None -> Alcotest.fail "Read public descriptor did not resolve"
 ;;
 
 let test_read_descriptor_spells_out_path_basis () =
@@ -747,6 +836,18 @@ let () =
         ] )
     ; ( "agent-contract"
       , [ test_case
+            "Read public descriptor schema is closed"
+            `Quick
+            test_read_public_descriptor_schema_is_closed
+        ; test_case
+            "Read rejects unsupported line fields before translation"
+            `Quick
+            test_read_public_validation_rejects_line_fields
+        ; test_case
+            "Read validates then translates supported public fields"
+            `Quick
+            test_read_public_validation_translates_supported_fields
+        ; test_case
             "Read path basis is explicit"
             `Quick
             test_read_descriptor_spells_out_path_basis

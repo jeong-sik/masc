@@ -41,6 +41,129 @@ let append_assoc_fields fields additions =
     fields
     additions
 
+let assoc_field_string key fields =
+  match List.assoc_opt key fields with
+  | Some (`String value) ->
+      let value = String.trim value in
+      if String.equal value "" then None else Some value
+  | _ -> None
+
+let assoc_field_int key fields =
+  match List.assoc_opt key fields with
+  | Some (`Int value) -> Some value
+  | _ -> None
+
+let assoc_field_bool key fields =
+  match List.assoc_opt key fields with
+  | Some (`Bool value) -> Some value
+  | _ -> None
+
+let add_optional_line label value acc =
+  match value with
+  | Some value -> Printf.sprintf "%s: %s" label value :: acc
+  | None -> acc
+
+let add_optional_int_line label value acc =
+  match value with
+  | Some value -> Printf.sprintf "%s: %d" label value :: acc
+  | None -> acc
+
+let string_of_bool value = if value then "true" else "false"
+
+let render_content_status fields =
+  let status =
+    match assoc_field_string "page_content_status" fields with
+    | Some value -> value
+    | None -> "unknown"
+  in
+  let details =
+    []
+    |> (fun acc ->
+      match assoc_field_int "page_content_http_status" fields with
+      | Some value -> Printf.sprintf "http=%d" value :: acc
+      | None -> acc)
+    |> (fun acc ->
+      match assoc_field_int "page_content_chars" fields with
+      | Some value -> Printf.sprintf "chars=%d" value :: acc
+      | None -> acc)
+    |> (fun acc ->
+      match assoc_field_bool "page_content_truncated" fields with
+      | Some value -> Printf.sprintf "truncated=%s" (string_of_bool value) :: acc
+      | None -> acc)
+    |> List.rev
+  in
+  let detail_text =
+    match details with
+    | [] -> ""
+    | _ -> " (" ^ String.concat ", " details ^ ")"
+  in
+  let error_text =
+    match assoc_field_string "page_content_error" fields with
+    | Some value -> " - " ^ value
+    | None -> ""
+  in
+  Printf.sprintf "Content status: %s%s%s" status detail_text error_text
+
+let render_hit_content_text hit =
+  match hit with
+  | `Assoc fields ->
+      let title =
+        match assoc_field_string "title" fields with
+        | Some value -> value
+        | None -> "Untitled result"
+      in
+      let heading =
+        match assoc_field_int "rank" fields with
+        | Some rank -> Printf.sprintf "%d. %s" rank title
+        | None -> title
+      in
+      let content =
+        match assoc_field_string "page_content" fields with
+        | Some value -> value
+        | None -> "(no page content available)"
+      in
+      let metadata =
+        []
+        |> add_optional_line "URL" (assoc_field_string "url" fields)
+        |> add_optional_line "Snippet" (assoc_field_string "snippet" fields)
+        |> add_optional_line "Provider" (assoc_field_string "source" fields)
+        |> add_optional_line "Fetched URL" (assoc_field_string "page_content_final_url" fields)
+        |> add_optional_line "Fetched title" (assoc_field_string "page_content_title" fields)
+        |> List.rev
+      in
+      let lines =
+        heading :: (metadata @ [ render_content_status fields; "Content:"; content ])
+      in
+      String.concat "\n" lines
+  | _ -> "Unreadable search result payload."
+
+let render_content_text ~content_max_chars ~content_timeout ~content_ok_count
+  ~content_error_count result_fields hits =
+  let metadata =
+    []
+    |> add_optional_line "Query" (assoc_field_string "query" result_fields)
+    |> add_optional_line "Engine" (assoc_field_string "engine" result_fields)
+    |> add_optional_line "Search URL" (assoc_field_string "search_url" result_fields)
+    |> add_optional_int_line "Results" (assoc_field_int "result_count" result_fields)
+    |> List.rev
+  in
+  let header =
+    ("WebSearch readable results" :: metadata)
+    @ [ Printf.sprintf
+          "Content fetch: best_effort, ok=%d, unavailable=%d, max_chars=%d, timeout=%ds"
+          content_ok_count
+          content_error_count
+          content_max_chars
+          content_timeout
+      ]
+  in
+  let body =
+    match hits with
+    | [] -> "No results."
+    | _ -> hits |> List.map render_hit_content_text |> String.concat "\n\n---\n\n"
+  in
+  String.concat "\n" header ^ "\n\n" ^ body
+
 let failed_page_content_note ~url message =
   let message = String.trim message in
   let message = if String.equal message "" then "unknown error" else message in
@@ -171,6 +294,15 @@ let enrich_web_search_payload ~tool_name ~start_time ~content_max_chars
                     ; "content_timeout", `Int content_timeout
                     ; "content_result_count", `Int content_ok_count
                     ; "content_error_count", `Int content_error_count
+                    ; ( "content_text",
+                        `String
+                          (render_content_text
+                             ~content_max_chars
+                             ~content_timeout
+                             ~content_ok_count
+                             ~content_error_count
+                             result_fields
+                             enriched_hits) )
                     ]
                 in
                 Tool_result.make_ok

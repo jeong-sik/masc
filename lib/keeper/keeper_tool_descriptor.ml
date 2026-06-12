@@ -267,12 +267,12 @@ let search_web_schema =
     ; property
         "includeContent"
         "boolean"
-        "When true, best-effort fetch readable page_content for each returned result."
+        "When true, best-effort fetch raw page_content for each result and add a keeper-readable content_text summary."
     ; ( "contentMaxChars",
         `Assoc
           [ "type", `String "integer"
           ; "description",
-            `String "Maximum readable page_content characters per result."
+            `String "Maximum raw page_content characters per result."
           ; "minimum", `Int 100
           ; "maximum", `Int 20000
           ; "default", `Int 4000

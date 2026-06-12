@@ -139,6 +139,11 @@ module Keeper_id = struct
         | Some c -> Some c
         | None -> canonical_keeper_name folded
       in
+      (* DET-OK: the raw fallback is the contract, not a permissive
+         default — authors that are not keepers (humans, external bots)
+         must still mint a comparable id, and their canonical form IS
+         the case-folded raw string.  Keeper-shaped inputs never reach
+         the fallback. *)
       match String.trim (Option.value canonical ~default:folded) with
       | "" -> None
       | id -> Some (String.lowercase_ascii id))

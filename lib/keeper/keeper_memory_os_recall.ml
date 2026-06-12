@@ -188,3 +188,18 @@ let render_context
       (Printexc.to_string exn);
     ""
 ;;
+
+let enabled () =
+  Keeper_memory_bank_env.memory_env_bool_logged
+    "MASC_KEEPER_MEMORY_OS_RECALL"
+    ~default:false
+;;
+
+let render_if_enabled ~keeper_id ~now () =
+  if not (enabled ())
+  then None
+  else (
+    match String.trim (render_context ~keeper_id ~now ()) with
+    | "" -> None
+    | block -> Some block)
+;;

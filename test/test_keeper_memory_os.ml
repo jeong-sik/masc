@@ -665,6 +665,69 @@ let test_recall_context_empty_without_memory () =
     Alcotest.(check string) "empty recall context" "" ctx)
 ;;
 
+(* render_if_enabled — the extra_system_context gate wired into
+   keeper_run_tools_hooks. Env reads are live (Env_config_core uses
+   Unix.getenv), so putenv steers the flag per test. *)
+let with_recall_env value f =
+  let var = "MASC_KEEPER_MEMORY_OS_RECALL" in
+  Unix.putenv var value;
+  Fun.protect ~finally:(fun () -> Unix.putenv var "") f
+;;
+
+let test_render_if_enabled_off_by_default () =
+  with_recall_env "" (fun () ->
+    with_temp_keepers_dir (fun _keepers_dir ->
+      match
+        Recall.render_if_enabled ~keeper_id:"virtual-memory-keeper" ~now:1_000_000.0 ()
+      with
+      | None -> ()
+      | Some block -> Alcotest.failf "expected None with flag unset, got %S" block))
+;;
+
+let test_render_if_enabled_empty_store_yields_none () =
+  with_recall_env "true" (fun () ->
+    with_temp_keepers_dir (fun _keepers_dir ->
+      match
+        Recall.render_if_enabled ~keeper_id:"virtual-memory-keeper" ~now:1_000_000.0 ()
+      with
+      | None -> ()
+      | Some block -> Alcotest.failf "expected None for empty store, got %S" block))
+;;
+
+let test_render_if_enabled_renders_persisted_memory () =
+  with_recall_env "true" (fun () ->
+    with_prompt_registry (fun () ->
+      with_temp_keepers_dir (fun _keepers_dir ->
+        let keeper_id = "virtual-memory-keeper" in
+        let now = 1_000_000.0 in
+        let fact =
+          { (fact_fixture ~now ()) with
+            Types.claim = "Gated recall should surface saved facts"
+          }
+        in
+        let episode =
+          { Types.trace_id = "trace-recall-gate"
+          ; Types.generation = 1
+          ; Types.episode_summary = "gated recall episode"
+          ; Types.claims = [ fact ]
+          ; Types.open_items = []
+          ; Types.constraints = []
+          ; Types.preserved_tool_refs = []
+          ; Types.source_turn_range = Some (1, 2)
+          ; Types.created_at = now
+          ; Types.schema_version = Types.schema_version
+          }
+        in
+        Memory_io.append_episode_bundle ~keeper_id episode;
+        match Recall.render_if_enabled ~keeper_id ~now () with
+        | None -> Alcotest.fail "expected Some block with flag set and seeded store"
+        | Some block ->
+          Alcotest.(check bool)
+            "block carries the persisted claim"
+            true
+            (contains "Gated recall should surface saved facts" block))))
+;;
+
 let test_recall_context_renders_sanitized_memory () =
   with_prompt_registry (fun () ->
     with_temp_keepers_dir (fun _keepers_dir ->
@@ -778,6 +841,18 @@ let () =
             "renders sanitized memory"
             `Quick
             test_recall_context_renders_sanitized_memory
+        ; Alcotest.test_case
+            "render_if_enabled off by default"
+            `Quick
+            test_render_if_enabled_off_by_default
+        ; Alcotest.test_case
+            "render_if_enabled empty store yields none"
+            `Quick
+            test_render_if_enabled_empty_store_yields_none
+        ; Alcotest.test_case
+            "render_if_enabled renders persisted memory"
+            `Quick
+            test_render_if_enabled_renders_persisted_memory
         ] )
     ]
 ;;

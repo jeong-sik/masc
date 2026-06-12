@@ -17,6 +17,8 @@ implementation_prs: [15924]
 
 `lib/keeper/keeper_context_core.ml` 의 `repair_dangling_tool_use_messages_with_stats` 와 `repair_orphan_tool_result_messages_with_stats` 는 메시지 히스토리에서 짝-잃은 `ToolUse` 와 `ToolResult` block 을 처리한다. 과거 구현은 이 block 을 provider/dashboard-visible transcript 에 남겼고, 그 결과물에 repair 메타데이터를 붙였다. 2026-06-12 이후 구현은 깨진 structural block 을 visible content 에서 drop 하고, bounded id/name sample 을 `masc.tool_pair_repair` metadata 및 telemetry stats 로 남긴다.
 
+Legacy adapter 는 provider/model 명으로 분기하지 않는다. 구조적으로 같은 message 안의 `ToolUse`/`ToolResult` pair 와, assistant `ToolUse` 뒤에 연속으로 붙는 `ToolResult` span 을 하나의 group 으로 취급한다. 따라서 "immediately previous/next message" 만 보는 수리는 유효한 OpenAI-compatible multi-result span 과 Gemma-style same-message pair 를 깨뜨리는 경계 위반이다.
+
 호출 사이트 4개 (`keeper_post_turn.ml:576,919` + `keeper_rollover.ml:266` + 명시적 opt-out `:783,838,867,196`):
 
 ```

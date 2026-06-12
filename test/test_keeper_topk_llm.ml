@@ -57,6 +57,8 @@ let test_tools = [
   make_tool "tool_search_files" "List functions and classes from a source file";
   make_tool "tool_edit_file" "Edit code files";
   make_tool "tool_execute" "Create a git worktree";
+  make_tool "keeper_surface_post" "Post a message to a Discord/MCP surface channel";
+  make_tool "keeper_surface_read" "Read messages or list channels from a Discord/MCP surface";
 ]
 
 let test_search_index () =
@@ -375,6 +377,17 @@ let test_deterministic_prefilter_surfaces_execute_for_explicit_shell_request () 
   Alcotest.(check bool) "Execute appears in final visible surface"
     true (List.mem "Execute" visible)
 
+let test_deterministic_prefilter_ranks_surface_tools_for_discord_channel_intent () =
+  let selected =
+    deterministic_prefilter_for_tools
+      ~tools:test_tools
+      ~query_text:"list my discord channels"
+      ~selection_limit:10
+  in
+  Alcotest.(check bool)
+    "keeper_surface_read appears for discord channel-list intent"
+    true (List.mem "keeper_surface_read" selected)
+
 let test_execute_aliases_exclude_repo_pr_workflow () =
   let aliases =
     Keeper_agent_tool_surface.tool_search_aliases "Execute"
@@ -566,6 +579,8 @@ let () =
         test_tool_search_partition_filters_policy_denied_core_hits;
       Alcotest.test_case "tool surface selection preserves order" `Quick
         test_tool_surface_selection_preserves_order;
+      Alcotest.test_case "surface tools rank for discord channel-list intent" `Quick
+        test_deterministic_prefilter_ranks_surface_tools_for_discord_channel_intent;
     ];
     "keeper_config", [
       Alcotest.test_case "config defaults" `Quick

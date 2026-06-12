@@ -33,6 +33,12 @@ type schedule_source =
   | Automated_request
   | System_request
 
+type payload =
+  { kind : string
+  ; schema_version : int
+  ; body : Yojson.Safe.t
+  }
+
 type schedule_request =
   { schedule_id : string
   ; requested_by : actor
@@ -40,7 +46,7 @@ type schedule_request =
   ; requested_at : float
   ; due_at : float
   ; expires_at : float option
-  ; payload : Yojson.Safe.t
+  ; payload : payload
   ; risk_class : risk_class
   ; approval_required : bool
   ; status : schedule_status
@@ -216,6 +222,11 @@ let float_of_yojson = function
   | _ -> Error "expected float"
 ;;
 
+let int_of_yojson = function
+  | `Int value -> Ok value
+  | _ -> Error "expected int"
+;;
+
 let bool_of_yojson = function
   | `Bool value -> Ok value
   | _ -> Error "expected bool"
@@ -237,6 +248,13 @@ let string_field name fields =
 let float_field name fields =
   let* value = assoc_field name fields in
   match float_of_yojson value with
+  | Ok value -> Ok value
+  | Error err -> Error (name ^ ": " ^ err)
+;;
+
+let int_field name fields =
+  let* value = assoc_field name fields in
+  match int_of_yojson value with
   | Ok value -> Ok value
   | Error err -> Error (name ^ ": " ^ err)
 ;;
@@ -270,7 +288,29 @@ let actor_of_yojson = function
   | _ -> Error "expected actor object"
 ;;
 
-let payload_digest payload = sha256_json payload
+let payload_to_yojson payload =
+  `Assoc
+    [ "kind", `String payload.kind
+    ; "schema_version", `Int payload.schema_version
+    ; "body", payload.body
+    ]
+;;
+
+let payload_of_yojson = function
+  | `Assoc fields ->
+    let* kind = string_field "kind" fields in
+    let* kind = nonempty "payload.kind" kind in
+    let* schema_version = int_field "schema_version" fields in
+    if schema_version <= 0 then Error "payload.schema_version must be positive"
+    else (
+      let* body = assoc_field "body" fields in
+      match body with
+      | `Assoc _ -> Ok { kind; schema_version; body }
+      | _ -> Error "payload.body must be a JSON object")
+  | _ -> Error "payload must be a JSON object"
+;;
+
+let payload_digest payload = payload |> payload_to_yojson |> sha256_json
 
 let evidence_of_request (request : schedule_request) =
   { schedule_id = request.schedule_id
@@ -351,7 +391,7 @@ let schedule_request_to_yojson (request : schedule_request) =
     ; "requested_at", float_to_yojson request.requested_at
     ; "due_at", float_to_yojson request.due_at
     ; "expires_at", option_to_yojson float_to_yojson request.expires_at
-    ; "payload", request.payload
+    ; "payload", payload_to_yojson request.payload
     ; "risk_class", `String (risk_class_to_string request.risk_class)
     ; "approval_required", `Bool request.approval_required
     ; "status", `String (schedule_status_to_string request.status)
@@ -375,7 +415,8 @@ let schedule_request_of_yojson = function
         let* value = float_of_yojson value in
         Ok (Some value)
     in
-    let* payload = assoc_field "payload" fields in
+    let* payload_json = assoc_field "payload" fields in
+    let* payload = payload_of_yojson payload_json in
     let* risk_name = string_field "risk_class" fields in
     let* risk_class = risk_class_of_string risk_name in
     let* approval_required = bool_field "approval_required" fields in
@@ -415,6 +456,7 @@ let create_request
   let* schedule_id = nonempty "schedule_id" schedule_id in
   let* _ = nonempty "requested_by.id" requested_by.id in
   let* _ = nonempty "scheduled_by.id" scheduled_by.id in
+  let* payload = payload_of_yojson payload in
   let approval_required = approval_required || is_side_effecting risk_class in
   let status = if approval_required then Pending_approval else Scheduled in
   Ok

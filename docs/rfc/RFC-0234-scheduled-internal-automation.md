@@ -76,9 +76,14 @@ boundary, "schedule something now" becomes a delayed self-approved action.
 5. Scheduled execution reuses the existing descriptor, policy, sandbox, and
    approval surfaces. It does not create a bypass.
 6. Every state change is append-only and replayable; projections are derived.
-7. The schedule core stores opaque payloads only. It has no constructors or
-   dependencies for keepers, tasks, boards, goals, tools, or any other consumer
-   domain. Consumers observe due rows and decide what, if anything, to do.
+7. The schedule core stores opaque payload envelopes only. It has no
+   constructors or dependencies for keepers, tasks, boards, goals, tools, or
+   any other consumer domain. Consumers observe due rows and decide what, if
+   anything, to do.
+8. A schedule entry must not guess missing intent. If the producer cannot
+   produce a valid payload envelope, it asks the operator for clarification or
+   records a consumer-owned clarification payload; the schedule core does not
+   infer domain fields.
 
 ## §3 Scope
 
@@ -136,6 +141,12 @@ type schedule_status =
   | Cancelled
   | Expired
 
+type payload =
+  { kind : string
+  ; schema_version : int
+  ; body : Yojson.Safe.t
+  }
+
 type schedule_request =
   { schedule_id : string
   ; requested_by : actor
@@ -143,7 +154,7 @@ type schedule_request =
   ; requested_at : float
   ; due_at : float
   ; expires_at : float option
-  ; payload : Yojson.Safe.t
+  ; payload : payload
   ; risk_class : risk_class
   ; approval_required : bool
   ; status : schedule_status
@@ -160,12 +171,31 @@ type execution_grant =
 }
 ```
 
-`payload` is intentionally opaque to the schedule core. It may be a text note,
-a JSON envelope, or a consumer-defined command description, but this RFC does
-not define a route enum. Keepers, tasks, boards, goals, tool names, and future
-execution adapters belong outside the schedule domain. A consumer may observe a
-due row and translate the payload later; the schedule ledger only preserves
-time, approval, risk, and audit evidence.
+`payload` is intentionally opaque to the schedule core, but not unstructured.
+The persisted shape is a JSON object envelope:
+
+```json
+{
+  "kind": "consumer.contract.name",
+  "schema_version": 1,
+  "body": {}
+}
+```
+
+The schedule domain validates only the envelope: `kind` must be a non-empty
+string, `schema_version` must be positive, and `body` must be an object. It
+does not define a route enum and does not interpret body fields. Keepers, tasks,
+boards, goals, tool names, and future execution adapters belong outside the
+schedule domain. A consumer may observe a due row and translate the payload
+later; the schedule ledger only preserves time, approval, risk, and audit
+evidence.
+
+If a producer cannot fill the consumer-owned `body` confidently, it must not
+create an executable schedule by guessing. It should either ask the operator a
+clarifying question before schedule creation or create a consumer-owned
+clarification payload such as `kind = "operator.clarification_request"`. The
+schedule core treats that as opaque data too; the consumer decides how to ask
+and what later schedule, if any, to create from the answer.
 
 ## §5 Separation-of-duties invariant
 

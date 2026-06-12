@@ -38,6 +38,14 @@ type schedule_source =
   | Automated_request
   | System_request
 
+(** Opaque consumer payload.
+
+    The schedule domain does not interpret payload kind or body fields, but it
+    does require a typed envelope so producers cannot persist an ambiguous raw
+    string/null/list as future intent. Serialized shape:
+    [{ kind: string; schema_version: int; body: object }]. *)
+type payload
+
 type schedule_request =
   { schedule_id : string
   ; requested_by : actor
@@ -45,7 +53,7 @@ type schedule_request =
   ; requested_at : float
   ; due_at : float
   ; expires_at : float option
-  ; payload : Yojson.Safe.t
+  ; payload : payload
   ; risk_class : risk_class
   ; approval_required : bool
   ; status : schedule_status
@@ -102,7 +110,9 @@ val is_terminal : schedule_status -> bool
 val is_side_effecting : risk_class -> bool
 val requires_separate_human_grant : schedule_request -> bool
 
-val payload_digest : Yojson.Safe.t -> string
+val payload_of_yojson : Yojson.Safe.t -> (payload, string) result
+val payload_to_yojson : payload -> Yojson.Safe.t
+val payload_digest : payload -> string
 val evidence_of_request : schedule_request -> execution_evidence
 
 val create_execution_grant :

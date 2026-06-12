@@ -93,6 +93,11 @@ let execute_with_observers
       ~(exec_cache : Masc_exec.Exec_cache.t option)
       ?search_fn
       ?on_tool_called
+      ?sw
+      ?clock
+      ?proc_mgr
+      ?net
+      ?mcp_session_id
       ~(failure_counts : failure_counts)
       ~(key : string)
       ~(input : Yojson.Safe.t)
@@ -110,6 +115,11 @@ let execute_with_observers
             ?turn_sandbox_factory
             ~exec_cache
           ?search_fn
+          ?sw
+          ?clock
+          ?proc_mgr
+          ?net
+          ?mcp_session_id
           ~name
           ~input
           ())

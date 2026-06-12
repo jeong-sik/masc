@@ -131,21 +131,34 @@ let make_keeper_tool_handler
             | Some clock -> Some clock
             | None -> Eio_context.get_clock_opt ()
           in
-          match gate_clock with
-          | None ->
+          let run_with_current_eio_context ?clock () =
+            let sw = Eio_context.get_switch_opt () in
+            let net = Eio_context.get_net_opt () in
+            let proc_mgr =
+              match Process_eio.get_proc_mgr () with
+              | Ok proc_mgr -> Some proc_mgr
+              | Error _ -> None
+            in
             Keeper_tools_oas_handler_exec.execute_with_observers
               ~name
               ~config
-                ~meta
-                ~ctx_snapshot
-                ?turn_sandbox_factory
-                ~exec_cache
+              ~meta
+              ~ctx_snapshot
+              ?turn_sandbox_factory
+              ~exec_cache
               ?search_fn
               ?on_tool_called
+              ?sw
+              ?clock
+              ?proc_mgr
+              ?net
               ~failure_counts
               ~key
               ~input
               ()
+          in
+          match gate_clock with
+          | None -> run_with_current_eio_context ()
           | Some clock ->
             let start_time = Time_compat.now () in
             let is_read_only =
@@ -176,18 +189,5 @@ let make_keeper_tool_handler
                   ~tool_name:name
                   ~start_time
                   payload)
-              (fun () ->
-                Keeper_tools_oas_handler_exec.execute_with_observers
-                  ~name
-                  ~config
-                    ~meta
-                    ~ctx_snapshot
-                    ?turn_sandbox_factory
-                    ~exec_cache
-                  ?search_fn
-                  ?on_tool_called
-                  ~failure_counts
-                  ~key
-                  ~input
-                  ())))
+              (fun () -> run_with_current_eio_context ~clock ())))
 ;;

@@ -84,6 +84,18 @@ let status_cache_key ~base_path ~name = base_path ^ ":" ^ name
 
 let normalize_status_name = String.trim
 
+let status_name_lookup_candidates raw_name =
+  let trimmed = normalize_status_name raw_name in
+  if String.equal trimmed "" then
+    []
+  else
+    let aliases =
+      match Keeper_identity.canonical_keeper_name trimmed with
+      | Some candidate when not (String.equal candidate trimmed) -> [ candidate ]
+      | Some _ | None -> []
+    in
+    trimmed :: aliases
+
 let docker_preflight_status_cache_key ~timeout_sec =
   String.concat "|"
     [
@@ -155,18 +167,26 @@ let apply_tail_order order items =
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
 let resolve_status_target_config ~(config : Workspace.config) ~(agent_name : string) args =
   let requested_name = effective_status_name_config ~agent_name args in
-  if not (validate_name requested_name) then
+  let candidates =
+    status_name_lookup_candidates requested_name
+    |> List.filter validate_name
+  in
+  if candidates = [] then
     Error
       (Printf.sprintf
          "invalid keeper name %S (must be non-empty and match \
           [A-Za-z0-9._-]+; see Keeper_config.validate_name)"
          requested_name)
   else
-    match read_effective_meta_resolved config requested_name with
-    | Error e -> Error e
-    | Ok (Some (resolved_name, meta)) -> Ok (resolved_name, meta)
-    | Ok None ->
-        Error (Printf.sprintf "keeper not found: %s" requested_name)
+    let rec loop = function
+      | [] -> Error (Printf.sprintf "keeper not found: %s" requested_name)
+      | candidate :: rest -> (
+          match read_effective_meta_resolved config candidate with
+          | Error e -> Error e
+          | Ok (Some (resolved_name, meta)) -> Ok (resolved_name, meta)
+          | Ok None -> loop rest)
+    in
+    loop candidates
 
 let resolve_status_target (ctx : _ context) args =
   resolve_status_target_config ~config:ctx.config ~agent_name:ctx.agent_name args

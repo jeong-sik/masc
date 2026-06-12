@@ -106,6 +106,13 @@ type dispatched_event =
       ; user_id : string
       ; emoji : string
       }
+  | Thread_tracked of
+      { thread_id : string
+      ; parent_channel_id : string
+      }
+  | Threads_bulk_tracked of
+      { threads : (string * string) list
+      }
   | Ignored of string  (** Known dispatch type we deliberately don't surface. *)
 
 (** {1 Inbound frame — what comes off the wire} *)
@@ -187,6 +194,8 @@ type config =
 
 and trigger_policy =
   | Mention_only
+  | Mention_or_thread
+      (** Mention in regular channels, auto-respond in Discord threads. *)
   | User_only of string  (** Discord user snowflake. *)
   | All
 

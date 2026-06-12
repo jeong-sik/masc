@@ -102,6 +102,26 @@ val record_ready : bot_user_id:string -> unit
     [bot_user_id] / [last_ready_at]. Atomic write — safe to call from
     the gateway fiber while HTTP handlers read. *)
 
+(** {2 Thread registry}
+
+    Thread→parent channel mapping populated from THREAD_CREATE gateway
+    events. Used by {!resolve_keeper_for_channel} to resolve bindings
+    for messages in Discord threads (whose [channel_id] is the thread's
+    snowflake, distinct from the parent channel). *)
+
+val register_thread : thread_id:string -> parent_channel_id:string -> unit
+(** Register a Discord thread's parent channel. Called from the gateway's
+    [Thread_tracked] event handler. Overwrites on duplicate. *)
+
+val parent_channel_of_thread : channel_id:string -> string option
+(** If [channel_id] is a known thread, return its parent channel ID. *)
+
+val is_known_thread : channel_id:string -> bool
+(** [true] when [channel_id] has been registered as a Discord thread. *)
+
+val registered_thread_count : unit -> int
+(** Number of threads currently in the registry. For diagnostics. *)
+
 (** Typed failure modes for Discord REST actions. Closed sum — adding
     a new variant forces every consumer to handle it. *)
 type send_error =

@@ -38,10 +38,18 @@ type gateway_event = Discord_gateway_state.dispatched_event =
       ; user_id : string
       ; emoji : string
       }
+  | Thread_tracked of
+      { thread_id : string
+      ; parent_channel_id : string
+      }
+  | Threads_bulk_tracked of
+      { threads : (string * string) list
+      }
   | Ignored of string
 
 type trigger_policy = Discord_gateway_state.trigger_policy =
   | Mention_only
+  | Mention_or_thread
   | User_only of string
   | All
 
@@ -238,6 +246,8 @@ let run ~sw ~env ~token ~intents ~trigger_policy ~on_event ~on_ambient () =
           Discord_observability.Message_create, Discord_observability.Triggered
         | Reaction_add _ ->
           Discord_observability.Reaction_add, Discord_observability.Triggered
+        | Thread_tracked _ | Threads_bulk_tracked _ ->
+          Discord_observability.Ignored, Discord_observability.Control
         | Ignored _ -> Discord_observability.Ignored, Discord_observability.Control
       in
       Discord_observability.record_gateway_event ~route event;
@@ -248,6 +258,7 @@ let run ~sw ~env ~token ~intents ~trigger_policy ~on_event ~on_ambient () =
         | Ready _ -> Discord_observability.Ready
         | Message_create _ -> Discord_observability.Message_create
         | Reaction_add _ -> Discord_observability.Reaction_add
+        | Thread_tracked _ | Threads_bulk_tracked _ -> Discord_observability.Ignored
         | Ignored _ -> Discord_observability.Ignored
       in
       Discord_observability.record_gateway_event

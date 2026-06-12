@@ -59,6 +59,7 @@ let test_intents_bitmask () =
 let policy_equal a b =
   match a, b with
   | S.Mention_only, S.Mention_only -> true
+  | S.Mention_or_thread, S.Mention_or_thread -> true
   | S.All, S.All -> true
   | S.User_only x, S.User_only y -> String.equal x y
   | _ -> false
@@ -66,6 +67,7 @@ let policy_equal a b =
 let test_parse_trigger_policy_accepts () =
   let cases =
     [ "mention_only", S.Mention_only
+    ; "mention_or_thread", S.Mention_or_thread
     ; "all", S.All
     ; "user_only:1234567890", S.User_only "1234567890"
     ]
@@ -1124,6 +1126,285 @@ let test_resume_round_trip_to_connected () =
   | _ -> fail "expected Connected sess-1 last_seq=99 after RESUMED"
 
 (* ---------------------------------------------------------------- *)
+(* Thread tracking + Mention_or_thread policy                      *)
+(* ---------------------------------------------------------------- *)
+
+let thread_create_frame ~thread_id ~parent_id ~seq : S.frame =
+  { op = S.Op_dispatch
+  ; s = Some seq
+  ; t = Some "THREAD_CREATE"
+  ; d =
+      `Assoc
+        [ ("id", `String thread_id)
+        ; ("parent_id", `String parent_id)
+        ; ("type", `Int 11)
+        ]
+  }
+
+let guild_create_frame_with_threads ~threads ~seq : S.frame =
+  let thread_items =
+    List.map
+      (fun (tid, pid) ->
+         `Assoc [ ("id", `String tid); ("parent_id", `String pid); ("type", `Int 11) ])
+      threads
+  in
+  { op = S.Op_dispatch
+  ; s = Some seq
+  ; t = Some "GUILD_CREATE"
+  ; d =
+      `Assoc
+        [ ("id", `String "G1")
+        ; ("name", `String "Test Guild")
+        ; ("threads", `List thread_items)
+        ]
+  }
+
+let has_emit_thread_tracked ~thread_id ~parent_channel_id effects =
+  List.exists
+    (function
+      | S.Emit_event
+          (S.Thread_tracked
+            { thread_id = tid; parent_channel_id = pid }) ->
+        String.equal tid thread_id && String.equal pid parent_channel_id
+      | _ -> false)
+    effects
+
+let has_emit_threads_bulk_tracked effects =
+  List.exists
+    (function S.Emit_event (S.Threads_bulk_tracked _) -> true | _ -> false)
+    effects
+
+let test_decode_thread_create () =
+  let payload =
+    `Assoc [ ("id", `String "THR1"); ("parent_id", `String "PARENT1"); ("type", `Int 11) ]
+  in
+  match S.decode_dispatch ~bot_user_id:None ~event_name:"THREAD_CREATE" ~payload with
+  | Ok (S.Thread_tracked { thread_id = "THR1"; parent_channel_id = "PARENT1" }) ->
+      ()
+  | Ok _ -> fail "decoded wrong THREAD_CREATE fields"
+  | Error msg -> fail msg
+
+let test_decode_thread_create_missing_fields () =
+  let payload = `Assoc [ ("id", `String "THR1") ] in
+  match S.decode_dispatch ~bot_user_id:None ~event_name:"THREAD_CREATE" ~payload with
+  | Ok (S.Ignored _) -> ()
+  | Ok _ -> fail "expected Ignored for THREAD_CREATE without parent_id"
+  | Error msg -> fail msg
+
+let test_decode_guild_create_with_threads () =
+  let payload =
+    `Assoc
+      [ ("id", `String "G1")
+      ; ("name", `String "Guild")
+      ; ( "threads",
+          `List
+            [ `Assoc [ ("id", `String "T1"); ("parent_id", `String "C1"); ("type", `Int 11) ]
+            ; `Assoc [ ("id", `String "T2"); ("parent_id", `String "C2"); ("type", `Int 12) ]
+            ] )
+      ]
+  in
+  match S.decode_dispatch ~bot_user_id:None ~event_name:"GUILD_CREATE" ~payload with
+  | Ok (S.Threads_bulk_tracked { threads }) ->
+      check int "2 threads parsed" 2 (List.length threads);
+      let has tid pid = List.exists (fun (t, p) -> t = tid && p = pid) threads in
+      check bool "T1 -> C1 present" true (has "T1" "C1");
+      check bool "T2 -> C2 present" true (has "T2" "C2")
+  | Ok _ -> fail "expected Threads_bulk_tracked"
+  | Error msg -> fail msg
+
+let test_decode_guild_create_without_threads () =
+  let payload =
+    `Assoc [ ("id", `String "G1"); ("name", `String "Guild") ]
+  in
+  match S.decode_dispatch ~bot_user_id:None ~event_name:"GUILD_CREATE" ~payload with
+  | Ok (S.Ignored _) -> ()
+  | Ok _ -> fail "expected Ignored for GUILD_CREATE without threads"
+  | Error msg -> fail msg
+
+let test_decode_thread_update_same_as_create () =
+  let payload =
+    `Assoc [ ("id", `String "THR1"); ("parent_id", `String "P1"); ("type", `Int 11) ]
+  in
+  match S.decode_dispatch ~bot_user_id:None ~event_name:"THREAD_UPDATE" ~payload with
+  | Ok (S.Thread_tracked { thread_id = "THR1"; parent_channel_id = "P1" }) -> ()
+  | Ok _ -> fail "THREAD_UPDATE should decode same as THREAD_CREATE"
+  | Error msg -> fail msg
+
+(* Step-level: THREAD_CREATE populates thread_parents and emits event *)
+let test_step_thread_create_updates_registry () =
+  let m = connected_with_policy ~policy:S.Mention_or_thread ~bot_user_id:"BOT" in
+  let m', effects =
+    S.step m ~now_mono:5.0
+      (S.Frame_received (thread_create_frame ~thread_id:"THR1" ~parent_id:"CH1" ~seq:10))
+  in
+  check bool "Emit_event Thread_tracked emitted" true
+    (has_emit_thread_tracked ~thread_id:"THR1" ~parent_channel_id:"CH1" effects);
+  (* Verify thread_parents was updated: a message in THR1 should now
+     pass Mention_or_thread policy without mention. *)
+  let payload =
+    message_create_payload
+      ~id:"M_T1" ~channel_id:"THR1" ~author_id:"U1" ~content:"thread msg"
+      ~mention_ids:[] ()
+  in
+  let _, effects2 =
+    S.step m' ~now_mono:6.0
+      (S.Frame_received
+         (dispatch_frame ~event_name:"MESSAGE_CREATE" ~payload ~seq:11))
+  in
+  check bool "Mention_or_thread: message in known thread passes" true
+    (has_emit_event effects2)
+
+let test_step_guild_create_bulk_tracks_threads () =
+  let m = connected_with_policy ~policy:S.Mention_or_thread ~bot_user_id:"BOT" in
+  let m', effects =
+    S.step m ~now_mono:5.0
+      (S.Frame_received
+         (guild_create_frame_with_threads
+            ~threads:[ ("T1", "C1"); ("T2", "C2"); ("T3", "C1") ]
+            ~seq:10))
+  in
+  check bool "Emit_event Threads_bulk_tracked emitted" true
+    (has_emit_threads_bulk_tracked effects);
+  (* Messages in all three threads should now pass policy *)
+  let test_thread m channel_id =
+    let payload =
+      message_create_payload
+        ~id:"M" ~channel_id ~author_id:"U1" ~content:"hi"
+        ~mention_ids:[] ()
+    in
+    let _, eff =
+      S.step m ~now_mono:6.0
+        (S.Frame_received
+           (dispatch_frame ~event_name:"MESSAGE_CREATE" ~payload ~seq:11))
+    in
+    has_emit_event eff
+  in
+  check bool "T1 (parent C1) passes" true (test_thread m' "T1");
+  check bool "T2 (parent C2) passes" true (test_thread m' "T2");
+  check bool "T3 (parent C1) passes" true (test_thread m' "T3")
+
+(* Mention_or_thread: regular channel still requires mention *)
+let test_policy_mention_or_thread_regular_channel_requires_mention () =
+  let m = connected_with_policy ~policy:S.Mention_or_thread ~bot_user_id:"BOT" in
+  let payload =
+    message_create_payload
+      ~id:"M1" ~channel_id:"REGULAR" ~author_id:"U1" ~content:"no mention"
+      ~mention_ids:[] ()
+  in
+  let _, effects =
+    S.step m ~now_mono:3.0
+      (S.Frame_received
+         (dispatch_frame ~event_name:"MESSAGE_CREATE" ~payload ~seq:5))
+  in
+  check bool "Mention_or_thread: regular channel without mention => suppressed"
+    false (has_emit_event effects);
+  check bool "Mention_or_thread: regular channel without mention => ambient"
+    true (has_emit_ambient effects)
+
+let test_policy_mention_or_thread_regular_channel_with_mention_passes () =
+  let m = connected_with_policy ~policy:S.Mention_or_thread ~bot_user_id:"BOT" in
+  let payload =
+    message_create_payload
+      ~id:"M2" ~channel_id:"REGULAR" ~author_id:"U1" ~content:"<@BOT> hi"
+      ~mention_ids:[ "BOT" ] ()
+  in
+  let _, effects =
+    S.step m ~now_mono:3.0
+      (S.Frame_received
+         (dispatch_frame ~event_name:"MESSAGE_CREATE" ~payload ~seq:5))
+  in
+  check bool "Mention_or_thread: regular channel with mention => passes"
+    true (has_emit_event effects)
+
+let test_policy_mention_or_thread_unknown_thread_still_requires_mention () =
+  let m = connected_with_policy ~policy:S.Mention_or_thread ~bot_user_id:"BOT" in
+  (* No THREAD_CREATE dispatched — "UNKNOWN_THR" is not in thread_parents *)
+  let payload =
+    message_create_payload
+      ~id:"M3" ~channel_id:"UNKNOWN_THR" ~author_id:"U1" ~content:"hi"
+      ~mention_ids:[] ()
+  in
+  let _, effects =
+    S.step m ~now_mono:3.0
+      (S.Frame_received
+         (dispatch_frame ~event_name:"MESSAGE_CREATE" ~payload ~seq:5))
+  in
+  check bool "Mention_or_thread: unknown thread => suppressed (no mention)"
+    false (has_emit_event effects)
+
+let test_policy_mention_or_thread_reaction_suppressed () =
+  let m = connected_with_policy ~policy:S.Mention_or_thread ~bot_user_id:"BOT" in
+  let payload =
+    reaction_add_payload
+      ~channel_id:"C1" ~message_id:"M1" ~user_id:"U1" ~emoji_name:"👍" ()
+  in
+  let _, effects =
+    S.step m ~now_mono:3.0
+      (S.Frame_received
+         (dispatch_frame ~event_name:"MESSAGE_REACTION_ADD" ~payload ~seq:5))
+  in
+  check bool "Mention_or_thread: reaction suppressed (same as mention_only)"
+    false (has_emit_event effects)
+
+(* Regression: Mention_only ignores is_thread entirely *)
+let test_policy_mention_only_ignores_thread () =
+  let m = connected_with_policy ~policy:S.Mention_only ~bot_user_id:"BOT" in
+  (* Register thread *)
+  let m', _ =
+    S.step m ~now_mono:5.0
+      (S.Frame_received (thread_create_frame ~thread_id:"THR1" ~parent_id:"CH1" ~seq:10))
+  in
+  (* Thread_parents has THR1, but Mention_only ignores is_thread *)
+  let payload =
+    message_create_payload
+      ~id:"M4" ~channel_id:"THR1" ~author_id:"U1" ~content:"thread msg"
+      ~mention_ids:[] ()
+  in
+  let _, effects =
+    S.step m' ~now_mono:6.0
+      (S.Frame_received
+         (dispatch_frame ~event_name:"MESSAGE_CREATE" ~payload ~seq:11))
+  in
+  check bool "Mention_only: thread message without mention => suppressed"
+    false (has_emit_event effects)
+
+(* Thread tracking survives reconnect *)
+let test_thread_registry_survives_reconnect () =
+  let m = connected_with_policy ~policy:S.Mention_or_thread ~bot_user_id:"BOT" in
+  (* Register thread *)
+  let m, _ =
+    S.step m ~now_mono:5.0
+      (S.Frame_received (thread_create_frame ~thread_id:"THR1" ~parent_id:"CH1" ~seq:10))
+  in
+  (* Reconnect cycle *)
+  let m, _ =
+    S.step m ~now_mono:10.0
+      (S.Wss_closed { code = 1006; reason = "blip" })
+  in
+  let m, _ = S.step m ~now_mono:12.0 S.Backoff_elapsed in
+  let m, _ =
+    S.step m ~now_mono:13.0
+      (S.Frame_received (hello_frame ~heartbeat_interval:41250))
+  in
+  let resumed : S.frame =
+    { op = S.Op_dispatch; s = Some 99; t = Some "RESUMED"; d = `Assoc [] }
+  in
+  let m, _ = S.step m ~now_mono:14.0 (S.Frame_received resumed) in
+  (* Thread should still be tracked after reconnect *)
+  let payload =
+    message_create_payload
+      ~id:"M5" ~channel_id:"THR1" ~author_id:"U1" ~content:"after reconnect"
+      ~mention_ids:[] ()
+  in
+  let _, effects =
+    S.step m ~now_mono:15.0
+      (S.Frame_received
+         (dispatch_frame ~event_name:"MESSAGE_CREATE" ~payload ~seq:100))
+  in
+  check bool "thread_parents survives reconnect cycle" true
+    (has_emit_event effects)
+
+(* ---------------------------------------------------------------- *)
 (* Entry                                                            *)
 (* ---------------------------------------------------------------- *)
 
@@ -1253,5 +1534,43 @@ let () =
             "Resume round trip: Connected → blip → Backoff → Hello → \
              Op_resume → RESUMED → Connected"
             `Quick test_resume_round_trip_to_connected
+        ] )
+    ; ( "thread decode"
+      , [ test_case "THREAD_CREATE with id + parent_id => Thread_tracked" `Quick
+            test_decode_thread_create
+        ; test_case "THREAD_CREATE missing parent_id => Ignored" `Quick
+            test_decode_thread_create_missing_fields
+        ; test_case "GUILD_CREATE with threads => Threads_bulk_tracked" `Quick
+            test_decode_guild_create_with_threads
+        ; test_case "GUILD_CREATE without threads => Ignored" `Quick
+            test_decode_guild_create_without_threads
+        ; test_case "THREAD_UPDATE decodes same as THREAD_CREATE" `Quick
+            test_decode_thread_update_same_as_create
+        ] )
+    ; ( "thread tracking + Mention_or_thread policy"
+      , [ test_case
+            "THREAD_CREATE dispatch updates thread_parents + emits event"
+            `Quick test_step_thread_create_updates_registry
+        ; test_case
+            "GUILD_CREATE bulk tracks all threads"
+            `Quick test_step_guild_create_bulk_tracks_threads
+        ; test_case
+            "Mention_or_thread: regular channel without mention => suppressed"
+            `Quick test_policy_mention_or_thread_regular_channel_requires_mention
+        ; test_case
+            "Mention_or_thread: regular channel with mention => passes"
+            `Quick test_policy_mention_or_thread_regular_channel_with_mention_passes
+        ; test_case
+            "Mention_or_thread: unknown thread => suppressed"
+            `Quick test_policy_mention_or_thread_unknown_thread_still_requires_mention
+        ; test_case
+            "Mention_or_thread: reaction suppressed"
+            `Quick test_policy_mention_or_thread_reaction_suppressed
+        ; test_case
+            "Mention_only: ignores is_thread (no auto-respond in threads)"
+            `Quick test_policy_mention_only_ignores_thread
+        ; test_case
+            "thread_parents survives reconnect cycle"
+            `Quick test_thread_registry_survives_reconnect
         ] )
     ]

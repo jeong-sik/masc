@@ -253,6 +253,13 @@ let handle_message_create ~dispatch
       @ metadata_opt "discord.guild_id" guild_id
       @ metadata_bool "discord.mentions_bot" mentions_bot
       @ metadata_bool "discord.explicit_mentions_bot" explicit_mentions_bot
+      (* Connector-neutral key consumed by the gate recorder: the
+         structured mentions array named this channel's bound keeper
+         (its bot user), so the persisted user line carries an explicit
+         mention even when the text has no "@name" token (Discord
+         renders mentions as <@snowflake>, invisible to the token
+         parser).  RFC-0232 §3.3. *)
+      @ metadata_bool "mentions_bound_keeper" mentions_bot
       @ metadata_opt "discord.message_reference_channel_id"
           message_reference_channel_id
       @ metadata_opt "discord.message_reference_message_id"

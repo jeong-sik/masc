@@ -20,14 +20,9 @@ val is_self_author
 
 val is_keeper_authored_message : string -> bool
 
-(** [line_mentions ~targets content] is true when some whitespace token of
-    [content] equals ["@" ^ target] for a target, after trimming surrounding
-    punctuation. Token equality (not substring) so ["@dreamerx"] and
-    ["email@dreamer.com"] do not match ["@dreamer"]. *)
-val line_mentions : targets:string list -> string -> bool
-
 (** [pending_mentions_of_messages ~targets messages] returns the [(speaker,
-    content)] of every user line that mentions a target and arrives after the
+    content)] of every user line whose persisted [mentions] (RFC-0232
+    §3.3: parsed once at append) hit a target and that arrives after the
     keeper's own last line. Pure (no I/O) so the watermark logic is testable
     directly; this is the core of {!collect_message_scope}. *)
 val pending_mentions_of_messages

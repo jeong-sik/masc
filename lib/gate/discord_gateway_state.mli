@@ -85,6 +85,10 @@ type dispatched_event =
             [author.username]; [None] only when the payload carries
             neither (RFC-0223 P1). *)
       ; content : string
+      ; mention_user_ids : string list
+            (* RFC-0232 §3.3: the structured [mentions] member ids are
+               kept at decode instead of being reduced to a bot bool;
+               the gate maps what its bindings can resolve. *)
       ; mentions_bot : bool
       ; explicit_mentions_bot : bool
         (** [true] only when message [content] contains a literal

@@ -22,6 +22,7 @@ let msg ?ts ?source ?speaker ~role content : Store.chat_message =
     conversation_id = None;
     external_message_id = None;
     speaker;
+    mentions = [];
   }
 
 let external_speaker ?name id : Store.speaker =

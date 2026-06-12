@@ -121,11 +121,11 @@ let finalize
           ~snapshot:state_snapshot
       in
       (match
-         Keeper_checkpoint_store.save_oas
+         Keeper_checkpoint_store.save_oas_classified
            ~session_dir:session.session_dir
            patched
        with
-       | Ok () ->
+       | Ok (Keeper_checkpoint_store.Saved _) ->
          append_manifest ~site:"checkpoint_saved"
            ~keeper_turn_id:manifest_keeper_turn_id
            ~oas_turn_count:result.turns
@@ -142,6 +142,17 @@ let finalize
                ])
            Keeper_runtime_manifest.Checkpoint_saved;
          Ok (Some patched)
+       | Ok (Keeper_checkpoint_store.Stale_noop
+                { incoming_turn_count; known_turn_count }) ->
+         Log.Keeper.warn ~keeper_name:meta.name
+           "runtime=%s OAS checkpoint stale no-op: incoming turn_count=%d, last saved=%d"
+           (Keeper_meta_contract.runtime_id_of_meta meta)
+           incoming_turn_count known_turn_count;
+         Otel_metric_store.inc_counter
+           "masc_keeper_checkpoint_stale_noop_total"
+           ~labels:[ "keeper", meta.name; "site", "finalize" ]
+           ();
+         Ok None
        | Error e ->
          Log.Keeper.error ~keeper_name:meta.name
            "runtime=%s OAS checkpoint save failed: %s"

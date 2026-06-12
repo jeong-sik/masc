@@ -10,6 +10,10 @@ import { useEffect, useState } from 'preact/hooks'
 export const EXPANDABLE_TEXTAREA_STYLE =
   'w-full bg-card/60 backdrop-blur-sm text-text-strong text-sm border border-card-border rounded-[var(--r-1)] py-2 px-3 font-mono focus:outline-none focus:border-accent-fg/50 focus:ring-1 focus:ring-accent-fg/50 transition-[border-color,box-shadow] duration-[var(--t-med)] shadow-inset resize-y custom-scrollbar'
 
+function byteLength(s: string): number {
+  return new TextEncoder().encode(s).length
+}
+
 export function ExpandableTextarea({
   value,
   onChange,
@@ -17,6 +21,8 @@ export function ExpandableTextarea({
   rows = 6,
   placeholder = '',
   dirty = false,
+  maxBytes,
+  maxChars,
 }: {
   value: string
   onChange: (value: string) => void
@@ -24,6 +30,8 @@ export function ExpandableTextarea({
   rows?: number
   placeholder?: string
   dirty?: boolean
+  maxBytes?: number
+  maxChars?: number
 }) {
   const [local, setLocal] = useState(value)
   const [expanded, setExpanded] = useState(false)
@@ -42,6 +50,33 @@ export function ExpandableTextarea({
     ? 'border-l-4 border-l-[var(--color-accent-fg)]'
     : ''
 
+  const charCount = local.length
+  const byteCount = byteLength(local)
+  const overLimit = (maxBytes !== undefined && byteCount > maxBytes)
+    || (maxChars !== undefined && charCount > maxChars)
+  const nearLimit = !overLimit
+    && ((maxBytes !== undefined && byteCount > maxBytes * 0.9)
+      || (maxChars !== undefined && charCount > maxChars * 0.9))
+
+  let countLabel = ''
+  if (maxBytes !== undefined) {
+    countLabel = `${byteCount.toLocaleString()} / ${maxBytes.toLocaleString()} bytes`
+  } else if (maxChars !== undefined) {
+    countLabel = `${charCount.toLocaleString()} / ${maxChars.toLocaleString()} 글자`
+  } else {
+    countLabel = `${charCount.toLocaleString()} 글자`
+  }
+
+  const countColor = overLimit
+    ? 'text-[var(--color-status-error)]'
+    : nearLimit
+      ? 'text-[var(--color-status-warn)]'
+      : 'text-[var(--color-fg-muted)]'
+
+  const CountHint = () => html`
+    <span class="text-3xs ${countColor} font-medium">${countLabel}</span>
+  `
+
   return html`
     <div class="relative">
       <textarea
@@ -55,6 +90,9 @@ export function ExpandableTextarea({
         onBlur=${(e: Event) =>
           commit((e.target as HTMLTextAreaElement).value)}
       />
+      <div class="flex justify-end mt-1">
+        <${CountHint} />
+      </div>
       <button
         type="button"
         class="absolute top-2 right-2 rounded-[var(--r-0)] bg-[var(--color-bg-surface)] border border-card-border px-1.5 py-0.5 text-3xs text-[var(--color-fg-muted)] hover:text-text-strong hover:bg-[var(--color-bg-hover)] transition-colors"
@@ -92,14 +130,16 @@ export function ExpandableTextarea({
                   onInput=${(e: Event) =>
                     setLocal((e.target as HTMLTextAreaElement).value)}
                 />
-                <div class="flex justify-end gap-2 mt-3">
-                  <button
-                    type="button"
-                    class="px-3 py-1.5 rounded-[var(--r-1)] text-2xs bg-[var(--color-bg-hover)] text-[var(--color-fg-secondary)]"
-                    onClick=${() => setExpanded(false)}
-                  >
-                    취소
-                  </button>
+                <div class="flex items-center justify-between gap-2 mt-3">
+                  <${CountHint} />
+                  <div class="flex gap-2">
+                    <button
+                      type="button"
+                      class="px-3 py-1.5 rounded-[var(--r-1)] text-2xs bg-[var(--color-bg-hover)] text-[var(--color-fg-secondary)]"
+                      onClick=${() => setExpanded(false)}
+                    >
+                      취소
+                    </button>
                   <button
                     type="button"
                     class="px-3 py-1.5 rounded-[var(--r-1)] text-2xs bg-[var(--color-status-ok)] text-[var(--color-fg-on-ok)]"
@@ -110,6 +150,7 @@ export function ExpandableTextarea({
                   >
                     확인
                   </button>
+                  </div>
                 </div>
               </div>
             </div>

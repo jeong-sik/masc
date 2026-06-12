@@ -580,7 +580,19 @@ function updateDraft(field: keyof EditDraft, value: string | boolean | number) {
   editDraft.value = { ...d, [field]: value }
 }
 
-function EditTextarea({ field, label, rows = 6 }: { field: keyof EditDraft; label: string; rows?: number }) {
+function EditTextarea({
+  field,
+  label,
+  rows = 6,
+  maxBytes,
+  maxChars,
+}: {
+  field: keyof EditDraft
+  label: string
+  rows?: number
+  maxBytes?: number
+  maxChars?: number
+}) {
   const d = editDraft.value
   if (!d) return null
   const val = d[field] as string
@@ -597,6 +609,8 @@ function EditTextarea({ field, label, rows = 6 }: { field: keyof EditDraft; labe
         value=${val}
         rows=${rows}
         dirty=${dirty}
+        maxBytes=${maxBytes}
+        maxChars=${maxChars}
         onChange=${(value: string) => updateDraft(field, value)}
       />
     </div>
@@ -752,13 +766,13 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
   // --- Prompt section (editable) ---
   const promptSection = isEditing ? html`
     <${MajorSectionHeader} title="프롬프트 (편집)" />
-    <${EditTextarea} field="goal" label="목표" rows=${8} />
-    <${EditTextarea} field="short_goal" label="단기 목표" rows=${5} />
-    <${EditTextarea} field="mid_goal" label="중기 목표" rows=${5} />
-    <${EditTextarea} field="long_goal" label="장기 목표" rows=${5} />
-    <${EditTextarea} field="will" label="의지" rows=${4} />
-    <${EditTextarea} field="needs" label="필요" rows=${4} />
-    <${EditTextarea} field="desires" label="욕구" rows=${4} />
+    <${EditTextarea} field="goal" label="목표" rows=${8} maxChars=${4096} />
+    <${EditTextarea} field="short_goal" label="단기 목표" rows=${5} maxChars=${4096} />
+    <${EditTextarea} field="mid_goal" label="중기 목표" rows=${5} maxChars=${4096} />
+    <${EditTextarea} field="long_goal" label="장기 목표" rows=${5} maxChars=${4096} />
+    <${EditTextarea} field="will" label="의지" rows=${4} maxBytes=${4096} />
+    <${EditTextarea} field="needs" label="필요" rows=${4} maxBytes=${4096} />
+    <${EditTextarea} field="desires" label="욕구" rows=${4} maxBytes=${4096} />
     <${EditTextarea} field="instructions" label="지시사항" rows=${10} />
   ` : html`
     <${MajorSectionHeader} title="프롬프트" />

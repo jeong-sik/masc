@@ -118,11 +118,15 @@ let emit_native_event_log (evt : Agent_sdk.Event_bus.event) (json : Yojson.Safe.
 ;;
 
 (** Build the SSE JSON wrapper. [correlation_id] and [run_id] are
-    mandatory (from the envelope); all other fields are optional. *)
+    mandatory (from the envelope); all other fields are optional.
+    [caused_by] is the envelope's causation pointer (OAS #877) — for
+    [oas:tool_completed] it equals the matching [oas:tool_called] row's
+    [run_id], the only key that pairs the two rows. *)
 let wrap_event
       ~ts
       ~correlation_id
       ~run_id
+      ?caused_by
       ~event_type
       ~payload
       ?agent_name
@@ -137,6 +141,7 @@ let wrap_event
     ; "ts_unix", `Float ts
     ; "correlation_id", `String correlation_id
     ; "run_id", `String run_id
+    ; "caused_by", Json_util.string_opt_to_json_trimmed caused_by
     ; "agent_name", Json_util.string_opt_to_json_trimmed agent_name
     ; "task_id", Json_util.string_opt_to_json_trimmed task_id
     ; "turn", Option.fold ~none:`Null ~some:(fun value -> `Int value) turn
@@ -173,8 +178,8 @@ let wrap_event
     point of this function's shape — do not remove it without also
     removing the catch-all. *)
 let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t option =
-  let { Agent_sdk.Event_bus.correlation_id; run_id; ts; _ } = evt.meta in
-  let wrap = wrap_event ~ts ~correlation_id ~run_id in
+  let { Agent_sdk.Event_bus.correlation_id; run_id; ts; caused_by; _ } = evt.meta in
+  let wrap = wrap_event ~ts ~correlation_id ~run_id ?caused_by in
   match[@warning "-11"] evt.payload with
   | Agent_sdk.Event_bus.AgentStarted { agent_name; task_id } ->
     let payload =
@@ -214,14 +219,34 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
          @ agent_failed_error_fields error)
     in
     Some (wrap ~event_type:"agent_failed" ~payload ~agent_name ~task_id ())
-  | Agent_sdk.Event_bus.ToolCalled { agent_name; tool_name; _ } ->
+  | Agent_sdk.Event_bus.ToolCalled { agent_name; tool_name; tool_use_id; _ } ->
+    (* tool_called publishes before execution, so the keeper hook has not
+       minted an execution_id yet — this row carries the provider call id
+       only; the matching tool_completed row carries both. *)
     let payload =
-      `Assoc [ "agent_name", `String agent_name; "tool_name", `String tool_name ]
+      `Assoc
+        ([ "agent_name", `String agent_name; "tool_name", `String tool_name ]
+         @ (if tool_use_id = "" then [] else [ "tool_use_id", `String tool_use_id ]))
     in
     Some (wrap ~event_type:"tool_called" ~payload ~agent_name ~tool_name ())
-  | Agent_sdk.Event_bus.ToolCompleted { agent_name; tool_name; _ } ->
+  | Agent_sdk.Event_bus.ToolCompleted { agent_name; tool_name; tool_use_id; _ } ->
+    (* RFC-0233 PR-2: the keeper post_tool_use hook registered the
+       tool_use_id ↔ execution_id pair before OAS published this event,
+       so the lookup is deterministic. A miss means the execution did not
+       go through a keeper hook (worker/eval lanes), not a failure. *)
+    let execution_id_fields =
+      match
+        if tool_use_id = "" then None
+        else Keeper_execution_join.take ~tool_use_id
+      with
+      | Some execution_id -> [ "execution_id", `String execution_id ]
+      | None -> []
+    in
     let payload =
-      `Assoc [ "agent_name", `String agent_name; "tool_name", `String tool_name ]
+      `Assoc
+        ([ "agent_name", `String agent_name; "tool_name", `String tool_name ]
+         @ (if tool_use_id = "" then [] else [ "tool_use_id", `String tool_use_id ])
+         @ execution_id_fields)
     in
     Some (wrap ~event_type:"tool_completed" ~payload ~agent_name ~tool_name ())
   | Agent_sdk.Event_bus.TurnStarted { agent_name; turn } ->

@@ -514,7 +514,8 @@ let make_hooks
 
     post_tool_use = Some (fun event ->
       match event with
-      | Agent_sdk.Hooks.PostToolUse { tool_name; input; output; duration_ms = hook_duration_ms; _ } ->
+      | Agent_sdk.Hooks.PostToolUse
+          { tool_name; input; output; duration_ms = hook_duration_ms; tool_use_id; _ } ->
         record_progress ("tool_completed:" ^ tool_name);
         incr tool_call_count_ref;
         (* Extract typed_outcome from structured tool output JSON and strip it
@@ -612,6 +613,12 @@ let make_hooks
            the log_call row and the trajectory entry below share the value
            so downstream views can join the two stores on a single key. *)
         let execution_id = Ids.Execution_id.generate () in
+        (* RFC-0233 PR-2: register the provider-call ↔ execution pair now,
+           strictly before OAS publishes ToolCompleted for this call, so the
+           event bridge can stamp the same id onto the oas:tool_completed
+           row (insert happens-before publish happens-before drain). *)
+        Keeper_execution_join.record ~tool_use_id
+          ~execution_id:(Ids.Execution_id.to_string execution_id);
         (try
            Keeper_tool_call_log.log_call
              ~keeper_name:(!meta_ref).name
@@ -624,6 +631,7 @@ let make_hooks
              ?thinking_budget:tctx.thinking_budget
              ?prompt_fingerprint:tctx.prompt_fingerprint
              ~execution_id
+             ?tool_use_id:(if tool_use_id = "" then None else Some tool_use_id)
              ?trace_id:tctx.trace_id ?session_id:tctx.session_id
              ?generation:tctx.generation
              ?turn:tctx.turn ?keeper_turn_id:tctx.keeper_turn_id

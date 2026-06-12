@@ -1958,25 +1958,35 @@ let test_streaming_exec_keeps_sparse_progress_live () =
     cleanup_dir base) @@ fun () ->
   let start = Unix.gettimeofday () in
   let first_stdout_at = Atomic.make None in
+  let callback_on_turn_switch = ref [] in
   let stdout_chunks = ref [] in
   let stdout_mu = Stdlib.Mutex.create () in
-  (match
-     Keeper_turn_sandbox_runtime.run_exec_with_status_split
-       ~on_stdout_chunk:(fun chunk ->
-         if Option.is_none (Atomic.get first_stdout_at)
-         then Atomic.set first_stdout_at (Some (Unix.gettimeofday () -. start));
-         Stdlib.Mutex.protect stdout_mu (fun () ->
-           stdout_chunks := chunk :: !stdout_chunks))
-       ~timeout_sec:5.0
-       runtime
-       ~cwd:host_root
-       ~command_argv:[ "sparse-progress" ]
-   with
-   | Error msg -> Alcotest.failf "expected sparse progress exec success, got %s" msg
-   | Ok (Unix.WEXITED 0, stdout, stderr) ->
-       Alcotest.(check string) "sparse progress stdout" "ready\ndone\n" stdout;
-       Alcotest.(check string) "sparse progress stderr" "" stderr
-   | Ok _ -> Alcotest.fail "expected sparse progress exec exit 0");
+  Eio.Switch.run (fun turn_sw ->
+    Eio_context.with_turn_switch turn_sw (fun () ->
+      match
+        Keeper_turn_sandbox_runtime.run_exec_with_status_split
+          ~on_stdout_chunk:(fun chunk ->
+            if Option.is_none (Atomic.get first_stdout_at)
+            then Atomic.set first_stdout_at (Some (Unix.gettimeofday () -. start));
+            let saw_turn_switch =
+              match Eio_context.get_switch_opt () with
+              | Some sw -> sw == turn_sw
+              | None -> false
+            in
+            Stdlib.Mutex.protect stdout_mu (fun () ->
+              callback_on_turn_switch := saw_turn_switch :: !callback_on_turn_switch;
+              stdout_chunks := chunk :: !stdout_chunks))
+          ~timeout_sec:5.0
+          runtime
+          ~cwd:host_root
+          ~command_argv:[ "sparse-progress" ]
+      with
+      | Error msg ->
+        Alcotest.failf "expected sparse progress exec success, got %s" msg
+      | Ok (Unix.WEXITED 0, stdout, stderr) ->
+        Alcotest.(check string) "sparse progress stdout" "ready\ndone\n" stdout;
+        Alcotest.(check string) "sparse progress stderr" "" stderr
+      | Ok _ -> Alcotest.fail "expected sparse progress exec exit 0"));
   let elapsed = Unix.gettimeofday () -. start in
   let first_stdout_at =
     match Atomic.get first_stdout_at with
@@ -1987,10 +1997,17 @@ let test_streaming_exec_keeps_sparse_progress_live () =
     Stdlib.Mutex.protect stdout_mu (fun () ->
       String.concat "" (List.rev !stdout_chunks))
   in
+  let callback_on_turn_switch =
+    Stdlib.Mutex.protect stdout_mu (fun () -> List.rev !callback_on_turn_switch)
+  in
   Alcotest.(check string)
     "sparse progress callback stdout"
     "ready\ndone\n"
     streamed_stdout;
+  Alcotest.(check bool)
+    "sparse progress callback keeps turn switch"
+    true
+    (List.for_all Fun.id callback_on_turn_switch);
   Alcotest.(check bool)
     "single sparse progress callback arrives before command completion"
     true
@@ -2370,8 +2387,12 @@ let run_tests ~clock () =
 
 let () =
   Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let clock = Eio.Stdenv.clock env in
+  Eio_context.set_clock clock;
+  Eio_context.set_switch sw;
   Process_eio.init
     ~cwd_default:Eio.Path.(Eio.Stdenv.fs env / Sys.getcwd ())
     ~proc_mgr:(Eio.Stdenv.process_mgr env)
-    ~clock:(Eio.Stdenv.clock env);
-  run_tests ~clock:(Eio.Stdenv.clock env) ()
+    ~clock;
+  run_tests ~clock ()

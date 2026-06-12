@@ -238,6 +238,7 @@ type retry_stream_guard = {
   on_stderr_chunk : (string -> unit) option;
   held_chunks : [ `Stdout of string | `Stderr of string ] list ref;
   mutable saw_retry_marker : bool;
+  mutable pass_through : bool;
   mutable visible_flushed : bool;
   mutable marker_scan_tail : string;
   mutable release_scheduled : bool;
@@ -329,36 +330,42 @@ let guard_chunk_has_visible_callback guard = function
   | `Stderr _ -> Option.is_some guard.on_stderr_chunk
 ;;
 
+let guard_release_chunks guard =
+  with_retry_guard_lock guard (fun () ->
+    guard.release_scheduled <- false;
+    if guard.closed || guard.saw_retry_marker
+    then [], false
+    else if
+      retry_marker_prefix_pending guard.marker_scan_tail
+      && guard.prefix_release_deferrals < retry_stream_guard_prefix_deferral_limit
+    then (
+      guard.prefix_release_deferrals <- guard.prefix_release_deferrals + 1;
+      guard.release_scheduled <- true;
+      [], true)
+    else (
+      guard.pass_through <- true;
+      guard.prefix_release_deferrals <- 0;
+      let chunks = take_guard_held_chunks_locked guard in
+      if List.exists (guard_chunk_has_visible_callback guard) chunks
+      then guard.visible_flushed <- true;
+      chunks, false))
+;;
+
 (* Docker EINTR retry output arrives as a short burst. Release ordinary held
-   prefixes after a small delay so sparse successful commands still stream. *)
+   prefixes after a small Eio sleep so sparse successful commands still stream
+   without invoking user callbacks from an unmanaged systhread. *)
 let rec schedule_guard_release guard =
-  ignore
-    (Thread.create
-       (fun () ->
-          Thread.delay retry_stream_guard_release_delay_sec;
-          let chunks, reschedule =
-            with_retry_guard_lock guard (fun () ->
-              guard.release_scheduled <- false;
-              if guard.closed || guard.saw_retry_marker
-              then [], false
-              else if
-                retry_marker_prefix_pending guard.marker_scan_tail
-                && guard.prefix_release_deferrals
-                   < retry_stream_guard_prefix_deferral_limit
-              then (
-                guard.prefix_release_deferrals <- guard.prefix_release_deferrals + 1;
-                guard.release_scheduled <- true;
-                [], true)
-              else (
-                let chunks = take_guard_held_chunks_locked guard in
-                if List.exists (guard_chunk_has_visible_callback guard) chunks
-                then guard.visible_flushed <- true;
-                chunks, false))
-          in
-          emit_guard_chunks guard chunks;
-          if reschedule then schedule_guard_release guard)
-       ()
-     : Thread.t)
+  match Eio_context.get_switch_opt (), Eio_context.get_clock_opt () with
+  | Some sw, Some clock ->
+    Eio.Fiber.fork ~sw (fun () ->
+      Eio.Time.sleep clock retry_stream_guard_release_delay_sec;
+      let chunks, reschedule = guard_release_chunks guard in
+      emit_guard_chunks guard chunks;
+      if reschedule then schedule_guard_release guard)
+  | _ ->
+    (* Without Eio context there is no safe live timer surface for user
+       callbacks. Held chunks are emitted when the attempt completes. *)
+    ()
 ;;
 
 let guard_attempt_callback guard stream chunk =
@@ -366,12 +373,20 @@ let guard_attempt_callback guard stream chunk =
   let chunks, should_schedule_release =
     with_retry_guard_lock guard (fun () ->
       update_retry_marker_scan guard chunk;
-      guard.held_chunks := item :: !(guard.held_chunks);
-      let should_schedule_release =
-        (not guard.release_scheduled) && not guard.closed && not guard.saw_retry_marker
-      in
-      if should_schedule_release then guard.release_scheduled <- true;
-      [], should_schedule_release)
+      if
+        guard.pass_through
+        && not guard.saw_retry_marker
+        && not (retry_marker_prefix_pending guard.marker_scan_tail)
+      then [ item ], false
+      else (
+        guard.held_chunks := item :: !(guard.held_chunks);
+        let should_schedule_release =
+          (not guard.release_scheduled)
+          && not guard.closed
+          && not guard.saw_retry_marker
+        in
+        if should_schedule_release then guard.release_scheduled <- true;
+        [], should_schedule_release))
   in
   emit_guard_chunks guard chunks;
   if should_schedule_release then schedule_guard_release guard
@@ -389,6 +404,7 @@ let run_split_retry_eintr_with_live_callbacks
       ; on_stderr_chunk
       ; held_chunks = ref []
       ; saw_retry_marker = false
+      ; pass_through = false
       ; visible_flushed = false
       ; marker_scan_tail = ""
       ; release_scheduled = false

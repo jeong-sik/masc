@@ -1303,6 +1303,8 @@
 
 (include stanzas/test_discord_gateway_state.inc)
 
+(include stanzas/test_discord_presence_bridge.inc)
+
 (include stanzas/test_discord_observability.inc)
 
 (include stanzas/test_discord_rest_client.inc)

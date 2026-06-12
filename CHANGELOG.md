@@ -2,10 +2,34 @@
 
 ## [Unreleased]
 
+## [0.19.41] - 2026-06-12
+
+### Added
+- `keeper`: added local secret env/file projection for local keeper runs,
+  including `secrets/<keeper>/env` overlays and `secrets/<keeper>/files`
+  materialization (#20922).
+- `keeper`: advanced the Memory OS rollout with persistence, recall rendering,
+  librarian runtime wiring, prompt integration, and default-on behavior
+  (#20876, #20881, #20883, #20897, #20915, #20926).
+- `runtime`: added the Gemma4 Ollama runtime seed and constrained it to the
+  intended `nick0cave` runtime lane (#20927, #20928).
+
 ### Changed
 - Bumped the OAS agent SDK pin to `v0.206.0` at
   `a5038de0c43d70b091418041ba1afde5486d30c7` and raised the
   `agent_sdk` dependency floor to `0.206.0`.
+- `keeper`: continued RFC-0232 typed lane identity work with closed role
+  modeling, producer-typed turn outcomes, and structural keeper identity
+  (#20896, #20914, #20932).
+
+### Fixed
+- `keeper`: scrubbed ambient host GitHub/SSH credentials when a local keeper
+  secret root is absent, while preserving noninteractive git/gh defaults for
+  local subprocesses (#20922).
+- `keeper-chat`: re-landed live text-delta streaming behind a typed guard, and
+  `keeper-memory` now uses token-AND matching for search (#20912, #20913).
+- `workspace`: tightened stale task-cache cleanup after backlog writeback and
+  stale-release paths (#20822, #20847, #20878).
 
 ## [0.19.40] - 2026-06-09
 

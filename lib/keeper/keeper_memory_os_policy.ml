@@ -76,6 +76,68 @@ let string_contains substring str =
   if sub_len = 0 then true else aux 0
 ;;
 
+let string_contains_any needles str =
+  List.exists (fun needle -> string_contains needle str) needles
+;;
+
+let transient_admission_markers =
+  [ "goal_cap"
+  ; "goal cap"
+  ; "wip cap"
+  ; "wip 3/3"
+  ; "wip 4/3"
+  ; "claim admission"
+  ; "admission slot"
+  ; "admission slots"
+  ; "task claim"
+  ; "task claiming"
+  ; "claim new task"
+  ; "claiming new task"
+  ; "new task claim"
+  ]
+;;
+
+let transient_blocker_markers =
+  [ "3/3"
+  ; "4/3"
+  ; "at limit"
+  ; "blocked"
+  ; "blocking"
+  ; "cannot claim"
+  ; "can't claim"
+  ; "prevents claiming"
+  ; "preventing"
+  ; "rejected"
+  ; "all slots occupied"
+  ; "slots occupied"
+  ; "slots held"
+  ; "occupied by other agents"
+  ; "no new tasks can be claimed"
+  ]
+;;
+
+let durable_meta_markers =
+  [ "stale"
+  ; "outdated"
+  ; "obsolete"
+  ; "incorrectly"
+  ; "disproved"
+  ; "disproving"
+  ; "mismatch"
+  ; "contradict"
+  ; "root cause"
+  ; "fix"
+  ; "fixed"
+  ]
+;;
+
+let is_transient_admission_memory_text text =
+  let lower = String.lowercase_ascii text in
+  string_contains_any transient_admission_markers lower
+  && string_contains_any transient_blocker_markers lower
+  && not (string_contains_any durable_meta_markers lower)
+;;
+
 let normalize_word_char = function
   | 'A'..'Z' as c -> Char.lowercase_ascii c
   | ('a'..'z' | '0'..'9') as c -> c

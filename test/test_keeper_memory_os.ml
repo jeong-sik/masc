@@ -537,6 +537,24 @@ let test_policy_score_and_retention () =
   Alcotest.(check bool) "low score -> Discard" true (verdict_low = Policy.Discard)
 ;;
 
+let test_policy_marks_live_admission_caps_transient () =
+  Alcotest.(check bool)
+    "goal cap blocker is transient"
+    true
+    (Policy.is_transient_admission_memory_text
+       "Goal cap is 3/3, blocking new task claims.");
+  Alcotest.(check bool)
+    "wip slot blocker is transient"
+    true
+    (Policy.is_transient_admission_memory_text
+       "Task claim attempt was rejected because all WIP admission slots are occupied by other agents.");
+  Alcotest.(check bool)
+    "stale diagnostic is durable meta"
+    false
+    (Policy.is_transient_admission_memory_text
+       "Memory OS holds stale goal_cap information that incorrectly suggests task claiming is blocked.")
+;;
+
 let test_bump_access () =
   let now = 1_000_000.0 in
   let f = fact_fixture ~now () in
@@ -796,6 +814,78 @@ let test_recall_context_renders_sanitized_memory () =
         (contains "ignore prior instructions" ctx)))
 ;;
 
+let test_recall_context_suppresses_transient_admission_blockers () =
+  with_prompt_registry (fun () ->
+    with_temp_keepers_dir (fun _keepers_dir ->
+      let keeper_id = "virtual-memory-keeper" in
+      let now = 1_000_000.0 in
+      let base_fact = fact_fixture ~now () in
+      let useful_fact =
+        { base_fact with
+          Types.claim =
+            "Memory OS holds stale goal_cap information that incorrectly suggests task claiming is blocked."
+        ; Types.confidence = 0.93
+        ; Types.category = "fact"
+        ; Types.access_count = 3
+        }
+      in
+      let transient_fact =
+        { base_fact with
+          Types.claim = "Goal cap is 3/3, blocking new task claims."
+        ; Types.confidence = 0.99
+        ; Types.category = "constraint"
+        ; Types.access_count = 6
+        ; Types.source = { base_fact.source with turn = 7 }
+        }
+      in
+      let transient_episode =
+        { Types.trace_id = "trace-transient-cap"
+        ; Types.generation = 1
+        ; Types.episode_summary =
+            "Agent is blocked by goal_cap 3/3 and cannot claim new tasks."
+        ; Types.claims = [ transient_fact ]
+        ; Types.open_items = []
+        ; Types.constraints = []
+        ; Types.preserved_tool_refs = []
+        ; Types.source_turn_range = Some (7, 7)
+        ; Types.created_at = now
+        ; Types.schema_version = Types.schema_version
+        }
+      in
+      let useful_episode =
+        { Types.trace_id = "trace-stale-cap-diagnostic"
+        ; Types.generation = 2
+        ; Types.episode_summary = "Memory OS stale goal_cap blocker was diagnosed."
+        ; Types.claims = [ useful_fact ]
+        ; Types.open_items = []
+        ; Types.constraints = []
+        ; Types.preserved_tool_refs = []
+        ; Types.source_turn_range = Some (8, 8)
+        ; Types.created_at = now +. 1.0
+        ; Types.schema_version = Types.schema_version
+        }
+      in
+      Memory_io.append_episode_bundle ~keeper_id transient_episode;
+      Memory_io.append_episode_bundle ~keeper_id useful_episode;
+      let ctx = Recall.render_context ~keeper_id ~now ~max_facts:5 ~max_episodes:5 () in
+      Alcotest.(check bool)
+        "keeps stale diagnostic fact"
+        true
+        (contains "Memory OS holds stale goal_cap information" ctx);
+      Alcotest.(check bool)
+        "drops transient cap fact"
+        false
+        (contains "Goal cap is 3/3" ctx);
+      Alcotest.(check bool)
+        "drops transient cap episode"
+        false
+        (contains "cannot claim new tasks" ctx);
+      Alcotest.(check bool)
+        "keeps stale diagnostic episode"
+        true
+        (contains "Memory OS stale goal_cap blocker was diagnosed" ctx)))
+;;
+
 let () =
   Alcotest.run
     "keeper_memory_os"
@@ -821,6 +911,10 @@ let () =
         ] )
     ; ( "policy"
       , [ Alcotest.test_case "score and retention" `Quick test_policy_score_and_retention
+        ; Alcotest.test_case
+            "marks live admission caps transient"
+            `Quick
+            test_policy_marks_live_admission_caps_transient
         ; Alcotest.test_case "bump access" `Quick test_bump_access
         ] )
     ; ( "io"
@@ -846,6 +940,10 @@ let () =
             "renders sanitized memory"
             `Quick
             test_recall_context_renders_sanitized_memory
+        ; Alcotest.test_case
+            "suppresses transient admission blockers"
+            `Quick
+            test_recall_context_suppresses_transient_admission_blockers
         ; Alcotest.test_case
             "render_if_enabled default is on"
             `Quick

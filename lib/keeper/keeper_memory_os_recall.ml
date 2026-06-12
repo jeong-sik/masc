@@ -89,6 +89,17 @@ let fact_is_current ~now fact =
   | Some ts -> ts >= now
 ;;
 
+let fact_is_recallable ~now fact =
+  fact_is_current ~now fact
+  && not (Keeper_memory_os_policy.is_transient_admission_memory_text fact.claim)
+;;
+
+let episode_is_recallable episode =
+  not
+    (Keeper_memory_os_policy.is_transient_admission_memory_text
+       episode.episode_summary)
+;;
+
 let render_fact ~now fact =
   let score = Keeper_memory_os_policy.score_fact ~now fact in
   let source = fact.source in
@@ -145,7 +156,7 @@ let render_recall_context ~fact_lines ~episode_lines =
 
 let scored_facts ~now facts =
   facts
-  |> List.filter (fact_is_current ~now)
+  |> List.filter (fact_is_recallable ~now)
   |> List.map (fun fact -> Keeper_memory_os_policy.score_fact ~now fact, fact)
   |> List.sort (fun (a, _) (b, _) -> compare b a)
   |> List.map snd
@@ -160,6 +171,7 @@ let render_context_exn ~keeper_id ~now ~max_facts ~max_episodes () =
     |> take max_facts
   in
   let episodes = Keeper_memory_os_io.read_episodes_tail ~keeper_id ~n:max_episodes in
+  let episodes = List.filter episode_is_recallable episodes in
   match facts, episodes with
   | [], [] -> ""
   | _ ->

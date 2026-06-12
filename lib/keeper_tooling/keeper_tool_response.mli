@@ -33,8 +33,10 @@ val response_accept_rejection : Agent_sdk.Types.api_response -> accept_rejection
 val accept_rejection_of_response :
   runtime_id:string -> Agent_sdk.Types.api_response -> accept_rejection
 
-(** [true] when a provider response carries usable keeper progress for runtime
-    accept/reject: non-blank text, ToolUse, or a non-terminal stop reason.
-    Empty [end_turn] responses are rejected so runtime can try the next
-    candidate instead of failing later as "no textual reply". *)
+(** [true] when a provider response carries OAS-defined downstream-visible
+    progress for runtime accept/reject. This delegates the content-shape
+    boundary to [Agent_sdk.Response_shape.has_deliverable_content]; MASC should
+    not add provider/model-specific accept rules here. Responses with no
+    deliverable content are rejected before keeper response finalization,
+    instead of failing later as "no textual reply". *)
 val response_has_text_or_tool_progress : Agent_sdk.Types.api_response -> bool

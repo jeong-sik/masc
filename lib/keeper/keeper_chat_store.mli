@@ -80,6 +80,13 @@ type chat_message = {
   tool_call_id : string option;
   tool_call_name : string option;
   source : string option;
+      (** Legacy lane label.  Since RFC-0232 P5 it is derived from
+          [surface] at write ({!Surface_ref.lane_label}); pre-P5 rows
+          carry their original label verbatim. *)
+  surface : Surface_ref.t option;
+      (** The typed surface (RFC-0232 §3.6).  [None] on rows written
+          before P5 and on rows whose persisted surface payload fails
+          to decode (reported as a persistence read drop, row kept). *)
   conversation_id : string option;
   external_message_id : string option;
   speaker : speaker option;
@@ -114,7 +121,7 @@ val append_turn :
   user_content:string ->
   user_attachments:attachment list ->
   ?tool_calls:tool_call list ->
-  ?source:string ->
+  ?surface:Surface_ref.t ->
   ?conversation_id:string ->
   ?external_message_id:string ->
   ?speaker:speaker ->
@@ -132,7 +139,7 @@ val append_assistant_message :
   base_dir:string ->
   keeper_name:string ->
   content:string ->
-  ?source:string ->
+  ?surface:Surface_ref.t ->
   ?conversation_id:string ->
   unit ->
   unit
@@ -147,7 +154,7 @@ val append_user_message :
   base_dir:string ->
   keeper_name:string ->
   content:string ->
-  ?source:string ->
+  ?surface:Surface_ref.t ->
   ?conversation_id:string ->
   ?external_message_id:string ->
   ?speaker:speaker ->

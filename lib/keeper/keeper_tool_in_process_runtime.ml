@@ -173,7 +173,7 @@ let handle_surface_post ~config ~(meta : keeper_meta) ~args =
           ~base_dir:config.Workspace.base_path
           ~keeper_name:meta.name
           ~content:safe_content
-          ~source:"dashboard"
+          ~surface:(Surface_ref.Dashboard { session_id = None })
           ();
         Keeper_chat_broadcast.chat_appended ~keeper_name:meta.name
           ~source:"dashboard";
@@ -189,7 +189,14 @@ let handle_surface_post ~config ~(meta : keeper_meta) ~args =
               ~base_dir:config.Workspace.base_path
               ~keeper_name:meta.name
               ~content:safe_content
-              ~source:"discord"
+              ~surface:
+                (Surface_ref.Discord
+                   {
+                     guild_id = None;
+                     channel_id;
+                     parent_channel_id = None;
+                     thread_id = None;
+                   })
               ();
             Keeper_chat_broadcast.chat_appended ~keeper_name:meta.name
               ~source:"discord";

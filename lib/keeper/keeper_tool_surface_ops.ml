@@ -549,7 +549,7 @@ let append_direct_chat_pair_if_reply ~(config : Workspace.config) ~name ~args re
             ~keeper_name:name
             ~user_content
             ~user_attachments:[]
-            ~source:"agent"
+            ~surface:Surface_ref.Agent
             ~assistant_content
             ();
           Keeper_chat_broadcast.chat_appended ~keeper_name:name ~source:"agent"
@@ -559,7 +559,7 @@ let append_direct_chat_pair_if_reply ~(config : Workspace.config) ~name ~args re
             ~base_dir:config.base_path
             ~keeper_name:name
             ~content:assistant_content
-            ~source:channel
+            ~surface:(Surface_ref.Gate { label = channel; address = [] })
             ();
           Keeper_chat_broadcast.chat_appended ~keeper_name:name ~source:channel
         end)

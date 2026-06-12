@@ -10,7 +10,9 @@
 
 (** {1 Coordinates} *)
 
-type surface_ref =
+(** Re-export of the shared surface vocabulary (RFC-0232 P5); see
+    {!Surface_ref}. *)
+type surface_ref = Surface_ref.t =
   | Dashboard of { session_id : string option }
   | Discord of {
       guild_id : string option;
@@ -25,6 +27,7 @@ type surface_ref =
     }
   | Github of { repo : string; notification_id : string option }
   | Webhook of { source : string; event_id : string }
+  | Agent
   | Gate of { label : string; address : (string * string) list }
 
 type conversation_ref = {

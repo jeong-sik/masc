@@ -70,7 +70,7 @@ let build_forest ~(config : Workspace.config) ~goals ~tasks =
     |> List.map (fun (meta : Keeper_meta_contract.keeper_meta) -> meta.name)
     |> Keeper_execution_receipt.latest_json_by_keeper config
   in
-  let goal_task_index = Workspace_goal_index.build_task_goal_index () in
+  let goal_task_index = Workspace_goal_index.build_task_goal_index_for_config config in
   let context =
     {
       now_ts = Time_compat.now ();

@@ -272,7 +272,7 @@ let wip_admission_result_fields rejections =
 ;;
 
 let find_task_goal_id config task_id =
-  let index = Workspace_goal_index.build_task_goal_index () in
+  let index = Workspace_goal_index.build_task_goal_index_for_config config in
   try Some (List.hd (Hashtbl.find index task_id)) with Not_found -> None
 ;;
 
@@ -501,7 +501,7 @@ let handle_keeper_task_tool
            | Ok contract ->
               let capacity_error =
                 let backlog = Workspace.read_backlog config in
-                Workspace_task_capacity.check ?goal_id backlog
+                Workspace_task_capacity.check_for_config config ?goal_id backlog
               in
               (match capacity_error with
                | Some error -> Workspace_task_capacity.error_to_json_string error
@@ -510,7 +510,10 @@ let handle_keeper_task_tool
                 Workspace_task.add_task
                   ?contract
                   ?goal_id
-                  ~reject_if:(Workspace_task_capacity.rejection_for_add_task ?goal_id)
+                  ~reject_if:
+                    (Workspace_task_capacity.rejection_for_add_task_for_config
+                       config
+                       ?goal_id)
                   config
                   ~title
                   ~priority
@@ -531,12 +534,12 @@ let handle_keeper_task_tool
     in
     let wip_default_repo = wip_admission_default_repo config in
     let wip_rejections = ref [] in
+    let task_goal_index = Workspace_goal_index.build_task_goal_index_for_config config in
     let remember_wip_rejection task_id rejection =
       if not (List.exists (fun (existing_id, _) -> String.equal existing_id task_id) !wip_rejections)
       then wip_rejections := (task_id, rejection) :: !wip_rejections
     in
     let wip_admission_filter ~active_tasks task =
-      let task_goal_index = Workspace_goal_index.build_task_goal_index () in
       let active_items =
         Keeper_wip_admission.active_items_of_tasks
           ~task_goal_index

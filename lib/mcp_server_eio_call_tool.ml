@@ -342,7 +342,8 @@ let record_runtime_mcp_keeper_trajectory
     ~(arguments : Yojson.Safe.t)
     ~(message : string)
     ~(success : bool)
-    ~(duration_ms : int) : unit =
+    ~(duration_ms : int)
+    ~(execution_id : Ids.Execution_id.t) : unit =
   let trace_id = Option.value ~default:"runtime-mcp" ctx.trace_id in
   let masc_root = runtime_mcp_masc_root ~base_path in
   let safe_input = Observability_redact.redact_json_value arguments in
@@ -400,6 +401,7 @@ let record_runtime_mcp_keeper_trajectory
       duration_ms;
       error;
       cost_usd = Trajectory.tool_cost_estimate tool_name;
+      execution_id = Some (Ids.Execution_id.to_string execution_id);
     }
   in
   try
@@ -434,6 +436,9 @@ let record_runtime_mcp_keeper_tool_trace
       entry
       ~arguments
   in
+  (* RFC-0233 PR-1: one mint per execution at this dispatch boundary;
+     the tool_calls row and the trajectory row below share the value. *)
+  let execution_id = Ids.Execution_id.generate () in
   Keeper_tool_call_log.log_call
     ~keeper_name:ctx.keeper_name
     ~tool_name
@@ -444,6 +449,7 @@ let record_runtime_mcp_keeper_tool_trace
     ~model:ctx.model
     ~lane:"runtime_mcp"
     ?agent_name:ctx.agent_name
+    ~execution_id
     ?trace_id:ctx.trace_id
     ?session_id:ctx.session_id
     ?generation:ctx.generation
@@ -466,7 +472,8 @@ let record_runtime_mcp_keeper_tool_trace
     ~arguments
     ~message
     ~success
-    ~duration_ms;
+    ~duration_ms
+    ~execution_id;
   Sse.broadcast
     (runtime_mcp_keeper_tool_call_sse_payload
        ~keeper_name:ctx.keeper_name

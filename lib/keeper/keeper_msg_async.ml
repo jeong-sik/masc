@@ -47,6 +47,8 @@ let is_safe_request_id request_id =
   let len = String.length request_id in
   if len = 0
   then false
+  else if request_id = ".." || request_id = "."
+  then false
   else if len > max_request_id_len
   then false
   else (

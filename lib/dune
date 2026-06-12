@@ -116,7 +116,6 @@
   keeper_unified_turn_pre_dispatch
   keeper_unified_turn_retry_setup
   keeper_unified_turn_terminal_error
-  keeper_unified_turn_attempt_watchdog
   keeper_unified_turn_cascade_resolution
   keeper_unified_turn_execution
   keeper_unified_turn_livelock_block

@@ -1,7 +1,7 @@
 open Alcotest
 
-module W = Keeper_unified_turn_attempt_watchdog
-module Metrics = Otel_metric_store
+module W = Masc.Keeper_unified_turn_attempt_watchdog
+module Metrics = Masc.Otel_metric_store
 
 let watchdog_metric = Keeper_metrics.(to_string AttemptWatchdogFired)
 
@@ -29,7 +29,7 @@ let test_safety_deadline_records_terminal_reason_and_metric () =
          : (unit, Agent_sdk.Error.sdk_error) result);
       false
     with
-    | Eio.Cancel.Cancelled (Failure "attempt_watchdog_safety_deadline") -> true
+    | Eio.Cancel.Cancelled (Failure msg) when String.equal msg "attempt_watchdog_safety_deadline" -> true
     | Eio.Cancel.Cancelled exn ->
       Alcotest.failf "unexpected cancellation: %s" (Printexc.to_string exn)
   in
@@ -64,7 +64,7 @@ let test_external_cancel_records_external_reason_without_metric () =
          : (unit, Agent_sdk.Error.sdk_error) result);
       false
     with
-    | Eio.Cancel.Cancelled (Failure "external-cancel-test") -> true
+    | Eio.Cancel.Cancelled (Failure msg) when String.equal msg "external-cancel-test" -> true
     | Eio.Cancel.Cancelled exn ->
       Alcotest.failf "unexpected cancellation: %s" (Printexc.to_string exn)
   in
@@ -90,7 +90,10 @@ let test_normal_completion_does_not_record_cancel () =
         ~on_cancelled:(fun reason -> cancel_reasons := reason :: !cancel_reasons)
         ~run:(fun () -> Ok "done"))
   in
-  check (result string) "normal result passes through" (Ok "done") outcome;
+  (match outcome with
+   | Ok value -> check string "normal result passes through" "done" value
+   | Error err ->
+     Alcotest.failf "unexpected error: %s" (Agent_sdk.Error.to_string err));
   check (list string) "no cancel reason" [] !cancel_reasons
 ;;
 

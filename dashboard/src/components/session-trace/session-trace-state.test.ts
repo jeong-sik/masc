@@ -1,4 +1,13 @@
-import { describe, expect, it, beforeEach } from 'vitest'
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
+
+const dashboardApiMocks = vi.hoisted(() => ({
+  fetchAgentTimeline: vi.fn(),
+  fetchKeeperToolCalls: vi.fn(),
+  fetchKeeperTrajectory: vi.fn(),
+}))
+
+vi.mock('../../api/dashboard', () => dashboardApiMocks)
+
 import {
   closeSessionTrace,
   getTraceEvents,
@@ -14,6 +23,7 @@ import {
   getTraceLoading,
   getTraceError,
   buildTraceEvents,
+  scheduleSessionTraceReload,
   traceSlots,
 } from './session-trace-state'
 import { appendLiveToolCall, liveTraceFeeds } from './session-trace-live-store'
@@ -23,6 +33,26 @@ beforeEach(() => {
   traceSlots.value = {}
   liveTraceFeeds.value = {}
 })
+
+afterEach(() => {
+  vi.useRealTimers()
+  vi.clearAllMocks()
+})
+
+function emptyTimeline(agent = 'keeper-a') {
+  return {
+    agent,
+    period: { from: '', to: '' },
+    events: [],
+    summary: {
+      tasks_completed: 0,
+      tasks_claimed: 0,
+      messages_sent: 0,
+      active_duration_minutes: 0,
+      total_events: 0,
+    },
+  }
+}
 
 describe('appendLiveToolCall', () => {
   it('does nothing when trace slot is not open', () => {
@@ -169,6 +199,64 @@ describe('appendLiveToolCall', () => {
     // Newest-first: tool_call (tsUnix=1712400000) > broadcast (ts=1712399000000)
     expect(events[0]!.kind).toBe('tool_call')
     expect(events[1]!.kind).toBe('broadcast')
+  })
+})
+
+describe('scheduleSessionTraceReload', () => {
+  it('debounces a reload for an open keeper trace slot', async () => {
+    vi.useFakeTimers()
+    traceSlots.value = {
+      'keeper-a': {
+        events: [],
+        loading: false,
+        error: null,
+        filter: 'all',
+        statusFilter: 'all',
+        searchQuery: '',
+        fetchToken: 0,
+      },
+    }
+    dashboardApiMocks.fetchAgentTimeline.mockResolvedValue(emptyTimeline())
+    dashboardApiMocks.fetchKeeperTrajectory.mockResolvedValue({
+      keeper: 'keeper-a',
+      trace_id: 'trace-1',
+      generation: 1,
+      total_entries: 1,
+      showing: 1,
+      entries: [{
+        type: 'thinking',
+        ts: 1712400000,
+        ts_iso: '2024-04-06T10:40:00Z',
+        turn: 12,
+        content: 'new keeper thought',
+        content_length: 18,
+        redacted: false,
+      }],
+    })
+    dashboardApiMocks.fetchKeeperToolCalls.mockResolvedValue({
+      keeper: 'keeper-a',
+      count: 0,
+      entries: [],
+    })
+
+    scheduleSessionTraceReload('keeper-a', true, 10)
+    scheduleSessionTraceReload('keeper-a', true, 10)
+
+    expect(dashboardApiMocks.fetchAgentTimeline).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(10)
+
+    expect(dashboardApiMocks.fetchAgentTimeline).toHaveBeenCalledTimes(1)
+    expect(dashboardApiMocks.fetchKeeperTrajectory).toHaveBeenCalledTimes(1)
+    expect(getTraceEvents('keeper-a')[0]?.summary).toBe('new keeper thought')
+  })
+
+  it('ignores reload requests for closed trace slots', async () => {
+    vi.useFakeTimers()
+
+    scheduleSessionTraceReload('keeper-a', true, 10)
+    await vi.advanceTimersByTimeAsync(10)
+
+    expect(dashboardApiMocks.fetchAgentTimeline).not.toHaveBeenCalled()
   })
 })
 

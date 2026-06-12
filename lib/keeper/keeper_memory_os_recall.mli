@@ -4,6 +4,11 @@
     and episodes, sanitizes them, and returns an advisory block suitable for
     OAS [extra_system_context]. *)
 
+type rendered_context =
+  { text : string
+  ; prompt_keys : string list
+  }
+
 val render_context
   :  keeper_id:string
   -> now:float
@@ -21,3 +26,11 @@ val render_if_enabled : keeper_id:string -> now:float -> unit -> string option
 (** [render_if_enabled ~keeper_id ~now ()] is [Some block] when the
     flag is on and the store yields advisory content, [None] otherwise.
     Intended for the [extra_system_context] assembly site. *)
+
+val render_if_enabled_with_sources
+  :  keeper_id:string
+  -> now:float
+  -> unit
+  -> rendered_context option
+(** Like {!render_if_enabled}, but also returns the Prompt_registry keys that
+    contributed to the rendered block for runtime injection manifests. *)

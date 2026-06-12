@@ -26,6 +26,36 @@ let observation_timestamp_ms () =
 let completion_contract_result_for_progress_evidence =
   Turn_helpers.completion_contract_result_for_progress_evidence
 
+let prompt_source_json key =
+  let resolved = Prompt_registry.resolve_prompt key in
+  `Assoc
+    [ "key", `String key
+    ; "source", `String resolved.source
+    ; "file_path", Json_util.string_opt_to_json resolved.file_path
+    ; "file_exists", `Bool resolved.file_exists
+    ; "has_override", `Bool resolved.has_override
+    ; "effective_digest", `String (Turn_helpers.digest_text resolved.effective)
+    ; "effective_bytes", `Int (String.length resolved.effective)
+    ; "drift", Prompt_runtime_drift.prompt_key_status_json key
+    ]
+;;
+
+let prompt_source_keys_for_context_manifest =
+  [ Keeper_prompt_names.unified_system
+  ; Keeper_prompt_names.turn_intent
+  ; Keeper_prompt_names.connected_surfaces_guidance
+  ; Keeper_prompt_names.continuity_guidance
+  ; Keeper_prompt_names.immediate_task_move
+  ; Keeper_prompt_names.claimed_task_nudge
+  ; Keeper_prompt_names.retry_context_nudge
+  ; Keeper_prompt_names.memory_os_recall_context
+  ; Keeper_prompt_names.memory_os_recall_facts_section
+  ; Keeper_prompt_names.memory_os_recall_episodes_section
+  ; Tool_contract_prompt_names.task_lifecycle_rule
+  ; Tool_contract_prompt_names.task_lifecycle_workflow
+  ]
+;;
+
 let keeper_oas_visibility_neutral_guardrails ?guardrails () =
   let max_tool_calls_per_turn =
     match guardrails with
@@ -346,6 +376,22 @@ let run_turn
             ("history_messages_digest", `String history_messages_digest);
             ("estimated_input_tokens", `Int estimated_input_tokens);
             ("context_digest", `String context_digest);
+            ( "prompt_injection_stage",
+              `String "keeper_run_prompt.build_turn_context" );
+            ( "prompt_pipeline",
+              `List
+                [ `String "keeper_unified_turn.build_prompt"
+                ; `String "keeper_run_prompt.build_turn_context"
+                ; `String "keeper_agent_run.context_injected_manifest"
+                ; `String "keeper_run_tools_hooks.before_turn_params"
+                ; `String "oas.agent_turn.prepare_messages"
+                ] );
+            ( "prompt_sources",
+              `List
+                (List.map prompt_source_json
+                   prompt_source_keys_for_context_manifest) );
+            ( "dynamic_context_transport",
+              `String "oas_extra_system_context_user_tail_when_present" );
           ]))
     Keeper_runtime_manifest.Context_injected;
   let _world_observation_is_advisory = world_observation in

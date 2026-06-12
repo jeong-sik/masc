@@ -190,6 +190,7 @@
   meta_cognition_parse
   meta_cognition_interpret
   meta_cognition_digest
+  prompt_runtime_drift
   keeper_memory_os_io
   keeper_memory_os_recall)
  (libraries

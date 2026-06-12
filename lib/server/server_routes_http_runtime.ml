@@ -234,6 +234,7 @@ let make_health_probe_fields ?(listener = "http/1.1") ?full_health_url
   let uptime_secs = health_uptime_secs () in
   let build = Build_identity.current () in
   let path_diagnostics = health_path_diagnostics () in
+  let prompt_drift = Prompt_runtime_drift.summarize ~limit:10 () in
   let full_health_url_fields =
     match full_health_url with
     | Some url -> [ ("full_health_url", `String url) ]
@@ -255,6 +256,7 @@ let make_health_probe_fields ?(listener = "http/1.1") ?full_health_url
       ( "internal_mcp_auth"
       , internal_mcp_auth_json ~base_path:path_diagnostics.effective_base_path );
       ("otel", otel_health_json ());
+      ("prompt_drift", Prompt_runtime_drift.to_yojson prompt_drift);
       ("uptime", `String (health_uptime_string uptime_secs));
       ("sse_clients", `Int (Sse.client_count ()));
       ("startup", Server_startup_state.to_yojson ());
@@ -360,6 +362,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref request =
   in
   let key_paused_keepers = "paused_keepers" in
   let path_diagnostics = health_path_diagnostics () in
+  let prompt_drift = Prompt_runtime_drift.summarize ~limit:25 () in
   let base_path = runtime_base_path_opt () in
   let phase_snapshot = keeper_phase_snapshot ?base_path () in
   let phase_counts = phase_snapshot.counts in
@@ -430,8 +433,9 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref request =
        payload cheap and redacted: only ring counters, latest metadata, and
        file-sink state are exposed here; full log rows stay behind the
        dashboard logs API. *)
-    ("logs", Log.Ring.summary_json ());
-    ("feature_flags", let features = Dashboard_feature_health.get_all_features () in
+	    ("logs", Log.Ring.summary_json ());
+	    ("prompt_drift", Prompt_runtime_drift.to_yojson prompt_drift);
+	    ("feature_flags", let features = Dashboard_feature_health.get_all_features () in
       Dashboard_feature_health.overview_json features);
     ("gc", quick_gc_json ());
     ("keeper_fibers", `Int keeper_fibers);

@@ -48,6 +48,79 @@ type ctx =
   ; tools : Agent_sdk.Tool.t list
   }
 
+let render_prompt_template_or_fallback key vars fallback =
+  match Prompt_registry.render_prompt_template key vars with
+  | Ok text ->
+    let trimmed = String.trim text in
+    if trimmed <> ""
+    then trimmed
+    else (
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string PromptFailures)
+        ~labels:[ "prompt", key ]
+        ();
+      Log.Keeper.warn "prompt %s rendered empty; using in-binary fallback" key;
+      fallback)
+  | Error msg ->
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string PromptFailures)
+      ~labels:[ "prompt", key ]
+      ();
+    Log.Keeper.warn "prompt %s render failed; using in-binary fallback: %s" key msg;
+    fallback
+;;
+
+let digest_text text = Digest.to_hex (Digest.string text)
+
+let emit_before_turn_prompt_manifest
+      ?runtime_manifest_context
+      ?runtime_manifest_append
+      ~runtime_id_string
+      ~turn
+      ~schema_filter
+      ~tool_choice
+      ~extra_system_context
+      ~injection_sources
+      ()
+  =
+  match runtime_manifest_context, runtime_manifest_append with
+  | Some manifest_ctx, Some append ->
+    let ctx_digest, ctx_bytes =
+      match extra_system_context with
+      | None -> (`Null, `Int 0)
+      | Some text -> (`String (digest_text text), `Int (String.length text))
+    in
+    let tool_choice_json =
+      match tool_choice with
+      | None -> `Null
+      | Some choice -> Agent_sdk.Types.tool_choice_to_json choice
+    in
+    let decision =
+      Keeper_runtime_manifest.with_payload_role
+        ~payload_role:Keeper_runtime_manifest.Model_input
+        (`Assoc
+          [ "prompt_injection_stage", `String "oas_before_turn_params"
+          ; "turn", `Int turn
+          ; "injection_sources", Json_util.json_string_list injection_sources
+          ; "extra_system_context_digest", ctx_digest
+          ; "extra_system_context_bytes", ctx_bytes
+          ; "extra_system_context_transport", `String "oas_extra_system_context_user_tail"
+          ; "tool_filter_mode", `String "allow_list"
+          ; "tool_filter_count", `Int (List.length schema_filter)
+          ; "tool_filter", Json_util.json_string_list schema_filter
+          ; "tool_choice", tool_choice_json
+          ])
+    in
+    Keeper_runtime_manifest.make_for_context manifest_ctx
+      ~event:Keeper_runtime_manifest.Context_injected
+      ~runtime_id:runtime_id_string
+      ~status:"oas_before_turn_params"
+      ~decision
+      ()
+    |> append
+  | _ -> ()
+;;
+
 let assemble_hooks
       ~(ctx : ctx)
       ~(session : Keeper_types.session_context)
@@ -249,14 +322,19 @@ let assemble_hooks
                     | None -> Some dynamic_context
                     | Some existing -> Some (existing ^ "\n\n" ^ dynamic_context))
                 in
+                let temporal_summary_opt =
+                  Masc_context_injector.render_temporal_summary shared_context
+                in
                 let ctx =
-                  match Masc_context_injector.render_temporal_summary shared_context with
+                  match temporal_summary_opt with
                   | None -> ctx
                   | Some temporal ->
                     (match ctx with
-                     | None -> Some temporal
-                     | Some existing -> Some (existing ^ "\n\n" ^ temporal))
+	                     | None -> Some temporal
+	                     | Some existing -> Some (existing ^ "\n\n" ^ temporal))
                 in
+                let temporal_summary_present = Option.is_some temporal_summary_opt in
+                let claim_nudge_injected = ref false in
                 let ctx =
                   match acc.meta.current_task_id with
                   | Some task_id ->
@@ -280,18 +358,23 @@ let assemble_hooks
                       List.exists is_claim_tool_name last_tool_names
                       && List.for_all is_claim_context_tool_name last_tool_names
                     in
-                    if is_claim_only_turn
-                    then (
-                      let nudge =
-                        Printf.sprintf
-                          "[CLAIMED TASK] You hold %s. Do NOT call claim_next again. Use \
-                           an execution tool from your active runtime schema to start \
-                           working on it now. If no execution tool is available, emit \
-                           [STATE] with the blocker instead of inventing a tool name."
-                          (Keeper_id.Task_id.to_string task_id)
-                      in
-                      match ctx with
-                      | None -> Some nudge
+	                    if is_claim_only_turn
+	                    then (
+	                      claim_nudge_injected := true;
+	                      let task_id_s = Keeper_id.Task_id.to_string task_id in
+	                      let nudge =
+	                        render_prompt_template_or_fallback
+	                          Keeper_prompt_names.claimed_task_nudge
+	                          [ "task_id", task_id_s ]
+	                          (Printf.sprintf
+	                             "[CLAIMED TASK] You hold %s. Do NOT call claim_next again. Use \
+	                              an execution tool from your active runtime schema to start \
+	                              working on it now. If no execution tool is available, emit \
+	                              [STATE] with the blocker instead of inventing a tool name."
+	                             task_id_s)
+	                      in
+	                      match ctx with
+	                      | None -> Some nudge
                       | Some existing -> Some (existing ^ "\n\n" ^ nudge))
                     else ctx
                   | None -> ctx
@@ -315,26 +398,30 @@ let assemble_hooks
                   then
                     append_ctx
                       ctx
-                      (Printf.sprintf
+                      (render_prompt_template_or_fallback
+                         Keeper_prompt_names.retry_context_nudge
+                         []
                          "[RETRY] The previous attempt overflowed the model context. \
                           Stay concise, prefer already-loaded context, and only use the \
-                          smallest essential tool set if a tool call is strictly \
-                          necessary.")
+                          smallest essential tool set if a tool call is strictly necessary.")
                   else ctx
                 in
+                let memory_os_recall_source_keys = ref [] in
                 let ctx =
                   (* Memory OS recall — bounded advisory block rendered from
                      persisted facts/episodes (read side; the write side is
-                     the librarian wired in #20897). Opt-in via
-                     MASC_KEEPER_MEMORY_OS_RECALL. *)
+                     the librarian wired in #20897). Default-on; disable with
+                     the MASC_KEEPER_MEMORY_OS_RECALL kill switch. *)
                   match
-                    Keeper_memory_os_recall.render_if_enabled
+                    Keeper_memory_os_recall.render_if_enabled_with_sources
                       ~keeper_id:meta.name
                       ~now:(Time_compat.now ())
                       ()
                   with
                   | None -> ctx
-                  | Some block -> append_ctx ctx block
+                  | Some rendered ->
+                    memory_os_recall_source_keys := rendered.prompt_keys;
+                    append_ctx ctx rendered.text
                 in
                 let tool_filter =
                   Agent_sdk.Guardrails.AllowList schema_filter
@@ -394,6 +481,37 @@ let assemble_hooks
                   ?approval_mode:approval_mode_effective
                   ~runtime_profile:runtime_id_string
                   ();
+                let injection_sources =
+                  []
+                  |> (fun acc ->
+                    if String.trim dynamic_context <> ""
+                    then "dynamic_context" :: acc
+                    else acc)
+                  |> (fun acc ->
+                    if temporal_summary_present
+                    then "temporal_summary" :: acc
+                    else acc)
+                  |> (fun acc ->
+                    if !claim_nudge_injected
+                    then Keeper_prompt_names.claimed_task_nudge :: acc
+                    else acc)
+                  |> (fun acc ->
+                    if is_retry
+                    then Keeper_prompt_names.retry_context_nudge :: acc
+                    else acc)
+                  |> (fun acc -> List.rev_append !memory_os_recall_source_keys acc)
+                  |> List.rev
+                in
+                emit_before_turn_prompt_manifest
+                  ?runtime_manifest_context
+                  ?runtime_manifest_append
+                  ~runtime_id_string
+                  ~turn
+                  ~schema_filter
+                  ~tool_choice
+                  ~extra_system_context:ctx
+                  ~injection_sources
+                  ();
                 (ignore hook_t0;
                  Keeper_registry.set_turn_decision_stage
                    ~base_path:config.base_path
@@ -433,8 +551,6 @@ let assemble_hooks
       }
     in
     let hooks = Agent_sdk.Hooks.compose ~outer:before_turn_hook ~inner:base_hooks in
-    ignore runtime_manifest_context;
-    ignore runtime_manifest_append;
     (* Tier K4b/K4c: install the tool-emission PostToolUse hook so
      tagged tool results flow into this keeper's own accumulator
      during Agent.run. The drain happens in keeper_post_turn.ml

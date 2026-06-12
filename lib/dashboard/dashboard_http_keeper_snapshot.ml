@@ -264,6 +264,13 @@ let keeper_config_json (config : Workspace.config) (name : string)
                 ("constitution", prompt_block_json Keeper_prompt_names.constitution);
                 ("world", prompt_block_json Keeper_prompt_names.world);
                 ("capabilities", prompt_block_json Keeper_prompt_names.capabilities);
+                ("unified_system", prompt_block_json Keeper_prompt_names.unified_system);
+                ( "connected_surfaces_guidance",
+                  prompt_block_json Keeper_prompt_names.connected_surfaces_guidance );
+                ( "continuity_guidance",
+                  prompt_block_json Keeper_prompt_names.continuity_guidance );
+                ("claimed_task_nudge", prompt_block_json Keeper_prompt_names.claimed_task_nudge);
+                ("retry_context_nudge", prompt_block_json Keeper_prompt_names.retry_context_nudge);
               ] );
           ("effective_system_prompt", `String effective_system_prompt);
         ]

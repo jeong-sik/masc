@@ -21,6 +21,10 @@ let librarian_episode_extraction = "keeper.librarian.episode_extraction"
 let memory_os_recall_context = "keeper.memory_os_recall.context"
 let memory_os_recall_facts_section = "keeper.memory_os_recall.facts_section"
 let memory_os_recall_episodes_section = "keeper.memory_os_recall.episodes_section"
+let connected_surfaces_guidance = "keeper.connected_surfaces_guidance"
+let continuity_guidance = "keeper.continuity_guidance"
+let claimed_task_nudge = "keeper.claimed_task_nudge"
+let retry_context_nudge = "keeper.retry_context_nudge"
 
 (** Turn-intent substitution prose files. Each holds a single bullet (or
     short block) that the OCaml side injects into [turn_intent] when the

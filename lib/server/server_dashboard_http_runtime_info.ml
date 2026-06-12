@@ -1351,6 +1351,7 @@ let runtime_resolution_json (config : Workspace.config) =
     prompt_markdown_dir <> ""
     && not (String.equal prompt_markdown_dir expected_prompt_dir)
   in
+  let prompt_drift = Prompt_runtime_drift.summarize () in
   let source_mismatch =
     match runtime_commit, server_repo_commit, workspace_commit with
     | Some runtime, Some server_repo, _ -> not (String.equal runtime server_repo)
@@ -1500,6 +1501,9 @@ let runtime_resolution_json (config : Workspace.config) =
       :: acc
     else acc
   in
+  let add_prompt_drift_warning acc =
+    List.rev_append (Prompt_runtime_drift.warning_messages prompt_drift) acc
+  in
   let add_signal_warning acc =
     if signal_count > 0
     then
@@ -1531,6 +1535,7 @@ let runtime_resolution_json (config : Workspace.config) =
     |> add_upstream_drift_warning
     |> add_server_workspace_mismatch_warning
     |> add_prompt_dir_mismatch_warning
+    |> add_prompt_drift_warning
     |> add_signal_warning
     |> add_repair_warning
     |> add_agent_issue_warning
@@ -1545,6 +1550,7 @@ let runtime_resolution_json (config : Workspace.config) =
       ; "resolved_base_path", path_item_json ~source:"resolved_base" config.base_path
       ; "data_root", path_item_json ~source:"runtime_data" (Workspace.masc_root_dir config)
       ; "prompt_markdown_dir", path_item_json ~source:"prompt_registry" prompt_markdown_dir
+      ; "prompt_drift", Prompt_runtime_drift.to_yojson prompt_drift
       ; ( "server_repo_path"
         , match server_repo_path with
           | Some path -> path_item_json ~source:"server_binary" path
@@ -1584,6 +1590,7 @@ let light_runtime_resolution_json (config : Workspace.config) =
     Prompt_registry.get_markdown_dir ()
     |> Option.value ~default:(Config_dir_resolver.prompts_dir ())
   in
+  let prompt_drift = Prompt_runtime_drift.summarize () in
   let server_repo_path = Build_identity.repo_root () in
   let server_workspace_mismatch =
     match server_repo_path with
@@ -1620,6 +1627,8 @@ let light_runtime_resolution_json (config : Workspace.config) =
   let warnings =
     []
     |> (fun acc ->
+         List.rev_append (Prompt_runtime_drift.warning_messages prompt_drift) acc)
+    |> (fun acc ->
          if server_workspace_mismatch
          then
            "Server binary checkout differs from dashboard workspace/base path."
@@ -1640,6 +1649,7 @@ let light_runtime_resolution_json (config : Workspace.config) =
       ; "resolved_base_path", path_item_json ~source:"resolved_base" config.base_path
       ; "data_root", path_item_json ~source:"runtime_data" (Workspace.masc_root_dir config)
       ; "prompt_markdown_dir", path_item_json ~source:"prompt_registry" prompt_markdown_dir
+      ; "prompt_drift", Prompt_runtime_drift.to_yojson prompt_drift
       ; ( "server_repo_path"
         , match server_repo_path with
           | Some path -> path_item_json ~source:"server_binary" path

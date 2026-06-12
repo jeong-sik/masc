@@ -281,6 +281,8 @@ let bootstrap_prompt_state (state : Mcp_server.server_state) =
     Log.Misc.warn
       "prompt markdown dir diverges from resolved config root: %s (expected %s)"
       prompt_markdown_dir expected_prompt_dir;
+  Prompt_runtime_drift.write_source_stamp ~prompt_markdown_dir;
+  Prompt_runtime_drift.(summarize () |> log_if_drift);
   let missing_prompt_files = Prompt_registry.validate_required_prompt_files () in
   if missing_prompt_files <> [] then
     begin

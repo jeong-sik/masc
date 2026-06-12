@@ -56,6 +56,10 @@ let prompt_block_json key =
     [
       ("key", `String key);
       ("source", `String resolved.source);
+      ("file_path", Json_util.string_opt_to_json resolved.file_path);
+      ("file_exists", `Bool resolved.file_exists);
+      ("has_override", `Bool resolved.has_override);
+      ("drift", Prompt_runtime_drift.prompt_key_status_json key);
       ("text", `String resolved.effective);
     ]
 

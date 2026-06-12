@@ -9,6 +9,11 @@ let max_fact_text_len = 260
 let max_episode_text_len = 360
 let max_atom_len = 48
 
+type rendered_context =
+  { text : string
+  ; prompt_keys : string list
+  }
+
 let prompt_injection_prefixes =
   [ "ignore previous instructions"
   ; "ignore all previous instructions"
@@ -121,6 +126,18 @@ let render_nonempty_section key variable lines =
   | _ -> render_prompt_template key [ variable, String.concat "\n" lines ]
 ;;
 
+let recall_prompt_keys ~has_facts ~has_episodes =
+  [ Keeper_prompt_names.memory_os_recall_context ]
+  |> (fun acc ->
+    if has_facts
+    then acc @ [ Keeper_prompt_names.memory_os_recall_facts_section ]
+    else acc)
+  |> fun acc ->
+  if has_episodes
+  then acc @ [ Keeper_prompt_names.memory_os_recall_episodes_section ]
+  else acc
+;;
+
 let render_recall_context ~fact_lines ~episode_lines =
   match
     render_nonempty_section
@@ -140,7 +157,14 @@ let render_recall_context ~fact_lines ~episode_lines =
      | Ok episodes_section ->
        render_prompt_template
          Keeper_prompt_names.memory_os_recall_context
-         [ "facts_section", facts_section; "episodes_section", episodes_section ])
+         [ "facts_section", facts_section; "episodes_section", episodes_section ]
+       |> Result.map (fun text ->
+         { text
+         ; prompt_keys =
+             recall_prompt_keys
+               ~has_facts:(fact_lines <> [])
+               ~has_episodes:(episode_lines <> [])
+         }))
 ;;
 
 let scored_facts ~now facts =
@@ -151,7 +175,7 @@ let scored_facts ~now facts =
   |> List.map snd
 ;;
 
-let render_context_exn ~keeper_id ~now ~max_facts ~max_episodes () =
+let render_context_with_sources_exn ~keeper_id ~now ~max_facts ~max_episodes () =
   let max_facts = max 0 max_facts in
   let max_episodes = max 0 max_episodes in
   let facts =
@@ -161,7 +185,7 @@ let render_context_exn ~keeper_id ~now ~max_facts ~max_episodes () =
   in
   let episodes = Keeper_memory_os_io.read_episodes_tail ~keeper_id ~n:max_episodes in
   match facts, episodes with
-  | [], [] -> ""
+  | [], [] -> { text = ""; prompt_keys = [] }
   | _ ->
     let fact_lines = List.map (render_fact ~now) facts in
     let episode_lines = List.map render_episode episodes in
@@ -169,24 +193,28 @@ let render_context_exn ~keeper_id ~now ~max_facts ~max_episodes () =
      | Ok context -> context
      | Error msg ->
        Log.Keeper.warn "memory os recall prompt unavailable keeper=%s: %s" keeper_id msg;
-       "")
+       { text = ""; prompt_keys = [] })
 ;;
 
-let render_context
+let render_context_with_sources
       ~keeper_id
       ~now
       ?(max_facts = default_max_facts)
       ?(max_episodes = default_max_episodes)
       ()
   =
-  try render_context_exn ~keeper_id ~now ~max_facts ~max_episodes () with
+  try render_context_with_sources_exn ~keeper_id ~now ~max_facts ~max_episodes () with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
     Log.Keeper.warn
       "memory os recall unavailable keeper=%s: %s"
       keeper_id
       (Printexc.to_string exn);
-    ""
+    { text = ""; prompt_keys = [] }
+;;
+
+let render_context ~keeper_id ~now ?max_facts ?max_episodes () =
+  (render_context_with_sources ~keeper_id ~now ?max_facts ?max_episodes ()).text
 ;;
 
 let enabled () =
@@ -197,11 +225,18 @@ let enabled () =
     ~default:true
 ;;
 
-let render_if_enabled ~keeper_id ~now () =
+let render_if_enabled_with_sources ~keeper_id ~now () =
   if not (enabled ())
   then None
   else (
-    match String.trim (render_context ~keeper_id ~now ()) with
+    let rendered = render_context_with_sources ~keeper_id ~now () in
+    match String.trim rendered.text with
     | "" -> None
-    | block -> Some block)
+    | text -> Some { rendered with text })
+;;
+
+let render_if_enabled ~keeper_id ~now () =
+  Option.map
+    (fun rendered -> rendered.text)
+    (render_if_enabled_with_sources ~keeper_id ~now ())
 ;;

@@ -733,6 +733,47 @@ let test_render_if_enabled_renders_persisted_memory () =
             (contains "Gated recall should surface saved facts" block))))
 ;;
 
+let test_render_if_enabled_with_sources_records_prompt_keys () =
+  with_recall_env "true" (fun () ->
+    with_prompt_registry (fun () ->
+      with_temp_keepers_dir (fun _keepers_dir ->
+        let keeper_id = "virtual-memory-keeper" in
+        let now = 1_000_000.0 in
+        let fact =
+          { (fact_fixture ~now ()) with
+            Types.claim = "Recall source manifest fact"
+          }
+        in
+        let episode =
+          { Types.trace_id = "trace-recall-sources"
+          ; Types.generation = 1
+          ; Types.episode_summary = "recall source manifest episode"
+          ; Types.claims = [ fact ]
+          ; Types.open_items = []
+          ; Types.constraints = []
+          ; Types.preserved_tool_refs = []
+          ; Types.source_turn_range = Some (1, 2)
+          ; Types.created_at = now
+          ; Types.schema_version = Types.schema_version
+          }
+        in
+        Memory_io.append_episode_bundle ~keeper_id episode;
+        match Recall.render_if_enabled_with_sources ~keeper_id ~now () with
+        | None -> Alcotest.fail "expected Some rendered context with seeded store"
+        | Some rendered ->
+          Alcotest.(check bool)
+            "rendered text carries claim"
+            true
+            (contains "Recall source manifest fact" rendered.Recall.text);
+          Alcotest.(check (list string))
+            "prompt keys"
+            [ Prompt_names.memory_os_recall_context
+            ; Prompt_names.memory_os_recall_facts_section
+            ; Prompt_names.memory_os_recall_episodes_section
+            ]
+            rendered.Recall.prompt_keys)))
+;;
+
 let test_recall_context_renders_sanitized_memory () =
   with_prompt_registry (fun () ->
     with_temp_keepers_dir (fun _keepers_dir ->
@@ -862,6 +903,10 @@ let () =
             "render_if_enabled renders persisted memory"
             `Quick
             test_render_if_enabled_renders_persisted_memory
+        ; Alcotest.test_case
+            "render_if_enabled_with_sources records prompt keys"
+            `Quick
+            test_render_if_enabled_with_sources_records_prompt_keys
         ] )
     ]
 ;;

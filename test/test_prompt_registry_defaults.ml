@@ -35,6 +35,7 @@ let prompt_metadata key =
        [ "keeper_name"; "soul_profile"; "goal"; "triggers"; "world_state" ])
   | "dashboard.operator_judge" | "dashboard.governance_judge" ->
       ("test prompt for " ^ key, [ "facts_json" ])
+  | "keeper.claimed_task_nudge" -> ("test prompt for " ^ key, [ "task_id" ])
   | _ -> ("test prompt for " ^ key, [])
 
 let markdown_fixture key body =
@@ -68,6 +69,10 @@ let fixtures =
     ("governance.dry_run", "DRY RUN governance prompt");
     ("dashboard.operator_judge", "operator facts {{facts_json}}");
     ("dashboard.governance_judge", "governance facts {{facts_json}}");
+    ("keeper.connected_surfaces_guidance", "external surface guidance");
+    ("keeper.continuity_guidance", "continuity guidance");
+    ("keeper.claimed_task_nudge", "claimed {{task_id}}");
+    ("keeper.retry_context_nudge", "retry guidance");
     ("test.unlisted.vars", "template body still has {{missing_var}}");
   ]
 
@@ -119,7 +124,7 @@ let () =
           test_case "all markdown-backed prompts are registered" `Quick (fun () ->
               with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
               let prompts = Prompt_registry.list_prompts () in
-              check int "registered prompt count" 10 (List.length prompts));
+              check int "registered prompt count" 14 (List.length prompts));
           test_case "get_prompt resolves markdown content" `Quick (fun () ->
               with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
               check string "keeper.constitution"
@@ -189,6 +194,15 @@ let () =
                   [ (" missing_var ", "world") ]
               with
               | Ok rendered -> check string "rendered" "hello world" rendered
+              | Error msg -> fail msg);
+          test_case "render_prompt_template renders claimed task nudge" `Quick
+            (fun () ->
+              with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
+              match
+                Prompt_registry.render_prompt_template "keeper.claimed_task_nudge"
+                  [ ("task_id", "task-123") ]
+              with
+              | Ok rendered -> check string "rendered" "claimed task-123" rendered
               | Error msg -> fail msg);
           test_case "render_prompt_template detects variables without metadata" `Quick
             (fun () ->

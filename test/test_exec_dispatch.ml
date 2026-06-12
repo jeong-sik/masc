@@ -64,6 +64,27 @@ let () =
   assert (stdout = "hello world");
   assert (result.status = Unix.WEXITED 0)
 
+let () =
+  with_eio @@ fun () ->
+  let open Masc_exec.Shell_ir in
+  let bin = Masc_exec.Exec_program.of_string "sh" |> Result.get_ok in
+  let ir =
+      { bin
+      ; args = [ Lit ("-c", default_meta); Lit ("printf %s \"$MASC_TEST_BASE_HOST_ENV\"", default_meta) ]
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Masc_exec.Sandbox_target.host ()
+      }
+  in
+  let result =
+    Masc_exec.Exec_dispatch.dispatch_simple
+      ~base_host_env:[| "PATH=/bin:/usr/bin"; "MASC_TEST_BASE_HOST_ENV=from-base" |]
+      ir
+  in
+  assert (result.stdout = "from-base");
+  assert (result.status = Unix.WEXITED 0)
+
 (* --- dispatch_simple captures stderr --- *)
 
 let () =
@@ -98,6 +119,44 @@ let () =
   let result = Masc_exec.Exec_dispatch.dispatch_pipeline stages in
   let stdout = String.trim result.stdout in
   assert (stdout = "HELLO WORLD");
+  assert (result.status = Unix.WEXITED 0)
+
+let () =
+  with_eio @@ fun () ->
+  let open Masc_exec.Shell_ir in
+  let sh_bin = Masc_exec.Exec_program.of_string "sh" |> Result.get_ok in
+  let cat_bin = Masc_exec.Exec_program.of_string "cat" |> Result.get_ok in
+  let host_sandbox = Masc_exec.Sandbox_target.host () in
+  let stages =
+    [
+      Simple
+        { bin = sh_bin
+        ; args =
+            [ Lit ("-c", default_meta)
+            ; Lit ("printf %s \"$MASC_TEST_PIPE_BASE_HOST_ENV\"", default_meta)
+            ]
+        ; env = []
+        ; cwd = None
+        ; redirects = []
+        ; sandbox = host_sandbox
+        };
+      Simple
+        { bin = cat_bin
+        ; args = []
+        ; env = []
+        ; cwd = None
+        ; redirects = []
+        ; sandbox = host_sandbox
+        };
+    ]
+  in
+  let result =
+    Masc_exec.Exec_dispatch.dispatch_pipeline
+      ~base_host_env:
+        [| "PATH=/bin:/usr/bin"; "MASC_TEST_PIPE_BASE_HOST_ENV=from-pipeline-base" |]
+      stages
+  in
+  assert (result.stdout = "from-pipeline-base");
   assert (result.status = Unix.WEXITED 0)
 
 (* --- host pipeline streams between stages --- *)

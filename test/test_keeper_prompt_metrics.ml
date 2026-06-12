@@ -302,12 +302,16 @@ let test_state_block_schema_is_canonical_six_field_shape () =
     [
       "DONE: what you accomplished this turn";
       "NEXT: what the next turn should do";
-      "Goal: current active goal";
+      "Goal: active goal id from <available_goals> verbatim";
       "Decisions: key decisions";
       "OpenQuestions: unresolved items";
       "Constraints: active constraints";
     ];
-  check bool "schema excludes old Progress field" false (has_in text "Progress:")
+  check bool "schema excludes old Progress field" false (has_in text "Progress:");
+  (* #20937: prose in the Goal field is cleared by the post-turn sanitizer
+     (active_goal_ids membership), so the instruction must demand the id. *)
+  check bool "goal field demands id, not prose" false
+    (has_in text "Goal: current active goal")
 
 let test_constitution_uses_canonical_state_instruction () =
   let text = KP.keeper_constitution () in

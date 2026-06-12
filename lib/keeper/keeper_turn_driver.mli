@@ -153,4 +153,10 @@ module For_testing : sig
     Agent_sdk.Checkpoint.t option
 
   val success_selected_model_raw : Runtime_candidate.t -> string option
+
+  val apply_accept :
+    runtime_id:string ->
+    accept:(Agent_sdk_response.api_response -> bool) ->
+    Runtime_agent.run_result ->
+    (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
 end

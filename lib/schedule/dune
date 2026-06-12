@@ -1,11 +1,11 @@
 (include_subdirs no)
 
-;; Scheduled internal automation domain + file store. No runner, shell, or
+;; Scheduled internal automation domain + service/store. No runner, shell, or
 ;; transport dependency at this layer.
 
 (library
  (name masc_schedule)
  (public_name masc.masc_schedule)
  (wrapped false)
- (modules schedule_domain schedule_store)
+ (modules schedule_domain schedule_store schedule_service)
  (libraries digestif masc_workspace unix yojson))

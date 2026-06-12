@@ -298,10 +298,11 @@ let parse_thinking_control_format ~(path : string) (raw : string)
     Runtime_schema.No_thinking_control
   | "thinking-object" | "thinking_object" -> Runtime_schema.Thinking_object
   | "chat-template-kwargs" | "chat_template_kwargs" -> Runtime_schema.Chat_template_kwargs
+  | "chat-template-token" | "chat_template_token" -> Runtime_schema.Chat_template_token
   | "reasoning-effort" | "reasoning_effort" -> Runtime_schema.Reasoning_effort
   | other ->
     Log.Runtime.warn "runtime_toml: %s.capabilities.thinking-control-format = %S — expected one of \
-         none|thinking-object|chat-template-kwargs|reasoning-effort, defaulting to none"
+         none|thinking-object|chat-template-kwargs|chat-template-token|reasoning-effort, defaulting to none"
         path
         other;
     Runtime_schema.No_thinking_control

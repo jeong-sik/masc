@@ -6,7 +6,8 @@
 #
 # Local Gemma 4 QAT is a canary runtime, not the fleet default. Keep the
 # default on the cloud runtime and pin only one keeper to local Ollama until
-# sustained turns prove the local box can absorb more load.
+# sustained turns prove the local box can absorb more load. OAS handles Gemma 4
+# thinking through the chat-template control token path, not Ollama think:true.
 
 [runtime]
 default = "ollama_cloud.deepseek-v4-flash"
@@ -41,16 +42,15 @@ streaming = true
 api-name = "hf.co/unsloth/gemma-4-26B-A4B-it-qat-GGUF:UD-Q4_K_XL"
 max-context = 262144
 tools-support = true
-# This exact QAT model is served by local Ollama with tools/vision, but Ollama
-# rejects generic thinking enablement for it. OAS Gemma 4 template/control-token
-# handling belongs in the adapter path; the runtime seed keeps keeper thinking
-# off for this local canary.
-thinking-support = false
+# OAS maps this to Gemma 4's <|think|> chat-template token and omits the
+# generic Ollama top-level think field for this model family.
+thinking-support = true
 preserve-thinking = false
 streaming = true
 
 [models.gemma4-26b-a4b-qat.capabilities]
 supports-tool-choice = true
+thinking-control-format = "chat_template_token"
 supports-native-streaming = true
 supports-top-k = true
 supports-seed = true

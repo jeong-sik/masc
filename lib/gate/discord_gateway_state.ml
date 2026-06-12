@@ -112,6 +112,13 @@ type dispatched_event =
       }
       (** Bulk thread discovery from GUILD_CREATE. Carries all active
           threads in a guild that existed before the bot connected. *)
+  | Thread_removed of
+      { thread_id : string
+      }
+      (** A Discord thread was deleted or archived. Removes the entry
+          from [thread_parents] and notifies the I/O layer to clean its
+          mutable registries. Carries only [thread_id] — parent_channel_id
+          is no longer needed after removal. *)
   | Ignored of string
 
 (* ── Frame ─────────────────────────────────────────────────────── *)
@@ -438,6 +445,33 @@ let decode_thread_create ~payload =
       else Ok (Thread_tracked { thread_id; parent_channel_id })
   | _ -> Ok (Ignored "THREAD_CREATE: missing id or parent_id")
 
+let decode_thread_update ~payload =
+  (* THREAD_UPDATE carries thread_metadata.archived — when true the
+     thread is no longer active and should be removed from tracking.
+     Discord docs: "Sent when a thread is updated, including when
+     the thread is archived or unarchived." *)
+  let thread_metadata = assoc_opt "thread_metadata" payload in
+  let is_archived =
+    match thread_metadata with
+    | Some meta -> (match field_bool_opt "archived" meta with
+      | Some true -> true | _ -> false)
+    | None -> false
+  in
+  if is_archived then
+    match field_string_opt "id" payload with
+    | Some thread_id when String.trim thread_id <> "" ->
+        Ok (Thread_removed { thread_id })
+    | _ -> Ok (Ignored "THREAD_UPDATE: archived but missing id")
+  else
+    (* Active thread update — treat same as THREAD_CREATE *)
+    decode_thread_create ~payload
+
+let decode_thread_delete ~payload =
+  match field_string_opt "id" payload with
+  | Some thread_id when String.trim thread_id <> "" ->
+      Ok (Thread_removed { thread_id })
+  | _ -> Ok (Ignored "THREAD_DELETE: missing id")
+
 let decode_guild_create_threads ~payload =
   let threads_json = assoc_opt "threads" payload in
   match threads_json with
@@ -462,7 +496,9 @@ let decode_dispatch ~bot_user_id ~event_name ~payload =
   | "READY" -> decode_ready ~payload
   | "MESSAGE_CREATE" -> decode_message_create ~bot_user_id ~payload
   | "MESSAGE_REACTION_ADD" -> decode_reaction_add ~payload
-  | "THREAD_CREATE" | "THREAD_UPDATE" -> decode_thread_create ~payload
+  | "THREAD_CREATE" -> decode_thread_create ~payload
+  | "THREAD_UPDATE" -> decode_thread_update ~payload
+  | "THREAD_DELETE" -> decode_thread_delete ~payload
   | "GUILD_CREATE" -> decode_guild_create_threads ~payload
   | other -> Ok (Ignored other)
 
@@ -703,6 +739,16 @@ let handle_dispatch t (frame : frame) =
                      Printf.sprintf
                        "guild threads bulk tracked: %d threads"
                        (List.length threads)
+                 }
+             ] )
+       | Ok (Thread_removed { thread_id } as ev) ->
+           let thread_parents' = StringMap.remove thread_id t'.thread_parents in
+           ( { t' with thread_parents = thread_parents' }
+           , [ Emit_event ev
+             ; Log
+                 { level = `Info
+                 ; message =
+                     Printf.sprintf "thread removed: %s" thread_id
                  }
              ] )
        | Ok (Ignored "RESUMED") ->

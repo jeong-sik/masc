@@ -122,6 +122,11 @@ val is_known_thread : channel_id:string -> bool
 val registered_thread_count : unit -> int
 (** Number of threads currently in the registry. For diagnostics. *)
 
+val unregister_thread : thread_id:string -> unit
+(** Remove a Discord thread from the registry. Called when the gateway
+    receives a THREAD_DELETE dispatch or a THREAD_UPDATE with
+    [thread_metadata.archived = true]. No-op for blank or unknown ids. *)
+
 (** {2 Trigger policy}
 
     Set once at gateway startup, read by [connectors_json] for dashboard

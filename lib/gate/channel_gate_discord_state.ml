@@ -170,6 +170,10 @@ let is_known_thread ~channel_id =
 
 let registered_thread_count () = Hashtbl.length thread_parent_table
 
+let unregister_thread ~thread_id =
+  let tid = String.trim thread_id in
+  if tid <> "" then Hashtbl.remove thread_parent_table tid
+
 (* ── Trigger policy registry ──────────────────────────────────────
    Set once at gateway startup by [set_trigger_policy]. Read by
    [connectors_json] for dashboard display. Same mutable-ref pattern

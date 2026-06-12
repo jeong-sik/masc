@@ -422,6 +422,12 @@ let on_event ~dispatch ~clock ~base_dir (ev : Gw.gateway_event) =
       "Discord guild threads bulk registered: %d threads (total=%d)"
       (List.length threads)
       (State.registered_thread_count ())
+  | Gw.Thread_removed { thread_id } ->
+    State.unregister_thread ~thread_id;
+    Log.Server.info
+      "Discord thread removed: %s (total=%d)"
+      thread_id
+      (State.registered_thread_count ())
   | Gw.Ignored _ ->
     ()
 
@@ -485,7 +491,7 @@ let on_ambient ~base_dir (ev : Gw.gateway_event) =
     ->
     handle_ambient ~base_dir ~channel_id ~guild_id ~message_id ~author_id
       ~author_name ~content
-  | Gw.Ready _ | Gw.Reaction_add _ | Gw.Thread_tracked _ | Gw.Threads_bulk_tracked _ | Gw.Ignored _ -> ()
+  | Gw.Ready _ | Gw.Reaction_add _ | Gw.Thread_tracked _ | Gw.Threads_bulk_tracked _ | Gw.Thread_removed _ | Gw.Ignored _ -> ()
 
 (* ---------------------------------------------------------------- *)
 (* Start                                                            *)
